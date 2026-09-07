@@ -496,22 +496,22 @@ function computeReminders(data, now){
     if (j.paymentStatus !== 'Paid') {
       const age = daysBetween(parseLocalDate(j.date), today);
       const key = `unpaid:${j.id}`;
-      if (age >= unpaidReminderDays && !dismissed.has(key)) items.push({ key, type:'unpaid', severity: age>=14?'bad':'warn', date:j.date, title:`${j.customerName} — invoice #${j.invoiceNumber||'—'} still unpaid`, meta:`${j.technician} · ${age} days overdue (past the ${unpaidReminderDays}-day term)` });
+      if (age >= unpaidReminderDays && !dismissed.has(key)) items.push({ key, readKey:key, type:'unpaid', severity: age>=14?'bad':'warn', date:j.date, title:`${j.customerName} — invoice #${j.invoiceNumber||'—'} still unpaid`, meta:`${j.technician} · ${age} days overdue (past the ${unpaidReminderDays}-day term)` });
     } else if (j.paidToTechnician !== 'Paid' && j.paidToTechnician !== 'Stuck') {
       const comm = jobCommissionAmount(j);
       const key = `commission:${j.id}`;
-      if (comm > 0 && !dismissed.has(key)) items.push({ key, type:'commission', severity:'warn', date:j.date, title:`Commission owed to ${j.technician}`, meta:`${j.customerName} · invoice #${j.invoiceNumber||'—'}` });
+      if (comm > 0 && !dismissed.has(key)) items.push({ key, readKey:key, type:'commission', severity:'warn', date:j.date, title:`Commission owed to ${j.technician}`, meta:`${j.customerName} · invoice #${j.invoiceNumber||'—'}` });
     }
     const refundKey = `refund:${j.id}`;
-    if (j.partsCost > 0 && j.partsRefundStatus === 'Pending Refund' && !dismissed.has(refundKey)) items.push({ key:refundKey, type:'refund', severity:'warn', date:j.date, title:`Parts refund pending for ${j.partsPaidBy||j.technician}`, meta:j.customerName });
+    if (j.partsCost > 0 && j.partsRefundStatus === 'Pending Refund' && !dismissed.has(refundKey)) items.push({ key:refundKey, readKey:refundKey, type:'refund', severity:'warn', date:j.date, title:`Parts refund pending for ${j.partsPaidBy||j.technician}`, meta:j.customerName });
   });
-  data.equipmentSpend.forEach(e => { const key = `equipment:${e.id}`; if (e.reimbursed==='Pending' && !dismissed.has(key)) items.push({ key, type:'equipment', severity:'warn', date:e.date, title:`Equipment reimbursement pending for ${e.technician}`, meta:e.item }); });
+  data.equipmentSpend.forEach(e => { const key = `equipment:${e.id}`; if (e.reimbursed==='Pending' && !dismissed.has(key)) items.push({ key, readKey:key, type:'equipment', severity:'warn', date:e.date, title:`Equipment reimbursement pending for ${e.technician}`, meta:e.item }); });
   const activeQuoteStates = ['In Discussion','Waiting for Reply'];
   data.quotes.forEach(q => {
     if (activeQuoteStates.includes(q.status)) {
       const age = daysBetween(parseLocalDate(q.date), today);
       const key = `quote:${q.id}`;
-      if (age >= quoteStaleDays && !dismissed.has(key)) items.push({ key, type:'quote', severity: age>=10?'bad':'warn', date:q.date, title:`Quote for ${q.customer} still open`, meta:`${q.status} · ${age} days` });
+      if (age >= quoteStaleDays && !dismissed.has(key)) items.push({ key, readKey:key, type:'quote', severity: age>=10?'bad':'warn', date:q.date, title:`Quote for ${q.customer} still open`, meta:`${q.status} · ${age} days` });
     }
   });
   // Manually-created reminders (from the CRM follow-up flow) sit alongside the derived ones, so Ron sees
@@ -519,7 +519,7 @@ function computeReminders(data, now){
   (data.manualReminders||[]).forEach(r => {
     if (r.done) return;
     const age = daysBetween(parseLocalDate(r.date), today);
-    items.push({ id:r.id, contactId:r.contactId, manual:true, type:'followup', severity: age>=0?'bad':'warn', date:r.date, title:r.title, meta:`${r.contactName||''}${age>0?` · ${age} days overdue`:(age===0?' · due today':` · due ${fmtDateShort(r.date)}`)}${r.note?` · "${r.note}"`:''}` });
+    items.push({ id:r.id, contactId:r.contactId, manual:true, readKey:`manual:${r.id}`, type:'followup', severity: age>=0?'bad':'warn', date:r.date, title:r.title, meta:`${r.contactName||''}${age>0?` · ${age} days overdue`:(age===0?' · due today':` · due ${fmtDateShort(r.date)}`)}${r.note?` · "${r.note}"`:''}` });
   });
   // A lead's own "Next follow-up" date (set directly on the Details tab or the CRM Inbox panel, not
   // through the "Create follow-up" form) needs to show up here too — otherwise picking a date there
@@ -531,8 +531,10 @@ function computeReminders(data, now){
     const hasTask = (data.tasks||[]).some(t => t.client===c.fullName && t.due===c.nextFollowUp && t.status!=='Done');
     if (hasReminder || hasTask) return;
     const age = daysBetween(parseLocalDate(c.nextFollowUp), today);
-    items.push({ contactId:c.id, type:'followup', severity: age>=0?'bad':'warn', date:c.nextFollowUp, title:`Follow up with ${c.fullName}`, meta:`${c.division}${age>0?` · ${age} days overdue`:(age===0?' · due today':` · due ${fmtDateShort(c.nextFollowUp)}`)}` });
+    items.push({ contactId:c.id, type:'followup', readKey:`followup:${c.id}`, severity: age>=0?'bad':'warn', date:c.nextFollowUp, title:`Follow up with ${c.fullName}`, meta:`${c.division}${age>0?` · ${age} days overdue`:(age===0?' · due today':` · due ${fmtDateShort(c.nextFollowUp)}`)}` });
   });
+  const read = new Set(data.readReminders||[]);
+  items.forEach(it => { it.isRead = read.has(it.readKey); });
   items.sort((a,b) => Number(b.severity==='bad') - Number(a.severity==='bad') || a.date.localeCompare(b.date));
   return items;
 }
@@ -666,6 +668,7 @@ function seedData(){
   // pre-created (or deleted, cascading off every contact) without needing a lead to hang it on.
   data.tagCatalog = ['air con','chimney','pressure washing','booked ac','booked chimney','booked pw','no answer ac','missed call','not relevant - price'];
   data.dismissedReminders = [];
+  data.readReminders = [];
   // Ofek and Noam's weekly cash-on-hand check-in, migrated off Monday.com — one number, kept blunt on
   // purpose (Ofek's words: "יבש לחלוטין" — bone dry, no other fields), plus a running notes thread.
   data.cashStatus = { amount: 6200, activityLog: [
@@ -1101,7 +1104,7 @@ function navButtonHtml(id, label, icon, active, onClick, badge){
 }
 
 function renderShell(profile, data){
-  const reminderCount = computeReminders(data).length;
+  const reminderCount = computeReminders(data).filter(it=>!it.isRead).length;
   // navBlocks: [Overview group, Finance group, System group], in NAV's declared order — Closings and
   // Management (built separately below, since they need custom per-item logic) are spliced in between.
   const navBlocks = NAV.map(g => {
@@ -2971,19 +2974,28 @@ function dismissReminder(key, rowEl){
 // Where clicking a reminder should take you — a lead follow-up goes to that live conversation;
 // everything else (unpaid invoices, commission owed, parts/equipment refunds, stale quotes) goes to
 // the screen that actually owns that record, since there's no per-record page for those yet.
-function goToReminderTarget(type, contactId){
+// Clicking a reminder marks it "read" — it stays in the list (Delete is the only way to
+// actually remove one, by request), but it stops counting toward the sidebar's unread badge.
+function markReminderRead(readKey){
+  if (!readKey) return;
+  if (!STATE.data.readReminders) STATE.data.readReminders = [];
+  if (!STATE.data.readReminders.includes(readKey)) STATE.data.readReminders.push(readKey);
+}
+function goToReminderTarget(type, contactId, readKey){
+  markReminderRead(readKey);
   if (type==='followup' && contactId) { goToLeadConversation(contactId); return; }
   if (type==='unpaid' || type==='commission' || type==='refund') { UI.tab='outstanding'; render(); return; }
   if (type==='equipment') { UI.tab='reference'; UI.reference.tab='equipmentSpend'; render(); return; }
   if (type==='quote') { UI.tab='quotes'; render(); return; }
+  render();
 }
 function renderReminders(profile, data){
   const items = computeReminders(data);
   const list = items.length ? items.map(it => `
-    <div class="reminder-item" style="cursor:pointer" onclick="goToReminderTarget('${it.type}','${it.contactId||''}')">
+    <div class="reminder-item" style="cursor:pointer${it.isRead?';opacity:.55':''}" onclick="goToReminderTarget('${it.type}','${it.contactId||''}','${jsStr(it.readKey||'')}')">
       <div class="reminder-ic" style="background:${it.severity==='bad'?'var(--bad-soft)':'var(--warn-soft)'}">${REMINDER_ICONS[it.type]}</div>
       <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(it.title)}</div><div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(it.meta)}</div></div>
-      ${pill(it.severity, it.severity==='bad'?'Urgent':'Attention')}
+      ${it.isRead ? pill('neutral','Read') : pill(it.severity, it.severity==='bad'?'Urgent':'Attention')}
       ${it.manual ? `<button class="btn ghost small danger" onclick="event.stopPropagation();deleteManualReminder('${it.id}', this.closest('.reminder-item'))">Delete</button>` : (it.contactId ? `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissLeadFollowup('${it.contactId}', this.closest('.reminder-item'))">Delete</button>` : `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissReminder('${it.key}', this.closest('.reminder-item'))">Delete</button>`)}
     </div>`).join('') : emptyState('No reminders right now','All caught up ✓','✓');
   return `
