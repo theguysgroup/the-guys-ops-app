@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read -r f; case \"$f\" in */index.html|index.html) out=$(python3 \"$(dirname \"$f\")/.claude/hooks/check_index_js.py\" \"$f\" 2>&1); if [ -n \"$out\" ]; then printf '{\"decision\":\"block\",\"reason\":%s}' \"$(printf '%s' \"$out\" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))')\"; fi;; esac; }",
+            "timeout": 15,
+            "statusMessage": "Checking index.html for broken JS..."
+          }
+        ]
+      }
+    ]
+  }
+}
