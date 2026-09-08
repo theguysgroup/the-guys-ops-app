@@ -3179,7 +3179,7 @@ async function saveJobModal(jobId){
   } else {
     logJobActivity(job, actor, 'Job created');
   }
-  ensureContactForJob(job);
+  await ensureContactForJob(job);
   closeModal(); showToast(jobId?'Job updated':'Job added'); render();
 }
 function job_or_null(rec, field){ return rec ? (rec[field] ?? null) : null; }
@@ -3297,26 +3297,35 @@ function customerNameCell(name){
 // through the CRM pipeline or was entered directly via Closings/the Job modal) must have a CRM contact
 // behind it. If a same-named contact exists, link this job to it (and sync Sales Value + bump the
 // stage to Booked, since a real job existing means it's a closed sale); otherwise create one.
-function ensureContactForJob(job){
+// A real Postgres uuid, as opposed to the old client-side uid() format (e.g. "idmtryrkday1kjq4")
+// that a still-unwired caller (finalizeClosing, as of this writing) may pass as job.id — sending
+// one of those into a `uuid` column throws "invalid input syntax for type uuid", so anything
+// derived from job.id must be guarded by this before it's allowed into a persisted patch.
+function isRealId(id){ return typeof id==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id); }
+async function ensureContactForJob(job){
   if (!job.customerName) return;
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   let c = findContactByName(job.customerName);
   if (c) {
-    if (!c.linkedJobId) { c.linkedJobId = job.id; logContactActivity(c, actor, `Linked to job ${job.invoiceNumber||job.id}`); }
-    if (job.amount && job.amount!==c.salesValue) c.salesValue = job.amount;
-    if (c.status!=='Booked' && c.status!=='Not Relevant') { c.status = 'Booked'; c.nextFollowUp = ''; }
+    const patch = {};
+    if (!c.linkedJobId && isRealId(job.id)) { c.linkedJobId = job.id; patch.linkedJobId = job.id; logContactActivity(c, actor, `Linked to job ${job.invoiceNumber||job.id}`); }
+    if (job.amount && job.amount!==c.salesValue) { c.salesValue = job.amount; patch.salesValue = job.amount; }
+    if (c.status!=='Booked' && c.status!=='Not Relevant') { c.status = 'Booked'; c.nextFollowUp = ''; patch.status = 'Booked'; patch.nextFollowUp = ''; }
+    if (Object.keys(patch).length) db.contacts.update(c.id, patch);
     return;
   }
   const division = LEAD_DIVISIONS.includes(job.jobType) ? job.jobType : LEAD_DIVISIONS[0];
-  c = {
-    id: uid(), fullName: job.customerName, phone:'', email:'', postcode:'',
+  const values = {
+    fullName: job.customerName, phone:'', email:'', postcode:'',
     division, source:'Organic', status:'Booked', createdAt: job.date || todayStr(), nextFollowUp:'',
     estimatedValue: job.amount||0, salesValue: job.amount||0, jobDescription: job.notes||'',
-    linkedJobId: job.id, activityLog:[], starred:false, lastReadAt:null, tags:[], followupNote:'', messages:[],
+    linkedJobId: isRealId(job.id) ? job.id : null, starred:false, lastReadAt:null, tags:[], followupNote:'', messages:[],
   };
+  try {
+    c = await db.contacts.create({ activityLog:[], ...values });
+  } catch (err) { return; }   // db.contacts.create() already showed an error toast
   logContactActivity(c, actor, 'Lead created automatically from a job');
   logLeadEvent(c, `Lead created automatically from job ${job.invoiceNumber?('#'+job.invoiceNumber):''} — ${job.jobType}, ${fmtMoney(job.amount||0)}`);
-  STATE.data.contacts.push(c);
 }
 /* ── outstanding ─────────────────────────────────────────────────────── */
 function renderOutstanding(profile, data){
@@ -3393,6 +3402,13 @@ function markReminderRead(readKey){
   if (!STATE.data.readReminders) STATE.data.readReminders = [];
   if (!STATE.data.readReminders.includes(readKey)) STATE.data.readReminders.push(readKey);
 }
+// Clicking the reminder's own icon (as opposed to the rest of the row) marks it read WITHOUT
+// navigating anywhere — Ofek's ask: the icon is "mark as read, stay here," the row is "take me
+// there" (which still marks it read too, as a side effect of actually dealing with it).
+function markReminderReadOnly(readKey){
+  markReminderRead(readKey);
+  render();
+}
 function goToReminderTarget(type, contactId, readKey){
   markReminderRead(readKey);
   if (type==='followup' && contactId) { goToLeadConversation(contactId); return; }
@@ -3405,7 +3421,7 @@ function renderReminders(profile, data){
   const items = computeReminders(data);
   const list = items.length ? items.map(it => `
     <div class="reminder-item" style="cursor:pointer${it.isRead?';opacity:.55':''}" onclick="goToReminderTarget('${it.type}','${it.contactId||''}','${jsStr(it.readKey||'')}')">
-      <div class="reminder-ic" style="background:${it.severity==='bad'?'var(--bad-soft)':'var(--warn-soft)'}">${REMINDER_ICONS[it.type]}</div>
+      <div class="reminder-ic" style="background:${it.severity==='bad'?'var(--bad-soft)':'var(--warn-soft)'};cursor:pointer" title="Mark as read" onclick="event.stopPropagation();markReminderReadOnly('${jsStr(it.readKey||'')}')">${REMINDER_ICONS[it.type]}</div>
       <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(it.title)}</div><div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(it.meta)}</div></div>
       ${it.isRead ? pill('neutral','Read') : pill(it.severity, it.severity==='bad'?'Urgent':'Attention')}
       ${it.manual ? `<button class="btn ghost small danger" onclick="event.stopPropagation();deleteManualReminder('${it.id}', this.closest('.reminder-item'))">Delete</button>` : (it.contactId ? `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissLeadFollowup('${it.contactId}', this.closest('.reminder-item'))">Delete</button>` : `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissReminder('${it.key}', this.closest('.reminder-item'))">Delete</button>`)}
