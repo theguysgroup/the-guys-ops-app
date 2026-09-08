@@ -1,0 +1,30 @@
+name: Supabase Keep-Alive
+
+# Supabase's free tier auto-pauses a project after 7 days with no activity.
+# This just pings the REST API twice a week so the project always looks
+# "active" — the anon key is already public (it's committed in index.html
+# and shipped to every browser), so there's nothing sensitive to hide here.
+on:
+  schedule:
+    - cron: '0 3 * * 1,4'   # Monday and Thursday, 03:00 UTC — comfortably under the 7-day pause window
+  workflow_dispatch: {}      # lets you trigger it manually from the Actions tab too
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://dszlllazwmllmoklzjwl.supabase.co/rest/v1/settings?select=id&limit=1" \
+            -H "apikey: sb_publishable_CYDF61njgAU74Dm3PvkLGQ_4N6qfvIi")
+          echo "Supabase responded with HTTP $status"
+          # A 401 here is EXPECTED and fine: every table in this app requires a real signed-in
+          # user (RLS + no grants to the anon role at all, by design), so an anonymous ping always
+          # gets "permission denied" — but that still means the request reached Postgres, which is
+          # all that's needed to count as activity and reset the 7-day auto-pause clock. Only a
+          # connection failure or a server error means the project is actually unreachable/paused.
+          if [ "$status" -ge 500 ] || [ "$status" = "000" ]; then
+            echo "Supabase project may be unreachable or paused."
+            exit 1
+          fi
