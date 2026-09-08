@@ -797,7 +797,8 @@ async function loadFromSupabase(){
       unpaidReminderDays:settingsRow.unpaid_reminder_days, quoteStaleDays:settingsRow.quote_stale_days,
       gstRatePercent:settingsRow.gst_rate_percent, companyName:settingsRow.company_name,
       abn:settingsRow.abn||'', defaultPaymentTerms:settingsRow.default_payment_terms||'',
-    } : { unpaidReminderDays:7, quoteStaleDays:5, gstRatePercent:10, companyName:'The Guys Service Group', abn:'', defaultPaymentTerms:'' },
+      ownerSalaries: settingsRow.owner_salaries||{},
+    } : { unpaidReminderDays:7, quoteStaleDays:5, gstRatePercent:10, companyName:'The Guys Service Group', abn:'', defaultPaymentTerms:'', ownerSalaries:{} },
     settingsActivityLog: logsFor('settings','global'),
     employees: (employees||[]).map(e => ({
       id:e.id, name:e.name, roles:e.roles||[], status:e.status, employmentType:e.employment_type||'',
@@ -948,6 +949,18 @@ const db = {
       if (r) r.done = done;
       const { error } = await sb.from('manual_reminders').update({ done }).eq('id', id);
       if (error) console.error('manual_reminders update failed:', error);
+    },
+  },
+  settings: {
+    async update(patch){
+      Object.assign(STATE.data.settings, patch);
+      const map = {
+        unpaidReminderDays:'unpaid_reminder_days', quoteStaleDays:'quote_stale_days', gstRatePercent:'gst_rate_percent',
+        companyName:'company_name', abn:'abn', defaultPaymentTerms:'default_payment_terms', ownerSalaries:'owner_salaries',
+      };
+      const row = {}; for (const k in patch) if (map[k]) row[map[k]] = patch[k];
+      const { error } = await sb.from('settings').update(row).eq('id', 1);
+      if (error) showToast('Could not save setting: '+error.message);
     },
   },
 };
@@ -4727,6 +4740,7 @@ function renderTechnicianSettingsCard(emp){
 }
 function renderSettings(profile){
   const others = STATE.profiles.filter(p => p.role==='technician' || p.role==='va');
+  const owners = STATE.profiles.filter(p => p.role==='owner');
   const grantable = ALL_SECTIONS.filter(s => s!=='settings');
   const cards = others.length ? others.map(p => `
     <div class="card" style="margin-bottom:14px">
@@ -4769,6 +4783,14 @@ function renderSettings(profile){
     <div class="section-title">Technician commission rates &amp; working days</div>
     ${techCards}
 
+    <div class="section-title">Owner salaries</div>
+    <div class="hint" style="margin-bottom:10px">Fixed weekly wage, not commission — visible only here, to owners.</div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="grid-3">
+        ${owners.map(o => `<div class="field"><label>${esc(o.fullName)} — weekly ($)</label><input type="number" min="0" value="${(s.ownerSalaries||{})[o.fullName]||0}" onchange="setOwnerSalary('${jsStr(o.fullName)}', this.value)"></div>`).join('')}
+      </div>
+    </div>
+
     <div class="section-title">Business rules</div>
     <div class="card" style="margin-bottom:14px">
       <div class="grid-3">
@@ -4792,6 +4814,7 @@ function renderSettings(profile){
 function logSettingsActivity(actor, text){
   if (!STATE.data.settingsActivityLog) STATE.data.settingsActivityLog = [];
   STATE.data.settingsActivityLog.push({ id: uid(), at: new Date().toISOString(), actor, text });
+  db.activityLog.insert('settings', 'global', actor, text);
 }
 function openSettingsActivityModal(){
   openRecordActivityModal('settings', 'global', 'Settings Activity', 'Permission and business-rule changes, plus your own notes');
@@ -4808,7 +4831,7 @@ function updateBusinessSetting(key, rawValue, label){
   const old = STATE.data.settings[key];
   const value = Number(rawValue);
   if (isNaN(value) || value===old) return;
-  STATE.data.settings[key] = value;
+  db.settings.update({ [key]: value });
   logSettingsActivity(actor, `${label} changed from ${old} to ${value}`);
   render();
 }
@@ -4816,8 +4839,21 @@ function updateBusinessProfileField(key, value, label){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   const old = STATE.data.settings[key];
   if (old === value) return;
-  STATE.data.settings[key] = value;
+  db.settings.update({ [key]: value });
   logSettingsActivity(actor, `${label} updated`);
+}
+// Owner-only (this whole page already is): each owner's fixed weekly salary — they're on a flat
+// wage, not commission, so this lives in Settings rather than the per-technician commission table.
+function setOwnerSalary(name, rawValue){
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  if (!STATE.data.settings.ownerSalaries) STATE.data.settings.ownerSalaries = {};
+  const old = STATE.data.settings.ownerSalaries[name] || 0;
+  const value = Number(rawValue)||0;
+  if (old===value) return;
+  const ownerSalaries = { ...STATE.data.settings.ownerSalaries, [name]: value };
+  db.settings.update({ ownerSalaries });
+  logSettingsActivity(actor, `${name}'s weekly salary changed from ${fmtMoney(old)} to ${fmtMoney(value)}`);
+  render();
 }
 function updateCommissionRateFromSettings(techName, jobType, rawValue){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
