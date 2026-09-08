@@ -774,7 +774,8 @@ async function loadFromSupabase(){
     })),
     tasks: (tasks||[]).map(t => ({
       id:t.id, board:t.board, title:t.title, status:t.status, due:t.due, notes:t.notes||'', client:t.client||'',
-      priority:t.priority, assignedTo:t.assigned_to||'', createdBy:t.created_by||'', createdAt:t.created_at,
+      priority:t.priority, assignees:t.assignees||[], assignedTo:t.assigned_to||'', headsUp:t.heads_up||'',
+      createdBy:t.created_by||'', createdAt:t.created_at,
       technician:t.technician||'', category:t.category||'', subtasks:t.subtasks||[], updates:t.updates||[],
       activityLog: logsFor('task', t.id),
     })),
@@ -782,14 +783,15 @@ async function loadFromSupabase(){
       id:q.id, customer:q.customer, date:q.date, amount:q.amount||0, status:q.status, notes:q.notes||'',
       jobNumber:q.job_number||'', clientNumber:q.client_number||'', email:q.email||'', address:q.address||'',
       serviceTypes:q.service_types||[], winProbability:q.win_probability||'', nextAction:q.next_action||'',
-      updates:q.updates||[],
+      nextActionNotes:q.next_action_notes||'', sent:q.sent||false, technicianQuoted:q.technician_quoted||'',
+      followedBy:q.followed_by||'', updates:q.updates||[],
     })),
     closings: (closings||[]).map(c => ({
       id:c.id, technicianName:c.technician_name, date:c.date, customerName:c.customer_name,
       invoiceNumber:c.invoice_number||'', jobType:c.job_type, amount:c.amount||0, includesGST:c.includes_gst,
       paymentStatus:c.payment_status, paymentMethod:c.payment_method||'', partsCost:c.parts_cost||0,
       partsPaidBy:c.parts_paid_by||'', notes:c.notes||'', invoiceFileUrl:c.invoice_file_url,
-      postedBy:c.posted_by||'', createdAt:c.created_at,
+      postedBy:c.posted_by||'', createdAt:c.created_at, linkedJobId:c.linked_job_id||null,
     })),
     manualReminders: (manualReminders||[]).map(r => ({
       id:r.id, contactId:r.contact_id, contactName:r.contact_name||'', title:r.title, date:r.date,
@@ -872,6 +874,48 @@ function jobPatchToRow(patch){
   }
   return row;
 }
+function taskPatchToRow(patch){
+  const map = {
+    board:'board', title:'title', status:'status', due:'due', notes:'notes', client:'client',
+    priority:'priority', assignees:'assignees', assignedTo:'assigned_to', headsUp:'heads_up',
+    createdBy:'created_by', createdAt:'created_at', technician:'technician', category:'category',
+    subtasks:'subtasks', updates:'updates',
+  };
+  const nullIfEmpty = new Set(['due']);
+  const row = {};
+  for (const k in patch) {
+    if (!map[k]) continue;
+    const col = map[k];
+    row[col] = (nullIfEmpty.has(col) && patch[k]==='') ? null : patch[k];
+  }
+  return row;
+}
+function quotePatchToRow(patch){
+  const map = {
+    customer:'customer', date:'date', amount:'amount', status:'status', notes:'notes',
+    jobNumber:'job_number', clientNumber:'client_number', email:'email', address:'address',
+    serviceTypes:'service_types', winProbability:'win_probability', nextAction:'next_action',
+    nextActionNotes:'next_action_notes', sent:'sent', technicianQuoted:'technician_quoted',
+    followedBy:'followed_by', updates:'updates',
+  };
+  const row = {};
+  for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
+  if ('date' in row && !row.date) row.date = todayStr();   // quotes.date is NOT NULL, same defense as jobs.date
+  return row;
+}
+function closingPatchToRow(patch){
+  const map = {
+    technicianName:'technician_name', date:'date', customerName:'customer_name', invoiceNumber:'invoice_number',
+    jobType:'job_type', amount:'amount', includesGST:'includes_gst', paymentStatus:'payment_status',
+    paymentMethod:'payment_method', partsCost:'parts_cost', partsPaidBy:'parts_paid_by', notes:'notes',
+    invoiceFileUrl:'invoice_file_url', postedBy:'posted_by', createdAt:'created_at',
+    linkedJobId: isRealId(patch.linkedJobId) ? 'linked_job_id' : null,   // see isRealId()'s comment — a still-fake job id from the old client uid() must never reach a uuid column
+  };
+  const row = {};
+  for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
+  if ('date' in row && !row.date) row.date = todayStr();
+  return row;
+}
 const db = {
   jobs: {
     async create(values){
@@ -891,6 +935,61 @@ const db = {
       STATE.data.jobs = STATE.data.jobs.filter(x=>x.id!==id);
       const { error } = await sb.from('jobs').delete().eq('id', id);
       if (error) showToast('Could not delete job: '+error.message);
+    },
+  },
+  tasks: {
+    async create(values){
+      const { data: row, error } = await sb.from('tasks').insert(taskPatchToRow(values)).select().single();
+      if (error) { showToast('Could not save task: '+error.message); throw error; }
+      const t = { ...values, id: row.id, activityLog: values.activityLog||[] };
+      STATE.data.tasks.push(t);
+      return t;
+    },
+    async update(id, patch){
+      const t = STATE.data.tasks.find(x=>x.id===id);
+      if (t) Object.assign(t, patch);
+      const { error } = await sb.from('tasks').update(taskPatchToRow(patch)).eq('id', id);
+      if (error) showToast('Could not save change: '+error.message);
+    },
+    async remove(id){
+      STATE.data.tasks = STATE.data.tasks.filter(x=>x.id!==id);
+      const { error } = await sb.from('tasks').delete().eq('id', id);
+      if (error) showToast('Could not delete task: '+error.message);
+    },
+  },
+  quotes: {
+    async create(values){
+      const { data: row, error } = await sb.from('quotes').insert(quotePatchToRow(values)).select().single();
+      if (error) { showToast('Could not save quote: '+error.message); throw error; }
+      const q = { ...values, id: row.id, updates: values.updates||[] };
+      STATE.data.quotes.push(q);
+      return q;
+    },
+    async update(id, patch){
+      const q = STATE.data.quotes.find(x=>x.id===id);
+      if (q) Object.assign(q, patch);
+      const { error } = await sb.from('quotes').update(quotePatchToRow(patch)).eq('id', id);
+      if (error) showToast('Could not save change: '+error.message);
+    },
+    async remove(id){
+      STATE.data.quotes = STATE.data.quotes.filter(x=>x.id!==id);
+      const { error } = await sb.from('quotes').delete().eq('id', id);
+      if (error) showToast('Could not delete quote: '+error.message);
+    },
+  },
+  closings: {
+    async create(values){
+      const { data: row, error } = await sb.from('closings').insert(closingPatchToRow(values)).select().single();
+      if (error) { showToast('Could not save closing: '+error.message); throw error; }
+      const c = { ...values, id: row.id };
+      STATE.data.closings.push(c);
+      return c;
+    },
+    async update(id, patch){
+      const c = STATE.data.closings.find(x=>x.id===id);
+      if (c) Object.assign(c, patch);
+      const { error } = await sb.from('closings').update(closingPatchToRow(patch)).eq('id', id);
+      if (error) showToast('Could not save change: '+error.message);
     },
   },
   contacts: {
@@ -982,6 +1081,10 @@ function logContactActivity(c, actor, text){
 function logJobActivity(job, actor, text){
   logActivity(job, actor, text);
   if (job?.id) db.activityLog.insert('job', job.id, actor, text);
+}
+function logTaskActivity(task, actor, text){
+  logActivity(task, actor, text);
+  if (task?.id) db.activityLog.insert('task', task.id, actor, text);
 }
 
 function filterForProfile(data, profile){
@@ -1371,22 +1474,27 @@ function onStatusChange(kind, id, value){
     const t = STATE.data.tasks.find(x=>x.id===id);
     const old = t.priority;
     t.priority = value;
-    if (old!==value) logActivity(t, actor, `Priority changed from "${old||'—'}" to "${value||'—'}"`);
+    db.tasks.update(t.id, { priority: t.priority });
+    if (old!==value) logTaskActivity(t, actor, `Priority changed from "${old||'—'}" to "${value||'—'}"`);
   } else if (kind==='equipReimbursed') {
     const e = STATE.data.equipmentSpend.find(x=>x.id===id);
     const old = e.reimbursed;
     e.reimbursed = value;
     if (old!==value) logActivity(e, actor, `Reimbursement status changed from "${old}" to "${value}"`);
   } else if (kind==='taskStatus') {
-    STATE.data.tasks.find(x=>x.id===id).status = value;
+    const t = STATE.data.tasks.find(x=>x.id===id);
+    t.status = value;
+    db.tasks.update(t.id, { status: value });
   } else if (kind==='quoteStatus') {
-    STATE.data.quotes.find(x=>x.id===id).status = value;
+    const q = STATE.data.quotes.find(x=>x.id===id);
+    q.status = value;
+    db.quotes.update(q.id, { status: value });
   }
   render();
 }
 function deleteJob(id){ confirmAction('Delete this job?', ()=>{ db.jobs.remove(id); showToast('Deleted'); render(); }); }
-function deleteTask(id){ confirmAction('Delete this task?', ()=>{ STATE.data.tasks = STATE.data.tasks.filter(t=>t.id!==id); showToast('Deleted'); render(); }); }
-function deleteQuote(id){ confirmAction('Delete this quote?', ()=>{ STATE.data.quotes = STATE.data.quotes.filter(q=>q.id!==id); showToast('Deleted'); render(); }); }
+function deleteTask(id){ confirmAction('Delete this task?', ()=>{ db.tasks.remove(id); showToast('Deleted'); render(); }); }
+function deleteQuote(id){ confirmAction('Delete this quote?', ()=>{ db.quotes.remove(id); showToast('Deleted'); render(); }); }
 function deleteRefItem(kind, id){ confirmAction('Delete this item?', ()=>{ STATE.data[kind] = STATE.data[kind].filter(x=>x.id!==id); showToast('Deleted'); render(); }); }
 function deleteEquipSpend(id){ confirmAction('Delete this purchase?', ()=>{ STATE.data.equipmentSpend = STATE.data.equipmentSpend.filter(x=>x.id!==id); showToast('Deleted'); render(); }); }
 function deleteEmployee(id){ confirmAction('Delete this employee?', ()=>{ STATE.data.employees = STATE.data.employees.filter(x=>x.id!==id); showToast('Deleted'); render(); }); }
@@ -3726,41 +3834,45 @@ function confirmManualCommission(){
   closeModal();
   finalizeClosing(gathered, commissionPercent);
 }
-function finalizeClosing(g, commissionPercent){
+async function finalizeClosing(g, commissionPercent){
   const currentProfile = getCurrentProfile();
   const existingJob = STATE.data.jobs.find(j => j.invoiceNumber === g.invoiceNumber);
-  let linkedJobId, wasCreated;
+  let job;
   if (existingJob) {
-    existingJob.customerName = g.customerName; existingJob.technician = g.technicianName; existingJob.date = g.date;
-    existingJob.jobType = g.jobType; existingJob.commissionPercent = commissionPercent;
-    existingJob.amount = g.amount; existingJob.includesGST = g.includesGST; existingJob.paymentStatus = g.paymentStatus;
-    existingJob.paymentMethod = g.paymentMethod; existingJob.partsCost = g.partsCost; existingJob.partsPaidBy = g.partsPaidBy;
-    existingJob.notes = g.notes;
-    if (g.paymentStatus==='Paid' && !existingJob.datePaid) existingJob.datePaid = todayStr();
-    if (g.paymentStatus!=='Paid') existingJob.datePaid = '';
-    if (g.invoiceFileUrl) existingJob.invoiceFile = g.invoiceFileUrl;
-    linkedJobId = existingJob.id; wasCreated = false;
+    const patch = {
+      customerName: g.customerName, technician: g.technicianName, date: g.date,
+      jobType: g.jobType, commissionPercent, amount: g.amount, includesGST: g.includesGST,
+      paymentStatus: g.paymentStatus, paymentMethod: g.paymentMethod, partsCost: g.partsCost,
+      partsPaidBy: g.partsPaidBy, notes: g.notes,
+    };
+    if (g.paymentStatus==='Paid' && !existingJob.datePaid) patch.datePaid = todayStr();
+    if (g.paymentStatus!=='Paid') patch.datePaid = '';
+    if (g.invoiceFileUrl) patch.invoiceFile = g.invoiceFileUrl;
+    db.jobs.update(existingJob.id, patch);
+    job = existingJob;
   } else {
-    const newJob = {
-      id: uid(), customerName: g.customerName, invoiceNumber: g.invoiceNumber, date: g.date, technician: g.technicianName,
+    const values = {
+      customerName: g.customerName, invoiceNumber: g.invoiceNumber, date: g.date, technician: g.technicianName,
       jobType: g.jobType, commissionPercent, amount: g.amount, includesGST: g.includesGST, paymentStatus: g.paymentStatus,
       paymentMethod: g.paymentMethod, partsCost: g.partsCost, partsPaidBy: g.partsPaidBy, partsRefundStatus:'N/A',
       notes: g.notes || 'Created automatically from a Closings post.', datePaid: g.paymentStatus==='Paid'?todayStr():'',
       paidToTechnician:'Not Paid', enteredBy: g.technicianName, cashConfirmed:false,
       invoiceFile: g.invoiceFileUrl||null, transferReceiptFile:null, equipmentRentalFile:null,
     };
-    STATE.data.jobs.push(newJob);
-    linkedJobId = newJob.id; wasCreated = true;
+    try { job = await db.jobs.create({ activityLog:[], ...values }); }
+    catch (err) { return; }   // db.jobs.create() already showed an error toast; leave the closing form as-is so the user can retry
   }
-  ensureContactForJob(STATE.data.jobs.find(j=>j.id===linkedJobId));
-  STATE.data.closings.push({
-    id: uid(), technicianName: g.technicianName, date: g.date, customerName: g.customerName, invoiceNumber: g.invoiceNumber,
+  await ensureContactForJob(job);
+  const closingValues = {
+    technicianName: g.technicianName, date: g.date, customerName: g.customerName, invoiceNumber: g.invoiceNumber,
     jobType: g.jobType, amount: g.amount, includesGST: g.includesGST, paymentStatus: g.paymentStatus, paymentMethod: g.paymentMethod,
     partsCost: g.partsCost, partsPaidBy: g.partsPaidBy, notes: g.notes, invoiceFileUrl: g.invoiceFileUrl,
-    postedBy: currentProfile?.fullName || g.technicianName, createdAt: new Date().toISOString(), linkedJobId,
-  });
+    postedBy: currentProfile?.fullName || g.technicianName, createdAt: new Date().toISOString(), linkedJobId: job.id,
+  };
+  try { await db.closings.create(closingValues); }
+  catch (err) { return; }   // db.closings.create() already showed an error toast
   CLOSING_FILE = null;
-  showToast(wasCreated ? 'Closing posted — new job created' : 'Closing posted — existing job updated');
+  showToast(existingJob ? 'Closing posted — existing job updated' : 'Closing posted — new job created');
   render();
 }
 
@@ -4079,7 +4191,7 @@ function postTaskUpdate(){
   // item's own fields), so they survive even if the rest of the modal is cancelled instead of saved.
   if (MODAL_TASK_ID) {
     const task = STATE.data.tasks.find(t=>t.id===MODAL_TASK_ID);
-    if (task) { if (!task.updates) task.updates = []; task.updates.push({...entry}); }
+    if (task) { if (!task.updates) task.updates = []; task.updates.push({...entry}); db.tasks.update(task.id, { updates: task.updates }); }
   }
   input.value = '';
   document.getElementById('tm-updates-list').innerHTML = renderUpdatesList();
@@ -4134,7 +4246,7 @@ function addSubtask(){
   document.getElementById('tm-subtasks-list').innerHTML = renderSubtasksList();
 }
 function removeSubtask(i){ MODAL_SUBTASKS.splice(i,1); if (EXPANDED_SUBTASK_INDEX===i) EXPANDED_SUBTASK_INDEX=null; document.getElementById('tm-subtasks-list').innerHTML = renderSubtasksList(); }
-function saveTaskModal(taskId, createdBy, createdAt){
+async function saveTaskModal(taskId, createdBy, createdAt){
   const title = document.getElementById('tm-title').value.trim();
   if (!title) { modalError('Please enter a title'); return; }
   const currentProfile = getCurrentProfile();
@@ -4152,24 +4264,28 @@ function saveTaskModal(taskId, createdBy, createdAt){
     createdBy, createdAt, subtasks: newSubtasks, updates: MODAL_UPDATES.map(u=>({...u})),
   };
   let task;
-  if (taskId) { task = oldTask; Object.assign(task, values); } else { task = { id: uid(), activityLog:[], ...values }; STATE.data.tasks.push(task); }
+  if (taskId) { task = oldTask; db.tasks.update(task.id, values); }
+  else {
+    try { task = await db.tasks.create({ activityLog:[], ...values }); }
+    catch (err) { return; }   // db.tasks.create() already showed an error toast; leave the modal open so the user can retry
+  }
   // Auto-generated activity log — mirrors Monday's Activity Log: every tracked field change gets its
   // own timestamped, attributed entry, independent of the manual Updates thread above.
   if (oldSnapshot) {
-    if (oldSnapshot.status !== values.status) logActivity(task, actor, `Status changed from "${oldSnapshot.status}" to "${values.status}"`);
-    if ((oldSnapshot.priority||'') !== (values.priority||'')) logActivity(task, actor, `Priority changed from "${oldSnapshot.priority||'—'}" to "${values.priority||'—'}"`);
-    if ((oldSnapshot.due||'') !== (values.due||'')) logActivity(task, actor, `Due date changed from "${oldSnapshot.due||'—'}" to "${values.due||'—'}"`);
+    if (oldSnapshot.status !== values.status) logTaskActivity(task, actor, `Status changed from "${oldSnapshot.status}" to "${values.status}"`);
+    if ((oldSnapshot.priority||'') !== (values.priority||'')) logTaskActivity(task, actor, `Priority changed from "${oldSnapshot.priority||'—'}" to "${values.priority||'—'}"`);
+    if ((oldSnapshot.due||'') !== (values.due||'')) logTaskActivity(task, actor, `Due date changed from "${oldSnapshot.due||'—'}" to "${values.due||'—'}"`);
     const addedPeople = assignees.filter(a=>!oldSnapshot.assignees.includes(a));
     const removedPeople = oldSnapshot.assignees.filter(a=>!assignees.includes(a));
-    addedPeople.forEach(p=>logActivity(task, actor, `${p} was assigned`));
-    removedPeople.forEach(p=>logActivity(task, actor, `${p} was unassigned`));
+    addedPeople.forEach(p=>logTaskActivity(task, actor, `${p} was assigned`));
+    removedPeople.forEach(p=>logTaskActivity(task, actor, `${p} was unassigned`));
     newSubtasks.forEach(s => {
       const before = oldSnapshot.subtasks.find(b=>b.id===s.id);
-      if (before && before.status !== s.status) logActivity(task, actor, `Subtask "${s.text}" status changed to "${s.status}"`);
-      else if (!before) logActivity(task, actor, `Subtask "${s.text}" added`);
+      if (before && before.status !== s.status) logTaskActivity(task, actor, `Subtask "${s.text}" status changed to "${s.status}"`);
+      else if (!before) logTaskActivity(task, actor, `Subtask "${s.text}" added`);
     });
   } else {
-    logActivity(task, actor, 'Task created');
+    logTaskActivity(task, actor, 'Task created');
   }
   closeModal(); showToast(taskId?'Task updated':'Task added'); render();
 }
@@ -4437,12 +4553,12 @@ function postQuoteUpdate(){
   // if the rest of the modal is cancelled instead of saved.
   if (MODAL_QUOTE_ID) {
     const quote = STATE.data.quotes.find(q=>q.id===MODAL_QUOTE_ID);
-    if (quote) { if (!quote.updates) quote.updates = []; quote.updates.push({...entry}); }
+    if (quote) { if (!quote.updates) quote.updates = []; quote.updates.push({...entry}); db.quotes.update(quote.id, { updates: quote.updates }); }
   }
   input.value = '';
   document.getElementById('qm-updates-list').innerHTML = renderQuoteUpdatesList();
 }
-function saveQuoteModal(quoteId){
+async function saveQuoteModal(quoteId){
   const customer = document.getElementById('qm-customer').value.trim();
   if (!customer) { modalError('Please enter a customer name'); return; }
   const serviceTypes = SERVICE_TYPES.filter((s,i)=>document.getElementById('qm-svc-'+i).checked);
@@ -4456,7 +4572,11 @@ function saveQuoteModal(quoteId){
     technicianQuoted: document.getElementById('qm-techquoted').value, followedBy: document.getElementById('qm-followedby').value.trim(),
     updates: MODAL_QUOTE_UPDATES.map(u=>({...u})),
   };
-  if (quoteId) Object.assign(STATE.data.quotes.find(x=>x.id===quoteId), values); else STATE.data.quotes.push({ id: uid(), ...values });
+  if (quoteId) { db.quotes.update(quoteId, values); }
+  else {
+    try { await db.quotes.create(values); }
+    catch (err) { return; }   // db.quotes.create() already showed an error toast; leave the modal open so the user can retry
+  }
   closeModal(); showToast(quoteId?'Quote updated':'Quote added'); render();
 }
 
