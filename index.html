@@ -1741,6 +1741,34 @@ async function doLogout(){
   resetUI();
   // onAuthStateChange fires SIGNED_OUT and calls render() itself
 }
+// Lets anyone signed in replace their own password (e.g. the temporary one Ofek set manually via
+// the Supabase dashboard for onboarding) — available in the sidebar for every role, not gated by
+// any permission, since everyone needs to be able to do this for themselves.
+function openChangePasswordModal(){
+  openModal(`
+    <div class="modal-back" onclick="if(event.target===this) closeModal()">
+      <div class="modal" style="max-width:420px">
+        <h2>Change Password</h2>
+        <div class="field"><label>New password</label><input type="password" id="cp-new1" autocomplete="new-password"></div>
+        <div class="field" style="margin-top:11px"><label>Confirm new password</label><input type="password" id="cp-new2" autocomplete="new-password"></div>
+        <div id="modal-error"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
+          <button class="btn" onclick="closeModal()">Cancel</button>
+          <button class="btn primary" onclick="doChangePassword()">Save</button>
+        </div>
+      </div>
+    </div>`);
+}
+async function doChangePassword(){
+  const p1 = document.getElementById('cp-new1').value;
+  const p2 = document.getElementById('cp-new2').value;
+  if (!p1 || p1.length < 8) { modalError('Password must be at least 8 characters.'); return; }
+  if (p1 !== p2) { modalError("Passwords don't match."); return; }
+  const { error } = await sb.auth.updateUser({ password: p1 });
+  if (error) { modalError(error.message); return; }
+  closeModal();
+  showToast('Password updated');
+}
 
 /* ── app shell ───────────────────────────────────────────────────────── */
 // NAV is data-driven for plain single-target sections. Two spots need special handling because
@@ -1861,7 +1889,10 @@ function renderShell(profile, data){
         <nav>${navBlocks[0]}${navBlocks[1]}${closingsHtml}${navBlocks[2]}${mgmtHtml}${navBlocks[3]}</nav>
         <div class="footer-block" style="margin-top:auto;padding:10px 8px 0;font-size:11px;border-top:1px solid var(--line);padding-top:12px">
           <div style="margin-bottom:9px;display:flex;align-items:center;justify-content:space-between"><span>${esc(profile.fullName)} · ${roleLabel(profile.role)}</span></div>
-          <button class="btn ghost small" onclick="doLogout()">Log out</button>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <button class="btn ghost small" onclick="openChangePasswordModal()">Change password</button>
+            <button class="btn ghost small" onclick="doLogout()">Log out</button>
+          </div>
         </div>
         </div>
       </div>
@@ -3344,7 +3375,7 @@ function openJobModal(jobId){
         <div class="grid-3">
           <div class="field"><label>Customer</label><input id="jm-customer" value="${esc(job?.customerName||'')}"></div>
           <div class="field"><label>Invoice Number</label><input id="jm-invoice" value="${esc(job?.invoiceNumber||'')}"></div>
-          <div class="field"><label>Date</label><input type="date" id="jm-date" value="${job?.date||todayStr()}"></div>
+          <div class="field"><label>Date</label>${dateCellField('jm-date', job?.date||todayStr())}</div>
         </div>
 
         <div class="modal-section">Job details</div>
