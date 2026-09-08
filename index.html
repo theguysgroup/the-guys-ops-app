@@ -813,6 +813,105 @@ async function loadFromSupabase(){
 
   STATE.data = data;
 }
+
+/* ── db: the write layer (Stage 3, part 2) ───────────────────────────────
+   First slice: CRM/contacts + the shared activity_log + the tag catalog +
+   dismissed-reminders tables — the rest (jobs, tasks, quotes, closings,
+   employees, reference data) are still in-memory-only and come next.
+   Every method does an OPTIMISTIC local patch to STATE.data first (so the
+   UI feels exactly as instant as it always has), then fires the real
+   Supabase write in the background; a failed write shows a toast rather
+   than silently losing the change, but does NOT roll back the optimistic
+   UI update — simplest correct behavior for a single-user-at-a-time save,
+   revisited if this turns out to matter once everyone's really on it. */
+function contactPatchToRow(patch){
+  const map = {
+    fullName:'full_name', phone:'phone', email:'email', postcode:'postcode', division:'division',
+    source:'source', status:'status', createdAt:'created_at', nextFollowUp:'next_follow_up',
+    followupNote:'followup_note', estimatedValue:'estimated_value', salesValue:'sales_value',
+    jobDescription:'job_description', linkedJobId:'linked_job_id', starred:'starred',
+    lastReadAt:'last_read_at', tags:'tags', messages:'messages',
+  };
+  const row = {};
+  for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
+  return row;
+}
+const db = {
+  contacts: {
+    async create(values){
+      const { data: row, error } = await sb.from('contacts').insert(contactPatchToRow(values)).select().single();
+      if (error) { showToast('Could not save lead: '+error.message); throw error; }
+      const c = { ...values, id: row.id, activityLog: values.activityLog||[], messages: values.messages||[], tags: values.tags||[] };
+      STATE.data.contacts.push(c);
+      return c;
+    },
+    async update(id, patch){
+      const c = STATE.data.contacts.find(x=>x.id===id);
+      if (c) Object.assign(c, patch);
+      const { error } = await sb.from('contacts').update(contactPatchToRow(patch)).eq('id', id);
+      if (error) showToast('Could not save change: '+error.message);
+    },
+    async remove(id){
+      STATE.data.contacts = STATE.data.contacts.filter(x=>x.id!==id);
+      const { error } = await sb.from('contacts').delete().eq('id', id);
+      if (error) showToast('Could not delete lead: '+error.message);
+    },
+  },
+  activityLog: {
+    async insert(kind, recordId, actor, text){
+      const { error } = await sb.from('activity_log').insert({ record_kind:kind, record_id:String(recordId), actor, text, manual:true });
+      if (error) console.error('activity_log insert failed:', error);
+    },
+  },
+  tagCatalog: {
+    async add(tag){
+      const { error } = await sb.from('tag_catalog').upsert({ tag });
+      if (error) console.error('tag_catalog insert failed:', error);
+    },
+    async remove(tag){
+      const { error } = await sb.from('tag_catalog').delete().eq('tag', tag);
+      if (error) console.error('tag_catalog delete failed:', error);
+    },
+  },
+  dismissedReminders: {
+    async add(key){
+      const { error } = await sb.from('dismissed_reminders').upsert({ key });
+      if (error) console.error('dismissed_reminders insert failed:', error);
+    },
+  },
+  manualReminders: {
+    async create(values){
+      const map = { contactId:'contact_id', contactName:'contact_name', title:'title', date:'date', note:'note', done:'done' };
+      const row = {}; for (const k in values) if (map[k]) row[map[k]] = values[k];
+      const { data: inserted, error } = await sb.from('manual_reminders').insert(row).select().single();
+      if (error) { showToast('Could not save reminder: '+error.message); throw error; }
+      const r = { ...values, id: inserted.id };
+      STATE.data.manualReminders.push(r);
+      return r;
+    },
+    async remove(id){
+      STATE.data.manualReminders = (STATE.data.manualReminders||[]).filter(r=>r.id!==id);
+      const { error } = await sb.from('manual_reminders').delete().eq('id', id);
+      if (error) showToast('Could not delete reminder: '+error.message);
+    },
+    async setDone(id, done){
+      const r = (STATE.data.manualReminders||[]).find(x=>x.id===id);
+      if (r) r.done = done;
+      const { error } = await sb.from('manual_reminders').update({ done }).eq('id', id);
+      if (error) console.error('manual_reminders update failed:', error);
+    },
+  },
+};
+// Wraps logActivity() for contacts specifically: keeps the exact same in-memory
+// behavior (so every existing call site's UI feedback is unchanged) and ALSO
+// persists the entry to the shared activity_log table. Other entities (jobs,
+// tasks, employees, equipment, cashStatus, settings) still call plain
+// logActivity() and stay in-memory-only until their own write layer lands.
+function logContactActivity(c, actor, text){
+  logActivity(c, actor, text);
+  if (c?.id) db.activityLog.insert('contact', c.id, actor, text);
+}
+
 function filterForProfile(data, profile){
   if (profile.role==='owner' || profile.role==='manager') return data;
   const canSeeJobs = profile.permissions.jobs || profile.permissions.finance;
@@ -1165,17 +1264,20 @@ function onStatusChange(kind, id, value){
     const old = c.status;
     c.status = value;
     if (value==='Booked' || value==='Not Relevant') c.nextFollowUp = '';
-    if (old!==value) logActivity(c, actor, `Stage changed from "${old}" to "${value}"`);
+    db.contacts.update(c.id, { status: c.status, nextFollowUp: c.nextFollowUp });
+    if (old!==value) logContactActivity(c, actor, `Stage changed from "${old}" to "${value}"`);
   } else if (kind==='leadDivision') {
     const c = STATE.data.contacts.find(x=>x.id===id);
     const old = c.division;
     c.division = value;
-    if (old!==value) logActivity(c, actor, `Division changed from "${old}" to "${value}"`);
+    db.contacts.update(c.id, { division: c.division });
+    if (old!==value) logContactActivity(c, actor, `Division changed from "${old}" to "${value}"`);
   } else if (kind==='leadSource') {
     const c = STATE.data.contacts.find(x=>x.id===id);
     const old = c.source;
     c.source = value;
-    if (old!==value) logActivity(c, actor, `Source changed from "${old}" to "${value}"`);
+    db.contacts.update(c.id, { source: c.source });
+    if (old!==value) logContactActivity(c, actor, `Source changed from "${old}" to "${value}"`);
   } else if (kind==='empStatus') {
     const emp = STATE.data.employees.find(x=>x.id===id);
     const old = emp.status;
@@ -1657,6 +1759,7 @@ function markLeadRead(contactId){
   const c = contactById(contactId); if (!c) return;
   if (unreadCountFor(c)===0) return;
   c.lastReadAt = new Date().toISOString();
+  db.contacts.update(c.id, { lastReadAt: c.lastReadAt });
 }
 // The explicit "Mark as read" action — opening/selecting a conversation no longer marks it read on its
 // own (Ofek's call: unread should mean "still needs my action," not "haven't glanced at it").
@@ -1672,6 +1775,7 @@ function refreshLeadUnreadUI(contactId, scope){
 function logLeadEvent(contact, text){
   if (!contact.messages) contact.messages = [];
   contact.messages.push({ id:uid(), kind:'event', text, at:new Date().toISOString() });
+  if (contact.id) db.contacts.update(contact.id, { messages: contact.messages });
 }
 function renderLeadConversation(contactId){
   const c = contactById(contactId); if (!c) return '';
@@ -1726,6 +1830,7 @@ function sendLeadReply(contactId, scope){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   if (!c.messages) c.messages = [];
   c.messages.push({ id:uid(), kind:'message', direction:'out', text, author:actor, at:new Date().toISOString() });
+  db.contacts.update(c.id, { messages: c.messages });
   markLeadRead(contactId); // replying is itself proof the thread was handled — the newest message is now ours
   textEl.value = '';
   refreshLeadThread(contactId, scope);
@@ -1746,6 +1851,7 @@ function logIncomingMessage(contactId, scope){
   const text = textEl.value.trim(); if (!text) return;
   if (!c.messages) c.messages = [];
   c.messages.push({ id:uid(), kind:'message', direction:'in', text, author:c.fullName, at:new Date().toISOString() });
+  db.contacts.update(c.id, { messages: c.messages });
   textEl.value = '';
   const box = document.getElementById(scope+'-log-incoming-box'); if (box) box.style.display = 'none';
   refreshLeadThread(contactId, scope);
@@ -1821,7 +1927,7 @@ function allKnownTags(){
 }
 function registerTag(tag){
   if (!STATE.data.tagCatalog) STATE.data.tagCatalog = [];
-  if (!STATE.data.tagCatalog.includes(tag)) STATE.data.tagCatalog.push(tag);
+  if (!STATE.data.tagCatalog.includes(tag)) { STATE.data.tagCatalog.push(tag); db.tagCatalog.add(tag); }
 }
 function addLeadTag(contactId, rawTag){
   const c = contactById(contactId); if (!c) return;
@@ -1830,7 +1936,8 @@ function addLeadTag(contactId, rawTag){
   registerTag(tag);
   if (c.tags.includes(tag)) { refreshLeadTagsUI(contactId); return; }
   c.tags.push(tag);
-  logActivity(c, getCurrentProfile()?.fullName||'Unknown', `Tag added: "${tag}"`);
+  db.contacts.update(c.id, { tags: c.tags });
+  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Tag added: "${tag}"`);
   refreshLeadTagsUI(contactId);
   render(); // the CRM page's "All tags" filter (and any other tags-block open elsewhere) only
             // rebuilds on a full render — without this it silently goes stale until something
@@ -1839,7 +1946,8 @@ function addLeadTag(contactId, rawTag){
 function removeLeadTag(contactId, tag){
   const c = contactById(contactId); if (!c) return;
   c.tags = (c.tags||[]).filter(t=>t!==tag);
-  logActivity(c, getCurrentProfile()?.fullName||'Unknown', `Tag removed: "${tag}"`);
+  db.contacts.update(c.id, { tags: c.tags });
+  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Tag removed: "${tag}"`);
   refreshLeadTagsUI(contactId);
   render();
 }
@@ -1919,7 +2027,10 @@ function deleteTagGlobally(tag){
   const affected = (STATE.data.contacts||[]).filter(c => (c.tags||[]).includes(tag)).length;
   confirmAction(`Delete the tag "${tag}"?${affected?` It will be removed from ${affected} lead${affected===1?'':'s'}.`:''}`, ()=>{
     STATE.data.tagCatalog = (STATE.data.tagCatalog||[]).filter(t=>t!==tag);
-    (STATE.data.contacts||[]).forEach(c => { if (c.tags) c.tags = c.tags.filter(t=>t!==tag); });
+    db.tagCatalog.remove(tag);
+    (STATE.data.contacts||[]).forEach(c => {
+      if (c.tags && c.tags.includes(tag)) { c.tags = c.tags.filter(t=>t!==tag); db.contacts.update(c.id, { tags: c.tags }); }
+    });
     if (UI.crm.tag===tag) UI.crm.tag = 'all';
     showToast(`Tag "${tag}" deleted`);
     refreshManageTagsModal();
@@ -1981,7 +2092,8 @@ function moveLead(id, status){
   const old = c.status;
   c.status = status;
   if (status==='Booked' || status==='Not Relevant') c.nextFollowUp = '';
-  logActivity(c, actor, `Stage changed from "${old}" to "${status}"`);
+  db.contacts.update(c.id, { status: c.status, nextFollowUp: c.nextFollowUp });
+  logContactActivity(c, actor, `Stage changed from "${old}" to "${status}"`);
   logLeadEvent(c, `Stage changed from "${old}" to "${status}"`);
   showToast(`${c.fullName} → ${status}`);
   render();
@@ -2013,29 +2125,31 @@ function leadFollowupContextFor(c){
   const title = r.title.endsWith(suffix) ? r.title.slice(0, -suffix.length) : r.title;
   return r.note ? title+' — '+r.note : title;
 }
-function setLeadFollowupNote(id, value){ const c = contactById(id); if (c) c.followupNote = value; }
+function setLeadFollowupNote(id, value){ const c = contactById(id); if (c) { c.followupNote = value; db.contacts.update(id, { followupNote: value }); } }
 function toggleLeadStar(id, event){
   if (event) event.stopPropagation();
   const c = contactById(id); if (!c) return;
   c.starred = !c.starred;
+  db.contacts.update(id, { starred: c.starred });
   render();
 }
 function setLeadFollowupDate(id, value){
   const c = contactById(id); if (!c) return;
   const old = c.nextFollowUp||''; c.nextFollowUp = value;
-  if (old!==value) logActivity(c, getCurrentProfile()?.fullName||'Unknown', `Follow-up date changed from "${old||'—'}" to "${value||'—'}"`);
+  db.contacts.update(id, { nextFollowUp: value });
+  if (old!==value) logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Follow-up date changed from "${old||'—'}" to "${value||'—'}"`);
 }
 function setLeadEstimatedValue(id, value){
   const c = contactById(id); if (!c) return;
   const num = Number(value)||0;
-  if ((c.estimatedValue||0)!==num) { logActivity(c, getCurrentProfile()?.fullName||'Unknown', `Estimated value changed from ${fmtMoney(c.estimatedValue||0)} to ${fmtMoney(num)}`); c.estimatedValue = num; }
+  if ((c.estimatedValue||0)!==num) { logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Estimated value changed from ${fmtMoney(c.estimatedValue||0)} to ${fmtMoney(num)}`); c.estimatedValue = num; db.contacts.update(id, { estimatedValue: num }); }
 }
 function setLeadSalesValue(id, value){
   const c = contactById(id); if (!c) return;
   const num = Number(value)||0;
-  if ((c.salesValue||0)!==num) { logActivity(c, getCurrentProfile()?.fullName||'Unknown', `Sales value changed from ${fmtMoney(c.salesValue||0)} to ${fmtMoney(num)}`); c.salesValue = num; }
+  if ((c.salesValue||0)!==num) { logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Sales value changed from ${fmtMoney(c.salesValue||0)} to ${fmtMoney(num)}`); c.salesValue = num; db.contacts.update(id, { salesValue: num }); }
 }
-function setLeadJobDescription(id, value){ const c = contactById(id); if (c) c.jobDescription = value; }
+function setLeadJobDescription(id, value){ const c = contactById(id); if (c) { c.jobDescription = value; db.contacts.update(id, { jobDescription: value }); } }
 function initials(name){
   return (name||'').trim().split(/\s+/).slice(0,2).map(w=>w[0]).filter(Boolean).join('').toUpperCase() || '?';
 }
@@ -2434,11 +2548,12 @@ function createFollowup(contactId){
       activityLog:[{ id:uid(), at:new Date().toISOString(), actor, text:'Created from a CRM follow-up' }],
     });
   } else {
-    STATE.data.manualReminders.push({ id:uid(), date, title:`${text} — ${c.fullName}`, note, contactId:c.id, contactName:c.fullName, done:false });
+    db.manualReminders.create({ date, title:`${text} — ${c.fullName}`, note, contactId:c.id, contactName:c.fullName, done:false });
   }
   c.nextFollowUp = date;
   if (c.status==='New') c.status = 'Follow-up';
-  logActivity(c, actor, `Follow-up set for ${fmtDateShort(date)} — "${text}"${note?` (note: "${note}")`:''} (${kind})`);
+  db.contacts.update(c.id, { nextFollowUp: c.nextFollowUp, status: c.status });
+  logContactActivity(c, actor, `Follow-up set for ${fmtDateShort(date)} — "${text}"${note?` (note: "${note}")`:''} (${kind})`);
   logLeadEvent(c, `Follow-up set for ${fmtDateShort(date)} — "${text}"`);
   closeModal();
   showToast(kind==='task'?'Task created':'Reminder created');
@@ -2446,11 +2561,11 @@ function createFollowup(contactId){
 }
 function deleteLead(id){
   confirmAction('Delete this lead?', ()=>{
-    STATE.data.contacts = STATE.data.contacts.filter(c=>c.id!==id);
+    db.contacts.remove(id);
     closeModal(); showToast('Lead deleted'); render();
   });
 }
-function saveLeadModal(contactId){
+async function saveLeadModal(contactId){
   const fullName = document.getElementById('lm-name').value.trim();
   if (!fullName) { modalError('Please enter a name'); return; }
   const actor = getCurrentProfile()?.fullName || 'Unknown';
@@ -2470,16 +2585,22 @@ function saveLeadModal(contactId){
     jobDescription: document.getElementById('lm-desc').value,
   };
   let c;
-  if (prev) { c = prev; Object.assign(c, values); }
-  else { c = { id:uid(), createdAt:todayStr(), linkedJobId:null, activityLog:[], messages:[], lastReadAt:null, starred:false, tags:[], ...values }; STATE.data.contacts.push(c); }
+  // Update reuses the existing (already-real) id and can fire-and-forget; create has to be
+  // awaited first so the real database-assigned id exists before anything below (activity log,
+  // "lead created" event) tries to persist against it.
+  if (prev) { c = prev; db.contacts.update(c.id, values); }
+  else {
+    try { c = await db.contacts.create({ createdAt:todayStr(), linkedJobId:null, activityLog:[], messages:[], lastReadAt:null, starred:false, tags:[], ...values }); }
+    catch (err) { return; }   // db.contacts.create() already showed an error toast; leave the modal open so the user can retry
+  }
   if (before) {
-    if (before.status !== values.status) { logActivity(c, actor, `Stage changed from "${before.status}" to "${values.status}"`); logLeadEvent(c, `Stage changed from "${before.status}" to "${values.status}"`); }
-    if (before.division !== values.division) logActivity(c, actor, `Division changed from "${before.division}" to "${values.division}"`);
-    if (before.source !== values.source) logActivity(c, actor, `Source changed from "${before.source}" to "${values.source}"`);
-    if ((before.nextFollowUp||'') !== (values.nextFollowUp||'')) logActivity(c, actor, `Follow-up date changed from "${before.nextFollowUp||'—'}" to "${values.nextFollowUp||'—'}"`);
-    if (before.estimatedValue !== values.estimatedValue) logActivity(c, actor, `Estimated value changed from ${fmtMoney(before.estimatedValue)} to ${fmtMoney(values.estimatedValue)}`);
+    if (before.status !== values.status) { logContactActivity(c, actor, `Stage changed from "${before.status}" to "${values.status}"`); logLeadEvent(c, `Stage changed from "${before.status}" to "${values.status}"`); }
+    if (before.division !== values.division) logContactActivity(c, actor, `Division changed from "${before.division}" to "${values.division}"`);
+    if (before.source !== values.source) logContactActivity(c, actor, `Source changed from "${before.source}" to "${values.source}"`);
+    if ((before.nextFollowUp||'') !== (values.nextFollowUp||'')) logContactActivity(c, actor, `Follow-up date changed from "${before.nextFollowUp||'—'}" to "${values.nextFollowUp||'—'}"`);
+    if (before.estimatedValue !== values.estimatedValue) logContactActivity(c, actor, `Estimated value changed from ${fmtMoney(before.estimatedValue)} to ${fmtMoney(values.estimatedValue)}`);
   } else {
-    logActivity(c, actor, 'Lead created');
+    logContactActivity(c, actor, 'Lead created');
     logLeadEvent(c, values.jobDescription ? `Lead created: ${values.jobDescription}` : 'Lead created');
   }
   closeModal(); showToast(contactId?'Lead updated':'Lead added'); render();
@@ -2699,7 +2820,8 @@ function commitContactCellEdit(contactId, field, rawValue, inputType){
   const newVal = inputType==='number' ? (Number(rawValue)||0) : rawValue.trim();
   if (oldVal !== newVal) {
     c[field] = newVal;
-    if (field==='salesValue') logActivity(c, actor, `Sales value changed from ${fmtMoney(oldVal||0)} to ${fmtMoney(newVal)}`);
+    db.contacts.update(c.id, { [field]: newVal });
+    if (field==='salesValue') logContactActivity(c, actor, `Sales value changed from ${fmtMoney(oldVal||0)} to ${fmtMoney(newVal)}`);
   }
   render();
 }
@@ -3115,7 +3237,7 @@ function ensureContactForJob(job){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   let c = findContactByName(job.customerName);
   if (c) {
-    if (!c.linkedJobId) { c.linkedJobId = job.id; logActivity(c, actor, `Linked to job ${job.invoiceNumber||job.id}`); }
+    if (!c.linkedJobId) { c.linkedJobId = job.id; logContactActivity(c, actor, `Linked to job ${job.invoiceNumber||job.id}`); }
     if (job.amount && job.amount!==c.salesValue) c.salesValue = job.amount;
     if (c.status!=='Booked' && c.status!=='Not Relevant') { c.status = 'Booked'; c.nextFollowUp = ''; }
     return;
@@ -3127,7 +3249,7 @@ function ensureContactForJob(job){
     estimatedValue: job.amount||0, salesValue: job.amount||0, jobDescription: job.notes||'',
     linkedJobId: job.id, activityLog:[], starred:false, lastReadAt:null, tags:[], followupNote:'', messages:[],
   };
-  logActivity(c, actor, 'Lead created automatically from a job');
+  logContactActivity(c, actor, 'Lead created automatically from a job');
   logLeadEvent(c, `Lead created automatically from job ${job.invoiceNumber?('#'+job.invoiceNumber):''} — ${job.jobType}, ${fmtMoney(job.amount||0)}`);
   STATE.data.contacts.push(c);
 }
@@ -3159,7 +3281,7 @@ const REMINDER_ICONS = { unpaid:'💵', commission:'🧾', refund:'♻️', equi
 function deleteManualReminder(id, rowEl){
   confirmAction('Delete this reminder?', ()=>{
     animateRowRemove(rowEl, ()=>{
-      STATE.data.manualReminders = (STATE.data.manualReminders||[]).filter(r=>r.id!==id);
+      db.manualReminders.remove(id);
       showToast('Reminder deleted');
       render();
     });
@@ -3173,7 +3295,8 @@ function dismissLeadFollowup(contactId, rowEl){
   confirmAction(`Clear the follow-up date for ${c.fullName}?`, ()=>{
     animateRowRemove(rowEl, ()=>{
       c.nextFollowUp = '';
-      logActivity(c, getCurrentProfile()?.fullName||'Unknown', 'Follow-up date cleared from Reminders');
+      db.contacts.update(c.id, { nextFollowUp: '' });
+      logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', 'Follow-up date cleared from Reminders');
       showToast('Follow-up cleared');
       render();
     });
@@ -3189,6 +3312,7 @@ function dismissReminder(key, rowEl){
     animateRowRemove(rowEl, ()=>{
       if (!STATE.data.dismissedReminders) STATE.data.dismissedReminders = [];
       STATE.data.dismissedReminders.push(key);
+      db.dismissedReminders.add(key);
       showToast('Reminder deleted');
       render();
     });
