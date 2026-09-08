@@ -399,6 +399,12 @@ function commissionRateFor(rates, tech, jobType){
   const v = t[jobType]; return (v===null||v===undefined) ? null : v;
 }
 function technicianNames(data){ return data.employees.filter(e=>e.roles.includes('Technician')).map(e=>e.name); }
+// Owners who also do jobs (Ofek, Noam) are selectable everywhere a job/equipment/quote needs
+// "who did this" — technicianNames() above stays as-is for that. But they're paid a fixed weekly
+// salary (Settings → Owner salaries), not commission, so they must NOT also appear in anything
+// that computes or edits a per-technician COMMISSION rate/payout — salary replaces commission for
+// them entirely, it doesn't sit alongside it. This is that narrower list.
+function commissionEligibleTechnicianNames(data){ return data.employees.filter(e=>e.roles.includes('Technician') && !e.roles.includes('Owner')).map(e=>e.name); }
 function activeEmployeeNames(data){ return data.employees.filter(e=>e.status==='Active').map(e=>e.name); }
 // A task's people used to be one `assignedTo` string; new tasks store `assignees` (an array) instead.
 // This reads either shape so every render site keeps working regardless of which one a task has.
@@ -427,7 +433,7 @@ function computeWeek(data, weekKey, technicianFilter){
     overview.commissionOwedTotal += jobCommissionAmount(j);
   });
   equip.forEach(e => { overview.equipmentTotal += Number(e.cost)||0; });
-  const names = technicianFilter ? [technicianFilter] : technicianNames(data);
+  const names = technicianFilter ? [technicianFilter] : commissionEligibleTechnicianNames(data);
   const perTech = {};
   names.forEach(t => {
     const tJobs = jobs.filter(j => j.technician===t);
@@ -463,7 +469,7 @@ function computeMonth(data, monthKey, technicianFilter){
   const jobs = data.jobs.filter(j => monthOf(j.date).key===monthKey);
   const equip = data.equipmentSpend.filter(e => monthOf(e.date).key===monthKey);
   let revenue=0, commission=0, parts=0, equipment=0, paidTotal=0, unpaidTotal=0, paidCount=0, unpaidCount=0;
-  const names = technicianFilter ? [technicianFilter] : technicianNames(data);
+  const names = technicianFilter ? [technicianFilter] : commissionEligibleTechnicianNames(data);
   const perTech = {}; names.forEach(t => perTech[t] = { jobs:0, commission:0 });
   jobs.forEach(j => {
     revenue += Number(j.amount)||0; commission += jobCommissionAmount(j); parts += Number(j.partsCost)||0;
@@ -3200,7 +3206,7 @@ function job_or_null(rec, field){ return rec ? (rec[field] ?? null) : null; }
 /* ── finance ─────────────────────────────────────────────────────────── */
 const JOB_TYPES = ['Aircon','Chimney','Pressure Washing','Other'];
 function renderFinance(profile, data){
-  const weeks = allWeekKeys(data), months = allMonthKeys(data), allTechs = technicianNames(data);
+  const weeks = allWeekKeys(data), months = allMonthKeys(data), allTechs = commissionEligibleTechnicianNames(data);
   const isTech = profile.role==='technician';
   const techFilter = isTech ? (profile.technicianName||undefined) : undefined;
   const cardTechs = isTech ? (techFilter?[techFilter]:[]) : allTechs;
@@ -4753,7 +4759,7 @@ function renderSettings(profile){
         ${grantable.map(s => `<label class="checkline" style="padding:6px 4px"><input type="checkbox" ${p.permissions[s]?'checked':''} onchange="togglePermission('${p.id}','${s}',this.checked)"> ${SECTION_LABEL[s]}</label>`).join('')}
       </div>
     </div>`).join('') : emptyState('No additional users yet', 'Once Guy, Dolev or Ron sign in, they will appear here.');
-  const techs = STATE.data.employees.filter(e=>e.roles.includes('Technician'));
+  const techs = STATE.data.employees.filter(e=>e.roles.includes('Technician') && !e.roles.includes('Owner'));
   const techCards = techs.length ? techs.map(renderTechnicianSettingsCard).join('') : emptyState('No technicians yet');
   const s = STATE.data.settings;
   return `
