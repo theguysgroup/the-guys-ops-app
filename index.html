@@ -814,6 +814,7 @@ async function loadFromSupabase(){
       bankDetails:e.bank_details||'', abn:e.abn||'', startDate:e.start_date, endDate:e.end_date,
       department:e.department||'', contractFile:e.contract_file, passportPhotoFile:e.passport_photo_file,
       licensePhotoFile:e.license_photo_file, localLicenseFile:e.local_license_file,
+      workingDays: e.working_days || [0,1,2,3,4,5,6],
       activityLog: logsFor('employee', e.id),
     })),
     commissionRates: {},
@@ -922,7 +923,7 @@ function employeePatchToRow(patch){
     phone:'phone', email:'email', address:'address', commissionNotes:'commission_notes',
     bankDetails:'bank_details', abn:'abn', startDate:'start_date', endDate:'end_date',
     department:'department', contractFile:'contract_file', passportPhotoFile:'passport_photo_file',
-    licensePhotoFile:'license_photo_file', localLicenseFile:'local_license_file',
+    licensePhotoFile:'license_photo_file', localLicenseFile:'local_license_file', workingDays:'working_days',
   };
   const nullIfEmpty = new Set(['start_date','end_date']);
   const row = {};
@@ -1111,6 +1112,18 @@ const db = {
       const row = {}; for (const k in patch) if (map[k]) row[map[k]] = patch[k];
       const { error } = await sb.from('settings').update(row).eq('id', 1);
       if (error) showToast('Could not save setting: '+error.message);
+    },
+  },
+  // STATE.profiles (not STATE.data) — the signed-in team roster, separate from the business data
+  // every other db.* method touches. Only `permissions` is ever edited today (Settings' access grid).
+  profiles: {
+    async update(id, patch){
+      const p = STATE.profiles.find(x=>x.id===id);
+      if (p) Object.assign(p, patch);
+      const row = {};
+      if ('permissions' in patch) row.permissions = patch.permissions;
+      const { error } = await sb.from('profiles').update(row).eq('id', id);
+      if (error) showToast('Could not save permission change: '+error.message);
     },
   },
   employees: {
@@ -5116,7 +5129,8 @@ function openSettingsActivityModal(){
 function togglePermission(profileId, section, value){
   const p = STATE.profiles.find(x=>x.id===profileId);
   const actor = getCurrentProfile()?.fullName || 'Unknown';
-  p.permissions[section] = value;
+  const permissions = { ...p.permissions, [section]: value };
+  db.profiles.update(profileId, { permissions });
   logSettingsActivity(actor, `${value?'Granted':'Revoked'} "${SECTION_LABEL[section]}" access for ${p.fullName}`);
   showToast('Permission updated');
 }
@@ -5165,7 +5179,8 @@ function toggleWorkingDay(empId, dow, checked){
   const emp = STATE.data.employees.find(e=>e.id===empId); if (!emp) return;
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   if (!Array.isArray(emp.workingDays)) emp.workingDays = [0,1,2,3,4,5,6];
-  emp.workingDays = checked ? [...new Set([...emp.workingDays, dow])] : emp.workingDays.filter(d=>d!==dow);
+  const workingDays = checked ? [...new Set([...emp.workingDays, dow])] : emp.workingDays.filter(d=>d!==dow);
+  db.employees.update(emp.id, { workingDays });
   logSettingsActivity(actor, `${emp.name}'s working days updated`);
 }
 
