@@ -5,6 +5,17 @@
 // "Invoice #" field) and pulls payment status back in, so nobody has to
 // manually re-enter what's already been paid in ServiceM8.
 //
+// IMPORTANT, confirmed with Ofek against real data (2026-09-08): ServiceM8's
+// payment_received flag only ever gets set for payments processed through
+// ServiceM8 itself — in practice that means credit card. Cash and bank
+// transfer payments (the majority of this business's jobs, per Ron's own
+// tracking) are never reflected here and this sync will never catch them.
+// This is not a bug to fix — there's no other field on the Job/JobPayment
+// object that captures it — it's a real limitation of what ServiceM8 knows.
+// Ron/the team still need to mark those paid directly in Jobs & Commissions,
+// same as they always have; this sync is a bonus for the credit-card subset,
+// not a replacement for manual entry.
+//
 // Deliberately narrow scope for this first phase: only payment_status and
 // date_paid are pulled. Amount/GST are left as manually entered — ServiceM8's
 // total_invoice_amount doesn't have a documented pre/post-GST distinction

@@ -758,6 +758,7 @@ async function loadFromSupabase(){
       partsRefundStatus:j.parts_refund_status||'N/A', notes:j.notes||'', datePaid:j.date_paid,
       paidToTechnician:j.paid_to_technician, enteredBy:j.entered_by||'', cashConfirmed:j.cash_confirmed,
       invoiceFile:j.invoice_file, transferReceiptFile:j.transfer_receipt_file, equipmentRentalFile:j.equipment_rental_file,
+      reviewTaken:j.review_taken,
       activityLog: logsFor('job', j.id),
     })),
     equipmentSpend: (equipmentSpend||[]).map(e => ({
@@ -861,7 +862,7 @@ function jobPatchToRow(patch){
     partsPaidBy:'parts_paid_by', partsRefundStatus:'parts_refund_status', notes:'notes',
     datePaid:'date_paid', paidToTechnician:'paid_to_technician', enteredBy:'entered_by',
     cashConfirmed:'cash_confirmed', invoiceFile:'invoice_file', transferReceiptFile:'transfer_receipt_file',
-    equipmentRentalFile:'equipment_rental_file',
+    equipmentRentalFile:'equipment_rental_file', reviewTaken:'review_taken',
   };
   const nullIfEmpty = new Set(['date_paid']);
   const row = {};
@@ -1578,6 +1579,12 @@ function onStatusChange(kind, id, value){
     j.includesGST = value==='Yes';
     db.jobs.update(j.id, { includesGST: j.includesGST });
     if (old!==j.includesGST) logJobActivity(j, actor, `GST toggle changed from ${old?'On':'Off'} to ${j.includesGST?'On':'Off'}`);
+  } else if (kind==='jobReview') {
+    const j = STATE.data.jobs.find(x=>x.id===id);
+    const old = j.reviewTaken;
+    j.reviewTaken = value==='Yes';
+    db.jobs.update(j.id, { reviewTaken: j.reviewTaken });
+    if (old!==j.reviewTaken) logJobActivity(j, actor, `Review ${j.reviewTaken?'marked as taken':'unmarked'}`);
   } else if (kind==='jobType') {
     const j = STATE.data.jobs.find(x=>x.id===id);
     const old = j.jobType;
@@ -3130,21 +3137,21 @@ function exportJobsCsv(){
   const profile = getCurrentProfile(); if (!profile) return;
   const data = filterForProfile(STATE.data, profile);
   const jobs = computeFilteredJobs(data);
-  const header = ['Technician','Date','Customer','Invoice','Type','Amount','GST Included','Status','Method','GST Amount','Parts Cost','Parts Paid By','Commission %','Commission','Tech Paid','Notes'];
-  const rows = jobs.map(j => [j.technician, j.date, j.customerName, j.invoiceNumber||'', j.jobType, j.amount, j.includesGST?'Yes':'No', j.paymentStatus, j.paymentMethod||'', j.includesGST?jobGst(j):'', j.partsCost||'', j.partsPaidBy||'', j.commissionPercent, jobCommissionAmount(j), j.paidToTechnician, j.notes||'']);
+  const header = ['Technician','Date','Customer','Invoice','Type','Amount','GST Included','Status','Method','GST Amount','Parts Cost','Parts Paid By','Commission %','Commission','Tech Paid','Review','Notes'];
+  const rows = jobs.map(j => [j.technician, j.date, j.customerName, j.invoiceNumber||'', j.jobType, j.amount, j.includesGST?'Yes':'No', j.paymentStatus, j.paymentMethod||'', j.includesGST?jobGst(j):'', j.partsCost||'', j.partsPaidBy||'', j.commissionPercent, jobCommissionAmount(j), j.paidToTechnician, j.reviewTaken?'Yes':'No', j.notes||'']);
   downloadCsv(`jobs-${todayStr()}.csv`, [header, ...rows]);
 }
 
 /* ── jobs ────────────────────────────────────────────────────────────── */
 // Column order is fixed per spec: Technician, Date, Customer Name, Invoice, Job Type, Amount, GST,
-// Status, Method, GST Amount, Parts Cost, Parts Paid By, %, Commission, Tech Paid, Notes.
+// Status, Method, GST Amount, Parts Cost, Parts Paid By, %, Commission, Tech Paid, Review, Notes.
 // "GST" is a yes/no indicator; "GST Amount" is the actual computed dollar figure (jobGst(j)).
 const JOB_COLUMNS = [
   {key:'technician', label:'Technician'}, {key:'date', label:'Date'}, {key:'customer', label:'Customer'},
   {key:'invoice', label:'Invoice'}, {key:'type', label:'Type'}, {key:'amount', label:'Amount'},
   {key:'gst', label:'GST'}, {key:'status', label:'Status'}, {key:'method', label:'Method'},
   {key:'gstAmount', label:'GST Amount'}, {key:'partsCost', label:'Parts Cost'}, {key:'partsPaidBy', label:'Parts Paid By'},
-  {key:'percent', label:'%'}, {key:'commission', label:'Commission'}, {key:'techPaid', label:'Tech Paid'}, {key:'notes', label:'Notes'},
+  {key:'percent', label:'%'}, {key:'commission', label:'Commission'}, {key:'techPaid', label:'Tech Paid'}, {key:'review', label:'Review'}, {key:'notes', label:'Notes'},
 ];
 function jobColumnText(j, key){
   switch(key){
@@ -3163,6 +3170,7 @@ function jobColumnText(j, key){
     case 'percent': return String(j.commissionPercent??'');
     case 'commission': return fmtMoney(jobCommissionAmount(j));
     case 'techPaid': return j.paidToTechnician||'';
+    case 'review': return j.reviewTaken?'Yes':'No';
     case 'notes': return j.notes||'';
     default: return '';
   }
@@ -3243,7 +3251,7 @@ function commitJobCellEdit(jobId, field, rawValue, inputType){
   refreshJobsTable();
 }
 function renderJobRows(jobs, canEdit){
-  if (!jobs.length) return `<tr><td colspan="${canEdit?18:17}">${emptyState('No jobs match these filters', canEdit ? 'Try clearing a column filter, or click "New Job" to get started.' : undefined)}</td></tr>`;
+  if (!jobs.length) return `<tr><td colspan="${canEdit?19:18}">${emptyState('No jobs match these filters', canEdit ? 'Try clearing a column filter, or click "New Job" to get started.' : undefined)}</td></tr>`;
   return jobs.map(j => {
     const accent = j.paymentStatus==='Paid' ? 'var(--good)' : 'var(--bad)';
     return `
@@ -3263,6 +3271,7 @@ function renderJobRows(jobs, canEdit){
       <td class="num">${jobEditableCell(j.id,'commissionPercent', j.commissionPercent+'%', 'number')}</td>
       <td class="num">${fmtMoney(jobCommissionAmount(j))}</td>
       <td>${statusSelect('jobPaidTech', j.id, j.paidToTechnician, ['Not Paid','Paid','Stuck'], v=>v==='Paid'?'good':v==='Stuck'?'neutral':'bad', v=>v, !canEdit)}</td>
+      <td>${statusSelect('jobReview', j.id, j.reviewTaken?'Yes':'No', ['Yes','No'], v=>v==='Yes'?'good':'neutral', v=>v, !canEdit)}</td>
       <td class="wrap">${jobEditableCell(j.id,'notes', esc(j.notes||'—'), 'text')}</td>
       <td><button class="btn ghost small" onclick="openJobActivityModal('${j.id}')">💬 ${recordActivityCount(j)}</button></td>
       ${canEdit ? `<td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openJobModal('${j.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteJob('${j.id}');render()">Delete</button></td>` : ''}
@@ -3304,7 +3313,7 @@ function renderJobs(profile, data){
       ${Object.values(activeFilters).some(v=>v) ? `<button class="btn ghost small" onclick="UI.jobsFilters={};render()">Clear column filters</button>` : ''}
     </div>
     <div class="table-wrap"><table class="jobs-table"><thead>
-      <tr><th>Technician</th><th>Date</th><th>Customer</th><th>Invoice</th><th>Type</th><th>Amount</th><th>GST</th><th>Status</th><th>Method</th><th>GST Amount</th><th>Parts Cost</th><th>Parts Paid By</th><th>%</th><th>Commission</th><th>Tech Paid</th><th class="wrap">Notes</th><th>Activity</th>${canEdit?'<th></th>':''}</tr>
+      <tr><th>Technician</th><th>Date</th><th>Customer</th><th>Invoice</th><th>Type</th><th>Amount</th><th>GST</th><th>Status</th><th>Method</th><th>GST Amount</th><th>Parts Cost</th><th>Parts Paid By</th><th>%</th><th>Commission</th><th>Tech Paid</th><th>Review</th><th class="wrap">Notes</th><th>Activity</th>${canEdit?'<th></th>':''}</tr>
       <tr class="filter-row">${filterRow}<th></th>${canEdit?'<th></th>':''}</tr>
     </thead><tbody id="jobs-tbody">${renderJobRows(jobs, canEdit)}</tbody></table></div>
   `;
@@ -3395,6 +3404,7 @@ function openJobModal(jobId){
           <label class="checkline" style="align-self:center"><input type="checkbox" id="jm-nogst" ${job && !job.includesGST ? 'checked' : ''}> No GST <span class="hint" style="font-weight:400">(off = GST added on top, ${STATE.data.settings.gstRatePercent}%)</span></label>
           <div class="field"><label>Entered By</label><input id="jm-enteredby" value="${esc(job?.enteredBy || currentProfile?.fullName || '')}"></div>
         </div>
+        <label class="checkline" style="margin-top:11px"><input type="checkbox" id="jm-review" ${job?.reviewTaken?'checked':''}> Review taken</label>
         <div class="checkline" id="jm-cash-row" style="margin-top:11px;display:${job?.paymentMethod==='Cash'?'flex':'none'}">
           <input type="checkbox" id="jm-cashconfirmed" ${job?.cashConfirmed?'checked':''}>
           <label for="jm-cashconfirmed" style="font-weight:600;font-size:12.6px;color:var(--ink)">Cash physically confirmed received</label>
@@ -3457,7 +3467,7 @@ async function saveJobModal(jobId){
   const paymentStatus = document.getElementById('jm-status').value;
   const prevJob = jobId ? STATE.data.jobs.find(j=>j.id===jobId) : null;
   const actor = getCurrentProfile()?.fullName || 'Unknown';
-  const oldSnapshot = prevJob ? { amount:prevJob.amount, paymentStatus:prevJob.paymentStatus, paymentMethod:prevJob.paymentMethod, commissionPercent:prevJob.commissionPercent, partsCost:prevJob.partsCost, includesGST:prevJob.includesGST, partsRefundStatus:prevJob.partsRefundStatus } : null;
+  const oldSnapshot = prevJob ? { amount:prevJob.amount, paymentStatus:prevJob.paymentStatus, paymentMethod:prevJob.paymentMethod, commissionPercent:prevJob.commissionPercent, partsCost:prevJob.partsCost, includesGST:prevJob.includesGST, partsRefundStatus:prevJob.partsRefundStatus, reviewTaken:prevJob.reviewTaken } : null;
   let datePaid = prevJob?.datePaid || '';
   if (paymentStatus==='Paid' && !datePaid) datePaid = todayStr();
   if (paymentStatus!=='Paid') datePaid = '';
@@ -3478,6 +3488,7 @@ async function saveJobModal(jobId){
     partsPaidBy: document.getElementById('jm-partsby').value,
     partsRefundStatus: document.getElementById('jm-refund').value,
     notes: document.getElementById('jm-notes').value,
+    reviewTaken: document.getElementById('jm-review').checked,
     datePaid, paidToTechnician: prevJob?.paidToTechnician || 'Not Paid',
     invoiceFile: MODAL_FILES['jm-invoiceFile'] ?? job_or_null(prevJob,'invoiceFile'),
     transferReceiptFile: MODAL_FILES['jm-transferReceiptFile'] ?? job_or_null(prevJob,'transferReceiptFile'),
@@ -3497,6 +3508,7 @@ async function saveJobModal(jobId){
     if (oldSnapshot.partsCost !== values.partsCost) logJobActivity(job, actor, `Parts cost changed from ${fmtMoney(oldSnapshot.partsCost)} to ${fmtMoney(values.partsCost)}`);
     if (oldSnapshot.includesGST !== values.includesGST) logJobActivity(job, actor, `GST toggle changed from ${oldSnapshot.includesGST?'On':'Off'} to ${values.includesGST?'On':'Off'}`);
     if (oldSnapshot.partsRefundStatus !== values.partsRefundStatus) logJobActivity(job, actor, `Parts refund status changed from "${oldSnapshot.partsRefundStatus}" to "${values.partsRefundStatus}"`);
+    if (oldSnapshot.reviewTaken !== values.reviewTaken) logJobActivity(job, actor, `Review ${values.reviewTaken?'marked as taken':'unmarked'}`);
   } else {
     logJobActivity(job, actor, 'Job created');
   }
