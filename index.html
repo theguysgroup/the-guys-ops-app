@@ -749,6 +749,9 @@ async function loadFromSupabase(){
       estimatedValue:c.estimated_value||0, salesValue:c.sales_value||0, jobDescription:c.job_description||'',
       linkedJobId:c.linked_job_id, starred:c.starred, lastReadAt:c.last_read_at,
       tags:c.tags||[], messages:c.messages||[], activityLog: logsFor('contact', c.id),
+      utmSource:c.utm_source||'', utmMedium:c.utm_medium||'', utmCampaign:c.utm_campaign||'',
+      utmTerm:c.utm_term||'', utmContent:c.utm_content||'', landingPage:c.landing_page||'',
+      referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
     })),
     jobs: (jobs||[]).map(j => ({
       id:j.id, customerName:j.customer_name, invoiceNumber:j.invoice_number||'', date:j.date,
@@ -2104,12 +2107,30 @@ function renderProgressBar(value, target, opts){
    tag families (source / division / status) are kept as separate fields rather
    than one free-form tag pile, which is what makes the per-channel and per-
    division counts in the stat row actually countable. ── */
-const LEAD_SOURCES = ['Google Ads','Facebook Ads','Organic','Phone Call'];
+const LEAD_SOURCES = ['Google Ads','Facebook Ads','Google Maps','Organic','Phone Call'];
 const LEAD_DIVISIONS = ['Aircon','Chimney','Pressure Washing'];
 const LEAD_STATUSES = ['New','Follow-up','Booked','Not Relevant'];
 const LEAD_STATUS_COLOR = { New:'var(--primary)', 'Follow-up':'var(--warn)', Booked:'var(--good)', 'Not Relevant':'var(--ink-faint)' };
 const LEAD_STATUS_TONE = { New:'neutral', 'Follow-up':'warn', Booked:'good', 'Not Relevant':'neutral' };
-const LEAD_SOURCE_COLOR = { 'Google Ads':'var(--primary)', 'Facebook Ads':'var(--accent)', Organic:'var(--good)', 'Phone Call':'var(--warn)' };
+const LEAD_SOURCE_COLOR = { 'Google Ads':'var(--primary)', 'Facebook Ads':'var(--accent)', 'Google Maps':'var(--ink-faint)', Organic:'var(--good)', 'Phone Call':'var(--warn)' };
+// Read-only — populated once, at creation, by the intake-lead Edge Function (or blank for every
+// lead entered directly in the app). Shared between the CRM Inbox details panel and the lead
+// modal's Details tab so the two never drift. Renders nothing at all if there's no data, which is
+// the common case for anything not created via the website form.
+function renderMarketingSourceBlock(c){
+  const rows = [
+    ['Campaign source', c.utmSource], ['Medium', c.utmMedium], ['Campaign', c.utmCampaign],
+    ['Term', c.utmTerm], ['Ad content', c.utmContent], ['Landing page', c.landingPage],
+    ['Referrer', c.referrerDomain],
+  ].filter(([,v]) => v);
+  if (!rows.length) return '';
+  return `<div class="field" style="margin-top:9px">
+    <label>Marketing source</label>
+    <div style="font-size:12px;color:var(--ink-soft);display:flex;flex-direction:column;gap:2px;padding-top:2px">
+      ${rows.map(([label,v])=>`<div><b style="color:var(--ink)">${esc(label)}:</b> ${esc(v)}</div>`).join('')}
+    </div>
+  </div>`;
+}
 // Preset follow-up actions Ron reaches for constantly — one tap instead of typing the same text again.
 const FOLLOWUP_PRESETS = [
   { label:'Follow up', text:'Follow up call', kind:'reminder' },
@@ -2618,6 +2639,7 @@ function renderCrmInboxThreadAndDetails(c){
       <div class="field" style="margin-top:9px"><label>Estimated value</label><input type="number" value="${c.estimatedValue||0}" onchange="setLeadEstimatedValue('${c.id}',this.value)"></div>
       <div class="field" style="margin-top:9px"><label>Sales value</label><input type="number" value="${c.salesValue||0}" onchange="setLeadSalesValue('${c.id}',this.value)"></div>
       <div class="field" style="margin-top:9px"><label>What they need</label><textarea rows="3" onchange="setLeadJobDescription('${c.id}',this.value)">${esc(c.jobDescription||'')}</textarea></div>
+      ${renderMarketingSourceBlock(c)}
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost small" onclick="openLeadActivityModal('${c.id}')">💬 History (${recordActivityCount(c)})</button>
         <button class="btn ghost small" onclick="openLeadModal('${c.id}')">Follow-up / edit</button>
@@ -2856,6 +2878,7 @@ function openLeadModal(contactId){
           </div>
           <div class="field" style="margin-top:11px"><label>What they need</label><textarea rows="2" id="lm-desc">${c?esc(c.jobDescription||''):''}</textarea></div>
           ${c ? `<div class="field" style="margin-top:11px"><label>Tags</label>${renderLeadTags(c.id, 'modal')}</div>` : ''}
+          ${c ? renderMarketingSourceBlock(c) : ''}
         </div>
 
         ${c ? `
