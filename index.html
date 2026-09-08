@@ -916,6 +916,51 @@ function closingPatchToRow(patch){
   if ('date' in row && !row.date) row.date = todayStr();
   return row;
 }
+function employeePatchToRow(patch){
+  const map = {
+    name:'name', roles:'roles', status:'status', employmentType:'employment_type',
+    phone:'phone', email:'email', address:'address', commissionNotes:'commission_notes',
+    bankDetails:'bank_details', abn:'abn', startDate:'start_date', endDate:'end_date',
+    department:'department', contractFile:'contract_file', passportPhotoFile:'passport_photo_file',
+    licensePhotoFile:'license_photo_file', localLicenseFile:'local_license_file',
+  };
+  const nullIfEmpty = new Set(['start_date','end_date']);
+  const row = {};
+  for (const k in patch) {
+    if (!map[k]) continue;
+    const col = map[k];
+    row[col] = (nullIfEmpty.has(col) && patch[k]==='') ? null : patch[k];
+  }
+  return row;
+}
+function equipmentCatalogPatchToRow(patch){
+  const map = {
+    name:'name', supplierId:'supplier_id', otherSource:'other_source', price:'price',
+    category:'category', description:'description', purchaseDate:'purchase_date',
+  };
+  const row = {};
+  for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
+  // supplierId is '' when "— Other source —" is picked — that must reach a uuid column as null, not ''
+  if ('supplier_id' in row && !isRealId(row.supplier_id)) row.supplier_id = null;
+  if ('purchase_date' in row && !row.purchase_date) row.purchase_date = null;
+  return row;
+}
+function supplierPatchToRow(patch){
+  const map = {
+    name:'name', supplyType:'supply_type', contactPerson:'contact_person', phone:'phone',
+    email:'email', addressWebsite:'address_website', paymentTerms:'payment_terms',
+  };
+  const row = {};
+  for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
+  return row;
+}
+function equipmentSpendPatchToRow(patch){
+  const map = { date:'date', item:'item', technician:'technician', paidBy:'paid_by', cost:'cost', reimbursed:'reimbursed' };
+  const row = {};
+  for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
+  if ('date' in row && !row.date) row.date = todayStr();   // equipment_spend.date is NOT NULL, same defense as jobs.date
+  return row;
+}
 const db = {
   jobs: {
     async create(values){
@@ -1068,11 +1113,106 @@ const db = {
       if (error) showToast('Could not save setting: '+error.message);
     },
   },
+  employees: {
+    async create(values){
+      const { data: row, error } = await sb.from('employees').insert(employeePatchToRow(values)).select().single();
+      if (error) { showToast('Could not save employee: '+error.message); throw error; }
+      const e = { ...values, id: row.id, activityLog: values.activityLog||[] };
+      STATE.data.employees.push(e);
+      return e;
+    },
+    async update(id, patch){
+      const e = STATE.data.employees.find(x=>x.id===id);
+      if (e) Object.assign(e, patch);
+      const { error } = await sb.from('employees').update(employeePatchToRow(patch)).eq('id', id);
+      if (error) showToast('Could not save change: '+error.message);
+    },
+    async remove(id){
+      STATE.data.employees = STATE.data.employees.filter(x=>x.id!==id);
+      const { error } = await sb.from('employees').delete().eq('id', id);
+      if (error) showToast('Could not delete employee: '+error.message);
+    },
+  },
+  // Keyed by technician_name (the table's primary key), not id — commission rates are looked up by
+  // name everywhere in the app (commissionRateFor, STATE.data.commissionRates[name]), matching the
+  // employee record's own `name` field rather than its uuid.
+  commissionRates: {
+    async set(technicianName, rates){
+      STATE.data.commissionRates[technicianName] = rates;
+      const { error } = await sb.from('commission_rates').upsert({ technician_name: technicianName, rates });
+      if (error) showToast('Could not save commission rates: '+error.message);
+    },
+    async remove(technicianName){
+      delete STATE.data.commissionRates[technicianName];
+      const { error } = await sb.from('commission_rates').delete().eq('technician_name', technicianName);
+      if (error) showToast('Could not remove old commission rates: '+error.message);
+    },
+  },
+  equipmentCatalog: {
+    async create(values){
+      const { data: row, error } = await sb.from('equipment_catalog').insert(equipmentCatalogPatchToRow(values)).select().single();
+      if (error) { showToast('Could not save equipment: '+error.message); throw error; }
+      const item = { ...values, id: row.id };
+      STATE.data.equipmentCatalog.push(item);
+      return item;
+    },
+    async update(id, patch){
+      const item = STATE.data.equipmentCatalog.find(x=>x.id===id);
+      if (item) Object.assign(item, patch);
+      const { error } = await sb.from('equipment_catalog').update(equipmentCatalogPatchToRow(patch)).eq('id', id);
+      if (error) showToast('Could not save change: '+error.message);
+    },
+    async remove(id){
+      STATE.data.equipmentCatalog = STATE.data.equipmentCatalog.filter(x=>x.id!==id);
+      const { error } = await sb.from('equipment_catalog').delete().eq('id', id);
+      if (error) showToast('Could not delete equipment: '+error.message);
+    },
+  },
+  suppliers: {
+    async create(values){
+      const { data: row, error } = await sb.from('suppliers').insert(supplierPatchToRow(values)).select().single();
+      if (error) { showToast('Could not save supplier: '+error.message); throw error; }
+      const s = { ...values, id: row.id };
+      STATE.data.suppliers.push(s);
+      return s;
+    },
+    async update(id, patch){
+      const s = STATE.data.suppliers.find(x=>x.id===id);
+      if (s) Object.assign(s, patch);
+      const { error } = await sb.from('suppliers').update(supplierPatchToRow(patch)).eq('id', id);
+      if (error) showToast('Could not save change: '+error.message);
+    },
+    async remove(id){
+      STATE.data.suppliers = STATE.data.suppliers.filter(x=>x.id!==id);
+      const { error } = await sb.from('suppliers').delete().eq('id', id);
+      if (error) showToast('Could not delete supplier: '+error.message);
+    },
+  },
+  equipmentSpend: {
+    async create(values){
+      const { data: row, error } = await sb.from('equipment_spend').insert(equipmentSpendPatchToRow(values)).select().single();
+      if (error) { showToast('Could not save purchase: '+error.message); throw error; }
+      const item = { ...values, id: row.id, activityLog: values.activityLog||[] };
+      STATE.data.equipmentSpend.push(item);
+      return item;
+    },
+    async update(id, patch){
+      const item = STATE.data.equipmentSpend.find(x=>x.id===id);
+      if (item) Object.assign(item, patch);
+      const { error } = await sb.from('equipment_spend').update(equipmentSpendPatchToRow(patch)).eq('id', id);
+      if (error) showToast('Could not save change: '+error.message);
+    },
+    async remove(id){
+      STATE.data.equipmentSpend = STATE.data.equipmentSpend.filter(x=>x.id!==id);
+      const { error } = await sb.from('equipment_spend').delete().eq('id', id);
+      if (error) showToast('Could not delete purchase: '+error.message);
+    },
+  },
 };
-// Wraps logActivity() for contacts specifically: keeps the exact same in-memory
-// behavior (so every existing call site's UI feedback is unchanged) and ALSO
-// persists the entry to the shared activity_log table. Other entities (jobs,
-// tasks, employees, equipment, cashStatus, settings) still call plain
+// Wraps logActivity() for each entity: keeps the exact same in-memory behavior
+// (so every existing call site's UI feedback is unchanged) and ALSO persists
+// the entry to the shared activity_log table. cashStatus and settings-level
+// changes (settings has its own logSettingsActivity) still call plain
 // logActivity() and stay in-memory-only until their own write layer lands.
 function logContactActivity(c, actor, text){
   logActivity(c, actor, text);
@@ -1085,6 +1225,14 @@ function logJobActivity(job, actor, text){
 function logTaskActivity(task, actor, text){
   logActivity(task, actor, text);
   if (task?.id) db.activityLog.insert('task', task.id, actor, text);
+}
+function logEmployeeActivity(emp, actor, text){
+  logActivity(emp, actor, text);
+  if (emp?.id) db.activityLog.insert('employee', emp.id, actor, text);
+}
+function logEquipmentActivity(item, actor, text){
+  logActivity(item, actor, text);
+  if (item?.id) db.activityLog.insert('equipment', item.id, actor, text);
 }
 
 function filterForProfile(data, profile){
@@ -1464,12 +1612,14 @@ function onStatusChange(kind, id, value){
     const emp = STATE.data.employees.find(x=>x.id===id);
     const old = emp.status;
     emp.status = value;
-    if (old!==value) logActivity(emp, actor, `Status changed from "${old}" to "${value}"`);
+    db.employees.update(emp.id, { status: emp.status });
+    if (old!==value) logEmployeeActivity(emp, actor, `Status changed from "${old}" to "${value}"`);
   } else if (kind==='equipPaidBy') {
     const e = STATE.data.equipmentSpend.find(x=>x.id===id);
     const old = e.paidBy;
     e.paidBy = value;
-    if (old!==value) logActivity(e, actor, `Paid-by changed from "${old}" to "${value}"`);
+    db.equipmentSpend.update(e.id, { paidBy: e.paidBy });
+    if (old!==value) logEquipmentActivity(e, actor, `Paid-by changed from "${old}" to "${value}"`);
   } else if (kind==='taskPriority') {
     const t = STATE.data.tasks.find(x=>x.id===id);
     const old = t.priority;
@@ -1480,7 +1630,8 @@ function onStatusChange(kind, id, value){
     const e = STATE.data.equipmentSpend.find(x=>x.id===id);
     const old = e.reimbursed;
     e.reimbursed = value;
-    if (old!==value) logActivity(e, actor, `Reimbursement status changed from "${old}" to "${value}"`);
+    db.equipmentSpend.update(e.id, { reimbursed: e.reimbursed });
+    if (old!==value) logEquipmentActivity(e, actor, `Reimbursement status changed from "${old}" to "${value}"`);
   } else if (kind==='taskStatus') {
     const t = STATE.data.tasks.find(x=>x.id===id);
     t.status = value;
@@ -1495,9 +1646,9 @@ function onStatusChange(kind, id, value){
 function deleteJob(id){ confirmAction('Delete this job?', ()=>{ db.jobs.remove(id); showToast('Deleted'); render(); }); }
 function deleteTask(id){ confirmAction('Delete this task?', ()=>{ db.tasks.remove(id); showToast('Deleted'); render(); }); }
 function deleteQuote(id){ confirmAction('Delete this quote?', ()=>{ db.quotes.remove(id); showToast('Deleted'); render(); }); }
-function deleteRefItem(kind, id){ confirmAction('Delete this item?', ()=>{ STATE.data[kind] = STATE.data[kind].filter(x=>x.id!==id); showToast('Deleted'); render(); }); }
-function deleteEquipSpend(id){ confirmAction('Delete this purchase?', ()=>{ STATE.data.equipmentSpend = STATE.data.equipmentSpend.filter(x=>x.id!==id); showToast('Deleted'); render(); }); }
-function deleteEmployee(id){ confirmAction('Delete this employee?', ()=>{ STATE.data.employees = STATE.data.employees.filter(x=>x.id!==id); showToast('Deleted'); render(); }); }
+function deleteRefItem(kind, id){ confirmAction('Delete this item?', ()=>{ db[kind].remove(id); showToast('Deleted'); render(); }); }
+function deleteEquipSpend(id){ confirmAction('Delete this purchase?', ()=>{ db.equipmentSpend.remove(id); showToast('Deleted'); render(); }); }
+function deleteEmployee(id){ confirmAction('Delete this employee?', ()=>{ db.employees.remove(id); showToast('Deleted'); render(); }); }
 
 /* ── login screen ────────────────────────────────────────────────────── */
 function renderAuthLoading(msg){
@@ -4316,9 +4467,10 @@ function postManualNoteToRecord(kind, id){
   const input = document.getElementById('quick-update-input');
   const text = input.value.trim(); if (!text) return;
   const record = findRecordByKind(kind, id); if (!record) return;
-  const currentProfile = getCurrentProfile();
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
   if (!record.activityLog) record.activityLog = [];
-  record.activityLog.push({ id:uid(), at:new Date().toISOString(), actor: currentProfile?.fullName || 'Unknown', text, manual:true });
+  record.activityLog.push({ id:uid(), at:new Date().toISOString(), actor, text, manual:true });
+  db.activityLog.insert(kind, id, actor, text);
   input.value = '';
   document.getElementById('quick-activity-list').innerHTML = renderRecordActivityList(kind, id);
 }
@@ -4663,7 +4815,7 @@ function openEmployeeModal(empId){
       </div>
     </div>`);
 }
-function saveEmployeeModal(empId){
+async function saveEmployeeModal(empId){
   const name = document.getElementById('em-name').value.trim();
   if (!name) { modalError('Please enter a name'); return; }
   const isOwner = document.getElementById('em-owner').checked, isManager = document.getElementById('em-manager').checked, isTech = document.getElementById('em-tech').checked, isVA = document.getElementById('em-va').checked;
@@ -4684,19 +4836,23 @@ function saveEmployeeModal(empId){
     localLicenseFile: MODAL_FILES['em-localLicenseFile'] ?? job_or_null(prev,'localLicenseFile'),
   };
   let emp;
-  if (prev) { emp = prev; Object.assign(emp, values); } else { emp = { id: uid(), activityLog:[], ...values }; STATE.data.employees.push(emp); }
+  if (prev) { emp = prev; db.employees.update(emp.id, values); }
+  else {
+    try { emp = await db.employees.create({ activityLog:[], ...values }); }
+    catch (err) { return; }   // db.employees.create() already showed an error toast; leave the modal open so the user can retry
+  }
   if (isTech) {
     const rates = { Aircon: document.getElementById('em-aircon').value===''?null:Number(document.getElementById('em-aircon').value), Chimney: document.getElementById('em-chimney').value===''?null:Number(document.getElementById('em-chimney').value), 'Pressure Washing': document.getElementById('em-pw').value===''?null:Number(document.getElementById('em-pw').value), Other: document.getElementById('em-other').value===''?null:Number(document.getElementById('em-other').value) };
-    if (oldName && oldName!==name && STATE.data.commissionRates[oldName]) delete STATE.data.commissionRates[oldName];
-    STATE.data.commissionRates[name] = rates;
+    if (oldName && oldName!==name && STATE.data.commissionRates[oldName]) db.commissionRates.remove(oldName);
+    db.commissionRates.set(name, rates);
     if (prev && oldRates) {
       ['Aircon','Chimney','Pressure Washing','Other'].forEach(jt => {
         const before = oldRates[jt] ?? null, after = rates[jt] ?? null;
-        if (before !== after) logActivity(emp, actor, `${jt} commission rate changed from ${before===null?'—':before+'%'} to ${after===null?'—':after+'%'}`);
+        if (before !== after) logEmployeeActivity(emp, actor, `${jt} commission rate changed from ${before===null?'—':before+'%'} to ${after===null?'—':after+'%'}`);
       });
     }
   }
-  if (!prev) logActivity(emp, actor, 'Employee added');
+  if (!prev) logEmployeeActivity(emp, actor, 'Employee added');
   closeModal(); showToast(empId?'Employee updated':'Employee added'); render();
 }
 const EQUIPMENT_CATEGORIES = ['Tools','Consumable'];
@@ -4736,12 +4892,16 @@ function openEquipmentCatalogModal(itemId){
       </div>
     </div>`);
 }
-function saveEquipmentCatalogModal(itemId){
+async function saveEquipmentCatalogModal(itemId){
   const name = document.getElementById('eq-name').value.trim();
   if (!name) { modalError('Please enter an equipment name'); return; }
   const supplierId = document.getElementById('eq-supplier').value;
   const values = { name, category: document.getElementById('eq-category').value, supplierId: supplierId||'', otherSource: supplierId?'':document.getElementById('eq-othersource').value.trim(), price: Number(document.getElementById('eq-price').value)||0, purchaseDate: document.getElementById('eq-purchasedate').value, description: document.getElementById('eq-description').value };
-  if (itemId) Object.assign(STATE.data.equipmentCatalog.find(x=>x.id===itemId), values); else STATE.data.equipmentCatalog.push({ id: uid(), ...values });
+  if (itemId) { db.equipmentCatalog.update(itemId, values); }
+  else {
+    try { await db.equipmentCatalog.create(values); }
+    catch (err) { return; }   // db.equipmentCatalog.create() already showed an error toast; leave the modal open so the user can retry
+  }
   closeModal(); showToast('Saved'); render();
 }
 function renderSuppliersTab(data, canEdit){
@@ -4776,11 +4936,15 @@ function openSupplierModal(supplierId){
       </div>
     </div>`);
 }
-function saveSupplierModal(supplierId){
+async function saveSupplierModal(supplierId){
   const name = document.getElementById('sp-name').value.trim();
   if (!name) { modalError('Please enter a supplier name'); return; }
   const values = { name, supplyType: document.getElementById('sp-supplytype').value.trim(), contactPerson: document.getElementById('sp-contactperson').value.trim(), phone: document.getElementById('sp-phone').value.trim(), email: document.getElementById('sp-email').value.trim(), addressWebsite: document.getElementById('sp-addresswebsite').value.trim(), paymentTerms: document.getElementById('sp-paymentterms').value.trim() };
-  if (supplierId) Object.assign(STATE.data.suppliers.find(x=>x.id===supplierId), values); else STATE.data.suppliers.push({ id: uid(), ...values });
+  if (supplierId) { db.suppliers.update(supplierId, values); }
+  else {
+    try { await db.suppliers.create(values); }
+    catch (err) { return; }   // db.suppliers.create() already showed an error toast; leave the modal open so the user can retry
+  }
   closeModal(); showToast('Saved'); render();
 }
 function renderEquipSpendTab(data){
@@ -4822,7 +4986,7 @@ function openEquipSpendModal(itemId){
       </div>
     </div>`);
 }
-function saveEquipSpendModal(itemId){
+async function saveEquipSpendModal(itemId){
   const itemName = document.getElementById('es-item').value.trim();
   if (!itemName) { modalError('Please enter an item name'); return; }
   const actor = getCurrentProfile()?.fullName || 'Unknown';
@@ -4830,13 +4994,17 @@ function saveEquipSpendModal(itemId){
   const oldSnapshot = prev ? { cost:prev.cost, reimbursed:prev.reimbursed, paidBy:prev.paidBy } : null;
   const values = { date: document.getElementById('es-date').value, item: itemName, technician: document.getElementById('es-tech').value, paidBy: document.getElementById('es-paidby').value, cost: Number(document.getElementById('es-cost').value)||0, reimbursed: document.getElementById('es-reimb').value };
   let item;
-  if (itemId) { item = prev; Object.assign(item, values); } else { item = { id: uid(), activityLog:[], ...values }; STATE.data.equipmentSpend.push(item); }
+  if (itemId) { item = prev; db.equipmentSpend.update(item.id, values); }
+  else {
+    try { item = await db.equipmentSpend.create({ activityLog:[], ...values }); }
+    catch (err) { return; }   // db.equipmentSpend.create() already showed an error toast; leave the modal open so the user can retry
+  }
   if (oldSnapshot) {
-    if (oldSnapshot.cost !== values.cost) logActivity(item, actor, `Cost changed from ${fmtMoney(oldSnapshot.cost)} to ${fmtMoney(values.cost)}`);
-    if (oldSnapshot.reimbursed !== values.reimbursed) logActivity(item, actor, `Reimbursement status changed from "${oldSnapshot.reimbursed}" to "${values.reimbursed}"`);
-    if (oldSnapshot.paidBy !== values.paidBy) logActivity(item, actor, `Paid-by changed from "${oldSnapshot.paidBy}" to "${values.paidBy}"`);
+    if (oldSnapshot.cost !== values.cost) logEquipmentActivity(item, actor, `Cost changed from ${fmtMoney(oldSnapshot.cost)} to ${fmtMoney(values.cost)}`);
+    if (oldSnapshot.reimbursed !== values.reimbursed) logEquipmentActivity(item, actor, `Reimbursement status changed from "${oldSnapshot.reimbursed}" to "${values.reimbursed}"`);
+    if (oldSnapshot.paidBy !== values.paidBy) logEquipmentActivity(item, actor, `Paid-by changed from "${oldSnapshot.paidBy}" to "${values.paidBy}"`);
   } else {
-    logActivity(item, actor, 'Equipment purchase logged');
+    logEquipmentActivity(item, actor, 'Equipment purchase logged');
   }
   closeModal(); showToast(itemId?'Purchase updated':'Purchase added'); render();
 }
@@ -4984,13 +5152,14 @@ function setOwnerSalary(name, rawValue){
 function updateCommissionRateFromSettings(techName, jobType, rawValue){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   if (!STATE.data.commissionRates[techName]) STATE.data.commissionRates[techName] = { Aircon:null, Chimney:null, 'Pressure Washing':null, Other:null };
-  const rates = STATE.data.commissionRates[techName];
+  const rates = { ...STATE.data.commissionRates[techName] };
   const before = rates[jobType] ?? null;
   const after = rawValue===''? null : Number(rawValue);
   if (before === after) return;
   rates[jobType] = after;
+  db.commissionRates.set(techName, rates);
   const emp = STATE.data.employees.find(e=>e.name===techName);
-  if (emp) logActivity(emp, actor, `${jobType} commission rate changed from ${before===null?'—':before+'%'} to ${after===null?'—':after+'%'} (via Settings)`);
+  if (emp) logEmployeeActivity(emp, actor, `${jobType} commission rate changed from ${before===null?'—':before+'%'} to ${after===null?'—':after+'%'} (via Settings)`);
 }
 function toggleWorkingDay(empId, dow, checked){
   const emp = STATE.data.employees.find(e=>e.id===empId); if (!emp) return;
