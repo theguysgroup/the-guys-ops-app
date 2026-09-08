@@ -832,8 +832,15 @@ function contactPatchToRow(patch){
     jobDescription:'job_description', linkedJobId:'linked_job_id', starred:'starred',
     lastReadAt:'last_read_at', tags:'tags', messages:'messages',
   };
+  // date/timestamptz/uuid columns reject '' outright ("invalid input syntax for type date")
+  // where the in-memory shape has always used '' to mean "unset" — null is the real "unset".
+  const nullIfEmpty = new Set(['created_at','next_follow_up','last_read_at','linked_job_id']);
   const row = {};
-  for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
+  for (const k in patch) {
+    if (!map[k]) continue;
+    const col = map[k];
+    row[col] = (nullIfEmpty.has(col) && patch[k]==='') ? null : patch[k];
+  }
   return row;
 }
 const db = {
