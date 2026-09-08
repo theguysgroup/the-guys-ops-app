@@ -843,7 +843,49 @@ function contactPatchToRow(patch){
   }
   return row;
 }
+function jobPatchToRow(patch){
+  const map = {
+    customerName:'customer_name', invoiceNumber:'invoice_number', date:'date', technician:'technician',
+    jobType:'job_type', commissionPercent:'commission_percent', amount:'amount', includesGST:'includes_gst',
+    paymentStatus:'payment_status', paymentMethod:'payment_method', partsCost:'parts_cost',
+    partsPaidBy:'parts_paid_by', partsRefundStatus:'parts_refund_status', notes:'notes',
+    datePaid:'date_paid', paidToTechnician:'paid_to_technician', enteredBy:'entered_by',
+    cashConfirmed:'cash_confirmed', invoiceFile:'invoice_file', transferReceiptFile:'transfer_receipt_file',
+    equipmentRentalFile:'equipment_rental_file',
+  };
+  const nullIfEmpty = new Set(['date_paid']);
+  const row = {};
+  for (const k in patch) {
+    if (!map[k]) continue;
+    const col = map[k];
+    let v = patch[k];
+    if (col==='date' && !v) v = todayStr();   // jobs.date is NOT NULL — the form should always fill it, but never send '' if it somehow doesn't
+    if (nullIfEmpty.has(col) && v==='') v = null;
+    row[col] = v;
+  }
+  return row;
+}
 const db = {
+  jobs: {
+    async create(values){
+      const { data: row, error } = await sb.from('jobs').insert(jobPatchToRow(values)).select().single();
+      if (error) { showToast('Could not save job: '+error.message); throw error; }
+      const j = { ...values, id: row.id, activityLog: values.activityLog||[] };
+      STATE.data.jobs.push(j);
+      return j;
+    },
+    async update(id, patch){
+      const j = STATE.data.jobs.find(x=>x.id===id);
+      if (j) Object.assign(j, patch);
+      const { error } = await sb.from('jobs').update(jobPatchToRow(patch)).eq('id', id);
+      if (error) showToast('Could not save change: '+error.message);
+    },
+    async remove(id){
+      STATE.data.jobs = STATE.data.jobs.filter(x=>x.id!==id);
+      const { error } = await sb.from('jobs').delete().eq('id', id);
+      if (error) showToast('Could not delete job: '+error.message);
+    },
+  },
   contacts: {
     async create(values){
       const { data: row, error } = await sb.from('contacts').insert(contactPatchToRow(values)).select().single();
@@ -917,6 +959,10 @@ const db = {
 function logContactActivity(c, actor, text){
   logActivity(c, actor, text);
   if (c?.id) db.activityLog.insert('contact', c.id, actor, text);
+}
+function logJobActivity(job, actor, text){
+  logActivity(job, actor, text);
+  if (job?.id) db.activityLog.insert('job', job.id, actor, text);
 }
 
 function filterForProfile(data, profile){
@@ -1229,43 +1275,50 @@ function onStatusChange(kind, id, value){
     j.paymentStatus = value;
     if (value==='Paid' && !j.datePaid) j.datePaid = todayStr();
     if (value!=='Paid') j.datePaid = '';
-    if (old!==value) logActivity(j, actor, `Payment status changed from "${old}" to "${value}"`);
+    db.jobs.update(j.id, { paymentStatus: j.paymentStatus, datePaid: j.datePaid });
+    if (old!==value) logJobActivity(j, actor, `Payment status changed from "${old}" to "${value}"`);
   } else if (kind==='jobPaymentMethod') {
     const j = STATE.data.jobs.find(x=>x.id===id);
     const old = j.paymentMethod;
     j.paymentMethod = value;
-    if ((old||'')!==(value||'')) logActivity(j, actor, `Payment method changed from "${old||'—'}" to "${value||'—'}"`);
+    db.jobs.update(j.id, { paymentMethod: j.paymentMethod });
+    if ((old||'')!==(value||'')) logJobActivity(j, actor, `Payment method changed from "${old||'—'}" to "${value||'—'}"`);
   } else if (kind==='jobPaidTech') {
     const j = STATE.data.jobs.find(x=>x.id===id);
     const old = j.paidToTechnician;
     j.paidToTechnician = value;
-    if (old!==value) logActivity(j, actor, `Paid-to-technician changed from "${old}" to "${value}"`);
+    db.jobs.update(j.id, { paidToTechnician: j.paidToTechnician });
+    if (old!==value) logJobActivity(j, actor, `Paid-to-technician changed from "${old}" to "${value}"`);
   } else if (kind==='jobGst') {
     const j = STATE.data.jobs.find(x=>x.id===id);
     const old = j.includesGST;
     j.includesGST = value==='Yes';
-    if (old!==j.includesGST) logActivity(j, actor, `GST toggle changed from ${old?'On':'Off'} to ${j.includesGST?'On':'Off'}`);
+    db.jobs.update(j.id, { includesGST: j.includesGST });
+    if (old!==j.includesGST) logJobActivity(j, actor, `GST toggle changed from ${old?'On':'Off'} to ${j.includesGST?'On':'Off'}`);
   } else if (kind==='jobType') {
     const j = STATE.data.jobs.find(x=>x.id===id);
     const old = j.jobType;
     j.jobType = value;
-    if (old!==value) logActivity(j, actor, `Job type changed from "${old}" to "${value}"`);
+    if (old!==value) logJobActivity(j, actor, `Job type changed from "${old}" to "${value}"`);
     const rate = commissionRateFor(STATE.data.commissionRates, j.technician, value);
-    if (rate!==null && rate!==j.commissionPercent) { const oldPct = j.commissionPercent; j.commissionPercent = rate; logActivity(j, actor, `Commission % auto-updated from ${oldPct}% to ${rate}% for ${j.technician} · ${value}`); }
+    if (rate!==null && rate!==j.commissionPercent) { const oldPct = j.commissionPercent; j.commissionPercent = rate; logJobActivity(j, actor, `Commission % auto-updated from ${oldPct}% to ${rate}% for ${j.technician} · ${value}`); }
+    db.jobs.update(j.id, { jobType: j.jobType, commissionPercent: j.commissionPercent });
   } else if (kind==='jobTechnician') {
     const j = STATE.data.jobs.find(x=>x.id===id);
     const old = j.technician;
     j.technician = value;
     const allowed = jobTypesForTech(value);
-    if (!allowed.includes(j.jobType)) { const oldType = j.jobType; j.jobType = allowed[0]; logActivity(j, actor, `Job type auto-changed from "${oldType}" to "${j.jobType}" — "${oldType}" isn't done by ${value}`); }
-    if (old!==value) logActivity(j, actor, `Technician changed from "${old}" to "${value}"`);
+    if (!allowed.includes(j.jobType)) { const oldType = j.jobType; j.jobType = allowed[0]; logJobActivity(j, actor, `Job type auto-changed from "${oldType}" to "${j.jobType}" — "${oldType}" isn't done by ${value}`); }
+    if (old!==value) logJobActivity(j, actor, `Technician changed from "${old}" to "${value}"`);
     const rate = commissionRateFor(STATE.data.commissionRates, value, j.jobType);
-    if (rate!==null && rate!==j.commissionPercent) { const oldPct = j.commissionPercent; j.commissionPercent = rate; logActivity(j, actor, `Commission % auto-updated from ${oldPct}% to ${rate}% for ${value} · ${j.jobType}`); }
+    if (rate!==null && rate!==j.commissionPercent) { const oldPct = j.commissionPercent; j.commissionPercent = rate; logJobActivity(j, actor, `Commission % auto-updated from ${oldPct}% to ${rate}% for ${value} · ${j.jobType}`); }
+    db.jobs.update(j.id, { technician: j.technician, jobType: j.jobType, commissionPercent: j.commissionPercent });
   } else if (kind==='jobPartsPaidBy') {
     const j = STATE.data.jobs.find(x=>x.id===id);
     const old = j.partsPaidBy;
     j.partsPaidBy = value;
-    if ((old||'')!==(value||'')) logActivity(j, actor, `Parts paid-by changed from "${old||'—'}" to "${value||'—'}"`);
+    db.jobs.update(j.id, { partsPaidBy: j.partsPaidBy });
+    if ((old||'')!==(value||'')) logJobActivity(j, actor, `Parts paid-by changed from "${old||'—'}" to "${value||'—'}"`);
   } else if (kind==='leadStage') {
     const c = STATE.data.contacts.find(x=>x.id===id);
     const old = c.status;
@@ -1312,7 +1365,7 @@ function onStatusChange(kind, id, value){
   }
   render();
 }
-function deleteJob(id){ confirmAction('Delete this job?', ()=>{ STATE.data.jobs = STATE.data.jobs.filter(j=>j.id!==id); showToast('Deleted'); render(); }); }
+function deleteJob(id){ confirmAction('Delete this job?', ()=>{ db.jobs.remove(id); showToast('Deleted'); render(); }); }
 function deleteTask(id){ confirmAction('Delete this task?', ()=>{ STATE.data.tasks = STATE.data.tasks.filter(t=>t.id!==id); showToast('Deleted'); render(); }); }
 function deleteQuote(id){ confirmAction('Delete this quote?', ()=>{ STATE.data.quotes = STATE.data.quotes.filter(q=>q.id!==id); showToast('Deleted'); render(); }); }
 function deleteRefItem(kind, id){ confirmAction('Delete this item?', ()=>{ STATE.data[kind] = STATE.data[kind].filter(x=>x.id!==id); showToast('Deleted'); render(); }); }
@@ -2860,9 +2913,10 @@ function commitJobCellEdit(jobId, field, rawValue, inputType){
   const newVal = inputType==='number' ? (Number(rawValue)||0) : rawValue.trim();
   if (oldVal !== newVal) {
     job[field] = newVal;
+    db.jobs.update(job.id, { [field]: newVal });
     const financialFieldLabels = { amount:'Amount', partsCost:'Parts cost' };
     if (financialFieldLabels[field]) {
-      logActivity(job, actor, `${financialFieldLabels[field]} changed from ${typeof oldVal==='number'?fmtMoney(oldVal):(oldVal||'—')} to ${typeof newVal==='number'?fmtMoney(newVal):(newVal||'—')}`);
+      logJobActivity(job, actor, `${financialFieldLabels[field]} changed from ${typeof oldVal==='number'?fmtMoney(oldVal):(oldVal||'—')} to ${typeof newVal==='number'?fmtMoney(newVal):(newVal||'—')}`);
     }
   }
   refreshJobsTable();
@@ -3073,7 +3127,7 @@ function updateJobCommissionField(){
   if (auto !== null) { input.value = auto; label.textContent = 'Commission % (auto-filled — editable)'; }
   else { label.textContent = 'Commission % (manual — no automatic rate)'; }
 }
-function saveJobModal(jobId){
+async function saveJobModal(jobId){
   const customerName = document.getElementById('jm-customer').value.trim();
   if (!customerName) { modalError('Please enter a customer name'); return; }
   const tech = document.getElementById('jm-tech').value, jobType = document.getElementById('jm-type').value;
@@ -3109,17 +3163,21 @@ function saveJobModal(jobId){
     equipmentRentalFile: MODAL_FILES['jm-equipmentRentalFile'] ?? job_or_null(prevJob,'equipmentRentalFile'),
   };
   let job;
-  if (jobId) { job = prevJob; Object.assign(job, values); } else { job = { id: uid(), activityLog:[], ...values }; STATE.data.jobs.push(job); }
+  if (jobId) { job = prevJob; db.jobs.update(job.id, values); }
+  else {
+    try { job = await db.jobs.create({ activityLog:[], ...values }); }
+    catch (err) { return; }   // db.jobs.create() already showed an error toast; leave the modal open so the user can retry
+  }
   if (oldSnapshot) {
-    if (oldSnapshot.amount !== values.amount) logActivity(job, actor, `Amount changed from ${fmtMoney(oldSnapshot.amount)} to ${fmtMoney(values.amount)}`);
-    if (oldSnapshot.paymentStatus !== values.paymentStatus) logActivity(job, actor, `Payment status changed from "${oldSnapshot.paymentStatus}" to "${values.paymentStatus}"`);
-    if ((oldSnapshot.paymentMethod||'') !== (values.paymentMethod||'')) logActivity(job, actor, `Payment method changed from "${oldSnapshot.paymentMethod||'—'}" to "${values.paymentMethod||'—'}"`);
-    if (oldSnapshot.commissionPercent !== values.commissionPercent) logActivity(job, actor, `Commission % changed from ${oldSnapshot.commissionPercent}% to ${values.commissionPercent}%`);
-    if (oldSnapshot.partsCost !== values.partsCost) logActivity(job, actor, `Parts cost changed from ${fmtMoney(oldSnapshot.partsCost)} to ${fmtMoney(values.partsCost)}`);
-    if (oldSnapshot.includesGST !== values.includesGST) logActivity(job, actor, `GST toggle changed from ${oldSnapshot.includesGST?'On':'Off'} to ${values.includesGST?'On':'Off'}`);
-    if (oldSnapshot.partsRefundStatus !== values.partsRefundStatus) logActivity(job, actor, `Parts refund status changed from "${oldSnapshot.partsRefundStatus}" to "${values.partsRefundStatus}"`);
+    if (oldSnapshot.amount !== values.amount) logJobActivity(job, actor, `Amount changed from ${fmtMoney(oldSnapshot.amount)} to ${fmtMoney(values.amount)}`);
+    if (oldSnapshot.paymentStatus !== values.paymentStatus) logJobActivity(job, actor, `Payment status changed from "${oldSnapshot.paymentStatus}" to "${values.paymentStatus}"`);
+    if ((oldSnapshot.paymentMethod||'') !== (values.paymentMethod||'')) logJobActivity(job, actor, `Payment method changed from "${oldSnapshot.paymentMethod||'—'}" to "${values.paymentMethod||'—'}"`);
+    if (oldSnapshot.commissionPercent !== values.commissionPercent) logJobActivity(job, actor, `Commission % changed from ${oldSnapshot.commissionPercent}% to ${values.commissionPercent}%`);
+    if (oldSnapshot.partsCost !== values.partsCost) logJobActivity(job, actor, `Parts cost changed from ${fmtMoney(oldSnapshot.partsCost)} to ${fmtMoney(values.partsCost)}`);
+    if (oldSnapshot.includesGST !== values.includesGST) logJobActivity(job, actor, `GST toggle changed from ${oldSnapshot.includesGST?'On':'Off'} to ${values.includesGST?'On':'Off'}`);
+    if (oldSnapshot.partsRefundStatus !== values.partsRefundStatus) logJobActivity(job, actor, `Parts refund status changed from "${oldSnapshot.partsRefundStatus}" to "${values.partsRefundStatus}"`);
   } else {
-    logActivity(job, actor, 'Job created');
+    logJobActivity(job, actor, 'Job created');
   }
   ensureContactForJob(job);
   closeModal(); showToast(jobId?'Job updated':'Job added'); render();
