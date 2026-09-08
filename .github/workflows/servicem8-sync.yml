@@ -1,0 +1,24 @@
+name: ServiceM8 Sync (Phase 2 — read-only)
+
+# Pulls payment status from ServiceM8 back into Jobs & Commissions every 30
+# minutes, matching by invoice number (= ServiceM8's job number). See
+# .github/scripts/sync-servicem8.mjs for the actual logic and its scope notes.
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Sync payment status from ServiceM8
+        run: node .github/scripts/sync-servicem8.mjs
+        env:
+          SERVICEM8_API_KEY: ${{ secrets.SERVICEM8_API_KEY }}
+          SUPABASE_URL: https://dszlllazwmllmoklzjwl.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
