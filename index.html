@@ -752,6 +752,7 @@ async function loadFromSupabase(){
       utmSource:c.utm_source||'', utmMedium:c.utm_medium||'', utmCampaign:c.utm_campaign||'',
       utmTerm:c.utm_term||'', utmContent:c.utm_content||'', landingPage:c.landing_page||'',
       referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
+      submissionPage:c.submission_page||'',
     })),
     jobs: (jobs||[]).map(j => ({
       id:j.id, customerName:j.customer_name, invoiceNumber:j.invoice_number||'', date:j.date,
@@ -1331,6 +1332,57 @@ sb.auth.onAuthStateChange((event, session) => {
 });
 
 const STATE = { profiles: [], currentProfileId: null, data: null, dataLoaded: false };
+
+/* ── Realtime: live CRM updates, WhatsApp-style (no manual refresh) ─────
+   Subscribes to every change on `contacts` — covers both brand-new leads
+   (the intake-lead Edge Function inserts a row) and new messages on an
+   existing lead's thread (messages live as a JSONB column ON the contacts
+   row, not a separate table, so an UPDATE here already covers that too).
+   One shared channel per signed-in session; torn down on logout so a stale
+   subscription never fires after STATE.data is cleared. */
+let REALTIME_CHANNEL = null;
+function mapContactRow(c){
+  return {
+    id:c.id, fullName:c.full_name, phone:c.phone||'', email:c.email||'', postcode:c.postcode||'',
+    division:c.division, source:c.source, status:c.status, createdAt:c.created_at,
+    nextFollowUp:c.next_follow_up||'', followupNote:c.followup_note||'',
+    estimatedValue:c.estimated_value||0, salesValue:c.sales_value||0, jobDescription:c.job_description||'',
+    linkedJobId:c.linked_job_id, starred:c.starred, lastReadAt:c.last_read_at,
+    tags:c.tags||[], messages:c.messages||[],
+    utmSource:c.utm_source||'', utmMedium:c.utm_medium||'', utmCampaign:c.utm_campaign||'',
+    utmTerm:c.utm_term||'', utmContent:c.utm_content||'', landingPage:c.landing_page||'',
+    referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
+    submissionPage:c.submission_page||'',
+  };
+}
+function handleContactRealtimeChange(payload){
+  if (!STATE.data) return; // not loaded yet, or already signed out
+  if (payload.eventType === 'DELETE') {
+    STATE.data.contacts = STATE.data.contacts.filter(c => c.id !== payload.old.id);
+    render();
+    return;
+  }
+  const idx = STATE.data.contacts.findIndex(c => c.id === payload.new.id);
+  if (idx === -1) {
+    // Brand-new lead — it has no activity_log rows yet in the overwhelming majority of
+    // cases (nothing has happened to it), so an empty log is the correct starting state.
+    STATE.data.contacts.push({ ...mapContactRow(payload.new), activityLog: [] });
+  } else {
+    // Preserve the existing activityLog — it isn't part of the contacts row itself
+    // (comes from the separate activity_log table, joined only at initial load).
+    STATE.data.contacts[idx] = { ...mapContactRow(payload.new), activityLog: STATE.data.contacts[idx].activityLog };
+  }
+  render();
+}
+function setupRealtimeSubscriptions(){
+  if (REALTIME_CHANNEL) return; // already subscribed this session
+  REALTIME_CHANNEL = sb.channel('contacts-realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, handleContactRealtimeChange)
+    .subscribe();
+}
+function teardownRealtimeSubscriptions(){
+  if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
+}
 let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all'}, jobsFilters:{}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let toastMsg = null, toastTimer = null;
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
@@ -1747,6 +1799,7 @@ async function doSetPassword(){
 }
 async function doLogout(){
   await sb.auth.signOut();
+  teardownRealtimeSubscriptions();
   STATE.data = null; STATE.dataLoaded = false; STATE.profiles = []; STATE.currentProfileId = null;
   resetUI();
   // onAuthStateChange fires SIGNED_OUT and calls render() itself
@@ -2121,7 +2174,7 @@ function renderMarketingSourceBlock(c){
   const rows = [
     ['Campaign source', c.utmSource], ['Medium', c.utmMedium], ['Campaign', c.utmCampaign],
     ['Term', c.utmTerm], ['Ad content', c.utmContent], ['Landing page', c.landingPage],
-    ['Referrer', c.referrerDomain],
+    ['Submitted from', c.submissionPage], ['Referrer', c.referrerDomain],
   ].filter(([,v]) => v);
   if (!rows.length) return '';
   return `<div class="field" style="margin-top:9px">
@@ -5269,7 +5322,7 @@ function render(){
     if (!AUTH_DATA_LOADING) {
       AUTH_DATA_LOADING = true;
       loadFromSupabase()
-        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; render(); })
+        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); })
         .catch(err => { AUTH_DATA_LOADING = false; AUTH.error = err.message; AUTH.status = 'signedOut'; render(); });
     }
     return;
