@@ -655,7 +655,7 @@ function seedData(){
   // website form (all fields captured automatically) or a phone call (only the number is known at first).
   // `source` is the marketing-channel attribution that makes per-channel lead counts possible.
   data.contacts = [
-    { id:uid(), fullName:'Lynette Trotter', phone:'0400 100 201', email:'lynette.demo@example.com', postcode:'2217', division:'Aircon', source:'Facebook Ads', status:'Follow-up', createdAt:'2026-08-24', nextFollowUp:'2026-08-31', estimatedValue:450, salesValue:0, jobDescription:'Duct system, residential property. Asked to be contacted by email.', linkedJobId:null, activityLog:[], starred:false, lastReadAt:'2026-08-25T09:40:01', tags:['air con','no answer ac'], messages:[
+    { id:uid(), fullName:'Lynette Trotter', phone:'0400 100 201', email:'lynette.demo@example.com', postcode:'2217', division:'Aircon', source:'Meta Ads', status:'Follow-up', createdAt:'2026-08-24', nextFollowUp:'2026-08-31', estimatedValue:450, salesValue:0, jobDescription:'Duct system, residential property. Asked to be contacted by email.', linkedJobId:null, activityLog:[], starred:false, lastReadAt:'2026-08-25T09:40:01', tags:['air con','no answer ac','Duct System','Instagram'], messages:[
       { id:uid(), kind:'event', text:'Lead created: Duct system, residential property. Asked to be contacted by email.', at:'2026-08-24T22:51:00' },
       { id:uid(), kind:'message', direction:'in', text:'do you have a duct or a split system?: duct system\nPlease enter your suburb: Monterey\nHow would you want to be contacted?: email\nFull name: Lynette Trotter\nEmail: lynette.demo@example.com\nThe service is required for a commercial or a residential property: residential property', author:'Lynette Trotter', at:'2026-08-24T22:52:00' },
       { id:uid(), kind:'event', text:'Outbound call attempted', at:'2026-08-25T09:39:00' },
@@ -2160,12 +2160,20 @@ function renderProgressBar(value, target, opts){
    tag families (source / division / status) are kept as separate fields rather
    than one free-form tag pile, which is what makes the per-channel and per-
    division counts in the stat row actually countable. ── */
-const LEAD_SOURCES = ['Google Ads','Facebook Ads','Google Maps','Organic','Phone Call'];
+const LEAD_SOURCES = ['Google Ads','Meta Ads','Google Maps','Organic','Phone Call'];
 const LEAD_DIVISIONS = ['Aircon','Chimney','Pressure Washing'];
 const LEAD_STATUSES = ['New','Follow-up','Booked','Not Relevant'];
 const LEAD_STATUS_COLOR = { New:'var(--primary)', 'Follow-up':'var(--warn)', Booked:'var(--good)', 'Not Relevant':'var(--ink-faint)' };
 const LEAD_STATUS_TONE = { New:'neutral', 'Follow-up':'warn', Booked:'good', 'Not Relevant':'neutral' };
-const LEAD_SOURCE_COLOR = { 'Google Ads':'var(--primary)', 'Facebook Ads':'var(--accent)', 'Google Maps':'var(--ink-faint)', Organic:'var(--good)', 'Phone Call':'var(--warn)' };
+const LEAD_SOURCE_COLOR = { 'Google Ads':'var(--primary)', 'Meta Ads':'var(--accent)', 'Google Maps':'var(--ink-faint)', Organic:'var(--good)', 'Phone Call':'var(--warn)' };
+// Finer-grained breakdown tags, layered on top of the division/source rollups above rather than
+// replacing them — a lead still counts once toward "Aircon" / "Meta Ads" in every existing report,
+// and *additionally* carries one of these (when known) via the existing free-form tags array, so
+// "how many were Instagram vs Facebook" is answerable without splitting the totals Ofek budgets
+// against. Auto-applied by the intake-lead Edge Function from UTM/landing-page/message-text
+// signals; always just a normal tag from here on, editable/removable like any other.
+const AIRCON_TYPE_TAGS = ['Split System','Duct System'];
+const META_PLATFORM_TAGS = ['Facebook','Instagram'];
 // Read-only — populated once, at creation, by the intake-lead Edge Function (or blank for every
 // lead entered directly in the app). Shared between the CRM Inbox details panel and the lead
 // modal's Details tab so the two never drift. Renders nothing at all if there's no data, which is
@@ -2321,9 +2329,11 @@ function logIncomingMessage(contactId, scope){
 }
 
 function computeCrmStats(contacts){
-  const stats = { total:contacts.length, byStatus:{New:0,'Follow-up':0,Booked:0,'Not Relevant':0}, bySource:{}, byDivision:{}, wonValue:0 };
+  const stats = { total:contacts.length, byStatus:{New:0,'Follow-up':0,Booked:0,'Not Relevant':0}, bySource:{}, byDivision:{}, byAirconType:{}, byMetaPlatform:{}, wonValue:0 };
   LEAD_SOURCES.forEach(s=>stats.bySource[s]=0);
   LEAD_DIVISIONS.forEach(d=>stats.byDivision[d]={total:0,won:0});
+  AIRCON_TYPE_TAGS.forEach(t=>stats.byAirconType[t]=0);
+  META_PLATFORM_TAGS.forEach(t=>stats.byMetaPlatform[t]=0);
   contacts.forEach(c => {
     if (stats.byStatus[c.status]!==undefined) stats.byStatus[c.status]++;
     if (stats.bySource[c.source]!==undefined) stats.bySource[c.source]++;
@@ -2331,6 +2341,10 @@ function computeCrmStats(contacts){
       stats.byDivision[c.division].total++;
       if (c.status==='Booked') stats.byDivision[c.division].won++;
     }
+    // Sub-tags only ever refine their parent bucket, never replace it — an Aircon lead tagged
+    // "Duct System" still counts under Aircon above; this just additionally answers "which kind".
+    if (c.division==='Aircon') (c.tags||[]).forEach(t => { if (stats.byAirconType[t]!==undefined) stats.byAirconType[t]++; });
+    if (c.source==='Meta Ads') (c.tags||[]).forEach(t => { if (stats.byMetaPlatform[t]!==undefined) stats.byMetaPlatform[t]++; });
     if (c.status==='Booked') stats.wonValue += Number(c.estimatedValue)||0;
   });
   const decided = stats.byStatus.Booked + stats.byStatus['Not Relevant'];
@@ -2825,6 +2839,12 @@ function renderCrmOverview(profile, data){
     const rate = (v.won+0)>0 || v.total>0 ? (v.total ? Math.round((v.won/v.total)*100) : 0) : 0;
     return `<div class="kv"><span>${d}</span><span class="v">${v.total} · ${rate}% won</span></div>`;
   }).join('');
+  // Drill-down bars for the two sub-tag families — only rendered when the parent bucket actually
+  // has leads this period, so an account with no Aircon/Meta activity yet doesn't show empty charts.
+  const airconTypeTotal = AIRCON_TYPE_TAGS.reduce((s,t)=>s+stats.byAirconType[t],0);
+  const metaPlatformTotal = META_PLATFORM_TAGS.reduce((s,t)=>s+stats.byMetaPlatform[t],0);
+  const airconTypeBars = airconTypeTotal ? renderBarGroup(AIRCON_TYPE_TAGS.map(t => ({ label:t, value:stats.byAirconType[t], color:'var(--primary)' })), { fmt:(n)=>String(n) }) : '';
+  const metaPlatformBars = metaPlatformTotal ? renderBarGroup(META_PLATFORM_TAGS.map(t => ({ label:t, value:stats.byMetaPlatform[t], color:'var(--accent)' })), { fmt:(n)=>String(n) }) : '';
 
   // Sales Value (what was actually agreed on the phone, distinct from the Estimated Value) attributed
   // to whichever technician the lead's linked job belongs to — leads not yet linked to a job land in
@@ -2864,6 +2884,10 @@ function renderCrmOverview(profile, data){
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">By marketing channel</div>${sourceBars}</div>
       <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">By division</div><div style="margin-top:6px">${divisionRows}</div></div>
     </div>
+    ${(airconTypeBars || metaPlatformBars) ? `<div class="grid-2" style="margin-top:12px">
+      ${airconTypeBars ? `<div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Aircon — Split vs Duct</div>${airconTypeBars}<div class="hint" style="margin-top:6px">Only counts leads where the type is known from the landing page or the customer's message — the rest still count toward Aircon above, just unsplit.</div></div>` : ''}
+      ${metaPlatformBars ? `<div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Meta Ads — Facebook vs Instagram</div>${metaPlatformBars}<div class="hint" style="margin-top:6px">Depends on each ad's placement tracking being set up in Ads Manager — leads from ads without it still count toward Meta Ads above, just unsplit.</div></div>` : ''}
+    </div>` : ''}
 
     <div class="section-title">Sales value by technician</div>
     <div class="card stat-card" style="--stat-accent:var(--good)">
