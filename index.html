@@ -471,13 +471,23 @@ function computeMonth(data, monthKey, technicianFilter){
   let revenue=0, commission=0, parts=0, equipment=0, paidTotal=0, unpaidTotal=0, paidCount=0, unpaidCount=0;
   const names = technicianFilter ? [technicianFilter] : commissionEligibleTechnicianNames(data);
   const perTech = {}; names.forEach(t => perTech[t] = { jobs:0, commission:0 });
+  // Additive revenue breakdown, layered on top of `revenue` above rather than replacing it — see
+  // jobAttributionTags(): only jobs whose linked lead carries a known Split/Duct or Facebook/Instagram
+  // tag land here, everything else still counts once toward the plain `revenue` total, unsplit.
+  const airconTypeRevenue = {}; AIRCON_TYPE_TAGS.forEach(t=>airconTypeRevenue[t]=0);
+  const metaPlatformRevenue = {}; META_PLATFORM_TAGS.forEach(t=>metaPlatformRevenue[t]=0);
   jobs.forEach(j => {
     revenue += Number(j.amount)||0; commission += jobCommissionAmount(j); parts += Number(j.partsCost)||0;
     if (j.paymentStatus==='Paid') { paidTotal += j.amount; paidCount++; } else { unpaidTotal += j.amount; unpaidCount++; }
     if (perTech[j.technician]) { perTech[j.technician].jobs++; perTech[j.technician].commission += jobCommissionAmount(j); }
+    const attr = jobAttributionTags(j);
+    if (attr.airconType) airconTypeRevenue[attr.airconType] += Number(j.amount)||0;
+    if (attr.metaPlatform) metaPlatformRevenue[attr.metaPlatform] += Number(j.amount)||0;
   });
   equip.forEach(e => equipment += Number(e.cost)||0);
-  return { monthKey, jobs, revenue: round2(revenue), commission: round2(commission), parts: round2(parts), equipment: round2(equipment), paidTotal: round2(paidTotal), unpaidTotal: round2(unpaidTotal), paidCount, unpaidCount, perTech, net: round2(revenue-commission-parts-equipment) };
+  Object.keys(airconTypeRevenue).forEach(t=>airconTypeRevenue[t]=round2(airconTypeRevenue[t]));
+  Object.keys(metaPlatformRevenue).forEach(t=>metaPlatformRevenue[t]=round2(metaPlatformRevenue[t]));
+  return { monthKey, jobs, revenue: round2(revenue), commission: round2(commission), parts: round2(parts), equipment: round2(equipment), paidTotal: round2(paidTotal), unpaidTotal: round2(unpaidTotal), paidCount, unpaidCount, perTech, net: round2(revenue-commission-parts-equipment), airconTypeRevenue, metaPlatformRevenue };
 }
 
 function allWeekKeys(data, now){
@@ -3693,6 +3703,10 @@ function renderFinanceMonthly(data, monthKey, months, allTechs){
   const m = computeMonth(data, monthKey, allTechs.length===1 ? allTechs[0] : undefined);
   const chips = months.map(k => { const [y,mo]=k.split('-'); return `<button class="week-chip ${k===monthKey?'active':''}" onclick="UI.finance.month='${k}';render()">${MONTHS_FULL[Number(mo)-1]} ${y}</button>`; }).join('');
   const techCards = allTechs.map(t => { const d = m.perTech[t] || {jobs:0,commission:0}; return `<div class="card tight"><div style="margin-bottom:8px">${techTag(t)}</div><div class="kv"><span>Jobs</span><span class="v">${d.jobs}</span></div><div class="kv total"><span>Commission</span><span class="v">${fmtMoney(d.commission)}</span></div></div>`; }).join('');
+  const airconTypeRevTotal = AIRCON_TYPE_TAGS.reduce((s,t)=>s+m.airconTypeRevenue[t],0);
+  const metaPlatformRevTotal = META_PLATFORM_TAGS.reduce((s,t)=>s+m.metaPlatformRevenue[t],0);
+  const airconTypeRevBars = airconTypeRevTotal ? renderBarGroup(AIRCON_TYPE_TAGS.map(t => ({ label:t, value:m.airconTypeRevenue[t], color:'var(--primary)' }))) : '';
+  const metaPlatformRevBars = metaPlatformRevTotal ? renderBarGroup(META_PLATFORM_TAGS.map(t => ({ label:t, value:m.metaPlatformRevenue[t], color:'var(--accent)' }))) : '';
   return `
     <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:16px">${chips}</div>
     <div class="grid-4">
@@ -3702,6 +3716,10 @@ function renderFinanceMonthly(data, monthKey, months, allTechs){
       <div class="card"><div class="stat-label">Net for Business</div><div class="stat-value">${fmtMoney(m.net)}</div></div>
     </div>
     <div class="grid-3" style="margin-top:12px"><div class="card tight"><div class="stat-label">Paid / Unpaid</div><div class="stat-value" style="font-size:18px">${fmtMoney(m.paidTotal)} <span style="color:var(--ink-soft);font-size:13px">/ ${fmtMoney(m.unpaidTotal)}</span></div></div></div>
+    ${(airconTypeRevBars || metaPlatformRevBars) ? `<div class="grid-2" style="margin-top:12px">
+      ${airconTypeRevBars ? `<div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Aircon revenue — Split vs Duct</div>${airconTypeRevBars}<div class="hint" style="margin-top:6px">Only counts jobs whose lead has a known type — still part of Revenue above either way, just unsplit when not.</div></div>` : ''}
+      ${metaPlatformRevBars ? `<div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Meta Ads revenue — Facebook vs Instagram</div>${metaPlatformRevBars}<div class="hint" style="margin-top:6px">Only counts jobs whose lead has known ad placement — still part of Revenue above either way, just unsplit when not.</div></div>` : ''}
+    </div>` : ''}
     <div class="section-title">Commission by Technician</div>
     <div class="grid-3">${techCards}</div>
   `;
@@ -3725,6 +3743,19 @@ function customerNameCell(name){
   const c = findContactByName(name);
   if (!c) return esc(name);
   return `<span style="cursor:pointer;color:var(--primary-strong);text-decoration:underline;text-decoration-style:dotted" onclick="event.stopPropagation();goToLeadConversation('${c.id}')" title="Open conversation with ${esc(c.fullName)}">${esc(name)}</span>`;
+}
+// Carries the Split/Duct and Facebook/Instagram tags (see AIRCON_TYPE_TAGS/META_PLATFORM_TAGS) from a
+// job's linked lead over to its revenue — same name-match as customerNameCell, so this only knows the
+// type for jobs that were (or matched) a CRM lead with that tag; every other job's dollars still land in
+// the plain jobType/revenue totals untouched, exactly like the unsplit leads on the CRM Overview.
+function jobAttributionTags(job){
+  const c = findContactByName(job.customerName);
+  if (!c) return { airconType:null, metaPlatform:null };
+  const tags = c.tags || [];
+  return {
+    airconType: job.jobType==='Aircon' ? (AIRCON_TYPE_TAGS.find(t=>tags.includes(t)) || null) : null,
+    metaPlatform: c.source==='Meta Ads' ? (META_PLATFORM_TAGS.find(t=>tags.includes(t)) || null) : null,
+  };
 }
 // Ofek's call: every customer, however they arrived, is a lead — so every job (whether it came in
 // through the CRM pipeline or was entered directly via Closings/the Job modal) must have a CRM contact
