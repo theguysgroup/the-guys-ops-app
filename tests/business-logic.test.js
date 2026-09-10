@@ -36,6 +36,7 @@ const DECLS = [
   'commissionEligibleTechnicianNames', 'computeWeek', 'computeMonth',
   // business performance
   'blankPerfBucket', 'addToPerfBucket', 'finalizePerfBucket', 'computeProfitByWeekInRange', 'computeBusinessPerformance',
+  'contactHasQuote', 'contactHasJob',
 ];
 
 function extractDecl(source, name){
@@ -182,6 +183,38 @@ function testComputeBusinessPerformance(sb){
   if (channelRevenueSum > perf.totalRevenue + 0.01) { fail++; console.error(`FAIL: computeBusinessPerformance additive invariant — channel revenue sum (${channelRevenueSum}) exceeds totalRevenue (${perf.totalRevenue})`); } else pass++;
 }
 
+function testFunnelLossReasonsSpeedToLead(sb){
+  // Added 2026-09-10 after the GHL 90-day import surfaced real loss-reason tags (19 price / 32
+  // outside-area / 7 wrong-number / 117 untagged, out of 175 Not Relevant) and Ofek asked for a
+  // lead->job funnel and speed-to-lead metric built from data that already exists (no new fields).
+  sb.STATE.data.contacts = [
+    { fullName:'Alice', source:'Organic', status:'Booked', createdAt:'2026-09-02', tags:['not interested - price'],
+      messages:[{kind:'event',at:'2026-09-02T10:00:00Z'},{kind:'outbound',at:'2026-09-02T10:05:00Z'}] }, // 5 min reply
+    { fullName:'Bob', source:'Organic', status:'Not Relevant', createdAt:'2026-09-03', tags:['not interested - price'] },
+    { fullName:'Carol', source:'Organic', status:'Not Relevant', createdAt:'2026-09-03', tags:['outside service area'] },
+    { fullName:'Dave', source:'Organic', status:'Not Relevant', createdAt:'2026-09-04', tags:['wrong number'] },
+    { fullName:'Eve', source:'Organic', status:'Not Relevant', createdAt:'2026-09-04', tags:[] },
+    { fullName:'Frank', source:'Organic', status:'New', createdAt:'2026-09-05', tags:[] },
+    { fullName:'Grace', source:'Organic', status:'Follow-up', createdAt:'2026-09-05', tags:[],
+      messages:[{kind:'event',at:'2026-09-05T09:00:00Z'},{kind:'outbound',at:'2026-09-05T09:30:00Z'}] }, // 30 min reply
+  ];
+  sb.STATE.data.jobs = [
+    { id:'1', customerName:'Alice', jobType:'Aircon', date:'2026-09-05', amount:500, commissionPercent:20, partsCost:0, paymentStatus:'Paid', technician:'Guy' },
+  ];
+  sb.STATE.data.quotes = [ { customer:'Alice', date:'2026-09-03', status:'Approved' } ];
+  sb.STATE.data.adSpend = [];
+  sb.STATE.data.employees = [{ name:'Guy', roles:['Technician'] }];
+
+  const perf = sb.computeBusinessPerformance(sb.STATE.data, '2026-09-01', '2026-09-10');
+
+  assertEqual(perf.funnel, { leads:7, contacted:6, quoted:1, booked:1, jobDone:1 }, 'funnel: leads/contacted(status!=New)/quoted(by name)/booked/jobDone(by name)');
+  assertEqual(perf.lossReasons, { price:1, outsideArea:1, wrongNumber:1, noReasonGiven:1 }, 'lossReasons: first-match-wins tag classification of Not Relevant leads');
+  assertEqual(perf.speedToLead.sampleSize, 2, 'speedToLead: only counts contacts with >=2 messages and a non-event reply');
+  // Alice: 5 min = 0.0833h, Grace: 30 min = 0.5h -> avg 0.2917 (rounds to 0.29), median (upper of the two) 0.5
+  assertClose(perf.speedToLead.avgHours, 0.29, 'speedToLead: avgHours across both replies', 0.01);
+  assertClose(perf.speedToLead.medianHours, 0.5, 'speedToLead: medianHours', 0.01);
+}
+
 function testComputeProfitByWeekInRange(sb){
   // computeProfitByWeekInRange goes through computeWeek(), which (unlike computeMonth/
   // computeBusinessPerformance above) also touches data.equipmentSpend — this fixture caught a real
@@ -209,6 +242,7 @@ function testComputeProfitByWeekInRange(sb){
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
+testFunnelLossReasonsSpeedToLead(loadSandbox());
 testComputeProfitByWeekInRange(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);

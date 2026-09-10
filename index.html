@@ -3839,6 +3839,58 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   const quotesRejected = quotesInRange.filter(q=>q.status==='Rejected').length;
   const quoteDecided = quotesApproved + quotesRejected;
 
+  // Lead -> job funnel. "Contacted"/"Quoted"/"Job done" are all proxies from data that already
+  // exists rather than new tracked stages, on purpose — no new fields, no new discipline required
+  // from Ron for this to start working today:
+  //   Contacted  = status has moved past New at all (Follow-up/Booked/Not Relevant)
+  //   Quoted     = a quote exists for this customer's name, in data.quotes (ANY quote ever, not just
+  //                this period, since a quote can be sent well before or after the lead date)
+  //   Booked     = status === Booked
+  //   Job done   = a job exists for this customer's name, in data.jobs (ALL jobs, same reasoning)
+  // Each stage is a strict subset check against the full lead list for this period, not a "moved
+  // through in order" pipeline, so a lead that skipped straight to Booked without a logged quote
+  // still counts in Booked even though it shows 0 in Quoted - the funnel shows where the *process*
+  // has evidence of happening, not a guess about hidden steps.
+  const funnelContacted = contacts.filter(c => c.status !== 'New').length;
+  const funnelQuoted = contacts.filter(c => contactHasQuote(c.fullName, data.quotes)).length;
+  const funnelJobDone = contacts.filter(c => contactHasJob(c.fullName, data.jobs)).length;
+
+  // Loss-reason breakdown for Not Relevant leads, from the same tags already on the contact (most of
+  // this data arrived via the GHL import, where "why" was usually captured as a specific tag - see
+  // chat: 19 price / 32 outside-area / 7 wrong-number / rest untagged). First match wins, in order of
+  // how unambiguous the tag is.
+  const notRelevantContacts = contacts.filter(c => c.status === 'Not Relevant');
+  const lossReasons = { price:0, outsideArea:0, wrongNumber:0, noReasonGiven:0 };
+  notRelevantContacts.forEach(c => {
+    const tags = (c.tags||[]).map(t=>String(t).toLowerCase());
+    if (tags.some(t=>t.includes('price'))) lossReasons.price++;
+    else if (tags.some(t=>t.includes('outside service area'))) lossReasons.outsideArea++;
+    else if (tags.some(t=>t.includes('wrong number'))) lossReasons.wrongNumber++;
+    else lossReasons.noReasonGiven++;
+  });
+
+  // Speed-to-lead: hours between the lead's own creation and the first non-automatic (kind !== event)
+  // message logged against it - i.e. a real reply, not the auto "Lead created" event. Only computable
+  // for leads that actually have a message history (contacts.messages) - bulk-imported historical
+  // leads (e.g. the GHL import) have none, so sampleSize reflects real coverage honestly instead of
+  // silently averaging over mostly-missing data.
+  const speedSamples = [];
+  contacts.forEach(c => {
+    const msgs = (c.messages||[]).slice().sort((a,b)=> new Date(a.at) - new Date(b.at));
+    if (msgs.length < 2) return;
+    const firstAt = new Date(msgs[0].at);
+    const reply = msgs.slice(1).find(m => m.kind !== 'event');
+    if (!reply) return;
+    const hours = (new Date(reply.at) - firstAt) / 3600000;
+    if (hours >= 0) speedSamples.push(hours);
+  });
+  speedSamples.sort((a,b)=>a-b);
+  const speedToLead = {
+    sampleSize: speedSamples.length,
+    avgHours: speedSamples.length ? round2(speedSamples.reduce((s,v)=>s+v,0)/speedSamples.length) : null,
+    medianHours: speedSamples.length ? round2(speedSamples[Math.floor(speedSamples.length/2)]) : null,
+  };
+
   return {
     startDateStr, endDateStr, jobsCount: jobs.length, byDivision, bySubDivision, byChannel, techEntries,
     totalRevenue, totalProfit, totalLeads: contacts.length,
@@ -3848,7 +3900,19 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
     avgDaysToPayment, outstanding,
     quoteConversionRate: quoteDecided ? Math.round((quotesApproved/quoteDecided)*100) : null,
     quotesApproved, quotesRejected,
+    funnel: { leads: contacts.length, contacted: funnelContacted, quoted: funnelQuoted, booked: totalBooked, jobDone: funnelJobDone },
+    lossReasons, speedToLead,
   };
+}
+function contactHasQuote(fullName, allQuotes){
+  const norm = (fullName||'').trim().toLowerCase();
+  if (!norm || !allQuotes) return false;
+  return allQuotes.some(q => (q.customer||'').trim().toLowerCase() === norm);
+}
+function contactHasJob(fullName, allJobs){
+  const norm = (fullName||'').trim().toLowerCase();
+  if (!norm || !allJobs) return false;
+  return allJobs.some(j => (j.customerName||'').trim().toLowerCase() === norm);
 }
 function pctDelta(curr, prev){
   if (!prev) return null;
@@ -3912,6 +3976,17 @@ function techLeaderboard(entries){
     </div>`;
   }).join('');
 }
+function funnelStage(label, count, totalForPct, color){
+  const pct = totalForPct ? Math.round((count/totalForPct)*100) : 0;
+  return `<div style="margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+      <span>${esc(label)}</span><span class="mono" style="font-weight:600">${count} <span style="color:var(--ink-soft);font-weight:400">(${pct}%)</span></span>
+    </div>
+    <div style="height:20px;border-radius:5px;background:var(--surface-3);overflow:hidden">
+      <div style="height:100%;width:${count?Math.max(pct,3):0}%;background:${color};border-radius:5px;transition:width .2s"></div>
+    </div>
+  </div>`;
+}
 function renderBusinessPerformance(profile, data){
   const range = resolveOverviewRange(UI.bizPerf);
   const perf = computeBusinessPerformance(data, range.start, range.end);
@@ -3954,6 +4029,39 @@ function renderBusinessPerformance(profile, data){
       <div class="card stat-card" style="--stat-accent:${perf.outstanding>0?'var(--warn)':'var(--good)'}"><div class="stat-label">Outstanding (unpaid)</div><div class="stat-value" style="font-size:20px">${fmtMoney(perf.outstanding)}</div><div class="stat-sub">from jobs done this period</div></div>
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Avg Days to Payment</div><div class="stat-value" style="font-size:20px">${perf.avgDaysToPayment===null?'—':perf.avgDaysToPayment+' days'}</div><div class="stat-sub">job date → paid date</div></div>
       <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Quote → Job Conversion</div><div class="stat-value" style="font-size:20px">${perf.quoteConversionRate===null?'—':perf.quoteConversionRate+'%'}</div><div class="stat-sub">${perf.quotesApproved} approved / ${perf.quotesRejected} rejected</div></div>
+    </div>
+
+    <div class="section-title">Lead pipeline &amp; loss analysis</div>
+    <div class="grid-2">
+      <div class="card stat-card" style="--stat-accent:var(--primary)">
+        <div class="stat-label">Funnel — lead to job</div>
+        ${funnelStage('Leads', perf.funnel.leads, perf.funnel.leads, 'var(--primary)')}
+        ${funnelStage('Contacted', perf.funnel.contacted, perf.funnel.leads, 'var(--accent)')}
+        ${funnelStage('Quoted', perf.funnel.quoted, perf.funnel.leads, 'var(--primary-teal)')}
+        ${funnelStage('Booked', perf.funnel.booked, perf.funnel.leads, 'var(--good)')}
+        ${funnelStage('Job Completed', perf.funnel.jobDone, perf.funnel.leads, 'var(--good)')}
+        <div class="hint" style="margin-top:4px">Contacted/Quoted/Job Completed are inferred from existing data (status, Quotes, Jobs matched by name) — not a strict step-by-step order, so a lead can reach Booked with 0 in Quoted if no quote was logged.</div>
+      </div>
+      <div class="card stat-card" style="--stat-accent:var(--bad)">
+        <div class="stat-label">Why leads are lost (Not Relevant)</div>
+        ${(perf.lossReasons.price+perf.lossReasons.outsideArea+perf.lossReasons.wrongNumber+perf.lossReasons.noReasonGiven) ? renderBarGroup([
+          {label:'Price', value:perf.lossReasons.price, color:'var(--bad)'},
+          {label:'Outside Area', value:perf.lossReasons.outsideArea, color:'var(--warn)'},
+          {label:'Wrong Number', value:perf.lossReasons.wrongNumber, color:'var(--ink-faint)'},
+          {label:'No Reason Given', value:perf.lossReasons.noReasonGiven, color:'var(--accent)'},
+        ], {fmt:(n)=>String(n)}) : emptyState('No lost leads this period')}
+        ${perf.lossReasons.noReasonGiven>0 ? `<div class="hint" style="margin-top:6px">${perf.lossReasons.noReasonGiven} lost lead${perf.lossReasons.noReasonGiven===1?'':'s'} marked Not Relevant with no reason tag — worth tagging why going forward (price / outside area / wrong number / etc.) so this stops being the biggest bar by default.</div>` : ''}
+      </div>
+    </div>
+    <div class="card stat-card" style="--stat-accent:var(--accent);margin-top:12px">
+      <div class="stat-label">Speed to Lead</div>
+      ${perf.speedToLead.sampleSize ? `
+        <div class="stat-value" style="font-size:20px">${perf.speedToLead.medianHours<1 ? Math.round(perf.speedToLead.medianHours*60)+' min' : perf.speedToLead.medianHours+' hrs'}</div>
+        <div class="stat-sub">median time to first reply · avg ${perf.speedToLead.avgHours<1 ? Math.round(perf.speedToLead.avgHours*60)+' min' : perf.speedToLead.avgHours+' hrs'} · based on ${perf.speedToLead.sampleSize} lead${perf.speedToLead.sampleSize===1?'':'s'} with a logged reply</div>
+      ` : `
+        <div class="stat-value" style="font-size:16px;color:var(--ink-soft)">Not enough data yet</div>
+        <div class="stat-sub">only leads created and replied to through this app have a timestamped message history — bulk-imported leads don't carry this, so it fills in naturally as new leads come in</div>
+      `}
     </div>
 
     ${perfBarSection('Revenue & profit by division', divisionBuckets, 'var(--primary)', 'var(--good)')}
