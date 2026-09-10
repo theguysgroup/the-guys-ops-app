@@ -3956,7 +3956,7 @@ function renderBusinessPerformance(profile, data){
       <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Quote → Job Conversion</div><div class="stat-value" style="font-size:20px">${perf.quoteConversionRate===null?'—':perf.quoteConversionRate+'%'}</div><div class="stat-sub">${perf.quotesApproved} approved / ${perf.quotesRejected} rejected</div></div>
     </div>
 
-    ${perfBarSection('Revenue &amp; profit by division', divisionBuckets, 'var(--primary)', 'var(--good)')}
+    ${perfBarSection('Revenue & profit by division', divisionBuckets, 'var(--primary)', 'var(--good)')}
     ${subDivBuckets.length ? perfBarSection('Split vs Duct · Facebook vs Instagram', subDivBuckets, 'var(--primary-teal)', 'var(--accent)') + `<div class="hint" style="margin-top:-6px;margin-bottom:6px">Only jobs whose lead has a known type/placement — a subset of the division numbers above, not a replacement.</div>` : ''}
 
     <div class="section-title">Marketing channel performance</div>

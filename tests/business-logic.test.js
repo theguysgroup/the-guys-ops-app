@@ -182,9 +182,34 @@ function testComputeBusinessPerformance(sb){
   if (channelRevenueSum > perf.totalRevenue + 0.01) { fail++; console.error(`FAIL: computeBusinessPerformance additive invariant — channel revenue sum (${channelRevenueSum}) exceeds totalRevenue (${perf.totalRevenue})`); } else pass++;
 }
 
+function testComputeProfitByWeekInRange(sb){
+  // computeProfitByWeekInRange goes through computeWeek(), which (unlike computeMonth/
+  // computeBusinessPerformance above) also touches data.equipmentSpend — this fixture caught a real
+  // gap when the Business Performance page was first verified live: computeWeek() threw on
+  // `data.equipmentSpend.filter` when a fixture forgot the field. Every production data object always
+  // has it (loadFromSupabase defaults it to []), so this is fixture hygiene, not a real-world case —
+  // but that's exactly why it's worth a dedicated test: the next fixture that forgets it should fail
+  // here, not get discovered by hand in the browser again.
+  sb.STATE.data.equipmentSpend = [];
+  sb.STATE.data.employees = [{ name:'Guy', roles:['Technician'] }, { name:'Dolev', roles:['Technician'] }];
+  sb.STATE.data.jobs = [
+    { id:'1', customerName:'Lynette Trotter', jobType:'Aircon', date:'2026-09-05', amount:1000, commissionPercent:20, partsCost:50, paymentStatus:'Paid', technician:'Guy' },
+    { id:'2', customerName:'Split Sam', jobType:'Aircon', date:'2026-09-06', amount:500, commissionPercent:20, partsCost:0, paymentStatus:'Unpaid', technician:'Guy' },
+    { id:'4', customerName:'No Tag Nick', jobType:'Aircon', date:'2026-09-08', amount:200, commissionPercent:20, partsCost:0, paymentStatus:'Paid', technician:'Dolev' },
+    { id:'5', customerName:'Unmatched Customer', jobType:'Chimney', date:'2026-09-09', amount:150, commissionPercent:30, partsCost:0, paymentStatus:'Paid', technician:'Dolev' },
+  ];
+  const weeks = sb.computeProfitByWeekInRange(sb.STATE.data, '2026-09-01', '2026-09-10');
+  // Week of 31 Aug–6 Sep: job1 (profit 1000-200-50=750) + job2 (profit 500-100-0=400) = 1150.
+  // Week of 7 Sep–13 Sep: job4 (profit 200-40-0=160) + job5 (profit 150-45-0=105) = 265.
+  assertEqual(weeks.length, 2, 'computeProfitByWeekInRange: buckets the range into the 2 weeks it spans');
+  assertEqual(weeks[0].revenue, 1150, 'computeProfitByWeekInRange: first week profit (property is named "revenue" to match renderSparkline\'s expected shape)');
+  assertEqual(weeks[1].revenue, 265, 'computeProfitByWeekInRange: second week profit');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
+testComputeProfitByWeekInRange(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
