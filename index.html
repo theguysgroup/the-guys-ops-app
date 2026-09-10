@@ -3738,7 +3738,26 @@ function addToPerfBucket(bucket, job){
   bucket.profit += revenue - commission - parts;
 }
 function finalizePerfBucket(b){
-  return { count:b.count, revenue:round2(b.revenue), commission:round2(b.commission), parts:round2(b.parts), profit:round2(b.profit), avgDeal: b.count?round2(b.revenue/b.count):0, avgProfit: b.count?round2(b.profit/b.count):0 };
+  return { count:b.count, revenue:round2(b.revenue), commission:round2(b.commission), parts:round2(b.parts), profit:round2(b.profit), avgDeal: b.count?round2(b.revenue/b.count):0, avgProfit: b.count?round2(b.profit/b.count):0, margin: b.revenue?Math.round((b.profit/b.revenue)*100):null };
+}
+// Same week-bucketing as computeRevenueByWeekInRange, but summing profit (amount − commission − parts)
+// instead of raw amount — reuses the {label, revenue} shape renderSparkline already expects (the "revenue"
+// key just holds profit here) so the trend chart needs no changes to that shared renderer.
+function computeProfitByWeekInRange(data, startDateStr, endDateStr, technicianFilter){
+  const keys = []; const seen = new Set();
+  let d = parseLocalDate(startDateStr);
+  const endKey = weekOf(endDateStr).key;
+  for (let guard=0; guard<60; guard++) {
+    const wk = weekOf(fmtLocal(d)).key;
+    if (!seen.has(wk)) { seen.add(wk); keys.push(wk); }
+    if (wk===endKey) break;
+    d.setDate(d.getDate()+7);
+  }
+  return keys.map(k => {
+    const jobs = computeWeek(data, k, technicianFilter).jobs;
+    const profit = jobs.reduce((s,j) => s + (Number(j.amount)||0) - jobCommissionAmount(j) - (Number(j.partsCost)||0), 0);
+    return { label: weekOf(k).label, revenue: round2(profit) };
+  });
 }
 // Profit here = amount (pre-GST, matching every other "revenue" figure in the app) − technician
 // commission − parts cost. Deliberately does NOT allocate equipment spend or marketing spend down to
@@ -3806,11 +3825,29 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   const totalDecided = totalBooked+totalNotRelevant;
   const totalReviewTaken = jobs.filter(j=>j.reviewTaken).length;
 
+  // Cash-flow health: how long money actually takes to land once a job is done, not just whether it's
+  // marked Paid — and how much is currently sitting unpaid from jobs done in this same window.
+  const paidWithDates = jobs.filter(j => j.paymentStatus==='Paid' && j.datePaid);
+  const avgDaysToPayment = paidWithDates.length ? Math.round(paidWithDates.reduce((s,j)=>s+daysBetween(parseLocalDate(j.date), parseLocalDate(j.datePaid)), 0) / paidWithDates.length) : null;
+  const outstanding = round2(jobs.filter(j=>j.paymentStatus!=='Paid').reduce((s,j)=>s+(Number(j.amount)||0), 0));
+
+  // Quote → job pipeline: of the quotes decided this period, how many actually turned into a sale
+  // (Approved) vs. fell through (Rejected) — "No Response"/still-open quotes aren't a decision yet,
+  // same in/out logic as the lead close rate above.
+  const quotesInRange = (data.quotes||[]).filter(q => q.date>=startDateStr && q.date<=endDateStr);
+  const quotesApproved = quotesInRange.filter(q=>q.status==='Approved').length;
+  const quotesRejected = quotesInRange.filter(q=>q.status==='Rejected').length;
+  const quoteDecided = quotesApproved + quotesRejected;
+
   return {
     startDateStr, endDateStr, jobsCount: jobs.length, byDivision, bySubDivision, byChannel, techEntries,
     totalRevenue, totalProfit, totalLeads: contacts.length,
+    profitMargin: totalRevenue ? Math.round((totalProfit/totalRevenue)*100) : null,
     overallCloseRate: totalDecided ? Math.round((totalBooked/totalDecided)*100) : null,
     reviewRate: jobs.length ? Math.round((totalReviewTaken/jobs.length)*100) : null,
+    avgDaysToPayment, outstanding,
+    quoteConversionRate: quoteDecided ? Math.round((quotesApproved/quoteDecided)*100) : null,
+    quotesApproved, quotesRejected,
   };
 }
 function pctDelta(curr, prev){
@@ -3823,8 +3860,57 @@ function deltaBadge(curr, prev){
   const up = pct>0;
   return ` <span style="font-size:11.5px;font-weight:600;color:${up?'var(--good)':'var(--bad)'}">${up?'▲':'▼'} ${Math.abs(pct)}%</span>`;
 }
-function perfRow(label, b, extraCols){
-  return `<tr><td>${esc(label)}</td><td class="num">${b.count}</td><td class="num">${fmtMoney(b.avgDeal)}</td><td class="num">${fmtMoney(b.revenue)}</td><td class="num">${fmtMoney(b.commission)}</td><td class="num">${fmtMoney(b.parts)}</td><td class="num" style="font-weight:600">${fmtMoney(b.profit)}</td><td class="num">${fmtMoney(b.avgProfit)}</td>${extraCols||''}</tr>`;
+// Rough, deliberately simple health thresholds for the colored pills below — not a claim of industry
+// benchmarks, just enough to make "good/meh/bad" jump out at a glance instead of making Ofek do the
+// division-by-division comparison in his head every time he opens the page.
+function roasTone(roas){ if (roas===null) return 'neutral'; return roas>=3 ? 'good' : (roas>=1.5 ? 'warn' : 'bad'); }
+function closeRateTone(rate){ if (rate===null) return 'neutral'; return rate>=50 ? 'good' : (rate>=25 ? 'warn' : 'bad'); }
+function marginTone(margin){ if (margin===null) return 'neutral'; return margin>=40 ? 'good' : (margin>=20 ? 'warn' : 'bad'); }
+function perfDetailRow(label, b){
+  return `<tr><td>${esc(label)}</td><td class="num">${b.count}</td><td class="num">${fmtMoney(b.avgDeal)}</td><td class="num">${b.margin===null?'—':b.margin+'%'}</td><td class="num" style="font-weight:600">${fmtMoney(b.profit)}</td></tr>`;
+}
+function perfBarSection(title, buckets, colorRevenue, colorProfit){
+  const revBars = renderBarGroup(buckets.map(([label,b]) => ({label, value:b.revenue, color:colorRevenue})));
+  const profitBars = renderBarGroup(buckets.map(([label,b]) => ({label, value:b.profit, color:colorProfit})));
+  const rows = buckets.map(([label,b]) => perfDetailRow(label, b)).join('');
+  return `
+    <div class="section-title">${esc(title)}</div>
+    <div class="grid-2">
+      <div class="card stat-card" style="--stat-accent:${colorRevenue}"><div class="stat-label">Revenue</div>${revBars}</div>
+      <div class="card stat-card" style="--stat-accent:${colorProfit}"><div class="stat-label">Profit</div>${profitBars}</div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th></th><th>Jobs</th><th>Avg Deal</th><th>Margin</th><th>Profit</th></tr></thead><tbody>${rows}</tbody></table></div>
+  `;
+}
+function channelCard(name, ch){
+  const roasBadge = ch.spend===null ? pill('neutral','not synced') : (ch.roas===null ? pill('neutral','no revenue yet') : pill(roasTone(ch.roas), `${ch.roas}× ROAS`));
+  return `<div class="card stat-card" style="--stat-accent:${LEAD_SOURCE_COLOR[name]||'var(--ink-faint)'}">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div class="stat-label">${esc(name)}</div>
+      ${roasBadge}
+    </div>
+    <div class="stat-value" style="font-size:26px">${ch.leads}<span style="font-size:12.5px;font-weight:500;color:var(--ink-soft)"> leads</span></div>
+    <div style="margin-top:4px">${pill(closeRateTone(ch.closeRate), (ch.closeRate===null?'—':ch.closeRate+'%')+' close rate')}</div>
+    <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line-soft)">
+      <div class="kv"><span>Revenue</span><span class="v">${fmtMoney(ch.revenue)}</span></div>
+      <div class="kv"><span>Ad Spend</span><span class="v">${ch.spend===null?'<span class="hint">not synced</span>':fmtMoney(ch.spend)}</span></div>
+      ${ch.spend!==null ? `<div class="kv"><span>Cost / Lead</span><span class="v">${ch.costPerLead===null?'—':fmtMoney(ch.costPerLead)}</span></div><div class="kv"><span>Cost / Booked Job</span><span class="v">${ch.costPerBookedJob===null?'—':fmtMoney(ch.costPerBookedJob)}</span></div>` : ''}
+    </div>
+  </div>`;
+}
+function techLeaderboard(entries){
+  if (!entries.length) return emptyState('No jobs this period');
+  const max = Math.max(...entries.map(t=>Math.max(t.profit,0)), 0.0001);
+  return entries.map(t => {
+    const pct = Math.max(2, Math.round((Math.max(t.profit,0)/max)*100));
+    return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-soft)">
+      <div style="width:100px;flex:none">${techTag(t.name)}</div>
+      <div style="flex:1;min-width:60px"><div style="height:18px;border-radius:5px;background:var(--surface-3);overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--good);border-radius:5px;transition:width .2s"></div></div></div>
+      <div class="mono" style="width:88px;text-align:end;font-weight:600;flex:none">${fmtMoney(t.profit)}</div>
+      <div style="width:56px;text-align:end;color:var(--ink-soft);font-size:11.5px;flex:none">${t.count} jobs</div>
+      <div style="width:64px;text-align:end;flex:none">${t.reviewRate===null?'<span class="hint">—</span>':pill(t.reviewRate>=70?'good':(t.reviewRate>=40?'warn':'bad'), t.reviewRate+'%')}</div>
+    </div>`;
+  }).join('');
 }
 function renderBusinessPerformance(profile, data){
   const range = resolveOverviewRange(UI.bizPerf);
@@ -3832,6 +3918,7 @@ function renderBusinessPerformance(profile, data){
   const prevEnd = fmtLocal(new Date(parseLocalDate(range.start).getTime() - 86400000));
   const prevStartDate = parseLocalDate(range.start); prevStartDate.setDate(prevStartDate.getDate()-dateSpanDays(range.start, range.end));
   const prevPerf = computeBusinessPerformance(data, fmtLocal(prevStartDate), prevEnd);
+  const profitTrend = computeProfitByWeekInRange(data, range.start, range.end);
 
   const rangeChips = [['week','This week'],['month','This month'],['7d','Last 7 days'],['30d','Last 30 days'],['custom','Custom']]
     .map(([key,label]) => `<button class="week-chip ${UI.bizPerf.range===key?'active':''}" onclick="UI.bizPerf.range='${key}';render()">${label}</button>`).join('');
@@ -3841,22 +3928,12 @@ function renderBusinessPerformance(profile, data){
     <input type="date" style="width:auto" value="${UI.bizPerf.customTo||''}" onchange="UI.bizPerf.customTo=this.value;render()">
   ` : '';
 
-  const divisionRows = LEAD_DIVISIONS.map(d => perfRow(d, perf.byDivision[d])).join('') + (perf.byDivision.Other.count ? perfRow('Other', perf.byDivision.Other) : '');
-  const subDivBuckets = [...AIRCON_TYPE_TAGS, ...META_PLATFORM_TAGS].filter(t => perf.bySubDivision[t].count>0);
-  const subDivRows = subDivBuckets.map(t => perfRow(t, perf.bySubDivision[t])).join('');
+  const divisionBuckets = LEAD_DIVISIONS.map(d => [d, perf.byDivision[d]]).concat(perf.byDivision.Other.count ? [['Other', perf.byDivision.Other]] : []);
+  const subDivBuckets = [...AIRCON_TYPE_TAGS, ...META_PLATFORM_TAGS].filter(t => perf.bySubDivision[t].count>0).map(t => [t, perf.bySubDivision[t]]);
 
-  const channelRows = LEAD_SOURCES.map(s => {
-    const ch = perf.byChannel[s];
-    const closeRateCell = ch.closeRate===null ? '<span class="hint">—</span>' : `${ch.closeRate}%`;
-    const spendCell = ch.spend===null ? '<span class="hint">not synced yet</span>' : fmtMoney(ch.spend);
-    const cplCell = ch.costPerLead===null ? '<span class="hint">—</span>' : fmtMoney(ch.costPerLead);
-    const cpbjCell = ch.costPerBookedJob===null ? '<span class="hint">—</span>' : fmtMoney(ch.costPerBookedJob);
-    const roasCell = ch.roas===null ? '<span class="hint">—</span>' : `${ch.roas}×`;
-    return `<tr><td>${esc(s)}</td><td class="num">${ch.leads}</td><td class="num">${ch.booked}</td><td class="num">${closeRateCell}</td><td class="num">${fmtMoney(ch.revenue)}</td><td class="num">${spendCell}</td><td class="num">${cplCell}</td><td class="num">${cpbjCell}</td><td class="num">${roasCell}</td></tr>`;
-  }).join('');
+  const channelCards = LEAD_SOURCES.map(s => channelCard(s, perf.byChannel[s])).join('');
   const anySpendSynced = LEAD_SOURCES.some(s => perf.byChannel[s].spend!==null);
-
-  const techRows = perf.techEntries.length ? perf.techEntries.map(t => `<tr><td>${techTag(t.name)}</td><td class="num">${t.count}</td><td class="num">${fmtMoney(t.revenue)}</td><td class="num">${fmtMoney(t.commission)}</td><td class="num">${fmtMoney(t.parts)}</td><td class="num" style="font-weight:600">${fmtMoney(t.profit)}</td><td class="num">${fmtMoney(t.avgProfit)}</td><td class="num">${t.reviewRate===null?'<span class="hint">—</span>':t.reviewRate+'%'}</td></tr>`).join('') : `<tr><td colspan="8">${emptyState('No jobs this period')}</td></tr>`;
+  const avgDealOverall = perf.jobsCount ? round2(perf.totalRevenue/perf.jobsCount) : 0;
 
   return `
     <div class="page-head">
@@ -3865,25 +3942,29 @@ function renderBusinessPerformance(profile, data){
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">${rangeChips}${customInputs}</div>
 
     <div class="grid-4">
-      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Profit</div><div class="stat-value">${fmtMoney(perf.totalProfit)}${deltaBadge(perf.totalProfit, prevPerf.totalProfit)}</div><div class="stat-sub">revenue − commission − parts, before marketing spend</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--primary-teal)"><div class="stat-label">Revenue</div><div class="stat-value">${fmtMoney(perf.totalRevenue)}${deltaBadge(perf.totalRevenue, prevPerf.totalRevenue)}</div><div class="stat-sub">${perf.jobsCount} jobs</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Profit</div><div class="stat-value">${fmtMoney(perf.totalProfit)}${deltaBadge(perf.totalProfit, prevPerf.totalProfit)}</div><div class="stat-sub">${perf.profitMargin===null?'—':perf.profitMargin+'% margin'} · before marketing spend</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--primary-teal)"><div class="stat-label">Revenue</div><div class="stat-value">${fmtMoney(perf.totalRevenue)}${deltaBadge(perf.totalRevenue, prevPerf.totalRevenue)}</div><div class="stat-sub">${perf.jobsCount} jobs · avg ${fmtMoney(avgDealOverall)}</div></div>
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Leads</div><div class="stat-value">${perf.totalLeads}${deltaBadge(perf.totalLeads, prevPerf.totalLeads)}</div><div class="stat-sub">${perf.overallCloseRate===null?'no closed leads yet':perf.overallCloseRate+'% close rate'}</div></div>
       <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Review Taken Rate</div><div class="stat-value">${perf.reviewRate===null?'—':perf.reviewRate+'%'}</div><div class="stat-sub">of jobs this period</div></div>
     </div>
+    ${profitTrend.length>1 ? `<div class="card stat-card" style="--stat-accent:var(--good);margin-top:12px"><div class="stat-label">Profit trend</div>${renderSparkline(profitTrend,{color:'var(--good)'})}</div>` : ''}
 
-    <div class="section-title">Deal size &amp; profit by division</div>
-    <div class="table-wrap"><table><thead><tr><th>Division</th><th>Jobs</th><th>Avg Deal</th><th>Revenue</th><th>Commission</th><th>Parts</th><th>Profit</th><th>Avg Profit/Job</th></tr></thead><tbody>${divisionRows}</tbody></table></div>
+    <div class="section-title">Cash flow &amp; pipeline health</div>
+    <div class="grid-3">
+      <div class="card stat-card" style="--stat-accent:${perf.outstanding>0?'var(--warn)':'var(--good)'}"><div class="stat-label">Outstanding (unpaid)</div><div class="stat-value" style="font-size:20px">${fmtMoney(perf.outstanding)}</div><div class="stat-sub">from jobs done this period</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Avg Days to Payment</div><div class="stat-value" style="font-size:20px">${perf.avgDaysToPayment===null?'—':perf.avgDaysToPayment+' days'}</div><div class="stat-sub">job date → paid date</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Quote → Job Conversion</div><div class="stat-value" style="font-size:20px">${perf.quoteConversionRate===null?'—':perf.quoteConversionRate+'%'}</div><div class="stat-sub">${perf.quotesApproved} approved / ${perf.quotesRejected} rejected</div></div>
+    </div>
 
-    ${subDivRows ? `<div class="section-title">Split vs Duct · Facebook vs Instagram</div>
-    <div class="table-wrap"><table><thead><tr><th>Type</th><th>Jobs</th><th>Avg Deal</th><th>Revenue</th><th>Commission</th><th>Parts</th><th>Profit</th><th>Avg Profit/Job</th></tr></thead><tbody>${subDivRows}</tbody></table></div>
-    <div class="hint" style="margin-top:6px">Only jobs whose lead has a known type/placement — a subset of the division rows above, not a replacement. The rest of each division's jobs still count above, just unsplit.</div>` : ''}
+    ${perfBarSection('Revenue &amp; profit by division', divisionBuckets, 'var(--primary)', 'var(--good)')}
+    ${subDivBuckets.length ? perfBarSection('Split vs Duct · Facebook vs Instagram', subDivBuckets, 'var(--primary-teal)', 'var(--accent)') + `<div class="hint" style="margin-top:-6px;margin-bottom:6px">Only jobs whose lead has a known type/placement — a subset of the division numbers above, not a replacement.</div>` : ''}
 
     <div class="section-title">Marketing channel performance</div>
-    <div class="table-wrap"><table><thead><tr><th>Channel</th><th>Leads</th><th>Booked</th><th>Close Rate</th><th>Revenue</th><th>Ad Spend</th><th>Cost / Lead</th><th>Cost / Booked Job</th><th>ROAS</th></tr></thead><tbody>${channelRows}</tbody></table></div>
-    <div class="hint" style="margin-top:6px">${anySpendSynced ? 'Ad Spend comes from the daily Google Ads / Meta Ads sync — Google Maps, Organic and Phone Call have no ad spend by definition.' : 'Ad Spend / Cost per Lead / ROAS need the ad-spend sync (ingest-ad-spend) to be deployed — everything else on this page already works without it.'}</div>
+    <div class="grid-3">${channelCards}</div>
+    <div class="hint" style="margin-top:6px">${anySpendSynced ? 'Ad Spend comes from the daily Google Ads / Meta Ads sync — Google Maps, Organic and Phone Call have no ad spend by definition.' : 'Ad Spend / Cost per Lead / ROAS need the ad-spend sync to be deployed — everything else on this page already works without it.'}</div>
 
     <div class="section-title">Technician profitability</div>
-    <div class="table-wrap"><table><thead><tr><th>Technician</th><th>Jobs</th><th>Revenue</th><th>Commission</th><th>Parts</th><th>Profit</th><th>Avg Profit/Job</th><th>Review Rate</th></tr></thead><tbody>${techRows}</tbody></table></div>
+    <div class="card">${techLeaderboard(perf.techEntries)}</div>
   `;
 }
 function bulkMarkPaid(tech, weekKey){
