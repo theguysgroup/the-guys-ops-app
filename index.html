@@ -1645,8 +1645,13 @@ function onStatusChange(kind, id, value){
     const j = STATE.data.jobs.find(x=>x.id===id);
     const old = j.paymentMethod;
     j.paymentMethod = value;
-    db.jobs.update(j.id, { paymentMethod: j.paymentMethod });
-    if ((old||'')!==(value||'')) logJobActivity(j, actor, `Payment method changed from "${old||'—'}" to "${value||'—'}"`);
+    // Cash jobs are GST-exempt ~99% of the time (Ofek's rule) — default the GST toggle off the moment a
+    // job switches to Cash, same as the Jobs/Closings forms. Only fires on an actual switch INTO Cash, so
+    // it never silently rewrites a job that was already Cash with GST intentionally left on.
+    const patch = { paymentMethod: j.paymentMethod };
+    if (value==='Cash' && old!=='Cash' && j.includesGST) { j.includesGST = false; patch.includesGST = false; }
+    db.jobs.update(j.id, patch);
+    if ((old||'')!==(value||'')) logJobActivity(j, actor, `Payment method changed from "${old||'—'}" to "${value||'—'}"${patch.includesGST===false?' · GST defaulted off for Cash':''}`);
   } else if (kind==='jobPaidTech') {
     const j = STATE.data.jobs.find(x=>x.id===id);
     const old = j.paidToTechnician;
@@ -3523,7 +3528,7 @@ function openJobModal(jobId){
         <div class="grid-3">
           <div class="field"><label>Amount (pre-GST)</label><input type="number" id="jm-amount" value="${job?.amount||0}"></div>
           <div class="field"><label>Payment Status</label><select id="jm-status" onchange="document.getElementById('jm-cash-row').style.display=(document.getElementById('jm-method').value==='Cash')?'flex':'none'"><option value="Unpaid" ${job?.paymentStatus!=='Paid'?'selected':''}>Unpaid</option><option value="Paid" ${job?.paymentStatus==='Paid'?'selected':''}>Paid</option></select></div>
-          <div class="field"><label>Payment Method</label><select id="jm-method" onchange="document.getElementById('jm-cash-row').style.display=(this.value==='Cash')?'flex':'none'"><option value="">—</option><option value="Cash" ${job?.paymentMethod==='Cash'?'selected':''}>Cash</option><option value="Bank Transfer" ${job?.paymentMethod==='Bank Transfer'?'selected':''}>Bank Transfer</option><option value="Credit Card" ${job?.paymentMethod==='Credit Card'?'selected':''}>Credit Card</option></select></div>
+          <div class="field"><label>Payment Method</label><select id="jm-method" onchange="document.getElementById('jm-cash-row').style.display=(this.value==='Cash')?'flex':'none'; if(this.value==='Cash') document.getElementById('jm-nogst').checked=true;"><option value="">—</option><option value="Cash" ${job?.paymentMethod==='Cash'?'selected':''}>Cash</option><option value="Bank Transfer" ${job?.paymentMethod==='Bank Transfer'?'selected':''}>Bank Transfer</option><option value="Credit Card" ${job?.paymentMethod==='Credit Card'?'selected':''}>Credit Card</option></select></div>
         </div>
         <div class="grid-2" style="margin-top:11px">
           <label class="checkline" style="align-self:center"><input type="checkbox" id="jm-nogst" ${job && !job.includesGST ? 'checked' : ''}> No GST <span class="hint" style="font-weight:400">(off = GST added on top, ${STATE.data.settings.gstRatePercent}%)</span></label>
@@ -4443,7 +4448,7 @@ function renderClosings(profile, data){
         <div class="field"><label>Amount (pre-GST)</label><input type="number" id="cf-amount" value="0"></div>
         <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="cf-nogst"> No GST</label><span class="hint">Off = GST added on top of Amount (${STATE.data.settings.gstRatePercent}%)</span></div>
         <div class="field"><label>Payment Status</label><select id="cf-status">${CLOSING_PAYMENT_STATUSES.map(s=>`<option value="${s}">${s}</option>`).join('')}</select></div>
-        <div class="field"><label>Method</label><select id="cf-method">${CLOSING_PAYMENT_METHODS.map(m=>`<option value="${m}">${m||'—'}</option>`).join('')}</select></div>
+        <div class="field"><label>Method</label><select id="cf-method" onchange="if(this.value==='Cash') document.getElementById('cf-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.map(m=>`<option value="${m}">${m||'—'}</option>`).join('')}</select></div>
         <div class="field"><label>Parts Cost</label><input type="number" id="cf-partscost" value="0"></div>
         <div class="field"><label>Parts Paid By</label><select id="cf-partsby"><option value="">—</option>${allTechs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}<option value="Business">Business</option></select></div>
       </div>
