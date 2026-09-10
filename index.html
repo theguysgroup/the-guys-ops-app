@@ -558,8 +558,8 @@ function computeReminders(data, now){
 
 /* ── permissions / types (ported from src/lib/types.ts + permissions.ts) ── */
 const ALL_SECTIONS = ['crm','crmOverview','overview','jobs','finance','outstanding','reminders','openItems','tasks','quotes','reference','closings','settings'];
-const SECTION_ORDER = ['crm','crmOverview','overview','closings','jobs','finance','outstanding','reminders','openItems','tasks','quotes','reference'];
-const SECTION_LABEL = { crm:'CRM', crmOverview:'Leads & Marketing', overview:'Overview', jobs:'Jobs & Commissions', finance:'Financial Summary', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', quotes:'Quotes', reference:'Equipment & Suppliers', closings:'Closings', settings:'Permissions & Settings' };
+const SECTION_ORDER = ['crm','crmOverview','overview','closings','jobs','finance','bizPerformance','outstanding','reminders','openItems','tasks','quotes','reference'];
+const SECTION_LABEL = { crm:'CRM', crmOverview:'Leads & Marketing', overview:'Overview', jobs:'Jobs & Commissions', finance:'Financial Summary', bizPerformance:'Business Performance', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', quotes:'Quotes', reference:'Equipment & Suppliers', closings:'Closings', settings:'Permissions & Settings' };
 const ROLE_LABEL = { owner:'Owner', manager:'Manager', technician:'Technician', va:'Virtual Assistant' };
 function roleLabel(role){ return ROLE_LABEL[role] || role; }
 function defaultPermissionsFor(role){
@@ -722,7 +722,7 @@ async function loadFromSupabase(){
     { data: suppliers }, { data: tasks }, { data: quotes }, { data: closings },
     { data: manualReminders }, { data: tagCatalog }, { data: dismissedReminders },
     { data: cashStatusRow }, { data: settingsRow }, { data: employees }, { data: commissionRateRows },
-    { data: activityRows },
+    { data: activityRows }, { data: adSpendRows },
   ] = await Promise.all([
     sb.from('contacts').select('*'),
     sb.from('jobs').select('*'),
@@ -740,6 +740,9 @@ async function loadFromSupabase(){
     sb.from('employees').select('*'),
     sb.from('commission_rates').select('*'),
     sb.from('activity_log').select('*'),
+    // Fed by the ingest-ad-spend Edge Function (Supermetrics -> Google Ads + Meta Ads daily spend).
+    // Same (data||[]) defensive pattern as every other table below covers the table not existing yet.
+    sb.from('ad_spend').select('*'),
   ]);
 
   // Group the shared activity_log table back into each record's own .activityLog[],
@@ -833,6 +836,7 @@ async function loadFromSupabase(){
       activityLog: logsFor('employee', e.id),
     })),
     commissionRates: {},
+    adSpend: (adSpendRows||[]).map(a => ({ date:a.date, channel:a.channel, spend:a.spend||0, leadsReported:a.leads_reported })),
   };
   (commissionRateRows||[]).forEach(r => { data.commissionRates[r.technician_name] = r.rates || {}; });
 
@@ -1393,7 +1397,7 @@ function setupRealtimeSubscriptions(){
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
 }
-let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all'}, jobsFilters:{}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
+let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all'}, jobsFilters:{}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let toastMsg = null, toastTimer = null;
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
 let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task modal
@@ -1405,7 +1409,7 @@ let MODAL_QUOTE_ID = null; // id of the quote currently open in the quote modal 
 let CLOSING_FILE = null; // transient invoice-photo state for the "Post a closing" form
 
 function getCurrentProfile(){ return STATE.profiles.find(p => p.id===STATE.currentProfileId) || null; }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all'}, jobsFilters:{}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all'}, jobsFilters:{}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
   toastTimer = setTimeout(()=>{
@@ -1856,7 +1860,7 @@ async function doChangePassword(){
 const NAV = [
   { group:'Sales', items:[ {id:'crm', label:'CRM', icon:'◈'}, {id:'crmOverview', label:'Leads & Marketing', icon:'📊'} ] },
   { group:'Overview', items:[ {id:'overview', label:'Overview', icon:'◆'}, {id:'reminders', label:'Reminders', icon:'●'}, {id:'openItems', label:'Open Tasks', icon:'▣'} ] },
-  { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'finance', label:'Financial Summary', icon:'▦'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
+  { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'finance', label:'Financial Summary', icon:'▦'}, {id:'bizPerformance', label:'Business Performance', icon:'📈'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
   { group:'System', items:[ {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
 ];
 function goTab(id){ UI.tab = id; UI.mobileNavOpen = false; render(); }
@@ -3724,6 +3728,164 @@ function renderFinanceMonthly(data, monthKey, months, allTechs){
     <div class="grid-3">${techCards}</div>
   `;
 }
+
+/* ── business performance (decision-making metrics — separate from the day-to-day Overview/Finance
+   pages above, which stay unchanged) ──────────────────────────────────────────────────────────── */
+function blankPerfBucket(){ return { count:0, revenue:0, commission:0, parts:0, profit:0 }; }
+function addToPerfBucket(bucket, job){
+  const commission = jobCommissionAmount(job), parts = Number(job.partsCost)||0, revenue = Number(job.amount)||0;
+  bucket.count++; bucket.revenue += revenue; bucket.commission += commission; bucket.parts += parts;
+  bucket.profit += revenue - commission - parts;
+}
+function finalizePerfBucket(b){
+  return { count:b.count, revenue:round2(b.revenue), commission:round2(b.commission), parts:round2(b.parts), profit:round2(b.profit), avgDeal: b.count?round2(b.revenue/b.count):0, avgProfit: b.count?round2(b.profit/b.count):0 };
+}
+// Profit here = amount (pre-GST, matching every other "revenue" figure in the app) − technician
+// commission − parts cost. Deliberately does NOT allocate equipment spend or marketing spend down to
+// a division/technician — equipment isn't tracked per-job, and a division draws leads from multiple
+// channels, so neither can be split cleanly. Marketing cost/ROAS gets its own honest home below,
+// against the channel it actually applies to (byChannel), rather than a fudged per-division number.
+function computeBusinessPerformance(data, startDateStr, endDateStr){
+  const jobs = data.jobs.filter(j => j.date>=startDateStr && j.date<=endDateStr);
+  const contacts = (data.contacts||[]).filter(c => c.createdAt>=startDateStr && c.createdAt<=endDateStr);
+
+  const byDivision = {}; JOB_TYPES.forEach(t=>byDivision[t]=blankPerfBucket());
+  // Same additive pattern as the CRM Overview / Jobs-revenue breakdowns: sub-division numbers are a
+  // subset of the parent division's, never a replacement, and only cover jobs whose linked lead
+  // carries the tag (see jobAttributionTags) — the rest still count once toward byDivision above.
+  const bySubDivision = {}; [...AIRCON_TYPE_TAGS, ...META_PLATFORM_TAGS].forEach(t=>bySubDivision[t]=blankPerfBucket());
+  const byTech = {};
+  jobs.forEach(j => {
+    if (byDivision[j.jobType]) addToPerfBucket(byDivision[j.jobType], j);
+    const attr = jobAttributionTags(j);
+    if (attr.airconType) addToPerfBucket(bySubDivision[attr.airconType], j);
+    if (attr.metaPlatform) addToPerfBucket(bySubDivision[attr.metaPlatform], j);
+    if (!byTech[j.technician]) byTech[j.technician] = blankPerfBucket();
+    addToPerfBucket(byTech[j.technician], j);
+    byTech[j.technician].reviewCount = (byTech[j.technician].reviewCount||0) + (j.reviewTaken?1:0);
+  });
+
+  // Channel performance: leads + close rate from contacts created in this period; revenue from jobs
+  // in this period whose customer name matches a lead with that source (same lookup as
+  // customerNameCell/jobAttributionTags); spend from ad_spend when the ingest-ad-spend sync has data
+  // for the channel/period — left as `null` (not 0) when it doesn't, so the UI can say "not available"
+  // instead of implying a real $0 spend.
+  const byChannel = {};
+  LEAD_SOURCES.forEach(s => byChannel[s] = { leads:0, booked:0, notRelevant:0, revenue:0, jobCount:0 });
+  contacts.forEach(c => {
+    if (!byChannel[c.source]) return;
+    byChannel[c.source].leads++;
+    if (c.status==='Booked') byChannel[c.source].booked++;
+    if (c.status==='Not Relevant') byChannel[c.source].notRelevant++;
+  });
+  jobs.forEach(j => {
+    const c = findContactByName(j.customerName);
+    if (c && byChannel[c.source]) { byChannel[c.source].revenue += Number(j.amount)||0; byChannel[c.source].jobCount++; }
+  });
+  const spendByChannel = {};
+  (data.adSpend||[]).forEach(a => { if (a.date>=startDateStr && a.date<=endDateStr) spendByChannel[a.channel] = round2((spendByChannel[a.channel]||0) + (Number(a.spend)||0)); });
+  Object.keys(byChannel).forEach(s => {
+    const ch = byChannel[s];
+    ch.revenue = round2(ch.revenue);
+    const decided = ch.booked + ch.notRelevant;
+    ch.closeRate = decided ? Math.round((ch.booked/decided)*100) : null;
+    ch.spend = spendByChannel[s] !== undefined ? spendByChannel[s] : null;
+    ch.costPerLead = (ch.spend!==null && ch.leads) ? round2(ch.spend/ch.leads) : null;
+    ch.costPerBookedJob = (ch.spend!==null && ch.jobCount) ? round2(ch.spend/ch.jobCount) : null;
+    ch.roas = (ch.spend) ? round2(ch.revenue/ch.spend) : null;
+  });
+
+  Object.keys(byDivision).forEach(k=>byDivision[k]=finalizePerfBucket(byDivision[k]));
+  Object.keys(bySubDivision).forEach(k=>bySubDivision[k]=finalizePerfBucket(bySubDivision[k]));
+  const techEntries = Object.entries(byTech).map(([name,b]) => ({ name, ...finalizePerfBucket(b), reviewRate: b.count ? Math.round(((b.reviewCount||0)/b.count)*100) : null })).sort((a,b)=>b.profit-a.profit);
+
+  const totalRevenue = round2(jobs.reduce((s,j)=>s+(Number(j.amount)||0),0));
+  const totalProfit = round2(Object.values(byDivision).reduce((s,d)=>s+d.profit,0));
+  const totalBooked = contacts.filter(c=>c.status==='Booked').length;
+  const totalNotRelevant = contacts.filter(c=>c.status==='Not Relevant').length;
+  const totalDecided = totalBooked+totalNotRelevant;
+  const totalReviewTaken = jobs.filter(j=>j.reviewTaken).length;
+
+  return {
+    startDateStr, endDateStr, jobsCount: jobs.length, byDivision, bySubDivision, byChannel, techEntries,
+    totalRevenue, totalProfit, totalLeads: contacts.length,
+    overallCloseRate: totalDecided ? Math.round((totalBooked/totalDecided)*100) : null,
+    reviewRate: jobs.length ? Math.round((totalReviewTaken/jobs.length)*100) : null,
+  };
+}
+function pctDelta(curr, prev){
+  if (!prev) return null;
+  return round2(((curr-prev)/Math.abs(prev))*100);
+}
+function deltaBadge(curr, prev){
+  const pct = pctDelta(curr, prev);
+  if (pct===null || Math.abs(pct)<1) return '';
+  const up = pct>0;
+  return ` <span style="font-size:11.5px;font-weight:600;color:${up?'var(--good)':'var(--bad)'}">${up?'▲':'▼'} ${Math.abs(pct)}%</span>`;
+}
+function perfRow(label, b, extraCols){
+  return `<tr><td>${esc(label)}</td><td class="num">${b.count}</td><td class="num">${fmtMoney(b.avgDeal)}</td><td class="num">${fmtMoney(b.revenue)}</td><td class="num">${fmtMoney(b.commission)}</td><td class="num">${fmtMoney(b.parts)}</td><td class="num" style="font-weight:600">${fmtMoney(b.profit)}</td><td class="num">${fmtMoney(b.avgProfit)}</td>${extraCols||''}</tr>`;
+}
+function renderBusinessPerformance(profile, data){
+  const range = resolveOverviewRange(UI.bizPerf);
+  const perf = computeBusinessPerformance(data, range.start, range.end);
+  const prevEnd = fmtLocal(new Date(parseLocalDate(range.start).getTime() - 86400000));
+  const prevStartDate = parseLocalDate(range.start); prevStartDate.setDate(prevStartDate.getDate()-dateSpanDays(range.start, range.end));
+  const prevPerf = computeBusinessPerformance(data, fmtLocal(prevStartDate), prevEnd);
+
+  const rangeChips = [['week','This week'],['month','This month'],['7d','Last 7 days'],['30d','Last 30 days'],['custom','Custom']]
+    .map(([key,label]) => `<button class="week-chip ${UI.bizPerf.range===key?'active':''}" onclick="UI.bizPerf.range='${key}';render()">${label}</button>`).join('');
+  const customInputs = UI.bizPerf.range==='custom' ? `
+    <input type="date" style="width:auto" value="${UI.bizPerf.customFrom||''}" onchange="UI.bizPerf.customFrom=this.value;render()">
+    <span style="color:var(--ink-faint);font-size:12px;align-self:center">to</span>
+    <input type="date" style="width:auto" value="${UI.bizPerf.customTo||''}" onchange="UI.bizPerf.customTo=this.value;render()">
+  ` : '';
+
+  const divisionRows = LEAD_DIVISIONS.map(d => perfRow(d, perf.byDivision[d])).join('') + (perf.byDivision.Other.count ? perfRow('Other', perf.byDivision.Other) : '');
+  const subDivBuckets = [...AIRCON_TYPE_TAGS, ...META_PLATFORM_TAGS].filter(t => perf.bySubDivision[t].count>0);
+  const subDivRows = subDivBuckets.map(t => perfRow(t, perf.bySubDivision[t])).join('');
+
+  const channelRows = LEAD_SOURCES.map(s => {
+    const ch = perf.byChannel[s];
+    const closeRateCell = ch.closeRate===null ? '<span class="hint">—</span>' : `${ch.closeRate}%`;
+    const spendCell = ch.spend===null ? '<span class="hint">not synced yet</span>' : fmtMoney(ch.spend);
+    const cplCell = ch.costPerLead===null ? '<span class="hint">—</span>' : fmtMoney(ch.costPerLead);
+    const cpbjCell = ch.costPerBookedJob===null ? '<span class="hint">—</span>' : fmtMoney(ch.costPerBookedJob);
+    const roasCell = ch.roas===null ? '<span class="hint">—</span>' : `${ch.roas}×`;
+    return `<tr><td>${esc(s)}</td><td class="num">${ch.leads}</td><td class="num">${ch.booked}</td><td class="num">${closeRateCell}</td><td class="num">${fmtMoney(ch.revenue)}</td><td class="num">${spendCell}</td><td class="num">${cplCell}</td><td class="num">${cpbjCell}</td><td class="num">${roasCell}</td></tr>`;
+  }).join('');
+  const anySpendSynced = LEAD_SOURCES.some(s => perf.byChannel[s].spend!==null);
+
+  const techRows = perf.techEntries.length ? perf.techEntries.map(t => `<tr><td>${techTag(t.name)}</td><td class="num">${t.count}</td><td class="num">${fmtMoney(t.revenue)}</td><td class="num">${fmtMoney(t.commission)}</td><td class="num">${fmtMoney(t.parts)}</td><td class="num" style="font-weight:600">${fmtMoney(t.profit)}</td><td class="num">${fmtMoney(t.avgProfit)}</td><td class="num">${t.reviewRate===null?'<span class="hint">—</span>':t.reviewRate+'%'}</td></tr>`).join('') : `<tr><td colspan="8">${emptyState('No jobs this period')}</td></tr>`;
+
+  return `
+    <div class="page-head">
+      <div><h1 class="page-title">Business Performance</h1><div class="page-sub">The numbers that drive decisions — profit, deal size, and marketing effectiveness by division and channel</div></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">${rangeChips}${customInputs}</div>
+
+    <div class="grid-4">
+      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Profit</div><div class="stat-value">${fmtMoney(perf.totalProfit)}${deltaBadge(perf.totalProfit, prevPerf.totalProfit)}</div><div class="stat-sub">revenue − commission − parts, before marketing spend</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--primary-teal)"><div class="stat-label">Revenue</div><div class="stat-value">${fmtMoney(perf.totalRevenue)}${deltaBadge(perf.totalRevenue, prevPerf.totalRevenue)}</div><div class="stat-sub">${perf.jobsCount} jobs</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Leads</div><div class="stat-value">${perf.totalLeads}${deltaBadge(perf.totalLeads, prevPerf.totalLeads)}</div><div class="stat-sub">${perf.overallCloseRate===null?'no closed leads yet':perf.overallCloseRate+'% close rate'}</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Review Taken Rate</div><div class="stat-value">${perf.reviewRate===null?'—':perf.reviewRate+'%'}</div><div class="stat-sub">of jobs this period</div></div>
+    </div>
+
+    <div class="section-title">Deal size &amp; profit by division</div>
+    <div class="table-wrap"><table><thead><tr><th>Division</th><th>Jobs</th><th>Avg Deal</th><th>Revenue</th><th>Commission</th><th>Parts</th><th>Profit</th><th>Avg Profit/Job</th></tr></thead><tbody>${divisionRows}</tbody></table></div>
+
+    ${subDivRows ? `<div class="section-title">Split vs Duct · Facebook vs Instagram</div>
+    <div class="table-wrap"><table><thead><tr><th>Type</th><th>Jobs</th><th>Avg Deal</th><th>Revenue</th><th>Commission</th><th>Parts</th><th>Profit</th><th>Avg Profit/Job</th></tr></thead><tbody>${subDivRows}</tbody></table></div>
+    <div class="hint" style="margin-top:6px">Only jobs whose lead has a known type/placement — a subset of the division rows above, not a replacement. The rest of each division's jobs still count above, just unsplit.</div>` : ''}
+
+    <div class="section-title">Marketing channel performance</div>
+    <div class="table-wrap"><table><thead><tr><th>Channel</th><th>Leads</th><th>Booked</th><th>Close Rate</th><th>Revenue</th><th>Ad Spend</th><th>Cost / Lead</th><th>Cost / Booked Job</th><th>ROAS</th></tr></thead><tbody>${channelRows}</tbody></table></div>
+    <div class="hint" style="margin-top:6px">${anySpendSynced ? 'Ad Spend comes from the daily Google Ads / Meta Ads sync — Google Maps, Organic and Phone Call have no ad spend by definition.' : 'Ad Spend / Cost per Lead / ROAS need the ad-spend sync (ingest-ad-spend) to be deployed — everything else on this page already works without it.'}</div>
+
+    <div class="section-title">Technician profitability</div>
+    <div class="table-wrap"><table><thead><tr><th>Technician</th><th>Jobs</th><th>Revenue</th><th>Commission</th><th>Parts</th><th>Profit</th><th>Avg Profit/Job</th><th>Review Rate</th></tr></thead><tbody>${techRows}</tbody></table></div>
+  `;
+}
 function bulkMarkPaid(tech, weekKey){
   const jobsToUpdate = STATE.data.jobs.filter(j => j.technician===tech && weekOf(j.date).key===weekKey && j.paymentStatus==='Paid' && j.paidToTechnician!=='Paid' && j.paidToTechnician!=='Stuck');
   jobsToUpdate.forEach(j => j.paidToTechnician='Paid');
@@ -5403,6 +5565,7 @@ function render(){
   else if (UI.tab==='closings') content.innerHTML = renderClosings(profile, data);
   else if (UI.tab==='jobs') content.innerHTML = renderJobs(profile, data);
   else if (UI.tab==='finance') content.innerHTML = renderFinance(profile, data);
+  else if (UI.tab==='bizPerformance') content.innerHTML = renderBusinessPerformance(profile, data);
   else if (UI.tab==='outstanding') content.innerHTML = renderOutstanding(profile, data);
   else if (UI.tab==='reminders') content.innerHTML = renderReminders(profile, data);
   else if (UI.tab==='openItems') content.innerHTML = renderOpenItems(profile, data);
