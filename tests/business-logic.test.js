@@ -36,7 +36,9 @@ const DECLS = [
   'commissionEligibleTechnicianNames', 'computeWeek', 'computeMonth',
   // business performance
   'blankPerfBucket', 'addToPerfBucket', 'finalizePerfBucket', 'computeProfitByWeekInRange', 'computeBusinessPerformance',
-  'contactHasQuote', 'contactHasJob',
+  'contactHasJob',
+  // reminders
+  'fmtDateShort', 'computeReminders',
 ];
 
 function extractDecl(source, name){
@@ -188,7 +190,7 @@ function testFunnelLossReasonsSpeedToLead(sb){
   // outside-area / 7 wrong-number / 117 untagged, out of 175 Not Relevant) and Ofek asked for a
   // lead->job funnel and speed-to-lead metric built from data that already exists (no new fields).
   sb.STATE.data.contacts = [
-    { fullName:'Alice', source:'Organic', status:'Booked', createdAt:'2026-09-02', tags:['not interested - price'],
+    { fullName:'Alice', source:'Organic', status:'Booked', createdAt:'2026-09-02', tags:['not interested - price'], estimatedValue:500,
       messages:[{kind:'event',at:'2026-09-02T10:00:00Z'},{kind:'outbound',at:'2026-09-02T10:05:00Z'}] }, // 5 min reply
     { fullName:'Bob', source:'Organic', status:'Not Relevant', createdAt:'2026-09-03', tags:['not interested - price'] },
     { fullName:'Carol', source:'Organic', status:'Not Relevant', createdAt:'2026-09-03', tags:['outside service area'] },
@@ -207,7 +209,7 @@ function testFunnelLossReasonsSpeedToLead(sb){
 
   const perf = sb.computeBusinessPerformance(sb.STATE.data, '2026-09-01', '2026-09-10');
 
-  assertEqual(perf.funnel, { leads:7, contacted:6, quoted:1, booked:1, jobDone:1 }, 'funnel: leads/contacted(status!=New)/quoted(by name)/booked/jobDone(by name)');
+  assertEqual(perf.funnel, { leads:7, contacted:6, priceGiven:1, booked:1, jobDone:1 }, 'funnel: leads/contacted(status!=New)/priceGiven(estimatedValue>0)/booked/jobDone(by name)');
   assertEqual(perf.lossReasons, { price:1, outsideArea:1, wrongNumber:1, noReasonGiven:1 }, 'lossReasons: first-match-wins tag classification of Not Relevant leads');
   assertEqual(perf.speedToLead.sampleSize, 2, 'speedToLead: only counts contacts with >=2 messages and a non-event reply');
   // Alice: 5 min = 0.0833h, Grace: 30 min = 0.5h -> avg 0.2917 (rounds to 0.29), median (upper of the two) 0.5
@@ -239,11 +241,44 @@ function testComputeProfitByWeekInRange(sb){
   assertEqual(weeks[1].revenue, 265, 'computeProfitByWeekInRange: second week profit');
 }
 
+function testRepeatServiceReminder(sb){
+  // Added 2026-09-10 per Ofek's spec: a job that's exactly 358 days old (365 minus a 7-day lead time)
+  // should surface a "call to re-offer the service" reminder for that one day only. Since
+  // computeReminders is recomputed fresh on every render (never persisted), the 24h window falls out
+  // naturally from the date math — no expiry field or cron needed. Fixed `now` so the fixture doesn't
+  // drift with the calendar.
+  const now = new Date(2026, 8, 10); // 10 Sep 2026
+  const dateNDaysBefore = (n) => { const d = new Date(now); d.setDate(d.getDate()-n); return sb.fmtLocal(d); };
+  sb.STATE.data.jobs = [
+    { id:'due-today', customerName:'Chen Family', jobType:'Aircon', date: dateNDaysBefore(358), technician:'Guy', paymentStatus:'Paid', paidToTechnician:'Paid', partsCost:0 },
+    { id:'yesterday', customerName:'Nguyen', jobType:'Chimney', date: dateNDaysBefore(359), technician:'Guy', paymentStatus:'Paid', paidToTechnician:'Paid', partsCost:0 },
+    { id:'tomorrow', customerName:'Okafor', jobType:'Aircon', date: dateNDaysBefore(357), technician:'Guy', paymentStatus:'Paid', paidToTechnician:'Paid', partsCost:0 },
+  ];
+  sb.STATE.data.equipmentSpend = [];
+  sb.STATE.data.quotes = [];
+  sb.STATE.data.contacts = [];
+  sb.STATE.data.manualReminders = [];
+  sb.STATE.data.dismissedReminders = [];
+  sb.STATE.data.readReminders = [];
+
+  const items = sb.computeReminders(sb.STATE.data, now);
+  const repeatItems = items.filter(it => it.type === 'repeat-service');
+  assertEqual(repeatItems.length, 1, 'computeReminders: only the job exactly 358 days old fires the repeat-service reminder');
+  assertEqual(repeatItems[0]?.key, 'repeat-service:due-today', 'computeReminders: repeat-service reminder keyed to the matching job');
+  assertEqual(repeatItems[0]?.title.includes('Chen Family') && repeatItems[0]?.title.includes('Aircon'), true, 'computeReminders: repeat-service title names the customer and job type');
+
+  // Dismissing it (same mechanism as every other reminder) hides it even though the date still matches.
+  sb.STATE.data.dismissedReminders = ['repeat-service:due-today'];
+  const itemsAfterDismiss = sb.computeReminders(sb.STATE.data, now);
+  assertEqual(itemsAfterDismiss.filter(it => it.type === 'repeat-service').length, 0, 'computeReminders: repeat-service reminder respects the normal dismissed-reminders set');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
 testFunnelLossReasonsSpeedToLead(loadSandbox());
 testComputeProfitByWeekInRange(loadSandbox());
+testRepeatServiceReminder(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

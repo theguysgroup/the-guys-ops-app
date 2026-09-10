@@ -523,6 +523,17 @@ function computeReminders(data, now){
     if (j.partsCost > 0 && j.partsRefundStatus === 'Pending Refund' && !dismissed.has(refundKey)) items.push({ key:refundKey, readKey:refundKey, type:'refund', severity:'warn', date:j.date, title:`Parts refund pending for ${j.partsPaidBy||j.technician}`, meta:j.customerName });
   });
   data.equipmentSpend.forEach(e => { const key = `equipment:${e.id}`; if (e.reimbursed==='Pending' && !dismissed.has(key)) items.push({ key, readKey:key, type:'equipment', severity:'warn', date:e.date, title:`Equipment reimbursement pending for ${e.technician}`, meta:e.item }); });
+  // Repeat-service reminder: fires exactly once, 358 days after a job (365 minus a 7-day lead time),
+  // so Ron can call ahead of the 1-year mark to re-offer the service. Computed fresh every render off
+  // today's date rather than stored/expired — the day after, the same job's age is 359 and it simply
+  // stops matching, giving the "shows for 24h then disappears on its own" behaviour Ofek asked for.
+  data.jobs.forEach(j => {
+    const jobAge = daysBetween(parseLocalDate(j.date), today);
+    const key = `repeat-service:${j.id}`;
+    if (jobAge === 358 && !dismissed.has(key)) {
+      items.push({ key, readKey:key, type:'repeat-service', severity:'warn', date:todayStr(now), title:`${j.customerName} — re-offer ${j.jobType} service`, meta:`1 year ago this week: ${j.jobType} job done on ${fmtDateShort(j.date)} · call to check if it's time again` });
+    }
+  });
   const activeQuoteStates = ['In Discussion','Waiting for Reply'];
   data.quotes.forEach(q => {
     if (activeQuoteStates.includes(q.status)) {
@@ -3842,17 +3853,19 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   // Lead -> job funnel. "Contacted"/"Quoted"/"Job done" are all proxies from data that already
   // exists rather than new tracked stages, on purpose — no new fields, no new discipline required
   // from Ron for this to start working today:
-  //   Contacted  = status has moved past New at all (Follow-up/Booked/Not Relevant)
-  //   Quoted     = a quote exists for this customer's name, in data.quotes (ANY quote ever, not just
-  //                this period, since a quote can be sent well before or after the lead date)
-  //   Booked     = status === Booked
-  //   Job done   = a job exists for this customer's name, in data.jobs (ALL jobs, same reasoning)
+  //   Contacted    = status has moved past New at all (Follow-up/Booked/Not Relevant)
+  //   Price Given  = the lead has an estimated value logged (>0) - the Quotes page is confirmed unused
+  //                  (0 rows) since Ofek/Ron give prices verbally over the phone, never through a
+  //                  logged Quote record, so estimatedValue is the only existing-data signal that a
+  //                  price was actually given
+  //   Booked       = status === Booked
+  //   Job done     = a job exists for this customer's name, in data.jobs (ALL jobs, same reasoning)
   // Each stage is a strict subset check against the full lead list for this period, not a "moved
-  // through in order" pipeline, so a lead that skipped straight to Booked without a logged quote
-  // still counts in Booked even though it shows 0 in Quoted - the funnel shows where the *process*
+  // through in order" pipeline, so a lead that skipped straight to Booked without a logged estimate
+  // still counts in Booked even though it shows 0 in Price Given - the funnel shows where the *process*
   // has evidence of happening, not a guess about hidden steps.
   const funnelContacted = contacts.filter(c => c.status !== 'New').length;
-  const funnelQuoted = contacts.filter(c => contactHasQuote(c.fullName, data.quotes)).length;
+  const funnelPriceGiven = contacts.filter(c => Number(c.estimatedValue) > 0).length;
   const funnelJobDone = contacts.filter(c => contactHasJob(c.fullName, data.jobs)).length;
 
   // Loss-reason breakdown for Not Relevant leads, from the same tags already on the contact (most of
@@ -3900,14 +3913,9 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
     avgDaysToPayment, outstanding,
     quoteConversionRate: quoteDecided ? Math.round((quotesApproved/quoteDecided)*100) : null,
     quotesApproved, quotesRejected,
-    funnel: { leads: contacts.length, contacted: funnelContacted, quoted: funnelQuoted, booked: totalBooked, jobDone: funnelJobDone },
+    funnel: { leads: contacts.length, contacted: funnelContacted, priceGiven: funnelPriceGiven, booked: totalBooked, jobDone: funnelJobDone },
     lossReasons, speedToLead,
   };
-}
-function contactHasQuote(fullName, allQuotes){
-  const norm = (fullName||'').trim().toLowerCase();
-  if (!norm || !allQuotes) return false;
-  return allQuotes.some(q => (q.customer||'').trim().toLowerCase() === norm);
 }
 function contactHasJob(fullName, allJobs){
   const norm = (fullName||'').trim().toLowerCase();
@@ -4037,10 +4045,10 @@ function renderBusinessPerformance(profile, data){
         <div class="stat-label">Funnel — lead to job</div>
         ${funnelStage('Leads', perf.funnel.leads, perf.funnel.leads, 'var(--primary)')}
         ${funnelStage('Contacted', perf.funnel.contacted, perf.funnel.leads, 'var(--accent)')}
-        ${funnelStage('Quoted', perf.funnel.quoted, perf.funnel.leads, 'var(--primary-teal)')}
+        ${funnelStage('Price Given', perf.funnel.priceGiven, perf.funnel.leads, 'var(--primary-teal)')}
         ${funnelStage('Booked', perf.funnel.booked, perf.funnel.leads, 'var(--good)')}
         ${funnelStage('Job Completed', perf.funnel.jobDone, perf.funnel.leads, 'var(--good)')}
-        <div class="hint" style="margin-top:4px">Contacted/Quoted/Job Completed are inferred from existing data (status, Quotes, Jobs matched by name) — not a strict step-by-step order, so a lead can reach Booked with 0 in Quoted if no quote was logged.</div>
+        <div class="hint" style="margin-top:4px">Contacted/Job Completed are inferred from existing data (status, Jobs matched by name) — not a strict step-by-step order, so a lead can reach Booked with 0 in Price Given if no estimate was logged. Price Given uses the lead's Estimated Value as a proxy since quotes are given verbally, not logged in the (unused) Quotes page.</div>
       </div>
       <div class="card stat-card" style="--stat-accent:var(--bad)">
         <div class="stat-label">Why leads are lost (Not Relevant)</div>
@@ -4166,7 +4174,7 @@ function renderOutstanding(profile, data){
 }
 
 /* ── reminders ───────────────────────────────────────────────────────── */
-const REMINDER_ICONS = { unpaid:'💵', commission:'🧾', refund:'♻️', equipment:'🧰', quote:'✎', followup:'📞' };
+const REMINDER_ICONS = { unpaid:'💵', commission:'🧾', refund:'♻️', equipment:'🧰', quote:'✎', followup:'📞', 'repeat-service':'🔁' };
 function deleteManualReminder(id, rowEl){
   confirmAction('Delete this reminder?', ()=>{
     animateRowRemove(rowEl, ()=>{
@@ -4230,6 +4238,7 @@ function goToReminderTarget(type, contactId, readKey){
   if (type==='unpaid' || type==='commission' || type==='refund') { UI.tab='outstanding'; render(); return; }
   if (type==='equipment') { UI.tab='reference'; UI.reference.tab='equipmentSpend'; render(); return; }
   if (type==='quote') { UI.tab='quotes'; render(); return; }
+  if (type==='repeat-service') { UI.tab='jobs'; render(); return; }
   render();
 }
 function renderReminders(profile, data){
