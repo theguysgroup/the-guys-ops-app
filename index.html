@@ -1408,7 +1408,7 @@ function setupRealtimeSubscriptions(){
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
 }
-let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all'}, jobsFilters:{}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
+let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let toastMsg = null, toastTimer = null;
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
 let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task modal
@@ -1420,7 +1420,7 @@ let MODAL_QUOTE_ID = null; // id of the quote currently open in the quote modal 
 let CLOSING_FILE = null; // transient invoice-photo state for the "Post a closing" form
 
 function getCurrentProfile(){ return STATE.profiles.find(p => p.id===STATE.currentProfileId) || null; }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all'}, jobsFilters:{}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
   toastTimer = setTimeout(()=>{
@@ -1436,6 +1436,34 @@ function fmtMoney(n){ n = round2(n); const isInt = Math.abs(n-Math.round(n)) < 1
 function fmtDateShort(s){ if(!s) return '—'; const d = parseLocalDate(s); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; }
 function pill(tone, text){ return `<span class="pill ${tone}">${esc(text)}</span>`; }
 function emptyState(title, sub, icon){ return `<div class="empty">${icon?`<div class="ic">${icon}</div>`:''}<b>${esc(title)}</b>${sub?`<div>${esc(sub)}</div>`:''}</div>`; }
+/* ── generic table pagination — shared by any long list (Jobs, CRM table, Outstanding, …) so a growing
+   table never becomes an unbounded scroll. `ns` is the UI.<namespace> object holding {page, pageSize}
+   for that one table; clamps page back into range itself (e.g. after a filter shrinks the result set),
+   so callers never need to reset it by hand. */
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 250];
+function paginateRows(rows, ns, defaultPageSize){
+  const pageSize = ns.pageSize || defaultPageSize || 25;
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const page = Math.min(Math.max(1, ns.page || 1), totalPages);
+  ns.page = page;
+  const startIdx = (page - 1) * pageSize;
+  return { pageItems: rows.slice(startIdx, startIdx + pageSize), page, totalPages, pageSize, total: rows.length };
+}
+// setPageFn/setPageSizeFn are the names of single-argument global functions the caller defines for its
+// own table (e.g. "setJobsPage"/"setJobsPageSize") — keeps each table's page state update going through
+// whatever refresh path that table already uses (a full render(), or a fast partial-DOM refresh like
+// Jobs' refreshJobsTable(), which column-filter typing also relies on).
+function renderPager(page, totalPages, total, pageSize, setPageFn, setPageSizeFn){
+  if (!total) return '';
+  return `<div class="pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-top:1px solid var(--line);flex-wrap:wrap">
+    <div style="font-size:12px;color:var(--ink-soft)">${total} total · page ${page} of ${totalPages}</div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <select style="width:auto" onchange="${setPageSizeFn}(this.value)">${PAGE_SIZE_OPTIONS.map(n=>`<option value="${n}" ${pageSize===n?'selected':''}>${n} / page</option>`).join('')}</select>
+      <button class="btn ghost small" ${page<=1?'disabled':''} onclick="${setPageFn}(${page-1})">Prev</button>
+      <button class="btn ghost small" ${page>=totalPages?'disabled':''} onclick="${setPageFn}(${page+1})">Next</button>
+    </div>
+  </div>`;
+}
 const TECH_COLORS = { Noam:'var(--noam)', Guy:'var(--guy)', Dolev:'var(--dolev)', Ofek:'var(--ofek)' };
 function techColor(name){
   if (TECH_COLORS[name]) return TECH_COLORS[name];
@@ -2014,6 +2042,10 @@ function resolveOverviewRange(ui, now){
   if (mode==='7d') {
     const end = parseLocalDate(today); const start = new Date(end); start.setDate(end.getDate()-6);
     return { start: fmtLocal(start), end: fmtLocal(end), label: 'Last 7 days' };
+  }
+  if (mode==='14d') {
+    const end = parseLocalDate(today); const start = new Date(end); start.setDate(end.getDate()-13);
+    return { start: fmtLocal(start), end: fmtLocal(end), label: 'Last 14 days' };
   }
   if (mode==='30d') {
     const end = parseLocalDate(today); const start = new Date(end); start.setDate(end.getDate()-29);
@@ -2776,8 +2808,11 @@ function renderTableTagsCell(c){
       onkeydown="if(event.key==='Enter'){event.preventDefault();addLeadTag('${c.id}', this.value); this.value='';}">
   </div>`;
 }
-function renderCrmTable(contacts){
+function setCrmPage(page){ UI.crm.page = Math.max(1, page); render(); }
+function setCrmPageSize(size){ UI.crm.pageSize = Number(size); UI.crm.page = 1; render(); }
+function renderCrmTable(allContacts){
   const today = todayStr();
+  const { pageItems: contacts, page, totalPages, pageSize, total } = paginateRows(allContacts, UI.crm, 25);
   const rows = contacts.length ? contacts.map(c => {
     const overdue = c.nextFollowUp && c.nextFollowUp < today;
     return `<tr>
@@ -2798,7 +2833,7 @@ function renderCrmTable(contacts){
   }).join('') : `<tr><td colspan="13">${emptyState('No leads match these filters','Try clearing a filter.')}</td></tr>`;
   return `<div class="table-wrap"><table class="jobs-table"><thead><tr>
     <th>Name</th><th>Phone</th><th>Division</th><th>Source</th><th>Stage</th><th>Tags</th><th>Created</th><th>Last Contact</th><th>Follow-up</th><th>Est. Value</th><th>Sales Value</th><th>Activity</th><th></th>
-  </tr></thead><tbody>${rows}</tbody></table></div>`;
+  </tr></thead><tbody>${rows}</tbody></table>${renderPager(page, totalPages, total, pageSize, 'setCrmPage', 'setCrmPageSize')}</div>`;
 }
 function renderCrmBody(data){
   if (UI.crm.view==='inbox') return renderCrmInbox(crmInboxSortedContacts(data));
@@ -2856,7 +2891,7 @@ function renderCrmOverview(profile, data){
   const contacts = filteredContacts(data);
   const stats = computeCrmStats(contacts);
 
-  const rangeChips = [['week','This week'],['month','This month'],['7d','Last 7 days'],['30d','Last 30 days'],['custom','Custom']]
+  const rangeChips = [['week','This week'],['month','This month'],['7d','Last 7 days'],['14d','Last 14 days'],['30d','Last 30 days'],['custom','Custom']]
     .map(([k,l]) => `<button class="week-chip ${UI.crmOverview.range===k?'active':''}" onclick="setCrmRange('${k}')">${l}</button>`).join('');
   const customInputs = UI.crmOverview.range==='custom' ? `
     <input type="date" style="width:auto" value="${UI.crmOverview.customFrom||''}" onchange="UI.crmOverview.customFrom=this.value;render()">
@@ -3137,7 +3172,7 @@ function renderOverview(profile, data){
   const openTasks = data.tasks.filter(t=>t.status!=='Done').length;
   const openQuotes = data.quotes.filter(q=>['In Discussion','Waiting for Reply'].includes(q.status)).length;
 
-  const rangeChips = [['week','This week'],['month','This month'],['7d','Last 7 days'],['30d','Last 30 days'],['custom','Custom']]
+  const rangeChips = [['week','This week'],['month','This month'],['7d','Last 7 days'],['14d','Last 14 days'],['30d','Last 30 days'],['custom','Custom']]
     .map(([key,label]) => `<button class="week-chip ${UI.overview.range===key?'active':''}" onclick="setOverviewRange('${key}')">${label}</button>`).join('');
   const customInputs = UI.overview.range==='custom' ? `
     <input type="date" style="width:auto" value="${UI.overview.customFrom||''}" onchange="UI.overview.customFrom=this.value;render()">
@@ -3412,19 +3447,26 @@ function refreshJobsTable(){
   const profile = getCurrentProfile(); if (!profile) return;
   const data = filterForProfile(STATE.data, profile);
   const canEdit = profile.role==='owner' || profile.role==='manager';
+  const { pageItems, page, totalPages, pageSize, total } = paginateRows(computeFilteredJobs(data), UI.jobs, 25);
   const tbody = document.getElementById('jobs-tbody');
-  if (tbody) tbody.innerHTML = renderJobRows(computeFilteredJobs(data), canEdit);
+  if (tbody) tbody.innerHTML = renderJobRows(pageItems, canEdit);
+  const pager = document.getElementById('jobs-pager');
+  if (pager) pager.innerHTML = renderPager(page, totalPages, total, pageSize, 'setJobsPage', 'setJobsPageSize');
 }
 function updateJobColumnFilter(key, value){
   UI.jobsFilters = UI.jobsFilters || {};
   UI.jobsFilters[key] = value;
+  UI.jobs.page = 1;
   refreshJobsTable();
 }
+function setJobsPage(page){ UI.jobs.page = Math.max(1, page); refreshJobsTable(); }
+function setJobsPageSize(size){ UI.jobs.pageSize = Number(size); UI.jobs.page = 1; refreshJobsTable(); }
 function renderJobs(profile, data){
   const canEdit = profile.role==='owner' || profile.role==='manager';
   const allTechs = technicianNames(data);
   const weeks = allWeekKeys(data);
   const jobs = computeFilteredJobs(data);
+  const { pageItems, page, totalPages, pageSize, total } = paginateRows(jobs, UI.jobs, 25);
   const activeFilters = UI.jobsFilters || {};
   const filterRow = JOB_COLUMNS.map(c => `<th style="padding:4px 6px"><input value="${esc(activeFilters[c.key]||'')}" placeholder="Filter…" oninput="updateJobColumnFilter('${c.key}', this.value)" style="width:100%;font-size:10.5px;padding:3px 5px;font-weight:400;text-transform:none;letter-spacing:normal"></th>`).join('');
 
@@ -3445,7 +3487,7 @@ function renderJobs(profile, data){
     <div class="table-wrap"><table class="jobs-table"><thead>
       <tr><th>Technician</th><th>Date</th><th>Customer</th><th>Invoice</th><th>Type</th><th>Amount</th><th>GST</th><th>Status</th><th>Method</th><th>GST Amount</th><th>Parts Cost</th><th>Parts Paid By</th><th>%</th><th>Commission</th><th>Tech Paid</th><th>Review</th><th class="wrap">Notes</th><th>Activity</th>${canEdit?'<th></th>':''}</tr>
       <tr class="filter-row">${filterRow}<th></th>${canEdit?'<th></th>':''}</tr>
-    </thead><tbody id="jobs-tbody">${renderJobRows(jobs, canEdit)}</tbody></table></div>
+    </thead><tbody id="jobs-tbody">${renderJobRows(pageItems, canEdit)}</tbody></table><div id="jobs-pager">${renderPager(page, totalPages, total, pageSize, 'setJobsPage', 'setJobsPageSize')}</div></div>
   `;
 }
 
@@ -4008,7 +4050,7 @@ function renderBusinessPerformance(profile, data){
   const prevPerf = computeBusinessPerformance(data, fmtLocal(prevStartDate), prevEnd);
   const profitTrend = computeProfitByWeekInRange(data, range.start, range.end);
 
-  const rangeChips = [['week','This week'],['month','This month'],['7d','Last 7 days'],['30d','Last 30 days'],['custom','Custom']]
+  const rangeChips = [['week','This week'],['month','This month'],['7d','Last 7 days'],['14d','Last 14 days'],['30d','Last 30 days'],['custom','Custom']]
     .map(([key,label]) => `<button class="week-chip ${UI.bizPerf.range===key?'active':''}" onclick="UI.bizPerf.range='${key}';render()">${label}</button>`).join('');
   const customInputs = UI.bizPerf.range==='custom' ? `
     <input type="date" style="width:auto" value="${UI.bizPerf.customFrom||''}" onchange="UI.bizPerf.customFrom=this.value;render()">
@@ -4156,9 +4198,12 @@ async function ensureContactForJob(job){
   logLeadEvent(c, `Lead created automatically from job ${job.invoiceNumber?('#'+job.invoiceNumber):''} — ${job.jobType}, ${fmtMoney(job.amount||0)}`);
 }
 /* ── outstanding ─────────────────────────────────────────────────────── */
+function setOutstandingPage(page){ UI.outstanding.page = Math.max(1, page); render(); }
+function setOutstandingPageSize(size){ UI.outstanding.pageSize = Number(size); UI.outstanding.page = 1; render(); }
 function renderOutstanding(profile, data){
   const canEdit = profile.role==='owner' || profile.role==='manager';
-  const unpaidJobs = [...data.jobs].filter(j=>j.paymentStatus!=='Paid').sort((a,b)=>a.date.localeCompare(b.date));
+  const allUnpaidJobs = [...data.jobs].filter(j=>j.paymentStatus!=='Paid').sort((a,b)=>a.date.localeCompare(b.date));
+  const { pageItems: unpaidJobs, page, totalPages, pageSize, total } = paginateRows(allUnpaidJobs, UI.outstanding, 25);
   const pendingParts = data.jobs.filter(j=>j.partsRefundStatus==='Pending Refund');
   const pendingEquip = data.equipmentSpend.filter(e=>e.reimbursed==='Pending');
   const today = parseLocalDate(todayStr());
@@ -4169,8 +4214,8 @@ function renderOutstanding(profile, data){
   const equipRows = pendingEquip.length ? pendingEquip.map(e=>`<tr><td class="mono">${fmtDateShort(e.date)}</td><td>${esc(e.item)}</td><td>${esc(e.technician)}</td><td class="num">${fmtMoney(e.cost)}</td></tr>`).join('') : `<tr><td colspan="4">${emptyState('No pending equipment refunds')}</td></tr>`;
   return `
     <div class="page-head"><div><h1 class="page-title">Outstanding</h1><div class="page-sub">Everything still open — customer payments, parts and equipment refunds</div></div></div>
-    <div class="section-title">Customers who haven't paid <span class="tag">${unpaidJobs.length}</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Customer</th><th>Invoice</th><th>Technician</th><th>Amount</th><th>Days Overdue</th><th>Status</th><th>Method</th></tr></thead><tbody>${unpaidRows}</tbody></table></div>
+    <div class="section-title">Customers who haven't paid <span class="tag">${allUnpaidJobs.length}</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Customer</th><th>Invoice</th><th>Technician</th><th>Amount</th><th>Days Overdue</th><th>Status</th><th>Method</th></tr></thead><tbody>${unpaidRows}</tbody></table>${renderPager(page, totalPages, total, pageSize, 'setOutstandingPage', 'setOutstandingPageSize')}</div>
     <div class="section-title">Pending parts refunds <span class="tag">${pendingParts.length}</span></div>
     <div class="table-wrap"><table><thead><tr><th>Date</th><th>Job</th><th>Paid By</th><th>Amount</th></tr></thead><tbody>${partsRows}</tbody></table></div>
     <div class="section-title">Pending equipment refunds <span class="tag">${pendingEquip.length}</span></div>
