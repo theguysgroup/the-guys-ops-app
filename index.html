@@ -3771,7 +3771,7 @@ function renderFinanceWeekly(data, weekKey, weeks, allTechs, techFilter, canBulk
     </div>`;
   }).join('') : emptyState('No technicians', 'Add technicians on the Employees tab');
   return `
-    <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:16px">${chips}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${chips}</div>
     ${businessOverview}
     <div class="section-title">${techFilter?'Your summary':'Technicians'} <span class="tag">${weekOf(weekKey).label}</span></div>
     <div class="grid-2">${techCards}</div>
@@ -3786,7 +3786,7 @@ function renderFinanceMonthly(data, monthKey, months, allTechs){
   const airconTypeRevBars = airconTypeRevTotal ? renderBarGroup(AIRCON_TYPE_TAGS.map(t => ({ label:t, value:m.airconTypeRevenue[t], color:'var(--primary)' }))) : '';
   const metaPlatformRevBars = metaPlatformRevTotal ? renderBarGroup(META_PLATFORM_TAGS.map(t => ({ label:t, value:m.metaPlatformRevenue[t], color:'var(--accent)' }))) : '';
   return `
-    <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:16px">${chips}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${chips}</div>
     <div class="grid-4">
       <div class="card"><div class="stat-label">Revenue (excl. GST)</div><div class="stat-value">${fmtMoney(m.revenue)}</div><div class="stat-sub">${m.jobs.length} jobs</div></div>
       <div class="card"><div class="stat-label">Technician Commission</div><div class="stat-value">${fmtMoney(m.commission)}</div></div>
