@@ -4473,6 +4473,13 @@ function renderDashboard(profile, data){
     gst += jobGst(j);
   });
 
+  // Trend is deliberately NOT tied to the period picker: 12 weeks back from today, always, so that
+  // picking "this week" still shows where the business is heading rather than a single dot.
+  const trendStart = shiftDays(payrollWeekOf(today).start, -7*11);
+  const revSeries = computeRevenueByWeekInRange(data, trendStart, today);
+  const profitSeries = computeProfitByWeekInRange(data, trendStart, today);
+  const lastFull = revSeries.length>1 ? revSeries[revSeries.length-2] : null;
+
   const rangeChips = DASH_RANGES.map(([k,l]) => `<button class="week-chip ${UI.dashboard.range===k?'active':''}" onclick="setDashboardRange('${k}')">${l}</button>`).join('');
   const customInputs = UI.dashboard.range==='custom' ? `
     <input type="date" style="width:auto" value="${UI.dashboard.customFrom||''}" onchange="UI.dashboard.customFrom=this.value;render()">
@@ -4493,6 +4500,7 @@ function renderDashboard(profile, data){
       <td class="num">${spend===null ? '—' : fmtMoney(spend)}</td>
       <td class="num">${cpe===null ? '—' : fmtMoney(cpe)}</td>
       <td class="num">${ch.booked!==undefined ? ch.booked : '—'}</td>
+      <td class="num">${ch.closeRate===null || ch.closeRate===undefined ? '—' : pill(closeRateTone(ch.closeRate), ch.closeRate+'%')}</td>
       <td class="num">${ch.revenue!==undefined ? fmtMoney(ch.revenue) : '—'}</td>
       <td class="num">${ch.roas===null || ch.roas===undefined ? '—' : pill(roasTone(ch.roas), ch.roas+'×')}</td>
     </tr>`;
@@ -4520,11 +4528,14 @@ function renderDashboard(profile, data){
     let html = divRow(d, divLeads(d), cs.byDivision[d]||0, perf.byDivision[d]);
     if (d==='Aircon') html += AIRCON_TYPE_TAGS.map(t => divRow(t, typeLeads(t), null, perf.bySubDivision[t], true)).join('');
     return html;
-  }).join('') + (perf.byDivision.Other.count ? divRow('Other', 0, null, perf.byDivision.Other) : '');
+  }).join('') + (perf.byDivision.Other.count ? divRow('Other', 0, null, perf.byDivision.Other) : '')
+    + `<tr style="font-weight:700;border-top:2px solid var(--line)"><td>All divisions</td><td class="num">${perf.totalLeads}</td><td class="num">${cs.total}</td>
+       <td class="num">${perf.jobsCount}</td><td class="num">${fmtMoney(perf.totalRevenue)}</td><td class="num">${perf.jobsCount?fmtMoney(round2(perf.totalRevenue/perf.jobsCount)):'—'}</td>
+       <td class="num">${fmtMoney(perf.totalProfit)}${dashDelta(perf.totalProfit, prev.totalProfit)}</td><td class="num">${perf.profitMargin===null?'—':pill(marginTone(perf.profitMargin), perf.profitMargin+'%')}</td></tr>`;
 
   // ── team: technicians (from the same buckets as everything else) + hourly sales staff ──
   const teamRows = perf.techEntries.map(t => `<tr><td>${techTag(t.name)}</td><td class="num">${t.count}</td><td class="num" style="font-weight:700">${fmtMoney(t.revenue)}</td>
-    <td class="num">${fmtMoney(t.commission)}</td><td class="num">${fmtMoney(t.avgDeal)}</td><td class="num">${t.reviewRate===null?'—':t.reviewRate+'%'}</td></tr>`).join('');
+    <td class="num">${fmtMoney(t.commission)}</td><td class="num">${fmtMoney(t.profit)}</td><td class="num">${fmtMoney(t.avgDeal)}</td><td class="num">${t.reviewRate===null?'—':t.reviewRate+'%'}</td></tr>`).join('');
   const hourlyRows = payrollHourlyPeople(data).map(p => {
     const logs = (data.salesLogs||[]).filter(l => l.person===p && inRange(l.date, r.start, r.effEnd));
     const hours = round2(logs.reduce((s,l)=>s+(Number(l.hours)||0),0));
@@ -4579,12 +4590,24 @@ function renderDashboard(profile, data){
         </div>
       </div>
     </div>
+    <div class="grid-2" style="align-items:start;margin-top:12px">
+      <div class="card stat-card" style="--stat-accent:var(--primary-teal)">
+        <div class="stat-label">Revenue per week <span class="hint">(last 12 weeks, not the period above)</span></div>
+        ${renderSparkline(revSeries, {color:'var(--primary-teal)'}) || emptyState('Not enough weeks yet')}
+        <div class="stat-sub" style="margin-top:6px">Last full week ${lastFull ? `${esc(lastFull.label)}: <b>${fmtMoney(lastFull.revenue)}</b>` : '—'}</div>
+      </div>
+      <div class="card stat-card" style="--stat-accent:var(--good)">
+        <div class="stat-label">Gross profit per week <span class="hint">(revenue − commission − job expenses)</span></div>
+        ${renderSparkline(profitSeries, {color:'var(--good)'}) || emptyState('Not enough weeks yet')}
+        <div class="stat-sub" style="margin-top:6px">Marketing and salaries are not in this line — they are in Net profit above</div>
+      </div>
+    </div>
     <div style="margin-top:12px">${cashStatusRow()}</div>
 
     ${attention ? `<div class="section-title">Needs attention</div><div style="display:flex;gap:8px;flex-wrap:wrap">${attention}</div>` : ''}
 
     <div class="section-title">Marketing <span class="tag">ad spend ${fmtMoney(totalSpend)}</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Channel</th><th class="num">Form leads</th><th class="num">Calls</th><th class="num">Enquiries</th><th class="num">Ad spend</th><th class="num">Cost / enquiry</th><th class="num">Booked*</th><th class="num">Revenue</th><th class="num">ROAS</th></tr></thead>
+    <div class="table-wrap"><table><thead><tr><th>Channel</th><th class="num">Form leads</th><th class="num">Calls</th><th class="num">Enquiries</th><th class="num">Ad spend</th><th class="num">Cost / enquiry</th><th class="num">Booked*</th><th class="num">Close rate*</th><th class="num">Revenue</th><th class="num">ROAS</th></tr></thead>
       <tbody>${channelRows}</tbody></table></div>
     <div class="hint" style="margin-top:6px">📞 Google Ads calls this period: <b>${cs.total}</b> · answered ${cs.answered} · missed ${cs.missed} · 30 s or longer ${cs.over30s}. Calls from Google Maps and from people who dial the 1300 number off the website aren't tracked yet — that comes with the phone system (Twilio). *Booked is partial while lead statuses are still updated in GHL.</div>
     <div class="grid-3" style="margin-top:12px;align-items:start">
@@ -4618,8 +4641,8 @@ function renderDashboard(profile, data){
 
     <div class="section-title">Team <button class="btn ghost small" onclick="goTab('payroll')" style="margin-inline-start:8px">Pay status → Payroll</button></div>
     <div class="grid-2" style="align-items:start">
-      <div class="table-wrap"><table><thead><tr><th>Technician</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num">Commission</th><th class="num">Avg job</th><th class="num">Reviews</th></tr></thead>
-        <tbody>${teamRows || `<tr><td colspan="6">${emptyState('No jobs this period')}</td></tr>`}</tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Technician</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num">Commission</th><th class="num">Gross profit</th><th class="num">Avg job</th><th class="num">Reviews</th></tr></thead>
+        <tbody>${teamRows || `<tr><td colspan="7">${emptyState('No jobs this period')}</td></tr>`}</tbody></table></div>
       <div class="table-wrap"><table><thead><tr><th>Sales</th><th class="num">Hours</th><th class="num">Bookings</th><th class="num">Pay</th><th class="num">Pay / booking</th></tr></thead>
         <tbody>${hourlyRows || `<tr><td colspan="5">${emptyState('No hourly staff')}</td></tr>`}</tbody></table></div>
     </div>
