@@ -27,7 +27,7 @@ const DECLS = [
   // date/money primitives
   'MONTHS', 'MONTHS_FULL', 'pad2', 'parseLocalDate', 'fmtLocal', 'daysBetween', 'round2', 'todayStr',
   'weekOf', 'monthOf', 'currentWeekKey',
-  'jobGst', 'jobTotalCollected', 'jobCommissionAmount', 'commissionRateFor',
+  'jobGst', 'jobTotalCollected', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
   'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS',
   // CRM / attribution
@@ -39,6 +39,11 @@ const DECLS = [
   'contactHasJob',
   // reminders
   'fmtDateShort', 'computeReminders',
+  // payroll + net profit
+  'PAYROLL_HOURLY_RATE', 'PAYROLL_BOOKING_BONUS', 'PAYROLL_HEBREW_NAMES', 'bookingBonus', 'nextBookingTier',
+  'salesLogBookings', 'salesLogPay', 'payrollWeekOf', 'shiftPayrollWeek', 'payrollRangeText', 'payMoney', 'jobPaidDate',
+  'computePayrollCommission', 'computePayrollHourly', 'buildCommissionPayMessage', 'buildHourlyPayMessage', 'shiftDays',
+  'computeNetProfit',
 ];
 
 function extractDecl(source, name){
@@ -124,7 +129,8 @@ function testComputeMonth(sb){
   const m = sb.computeMonth(sb.STATE.data, '2026-09');
   // Hand-computed: revenue = 1000+500 = 1500; commission = 200+100 = 300; parts = 50
   assertEqual(m.revenue, 1500, 'computeMonth: revenue sums job.amount');
-  assertEqual(m.commission, 300, 'computeMonth: commission is 20% of each job.amount');
+  // Pay model (Sep 2026): commission is taken AFTER the job's expenses. job1: (1000-50)*20% = 190; job2: 500*20% = 100.
+  assertEqual(m.commission, 290, 'computeMonth: commission is 20% of (job.amount - partsCost)');
   assertEqual(m.parts, 50, 'computeMonth: parts sums job.partsCost');
   // Duct System (Lynette) = 1000; Split System (Split Sam) = 500; Instagram (Lynette) = 1000; Facebook = 0
   assertEqual(m.airconTypeRevenue, { 'Split System':500, 'Duct System':1000 }, 'computeMonth: airconTypeRevenue splits by tag');
@@ -165,11 +171,12 @@ function testComputeBusinessPerformance(sb){
   // Hand-computed exactly as verified live against the deployed app on 2026-09-10 (see chat history) —
   // this fixture is the same one, kept here so a future edit can be checked against a known-good answer.
   assertEqual(perf.totalRevenue, 1850, 'computeBusinessPerformance: totalRevenue = sum of all job amounts');
-  assertEqual(perf.totalProfit, 1415, 'computeBusinessPerformance: totalProfit = sum of division profits');
+  // job1 profit is now 1000 - 190 (20% of 1000-50) - 50 = 760 (was 750 before commission moved after expenses) -> 1415 + 10.
+  assertEqual(perf.totalProfit, 1425, 'computeBusinessPerformance: totalProfit = sum of division profits');
   assertEqual(perf.totalLeads, 5, 'computeBusinessPerformance: totalLeads = contacts created in range');
   assertEqual(perf.overallCloseRate, 75, 'computeBusinessPerformance: overallCloseRate = booked / (booked+notRelevant)');
   assertEqual(perf.reviewRate, 50, 'computeBusinessPerformance: reviewRate = jobs with reviewTaken / all jobs');
-  assertEqual(perf.byDivision.Aircon.profit, 1310, 'computeBusinessPerformance: byDivision.Aircon.profit');
+  assertEqual(perf.byDivision.Aircon.profit, 1320, 'computeBusinessPerformance: byDivision.Aircon.profit');
   assertEqual(perf.byChannel['Google Ads'].roas, 6.25, 'computeBusinessPerformance: Google Ads ROAS = revenue/spend');
   assertEqual(perf.byChannel['Meta Ads'].costPerLead, 73.33, 'computeBusinessPerformance: Meta Ads cost/lead = spend/leads');
   assertEqual(perf.byChannel['Google Maps'].spend, null, 'computeBusinessPerformance: a channel with no ad_spend rows stays null, not 0');
@@ -178,7 +185,7 @@ function testComputeBusinessPerformance(sb){
   // (3+1+0)/3 = 1.33, rounded to the nearest whole day by the function itself -> 1.
   assertEqual(perf.avgDaysToPayment, 1, 'computeBusinessPerformance: avgDaysToPayment averages (datePaid - date) across paid jobs with a datePaid, rounded');
   assertEqual(perf.outstanding, 500, 'computeBusinessPerformance: outstanding = sum of unpaid job amounts');
-  assertEqual(perf.profitMargin, Math.round((1415/1850)*100), 'computeBusinessPerformance: profitMargin = totalProfit/totalRevenue');
+  assertEqual(perf.profitMargin, Math.round((1425/1850)*100), 'computeBusinessPerformance: profitMargin = totalProfit/totalRevenue');
 
   // additive invariant, same as testComputeMonth: no sub-slice may exceed its parent total
   const channelRevenueSum = sb.LEAD_SOURCES.reduce((s,c)=>s+perf.byChannel[c].revenue, 0);
@@ -234,10 +241,10 @@ function testComputeProfitByWeekInRange(sb){
     { id:'5', customerName:'Unmatched Customer', jobType:'Chimney', date:'2026-09-09', amount:150, commissionPercent:30, partsCost:0, paymentStatus:'Paid', technician:'Dolev' },
   ];
   const weeks = sb.computeProfitByWeekInRange(sb.STATE.data, '2026-09-01', '2026-09-10');
-  // Week of 31 Aug–6 Sep: job1 (profit 1000-200-50=750) + job2 (profit 500-100-0=400) = 1150.
+  // Week of 31 Aug–6 Sep: job1 (profit 1000-190-50=760; commission is 20% of 1000-50) + job2 (profit 500-100-0=400) = 1160.
   // Week of 7 Sep–13 Sep: job4 (profit 200-40-0=160) + job5 (profit 150-45-0=105) = 265.
   assertEqual(weeks.length, 2, 'computeProfitByWeekInRange: buckets the range into the 2 weeks it spans');
-  assertEqual(weeks[0].revenue, 1150, 'computeProfitByWeekInRange: first week profit (property is named "revenue" to match renderSparkline\'s expected shape)');
+  assertEqual(weeks[0].revenue, 1160, 'computeProfitByWeekInRange: first week profit (property is named "revenue" to match renderSparkline\'s expected shape)');
   assertEqual(weeks[1].revenue, 265, 'computeProfitByWeekInRange: second week profit');
 }
 
@@ -273,12 +280,111 @@ function testRepeatServiceReminder(sb){
   assertEqual(itemsAfterDismiss.filter(it => it.type === 'repeat-service').length, 0, 'computeReminders: repeat-service reminder respects the normal dismissed-reminders set');
 }
 
+function testPayroll(sb){
+  // Pay model given by Ofek (Sep 2026). Employees drive the "who deducts expenses" rule.
+  sb.STATE.data.employees = [
+    { name:'Guy', roles:['Technician','Sales'], status:'Active', employmentType:'Freelance-commission' },
+    { name:'Alessandro', roles:['Technician'], status:'Active', employmentType:'Independent Contractor' },
+    { name:'Ron', roles:['VA'], status:'Active', employmentType:'Hourly' },
+  ];
+  // Ofek's own example: $1,000, $100 of parts, Guy at 30% -> 30% of $900 = $270.
+  assertEqual(sb.jobCommissionAmount({ technician:'Guy', amount:1000, partsCost:100, commissionPercent:30 }), 270, 'commission: Guy 30% of (1000 - 100 parts) = 270');
+  // Alessandro pays his own expenses -> 50% of the full ex-GST amount, parts NOT deducted.
+  assertEqual(sb.jobCommissionAmount({ technician:'Alessandro', amount:1000, partsCost:100, commissionPercent:50 }), 500, 'commission: independent contractor = 50% of full amount, parts not deducted');
+  assertEqual(sb.jobCommissionAmount({ technician:'Guy', amount:100, partsCost:300, commissionPercent:30 }), 0, 'commission: never negative when expenses exceed the amount');
+
+  // Weeks are Sunday -> Saturday.
+  assertEqual(sb.payrollWeekOf('2026-09-19').start, '2026-09-13', 'payrollWeekOf: Saturday belongs to the week starting the Sunday before');
+  assertEqual(sb.payrollWeekOf('2026-09-13').start, '2026-09-13', 'payrollWeekOf: Sunday starts its own week');
+  assertEqual(sb.payrollWeekOf('2026-09-20').start, '2026-09-20', 'payrollWeekOf: next Sunday starts a new week');
+  assertEqual(sb.payrollRangeText('2026-08-23', '2026-08-29'), '23-29/8', 'payrollRangeText: same month');
+  assertEqual(sb.payrollRangeText('2026-08-30', '2026-09-05'), '30/8-5/9', 'payrollRangeText: across months');
+
+  // Week 13-19 Sep 2026, Guy at 30%. Commission lands in the week the job was PAID.
+  sb.STATE.data.jobs = [
+    { id:'a', technician:'Guy', invoiceNumber:'3001', customerName:'A', date:'2026-09-14', datePaid:'2026-09-14', paymentStatus:'Paid', paymentMethod:'Credit Card', amount:700, partsCost:0, commissionPercent:30, includesGST:true },   // 210
+    { id:'b', technician:'Guy', invoiceNumber:'3002', customerName:'B', date:'2026-09-10', datePaid:'2026-09-15', paymentStatus:'Paid', paymentMethod:'Bank Transfer', amount:1000, partsCost:100, commissionPercent:30, includesGST:true }, // late, last week: 270
+    { id:'c', technician:'Guy', invoiceNumber:'3003', customerName:'C', date:'2026-09-02', datePaid:'2026-09-16', paymentStatus:'Paid', paymentMethod:'Credit Card', amount:500, partsCost:0, commissionPercent:30, includesGST:true },   // late, 2 weeks back: 150
+    { id:'d', technician:'Guy', invoiceNumber:'3004', customerName:'D', date:'2026-09-16', datePaid:'2026-09-16', paymentStatus:'Paid', paymentMethod:'Cash', amount:350, partsCost:0, commissionPercent:30, includesGST:false },         // cash: 105, $350 cash
+    { id:'e', technician:'Guy', invoiceNumber:'3005', customerName:'E', date:'2026-09-17', paymentStatus:'Unpaid', paymentMethod:'', amount:400, partsCost:0, commissionPercent:30, includesGST:true },                             // expected 120
+    { id:'f', technician:'Guy', invoiceNumber:'3006', customerName:'F', date:'2026-09-20', paymentStatus:'Unpaid', paymentMethod:'', amount:900, partsCost:0, commissionPercent:30, includesGST:true },                             // next week: excluded
+    { id:'g', technician:'Guy', invoiceNumber:'3007', customerName:'G', date:'2026-09-12', datePaid:'2026-09-12', paymentStatus:'Paid', paymentMethod:'Credit Card', amount:800, partsCost:0, commissionPercent:30, includesGST:true },   // paid last week: excluded
+    { id:'h', technician:'Alessandro', invoiceNumber:'3008', customerName:'H', date:'2026-09-14', datePaid:'2026-09-14', paymentStatus:'Paid', paymentMethod:'Credit Card', amount:600, partsCost:40, commissionPercent:50, includesGST:true }, // someone else
+  ];
+  const c = sb.computePayrollCommission(sb.STATE.data, 'Guy', '2026-09-13');
+  assertEqual(c.lines.map(l=>l.job.id).join(','), 'c,b,a,d', 'payroll: paid-this-week jobs only, oldest job first');
+  assertEqual(c.total, 735, 'payroll: total = 210 + 270 + 150 + 105');
+  assertEqual(c.lines.find(l=>l.job.id==='b').fromLastWeek, true, 'payroll: job from last week flagged fromLastWeek');
+  assertEqual(c.lines.find(l=>l.job.id==='c').fromLastWeek, false, 'payroll: job from 2 weeks back is late but not "last week"');
+  assertEqual(c.lines.find(l=>l.job.id==='c').late, true, 'payroll: job from 2 weeks back is late');
+  assertEqual(c.unpaid.length, 1, 'payroll: unpaid = jobs done by week end still unpaid (next week excluded)');
+  assertEqual(c.expected, 120, 'payroll: expected commission of the unpaid job');
+  assertEqual(c.cash, 350, 'payroll: cash to collect = cash jobs paid this week (no GST on this one)');
+  assertEqual(c.percent, 30, 'payroll: single rate shown in the message header');
+  const msg = sb.buildCommissionPayMessage(c);
+  const expectedMsg = [
+    'היי גיא 👋',
+    'סיכום שכר שבועי (13-19/9):',
+    'עמלה על עבודות השבוע (30%):',
+    '* #3003 (נסגרה מ-2/9): $150.00',
+    '* #3002 (נסגרה משבוע שעבר): $270.00',
+    '* #3001: $210.00',
+    '* #3004: $105.00',
+    '',
+    '💰 סה"כ לתשלום: $735.00',
+    '⚠️ עבודה אחת עדיין לא שולמה - תיכנס לשבוע שבו תיסגר (עמלה צפויה: $120.00)',
+    'מזומן שנאסף השבוע: $350.00 - צריך להעביר לאופק',
+    'שבוע טוב!',
+  ].join('\n');
+  assertEqual(msg, expectedMsg, 'payroll: Hebrew pay message for Guy matches Ofek\'s format');
+  const aMsg = sb.buildCommissionPayMessage(sb.computePayrollCommission(sb.STATE.data, 'Alessandro', '2026-09-13'));
+  assertEqual(aMsg.split('\n')[0], 'Hi Alessandro 👋', 'payroll: Alessandro gets his message in English');
+  assertEqual(aMsg.includes('💰 Total to pay: $300.00'), true, 'payroll: Alessandro 50% of 600 (parts not deducted) = 300');
+
+  // Ron: $10/h + daily bonus on that day's bookings (5-7 -> $10, 8-11 -> $15, 12+ -> $25).
+  assertEqual([4,5,7,8,11,12,30].map(n=>sb.bookingBonus(n)).join(','), '0,10,10,15,15,25,25', 'bookingBonus tiers');
+  assertEqual(sb.nextBookingTier(3), { needed:2, bonus:10 }, 'nextBookingTier: 3 bookings -> 2 more for $10');
+  assertEqual(sb.nextBookingTier(12), null, 'nextBookingTier: top tier reached');
+  sb.STATE.data.salesLogs = [
+    { person:'Ron', date:'2026-09-14', hours:8,   bookingsAircon:3, bookingsChimney:1, bookingsPw:1 },  // 5 -> $10, pay 90
+    { person:'Ron', date:'2026-09-15', hours:8.5, bookingsAircon:6, bookingsChimney:2, bookingsPw:0 },  // 8 -> $15, pay 100
+    { person:'Ron', date:'2026-09-16', hours:8,   bookingsAircon:9, bookingsChimney:2, bookingsPw:1 },  // 12 -> $25, pay 105
+    { person:'Ron', date:'2026-09-17', hours:7.5, bookingsAircon:4, bookingsChimney:0, bookingsPw:0 },  // 4 -> $0, pay 75
+    { person:'Ron', date:'2026-09-18', hours:8,   bookingsAircon:5, bookingsChimney:1, bookingsPw:1 },  // 7 -> $10, pay 90
+    { person:'Ron', date:'2026-09-21', hours:8,   bookingsAircon:9, bookingsChimney:9, bookingsPw:9 },  // next week: excluded
+  ];
+  const h = sb.computePayrollHourly(sb.STATE.data, 'Ron', '2026-09-13');
+  assertEqual(h.hours, 40, 'hourly: hours this week');
+  assertEqual(h.bookings, 36, 'hourly: bookings this week');
+  assertEqual(h.bonuses, 60, 'hourly: bonuses 10+15+25+0+10');
+  assertEqual(h.total, 460, 'hourly: 40h x $10 + $60 bonuses');
+  assertEqual(sb.buildHourlyPayMessage(h), 'Hi Ron 👋\nYour salary this week (14-18/9) + bonuses is $460.00.\nPlease upload your receipt to Dext.\nHave a good week!', 'hourly: Ron\'s English message uses the days he worked');
+
+  // Net profit = revenue - commissions - job expenses - equipment - marketing - Ron - owners (prorated per day).
+  sb.STATE.data.jobs = [
+    { technician:'Guy', date:'2026-09-14', amount:1000, partsCost:100, commissionPercent:30 },        // commission 270
+    { technician:'Alessandro', date:'2026-09-16', amount:500, partsCost:50, commissionPercent:50 },   // commission 250
+  ];
+  sb.STATE.data.equipmentSpend = [{ date:'2026-09-15', cost:60 }, { date:'2026-09-25', cost:999 }];
+  sb.STATE.data.adSpend = [{ date:'2026-09-14', channel:'Google Ads', spend:200 }, { date:'2026-09-14', channel:'Meta Ads', spend:100 }];
+  sb.STATE.data.salesLogs = [{ person:'Ron', date:'2026-09-14', hours:8, bookingsAircon:5, bookingsChimney:0, bookingsPw:0 }]; // 90
+  sb.STATE.data.settings = { gstRatePercent:10, ownerSalaries:{ Ofek:1200, Noam:1200 } };
+  const np = sb.computeNetProfit(sb.STATE.data, '2026-09-13', '2026-09-19', new Date(2026, 8, 22));
+  // 1500 - 520 - 150 - 60 - 300 - 90 - 2400 = -2020
+  assertEqual([np.revenue, np.commission, np.parts, np.equipment, np.marketing, np.hourlyStaff, np.owners, np.net].join(','), '1500,520,150,60,300,90,2400,-2020', 'netProfit: full week breakdown');
+  const npCapped = sb.computeNetProfit(sb.STATE.data, '2026-09-13', '2026-09-19', new Date(2026, 8, 15));
+  // capped at 15 Sep: 3 days of owner salary (2400*3/7 = 1028.57); the 16 Sep job is not counted yet
+  assertEqual([npCapped.days, npCapped.owners, npCapped.revenue].join(','), '3,1028.57,1000', 'netProfit: range capped at today');
+  sb.STATE.data.settings = { gstRatePercent:10 };
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
 testFunnelLossReasonsSpeedToLead(loadSandbox());
 testComputeProfitByWeekInRange(loadSandbox());
 testRepeatServiceReminder(loadSandbox());
+testPayroll(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
