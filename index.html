@@ -385,6 +385,10 @@ function pad2(n){ return String(n).padStart(2,'0'); }
 function parseLocalDate(s){ const [y,m,d]=s.slice(0,10).split('-').map(Number); return new Date(y,m-1,d); }
 function fmtLocal(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
 function todayStr(now){ return fmtLocal(now||new Date()); }
+// contacts.created_at is a full UTC timestamp ("2026-09-22T03:15:00+00:00"). Comparing it as a string with a
+// plain date drops every lead from the last day of a range and uses the UTC day, not Sydney's —
+// so turn it into the local calendar day first. Plain dates (seed data) pass through unchanged.
+function localDay(ts){ if (!ts) return ''; const s = String(ts); return s.length<=10 ? s : fmtLocal(new Date(s)); }
 function daysBetween(a,b){ return Math.round((b.getTime()-a.getTime())/86400000); }
 function round2(n){ return Math.round((Number(n)||0)*100)/100; }
 function weekOf(dateStr){
@@ -562,6 +566,52 @@ function computeNetProfit(data, startDateStr, endDateStr, now){
   const net = round2(revenue - commission - parts - equipment - marketing - hourlyStaff - owners);
   return { revenue, commission, parts, equipment, marketing, hourlyStaff, owners, net, days, start:startDateStr, end };
 }
+
+/* ── phone calls (Google Ads call reporting, synced daily into ad_calls) ─────────────────────────
+   Only calls made through Google's forwarding numbers on the ads are visible today — Google Maps
+   listings and people who type the 1300 number off the website aren't tracked until the Twilio stage. */
+const GOOGLE_ADS_AIRCON_ACCOUNT = '6569440597';
+function callDivision(c){
+  if (c.account===GOOGLE_ADS_AIRCON_ACCOUNT) return 'Aircon';
+  const name = (c.campaign||'').toLowerCase();
+  if (/chimney|fireplace/.test(name)) return 'Chimney';
+  if (/air ?con|aircon|duct|split/.test(name)) return 'Aircon';
+  return 'Pressure Washing'; // the other account's remaining campaigns are pressure washing / solar
+}
+function summarizeCalls(calls){
+  const out = { total:0, answered:0, missed:0, over30s:0, byDivision:{ Aircon:0, Chimney:0, 'Pressure Washing':0 } };
+  calls.forEach(c => {
+    out.total++;
+    if (c.status==='MISSED') out.missed++; else out.answered++;
+    if ((Number(c.durationSeconds)||0) >= 30) out.over30s++;
+    const d = callDivision(c); out.byDivision[d] = (out.byDivision[d]||0) + 1;
+  });
+  return out;
+}
+// Dashboard periods. Weeks are Sunday → Saturday, the same as Payroll. The comparison period is the
+// same length right before it (for "this month": the same days of last month), capped at today so a
+// half-finished period is never compared against a full one.
+const DASH_RANGES = [['week','This week'],['lastWeek','Last week'],['month','This month'],['lastMonth','Last month'],['30d','Last 30 days'],['90d','Last 90 days'],['custom','Custom']];
+function resolveDashboardRange(ui, now){
+  const today = todayStr(now);
+  const d = parseLocalDate(today);
+  let start, end, unit = null;
+  if (ui.range==='week') { const w = payrollWeekOf(today); start = w.start; end = w.end; unit = 'week'; }
+  else if (ui.range==='lastWeek') { const w = payrollWeekOf(shiftDays(payrollWeekOf(today).start, -1)); start = w.start; end = w.end; unit = 'week'; }
+  else if (ui.range==='lastMonth') { start = fmtLocal(new Date(d.getFullYear(), d.getMonth()-1, 1)); end = fmtLocal(new Date(d.getFullYear(), d.getMonth(), 0)); unit = 'month'; }
+  else if (ui.range==='30d' || ui.range==='90d') { const n = ui.range==='30d' ? 30 : 90; start = shiftDays(today, -(n-1)); end = today; }
+  else if (ui.range==='custom') { const a = ui.customFrom || today, b = ui.customTo || today; start = a<=b?a:b; end = a<=b?b:a; }
+  else { start = fmtLocal(new Date(d.getFullYear(), d.getMonth(), 1)); end = fmtLocal(new Date(d.getFullYear(), d.getMonth()+1, 0)); unit = 'month'; }
+  const effEnd = end > today ? today : end;
+  const spanDays = Math.max(1, daysBetween(parseLocalDate(start), parseLocalDate(effEnd)) + 1);
+  let prevStart;
+  if (unit==='week') prevStart = shiftDays(start, -7);
+  else if (unit==='month') { const s0 = parseLocalDate(start); prevStart = fmtLocal(new Date(s0.getFullYear(), s0.getMonth()-1, 1)); }
+  else prevStart = shiftDays(start, -spanDays);
+  let prevEnd = shiftDays(prevStart, spanDays - 1);
+  if (prevEnd >= start) prevEnd = shiftDays(start, -1);
+  return { start, end, effEnd, prevStart, prevEnd, spanDays };
+}
 // A task's people used to be one `assignedTo` string; new tasks store `assignees` (an array) instead.
 // This reads either shape so every render site keeps working regardless of which one a task has.
 function assigneeNames(t){
@@ -725,8 +775,8 @@ function computeReminders(data, now){
 
 /* ── permissions / types (ported from src/lib/types.ts + permissions.ts) ── */
 const ALL_SECTIONS = ['crm','crmOverview','overview','jobs','finance','payroll','outstanding','reminders','openItems','tasks','quotes','reference','closings','settings'];
-const SECTION_ORDER = ['crm','crmOverview','overview','closings','jobs','finance','payroll','bizPerformance','employeeViews','outstanding','reminders','openItems','tasks','quotes','reference'];
-const SECTION_LABEL = { crm:'CRM', crmOverview:'Leads & Marketing', overview:'Overview', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', bizPerformance:'Business Performance', employeeViews:'Employee Views', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', quotes:'Quotes', reference:'Equipment & Suppliers', closings:'Closings', settings:'Permissions & Settings' };
+const SECTION_ORDER = ['crm','crmOverview','overview','dashboard','closings','jobs','finance','payroll','bizPerformance','employeeViews','outstanding','reminders','openItems','tasks','quotes','reference'];
+const SECTION_LABEL = { dashboard:'Dashboard', crm:'CRM', crmOverview:'Leads & Marketing', overview:'Overview', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', bizPerformance:'Business Performance', employeeViews:'Employee Views', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', quotes:'Quotes', reference:'Equipment & Suppliers', closings:'Closings', settings:'Permissions & Settings' };
 const ROLE_LABEL = { owner:'Owner', manager:'Manager', technician:'Technician', va:'Virtual Assistant' };
 function roleLabel(role){ return ROLE_LABEL[role] || role; }
 function defaultPermissionsFor(role){
@@ -751,6 +801,8 @@ function canViewSection(profile, section){
   if (section==='settings') return profile.role==='owner';
   // Employee Views: only the owners (Ofek, Noam) can look at what each worker sees.
   if (section==='employeeViews') return profile.role==='owner';
+  // Dashboard: the whole-business summary (money, marketing, team) — owners/managers only, not grantable.
+  if (section==='dashboard') return profile.role==='owner' || profile.role==='manager';
   if (profile.role==='owner' || profile.role==='manager') return true;
   return !!profile.permissions[section];
 }
@@ -893,7 +945,7 @@ async function loadFromSupabase(){
     { data: suppliers }, { data: tasks }, { data: quotes }, { data: closings },
     { data: manualReminders }, { data: tagCatalog }, { data: dismissedReminders },
     { data: cashStatusRow }, { data: settingsRow }, { data: employees }, { data: commissionRateRows },
-    { data: activityRows }, { data: adSpendRows }, { data: payrollRows }, { data: salesLogRows },
+    { data: activityRows }, { data: adSpendRows }, { data: payrollRows }, { data: salesLogRows }, { data: adCallRows },
   ] = await Promise.all([
     sb.from('contacts').select('*'),
     sb.from('jobs').select('*'),
@@ -917,6 +969,8 @@ async function loadFromSupabase(){
     // Payroll board — same (data||[]) tolerance as ad_spend if a table is missing.
     sb.from('payroll_weeks').select('*'),
     sb.from('sales_daily_log').select('*'),
+    // Google Ads phone calls (owners/managers only via RLS — everyone else just gets []).
+    sb.from('ad_calls').select('*'),
   ]);
 
   // Group the shared activity_log table back into each record's own .activityLog[],
@@ -1003,6 +1057,7 @@ async function loadFromSupabase(){
     adSpend: (adSpendRows||[]).map(a => ({ date:a.date, channel:a.channel, spend:a.spend||0, leadsReported:a.leads_reported })),
     payrollWeeks: (payrollRows||[]).map(mapPayrollRow),
     salesLogs: (salesLogRows||[]).map(mapSalesLogRow),
+    adCalls: (adCallRows||[]).map(c => ({ id:c.id, callId:c.call_id, source:c.source, date:c.date, startedAt:c.started_at_local, durationSeconds:Number(c.duration_seconds)||0, status:c.status||'', callType:c.call_type||'', campaign:c.campaign||'', account:c.account||'' })),
   };
   (commissionRateRows||[]).forEach(r => { data.commissionRates[r.technician_name] = r.rates || {}; });
 
@@ -1657,7 +1712,7 @@ function setupRealtimeSubscriptions(){
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
 }
-let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null}, employeeViews:{person:null}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
+let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null}, employeeViews:{person:null}, dashboard:{range:'month', customFrom:'', customTo:''}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let toastMsg = null, toastTimer = null;
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
 let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task modal
@@ -1669,7 +1724,7 @@ let MODAL_QUOTE_ID = null; // id of the quote currently open in the quote modal 
 let CLOSING_FILE = null; // transient invoice-photo state for the "Post a closing" form
 
 function getCurrentProfile(){ return STATE.profiles.find(p => p.id===STATE.currentProfileId) || null; }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null}, employeeViews:{person:null}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null}, employeeViews:{person:null}, dashboard:{range:'month', customFrom:'', customTo:''}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
   toastTimer = setTimeout(()=>{
@@ -2152,7 +2207,7 @@ async function doChangePassword(){
 // length in sync with that template if you add or remove a group.
 const NAV = [
   { group:'Sales', items:[ {id:'crm', label:'CRM', icon:'◈'}, {id:'crmOverview', label:'Leads & Marketing', icon:'📊'} ] },
-  { group:'Overview', items:[ {id:'overview', label:'Overview', icon:'◆'}, {id:'reminders', label:'Reminders', icon:'●'}, {id:'openItems', label:'Open Tasks', icon:'▣'} ] },
+  { group:'Overview', items:[ {id:'dashboard', label:'Dashboard (new)', icon:'🧭'}, {id:'overview', label:'Overview', icon:'◆'}, {id:'reminders', label:'Reminders', icon:'●'}, {id:'openItems', label:'Open Tasks', icon:'▣'} ] },
   { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'finance', label:'Financial Summary', icon:'▦'}, {id:'payroll', label:'Payroll', icon:'💵'}, {id:'bizPerformance', label:'Business Performance', icon:'📈'}, {id:'employeeViews', label:'Employee Views', icon:'👁'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
   { group:'System', items:[ {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
 ];
@@ -2266,7 +2321,7 @@ function renderShell(profile, data){
         </div>
         </div>
       </div>
-      <div style="padding:24px 30px 60px;max-width:1200px;width:100%;margin:0 auto">
+      <div style="padding:24px 30px 60px;max-width:1200px;width:100%;min-width:0;margin:0 auto">
         <div id="content"></div>
       </div>
     </div>
@@ -4074,7 +4129,7 @@ function computeProfitByWeekInRange(data, startDateStr, endDateStr, technicianFi
 // against the channel it actually applies to (byChannel), rather than a fudged per-division number.
 function computeBusinessPerformance(data, startDateStr, endDateStr){
   const jobs = data.jobs.filter(j => j.date>=startDateStr && j.date<=endDateStr);
-  const contacts = (data.contacts||[]).filter(c => c.createdAt>=startDateStr && c.createdAt<=endDateStr);
+  const contacts = (data.contacts||[]).filter(c => { const d = localDay(c.createdAt); return d>=startDateStr && d<=endDateStr; });
 
   const byDivision = {}; JOB_TYPES.forEach(t=>byDivision[t]=blankPerfBucket());
   // Same additive pattern as the CRM Overview / Jobs-revenue breakdowns: sub-division numbers are a
@@ -4381,6 +4436,195 @@ function renderBusinessPerformance(profile, data){
     <div class="card">${techLeaderboard(perf.techEntries)}</div>
   `;
 }
+/* ── Dashboard: ONE page for the whole business (preview — meant to replace Overview, Leads &
+   Marketing, Financial Summary and Business Performance). One period picker drives every number;
+   each number appears exactly once. Reuses computeBusinessPerformance / computeNetProfit rather
+   than re-deriving anything, so it can't drift from the rest of the app. ───────────────────────── */
+function setDashboardRange(r){ UI.dashboard.range = r; render(); }
+function dashDelta(curr, prev){ return deltaBadge(curr, prev); }
+function dashHeadCard(label, value, sub, accent, delta){
+  return `<div class="card stat-card" style="--stat-accent:${accent}"><div class="stat-label">${esc(label)}</div><div class="stat-value">${value}${delta||''}</div><div class="stat-sub">${sub}</div></div>`;
+}
+function renderDashboard(profile, data){
+  const now = new Date();
+  const r = resolveDashboardRange(UI.dashboard, now);
+  const perf = computeBusinessPerformance(data, r.start, r.effEnd);
+  const prev = computeBusinessPerformance(data, r.prevStart, r.prevEnd);
+  const np = computeNetProfit(data, r.start, r.effEnd, now);
+  const npPrev = computeNetProfit(data, r.prevStart, r.prevEnd, now);
+  const inRange = (d, a, b) => d>=a && d<=b;
+  const calls = (data.adCalls||[]).filter(c => inRange(c.date, r.start, r.effEnd));
+  const callsPrev = (data.adCalls||[]).filter(c => inRange(c.date, r.prevStart, r.prevEnd));
+  const cs = summarizeCalls(calls);
+  const enquiries = perf.totalLeads + cs.total, enquiriesPrev = prev.totalLeads + callsPrev.length;
+  const jobs = data.jobs.filter(j => inRange(j.date, r.start, r.effEnd));
+  const today = todayStr(now);
+
+  // Owed to you right now — every unpaid job, not just this period's.
+  const unpaidAll = data.jobs.filter(j => j.paymentStatus!=='Paid');
+  const owed = round2(unpaidAll.reduce((s,j)=>s+jobTotalCollected(j),0));
+  const overdue = unpaidAll.filter(j => daysBetween(parseLocalDate(j.date), parseLocalDate(today)) > 7);
+
+  // How customers paid, for jobs done this period (amounts include GST — what actually hit the account).
+  const pay = { Cash:0, 'Bank Transfer':0, 'Credit Card':0, unset:0 }; let gst = 0, paidAmt = 0, unpaidAmt = 0;
+  jobs.forEach(j => {
+    const t = jobTotalCollected(j);
+    if (j.paymentStatus==='Paid') { paidAmt += t; pay[j.paymentMethod] !== undefined ? pay[j.paymentMethod] += t : pay.unset += t; } else unpaidAmt += t;
+    gst += jobGst(j);
+  });
+
+  const rangeChips = DASH_RANGES.map(([k,l]) => `<button class="week-chip ${UI.dashboard.range===k?'active':''}" onclick="setDashboardRange('${k}')">${l}</button>`).join('');
+  const customInputs = UI.dashboard.range==='custom' ? `
+    <input type="date" style="width:auto" value="${UI.dashboard.customFrom||''}" onchange="UI.dashboard.customFrom=this.value;render()">
+    <span style="color:var(--ink-faint);font-size:12px;align-self:center">to</span>
+    <input type="date" style="width:auto" value="${UI.dashboard.customTo||''}" onchange="UI.dashboard.customTo=this.value;render()">` : '';
+
+  // ── marketing: one table, one row per channel ──
+  const tagLeads = tag => (data.contacts||[]).filter(c => c.source==='Meta Ads' && (c.tags||[]).includes(tag) && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
+  const chRow = (name, ch, callCount, sub) => {
+    const forms = ch.leads, total = forms + (callCount||0);
+    const spend = ch.spend;
+    const cpe = spend!==null && total ? round2(spend/total) : null;
+    return `<tr${sub?' style="color:var(--ink-soft)"':''}>
+      <td>${sub?'&nbsp;&nbsp;↳ ':''}${esc(name)}</td>
+      <td class="num">${forms}</td>
+      <td class="num">${callCount===null ? '<span class="hint">not tracked</span>' : callCount}</td>
+      <td class="num" style="font-weight:700">${total}</td>
+      <td class="num">${spend===null ? '—' : fmtMoney(spend)}</td>
+      <td class="num">${cpe===null ? '—' : fmtMoney(cpe)}</td>
+      <td class="num">${ch.booked!==undefined ? ch.booked : '—'}</td>
+      <td class="num">${ch.revenue!==undefined ? fmtMoney(ch.revenue) : '—'}</td>
+      <td class="num">${ch.roas===null || ch.roas===undefined ? '—' : pill(roasTone(ch.roas), ch.roas+'×')}</td>
+    </tr>`;
+  };
+  const C = perf.byChannel;
+  const channelRows = [
+    chRow('Google Ads', C['Google Ads'], cs.total),
+    chRow('Meta Ads', C['Meta Ads'], null),
+    chRow('Facebook', { leads: tagLeads('Facebook'), spend:null, revenue: perf.bySubDivision.Facebook.revenue }, null, true),
+    chRow('Instagram', { leads: tagLeads('Instagram'), spend:null, revenue: perf.bySubDivision.Instagram.revenue }, null, true),
+    chRow('Google Maps', C['Google Maps'], null),
+    chRow('Organic (website)', C['Organic'], null),
+    chRow('Phone (logged by hand)', C['Phone Call'], null),
+  ].join('');
+  const totalSpend = round2(LEAD_SOURCES.reduce((s,k)=>s+(C[k].spend||0),0));
+
+  // ── divisions: one table, Split/Duct nested under Aircon ──
+  const divLeads = div => (data.contacts||[]).filter(c => c.division===div && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
+  const typeLeads = tag => (data.contacts||[]).filter(c => c.division==='Aircon' && (c.tags||[]).includes(tag) && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
+  const divRow = (label, leads, callsN, b, sub) => `<tr${sub?' style="color:var(--ink-soft)"':''}>
+    <td>${sub?'&nbsp;&nbsp;↳ ':''}${esc(label)}</td><td class="num">${leads}</td><td class="num">${callsN===null?'—':callsN}</td>
+    <td class="num">${b.count}</td><td class="num" style="font-weight:700">${fmtMoney(b.revenue)}</td><td class="num">${b.count?fmtMoney(b.avgDeal):'—'}</td>
+    <td class="num">${fmtMoney(b.profit)}</td><td class="num">${b.margin===null||b.margin===undefined?'—':pill(marginTone(b.margin), b.margin+'%')}</td></tr>`;
+  const divisionRows = LEAD_DIVISIONS.map(d => {
+    let html = divRow(d, divLeads(d), cs.byDivision[d]||0, perf.byDivision[d]);
+    if (d==='Aircon') html += AIRCON_TYPE_TAGS.map(t => divRow(t, typeLeads(t), null, perf.bySubDivision[t], true)).join('');
+    return html;
+  }).join('') + (perf.byDivision.Other.count ? divRow('Other', 0, null, perf.byDivision.Other) : '');
+
+  // ── team: technicians (from the same buckets as everything else) + hourly sales staff ──
+  const teamRows = perf.techEntries.map(t => `<tr><td>${techTag(t.name)}</td><td class="num">${t.count}</td><td class="num" style="font-weight:700">${fmtMoney(t.revenue)}</td>
+    <td class="num">${fmtMoney(t.commission)}</td><td class="num">${fmtMoney(t.avgDeal)}</td><td class="num">${t.reviewRate===null?'—':t.reviewRate+'%'}</td></tr>`).join('');
+  const hourlyRows = payrollHourlyPeople(data).map(p => {
+    const logs = (data.salesLogs||[]).filter(l => l.person===p && inRange(l.date, r.start, r.effEnd));
+    const hours = round2(logs.reduce((s,l)=>s+(Number(l.hours)||0),0));
+    const bookings = logs.reduce((s,l)=>s+salesLogBookings(l),0);
+    const payTotal = round2(logs.reduce((s,l)=>s+salesLogPay(l),0));
+    return `<tr><td>${techTag(p)}</td><td class="num">${hours}h</td><td class="num">${bookings}</td><td class="num" style="font-weight:700">${fmtMoney(payTotal)}</td><td class="num">${bookings ? fmtMoney(round2(payTotal/bookings)) : '—'}</td></tr>`;
+  }).join('');
+
+  // ── needs attention: counts + links only (the lists live on their own pages) ──
+  const thisPayWeek = payrollWeekOf(today).key;
+  const cashToCollect = round2(payrollCommissionPeople(data).map(p => computePayrollCommission(data, p, thisPayWeek))
+    .filter(c => !payrollStatus(data, thisPayWeek, c.person).cashCollected).reduce((s,c)=>s+c.cash,0));
+  const openReminders = computeReminders(data).filter(it => !it.isRead).length;
+  const invCounts = {}; data.jobs.forEach(j => { if (j.invoiceNumber) invCounts[j.invoiceNumber] = (invCounts[j.invoiceNumber]||0) + 1; });
+  const dupInvoices = Object.values(invCounts).filter(n => n>1).length;
+  const attention = [
+    overdue.length ? `<button class="btn" onclick="goTab('outstanding')">💵 ${overdue.length} unpaid job${overdue.length===1?'':'s'} older than 7 days · ${fmtMoney(round2(overdue.reduce((s,j)=>s+jobTotalCollected(j),0)))} →</button>` : '',
+    cashToCollect>0 ? `<button class="btn" onclick="goTab('payroll')">💰 ${fmtMoney(cashToCollect)} cash to collect from technicians this week →</button>` : '',
+    openReminders ? `<button class="btn" onclick="goTab('reminders')">🔔 ${openReminders} open reminder${openReminders===1?'':'s'} →</button>` : '',
+    dupInvoices ? `<button class="btn" onclick="goTab('jobs')">⚠️ ${dupInvoices} invoice number${dupInvoices===1?' is':'s are'} on more than one job →</button>` : '',
+  ].filter(Boolean).join('');
+
+  return `
+    <div class="page-head">
+      <div><h1 class="page-title">Dashboard</h1><div class="page-sub">The whole business on one page · ${fmtDateShort(r.start)} – ${fmtDateShort(r.effEnd)}${r.effEnd<r.end?' (to date)':''} · compared with ${fmtDateShort(r.prevStart)} – ${fmtDateShort(r.prevEnd)}</div></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">${rangeChips}${customInputs}</div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
+      ${dashHeadCard('Revenue (excl. GST)', fmtMoney(perf.totalRevenue), `${perf.jobsCount} jobs · avg ${perf.jobsCount?fmtMoney(round2(perf.totalRevenue/perf.jobsCount)):'—'}`, 'var(--primary-teal)', dashDelta(perf.totalRevenue, prev.totalRevenue))}
+      ${dashHeadCard('Enquiries', String(enquiries), `${perf.totalLeads} forms · ${cs.total} Google Ads calls`, 'var(--primary)', dashDelta(enquiries, enquiriesPrev))}
+      ${dashHeadCard('Jobs done', String(perf.jobsCount), `${perf.reviewRate===null?'—':perf.reviewRate+'% with a review'}`, 'var(--accent)', dashDelta(perf.jobsCount, prev.jobsCount))}
+      ${dashHeadCard('Owed to you now', fmtMoney(owed), `${unpaidAll.length} unpaid job${unpaidAll.length===1?'':'s'} (all time)`, owed>0?'var(--warn)':'var(--good)', '')}
+    </div>
+
+    <div class="section-title">Money</div>
+    <div class="grid-2" style="align-items:start">
+      ${renderNetProfitCard(np, 'Net profit', dashDelta(np.net, npPrev.net))}
+      <div class="card stat-card" style="--stat-accent:var(--primary-teal);margin-top:12px">
+        <div class="stat-label">How customers paid <span class="hint">(jobs this period, incl. GST)</span></div>
+        <div style="margin-top:8px">
+          <div class="kv"><span>Credit card</span><span class="v">${fmtMoney(pay['Credit Card'])}</span></div>
+          <div class="kv"><span>Bank transfer</span><span class="v">${fmtMoney(pay['Bank Transfer'])}</span></div>
+          <div class="kv"><span>Cash</span><span class="v">${fmtMoney(pay.Cash)}</span></div>
+          ${pay.unset ? `<div class="kv"><span>Paid, method not set</span><span class="v">${fmtMoney(pay.unset)}</span></div>` : ''}
+          <div class="kv total"><span>Paid</span><span class="v">${fmtMoney(paidAmt)}</span></div>
+          <div class="kv"><span>Still unpaid</span><span class="v" style="color:${unpaidAmt>0?'var(--bad)':'inherit'}">${fmtMoney(unpaidAmt)}</span></div>
+          <div class="kv"><span>GST collected</span><span class="v">${fmtMoney(gst)}</span></div>
+          <div class="kv"><span>Avg days to get paid</span><span class="v">${perf.avgDaysToPayment===null?'—':perf.avgDaysToPayment+' days'}</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:12px">${cashStatusRow()}</div>
+
+    ${attention ? `<div class="section-title">Needs attention</div><div style="display:flex;gap:8px;flex-wrap:wrap">${attention}</div>` : ''}
+
+    <div class="section-title">Marketing <span class="tag">ad spend ${fmtMoney(totalSpend)}</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Channel</th><th class="num">Form leads</th><th class="num">Calls</th><th class="num">Enquiries</th><th class="num">Ad spend</th><th class="num">Cost / enquiry</th><th class="num">Booked*</th><th class="num">Revenue</th><th class="num">ROAS</th></tr></thead>
+      <tbody>${channelRows}</tbody></table></div>
+    <div class="hint" style="margin-top:6px">📞 Google Ads calls this period: <b>${cs.total}</b> · answered ${cs.answered} · missed ${cs.missed} · 30 s or longer ${cs.over30s}. Calls from Google Maps and from people who dial the 1300 number off the website aren't tracked yet — that comes with the phone system (Twilio). *Booked is partial while lead statuses are still updated in GHL.</div>
+    <div class="grid-3" style="margin-top:12px;align-items:start">
+      <div class="card stat-card" style="--stat-accent:var(--primary)">
+        <div class="stat-label">Funnel — form leads to jobs*</div>
+        ${funnelStage('Leads', perf.funnel.leads, perf.funnel.leads, 'var(--primary)')}
+        ${funnelStage('Contacted', perf.funnel.contacted, perf.funnel.leads, 'var(--accent)')}
+        ${funnelStage('Price given', perf.funnel.priceGiven, perf.funnel.leads, 'var(--primary-teal)')}
+        ${funnelStage('Booked', perf.funnel.booked, perf.funnel.leads, 'var(--good)')}
+        ${funnelStage('Job done', perf.funnel.jobDone, perf.funnel.leads, 'var(--good)')}
+      </div>
+      <div class="card stat-card" style="--stat-accent:var(--bad)">
+        <div class="stat-label">Why leads were lost*</div>
+        ${(perf.lossReasons.price+perf.lossReasons.outsideArea+perf.lossReasons.wrongNumber+perf.lossReasons.noReasonGiven) ? renderBarGroup([
+          {label:'Price', value:perf.lossReasons.price, color:'var(--bad)'},
+          {label:'Outside area', value:perf.lossReasons.outsideArea, color:'var(--warn)'},
+          {label:'Wrong number', value:perf.lossReasons.wrongNumber, color:'var(--ink-faint)'},
+          {label:'No reason given', value:perf.lossReasons.noReasonGiven, color:'var(--accent)'},
+        ], {fmt:(n)=>String(n)}) : emptyState('No lost leads this period')}
+      </div>
+      <div class="card stat-card" style="--stat-accent:var(--accent)">
+        <div class="stat-label">Speed to lead</div>
+        ${perf.speedToLead.sampleSize ? `<div class="stat-value" style="font-size:20px">${perf.speedToLead.medianHours<1 ? Math.round(perf.speedToLead.medianHours*60)+' min' : perf.speedToLead.medianHours+' hrs'}</div><div class="stat-sub">median first reply · ${perf.speedToLead.sampleSize} lead${perf.speedToLead.sampleSize===1?'':'s'}</div>` : `<div class="stat-sub">Not enough data yet — fills in as leads are answered inside the app</div>`}
+      </div>
+    </div>
+
+    <div class="section-title">Divisions</div>
+    <div class="table-wrap"><table><thead><tr><th>Division</th><th class="num">Form leads</th><th class="num">Ad calls</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num">Avg job</th><th class="num">Gross profit</th><th class="num">Margin</th></tr></thead>
+      <tbody>${divisionRows}</tbody></table></div>
+    <div class="hint" style="margin-top:6px">Gross profit = revenue − technician commission − job expenses (before marketing and salaries, which are only in the Net profit above). Split / Duct only count jobs whose lead has that tag.</div>
+
+    <div class="section-title">Team <button class="btn ghost small" onclick="goTab('payroll')" style="margin-inline-start:8px">Pay status → Payroll</button></div>
+    <div class="grid-2" style="align-items:start">
+      <div class="table-wrap"><table><thead><tr><th>Technician</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num">Commission</th><th class="num">Avg job</th><th class="num">Reviews</th></tr></thead>
+        <tbody>${teamRows || `<tr><td colspan="6">${emptyState('No jobs this period')}</td></tr>`}</tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Sales</th><th class="num">Hours</th><th class="num">Bookings</th><th class="num">Pay</th><th class="num">Pay / booking</th></tr></thead>
+        <tbody>${hourlyRows || `<tr><td colspan="5">${emptyState('No hourly staff')}</td></tr>`}</tbody></table></div>
+    </div>
+    <div class="hint" style="margin-top:6px">Commission here is on the jobs DONE in this period; what was actually paid out, and when, is on the Payroll board.</div>
+  `;
+}
+
 /* ── Payroll board + each worker's own pay page + the owners' Employee Views ─────────────────────
    Pure math lives up top (computePayrollCommission / computePayrollHourly / build*PayMessage);
    everything here is rendering and the two manual statuses (cash collected → salary paid). */
@@ -4686,7 +4930,7 @@ async function copyPayMessage(kind, person){
 }
 
 function fmtSignedMoney(n){ return n < 0 ? '−' + fmtMoney(-n) : fmtMoney(n); }
-function renderNetProfitCard(np, title){
+function renderNetProfitCard(np, title, valueSuffix){
   const rows = [
     ['Revenue (excl. GST)', np.revenue, false],
     ['Technician commissions', np.commission, true],
@@ -4698,7 +4942,7 @@ function renderNetProfitCard(np, title){
   ];
   return `<div class="card stat-card" style="--stat-accent:${np.net>=0?'var(--good)':'var(--bad)'};margin-top:12px">
     <div class="stat-label">${esc(title||'Net profit')}</div>
-    <div class="stat-value">${fmtSignedMoney(np.net)}</div>
+    <div class="stat-value">${fmtSignedMoney(np.net)}${valueSuffix||''}</div>
     <div class="stat-sub">after commissions, expenses, marketing and all salaries · ${np.days ? `${fmtDateShort(np.start)} – ${fmtDateShort(np.end)}` : 'no days elapsed yet'}</div>
     <div style="margin-top:10px;max-width:520px">
       ${rows.map(([label, v, minus]) => `<div class="kv"><span>${minus?'− ':''}${esc(label)}</span><span class="v">${fmtMoney(v)}</span></div>`).join('')}
@@ -6395,6 +6639,7 @@ function render(){
   else if (UI.tab==='closings') content.innerHTML = renderClosings(profile, data);
   else if (UI.tab==='jobs') content.innerHTML = renderJobs(profile, data);
   else if (UI.tab==='finance') content.innerHTML = renderFinance(profile, data);
+  else if (UI.tab==='dashboard') content.innerHTML = renderDashboard(profile, data);
   else if (UI.tab==='payroll') content.innerHTML = renderPayroll(profile, data);
   else if (UI.tab==='bizPerformance') content.innerHTML = renderBusinessPerformance(profile, data);
   else if (UI.tab==='employeeViews') content.innerHTML = renderEmployeeViews(profile, data);

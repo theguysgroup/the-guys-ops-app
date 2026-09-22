@@ -44,6 +44,8 @@ const DECLS = [
   'salesLogBookings', 'salesLogPay', 'payrollWeekOf', 'shiftPayrollWeek', 'payrollRangeText', 'payMoney', 'jobPaidDate',
   'computePayrollCommission', 'computePayrollHourly', 'buildCommissionPayMessage', 'buildHourlyPayMessage', 'shiftDays',
   'computeNetProfit',
+  // dashboard
+  'localDay', 'GOOGLE_ADS_AIRCON_ACCOUNT', 'callDivision', 'summarizeCalls', 'DASH_RANGES', 'resolveDashboardRange',
 ];
 
 function extractDecl(source, name){
@@ -378,6 +380,44 @@ function testPayroll(sb){
   sb.STATE.data.settings = { gstRatePercent:10 };
 }
 
+function testDashboard(sb){
+  // localDay: a UTC timestamp becomes the LOCAL calendar day; plain dates pass through.
+  assertEqual(sb.localDay('2026-09-22'), '2026-09-22', 'localDay: plain date unchanged');
+  assertEqual(sb.localDay(new Date(2026, 8, 22, 23, 30).toISOString()), '2026-09-22', 'localDay: late-evening timestamp stays on its local day');
+  assertEqual(sb.localDay(null), '', 'localDay: empty');
+
+  // A lead created (full timestamp) on the LAST day of the range must be counted.
+  sb.STATE.data.contacts = [
+    { id:'c1', fullName:'A', source:'Organic', status:'New', division:'Aircon', createdAt: new Date(2026, 8, 22, 15, 0).toISOString(), tags:[] },
+    { id:'c2', fullName:'B', source:'Organic', status:'New', division:'Aircon', createdAt: new Date(2026, 8, 23, 9, 0).toISOString(), tags:[] },
+  ];
+  const perf = sb.computeBusinessPerformance(sb.STATE.data, '2026-09-20', '2026-09-22');
+  assertEqual(perf.totalLeads, 1, 'bizPerformance: timestamped lead on the end date is counted, next day is not');
+
+  // callDivision / summarizeCalls
+  assertEqual(sb.callDivision({ account:'6569440597', campaign:'PMax' }), 'Aircon', 'callDivision: aircon account');
+  assertEqual(sb.callDivision({ account:'3782562798', campaign:'Chimney Sweep - Search' }), 'Chimney', 'callDivision: chimney campaign');
+  assertEqual(sb.callDivision({ account:'3782562798', campaign:'Pressure Washing Sydney' }), 'Pressure Washing', 'callDivision: pressure washing campaign');
+  const cs = sb.summarizeCalls([
+    { account:'6569440597', status:'RECEIVED', durationSeconds:95 },
+    { account:'6569440597', status:'MISSED', durationSeconds:0 },
+    { account:'3782562798', campaign:'Chimney', status:'RECEIVED', durationSeconds:29 },
+  ]);
+  assertEqual([cs.total, cs.answered, cs.missed, cs.over30s, cs.byDivision.Aircon, cs.byDivision.Chimney].join(','), '3,2,1,1,2,1', 'summarizeCalls: counts');
+
+  // resolveDashboardRange — Tue 22 Sep 2026
+  const now = new Date(2026, 8, 22, 10, 0);
+  const R = (range, extra) => { const r = sb.resolveDashboardRange(Object.assign({ range }, extra||{}), now); return [r.start, r.effEnd, r.prevStart, r.prevEnd].join(' '); };
+  assertEqual(R('week'), '2026-09-20 2026-09-22 2026-09-13 2026-09-15', 'dashRange: this week (Sun-Sat, to date) vs same days last week');
+  assertEqual(R('lastWeek'), '2026-09-13 2026-09-19 2026-09-06 2026-09-12', 'dashRange: last week');
+  assertEqual(R('month'), '2026-09-01 2026-09-22 2026-08-01 2026-08-22', 'dashRange: this month to date vs same days last month');
+  assertEqual(R('lastMonth'), '2026-08-01 2026-08-31 2026-07-01 2026-07-31', 'dashRange: last month');
+  assertEqual(R('30d'), '2026-08-24 2026-09-22 2026-07-25 2026-08-23', 'dashRange: last 30 days');
+  assertEqual(R('custom', { customFrom:'2026-09-10', customTo:'2026-09-01' }), '2026-09-01 2026-09-10 2026-08-22 2026-08-31', 'dashRange: custom (reversed dates are swapped)');
+  const r2 = sb.resolveDashboardRange({ range:'lastMonth' }, new Date(2026, 3, 10));
+  assertEqual([r2.start, r2.effEnd, r2.prevStart, r2.prevEnd].join(' '), '2026-03-01 2026-03-31 2026-02-01 2026-02-28', 'dashRange: previous period never overlaps (March vs February)');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
@@ -385,6 +425,7 @@ testFunnelLossReasonsSpeedToLead(loadSandbox());
 testComputeProfitByWeekInRange(loadSandbox());
 testRepeatServiceReminder(loadSandbox());
 testPayroll(loadSandbox());
+testDashboard(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
