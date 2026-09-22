@@ -4553,7 +4553,7 @@ function renderDashboard(profile, data){
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">${rangeChips}${customInputs}</div>
 
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
       ${dashHeadCard('Revenue (excl. GST)', fmtMoney(perf.totalRevenue), `${perf.jobsCount} jobs · avg ${perf.jobsCount?fmtMoney(round2(perf.totalRevenue/perf.jobsCount)):'—'}`, 'var(--primary-teal)', dashDelta(perf.totalRevenue, prev.totalRevenue))}
       ${dashHeadCard('Enquiries', String(enquiries), `${perf.totalLeads} forms · ${cs.total} Google Ads calls`, 'var(--primary)', dashDelta(enquiries, enquiriesPrev))}
       ${dashHeadCard('Jobs done', String(perf.jobsCount), `${perf.reviewRate===null?'—':perf.reviewRate+'% with a review'}`, 'var(--accent)', dashDelta(perf.jobsCount, prev.jobsCount))}
