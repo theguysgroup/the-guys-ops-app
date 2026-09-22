@@ -4538,8 +4538,10 @@ function renderDashboard(profile, data){
   const cashToCollect = round2(payrollCommissionPeople(data).map(p => computePayrollCommission(data, p, thisPayWeek))
     .filter(c => !payrollStatus(data, thisPayWeek, c.person).cashCollected).reduce((s,c)=>s+c.cash,0));
   const openReminders = computeReminders(data).filter(it => !it.isRead).length;
-  const invCounts = {}; data.jobs.forEach(j => { if (j.invoiceNumber) invCounts[j.invoiceNumber] = (invCounts[j.invoiceNumber]||0) + 1; });
-  const dupInvoices = Object.values(invCounts).filter(n => n>1).length;
+  // Same invoice number AND same amount = the same job logged twice. Different amounts on one invoice are
+  // split payments (e.g. 2284: $150 card + $250 cash) and are real money, so they aren't flagged.
+  const invCounts = {}; data.jobs.forEach(j => { if (j.invoiceNumber) { const k = j.invoiceNumber+'|'+Number(j.amount); invCounts[k] = (invCounts[k]||0) + 1; } });
+  const dupInvoices = new Set(Object.keys(invCounts).filter(k => invCounts[k]>1).map(k => k.split('|')[0])).size;
   const attention = [
     overdue.length ? `<button class="btn" onclick="goTab('outstanding')">💵 ${overdue.length} unpaid job${overdue.length===1?'':'s'} older than 7 days · ${fmtMoney(round2(overdue.reduce((s,j)=>s+jobTotalCollected(j),0)))} →</button>` : '',
     cashToCollect>0 ? `<button class="btn" onclick="goTab('payroll')">💰 ${fmtMoney(cashToCollect)} cash to collect from technicians this week →</button>` : '',
