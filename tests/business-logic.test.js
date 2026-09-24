@@ -31,7 +31,7 @@ const DECLS = [
   // constants the functions below key off of
   'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS',
   // CRM / attribution
-  'findContactByName', 'jobAttributionTags', 'computeCrmStats',
+  'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
   'commissionEligibleTechnicianNames', 'computeWeek', 'computeMonth',
   // business performance
@@ -418,6 +418,32 @@ function testDashboard(sb){
   assertEqual([r2.start, r2.effEnd, r2.prevStart, r2.prevEnd].join(' '), '2026-03-01 2026-03-31 2026-02-01 2026-02-28', 'dashRange: previous period never overlaps (March vs February)');
 }
 
+function testJobCustomerLink(sb){
+  // A job is tied to its CRM customer by contactId; the name is only a fallback. Names here deliberately do NOT match.
+  sb.STATE.data.contacts = [
+    { id:'c-google', fullName:'Vianney Hunter', source:'Google Ads', status:'Booked', createdAt:'2026-09-03', tags:['Split System'] },
+    { id:'c-meta', fullName:'Neslihan', source:'Meta Ads', status:'Booked', createdAt:'2026-09-14', tags:[] },
+    { id:'c-none', fullName:'Nobody Yet', source:'Organic', status:'New', createdAt:'2026-09-05', tags:[] },
+  ];
+  sb.STATE.data.jobs = [
+    { id:'j1', customerName:'James', contactId:'c-google', jobType:'Aircon', date:'2026-09-07', amount:400, commissionPercent:30, partsCost:0, paymentStatus:'Paid', datePaid:'2026-09-08', technician:'Guy', reviewTaken:false },
+    { id:'j2', customerName:'Neslihan B', contactId:'c-meta', jobType:'Aircon', date:'2026-09-08', amount:600, commissionPercent:30, partsCost:0, paymentStatus:'Unpaid', technician:'Guy', reviewTaken:false },
+    { id:'j3', customerName:'Vianney Hunter', contactId:null, jobType:'Aircon', date:'2026-09-09', amount:100, commissionPercent:30, partsCost:0, paymentStatus:'Paid', datePaid:'2026-09-09', technician:'Guy', reviewTaken:false },
+    { id:'j4', customerName:'Somebody Else', contactId:null, jobType:'Chimney', date:'2026-09-09', amount:50, commissionPercent:30, partsCost:0, paymentStatus:'Paid', datePaid:'2026-09-09', technician:'Guy', reviewTaken:false },
+  ];
+  sb.STATE.data.adSpend = []; sb.STATE.data.quotes = []; sb.STATE.data.employees = [{ name:'Guy', roles:['Technician'] }];
+  assertEqual((sb.contactForJob(sb.STATE.data.jobs[0])||{}).id, 'c-google', 'contactForJob: linked id wins even when the names differ');
+  assertEqual((sb.contactForJob(sb.STATE.data.jobs[2])||{}).id, 'c-google', 'contactForJob: unlinked job falls back to the exact name');
+  assertEqual(sb.contactForJob(sb.STATE.data.jobs[3]), null, 'contactForJob: no link and no name match gives null');
+  const perf = sb.computeBusinessPerformance(sb.STATE.data, '2026-09-01', '2026-09-30');
+  assertEqual(perf.byChannel['Google Ads'].revenue, 500, 'channel revenue: linked job (400) + name-matched job (100) both credited to Google Ads');
+  assertEqual(perf.byChannel['Meta Ads'].revenue, 600, 'channel revenue: job with a different name is credited through its link');
+  assertEqual(perf.byChannel['Organic'].revenue, 0, 'channel revenue: an unlinked, unmatched job is not credited to any channel');
+  assertEqual(sb.contactHasJob({ id:'c-meta', fullName:'Neslihan' }, sb.STATE.data.jobs), true, 'contactHasJob: true through the link even if names differ');
+  assertEqual(sb.contactHasJob({ id:'c-none', fullName:'Nobody Yet' }, sb.STATE.data.jobs), false, 'contactHasJob: false with no link and no name');
+  assertEqual(sb.contactHasJob('Somebody Else', sb.STATE.data.jobs), true, 'contactHasJob: a plain name still works');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
@@ -426,6 +452,7 @@ testComputeProfitByWeekInRange(loadSandbox());
 testRepeatServiceReminder(loadSandbox());
 testPayroll(loadSandbox());
 testDashboard(loadSandbox());
+testJobCustomerLink(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

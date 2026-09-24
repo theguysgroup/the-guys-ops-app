@@ -719,7 +719,7 @@ function computeReminders(data, now){
     if (j.paymentStatus !== 'Paid') {
       const age = daysBetween(parseLocalDate(j.date), today);
       const key = `unpaid:${j.id}`;
-      if (age >= unpaidReminderDays && !dismissed.has(key)) items.push({ key, readKey:key, type:'unpaid', severity: age>=14?'bad':'warn', date:j.date, title:`${j.customerName} — invoice #${j.invoiceNumber||'—'} still unpaid`, meta:`${j.technician} · ${age} days overdue (past the ${unpaidReminderDays}-day term)` });
+      if (age >= unpaidReminderDays && !dismissed.has(key)) items.push({ key, readKey:key, type:'unpaid', severity: age>=14?'bad':'warn', date:j.date, contactId:j.contactId||'', title:`${j.customerName} — invoice #${j.invoiceNumber||'—'} still unpaid`, meta:`${j.technician} · ${age} days overdue (past the ${unpaidReminderDays}-day term)` });
     } else if (j.paidToTechnician !== 'Paid' && j.paidToTechnician !== 'Stuck') {
       const comm = jobCommissionAmount(j);
       const key = `commission:${j.id}`;
@@ -1101,9 +1101,9 @@ function jobPatchToRow(patch){
     partsPaidBy:'parts_paid_by', partsRefundStatus:'parts_refund_status', notes:'notes',
     datePaid:'date_paid', paidToTechnician:'paid_to_technician', enteredBy:'entered_by',
     cashConfirmed:'cash_confirmed', invoiceFile:'invoice_file', transferReceiptFile:'transfer_receipt_file',
-    equipmentRentalFile:'equipment_rental_file', reviewTaken:'review_taken',
+    equipmentRentalFile:'equipment_rental_file', reviewTaken:'review_taken', contactId:'contact_id',
   };
-  const nullIfEmpty = new Set(['date_paid']);
+  const nullIfEmpty = new Set(['date_paid','contact_id']);
   const row = {};
   for (const k in patch) {
     if (!map[k]) continue;
@@ -1621,7 +1621,7 @@ function mapJobRow(j){
     partsRefundStatus:j.parts_refund_status||'N/A', notes:j.notes||'', datePaid:j.date_paid,
     paidToTechnician:j.paid_to_technician, enteredBy:j.entered_by||'', cashConfirmed:j.cash_confirmed,
     invoiceFile:j.invoice_file, transferReceiptFile:j.transfer_receipt_file, equipmentRentalFile:j.equipment_rental_file,
-    reviewTaken:j.review_taken,
+    reviewTaken:j.review_taken, contactId:j.contact_id||null,
   };
 }
 function mapPayrollRow(r){
@@ -3714,6 +3714,7 @@ function commitJobCellEdit(jobId, field, rawValue, inputType){
   if (oldVal !== newVal) {
     job[field] = newVal;
     db.jobs.update(job.id, { [field]: newVal });
+    if (field==='customerName') relinkJobByName(job);
     const financialFieldLabels = { amount:'Amount', partsCost:'Parts cost' };
     if (financialFieldLabels[field]) {
       logJobActivity(job, actor, `${financialFieldLabels[field]} changed from ${typeof oldVal==='number'?fmtMoney(oldVal):(oldVal||'—')} to ${typeof newVal==='number'?fmtMoney(newVal):(newVal||'—')}`);
@@ -3729,7 +3730,7 @@ function renderJobRows(jobs, canEdit){
     <tr>
       <td style="border-inline-start:3px solid ${accent}">${statusSelect('jobTechnician', j.id, j.technician, technicianNames(STATE.data), ()=>'neutral', v=>v, !canEdit)}</td>
       <td class="mono">${jobEditableCell(j.id,'date', fmtDateShort(j.date), 'date')}</td>
-      <td>${jobEditableCell(j.id,'customerName', esc(j.customerName), 'text')}</td>
+      <td>${jobEditableCell(j.id,'customerName', esc(j.customerName), 'text')}${crmLinkButton(j.contactId)}</td>
       <td class="mono">${jobEditableCell(j.id,'invoiceNumber', esc(j.invoiceNumber||'—'), 'text')}</td>
       <td>${statusSelect('jobType', j.id, j.jobType, jobTypesForTech(j.technician), ()=>'neutral', v=>v, !canEdit)}</td>
       <td class="num">${jobEditableCell(j.id,'amount', fmtMoney(j.amount), 'number')}</td>
@@ -3860,7 +3861,7 @@ function openJobModal(jobId){
 
         <div class="modal-section">Customer &amp; invoice</div>
         <div class="grid-3">
-          <div class="field"><label>Customer</label><input id="jm-customer" value="${esc(job?.customerName||'')}"></div>
+          <div class="field"><label>Customer</label>${customerPickerInput('jm-customer', job?.customerName||'')}</div>
           <div class="field"><label>Invoice Number</label><input id="jm-invoice" value="${esc(job?.invoiceNumber||'')}"></div>
           <div class="field"><label>Date</label>${dateCellField('jm-date', job?.date||todayStr())}</div>
         </div>
@@ -3933,7 +3934,8 @@ function updateJobCommissionField(){
   else { label.textContent = 'Commission % (manual — no automatic rate)'; }
 }
 async function saveJobModal(jobId){
-  const customerName = document.getElementById('jm-customer').value.trim();
+  const pick = resolveCustomerInput('jm-customer');
+  const customerName = pick.name;
   if (!customerName) { modalError('Please enter a customer name'); return; }
   const tech = document.getElementById('jm-tech').value, jobType = document.getElementById('jm-type').value;
   const auto = commissionRateFor(STATE.data.commissionRates, tech, jobType);
@@ -3945,8 +3947,11 @@ async function saveJobModal(jobId){
   let datePaid = prevJob?.datePaid || '';
   if (paymentStatus==='Paid' && !datePaid) datePaid = todayStr();
   if (paymentStatus!=='Paid') datePaid = '';
+  // Keep the existing customer link when the name is untouched; a new pick wins; a different typed name is re-matched below.
+  let contactId = pick.contactId;
+  if (!contactId && prevJob && prevJob.customerName===customerName) contactId = prevJob.contactId || null;
   const values = {
-    customerName, invoiceNumber: document.getElementById('jm-invoice').value.trim(),
+    customerName, contactId, invoiceNumber: document.getElementById('jm-invoice').value.trim(),
     date: document.getElementById('jm-date').value, technician: tech, jobType, commissionPercent,
     amount: Number(document.getElementById('jm-amount').value)||0,
     // "No GST" toggle, default OFF (unpressed) — unpressed means GST applies and is added on top of the
@@ -3986,7 +3991,7 @@ async function saveJobModal(jobId){
   } else {
     logJobActivity(job, actor, 'Job created');
   }
-  await ensureContactForJob(job);
+  await ensureContactForJob(job, contactId);
   closeModal(); showToast(jobId?'Job updated':'Job added'); render();
 }
 function job_or_null(rec, field){ return rec ? (rec[field] ?? null) : null; }
@@ -4161,7 +4166,7 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
     if (c.status==='Not Relevant') byChannel[c.source].notRelevant++;
   });
   jobs.forEach(j => {
-    const c = findContactByName(j.customerName);
+    const c = contactForJob(j);
     if (c && byChannel[c.source]) { byChannel[c.source].revenue += Number(j.amount)||0; byChannel[c.source].jobCount++; }
   });
   const spendByChannel = {};
@@ -4218,7 +4223,7 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   // has evidence of happening, not a guess about hidden steps.
   const funnelContacted = contacts.filter(c => c.status !== 'New').length;
   const funnelPriceGiven = contacts.filter(c => Number(c.estimatedValue) > 0).length;
-  const funnelJobDone = contacts.filter(c => contactHasJob(c.fullName, data.jobs)).length;
+  const funnelJobDone = contacts.filter(c => contactHasJob(c, data.jobs)).length;
 
   // Loss-reason breakdown for Not Relevant leads, from the same tags already on the contact (most of
   // this data arrived via the GHL import, where "why" was usually captured as a specific tag - see
@@ -4269,9 +4274,14 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
     lossReasons, speedToLead,
   };
 }
-function contactHasJob(fullName, allJobs){
-  const norm = (fullName||'').trim().toLowerCase();
-  if (!norm || !allJobs) return false;
+function contactHasJob(contactOrName, allJobs){
+  if (!allJobs) return false;
+  if (contactOrName && typeof contactOrName==='object') {
+    if (allJobs.some(j => j.contactId && j.contactId===contactOrName.id)) return true;
+    contactOrName = contactOrName.fullName;
+  }
+  const norm = (contactOrName||'').trim().toLowerCase();
+  if (!norm) return false;
   return allJobs.some(j => (j.customerName||'').trim().toLowerCase() === norm);
 }
 function pctDelta(curr, prev){
@@ -4480,6 +4490,16 @@ function renderDashboard(profile, data){
   const profitSeries = computeProfitByWeekInRange(data, trendStart, today);
   const lastFull = revSeries.length>1 ? revSeries[revSeries.length-2] : null;
 
+  // Which landing pages bring work: leads by when they came in; jobs and revenue by when the job was done, attributed to the
+  // page the linked customer first landed on. Only as good as the link between jobs and customers and landing_page (kept since 8 Sep).
+  const pagePath = u => { let x = (u||'').trim(); if (!x) return ''; x = x.replace(/^https?:\/\/[^/]+/i,'').split('?')[0].split('#')[0]; return x || '/'; };
+  const pageStats = {};
+  const pageOf = k => (pageStats[k] = pageStats[k] || { leads:0, jobs:0, revenue:0 });
+  (data.contacts||[]).filter(c => inRange(localDay(c.createdAt), r.start, r.effEnd)).forEach(c => { pageOf(pagePath(c.landingPage) || '(not recorded)').leads++; });
+  jobs.forEach(j => { const c = contactForJob(j); const b = pageOf(c ? (pagePath(c.landingPage) || '(not recorded)') : '(no customer linked)'); b.jobs++; b.revenue += Number(j.amount)||0; });
+  const pageRows = Object.entries(pageStats).sort((a,b) => b[1].revenue-a[1].revenue || b[1].leads-a[1].leads)
+    .map(([k,v]) => `<tr><td>${esc(k)}</td><td class="num">${v.leads}</td><td class="num">${v.jobs}</td><td class="num" style="font-weight:700">${fmtMoney(round2(v.revenue))}</td></tr>`).join('');
+
   const rangeChips = DASH_RANGES.map(([k,l]) => `<button class="week-chip ${UI.dashboard.range===k?'active':''}" onclick="setDashboardRange('${k}')">${l}</button>`).join('');
   const customInputs = UI.dashboard.range==='custom' ? `
     <input type="date" style="width:auto" value="${UI.dashboard.customFrom||''}" onchange="UI.dashboard.customFrom=this.value;render()">
@@ -4633,6 +4653,11 @@ function renderDashboard(profile, data){
         ${perf.speedToLead.sampleSize ? `<div class="stat-value" style="font-size:20px">${perf.speedToLead.medianHours<1 ? Math.round(perf.speedToLead.medianHours*60)+' min' : perf.speedToLead.medianHours+' hrs'}</div><div class="stat-sub">median first reply · ${perf.speedToLead.sampleSize} lead${perf.speedToLead.sampleSize===1?'':'s'}</div>` : `<div class="stat-sub">Not enough data yet — fills in as leads are answered inside the app</div>`}
       </div>
     </div>
+
+    <div class="section-title">Pages that bring work <span class="tag">by landing page</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Landing page</th><th class="num">Leads</th><th class="num">Jobs done</th><th class="num">Revenue</th></tr></thead>
+      <tbody>${pageRows || `<tr><td colspan="4">${emptyState('No leads or jobs this period')}</td></tr>`}</tbody></table></div>
+    <div class="hint" style="margin-top:6px">Leads count by when they came in; jobs and revenue by when the job was done, credited to the page that customer first landed on. "(not recorded)" = leads from before 8 Sep or entered by hand; "(no customer linked)" = jobs not yet tied to a CRM customer.</div>
 
     <div class="section-title">Divisions</div>
     <div class="table-wrap"><table><thead><tr><th>Division</th><th class="num">Form leads</th><th class="num">Ad calls</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num">Avg job</th><th class="num">Gross profit</th><th class="num">Margin</th></tr></thead>
@@ -4991,8 +5016,44 @@ function findContactByName(name){
   const norm = name.trim().toLowerCase();
   return (STATE.data.contacts||[]).find(c => c.fullName.trim().toLowerCase()===norm) || null;
 }
-function customerNameCell(name){
-  const c = findContactByName(name);
+// A job points at its CRM customer through jobs.contact_id (many jobs per customer). The name match is only a
+// fallback for old/unlinked rows — it misses most real customers (nicknames, company names, spelling).
+function contactForJob(job){
+  if (!job) return null;
+  if (job.contactId) { const c = (STATE.data.contacts||[]).find(x => x.id===job.contactId); if (c) return c; }
+  return findContactByName(job.customerName);
+}
+function relinkJobByName(job){
+  const c = findContactByName(job.customerName), id = c ? c.id : null;
+  if ((job.contactId||null) !== id) { job.contactId = id; db.jobs.update(job.id, { contactId:id }); }
+}
+// Small 💬 button that opens the customer's CRM conversation — only for people who can see the CRM.
+function crmLinkButton(contactId){
+  if (!contactId) return '';
+  const pr = getCurrentProfile();
+  if (!pr || !canViewSection(pr, 'crm')) return '';
+  return `<button class="btn ghost small" style="padding:0 6px;margin-inline-start:6px" title="Open the conversation with this customer" onclick="event.stopPropagation();goToLeadConversation('${contactId}')">💬</button>`;
+}
+// Customer picker for the Job modal and the Closings form: typing shows the CRM customers (name · phone) so the
+// person choosing picks the real customer instead of retyping a name that later fails to match.
+let CUSTOMER_PICK = {};   // datalist option text -> contact id, rebuilt every time a picker renders
+function customerPickerInput(id, value, placeholder){
+  CUSTOMER_PICK = {};
+  const opts = (STATE.data.contacts||[]).map(c => {
+    const label = `${c.fullName||'(no name)'} · ${c.phone||c.email||c.postcode||'no phone'}`;
+    CUSTOMER_PICK[label] = c.id;
+    return `<option value="${esc(label)}"></option>`;
+  }).join('');
+  return `<input id="${id}" list="dl-crm-customers" autocomplete="off" value="${esc(value||'')}"${placeholder?` placeholder="${esc(placeholder)}"`:''}><datalist id="dl-crm-customers">${opts}</datalist>`;
+}
+function resolveCustomerInput(id){
+  const raw = document.getElementById(id).value.trim();
+  const cid = CUSTOMER_PICK[raw];
+  if (cid) { const c = contactById(cid); if (c) return { name: c.fullName || c.phone || raw, contactId: c.id }; }
+  return { name: raw, contactId: null };
+}
+function customerNameCell(name, contactId){
+  const c = contactId ? ((STATE.data.contacts||[]).find(x => x.id===contactId) || findContactByName(name)) : findContactByName(name);
   if (!c) return esc(name);
   return `<span style="cursor:pointer;color:var(--primary-strong);text-decoration:underline;text-decoration-style:dotted" onclick="event.stopPropagation();goToLeadConversation('${c.id}')" title="Open conversation with ${esc(c.fullName)}">${esc(name)}</span>`;
 }
@@ -5001,7 +5062,7 @@ function customerNameCell(name){
 // type for jobs that were (or matched) a CRM lead with that tag; every other job's dollars still land in
 // the plain jobType/revenue totals untouched, exactly like the unsplit leads on the CRM Overview.
 function jobAttributionTags(job){
-  const c = findContactByName(job.customerName);
+  const c = contactForJob(job);
   if (!c) return { airconType:null, metaPlatform:null };
   const tags = c.tags || [];
   return {
@@ -5018,14 +5079,24 @@ function jobAttributionTags(job){
 // one of those into a `uuid` column throws "invalid input syntax for type uuid", so anything
 // derived from job.id must be guarded by this before it's allowed into a persisted patch.
 function isRealId(id){ return typeof id==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id); }
-async function ensureContactForJob(job){
+async function ensureContactForJob(job, chosenContactId){
   if (!job.customerName) return;
   const actor = getCurrentProfile()?.fullName || 'Unknown';
-  let c = findContactByName(job.customerName);
+  // Order: the customer the person picked, then the customer this job is already linked to, then a same-named contact.
+  let c = chosenContactId ? contactById(chosenContactId) : null;
+  if (!c && job.contactId) c = contactById(job.contactId);
+  if (!c) c = findContactByName(job.customerName);
   if (c) {
+    if (job.contactId !== c.id) {
+      job.contactId = c.id;
+      if (isRealId(job.id)) db.jobs.update(job.id, { contactId: c.id });
+      logJobActivity(job, actor, `Linked to CRM customer "${c.fullName||c.phone||c.id}"`);
+    }
     const patch = {};
     if (!c.linkedJobId && isRealId(job.id)) { c.linkedJobId = job.id; patch.linkedJobId = job.id; logContactActivity(c, actor, `Linked to job ${job.invoiceNumber||job.id}`); }
-    if (job.amount && job.amount!==c.salesValue) { c.salesValue = job.amount; patch.salesValue = job.amount; }
+    // A customer can have many jobs: Sales Value is the total of all of them, not just the latest.
+    const total = round2((STATE.data.jobs||[]).filter(j => j.contactId===c.id).reduce((sum,j) => sum + (Number(j.amount)||0), 0)) || job.amount;
+    if (total && total!==c.salesValue) { c.salesValue = total; patch.salesValue = total; }
     if (c.status!=='Booked' && c.status!=='Not Relevant') { c.status = 'Booked'; c.nextFollowUp = ''; patch.status = 'Booked'; patch.nextFollowUp = ''; }
     if (Object.keys(patch).length) db.contacts.update(c.id, patch);
     return;
@@ -5035,11 +5106,12 @@ async function ensureContactForJob(job){
     fullName: job.customerName, phone:'', email:'', postcode:'',
     division, source:'Organic', status:'Booked', createdAt: job.date || todayStr(), nextFollowUp:'',
     estimatedValue: job.amount||0, salesValue: job.amount||0, jobDescription: job.notes||'',
-    linkedJobId: isRealId(job.id) ? job.id : null, starred:false, lastReadAt:null, tags:[], followupNote:'', messages:[],
+    linkedJobId: isRealId(job.id) ? job.id : null, starred:false, lastReadAt:null, tags:['from job'], followupNote:'', messages:[],
   };
   try {
     c = await db.contacts.create({ activityLog:[], ...values });
   } catch (err) { return; }   // db.contacts.create() already showed an error toast
+  if (isRealId(job.id)) { job.contactId = c.id; db.jobs.update(job.id, { contactId: c.id }); }
   logContactActivity(c, actor, 'Lead created automatically from a job');
   logLeadEvent(c, `Lead created automatically from job ${job.invoiceNumber?('#'+job.invoiceNumber):''} — ${job.jobType}, ${fmtMoney(job.amount||0)}`);
 }
@@ -5055,8 +5127,8 @@ function renderOutstanding(profile, data){
   const today = parseLocalDate(todayStr());
   // Status/Method controls write directly to the same job records Jobs & Commissions reads — marking
   // paid here is automatically reflected there (and vice versa), since it's the same underlying data.
-  const unpaidRows = unpaidJobs.length ? unpaidJobs.map(j => { const age = daysBetween(parseLocalDate(j.date), today); return `<tr><td class="mono">${fmtDateShort(j.date)}</td><td>${customerNameCell(j.customerName)}</td><td class="mono">${esc(j.invoiceNumber||'—')}</td><td>${esc(j.technician)}</td><td class="num">${fmtMoney(j.amount)}</td><td>${pill(age>=7?'bad':'neutral', age+' days')}</td><td>${statusSelect('jobStatus', j.id, j.paymentStatus, ['Unpaid','Paid'], v=>v==='Paid'?'good':'bad', v=>v, !canEdit)}</td><td>${statusSelect('jobPaymentMethod', j.id, j.paymentMethod||'', CLOSING_PAYMENT_METHODS, ()=>'neutral', v=>v||'—', !canEdit)}</td></tr>`; }).join('') : `<tr><td colspan="8">${emptyState('No outstanding balances','All customers have paid ✓')}</td></tr>`;
-  const partsRows = pendingParts.length ? pendingParts.map(j=>`<tr><td class="mono">${fmtDateShort(j.date)}</td><td>${customerNameCell(j.customerName)}</td><td>${esc(j.partsPaidBy)}</td><td class="num">${fmtMoney(j.partsCost)}</td></tr>`).join('') : `<tr><td colspan="4">${emptyState('No pending parts refunds')}</td></tr>`;
+  const unpaidRows = unpaidJobs.length ? unpaidJobs.map(j => { const age = daysBetween(parseLocalDate(j.date), today); return `<tr><td class="mono">${fmtDateShort(j.date)}</td><td>${customerNameCell(j.customerName, j.contactId)}${crmLinkButton(j.contactId)}</td><td class="mono">${esc(j.invoiceNumber||'—')}</td><td>${esc(j.technician)}</td><td class="num">${fmtMoney(j.amount)}</td><td>${pill(age>=7?'bad':'neutral', age+' days')}</td><td>${statusSelect('jobStatus', j.id, j.paymentStatus, ['Unpaid','Paid'], v=>v==='Paid'?'good':'bad', v=>v, !canEdit)}</td><td>${statusSelect('jobPaymentMethod', j.id, j.paymentMethod||'', CLOSING_PAYMENT_METHODS, ()=>'neutral', v=>v||'—', !canEdit)}</td></tr>`; }).join('') : `<tr><td colspan="8">${emptyState('No outstanding balances','All customers have paid ✓')}</td></tr>`;
+  const partsRows = pendingParts.length ? pendingParts.map(j=>`<tr><td class="mono">${fmtDateShort(j.date)}</td><td>${customerNameCell(j.customerName, j.contactId)}</td><td>${esc(j.partsPaidBy)}</td><td class="num">${fmtMoney(j.partsCost)}</td></tr>`).join('') : `<tr><td colspan="4">${emptyState('No pending parts refunds')}</td></tr>`;
   const equipRows = pendingEquip.length ? pendingEquip.map(e=>`<tr><td class="mono">${fmtDateShort(e.date)}</td><td>${esc(e.item)}</td><td>${esc(e.technician)}</td><td class="num">${fmtMoney(e.cost)}</td></tr>`).join('') : `<tr><td colspan="4">${emptyState('No pending equipment refunds')}</td></tr>`;
   return `
     <div class="page-head"><div><h1 class="page-title">Outstanding</h1><div class="page-sub">Everything still open — customer payments, parts and equipment refunds</div></div></div>
@@ -5131,6 +5203,8 @@ function markReminderReadOnly(readKey){
 function goToReminderTarget(type, contactId, readKey){
   markReminderRead(readKey);
   if (type==='followup' && contactId) { goToLeadConversation(contactId); return; }
+  // An unpaid invoice opens the conversation with that customer when it's linked and this person can see the CRM.
+  if (type==='unpaid' && contactId && canViewSection(getCurrentProfile(), 'crm')) { goToLeadConversation(contactId); return; }
   if (type==='unpaid' || type==='commission' || type==='refund') { UI.tab='outstanding'; render(); return; }
   if (type==='equipment') { UI.tab='reference'; UI.reference.tab='equipmentSpend'; render(); return; }
   if (type==='quote') { UI.tab='quotes'; render(); return; }
@@ -5333,7 +5407,7 @@ function renderClosings(profile, data){
       <div class="grid-3">
         <div class="field"><label>Technician</label><select id="cf-tech" onchange="onClosingTechChange()">${allTechs.map(t=>`<option value="${esc(t)}" ${t===defaultTech?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
         <div class="field"><label>Date</label><input type="date" id="cf-date" value="${todayStr()}"></div>
-        <div class="field"><label>Customer Name</label><input id="cf-customer" placeholder="e.g. Ivonne"></div>
+        <div class="field"><label>Customer Name</label>${customerPickerInput('cf-customer', '', 'Start typing — pick the customer from the CRM')}</div>
         <div class="field"><label>Invoice #</label><input id="cf-invoice" placeholder="e.g. 1008"></div>
         <div class="field"><label>Job Type</label><select id="cf-jobtype">${jobTypesForTech(defaultTech).map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
         <div class="field"><label>Amount (pre-GST)</label><input type="number" id="cf-amount" value="0"></div>
@@ -5360,7 +5434,8 @@ function renderClosings(profile, data){
 function postClosing(){
   const technicianName = document.getElementById('cf-tech').value;
   const date = document.getElementById('cf-date').value || todayStr();
-  const customerName = document.getElementById('cf-customer').value.trim();
+  const pick = resolveCustomerInput('cf-customer');
+  const customerName = pick.name;
   const invoiceNumber = document.getElementById('cf-invoice').value.trim();
   if (!customerName) { closingFormError('Please enter a customer name'); return; }
   if (!invoiceNumber) { closingFormError('Please enter an invoice number'); return; }
@@ -5376,7 +5451,7 @@ function postClosing(){
   const partsPaidBy = document.getElementById('cf-partsby').value;
   const notes = document.getElementById('cf-notes').value;
   const invoiceFileUrl = CLOSING_FILE;
-  const gathered = { technicianName, date, customerName, invoiceNumber, jobType, amount, includesGST, paymentStatus, paymentMethod, partsCost, partsPaidBy, notes, invoiceFileUrl };
+  const gathered = { technicianName, date, customerName, contactId: pick.contactId, invoiceNumber, jobType, amount, includesGST, paymentStatus, paymentMethod, partsCost, partsPaidBy, notes, invoiceFileUrl };
 
   // % commission isn't a field on this form (it's Jobs-table-only) — it's looked up automatically from
   // the commission-rates table. When there's no automatic rate for this technician/job-type combo, don't
@@ -5441,11 +5516,12 @@ async function finalizeClosing(g, commissionPercent){
     if (g.paymentStatus==='Paid' && !existingJob.datePaid) patch.datePaid = todayStr();
     if (g.paymentStatus!=='Paid') patch.datePaid = '';
     if (g.invoiceFileUrl) patch.invoiceFile = g.invoiceFileUrl;
+    if (g.contactId) patch.contactId = g.contactId;
     db.jobs.update(existingJob.id, patch);
     job = existingJob;
   } else {
     const values = {
-      customerName: g.customerName, invoiceNumber: g.invoiceNumber, date: g.date, technician: g.technicianName,
+      customerName: g.customerName, contactId: g.contactId || null, invoiceNumber: g.invoiceNumber, date: g.date, technician: g.technicianName,
       jobType: g.jobType, commissionPercent, amount: g.amount, includesGST: g.includesGST, paymentStatus: g.paymentStatus,
       paymentMethod: g.paymentMethod, partsCost: g.partsCost, partsPaidBy: g.partsPaidBy, partsRefundStatus:'N/A',
       notes: g.notes || 'Created automatically from a Closings post.', datePaid: g.paymentStatus==='Paid'?todayStr():'',
@@ -5455,7 +5531,7 @@ async function finalizeClosing(g, commissionPercent){
     try { job = await db.jobs.create({ activityLog:[], ...values }); }
     catch (err) { return; }   // db.jobs.create() already showed an error toast; leave the closing form as-is so the user can retry
   }
-  await ensureContactForJob(job);
+  await ensureContactForJob(job, g.contactId);
   const closingValues = {
     technicianName: g.technicianName, date: g.date, customerName: g.customerName, invoiceNumber: g.invoiceNumber,
     jobType: g.jobType, amount: g.amount, includesGST: g.includesGST, paymentStatus: g.paymentStatus, paymentMethod: g.paymentMethod,
