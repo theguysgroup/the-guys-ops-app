@@ -1711,7 +1711,7 @@ function setupRealtimeSubscriptions(){
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
 }
-let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null}, employeeViews:{person:null}, dashboard:{range:'month', customFrom:'', customTo:''}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
+let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null}, employeeViews:{person:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let toastMsg = null, toastTimer = null;
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
 let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task modal
@@ -1723,7 +1723,7 @@ let MODAL_QUOTE_ID = null; // id of the quote currently open in the quote modal 
 let CLOSING_FILE = null; // transient invoice-photo state for the "Post a closing" form
 
 function getCurrentProfile(){ return STATE.profiles.find(p => p.id===STATE.currentProfileId) || null; }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null}, employeeViews:{person:null}, dashboard:{range:'month', customFrom:'', customTo:''}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null}, employeeViews:{person:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
   toastTimer = setTimeout(()=>{
@@ -4454,6 +4454,131 @@ function dashDelta(curr, prev){ return deltaBadge(curr, prev); }
 function dashHeadCard(label, value, sub, accent, delta){
   return `<div class="card stat-card" style="--stat-accent:${accent}"><div class="stat-label">${esc(label)}</div><div class="stat-value">${value}${delta||''}</div><div class="stat-sub">${sub}</div></div>`;
 }
+
+// ── Dashboard sub-pages (dropdown at the top of the Dashboard) ─────────────────────────────────────
+// Detail pages read public.ads_stats: keyword / search-term / ad / campaign / hour / weekday / device
+// snapshots per window (30d, 90d), replaced by the ingest-ads-stats Edge Function. Loaded lazily (the table
+// is a few thousand rows, so it is paged) and only for owners/managers (RLS).
+const DASH_VIEWS = [['summary','Summary'],['google','Google Ads — keywords & wasted spend']];
+let ADS_STATS = { rows:null, loading:false, err:'' };
+function setDashboardView(v){ UI.dashboard.view = v; if (v!=='summary' && !ADS_STATS.rows) loadAdsStats(); else render(); }
+function setDashAdsWin(w){ UI.dashboard.adsWin = w; render(); }
+async function loadAdsStats(){
+  if (ADS_STATS.loading) return;
+  ADS_STATS.loading = true; render();
+  try {
+    let all = [], from = 0;
+    for (;;) {
+      const { data, error } = await sb.from('ads_stats').select('*').range(from, from+999);
+      if (error) throw error;
+      all = all.concat(data||[]);
+      if (!data || data.length < 1000) break;
+      from += 1000;
+    }
+    ADS_STATS.rows = all; ADS_STATS.err = '';
+  } catch(e) { ADS_STATS.err = String((e && e.message) || e); }
+  ADS_STATS.loading = false; render();
+}
+function dashViewSelect(){
+  return `<select class="input" style="min-width:250px;font-weight:600" onchange="setDashboardView(this.value)" aria-label="Dashboard view">${DASH_VIEWS.map(([k,l])=>`<option value="${k}" ${UI.dashboard.view===k?'selected':''}>${esc(l)}</option>`).join('')}</select>`;
+}
+function adsRatio(a,b){ return b>0 ? a/b : null; }
+function adsPct(x){ return x===null||x===undefined ? '—' : (x*100).toFixed(1)+'%'; }
+function adsTable(headers, rows, empty){
+  if (!rows.length) return `<div class="card" style="color:var(--ink-soft)">${esc(empty||'Nothing to show.')}</div>`;
+  return `<div class="table-wrap"><table><thead><tr>${headers.map((h,i)=>`<th${i>0&&h.num?' style="text-align:end"':''}>${esc(h.t||h)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+}
+function adsRow(cells){ return `<tr>${cells.map((c,i)=>`<td${c&&c.n?' style="text-align:end;font-variant-numeric:tabular-nums"':''}>${c&&c.n!==undefined?c.h:c}</td>`).join('')}</tr>`; }
+const adsNum = h => ({ n:1, h });
+function adsSection(title, sub, body){ return `<div style="margin-top:26px"><h2 style="font-size:16px;margin:0 0 4px">${esc(title)}</h2><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:10px">${sub}</div>${body}</div>`; }
+function adsBarCell(v, max, colour){ const w = max>0 ? Math.max(2, Math.round(v/max*100)) : 0; return `<div style="display:flex;align-items:center;gap:8px;min-width:120px"><div style="height:8px;width:${w}%;max-width:100px;background:${colour||'var(--primary)'};border-radius:2px"></div></div>`; }
+
+function renderDashGoogle(profile, data){
+  const win = UI.dashboard.adsWin;
+  const head = `<div class="page-head"><div><h1 class="page-title">Dashboard · Google Ads</h1><div class="page-sub">Aircon account — which keywords, searches and ads earn leads and which only burn budget</div></div><div>${dashViewSelect()}</div></div>`;
+  if (ADS_STATS.loading && !ADS_STATS.rows) return head + `<div class="card">Loading Google Ads detail…</div>`;
+  if (ADS_STATS.err) return head + `<div class="card" style="border-inline-start:4px solid var(--bad)">Could not load the data: ${esc(ADS_STATS.err)}</div>`;
+  const all = (ADS_STATS.rows||[]).filter(r => r.platform==='google' && r.win===win);
+  if (!all.length) return head + `<div class="card">No Google Ads detail has been synced for this window yet.</div>`;
+  const lv = l => all.filter(r => r.level===l).map(r => ({ ...r, cost:Number(r.cost)||0, conversions:Number(r.conversions)||0, clicks:Number(r.clicks)||0, impressions:Number(r.impressions)||0 }));
+  const sum = (rows, k) => rows.reduce((s,r)=>s+r[k],0);
+  const camps = lv('campaign'), kws = lv('keyword'), terms = lv('search_term'), ads = lv('ad'), hours = lv('hour'), dows = lv('dow'), devs = lv('device');
+  const tCost = sum(camps,'cost'), tClicks = sum(camps,'clicks'), tConv = sum(camps,'conversions'), tImp = sum(camps,'impressions');
+  const cpl = adsRatio(tCost, tConv);
+  const WASTE = win==='90d' ? 30 : 15;
+  const winChips = ['30d','90d'].map(w => `<button class="week-chip ${win===w?'active':''}" onclick="setDashAdsWin('${w}')">${w==='30d'?'Last 30 days':'Last 90 days'}</button>`).join('');
+  const updated = all.reduce((m,r)=>r.updated_at>m?r.updated_at:m,'');
+
+  const kwZero = kws.filter(k => k.conversions===0 && k.cost>0);
+  const kwZeroCost = sum(kwZero,'cost'), kwCost = sum(kws,'cost');
+  const wasteKws = kwZero.filter(k => k.cost>=WASTE).sort((a,b)=>b.cost-a.cost);
+  const termsZero = terms.filter(t => t.conversions===0 && t.cost>0);
+  const wasteTerms = termsZero.filter(t => t.item2!=='EXCLUDED' && t.cost>=WASTE/3).sort((a,b)=>b.cost-a.cost);
+  const wasteTermsCost = sum(wasteTerms,'cost');
+
+  const card = (label, val, sub, colour) => `<div class="card stat-card" style="--stat-accent:${colour||'var(--primary)'}"><div class="stat-label">${esc(label)}</div><div class="stat-value">${val}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:4px">${sub||''}</div></div>`;
+  const headline = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
+    ${card('Spend', fmtMoney(round2(tCost)), `${tClicks.toLocaleString()} clicks · CTR ${adsPct(adsRatio(tClicks,tImp))}`)}
+    ${card('Conversions (Google-counted)', String(Math.round(tConv*10)/10), `cost per conversion ${cpl===null?'—':fmtMoney(round2(cpl))}`, 'var(--primary-teal)')}
+    ${card('Keyword spend with no conversion', fmtMoney(round2(kwZeroCost)), `${adsPct(adsRatio(kwZeroCost,kwCost))} of keyword spend · ${kwZero.length} keywords`, 'var(--warn)')}
+    ${card(`Keywords ≥ ${fmtMoney(WASTE)} and nothing back`, fmtMoney(round2(sum(wasteKws,'cost'))), `${wasteKws.length} keywords — the clearest waste`, 'var(--bad)')}
+    ${card('Search terms not yet blocked, no result', fmtMoney(round2(wasteTermsCost)), `${wasteTerms.length} searches (≥ ${fmtMoney(round2(WASTE/3))} each)`, 'var(--bad)')}
+  </div>`;
+  const caveat = `<div class="card" style="margin-top:14px;border-inline-start:4px solid var(--warn);font-size:12.5px;color:var(--ink-soft)">
+    <b>Read this first.</b> "Conversions" are what Google counts (forms, calls and other actions), not confirmed leads or jobs.
+    27 Jul – 16 Aug the tracking was inflating conversions, so judge results on the <b>30-day</b> view; the 90-day view includes that stretch.
+    Performance Max (PMax) does not report keywords or search terms — it only appears in the campaign table.
+    Suggestions below are read-only signals: nothing is changed in the ad account from here.</div>`;
+
+  const campRows = camps.filter(c=>c.impressions>0||c.cost>0).sort((a,b)=>b.cost-a.cost).map(c => {
+    const x = c.extra||{};
+    return adsRow([`<b>${esc(c.campaign)}</b> <span style="color:var(--ink-faint);font-size:11px">${esc(c.item)}</span>`, adsNum(fmtMoney(round2(c.cost))), adsNum(c.clicks.toLocaleString()), adsNum(adsPct(adsRatio(c.clicks,c.impressions))), adsNum(String(Math.round(c.conversions*10)/10)), adsNum(c.conversions>0?fmtMoney(round2(c.cost/c.conversions)):'—'), adsNum(x.searchImpressionShare!=null?adsPct(x.searchImpressionShare):'—'), adsNum(x.searchBudgetLostImpressionShare!=null?adsPct(x.searchBudgetLostImpressionShare):'—'), adsNum(x.searchRankLostImpressionShare!=null?adsPct(x.searchRankLostImpressionShare):'—')]);
+  });
+  const campTable = adsTable(['Campaign',{t:'Spend',num:1},{t:'Clicks',num:1},{t:'CTR',num:1},{t:'Conv.',num:1},{t:'Cost / conv.',num:1},{t:'Impr. share',num:1},{t:'Lost: budget',num:1},{t:'Lost: rank',num:1}], campRows, 'No campaign data.');
+
+  const kwRow = k => adsRow([`<b>${esc(k.item)}</b> <span style="color:var(--ink-faint);font-size:11px">${esc((k.item2||'').toLowerCase())}</span>`, `${esc(k.campaign)} › ${esc(k.ad_group)}`, adsNum(fmtMoney(round2(k.cost))), adsNum(k.clicks.toLocaleString()), adsNum(String(Math.round(k.conversions*10)/10)), adsNum(k.conversions>0?fmtMoney(round2(k.cost/k.conversions)):'—'), adsNum((k.extra&&k.extra.qs)||'—'), esc((k.extra&&k.extra.status)||'')]);
+  const kwHead = ['Keyword','Campaign › ad group',{t:'Spend',num:1},{t:'Clicks',num:1},{t:'Conv.',num:1},{t:'Cost / conv.',num:1},{t:'QS',num:1},'Status'];
+  const wasteKwTable = adsTable(kwHead, wasteKws.slice(0,30).map(kwRow), `No keyword has spent ${fmtMoney(WASTE)} or more without a conversion in this window.`);
+  const bestKws = kws.filter(k => k.conversions>0 && k.cost>=5).sort((a,b)=>(a.cost/a.conversions)-(b.cost/b.conversions)).slice(0,15);
+  const bestKwTable = adsTable(kwHead, bestKws.map(kwRow), 'No keyword has conversions in this window.');
+  const lowQs = kws.filter(k => k.extra && k.extra.qs && Number(k.extra.qs)<=4 && k.cost>0).sort((a,b)=>b.cost-a.cost).slice(0,15);
+  const lowQsTable = adsTable(kwHead, lowQs.map(kwRow), 'No spending keyword has a Quality Score of 4 or lower.');
+
+  const termRow = t => adsRow([`<b>${esc(t.item)}</b>`, `${esc(t.campaign)} › ${esc(t.ad_group)}`, adsNum(fmtMoney(round2(t.cost))), adsNum(t.clicks.toLocaleString()), adsNum(String(Math.round(t.conversions*10)/10)), esc(t.item2==='NONE'?'not blocked':t.item2==='ADDED'?'added as keyword':t.item2.toLowerCase())]);
+  const termHead = ['What people searched','Campaign › ad group',{t:'Spend',num:1},{t:'Clicks',num:1},{t:'Conv.',num:1},'State'];
+  const wasteTermTable = adsTable(termHead, wasteTerms.slice(0,40).map(termRow), 'No unblocked search term is burning budget in this window.');
+  const goodTerms = terms.filter(t => t.conversions>0).sort((a,b)=>b.conversions-a.conversions||a.cost-b.cost).slice(0,15);
+  const goodTermTable = adsTable(termHead, goodTerms.map(termRow), 'No search term has conversions in this window.');
+
+  const adRows = ads.sort((a,b)=>b.cost-a.cost).map(a => adsRow([esc(a.item2||('Ad '+a.item)), `${esc(a.campaign)} › ${esc(a.ad_group)}`, adsNum(fmtMoney(round2(a.cost))), adsNum(a.clicks.toLocaleString()), adsNum(adsPct(adsRatio(a.clicks,a.impressions))), adsNum(String(Math.round(a.conversions*10)/10)), adsNum(a.conversions>0?fmtMoney(round2(a.cost/a.conversions)):'—')]));
+  const adTable = adsTable(['Ad (first headlines)','Campaign › ad group',{t:'Spend',num:1},{t:'Clicks',num:1},{t:'CTR',num:1},{t:'Conv.',num:1},{t:'Cost / conv.',num:1}], adRows, 'No ad data.');
+
+  const seg = (rows, labelFn, orderFn) => {
+    const maxCost = Math.max(0, ...rows.map(r=>r.cost));
+    return adsTable(['',{t:'Spend',num:1},'',{t:'Clicks',num:1},{t:'Conv.',num:1},{t:'Cost / conv.',num:1}], rows.sort(orderFn).map(r => adsRow([labelFn(r), adsNum(fmtMoney(round2(r.cost))), adsBarCell(r.cost, maxCost, r.conversions===0&&r.cost>0?'var(--bad)':'var(--primary)'), adsNum(r.clicks.toLocaleString()), adsNum(String(Math.round(r.conversions*10)/10)), adsNum(r.conversions>0?fmtMoney(round2(r.cost/r.conversions)):'—')])), 'No data.');
+  };
+  const DOW = ['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'];
+  const hrLabel = h => `${String(h).padStart(2,'0')}:00`;
+  const hourTable = seg(hours, r => hrLabel(r.item), (a,b)=>Number(a.item)-Number(b.item));
+  const dowTable = seg(dows, r => r.item.charAt(0)+r.item.slice(1).toLowerCase(), (a,b)=>DOW.indexOf(a.item)-DOW.indexOf(b.item));
+  const devTable = seg(devs, r => `${esc(r.campaign)} · ${esc(r.item.charAt(0)+r.item.slice(1).toLowerCase())}`, (a,b)=>b.cost-a.cost);
+
+  return head + `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center">${winChips}<span style="color:var(--ink-faint);font-size:12px">Synced ${updated?esc(new Date(updated).toLocaleString('en-AU',{timeZone:'Australia/Sydney',dateStyle:'medium',timeStyle:'short'})):'—'} · account 6569440597 (aircon)</span></div>
+    ${headline}${caveat}
+    ${adsSection('Campaigns', 'Impression share lost to <b>budget</b> means more money would buy more clicks; lost to <b>rank</b> means bids/quality are the limit.', campTable)}
+    ${adsSection('Keywords that spent money and brought nothing', `Spent ${fmtMoney(WASTE)} or more with zero conversions in this window. Candidates to pause or restructure — check the search terms first.`, wasteKwTable)}
+    ${adsSection('Searches burning budget (not blocked yet)', 'The actual words people typed. Irrelevant ones are candidates for negative keywords.', wasteTermTable)}
+    ${adsSection('Keywords with the lowest cost per conversion', 'Where each dollar works hardest — room to raise bids or budget.', bestKwTable)}
+    ${adsSection('Searches that convert', 'Real searches that led to conversions — candidates to add as exact/phrase keywords.', goodTermTable)}
+    ${adsSection('Low Quality Score keywords that are spending', 'Score 4 or lower means Google rates the ad or page as a poor match, so the same click costs more.', lowQsTable)}
+    ${adsSection('Ads', 'Which wording earns clicks and conversions.', adTable)}
+    ${adsSection('By hour of day (Sydney)', 'Red bars are hours that spent with no conversion.', hourTable)}
+    ${adsSection('By day of week', '', dowTable)}
+    ${adsSection('By device', '', devTable)}
+  `;
+}
+
 function renderDashboard(profile, data){
   const now = new Date();
   const r = resolveDashboardRange(UI.dashboard, now);
@@ -4582,6 +4707,7 @@ function renderDashboard(profile, data){
   return `
     <div class="page-head">
       <div><h1 class="page-title">Dashboard</h1><div class="page-sub">The whole business on one page · ${fmtDateShort(r.start)} – ${fmtDateShort(r.effEnd)}${r.effEnd<r.end?' (to date)':''} · compared with ${fmtDateShort(r.prevStart)} – ${fmtDateShort(r.prevEnd)}</div></div>
+      <div>${dashViewSelect()}</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">${rangeChips}${customInputs}</div>
 
@@ -6738,7 +6864,7 @@ function render(){
   else if (UI.tab==='closings') content.innerHTML = renderClosings(profile, data);
   else if (UI.tab==='jobs') content.innerHTML = renderJobs(profile, data);
   else if (UI.tab==='finance') content.innerHTML = renderFinance(profile, data);
-  else if (UI.tab==='dashboard') content.innerHTML = renderDashboard(profile, data);
+  else if (UI.tab==='dashboard') content.innerHTML = UI.dashboard.view==='google' ? renderDashGoogle(profile, data) : renderDashboard(profile, data);
   else if (UI.tab==='payroll') content.innerHTML = renderPayroll(profile, data);
   else if (UI.tab==='bizPerformance') content.innerHTML = renderBusinessPerformance(profile, data);
   else if (UI.tab==='employeeViews') content.innerHTML = renderEmployeeViews(profile, data);
