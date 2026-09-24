@@ -362,7 +362,7 @@ function testPayroll(sb){
   assertEqual(h.total, 460, 'hourly: 40h x $10 + $60 bonuses');
   assertEqual(sb.buildHourlyPayMessage(h), 'Hi Ron 👋\nYour salary this week (14-18/9) + bonuses is $460.00.\nPlease upload your receipt to Dext.\nHave a good week!', 'hourly: Ron\'s English message uses the days he worked');
 
-  // Net profit = revenue - commissions - job expenses - equipment - marketing - Ron - owners (prorated per day).
+  // Net profit = revenue - commissions - job expenses (parts) - marketing - Ron - owners (prorated per day).
   sb.STATE.data.jobs = [
     { technician:'Guy', date:'2026-09-14', amount:1000, partsCost:100, commissionPercent:30 },        // commission 270
     { technician:'Alessandro', date:'2026-09-16', amount:500, partsCost:50, commissionPercent:50 },   // commission 250
@@ -372,8 +372,8 @@ function testPayroll(sb){
   sb.STATE.data.salesLogs = [{ person:'Ron', date:'2026-09-14', hours:8, bookingsAircon:5, bookingsChimney:0, bookingsPw:0 }]; // 90
   sb.STATE.data.settings = { gstRatePercent:10, ownerSalaries:{ Ofek:1200, Noam:1200 } };
   const np = sb.computeNetProfit(sb.STATE.data, '2026-09-13', '2026-09-19', new Date(2026, 8, 22));
-  // 1500 - 520 - 150 - 60 - 300 - 90 - 2400 = -2020
-  assertEqual([np.revenue, np.commission, np.parts, np.equipment, np.marketing, np.hourlyStaff, np.owners, np.net].join(','), '1500,520,150,60,300,90,2400,-2020', 'netProfit: full week breakdown');
+  // 1500 - 520 - 150 - 300 - 90 - 2400 = -1960 (equipment purchases are not part of net profit)
+  assertEqual([np.revenue, np.commission, np.parts, np.marketing, np.hourlyStaff, np.owners, np.net].join(','), '1500,520,150,300,90,2400,-1960', 'netProfit: full week breakdown');
   const npCapped = sb.computeNetProfit(sb.STATE.data, '2026-09-13', '2026-09-19', new Date(2026, 8, 15));
   // capped at 15 Sep: 3 days of owner salary (2400*3/7 = 1028.57); the 16 Sep job is not counted yet
   assertEqual([npCapped.days, npCapped.owners, npCapped.revenue].join(','), '3,1028.57,1000', 'netProfit: range capped at today');

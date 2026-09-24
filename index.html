@@ -545,26 +545,25 @@ function buildHourlyPayMessage(h){
 }
 function shiftDays(dateStr, n){ const d = parseLocalDate(dateStr); d.setDate(d.getDate()+n); return fmtLocal(d); }
 // Net profit for any date range = revenue ex-GST − technician commissions − job expenses (parts) −
-// equipment purchases − marketing (ad_spend) − hourly staff pay (Ron) − owners' fixed weekly salaries
+// marketing (ad_spend) − hourly staff pay (Ron) − owners' fixed weekly salaries
 // (prorated per day). The range is capped at today, so "this month" doesn't charge salaries for days
 // that haven't happened yet while revenue only runs to date.
 function computeNetProfit(data, startDateStr, endDateStr, now){
   const today = todayStr(now);
   const end = endDateStr > today ? today : endDateStr;
-  if (end < startDateStr) return { revenue:0, commission:0, parts:0, equipment:0, marketing:0, hourlyStaff:0, owners:0, net:0, days:0, start:startDateStr, end };
+  if (end < startDateStr) return { revenue:0, commission:0, parts:0, marketing:0, hourlyStaff:0, owners:0, net:0, days:0, start:startDateStr, end };
   const inRange = d => d>=startDateStr && d<=end;
   const jobs = data.jobs.filter(j => inRange(j.date));
   const revenue = round2(jobs.reduce((s,j)=>s+(Number(j.amount)||0),0));
   const commission = round2(jobs.reduce((s,j)=>s+jobCommissionAmount(j),0));
   const parts = round2(jobs.reduce((s,j)=>s+(Number(j.partsCost)||0),0));
-  const equipment = round2((data.equipmentSpend||[]).filter(e=>inRange(e.date)).reduce((s,e)=>s+(Number(e.cost)||0),0));
   const marketing = round2((data.adSpend||[]).filter(a=>inRange(a.date)).reduce((s,a)=>s+(Number(a.spend)||0),0));
   const hourlyStaff = round2((data.salesLogs||[]).filter(l=>inRange(l.date)).reduce((s,l)=>s+salesLogPay(l),0));
   const days = daysBetween(parseLocalDate(startDateStr), parseLocalDate(end)) + 1;
   const weeklyOwners = Object.values((data.settings && data.settings.ownerSalaries) || {}).reduce((s,v)=>s+(Number(v)||0),0);
   const owners = round2(weeklyOwners * days / 7);
-  const net = round2(revenue - commission - parts - equipment - marketing - hourlyStaff - owners);
-  return { revenue, commission, parts, equipment, marketing, hourlyStaff, owners, net, days, start:startDateStr, end };
+  const net = round2(revenue - commission - parts - marketing - hourlyStaff - owners);
+  return { revenue, commission, parts, marketing, hourlyStaff, owners, net, days, start:startDateStr, end };
 }
 
 /* ── phone calls (Google Ads call reporting, synced daily into ad_calls) ─────────────────────────
@@ -4985,7 +4984,6 @@ function renderNetProfitCard(np, title, valueSuffix){
     ['Revenue (excl. GST)', np.revenue, false],
     ['Technician commissions', np.commission, true],
     ['Job expenses (parts)', np.parts, true],
-    ['Equipment purchases', np.equipment, true],
     ['Marketing (Google + Meta ads)', np.marketing, true],
     ['Hourly staff (Ron: hours + bonuses)', np.hourlyStaff, true],
     [`Owner salaries (${np.days} day${np.days===1?'':'s'})`, np.owners, true],
