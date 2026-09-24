@@ -4460,7 +4460,7 @@ function dashHeadCard(label, value, sub, accent, delta){
 // Detail pages read public.ads_stats: keyword / search-term / ad / campaign / hour / weekday / device
 // snapshots per window (30d, 90d), replaced by the ingest-ads-stats Edge Function. Loaded lazily (the table
 // is a few thousand rows, so it is paged) and only for owners/managers (RLS).
-const DASH_VIEWS = [['summary','Business summary'],['google','Google Ads']];
+const DASH_VIEWS = [['summary','Business summary'],['google','Google Ads'],['meta','Meta Ads (Facebook & Instagram)']];
 let ADS_STATS = { rows:null, insights:[], loading:false, err:'', tried:false };
 function setDashboardView(v){ UI.dashboard.view = v; if (v!=='summary' && !ADS_STATS.rows) loadAdsStats(); else render(); }
 function setDashAdsWin(w){ UI.dashboard.adsWin = w; render(); }
@@ -4560,7 +4560,7 @@ function renderDashGoogle(profile, data, standalone){
   const idx = adsIndex();
   if (!idx[win]) return head + `<div class="card">No Google Ads data has been synced yet.</div>`;
   const A = adsAnalyse(idx, win);
-  const updated = (ADS_STATS.rows||[]).reduce((m,r)=>r.updated_at>m?r.updated_at:m,'');
+  const updated = (ADS_STATS.rows||[]).filter(r=>r.platform==='google').reduce((m,r)=>r.updated_at>m?r.updated_at:m,'');
   const stamp = updated ? new Date(updated).toLocaleString('en-AU',{ timeZone:'Australia/Sydney', dateStyle:'medium', timeStyle:'short' }) : '—';
   const dl = (x) => x===null||x===undefined ? '—' : fmtMoney(round2(x));
   const cnt = x => String(Math.round(x*10)/10);
@@ -4636,6 +4636,97 @@ function renderDashGoogle(profile, data, standalone){
     ${campSec}${adSec}${hourSec}${daySec}${devSec}</div>`;
   return head + summary + details;
 }
+
+// ── Meta Ads board (owners/managers only — RLS hides platform='meta' rows from everyone else) ──────────
+// Same shape as the Google board. Meta reports very few leads itself, so "CRM leads" (contacts whose ad link carried this
+// ad set's id in utm_content) are the number that decides; jobs/revenue come from the job↔customer link.
+const META_MIN = { '7d':{ adset:40, ad:25, conv:1 }, '14d':{ adset:60, ad:35, conv:1 }, '30d':{ adset:100, ad:60, conv:2 }, '60d':{ adset:150, ad:90, conv:2 }, '90d':{ adset:200, ad:120, conv:2 } };
+function metaIsLead(c){ return c.source==='Meta Ads' || !!c.fbclid || /^(facebook|instagram|fb|ig)$/i.test(c.utmSource||''); }
+function metaAnalyse(data, win){
+  const rows = (ADS_STATS.rows||[]).filter(r => r.platform==='meta' && r.win===win && r.level==='ad').map(r => ({ ...r, cost:+r.cost||0, clicks:+r.clicks||0, impressions:+r.impressions||0, conversions:+r.conversions||0 }));
+  const end = shiftDays(todayStr(new Date()), -1), start = shiftDays(end, -(parseInt(win)-1));
+  const leadsAll = data.contacts.filter(c => { const d = localDay(c.createdAt); return d>=start && d<=end && metaIsLead(c); });
+  const byAdset = new Map(), byCamp = new Map();
+  const bump = (m, id, base, r) => { let g = m.get(id); if (!g) { g = { id, ...base, cost:0, clicks:0, impressions:0, metaLeads:0, ads:0, active:false, crmLeads:0, jobs:0, revenue:0 }; m.set(id, g); } g.cost += r.cost; g.clicks += r.clicks; g.impressions += r.impressions; g.metaLeads += r.conversions; g.ads++; if ((r.extra||{}).status==='ACTIVE') g.active = true; return g; };
+  rows.forEach(r => { const x = r.extra||{}; bump(byAdset, x.adset_id||r.ad_group, { name:r.ad_group, campaign:r.campaign, campaignId:x.campaign_id }, r); bump(byCamp, x.campaign_id||r.campaign, { name:r.campaign }, r); });
+  const leadAdset = new Map(); let tagged = 0;
+  leadsAll.forEach(c => { const g = byAdset.get(c.utmContent); if (g) { g.crmLeads++; tagged++; leadAdset.set(c.id, g); const cg = byCamp.get(g.campaignId); if (cg) cg.crmLeads++; } });
+  data.jobs.forEach(j => { const c = contactForJob(j); const g = c && leadAdset.get(c.id); if (g) { g.jobs++; g.revenue += Number(j.amount)||0; const cg = byCamp.get(g.campaignId); if (cg) { cg.jobs++; cg.revenue += Number(j.amount)||0; } } });
+  const sum = (a,f) => a.reduce((t,x)=>t+f(x),0);
+  const adsets = [...byAdset.values()], camps = [...byCamp.values()];
+  const th = META_MIN[win];
+  const pause = adsets.filter(g => g.active && g.crmLeads===0 && g.cost>=th.adset).sort((a,b)=>b.cost-a.cost);
+  const scale = adsets.filter(g => g.crmLeads>=th.conv && g.cost/g.crmLeads<=120).sort((a,b)=>(a.cost/a.crmLeads)-(b.cost/b.crmLeads));
+  const totCost = sum(rows,r=>r.cost), totClicks = sum(rows,r=>r.clicks), totImp = sum(rows,r=>r.impressions);
+  const avgCtr = totImp ? totClicks/totImp : 0;
+  const weak = rows.filter(r => (r.extra||{}).status==='ACTIVE' && r.cost>=th.ad && r.impressions>0 && (r.clicks/r.impressions) < avgCtr*0.75).sort((a,b)=>b.cost-a.cost);
+  return { rows, adsets, camps, pause, scale, weak, leadsAll, tagged, totCost, totClicks, totImp, metaLeads:sum(rows,r=>r.conversions), th, start, end, avgCtr };
+}
+function renderDashMeta(profile, data){
+  const win = UI.dashboard.adsWin;
+  const head = `<div class="page-head"><div><h1 class="page-title">Meta Ads</h1><div class="page-sub">Facebook &amp; Instagram · read-only view, refreshed every night · owners only</div></div><div>${dashViewSelect()}</div></div>`;
+  if (ADS_STATS.loading && !ADS_STATS.rows) return head + `<div class="card">Loading Meta Ads data…</div>`;
+  if (ADS_STATS.err) return head + `<div class="card" style="border-inline-start:4px solid var(--bad)">Could not load the data: ${esc(ADS_STATS.err)}</div>`;
+  if (!ADS_STATS.rows) return head + `<div class="card">Loading Meta Ads data…</div>`;
+  if (!(ADS_STATS.rows||[]).some(r=>r.platform==='meta')) return head + `<div class="card">No Meta Ads data has been synced yet.</div>`;
+  const A = metaAnalyse(data, win);
+  const updated = (ADS_STATS.rows||[]).filter(r=>r.platform==='meta').reduce((m,r)=>r.updated_at>m?r.updated_at:m,'');
+  const stamp = updated ? new Date(updated).toLocaleString('en-AU',{ timeZone:'Australia/Sydney', dateStyle:'medium', timeStyle:'short' }) : '—';
+  const W = ADS_WIN_LABEL[win], th = A.th;
+  const dl = x => x===null||x===undefined||!isFinite(x) ? '—' : fmtMoney(round2(x));
+  const cnt = x => String(Math.round(x*10)/10);
+  const winChips = ADS_WINS.map(w => `<button class="week-chip ${win===w?'active':''}" onclick="setDashAdsWin('${w}')">${ADS_WIN_LABEL[w]}</button>`).join('');
+  const chipsRow = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px"><b style="margin-inline-end:4px">Show the last</b>${winChips}<span style="color:var(--ink-faint);font-size:12px;margin-inline-start:8px">Data synced ${esc(stamp)}</span></div>`;
+  const card = (label, val, sub, colour, target) => {
+    const inner = `<div class="stat-label">${esc(label)}</div><div class="stat-value">${val}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:4px;line-height:1.35">${sub}</div>`;
+    return target ? `<button onclick="adsGo('${target}')" class="card stat-card" style="--stat-accent:${colour};text-align:start;cursor:pointer;font:inherit;color:inherit;width:100%">${inner}<div style="font-size:11.5px;color:var(--primary);margin-top:6px">See the list ↓</div></button>` : `<div class="card stat-card" style="--stat-accent:${colour}">${inner}</div>`;
+  };
+  const crm = A.leadsAll.length;
+  const cards = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+    ${card('Spend', fmtMoney(round2(A.totCost)), `${A.totClicks.toLocaleString()} clicks at ${dl(A.totClicks?A.totCost/A.totClicks:null)} each`, 'var(--primary)', 'ads-m-trend')}
+    ${card('Leads in the CRM', String(crm), `${crm?dl(A.totCost/crm)+' each. ':''}Meta itself counts only ${cnt(A.metaLeads)}.`, 'var(--primary-teal)', 'ads-m-adsets')}
+    ${card('Ad sets to pause or rework', String(A.pause.length), `Running, spent ${fmtMoney(th.adset)}+ and no CRM lead.`, 'var(--bad)', 'ads-m-pause')}
+    ${card('Ad sets worth scaling', String(A.scale.length), A.scale.length?'Bring CRM leads at $120 or less each.':'None qualify in this period.', 'var(--good)', 'ads-m-scale')}
+    ${card('Ads with a weak click rate', String(A.weak.length), `Running ads whose click rate is well below the account average (${adsPct(A.avgCtr)}).`, 'var(--warn)', 'ads-m-weak')}
+    ${card('Leads with no ad tag', String(crm-A.tagged), 'Meta leads in the CRM that cannot be tied to an ad set.', 'var(--primary)', 'ads-m-adsets')}
+  </div>`;
+  const ins = (ADS_STATS.insights||[]).filter(i=>i.platform==='meta').sort((a,b)=>String(b.day).localeCompare(String(a.day)))[0];
+  const TONES = [['bad','Problems','var(--bad)'],['warn','Watch','var(--warn)'],['good','Going well','var(--good)']];
+  const opinion = ins ? `<div class="card" style="margin-top:18px;padding:18px 20px">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0;font-size:16px">Assessment</h3><span style="font-size:12px;color:var(--ink-faint)">Written ${esc(fmtDateShort(ins.day))} · looks at 7, 14, 30, 60 and 90 days together · does not change with the period above</span></div>
+      <p style="margin:10px 0 14px;line-height:1.5;font-size:14.5px">${esc(ins.summary)}</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">${TONES.map(([tone,label,colour]) => { const pts=(ins.points||[]).filter(p=>(p.tone||'warn')===tone); if(!pts.length) return ''; return `<div style="border-radius:10px;padding:12px 14px;background:color-mix(in srgb, ${colour} 12%, transparent);border:1px solid color-mix(in srgb, ${colour} 40%, transparent)"><div style="font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${colour};margin-bottom:8px">${label}</div><ul style="margin:0;padding:0;list-style:none;display:grid;gap:10px">${pts.map(pt=>`<li style="line-height:1.4;font-size:13.5px">${esc(pt.text)}${pt.target?` <a href="#" onclick="adsGo('${esc(pt.target)}');return false" style="color:var(--primary);white-space:nowrap">See list →</a>`:''}</li>`).join('')}</ul></div>`; }).join('')}</div></div>`
+    : `<div class="card" style="margin-top:18px;color:var(--ink-soft)"><b>Assessment</b> — a written assessment will appear here after the next nightly run.</div>`;
+
+  const all = ADS_WINS.map(w => { const a = metaAnalyse(data, w); return { w, cost:a.totCost, clicks:a.totClicks, crm:a.leadsAll.length, meta:a.metaLeads }; });
+  const trendRows = all.map(t => adsRow([`<b>Last ${ADS_WIN_LABEL[t.w]}</b>`, adsNum(fmtMoney(round2(t.cost))), adsNum(t.clicks.toLocaleString()), adsNum(dl(t.clicks?t.cost/t.clicks:null)), adsNum(String(t.crm)), adsNum(t.crm?dl(t.cost/t.crm):'—'), adsNum(cnt(t.meta))]));
+  const trendTable = `<div id="ads-m-trend" style="margin-top:22px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:15px;margin:0 0 8px">All periods side by side</h3>${adsTable(['Period',{t:'Spend',num:1},{t:'Clicks',num:1},{t:'Cost per click',num:1},{t:'CRM leads',num:1},{t:'Cost per CRM lead',num:1},{t:'Meta-counted leads',num:1}], trendRows)}<div style="font-size:12px;color:var(--ink-faint);margin-top:6px">Spend covers the whole account, including chimney and pressure-washing ads. CRM leads are every lead in the ops app that came from Meta.</div></div>`;
+  const summary = `<h2 style="font-size:18px;margin:0 0 12px">Summary</h2>${chipsRow}${cards}${opinion}${trendTable}`;
+
+  const statusPill = st => { const on = st==='ACTIVE'; return `<span style="font-size:11px;padding:2px 8px;border-radius:99px;background:${on?'color-mix(in srgb, var(--good) 18%, transparent)':'var(--surface-2, var(--line))'};color:${on?'var(--good)':'var(--ink-faint)'}">${on?'running':'paused'}</span>`; };
+  const gHead = (first) => [first,'Status',{t:'Spent',num:1},{t:'Clicks',num:1},{t:'Click rate',num:1},{t:'Cost / click',num:1},{t:'Meta leads',num:1},{t:'CRM leads',num:1},{t:'Cost / CRM lead',num:1},{t:'Jobs',num:1},{t:'Revenue',num:1}];
+  const gRow = (g, sub) => adsRow([`<b>${esc(g.name)}</b>${sub?`<div style="color:var(--ink-faint);font-size:11.5px;margin-top:2px">${esc(sub)}</div>`:''}`, statusPill(g.active?'ACTIVE':'PAUSED'), adsNum(fmtMoney(round2(g.cost))), adsNum(g.clicks.toLocaleString()), adsNum(adsPct(adsRatio(g.clicks,g.impressions))), adsNum(dl(g.clicks?g.cost/g.clicks:null)), adsNum(cnt(g.metaLeads)), adsNum(String(g.crmLeads)), adsNum(g.crmLeads?dl(g.cost/g.crmLeads):'—'), adsNum(String(g.jobs)), adsNum(g.revenue?fmtMoney(round2(g.revenue)):'—')]);
+  const listSec = (id, title, what, headers, rows, rowFn, empty) => adsListSection(id, title, what, headers, rows, rowFn, empty);
+  const pause = listSec('ads-m-pause', 'Ad sets to pause or rework', `Still running, spent ${fmtMoney(th.adset)} or more in the last ${W} and no lead reached the CRM from them. Look at the audience and the ads inside before judging.`, gHead('Ad set'), A.pause, g => gRow(g, g.campaign), 'No ad set meets this rule in this period.');
+  const scale = listSec('ads-m-scale', 'Ad sets worth scaling', `${th.conv} or more CRM lead${th.conv>1?'s':''} in the last ${W} at $120 or less each. Candidates for more budget.`, gHead('Ad set'), A.scale, g => gRow(g, g.campaign), 'No ad set meets this rule in this period.');
+  const weakHead = ['Ad','Status',{t:'Spent',num:1},{t:'Clicks',num:1},{t:'Click rate',num:1},{t:'Cost / click',num:1},{t:'Meta leads',num:1}];
+  const adRow = r => adsRow([`<b>${esc(r.item2)}</b><div style="color:var(--ink-faint);font-size:11.5px;margin-top:2px">${esc(r.campaign)} › ${esc(r.ad_group)}</div>`, statusPill((r.extra||{}).status), adsNum(fmtMoney(round2(r.cost))), adsNum(r.clicks.toLocaleString()), adsNum(adsPct(adsRatio(r.clicks,r.impressions))), adsNum(dl(r.clicks?r.cost/r.clicks:null)), adsNum(cnt(r.conversions))]);
+  const weak = listSec('ads-m-weak', 'Ads with a weak click rate', `Running, spent ${fmtMoney(th.ad)} or more, and the click rate is under 75% of the account average. The picture or first line may not be catching attention.`, weakHead, A.weak, adRow, 'No running ad has a weak click rate in this period.');
+  const adsetsSec = listSec('ads-m-adsets', 'All ad sets', `Every ad set with spend in the last ${W}. <b>CRM leads</b> = leads in the ops app whose ad link carried this ad set. <b>Meta leads</b> = what Meta itself counted (it misses most website-form leads). Jobs and revenue (excl. GST) come from those CRM leads.`, gHead('Ad set'), A.adsets.slice().sort((a,b)=>b.cost-a.cost), g => gRow(g, g.campaign), 'No ad set had spend in this period.');
+  const campsSec = listSec('ads-m-campaigns', 'Campaigns', `Every campaign with spend in the last ${W}.`, gHead('Campaign'), A.camps.slice().sort((a,b)=>b.cost-a.cost), g => gRow(g, ''), 'No campaign had spend in this period.');
+  const adsSec = listSec('ads-m-ads', 'All ads', `Every ad with spend in the last ${W}: which picture or video earns clicks.`, weakHead, A.rows.slice().sort((a,b)=>b.cost-a.cost), adRow, 'No ad had spend in this period.');
+  const pl = (ADS_STATS.rows||[]).filter(r=>r.platform==='meta' && r.level==='placement' && r.win==='30d').map(r=>({ ...r, cost:+r.cost||0, clicks:+r.clicks||0, impressions:+r.impressions||0, conversions:+r.conversions||0 })).sort((a,b)=>b.cost-a.cost);
+  const plTotal = pl.reduce((t,r)=>t+r.cost,0);
+  const NAMES = { facebook:'Facebook', instagram:'Instagram', audience_network:'Audience Network', threads:'Threads', whatsapp:'WhatsApp' };
+  const plMax = Math.max(0, ...pl.map(r=>r.cost));
+  const plRows = pl.filter(r=>r.cost>=1).map(r => adsRow([`<b>${esc(NAMES[r.item]||r.item)}</b> <span style="color:var(--ink-faint);font-size:12px">${esc(r.item2.replace(/_/g,' '))}</span>`, adsNum(fmtMoney(round2(r.cost))), adsNum(adsPct(plTotal?r.cost/plTotal:null)), adsBarCell(r.cost, plMax, 'var(--primary)'), adsNum(r.clicks.toLocaleString()), adsNum(dl(r.clicks?r.cost/r.clicks:null)), adsNum(cnt(r.conversions))]));
+  const plSec = `<section id="ads-m-placement" style="margin-top:28px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:16px;margin:0 0 4px">Where the ads are shown</h3><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:10px">Always the last 30 days, whatever period is selected. Placements under $1 are hidden.</div>${adsTable(['Placement',{t:'Spent',num:1},{t:'Share',num:1},'',{t:'Clicks',num:1},{t:'Cost / click',num:1},{t:'Meta leads',num:1}], plRows, 'No placement data yet.')}</section>`;
+  const details = `<div style="margin-top:40px;padding-top:20px;border-top:1px solid var(--line)"><h2 style="font-size:18px;margin:0 0 4px">Details</h2><div style="color:var(--ink-soft);font-size:12.5px">The lists behind the summary numbers, for the last ${W}. Read-only: nothing here changes the ad account.</div>
+    <div style="margin:10px 0 0">${chipsRow.replace('Show the last','Period')}</div>
+    ${pause}${scale}${weak}${adsetsSec}${campsSec}${adsSec}${plSec}</div>`;
+  return head + summary + details;
+}
+
 function sumField(rows, k){ return rows.reduce((s,r)=>s+(Number(r[k])||0),0); }
 
 function renderDashboard(profile, data){
@@ -6924,7 +7015,7 @@ function render(){
   else if (UI.tab==='jobs') content.innerHTML = renderJobs(profile, data);
   else if (UI.tab==='finance') content.innerHTML = renderFinance(profile, data);
   else if (UI.tab==='adsGoogle') { if (!ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = renderDashGoogle(profile, data, true); }
-  else if (UI.tab==='dashboard') { if (UI.dashboard.view==='google' && !ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = UI.dashboard.view==='google' ? renderDashGoogle(profile, data) : renderDashboard(profile, data); }
+  else if (UI.tab==='dashboard') { if (UI.dashboard.view!=='summary' && !ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = UI.dashboard.view==='google' ? renderDashGoogle(profile, data) : UI.dashboard.view==='meta' ? renderDashMeta(profile, data) : renderDashboard(profile, data); }
   else if (UI.tab==='payroll') content.innerHTML = renderPayroll(profile, data);
   else if (UI.tab==='bizPerformance') content.innerHTML = renderBusinessPerformance(profile, data);
   else if (UI.tab==='employeeViews') content.innerHTML = renderEmployeeViews(profile, data);
