@@ -442,7 +442,7 @@ const PAYROLL_HEBREW_NAMES = { Guy:'גיא', Dolev:'דולב' }; // these people
 function bookingBonus(bookings){ const t = PAYROLL_BOOKING_BONUS.find(t => (Number(bookings)||0) >= t.min); return t ? t.bonus : 0; }
 function nextBookingTier(bookings){ const n = Number(bookings)||0; const t = PAYROLL_BOOKING_BONUS.slice().reverse().find(t => n < t.min); return t ? { needed: t.min - n, bonus: t.bonus } : null; }
 function salesLogBookings(l){ return (Number(l.bookingsAircon)||0) + (Number(l.bookingsChimney)||0) + (Number(l.bookingsPw)||0); }
-function salesLogPay(l){ return round2((Number(l.hours)||0) * PAYROLL_HOURLY_RATE + bookingBonus(salesLogBookings(l))); }
+function salesLogPay(l){ return round2(((Number(l.hours)||0) * PAYROLL_HOURLY_RATE + bookingBonus(salesLogBookings(l))) * (typeof PRESENT!=='undefined' && PRESENT ? PRESENT_FACTOR : 1)); }
 function payrollWeekOf(dateStr){
   const d = parseLocalDate(dateStr);
   const sun = new Date(d); sun.setDate(d.getDate() - d.getDay());
@@ -1060,6 +1060,7 @@ async function loadFromSupabase(){
   };
   (commissionRateRows||[]).forEach(r => { data.commissionRates[r.technician_name] = r.rates || {}; });
 
+  if (PRESENT) presentScaleData(data);
   STATE.data = data;
 }
 
@@ -1573,6 +1574,39 @@ function clearSavedData(){
 const SUPABASE_URL = 'https://dszlllazwmllmoklzjwl.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_CYDF61njgAU74Dm3PvkLGQ_4N6qfvIi';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// ── Presentation mode (owner toggle, per browser) ──────────────────────────────────────────────────
+// For showing the app to someone without revealing real figures: every money value is multiplied by
+// PRESENT_FACTOR in memory right after loading (so tables, cards, forms and totals all stay consistent),
+// counts and percentages stay real, live updates are ignored and every database write is refused, so a
+// scaled number can never be saved back. Turning it off reloads the real data.
+const PRESENT_FACTOR = 3;
+let PRESENT = false;
+try { PRESENT = localStorage.getItem('tgsg_present')==='1'; } catch(e) {}
+function togglePresentationMode(){ try { localStorage.setItem('tgsg_present', PRESENT?'0':'1'); } catch(e) {} location.reload(); }
+function presentBlocked(){
+  const res = { data:null, error:{ message:'Presentation mode is on, changes are not saved' } };
+  const p = new Proxy(function(){}, { get(t,k){ if (k==='then') return (ok,bad)=>Promise.resolve(res).then(ok,bad); return p; }, apply(){ return p; } });
+  return p;
+}
+{
+  const realFrom = sb.from.bind(sb);
+  sb.from = (table) => { const q = realFrom(table); if (!PRESENT) return q; ['insert','update','upsert','delete'].forEach(m => { q[m] = () => presentBlocked(); }); return q; };
+}
+// Dollar figures written inside text (assessments, activity history) are scaled the same way.
+function presentText(t){ if (!PRESENT || !t) return t; return String(t).replace(/\$\s?([\d,]+(?:\.\d+)?)(\s?[Kk])?/g, (m, n, kk) => { const v = parseFloat(n.replace(/,/g,''))*PRESENT_FACTOR; return kk ? '$'+(Math.round(v*10)/10)+'K' : '$'+(Math.round(v*100)/100).toLocaleString('en-US'); }); }
+function presentScaleData(d){
+  const k = PRESENT_FACTOR, x = v => (Number(v)||0) * k;
+  (d.jobs||[]).forEach(j => { j.amount = x(j.amount); j.partsCost = x(j.partsCost); });
+  (d.closings||[]).forEach(c => { c.amount = x(c.amount); c.partsCost = x(c.partsCost); });
+  (d.contacts||[]).forEach(c => { c.estimatedValue = x(c.estimatedValue); c.salesValue = x(c.salesValue); });
+  (d.quotes||[]).forEach(q => { q.amount = x(q.amount); });
+  (d.equipmentSpend||[]).forEach(e => { e.cost = x(e.cost); });
+  (d.equipmentCatalog||[]).forEach(e => { e.price = x(e.price); });
+  (d.adSpend||[]).forEach(a => { a.spend = x(a.spend); });
+  (d.payrollWeeks||[]).forEach(r => { if (r.salaryPaidAmount!=null) r.salaryPaidAmount = x(r.salaryPaidAmount); });
+  if (d.cashStatus) d.cashStatus.amount = x(d.cashStatus.amount);
+  if (d.settings && d.settings.ownerSalaries) Object.keys(d.settings.ownerSalaries).forEach(n => { d.settings.ownerSalaries[n] = x(d.settings.ownerSalaries[n]); });
+}
 
 // Auth/session state — separate from STATE.data (the business data) since it
 // has its own async lifecycle that render() has to gate on.
@@ -1648,7 +1682,7 @@ function mapContactRow(c){
     submissionPage:c.submission_page||'',
   };
 }
-function handleContactRealtimeChange(payload){
+function handleContactRealtimeChange(payload){ if (PRESENT) return;
   if (!STATE.data) return; // not loaded yet, or already signed out
   if (payload.eventType === 'DELETE') {
     STATE.data.contacts = STATE.data.contacts.filter(c => c.id !== payload.old.id);
@@ -1669,7 +1703,7 @@ function handleContactRealtimeChange(payload){
 }
 // Jobs + the Payroll tables live-update too, so the Payroll board's commission totals move the moment
 // someone marks a job Paid (or a payroll status / Ron's daily log changes) on another device.
-function handleJobRealtimeChange(payload){
+function handleJobRealtimeChange(payload){ if (PRESENT) return;
   if (!STATE.data) return;
   if (payload.eventType === 'DELETE') { STATE.data.jobs = STATE.data.jobs.filter(j => j.id !== payload.old.id); render(); return; }
   const idx = STATE.data.jobs.findIndex(j => j.id === payload.new.id);
@@ -1682,14 +1716,14 @@ function upsertLocalRow(listKey, mapped, match){
   const idx = list.findIndex(match);
   if (idx === -1) list.push(mapped); else list[idx] = mapped;
 }
-function handlePayrollRealtimeChange(payload){
+function handlePayrollRealtimeChange(payload){ if (PRESENT) return;
   if (!STATE.data) return;
   if (payload.eventType === 'DELETE') { STATE.data.payrollWeeks = (STATE.data.payrollWeeks||[]).filter(r => r.id !== payload.old.id); render(); return; }
   const m = mapPayrollRow(payload.new);
   upsertLocalRow('payrollWeeks', m, r => r.weekKey===m.weekKey && r.person===m.person);
   render();
 }
-function handleSalesLogRealtimeChange(payload){
+function handleSalesLogRealtimeChange(payload){ if (PRESENT) return;
   if (!STATE.data) return;
   if (payload.eventType === 'DELETE') { STATE.data.salesLogs = (STATE.data.salesLogs||[]).filter(l => l.id !== payload.old.id); render(); return; }
   const m = mapSalesLogRow(payload.new);
@@ -2315,6 +2349,7 @@ function renderShell(profile, data){
         <div class="footer-block" style="margin-top:auto;padding:10px 8px 0;font-size:11px;border-top:1px solid var(--line);padding-top:12px">
           <div style="margin-bottom:9px;display:flex;align-items:center;justify-content:space-between"><span>${esc(profile.fullName)} · ${roleLabel(profile.role)}</span></div>
           <div style="display:flex;flex-direction:column;gap:6px">
+            ${profile.role==='owner' ? `<button class="btn ghost small" onclick="togglePresentationMode()" title="Hide the real figures when showing the app to someone">${PRESENT?'👁 Presentation mode: ON':'Presentation mode'}</button>` : ''}
             <button class="btn ghost small" onclick="openChangePasswordModal()">Change password</button>
             <button class="btn ghost small" onclick="doLogout()">Log out</button>
           </div>
@@ -2616,7 +2651,7 @@ function renderLeadConversation(contactId){
   const msgs = (c.messages||[]).slice().sort((a,b)=>new Date(a.at).getTime()-new Date(b.at).getTime());
   if (!msgs.length) return `<div class="empty" style="padding:26px 10px"><b>No conversation yet</b><div>Log what the customer said and what you replied — it all stays in one thread here, like GHL.</div></div>`;
   return msgs.map(m => {
-    if (m.kind==='event') return `<div class="chat-event">${esc(m.text)} <span class="chat-event-time">${new Date(m.at).toLocaleString('en-AU')}</span></div>`;
+    if (m.kind==='event') return `<div class="chat-event">${esc(presentText(m.text))} <span class="chat-event-time">${new Date(m.at).toLocaleString('en-AU')}</span></div>`;
     const out = m.direction==='out';
     return `<div class="chat-row ${out?'out':'in'}">
       <div class="chat-bubble ${out?'out':'in'}">
@@ -4477,6 +4512,7 @@ async function loadAdsStats(){
       from += 1000;
     }
     const ins = await sb.from('ads_insights').select('*').order('day', { ascending:false }).limit(10);
+    if (PRESENT) all.forEach(r => { r.cost = (Number(r.cost)||0) * PRESENT_FACTOR; });
     ADS_STATS.rows = all; ADS_STATS.insights = ins.data || []; ADS_STATS.err = '';
   } catch(e) { ADS_STATS.err = String((e && e.message) || e); }
   ADS_STATS.loading = false; render();
@@ -4589,8 +4625,8 @@ function renderDashGoogle(profile, data, standalone){
   const TONES = [['bad','Problems','var(--bad)'],['warn','Watch','var(--warn)'],['good','Going well','var(--good)']];
   const opinion = ins ? `<div class="card" style="margin-top:18px;padding:18px 20px">
       <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0;font-size:16px">Assessment</h3><span style="font-size:12px;color:var(--ink-faint)">Written ${esc(fmtDateShort(ins.day))} · looks at 7, 14, 30, 60 and 90 days together · does not change with the period above</span></div>
-      <p style="margin:10px 0 14px;line-height:1.5;font-size:14.5px">${esc(ins.summary)}</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">${TONES.map(([tone,label,colour]) => { const pts=(ins.points||[]).filter(p=>(p.tone||'warn')===tone); if(!pts.length) return ''; return `<div style="border-radius:10px;padding:12px 14px;background:color-mix(in srgb, ${colour} 12%, transparent);border:1px solid color-mix(in srgb, ${colour} 40%, transparent)"><div style="font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${colour};margin-bottom:8px">${label}</div><ul style="margin:0;padding:0;list-style:none;display:grid;gap:10px">${pts.map(pt=>`<li style="line-height:1.4;font-size:13.5px">${esc(pt.text)}${pt.target?` <a href="#" onclick="adsGo('${esc(pt.target)}');return false" style="color:var(--primary);white-space:nowrap">See list →</a>`:''}</li>`).join('')}</ul></div>`; }).join('')}</div></div>`
+      <p style="margin:10px 0 14px;line-height:1.5;font-size:14.5px">${esc(presentText(ins.summary))}</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">${TONES.map(([tone,label,colour]) => { const pts=(ins.points||[]).filter(p=>(p.tone||'warn')===tone); if(!pts.length) return ''; return `<div style="border-radius:10px;padding:12px 14px;background:color-mix(in srgb, ${colour} 12%, transparent);border:1px solid color-mix(in srgb, ${colour} 40%, transparent)"><div style="font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${colour};margin-bottom:8px">${label}</div><ul style="margin:0;padding:0;list-style:none;display:grid;gap:10px">${pts.map(pt=>`<li style="line-height:1.4;font-size:13.5px">${esc(presentText(pt.text))}${pt.target?` <a href="#" onclick="adsGo('${esc(pt.target)}');return false" style="color:var(--primary);white-space:nowrap">See list →</a>`:''}</li>`).join('')}</ul></div>`; }).join('')}</div></div>`
     : `<div class="card" style="margin-top:18px;color:var(--ink-soft)"><b>Assessment</b> — a written assessment (looking across the last 7, 14, 30, 60 and 90 days) will appear here after the next nightly run.</div>`;
 
   const trendRows = A.trend.map(t => adsRow([`<b>Last ${ADS_WIN_LABEL[t.w]}</b>`, adsNum(fmtMoney(round2(t.cost))), adsNum(t.clicks.toLocaleString()), adsNum(dl(t.cpc)), adsNum(cnt(t.conv)), adsNum(dl(t.cpl))]));
@@ -4694,8 +4730,8 @@ function renderDashMeta(profile, data){
   const TONES = [['bad','Problems','var(--bad)'],['warn','Watch','var(--warn)'],['good','Going well','var(--good)']];
   const opinion = ins ? `<div class="card" style="margin-top:18px;padding:18px 20px">
       <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0;font-size:16px">Assessment</h3><span style="font-size:12px;color:var(--ink-faint)">Written ${esc(fmtDateShort(ins.day))} · looks at 7, 14, 30, 60 and 90 days together · does not change with the period above</span></div>
-      <p style="margin:10px 0 14px;line-height:1.5;font-size:14.5px">${esc(ins.summary)}</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">${TONES.map(([tone,label,colour]) => { const pts=(ins.points||[]).filter(p=>(p.tone||'warn')===tone); if(!pts.length) return ''; return `<div style="border-radius:10px;padding:12px 14px;background:color-mix(in srgb, ${colour} 12%, transparent);border:1px solid color-mix(in srgb, ${colour} 40%, transparent)"><div style="font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${colour};margin-bottom:8px">${label}</div><ul style="margin:0;padding:0;list-style:none;display:grid;gap:10px">${pts.map(pt=>`<li style="line-height:1.4;font-size:13.5px">${esc(pt.text)}${pt.target?` <a href="#" onclick="adsGo('${esc(pt.target)}');return false" style="color:var(--primary);white-space:nowrap">See list →</a>`:''}</li>`).join('')}</ul></div>`; }).join('')}</div></div>`
+      <p style="margin:10px 0 14px;line-height:1.5;font-size:14.5px">${esc(presentText(ins.summary))}</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">${TONES.map(([tone,label,colour]) => { const pts=(ins.points||[]).filter(p=>(p.tone||'warn')===tone); if(!pts.length) return ''; return `<div style="border-radius:10px;padding:12px 14px;background:color-mix(in srgb, ${colour} 12%, transparent);border:1px solid color-mix(in srgb, ${colour} 40%, transparent)"><div style="font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${colour};margin-bottom:8px">${label}</div><ul style="margin:0;padding:0;list-style:none;display:grid;gap:10px">${pts.map(pt=>`<li style="line-height:1.4;font-size:13.5px">${esc(presentText(pt.text))}${pt.target?` <a href="#" onclick="adsGo('${esc(pt.target)}');return false" style="color:var(--primary);white-space:nowrap">See list →</a>`:''}</li>`).join('')}</ul></div>`; }).join('')}</div></div>`
     : `<div class="card" style="margin-top:18px;color:var(--ink-soft)"><b>Assessment</b> — a written assessment will appear here after the next nightly run.</div>`;
 
   const all = ADS_WINS.map(w => { const a = metaAnalyse(data, w); return { w, cost:a.totCost, clicks:a.totClicks, crm:a.leadsAll.length, meta:a.metaLeads }; });
@@ -6255,7 +6291,7 @@ function renderRecordActivityList(kind, id){
   const entries = (record.activityLog||[]).slice().sort((a,b)=>a.at.localeCompare(b.at));
   return entries.length ? entries.map(e => `<div style="padding:8px 0;border-bottom:1px solid var(--line-soft)">
     <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--ink-soft);margin-bottom:3px"><b style="color:var(--ink)">${esc(e.actor)}</b><span>${new Date(e.at).toLocaleString('en-AU')}</span></div>
-    <div style="font-size:12.5px;${e.manual?'':'color:var(--ink-soft);font-style:italic'}">${esc(e.text)}</div>
+    <div style="font-size:12.5px;${e.manual?'':'color:var(--ink-soft);font-style:italic'}">${esc(presentText(e.text))}</div>
   </div>`).join('') : emptyState('No activity yet');
 }
 function postManualNoteToRecord(kind, id){
@@ -6376,7 +6412,7 @@ function renderTaskActivityList(taskId){
   ].sort((a,b)=>a.at.localeCompare(b.at));
   return entries.length ? entries.map(e => `<div style="padding:8px 0;border-bottom:1px solid var(--line-soft)">
     <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--ink-soft);margin-bottom:3px"><b style="color:var(--ink)">${esc(e.actor)}</b><span>${new Date(e.at).toLocaleString('en-AU')}</span></div>
-    <div style="font-size:12.5px;${e.manual?'':'color:var(--ink-soft);font-style:italic'}">${esc(e.text)}</div>
+    <div style="font-size:12.5px;${e.manual?'':'color:var(--ink-soft);font-style:italic'}">${esc(presentText(e.text))}</div>
   </div>`).join('') : emptyState('No activity yet');
 }
 function postQuickTaskUpdate(taskId){
