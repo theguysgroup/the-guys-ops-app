@@ -4962,7 +4962,7 @@ function renderDashboard(profile, data){
       ${dashHeadCard('Revenue (excl. GST)', fmtMoney(perf.totalRevenue), `${perf.jobsCount} jobs · avg ${perf.jobsCount?fmtMoney(round2(perf.totalRevenue/perf.jobsCount)):'—'}`, 'var(--primary-teal)', dashDelta(perf.totalRevenue, prev.totalRevenue))}
       ${dashHeadCard('Enquiries', String(enquiries), `${perf.totalLeads} forms · ${cs.total} Google Ads calls`, 'var(--primary)', dashDelta(enquiries, enquiriesPrev))}
       ${dashHeadCard('Jobs done', String(perf.jobsCount), `${perf.reviewRate===null?'—':perf.reviewRate+'% with a review'}`, 'var(--accent)', dashDelta(perf.jobsCount, prev.jobsCount))}
-      ${dashHeadCard('Owed to you now', fmtMoney(owed), `${unpaidAll.length} unpaid job${unpaidAll.length===1?'':'s'} · all periods, incl. GST`, owed>0?'var(--warn)':'var(--good)', '', "document.getElementById('late-to-pay').scrollIntoView({behavior:'smooth'})")}
+      ${dashHeadCard('Owed to you now', fmtMoney(owed), `${unpaidAll.length} unpaid job${unpaidAll.length===1?'':'s'} · all periods, incl. GST`, owed>0?'var(--warn)':'var(--good)', '', "adsGo('late-to-pay')")}
     </div>
 
     <div class="section-title">Money</div>
