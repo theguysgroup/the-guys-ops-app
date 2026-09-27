@@ -4173,6 +4173,7 @@ function renderFinance(profile, data){
       </div>
     </div>
     ${isTech ? '' : cashStatusRow()}
+    ${renderLateToPay(data)}
     ${body}
   `;
 }
@@ -4514,7 +4515,39 @@ function funnelStage(label, count, totalForPct, color){
    than re-deriving anything, so it can't drift from the rest of the app. ───────────────────────── */
 function setDashboardRange(r){ UI.dashboard.range = r; render(); }
 function dashDelta(curr, prev){ return deltaBadge(curr, prev); }
-function dashHeadCard(label, value, sub, accent, delta){
+// "Late to pay": every job the customer hasn't paid yet (all periods), oldest first. It leaves the list the moment the job is
+// marked Paid. Shown on the Dashboard (the "Owed to you now" card jumps here) and in Financial Summary. Clicking the customer
+// opens their CRM card when the job is linked to one and the user can see the CRM, otherwise the job in Jobs & Commissions.
+function openJobCustomer(jobId){
+  const j = (STATE.data.jobs||[]).find(x => x.id===jobId); if (!j) return;
+  const c = contactForJob(j), pr = getCurrentProfile();
+  if (c && pr && canViewSection(pr,'crm')) goToLeadConversation(c.id); else goToJobFromSearch(jobId);
+}
+function renderLateToPay(data){
+  const today = todayStr();
+  const termDays = data.settings?.unpaidReminderDays ?? 7;
+  const jobs = (data.jobs||[]).filter(j => j.paymentStatus!=='Paid').sort((a,b) => a.date.localeCompare(b.date));
+  const total = round2(jobs.reduce((s,j)=>s+jobTotalCollected(j),0));
+  const rows = jobs.length ? jobs.map(j => {
+    const days = daysBetween(parseLocalDate(j.date), parseLocalDate(today));
+    const late = days > termDays;
+    return `<tr>
+      <td><span style="cursor:pointer;color:var(--primary-strong);text-decoration:underline;text-decoration-style:dotted" onclick="openJobCustomer('${j.id}')" title="Open this customer">${esc(j.customerName||'—')}</span></td>
+      <td class="mono"><span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" onclick="goToJobFromSearch('${j.id}')" title="Open the job">${esc(j.invoiceNumber||'—')}</span></td>
+      <td>${techTag(j.technician)}</td>
+      <td class="num" style="font-weight:700">${fmtMoney(jobTotalCollected(j))}</td>
+      <td class="mono">${fmtDateShort(j.date)}</td>
+      <td class="num">${days} day${days===1?'':'s'}</td>
+      <td>${late ? pill('bad','Late') : pill('warn','Not due yet')}</td>
+    </tr>`; }).join('') : `<tr><td colspan="7">${emptyState('Every customer has paid ✓')}</td></tr>`;
+  return `<div id="late-to-pay" style="scroll-margin-top:12px;border-radius:var(--radius)">
+    <div class="section-title">Late to pay — jobs not paid yet <span class="tag">${jobs.length} job${jobs.length===1?'':'s'} · ${fmtMoney(total)} incl. GST</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Invoice</th><th>Technician</th><th class="num">Amount</th><th>Job date</th><th class="num">Waiting</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="hint" style="margin-top:6px">All periods. "Late" = more than ${termDays} days since the job (the payment term in Settings). A job leaves this list as soon as it is marked Paid.</div>
+  </div>`;
+}
+function dashHeadCard(label, value, sub, accent, delta, onclick){
+  if (onclick) return `<button class="card stat-card" onclick="${onclick}" style="--stat-accent:${accent};text-align:start;cursor:pointer;font:inherit;color:inherit;width:100%"><div class="stat-label">${esc(label)}</div><div class="stat-value">${value}${delta||''}</div><div class="stat-sub">${sub} · <span style="color:var(--primary)">see who ↓</span></div></button>`;
   return `<div class="card stat-card" style="--stat-accent:${accent}"><div class="stat-label">${esc(label)}</div><div class="stat-value">${value}${delta||''}</div><div class="stat-sub">${sub}</div></div>`;
 }
 
@@ -4902,9 +4935,6 @@ function renderDashboard(profile, data){
     return `<tr><td>${techTag(p)}</td><td class="num">${hours}h</td><td class="num">${bookings}</td><td class="num" style="font-weight:700">${fmtMoney(payTotal)}</td><td class="num">${bookings ? fmtMoney(round2(payTotal/bookings)) : '—'}</td></tr>`;
   }).join('');
 
-  // Paid late (moved from the old Overview page): jobs done BEFORE this period whose payment landed inside it.
-  const lateJobs = data.jobs.filter(j => j.paymentStatus==='Paid' && j.datePaid && inRange(j.datePaid, r.start, r.effEnd) && j.date < r.start).sort((a,b)=>b.datePaid.localeCompare(a.datePaid));
-  const lateRows = lateJobs.length ? lateJobs.map(j => `<tr><td>${techTag(j.technician)}</td><td>${customerNameCell(j.customerName, j.contactId)}</td><td class="mono">${esc(j.invoiceNumber||'—')}</td><td class="num">${fmtMoney(jobTotalCollected(j))}</td><td class="mono">${fmtDateShort(j.date)}</td><td class="mono">${fmtDateShort(j.datePaid)}</td></tr>`).join('') : `<tr><td colspan="6">${emptyState('No late payments this period')}</td></tr>`;
   // ── needs attention: counts + links only (the lists live on their own pages) ──
   const thisPayWeek = payrollWeekOf(today).key;
   const cashToCollect = round2(payrollCommissionPeople(data).map(p => computePayrollCommission(data, p, thisPayWeek))
@@ -4932,7 +4962,7 @@ function renderDashboard(profile, data){
       ${dashHeadCard('Revenue (excl. GST)', fmtMoney(perf.totalRevenue), `${perf.jobsCount} jobs · avg ${perf.jobsCount?fmtMoney(round2(perf.totalRevenue/perf.jobsCount)):'—'}`, 'var(--primary-teal)', dashDelta(perf.totalRevenue, prev.totalRevenue))}
       ${dashHeadCard('Enquiries', String(enquiries), `${perf.totalLeads} forms · ${cs.total} Google Ads calls`, 'var(--primary)', dashDelta(enquiries, enquiriesPrev))}
       ${dashHeadCard('Jobs done', String(perf.jobsCount), `${perf.reviewRate===null?'—':perf.reviewRate+'% with a review'}`, 'var(--accent)', dashDelta(perf.jobsCount, prev.jobsCount))}
-      ${dashHeadCard('Owed to you now', fmtMoney(owed), `${unpaidAll.length} unpaid job${unpaidAll.length===1?'':'s'} · all periods, incl. GST`, owed>0?'var(--warn)':'var(--good)', '')}
+      ${dashHeadCard('Owed to you now', fmtMoney(owed), `${unpaidAll.length} unpaid job${unpaidAll.length===1?'':'s'} · all periods, incl. GST`, owed>0?'var(--warn)':'var(--good)', '', "document.getElementById('late-to-pay').scrollIntoView({behavior:'smooth'})")}
     </div>
 
     <div class="section-title">Money</div>
@@ -4991,8 +5021,7 @@ function renderDashboard(profile, data){
       </div>
     </div>
 
-    <div class="section-title">Paid late — jobs from previous periods <span class="tag">paid in this period</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Technician</th><th>Customer</th><th>Invoice</th><th class="num">Amount</th><th>Job date</th><th>Paid on</th></tr></thead><tbody>${lateRows}</tbody></table></div>
+    ${renderLateToPay(data)}
 
     <div class="section-title">Pages that bring work <span class="tag">by landing page</span></div>
     <div class="table-wrap"><table><thead><tr><th>Landing page</th><th class="num">Leads</th><th class="num">Jobs done</th><th class="num">Revenue</th></tr></thead>
@@ -5445,7 +5474,7 @@ async function ensureContactForJob(job, chosenContactId){
     fullName: job.customerName, phone:'', email:'', postcode:'',
     division, source:'Organic', status:'Booked', createdAt: job.date || todayStr(), nextFollowUp:'',
     estimatedValue: job.amount||0, salesValue: job.amount||0, jobDescription: job.notes||'',
-    linkedJobId: isRealId(job.id) ? job.id : null, starred:false, lastReadAt:null, tags:['from job'], followupNote:'', messages:[],
+    linkedJobId: isRealId(job.id) ? job.id : null, starred:false, lastReadAt:null, tags:[], followupNote:'', messages:[],
   };
   try {
     c = await db.contacts.create({ activityLog:[], ...values });
