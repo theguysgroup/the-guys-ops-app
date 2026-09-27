@@ -773,8 +773,8 @@ function computeReminders(data, now){
 }
 
 /* ── permissions / types (ported from src/lib/types.ts + permissions.ts) ── */
-const ALL_SECTIONS = ['crm','crmOverview','adsGoogle','overview','jobs','finance','payroll','outstanding','reminders','openItems','tasks','quotes','reference','closings','settings'];
-const SECTION_ORDER = ['crm','crmOverview','adsGoogle','overview','dashboard','closings','jobs','finance','payroll','bizPerformance','employeeViews','outstanding','reminders','openItems','tasks','quotes','reference'];
+const ALL_SECTIONS = ['crm','crmOverview','adsGoogle','jobs','finance','payroll','outstanding','reminders','openItems','tasks','quotes','reference','closings','settings'];
+const SECTION_ORDER = ['crm','dashboard','crmOverview','adsGoogle','closings','jobs','finance','payroll','employeeViews','outstanding','reminders','openItems','tasks','quotes','reference'];
 const SECTION_LABEL = { dashboard:'Dashboard', adsGoogle:'Google Ads board', crm:'CRM', crmOverview:'Leads & Marketing', overview:'Overview', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', bizPerformance:'Business Performance', employeeViews:'Employee Views', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', quotes:'Quotes', reference:'Equipment & Suppliers', closings:'Closings', settings:'Permissions & Settings' };
 const ROLE_LABEL = { owner:'Owner', manager:'Manager', technician:'Technician', va:'Virtual Assistant' };
 function roleLabel(role){ return ROLE_LABEL[role] || role; }
@@ -2240,8 +2240,8 @@ async function doChangePassword(){
 // length in sync with that template if you add or remove a group.
 const NAV = [
   { group:'Sales', items:[ {id:'crm', label:'CRM', icon:'◈'}, {id:'crmOverview', label:'Leads & Marketing', icon:'📊'}, {id:'adsGoogle', label:'Google Ads', icon:'🎯'} ] },
-  { group:'Overview', items:[ {id:'dashboard', label:'Dashboard (new)', icon:'🧭'}, {id:'overview', label:'Overview', icon:'◆'}, {id:'reminders', label:'Reminders', icon:'●'}, {id:'openItems', label:'Open Tasks', icon:'▣'} ] },
-  { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'finance', label:'Financial Summary', icon:'▦'}, {id:'payroll', label:'Payroll', icon:'💵'}, {id:'bizPerformance', label:'Business Performance', icon:'📈'}, {id:'employeeViews', label:'Employee Views', icon:'👁'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
+  { group:'Overview', items:[ {id:'dashboard', label:'Dashboard', icon:'🧭'}, {id:'reminders', label:'Reminders', icon:'●'}, {id:'openItems', label:'Open Tasks', icon:'▣'} ] },
+  { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'finance', label:'Financial Summary', icon:'▦'}, {id:'payroll', label:'Payroll', icon:'💵'}, {id:'employeeViews', label:'Employee Views', icon:'👁'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
   { group:'System', items:[ {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
 ];
 function goTab(id){ UI.tab = id; UI.mobileNavOpen = false; render(); }
@@ -2271,7 +2271,7 @@ function renderShell(profile, data){
   // Management (built separately below, since they need custom per-item logic) are spliced in between.
   const navBlocks = NAV.map(g => {
     // 'adsGoogle' is a standalone page only for people who are not owners/managers (they open it from the Dashboard dropdown).
-    const visible = g.items.filter(it => canViewSection(profile, it.id) && !(it.id==='adsGoogle' && (profile.role==='owner' || profile.role==='manager')));
+    const visible = g.items.filter(it => canViewSection(profile, it.id) && !((it.id==='adsGoogle' || it.id==='crmOverview') && (profile.role==='owner' || profile.role==='manager')));
     if (!visible.length) return '';
     const itemsHtml = visible.map(it => {
       const active = UI.tab===it.id;
@@ -2572,6 +2572,23 @@ const LEAD_SOURCE_COLOR = { 'Google Ads':'var(--primary)', 'Meta Ads':'var(--acc
 // against. Auto-applied by the intake-lead Edge Function from UTM/landing-page/message-text
 // signals; always just a normal tag from here on, editable/removable like any other.
 const AIRCON_TYPE_TAGS = ['Split System','Duct System'];
+// Why a lead was lost — the fixed list Ofek set on 2026-09-27. Until the Lost stage makes one of these mandatory, older leads
+// are classified from their free-form tags (first match wins; price before 'not interested' because GHL wrote 'not interested - price').
+const LOST_REASONS = [
+  { key:'noAnswer',      label:'No answer',             match:t => t.includes('no answer') || t.includes('not answering') },
+  { key:'outsideArea',   label:'Outside service area',  match:t => t.includes('outside service area') || t.includes('outside area') },
+  { key:'spam',          label:'Spam',                  match:t => t.includes('spam') },
+  { key:'wrongNumber',   label:'Wrong number',          match:t => t.includes('wrong number') },
+  { key:'wrongDetails',  label:'Wrong details',         match:t => t.includes('wrong details') || t.includes('incorrect details') },
+  { key:'tooExpensive',  label:'Too expensive',         match:t => t.includes('price') || t.includes('expensive') },
+  { key:'notInterested', label:'Not interested',        match:t => t.includes('not interested') },
+];
+function lostReasonOf(c){
+  const tags = (c.tags||[]).map(t=>String(t).toLowerCase());
+  const order = ['tooExpensive','outsideArea','spam','wrongNumber','wrongDetails','noAnswer','notInterested'];
+  for (const k of order) { const r = LOST_REASONS.find(x=>x.key===k); if (tags.some(r.match)) return k; }
+  return 'noReason';
+}
 const META_PLATFORM_TAGS = ['Facebook','Instagram'];
 // Read-only — populated once, at creation, by the intake-lead Edge Function (or blank for every
 // lead entered directly in the app). Shared between the CRM Inbox details panel and the lead
@@ -2738,7 +2755,7 @@ function computeCrmStats(contacts){
     if (stats.bySource[c.source]!==undefined) stats.bySource[c.source]++;
     if (stats.byDivision[c.division]) {
       stats.byDivision[c.division].total++;
-      if (c.status==='Booked') stats.byDivision[c.division].won++;
+      if (contactHasJob(c, (STATE.data && STATE.data.jobs) || [])) stats.byDivision[c.division].won++;
     }
     // Sub-tags only ever refine their parent bucket, never replace it — an Aircon lead tagged
     // "Duct System" still counts under Aircon above; this just additionally answers "which kind".
@@ -2746,8 +2763,9 @@ function computeCrmStats(contacts){
     if (c.source==='Meta Ads') (c.tags||[]).forEach(t => { if (stats.byMetaPlatform[t]!==undefined) stats.byMetaPlatform[t]++; });
     if (c.status==='Booked') stats.wonValue += Number(c.estimatedValue)||0;
   });
-  const decided = stats.byStatus.Booked + stats.byStatus['Not Relevant'];
-  stats.closeRate = decided ? Math.round((stats.byStatus.Booked/decided)*100) : null;
+  // Won = the lead became a job (same rule as the Dashboard); close rate = won out of every lead in the period.
+  stats.won = contacts.filter(c => contactHasJob(c, (STATE.data && STATE.data.jobs) || [])).length;
+  stats.closeRate = contacts.length ? Math.round((stats.won/contacts.length)*100) : null;
   return stats;
 }
 function filteredContacts(data){
@@ -3260,7 +3278,7 @@ function renderCrmOverview(profile, data){
   const salesByTech = {};
   contacts.forEach(c => {
     if (!c.salesValue) return;
-    const job = c.linkedJobId ? STATE.data.jobs.find(j=>j.id===c.linkedJobId) : null;
+    const job = STATE.data.jobs.find(j => j.contactId===c.id) || (c.linkedJobId ? STATE.data.jobs.find(j=>j.id===c.linkedJobId) : null);
     const tech = job ? job.technician : 'Unassigned';
     salesByTech[tech] = round2((salesByTech[tech]||0) + Number(c.salesValue));
   });
@@ -3270,6 +3288,7 @@ function renderCrmOverview(profile, data){
   return `
     <div class="page-head">
       <div><h1 class="page-title">Leads &amp; Marketing</h1><div class="page-sub">${esc(range.label)} · ${contacts.length} lead${contacts.length===1?'':'s'} · reporting, not day-to-day work</div></div>
+      ${UI.tab==='dashboard' ? `<div>${dashViewSelect()}</div>` : ''}
     </div>
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
@@ -3281,7 +3300,7 @@ function renderCrmOverview(profile, data){
     <div class="grid-4">
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Total leads</div><div class="stat-value">${stats.total}</div><div class="stat-sub">in this period</div></div>
       <div class="card stat-card" style="--stat-accent:var(--warn)"><div class="stat-label">In follow-up</div><div class="stat-value">${stats.byStatus['Follow-up']}</div><div class="stat-sub">${stats.byStatus.New} still new</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Booked</div><div class="stat-value">${stats.byStatus.Booked}</div><div class="stat-sub">${stats.closeRate===null?'no closed leads yet':stats.closeRate+'% close rate'}</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Won</div><div class="stat-value">${stats.won}</div><div class="stat-sub">${stats.closeRate===null?'no leads yet':stats.closeRate+'% of leads became a job'} · ${stats.byStatus.Booked} booked</div></div>
       <div class="card stat-card" style="--stat-accent:var(--bad)"><div class="stat-label">Not Relevant</div><div class="stat-value">${stats.byStatus['Not Relevant']}</div><div class="stat-sub">${fmtMoney(stats.wonValue)} booked value</div></div>
     </div>
 
@@ -3302,13 +3321,9 @@ function renderCrmOverview(profile, data){
       <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line-soft)">
         ${salesByTechEntries.length ? salesByTechEntries.map(([t,v])=>`<div class="kv"><span>${esc(t)}</span><span class="v">${fmtMoney(v)}</span></div>`).join('') : emptyState('No sales value recorded yet')}
       </div>
-      <div class="hint" style="margin-top:8px">Attributed via each lead's linked job. Leads not yet linked to a job show under "Unassigned."</div>
+      <div class="hint" style="margin-top:8px">Attributed via the job linked to each customer. Leads with no job yet show under "Unassigned."</div>
     </div>
 
-    <div class="card" style="margin-top:18px;border-inline-start:4px solid var(--ink-faint)">
-      <div class="stat-label" style="margin-bottom:4px">Marketing spend &amp; cost-per-lead</div>
-      <div class="hint">Coming after the Stage 3 backend — real Google Ads &amp; Meta Ads API connections will feed cost-per-lead, close rate per channel, and net profit per job here automatically. No manual expense entry.</div>
-    </div>
   `;
 }
 
@@ -3501,114 +3516,6 @@ async function saveLeadModal(contactId){
 }
 
 /* ── overview ────────────────────────────────────────────────────────── */
-function renderOverview(profile, data){
-  const isTech = profile.role==='technician';
-  const techFilter = isTech ? (profile.technicianName||undefined) : undefined;
-  const range = resolveOverviewRange(UI.overview);
-  const rangeData = computeRange(data, range.start, range.end, techFilter);
-  const spanDays = dateSpanDays(range.start, range.end);
-  const chartSeries = spanDays <= 14 ? computeRevenueByWeekday(rangeData.jobs) : computeRevenueByWeekInRange(data, range.start, range.end, techFilter);
-
-  const reminders = computeReminders(data);
-  const openTasks = data.tasks.filter(t=>t.status!=='Done').length;
-  const openQuotes = data.quotes.filter(q=>['In Discussion','Waiting for Reply'].includes(q.status)).length;
-
-  const rangeChips = [['week','This week'],['month','This month'],['7d','Last 7 days'],['14d','Last 14 days'],['30d','Last 30 days'],['custom','Custom']]
-    .map(([key,label]) => `<button class="week-chip ${UI.overview.range===key?'active':''}" onclick="setOverviewRange('${key}')">${label}</button>`).join('');
-  const customInputs = UI.overview.range==='custom' ? `
-    <input type="date" style="width:auto" value="${UI.overview.customFrom||''}" onchange="UI.overview.customFrom=this.value;render()">
-    <span style="color:var(--ink-faint);font-size:12px;align-self:center">to</span>
-    <input type="date" style="width:auto" value="${UI.overview.customTo||''}" onchange="UI.overview.customTo=this.value;render()">
-  ` : '';
-
-  const shortcuts = [];
-  if (canViewSection(profile,'reminders')) shortcuts.push(`<div class="card stat-card" style="--stat-accent:var(--warn);cursor:pointer" onclick="goTab('reminders')"><div class="stat-label">Open Reminders</div><div class="stat-value">${reminders.length}</div><div class="stat-sub">View →</div></div>`);
-  if (canViewSection(profile,'tasks')) shortcuts.push(`<div class="card stat-card" style="--stat-accent:var(--primary);cursor:pointer" onclick="goTab('tasks')"><div class="stat-label">Open Tasks</div><div class="stat-value">${openTasks}</div><div class="stat-sub">View →</div></div>`);
-  if (canViewSection(profile,'quotes')) shortcuts.push(`<div class="card stat-card" style="--stat-accent:var(--good);cursor:pointer" onclick="goTab('quotes')"><div class="stat-label">Open Quotes</div><div class="stat-value">${openQuotes}</div><div class="stat-sub">View →</div></div>`);
-
-  if (isTech) {
-    return `
-      <div class="page-head">
-        <div><h1 class="page-title">Overview</h1><div class="page-sub">Your numbers — ${esc(range.label)}</div></div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">${rangeChips}${customInputs}</div>
-      <div class="grid-3">
-        <div class="card stat-card" style="--stat-accent:var(--primary-teal)"><div class="stat-label">Your revenue</div><div class="stat-value">${fmtMoney(rangeData.revenue)}</div><div class="stat-sub">${rangeData.jobs.length} jobs</div>${renderSparkline(chartSeries,{color:'var(--primary)'})}</div>
-        <div class="card stat-card" style="--stat-accent:var(--bad)"><div class="stat-label">Unpaid by customer</div><div class="stat-value" style="color:var(--bad)">${fmtMoney(rangeData.overview.unpaidTotal)}</div><div class="stat-sub">${rangeData.overview.unpaidCount} jobs</div></div>
-        <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Commission paid to you</div><div class="stat-value">${fmtMoney(rangeData.overview.paidToTechTotal)}</div><div class="stat-sub">of ${fmtMoney(rangeData.overview.commissionOwedTotal)} owed</div>${renderProgressBar(rangeData.overview.paidToTechTotal, rangeData.overview.commissionOwedTotal,{color:'var(--accent)'})}</div>
-      </div>
-      ${shortcuts.length ? `<div class="grid-3" style="margin-top:22px">${shortcuts.join('')}</div>` : ''}
-    `;
-  }
-
-  const paymentMethodBars = renderBarGroup([
-    {label:'Cash', value:rangeData.overview.cash, color:'var(--primary)'},
-    {label:'Credit Card', value:rangeData.overview.creditCard, color:'var(--accent)'},
-    {label:'Bank Transfer', value:rangeData.overview.bankTransfer, color:'var(--good)'},
-  ]);
-  const jobTypeBars = renderBarGroup([
-    {label:'Aircon', value:rangeData.jobTypeStats.Aircon.revenue, color:'var(--primary)'},
-    {label:'Chimney', value:rangeData.jobTypeStats.Chimney.revenue, color:'var(--accent)'},
-    {label:'Pressure Wash', value:rangeData.jobTypeStats['Pressure Washing'].revenue, color:'var(--good)'},
-    {label:'Other', value:rangeData.jobTypeStats.Other.revenue, color:'var(--ink-faint)'},
-  ]);
-  const unpaidByTechEntries = Object.entries(rangeData.unpaidByTech).sort((a,b)=>b[1]-a[1]);
-  const commissionEntries = Object.entries(rangeData.commissionByTech).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
-  const commissionTotal = round2(commissionEntries.reduce((s,[,v])=>s+v,0));
-  const insights = computeInsights(data, range, rangeData, techFilter);
-  const latePaymentRows = rangeData.latePayments.length ? rangeData.latePayments.map(j => `
-    <tr><td>${techTag(j.technician)}</td><td>${esc(j.customerName)}</td><td class="mono">${esc(j.invoiceNumber||'—')}</td><td class="num">${fmtMoney(jobTotalCollected(j))}</td><td class="mono">${fmtDateShort(j.date)}</td><td class="mono">${fmtDateShort(j.datePaid)}</td></tr>
-  `).join('') : `<tr><td colspan="6">${emptyState('No late payments this period')}</td></tr>`;
-
-  return `
-    <div class="page-head">
-      <div><h1 class="page-title">Overview</h1><div class="page-sub">${esc(range.label)}</div></div>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">${rangeChips}${customInputs}</div>
-
-    <div class="grid-4">
-      <div class="card stat-card" style="--stat-accent:var(--primary-teal)">
-        <div class="stat-label">Total Revenue</div><div class="stat-value">${fmtMoney(rangeData.revenue)}</div><div class="stat-sub">${rangeData.jobs.length} jobs · incl. GST, paid + unpaid</div>
-        ${renderSparkline(chartSeries,{color:'var(--primary)'})}
-      </div>
-      <div class="card stat-card" style="--stat-accent:var(--warn)"><div class="stat-label">Costs</div>
-        <div class="kv"><span>Materials</span><span class="v">${fmtMoney(rangeData.overview.partsTotal)}</span></div>
-        <div class="kv"><span>Equipment</span><span class="v">${fmtMoney(rangeData.overview.equipmentTotal)}</span></div>
-      </div>
-      <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Technician Commission Summary</div>
-        <div class="stat-value" style="font-size:22px">${fmtMoney(commissionTotal)}</div>
-        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line-soft)">
-          ${commissionEntries.length ? commissionEntries.map(([t,v])=>`<div class="kv"><span>${techTag(t)}</span><span class="v">${fmtMoney(v)}</span></div>`).join('') : emptyState('No commission earned yet')}
-        </div>
-      </div>
-      <div class="card stat-card" style="--stat-accent:var(--good)">
-        <div class="stat-label">Remaining for Business</div><div class="stat-value" style="color:${rangeData.remainingAfterTech>=0?'inherit':'var(--bad)'}">${fmtMoney(rangeData.remainingAfterTech)}</div>
-        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line-soft)">
-          <div class="kv"><span>GST collected</span><span class="v">${fmtMoney(rangeData.overview.gstTotal)}</span></div>
-          <div class="kv"><span>Paid</span><span class="v" style="color:var(--good)">${fmtMoney(rangeData.overview.paidTotal)}</span></div>
-          <div class="kv"><span>Unpaid</span><span class="v" style="color:var(--bad)">${fmtMoney(rangeData.overview.unpaidTotal)}</span></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="section-title">Business overview — ${esc(range.label)}</div>
-    <div class="grid-4">
-      <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Payment method</div>${paymentMethodBars}</div>
-      <div class="card stat-card" style="--stat-accent:var(--primary-teal)"><div class="stat-label">Revenue by job type</div>${jobTypeBars}</div>
-      <div class="card stat-card" style="--stat-accent:var(--bad)"><div class="stat-label">Unpaid Jobs by Technician</div>
-        ${unpaidByTechEntries.length ? unpaidByTechEntries.map(([t,c])=>`<div class="kv"><span>${techTag(t)}</span><span class="v">${c} job${c>1?'s':''}</span></div>`).join('') : emptyState('None unpaid')}
-      </div>
-      <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">GST</div><div class="stat-value" style="font-size:20px">${fmtMoney(rangeData.overview.gstTotal)}</div><div class="stat-sub">Collected this period — owed to the ATO</div></div>
-    </div>
-    <div class="section-title">Paid late — jobs from previous periods</div>
-    <div class="table-wrap"><table><thead><tr><th>Technician</th><th>Customer</th><th>Invoice</th><th>Amount</th><th>Job Date</th><th>Paid On</th></tr></thead><tbody>${latePaymentRows}</tbody></table></div>
-
-    <div class="section-title">Insights</div>
-    <div class="card">${renderInsights(insights)}</div>
-
-    ${shortcuts.length ? `<div class="grid-3" style="margin-top:22px">${shortcuts.join('')}</div>` : ''}
-  `;
-}
 
 /* ── CSV export (client-side only; nothing leaves the browser) ─────────── */
 function csvCell(v){
@@ -4193,12 +4100,13 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   // for the channel/period — left as `null` (not 0) when it doesn't, so the UI can say "not available"
   // instead of implying a real $0 spend.
   const byChannel = {};
-  LEAD_SOURCES.forEach(s => byChannel[s] = { leads:0, booked:0, notRelevant:0, revenue:0, jobCount:0 });
+  LEAD_SOURCES.forEach(s => byChannel[s] = { leads:0, booked:0, won:0, notRelevant:0, revenue:0, jobCount:0 });
   contacts.forEach(c => {
     if (!byChannel[c.source]) return;
     byChannel[c.source].leads++;
     if (c.status==='Booked') byChannel[c.source].booked++;
     if (c.status==='Not Relevant') byChannel[c.source].notRelevant++;
+    if (contactHasJob(c, data.jobs)) byChannel[c.source].won++;
   });
   jobs.forEach(j => {
     const c = contactForJob(j);
@@ -4209,8 +4117,8 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   Object.keys(byChannel).forEach(s => {
     const ch = byChannel[s];
     ch.revenue = round2(ch.revenue);
-    const decided = ch.booked + ch.notRelevant;
-    ch.closeRate = decided ? Math.round((ch.booked/decided)*100) : null;
+    // Close rate = leads that became a job (Won) out of ALL leads that came in, not out of the few already decided.
+    ch.closeRate = ch.leads ? Math.round((ch.won/ch.leads)*100) : null;
     ch.spend = spendByChannel[s] !== undefined ? spendByChannel[s] : null;
     ch.costPerLead = (ch.spend!==null && ch.leads) ? round2(ch.spend/ch.leads) : null;
     ch.costPerBookedJob = (ch.spend!==null && ch.jobCount) ? round2(ch.spend/ch.jobCount) : null;
@@ -4265,14 +4173,8 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   // chat: 19 price / 32 outside-area / 7 wrong-number / rest untagged). First match wins, in order of
   // how unambiguous the tag is.
   const notRelevantContacts = contacts.filter(c => c.status === 'Not Relevant');
-  const lossReasons = { price:0, outsideArea:0, wrongNumber:0, noReasonGiven:0 };
-  notRelevantContacts.forEach(c => {
-    const tags = (c.tags||[]).map(t=>String(t).toLowerCase());
-    if (tags.some(t=>t.includes('price'))) lossReasons.price++;
-    else if (tags.some(t=>t.includes('outside service area'))) lossReasons.outsideArea++;
-    else if (tags.some(t=>t.includes('wrong number'))) lossReasons.wrongNumber++;
-    else lossReasons.noReasonGiven++;
-  });
+  const lossReasons = { noReason:0 }; LOST_REASONS.forEach(r => lossReasons[r.key] = 0);
+  notRelevantContacts.forEach(c => { lossReasons[lostReasonOf(c)]++; });
 
   // Speed-to-lead: hours between the lead's own creation and the first non-automatic (kind !== event)
   // message logged against it - i.e. a real reply, not the auto "Lead created" event. Only computable
@@ -4306,6 +4208,7 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
     quoteConversionRate: quoteDecided ? Math.round((quotesApproved/quoteDecided)*100) : null,
     quotesApproved, quotesRejected,
     funnel: { leads: contacts.length, contacted: funnelContacted, priceGiven: funnelPriceGiven, booked: totalBooked, jobDone: funnelJobDone },
+    outcome: (() => { const lost = contacts.filter(c => c.status==='Not Relevant' && !contactHasJob(c, data.jobs)).length; return { leads: contacts.length, won: funnelJobDone, lost, open: contacts.length - funnelJobDone - lost }; })(),
     lossReasons, speedToLead,
   };
 }
@@ -4392,95 +4295,6 @@ function funnelStage(label, count, totalForPct, color){
     </div>
   </div>`;
 }
-function renderBusinessPerformance(profile, data){
-  const range = resolveOverviewRange(UI.bizPerf);
-  const perf = computeBusinessPerformance(data, range.start, range.end);
-  const prevEnd = fmtLocal(new Date(parseLocalDate(range.start).getTime() - 86400000));
-  const prevStartDate = parseLocalDate(range.start); prevStartDate.setDate(prevStartDate.getDate()-dateSpanDays(range.start, range.end));
-  const prevPerf = computeBusinessPerformance(data, fmtLocal(prevStartDate), prevEnd);
-  const profitTrend = computeProfitByWeekInRange(data, range.start, range.end);
-
-  const rangeChips = [['week','This week'],['month','This month'],['7d','Last 7 days'],['14d','Last 14 days'],['30d','Last 30 days'],['custom','Custom']]
-    .map(([key,label]) => `<button class="week-chip ${UI.bizPerf.range===key?'active':''}" onclick="UI.bizPerf.range='${key}';render()">${label}</button>`).join('');
-  const customInputs = UI.bizPerf.range==='custom' ? `
-    <input type="date" style="width:auto" value="${UI.bizPerf.customFrom||''}" onchange="UI.bizPerf.customFrom=this.value;render()">
-    <span style="color:var(--ink-faint);font-size:12px;align-self:center">to</span>
-    <input type="date" style="width:auto" value="${UI.bizPerf.customTo||''}" onchange="UI.bizPerf.customTo=this.value;render()">
-  ` : '';
-
-  const divisionBuckets = LEAD_DIVISIONS.map(d => [d, perf.byDivision[d]]).concat(perf.byDivision.Other.count ? [['Other', perf.byDivision.Other]] : []);
-  const subDivBuckets = [...AIRCON_TYPE_TAGS, ...META_PLATFORM_TAGS].filter(t => perf.bySubDivision[t].count>0).map(t => [t, perf.bySubDivision[t]]);
-
-  const channelCards = LEAD_SOURCES.map(s => channelCard(s, perf.byChannel[s])).join('');
-  const anySpendSynced = LEAD_SOURCES.some(s => perf.byChannel[s].spend!==null);
-  const avgDealOverall = perf.jobsCount ? round2(perf.totalRevenue/perf.jobsCount) : 0;
-
-  return `
-    <div class="page-head">
-      <div><h1 class="page-title">Business Performance</h1><div class="page-sub">The numbers that drive decisions — profit, deal size, and marketing effectiveness by division and channel</div></div>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">${rangeChips}${customInputs}</div>
-
-    <div class="grid-4">
-      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Gross profit</div><div class="stat-value">${fmtMoney(perf.totalProfit)}${deltaBadge(perf.totalProfit, prevPerf.totalProfit)}</div><div class="stat-sub">${perf.profitMargin===null?'—':perf.profitMargin+'% margin'} · after commissions &amp; job expenses, before marketing &amp; salaries</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--primary-teal)"><div class="stat-label">Revenue</div><div class="stat-value">${fmtMoney(perf.totalRevenue)}${deltaBadge(perf.totalRevenue, prevPerf.totalRevenue)}</div><div class="stat-sub">${perf.jobsCount} jobs · avg ${fmtMoney(avgDealOverall)}</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Leads</div><div class="stat-value">${perf.totalLeads}${deltaBadge(perf.totalLeads, prevPerf.totalLeads)}</div><div class="stat-sub">${perf.overallCloseRate===null?'no closed leads yet':perf.overallCloseRate+'% close rate'}</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Review Taken Rate</div><div class="stat-value">${perf.reviewRate===null?'—':perf.reviewRate+'%'}</div><div class="stat-sub">of jobs this period</div></div>
-    </div>
-    ${renderNetProfitCard(computeNetProfit(data, range.start, range.end), 'Net profit')}
-    ${profitTrend.length>1 ? `<div class="card stat-card" style="--stat-accent:var(--good);margin-top:12px"><div class="stat-label">Gross profit trend</div>${renderSparkline(profitTrend,{color:'var(--good)'})}</div>` : ''}
-
-    <div class="section-title">Cash flow &amp; pipeline health</div>
-    <div class="grid-3">
-      <div class="card stat-card" style="--stat-accent:${perf.outstanding>0?'var(--warn)':'var(--good)'}"><div class="stat-label">Outstanding (unpaid)</div><div class="stat-value" style="font-size:20px">${fmtMoney(perf.outstanding)}</div><div class="stat-sub">from jobs done this period</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Avg Days to Payment</div><div class="stat-value" style="font-size:20px">${perf.avgDaysToPayment===null?'—':perf.avgDaysToPayment+' days'}</div><div class="stat-sub">job date → paid date</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Quote → Job Conversion</div><div class="stat-value" style="font-size:20px">${perf.quoteConversionRate===null?'—':perf.quoteConversionRate+'%'}</div><div class="stat-sub">${perf.quotesApproved} approved / ${perf.quotesRejected} rejected</div></div>
-    </div>
-
-    <div class="section-title">Lead pipeline &amp; loss analysis</div>
-    <div class="grid-2">
-      <div class="card stat-card" style="--stat-accent:var(--primary)">
-        <div class="stat-label">Funnel — lead to job</div>
-        ${funnelStage('Leads', perf.funnel.leads, perf.funnel.leads, 'var(--primary)')}
-        ${funnelStage('Contacted', perf.funnel.contacted, perf.funnel.leads, 'var(--accent)')}
-        ${funnelStage('Price Given', perf.funnel.priceGiven, perf.funnel.leads, 'var(--primary-teal)')}
-        ${funnelStage('Booked', perf.funnel.booked, perf.funnel.leads, 'var(--good)')}
-        ${funnelStage('Job Completed', perf.funnel.jobDone, perf.funnel.leads, 'var(--good)')}
-        <div class="hint" style="margin-top:4px">Contacted/Job Completed are inferred from existing data (status, Jobs matched by name) — not a strict step-by-step order, so a lead can reach Booked with 0 in Price Given if no estimate was logged. Price Given uses the lead's Estimated Value as a proxy since quotes are given verbally, not logged in the (unused) Quotes page.</div>
-      </div>
-      <div class="card stat-card" style="--stat-accent:var(--bad)">
-        <div class="stat-label">Why leads are lost (Not Relevant)</div>
-        ${(perf.lossReasons.price+perf.lossReasons.outsideArea+perf.lossReasons.wrongNumber+perf.lossReasons.noReasonGiven) ? renderBarGroup([
-          {label:'Price', value:perf.lossReasons.price, color:'var(--bad)'},
-          {label:'Outside Area', value:perf.lossReasons.outsideArea, color:'var(--warn)'},
-          {label:'Wrong Number', value:perf.lossReasons.wrongNumber, color:'var(--ink-faint)'},
-          {label:'No Reason Given', value:perf.lossReasons.noReasonGiven, color:'var(--accent)'},
-        ], {fmt:(n)=>String(n)}) : emptyState('No lost leads this period')}
-        ${perf.lossReasons.noReasonGiven>0 ? `<div class="hint" style="margin-top:6px">${perf.lossReasons.noReasonGiven} lost lead${perf.lossReasons.noReasonGiven===1?'':'s'} marked Not Relevant with no reason tag — worth tagging why going forward (price / outside area / wrong number / etc.) so this stops being the biggest bar by default.</div>` : ''}
-      </div>
-    </div>
-    <div class="card stat-card" style="--stat-accent:var(--accent);margin-top:12px">
-      <div class="stat-label">Speed to Lead</div>
-      ${perf.speedToLead.sampleSize ? `
-        <div class="stat-value" style="font-size:20px">${perf.speedToLead.medianHours<1 ? Math.round(perf.speedToLead.medianHours*60)+' min' : perf.speedToLead.medianHours+' hrs'}</div>
-        <div class="stat-sub">median time to first reply · avg ${perf.speedToLead.avgHours<1 ? Math.round(perf.speedToLead.avgHours*60)+' min' : perf.speedToLead.avgHours+' hrs'} · based on ${perf.speedToLead.sampleSize} lead${perf.speedToLead.sampleSize===1?'':'s'} with a logged reply</div>
-      ` : `
-        <div class="stat-value" style="font-size:16px;color:var(--ink-soft)">Not enough data yet</div>
-        <div class="stat-sub">only leads created and replied to through this app have a timestamped message history — bulk-imported leads don't carry this, so it fills in naturally as new leads come in</div>
-      `}
-    </div>
-
-    ${perfBarSection('Revenue & profit by division', divisionBuckets, 'var(--primary)', 'var(--good)')}
-    ${subDivBuckets.length ? perfBarSection('Split vs Duct · Facebook vs Instagram', subDivBuckets, 'var(--primary-teal)', 'var(--accent)') + `<div class="hint" style="margin-top:-6px;margin-bottom:6px">Only jobs whose lead has a known type/placement — a subset of the division numbers above, not a replacement.</div>` : ''}
-
-    <div class="section-title">Marketing channel performance</div>
-    <div class="grid-3">${channelCards}</div>
-    <div class="hint" style="margin-top:6px">${anySpendSynced ? 'Ad Spend comes from the daily Google Ads / Meta Ads sync — Google Maps, Organic and Phone Call have no ad spend by definition.' : 'Ad Spend / Cost per Lead / ROAS need the ad-spend sync to be deployed — everything else on this page already works without it.'}</div>
-
-    <div class="section-title">Technician profitability</div>
-    <div class="card">${techLeaderboard(perf.techEntries)}</div>
-  `;
-}
 /* ── Dashboard: ONE page for the whole business (preview — meant to replace Overview, Leads &
    Marketing, Financial Summary and Business Performance). One period picker drives every number;
    each number appears exactly once. Reuses computeBusinessPerformance / computeNetProfit rather
@@ -4495,7 +4309,7 @@ function dashHeadCard(label, value, sub, accent, delta){
 // Detail pages read public.ads_stats: keyword / search-term / ad / campaign / hour / weekday / device
 // snapshots per window (30d, 90d), replaced by the ingest-ads-stats Edge Function. Loaded lazily (the table
 // is a few thousand rows, so it is paged) and only for owners/managers (RLS).
-const DASH_VIEWS = [['summary','Business summary'],['google','Google Ads'],['meta','Meta Ads (Facebook & Instagram)']];
+const DASH_VIEWS = [['summary','Business summary'],['leads','Leads & Marketing'],['google','Google Ads'],['meta','Meta Ads (Facebook & Instagram)']];
 let ADS_STATS = { rows:null, insights:[], loading:false, err:'', tried:false };
 function setDashboardView(v){ UI.dashboard.view = v; if (v!=='summary' && !ADS_STATS.rows) loadAdsStats(); else render(); }
 function setDashAdsWin(w){ UI.dashboard.adsWin = w; render(); }
@@ -4818,6 +4632,7 @@ function renderDashboard(profile, data){
 
   // ── marketing: one table, one row per channel ──
   const tagLeads = tag => (data.contacts||[]).filter(c => c.source==='Meta Ads' && (c.tags||[]).includes(tag) && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
+  const subWon = tag => { const ls = (data.contacts||[]).filter(c => c.source==='Meta Ads' && (c.tags||[]).includes(tag) && inRange(localDay(c.createdAt), r.start, r.effEnd)); const won = ls.filter(c => contactHasJob(c, data.jobs)).length; return { leads:ls.length, won, closeRate: ls.length ? Math.round(won/ls.length*100) : null, spend:null, revenue: perf.bySubDivision[tag].revenue }; };
   const chRow = (name, ch, callCount, sub) => {
     const forms = ch.leads, total = forms + (callCount||0);
     const spend = ch.spend;
@@ -4829,7 +4644,7 @@ function renderDashboard(profile, data){
       <td class="num" style="font-weight:700">${total}</td>
       <td class="num">${spend===null ? '—' : fmtMoney(spend)}</td>
       <td class="num">${cpe===null ? '—' : fmtMoney(cpe)}</td>
-      <td class="num">${ch.booked!==undefined ? ch.booked : '—'}</td>
+      <td class="num">${ch.won!==undefined ? ch.won : '—'}</td>
       <td class="num">${ch.closeRate===null || ch.closeRate===undefined ? '—' : pill(closeRateTone(ch.closeRate), ch.closeRate+'%')}</td>
       <td class="num">${ch.revenue!==undefined ? fmtMoney(ch.revenue) : '—'}</td>
       <td class="num">${ch.roas===null || ch.roas===undefined ? '—' : pill(roasTone(ch.roas), ch.roas+'×')}</td>
@@ -4839,8 +4654,8 @@ function renderDashboard(profile, data){
   const channelRows = [
     chRow('Google Ads', C['Google Ads'], cs.total),
     chRow('Meta Ads', C['Meta Ads'], null),
-    chRow('Facebook', { leads: tagLeads('Facebook'), spend:null, revenue: perf.bySubDivision.Facebook.revenue }, null, true),
-    chRow('Instagram', { leads: tagLeads('Instagram'), spend:null, revenue: perf.bySubDivision.Instagram.revenue }, null, true),
+    chRow('Facebook', subWon('Facebook'), null, true),
+    chRow('Instagram', subWon('Instagram'), null, true),
     chRow('Google Maps', C['Google Maps'], null),
     chRow('Organic (website)', C['Organic'], null),
     chRow('Phone (logged by hand)', C['Phone Call'], null),
@@ -4874,6 +4689,9 @@ function renderDashboard(profile, data){
     return `<tr><td>${techTag(p)}</td><td class="num">${hours}h</td><td class="num">${bookings}</td><td class="num" style="font-weight:700">${fmtMoney(payTotal)}</td><td class="num">${bookings ? fmtMoney(round2(payTotal/bookings)) : '—'}</td></tr>`;
   }).join('');
 
+  // Paid late (moved from the old Overview page): jobs done BEFORE this period whose payment landed inside it.
+  const lateJobs = data.jobs.filter(j => j.paymentStatus==='Paid' && j.datePaid && inRange(j.datePaid, r.start, r.effEnd) && j.date < r.start).sort((a,b)=>b.datePaid.localeCompare(a.datePaid));
+  const lateRows = lateJobs.length ? lateJobs.map(j => `<tr><td>${techTag(j.technician)}</td><td>${customerNameCell(j.customerName, j.contactId)}</td><td class="mono">${esc(j.invoiceNumber||'—')}</td><td class="num">${fmtMoney(jobTotalCollected(j))}</td><td class="mono">${fmtDateShort(j.date)}</td><td class="mono">${fmtDateShort(j.datePaid)}</td></tr>`).join('') : `<tr><td colspan="6">${emptyState('No late payments this period')}</td></tr>`;
   // ── needs attention: counts + links only (the lists live on their own pages) ──
   const thisPayWeek = payrollWeekOf(today).key;
   const cashToCollect = round2(payrollCommissionPeople(data).map(p => computePayrollCommission(data, p, thisPayWeek))
@@ -4901,7 +4719,7 @@ function renderDashboard(profile, data){
       ${dashHeadCard('Revenue (excl. GST)', fmtMoney(perf.totalRevenue), `${perf.jobsCount} jobs · avg ${perf.jobsCount?fmtMoney(round2(perf.totalRevenue/perf.jobsCount)):'—'}`, 'var(--primary-teal)', dashDelta(perf.totalRevenue, prev.totalRevenue))}
       ${dashHeadCard('Enquiries', String(enquiries), `${perf.totalLeads} forms · ${cs.total} Google Ads calls`, 'var(--primary)', dashDelta(enquiries, enquiriesPrev))}
       ${dashHeadCard('Jobs done', String(perf.jobsCount), `${perf.reviewRate===null?'—':perf.reviewRate+'% with a review'}`, 'var(--accent)', dashDelta(perf.jobsCount, prev.jobsCount))}
-      ${dashHeadCard('Owed to you now', fmtMoney(owed), `${unpaidAll.length} unpaid job${unpaidAll.length===1?'':'s'} (all time)`, owed>0?'var(--warn)':'var(--good)', '')}
+      ${dashHeadCard('Owed to you now', fmtMoney(owed), `${unpaidAll.length} unpaid job${unpaidAll.length===1?'':'s'} · all periods, incl. GST`, owed>0?'var(--warn)':'var(--good)', '')}
     </div>
 
     <div class="section-title">Money</div>
@@ -4915,7 +4733,7 @@ function renderDashboard(profile, data){
           <div class="kv"><span>Cash</span><span class="v">${fmtMoney(pay.Cash)}</span></div>
           ${pay.unset ? `<div class="kv"><span>Paid, method not set</span><span class="v">${fmtMoney(pay.unset)}</span></div>` : ''}
           <div class="kv total"><span>Paid</span><span class="v">${fmtMoney(paidAmt)}</span></div>
-          <div class="kv"><span>Still unpaid</span><span class="v" style="color:${unpaidAmt>0?'var(--bad)':'inherit'}">${fmtMoney(unpaidAmt)}</span></div>
+          <div class="kv"><span>Still unpaid <span class="hint">(this period's jobs)</span></span><span class="v" style="color:${unpaidAmt>0?'var(--bad)':'inherit'}">${fmtMoney(unpaidAmt)}</span></div>
           <div class="kv"><span>GST collected</span><span class="v">${fmtMoney(gst)}</span></div>
           <div class="kv"><span>Avg days to get paid</span><span class="v">${perf.avgDaysToPayment===null?'—':perf.avgDaysToPayment+' days'}</span></div>
         </div>
@@ -4938,32 +4756,30 @@ function renderDashboard(profile, data){
     ${attention ? `<div class="section-title">Needs attention</div><div style="display:flex;gap:8px;flex-wrap:wrap">${attention}</div>` : ''}
 
     <div class="section-title">Marketing <span class="tag">ad spend ${fmtMoney(totalSpend)}</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Channel</th><th class="num">Form leads</th><th class="num">Calls</th><th class="num">Enquiries</th><th class="num">Ad spend</th><th class="num">Cost / enquiry</th><th class="num">Booked*</th><th class="num">Close rate*</th><th class="num">Revenue</th><th class="num">ROAS</th></tr></thead>
+    <div class="table-wrap"><table><thead><tr><th>Channel</th><th class="num">Form leads</th><th class="num">Calls</th><th class="num">Enquiries</th><th class="num">Ad spend</th><th class="num">Cost / enquiry</th><th class="num">Won</th><th class="num">Close rate</th><th class="num">Revenue</th><th class="num">ROAS</th></tr></thead>
       <tbody>${channelRows}</tbody></table></div>
-    <div class="hint" style="margin-top:6px">📞 Google Ads calls this period: <b>${cs.total}</b> · answered ${cs.answered} · missed ${cs.missed} · 30 s or longer ${cs.over30s}. Calls from Google Maps and from people who dial the 1300 number off the website aren't tracked yet — that comes with the phone system (Twilio). *Booked is partial while lead statuses are still updated in GHL.</div>
+    <div class="hint" style="margin-top:6px">📞 Google Ads calls this period: <b>${cs.total}</b> · answered ${cs.answered} · missed ${cs.missed} · 30 s or longer ${cs.over30s}. Calls from Google Maps and from people who dial the 1300 number off the website aren't tracked yet — that comes with the phone system (Twilio). Won = leads from this period that already have a job in Jobs &amp; Commissions; close rate = Won ÷ form leads. Recent leads may still turn into jobs, so the latest period always looks lower.</div>
     <div class="grid-3" style="margin-top:12px;align-items:start">
       <div class="card stat-card" style="--stat-accent:var(--primary)">
-        <div class="stat-label">Funnel — form leads to jobs*</div>
-        ${funnelStage('Leads', perf.funnel.leads, perf.funnel.leads, 'var(--primary)')}
-        ${funnelStage('Contacted', perf.funnel.contacted, perf.funnel.leads, 'var(--accent)')}
-        ${funnelStage('Price given', perf.funnel.priceGiven, perf.funnel.leads, 'var(--primary-teal)')}
-        ${funnelStage('Booked', perf.funnel.booked, perf.funnel.leads, 'var(--good)')}
-        ${funnelStage('Job done', perf.funnel.jobDone, perf.funnel.leads, 'var(--good)')}
+        <div class="stat-label">Leads → won / lost</div>
+        ${funnelStage('Leads came in', perf.outcome.leads, perf.outcome.leads, 'var(--primary)')}
+        ${funnelStage('Won (became a job)', perf.outcome.won, perf.outcome.leads, 'var(--good)')}
+        ${funnelStage('Lost', perf.outcome.lost, perf.outcome.leads, 'var(--bad)')}
+        ${funnelStage('Still open', perf.outcome.open, perf.outcome.leads, 'var(--warn)')}
+        <div class="hint" style="margin-top:6px">Won = the customer has a job in Jobs &amp; Commissions. Form leads only; phone calls join when the phone system is live.</div>
       </div>
       <div class="card stat-card" style="--stat-accent:var(--bad)">
-        <div class="stat-label">Why leads were lost*</div>
-        ${(perf.lossReasons.price+perf.lossReasons.outsideArea+perf.lossReasons.wrongNumber+perf.lossReasons.noReasonGiven) ? renderBarGroup([
-          {label:'Price', value:perf.lossReasons.price, color:'var(--bad)'},
-          {label:'Outside area', value:perf.lossReasons.outsideArea, color:'var(--warn)'},
-          {label:'Wrong number', value:perf.lossReasons.wrongNumber, color:'var(--ink-faint)'},
-          {label:'No reason given', value:perf.lossReasons.noReasonGiven, color:'var(--accent)'},
-        ], {fmt:(n)=>String(n)}) : emptyState('No lost leads this period')}
+        <div class="stat-label">Why leads were lost</div>
+        ${perf.outcome.lost ? renderBarGroup([...LOST_REASONS.map((x,i) => ({ label:x.label, value:perf.lossReasons[x.key], color:['var(--ink-faint)','var(--warn)','var(--bad)','var(--ink-faint)','var(--ink-faint)','var(--bad)','var(--accent)'][i] })), { label:'No reason given', value:perf.lossReasons.noReason, color:'var(--line)' }].filter(b => b.value>0), {fmt:(n)=>String(n)}) : emptyState('No lost leads this period')}
       </div>
       <div class="card stat-card" style="--stat-accent:var(--accent)">
         <div class="stat-label">Speed to lead</div>
         ${perf.speedToLead.sampleSize ? `<div class="stat-value" style="font-size:20px">${perf.speedToLead.medianHours<1 ? Math.round(perf.speedToLead.medianHours*60)+' min' : perf.speedToLead.medianHours+' hrs'}</div><div class="stat-sub">median first reply · ${perf.speedToLead.sampleSize} lead${perf.speedToLead.sampleSize===1?'':'s'}</div>` : `<div class="stat-sub">Not enough data yet — fills in as leads are answered inside the app</div>`}
       </div>
     </div>
+
+    <div class="section-title">Paid late — jobs from previous periods <span class="tag">paid in this period</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Technician</th><th>Customer</th><th>Invoice</th><th class="num">Amount</th><th>Job date</th><th>Paid on</th></tr></thead><tbody>${lateRows}</tbody></table></div>
 
     <div class="section-title">Pages that bring work <span class="tag">by landing page</span></div>
     <div class="table-wrap"><table><thead><tr><th>Landing page</th><th class="num">Leads</th><th class="num">Jobs done</th><th class="num">Revenue</th></tr></thead>
@@ -7046,14 +6862,12 @@ function render(){
   if (!UI.tab) { content.innerHTML = renderNoAccess(profile); return; }
   if (UI.tab==='crm') content.innerHTML = renderCrm(profile, data);
   else if (UI.tab==='crmOverview') content.innerHTML = renderCrmOverview(profile, data);
-  else if (UI.tab==='overview') content.innerHTML = renderOverview(profile, data);
   else if (UI.tab==='closings') content.innerHTML = renderClosings(profile, data);
   else if (UI.tab==='jobs') content.innerHTML = renderJobs(profile, data);
   else if (UI.tab==='finance') content.innerHTML = renderFinance(profile, data);
   else if (UI.tab==='adsGoogle') { if (!ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = renderDashGoogle(profile, data, true); }
-  else if (UI.tab==='dashboard') { if (UI.dashboard.view!=='summary' && !ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = UI.dashboard.view==='google' ? renderDashGoogle(profile, data) : UI.dashboard.view==='meta' ? renderDashMeta(profile, data) : renderDashboard(profile, data); }
+  else if (UI.tab==='dashboard') { if ((UI.dashboard.view==='google' || UI.dashboard.view==='meta') && !ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = UI.dashboard.view==='google' ? renderDashGoogle(profile, data) : UI.dashboard.view==='meta' ? renderDashMeta(profile, data) : UI.dashboard.view==='leads' ? renderCrmOverview(profile, data) : renderDashboard(profile, data); }
   else if (UI.tab==='payroll') content.innerHTML = renderPayroll(profile, data);
-  else if (UI.tab==='bizPerformance') content.innerHTML = renderBusinessPerformance(profile, data);
   else if (UI.tab==='employeeViews') content.innerHTML = renderEmployeeViews(profile, data);
   else if (UI.tab==='outstanding') content.innerHTML = renderOutstanding(profile, data);
   else if (UI.tab==='reminders') content.innerHTML = renderReminders(profile, data);

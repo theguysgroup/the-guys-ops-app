@@ -29,7 +29,7 @@ const DECLS = [
   'weekOf', 'monthOf', 'currentWeekKey',
   'jobGst', 'jobTotalCollected', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
-  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS',
+  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf',
   // CRM / attribution
   'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
@@ -219,7 +219,11 @@ function testFunnelLossReasonsSpeedToLead(sb){
   const perf = sb.computeBusinessPerformance(sb.STATE.data, '2026-09-01', '2026-09-10');
 
   assertEqual(perf.funnel, { leads:7, contacted:6, priceGiven:1, booked:1, jobDone:1 }, 'funnel: leads/contacted(status!=New)/priceGiven(estimatedValue>0)/booked/jobDone(by name)');
-  assertEqual(perf.lossReasons, { price:1, outsideArea:1, wrongNumber:1, noReasonGiven:1 }, 'lossReasons: first-match-wins tag classification of Not Relevant leads');
+  assertEqual(perf.lossReasons, { noReason:1, noAnswer:0, outsideArea:1, spam:0, wrongNumber:1, wrongDetails:0, tooExpensive:1, notInterested:0 }, 'lossReasons: Not Relevant leads classified into the fixed Lost-reason list');
+  assertEqual(perf.outcome, { leads:7, won:1, lost:4, open:2 }, 'outcome: leads in / won (has a job) / lost / still open');
+  assertEqual(perf.byChannel.Organic.closeRate, 14, 'closeRate: won (1) out of ALL leads (7), not out of decided ones');
+  assertEqual(sb.lostReasonOf({ tags:['not interested - price'] }), 'tooExpensive', 'lostReasonOf: price wins over not interested');
+  assertEqual(sb.lostReasonOf({ tags:['no answer ac'] }), 'noAnswer', 'lostReasonOf: no answer');
   assertEqual(perf.speedToLead.sampleSize, 2, 'speedToLead: only counts contacts with >=2 messages and a non-event reply');
   // Alice: 5 min = 0.0833h, Grace: 30 min = 0.5h -> avg 0.2917 (rounds to 0.29), median (upper of the two) 0.5
   assertClose(perf.speedToLead.avgHours, 0.29, 'speedToLead: avgHours across both replies', 0.01);
