@@ -759,7 +759,7 @@ function computeReminders(data, now){
   // silently goes nowhere, which is exactly the kind of dead-end Ofek asked to be caught. Skipped when
   // an explicit reminder or task already tracks that same lead + date, so the two paths never double up.
   (data.contacts||[]).forEach(c => {
-    if (!c.nextFollowUp || c.status==='Booked' || c.status==='Not Relevant') return;
+    if (!c.nextFollowUp || ['Booked','Won','Lost'].includes(leadStage(c))) return;
     const hasReminder = (data.manualReminders||[]).some(r => r.contactId===c.id && !r.done && r.date===c.nextFollowUp);
     const hasTask = (data.tasks||[]).some(t => t.client===c.fullName && t.due===c.nextFollowUp && t.status!=='Done');
     if (hasReminder || hasTask) return;
@@ -993,6 +993,8 @@ async function loadFromSupabase(){
       utmTerm:c.utm_term||'', utmContent:c.utm_content||'', landingPage:c.landing_page||'',
       referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
       submissionPage:c.submission_page||'',
+      lostReason:c.lost_reason||'', stageChangedAt:c.stage_changed_at||null, chasingSince:c.chasing_since||null,
+      chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done,
     })),
     jobs: (jobs||[]).map(j => ({ ...mapJobRow(j), activityLog: logsFor('job', j.id) })),
     equipmentSpend: (equipmentSpend||[]).map(e => ({
@@ -1081,10 +1083,11 @@ function contactPatchToRow(patch){
     followupNote:'followup_note', estimatedValue:'estimated_value', salesValue:'sales_value',
     jobDescription:'job_description', linkedJobId:'linked_job_id', starred:'starred',
     lastReadAt:'last_read_at', tags:'tags', messages:'messages',
+    lostReason:'lost_reason', stageChangedAt:'stage_changed_at', chasingSince:'chasing_since', chaseCalls:'chase_calls', chaseAlertDone:'chase_alert_done',
   };
   // date/timestamptz/uuid columns reject '' outright ("invalid input syntax for type date")
   // where the in-memory shape has always used '' to mean "unset" — null is the real "unset".
-  const nullIfEmpty = new Set(['created_at','next_follow_up','last_read_at','linked_job_id']);
+  const nullIfEmpty = new Set(['created_at','next_follow_up','last_read_at','linked_job_id','stage_changed_at','chasing_since']);
   const row = {};
   for (const k in patch) {
     if (!map[k]) continue;
@@ -1680,6 +1683,8 @@ function mapContactRow(c){
     utmTerm:c.utm_term||'', utmContent:c.utm_content||'', landingPage:c.landing_page||'',
     referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
     submissionPage:c.submission_page||'',
+    lostReason:c.lost_reason||'', stageChangedAt:c.stage_changed_at||null, chasingSince:c.chasing_since||null,
+    chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done,
   };
 }
 function handleContactRealtimeChange(payload){ if (PRESENT) return;
@@ -2060,12 +2065,8 @@ function onStatusChange(kind, id, value){
     db.jobs.update(j.id, { partsPaidBy: j.partsPaidBy });
     if ((old||'')!==(value||'')) logJobActivity(j, actor, `Parts paid-by changed from "${old||'—'}" to "${value||'—'}"`);
   } else if (kind==='leadStage') {
-    const c = STATE.data.contacts.find(x=>x.id===id);
-    const old = c.status;
-    c.status = value;
-    if (value==='Booked' || value==='Not Relevant') c.nextFollowUp = '';
-    db.contacts.update(c.id, { status: c.status, nextFollowUp: c.nextFollowUp });
-    if (old!==value) logContactActivity(c, actor, `Stage changed from "${old}" to "${value}"`);
+    setLeadStage(id, value);
+    return;
   } else if (kind==='leadDivision') {
     const c = STATE.data.contacts.find(x=>x.id===id);
     const old = c.division;
@@ -2244,7 +2245,7 @@ const NAV = [
   { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'finance', label:'Financial Summary', icon:'▦'}, {id:'payroll', label:'Payroll', icon:'💵'}, {id:'employeeViews', label:'Employee Views', icon:'👁'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
   { group:'System', items:[ {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
 ];
-function goTab(id){ UI.tab = id; UI.mobileNavOpen = false; render(); }
+function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 function goTasks(board){ UI.tab = 'tasks'; UI.tasks.board = board; UI.mobileNavOpen = false; render(); }
 function goResources(tab){ UI.tab = 'reference'; UI.reference.tab = tab; UI.mobileNavOpen = false; render(); }
 function toggleMobileNav(){ UI.mobileNavOpen = !UI.mobileNavOpen; render(); }
@@ -2559,19 +2560,53 @@ function renderProgressBar(value, target, opts){
    tag families (source / division / status) are kept as separate fields rather
    than one free-form tag pile, which is what makes the per-channel and per-
    division counts in the stat row actually countable. ── */
-const LEAD_SOURCES = ['Google Ads','Meta Ads','Google Maps','Organic','Phone Call'];
-const LEAD_DIVISIONS = ['Aircon','Chimney','Pressure Washing'];
-const LEAD_STATUSES = ['New','Follow-up','Booked','Not Relevant'];
-const LEAD_STATUS_COLOR = { New:'var(--primary)', 'Follow-up':'var(--warn)', Booked:'var(--good)', 'Not Relevant':'var(--ink-faint)' };
-const LEAD_STATUS_TONE = { New:'neutral', 'Follow-up':'warn', Booked:'good', 'Not Relevant':'neutral' };
-const LEAD_SOURCE_COLOR = { 'Google Ads':'var(--primary)', 'Meta Ads':'var(--accent)', 'Google Maps':'var(--ink-faint)', Organic:'var(--good)', 'Phone Call':'var(--warn)' };
+// Sources (Ofek, 2026-09-27). The stored value 'Organic' is shown as "Organic web" (every website form without an ad signal);
+// 'Unknown' is for leads where nobody knows how they found us. 'Phone Call' is a legacy value on old rows only.
+const LEAD_SOURCES = ['Google Ads','Meta Ads','Google Maps','Organic','Unknown'];
+const LEAD_SOURCE_LABEL = { Organic:'Organic web', 'Phone Call':'Phone (old)' };
+function sourceLabel(s){ return LEAD_SOURCE_LABEL[s] || s || '—'; }
+const LEAD_DIVISIONS = ['Aircon','Chimney','Pressure Washing','Other'];
+// Pipeline stages (Ofek, 2026-09-27). Stored values keep 'New' and 'Follow-up' so older rows need no rewrite; the legacy
+// 'Not Relevant' reads as Lost. Won is never picked by hand: a lead is Won as soon as its customer has a job.
+const LEAD_STATUSES = ['New','Chasing','Quoted','Follow-up','Booked','Won','Lost'];
+const LEAD_STAGE_PICKABLE = ['New','Chasing','Quoted','Follow-up','Booked','Lost'];
+const LEAD_STAGE_LABEL = { New:'New lead', Chasing:'Chasing', Quoted:'Quoted', 'Follow-up':'Follow up', Booked:'Booked', Won:'Won', Lost:'Lost' };
+function stageLabel(s){ return LEAD_STAGE_LABEL[s] || s; }
+const LEAD_STATUS_COLOR = { New:'var(--primary)', Chasing:'var(--accent)', Quoted:'var(--primary-teal)', 'Follow-up':'var(--warn)', Booked:'var(--good)', Won:'var(--good)', Lost:'var(--ink-faint)', 'Not Relevant':'var(--ink-faint)' };
+const LEAD_STATUS_TONE = { New:'neutral', Chasing:'warn', Quoted:'warn', 'Follow-up':'warn', Booked:'good', Won:'good', Lost:'neutral', 'Not Relevant':'neutral' };
+const LEAD_SOURCE_COLOR = { 'Google Ads':'var(--primary)', 'Meta Ads':'var(--accent)', 'Google Maps':'var(--ink-faint)', Organic:'var(--good)', Unknown:'var(--ink-faint)', 'Phone Call':'var(--warn)' };
+// Stages that must always carry a FUTURE follow-up date.
+const STAGES_NEED_DATE = ['Quoted','Follow-up'];
+// The stage rules (date lock) apply to leads created or moved from this day on; older leads get them when the old data is migrated.
+const PIPELINE_RULES_FROM = '2026-09-27';
+function leadStage(c){
+  if (!c) return 'New';
+  if (c.status==='Won' || leadHasJobFast(c)) return 'Won';
+  if (c.status==='Lost' || c.status==='Not Relevant') return 'Lost';
+  return LEAD_STATUSES.includes(c.status) ? c.status : 'New';
+}
+// Same answer as contactHasJob (job linked by id, else same customer name), but from an index rebuilt once per render,
+// because the CRM asks it for every lead many times while sorting and drawing.
+const JOB_CACHE = { index:null };
+function leadHasJobFast(c){
+  const jobs = (STATE.data && STATE.data.jobs) || [];
+  let ix = JOB_CACHE.index;
+  if (!ix || ix.jobs !== jobs || ix.len !== jobs.length) {
+    ix = JOB_CACHE.index = { jobs, len: jobs.length, ids: new Set(jobs.map(j=>j.contactId).filter(Boolean)), names: new Set(jobs.map(j=>(j.customerName||'').trim().toLowerCase()).filter(Boolean)) };
+  }
+  if (c.id && ix.ids.has(c.id)) return true;
+  const n = (c.fullName||'').trim().toLowerCase();
+  return !!n && ix.names.has(n);
+}
+function leadRulesApply(c){ return !!c && (!!c.stageChangedAt || localDay(c.createdAt) >= PIPELINE_RULES_FROM); }
+function leadNeedsFutureDate(c){ return leadRulesApply(c) && STAGES_NEED_DATE.includes(leadStage(c)) && !(c.nextFollowUp && c.nextFollowUp > todayStr()); }
 // Finer-grained breakdown tags, layered on top of the division/source rollups above rather than
 // replacing them — a lead still counts once toward "Aircon" / "Meta Ads" in every existing report,
 // and *additionally* carries one of these (when known) via the existing free-form tags array, so
 // "how many were Instagram vs Facebook" is answerable without splitting the totals Ofek budgets
 // against. Auto-applied by the intake-lead Edge Function from UTM/landing-page/message-text
 // signals; always just a normal tag from here on, editable/removable like any other.
-const AIRCON_TYPE_TAGS = ['Split System','Duct System'];
+const AIRCON_TYPE_TAGS = ['Split System','Duct System','Ventilation'];
 // Why a lead was lost — the fixed list Ofek set on 2026-09-27. Until the Lost stage makes one of these mandatory, older leads
 // are classified from their free-form tags (first match wins; price before 'not interested' because GHL wrote 'not interested - price').
 const LOST_REASONS = [
@@ -2584,6 +2619,7 @@ const LOST_REASONS = [
   { key:'notInterested', label:'Not interested',        match:t => t.includes('not interested') },
 ];
 function lostReasonOf(c){
+  if (c.lostReason && LOST_REASONS.some(r=>r.key===c.lostReason)) return c.lostReason;
   const tags = (c.tags||[]).map(t=>String(t).toLowerCase());
   const order = ['tooExpensive','outsideArea','spam','wrongNumber','wrongDetails','noAnswer','notInterested'];
   for (const k of order) { const r = LOST_REASONS.find(x=>x.key===k); if (tags.some(r.match)) return k; }
@@ -2745,13 +2781,13 @@ function logIncomingMessage(contactId, scope){
 }
 
 function computeCrmStats(contacts){
-  const stats = { total:contacts.length, byStatus:{New:0,'Follow-up':0,Booked:0,'Not Relevant':0}, bySource:{}, byDivision:{}, byAirconType:{}, byMetaPlatform:{}, wonValue:0 };
+  const stats = { total:contacts.length, byStatus:Object.fromEntries(LEAD_STATUSES.map(s=>[s,0])), bySource:{}, byDivision:{}, byAirconType:{}, byMetaPlatform:{}, wonValue:0 };
   LEAD_SOURCES.forEach(s=>stats.bySource[s]=0);
   LEAD_DIVISIONS.forEach(d=>stats.byDivision[d]={total:0,won:0});
   AIRCON_TYPE_TAGS.forEach(t=>stats.byAirconType[t]=0);
   META_PLATFORM_TAGS.forEach(t=>stats.byMetaPlatform[t]=0);
   contacts.forEach(c => {
-    if (stats.byStatus[c.status]!==undefined) stats.byStatus[c.status]++;
+    const st = leadStage(c); if (stats.byStatus[st]!==undefined) stats.byStatus[st]++;
     if (stats.bySource[c.source]!==undefined) stats.bySource[c.source]++;
     if (stats.byDivision[c.division]) {
       stats.byDivision[c.division].total++;
@@ -2761,7 +2797,7 @@ function computeCrmStats(contacts){
     // "Duct System" still counts under Aircon above; this just additionally answers "which kind".
     if (c.division==='Aircon') (c.tags||[]).forEach(t => { if (stats.byAirconType[t]!==undefined) stats.byAirconType[t]++; });
     if (c.source==='Meta Ads') (c.tags||[]).forEach(t => { if (stats.byMetaPlatform[t]!==undefined) stats.byMetaPlatform[t]++; });
-    if (c.status==='Booked') stats.wonValue += Number(c.estimatedValue)||0;
+    if (st==='Booked' || st==='Won') stats.wonValue += Number(c.estimatedValue)||0;
   });
   // Won = the lead became a job (same rule as the Dashboard); close rate = won out of every lead in the period.
   stats.won = contacts.filter(c => contactHasJob(c, (STATE.data && STATE.data.jobs) || [])).length;
@@ -2779,7 +2815,7 @@ function crmFilteredContactsUnsorted(data){
   let list = data.contacts.slice();
   if (UI.crm.source!=='all') list = list.filter(c=>c.source===UI.crm.source);
   if (UI.crm.division!=='all') list = list.filter(c=>c.division===UI.crm.division);
-  if (UI.crm.status!=='all') list = list.filter(c=>c.status===UI.crm.status);
+  if (UI.crm.status!=='all') list = list.filter(c=>leadStage(c)===UI.crm.status);
   if (UI.crm.tag && UI.crm.tag!=='all') list = list.filter(c=>(c.tags||[]).includes(UI.crm.tag));
   const q = (UI.crm.search||'').trim().toLowerCase();
   if (q) list = list.filter(c => [c.fullName,c.phone,c.email,c.postcode,c.jobDescription].some(v => (v||'').toLowerCase().indexOf(q)!==-1));
@@ -2797,7 +2833,7 @@ function opsFilteredContacts(data){
   if (sortBy==='oldest') list.sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
   else if (sortBy==='lastContacted') list.sort((a,b)=>new Date(lastContactedAt(b)).getTime()-new Date(lastContactedAt(a)).getTime());
   else if (sortBy==='newest') list.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
-  else list.sort((a,b) => (LEAD_STATUSES.indexOf(a.status)-LEAD_STATUSES.indexOf(b.status)) || (new Date(lastContactedAt(b)).getTime()-new Date(lastContactedAt(a)).getTime()));
+  else list.sort((a,b) => (LEAD_STATUSES.indexOf(leadStage(a))-LEAD_STATUSES.indexOf(leadStage(b))) || (new Date(lastContactedAt(b)).getTime()-new Date(lastContactedAt(a)).getTime()));
   return list;
 }
 function updateCrmSearch(v){
@@ -2946,6 +2982,156 @@ function renderManageTagsList(){
     </div>`;
   }).join('');
 }
+/* ── Pipeline stage rules (Ofek, 2026-09-27) ────────────────────────────────────────────────────────
+   Every way of changing a stage (dropdowns, drag & drop, the lead form) goes through setLeadStage, so the rules hold everywhere:
+   Lost needs a reason · Quoted/Follow up need a future follow-up date · Chasing starts the 3-hour call-back alert and the daily
+   "called today" counter · Won is automatic (the customer has a job). */
+function setLeadStage(id, stage, after){
+  const c = contactById(id); if (!c) return;
+  const cur = leadStage(c);
+  if (stage==='Won') { showToast('Won is set automatically once the customer has a job in Jobs & Commissions'); render(); return; }
+  if (cur==='Won') { showToast(`${c.fullName} already has a job, so the lead stays Won`); render(); return; }
+  if (stage===cur && stage!=='Lost') { if (after) after(); return; }
+  if (stage==='Lost') { openLostReasonPrompt(c, after); return; }
+  if (STAGES_NEED_DATE.includes(stage) && !(c.nextFollowUp && c.nextFollowUp > todayStr())) { openFollowupDatePrompt(c, stage, after); return; }
+  applyLeadStage(c, stage, {});
+  if (after) after(); else render();
+}
+function applyLeadStage(c, stage, extra){
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  const old = stageLabel(leadStage(c));
+  const nowIso = new Date().toISOString();
+  const patch = { status: stage, stageChangedAt: nowIso, ...extra };
+  if (stage==='Booked' || stage==='Lost') patch.nextFollowUp = '';
+  if (stage==='Chasing' && leadStage(c)!=='Chasing') { patch.chasingSince = nowIso; patch.chaseAlertDone = false; }
+  if (stage!=='Lost') patch.lostReason = '';
+  Object.assign(c, patch);
+  db.contacts.update(c.id, patch);
+  logContactActivity(c, actor, `Stage changed from "${old}" to "${stageLabel(stage)}"${extra.lostReason?` (${lostReasonLabel(extra.lostReason)})`:''}`);
+  logLeadEvent(c, `Stage changed from "${old}" to "${stageLabel(stage)}"`);
+  showToast(`${c.fullName} → ${stageLabel(stage)}`);
+}
+function lostReasonLabel(k){ const r = LOST_REASONS.find(x=>x.key===k); return r ? r.label : 'No reason given'; }
+function openLostReasonPrompt(c, after){
+  POPUP_AFTER = after || null;
+  openPopup(`<h3 style="margin:0 0 6px">Why was ${esc(c.fullName)} lost?</h3>
+    <div class="hint" style="margin-bottom:10px">A lost lead always needs a reason — it feeds "Why leads were lost" on the Dashboard.</div>
+    <div style="display:grid;gap:6px">${LOST_REASONS.map(r=>`<button class="btn" style="justify-content:flex-start" onclick="confirmLostReason('${c.id}','${r.key}')">${esc(r.label)}</button>`).join('')}</div>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn ghost" onclick="closePopup();render()">Cancel</button></div>`);
+}
+function confirmLostReason(id, key){
+  const c = contactById(id); if (!c) return;
+  const label = lostReasonLabel(key);
+  const tags = (c.tags||[]).includes(label) ? c.tags : [...(c.tags||[]), label];
+  applyLeadStage(c, 'Lost', { lostReason:key, tags });
+  finishPopup();
+}
+function openFollowupDatePrompt(c, stage, after){
+  POPUP_AFTER = after || null;
+  const tomorrow = shiftDays(todayStr(), 1);
+  openPopup(`<h3 style="margin:0 0 6px">When is the next follow-up with ${esc(c.fullName)}?</h3>
+    <div class="hint" style="margin-bottom:10px">A lead in <b>${esc(stageLabel(stage))}</b> must always have a future follow-up date, so it can never fall through the cracks. On that day it shows up in Open Tasks.</div>
+    <input type="date" id="popup-fu-date" min="${tomorrow}" value="${c.nextFollowUp && c.nextFollowUp>todayStr() ? c.nextFollowUp : tomorrow}" style="width:100%">
+    <div id="popup-error" style="color:var(--bad);font-size:12px;margin-top:6px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+      ${leadStage(c)===stage ? `<button class="btn ghost" onclick="POPUP_AFTER=null;closePopup();render()" title="Stay on this lead and change its stage instead">Change the stage instead</button>` : `<button class="btn ghost" onclick="closePopup();render()">Cancel</button>`}
+      <button class="btn primary" onclick="confirmFollowupDate('${c.id}','${stage}')">Save date</button>
+    </div>`);
+}
+function confirmFollowupDate(id, stage){
+  const c = contactById(id); if (!c) return;
+  const v = (document.getElementById('popup-fu-date')||{}).value || '';
+  if (!v || v <= todayStr()) { const e = document.getElementById('popup-error'); if (e) e.textContent = 'Pick a date after today.'; return; }
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  if ((c.nextFollowUp||'') !== v) logContactActivity(c, actor, `Follow-up date changed from "${c.nextFollowUp||'—'}" to "${v}"`);
+  if (leadStage(c)===stage) { c.nextFollowUp = v; db.contacts.update(c.id, { nextFollowUp: v }); }
+  else applyLeadStage(c, stage, { nextFollowUp: v });
+  finishPopup();
+}
+// Leaving a Quoted / Follow up lead without a future date is blocked: returns false and asks for the date first.
+function leadLeaveGuard(id, then){
+  const c = id ? contactById(id) : null;
+  if (!c || !leadNeedsFutureDate(c)) return true;
+  openFollowupDatePrompt(c, leadStage(c), then);
+  return false;
+}
+// Small centred popup, separate from the main modal so it can sit on top of it.
+let POPUP_AFTER = null;
+function openPopup(html){
+  closePopup();
+  const el = document.createElement('div');
+  el.id = 'app-popup'; el.className = 'modal-back'; el.style.zIndex = '2000';
+  el.innerHTML = `<div class="modal" style="max-width:420px">${html}</div>`;
+  document.body.appendChild(el);
+}
+function closePopup(){ const el = document.getElementById('app-popup'); if (el) el.remove(); }
+function finishPopup(){ closePopup(); const a = POPUP_AFTER; POPUP_AFTER = null; if (a) a(); else render(); }
+
+// ── Chasing: workdays are Mon–Fri, 08:00–17:00 Sydney ──
+function sydneyWall(d){
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{ timeZone:'Australia/Sydney', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false, weekday:'short' }).formatToParts(d).map(x=>[x.type,x.value]));
+  return { day:`${p.year}-${p.month}-${p.day}`, hour:Number(p.hour)%24, minute:Number(p.minute), dow:p.weekday };
+}
+function isWorkday(dayStr){ const dw = parseLocalDate(dayStr).getDay(); return dw>=1 && dw<=5; }
+// When Ron should be told to call again: 3 hours after the lead went to Chasing, pushed to the next working morning if that lands outside hours.
+function chaseAlertDue(sinceIso){
+  const w = sydneyWall(new Date(sinceIso));
+  let day = w.day, mins = w.hour*60 + w.minute + 180;
+  if (mins >= 24*60) { day = shiftDays(day, 1); mins -= 24*60; }
+  if (!isWorkday(day) || mins >= 17*60) { day = shiftDays(day, 1); mins = 8*60; }
+  else if (mins < 8*60) mins = 8*60;
+  while (!isWorkday(day)) day = shiftDays(day, 1);
+  return { day, mins };
+}
+function chaseAlertIsDue(c, now){
+  if (leadStage(c)!=='Chasing' || !c.chasingSince || c.chaseAlertDone) return false;
+  const due = chaseAlertDue(c.chasingSince), w = sydneyWall(now || new Date());
+  return w.day > due.day || (w.day===due.day && w.hour*60+w.minute >= due.mins);
+}
+// X / Y: working days Ron ticked "called" / working days since the lead came in (both inclusive of today).
+function chaseCounter(c, now){
+  const today = sydneyWall(now || new Date()).day;
+  const start = localDay(c.createdAt) || today;
+  let y = 0; for (let d = start; d <= today; d = shiftDays(d, 1)) { if (isWorkday(d)) y++; if (y > 400) break; }
+  const called = new Set((c.chaseCalls||[]).filter(d => d>=start && d<=today && isWorkday(d)));
+  return { x: called.size, y, calledToday: (c.chaseCalls||[]).includes(today) };
+}
+function toggleChaseCalledToday(id, ev){
+  if (ev) ev.stopPropagation();
+  const c = contactById(id); if (!c) return;
+  const today = sydneyWall(new Date()).day;
+  const set = new Set(c.chaseCalls||[]);
+  const had = set.has(today);
+  if (had) set.delete(today); else set.add(today);
+  c.chaseCalls = [...set].sort();
+  db.contacts.update(c.id, { chaseCalls: c.chaseCalls });
+  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', had ? 'Unticked "called today" (chasing)' : 'Called today (chasing)');
+  render();
+}
+function chaseTick(c){
+  if (leadStage(c)!=='Chasing') return '';
+  const k = chaseCounter(c);
+  return `<label onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;white-space:nowrap" title="Tick once a day when you called this lead">
+    <input type="checkbox" ${k.calledToday?'checked':''} onchange="toggleChaseCalledToday('${c.id}', event)" style="width:auto;margin:0"> Called today <b>${k.x}/${k.y}</b></label>`;
+}
+// Floating call-back bubbles: stay until someone presses ×.
+function renderChaseBubbles(){
+  let host = document.getElementById('chase-bubbles');
+  const prof = typeof getCurrentProfile==='function' ? getCurrentProfile() : null;
+  if (!STATE.data || !prof || !canViewSection(prof,'crm')) { if (host) host.remove(); return; }
+  const due = (STATE.data.contacts||[]).filter(c => chaseAlertIsDue(c));
+  if (!due.length) { if (host) host.remove(); return; }
+  if (!host) { host = document.createElement('div'); host.id = 'chase-bubbles'; host.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:1500;display:flex;flex-direction:column;gap:10px;max-width:340px'; document.body.appendChild(host); }
+  host.innerHTML = due.slice(0,5).map(c => `<div class="card" style="box-shadow:0 8px 28px rgba(0,0,0,.35);border-inline-start:4px solid var(--accent);padding:12px 14px;position:relative">
+      <button onclick="dismissChaseBubble('${c.id}')" aria-label="Dismiss" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--ink-soft);font-size:18px;cursor:pointer">×</button>
+      <div style="font-weight:700;margin-bottom:4px;padding-right:18px">📞 Call ${esc(c.fullName)} now</div>
+      <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">3 hours since they didn't answer. ${esc(c.phone||'')}</div>
+      <button class="btn primary small" onclick="goToLeadConversation('${c.id}')">Open customer card</button>
+    </div>`).join('') + (due.length>5 ? `<div class="hint" style="text-align:right">+${due.length-5} more in Chasing</div>` : '');
+}
+function dismissChaseBubble(id){ const c = contactById(id); if (!c) return; c.chaseAlertDone = true; db.contacts.update(id, { chaseAlertDone: true }); renderChaseBubbles(); }
+setInterval(() => { try { renderChaseBubbles(); } catch(e) {} }, 60000);
+
 function renderLeadCard(c){
   const today = todayStr();
   const overdue = c.nextFollowUp && c.nextFollowUp < today;
@@ -2956,15 +3142,17 @@ function renderLeadCard(c){
       <div class="lead-name">${esc(c.fullName)}${unreadBadge(c)}</div>
     </div>
     <div class="lead-tags">
-      ${leadTagChip(c.division, LEAD_STATUS_COLOR[c.status])}
-      ${leadTagChip(c.source, LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}
+      ${leadTagChip(c.division, LEAD_STATUS_COLOR[leadStage(c)])}
+      ${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}
     </div>
     <div class="lead-meta mono">${esc(c.phone||'—')}</div>
+    ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
+    ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">${esc(lostReasonLabel(lostReasonOf(c)))}</div>` : ''}
     ${c.salesValue ? `<div class="lead-sales-chip">💰 ${fmtMoney(c.salesValue)}</div>` : ''}
     ${c.nextFollowUp ? `<div class="lead-due ${overdue?'overdue':(dueToday?'today':'')}">${overdue?'⚠ Overdue':(dueToday?'● Due today':'○ Follow up')} · ${fmtDateShort(c.nextFollowUp)}</div>` : ''}
-    <select class="lead-move" onclick="event.stopPropagation()" onchange="moveLead('${c.id}',this.value)" aria-label="Move ${esc(c.fullName)} to another stage">
-      ${LEAD_STATUSES.map(s=>`<option value="${s}" ${c.status===s?'selected':''}>${s}</option>`).join('')}
-    </select>
+    ${leadStage(c)==='Won' ? '' : `<select class="lead-move" onclick="event.stopPropagation()" onchange="moveLead('${c.id}',this.value)" aria-label="Move ${esc(c.fullName)} to another stage">
+      ${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${leadStage(c)===s?'selected':''}>${stageLabel(s)}</option>`).join('')}
+    </select>`}
   </div>`;
 }
 let DRAGGED_LEAD_ID = null;
@@ -2980,26 +3168,20 @@ function onLeadDrop(e, status, colEl){
   if (id) moveLead(id, status);
 }
 function moveLead(id, status){
-  const c = contactById(id); if (!c || c.status===status) return;
-  const actor = getCurrentProfile()?.fullName || 'Unknown';
-  const old = c.status;
-  c.status = status;
-  if (status==='Booked' || status==='Not Relevant') c.nextFollowUp = '';
-  db.contacts.update(c.id, { status: c.status, nextFollowUp: c.nextFollowUp });
-  logContactActivity(c, actor, `Stage changed from "${old}" to "${status}"`);
-  logLeadEvent(c, `Stage changed from "${old}" to "${status}"`);
-  showToast(`${c.fullName} → ${status}`);
-  render();
-  const moved = document.querySelector(`.lead-card[data-lead-id="${id}"]`);
-  if (moved) { moved.classList.add('just-moved'); setTimeout(()=>moved.classList.remove('just-moved'), 700); }
+  const c = contactById(id); if (!c || leadStage(c)===status) return;
+  setLeadStage(id, status, () => {
+    render();
+    const moved = document.querySelector(`.lead-card[data-lead-id="${id}"]`);
+    if (moved) { moved.classList.add('just-moved'); setTimeout(()=>moved.classList.remove('just-moved'), 700); }
+  });
 }
 
 /* ── CRM Inbox — the 3-pane working view (list · thread · details), modelled on the
    unified-inbox layout Ofek uses day to day (screenshots he sent), since this screen is where
    Ron spends most of his time and needs to live entirely in conversations, not a modal per lead. */
 function setCrmInboxFilter(f){ UI.crm.inboxFilter = f; render(); }
-function selectCrmContact(id){ UI.crm.selectedContactId = id; render(); }
-function clearCrmSelection(){ UI.crm.selectedContactId = null; render(); }
+function selectCrmContact(id){ const go = () => { UI.crm.selectedContactId = id; render(); }; if (UI.crm.selectedContactId && UI.crm.selectedContactId!==id && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
+function clearCrmSelection(){ const go = () => { UI.crm.selectedContactId = null; render(); }; if (!leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 // Clicking a lead's name anywhere (Pipeline card, Table row, the Reminders follow-up banner) jumps
 // straight into the live conversation, instead of opening the full edit modal. Explicit action buttons
 // ("Follow-up / edit", "Full profile", "Open") still open the modal — only the plain name-click changes.
@@ -3029,6 +3211,7 @@ function toggleLeadStar(id, event){
 }
 function setLeadFollowupDate(id, value){
   const c = contactById(id); if (!c) return;
+  if (leadRulesApply(c) && STAGES_NEED_DATE.includes(leadStage(c)) && !(value && value > todayStr())) { showToast(`A lead in ${stageLabel(leadStage(c))} needs a follow-up date after today`); openFollowupDatePrompt(c, leadStage(c)); return; }
   const old = c.nextFollowUp||''; c.nextFollowUp = value;
   db.contacts.update(id, { nextFollowUp: value });
   if (old!==value) logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Follow-up date changed from "${old||'—'}" to "${value||'—'}"`);
@@ -3075,7 +3258,7 @@ function renderCrmInboxList(contacts){
   const tabs = [['unread',`Unread${unreadTotal?` (${unreadTotal})`:''}`],['all','All'],['recent','Recent'],['starred','Starred']];
   const rows = filtered.length ? filtered.map(c => `
     <div class="crm-inbox-row ${c.id===selected?'active':''}" onclick="selectCrmContact('${c.id}')">
-      <div class="crm-inbox-avatar" style="--avatar-color:${LEAD_STATUS_COLOR[c.status]}">${esc(initials(c.fullName))}</div>
+      <div class="crm-inbox-avatar" style="--avatar-color:${LEAD_STATUS_COLOR[leadStage(c)]}">${esc(initials(c.fullName))}</div>
       <div class="crm-inbox-row-main">
         <div class="crm-inbox-row-top">
           <span class="crm-inbox-row-name">${esc(c.fullName)}</span>
@@ -3115,13 +3298,15 @@ function renderCrmInboxThreadAndDetails(c){
     </div>
     <div class="crm-inbox-details">
       <div class="lead-tags" style="margin-bottom:14px">
-        ${leadTagChip(c.division, LEAD_STATUS_COLOR[c.status])}
-        ${leadTagChip(c.source, LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}
+        ${leadTagChip(c.division, LEAD_STATUS_COLOR[leadStage(c)])}
+        ${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}
       </div>
       <div class="field"><label>Tags</label>${renderLeadTags(c.id, 'inbox')}</div>
-      <div class="field" style="margin-top:9px"><label>Stage</label>${statusSelect('leadStage', c.id, c.status, LEAD_STATUSES, v=>LEAD_STATUS_TONE[v], v=>v, false)}</div>
+      <div class="field" style="margin-top:9px"><label>Stage</label>${leadStageControl(c)}</div>
+      ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
+      ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">Lost reason: <b>${esc(lostReasonLabel(lostReasonOf(c)))}</b></div>` : ''}
       <div class="field" style="margin-top:9px"><label>Division</label>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</div>
-      <div class="field" style="margin-top:9px"><label>Source</label>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', v=>v, false)}</div>
+      <div class="field" style="margin-top:9px"><label>Source</label>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</div>
       <div class="field" style="margin-top:9px"><label>Next follow-up</label>${renderDateCell('inbox-followup-'+c.id, c.nextFollowUp||'', `setLeadFollowupDate('${c.id}', v)`)}</div>
       <div class="field" style="margin-top:9px"><label>Follow-up note</label><textarea rows="2" placeholder="What needs doing when this follow-up is due…" onchange="setLeadFollowupNote('${c.id}',this.value)">${esc(c.followupNote||'')}</textarea></div>
       <div class="field" style="margin-top:9px"><label>Estimated value</label><input type="number" value="${c.estimatedValue||0}" onchange="setLeadEstimatedValue('${c.id}',this.value)"></div>
@@ -3134,6 +3319,13 @@ function renderCrmInboxThreadAndDetails(c){
       </div>
     </div>`;
 }
+// Stage dropdown that goes through the stage rules; Won is shown, not picked.
+function leadStageControl(c){
+  const st = leadStage(c);
+  if (st==='Won') return pill('good', 'Won — has a job');
+  const opts = LEAD_STAGE_PICKABLE.map(o => `<option value="${o}" ${o===st?'selected':''}>${esc(stageLabel(o))}</option>`).join('');
+  return `<select style="min-width:130px" onchange="setLeadStage('${c.id}', this.value)">${opts}</select>`;
+}
 function renderCrmInbox(contacts){
   const selected = UI.crm.selectedContactId ? contactById(UI.crm.selectedContactId) : null;
   return `<div class="crm-inbox ${selected?'has-selection':''}">
@@ -3143,10 +3335,10 @@ function renderCrmInbox(contacts){
 }
 function renderCrmPipeline(contacts){
   const cols = LEAD_STATUSES.map(status => {
-    const inCol = contacts.filter(c=>c.status===status);
+    const inCol = contacts.filter(c=>leadStage(c)===status);
     return `<div class="pipe-col" style="--stage:${LEAD_STATUS_COLOR[status]}" ondragover="onLeadDragOver(event,this)" ondragleave="onLeadDragLeave(this)" ondrop="onLeadDrop(event,'${status}',this)">
       <div class="pipe-head">
-        <span class="pipe-title-wrap"><span class="pipe-dot"></span><span class="pipe-title">${status}</span></span>
+        <span class="pipe-title-wrap"><span class="pipe-dot"></span><span class="pipe-title">${esc(stageLabel(status))}</span></span>
         <span class="pipe-count">${inCol.length}</span>
       </div>
       <div class="pipe-body">
@@ -3155,7 +3347,7 @@ function renderCrmPipeline(contacts){
     </div>`;
   }).join('');
   return `<div class="pipeline">${cols}</div>
-    <div class="hint" style="margin-top:10px">Drag a card between columns, or use the stage dropdown on the card — both work.</div>`;
+    <div class="hint" style="margin-top:10px">Drag a card between columns, or use the stage dropdown on the card. Won fills itself once the customer has a job.</div>`;
 }
 function renderTableTagsCell(c){
   const tags = c.tags||[];
@@ -3175,11 +3367,11 @@ function renderCrmTable(allContacts){
   const rows = contacts.length ? contacts.map(c => {
     const overdue = c.nextFollowUp && c.nextFollowUp < today;
     return `<tr>
-      <td style="border-inline-start:2px solid ${LEAD_STATUS_COLOR[c.status]};cursor:pointer" onclick="goToLeadConversation('${c.id}')"><span style="display:flex;align-items:center;gap:8px"><span class="table-row-avatar" style="--avatar-color:${LEAD_STATUS_COLOR[c.status]}">${esc(initials(c.fullName))}</span>${esc(c.fullName)}${unreadBadge(c)}</span></td>
+      <td style="border-inline-start:2px solid ${LEAD_STATUS_COLOR[leadStage(c)]};cursor:pointer" onclick="goToLeadConversation('${c.id}')"><span style="display:flex;align-items:center;gap:8px"><span class="table-row-avatar" style="--avatar-color:${LEAD_STATUS_COLOR[leadStage(c)]}">${esc(initials(c.fullName))}</span>${esc(c.fullName)}${unreadBadge(c)}</span></td>
       <td class="mono">${esc(c.phone||'—')}</td>
       <td>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</td>
-      <td>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', v=>v, false)}</td>
-      <td>${statusSelect('leadStage', c.id, c.status, LEAD_STATUSES, v=>LEAD_STATUS_TONE[v], v=>v, false)}</td>
+      <td>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</td>
+      <td>${leadStageControl(c)}${leadStage(c)==='Chasing'?`<div style="margin-top:4px">${chaseTick(c)}</div>`:''}</td>
       <td class="wrap">${renderTableTagsCell(c)}</td>
       <td class="mono">${fmtDateShort(c.createdAt)}</td>
       <td class="mono">${fmtDateShort(lastContactedAt(c))}</td>
@@ -3202,7 +3394,9 @@ function renderCrmBody(data){
 function renderCrm(profile, data){
   const today = todayStr();
   const contacts = opsFilteredContacts(data);
-  const needsAction = data.contacts.filter(c => c.nextFollowUp && c.nextFollowUp <= today && c.status!=='Booked' && c.status!=='Not Relevant');
+  const needsAction = data.contacts.filter(c => c.nextFollowUp && c.nextFollowUp <= today && !['Booked','Won','Lost'].includes(leadStage(c)));
+  const chasing = data.contacts.filter(c => leadStage(c)==='Chasing');
+  const chasingCalledToday = chasing.filter(c => chaseCounter(c).calledToday).length;
   const isTable = UI.crm.view==='table';
   const isInbox = UI.crm.view==='inbox';
 
@@ -3217,6 +3411,10 @@ function renderCrm(profile, data){
       </div>
     </div>
 
+    ${chasing.length ? `<div class="card" style="margin-bottom:12px;border-inline-start:4px solid var(--accent);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span><b>Chasing:</b> called today <b>${chasingCalledToday} of ${chasing.length}</b> leads</span>
+      <button class="btn small" onclick="UI.crm.status='Chasing';UI.crm.view='table';render()">Show chasing leads</button>
+    </div>` : ''}
     ${needsAction.length ? `<div class="card" style="margin-bottom:18px;border-inline-start:4px solid var(--bad)">
       <div class="stat-label" style="margin-bottom:8px">Needs a follow-up today</div>
       ${needsAction.sort((a,b)=>a.nextFollowUp.localeCompare(b.nextFollowUp)).map(c=>{ const ctx = leadFollowupContextFor(c); return `
@@ -3232,9 +3430,9 @@ function renderCrm(profile, data){
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
       <input value="${esc(UI.crm.search||'')}" placeholder="Search name, phone, email…" oninput="updateCrmSearch(this.value)" style="width:auto;min-width:220px;flex:1">
       <select style="width:auto" onchange="UI.crm.division=this.value;render()"><option value="all">All divisions</option>${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${UI.crm.division===d?'selected':''}>${d}</option>`).join('')}</select>
-      <select style="width:auto" onchange="UI.crm.source=this.value;render()"><option value="all">All sources</option>${LEAD_SOURCES.map(s=>`<option value="${s}" ${UI.crm.source===s?'selected':''}>${s}</option>`).join('')}</select>
+      <select style="width:auto" onchange="UI.crm.source=this.value;render()"><option value="all">All sources</option>${LEAD_SOURCES.map(s=>`<option value="${s}" ${UI.crm.source===s?'selected':''}>${esc(sourceLabel(s))}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.tag=this.value;render()"><option value="all">All tags</option>${allKnownTags().map(t=>`<option value="${esc(t)}" ${UI.crm.tag===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
-      <select style="width:auto" onchange="UI.crm.status=this.value;render()"><option value="all">All stages</option>${LEAD_STATUSES.map(s=>`<option value="${s}" ${UI.crm.status===s?'selected':''}>${s}</option>`).join('')}</select>
+      <select style="width:auto" onchange="UI.crm.status=this.value;render()"><option value="all">All stages</option>${LEAD_STATUSES.map(s=>`<option value="${s}" ${UI.crm.status===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>
       ${isTable ? `<select style="width:auto" onchange="UI.crm.sortBy=this.value;render()">
         <option value="stage" ${UI.crm.sortBy==='stage'?'selected':''}>By stage (New first)</option>
         <option value="newest" ${UI.crm.sortBy==='newest'?'selected':''}>Newest lead first</option>
@@ -3257,7 +3455,7 @@ function renderCrmOverview(profile, data){
     <span style="color:var(--ink-faint);font-size:12px;align-self:center">to</span>
     <input type="date" style="width:auto" value="${UI.crmOverview.customTo||''}" onchange="UI.crmOverview.customTo=this.value;render()">` : '';
 
-  const sourceBars = renderBarGroup(LEAD_SOURCES.map(s => ({ label:s, value:stats.bySource[s], color:LEAD_SOURCE_COLOR[s] })), { fmt:(n)=>String(n) });
+  const sourceBars = renderBarGroup(LEAD_SOURCES.map(s => ({ label:sourceLabel(s), value:stats.bySource[s], color:LEAD_SOURCE_COLOR[s] })), { fmt:(n)=>String(n) });
   const divisionRows = LEAD_DIVISIONS.map(d => {
     const v = stats.byDivision[d];
     const rate = (v.won+0)>0 || v.total>0 ? (v.total ? Math.round((v.won/v.total)*100) : 0) : 0;
@@ -3293,15 +3491,15 @@ function renderCrmOverview(profile, data){
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
       ${rangeChips}${customInputs}
-      <select style="width:auto" onchange="UI.crmOverview.source=this.value;render()"><option value="all">All sources</option>${LEAD_SOURCES.map(s=>`<option value="${s}" ${UI.crmOverview.source===s?'selected':''}>${s}</option>`).join('')}</select>
+      <select style="width:auto" onchange="UI.crmOverview.source=this.value;render()"><option value="all">All sources</option>${LEAD_SOURCES.map(s=>`<option value="${s}" ${UI.crmOverview.source===s?'selected':''}>${esc(sourceLabel(s))}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crmOverview.division=this.value;render()"><option value="all">All divisions</option>${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${UI.crmOverview.division===d?'selected':''}>${d}</option>`).join('')}</select>
     </div>
 
     <div class="grid-4">
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Total leads</div><div class="stat-value">${stats.total}</div><div class="stat-sub">in this period</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--warn)"><div class="stat-label">In follow-up</div><div class="stat-value">${stats.byStatus['Follow-up']}</div><div class="stat-sub">${stats.byStatus.New} still new</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--warn)"><div class="stat-label">In progress</div><div class="stat-value">${stats.byStatus.Chasing + stats.byStatus.Quoted + stats.byStatus['Follow-up'] + stats.byStatus.Booked}</div><div class="stat-sub">${stats.byStatus.New} new · ${stats.byStatus.Chasing} chasing · ${stats.byStatus.Quoted} quoted · ${stats.byStatus['Follow-up']} follow up · ${stats.byStatus.Booked} booked</div></div>
       <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Won</div><div class="stat-value">${stats.won}</div><div class="stat-sub">${stats.closeRate===null?'no leads yet':stats.closeRate+'% of leads became a job'} · ${stats.byStatus.Booked} booked</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--bad)"><div class="stat-label">Not Relevant</div><div class="stat-value">${stats.byStatus['Not Relevant']}</div><div class="stat-sub">${fmtMoney(stats.wonValue)} booked value</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--bad)"><div class="stat-label">Lost</div><div class="stat-value">${stats.byStatus.Lost}</div><div class="stat-sub">${fmtMoney(stats.wonValue)} booked value</div></div>
     </div>
 
     <div class="section-title">Where leads come from</div>
@@ -3310,7 +3508,7 @@ function renderCrmOverview(profile, data){
       <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">By division</div><div style="margin-top:6px">${divisionRows}</div></div>
     </div>
     ${(airconTypeBars || metaPlatformBars) ? `<div class="grid-2" style="margin-top:12px">
-      ${airconTypeBars ? `<div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Aircon — Split vs Duct</div>${airconTypeBars}<div class="hint" style="margin-top:6px">Only counts leads where the type is known from the landing page or the customer's message — the rest still count toward Aircon above, just unsplit.</div></div>` : ''}
+      ${airconTypeBars ? `<div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Aircon — Split / Duct / Ventilation</div>${airconTypeBars}<div class="hint" style="margin-top:6px">Only counts leads where the type is known from the landing page or the customer's message — the rest still count toward Aircon above, just unsplit.</div></div>` : ''}
       ${metaPlatformBars ? `<div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Meta Ads — Facebook vs Instagram</div>${metaPlatformBars}<div class="hint" style="margin-top:6px">Depends on each ad's placement tracking being set up in Ads Manager — leads from ads without it still count toward Meta Ads above, just unsplit.</div></div>` : ''}
     </div>` : ''}
 
@@ -3341,9 +3539,11 @@ function switchLeadTab(tab, contactId){
     const th = document.getElementById('modal-conversation-thread'); if (th) th.scrollTop = th.scrollHeight;
   }
 }
-function closeLeadModal(){ closeModal(); if (UI.tab==='crm' || UI.tab==='crmOverview') render(); }
+function closeLeadModal(){ const id = LEAD_MODAL_ID; const go = () => { LEAD_MODAL_ID = null; closeModal(); if (UI.tab==='crm' || UI.tab==='dashboard') render(); }; if (id && !leadLeaveGuard(id, go)) return; go(); }
+let LEAD_MODAL_ID = null;
 function openLeadModal(contactId){
   const c = contactId ? contactById(contactId) : null;
+  LEAD_MODAL_ID = c ? c.id : null;
   const today = todayStr();
   const defaultTab = c ? 'conversation' : 'details';
   const tabBtn = (id,label) => `<button type="button" class="btn small lead-tab-btn ${defaultTab===id?'primary':''}" data-tab="${id}" onclick="switchLeadTab('${id}','${c?c.id:''}')">${label}</button>`;
@@ -3366,14 +3566,15 @@ function openLeadModal(contactId){
           </div>
           <div class="grid-3" style="margin-top:11px">
             <div class="field"><label>Division</label><select id="lm-division">${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${c&&c.division===d?'selected':''}>${d}</option>`).join('')}</select></div>
-            <div class="field"><label>Source</label><select id="lm-source">${LEAD_SOURCES.map(s=>`<option value="${s}" ${c&&c.source===s?'selected':(!c&&s==='Phone Call'?'selected':'')}>${s}</option>`).join('')}</select></div>
-            <div class="field"><label>Stage</label><select id="lm-status">${LEAD_STATUSES.map(s=>`<option value="${s}" ${c&&c.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+            <div class="field"><label>Source</label><select id="lm-source">${(c && !LEAD_SOURCES.includes(c.source) ? [c.source, ...LEAD_SOURCES] : LEAD_SOURCES).map(s=>`<option value="${s}" ${c&&c.source===s?'selected':(!c&&s==='Unknown'?'selected':'')}>${esc(sourceLabel(s))}</option>`).join('')}</select></div>
+            <div class="field"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${pill('good','Won — has a job')}` : `<select id="lm-status" onchange="document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
           </div>
           <div class="grid-3" style="margin-top:11px">
             <div class="field"><label>Estimated value</label><input type="number" id="lm-value" value="${c?(c.estimatedValue||0):0}"></div>
             <div class="field"><label>Sales value</label><input type="number" id="lm-sales" value="${c?(c.salesValue||0):0}"></div>
             <div class="field"><label>Next follow-up</label>${dateCellField('lm-followup', c?(c.nextFollowUp||''):'')}</div>
           </div>
+          <div class="field" id="lm-lost-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Lost'?'':'none'}"><label>Why was it lost?</label><select id="lm-lost-reason"><option value="">— choose a reason —</option>${LOST_REASONS.map(r=>`<option value="${r.key}" ${c&&lostReasonOf(c)===r.key?'selected':''}>${esc(r.label)}</option>`).join('')}</select></div>
           <div class="field" style="margin-top:11px"><label>What they need</label><textarea rows="2" id="lm-desc">${c?esc(c.jobDescription||''):''}</textarea></div>
           ${c ? `<div class="field" style="margin-top:11px"><label>Tags</label>${renderLeadTags(c.id, 'modal')}</div>` : ''}
           ${c ? renderMarketingSourceBlock(c) : ''}
@@ -3460,11 +3661,10 @@ function createFollowup(contactId){
     db.manualReminders.create({ date, title:`${text} — ${c.fullName}`, note, contactId:c.id, contactName:c.fullName, done:false });
   }
   c.nextFollowUp = date;
-  if (c.status==='New') c.status = 'Follow-up';
-  db.contacts.update(c.id, { nextFollowUp: c.nextFollowUp, status: c.status });
+  db.contacts.update(c.id, { nextFollowUp: c.nextFollowUp });
   logContactActivity(c, actor, `Follow-up set for ${fmtDateShort(date)} — "${text}"${note?` (note: "${note}")`:''} (${kind})`);
   logLeadEvent(c, `Follow-up set for ${fmtDateShort(date)} — "${text}"`);
-  closeModal();
+  LEAD_MODAL_ID = null; closeModal();
   showToast(kind==='task'?'Task created':'Reminder created');
   render();
 }
@@ -3480,6 +3680,11 @@ async function saveLeadModal(contactId){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   const prev = contactId ? contactById(contactId) : null;
   const before = prev ? { status:prev.status, division:prev.division, source:prev.source, nextFollowUp:prev.nextFollowUp, estimatedValue:prev.estimatedValue } : null;
+  const stagePicked = document.getElementById('lm-status').value;
+  const followPicked = document.getElementById('lm-followup').value;
+  const lostPicked = (document.getElementById('lm-lost-reason')||{}).value || '';
+  if (stagePicked==='Lost' && !lostPicked) { modalError('Choose why the lead was lost'); return; }
+  if (STAGES_NEED_DATE.includes(stagePicked) && !(followPicked && followPicked > todayStr())) { modalError(`A lead in ${stageLabel(stagePicked)} needs a follow-up date after today`); return; }
   const values = {
     fullName,
     phone: document.getElementById('lm-phone').value.trim(),
@@ -3487,23 +3692,31 @@ async function saveLeadModal(contactId){
     postcode: document.getElementById('lm-postcode').value.trim(),
     division: document.getElementById('lm-division').value,
     source: document.getElementById('lm-source').value,
-    status: document.getElementById('lm-status').value,
+    status: (prev && leadStage(prev)==='Won') ? prev.status : stagePicked,
     estimatedValue: Number(document.getElementById('lm-value').value)||0,
     salesValue: Number(document.getElementById('lm-sales').value)||0,
     nextFollowUp: document.getElementById('lm-followup').value,
     jobDescription: document.getElementById('lm-desc').value,
   };
+  const stageChanged = !prev || leadStage(prev) !== stagePicked;
+  if (stageChanged && stagePicked!=='Won') {
+    values.stageChangedAt = new Date().toISOString();
+    if (stagePicked==='Chasing') { values.chasingSince = values.stageChangedAt; values.chaseAlertDone = false; }
+  }
+  if (stagePicked==='Lost') { values.lostReason = lostPicked; values.nextFollowUp = ''; const lbl = lostReasonLabel(lostPicked); if (prev && !(prev.tags||[]).includes(lbl)) values.tags = [...(prev.tags||[]), lbl]; }
+  else if (stagePicked!=='Won') values.lostReason = '';
+  if (stagePicked==='Booked') values.nextFollowUp = '';
   let c;
   // Update reuses the existing (already-real) id and can fire-and-forget; create has to be
   // awaited first so the real database-assigned id exists before anything below (activity log,
   // "lead created" event) tries to persist against it.
   if (prev) { c = prev; db.contacts.update(c.id, values); }
   else {
-    try { c = await db.contacts.create({ createdAt:todayStr(), linkedJobId:null, activityLog:[], messages:[], lastReadAt:null, starred:false, tags:[], ...values }); }
+    try { c = await db.contacts.create({ createdAt:todayStr(), linkedJobId:null, activityLog:[], messages:[], lastReadAt:null, starred:false, tags: values.lostReason ? [lostReasonLabel(values.lostReason)] : [], chaseCalls:[], ...values }); }
     catch (err) { return; }   // db.contacts.create() already showed an error toast; leave the modal open so the user can retry
   }
   if (before) {
-    if (before.status !== values.status) { logContactActivity(c, actor, `Stage changed from "${before.status}" to "${values.status}"`); logLeadEvent(c, `Stage changed from "${before.status}" to "${values.status}"`); }
+    if (stageChanged) { const a = stageLabel(leadStage({ ...prev, ...before })), b2 = stageLabel(stagePicked); logContactActivity(c, actor, `Stage changed from "${a}" to "${b2}"${values.lostReason?` (${lostReasonLabel(values.lostReason)})`:''}`); logLeadEvent(c, `Stage changed from "${a}" to "${b2}"`); }
     if (before.division !== values.division) logContactActivity(c, actor, `Division changed from "${before.division}" to "${values.division}"`);
     if (before.source !== values.source) logContactActivity(c, actor, `Source changed from "${before.source}" to "${values.source}"`);
     if ((before.nextFollowUp||'') !== (values.nextFollowUp||'')) logContactActivity(c, actor, `Follow-up date changed from "${before.nextFollowUp||'—'}" to "${values.nextFollowUp||'—'}"`);
@@ -3512,7 +3725,7 @@ async function saveLeadModal(contactId){
     logContactActivity(c, actor, 'Lead created');
     logLeadEvent(c, values.jobDescription ? `Lead created: ${values.jobDescription}` : 'Lead created');
   }
-  closeModal(); showToast(contactId?'Lead updated':'Lead added'); render();
+  LEAD_MODAL_ID = null; closeModal(); showToast(contactId?'Lead updated':'Lead added'); render();
 }
 
 /* ── overview ────────────────────────────────────────────────────────── */
@@ -4104,8 +4317,8 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   contacts.forEach(c => {
     if (!byChannel[c.source]) return;
     byChannel[c.source].leads++;
-    if (c.status==='Booked') byChannel[c.source].booked++;
-    if (c.status==='Not Relevant') byChannel[c.source].notRelevant++;
+    if (leadStage(c)==='Booked') byChannel[c.source].booked++;
+    if (leadStage(c)==='Lost') byChannel[c.source].notRelevant++;
     if (contactHasJob(c, data.jobs)) byChannel[c.source].won++;
   });
   jobs.forEach(j => {
@@ -4132,7 +4345,7 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   const totalRevenue = round2(jobs.reduce((s,j)=>s+(Number(j.amount)||0),0));
   const totalProfit = round2(Object.values(byDivision).reduce((s,d)=>s+d.profit,0));
   const totalBooked = contacts.filter(c=>c.status==='Booked').length;
-  const totalNotRelevant = contacts.filter(c=>c.status==='Not Relevant').length;
+  const totalNotRelevant = contacts.filter(c=>leadStage(c)==='Lost').length;
   const totalDecided = totalBooked+totalNotRelevant;
   const totalReviewTaken = jobs.filter(j=>j.reviewTaken).length;
 
@@ -4172,7 +4385,7 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   // this data arrived via the GHL import, where "why" was usually captured as a specific tag - see
   // chat: 19 price / 32 outside-area / 7 wrong-number / rest untagged). First match wins, in order of
   // how unambiguous the tag is.
-  const notRelevantContacts = contacts.filter(c => c.status === 'Not Relevant');
+  const notRelevantContacts = contacts.filter(c => leadStage(c)==='Lost');
   const lossReasons = { noReason:0 }; LOST_REASONS.forEach(r => lossReasons[r.key] = 0);
   notRelevantContacts.forEach(c => { lossReasons[lostReasonOf(c)]++; });
 
@@ -4208,7 +4421,7 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
     quoteConversionRate: quoteDecided ? Math.round((quotesApproved/quoteDecided)*100) : null,
     quotesApproved, quotesRejected,
     funnel: { leads: contacts.length, contacted: funnelContacted, priceGiven: funnelPriceGiven, booked: totalBooked, jobDone: funnelJobDone },
-    outcome: (() => { const lost = contacts.filter(c => c.status==='Not Relevant' && !contactHasJob(c, data.jobs)).length; return { leads: contacts.length, won: funnelJobDone, lost, open: contacts.length - funnelJobDone - lost }; })(),
+    outcome: (() => { const lost = contacts.filter(c => leadStage(c)==='Lost').length; return { leads: contacts.length, won: funnelJobDone, lost, open: contacts.length - funnelJobDone - lost }; })(),
     lossReasons, speedToLead,
   };
 }
@@ -4657,8 +4870,8 @@ function renderDashboard(profile, data){
     chRow('Facebook', subWon('Facebook'), null, true),
     chRow('Instagram', subWon('Instagram'), null, true),
     chRow('Google Maps', C['Google Maps'], null),
-    chRow('Organic (website)', C['Organic'], null),
-    chRow('Phone (logged by hand)', C['Phone Call'], null),
+    chRow('Organic web', C['Organic'], null),
+    chRow('Unknown', C['Unknown'], null),
   ].join('');
   const totalSpend = round2(LEAD_SOURCES.reduce((s,k)=>s+(C[k].spend||0),0));
 
@@ -4673,7 +4886,7 @@ function renderDashboard(profile, data){
     let html = divRow(d, divLeads(d), cs.byDivision[d]||0, perf.byDivision[d]);
     if (d==='Aircon') html += AIRCON_TYPE_TAGS.map(t => divRow(t, typeLeads(t), null, perf.bySubDivision[t], true)).join('');
     return html;
-  }).join('') + (perf.byDivision.Other.count ? divRow('Other', 0, null, perf.byDivision.Other) : '')
+  }).join('')
     + `<tr style="font-weight:700;border-top:2px solid var(--line)"><td>All divisions</td><td class="num">${perf.totalLeads}</td><td class="num">${cs.total}</td>
        <td class="num">${perf.jobsCount}</td><td class="num">${fmtMoney(perf.totalRevenue)}</td><td class="num">${perf.jobsCount?fmtMoney(round2(perf.totalRevenue/perf.jobsCount)):'—'}</td>
        <td class="num">${fmtMoney(perf.totalProfit)}${dashDelta(perf.totalProfit, prev.totalProfit)}</td><td class="num">${perf.profitMargin===null?'—':pill(marginTone(perf.profitMargin), perf.profitMargin+'%')}</td></tr>`;
@@ -5223,7 +5436,7 @@ async function ensureContactForJob(job, chosenContactId){
     // A customer can have many jobs: Sales Value is the total of all of them, not just the latest.
     const total = round2((STATE.data.jobs||[]).filter(j => j.contactId===c.id).reduce((sum,j) => sum + (Number(j.amount)||0), 0)) || job.amount;
     if (total && total!==c.salesValue) { c.salesValue = total; patch.salesValue = total; }
-    if (c.status!=='Booked' && c.status!=='Not Relevant') { c.status = 'Booked'; c.nextFollowUp = ''; patch.status = 'Booked'; patch.nextFollowUp = ''; }
+    if (c.status!=='Won') { c.status = 'Won'; c.nextFollowUp = ''; c.stageChangedAt = new Date().toISOString(); patch.status = 'Won'; patch.nextFollowUp = ''; patch.stageChangedAt = c.stageChangedAt; }
     if (Object.keys(patch).length) db.contacts.update(c.id, patch);
     return;
   }
@@ -5395,7 +5608,15 @@ function renderOpenTasksCalendarBlock(data){
     <div class="card" style="margin-bottom:20px">${unscheduledRows}</div>
   `;
 }
+// Quoted / Follow up leads whose follow-up day has arrived — they join Open Tasks on that day.
+function followupsDueRows(data){
+  const t = todayStr();
+  return (data.contacts||[]).filter(c => STAGES_NEED_DATE.includes(leadStage(c)) && c.nextFollowUp && c.nextFollowUp <= t).map(c => ({
+    kind:'Follow-up', id:c.id, raw:c, date:c.nextFollowUp, title:`${c.fullName} — ${stageLabel(leadStage(c))}`,
+    meta:`${c.division}${c.phone?' · '+c.phone:''}${c.followupNote?' · '+c.followupNote:''}`, tone: c.nextFollowUp < t ? 'bad' : 'warn' }));
+}
 function openItemActivityButton(r){
+  if (r.kind==='Follow-up') return `<button class="btn ghost small" onclick="goToLeadConversation('${r.id}')">Open card</button>`;
   if (r.kind==='Task') return `<button class="btn ghost small" data-activity-count="${r.id}" onclick="openTaskActivityModal('${r.id}')">💬 ${taskActivityCount(r.raw)}</button>`;
   if (r.kind==='Quote') return `<button class="btn ghost small" onclick="openQuoteActivityModal('${r.id}')">💬 ${(r.raw.updates||[]).length}</button>`;
   return `<button class="btn ghost small" onclick="openJobActivityModal('${r.id}')">💬 ${recordActivityCount(r.raw)}</button>`;
@@ -5416,6 +5637,7 @@ function renderOpenItemsMixedList(data){
     const age = daysBetween(parseLocalDate(j.date), today);
     rows.push({ kind:'Unpaid Job', id:j.id, raw:j, date: j.date, title: `${j.customerName} — invoice #${j.invoiceNumber||'—'}`, meta: `${j.technician} · ${fmtMoney(j.amount)} · ${age} days overdue`, tone: age>=14?'bad':'warn' });
   });
+  followupsDueRows(data).forEach(r => rows.push(r));
   rows.sort((a,b) => (a.date||'9999-99-99').localeCompare(b.date||'9999-99-99'));
   return rows.length ? rows.map(r => `
     <tr>
@@ -5438,6 +5660,7 @@ function renderOpenItemsNonTaskList(data){
     const age = daysBetween(parseLocalDate(j.date), today);
     rows.push({ kind:'Unpaid Job', id:j.id, raw:j, date: j.date, title: `${j.customerName} — invoice #${j.invoiceNumber||'—'}`, meta: `${j.technician} · ${fmtMoney(j.amount)} · ${age} days overdue`, tone: age>=14?'bad':'warn' });
   });
+  followupsDueRows(data).forEach(r => rows.push(r));
   rows.sort((a,b) => (a.date||'9999-99-99').localeCompare(b.date||'9999-99-99'));
   return rows.length ? rows.map(r => `
     <tr>
@@ -6829,7 +7052,7 @@ function renderNoAccess(profile){
 }
 
 /* ── main render loop ───────────────────────────────────────────────── */
-function render(){
+function render(){ JOB_CACHE.index = null; try { setTimeout(renderChaseBubbles, 0); } catch(e) {}
   const app = document.getElementById('app');
   if (AUTH.status === 'loading') { app.innerHTML = renderAuthLoading(); return; }
   if (AUTH.status === 'signedOut') { app.innerHTML = renderLogin(); return; }

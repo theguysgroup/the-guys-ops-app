@@ -29,7 +29,7 @@ const DECLS = [
   'weekOf', 'monthOf', 'currentWeekKey',
   'jobGst', 'jobTotalCollected', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
-  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf',
+  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'leadHasJobFast', 'leadStage', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
   // CRM / attribution
   'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
@@ -135,7 +135,7 @@ function testComputeMonth(sb){
   assertEqual(m.commission, 290, 'computeMonth: commission is 20% of (job.amount - partsCost)');
   assertEqual(m.parts, 50, 'computeMonth: parts sums job.partsCost');
   // Duct System (Lynette) = 1000; Split System (Split Sam) = 500; Instagram (Lynette) = 1000; Facebook = 0
-  assertEqual(m.airconTypeRevenue, { 'Split System':500, 'Duct System':1000 }, 'computeMonth: airconTypeRevenue splits by tag');
+  assertEqual(m.airconTypeRevenue, { 'Split System':500, 'Duct System':1000, Ventilation:0 }, 'computeMonth: airconTypeRevenue splits by tag');
   assertEqual(m.metaPlatformRevenue, { Facebook:0, Instagram:1000 }, 'computeMonth: metaPlatformRevenue splits by tag');
   // additive invariant: sub-division revenue never exceeds the parent total
   const airconSum = Object.values(m.airconTypeRevenue).reduce((s,v)=>s+v,0);
@@ -224,6 +224,19 @@ function testFunnelLossReasonsSpeedToLead(sb){
   assertEqual(perf.byChannel.Organic.closeRate, 14, 'closeRate: won (1) out of ALL leads (7), not out of decided ones');
   assertEqual(sb.lostReasonOf({ tags:['not interested - price'] }), 'tooExpensive', 'lostReasonOf: price wins over not interested');
   assertEqual(sb.lostReasonOf({ tags:['no answer ac'] }), 'noAnswer', 'lostReasonOf: no answer');
+  // Pipeline stages (2026-09-27): legacy Not Relevant reads as Lost, a customer with a job is Won, a chosen reason wins over tags.
+  sb.STATE.data.jobs = [{ id:'j1', customerName:'Zed', contactId:'c-won' }];
+  assertEqual(sb.leadStage({ id:'x', fullName:'Nobody', status:'Not Relevant' }), 'Lost', 'leadStage: Not Relevant = Lost');
+  assertEqual(sb.leadStage({ id:'c-won', fullName:'Someone', status:'Chasing' }), 'Won', 'leadStage: job linked by id = Won');
+  assertEqual(sb.leadStage({ id:'y', fullName:'zed', status:'New' }), 'Won', 'leadStage: job by customer name = Won');
+  assertEqual(sb.leadStage({ id:'z', fullName:'Q', status:'Quoted' }), 'Quoted', 'leadStage: new stages kept');
+  assertEqual(sb.lostReasonOf({ lostReason:'spam', tags:['not interested - price'] }), 'spam', 'lostReasonOf: chosen reason beats tags');
+  // Chasing call-back time: 3h later, pushed to the next working morning (Mon–Fri 08:00–17:00 Sydney).
+  assertEqual(sb.chaseAlertDue('2026-09-22T00:00:00Z'), { day:'2026-09-22', mins:780 }, 'chaseAlertDue: Tue 10:00 -> 13:00 same day');
+  assertEqual(sb.chaseAlertDue('2026-09-25T06:00:00Z'), { day:'2026-09-28', mins:480 }, 'chaseAlertDue: Fri 16:00 -> Mon 08:00');
+  assertEqual(sb.chaseAlertDue('2026-09-21T13:30:00Z'), { day:'2026-09-22', mins:480 }, 'chaseAlertDue: Mon 23:30 -> Tue 08:00');
+  const k = sb.chaseCounter({ createdAt:'2026-09-21', chaseCalls:['2026-09-20','2026-09-21','2026-09-23'] }, new Date('2026-09-25T02:00:00Z'));
+  assertEqual([k.x, k.y, k.calledToday], [2, 5, false], 'chaseCounter: 2 called out of 5 workdays since the lead came in');
   assertEqual(perf.speedToLead.sampleSize, 2, 'speedToLead: only counts contacts with >=2 messages and a non-event reply');
   // Alice: 5 min = 0.0833h, Grace: 30 min = 0.5h -> avg 0.2917 (rounds to 0.29), median (upper of the two) 0.5
   assertClose(perf.speedToLead.avgHours, 0.29, 'speedToLead: avgHours across both replies', 0.01);
