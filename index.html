@@ -822,6 +822,10 @@ function computeReminders(data, now){
       const key = `chase-long:${c.id}:${localDay(c.chasingSince)}`;
       if (!dismissed.has(key)) items.push({ key, readKey:key, contactId:c.id, type:'chase-long', severity:'bad', date:localDay(c.chasingSince), title:`${c.fullName} — 21+ days in Chasing, decide`, meta:`${c.division} · chasing since ${fmtDateShort(localDay(c.chasingSince))} · keep chasing or mark Lost (no answer)` });
     }
+    if (bookedNoJob(c, now)) {
+      const key = `booked-no-job:${c.id}:${c.bookedFor}`;
+      if (!dismissed.has(key)) items.push({ key, readKey:key, contactId:c.id, type:'booked-no-job', severity:'bad', date:c.bookedFor, title:`${c.fullName} — booked for ${fmtDateShort(c.bookedFor)}, no job yet`, meta:`${c.division} · check what happened: cancelled, moved, or the job wasn't entered` });
+    }
     if (quoteStale(c, now)) {
       const key = `stale-quote:${c.id}:${localDay(c.stageChangedAt)}`;
       if (!dismissed.has(key)) items.push({ key, readKey:key, contactId:c.id, type:'stale-quote', severity:'bad', date:localDay(c.stageChangedAt), title:`${c.fullName} — quote idle 14+ days`, meta:`${c.division} · quoted ${fmtDateShort(localDay(c.stageChangedAt))}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` });
@@ -850,11 +854,11 @@ function defaultPermissionsFor(role){
   // Payroll: a technician/VA sees only their OWN pay page (renderPayroll routes non-owners to it; RLS
   // limits payroll_weeks/sales_daily_log to their own rows anyway).
   if (role==='technician') return { ...none, overview:true, jobs:true, finance:true, payroll:true, reminders:true, tasks:true };
-  // VA (Ron): Closings AND CRM (the operational board) are ON by default — Ron is the salesperson who works
-  // leads all day, so the CRM board is his primary screen. Leads & Marketing (crmOverview) stays OFF —
-  // that's reporting/analytics for the owner, not something Ron needs to run his board. Everything else
-  // stays off until the owner grants it in Settings.
-  if (role==='va') return { ...none, crm:true, closings:true, payroll:true, tasks:true, reminders:true };
+  // VA (Ron), per Ofek 29 Sep: everything except the owners' dashboards and their personal task boards. So CRM,
+  // Closings, Jobs & Commissions (a closing creates/updates a job, which needs Jobs access), Outstanding, Open Tasks,
+  // Resources, his own pay, tasks and reminders are ON. Off: Leads & Marketing / Google Ads (dashboards) and the
+  // Financial Summary (the business's revenue and profit).
+  if (role==='va') return { ...none, crm:true, closings:true, payroll:true, tasks:true, reminders:true, jobs:true, outstanding:true, openItems:true, reference:true };
   return none;
 }
 function canViewSection(profile, section){
@@ -959,7 +963,7 @@ async function loadFromSupabase(){
       referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
       submissionPage:c.submission_page||'',
       lostReason:c.lost_reason||'', stageChangedAt:c.stage_changed_at||null, chasingSince:c.chasing_since||null,
-      chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null, contactedAt:c.contacted_at||null,
+      chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null, contactedAt:c.contacted_at||null, bookedFor:c.booked_for||'',
     })),
     jobs: (jobs||[]).map(j => ({ ...mapJobRow(j), activityLog: logsFor('job', j.id) })),
     equipmentSpend: (equipmentSpend||[]).map(e => ({ ...mapEquipSpendRow(e), activityLog: logsFor('equipment', e.id) })),
@@ -1018,11 +1022,11 @@ function contactPatchToRow(patch){
     jobDescription:'job_description', linkedJobId:'linked_job_id', starred:'starred',
     lastReadAt:'last_read_at', tags:'tags', messages:'messages',
     lostReason:'lost_reason', stageChangedAt:'stage_changed_at', chasingSince:'chasing_since', chaseCalls:'chase_calls', chaseAlertDone:'chase_alert_done',
-    reopenedAt:'reopened_at', contactedAt:'contacted_at',
+    reopenedAt:'reopened_at', contactedAt:'contacted_at', bookedFor:'booked_for',
   };
   // date/timestamptz/uuid columns reject '' outright ("invalid input syntax for type date")
   // where the in-memory shape has always used '' to mean "unset" — null is the real "unset".
-  const nullIfEmpty = new Set(['created_at','next_follow_up','last_read_at','linked_job_id','stage_changed_at','chasing_since']);
+  const nullIfEmpty = new Set(['created_at','next_follow_up','last_read_at','linked_job_id','stage_changed_at','chasing_since','booked_for']);
   const row = {};
   for (const k in patch) {
     if (!map[k]) continue;
@@ -1679,7 +1683,7 @@ function mapContactRow(c){
     referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
     submissionPage:c.submission_page||'',
     lostReason:c.lost_reason||'', stageChangedAt:c.stage_changed_at||null, chasingSince:c.chasing_since||null,
-    chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null, contactedAt:c.contacted_at||null,
+    chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null, contactedAt:c.contacted_at||null, bookedFor:c.booked_for||'',
   };
 }
 // Live updates (a new lead arriving, someone else's change) redraw the page. Keep whatever a person is in
@@ -2958,6 +2962,7 @@ function setLeadStage(id, stage, after){
   if (cur==='Won') { showToast(`${c.fullName} already has a job, so the lead stays Won`); render(); return; }
   if (stage===cur && stage!=='Lost') { if (after) after(); return; }
   if (stage==='Lost') { openLostReasonPrompt(c, after); return; }
+  if (stage==='Booked') { openBookedDatePrompt(c, after); return; }
   if (STAGES_NEED_DATE.includes(stage) && !(c.nextFollowUp && c.nextFollowUp > todayStr())) { openFollowupDatePrompt(c, stage, after); return; }
   applyLeadStage(c, stage, {});
   if (after) after(); else render();
@@ -2990,6 +2995,35 @@ function confirmLostReason(id, key){
   const tags = (c.tags||[]).includes(label) ? c.tags : [...(c.tags||[]), label];
   applyLeadStage(c, 'Lost', { lostReason:key, tags });
   finishPopup();
+}
+function openBookedDatePrompt(c, after){
+  POPUP_AFTER = after || null;
+  openPopup(`<h3 style="margin:0 0 6px">Which day is ${esc(c.fullName)}'s job booked for?</h3>
+    <div class="hint" style="margin-bottom:10px">The date it's booked in ServiceM8. If there's still no job in Jobs &amp; Commissions 2 days after it, you'll get a reminder to check what happened.</div>
+    <input type="date" id="popup-booked-date" value="${c.bookedFor || shiftDays(todayStr(), 1)}" style="width:100%">
+    <div id="popup-error" style="color:var(--bad);font-size:12px;margin-top:6px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn ghost" onclick="POPUP_AFTER=null;closePopup();render()">Cancel</button>
+      <button class="btn primary" onclick="confirmBookedDate('${c.id}')">Save</button>
+    </div>`);
+}
+function confirmBookedDate(id){
+  const c = contactById(id); if (!c) return;
+  const v = (document.getElementById('popup-booked-date')||{}).value || '';
+  if (!v) { const e = document.getElementById('popup-error'); if (e) e.textContent = 'Pick the day the job is booked for.'; return; }
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  if ((c.bookedFor||'') !== v) logContactActivity(c, actor, `Job date set to ${fmtDateShort(v)}`);
+  if (leadStage(c)==='Booked') { c.bookedFor = v; db.contacts.update(c.id, { bookedFor: v }); }
+  else applyLeadStage(c, 'Booked', { bookedFor: v });
+  finishPopup();
+}
+// Moving the job date (the job was rescheduled) — from My Day or the lead form.
+function setBookedFor(id, v){
+  const c = contactById(id); if (!c || !v || v===c.bookedFor) return;
+  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Job date changed from ${c.bookedFor ? fmtDateShort(c.bookedFor) : '—'} to ${fmtDateShort(v)}`);
+  c.bookedFor = v; db.contacts.update(c.id, { bookedFor: v });
+  showToast(`${c.fullName}: job date ${fmtDateShort(v)}`);
+  render();
 }
 function openFollowupDatePrompt(c, stage, after){
   POPUP_AFTER = after || null;
@@ -3083,6 +3117,9 @@ function newLeadUnhandled(c, now){
 }
 // Automation 2: a lead chased for 21+ days without an answer — Ron decides (lost as "no answer", or keep going).
 function chaseTooLong(c, now){ return leadStage(c)==='Chasing' && !!c.chasingSince && daysBetween(parseLocalDate(localDay(c.chasingSince)), parseLocalDate(sydneyWall(now||new Date()).day)) >= 21; }
+// Booked with no job (Ofek, 29 Sep): Ron picks the job date when he sets Booked; 2 days after that date, if the customer
+// still has no job in Jobs & Commissions (a job makes the lead Won), Ron is told to check what happened.
+function bookedNoJob(c, now){ return leadStage(c)==='Booked' && !!c.bookedFor && sydneyWall(now||new Date()).day >= shiftDays(c.bookedFor, 2); }
 // Automation 3: a quote with no movement for 14+ days is flagged red.
 function quoteStale(c, now){ return leadStage(c)==='Quoted' && !!c.stageChangedAt && daysBetween(parseLocalDate(localDay(c.stageChangedAt)), parseLocalDate(sydneyWall(now||new Date()).day)) >= 14; }
 function chaseAlertIsDue(c, now){
@@ -3158,6 +3195,7 @@ function renderLeadCard(c){
     ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
     ${quoteStale(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Quote idle 14+ days</div>` : ''}
     ${chaseTooLong(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Chasing 21+ days — decide</div>` : ''}
+    ${leadStage(c)==='Booked' && c.bookedFor ? `<div class="lead-due ${bookedNoJob(c)?'overdue':''}" style="margin-top:4px">${bookedNoJob(c) ? `⚠ Booked ${fmtDateShort(c.bookedFor)} — no job yet` : `Job ${fmtDateShort(c.bookedFor)}`}</div>` : ''}
     ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">${esc(lostReasonLabel(lostReasonOf(c)))}</div>` : ''}
     ${(contactJobsTotal(c) ?? c.salesValue) ? `<div class="lead-sales-chip">💰 ${fmtMoney(contactJobsTotal(c) ?? c.salesValue)}</div>` : ''}
     ${c.nextFollowUp ? `<div class="lead-due ${overdue?'overdue':(dueToday?'today':'')}">${overdue?'⚠ Overdue':(dueToday?'● Due today':'○ Follow up')} · ${fmtDateShort(c.nextFollowUp)}</div>` : ''}
@@ -3398,7 +3436,7 @@ function renderCrmTable(allContacts){
       <td class="mono">${esc(c.phone||'—')}</td>
       <td>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</td>
       <td>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</td>
-      <td>${leadStageControl(c)}${leadStage(c)==='Chasing'?`<div style="margin-top:4px">${chaseTick(c)}</div>`:''}${quoteStale(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ Idle 14+ days</div>`:''}${chaseTooLong(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ 21+ days — decide</div>`:''}</td>
+      <td>${leadStageControl(c)}${leadStage(c)==='Chasing'?`<div style="margin-top:4px">${chaseTick(c)}</div>`:''}${quoteStale(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ Idle 14+ days</div>`:''}${chaseTooLong(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ 21+ days — decide</div>`:''}${leadStage(c)==='Booked' && c.bookedFor ? `<div class="lead-due ${bookedNoJob(c)?'overdue':''}" style="margin-top:4px">${bookedNoJob(c) ? `⚠ Job ${fmtDateShort(c.bookedFor)} — no job yet` : `Job ${fmtDateShort(c.bookedFor)}`}</div>` : ''}</td>
       <td class="wrap">${renderTableTagsCell(c)}</td>
       <td class="mono">${fmtDateShort(c.createdAt)}</td>
       <td class="mono">${fmtDateShort(lastContactedAt(c))}</td>
@@ -3599,7 +3637,7 @@ function openLeadModal(contactId){
           <div class="grid-3" style="margin-top:11px">
             <div class="field"><label>Division</label><select id="lm-division">${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${c&&c.division===d?'selected':''}>${d}</option>`).join('')}</select></div>
             <div class="field"><label>Source</label><select id="lm-source">${(c && !LEAD_SOURCES.includes(c.source) ? [c.source, ...LEAD_SOURCES] : LEAD_SOURCES).map(s=>`<option value="${s}" ${c&&c.source===s?'selected':(!c&&s==='Unknown'?'selected':'')}>${esc(sourceLabel(s))}</option>`).join('')}</select></div>
-            <div class="field"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${pill('good','Won — has a job')}` : `<select id="lm-status" onchange="document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
+            <div class="field"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${pill('good','Won — has a job')}` : `<select id="lm-status" onchange="document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none';document.getElementById('lm-booked-wrap').style.display=this.value==='Booked'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
           </div>
           <div class="grid-3" style="margin-top:11px">
             <div class="field"><label>Estimated value</label><input type="number" id="lm-value" value="${c?(c.estimatedValue||0):0}"></div>
@@ -3607,6 +3645,7 @@ function openLeadModal(contactId){
             <div class="field"><label>Next follow-up</label>${dateCellField('lm-followup', c?(c.nextFollowUp||''):'')}</div>
           </div>
           <div class="field" style="margin-top:11px"><label>Follow-up note</label><textarea rows="2" id="lm-followup-note" placeholder="What needs doing when this follow-up is due…">${c?esc(c.followupNote||''):''}</textarea></div>
+          <div class="field" id="lm-booked-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Booked'?'':'none'}"><label>Job booked for</label><input type="date" id="lm-booked-for" value="${c?esc(c.bookedFor||''):''}"><span class="hint">The day it's booked in ServiceM8 — 2 days after it with no job, you get a reminder</span></div>
           <div class="field" id="lm-lost-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Lost'?'':'none'}"><label>Why was it lost?</label><select id="lm-lost-reason"><option value="">— choose a reason —</option>${LOST_REASONS.map(r=>`<option value="${r.key}" ${c&&lostReasonOf(c)===r.key?'selected':''}>${esc(r.label)}</option>`).join('')}</select></div>
           <div class="field" style="margin-top:11px"><label>What they need</label><textarea rows="2" id="lm-desc">${c?esc(c.jobDescription||''):''}</textarea></div>
           ${c ? `<div class="field" style="margin-top:11px"><label>Tags</label>${renderLeadTags(c.id, 'modal')}</div>` : ''}
@@ -3717,7 +3756,7 @@ async function saveLeadModal(contactId){
   if (!fullName) { modalError('Please enter a name'); return; }
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   const prev = contactId ? contactById(contactId) : null;
-  const before = prev ? { status:prev.status, division:prev.division, source:prev.source, nextFollowUp:prev.nextFollowUp, estimatedValue:prev.estimatedValue } : null;
+  const before = prev ? { status:prev.status, division:prev.division, source:prev.source, nextFollowUp:prev.nextFollowUp, estimatedValue:prev.estimatedValue, bookedFor:prev.bookedFor } : null;
   const stagePicked = document.getElementById('lm-status').value;
   const followPicked = document.getElementById('lm-followup').value;
   const lostPicked = (document.getElementById('lm-lost-reason')||{}).value || '';
@@ -3726,6 +3765,8 @@ async function saveLeadModal(contactId){
   const stageChanging = !prev || stagePicked !== leadStage(prev);
   const rulesOn = stageChanging || leadRulesApply(prev);
   if (rulesOn && stagePicked==='Lost' && !lostPicked) { modalError('Choose why the lead was lost'); return; }
+  const bookedPicked = (document.getElementById('lm-booked-for')||{}).value || '';
+  if (stageChanging && stagePicked==='Booked' && !bookedPicked) { modalError('Pick the day the job is booked for'); return; }
   if (rulesOn && STAGES_NEED_DATE.includes(stagePicked) && !(followPicked && followPicked > todayStr())) { modalError(`A lead in ${stageLabel(stagePicked)} needs a follow-up date after today`); return; }
   const values = {
     fullName,
@@ -3748,7 +3789,7 @@ async function saveLeadModal(contactId){
   }
   if (stagePicked==='Lost') { values.lostReason = lostPicked; values.nextFollowUp = ''; if (lostPicked) { const lbl = lostReasonLabel(lostPicked); if (prev && !(prev.tags||[]).includes(lbl)) values.tags = [...(prev.tags||[]), lbl]; } }
   else if (stagePicked!=='Won') values.lostReason = '';
-  if (stagePicked==='Booked') values.nextFollowUp = '';
+  if (stagePicked==='Booked') { values.nextFollowUp = ''; if (bookedPicked) values.bookedFor = bookedPicked; }
   let c;
   // Update reuses the existing (already-real) id and can fire-and-forget; create has to be
   // awaited first so the real database-assigned id exists before anything below (activity log,
@@ -3767,6 +3808,7 @@ async function saveLeadModal(contactId){
     if (before.division !== values.division) logContactActivity(c, actor, `Division changed from "${before.division}" to "${values.division}"`);
     if (before.source !== values.source) logContactActivity(c, actor, `Source changed from "${before.source}" to "${values.source}"`);
     if ((before.nextFollowUp||'') !== (values.nextFollowUp||'')) logContactActivity(c, actor, `Follow-up date changed from "${before.nextFollowUp||'—'}" to "${values.nextFollowUp||'—'}"`);
+    if (values.bookedFor && (before.bookedFor||'') !== values.bookedFor) logContactActivity(c, actor, `Job date set to ${fmtDateShort(values.bookedFor)}`);
     if (before.estimatedValue !== values.estimatedValue) logContactActivity(c, actor, `Estimated value changed from ${fmtMoney(before.estimatedValue)} to ${fmtMoney(values.estimatedValue)}`);
   } else {
     logContactActivity(c, actor, 'Lead created');
@@ -5586,7 +5628,7 @@ function renderOutstanding(profile, data){
 }
 
 /* ── reminders ───────────────────────────────────────────────────────── */
-const REMINDER_ICONS = { unpaid:'💵', commission:'🧾', refund:'♻️', equipment:'🧰', followup:'📞', 'repeat-service':'🔁', 'chase-long':'⏳', 'stale-quote':'📄' };
+const REMINDER_ICONS = { unpaid:'💵', commission:'🧾', refund:'♻️', equipment:'🧰', followup:'📞', 'repeat-service':'🔁', 'chase-long':'⏳', 'stale-quote':'📄', 'booked-no-job':'📅' };
 function deleteManualReminder(id, rowEl){
   confirmAction('Delete this reminder?', ()=>{
     animateRowRemove(rowEl, ()=>{
@@ -5656,7 +5698,7 @@ function goToReminderTarget(type, contactId, readKey, weekKey){
   const refId = String(readKey||'').split(':').slice(1).join(':');   // "repeat-service:<jobId>", …
   if (type==='commission' && can('payroll')) { UI.tab='payroll'; if (weekKey) UI.payroll.week = weekKey; render(); return; }
   // A lead follow-up, an unpaid invoice or a re-offer opens that customer when they're linked and this person sees the CRM.
-  if ((type==='followup' || type==='unpaid' || type==='repeat-service' || type==='chase-long' || type==='stale-quote') && contactId && can('crm')) { goToLeadConversation(contactId); return; }
+  if ((type==='followup' || type==='unpaid' || type==='repeat-service' || type==='chase-long' || type==='stale-quote' || type==='booked-no-job') && contactId && can('crm')) { goToLeadConversation(contactId); return; }
   if ((type==='unpaid' || type==='refund') && can('outstanding')) { UI.tab='outstanding'; render(); return; }
   if (type==='repeat-service' && refId && can('jobs')) { goToJobFromSearch(refId); return; }
   if (type==='equipment' && can('reference')) { UI.tab='reference'; UI.reference.tab='equipmentSpend'; render(); return; }
@@ -5711,6 +5753,7 @@ function myDayLists(data, now){
     chaseDone: chasing.filter(c => !chaseTooLong(c, now) && chaseCounter(c, now).calledToday),
     chaseDecide: chasing.filter(c => chaseTooLong(c, now)),
     followups: cs.filter(c => followupDue(c, localToday)).sort((a,b) => a.nextFollowUp.localeCompare(b.nextFollowUp)),
+    bookedNoJob: cs.filter(c => bookedNoJob(c, now)).sort((a,b) => a.bookedFor.localeCompare(b.bookedFor)),
     staleQuotes: cs.filter(c => quoteStale(c, now)).sort((a,b) => String(a.stageChangedAt).localeCompare(String(b.stageChangedAt))),
   };
 }
@@ -5780,6 +5823,9 @@ function renderMyDay(profile, data){
     return myDayRow(c, `${pill(over?'bad':'warn', over?'Overdue':'Today')}<span class="hint">${fmtDateShort(c.nextFollowUp)}</span>`, { bad: over, meta: `${esc(stageLabel(leadStage(c)))}${ctx?` — ${esc(ctx)}`:''}` }); }).join('');
   const quoteBody = L.staleQuotes.map(c => myDayRow(c, `${pill('bad', daysBetween(parseLocalDate(localDay(c.stageChangedAt)), parseLocalDate(L.today))+' days')}${leadStageControl(c)}`,
     { bad: true, meta: `quoted ${fmtDateShort(localDay(c.stageChangedAt))}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` })).join('');
+  const bookedBody = L.bookedNoJob.map(c => myDayRow(c,
+    `<label class="hint" style="display:flex;align-items:center;gap:6px">Moved to <input type="date" value="${esc(c.bookedFor)}" onchange="setBookedFor('${c.id}', this.value)" style="width:auto"></label>${leadStageControl(c)}`,
+    { bad: true, meta: `booked for ${fmtDateShort(c.bookedFor)} · no job in Jobs &amp; Commissions yet` })).join('');
   const logBody = logRows.map(r => `<div class="myday-row" style="cursor:default">
       <div style="flex:1 1 220px;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(r.person)}</div>
       <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${r.log ? `${r.log.hours}h · ${r.bookings} booking${r.bookings===1?'':'s'} today` : 'Hours and bookings for today are not logged yet'}</div></div>
@@ -5797,6 +5843,7 @@ function renderMyDay(profile, data){
         ${stat('decide', 'Chasing 21+ days', L.chaseDecide.length, 'decide: keep or lost', 'bad')}
         ${stat('followups', 'Follow-ups due', L.followups.length, L.followups.filter(c=>c.nextFollowUp<L.localToday).length ? `${L.followups.filter(c=>c.nextFollowUp<L.localToday).length} overdue` : '', 'warn')}
         ${stat('quotes', 'Quotes idle 14+ days', L.staleQuotes.length, '', 'bad')}
+        ${stat('booked', 'Booked, no job yet', L.bookedNoJob.length, '2+ days after the job date', 'bad')}
       </div>
     </div>
     ${myDaySection('new', 'New leads — call first', L.fresh.length, newBody, 'No new leads waiting. ✓',
@@ -5804,6 +5851,7 @@ function renderMyDay(profile, data){
     ${myDaySection('chasing', 'Chasing — call today', L.chaseToCall.length + L.chaseDone.length, L.chaseToCall.map(chaseRow).join('') + L.chaseDone.map(chaseRow).join(''), 'Nobody in Chasing right now.', 'Tick "Called today" after each call. Leads you already called today drop to the bottom.')}
     ${L.chaseDecide.length ? myDaySection('decide', 'Chasing 21+ days — decide', L.chaseDecide.length, decideBody, '', 'Three weeks without an answer. Mark as Lost (no answer), or keep chasing for another 21 days.') : ''}
     ${myDaySection('followups', 'Follow-ups due', L.followups.length, fuBody, 'No follow-ups due today. ✓')}
+    ${L.bookedNoJob.length ? myDaySection('booked', 'Booked — no job yet', L.bookedNoJob.length, bookedBody, '', 'Two days after the job date and still no job. Check with the customer or the technician: if it moved, change the date; if it was cancelled, change the stage.') : ''}
     ${myDaySection('quotes', 'Quotes idle 14+ days', L.staleQuotes.length, quoteBody, 'No quote has been sitting for 14 days. ✓', 'A quote nobody has touched for two weeks goes cold. Call them, or move the lead on.')}
     ${logRows.length ? myDaySection('log', 'Log your day', logRows.filter(r=>!r.log).length, logBody, '', 'Hours and bookings go on the Payroll page — that is what your pay is calculated from.', logRows.every(r=>r.log) ? 'done' : '') : ''}
   `;
@@ -6001,7 +6049,8 @@ function deleteClosing(id){
 // Editing a closing (Ofek, 29 Sep): fixes the post, and sends only the fields that changed to the job it created or
 // updated — so anything already corrected directly in Jobs & Commissions isn't overwritten. Same people as Delete.
 let CLOSING_EDIT = null;   // { id, file } while the edit window is open
-function canEditClosings(){ return ['owner','manager'].includes(getCurrentProfile()?.role); }
+// Owners/managers, and Ron (a VA with Jobs access — he posts the closings, so he fixes them too). Never technicians.
+function canEditClosings(){ const p = getCurrentProfile(); return !!p && (['owner','manager'].includes(p.role) || (p.role==='va' && !!p.permissions.jobs && !!p.permissions.closings)); }
 function closingEditFileRow(){
   const f = CLOSING_EDIT && CLOSING_EDIT.file;
   if (f) return `<a href="#" onclick="event.preventDefault();openEmbeddedFile(CLOSING_EDIT.file)" class="file-chip">📷 View photo</a><button type="button" class="btn ghost small" onclick="document.getElementById('ce-photo-input').click()">Replace</button><button type="button" class="btn ghost small" onclick="CLOSING_EDIT.file=null;document.getElementById('ce-photo-row').innerHTML=closingEditFileRow()">Remove</button>`;

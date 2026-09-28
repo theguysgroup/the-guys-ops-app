@@ -48,7 +48,7 @@ const DECLS = [
   // dashboard
   'localDay', 'GOOGLE_ADS_AIRCON_ACCOUNT', 'callDivision', 'summarizeCalls', 'DASH_RANGES', 'resolveDashboardRange',
   // sales automations + My Day
-  'fmtMoney', 'workClockDue', 'sydneyNowPast', 'NEW_LEAD_ALERT_FROM', 'leadArrivedAt', 'newLeadUnhandled', 'chaseTooLong', 'quoteStale', 'MY_DAY_NEW_DAYS', 'myDayLists',
+  'fmtMoney', 'workClockDue', 'sydneyNowPast', 'NEW_LEAD_ALERT_FROM', 'leadArrivedAt', 'newLeadUnhandled', 'chaseTooLong', 'quoteStale', 'bookedNoJob', 'MY_DAY_NEW_DAYS', 'myDayLists',
 ];
 
 function extractDecl(source, name){
@@ -499,11 +499,21 @@ function testSalesAutomations(sb){
   assertEqual(sb.quoteStale(quote('2026-09-08T02:00:00Z'), at('2026-09-22T02:00:00Z')), true, 'quoteStale: 14 days untouched → red');
   assertEqual(sb.quoteStale(quote('2026-09-08T02:00:00Z'), at('2026-09-21T02:00:00Z')), false, 'quoteStale: 13 days → fine');
 
-  sb.STATE.data.contacts = [chase('2026-09-01T02:00:00Z'), quote('2026-09-08T02:00:00Z')];
+  // Booked with no job: 2 days after the job date (Sydney), and only while the lead is still Booked (a job makes it Won).
+  const booked = d => ({ id:'bk', fullName:'Booked B', status:'Booked', bookedFor:d, createdAt:'2026-09-01', division:'Aircon' });
+  assertEqual(sb.bookedNoJob(booked('2026-09-20'), at('2026-09-22T02:00:00Z')), true, 'bookedNoJob: 2 days after the job date → check');
+  assertEqual(sb.bookedNoJob(booked('2026-09-21'), at('2026-09-22T02:00:00Z')), false, 'bookedNoJob: 1 day after → not yet');
+  assertEqual(sb.bookedNoJob(booked(''), at('2026-09-22T02:00:00Z')), false, 'bookedNoJob: no job date (old Booked leads) → never');
+  sb.STATE.data.jobs = [{ id:'bj', contactId:'bk', customerName:'Booked B', date:'2026-09-20' }]; sb.JOB_CACHE.index = null;
+  assertEqual(sb.bookedNoJob(booked('2026-09-20'), at('2026-09-22T02:00:00Z')), false, 'bookedNoJob: the job was entered → Won, no alert');
+  sb.STATE.data.jobs = []; sb.JOB_CACHE.index = null;
+
+  sb.STATE.data.contacts = [chase('2026-09-01T02:00:00Z'), quote('2026-09-08T02:00:00Z'), booked('2026-09-20')];
   Object.assign(sb.STATE.data, { equipmentSpend:[], manualReminders:[], dismissedReminders:[], readReminders:[], employees:[] });
   const items = sb.computeReminders(sb.STATE.data, at('2026-09-22T02:00:00Z'));
   assertEqual(items.filter(i => i.type==='chase-long').map(i => i.key), ['chase-long:ch:2026-09-01'], 'computeReminders: one "decide" reminder, keyed to when chasing started');
   assertEqual(items.filter(i => i.type==='stale-quote').map(i => i.key), ['stale-quote:q:2026-09-08'], 'computeReminders: one idle-quote reminder, keyed to the quote date');
+  assertEqual(items.filter(i => i.type==='booked-no-job').map(i => i.key), ['booked-no-job:bk:2026-09-20'], 'computeReminders: booked-no-job reminder keyed to the job date (moving the date gives a fresh one)');
   sb.STATE.data.dismissedReminders = ['chase-long:ch:2026-09-01'];
   assertEqual(sb.computeReminders(sb.STATE.data, at('2026-09-22T02:00:00Z')).filter(i => i.type==='chase-long').length, 0, 'computeReminders: a deleted "decide" reminder stays deleted');
 
