@@ -727,7 +727,6 @@ function allMonthKeys(data, now){
 function computeReminders(data, now){
   const items = []; const today = parseLocalDate(todayStr(now));
   const unpaidReminderDays = data.settings?.unpaidReminderDays ?? 7;
-  const quoteStaleDays = data.settings?.quoteStaleDays ?? 5;
   const dismissed = new Set(data.dismissedReminders||[]);
   data.jobs.forEach(j => {
     if (j.paymentStatus !== 'Paid') {
@@ -764,14 +763,6 @@ function computeReminders(data, now){
       items.push({ key, readKey:key, type:'repeat-service', contactId: contactForJob(j)?.id || '', severity:'warn', date:todayStr(now), title:`${j.customerName} — re-offer ${j.jobType} service`, meta:`1 year ago this week: ${j.jobType} job done on ${fmtDateShort(j.date)} · call to check if it's time again` });
     }
   });
-  const activeQuoteStates = ['In Discussion','Waiting for Reply'];
-  data.quotes.forEach(q => {
-    if (activeQuoteStates.includes(q.status)) {
-      const age = daysBetween(parseLocalDate(q.date), today);
-      const key = `quote:${q.id}`;
-      if (age >= quoteStaleDays && !dismissed.has(key)) items.push({ key, readKey:key, type:'quote', severity: age>=10?'bad':'warn', date:q.date, title:`Quote for ${q.customer} still open`, meta:`${q.status} · ${age} days` });
-    }
-  });
   // Manually-created reminders (from the CRM follow-up flow) sit alongside the derived ones, so Ron sees
   // one reminder list rather than two competing ones.
   (data.manualReminders||[]).forEach(r => {
@@ -799,16 +790,16 @@ function computeReminders(data, now){
 }
 
 /* ── permissions / types (ported from src/lib/types.ts + permissions.ts) ── */
-const ALL_SECTIONS = ['crm','crmOverview','adsGoogle','jobs','finance','payroll','outstanding','reminders','openItems','tasks','quotes','reference','closings','settings'];
-const SECTION_ORDER = ['crm','dashboard','crmOverview','adsGoogle','closings','jobs','finance','payroll','employeeViews','outstanding','reminders','openItems','tasks','quotes','reference'];
-const SECTION_LABEL = { dashboard:'Dashboard', adsGoogle:'Google Ads board', crm:'CRM', crmOverview:'Leads & Marketing', overview:'Overview', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', bizPerformance:'Business Performance', employeeViews:'Employee Views', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', quotes:'Quotes', reference:'Equipment & Suppliers', closings:'Closings', settings:'Permissions & Settings' };
+const ALL_SECTIONS = ['crm','crmOverview','adsGoogle','jobs','finance','payroll','outstanding','reminders','openItems','tasks','reference','closings','settings'];
+const SECTION_ORDER = ['crm','dashboard','crmOverview','adsGoogle','closings','jobs','finance','payroll','outstanding','reminders','openItems','tasks','reference'];
+const SECTION_LABEL = { dashboard:'Dashboard', adsGoogle:'Google Ads board', crm:'CRM', crmOverview:'Leads & Marketing', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', reference:'Equipment & Suppliers', closings:'Closings', settings:'Permissions & Settings' };
 const ROLE_LABEL = { owner:'Owner', manager:'Manager', technician:'Technician', va:'Virtual Assistant' };
 function roleLabel(role){ return ROLE_LABEL[role] || role; }
 function defaultPermissionsFor(role){
-  const none = { crm:false, crmOverview:false, overview:false, jobs:false, finance:false, payroll:false, outstanding:false, reminders:false, openItems:false, tasks:false, quotes:false, reference:false, closings:false, settings:false };
-  if (role==='owner') return { ...none, crm:true, crmOverview:true, overview:true, jobs:true, finance:true, payroll:true, outstanding:true, reminders:true, openItems:true, tasks:true, quotes:true, reference:true, closings:true, settings:true };
+  const none = { crm:false, crmOverview:false, overview:false, jobs:false, finance:false, payroll:false, outstanding:false, reminders:false, openItems:false, tasks:false, reference:false, closings:false, settings:false };
+  if (role==='owner') return { ...none, crm:true, crmOverview:true, overview:true, jobs:true, finance:true, payroll:true, outstanding:true, reminders:true, openItems:true, tasks:true, reference:true, closings:true, settings:true };
   // Manager: everything an owner sees except Settings (permissions/system administration stays owner-only).
-  if (role==='manager') return { ...none, crm:true, crmOverview:true, overview:true, jobs:true, finance:true, payroll:true, outstanding:true, reminders:true, openItems:true, tasks:true, quotes:true, reference:true, closings:true, settings:false };
+  if (role==='manager') return { ...none, crm:true, crmOverview:true, overview:true, jobs:true, finance:true, payroll:true, outstanding:true, reminders:true, openItems:true, tasks:true, reference:true, closings:true, settings:false };
   // Technician: Closings stays OFF by default — posting closings is office-staff/owner work, not something
   // a technician gets automatically (owner can still grant it manually in Settings). CRM is off too:
   // leads/sales are not a technician's job.
@@ -825,7 +816,6 @@ function defaultPermissionsFor(role){
 function canViewSection(profile, section){
   if (section==='settings') return profile.role==='owner';
   // Employee Views: only the owners (Ofek, Noam) can look at what each worker sees.
-  if (section==='employeeViews') return profile.role==='owner';
   // Dashboard: the whole-business summary (money, marketing, team) — owners/managers only, not grantable.
   if (section==='dashboard') return profile.role==='owner' || profile.role==='manager';
   if (profile.role==='owner' || profile.role==='manager') return true;
@@ -833,123 +823,10 @@ function canViewSection(profile, section){
 }
 function firstAccessibleTab(profile){ return SECTION_ORDER.find(s => canViewSection(profile,s)) || null; }
 
-/* ── seed data (ported from src/lib/data/mock-backend.ts) ──────────────── */
+// Local id for things that live only on screen until saved (list rows, update entries).
 function uid(){ return 'id'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
-const DEMO_PROFILES = [
-  { id:'p-noam', fullName:'Noam', role:'owner', technicianName:'Noam', permissions: defaultPermissionsFor('owner') },
-  { id:'p-ofek', fullName:'Ofek', role:'owner', technicianName:'Ofek', permissions: defaultPermissionsFor('owner') },
-  { id:'p-guy', fullName:'Guy', role:'technician', technicianName:'Guy', permissions: defaultPermissionsFor('technician') },
-  { id:'p-dolev', fullName:'Dolev', role:'technician', technicianName:'Dolev', permissions: defaultPermissionsFor('technician') },
-  { id:'p-alessandro', fullName:'Alessandro', role:'technician', technicianName:'Alessandro', permissions: defaultPermissionsFor('technician') },
-  { id:'p-omri', fullName:'Omri', role:'technician', technicianName:'Omri', permissions: defaultPermissionsFor('technician') },
-  { id:'p-ron', fullName:'Ron', role:'va', technicianName:null, permissions: { ...defaultPermissionsFor('va'), tasks:true, quotes:true } },
-];
-function seedData(){
-  const data = {
-    employees: [
-      { id:'e1', name:'Noam', roles:['Owner'], status:'Active', employmentType:'Salaried', phone:'0400 000 101', email:'noam.demo@example.com', address:'', commissionNotes:'Co-Owner — Aircon & Chimney division manager. Fixed salary $1,200. Company vehicle.', bankDetails:'', abn:'', startDate:'2025-01-01', endDate:'', contractFile:null, passportPhotoFile:null, licensePhotoFile:null, localLicenseFile:null, department:'AC' },
-      { id:'e2', name:'Ofek', roles:['Owner'], status:'Active', employmentType:'Salaried', phone:'0400 000 102', email:'ofek.demo@example.com', address:'', commissionNotes:'Co-Owner — Pressure Washing division manager. Fixed salary $1,200. Company vehicle.', bankDetails:'', abn:'', startDate:'', endDate:'', contractFile:null, passportPhotoFile:null, licensePhotoFile:null, localLicenseFile:null, department:'PW' },
-      { id:'e3', name:'Guy', roles:['Technician','Sales','Field Trainer'], status:'Active', employmentType:'Freelance-commission', phone:'0400 000 103', email:'guy.demo@example.com', address:'', commissionNotes:'30% commission. Private vehicle.', bankDetails:'', abn:'', startDate:'', endDate:'', contractFile:null, passportPhotoFile:null, licensePhotoFile:null, localLicenseFile:null, department:'AC' },
-      { id:'e4', name:'Dolev', roles:['Technician','Sales'], status:'Active', employmentType:'Freelance-commission', phone:'0400 000 104', email:'dolev.demo@example.com', address:'', commissionNotes:'27.5% trial rate → 30% after trial. Company vehicle. Missing: contract, ABN, insurance, AU license, file uploads.', bankDetails:'', abn:'', startDate:'2026-05-02', endDate:'', contractFile:null, passportPhotoFile:null, licensePhotoFile:null, localLicenseFile:null, department:'AC' },
-      { id:'e5', name:'Alessandro', roles:['Technician'], status:'Active', employmentType:'Independent Contractor', phone:'0400 000 105', email:'alessandro.demo@example.com', address:'', commissionNotes:'50% commission (confirmed). Independent contractor agreement on file — commission tiers, equipment bond, non-solicitation clause. Company vehicle.', bankDetails:'', abn:'', startDate:'', endDate:'', contractFile:null, passportPhotoFile:null, licensePhotoFile:null, localLicenseFile:null, department:'PW' },
-      { id:'e6', name:'Omri', roles:['Technician'], status:'Pending', employmentType:'', phone:'', email:'', address:'', commissionNotes:'Joining September 2026 — details TBD.', bankDetails:'', abn:'', startDate:'2026-09-01', endDate:'', contractFile:null, passportPhotoFile:null, licensePhotoFile:null, localLicenseFile:null, department:'' },
-      { id:'e7', name:'Ron', roles:['VA','Remote Sales'], status:'Active', employmentType:'Hourly - Remote', phone:'+63 900 000 106', email:'ron.demo@example.com', address:'Remote — Philippines', commissionNotes:'Phone sales — remote, English-only, based in the Philippines. $10/hr + 7% cross-sale bonus. Signed Independent Sales Contractor Agreement (under AO Group Pty Ltd — older entity name). ', bankDetails:'', abn:'', startDate:'', endDate:'', contractFile:null, passportPhotoFile:null, licensePhotoFile:null, localLicenseFile:null, department:'' },
-      { id:'e8', name:'Rashid', roles:['External Supplier'], status:'Active', employmentType:'External Contractor', phone:'0400 000 107', email:'rashid.demo@example.com', address:'', commissionNotes:'Gutter guard installation. No company name/ABN on file. (Phone number as provided — looks incomplete, please double-check.)', bankDetails:'', abn:'', startDate:'', endDate:'', contractFile:null, passportPhotoFile:null, licensePhotoFile:null, localLicenseFile:null, department:'PW' },
-      { id:'e9', name:'Paul', roles:['External Supplier'], status:'Active', employmentType:'External Contractor', phone:'0400 000 108', email:'paul.demo@example.com', address:'', commissionNotes:'Innovative Roof Painting. No ABN on file.', bankDetails:'', abn:'', startDate:'', endDate:'', contractFile:null, passportPhotoFile:null, licensePhotoFile:null, localLicenseFile:null, department:'PW' },
-      { id:'e10', name:'Mohammad', roles:['External Supplier'], status:'Active', employmentType:'External Contractor', phone:'', email:'', address:'', commissionNotes:'No contact details on file.', bankDetails:'', abn:'', startDate:'', endDate:'', contractFile:null, passportPhotoFile:null, licensePhotoFile:null, localLicenseFile:null, department:'AC' },
-    ],
-    commissionRates: { Noam:{Aircon:0,Chimney:0,'Pressure Washing':0,Other:0}, Ofek:{Aircon:0,Chimney:0,'Pressure Washing':0,Other:0}, Guy:{Aircon:30,Chimney:30,'Pressure Washing':null,Other:null}, Dolev:{Aircon:27.5,Chimney:27.5,'Pressure Washing':null,Other:null}, Alessandro:{Aircon:null,Chimney:null,'Pressure Washing':50,Other:null} },
-    jobs: [
-      { id:uid(), customerName:'Harbourview Apartments — Unit 4', invoiceNumber:'INV-1042', date:'2026-08-25', technician:'Noam', jobType:'Aircon', commissionPercent:0, amount:350, includesGST:true, paymentStatus:'Paid', paymentMethod:'Cash', partsCost:0, partsPaidBy:'', partsRefundStatus:'N/A', notes:'', datePaid:'2026-08-25', paidToTechnician:'Not Paid', enteredBy:'Noam', cashConfirmed:true, invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null },
-      { id:uid(), customerName:'R. Nguyen', invoiceNumber:'INV-1043', date:'2026-08-25', technician:'Guy', jobType:'Chimney', commissionPercent:30, amount:420, includesGST:true, paymentStatus:'Paid', paymentMethod:'Bank Transfer', partsCost:0, partsPaidBy:'', partsRefundStatus:'N/A', notes:'', datePaid:'2026-08-25', paidToTechnician:'Paid', enteredBy:'Noam', cashConfirmed:false, invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null },
-      { id:uid(), customerName:'Grand Cafe', invoiceNumber:'INV-1044', date:'2026-08-24', technician:'Guy', jobType:'Aircon', commissionPercent:30, amount:280, includesGST:false, paymentStatus:'Unpaid', paymentMethod:'Credit Card', partsCost:0, partsPaidBy:'', partsRefundStatus:'N/A', notes:'', datePaid:'', paidToTechnician:'Not Paid', enteredBy:'Noam', cashConfirmed:false, invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null },
-      { id:uid(), customerName:'Chen Family', invoiceNumber:'INV-1045', date:'2026-08-24', technician:'Dolev', jobType:'Aircon', commissionPercent:30, amount:500, includesGST:true, paymentStatus:'Paid', paymentMethod:'Credit Card', partsCost:0, partsPaidBy:'', partsRefundStatus:'N/A', notes:'', datePaid:'2026-08-24', paidToTechnician:'Not Paid', enteredBy:'Ofek', cashConfirmed:false, invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null },
-      { id:uid(), customerName:'S. Okafor', invoiceNumber:'INV-1031', date:'2026-08-10', technician:'Dolev', jobType:'Chimney', commissionPercent:25, amount:150, includesGST:false, paymentStatus:'Unpaid', paymentMethod:'Bank Transfer', partsCost:0, partsPaidBy:'', partsRefundStatus:'N/A', notes:'Waiting on customer to process transfer.', datePaid:'', paidToTechnician:'Not Paid', enteredBy:'Noam', cashConfirmed:false, invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null },
-      { id:uid(), customerName:'Parramatta Medical Centre', invoiceNumber:'INV-1028', date:'2026-08-15', technician:'Guy', jobType:'Aircon', commissionPercent:30, amount:300, includesGST:true, paymentStatus:'Paid', paymentMethod:'Bank Transfer', partsCost:0, partsPaidBy:'', partsRefundStatus:'N/A', notes:'', datePaid:'2026-08-16', paidToTechnician:'Not Paid', enteredBy:'Noam', cashConfirmed:false, invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null },
-      { id:uid(), customerName:'B. Williams', invoiceNumber:'INV-0987', date:'2026-07-20', technician:'Noam', jobType:'Chimney', commissionPercent:0, amount:600, includesGST:true, paymentStatus:'Paid', paymentMethod:'Cash', partsCost:0, partsPaidBy:'', partsRefundStatus:'N/A', notes:'', datePaid:'2026-07-20', paidToTechnician:'Not Paid', enteredBy:'Noam', cashConfirmed:true, invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null },
-      { id:uid(), customerName:'Lakeside Bowling Club', invoiceNumber:'INV-0991', date:'2026-07-22', technician:'Dolev', jobType:'Aircon', commissionPercent:30, amount:260, includesGST:true, paymentStatus:'Paid', paymentMethod:'Credit Card', partsCost:0, partsPaidBy:'', partsRefundStatus:'N/A', notes:'', datePaid:'2026-07-22', paidToTechnician:'Paid', enteredBy:'Ofek', cashConfirmed:false, invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null },
-      { id:uid(), customerName:'D. Petrov', invoiceNumber:'INV-0975', date:'2026-07-25', technician:'Guy', jobType:'Other', commissionPercent:20, amount:180, includesGST:false, paymentStatus:'Unpaid', paymentMethod:'', partsCost:0, partsPaidBy:'', partsRefundStatus:'N/A', notes:'One-off custom vent job — manual commission.', datePaid:'', paidToTechnician:'Not Paid', enteredBy:'Noam', cashConfirmed:false, invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null },
-      { id:uid(), customerName:'A. Thompson', invoiceNumber:'INV-1046', date:'2026-08-26', technician:'Noam', jobType:'Aircon', commissionPercent:0, amount:400, includesGST:true, paymentStatus:'Unpaid', paymentMethod:'', partsCost:40, partsPaidBy:'Guy', partsRefundStatus:'Pending Refund', notes:'', datePaid:'', paidToTechnician:'Not Paid', enteredBy:'Noam', cashConfirmed:false, invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null },
-      { id:uid(), customerName:'Miller Residence', invoiceNumber:'INV-1050', date:'2026-08-26', technician:'Dolev', jobType:'Aircon', commissionPercent:30, amount:275, includesGST:true, paymentStatus:'Unpaid', paymentMethod:'', partsCost:0, partsPaidBy:'', partsRefundStatus:'N/A', notes:'Created automatically from a Closings post.', datePaid:'', paidToTechnician:'Not Paid', enteredBy:'Dolev', cashConfirmed:false, invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null },
-    ],
-    equipmentSpend: [
-      { id:uid(), date:'2026-08-20', item:'Extension ladder', technician:'Guy', paidBy:'Guy', cost:85, reimbursed:'Pending' },
-      { id:uid(), date:'2026-08-15', item:'Coil cleaner spray (bulk)', technician:'Dolev', paidBy:'Dolev', cost:32, reimbursed:'Reimbursed' },
-    ],
-    equipmentCatalog: [
-      { id:uid(), name:'Duct Cleaning Brush Kit', supplierId:'s1', otherSource:'', price:145, category:'Tools', description:'Rotary brush set with 4 head sizes for standard residential ductwork.', purchaseDate:'2026-02-10' },
-      { id:uid(), name:'Vacuum Filter Bags (pack of 20)', supplierId:'s1', otherSource:'', price:38, category:'Consumable', description:'HEPA-rated bags for the truck-mount vacuum unit.', purchaseDate:'2026-05-03' },
-      { id:uid(), name:'Extension Ladder 3.2m', supplierId:'', otherSource:'Bunnings Warehouse (cash purchase)', price:189, category:'Tools', description:'Fibreglass extension ladder for roof-space access.', purchaseDate:'2026-06-18' },
-      { id:uid(), name:'Coil Cleaner Spray (case of 12)', supplierId:'s1', otherSource:'', price:96, category:'Consumable', description:'No-rinse foaming coil cleaner.', purchaseDate:'2026-07-01' },
-    ],
-    suppliers: [
-      { id:'s1', name:'Sparky Direct Pty Ltd', supplyType:'Cleaning Products, Degreaser & AC Accessories', contactPerson:'', phone:'1300 607 290 (alt: 07 5428 3044)', email:'support@sparkydirect.com.au', addressWebsite:'sparkydirect.com.au', paymentTerms:'Online payment only, no trade account' },
-    ],
-    tasks: [
-      { id:uid(), board:'ron', title:'Follow up INV-1044 (Grand Cafe)', status:'In Progress', due:'2026-08-28', notes:'Customer said card was declined, try again.', client:'Grand Cafe', priority:'Medium', assignedTo:'Ron', createdBy:'Noam', createdAt:'2026-08-24T09:10:00', technician:'Guy', category:'', subtasks:[ {id:uid(),text:'Call customer',done:true}, {id:uid(),text:'Confirm new payment date',done:false} ], updates:[ {id:uid(), author:'Ron', text:'Left a voicemail, will try again tomorrow.', createdAt:'2026-08-24T15:30:00'} ] },
-      { id:uid(), board:'ron', title:'Order more filter bags', status:'Not Started', due:'2026-09-02', notes:'', client:'', priority:'Low', assignedTo:'Ron', createdBy:'Noam', createdAt:'2026-08-20T14:00:00', technician:'', category:'', subtasks:[], updates:[] },
-      { id:uid(), board:'mine', title:'Review Q3 commission rates', status:'In Progress', due:'2026-08-30', notes:'Check if Dolev should move to 30% on chimney too.', client:'', priority:'High', assignedTo:'Noam', createdBy:'Noam', createdAt:'2026-08-18T08:30:00', technician:'', category:'Financial', subtasks:[], updates:[] },
-      { id:uid(), board:'mine', title:'Plan spring marketing flyer drop', status:'Not Started', due:'2026-09-10', notes:'', client:'', priority:'Medium', assignedTo:'Noam', createdBy:'Noam', createdAt:'2026-08-12T11:00:00', technician:'', category:'Marketing', subtasks:[], updates:[] },
-      { id:uid(), board:'mine', title:'Restock coil cleaner before next chimney run', status:'Not Started', due:'2026-08-29', notes:'', client:'', priority:'Medium', assignedTo:'Guy', createdBy:'Noam', createdAt:'2026-08-22T10:00:00', technician:'Guy', category:'Operational', subtasks:[], updates:[] },
-      // Per-technician personal boards — each active technician gets their own board (board = their name),
-      // separate from 'ron' and 'mine'. Seeded here so the feature is visible right away.
-      { id:uid(), board:'Guy', title:'Pick up new coil cleaner from AirTech Supplies', status:'Not Started', due:'2026-08-30', notes:'', client:'', priority:'Medium', assignedTo:'Guy', createdBy:'Noam', createdAt:'2026-08-23T09:00:00', technician:'Guy', category:'', subtasks:[], updates:[] },
-      { id:uid(), board:'Dolev', title:'Service the truck-mount vacuum before Friday', status:'In Progress', due:'2026-08-28', notes:'', client:'', priority:'High', assignedTo:'Dolev', createdBy:'Noam', createdAt:'2026-08-21T09:00:00', technician:'Dolev', category:'', subtasks:[], updates:[] },
-    ],
-    quotes: [
-      { id:uid(), customer:'Harbourview Apartments (body corp)', date:'2026-08-20', amount:2400, status:'In Discussion', notes:'Body corp needs board approval before sign-off.', jobNumber:'J-2201', clientNumber:'C-118', email:'admin@harbourviewsc.com.au', address:'4 Bayview Rd, Cronulla NSW', serviceTypes:['Duct Cleaning','Ventilation'], winProbability:'Medium', nextAction:'Call', nextActionNotes:'Call Thursday to confirm scope with the strata manager.', sent:true, technicianQuoted:'Noam', followedBy:'Ron', updates:[ {id:uid(), author:'Ron', text:'Left message with the strata manager, waiting on the board meeting date.', createdAt:'2026-08-21T11:00:00'} ] },
-      { id:uid(), customer:'Grand Cafe', date:'2026-08-15', amount:850, status:'Waiting for Reply', notes:'', jobNumber:'J-2205', clientNumber:'C-204', email:'manager@grandcafe.com.au', address:'19 High St, Parramatta NSW', serviceTypes:['Exhaust Fan Cleaning'], winProbability:'High', nextAction:'Send Reminder', nextActionNotes:'', sent:true, technicianQuoted:'Guy', followedBy:'Ron', updates:[] },
-      { id:uid(), customer:'Chen Family', date:'2026-08-22', amount:300, status:'Approved', notes:'Booked in for next week.', jobNumber:'J-2210', clientNumber:'C-233', email:'chen.family@gmail.com', address:'11 Kent St, Liverpool NSW', serviceTypes:['Split Cleaning'], winProbability:'High', nextAction:'Wait for Reply', nextActionNotes:'', sent:true, technicianQuoted:'Dolev', followedBy:'', updates:[] },
-    ],
-  };
-  // Closings feed — structured "job closed" reports technicians post from the field (WhatsApp-style,
-  // but built from real fields, not free text). Seeded with one closing linked to an existing job
-  // (INV-1043) and one that hasn't been matched to a job yet, for demo purposes.
-  data.closings = [
-    { id:uid(), technicianName:'Guy', date:'2026-08-25', customerName:'R. Nguyen', invoiceNumber:'INV-1043', jobType:'Chimney', amount:420, includesGST:true, paymentStatus:'Paid', paymentMethod:'Bank Transfer', partsCost:0, partsPaidBy:'', notes:'', invoiceFileUrl:null, postedBy:'Guy', createdAt:'2026-08-25T16:40:00', linkedJobId: data.jobs.find(j=>j.invoiceNumber==='INV-1043').id },
-    { id:uid(), technicianName:'Dolev', date:'2026-08-26', customerName:'Miller Residence', invoiceNumber:'INV-1050', jobType:'Aircon', amount:275, includesGST:true, paymentStatus:'Unpaid', paymentMethod:'', partsCost:0, partsPaidBy:'', notes:'Created automatically from a Closings post.', invoiceFileUrl:null, postedBy:'Dolev', createdAt:'2026-08-26T18:05:00', linkedJobId: data.jobs.find(j=>j.invoiceNumber==='INV-1050').id },
-  ];
-  // CRM leads/contacts — the top of the funnel, before a lead becomes a Job. A lead arrives either from a
-  // website form (all fields captured automatically) or a phone call (only the number is known at first).
-  // `source` is the marketing-channel attribution that makes per-channel lead counts possible.
-  data.contacts = [
-    { id:uid(), fullName:'Lynette Trotter', phone:'0400 100 201', email:'lynette.demo@example.com', postcode:'2217', division:'Aircon', source:'Meta Ads', status:'Follow-up', createdAt:'2026-08-24', nextFollowUp:'2026-08-31', estimatedValue:450, salesValue:0, jobDescription:'Duct system, residential property. Asked to be contacted by email.', linkedJobId:null, activityLog:[], starred:false, lastReadAt:'2026-08-25T09:40:01', tags:['air con','no answer ac','Duct System','Instagram'], messages:[
-      { id:uid(), kind:'event', text:'Lead created: Duct system, residential property. Asked to be contacted by email.', at:'2026-08-24T22:51:00' },
-      { id:uid(), kind:'message', direction:'in', text:'do you have a duct or a split system?: duct system\nPlease enter your suburb: Monterey\nHow would you want to be contacted?: email\nFull name: Lynette Trotter\nEmail: lynette.demo@example.com\nThe service is required for a commercial or a residential property: residential property', author:'Lynette Trotter', at:'2026-08-24T22:52:00' },
-      { id:uid(), kind:'event', text:'Outbound call attempted', at:'2026-08-25T09:39:00' },
-      { id:uid(), kind:'message', direction:'out', text:"Hi, It's Ron with The Guys Group, I tried to call to follow up on your inquiry with our aircon cleaning service. When is the best time that we can call you back? Thanks", author:'Ron', at:'2026-08-25T09:40:00' },
-      { id:uid(), kind:'message', direction:'in', text:"Tuesday afternoon works best for me, thanks Ron.", author:'Lynette Trotter', at:'2026-08-30T16:05:00' },
-    ] },
-    { id:uid(), fullName:'Christoper Lazzari', phone:'+61 400 100 202', email:'christoper.demo@example.com', postcode:'2154', division:'Chimney', source:'Phone Call', status:'Booked', createdAt:'2026-08-21', nextFollowUp:'', estimatedValue:380, salesValue:400, jobDescription:'Annual chimney sweep before winter.', linkedJobId:null, activityLog:[], starred:false, lastReadAt:null, tags:['chimney','booked chimney'], messages:[ { id:uid(), kind:'event', text:'Lead created: Annual chimney sweep before winter.', at:'2026-08-21T09:00:00' } ] },
-    { id:uid(), fullName:'Anika Mclane', phone:'+61 400 100 203', email:'anika.demo@example.com', postcode:'2088', division:'Aircon', source:'Google Ads', status:'Booked', createdAt:'2026-08-26', nextFollowUp:'', estimatedValue:520, salesValue:540, jobDescription:'Split system clean, two units.', linkedJobId:null, activityLog:[], starred:false, lastReadAt:null, tags:['air con','booked ac'], messages:[ { id:uid(), kind:'event', text:'Lead created: Split system clean, two units.', at:'2026-08-26T10:00:00' } ] },
-    { id:uid(), fullName:'Marcus Webb', phone:'0400 100 204', email:'marcus.demo@example.com', postcode:'2170', division:'Pressure Washing', source:'Organic', status:'New', createdAt:'2026-08-29', nextFollowUp:'', estimatedValue:0, salesValue:0, jobDescription:'Driveway and front path, wants a quote.', linkedJobId:null, activityLog:[], starred:false, lastReadAt:null, tags:['pressure washing'], messages:[ { id:uid(), kind:'event', text:'Lead created: Driveway and front path, wants a quote.', at:'2026-08-29T14:00:00' } ] },
-    { id:uid(), fullName:'Priya Raman', phone:'0400 100 205', email:'priya.demo@example.com', postcode:'2145', division:'Aircon', source:'Google Ads', status:'Follow-up', createdAt:'2026-08-20', nextFollowUp:'2026-08-28', estimatedValue:300, salesValue:0, jobDescription:'Wants pricing for three split systems.', linkedJobId:null, activityLog:[], starred:false, lastReadAt:null, tags:['air con'], messages:[ { id:uid(), kind:'event', text:'Lead created: Wants pricing for three split systems.', at:'2026-08-20T11:00:00' } ] },
-    { id:uid(), fullName:'Tom Beattie', phone:'0400 100 206', email:'', postcode:'2026', division:'Chimney', source:'Phone Call', status:'Not Relevant', createdAt:'2026-08-14', nextFollowUp:'', estimatedValue:0, salesValue:0, jobDescription:'Went with a cheaper quote.', linkedJobId:null, activityLog:[], starred:false, lastReadAt:null, tags:['chimney','not relevant - price'], messages:[ { id:uid(), kind:'event', text:'Lead created: Went with a cheaper quote.', at:'2026-08-14T09:00:00' } ] },
-  ];
-  // Manually-created reminders (from the CRM follow-up flow). The automatic reminders in computeReminders
-  // are derived from job/quote data and have nothing to store; these are user-created and need a home.
-  data.manualReminders = [];
-  // The master vocabulary of tags — separate from any single contact's `tags[]` so a tag can be
-  // pre-created (or deleted, cascading off every contact) without needing a lead to hang it on.
-  data.tagCatalog = ['air con','chimney','pressure washing','booked ac','booked chimney','booked pw','no answer ac','missed call','not relevant - price'];
-  data.dismissedReminders = [];
-  data.readReminders = [];
-  // Ofek and Noam's weekly cash-on-hand check-in, migrated off Monday.com — one number, kept blunt on
-  // purpose (Ofek's words: "יבש לחלוטין" — bone dry, no other fields), plus a running notes thread.
-  data.cashStatus = { amount: 6200, activityLog: [
-    { id:uid(), at:'2026-08-24T08:15:00', actor:'Ofek', text:'Collected cash from Guy and Dolev, paid out weekly wages. ~$6,200 liquid across bank + on hand.', manual:true },
-  ] };
-  // Owner-configurable business rules/profile — previously hardcoded consts; now editable from Settings.
-  data.settings = { unpaidReminderDays: 7, quoteStaleDays: 5, gstRatePercent: 10, companyName: 'The Guys Service Group', abn: '', defaultPaymentTerms: '' };
-  data.settingsActivityLog = []; // permission/business-rule/working-days changes — not tied to one record
-  return data;
-}
-// Reshapes normalized Supabase rows back into the exact nested-object shape
-// seedData() used to build in-memory, so every render*()/renderer function
-// below (which all expect e.g. job.activityLog, contact.tags, etc.) keeps
-// working completely unchanged. Read-only for now — mutation functions still
-// only patch STATE.data in memory; wiring writes back to Supabase is the
-// next piece of work, tracked separately from this login/data-load step.
+// Loads everything this person may see from Supabase and reshapes the rows into the objects the screens use
+// (job.activityLog, contact.tags, …). All writes go through the db layer below.
 async function loadFromSupabase(){
   const uid = AUTH.session?.user?.id;
   if (!uid) throw new Error('No signed-in user');
@@ -967,7 +844,7 @@ async function loadFromSupabase(){
 
   // Every list table is read page by page (fetchAllRows): one request returns at most 1,000 rows, and
   // anything past that used to disappear without a trace. Single-row tables stay as one request.
-  const LOAD_NAMES = ['leads','jobs','equipment purchases','equipment catalogue','suppliers','tasks','quotes','closings',
+  const LOAD_NAMES = ['leads','jobs','equipment purchases','equipment catalogue','suppliers','tasks','closings',
     'reminders','tags','deleted reminders','cash status','settings','employees','commission rates',
     'activity history','ad spend','payroll','daily sales log','Google Ads calls','read reminders'];
   const loadResults = await Promise.all([
@@ -977,7 +854,6 @@ async function loadFromSupabase(){
     fetchAllRows('equipment_catalog', 'id'),
     fetchAllRows('suppliers', 'id'),
     fetchAllRows('tasks', 'id'),
-    fetchAllRows('quotes', 'id'),
     fetchAllRows('closings', 'id'),
     fetchAllRows('manual_reminders', 'id'),
     fetchAllRows('tag_catalog', 'tag'),
@@ -998,7 +874,7 @@ async function loadFromSupabase(){
   ]);
   const [
     { data: contacts }, { data: jobs }, { data: equipmentSpend }, { data: equipmentCatalog },
-    { data: suppliers }, { data: tasks }, { data: quotes }, { data: closings },
+    { data: suppliers }, { data: tasks }, { data: closings },
     { data: manualReminders }, { data: tagCatalog }, { data: dismissedReminders },
     { data: cashStatusRow }, { data: settingsRow }, { data: employees }, { data: commissionRateRows },
     { data: activityRows }, { data: adSpendRows }, { data: payrollRows }, { data: salesLogRows }, { data: adCallRows },
@@ -1044,7 +920,6 @@ async function loadFromSupabase(){
       email:s.email||'', addressWebsite:s.address_website||'', paymentTerms:s.payment_terms||'',
     })),
     tasks: (tasks||[]).map(t => ({ ...mapTaskRow(t), activityLog: logsFor('task', t.id) })),
-    quotes: (quotes||[]).map(mapQuoteRow),
     closings: (closings||[]).map(mapClosingRow),
     manualReminders: (manualReminders||[]).map(mapManualReminderRow),
     tagCatalog: (tagCatalog||[]).map(t => t.tag),
@@ -1059,7 +934,6 @@ async function loadFromSupabase(){
       bankDetails:e.bank_details||'', abn:e.abn||'', startDate:e.start_date, endDate:e.end_date,
       department:e.department||'', contractFile:e.contract_file, passportPhotoFile:e.passport_photo_file,
       licensePhotoFile:e.license_photo_file, localLicenseFile:e.local_license_file,
-      workingDays: e.working_days || [0,1,2,3,4,5,6],
       activityLog: logsFor('employee', e.id),
     })),
     commissionRates: {},
@@ -1142,19 +1016,6 @@ function taskPatchToRow(patch){
   }
   return row;
 }
-function quotePatchToRow(patch){
-  const map = {
-    customer:'customer', date:'date', amount:'amount', status:'status', notes:'notes',
-    jobNumber:'job_number', clientNumber:'client_number', email:'email', address:'address',
-    serviceTypes:'service_types', winProbability:'win_probability', nextAction:'next_action',
-    nextActionNotes:'next_action_notes', sent:'sent', technicianQuoted:'technician_quoted',
-    followedBy:'followed_by', updates:'updates',
-  };
-  const row = {};
-  for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
-  if ('date' in row && !row.date) row.date = todayStr();   // quotes.date is NOT NULL, same defense as jobs.date
-  return row;
-}
 function closingPatchToRow(patch){
   const map = {
     technicianName:'technician_name', date:'date', customerName:'customer_name', invoiceNumber:'invoice_number',
@@ -1174,7 +1035,7 @@ function employeePatchToRow(patch){
     phone:'phone', email:'email', address:'address', commissionNotes:'commission_notes',
     bankDetails:'bank_details', abn:'abn', startDate:'start_date', endDate:'end_date',
     department:'department', contractFile:'contract_file', passportPhotoFile:'passport_photo_file',
-    licensePhotoFile:'license_photo_file', localLicenseFile:'local_license_file', workingDays:'working_days',
+    licensePhotoFile:'license_photo_file', localLicenseFile:'local_license_file',
   };
   const nullIfEmpty = new Set(['start_date','end_date']);
   const row = {};
@@ -1286,27 +1147,6 @@ const db = {
       STATE.data.tasks = STATE.data.tasks.filter(x=>x.id!==id);
       const { error } = await sb.from('tasks').delete().eq('id', id);
       if (error) restoreAfterFailedDelete('tasks', gone, 'task', error);
-    },
-  },
-  quotes: {
-    async create(values){
-      const { data: row, error } = await sb.from('quotes').insert(quotePatchToRow(values)).select().single();
-      if (error) { showToast('Could not save quote: '+error.message); throw error; }
-      const q = { ...values, id: row.id, updates: values.updates||[] };
-      STATE.data.quotes.push(q);
-      return q;
-    },
-    async update(id, patch){
-      const q = STATE.data.quotes.find(x=>x.id===id);
-      if (q) Object.assign(q, patch);
-      const { error } = await sb.from('quotes').update(quotePatchToRow(patch)).eq('id', id);
-      if (error) await restoreAfterFailedSave('quotes', 'quotes', id, mapQuoteRow, 'quote', error);
-    },
-    async remove(id){
-      const gone = STATE.data.quotes.find(x=>x.id===id);
-      STATE.data.quotes = STATE.data.quotes.filter(x=>x.id!==id);
-      const { error } = await sb.from('quotes').delete().eq('id', id);
-      if (error) restoreAfterFailedDelete('quotes', gone, 'quote', error);
     },
   },
   closings: {
@@ -1618,7 +1458,6 @@ function filterForProfile(data, profile){
     // (see UI.tasks.board / UI.tasks.filterMode), not a data-visibility one.
     tasks: profile.permissions.tasks ? data.tasks : [],
     contacts: (profile.permissions.crm || profile.permissions.crmOverview) ? data.contacts : [],
-    quotes: profile.permissions.quotes ? data.quotes : [],
     equipmentCatalog: profile.permissions.reference ? data.equipmentCatalog : [],
     suppliers: profile.permissions.reference ? data.suppliers : [],
     closings: profile.permissions.closings ? data.closings : [],
@@ -1631,19 +1470,6 @@ function filterForProfile(data, profile){
    a refresh instead of silently reseeding, by mirroring STATE.data into localStorage. It's still
    single-browser, single-tab, not shared with anyone else, and "Log out" wipes it back to fresh
    demo data on purpose (so this stays clearly a testing aid, not a real save). */
-const LOCAL_SAVE_KEY = 'tgsg_preview_data_v1';
-function loadSavedData(){
-  try {
-    const raw = localStorage.getItem(LOCAL_SAVE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch(e) { return null; }
-}
-function saveDataLocally(){
-  try { localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(STATE.data)); } catch(e) { /* private browsing / quota — testing aid only, fail silently */ }
-}
-function clearSavedData(){
-  try { localStorage.removeItem(LOCAL_SAVE_KEY); } catch(e) {}
-}
 /* ── Supabase (Stage 3 real backend) ─────────────────────────────────────
    The anon/publishable key below is meant to be public — it identifies the
    project, not a secret. Row Level Security on the database side (see
@@ -1677,7 +1503,6 @@ function presentScaleData(d){
   (d.jobs||[]).forEach(j => { j.amount = x(j.amount); j.partsCost = x(j.partsCost); });
   (d.closings||[]).forEach(c => { c.amount = x(c.amount); c.partsCost = x(c.partsCost); });
   (d.contacts||[]).forEach(c => { c.estimatedValue = x(c.estimatedValue); c.salesValue = x(c.salesValue); });
-  (d.quotes||[]).forEach(q => { q.amount = x(q.amount); });
   (d.equipmentSpend||[]).forEach(e => { e.cost = x(e.cost); });
   (d.equipmentCatalog||[]).forEach(e => { e.price = x(e.price); });
   (d.adSpend||[]).forEach(a => { a.spend = x(a.spend); });
@@ -1744,15 +1569,6 @@ function mapTaskRow(t){
     priority:t.priority, assignees:t.assignees||[], assignedTo:t.assigned_to||'', headsUp:t.heads_up||'',
     createdBy:t.created_by||'', createdAt:t.created_at,
     technician:t.technician||'', category:t.category||'', subtasks:t.subtasks||[], updates:t.updates||[],
-  };
-}
-function mapQuoteRow(q){
-  return {
-    id:q.id, customer:q.customer, date:q.date, amount:q.amount||0, status:q.status, notes:q.notes||'',
-    jobNumber:q.job_number||'', clientNumber:q.client_number||'', email:q.email||'', address:q.address||'',
-    serviceTypes:q.service_types||[], winProbability:q.win_probability||'', nextAction:q.next_action||'',
-    nextActionNotes:q.next_action_notes||'', sent:q.sent||false, technicianQuoted:q.technician_quoted||'',
-    followedBy:q.followed_by||'', updates:q.updates||[],
   };
 }
 function mapClosingRow(c){
@@ -1897,7 +1713,6 @@ function setupRealtimeSubscriptions(){
     .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, handleContactRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, handleJobRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, handleListRealtimeChange('tasks', mapTaskRow))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'quotes' }, handleListRealtimeChange('quotes', mapQuoteRow))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'closings' }, handleListRealtimeChange('closings', mapClosingRow))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'manual_reminders' }, handleListRealtimeChange('manualReminders', mapManualReminderRow))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, handleSettingsRealtimeChange)
@@ -1909,19 +1724,17 @@ function setupRealtimeSubscriptions(){
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
 }
-let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null}, employeeViews:{person:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
+let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let toastMsg = null, toastTimer = null;
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
 let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task modal
 let EXPANDED_SUBTASK_INDEX = null; // which subtask's own updates thread is expanded in the task modal
 let MODAL_UPDATES = []; // transient per-modal Updates-log state for the task modal (append-only)
 let MODAL_TASK_ID = null; // id of the task currently open in the task modal (null while creating a new one)
-let MODAL_QUOTE_UPDATES = []; // same append-only Updates-log pattern as tasks, but for the quote modal
-let MODAL_QUOTE_ID = null; // id of the quote currently open in the quote modal (null while creating a new one)
 let CLOSING_FILE = null; // transient invoice-photo state for the "Post a closing" form
 
 function getCurrentProfile(){ return STATE.profiles.find(p => p.id===STATE.currentProfileId) || null; }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null}, employeeViews:{person:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, overview:{range:'week', customFrom:null, customTo:null}, bizPerf:{range:'30d', customFrom:null, customTo:null}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
   toastTimer = setTimeout(()=>{
@@ -2069,7 +1882,7 @@ function dateCellField(hiddenInputId, value, extraOnSelectJs){
   return `${renderDateCell(hiddenInputId+'-cell', value, onSelectJs)}<input type="hidden" id="${hiddenInputId}" value="${value||''}">`;
 }
 function openModal(html){ document.getElementById('modal-root').innerHTML = html; }
-function closeModal(){ document.getElementById('modal-root').innerHTML = ''; MODAL_FILES = {}; MODAL_SUBTASKS = []; MODAL_UPDATES = []; MODAL_TASK_ID = null; MODAL_QUOTE_UPDATES = []; MODAL_QUOTE_ID = null; }
+function closeModal(){ document.getElementById('modal-root').innerHTML = ''; MODAL_FILES = {}; MODAL_SUBTASKS = []; MODAL_UPDATES = []; MODAL_TASK_ID = null; }
 function modalError(msg){ document.getElementById('modal-error').innerHTML = msg ? pill('bad', msg) : ''; }
 
 // Custom confirm dialog, replacing native confirm(). Native confirm() has a real, silent failure mode in
@@ -2268,16 +2081,11 @@ function onStatusChange(kind, id, value){
     const t = STATE.data.tasks.find(x=>x.id===id);
     t.status = value;
     db.tasks.update(t.id, { status: value });
-  } else if (kind==='quoteStatus') {
-    const q = STATE.data.quotes.find(x=>x.id===id);
-    q.status = value;
-    db.quotes.update(q.id, { status: value });
   }
   render();
 }
 function deleteJob(id){ confirmAction('Delete this job?', ()=>{ db.jobs.remove(id); showToast('Deleted'); render(); }); }
 function deleteTask(id){ confirmAction('Delete this task?', ()=>{ db.tasks.remove(id); showToast('Deleted'); render(); }); }
-function deleteQuote(id){ confirmAction('Delete this quote?', ()=>{ db.quotes.remove(id); showToast('Deleted'); render(); }); }
 function deleteRefItem(kind, id){ confirmAction('Delete this item?', ()=>{ db[kind].remove(id); showToast('Deleted'); render(); }); }
 function deleteEquipSpend(id){ confirmAction('Delete this purchase?', ()=>{ db.equipmentSpend.remove(id); showToast('Deleted'); render(); }); }
 function deleteEmployee(id){ confirmAction('Delete this employee?', ()=>{ db.employees.remove(id); showToast('Deleted'); render(); }); }
@@ -2403,7 +2211,7 @@ async function doChangePassword(){
 const NAV = [
   { group:'Sales', items:[ {id:'crm', label:'CRM', icon:'◈'}, {id:'crmOverview', label:'Leads & Marketing', icon:'📊'}, {id:'adsGoogle', label:'Google Ads', icon:'🎯'} ] },
   { group:'Overview', items:[ {id:'dashboard', label:'Dashboard', icon:'🧭'}, {id:'reminders', label:'Reminders', icon:'●'}, {id:'openItems', label:'Open Tasks', icon:'▣'} ] },
-  { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'finance', label:'Financial Summary', icon:'▦'}, {id:'payroll', label:'Payroll', icon:'💵'}, {id:'employeeViews', label:'Employee Views', icon:'👁'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
+  { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'finance', label:'Financial Summary', icon:'▦'}, {id:'payroll', label:'Payroll', icon:'💵'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
   { group:'System', items:[ {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
 ];
 function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
@@ -2448,7 +2256,7 @@ function renderShell(profile, data){
     ? `<div><div class="nav-group-label">Field</div>${navButtonHtml('closings','Closings','🧾', UI.tab==='closings', "goTab('closings')")}</div>`
     : '';
 
-  // "Management" group: task boards (split from one Tasks link, same `tasks` permission), Quotes, and the
+  // "Management" group: task boards (split from one Tasks link, same `tasks` permission) and the
   // collapsible Resources group (Equipment / Employees / Suppliers, same `reference` permission).
   // Task board nav depends on role, not just the `tasks` flag: a technician gets exactly ONE link — their
   // own personal board — never Ron's, never Mine, never another technician's. Owner/Manager/VA instead
@@ -2476,7 +2284,6 @@ function renderShell(profile, data){
       }
     }
   }
-  if (canViewSection(profile,'quotes')) mgmtItems.push(navButtonHtml('quotes', 'Quotes', '✎', UI.tab==='quotes', "goTab('quotes')"));
   if (canViewSection(profile,'reference')) {
     const open = !!UI.resourcesOpen;
     const subItems = [['equipment','Equipment'],['employees','Employees'],['suppliers','Suppliers']]
@@ -2530,7 +2337,6 @@ function renderShell(profile, data){
    Independent of computeWeek/computeMonth — those stay untouched since Finance
    relies on their week-specific "late payment" semantics, which don't generalize
    to an arbitrary range. This is a simpler, direct range aggregate. */
-function dateSpanDays(startDateStr, endDateStr){ return daysBetween(parseLocalDate(startDateStr), parseLocalDate(endDateStr)) + 1; }
 function resolveOverviewRange(ui, now){
   const today = todayStr(now);
   const mode = ui.range;
@@ -2559,50 +2365,6 @@ function resolveOverviewRange(ui, now){
   const w = weekOf(today);
   return { start: fmtLocal(w.start), end: fmtLocal(w.end), label: `Week of ${w.label}` };
 }
-function setOverviewRange(mode){ UI.overview.range = mode; render(); }
-function computeRange(data, startDateStr, endDateStr, technicianFilter){
-  let jobs = data.jobs.filter(j => j.date>=startDateStr && j.date<=endDateStr);
-  let equip = data.equipmentSpend.filter(e => e.date>=startDateStr && e.date<=endDateStr);
-  if (technicianFilter) { jobs = jobs.filter(j=>j.technician===technicianFilter); equip = equip.filter(e=>e.technician===technicianFilter); }
-  const overview = { cash:0, bankTransfer:0, creditCard:0, paidTotal:0, unpaidTotal:0, paidCount:0, unpaidCount:0, partsTotal:0, equipmentTotal:0, commissionOwedTotal:0, paidToTechTotal:0, gstTotal:0 };
-  const jobTypeStats = { Aircon:{revenue:0,count:0}, Chimney:{revenue:0,count:0}, 'Pressure Washing':{revenue:0,count:0}, Other:{revenue:0,count:0} };
-  const unpaidByTech = {};
-  const commissionByTech = {};
-  jobs.forEach(j => {
-    const totalIncGst = jobTotalCollected(j);
-    if (j.paymentMethod==='Cash') overview.cash += totalIncGst;
-    else if (j.paymentMethod==='Bank Transfer') overview.bankTransfer += totalIncGst;
-    else if (j.paymentMethod==='Credit Card') overview.creditCard += totalIncGst;
-    overview.gstTotal += jobGst(j);
-    if (j.paymentStatus==='Paid') { overview.paidCount++; overview.paidTotal += j.amount; }
-    else { overview.unpaidCount++; overview.unpaidTotal += j.amount; unpaidByTech[j.technician] = (unpaidByTech[j.technician]||0) + 1; }
-    overview.partsTotal += Number(j.partsCost)||0;
-    const commission = jobCommissionAmount(j);
-    overview.commissionOwedTotal += commission;
-    commissionByTech[j.technician] = round2((commissionByTech[j.technician]||0) + commission);
-    if (j.paidToTechnician==='Paid') overview.paidToTechTotal += commission;
-    if (jobTypeStats[j.jobType]===undefined) jobTypeStats[j.jobType] = {revenue:0,count:0};
-    jobTypeStats[j.jobType].revenue += Number(j.amount)||0;
-    jobTypeStats[j.jobType].count += 1;
-  });
-  equip.forEach(e => { overview.equipmentTotal += Number(e.cost)||0; });
-  Object.keys(overview).forEach(k => overview[k]=round2(overview[k]));
-  Object.keys(jobTypeStats).forEach(k => jobTypeStats[k].revenue = round2(jobTypeStats[k].revenue));
-  const revenueExGst = round2(jobs.reduce((s,j)=>s+(Number(j.amount)||0),0));
-  const revenue = round2(jobs.reduce((s,j)=>s+jobTotalCollected(j),0)); // headline "Total Revenue" — incl. GST, paid + unpaid
-  const remainingAfterTech = round2(revenueExGst - overview.commissionOwedTotal - overview.partsTotal - overview.equipmentTotal);
-  // Money collected in THIS period for jobs whose original service date falls in an earlier period.
-  let latePayments = data.jobs.filter(j => j.paymentStatus==='Paid' && j.datePaid && j.datePaid>=startDateStr && j.datePaid<=endDateStr && j.date<startDateStr);
-  if (technicianFilter) latePayments = latePayments.filter(j=>j.technician===technicianFilter);
-  const latePaymentsTotal = round2(latePayments.reduce((s,j)=>s+jobTotalCollected(j),0));
-  return { startDateStr, endDateStr, jobs, equip, overview, jobTypeStats, unpaidByTech, commissionByTech, revenue, revenueExGst, remainingAfterTech, latePayments, latePaymentsTotal };
-}
-function computeRevenueByWeekday(jobs){
-  const labels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const totals = [0,0,0,0,0,0,0];
-  jobs.forEach(j => { totals[parseLocalDate(j.date).getDay()] += Number(j.amount)||0; });
-  return labels.map((label,i)=>({label, revenue: round2(totals[i])}));
-}
 function computeRevenueByWeekInRange(data, startDateStr, endDateStr, technicianFilter){
   const keys = []; const seen = new Set();
   let d = parseLocalDate(startDateStr);
@@ -2614,54 +2376,6 @@ function computeRevenueByWeekInRange(data, startDateStr, endDateStr, technicianF
     d.setDate(d.getDate()+7);
   }
   return keys.map(k => ({ label: weekOf(k).label, revenue: round2(computeWeek(data, k, technicianFilter).jobs.reduce((s,j)=>s+j.amount,0)) }));
-}
-const WEEKDAY_LABEL_TO_DOW = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 };
-function worksOnDay(emp, dow){
-  if (!emp || !Array.isArray(emp.workingDays)) return true; // no restriction configured = assume every day
-  return emp.workingDays.includes(dow);
-}
-function computeInsights(data, range, rangeData, technicianFilter){
-  const insights = []; const jobs = rangeData.jobs;
-  if (!jobs.length) return insights;
-  let byDay = computeRevenueByWeekday(jobs).filter(d=>d.revenue>0);
-  if (technicianFilter) {
-    const emp = data.employees.find(e=>e.name===technicianFilter);
-    byDay = byDay.filter(d => worksOnDay(emp, WEEKDAY_LABEL_TO_DOW[d.label]));
-  }
-  if (byDay.length>1) {
-    const best = byDay.reduce((a,b)=>b.revenue>a.revenue?b:a);
-    const worst = byDay.reduce((a,b)=>b.revenue<a.revenue?b:a);
-    insights.push({ title:`${best.label} is your strongest day`, detail:`${fmtMoney(best.revenue)} in revenue this period — consider concentrating scheduling or marketing around ${best.label}s.` });
-    if (worst.label!==best.label) insights.push({ title:`${worst.label} is your slowest day`, detail:`Only ${fmtMoney(worst.revenue)} — worth checking if that's by design or a missed opportunity.` });
-  }
-  const unpaidEntries = Object.entries(rangeData.unpaidByTech).sort((a,b)=>b[1]-a[1]);
-  if (unpaidEntries.length) {
-    const [tech,count] = unpaidEntries[0];
-    insights.push({ title:`${tech} has the most unpaid invoices`, detail:`${count} unpaid job${count>1?'s':''} this period — worth a follow-up call.` });
-  }
-  const spanDays = dateSpanDays(range.start, range.end);
-  const prevEnd = fmtLocal(new Date(parseLocalDate(range.start).getTime() - 86400000));
-  const prevStartDate = parseLocalDate(range.start); prevStartDate.setDate(prevStartDate.getDate()-spanDays);
-  const prevRange = computeRange(data, fmtLocal(prevStartDate), prevEnd, technicianFilter);
-  if (prevRange.revenue > 0) {
-    const pct = round2(((rangeData.revenue - prevRange.revenue)/prevRange.revenue)*100);
-    if (Math.abs(pct) >= 5) insights.push({ title: pct>0 ? `Revenue is up ${pct}% vs. the previous period` : `Revenue is down ${Math.abs(pct)}% vs. the previous period`, detail:`${fmtMoney(rangeData.revenue)} vs ${fmtMoney(prevRange.revenue)} in the prior ${spanDays}-day period.` });
-  }
-  const typeStats = {};
-  jobs.forEach(j => { const t=j.jobType; if(!typeStats[t]) typeStats[t]={count:0, profit:0}; typeStats[t].count++; typeStats[t].profit += (Number(j.amount)||0) - jobCommissionAmount(j); });
-  const typeEntries = Object.entries(typeStats).map(([t,v])=>[t, v.profit/v.count]);
-  if (typeEntries.length>1) {
-    const [bestType, bestAvg] = typeEntries.reduce((a,b)=>b[1]>a[1]?b:a);
-    insights.push({ title:`${bestType} jobs are your most profitable per job`, detail:`Averaging ${fmtMoney(bestAvg)} profit after commission per job this period.` });
-  }
-  return insights.slice(0,5);
-}
-function renderInsights(insights){
-  if (!insights.length) return emptyState('Not enough data yet', 'Insights will appear here once there are a few jobs in this period.');
-  return insights.map(i => `<div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft)">
-    <span style="width:6px;height:6px;border-radius:99px;background:var(--primary);margin-top:6px;flex:none"></span>
-    <div><div style="font-weight:600;font-size:13px">${esc(i.title)}</div><div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(i.detail)}</div></div>
-  </div>`).join('');
 }
 function renderBarGroup(items, opts){
   // opts.fmt lets a caller render plain counts instead of money (the CRM channel chart) — defaults to
@@ -2703,18 +2417,6 @@ function renderSparkline(series, opts){
     <div style="display:flex;gap:2px;margin-top:3px;font-size:9.5px;color:var(--ink-faint)">${labelsRow}</div>
   </div>`;
 }
-function renderProgressBar(value, target, opts){
-  opts = opts || {};
-  const pct = target > 0 ? Math.max(0, Math.min(100, Math.round((value/target)*100))) : 0;
-  const color = opts.color || 'var(--good)';
-  const label = opts.ariaLabel || `${pct}% of target`;
-  return `<div style="margin-top:10px" role="img" aria-label="${esc(label)}">
-    <div style="height:6px;border-radius:99px;background:var(--surface-3);overflow:hidden">
-      <div style="height:100%;width:${pct}%;background:${color};border-radius:99px;transition:width .2s"></div>
-    </div>
-    <div style="font-size:10.5px;color:var(--ink-faint);margin-top:4px">${pct}% of amount owed paid out</div>
-  </div>`;
-}
 
 /* ── CRM: leads & customers ──────────────────────────────────────────────
    The main sales board. A lead moves New → Follow-up → Won/Lost, and the three
@@ -2734,7 +2436,6 @@ const LEAD_STAGE_PICKABLE = ['New','Chasing','Quoted','Follow-up','Booked','Lost
 const LEAD_STAGE_LABEL = { New:'New lead', Chasing:'Chasing', Quoted:'Quoted', 'Follow-up':'Follow up', Booked:'Booked', Won:'Won', Lost:'Lost' };
 function stageLabel(s){ return LEAD_STAGE_LABEL[s] || s; }
 const LEAD_STATUS_COLOR = { New:'var(--primary)', Chasing:'var(--accent)', Quoted:'var(--primary-teal)', 'Follow-up':'var(--warn)', Booked:'var(--good)', Won:'var(--good)', Lost:'var(--ink-faint)', 'Not Relevant':'var(--ink-faint)' };
-const LEAD_STATUS_TONE = { New:'neutral', Chasing:'warn', Quoted:'warn', 'Follow-up':'warn', Booked:'good', Won:'good', Lost:'neutral', 'Not Relevant':'neutral' };
 const LEAD_SOURCE_COLOR = { 'Google Ads':'var(--primary)', 'Meta Ads':'var(--accent)', 'Google Maps':'var(--ink-faint)', Organic:'var(--good)', Unknown:'var(--ink-faint)', 'Phone Call':'var(--warn)' };
 // Stages that must always carry a FUTURE follow-up date.
 const STAGES_NEED_DATE = ['Quoted','Follow-up'];
@@ -4409,7 +4110,7 @@ function renderFinanceWeekly(data, weekKey, weeks, allTechs, techFilter, canBulk
       return `<div class="jobtype-chip"><span>${t}</span><span class="n">${items.length} · ${fmtMoney(avg)} avg · ${fmtMoney(total)}</span></div>`;
     }).join('');
     businessOverview = `
-      <div class="section-title">Business Overview</div>
+      <div class="section-title">Business Overview <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">jobs done this week · money in = paid jobs, incl. GST · technicians' pay is by the week the customer paid, see Payroll</span></div>
       <div class="grid-4">
         <div class="card"><div class="stat-label">Cash</div><div class="stat-value">${drill(fmtMoney(w.overview.cash), 'Paid in cash — jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus==='Paid' && j.paymentMethod==='Cash'))}</div><div class="stat-sub">GST: ${fmtMoney(w.overview.gstCash)}</div></div>
         <div class="card"><div class="stat-label">Bank Transfer</div><div class="stat-value">${drill(fmtMoney(w.overview.bankTransfer), 'Paid by bank transfer — jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus==='Paid' && j.paymentMethod==='Bank Transfer'))}</div></div>
@@ -4579,13 +4280,6 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   const avgDaysToPayment = paidWithDates.length ? Math.round(paidWithDates.reduce((s,j)=>s+daysBetween(parseLocalDate(j.date), parseLocalDate(j.datePaid)), 0) / paidWithDates.length) : null;
   const outstanding = round2(jobs.filter(j=>j.paymentStatus!=='Paid').reduce((s,j)=>s+(Number(j.amount)||0), 0));
 
-  // Quote → job pipeline: of the quotes decided this period, how many actually turned into a sale
-  // (Approved) vs. fell through (Rejected) — "No Response"/still-open quotes aren't a decision yet,
-  // same in/out logic as the lead close rate above.
-  const quotesInRange = (data.quotes||[]).filter(q => q.date>=startDateStr && q.date<=endDateStr);
-  const quotesApproved = quotesInRange.filter(q=>q.status==='Approved').length;
-  const quotesRejected = quotesInRange.filter(q=>q.status==='Rejected').length;
-  const quoteDecided = quotesApproved + quotesRejected;
 
   // Lead -> job funnel. "Contacted"/"Quoted"/"Job done" are all proxies from data that already
   // exists rather than new tracked stages, on purpose — no new fields, no new discipline required
@@ -4642,8 +4336,6 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
     overallCloseRate: totalDecided ? Math.round((totalBooked/totalDecided)*100) : null,
     reviewRate: jobs.length ? Math.round((totalReviewTaken/jobs.length)*100) : null,
     avgDaysToPayment, outstanding,
-    quoteConversionRate: quoteDecided ? Math.round((quotesApproved/quoteDecided)*100) : null,
-    quotesApproved, quotesRejected,
     funnel: { leads: contacts.length, contacted: funnelContacted, priceGiven: funnelPriceGiven, booked: totalBooked, jobDone: funnelJobDone },
     outcome: (() => { const lost = contacts.filter(c => leadStage(c)==='Lost').length; return { leads: contacts.length, won: funnelJobDone, lost, open: contacts.length - funnelJobDone - lost }; })(),
     lossReasons, speedToLead,
@@ -4675,52 +4367,6 @@ function deltaBadge(curr, prev){
 function roasTone(roas){ if (roas===null) return 'neutral'; return roas>=3 ? 'good' : (roas>=1.5 ? 'warn' : 'bad'); }
 function closeRateTone(rate){ if (rate===null) return 'neutral'; return rate>=50 ? 'good' : (rate>=25 ? 'warn' : 'bad'); }
 function marginTone(margin){ if (margin===null) return 'neutral'; return margin>=40 ? 'good' : (margin>=20 ? 'warn' : 'bad'); }
-function perfDetailRow(label, b){
-  return `<tr><td>${esc(label)}</td><td class="num">${b.count}</td><td class="num">${fmtMoney(b.avgDeal)}</td><td class="num">${b.margin===null?'—':b.margin+'%'}</td><td class="num" style="font-weight:600">${fmtMoney(b.profit)}</td></tr>`;
-}
-function perfBarSection(title, buckets, colorRevenue, colorProfit){
-  const revBars = renderBarGroup(buckets.map(([label,b]) => ({label, value:b.revenue, color:colorRevenue})));
-  const profitBars = renderBarGroup(buckets.map(([label,b]) => ({label, value:b.profit, color:colorProfit})));
-  const rows = buckets.map(([label,b]) => perfDetailRow(label, b)).join('');
-  return `
-    <div class="section-title">${esc(title)}</div>
-    <div class="grid-2">
-      <div class="card stat-card" style="--stat-accent:${colorRevenue}"><div class="stat-label">Revenue</div>${revBars}</div>
-      <div class="card stat-card" style="--stat-accent:${colorProfit}"><div class="stat-label">Profit</div>${profitBars}</div>
-    </div>
-    <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th></th><th>Jobs</th><th>Avg Deal</th><th>Margin</th><th>Profit</th></tr></thead><tbody>${rows}</tbody></table></div>
-  `;
-}
-function channelCard(name, ch){
-  const roasBadge = ch.spend===null ? pill('neutral','not synced') : (ch.roas===null ? pill('neutral','no revenue yet') : pill(roasTone(ch.roas), `${ch.roas}× ROAS`));
-  return `<div class="card stat-card" style="--stat-accent:${LEAD_SOURCE_COLOR[name]||'var(--ink-faint)'}">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-      <div class="stat-label">${esc(name)}</div>
-      ${roasBadge}
-    </div>
-    <div class="stat-value" style="font-size:26px">${ch.leads}<span style="font-size:12.5px;font-weight:500;color:var(--ink-soft)"> leads</span></div>
-    <div style="margin-top:4px">${pill(closeRateTone(ch.closeRate), (ch.closeRate===null?'—':ch.closeRate+'%')+' close rate')}</div>
-    <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line-soft)">
-      <div class="kv"><span>Revenue</span><span class="v">${fmtMoney(ch.revenue)}</span></div>
-      <div class="kv"><span>Ad Spend</span><span class="v">${ch.spend===null?'<span class="hint">not synced</span>':fmtMoney(ch.spend)}</span></div>
-      ${ch.spend!==null ? `<div class="kv"><span>Cost / Lead</span><span class="v">${ch.costPerLead===null?'—':fmtMoney(ch.costPerLead)}</span></div><div class="kv"><span>Cost / Booked Job</span><span class="v">${ch.costPerBookedJob===null?'—':fmtMoney(ch.costPerBookedJob)}</span></div>` : ''}
-    </div>
-  </div>`;
-}
-function techLeaderboard(entries){
-  if (!entries.length) return emptyState('No jobs this period');
-  const max = Math.max(...entries.map(t=>Math.max(t.profit,0)), 0.0001);
-  return entries.map(t => {
-    const pct = Math.max(2, Math.round((Math.max(t.profit,0)/max)*100));
-    return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-soft)">
-      <div style="width:100px;flex:none">${techTag(t.name)}</div>
-      <div style="flex:1;min-width:60px"><div style="height:18px;border-radius:5px;background:var(--surface-3);overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--good);border-radius:5px;transition:width .2s"></div></div></div>
-      <div class="mono" style="width:88px;text-align:end;font-weight:600;flex:none">${fmtMoney(t.profit)}</div>
-      <div style="width:56px;text-align:end;color:var(--ink-soft);font-size:11.5px;flex:none">${t.count} jobs</div>
-      <div style="width:64px;text-align:end;flex:none">${t.reviewRate===null?'<span class="hint">—</span>':pill(t.reviewRate>=70?'good':(t.reviewRate>=40?'warn':'bad'), t.reviewRate+'%')}</div>
-    </div>`;
-  }).join('');
-}
 function funnelStage(label, count, totalForPct, color, clickJs){
   const pct = totalForPct ? Math.round((count/totalForPct)*100) : 0;
   return `<div style="margin-bottom:10px">
@@ -4812,7 +4458,6 @@ function adsTable(headers, rows, empty){
 }
 function adsRow(cells){ return `<tr>${cells.map((c,i)=>`<td${c&&c.n?' style="text-align:end;font-variant-numeric:tabular-nums"':''}>${c&&c.n!==undefined?c.h:c}</td>`).join('')}</tr>`; }
 const adsNum = h => ({ n:1, h });
-function adsSection(title, sub, body){ return `<div style="margin-top:26px"><h2 style="font-size:16px;margin:0 0 4px">${esc(title)}</h2><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:10px">${sub}</div>${body}</div>`; }
 function adsBarCell(v, max, colour){ const w = max>0 ? Math.max(2, Math.round(v/max*100)) : 0; return `<div style="display:flex;align-items:center;gap:8px;min-width:120px"><div style="height:8px;width:${w}%;max-width:100px;background:${colour||'var(--primary)'};border-radius:2px"></div></div>`; }
 
 // ── Google Ads board ───────────────────────────────────────────────────────────────────────────────
@@ -5342,10 +4987,18 @@ function payrollDaysTable(h){
 }
 
 function renderPayroll(profile, data){
-  if (profile.role==='owner' || profile.role==='manager') return renderPayrollBoard(profile, data);
+  if (profile.role==='owner' || profile.role==='manager') {
+    // Owners can open any worker's own pay page from here (what used to be the separate Employee Views page).
+    const people = [...payrollCommissionPeople(data), ...payrollHourlyPeople(data)];
+    const viewAs = people.includes(UI.payroll.viewAs) ? UI.payroll.viewAs : null;
+    const chips = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="week-chip ${viewAs?'':'active'}" onclick="UI.payroll.viewAs=null;render()">Payroll board</button>${people.map(p => `<button class="week-chip ${p===viewAs?'active':''}" onclick="UI.payroll.viewAs='${jsStr(p)}';render()" title="What ${esc(p)} sees on their own pay page">👁 ${esc(p)}'s view</button>`).join('')}</div>`;
+    return viewAs
+      ? `<div class="page-head"><div><h1 class="page-title">Payroll</h1><div class="page-sub">Viewing as ${esc(viewAs)} — exactly what they see on their own pay page</div></div></div>${chips}${renderMyPay(profile, data, viewAs, true)}`
+      : renderPayrollBoard(profile, data, chips);
+  }
   return renderMyPay(profile, data, profile.technicianName || profile.fullName, false);
 }
-function renderPayrollBoard(profile, data){
+function renderPayrollBoard(profile, data, viewChips){
   const weekKey = payrollWeekKeyFromUI(); const wk = payrollWeekOf(weekKey);
   const people = payrollCommissionPeople(data);
   // An inactive technician still shows up for a week in which one of their jobs got paid.
@@ -5402,6 +5055,7 @@ function renderPayrollBoard(profile, data){
     <div class="page-head">
       <div><h1 class="page-title">Payroll</h1><div class="page-sub">Weekly pay, Sunday → Saturday · commission counts in the week the customer paid</div></div>
     </div>
+    ${viewChips||''}
     ${renderPayrollWeekNav(weekKey)}
     <div class="grid-4">
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Technician commissions</div><div class="stat-value">${payMoney(commTotal)}</div><div class="stat-sub">${comm.reduce((s,c)=>s+c.lines.length,0)} paid jobs this week</div></div>
@@ -5479,17 +5133,6 @@ function renderMyPay(profile, data, person, isPreview){
     ${isPreview ? `<div style="margin-top:10px"><button class="btn small" onclick="copyPayMessage('commission','${jsStr(person)}')">📋 Copy pay message</button></div>` : ''}
   `;
 }
-function renderEmployeeViews(profile, data){
-  const people = [...payrollCommissionPeople(data), ...payrollHourlyPeople(data)];
-  const person = people.includes(UI.employeeViews.person) ? UI.employeeViews.person : people[0];
-  const chips = people.map(p => `<button class="week-chip ${p===person?'active':''}" onclick="UI.employeeViews.person='${jsStr(p)}';render()">${esc(p)}</button>`).join('');
-  return `
-    <div class="page-head"><div><h1 class="page-title">Employee Views</h1><div class="page-sub">What each worker sees on their own pay page — visible to Ofek and Noam only</div></div></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">${chips}</div>
-    ${person ? `<div class="section-title" style="margin-top:10px">Viewing as ${esc(person)}</div>${renderMyPay(profile, data, person, true)}` : emptyState('No workers yet', 'Technicians and hourly staff appear here')}
-  `;
-}
-
 function setSalesLogDate(v){ if (!v) return; UI.payroll.logDate = v; UI.payroll.week = payrollWeekOf(v).key; render(); }
 async function saveSalesLog(person){
   const profile = getCurrentProfile();
@@ -5796,7 +5439,7 @@ function renderOutstanding(profile, data){
 }
 
 /* ── reminders ───────────────────────────────────────────────────────── */
-const REMINDER_ICONS = { unpaid:'💵', commission:'🧾', refund:'♻️', equipment:'🧰', quote:'✎', followup:'📞', 'repeat-service':'🔁' };
+const REMINDER_ICONS = { unpaid:'💵', commission:'🧾', refund:'♻️', equipment:'🧰', followup:'📞', 'repeat-service':'🔁' };
 function deleteManualReminder(id, rowEl){
   confirmAction('Delete this reminder?', ()=>{
     animateRowRemove(rowEl, ()=>{
@@ -5822,8 +5465,8 @@ function dismissLeadFollowup(contactId, rowEl){
     });
   });
 }
-// Ofek's call: every reminder gets a delete option, including the ones computed live from jobs/quotes/
-// equipment (unpaid invoices, stale quotes, commission owed, pending reimbursements) — there's no
+// Ofek's call: every reminder gets a delete option, including the ones computed live from jobs/payroll/
+// equipment (unpaid invoices, commission owed, pending reimbursements) — there's no
 // standalone record for those, so "delete" means permanently dismiss that specific source record's
 // reminder, tracked by a stable key (e.g. "unpaid:<jobId>"). It stays dismissed even if the underlying
 // condition is still unresolved — that's the trade-off of "delete" rather than "snooze," by request.
@@ -5839,7 +5482,7 @@ function dismissReminder(key, rowEl){
   });
 }
 // Where clicking a reminder should take you — a lead follow-up goes to that live conversation;
-// everything else (unpaid invoices, commission owed, parts/equipment refunds, stale quotes) goes to
+// everything else (unpaid invoices, commission owed, parts/equipment refunds) goes to
 // the screen that actually owns that record, since there's no per-record page for those yet.
 // Clicking a reminder marks it "read" — it stays in the list (Delete is the only way to
 // actually remove one, by request), but it stops counting toward the sidebar's unread badge.
@@ -5863,14 +5506,13 @@ function markReminderReadOnly(readKey){
 function goToReminderTarget(type, contactId, readKey, weekKey){
   markReminderRead(readKey);
   const pr = getCurrentProfile(); const can = sec => !!pr && canViewSection(pr, sec);
-  const refId = String(readKey||'').split(':').slice(1).join(':');   // "quote:<id>", "repeat-service:<jobId>", …
+  const refId = String(readKey||'').split(':').slice(1).join(':');   // "repeat-service:<jobId>", …
   if (type==='commission' && can('payroll')) { UI.tab='payroll'; if (weekKey) UI.payroll.week = weekKey; render(); return; }
   // A lead follow-up, an unpaid invoice or a re-offer opens that customer when they're linked and this person sees the CRM.
   if ((type==='followup' || type==='unpaid' || type==='repeat-service') && contactId && can('crm')) { goToLeadConversation(contactId); return; }
   if ((type==='unpaid' || type==='refund') && can('outstanding')) { UI.tab='outstanding'; render(); return; }
   if (type==='repeat-service' && refId && can('jobs')) { goToJobFromSearch(refId); return; }
   if (type==='equipment' && can('reference')) { UI.tab='reference'; UI.reference.tab='equipmentSpend'; render(); return; }
-  if (type==='quote' && can('quotes')) { UI.tab='quotes'; render(); if (refId) openQuoteModal(refId); return; }
   render();   // nowhere this person is allowed to go — it's marked read and stays here
 }
 function renderReminders(profile, data){
@@ -5938,18 +5580,15 @@ function followupsDueRows(data){
     kind:'Follow-up', id:c.id, raw:c, date:c.nextFollowUp, title:`${c.fullName} — ${stageLabel(leadStage(c))}`,
     meta:`${c.division}${c.phone?' · '+c.phone:''}${c.followupNote?' · '+c.followupNote:''}`, tone: c.nextFollowUp < t ? 'bad' : 'warn' }));
 }
-// The row's title opens what the row is about: the customer for an unpaid job or a follow-up, the quote, the task.
+// The row's title opens what the row is about: the customer for an unpaid job or a follow-up, or the task.
 function openItemTitle(r){
-  if (r.kind==='Unpaid Job') return `<span class="xlink" onclick="openJobCustomer('${r.id}')">${esc(r.title)}</span>`;
   if (r.kind==='Follow-up') return `<span class="xlink" onclick="goToLeadConversation('${r.id}')">${esc(r.title)}</span>`;
-  if (r.kind==='Quote') return `<span class="xlink" onclick="openQuoteModal('${r.id}')">${esc(r.title)}</span>`;
   if (r.kind==='Task') return `<span class="xlink" onclick="openTaskModal('${r.id}')">${esc(r.title)}</span>`;
   return esc(r.title);
 }
 function openItemActivityButton(r){
   if (r.kind==='Follow-up') return `<button class="btn ghost small" onclick="goToLeadConversation('${r.id}')">Open card</button>`;
   if (r.kind==='Task') return `<button class="btn ghost small" data-activity-count="${r.id}" onclick="openTaskActivityModal('${r.id}')">💬 ${taskActivityCount(r.raw)}</button>`;
-  if (r.kind==='Quote') return `<button class="btn ghost small" onclick="openQuoteActivityModal('${r.id}')">💬 ${(r.raw.updates||[]).length}</button>`;
   return `<button class="btn ghost small" onclick="openJobActivityModal('${r.id}')">💬 ${recordActivityCount(r.raw)}</button>`;
 }
 function renderOpenItemsMixedList(data){
@@ -5957,17 +5596,10 @@ function renderOpenItemsMixedList(data){
   const rows = [];
   // Aggregates open tasks from EVERY board — Ron's, the owner's Mine, and every individual
   // technician's personal board — since data.tasks already holds all boards together (board-filtering
-  // only happens at the Tasks-page render layer, not here), plus quotes-in-progress and unpaid jobs below.
+  // only happens at the Tasks-page render layer, not here), plus follow-ups due and unpaid jobs below.
   data.tasks.filter(t=>t.status!=='Done').forEach(t => {
     rows.push({ kind:'Task', id:t.id, raw:t, date: t.due||null, title: t.title, meta: `${taskBoardLabel(t.board)} · ${t.status}${t.client?' · '+t.client:''}${t.priority?' · '+t.priority+' priority':''}`, tone: t.priority==='Urgent'?'bad':(t.priority==='High'?'warn':'neutral') });
   });
-  data.quotes.filter(q=>['In Discussion','Waiting for Reply'].includes(q.status)).forEach(q => {
-    rows.push({ kind:'Quote', id:q.id, raw:q, date: q.date, title: `${q.customer}`, meta: `${q.status}${q.amount?' · '+fmtMoney(q.amount):''}${q.nextAction?' · next: '+q.nextAction:''}`, tone:'warn' });
-  });
-  data.jobs.filter(j=>j.paymentStatus!=='Paid').forEach(j => {
-    const age = daysBetween(parseLocalDate(j.date), today);
-    rows.push({ kind:'Unpaid Job', id:j.id, raw:j, date: j.date, title: `${j.customerName} — invoice #${j.invoiceNumber||'—'}`, meta: `${j.technician} · ${fmtMoney(jobTotalCollected(j))} incl. GST · ${age} days since the job${jobIsLate(j, data)?' · late':''}`, tone: jobIsLate(j, data)?'bad':'warn' });
-  });
   followupsDueRows(data).forEach(r => rows.push(r));
   rows.sort((a,b) => (a.date||'9999-99-99').localeCompare(b.date||'9999-99-99'));
   return rows.length ? rows.map(r => `
@@ -5977,20 +5609,13 @@ function renderOpenItemsMixedList(data){
       <td class="mono">${r.date?fmtDateShort(r.date):'—'}</td>
       <td>${pill(r.tone, r.tone==='bad'?'Overdue':(r.tone==='warn'?'Open':'—'))}</td>
       <td>${openItemActivityButton(r)}</td>
-    </tr>`).join('') : `<tr><td colspan="5">${emptyState('Nothing open right now','Every task, quote and job is settled ✓','✓')}</td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="5">${emptyState('Nothing open right now','Every task and follow-up is done ✓','✓')}</td></tr>`;
 }
 function renderOpenItemsNonTaskList(data){
-  // Quotes + unpaid jobs only — tasks live on the calendar instead. Kept visible under the calendar
-  // too (not List-view-exclusive), since a quote/unpaid job can't sensibly plot on a task calendar.
+  // Follow-ups due + unpaid jobs — tasks live on the calendar instead. Kept visible under the calendar
+  // too (not List-view-exclusive), since these can't sensibly plot on a task calendar.
   const today = parseLocalDate(todayStr());
   const rows = [];
-  data.quotes.filter(q=>['In Discussion','Waiting for Reply'].includes(q.status)).forEach(q => {
-    rows.push({ kind:'Quote', id:q.id, raw:q, date: q.date, title: `${q.customer}`, meta: `${q.status}${q.amount?' · '+fmtMoney(q.amount):''}${q.nextAction?' · next: '+q.nextAction:''}`, tone:'warn' });
-  });
-  data.jobs.filter(j=>j.paymentStatus!=='Paid').forEach(j => {
-    const age = daysBetween(parseLocalDate(j.date), today);
-    rows.push({ kind:'Unpaid Job', id:j.id, raw:j, date: j.date, title: `${j.customerName} — invoice #${j.invoiceNumber||'—'}`, meta: `${j.technician} · ${fmtMoney(jobTotalCollected(j))} incl. GST · ${age} days since the job${jobIsLate(j, data)?' · late':''}`, tone: jobIsLate(j, data)?'bad':'warn' });
-  });
   followupsDueRows(data).forEach(r => rows.push(r));
   rows.sort((a,b) => (a.date||'9999-99-99').localeCompare(b.date||'9999-99-99'));
   return rows.length ? rows.map(r => `
@@ -6000,21 +5625,32 @@ function renderOpenItemsNonTaskList(data){
       <td class="mono">${r.date?fmtDateShort(r.date):'—'}</td>
       <td>${pill(r.tone, r.tone==='bad'?'Overdue':(r.tone==='warn'?'Open':'—'))}</td>
       <td>${openItemActivityButton(r)}</td>
-    </tr>`).join('') : `<tr><td colspan="5">${emptyState('Nothing open right now','Every quote and job is settled ✓','✓')}</td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="5">${emptyState('No follow-ups due','Nothing to chase today ✓','✓')}</td></tr>`;
+}
+// Unpaid invoices have one home (Late to pay / Outstanding) — Open Tasks shows a single line pointing there
+// instead of a second copy of the list.
+function openItemsUnpaidLine(profile, data){
+  const unpaid = (data.jobs||[]).filter(j => j.paymentStatus!=='Paid'); if (!unpaid.length) return '';
+  const late = unpaid.filter(j => jobIsLate(j, data));
+  const total = round2(unpaid.reduce((s,j)=>s+jobTotalCollected(j),0));
+  const where = canViewSection(profile,'outstanding') ? `<button class="btn small" onclick="goTab('outstanding')">Open the list →</button>` : '';
+  return `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px"><span>💵 <b>${unpaid.length} unpaid job${unpaid.length===1?'':'s'}</b> · ${fmtMoney(total)} incl. GST${late.length?` · <span style="color:var(--bad)">${late.length} late</span>`:''}</span>${where}</div>`;
 }
 function renderOpenItems(profile, data){
   const view = UI.openItems.view || 'list';
   const viewToggle = `<button class="btn small ${view==='list'?'primary':''}" onclick="setOpenItemsView('list')">List</button><button class="btn small ${view==='calendar'?'primary':''}" onclick="setOpenItemsView('calendar')">Calendar</button>`;
   if (view==='calendar') {
     return `
-      <div class="page-head"><div><h1 class="page-title">Open Tasks</h1><div class="page-sub">Tasks on a calendar, plus live quotes and unpaid jobs below</div></div><div>${viewToggle}</div></div>
+      <div class="page-head"><div><h1 class="page-title">Open Tasks</h1><div class="page-sub">Tasks on a calendar, plus follow-ups due below</div></div><div>${viewToggle}</div></div>
+      ${openItemsUnpaidLine(profile, data)}
       ${renderOpenTasksCalendarBlock(data)}
-      <div class="section-title">Quotes &amp; unpaid jobs</div>
+      <div class="section-title">Follow-ups due</div>
       <div class="table-wrap"><table><thead><tr><th>Type</th><th class="wrap">Item</th><th>Date</th><th>Status</th><th>Activity</th></tr></thead><tbody>${renderOpenItemsNonTaskList(data)}</tbody></table></div>
     `;
   }
   return `
-    <div class="page-head"><div><h1 class="page-title">Open Tasks</h1><div class="page-sub">One list of everything still needing action — open tasks from every board (Ron's, Mine, and each technician's), live quotes and unpaid jobs</div></div><div>${viewToggle}</div></div>
+    <div class="page-head"><div><h1 class="page-title">Open Tasks</h1><div class="page-sub">One list of everything still needing action — open tasks from every board (Ron's, Mine, and each technician's) and follow-ups due</div></div><div>${viewToggle}</div></div>
+    ${openItemsUnpaidLine(profile, data)}
     <div class="table-wrap"><table><thead><tr><th>Type</th><th class="wrap">Item</th><th>Date</th><th>Status</th><th>Activity</th></tr></thead><tbody>${renderOpenItemsMixedList(data)}</tbody></table></div>
   `;
 }
@@ -6763,45 +6399,6 @@ function openEmployeeActivityModal(empId){
   const emp = STATE.data.employees.find(e=>e.id===empId); if (!emp) return;
   openRecordActivityModal('employee', empId, emp.name, 'Commission-rate history + notes');
 }
-function renderQuoteQuickUpdates(quoteId){
-  const q = STATE.data.quotes.find(x=>x.id===quoteId); if (!q) return '';
-  const entries = (q.updates||[]).slice().sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
-  return entries.length ? entries.map(u => `<div style="padding:8px 0;border-bottom:1px solid var(--line-soft)">
-    <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--ink-soft);margin-bottom:3px"><b style="color:var(--ink)">${esc(u.author)}</b><span>${new Date(u.createdAt).toLocaleString('en-AU')}</span></div>
-    <div style="font-size:12.5px">${esc(u.text)}</div>
-  </div>`).join('') : emptyState('No updates yet');
-}
-function postQuickQuoteUpdate(quoteId){
-  const input = document.getElementById('quick-update-input');
-  const text = input.value.trim(); if (!text) return;
-  const q = STATE.data.quotes.find(x=>x.id===quoteId); if (!q) return;
-  const currentProfile = getCurrentProfile();
-  if (!q.updates) q.updates = [];
-  const qEntry = { id:uid(), author: currentProfile?.fullName || 'Unknown', text, createdAt: new Date().toISOString() };
-  q.updates.push(qEntry);
-  db.recordUpdates.append('quotes', 'quotes', q.id, { ...qEntry });
-  input.value = '';
-  document.getElementById('quick-activity-list').innerHTML = renderQuoteQuickUpdates(quoteId);
-}
-function openQuoteActivityModal(quoteId){
-  const q = STATE.data.quotes.find(x=>x.id===quoteId); if (!q) return;
-  openModal(`
-    <div class="modal-back" onclick="if(event.target===this) closeModal()">
-      <div class="modal" style="max-width:480px">
-        <h2>${esc(q.customer)}</h2>
-        <div class="modal-sub">Updates — oldest first</div>
-        <div id="quick-activity-list" style="max-height:45vh;overflow-y:auto">${renderQuoteQuickUpdates(quoteId)}</div>
-        <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-start">
-          <textarea rows="2" id="quick-update-input" placeholder="Post an update…" style="flex:1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();postQuickQuoteUpdate('${quoteId}');}"></textarea>
-          <button type="button" class="btn small" onclick="postQuickQuoteUpdate('${quoteId}')">Post</button>
-        </div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
-          <button class="btn" onclick="closeModal()">Close</button>
-          <button class="btn primary" onclick="openQuoteModal('${quoteId}')">Open full quote</button>
-        </div>
-      </div>
-    </div>`);
-}
 function renderTaskActivityList(taskId){
   const task = STATE.data.tasks.find(t=>t.id===taskId); if (!task) return '';
   const entries = [
@@ -6845,122 +6442,6 @@ function openTaskActivityModal(taskId){
         </div>
       </div>
     </div>`);
-}
-
-/* ── quotes ──────────────────────────────────────────────────────────── */
-const QUOTE_STATUSES = ['In Discussion','Waiting for Reply','Approved','Rejected','No Response'];
-const QUOTE_STATUS_COLOR = { 'In Discussion':'warn', 'Waiting for Reply':'warn', Approved:'good', Rejected:'bad', 'No Response':'neutral' };
-const SERVICE_TYPES = ['Duct Cleaning','Split Cleaning','Ventilation','Exhaust Fan Cleaning','Vent Repair'];
-const WIN_PROBABILITIES = ['Low','Medium','High'];
-const NEXT_ACTIONS = ['Call','Send Reminder','Wait for Reply'];
-function renderQuotes(profile, data){
-  const list = [...data.quotes].sort((a,b)=>b.date.localeCompare(a.date));
-  const rows = list.length ? list.map(q => `
-    <tr><td class="mono">${fmtDateShort(q.date)}</td><td>${custLink(q.customer)}</td><td class="num">${q.amount?fmtMoney(q.amount):'—'}</td>
-    <td>${(q.serviceTypes||[]).map(s=>pill('neutral',s)).join(' ')||'—'}</td>
-    <td>${statusSelect('quoteStatus', q.id, q.status, QUOTE_STATUSES, v=>QUOTE_STATUS_COLOR[v], v=>v, false)}</td>
-    <td>${q.winProbability?pill(q.winProbability==='High'?'good':q.winProbability==='Medium'?'warn':'neutral', q.winProbability):'—'}</td>
-    <td class="wrap">${q.nextAction?esc(q.nextAction):'—'}</td>
-    <td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openQuoteModal('${q.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteQuote('${q.id}');render()">Delete</button></td></tr>`).join('') : `<tr><td colspan="8">${emptyState('No quotes yet')}</td></tr>`;
-  return `
-    <div class="page-head">
-      <div><h1 class="page-title">Quotes</h1><div class="page-sub">${data.quotes.length} quotes total</div></div>
-      <button class="btn primary" onclick="openQuoteModal(null)">+ New Quote</button>
-    </div>
-    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Customer</th><th>Amount</th><th class="wrap">Service Type</th><th>Status</th><th>Win Prob.</th><th class="wrap">Next Action</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-  `;
-}
-function openQuoteModal(quoteId){
-  const q = quoteId ? STATE.data.quotes.find(x=>x.id===quoteId) : null;
-  const allTechs = technicianNames(STATE.data);
-  const svc = q?.serviceTypes || [];
-  MODAL_QUOTE_UPDATES = q?.updates ? q.updates.map(u=>({...u})) : [];
-  MODAL_QUOTE_ID = quoteId;
-  openModal(`
-    <div class="modal-back" onclick="if(event.target===this) closeModal()">
-      <div class="modal">
-        <h2>${q?'Edit Quote':'New Quote'}</h2>
-        <div class="grid-2">
-          <div class="field"><label>Customer</label><input id="qm-customer" value="${esc(q?.customer||'')}"></div>
-          <div class="field"><label>Date</label><input type="date" id="qm-date" value="${q?.date||todayStr()}"></div>
-          <div class="field"><label>Job Number</label><input id="qm-jobnumber" value="${esc(q?.jobNumber||'')}"></div>
-          <div class="field"><label>Client Number</label><input id="qm-clientnumber" value="${esc(q?.clientNumber||'')}"></div>
-          <div class="field"><label>Email</label><input id="qm-email" value="${esc(q?.email||'')}"></div>
-          <div class="field"><label>Address</label><input id="qm-address" value="${esc(q?.address||'')}"></div>
-          <div class="field"><label>Quoted Amount</label><input type="number" id="qm-amount" value="${q?.amount||0}"></div>
-          <div class="field"><label>Status</label><select id="qm-status">${QUOTE_STATUSES.map(s=>`<option value="${s}" ${q?.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
-        </div>
-        <div class="field" style="margin-top:11px"><label>Service Type (select all that apply)</label>
-          <div class="svc-grid">${SERVICE_TYPES.map((s,i)=>`<label class="checkline"><input type="checkbox" id="qm-svc-${i}" value="${esc(s)}" ${svc.includes(s)?'checked':''}> ${esc(s)}</label>`).join('')}</div>
-        </div>
-        <div class="grid-3" style="margin-top:11px">
-          <div class="field"><label>Win Probability</label><select id="qm-winprob"><option value="">—</option>${WIN_PROBABILITIES.map(s=>`<option value="${s}" ${q?.winProbability===s?'selected':''}>${s}</option>`).join('')}</select></div>
-          <div class="field"><label>Next Action</label><select id="qm-nextaction"><option value="">—</option>${NEXT_ACTIONS.map(s=>`<option value="${s}" ${q?.nextAction===s?'selected':''}>${s}</option>`).join('')}</select></div>
-          <div class="field"><label>Sent?</label><select id="qm-sent"><option value="no" ${!q?.sent?'selected':''}>No</option><option value="yes" ${q?.sent?'selected':''}>Yes</option></select></div>
-        </div>
-        <div class="field" style="margin-top:11px"><label>Next Action Notes</label><textarea rows="2" id="qm-nextactionnotes">${esc(q?.nextActionNotes||'')}</textarea></div>
-        <div class="grid-2" style="margin-top:11px">
-          <div class="field"><label>Technician Quoted</label><select id="qm-techquoted"><option value="">—</option>${allTechs.map(t=>`<option value="${esc(t)}" ${q?.technicianQuoted===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
-          <div class="field"><label>Followed By</label><input id="qm-followedby" value="${esc(q?.followedBy||'')}" placeholder="e.g. Ron"></div>
-        </div>
-        <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="qm-notes">${esc(q?.notes||'')}</textarea></div>
-        <div class="modal-section">Updates / Follow-ups</div>
-        <div class="hint" style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">Supplements Next Action above — a running log, like Monday's Updates panel. Every post is kept; nothing here overwrites an earlier entry.</div>
-        <div id="qm-updates-list" style="max-height:220px;overflow-y:auto">${renderQuoteUpdatesList()}</div>
-        <div style="display:flex;gap:8px;margin-top:8px;align-items:flex-start">
-          <textarea rows="2" id="qm-update-input" placeholder="Post an update…" style="flex:1"></textarea>
-          <button type="button" class="btn small" onclick="postQuoteUpdate()">Post update</button>
-        </div>
-        <div id="modal-error"></div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
-          <button class="btn" onclick="closeModal()">Cancel</button>
-          <button class="btn primary" onclick="saveQuoteModal(${q?`'${q.id}'`:'null'})">Save</button>
-        </div>
-      </div>
-    </div>`);
-}
-function renderQuoteUpdatesList(){
-  if (!MODAL_QUOTE_UPDATES.length) return `<div class="file-hint">No updates yet.</div>`;
-  return MODAL_QUOTE_UPDATES.map(u => `<div style="padding:8px 0;border-bottom:1px solid var(--line-soft)">
-    <div style="display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--ink-soft);margin-bottom:3px"><b style="color:var(--ink)">${esc(u.author)}</b><span>${new Date(u.createdAt).toLocaleString('en-AU')}</span></div>
-    <div style="font-size:13px;white-space:pre-wrap">${esc(u.text)}</div>
-  </div>`).join('');
-}
-function postQuoteUpdate(){
-  const input = document.getElementById('qm-update-input');
-  const text = input.value.trim(); if (!text) return;
-  const currentProfile = getCurrentProfile();
-  const entry = { id:uid(), author: currentProfile?.fullName || 'Unknown', text, createdAt: new Date().toISOString() };
-  MODAL_QUOTE_UPDATES.push(entry);
-  // Posts immediately to the underlying quote record (same pattern as Task Updates), so it survives even
-  // if the rest of the modal is cancelled instead of saved.
-  if (MODAL_QUOTE_ID) {
-    const quote = STATE.data.quotes.find(q=>q.id===MODAL_QUOTE_ID);
-    if (quote) { if (!quote.updates) quote.updates = []; quote.updates.push({...entry}); db.recordUpdates.append('quotes', 'quotes', quote.id, {...entry}); }
-  }
-  input.value = '';
-  document.getElementById('qm-updates-list').innerHTML = renderQuoteUpdatesList();
-}
-async function saveQuoteModal(quoteId){
-  const customer = document.getElementById('qm-customer').value.trim();
-  if (!customer) { modalError('Please enter a customer name'); return; }
-  const serviceTypes = SERVICE_TYPES.filter((s,i)=>document.getElementById('qm-svc-'+i).checked);
-  const values = {
-    customer, date: document.getElementById('qm-date').value, amount: Number(document.getElementById('qm-amount').value)||0,
-    status: document.getElementById('qm-status').value, notes: document.getElementById('qm-notes').value,
-    jobNumber: document.getElementById('qm-jobnumber').value.trim(), clientNumber: document.getElementById('qm-clientnumber').value.trim(),
-    email: document.getElementById('qm-email').value.trim(), address: document.getElementById('qm-address').value.trim(),
-    serviceTypes, winProbability: document.getElementById('qm-winprob').value, nextAction: document.getElementById('qm-nextaction').value,
-    nextActionNotes: document.getElementById('qm-nextactionnotes').value, sent: document.getElementById('qm-sent').value==='yes',
-    technicianQuoted: document.getElementById('qm-techquoted').value, followedBy: document.getElementById('qm-followedby').value.trim(),
-    updates: MODAL_QUOTE_UPDATES.map(u=>({...u})),
-  };
-  if (quoteId) { const { updates, ...fields } = values; db.quotes.update(quoteId, fields); }
-  else {
-    try { await db.quotes.create(values); }
-    catch (err) { return; }   // db.quotes.create() already showed an error toast; leave the modal open so the user can retry
-  }
-  closeModal(); showToast(quoteId?'Quote updated':'Quote added'); render();
 }
 
 /* ── reference (employees / equipment / suppliers / equipment spend) ───── */
@@ -7262,11 +6743,9 @@ async function saveEquipSpendModal(itemId){
 }
 
 /* ── settings ────────────────────────────────────────────────────────── */
-const WORKING_DAY_LABELS = [{dow:1,label:'Mon'},{dow:2,label:'Tue'},{dow:3,label:'Wed'},{dow:4,label:'Thu'},{dow:5,label:'Fri'},{dow:6,label:'Sat'},{dow:0,label:'Sun'}];
 function renderTechnicianSettingsCard(emp){
   const rates = STATE.data.commissionRates[emp.name] || { Aircon:null, Chimney:null, 'Pressure Washing':null, Other:null };
   const allowedTypes = jobTypesForTech(emp.name);
-  const workingDays = Array.isArray(emp.workingDays) ? emp.workingDays : [0,1,2,3,4,5,6];
   return `<div class="card" style="margin-bottom:14px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       ${techTag(emp.name)}
@@ -7277,10 +6756,6 @@ function renderTechnicianSettingsCard(emp){
       ${['Aircon','Chimney','Pressure Washing','Other'].map(jt => `
         <div class="field"><label>${jt}</label><input type="number" min="0" max="100" placeholder="—" value="${rates[jt]!=null?rates[jt]:''}" ${allowedTypes.includes(jt)?'':'disabled'} onchange="updateCommissionRateFromSettings('${esc(emp.name)}','${jt}',this.value)"></div>
       `).join('')}
-    </div>
-    <div class="stat-label" style="margin-bottom:6px">Working days</div>
-    <div style="display:flex;gap:12px;flex-wrap:wrap">
-      ${WORKING_DAY_LABELS.map(d => `<label class="checkline"><input type="checkbox" ${workingDays.includes(d.dow)?'checked':''} onchange="toggleWorkingDay('${emp.id}',${d.dow},this.checked)">${d.label}</label>`).join('')}
     </div>
   </div>`;
 }
@@ -7341,7 +6816,6 @@ function renderSettings(profile){
     <div class="card" style="margin-bottom:14px">
       <div class="grid-3">
         <div class="field"><label>Unpaid reminder threshold (days)</label><input type="number" min="1" value="${s.unpaidReminderDays}" onchange="updateBusinessSetting('unpaidReminderDays', this.value, 'Unpaid reminder threshold')"></div>
-        <div class="field"><label>Stale quote threshold (days)</label><input type="number" min="1" value="${s.quoteStaleDays}" onchange="updateBusinessSetting('quoteStaleDays', this.value, 'Stale quote threshold')"></div>
         <div class="field"><label>GST rate (%)</label><input type="number" min="0" max="100" value="${s.gstRatePercent}" onchange="updateBusinessSetting('gstRatePercent', this.value, 'GST rate')"></div>
       </div>
     </div>
@@ -7414,20 +6888,12 @@ function updateCommissionRateFromSettings(techName, jobType, rawValue){
   const emp = STATE.data.employees.find(e=>e.name===techName);
   if (emp) logEmployeeActivity(emp, actor, `${jobType} commission rate changed from ${before===null?'—':before+'%'} to ${after===null?'—':after+'%'} (via Settings)`);
 }
-function toggleWorkingDay(empId, dow, checked){
-  const emp = STATE.data.employees.find(e=>e.id===empId); if (!emp) return;
-  const actor = getCurrentProfile()?.fullName || 'Unknown';
-  if (!Array.isArray(emp.workingDays)) emp.workingDays = [0,1,2,3,4,5,6];
-  const workingDays = checked ? [...new Set([...emp.workingDays, dow])] : emp.workingDays.filter(d=>d!==dow);
-  db.employees.update(emp.id, { workingDays });
-  logSettingsActivity(actor, `${emp.name}'s working days updated`);
-}
 
 function renderNoAccess(profile){
   return `<div class="card" style="max-width:480px;margin:60px auto;padding:30px;text-align:center">
     <div style="font-size:34px;margin-bottom:10px">🔒</div>
     <h1 style="font-family:'Figtree',sans-serif;font-size:20px;font-weight:700;margin-bottom:8px">You don't have access to any section yet</h1>
-    <p style="color:var(--ink-soft);font-size:14px;line-height:1.7">Hi ${esc(profile.fullName)}, Noam needs to open at least one section for you (Jobs, Finance, Tasks, Quotes, etc.) on his Settings screen. Once he does, that section will automatically appear in your sidebar.</p>
+    <p style="color:var(--ink-soft);font-size:14px;line-height:1.7">Hi ${esc(profile.fullName)}, Noam needs to open at least one section for you (Jobs, Finance, Tasks, etc.) on his Settings screen. Once he does, that section will automatically appear in your sidebar.</p>
   </div>`;
 }
 
@@ -7471,12 +6937,10 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   else if (UI.tab==='adsGoogle') { if (!ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = renderDashGoogle(profile, data, true); }
   else if (UI.tab==='dashboard') { if ((UI.dashboard.view==='google' || UI.dashboard.view==='meta') && !ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = UI.dashboard.view==='google' ? renderDashGoogle(profile, data) : UI.dashboard.view==='meta' ? renderDashMeta(profile, data) : UI.dashboard.view==='leads' ? renderCrmOverview(profile, data) : renderDashboard(profile, data); }
   else if (UI.tab==='payroll') content.innerHTML = renderPayroll(profile, data);
-  else if (UI.tab==='employeeViews') content.innerHTML = renderEmployeeViews(profile, data);
   else if (UI.tab==='outstanding') content.innerHTML = renderOutstanding(profile, data);
   else if (UI.tab==='reminders') content.innerHTML = renderReminders(profile, data);
   else if (UI.tab==='openItems') content.innerHTML = renderOpenItems(profile, data);
   else if (UI.tab==='tasks') content.innerHTML = renderTasks(profile, data);
-  else if (UI.tab==='quotes') content.innerHTML = renderQuotes(profile, data);
   else if (UI.tab==='reference') content.innerHTML = renderReference(profile, data);
   else if (UI.tab==='settings') content.innerHTML = renderSettings(profile);
   if (STATE.loadErrors && STATE.loadErrors.length) content.insertAdjacentHTML('afterbegin', `<div class="card" style="border:1px solid var(--bad);background:var(--bad-soft);margin-bottom:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Some data did not load: ${esc(STATE.loadErrors.join(', '))}.</b> What you see may be incomplete. Don't re-enter anything that looks missing.</div><button class="btn small" onclick="location.reload()">Reload</button></div>`);

@@ -162,11 +162,6 @@ function testComputeBusinessPerformance(sb){
     { date:'2026-09-06', channel:'Meta Ads', spend:120 },
     { date:'2026-09-05', channel:'Google Ads', spend:80 },
   ];
-  sb.STATE.data.quotes = [
-    { date:'2026-09-03', status:'Approved' },
-    { date:'2026-09-04', status:'Rejected' },
-    { date:'2026-09-05', status:'In Discussion' }, // still open — must not count toward conversion
-  ];
   sb.STATE.data.employees = [{ name:'Guy', roles:['Technician'] }, { name:'Dolev', roles:['Technician'] }];
 
   const perf = sb.computeBusinessPerformance(sb.STATE.data, '2026-09-01', '2026-09-10');
@@ -183,7 +178,6 @@ function testComputeBusinessPerformance(sb){
   assertEqual(perf.byChannel['Google Ads'].roas, 6.25, 'computeBusinessPerformance: Google Ads ROAS = revenue/spend');
   assertEqual(perf.byChannel['Meta Ads'].costPerLead, 73.33, 'computeBusinessPerformance: Meta Ads cost/lead = spend/leads');
   assertEqual(perf.byChannel['Google Maps'].spend, null, 'computeBusinessPerformance: a channel with no ad_spend rows stays null, not 0');
-  assertEqual(perf.quoteConversionRate, 50, 'computeBusinessPerformance: quoteConversionRate ignores still-open quotes');
   // job1: 09-05 -> 09-08 = 3 days; job4: 09-08 -> 09-09 = 1 day; job5: 09-09 -> 09-09 = 0 days.
   // (3+1+0)/3 = 1.33, rounded to the nearest whole day by the function itself -> 1.
   assertEqual(perf.avgDaysToPayment, 1, 'computeBusinessPerformance: avgDaysToPayment averages (datePaid - date) across paid jobs with a datePaid, rounded');
