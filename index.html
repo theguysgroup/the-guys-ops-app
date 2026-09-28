@@ -438,7 +438,7 @@ function activeEmployeeNames(data){ return data.employees.filter(e=>e.status==='
    Hourly staff (Ron) are paid hours × rate + a daily bonus tier on that day's total bookings. */
 const PAYROLL_HOURLY_RATE = 10; // AUD per reported hour
 const PAYROLL_BOOKING_BONUS = [ { min:12, bonus:25 }, { min:8, bonus:15 }, { min:5, bonus:10 } ]; // checked top-down
-const PAYROLL_HEBREW_NAMES = { Guy:'גיא', Dolev:'דולב' }; // these people get their pay message in Hebrew; everyone else in English
+const PAYROLL_HEBREW_NAMES = { Guy:'גיא', Dolev:'דולב', Omri:'עומרי' }; // these people get their pay message in Hebrew; everyone else in English
 function bookingBonus(bookings){ const t = PAYROLL_BOOKING_BONUS.find(t => (Number(bookings)||0) >= t.min); return t ? t.bonus : 0; }
 function nextBookingTier(bookings){ const n = Number(bookings)||0; const t = PAYROLL_BOOKING_BONUS.slice().reverse().find(t => n < t.min); return t ? { needed: t.min - n, bonus: t.bonus } : null; }
 function salesLogBookings(l){ return (Number(l.bookingsAircon)||0) + (Number(l.bookingsChimney)||0) + (Number(l.bookingsPw)||0); }
