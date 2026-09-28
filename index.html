@@ -959,7 +959,7 @@ async function loadFromSupabase(){
       referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
       submissionPage:c.submission_page||'',
       lostReason:c.lost_reason||'', stageChangedAt:c.stage_changed_at||null, chasingSince:c.chasing_since||null,
-      chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done,
+      chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null,
     })),
     jobs: (jobs||[]).map(j => ({ ...mapJobRow(j), activityLog: logsFor('job', j.id) })),
     equipmentSpend: (equipmentSpend||[]).map(e => ({ ...mapEquipSpendRow(e), activityLog: logsFor('equipment', e.id) })),
@@ -1018,6 +1018,7 @@ function contactPatchToRow(patch){
     jobDescription:'job_description', linkedJobId:'linked_job_id', starred:'starred',
     lastReadAt:'last_read_at', tags:'tags', messages:'messages',
     lostReason:'lost_reason', stageChangedAt:'stage_changed_at', chasingSince:'chasing_since', chaseCalls:'chase_calls', chaseAlertDone:'chase_alert_done',
+    reopenedAt:'reopened_at',
   };
   // date/timestamptz/uuid columns reject '' outright ("invalid input syntax for type date")
   // where the in-memory shape has always used '' to mean "unset" — null is the real "unset".
@@ -1667,7 +1668,7 @@ function mapContactRow(c){
     referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
     submissionPage:c.submission_page||'',
     lostReason:c.lost_reason||'', stageChangedAt:c.stage_changed_at||null, chasingSince:c.chasing_since||null,
-    chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done,
+    chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null,
   };
 }
 // Live updates (a new lead arriving, someone else's change) redraw the page. Keep whatever a person is in
@@ -2504,22 +2505,40 @@ const STAGES_NEED_DATE = ['Quoted','Follow-up'];
 const PIPELINE_RULES_FROM = '2026-09-27';
 function leadStage(c){
   if (!c) return 'New';
-  if (c.status==='Won' || leadHasJobFast(c)) return 'Won';
+  if (c.status==='Won' || leadWonByJob(c)) return 'Won';
   if (c.status==='Lost' || c.status==='Not Relevant') return 'Lost';
   return LEAD_STATUSES.includes(c.status) ? c.status : 'New';
 }
 // Same answer as contactHasJob (job linked by id, else same customer name), but from an index rebuilt once per render,
 // because the CRM asks it for every lead many times while sorting and drawing.
 const JOB_CACHE = { index:null };
-function leadHasJobFast(c){
+function jobIndex(){
   const jobs = (STATE.data && STATE.data.jobs) || [];
   let ix = JOB_CACHE.index;
   if (!ix || ix.jobs !== jobs || ix.len !== jobs.length) {
-    ix = JOB_CACHE.index = { jobs, len: jobs.length, ids: new Set(jobs.map(j=>j.contactId).filter(Boolean)), names: new Set(jobs.map(j=>(j.customerName||'').trim().toLowerCase()).filter(Boolean)) };
+    // For each customer id / name: the date of their latest job.
+    const ids = new Map(), names = new Map();
+    const keep = (m, k, d) => { if (k && (!m.has(k) || String(d||'') > m.get(k))) m.set(k, String(d||'')); };
+    jobs.forEach(j => { keep(ids, j.contactId, j.date); keep(names, (j.customerName||'').trim().toLowerCase(), j.date); });
+    ix = JOB_CACHE.index = { jobs, len: jobs.length, ids, names };
   }
-  if (c.id && ix.ids.has(c.id)) return true;
+  return ix;
+}
+// The latest job date for this customer (linked by id, else same name), or null when they have no job.
+function leadLatestJobDate(c){
+  const ix = jobIndex();
+  const a = c.id && ix.ids.has(c.id) ? ix.ids.get(c.id) : null;
   const n = (c.fullName||'').trim().toLowerCase();
-  return !!n && ix.names.has(n);
+  const b = n && ix.names.has(n) ? ix.names.get(n) : null;
+  if (a===null) return b; if (b===null) return a;
+  return a > b ? a : b;
+}
+// A job makes a lead Won — except for a returning customer who enquired again: their old jobs don't count,
+// only a job dated on or after the day they came back (Ofek, 28 Sep: "attach to the existing card").
+function leadWonByJob(c){
+  const d = leadLatestJobDate(c);
+  if (d===null) return false;
+  return !c.reopenedAt || d >= localDay(c.reopenedAt);
 }
 // One rule for follow-ups everywhere (CRM cards, "Needs a follow-up today", Open Tasks, Reminders): a lead's
 // follow-up is due once its date is today or earlier and the lead is still being worked (not Booked/Won/Lost).
@@ -3044,7 +3063,8 @@ function newLeadUnhandled(c, now){
   const at = leadArrivedAt(c); if (!at || sydneyWall(new Date(at)).day < NEW_LEAD_ALERT_FROM) return false;
   const atMs = new Date(at).getTime();
   if (c.lastReadAt && new Date(c.lastReadAt).getTime() >= atMs) return false;
-  if ((c.messages||[]).some(m => m.kind==='message' && new Date(m.at).getTime() >= atMs)) return false;
+  // A call/reply someone logged counts as handled; the enquiry the website wrote in by itself (auto) does not.
+  if ((c.messages||[]).some(m => m.kind==='message' && !m.auto && new Date(m.at).getTime() >= atMs)) return false;
   return sydneyNowPast(workClockDue(at, 15), now);
 }
 // Automation 2: a lead chased for 21+ days without an answer — Ron decides (lost as "no answer", or keep going).
@@ -5502,7 +5522,8 @@ async function ensureContactForJob(job, chosenContactId){
     // A customer can have many jobs: Sales Value is the total of all of them, not just the latest.
     const total = round2((STATE.data.jobs||[]).filter(j => j.contactId===c.id).reduce((sum,j) => sum + (Number(j.amount)||0), 0)) || job.amount;
     if (total && total!==c.salesValue) { c.salesValue = total; patch.salesValue = total; }
-    if (c.status!=='Won') { c.status = 'Won'; c.nextFollowUp = ''; c.stageChangedAt = new Date().toISOString(); patch.status = 'Won'; patch.nextFollowUp = ''; patch.stageChangedAt = c.stageChangedAt; }
+    // A returning customer's card only goes back to Won for a job from their new enquiry on, not an old job being edited.
+    if (c.status!=='Won' && (!c.reopenedAt || (job.date||todayStr()) >= localDay(c.reopenedAt))) { c.status = 'Won'; c.nextFollowUp = ''; c.stageChangedAt = new Date().toISOString(); patch.status = 'Won'; patch.nextFollowUp = ''; patch.stageChangedAt = c.stageChangedAt; }
     if (Object.keys(patch).length) db.contacts.update(c.id, patch);
     return;
   }
@@ -5659,7 +5680,9 @@ function myDayLists(data, now){
   const allNew = cs.filter(c => leadStage(c)==='New');
   const fresh = allNew.filter(c => arrivedDay(c) >= shiftDays(today, -MY_DAY_NEW_DAYS));
   const late = new Set(fresh.filter(c => newLeadUnhandled(c, now)));
-  fresh.sort((a,b) => Number(late.has(b)) - Number(late.has(a)) || String(leadArrivedAt(a)||a.createdAt).localeCompare(String(leadArrivedAt(b)||b.createdAt)));
+  // Late ones (15+ working minutes, nobody on it) on top, then newest first — the freshest lead is the easiest to win.
+  const arrivedMs = c => new Date(leadArrivedAt(c) || c.createdAt).getTime() || 0;
+  fresh.sort((a,b) => Number(late.has(b)) - Number(late.has(a)) || arrivedMs(b) - arrivedMs(a));
   const chasing = cs.filter(c => leadStage(c)==='Chasing');
   return {
     today, localToday, prevWorkday,
@@ -5751,7 +5774,7 @@ function renderMyDay(profile, data){
     <div class="myday-summary card">
       <div class="stat-label" style="margin-bottom:10px">Morning summary</div>
       <div class="myday-stats">
-        ${stat('new', 'New leads since '+(L.prevWorkday===shiftDays(L.today,-1)?'yesterday':fmtDateShort(L.prevWorkday)), L.sinceYesterday.length, L.unhandled.length ? `${L.unhandled.length} waiting 15+ min` : '', L.unhandled.length ? 'bad' : '')}
+        ${stat('new', 'New leads since '+(L.prevWorkday===shiftDays(L.today,-1)?'yesterday':parseLocalDate(L.prevWorkday).toLocaleDateString('en-AU',{weekday:'long'})), L.sinceYesterday.length, L.unhandled.length ? `${L.unhandled.length} waiting 15+ min` : '', L.unhandled.length ? 'bad' : '')}
         ${stat('chasing', 'Chasing — call today', L.chaseToCall.length, L.chaseDone.length ? `${L.chaseDone.length} already called` : '', 'warn')}
         ${stat('decide', 'Chasing 21+ days', L.chaseDecide.length, 'decide: keep or lost', 'bad')}
         ${stat('followups', 'Follow-ups due', L.followups.length, L.followups.filter(c=>c.nextFollowUp<L.localToday).length ? `${L.followups.filter(c=>c.nextFollowUp<L.localToday).length} overdue` : '', 'warn')}
@@ -5759,7 +5782,7 @@ function renderMyDay(profile, data){
       </div>
     </div>
     ${myDaySection('new', 'New leads — call first', L.fresh.length, newBody, 'No new leads waiting. ✓',
-      `Last ${MY_DAY_NEW_DAYS} days, oldest waiting first. Move each one to its next stage once you've spoken to them.${L.backlog.length ? ` ${drill(`${L.backlog.length} older lead${L.backlog.length===1?' is':'s are'} still in New`, 'Older leads still in New', 'leads', L.backlog)} — clear them in the CRM when you have time.` : ''}`)}
+      `Last ${MY_DAY_NEW_DAYS} days, newest first — the ones waiting 15+ minutes are on top in red. Move each one to its next stage once you've spoken to them.${L.backlog.length ? ` ${drill(`${L.backlog.length} older lead${L.backlog.length===1?' is':'s are'} still in New`, 'Older leads still in New', 'leads', L.backlog)} — clear them in the CRM when you have time.` : ''}`)}
     ${myDaySection('chasing', 'Chasing — call today', L.chaseToCall.length + L.chaseDone.length, L.chaseToCall.map(chaseRow).join('') + L.chaseDone.map(chaseRow).join(''), 'Nobody in Chasing right now.', 'Tick "Called today" after each call. Leads you already called today drop to the bottom.')}
     ${L.chaseDecide.length ? myDaySection('decide', 'Chasing 21+ days — decide', L.chaseDecide.length, decideBody, '', 'Three weeks without an answer. Mark as Lost (no answer), or keep chasing for another 21 days.') : ''}
     ${myDaySection('followups', 'Follow-ups due', L.followups.length, fuBody, 'No follow-ups due today. ✓')}

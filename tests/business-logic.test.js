@@ -29,7 +29,7 @@ const DECLS = [
   'weekOf', 'monthOf', 'currentWeekKey',
   'jobGst', 'jobTotalCollected', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
-  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'leadHasJobFast', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
+  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
   // CRM / attribution
   'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
@@ -500,6 +500,21 @@ function testSalesAutomations(sb){
   assertEqual([L.chaseDecide.length, L.chaseToCall.length, L.staleQuotes.length], [1, 0, 1], 'myDayLists: 21+ days chasing is in "decide", the idle quote is listed');
   assertEqual([L.fresh.map(c=>c.id), L.backlog.map(c=>c.id), L.unhandled.map(c=>c.id)], [['n1'], ['old'], ['n1']], 'myDayLists: this week\'s New lead is listed and flagged, the June one is backlog');
   assertEqual(L.prevWorkday, '2026-09-28', 'myDayLists: previous working day of a Tuesday is Monday');
+
+  // Returning customer: an old job keeps them Won until they enquire again; a job from the new enquiry makes them Won again.
+  sb.STATE.data.jobs = [{ id:'oldjob', contactId:'rc', customerName:'Return Cust', date:'2026-03-01' }];
+  sb.JOB_CACHE.index = null;
+  const rc = { id:'rc', fullName:'Return Cust', status:'Won', createdAt:'2026-02-20', messages:[] };
+  assertEqual(sb.leadStage(rc), 'Won', 'leadStage: a customer with a job is Won');
+  const back = Object.assign({}, rc, { status:'New', reopenedAt:'2026-09-29T00:00:00Z' });
+  assertEqual(sb.leadStage(back), 'New', 'leadStage: a returning customer is New again — the March job belongs to the old enquiry');
+  sb.STATE.data.jobs = sb.STATE.data.jobs.concat([{ id:'newjob', contactId:'rc', customerName:'Return Cust', date:'2026-10-02' }]);
+  sb.JOB_CACHE.index = null;
+  assertEqual(sb.leadStage(back), 'Won', 'leadStage: a job from the new enquiry makes them Won again');
+  assertEqual(sb.leadLatestJobDate({ id:'x', fullName:'Return Cust' }), '2026-10-02', 'leadLatestJobDate: same-name match finds the latest job');
+  sb.STATE.data.jobs = [{ id:'oldjob', contactId:'rc', customerName:'Return Cust', date:'2026-03-01' }];
+  sb.JOB_CACHE.index = null;
+  assertEqual(sb.newLeadUnhandled(Object.assign({}, back, { messages:[{ kind:'message', direction:'in', auto:true, at:'2026-09-29T00:00:00Z' }] }), at('2026-09-29T00:30:00Z')), true, 'newLeadUnhandled: the website\'s own "new enquiry" message does not count as handled');
 }
 
 testJobAttributionTags(loadSandbox());
