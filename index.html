@@ -777,6 +777,7 @@ function computeReminders(data, now){
   (data.manualReminders||[]).forEach(r => {
     if (r.done) return;
     const age = daysBetween(parseLocalDate(r.date), today);
+    if (age < 0) return;   // a reminder shows (and counts) from its day, not before
     items.push({ id:r.id, contactId:r.contactId, manual:true, readKey:`manual:${r.id}`, type:'followup', severity: age>=0?'bad':'warn', date:r.date, title:r.title, meta:`${r.contactName||''}${age>0?` · ${age} days overdue`:(age===0?' · due today':` · due ${fmtDateShort(r.date)}`)}${r.note?` · "${r.note}"`:''}` });
   });
   // A lead's own "Next follow-up" date (set directly on the Details tab or the CRM Inbox panel, not
@@ -784,7 +785,7 @@ function computeReminders(data, now){
   // silently goes nowhere, which is exactly the kind of dead-end Ofek asked to be caught. Skipped when
   // an explicit reminder or task already tracks that same lead + date, so the two paths never double up.
   (data.contacts||[]).forEach(c => {
-    if (!c.nextFollowUp || ['Booked','Won','Lost'].includes(leadStage(c))) return;
+    if (!followupDue(c, todayStr(now))) return;
     const hasReminder = (data.manualReminders||[]).some(r => r.contactId===c.id && !r.done && r.date===c.nextFollowUp);
     const hasTask = (data.tasks||[]).some(t => t.client===c.fullName && t.due===c.nextFollowUp && t.status!=='Done');
     if (hasReminder || hasTask) return;
@@ -1045,20 +1046,12 @@ async function loadFromSupabase(){
     tasks: (tasks||[]).map(t => ({ ...mapTaskRow(t), activityLog: logsFor('task', t.id) })),
     quotes: (quotes||[]).map(mapQuoteRow),
     closings: (closings||[]).map(mapClosingRow),
-    manualReminders: (manualReminders||[]).map(r => ({
-      id:r.id, contactId:r.contact_id, contactName:r.contact_name||'', title:r.title, date:r.date,
-      note:r.note||'', done:r.done,
-    })),
+    manualReminders: (manualReminders||[]).map(mapManualReminderRow),
     tagCatalog: (tagCatalog||[]).map(t => t.tag),
     dismissedReminders: (dismissedReminders||[]).map(d => d.key),
     readReminders: (readReminderRows||[]).map(r => r.key),
     cashStatus: { amount: cashStatusRow?.amount||0, activityLog: logsFor('cashStatus','main') },
-    settings: settingsRow ? {
-      unpaidReminderDays:settingsRow.unpaid_reminder_days, quoteStaleDays:settingsRow.quote_stale_days,
-      gstRatePercent:settingsRow.gst_rate_percent, companyName:settingsRow.company_name,
-      abn:settingsRow.abn||'', defaultPaymentTerms:settingsRow.default_payment_terms||'',
-      ownerSalaries: settingsRow.owner_salaries||{},
-    } : { unpaidReminderDays:7, quoteStaleDays:5, gstRatePercent:10, companyName:'The Guys Service Group', abn:'', defaultPaymentTerms:'', ownerSalaries:{} },
+    settings: settingsRow ? mapSettingsRow(settingsRow) : { unpaidReminderDays:7, quoteStaleDays:5, gstRatePercent:10, companyName:'The Guys Service Group', abn:'', defaultPaymentTerms:'', ownerSalaries:{} },
     settingsActivityLog: logsFor('settings','global'),
     employees: (employees||[]).map(e => ({
       id:e.id, name:e.name, roles:e.roles||[], status:e.status, employmentType:e.employment_type||'',
@@ -1356,6 +1349,18 @@ const db = {
       STATE.data.contacts = STATE.data.contacts.filter(x=>x.id!==id);
       const { error } = await sb.from('contacts').delete().eq('id', id);
       if (error) restoreAfterFailedDelete('contacts', gone, 'lead', error);
+    },
+  },
+  // Appends ONE update to a task or quote in a single database statement (append_record_update), so two
+  // people posting at the same moment both keep theirs. The local copy becomes what the database now holds.
+  recordUpdates: {
+    async append(table, listKey, id, entry){
+      if (PRESENT) { showToast('Presentation mode is on, changes are not saved'); return false; }
+      const { data, error } = await sb.rpc('append_record_update', { p_table: table, p_id: id, p_entry: entry });
+      if (error) { showToast('Update not saved: '+error.message); return false; }
+      const rec = (STATE.data[listKey]||[]).find(x => x.id===id);
+      if (rec && Array.isArray(data)) rec.updates = data;
+      return true;
     },
   },
   activityLog: {
@@ -1759,6 +1764,17 @@ function mapClosingRow(c){
     postedBy:c.posted_by||'', createdAt:c.created_at, linkedJobId:c.linked_job_id||null,
   };
 }
+function mapManualReminderRow(r){
+  return { id:r.id, contactId:r.contact_id, contactName:r.contact_name||'', title:r.title, date:r.date, note:r.note||'', done:r.done };
+}
+function mapSettingsRow(r){
+  return {
+    unpaidReminderDays:r.unpaid_reminder_days, quoteStaleDays:r.quote_stale_days,
+    gstRatePercent:r.gst_rate_percent, companyName:r.company_name,
+    abn:r.abn||'', defaultPaymentTerms:r.default_payment_terms||'',
+    ownerSalaries: r.owner_salaries||{},
+  };
+}
 function mapPayrollRow(r){
   return { id:r.id, weekKey:r.week_start, person:r.person,
     cashCollected:!!r.cash_collected, cashCollectedAt:r.cash_collected_at, cashCollectedBy:r.cash_collected_by||'',
@@ -1786,11 +1802,30 @@ function mapContactRow(c){
     chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done,
   };
 }
+// Live updates (a new lead arriving, someone else's change) redraw the page. Keep whatever a person is in
+// the middle of typing — a reply, a Closing form, a setting — and where their cursor is, instead of wiping it.
+function fieldKey(el){ return el.id ? '#'+el.id : (el.getAttribute('onchange') || el.getAttribute('oninput') || el.getAttribute('name') || ''); }
+document.addEventListener('input', e => { const t = e.target; if (t && t.matches && t.matches('input,textarea,select')) t.dataset.dirty = '1'; }, true);
+function renderKeepingInput(){
+  const app = document.getElementById('app');
+  if (!app) { render(); return; }
+  const keep = [...app.querySelectorAll('input,textarea,select')].filter(el => el.dataset.dirty==='1' && el.type!=='file')
+    .map(el => ({ key: fieldKey(el), value: el.value, checked: el.checked, type: el.type })).filter(x => x.key);
+  const a = document.activeElement;
+  const aKey = a && app.contains(a) && a.matches('input,textarea,select') ? fieldKey(a) : '';
+  const caret = aKey && typeof a.selectionStart==='number' ? [a.selectionStart, a.selectionEnd] : null;
+  render();
+  if (!keep.length && !aKey) return;
+  const fresh = [...app.querySelectorAll('input,textarea,select')];
+  const byKey = k => fresh.find(el => fieldKey(el)===k);
+  keep.forEach(k => { const el = byKey(k.key); if (!el) return; if (k.type==='checkbox' || k.type==='radio') el.checked = k.checked; else el.value = k.value; el.dataset.dirty = '1'; });
+  if (aKey) { const el = byKey(aKey); if (el) { el.focus(); if (caret) try { el.setSelectionRange(caret[0], caret[1]); } catch(e) {} } }
+}
 function handleContactRealtimeChange(payload){ if (PRESENT) return;
   if (!STATE.data) return; // not loaded yet, or already signed out
   if (payload.eventType === 'DELETE') {
     STATE.data.contacts = STATE.data.contacts.filter(c => c.id !== payload.old.id);
-    render();
+    renderKeepingInput();
     return;
   }
   const idx = STATE.data.contacts.findIndex(c => c.id === payload.new.id);
@@ -1803,17 +1838,17 @@ function handleContactRealtimeChange(payload){ if (PRESENT) return;
     // (comes from the separate activity_log table, joined only at initial load).
     STATE.data.contacts[idx] = { ...mapContactRow(payload.new), activityLog: STATE.data.contacts[idx].activityLog };
   }
-  render();
+  renderKeepingInput();
 }
 // Jobs + the Payroll tables live-update too, so the Payroll board's commission totals move the moment
 // someone marks a job Paid (or a payroll status / Ron's daily log changes) on another device.
 function handleJobRealtimeChange(payload){ if (PRESENT) return;
   if (!STATE.data) return;
-  if (payload.eventType === 'DELETE') { STATE.data.jobs = STATE.data.jobs.filter(j => j.id !== payload.old.id); render(); return; }
+  if (payload.eventType === 'DELETE') { STATE.data.jobs = STATE.data.jobs.filter(j => j.id !== payload.old.id); renderKeepingInput(); return; }
   const idx = STATE.data.jobs.findIndex(j => j.id === payload.new.id);
   if (idx === -1) STATE.data.jobs.push({ ...mapJobRow(payload.new), activityLog: [] });
   else STATE.data.jobs[idx] = { ...mapJobRow(payload.new), activityLog: STATE.data.jobs[idx].activityLog };
-  render();
+  renderKeepingInput();
 }
 function upsertLocalRow(listKey, mapped, match){
   const list = STATE.data[listKey] || (STATE.data[listKey] = []);
@@ -1822,26 +1857,51 @@ function upsertLocalRow(listKey, mapped, match){
 }
 function handlePayrollRealtimeChange(payload){ if (PRESENT) return;
   if (!STATE.data) return;
-  if (payload.eventType === 'DELETE') { STATE.data.payrollWeeks = (STATE.data.payrollWeeks||[]).filter(r => r.id !== payload.old.id); render(); return; }
+  if (payload.eventType === 'DELETE') { STATE.data.payrollWeeks = (STATE.data.payrollWeeks||[]).filter(r => r.id !== payload.old.id); renderKeepingInput(); return; }
   const m = mapPayrollRow(payload.new);
   upsertLocalRow('payrollWeeks', m, r => r.weekKey===m.weekKey && r.person===m.person);
-  render();
+  renderKeepingInput();
 }
 function handleSalesLogRealtimeChange(payload){ if (PRESENT) return;
   if (!STATE.data) return;
-  if (payload.eventType === 'DELETE') { STATE.data.salesLogs = (STATE.data.salesLogs||[]).filter(l => l.id !== payload.old.id); render(); return; }
+  if (payload.eventType === 'DELETE') { STATE.data.salesLogs = (STATE.data.salesLogs||[]).filter(l => l.id !== payload.old.id); renderKeepingInput(); return; }
   const m = mapSalesLogRow(payload.new);
   upsertLocalRow('salesLogs', m, l => l.person===m.person && l.date===m.date);
   // Don't yank the form out from under someone mid-typing on their own daily log.
   const active = document.activeElement;
   if (active && active.id && active.id.startsWith('sl-')) return;
-  render();
+  renderKeepingInput();
+}
+// Same live behaviour for the other shared tables, so two people never work on stale copies.
+function handleListRealtimeChange(listKey, mapRow){
+  return payload => {
+    if (PRESENT || !STATE.data) return;
+    const list = STATE.data[listKey] || (STATE.data[listKey] = []);
+    if (payload.eventType === 'DELETE') { STATE.data[listKey] = list.filter(x => x.id !== payload.old.id); renderKeepingInput(); return; }
+    const m = mapRow(payload.new); const idx = list.findIndex(x => x.id === m.id);
+    if (idx === -1) list.push({ ...m, activityLog: [] }); else list[idx] = { ...m, activityLog: list[idx].activityLog || [] };
+    renderKeepingInput();
+  };
+}
+function handleSettingsRealtimeChange(payload){ if (PRESENT || !STATE.data || payload.eventType==='DELETE') return;
+  Object.assign(STATE.data.settings, mapSettingsRow(payload.new)); renderKeepingInput();
+}
+function handleCommissionRatesRealtimeChange(payload){ if (PRESENT || !STATE.data) return;
+  if (payload.eventType === 'DELETE') delete STATE.data.commissionRates[payload.old.technician_name];
+  else STATE.data.commissionRates[payload.new.technician_name] = payload.new.rates || {};
+  renderKeepingInput();
 }
 function setupRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) return; // already subscribed this session
   REALTIME_CHANNEL = sb.channel('contacts-realtime')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, handleContactRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, handleJobRealtimeChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, handleListRealtimeChange('tasks', mapTaskRow))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quotes' }, handleListRealtimeChange('quotes', mapQuoteRow))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'closings' }, handleListRealtimeChange('closings', mapClosingRow))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'manual_reminders' }, handleListRealtimeChange('manualReminders', mapManualReminderRow))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, handleSettingsRealtimeChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'commission_rates' }, handleCommissionRatesRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'payroll_weeks' }, handlePayrollRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_daily_log' }, handleSalesLogRealtimeChange)
     .subscribe();
@@ -2699,6 +2759,10 @@ function leadHasJobFast(c){
   const n = (c.fullName||'').trim().toLowerCase();
   return !!n && ix.names.has(n);
 }
+// One rule for follow-ups everywhere (CRM cards, "Needs a follow-up today", Open Tasks, Reminders): a lead's
+// follow-up is due once its date is today or earlier and the lead is still being worked (not Booked/Won/Lost).
+// A follow-up dated in the future shows nowhere and counts nowhere until its day comes.
+function followupDue(c, today){ return !!c.nextFollowUp && c.nextFollowUp <= (today || todayStr()) && !['Booked','Won','Lost'].includes(leadStage(c)); }
 function leadRulesApply(c){ return !!c && (!!c.stageChangedAt || localDay(c.createdAt) >= PIPELINE_RULES_FROM); }
 function leadNeedsFutureDate(c){ return leadRulesApply(c) && STAGES_NEED_DATE.includes(leadStage(c)) && !(c.nextFollowUp && c.nextFollowUp > todayStr()); }
 // Finer-grained breakdown tags, layered on top of the division/source rollups above rather than
@@ -2905,9 +2969,15 @@ function computeCrmStats(contacts){
   stats.closeRate = contacts.length ? Math.round((stats.won/contacts.length)*100) : null;
   return stats;
 }
+// Inside the Dashboard, Leads & Marketing follows the Dashboard's period picker (one period for the whole
+// page); on its own page it keeps its own. A lead counts on its Sydney day (localDay).
+function crmOverviewRange(){
+  if (UI.tab==='dashboard') { const r = resolveDashboardRange(UI.dashboard, new Date()); return { start: r.start, end: r.effEnd, label: `${fmtDateShort(r.start)} – ${fmtDateShort(r.effEnd)}` }; }
+  return resolveCrmRange();
+}
 function filteredContacts(data){
-  const range = resolveCrmRange();
-  let list = data.contacts.filter(c => c.createdAt >= range.start && c.createdAt <= range.end);
+  const range = crmOverviewRange();
+  let list = data.contacts.filter(c => { const d = localDay(c.createdAt); return d >= range.start && d <= range.end; });
   if (UI.crmOverview.source!=='all') list = list.filter(c=>c.source===UI.crmOverview.source);
   if (UI.crmOverview.division!=='all') list = list.filter(c=>c.division===UI.crmOverview.division);
   return list;
@@ -3235,8 +3305,8 @@ setInterval(() => { try { renderChaseBubbles(); } catch(e) {} }, 60000);
 
 function renderLeadCard(c){
   const today = todayStr();
-  const overdue = c.nextFollowUp && c.nextFollowUp < today;
-  const dueToday = c.nextFollowUp === today;
+  const overdue = followupDue(c, today) && c.nextFollowUp < today;
+  const dueToday = followupDue(c, today) && c.nextFollowUp === today;
   return `<div class="lead-card" data-lead-id="${c.id}" draggable="true" ondragstart="onLeadDragStart(event,'${c.id}')" onclick="goToLeadConversation('${c.id}')" tabindex="0" onkeydown="if(event.key==='Enter'){goToLeadConversation('${c.id}')}">
     <div class="lead-card-top">
       <div class="lead-card-avatar">${esc(initials(c.fullName))}</div>
@@ -3249,7 +3319,7 @@ function renderLeadCard(c){
     <div class="lead-meta mono">${esc(c.phone||'—')}</div>
     ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
     ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">${esc(lostReasonLabel(lostReasonOf(c)))}</div>` : ''}
-    ${c.salesValue ? `<div class="lead-sales-chip">💰 ${fmtMoney(c.salesValue)}</div>` : ''}
+    ${(contactJobsTotal(c) ?? c.salesValue) ? `<div class="lead-sales-chip">💰 ${fmtMoney(contactJobsTotal(c) ?? c.salesValue)}</div>` : ''}
     ${c.nextFollowUp ? `<div class="lead-due ${overdue?'overdue':(dueToday?'today':'')}">${overdue?'⚠ Overdue':(dueToday?'● Due today':'○ Follow up')} · ${fmtDateShort(c.nextFollowUp)}</div>` : ''}
     ${leadStage(c)==='Won' ? '' : `<select class="lead-move" onclick="event.stopPropagation()" onchange="moveLead('${c.id}',this.value)" aria-label="Move ${esc(c.fullName)} to another stage">
       ${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${leadStage(c)===s?'selected':''}>${stageLabel(s)}</option>`).join('')}
@@ -3286,11 +3356,20 @@ function clearCrmSelection(){ const go = () => { UI.crm.selectedContactId = null
 // Clicking a lead's name anywhere (Pipeline card, Table row, the Reminders follow-up banner) jumps
 // straight into the live conversation, instead of opening the full edit modal. Explicit action buttons
 // ("Follow-up / edit", "Full profile", "Open") still open the modal — only the plain name-click changes.
+// Every way of jumping to another lead or page (a reminder, search, the chasing bubble, a customer link) goes
+// through the same follow-up lock as the tabs: a Quoted / Follow up lead can't be left without a future date.
+function leaveLeadThen(targetId, go){
+  const cur = (UI.tab==='crm' && UI.crm.view==='inbox') ? UI.crm.selectedContactId : null;
+  if (cur && cur!==targetId && !leadLeaveGuard(cur, go)) return;
+  go();
+}
 function goToLeadConversation(contactId){
-  UI.tab = 'crm';
-  UI.crm.view = 'inbox';
-  UI.crm.selectedContactId = contactId;
-  render();
+  leaveLeadThen(contactId, () => {
+    UI.tab = 'crm';
+    UI.crm.view = 'inbox';
+    UI.crm.selectedContactId = contactId;
+    render();
+  });
 }
 // What a lead's active follow-up is actually about — shown next to the name in "Needs a follow-up
 // today" and above the conversation, so a click-through doesn't leave Ofek guessing why he's there.
@@ -3322,8 +3401,13 @@ function setLeadEstimatedValue(id, value){
   const num = Number(value)||0;
   if ((c.estimatedValue||0)!==num) { logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Estimated value changed from ${fmtMoney(c.estimatedValue||0)} to ${fmtMoney(num)}`); c.estimatedValue = num; db.contacts.update(id, { estimatedValue: num }); }
 }
+// Sales value: a customer with jobs gets the total of those jobs automatically (excl. GST); only a lead with no
+// job yet has a hand-typed value (what was agreed on the phone). One value, never written from two places.
+function contactJobsTotal(c){ if (!c) return null; const js = (STATE.data.jobs||[]).filter(j => j.contactId===c.id); return js.length ? round2(js.reduce((s,j)=>s+(Number(j.amount)||0),0)) : null; }
+function salesValueField(c, inputHtml){ const t = contactJobsTotal(c); return t===null ? inputHtml : `<span class="mono" title="The total of this customer's jobs — set automatically">${fmtMoney(t)} <span class="hint">from jobs</span></span>`; }
 function setLeadSalesValue(id, value){
   const c = contactById(id); if (!c) return;
+  if (contactJobsTotal(c)!==null) { showToast('Sales value comes from this customer\'s jobs'); render(); return; }
   const num = Number(value)||0;
   if ((c.salesValue||0)!==num) { logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Sales value changed from ${fmtMoney(c.salesValue||0)} to ${fmtMoney(num)}`); c.salesValue = num; db.contacts.update(id, { salesValue: num }); }
 }
@@ -3411,7 +3495,7 @@ function renderCrmInboxThreadAndDetails(c){
       <div class="field" style="margin-top:9px"><label>Next follow-up</label>${renderDateCell('inbox-followup-'+c.id, c.nextFollowUp||'', `setLeadFollowupDate('${c.id}', v)`)}</div>
       <div class="field" style="margin-top:9px"><label>Follow-up note</label><textarea rows="2" placeholder="What needs doing when this follow-up is due…" onchange="setLeadFollowupNote('${c.id}',this.value)">${esc(c.followupNote||'')}</textarea></div>
       <div class="field" style="margin-top:9px"><label>Estimated value</label><input type="number" value="${c.estimatedValue||0}" onchange="setLeadEstimatedValue('${c.id}',this.value)"></div>
-      <div class="field" style="margin-top:9px"><label>Sales value</label><input type="number" value="${c.salesValue||0}" onchange="setLeadSalesValue('${c.id}',this.value)"></div>
+      <div class="field" style="margin-top:9px"><label>Sales value</label>${salesValueField(c, `<input type="number" value="${c.salesValue||0}" onchange="setLeadSalesValue('${c.id}',this.value)">`)}</div>
       <div class="field" style="margin-top:9px"><label>What they need</label><textarea rows="3" onchange="setLeadJobDescription('${c.id}',this.value)">${esc(c.jobDescription||'')}</textarea></div>
       ${renderContactJobsBlock(c)}
       ${renderMarketingSourceBlock(c)}
@@ -3467,7 +3551,7 @@ function renderCrmTable(allContacts){
   const today = todayStr();
   const { pageItems: contacts, page, totalPages, pageSize, total } = paginateRows(allContacts, UI.crm, 25);
   const rows = contacts.length ? contacts.map(c => {
-    const overdue = c.nextFollowUp && c.nextFollowUp < today;
+    const overdue = followupDue(c, today) && c.nextFollowUp < today;
     return `<tr>
       <td style="border-inline-start:2px solid ${LEAD_STATUS_COLOR[leadStage(c)]};cursor:pointer" onclick="goToLeadConversation('${c.id}')"><span style="display:flex;align-items:center;gap:8px"><span class="table-row-avatar" style="--avatar-color:${LEAD_STATUS_COLOR[leadStage(c)]}">${esc(initials(c.fullName))}</span>${esc(c.fullName)}${unreadBadge(c)}</span></td>
       <td class="mono">${esc(c.phone||'—')}</td>
@@ -3479,7 +3563,7 @@ function renderCrmTable(allContacts){
       <td class="mono">${fmtDateShort(lastContactedAt(c))}</td>
       <td class="mono" style="${overdue?'color:var(--bad);font-weight:600':''}">${c.nextFollowUp?fmtDateShort(c.nextFollowUp):'—'}</td>
       <td class="num">${c.estimatedValue?fmtMoney(c.estimatedValue):'—'}</td>
-      <td class="num">${contactEditableCell(c.id,'salesValue', c.salesValue?fmtMoney(c.salesValue):'—', 'number')}</td>
+      <td class="num">${contactJobsTotal(c)!==null ? `<span title="The total of this customer's jobs">${fmtMoney(contactJobsTotal(c))}</span>` : contactEditableCell(c.id,'salesValue', c.salesValue?fmtMoney(c.salesValue):'—', 'number')}</td>
       <td><button class="btn ghost small" onclick="openLeadActivityModal('${c.id}')">💬 ${recordActivityCount(c)}</button></td>
       <td><button class="btn ghost small" onclick="openLeadModal('${c.id}')">Open</button></td>
     </tr>`;
@@ -3496,7 +3580,7 @@ function renderCrmBody(data){
 function renderCrm(profile, data){
   const today = todayStr();
   const contacts = opsFilteredContacts(data);
-  const needsAction = data.contacts.filter(c => c.nextFollowUp && c.nextFollowUp <= today && !['Booked','Won','Lost'].includes(leadStage(c)));
+  const needsAction = data.contacts.filter(c => followupDue(c, today));
   const chasing = data.contacts.filter(c => leadStage(c)==='Chasing');
   const chasingCalledToday = chasing.filter(c => chaseCounter(c).calledToday).length;
   const isTable = UI.crm.view==='table';
@@ -3546,13 +3630,19 @@ function renderCrm(profile, data){
   `;
 }
 function renderCrmOverview(profile, data){
-  const range = resolveCrmRange();
+  const range = crmOverviewRange();
   const contacts = filteredContacts(data);
   const stats = computeCrmStats(contacts);
 
-  const rangeChips = [['week','This week'],['month','This month'],['7d','Last 7 days'],['14d','Last 14 days'],['30d','Last 30 days'],['custom','Custom']]
-    .map(([k,l]) => `<button class="week-chip ${UI.crmOverview.range===k?'active':''}" onclick="setCrmRange('${k}')">${l}</button>`).join('');
-  const customInputs = UI.crmOverview.range==='custom' ? `
+  const inDash = UI.tab==='dashboard';
+  const rangeChips = inDash
+    ? DASH_RANGES.map(([k,l]) => `<button class="week-chip ${UI.dashboard.range===k?'active':''}" onclick="setDashboardRange('${k}')">${l}</button>`).join('')
+    : [['week','This week'],['month','This month'],['7d','Last 7 days'],['14d','Last 14 days'],['30d','Last 30 days'],['custom','Custom']]
+      .map(([k,l]) => `<button class="week-chip ${UI.crmOverview.range===k?'active':''}" onclick="setCrmRange('${k}')">${l}</button>`).join('');
+  const customInputs = inDash ? (UI.dashboard.range==='custom' ? `
+    <input type="date" style="width:auto" value="${UI.dashboard.customFrom||''}" onchange="UI.dashboard.customFrom=this.value;render()">
+    <span style="color:var(--ink-faint);font-size:12px;align-self:center">to</span>
+    <input type="date" style="width:auto" value="${UI.dashboard.customTo||''}" onchange="UI.dashboard.customTo=this.value;render()">` : '') : UI.crmOverview.range==='custom' ? `
     <input type="date" style="width:auto" value="${UI.crmOverview.customFrom||''}" onchange="UI.crmOverview.customFrom=this.value;render()">
     <span style="color:var(--ink-faint);font-size:12px;align-self:center">to</span>
     <input type="date" style="width:auto" value="${UI.crmOverview.customTo||''}" onchange="UI.crmOverview.customTo=this.value;render()">` : '';
@@ -3675,9 +3765,10 @@ function openLeadModal(contactId){
           </div>
           <div class="grid-3" style="margin-top:11px">
             <div class="field"><label>Estimated value</label><input type="number" id="lm-value" value="${c?(c.estimatedValue||0):0}"></div>
-            <div class="field"><label>Sales value</label><input type="number" id="lm-sales" value="${c?(c.salesValue||0):0}"></div>
+            <div class="field"><label>Sales value</label>${salesValueField(c, `<input type="number" id="lm-sales" value="${c?(c.salesValue||0):0}">`)}</div>
             <div class="field"><label>Next follow-up</label>${dateCellField('lm-followup', c?(c.nextFollowUp||''):'')}</div>
           </div>
+          <div class="field" style="margin-top:11px"><label>Follow-up note</label><textarea rows="2" id="lm-followup-note" placeholder="What needs doing when this follow-up is due…">${c?esc(c.followupNote||''):''}</textarea></div>
           <div class="field" id="lm-lost-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Lost'?'':'none'}"><label>Why was it lost?</label><select id="lm-lost-reason"><option value="">— choose a reason —</option>${LOST_REASONS.map(r=>`<option value="${r.key}" ${c&&lostReasonOf(c)===r.key?'selected':''}>${esc(r.label)}</option>`).join('')}</select></div>
           <div class="field" style="margin-top:11px"><label>What they need</label><textarea rows="2" id="lm-desc">${c?esc(c.jobDescription||''):''}</textarea></div>
           ${c ? `<div class="field" style="margin-top:11px"><label>Tags</label>${renderLeadTags(c.id, 'modal')}</div>` : ''}
@@ -3792,8 +3883,12 @@ async function saveLeadModal(contactId){
   const stagePicked = document.getElementById('lm-status').value;
   const followPicked = document.getElementById('lm-followup').value;
   const lostPicked = (document.getElementById('lm-lost-reason')||{}).value || '';
-  if (stagePicked==='Lost' && !lostPicked) { modalError('Choose why the lead was lost'); return; }
-  if (STAGES_NEED_DATE.includes(stagePicked) && !(followPicked && followPicked > todayStr())) { modalError(`A lead in ${stageLabel(stagePicked)} needs a follow-up date after today`); return; }
+  // The stage rules apply to new leads, to leads under the new rules (from 27 Sep), and whenever the stage is
+  // being changed — an old lead can still get its phone or email fixed without re-doing its stage.
+  const stageChanging = !prev || stagePicked !== leadStage(prev);
+  const rulesOn = stageChanging || leadRulesApply(prev);
+  if (rulesOn && stagePicked==='Lost' && !lostPicked) { modalError('Choose why the lead was lost'); return; }
+  if (rulesOn && STAGES_NEED_DATE.includes(stagePicked) && !(followPicked && followPicked > todayStr())) { modalError(`A lead in ${stageLabel(stagePicked)} needs a follow-up date after today`); return; }
   const values = {
     fullName,
     phone: document.getElementById('lm-phone').value.trim(),
@@ -3803,7 +3898,8 @@ async function saveLeadModal(contactId){
     source: document.getElementById('lm-source').value,
     status: (prev && leadStage(prev)==='Won') ? prev.status : stagePicked,
     estimatedValue: Number(document.getElementById('lm-value').value)||0,
-    salesValue: Number(document.getElementById('lm-sales').value)||0,
+    salesValue: document.getElementById('lm-sales') ? (Number(document.getElementById('lm-sales').value)||0) : (prev ? prev.salesValue : 0),
+    followupNote: (document.getElementById('lm-followup-note')||{}).value ?? (prev ? prev.followupNote : ''),
     nextFollowUp: document.getElementById('lm-followup').value,
     jobDescription: document.getElementById('lm-desc').value,
   };
@@ -3812,14 +3908,18 @@ async function saveLeadModal(contactId){
     values.stageChangedAt = new Date().toISOString();
     if (stagePicked==='Chasing') { values.chasingSince = values.stageChangedAt; values.chaseAlertDone = false; }
   }
-  if (stagePicked==='Lost') { values.lostReason = lostPicked; values.nextFollowUp = ''; const lbl = lostReasonLabel(lostPicked); if (prev && !(prev.tags||[]).includes(lbl)) values.tags = [...(prev.tags||[]), lbl]; }
+  if (stagePicked==='Lost') { values.lostReason = lostPicked; values.nextFollowUp = ''; if (lostPicked) { const lbl = lostReasonLabel(lostPicked); if (prev && !(prev.tags||[]).includes(lbl)) values.tags = [...(prev.tags||[]), lbl]; } }
   else if (stagePicked!=='Won') values.lostReason = '';
   if (stagePicked==='Booked') values.nextFollowUp = '';
   let c;
   // Update reuses the existing (already-real) id and can fire-and-forget; create has to be
   // awaited first so the real database-assigned id exists before anything below (activity log,
   // "lead created" event) tries to persist against it.
-  if (prev) { c = prev; db.contacts.update(c.id, values); }
+  if (prev) {
+    c = prev;
+    const patch = {}; for (const k in values) if (JSON.stringify(values[k]) !== JSON.stringify(prev[k])) patch[k] = values[k];
+    if (Object.keys(patch).length) db.contacts.update(c.id, patch);
+  }
   else {
     try { c = await db.contacts.create({ createdAt:todayStr(), linkedJobId:null, activityLog:[], messages:[], lastReadAt:null, starred:false, tags: values.lostReason ? [lostReasonLabel(values.lostReason)] : [], chaseCalls:[], ...values }); }
     catch (err) { return; }   // db.contacts.create() already showed an error toast; leave the modal open so the user can retry
@@ -4113,6 +4213,9 @@ function renderSearchResults(query){
 function goToJobFromSearch(jobId){
   const profile = getCurrentProfile(); if (!profile) return;
   closeModal();
+  leaveLeadThen(null, () => openJobFromSearch(jobId, profile));
+}
+function openJobFromSearch(jobId, profile){
   UI.tab = 'jobs'; UI.jobs = {tech:'all', status:'all', week:'all'};
   render();
   if (profile.role==='owner' || profile.role==='manager') openJobModal(jobId);
@@ -4859,7 +4962,9 @@ function renderDashGoogle(profile, data, standalone){
 // Same shape as the Google board. Meta reports very few leads itself, so "CRM leads" (contacts whose ad link carried this
 // ad set's id in utm_content) are the number that decides; jobs/revenue come from the job↔customer link.
 const META_MIN = { '7d':{ adset:40, ad:25, conv:1 }, '14d':{ adset:60, ad:35, conv:1 }, '30d':{ adset:100, ad:60, conv:2 }, '60d':{ adset:150, ad:90, conv:2 }, '90d':{ adset:200, ad:120, conv:2 } };
-function metaIsLead(c){ return c.source==='Meta Ads' || !!c.fbclid || /^(facebook|instagram|fb|ig)$/i.test(c.utmSource||''); }
+// One definition everywhere (Dashboard, Leads & Marketing, this board, the nightly digest): a Meta lead is a lead
+// whose source is Meta Ads. An fbclid alone isn't enough — organic Facebook shares carry one too.
+function metaIsLead(c){ return c.source==='Meta Ads'; }
 function metaAnalyse(data, win){
   const rows = (ADS_STATS.rows||[]).filter(r => r.platform==='meta' && r.win===win && r.level==='ad').map(r => ({ ...r, cost:+r.cost||0, clicks:+r.clicks||0, impressions:+r.impressions||0, conversions:+r.conversions||0 }));
   const end = shiftDays(todayStr(new Date()), -1), start = shiftDays(end, -(parseInt(win)-1));
@@ -5706,6 +5811,7 @@ function deleteManualReminder(id, rowEl){
 // delete but the date itself, so clearing it is what makes the reminder go away.
 function dismissLeadFollowup(contactId, rowEl){
   const c = contactById(contactId); if (!c) return;
+  if (leadRulesApply(c) && STAGES_NEED_DATE.includes(leadStage(c))) { openFollowupDatePrompt(c, leadStage(c), render); return; }
   confirmAction(`Clear the follow-up date for ${c.fullName}?`, ()=>{
     animateRowRemove(rowEl, ()=>{
       c.nextFollowUp = '';
@@ -5828,7 +5934,7 @@ function renderOpenTasksCalendarBlock(data){
 // Quoted / Follow up leads whose follow-up day has arrived — they join Open Tasks on that day.
 function followupsDueRows(data){
   const t = todayStr();
-  return (data.contacts||[]).filter(c => STAGES_NEED_DATE.includes(leadStage(c)) && c.nextFollowUp && c.nextFollowUp <= t).map(c => ({
+  return (data.contacts||[]).filter(c => followupDue(c, t)).map(c => ({
     kind:'Follow-up', id:c.id, raw:c, date:c.nextFollowUp, title:`${c.fullName} — ${stageLabel(leadStage(c))}`,
     meta:`${c.division}${c.phone?' · '+c.phone:''}${c.followupNote?' · '+c.followupNote:''}`, tone: c.nextFollowUp < t ? 'bad' : 'warn' }));
 }
@@ -6455,7 +6561,7 @@ function postTaskUpdate(){
   // item's own fields), so they survive even if the rest of the modal is cancelled instead of saved.
   if (MODAL_TASK_ID) {
     const task = STATE.data.tasks.find(t=>t.id===MODAL_TASK_ID);
-    if (task) { if (!task.updates) task.updates = []; task.updates.push({...entry}); db.tasks.update(task.id, { updates: task.updates }); }
+    if (task) { if (!task.updates) task.updates = []; task.updates.push({...entry}); db.recordUpdates.append('tasks', 'tasks', task.id, {...entry}); }
   }
   input.value = '';
   document.getElementById('tm-updates-list').innerHTML = renderUpdatesList();
@@ -6528,7 +6634,7 @@ async function saveTaskModal(taskId, createdBy, createdAt){
     createdBy, createdAt, subtasks: newSubtasks, updates: MODAL_UPDATES.map(u=>({...u})),
   };
   let task;
-  if (taskId) { task = oldTask; db.tasks.update(task.id, values); }
+  if (taskId) { task = oldTask; const { updates, ...fields } = values; db.tasks.update(task.id, fields); }
   else {
     try { task = await db.tasks.create({ activityLog:[], ...values }); }
     catch (err) { return; }   // db.tasks.create() already showed an error toast; leave the modal open so the user can retry
@@ -6671,8 +6777,9 @@ function postQuickQuoteUpdate(quoteId){
   const q = STATE.data.quotes.find(x=>x.id===quoteId); if (!q) return;
   const currentProfile = getCurrentProfile();
   if (!q.updates) q.updates = [];
-  q.updates.push({ id:uid(), author: currentProfile?.fullName || 'Unknown', text, createdAt: new Date().toISOString() });
-  db.quotes.update(q.id, { updates: q.updates });
+  const qEntry = { id:uid(), author: currentProfile?.fullName || 'Unknown', text, createdAt: new Date().toISOString() };
+  q.updates.push(qEntry);
+  db.recordUpdates.append('quotes', 'quotes', q.id, { ...qEntry });
   input.value = '';
   document.getElementById('quick-activity-list').innerHTML = renderQuoteQuickUpdates(quoteId);
 }
@@ -6712,8 +6819,9 @@ function postQuickTaskUpdate(taskId){
   const task = STATE.data.tasks.find(t=>t.id===taskId); if (!task) return;
   const currentProfile = getCurrentProfile();
   if (!task.updates) task.updates = [];
-  task.updates.push({ id:uid(), author: currentProfile?.fullName || 'Unknown', text, createdAt: new Date().toISOString() });
-  db.tasks.update(task.id, { updates: task.updates });
+  const tEntry = { id:uid(), author: currentProfile?.fullName || 'Unknown', text, createdAt: new Date().toISOString() };
+  task.updates.push(tEntry);
+  db.recordUpdates.append('tasks', 'tasks', task.id, { ...tEntry });
   input.value = '';
   document.getElementById('quick-activity-list').innerHTML = renderTaskActivityList(taskId);
   const btn = document.querySelector(`[data-activity-count="${taskId}"]`);
@@ -6828,7 +6936,7 @@ function postQuoteUpdate(){
   // if the rest of the modal is cancelled instead of saved.
   if (MODAL_QUOTE_ID) {
     const quote = STATE.data.quotes.find(q=>q.id===MODAL_QUOTE_ID);
-    if (quote) { if (!quote.updates) quote.updates = []; quote.updates.push({...entry}); db.quotes.update(quote.id, { updates: quote.updates }); }
+    if (quote) { if (!quote.updates) quote.updates = []; quote.updates.push({...entry}); db.recordUpdates.append('quotes', 'quotes', quote.id, {...entry}); }
   }
   input.value = '';
   document.getElementById('qm-updates-list').innerHTML = renderQuoteUpdatesList();
@@ -6847,7 +6955,7 @@ async function saveQuoteModal(quoteId){
     technicianQuoted: document.getElementById('qm-techquoted').value, followedBy: document.getElementById('qm-followedby').value.trim(),
     updates: MODAL_QUOTE_UPDATES.map(u=>({...u})),
   };
-  if (quoteId) { db.quotes.update(quoteId, values); }
+  if (quoteId) { const { updates, ...fields } = values; db.quotes.update(quoteId, fields); }
   else {
     try { await db.quotes.create(values); }
     catch (err) { return; }   // db.quotes.create() already showed an error toast; leave the modal open so the user can retry
@@ -6940,9 +7048,20 @@ function openEmployeeModal(empId){
       </div>
     </div>`);
 }
+let EMP_RENAME_OK = false;
 async function saveEmployeeModal(empId){
   const name = document.getElementById('em-name').value.trim();
   if (!name) { modalError('Please enter a name'); return; }
+  // A new name has to follow the person everywhere they appear by name (jobs, payroll, daily log, closings,
+  // equipment, tasks, their login) — otherwise their history "disconnects". Ask first, then rename it all at once.
+  const renaming = empId && (STATE.data.employees.find(e=>e.id===empId)?.name || name) !== name;
+  if (renaming && !EMP_RENAME_OK) {
+    const oldN = STATE.data.employees.find(e=>e.id===empId).name;
+    confirmAction(`Rename ${oldN} to ${name}? Their jobs, payroll, daily log, closings, equipment, tasks and login all move to the new name, so no history is lost.`,
+      () => { EMP_RENAME_OK = true; saveEmployeeModal(empId); }, { danger:false, title:'Rename team member', confirmLabel:'Rename everywhere' });
+    return;
+  }
+  EMP_RENAME_OK = false;
   const isOwner = document.getElementById('em-owner').checked, isManager = document.getElementById('em-manager').checked, isTech = document.getElementById('em-tech').checked, isVA = document.getElementById('em-va').checked;
   const roles = [...(isOwner?['Owner']:[]), ...(isManager?['Manager']:[]), ...(isTech?['Technician']:[]), ...(isVA?['VA']:[])];
   const prev = empId ? STATE.data.employees.find(e=>e.id===empId) : null;
@@ -6961,15 +7080,21 @@ async function saveEmployeeModal(empId){
     localLicenseFile: MODAL_FILES['em-localLicenseFile'] ?? job_or_null(prev,'localLicenseFile'),
   };
   let emp;
-  if (prev) { emp = prev; db.employees.update(emp.id, values); }
+  if (prev && oldName && oldName!==name) {
+    if (PRESENT) { showToast('Presentation mode is on, changes are not saved'); return; }
+    const { data: moved, error: renameErr } = await sb.rpc('rename_team_member', { p_old: oldName, p_new: name });
+    if (renameErr) { modalError('Could not rename: '+renameErr.message); return; }
+    logEmployeeActivity(prev, actor, `Renamed from "${oldName}" to "${name}" everywhere (${Object.entries(moved||{}).filter(([,n])=>n).map(([k,n])=>`${n} ${k.replace('_',' ')}`).join(', ') || 'no linked records'})`);
+  }
+  if (prev) { emp = prev; await db.employees.update(emp.id, values); }
   else {
     try { emp = await db.employees.create({ activityLog:[], ...values }); }
     catch (err) { return; }   // db.employees.create() already showed an error toast; leave the modal open so the user can retry
   }
   if (isTech) {
     const rates = { Aircon: document.getElementById('em-aircon').value===''?null:Number(document.getElementById('em-aircon').value), Chimney: document.getElementById('em-chimney').value===''?null:Number(document.getElementById('em-chimney').value), 'Pressure Washing': document.getElementById('em-pw').value===''?null:Number(document.getElementById('em-pw').value), Other: document.getElementById('em-other').value===''?null:Number(document.getElementById('em-other').value) };
-    if (oldName && oldName!==name && STATE.data.commissionRates[oldName]) db.commissionRates.remove(oldName);
-    db.commissionRates.set(name, rates);
+    if (oldName && oldName!==name && STATE.data.commissionRates[oldName]) await db.commissionRates.remove(oldName);
+    await db.commissionRates.set(name, rates);
     if (prev && oldRates) {
       ['Aircon','Chimney','Pressure Washing','Other'].forEach(jt => {
         const before = oldRates[jt] ?? null, after = rates[jt] ?? null;
@@ -6978,7 +7103,9 @@ async function saveEmployeeModal(empId){
     }
   }
   if (!prev) logEmployeeActivity(emp, actor, 'Employee added');
-  closeModal(); showToast(empId?'Employee updated':'Employee added'); render();
+  closeModal(); showToast(empId?'Employee updated':'Employee added');
+  if (prev && oldName && oldName!==name) { await loadFromSupabase(); }   // every screen now shows the new name
+  render();
 }
 const EQUIPMENT_CATEGORIES = ['Tools','Consumable'];
 function renderEquipmentCatalogTab(data, canEdit){

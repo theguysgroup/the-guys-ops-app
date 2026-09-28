@@ -29,7 +29,7 @@ const DECLS = [
   'weekOf', 'monthOf', 'currentWeekKey',
   'jobGst', 'jobTotalCollected', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
-  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'leadHasJobFast', 'leadStage', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
+  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'leadHasJobFast', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
   // CRM / attribution
   'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
