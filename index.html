@@ -5706,7 +5706,7 @@ function myDayAgo(iso){
 function myDayRow(c, right, opts){
   const o = opts || {};
   return `<div class="myday-row${o.bad?' bad':''}" onclick="goToLeadConversation('${c.id}')" tabindex="0" onkeydown="if(event.key==='Enter'){goToLeadConversation('${c.id}')}">
-    <div style="min-width:0;flex:1">
+    <div style="min-width:0;flex:1 1 220px">
       <div style="font-weight:600;font-size:13.5px">${esc(c.fullName)}${unreadBadge(c)} ${o.flag||''}</div>
       <div style="font-size:12px;color:var(--ink-soft);margin-top:2px"><span class="mono">${esc(c.phone||'no phone')}</span> · ${esc(c.division||'—')} · ${esc(sourceLabel(c.source))}${o.meta?` · ${o.meta}`:''}</div>
     </div>
@@ -5763,7 +5763,7 @@ function renderMyDay(profile, data){
   const quoteBody = L.staleQuotes.map(c => myDayRow(c, `${pill('bad', daysBetween(parseLocalDate(localDay(c.stageChangedAt)), parseLocalDate(L.today))+' days')}${leadStageControl(c)}`,
     { bad: true, meta: `quoted ${fmtDateShort(localDay(c.stageChangedAt))}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` })).join('');
   const logBody = logRows.map(r => `<div class="myday-row" style="cursor:default">
-      <div style="flex:1"><div style="font-weight:600;font-size:13.5px">${esc(r.person)}</div>
+      <div style="flex:1 1 220px;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(r.person)}</div>
       <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${r.log ? `${r.log.hours}h · ${r.bookings} booking${r.bookings===1?'':'s'} today` : 'Hours and bookings for today are not logged yet'}</div></div>
       ${r.log ? pill('good','Logged') : pill('warn','Not logged')}
       <button class="btn small" onclick="goTab('payroll')">${r.log ? 'Update' : 'Log today'} →</button>
