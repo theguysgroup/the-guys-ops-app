@@ -47,6 +47,8 @@ const DECLS = [
   'computeNetProfit',
   // dashboard
   'localDay', 'GOOGLE_ADS_AIRCON_ACCOUNT', 'callDivision', 'summarizeCalls', 'DASH_RANGES', 'resolveDashboardRange',
+  // sales automations + My Day
+  'fmtMoney', 'workClockDue', 'sydneyNowPast', 'NEW_LEAD_ALERT_FROM', 'leadArrivedAt', 'newLeadUnhandled', 'chaseTooLong', 'quoteStale', 'MY_DAY_NEW_DAYS', 'myDayLists',
 ];
 
 function extractDecl(source, name){
@@ -457,6 +459,49 @@ function testJobCustomerLink(sb){
   assertEqual(sb.contactHasJob('Somebody Else', sb.STATE.data.jobs), true, 'contactHasJob: a plain name still works');
 }
 
+function testSalesAutomations(sb){
+  // Sydney is UTC+10 until daylight saving starts on 4 Oct 2026. Work hours Mon–Fri 08:00–17:00.
+  const due = iso => JSON.stringify(sb.workClockDue(iso, 15));
+  assertEqual(due('2026-09-29T00:00:00Z'), JSON.stringify({ day:'2026-09-29', mins:615 }), 'workClockDue: Tue 10:00 + 15 min = 10:15 same day');
+  assertEqual(due('2026-09-28T21:00:00Z'), JSON.stringify({ day:'2026-09-29', mins:495 }), 'workClockDue: 07:00 before opening counts from 08:00 → 08:15');
+  assertEqual(due('2026-10-02T06:50:00Z'), JSON.stringify({ day:'2026-10-05', mins:485 }), 'workClockDue: Fri 16:50 uses 10 min Friday, 5 min Monday → Mon 08:05');
+  assertEqual(due('2026-10-03T00:00:00Z'), JSON.stringify({ day:'2026-10-05', mins:495 }), 'workClockDue: a Saturday lead starts Monday 08:00 → 08:15');
+
+  sb.STATE.data.jobs = [];
+  const arrived = '2026-09-29T00:00:00Z';   // Tue 29 Sep, 10:00 Sydney
+  const lead = extra => Object.assign({ id:'n1', fullName:'Fresh Lead', status:'New', createdAt:'2026-09-29', messages:[{ kind:'event', text:'Form', at:arrived }] }, extra||{});
+  const at = iso => new Date(iso);
+  assertEqual(sb.newLeadUnhandled(lead(), at('2026-09-29T00:16:00Z')), true, 'newLeadUnhandled: New, nobody touched it, 16 working minutes → alert');
+  assertEqual(sb.newLeadUnhandled(lead(), at('2026-09-29T00:14:00Z')), false, 'newLeadUnhandled: only 14 minutes → not yet');
+  assertEqual(sb.newLeadUnhandled(lead({ lastReadAt:'2026-09-29T00:05:00Z' }), at('2026-09-29T00:30:00Z')), false, 'newLeadUnhandled: marked read (or bubble closed) → handled');
+  assertEqual(sb.newLeadUnhandled(lead({ messages:[{ kind:'event', at:arrived }, { kind:'message', direction:'out', at:'2026-09-29T00:10:00Z' }] }), at('2026-09-29T00:30:00Z')), false, 'newLeadUnhandled: a reply was logged → handled');
+  assertEqual(sb.newLeadUnhandled(lead({ status:'Chasing' }), at('2026-09-29T00:30:00Z')), false, 'newLeadUnhandled: moved out of New → handled');
+  assertEqual(sb.newLeadUnhandled(lead({ messages:[{ kind:'event', at:'2026-09-20T00:00:00Z' }] }), at('2026-09-29T00:30:00Z')), false, 'newLeadUnhandled: leads from before the go-live day never alert');
+  assertEqual(sb.newLeadUnhandled(lead({ lastReadAt:'2026-09-01T00:00:00Z', reopenedAt:arrived }), at('2026-09-29T00:30:00Z')), true, 'newLeadUnhandled: a returning customer read long ago but enquiring again → alert');
+
+  const chase = since => ({ id:'ch', fullName:'Chased', status:'Chasing', chasingSince:since, createdAt:'2026-09-01' });
+  assertEqual(sb.chaseTooLong(chase('2026-09-01T02:00:00Z'), at('2026-09-22T02:00:00Z')), true, 'chaseTooLong: 21 days in Chasing → decide');
+  assertEqual(sb.chaseTooLong(chase('2026-09-01T02:00:00Z'), at('2026-09-21T02:00:00Z')), false, 'chaseTooLong: 20 days → not yet');
+  const quote = changed => ({ id:'q', fullName:'Quoted Q', status:'Quoted', stageChangedAt:changed, createdAt:'2026-09-01', division:'Aircon', estimatedValue:450 });
+  assertEqual(sb.quoteStale(quote('2026-09-08T02:00:00Z'), at('2026-09-22T02:00:00Z')), true, 'quoteStale: 14 days untouched → red');
+  assertEqual(sb.quoteStale(quote('2026-09-08T02:00:00Z'), at('2026-09-21T02:00:00Z')), false, 'quoteStale: 13 days → fine');
+
+  sb.STATE.data.contacts = [chase('2026-09-01T02:00:00Z'), quote('2026-09-08T02:00:00Z')];
+  Object.assign(sb.STATE.data, { equipmentSpend:[], manualReminders:[], dismissedReminders:[], readReminders:[], employees:[] });
+  const items = sb.computeReminders(sb.STATE.data, at('2026-09-22T02:00:00Z'));
+  assertEqual(items.filter(i => i.type==='chase-long').map(i => i.key), ['chase-long:ch:2026-09-01'], 'computeReminders: one "decide" reminder, keyed to when chasing started');
+  assertEqual(items.filter(i => i.type==='stale-quote').map(i => i.key), ['stale-quote:q:2026-09-08'], 'computeReminders: one idle-quote reminder, keyed to the quote date');
+  sb.STATE.data.dismissedReminders = ['chase-long:ch:2026-09-01'];
+  assertEqual(sb.computeReminders(sb.STATE.data, at('2026-09-22T02:00:00Z')).filter(i => i.type==='chase-long').length, 0, 'computeReminders: a deleted "decide" reminder stays deleted');
+
+  // My Day lists: the 21-day lead goes to "decide", not the daily call list; the idle quote is listed.
+  sb.STATE.data.contacts.push(lead(), lead({ id:'old', fullName:'Backlog', createdAt:'2026-06-15', messages:[{ kind:'event', at:'2026-06-15T02:00:00Z' }] }));
+  const L = sb.myDayLists(sb.STATE.data, at('2026-09-29T00:30:00Z'));
+  assertEqual([L.chaseDecide.length, L.chaseToCall.length, L.staleQuotes.length], [1, 0, 1], 'myDayLists: 21+ days chasing is in "decide", the idle quote is listed');
+  assertEqual([L.fresh.map(c=>c.id), L.backlog.map(c=>c.id), L.unhandled.map(c=>c.id)], [['n1'], ['old'], ['n1']], 'myDayLists: this week\'s New lead is listed and flagged, the June one is backlog');
+  assertEqual(L.prevWorkday, '2026-09-28', 'myDayLists: previous working day of a Tuesday is Monday');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
@@ -466,6 +511,7 @@ testRepeatServiceReminder(loadSandbox());
 testPayroll(loadSandbox());
 testDashboard(loadSandbox());
 testJobCustomerLink(loadSandbox());
+testSalesAutomations(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

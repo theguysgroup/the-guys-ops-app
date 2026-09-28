@@ -262,6 +262,25 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .lead-due { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; color: var(--ink-soft); background: var(--surface-2); border-radius: 99px; padding: 2px 9px; align-self: flex-start; }
 .lead-due.overdue { color: var(--bad); background: var(--bad-soft); }
 .lead-due.today { color: var(--warn); background: var(--warn-soft); }
+.myday-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.myday-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: start; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px 12px; cursor: pointer; font-family: inherit; color: var(--ink); }
+.myday-stat:hover, .myday-stat:focus-visible { border-color: var(--primary); }
+.myday-stat-n { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.myday-stat-l { font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+.myday-stat-s { font-size: 11px; color: var(--ink-faint); }
+.myday-stat.bad .myday-stat-n { color: var(--bad); }
+.myday-stat.warn .myday-stat-n { color: var(--warn); }
+.myday-section { margin-top: 14px; }
+.myday-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.myday-head h2 { margin: 0; font-size: 15px; }
+.myday-count { font-size: 11.5px; font-weight: 700; background: var(--primary); color: #fff; border-radius: 99px; padding: 1px 8px; font-variant-numeric: tabular-nums; }
+.myday-count.zero { background: var(--surface-2); color: var(--ink-faint); }
+.myday-count.zero.done { background: var(--good-soft); color: var(--good); }
+.myday-row { display: flex; align-items: center; gap: 12px; padding: 9px 8px; border-bottom: 1px solid var(--line-soft); cursor: pointer; flex-wrap: wrap; border-radius: 6px; }
+.myday-row:last-child { border-bottom: none; }
+.myday-row:hover { background: var(--surface-2); }
+.myday-row.bad { box-shadow: inset 3px 0 0 var(--bad); }
+.myday-row select { width: auto; }
 .lead-move { appearance: none; -webkit-appearance: none; font-size: 11px !important; font-weight: 600; padding: 5px 24px 5px 9px !important; min-height: 0 !important; border-radius: 99px !important; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23948a7e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>"); background-repeat: no-repeat; background-position: right 9px center; }
 @media (max-width: 900px) { .pipeline { grid-template-columns: repeat(2, minmax(0,1fr)); } }
 @media (max-width: 560px) { .pipeline { grid-template-columns: minmax(0,1fr); } }
@@ -796,6 +815,18 @@ function computeReminders(data, now){
     const age = daysBetween(parseLocalDate(c.nextFollowUp), today);
     items.push({ contactId:c.id, type:'followup', readKey:`followup:${c.id}`, severity: age>=0?'bad':'warn', date:c.nextFollowUp, title:`Follow up with ${c.fullName}`, meta:`${c.division}${age>0?` · ${age} days overdue`:(age===0?' · due today':` · due ${fmtDateShort(c.nextFollowUp)}`)}` });
   });
+  // Sales automations (28 Sep): 21+ days in Chasing → decide; a quote untouched for 14+ days → call or move on.
+  // The key carries the date the clock started, so "Keep chasing" or a new quote gives a fresh reminder later.
+  (data.contacts||[]).forEach(c => {
+    if (chaseTooLong(c, now)) {
+      const key = `chase-long:${c.id}:${localDay(c.chasingSince)}`;
+      if (!dismissed.has(key)) items.push({ key, readKey:key, contactId:c.id, type:'chase-long', severity:'bad', date:localDay(c.chasingSince), title:`${c.fullName} — 21+ days in Chasing, decide`, meta:`${c.division} · chasing since ${fmtDateShort(localDay(c.chasingSince))} · keep chasing or mark Lost (no answer)` });
+    }
+    if (quoteStale(c, now)) {
+      const key = `stale-quote:${c.id}:${localDay(c.stageChangedAt)}`;
+      if (!dismissed.has(key)) items.push({ key, readKey:key, contactId:c.id, type:'stale-quote', severity:'bad', date:localDay(c.stageChangedAt), title:`${c.fullName} — quote idle 14+ days`, meta:`${c.division} · quoted ${fmtDateShort(localDay(c.stageChangedAt))}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` });
+    }
+  });
   const read = new Set(data.readReminders||[]);
   items.forEach(it => { it.isRead = read.has(it.readKey); });
   items.sort((a,b) => Number(b.severity==='bad') - Number(a.severity==='bad') || a.date.localeCompare(b.date));
@@ -804,8 +835,8 @@ function computeReminders(data, now){
 
 /* ── permissions / types (ported from src/lib/types.ts + permissions.ts) ── */
 const ALL_SECTIONS = ['crm','crmOverview','adsGoogle','jobs','finance','payroll','outstanding','reminders','openItems','tasks','reference','closings','settings'];
-const SECTION_ORDER = ['crm','dashboard','crmOverview','adsGoogle','closings','jobs','finance','payroll','outstanding','reminders','openItems','tasks','reference'];
-const SECTION_LABEL = { dashboard:'Dashboard', adsGoogle:'Google Ads board', crm:'CRM', crmOverview:'Leads & Marketing', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', reference:'Resources (equipment, employees, suppliers)', closings:'Closings', settings:'Permissions & Settings' };
+const SECTION_ORDER = ['myDay','crm','dashboard','crmOverview','adsGoogle','closings','jobs','finance','payroll','outstanding','reminders','openItems','tasks','reference'];
+const SECTION_LABEL = { myDay:'My Day', dashboard:'Dashboard', adsGoogle:'Google Ads board', crm:'CRM', crmOverview:'Leads & Marketing', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', reference:'Resources (equipment, employees, suppliers)', closings:'Closings', settings:'Permissions & Settings' };
 const ROLE_LABEL = { owner:'Owner', manager:'Manager', technician:'Technician', va:'Virtual Assistant' };
 function roleLabel(role){ return ROLE_LABEL[role] || role; }
 function defaultPermissionsFor(role){
@@ -831,14 +862,16 @@ function canViewSection(profile, section){
   // Employee Views: only the owners (Ofek, Noam) can look at what each worker sees.
   // Dashboard: the whole-business summary (money, marketing, team) — owners/managers only, not grantable.
   if (section==='dashboard') return profile.role==='owner' || profile.role==='manager';
+  // My Day: Ron's daily work list, built from the CRM — anyone who works the CRM gets it, nobody else.
+  if (section==='myDay') return profile.role==='owner' || profile.role==='manager' || (profile.role==='va' && !!profile.permissions.crm);
   if (profile.role==='owner' || profile.role==='manager') return true;
   return !!profile.permissions[section];
 }
 function firstAccessibleTab(profile){ return SECTION_ORDER.find(s => canViewSection(profile,s)) || null; }
 // Where each person lands: owners/managers on the Dashboard, technicians on their own pay page (My Pay),
-// Ron on the CRM; anyone else on the first section they can open.
+// Ron on My Day (his list for today); anyone else on the first section they can open.
 function homeTabFor(profile){
-  const pref = (profile.role==='owner' || profile.role==='manager') ? 'dashboard' : profile.role==='technician' ? 'payroll' : profile.role==='va' ? 'crm' : null;
+  const pref = (profile.role==='owner' || profile.role==='manager') ? 'dashboard' : profile.role==='technician' ? 'payroll' : profile.role==='va' ? 'myDay' : null;
   return (pref && canViewSection(profile, pref)) ? pref : firstAccessibleTab(profile);
 }
 
@@ -2237,7 +2270,7 @@ async function doChangePassword(){
 // navBlocks below is consumed positionally in renderShell (index 0..3) — keep this array's order and
 // length in sync with that template if you add or remove a group.
 const NAV = [
-  { group:'Sales', items:[ {id:'crm', label:'CRM', icon:'◈'}, {id:'crmOverview', label:'Leads & Marketing', icon:'📊'}, {id:'adsGoogle', label:'Google Ads', icon:'🎯'} ] },
+  { group:'Sales', items:[ {id:'myDay', label:'My Day', icon:'☀'}, {id:'crm', label:'CRM', icon:'◈'}, {id:'crmOverview', label:'Leads & Marketing', icon:'📊'}, {id:'adsGoogle', label:'Google Ads', icon:'🎯'} ] },
   { group:'Overview', items:[ {id:'dashboard', label:'Dashboard', icon:'🧭'}, {id:'reminders', label:'Reminders', icon:'●'}, {id:'openItems', label:'Open Tasks', icon:'▣'} ] },
   { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'finance', label:'Financial Summary', icon:'▦'}, {id:'payroll', label:'Payroll', icon:'💵'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
   { group:'System', items:[ {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
@@ -2969,7 +3002,9 @@ function finishPopup(){ closePopup(); const a = POPUP_AFTER; POPUP_AFTER = null;
 
 // ── Chasing: workdays are Mon–Fri, 08:00–17:00 Sydney ──
 function sydneyWall(d){
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{ timeZone:'Australia/Sydney', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false, weekday:'short' }).formatToParts(d).map(x=>[x.type,x.value]));
+  // The formatter is built once and kept on the function — the lead alerts ask for Sydney time many times per screen.
+  const fmt = sydneyWall.fmt || (sydneyWall.fmt = new Intl.DateTimeFormat('en-CA',{ timeZone:'Australia/Sydney', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false, weekday:'short' }));
+  const p = Object.fromEntries(fmt.formatToParts(d).map(x=>[x.type,x.value]));
   return { day:`${p.year}-${p.month}-${p.day}`, hour:Number(p.hour)%24, minute:Number(p.minute), dow:p.weekday };
 }
 function isWorkday(dayStr){ const dw = parseLocalDate(dayStr).getDay(); return dw>=1 && dw<=5; }
@@ -2983,6 +3018,39 @@ function chaseAlertDue(sinceIso){
   while (!isWorkday(day)) day = shiftDays(day, 1);
   return { day, mins };
 }
+// When a clock that starts at `sinceIso` has run `minutes` of WORKING time (Mon–Fri 08:00–17:00 Sydney).
+function workClockDue(sinceIso, minutes){
+  const w = sydneyWall(new Date(sinceIso));
+  let day = w.day, start = w.hour*60 + w.minute;
+  if (!isWorkday(day) || start >= 17*60) { day = shiftDays(day, 1); start = 8*60; } else if (start < 8*60) start = 8*60;
+  while (!isWorkday(day)) day = shiftDays(day, 1);
+  let left = minutes;
+  for (let guard = 0; guard < 400; guard++) {
+    const room = 17*60 - start;
+    if (left <= room) return { day, mins: start + left };
+    left -= room; day = shiftDays(day, 1); while (!isWorkday(day)) day = shiftDays(day, 1); start = 8*60;
+  }
+  return { day, mins: 17*60 };
+}
+function sydneyNowPast(due, now){ const w = sydneyWall(now || new Date()); return w.day > due.day || (w.day===due.day && w.hour*60+w.minute >= due.mins); }
+// Automation 1 (Ofek, 28 Sep): a new website lead nobody has handled within 15 working minutes alerts Ron.
+// "Handled" = moved out of New, a call/reply logged on it, or someone closed the alert (×). Starts with leads
+// that arrive from the day it went live, so the old backlog doesn't flood the screen.
+const NEW_LEAD_ALERT_FROM = '2026-09-29';
+// When the lead (or a returning customer's new enquiry) came in: the first thing in its thread is the form/ad event.
+function leadArrivedAt(c){ if (c.reopenedAt) return c.reopenedAt; const m = (c.messages||[])[0]; return m && m.at ? m.at : null; }
+function newLeadUnhandled(c, now){
+  if (leadStage(c)!=='New') return false;
+  const at = leadArrivedAt(c); if (!at || sydneyWall(new Date(at)).day < NEW_LEAD_ALERT_FROM) return false;
+  const atMs = new Date(at).getTime();
+  if (c.lastReadAt && new Date(c.lastReadAt).getTime() >= atMs) return false;
+  if ((c.messages||[]).some(m => m.kind==='message' && new Date(m.at).getTime() >= atMs)) return false;
+  return sydneyNowPast(workClockDue(at, 15), now);
+}
+// Automation 2: a lead chased for 21+ days without an answer — Ron decides (lost as "no answer", or keep going).
+function chaseTooLong(c, now){ return leadStage(c)==='Chasing' && !!c.chasingSince && daysBetween(parseLocalDate(localDay(c.chasingSince)), parseLocalDate(sydneyWall(now||new Date()).day)) >= 21; }
+// Automation 3: a quote with no movement for 14+ days is flagged red.
+function quoteStale(c, now){ return leadStage(c)==='Quoted' && !!c.stageChangedAt && daysBetween(parseLocalDate(localDay(c.stageChangedAt)), parseLocalDate(sydneyWall(now||new Date()).day)) >= 14; }
 function chaseAlertIsDue(c, now){
   if (leadStage(c)!=='Chasing' || !c.chasingSince || c.chaseAlertDone) return false;
   const due = chaseAlertDue(c.chasingSince), w = sydneyWall(now || new Date());
@@ -3020,15 +3088,22 @@ function renderChaseBubbles(){
   const prof = typeof getCurrentProfile==='function' ? getCurrentProfile() : null;
   if (!STATE.data || !prof || !canViewSection(prof,'crm')) { if (host) host.remove(); return; }
   const due = (STATE.data.contacts||[]).filter(c => chaseAlertIsDue(c));
-  if (!due.length) { if (host) host.remove(); return; }
+  const fresh = (STATE.data.contacts||[]).filter(c => newLeadUnhandled(c));
+  if (!due.length && !fresh.length) { if (host) host.remove(); return; }
   if (!host) { host = document.createElement('div'); host.id = 'chase-bubbles'; host.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:1500;display:flex;flex-direction:column;gap:10px;max-width:340px'; document.body.appendChild(host); }
-  host.innerHTML = due.slice(0,5).map(c => `<div class="card" style="box-shadow:0 8px 28px rgba(0,0,0,.35);border-inline-start:4px solid var(--accent);padding:12px 14px;position:relative">
+  host.innerHTML = fresh.slice(0,3).map(c => `<div class="card" style="box-shadow:0 8px 28px rgba(0,0,0,.35);border-inline-start:4px solid var(--bad);padding:12px 14px;position:relative">
+      <button onclick="dismissNewLeadBubble('${c.id}')" aria-label="Dismiss" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--ink-soft);font-size:18px;cursor:pointer">×</button>
+      <div style="font-weight:700;margin-bottom:4px;padding-right:18px">🔥 New lead waiting: ${esc(c.fullName)}</div>
+      <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">Came in ${esc(myDayAgo(leadArrivedAt(c)))} and nobody has handled it yet. ${esc(c.phone||'')}</div>
+      <button class="btn primary small" onclick="goToLeadConversation('${c.id}')">Open customer card</button>
+    </div>`).join('') + due.slice(0,5).map(c => `<div class="card" style="box-shadow:0 8px 28px rgba(0,0,0,.35);border-inline-start:4px solid var(--accent);padding:12px 14px;position:relative">
       <button onclick="dismissChaseBubble('${c.id}')" aria-label="Dismiss" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--ink-soft);font-size:18px;cursor:pointer">×</button>
       <div style="font-weight:700;margin-bottom:4px;padding-right:18px">📞 Call ${esc(c.fullName)} now</div>
       <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">3 hours since they didn't answer. ${esc(c.phone||'')}</div>
       <button class="btn primary small" onclick="goToLeadConversation('${c.id}')">Open customer card</button>
     </div>`).join('') + (due.length>5 ? `<div class="hint" style="text-align:right">+${due.length-5} more in Chasing</div>` : '');
 }
+function dismissNewLeadBubble(id){ const c = contactById(id); if (!c) return; c.lastReadAt = new Date().toISOString(); db.contacts.update(id, { lastReadAt: c.lastReadAt }); renderChaseBubbles(); }
 function dismissChaseBubble(id){ const c = contactById(id); if (!c) return; c.chaseAlertDone = true; db.contacts.update(id, { chaseAlertDone: true }); renderChaseBubbles(); }
 setInterval(() => { try { renderChaseBubbles(); } catch(e) {} }, 60000);
 
@@ -3047,6 +3122,8 @@ function renderLeadCard(c){
     </div>
     <div class="lead-meta mono">${esc(c.phone||'—')}</div>
     ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
+    ${quoteStale(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Quote idle 14+ days</div>` : ''}
+    ${chaseTooLong(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Chasing 21+ days — decide</div>` : ''}
     ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">${esc(lostReasonLabel(lostReasonOf(c)))}</div>` : ''}
     ${(contactJobsTotal(c) ?? c.salesValue) ? `<div class="lead-sales-chip">💰 ${fmtMoney(contactJobsTotal(c) ?? c.salesValue)}</div>` : ''}
     ${c.nextFollowUp ? `<div class="lead-due ${overdue?'overdue':(dueToday?'today':'')}">${overdue?'⚠ Overdue':(dueToday?'● Due today':'○ Follow up')} · ${fmtDateShort(c.nextFollowUp)}</div>` : ''}
@@ -3287,7 +3364,7 @@ function renderCrmTable(allContacts){
       <td class="mono">${esc(c.phone||'—')}</td>
       <td>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</td>
       <td>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</td>
-      <td>${leadStageControl(c)}${leadStage(c)==='Chasing'?`<div style="margin-top:4px">${chaseTick(c)}</div>`:''}</td>
+      <td>${leadStageControl(c)}${leadStage(c)==='Chasing'?`<div style="margin-top:4px">${chaseTick(c)}</div>`:''}${quoteStale(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ Idle 14+ days</div>`:''}${chaseTooLong(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ 21+ days — decide</div>`:''}</td>
       <td class="wrap">${renderTableTagsCell(c)}</td>
       <td class="mono">${fmtDateShort(c.createdAt)}</td>
       <td class="mono">${fmtDateShort(lastContactedAt(c))}</td>
@@ -5470,7 +5547,7 @@ function renderOutstanding(profile, data){
 }
 
 /* ── reminders ───────────────────────────────────────────────────────── */
-const REMINDER_ICONS = { unpaid:'💵', commission:'🧾', refund:'♻️', equipment:'🧰', followup:'📞', 'repeat-service':'🔁' };
+const REMINDER_ICONS = { unpaid:'💵', commission:'🧾', refund:'♻️', equipment:'🧰', followup:'📞', 'repeat-service':'🔁', 'chase-long':'⏳', 'stale-quote':'📄' };
 function deleteManualReminder(id, rowEl){
   confirmAction('Delete this reminder?', ()=>{
     animateRowRemove(rowEl, ()=>{
@@ -5540,7 +5617,7 @@ function goToReminderTarget(type, contactId, readKey, weekKey){
   const refId = String(readKey||'').split(':').slice(1).join(':');   // "repeat-service:<jobId>", …
   if (type==='commission' && can('payroll')) { UI.tab='payroll'; if (weekKey) UI.payroll.week = weekKey; render(); return; }
   // A lead follow-up, an unpaid invoice or a re-offer opens that customer when they're linked and this person sees the CRM.
-  if ((type==='followup' || type==='unpaid' || type==='repeat-service') && contactId && can('crm')) { goToLeadConversation(contactId); return; }
+  if ((type==='followup' || type==='unpaid' || type==='repeat-service' || type==='chase-long' || type==='stale-quote') && contactId && can('crm')) { goToLeadConversation(contactId); return; }
   if ((type==='unpaid' || type==='refund') && can('outstanding')) { UI.tab='outstanding'; render(); return; }
   if (type==='repeat-service' && refId && can('jobs')) { goToJobFromSearch(refId); return; }
   if (type==='equipment' && can('reference')) { UI.tab='reference'; UI.reference.tab='equipmentSpend'; render(); return; }
@@ -5566,6 +5643,128 @@ function renderReminders(profile, data){
   return `
     <div class="page-head"><div><h1 class="page-title">Reminders</h1><div class="page-sub">Computed automatically from your data — click one to go straight to it, or delete it if you don't need the alert</div></div></div>
     <div class="table-wrap" style="padding:4px 18px">${list}</div>
+  `;
+}
+
+/* ── My Day: Ron's list for today (v1, 28 Sep) ──────────────────────────
+   One page that answers "who do I call now?": new leads first, then today's chasing calls, follow-ups due, quotes
+   going cold, and whether today's hours/bookings are logged. Everything here is read from the CRM — nothing new is stored. */
+const MY_DAY_NEW_DAYS = 7;   // New leads older than this are backlog: counted, not listed
+function myDayLists(data, now){
+  // Arrivals and chasing run on Sydney days; follow-ups and the daily log use the same "today" as the rest of the app.
+  const today = sydneyWall(now || new Date()).day, localToday = todayStr(now);
+  const cs = data.contacts || [];
+  let prevWorkday = shiftDays(today, -1); while (!isWorkday(prevWorkday)) prevWorkday = shiftDays(prevWorkday, -1);
+  const arrivedDay = c => localDay(leadArrivedAt(c) || c.createdAt);
+  const allNew = cs.filter(c => leadStage(c)==='New');
+  const fresh = allNew.filter(c => arrivedDay(c) >= shiftDays(today, -MY_DAY_NEW_DAYS));
+  const late = new Set(fresh.filter(c => newLeadUnhandled(c, now)));
+  fresh.sort((a,b) => Number(late.has(b)) - Number(late.has(a)) || String(leadArrivedAt(a)||a.createdAt).localeCompare(String(leadArrivedAt(b)||b.createdAt)));
+  const chasing = cs.filter(c => leadStage(c)==='Chasing');
+  return {
+    today, localToday, prevWorkday,
+    sinceYesterday: cs.filter(c => arrivedDay(c) >= prevWorkday),
+    fresh, backlog: allNew.filter(c => !fresh.includes(c)),
+    unhandled: fresh.filter(c => late.has(c)),
+    chaseToCall: chasing.filter(c => !chaseTooLong(c, now) && !chaseCounter(c, now).calledToday),
+    chaseDone: chasing.filter(c => !chaseTooLong(c, now) && chaseCounter(c, now).calledToday),
+    chaseDecide: chasing.filter(c => chaseTooLong(c, now)),
+    followups: cs.filter(c => followupDue(c, localToday)).sort((a,b) => a.nextFollowUp.localeCompare(b.nextFollowUp)),
+    staleQuotes: cs.filter(c => quoteStale(c, now)).sort((a,b) => String(a.stageChangedAt).localeCompare(String(b.stageChangedAt))),
+  };
+}
+function myDayAgo(iso){
+  if (!iso) return '';
+  const mins = Math.round((Date.now() - new Date(iso).getTime())/60000);
+  if (mins < 60) return `${Math.max(mins,0)} min ago`;
+  if (mins < 60*24) return `${Math.round(mins/60)} h ago`;
+  return `${Math.round(mins/1440)} days ago`;
+}
+function myDayRow(c, right, opts){
+  const o = opts || {};
+  return `<div class="myday-row${o.bad?' bad':''}" onclick="goToLeadConversation('${c.id}')" tabindex="0" onkeydown="if(event.key==='Enter'){goToLeadConversation('${c.id}')}">
+    <div style="min-width:0;flex:1">
+      <div style="font-weight:600;font-size:13.5px">${esc(c.fullName)}${unreadBadge(c)} ${o.flag||''}</div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:2px"><span class="mono">${esc(c.phone||'no phone')}</span> · ${esc(c.division||'—')} · ${esc(sourceLabel(c.source))}${o.meta?` · ${o.meta}`:''}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end" onclick="event.stopPropagation()">${right||''}</div>
+  </div>`;
+}
+function myDaySection(id, title, count, body, emptyText, note, countTone){
+  return `<section class="card myday-section" id="myday-${id}">
+    <div class="myday-head"><h2>${esc(title)}</h2><span class="myday-count${count?'':' zero'}${countTone?' '+countTone:''}">${count}</span></div>
+    ${note ? `<div class="hint" style="margin:-4px 0 8px">${note}</div>` : ''}
+    ${body || `<div class="hint" style="padding:6px 0">${esc(emptyText)}</div>`}
+  </section>`;
+}
+function myDayJump(id){ const el = document.getElementById('myday-'+id); if (el) el.scrollIntoView({ behavior:'smooth', block:'start' }); }
+function chaseGiveUp(id){
+  const c = contactById(id); if (!c || leadStage(c)!=='Chasing') return;
+  confirmAction(`${c.fullName} has been in Chasing for 21+ days. Move them to Lost with the reason "No answer"?`, () => {
+    const label = lostReasonLabel('noAnswer');
+    const tags = (c.tags||[]).includes(label) ? c.tags : [...(c.tags||[]), label];
+    applyLeadStage(c, 'Lost', { lostReason:'noAnswer', tags });
+    render();
+  }, { danger:false, title:'Mark as Lost?', confirmLabel:'Mark as Lost' });
+}
+function chaseKeepGoing(id){
+  const c = contactById(id); if (!c || leadStage(c)!=='Chasing') return;
+  c.chasingSince = new Date().toISOString();
+  db.contacts.update(c.id, { chasingSince: c.chasingSince });
+  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', 'Kept chasing after 21 days (count restarted)');
+  showToast(`${c.fullName} stays in Chasing — asked again in 21 days`);
+  render();
+}
+function renderMyDay(profile, data){
+  const now = new Date();
+  const L = myDayLists(data, now);
+  const dayName = parseLocalDate(L.today).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' });
+  const logPeople = profile.role==='va' ? [profile.technicianName || profile.fullName] : payrollHourlyPeople(data);
+  const logRows = logPeople.map(person => {
+    const log = (data.salesLogs||[]).find(l => l.person===person && l.date===L.localToday);
+    return { person, log, bookings: log ? salesLogBookings(log) : 0 };
+  });
+  const stat = (id, label, n, sub, tone) => `<button class="myday-stat${n && tone?' '+tone:''}" onclick="myDayJump('${id}')"><span class="myday-stat-n">${n}</span><span class="myday-stat-l">${esc(label)}</span>${sub?`<span class="myday-stat-s">${esc(sub)}</span>`:''}</button>`;
+
+  const newBody = L.fresh.map(c => {
+    const late = newLeadUnhandled(c, now);
+    return myDayRow(c, `<span class="hint">${esc(myDayAgo(leadArrivedAt(c)) || fmtDateShort(c.createdAt))}</span>${leadStageControl(c)}`,
+      { bad: late, flag: late ? pill('bad','Waiting 15+ min') : '' });
+  }).join('');
+  const chaseRow = c => { const k = chaseCounter(c, now); return myDayRow(c, chaseTick(c), { meta: `chasing since ${fmtDateShort(localDay(c.chasingSince))} · called ${k.x} of ${k.y} days` }); };
+  const decideBody = L.chaseDecide.map(c => myDayRow(c,
+    `<button class="btn small" onclick="chaseKeepGoing('${c.id}')">Keep chasing</button><button class="btn small danger" onclick="chaseGiveUp('${c.id}')">Lost — no answer</button>`,
+    { bad: true, meta: `chasing ${daysBetween(parseLocalDate(localDay(c.chasingSince)), parseLocalDate(L.today))} days` })).join('');
+  const fuBody = L.followups.map(c => { const ctx = leadFollowupContextFor(c); const over = c.nextFollowUp < L.localToday;
+    return myDayRow(c, `${pill(over?'bad':'warn', over?'Overdue':'Today')}<span class="hint">${fmtDateShort(c.nextFollowUp)}</span>`, { bad: over, meta: `${esc(stageLabel(leadStage(c)))}${ctx?` — ${esc(ctx)}`:''}` }); }).join('');
+  const quoteBody = L.staleQuotes.map(c => myDayRow(c, `${pill('bad', daysBetween(parseLocalDate(localDay(c.stageChangedAt)), parseLocalDate(L.today))+' days')}${leadStageControl(c)}`,
+    { bad: true, meta: `quoted ${fmtDateShort(localDay(c.stageChangedAt))}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` })).join('');
+  const logBody = logRows.map(r => `<div class="myday-row" style="cursor:default">
+      <div style="flex:1"><div style="font-weight:600;font-size:13.5px">${esc(r.person)}</div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${r.log ? `${r.log.hours}h · ${r.bookings} booking${r.bookings===1?'':'s'} today` : 'Hours and bookings for today are not logged yet'}</div></div>
+      ${r.log ? pill('good','Logged') : pill('warn','Not logged')}
+      <button class="btn small" onclick="goTab('payroll')">${r.log ? 'Update' : 'Log today'} →</button>
+    </div>`).join('');
+
+  return `
+    <div class="page-head"><div><h1 class="page-title">My Day</h1><div class="page-sub">${esc(dayName)} · who to call, in order. Work hours Mon–Fri 8:00–17:00.</div></div></div>
+    <div class="myday-summary card">
+      <div class="stat-label" style="margin-bottom:10px">Morning summary</div>
+      <div class="myday-stats">
+        ${stat('new', 'New leads since '+(L.prevWorkday===shiftDays(L.today,-1)?'yesterday':fmtDateShort(L.prevWorkday)), L.sinceYesterday.length, L.unhandled.length ? `${L.unhandled.length} waiting 15+ min` : '', L.unhandled.length ? 'bad' : '')}
+        ${stat('chasing', 'Chasing — call today', L.chaseToCall.length, L.chaseDone.length ? `${L.chaseDone.length} already called` : '', 'warn')}
+        ${stat('decide', 'Chasing 21+ days', L.chaseDecide.length, 'decide: keep or lost', 'bad')}
+        ${stat('followups', 'Follow-ups due', L.followups.length, L.followups.filter(c=>c.nextFollowUp<L.localToday).length ? `${L.followups.filter(c=>c.nextFollowUp<L.localToday).length} overdue` : '', 'warn')}
+        ${stat('quotes', 'Quotes idle 14+ days', L.staleQuotes.length, '', 'bad')}
+      </div>
+    </div>
+    ${myDaySection('new', 'New leads — call first', L.fresh.length, newBody, 'No new leads waiting. ✓',
+      `Last ${MY_DAY_NEW_DAYS} days, oldest waiting first. Move each one to its next stage once you've spoken to them.${L.backlog.length ? ` ${drill(`${L.backlog.length} older lead${L.backlog.length===1?' is':'s are'} still in New`, 'Older leads still in New', 'leads', L.backlog)} — clear them in the CRM when you have time.` : ''}`)}
+    ${myDaySection('chasing', 'Chasing — call today', L.chaseToCall.length + L.chaseDone.length, L.chaseToCall.map(chaseRow).join('') + L.chaseDone.map(chaseRow).join(''), 'Nobody in Chasing right now.', 'Tick "Called today" after each call. Leads you already called today drop to the bottom.')}
+    ${L.chaseDecide.length ? myDaySection('decide', 'Chasing 21+ days — decide', L.chaseDecide.length, decideBody, '', 'Three weeks without an answer. Mark as Lost (no answer), or keep chasing for another 21 days.') : ''}
+    ${myDaySection('followups', 'Follow-ups due', L.followups.length, fuBody, 'No follow-ups due today. ✓')}
+    ${myDaySection('quotes', 'Quotes idle 14+ days', L.staleQuotes.length, quoteBody, 'No quote has been sitting for 14 days. ✓', 'A quote nobody has touched for two weeks goes cold. Call them, or move the lead on.')}
+    ${logRows.length ? myDaySection('log', 'Log your day', logRows.filter(r=>!r.log).length, logBody, '', 'Hours and bookings go on the Payroll page — that is what your pay is calculated from.', logRows.every(r=>r.log) ? 'done' : '') : ''}
   `;
 }
 
@@ -6978,6 +7177,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   else if (UI.tab==='dashboard') { if ((UI.dashboard.view==='google' || UI.dashboard.view==='meta') && !ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = UI.dashboard.view==='google' ? renderDashGoogle(profile, data) : UI.dashboard.view==='meta' ? renderDashMeta(profile, data) : UI.dashboard.view==='leads' ? renderCrmOverview(profile, data) : renderDashboard(profile, data); }
   else if (UI.tab==='payroll') content.innerHTML = renderPayroll(profile, data);
   else if (UI.tab==='outstanding') content.innerHTML = renderOutstanding(profile, data);
+  else if (UI.tab==='myDay') content.innerHTML = renderMyDay(profile, data);
   else if (UI.tab==='reminders') content.innerHTML = renderReminders(profile, data);
   else if (UI.tab==='openItems') content.innerHTML = renderOpenItems(profile, data);
   else if (UI.tab==='tasks') content.innerHTML = renderTasks(profile, data);
