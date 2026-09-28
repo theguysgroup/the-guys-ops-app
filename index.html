@@ -939,38 +939,49 @@ async function loadFromSupabase(){
   STATE.profiles = (profileRows||[]).map(p => ({ id:p.id, fullName:p.full_name, role:p.role, technicianName:p.technician_name, permissions:p.permissions||{} }));
   STATE.currentProfileId = mine.id;
 
+  // Every list table is read page by page (fetchAllRows): one request returns at most 1,000 rows, and
+  // anything past that used to disappear without a trace. Single-row tables stay as one request.
+  const LOAD_NAMES = ['leads','jobs','equipment purchases','equipment catalogue','suppliers','tasks','quotes','closings',
+    'reminders','tags','deleted reminders','cash status','settings','employees','commission rates',
+    'activity history','ad spend','payroll','daily sales log','Google Ads calls','read reminders'];
+  const loadResults = await Promise.all([
+    fetchAllRows('contacts', 'id'),
+    fetchAllRows('jobs', 'id'),
+    fetchAllRows('equipment_spend', 'id'),
+    fetchAllRows('equipment_catalog', 'id'),
+    fetchAllRows('suppliers', 'id'),
+    fetchAllRows('tasks', 'id'),
+    fetchAllRows('quotes', 'id'),
+    fetchAllRows('closings', 'id'),
+    fetchAllRows('manual_reminders', 'id'),
+    fetchAllRows('tag_catalog', 'tag'),
+    fetchAllRows('dismissed_reminders', 'key'),
+    sb.from('cash_status').select('*').eq('id', 1).maybeSingle(),
+    sb.from('settings').select('*').eq('id', 1).maybeSingle(),
+    fetchAllRows('employees', 'id'),
+    fetchAllRows('commission_rates', 'technician_name'),
+    fetchAllRows('activity_log', 'id'),
+    // Fed by the ingest-ad-spend Edge Function (Google Ads + Meta Ads daily spend).
+    fetchAllRows('ad_spend', 'id'),
+    fetchAllRows('payroll_weeks', 'id'),
+    fetchAllRows('sales_daily_log', 'id'),
+    // Google Ads phone calls (owners/managers only via RLS — everyone else just gets []).
+    fetchAllRows('ad_calls', 'id'),
+    // Which reminders THIS person has already opened (RLS returns only their own rows).
+    fetchAllRows('reminder_reads', 'key'),
+  ]);
   const [
     { data: contacts }, { data: jobs }, { data: equipmentSpend }, { data: equipmentCatalog },
     { data: suppliers }, { data: tasks }, { data: quotes }, { data: closings },
     { data: manualReminders }, { data: tagCatalog }, { data: dismissedReminders },
     { data: cashStatusRow }, { data: settingsRow }, { data: employees }, { data: commissionRateRows },
     { data: activityRows }, { data: adSpendRows }, { data: payrollRows }, { data: salesLogRows }, { data: adCallRows },
-  ] = await Promise.all([
-    sb.from('contacts').select('*'),
-    sb.from('jobs').select('*'),
-    sb.from('equipment_spend').select('*'),
-    sb.from('equipment_catalog').select('*'),
-    sb.from('suppliers').select('*'),
-    sb.from('tasks').select('*'),
-    sb.from('quotes').select('*'),
-    sb.from('closings').select('*'),
-    sb.from('manual_reminders').select('*'),
-    sb.from('tag_catalog').select('*'),
-    sb.from('dismissed_reminders').select('*'),
-    sb.from('cash_status').select('*').eq('id', 1).maybeSingle(),
-    sb.from('settings').select('*').eq('id', 1).maybeSingle(),
-    sb.from('employees').select('*'),
-    sb.from('commission_rates').select('*'),
-    sb.from('activity_log').select('*'),
-    // Fed by the ingest-ad-spend Edge Function (Supermetrics -> Google Ads + Meta Ads daily spend).
-    // Same (data||[]) defensive pattern as every other table below covers the table not existing yet.
-    sb.from('ad_spend').select('*'),
-    // Payroll board — same (data||[]) tolerance as ad_spend if a table is missing.
-    sb.from('payroll_weeks').select('*'),
-    sb.from('sales_daily_log').select('*'),
-    // Google Ads phone calls (owners/managers only via RLS — everyone else just gets []).
-    sb.from('ad_calls').select('*'),
-  ]);
+    { data: readReminderRows },
+  ] = loadResults;
+  // A table that failed to load used to look exactly like an empty one. Remember which ones failed so
+  // every screen shows a red warning instead of quietly showing partial data.
+  STATE.loadErrors = loadResults.map((r, i) => (r && r.error) ? LOAD_NAMES[i] : null).filter(Boolean);
+  if (STATE.loadErrors.length) console.error('Load failed for:', loadResults.filter(r => r && r.error).map(r => r.error));
 
   // Group the shared activity_log table back into each record's own .activityLog[],
   // exactly like the old inline arrays — findRecordByKind()'s kind strings, unchanged.
@@ -997,10 +1008,7 @@ async function loadFromSupabase(){
       chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done,
     })),
     jobs: (jobs||[]).map(j => ({ ...mapJobRow(j), activityLog: logsFor('job', j.id) })),
-    equipmentSpend: (equipmentSpend||[]).map(e => ({
-      id:e.id, date:e.date, item:e.item, technician:e.technician, paidBy:e.paid_by||'', cost:e.cost||0,
-      reimbursed:e.reimbursed, activityLog: logsFor('equipment', e.id),
-    })),
+    equipmentSpend: (equipmentSpend||[]).map(e => ({ ...mapEquipSpendRow(e), activityLog: logsFor('equipment', e.id) })),
     equipmentCatalog: (equipmentCatalog||[]).map(x => ({
       id:x.id, name:x.name, supplierId:x.supplier_id, otherSource:x.other_source||'', price:x.price||0,
       category:x.category||'', description:x.description||'', purchaseDate:x.purchase_date,
@@ -1009,34 +1017,16 @@ async function loadFromSupabase(){
       id:s.id, name:s.name, supplyType:s.supply_type||'', contactPerson:s.contact_person||'', phone:s.phone||'',
       email:s.email||'', addressWebsite:s.address_website||'', paymentTerms:s.payment_terms||'',
     })),
-    tasks: (tasks||[]).map(t => ({
-      id:t.id, board:t.board, title:t.title, status:t.status, due:t.due, notes:t.notes||'', client:t.client||'',
-      priority:t.priority, assignees:t.assignees||[], assignedTo:t.assigned_to||'', headsUp:t.heads_up||'',
-      createdBy:t.created_by||'', createdAt:t.created_at,
-      technician:t.technician||'', category:t.category||'', subtasks:t.subtasks||[], updates:t.updates||[],
-      activityLog: logsFor('task', t.id),
-    })),
-    quotes: (quotes||[]).map(q => ({
-      id:q.id, customer:q.customer, date:q.date, amount:q.amount||0, status:q.status, notes:q.notes||'',
-      jobNumber:q.job_number||'', clientNumber:q.client_number||'', email:q.email||'', address:q.address||'',
-      serviceTypes:q.service_types||[], winProbability:q.win_probability||'', nextAction:q.next_action||'',
-      nextActionNotes:q.next_action_notes||'', sent:q.sent||false, technicianQuoted:q.technician_quoted||'',
-      followedBy:q.followed_by||'', updates:q.updates||[],
-    })),
-    closings: (closings||[]).map(c => ({
-      id:c.id, technicianName:c.technician_name, date:c.date, customerName:c.customer_name,
-      invoiceNumber:c.invoice_number||'', jobType:c.job_type, amount:c.amount||0, includesGST:c.includes_gst,
-      paymentStatus:c.payment_status, paymentMethod:c.payment_method||'', partsCost:c.parts_cost||0,
-      partsPaidBy:c.parts_paid_by||'', notes:c.notes||'', invoiceFileUrl:c.invoice_file_url,
-      postedBy:c.posted_by||'', createdAt:c.created_at, linkedJobId:c.linked_job_id||null,
-    })),
+    tasks: (tasks||[]).map(t => ({ ...mapTaskRow(t), activityLog: logsFor('task', t.id) })),
+    quotes: (quotes||[]).map(mapQuoteRow),
+    closings: (closings||[]).map(mapClosingRow),
     manualReminders: (manualReminders||[]).map(r => ({
       id:r.id, contactId:r.contact_id, contactName:r.contact_name||'', title:r.title, date:r.date,
       note:r.note||'', done:r.done,
     })),
     tagCatalog: (tagCatalog||[]).map(t => t.tag),
     dismissedReminders: (dismissedReminders||[]).map(d => d.key),
-    readReminders: [],   // client-only for now (see markReminderRead) — not yet a Supabase table
+    readReminders: (readReminderRows||[]).map(r => r.key),
     cashStatus: { amount: cashStatusRow?.amount||0, activityLog: logsFor('cashStatus','main') },
     settings: settingsRow ? {
       unpaidReminderDays:settingsRow.unpaid_reminder_days, quoteStaleDays:settingsRow.quote_stale_days,
@@ -1205,6 +1195,38 @@ function equipmentSpendPatchToRow(patch){
   if ('date' in row && !row.date) row.date = todayStr();   // equipment_spend.date is NOT NULL, same defense as jobs.date
   return row;
 }
+// One request returns at most 1,000 rows, so read list tables page by page (ordered by the primary key so
+// pages never overlap or skip). A failure returns the error instead of a short list that looks complete.
+async function fetchAllRows(table, orderCol){
+  const out = []; const size = 1000;
+  for (let from = 0; ; from += size) {
+    const { data, error } = await sb.from(table).select('*').order(orderCol, { ascending:true }).range(from, from + size - 1);
+    if (error) return { data: out, error };
+    out.push(...(data||[]));
+    if (!data || data.length < size) return { data: out, error: null };
+  }
+}
+// A failed save must never look like it worked: reload the row as it really is in the database, put it
+// back on screen, and say clearly that the change was not saved. (Presentation mode blocks every write on
+// purpose and its figures are scaled, so there the change just stays on screen with the warning.)
+async function restoreAfterFailedSave(listKey, table, id, mapRow, what, error){
+  showToast(`Not saved (${what}): ${error.message}. The screen now shows what is really saved.`);
+  if (PRESENT || !STATE.data) return;
+  const { data: row, error: readErr } = await sb.from(table).select('*').eq('id', id).maybeSingle();
+  if (readErr) { showToast(`Not saved (${what}). Reload the page before you continue.`); return; }
+  const list = STATE.data[listKey] || (STATE.data[listKey] = []);
+  const idx = list.findIndex(x => x.id === id);
+  if (!row) { if (idx !== -1) list.splice(idx, 1); render(); return; }
+  const fresh = mapRow(row);
+  if (idx === -1) list.push({ ...fresh, activityLog: [] });
+  else list[idx] = { ...fresh, activityLog: list[idx].activityLog || [] };
+  render();
+}
+// A failed delete puts the item back where it was.
+function restoreAfterFailedDelete(listKey, item, what, error){
+  showToast(`Not deleted (${what}): ${error.message}`);
+  if (item && STATE.data && !(STATE.data[listKey]||[]).some(x => x.id === item.id)) { (STATE.data[listKey] ||= []).push(item); render(); }
+}
 const db = {
   jobs: {
     async create(values){
@@ -1218,12 +1240,13 @@ const db = {
       const j = STATE.data.jobs.find(x=>x.id===id);
       if (j) Object.assign(j, patch);
       const { error } = await sb.from('jobs').update(jobPatchToRow(patch)).eq('id', id);
-      if (error) showToast('Could not save change: '+error.message);
+      if (error) await restoreAfterFailedSave('jobs', 'jobs', id, mapJobRow, 'job', error);
     },
     async remove(id){
+      const gone = STATE.data.jobs.find(x=>x.id===id);
       STATE.data.jobs = STATE.data.jobs.filter(x=>x.id!==id);
       const { error } = await sb.from('jobs').delete().eq('id', id);
-      if (error) showToast('Could not delete job: '+error.message);
+      if (error) restoreAfterFailedDelete('jobs', gone, 'job', error);
     },
   },
   tasks: {
@@ -1238,12 +1261,13 @@ const db = {
       const t = STATE.data.tasks.find(x=>x.id===id);
       if (t) Object.assign(t, patch);
       const { error } = await sb.from('tasks').update(taskPatchToRow(patch)).eq('id', id);
-      if (error) showToast('Could not save change: '+error.message);
+      if (error) await restoreAfterFailedSave('tasks', 'tasks', id, mapTaskRow, 'task', error);
     },
     async remove(id){
+      const gone = STATE.data.tasks.find(x=>x.id===id);
       STATE.data.tasks = STATE.data.tasks.filter(x=>x.id!==id);
       const { error } = await sb.from('tasks').delete().eq('id', id);
-      if (error) showToast('Could not delete task: '+error.message);
+      if (error) restoreAfterFailedDelete('tasks', gone, 'task', error);
     },
   },
   quotes: {
@@ -1258,12 +1282,13 @@ const db = {
       const q = STATE.data.quotes.find(x=>x.id===id);
       if (q) Object.assign(q, patch);
       const { error } = await sb.from('quotes').update(quotePatchToRow(patch)).eq('id', id);
-      if (error) showToast('Could not save change: '+error.message);
+      if (error) await restoreAfterFailedSave('quotes', 'quotes', id, mapQuoteRow, 'quote', error);
     },
     async remove(id){
+      const gone = STATE.data.quotes.find(x=>x.id===id);
       STATE.data.quotes = STATE.data.quotes.filter(x=>x.id!==id);
       const { error } = await sb.from('quotes').delete().eq('id', id);
-      if (error) showToast('Could not delete quote: '+error.message);
+      if (error) restoreAfterFailedDelete('quotes', gone, 'quote', error);
     },
   },
   closings: {
@@ -1278,7 +1303,7 @@ const db = {
       const c = STATE.data.closings.find(x=>x.id===id);
       if (c) Object.assign(c, patch);
       const { error } = await sb.from('closings').update(closingPatchToRow(patch)).eq('id', id);
-      if (error) showToast('Could not save change: '+error.message);
+      if (error) await restoreAfterFailedSave('closings', 'closings', id, mapClosingRow, 'closing', error);
     },
   },
   contacts: {
@@ -1293,18 +1318,19 @@ const db = {
       const c = STATE.data.contacts.find(x=>x.id===id);
       if (c) Object.assign(c, patch);
       const { error } = await sb.from('contacts').update(contactPatchToRow(patch)).eq('id', id);
-      if (error) showToast('Could not save change: '+error.message);
+      if (error) await restoreAfterFailedSave('contacts', 'contacts', id, mapContactRow, 'lead', error);
     },
     async remove(id){
+      const gone = STATE.data.contacts.find(x=>x.id===id);
       STATE.data.contacts = STATE.data.contacts.filter(x=>x.id!==id);
       const { error } = await sb.from('contacts').delete().eq('id', id);
-      if (error) showToast('Could not delete lead: '+error.message);
+      if (error) restoreAfterFailedDelete('contacts', gone, 'lead', error);
     },
   },
   activityLog: {
     async insert(kind, recordId, actor, text){
       const { error } = await sb.from('activity_log').insert({ record_kind:kind, record_id:String(recordId), actor, text, manual:true });
-      if (error) console.error('activity_log insert failed:', error);
+      if (error) { console.error('activity_log insert failed:', error); showToast('History note not saved: '+error.message); }
     },
   },
   tagCatalog: {
@@ -1320,7 +1346,10 @@ const db = {
   dismissedReminders: {
     async add(key){
       const { error } = await sb.from('dismissed_reminders').upsert({ key });
-      if (error) console.error('dismissed_reminders insert failed:', error);
+      if (error) {
+        showToast('Reminder not deleted: '+error.message);
+        if (STATE.data && !PRESENT) { STATE.data.dismissedReminders = (STATE.data.dismissedReminders||[]).filter(k => k!==key); render(); }
+      }
     },
   },
   manualReminders: {
@@ -1336,17 +1365,18 @@ const db = {
     async remove(id){
       STATE.data.manualReminders = (STATE.data.manualReminders||[]).filter(r=>r.id!==id);
       const { error } = await sb.from('manual_reminders').delete().eq('id', id);
-      if (error) showToast('Could not delete reminder: '+error.message);
+      if (error) showToast('Could not delete reminder: '+error.message+'. Reload the page to see it again.');
     },
     async setDone(id, done){
       const r = (STATE.data.manualReminders||[]).find(x=>x.id===id);
       if (r) r.done = done;
       const { error } = await sb.from('manual_reminders').update({ done }).eq('id', id);
-      if (error) console.error('manual_reminders update failed:', error);
+      if (error) { showToast('Reminder not saved: '+error.message); if (r && !PRESENT) { r.done = !done; render(); } }
     },
   },
   settings: {
     async update(patch){
+      const before = {}; for (const k in patch) before[k] = STATE.data.settings[k];
       Object.assign(STATE.data.settings, patch);
       const map = {
         unpaidReminderDays:'unpaid_reminder_days', quoteStaleDays:'quote_stale_days', gstRatePercent:'gst_rate_percent',
@@ -1354,7 +1384,7 @@ const db = {
       };
       const row = {}; for (const k in patch) if (map[k]) row[map[k]] = patch[k];
       const { error } = await sb.from('settings').update(row).eq('id', 1);
-      if (error) showToast('Could not save setting: '+error.message);
+      if (error) { showToast('Setting not saved: '+error.message); if (!PRESENT) { Object.assign(STATE.data.settings, before); render(); } }
     },
   },
   // Payroll board statuses — one row per (week, person), upserted on the unique key.
@@ -1362,6 +1392,7 @@ const db = {
     async set(weekKey, person, patch){
       if (!STATE.data.payrollWeeks) STATE.data.payrollWeeks = [];
       let r = STATE.data.payrollWeeks.find(x => x.weekKey===weekKey && x.person===person);
+      const before = r ? { ...r } : null;
       if (!r) { r = { weekKey, person, cashCollected:false, salaryPaid:false }; STATE.data.payrollWeeks.push(r); }
       Object.assign(r, patch);
       const row = {
@@ -1372,7 +1403,13 @@ const db = {
         updated_at: new Date().toISOString(),
       };
       const { error } = await sb.from('payroll_weeks').upsert(row, { onConflict: 'week_start,person' });
-      if (error) showToast('Could not save payroll status: '+error.message);
+      if (error) {
+        showToast('Payroll status not saved: '+error.message);
+        if (!PRESENT) {
+          if (before) Object.assign(r, before); else STATE.data.payrollWeeks = STATE.data.payrollWeeks.filter(x => x !== r);
+          render();
+        }
+      }
     },
   },
   // Hourly staff daily log (Ron): hours + bookings per division, one row per (person, day).
@@ -1397,11 +1434,12 @@ const db = {
   profiles: {
     async update(id, patch){
       const p = STATE.profiles.find(x=>x.id===id);
+      const before = p ? { permissions: p.permissions } : null;
       if (p) Object.assign(p, patch);
       const row = {};
       if ('permissions' in patch) row.permissions = patch.permissions;
       const { error } = await sb.from('profiles').update(row).eq('id', id);
-      if (error) showToast('Could not save permission change: '+error.message);
+      if (error) { showToast('Permission change not saved: '+error.message); if (p && before && !PRESENT) { Object.assign(p, before); render(); } }
     },
   },
   employees: {
@@ -1416,7 +1454,7 @@ const db = {
       const e = STATE.data.employees.find(x=>x.id===id);
       if (e) Object.assign(e, patch);
       const { error } = await sb.from('employees').update(employeePatchToRow(patch)).eq('id', id);
-      if (error) showToast('Could not save change: '+error.message);
+      if (error) showToast('Not saved: '+error.message+'. Reload the page to see what is really saved.');
     },
     async remove(id){
       STATE.data.employees = STATE.data.employees.filter(x=>x.id!==id);
@@ -1431,7 +1469,7 @@ const db = {
     async set(technicianName, rates){
       STATE.data.commissionRates[technicianName] = rates;
       const { error } = await sb.from('commission_rates').upsert({ technician_name: technicianName, rates });
-      if (error) showToast('Could not save commission rates: '+error.message);
+      if (error) showToast('Commission rates not saved: '+error.message+'. Reload the page to see what is really saved.');
     },
     async remove(technicianName){
       delete STATE.data.commissionRates[technicianName];
@@ -1451,7 +1489,7 @@ const db = {
       const item = STATE.data.equipmentCatalog.find(x=>x.id===id);
       if (item) Object.assign(item, patch);
       const { error } = await sb.from('equipment_catalog').update(equipmentCatalogPatchToRow(patch)).eq('id', id);
-      if (error) showToast('Could not save change: '+error.message);
+      if (error) showToast('Not saved: '+error.message+'. Reload the page to see what is really saved.');
     },
     async remove(id){
       STATE.data.equipmentCatalog = STATE.data.equipmentCatalog.filter(x=>x.id!==id);
@@ -1471,7 +1509,7 @@ const db = {
       const s = STATE.data.suppliers.find(x=>x.id===id);
       if (s) Object.assign(s, patch);
       const { error } = await sb.from('suppliers').update(supplierPatchToRow(patch)).eq('id', id);
-      if (error) showToast('Could not save change: '+error.message);
+      if (error) showToast('Not saved: '+error.message+'. Reload the page to see what is really saved.');
     },
     async remove(id){
       STATE.data.suppliers = STATE.data.suppliers.filter(x=>x.id!==id);
@@ -1491,12 +1529,13 @@ const db = {
       const item = STATE.data.equipmentSpend.find(x=>x.id===id);
       if (item) Object.assign(item, patch);
       const { error } = await sb.from('equipment_spend').update(equipmentSpendPatchToRow(patch)).eq('id', id);
-      if (error) showToast('Could not save change: '+error.message);
+      if (error) await restoreAfterFailedSave('equipmentSpend', 'equipment_spend', id, mapEquipSpendRow, 'purchase', error);
     },
     async remove(id){
+      const gone = STATE.data.equipmentSpend.find(x=>x.id===id);
       STATE.data.equipmentSpend = STATE.data.equipmentSpend.filter(x=>x.id!==id);
       const { error } = await sb.from('equipment_spend').delete().eq('id', id);
-      if (error) showToast('Could not delete purchase: '+error.message);
+      if (error) restoreAfterFailedDelete('equipmentSpend', gone, 'purchase', error);
     },
   },
 };
@@ -1658,6 +1697,35 @@ function mapJobRow(j){
     paidToTechnician:j.paid_to_technician, enteredBy:j.entered_by||'', cashConfirmed:j.cash_confirmed,
     invoiceFile:j.invoice_file, transferReceiptFile:j.transfer_receipt_file, equipmentRentalFile:j.equipment_rental_file,
     reviewTaken:j.review_taken, contactId:j.contact_id||null,
+  };
+}
+function mapEquipSpendRow(e){
+  return { id:e.id, date:e.date, item:e.item, technician:e.technician, paidBy:e.paid_by||'', cost:e.cost||0, reimbursed:e.reimbursed };
+}
+function mapTaskRow(t){
+  return {
+    id:t.id, board:t.board, title:t.title, status:t.status, due:t.due, notes:t.notes||'', client:t.client||'',
+    priority:t.priority, assignees:t.assignees||[], assignedTo:t.assigned_to||'', headsUp:t.heads_up||'',
+    createdBy:t.created_by||'', createdAt:t.created_at,
+    technician:t.technician||'', category:t.category||'', subtasks:t.subtasks||[], updates:t.updates||[],
+  };
+}
+function mapQuoteRow(q){
+  return {
+    id:q.id, customer:q.customer, date:q.date, amount:q.amount||0, status:q.status, notes:q.notes||'',
+    jobNumber:q.job_number||'', clientNumber:q.client_number||'', email:q.email||'', address:q.address||'',
+    serviceTypes:q.service_types||[], winProbability:q.win_probability||'', nextAction:q.next_action||'',
+    nextActionNotes:q.next_action_notes||'', sent:q.sent||false, technicianQuoted:q.technician_quoted||'',
+    followedBy:q.followed_by||'', updates:q.updates||[],
+  };
+}
+function mapClosingRow(c){
+  return {
+    id:c.id, technicianName:c.technician_name, date:c.date, customerName:c.customer_name,
+    invoiceNumber:c.invoice_number||'', jobType:c.job_type, amount:c.amount||0, includesGST:c.includes_gst,
+    paymentStatus:c.payment_status, paymentMethod:c.payment_method||'', partsCost:c.parts_cost||0,
+    partsPaidBy:c.parts_paid_by||'', notes:c.notes||'', invoiceFileUrl:c.invoice_file_url,
+    postedBy:c.posted_by||'', createdAt:c.created_at, linkedJobId:c.linked_job_id||null,
   };
 }
 function mapPayrollRow(r){
@@ -3636,12 +3704,14 @@ function postLeadNote(contactId){
   const input = document.getElementById('lead-note-input');
   const text = input.value.trim(); if (!text) return;
   const c = contactById(contactId); if (!c) return;
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
   if (!c.activityLog) c.activityLog = [];
-  c.activityLog.push({ id:uid(), at:new Date().toISOString(), actor:getCurrentProfile()?.fullName||'Unknown', text, manual:true });
+  c.activityLog.push({ id:uid(), at:new Date().toISOString(), actor, text, manual:true });
+  db.activityLog.insert('contact', contactId, actor, text);
   input.value = '';
   document.getElementById('lead-activity').innerHTML = renderRecordActivityList('contact', contactId);
 }
-function createFollowup(contactId){
+async function createFollowup(contactId){
   const c = contactById(contactId); if (!c) return;
   const text = document.getElementById('lm-fu-text').value.trim();
   const date = document.getElementById('lm-fu-date').value;
@@ -3650,16 +3720,18 @@ function createFollowup(contactId){
   if (!text) { modalError('Write what needs doing, or pick a preset'); return; }
   if (!date) { modalError('Pick a date for the follow-up'); return; }
   const actor = getCurrentProfile()?.fullName || 'Unknown';
-  if (kind==='task') {
-    STATE.data.tasks.push({
-      id: uid(), board:'ron', title:`${text} — ${c.fullName}`, status:'Not Started', due:date, headsUp:'',
-      notes:note||c.jobDescription||'', client:c.fullName, priority:'Medium', assignees:['Ron'], technician:'', category:'',
-      createdBy:actor, createdAt:new Date().toISOString(), subtasks:[], updates:[],
-      activityLog:[{ id:uid(), at:new Date().toISOString(), actor, text:'Created from a CRM follow-up' }],
-    });
-  } else {
-    db.manualReminders.create({ date, title:`${text} — ${c.fullName}`, note, contactId:c.id, contactName:c.fullName, done:false });
-  }
+  try {
+    if (kind==='task') {
+      const t = await db.tasks.create({
+        board:'ron', title:`${text} — ${c.fullName}`, status:'Not Started', due:date, headsUp:'',
+        notes:note||c.jobDescription||'', client:c.fullName, priority:'Medium', assignees:['Ron'], technician:'', category:'',
+        createdBy:actor, createdAt:new Date().toISOString(), subtasks:[], updates:[], activityLog:[],
+      });
+      logTaskActivity(t, actor, 'Created from a CRM follow-up');
+    } else {
+      await db.manualReminders.create({ date, title:`${text} — ${c.fullName}`, note, contactId:c.id, contactName:c.fullName, done:false });
+    }
+  } catch (err) { return; }   // the create already showed an error toast; leave the form open so it can be retried
   c.nextFollowUp = date;
   db.contacts.update(c.id, { nextFollowUp: c.nextFollowUp });
   logContactActivity(c, actor, `Follow-up set for ${fmtDateShort(date)} — "${text}"${note?` (note: "${note}")`:''} (${kind})`);
@@ -4565,7 +4637,7 @@ async function loadAdsStats(){
   try {
     let all = [], from = 0;
     for (;;) {
-      const { data, error } = await sb.from('ads_stats').select('*').range(from, from+999);
+      const { data, error } = await sb.from('ads_stats').select('*').order('id', { ascending:true }).range(from, from+999);
       if (error) throw error;
       all = all.concat(data||[]);
       if (!data || data.length < 1000) break;
@@ -5370,8 +5442,15 @@ function renderNetProfitCard(np, title, valueSuffix){
 }
 
 function bulkMarkPaid(tech, weekKey){
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
   const jobsToUpdate = STATE.data.jobs.filter(j => j.technician===tech && weekOf(j.date).key===weekKey && j.paymentStatus==='Paid' && j.paidToTechnician!=='Paid' && j.paidToTechnician!=='Stuck');
-  jobsToUpdate.forEach(j => j.paidToTechnician='Paid');
+  jobsToUpdate.forEach(j => {
+    const old = j.paidToTechnician || 'Not Paid';
+    j.paidToTechnician = 'Paid';
+    db.jobs.update(j.id, { paidToTechnician:'Paid' });
+    logJobActivity(j, actor, `Paid-to-technician changed from "${old}" to "Paid" (Mark all paid to tech)`);
+  });
+  if (jobsToUpdate.length) showToast(`${jobsToUpdate.length} job${jobsToUpdate.length>1?'s':''} marked paid to ${tech}`);
   render();
 }
 
@@ -5559,7 +5638,12 @@ function dismissReminder(key, rowEl){
 function markReminderRead(readKey){
   if (!readKey) return;
   if (!STATE.data.readReminders) STATE.data.readReminders = [];
-  if (!STATE.data.readReminders.includes(readKey)) STATE.data.readReminders.push(readKey);
+  if (STATE.data.readReminders.includes(readKey)) return;
+  STATE.data.readReminders.push(readKey);
+  // Saved per person (reminder_reads.user_id defaults to the signed-in user), so it survives a refresh
+  // and one person reading a reminder doesn't mark it read for everyone else.
+  sb.from('reminder_reads').upsert({ key: readKey }, { onConflict: 'user_id,key', ignoreDuplicates: true })
+    .then(({ error }) => { if (error && !PRESENT) console.error('reminder_reads save failed:', error); });
 }
 // Clicking the reminder's own icon (as opposed to the rest of the row) marks it read WITHOUT
 // navigating anywhere — Ofek's ask: the icon is "mark as read, stay here," the row is "take me
@@ -5586,7 +5670,7 @@ function renderReminders(profile, data){
       <div class="reminder-ic" style="background:${it.severity==='bad'?'var(--bad-soft)':'var(--warn-soft)'};cursor:pointer" title="Mark as read" onclick="event.stopPropagation();markReminderReadOnly('${jsStr(it.readKey||'')}')">${REMINDER_ICONS[it.type]}</div>
       <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(it.title)}</div><div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(it.meta)}</div></div>
       ${it.isRead ? pill('neutral','Read') : pill(it.severity, it.severity==='bad'?'Urgent':'Attention')}
-      ${it.manual ? `<button class="btn ghost small danger" onclick="event.stopPropagation();deleteManualReminder('${it.id}', this.closest('.reminder-item'))">Delete</button>` : (it.contactId ? `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissLeadFollowup('${it.contactId}', this.closest('.reminder-item'))">Delete</button>` : `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissReminder('${it.key}', this.closest('.reminder-item'))">Delete</button>`)}
+      ${it.manual ? `<button class="btn ghost small danger" onclick="event.stopPropagation();deleteManualReminder('${it.id}', this.closest('.reminder-item'))">Delete</button>` : (it.type==='followup' && !it.key && it.contactId ? `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissLeadFollowup('${it.contactId}', this.closest('.reminder-item'))">Delete</button>` : `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissReminder('${it.key}', this.closest('.reminder-item'))">Delete</button>`)}
     </div>`).join('') : emptyState('No reminders right now','All caught up ✓','✓');
   return `
     <div class="page-head"><div><h1 class="page-title">Reminders</h1><div class="page-sub">Computed automatically from your data — click one to go straight to it, or delete it if you don't need the alert</div></div></div>
@@ -5966,7 +6050,7 @@ function renderEquipmentQuickFeed(profile, data){
     ${feedHtml}
   `;
 }
-function postEquipmentQuick(){
+async function postEquipmentQuick(){
   const item = document.getElementById('eqf-desc').value.trim();
   const errEl = document.getElementById('eqf-error');
   if (!item) { if (errEl) errEl.innerHTML = pill('bad','Please enter a description'); return; }
@@ -5975,7 +6059,8 @@ function postEquipmentQuick(){
   const cost = Number(document.getElementById('eqf-price').value) || 0;
   const date = document.getElementById('eqf-date').value || todayStr();
   const paidBy = document.getElementById('eqf-paidby').value;
-  STATE.data.equipmentSpend.push({ id: uid(), date, item, technician, paidBy, cost, reimbursed:'Pending' });
+  try { await db.equipmentSpend.create({ date, item, technician, paidBy, cost, reimbursed:'Pending', activityLog:[] }); }
+  catch (err) { return; }   // db.equipmentSpend.create() already showed an error toast; the form keeps what was typed
   showToast('Equipment purchase posted');
   render();
 }
@@ -6413,15 +6498,23 @@ function startCashAmountEdit(el){
   input.onblur = () => commitCashAmountEdit(input.value);
   el.innerHTML = ''; el.appendChild(input); input.focus(); input.select();
 }
-function commitCashAmountEdit(rawValue){
+async function commitCashAmountEdit(rawValue){
   if (!STATE.data.cashStatus) STATE.data.cashStatus = { amount:0, activityLog:[] };
   const old = STATE.data.cashStatus.amount;
   const newVal = Number(rawValue)||0;
-  if (old !== newVal) {
-    STATE.data.cashStatus.amount = newVal;
-    logActivity(STATE.data.cashStatus, getCurrentProfile()?.fullName||'Unknown', `Cash status changed from ${fmtMoney(old)} to ${fmtMoney(newVal)}`);
-  }
+  if (old === newVal) { render(); return; }
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  const text = `Cash status changed from ${fmtMoney(old)} to ${fmtMoney(newVal)}`;
+  STATE.data.cashStatus.amount = newVal;
+  logActivity(STATE.data.cashStatus, actor, text);
   render();
+  const { error } = await sb.from('cash_status').upsert({ id:1, amount:newVal });
+  if (error) {
+    showToast('Cash status not saved: '+error.message);
+    if (!PRESENT) { STATE.data.cashStatus.amount = old; STATE.data.cashStatus.activityLog.pop(); render(); }
+    return;
+  }
+  db.activityLog.insert('cashStatus', 'main', actor, text);
 }
 function openJobActivityModal(jobId){
   const job = STATE.data.jobs.find(j=>j.id===jobId); if (!job) return;
@@ -6450,6 +6543,7 @@ function postQuickQuoteUpdate(quoteId){
   const currentProfile = getCurrentProfile();
   if (!q.updates) q.updates = [];
   q.updates.push({ id:uid(), author: currentProfile?.fullName || 'Unknown', text, createdAt: new Date().toISOString() });
+  db.quotes.update(q.id, { updates: q.updates });
   input.value = '';
   document.getElementById('quick-activity-list').innerHTML = renderQuoteQuickUpdates(quoteId);
 }
@@ -6490,6 +6584,7 @@ function postQuickTaskUpdate(taskId){
   const currentProfile = getCurrentProfile();
   if (!task.updates) task.updates = [];
   task.updates.push({ id:uid(), author: currentProfile?.fullName || 'Unknown', text, createdAt: new Date().toISOString() });
+  db.tasks.update(task.id, { updates: task.updates });
   input.value = '';
   document.getElementById('quick-activity-list').innerHTML = renderTaskActivityList(taskId);
   const btn = document.querySelector(`[data-activity-count="${taskId}"]`);
@@ -7128,6 +7223,7 @@ function render(){ JOB_CACHE.index = null; try { setTimeout(renderChaseBubbles, 
   else if (UI.tab==='quotes') content.innerHTML = renderQuotes(profile, data);
   else if (UI.tab==='reference') content.innerHTML = renderReference(profile, data);
   else if (UI.tab==='settings') content.innerHTML = renderSettings(profile);
+  if (STATE.loadErrors && STATE.loadErrors.length) content.insertAdjacentHTML('afterbegin', `<div class="card" style="border:1px solid var(--bad);background:var(--bad-soft);margin-bottom:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Some data did not load: ${esc(STATE.loadErrors.join(', '))}.</b> What you see may be incomplete. Don't re-enter anything that looks missing.</div><button class="btn small" onclick="location.reload()">Reload</button></div>`);
 }
 
 document.addEventListener('keydown', (e) => {
