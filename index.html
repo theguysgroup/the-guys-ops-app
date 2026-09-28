@@ -355,6 +355,8 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 
 .editable-cell { cursor: text; border-radius: 4px; padding: 2px 4px; margin: -2px -4px; display: inline-block; }
 .editable-cell:hover { background: var(--surface-2); box-shadow: 0 0 0 1px var(--line); }
+.xlink { cursor: pointer; color: var(--primary-strong); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+.xlink:hover { text-decoration-style: solid; }
 .cash-amount { font-family: 'Figtree', sans-serif; font-size: 26px; font-weight: 700; color: var(--good); letter-spacing: -.01em; }
 .cell-edit-input { font: inherit; padding: 2px 5px; border: 1px solid var(--primary); border-radius: 4px; background: var(--surface); color: var(--ink); width: 100%; min-width: 90px; }
 
@@ -672,7 +674,7 @@ function computeWeek(data, weekKey, technicianFilter){
     const owed = round2(pc.total + equipOwed), paidThisWeek = round2(commissionPaid + equipPaid);
     perTech[t] = {
       owed, paidThisWeek, balanceDue: round2(owed-paidThisWeek),
-      commission: pc.total, expected: pc.expected, unpaidJobsCount: pc.unpaid.length, salaryPaid: !!st.salaryPaid, equipOwed,
+      commission: pc.total, paidJobs: pc.lines.map(l=>l.job), unpaidJobs: pc.unpaid, expected: pc.expected, unpaidJobsCount: pc.unpaid.length, salaryPaid: !!st.salaryPaid, equipOwed,
       jobTypeBreak, paidCount, unpaidCount, totalJobs: tJobs.length,
       dailyAvg: distinctDays.size ? round2(netIncome/distinctDays.size) : null,
       daysWorked: distinctDays.size, latePaymentTotal: round2(lateLines.reduce((s,l)=>s+l.commission,0)), lateJobs: lateLines.map(l=>l.job),
@@ -731,7 +733,7 @@ function computeReminders(data, now){
     if (j.paymentStatus !== 'Paid') {
       const age = daysBetween(parseLocalDate(j.date), today);
       const key = `unpaid:${j.id}`;
-      if (age > unpaidReminderDays && !dismissed.has(key)) items.push({ key, readKey:key, type:'unpaid', severity: age>=14?'bad':'warn', date:j.date, contactId:j.contactId||'', title:`${j.customerName} — invoice #${j.invoiceNumber||'—'} still unpaid`, meta:`${j.technician} · ${fmtMoney(jobTotalCollected(j))} incl. GST · ${age} days since the job (the term is ${unpaidReminderDays} days)` });
+      if (age > unpaidReminderDays && !dismissed.has(key)) items.push({ key, readKey:key, type:'unpaid', severity: age>=14?'bad':'warn', date:j.date, contactId:contactForJob(j)?.id||'', title:`${j.customerName} — invoice #${j.invoiceNumber||'—'} still unpaid`, meta:`${j.technician} · ${fmtMoney(jobTotalCollected(j))} incl. GST · ${age} days since the job (the term is ${unpaidReminderDays} days)` });
     }
     const refundKey = `refund:${j.id}`;
     if (j.partsCost > 0 && j.partsRefundStatus === 'Pending Refund' && !dismissed.has(refundKey)) items.push({ key:refundKey, readKey:refundKey, type:'refund', severity:'warn', date:j.date, title:`Parts refund pending for ${j.partsPaidBy||j.technician}`, meta:j.customerName });
@@ -759,7 +761,7 @@ function computeReminders(data, now){
     const jobAge = daysBetween(parseLocalDate(j.date), today);
     const key = `repeat-service:${j.id}`;
     if (jobAge === 358 && !dismissed.has(key)) {
-      items.push({ key, readKey:key, type:'repeat-service', severity:'warn', date:todayStr(now), title:`${j.customerName} — re-offer ${j.jobType} service`, meta:`1 year ago this week: ${j.jobType} job done on ${fmtDateShort(j.date)} · call to check if it's time again` });
+      items.push({ key, readKey:key, type:'repeat-service', contactId: contactForJob(j)?.id || '', severity:'warn', date:todayStr(now), title:`${j.customerName} — re-offer ${j.jobType} service`, meta:`1 year ago this week: ${j.jobType} job done on ${fmtDateShort(j.date)} · call to check if it's time again` });
     }
   });
   const activeQuoteStates = ['In Discussion','Waiting for Reply'];
@@ -2608,8 +2610,8 @@ function renderBarGroup(items, opts){
   const max = Math.max(...items.map(i=>i.value), 0.0001);
   const bars = items.map(it => {
     const pct = it.value>0 ? Math.max(4, Math.round((it.value/max)*100)) : 2;
-    return `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;min-width:0">
-      <div class="mono" style="font-size:12px;font-weight:600;white-space:nowrap">${fmt(it.value)}</div>
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;min-width:0${it.onclick?';cursor:pointer':''}"${it.onclick?` onclick="${it.onclick}" title="Show the list"`:''}>
+      <div class="mono${it.onclick?' xlink':''}" style="font-size:12px;font-weight:600;white-space:nowrap">${fmt(it.value)}</div>
       <div style="width:100%;height:64px;display:flex;align-items:flex-end;background:var(--surface-3);border-radius:4px;overflow:hidden">
         <div style="width:100%;height:${pct}%;background:${it.color};transition:height .2s"></div>
       </div>
@@ -3411,6 +3413,7 @@ function renderCrmInboxThreadAndDetails(c){
       <div class="field" style="margin-top:9px"><label>Estimated value</label><input type="number" value="${c.estimatedValue||0}" onchange="setLeadEstimatedValue('${c.id}',this.value)"></div>
       <div class="field" style="margin-top:9px"><label>Sales value</label><input type="number" value="${c.salesValue||0}" onchange="setLeadSalesValue('${c.id}',this.value)"></div>
       <div class="field" style="margin-top:9px"><label>What they need</label><textarea rows="3" onchange="setLeadJobDescription('${c.id}',this.value)">${esc(c.jobDescription||'')}</textarea></div>
+      ${renderContactJobsBlock(c)}
       ${renderMarketingSourceBlock(c)}
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost small" onclick="openLeadActivityModal('${c.id}')">💬 History (${recordActivityCount(c)})</button>
@@ -3554,18 +3557,20 @@ function renderCrmOverview(profile, data){
     <span style="color:var(--ink-faint);font-size:12px;align-self:center">to</span>
     <input type="date" style="width:auto" value="${UI.crmOverview.customTo||''}" onchange="UI.crmOverview.customTo=this.value;render()">` : '';
 
-  const sourceBars = renderBarGroup(LEAD_SOURCES.map(s => ({ label:sourceLabel(s), value:stats.bySource[s], color:LEAD_SOURCE_COLOR[s] })), { fmt:(n)=>String(n) });
+  const jobsAll = (STATE.data && STATE.data.jobs) || [];
+  const sourceBars = renderBarGroup(LEAD_SOURCES.map(s => ({ label:sourceLabel(s), value:stats.bySource[s], color:LEAD_SOURCE_COLOR[s], onclick: drillJs(`${sourceLabel(s)} — leads`, 'leads', contacts.filter(c => c.source===s)) })), { fmt:(n)=>String(n) });
   const divisionRows = LEAD_DIVISIONS.map(d => {
     const v = stats.byDivision[d];
     const rate = (v.won+0)>0 || v.total>0 ? (v.total ? Math.round((v.won/v.total)*100) : 0) : 0;
-    return `<div class="kv"><span>${d}</span><span class="v">${v.total} · ${rate}% won</span></div>`;
+    const dl = contacts.filter(c => c.division===d);
+    return `<div class="kv"><span>${d}</span><span class="v">${drill(v.total, `${d} — leads`, 'leads', dl)} · ${drill(rate+'% won', `${d} — leads that became a job`, 'leads', dl.filter(c => contactHasJob(c, jobsAll)))}</span></div>`;
   }).join('');
   // Drill-down bars for the two sub-tag families — only rendered when the parent bucket actually
   // has leads this period, so an account with no Aircon/Meta activity yet doesn't show empty charts.
   const airconTypeTotal = AIRCON_TYPE_TAGS.reduce((s,t)=>s+stats.byAirconType[t],0);
   const metaPlatformTotal = META_PLATFORM_TAGS.reduce((s,t)=>s+stats.byMetaPlatform[t],0);
-  const airconTypeBars = airconTypeTotal ? renderBarGroup(AIRCON_TYPE_TAGS.map(t => ({ label:t, value:stats.byAirconType[t], color:'var(--primary)' })), { fmt:(n)=>String(n) }) : '';
-  const metaPlatformBars = metaPlatformTotal ? renderBarGroup(META_PLATFORM_TAGS.map(t => ({ label:t, value:stats.byMetaPlatform[t], color:'var(--accent)' })), { fmt:(n)=>String(n) }) : '';
+  const airconTypeBars = airconTypeTotal ? renderBarGroup(AIRCON_TYPE_TAGS.map(t => ({ label:t, value:stats.byAirconType[t], color:'var(--primary)', onclick: drillJs(`Aircon — ${t}`, 'leads', contacts.filter(c => c.division==='Aircon' && (c.tags||[]).includes(t))) })), { fmt:(n)=>String(n) }) : '';
+  const metaPlatformBars = metaPlatformTotal ? renderBarGroup(META_PLATFORM_TAGS.map(t => ({ label:t, value:stats.byMetaPlatform[t], color:'var(--accent)', onclick: drillJs(`Meta Ads — ${t}`, 'leads', contacts.filter(c => c.source==='Meta Ads' && (c.tags||[]).includes(t))) })), { fmt:(n)=>String(n) }) : '';
 
   // Sales Value (what was actually agreed on the phone, distinct from the Estimated Value) attributed
   // to whichever technician the lead's linked job belongs to — leads not yet linked to a job land in
@@ -3595,10 +3600,10 @@ function renderCrmOverview(profile, data){
     </div>
 
     <div class="grid-4">
-      <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Total leads</div><div class="stat-value">${stats.total}</div><div class="stat-sub">in this period</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--warn)"><div class="stat-label">In progress</div><div class="stat-value">${stats.byStatus.Chasing + stats.byStatus.Quoted + stats.byStatus['Follow-up'] + stats.byStatus.Booked}</div><div class="stat-sub">${stats.byStatus.New} new · ${stats.byStatus.Chasing} chasing · ${stats.byStatus.Quoted} quoted · ${stats.byStatus['Follow-up']} follow up · ${stats.byStatus.Booked} booked</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Won</div><div class="stat-value">${stats.won}</div><div class="stat-sub">${stats.closeRate===null?'no leads yet':stats.closeRate+'% of leads became a job'} · ${stats.byStatus.Booked} booked</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--bad)"><div class="stat-label">Lost</div><div class="stat-value">${stats.byStatus.Lost}</div><div class="stat-sub">${fmtMoney(stats.wonValue)} booked value</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Total leads</div><div class="stat-value">${drill(stats.total, 'All leads in this period', 'leads', contacts)}</div><div class="stat-sub">in this period</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--warn)"><div class="stat-label">In progress</div><div class="stat-value">${drill(stats.byStatus.Chasing + stats.byStatus.Quoted + stats.byStatus['Follow-up'] + stats.byStatus.Booked, 'In progress (chasing, quoted, follow up, booked)', 'leads', contacts.filter(c => ['Chasing','Quoted','Follow-up','Booked'].includes(leadStage(c))))}</div><div class="stat-sub">${stats.byStatus.New} new · ${stats.byStatus.Chasing} chasing · ${stats.byStatus.Quoted} quoted · ${stats.byStatus['Follow-up']} follow up · ${stats.byStatus.Booked} booked</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Won</div><div class="stat-value">${drill(stats.won, 'Won — became a job', 'leads', contacts.filter(c => contactHasJob(c, jobsAll)))}</div><div class="stat-sub">${stats.closeRate===null?'no leads yet':stats.closeRate+'% of leads became a job'} · ${stats.byStatus.Booked} booked</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--bad)"><div class="stat-label">Lost</div><div class="stat-value">${drill(stats.byStatus.Lost, 'Lost leads', 'leads', contacts.filter(c => leadStage(c)==='Lost'))}</div><div class="stat-sub">${fmtMoney(stats.wonValue)} booked value</div></div>
     </div>
 
     <div class="section-title">Where leads come from</div>
@@ -3676,6 +3681,7 @@ function openLeadModal(contactId){
           <div class="field" id="lm-lost-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Lost'?'':'none'}"><label>Why was it lost?</label><select id="lm-lost-reason"><option value="">— choose a reason —</option>${LOST_REASONS.map(r=>`<option value="${r.key}" ${c&&lostReasonOf(c)===r.key?'selected':''}>${esc(r.label)}</option>`).join('')}</select></div>
           <div class="field" style="margin-top:11px"><label>What they need</label><textarea rows="2" id="lm-desc">${c?esc(c.jobDescription||''):''}</textarea></div>
           ${c ? `<div class="field" style="margin-top:11px"><label>Tags</label>${renderLeadTags(c.id, 'modal')}</div>` : ''}
+          ${c ? renderContactJobsBlock(c) : ''}
           ${c ? renderMarketingSourceBlock(c) : ''}
         </div>
 
@@ -3988,8 +3994,8 @@ function renderJobRows(jobs, canEdit){
     <tr>
       <td style="border-inline-start:3px solid ${accent}">${statusSelect('jobTechnician', j.id, j.technician, technicianNames(STATE.data), ()=>'neutral', v=>v, !canEdit)}</td>
       <td class="mono">${jobEditableCell(j.id,'date', fmtDateShort(j.date), 'date')}</td>
-      <td>${jobEditableCell(j.id,'customerName', esc(j.customerName), 'text')}${crmLinkButton(j.contactId)}</td>
-      <td class="mono">${jobEditableCell(j.id,'invoiceNumber', esc(j.invoiceNumber||'—'), 'text')}</td>
+      <td>${custLink(j.customerName, j.contactId, j.id)}</td>
+      <td class="mono">${canEdit ? `<span class="xlink" onclick="openJobModal('${j.id}')" title="Open / edit the job">${esc(j.invoiceNumber||'—')}</span>` : esc(j.invoiceNumber||'—')}</td>
       <td>${statusSelect('jobType', j.id, j.jobType, jobTypesForTech(j.technician), ()=>'neutral', v=>v, !canEdit)}</td>
       <td class="num">${jobEditableCell(j.id,'amount', fmtMoney(j.amount), 'number')}</td>
       <td>${statusSelect('jobGst', j.id, j.includesGST?'Yes':'No', ['Yes','No'], v=>v==='Yes'?'good':'neutral', v=>v, !canEdit)}</td>
@@ -4063,7 +4069,7 @@ function openSearchModal(){
     <div class="modal-back" onclick="if(event.target===this) closeModal()">
       <div class="modal" style="max-width:520px">
         <h2>Search</h2>
-        <div class="modal-sub">Find a job by customer, invoice number, or technician.</div>
+        <div class="modal-sub">Find a lead or customer, or a job by customer, invoice number or technician.</div>
         <input id="search-input" type="text" placeholder="Type to search…" oninput="runSearch(this.value)" onkeydown="if(event.key==='Escape') closeModal()">
         <div id="search-results" style="margin-top:14px;max-height:50vh;overflow-y:auto">${renderSearchResults('')}</div>
       </div>
@@ -4075,26 +4081,34 @@ function runSearch(query){
   const el = document.getElementById('search-results');
   if (el) el.innerHTML = renderSearchResults(query);
 }
+// ⌘K finds leads/customers (name, phone, email, postcode) for anyone who can see the CRM, and jobs
+// (customer, invoice #, technician) for anyone who can see jobs — so Ron finds his leads too.
 function renderSearchResults(query){
   const profile = getCurrentProfile(); if (!profile) return '';
   const data = filterForProfile(STATE.data, profile);
+  const canCrm = canViewSection(profile,'crm'), canJobs = canViewSection(profile,'jobs');
   const q = (query||'').trim().toLowerCase();
-  if (!q) return emptyState('Start typing', 'Search by customer, invoice #, or technician.');
-  const matches = data.jobs.filter(j =>
-    (j.customerName||'').toLowerCase().indexOf(q)!==-1 ||
-    (j.invoiceNumber||'').toLowerCase().indexOf(q)!==-1 ||
-    (j.technician||'').toLowerCase().indexOf(q)!==-1
+  if (!q) return emptyState('Start typing', `Search ${canCrm?'leads by name, phone, email or postcode':''}${canCrm&&canJobs?', and ':''}${canJobs?'jobs by customer, invoice # or technician':''}.`);
+  const digits = q.replace(/\D/g,'');
+  const leads = !canCrm ? [] : (data.contacts||[]).filter(c =>
+    (c.fullName||'').toLowerCase().includes(q) || (c.email||'').toLowerCase().includes(q) || (c.postcode||'')===q ||
+    (digits.length>=4 && (c.phone||'').replace(/\D/g,'').includes(digits))
+  ).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).slice(0,8);
+  const jobs = !canJobs ? [] : (data.jobs||[]).filter(j =>
+    (j.customerName||'').toLowerCase().includes(q) || (j.invoiceNumber||'').toLowerCase().includes(q) || (j.technician||'').toLowerCase().includes(q)
   ).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8);
-  if (!matches.length) return emptyState('No matches', 'Try a different customer, invoice, or technician name.');
-  return matches.map(j => `
-    <button onclick="goToJobFromSearch('${j.id}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:start;padding:10px 12px;border-radius:var(--radius-sm);border:1px solid var(--line);background:var(--surface);margin-bottom:6px;cursor:pointer">
+  if (!leads.length && !jobs.length) return emptyState('No matches', 'Try a different name, phone number, invoice or technician.');
+  const btn = (onclick, title, sub, right) => `
+    <button onclick="${onclick}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:start;padding:10px 12px;border-radius:var(--radius-sm);border:1px solid var(--line);background:var(--surface);margin-bottom:6px;cursor:pointer">
       <span style="display:flex;flex-direction:column;gap:2px;min-width:0">
-        <b style="font-family:'Figtree',sans-serif;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.customerName)}</b>
-        <span style="font-size:11.5px;color:var(--ink-soft)">${esc(j.technician)} · ${fmtDateShort(j.date)} · ${esc(j.invoiceNumber||'—')}</span>
+        <b style="font-family:'Figtree',sans-serif;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</b>
+        <span style="font-size:11.5px;color:var(--ink-soft)">${sub}</span>
       </span>
-      <span class="mono" style="font-size:13px;font-weight:600;flex:none">${fmtMoney(j.amount)}</span>
-    </button>
-  `).join('');
+      <span class="mono" style="font-size:13px;font-weight:600;flex:none">${right}</span>
+    </button>`;
+  const leadHtml = leads.map(c => btn(`closeModal();goToLeadConversation('${c.id}')`, esc(c.fullName||'(no name)'), `${esc(c.phone||c.email||'—')} · ${esc(c.division||'')} · ${esc(sourceLabel(c.source))}`, esc(stageLabel(leadStage(c))))).join('');
+  const jobHtml = jobs.map(j => btn(`goToJobFromSearch('${j.id}')`, esc(j.customerName), `${esc(j.technician)} · ${fmtDateShort(j.date)} · ${esc(j.invoiceNumber||'—')}`, fmtMoney(j.amount))).join('');
+  return (leads.length ? `<div class="modal-section" style="margin-top:0">Leads &amp; customers</div>${leadHtml}` : '') + (jobs.length ? `<div class="modal-section"${leads.length?'':' style="margin-top:0"'}>Jobs</div>${jobHtml}` : '');
 }
 function goToJobFromSearch(jobId){
   const profile = getCurrentProfile(); if (!profile) return;
@@ -4294,13 +4308,13 @@ function renderFinanceWeekly(data, weekKey, weeks, allTechs, techFilter, canBulk
     businessOverview = `
       <div class="section-title">Business Overview</div>
       <div class="grid-4">
-        <div class="card"><div class="stat-label">Cash</div><div class="stat-value">${fmtMoney(w.overview.cash)}</div><div class="stat-sub">GST: ${fmtMoney(w.overview.gstCash)}</div></div>
-        <div class="card"><div class="stat-label">Bank Transfer</div><div class="stat-value">${fmtMoney(w.overview.bankTransfer)}</div></div>
-        <div class="card"><div class="stat-label">Credit Card</div><div class="stat-value">${fmtMoney(w.overview.creditCard)}</div><div class="stat-sub">GST (card+transfer): ${fmtMoney(w.overview.gstOther)}</div></div>
+        <div class="card"><div class="stat-label">Cash</div><div class="stat-value">${drill(fmtMoney(w.overview.cash), 'Paid in cash — jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus==='Paid' && j.paymentMethod==='Cash'))}</div><div class="stat-sub">GST: ${fmtMoney(w.overview.gstCash)}</div></div>
+        <div class="card"><div class="stat-label">Bank Transfer</div><div class="stat-value">${drill(fmtMoney(w.overview.bankTransfer), 'Paid by bank transfer — jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus==='Paid' && j.paymentMethod==='Bank Transfer'))}</div></div>
+        <div class="card"><div class="stat-label">Credit Card</div><div class="stat-value">${drill(fmtMoney(w.overview.creditCard), 'Paid by card — jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus==='Paid' && j.paymentMethod==='Credit Card'))}</div><div class="stat-sub">GST (card+transfer): ${fmtMoney(w.overview.gstOther)}</div></div>
         <div class="card"><div class="stat-label">After commissions &amp; expenses</div><div class="stat-value">${fmtMoney(w.remainingAfterTech)}</div></div>
       </div>
       <div class="grid-3" style="margin-top:12px">
-        <div class="card tight"><div class="stat-label">Jobs Paid / Unpaid</div><div class="stat-value" style="font-size:18px">${w.overview.paidCount} <span style="color:var(--ink-soft);font-size:13px">/ ${w.overview.unpaidCount}</span></div></div>
+        <div class="card tight"><div class="stat-label">Jobs Paid / Unpaid</div><div class="stat-value" style="font-size:18px">${drill(w.overview.paidCount, 'Paid jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus==='Paid'))} <span style="color:var(--ink-soft);font-size:13px">/ ${drill(w.overview.unpaidCount, 'Unpaid jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus!=='Paid'))}</span></div></div>
         <div class="card tight"><div class="stat-label">Parts</div><div class="stat-value" style="font-size:18px">${fmtMoney(w.overview.partsTotal)}</div></div>
         <div class="card tight"><div class="stat-label">Equipment Purchases</div><div class="stat-value" style="font-size:18px">${fmtMoney(w.overview.equipmentTotal)}</div></div>
       </div>
@@ -4314,14 +4328,14 @@ function renderFinanceWeekly(data, weekKey, weeks, allTechs, techFilter, canBulk
     const types = JOB_TYPES.map(jt => { const b=d.jobTypeBreak[jt]; const avg=b.count?round2(b.total/b.count):0; return `<div class="jobtype-chip"><span>${jt}</span><span class="n">${b.count} · avg ${fmtMoney(avg)} · ${fmtMoney(b.total)}</span></div>`; }).join('');
     return `<div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">${techTag(t)}${canBulk?`<button class="btn small" onclick="openPayrollWeek('${weekKey}')" title="Technicians are paid in Payroll">Pay in Payroll →</button>`:''}</div>
-      <div class="kv"><span>Jobs done this week (paid / unpaid / total)</span><span class="v">${d.paidCount} / ${d.unpaidCount} / ${d.totalJobs}</span></div>
+      <div class="kv"><span>Jobs done this week (paid / unpaid / total)</span><span class="v">${drill(d.paidCount, `${t} — paid jobs this week`, 'jobs', w.jobs.filter(j=>j.technician===t && j.paymentStatus==='Paid'))} / ${drill(d.unpaidCount, `${t} — unpaid jobs this week`, 'jobs', w.jobs.filter(j=>j.technician===t && j.paymentStatus!=='Paid'))} / ${drill(d.totalJobs, `${t} — jobs this week`, 'jobs', w.jobs.filter(j=>j.technician===t))}</span></div>
       <div class="kv"><span>Daily average (${d.daysWorked} days)</span><span class="v">${d.dailyAvg===null?'—':fmtMoney(d.dailyAvg)}</span></div>
       <div style="margin:10px 0">${types}</div>
-      <div class="kv"><span>Commission on jobs paid this week</span><span class="v">${fmtMoney(d.commission||0)}</span></div>
+      <div class="kv"><span>Commission on jobs paid this week</span><span class="v">${drill(fmtMoney(d.commission||0), `${t} — jobs paid this week`, 'jobs', d.paidJobs||[])}</span></div>
       ${d.latePaymentTotal ? `<div class="kv"><span class="hint">of which from jobs paid late</span><span class="v">${fmtMoney(d.latePaymentTotal)}</span></div>` : ''}
       ${d.equipOwed ? `<div class="kv"><span>Equipment to reimburse</span><span class="v">${fmtMoney(d.equipOwed)}</span></div>` : ''}
       <div class="kv"><span>Paid in Payroll</span><span class="v">${fmtMoney(d.paidThisWeek)}</span></div>
-      ${d.unpaidJobsCount ? `<div class="kv"><span class="hint">Expected when ${d.unpaidJobsCount} unpaid job${d.unpaidJobsCount===1?' is':'s are'} paid</span><span class="v">${fmtMoney(d.expected)}</span></div>` : ''}
+      ${d.unpaidJobsCount ? `<div class="kv"><span class="hint">Expected when ${d.unpaidJobsCount} unpaid job${d.unpaidJobsCount===1?' is':'s are'} paid</span><span class="v">${drill(fmtMoney(d.expected), `${t} — jobs not paid yet`, 'jobs', d.unpaidJobs||[])}</span></div>` : ''}
       <div class="kv total"><span>Balance due</span><span class="v" style="color:${d.balanceDue>0.01?'var(--bad)':'var(--good)'}">${fmtMoney(Math.max(0,d.balanceDue))}</span></div>
     </div>`;
   }).join('') : emptyState('No technicians', 'Add technicians on the Employees tab');
@@ -4343,7 +4357,7 @@ function renderFinanceMonthly(data, monthKey, months, allTechs, showNet){
   return `
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${chips}</div>
     <div class="grid-4">
-      <div class="card"><div class="stat-label">Revenue (excl. GST)</div><div class="stat-value">${fmtMoney(m.revenue)}</div><div class="stat-sub">${m.jobs.length} jobs</div></div>
+      <div class="card"><div class="stat-label">Revenue (excl. GST)</div><div class="stat-value">${drill(fmtMoney(m.revenue), 'Jobs this month', 'jobs', m.jobs)}</div><div class="stat-sub">${m.jobs.length} jobs</div></div>
       <div class="card"><div class="stat-label">Technician Commission</div><div class="stat-value">${fmtMoney(m.commission)}</div></div>
       <div class="card"><div class="stat-label">Parts + Equipment</div><div class="stat-value">${fmtMoney(m.parts+m.equipment)}</div></div>
       <div class="card"><div class="stat-label">After commissions &amp; expenses</div><div class="stat-value">${fmtMoney(m.net)}</div></div>
@@ -4604,11 +4618,11 @@ function techLeaderboard(entries){
     </div>`;
   }).join('');
 }
-function funnelStage(label, count, totalForPct, color){
+function funnelStage(label, count, totalForPct, color, clickJs){
   const pct = totalForPct ? Math.round((count/totalForPct)*100) : 0;
   return `<div style="margin-bottom:10px">
     <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-      <span>${esc(label)}</span><span class="mono" style="font-weight:600">${count} <span style="color:var(--ink-soft);font-weight:400">(${pct}%)</span></span>
+      <span>${esc(label)}</span><span class="mono${clickJs?' xlink':''}" style="font-weight:600"${clickJs?` onclick="${clickJs}" title="Show the list"`:''}>${count} <span style="color:var(--ink-soft);font-weight:400">(${pct}%)</span></span>
     </div>
     <div style="height:20px;border-radius:5px;background:var(--surface-3);overflow:hidden">
       <div style="height:100%;width:${count?Math.max(pct,3):0}%;background:${color};border-radius:5px;transition:width .2s"></div>
@@ -4626,6 +4640,7 @@ function dashDelta(curr, prev){ return deltaBadge(curr, prev); }
 // opens their CRM card when the job is linked to one and the user can see the CRM, otherwise the job in Jobs & Commissions.
 function openJobCustomer(jobId){
   const j = (STATE.data.jobs||[]).find(x => x.id===jobId); if (!j) return;
+  closeModal();
   const c = contactForJob(j), pr = getCurrentProfile();
   if (c && pr && canViewSection(pr,'crm')) goToLeadConversation(c.id); else goToJobFromSearch(jobId);
 }
@@ -4772,8 +4787,9 @@ function renderDashGoogle(profile, data, standalone){
   // ── SUMMARY ────────────────────────────────────────────────────────────────
   const winChips = ADS_WINS.map(w => `<button class="week-chip ${win===w?'active':''}" onclick="setDashAdsWin('${w}')">${ADS_WIN_LABEL[w]}</button>`).join('');
   const chipsRow = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px"><b style="margin-inline-end:4px">Show the last</b>${winChips}<span style="color:var(--ink-faint);font-size:12px;margin-inline-start:8px">Data synced ${esc(stamp)}</span></div>`;
-  const card = (label, val, sub, colour, target) => {
+  const card = (label, val, sub, colour, target, openJs) => {
     const inner = `<div class="stat-label">${esc(label)}</div><div class="stat-value">${val}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:4px;line-height:1.35">${sub}</div>`;
+    if (openJs) return `<button onclick="${openJs}" class="card stat-card" style="--stat-accent:${colour};text-align:start;cursor:pointer;font:inherit;color:inherit;width:100%">${inner}<div style="font-size:11.5px;color:var(--primary);margin-top:6px">See the leads →</div></button>`;
     return target ? `<button onclick="adsGo('${target}')" class="card stat-card" style="--stat-accent:${colour};text-align:start;cursor:pointer;font:inherit;color:inherit;width:100%">${inner}<div style="font-size:11.5px;color:var(--primary);margin-top:6px">See the list ↓</div></button>` : `<div class="card stat-card" style="--stat-accent:${colour}">${inner}</div>`;
   };
   const bigCamp = (idx[win].campaign||[]).filter(x=>x.cost>0&&x.extra&&x.extra.searchImpressionShare!=null).sort((a,b)=>b.cost-a.cost)[0];
@@ -4879,18 +4895,19 @@ function renderDashMeta(profile, data){
   const cnt = x => String(Math.round(x*10)/10);
   const winChips = ADS_WINS.map(w => `<button class="week-chip ${win===w?'active':''}" onclick="setDashAdsWin('${w}')">${ADS_WIN_LABEL[w]}</button>`).join('');
   const chipsRow = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px"><b style="margin-inline-end:4px">Show the last</b>${winChips}<span style="color:var(--ink-faint);font-size:12px;margin-inline-start:8px">Data synced ${esc(stamp)}</span></div>`;
-  const card = (label, val, sub, colour, target) => {
+  const card = (label, val, sub, colour, target, openJs) => {
     const inner = `<div class="stat-label">${esc(label)}</div><div class="stat-value">${val}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:4px;line-height:1.35">${sub}</div>`;
+    if (openJs) return `<button onclick="${openJs}" class="card stat-card" style="--stat-accent:${colour};text-align:start;cursor:pointer;font:inherit;color:inherit;width:100%">${inner}<div style="font-size:11.5px;color:var(--primary);margin-top:6px">See the leads →</div></button>`;
     return target ? `<button onclick="adsGo('${target}')" class="card stat-card" style="--stat-accent:${colour};text-align:start;cursor:pointer;font:inherit;color:inherit;width:100%">${inner}<div style="font-size:11.5px;color:var(--primary);margin-top:6px">See the list ↓</div></button>` : `<div class="card stat-card" style="--stat-accent:${colour}">${inner}</div>`;
   };
   const crm = A.leadsAll.length;
   const cards = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
     ${card('Spend', fmtMoney(round2(A.totCost)), `${A.totClicks.toLocaleString()} clicks at ${dl(A.totClicks?A.totCost/A.totClicks:null)} each`, 'var(--primary)', 'ads-m-trend')}
-    ${card('Leads in the CRM', String(crm), `${crm?dl(A.totCost/crm)+' each. ':''}Meta counts ${cnt(A.metaLeads)} (its results).`, 'var(--primary-teal)', 'ads-m-adsets')}
+    ${card('Leads in the CRM', String(crm), `${crm?dl(A.totCost/crm)+' each. ':''}Meta counts ${cnt(A.metaLeads)} (its results).`, 'var(--primary-teal)', 'ads-m-adsets', drillJs('Meta leads in the CRM', 'leads', A.leadsAll))}
     ${card('Ad sets to pause or rework', String(A.pause.length), `Running, spent ${fmtMoney(th.adset)}+ and no CRM lead.`, 'var(--bad)', 'ads-m-pause')}
     ${card('Ad sets worth scaling', String(A.scale.length), A.scale.length?'Bring CRM leads at $120 or less each.':'None qualify in this period.', 'var(--good)', 'ads-m-scale')}
     ${card('Ads with a weak click rate', String(A.weak.length), `Running ads whose click rate is well below the account average (${adsPct(A.avgCtr)}).`, 'var(--warn)', 'ads-m-weak')}
-    ${card('Leads with no ad tag', String(crm-A.tagged), 'Meta leads in the CRM that cannot be tied to an ad set.', 'var(--primary)', 'ads-m-adsets')}
+    ${card('Leads with no ad tag', String(crm-A.tagged), 'Meta leads in the CRM that cannot be tied to an ad set.', 'var(--primary)', 'ads-m-adsets', drillJs('Meta leads with no ad-set tag', 'leads', A.leadsAll.filter(c => !A.adsets.some(g => g.id===c.utmContent))))}
   </div>`;
   const ins = (ADS_STATS.insights||[]).filter(i=>i.platform==='meta').sort((a,b)=>String(b.day).localeCompare(String(a.day)))[0];
   const TONES = [['bad','Problems','var(--bad)'],['warn','Watch','var(--warn)'],['good','Going well','var(--good)']];
@@ -4945,6 +4962,9 @@ function renderDashboard(profile, data){
   const enquiries = perf.totalLeads + cs.total, enquiriesPrev = prev.totalLeads + callsPrev.length;
   const jobs = data.jobs.filter(j => inRange(j.date, r.start, r.effEnd));
   const today = todayStr(now);
+  // The exact leads/jobs behind each number below (same filters as computeBusinessPerformance), so any number opens its list.
+  const leadsIn = (data.contacts||[]).filter(c => inRange(localDay(c.createdAt), r.start, r.effEnd));
+  const isWon = c => contactHasJob(c, data.jobs);
 
   // Owed to you right now — every unpaid job, not just this period's.
   const unpaidAll = data.jobs.filter(j => j.paymentStatus!=='Paid');
@@ -4971,9 +4991,12 @@ function renderDashboard(profile, data){
   const pageStats = {};
   const pageOf = k => (pageStats[k] = pageStats[k] || { leads:0, jobs:0, revenue:0 });
   (data.contacts||[]).filter(c => inRange(localDay(c.createdAt), r.start, r.effEnd)).forEach(c => { pageOf(pagePath(c.landingPage) || '(not recorded)').leads++; });
-  jobs.forEach(j => { const c = contactForJob(j); const b = pageOf(c ? (pagePath(c.landingPage) || '(not recorded)') : '(no customer linked)'); b.jobs++; b.revenue += Number(j.amount)||0; });
+  const pageLists = {};
+  const pageList = k => (pageLists[k] = pageLists[k] || { leads:[], jobs:[] });
+  leadsIn.forEach(c => pageList(pagePath(c.landingPage) || '(not recorded)').leads.push(c));
+  jobs.forEach(j => { const c = contactForJob(j); const k = c ? (pagePath(c.landingPage) || '(not recorded)') : '(no customer linked)'; const b = pageOf(k); b.jobs++; b.revenue += Number(j.amount)||0; pageList(k).jobs.push(j); });
   const pageRows = Object.entries(pageStats).sort((a,b) => b[1].revenue-a[1].revenue || b[1].leads-a[1].leads)
-    .map(([k,v]) => `<tr><td>${esc(k)}</td><td class="num">${v.leads}</td><td class="num">${v.jobs}</td><td class="num" style="font-weight:700">${fmtMoney(round2(v.revenue))}</td></tr>`).join('');
+    .map(([k,v]) => `<tr><td>${esc(k)}</td><td class="num">${drill(v.leads, `Leads that landed on ${k}`, 'leads', pageList(k).leads)}</td><td class="num">${drill(v.jobs, `Jobs from ${k}`, 'jobs', pageList(k).jobs)}</td><td class="num" style="font-weight:700">${drill(fmtMoney(round2(v.revenue)), `Jobs from ${k}`, 'jobs', pageList(k).jobs)}</td></tr>`).join('');
 
   const rangeChips = DASH_RANGES.map(([k,l]) => `<button class="week-chip ${UI.dashboard.range===k?'active':''}" onclick="setDashboardRange('${k}')">${l}</button>`).join('');
   const customInputs = UI.dashboard.range==='custom' ? `
@@ -4984,53 +5007,55 @@ function renderDashboard(profile, data){
   // ── marketing: one table, one row per channel ──
   const tagLeads = tag => (data.contacts||[]).filter(c => c.source==='Meta Ads' && (c.tags||[]).includes(tag) && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
   const subWon = tag => { const ls = (data.contacts||[]).filter(c => c.source==='Meta Ads' && (c.tags||[]).includes(tag) && inRange(localDay(c.createdAt), r.start, r.effEnd)); const won = ls.filter(c => contactHasJob(c, data.jobs)).length; return { leads:ls.length, won, closeRate: ls.length ? Math.round(won/ls.length*100) : null, spend:null, revenue: perf.bySubDivision[tag].revenue }; };
-  const chRow = (name, ch, callCount, sub) => {
+  const chRow = (name, ch, callCount, sub, L) => {
     const forms = ch.leads, total = forms + (callCount||0);
     const spend = ch.spend;
     const cpe = spend!==null && total ? round2(spend/total) : null;
     return `<tr${sub?' style="color:var(--ink-soft)"':''}>
       <td>${sub?'&nbsp;&nbsp;↳ ':''}${esc(name)}</td>
-      <td class="num">${forms}</td>
+      <td class="num">${L ? drill(forms, `${name} — form leads`, 'leads', L.leads) : forms}</td>
       <td class="num">${callCount===null ? '<span class="hint">not tracked</span>' : callCount}</td>
       <td class="num" style="font-weight:700">${total}</td>
       <td class="num">${spend===null ? '—' : fmtMoney(spend)}</td>
       <td class="num">${cpe===null ? '—' : fmtMoney(cpe)}</td>
-      <td class="num">${ch.won!==undefined ? ch.won : '—'}</td>
+      <td class="num">${ch.won===undefined ? '—' : (L ? drill(ch.won, `${name} — leads that became a job`, 'leads', L.leads.filter(isWon)) : ch.won)}</td>
       <td class="num">${ch.closeRate===null || ch.closeRate===undefined ? '—' : pill(closeRateTone(ch.closeRate), ch.closeRate+'%')}</td>
-      <td class="num">${ch.revenue!==undefined ? fmtMoney(ch.revenue) : '—'}</td>
+      <td class="num">${ch.revenue===undefined ? '—' : (L ? drill(fmtMoney(ch.revenue), `${name} — jobs`, 'jobs', L.jobs) : fmtMoney(ch.revenue))}</td>
       <td class="num">${ch.roas===null || ch.roas===undefined ? '—' : pill(roasTone(ch.roas), ch.roas+'×')}</td>
     </tr>`;
   };
   const C = perf.byChannel;
+  const chLists = src => ({ leads: leadsIn.filter(c => c.source===src), jobs: jobs.filter(j => contactForJob(j)?.source===src) });
+  const tagLists = tag => ({ leads: leadsIn.filter(c => c.source==='Meta Ads' && (c.tags||[]).includes(tag)), jobs: jobs.filter(j => jobAttributionTags(j).metaPlatform===tag) });
   const channelRows = [
-    chRow('Google Ads', C['Google Ads'], cs.total),
-    chRow('Meta Ads', C['Meta Ads'], null),
-    chRow('Facebook', subWon('Facebook'), null, true),
-    chRow('Instagram', subWon('Instagram'), null, true),
-    chRow('Google Maps', C['Google Maps'], null),
-    chRow('Organic web', C['Organic'], null),
-    chRow('Unknown', C['Unknown'], null),
+    chRow('Google Ads', C['Google Ads'], cs.total, false, chLists('Google Ads')),
+    chRow('Meta Ads', C['Meta Ads'], null, false, chLists('Meta Ads')),
+    chRow('Facebook', subWon('Facebook'), null, true, tagLists('Facebook')),
+    chRow('Instagram', subWon('Instagram'), null, true, tagLists('Instagram')),
+    chRow('Google Maps', C['Google Maps'], null, false, chLists('Google Maps')),
+    chRow('Organic web', C['Organic'], null, false, chLists('Organic')),
+    chRow('Unknown', C['Unknown'], null, false, chLists('Unknown')),
   ].join('');
   const totalSpend = round2(LEAD_SOURCES.reduce((s,k)=>s+(C[k].spend||0),0));
 
   // ── divisions: one table, Split/Duct nested under Aircon ──
   const divLeads = div => (data.contacts||[]).filter(c => c.division===div && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
   const typeLeads = tag => (data.contacts||[]).filter(c => c.division==='Aircon' && (c.tags||[]).includes(tag) && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
-  const divRow = (label, leads, callsN, b, sub) => `<tr${sub?' style="color:var(--ink-soft)"':''}>
-    <td>${sub?'&nbsp;&nbsp;↳ ':''}${esc(label)}</td><td class="num">${leads}</td><td class="num">${callsN===null?'—':callsN}</td>
-    <td class="num">${b.count}</td><td class="num" style="font-weight:700">${fmtMoney(b.revenue)}</td><td class="num">${b.count?fmtMoney(b.avgDeal):'—'}</td>
+  const divRow = (label, leads, callsN, b, sub, L) => `<tr${sub?' style="color:var(--ink-soft)"':''}>
+    <td>${sub?'&nbsp;&nbsp;↳ ':''}${esc(label)}</td><td class="num">${drill(leads, `${label} — form leads`, 'leads', L.leads)}</td><td class="num">${callsN===null?'—':callsN}</td>
+    <td class="num">${drill(b.count, `${label} — jobs`, 'jobs', L.jobs)}</td><td class="num" style="font-weight:700">${drill(fmtMoney(b.revenue), `${label} — jobs`, 'jobs', L.jobs)}</td><td class="num">${b.count?fmtMoney(b.avgDeal):'—'}</td>
     <td class="num">${fmtMoney(b.profit)}</td><td class="num">${b.margin===null||b.margin===undefined?'—':pill(marginTone(b.margin), b.margin+'%')}</td></tr>`;
   const divisionRows = LEAD_DIVISIONS.map(d => {
-    let html = divRow(d, divLeads(d), cs.byDivision[d]||0, perf.byDivision[d]);
-    if (d==='Aircon') html += AIRCON_TYPE_TAGS.map(t => divRow(t, typeLeads(t), null, perf.bySubDivision[t], true)).join('');
+    let html = divRow(d, divLeads(d), cs.byDivision[d]||0, perf.byDivision[d], false, { leads: leadsIn.filter(c => c.division===d), jobs: jobs.filter(j => j.jobType===d) });
+    if (d==='Aircon') html += AIRCON_TYPE_TAGS.map(t => divRow(t, typeLeads(t), null, perf.bySubDivision[t], true, { leads: leadsIn.filter(c => c.division==='Aircon' && (c.tags||[]).includes(t)), jobs: jobs.filter(j => jobAttributionTags(j).airconType===t) })).join('');
     return html;
   }).join('')
-    + `<tr style="font-weight:700;border-top:2px solid var(--line)"><td>All divisions</td><td class="num">${perf.totalLeads}</td><td class="num">${cs.total}</td>
-       <td class="num">${perf.jobsCount}</td><td class="num">${fmtMoney(perf.totalRevenue)}</td><td class="num">${perf.jobsCount?fmtMoney(round2(perf.totalRevenue/perf.jobsCount)):'—'}</td>
+    + `<tr style="font-weight:700;border-top:2px solid var(--line)"><td>All divisions</td><td class="num">${drill(perf.totalLeads, 'All form leads', 'leads', leadsIn)}</td><td class="num">${cs.total}</td>
+       <td class="num">${drill(perf.jobsCount, 'All jobs', 'jobs', jobs)}</td><td class="num">${drill(fmtMoney(perf.totalRevenue), 'All jobs', 'jobs', jobs)}</td><td class="num">${perf.jobsCount?fmtMoney(round2(perf.totalRevenue/perf.jobsCount)):'—'}</td>
        <td class="num">${fmtMoney(perf.totalProfit)}${dashDelta(perf.totalProfit, prev.totalProfit)}</td><td class="num">${perf.profitMargin===null?'—':pill(marginTone(perf.profitMargin), perf.profitMargin+'%')}</td></tr>`;
 
   // ── team: technicians (from the same buckets as everything else) + hourly sales staff ──
-  const teamRows = perf.techEntries.map(t => `<tr><td>${techTag(t.name)}</td><td class="num">${t.count}</td><td class="num" style="font-weight:700">${fmtMoney(t.revenue)}</td>
+  const teamRows = perf.techEntries.map(t => `<tr><td>${techTag(t.name)}</td><td class="num">${drill(t.count, `${t.name} — jobs`, 'jobs', jobs.filter(j => j.technician===t.name))}</td><td class="num" style="font-weight:700">${drill(fmtMoney(t.revenue), `${t.name} — jobs`, 'jobs', jobs.filter(j => j.technician===t.name))}</td>
     <td class="num">${fmtMoney(t.commission)}</td><td class="num">${fmtMoney(t.profit)}</td><td class="num">${fmtMoney(t.avgDeal)}</td><td class="num">${t.reviewRate===null?'—':t.reviewRate+'%'}</td></tr>`).join('');
   const hourlyRows = payrollHourlyPeople(data).map(p => {
     const logs = (data.salesLogs||[]).filter(l => l.person===p && inRange(l.date, r.start, r.effEnd));
@@ -5050,10 +5075,10 @@ function renderDashboard(profile, data){
   const invCounts = {}; data.jobs.forEach(j => { if (j.invoiceNumber) { const k = j.invoiceNumber+'|'+Number(j.amount); invCounts[k] = (invCounts[k]||0) + 1; } });
   const dupInvoices = new Set(Object.keys(invCounts).filter(k => invCounts[k]>1).map(k => k.split('|')[0])).size;
   const attention = [
-    overdue.length ? `<button class="btn" onclick="goTab('outstanding')">💵 ${overdue.length} unpaid job${overdue.length===1?'':'s'} past the ${paymentTermDays(data)}-day term · ${fmtMoney(round2(overdue.reduce((s,j)=>s+jobTotalCollected(j),0)))} →</button>` : '',
+    overdue.length ? `<button class="btn" onclick="adsGo('late-to-pay')">💵 ${overdue.length} unpaid job${overdue.length===1?'':'s'} past the ${paymentTermDays(data)}-day term · ${fmtMoney(round2(overdue.reduce((s,j)=>s+jobTotalCollected(j),0)))} →</button>` : '',
     cashToCollect>0 ? `<button class="btn" onclick="goTab('payroll')">💰 ${fmtMoney(cashToCollect)} cash to collect from technicians this week →</button>` : '',
     openReminders ? `<button class="btn" onclick="goTab('reminders')">🔔 ${openReminders} open reminder${openReminders===1?'':'s'} →</button>` : '',
-    dupInvoices ? `<button class="btn" onclick="goTab('jobs')">⚠️ ${dupInvoices} invoice number${dupInvoices===1?' is':'s are'} on more than one job →</button>` : '',
+    dupInvoices ? `<button class="btn" onclick="${drillJs('Invoices on more than one job (same amount)', 'jobs', data.jobs.filter(j => j.invoiceNumber && invCounts[j.invoiceNumber+'|'+Number(j.amount)]>1))}">⚠️ ${dupInvoices} invoice number${dupInvoices===1?' is':'s are'} on more than one job →</button>` : '',
   ].filter(Boolean).join('');
 
   return `
@@ -5064,9 +5089,9 @@ function renderDashboard(profile, data){
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">${rangeChips}${customInputs}</div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
-      ${dashHeadCard('Revenue (excl. GST)', fmtMoney(perf.totalRevenue), `${perf.jobsCount} jobs · avg ${perf.jobsCount?fmtMoney(round2(perf.totalRevenue/perf.jobsCount)):'—'}`, 'var(--primary-teal)', dashDelta(perf.totalRevenue, prev.totalRevenue))}
-      ${dashHeadCard('Enquiries', String(enquiries), `${perf.totalLeads} forms · ${cs.total} Google Ads calls`, 'var(--primary)', dashDelta(enquiries, enquiriesPrev))}
-      ${dashHeadCard('Jobs done', String(perf.jobsCount), `${perf.reviewRate===null?'—':perf.reviewRate+'% with a review'}`, 'var(--accent)', dashDelta(perf.jobsCount, prev.jobsCount))}
+      ${dashHeadCard('Revenue (excl. GST)', fmtMoney(perf.totalRevenue), `${perf.jobsCount} jobs · avg ${perf.jobsCount?fmtMoney(round2(perf.totalRevenue/perf.jobsCount)):'—'}`, 'var(--primary-teal)', dashDelta(perf.totalRevenue, prev.totalRevenue), drillJs('Jobs done this period', 'jobs', jobs))}
+      ${dashHeadCard('Enquiries', String(enquiries), `${perf.totalLeads} forms · ${cs.total} Google Ads calls`, 'var(--primary)', dashDelta(enquiries, enquiriesPrev), drillJs('Form leads this period (calls are not in this list)', 'leads', leadsIn))}
+      ${dashHeadCard('Jobs done', String(perf.jobsCount), `${perf.reviewRate===null?'—':perf.reviewRate+'% with a review'}`, 'var(--accent)', dashDelta(perf.jobsCount, prev.jobsCount), drillJs('Jobs done this period', 'jobs', jobs))}
       ${dashHeadCard('Owed to you now', fmtMoney(owed), `${unpaidAll.length} unpaid job${unpaidAll.length===1?'':'s'} · all periods, incl. GST`, owed>0?'var(--warn)':'var(--good)', '', "adsGo('late-to-pay')")}
     </div>
 
@@ -5080,8 +5105,8 @@ function renderDashboard(profile, data){
           <div class="kv"><span>Bank transfer</span><span class="v">${fmtMoney(pay['Bank Transfer'])}</span></div>
           <div class="kv"><span>Cash</span><span class="v">${fmtMoney(pay.Cash)}</span></div>
           ${pay.unset ? `<div class="kv"><span>Paid, method not set</span><span class="v">${fmtMoney(pay.unset)}</span></div>` : ''}
-          <div class="kv total"><span>Paid</span><span class="v">${fmtMoney(paidAmt)}</span></div>
-          <div class="kv"><span>Still unpaid <span class="hint">(this period's jobs)</span></span><span class="v" style="color:${unpaidAmt>0?'var(--bad)':'inherit'}">${fmtMoney(unpaidAmt)}</span></div>
+          <div class="kv total"><span>Paid</span><span class="v">${drill(fmtMoney(paidAmt), 'Paid jobs this period', 'jobs', jobs.filter(j => j.paymentStatus==='Paid'))}</span></div>
+          <div class="kv"><span>Still unpaid <span class="hint">(this period's jobs)</span></span><span class="v" style="color:${unpaidAmt>0?'var(--bad)':'inherit'}">${drill(fmtMoney(unpaidAmt), "This period's jobs not paid yet", 'jobs', jobs.filter(j => j.paymentStatus!=='Paid'))}</span></div>
           <div class="kv"><span>GST collected</span><span class="v">${fmtMoney(gst)}</span></div>
           <div class="kv"><span>Avg days to get paid</span><span class="v">${perf.avgDaysToPayment===null?'—':perf.avgDaysToPayment+' days'}</span></div>
         </div>
@@ -5110,15 +5135,15 @@ function renderDashboard(profile, data){
     <div class="grid-3" style="margin-top:12px;align-items:start">
       <div class="card stat-card" style="--stat-accent:var(--primary)">
         <div class="stat-label">Leads → won / lost</div>
-        ${funnelStage('Leads came in', perf.outcome.leads, perf.outcome.leads, 'var(--primary)')}
-        ${funnelStage('Won (became a job)', perf.outcome.won, perf.outcome.leads, 'var(--good)')}
-        ${funnelStage('Lost', perf.outcome.lost, perf.outcome.leads, 'var(--bad)')}
-        ${funnelStage('Still open', perf.outcome.open, perf.outcome.leads, 'var(--warn)')}
+        ${funnelStage('Leads came in', perf.outcome.leads, perf.outcome.leads, 'var(--primary)', drillJs('Leads that came in', 'leads', leadsIn))}
+        ${funnelStage('Won (became a job)', perf.outcome.won, perf.outcome.leads, 'var(--good)', drillJs('Won — became a job', 'leads', leadsIn.filter(isWon)))}
+        ${funnelStage('Lost', perf.outcome.lost, perf.outcome.leads, 'var(--bad)', drillJs('Lost leads', 'leads', leadsIn.filter(c => leadStage(c)==='Lost')))}
+        ${funnelStage('Still open', perf.outcome.open, perf.outcome.leads, 'var(--warn)', drillJs('Still open', 'leads', leadsIn.filter(c => !isWon(c) && leadStage(c)!=='Lost')))}
         <div class="hint" style="margin-top:6px">Won = the customer has a job in Jobs &amp; Commissions. Form leads only; phone calls join when the phone system is live.</div>
       </div>
       <div class="card stat-card" style="--stat-accent:var(--bad)">
         <div class="stat-label">Why leads were lost</div>
-        ${perf.outcome.lost ? renderBarGroup([...LOST_REASONS.map((x,i) => ({ label:x.label, value:perf.lossReasons[x.key], color:['var(--ink-faint)','var(--warn)','var(--bad)','var(--ink-faint)','var(--ink-faint)','var(--bad)','var(--accent)'][i] })), { label:'No reason given', value:perf.lossReasons.noReason, color:'var(--line)' }].filter(b => b.value>0), {fmt:(n)=>String(n)}) : emptyState('No lost leads this period')}
+        ${perf.outcome.lost ? renderBarGroup([...LOST_REASONS.map((x,i) => ({ label:x.label, value:perf.lossReasons[x.key], onclick: drillJs(`Lost — ${x.label}`, 'leads', leadsIn.filter(c => leadStage(c)==='Lost' && lostReasonOf(c)===x.key)), color:['var(--ink-faint)','var(--warn)','var(--bad)','var(--ink-faint)','var(--ink-faint)','var(--bad)','var(--accent)'][i] })), { label:'No reason given', value:perf.lossReasons.noReason, onclick: drillJs('Lost — no reason given', 'leads', leadsIn.filter(c => leadStage(c)==='Lost' && lostReasonOf(c)==='noReason')), color:'var(--line)' }].filter(b => b.value>0), {fmt:(n)=>String(n)}) : emptyState('No lost leads this period')}
       </div>
       <div class="card stat-card" style="--stat-accent:var(--accent)">
         <div class="stat-label">Speed to lead</div>
@@ -5184,7 +5209,7 @@ function payrollJobLinesTable(c){
   const deducts = commissionDeductsParts(c.person);
   return `<div class="table-wrap"><table><thead><tr><th>Job date</th><th>Invoice</th><th>Customer</th><th class="num">Amount (ex-GST)</th><th class="num">Expenses${deducts?' (deducted)':''}</th><th class="num">%</th><th class="num">Commission</th><th></th></tr></thead><tbody>
     ${c.lines.map(l => `<tr>
-      <td class="mono">${fmtDateShort(l.job.date)}</td><td class="mono">${esc(l.job.invoiceNumber||'—')}</td><td>${esc(l.job.customerName)}</td>
+      <td class="mono">${fmtDateShort(l.job.date)}</td><td class="mono">${invoiceLink(l.job.id, l.job.invoiceNumber)}</td><td>${custLink(l.job.customerName, l.job.contactId, l.job.id)}</td>
       <td class="num">${fmtMoney(l.job.amount)}</td><td class="num">${l.job.partsCost?fmtMoney(l.job.partsCost):'—'}</td>
       <td class="num">${Number(l.job.commissionPercent)||0}%</td><td class="num" style="font-weight:600">${payMoney(l.commission)}</td>
       <td>${l.late ? pill('warn', `paid late · job from ${fmtDateShort(l.job.date)}`) : ''}${l.job.paymentMethod==='Cash' ? ' '+pill('neutral','cash') : ''}</td>
@@ -5195,7 +5220,7 @@ function payrollUnpaidTable(c){
   if (!c.unpaid.length) return '';
   return `<div class="section-title" style="margin-top:14px">Not paid yet <span class="tag">${c.unpaid.length} · expected ${payMoney(c.expected)}</span></div>
     <div class="table-wrap"><table><thead><tr><th>Job date</th><th>Invoice</th><th>Customer</th><th class="num">Amount (ex-GST)</th><th class="num">Expected commission</th></tr></thead><tbody>
-    ${c.unpaid.map(j => `<tr><td class="mono">${fmtDateShort(j.date)}</td><td class="mono">${esc(j.invoiceNumber||'—')}</td><td>${esc(j.customerName)}</td><td class="num">${fmtMoney(j.amount)}</td><td class="num">${payMoney(jobCommissionAmount(j))}</td></tr>`).join('')}
+    ${c.unpaid.map(j => `<tr><td class="mono">${fmtDateShort(j.date)}</td><td class="mono">${invoiceLink(j.id, j.invoiceNumber)}</td><td>${custLink(j.customerName, j.contactId, j.id)}</td><td class="num">${fmtMoney(j.amount)}</td><td class="num">${payMoney(jobCommissionAmount(j))}</td></tr>`).join('')}
     </tbody></table></div>`;
 }
 function payrollDaysTable(h){
@@ -5526,6 +5551,61 @@ function customerNameCell(name, contactId){
   if (!c) return esc(name);
   return `<span style="cursor:pointer;color:var(--primary-strong);text-decoration:underline;text-decoration-style:dotted" onclick="event.stopPropagation();goToLeadConversation('${c.id}')" title="Open conversation with ${esc(c.fullName)}">${esc(name)}</span>`;
 }
+// Every customer name opens that customer: their CRM card when this person can see the CRM and the name
+// belongs to a lead, otherwise the job itself. Every invoice number opens its job.
+function custLink(name, contactId, jobId){
+  const pr = getCurrentProfile();
+  const job = jobId ? (STATE.data.jobs||[]).find(j => j.id===jobId) : null;
+  const c = contactId ? contactById(contactId) : (job ? contactForJob(job) : findContactByName(name));
+  if (c && pr && canViewSection(pr,'crm')) return `<span class="xlink" onclick="event.stopPropagation();closeModal();goToLeadConversation('${c.id}')" title="Open ${esc(c.fullName)}'s card">${esc(name||c.fullName)}</span>`;
+  if (jobId && pr && canViewSection(pr,'jobs')) return `<span class="xlink" onclick="event.stopPropagation();goToJobFromSearch('${jobId}')" title="Open the job">${esc(name||'—')}</span>`;
+  return esc(name||'—');
+}
+function invoiceLink(jobId, invoiceNumber){
+  const pr = getCurrentProfile();
+  if (!jobId || !pr || !canViewSection(pr,'jobs')) return esc(invoiceNumber||'—');
+  return `<span class="xlink" onclick="event.stopPropagation();goToJobFromSearch('${jobId}')" title="Open the job">${esc(invoiceNumber||'—')}</span>`;
+}
+// "The list behind the number": any count or total on the page can open the exact leads or jobs it was
+// counted from. The lists are captured while the page is drawn, so the list always matches the number.
+let DRILL = [];
+function drill(label, title, kind, items){
+  const i = DRILL.push({ title, kind, items: items || [] }) - 1;
+  return `<span class="xlink" onclick="event.stopPropagation();openDrill(${i})" title="Show the list">${label}</span>`;
+}
+function drillJs(title, kind, items){ return `openDrill(${DRILL.push({ title, kind, items: items || [] }) - 1})`; }
+function openDrill(i){
+  const d = DRILL[i]; if (!d) return;
+  const items = d.items.slice();
+  let head, rows;
+  if (d.kind==='leads') {
+    items.sort((a,b) => String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+    head = '<th>Lead</th><th>Came in</th><th>Source</th><th>Division</th><th>Stage</th>';
+    rows = items.map(c => `<tr><td>${custLink(c.fullName, c.id)}</td><td class="mono">${fmtDateShort(localDay(c.createdAt))}</td><td>${esc(sourceLabel(c.source))}</td><td>${esc(c.division||'—')}</td><td>${esc(stageLabel(leadStage(c)))}</td></tr>`).join('');
+  } else {
+    items.sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
+    head = '<th>Date</th><th>Customer</th><th>Invoice</th><th>Technician</th><th class="num">Amount (incl. GST)</th><th>Status</th>';
+    rows = items.map(j => `<tr><td class="mono">${fmtDateShort(j.date)}</td><td>${custLink(j.customerName, j.contactId, j.id)}</td><td class="mono">${invoiceLink(j.id, j.invoiceNumber)}</td><td>${esc(j.technician||'—')}</td><td class="num">${fmtMoney(jobTotalCollected(j))}</td><td>${pill(j.paymentStatus==='Paid'?'good':'bad', j.paymentStatus)}</td></tr>`).join('');
+  }
+  const total = d.kind==='jobs' ? ` · ${fmtMoney(round2(items.reduce((s,j)=>s+jobTotalCollected(j),0)))} incl. GST` : '';
+  openModal(`<div class="modal-back" onclick="if(event.target===this) closeModal()"><div class="modal" style="max-width:820px">
+    <h2>${esc(d.title)}</h2><div class="modal-sub">${items.length} ${d.kind==='leads'?'lead':'job'}${items.length===1?'':'s'}${total}</div>
+    <div class="table-wrap" style="max-height:60vh;overflow:auto"><table><thead><tr>${head}</tr></thead><tbody>${rows || `<tr><td colspan="6">${emptyState('Nothing here')}</td></tr>`}</tbody></table></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Close</button></div>
+  </div></div>`);
+}
+// Customer card: this customer's jobs and what they still owe (jobs linked to them, or matching by name for old rows).
+function jobsForContact(c){
+  const pr = getCurrentProfile(); if (!pr || !c) return [];
+  return (filterForProfile(STATE.data, pr).jobs || []).filter(j => j.contactId===c.id || (!j.contactId && contactForJob(j)?.id===c.id)).sort((a,b)=>b.date.localeCompare(a.date));
+}
+function renderContactJobsBlock(c){
+  const jobs = jobsForContact(c); if (!jobs.length) return '';
+  const open = jobs.filter(j => j.paymentStatus!=='Paid');
+  const owed = round2(open.reduce((s,j)=>s+jobTotalCollected(j),0));
+  const rows = jobs.map(j => `<div class="kv" style="gap:8px"><span><span class="mono">${fmtDateShort(j.date)}</span> · ${invoiceLink(j.id, j.invoiceNumber)} · ${esc(j.jobType||'')}</span><span class="v">${fmtMoney(jobTotalCollected(j))} ${pill(j.paymentStatus==='Paid'?'good':'bad', j.paymentStatus)}</span></div>`).join('');
+  return `<div class="field" style="margin-top:12px"><label>Jobs (${jobs.length})${owed>0 ? ` · <span style="color:var(--bad)">owes ${fmtMoney(owed)} incl. GST</span>` : ''}</label><div>${rows}</div></div>`;
+}
 // Carries the Split/Duct and Facebook/Instagram tags (see AIRCON_TYPE_TAGS/META_PLATFORM_TAGS) from a
 // job's linked lead over to its revenue — same name-match as customerNameCell, so this only knows the
 // type for jobs that were (or matched) a CRM lead with that tag; every other job's dollars still land in
@@ -5676,15 +5756,16 @@ function markReminderReadOnly(readKey){
 }
 function goToReminderTarget(type, contactId, readKey, weekKey){
   markReminderRead(readKey);
-  if (type==='commission' && canViewSection(getCurrentProfile(), 'payroll')) { UI.tab='payroll'; if (weekKey) UI.payroll.week = weekKey; render(); return; }
-  if (type==='followup' && contactId) { goToLeadConversation(contactId); return; }
-  // An unpaid invoice opens the conversation with that customer when it's linked and this person can see the CRM.
-  if (type==='unpaid' && contactId && canViewSection(getCurrentProfile(), 'crm')) { goToLeadConversation(contactId); return; }
-  if (type==='unpaid' || type==='refund') { UI.tab='outstanding'; render(); return; }
-  if (type==='equipment') { UI.tab='reference'; UI.reference.tab='equipmentSpend'; render(); return; }
-  if (type==='quote') { UI.tab='quotes'; render(); return; }
-  if (type==='repeat-service') { UI.tab='jobs'; render(); return; }
-  render();
+  const pr = getCurrentProfile(); const can = sec => !!pr && canViewSection(pr, sec);
+  const refId = String(readKey||'').split(':').slice(1).join(':');   // "quote:<id>", "repeat-service:<jobId>", …
+  if (type==='commission' && can('payroll')) { UI.tab='payroll'; if (weekKey) UI.payroll.week = weekKey; render(); return; }
+  // A lead follow-up, an unpaid invoice or a re-offer opens that customer when they're linked and this person sees the CRM.
+  if ((type==='followup' || type==='unpaid' || type==='repeat-service') && contactId && can('crm')) { goToLeadConversation(contactId); return; }
+  if ((type==='unpaid' || type==='refund') && can('outstanding')) { UI.tab='outstanding'; render(); return; }
+  if (type==='repeat-service' && refId && can('jobs')) { goToJobFromSearch(refId); return; }
+  if (type==='equipment' && can('reference')) { UI.tab='reference'; UI.reference.tab='equipmentSpend'; render(); return; }
+  if (type==='quote' && can('quotes')) { UI.tab='quotes'; render(); if (refId) openQuoteModal(refId); return; }
+  render();   // nowhere this person is allowed to go — it's marked read and stays here
 }
 function renderReminders(profile, data){
   const items = computeReminders(data);
@@ -5751,6 +5832,14 @@ function followupsDueRows(data){
     kind:'Follow-up', id:c.id, raw:c, date:c.nextFollowUp, title:`${c.fullName} — ${stageLabel(leadStage(c))}`,
     meta:`${c.division}${c.phone?' · '+c.phone:''}${c.followupNote?' · '+c.followupNote:''}`, tone: c.nextFollowUp < t ? 'bad' : 'warn' }));
 }
+// The row's title opens what the row is about: the customer for an unpaid job or a follow-up, the quote, the task.
+function openItemTitle(r){
+  if (r.kind==='Unpaid Job') return `<span class="xlink" onclick="openJobCustomer('${r.id}')">${esc(r.title)}</span>`;
+  if (r.kind==='Follow-up') return `<span class="xlink" onclick="goToLeadConversation('${r.id}')">${esc(r.title)}</span>`;
+  if (r.kind==='Quote') return `<span class="xlink" onclick="openQuoteModal('${r.id}')">${esc(r.title)}</span>`;
+  if (r.kind==='Task') return `<span class="xlink" onclick="openTaskModal('${r.id}')">${esc(r.title)}</span>`;
+  return esc(r.title);
+}
 function openItemActivityButton(r){
   if (r.kind==='Follow-up') return `<button class="btn ghost small" onclick="goToLeadConversation('${r.id}')">Open card</button>`;
   if (r.kind==='Task') return `<button class="btn ghost small" data-activity-count="${r.id}" onclick="openTaskActivityModal('${r.id}')">💬 ${taskActivityCount(r.raw)}</button>`;
@@ -5778,7 +5867,7 @@ function renderOpenItemsMixedList(data){
   return rows.length ? rows.map(r => `
     <tr>
       <td>${pill('neutral', r.kind)}</td>
-      <td class="wrap"><div style="font-weight:600;font-size:13.4px">${esc(r.title)}</div><div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(r.meta)}</div></td>
+      <td class="wrap"><div style="font-weight:600;font-size:13.4px">${openItemTitle(r)}</div><div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(r.meta)}</div></td>
       <td class="mono">${r.date?fmtDateShort(r.date):'—'}</td>
       <td>${pill(r.tone, r.tone==='bad'?'Overdue':(r.tone==='warn'?'Open':'—'))}</td>
       <td>${openItemActivityButton(r)}</td>
@@ -5801,7 +5890,7 @@ function renderOpenItemsNonTaskList(data){
   return rows.length ? rows.map(r => `
     <tr>
       <td>${pill('neutral', r.kind)}</td>
-      <td class="wrap"><div style="font-weight:600;font-size:13.4px">${esc(r.title)}</div><div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(r.meta)}</div></td>
+      <td class="wrap"><div style="font-weight:600;font-size:13.4px">${openItemTitle(r)}</div><div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(r.meta)}</div></td>
       <td class="mono">${r.date?fmtDateShort(r.date):'—'}</td>
       <td>${pill(r.tone, r.tone==='bad'?'Overdue':(r.tone==='warn'?'Open':'—'))}</td>
       <td>${openItemActivityButton(r)}</td>
@@ -5870,7 +5959,7 @@ function closingCard(c){
       ${c.invoiceFileUrl ? `<a href="${c.invoiceFileUrl}" target="_blank" rel="noopener"><img src="${c.invoiceFileUrl}" alt="Invoice photo" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex:none;display:block"></a>` : ''}
       <div style="flex:1;min-width:0">
         <div style="margin-bottom:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${techTag(c.technicianName)}<span class="mono" style="font-size:11.5px;color:var(--ink-soft)">${fmtDateShort(c.date)}</span>${pill('neutral', c.jobType||'—')}</div>
-        <div style="font-weight:600;font-size:13.5px;margin-bottom:3px">${esc(c.customerName)} <span class="mono" style="color:var(--ink-soft);font-weight:500">— ${esc(c.invoiceNumber||'—')}</span></div>
+        <div style="font-weight:600;font-size:13.5px;margin-bottom:3px">${custLink(c.customerName, null, c.linkedJobId)} <span class="mono" style="color:var(--ink-soft);font-weight:500">— ${c.linkedJobId ? invoiceLink(c.linkedJobId, c.invoiceNumber) : esc(c.invoiceNumber||'—')}</span></div>
         <div class="mono" style="font-size:13px;margin-bottom:3px">${fmtMoney(c.amount)} <span style="color:var(--ink-soft);font-family:'Figtree',sans-serif">(${c.includesGST ? 'GST '+fmtMoney(round2(c.amount*(STATE.data.settings.gstRatePercent/100)))+' added' : 'no GST'})</span></div>
         <div style="margin-bottom:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${pill(statusTone, c.paymentStatus)}${c.paymentMethod?pill('neutral', c.paymentMethod):''}${linkedJob ? `<span style="font-size:11px;color:var(--ink-soft)">→ linked to Job ${esc(linkedJob.invoiceNumber||'')}</span>` : ''}</div>
         ${(c.partsCost>0 || c.partsPaidBy) ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:2px">Parts: ${fmtMoney(c.partsCost||0)}${c.partsPaidBy?' · paid by '+esc(c.partsPaidBy):''}</div>` : ''}
@@ -6659,7 +6748,7 @@ const NEXT_ACTIONS = ['Call','Send Reminder','Wait for Reply'];
 function renderQuotes(profile, data){
   const list = [...data.quotes].sort((a,b)=>b.date.localeCompare(a.date));
   const rows = list.length ? list.map(q => `
-    <tr><td class="mono">${fmtDateShort(q.date)}</td><td>${esc(q.customer)}</td><td class="num">${q.amount?fmtMoney(q.amount):'—'}</td>
+    <tr><td class="mono">${fmtDateShort(q.date)}</td><td>${custLink(q.customer)}</td><td class="num">${q.amount?fmtMoney(q.amount):'—'}</td>
     <td>${(q.serviceTypes||[]).map(s=>pill('neutral',s)).join(' ')||'—'}</td>
     <td>${statusSelect('quoteStatus', q.id, q.status, QUOTE_STATUSES, v=>QUOTE_STATUS_COLOR[v], v=>v, false)}</td>
     <td>${q.winProbability?pill(q.winProbability==='High'?'good':q.winProbability==='Medium'?'warn':'neutral', q.winProbability):'—'}</td>
@@ -7216,7 +7305,7 @@ function renderNoAccess(profile){
 }
 
 /* ── main render loop ───────────────────────────────────────────────── */
-function render(){ JOB_CACHE.index = null; try { setTimeout(renderChaseBubbles, 0); } catch(e) {}
+function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderChaseBubbles, 0); } catch(e) {}
   const app = document.getElementById('app');
   if (AUTH.status === 'loading') { app.innerHTML = renderAuthLoading(); return; }
   if (AUTH.status === 'signedOut') { app.innerHTML = renderLogin(); return; }
