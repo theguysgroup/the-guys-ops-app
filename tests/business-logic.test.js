@@ -43,6 +43,7 @@ const DECLS = [
   'PAYROLL_HOURLY_RATE', 'PAYROLL_BOOKING_BONUS', 'PAYROLL_HEBREW_NAMES', 'bookingBonus', 'nextBookingTier',
   'salesLogBookings', 'salesLogPay', 'payrollWeekOf', 'shiftPayrollWeek', 'payrollRangeText', 'payMoney', 'jobPaidDate',
   'computePayrollCommission', 'computePayrollHourly', 'buildCommissionPayMessage', 'buildHourlyPayMessage', 'shiftDays',
+  'PAYROLL_REMINDERS_FROM', 'payrollStatus', 'payrollCommissionPeople', 'payrollHourlyPeople', 'paymentTermDays', 'jobDaysWaiting', 'jobIsLate',
   'computeNetProfit',
   // dashboard
   'localDay', 'GOOGLE_ADS_AIRCON_ACCOUNT', 'callDivision', 'summarizeCalls', 'DASH_RANGES', 'resolveDashboardRange',
@@ -260,11 +261,12 @@ function testComputeProfitByWeekInRange(sb){
     { id:'5', customerName:'Unmatched Customer', jobType:'Chimney', date:'2026-09-09', amount:150, commissionPercent:30, partsCost:0, paymentStatus:'Paid', technician:'Dolev' },
   ];
   const weeks = sb.computeProfitByWeekInRange(sb.STATE.data, '2026-09-01', '2026-09-10');
-  // Week of 31 Aug–6 Sep: job1 (profit 1000-190-50=760; commission is 20% of 1000-50) + job2 (profit 500-100-0=400) = 1160.
-  // Week of 7 Sep–13 Sep: job4 (profit 200-40-0=160) + job5 (profit 150-45-0=105) = 265.
+  // Weeks run Sunday–Saturday (same as Payroll). 5 Sep is a Saturday, 6 Sep a Sunday.
+  // Week of 30 Aug–5 Sep: job1 (profit 1000-190-50=760; commission is 20% of 1000-50) = 760.
+  // Week of 6–12 Sep: job2 (500-100-0=400) + job4 (200-40-0=160) + job5 (150-45-0=105) = 665.
   assertEqual(weeks.length, 2, 'computeProfitByWeekInRange: buckets the range into the 2 weeks it spans');
-  assertEqual(weeks[0].revenue, 1160, 'computeProfitByWeekInRange: first week profit (property is named "revenue" to match renderSparkline\'s expected shape)');
-  assertEqual(weeks[1].revenue, 265, 'computeProfitByWeekInRange: second week profit');
+  assertEqual(weeks[0].revenue, 760, 'computeProfitByWeekInRange: first week profit (property is named "revenue" to match renderSparkline\'s expected shape)');
+  assertEqual(weeks[1].revenue, 665, 'computeProfitByWeekInRange: second week profit');
 }
 
 function testRepeatServiceReminder(sb){
