@@ -312,6 +312,11 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .followup-context-banner { background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 12.5px; font-weight: 600; margin: 0 0 10px; flex: none; }
 @media (max-width: 1100px) { .crm-inbox { grid-template-columns: 240px minmax(0,1fr); height: auto; } .crm-inbox-details { display: none; } }
 .crm-inbox-back-btn { display: none; }
+.crm-inbox-details-btn { display: none; }
+@media (max-width: 1100px) {
+  .crm-inbox-details-btn { display: inline-flex; }
+  .crm-inbox.show-details .crm-inbox-details { display: block; grid-column: 1 / -1; border-top: 1px solid var(--line); }
+}
 /* Below 760px there's only room for one pane at a time — like a phone's messaging app, the list and
    the open conversation are two separate screens, not two columns squeezed together. Default shows the
    list; picking a contact swaps to a full-height thread view with a Back button, via the .has-selection
@@ -451,6 +456,8 @@ const PAYROLL_HEBREW_NAMES = { Guy:'גיא', Dolev:'דולב', Omri:'עומרי'
 function bookingBonus(bookings){ const t = PAYROLL_BOOKING_BONUS.find(t => (Number(bookings)||0) >= t.min); return t ? t.bonus : 0; }
 function nextBookingTier(bookings){ const n = Number(bookings)||0; const t = PAYROLL_BOOKING_BONUS.slice().reverse().find(t => n < t.min); return t ? { needed: t.min - n, bonus: t.bonus } : null; }
 function salesLogBookings(l){ return (Number(l.bookingsAircon)||0) + (Number(l.bookingsChimney)||0) + (Number(l.bookingsPw)||0); }
+// Money shown in presentation mode is scaled everywhere, including Ron's hourly rate and bonus amounts.
+function presentAmt(n){ return (typeof PRESENT!=='undefined' && PRESENT) ? n * PRESENT_FACTOR : n; }
 function salesLogPay(l){ return round2(((Number(l.hours)||0) * PAYROLL_HOURLY_RATE + bookingBonus(salesLogBookings(l))) * (typeof PRESENT!=='undefined' && PRESENT ? PRESENT_FACTOR : 1)); }
 function payrollWeekOf(dateStr){
   const d = parseLocalDate(dateStr);
@@ -478,7 +485,10 @@ function computePayrollCommission(data, person, weekKey){
   const mine = data.jobs.filter(j => j.technician===person);
   const paid = mine.filter(j => j.paymentStatus==='Paid' && jobPaidDate(j)>=wk.start && jobPaidDate(j)<=wk.end)
     .sort((a,b) => a.date.localeCompare(b.date) || String(a.invoiceNumber||'').localeCompare(String(b.invoiceNumber||'')));
-  const lines = paid.map(j => ({ job:j, commission: jobCommissionAmount(j), late: j.date < wk.start, fromLastWeek: j.date < wk.start && j.date >= prevWeekStart }));
+  // A job put on hold ("Stuck") stays out of the week's pay until it is released; it's listed separately.
+  const toLine = j => ({ job:j, commission: jobCommissionAmount(j), late: j.date < wk.start, fromLastWeek: j.date < wk.start && j.date >= prevWeekStart });
+  const lines = paid.filter(j => j.paidToTechnician!=='Stuck').map(toLine);
+  const onHold = paid.filter(j => j.paidToTechnician==='Stuck').map(toLine);
   // "Not paid yet" = this person's jobs done by the end of this week that are still unpaid today — their
   // commission joins whichever week they eventually get paid in.
   const unpaid = mine.filter(j => j.paymentStatus!=='Paid' && j.date <= wk.end).sort((a,b)=>a.date.localeCompare(b.date));
@@ -489,6 +499,7 @@ function computePayrollCommission(data, person, weekKey){
   return {
     person, week: wk, lines, unpaid,
     total: round2(lines.reduce((s,l)=>s+l.commission,0)),
+    onHold, onHoldTotal: round2(onHold.reduce((s,l)=>s+l.commission,0)),
     expected: round2(unpaid.reduce((s,j)=>s+jobCommissionAmount(j),0)),
     cash: round2(cashJobs.reduce((s,j)=>s+jobTotalCollected(j),0)),
     cashJobs, percent: pcts.length===1 ? pcts[0] : null,
@@ -532,6 +543,7 @@ function buildCommissionPayMessage(p){
     out.push(`היי ${name} 👋`, `סיכום שכר שבועי (${range}):`, `עמלה על עבודות השבוע${pct}:`);
     out.push(...(p.lines.length ? p.lines.map(lineText) : ['* אין עבודות ששולמו השבוע']));
     out.push('', `💰 סה"כ לתשלום: ${payMoney(p.total)}`);
+    if ((p.onHold||[]).length) out.push(`⏸ ${p.onHold.length===1?'עבודה אחת בהמתנה':p.onHold.length+' עבודות בהמתנה'} (${payMoney(p.onHoldTotal)}) - לא נכלל בתשלום השבוע`);
     if (p.unpaid.length===1) out.push(`⚠️ עבודה אחת עדיין לא שולמה - תיכנס לשבוע שבו תיסגר (עמלה צפויה: ${payMoney(p.expected)})`);
     else if (p.unpaid.length>1) out.push(`⚠️ ${p.unpaid.length} עבודות עדיין לא שולמו - ייכנסו לשבוע שבו ייסגרו (עמלה צפויה: ${payMoney(p.expected)})`);
     if (p.cash>0) out.push(`מזומן שנאסף השבוע: ${payMoney(p.cash)} - צריך להעביר לאופק`);
@@ -540,6 +552,7 @@ function buildCommissionPayMessage(p){
     out.push(`Hi ${name} 👋`, `Weekly pay summary (${range}):`, `Commission on this week's jobs${pct}:`);
     out.push(...(p.lines.length ? p.lines.map(lineText) : ['* No jobs were paid this week']));
     out.push('', `💰 Total to pay: ${payMoney(p.total)}`);
+    if ((p.onHold||[]).length) out.push(`⏸ ${p.onHold.length} job${p.onHold.length===1?'':'s'} on hold (${payMoney(p.onHoldTotal)}) - not included this week`);
     if (p.unpaid.length===1) out.push(`⚠️ 1 job is still unpaid - it will be added in the week it's paid (expected commission: ${payMoney(p.expected)})`);
     else if (p.unpaid.length>1) out.push(`⚠️ ${p.unpaid.length} jobs are still unpaid - they will be added in the week they're paid (expected commission: ${payMoney(p.expected)})`);
     if (p.cash>0) out.push(`Cash collected this week: ${payMoney(p.cash)} - please transfer to Ofek`);
@@ -792,7 +805,7 @@ function computeReminders(data, now){
 /* ── permissions / types (ported from src/lib/types.ts + permissions.ts) ── */
 const ALL_SECTIONS = ['crm','crmOverview','adsGoogle','jobs','finance','payroll','outstanding','reminders','openItems','tasks','reference','closings','settings'];
 const SECTION_ORDER = ['crm','dashboard','crmOverview','adsGoogle','closings','jobs','finance','payroll','outstanding','reminders','openItems','tasks','reference'];
-const SECTION_LABEL = { dashboard:'Dashboard', adsGoogle:'Google Ads board', crm:'CRM', crmOverview:'Leads & Marketing', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', reference:'Equipment & Suppliers', closings:'Closings', settings:'Permissions & Settings' };
+const SECTION_LABEL = { dashboard:'Dashboard', adsGoogle:'Google Ads board', crm:'CRM', crmOverview:'Leads & Marketing', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', reference:'Resources (equipment, employees, suppliers)', closings:'Closings', settings:'Permissions & Settings' };
 const ROLE_LABEL = { owner:'Owner', manager:'Manager', technician:'Technician', va:'Virtual Assistant' };
 function roleLabel(role){ return ROLE_LABEL[role] || role; }
 function defaultPermissionsFor(role){
@@ -822,6 +835,12 @@ function canViewSection(profile, section){
   return !!profile.permissions[section];
 }
 function firstAccessibleTab(profile){ return SECTION_ORDER.find(s => canViewSection(profile,s)) || null; }
+// Where each person lands: owners/managers on the Dashboard, technicians on their own pay page (My Pay),
+// Ron on the CRM; anyone else on the first section they can open.
+function homeTabFor(profile){
+  const pref = (profile.role==='owner' || profile.role==='manager') ? 'dashboard' : profile.role==='technician' ? 'payroll' : profile.role==='va' ? 'crm' : null;
+  return (pref && canViewSection(profile, pref)) ? pref : firstAccessibleTab(profile);
+}
 
 // Local id for things that live only on screen until saved (list rows, update entries).
 function uid(){ return 'id'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
@@ -1456,7 +1475,7 @@ function filterForProfile(data, profile){
     // Both the "Ron's Tasks" and "My Tasks" boards are gated by the same `tasks` permission flag —
     // which board is showing, and whether it's filtered to just this person, is a rendering concern
     // (see UI.tasks.board / UI.tasks.filterMode), not a data-visibility one.
-    tasks: profile.permissions.tasks ? data.tasks : [],
+    tasks: !profile.permissions.tasks ? [] : profile.role==='va' ? data.tasks.filter(t => t.board!=='mine') : data.tasks,
     contacts: (profile.permissions.crm || profile.permissions.crmOverview) ? data.contacts : [],
     equipmentCatalog: profile.permissions.reference ? data.equipmentCatalog : [],
     suppliers: profile.permissions.reference ? data.suppliers : [],
@@ -2163,6 +2182,7 @@ async function doSetPassword(){
   render();
 }
 async function doLogout(){
+  if (PRESENT) { try { localStorage.setItem('tgsg_present','0'); } catch(e) {} PRESENT = false; }   // a demo never carries over to the next login
   await sb.auth.signOut();
   teardownRealtimeSubscriptions();
   STATE.data = null; STATE.dataLoaded = false; STATE.profiles = []; STATE.currentProfileId = null;
@@ -2236,7 +2256,7 @@ function navButtonHtml(id, label, icon, active, onClick, badge){
 }
 
 function renderShell(profile, data){
-  const reminderCount = computeReminders(data).filter(it=>!it.isRead).length;
+  const reminderCount = remindersFor(profile, data).filter(it=>!it.isRead).length;
   // navBlocks: [Overview group, Finance group, System group], in NAV's declared order — Closings and
   // Management (built separately below, since they need custom per-item logic) are spliced in between.
   const navBlocks = NAV.map(g => {
@@ -2269,7 +2289,7 @@ function renderShell(profile, data){
       if (myBoard) mgmtItems.push(navButtonHtml('tasksMineTech', taskBoardLabel(myBoard), '☑', UI.tab==='tasks' && UI.tasks.board===myBoard, `goTasks('${esc(myBoard)}')`));
     } else {
       mgmtItems.push(navButtonHtml('tasksPatrick', "Ron's Tasks", '☐', UI.tab==='tasks' && UI.tasks.board==='ron', "goTasks('ron')"));
-      mgmtItems.push(navButtonHtml('tasksMine', 'My Tasks', '☑', UI.tab==='tasks' && UI.tasks.board==='mine', "goTasks('mine')"));
+      if (profile.role!=='va') mgmtItems.push(navButtonHtml('tasksMine', 'My Tasks', '☑', UI.tab==='tasks' && UI.tasks.board==='mine', "goTasks('mine')"));
       const techs = activeTechnicianNames(data);
       if (techs.length) {
         const techOpen = !!UI.techTasksOpen;
@@ -3175,6 +3195,7 @@ function renderCrmInboxThreadAndDetails(c){
         </span>
         <span style="display:flex;gap:6px">
           <button id="inbox-mark-read-btn" class="btn ghost small" style="display:${unread>0?'':'none'}" onclick="markLeadReadManually('${c.id}','inbox')">Mark as read</button>
+          <button class="btn ghost small crm-inbox-details-btn" onclick="UI.crm.showDetails=!UI.crm.showDetails;render()">${UI.crm.showDetails?'Hide details':'Details'}</button>
           <button class="btn ghost small" onclick="openLeadModal('${c.id}')">Full profile</button>
         </span>
       </div>
@@ -3215,7 +3236,7 @@ function leadStageControl(c){
 }
 function renderCrmInbox(contacts){
   const selected = UI.crm.selectedContactId ? contactById(UI.crm.selectedContactId) : null;
-  return `<div class="crm-inbox ${selected?'has-selection':''}">
+  return `<div class="crm-inbox ${selected?'has-selection':''} ${UI.crm.showDetails?'show-details':''}">
     <div class="crm-inbox-list" id="crm-inbox-list">${renderCrmInboxList(contacts)}</div>
     ${renderCrmInboxThreadAndDetails(selected)}
   </div>`;
@@ -3647,6 +3668,7 @@ function csvCell(v){
   return needsQuotes ? '"'+s.replace(/"/g,'""')+'"' : s;
 }
 function downloadCsv(filename, rows){
+  if (typeof PRESENT!=='undefined' && PRESENT) { showToast('Exports are off in presentation mode'); return; }
   const csv = rows.map(r => r.map(csvCell).join(',')).join('\r\n');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
@@ -4955,7 +4977,11 @@ function payrollPaidBadge(st, currentTotal){
   return pill('good', `Paid ${payMoney(paidAmt)}`) + (Math.abs(diff) > 0.004 ? ' ' + pill('warn', `${diff>0?'+':''}${payMoney(diff)} since`) : '');
 }
 function payrollJobLinesTable(c){
-  if (!c.lines.length) return `<div class="hint" style="padding:8px 0">No jobs were paid this week.</div>`;
+  const held = (c.onHold||[]).length ? `<div class="section-title" style="margin-top:14px">On hold <span class="tag">${c.onHold.length} · ${payMoney(c.onHoldTotal)} · not in this week's pay</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Job date</th><th>Invoice</th><th>Customer</th><th class="num">Amount (ex-GST)</th><th class="num">Commission on hold</th></tr></thead><tbody>
+    ${c.onHold.map(l => `<tr><td class="mono">${fmtDateShort(l.job.date)}</td><td class="mono">${invoiceLink(l.job.id, l.job.invoiceNumber)}</td><td>${custLink(l.job.customerName, l.job.contactId, l.job.id)}</td><td class="num">${fmtMoney(l.job.amount)}</td><td class="num">${payMoney(l.commission)}</td></tr>`).join('')}
+    </tbody></table></div><div class="hint" style="margin-top:4px">Set back to "Not Paid" in Jobs to release it; it then counts in the week the customer paid.</div>` : '';
+  if (!c.lines.length) return `<div class="hint" style="padding:8px 0">No jobs were paid this week.</div>` + held;
   const deducts = commissionDeductsParts(c.person);
   return `<div class="table-wrap"><table><thead><tr><th>Job date</th><th>Invoice</th><th>Customer</th><th class="num">Amount (ex-GST)</th><th class="num">Expenses${deducts?' (deducted)':''}</th><th class="num">%</th><th class="num">Commission</th><th></th></tr></thead><tbody>
     ${c.lines.map(l => `<tr>
@@ -4964,7 +4990,7 @@ function payrollJobLinesTable(c){
       <td class="num">${Number(l.job.commissionPercent)||0}%</td><td class="num" style="font-weight:600">${payMoney(l.commission)}</td>
       <td>${l.late ? pill('warn', `paid late · job from ${fmtDateShort(l.job.date)}`) : ''}${l.job.paymentMethod==='Cash' ? ' '+pill('neutral','cash') : ''}</td>
     </tr>`).join('')}
-  </tbody></table></div>`;
+  </tbody></table></div>` + held;
 }
 function payrollUnpaidTable(c){
   if (!c.unpaid.length) return '';
@@ -4980,9 +5006,9 @@ function payrollDaysTable(h){
     ${h.days.map(d => `<tr style="${d.date===today?'background:var(--primary-soft, rgba(0,0,0,.03))':''}">
       <td>${dayName(d.date)} <span class="mono" style="color:var(--ink-soft)">${fmtDateShort(d.date)}</span></td>
       <td class="num">${d.log ? d.hours : '—'}</td><td class="num">${d.log ? d.aircon : '—'}</td><td class="num">${d.log ? d.chimney : '—'}</td><td class="num">${d.log ? d.pw : '—'}</td>
-      <td class="num" style="font-weight:600">${d.log ? d.bookings : '—'}</td><td class="num">${d.bonus ? payMoney(d.bonus) : '—'}</td><td class="num">${d.log ? payMoney(d.pay) : '—'}</td>
+      <td class="num" style="font-weight:600">${d.log ? d.bookings : '—'}</td><td class="num">${d.bonus ? payMoney(presentAmt(d.bonus)) : '—'}</td><td class="num">${d.log ? payMoney(d.pay) : '—'}</td>
     </tr>`).join('')}
-    <tr style="font-weight:700"><td>Week</td><td class="num">${h.hours}</td><td class="num">${h.byDivision.Aircon}</td><td class="num">${h.byDivision.Chimney}</td><td class="num">${h.byDivision['Pressure Washing']}</td><td class="num">${h.bookings}</td><td class="num">${payMoney(h.bonuses)}</td><td class="num">${payMoney(h.total)}</td></tr>
+    <tr style="font-weight:700"><td>Week</td><td class="num">${h.hours}</td><td class="num">${h.byDivision.Aircon}</td><td class="num">${h.byDivision.Chimney}</td><td class="num">${h.byDivision['Pressure Washing']}</td><td class="num">${h.bookings}</td><td class="num">${payMoney(presentAmt(h.bonuses))}</td><td class="num">${payMoney(h.total)}</td></tr>
   </tbody></table></div>`;
 }
 
@@ -5044,7 +5070,7 @@ function renderPayrollBoard(profile, data, viewChips){
     const open = !!UI.payroll.expanded[h.person];
     return `<tr>
       <td><button class="btn ghost small" onclick="togglePayrollExpanded('${p}')">${open?'▾':'▸'}</button> ${techTag(h.person)}</td>
-      <td class="num">${h.hours}</td><td class="num">${h.bookings}</td><td class="num">${payMoney(h.bonuses)}</td>
+      <td class="num">${h.hours}</td><td class="num">${h.bookings}</td><td class="num">${payMoney(presentAmt(h.bonuses))}</td>
       <td class="num" style="font-weight:700">${payMoney(h.total)}</td>
       <td>${salaryCell}</td>
       <td><button class="btn small" onclick="copyPayMessage('hourly','${p}')">📋 Copy message</button></td>
@@ -5067,10 +5093,10 @@ function renderPayrollBoard(profile, data, viewChips){
     <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Paid jobs</th><th class="num">Commission</th><th class="num">Not paid yet</th><th>Cash to collect</th><th>Salary</th><th>Message</th></tr></thead>
       <tbody>${commRows || `<tr><td colspan="7">${emptyState('No technicians', 'Add technicians on the Employees tab')}</td></tr>`}</tbody></table></div>
     <div class="hint" style="margin-top:6px">Commission = (amount before GST − the job's expenses) × the technician's %. Independent contractors (Alessandro) cover their own expenses, so theirs is on the full amount before GST.</div>
-    <div class="section-title">Hourly staff <span class="tag">$${PAYROLL_HOURLY_RATE}/hour + daily booking bonus</span></div>
+    <div class="section-title">Hourly staff <span class="tag">$${presentAmt(PAYROLL_HOURLY_RATE)}/hour + daily booking bonus</span></div>
     <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Hours</th><th class="num">Bookings</th><th class="num">Bonuses</th><th class="num">Total</th><th>Salary</th><th>Message</th></tr></thead>
       <tbody>${hourlyRows || `<tr><td colspan="7">${emptyState('No hourly staff', 'Set the employee’s Employment Type to Hourly on the Employees tab')}</td></tr>`}</tbody></table></div>
-    <div class="hint" style="margin-top:6px">Daily bonus by that day's bookings: ${PAYROLL_BOOKING_BONUS.slice().reverse().map((t,i,arr)=>`${t.min}${arr[i+1]?`–${arr[i+1].min-1}`:'+'} → $${t.bonus}`).join(' · ')}</div>
+    <div class="hint" style="margin-top:6px">Daily bonus by that day's bookings: ${PAYROLL_BOOKING_BONUS.slice().reverse().map((t,i,arr)=>`${t.min}${arr[i+1]?`–${arr[i+1].min-1}`:'+'} → $${presentAmt(t.bonus)}`).join(' · ')}</div>
   `;
 }
 
@@ -5094,9 +5120,9 @@ function renderMyPay(profile, data, person, isPreview){
     return `${head}
       ${renderPayrollWeekNav(weekKey)}
       <div class="grid-4">
-        <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Pay this week so far</div><div class="stat-value">${payMoney(h.total)}</div><div class="stat-sub">${h.hours}h × $${PAYROLL_HOURLY_RATE} + ${payMoney(h.bonuses)} bonuses</div></div>
+        <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Pay this week so far</div><div class="stat-value">${payMoney(h.total)}</div><div class="stat-sub">${h.hours}h × $${presentAmt(PAYROLL_HOURLY_RATE)} + ${payMoney(presentAmt(h.bonuses))} bonuses</div></div>
         <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Bookings this week</div><div class="stat-value">${h.bookings}</div><div class="stat-sub">Aircon ${h.byDivision.Aircon} · Chimney ${h.byDivision.Chimney} · Pressure W. ${h.byDivision['Pressure Washing']}</div></div>
-        <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Bookings today</div><div class="stat-value">${todayBookings}</div><div class="stat-sub">${bookingBonus(todayBookings) ? `${payMoney(bookingBonus(todayBookings))} bonus today` : 'no bonus yet'}${next ? ` · ${next.needed} more → $${next.bonus}` : ' · top bonus reached 🎉'}</div></div>
+        <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Bookings today</div><div class="stat-value">${todayBookings}</div><div class="stat-sub">${bookingBonus(todayBookings) ? `${payMoney(presentAmt(bookingBonus(todayBookings)))} bonus today` : 'no bonus yet'}${next ? ` · ${next.needed} more → $${presentAmt(next.bonus)}` : ' · top bonus reached 🎉'}</div></div>
         <div class="card stat-card" style="--stat-accent:${st.salaryPaid?'var(--good)':'var(--ink-faint)'}"><div class="stat-label">This week's salary</div><div class="stat-value" style="font-size:20px">${st.salaryPaid ? 'Paid ✓' : 'Not paid yet'}</div><div class="stat-sub">${st.salaryPaid ? payMoney(st.salaryPaidAmount) : 'paid after the week ends'}</div></div>
       </div>
       <div class="card" style="margin-top:14px">
@@ -5109,7 +5135,7 @@ function renderMyPay(profile, data, person, isPreview){
           <div class="field"><label>Bookings — Pressure Washing</label><input type="number" id="sl-pw" min="0" step="1" value="${log ? log.bookingsPw : ''}" placeholder="0"></div>
           <div class="field"><button class="btn primary" onclick="saveSalesLog('${p}')">${log ? 'Update day' : 'Save day'}</button></div>
         </div>
-        <div class="hint">Pay is $${PAYROLL_HOURLY_RATE} per hour you report, plus a daily bonus on that day's total bookings: ${PAYROLL_BOOKING_BONUS.slice().reverse().map((t,i,arr)=>`${t.min}${arr[i+1]?`–${arr[i+1].min-1}`:'+'} → $${t.bonus}`).join(' · ')}.</div>
+        <div class="hint">Pay is $${presentAmt(PAYROLL_HOURLY_RATE)} per hour you report, plus a daily bonus on that day's total bookings: ${PAYROLL_BOOKING_BONUS.slice().reverse().map((t,i,arr)=>`${t.min}${arr[i+1]?`–${arr[i+1].min-1}`:'+'} → $${presentAmt(t.bonus)}`).join(' · ')}.</div>
       </div>
       <div class="section-title">This week <span class="tag">${payrollWeekLabel(wk)}</span></div>
       ${payrollDaysTable(h)}
@@ -5515,14 +5541,22 @@ function goToReminderTarget(type, contactId, readKey, weekKey){
   if (type==='equipment' && can('reference')) { UI.tab='reference'; UI.reference.tab='equipmentSpend'; render(); return; }
   render();   // nowhere this person is allowed to go — it's marked read and stays here
 }
-function renderReminders(profile, data){
+// A technician's reminders are only about their own jobs and purchases; they can mark them read but not delete them
+// (a delete hides a reminder for everyone). Sales and pay reminders are for the office.
+const TECH_REMINDER_TYPES = ['unpaid','refund','equipment'];
+function remindersFor(profile, data){
   const items = computeReminders(data);
+  return profile && profile.role==='technician' ? items.filter(it => TECH_REMINDER_TYPES.includes(it.type)) : items;
+}
+function renderReminders(profile, data){
+  const items = remindersFor(profile, data);
+  const canDelete = profile.role!=='technician';
   const list = items.length ? items.map(it => `
     <div class="reminder-item" style="cursor:pointer${it.isRead?';opacity:.55':''}" onclick="goToReminderTarget('${it.type}','${it.contactId||''}','${jsStr(it.readKey||'')}','${it.weekKey||''}')">
       <div class="reminder-ic" style="background:${it.severity==='bad'?'var(--bad-soft)':'var(--warn-soft)'};cursor:pointer" title="Mark as read" onclick="event.stopPropagation();markReminderReadOnly('${jsStr(it.readKey||'')}')">${REMINDER_ICONS[it.type]}</div>
       <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(it.title)}</div><div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(it.meta)}</div></div>
       ${it.isRead ? pill('neutral','Read') : pill(it.severity, it.severity==='bad'?'Urgent':'Attention')}
-      ${it.manual ? `<button class="btn ghost small danger" onclick="event.stopPropagation();deleteManualReminder('${it.id}', this.closest('.reminder-item'))">Delete</button>` : (it.type==='followup' && !it.key && it.contactId ? `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissLeadFollowup('${it.contactId}', this.closest('.reminder-item'))">Delete</button>` : `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissReminder('${it.key}', this.closest('.reminder-item'))">Delete</button>`)}
+      ${!canDelete ? '' : it.manual ? `<button class="btn ghost small danger" onclick="event.stopPropagation();deleteManualReminder('${it.id}', this.closest('.reminder-item'))">Delete</button>` : (it.type==='followup' && !it.key && it.contactId ? `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissLeadFollowup('${it.contactId}', this.closest('.reminder-item'))">Delete</button>` : `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissReminder('${it.key}', this.closest('.reminder-item'))">Delete</button>`)}
     </div>`).join('') : emptyState('No reminders right now','All caught up ✓','✓');
   return `
     <div class="page-head"><div><h1 class="page-title">Reminders</h1><div class="page-sub">Computed automatically from your data — click one to go straight to it, or delete it if you don't need the alert</div></div></div>
@@ -6084,7 +6118,7 @@ function renderTasksList(profile, data){
   const canSwitchBoards = profile.role !== 'technician';
   const switcher = canSwitchBoards ? `
     <button class="btn ${board==='ron'?'primary':''}" onclick="goTasks('ron')">Ron's Tasks</button>
-    <button class="btn ${board==='mine'?'primary':''}" onclick="goTasks('mine')">My Tasks</button>
+    ${profile.role!=='va' ? `<button class="btn ${board==='mine'?'primary':''}" onclick="goTasks('mine')">My Tasks</button>` : ''}
     ${activeTechnicianNames(STATE.data).map(t=>`<button class="btn ${board===t?'primary':''}" onclick="goTasks('${esc(t)}')">${esc(taskBoardLabel(t))}</button>`).join('')}
   ` : '';
   return `
@@ -6456,7 +6490,7 @@ function renderReference(profile, data){
   else if (UI.reference.tab==='suppliers') body = renderSuppliersTab(data, canEditFinancial);
   else if (UI.reference.tab==='equipmentSpend' && canEditFinancial) body = renderEquipSpendTab(data);
   return `
-    <div class="page-head"><div><h1 class="page-title">Equipment &amp; Suppliers</h1><div class="page-sub">Reference lists for the business</div></div></div>
+    <div class="page-head"><div><h1 class="page-title">Resources</h1><div class="page-sub">Equipment, employees and suppliers</div></div></div>
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">${tabBtns}</div>
     ${body}
   `;
@@ -6779,13 +6813,13 @@ function renderSettings(profile){
   const s = STATE.data.settings;
   return `
     <div class="page-head">
-      <div><h1 class="page-title">Permissions &amp; Settings</h1><div class="page-sub">Decide exactly what each person sees — including Ron, whenever you choose. Changes apply immediately.</div></div>
+      <div><h1 class="page-title">Permissions &amp; Settings</h1><div class="page-sub">Decide exactly what each person sees — including Ron, whenever you choose. A change reaches that person the next time they open or refresh the app.</div></div>
       <span style="display:flex;gap:8px">
         <button class="btn ghost small" onclick="exportDataAsJson()">⬇️ Export all data (JSON)</button>
         <button class="btn ghost small" onclick="openSettingsActivityModal()">💬 Settings activity</button>
       </span>
     </div>
-    <div class="banner">Manager accounts (like Ofek) automatically see everything an owner sees except this Settings page, so they aren't listed below.</div>
+    <div class="banner">Manager accounts automatically see everything an owner sees except this Settings page, so they aren't listed below.</div>
 
     <div class="section-title">Access permissions</div>
     ${cards}
@@ -6920,10 +6954,11 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
 
   // route guard — mirrors src/lib/permissions.ts + the (app)/layout.tsx guard:
   // never render a section the current profile isn't permitted to view.
-  if (!UI.tab || !canViewSection(profile, UI.tab)) UI.tab = firstAccessibleTab(profile);
+  if (!UI.tab || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);
   // board guard — a technician may only ever be looking at their OWN personal task board, regardless of
   // what UI.tasks.board was last set to (e.g. left over from another profile in this same browser tab).
   if (profile.role==='technician' && profile.technicianName) UI.tasks.board = profile.technicianName;
+  if (profile.role==='va' && UI.tasks.board==='mine') UI.tasks.board = 'ron';
 
   const data = filterForProfile(STATE.data, profile);
   app.innerHTML = renderShell(profile, data);
