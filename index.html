@@ -959,7 +959,7 @@ async function loadFromSupabase(){
       referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
       submissionPage:c.submission_page||'',
       lostReason:c.lost_reason||'', stageChangedAt:c.stage_changed_at||null, chasingSince:c.chasing_since||null,
-      chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null,
+      chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null, contactedAt:c.contacted_at||null,
     })),
     jobs: (jobs||[]).map(j => ({ ...mapJobRow(j), activityLog: logsFor('job', j.id) })),
     equipmentSpend: (equipmentSpend||[]).map(e => ({ ...mapEquipSpendRow(e), activityLog: logsFor('equipment', e.id) })),
@@ -1018,7 +1018,7 @@ function contactPatchToRow(patch){
     jobDescription:'job_description', linkedJobId:'linked_job_id', starred:'starred',
     lastReadAt:'last_read_at', tags:'tags', messages:'messages',
     lostReason:'lost_reason', stageChangedAt:'stage_changed_at', chasingSince:'chasing_since', chaseCalls:'chase_calls', chaseAlertDone:'chase_alert_done',
-    reopenedAt:'reopened_at',
+    reopenedAt:'reopened_at', contactedAt:'contacted_at',
   };
   // date/timestamptz/uuid columns reject '' outright ("invalid input syntax for type date")
   // where the in-memory shape has always used '' to mean "unset" — null is the real "unset".
@@ -1476,6 +1476,17 @@ const db = {
 function logContactActivity(c, actor, text){
   logActivity(c, actor, text);
   if (c?.id) db.activityLog.insert('contact', c.id, actor, text);
+  if (!/^(Lead created|Linked to job)/.test(text)) markLeadContacted(c);
+}
+// The first time anyone on the team acts on a lead after it came in (or came back): a reply, a logged call, a note,
+// a stage / tag / follow-up change, "called today". Saved on the lead, so the red "new lead waiting" alert disappears
+// for everyone at once (Ofek, 29 Sep). Just opening the lead doesn't count.
+function markLeadContacted(c){
+  if (!c || !c.id) return;
+  const at = leadArrivedAt(c);
+  if (c.contactedAt && (!at || new Date(c.contactedAt).getTime() >= new Date(at).getTime())) return;
+  c.contactedAt = new Date().toISOString();
+  db.contacts.update(c.id, { contactedAt: c.contactedAt });
 }
 function logJobActivity(job, actor, text){
   logActivity(job, actor, text);
@@ -1668,7 +1679,7 @@ function mapContactRow(c){
     referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
     submissionPage:c.submission_page||'',
     lostReason:c.lost_reason||'', stageChangedAt:c.stage_changed_at||null, chasingSince:c.chasing_since||null,
-    chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null,
+    chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null, contactedAt:c.contacted_at||null,
   };
 }
 // Live updates (a new lead arriving, someone else's change) redraw the page. Keep whatever a person is in
@@ -2699,6 +2710,7 @@ function sendLeadReply(contactId, scope){
   if (!c.messages) c.messages = [];
   c.messages.push({ id:uid(), kind:'message', direction:'out', text, author:actor, at:new Date().toISOString() });
   db.contacts.update(c.id, { messages: c.messages });
+  markLeadContacted(c);
   markLeadRead(contactId); // replying is itself proof the thread was handled — the newest message is now ours
   textEl.value = '';
   refreshLeadThread(contactId, scope);
@@ -2720,6 +2732,7 @@ function logIncomingMessage(contactId, scope){
   if (!c.messages) c.messages = [];
   c.messages.push({ id:uid(), kind:'message', direction:'in', text, author:c.fullName, at:new Date().toISOString() });
   db.contacts.update(c.id, { messages: c.messages });
+  markLeadContacted(c);
   textEl.value = '';
   const box = document.getElementById(scope+'-log-incoming-box'); if (box) box.style.display = 'none';
   refreshLeadThread(contactId, scope);
@@ -3053,7 +3066,7 @@ function workClockDue(sinceIso, minutes){
 }
 function sydneyNowPast(due, now){ const w = sydneyWall(now || new Date()); return w.day > due.day || (w.day===due.day && w.hour*60+w.minute >= due.mins); }
 // Automation 1 (Ofek, 28 Sep): a new website lead nobody has handled within 15 working minutes alerts Ron.
-// "Handled" = moved out of New, a call/reply logged on it, or someone closed the alert (×). Starts with leads
+// "Handled" = moved out of New, anyone acted on it (contactedAt), or someone closed the alert (×). Starts with leads
 // that arrive from the day it went live, so the old backlog doesn't flood the screen.
 const NEW_LEAD_ALERT_FROM = '2026-09-29';
 // When the lead (or a returning customer's new enquiry) came in: the first thing in its thread is the form/ad event.
@@ -3063,6 +3076,7 @@ function newLeadUnhandled(c, now){
   const at = leadArrivedAt(c); if (!at || sydneyWall(new Date(at)).day < NEW_LEAD_ALERT_FROM) return false;
   const atMs = new Date(at).getTime();
   if (c.lastReadAt && new Date(c.lastReadAt).getTime() >= atMs) return false;
+  if (c.contactedAt && new Date(c.contactedAt).getTime() >= atMs) return false;
   // A call/reply someone logged counts as handled; the enquiry the website wrote in by itself (auto) does not.
   if ((c.messages||[]).some(m => m.kind==='message' && !m.auto && new Date(m.at).getTime() >= atMs)) return false;
   return sydneyNowPast(workClockDue(at, 15), now);
@@ -4439,11 +4453,15 @@ function computeBusinessPerformance(data, startDateStr, endDateStr){
   const speedSamples = [];
   contacts.forEach(c => {
     const msgs = (c.messages||[]).slice().sort((a,b)=> new Date(a.at) - new Date(b.at));
-    if (msgs.length < 2) return;
+    if (!msgs.length) return;
     const firstAt = new Date(msgs[0].at);
-    const reply = msgs.slice(1).find(m => m.kind !== 'event');
-    if (!reply) return;
-    const hours = (new Date(reply.at) - firstAt) / 3600000;
+    // First contact = the first real reply/logged call (not the website's own "returning customer" message), or the
+    // first time someone acted on the lead (contactedAt, from 29 Sep) — whichever came first. A returning customer's
+    // contactedAt belongs to their new enquiry, so it isn't measured against the original one.
+    const reply = msgs.slice(1).find(m => m.kind !== 'event' && !m.auto);
+    const times = [reply ? new Date(reply.at) : null, (c.contactedAt && !c.reopenedAt) ? new Date(c.contactedAt) : null].filter(t => t && t >= firstAt);
+    if (!times.length) return;
+    const hours = (Math.min(...times.map(t => t.getTime())) - firstAt) / 3600000;
     if (hours >= 0) speedSamples.push(hours);
   });
   speedSamples.sort((a,b)=>a-b);
@@ -5021,7 +5039,7 @@ function renderDashboard(profile, data){
       </div>
       <div class="card stat-card" style="--stat-accent:var(--accent)">
         <div class="stat-label">Speed to lead</div>
-        ${perf.speedToLead.sampleSize ? `<div class="stat-value" style="font-size:20px">${perf.speedToLead.medianHours<1 ? Math.round(perf.speedToLead.medianHours*60)+' min' : perf.speedToLead.medianHours+' hrs'}</div><div class="stat-sub">median first reply · ${perf.speedToLead.sampleSize} lead${perf.speedToLead.sampleSize===1?'':'s'}</div>` : `<div class="stat-sub">Not enough data yet — fills in as leads are answered inside the app</div>`}
+        ${perf.speedToLead.sampleSize ? `<div class="stat-value" style="font-size:20px">${perf.speedToLead.medianHours<1 ? Math.round(perf.speedToLead.medianHours*60)+' min' : perf.speedToLead.medianHours+' hrs'}</div><div class="stat-sub">median time to first contact · ${perf.speedToLead.sampleSize} lead${perf.speedToLead.sampleSize===1?'':'s'}</div>` : `<div class="stat-sub">Not enough data yet — fills in as leads are answered inside the app</div>`}
       </div>
     </div>
 
@@ -5969,7 +5987,7 @@ function closingCard(c){
         ${c.notes ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${esc(c.notes)}</div>` : ''}
         <div style="font-size:11px;color:var(--ink-faint);margin-top:4px">Posted by ${esc(c.postedBy)} · ${new Date(c.createdAt).toLocaleString('en-AU')}</div>
       </div>
-      ${['owner','manager'].includes(getCurrentProfile()?.role) ? `<button class="btn ghost small danger" onclick="deleteClosing('${c.id}')">Delete</button>` : ''}
+      ${canEditClosings() ? `<div style="display:flex;flex-direction:column;gap:6px"><button class="btn ghost small" onclick="openClosingEdit('${c.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteClosing('${c.id}')">Delete</button></div>` : ''}
     </div>
   </div>`;
 }
@@ -5979,6 +5997,112 @@ function deleteClosing(id){
   confirmAction('Delete this closing? The job it created or updated stays in Jobs & Commissions — change or delete the job there.', () => {
     db.closings.remove(id); showToast('Closing deleted'); render();
   });
+}
+// Editing a closing (Ofek, 29 Sep): fixes the post, and sends only the fields that changed to the job it created or
+// updated — so anything already corrected directly in Jobs & Commissions isn't overwritten. Same people as Delete.
+let CLOSING_EDIT = null;   // { id, file } while the edit window is open
+function canEditClosings(){ return ['owner','manager'].includes(getCurrentProfile()?.role); }
+function closingEditFileRow(){
+  const f = CLOSING_EDIT && CLOSING_EDIT.file;
+  if (f) return `<a href="#" onclick="event.preventDefault();openEmbeddedFile(CLOSING_EDIT.file)" class="file-chip">📷 View photo</a><button type="button" class="btn ghost small" onclick="document.getElementById('ce-photo-input').click()">Replace</button><button type="button" class="btn ghost small" onclick="CLOSING_EDIT.file=null;document.getElementById('ce-photo-row').innerHTML=closingEditFileRow()">Remove</button>`;
+  return `<button type="button" class="btn small" onclick="document.getElementById('ce-photo-input').click()">Attach invoice photo…</button><span class="file-hint">Saved when you press Save changes</span>`;
+}
+function onClosingEditFilePicked(inputEl){
+  const file = inputEl.files && inputEl.files[0]; if (!file || !CLOSING_EDIT) return;
+  const reader = new FileReader();
+  reader.onload = () => { CLOSING_EDIT.file = reader.result; const row = document.getElementById('ce-photo-row'); if (row) row.innerHTML = closingEditFileRow(); };
+  reader.readAsDataURL(file);
+}
+function onClosingEditTechChange(){
+  const typeSelect = document.getElementById('ce-jobtype'), current = typeSelect.value;
+  const allowed = jobTypesForTech(document.getElementById('ce-tech').value);
+  typeSelect.innerHTML = allowed.map(t=>`<option value="${t}" ${t===current?'selected':''}>${t}</option>`).join('');
+  if (!allowed.includes(current)) typeSelect.value = allowed[0];
+}
+function closeClosingEdit(){ CLOSING_EDIT = null; closeModal(); }
+function openClosingEdit(id){
+  const c = STATE.data.closings.find(x => x.id===id); if (!c || !canEditClosings()) return;
+  CLOSING_EDIT = { id, file: c.invoiceFileUrl || null };
+  const allTechs = technicianNames(STATE.data);
+  const techs = !c.technicianName || allTechs.includes(c.technicianName) ? allTechs : [c.technicianName, ...allTechs];
+  const baseTypes = jobTypesForTech(c.technicianName);
+  const types = !c.jobType || baseTypes.includes(c.jobType) ? baseTypes : [c.jobType, ...baseTypes];
+  const job = c.linkedJobId ? STATE.data.jobs.find(j => j.id===c.linkedJobId) : null;
+  const opt = (v, cur, label) => `<option value="${esc(v)}" ${v===cur?'selected':''}>${esc(label===undefined?v:label)}</option>`;
+  openModal(`
+    <div class="modal-back" onclick="if(event.target===this) closeClosingEdit()">
+      <div class="modal" style="max-width:760px">
+        <h2>Edit closing</h2>
+        <div class="modal-sub">${job ? `Saving also updates job #${esc(job.invoiceNumber||'—')} in Jobs &amp; Commissions — only the fields you change here.` : 'The job this closing created is no longer in Jobs &amp; Commissions, so only the closing is updated.'}</div>
+        <div class="grid-3">
+          <div class="field"><label>Technician</label><select id="ce-tech" onchange="onClosingEditTechChange()">${techs.map(t=>opt(t, c.technicianName)).join('')}</select></div>
+          <div class="field"><label>Date</label><input type="date" id="ce-date" value="${esc(c.date||'')}"></div>
+          <div class="field"><label>Customer Name</label>${customerPickerInput('ce-customer', c.customerName, 'Start typing — pick the customer from the CRM')}</div>
+          <div class="field"><label>Invoice #</label><input id="ce-invoice" value="${esc(c.invoiceNumber||'')}"></div>
+          <div class="field"><label>Job Type</label><select id="ce-jobtype">${types.map(t=>opt(t, c.jobType)).join('')}</select></div>
+          <div class="field"><label>Amount (pre-GST)</label><input type="number" id="ce-amount" value="${Number(c.amount)||0}"></div>
+          <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="ce-nogst" ${c.includesGST?'':'checked'}> No GST</label><span class="hint">Off = GST added on top of Amount (${STATE.data.settings.gstRatePercent}%)</span></div>
+          <div class="field"><label>Payment Status</label><select id="ce-status">${CLOSING_PAYMENT_STATUSES.map(v=>opt(v, c.paymentStatus)).join('')}</select></div>
+          <div class="field"><label>Method</label><select id="ce-method" onchange="if(this.value==='Cash') document.getElementById('ce-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.map(v=>opt(v, c.paymentMethod||'', v||'—')).join('')}</select></div>
+          <div class="field"><label>Parts Cost</label><input type="number" id="ce-partscost" value="${Number(c.partsCost)||0}"></div>
+          <div class="field"><label>Parts Paid By</label><select id="ce-partsby">${opt('', c.partsPaidBy||'', '—')}${allTechs.map(t=>opt(t, c.partsPaidBy)).join('')}${opt('Business', c.partsPaidBy)}</select></div>
+        </div>
+        <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="ce-notes">${esc(c.notes||'')}</textarea></div>
+        <div class="field" style="margin-top:11px">
+          <label>Invoice Photo</label>
+          <div class="file-row" id="ce-photo-row">${closingEditFileRow()}</div>
+          <input type="file" id="ce-photo-input" accept="image/*" style="display:none" onchange="onClosingEditFilePicked(this)">
+        </div>
+        <div id="modal-error"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
+          <button class="btn" onclick="closeClosingEdit()">Cancel</button>
+          <button class="btn primary" onclick="saveClosingEdit()">Save changes</button>
+        </div>
+      </div>
+    </div>`);
+}
+async function saveClosingEdit(){
+  const cl = CLOSING_EDIT && STATE.data.closings.find(x => x.id===CLOSING_EDIT.id);
+  if (!cl) { closeClosingEdit(); return; }
+  const val = id => document.getElementById(id).value;
+  const pick = resolveCustomerInput('ce-customer');
+  const v = {
+    technicianName: val('ce-tech'), date: val('ce-date') || cl.date, customerName: pick.name, invoiceNumber: val('ce-invoice').trim(),
+    jobType: val('ce-jobtype'), amount: Number(val('ce-amount')) || 0, includesGST: !document.getElementById('ce-nogst').checked,
+    paymentStatus: val('ce-status'), paymentMethod: val('ce-method'), partsCost: Number(val('ce-partscost')) || 0,
+    partsPaidBy: val('ce-partsby'), notes: val('ce-notes'), invoiceFileUrl: CLOSING_EDIT.file,
+  };
+  if (!v.customerName) { modalError('Please enter a customer name'); return; }
+  if (!v.invoiceNumber) { modalError('Please enter an invoice number'); return; }
+  const job = cl.linkedJobId ? STATE.data.jobs.find(j => j.id===cl.linkedJobId) : null;
+  if (v.invoiceNumber !== cl.invoiceNumber && STATE.data.jobs.some(j => j.invoiceNumber===v.invoiceNumber && (!job || j.id!==job.id))) { modalError(`Invoice #${v.invoiceNumber} already belongs to another job`); return; }
+  const same = (k) => (k==='amount' || k==='partsCost') ? Number(v[k]||0)===Number(cl[k]||0) : String(v[k] ?? '')===String(cl[k] ?? '');
+  const changed = Object.keys(v).filter(k => !same(k));
+  const relink = !!(job && pick.contactId && job.contactId !== pick.contactId);
+  if (!changed.length && !relink) { closeClosingEdit(); showToast('Nothing changed'); return; }
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  const closingPatch = {}; changed.forEach(k => { closingPatch[k] = v[k]; });
+  if (changed.length) await db.closings.update(cl.id, closingPatch);
+  let note = '';
+  if (job) {
+    const toJob = { technicianName:'technician', date:'date', customerName:'customerName', invoiceNumber:'invoiceNumber', jobType:'jobType', amount:'amount', includesGST:'includesGST', paymentStatus:'paymentStatus', paymentMethod:'paymentMethod', partsCost:'partsCost', partsPaidBy:'partsPaidBy', notes:'notes', invoiceFileUrl:'invoiceFile' };
+    const jp = {}; changed.forEach(k => { if (toJob[k]) jp[toJob[k]] = v[k]; });
+    // Marked paid now → paid today (commission counts in the week the customer paid); back to unpaid → no paid date.
+    if ('paymentStatus' in jp) { if (jp.paymentStatus==='Paid' && !job.datePaid) jp.datePaid = todayStr(); if (jp.paymentStatus!=='Paid') jp.datePaid = ''; }
+    if (changed.includes('technicianName') || changed.includes('jobType')) {
+      const auto = commissionRateFor(STATE.data.commissionRates, v.technicianName, v.jobType);
+      if (auto !== null) jp.commissionPercent = auto; else note = ` — no automatic rate for ${v.technicianName} / ${v.jobType}, so the job kept its ${job.commissionPercent}% commission`;
+    }
+    if (relink) jp.contactId = pick.contactId;
+    if (Object.keys(jp).length) {
+      await db.jobs.update(job.id, jp);
+      logJobActivity(job, actor, `Updated from an edited closing: ${Object.keys(jp).join(', ')}`);
+      if ('customerName' in jp || 'contactId' in jp) await ensureContactForJob(job, pick.contactId);
+    }
+  }
+  closeClosingEdit();
+  showToast((job ? 'Closing and job updated' : 'Closing updated') + note);
+  render();
 }
 function renderClosings(profile, data){
   const allTechs = technicianNames(STATE.data);

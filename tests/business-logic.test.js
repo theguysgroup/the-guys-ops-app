@@ -238,6 +238,17 @@ function testFunnelLossReasonsSpeedToLead(sb){
   // Alice: 5 min = 0.0833h, Grace: 30 min = 0.5h -> avg 0.2917 (rounds to 0.29), median (upper of the two) 0.5
   assertClose(perf.speedToLead.avgHours, 0.29, 'speedToLead: avgHours across both replies', 0.01);
   assertClose(perf.speedToLead.medianHours, 0.5, 'speedToLead: medianHours', 0.01);
+  // 29 Sep: the first action on a lead (contactedAt) counts as first contact; the website's own "returning customer"
+  // message (auto) never does.
+  sb.STATE.data.contacts = [
+    { fullName:'Hana', source:'Organic', status:'Chasing', createdAt:'2026-09-06', contactedAt:'2026-09-06T01:12:00Z',
+      messages:[{kind:'event',at:'2026-09-06T01:00:00Z'}] },   // 12 min to the first action
+    { fullName:'Ivan', source:'Organic', status:'New', createdAt:'2026-09-06',
+      messages:[{kind:'event',at:'2026-09-06T01:00:00Z'},{kind:'message',direction:'in',auto:true,at:'2026-09-06T02:00:00Z'}] },   // nobody acted
+  ];
+  sb.STATE.data.jobs = [];
+  const perf2 = sb.computeBusinessPerformance(sb.STATE.data, '2026-09-01', '2026-09-10');
+  assertEqual([perf2.speedToLead.sampleSize, perf2.speedToLead.medianHours], [1, 0.2], 'speedToLead: contactedAt counts, an auto message does not');
 }
 
 function testComputeProfitByWeekInRange(sb){
@@ -476,6 +487,8 @@ function testSalesAutomations(sb){
   assertEqual(sb.newLeadUnhandled(lead({ lastReadAt:'2026-09-29T00:05:00Z' }), at('2026-09-29T00:30:00Z')), false, 'newLeadUnhandled: marked read (or bubble closed) → handled');
   assertEqual(sb.newLeadUnhandled(lead({ messages:[{ kind:'event', at:arrived }, { kind:'message', direction:'out', at:'2026-09-29T00:10:00Z' }] }), at('2026-09-29T00:30:00Z')), false, 'newLeadUnhandled: a reply was logged → handled');
   assertEqual(sb.newLeadUnhandled(lead({ status:'Chasing' }), at('2026-09-29T00:30:00Z')), false, 'newLeadUnhandled: moved out of New → handled');
+  assertEqual(sb.newLeadUnhandled(lead({ contactedAt:'2026-09-29T00:20:00Z' }), at('2026-09-29T00:30:00Z')), false, 'newLeadUnhandled: someone acted on it (tag, note, follow-up…) → gone for everyone');
+  assertEqual(sb.newLeadUnhandled(lead({ contactedAt:'2026-09-20T00:20:00Z', reopenedAt:arrived }), at('2026-09-29T00:30:00Z')), true, 'newLeadUnhandled: an action from before the customer came back does not count');
   assertEqual(sb.newLeadUnhandled(lead({ messages:[{ kind:'event', at:'2026-09-20T00:00:00Z' }] }), at('2026-09-29T00:30:00Z')), false, 'newLeadUnhandled: leads from before the go-live day never alert');
   assertEqual(sb.newLeadUnhandled(lead({ lastReadAt:'2026-09-01T00:00:00Z', reopenedAt:arrived }), at('2026-09-29T00:30:00Z')), true, 'newLeadUnhandled: a returning customer read long ago but enquiring again → alert');
 
