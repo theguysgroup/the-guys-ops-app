@@ -195,15 +195,23 @@
     }
     var usedForm = false;
     if (state === 'form') {
-      var n = ghlNodes();
-      typeInto(findInput(n, 'name'), st.name);
-      typeInto(findInput(n, 'phone'), st.phone);
-      await sleep(300);
-      var btn = findId(n, 'lc_text-widget--send-btn');
-      if (!btn) throw new Error('no-form-button');
-      btn.click();
-      state = await waitFor(function () { var s2 = ghlState(); return s2 === 'box' || s2 === 'closed' ? s2 : null; }, 15000);
-      if (!state) throw new Error('form-not-accepted');
+      // GHL's form can ignore a click that comes right after it appears, so check the values and retry.
+      await sleep(600);
+      var after = null;
+      for (var attempt = 0; attempt < 4 && !after; attempt++) {
+        var n = ghlNodes();
+        var nameIn = findInput(n, 'name'), phoneIn = findInput(n, 'phone');
+        var btn = findId(n, 'lc_text-widget--send-btn');
+        if (!nameIn || !phoneIn || !btn) break;
+        if (nameIn.value !== st.name) typeInto(nameIn, st.name);
+        if (phoneIn.value !== st.phone) typeInto(phoneIn, st.phone);
+        await sleep(500);
+        btn.click();
+        after = await waitFor(function () { var s2 = ghlState(); return s2 === 'box' || s2 === 'closed' ? s2 : null; }, 4000);
+      }
+      if (!after) after = await waitFor(function () { var s2 = ghlState(); return s2 === 'box' || s2 === 'closed' ? s2 : null; }, 6000);
+      if (!after) throw new Error('form-not-accepted');
+      state = after;
       usedForm = true;
     }
     fireLead();
