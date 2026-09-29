@@ -155,7 +155,7 @@
     });
     return out;
   }
-  var SYSTEM_TEXT = /^(to connect you with ron|please share (your )?contact details|give us a minute|thanks for your message! our office is closed|hi, i'm ron from the guys group office|chat closed|.*inactiv)/i;
+  var SYSTEM_TEXT = /^(to connect you with ron|please share (your )?contact details|give us a minute|thanks! ron will reply|thanks for your message! our office is closed|hi, i'm ron from the guys group office|chat closed|.*inactiv)/i;
   function typeInto(el, value) {
     var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
@@ -164,19 +164,37 @@
   }
   function widgetApi() { var c = window.leadConnector && window.leadConnector.chatWidget; return c && c.openWidget ? c : null; }
 
-  // Sends one message to GHL as the visitor, filling GHL's name + phone form first when it asks for it.
+  // GHL ended the chat (office hours, or 5 minutes without activity): shows 'Chat Closed' + a 'Click here' restart button.
+  function findRestart(nodes) {
+    for (var i = 0; i < nodes.length; i++) if (nodes[i].tagName === 'ION-BUTTON' && /reset-chat-button/.test(nodes[i].className) && nodes[i].getClientRects().length) return nodes[i];
+    return null;
+  }
+  function ghlState() {
+    var n = ghlNodes();
+    if (findInput(n, 'name') && findInput(n, 'phone')) return 'form';
+    if (findRestart(n)) return 'closed';
+    if (findTag(n, 'TEXTAREA')) return 'box';
+    return null;
+  }
+
+  // Sends one message to GHL as the visitor. Fills GHL's name + phone form first when it asks for it, and restarts
+  // a chat GHL has closed. If GHL closes the chat right after the form (outside office hours) the name + phone are
+  // saved in GHL but the message cannot be added; that is reported as 'closed' and does not count as a failure.
   async function deliver(text) {
     var cw = await waitFor(widgetApi, 20000);
     if (!cw) throw new Error('widget-not-loaded');
     cw.openWidget();
-    var ready = await waitFor(function () {
-      var n = ghlNodes();
-      if (findInput(n, 'name') && findInput(n, 'phone')) return { form: true };
-      if (findTag(n, 'TEXTAREA')) return { form: false };
-      return null;
-    }, 15000);
-    if (!ready) throw new Error('no-form-or-box');
-    if (ready.form) {
+    var state = await waitFor(ghlState, 15000);
+    if (!state) throw new Error('no-form-or-box');
+    if (state === 'closed') {
+      if (st.closedAt && Date.now() - st.closedAt < 12 * 3600 * 1000 && !isOpen()) return 'closed';
+      var rb = findRestart(ghlNodes());
+      if (rb) rb.click();
+      state = await waitFor(function () { var s2 = ghlState(); return s2 && s2 !== 'closed' ? s2 : null; }, 15000);
+      if (!state) throw new Error('restart-failed');
+    }
+    var usedForm = false;
+    if (state === 'form') {
       var n = ghlNodes();
       typeInto(findInput(n, 'name'), st.name);
       typeInto(findInput(n, 'phone'), st.phone);
@@ -184,11 +202,17 @@
       var btn = findId(n, 'lc_text-widget--send-btn');
       if (!btn) throw new Error('no-form-button');
       btn.click();
-      var accepted = await waitFor(function () { var m = ghlNodes(); return !findInput(m, 'name') && findTag(m, 'TEXTAREA') ? true : null; }, 15000);
-      if (!accepted) throw new Error('form-not-accepted');
+      state = await waitFor(function () { var s2 = ghlState(); return s2 === 'box' || s2 === 'closed' ? s2 : null; }, 15000);
+      if (!state) throw new Error('form-not-accepted');
+      usedForm = true;
     }
-    if (!ready.form && !st.handed) text = 'Name: ' + st.name + ', Phone: ' + st.phone + '. ' + text;
     fireLead();
+    if (state === 'closed') {
+      st.closedAt = Date.now();
+      save();
+      return 'closed';
+    }
+    if (!usedForm && !st.handed) text = 'Name: ' + st.name + ', Phone: ' + st.phone + '. ' + text;
     var nodes = ghlNodes();
     var before = ghlMessages(nodes).filter(function (m) { return m.out; }).length;
     var ion = findTag(nodes, 'ION-TEXTAREA'), ta = findTag(nodes, 'TEXTAREA');
@@ -253,7 +277,7 @@
     waitFor(widgetApi, 20000).then(function (cw) {
       if (!cw) return;
       cw.openWidget();
-      waitFor(function () { return findTag(ghlNodes(), 'TEXTAREA') || findInput(ghlNodes(), 'name'); }, 15000).then(function () { startMirror(); });
+      waitFor(ghlState, 15000).then(function () { startMirror(); });
     });
   }
 
