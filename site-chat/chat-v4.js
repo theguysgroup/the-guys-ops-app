@@ -156,7 +156,7 @@
     });
     return out;
   }
-  var SYSTEM_TEXT = /^(to connect you with ron|please share (your )?contact details|give us a minute|thanks! ron will reply|thanks for your message! our office is closed|hi, i'm ron from the guys group office|chat closed|.*inactiv)/i;
+  var SYSTEM_TEXT = /^(to connect you with ron|please share (your )?contact details|give us a minute|thanks! ron will reply|ron is busy right now|looks like no one is available|thanks for your message! our office is closed|hi, i'm ron from the guys group office|chat closed|.*inactiv)/i;
   function typeInto(el, value) {
     var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
