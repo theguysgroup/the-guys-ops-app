@@ -30,6 +30,7 @@
         var v = null;
         try { v = fn(); } catch (e) {}
         if (v) return resolve(v);
+        if (document.hidden) end += 250; // a background tab is slowed down by the browser; only count visible time
         if (Date.now() > end) return resolve(null);
         setTimeout(tick, 250);
       })();
@@ -184,7 +185,7 @@
     var cw = await waitFor(widgetApi, 20000);
     if (!cw) throw new Error('widget-not-loaded');
     cw.openWidget();
-    var state = await waitFor(ghlState, 15000);
+    var state = await waitFor(ghlState, 30000);
     if (!state) throw new Error('no-form-or-box');
     if (state === 'closed') {
       if (st.closedAt && Date.now() - st.closedAt < 12 * 3600 * 1000 && !isOpen()) return 'closed';
