@@ -4902,7 +4902,7 @@ function renderDashGoogle(profile, data, standalone){
   const matchLabel = m => ({BROAD:'broad',PHRASE:'phrase',EXACT:'exact'})[m] || String(m||'').toLowerCase();
   const kjRows = KJ.rows.map(x => { const name = x.keyword || x.campaign; return adsRow([
     x.keyword ? `<b>${esc(x.keyword)}</b> <span style="color:var(--ink-faint);font-size:11px">${esc(matchLabel(x.match))}</span><div style="color:var(--ink-faint);font-size:11.5px;margin-top:2px">${esc(x.campaign)} › ${esc(x.adGroup)}</div>`
-              : `<b>${esc(x.campaign)}</b><div style="color:var(--ink-faint);font-size:11.5px;margin-top:2px">No keyword: Google does not share the search for this campaign type</div>`,
+              : `<b>${esc(x.campaign)}</b><div style="color:var(--ink-faint);font-size:11.5px;margin-top:2px">${/pmax|performance max/i.test(x.campaign) ? 'No keyword: Performance Max never reports the search' : 'Google reported no keyword for these clicks'}</div>`,
     adsNum(drill(String(x.leads.length), `Leads from "${name}"`, 'leads', x.leads)),
     adsNum(x.jobs.length ? drill(String(x.jobs.length), `Jobs from "${name}"`, 'jobs', x.jobs) : '0'),
     adsNum(x.leads.length ? Math.round(x.jobs.length/x.leads.length*100)+'%' : '—'),
