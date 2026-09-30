@@ -1252,7 +1252,7 @@ const db = {
   // people posting at the same moment both keep theirs. The local copy becomes what the database now holds.
   recordUpdates: {
     async append(table, listKey, id, entry){
-      if (PRESENT) { showToast('Presentation mode is on, changes are not saved'); return false; }
+      if (readOnlyReason()) { showToast(readOnlyReason()); return false; }
       const { data, error } = await sb.rpc('append_record_update', { p_table: table, p_id: id, p_entry: entry });
       if (error) { showToast('Update not saved: '+error.message); return false; }
       const rec = (STATE.data[listKey]||[]).find(x => x.id===id);
@@ -1555,14 +1555,44 @@ const PRESENT_FACTOR = 3;
 let PRESENT = false;
 try { PRESENT = localStorage.getItem('tgsg_present')==='1'; } catch(e) {}
 function togglePresentationMode(){ try { localStorage.setItem('tgsg_present', PRESENT?'0':'1'); } catch(e) {} location.reload(); }
+// ── View as (owners only, 30 Sep): see the whole app as a team member sees it (their menu, home page, pages and
+// what each page shows them), to check nobody sees too much or misses something. Read-only like presentation mode:
+// every database write is refused, so viewing never marks Ron's leads read or changes anything. In memory only;
+// Exit reloads the real session. Data limits the database adds for that person (RLS) are not re-applied here —
+// those were checked separately — so this shows their screens, built from what the owner has loaded.
+let VIEW_AS_ID = null;
+function readOnlyReason(){ return PRESENT ? 'Presentation mode is on, changes are not saved' : VIEW_AS_ID ? 'You are viewing as someone else, changes are not saved' : ''; }
+function openViewAsModal(){
+  const me = getRealProfile(); if (!me || me.role!=='owner') return;
+  const people = STATE.profiles.filter(p => p.id!==me.id).sort((a,b)=>String(a.fullName).localeCompare(String(b.fullName)));
+  openModal(`
+    <div class="modal-back" onclick="if(event.target===this) closeModal()">
+      <div class="modal" style="max-width:420px">
+        <h2>View as</h2>
+        <div class="modal-sub">See the app exactly as this person sees it: their menu, home page and pages. Read-only, nothing is saved.</div>
+        ${people.map(p => searchResultBtn(`enterViewAs('${p.id}')`, esc(p.fullName||'—'), esc(roleLabel(p.role)), '👁')).join('')}
+      </div>
+    </div>`);
+}
+function enterViewAs(id){
+  const me = getRealProfile(); if (!me || me.role!=='owner' || !STATE.profiles.some(p=>p.id===id)) return;
+  VIEW_AS_ID = id;
+  resetUI();
+  UI.tab = homeTabFor(getCurrentProfile());
+  closeModal();
+  render();
+}
+function exitViewAs(){ VIEW_AS_ID = null; location.reload(); }
 function presentBlocked(){
-  const res = { data:null, error:{ message:'Presentation mode is on, changes are not saved' } };
+  const res = { data:null, error:{ message: readOnlyReason() || 'Changes are not saved' } };
   const p = new Proxy(function(){}, { get(t,k){ if (k==='then') return (ok,bad)=>Promise.resolve(res).then(ok,bad); return p; }, apply(){ return p; } });
   return p;
 }
 {
   const realFrom = sb.from.bind(sb);
-  sb.from = (table) => { const q = realFrom(table); if (!PRESENT) return q; ['insert','update','upsert','delete'].forEach(m => { q[m] = () => presentBlocked(); }); return q; };
+  sb.from = (table) => { const q = realFrom(table); if (!PRESENT && !VIEW_AS_ID) return q; ['insert','update','upsert','delete'].forEach(m => { q[m] = () => presentBlocked(); }); return q; };
+  const realRpc = sb.rpc.bind(sb);
+  sb.rpc = (...args) => (PRESENT || VIEW_AS_ID) ? presentBlocked() : realRpc(...args);
 }
 // Dollar figures written inside text (assessments, activity history) are scaled the same way.
 function presentText(t){ if (!PRESENT || !t) return t; return String(t).replace(/\$\s?([\d,]+(?:\.\d+)?)(\s?[Kk])?/g, (m, n, kk) => { const v = parseFloat(n.replace(/,/g,''))*PRESENT_FACTOR; return kk ? '$'+(Math.round(v*10)/10)+'K' : '$'+(Math.round(v*100)/100).toLocaleString('en-US'); }); }
@@ -1801,7 +1831,13 @@ let MODAL_UPDATES = []; // transient per-modal Updates-log state for the task mo
 let MODAL_TASK_ID = null; // id of the task currently open in the task modal (null while creating a new one)
 let CLOSING_FILE = null; // transient invoice-photo state for the "Post a closing" form
 
-function getCurrentProfile(){ return STATE.profiles.find(p => p.id===STATE.currentProfileId) || null; }
+function getRealProfile(){ return STATE.profiles.find(p => p.id===STATE.currentProfileId) || null; }
+// The person the screens are built for: the signed-in user, or (owners only) the team member they're viewing as.
+function getCurrentProfile(){
+  const real = getRealProfile();
+  if (VIEW_AS_ID && real && real.role==='owner') { const v = STATE.profiles.find(p => p.id===VIEW_AS_ID); if (v) return v; }
+  return real;
+}
 function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
@@ -2396,13 +2432,15 @@ function renderShell(profile, data){
           <div style="margin-bottom:9px;display:flex;align-items:center;justify-content:space-between"><span>${esc(profile.fullName)} · ${roleLabel(profile.role)}</span></div>
           <div style="display:flex;flex-direction:column;gap:6px">
             ${profile.role==='owner' ? `<button class="btn ghost small" onclick="togglePresentationMode()" title="Hide the real figures when showing the app to someone">${PRESENT?'👁 Presentation mode: ON':'Presentation mode'}</button>` : ''}
-            <button class="btn ghost small" onclick="openChangePasswordModal()">Change password</button>
+            ${VIEW_AS_ID ? `<button class="btn primary small" onclick="exitViewAs()">Exit view as ${esc(profile.fullName)}</button>` : profile.role==='owner' ? `<button class="btn ghost small" onclick="openViewAsModal()" title="See the app as a team member sees it (read-only)">👁 View as…</button>` : ''}
+            ${VIEW_AS_ID ? '' : `<button class="btn ghost small" onclick="openChangePasswordModal()">Change password</button>`}
             <button class="btn ghost small" onclick="doLogout()">Log out</button>
           </div>
         </div>
         </div>
       </div>
       <div style="padding:24px 30px 60px;max-width:1200px;width:100%;min-width:0;margin:0 auto">
+        ${VIEW_AS_ID ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid var(--primary);background:var(--surface)"><span>👁 Viewing as <b>${esc(profile.fullName)}</b> (${esc(roleLabel(profile.role))}). This is their menu and their pages. Read-only: nothing you do here is saved.</span><button class="btn primary small" onclick="exitViewAs()">Exit</button></div>` : ''}
         <div id="content"></div>
       </div>
     </div>
@@ -7088,7 +7126,7 @@ async function saveEmployeeModal(empId){
   };
   let emp;
   if (prev && oldName && oldName!==name) {
-    if (PRESENT) { showToast('Presentation mode is on, changes are not saved'); return; }
+    if (readOnlyReason()) { showToast(readOnlyReason()); return; }
     const { data: moved, error: renameErr } = await sb.rpc('rename_team_member', { p_old: oldName, p_new: name });
     if (renameErr) { modalError('Could not rename: '+renameErr.message); return; }
     logEmployeeActivity(prev, actor, `Renamed from "${oldName}" to "${name}" everywhere (${Object.entries(moved||{}).filter(([,n])=>n).map(([k,n])=>`${n} ${k.replace('_',' ')}`).join(', ') || 'no linked records'})`);
