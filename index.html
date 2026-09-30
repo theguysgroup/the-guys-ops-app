@@ -3377,6 +3377,7 @@ function renderCrmInboxThreadAndDetails(c){
       <div class="field" style="margin-top:9px"><label>Sales value</label>${salesValueField(c, `<input type="number" value="${c.salesValue||0}" onchange="setLeadSalesValue('${c.id}',this.value)">`)}</div>
       <div class="field" style="margin-top:9px"><label>What they need</label><textarea rows="3" onchange="setLeadJobDescription('${c.id}',this.value)">${esc(c.jobDescription||'')}</textarea></div>
       ${renderContactJobsBlock(c)}
+      ${renderGhlHistoryBlock(c)}
       ${renderMarketingSourceBlock(c)}
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost small" onclick="openLeadActivityModal('${c.id}')">💬 History (${recordActivityCount(c)})</button>
@@ -3650,6 +3651,7 @@ function openLeadModal(contactId){
           <div class="field" style="margin-top:11px"><label>What they need</label><textarea rows="2" id="lm-desc">${c?esc(c.jobDescription||''):''}</textarea></div>
           ${c ? `<div class="field" style="margin-top:11px"><label>Tags</label>${renderLeadTags(c.id, 'modal')}</div>` : ''}
           ${c ? renderContactJobsBlock(c) : ''}
+          ${c ? renderGhlHistoryBlock(c) : ''}
           ${c ? renderMarketingSourceBlock(c) : ''}
         </div>
 
@@ -4052,7 +4054,7 @@ function openSearchModal(){
         <h2>Search</h2>
         <div class="modal-sub">Find a lead or customer, or a job by customer, invoice number or technician.</div>
         <input id="search-input" type="text" placeholder="Type to search…" oninput="runSearch(this.value)" onkeydown="if(event.key==='Escape') closeModal()">
-        <div id="search-results" style="margin-top:14px;max-height:50vh;overflow-y:auto">${renderSearchResults('')}</div>
+        <div style="margin-top:14px;max-height:50vh;overflow-y:auto"><div id="search-results">${renderSearchResults('')}</div><div id="search-ghl"></div></div>
       </div>
     </div>
   `);
@@ -4061,6 +4063,17 @@ function openSearchModal(){
 function runSearch(query){
   const el = document.getElementById('search-results');
   if (el) el.innerHTML = renderSearchResults(query);
+  searchGhlArchive(query);
+}
+function searchResultBtn(onclick, title, sub, right){
+  return `
+    <button onclick="${onclick}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:start;padding:10px 12px;border-radius:var(--radius-sm);border:1px solid var(--line);background:var(--surface);margin-bottom:6px;cursor:pointer">
+      <span style="display:flex;flex-direction:column;gap:2px;min-width:0">
+        <b style="font-family:'Figtree',sans-serif;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</b>
+        <span style="font-size:11.5px;color:var(--ink-soft)">${sub}</span>
+      </span>
+      <span class="mono" style="font-size:13px;font-weight:600;flex:none">${right}</span>
+    </button>`;
 }
 // ⌘K finds leads/customers (name, phone, email, postcode) for anyone who can see the CRM, and jobs
 // (customer, invoice #, technician) for anyone who can see jobs — so Ron finds his leads too.
@@ -4078,18 +4091,97 @@ function renderSearchResults(query){
   const jobs = !canJobs ? [] : (data.jobs||[]).filter(j =>
     (j.customerName||'').toLowerCase().includes(q) || (j.invoiceNumber||'').toLowerCase().includes(q) || (j.technician||'').toLowerCase().includes(q)
   ).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8);
-  if (!leads.length && !jobs.length) return emptyState('No matches', 'Try a different name, phone number, invoice or technician.');
-  const btn = (onclick, title, sub, right) => `
-    <button onclick="${onclick}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:start;padding:10px 12px;border-radius:var(--radius-sm);border:1px solid var(--line);background:var(--surface);margin-bottom:6px;cursor:pointer">
-      <span style="display:flex;flex-direction:column;gap:2px;min-width:0">
-        <b style="font-family:'Figtree',sans-serif;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</b>
-        <span style="font-size:11.5px;color:var(--ink-soft)">${sub}</span>
-      </span>
-      <span class="mono" style="font-size:13px;font-weight:600;flex:none">${right}</span>
-    </button>`;
+  if (!leads.length && !jobs.length) return emptyState('No matches', `Try a different name, phone number, invoice or technician.${canCrm?' Old GHL contacts show below if any match.':''}`);
+  const btn = searchResultBtn;
   const leadHtml = leads.map(c => btn(`closeModal();goToLeadConversation('${c.id}')`, esc(c.fullName||'(no name)'), `${esc(c.phone||c.email||'—')} · ${esc(c.division||'')} · ${esc(sourceLabel(c.source))}`, esc(stageLabel(leadStage(c))))).join('');
   const jobHtml = jobs.map(j => btn(`goToJobFromSearch('${j.id}')`, esc(j.customerName), `${esc(j.technician)} · ${fmtDateShort(j.date)} · ${esc(j.invoiceNumber||'—')}`, fmtMoney(j.amount))).join('');
   return (leads.length ? `<div class="modal-section" style="margin-top:0">Leads &amp; customers</div>${leadHtml}` : '') + (jobs.length ? `<div class="modal-section"${leads.length?'':' style="margin-top:0"'}>Jobs</div>${jobHtml}` : '');
+}
+/* ── GHL archive: old GHL contacts (exported 30 Sep 2026) ──
+   About 4,600 old leads/customers from GHL live in their own table (ghl_archive), NOT in contacts, so dashboards,
+   close rate, lost reasons, source reports and alerts stay exactly as they were (Ofek: don't ruin the data).
+   They show up in ⌘K (only the ones that have no CRM card yet), an existing customer's card shows their GHL history,
+   and "Create lead from this" turns an old contact into a new lead today. Fetched on demand, never loaded up front. */
+const GHL_ARCHIVE_COLS = 'id,full_name,phone,email,ghl_created_at,ghl_last_activity,tags,division,source,outcome,ops_contact_id';
+let ghlSearchTimer = null, ghlSearchSeq = 0;
+// Archive dates go back to 2025, so they carry the year.
+function ghlDate(ts){ const d = localDay(ts); return d ? `${fmtDateShort(d)} ${d.slice(0,4)}` : '—'; }
+function searchGhlArchive(query){
+  clearTimeout(ghlSearchTimer);
+  const seq = ++ghlSearchSeq;
+  const box = document.getElementById('search-ghl'); if (box) box.innerHTML = '';
+  const profile = getCurrentProfile(); if (!profile || !canViewSection(profile,'crm')) return;
+  const q = (query||'').replace(/[,()%*\\"]/g,' ').trim();
+  if (q.length < 2) return;
+  const digits = q.replace(/\D/g,'').replace(/^61/,'').replace(/^0/,'');
+  ghlSearchTimer = setTimeout(async () => {
+    const ors = [`full_name.ilike.%${q}%`, `email.ilike.%${q}%`];
+    if (digits.length >= 4) ors.push(`phone_key.like.%${digits.slice(-9)}%`);
+    const { data, error } = await sb.from('ghl_archive').select(GHL_ARCHIVE_COLS).is('ops_contact_id', null).or(ors.join(',')).order('ghl_created_at', { ascending:false }).limit(8);
+    if (seq !== ghlSearchSeq) return;
+    const el = document.getElementById('search-ghl'); if (!el || error || !data || !data.length) return;
+    STATE.ghlSeen = STATE.ghlSeen || {};
+    data.forEach(r => { STATE.ghlSeen[r.id] = r; });
+    el.innerHTML = `<div class="modal-section">Old GHL contacts (archive, not in the CRM)</div>` + data.map(r =>
+      searchResultBtn(`openGhlArchiveModal('${r.id}')`, esc(r.full_name||'(no name)'), `${esc(r.phone||r.email||'—')} · ${esc(r.division||'—')} · first contact ${ghlDate(r.ghl_created_at)}`, esc(r.outcome||'GHL'))).join('');
+  }, 250);
+}
+function ghlHistoryRows(r){
+  const row = (k, v) => v ? `<div class="kv"><span>${k}</span><span class="v">${v}</span></div>` : '';
+  return row('First contact', ghlDate(r.ghl_created_at)) + row('Last activity', r.ghl_last_activity ? ghlDate(r.ghl_last_activity) : '') +
+    row('Service', esc(r.division||'')) + row('Source in GHL', esc(r.source||'')) + row('Outcome in GHL', esc(r.outcome||'')) +
+    row('GHL tags', esc((r.tags||[]).join(', ')));
+}
+function openGhlArchiveModal(id){
+  const r = (STATE.ghlSeen||{})[id]; if (!r) return;
+  openModal(`
+    <div class="modal-back" onclick="if(event.target===this) closeModal()">
+      <div class="modal" style="max-width:480px">
+        <h2>${esc(r.full_name||'(no name)')}</h2>
+        <div class="modal-sub">Old contact from GHL. Not in the CRM and not counted in any report.</div>
+        ${r.phone ? `<div class="kv"><span>Phone</span><span class="v mono">${esc(r.phone)}</span></div>` : ''}
+        ${r.email ? `<div class="kv"><span>Email</span><span class="v">${esc(r.email)}</span></div>` : ''}
+        ${ghlHistoryRows(r)}
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap">
+          <button class="btn" onclick="closeModal()">Close</button>
+          <button class="btn primary" onclick="createLeadFromGhl('${r.id}')">Create lead from this</button>
+        </div>
+      </div>
+    </div>`);
+}
+// A new lead today (source Unknown: whatever brought them back now is not the old GHL source), linked to the archive row.
+async function createLeadFromGhl(id){
+  const r = (STATE.ghlSeen||{})[id]; if (!r) return;
+  if (r.ops_contact_id && contactById(r.ops_contact_id)) { closeModal(); goToLeadConversation(r.ops_contact_id); return; }
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  let c;
+  try { c = await db.contacts.create({ fullName: r.full_name||'(no name)', phone: r.phone||'', email: r.email||'', postcode:'', division: LEAD_DIVISIONS.includes(r.division) ? r.division : 'Other', source:'Unknown', status:'New', createdAt: todayStr(), jobDescription:'', linkedJobId:null, activityLog:[], messages:[], lastReadAt:null, starred:false, tags:[], chaseCalls:[] }); }
+  catch (err) { return; }   // db.contacts.create() already showed an error toast
+  logLeadEvent(c, `Brought back from the GHL archive: first contact ${ghlDate(r.ghl_created_at)}${r.outcome ? `, last outcome in GHL: ${r.outcome}` : ''}`);
+  logContactActivity(c, actor, 'Lead created from the GHL archive');
+  r.ops_contact_id = c.id;
+  STATE.ghlByContact = STATE.ghlByContact || {};
+  STATE.ghlByContact[c.id] = r;
+  const { error } = await sb.from('ghl_archive').update({ ops_contact_id: c.id }).eq('id', r.id);
+  if (error) showToast('Lead created, but the link to the GHL archive was not saved: '+error.message);
+  closeModal();
+  goToLeadConversation(c.id);
+}
+// On a customer's card: what GHL knew about them (only customers who were in GHL before 30 Sep).
+function renderGhlHistoryBlock(c){
+  if (!c || !isRealId(c.id)) return '';
+  const cache = STATE.ghlByContact = STATE.ghlByContact || {};
+  if (!(c.id in cache)) loadGhlHistory(c.id);
+  const r = cache[c.id];
+  return `<div class="ghl-hist-${c.id}">${r ? ghlHistoryField(r) : ''}</div>`;
+}
+function ghlHistoryField(r){ return `<div class="field" style="margin-top:12px"><label>GHL history</label><div>${ghlHistoryRows(r)}</div></div>`; }
+async function loadGhlHistory(contactId){
+  STATE.ghlByContact[contactId] = null;   // asked once per session; null = none (or still loading)
+  const { data, error } = await sb.from('ghl_archive').select(GHL_ARCHIVE_COLS).eq('ops_contact_id', contactId).order('ghl_created_at').limit(1);
+  const r = !error && data && data[0]; if (!r) return;
+  STATE.ghlByContact[contactId] = r;
+  document.querySelectorAll('.ghl-hist-'+contactId).forEach(el => { el.innerHTML = ghlHistoryField(r); });
 }
 function goToJobFromSearch(jobId){
   const profile = getCurrentProfile(); if (!profile) return;
