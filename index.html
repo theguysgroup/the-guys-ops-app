@@ -4756,8 +4756,9 @@ async function loadAdsStats(){
       from += 1000;
     }
     const ins = await sb.from('ads_insights').select('*').order('day', { ascending:false }).limit(10);
+    const attr = await sb.from('gads_click_attribution').select('gclid,click_date,network,campaign,ad_group,keyword,match_type');
     if (PRESENT) all.forEach(r => { r.cost = (Number(r.cost)||0) * PRESENT_FACTOR; });
-    ADS_STATS.rows = all; ADS_STATS.insights = ins.data || []; ADS_STATS.err = '';
+    ADS_STATS.rows = all; ADS_STATS.insights = ins.data || []; ADS_STATS.attr = attr.data || []; ADS_STATS.err = '';
   } catch(e) { ADS_STATS.err = String((e && e.message) || e); }
   ADS_STATS.loading = false; render();
 }
@@ -4830,6 +4831,28 @@ function adsListSection(id, title, what, headers, rows, rowFn, empty){
   const { shown, more } = adsLimited(id, rows);
   return `<section id="${id}" style="margin-top:28px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:16px;margin:0 0 4px">${esc(title)} <span style="color:var(--ink-faint);font-weight:500">(${rows.length})</span></h3><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:10px">${what}</div>${adsTable(headers, shown.map(rowFn), empty)}${more}</section>`;
 }
+// Keyword → lead → job (30 Sep). Every lead that arrived with a Google click id (gclid, captured since 10 Sep) is matched
+// each morning to that click in Google Ads (gads_click_attribution): campaign, ad group, keyword. Jobs and revenue come
+// from the job↔customer link, so this is the only place that says which keyword brought paying work. Performance Max
+// clicks have no keyword (Google does not share the search), so they group under the campaign.
+const GCLID_CAPTURE_FROM = '2026-09-10';
+function adsKeywordJobs(data){
+  const byGclid = new Map((ADS_STATS.attr||[]).map(a => [a.gclid, a]));
+  const leadAttr = new Map();
+  (data.contacts||[]).forEach(c => { const a = c.gclid && byGclid.get(c.gclid); if (a) leadAttr.set(c.id, a); });
+  const groups = new Map();
+  const group = a => {
+    const k = [a.campaign, a.keyword ? a.ad_group||'' : '', a.keyword||'', a.keyword ? a.match_type||'' : ''].join('\u0001');
+    let x = groups.get(k);
+    if (!x) { x = { campaign:a.campaign||'—', adGroup:a.ad_group||'', keyword:a.keyword||'', match:a.match_type||'', leads:[], jobs:[], revenue:0 }; groups.set(k, x); }
+    return x;
+  };
+  (data.contacts||[]).forEach(c => { const a = leadAttr.get(c.id); if (a) group(a).leads.push(c); });
+  (data.jobs||[]).forEach(j => { const c = contactForJob(j); const a = c && leadAttr.get(c.id); if (a) { const x = group(a); x.jobs.push(j); x.revenue += Number(j.amount)||0; } });
+  const rows = [...groups.values()].sort((a,b) => b.revenue-a.revenue || b.jobs.length-a.jobs.length || b.leads.length-a.leads.length);
+  const googleLeads = (data.contacts||[]).filter(c => c.source==='Google Ads' && localDay(c.createdAt) >= GCLID_CAPTURE_FROM).length;
+  return { rows, matched: leadAttr.size, googleLeads };
+}
 function renderDashGoogle(profile, data, standalone){
   const win = UI.dashboard.adsWin;
   const head = `<div class="page-head"><div><h1 class="page-title">Google Ads</h1><div class="page-sub">Aircon account · read-only view of what Google Ads is doing, refreshed every night</div></div>${standalone?'':`<div>${dashViewSelect()}</div>`}</div>`;
@@ -4875,7 +4898,17 @@ function renderDashGoogle(profile, data, standalone){
 
   const trendRows = A.trend.map(t => adsRow([`<b>Last ${ADS_WIN_LABEL[t.w]}</b>`, adsNum(fmtMoney(round2(t.cost))), adsNum(t.clicks.toLocaleString()), adsNum(dl(t.cpc)), adsNum(cnt(t.conv)), adsNum(dl(t.cpl))]));
   const trendTable = `<div id="ads-trend" style="margin-top:22px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:15px;margin:0 0 8px">All periods side by side</h3>${adsTable(['Period',{t:'Spend',num:1},{t:'Clicks',num:1},{t:'Cost per click',num:1},{t:'Conversions',num:1},{t:'Cost per conversion',num:1}], trendRows)}<div style="font-size:12px;color:var(--ink-faint);margin-top:6px">From 27 Jul to 16 Aug tracking over-counted conversions, so the 60- and 90-day cost per conversion look better than reality.</div></div>`;
-  const summary = `<h2 style="font-size:18px;margin:0 0 12px">Summary</h2>${chipsRow}${cards}${opinion}${trendTable}`;
+  const KJ = adsKeywordJobs(data);
+  const matchLabel = m => ({BROAD:'broad',PHRASE:'phrase',EXACT:'exact'})[m] || String(m||'').toLowerCase();
+  const kjRows = KJ.rows.map(x => { const name = x.keyword || x.campaign; return adsRow([
+    x.keyword ? `<b>${esc(x.keyword)}</b> <span style="color:var(--ink-faint);font-size:11px">${esc(matchLabel(x.match))}</span><div style="color:var(--ink-faint);font-size:11.5px;margin-top:2px">${esc(x.campaign)} › ${esc(x.adGroup)}</div>`
+              : `<b>${esc(x.campaign)}</b><div style="color:var(--ink-faint);font-size:11.5px;margin-top:2px">No keyword: Google does not share the search for this campaign type</div>`,
+    adsNum(drill(String(x.leads.length), `Leads from "${name}"`, 'leads', x.leads)),
+    adsNum(x.jobs.length ? drill(String(x.jobs.length), `Jobs from "${name}"`, 'jobs', x.jobs) : '0'),
+    adsNum(x.leads.length ? Math.round(x.jobs.length/x.leads.length*100)+'%' : '—'),
+    adsNum(x.revenue ? fmtMoney(round2(x.revenue)) : '—')]); });
+  const kwJobs = (data.contacts||[]).length ? `<section id="ads-kw-jobs" style="margin-top:22px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:15px;margin:0 0 4px">From keyword to job</h3><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:10px">Which keyword brought each lead, and which of those leads became paying jobs. Matched every morning from the Google click behind the lead. So far <b>${KJ.matched}</b> of ${KJ.googleLeads} Google Ads leads since ${fmtDateShort(GCLID_CAPTURE_FROM)} are matched; phone calls and leads that came without a click id cannot be. Revenue excl. GST. Too early to judge a keyword on a handful of leads.</div>${adsTable(['Keyword',{t:'Leads',num:1},{t:'Jobs',num:1},{t:'Became a job',num:1},{t:'Revenue',num:1}], kjRows, 'No lead has been matched to a keyword yet.')}</section>` : '';
+  const summary = `<h2 style="font-size:18px;margin:0 0 12px">Summary</h2>${chipsRow}${cards}${opinion}${kwJobs}${trendTable}`;
 
   // ── DETAILS ────────────────────────────────────────────────────────────────
   const legend = `<div style="font-size:12px;color:var(--ink-faint);margin:0 0 10px">Everything below covers the last ${W}. Dots show 7 · 14 · 30 · 60 · 90 days, left to right: <span style="color:var(--bad)">●</span> spent with no conversion, <span style="color:var(--good)">●</span> converted, <span style="color:var(--line)">●</span> no spend.</div>`;
