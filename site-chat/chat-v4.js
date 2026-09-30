@@ -84,12 +84,15 @@
     var m = new RegExp('[?&]' + name + '=([^&#]*)').exec(window.location.search);
     return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : '';
   }
-  function attribution() {
-    var a = {};
+  function attrCookie() {
     try {
       var m = document.cookie.match(/(?:^|; )tgsg_attribution=([^;]*)/);
-      if (m) a = JSON.parse(decodeURIComponent(m[1])) || {};
-    } catch (e) { a = {}; }
+      if (m) return JSON.parse(decodeURIComponent(m[1])) || {};
+    } catch (e) {}
+    return {};
+  }
+  function attribution() {
+    var a = attrCookie();
     var keys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'gbraid', 'wbraid', 'fbclid', 'landing_page'];
     var out = {};
     keys.forEach(function (k) { out[k] = a[k] || (k === 'landing_page' ? '' : param(k)) || ''; });
@@ -312,6 +315,50 @@
       window.fbq('track', META_EVENT, { content_name: 'Website chat', content_category: svc.division || 'Other' }, { eventID: eventId });
     }
   }
+
+  // The lead also goes to the OPS app (Supabase intake-lead), the same way the site's forms do (snippet #15), so chat
+  // leads are counted in the CRM with their ad source. Sent once: when the visitor answers the details question (or
+  // skips it), or when they leave the page after giving a valid phone. Independent of GHL, so a GHL failure loses
+  // nothing. The shared secret is not kept in this public file: it is read from snippet #15 on the page, or from
+  // tggChatV4Config.intakeSecret if the loader ever sets it; without it nothing is sent. Test mode never sends.
+  var INTAKE_URL = 'https://dszlllazwmllmoklzjwl.supabase.co/functions/v1/intake-lead';
+  function intakeSecret() {
+    if (CFG.intakeSecret) return CFG.intakeSecret;
+    var s = document.getElementsByTagName('script');
+    for (var i = 0; i < s.length; i++) {
+      var m = /INTAKE_SECRET\s*=\s*'([^']+)'/.exec(s[i].textContent || '');
+      if (m) return m[1];
+    }
+    return '';
+  }
+  function sendToOps(details) {
+    if (TEST_MODE || st.opsSent || !st.phone) return;
+    var secret = intakeSecret();
+    if (!secret) return;
+    st.opsSent = true; save();
+    var svc = serviceByKey(st.service);
+    var a = attribution(), c = attrCookie();
+    var payload = {
+      full_name: st.name, phone: st.phone, email: '', postcode: '',
+      division: svc.division || 'Other',
+      job_description: 'Website chat' + (svc.text ? ': ' + svc.text : '') + (details ? '. ' + details : ''),
+      utm_source: a.utm_source, utm_medium: a.utm_medium, utm_campaign: a.utm_campaign, utm_term: a.utm_term, utm_content: a.utm_content,
+      landing_page: a.landing_page, referrer_domain: c.referrer_domain || '',
+      gclid: a.gclid, fbclid: a.fbclid, gbraid: a.gbraid, wbraid: a.wbraid,
+      submission_page: window.location.pathname,
+      lead_channel: 'chat',
+      intake_secret: secret
+    };
+    var body = new URLSearchParams();
+    Object.keys(payload).forEach(function (k) { body.append(k, payload[k] == null ? '' : payload[k]); });
+    var sent = false;
+    try { sent = !!(navigator.sendBeacon && navigator.sendBeacon(INTAKE_URL, new Blob([body.toString()], { type: 'application/x-www-form-urlencoded' }))); } catch (e) { sent = false; }
+    if (!sent) {
+      try { fetch(INTAKE_URL, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() }).catch(function () {}); } catch (e) {}
+    }
+  }
+  // Left after giving the phone but before the details question was answered.
+  window.addEventListener('pagehide', function () { if (st.step === 'details') sendToOps(''); });
 
   /* ---------- our chat window ---------- */
   var root = document.createElement('div');
@@ -574,9 +621,10 @@
       sendToRon(v);
     }
   }
-  function finish() {
+  function finish(details) {
     var c = msgs.querySelector('.chips'); if (c) c.remove();
     st.step = 'chat'; save();
+    sendToOps(details || '');
     setInput('', 'text', false);
     var text = isOpen()
       ? 'Thanks ' + st.first + ", you're all set \u2705\nRon from our office will reply right here in a few minutes. Don't want to wait? We'll call you on " + st.phone + ' shortly.'
