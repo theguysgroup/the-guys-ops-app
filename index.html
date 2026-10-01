@@ -1043,7 +1043,7 @@ function jobPatchToRow(patch){
     partsPaidBy:'parts_paid_by', partsRefundStatus:'parts_refund_status', notes:'notes',
     datePaid:'date_paid', paidToTechnician:'paid_to_technician', enteredBy:'entered_by',
     cashConfirmed:'cash_confirmed', invoiceFile:'invoice_file', transferReceiptFile:'transfer_receipt_file',
-    equipmentRentalFile:'equipment_rental_file', reviewTaken:'review_taken', contactId:'contact_id',
+    equipmentRentalFile:'equipment_rental_file', reviewTaken:'review_taken', reviewDoNotAsk:'review_do_not_ask', contactId:'contact_id',
   };
   const nullIfEmpty = new Set(['date_paid','contact_id']);
   const row = {};
@@ -1078,7 +1078,7 @@ function closingPatchToRow(patch){
     technicianName:'technician_name', date:'date', customerName:'customer_name', invoiceNumber:'invoice_number',
     jobType:'job_type', amount:'amount', includesGST:'includes_gst', paymentStatus:'payment_status',
     paymentMethod:'payment_method', partsCost:'parts_cost', partsPaidBy:'parts_paid_by', notes:'notes',
-    invoiceFileUrl:'invoice_file_url', postedBy:'posted_by', createdAt:'created_at',
+    invoiceFileUrl:'invoice_file_url', postedBy:'posted_by', createdAt:'created_at', reviewTaken:'review_taken', reviewDoNotAsk:'review_do_not_ask',
     linkedJobId: isRealId(patch.linkedJobId) ? 'linked_job_id' : null,   // see isRealId()'s comment — a still-fake job id from the old client uid() must never reach a uuid column
   };
   const row = {};
@@ -1655,7 +1655,7 @@ function mapJobRow(j){
     partsRefundStatus:j.parts_refund_status||'N/A', notes:j.notes||'', datePaid:j.date_paid,
     paidToTechnician:j.paid_to_technician, enteredBy:j.entered_by||'', cashConfirmed:j.cash_confirmed,
     invoiceFile:j.invoice_file, transferReceiptFile:j.transfer_receipt_file, equipmentRentalFile:j.equipment_rental_file,
-    reviewTaken:j.review_taken, contactId:j.contact_id||null,
+    reviewTaken:j.review_taken, reviewDoNotAsk:!!j.review_do_not_ask, contactId:j.contact_id||null,
   };
 }
 function mapEquipSpendRow(e){
@@ -1676,6 +1676,7 @@ function mapClosingRow(c){
     paymentStatus:c.payment_status, paymentMethod:c.payment_method||'', partsCost:c.parts_cost||0,
     partsPaidBy:c.parts_paid_by||'', notes:c.notes||'', invoiceFileUrl:c.invoice_file_url,
     postedBy:c.posted_by||'', createdAt:c.created_at, linkedJobId:c.linked_job_id||null,
+    reviewTaken:!!c.review_taken, reviewDoNotAsk:!!c.review_do_not_ask,
   };
 }
 function mapManualReminderRow(r){
@@ -4270,6 +4271,7 @@ function openJobModal(jobId){
           <div class="field"><label>Entered By</label><input id="jm-enteredby" value="${esc(job?.enteredBy || currentProfile?.fullName || '')}"></div>
         </div>
         <label class="checkline" style="margin-top:11px"><input type="checkbox" id="jm-review" ${job?.reviewTaken?'checked':''}> Review taken</label>
+        <label class="checkline" style="margin-top:6px"><input type="checkbox" id="jm-noask" ${job?.reviewDoNotAsk?'checked':''}> Don't ask this customer for a Google review <span class="hint" style="font-weight:400">(unhappy customer or complaint, the automatic review request is not sent)</span></label>
 
         <div class="modal-section">Job expenses</div>
         <div class="grid-3">
@@ -4330,7 +4332,7 @@ async function saveJobModal(jobId){
   const paymentStatus = document.getElementById('jm-status').value;
   const prevJob = jobId ? STATE.data.jobs.find(j=>j.id===jobId) : null;
   const actor = getCurrentProfile()?.fullName || 'Unknown';
-  const oldSnapshot = prevJob ? { amount:prevJob.amount, paymentStatus:prevJob.paymentStatus, paymentMethod:prevJob.paymentMethod, commissionPercent:prevJob.commissionPercent, partsCost:prevJob.partsCost, includesGST:prevJob.includesGST, partsRefundStatus:prevJob.partsRefundStatus, reviewTaken:prevJob.reviewTaken } : null;
+  const oldSnapshot = prevJob ? { amount:prevJob.amount, paymentStatus:prevJob.paymentStatus, paymentMethod:prevJob.paymentMethod, commissionPercent:prevJob.commissionPercent, partsCost:prevJob.partsCost, includesGST:prevJob.includesGST, partsRefundStatus:prevJob.partsRefundStatus, reviewTaken:prevJob.reviewTaken, reviewDoNotAsk:!!prevJob.reviewDoNotAsk } : null;
   let datePaid = prevJob?.datePaid || '';
   if (paymentStatus==='Paid' && !datePaid) datePaid = todayStr();
   if (paymentStatus!=='Paid') datePaid = '';
@@ -4355,6 +4357,7 @@ async function saveJobModal(jobId){
     partsRefundStatus: document.getElementById('jm-refund').value,
     notes: document.getElementById('jm-notes').value,
     reviewTaken: document.getElementById('jm-review').checked,
+    reviewDoNotAsk: document.getElementById('jm-noask').checked,
     datePaid, paidToTechnician: prevJob?.paidToTechnician || 'Not Paid',
     invoiceFile: MODAL_FILES['jm-invoiceFile'] ?? job_or_null(prevJob,'invoiceFile'),
     transferReceiptFile: MODAL_FILES['jm-transferReceiptFile'] ?? job_or_null(prevJob,'transferReceiptFile'),
@@ -4375,6 +4378,7 @@ async function saveJobModal(jobId){
     if (oldSnapshot.includesGST !== values.includesGST) logJobActivity(job, actor, `GST toggle changed from ${oldSnapshot.includesGST?'On':'Off'} to ${values.includesGST?'On':'Off'}`);
     if (oldSnapshot.partsRefundStatus !== values.partsRefundStatus) logJobActivity(job, actor, `Parts refund status changed from "${oldSnapshot.partsRefundStatus}" to "${values.partsRefundStatus}"`);
     if (oldSnapshot.reviewTaken !== values.reviewTaken) logJobActivity(job, actor, `Review ${values.reviewTaken?'marked as taken':'unmarked'}`);
+    if (oldSnapshot.reviewDoNotAsk !== values.reviewDoNotAsk) logJobActivity(job, actor, values.reviewDoNotAsk ? "Marked: don't ask this customer for a review" : 'Review request allowed again');
   } else {
     logJobActivity(job, actor, 'Job created');
   }
@@ -6196,6 +6200,7 @@ function closingCard(c){
         <div style="margin-bottom:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${pill(statusTone, c.paymentStatus)}${c.paymentMethod?pill('neutral', c.paymentMethod):''}${linkedJob ? `<span style="font-size:11px;color:var(--ink-soft)">→ linked to Job ${esc(linkedJob.invoiceNumber||'')}</span>` : ''}</div>
         ${(c.partsCost>0 || c.partsPaidBy) ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:2px">Parts: ${fmtMoney(c.partsCost||0)}${c.partsPaidBy?' · paid by '+esc(c.partsPaidBy):''}</div>` : ''}
         ${c.notes ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${esc(c.notes)}</div>` : ''}
+        <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${c.reviewTaken ? pill('good','Review taken') : pill('neutral','Review not taken')}${c.reviewDoNotAsk ? pill('bad',"Don't ask for a review") : ''}</div>
         <div style="font-size:11px;color:var(--ink-faint);margin-top:4px">Posted by ${esc(c.postedBy)} · ${new Date(c.createdAt).toLocaleString('en-AU')}</div>
       </div>
       ${canEditClosings() ? `<div style="display:flex;flex-direction:column;gap:6px"><button class="btn ghost small" onclick="openClosingEdit('${c.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteClosing('${c.id}')">Delete</button></div>` : ''}
@@ -6258,6 +6263,8 @@ function openClosingEdit(id){
           <div class="field"><label>Method</label><select id="ce-method" onchange="if(this.value==='Cash') document.getElementById('ce-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.map(v=>opt(v, c.paymentMethod||'', v||'—')).join('')}</select></div>
           <div class="field"><label>Parts Cost</label><input type="number" id="ce-partscost" value="${Number(c.partsCost)||0}"></div>
           <div class="field"><label>Parts Paid By</label><select id="ce-partsby">${opt('', c.partsPaidBy||'', '—')}${allTechs.map(t=>opt(t, c.partsPaidBy)).join('')}${opt('Business', c.partsPaidBy)}</select></div>
+          <div class="field"><label>Google review</label><select id="ce-review">${opt('no', c.reviewTaken?'yes':'no', 'Not taken')}${opt('yes', c.reviewTaken?'yes':'no', 'Taken')}</select></div>
+          <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="ce-noask" ${c.reviewDoNotAsk?'checked':''}> Don't ask for a review</label><span class="hint">Unhappy customer or a complaint</span></div>
         </div>
         <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="ce-notes">${esc(c.notes||'')}</textarea></div>
         <div class="field" style="margin-top:11px">
@@ -6283,6 +6290,7 @@ async function saveClosingEdit(){
     jobType: val('ce-jobtype'), amount: Number(val('ce-amount')) || 0, includesGST: !document.getElementById('ce-nogst').checked,
     paymentStatus: val('ce-status'), paymentMethod: val('ce-method'), partsCost: Number(val('ce-partscost')) || 0,
     partsPaidBy: val('ce-partsby'), notes: val('ce-notes'), invoiceFileUrl: CLOSING_EDIT.file,
+    reviewTaken: val('ce-review')==='yes', reviewDoNotAsk: document.getElementById('ce-noask').checked,
   };
   if (!v.customerName) { modalError('Please enter a customer name'); return; }
   if (!v.invoiceNumber) { modalError('Please enter an invoice number'); return; }
@@ -6297,7 +6305,7 @@ async function saveClosingEdit(){
   if (changed.length) await db.closings.update(cl.id, closingPatch);
   let note = '';
   if (job) {
-    const toJob = { technicianName:'technician', date:'date', customerName:'customerName', invoiceNumber:'invoiceNumber', jobType:'jobType', amount:'amount', includesGST:'includesGST', paymentStatus:'paymentStatus', paymentMethod:'paymentMethod', partsCost:'partsCost', partsPaidBy:'partsPaidBy', notes:'notes', invoiceFileUrl:'invoiceFile' };
+    const toJob = { reviewTaken:'reviewTaken', reviewDoNotAsk:'reviewDoNotAsk', technicianName:'technician', date:'date', customerName:'customerName', invoiceNumber:'invoiceNumber', jobType:'jobType', amount:'amount', includesGST:'includesGST', paymentStatus:'paymentStatus', paymentMethod:'paymentMethod', partsCost:'partsCost', partsPaidBy:'partsPaidBy', notes:'notes', invoiceFileUrl:'invoiceFile' };
     const jp = {}; changed.forEach(k => { if (toJob[k]) jp[toJob[k]] = v[k]; });
     // Marked paid now → paid today (commission counts in the week the customer paid); back to unpaid → no paid date.
     if ('paymentStatus' in jp) { if (jp.paymentStatus==='Paid' && !job.datePaid) jp.datePaid = todayStr(); if (jp.paymentStatus!=='Paid') jp.datePaid = ''; }
@@ -6337,6 +6345,8 @@ function renderClosings(profile, data){
         <div class="field"><label>Method</label><select id="cf-method" onchange="if(this.value==='Cash') document.getElementById('cf-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.map(m=>`<option value="${m}">${m||'—'}</option>`).join('')}</select></div>
         <div class="field"><label>Parts Cost</label><input type="number" id="cf-partscost" value="0"></div>
         <div class="field"><label>Parts Paid By</label><select id="cf-partsby"><option value="">—</option>${allTechs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}<option value="Business">Business</option></select></div>
+        <div class="field"><label>Google review</label><select id="cf-review"><option value="no">Not taken</option><option value="yes">Taken</option></select><span class="hint">Not taken = the customer gets an automatic review request</span></div>
+        ${profile.role==='technician' ? '' : `<div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="cf-noask"> Don't ask for a review</label><span class="hint">Unhappy customer or a complaint: no review request</span></div>`}
       </div>
       <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="cf-notes"></textarea></div>
       <div class="field" style="margin-top:11px">
@@ -6372,7 +6382,9 @@ function postClosing(){
   const partsPaidBy = document.getElementById('cf-partsby').value;
   const notes = document.getElementById('cf-notes').value;
   const invoiceFileUrl = CLOSING_FILE;
-  const gathered = { technicianName, date, customerName, contactId: pick.contactId, invoiceNumber, jobType, amount, includesGST, paymentStatus, paymentMethod, partsCost, partsPaidBy, notes, invoiceFileUrl };
+  const reviewTaken = document.getElementById('cf-review').value === 'yes';
+  const reviewDoNotAsk = !!(document.getElementById('cf-noask') && document.getElementById('cf-noask').checked);
+  const gathered = { technicianName, date, customerName, contactId: pick.contactId, invoiceNumber, jobType, amount, includesGST, paymentStatus, paymentMethod, partsCost, partsPaidBy, notes, invoiceFileUrl, reviewTaken, reviewDoNotAsk };
 
   // % commission isn't a field on this form (it's Jobs-table-only) — it's looked up automatically from
   // the commission-rates table. When there's no automatic rate for this technician/job-type combo, don't
@@ -6443,6 +6455,9 @@ async function finalizeClosing(g, commissionPercent){
       paymentStatus: g.paymentStatus, paymentMethod: g.paymentMethod, partsCost: g.partsCost,
       partsPaidBy: g.partsPaidBy, notes: g.notes,
     };
+    // A later closing on the same invoice (a split payment) only adds review info, never clears "taken" or "don't ask".
+    if (g.reviewTaken) patch.reviewTaken = true;
+    if (g.reviewDoNotAsk) patch.reviewDoNotAsk = true;
     if (g.paymentStatus==='Paid' && !existingJob.datePaid) patch.datePaid = g.date || todayStr();
     if (g.paymentStatus!=='Paid') patch.datePaid = '';
     if (g.invoiceFileUrl) patch.invoiceFile = g.invoiceFileUrl;
@@ -6457,6 +6472,7 @@ async function finalizeClosing(g, commissionPercent){
       notes: g.notes || 'Created automatically from a Closings post.', datePaid: g.paymentStatus==='Paid'?(g.date || todayStr()):'',
       paidToTechnician:'Not Paid', enteredBy: g.technicianName, cashConfirmed:false,
       invoiceFile: g.invoiceFileUrl||null, transferReceiptFile:null, equipmentRentalFile:null,
+      reviewTaken: !!g.reviewTaken, reviewDoNotAsk: !!g.reviewDoNotAsk,
     };
     try { job = await db.jobs.create({ activityLog:[], ...values }); }
     catch (err) { return; }   // db.jobs.create() already showed an error toast; leave the closing form as-is so the user can retry
@@ -6467,6 +6483,7 @@ async function finalizeClosing(g, commissionPercent){
     jobType: g.jobType, amount: g.amount, includesGST: g.includesGST, paymentStatus: g.paymentStatus, paymentMethod: g.paymentMethod,
     partsCost: g.partsCost, partsPaidBy: g.partsPaidBy, notes: g.notes, invoiceFileUrl: g.invoiceFileUrl,
     postedBy: currentProfile?.fullName || g.technicianName, createdAt: new Date().toISOString(), linkedJobId: job.id,
+    reviewTaken: !!g.reviewTaken, reviewDoNotAsk: !!g.reviewDoNotAsk,
   };
   try { await db.closings.create(closingValues); }
   catch (err) { return; }   // db.closings.create() already showed an error toast
