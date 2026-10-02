@@ -4208,8 +4208,64 @@ function renderJobRows(jobs, canEdit){
       <td class="wrap">${jobEditableCell(j.id,'notes', esc(j.notes||'—'), 'text')}</td>
       <td><button class="btn ghost small" onclick="openJobActivityModal('${j.id}')">💬 ${recordActivityCount(j)}</button></td>
       ${canEdit ? `<td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openJobModal('${j.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteJob('${j.id}');render()">Delete</button></td>` : ''}
+      ${canAskReview() ? `<td style="white-space:nowrap">${reviewAskCell(j)}</td>` : ''}
     </tr>`;
   }).join('');
+}
+/* ── "Ask for review" (Ofek, 2 Oct): the office sends the Google review request from the job, by hand ──
+   Same text and sending as the old automatic request (review-requests function: SMS through GHL now, the email from
+   info@ within 15 minutes). The cell shows what the technician wrote in the closing (review taken / don't ask) and
+   whether the customer was already asked. */
+let REVIEW_REQ = null, REVIEW_REQ_LOADING = false;
+const reviewInvoiceKey = inv => String(inv||'').replace(/\D/g,'');
+function canAskReview(){ const p = getCurrentProfile(); return !!p && (p.role==='owner' || p.role==='manager' || (p.role==='va' && !!p.permissions.jobs)); }
+async function loadReviewRequests(){
+  if (REVIEW_REQ_LOADING) return; REVIEW_REQ_LOADING = true;
+  const { data, error } = await sb.from('review_requests').select('invoice_number,status,sent_at,send_after,reason,source,requested_by');
+  REVIEW_REQ_LOADING = false;
+  if (error) return;
+  REVIEW_REQ = {}; (data||[]).forEach(r => { REVIEW_REQ[reviewInvoiceKey(r.invoice_number)] = r; });
+  if (UI.tab==='jobs') refreshJobsTable();
+}
+function reviewAskCell(j){
+  if (REVIEW_REQ===null) { loadReviewRequests(); return '<span class="hint">…</span>'; }
+  if (j.reviewDoNotAsk) return pill('bad', "Don't ask");
+  if (j.reviewTaken) return pill('good', 'Review taken');
+  const r = REVIEW_REQ[reviewInvoiceKey(j.invoiceNumber)];
+  if (r && r.status==='sent') return `<span title="${esc(r.requested_by ? 'Asked by '+r.requested_by : 'Asked automatically')}">${pill('good', 'Asked '+fmtDateShort(localDay(r.sent_at)))}</span>`;
+  if (r && r.status==='waiting') return pill('warn', 'Goes '+new Date(r.send_after).toLocaleString('en-AU', { timeZone:'Australia/Sydney', weekday:'short', hour:'numeric', minute:'2-digit' }));
+  if (!j.invoiceNumber) return '<span class="hint">No invoice #</span>';
+  return `${r && r.status==='error' ? pill('bad','Failed')+' ' : ''}<button class="btn primary small" onclick="askForReview('${j.id}')">Ask for review</button>`;
+}
+const REVIEW_ASK_REASONS = {
+  do_not_ask: "This customer is marked \"Don't ask for a review\".",
+  review_taken: 'The review for this job is already taken.',
+  not_in_servicem8: 'This job number is not in ServiceM8, so there is no phone or email to send to.',
+  no_contact: 'There is no mobile or email for this job in ServiceM8.',
+  unknown_job_type: 'Unknown job type, so there is no review link for it.',
+  no_invoice: 'The job has no invoice number.',
+  job_not_found: 'Job not found.',
+  unauthorized: 'You need to be signed in with Jobs access.',
+};
+async function askForReview(jobId, again){
+  const j = STATE.data.jobs.find(x => x.id===jobId); if (!j) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const go = async () => {
+    const { data } = await sb.auth.getSession();
+    const res = await fetch(SUPABASE_URL + '/functions/v1/review-requests', { method:'POST', headers:{ 'Content-Type':'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + (data.session && data.session.access_token) }, body: JSON.stringify({ ask: { job_id: jobId, again: !!again } }) });
+    const out = await res.json().catch(() => ({}));
+    if (out.ok) {
+      logJobActivity(j, getCurrentProfile()?.fullName || 'Unknown', out.status==='sent' ? 'Google review request sent (text now, email from info@ shortly)' : 'Google review request scheduled for the morning');
+      showToast(out.status==='sent' ? `Review request sent to ${j.customerName}: text now, email within 15 minutes` : `After hours: the review request goes at 10:00 tomorrow`);
+    } else if (out.reason==='already_asked' || out.reason==='asked_recently') {
+      const when = out.sent_at ? ` on ${fmtDateShort(localDay(out.sent_at))}` : '';
+      confirmAction(out.reason==='already_asked' ? `${j.customerName} was already asked for a review for this job${when}. Ask again?` : `${j.customerName} was already asked for a review in the last 6 months (another job). Ask again anyway?`,
+        () => askForReview(jobId, true), { danger:false, title:'Already asked', confirmLabel:'Ask again' });
+    } else showToast('Not sent: ' + (REVIEW_ASK_REASONS[out.reason] || out.reason || 'unknown error'));
+    REVIEW_REQ = null; loadReviewRequests();
+  };
+  if (again) { go(); return; }
+  confirmAction(`Send ${j.customerName} a Google review request? A text goes now and an email from info@ shortly (same wording as before).`, go, { danger:false, title:'Ask for a Google review', confirmLabel:'Send' });
 }
 function refreshJobsTable(){
   const profile = getCurrentProfile(); if (!profile) return;
@@ -4253,8 +4309,8 @@ function renderJobs(profile, data){
       ${Object.values(activeFilters).some(v=>v) ? `<button class="btn ghost small" onclick="UI.jobsFilters={};render()">Clear column filters</button>` : ''}
     </div>
     <div class="table-wrap"><table class="jobs-table"><thead>
-      <tr><th>Technician</th><th>Date</th><th>Customer</th><th>Invoice</th><th>Type</th><th>Amount</th><th>GST</th><th>Status</th><th>Method</th><th>GST Amount</th><th>Parts Cost</th><th>Parts Paid By</th><th>%</th><th>Commission</th><th>Tech Paid</th><th>Review</th><th class="wrap">Notes</th><th>Activity</th>${canEdit?'<th></th>':''}</tr>
-      <tr class="filter-row">${filterRow}<th></th>${canEdit?'<th></th>':''}</tr>
+      <tr><th>Technician</th><th>Date</th><th>Customer</th><th>Invoice</th><th>Type</th><th>Amount</th><th>GST</th><th>Status</th><th>Method</th><th>GST Amount</th><th>Parts Cost</th><th>Parts Paid By</th><th>%</th><th>Commission</th><th>Tech Paid</th><th>Review</th><th class="wrap">Notes</th><th>Activity</th>${canEdit?'<th></th>':''}${canAskReview()?'<th>Google review</th>':''}</tr>
+      <tr class="filter-row">${filterRow}<th></th>${canEdit?'<th></th>':''}${canAskReview()?'<th></th>':''}</tr>
     </thead><tbody id="jobs-tbody">${renderJobRows(pageItems, canEdit)}</tbody></table><div id="jobs-pager">${renderPager(page, totalPages, total, pageSize, 'setJobsPage', 'setJobsPageSize')}</div></div>
   `;
 }
