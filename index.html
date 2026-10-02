@@ -895,7 +895,7 @@ async function loadFromSupabase(){
   const mine = (profileRows||[]).find(p => p.id === uid);
   if (!mine) { STATE.profiles = []; STATE.currentProfileId = null; STATE.data = null; STATE.noProfile = true; return; }
   STATE.noProfile = false;
-  STATE.profiles = (profileRows||[]).map(p => ({ id:p.id, fullName:p.full_name, role:p.role, technicianName:p.technician_name, permissions:p.permissions||{} }));
+  STATE.profiles = (profileRows||[]).map(p => ({ id:p.id, fullName:p.full_name, role:p.role, technicianName:p.technician_name, permissions:p.permissions||{}, onDuty:!!p.on_duty, onDutyDate:p.on_duty_date||null, onDutyChangedAt:p.on_duty_changed_at||null }));
   STATE.currentProfileId = mine.id;
 
   // Every list table is read page by page (fetchAllRows): one request returns at most 1,000 rows, and
@@ -1314,6 +1314,7 @@ const db = {
       const map = {
         unpaidReminderDays:'unpaid_reminder_days', quoteStaleDays:'quote_stale_days', gstRatePercent:'gst_rate_percent',
         companyName:'company_name', abn:'abn', defaultPaymentTerms:'default_payment_terms', ownerSalaries:'owner_salaries',
+        phoneEnabled:'phone_enabled', phoneRouting:'phone_routing',
       };
       const row = {}; for (const k in patch) if (map[k]) row[map[k]] = patch[k];
       const { error } = await sb.from('settings').update(row).eq('id', 1);
@@ -1688,7 +1689,7 @@ function mapSettingsRow(r){
     gstRatePercent:r.gst_rate_percent, companyName:r.company_name,
     abn:r.abn||'', defaultPaymentTerms:r.default_payment_terms||'',
     ownerSalaries: r.owner_salaries||{},
-    phoneEnabled: !!r.phone_enabled,
+    phoneEnabled: !!r.phone_enabled, phoneRouting: r.phone_routing || {},
   };
 }
 function mapPayrollRow(r){
@@ -6175,7 +6176,7 @@ function renderMyDay(profile, data){
     </div>`).join('');
 
   return `
-    <div class="page-head"><div><h1 class="page-title">My Day</h1><div class="page-sub">${esc(dayName)} · who to call, in order. Work hours Mon–Fri 8:00–17:00.</div></div></div>
+    <div class="page-head"><div><h1 class="page-title">My Day</h1><div class="page-sub">${esc(dayName)} · who to call, in order. Work hours Mon–Fri 8:00–17:00.</div></div>${myShiftButton(profile)}</div>
     <div class="myday-summary card">
       <div class="stat-label" style="margin-bottom:10px">Morning summary</div>
       <div class="myday-stats">
@@ -7579,6 +7580,9 @@ function renderSettings(profile){
     <div class="section-title">Access permissions</div>
     ${cards}
 
+    <div class="section-title">Phone</div>
+    ${renderPhoneSettings(s)}
+
     <div class="section-title">CRM Settings</div>
     <div class="card">
       <div style="font-family:'Figtree',sans-serif;font-weight:700;font-size:15.5px;margin-bottom:4px">Tags</div>
@@ -7618,6 +7622,90 @@ function renderSettings(profile){
       </div>
     </div>
   `;
+}
+
+/* ── Settings → Phone (Ofek, 2 Oct): who answers the business number, and when ──
+   Stored in settings.phone_routing and read by the `voice` function on every call:
+   Ron on shift → his browser phone (20 s) → the owner(s) for that service during the backup hours → voicemail + text. */
+const PHONE_DIVISIONS = [['Aircon','Air conditioning'],['Chimney','Chimney'],['Pressure Washing','Pressure washing'],['Other','New caller who didn\'t choose']];
+const PHONE_DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function sydneyToday(){ return new Intl.DateTimeFormat('en-CA', { timeZone:'Australia/Sydney' }).format(new Date()); }
+function onShiftToday(p){ return !!(p && p.onDuty && p.onDutyDate === sydneyToday()); }
+function phoneRoutingCopy(){ return JSON.parse(JSON.stringify((STATE.data.settings && STATE.data.settings.phoneRouting) || {})); }
+function savePhoneRouting(R, logText){
+  db.settings.update({ phoneRouting: R });
+  logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', logText);
+  showToast('Phone setting saved'); render();
+}
+function setPhonePerson(key, field, value){
+  const R = phoneRoutingCopy(); R.people = R.people || {}; R.people[key] = R.people[key] || { name:key };
+  R.people[key][field] = value;
+  savePhoneRouting(R, field==='available' ? `${R.people[key].name||key} is now ${value ? 'available' : 'away'} for phone backup` : `${R.people[key].name||key}'s mobile changed`);
+}
+function setPhoneDivision(div, value){
+  const R = phoneRoutingCopy(); R.divisions = R.divisions || {};
+  R.divisions[div] = value==='all' ? Object.keys(R.people||{}) : [value];
+  savePhoneRouting(R, `Calls for ${div} now go to ${value==='all' ? 'everyone' : ((R.people||{})[value]||{}).name||value} when the office doesn't answer`);
+}
+function setPhoneHours(field, value){
+  const R = phoneRoutingCopy(); R.backupHours = R.backupHours || { from:'08:00', to:'20:00', days:[0,1,2,3,4,5,6] };
+  if (field==='day') { const d = Number(value.day); const set = new Set(R.backupHours.days||[]); value.on ? set.add(d) : set.delete(d); R.backupHours.days = [...set].sort(); }
+  else R.backupHours[field] = value;
+  savePhoneRouting(R, `Phone backup hours changed`);
+}
+function setPhoneCallerId(value){ const R = phoneRoutingCopy(); R.callerId = value.trim(); savePhoneRouting(R, `Number shown on outgoing calls changed to ${R.callerId}`); }
+function setPhoneEnabled(on){
+  db.settings.update({ phoneEnabled: on });
+  logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `Business phone in the app switched ${on ? 'on' : 'off'}`);
+  render(); phoneSync();
+}
+function renderPhoneSettings(s){
+  const R = s.phoneRouting || {}, people = R.people || {}, divs = R.divisions || {};
+  const hrs = R.backupHours || { from:'08:00', to:'20:00', days:[0,1,2,3,4,5,6] };
+  const keys = Object.keys(people);
+  const vas = STATE.profiles.filter(p => p.role==='va');
+  const shiftLine = vas.length ? vas.map(p => `<div class="kv"><span>${esc(p.fullName)}</span><span class="v">${onShiftToday(p) ? pill('good', 'On shift' + (p.onDutyChangedAt ? ' since ' + new Date(p.onDutyChangedAt).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' }) : '')) : pill('neutral', 'Off shift')}</span></div>`).join('') : '<div class="hint">No office assistant yet.</div>';
+  const divRows = PHONE_DIVISIONS.map(([key, label]) => {
+    const cur = divs[key] || [];
+    const val = cur.length > 1 || !cur.length ? 'all' : cur[0];
+    return `<div class="field"><label>${esc(label)}</label><select onchange="setPhoneDivision('${jsStr(key)}', this.value)">${keys.map(k => `<option value="${esc(k)}" ${val===k?'selected':''}>${esc(people[k].name||k)}</option>`).join('')}<option value="all" ${val==='all'?'selected':''}>Everyone together</option></select></div>`;
+  }).join('');
+  const personRows = keys.map(k => { const pp = people[k]; return `<div class="grid-3" style="align-items:end;margin-bottom:8px">
+      <div class="field"><label>${esc(pp.name||k)} — mobile</label><input value="${esc(pp.mobile||'')}" onchange="setPhonePerson('${jsStr(k)}','mobile',this.value.trim())"></div>
+      <label class="checkline" style="padding-bottom:10px"><input type="checkbox" ${pp.available!==false?'checked':''} onchange="setPhonePerson('${jsStr(k)}','available',this.checked)"> Available <span class="hint" style="font-weight:400">(untick on holiday: their calls go to the other)</span></label>
+    </div>`; }).join('');
+  return `<div class="card" style="margin-bottom:14px">
+    <label class="checkline" style="font-weight:700;font-size:14.5px"><input type="checkbox" ${s.phoneEnabled?'checked':''} onchange="setPhoneEnabled(this.checked)"> Business phone in the app</label>
+    <div class="hint" style="margin:6px 0 14px">Who answers 1300 380 090 and the old mobile. While Ron is on shift (his Start shift button on My Day) his browser phone rings first for ${R.officeRingSeconds||20} seconds. If he doesn't answer, or he's off shift, the call goes to the person set for that service below, during the backup hours. Outside them, or if nobody answers, the caller leaves a voicemail and gets a text, and it waits in Ron's My Day. A known customer goes by their service; a new caller picks one from a short menu.</div>
+    <div style="font-weight:600;margin-bottom:6px">Office shift today</div>
+    <div style="margin-bottom:14px">${shiftLine}</div>
+    <div style="font-weight:600;margin-bottom:6px">When the office doesn't answer, the call goes to</div>
+    <div class="grid-3" style="margin-bottom:14px">${divRows}</div>
+    <div style="font-weight:600;margin-bottom:6px">Backup phones</div>
+    ${personRows}
+    <div style="font-weight:600;margin:10px 0 6px">Backup hours (Sydney time)</div>
+    <div class="grid-3" style="align-items:end">
+      <div class="field"><label>From</label><input type="time" value="${esc(hrs.from)}" onchange="setPhoneHours('from', this.value)"></div>
+      <div class="field"><label>To</label><input type="time" value="${esc(hrs.to)}" onchange="setPhoneHours('to', this.value)"></div>
+      <div class="field"><label>Outgoing calls show</label><input value="${esc(R.callerId||'')}" onchange="setPhoneCallerId(this.value)"></div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">${PHONE_DAYS.map((d,i) => `<label class="checkline"><input type="checkbox" ${(hrs.days||[]).includes(i)?'checked':''} onchange="setPhoneHours('day', { day:${i}, on:this.checked })"> ${d}</label>`).join('')}</div>
+  </div>`;
+}
+// Ron's shift (My Day): while on shift, the business number rings his browser phone first. A shift ends by itself at midnight.
+async function setMyShift(on){
+  const me = getCurrentProfile(); if (!me) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const { error } = await sb.rpc('set_phone_duty', { p_on: on });
+  if (error) { showToast('Not saved: ' + error.message); return; }
+  me.onDuty = on; me.onDutyDate = sydneyToday(); me.onDutyChangedAt = new Date().toISOString();
+  showToast(on ? 'Shift started: calls to the business number ring here first' : 'Shift ended: calls go to Ofek and Noam');
+  render(); phoneSync();
+}
+function myShiftButton(profile){
+  if (profile.role!=='va') return '';
+  const on = onShiftToday(profile);
+  return `<div style="display:flex;align-items:center;gap:10px">${on ? pill('good','On shift') : pill('neutral','Off shift')}<button class="btn ${on?'':'primary'}" onclick="setMyShift(${on?'false':'true'})">${on ? 'End shift' : 'Start shift'}</button></div>`;
 }
 /* ── settings activity log — permission/business-rule/working-day changes (no single record to attach to) ── */
 function logSettingsActivity(actor, text){
