@@ -1688,6 +1688,7 @@ function mapSettingsRow(r){
     gstRatePercent:r.gst_rate_percent, companyName:r.company_name,
     abn:r.abn||'', defaultPaymentTerms:r.default_payment_terms||'',
     ownerSalaries: r.owner_salaries||{},
+    phoneEnabled: !!r.phone_enabled,
   };
 }
 function mapPayrollRow(r){
@@ -1799,7 +1800,7 @@ function handleListRealtimeChange(listKey, mapRow){
   };
 }
 function handleSettingsRealtimeChange(payload){ if (PRESENT || !STATE.data || payload.eventType==='DELETE') return;
-  Object.assign(STATE.data.settings, mapSettingsRow(payload.new)); renderKeepingInput();
+  Object.assign(STATE.data.settings, mapSettingsRow(payload.new)); renderKeepingInput(); phoneSync();
 }
 function handleCommissionRatesRealtimeChange(payload){ if (PRESENT || !STATE.data) return;
   if (payload.eventType === 'DELETE') delete STATE.data.commissionRates[payload.old.technician_name];
@@ -1818,6 +1819,7 @@ function setupRealtimeSubscriptions(){
     .on('postgres_changes', { event: '*', schema: 'public', table: 'commission_rates' }, handleCommissionRatesRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'payroll_weeks' }, handlePayrollRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_daily_log' }, handleSalesLogRealtimeChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'calls' }, handleCallRealtimeChange)
     .subscribe();
 }
 function teardownRealtimeSubscriptions(){
@@ -2277,6 +2279,7 @@ async function doSetPassword(){
 }
 async function doLogout(){
   if (PRESENT) { try { localStorage.setItem('tgsg_present','0'); } catch(e) {} PRESENT = false; }   // a demo never carries over to the next login
+  phoneStop(); renderPhoneWidget();
   await sb.auth.signOut();
   teardownRealtimeSubscriptions();
   STATE.data = null; STATE.dataLoaded = false; STATE.profiles = []; STATE.currentProfileId = null;
@@ -3213,6 +3216,174 @@ function renderChaseBubbles(){
       <button class="btn primary small" onclick="goToLeadConversation('${c.id}')">Open customer card</button>
     </div>`).join('') + (due.length>5 ? `<div class="hint" style="text-align:right">+${due.length-5} more in Chasing</div>` : '');
 }
+/* ── Business phone (Twilio, 1 Oct 2026) ──────────────────────────────────────────────────────────────────
+   The office answers and makes calls in the browser (Ron works from the Philippines, so no local phone is needed).
+   Shown only when Settings → phone is switched on (settings.phone_enabled) and to people who work the CRM. Calls are
+   handled by the `voice` function (Twilio webhooks): it rings the browser phones for 20 s, then Ofek's and Noam's
+   mobiles, then texts the caller and flags a missed call. Every call lands in `calls` and on the customer's card. */
+const VOICE_URL = SUPABASE_URL + '/functions/v1/voice';
+const TWILIO_SDK_URL = 'https://cdn.jsdelivr.net/npm/@twilio/voice-sdk@2.18.5/dist/twilio.min.js';
+let PHONE = { device:null, status:'off', err:'', incoming:null, call:null, callLabel:'', callContactId:null, startedAt:0, muted:false, missed:[], tick:null, starting:false };
+function phoneWanted(){
+  const p = typeof getCurrentProfile==='function' ? getCurrentProfile() : null;
+  return !!(STATE.data && STATE.data.settings && STATE.data.settings.phoneEnabled && p && canViewSection(p,'crm') && !VIEW_AS_ID && !PRESENT);
+}
+function loadTwilioSdk(){
+  if (window.Twilio && window.Twilio.Device) return Promise.resolve();
+  return new Promise((ok, bad) => { const s = document.createElement('script'); s.src = TWILIO_SDK_URL; s.onload = ok; s.onerror = () => bad(new Error('Could not load the phone library')); document.head.appendChild(s); });
+}
+async function voiceFetch(step, extra){
+  const { data } = await sb.auth.getSession();
+  const token = data && data.session && data.session.access_token;
+  return fetch(`${VOICE_URL}?step=${step}${extra||''}`, { method: step==='play' ? 'GET' : 'POST', headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token } });
+}
+async function phoneToken(){
+  const r = await voiceFetch('token');
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.token) throw new Error(j.error || 'No phone token');
+  return j.token;
+}
+// Starts (or stops) the browser phone to match the setting. Safe to call often.
+async function phoneSync(){
+  if (!phoneWanted()) { phoneStop(); renderPhoneWidget(); return; }
+  if (PHONE.device || PHONE.starting) return;
+  PHONE.starting = true; PHONE.status = 'connecting'; PHONE.err = ''; renderPhoneWidget();
+  try {
+    await loadTwilioSdk();
+    const dev = new window.Twilio.Device(await phoneToken(), { codecPreferences: ['opus', 'pcmu'], closeProtection: true });
+    dev.on('registered', () => { PHONE.status = 'ready'; renderPhoneWidget(); });
+    dev.on('unregistered', () => { PHONE.status = 'off'; renderPhoneWidget(); });
+    dev.on('error', (e) => { PHONE.err = (e && e.message) || 'Phone error'; renderPhoneWidget(); });
+    dev.on('tokenWillExpire', async () => { try { dev.updateToken(await phoneToken()); } catch (e) { PHONE.err = 'Phone sign-in expired, reload the page'; renderPhoneWidget(); } });
+    dev.on('incoming', (call) => {
+      PHONE.incoming = call;
+      const end = () => { if (PHONE.incoming === call) PHONE.incoming = null; renderPhoneWidget(); };
+      call.on('cancel', end); call.on('reject', end); call.on('disconnect', end);
+      renderPhoneWidget();
+    });
+    PHONE.device = dev;
+    await dev.register();
+    loadMissedCalls();
+  } catch (e) { PHONE.status = 'error'; PHONE.err = (e && e.message) || String(e); PHONE.device = null; }
+  PHONE.starting = false; renderPhoneWidget();
+}
+function phoneStop(){ try { if (PHONE.device) PHONE.device.destroy(); } catch(e) {} PHONE.device = null; PHONE.incoming = null; PHONE.call = null; PHONE.status = 'off'; clearInterval(PHONE.tick); }
+function callParam(call, k){ try { return (call.customParameters && call.customParameters.get(k)) || ''; } catch(e) { return ''; } }
+function phoneTrack(call, label, contactId){
+  PHONE.call = call; PHONE.callLabel = label; PHONE.callContactId = contactId || null; PHONE.startedAt = Date.now(); PHONE.muted = false;
+  const end = () => { if (PHONE.call === call) { PHONE.call = null; clearInterval(PHONE.tick); } renderPhoneWidget(); if (contactId) refreshCallsFor(contactId); };
+  call.on('disconnect', end); call.on('cancel', end); call.on('reject', end); call.on('error', end);
+  clearInterval(PHONE.tick); PHONE.tick = setInterval(renderPhoneWidget, 1000);
+  renderPhoneWidget();
+}
+function phoneAnswer(){
+  const call = PHONE.incoming; if (!call) return;
+  PHONE.incoming = null; call.accept();
+  const contactId = callParam(call, 'contactId');
+  phoneTrack(call, callParam(call, 'callerName') || (call.parameters && call.parameters.From) || 'Caller', contactId);
+  if (contactId && contactById(contactId)) goToLeadConversation(contactId);
+}
+function phoneDecline(){ const call = PHONE.incoming; if (!call) return; PHONE.incoming = null; call.reject(); renderPhoneWidget(); }
+async function phoneCall(number, contactId){
+  if (!PHONE.device || PHONE.status!=='ready') { showToast('The phone is not connected yet'); return; }
+  if (PHONE.call) { showToast('Finish the current call first'); return; }
+  const c = contactId ? contactById(contactId) : null;
+  try { const call = await PHONE.device.connect({ params: { To: number } }); phoneTrack(call, c ? c.fullName : number, contactId); }
+  catch (e) { showToast('Could not call: ' + ((e && e.message) || e)); }
+}
+function phoneHangup(){ try { if (PHONE.call) PHONE.call.disconnect(); } catch(e) {} }
+function phoneMute(){ if (!PHONE.call) return; PHONE.muted = !PHONE.muted; PHONE.call.mute(PHONE.muted); renderPhoneWidget(); }
+function phoneCallButton(c){
+  if (!phoneWanted() || !c || !c.phone) return '';
+  return `<button class="btn primary small" onclick="event.stopPropagation();phoneCall('${jsStr(c.phone)}','${c.id}')" ${PHONE.status==='ready' && !PHONE.call ? '' : 'disabled'} title="Call from the business number">📞 Call</button>`;
+}
+// The small phone in the bottom-left corner: status, an incoming call, or the call in progress.
+function renderPhoneWidget(){
+  let host = document.getElementById('phone-widget');
+  if (!phoneWanted() && !PHONE.call && !PHONE.incoming) { if (host) host.remove(); return; }
+  if (!host) { host = document.createElement('div'); host.id = 'phone-widget'; host.style.cssText = 'position:fixed;left:18px;bottom:18px;z-index:1600;max-width:320px'; document.body.appendChild(host); }
+  const box = (inner, edge) => `<div class="card" style="box-shadow:0 8px 28px rgba(0,0,0,.35);border-inline-start:4px solid ${edge};padding:12px 14px">${inner}</div>`;
+  if (PHONE.incoming) {
+    const call = PHONE.incoming, name = callParam(call, 'callerName'), from = (call.parameters && call.parameters.From) || '';
+    host.innerHTML = box(`<div style="font-weight:700;margin-bottom:2px">📞 Incoming call</div><div style="font-size:14px;margin-bottom:10px">${esc(name || from || 'Unknown caller')}${name && from ? `<div class="hint">${esc(from)}</div>` : ''}</div>
+      <div style="display:flex;gap:8px"><button class="btn primary small" onclick="phoneAnswer()">Answer</button><button class="btn small danger" onclick="phoneDecline()">Decline</button></div>`, 'var(--good)');
+    return;
+  }
+  if (PHONE.call) {
+    const s = Math.floor((Date.now() - PHONE.startedAt) / 1000);
+    host.innerHTML = box(`<div style="font-weight:700;margin-bottom:2px">On a call · <span class="mono">${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}</span></div><div style="font-size:13.5px;margin-bottom:10px">${esc(PHONE.callLabel)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" onclick="phoneMute()">${PHONE.muted ? 'Unmute' : 'Mute'}</button><button class="btn small danger" onclick="phoneHangup()">Hang up</button>${PHONE.callContactId ? `<button class="btn ghost small" onclick="goToLeadConversation('${PHONE.callContactId}')">Card</button>` : ''}</div>`, 'var(--primary)');
+    return;
+  }
+  const missed = PHONE.missed.length;
+  const label = PHONE.status==='ready' ? '📞 Phone ready' : PHONE.status==='connecting' ? '📞 Connecting…' : '📞 Phone offline';
+  host.innerHTML = `<div style="display:flex;gap:8px;align-items:center">
+    <button class="btn small" onclick="${PHONE.status==='ready' ? (missed ? "goTab('myDay');setTimeout(()=>myDayJump('missed'),50)" : '') : 'phoneStop();phoneSync()'}" title="${esc(PHONE.err || (PHONE.status==='ready' ? 'Calls to the business number ring here' : 'Click to reconnect'))}" style="border-inline-start:4px solid ${PHONE.status==='ready' ? 'var(--good)' : 'var(--bad)'}">${label}${missed ? ` · <b style="color:var(--bad)">${missed} missed</b>` : ''}</button></div>`;
+}
+// Missed calls nobody has called back yet (last 14 days).
+async function loadMissedCalls(){
+  const since = new Date(Date.now() - 14*86400000).toISOString();
+  const { data } = await sb.from('calls').select('*').eq('missed', true).is('callback_done_at', null).gte('started_at', since).order('started_at', { ascending:false });
+  PHONE.missed = data || []; renderPhoneWidget(); if (UI.tab==='myDay') renderKeepingInput();
+}
+function handleCallRealtimeChange(payload){
+  if (!STATE.data) return;
+  const row = payload.new || payload.old || {};
+  if (row.contact_id) refreshCallsFor(row.contact_id);
+  if (phoneWanted()) loadMissedCalls();
+}
+async function markCallbackDone(callId){
+  const row = PHONE.missed.find(m => m.id===callId); if (!row) return;
+  const { error } = await sb.from('calls').update({ callback_done_at: new Date().toISOString() }).eq('id', callId);
+  if (error) { showToast('Not saved: ' + error.message); return; }
+  PHONE.missed = PHONE.missed.filter(m => m.id!==callId); renderPhoneWidget(); render();
+}
+function myDayMissedCallsSection(){
+  if (!phoneWanted()) return '';
+  const rows = PHONE.missed.map(m => {
+    const c = m.contact_id ? contactById(m.contact_id) : null;
+    const name = c ? c.fullName : (m.from_number || 'Unknown caller');
+    const when = new Date(m.started_at).toLocaleString('en-AU', { timeZone:'Australia/Sydney', weekday:'short', hour:'numeric', minute:'2-digit' });
+    return `<div class="myday-row bad" ${c ? `onclick="goToLeadConversation('${c.id}')"` : ''} style="${c ? '' : 'cursor:default'}">
+      <div style="flex:1 1 220px;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(name)}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px">Missed ${esc(when)}${m.sms_sent ? ' · texted them' : ''} · ${esc(m.from_number || '')}</div></div>
+      <button class="btn primary small" onclick="event.stopPropagation();phoneCall('${jsStr(m.from_number||'')}', ${c ? `'${c.id}'` : 'null'})" ${PHONE.status==='ready' && !PHONE.call ? '' : 'disabled'}>📞 Call back</button>
+      <button class="btn small" onclick="event.stopPropagation();markCallbackDone('${m.id}')">Done</button>
+    </div>`; }).join('');
+  return myDaySection('missed', 'Missed calls — call back', PHONE.missed.length, rows, 'No missed calls waiting. ✓', 'Nobody answered these calls. The caller got a text; call them back. Calling back from here clears it.');
+}
+// Calls on a customer's card (fetched on demand, refreshed live).
+function renderCallsBlock(c){
+  if (!c || !isRealId(c.id) || !STATE.data || !STATE.data.settings || !STATE.data.settings.phoneEnabled) return '';
+  const cache = STATE.callsByContact = STATE.callsByContact || {};
+  if (!(c.id in cache)) refreshCallsFor(c.id);
+  const rows = cache[c.id] || [];
+  return `<div class="calls-${c.id}">${callsField(c.id, rows)}</div>`;
+}
+function callsField(contactId, rows){
+  if (!rows.length) return '';
+  const tone = s => s==='answered' ? 'good' : s==='missed' ? 'bad' : 'neutral';
+  const line = r => `<div class="kv" style="gap:8px"><span>${r.direction==='inbound' ? '↙ In' : '↗ Out'} · <span class="mono">${new Date(r.started_at).toLocaleString('en-AU', { timeZone:'Australia/Sydney', day:'numeric', month:'short', hour:'numeric', minute:'2-digit' })}</span></span>
+    <span class="v">${pill(tone(r.status), r.status)}${r.duration ? ` <span class="mono">${Math.floor(r.duration/60)}:${String(r.duration%60).padStart(2,'0')}</span>` : ''}${r.recording_sid ? ` <button class="btn ghost small" onclick="playCallRecording('${r.id}', this)">▶ Play</button>` : ''}</span></div>`;
+  return `<div class="field" style="margin-top:12px"><label>Calls (${rows.length})</label><div>${rows.slice(0, 10).map(line).join('')}</div></div>`;
+}
+async function refreshCallsFor(contactId){
+  STATE.callsByContact = STATE.callsByContact || {};
+  if (!(contactId in STATE.callsByContact)) STATE.callsByContact[contactId] = [];
+  const { data, error } = await sb.from('calls').select('*').eq('contact_id', contactId).order('started_at', { ascending:false }).limit(20);
+  if (error) return;
+  STATE.callsByContact[contactId] = data || [];
+  document.querySelectorAll('.calls-'+contactId).forEach(el => { el.innerHTML = callsField(contactId, data || []); });
+}
+async function playCallRecording(callId, btn){
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+  try {
+    const r = await voiceFetch('play', `&call=${encodeURIComponent(callId)}`);
+    if (!r.ok) throw new Error('Recording not available');
+    const audio = new Audio(URL.createObjectURL(await r.blob()));
+    audio.play();
+    if (btn) { btn.textContent = '■ Stop'; btn.disabled = false; btn.onclick = () => { audio.pause(); btn.textContent = '▶ Play'; btn.onclick = () => playCallRecording(callId, btn); }; }
+  } catch (e) { if (btn) { btn.disabled = false; btn.textContent = '▶ Play'; } showToast(String((e && e.message) || e)); }
+}
 function dismissNewLeadBubble(id){ const c = contactById(id); if (!c) return; c.lastReadAt = new Date().toISOString(); db.contacts.update(id, { lastReadAt: c.lastReadAt }); renderChaseBubbles(); }
 function dismissChaseBubble(id){ const c = contactById(id); if (!c) return; c.chaseAlertDone = true; db.contacts.update(id, { chaseAlertDone: true }); renderChaseBubbles(); }
 setInterval(() => { try { renderChaseBubbles(); } catch(e) {} }, 60000);
@@ -3390,6 +3561,7 @@ function renderCrmInboxThreadAndDetails(c){
           </div>
         </span>
         <span style="display:flex;gap:6px">
+          ${phoneCallButton(c)}
           <button id="inbox-mark-read-btn" class="btn ghost small" style="display:${unread>0?'':'none'}" onclick="markLeadReadManually('${c.id}','inbox')">Mark as read</button>
           <button class="btn ghost small crm-inbox-details-btn" onclick="UI.crm.showDetails=!UI.crm.showDetails;render()">${UI.crm.showDetails?'Hide details':'Details'}</button>
           <button class="btn ghost small" onclick="openLeadModal('${c.id}')">Full profile</button>
@@ -3416,6 +3588,7 @@ function renderCrmInboxThreadAndDetails(c){
       <div class="field" style="margin-top:9px"><label>Sales value</label>${salesValueField(c, `<input type="number" value="${c.salesValue||0}" onchange="setLeadSalesValue('${c.id}',this.value)">`)}</div>
       <div class="field" style="margin-top:9px"><label>What they need</label><textarea rows="3" onchange="setLeadJobDescription('${c.id}',this.value)">${esc(c.jobDescription||'')}</textarea></div>
       ${renderContactJobsBlock(c)}
+      ${renderCallsBlock(c)}
       ${renderGhlHistoryBlock(c)}
       ${renderMarketingSourceBlock(c)}
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
@@ -3690,6 +3863,7 @@ function openLeadModal(contactId){
           <div class="field" style="margin-top:11px"><label>What they need</label><textarea rows="2" id="lm-desc">${c?esc(c.jobDescription||''):''}</textarea></div>
           ${c ? `<div class="field" style="margin-top:11px"><label>Tags</label>${renderLeadTags(c.id, 'modal')}</div>` : ''}
           ${c ? renderContactJobsBlock(c) : ''}
+          ${c ? renderCallsBlock(c) : ''}
           ${c ? renderGhlHistoryBlock(c) : ''}
           ${c ? renderMarketingSourceBlock(c) : ''}
         </div>
@@ -6013,6 +6187,7 @@ function renderMyDay(profile, data){
         ${stat('booked', 'Booked, no job yet', L.bookedNoJob.length, '2+ days after the job date', 'bad')}
       </div>
     </div>
+    ${myDayMissedCallsSection()}
     ${myDaySection('new', 'New leads — call first', L.fresh.length, newBody, 'No new leads waiting. ✓',
       `Last ${MY_DAY_NEW_DAYS} days, newest first — the ones waiting 15+ minutes are on top in red. Move each one to its next stage once you've spoken to them.${L.backlog.length ? ` ${drill(`${L.backlog.length} older lead${L.backlog.length===1?' is':'s are'} still in New`, 'Older leads still in New', 'leads', L.backlog)} — clear them in the CRM when you have time.` : ''}`)}
     ${myDaySection('chasing', 'Chasing — call today', L.chaseToCall.length + L.chaseDone.length, L.chaseToCall.map(chaseRow).join('') + L.chaseDone.map(chaseRow).join(''), 'Nobody in Chasing right now.', 'Tick "Called today" after each call. Leads you already called today drop to the bottom.')}
@@ -7523,7 +7698,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
     if (!AUTH_DATA_LOADING) {
       AUTH_DATA_LOADING = true;
       loadFromSupabase()
-        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); })
+        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); phoneSync(); })
         .catch(err => { AUTH_DATA_LOADING = false; AUTH.error = err.message; AUTH.status = 'signedOut'; render(); });
     }
     return;
