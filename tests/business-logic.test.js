@@ -49,6 +49,8 @@ const DECLS = [
   'localDay', 'GOOGLE_ADS_AIRCON_ACCOUNT', 'callDivision', 'summarizeCalls', 'DASH_RANGES', 'resolveDashboardRange',
   // sales automations + My Day
   'fmtMoney', 'workClockDue', 'sydneyNowPast', 'NEW_LEAD_ALERT_FROM', 'leadArrivedAt', 'newLeadUnhandled', 'chaseTooLong', 'quoteStale', 'bookedNoJob', 'MY_DAY_NEW_DAYS', 'myDayLists',
+  // My Day counters (3 Oct)
+  'esc', 'MD_BUBBLES', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
 ];
 
 function extractDecl(source, name){
@@ -513,16 +515,38 @@ function testSalesAutomations(sb){
   const items = sb.computeReminders(sb.STATE.data, at('2026-09-22T02:00:00Z'));
   assertEqual(items.filter(i => i.type==='chase-long').map(i => i.key), ['chase-long:ch:2026-09-01'], 'computeReminders: one "decide" reminder, keyed to when chasing started');
   assertEqual(items.filter(i => i.type==='stale-quote').map(i => i.key), ['stale-quote:q:2026-09-08'], 'computeReminders: one idle-quote reminder, keyed to the quote date');
-  assertEqual(items.filter(i => i.type==='booked-no-job').map(i => i.key), ['booked-no-job:bk:2026-09-20'], 'computeReminders: booked-no-job reminder keyed to the job date (moving the date gives a fresh one)');
+  assertEqual(items.filter(i => i.type==='booked-no-job').length, 0, 'computeReminders: no "booked, no job yet" reminder any more (removed 3 Oct at Ofek\'s request)');
   sb.STATE.data.dismissedReminders = ['chase-long:ch:2026-09-01'];
   assertEqual(sb.computeReminders(sb.STATE.data, at('2026-09-22T02:00:00Z')).filter(i => i.type==='chase-long').length, 0, 'computeReminders: a deleted "decide" reminder stays deleted');
 
-  // My Day lists: the 21-day lead goes to "decide", not the daily call list; the idle quote is listed.
-  sb.STATE.data.contacts.push(lead(), lead({ id:'old', fullName:'Backlog', createdAt:'2026-06-15', messages:[{ kind:'event', at:'2026-06-15T02:00:00Z' }] }));
+  // My Day lists: the 21-day lead goes to "decide", not the daily call list; quotes due and follow-ups each keep to their own stage.
+  sb.STATE.data.contacts.push(lead(), lead({ id:'old', fullName:'Backlog', createdAt:'2026-06-15', messages:[{ kind:'event', at:'2026-06-15T02:00:00Z' }] }),
+    { id:'qd', fullName:'Quote Due', status:'Quoted', nextFollowUp:'2026-09-28', createdAt:'2026-09-01' },
+    { id:'ql', fullName:'Quote Later', status:'Quoted', nextFollowUp:'2026-10-05', createdAt:'2026-09-01' },
+    { id:'fu', fullName:'Follow Up', status:'Follow-up', nextFollowUp:'2026-09-29', createdAt:'2026-09-01' });
   const L = sb.myDayLists(sb.STATE.data, at('2026-09-29T00:30:00Z'));
-  assertEqual([L.chaseDecide.length, L.chaseToCall.length, L.staleQuotes.length], [1, 0, 1], 'myDayLists: 21+ days chasing is in "decide", the idle quote is listed');
+  assertEqual([L.chaseDecide.length, L.chaseToCall.length, L.quotesDue.map(c=>c.id), L.followups.map(c=>c.id)], [1, 0, ['qd'], ['fu']], 'myDayLists: 21+ days chasing is in "decide"; a due quote is in Quotes due only, a Follow-up lead in Follow-ups only');
   assertEqual([L.fresh.map(c=>c.id), L.backlog.map(c=>c.id), L.unhandled.map(c=>c.id)], [['n1'], ['old'], ['n1']], 'myDayLists: this week\'s New lead is listed and flagged, the June one is backlog');
   assertEqual(L.prevWorkday, '2026-09-28', 'myDayLists: previous working day of a Tuesday is Monday');
+
+  // My Day counters: done / total per bubble, the day's % = everything done ÷ everything (Ofek 3/10).
+  const K = sb.mdCounts({ new: [{done:true},{done:true},{done:true},{done:true},{done:true},{done:true},{done:false},{done:false},{done:false},{done:false}], chasing: Array.from({length:30}, () => ({done:true})) });
+  // new 6/10, chasing 30/30 → 36 of 40 = 90%
+  assertEqual([K.by.new, K.by.chasing, K.by.quotes, K.done, K.total, K.percent], [{done:6,total:10}, {done:30,total:30}, {done:0,total:0}, 36, 40, 90], 'mdCounts: done/total per bubble, % = all done ÷ all tasks');
+  assertEqual(sb.mdCounts({}).percent, null, 'mdCounts: a day with no tasks has no % (left out of averages)');
+  const dayRow = { day:'2026-09-29', items: { new: { a:{ a:'t', d:'t2', div:'Aircon' }, b:{ a:'t', d:null, div:'Chimney' } }, quotes: { q:{ a:'t', d:'t3', div:'Aircon' } } }, bookings: [{ c:'a', div:'Aircon', from:'new' }, { c:'z', div:'Aircon', from:'other' }] };
+  const SK = sb.mdStoredCounts(dayRow);
+  assertEqual([SK.by.new, SK.by.quotes, SK.percent], [{done:1,total:2}, {done:1,total:1}, 67], 'mdStoredCounts: a stored day counts its items (2 of 3 = 67%)');
+  // week: days of 67% and 100% → average 84% (rounded from 83.5), bubbles summed
+  const W = sb.mdWeekCounts([dayRow, { day:'2026-09-30', items:{}, totals:{ by:{ new:{done:4,total:4} }, done:4, total:4, percent:100 } }]);
+  assertEqual([W.by.new, W.percent, W.days], [{done:5,total:6}, 84, 2], 'mdWeekCounts: bubbles summed, % = average of the days');
+  const BT = sb.mdBookingsTable([dayRow]);
+  assertEqual([/1 of 1 from New leads/.test(BT), /1 from other stages/.test(BT), /<td class="num">2<\/td>/.test(BT)], [true, true, true], 'mdBookingsTable: aircon booked 2 — 1 of its 1 new aircon lead, 1 from other stages');
+  // Chasing → Lost (no answer): only leads that were chasing; days called counted inside the chase.
+  const lostLead = (id, calls, extra) => Object.assign({ id, fullName:id, status:'Lost', lostReason:'noAnswer', chasingSince:'2026-09-01T00:00:00Z', stageChangedAt:'2026-09-22T00:00:00Z', chaseCalls: calls, createdAt:'2026-09-01' }, extra||{});
+  const twelve = Array.from({length:12}, (_, i) => '2026-09-' + String(2+i).padStart(2,'0'));
+  const CL = sb.chasingLostStats({ contacts: [lostLead('few', ['2026-09-02','2026-09-03']), lostLead('many', twelve), lostLead('notChasing', [], { chasingSince:null }), lostLead('price', [], { lostReason:'price' }), lostLead('later', [], { stageChangedAt:'2026-10-20T00:00:00Z' })] }, '2026-09-01', '2026-09-30');
+  assertEqual([CL.total, CL.under.map(x => x.c.id + ':' + x.days)], [2, ['few:2']], 'chasingLostStats: counts chasing → lost (no answer) in the period; lists only those called on fewer than 10 days');
 
   // Returning customer: an old job keeps them Won until they enquire again; a job from the new enquiry makes them Won again.
   sb.STATE.data.jobs = [{ id:'oldjob', contactId:'rc', customerName:'Return Cust', date:'2026-03-01' }];

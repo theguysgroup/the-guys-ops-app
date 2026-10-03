@@ -270,6 +270,9 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .myday-stat-s { font-size: 11px; color: var(--ink-faint); }
 .myday-stat.bad .myday-stat-n { color: var(--bad); }
 .myday-stat.warn .myday-stat-n { color: var(--warn); }
+.myday-stat.good { border-color: var(--good); }
+.myday-stat.good .myday-stat-n { color: var(--good); }
+.myday-days { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
 .myday-section { margin-top: 14px; }
 .myday-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .myday-head h2 { margin: 0; font-size: 15px; }
@@ -822,10 +825,7 @@ function computeReminders(data, now){
       const key = `chase-long:${c.id}:${localDay(c.chasingSince)}`;
       if (!dismissed.has(key)) items.push({ key, readKey:key, contactId:c.id, type:'chase-long', severity:'bad', date:localDay(c.chasingSince), title:`${c.fullName} — 21+ days in Chasing, decide`, meta:`${c.division} · chasing since ${fmtDateShort(localDay(c.chasingSince))} · keep chasing or mark Lost (no answer)` });
     }
-    if (bookedNoJob(c, now)) {
-      const key = `booked-no-job:${c.id}:${c.bookedFor}`;
-      if (!dismissed.has(key)) items.push({ key, readKey:key, contactId:c.id, type:'booked-no-job', severity:'bad', date:c.bookedFor, title:`${c.fullName} — booked for ${fmtDateShort(c.bookedFor)}, no job yet`, meta:`${c.division} · check what happened: cancelled, moved, or the job wasn't entered` });
-    }
+    // (The "booked, no job yet" reminder was removed on 3 Oct, at Ofek's request.)
     if (quoteStale(c, now)) {
       const key = `stale-quote:${c.id}:${localDay(c.stageChangedAt)}`;
       if (!dismissed.has(key)) items.push({ key, readKey:key, contactId:c.id, type:'stale-quote', severity:'bad', date:localDay(c.stageChangedAt), title:`${c.fullName} — quote idle 14+ days`, meta:`${c.division} · quoted ${fmtDateShort(localDay(c.stageChangedAt))}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` });
@@ -1689,7 +1689,7 @@ function mapSettingsRow(r){
     gstRatePercent:r.gst_rate_percent, companyName:r.company_name,
     abn:r.abn||'', defaultPaymentTerms:r.default_payment_terms||'',
     ownerSalaries: r.owner_salaries||{},
-    phoneEnabled: !!r.phone_enabled, phoneRouting: r.phone_routing || {}, chatAutoSms: !!r.chat_auto_sms,
+    phoneEnabled: !!r.phone_enabled, phoneRouting: r.phone_routing || {}, chatAutoSms: !!r.chat_auto_sms, reviewsFrom: r.reviews_from || '2026-10-03',
   };
 }
 function mapPayrollRow(r){
@@ -1823,6 +1823,7 @@ function setupRealtimeSubscriptions(){
     .on('postgres_changes', { event: '*', schema: 'public', table: 'calls' }, handleCallRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'lead_messages' }, handleLeadMessageRealtime)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_sessions' }, handleChatSessionRealtime)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'myday_days' }, handleMyDayRealtime)
     .subscribe();
 }
 function teardownRealtimeSubscriptions(){
@@ -2281,6 +2282,9 @@ async function doSetPassword(){
   render();
 }
 async function doLogout(){
+  const p = getCurrentProfile();
+  if (p && p.role==='va' && !readOnlyReason() && STATE.data && !doLogout.confirmed) { mdEndOfDay(); return; }
+  doLogout.confirmed = false;
   if (PRESENT) { try { localStorage.setItem('tgsg_present','0'); } catch(e) {} PRESENT = false; }   // a demo never carries over to the next login
   phoneStop(); renderPhoneWidget();
   await sb.auth.signOut();
@@ -3018,6 +3022,7 @@ function applyLeadStage(c, stage, extra){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   const old = stageLabel(leadStage(c));
   const nowIso = new Date().toISOString();
+  if (stage==='Booked' && leadStage(c)!=='Booked') mdRecordBooking(c);
   const patch = { status: stage, stageChangedAt: nowIso, ...extra };
   if (stage==='Booked' || stage==='Lost') patch.nextFollowUp = '';
   if (stage==='Chasing' && leadStage(c)!=='Chasing') { patch.chasingSince = nowIso; patch.chaseAlertDone = false; }
@@ -3518,6 +3523,215 @@ function setChatAutoSms(on){
   logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `Automatic texts for unanswered website chats switched ${on ? 'on' : 'off'}`);
   render();
 }
+/* ── My Day counters, day history and Ron's daily % (Ofek, 3 Oct 2026) ─────────────────────────────
+   Every bubble shows done / total for today, live. Each Sydney workday has one row in myday_days with that day's
+   tasks: an item joins a bubble the first time it is due that day and never leaves it (a lead moved on still counts,
+   as done); it is done when its rule is met. The live page reads the CRM; the row keeps the day for the history at
+   the top, the logout summary ("you completed X% of today's tasks" = all done ÷ all tasks) and the Dashboard.
+   Writes go through the myday_merge / myday_close functions, which only add items or change "done", so two open
+   browsers can never wipe each other. */
+const MD_BUBBLES = [
+  ['new', 'New leads'], ['chasing', 'Chasing — call today'], ['decide', 'Chasing 21+ days'],
+  ['followups', 'Follow-ups due'], ['quotes', 'Quotes due'], ['reviews', 'Ask for a review'],
+];
+const MD_FROM_STAGE = { 'New':'new', 'Quoted':'quotes', 'Follow-up':'followups' };
+let MD = { days:{}, loaded:false, pending:{}, timer:null, closedOld:false };
+async function mdLoad(){
+  const p = getCurrentProfile();
+  if (!p || !canViewSection(p,'crm')) return;
+  const { data, error } = await sb.from('myday_days').select('*').order('day', { ascending:false }).limit(400);
+  if (error) return;
+  MD.days = {}; (data||[]).forEach(r => { MD.days[r.day] = r; });
+  MD.loaded = true;
+  mdTick();
+  renderKeepingInput();
+}
+function handleMyDayRealtime(payload){
+  if (!STATE.data || !MD.loaded || payload.eventType==='DELETE' || !payload.new) return;
+  MD.days[payload.new.day] = payload.new;
+  if (UI.tab==='myDay' || UI.tab==='dashboard') renderKeepingInput();
+}
+function mdReviewJobs(data){
+  if (REVIEW_REQ===null) { loadReviewRequests(); return null; }
+  const from = (STATE.data.settings && STATE.data.settings.reviewsFrom) || '2026-10-03';
+  return (data.jobs||[]).filter(j => j.date >= from && reviewInvoiceKey(j.invoiceNumber));
+}
+function mdReviewDone(j){
+  if (!j || j.reviewTaken || j.reviewDoNotAsk) return true;
+  const r = REVIEW_REQ && REVIEW_REQ[reviewInvoiceKey(j.invoiceNumber)];
+  return !!(r && (r.status==='sent' || r.status==='waiting'));
+}
+// Today's bubbles from the CRM right now, plus everything already on today's list. { key: [{ id, div, done, rec }] }
+function mdLive(data, now){
+  const today = sydneyWall(now || new Date()).day, localToday = todayStr(now);
+  const stored = (MD.days[today] && MD.days[today].items) || {};
+  const cs = data.contacts || [];
+  const byId = id => contactById(id);
+  const out = {};
+  const build = (key, current, isDone, recOf) => {
+    const seen = new Set(), list = [];
+    current.forEach(rec => { seen.add(rec.id); list.push({ id: rec.id, rec, div: rec.division || 'Other', done: isDone(rec) }); });
+    Object.keys(stored[key] || {}).forEach(id => {
+      if (seen.has(id)) return;
+      const rec = recOf(id);
+      list.push({ id, rec, div: (rec && rec.division) || stored[key][id].div || 'Other', done: rec ? isDone(rec) : true });
+    });
+    out[key] = list;
+  };
+  const fresh = cs.filter(c => leadStage(c)==='New' && localDay(leadArrivedAt(c) || c.createdAt) >= shiftDays(today, -MY_DAY_NEW_DAYS));
+  build('new', fresh, c => leadStage(c)!=='New', byId);
+  build('chasing', cs.filter(c => leadStage(c)==='Chasing' && !chaseTooLong(c, now)), c => leadStage(c)!=='Chasing' || chaseCounter(c, now).calledToday, byId);
+  build('decide', cs.filter(c => chaseTooLong(c, now)), c => !chaseTooLong(c, now), byId);
+  build('followups', cs.filter(c => leadStage(c)==='Follow-up' && followupDue(c, localToday)), c => !(leadStage(c)==='Follow-up' && followupDue(c, localToday)), byId);
+  build('quotes', cs.filter(c => leadStage(c)==='Quoted' && followupDue(c, localToday)), c => !(leadStage(c)==='Quoted' && followupDue(c, localToday)), byId);
+  const jobs = mdReviewJobs(data);
+  if (jobs) {
+    const jobById = id => (data.jobs||[]).find(j => j.id===id);
+    const div = j => { const c = contactForJob(j); return (c && c.division) || (/chimney/i.test(j.jobType||'') ? 'Chimney' : /pressure/i.test(j.jobType||'') ? 'Pressure Washing' : 'Aircon'); };
+    const due = jobs.filter(j => !mdReviewDone(j)).map(j => ({ ...j, division: div(j) }));
+    build('reviews', due, j => mdReviewDone(jobById(j.id) || j), id => { const j = jobById(id); return j ? { ...j, division: div(j) } : null; });
+  } else out.reviews = Object.keys(stored.reviews || {}).map(id => ({ id, rec:null, div: stored.reviews[id].div || 'Other', done: !!stored.reviews[id].d }));
+  return out;
+}
+function mdCounts(bubbles){
+  const c = {}; let done = 0, total = 0;
+  MD_BUBBLES.forEach(([k]) => { const l = bubbles[k] || []; const d = l.filter(x => x.done).length; c[k] = { done: d, total: l.length }; done += d; total += l.length; });
+  return { by: c, done, total, percent: total ? Math.round(done * 100 / total) : null };
+}
+// Counts for a stored day (history, auto-close): from the row itself.
+function mdStoredCounts(row){
+  if (row.totals && row.totals.by) return row.totals;
+  const bubbles = {};
+  MD_BUBBLES.forEach(([k]) => { const b = (row.items && row.items[k]) || {}; bubbles[k] = Object.keys(b).map(id => ({ id, div: b[id].div || 'Other', done: !!b[id].d })); });
+  return mdCounts(bubbles);
+}
+// Called after every render and every minute: puts new items and changed "done" marks on today's row.
+function mdTick(){
+  try {
+    if (!MD.loaded || !STATE.data || readOnlyReason()) return;
+    const p = getCurrentProfile(); if (!p || !canViewSection(p,'crm')) return;
+    const now = new Date(), today = sydneyWall(now).day;
+    if (!MD.closedOld) { MD.closedOld = true; mdCloseOldDays(today); }
+    if (!isWorkday(today)) return;
+    const bubbles = mdLive(filterForProfile(STATE.data, p), now);
+    const row = MD.days[today] = MD.days[today] || { day: today, items: {}, bookings: [] };
+    const nowIso = now.toISOString();
+    MD_BUBBLES.forEach(([k]) => {
+      const st = row.items[k] = row.items[k] || {};
+      (bubbles[k] || []).forEach(x => {
+        const ex = st[x.id];
+        let patch = null;
+        if (!ex) patch = { a: nowIso, d: x.done ? nowIso : null, div: x.div };
+        else if (!ex.d && x.done) patch = { d: nowIso };
+        else if (ex.d && !x.done) patch = { d: null };
+        if (!patch) return;
+        st[x.id] = { ...(ex || {}), ...patch };
+        (MD.pending[k] = MD.pending[k] || {})[x.id] = { ...(MD.pending[k] && MD.pending[k][x.id] || {}), ...patch };
+      });
+    });
+    if (Object.keys(MD.pending).length && !MD.timer) MD.timer = setTimeout(mdFlush, 1500);
+  } catch (e) { console.error('my day counters', e); }
+}
+async function mdFlush(day, booking){
+  MD.timer = null;
+  const items = MD.pending; MD.pending = {};
+  const d = day || sydneyWall(new Date()).day;
+  if (!Object.keys(items).length && !booking) return;
+  const { error } = await sb.rpc('myday_merge', { p_day: d, p_items: items, p_booking: booking || null });
+  if (error) { console.error('myday_merge', error); Object.keys(items).forEach(k => { MD.pending[k] = { ...items[k], ...(MD.pending[k]||{}) }; }); }
+}
+setInterval(() => { try { mdTick(); } catch(e) {} }, 60000);
+// A day nobody closed (Ron didn't log out) is closed the next time the app opens, from what was stored.
+function mdCloseOldDays(today){
+  Object.values(MD.days).filter(r => r.day < today && !r.closed_at && r.items && Object.keys(r.items).length).forEach(r => {
+    const k = mdStoredCounts(r);
+    sb.rpc('myday_close', { p_day: r.day, p_percent: k.percent, p_totals: k, p_by: 'auto' }).then(({ error }) => { if (!error) { r.closed_at = new Date().toISOString(); r.percent = k.percent; r.totals = k; } });
+  });
+}
+function mdRecordBooking(c){
+  if (readOnlyReason()) return;
+  const now = new Date(), today = sydneyWall(now).day;
+  const st = leadStage(c);
+  const from = st==='Chasing' ? (chaseTooLong(c, now) ? 'decide' : 'chasing') : (MD_FROM_STAGE[st] || 'other');
+  const b = { c: c.id, div: c.division || 'Other', from, at: now.toISOString() };
+  const row = MD.days[today] = MD.days[today] || { day: today, items: {}, bookings: [] };
+  row.bookings = [...(row.bookings || []), b];
+  mdFlush(today, b);
+}
+// Ron's logout (Ofek 3/10): a quote due today that wasn't handled blocks it; otherwise "good work, X%" and the day closes.
+function mdEndOfDay(){
+  const p = getCurrentProfile(), now = new Date(), today = sydneyWall(now).day;
+  const bubbles = mdLive(filterForProfile(STATE.data, p), now);
+  const openQuotes = (bubbles.quotes || []).filter(x => !x.done);
+  if (openQuotes.length) {
+    openPopup(`<h3 style="margin:0 0 6px">You haven't finished Quotes due</h3>
+      <div class="hint" style="margin-bottom:10px">${openQuotes.length} quote${openQuotes.length===1?' is':'s are'} due today and not handled yet. Call each one and set the next follow-up date (or move the stage). You can't close the day without it.</div>
+      <div style="display:grid;gap:4px;margin-bottom:12px">${openQuotes.slice(0, 8).map(x => `<div style="font-size:13px">• ${esc(x.rec ? x.rec.fullName : 'Lead')}</div>`).join('')}</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn primary" onclick="closePopup();goTab('myDay');setTimeout(()=>myDayJump('quotes'),50)">Go to Quotes due</button></div>`);
+    return;
+  }
+  const k = mdCounts(bubbles);
+  const finish = async () => {
+    if (isWorkday(today)) {
+      mdTick(); await mdFlush(today);
+      await sb.rpc('myday_close', { p_day: today, p_percent: k.percent, p_totals: k, p_by: p.fullName || 'Ron' });
+    }
+    closePopup(); doLogout.confirmed = true; doLogout();
+  };
+  window.__mdFinish = finish;
+  const first = String(p.fullName || '').split(' ')[0] || 'there';
+  openPopup(`<h3 style="margin:0 0 6px">Good work today, ${esc(first)}!</h3>
+    <div style="font-size:15px;margin:6px 0 4px">${k.percent===null ? 'There were no tasks today.' : `You completed <b>${k.percent}%</b> of today's tasks (${k.done} of ${k.total}).`}</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn ghost" onclick="closePopup()">Stay</button><button class="btn primary" onclick="window.__mdFinish()">Log out</button></div>`);
+}
+function setMyDayView(v){ UI.myDayView = v; render(); }
+// The strip at the top: today, each closed day of this week, and earlier weeks merged into one chip each.
+function mdHistoryStrip(today){
+  const wk = payrollWeekOf(today);
+  const rows = Object.values(MD.days).filter(r => r.day < today && r.items && Object.keys(r.items).length).sort((a,b) => b.day.localeCompare(a.day));
+  const pct = k => k.percent===null || k.percent===undefined ? '—' : k.percent + '%';
+  const cur = UI.myDayView || 'today';
+  const chip = (v, label) => `<button class="week-chip ${cur===v?'active':''}" onclick="setMyDayView('${v}')">${label}</button>`;
+  const days = rows.filter(r => r.day >= wk.start).map(r => chip('d:'+r.day, `${parseLocalDate(r.day).toLocaleDateString('en-AU',{weekday:'short', day:'numeric'})} · ${pct(mdStoredCounts(r))}`));
+  const weeks = {};
+  rows.filter(r => r.day < wk.start).forEach(r => { const w = payrollWeekOf(r.day).start; (weeks[w] = weeks[w] || []).push(r); });
+  const weekChips = Object.keys(weeks).sort().reverse().slice(0, 8).map(w => chip('w:'+w, `Week ${fmtDateShort(w)} · ${pct(mdWeekCounts(weeks[w]))}`));
+  return `<div class="myday-days">${chip('today','Today')}${days.join('')}${weekChips.join('')}</div>`;
+}
+// A week: every bubble summed, and Ron's % = the average of his days (Ofek 3/10).
+function mdWeekCounts(rows){
+  const by = {}; MD_BUBBLES.forEach(([k]) => by[k] = { done:0, total:0 });
+  const pcts = [];
+  rows.forEach(r => { const k = mdStoredCounts(r); MD_BUBBLES.forEach(([b]) => { by[b].done += (k.by[b]||{}).done||0; by[b].total += (k.by[b]||{}).total||0; }); if (k.percent!==null && k.percent!==undefined) pcts.push(k.percent); });
+  return { by, done: Object.values(by).reduce((s,x)=>s+x.done,0), total: Object.values(by).reduce((s,x)=>s+x.total,0), percent: pcts.length ? Math.round(pcts.reduce((s,x)=>s+x,0)/pcts.length) : null, days: rows.length };
+}
+// Bookings of a day (or week) per division, and which bubble each came from: "1 of 10 from New leads".
+function mdBookingsTable(rows){
+  const bookings = rows.flatMap(r => (r.bookings || []).map(b => ({ ...b, day: r.day })));
+  const label = Object.fromEntries(MD_BUBBLES); label.other = 'other stages';
+  const denom = (div, from) => rows.reduce((s, r) => s + Object.values((r.items && r.items[from]) || {}).filter(x => (x.div || 'Other')===div).length, 0);
+  const divs = [...new Set(bookings.map(b => b.div || 'Other'))];
+  if (!divs.length) return `<div class="hint">No bookings yet.</div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Division</th><th class="num">Booked</th><th>Where each booking came from</th></tr></thead><tbody>${divs.map(div => {
+    const mine = bookings.filter(b => (b.div||'Other')===div);
+    const froms = [...new Set(mine.map(b => b.from))];
+    const parts = froms.map(f => { const n = mine.filter(b => b.from===f).length; const d = f==='other' ? 0 : Math.max(denom(div, f), n); return f==='other' ? `${n} from other stages` : `${n} of ${d} from ${label[f]}`; });
+    return `<tr><td>${esc(div)}</td><td class="num">${mine.length}</td><td>${esc(parts.join(' · '))}</td></tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+// Dashboard: Ron's task completion for the period (a day = that day's %, longer = the average of the days).
+function mdPeriodPercent(start, end){
+  const rows = Object.values(MD.days).filter(r => r.day >= start && r.day <= end && r.items && Object.keys(r.items).length);
+  const today = sydneyWall(new Date()).day;
+  const pcts = rows.map(r => r.day===today && !r.closed_at && STATE.data ? mdCounts(mdLive(filterForProfile(STATE.data, getCurrentProfile()), new Date())).percent : mdStoredCounts(r).percent).filter(x => x!==null && x!==undefined);
+  return { percent: pcts.length ? Math.round(pcts.reduce((s,x)=>s+x,0)/pcts.length) : null, days: pcts.length };
+}
+// Dashboard: leads moved from Chasing to Lost (No answer) in the period, and the ones called on fewer than 10 days.
+function chasingLostStats(data, start, end){
+  const lost = (data.contacts||[]).filter(c => leadStage(c)==='Lost' && lostReasonOf(c)==='noAnswer' && c.chasingSince && c.stageChangedAt && localDay(c.stageChangedAt) >= start && localDay(c.stageChangedAt) <= end);
+  const rows = lost.map(c => { const a = localDay(c.chasingSince), b = localDay(c.stageChangedAt); return { c, days: new Set((c.chaseCalls||[]).filter(d => d >= a && d <= b)).size }; });
+  return { total: lost.length, under: rows.filter(r => r.days < 10).sort((x,y) => x.days - y.days) };
+}
 function dismissNewLeadBubble(id){ const c = contactById(id); if (!c) return; c.lastReadAt = new Date().toISOString(); db.contacts.update(id, { lastReadAt: c.lastReadAt }); renderChaseBubbles(); }
 function dismissChaseBubble(id){ const c = contactById(id); if (!c) return; c.chaseAlertDone = true; db.contacts.update(id, { chaseAlertDone: true }); renderChaseBubbles(); }
 setInterval(() => { try { renderChaseBubbles(); } catch(e) {} }, 60000);
@@ -3539,7 +3753,7 @@ function renderLeadCard(c){
     ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
     ${quoteStale(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Quote idle 14+ days</div>` : ''}
     ${chaseTooLong(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Chasing 21+ days — decide</div>` : ''}
-    ${leadStage(c)==='Booked' && c.bookedFor ? `<div class="lead-due ${bookedNoJob(c)?'overdue':''}" style="margin-top:4px">${bookedNoJob(c) ? `⚠ Booked ${fmtDateShort(c.bookedFor)} — no job yet` : `Job ${fmtDateShort(c.bookedFor)}`}</div>` : ''}
+    ${leadStage(c)==='Booked' && c.bookedFor ? `<div class="lead-due" style="margin-top:4px">Job ${fmtDateShort(c.bookedFor)}</div>` : ''}
     ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">${esc(lostReasonLabel(lostReasonOf(c)))}</div>` : ''}
     ${(contactJobsTotal(c) ?? c.salesValue) ? `<div class="lead-sales-chip">💰 ${fmtMoney(contactJobsTotal(c) ?? c.salesValue)}</div>` : ''}
     ${c.nextFollowUp ? `<div class="lead-due ${overdue?'overdue':(dueToday?'today':'')}">${overdue?'⚠ Overdue':(dueToday?'● Due today':'○ Follow up')} · ${fmtDateShort(c.nextFollowUp)}</div>` : ''}
@@ -3783,7 +3997,7 @@ function renderCrmTable(allContacts){
       <td class="mono">${esc(c.phone||'—')}</td>
       <td>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</td>
       <td>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</td>
-      <td>${leadStageControl(c)}${leadStage(c)==='Chasing'?`<div style="margin-top:4px">${chaseTick(c)}</div>`:''}${quoteStale(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ Idle 14+ days</div>`:''}${chaseTooLong(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ 21+ days — decide</div>`:''}${leadStage(c)==='Booked' && c.bookedFor ? `<div class="lead-due ${bookedNoJob(c)?'overdue':''}" style="margin-top:4px">${bookedNoJob(c) ? `⚠ Job ${fmtDateShort(c.bookedFor)} — no job yet` : `Job ${fmtDateShort(c.bookedFor)}`}</div>` : ''}</td>
+      <td>${leadStageControl(c)}${leadStage(c)==='Chasing'?`<div style="margin-top:4px">${chaseTick(c)}</div>`:''}${quoteStale(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ Idle 14+ days</div>`:''}${chaseTooLong(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ 21+ days — decide</div>`:''}${leadStage(c)==='Booked' && c.bookedFor ? `<div class="lead-due" style="margin-top:4px">Job ${fmtDateShort(c.bookedFor)}</div>` : ''}</td>
       <td class="wrap">${renderTableTagsCell(c)}</td>
       <td class="mono">${fmtDateShort(c.createdAt)}</td>
       <td class="mono">${fmtDateShort(lastContactedAt(c))}</td>
@@ -4359,6 +4573,7 @@ async function loadReviewRequests(){
   if (error) return;
   REVIEW_REQ = {}; (data||[]).forEach(r => { REVIEW_REQ[reviewInvoiceKey(r.invoice_number)] = r; });
   if (UI.tab==='jobs') refreshJobsTable();
+  else if (UI.tab==='myDay' || UI.tab==='dashboard') renderKeepingInput();
 }
 function reviewAskCell(j){
   if (REVIEW_REQ===null) { loadReviewRequests(); return '<span class="hint">…</span>'; }
@@ -5413,6 +5628,28 @@ function renderDashMeta(profile, data){
 
 function sumField(rows, k){ return rows.reduce((s,r)=>s+(Number(r[k])||0),0); }
 
+// Dashboard (Ofek 3/10): the office assistant's daily task completion (from My Day) and leads lost after chasing.
+function renderOfficeCards(data, r){
+  const va = (STATE.profiles||[]).find(p => p.role==='va');
+  const perf = mdPeriodPercent(r.start, r.effEnd);
+  const lost = chasingLostStats(data, r.start, r.effEnd);
+  const tone = perf.percent===null ? 'var(--ink-faint)' : perf.percent >= 80 ? 'var(--good)' : perf.percent >= 60 ? 'var(--warn)' : 'var(--bad)';
+  const under = lost.under.map(x => `<div class="kv"><span>${drill(esc(x.c.fullName), x.c.fullName, 'leads', [x.c])}</span><span class="v" style="color:var(--bad)">called on ${x.days} day${x.days===1?'':'s'}</span></div>`).join('');
+  return `<div class="section-title">Office</div>
+    <div class="grid-2" style="align-items:start">
+      <div class="card stat-card" style="--stat-accent:${tone}">
+        <div class="stat-label">${esc(va ? va.fullName : 'Office assistant')} — My Day tasks completed</div>
+        <div class="stat-value" style="color:${tone}">${perf.percent===null ? '—' : perf.percent + '%'}</div>
+        <div class="stat-sub">${perf.days ? (perf.days===1 ? 'that day' : `average of ${perf.days} working days`) : 'No My Day data for this period yet'}</div>
+      </div>
+      <div class="card stat-card" style="--stat-accent:var(--bad)">
+        <div class="stat-label">Chasing → Lost (no answer)</div>
+        <div class="stat-value">${lost.total}</div>
+        <div class="stat-sub">${lost.total ? `${lost.under.length} called on fewer than 10 of the 21 days` : 'Nobody this period'}</div>
+        ${under ? `<div style="margin-top:8px">${under}</div>` : ''}
+      </div>
+    </div>`;
+}
 function renderDashboard(profile, data){
   const now = new Date();
   const r = resolveDashboardRange(UI.dashboard, now);
@@ -5627,6 +5864,8 @@ function renderDashboard(profile, data){
     <div class="table-wrap"><table><thead><tr><th>Division</th><th class="num">Form leads</th><th class="num">Ad calls</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num">Avg job</th><th class="num">Gross profit</th><th class="num">Margin</th></tr></thead>
       <tbody>${divisionRows}</tbody></table></div>
     <div class="hint" style="margin-top:6px">Gross profit = revenue − technician commission − job expenses (before marketing and salaries, which are only in the Net profit above). Split / Duct only count jobs whose lead has that tag.</div>
+
+    ${renderOfficeCards(data, r)}
 
     <div class="section-title">Team <button class="btn ghost small" onclick="goTab('payroll')" style="margin-inline-start:8px">Pay status → Payroll</button></div>
     <div class="grid-2" style="align-items:start">
@@ -6283,9 +6522,9 @@ function myDayLists(data, now){
     chaseToCall: chasing.filter(c => !chaseTooLong(c, now) && !chaseCounter(c, now).calledToday),
     chaseDone: chasing.filter(c => !chaseTooLong(c, now) && chaseCounter(c, now).calledToday),
     chaseDecide: chasing.filter(c => chaseTooLong(c, now)),
-    followups: cs.filter(c => followupDue(c, localToday)).sort((a,b) => a.nextFollowUp.localeCompare(b.nextFollowUp)),
-    bookedNoJob: cs.filter(c => bookedNoJob(c, now)).sort((a,b) => a.bookedFor.localeCompare(b.bookedFor)),
-    staleQuotes: cs.filter(c => quoteStale(c, now)).sort((a,b) => String(a.stageChangedAt).localeCompare(String(b.stageChangedAt))),
+    // Each stage has its own bubble (Ofek 3/10): Follow-ups due = only leads in Follow-up; quotes are in Quotes due.
+    followups: cs.filter(c => leadStage(c)==='Follow-up' && followupDue(c, localToday)).sort((a,b) => a.nextFollowUp.localeCompare(b.nextFollowUp)),
+    quotesDue: cs.filter(c => leadStage(c)==='Quoted' && followupDue(c, localToday)).sort((a,b) => a.nextFollowUp.localeCompare(b.nextFollowUp)),
   };
 }
 function myDayAgo(iso){
@@ -6330,6 +6569,23 @@ function chaseKeepGoing(id){
   showToast(`${c.fullName} stays in Chasing — asked again in 21 days`);
   render();
 }
+// A past day or week on My Day: the bubbles as they ended, Ron's %, and the bookings table.
+function renderMyDayHistory(profile, data, L, view){
+  const isWeek = view.startsWith('w:'), key = view.slice(2);
+  const rows = isWeek ? Object.values(MD.days).filter(r => payrollWeekOf(r.day).start===key && r.items && Object.keys(r.items).length) : (MD.days[key] ? [MD.days[key]] : []);
+  const k = isWeek ? mdWeekCounts(rows) : (rows[0] ? mdStoredCounts(rows[0]) : { by:{}, done:0, total:0, percent:null });
+  const title = isWeek ? `Week of ${fmtDateShort(key)} · ${rows.length} day${rows.length===1?'':'s'}` : parseLocalDate(key).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' });
+  const bubble = (id, label) => { const b = k.by[id] || { done:0, total:0 }; return `<div class="myday-stat${b.total && b.done===b.total ? ' good' : ''}" style="cursor:default"><span class="myday-stat-n">${b.done}/${b.total}</span><span class="myday-stat-l">${esc(label)}</span></div>`; };
+  return `
+    <div class="page-head"><div><h1 class="page-title">My Day</h1><div class="page-sub">${esc(title)}</div></div></div>
+    ${mdHistoryStrip(L.today)}
+    <div class="myday-summary card">
+      <div class="stat-label" style="margin-bottom:10px">${isWeek ? 'Week summary' : 'How the day ended'}</div>
+      <div class="myday-stats">${MD_BUBBLES.map(([id, label]) => bubble(id, label)).join('')}</div>
+      <div style="margin-top:10px;font-size:13px;color:var(--ink-soft)">${isWeek ? 'Average' : 'Tasks completed'}: <b style="color:var(--ink)">${k.percent===null || k.percent===undefined ? '—' : k.percent + '%'}</b>${isWeek ? ' (average of the days)' : ` (${k.done} of ${k.total})`}${!isWeek && rows[0] && rows[0].closed_by ? ` · closed ${rows[0].closed_by==='auto' ? 'automatically the next morning' : 'by ' + esc(rows[0].closed_by)}` : ''}</div>
+    </div>
+    <div class="card"><div class="stat-label" style="margin-bottom:8px">Bookings — by division and where they came from</div>${mdBookingsTable(rows)}</div>`;
+}
 function renderMyDay(profile, data){
   const now = new Date();
   const L = myDayLists(data, now);
@@ -6339,7 +6595,12 @@ function renderMyDay(profile, data){
     const log = (data.salesLogs||[]).find(l => l.person===person && l.date===L.localToday);
     return { person, log, bookings: log ? salesLogBookings(log) : 0 };
   });
-  const stat = (id, label, n, sub, tone) => `<button class="myday-stat${n && tone?' '+tone:''}" onclick="myDayJump('${id}')"><span class="myday-stat-n">${n}</span><span class="myday-stat-l">${esc(label)}</span>${sub?`<span class="myday-stat-s">${esc(sub)}</span>`:''}</button>`;
+  // Live done / total for every bubble (Ofek 3/10); a bubble turns green when everything in it is done.
+  const live = mdLive(data, now), K = mdCounts(live);
+  const view = UI.myDayView || 'today';
+  const stat = (id, label, n, sub, tone) => { const k = K.by[id==='quotes'?'quotes':id] || { done:0, total:0 }; const left = k.total - k.done;
+    return `<button class="myday-stat${k.total && !left ? ' good' : (left && tone ? ' '+tone : '')}" onclick="myDayJump('${id}')"><span class="myday-stat-n">${k.done}/${k.total}</span><span class="myday-stat-l">${esc(label)}</span>${sub?`<span class="myday-stat-s">${esc(sub)}</span>`:''}</button>`; };
+  if (view !== 'today') return renderMyDayHistory(profile, data, L, view);
 
   const newBody = L.fresh.map(c => {
     const late = newLeadUnhandled(c, now);
@@ -6352,11 +6613,14 @@ function renderMyDay(profile, data){
     { bad: true, meta: `chasing ${daysBetween(parseLocalDate(localDay(c.chasingSince)), parseLocalDate(L.today))} days` })).join('');
   const fuBody = L.followups.map(c => { const ctx = leadFollowupContextFor(c); const over = c.nextFollowUp < L.localToday;
     return myDayRow(c, `${pill(over?'bad':'warn', over?'Overdue':'Today')}<span class="hint">${fmtDateShort(c.nextFollowUp)}</span>`, { bad: over, meta: `${esc(stageLabel(leadStage(c)))}${ctx?` — ${esc(ctx)}`:''}` }); }).join('');
-  const quoteBody = L.staleQuotes.map(c => myDayRow(c, `${pill('bad', daysBetween(parseLocalDate(localDay(c.stageChangedAt)), parseLocalDate(L.today))+' days')}${leadStageControl(c)}`,
-    { bad: true, meta: `quoted ${fmtDateShort(localDay(c.stageChangedAt))}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` })).join('');
-  const bookedBody = L.bookedNoJob.map(c => myDayRow(c,
-    `<label class="hint" style="display:flex;align-items:center;gap:6px">Moved to <input type="date" value="${esc(c.bookedFor)}" onchange="setBookedFor('${c.id}', this.value)" style="width:auto"></label>${leadStageControl(c)}`,
-    { bad: true, meta: `booked for ${fmtDateShort(c.bookedFor)} · no job in Jobs &amp; Commissions yet` })).join('');
+  const quoteBody = L.quotesDue.map(c => { const over = c.nextFollowUp < L.localToday;
+    return myDayRow(c, `${pill(over?'bad':'warn', over?'Overdue':'Today')}<button class="btn small" onclick="openFollowupDatePrompt(contactById('${c.id}'),'Quoted')">Next date</button>${leadStageControl(c)}`,
+      { bad: over, meta: `follow-up ${fmtDateShort(c.nextFollowUp)}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` }); }).join('');
+  const reviewItems = (live.reviews || []).filter(x => !x.done && x.rec);
+  const reviewBody = reviewItems.map(x => { const j = x.rec;
+    return `<div class="myday-row" style="cursor:default"><div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${esc(j.customerName||'—')}</div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">#${esc(j.invoiceNumber||'')} · ${esc(j.jobType||'—')} · ${esc(j.technician||'—')} · ${fmtDateShort(j.date)}</div></div>
+      <div style="display:flex;align-items:center;gap:8px">${reviewAskCell(j)}</div></div>`; }).join('');
   const logBody = logRows.map(r => `<div class="myday-row" style="cursor:default">
       <div style="flex:1 1 220px;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(r.person)}</div>
       <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${r.log ? `${r.log.hours}h · ${r.bookings} booking${r.bookings===1?'':'s'} today` : 'Hours and bookings for today are not logged yet'}</div></div>
@@ -6366,25 +6630,28 @@ function renderMyDay(profile, data){
 
   return `
     <div class="page-head"><div><h1 class="page-title">My Day</h1><div class="page-sub">${esc(dayName)} · who to call, in order. Work hours Mon–Fri 8:00–17:00.</div></div>${myShiftButton(profile)}</div>
+    ${mdHistoryStrip(L.today)}
     <div class="myday-summary card">
       <div class="stat-label" style="margin-bottom:10px">Morning summary</div>
       <div class="myday-stats">
-        ${stat('new', 'New leads since '+(L.prevWorkday===shiftDays(L.today,-1)?'yesterday':parseLocalDate(L.prevWorkday).toLocaleDateString('en-AU',{weekday:'long'})), L.sinceYesterday.length, L.unhandled.length ? `${L.unhandled.length} waiting 15+ min` : '', L.unhandled.length ? 'bad' : '')}
-        ${stat('chasing', 'Chasing — call today', L.chaseToCall.length, L.chaseDone.length ? `${L.chaseDone.length} already called` : '', 'warn')}
-        ${stat('decide', 'Chasing 21+ days', L.chaseDecide.length, 'decide: keep or lost', 'bad')}
-        ${stat('followups', 'Follow-ups due', L.followups.length, L.followups.filter(c=>c.nextFollowUp<L.localToday).length ? `${L.followups.filter(c=>c.nextFollowUp<L.localToday).length} overdue` : '', 'warn')}
-        ${stat('quotes', 'Quotes idle 14+ days', L.staleQuotes.length, '', 'bad')}
-        ${stat('booked', 'Booked, no job yet', L.bookedNoJob.length, '2+ days after the job date', 'bad')}
+        ${stat('new', 'New leads', 0, L.unhandled.length ? `${L.unhandled.length} waiting 15+ min` : 'done = moved to the next stage', L.unhandled.length ? 'bad' : 'warn')}
+        ${stat('chasing', 'Chasing — call today', 0, 'done = called today', 'warn')}
+        ${stat('decide', 'Chasing 21+ days', 0, 'decide: keep or lost', 'bad')}
+        ${stat('followups', 'Follow-ups due', 0, L.followups.filter(c=>c.nextFollowUp<L.localToday).length ? `${L.followups.filter(c=>c.nextFollowUp<L.localToday).length} overdue` : '', 'warn')}
+        ${stat('quotes', 'Quotes due', 0, 'must be done before you log out', 'bad')}
+        ${stat('reviews', 'Ask for a review', 0, 'jobs not asked yet', 'warn')}
       </div>
+      <div style="margin-top:10px;font-size:13px;color:var(--ink-soft)">Today so far: <b style="color:var(--ink)">${K.percent===null ? '—' : K.percent + '%'}</b> of today's tasks done (${K.done} of ${K.total})</div>
     </div>
+    <div class="card" style="margin-bottom:14px"><div class="stat-label" style="margin-bottom:8px">Bookings today — by division and where they came from</div>${mdBookingsTable(MD.days[L.today] ? [MD.days[L.today]] : [])}</div>
     ${myDayMissedCallsSection()}
     ${myDaySection('new', 'New leads — call first', L.fresh.length, newBody, 'No new leads waiting. ✓',
       `Last ${MY_DAY_NEW_DAYS} days, newest first — the ones waiting 15+ minutes are on top in red. Move each one to its next stage once you've spoken to them.${L.backlog.length ? ` ${drill(`${L.backlog.length} older lead${L.backlog.length===1?' is':'s are'} still in New`, 'Older leads still in New', 'leads', L.backlog)} — clear them in the CRM when you have time.` : ''}`)}
     ${myDaySection('chasing', 'Chasing — call today', L.chaseToCall.length + L.chaseDone.length, L.chaseToCall.map(chaseRow).join('') + L.chaseDone.map(chaseRow).join(''), 'Nobody in Chasing right now.', 'Tick "Called today" after each call. Leads you already called today drop to the bottom.')}
     ${L.chaseDecide.length ? myDaySection('decide', 'Chasing 21+ days — decide', L.chaseDecide.length, decideBody, '', 'Three weeks without an answer. Mark as Lost (no answer), or keep chasing for another 21 days.') : ''}
     ${myDaySection('followups', 'Follow-ups due', L.followups.length, fuBody, 'No follow-ups due today. ✓')}
-    ${L.bookedNoJob.length ? myDaySection('booked', 'Booked — no job yet', L.bookedNoJob.length, bookedBody, '', 'Two days after the job date and still no job. Check with the customer or the technician: if it moved, change the date; if it was cancelled, change the stage.') : ''}
-    ${myDaySection('quotes', 'Quotes idle 14+ days', L.staleQuotes.length, quoteBody, 'No quote has been sitting for 14 days. ✓', 'A quote nobody has touched for two weeks goes cold. Call them, or move the lead on.')}
+    ${myDaySection('quotes', 'Quotes due', L.quotesDue.length, quoteBody, 'No quote is due today. ✓', 'Quotes whose follow-up date has come. Call, then set the next date or move the stage. You can\'t log out while one is left.')}
+    ${myDaySection('reviews', 'Ask for a review', reviewItems.length, reviewBody, (REVIEW_REQ===null ? 'Loading…' : 'Every job has been asked, or is marked don\'t ask. ✓'), 'Jobs where the customer hasn\'t been asked for a Google review yet. Not shown: jobs marked "don\'t ask" and reviews already taken.')}
     ${logRows.length ? myDaySection('log', 'Log your day', logRows.filter(r=>!r.log).length, logBody, '', 'Hours and bookings go on the Payroll page — that is what your pay is calculated from.', logRows.every(r=>r.log) ? 'done' : '') : ''}
   `;
 }
@@ -7965,7 +8232,7 @@ function renderNoAccess(profile){
 }
 
 /* ── main render loop ───────────────────────────────────────────────── */
-function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderChaseBubbles, 0); } catch(e) {}
+function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderChaseBubbles, 0); setTimeout(mdTick, 0); } catch(e) {}
   const app = document.getElementById('app');
   if (AUTH.status === 'loading') { app.innerHTML = renderAuthLoading(); return; }
   if (AUTH.status === 'signedOut') { app.innerHTML = renderLogin(); return; }
@@ -7976,7 +8243,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
     if (!AUTH_DATA_LOADING) {
       AUTH_DATA_LOADING = true;
       loadFromSupabase()
-        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); phoneSync(); convLoad(); })
+        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); phoneSync(); convLoad(); mdLoad(); })
         .catch(err => { AUTH_DATA_LOADING = false; AUTH.error = err.message; AUTH.status = 'signedOut'; render(); });
     }
     return;
