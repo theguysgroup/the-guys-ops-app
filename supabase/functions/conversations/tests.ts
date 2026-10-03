@@ -171,6 +171,14 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   eq([dr2.via, waSent.map((w) => w.to)], ["whatsapp", ["+972509400581", "+972507731672"]], "report on WhatsApp to Ofek and Noam (Israeli numbers kept)");
   waMode = "off";
 
+  // ── status to the owners (Ron's break) ──
+  db.T.settings[0].whatsapp_enabled = false;
+  eq((await ownerStatus(db, { text: "Ron went on his lunch break" })).via, "none", "status: nothing sent while WhatsApp is off");
+  db.T.settings[0].whatsapp_enabled = true; waMode = "ok"; waSent.length = 0;
+  const os: any = await ownerStatus(db, { text: "Ron went on his lunch break" });
+  eq([os.via, os.sent, waSent.map((w) => w.to)], ["whatsapp", 2, ["+972509400581", "+972507731672"]], "status: WhatsApp to Ofek and Noam");
+  waMode = "off";
+
   // ── tick: the automatic text ──
   const mk = (over: any) => ({ id: crypto.randomUUID(), contact_id: "c1", first_name: "Sarah", phone: "+61400000001", brand: "The Chimney Guys", service_text: "chimney cleaning", test: false, auto_sms_at: null, auto_sms_skip: null, created_at: new Date(MON_1000 - 6 * 60000).toISOString(), ...over });
   db = fakeDb({ chat_sessions: [mk({})] });

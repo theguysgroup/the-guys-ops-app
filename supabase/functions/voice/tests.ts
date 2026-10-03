@@ -12,11 +12,11 @@ const ROUTING = {
   officeRingSeconds: 20, backupRingSeconds: 20, callerId: "1300 380 090",
 };
 // A tiny in-memory stand-in for the Supabase client.
-function fakeDb(opts: { ronOn?: boolean; ronDate?: string; routing?: any } = {}) {
+function fakeDb(opts: { ronOn?: boolean; ronDate?: string; ronBreak?: boolean; routing?: any } = {}) {
   const T: Record<string, any[]> = {
     contacts: [{ id: "c-known", full_name: "Kevin Love", phone: "+61466103709", division: "Chimney", created_at: "2026-09-23", messages: [], contacted_at: null }],
     calls: [],
-    profiles: [{ id: "ron1", role: "va", permissions: { crm: true }, on_duty: opts.ronOn !== false, on_duty_date: opts.ronDate || "2026-10-02" }, { id: "tech1", role: "technician", permissions: { crm: false }, on_duty: true, on_duty_date: "2026-10-02" }, { id: "own1", role: "owner", permissions: {} }],
+    profiles: [{ id: "ron1", role: "va", permissions: { crm: true }, on_duty: opts.ronOn !== false, on_duty_date: opts.ronDate || "2026-10-02", on_break: !!opts.ronBreak }, { id: "tech1", role: "technician", permissions: { crm: false }, on_duty: true, on_duty_date: "2026-10-02" }, { id: "own1", role: "owner", permissions: {} }],
     settings: [{ phone_routing: opts.routing || JSON.parse(JSON.stringify(ROUTING)) }],
   };
   const from = (t: string) => {
@@ -105,6 +105,10 @@ const IN = { From: "+61412345678", To: "+61400000001" };
   db = fakeDb({ ronDate: "2026-10-01" });
   x = await body(await step(db, "incoming", { CallSid: "CA6", From: "0466103709", To: IN.To }, {}, FRI_10));
   hasNot(x, "<Client>", "a shift from yesterday doesn't ring Ron today");
+  db = fakeDb({ ronBreak: true });
+  x = await body(await step(db, "incoming", { CallSid: "CA6b", From: "0466103709", To: IN.To }, {}, FRI_10));
+  hasNot(x, "<Client>", "Ron on a break: his browser doesn't ring");
+  has(x, "<Number>+61407735994</Number>", "on a break → straight to Noam for chimney");
 
   // 10. 21:00, Ron off shift → office-closed voicemail and text, no notice or menu.
   db = fakeDb({ ronOn: false }); sms.length = 0;

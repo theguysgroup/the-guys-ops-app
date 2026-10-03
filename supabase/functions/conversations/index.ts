@@ -8,6 +8,7 @@
 // The app (signed-in office staff):
 //   reply       Ron answers by website chat, SMS or WhatsApp (the business number, the same one the phone line uses), or
 //               email (queued here, sent from info@ by the info@ Apps Script within a minute).
+//   status      a one-line update to the owners on WhatsApp (Ron's lunch break); nothing is sent while WhatsApp is off.
 //   daily_report  Ron's end-of-day report (sent when he logs out) → WhatsApp to the owners, or by email until WhatsApp is on.
 // Twilio (signed webhooks): sms_in (a customer's text, STOP/START), sms_status (delivery).
 // The info@ Apps Script, every minute: alerts — the new-chat emails, handed only to the verified info@ mailbox, which
@@ -448,6 +449,19 @@ export async function dailyReport(sb: any, user: any, body: any, nowMs: number) 
   return { ok: true, via };
 }
 
+// ── a short status to the owners on WhatsApp (Ofek 3/10: Ron going on / back from his lunch break) ──
+// deno-lint-ignore no-explicit-any
+export async function ownerStatus(sb: any, body: any) {
+  const text = String(body.text || "").trim().slice(0, 500);
+  if (!text) return { ok: false, reason: "empty" };
+  const { data: st } = await sb.from("settings").select("daily_report_to, whatsapp_enabled").limit(1);
+  if (!(st && st[0] && st[0].whatsapp_enabled)) return { ok: true, via: "none" };
+  const to = (Array.isArray(st[0].daily_report_to) ? st[0].daily_report_to : []).map((r: { whatsapp?: string }) => toE164(r.whatsapp)).filter(Boolean);
+  let sent = 0;
+  for (const n of to) if ((await io.sendWhatsApp(n, text)).ok) sent++;
+  return { ok: true, via: sent ? "whatsapp" : "none", sent };
+}
+
 // ── a customer's text to the business number ──
 const STOP_WORDS = ["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "OPT OUT"];
 const START_WORDS = ["START", "UNSTOP", "YES"];
@@ -506,6 +520,11 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
       if (step === "tick") return json(req, await tick(sb, now));
       if (step === "alerts") return json(req, await alerts(sb, await req.json().catch(() => ({})), now));
       const body = await req.json().catch(() => ({}));
+      if (step === "status") {
+        const user = await officeUser(sb, req);
+        if (!user) return json(req, { error: "unauthorized" }, 401);
+        return json(req, await ownerStatus(sb, body));
+      }
       if (step === "daily_report") {
         const user = await officeUser(sb, req);
         if (!user) return json(req, { error: "unauthorized" }, 401);

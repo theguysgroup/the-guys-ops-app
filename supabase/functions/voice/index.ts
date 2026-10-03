@@ -96,13 +96,14 @@ function ownersFor(R: Routing, division: string): string[] {
   return [...new Set(pick.map((k) => toE164(R.people[k].mobile)))];
 }
 const identityFor = (profileId: string) => `office-${profileId}`;
-// Browser phones on shift: VAs with CRM access who pressed "Start shift" today (a shift never carries over to the next day).
+// Browser phones on shift: VAs with CRM access who pressed "Start shift" today (a shift never carries over to the next day)
+// and are not on a break (Ofek 3/10: during Ron's break his calls go straight to the owners).
 // deno-lint-ignore no-explicit-any
 async function onShift(sb: any, nowMs: number): Promise<string[]> {
   const today = sydney(nowMs).day;
-  const { data } = await sb.from("profiles").select("id, role, permissions, on_duty, on_duty_date");
+  const { data } = await sb.from("profiles").select("id, role, permissions, on_duty, on_duty_date, on_break");
   // deno-lint-ignore no-explicit-any
-  return (data || []).filter((p: any) => p.role === "va" && p.permissions && p.permissions.crm && p.on_duty && String(p.on_duty_date) === today).map((p: any) => identityFor(p.id));
+  return (data || []).filter((p: any) => p.role === "va" && p.permissions && p.permissions.crm && p.on_duty && !p.on_break && String(p.on_duty_date) === today).map((p: any) => identityFor(p.id));
 }
 
 // ── Twilio request signature (https://www.twilio.com/docs/usage/security#validating-requests) ──

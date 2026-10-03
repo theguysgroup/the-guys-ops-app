@@ -899,7 +899,7 @@ async function loadFromSupabase(){
   const mine = (profileRows||[]).find(p => p.id === uid);
   if (!mine) { STATE.profiles = []; STATE.currentProfileId = null; STATE.data = null; STATE.noProfile = true; return; }
   STATE.noProfile = false;
-  STATE.profiles = (profileRows||[]).map(p => ({ id:p.id, fullName:p.full_name, role:p.role, technicianName:p.technician_name, permissions:p.permissions||{}, onDuty:!!p.on_duty, onDutyDate:p.on_duty_date||null, onDutyChangedAt:p.on_duty_changed_at||null }));
+  STATE.profiles = (profileRows||[]).map(p => ({ id:p.id, fullName:p.full_name, role:p.role, technicianName:p.technician_name, permissions:p.permissions||{}, onDuty:!!p.on_duty, onDutyDate:p.on_duty_date||null, onDutyChangedAt:p.on_duty_changed_at||null, onBreak:!!p.on_break, onBreakSince:p.on_break_since||null }));
   STATE.currentProfileId = mine.id;
 
   // Every list table is read page by page (fetchAllRows): one request returns at most 1,000 rows, and
@@ -1844,6 +1844,82 @@ let CLOSING_FILE = null; // transient invoice-photo state for the "Post a closin
 
 function getRealProfile(){ return STATE.profiles.find(p => p.id===STATE.currentProfileId) || null; }
 // The person the screens are built for: the signed-in user, or (owners only) the team member they're viewing as.
+async function setMyBreak(on){
+  const me = getCurrentProfile(); if (!me) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const since = me.onBreakSince;
+  const { error } = await sb.rpc('set_phone_break', { p_on: on });
+  if (error) { showToast('Not saved: ' + error.message); return; }
+  const now = new Date();
+  me.onBreak = on; me.onBreakSince = on ? now.toISOString() : null;
+  const t = d => d.toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' });
+  const first = String(me.fullName||'').split(' ')[0] || me.fullName;
+  const mins = !on && since ? Math.max(1, Math.round((now - new Date(since)) / 60000)) : 0;
+  const text = on ? `☕ ${first} יצא להפסקת צהריים (${t(now)}). שיחות לעסק עוברות אליכם עד שיחזור.` : `✅ ${first} חזר מההפסקה (${t(now)})${mins ? `, הפסקה של ${mins} דקות` : ''}.`;
+  showToast(on ? 'Break started: calls go to Ofek and Noam until you are back' : `Welcome back${mins ? ` (${mins} min break)` : ''}`);
+  loadShiftEvents(); render(); phoneSync();
+  // The owners hear about it on WhatsApp (once WhatsApp is connected).
+  try {
+    const { data } = await sb.auth.getSession();
+    fetch(CONV_URL + '?step=status', { method:'POST', headers:{ 'Content-Type':'application/json', apikey:SUPABASE_ANON_KEY, Authorization:'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify({ text }) }).catch(() => {});
+  } catch (e) {}
+}
+// Shift clock (start/end shift, breaks) for Payroll: shift_events, own rows for Ron, everyone's for the owners.
+async function loadShiftEvents(){
+  const p = getRealProfile && getRealProfile();
+  if (!p || !(p.role==='va' || p.role==='owner' || p.role==='manager')) return;
+  const { data, error } = await sb.from('shift_events').select('profile_id, kind, at, day').gte('at', new Date(Date.now() - 120*86400000).toISOString()).order('at');
+  if (error) return;
+  STATE.shiftEvents = data || []; STATE.shiftEventsAt = Date.now();
+  if (UI.tab==='payroll') renderKeepingInput();
+}
+// One day of the clock: first start, last end, the breaks, and the minutes worked (shift time minus breaks).
+// A shift still open today runs to now; a past day left open is flagged and counted up to its last event.
+function shiftDaySummary(events, nowMs, isToday){
+  const ev = (events||[]).slice().sort((a,b) => String(a.at).localeCompare(String(b.at)));
+  let inShift = false, inBreak = false, segStart = 0, bStart = 0, shiftMs = 0, breakMs = 0, start = null, end = null, last = 0;
+  const breaks = [];
+  ev.forEach(e => { const t = Date.parse(e.at); last = t;
+    if (e.kind==='shift_start' && !inShift) { inShift = true; segStart = t; if (!start) start = e.at; }
+    else if (e.kind==='break_start' && inShift && !inBreak) { inBreak = true; bStart = t; }
+    else if (e.kind==='break_end' && inBreak) { inBreak = false; breakMs += t - bStart; breaks.push({ from: new Date(bStart).toISOString(), to: e.at }); }
+    else if (e.kind==='shift_end' && inShift) { if (inBreak) { inBreak = false; breakMs += t - bStart; breaks.push({ from: new Date(bStart).toISOString(), to: e.at }); } inShift = false; shiftMs += t - segStart; end = e.at; }
+  });
+  const until = isToday ? nowMs : last;
+  if (inBreak) { breakMs += until - bStart; breaks.push({ from: new Date(bStart).toISOString(), to: null }); }
+  if (inShift) shiftMs += until - segStart;
+  const workedMins = Math.max(0, Math.round((shiftMs - breakMs) / 60000));
+  return { start, end, breaks, breakMins: Math.round(breakMs / 60000), workedMins, open: inShift, onBreak: inBreak, hours: Math.round(workedMins / 15) / 4 };
+}
+function renderShiftLog(person, weekKey, isOwnPage){
+  const prof = (STATE.profiles||[]).find(p => (p.technicianName || p.fullName)===person);
+  if (!prof) return '';
+  if (!STATE.shiftEventsAt || Date.now() - STATE.shiftEventsAt > 60000) { STATE.shiftEventsAt = Date.now(); loadShiftEvents(); }
+  const wk = payrollWeekOf(weekKey), today = sydneyToday();
+  const t = iso => iso ? new Date(iso).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' }) : '—';
+  const mine = (STATE.shiftEvents||[]).filter(e => e.profile_id===prof.id);
+  const rows = []; let totalMins = 0;
+  for (let d = wk.start; d <= wk.end; d = shiftDays(d, 1)) {
+    const evs = mine.filter(e => e.day===d);
+    if (!evs.length) continue;
+    const k = shiftDaySummary(evs, Date.now(), d===today);
+    totalMins += k.workedMins;
+    const brk = k.breaks.length ? k.breaks.map(b => `${t(b.from)}–${b.to ? t(b.to) : 'now'}`).join(', ') + ` (${k.breakMins} min)` : '—';
+    rows.push(`<tr><td>${esc(parseLocalDate(d).toLocaleDateString('en-AU', { weekday:'short', day:'numeric', month:'short' }))}</td><td class="mono">${t(k.start)}</td><td class="mono">${k.end && !k.open ? t(k.end) : (d===today ? '<span style="color:var(--good)">on shift</span>' : '<span style="color:var(--bad)">not ended</span>')}</td><td>${brk}</td><td class="num">${(k.workedMins/60).toFixed(2)}h</td>
+      <td>${isOwnPage || getCurrentProfile().role!=='va' ? `<button class="btn ghost small" onclick="useShiftHours('${d}', ${k.hours})" title="Put these hours in the Log your day form">Use ${k.hours}h</button>` : ''}</td></tr>`);
+  }
+  const buttons = isOwnPage ? `<div style="margin-bottom:10px">${myShiftButton(getCurrentProfile())}</div>` : '';
+  return `<div class="card" style="margin-top:14px">
+    <div class="section-title" style="margin-top:0">Shift clock <span class="tag">${payrollWeekLabel(wk)}</span></div>
+    ${buttons}
+    ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Day</th><th>Start</th><th>End</th><th>Breaks</th><th class="num">Worked</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
+      <div class="hint" style="margin-top:6px">Worked = shift time minus breaks: ${(totalMins/60).toFixed(2)}h this week. Pay still comes from the hours in "Log your day"; "Use" copies a day's hours into that form, then press Save.</div>` : `<div class="hint">No shifts recorded this week yet. Start shift and End shift (and breaks) are recorded here automatically.</div>`}
+  </div>`;
+}
+function useShiftHours(day, hours){
+  UI.payroll.logDate = day; UI.payroll.week = payrollWeekOf(day).key; render();
+  setTimeout(() => { const el = document.getElementById('sl-hours'); if (el) { el.value = hours; el.focus(); showToast(`${hours}h filled in for ${fmtDateShort(day)}. Press Save to keep it.`); } }, 50);
+}
 function getCurrentProfile(){
   const real = getRealProfile();
   if (VIEW_AS_ID && real && real.role==='owner') { const v = STATE.profiles.find(p => p.id===VIEW_AS_ID); if (v) return v; }
@@ -6135,6 +6211,7 @@ function renderMyPay(profile, data, person, isPreview){
         <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Bookings today</div><div class="stat-value">${todayBookings}</div><div class="stat-sub">${bookingBonus(todayBookings) ? `${payMoney(presentAmt(bookingBonus(todayBookings)))} bonus today` : 'no bonus yet'}${next ? ` · ${next.needed} more → $${presentAmt(next.bonus)}` : ' · top bonus reached 🎉'}</div></div>
         <div class="card stat-card" style="--stat-accent:${st.salaryPaid?'var(--good)':'var(--ink-faint)'}"><div class="stat-label">This week's salary</div><div class="stat-value" style="font-size:20px">${st.salaryPaid ? 'Paid ✓' : 'Not paid yet'}</div><div class="stat-sub">${st.salaryPaid ? payMoney(st.salaryPaidAmount) : 'paid after the week ends'}</div></div>
       </div>
+      ${renderShiftLog(person, weekKey, !isPreview && (profile.technicianName || profile.fullName)===person && profile.role==='va')}
       <div class="card" style="margin-top:14px">
         <div class="section-title" style="margin-top:0">Log your day</div>
         <div class="grid-4" style="align-items:end">
@@ -8200,7 +8277,7 @@ function renderPhoneSettings(s){
   const hrs = R.backupHours || { from:'08:00', to:'20:00', days:[0,1,2,3,4,5,6] };
   const keys = Object.keys(people);
   const vas = STATE.profiles.filter(p => p.role==='va');
-  const shiftLine = vas.length ? vas.map(p => `<div class="kv"><span>${esc(p.fullName)}</span><span class="v">${onShiftToday(p) ? pill('good', 'On shift' + (p.onDutyChangedAt ? ' since ' + new Date(p.onDutyChangedAt).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' }) : '')) : pill('neutral', 'Off shift')}</span></div>`).join('') : '<div class="hint">No office assistant yet.</div>';
+  const shiftLine = vas.length ? vas.map(p => `<div class="kv"><span>${esc(p.fullName)}</span><span class="v">${onShiftToday(p) && p.onBreak ? pill('warn', 'On a break since ' + new Date(p.onBreakSince).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' })) : onShiftToday(p) ? pill('good', 'On shift' + (p.onDutyChangedAt ? ' since ' + new Date(p.onDutyChangedAt).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' }) : '')) : pill('neutral', 'Off shift')}</span></div>`).join('') : '<div class="hint">No office assistant yet.</div>';
   const divRows = PHONE_DIVISIONS.map(([key, label]) => {
     const cur = divs[key] || [];
     const val = cur.length > 1 || !cur.length ? 'all' : cur[0];
@@ -8234,14 +8311,19 @@ async function setMyShift(on){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   const { error } = await sb.rpc('set_phone_duty', { p_on: on });
   if (error) { showToast('Not saved: ' + error.message); return; }
-  me.onDuty = on; me.onDutyDate = sydneyToday(); me.onDutyChangedAt = new Date().toISOString();
+  me.onDuty = on; me.onDutyDate = sydneyToday(); me.onDutyChangedAt = new Date().toISOString(); if (!on) { me.onBreak = false; me.onBreakSince = null; }
+  loadShiftEvents();
   showToast(on ? 'Shift started: calls to the business number ring here first' : 'Shift ended: calls go to Ofek and Noam');
   render(); phoneSync();
 }
 function myShiftButton(profile){
   if (profile.role!=='va') return '';
-  const on = onShiftToday(profile);
-  return `<div style="display:flex;align-items:center;gap:10px">${on ? pill('good','On shift') : pill('neutral','Off shift')}<button class="btn ${on?'':'primary'}" onclick="setMyShift(${on?'false':'true'})">${on ? 'End shift' : 'Start shift'}</button></div>`;
+  const on = onShiftToday(profile), brk = on && profile.onBreak;
+  const t = iso => iso ? new Date(iso).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' }) : '';
+  const status = brk ? pill('warn', `On a break since ${t(profile.onBreakSince)}`) : on ? pill('good', 'On shift') : pill('neutral', 'Off shift');
+  // Break (Ofek 3/10): while on a break the business number skips Ron's browser, and the owners get a WhatsApp.
+  const breakBtn = !on ? '' : brk ? `<button class="btn primary" onclick="setMyBreak(false)">Back from break</button>` : `<button class="btn" onclick="setMyBreak(true)">☕ Start break</button>`;
+  return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${status}${breakBtn}<button class="btn ${on?'':'primary'}" onclick="setMyShift(${on?'false':'true'})">${on ? 'End shift' : 'Start shift'}</button></div>`;
 }
 /* ── settings activity log — permission/business-rule/working-day changes (no single record to attach to) ── */
 function logSettingsActivity(actor, text){
@@ -8322,7 +8404,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
     if (!AUTH_DATA_LOADING) {
       AUTH_DATA_LOADING = true;
       loadFromSupabase()
-        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); phoneSync(); convLoad(); mdLoad(); })
+        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); phoneSync(); convLoad(); mdLoad(); loadShiftEvents(); })
         .catch(err => { AUTH_DATA_LOADING = false; AUTH.error = err.message; AUTH.status = 'signedOut'; render(); });
     }
     return;
