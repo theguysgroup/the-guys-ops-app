@@ -899,7 +899,7 @@ async function loadFromSupabase(){
   const mine = (profileRows||[]).find(p => p.id === uid);
   if (!mine) { STATE.profiles = []; STATE.currentProfileId = null; STATE.data = null; STATE.noProfile = true; return; }
   STATE.noProfile = false;
-  STATE.profiles = (profileRows||[]).map(p => ({ id:p.id, fullName:p.full_name, role:p.role, technicianName:p.technician_name, permissions:p.permissions||{}, onDuty:!!p.on_duty, onDutyDate:p.on_duty_date||null, onDutyChangedAt:p.on_duty_changed_at||null, onBreak:!!p.on_break, onBreakSince:p.on_break_since||null }));
+  STATE.profiles = (profileRows||[]).map(p => ({ id:p.id, fullName:p.full_name, role:p.role, technicianName:p.technician_name, permissions:p.permissions||{}, onDuty:!!p.on_duty, onDutyDate:p.on_duty_date||null, onDutyChangedAt:p.on_duty_changed_at||null, onBreak:!!p.on_break, onBreakSince:p.on_break_since||null, lastLogoutAt:p.last_logout_at||null, sessionStartedAt:p.session_started_at||null, forgotLogoutOn:p.forgot_logout_on||null }));
   STATE.currentProfileId = mine.id;
 
   // Every list table is read page by page (fetchAllRows): one request returns at most 1,000 rows, and
@@ -1855,9 +1855,9 @@ async function setMyBreak(on){
   const t = d => d.toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' });
   const first = String(me.fullName||'').split(' ')[0] || me.fullName;
   const mins = !on && since ? Math.max(1, Math.round((now - new Date(since)) / 60000)) : 0;
-  const text = on ? `☕ ${first} יצא להפסקת צהריים (${t(now)}). שיחות לעסק עוברות אליכם עד שיחזור.` : `✅ ${first} חזר מההפסקה (${t(now)})${mins ? `, הפסקה של ${mins} דקות` : ''}.`;
-  showToast(on ? 'Break started: calls go to Ofek and Noam until you are back' : `Welcome back${mins ? ` (${mins} min break)` : ''}`);
-  loadShiftEvents(); render(); phoneSync();
+  const text = on ? `☕ ${first} יצא להפסקת צהריים (${t(now)}).` : `✅ ${first} חזר מההפסקה (${t(now)})${mins ? `, הפסקה של ${mins} דקות` : ''}.`;
+  showToast(on ? 'Break started' : `Welcome back${mins ? ` (${mins} min break)` : ''}`);
+  loadShiftEvents(); render();
   // The owners hear about it on WhatsApp (once WhatsApp is connected).
   try {
     const { data } = await sb.auth.getSession();
@@ -1873,7 +1873,8 @@ async function loadShiftEvents(){
   STATE.shiftEvents = data || []; STATE.shiftEventsAt = Date.now();
   if (UI.tab==='payroll') renderKeepingInput();
 }
-// One day of the clock: first start, last end, the breaks, and the minutes worked (shift time minus breaks).
+// One day of the clock: first start, last end, the breaks, and the minutes on shift. Breaks are only listed (Ofek 3/10:
+// a break is a record, it doesn't change pay), so they are not taken off.
 // A shift still open today runs to now; a past day left open is flagged and counted up to its last event.
 function shiftDaySummary(events, nowMs, isToday){
   const ev = (events||[]).slice().sort((a,b) => String(a.at).localeCompare(String(b.at)));
@@ -1888,7 +1889,7 @@ function shiftDaySummary(events, nowMs, isToday){
   const until = isToday ? nowMs : last;
   if (inBreak) { breakMs += until - bStart; breaks.push({ from: new Date(bStart).toISOString(), to: null }); }
   if (inShift) shiftMs += until - segStart;
-  const workedMins = Math.max(0, Math.round((shiftMs - breakMs) / 60000));
+  const workedMins = Math.max(0, Math.round(shiftMs / 60000));
   return { start, end, breaks, breakMins: Math.round(breakMs / 60000), workedMins, open: inShift, onBreak: inBreak, hours: Math.round(workedMins / 15) / 4 };
 }
 function renderShiftLog(person, weekKey, isOwnPage){
@@ -1912,8 +1913,8 @@ function renderShiftLog(person, weekKey, isOwnPage){
   return `<div class="card" style="margin-top:14px">
     <div class="section-title" style="margin-top:0">Shift clock <span class="tag">${payrollWeekLabel(wk)}</span></div>
     ${buttons}
-    ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Day</th><th>Start</th><th>End</th><th>Breaks</th><th class="num">Worked</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
-      <div class="hint" style="margin-top:6px">Worked = shift time minus breaks: ${(totalMins/60).toFixed(2)}h this week. Pay still comes from the hours in "Log your day"; "Use" copies a day's hours into that form, then press Save.</div>` : `<div class="hint">No shifts recorded this week yet. Start shift and End shift (and breaks) are recorded here automatically.</div>`}
+    ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Day</th><th>Start</th><th>End</th><th>Breaks</th><th class="num">On shift</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
+      <div class="hint" style="margin-top:6px">On shift = from Start shift to End shift: ${(totalMins/60).toFixed(2)}h this week. Breaks are shown for the record only and don't change anything. Pay still comes from the hours in "Log your day"; "Use" copies a day's hours into that form, then press Save.</div>` : `<div class="hint">No shifts recorded this week yet. Start shift and End shift (and breaks) are recorded here automatically.</div>`}
   </div>`;
 }
 function useShiftHours(day, hours){
@@ -2365,6 +2366,8 @@ async function doLogout(){
   const p = getCurrentProfile();
   if (p && p.role==='va' && !readOnlyReason() && STATE.data && !doLogout.confirmed) { mdEndOfDay(); return; }
   doLogout.confirmed = false;
+  if (p && p.role==='va' && !readOnlyReason() && !doLogout.silent) { try { await sb.rpc('mark_logout'); } catch (e) {} }
+  doLogout.silent = false;
   if (PRESENT) { try { localStorage.setItem('tgsg_present','0'); } catch(e) {} PRESENT = false; }   // a demo never carries over to the next login
   phoneStop(); renderPhoneWidget();
   await sb.auth.signOut();
@@ -3759,7 +3762,16 @@ setInterval(() => { try { mdTick(); } catch(e) {} }, 60000);
 function mdCloseOldDays(today){
   Object.values(MD.days).filter(r => r.day < today && !r.closed_at && r.items && Object.keys(r.items).length).forEach(r => {
     const k = mdStoredCounts(r);
-    sb.rpc('myday_close', { p_day: r.day, p_percent: k.percent, p_totals: k, p_by: 'auto' }).then(({ error }) => { if (!error) { r.closed_at = new Date().toISOString(); r.percent = k.percent; r.totals = k; } });
+    sb.rpc('myday_close', { p_day: r.day, p_percent: k.percent, p_totals: k, p_by: 'auto' }).then(async ({ error }) => {
+      if (error) return;
+      r.closed_at = new Date().toISOString(); r.percent = k.percent; r.totals = k;
+      // A day the assistant didn't close (forgot to log out): the owners still get that day's report, once.
+      const me = getRealProfile && getRealProfile();
+      if (me && me.role==='va' && !r.report_sent_at) {
+        const { data } = await sb.auth.getSession();
+        fetch(CONV_URL + '?step=daily_report', { method:'POST', headers:{ 'Content-Type':'application/json', apikey:SUPABASE_ANON_KEY, Authorization:'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify({ day: r.day, text: mdDailyReportText(k, r.day) + '\n(היום נסגר אוטומטית – רון לא יצא מהמערכת)' }) }).catch(() => {});
+      }
+    });
   });
 }
 function mdRecordBooking(c){
@@ -3838,6 +3850,81 @@ function mdDailyReportText(k, today){
   ];
   return lines.filter((l, i) => l !== '' || (lines[i-1] && lines[i-1] !== '')).join('\n').trim();
 }
+/* ── "While you were out" (Ofek 3/10) ─────────────────────────────────────────────────────────────
+   On My Day, under the bookings table: every message from an EXISTING customer (not a New lead: those are in New leads)
+   that came in between the office assistant's logout and their next login, oldest first. Opening one takes Ron to the
+   conversation and drops it from the list (for everyone). No bubble or counter: it just says what to look at first.
+   If the assistant is still on shift at 20:00 the system logs them out with the shift ending at 17:30
+   (auto_end_va_shifts), and the next morning the app tells them they forgot. */
+function vaWindow(){
+  const va = (STATE.profiles||[]).find(p => p.role==='va');
+  if (!va || !va.lastLogoutAt) return null;
+  const from = va.lastLogoutAt;
+  const to = va.sessionStartedAt && va.sessionStartedAt > from ? va.sessionStartedAt : new Date().toISOString();
+  return { va, from, to };
+}
+function whileOutItems(data){
+  const w = vaWindow(); if (!w) return { w:null, items:[] };
+  const today = sydneyWall(new Date()).day;
+  const seen = (MD.days[today] && MD.days[today].items && MD.days[today].items.inboxSeen) || {};
+  const fromMs = Date.parse(w.from), toMs = Date.parse(w.to);
+  const inWin = at => { const t = Date.parse(at); return t >= fromMs && t <= toMs; };
+  const items = [];
+  (data.contacts||[]).forEach(c => {
+    if (leadStage(c)==='New') return;
+    convMessagesFor(c.id).forEach(m => { if (m.direction==='in' && inWin(m.at) && !seen['m'+m.id]) items.push({ key:'m'+m.id, c, at:m.at, channel:m.channel, text:m.text }); });
+    (c.messages||[]).forEach(m => { if (m.kind==='message' && m.direction==='in' && m.auto && inWin(m.at) && !seen['c'+m.id]) items.push({ key:'c'+m.id, c, at:m.at, channel:null, text:m.text }); });
+  });
+  items.sort((a,b) => Date.parse(a.at) - Date.parse(b.at));
+  return { w, items };
+}
+function renderWhileYouWereOut(data){
+  const { w, items } = whileOutItems(data);
+  if (!items.length) return '';
+  const t = iso => new Date(iso).toLocaleString('en-AU', { timeZone:'Australia/Sydney', weekday:'short', hour:'numeric', minute:'2-digit' });
+  const rows = items.map(x => `<div class="myday-row" onclick="openWhileOutItem('${x.c.id}','${x.key}')" tabindex="0" onkeydown="if(event.key==='Enter'){openWhileOutItem('${x.c.id}','${x.key}')}">
+      <div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${esc(x.c.fullName)} <span class="hint" style="font-weight:400">${x.channel ? esc(CONV_CHANNEL_LABEL[x.channel] || x.channel) : 'Website / phone'}</span></div>
+      <div style="font-size:12.5px;color:var(--ink-soft);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(String(x.text||'').slice(0, 160))}</div></div>
+      <span class="hint">${esc(t(x.at))}</span></div>`).join('');
+  return `<section class="card myday-section" id="myday-whileout">
+    <div class="myday-head"><h2>While you were out</h2></div>
+    <div class="hint" style="margin:-4px 0 8px">Messages from existing customers since ${esc(w.va.fullName.split(' ')[0])} logged out (${esc(t(w.from))}), oldest first. Start here: open each one, and it leaves this list.</div>
+    ${rows}
+  </section>`;
+}
+function openWhileOutItem(contactId, key){
+  const today = sydneyWall(new Date()).day, nowIso = new Date().toISOString();
+  const row = MD.days[today] = MD.days[today] || { day: today, items: {}, bookings: [] };
+  row.items.inboxSeen = row.items.inboxSeen || {};
+  row.items.inboxSeen[key] = { a: nowIso, d: nowIso };
+  if (!readOnlyReason()) sb.rpc('myday_merge', { p_day: today, p_items: { inboxSeen: { [key]: { a: nowIso, d: nowIso } } }, p_booking: null }).then(({ error }) => { if (error) console.error('inboxSeen', error); });
+  goToLeadConversation(contactId);
+}
+// Office assistant opens the app: the end of the "while you were out" window, and "you forgot to log out" if the system
+// closed the day at 20:00.
+async function vaSessionStart(){
+  const p = getRealProfile && getRealProfile();
+  if (!p || p.role!=='va' || VIEW_AS_ID || PRESENT) return;
+  await sb.rpc('mark_session_start');
+  const { data } = await sb.from('profiles').select('last_logout_at, session_started_at, forgot_logout_on').eq('id', p.id).single();
+  if (data) { p.lastLogoutAt = data.last_logout_at; p.sessionStartedAt = data.session_started_at; p.forgotLogoutOn = data.forgot_logout_on; }
+  if (p.forgotLogoutOn) {
+    openPopup(`<h3 style="margin:0 0 6px">You forgot to log out</h3>
+      <div style="font-size:14px;margin-bottom:12px">On ${esc(parseLocalDate(p.forgotLogoutOn).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' }))} you were still logged in at 8pm, so the system logged you out and ended your shift at 5:30pm. Please log out at the end of every day.</div>
+      <div style="display:flex;justify-content:flex-end"><button class="btn primary" onclick="sb.rpc('ack_forgot_logout');closePopup()">OK</button></div>`);
+  }
+  render();
+}
+// Still logged in at 8pm: sign out without the end-of-day screen (the system ends the shift at 5:30pm).
+setInterval(() => {
+  try {
+    const p = getRealProfile && getRealProfile();
+    if (!p || p.role!=='va' || !STATE.dataLoaded || VIEW_AS_ID || PRESENT) return;
+    if (sydneyWall(new Date()).hour < 20) return;
+    if (!onShiftToday(p)) { sb.rpc('mark_logout'); }
+    doLogout.confirmed = true; doLogout.silent = true; doLogout();
+  } catch (e) {}
+}, 60000);
 function setMyDayView(v){ UI.myDayView = v; render(); }
 // The strip at the top: today, each closed day of this week, and earlier weeks merged into one chip each.
 function mdHistoryStrip(today){
@@ -6788,7 +6875,7 @@ function renderMyDay(profile, data){
     <div class="page-head"><div><h1 class="page-title">My Day</h1><div class="page-sub">${esc(dayName)} · who to call, in order. Work hours Mon–Fri 8:00–17:00.</div></div>${myShiftButton(profile)}</div>
     ${mdHistoryStrip(L.today)}
     <div class="myday-summary card">
-      <div class="stat-label" style="margin-bottom:10px">Morning summary</div>
+      <div class="stat-label" style="margin-bottom:10px">Daily summary</div>
       <div class="myday-stats">
         ${stat('new', 'New leads', 0, L.unhandled.length ? `${L.unhandled.length} waiting 15+ min` : 'done = moved to the next stage', L.unhandled.length ? 'bad' : 'warn')}
         ${stat('chasing', 'Chasing — call today', 0, 'done = called today', 'warn')}
@@ -6800,6 +6887,7 @@ function renderMyDay(profile, data){
       <div style="margin-top:10px;font-size:13px;color:var(--ink-soft)">Today so far: <b style="color:var(--ink)">${K.percent===null ? '—' : K.percent + '%'}</b> of today's tasks done (${K.done} of ${K.total})</div>
     </div>
     <div class="card" style="margin-bottom:14px"><div class="stat-label" style="margin-bottom:8px">Bookings today — by division and where they came from</div>${mdBookingsTable(MD.days[L.today] ? [MD.days[L.today]] : [])}</div>
+    ${renderWhileYouWereOut(data)}
     ${myDayMissedCallsSection()}
     ${myDaySection('new', 'New leads — call first', L.fresh.length, newBody, 'No new leads waiting. ✓',
       `Last ${MY_DAY_NEW_DAYS} days, newest first — the ones waiting 15+ minutes are on top in red. Move each one to its next stage once you've spoken to them.${L.backlog.length ? ` ${drill(`${L.backlog.length} older lead${L.backlog.length===1?' is':'s are'} still in New`, 'Older leads still in New', 'leads', L.backlog)} — clear them in the CRM when you have time.` : ''}`)}
@@ -8321,7 +8409,7 @@ function myShiftButton(profile){
   const on = onShiftToday(profile), brk = on && profile.onBreak;
   const t = iso => iso ? new Date(iso).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' }) : '';
   const status = brk ? pill('warn', `On a break since ${t(profile.onBreakSince)}`) : on ? pill('good', 'On shift') : pill('neutral', 'Off shift');
-  // Break (Ofek 3/10): while on a break the business number skips Ron's browser, and the owners get a WhatsApp.
+  // Break (Ofek 3/10): only recorded (times on Payroll) and the owners get a WhatsApp. Calls and pay don't change.
   const breakBtn = !on ? '' : brk ? `<button class="btn primary" onclick="setMyBreak(false)">Back from break</button>` : `<button class="btn" onclick="setMyBreak(true)">☕ Start break</button>`;
   return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${status}${breakBtn}<button class="btn ${on?'':'primary'}" onclick="setMyShift(${on?'false':'true'})">${on ? 'End shift' : 'Start shift'}</button></div>`;
 }
@@ -8404,7 +8492,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
     if (!AUTH_DATA_LOADING) {
       AUTH_DATA_LOADING = true;
       loadFromSupabase()
-        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); phoneSync(); convLoad(); mdLoad(); loadShiftEvents(); })
+        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); phoneSync(); convLoad(); mdLoad(); loadShiftEvents(); vaSessionStart(); })
         .catch(err => { AUTH_DATA_LOADING = false; AUTH.error = err.message; AUTH.status = 'signedOut'; render(); });
     }
     return;

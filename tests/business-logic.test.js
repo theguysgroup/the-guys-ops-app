@@ -531,17 +531,17 @@ function testSalesAutomations(sb){
 
   assertEqual(sb.quoteDueReason({ nextFollowUp:'2026-09-27' }, '2026-09-29'), 'Follow-up date 27 Sep has come (2 days late): call, then set the next date or move the stage', 'quoteDueReason: says what to do and how late');
   assertEqual(sb.quoteDueReason({ nextFollowUp:'2026-09-29' }, '2026-09-29'), 'Follow-up date 29 Sep has come (today): call, then set the next date or move the stage', 'quoteDueReason: due today');
-  // Shift clock: 08:00–17:00 with a 12:30–13:15 break = 9h − 45m = 8h15m worked (8.25h)
+  // Shift clock: 08:00–17:00 with a 12:30–13:15 break = 9h on shift; the break is listed only (Ofek 3/10: it changes nothing)
   const E = (kind, hm) => ({ kind, at: `2026-09-29T${hm}:00+10:00` });
   const day1 = sb.shiftDaySummary([E('shift_start','08:00'), E('break_start','12:30'), E('break_end','13:15'), E('shift_end','17:00')], 0, false);
-  assertEqual([day1.workedMins, day1.breakMins, day1.hours, day1.open, day1.breaks.length], [495, 45, 8.25, false, 1], 'shiftDaySummary: shift minus the break');
-  // still on a break at 13:00 today: 08:00–13:00 = 5h, break 12:30–now = 30m → 4h30m so far
+  assertEqual([day1.workedMins, day1.breakMins, day1.hours, day1.open, day1.breaks.length], [540, 45, 9, false, 1], 'shiftDaySummary: the whole shift counts, the break is only listed');
+  // still on a break at 13:00 today: 08:00–13:00 = 5h on shift so far, break 12:30–now listed
   const now13 = Date.parse('2026-09-29T13:00:00+10:00');
   const day2 = sb.shiftDaySummary([E('shift_start','08:00'), E('break_start','12:30')], now13, true);
-  assertEqual([day2.workedMins, day2.onBreak, day2.open], [270, true, true], 'shiftDaySummary: an open shift and break run to now');
+  assertEqual([day2.workedMins, day2.breakMins, day2.onBreak, day2.open], [300, 30, true, true], 'shiftDaySummary: an open shift and break run to now');
   // a past day nobody ended: counted up to the last event, flagged open
   const day3 = sb.shiftDaySummary([E('shift_start','08:00'), E('break_start','12:00'), E('break_end','12:30')], 0, false);
-  assertEqual([day3.workedMins, day3.open], [240, true], 'shiftDaySummary: a forgotten shift counts to its last event and is flagged');
+  assertEqual([day3.workedMins, day3.open], [270, true], 'shiftDaySummary: a forgotten shift counts to its last event and is flagged');
   // My Day counters: done / total per bubble, the day's % = everything done ÷ everything (Ofek 3/10).
   const K = sb.mdCounts({ new: [{done:true},{done:true},{done:true},{done:true},{done:true},{done:true},{done:false},{done:false},{done:false},{done:false}], chasing: Array.from({length:30}, () => ({done:true})) });
   // new 6/10, chasing 30/30 → 36 of 40 = 90%

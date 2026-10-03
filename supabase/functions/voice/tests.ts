@@ -105,10 +105,10 @@ const IN = { From: "+61412345678", To: "+61400000001" };
   db = fakeDb({ ronDate: "2026-10-01" });
   x = await body(await step(db, "incoming", { CallSid: "CA6", From: "0466103709", To: IN.To }, {}, FRI_10));
   hasNot(x, "<Client>", "a shift from yesterday doesn't ring Ron today");
+  // A break is only recorded (Ofek 3/10): Ron's browser still rings.
   db = fakeDb({ ronBreak: true });
   x = await body(await step(db, "incoming", { CallSid: "CA6b", From: "0466103709", To: IN.To }, {}, FRI_10));
-  hasNot(x, "<Client>", "Ron on a break: his browser doesn't ring");
-  has(x, "<Number>+61407735994</Number>", "on a break → straight to Noam for chimney");
+  has(x, "<Client>", "Ron on a break: his browser still rings");
 
   // 10. 21:00, Ron off shift → office-closed voicemail and text, no notice or menu.
   db = fakeDb({ ronOn: false }); sms.length = 0;
