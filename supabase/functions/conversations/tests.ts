@@ -55,10 +55,10 @@ function eq(got: any, want: any, name: string) {
 }
 const sent: { to: string; body: string }[] = [];
 let smsMode: "ok" | "off" | "fail" = "ok";
-const intakes: any[] = [], alerts: any[] = [];
+const intakes: any[] = [];
 io.sendSms = async (to: string, body: string) => { if (smsMode === "off") return { ok: false, error: "sms_not_set_up" }; if (smsMode === "fail") return { ok: false, error: "21610" }; sent.push({ to, body }); return { ok: true, sid: "SM" + sent.length }; };
 io.intake = async (f: any) => { intakes.push(f); return { id: "c-new", attached: "" }; };
-io.alertOffice = async (p: any) => { alerts.push(p); return true; };
+io.isMailbox = async (tok: any) => tok === "good-token-good-token";
 
 // Sydney times (AEST = UTC+10 until 4 Oct 2026 02:00, then AEDT = UTC+11)
 const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:00 AEST
@@ -89,7 +89,12 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   eq([s1.contact_id, s1.first_name, s1.brand, s1.service_text, s1.phone, s1.token_hash === r1.token], ["c-new", "Sarah", "The AC Cleaning Guys", "ducted aircon cleaning", "+61412345678", false], "session fields (token stored hashed)");
   eq([intakes[0].full_name, intakes[0].division, intakes[0].lead_channel, intakes[0].job_description, intakes[0].gclid, intakes[0].submission_page], ["Sarah Jones", "Aircon", "chat", "Website chat: ducted aircon cleaning", "abc", "/ducted-aircon-cleaning/"], "the card goes through intake-lead");
   eq([db.T.lead_messages[0].body, db.T.lead_messages[0].direction, db.T.lead_messages[0].channel], ["Hi, I'd like a quote for ducted aircon cleaning.", "in", "chat"], "first message stored");
-  eq([alerts.length, alerts[0].subject, /Source: Google Ads \(click id\)/.test(alerts[0].body), !!s1.alert_sent_at], [1, "New website chat lead - Sarah Jones 0412 345 678", true, true], "office alerted at once");
+  eq([s1.alert_subject, /Source: Google Ads \(click id\)/.test(s1.alert_body), s1.alert_sent_at ?? null], ["New website chat lead - Sarah Jones 0412 345 678", true, null], "office email written, waiting for info@");
+  eq((await alerts(db, { id_token: "forged-token-forged" }, MON_1000)).reason, "unauthorized", "only the info@ mailbox gets the emails");
+  const al: any = await alerts(db, { id_token: "good-token-good-token" }, MON_1000);
+  eq([al.emails.length, al.emails[0].to, al.emails[0].subject], [1, "info@theguyservicegroup.com", "New website chat lead - Sarah Jones 0412 345 678"], "info@ gets the email");
+  await alerts(db, { id_token: "good-token-good-token", sent: [al.emails[0].id] }, MON_1000 + 60000);
+  eq([!!db.T.chat_sessions[0].alert_sent_at, (await alerts(db, { id_token: "good-token-good-token" }, MON_1000 + 61000)).emails.length], [true, 0], "sent once only");
   const r2: any = await chatStart(db, { name: "Bob", phone: "0498765432", service: "nonsense" }, "", MON_1000);
   const s2 = db.T.chat_sessions.find((s: any) => s.id === r2.session);
   eq([s2.service_key, s2.brand, s2.service_text, db.T.lead_messages.find((m: any) => m.session_id === s2.id).body, intakes[1].division], ["other", "The Guys Group", "your enquiry", "Hi, I'd like a quote.", "Other"], "something else");
@@ -99,11 +104,12 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   io.intake = async () => { throw new Error("network"); };
   const rDown: any = await chatStart(db, { name: "Kim", phone: "0422222222", service: "pw" }, "", MON_1000);
   io.intake = keepIntake;
-  eq([rDown.ok, db.T.chat_sessions.find((s: any) => s.id === rDown.session).contact_id, /could not be created/.test(alerts[alerts.length - 1].body)], [true, null, true], "intake-lead down: the chat still starts and the alert says so");
+  const sDown = db.T.chat_sessions.find((s: any) => s.id === rDown.session);
+  eq([rDown.ok, sDown.contact_id, /could not be created/.test(sDown.alert_body)], [true, null, true], "intake-lead down: the chat still starts and the email says so");
   const before = intakes.length;
   const rt: any = await chatStart(db, { name: "Ofek", phone: "0418638552", service: "chimney", test: true }, "", MON_1000);
   const tc = db.T.contacts.find((c: any) => c.id === db.T.chat_sessions.find((s: any) => s.id === rt.session).contact_id);
-  eq([intakes.length === before, tc.full_name, tc.tags, alerts[alerts.length - 1].subject.startsWith("[TEST]")], [true, "TEST - Ofek", ["Test"], true], "test chat: own TEST card, no intake-lead");
+  eq([intakes.length === before, tc.full_name, tc.tags, db.T.chat_sessions.find((s: any) => s.id === rt.session).alert_subject.startsWith("[TEST]")], [true, "TEST - Ofek", ["Test"], true], "test chat: own TEST card, no intake-lead");
 
   // ── chat_send / chat_poll ──
   db.T.contacts.push({ id: "c-new", job_description: "Website chat: ducted aircon cleaning" });

@@ -49,6 +49,8 @@ drop policy if exists "sms opt-outs: read if CRM" on public.sms_opt_outs;
 create policy "sms opt-outs: read if CRM" on public.sms_opt_outs for select using (is_owner_or_manager() or can_view_section('crm'));
 
 alter table public.settings add column if not exists chat_auto_sms boolean not null default false;
+alter table public.chat_sessions add column if not exists alert_subject text;
+alter table public.chat_sessions add column if not exists alert_body text;
 alter table public.settings add column if not exists chat_tick_at timestamptz;
 
 -- Ron's app sees new chat messages and texts live.

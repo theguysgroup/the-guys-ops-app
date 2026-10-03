@@ -3,11 +3,13 @@
 //
 // The website chat (site-chat/chat-v4.js with transport 'ops') talks to this function directly:
 //   chat_start  name + phone + service → a CRM card (through intake-lead, so returning customers keep their card and
-//               their name), a chat session, the customer's first message, and an alert to the office straight away.
+//               their name), a chat session, the customer's first message, and an email to the office.
 //   chat_send   another message from the customer.        chat_poll   Ron's replies for the customer's window.
 // The app (signed-in office staff):
 //   reply       Ron answers in the chat, or by SMS (from the business number, the same one the phone line uses).
 // Twilio (signed webhooks): sms_in (a customer's text, STOP/START), sms_status (delivery).
+// The info@ Apps Script, every minute: alerts — the new-chat emails, handed only to the verified info@ mailbox, which
+//   sends them to itself (so the office gets the email within a minute, from its own address).
 // A scheduler every minute: tick — the automatic text when Ron hasn't answered a chat in 5 minutes:
 //   • office open (Mon–Fri 08:00–17:00 Sydney, no public holidays — Ofek 3/10): a human "I'm on another call" text;
 //   • office closed: "I'll call you first thing when our office opens".
@@ -24,8 +26,7 @@ const ACCOUNT_SID = env("TWILIO_ACCOUNT_SID");
 const AUTH_TOKEN = env("TWILIO_AUTH_TOKEN");
 const BUSINESS_NUMBER = env("TWILIO_NUMBER");
 const SELF_URL = env("CONVERSATIONS_FUNCTION_URL");       // https://<project>.supabase.co/functions/v1/conversations (Twilio signs this exact URL)
-const ALERT_URL = env("OFFICE_ALERT_URL");                // info@ Apps Script web app that emails the office (optional)
-const ALERT_SECRET = env("OFFICE_ALERT_SECRET");
+const MAILBOX = "info@theguyservicegroup.com";
 const TEST_PHONES = ["+61418638552"];                     // the only number Ofek approved for real test texts
 
 // ── approved texts (Ofek). {hi} = "Hi Sarah" or "Hi there" when there is no first name ──
@@ -151,10 +152,15 @@ export const io = {
     const out = await res.json().catch(() => ({}));
     return res.ok && out.id ? { id: out.id, attached: out.attached } : null;
   },
-  async alertOffice(payload: Record<string, string>): Promise<boolean> {
-    if (!ALERT_URL || !ALERT_SECRET) return false;
-    const res = await fetch(ALERT_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, secret: ALERT_SECRET }) });
-    return res.ok;
+  // True only when Google confirms the token belongs to the business mailbox (checked with Google, not by us).
+  async isMailbox(idToken: unknown): Promise<boolean> {
+    if (typeof idToken !== "string" || idToken.length < 20) return false;
+    try {
+      const r = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+      if (!r.ok) return false;
+      const t = await r.json();
+      return String(t.email || "").toLowerCase() === MAILBOX && String(t.email_verified) === "true" && Number(t.exp) * 1000 > Date.now();
+    } catch { return false; }
   },
 };
 
@@ -226,26 +232,23 @@ export async function chatStart(sb: any, body: any, ip: string, nowMs: number) {
     if (r) { contactId = r.id; attached = r.attached || ""; }
     // intake-lead down: the chat still works and is kept; the office alert says the card is missing.
   }
+  // The office email (Ofek 3/10: straight away): written now, sent by the info@ mailbox within a minute.
+  const alertSubject = `${test ? "[TEST] " : ""}New website chat lead - ${name} ${pretty(e164)}`;
+  const alertBody = [
+    "New lead from the website live chat.", `Name: ${name}`, `Phone: ${pretty(e164)}`, `Message: ${first}`, `Page: ${page || "-"}`,
+    `Source: ${[a.utm_source, a.utm_medium].filter(Boolean).join(" / ") || (a.gclid || a.gbraid || a.wbraid ? "Google Ads (click id)" : "-")}`,
+    `Campaign: ${a.utm_campaign || "-"}`,
+    attached === "returning" ? "Returning customer: added to their existing card." : attached === "repeat" ? "Same person again today: added to their card." : "",
+    contactId ? "Reply to the customer in OPS > CRM." : "The CRM card could not be created. Please add it by hand.",
+  ].filter(Boolean).join("\n");
   const token = newToken();
   const { data: s, error } = await sb.from("chat_sessions").insert({
     token_hash: await sha256(token), contact_id: contactId, first_name: cleanFirstName(name), full_name: name, phone: e164,
     service_key: SERVICES[key] ? key : "other", brand: svc.brand, service_text: svc.text || "your enquiry", first_message: first,
-    page, test, ip_hash: ipHash || null, created_at: new Date(nowMs).toISOString(),
+    page, test, ip_hash: ipHash || null, created_at: new Date(nowMs).toISOString(), alert_subject: alertSubject, alert_body: alertBody,
   }).select("*").single();
   if (error) throw error;
   await sb.from("lead_messages").insert({ contact_id: contactId, session_id: s.id, channel: "chat", direction: "in", body: first, author: name, phone: e164, at: new Date(nowMs).toISOString() });
-  // The office hears about it straight away (Ofek 3/10): an email to info@. Ron's app shows it live.
-  const alerted = await io.alertOffice({
-    subject: `${test ? "[TEST] " : ""}New website chat lead - ${name} ${pretty(e164)}`,
-    body: [
-      "New lead from the website live chat.", `Name: ${name}`, `Phone: ${pretty(e164)}`, `Message: ${first}`, `Page: ${page || "-"}`,
-      `Source: ${[a.utm_source, a.utm_medium].filter(Boolean).join(" / ") || (a.gclid || a.gbraid || a.wbraid ? "Google Ads (click id)" : "-")}`,
-      `Campaign: ${a.utm_campaign || "-"}`,
-      attached === "returning" ? "Returning customer: added to their existing card." : attached === "repeat" ? "Same person again today: added to their card." : "",
-      contactId ? "Reply to the customer in OPS > CRM." : "The CRM card could not be created — please add it by hand.",
-    ].filter(Boolean).join("\n"),
-  }).catch(() => false);
-  if (alerted) await sb.from("chat_sessions").update({ alert_sent_at: new Date(nowMs).toISOString() }).eq("id", s.id);
   return { ok: true, session: s.id, token };
 }
 
@@ -368,6 +371,18 @@ export async function tick(sb: any, nowMs: number) {
   return out;
 }
 
+// ── the new-chat emails, for the info@ mailbox only ──
+// deno-lint-ignore no-explicit-any
+export async function alerts(sb: any, body: any, nowMs: number) {
+  if (!(await io.isMailbox(body.id_token))) return { ok: false, reason: "unauthorized" };
+  const sent = Array.isArray(body.sent) ? body.sent.map(String).slice(0, 50) : [];
+  for (const id of sent) await sb.from("chat_sessions").update({ alert_sent_at: new Date(nowMs).toISOString() }).eq("id", id).is("alert_sent_at", null);
+  const since = new Date(nowMs - 24 * 3600 * 1000).toISOString();
+  const { data } = await sb.from("chat_sessions").select("id, alert_subject, alert_body").is("alert_sent_at", null).gte("created_at", since).order("created_at").limit(20);
+  // deno-lint-ignore no-explicit-any
+  return { ok: true, emails: (data || []).filter((r: any) => r.alert_subject).map((r: any) => ({ id: r.id, to: MAILBOX, subject: r.alert_subject, text: r.alert_body })) };
+}
+
 // ── a customer's text to the business number ──
 const STOP_WORDS = ["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "OPT OUT"];
 const START_WORDS = ["START", "UNSTOP", "YES"];
@@ -424,6 +439,7 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
         return twiml();
       }
       if (step === "tick") return json(req, await tick(sb, now));
+      if (step === "alerts") return json(req, await alerts(sb, await req.json().catch(() => ({})), now));
       const body = await req.json().catch(() => ({}));
       if (step === "reply") {
         const user = await officeUser(sb, req);
