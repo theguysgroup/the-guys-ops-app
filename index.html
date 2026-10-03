@@ -3772,7 +3772,7 @@ function mdCloseOldDays(today){
       const me = getRealProfile && getRealProfile();
       if (me && me.role==='va' && !r.report_sent_at) {
         const { data } = await sb.auth.getSession();
-        fetch(CONV_URL + '?step=daily_report', { method:'POST', headers:{ 'Content-Type':'application/json', apikey:SUPABASE_ANON_KEY, Authorization:'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify({ day: r.day, text: mdDailyReportText(k, r.day) + '\n(היום נסגר אוטומטית – רון לא יצא מהמערכת)' }) }).catch(() => {});
+        fetch(CONV_URL + '?step=daily_report', { method:'POST', headers:{ 'Content-Type':'application/json', apikey:SUPABASE_ANON_KEY, Authorization:'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify({ day: r.day, text: mdDailyReportText(k, r.day, { auto: true, at: (me.lastLogoutAt && sydneyWall(new Date(me.lastLogoutAt)).day===r.day) ? me.lastLogoutAt : null }) }) }).catch(() => {});
       }
     });
   });
@@ -3809,7 +3809,7 @@ function mdEndOfDay(){
       try {
         const { data } = await sb.auth.getSession();
         await Promise.race([
-          fetch(CONV_URL + '?step=daily_report', { method:'POST', headers:{ 'Content-Type':'application/json', apikey:SUPABASE_ANON_KEY, Authorization:'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify({ day: today, text: mdDailyReportText(k, today) }) }),
+          fetch(CONV_URL + '?step=daily_report', { method:'POST', headers:{ 'Content-Type':'application/json', apikey:SUPABASE_ANON_KEY, Authorization:'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify({ day: today, text: mdDailyReportText(k, today, { at: new Date().toISOString() }) }) }),
           new Promise(r => setTimeout(r, 6000)),
         ]);
       } catch (e) { console.error('daily report', e); }
@@ -3834,7 +3834,25 @@ function mdTaskLines(k, lead){
   return [`${lead} ${k.percent===null ? '—' : k.percent + '%'} מהמשימות (${k.done} מתוך ${k.total})`,
     ...MD_BUBBLES.map(([b]) => { const x = k.by[b] || { done:0, total:0 }; return x.total ? `• ${MD_HE[b]}: ${x.done}/${x.total}` : ''; }).filter(Boolean)];
 }
-function mdDailyReportText(k, today){
+// Bookings of a day per division, and where each was closed from, in Hebrew: "• מזגנים 3 – 1 מתוך 10 לידים חדשים, 2 מתוך 4 הצעות מחיר".
+const DIV_HE = { Aircon:'מזגנים', Chimney:'ארובות', 'Pressure Washing':'שטיפה בלחץ', Other:'אחר' };
+const MD_FROM_HE = { new:'לידים חדשים', chasing:'במרדף', decide:'במרדף 21+ ימים', followups:'במעקב', quotes:'הצעות מחיר' };
+function mdBookingLinesHe(row){
+  const bookings = (row && row.bookings) || [];
+  const divs = [...new Set(bookings.map(b => b.div || 'Other'))];
+  return divs.map(div => {
+    const mine = bookings.filter(b => (b.div || 'Other')===div);
+    const parts = [...new Set(mine.map(b => b.from))].map(f => {
+      const n = mine.filter(b => b.from===f).length;
+      if (f==='other' || !MD_FROM_HE[f]) return `${n} משלבים אחרים`;
+      const d = Math.max(Object.values((row.items && row.items[f]) || {}).filter(x => (x.div || 'Other')===div).length, n);
+      return `${n} מתוך ${d} ${MD_FROM_HE[f]}`;
+    });
+    return `• ${DIV_HE[div] || div} ${mine.length} – ${parts.join(', ')}`;
+  });
+}
+// ended: { at } when Ron logged out, or { auto, at } when the system closed the day (forgot to log out).
+function mdDailyReportText(k, today, ended){
   const data = STATE.data;
   const day = parseLocalDate(today).toLocaleDateString('he-IL', { weekday:'long', day:'numeric', month:'numeric' });
   const leads = (data.contacts||[]).filter(c => localDay(leadArrivedAt(c) || c.createdAt) === today);
@@ -3844,15 +3862,19 @@ function mdDailyReportText(k, today){
   const jobs = (data.jobs||[]).filter(j => j.date === today);
   const revenue = jobs.reduce((s, j) => s + (Number(j.amount) || 0), 0);
   const chats = Object.values(CONV.sessions || {}).filter(x => sydneyWall(new Date(x.created_at)).day === today && !x.test).length;
+  const hm = d => new Date(d).toLocaleTimeString('he-IL', { timeZone:'Australia/Sydney', hour:'2-digit', minute:'2-digit' });
+  const endLine = !ended ? '' : ended.auto ? `רון לא יצא מהמערכת – היום נסגר אוטומטית${ended.at ? ` (סוף משמרת ${hm(ended.at)})` : ''}` : `רון יצא מהמערכת ב-${hm(ended.at || new Date())}`;
   const lines = [
     `📊 דוח יומי – ${day}`,
+    endLine,
     '',
     ...mdTaskLines(k, 'רון השלים'),
     '',
     `לידים חדשים היום: ${leads.length}${leads.length ? ` (${count(leads, c => c.division)})` : ''}`,
     leads.length ? `מקורות: ${count(leads, c => sourceLabel(c.source))}` : '',
     `צ'אטים מהאתר: ${chats}`,
-    `הזמנות היום: ${bookings.length}${bookings.length ? ` (${count(bookings, b => b.div)})` : ''}`,
+    `לידים שנסגרו היום (הוזמנו): ${bookings.length}`,
+    ...mdBookingLinesHe(row),
     `עבודות שנרשמו להיום: ${jobs.length}${jobs.length ? `, הכנסות ${fmtMoney(revenue)}` : ''}`,
     phoneWanted() && PHONE.missed.length ? `שיחות שלא חזרנו אליהן: ${PHONE.missed.length}` : '',
   ];
