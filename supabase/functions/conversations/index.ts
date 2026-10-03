@@ -321,6 +321,7 @@ export async function reply(sb: any, user: any, body: any, nowMs: number) {
   if (!isMobile(to)) return { ok: false, reason: "not_mobile" };
   if (await optedOut(sb, to)) return { ok: false, reason: "opted_out" };
   const r = await io.sendSms(to, text);
+  if (!r.ok && r.error === "sms_not_set_up") return { ok: false, reason: "sms_not_set_up" };   // nothing was tried, nothing to log
   await sb.from("lead_messages").insert({ contact_id: contactId, channel: "sms", direction: "out", body: text, author, author_id: user.id, phone: to, status: r.ok ? "sent" : "failed", provider_sid: r.sid || null, error: r.error || null, at });
   return r.ok ? { ok: true, channel } : { ok: false, reason: r.error || "sms_failed" };
 }
@@ -341,9 +342,10 @@ export async function tick(sb: any, nowMs: number) {
     const skip = async (why: string) => { await sb.from("chat_sessions").update({ auto_sms_skip: why }).eq("id", s.id); out.skipped++; };
     const created = s.created_at;
     // Ron answered: any message from the office to this customer since the chat started, by chat or SMS…
-    const ans = sb.from("lead_messages").select("id", { count: "exact", head: true }).eq("direction", "out").eq("auto", false).gte("at", created);
-    const { count: answered } = await (s.contact_id ? ans.eq("contact_id", s.contact_id) : ans.eq("session_id", s.id));
-    if ((answered || 0) > 0) { await skip("answered"); continue; }
+    const ans = sb.from("lead_messages").select("id, status").eq("direction", "out").eq("auto", false).gte("at", created);
+    const { data: replies } = await (s.contact_id ? ans.eq("contact_id", s.contact_id) : ans.eq("session_id", s.id));
+    // deno-lint-ignore no-explicit-any
+    if ((replies || []).some((m: any) => m.status !== "failed" && m.status !== "undelivered")) { await skip("answered"); continue; }   // a text that never arrived isn't an answer
     // …or a call to them that connected.
     const { data: calls } = await sb.from("calls").select("id, status, duration").eq("direction", "outbound").eq("to_number", s.phone).gte("created_at", created);
     // deno-lint-ignore no-explicit-any

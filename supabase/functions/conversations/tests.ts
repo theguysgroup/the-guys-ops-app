@@ -125,6 +125,10 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   eq((await reply(db, user, { contact_id: "c-new", channel: "sms", text: "Hi" }, MON_1000)).reason, "opted_out", "never to a number that sent STOP");
   db.T.contacts.push({ id: "c-land", phone: "02 9999 8888" });
   eq((await reply(db, user, { contact_id: "c-land", channel: "sms", text: "Hi" }, MON_1000)).reason, "not_mobile", "landlines can't get texts");
+  smsMode = "off";
+  const nMsgs = db.T.lead_messages.length;
+  eq([(await reply(db, user, { contact_id: "c-new", channel: "sms", text: "Hi", phone: "0499999999" }, MON_1000)).reason, db.T.lead_messages.length - nMsgs], ["sms_not_set_up", 0], "texts not switched on: nothing logged");
+  smsMode = "ok";
 
   // ── tick: the automatic text ──
   const mk = (over: any) => ({ id: crypto.randomUUID(), contact_id: "c1", first_name: "Sarah", phone: "+61400000001", brand: "The Chimney Guys", service_text: "chimney cleaning", test: false, auto_sms_at: null, auto_sms_skip: null, created_at: new Date(MON_1000 - 6 * 60000).toISOString(), ...over });
@@ -148,6 +152,8 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   db = fakeDb({ chat_sessions: [s5], lead_messages: [{ contact_id: "c1", direction: "out", auto: false, channel: "chat", at: new Date(MON_1000 - 60000).toISOString() }] });
   await tick(db, MON_1000);
   eq(db.T.chat_sessions[0].auto_sms_skip, "answered", "Ron answered in the chat → no text");
+  db = fakeDb({ chat_sessions: [mk({})], lead_messages: [{ contact_id: "c1", direction: "out", auto: false, channel: "sms", status: "failed", at: new Date(MON_1000 - 60000).toISOString() }] });
+  eq((await tick(db, MON_1000)).sent, 1, "a text from Ron that failed doesn't count as an answer");
   db = fakeDb({ chat_sessions: [mk({})], calls: [{ direction: "outbound", to_number: "+61400000001", status: "completed", duration: 95, created_at: new Date(MON_1000 - 60000).toISOString() }] });
   await tick(db, MON_1000);
   eq(db.T.chat_sessions[0].auto_sms_skip, "called", "Ron called and they talked → no text");
