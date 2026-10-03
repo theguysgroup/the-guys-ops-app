@@ -1314,7 +1314,7 @@ const db = {
       const map = {
         unpaidReminderDays:'unpaid_reminder_days', quoteStaleDays:'quote_stale_days', gstRatePercent:'gst_rate_percent',
         companyName:'company_name', abn:'abn', defaultPaymentTerms:'default_payment_terms', ownerSalaries:'owner_salaries',
-        phoneEnabled:'phone_enabled', phoneRouting:'phone_routing',
+        phoneEnabled:'phone_enabled', phoneRouting:'phone_routing', chatAutoSms:'chat_auto_sms',
       };
       const row = {}; for (const k in patch) if (map[k]) row[map[k]] = patch[k];
       const { error } = await sb.from('settings').update(row).eq('id', 1);
@@ -1689,7 +1689,7 @@ function mapSettingsRow(r){
     gstRatePercent:r.gst_rate_percent, companyName:r.company_name,
     abn:r.abn||'', defaultPaymentTerms:r.default_payment_terms||'',
     ownerSalaries: r.owner_salaries||{},
-    phoneEnabled: !!r.phone_enabled, phoneRouting: r.phone_routing || {},
+    phoneEnabled: !!r.phone_enabled, phoneRouting: r.phone_routing || {}, chatAutoSms: !!r.chat_auto_sms,
   };
 }
 function mapPayrollRow(r){
@@ -1821,6 +1821,8 @@ function setupRealtimeSubscriptions(){
     .on('postgres_changes', { event: '*', schema: 'public', table: 'payroll_weeks' }, handlePayrollRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_daily_log' }, handleSalesLogRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'calls' }, handleCallRealtimeChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'lead_messages' }, handleLeadMessageRealtime)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_sessions' }, handleChatSessionRealtime)
     .subscribe();
 }
 function teardownRealtimeSubscriptions(){
@@ -2669,13 +2671,13 @@ function lastContactedAt(c){
   // Seed data uses naive local-time strings for `at`, while live-logged messages use full UTC
   // ISO strings (new Date().toISOString()) — comparing those as raw strings can misorder them,
   // so always compare via Date.parse, never string `>`/localeCompare.
-  const msgs = c.messages||[];
+  const msgs = [...(c.messages||[]), ...convMessagesFor(c.id)];
   if (!msgs.length) return c.createdAt;
   return msgs.reduce((max,m)=> new Date(m.at).getTime()>new Date(max).getTime()?m.at:max, msgs[0].at);
 }
 function unreadCountFor(c){
   const sinceMs = c.lastReadAt ? new Date(c.lastReadAt).getTime() : 0;
-  return (c.messages||[]).filter(m => m.kind==='message' && m.direction==='in' && new Date(m.at).getTime() > sinceMs).length;
+  return [...(c.messages||[]), ...convMessagesFor(c.id)].filter(m => m.kind==='message' && m.direction==='in' && new Date(m.at).getTime() > sinceMs).length;
 }
 function unreadBadge(c){
   const n = unreadCountFor(c);
@@ -2705,14 +2707,14 @@ function logLeadEvent(contact, text){
 }
 function renderLeadConversation(contactId){
   const c = contactById(contactId); if (!c) return '';
-  const msgs = (c.messages||[]).slice().sort((a,b)=>new Date(a.at).getTime()-new Date(b.at).getTime());
+  const msgs = [...(c.messages||[]), ...convMessagesFor(c.id)].sort((a,b)=>new Date(a.at).getTime()-new Date(b.at).getTime());
   if (!msgs.length) return `<div class="empty" style="padding:26px 10px"><b>No conversation yet</b><div>Log what the customer said and what you replied — it all stays in one thread here.</div></div>`;
   return msgs.map(m => {
     if (m.kind==='event') return `<div class="chat-event">${esc(presentText(m.text))} <span class="chat-event-time">${new Date(m.at).toLocaleString('en-AU')}</span></div>`;
     const out = m.direction==='out';
     return `<div class="chat-row ${out?'out':'in'}">
       <div class="chat-bubble ${out?'out':'in'}">
-        <div class="chat-bubble-meta">${esc(m.author || (out?'You':'Customer'))}</div>
+        <div class="chat-bubble-meta">${esc(m.author || (out?'You':'Customer'))}${m.channel ? ` · ${m.channel==='sms' ? '📱 SMS' : '💬 Website chat'}` : ''}${m.auto ? ' · automatic' : ''}${m.status==='failed' || m.status==='undelivered' ? ` · <span style="color:var(--bad)">⚠ not delivered${m.error ? ' (' + esc(m.error) + ')' : ''}</span>` : ''}</div>
         <div class="chat-bubble-text">${esc(m.text)}</div>
         <div class="chat-bubble-time">${new Date(m.at).toLocaleString('en-AU')}</div>
       </div>
@@ -2724,6 +2726,7 @@ function renderLeadConversation(contactId){
 // collide if both happen to be in the DOM at once.
 function renderLeadComposer(contactId, scope){
   return `
+    <div id="${scope}-conv-bar">${convComposerBar(contactId, scope)}</div>
     <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-start">
       <textarea rows="2" id="${scope}-msg-out-text" placeholder="Reply… (Enter to send, Shift+Enter for a new line)" style="flex:1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendLeadReply('${contactId}','${scope}');}"></textarea>
       <button type="button" class="btn primary small" onclick="sendLeadReply('${contactId}','${scope}')">Send</button>
@@ -2753,6 +2756,7 @@ function sendLeadReply(contactId, scope){
   const c = contactById(contactId); if (!c) return;
   const textEl = document.getElementById(scope+'-msg-out-text');
   const text = textEl.value.trim(); if (!text) return;
+  if (CONV.loaded && convChannel(c) !== 'note') { convSend(c, convChannel(c), text, scope); return; }
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   if (!c.messages) c.messages = [];
   c.messages.push({ id:uid(), kind:'message', direction:'out', text, author:actor, at:new Date().toISOString() });
@@ -3384,6 +3388,135 @@ async function playCallRecording(callId, btn){
     audio.play();
     if (btn) { btn.textContent = '■ Stop'; btn.disabled = false; btn.onclick = () => { audio.pause(); btn.textContent = '▶ Play'; btn.onclick = () => playCallRecording(callId, btn); }; }
   } catch (e) { if (btn) { btn.disabled = false; btn.textContent = '▶ Play'; } showToast(String((e && e.message) || e)); }
+}
+// ── Website chat + customer texts (Ofek, 3 Oct 2026; server: the "conversations" function) ──
+// The customer's chat messages and texts live in lead_messages (only the function writes there) and show in the
+// card's conversation next to the notes logged by hand. Ron answers in the website chat while the customer's chat is
+// recent, or by SMS from the business number; "Note only" keeps the old log-only behaviour.
+const CONV_URL = SUPABASE_URL + '/functions/v1/conversations';
+const CONV_BRANDS = { Aircon:'The AC Cleaning Guys', Chimney:'The Chimney Guys', 'Pressure Washing':'The Pressure Washing Guys' };
+const CONV_INTRO = "{hi}, it's Ron from {brand}. You sent us a message on our website chat about {service}. I'll give you a call shortly, or you can reply here.";
+const CONV_ERRORS = { no_chat:'This customer has no recent website chat. Send a text instead.', not_mobile:'There is no mobile number on the card.', opted_out:'This customer replied STOP, so no texts.', sms_not_set_up:'Texts start when the business phone is switched on.', unauthorized:'Please sign in again.', empty:'Write a message first.' };
+let CONV = { msgs:{}, sessions:{}, optOut:new Set(), channel:{}, loaded:false };
+function convE164(v){ let d = String(v||'').replace(/\D/g,''); if (d.startsWith('61')) d = d.slice(2); if (d.startsWith('0')) d = d.slice(1); return /^\d{9}$/.test(d) ? '+61'+d : ''; }
+async function convLoad(){
+  const p = getCurrentProfile();
+  if (!p || !canViewSection(p,'crm')) return;
+  const [m, s, o] = await Promise.all([
+    sb.from('lead_messages').select('*').gte('at', new Date(Date.now() - 180*86400000).toISOString()).order('at').limit(5000),
+    sb.from('chat_sessions').select('id, contact_id, first_name, full_name, phone, service_key, brand, service_text, created_at, last_visitor_at, last_staff_at, auto_sms_at, auto_sms_kind, auto_sms_skip, test').gte('created_at', new Date(Date.now() - 14*86400000).toISOString()).order('created_at'),
+    sb.from('sms_opt_outs').select('phone_key'),
+  ]);
+  if (m.error) return;
+  CONV.msgs = {}; (m.data||[]).forEach(convAddMsg);
+  CONV.sessions = {}; (s.data||[]).forEach(convAddSession);
+  CONV.optOut = new Set((o.data||[]).map(r => r.phone_key));
+  CONV.loaded = true;
+  renderKeepingInput();
+}
+function convAddMsg(r){ if (!r || !r.contact_id) return; const list = CONV.msgs[r.contact_id] = CONV.msgs[r.contact_id] || []; const i = list.findIndex(x => x.id===r.id); if (i>=0) list[i] = r; else list.push(r); }
+function convAddSession(r){ if (!r || !r.contact_id) return; const cur = CONV.sessions[r.contact_id]; if (!cur || cur.id===r.id || String(r.created_at) >= String(cur.created_at)) CONV.sessions[r.contact_id] = r; }
+function convMessagesFor(contactId){
+  return (CONV.msgs[contactId]||[]).map(r => ({ id:r.id, kind:'message', direction:r.direction, text:r.body, author:r.author || (r.direction==='in' ? 'Customer' : 'Office'), at:r.at, channel:r.channel, auto:!!r.auto, status:r.status, error:r.error }));
+}
+function convRefreshContact(contactId){
+  ['modal','inbox'].forEach(scope => { refreshLeadThread(contactId, scope); refreshLeadUnreadUI(contactId, scope); const bar = document.getElementById(scope+'-conv-bar'); if (bar) bar.innerHTML = convComposerBar(contactId, scope); });
+  refreshCrmInboxList();
+}
+function convOpenContactId(){ return document.getElementById('modal-conversation-thread') || UI.tab==='crm' ? (UI.crm.selectedContactId || null) : null; }
+function handleLeadMessageRealtime(payload){
+  if (!STATE.data || !CONV.loaded || payload.eventType==='DELETE') return;
+  const r = payload.new || {};
+  const isNew = payload.eventType==='INSERT' && !(CONV.msgs[r.contact_id]||[]).some(x => x.id===r.id);
+  convAddMsg(r);
+  if (!r.contact_id) return;
+  convRefreshContact(r.contact_id);
+  if (isNew && r.direction==='in' && convOpenContactId()!==r.contact_id) {
+    const c = contactById(r.contact_id);
+    showToast(`${r.channel==='sms' ? '📱 New text' : '💬 New website chat message'} from ${c ? c.fullName : (r.author || 'a customer')}`);
+  }
+}
+function handleChatSessionRealtime(payload){
+  if (!STATE.data || !CONV.loaded || payload.eventType==='DELETE') return;
+  convAddSession(payload.new);
+  if (payload.new && payload.new.contact_id) convRefreshContact(payload.new.contact_id);
+}
+function convChannels(c){
+  const sess = CONV.sessions[c.id];
+  const chat = !!(sess && Date.now() - Date.parse(sess.created_at) < 14*86400000);
+  const e164 = convE164(c.phone), mobile = /^\+614\d{8}$/.test(e164);
+  const opted = mobile && CONV.optOut.has(e164.slice(-9));
+  const smsOn = !!(STATE.data && STATE.data.settings && STATE.data.settings.phoneEnabled);
+  return { sess, chat, mobile, opted, smsOn, sms: mobile && !opted && smsOn };
+}
+// Default: the chat while the customer was there in the last day, otherwise a text if possible, otherwise a note.
+function convChannel(c){
+  const ch = convChannels(c);
+  let v = CONV.channel[c.id];
+  if ((v==='chat' && !ch.chat) || (v==='sms' && !ch.sms)) v = null;
+  if (v) return v;
+  if (ch.chat && Date.now() - Date.parse(ch.sess.last_visitor_at || ch.sess.created_at) < 24*3600000) return 'chat';
+  return ch.sms ? 'sms' : 'note';
+}
+function convComposerBar(contactId, scope){
+  const c = contactById(contactId);
+  if (!c || !CONV.loaded) return '';
+  const ch = convChannels(c);
+  if (!ch.chat && !ch.sms && !ch.opted) return '';   // nothing to send through yet: the composer stays as it was
+  const cur = convChannel(c);
+  const btn = (k, label, ok, why) => `<button type="button" class="btn small ${cur===k ? 'primary' : 'ghost'}" ${ok ? '' : 'disabled'} title="${esc(ok ? '' : why)}" onclick="setConvChannel('${contactId}','${k}','${scope}')">${label}</button>`;
+  const hint = cur==='chat' ? "Goes to the customer's website chat window." : cur==='sms' ? `Sent as a text to ${esc(c.phone)} from the business number.` : 'Only logged here. The customer does not get it.';
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px">
+      <span class="hint" style="margin-inline-end:2px">Reply by</span>
+      ${btn('chat', '💬 Chat', ch.chat, 'No website chat from this customer in the last 2 weeks')}
+      ${btn('sms', '📱 SMS', ch.sms, ch.opted ? 'This customer replied STOP, so no texts' : !ch.mobile ? 'No mobile number on the card' : 'Texts start when the business phone is switched on')}
+      ${btn('note', '📝 Note only', true, '')}
+      ${ch.sess ? `<button type="button" class="btn ghost small" onclick="convInsertIntro('${contactId}','${scope}')" title="Fills in Ron's intro text. You can change it before sending.">✍️ Intro text</button>` : ''}
+      ${ch.opted ? pill('bad', 'Replied STOP: no texts') : ''}
+    </div>
+    <div class="hint" style="margin-top:4px">${hint}</div>`;
+}
+function setConvChannel(contactId, k, scope){
+  CONV.channel[contactId] = k;
+  const bar = document.getElementById(scope+'-conv-bar'); if (bar) bar.innerHTML = convComposerBar(contactId, scope);
+}
+// Ron's one-click intro when he moves a chat to SMS (Ofek 2/10 + 3/10: filled in, and he can edit it).
+function convInsertIntro(contactId, scope){
+  const c = contactById(contactId), s = CONV.sessions[contactId];
+  if (!c || !s) return;
+  const first = String(s.first_name || '').trim();
+  const text = CONV_INTRO.replace('{hi}', first ? 'Hi ' + first : 'Hi there').replace('{brand}', s.brand || CONV_BRANDS[c.division] || 'The Guys Group').replace('{service}', s.service_text || 'your enquiry');
+  if (convChannels(c).sms) setConvChannel(contactId, 'sms', scope);
+  const ta = document.getElementById(scope+'-msg-out-text'); if (ta) { ta.value = text; ta.focus(); }
+}
+async function convSend(c, channel, text, scope){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const ta = document.getElementById(scope+'-msg-out-text');
+  if (ta) ta.disabled = true;
+  try {
+    const { data } = await sb.auth.getSession();
+    const r = await fetch(CONV_URL + '?step=reply', { method:'POST', headers:{ 'Content-Type':'application/json', apikey:SUPABASE_ANON_KEY, Authorization:'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify({ contact_id:c.id, channel, text }) });
+    const out = await r.json().catch(() => ({}));
+    if (!out.ok) { showToast(CONV_ERRORS[out.reason || out.error] || ('Not sent: ' + (out.reason || out.error || r.status))); return; }
+    if (ta) ta.value = '';
+    markLeadContacted(c); markLeadRead(c.id);
+    const { data: rows } = await sb.from('lead_messages').select('*').eq('contact_id', c.id).order('at');
+    (rows||[]).forEach(convAddMsg);
+    convRefreshContact(c.id);
+  } catch (e) { showToast('Not sent: ' + ((e && e.message) || e)); }
+  finally { if (ta) { ta.disabled = false; ta.focus(); } }
+}
+function renderChatSettings(s){
+  return `<div class="card" style="margin-bottom:14px">
+    <label class="checkline" style="font-weight:700;font-size:14.5px"><input type="checkbox" ${s.chatAutoSms ? 'checked' : ''} onchange="setChatAutoSms(this.checked)"> Automatic text when a website chat isn't answered</label>
+    <div class="hint" style="margin-top:6px">If nobody in the office answers a website chat within 5 minutes, the customer gets one text from the business number. Answering means a reply in the chat, a text, or a call that connected. When the office is open (Mon–Fri 8am–5pm) the text says Ron is finishing another call. When it's closed, it says he'll call first thing when the office opens. Each number gets at most one automatic text a day, only mobiles get them, and nobody who replied STOP gets one. It only works once the business phone is switched on.</div>
+  </div>`;
+}
+function setChatAutoSms(on){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
+  db.settings.update({ chatAutoSms: on });
+  logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `Automatic texts for unanswered website chats switched ${on ? 'on' : 'off'}`);
+  render();
 }
 function dismissNewLeadBubble(id){ const c = contactById(id); if (!c) return; c.lastReadAt = new Date().toISOString(); db.contacts.update(id, { lastReadAt: c.lastReadAt }); renderChaseBubbles(); }
 function dismissChaseBubble(id){ const c = contactById(id); if (!c) return; c.chaseAlertDone = true; db.contacts.update(id, { chaseAlertDone: true }); renderChaseBubbles(); }
@@ -7638,6 +7771,7 @@ function renderSettings(profile){
 
     <div class="section-title">Phone</div>
     ${renderPhoneSettings(s)}
+    ${renderChatSettings(s)}
 
     <div class="section-title">CRM Settings</div>
     <div class="card">
@@ -7842,7 +7976,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
     if (!AUTH_DATA_LOADING) {
       AUTH_DATA_LOADING = true;
       loadFromSupabase()
-        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); phoneSync(); })
+        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); phoneSync(); convLoad(); })
         .catch(err => { AUTH_DATA_LOADING = false; AUTH.error = err.message; AUTH.status = 'signedOut'; render(); });
     }
     return;
