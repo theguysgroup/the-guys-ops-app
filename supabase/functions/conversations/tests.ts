@@ -13,7 +13,7 @@ function fakeDb(seed: Record<string, any[]> = {}) {
       select(_c?: string, o?: any) { if (op === "select") opts = o || {}; else wantRows = true; return b; },
       insert(p: any) { op = "insert"; payload = p; wantRows = false; return b; },
       update(p: any) { op = "update"; payload = p; return b; },
-      upsert(p: any) { op = "upsert"; payload = p; return b; },
+      upsert(p: any, o?: any) { op = "upsert"; payload = p; opts = o || {}; return b; },
       delete() { op = "delete"; return b; },
       eq(k: string, v: any) { filters.push((r) => r[k] === v); return b; },
       gt(k: string, v: any) { filters.push((r) => String(r[k]) > String(v)); return b; },
@@ -33,7 +33,7 @@ function fakeDb(seed: Record<string, any[]> = {}) {
         rows().push(...list);
         return { data: single ? list[0] : list, error: null };
       }
-      if (op === "upsert") { const i = rows().findIndex((r) => r.phone_key === payload.phone_key); if (i >= 0) rows()[i] = { ...rows()[i], ...payload }; else rows().push({ ...payload }); return { data: null, error: null }; }
+      if (op === "upsert") { const key = opts.onConflict || "phone_key"; const i = rows().findIndex((r) => r[key] === payload[key]); if (i >= 0) rows()[i] = { ...rows()[i], ...payload }; else rows().push({ ...payload }); return { data: null, error: null }; }
       if (op === "update") { const m = match(); m.forEach((r) => Object.assign(r, payload)); return { data: m, error: null }; }
       if (op === "delete") { const m = match(); T[table] = rows().filter((r) => !m.includes(r)); return { data: m, error: null }; }
       let m = match();
@@ -54,6 +54,9 @@ function eq(got: any, want: any, name: string) {
   if (g === w) pass++; else { fail++; console.log(`FAIL ${name}\n  got  ${g}\n  want ${w}`); }
 }
 const sent: { to: string; body: string }[] = [];
+const waSent: { to: string; body: string }[] = [];
+let waMode: "ok" | "off" = "off";
+io.sendWhatsApp = async (to: string, body: string) => { if (waMode === "off") return { ok: false, error: "whatsapp_not_set_up" }; waSent.push({ to, body }); return { ok: true, sid: "WA" + waSent.length }; };
 let smsMode: "ok" | "off" | "fail" = "ok";
 const intakes: any[] = [];
 io.sendSms = async (to: string, body: string) => { if (smsMode === "off") return { ok: false, error: "sms_not_set_up" }; if (smsMode === "fail") return { ok: false, error: "21610" }; sent.push({ to, body }); return { ok: true, sid: "SM" + sent.length }; };
@@ -135,6 +138,38 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   const nMsgs = db.T.lead_messages.length;
   eq([(await reply(db, user, { contact_id: "c-new", channel: "sms", text: "Hi", phone: "0499999999" }, MON_1000)).reason, db.T.lead_messages.length - nMsgs], ["sms_not_set_up", 0], "texts not switched on: nothing logged");
   smsMode = "ok";
+
+  // ── reply by email / WhatsApp ──
+  db.T.contacts.find((c: any) => c.id === "c-new").email = "Sarah@Example.com";
+  db.T.contacts.find((c: any) => c.id === "c-new").division = "Chimney";
+  const re: any = await reply(db, user, { contact_id: "c-new", channel: "email", text: "Here is the quote." }, MON_1000);
+  const em = db.T.lead_messages[db.T.lead_messages.length - 1];
+  eq([re.ok, re.queued, em.channel, em.status, em.email, em.subject], [true, true, "email", "queued", "sarah@example.com", "Your enquiry - The Chimney Guys"], "email reply queued for info@ to send");
+  eq((await reply(db, user, { contact_id: "c-land", channel: "email", text: "Hi" }, MON_1000)).reason, "no_email", "no email on the card → refused");
+  const ae: any = await alerts(db, { id_token: "good-token-good-token" }, MON_1000 + 1000);
+  const custEmail = ae.emails.find((m: any) => m.id === "m:" + em.id);
+  eq([custEmail && custEmail.to, custEmail && /Here is the quote\.\n\nRon\nThe Guys Service Group/.test(custEmail.text)], ["sarah@example.com", true], "info@ gets the customer email, signed by Ron");
+  await alerts(db, { id_token: "good-token-good-token", sent: ["m:" + em.id] }, MON_1000 + 2000);
+  eq(em.status, "sent", "marked sent once info@ sent it");
+  db.T.sms_opt_outs.length = 0;
+  db.T.settings[0].whatsapp_enabled = false;
+  eq((await reply(db, user, { contact_id: "c-new", channel: "whatsapp", text: "Hi" }, MON_1000)).reason, "whatsapp_not_set_up", "WhatsApp off in settings → refused");
+  db.T.settings[0].whatsapp_enabled = true; waMode = "ok";
+  eq([(await reply(db, user, { contact_id: "c-new", channel: "whatsapp", text: "Hi on WhatsApp" }, MON_1000)).ok, waSent[0] && waSent[0].to, db.T.lead_messages[db.T.lead_messages.length - 1].channel], [true, "+61412345678", "whatsapp"], "WhatsApp reply sent and logged");
+  waMode = "off";
+
+  // ── daily report ──
+  db.T.settings[0].daily_report_to = [{ name: "Ofek", whatsapp: "+972509400581" }, { name: "Noam", whatsapp: "+972 50-773-1672" }];
+  db.T.settings[0].whatsapp_enabled = false;
+  db.T.myday_days = [];
+  const dr: any = await dailyReport(db, user, { day: "2026-09-28", text: "Report text" }, MON_1000);
+  const rep1 = db.T.lead_messages[db.T.lead_messages.length - 1];
+  eq([dr.via, rep1.email, rep1.subject, db.T.myday_days[0].report_sent_at ? true : false], ["email", "info@theguyservicegroup.com", "Daily report 2026-09-28", true], "report by email while WhatsApp is off, marked sent");
+  eq((await dailyReport(db, user, { day: "2026-09-28", text: "Again" }, MON_1000 + 1000)).already, true, "only once a day");
+  db.T.settings[0].whatsapp_enabled = true; waMode = "ok"; waSent.length = 0;
+  const dr2: any = await dailyReport(db, user, { day: "2026-09-29", text: "WA report" }, MON_1000);
+  eq([dr2.via, waSent.map((w) => w.to)], ["whatsapp", ["+972509400581", "+972507731672"]], "report on WhatsApp to Ofek and Noam (Israeli numbers kept)");
+  waMode = "off";
 
   // ── tick: the automatic text ──
   const mk = (over: any) => ({ id: crypto.randomUUID(), contact_id: "c1", first_name: "Sarah", phone: "+61400000001", brand: "The Chimney Guys", service_text: "chimney cleaning", test: false, auto_sms_at: null, auto_sms_skip: null, created_at: new Date(MON_1000 - 6 * 60000).toISOString(), ...over });

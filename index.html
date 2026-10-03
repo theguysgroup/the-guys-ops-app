@@ -273,6 +273,10 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .myday-stat.good { border-color: var(--good); }
 .myday-stat.good .myday-stat-n { color: var(--good); }
 .myday-days { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+.conv-menu { position:absolute; bottom:calc(100% + 6px); inset-inline-start:0; z-index:60; background:var(--surface); border:1px solid var(--surface-3); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.18); min-width:260px; padding:4px; }
+.conv-menu-item { display:flex; gap:10px; align-items:flex-start; width:100%; text-align:start; padding:8px 10px; background:none; border:0; color:var(--ink); border-radius:8px; cursor:pointer; font:inherit; font-size:13.5px; }
+.conv-menu-item:hover:not(:disabled) { background:var(--surface-2); }
+.conv-menu-item:disabled { opacity:.55; cursor:default; }
 .myday-section { margin-top: 14px; }
 .myday-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .myday-head h2 { margin: 0; font-size: 15px; }
@@ -963,7 +967,7 @@ async function loadFromSupabase(){
       referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
       submissionPage:c.submission_page||'',
       lostReason:c.lost_reason||'', stageChangedAt:c.stage_changed_at||null, chasingSince:c.chasing_since||null,
-      chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null, contactedAt:c.contacted_at||null, bookedFor:c.booked_for||'',
+      chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseRound:Number(c.chase_round)||1, chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null, contactedAt:c.contacted_at||null, bookedFor:c.booked_for||'',
     })),
     jobs: (jobs||[]).map(j => ({ ...mapJobRow(j), activityLog: logsFor('job', j.id) })),
     equipmentSpend: (equipmentSpend||[]).map(e => ({ ...mapEquipSpendRow(e), activityLog: logsFor('equipment', e.id) })),
@@ -1021,7 +1025,7 @@ function contactPatchToRow(patch){
     followupNote:'followup_note', estimatedValue:'estimated_value', salesValue:'sales_value',
     jobDescription:'job_description', linkedJobId:'linked_job_id', starred:'starred',
     lastReadAt:'last_read_at', tags:'tags', messages:'messages',
-    lostReason:'lost_reason', stageChangedAt:'stage_changed_at', chasingSince:'chasing_since', chaseCalls:'chase_calls', chaseAlertDone:'chase_alert_done',
+    lostReason:'lost_reason', stageChangedAt:'stage_changed_at', chasingSince:'chasing_since', chaseCalls:'chase_calls', chaseRound:'chase_round', chaseAlertDone:'chase_alert_done',
     reopenedAt:'reopened_at', contactedAt:'contacted_at', bookedFor:'booked_for',
   };
   // date/timestamptz/uuid columns reject '' outright ("invalid input syntax for type date")
@@ -1689,7 +1693,7 @@ function mapSettingsRow(r){
     gstRatePercent:r.gst_rate_percent, companyName:r.company_name,
     abn:r.abn||'', defaultPaymentTerms:r.default_payment_terms||'',
     ownerSalaries: r.owner_salaries||{},
-    phoneEnabled: !!r.phone_enabled, phoneRouting: r.phone_routing || {}, chatAutoSms: !!r.chat_auto_sms, reviewsFrom: r.reviews_from || '2026-10-03',
+    phoneEnabled: !!r.phone_enabled, phoneRouting: r.phone_routing || {}, chatAutoSms: !!r.chat_auto_sms, reviewsFrom: r.reviews_from || '2026-10-03', whatsappEnabled: !!r.whatsapp_enabled,
   };
 }
 function mapPayrollRow(r){
@@ -1716,7 +1720,7 @@ function mapContactRow(c){
     referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
     submissionPage:c.submission_page||'',
     lostReason:c.lost_reason||'', stageChangedAt:c.stage_changed_at||null, chasingSince:c.chasing_since||null,
-    chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null, contactedAt:c.contacted_at||null, bookedFor:c.booked_for||'',
+    chaseCalls:Array.isArray(c.chase_calls)?c.chase_calls:[], chaseRound:Number(c.chase_round)||1, chaseAlertDone:!!c.chase_alert_done, reopenedAt:c.reopened_at||null, contactedAt:c.contacted_at||null, bookedFor:c.booked_for||'',
   };
 }
 // Live updates (a new lead arriving, someone else's change) redraw the page. Keep whatever a person is in
@@ -2718,7 +2722,7 @@ function renderLeadConversation(contactId){
     const out = m.direction==='out';
     return `<div class="chat-row ${out?'out':'in'}">
       <div class="chat-bubble ${out?'out':'in'}">
-        <div class="chat-bubble-meta">${esc(m.author || (out?'You':'Customer'))}${m.channel ? ` · ${m.channel==='sms' ? '📱 SMS' : '💬 Website chat'}` : ''}${m.auto ? ' · automatic' : ''}${m.status==='failed' || m.status==='undelivered' ? ` · <span style="color:var(--bad)">⚠ not delivered${m.error ? ' (' + esc(m.error) + ')' : ''}</span>` : ''}</div>
+        <div class="chat-bubble-meta">${esc(m.author || (out?'You':'Customer'))}${m.channel ? ` · ${CONV_CHANNEL_LABEL[m.channel] || m.channel}` : ''}${m.auto ? ' · automatic' : ''}${m.status==='failed' || m.status==='undelivered' ? ` · <span style="color:var(--bad)">⚠ not delivered${m.error ? ' (' + esc(m.error) + ')' : ''}</span>` : ''}</div>
         <div class="chat-bubble-text">${esc(m.text)}</div>
         <div class="chat-bubble-time">${new Date(m.at).toLocaleString('en-AU')}</div>
       </div>
@@ -2730,11 +2734,12 @@ function renderLeadConversation(contactId){
 // collide if both happen to be in the DOM at once.
 function renderLeadComposer(contactId, scope){
   return `
-    <div id="${scope}-conv-bar">${convComposerBar(contactId, scope)}</div>
     <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-start">
+      <div style="position:relative"><span id="${scope}-conv-ch">${convChannelButton(contactId, scope)}</span><div id="${scope}-conv-menu" class="conv-menu" hidden></div></div>
       <textarea rows="2" id="${scope}-msg-out-text" placeholder="Reply… (Enter to send, Shift+Enter for a new line)" style="flex:1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendLeadReply('${contactId}','${scope}');}"></textarea>
       <button type="button" class="btn primary small" onclick="sendLeadReply('${contactId}','${scope}')">Send</button>
     </div>
+    <div id="${scope}-conv-bar">${convComposerBar(contactId, scope)}</div>
     <div style="margin-top:6px">
       <button type="button" class="btn ghost small" onclick="toggleLogIncoming('${scope}')">📥 Log what they said</button>
       <div id="${scope}-log-incoming-box" style="display:none;margin-top:6px">
@@ -2760,7 +2765,7 @@ function sendLeadReply(contactId, scope){
   const c = contactById(contactId); if (!c) return;
   const textEl = document.getElementById(scope+'-msg-out-text');
   const text = textEl.value.trim(); if (!text) return;
-  if (CONV.loaded && convChannel(c) !== 'note') { convSend(c, convChannel(c), text, scope); return; }
+  if (convChannel(c) !== 'note') { convSend(c, convChannel(c), text, scope); return; }
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   if (!c.messages) c.messages = [];
   c.messages.push({ id:uid(), kind:'message', direction:'out', text, author:actor, at:new Date().toISOString() });
@@ -3025,7 +3030,7 @@ function applyLeadStage(c, stage, extra){
   if (stage==='Booked' && leadStage(c)!=='Booked') mdRecordBooking(c);
   const patch = { status: stage, stageChangedAt: nowIso, ...extra };
   if (stage==='Booked' || stage==='Lost') patch.nextFollowUp = '';
-  if (stage==='Chasing' && leadStage(c)!=='Chasing') { patch.chasingSince = nowIso; patch.chaseAlertDone = false; }
+  if (stage==='Chasing' && leadStage(c)!=='Chasing') { patch.chasingSince = nowIso; patch.chaseAlertDone = false; patch.chaseRound = 1; }
   if (stage!=='Lost') patch.lostReason = '';
   Object.assign(c, patch);
   db.contacts.update(c.id, patch);
@@ -3203,7 +3208,7 @@ function chaseTick(c){
   if (leadStage(c)!=='Chasing') return '';
   const k = chaseCounter(c);
   return `<label onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;white-space:nowrap" title="Tick once a day when you called this lead">
-    <input type="checkbox" ${k.calledToday?'checked':''} onchange="toggleChaseCalledToday('${c.id}', event)" style="width:auto;margin:0"> Called today <b>${k.x}/${k.y}</b></label>`;
+    <input type="checkbox" ${k.calledToday?'checked':''} onchange="toggleChaseCalledToday('${c.id}', event)" style="width:auto;margin:0"> Called today <b>${k.x}/${k.y}</b></label>${(c.chaseRound||1) > 1 ? ` ${pill('warn', 'Round ' + c.chaseRound)}` : ''}`;
 }
 // Floating call-back bubbles: stay until someone presses ×.
 function renderChaseBubbles(){
@@ -3401,7 +3406,7 @@ async function playCallRecording(callId, btn){
 const CONV_URL = SUPABASE_URL + '/functions/v1/conversations';
 const CONV_BRANDS = { Aircon:'The AC Cleaning Guys', Chimney:'The Chimney Guys', 'Pressure Washing':'The Pressure Washing Guys' };
 const CONV_INTRO = "{hi}, it's Ron from {brand}. You sent us a message on our website chat about {service}. I'll give you a call shortly, or you can reply here.";
-const CONV_ERRORS = { no_chat:'This customer has no recent website chat. Send a text instead.', not_mobile:'There is no mobile number on the card.', opted_out:'This customer replied STOP, so no texts.', sms_not_set_up:'Texts start when the business phone is switched on.', unauthorized:'Please sign in again.', empty:'Write a message first.' };
+const CONV_ERRORS = { no_chat:'This customer has no recent website chat. Send a text instead.', not_mobile:'There is no mobile number on the card.', opted_out:'This customer replied STOP, so no texts.', sms_not_set_up:'Texts start when the business phone is switched on.', unauthorized:'Please sign in again.', empty:'Write a message first.', no_email:'There is no email address on the card.', whatsapp_not_set_up:'WhatsApp starts once it is connected (Twilio).' };
 let CONV = { msgs:{}, sessions:{}, optOut:new Set(), channel:{}, loaded:false };
 function convE164(v){ let d = String(v||'').replace(/\D/g,''); if (d.startsWith('61')) d = d.slice(2); if (d.startsWith('0')) d = d.slice(1); return /^\d{9}$/.test(d) ? '+61'+d : ''; }
 async function convLoad(){
@@ -3425,7 +3430,7 @@ function convMessagesFor(contactId){
   return (CONV.msgs[contactId]||[]).map(r => ({ id:r.id, kind:'message', direction:r.direction, text:r.body, author:r.author || (r.direction==='in' ? 'Customer' : 'Office'), at:r.at, channel:r.channel, auto:!!r.auto, status:r.status, error:r.error }));
 }
 function convRefreshContact(contactId){
-  ['modal','inbox'].forEach(scope => { refreshLeadThread(contactId, scope); refreshLeadUnreadUI(contactId, scope); const bar = document.getElementById(scope+'-conv-bar'); if (bar) bar.innerHTML = convComposerBar(contactId, scope); });
+  ['modal','inbox'].forEach(scope => { refreshLeadThread(contactId, scope); refreshLeadUnreadUI(contactId, scope); const bar = document.getElementById(scope+'-conv-bar'); if (bar) bar.innerHTML = convComposerBar(contactId, scope); const b = document.getElementById(scope+'-conv-ch'); if (b) b.innerHTML = convChannelButton(contactId, scope); });
   refreshCrmInboxList();
 }
 function convOpenContactId(){ return document.getElementById('modal-conversation-thread') || UI.tab==='crm' ? (UI.crm.selectedContactId || null) : null; }
@@ -3451,38 +3456,70 @@ function convChannels(c){
   const chat = !!(sess && Date.now() - Date.parse(sess.created_at) < 14*86400000);
   const e164 = convE164(c.phone), mobile = /^\+614\d{8}$/.test(e164);
   const opted = mobile && CONV.optOut.has(e164.slice(-9));
-  const smsOn = !!(STATE.data && STATE.data.settings && STATE.data.settings.phoneEnabled);
-  return { sess, chat, mobile, opted, smsOn, sms: mobile && !opted && smsOn };
+  const st = (STATE.data && STATE.data.settings) || {};
+  const email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(c.email||'').trim());
+  return { sess, chat, mobile, opted, email, smsOn: !!st.phoneEnabled, sms: mobile && !opted && !!st.phoneEnabled, wa: mobile && !opted && !!st.whatsappEnabled };
+}
+// Channels in the menu (Ofek 3/10, like GHL): SMS, WhatsApp, Live chat, Email, Internal note.
+const CONV_CHANNELS = [['sms','📱','SMS'], ['whatsapp','🟢','WhatsApp'], ['chat','💬','Live chat'], ['email','✉️','Email'], ['note','📝','Internal note']];
+const CONV_CHANNEL_LABEL = { sms:'📱 SMS', whatsapp:'🟢 WhatsApp', chat:'💬 Website chat', email:'✉️ Email' };
+function convAvail(c){
+  const ch = convChannels(c);
+  const stop = 'This customer replied STOP, so no messages';
+  return {
+    sms: [ch.sms, ch.opted ? stop : !ch.mobile ? 'No mobile number on the card' : 'Texts start when the business phone is switched on'],
+    whatsapp: [ch.wa, ch.opted ? stop : !ch.mobile ? 'No mobile number on the card' : 'WhatsApp starts once it is connected (Twilio)'],
+    chat: [ch.chat, 'No website chat from this customer in the last 2 weeks'],
+    email: [ch.email, 'No email address on the card'],
+    note: [true, ''],
+  };
 }
 // Default: the chat while the customer was there in the last day, otherwise a text if possible, otherwise a note.
 function convChannel(c){
-  const ch = convChannels(c);
+  if (!CONV.loaded) return 'note';
+  const ch = convChannels(c), av = convAvail(c);
   let v = CONV.channel[c.id];
-  if ((v==='chat' && !ch.chat) || (v==='sms' && !ch.sms)) v = null;
+  if (v && !(av[v] && av[v][0])) v = null;
   if (v) return v;
   if (ch.chat && Date.now() - Date.parse(ch.sess.last_visitor_at || ch.sess.created_at) < 24*3600000) return 'chat';
   return ch.sms ? 'sms' : 'note';
 }
+function convChannelButton(contactId, scope){
+  const c = contactById(contactId);
+  const cur = c ? convChannel(c) : 'note';
+  const d = CONV_CHANNELS.find(x => x[0]===cur) || CONV_CHANNELS[4];
+  return `<button type="button" class="btn small" style="white-space:nowrap" onclick="toggleConvMenu('${contactId}','${scope}', event)" title="Choose how this message goes">${d[1]} ${d[2]} ▾</button>`;
+}
+function toggleConvMenu(contactId, scope, ev){
+  if (ev) ev.stopPropagation();
+  const m = document.getElementById(scope+'-conv-menu'); if (!m) return;
+  if (!m.hidden) { m.hidden = true; return; }
+  const c = contactById(contactId); if (!c) return;
+  const av = CONV.loaded ? convAvail(c) : { note:[true,''] }, cur = convChannel(c);
+  m.innerHTML = CONV_CHANNELS.map(([k, ic, label]) => { const [ok, why] = av[k] || [false, 'Loading…'];
+    return `<button type="button" class="conv-menu-item" ${ok ? '' : 'disabled'} onclick="event.stopPropagation();setConvChannel('${contactId}','${k}','${scope}')"><span>${ic}</span><span style="flex:1"><b>${label}</b>${ok ? '' : `<br><span class="hint" style="font-size:11.5px">${esc(why)}</span>`}</span>${cur===k ? '<span style="color:var(--primary)">✓</span>' : ''}</button>`; }).join('');
+  m.hidden = false;
+  setTimeout(() => { const close = () => { m.hidden = true; document.removeEventListener('click', close); }; document.addEventListener('click', close); }, 0);
+}
 function convComposerBar(contactId, scope){
   const c = contactById(contactId);
   if (!c || !CONV.loaded) return '';
-  const ch = convChannels(c);
-  if (!ch.chat && !ch.sms && !ch.opted) return '';   // nothing to send through yet: the composer stays as it was
-  const cur = convChannel(c);
-  const btn = (k, label, ok, why) => `<button type="button" class="btn small ${cur===k ? 'primary' : 'ghost'}" ${ok ? '' : 'disabled'} title="${esc(ok ? '' : why)}" onclick="setConvChannel('${contactId}','${k}','${scope}')">${label}</button>`;
-  const hint = cur==='chat' ? "Goes to the customer's website chat window." : cur==='sms' ? `Sent as a text to ${esc(c.phone)} from the business number.` : 'Only logged here. The customer does not get it.';
-  return `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px">
-      <span class="hint" style="margin-inline-end:2px">Reply by</span>
-      ${btn('chat', '💬 Chat', ch.chat, 'No website chat from this customer in the last 2 weeks')}
-      ${btn('sms', '📱 SMS', ch.sms, ch.opted ? 'This customer replied STOP, so no texts' : !ch.mobile ? 'No mobile number on the card' : 'Texts start when the business phone is switched on')}
-      ${btn('note', '📝 Note only', true, '')}
+  const ch = convChannels(c), cur = convChannel(c);
+  const hint = cur==='chat' ? "Goes to the customer's website chat window."
+    : cur==='sms' ? `Sent as a text to ${esc(c.phone)} from the business number.`
+    : cur==='whatsapp' ? `Sent on WhatsApp to ${esc(c.phone)}.`
+    : cur==='email' ? `Emailed to ${esc(c.email)} from info@ within a minute. Their reply comes to the info@ inbox.`
+    : 'Internal note: only the team sees it, the customer does not get it.';
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
+      <span class="hint">${hint}</span>
       ${ch.sess ? `<button type="button" class="btn ghost small" onclick="convInsertIntro('${contactId}','${scope}')" title="Fills in Ron's intro text. You can change it before sending.">✍️ Intro text</button>` : ''}
       ${ch.opted ? pill('bad', 'Replied STOP: no texts') : ''}
-    </div>
-    <div class="hint" style="margin-top:4px">${hint}</div>`;
+    </div>`;
 }
 function setConvChannel(contactId, k, scope){
   CONV.channel[contactId] = k;
+  const m = document.getElementById(scope+'-conv-menu'); if (m) m.hidden = true;
+  const b = document.getElementById(scope+'-conv-ch'); if (b) b.innerHTML = convChannelButton(contactId, scope);
   const bar = document.getElementById(scope+'-conv-bar'); if (bar) bar.innerHTML = convComposerBar(contactId, scope);
 }
 // Ron's one-click intro when he moves a chat to SMS (Ofek 2/10 + 3/10: filled in, and he can edit it).
@@ -3504,6 +3541,7 @@ async function convSend(c, channel, text, scope){
     const out = await r.json().catch(() => ({}));
     if (!out.ok) { showToast(CONV_ERRORS[out.reason || out.error] || ('Not sent: ' + (out.reason || out.error || r.status))); return; }
     if (ta) ta.value = '';
+    if (out.queued) showToast(`Email to ${c.email} goes from info@ within a minute`);
     markLeadContacted(c); markLeadRead(c.id);
     const { data: rows } = await sb.from('lead_messages').select('*').eq('contact_id', c.id).order('at');
     (rows||[]).forEach(convAddMsg);
@@ -3662,11 +3700,12 @@ function mdRecordBooking(c){
 function mdEndOfDay(){
   const p = getCurrentProfile(), now = new Date(), today = sydneyWall(now).day;
   const bubbles = mdLive(filterForProfile(STATE.data, p), now);
-  const openQuotes = (bubbles.quotes || []).filter(x => !x.done);
+  const openQuotes = (bubbles.quotes || []).filter(x => !x.done && x.rec);
   if (openQuotes.length) {
+    // Exactly what is left and why, each name opening that customer (Ofek 3/10).
     openPopup(`<h3 style="margin:0 0 6px">You haven't finished Quotes due</h3>
-      <div class="hint" style="margin-bottom:10px">${openQuotes.length} quote${openQuotes.length===1?' is':'s are'} due today and not handled yet. Call each one and set the next follow-up date (or move the stage). You can't close the day without it.</div>
-      <div style="display:grid;gap:4px;margin-bottom:12px">${openQuotes.slice(0, 8).map(x => `<div style="font-size:13px">• ${esc(x.rec ? x.rec.fullName : 'Lead')}</div>`).join('')}</div>
+      <div class="hint" style="margin-bottom:10px">You can't close the day until every quote due today is handled: call the customer, then set the next follow-up date or move the stage.</div>
+      <div style="display:grid;gap:8px;margin-bottom:12px;max-height:50vh;overflow:auto">${openQuotes.map(x => `<div style="font-size:13px;line-height:1.4"><span class="xlink" style="font-weight:600" onclick="closePopup();goToLeadConversation('${x.rec.id}')">${esc(x.rec.fullName)}</span><br><span style="color:var(--ink-soft)">${esc(quoteDueReason(x.rec, todayStr()))}</span></div>`).join('')}</div>
       <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn primary" onclick="closePopup();goTab('myDay');setTimeout(()=>myDayJump('quotes'),50)">Go to Quotes due</button></div>`);
     return;
   }
@@ -3675,6 +3714,14 @@ function mdEndOfDay(){
     if (isWorkday(today)) {
       mdTick(); await mdFlush(today);
       await sb.rpc('myday_close', { p_day: today, p_percent: k.percent, p_totals: k, p_by: p.fullName || 'Ron' });
+      // The end-of-day report to Ofek and Noam (WhatsApp once connected, email to info@ until then). Never blocks logout.
+      try {
+        const { data } = await sb.auth.getSession();
+        await Promise.race([
+          fetch(CONV_URL + '?step=daily_report', { method:'POST', headers:{ 'Content-Type':'application/json', apikey:SUPABASE_ANON_KEY, Authorization:'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify({ day: today, text: mdDailyReportText(k, today) }) }),
+          new Promise(r => setTimeout(r, 6000)),
+        ]);
+      } catch (e) { console.error('daily report', e); }
     }
     closePopup(); doLogout.confirmed = true; doLogout();
   };
@@ -3683,6 +3730,37 @@ function mdEndOfDay(){
   openPopup(`<h3 style="margin:0 0 6px">Good work today, ${esc(first)}!</h3>
     <div style="font-size:15px;margin:6px 0 4px">${k.percent===null ? 'There were no tasks today.' : `You completed <b>${k.percent}%</b> of today's tasks (${k.done} of ${k.total}).`}</div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn ghost" onclick="closePopup()">Stay</button><button class="btn primary" onclick="window.__mdFinish()">Log out</button></div>`);
+}
+// Why a quote is in Quotes due, in one line (My Day row and the logout popup).
+function quoteDueReason(c, localToday){
+  const late = c.nextFollowUp && c.nextFollowUp < localToday ? daysBetween(parseLocalDate(c.nextFollowUp), parseLocalDate(localToday)) : 0;
+  return `Follow-up date ${fmtDateShort(c.nextFollowUp)} has come${late ? ` (${late} day${late===1?'':'s'} late)` : ' (today)'}: call, then set the next date or move the stage`;
+}
+// The end-of-day report (Hebrew, for the owners): Ron's tasks, then what happened in the business today.
+function mdDailyReportText(k, today){
+  const data = STATE.data, he = { new:'לידים חדשים', chasing:'מרדף', decide:'מרדף 21+ ימים', followups:'מעקבים', quotes:'הצעות מחיר', reviews:'בקשת ביקורת' };
+  const day = parseLocalDate(today).toLocaleDateString('he-IL', { weekday:'long', day:'numeric', month:'numeric' });
+  const leads = (data.contacts||[]).filter(c => localDay(leadArrivedAt(c) || c.createdAt) === today);
+  const count = (arr, f) => { const m = {}; arr.forEach(x => { const v = f(x) || 'אחר'; m[v] = (m[v]||0) + 1; }); return Object.entries(m).sort((a,b) => b[1]-a[1]).map(([n, v]) => `${n} ${v}`).join(', '); };
+  const row = MD.days[today] || { bookings: [] };
+  const bookings = row.bookings || [];
+  const jobs = (data.jobs||[]).filter(j => j.date === today);
+  const revenue = jobs.reduce((s, j) => s + (Number(j.amount) || 0), 0);
+  const chats = Object.values(CONV.sessions || {}).filter(x => sydneyWall(new Date(x.created_at)).day === today && !x.test).length;
+  const lines = [
+    `📊 דוח יומי – ${day}`,
+    '',
+    `רון השלים ${k.percent===null ? '—' : k.percent + '%'} מהמשימות (${k.done} מתוך ${k.total})`,
+    ...MD_BUBBLES.map(([b]) => { const x = k.by[b] || { done:0, total:0 }; return x.total ? `• ${he[b]}: ${x.done}/${x.total}` : ''; }).filter(Boolean),
+    '',
+    `לידים חדשים היום: ${leads.length}${leads.length ? ` (${count(leads, c => c.division)})` : ''}`,
+    leads.length ? `מקורות: ${count(leads, c => sourceLabel(c.source))}` : '',
+    `צ'אטים מהאתר: ${chats}`,
+    `הזמנות היום: ${bookings.length}${bookings.length ? ` (${count(bookings, b => b.div)})` : ''}`,
+    `עבודות שנרשמו להיום: ${jobs.length}${jobs.length ? `, הכנסות ${fmtMoney(revenue)}` : ''}`,
+    phoneWanted() && PHONE.missed.length ? `שיחות שלא חזרנו אליהן: ${PHONE.missed.length}` : '',
+  ];
+  return lines.filter((l, i) => l !== '' || (lines[i-1] && lines[i-1] !== '')).join('\n').trim();
 }
 function setMyDayView(v){ UI.myDayView = v; render(); }
 // The strip at the top: today, each closed day of this week, and earlier weeks merged into one chip each.
@@ -6563,10 +6641,11 @@ function chaseGiveUp(id){
 }
 function chaseKeepGoing(id){
   const c = contactById(id); if (!c || leadStage(c)!=='Chasing') return;
-  c.chasingSince = new Date().toISOString();
-  db.contacts.update(c.id, { chasingSince: c.chasingSince });
-  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', 'Kept chasing after 21 days (count restarted)');
-  showToast(`${c.fullName} stays in Chasing — asked again in 21 days`);
+  // Another 21-day round (Ofek 3/10), marked "Round 2", "Round 3"… wherever the lead shows.
+  c.chasingSince = new Date().toISOString(); c.chaseRound = (Number(c.chaseRound) || 1) + 1;
+  db.contacts.update(c.id, { chasingSince: c.chasingSince, chaseRound: c.chaseRound });
+  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Kept chasing after 21 days: round ${c.chaseRound} started`);
+  showToast(`${c.fullName} stays in Chasing: round ${c.chaseRound}, asked again in 21 days`);
   render();
 }
 // A past day or week on My Day: the bubbles as they ended, Ron's %, and the bookings table.
@@ -6607,15 +6686,15 @@ function renderMyDay(profile, data){
     return myDayRow(c, `<span class="hint">${esc(myDayAgo(leadArrivedAt(c)) || fmtDateShort(c.createdAt))}</span>${leadStageControl(c)}`,
       { bad: late, flag: late ? pill('bad','Waiting 15+ min') : '' });
   }).join('');
-  const chaseRow = c => { const k = chaseCounter(c, now); return myDayRow(c, chaseTick(c), { meta: `chasing since ${fmtDateShort(localDay(c.chasingSince))} · called ${k.x} of ${k.y} days` }); };
+  const chaseRow = c => { const k = chaseCounter(c, now); return myDayRow(c, chaseTick(c), { flag: (c.chaseRound||1) > 1 ? pill('warn', 'Round ' + c.chaseRound) : '', meta: `chasing since ${fmtDateShort(localDay(c.chasingSince))}${(c.chaseRound||1) > 1 ? ` (round ${c.chaseRound})` : ''} · called ${k.x} of ${k.y} days` }); };
   const decideBody = L.chaseDecide.map(c => myDayRow(c,
     `<button class="btn small" onclick="chaseKeepGoing('${c.id}')">Keep chasing</button><button class="btn small danger" onclick="chaseGiveUp('${c.id}')">Lost — no answer</button>`,
-    { bad: true, meta: `chasing ${daysBetween(parseLocalDate(localDay(c.chasingSince)), parseLocalDate(L.today))} days` })).join('');
+    { bad: true, flag: (c.chaseRound||1) > 1 ? pill('warn', 'Round ' + c.chaseRound) : '', meta: `chasing ${daysBetween(parseLocalDate(localDay(c.chasingSince)), parseLocalDate(L.today))} days${(c.chaseRound||1) > 1 ? ` in round ${c.chaseRound}` : ''}` })).join('');
   const fuBody = L.followups.map(c => { const ctx = leadFollowupContextFor(c); const over = c.nextFollowUp < L.localToday;
     return myDayRow(c, `${pill(over?'bad':'warn', over?'Overdue':'Today')}<span class="hint">${fmtDateShort(c.nextFollowUp)}</span>`, { bad: over, meta: `${esc(stageLabel(leadStage(c)))}${ctx?` — ${esc(ctx)}`:''}` }); }).join('');
   const quoteBody = L.quotesDue.map(c => { const over = c.nextFollowUp < L.localToday;
     return myDayRow(c, `${pill(over?'bad':'warn', over?'Overdue':'Today')}<button class="btn small" onclick="openFollowupDatePrompt(contactById('${c.id}'),'Quoted')">Next date</button>${leadStageControl(c)}`,
-      { bad: over, meta: `follow-up ${fmtDateShort(c.nextFollowUp)}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` }); }).join('');
+      { bad: over, meta: `${quoteDueReason(c, L.localToday)}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` }); }).join('');
   const reviewItems = (live.reviews || []).filter(x => !x.done && x.rec);
   const reviewBody = reviewItems.map(x => { const j = x.rec;
     return `<div class="myday-row" style="cursor:default"><div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${esc(j.customerName||'—')}</div>

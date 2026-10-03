@@ -6,7 +6,9 @@
 //               their name), a chat session, the customer's first message, and an email to the office.
 //   chat_send   another message from the customer.        chat_poll   Ron's replies for the customer's window.
 // The app (signed-in office staff):
-//   reply       Ron answers in the chat, or by SMS (from the business number, the same one the phone line uses).
+//   reply       Ron answers by website chat, SMS or WhatsApp (the business number, the same one the phone line uses), or
+//               email (queued here, sent from info@ by the info@ Apps Script within a minute).
+//   daily_report  Ron's end-of-day report (sent when he logs out) → WhatsApp to the owners, or by email until WhatsApp is on.
 // Twilio (signed webhooks): sms_in (a customer's text, STOP/START), sms_status (delivery).
 // The info@ Apps Script, every minute: alerts — the new-chat emails, handed only to the verified info@ mailbox, which
 //   sends them to itself (so the office gets the email within a minute, from its own address).
@@ -25,13 +27,14 @@ const INTAKE_SECRET = env("INTAKE_SHARED_SECRET");
 const ACCOUNT_SID = env("TWILIO_ACCOUNT_SID");
 const AUTH_TOKEN = env("TWILIO_AUTH_TOKEN");
 const BUSINESS_NUMBER = env("TWILIO_NUMBER");
+const WHATSAPP_FROM = env("TWILIO_WHATSAPP_FROM");        // the WhatsApp sender approved on Twilio, e.g. +614…
 const SELF_URL = env("CONVERSATIONS_FUNCTION_URL");       // https://<project>.supabase.co/functions/v1/conversations (Twilio signs this exact URL)
 const MAILBOX = "info@theguyservicegroup.com";
 const TEST_PHONES = ["+61418638552"];                     // the only number Ofek approved for real test texts
 
 // ── approved texts (Ofek). {hi} = "Hi Sarah" or "Hi there" when there is no first name ──
 const SMS_CLOSED = "{hi}, it's Ron from {brand}. You sent us a message on our website chat about {service}. I'll call you first thing when our office opens, or you can reply here.";
-// Draft sent to Ofek 3/10 for approval — not live until settings.chat_auto_sms is switched on.
+// Approved by Ofek 3/10 (the longer of the two versions). Live once settings.chat_auto_sms is switched on.
 const SMS_OPEN = "{hi}, Ron here from {brand}. I saw your message about {service} - I'm just finishing up another call and will get back to you very shortly. Feel free to reply here in the meantime.";
 // Ron's one-click intro when he moves a chat to SMS (he can edit it before sending).
 const INTRO = "{hi}, it's Ron from {brand}. You sent us a message on our website chat about {service}. I'll give you a call shortly, or you can reply here.";
@@ -45,6 +48,7 @@ const SERVICES: Record<string, { text: string; brand: string; division: string }
   other: { text: "", brand: "The Guys Group", division: "Other" },
 };
 const serviceOf = (key: unknown) => SERVICES[String(key)] || SERVICES.other;
+const BRANDS: Record<string, string> = { Aircon: "The AC Cleaning Guys", Chimney: "The Chimney Guys", "Pressure Washing": "The Pressure Washing Guys" };
 
 const ORIGINS = ["https://theguyservicegroup.com", "https://www.theguyservicegroup.com", "https://theguysgroup.github.io"];
 function cors(req: Request): Record<string, string> {
@@ -132,6 +136,18 @@ export const io = {
   async sendSms(to: string, body: string): Promise<SendResult> {
     if (!ACCOUNT_SID || !AUTH_TOKEN || !BUSINESS_NUMBER) return { ok: false, error: "sms_not_set_up" };
     const params: Record<string, string> = { To: to, From: BUSINESS_NUMBER, Body: body };
+    if (SELF_URL) params.StatusCallback = `${SELF_URL}?step=sms_status`;
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
+      method: "POST",
+      headers: { Authorization: "Basic " + btoa(`${ACCOUNT_SID}:${AUTH_TOKEN}`), "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(params).toString(),
+    });
+    const out = await res.json().catch(() => ({}));
+    return res.ok ? { ok: true, sid: out.sid } : { ok: false, error: String(out.message || res.status) };
+  },
+  async sendWhatsApp(to: string, body: string): Promise<SendResult> {
+    if (!ACCOUNT_SID || !AUTH_TOKEN || !WHATSAPP_FROM) return { ok: false, error: "whatsapp_not_set_up" };
+    const params: Record<string, string> = { To: "whatsapp:" + to, From: "whatsapp:" + WHATSAPP_FROM, Body: body };
     if (SELF_URL) params.StatusCallback = `${SELF_URL}?step=sms_status`;
     const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
       method: "POST",
@@ -305,9 +321,9 @@ export async function chatPoll(sb: any, body: any, nowMs: number) {
 export async function reply(sb: any, user: any, body: any, nowMs: number) {
   const contactId = String(body.contact_id || "");
   const text = String(body.text || "").trim().slice(0, 1200);
-  const channel = body.channel === "sms" ? "sms" : "chat";
+  const channel = ["sms", "whatsapp", "email"].includes(body.channel) ? body.channel : "chat";
   if (!contactId || !text) return { ok: false, reason: "empty" };
-  const { data: c } = await sb.from("contacts").select("id, full_name, phone").eq("id", contactId).single();
+  const { data: c } = await sb.from("contacts").select("id, full_name, phone, email, division").eq("id", contactId).single();
   if (!c) return { ok: false, reason: "no_contact" };
   const at = new Date(nowMs).toISOString();
   const author = user.full_name || "Office";
@@ -320,9 +336,26 @@ export async function reply(sb: any, user: any, body: any, nowMs: number) {
     await sb.from("chat_sessions").update({ last_staff_at: at }).eq("id", s.id);
     return { ok: true, channel };
   }
+  if (channel === "email") {
+    // Queued here; the info@ mailbox sends it within a minute (same route as the new-chat emails), so it comes from
+    // the business address the customer knows. Their reply lands in the info@ inbox.
+    const email = String(body.email || c.email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, reason: "no_email" };
+    const brand = BRANDS[c.division] || "The Guys Service Group";
+    await sb.from("lead_messages").insert({ contact_id: contactId, channel: "email", direction: "out", body: text, subject: `Your enquiry - ${brand}`, author, author_id: user.id, email, status: "queued", at });
+    return { ok: true, channel, queued: true };
+  }
   const to = toE164(body.phone || c.phone);
   if (!isMobile(to)) return { ok: false, reason: "not_mobile" };
   if (await optedOut(sb, to)) return { ok: false, reason: "opted_out" };
+  if (channel === "whatsapp") {
+    const { data: st } = await sb.from("settings").select("whatsapp_enabled").limit(1);
+    if (!(st && st[0] && st[0].whatsapp_enabled)) return { ok: false, reason: "whatsapp_not_set_up" };
+    const w = await io.sendWhatsApp(to, text);
+    if (!w.ok && w.error === "whatsapp_not_set_up") return { ok: false, reason: "whatsapp_not_set_up" };
+    await sb.from("lead_messages").insert({ contact_id: contactId, channel: "whatsapp", direction: "out", body: text, author, author_id: user.id, phone: to, status: w.ok ? "sent" : "failed", provider_sid: w.sid || null, error: w.error || null, at });
+    return w.ok ? { ok: true, channel } : { ok: false, reason: w.error || "whatsapp_failed" };
+  }
   const r = await io.sendSms(to, text);
   if (!r.ok && r.error === "sms_not_set_up") return { ok: false, reason: "sms_not_set_up" };   // nothing was tried, nothing to log
   await sb.from("lead_messages").insert({ contact_id: contactId, channel: "sms", direction: "out", body: text, author, author_id: user.id, phone: to, status: r.ok ? "sent" : "failed", provider_sid: r.sid || null, error: r.error || null, at });
@@ -376,11 +409,43 @@ export async function tick(sb: any, nowMs: number) {
 export async function alerts(sb: any, body: any, nowMs: number) {
   if (!(await io.isMailbox(body.id_token))) return { ok: false, reason: "unauthorized" };
   const sent = Array.isArray(body.sent) ? body.sent.map(String).slice(0, 50) : [];
-  for (const id of sent) await sb.from("chat_sessions").update({ alert_sent_at: new Date(nowMs).toISOString() }).eq("id", id).is("alert_sent_at", null);
+  const at = new Date(nowMs).toISOString();
+  for (const id of sent) {
+    if (id.startsWith("m:")) await sb.from("lead_messages").update({ status: "sent" }).eq("id", id.slice(2)).eq("status", "queued");
+    else await sb.from("chat_sessions").update({ alert_sent_at: at }).eq("id", id).is("alert_sent_at", null);
+  }
   const since = new Date(nowMs - 24 * 3600 * 1000).toISOString();
   const { data } = await sb.from("chat_sessions").select("id, alert_subject, alert_body").is("alert_sent_at", null).gte("created_at", since).order("created_at").limit(20);
-  // deno-lint-ignore no-explicit-any
-  return { ok: true, emails: (data || []).filter((r: any) => r.alert_subject).map((r: any) => ({ id: r.id, to: MAILBOX, subject: r.alert_subject, text: r.alert_body })) };
+  const { data: queued } = await sb.from("lead_messages").select("id, email, subject, body, author").eq("channel", "email").eq("status", "queued").gte("at", since).order("at").limit(20);
+  const sign = (m: { author?: string; email?: string }) => m.email === MAILBOX ? "" : `\n\n${String(m.author || "Ron").split(" ")[0]}\nThe Guys Service Group\n1300 380 090`;
+  return { ok: true, emails: [
+    // deno-lint-ignore no-explicit-any
+    ...(data || []).filter((r: any) => r.alert_subject).map((r: any) => ({ id: r.id, to: MAILBOX, subject: r.alert_subject, text: r.alert_body })),
+    // deno-lint-ignore no-explicit-any
+    ...(queued || []).filter((m: any) => m.email).map((m: any) => ({ id: "m:" + m.id, to: m.email, subject: m.subject || "The Guys Service Group", text: m.body + sign(m) })),
+  ] };
+}
+
+// ── Ron's end-of-day report (Ofek 3/10): when Ron logs out, to the owners on WhatsApp; by email until WhatsApp is on ──
+// deno-lint-ignore no-explicit-any
+export async function dailyReport(sb: any, user: any, body: any, nowMs: number) {
+  const day = String(body.day || "");
+  const text = String(body.text || "").trim().slice(0, 3500);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !text) return { ok: false, reason: "empty" };
+  const { data: row } = await sb.from("myday_days").select("day, report_sent_at").eq("day", day).limit(1);
+  if (row && row[0] && row[0].report_sent_at) return { ok: true, already: true };   // once a day, even if Ron logs out twice
+  const { data: st } = await sb.from("settings").select("daily_report_to, whatsapp_enabled").limit(1);
+  const to = (st && st[0] && Array.isArray(st[0].daily_report_to) ? st[0].daily_report_to : []).map((r: { whatsapp?: string }) => toE164(r.whatsapp)).filter(Boolean);
+  const at = new Date(nowMs).toISOString();
+  let via = "email";
+  if (st && st[0] && st[0].whatsapp_enabled && to.length) {
+    const results = [];
+    for (const n of to) results.push(await io.sendWhatsApp(n, text));
+    if (results.some((r) => r.ok)) via = "whatsapp";
+  }
+  if (via === "email") await sb.from("lead_messages").insert({ contact_id: null, channel: "email", direction: "out", body: text, subject: `Daily report ${day}`, author: user.full_name || "Ron", email: MAILBOX, status: "queued", at });
+  await sb.from("myday_days").upsert({ day, report_sent_at: at }, { onConflict: "day", ignoreDuplicates: false });
+  return { ok: true, via };
 }
 
 // ── a customer's text to the business number ──
@@ -441,6 +506,11 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
       if (step === "tick") return json(req, await tick(sb, now));
       if (step === "alerts") return json(req, await alerts(sb, await req.json().catch(() => ({})), now));
       const body = await req.json().catch(() => ({}));
+      if (step === "daily_report") {
+        const user = await officeUser(sb, req);
+        if (!user) return json(req, { error: "unauthorized" }, 401);
+        return json(req, await dailyReport(sb, user, body, now));
+      }
       if (step === "reply") {
         const user = await officeUser(sb, req);
         if (!user) return json(req, { error: "unauthorized" }, 401);
