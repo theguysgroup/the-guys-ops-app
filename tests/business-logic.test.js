@@ -50,7 +50,7 @@ const DECLS = [
   // sales automations + My Day
   'fmtMoney', 'workClockDue', 'sydneyNowPast', 'NEW_LEAD_ALERT_FROM', 'leadArrivedAt', 'newLeadUnhandled', 'chaseTooLong', 'quoteStale', 'bookedNoJob', 'MY_DAY_NEW_DAYS', 'myDayLists',
   // My Day counters (3 Oct)
-  'esc', 'quoteDueReason', 'shiftDaySummary', 'MD_BUBBLES', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
+  'esc', 'quoteDueReason', 'shiftDaySummary', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
 ];
 
 function extractDecl(source, name){
@@ -547,6 +547,8 @@ function testSalesAutomations(sb){
   // new 6/10, chasing 30/30 → 36 of 40 = 90%
   assertEqual([K.by.new, K.by.chasing, K.by.quotes, K.done, K.total, K.percent], [{done:6,total:10}, {done:30,total:30}, {done:0,total:0}, 36, 40, 90], 'mdCounts: done/total per bubble, % = all done ÷ all tasks');
   assertEqual(sb.mdCounts({}).percent, null, 'mdCounts: a day with no tasks has no % (left out of averages)');
+  // Lunch-break / daily-report lines: % then done/total per bubble that had tasks
+  assertEqual(sb.mdTaskLines(K, 'רון השלים'), ['רון השלים 90% מהמשימות (36 מתוך 40)', '• לידים חדשים: 6/10', '• מרדף: 30/30'], 'mdTaskLines: the % and each bubble with tasks');
   const dayRow = { day:'2026-09-29', items: { new: { a:{ a:'t', d:'t2', div:'Aircon' }, b:{ a:'t', d:null, div:'Chimney' } }, quotes: { q:{ a:'t', d:'t3', div:'Aircon' } } }, bookings: [{ c:'a', div:'Aircon', from:'new' }, { c:'z', div:'Aircon', from:'other' }] };
   const SK = sb.mdStoredCounts(dayRow);
   assertEqual([SK.by.new, SK.by.quotes, SK.percent], [{done:1,total:2}, {done:1,total:1}, 67], 'mdStoredCounts: a stored day counts its items (2 of 3 = 67%)');

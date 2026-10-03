@@ -1855,7 +1855,10 @@ async function setMyBreak(on){
   const t = d => d.toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' });
   const first = String(me.fullName||'').split(' ')[0] || me.fullName;
   const mins = !on && since ? Math.max(1, Math.round((now - new Date(since)) / 60000)) : 0;
-  const text = on ? `☕ ${first} יצא להפסקת צהריים (${t(now)}).` : `✅ ${first} חזר מההפסקה (${t(now)})${mins ? `, הפסקה של ${mins} דקות` : ''}.`;
+  // Going on the break also says where the day stands so far (Ofek 3/10), like the end-of-day report.
+  let progress = '';
+  try { progress = '\n\nעד עכשיו:\n' + mdTaskLines(mdCounts(mdLive(filterForProfile(STATE.data, me), now)), `${first} השלים`).join('\n'); } catch (e) {}
+  const text = on ? `☕ ${first} יצא להפסקת צהריים (${t(now)}).${progress}` : `✅ ${first} חזר מההפסקה (${t(now)})${mins ? `, הפסקה של ${mins} דקות` : ''}.`;
   showToast(on ? 'Break started' : `Welcome back${mins ? ` (${mins} min break)` : ''}`);
   loadShiftEvents(); render();
   // The owners hear about it on WhatsApp (once WhatsApp is connected).
@@ -3825,8 +3828,14 @@ function quoteDueReason(c, localToday){
   return `Follow-up date ${fmtDateShort(c.nextFollowUp)} has come${late ? ` (${late} day${late===1?'':'s'} late)` : ' (today)'}: call, then set the next date or move the stage`;
 }
 // The end-of-day report (Hebrew, for the owners): Ron's tasks, then what happened in the business today.
+// Ron's tasks in Hebrew, as in the daily report: the % and done/total per bubble (also in the lunch-break message).
+const MD_HE = { new:'לידים חדשים', chasing:'מרדף', decide:'מרדף 21+ ימים', followups:'מעקבים', quotes:'הצעות מחיר', reviews:'בקשת ביקורת' };
+function mdTaskLines(k, lead){
+  return [`${lead} ${k.percent===null ? '—' : k.percent + '%'} מהמשימות (${k.done} מתוך ${k.total})`,
+    ...MD_BUBBLES.map(([b]) => { const x = k.by[b] || { done:0, total:0 }; return x.total ? `• ${MD_HE[b]}: ${x.done}/${x.total}` : ''; }).filter(Boolean)];
+}
 function mdDailyReportText(k, today){
-  const data = STATE.data, he = { new:'לידים חדשים', chasing:'מרדף', decide:'מרדף 21+ ימים', followups:'מעקבים', quotes:'הצעות מחיר', reviews:'בקשת ביקורת' };
+  const data = STATE.data;
   const day = parseLocalDate(today).toLocaleDateString('he-IL', { weekday:'long', day:'numeric', month:'numeric' });
   const leads = (data.contacts||[]).filter(c => localDay(leadArrivedAt(c) || c.createdAt) === today);
   const count = (arr, f) => { const m = {}; arr.forEach(x => { const v = f(x) || 'אחר'; m[v] = (m[v]||0) + 1; }); return Object.entries(m).sort((a,b) => b[1]-a[1]).map(([n, v]) => `${n} ${v}`).join(', '); };
@@ -3838,8 +3847,7 @@ function mdDailyReportText(k, today){
   const lines = [
     `📊 דוח יומי – ${day}`,
     '',
-    `רון השלים ${k.percent===null ? '—' : k.percent + '%'} מהמשימות (${k.done} מתוך ${k.total})`,
-    ...MD_BUBBLES.map(([b]) => { const x = k.by[b] || { done:0, total:0 }; return x.total ? `• ${he[b]}: ${x.done}/${x.total}` : ''; }).filter(Boolean),
+    ...mdTaskLines(k, 'רון השלים'),
     '',
     `לידים חדשים היום: ${leads.length}${leads.length ? ` (${count(leads, c => c.division)})` : ''}`,
     leads.length ? `מקורות: ${count(leads, c => sourceLabel(c.source))}` : '',
