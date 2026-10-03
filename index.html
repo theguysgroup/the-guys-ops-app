@@ -190,6 +190,11 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 @media (max-width: 900px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; } .app-grid { grid-template-columns: minmax(0, 1fr) !important; } .sidebar { flex-direction: row !important; overflow-x: auto; border-inline-end:none !important; border-bottom:1px solid var(--line); min-width: 0; } .sidebar nav { display:flex; gap:2px; } .sidebar nav > div { display:flex; align-items:center; } }
 @media (max-width: 560px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
 .mobile-nav-toggle { display: none; }
+/* Desktop (Ofek 3/10): the sidebar stays in place and scrolls on its own; the page scrolls without dragging it along. */
+@media (min-width: 901px) {
+  .app-grid { align-items: start; }
+  .sidebar { position: sticky !important; top: 0; height: 100vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+}
 /* true phone widths — collapse the sidebar into a slim top bar with a hamburger toggle instead of the
    cramped horizontal-scrolling nav strip used at tablet widths (900px rule above). */
 @media (max-width: 640px) {
@@ -245,7 +250,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .pipe-dot { width: 8px; height: 8px; border-radius: 99px; background: var(--stage, var(--ink-faint)); flex: none; }
 .pipe-title { font-family: 'Figtree', sans-serif; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink); }
 .pipe-count { font-family: 'Figtree', sans-serif; font-size: 11px; font-weight: 700; color: var(--on-primary); background: var(--stage, var(--ink-soft)); border-radius: 99px; padding: 2px 9px; }
-.pipe-body { padding: 11px; display: flex; flex-direction: column; gap: 9px; min-height: 90px; }
+.pipe-body { padding: 11px; display: flex; flex-direction: column; gap: 9px; min-height: 90px; max-height: calc(100vh - 230px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }  /* each column scrolls on its own (Ofek 3/10) */
 .pipe-empty { font-size: 11.5px; color: var(--ink-faint); text-align: center; padding: 14px 0; }
 .lead-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 11px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 7px; transition: border-color .15s ease, box-shadow .15s ease, transform .15s cubic-bezier(.2,.85,.25,1); animation: leadCardIn .3s ease both; }
 .lead-card:hover, .lead-card:focus-visible { border-color: var(--primary); box-shadow: var(--shadow-lg); transform: translateY(-2px); }
