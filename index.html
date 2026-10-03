@@ -963,7 +963,7 @@ async function loadFromSupabase(){
     contacts: (contacts||[]).map(c => ({
       id:c.id, fullName:c.full_name, phone:c.phone||'', email:c.email||'', postcode:c.postcode||'',
       division:c.division, source:c.source, status:c.status, createdAt:c.created_at,
-      nextFollowUp:c.next_follow_up||'', followupNote:c.followup_note||'',
+      nextFollowUp:c.next_follow_up||'', followupNote:c.followup_note||'', notes:c.notes||'',
       estimatedValue:c.estimated_value||0, salesValue:c.sales_value||0, jobDescription:c.job_description||'',
       linkedJobId:c.linked_job_id, starred:c.starred, lastReadAt:c.last_read_at,
       tags:c.tags||[], messages:c.messages||[], activityLog: logsFor('contact', c.id),
@@ -1027,7 +1027,7 @@ function contactPatchToRow(patch){
   const map = {
     fullName:'full_name', phone:'phone', email:'email', postcode:'postcode', division:'division',
     source:'source', status:'status', createdAt:'created_at', nextFollowUp:'next_follow_up',
-    followupNote:'followup_note', estimatedValue:'estimated_value', salesValue:'sales_value',
+    followupNote:'followup_note', notes:'notes', estimatedValue:'estimated_value', salesValue:'sales_value',
     jobDescription:'job_description', linkedJobId:'linked_job_id', starred:'starred',
     lastReadAt:'last_read_at', tags:'tags', messages:'messages',
     lostReason:'lost_reason', stageChangedAt:'stage_changed_at', chasingSince:'chasing_since', chaseCalls:'chase_calls', chaseRound:'chase_round', chaseAlertDone:'chase_alert_done',
@@ -1716,7 +1716,7 @@ function mapContactRow(c){
   return {
     id:c.id, fullName:c.full_name, phone:c.phone||'', email:c.email||'', postcode:c.postcode||'',
     division:c.division, source:c.source, status:c.status, createdAt:c.created_at,
-    nextFollowUp:c.next_follow_up||'', followupNote:c.followup_note||'',
+    nextFollowUp:c.next_follow_up||'', followupNote:c.followup_note||'', notes:c.notes||'',
     estimatedValue:c.estimated_value||0, salesValue:c.sales_value||0, jobDescription:c.job_description||'',
     linkedJobId:c.linked_job_id, starred:c.starred, lastReadAt:c.last_read_at,
     tags:c.tags||[], messages:c.messages||[],
@@ -4093,6 +4093,18 @@ function leadFollowupContextFor(c){
   const title = r.title.endsWith(suffix) ? r.title.slice(0, -suffix.length) : r.title;
   return r.note ? title+' — '+r.note : title;
 }
+// A general note on the customer (Ofek 3/10): anything to remember (gate code, dog, prefers texts…). Shown on the card
+// details, on top of the conversation, and in the full profile.
+function setLeadNotes(id, value){
+  const c = contactById(id); if (!c) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const v = String(value||'').trim();
+  if ((c.notes||'') === v) return;
+  c.notes = v; db.contacts.update(id, { notes: v });
+  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', v ? 'Customer note updated' : 'Customer note cleared');
+  showToast(v ? 'Note saved' : 'Note cleared');
+  const b = document.getElementById('inbox-note-banner'); if (b) { b.style.display = v ? '' : 'none'; b.querySelector('span').textContent = v; }
+}
 function setLeadFollowupNote(id, value){ const c = contactById(id); if (c) { c.followupNote = value; db.contacts.update(id, { followupNote: value }); } }
 function toggleLeadStar(id, event){
   if (event) event.stopPropagation();
@@ -4192,6 +4204,7 @@ function renderCrmInboxThreadAndDetails(c){
         </span>
       </div>
       ${ctx ? `<div class="followup-context-banner">📌 Follow-up: ${esc(ctx)}</div>` : ''}
+      <div id="inbox-note-banner" class="followup-context-banner" style="${c.notes ? '' : 'display:none'}">📝 Note: <span>${esc(c.notes||'')}</span></div>
       <div id="inbox-conversation-thread" class="chat-thread crm-inbox-thread-body">${renderLeadConversation(c.id)}</div>
       <div class="crm-inbox-composer">${renderLeadComposer(c.id, 'inbox')}</div>
     </div>
@@ -4200,7 +4213,8 @@ function renderCrmInboxThreadAndDetails(c){
         ${leadTagChip(c.division, LEAD_STATUS_COLOR[leadStage(c)])}
         ${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}
       </div>
-      <div class="field"><label>Tags</label>${renderLeadTags(c.id, 'inbox')}</div>
+      <div class="field"><label>📝 Notes</label><textarea rows="3" placeholder="Anything to remember about this customer: gate code, dog, best time to call…" onchange="setLeadNotes('${c.id}',this.value)">${esc(c.notes||'')}</textarea></div>
+      <div class="field" style="margin-top:9px"><label>Tags</label>${renderLeadTags(c.id, 'inbox')}</div>
       <div class="field" style="margin-top:9px"><label>Stage</label>${leadStageControl(c)}</div>
       ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
       ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">Lost reason: <b>${esc(lostReasonLabel(lostReasonOf(c)))}</b></div>` : ''}
@@ -4485,6 +4499,7 @@ function openLeadModal(contactId){
           <div class="field" id="lm-booked-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Booked'?'':'none'}"><label>Job booked for</label><input type="date" id="lm-booked-for" value="${c?esc(c.bookedFor||''):''}"><span class="hint">The day it's booked in ServiceM8 — 2 days after it with no job, you get a reminder</span></div>
           <div class="field" id="lm-lost-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Lost'?'':'none'}"><label>Why was it lost?</label><select id="lm-lost-reason"><option value="">— choose a reason —</option>${LOST_REASONS.map(r=>`<option value="${r.key}" ${c&&lostReasonOf(c)===r.key?'selected':''}>${esc(r.label)}</option>`).join('')}</select></div>
           <div class="field" style="margin-top:11px"><label>What they need</label><textarea rows="2" id="lm-desc">${c?esc(c.jobDescription||''):''}</textarea></div>
+          <div class="field" style="margin-top:11px"><label>📝 Notes</label><textarea rows="3" id="lm-notes" placeholder="Anything to remember about this customer: gate code, dog, best time to call…">${c?esc(c.notes||''):''}</textarea></div>
           ${c ? `<div class="field" style="margin-top:11px"><label>Tags</label>${renderLeadTags(c.id, 'modal')}</div>` : ''}
           ${c ? renderContactJobsBlock(c) : ''}
           ${c ? renderCallsBlock(c) : ''}
@@ -4620,6 +4635,7 @@ async function saveLeadModal(contactId){
     followupNote: (document.getElementById('lm-followup-note')||{}).value ?? (prev ? prev.followupNote : ''),
     nextFollowUp: document.getElementById('lm-followup').value,
     jobDescription: document.getElementById('lm-desc').value,
+    notes: ((document.getElementById('lm-notes')||{}).value ?? (prev ? prev.notes : '')).trim(),
   };
   const stageChanged = !prev || leadStage(prev) !== stagePicked;
   if (stageChanged && stagePicked!=='Won') {
