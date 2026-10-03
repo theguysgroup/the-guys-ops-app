@@ -3870,7 +3870,7 @@ function mdDailyReportText(k, today, ended){
     '',
     ...mdTaskLines(k, 'רון השלים'),
     '',
-    `לידים חדשים היום: ${leads.length}${leads.length ? ` (${count(leads, c => c.division)})` : ''}`,
+    `סה"כ לידים חדשים היום: ${leads.length}${leads.length ? ` (${count(leads, c => DIV_HE[c.division] || c.division)})` : ''}`,
     leads.length ? `מקורות: ${count(leads, c => sourceLabel(c.source))}` : '',
     `צ'אטים מהאתר: ${chats}`,
     `לידים שנסגרו היום (הוזמנו): ${bookings.length}`,
