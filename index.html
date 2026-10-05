@@ -6910,18 +6910,17 @@ function renderPayrollExpenses(data, viewChips){
     : pill(r.refund==='Refunded' ? 'good' : r.refund==='Pending Refund' ? 'warn' : 'neutral', r.refund==='Pending Refund' ? 'Pending' : (r.refund || 'N/A'));
   const body = rows.length ? rows.map(r => `<tr>
       <td class="mono">${fmtDateShort(r.date)}</td>
-      <td class="wrap" style="min-width:180px"><div>${esc(r.item)}</div>${r.job ? `<div class="stat-sub">${esc(r.job)}</div>` : ''}</td>
+      <td class="wrap" style="min-width:170px"><div>${esc(r.item)}${r.receipt ? fileLinkHtml(r.receipt) : ''}</div>${r.job ? `<div class="stat-sub">${esc(r.job)}</div>` : ''}${r.receipt ? '' : '<div class="stat-sub" style="color:var(--warn)">no receipt</div>'}</td>
       <td>${r.kind==='equipment' ? statusSelect('equipCategory', r.id, r.category, ['', ...SPEND_CATEGORIES], ()=>'neutral', v=>v||'Not set', false) : pill('neutral', 'Job parts')}</td>
-      <td>${r.supplier ? `<button type="button" class="xlink" onclick="setExpenseFilter('exSupplier','${jsStr(r.supplier)}')" title="Only ${esc(r.supplier)}">${esc(r.supplier)}</button>` : '<span class="hint">—</span>'}</td>
+      <td class="wrap" style="max-width:150px">${r.supplier ? `<button type="button" class="xlink" style="text-align:start" onclick="setExpenseFilter('exSupplier','${jsStr(r.supplier)}')" title="Only ${esc(r.supplier)}">${esc(r.supplier)}</button>` : '<span class="hint">—</span>'}</td>
       <td>${r.technician ? techTag(r.technician) : '—'}</td>
       <td>${r.kind==='equipment' ? statusSelect('equipPaidBy', r.id, r.paidBy, [...technicianNames(data), 'Business'], ()=>'neutral', v=>v, false) : esc(r.paidBy || '—')}</td>
       <td class="num">${fmtMoney(r.amount)}</td>
-      <td>${r.receipt ? fileLinkHtml(r.receipt) : '<span class="hint">none</span>'}</td>
       <td>${refundPill(r)}</td>
       <td><div style="display:flex;gap:4px">${r.kind==='equipment'
         ? `<button class="btn ghost small" onclick="openEquipActivityModal('${r.id}')">💬 ${recordActivityCount(r.rec)}</button><button class="btn ghost small" onclick="openEquipSpendModal('${r.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteEquipSpend('${r.id}')">Delete</button>`
         : `<button class="btn ghost small" onclick="openJobModal('${r.id}')">Open job</button>`}</div></td>
-    </tr>`).join('') : `<tr><td colspan="10">${emptyState('No purchases match', 'Try another period, or clear the filters.')}</td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="9">${emptyState('No purchases match', 'Try another period, or clear the filters.')}</td></tr>`;
   const tile = (label, value, sub, accent) => `<div class="card stat-card" style="--stat-accent:${accent}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div><div class="stat-sub">${sub}</div></div>`;
   const filtered = tech || cat || sup;
   return `
@@ -6947,7 +6946,7 @@ function renderPayrollExpenses(data, viewChips){
       ${tile('Still to pay back', fmtMoney(waiting), 'to technicians, with their weekly pay', waiting > 0 ? 'var(--warn)' : 'var(--good)')}
     </div>
     ${segs.length > 1 ? `<div class="card" style="margin-bottom:16px"><div class="stat-label" style="margin-bottom:8px">By category</div>${splitBar(segs)}${splitRows(segs)}</div>` : ''}
-    <div class="table-wrap exp-table"><table><thead><tr><th>Bought</th><th class="wrap">Item</th><th>Category</th><th>Supplier</th><th>Technician</th><th>Paid by</th><th class="num">Amount</th><th>Receipt</th><th>Paid back</th><th></th></tr></thead><tbody>${body}</tbody></table></div>
+    <div class="table-wrap exp-table"><table><thead><tr><th>Bought</th><th class="wrap">Item</th><th>Category</th><th>Supplier</th><th>Technician</th><th>Paid by</th><th class="num">Amount</th><th>Paid back</th><th></th></tr></thead><tbody>${body}</tbody></table></div>
     <div class="hint" style="margin-top:6px">Paid by a technician = paid back with his weekly pay, on its own invoice. Paid by the business = an expense only. Both come off the net profit. Parts for a job are changed on the job (Open job).</div>
   `;
 }
