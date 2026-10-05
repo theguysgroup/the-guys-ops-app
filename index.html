@@ -453,6 +453,13 @@ function jobDaysWaiting(j, today){ return daysBetween(parseLocalDate(j.date), pa
 function jobIsLate(j, data, today){ return j.paymentStatus!=='Paid' && jobDaysWaiting(j, today) > paymentTermDays(data); }
 function jobGst(job){ return job.includesGST ? round2(job.amount*(STATE.data.settings.gstRatePercent/100)) : 0; }
 function jobTotalCollected(job){ return round2(job.amount + jobGst(job)); }
+// Closings take the total the customer paid, GST included (Ofek 6 Oct). Jobs keep the amount before GST, which
+// commissions, payroll and the dashboard all work from. Kept to 4 decimals so amount + GST always adds back to the
+// exact total (whole cents miss by a cent on about 1 total in 11).
+function amountExGst(total, includesGST){
+  const t = Number(total) || 0;
+  return includesGST ? Math.round(t / (1 + STATE.data.settings.gstRatePercent/100) * 10000) / 10000 : round2(t);
+}
 // Pay model (Ofek, Sep 2026): commission = (amount ex-GST − the job's expenses/parts) × %. The one
 // exception is an Independent Contractor (Alessandro), who covers his own expenses — his % is taken on
 // the full ex-GST amount. job.amount is already ex-GST everywhere in this app (GST sits on top, see jobGst).
@@ -5195,7 +5202,7 @@ function openJobModal(jobId){
           <div class="field"><label>Entered By</label><input id="jm-enteredby" value="${esc(job?.enteredBy || currentProfile?.fullName || '')}"></div>
         </div>
         <label class="checkline" style="margin-top:11px"><input type="checkbox" id="jm-review" ${job?.reviewTaken?'checked':''}> Review taken</label>
-        <label class="checkline" style="margin-top:6px"><input type="checkbox" id="jm-noask" ${job?.reviewDoNotAsk?'checked':''}> Don't ask this customer for a Google review <span class="hint" style="font-weight:400">(unhappy customer or complaint: the Ask for review button is blocked for this job)</span></label>
+        <label class="checkline" style="margin-top:6px"><input type="checkbox" id="jm-noask" ${job?.reviewDoNotAsk?'checked':''}> Don't ask for a review</label>
 
         <div class="modal-section">Job expenses</div>
         <div class="grid-3">
@@ -7219,11 +7226,11 @@ function closingCard(c){
       <div style="flex:1;min-width:0">
         <div style="margin-bottom:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${techTag(c.technicianName)}<span class="mono" style="font-size:11.5px;color:var(--ink-soft)">${fmtDateShort(c.date)}</span>${pill('neutral', c.jobType||'—')}</div>
         <div style="font-weight:600;font-size:13.5px;margin-bottom:3px">${custLink(c.customerName, null, c.linkedJobId)} <span class="mono" style="color:var(--ink-soft);font-weight:500">— ${c.linkedJobId ? invoiceLink(c.linkedJobId, c.invoiceNumber) : esc(c.invoiceNumber||'—')}</span></div>
-        <div class="mono" style="font-size:13px;margin-bottom:3px">${fmtMoney(c.amount)} <span style="color:var(--ink-soft);font-family:'Figtree',sans-serif">(${c.includesGST ? 'GST '+fmtMoney(round2(c.amount*(STATE.data.settings.gstRatePercent/100)))+' added' : 'no GST'})</span></div>
+        <div class="mono" style="font-size:13px;margin-bottom:3px">${fmtMoney(jobTotalCollected(c))} <span style="color:var(--ink-soft);font-family:'Figtree',sans-serif">(${c.includesGST ? 'incl. GST '+fmtMoney(jobGst(c)) : 'no GST'})</span></div>
         <div style="margin-bottom:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${pill(statusTone, c.paymentStatus)}${c.paymentMethod?pill('neutral', c.paymentMethod):''}${linkedJob ? `<span style="font-size:11px;color:var(--ink-soft)">→ linked to Job ${esc(linkedJob.invoiceNumber||'')}</span>` : ''}</div>
         ${(c.partsCost>0 || c.partsPaidBy) ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:2px">Parts: ${fmtMoney(c.partsCost||0)}${c.partsPaidBy?' · paid by '+esc(c.partsPaidBy):''}</div>` : ''}
         ${c.notes ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${esc(c.notes)}</div>` : ''}
-        <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${c.reviewTaken ? pill('good','Review taken') : pill('neutral','Review not taken')}${c.reviewDoNotAsk ? pill('bad',"Don't ask for a review") : ''}</div>
+        ${c.reviewDoNotAsk ? `<div style="margin-top:4px">${pill('bad',"Don't ask for a review")}</div>` : ''}
         <div style="font-size:11px;color:var(--ink-faint);margin-top:4px">Posted by ${esc(c.postedBy)} · ${new Date(c.createdAt).toLocaleString('en-AU')}</div>
       </div>
       ${canEditClosings() ? `<div style="display:flex;flex-direction:column;gap:6px"><button class="btn ghost small" onclick="openClosingEdit('${c.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteClosing('${c.id}')">Delete</button></div>` : ''}
@@ -7280,14 +7287,13 @@ function openClosingEdit(id){
           <div class="field"><label>Customer Name</label>${customerPickerInput('ce-customer', c.customerName, 'Start typing — pick the customer from the CRM')}</div>
           <div class="field"><label>Invoice #</label><input id="ce-invoice" value="${esc(c.invoiceNumber||'')}"></div>
           <div class="field"><label>Job Type</label><select id="ce-jobtype">${types.map(t=>opt(t, c.jobType)).join('')}</select></div>
-          <div class="field"><label>Amount (pre-GST)</label><input type="number" id="ce-amount" value="${Number(c.amount)||0}"></div>
-          <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="ce-nogst" ${c.includesGST?'':'checked'}> No GST</label><span class="hint">Off = GST added on top of Amount (${STATE.data.settings.gstRatePercent}%)</span></div>
+          <div class="field"><label>Total paid (incl. GST)</label><input type="number" step="0.01" id="ce-amount" value="${jobTotalCollected(c)}"></div>
+          <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="ce-nogst" ${c.includesGST?'':'checked'}> No GST</label><span class="hint">Off = the total includes GST (${STATE.data.settings.gstRatePercent}%)</span></div>
           <div class="field"><label>Payment Status</label><select id="ce-status">${CLOSING_PAYMENT_STATUSES.map(v=>opt(v, c.paymentStatus)).join('')}</select></div>
           <div class="field"><label>Method</label><select id="ce-method" onchange="if(this.value==='Cash') document.getElementById('ce-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.map(v=>opt(v, c.paymentMethod||'', v||'—')).join('')}</select></div>
           <div class="field"><label>Parts Cost</label><input type="number" id="ce-partscost" value="${Number(c.partsCost)||0}"></div>
           <div class="field"><label>Parts Paid By</label><select id="ce-partsby">${opt('', c.partsPaidBy||'', '—')}${allTechs.map(t=>opt(t, c.partsPaidBy)).join('')}${opt('Business', c.partsPaidBy)}</select></div>
-          <div class="field"><label>Google review</label><select id="ce-review">${opt('no', c.reviewTaken?'yes':'no', 'Not taken')}${opt('yes', c.reviewTaken?'yes':'no', 'Taken')}</select></div>
-          <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="ce-noask" ${c.reviewDoNotAsk?'checked':''}> Don't ask for a review</label><span class="hint">Unhappy customer or a complaint</span></div>
+          <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="ce-noask" ${c.reviewDoNotAsk?'checked':''}> Don't ask for a review</label></div>
         </div>
         <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="ce-notes">${esc(c.notes||'')}</textarea></div>
         <div class="field" style="margin-top:11px">
@@ -7308,12 +7314,16 @@ async function saveClosingEdit(){
   if (!cl) { closeClosingEdit(); return; }
   const val = id => document.getElementById(id).value;
   const pick = resolveCustomerInput('ce-customer');
+  // The window shows the total paid; the closing and the job keep the amount before GST. An untouched total keeps
+  // the stored amount exactly (no rounding change logged as an edit).
+  const includesGST = !document.getElementById('ce-nogst').checked, total = round2(Number(val('ce-amount')) || 0);
+  const amount = total===jobTotalCollected(cl) && includesGST===!!cl.includesGST ? cl.amount : amountExGst(total, includesGST);
   const v = {
     technicianName: val('ce-tech'), date: val('ce-date') || cl.date, customerName: pick.name, invoiceNumber: val('ce-invoice').trim(),
-    jobType: val('ce-jobtype'), amount: Number(val('ce-amount')) || 0, includesGST: !document.getElementById('ce-nogst').checked,
+    jobType: val('ce-jobtype'), amount, includesGST,
     paymentStatus: val('ce-status'), paymentMethod: val('ce-method'), partsCost: Number(val('ce-partscost')) || 0,
     partsPaidBy: val('ce-partsby'), notes: val('ce-notes'), invoiceFileUrl: CLOSING_EDIT.file,
-    reviewTaken: val('ce-review')==='yes', reviewDoNotAsk: document.getElementById('ce-noask').checked,
+    reviewDoNotAsk: document.getElementById('ce-noask').checked,
   };
   if (!v.customerName) { modalError('Please enter a customer name'); return; }
   if (!v.invoiceNumber) { modalError('Please enter an invoice number'); return; }
@@ -7328,7 +7338,7 @@ async function saveClosingEdit(){
   if (changed.length) await db.closings.update(cl.id, closingPatch);
   let note = '';
   if (job) {
-    const toJob = { reviewTaken:'reviewTaken', reviewDoNotAsk:'reviewDoNotAsk', technicianName:'technician', date:'date', customerName:'customerName', invoiceNumber:'invoiceNumber', jobType:'jobType', amount:'amount', includesGST:'includesGST', paymentStatus:'paymentStatus', paymentMethod:'paymentMethod', partsCost:'partsCost', partsPaidBy:'partsPaidBy', notes:'notes', invoiceFileUrl:'invoiceFile' };
+    const toJob = { reviewDoNotAsk:'reviewDoNotAsk', technicianName:'technician', date:'date', customerName:'customerName', invoiceNumber:'invoiceNumber', jobType:'jobType', amount:'amount', includesGST:'includesGST', paymentStatus:'paymentStatus', paymentMethod:'paymentMethod', partsCost:'partsCost', partsPaidBy:'partsPaidBy', notes:'notes', invoiceFileUrl:'invoiceFile' };
     const jp = {}; changed.forEach(k => { if (toJob[k]) jp[toJob[k]] = v[k]; });
     // Marked paid now → paid today (commission counts in the week the customer paid); back to unpaid → no paid date.
     if ('paymentStatus' in jp) { if (jp.paymentStatus==='Paid' && !job.datePaid) jp.datePaid = todayStr(); if (jp.paymentStatus!=='Paid') jp.datePaid = ''; }
@@ -7362,14 +7372,13 @@ function renderClosings(profile, data){
         <div class="field"><label>Customer Name</label>${customerPickerInput('cf-customer', '', 'Start typing — pick the customer from the CRM')}</div>
         <div class="field"><label>Invoice #</label><input id="cf-invoice" placeholder="e.g. 1008"></div>
         <div class="field"><label>Job Type</label><select id="cf-jobtype">${jobTypesForTech(defaultTech).map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
-        <div class="field"><label>Amount (pre-GST)</label><input type="number" id="cf-amount" value="0"></div>
-        <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="cf-nogst"> No GST</label><span class="hint">Off = GST added on top of Amount (${STATE.data.settings.gstRatePercent}%)</span></div>
+        <div class="field"><label>Total paid (incl. GST)</label><input type="number" step="0.01" id="cf-amount" value="0"></div>
+        <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="cf-nogst"> No GST</label><span class="hint">Off = the total includes GST (${STATE.data.settings.gstRatePercent}%)</span></div>
         <div class="field"><label>Payment Status</label><select id="cf-status">${CLOSING_PAYMENT_STATUSES.map(s=>`<option value="${s}">${s}</option>`).join('')}</select></div>
         <div class="field"><label>Method</label><select id="cf-method" onchange="if(this.value==='Cash') document.getElementById('cf-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.map(m=>`<option value="${m}">${m||'—'}</option>`).join('')}</select></div>
         <div class="field"><label>Parts Cost</label><input type="number" id="cf-partscost" value="0"></div>
         <div class="field"><label>Parts Paid By</label><select id="cf-partsby"><option value="">—</option>${allTechs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}<option value="Business">Business</option></select></div>
-        <div class="field"><label>Google review</label><select id="cf-review"><option value="no">Not taken</option><option value="yes">Taken</option></select><span class="hint">Not taken = the job waits in "Ask for a review" on My Day. Nothing is sent until someone presses Ask for review</span></div>
-        ${profile.role==='technician' ? '' : `<div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="cf-noask"> Don't ask for a review</label><span class="hint">Unhappy customer or a complaint: no review request</span></div>`}
+        ${profile.role==='technician' ? '' : `<div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="cf-noask"> Don't ask for a review</label></div>`}
       </div>
       <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="cf-notes"></textarea></div>
       <div class="field" style="margin-top:11px">
@@ -7395,19 +7404,19 @@ function postClosing(){
   if (!invoiceNumber) { closingFormError('Please enter an invoice number'); return; }
   closingFormError(null);
   const jobType = document.getElementById('cf-jobtype').value;
-  const amount = Number(document.getElementById('cf-amount').value) || 0;
-  // "No GST" toggle, default OFF (unpressed) — unpressed means GST applies and is added on top of the
-  // pre-GST Amount (includesGST:true); pressing "No GST" means includesGST:false (no GST at all).
+  // "No GST" toggle, default OFF (unpressed) — unpressed means the total the customer paid includes GST
+  // (includesGST:true); pressing "No GST" means includesGST:false (no GST at all). The job keeps the amount before GST.
   const includesGST = !document.getElementById('cf-nogst').checked;
+  const total = round2(Number(document.getElementById('cf-amount').value) || 0);
+  const amount = amountExGst(total, includesGST);
   const paymentStatus = document.getElementById('cf-status').value;
   const paymentMethod = document.getElementById('cf-method').value;
   const partsCost = Number(document.getElementById('cf-partscost').value) || 0;
   const partsPaidBy = document.getElementById('cf-partsby').value;
   const notes = document.getElementById('cf-notes').value;
   const invoiceFileUrl = CLOSING_FILE;
-  const reviewTaken = document.getElementById('cf-review').value === 'yes';
   const reviewDoNotAsk = !!(document.getElementById('cf-noask') && document.getElementById('cf-noask').checked);
-  const gathered = { technicianName, date, customerName, contactId: pick.contactId, invoiceNumber, jobType, amount, includesGST, paymentStatus, paymentMethod, partsCost, partsPaidBy, notes, invoiceFileUrl, reviewTaken, reviewDoNotAsk };
+  const gathered = { technicianName, date, customerName, contactId: pick.contactId, invoiceNumber, jobType, amount, includesGST, paymentStatus, paymentMethod, partsCost, partsPaidBy, notes, invoiceFileUrl, reviewDoNotAsk };
 
   // % commission isn't a field on this form (it's Jobs-table-only) — it's looked up automatically from
   // the commission-rates table. When there's no automatic rate for this technician/job-type combo, don't
@@ -7419,7 +7428,7 @@ function postClosing(){
   // difference first, so a second payment on a split invoice doesn't silently replace the first one.
   const existing = STATE.data.jobs.find(j => j.invoiceNumber === invoiceNumber);
   if (!existing) { go(); return; }
-  confirmAction(`Invoice #${invoiceNumber} already exists: ${existing.customerName}, ${fmtMoney(existing.amount)} (excl. GST), ${existing.paymentStatus}${existing.paymentMethod?' · '+existing.paymentMethod:''}. Posting this closing will update that job to ${fmtMoney(amount)}, ${paymentStatus}${paymentMethod?' · '+paymentMethod:''}. If this is a second payment on a split invoice, cancel and add it in Jobs & Commissions instead.`,
+  confirmAction(`Invoice #${invoiceNumber} already exists: ${existing.customerName}, ${fmtMoney(jobTotalCollected(existing))} paid (${existing.includesGST ? 'incl. GST' : 'no GST'}), ${existing.paymentStatus}${existing.paymentMethod?' · '+existing.paymentMethod:''}. Posting this closing will update that job to ${fmtMoney(total)}, ${paymentStatus}${paymentMethod?' · '+paymentMethod:''}. If this is a second payment on a split invoice, cancel and add it in Jobs & Commissions instead.`,
     go, { danger:false, title:'This invoice is already a job', confirmLabel:'Update the existing job' });
 }
 function openCommissionPopup(gathered){
@@ -7478,8 +7487,7 @@ async function finalizeClosing(g, commissionPercent){
       paymentStatus: g.paymentStatus, paymentMethod: g.paymentMethod, partsCost: g.partsCost,
       partsPaidBy: g.partsPaidBy, notes: g.notes,
     };
-    // A later closing on the same invoice (a split payment) only adds review info, never clears "taken" or "don't ask".
-    if (g.reviewTaken) patch.reviewTaken = true;
+    // A later closing on the same invoice (a split payment) only adds "don't ask", never clears it.
     if (g.reviewDoNotAsk) patch.reviewDoNotAsk = true;
     if (g.paymentStatus==='Paid' && !existingJob.datePaid) patch.datePaid = g.date || todayStr();
     if (g.paymentStatus!=='Paid') patch.datePaid = '';
@@ -7495,7 +7503,7 @@ async function finalizeClosing(g, commissionPercent){
       notes: g.notes || 'Created automatically from a Closings post.', datePaid: g.paymentStatus==='Paid'?(g.date || todayStr()):'',
       paidToTechnician:'Not Paid', enteredBy: g.technicianName, cashConfirmed:false,
       invoiceFile: g.invoiceFileUrl||null, transferReceiptFile:null, equipmentRentalFile:null,
-      reviewTaken: !!g.reviewTaken, reviewDoNotAsk: !!g.reviewDoNotAsk,
+      reviewTaken: false, reviewDoNotAsk: !!g.reviewDoNotAsk,
     };
     try { job = await db.jobs.create({ activityLog:[], ...values }); }
     catch (err) { return; }   // db.jobs.create() already showed an error toast; leave the closing form as-is so the user can retry
@@ -7506,7 +7514,7 @@ async function finalizeClosing(g, commissionPercent){
     jobType: g.jobType, amount: g.amount, includesGST: g.includesGST, paymentStatus: g.paymentStatus, paymentMethod: g.paymentMethod,
     partsCost: g.partsCost, partsPaidBy: g.partsPaidBy, notes: g.notes, invoiceFileUrl: g.invoiceFileUrl,
     postedBy: currentProfile?.fullName || g.technicianName, createdAt: new Date().toISOString(), linkedJobId: job.id,
-    reviewTaken: !!g.reviewTaken, reviewDoNotAsk: !!g.reviewDoNotAsk,
+    reviewTaken: false, reviewDoNotAsk: !!g.reviewDoNotAsk,
   };
   try { await db.closings.create(closingValues); }
   catch (err) { return; }   // db.closings.create() already showed an error toast

@@ -27,7 +27,7 @@ const DECLS = [
   // date/money primitives
   'MONTHS', 'MONTHS_FULL', 'pad2', 'parseLocalDate', 'fmtLocal', 'daysBetween', 'round2', 'todayStr',
   'weekOf', 'monthOf', 'currentWeekKey',
-  'jobGst', 'jobTotalCollected', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
+  'jobGst', 'jobTotalCollected', 'amountExGst', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
   'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
   // CRM / attribution
@@ -619,6 +619,31 @@ function testReviewNeed(sb){
   assertEqual(N(j({}), sent('2026-10-05', 1), true), 'again', 'reviewNeed auto: sent automatically yesterday, no review → ask again');
 }
 
+function testClosingTotalInclGst(sb){
+  // Closings take the total the customer paid, GST included (Ofek 6 Oct). The job keeps the amount before GST, and
+  // every technician calculation (commission, payroll) uses that — never the GST.
+  sb.STATE.data.settings = { gstRatePercent:10 };
+  sb.STATE.data.employees = [
+    { name:'Guy', roles:['Technician'], status:'Active', employmentType:'Freelance-commission' },
+    { name:'Alessandro', roles:['Technician'], status:'Active', employmentType:'Independent Contractor' },
+  ];
+  assertEqual(sb.amountExGst(383.90, true), 349, 'amountExGst: $383.90 paid incl. GST = $349 before GST (the ducted price + GST)');
+  assertEqual(sb.amountExGst(330, true), 300, 'amountExGst: $330 incl. GST = $300');
+  assertEqual(sb.amountExGst(250, false), 250, 'amountExGst: no GST (cash) → the total is the amount');
+  const j400 = { technician:'Guy', amount: sb.amountExGst(400, true), includesGST:true, partsCost:0, commissionPercent:30 };
+  assertEqual([j400.amount, sb.jobGst(j400), sb.jobTotalCollected(j400)], [363.6364, 36.36, 400], 'amountExGst: $400 → $363.6364 + $36.36 GST adds back to exactly $400');
+  // Every whole-dollar total from $1 to $5,000 adds back exactly (whole cents would miss by a cent on ~1 in 11).
+  let off = 0; for (let d = 1; d <= 5000; d++) { const job = { amount: sb.amountExGst(d, true), includesGST:true }; if (sb.jobTotalCollected(job) !== d) off++; }
+  assertEqual(off, 0, 'amountExGst: amount + GST always equals the total paid');
+  // Commission is on the amount before GST, minus parts for employees (Ofek's model).
+  const j440 = { technician:'Guy', amount: sb.amountExGst(440, true), includesGST:true, partsCost:40, commissionPercent:30 };
+  assertEqual(sb.jobCommissionAmount(j440), 108, 'commission: $440 paid incl. GST → 30% of ($400 − $40 parts) = $108, no GST in it');
+  const jAl = { technician:'Alessandro', amount: sb.amountExGst(550, true), includesGST:true, partsCost:50, commissionPercent:50 };
+  assertEqual(sb.jobCommissionAmount(jAl), 250, 'commission: contractor $550 paid incl. GST → 50% of $500, no GST, parts not deducted');
+  const jCash = { technician:'Guy', amount: sb.amountExGst(300, false), includesGST:false, partsCost:0, commissionPercent:30 };
+  assertEqual([sb.jobGst(jCash), sb.jobCommissionAmount(jCash)], [0, 90], 'cash, no GST: commission on the full $300');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
@@ -630,6 +655,7 @@ testDashboard(loadSandbox());
 testJobCustomerLink(loadSandbox());
 testSalesAutomations(loadSandbox());
 testReviewNeed(loadSandbox());
+testClosingTotalInclGst(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
