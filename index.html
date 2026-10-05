@@ -467,6 +467,36 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .xlink { cursor: pointer; color: var(--primary-strong); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
 .xlink:hover { text-decoration-style: solid; }
 button.xlink { background:none; border:none; padding:0; font:inherit; }
+/* The technician's invoice preview (Ofek 7 Oct): paper colours on purpose, the same in the light and dark app. */
+.inv-scroll { max-height: 62vh; overflow: auto; border-radius: 8px; background: #e9e5df; padding: 14px; }
+.inv { background: #fff; color: #1d1b19; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,.12); padding: 32px 34px; font-size: 13px; line-height: 1.45; min-width: 560px; }
+.inv b { color: #1d1b19; }
+.inv-top { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
+.inv-title { font-size: 28px; font-weight: 800; letter-spacing: .03em; }
+.inv-kind { color: #6b6560; font-weight: 600; margin-top: 2px; }
+.inv-due { background: #f5f2ee; border-radius: 6px; padding: 10px 14px; min-width: 170px; }
+.inv-amount { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.inv-label { font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #6b6560; margin-bottom: 4px; }
+.inv-meta { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: 6px 36px; margin: 20px 0 16px; padding-bottom: 14px; border-bottom: 1px solid #e3dfd9; }
+.inv-meta span { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #6b6560; }
+.inv-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 18px; }
+.inv-sub { color: #6b6560; font-size: 12px; }
+.inv-miss { background: #fff1cc; color: #8a5a00; border-radius: 4px; padding: 0 5px; font-weight: 600; font-size: 12px; }
+.inv-ok { color: #2e7d4f; font-weight: 600; font-size: 12px; white-space: nowrap; }
+.inv-table table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.inv-table th { text-align: left; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #6b6560; font-weight: 700; padding: 7px 8px; border-bottom: 1.5px solid #1d1b19; background: none; white-space: normal; }
+.inv-table td { padding: 8px; border-bottom: 1px solid #e3dfd9; vertical-align: top; color: #1d1b19; background: none; }
+.inv-table th:first-child, .inv-table td:first-child { padding-left: 0; }
+.inv-table th:last-child, .inv-table td:last-child { padding-right: 0; }
+.inv-table .num { text-align: right; white-space: nowrap; }
+.inv-totals { margin: 12px 0 0 auto; width: min(300px, 100%); display: grid; gap: 5px; font-variant-numeric: tabular-nums; }
+.inv-totals div { display: flex; justify-content: space-between; gap: 12px; }
+.inv-totals div span:first-child { color: #6b6560; }
+.inv-grand { border-top: 1.5px solid #1d1b19; padding-top: 7px; font-size: 16px; font-weight: 800; }
+.inv-grand span:first-child { color: #1d1b19 !important; }
+.inv-pay { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.inv-pay > div { background: #f5f2ee; border-radius: 6px; padding: 10px 12px; }
+.inv-foot { margin-top: 16px; color: #6b6560; font-size: 11.5px; }
 .exp-table select { min-width:0 !important; width:auto; }   /* Expenses & receipts: the in-table pickers take only the room they need */
 /* A big number that opens a list keeps the number's own color (red reads as a problem); the dotted line shows it's clickable. */
 .stat-value .xlink { color: inherit; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
@@ -611,11 +641,11 @@ function payrollMaterialItems(data, person){
   const out = [];
   (data.equipmentSpend||[]).forEach(e => {
     if (e.paidBy!==person || !((Number(e.cost)||0) > 0) || (e.reimbursed!=='Pending' && e.reimbursed!=='Reimbursed')) return;
-    out.push({ kind:'equipment', id:e.id, label:e.item, bought:e.date, entered: e.createdAt ? localDay(e.createdAt) : e.date, amount: round2(e.cost), paid: e.reimbursed==='Reimbursed', paidWeek: e.reimbursedWeek||null, receipt: e.receiptFile||null });
+    out.push({ kind:'equipment', id:e.id, label:e.item, bought:e.date, entered: e.createdAt ? localDay(e.createdAt) : e.date, amount: round2(e.cost), paid: e.reimbursed==='Reimbursed', paidWeek: e.reimbursedWeek||null, receipt: e.receiptFile||null, supplier: e.supplier||'', category: e.category||'' });
   });
   (data.jobs||[]).forEach(j => {
     if (j.partsPaidBy!==person || !((Number(j.partsCost)||0) > 0) || (j.partsRefundStatus!=='Pending Refund' && j.partsRefundStatus!=='Refunded')) return;
-    out.push({ kind:'parts', id:j.id, job:j, label:`Parts for job #${j.invoiceNumber||'—'}${j.customerName ? ' · '+j.customerName : ''}`, bought:j.date, entered: j.partsPendingAt ? localDay(j.partsPendingAt) : j.date, amount: round2(j.partsCost), paid: j.partsRefundStatus==='Refunded', paidWeek: j.partsRefundWeek||null, desc: j.partsDescription||'', receipt: j.partsReceiptFile||null });
+    out.push({ kind:'parts', id:j.id, job:j, label:`Parts for job #${j.invoiceNumber||'—'}${j.customerName ? ' · '+j.customerName : ''}`, bought:j.date, entered: j.partsPendingAt ? localDay(j.partsPendingAt) : j.date, amount: round2(j.partsCost), paid: j.partsRefundStatus==='Refunded', paidWeek: j.partsRefundWeek||null, desc: j.partsDescription||'', receipt: j.partsReceiptFile||null, supplier: j.partsSupplier||'', category: 'Job parts' });
   });
   return out;
 }
@@ -629,6 +659,27 @@ function computePayrollMaterials(data, person, weekKey){
   const total = round2(lines.reduce((s,l)=>s+l.amount,0));
   return { lines, total, gst: materialsGst(total) };
 }
+// ── The technician's weekly invoices, made by the app (Ofek 7 Oct; replaces uploading a file). Two a week: his commission
+// (the jobs the customer paid that week, as on the Payroll board) and the equipment & materials he paid for himself.
+// No technician is registered for GST, so neither invoice charges GST; the expenses one shows the GST inside the
+// receipts, and he is paid back the full amount. Number = name + the week's Sunday + C (commission) or E (expenses).
+// parties: { from:{ name, legalName, abn, address, email, phone, bankName, bankBsb, bankAccount }, to:{ legalName, abn, acn } }.
+function payrollInvoiceNumber(person, weekKey, kind){ return `${String(person||'').toUpperCase().replace(/[^A-Z0-9]/g, '')}-${payrollWeekOf(weekKey).start.slice(2).replace(/-/g, '')}-${kind==='salary' ? 'C' : 'E'}`; }
+function buildPayrollInvoice(data, person, weekKey, kind, parties, issued){
+  const c = computePayrollCommission(data, person, weekKey);
+  const deducts = commissionDeductsParts(person);
+  const base = { kind, person, number: payrollInvoiceNumber(person, weekKey, kind), issued, weekStart: c.week.start, weekEnd: c.week.end, from: parties.from, to: parties.to };
+  if (kind==='salary') {
+    const lines = c.lines.map(l => ({ date: l.job.date, invoice: l.job.invoiceNumber || '', customer: l.job.customerName || '', jobType: l.job.jobType || '',
+      amount: round2(Number(l.job.amount) || 0), parts: deducts ? round2(Number(l.job.partsCost) || 0) : 0, rate: Number(l.job.commissionPercent) || 0, commission: l.commission }));
+    return { ...base, deductsParts: deducts, lines, total: c.total, gst: 0 };
+  }
+  const lines = c.materials.lines.map(l => ({ date: l.bought, item: l.kind==='parts' ? (l.desc || 'Parts') : l.label,
+    detail: l.kind==='parts' ? `Job parts · job #${(l.job && l.job.invoiceNumber) || '—'}` : (l.category || ''), supplier: l.supplier || '', receipt: !!l.receipt, gst: materialsGst(l.amount), amount: l.amount }));
+  return { ...base, lines, total: c.materials.total, gst: round2(lines.reduce((s, l) => s + l.gst, 0)) };
+}
+// What's still missing before an invoice can be made: the ABN (without one the business has to hold back tax).
+function payrollInvoiceMissing(inv){ return inv.from && String(inv.from.abn || '').trim() ? [] : ['ABN']; }
 // GST for a period (Ofek 6 Oct): collected = the GST on the period's jobs that are paid; we get back = the GST inside
 // what we bought — equipment (by purchase date) and parts on the period's jobs (receipt totals include GST). Google and
 // Meta ads are left out for now: their spend comes in without GST. To pay = collected − we get back.
@@ -1203,6 +1254,7 @@ async function loadFromSupabase(){
       id:e.id, name:e.name, roles:e.roles||[], status:e.status, employmentType:e.employment_type||'',
       phone:e.phone||'', email:e.email||'', address:e.address||'', commissionNotes:e.commission_notes||'',
       bankDetails:e.bank_details||'', abn:e.abn||'', startDate:e.start_date, endDate:e.end_date,
+      legalName:e.legal_name||'', bankName:e.bank_name||'', bankBsb:e.bank_bsb||'', bankAccount:e.bank_account||'',
       department:e.department||'', contractFile:e.contract_file, passportPhotoFile:e.passport_photo_file,
       licensePhotoFile:e.license_photo_file, localLicenseFile:e.local_license_file,
       activityLog: logsFor('employee', e.id),
@@ -1308,6 +1360,7 @@ function employeePatchToRow(patch){
     name:'name', roles:'roles', status:'status', employmentType:'employment_type',
     phone:'phone', email:'email', address:'address', commissionNotes:'commission_notes',
     bankDetails:'bank_details', abn:'abn', startDate:'start_date', endDate:'end_date',
+    legalName:'legal_name', bankName:'bank_name', bankBsb:'bank_bsb', bankAccount:'bank_account',
     department:'department', contractFile:'contract_file', passportPhotoFile:'passport_photo_file',
     licensePhotoFile:'license_photo_file', localLicenseFile:'local_license_file',
   };
@@ -1531,6 +1584,7 @@ const db = {
       const map = {
         unpaidReminderDays:'unpaid_reminder_days', quoteStaleDays:'quote_stale_days', gstRatePercent:'gst_rate_percent',
         companyName:'company_name', abn:'abn', defaultPaymentTerms:'default_payment_terms', ownerSalaries:'owner_salaries',
+        legalName:'legal_name', acn:'acn',
         phoneEnabled:'phone_enabled', phoneRouting:'phone_routing', chatAutoSms:'chat_auto_sms',
       };
       const row = {}; for (const k in patch) if (map[k]) row[map[k]] = patch[k];
@@ -1905,7 +1959,7 @@ function mapSettingsRow(r){
   return {
     unpaidReminderDays:r.unpaid_reminder_days, quoteStaleDays:r.quote_stale_days,
     gstRatePercent:r.gst_rate_percent, companyName:r.company_name,
-    abn:r.abn||'', defaultPaymentTerms:r.default_payment_terms||'',
+    abn:r.abn||'', defaultPaymentTerms:r.default_payment_terms||'', legalName:r.legal_name||'', acn:r.acn||'',
     ownerSalaries: r.owner_salaries||{},
     phoneEnabled: !!r.phone_enabled, phoneRouting: r.phone_routing || {}, chatAutoSms: !!r.chat_auto_sms, reviewsFrom: r.reviews_from || '2026-10-03', whatsappEnabled: !!r.whatsapp_enabled, reviewRequestsAuto: !!r.review_requests_auto,
   };
@@ -2060,7 +2114,7 @@ let MODAL_TASK_ID = null; // id of the task currently open in the task modal (nu
 // Kept apart from MODAL_FILES, which every closeModal() empties (posting a closing can open the commission popup).
 let PAGE_FILES = {};
 const START_LINK = (() => { try { const q = new URLSearchParams(location.search); const week = q.get('week'); return { tab: q.get('tab'), week: /^\d{4}-\d{2}-\d{2}$/.test(week||'') ? week : null, used: false }; } catch (e) { return { used: true }; } })();
-const PAGE_FILE_IDS = ['cf-photo', 'cf-parts-receipt', 'eqf-receipt', 'inv-salary', 'inv-expenses'];
+const PAGE_FILE_IDS = ['cf-photo', 'cf-parts-receipt', 'eqf-receipt'];
 const fileStore = id => PAGE_FILE_IDS.includes(id) ? PAGE_FILES : MODAL_FILES;
 
 function getRealProfile(){ return STATE.profiles.find(p => p.id===STATE.currentProfileId) || null; }
@@ -2439,7 +2493,6 @@ function readPickedFile(fieldId, file){
   reader.onload = () => {
     fileStore(fieldId)[fieldId] = reader.result;
     const row = document.getElementById(fieldId+'-row'); if (row) row.innerHTML = fileRowInner(fieldId, reader.result);
-    if (/^inv-/.test(fieldId)) renderKeepingInput();   // an invoice: show its Send button now
   };
   reader.readAsDataURL(file);
   if (RECEIPT_SUPPLIER_FIELD[fieldId]) readStoreFromReceipt(fieldId, file);
@@ -2503,7 +2556,6 @@ function supplierFieldHtml(label, id, value){
 function clearFileField(fieldId){
   fileStore(fieldId)[fieldId] = null;
   const row = document.getElementById(fieldId+'-row'); if (row) row.innerHTML = fileRowInner(fieldId, null);
-  if (/^inv-/.test(fieldId)) renderKeepingInput();
 }
 // A file dropped next to a box (not on it) must not make the browser leave the app to show the file.
 ['dragover', 'drop'].forEach(t => window.addEventListener(t, e => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault(); }));
@@ -6684,25 +6736,172 @@ function payrollInvoiceCard(c, person, weekKey){
   const p = jsStr(person);
   const slot = (kind, title, amount, sub) => {
     const file = kind==='salary' ? st.salaryInvoiceFile : st.expensesInvoiceFile, at = kind==='salary' ? st.salaryInvoiceAt : st.expensesInvoiceAt;
-    const picked = PAGE_FILES['inv-' + kind];
     return `<div class="mini-tile">
       <div class="stat-label">${title}</div>
       <div class="stat-value" style="font-size:18px">${payMoney(amount)}</div>
       <div class="stat-sub">${sub}</div>
-      ${file ? `<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${pill('good', 'Sent ' + fmtDateShort(localDay(at)))}<a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">📄 View</a></div>` : ''}
       ${kind==='expenses' && c.materials.lines.length ? `<div style="margin-top:10px">${c.materials.lines.map(l => `<div class="split-row" style="grid-template-columns:1fr auto auto"><span>${esc(l.kind==='parts' ? `Parts · job #${l.job.invoiceNumber||'—'}${l.desc ? ' · ' + l.desc : ''}` : l.label)} <span class="hint">${fmtDateShort(l.bought)}</span></span><span class="num">${payMoney(l.amount)}</span><span>${l.receipt ? fileLinkHtml(l.receipt) : '<span class="hint">no receipt</span>'}</span></div>`).join('')}</div>` : ''}
-      <div style="margin-top:8px">${fileField(file ? 'Send a new one instead' : 'The invoice', 'inv-' + kind, picked, RECEIPT_TYPES)}</div>
-      ${picked ? `<button class="btn primary small" style="margin-top:8px" onclick="sendPayrollInvoice('${kind}','${p}','${weekKey}')">Send ${kind==='salary' ? 'commission' : 'expenses'} invoice</button>` : ''}
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${file ? `${pill('good', 'Sent ' + fmtDateShort(localDay(at)))}<a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">📄 View</a>` : ''}
+        ${amount > 0 ? `<button class="btn small ${file ? '' : 'primary'}" onclick="openPayrollInvoice('${kind}','${p}','${weekKey}')">${file ? 'Create it again' : 'Create invoice'}</button>` : (file ? '' : '<span class="hint">Nothing to invoice this week</span>')}
+      </div>
     </div>`;
   };
   return `<div class="card" style="margin-top:14px">
     <div class="stat-label">Your invoices for this week <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">${payrollWeekLabel(c.week)}</span></div>
-    <div class="stat-sub" style="margin:4px 0 10px">Two invoices each week: one for your commission, one for the equipment &amp; materials you paid for. Drag the file in or choose it, then press Send. When the commission invoice is in, Ofek and Noam get a message that you can be paid.</div>
+    <div class="stat-sub" style="margin:4px 0 10px">Two invoices each week: one for your commission, one for the equipment &amp; materials you paid for. Press Create invoice: the app fills it in from this week's jobs and purchases, you check it and press Send. When the commission invoice is in, Ofek and Noam get a message that you can be paid.</div>
     <div class="grid-2">
       ${slot('salary', 'Commission invoice', c.total, 'commission on the jobs paid this week')}
       ${slot('expenses', 'Equipment &amp; materials invoice', c.materials.total, c.materials.total ? `incl. GST ${payMoney(c.materials.gst)} · what you paid for yourself` : 'nothing to claim this week')}
     </div>
   </div>`;
+}
+// ── Creating the invoice (Ofek 7 Oct): the technician's details come from his employee card (Resources → Employees; a
+// technician reads only his own, through my_invoice_details), the business's from Settings. The preview is the same
+// invoice as the PDF that is sent (pdfmake, loaded the first time).
+const PDFMAKE_SCRIPTS = ['https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/pdfmake.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/vfs_fonts.min.js'];
+let PDFMAKE = null, CUR_INVOICE = null;
+function ensurePdfMake(){
+  if (!PDFMAKE) PDFMAKE = loadScriptOnce(PDFMAKE_SCRIPTS[0]).then(() => loadScriptOnce(PDFMAKE_SCRIPTS[1])).then(() => window.pdfMake).catch(e => { PDFMAKE = null; throw e; });
+  return PDFMAKE;
+}
+async function payrollInvoiceParties(person){
+  const s = STATE.data.settings || {};
+  const to = { legalName: s.legalName || s.companyName || 'The Guys Service Group Pty Ltd', abn: s.abn || '', acn: s.acn || '' };
+  let e = (STATE.data.employees || []).find(x => x.name===person);
+  if (!e) {   // a technician can't read the team list: his own card comes from the database function
+    const { data } = await sb.rpc('my_invoice_details');
+    if (data) e = { name: data.name, legalName: data.legal_name, abn: data.abn, address: data.address, email: data.email, phone: data.phone, bankName: data.bank_name, bankBsb: data.bank_bsb, bankAccount: data.bank_account };
+  }
+  e = e || { name: person };
+  const prof = (STATE.profiles || []).find(x => x.technicianName===person);
+  return { to, from: { name: person, legalName: e.legalName || (prof && prof.fullName) || person, abn: e.abn || '', address: e.address || '', email: e.email || '', phone: e.phone || '', bankName: e.bankName || '', bankBsb: e.bankBsb || '', bankAccount: e.bankAccount || '' } };
+}
+function invMoney(n){ return '$' + round2(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function invDate(d){ const x = parseLocalDate(d); return `${x.getDate()} ${MONTHS[x.getMonth()]} ${x.getFullYear()}`; }
+function invWeek(inv){ const a = parseLocalDate(inv.weekStart), b = parseLocalDate(inv.weekEnd); return `Sun ${a.getDate()} ${MONTHS[a.getMonth()]} – Sat ${b.getDate()} ${MONTHS[b.getMonth()]} ${b.getFullYear()}`; }
+function fmtAbn(v){ const d = String(v || '').replace(/\D/g, ''); return d.length===11 ? `${d.slice(0,2)} ${d.slice(2,5)} ${d.slice(5,8)} ${d.slice(8)}` : String(v || ''); }
+function invRate(p){ return (Math.round(Number(p) * 100) / 100) + '%'; }
+function invTitle(inv){ return inv.kind==='salary' ? 'Commission' : 'Equipment & materials paid back'; }
+function invBank(f){ return f.bankName || f.bankBsb || f.bankAccount ? [f.bankName && `Account name ${f.bankName}`, f.bankBsb && `BSB ${f.bankBsb}`, f.bankAccount && `Account ${f.bankAccount}`].filter(Boolean) : null; }
+// The invoice on screen (paper colours on purpose: it looks the same in a light or dark app).
+function payrollInvoiceHtml(inv){
+  const f = inv.from, t = inv.to, bank = invBank(f), miss = txt => `<span class="inv-miss">${txt}</span>`;
+  const head = inv.kind==='salary'
+    ? `<tr><th>Job date</th><th>Job</th><th class="num">Job amount<br>excl. GST</th>${inv.deductsParts ? '<th class="num">Parts</th>' : ''}<th class="num">Rate</th><th class="num">Commission</th></tr>`
+    : `<tr><th>Bought</th><th>Item</th><th>Supplier</th><th>Receipt</th><th class="num">GST in it</th><th class="num">Amount<br>incl. GST</th></tr>`;
+  const rows = inv.kind==='salary'
+    ? inv.lines.map(l => `<tr><td>${esc(fmtDateShort(l.date))}</td><td>#${esc(l.invoice || '—')}${l.customer ? ' · ' + esc(l.customer) : ''}<div class="inv-sub">${esc(l.jobType)}</div></td><td class="num">${invMoney(l.amount)}</td>${inv.deductsParts ? `<td class="num">${l.parts ? invMoney(l.parts) : '—'}</td>` : ''}<td class="num">${invRate(l.rate)}</td><td class="num">${invMoney(l.commission)}</td></tr>`).join('')
+    : inv.lines.map(l => `<tr><td>${esc(fmtDateShort(l.date))}</td><td>${esc(l.item)}${l.detail ? `<div class="inv-sub">${esc(l.detail)}</div>` : ''}</td><td>${esc(l.supplier || '—')}</td><td>${l.receipt ? '<span class="inv-ok">Attached in the app</span>' : '<span class="inv-sub">none</span>'}</td><td class="num">${invMoney(l.gst)}</td><td class="num">${invMoney(l.amount)}</td></tr>`).join('');
+  const how = inv.kind==='salary'
+    ? (inv.deductsParts ? 'Commission = (job amount excl. GST − parts) × the rate. A job counts in the week the customer paid.' : 'Commission = job amount excl. GST × the rate. A job counts in the week the customer paid.')
+    : 'Paid back in full. The GST shown is inside the store receipts.';
+  return `<div class="inv">
+    <div class="inv-top">
+      <div><div class="inv-title">INVOICE</div><div class="inv-kind">${esc(invTitle(inv))} · pay week ${esc(invWeek(inv))}</div></div>
+      <div class="inv-due"><div class="inv-label">Amount due</div><div class="inv-amount">${invMoney(inv.total)}</div><div class="inv-sub">with the weekly pay</div></div>
+    </div>
+    <div class="inv-meta"><div><span>Invoice no.</span><b>${esc(inv.number)}</b></div><div><span>Date</span><b>${esc(invDate(inv.issued))}</b></div><div><span>Pay week</span><b>${esc(invWeek(inv))}</b></div></div>
+    <div class="inv-parties">
+      <div><div class="inv-label">From</div><b>${esc(f.legalName)}</b><br>ABN ${f.abn ? esc(fmtAbn(f.abn)) : miss('missing')}${f.address ? '<br>' + esc(f.address) : ''}${f.email || f.phone ? `<br><span class="inv-sub">${esc([f.email, f.phone].filter(Boolean).join(' · '))}</span>` : ''}</div>
+      <div><div class="inv-label">Bill to</div><b>${esc(t.legalName)}</b><br>ABN ${t.abn ? esc(fmtAbn(t.abn)) : miss('missing')}${t.acn ? '<br>ACN ' + esc(t.acn) : ''}</div>
+    </div>
+    <div class="inv-table"><table><thead>${head}</thead><tbody>${rows}</tbody></table></div>
+    <div class="inv-totals">
+      ${inv.kind==='salary' ? `<div><span>${inv.lines.length} job${inv.lines.length===1 ? '' : 's'} paid by the customer this week</span><span></span></div>` : `<div><span>GST inside the receipts</span><span>${invMoney(inv.gst)}</span></div>`}
+      <div><span>GST on this invoice</span><span>Not charged</span></div>
+      <div class="inv-grand"><span>Total</span><span>${invMoney(inv.total)}</span></div>
+    </div>
+    <div class="inv-pay">
+      <div><div class="inv-label">Pay to</div>${bank ? bank.map(esc).join('<br>') : '<span class="inv-sub">Bank details are not on file</span>'}</div>
+      <div><div class="inv-label">How it is worked out</div><span class="inv-sub">${how}</span></div>
+    </div>
+    <div class="inv-foot">No GST has been charged: the supplier is not registered for GST. Created in The Guys app.</div>
+  </div>`;
+}
+// The same invoice as a PDF (A4).
+function payrollInvoicePdf(inv){
+  const ink = '#1d1b19', soft = '#6b6560', line = '#e3dfd9', tint = '#f5f2ee';
+  const f = inv.from, t = inv.to, bank = invBank(f);
+  const label = text => ({ text: text.toUpperCase(), fontSize: 7.5, bold: true, color: soft, characterSpacing: 0.8, margin: [0, 0, 0, 3] });
+  const small = text => ({ text, fontSize: 8.5, color: soft });
+  const salary = inv.kind==='salary';
+  const header = salary
+    ? ['Job date', 'Job', { text: 'Job amount excl. GST', alignment: 'right' }, ...(inv.deductsParts ? [{ text: 'Parts', alignment: 'right' }] : []), { text: 'Rate', alignment: 'right' }, { text: 'Commission', alignment: 'right' }]
+    : ['Bought', 'Item', 'Supplier', 'Receipt', { text: 'GST in it', alignment: 'right' }, { text: 'Amount incl. GST', alignment: 'right' }];
+  const body = salary
+    ? inv.lines.map(l => [fmtDateShort(l.date), { stack: [`#${l.invoice || '—'}${l.customer ? ' · ' + l.customer : ''}`, small(l.jobType)] }, { text: invMoney(l.amount), alignment: 'right' }, ...(inv.deductsParts ? [{ text: l.parts ? invMoney(l.parts) : '—', alignment: 'right' }] : []), { text: invRate(l.rate), alignment: 'right' }, { text: invMoney(l.commission), alignment: 'right' }])
+    : inv.lines.map(l => [fmtDateShort(l.date), { stack: [l.item, ...(l.detail ? [small(l.detail)] : [])] }, l.supplier || '—', l.receipt ? 'Attached in the app' : small('none'), { text: invMoney(l.gst), alignment: 'right' }, { text: invMoney(l.amount), alignment: 'right' }]);
+  const widths = salary ? (inv.deductsParts ? [52, '*', 78, 52, 40, 70] : [52, '*', 90, 44, 76]) : [44, '*', 78, 82, 52, 70];
+  const totalsRows = [
+    ...(salary ? [] : [['GST inside the receipts', invMoney(inv.gst)]]),
+    ['GST on this invoice', 'Not charged'],
+  ];
+  return {
+    pageSize: 'A4', pageMargins: [44, 44, 44, 60],
+    info: { title: `Invoice ${inv.number}`, author: f.legalName, subject: `${invTitle(inv)} · pay week ${invWeek(inv)}` },
+    defaultStyle: { font: 'Roboto', fontSize: 9.5, color: ink, lineHeight: 1.2 },
+    footer: (page, pages) => ({ margin: [44, 20, 44, 0], columns: [{ text: `${inv.number} · No GST has been charged: the supplier is not registered for GST.`, fontSize: 7.5, color: soft }, { text: `Page ${page} of ${pages}`, alignment: 'right', fontSize: 7.5, color: soft, width: 70 }] }),
+    content: [
+      { columns: [
+        { stack: [{ text: 'INVOICE', fontSize: 26, bold: true, characterSpacing: 1 }, { text: `${invTitle(inv)} · pay week ${invWeek(inv)}`, color: soft, bold: true, margin: [0, 2, 0, 0] }] },
+        { width: 170, table: { widths: ['*'], body: [[{ stack: [label('Amount due'), { text: invMoney(inv.total), fontSize: 20, bold: true }, small('with the weekly pay')], fillColor: tint, margin: [10, 8, 10, 8] }]] }, layout: 'noBorders' },
+      ] },
+      { margin: [0, 18, 0, 0], columns: [
+        { stack: [label('Invoice no.'), { text: inv.number, bold: true }] },
+        { stack: [label('Date'), { text: invDate(inv.issued), bold: true }] },
+        { stack: [label('Pay week'), { text: invWeek(inv), bold: true }] },
+      ] },
+      { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 507, y2: 0, lineWidth: 0.6, lineColor: line }], margin: [0, 14, 0, 14] },
+      { columns: [
+        { stack: [label('From'), { text: f.legalName, bold: true, fontSize: 11 }, `ABN ${f.abn ? fmtAbn(f.abn) : 'missing'}`, ...(f.address ? [f.address] : []), ...(f.email || f.phone ? [small([f.email, f.phone].filter(Boolean).join(' · '))] : [])] },
+        { stack: [label('Bill to'), { text: t.legalName, bold: true, fontSize: 11 }, `ABN ${fmtAbn(t.abn)}`, ...(t.acn ? [`ACN ${t.acn}`] : [])] },
+      ] },
+      { margin: [0, 20, 0, 0], table: { headerRows: 1, widths, body: [header.map(h => typeof h==='string' ? { text: h.toUpperCase(), fontSize: 7.5, bold: true, color: soft } : { ...h, text: h.text.toUpperCase(), fontSize: 7.5, bold: true, color: soft }), ...body] },
+        layout: { hLineWidth: (i, node) => i===0 ? 0 : i===1 ? 1.2 : 0.5, vLineWidth: () => 0, hLineColor: i => i===1 ? ink : line, paddingLeft: i => i===0 ? 0 : 6, paddingRight: (i, node) => i===node.table.widths.length - 1 ? 0 : 6, paddingTop: () => 6, paddingBottom: () => 6 } },
+      { margin: [0, 12, 0, 0], columns: [{ text: salary ? `${inv.lines.length} job${inv.lines.length===1 ? '' : 's'} paid by the customer this week` : '', color: soft }, { width: 230, table: { widths: ['*', 'auto'], body: [
+        ...totalsRows.map(([a, b]) => [{ text: a, color: soft }, { text: b, alignment: 'right' }]),
+        [{ text: 'Total', bold: true, fontSize: 13, margin: [0, 4, 0, 0] }, { text: invMoney(inv.total), bold: true, fontSize: 13, alignment: 'right', margin: [0, 4, 0, 0] }],
+      ] }, layout: { hLineWidth: (i, node) => i===node.table.body.length - 1 ? 1.2 : 0, vLineWidth: () => 0, hLineColor: () => ink, paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 3, paddingBottom: () => 3 } }] },
+      { margin: [0, 22, 0, 0], table: { widths: ['*', '*'], body: [[
+        { stack: [label('Pay to'), ...(bank || [small('Bank details are not on file')])], fillColor: tint, margin: [10, 8, 10, 8] },
+        { stack: [label('How it is worked out'), small(salary ? (inv.deductsParts ? 'Commission = (job amount excl. GST − parts) × the rate. A job counts in the week the customer paid.' : 'Commission = job amount excl. GST × the rate. A job counts in the week the customer paid.') : 'Paid back in full. The GST shown is inside the store receipts, which are attached in the app.')], fillColor: tint, margin: [10, 8, 10, 8] },
+      ]] }, layout: { hLineWidth: () => 0, vLineWidth: (i) => i===1 ? 6 : 0, vLineColor: () => '#ffffff' } },
+    ],
+  };
+}
+async function openPayrollInvoice(kind, person, weekKey){
+  const profile = getCurrentProfile();
+  const data = filterForProfile(STATE.data, profile);
+  let parties;
+  try { parties = await payrollInvoiceParties(person); } catch (e) { showToast('Could not load your details. Try again.'); return; }
+  const inv = { ...buildPayrollInvoice(data, person, weekKey, kind, parties, todayStr()), weekKey };
+  CUR_INVOICE = inv;
+  const missing = payrollInvoiceMissing(inv);
+  const owner = !!getRealProfile && ['owner', 'manager'].includes((getRealProfile() || {}).role);
+  const fixHint = owner ? `Add it in Resources → Employees → ${esc(person)}.` : 'Ask Ofek or Noam to add it to your employee card.';
+  ensurePdfMake().catch(() => {});   // start loading the PDF maker while the person reads
+  openModal(`
+    <div class="modal-back" onclick="if(event.target===this) closeModal()">
+      <div class="modal" style="max-width:860px">
+        <h2>${kind==='salary' ? 'Commission invoice' : 'Equipment &amp; materials invoice'}</h2>
+        <div class="modal-sub">Check it, then press Send. It's saved as a PDF${kind==='salary' ? ', and Ofek and Noam get a message that you can be paid' : ''}.</div>
+        ${missing.length ? `<div class="card tight" style="margin-bottom:12px;border-color:var(--warn)">${pill('warn', 'Missing: ' + missing.join(', '))} <span class="hint">The invoice can't be sent without an ABN. ${fixHint}</span></div>` : ''}
+        <div class="inv-scroll">${payrollInvoiceHtml(inv)}</div>
+        <div id="modal-error"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;flex-wrap:wrap">
+          <button class="btn" onclick="closeModal()">Cancel</button>
+          <button class="btn" onclick="downloadPayrollInvoice()">Download PDF</button>
+          <button class="btn primary" id="inv-send" ${missing.length ? 'disabled title="Add the ABN first"' : ''} onclick="sendPayrollInvoice('${kind}','${jsStr(person)}','${weekKey}')">Send invoice</button>
+        </div>
+      </div>
+    </div>`);
+}
+async function payrollInvoicePdfDataUrl(inv){ const pm = await ensurePdfMake(); return new Promise(res => pm.createPdf(payrollInvoicePdf(inv)).getDataUrl(res)); }
+async function downloadPayrollInvoice(){
+  const inv = CUR_INVOICE; if (!inv) return;
+  try { (await ensurePdfMake()).createPdf(payrollInvoicePdf(inv)).download(`Invoice ${inv.number}.pdf`); }
+  catch (e) { modalError('Could not make the PDF. Check the connection and try again.'); }
 }
 // ── Phone notifications (Ofek 6 Oct) ──
 // The app can be added to a phone's home screen (manifest + sw.js, which caches nothing). An owner turns notifications
@@ -6762,19 +6961,24 @@ function phoneNotificationsBar(){
 }
 async function sendPayrollInvoice(kind, person, weekKey){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
-  const picked = PAGE_FILES['inv-' + kind]; if (!picked) { showToast('Choose the invoice file first'); return; }
+  const inv = CUR_INVOICE;
+  if (!inv || inv.kind!==kind || inv.person!==person || inv.weekKey!==weekKey) { showToast('Open the invoice again and press Send'); return; }
+  if (payrollInvoiceMissing(inv).length) { modalError('Add the ABN first'); return; }
+  const btn = document.getElementById('inv-send'); if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  let pdf;
+  try { pdf = await payrollInvoicePdfDataUrl(inv); } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Send invoice'; } modalError('Could not make the PDF. Check the connection and try again.'); return; }
   const me = getRealProfile && getRealProfile();
-  const ref = await storeFile(`payroll/${weekKey}/${person}`, kind + '-invoice', picked);
-  if (!ref) return;   // storeFile already said why
+  const ref = await storeFile(`payroll/${weekKey}/${person}`, kind + '-invoice', pdf);
+  if (!ref) { if (btn) { btn.disabled = false; btn.textContent = 'Send invoice'; } return; }   // storeFile already said why
   const { data, error } = await sb.rpc('submit_payroll_invoice', { p_week: weekKey, p_kind: kind, p_file: ref, p_person: me && (me.role==='owner' || me.role==='manager') ? person : null });
-  if (error) { showToast('The invoice was not saved: ' + error.message); return; }
+  if (error) { if (btn) { btn.disabled = false; btn.textContent = 'Send invoice'; } modalError('The invoice was not saved: ' + error.message); return; }
   const who = (data && data.person) || person;
   if (!STATE.data.payrollWeeks) STATE.data.payrollWeeks = [];
   let row = STATE.data.payrollWeeks.find(x => x.weekKey===weekKey && x.person===who);
   if (!row) { row = { weekKey, person: who, cashCollected:false, salaryPaid:false }; STATE.data.payrollWeeks.push(row); }
   const now = new Date().toISOString();
   if (kind==='salary') { row.salaryInvoiceFile = ref; row.salaryInvoiceAt = now; } else { row.expensesInvoiceFile = ref; row.expensesInvoiceAt = now; }
-  PAGE_FILES['inv-' + kind] = null;
+  CUR_INVOICE = null; closeModal();
   if (kind==='salary') notifyOwnersInvoice(weekKey, who);
   showToast(kind==='salary' ? 'Commission invoice sent. Ofek and Noam will see you can be paid.' : 'Expenses invoice sent');
   render();
@@ -8745,7 +8949,13 @@ function openEmployeeModal(empId){
           <div class="field"><label>Start Date</label><input type="date" id="em-startdate" value="${emp?.startDate||''}"></div>
           <div class="field"><label>End Date</label><input type="date" id="em-enddate" value="${emp?.endDate||''}"></div>
         </div>
-        <div class="field" style="margin-top:11px"><label>Bank Details</label><input id="em-bank" value="${esc(emp?.bankDetails||'')}"></div>
+        <div class="modal-section">On their invoices <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">· a technician's weekly invoices are made from these (with the ABN and address above)</span></div>
+        <div class="grid-2">
+          <div class="field"><label>Full legal name <span class="hint">(as on the ABN)</span></label><input id="em-legalname" value="${esc(emp?.legalName||'')}" placeholder="e.g. Guy Galili"></div>
+          <div class="field"><label>Bank account name</label><input id="em-bankname" value="${esc(emp?.bankName||'')}" autocomplete="off"></div>
+          <div class="field"><label>BSB</label><input id="em-bankbsb" value="${esc(emp?.bankBsb||'')}" inputmode="numeric" autocomplete="off" placeholder="000-000"></div>
+          <div class="field"><label>Account number</label><input id="em-bankaccount" value="${esc(emp?.bankAccount||'')}" inputmode="numeric" autocomplete="off"></div>
+        </div>
         <div class="field" style="margin-top:11px"><label>Commission Notes</label><textarea rows="2" id="em-commissionnotes">${esc(emp?.commissionNotes||'')}</textarea></div>
         <div class="modal-section">Commission Rates</div>
         <div id="em-rates" class="grid-4" style="display:${isTech?'grid':'none'}">
@@ -8794,7 +9004,9 @@ async function saveEmployeeModal(empId){
     phone: document.getElementById('em-phone').value.trim(), email: document.getElementById('em-email').value.trim(),
     address: document.getElementById('em-address').value.trim(), abn: document.getElementById('em-abn').value.trim(),
     startDate: document.getElementById('em-startdate').value, endDate: document.getElementById('em-enddate').value,
-    bankDetails: document.getElementById('em-bank').value.trim(), commissionNotes: document.getElementById('em-commissionnotes').value,
+    legalName: document.getElementById('em-legalname').value.trim(), bankName: document.getElementById('em-bankname').value.trim(),
+    bankBsb: document.getElementById('em-bankbsb').value.trim(), bankAccount: document.getElementById('em-bankaccount').value.trim(),
+    commissionNotes: document.getElementById('em-commissionnotes').value,
     contractFile: MODAL_FILES['em-contractFile'] ?? job_or_null(prev,'contractFile'),
     passportPhotoFile: MODAL_FILES['em-passportPhotoFile'] ?? job_or_null(prev,'passportPhotoFile'),
     licensePhotoFile: MODAL_FILES['em-licensePhotoFile'] ?? job_or_null(prev,'licensePhotoFile'),
@@ -9069,6 +9281,8 @@ function renderSettings(profile){
       <div class="grid-3">
         <div class="field"><label>Company name</label><input value="${esc(s.companyName)}" onchange="updateBusinessProfileField('companyName', this.value.trim(), 'Company name')"></div>
         <div class="field"><label>ABN</label><input value="${esc(s.abn)}" onchange="updateBusinessProfileField('abn', this.value.trim(), 'ABN')"></div>
+        <div class="field"><label>Legal name <span class="hint">(on invoices)</span></label><input value="${esc(s.legalName)}" placeholder="The Guys Service Group Pty Ltd" onchange="updateBusinessProfileField('legalName', this.value.trim(), 'Legal name')"></div>
+        <div class="field"><label>ACN</label><input value="${esc(s.acn)}" onchange="updateBusinessProfileField('acn', this.value.trim(), 'ACN')"></div>
         <div class="field"><label>Default payment terms</label><input value="${esc(s.defaultPaymentTerms)}" placeholder="e.g. 7 days" onchange="updateBusinessProfileField('defaultPaymentTerms', this.value.trim(), 'Default payment terms')"></div>
       </div>
     </div>

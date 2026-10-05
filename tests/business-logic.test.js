@@ -61,6 +61,8 @@ const DECLS = [
   'payrollPeriod', 'techPeriodStats', 'hourlyPeriodStats',
   // Tasks views + Expenses & receipts (7 Oct)
   'boardForAssignees', 'tasksInView', 'taskPeople', 'SPEND_CATEGORIES', 'expenseRows', 'filterExpenseRows', 'supplierNames', 'KNOWN_STORES', 'storeWords', 'storeWordMatch', 'findStoreInText',
+  // The technician's weekly invoices, made by the app (7 Oct)
+  'payrollInvoiceNumber', 'buildPayrollInvoice', 'payrollInvoiceMissing', 'fmtAbn',
 ];
 
 function extractDecl(source, name){
@@ -806,6 +808,35 @@ function testTasksAndExpenses(sb){
   'findStoreInText: one misread letter, 0 read as O, MOBILE is not Mobil, SHELF is not Shell, top line + longer name wins, run-together words, no store inside other words');
 }
 
+function testPayrollInvoices(sb){
+  // Guy (commission on the amount before GST minus parts), pay week Sun 27 Sep – Sat 3 Oct 2026.
+  sb.STATE.data.employees = [{ name:'Guy', employmentType:'Freelance-commission' }, { name:'Alessandro', employmentType:'Independent Contractor' }];
+  const data = {
+    payrollWeeks: [], employees: sb.STATE.data.employees,
+    jobs: [
+      { id:'j1', technician:'Guy', date:'2026-09-28', amount:349, partsCost:0, commissionPercent:30, paymentStatus:'Paid', datePaid:'2026-09-28', invoiceNumber:'1012', customerName:'Sarah M.', jobType:'Aircon', partsRefundStatus:'N/A' },
+      { id:'j2', technician:'Guy', date:'2026-09-29', amount:549, partsCost:45, commissionPercent:30, paymentStatus:'Paid', datePaid:'2026-09-30', invoiceNumber:'1015', customerName:'David K.', jobType:'Aircon',
+        partsPaidBy:'Guy', partsRefundStatus:'Pending Refund', partsPendingAt:'2026-09-29T02:00:00Z', partsDescription:'Filter', partsSupplier:'Bunnings', partsReceiptFile:'sb:x' },
+      { id:'j3', technician:'Guy', date:'2026-10-01', amount:420, partsCost:0, commissionPercent:30, paymentStatus:'Unpaid', invoiceNumber:'1019', jobType:'Chimney', partsRefundStatus:'N/A' },
+      { id:'j4', technician:'Alessandro', date:'2026-09-29', amount:400, partsCost:50, commissionPercent:50, paymentStatus:'Paid', datePaid:'2026-09-29', invoiceNumber:'2001', jobType:'Pressure Washing', partsPaidBy:'Alessandro', partsRefundStatus:'N/A' },
+    ],
+    equipmentSpend: [{ id:'e1', date:'2026-10-02', createdAt:'2026-10-02T01:00:00Z', item:'Extension ladder', category:'Tools', supplier:'Total Tools', technician:'Guy', paidBy:'Guy', cost:330, reimbursed:'Pending', receiptFile:'sb:y' }],
+  };
+  const parties = { from:{ name:'Guy', legalName:'Guy Galili', abn:'' }, to:{ legalName:'The Guys Service Group Pty Ltd', abn:'51 695 019 339', acn:'695 019 339' } };
+  const c = sb.buildPayrollInvoice(data, 'Guy', '2026-09-27', 'salary', parties, '2026-10-04');
+  // 349 × 30% = 104.70; (549 − 45) × 30% = 151.20; the unpaid job is not on it
+  assertEqual([c.number, c.weekStart, c.weekEnd, c.lines.map(l => [l.invoice, l.amount, l.parts, l.rate, l.commission]), c.total, c.gst, c.deductsParts],
+    ['GUY-260927-C', '2026-09-27', '2026-10-03', [['1012', 349, 0, 30, 104.7], ['1015', 549, 45, 30, 151.2]], 255.9, 0, true], 'buildPayrollInvoice: commission = the jobs paid that week, parts taken off, no GST');
+  const e = sb.buildPayrollInvoice(data, 'Guy', '2026-09-27', 'expenses', parties, '2026-10-04');
+  // parts $45 (GST 4.09) and the ladder $330 (GST 30.00): paid back $375, GST inside 34.09
+  assertEqual([e.number, e.lines.map(l => [l.item, l.detail, l.supplier, l.receipt, l.gst, l.amount]), e.total, e.gst],
+    ['GUY-260927-E', [['Filter', 'Job parts · job #1015', 'Bunnings', true, 4.09, 45], ['Extension ladder', 'Tools', 'Total Tools', true, 30, 330]], 375, 34.09], 'buildPayrollInvoice: expenses = what he paid for himself, with supplier, receipt and the GST inside');
+  const a = sb.buildPayrollInvoice(data, 'Alessandro', '2026-09-27', 'salary', parties, '2026-10-04');
+  assertEqual([a.number, a.deductsParts, a.lines.map(l => [l.parts, l.commission]), a.total], ['ALESSANDRO-260927-C', false, [[0, 200]], 200], 'buildPayrollInvoice: an independent contractor gets the rate on the full amount (parts not taken off)');
+  assertEqual([sb.payrollInvoiceMissing(c), sb.payrollInvoiceMissing({ from:{ abn:'51 695 019 339' } })], [['ABN'], []], 'payrollInvoiceMissing: no ABN, no invoice');
+  assertEqual([sb.fmtAbn('51695019339'), sb.fmtAbn('51 695 019 339'), sb.fmtAbn('123')], ['51 695 019 339', '51 695 019 339', '123'], 'fmtAbn: 11 digits in the usual groups');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
 testFunnelLossReasonsSpeedToLead(loadSandbox());
@@ -823,6 +854,7 @@ testGstSummary(loadSandbox());
 testDashboardMoneyVisuals(loadSandbox());
 testPayrollPeriods(loadSandbox());
 testTasksAndExpenses(loadSandbox());
+testPayrollInvoices(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
