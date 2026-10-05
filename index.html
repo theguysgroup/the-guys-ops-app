@@ -674,6 +674,7 @@ function filterExpenseRows(rows, f){
 }
 // Every supplier name the app knows (typed on a purchase or a job, or on the Suppliers list), the most used first.
 function supplierNames(data){
+  data = data || {};
   const count = new Map(), add = (n, w) => { const k = String(n||'').trim(); if (!k) return; const key = k.toLowerCase(); const cur = count.get(key); count.set(key, { name: cur ? cur.name : k, n: (cur ? cur.n : 0) + w }); };
   (data.equipmentSpend||[]).forEach(e => add(e.supplier, 1));
   (data.jobs||[]).forEach(j => add(j.partsSupplier, 1));
@@ -6908,7 +6909,7 @@ function renderPayrollExpenses(data, viewChips){
     : pill(r.refund==='Refunded' ? 'good' : r.refund==='Pending Refund' ? 'warn' : 'neutral', r.refund==='Pending Refund' ? 'Pending' : (r.refund || 'N/A'));
   const body = rows.length ? rows.map(r => `<tr>
       <td class="mono">${fmtDateShort(r.date)}</td>
-      <td class="wrap"><div>${esc(r.item)}</div>${r.job ? `<div class="stat-sub">${esc(r.job)}</div>` : ''}</td>
+      <td class="wrap" style="min-width:200px"><div>${esc(r.item)}</div>${r.job ? `<div class="stat-sub">${esc(r.job)}</div>` : ''}</td>
       <td>${r.kind==='equipment' ? statusSelect('equipCategory', r.id, r.category, ['', ...SPEND_CATEGORIES], ()=>'neutral', v=>v||'Not set', false) : pill('neutral', 'Job parts')}</td>
       <td>${r.supplier ? `<button type="button" class="xlink" onclick="setExpenseFilter('exSupplier','${jsStr(r.supplier)}')" title="Only ${esc(r.supplier)}">${esc(r.supplier)}</button>` : '<span class="hint">—</span>'}</td>
       <td>${r.technician ? techTag(r.technician) : '—'}</td>
@@ -6916,9 +6917,9 @@ function renderPayrollExpenses(data, viewChips){
       <td class="num">${fmtMoney(r.amount)}</td>
       <td>${r.receipt ? fileLinkHtml(r.receipt) : '<span class="hint">none</span>'}</td>
       <td>${refundPill(r)}</td>
-      <td style="display:flex;gap:4px">${r.kind==='equipment'
+      <td><div style="display:flex;gap:4px">${r.kind==='equipment'
         ? `<button class="btn ghost small" onclick="openEquipActivityModal('${r.id}')">💬 ${recordActivityCount(r.rec)}</button><button class="btn ghost small" onclick="openEquipSpendModal('${r.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteEquipSpend('${r.id}')">Delete</button>`
-        : `<button class="btn ghost small" onclick="openJobModal('${r.id}')">Open job</button>`}</td>
+        : `<button class="btn ghost small" onclick="openJobModal('${r.id}')">Open job</button>`}</div></td>
     </tr>`).join('') : `<tr><td colspan="10">${emptyState('No purchases match', 'Try another period, or clear the filters.')}</td></tr>`;
   const tile = (label, value, sub, accent) => `<div class="card stat-card" style="--stat-accent:${accent}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div><div class="stat-sub">${sub}</div></div>`;
   const filtered = tech || cat || sup;
