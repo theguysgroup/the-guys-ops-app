@@ -56,7 +56,7 @@ const DECLS = [
   // Jobs & Commissions period (6 Oct)
   'JOBS_RANGES', 'jobsRangeBounds',
   // equipment & materials paid back with the weekly pay (6 Oct)
-  'equipReimbursedFor', 'partsRefundFor', 'partsRefundPatch', 'materialsGst', 'payrollMaterialItems', 'computePayrollMaterials', 'computeGstSummary',
+  'equipReimbursedFor', 'partsRefundFor', 'partsRefundPatch', 'materialsGst', 'payrollMaterialItems', 'computePayrollMaterials', 'computeGstSummary', 'profitSteps', 'techWeekStats',
 ];
 
 function extractDecl(source, name){
@@ -724,6 +724,30 @@ function testGstSummary(sb){
   };
   const g = sb.computeGstSummary(data, '2026-10-04', '2026-10-10');
   assertEqual([g.collected, g.backEquipment, g.backParts, g.back, g.toPay], [34.9, 30, 6, 36, -1.1], 'GST: collected 34.90, back 30 (equipment) + 6 (parts) = 36, to pay −1.10');
+  data.jobs[0].paymentMethod = 'Cash';
+  const g2 = sb.computeGstSummary(data, '2026-10-04', '2026-10-10');
+  assertEqual([g2.collectedCash, g2.collectedOther], [34.9, 0], 'GST: collected on cash jobs shown apart from card + transfer');
+}
+
+function testDashboardMoneyVisuals(sb){
+  // Net profit step by step (Ofek 6 Oct): revenue, each cost taken off the running total, then what is left.
+  const np = { revenue:1000, commission:300, parts:50, equipment:50, marketing:100, hourlyStaff:80, owners:600, days:7, net:-180 };
+  const p = sb.profitSteps(np);
+  assertEqual(p.steps.map(x => [x.from, x.to]), [[0,1000],[700,1000],[650,700],[600,650],[500,600],[420,500],[-180,420],[-180,0]], 'profitSteps: each cost starts where the running total was; a loss goes below zero');
+  assertEqual([p.lo, p.hi, p.steps[7].kind, p.steps[7].value], [-180, 1000, 'loss', -180], 'profitSteps: scale from the lowest point to revenue; the last step is the loss');
+  // A technician's week (moved from Financial Summary): jobs done that week by job date, daily average, job types.
+  sb.STATE.data.settings = { gstRatePercent:10 };
+  const data = { jobs: [
+    { technician:'Guy', date:'2026-10-05', amount:400, partsCost:40, jobType:'Aircon', paymentStatus:'Paid' },
+    { technician:'Guy', date:'2026-10-05', amount:300, partsCost:0, jobType:'Aircon', paymentStatus:'Unpaid' },
+    { technician:'Guy', date:'2026-10-07', amount:500, partsCost:20, jobType:'Chimney', paymentStatus:'Paid' },
+    { technician:'Guy', date:'2026-10-11', amount:999, partsCost:0, jobType:'Aircon', paymentStatus:'Paid' },   // next week
+    { technician:'Dolev', date:'2026-10-05', amount:200, partsCost:0, jobType:'Aircon', paymentStatus:'Paid' }, // someone else
+  ] };
+  const st = sb.techWeekStats(data, 'Guy', '2026-10-04');
+  // net = (400-40) + 300 + (500-20) = 1140 over 2 days = 570
+  assertEqual([st.totalJobs, st.paidCount, st.unpaidCount, st.daysWorked, st.dailyAvg], [3, 2, 1, 2, 570], 'techWeekStats: 3 jobs done this week, 2 paid, 2 days, $570 a day');
+  assertEqual([st.types.Aircon.count, st.types.Aircon.total, st.types.Chimney.count, st.types.Chimney.total], [2, 700, 1, 500], 'techWeekStats: by job type');
 }
 
 testJobAttributionTags(loadSandbox());
@@ -741,6 +765,7 @@ testClosingTotalInclGst(loadSandbox());
 testJobsRange(loadSandbox());
 testMaterialsPayback(loadSandbox());
 testGstSummary(loadSandbox());
+testDashboardMoneyVisuals(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

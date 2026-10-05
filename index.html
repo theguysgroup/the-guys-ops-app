@@ -230,6 +230,24 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .file-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .file-chip { display:inline-flex; align-items:center; gap:5px; font-size:12.5px; font-weight:600; color: var(--primary-strong); text-decoration:none; background: var(--primary-soft); padding:5px 10px; border-radius: 99px; }
 .file-hint { font-size:11px; color: var(--ink-faint); }
+.wf-row { display:grid; grid-template-columns: minmax(130px, 34%) 1fr auto; gap:10px; align-items:center; font-size:12.5px; padding:3px 0; }
+.wf-track { position:relative; height:16px; background: var(--surface-3); border-radius:4px; overflow:hidden; }
+.wf-bar { position:absolute; top:0; bottom:0; border-radius:3px; }
+.wf-zero { position:absolute; top:-2px; bottom:-2px; width:1px; background: var(--ink-faint); }
+.wf-row .v { font-family:'Figtree',sans-serif; font-variant-numeric: tabular-nums; text-align:end; min-width:88px; }
+.wf-row.total { border-top:1px solid var(--line); margin-top:6px; padding-top:9px; font-weight:700; }
+.stack-bar { display:flex; height:12px; border-radius:99px; overflow:hidden; background: var(--surface-3); margin-top:10px; }
+.stack-bar > span { display:block; height:100%; }
+.stack-legend { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:8px; font-size:12px; color: var(--ink-soft); }
+.stack-legend i { display:inline-block; width:9px; height:9px; border-radius:3px; margin-inline-end:5px; vertical-align:-1px; }
+.stack-legend b { color: var(--ink); font-weight:600; font-variant-numeric: tabular-nums; }
+.hbar-row { display:grid; grid-template-columns: 130px 1fr auto; gap:10px; align-items:center; font-size:12.5px; padding:4px 0; }
+.hbar-track { height:10px; background: var(--surface-3); border-radius:99px; overflow:hidden; }
+.hbar-track > span { display:block; height:100%; border-radius:99px; }
+.hbar-row .v { font-variant-numeric: tabular-nums; color: var(--ink-soft); text-align:end; }
+.mini-tile { background: var(--surface-2); border-radius: var(--radius-sm); padding:10px 12px; }
+.mini-tile .stat-value { font-size:20px; margin-top:4px; animation:none; }
+@media (max-width: 700px) { .wf-row, .hbar-row { grid-template-columns: 1fr auto; } .wf-row .wf-track, .hbar-row .hbar-track { grid-column: 1 / -1; order: 3; } }
 .file-drop { border:1.5px dashed var(--line); border-radius:10px; padding:8px 10px; min-height:46px; transition: border-color .1s, background .1s; }
 .file-drop.drag { border-color: var(--primary); background: var(--primary-soft); }
 .svc-grid { display:grid; grid-template-columns: repeat(2,1fr); gap:6px 14px; }
@@ -560,11 +578,39 @@ function computePayrollMaterials(data, person, weekKey){
 function computeGstSummary(data, start, end){
   const inR = d => !!d && d >= start && d <= end;
   const jobs = (data.jobs||[]).filter(j => inR(j.date));
-  const collected = round2(jobs.filter(j => j.paymentStatus==='Paid').reduce((s,j)=>s+jobGst(j),0));
+  const paidJobs = jobs.filter(j => j.paymentStatus==='Paid');
+  const collected = round2(paidJobs.reduce((s,j)=>s+jobGst(j),0));
+  const collectedCash = round2(paidJobs.filter(j => j.paymentMethod==='Cash').reduce((s,j)=>s+jobGst(j),0));
   const backEquipment = round2((data.equipmentSpend||[]).filter(e => inR(e.date)).reduce((s,e)=>s+materialsGst(e.cost),0));
   const backParts = round2(jobs.reduce((s,j)=>s+materialsGst(j.partsCost),0));
   const back = round2(backEquipment + backParts);
-  return { collected, back, backEquipment, backParts, toPay: round2(collected - back) };
+  return { collected, collectedCash, collectedOther: round2(collected - collectedCash), back, backEquipment, backParts, toPay: round2(collected - back) };
+}
+// Revenue down to net profit, step by step, for the Dashboard chart (Ofek 6 Oct): each cost is a bar from where the
+// running total was; the last bar is the net profit (or loss) from zero. lo / hi = the chart's scale.
+function profitSteps(np){
+  const costs = [['Technician commissions', np.commission], ['Job expenses (parts)', np.parts], ['Equipment (excl. GST)', np.equipment||0],
+    ['Marketing (Google + Meta)', np.marketing], ['Hourly staff (Ron)', np.hourlyStaff], [`Owner salaries (${np.days} day${np.days===1?'':'s'})`, np.owners]];
+  let run = Number(np.revenue)||0;
+  const steps = [{ label:'Revenue (excl. GST)', from:0, to:run, value:run, kind:'in' }];
+  costs.forEach(([label, v]) => { const val = Number(v)||0; steps.push({ label, from: round2(run - val), to: run, value: val, kind:'out' }); run = round2(run - val); });
+  steps.push({ label:'Net profit', from: Math.min(0, run), to: Math.max(0, run), value: run, kind: run >= 0 ? 'net' : 'loss' });
+  return { steps, lo: Math.min(0, ...steps.map(st => st.from)), hi: Math.max(0.01, ...steps.map(st => st.to)) };
+}
+// A technician's week (moved from Financial Summary to Payroll, Ofek 6 Oct): the jobs DONE that week (by job date),
+// paid / not paid, the daily average (amount before GST − parts, per day worked) and the job types.
+function techWeekStats(data, person, weekKey){
+  const wk = payrollWeekOf(weekKey);
+  const jobs = (data.jobs||[]).filter(j => j.technician===person && j.date >= wk.start && j.date <= wk.end);
+  const types = {}; JOB_TYPES.forEach(t => { types[t] = { count:0, total:0 }; });
+  const days = new Set(); let net = 0, paid = 0;
+  jobs.forEach(j => {
+    const b = types[j.jobType] || (types[j.jobType] = { count:0, total:0 });
+    b.count++; b.total = round2(b.total + (Number(j.amount)||0));
+    days.add(j.date); net += (Number(j.amount)||0) - (Number(j.partsCost)||0);
+    if (j.paymentStatus==='Paid') paid++;
+  });
+  return { jobs, paidCount: paid, unpaidCount: jobs.length - paid, totalJobs: jobs.length, daysWorked: days.size, dailyAvg: days.size ? round2(net / days.size) : null, types };
 }
 function payrollCommissionPeople(data){ return data.employees.filter(e => e.status==='Active' && e.roles.includes('Technician') && !e.roles.includes('Owner')).map(e=>e.name); }
 function payrollHourlyPeople(data){ return data.employees.filter(e => e.status==='Active' && e.employmentType==='Hourly').map(e=>e.name); }
@@ -6228,6 +6274,8 @@ function renderDashboard(profile, data){
     const t = jobTotalCollected(j);
     if (j.paymentStatus==='Paid') { paidAmt += t; pay[j.paymentMethod] !== undefined ? pay[j.paymentMethod] += t : pay.unset += t; } else unpaidAmt += t;
   });
+  const paidJobs = jobs.filter(j => j.paymentStatus==='Paid'), unpaidJobs = jobs.filter(j => j.paymentStatus!=='Paid');
+  const gross = round2(np.revenue - np.commission - np.parts);
   const gstSum = computeGstSummary(data, r.start, r.effEnd);
 
   // Trend is deliberately NOT tied to the period picker: 12 weeks back from today, always, so that
@@ -6349,36 +6397,34 @@ function renderDashboard(profile, data){
 
     <div class="section-title">Money</div>
     <div class="grid-2" style="align-items:start">
-      ${renderNetProfitCard(np, 'Net profit', dashDelta(np.net, npPrev.net))}
-      <div class="card stat-card" style="--stat-accent:var(--primary-teal);margin-top:12px">
-        <div class="stat-label">How customers paid <span class="hint">(jobs this period, incl. GST)</span></div>
-        <div style="margin-top:8px">
-          <div class="kv"><span>Credit card</span><span class="v">${fmtMoney(pay['Credit Card'])}</span></div>
-          <div class="kv"><span>Bank transfer</span><span class="v">${fmtMoney(pay['Bank Transfer'])}</span></div>
-          <div class="kv"><span>Cash</span><span class="v">${fmtMoney(pay.Cash)}</span></div>
-          ${pay.unset ? `<div class="kv"><span>Paid, method not set</span><span class="v">${fmtMoney(pay.unset)}</span></div>` : ''}
-          <div class="kv total"><span>Paid</span><span class="v">${drill(fmtMoney(paidAmt), 'Paid jobs this period', 'jobs', jobs.filter(j => j.paymentStatus==='Paid'))}</span></div>
-          <div class="kv"><span>Still unpaid <span class="hint">(this period's jobs)</span></span><span class="v" style="color:${unpaidAmt>0?'var(--bad)':'inherit'}">${drill(fmtMoney(unpaidAmt), "This period's jobs not paid yet", 'jobs', jobs.filter(j => j.paymentStatus!=='Paid'))}</span></div>
-          <div class="kv"><span>Avg days to get paid</span><span class="v">${perf.avgDaysToPayment===null?'—':perf.avgDaysToPayment+' days'}</span></div>
-        </div>
+      ${renderProfitWaterfall(np, 'Net profit', dashDelta(np.net, npPrev.net))}
+      <div class="card stat-card" style="--stat-accent:var(--accent)">
+        <div class="stat-label">Money in <span class="hint">(this period's jobs, incl. GST)</span></div>
+        <div class="stat-value">${drill(fmtMoney(paidAmt), 'Paid jobs this period', 'jobs', paidJobs)}</div>
+        <div class="stat-sub">paid · ${paidJobs.length} job${paidJobs.length===1?'':'s'} paid, ${unpaidJobs.length} not paid yet · avg ${perf.avgDaysToPayment===null ? '—' : perf.avgDaysToPayment + ' days'} to get paid</div>
+        <div class="stat-label" style="margin-top:16px">How customers paid</div>
+        ${(() => { const segs = [{ label:'Card', value: pay['Credit Card'], color:'var(--accent)' }, { label:'Transfer', value: pay['Bank Transfer'], color:'var(--primary-teal)' }, { label:'Cash', value: pay.Cash, color:'var(--good)' }, ...(pay.unset ? [{ label:'Method not set', value: pay.unset, color:'var(--ink-faint)' }] : [])]; return stackBar(segs) + stackLegend(segs); })()}
+        <div class="stat-label" style="margin-top:16px">Paid vs still unpaid</div>
+        ${(() => { const segs = [{ label:'Paid', value: round2(paidAmt), color:'var(--good)', html: drill(fmtMoney(paidAmt), 'Paid jobs this period', 'jobs', paidJobs) }, { label:'Still unpaid', value: round2(unpaidAmt), color:'var(--bad)', html: drill(fmtMoney(unpaidAmt), "This period's jobs not paid yet", 'jobs', unpaidJobs) }]; return stackBar(segs) + stackLegend(segs); })()}
       </div>
-      <div class="card stat-card" style="--stat-accent:var(--accent);margin-top:12px">
-        <div class="stat-label">Equipment purchases <span class="hint">(bought this period, incl. GST)</span></div>
-        <div class="stat-value">${drill(fmtMoney(eqTotal), 'Equipment purchases this period', 'equipment', eqList)}</div>
-        <div style="margin-top:8px">
-          <div class="kv"><span>Paid by the business <span class="hint">(expense only)</span></span><span class="v">${fmtMoney(eqBiz)}</span></div>
-          <div class="kv"><span>Paid by technicians <span class="hint">(paid back with the weekly pay)</span></span><span class="v">${fmtMoney(eqTech)}</span></div>
-          ${eqWaiting ? `<div class="kv"><span>Still to pay back</span><span class="v" style="color:var(--warn)">${fmtMoney(eqWaiting)}</span></div>` : ''}
-          <div class="kv"><span>GST in it <span class="hint">(claimed back)</span></span><span class="v">${fmtMoney(materialsGst(eqTotal))}</span></div>
-        </div>
-        <div class="stat-sub" style="margin-top:6px">${eqList.length} purchase${eqList.length===1?'':'s'} · comes off Net profit without the GST</div>
+    </div>
+    <div class="grid-3" style="align-items:start;margin-top:12px">
+      <div class="card stat-card" style="--stat-accent:var(--good)">
+        <div class="stat-label">Gross profit</div>
+        <div class="stat-value">${fmtSignedMoney(gross)}</div>
+        <div class="stat-sub">${np.revenue ? Math.round(gross / np.revenue * 100) + '% of revenue · ' : ''}revenue − commissions − job expenses</div>
+        <div class="stat-label" style="margin-top:14px">Per week <span class="hint">(last 12 weeks)</span></div>
+        ${renderSparkline(profitSeries, {color:'var(--good)'}) || emptyState('Not enough weeks yet')}
       </div>
-      <div class="card stat-card" style="--stat-accent:var(--warn);margin-top:12px">
+      <div class="card stat-card" style="--stat-accent:var(--warn)">
         <div class="stat-label">GST <span class="hint">(this period)</span></div>
         <div class="stat-value">${fmtSignedMoney(gstSum.toPay)}</div>
         <div class="stat-sub">${gstSum.toPay < 0 ? 'more GST comes back than we collected' : 'to pay, after the GST we get back'}</div>
-        <div style="margin-top:8px">
+        ${(() => { const segs = [{ label:'We get back', value: gstSum.back, color:'var(--good)' }, { label:'To pay', value: Math.max(0, gstSum.toPay), color:'var(--warn)' }]; return stackBar(segs) + stackLegend(segs); })()}
+        <div style="margin-top:10px">
           <div class="kv"><span>GST collected <span class="hint">(paid jobs)</span></span><span class="v">${fmtMoney(gstSum.collected)}</span></div>
+          <div class="kv"><span class="hint">on cash jobs</span><span class="v hint">${fmtMoney(gstSum.collectedCash)}</span></div>
+          <div class="kv"><span class="hint">on card + transfer</span><span class="v hint">${fmtMoney(gstSum.collectedOther)}</span></div>
           <div class="kv"><span>− GST we get back</span><span class="v">${fmtMoney(gstSum.back)}</span></div>
           <div class="kv"><span class="hint">in equipment purchases</span><span class="v hint">${fmtMoney(gstSum.backEquipment)}</span></div>
           <div class="kv"><span class="hint">in parts for jobs</span><span class="v hint">${fmtMoney(gstSum.backParts)}</span></div>
@@ -6386,18 +6432,21 @@ function renderDashboard(profile, data){
         </div>
         <div class="stat-sub" style="margin-top:6px">Google and Meta ads are not in this yet: their spend comes in without GST</div>
       </div>
+      <div class="card stat-card" style="--stat-accent:var(--primary)">
+        <div class="stat-label">Equipment purchases <span class="hint">(bought this period, incl. GST)</span></div>
+        <div class="stat-value">${drill(fmtMoney(eqTotal), 'Equipment purchases this period', 'equipment', eqList)}</div>
+        <div class="stat-sub">${eqList.length} purchase${eqList.length===1?'':'s'} · comes off net profit without the GST</div>
+        ${(() => { const segs = [{ label:'By the business', value: eqBiz, color:'var(--accent)' }, { label:'By technicians', value: eqTech, color:'var(--primary)' }]; return stackBar(segs) + stackLegend(segs); })()}
+        <div style="margin-top:10px">
+          ${eqWaiting ? `<div class="kv"><span>Still to pay back <span class="hint">(with the weekly pay)</span></span><span class="v" style="color:var(--warn)">${fmtMoney(eqWaiting)}</span></div>` : ''}
+          <div class="kv"><span>GST in it <span class="hint">(claimed back)</span></span><span class="v">${fmtMoney(materialsGst(eqTotal))}</span></div>
+        </div>
+      </div>
     </div>
-    <div class="grid-2" style="align-items:start;margin-top:12px">
-      <div class="card stat-card" style="--stat-accent:var(--primary-teal)">
-        <div class="stat-label">Revenue per week <span class="hint">(last 12 weeks, not the period above)</span></div>
-        ${renderSparkline(revSeries, {color:'var(--primary-teal)'}) || emptyState('Not enough weeks yet')}
-        <div class="stat-sub" style="margin-top:6px">Last full week ${lastFull ? `${esc(lastFull.label)}: <b>${fmtMoney(lastFull.revenue)}</b>` : '—'}</div>
-      </div>
-      <div class="card stat-card" style="--stat-accent:var(--good)">
-        <div class="stat-label">Gross profit per week <span class="hint">(revenue − commission − job expenses)</span></div>
-        ${renderSparkline(profitSeries, {color:'var(--good)'}) || emptyState('Not enough weeks yet')}
-        <div class="stat-sub" style="margin-top:6px">Marketing and salaries are not in this line — they are in Net profit above</div>
-      </div>
+    <div class="card stat-card" style="--stat-accent:var(--primary-teal);margin-top:12px">
+      <div class="stat-label">Revenue per week <span class="hint">(last 12 weeks, not the period above)</span></div>
+      ${renderSparkline(revSeries, {color:'var(--primary-teal)'}) || emptyState('Not enough weeks yet')}
+      <div class="stat-sub" style="margin-top:6px">Last full week ${lastFull ? `${esc(lastFull.label)}: <b>${fmtMoney(lastFull.revenue)}</b>` : '—'}</div>
     </div>
     <div style="margin-top:12px">${cashStatusRow()}</div>
 
@@ -6480,6 +6529,29 @@ function payrollPaidBadge(st, currentTotal){
   const paidAmt = Number(st.salaryPaidAmount)||0;
   const diff = round2(currentTotal - paidAmt);
   return pill('good', `Paid ${payMoney(paidAmt)}`) + (Math.abs(diff) > 0.004 ? ' ' + pill('warn', `${diff>0?'+':''}${payMoney(diff)} since`) : '');
+}
+// A technician's week at a glance, on the Payroll board and on his own pay page (moved from Financial Summary, Ofek
+// 6 Oct): the jobs done that week (paid / not paid), the daily average, the commission from jobs paid late, the job types.
+function payrollWeekPanel(c, data){
+  const st = techWeekStats(data, c.person, c.week.start);
+  const late = c.lines.filter(l => l.late), lateTotal = round2(late.reduce((s,l) => s + l.commission, 0));
+  const maxTotal = Math.max(0.01, ...Object.values(st.types).map(b => b.total));
+  const types = Object.entries(st.types).filter(([, b]) => b.count).map(([t, b]) => `<div class="hbar-row"><span>${esc(t)}</span>
+    <div class="hbar-track"><span style="width:${Math.max(3, b.total / maxTotal * 100).toFixed(1)}%;background:var(--accent)"></span></div>
+    <span class="v">${b.count} job${b.count===1?'':'s'} · avg ${fmtMoney(round2(b.total / b.count))} · <b style="color:var(--ink)">${fmtMoney(b.total)}</b></span></div>`).join('');
+  const who = c.person;
+  return `<div class="card tight" style="margin-bottom:12px">
+    <div class="stat-label" style="margin-bottom:8px">The week at a glance <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">jobs done ${payrollWeekLabel(c.week)}, by the job date</span></div>
+    <div class="grid-3">
+      <div class="mini-tile"><div class="stat-label">Jobs done</div><div class="stat-value">${drill(st.totalJobs, `${who} — jobs done this week`, 'jobs', st.jobs)}</div>
+        <div class="stat-sub">${drill(st.paidCount, `${who} — jobs done this week, paid`, 'jobs', st.jobs.filter(j => j.paymentStatus==='Paid'))} paid · ${drill(st.unpaidCount, `${who} — jobs done this week, not paid yet`, 'jobs', st.jobs.filter(j => j.paymentStatus!=='Paid'))} not paid yet</div></div>
+      <div class="mini-tile"><div class="stat-label">Daily average</div><div class="stat-value">${st.dailyAvg===null ? '—' : fmtMoney(st.dailyAvg)}</div>
+        <div class="stat-sub">before GST, after parts · ${st.daysWorked} day${st.daysWorked===1?'':'s'} worked</div></div>
+      <div class="mini-tile"><div class="stat-label">From jobs paid late</div><div class="stat-value">${payMoney(lateTotal)}</div>
+        <div class="stat-sub">${late.length ? `of this week's commission · ${late.length} job${late.length===1?'':'s'} from an earlier week` : 'no late payments this week'}</div></div>
+    </div>
+    <div style="margin-top:10px">${types || '<div class="hint">No jobs done this week.</div>'}</div>
+  </div>`;
 }
 function payrollMaterialsTable(c){
   const m = c.materials; if (!m || !m.lines.length) return '';
@@ -6574,7 +6646,7 @@ function renderPayrollBoard(profile, data, viewChips){
       <td>${cashCell}</td>
       <td>${salaryCell}</td>
       <td><button class="btn small" onclick="copyPayMessage('commission','${p}')">📋 Copy message</button></td>
-    </tr>${open ? `<tr><td colspan="9" style="background:var(--bg-soft, transparent)">${payrollJobLinesTable(c)}${payrollMaterialsTable(c)}${payrollUnpaidTable(c)}</td></tr>` : ''}`;
+    </tr>${open ? `<tr><td colspan="9" style="background:var(--bg-soft, transparent)">${payrollWeekPanel(c, data)}${payrollJobLinesTable(c)}${payrollMaterialsTable(c)}${payrollUnpaidTable(c)}</td></tr>` : ''}`;
   }).join('');
 
   const hourlyRows = hourly.map(h => {
@@ -6679,6 +6751,7 @@ function renderMyPay(profile, data, person, isPreview){
       <div class="card stat-card" style="--stat-accent:${c.cash>0 && !st.cashCollected ? 'var(--warn)' : 'var(--primary)'}"><div class="stat-label">Cash to hand over</div><div class="stat-value">${payMoney(c.cash)}</div><div class="stat-sub">${c.cash>0 ? (st.cashCollected ? 'handed over ✓' : 'not handed over yet') : 'no cash jobs this week'}</div></div>
       <div class="card stat-card" style="--stat-accent:${st.salaryPaid?'var(--good)':'var(--ink-faint)'}"><div class="stat-label">This week's salary</div><div class="stat-value" style="font-size:20px">${st.salaryPaid ? 'Paid ✓' : 'Not paid yet'}</div><div class="stat-sub">${st.salaryPaid ? payMoney(st.salaryPaidAmount) : 'paid after the week ends'}</div></div>
     </div>
+    <div style="margin-top:14px">${payrollWeekPanel(c, data)}</div>
     ${c.materials.lines.length ? `<div class="card" style="margin-top:14px;max-width:520px">
       <div class="stat-label" style="margin-bottom:6px">This week's pay</div>
       <div class="kv"><span>Commission (invoice 1)</span><span class="v">${payMoney(c.total)}</span></div>
@@ -6805,6 +6878,36 @@ async function copyPayMessage(kind, person){
 }
 
 function fmtSignedMoney(n){ return n < 0 ? '−' + fmtMoney(-n) : fmtMoney(n); }
+// ── Dashboard money visuals (Ofek 6 Oct) ──
+// A bar split by share (how customers paid, paid vs unpaid…) and its legend. Segment: { label, value, color, html? }.
+function stackBar(segs){
+  const total = segs.reduce((s,x) => s + Math.max(0, Number(x.value)||0), 0);
+  if (!(total > 0)) return '<div class="stack-bar"></div>';
+  return `<div class="stack-bar" role="img" aria-label="${esc(segs.map(x => `${x.label}: ${fmtMoney(x.value)}`).join(', '))}">${segs.filter(x => x.value > 0).map(x => `<span style="width:${(x.value/total*100).toFixed(2)}%;background:${x.color}" title="${esc(x.label)}: ${fmtMoney(x.value)}"></span>`).join('')}</div>`;
+}
+function stackLegend(segs){
+  const total = segs.reduce((s,x) => s + Math.max(0, Number(x.value)||0), 0);
+  return `<div class="stack-legend">${segs.map(x => `<span><i style="background:${x.color}"></i>${esc(x.label)} <b>${x.html || fmtMoney(x.value)}</b>${total > 0 ? ` · ${Math.round(Math.max(0, x.value)/total*100)}%` : ''}</span>`).join('')}</div>`;
+}
+// Net profit as steps: revenue, then each cost taken off where the running total was, then what is left.
+function renderProfitWaterfall(np, title, valueSuffix){
+  const { steps, lo, hi } = profitSteps(np);
+  const pos = v => (v - lo) / (hi - lo) * 100;
+  const color = st => st.kind==='in' ? 'var(--accent)' : st.kind==='out' ? 'color-mix(in srgb, var(--bad) 72%, transparent)' : st.kind==='net' ? 'var(--good)' : 'var(--bad)';
+  const zero = lo < 0 ? `<span class="wf-zero" style="left:${pos(0).toFixed(2)}%"></span>` : '';
+  const rows = steps.map(st => {
+    const end = st.kind==='net' || st.kind==='loss';
+    return `<div class="wf-row${end ? ' total' : ''}"><span>${st.kind==='out' ? '− ' : end ? '= ' : ''}${esc(st.label)}</span>
+      <div class="wf-track">${zero}<span class="wf-bar" style="left:${pos(st.from).toFixed(2)}%;width:${Math.max(0.6, pos(st.to) - pos(st.from)).toFixed(2)}%;background:${color(st)}"></span></div>
+      <span class="v"${end ? ` style="color:${st.kind==='net' ? 'var(--good)' : 'var(--bad)'}"` : ''}>${end ? fmtSignedMoney(st.value) : fmtMoney(st.value)}</span></div>`;
+  }).join('');
+  return `<div class="card stat-card" style="--stat-accent:${np.net>=0?'var(--good)':'var(--bad)'}">
+    <div class="stat-label">${esc(title||'Net profit')}</div>
+    <div class="stat-value">${fmtSignedMoney(np.net)}${valueSuffix||''}</div>
+    <div class="stat-sub">revenue down to profit, step by step · ${np.days ? `${fmtDateShort(np.start)} – ${fmtDateShort(np.end)}` : 'no days elapsed yet'}</div>
+    <div style="margin-top:12px">${rows}</div>
+  </div>`;
+}
 function renderNetProfitCard(np, title, valueSuffix){
   const rows = [
     ['Revenue (excl. GST)', np.revenue, false],
