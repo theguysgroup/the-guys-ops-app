@@ -2049,7 +2049,7 @@ function setupRealtimeSubscriptions(){
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
 }
-let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
+let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let toastMsg = null, toastTimer = null;
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
 let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task modal
@@ -2168,7 +2168,7 @@ function getCurrentProfile(){
   if (VIEW_AS_ID && real && real.role==='owner') { const v = STATE.profiles.find(p => p.id===VIEW_AS_ID); if (v) return v; }
   return real;
 }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; PAGE_FILES = {}; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; PAGE_FILES = {}; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
   toastTimer = setTimeout(()=>{
@@ -2747,16 +2747,15 @@ async function doChangePassword(){
 }
 
 /* ── app shell ───────────────────────────────────────────────────────── */
-// NAV is data-driven for plain single-target sections. Tasks and Resources are built separately inside renderShell()
-// below (one item each; the page switches views itself — see goTasks()/goResources()). Both stay gated by their
-// original single permission flag (`tasks` / `reference`) so the permission model itself is untouched.
-// navBlocks below is consumed positionally in renderShell (index 0..3) — keep this array's order and
-// length in sync with that template if you add or remove a group.
+// The menu, in Ofek's order (7 Oct): Operation · CRM · Overview · Finance · Management. Each item shows only for people
+// allowed to see that section; `go` is the click for an item that opens a page with its own inner tabs.
+// Open Tasks is left out of the menu: the Tasks page shows the same open tasks (All, and its Calendar).
 const NAV = [
-  { group:'Sales', items:[ {id:'myDay', label:'My Day', icon:'☀'}, {id:'crm', label:'CRM', icon:'◈'}, {id:'crmOverview', label:'Leads & Marketing', icon:'📊'}, {id:'adsGoogle', label:'Google Ads', icon:'🎯'} ] },
-  { group:'Overview', items:[ {id:'dashboard', label:'Dashboard', icon:'🧭'}, {id:'reminders', label:'Reminders', icon:'●'}, {id:'openItems', label:'Open Tasks', icon:'▣'} ] },
-  { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'payroll', label:'Payroll', icon:'💵'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
-  { group:'System', items:[ {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
+  { group:'Operation', items:[ {id:'myDay', label:'My Day', icon:'☀'}, {id:'reminders', label:'Reminders', icon:'●'}, {id:'tasks', label:'Tasks', icon:'☑', go:'goTasks()'} ] },
+  { group:'CRM', items:[ {id:'crm', label:'CRM', icon:'◈'} ] },
+  { group:'Overview', items:[ {id:'dashboard', label:'Dashboard', icon:'🧭'}, {id:'crmOverview', label:'Leads & Marketing', icon:'📊'}, {id:'adsGoogle', label:'Google Ads', icon:'🎯'}, {id:'payroll', label:'Payroll', icon:'💵'} ] },
+  { group:'Finance', items:[ {id:'closings', label:'Closings', icon:'🧾'}, {id:'outstanding', label:'Outstanding', icon:'▧'}, {id:'jobs', label:'Jobs & Commissions', icon:'▤'} ] },
+  { group:'Management', items:[ {id:'reference', label:'Resources', icon:'▥', go:'goResources()'}, {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
 ];
 function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 function goTasks(board){ UI.tab = 'tasks'; if (board) UI.tasks.board = board; UI.mobileNavOpen = false; render(); }
@@ -2778,32 +2777,20 @@ function navButtonHtml(id, label, icon, active, onClick, badge){
 
 function renderShell(profile, data){
   const reminderCount = remindersFor(profile, data).filter(it=>!it.isRead).length;
-  // navBlocks: [Overview group, Finance group, System group], in NAV's declared order — Closings and
-  // Management (built separately below, since they need custom per-item logic) are spliced in between.
-  const navBlocks = NAV.map(g => {
-    // 'adsGoogle' is a standalone page only for people who are not owners/managers (they open it from the Dashboard dropdown).
-    const visible = g.items.filter(it => canViewSection(profile, it.id) && !((it.id==='adsGoogle' || it.id==='crmOverview') && (profile.role==='owner' || profile.role==='manager')));
+  const navHtml = NAV.map(g => {
+    // Leads & Marketing and Google Ads are pages only for people who are not owners/managers (they open them from the
+    // Dashboard dropdown); a technician without a technician name has no tasks of his own.
+    const visible = g.items.filter(it => canViewSection(profile, it.id)
+      && !((it.id==='adsGoogle' || it.id==='crmOverview') && (profile.role==='owner' || profile.role==='manager'))
+      && !(it.id==='tasks' && profile.role==='technician' && !profile.technicianName));
     if (!visible.length) return '';
     const itemsHtml = visible.map(it => {
       const active = UI.tab===it.id;
       const badge = (it.id==='reminders' && reminderCount>0) ? `<span style="margin-inline-start:auto;background:var(--bad);color:#fff;font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:99px;min-width:16px;text-align:center">${reminderCount}</span>` : '';
-      return navButtonHtml(it.id, it.label, it.icon, active, `goTab('${it.id}')`, badge);
+      return navButtonHtml(it.id, it.label, it.icon, active, it.go || `goTab('${it.id}')`, badge);
     }).join('');
     return `<div><div class="nav-group-label">${esc(g.group)}</div>${itemsHtml}</div>`;
-  });
-
-  // "Closings" — inserted right after Overview since it's the frontline feed technicians post to.
-  const closingsHtml = canViewSection(profile,'closings')
-    ? `<div><div class="nav-group-label">Field</div>${navButtonHtml('closings','Closings','🧾', UI.tab==='closings', "goTab('closings')")}</div>`
-    : '';
-
-  // "Management" group: Tasks (`tasks` permission) and Resources (Employees / Equipment / Suppliers, `reference` permission).
-  // One "Tasks" item: the page itself switches between All, Just mine and each person (Ofek 7 Oct); a technician only
-  // ever sees his own tasks. One "Resources" item: its tabs are inside the page (Ofek 6 Oct).
-  const mgmtItems = [];
-  if (canViewSection(profile,'tasks') && (profile.role!=='technician' || profile.technicianName)) mgmtItems.push(navButtonHtml('tasks', 'Tasks', '☑', UI.tab==='tasks', 'goTasks()'));
-  if (canViewSection(profile,'reference')) mgmtItems.push(navButtonHtml('reference', 'Resources', '▥', UI.tab==='reference', 'goResources()'));
-  const mgmtHtml = mgmtItems.length ? `<div><div class="nav-group-label">Management</div>${mgmtItems.join('')}</div>` : '';
+  }).join('');
 
   return `
     <div class="app-grid" style="display:grid;grid-template-columns:240px 1fr;min-height:100vh">
@@ -2821,7 +2808,7 @@ function renderShell(profile, data){
           <span style="display:flex;align-items:center;gap:7px">🔍 Search</span>
           <span style="font-size:10px;color:var(--sidebar-ink-faint);border:1px solid var(--sidebar-line);border-radius:4px;padding:1px 5px">⌘K</span>
         </button>
-        <nav>${navBlocks[0]}${navBlocks[1]}${closingsHtml}${navBlocks[2]}${mgmtHtml}${navBlocks[3]}</nav>
+        <nav>${navHtml}</nav>
         <div class="footer-block" style="margin-top:auto;padding:10px 8px 0;font-size:11px;border-top:1px solid var(--line);padding-top:12px">
           <div style="margin-bottom:9px;display:flex;align-items:center;justify-content:space-between"><span>${esc(profile.fullName)} · ${roleLabel(profile.role)}</span></div>
           <div style="display:flex;flex-direction:column;gap:6px">
@@ -8154,7 +8141,6 @@ function taskPeople(data){
 }
 function taskView(){ const v = UI.tasks.board; return v==='ron' ? 'Ron' : (!v || v==='mine') ? 'all' : v; }
 /* ── tasks: unified calendar (merged across boards) + heads-up radar ───── */
-function visibleTasksForCalendar(profile, data){ return data.tasks; }   // already only this person's own for a technician (filterForProfile)
 function setTasksView(view){ UI.tasks.view = view; render(); }
 function setTaskCalGranularity(g){ UI.tasks.calGranularity = g; render(); }
 function shiftTaskCal(delta){
@@ -8205,8 +8191,7 @@ function renderCalendarDayCell(day, tasksByDate, isToday){
     ${dayTasks.map(renderTaskChip).join('')}
   </div>`;
 }
-function renderTasksCalendar(profile, data){
-  const tasks = visibleTasksForCalendar(profile, data);
+function renderTasksCalendar(profile, data, tasks){
   const anchor = UI.tasks.calAnchor || todayStr();
   const { days, label } = computeCalendarDays(UI.tasks.calGranularity, anchor);
   const tasksByDate = {}; const unscheduled = [];
@@ -8296,21 +8281,21 @@ function renderTaskSwitcher(profile, data){
   </div>`;
 }
 function renderTasks(profile, data){
-  const view = UI.tasks.view || 'calendar';
+  // List or Calendar, both showing the same choice: All, Just mine or one person (Ofek 7 Oct).
+  const view = UI.tasks.view || 'list';
   const tv = profile.role==='technician' ? 'me' : taskView();
   const listTasks = tasksInView(data.tasks, tv, profile);
-  const viewToggle = `<button class="btn small ${view==='calendar'?'primary':''}" onclick="setTasksView('calendar')">Calendar</button><button class="btn small ${view==='list'?'primary':''}" onclick="setTasksView('list')">List</button>`;
-  const title = view==='calendar' ? 'Tasks' : tv==='all' ? 'All tasks' : tv==='me' ? 'My tasks' : esc(`${tv}'s tasks`);
-  const sub = view==='calendar' ? 'Calendar across every board you can see'
-    : tv==='all' ? "Everyone's tasks · click a name for one person's" : tv==='me' ? 'Only the tasks assigned to you' : `The tasks assigned to ${esc(tv)}`;
+  const viewToggle = `<button class="btn small ${view==='list'?'primary':''}" onclick="setTasksView('list')">List</button><button class="btn small ${view==='calendar'?'primary':''}" onclick="setTasksView('calendar')">Calendar</button>`;
+  const title = tv==='all' ? 'All tasks' : tv==='me' ? 'My tasks' : esc(`${tv}'s tasks`);
+  const sub = (tv==='all' ? "Everyone's tasks · click a name for one person's" : tv==='me' ? 'Only the tasks assigned to you' : `The tasks assigned to ${esc(tv)}`) + (view==='calendar' ? ' · on a calendar' : '');
   return `
     <div class="page-head">
       <div><h1 class="page-title">${title}</h1><div class="page-sub">${sub}</div></div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${viewToggle}<button class="btn primary" onclick="openTaskModal(null)">+ New Task</button></div>
     </div>
-    ${view==='calendar' ? '' : renderTaskSwitcher(profile, data)}
-    ${renderRadarPanel(profile, data, view==='calendar' ? visibleTasksForCalendar(profile, data) : listTasks)}
-    ${view==='calendar' ? renderTasksCalendar(profile, data) : renderTasksList(profile, data, listTasks)}
+    ${renderTaskSwitcher(profile, data)}
+    ${renderRadarPanel(profile, data, listTasks)}
+    ${view==='calendar' ? renderTasksCalendar(profile, data, listTasks) : renderTasksList(profile, data, listTasks)}
   `;
 }
 // Task → customer (Ofek 5/10): the Client field suggests CRM customers as you type; picking one links the task to that
