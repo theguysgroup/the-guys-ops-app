@@ -54,7 +54,9 @@ const DECLS = [
   // review requests (5 Oct)
   'reviewInvoiceKey', 'reviewNeed',
   // Jobs & Commissions period (6 Oct)
-  'payrollWeekOf', 'JOBS_RANGES', 'jobsRangeBounds',
+  'JOBS_RANGES', 'jobsRangeBounds',
+  // equipment & materials paid back with the weekly pay (6 Oct)
+  'equipReimbursedFor', 'partsRefundFor', 'partsRefundPatch', 'materialsGst', 'payrollMaterialItems', 'computePayrollMaterials',
 ];
 
 function extractDecl(source, name){
@@ -392,8 +394,9 @@ function testPayroll(sb){
   sb.STATE.data.salesLogs = [{ person:'Ron', date:'2026-09-14', hours:8, bookingsAircon:5, bookingsChimney:0, bookingsPw:0 }]; // 90
   sb.STATE.data.settings = { gstRatePercent:10, ownerSalaries:{ Ofek:1200, Noam:1200 } };
   const np = sb.computeNetProfit(sb.STATE.data, '2026-09-13', '2026-09-19', new Date(2026, 8, 22));
-  // 1500 - 520 - 150 - 300 - 90 - 2400 = -1960 (equipment purchases are not part of net profit)
-  assertEqual([np.revenue, np.commission, np.parts, np.marketing, np.hourlyStaff, np.owners, np.net].join(','), '1500,520,150,300,90,2400,-1960', 'netProfit: full week breakdown');
+  // Equipment bought in the week comes off too, without the GST the business claims back (Ofek 6 Oct): $60 incl. GST
+  // = $54.55. The $999 bought on 25 Sep is outside the week. 1500 - 520 - 150 - 54.55 - 300 - 90 - 2400 = -2014.55
+  assertEqual([np.revenue, np.commission, np.parts, np.equipment, np.marketing, np.hourlyStaff, np.owners, np.net].join(','), '1500,520,150,54.55,300,90,2400,-2014.55', 'netProfit: full week breakdown, equipment excl. GST');
   const npCapped = sb.computeNetProfit(sb.STATE.data, '2026-09-13', '2026-09-19', new Date(2026, 8, 15));
   // capped at 15 Sep: 3 days of owner salary (2400*3/7 = 1028.57); the 16 Sep job is not counted yet
   assertEqual([npCapped.days, npCapped.owners, npCapped.revenue].join(','), '3,1028.57,1000', 'netProfit: range capped at today');
@@ -661,6 +664,49 @@ function testJobsRange(sb){
   assertEqual(sb.JOBS_RANGES.map(r => r[1]), ['All','Today','This week','This month','Custom'], 'jobsRange: the five choices, in order');
 }
 
+function testMaterialsPayback(sb){
+  // Equipment & materials a technician paid for himself (Ofek 6 Oct): paid back in full (GST included) with his weekly
+  // pay, on a second invoice next to the commission one; it lands in the week it was ENTERED; a week already marked
+  // paid takes nothing new. Bought by the business = an expense only.
+  sb.STATE.data.settings = { gstRatePercent:10 };
+  assertEqual([sb.equipReimbursedFor('Business'), sb.equipReimbursedFor('Guy'), sb.equipReimbursedFor('Guy', 'Reimbursed'), sb.equipReimbursedFor('Guy', 'N/A')], ['N/A','Pending','Reimbursed','Pending'], 'equipReimbursedFor: business = nothing to pay back; a technician = waiting, unless already paid back');
+  assertEqual(sb.partsRefundFor({ partsCost:40, partsPaidBy:'Guy' }), 'Pending Refund', 'partsRefundFor: parts the technician paid for wait to be paid back');
+  assertEqual([sb.partsRefundFor({ partsCost:40, partsPaidBy:'Business' }), sb.partsRefundFor({ partsCost:0, partsPaidBy:'Guy' }), sb.partsRefundFor({ partsCost:40, partsPaidBy:'' })], ['N/A','N/A','N/A'], 'partsRefundFor: business-paid, no parts, or nobody = nothing to pay back');
+  assertEqual(sb.partsRefundFor({ partsCost:40, partsPaidBy:'Guy', partsRefundStatus:'Refunded' }), 'Refunded', 'partsRefundFor: a refund already done stays done');
+  const pp = sb.partsRefundPatch(null, { partsCost:40, partsPaidBy:'Guy' });
+  assertEqual([pp.partsRefundStatus, !!pp.partsPendingAt, pp.partsRefundWeek], ['Pending Refund', true, null], 'partsRefundPatch: a new job with the technician\'s parts starts waiting now');
+  assertEqual(sb.partsRefundPatch({ partsCost:40, partsPaidBy:'Guy', partsRefundStatus:'Pending Refund' }, { partsCost:50, partsPaidBy:'Guy' }), {}, 'partsRefundPatch: still waiting after a cost change = no change (keeps its entered date)');
+  assertEqual(sb.materialsGst(110), 10, 'materialsGst: $110 incl. GST has $10 GST in it');
+
+  const W = '2026-10-04', PREV = '2026-09-27';   // Sun 4 Oct week, and the week before
+  sb.STATE.data.employees = [{ name:'Guy', roles:['Technician'], status:'Active', employmentType:'Freelance-commission' }];
+  sb.STATE.data.payrollWeeks = [{ weekKey: PREV, person:'Guy', salaryPaid:true, salaryPaidAmount:500 }];
+  sb.STATE.data.equipmentSpend = [
+    { id:'e1', date:'2026-10-02', createdAt:'2026-10-05T01:00:00Z', item:'Ladder', technician:'Guy', paidBy:'Guy', cost:110, reimbursed:'Pending' },        // bought last week, ENTERED this week
+    { id:'e2', date:'2026-10-05', createdAt:'2026-10-05T02:00:00Z', item:'Vacuum', technician:'Guy', paidBy:'Business', cost:330, reimbursed:'N/A' },     // the business paid: expense only
+    { id:'e3', date:'2026-09-29', createdAt:'2026-09-30T01:00:00Z', item:'Drill', technician:'Guy', paidBy:'Guy', cost:55, reimbursed:'Pending' },          // entered in a week already paid → moves on
+    { id:'e4', date:'2026-09-28', createdAt:'2026-09-28T01:00:00Z', item:'Gloves', technician:'Guy', paidBy:'Guy', cost:22, reimbursed:'Reimbursed', reimbursedWeek: PREV }, // paid back last week
+    { id:'e5', date:'2026-10-05', createdAt:'2026-10-05T03:00:00Z', item:'Hose', technician:'Dolev', paidBy:'Dolev', cost:44, reimbursed:'Pending' },        // someone else's
+  ];
+  sb.STATE.data.jobs = [
+    { id:'j1', invoiceNumber:'2500', customerName:'Sarah', technician:'Guy', date:'2026-10-05', amount:349, includesGST:true, partsCost:44, partsPaidBy:'Guy', partsRefundStatus:'Pending Refund', partsPendingAt:'2026-10-06T01:00:00Z', commissionPercent:30, paymentStatus:'Paid', datePaid:'2026-10-05', paidToTechnician:'Not Paid' },
+    { id:'j2', invoiceNumber:'2501', customerName:'Tom', technician:'Guy', date:'2026-10-05', amount:200, includesGST:true, partsCost:20, partsPaidBy:'Guy', partsRefundStatus:'N/A', commissionPercent:30, paymentStatus:'Unpaid' }, // old row, never marked waiting
+  ];
+  const m = sb.computePayrollMaterials(sb.STATE.data, 'Guy', W);
+  assertEqual(m.lines.map(l => l.label + ':' + l.amount), ['Drill:55', 'Ladder:110', 'Parts for job #2500 · Sarah:44'], 'materials: by the week entered (the ladder bought last week counts this week), the drill moves on from a paid week, not the business purchase, not someone else\'s');
+  assertEqual([m.total, m.gst], [209, 19], 'materials: $209 paid back in full, $19 GST in it');
+  const mPrev = sb.computePayrollMaterials(sb.STATE.data, 'Guy', PREV);
+  assertEqual(mPrev.lines.map(l => l.label), ['Gloves'], 'materials: a paid week shows what was paid back in it, nothing new');
+  const c = sb.computePayrollCommission(sb.STATE.data, 'Guy', W);
+  // commission: 30% of (349 - 44) = 91.50; materials 209 → total 300.50
+  assertEqual([c.total, c.materials.total, c.grandTotal], [91.5, 209, 300.5], 'payroll: commission and equipment & materials separately, then the total');
+  const msg = sb.buildCommissionPayMessage(c);
+  assertEqual(msg.includes('ציוד וחומרים שקנית (חשבונית נפרדת):') && msg.includes('* Ladder (2/10): $110.00') && msg.includes('עמלה: $91.50') && msg.includes('ציוד וחומרים: $209.00 (מתוך זה GST: $19.00)') && msg.includes('סה"כ לתשלום: $300.50'), true, 'pay message (Guy gets Hebrew): both amounts, the GST in the materials, and the total');
+  const plain = sb.buildCommissionPayMessage(sb.computePayrollCommission(sb.STATE.data, 'Guy', '2026-10-11'));
+  assertEqual(plain.includes('ציוד'), false, 'pay message: nothing about equipment in a week without any');
+  sb.STATE.data.payrollWeeks = []; sb.STATE.data.equipmentSpend = []; sb.STATE.data.jobs = [];
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
@@ -674,6 +720,7 @@ testSalesAutomations(loadSandbox());
 testReviewNeed(loadSandbox());
 testClosingTotalInclGst(loadSandbox());
 testJobsRange(loadSandbox());
+testMaterialsPayback(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

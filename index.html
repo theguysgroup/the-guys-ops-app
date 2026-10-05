@@ -512,6 +512,46 @@ function payrollRangeText(startStr, endStr){
 function payMoney(n){ return '$' + round2(n).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
 function jobPaidDate(j){ return j.datePaid || j.date; }
 // Commission-paid people (not owners — they're on a fixed salary) and hourly staff, as payroll rows.
+// ── Equipment & materials a technician paid for himself (Ofek 6 Oct) ──
+// Paid back with his weekly pay, on its own invoice next to the commission one (so the business claims the GST back);
+// he gets the full amount, GST included. Comes from equipment purchases he paid for, and parts he paid for on a job.
+// Bought by the business = an expense only, nothing to pay back.
+function equipReimbursedFor(paidBy, current){ return paidBy==='Business' ? 'N/A' : (current && current!=='N/A' ? current : 'Pending'); }
+function partsRefundFor(j){
+  const owed = (Number(j.partsCost)||0) > 0 && !!j.partsPaidBy && j.partsPaidBy!=='Business';
+  return !owed ? 'N/A' : j.partsRefundStatus==='Refunded' ? 'Refunded' : 'Pending Refund';
+}
+// The fields to save when a job's parts cost or paid-by changed (or a new job): its refund status, and when it started
+// waiting (the week it was "entered", for Payroll).
+function partsRefundPatch(before, after){
+  const next = partsRefundFor({ ...after, partsRefundStatus: before ? before.partsRefundStatus : 'N/A' });
+  const prev = before ? before.partsRefundStatus : null;
+  if (next===prev) return {};
+  return { partsRefundStatus: next, partsPendingAt: next==='Pending Refund' ? new Date().toISOString() : (before && before.partsPendingAt) || null, partsRefundWeek: next==='Refunded' ? (before && before.partsRefundWeek) || null : null };
+}
+function materialsGst(amount){ const r = Number(STATE.data.settings.gstRatePercent)||0; return round2((Number(amount)||0) * r / (100 + r)); }
+function payrollMaterialItems(data, person){
+  const out = [];
+  (data.equipmentSpend||[]).forEach(e => {
+    if (e.paidBy!==person || !((Number(e.cost)||0) > 0) || (e.reimbursed!=='Pending' && e.reimbursed!=='Reimbursed')) return;
+    out.push({ kind:'equipment', id:e.id, label:e.item, bought:e.date, entered: e.createdAt ? localDay(e.createdAt) : e.date, amount: round2(e.cost), paid: e.reimbursed==='Reimbursed', paidWeek: e.reimbursedWeek||null });
+  });
+  (data.jobs||[]).forEach(j => {
+    if (j.partsPaidBy!==person || !((Number(j.partsCost)||0) > 0) || (j.partsRefundStatus!=='Pending Refund' && j.partsRefundStatus!=='Refunded')) return;
+    out.push({ kind:'parts', id:j.id, job:j, label:`Parts for job #${j.invoiceNumber||'—'}${j.customerName ? ' · '+j.customerName : ''}`, bought:j.date, entered: j.partsPendingAt ? localDay(j.partsPendingAt) : j.date, amount: round2(j.partsCost), paid: j.partsRefundStatus==='Refunded', paidWeek: j.partsRefundWeek||null });
+  });
+  return out;
+}
+// Week = the week it was entered into the system (Ofek 6 Oct). A week already marked paid takes nothing new, so an
+// item entered after that goes into the next week not paid yet. A paid week shows what was paid back in it.
+function computePayrollMaterials(data, person, weekKey){
+  const weekPaid = !!payrollStatus(data, weekKey, person).salaryPaid;
+  const weekFor = entered => { let wk = payrollWeekOf(entered).key; for (let i = 0; i < 104 && payrollStatus(data, wk, person).salaryPaid; i++) wk = shiftPayrollWeek(wk, 1); return wk; };
+  const lines = payrollMaterialItems(data, person).filter(it => it.paid ? it.paidWeek===weekKey : (!weekPaid && weekFor(it.entered)===weekKey))
+    .sort((a,b) => a.entered.localeCompare(b.entered) || String(a.bought).localeCompare(String(b.bought)));
+  const total = round2(lines.reduce((s,l)=>s+l.amount,0));
+  return { lines, total, gst: materialsGst(total) };
+}
 function payrollCommissionPeople(data){ return data.employees.filter(e => e.status==='Active' && e.roles.includes('Technician') && !e.roles.includes('Owner')).map(e=>e.name); }
 function payrollHourlyPeople(data){ return data.employees.filter(e => e.status==='Active' && e.employmentType==='Hourly').map(e=>e.name); }
 function payrollStatus(data, weekKey, person){
@@ -534,9 +574,11 @@ function computePayrollCommission(data, person, weekKey){
   // The message header's "(30%)" describes this week's paid jobs; fall back to the unpaid ones only if none were paid.
   const pctSource = lines.length ? lines.map(l => l.job) : unpaid;
   const pcts = Array.from(new Set(pctSource.map(j => Number(j.commissionPercent)||0)));
+  const total = round2(lines.reduce((s,l)=>s+l.commission,0));
+  const materials = computePayrollMaterials(data, person, weekKey);
   return {
     person, week: wk, lines, unpaid,
-    total: round2(lines.reduce((s,l)=>s+l.commission,0)),
+    total, materials, grandTotal: round2(total + materials.total),
     onHold, onHoldTotal: round2(onHold.reduce((s,l)=>s+l.commission,0)),
     expected: round2(unpaid.reduce((s,j)=>s+jobCommissionAmount(j),0)),
     cash: round2(cashJobs.reduce((s,j)=>s+jobTotalCollected(j),0)),
@@ -576,11 +618,17 @@ function buildCommissionPayMessage(p){
     const note = !l.late ? '' : he ? (l.fromLastWeek ? ' (נסגרה משבוע שעבר)' : ` (נסגרה מ-${dm})`) : (l.fromLastWeek ? ' (paid late, from last week)' : ` (paid late, job from ${dm})`);
     return `* ${ref}${note}: ${payMoney(l.commission)}`;
   };
+  const m = p.materials || { lines:[], total:0, gst:0 };
+  const matText = l => { const d = parseLocalDate(l.bought); return `* ${l.kind==='parts' ? (he ? `חלקים לעבודה #${l.job.invoiceNumber||''}` : `Parts for job #${l.job.invoiceNumber||''}`) : l.label} (${d.getDate()}/${d.getMonth()+1}): ${payMoney(l.amount)}`; };
   const out = [];
   if (he) {
     out.push(`היי ${name} 👋`, `סיכום שכר שבועי (${range}):`, `עמלה על עבודות השבוע${pct}:`);
     out.push(...(p.lines.length ? p.lines.map(lineText) : ['* אין עבודות ששולמו השבוע']));
-    out.push('', `💰 סה"כ לתשלום: ${payMoney(p.total)}`);
+    if (m.lines.length) {
+      out.push('', 'ציוד וחומרים שקנית (חשבונית נפרדת):', ...m.lines.map(matText));
+      out.push('', `עמלה: ${payMoney(p.total)}`, `ציוד וחומרים: ${payMoney(m.total)} (מתוך זה GST: ${payMoney(m.gst)})`);
+    }
+    out.push('', `💰 סה"כ לתשלום: ${payMoney(m.lines.length ? p.grandTotal : p.total)}`);
     if ((p.onHold||[]).length) out.push(`⏸ ${p.onHold.length===1?'עבודה אחת בהמתנה':p.onHold.length+' עבודות בהמתנה'} (${payMoney(p.onHoldTotal)}) - לא נכלל בתשלום השבוע`);
     if (p.unpaid.length===1) out.push(`⚠️ עבודה אחת עדיין לא שולמה - תיכנס לשבוע שבו תיסגר (עמלה צפויה: ${payMoney(p.expected)})`);
     else if (p.unpaid.length>1) out.push(`⚠️ ${p.unpaid.length} עבודות עדיין לא שולמו - ייכנסו לשבוע שבו ייסגרו (עמלה צפויה: ${payMoney(p.expected)})`);
@@ -589,7 +637,11 @@ function buildCommissionPayMessage(p){
   } else {
     out.push(`Hi ${name} 👋`, `Weekly pay summary (${range}):`, `Commission on this week's jobs${pct}:`);
     out.push(...(p.lines.length ? p.lines.map(lineText) : ['* No jobs were paid this week']));
-    out.push('', `💰 Total to pay: ${payMoney(p.total)}`);
+    if (m.lines.length) {
+      out.push('', 'Equipment & materials you paid for (separate invoice):', ...m.lines.map(matText));
+      out.push('', `Commission: ${payMoney(p.total)}`, `Equipment & materials: ${payMoney(m.total)} (GST in it: ${payMoney(m.gst)})`);
+    }
+    out.push('', `💰 Total to pay: ${payMoney(m.lines.length ? p.grandTotal : p.total)}`);
     if ((p.onHold||[]).length) out.push(`⏸ ${p.onHold.length} job${p.onHold.length===1?'':'s'} on hold (${payMoney(p.onHoldTotal)}) - not included this week`);
     if (p.unpaid.length===1) out.push(`⚠️ 1 job is still unpaid - it will be added in the week it's paid (expected commission: ${payMoney(p.expected)})`);
     else if (p.unpaid.length>1) out.push(`⚠️ ${p.unpaid.length} jobs are still unpaid - they will be added in the week they're paid (expected commission: ${payMoney(p.expected)})`);
@@ -611,19 +663,21 @@ function shiftDays(dateStr, n){ const d = parseLocalDate(dateStr); d.setDate(d.g
 function computeNetProfit(data, startDateStr, endDateStr, now){
   const today = todayStr(now);
   const end = endDateStr > today ? today : endDateStr;
-  if (end < startDateStr) return { revenue:0, commission:0, parts:0, marketing:0, hourlyStaff:0, owners:0, net:0, days:0, start:startDateStr, end };
+  if (end < startDateStr) return { revenue:0, commission:0, parts:0, equipment:0, marketing:0, hourlyStaff:0, owners:0, net:0, days:0, start:startDateStr, end };
   const inRange = d => d>=startDateStr && d<=end;
   const jobs = data.jobs.filter(j => inRange(j.date));
   const revenue = round2(jobs.reduce((s,j)=>s+(Number(j.amount)||0),0));
   const commission = round2(jobs.reduce((s,j)=>s+jobCommissionAmount(j),0));
   const parts = round2(jobs.reduce((s,j)=>s+(Number(j.partsCost)||0),0));
+  // Equipment bought for the business (Ofek 6 Oct), by purchase date, without the GST the business claims back.
+  const equipment = round2((data.equipmentSpend||[]).filter(e=>inRange(e.date)).reduce((s,e)=>s+(Number(e.cost)||0)-materialsGst(e.cost),0));
   const marketing = round2((data.adSpend||[]).filter(a=>inRange(a.date)).reduce((s,a)=>s+(Number(a.spend)||0),0));
   const hourlyStaff = round2((data.salesLogs||[]).filter(l=>inRange(l.date)).reduce((s,l)=>s+salesLogPay(l),0));
   const days = daysBetween(parseLocalDate(startDateStr), parseLocalDate(end)) + 1;
   const weeklyOwners = Object.values((data.settings && data.settings.ownerSalaries) || {}).reduce((s,v)=>s+(Number(v)||0),0);
   const owners = round2(weeklyOwners * days / 7);
-  const net = round2(revenue - commission - parts - marketing - hourlyStaff - owners);
-  return { revenue, commission, parts, marketing, hourlyStaff, owners, net, days, start:startDateStr, end };
+  const net = round2(revenue - commission - parts - equipment - marketing - hourlyStaff - owners);
+  return { revenue, commission, parts, equipment, marketing, hourlyStaff, owners, net, days, start:startDateStr, end };
 }
 
 /* ── phone calls (Google Ads call reporting, synced daily into ad_calls) ─────────────────────────
@@ -704,7 +758,6 @@ function computeWeek(data, weekKey, technicianFilter){
   const perTech = {};
   names.forEach(t => {
     const tJobs = jobs.filter(j => j.technician===t);
-    const tEquip = equip.filter(e => e.technician===t);
     let paidCount=0, unpaidCount=0, netIncome=0;
     const jobTypeBreak = { Aircon:{count:0,total:0}, Chimney:{count:0,total:0}, 'Pressure Washing':{count:0,total:0}, Other:{count:0,total:0} };
     const distinctDays = new Set();
@@ -718,11 +771,11 @@ function computeWeek(data, weekKey, technicianFilter){
     // so a late-paid job counts once — in the week its money arrived — and "paid" is what Payroll says.
     const pc = computePayrollCommission(data, t, weekKey);
     const st = payrollStatus(data, weekKey, t);
-    const commissionPaid = st.salaryPaid ? (st.salaryPaidAmount!=null ? Number(st.salaryPaidAmount)||0 : pc.total) : 0;
-    const equipOwed = round2(tEquip.reduce((s,e)=>s+(Number(e.cost)||0),0));
-    const equipPaid = round2(tEquip.filter(e=>e.reimbursed==='Reimbursed').reduce((s,e)=>s+(Number(e.cost)||0),0));
+    // Equipment & materials they paid for themselves are paid back with the week's pay (Payroll), so the amount marked
+    // paid there covers both.
+    const equipOwed = pc.materials.total;
     const lateLines = pc.lines.filter(l => l.late);
-    const owed = round2(pc.total + equipOwed), paidThisWeek = round2(commissionPaid + equipPaid);
+    const owed = pc.grandTotal, paidThisWeek = st.salaryPaid ? (st.salaryPaidAmount!=null ? Number(st.salaryPaidAmount)||0 : owed) : 0;
     perTech[t] = {
       owed, paidThisWeek, balanceDue: round2(owed-paidThisWeek),
       commission: pc.total, paidJobs: pc.lines.map(l=>l.job), unpaidJobs: pc.unpaid, expected: pc.expected, unpaidJobsCount: pc.unpaid.length, salaryPaid: !!st.salaryPaid, equipOwed,
@@ -791,7 +844,7 @@ function computeReminders(data, now){
     const range = payrollRangeText(wk, shiftDays(wk, 6));
     payrollCommissionPeople(data).forEach(p => {
       const c = computePayrollCommission(data, p, wk); const key = `payroll:${wk}:${p}`;
-      if (c.total > 0 && !payrollStatus(data, wk, p).salaryPaid && !dismissed.has(key)) items.push({ key, readKey:key, type:'commission', weekKey:wk, severity:'warn', date:c.week.end, title:`Pay ${p} for ${range}`, meta:`${fmtMoney(c.total)} commission · not marked paid in Payroll yet` });
+      if (c.grandTotal > 0 && !payrollStatus(data, wk, p).salaryPaid && !dismissed.has(key)) items.push({ key, readKey:key, type:'commission', weekKey:wk, severity:'warn', date:c.week.end, title:`Pay ${p} for ${range}`, meta:`${fmtMoney(c.total)} commission${c.materials.total ? ` + ${fmtMoney(c.materials.total)} equipment & materials` : ''} · not marked paid in Payroll yet` });
     });
     payrollHourlyPeople(data).forEach(p => {
       const h = computePayrollHourly(data, p, wk); const key = `payroll:${wk}:${p}`;
@@ -1021,8 +1074,9 @@ function jobPatchToRow(patch){
     cashConfirmed:'cash_confirmed', invoiceFile:'invoice_file', transferReceiptFile:'transfer_receipt_file',
     equipmentRentalFile:'equipment_rental_file', reviewTaken:'review_taken', reviewDoNotAsk:'review_do_not_ask', contactId:'contact_id',
     paymentFollowup:'payment_followup', paymentContacts:'payment_contacts', reofferDoneAt:'reoffer_done_at',
+    partsPendingAt:'parts_pending_at', partsRefundWeek:'parts_refund_week',
   };
-  const nullIfEmpty = new Set(['date_paid','contact_id','payment_followup','reoffer_done_at']);
+  const nullIfEmpty = new Set(['date_paid','contact_id','payment_followup','reoffer_done_at','parts_pending_at','parts_refund_week']);
   const row = {};
   for (const k in patch) {
     if (!map[k]) continue;
@@ -1102,7 +1156,7 @@ function supplierPatchToRow(patch){
   return row;
 }
 function equipmentSpendPatchToRow(patch){
-  const map = { date:'date', item:'item', technician:'technician', paidBy:'paid_by', cost:'cost', reimbursed:'reimbursed' };
+  const map = { date:'date', item:'item', technician:'technician', paidBy:'paid_by', cost:'cost', reimbursed:'reimbursed', reimbursedWeek:'reimbursed_week' };
   const row = {};
   for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
   if ('date' in row && !row.date) row.date = todayStr();   // equipment_spend.date is NOT NULL, same defense as jobs.date
@@ -1432,7 +1486,7 @@ const db = {
     async create(values){
       const { data: row, error } = await sb.from('equipment_spend').insert(equipmentSpendPatchToRow(values)).select().single();
       if (error) { showToast('Could not save purchase: '+error.message); throw error; }
-      const item = { ...values, id: row.id, activityLog: values.activityLog||[] };
+      const item = { ...values, id: row.id, createdAt: row.created_at, activityLog: values.activityLog||[] };
       STATE.data.equipmentSpend.push(item);
       return item;
     },
@@ -1635,10 +1689,11 @@ function mapJobRow(j){
     invoiceFile:j.invoice_file, transferReceiptFile:j.transfer_receipt_file, equipmentRentalFile:j.equipment_rental_file,
     reviewTaken:j.review_taken, reviewDoNotAsk:!!j.review_do_not_ask, contactId:j.contact_id||null,
     paymentFollowup:j.payment_followup||'', paymentContacts:Array.isArray(j.payment_contacts)?j.payment_contacts:[], reofferDoneAt:j.reoffer_done_at||null,
+    partsPendingAt:j.parts_pending_at||null, partsRefundWeek:j.parts_refund_week||null,
   };
 }
 function mapEquipSpendRow(e){
-  return { id:e.id, date:e.date, item:e.item, technician:e.technician, paidBy:e.paid_by||'', cost:e.cost||0, reimbursed:e.reimbursed };
+  return { id:e.id, date:e.date, item:e.item, technician:e.technician, paidBy:e.paid_by||'', cost:e.cost||0, reimbursed:e.reimbursed, createdAt:e.created_at||null, reimbursedWeek:e.reimbursed_week||null };
 }
 function mapTaskRow(t){
   return {
@@ -2232,7 +2287,7 @@ function onStatusChange(kind, id, value){
     const j = STATE.data.jobs.find(x=>x.id===id);
     const old = j.partsPaidBy;
     j.partsPaidBy = value;
-    db.jobs.update(j.id, { partsPaidBy: j.partsPaidBy });
+    db.jobs.update(j.id, { partsPaidBy: j.partsPaidBy, ...partsRefundPatch({ ...j, partsPaidBy: old }, j) });
     if ((old||'')!==(value||'')) logJobActivity(j, actor, `Parts paid-by changed from "${old||'—'}" to "${value||'—'}"`);
   } else if (kind==='leadStage') {
     setLeadStage(id, value);
@@ -2259,7 +2314,8 @@ function onStatusChange(kind, id, value){
     const e = STATE.data.equipmentSpend.find(x=>x.id===id);
     const old = e.paidBy;
     e.paidBy = value;
-    db.equipmentSpend.update(e.id, { paidBy: e.paidBy });
+    const reimbursed = equipReimbursedFor(value, e.reimbursed);
+    db.equipmentSpend.update(e.id, reimbursed!==e.reimbursed ? { paidBy: e.paidBy, reimbursed, reimbursedWeek:null } : { paidBy: e.paidBy });
     if (old!==value) logEquipmentActivity(e, actor, `Paid-by changed from "${old}" to "${value}"`);
   } else if (kind==='taskPriority') {
     const t = STATE.data.tasks.find(x=>x.id===id);
@@ -4876,7 +4932,9 @@ function commitJobCellEdit(jobId, field, rawValue, inputType){
   const newVal = inputType==='number' ? (Number(rawValue)||0) : rawValue.trim();
   if (oldVal !== newVal) {
     job[field] = newVal;
-    db.jobs.update(job.id, { [field]: newVal });
+    // Parts cost changed: a technician's own parts wait to be paid back with his weekly pay (Ofek 6 Oct).
+    const extra = field==='partsCost' ? partsRefundPatch({ ...job, partsCost: oldVal }, job) : {};
+    db.jobs.update(job.id, { [field]: newVal, ...extra });
     if (field==='customerName') relinkJobByName(job);
     const financialFieldLabels = { amount:'Amount', partsCost:'Parts cost' };
     if (financialFieldLabels[field]) {
@@ -5313,6 +5371,16 @@ async function saveJobModal(jobId){
     transferReceiptFile: MODAL_FILES['jm-transferReceiptFile'] ?? job_or_null(prevJob,'transferReceiptFile'),
     equipmentRentalFile: MODAL_FILES['jm-equipmentRentalFile'] ?? job_or_null(prevJob,'equipmentRentalFile'),
   };
+  // Parts a technician paid for himself wait to be paid back with his weekly pay (Ofek 6 Oct). When the parts cost or
+  // paid-by changed (or it's a new job) and the refund status was left as it was, the status follows them; a status
+  // picked by hand wins.
+  const prevRefund = prevJob ? prevJob.partsRefundStatus : 'N/A';
+  if (values.partsRefundStatus===prevRefund) {
+    if (!prevJob || prevJob.partsCost!==values.partsCost || (prevJob.partsPaidBy||'')!==(values.partsPaidBy||'')) Object.assign(values, partsRefundPatch(prevJob, values));
+  } else {
+    values.partsPendingAt = values.partsRefundStatus==='Pending Refund' ? new Date().toISOString() : (prevJob ? prevJob.partsPendingAt : null) || null;
+    if (values.partsRefundStatus!=='Refunded') values.partsRefundWeek = null;
+  }
   let job;
   if (jobId) { job = prevJob; db.jobs.update(job.id, values); }
   else {
@@ -5384,7 +5452,7 @@ function renderFinanceWeekly(data, weekKey, weeks, allTechs, techFilter, canBulk
       <div class="grid-3" style="margin-top:12px">
         <div class="card tight"><div class="stat-label">Jobs Paid / Unpaid</div><div class="stat-value" style="font-size:18px">${drill(w.overview.paidCount, 'Paid jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus==='Paid'))} <span style="color:var(--ink-soft);font-size:13px">/ ${drill(w.overview.unpaidCount, 'Unpaid jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus!=='Paid'))}</span></div></div>
         <div class="card tight"><div class="stat-label">Parts</div><div class="stat-value" style="font-size:18px">${fmtMoney(w.overview.partsTotal)}</div></div>
-        <div class="card tight"><div class="stat-label">Equipment Purchases</div><div class="stat-value" style="font-size:18px">${fmtMoney(w.overview.equipmentTotal)}</div></div>
+        <div class="card tight"><div class="stat-label">Equipment Purchases</div><div class="stat-value" style="font-size:18px">${drill(fmtMoney(w.overview.equipmentTotal), 'Equipment purchases this week', 'equipment', w.equip)}</div></div>
       </div>
       ${showNet ? renderNetProfitCard(computeNetProfit(data, weekKey, fmtLocal(weekOf(weekKey).end)), 'Net profit this week') : ''}
       <div class="section-title">Breakdown by Job Type</div>
@@ -5401,7 +5469,7 @@ function renderFinanceWeekly(data, weekKey, weeks, allTechs, techFilter, canBulk
       <div style="margin:10px 0">${types}</div>
       <div class="kv"><span>Commission on jobs paid this week</span><span class="v">${drill(fmtMoney(d.commission||0), `${t} — jobs paid this week`, 'jobs', d.paidJobs||[])}</span></div>
       ${d.latePaymentTotal ? `<div class="kv"><span class="hint">of which from jobs paid late</span><span class="v">${fmtMoney(d.latePaymentTotal)}</span></div>` : ''}
-      ${d.equipOwed ? `<div class="kv"><span>Equipment to reimburse</span><span class="v">${fmtMoney(d.equipOwed)}</span></div>` : ''}
+      ${d.equipOwed ? `<div class="kv"><span>Equipment &amp; materials to pay back</span><span class="v">${fmtMoney(d.equipOwed)}</span></div>` : ''}
       <div class="kv"><span>Paid in Payroll</span><span class="v">${fmtMoney(d.paidThisWeek)}</span></div>
       ${d.unpaidJobsCount ? `<div class="kv"><span class="hint">Expected when ${d.unpaidJobsCount} unpaid job${d.unpaidJobsCount===1?' is':'s are'} paid</span><span class="v">${drill(fmtMoney(d.expected), `${t} — jobs not paid yet`, 'jobs', d.unpaidJobs||[])}</span></div>` : ''}
       <div class="kv total"><span>Balance due</span><span class="v" style="color:${d.balanceDue>0.01?'var(--bad)':'var(--good)'}">${fmtMoney(Math.max(0,d.balanceDue))}</span></div>
@@ -6068,6 +6136,12 @@ function renderDashboard(profile, data){
   const inRange = (d, a, b) => d>=a && d<=b;
   const calls = (data.adCalls||[]).filter(c => inRange(c.date, r.start, r.effEnd));
   const callsPrev = (data.adCalls||[]).filter(c => inRange(c.date, r.prevStart, r.prevEnd));
+  // Equipment bought this period (Ofek 6 Oct), by purchase date: all of it is a business expense; a technician's
+  // purchase is also paid back to him with his weekly pay.
+  const eqList = (data.equipmentSpend||[]).filter(e => inRange(e.date, r.start, r.effEnd));
+  const eqSum = list => round2(list.reduce((s,e)=>s+(Number(e.cost)||0),0));
+  const eqTotal = eqSum(eqList), eqBiz = eqSum(eqList.filter(e => e.paidBy==='Business')), eqTech = round2(eqTotal - eqBiz);
+  const eqWaiting = eqSum(eqList.filter(e => e.paidBy!=='Business' && e.reimbursed==='Pending'));
   const cs = summarizeCalls(calls);
   const enquiries = perf.totalLeads + cs.total, enquiriesPrev = prev.totalLeads + callsPrev.length;
   const jobs = data.jobs.filter(j => inRange(j.date, r.start, r.effEnd));
@@ -6221,6 +6295,17 @@ function renderDashboard(profile, data){
           <div class="kv"><span>Avg days to get paid</span><span class="v">${perf.avgDaysToPayment===null?'—':perf.avgDaysToPayment+' days'}</span></div>
         </div>
       </div>
+      <div class="card stat-card" style="--stat-accent:var(--accent);margin-top:12px">
+        <div class="stat-label">Equipment purchases <span class="hint">(bought this period, incl. GST)</span></div>
+        <div class="stat-value">${drill(fmtMoney(eqTotal), 'Equipment purchases this period', 'equipment', eqList)}</div>
+        <div style="margin-top:8px">
+          <div class="kv"><span>Paid by the business <span class="hint">(expense only)</span></span><span class="v">${fmtMoney(eqBiz)}</span></div>
+          <div class="kv"><span>Paid by technicians <span class="hint">(paid back with the weekly pay)</span></span><span class="v">${fmtMoney(eqTech)}</span></div>
+          ${eqWaiting ? `<div class="kv"><span>Still to pay back</span><span class="v" style="color:var(--warn)">${fmtMoney(eqWaiting)}</span></div>` : ''}
+          <div class="kv"><span>GST in it <span class="hint">(claimed back)</span></span><span class="v">${fmtMoney(materialsGst(eqTotal))}</span></div>
+        </div>
+        <div class="stat-sub" style="margin-top:6px">${eqList.length} purchase${eqList.length===1?'':'s'} · comes off Net profit without the GST</div>
+      </div>
     </div>
     <div class="grid-2" style="align-items:start;margin-top:12px">
       <div class="card stat-card" style="--stat-accent:var(--primary-teal)">
@@ -6316,6 +6401,14 @@ function payrollPaidBadge(st, currentTotal){
   const diff = round2(currentTotal - paidAmt);
   return pill('good', `Paid ${payMoney(paidAmt)}`) + (Math.abs(diff) > 0.004 ? ' ' + pill('warn', `${diff>0?'+':''}${payMoney(diff)} since`) : '');
 }
+function payrollMaterialsTable(c){
+  const m = c.materials; if (!m || !m.lines.length) return '';
+  return `<div class="section-title" style="margin-top:14px">Equipment &amp; materials <span class="tag">${payMoney(m.total)} · incl. GST ${payMoney(m.gst)} · its own invoice</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Entered</th><th>Bought</th><th>What</th><th class="num">Amount (incl. GST)</th><th class="num">GST in it</th><th></th></tr></thead><tbody>
+    ${m.lines.map(l => `<tr><td class="mono">${fmtDateShort(l.entered)}</td><td class="mono">${fmtDateShort(l.bought)}</td><td>${l.kind==='parts' ? `Parts for job ${invoiceLink(l.id, l.job.invoiceNumber)}${l.job.customerName ? ' · '+esc(l.job.customerName) : ''}` : esc(l.label)}</td>
+      <td class="num" style="font-weight:600">${payMoney(l.amount)}</td><td class="num">${payMoney(materialsGst(l.amount))}</td><td>${l.paid ? pill('good','paid back') : ''}</td></tr>`).join('')}
+  </tbody></table></div>`;
+}
 function payrollJobLinesTable(c){
   const held = (c.onHold||[]).length ? `<div class="section-title" style="margin-top:14px">On hold <span class="tag">${c.onHold.length} · ${payMoney(c.onHoldTotal)} · not in this week's pay</span></div>
     <div class="table-wrap"><table><thead><tr><th>Job date</th><th>Invoice</th><th>Customer</th><th class="num">Amount (ex-GST)</th><th class="num">Commission on hold</th></tr></thead><tbody>
@@ -6373,9 +6466,10 @@ function renderPayrollBoard(profile, data, viewChips){
   const comm = people.map(p => computePayrollCommission(data, p, weekKey));
   const hourly = payrollHourlyPeople(data).map(p => computePayrollHourly(data, p, weekKey));
   const commTotal = round2(comm.reduce((s,c)=>s+c.total,0));
+  const matTotal = round2(comm.reduce((s,c)=>s+c.materials.total,0));
   const hourlyTotal = round2(hourly.reduce((s,h)=>s+h.total,0));
   const cashOpen = round2(comm.filter(c => !payrollStatus(data, weekKey, c.person).cashCollected).reduce((s,c)=>s+c.cash,0));
-  const unpaidPeople = [...comm.filter(c=>c.total>0), ...hourly.filter(h=>h.total>0)].filter(x => !payrollStatus(data, weekKey, x.person).salaryPaid).length;
+  const unpaidPeople = [...comm.filter(c=>c.grandTotal>0), ...hourly.filter(h=>h.total>0)].filter(x => !payrollStatus(data, weekKey, x.person).salaryPaid).length;
 
   const commRows = comm.map(c => {
     const st = payrollStatus(data, weekKey, c.person);
@@ -6387,18 +6481,20 @@ function renderPayrollBoard(profile, data, viewChips){
       : '—';
     const cashBlocks = c.cash>0 && !st.cashCollected;
     const salaryCell = st.salaryPaid
-      ? `${payrollPaidBadge(st, c.total)}<div style="margin-top:4px"><button class="btn ghost small" onclick="togglePayrollSalary('commission','${p}','${weekKey}')">Undo</button></div>`
-      : (c.total>0 ? `<button class="btn small ${cashBlocks?'':'primary'}" ${cashBlocks?'disabled title="Mark the cash as collected first"':''} onclick="togglePayrollSalary('commission','${p}','${weekKey}')">Mark paid</button>${cashBlocks?'<div class="hint">cash first</div>':''}` : '—');
+      ? `${payrollPaidBadge(st, c.grandTotal)}<div style="margin-top:4px"><button class="btn ghost small" onclick="togglePayrollSalary('commission','${p}','${weekKey}')">Undo</button></div>`
+      : (c.grandTotal>0 ? `<button class="btn small ${cashBlocks?'':'primary'}" ${cashBlocks?'disabled title="Mark the cash as collected first"':''} onclick="togglePayrollSalary('commission','${p}','${weekKey}')">Mark paid</button>${cashBlocks?'<div class="hint">cash first</div>':''}` : '—');
     const open = !!UI.payroll.expanded[c.person];
     return `<tr>
       <td><button class="btn ghost small" onclick="togglePayrollExpanded('${p}')">${open?'▾':'▸'}</button> ${techTag(c.person)}</td>
       <td class="num">${c.lines.length}${c.lines.some(l=>l.late)?` <span class="hint">(${c.lines.filter(l=>l.late).length} late)</span>`:''}</td>
-      <td class="num" style="font-weight:700">${payMoney(c.total)}</td>
+      <td class="num">${payMoney(c.total)}</td>
+      <td class="num">${c.materials.total ? `${payMoney(c.materials.total)}<div class="hint">incl. GST ${payMoney(c.materials.gst)}</div>` : '—'}</td>
+      <td class="num" style="font-weight:700">${payMoney(c.grandTotal)}</td>
       <td class="num">${c.unpaid.length ? `${payMoney(c.expected)} <span class="hint">(${c.unpaid.length})</span>` : '—'}</td>
       <td>${cashCell}</td>
       <td>${salaryCell}</td>
       <td><button class="btn small" onclick="copyPayMessage('commission','${p}')">📋 Copy message</button></td>
-    </tr>${open ? `<tr><td colspan="7" style="background:var(--bg-soft, transparent)">${payrollJobLinesTable(c)}${payrollUnpaidTable(c)}</td></tr>` : ''}`;
+    </tr>${open ? `<tr><td colspan="9" style="background:var(--bg-soft, transparent)">${payrollJobLinesTable(c)}${payrollMaterialsTable(c)}${payrollUnpaidTable(c)}</td></tr>` : ''}`;
   }).join('');
 
   const hourlyRows = hourly.map(h => {
@@ -6426,13 +6522,13 @@ function renderPayrollBoard(profile, data, viewChips){
     <div class="grid-4">
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Technician commissions</div><div class="stat-value">${payMoney(commTotal)}</div><div class="stat-sub">${comm.reduce((s,c)=>s+c.lines.length,0)} paid jobs this week</div></div>
       <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Hourly staff</div><div class="stat-value">${payMoney(hourlyTotal)}</div><div class="stat-sub">${hourly.map(h=>`${esc(h.person)}: ${h.hours}h · ${h.bookings} bookings`).join(' · ') || '—'}</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Total payroll this week</div><div class="stat-value">${payMoney(commTotal+hourlyTotal)}</div><div class="stat-sub">${unpaidPeople ? `${unpaidPeople} still to pay` : 'everyone with pay is marked paid'} · owners' fixed salaries not included</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Total payroll this week</div><div class="stat-value">${payMoney(round2(commTotal+matTotal+hourlyTotal))}</div><div class="stat-sub">${matTotal ? `incl. ${payMoney(matTotal)} equipment &amp; materials · ` : ''}${unpaidPeople ? `${unpaidPeople} still to pay` : 'everyone with pay is marked paid'} · owners' fixed salaries not included</div></div>
       <div class="card stat-card" style="--stat-accent:${cashOpen>0?'var(--warn)':'var(--good)'}"><div class="stat-label">Cash still to collect</div><div class="stat-value">${payMoney(cashOpen)}</div><div class="stat-sub">cash is collected before salary is paid</div></div>
     </div>
     <div class="section-title">Technicians <span class="tag">${payrollWeekLabel(wk)}</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Paid jobs</th><th class="num">Commission</th><th class="num">Not paid yet</th><th>Cash to collect</th><th>Salary</th><th>Message</th></tr></thead>
-      <tbody>${commRows || `<tr><td colspan="7">${emptyState('No technicians', 'Add technicians on the Employees tab')}</td></tr>`}</tbody></table></div>
-    <div class="hint" style="margin-top:6px">Commission = (amount before GST − the job's expenses) × the technician's %. Independent contractors (Alessandro) cover their own expenses, so theirs is on the full amount before GST.</div>
+    <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Paid jobs</th><th class="num">Commission</th><th class="num">Equipment &amp; materials</th><th class="num">Total to pay</th><th class="num">Not paid yet</th><th>Cash to collect</th><th>Salary</th><th>Message</th></tr></thead>
+      <tbody>${commRows || `<tr><td colspan="9">${emptyState('No technicians', 'Add technicians on the Employees tab')}</td></tr>`}</tbody></table></div>
+    <div class="hint" style="margin-top:6px">Commission = (amount before GST − the job's expenses) × the technician's %. Independent contractors (Alessandro) cover their own expenses, so theirs is on the full amount before GST. Equipment &amp; materials = what the technician paid for himself (equipment, and parts on a job): paid back in full, on its own invoice, in the week it was entered.</div>
     <div class="section-title">Hourly staff <span class="tag">$${presentAmt(PAYROLL_HOURLY_RATE)}/hour + daily booking bonus</span></div>
     <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Hours</th><th class="num">Bookings</th><th class="num">Bonuses</th><th class="num">Total</th><th>Salary</th><th>Message</th></tr></thead>
       <tbody>${hourlyRows || `<tr><td colspan="7">${emptyState('No hourly staff', 'Set the employee’s Employment Type to Hourly on the Employees tab')}</td></tr>`}</tbody></table></div>
@@ -6503,8 +6599,15 @@ function renderMyPay(profile, data, person, isPreview){
       <div class="card stat-card" style="--stat-accent:${c.cash>0 && !st.cashCollected ? 'var(--warn)' : 'var(--primary)'}"><div class="stat-label">Cash to hand over</div><div class="stat-value">${payMoney(c.cash)}</div><div class="stat-sub">${c.cash>0 ? (st.cashCollected ? 'handed over ✓' : 'not handed over yet') : 'no cash jobs this week'}</div></div>
       <div class="card stat-card" style="--stat-accent:${st.salaryPaid?'var(--good)':'var(--ink-faint)'}"><div class="stat-label">This week's salary</div><div class="stat-value" style="font-size:20px">${st.salaryPaid ? 'Paid ✓' : 'Not paid yet'}</div><div class="stat-sub">${st.salaryPaid ? payMoney(st.salaryPaidAmount) : 'paid after the week ends'}</div></div>
     </div>
+    ${c.materials.lines.length ? `<div class="card" style="margin-top:14px;max-width:520px">
+      <div class="stat-label" style="margin-bottom:6px">This week's pay</div>
+      <div class="kv"><span>Commission (invoice 1)</span><span class="v">${payMoney(c.total)}</span></div>
+      <div class="kv"><span>Equipment &amp; materials (invoice 2) <span class="hint">incl. GST ${payMoney(c.materials.gst)}</span></span><span class="v">${payMoney(c.materials.total)}</span></div>
+      <div class="kv total"><span>Total</span><span class="v">${payMoney(c.grandTotal)}</span></div>
+    </div>` : ''}
     <div class="section-title">Jobs paid this week <span class="tag">${payrollWeekLabel(wk)}</span></div>
     ${payrollJobLinesTable(c)}
+    ${payrollMaterialsTable(c)}
     ${payrollUnpaidTable(c)}
     <div class="hint" style="margin-top:8px">${deducts ? 'Commission = (amount before GST − the job\'s expenses) × your %.' : 'Commission = amount before GST × your %.'} It counts in the week the customer pays.</div>
     ${isPreview ? `<div style="margin-top:10px"><button class="btn small" onclick="copyPayMessage('commission','${jsStr(person)}')">📋 Copy pay message</button></div>` : ''}
@@ -6543,6 +6646,21 @@ function togglePayrollCash(person, weekKey){
     }, { danger:false, title:'Undo cash collected', confirmLabel:'Undo' });
   }
 }
+// Equipment & materials paid back with the week's pay: marked "Reimbursed" / "Refunded" with the week (so Undo can
+// put exactly those back to waiting).
+function setMaterialsPaid(lines, weekKey, paid, actor, person, range){
+  (lines||[]).forEach(l => {
+    if (l.kind==='equipment') {
+      const e = STATE.data.equipmentSpend.find(x => x.id===l.id); if (!e) return;
+      db.equipmentSpend.update(e.id, paid ? { reimbursed:'Reimbursed', reimbursedWeek:weekKey } : { reimbursed:'Pending', reimbursedWeek:null });
+      logEquipmentActivity(e, actor, paid ? `Paid back to ${person} with the pay for ${range}` : `Payback undone (pay for ${range} marked not paid)`);
+    } else {
+      const j = STATE.data.jobs.find(x => x.id===l.id); if (!j) return;
+      db.jobs.update(j.id, paid ? { partsRefundStatus:'Refunded', partsRefundWeek:weekKey } : { partsRefundStatus:'Pending Refund', partsRefundWeek:null });
+      logJobActivity(j, actor, paid ? `Parts ${payMoney(l.amount)} paid back to ${person} with the pay for ${range}` : `Parts payback undone (pay for ${range} marked not paid)`);
+    }
+  });
+}
 function togglePayrollSalary(kind, person, weekKey){
   const st = payrollStatus(STATE.data, weekKey, person);
   const actor = payrollActor();
@@ -6562,19 +6680,22 @@ function togglePayrollSalary(kind, person, weekKey){
   const c = computePayrollCommission(STATE.data, person, weekKey);
   if (!st.salaryPaid) {
     if (c.cash>0 && !st.cashCollected) { showToast('Mark the cash as collected first'); return; }
-    confirmAction(`Mark ${payMoney(c.total)} paid to ${person} for ${range}? The ${c.lines.length} job${c.lines.length===1?'':'s'} in it will be marked "Paid" to technician.`, () => {
-      db.payroll.set(weekKey, person, { salaryPaid:true, salaryPaidAt:new Date().toISOString(), salaryPaidBy:actor, salaryPaidAmount:c.total });
+    const mat = c.materials.lines.length ? ` Commission ${payMoney(c.total)} + equipment & materials ${payMoney(c.materials.total)} (two invoices). The ${c.materials.lines.length} purchase${c.materials.lines.length===1?'':'s'} will be marked paid back.` : '';
+    confirmAction(`Mark ${payMoney(c.grandTotal)} paid to ${person} for ${range}?${mat} The ${c.lines.length} job${c.lines.length===1?'':'s'} in it will be marked "Paid" to technician.`, () => {
+      db.payroll.set(weekKey, person, { salaryPaid:true, salaryPaidAt:new Date().toISOString(), salaryPaidBy:actor, salaryPaidAmount:c.grandTotal });
       c.lines.forEach(l => {
         if (l.job.paidToTechnician!=='Paid' && l.job.paidToTechnician!=='Stuck') {
           db.jobs.update(l.job.id, { paidToTechnician:'Paid' });
           logJobActivity(l.job, actor, `Commission ${payMoney(l.commission)} paid to ${person} (Payroll, week ${range})`);
         }
       });
+      setMaterialsPaid(c.materials.lines, weekKey, true, actor, person, range);
       showToast('Salary marked as paid'); render();
     }, { danger:false, title:'Mark salary as paid', confirmLabel:'Mark paid' });
   } else {
-    confirmAction(`Mark ${person}'s salary for ${range} as NOT paid? Its jobs go back to "Not Paid" to technician.`, () => {
+    confirmAction(`Mark ${person}'s salary for ${range} as NOT paid? Its jobs go back to "Not Paid" to technician${c.materials.lines.length ? ' and its equipment & materials back to waiting' : ''}.`, () => {
       db.payroll.set(weekKey, person, { salaryPaid:false, salaryPaidAt:null, salaryPaidBy:null, salaryPaidAmount:null });
+      setMaterialsPaid(c.materials.lines, weekKey, false, actor, person, range);
       c.lines.forEach(l => {
         if (l.job.paidToTechnician==='Paid') {
           db.jobs.update(l.job.id, { paidToTechnician:'Not Paid' });
@@ -6609,6 +6730,7 @@ function renderNetProfitCard(np, title, valueSuffix){
     ['Revenue (excl. GST)', np.revenue, false],
     ['Technician commissions', np.commission, true],
     ['Job expenses (parts)', np.parts, true],
+    ['Equipment purchases (excl. GST)', np.equipment||0, true],
     ['Marketing (Google + Meta ads)', np.marketing, true],
     ['Hourly staff (Ron: hours + bonuses)', np.hourlyStaff, true],
     [`Owner salaries (${np.days} day${np.days===1?'':'s'})`, np.owners, true],
@@ -6707,15 +6829,19 @@ function openDrill(i){
     items.sort((a,b) => String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
     head = '<th>Lead</th><th>Came in</th><th>Source</th><th>Division</th><th>Stage</th>';
     rows = items.map(c => `<tr><td>${custLink(c.fullName, c.id)}</td><td class="mono">${fmtDateShort(localDay(c.createdAt))}</td><td>${esc(sourceLabel(c.source))}</td><td>${esc(c.division||'—')}</td><td>${esc(stageLabel(leadStage(c)))}</td></tr>`).join('');
+  } else if (d.kind==='equipment') {
+    items.sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
+    head = '<th>Bought</th><th>Entered</th><th>What</th><th>Technician</th><th>Paid by</th><th class="num">Amount (incl. GST)</th><th class="num">GST in it</th><th>Pay back</th>';
+    rows = items.map(e => `<tr><td class="mono">${fmtDateShort(e.date)}</td><td class="mono">${e.createdAt ? fmtDateShort(localDay(e.createdAt)) : '—'}</td><td>${esc(e.item||'—')}</td><td>${esc(e.technician||'—')}</td><td>${esc(e.paidBy||'—')}</td><td class="num">${fmtMoney(e.cost)}</td><td class="num">${fmtMoney(materialsGst(e.cost))}</td><td>${e.paidBy==='Business' || e.reimbursed==='N/A' ? '<span class="hint">expense only</span>' : e.reimbursed==='Reimbursed' ? pill('good','paid back') : pill('warn','with the weekly pay')}</td></tr>`).join('');
   } else {
     items.sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
     head = '<th>Date</th><th>Customer</th><th>Invoice</th><th>Technician</th><th class="num">Amount (incl. GST)</th><th>Status</th>';
     rows = items.map(j => `<tr><td class="mono">${fmtDateShort(j.date)}</td><td>${custLink(j.customerName, j.contactId, j.id)}</td><td class="mono">${invoiceLink(j.id, j.invoiceNumber)}</td><td>${esc(j.technician||'—')}</td><td class="num">${fmtMoney(jobTotalCollected(j))}</td><td>${pill(j.paymentStatus==='Paid'?'good':'bad', j.paymentStatus)}</td></tr>`).join('');
   }
-  const total = d.kind==='jobs' ? ` · ${fmtMoney(round2(items.reduce((s,j)=>s+jobTotalCollected(j),0)))} incl. GST` : '';
+  const total = d.kind==='jobs' ? ` · ${fmtMoney(round2(items.reduce((s,j)=>s+jobTotalCollected(j),0)))} incl. GST` : d.kind==='equipment' ? ` · ${fmtMoney(round2(items.reduce((s,e)=>s+(Number(e.cost)||0),0)))} incl. GST` : '';
   openModal(`<div class="modal-back" onclick="if(event.target===this) closeModal()"><div class="modal" style="max-width:820px">
-    <h2>${esc(d.title)}</h2><div class="modal-sub">${items.length} ${d.kind==='leads'?'lead':'job'}${items.length===1?'':'s'}${total}</div>
-    <div class="table-wrap" style="max-height:60vh;overflow:auto"><table><thead><tr>${head}</tr></thead><tbody>${rows || `<tr><td colspan="6">${emptyState('Nothing here')}</td></tr>`}</tbody></table></div>
+    <h2>${esc(d.title)}</h2><div class="modal-sub">${items.length} ${d.kind==='leads'?'lead':d.kind==='equipment'?'purchase':'job'}${items.length===1?'':'s'}${total}</div>
+    <div class="table-wrap" style="max-height:60vh;overflow:auto"><table><thead><tr>${head}</tr></thead><tbody>${rows || `<tr><td colspan="8">${emptyState('Nothing here')}</td></tr>`}</tbody></table></div>
     <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Close</button></div>
   </div></div>`);
 }
@@ -7364,6 +7490,7 @@ async function finalizeClosing(g, commissionPercent){
     };
     // A later closing on the same invoice (a split payment) only adds "don't ask", never clears it.
     if (g.reviewDoNotAsk) patch.reviewDoNotAsk = true;
+    Object.assign(patch, partsRefundPatch(existingJob, { ...existingJob, partsCost: g.partsCost, partsPaidBy: g.partsPaidBy }));
     if (g.paymentStatus==='Paid' && !existingJob.datePaid) patch.datePaid = g.date || todayStr();
     if (g.paymentStatus!=='Paid') patch.datePaid = '';
     if (g.invoiceFileUrl) patch.invoiceFile = g.invoiceFileUrl;
@@ -7374,7 +7501,7 @@ async function finalizeClosing(g, commissionPercent){
     const values = {
       customerName: g.customerName, contactId: g.contactId || null, invoiceNumber: g.invoiceNumber, date: g.date, technician: g.technicianName,
       jobType: g.jobType, commissionPercent, amount: g.amount, includesGST: g.includesGST, paymentStatus: g.paymentStatus,
-      paymentMethod: g.paymentMethod, partsCost: g.partsCost, partsPaidBy: g.partsPaidBy, partsRefundStatus:'N/A',
+      paymentMethod: g.paymentMethod, partsCost: g.partsCost, partsPaidBy: g.partsPaidBy, ...partsRefundPatch(null, { partsCost: g.partsCost, partsPaidBy: g.partsPaidBy }),
       notes: g.notes || 'Created automatically from a Closings post.', datePaid: g.paymentStatus==='Paid'?(g.date || todayStr()):'',
       paidToTechnician:'Not Paid', enteredBy: g.technicianName, cashConfirmed:false,
       invoiceFile: g.invoiceFileUrl||null, transferReceiptFile:null, equipmentRentalFile:null,
@@ -7400,8 +7527,9 @@ async function finalizeClosing(g, commissionPercent){
 
 /* ── equipment & suppliers quick-entry feed (technician reimbursement tracking) ─────────────
    Second feed on the same Closings screen, same quick-form → feed pattern. Maps to the EXISTING
-   equipmentSpend records (the same ones commission math already reads via computeWeek's tEquip
-   loop) — NOT the Equipment Catalog / Suppliers reference lists on the Reference page. Fields are
+   equipmentSpend records (paid back to the technician with his weekly pay when he paid, an expense
+   only when the business paid — see computePayrollMaterials) — NOT the Equipment Catalog / Suppliers
+   reference lists on the Reference page. Fields are
    deliberately narrower than the full Reference-page Equipment Purchase modal: Technician,
    Description, Price, Date Purchased, Paid By. Reimbursed status still lives on the record
    (defaults 'Pending' for anything created here) but isn't shown as a column in this quick feed. ── */
@@ -7430,9 +7558,9 @@ function renderEquipmentQuickFeed(profile, data){
       <div class="grid-3">
         <div class="field"><label>Technician</label><select id="eqf-tech">${allTechs.map(t=>`<option value="${esc(t)}" ${t===defaultTech?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
         <div class="field"><label>Description</label><input id="eqf-desc" placeholder="e.g. Extension ladder"></div>
-        <div class="field"><label>Price</label><input type="number" id="eqf-price" value="0"></div>
+        <div class="field"><label>Price (incl. GST)</label><input type="number" step="0.01" id="eqf-price" value="0"><span class="hint">The total on the receipt</span></div>
         <div class="field"><label>Date Purchased</label><input type="date" id="eqf-date" value="${todayStr()}"></div>
-        <div class="field"><label>Paid By</label><select id="eqf-paidby">${allTechs.map(t=>`<option value="${esc(t)}" ${t===defaultTech?'selected':''}>${esc(t)}</option>`).join('')}<option value="Business">Business</option></select></div>
+        <div class="field"><label>Paid By</label><select id="eqf-paidby">${allTechs.map(t=>`<option value="${esc(t)}" ${t===defaultTech?'selected':''}>${esc(t)}</option>`).join('')}<option value="Business">Business</option></select><span class="hint">A technician is paid back with his weekly pay. Business = an expense only</span></div>
       </div>
       <div id="eqf-error"></div>
       <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn primary" onclick="postEquipmentQuick()">Post purchase</button></div>
@@ -7450,7 +7578,7 @@ async function postEquipmentQuick(){
   const cost = Number(document.getElementById('eqf-price').value) || 0;
   const date = document.getElementById('eqf-date').value || todayStr();
   const paidBy = document.getElementById('eqf-paidby').value;
-  try { await db.equipmentSpend.create({ date, item, technician, paidBy, cost, reimbursed:'Pending', activityLog:[] }); }
+  try { await db.equipmentSpend.create({ date, item, technician, paidBy, cost, reimbursed: equipReimbursedFor(paidBy), activityLog:[] }); }
   catch (err) { return; }   // db.equipmentSpend.create() already showed an error toast; the form keeps what was typed
   showToast('Equipment purchase posted');
   render();
@@ -8256,16 +8384,16 @@ function renderEquipSpendTab(data){
   const allTechs = technicianNames(data);
   const list = [...data.equipmentSpend].sort((a,b)=>b.date.localeCompare(a.date));
   const rows = list.length ? list.map(e => `
-    <tr><td class="mono">${fmtDateShort(e.date)}</td><td>${esc(e.item)}</td><td>${techTag(e.technician)}</td><td>${statusSelect('equipPaidBy', e.id, e.paidBy, allTechs, ()=>'neutral', v=>v, false)}</td><td class="num">${fmtMoney(e.cost)}</td>
+    <tr><td class="mono">${fmtDateShort(e.date)}</td><td class="mono">${e.createdAt ? fmtDateShort(localDay(e.createdAt)) : '—'}</td><td>${esc(e.item)}</td><td>${techTag(e.technician)}</td><td>${statusSelect('equipPaidBy', e.id, e.paidBy, [...allTechs, 'Business'], ()=>'neutral', v=>v, false)}</td><td class="num">${fmtMoney(e.cost)}</td>
     <td>${statusSelect('equipReimbursed', e.id, e.reimbursed, ['Pending','Reimbursed','N/A'], v=>v==='Reimbursed'?'good':v==='Pending'?'warn':'neutral', v=>v, false)}</td>
     <td><button class="btn ghost small" onclick="openEquipActivityModal('${e.id}')">💬 ${recordActivityCount(e)}</button></td>
-    <td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openEquipSpendModal('${e.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteEquipSpend('${e.id}');render()">Delete</button></td></tr>`).join('') : `<tr><td colspan="8">${emptyState('No equipment purchases yet')}</td></tr>`;
+    <td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openEquipSpendModal('${e.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteEquipSpend('${e.id}');render()">Delete</button></td></tr>`).join('') : `<tr><td colspan="9">${emptyState('No equipment purchases yet')}</td></tr>`;
   return `
     <div style="display:flex;justify-content:space-between;margin-bottom:12px;gap:10px;flex-wrap:wrap">
-      <div style="font-size:12.5px;color:var(--ink-soft)">General equipment a technician buys out of pocket — included in commission math</div>
+      <div style="font-size:12.5px;color:var(--ink-soft)">Equipment bought for the business. Paid by a technician = paid back with his weekly pay (Payroll, its own invoice). Paid by the business = an expense only. Both come off the net profit.</div>
       <button class="btn primary" onclick="openEquipSpendModal(null)">+ Equipment Purchase</button>
     </div>
-    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Item</th><th>Technician</th><th>Paid By</th><th>Amount</th><th>Refund Status</th><th>Activity</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Bought</th><th>Entered</th><th>Item</th><th>Technician</th><th>Paid By</th><th>Amount (incl. GST)</th><th>Refund Status</th><th>Activity</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   `;
 }
 function openEquipSpendModal(itemId){
@@ -8280,7 +8408,7 @@ function openEquipSpendModal(itemId){
           <div class="field"><label>Item</label><input id="es-item" value="${esc(item?.item||'')}"></div>
           <div class="field"><label>Technician (for commission)</label><select id="es-tech">${allTechs.map(t=>`<option value="${esc(t)}" ${(item?.technician||allTechs[0])===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
           <div class="field"><label>Paid By</label><select id="es-paidby">${allTechs.map(t=>`<option value="${esc(t)}" ${(item?.paidBy||allTechs[0])===t?'selected':''}>${esc(t)}</option>`).join('')}<option value="Business" ${item?.paidBy==='Business'?'selected':''}>Business</option></select></div>
-          <div class="field"><label>Amount</label><input type="number" id="es-cost" value="${item?.cost||0}"></div>
+          <div class="field"><label>Amount (incl. GST)</label><input type="number" step="0.01" id="es-cost" value="${item?.cost||0}"></div>
           <div class="field"><label>Refund Status</label><select id="es-reimb"><option value="Pending" ${(!item||item.reimbursed==='Pending')?'selected':''}>Pending</option><option value="Reimbursed" ${item?.reimbursed==='Reimbursed'?'selected':''}>Reimbursed</option><option value="N/A" ${item?.reimbursed==='N/A'?'selected':''}>N/A</option></select></div>
         </div>
         <div id="modal-error"></div>
@@ -8298,6 +8426,9 @@ async function saveEquipSpendModal(itemId){
   const prev = itemId ? STATE.data.equipmentSpend.find(x=>x.id===itemId) : null;
   const oldSnapshot = prev ? { cost:prev.cost, reimbursed:prev.reimbursed, paidBy:prev.paidBy } : null;
   const values = { date: document.getElementById('es-date').value, item: itemName, technician: document.getElementById('es-tech').value, paidBy: document.getElementById('es-paidby').value, cost: Number(document.getElementById('es-cost').value)||0, reimbursed: document.getElementById('es-reimb').value };
+  // Bought by the business = an expense only (nothing to pay back); a technician's purchase waits for his weekly pay.
+  values.reimbursed = equipReimbursedFor(values.paidBy, values.reimbursed);
+  if (values.reimbursed!=='Reimbursed') values.reimbursedWeek = null;
   let item;
   if (itemId) { item = prev; db.equipmentSpend.update(item.id, values); }
   else {
