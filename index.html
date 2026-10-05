@@ -3787,6 +3787,7 @@ async function mdFlush(day, booking){
 setInterval(() => { try { mdTick(); } catch(e) {} }, 60000);
 // A day nobody closed (Ron didn't log out) is closed the next time the app opens, from what was stored.
 function mdCloseOldDays(today){
+  if (readOnlyReason()) return;
   Object.values(MD.days).filter(r => r.day < today && !r.closed_at && r.items && Object.keys(r.items).length).forEach(r => {
     const k = mdStoredCounts(r);
     sb.rpc('myday_close', { p_day: r.day, p_percent: k.percent, p_totals: k, p_by: 'auto' }).then(async ({ error }) => {
@@ -3813,6 +3814,7 @@ function mdRecordBooking(c){
 }
 // Ron's logout (Ofek 3/10): a quote due today that wasn't handled blocks it; otherwise "good work, X%" and the day closes.
 function mdEndOfDay(opts){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   const signOut = !!(opts && opts.signOut);
   const p = getCurrentProfile(), now = new Date(), today = sydneyWall(now).day;
   const bubbles = mdLive(filterForProfile(STATE.data, p), now);
