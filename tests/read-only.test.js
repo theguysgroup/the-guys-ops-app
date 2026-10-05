@@ -108,7 +108,7 @@ function actionSandbox(){
     contactById: (id) => id === contact.id ? contact : null,
     getCurrentProfile: () => ({ id: 'ron', fullName: 'Ron', role: 'va', onDuty: true, onDutyDate: '2026-10-05' }),
     getRealProfile: () => ({ id: 'own', role: 'owner' }),
-    STATE: { data: { jobs: [job], contacts: [contact], settings: {} }, profiles: [] },
+    STATE: { data: { jobs: [job], contacts: [contact], tasks: [{ id:'t1', title:'x', assignees:['Guy'] }], settings: {} }, profiles: [] },
     MD: { loaded: true, days: {}, pending: {} },
     UI: { tab: 'myDay' },
     sydneyWall: () => ({ day: '2026-10-05', hour: 10, minute: 0, dow: 'Mon' }),
@@ -120,7 +120,7 @@ function actionSandbox(){
     leadStage: () => 'New', chaseTooLong: () => false, isWorkday: () => true, Promise, console,
   };
   vm.createContext(ctx);
-  const names = ['readOnlyReason', 'setLeadNotes', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'setChatAutoSms', 'setMyShift'];
+  const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'setLeadNotes', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'setChatAutoSms', 'setMyShift'];
   vm.runInContext(names.map(fnText).join('\n'), ctx);
   return ctx;
 }
@@ -144,6 +144,10 @@ async function testActions(){
     await run(`mdEndOfDay({ signOut: false })`);
     await run(`mdCloseOldDays('2026-10-05')`);
     await run(`openWhileOutItem('c1', 'mX')`);
+    await run(`markPaymentContacted('j1')`);
+    await run(`setPaymentFollowup('j1', '2099-01-01')`);
+    await run(`markReofferDone('j1')`);
+    await run(`markTeamReminded('t1')`);
     ok(ctx.log.db.length === 0, `${mode}: nothing is written (database, RPCs, activity log)`, ctx.log.db);
     ok(ctx.log.fetch.length === 0, `${mode}: no message, review request, report or status is sent`, ctx.log.fetch);
     ok(ctx.log.toasts.length >= 8 && ctx.log.toasts.every(t => /not saved/.test(t)), `${mode}: the person is told changes are not saved`, ctx.log.toasts);

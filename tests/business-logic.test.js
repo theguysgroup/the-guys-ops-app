@@ -50,7 +50,7 @@ const DECLS = [
   // sales automations + My Day
   'fmtMoney', 'workClockDue', 'sydneyNowPast', 'NEW_LEAD_ALERT_FROM', 'leadArrivedAt', 'newLeadUnhandled', 'chaseTooLong', 'quoteStale', 'bookedNoJob', 'MY_DAY_NEW_DAYS', 'myDayLists',
   // My Day counters (3 Oct)
-  'esc', 'quoteDueReason', 'shiftDaySummary', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
+  'esc', 'quoteDueReason', 'shiftDaySummary', 'latePaymentDue', 'latePaymentDoneToday', 'reofferDue', 'assigneeNames', 'taskAssignedTo', 'myTaskDue', 'teamTaskDue', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
 ];
 
 function extractDecl(source, name){
@@ -279,35 +279,23 @@ function testComputeProfitByWeekInRange(sb){
 }
 
 function testRepeatServiceReminder(sb){
-  // Added 2026-09-10 per Ofek's spec: a job that's exactly 358 days old (365 minus a 7-day lead time)
-  // should surface a "call to re-offer the service" reminder for that one day only. Since
-  // computeReminders is recomputed fresh on every render (never persisted), the 24h window falls out
-  // naturally from the date math — no expiry field or cron needed. Fixed `now` so the fixture doesn't
-  // drift with the calendar.
-  const now = new Date(2026, 8, 10); // 10 Sep 2026
-  const dateNDaysBefore = (n) => { const d = new Date(now); d.setDate(d.getDate()-n); return sb.fmtLocal(d); };
-  sb.STATE.data.jobs = [
-    { id:'due-today', customerName:'Chen Family', jobType:'Aircon', date: dateNDaysBefore(358), technician:'Guy', paymentStatus:'Paid', paidToTechnician:'Paid', partsCost:0 },
-    { id:'yesterday', customerName:'Nguyen', jobType:'Chimney', date: dateNDaysBefore(359), technician:'Guy', paymentStatus:'Paid', paidToTechnician:'Paid', partsCost:0 },
-    { id:'tomorrow', customerName:'Okafor', jobType:'Aircon', date: dateNDaysBefore(357), technician:'Guy', paymentStatus:'Paid', paidToTechnician:'Paid', partsCost:0 },
+  // Re-offer a year later (Ofek 10 Sep, moved to a My Day bubble on 5 Oct): due from 358 days after the job (a week
+  // before the year) until Ron marks it — unless the customer already has a newer job. No longer a Reminder.
+  const today = '2026-09-10';
+  const daysBefore = n => sb.shiftDays(today, -n);
+  const jobs = [
+    { id:'due-today', customerName:'Chen Family', jobType:'Aircon', date: daysBefore(358), paymentStatus:'Paid' },
+    { id:'past', customerName:'Nguyen', jobType:'Chimney', date: daysBefore(370), paymentStatus:'Paid' },
+    { id:'too-soon', customerName:'Okafor', jobType:'Aircon', date: daysBefore(357), paymentStatus:'Paid' },
+    { id:'done', customerName:'Lee', jobType:'Aircon', date: daysBefore(360), paymentStatus:'Paid', reofferDoneAt:'2026-09-09T01:00:00Z' },
+    { id:'came-back-old', customerName:'Patel', jobType:'Aircon', date: daysBefore(365), paymentStatus:'Paid' },
+    { id:'came-back-new', customerName:'patel ', jobType:'Aircon', date: daysBefore(20), paymentStatus:'Paid' },
   ];
-  sb.STATE.data.equipmentSpend = [];
-  sb.STATE.data.quotes = [];
-  sb.STATE.data.contacts = [];
-  sb.STATE.data.manualReminders = [];
-  sb.STATE.data.dismissedReminders = [];
-  sb.STATE.data.readReminders = [];
-
-  const items = sb.computeReminders(sb.STATE.data, now);
-  const repeatItems = items.filter(it => it.type === 'repeat-service');
-  assertEqual(repeatItems.length, 1, 'computeReminders: only the job exactly 358 days old fires the repeat-service reminder');
-  assertEqual(repeatItems[0]?.key, 'repeat-service:due-today', 'computeReminders: repeat-service reminder keyed to the matching job');
-  assertEqual(repeatItems[0]?.title.includes('Chen Family') && repeatItems[0]?.title.includes('Aircon'), true, 'computeReminders: repeat-service title names the customer and job type');
-
-  // Dismissing it (same mechanism as every other reminder) hides it even though the date still matches.
-  sb.STATE.data.dismissedReminders = ['repeat-service:due-today'];
-  const itemsAfterDismiss = sb.computeReminders(sb.STATE.data, now);
-  assertEqual(itemsAfterDismiss.filter(it => it.type === 'repeat-service').length, 0, 'computeReminders: repeat-service reminder respects the normal dismissed-reminders set');
+  sb.STATE.data.jobs = jobs; sb.STATE.data.contacts = []; sb.JOB_CACHE.index = null;
+  const due = jobs.filter(j => sb.reofferDue(j, jobs, today)).map(j => j.id);
+  assertEqual(due, ['due-today', 'past'], 'reofferDue: from 358 days on, until handled; not before, not when done, not when the customer has a newer job');
+  Object.assign(sb.STATE.data, { equipmentSpend:[], quotes:[], manualReminders:[], dismissedReminders:[], readReminders:[] });
+  assertEqual(sb.computeReminders(sb.STATE.data, sb.parseLocalDate(today)).filter(it => it.type==='repeat-service').length, 0, 'computeReminders: the re-offer is a My Day bubble now, not a Reminder');
 }
 
 function testPayroll(sb){
@@ -513,11 +501,8 @@ function testSalesAutomations(sb){
   sb.STATE.data.contacts = [chase('2026-09-01T02:00:00Z'), quote('2026-09-08T02:00:00Z'), booked('2026-09-20')];
   Object.assign(sb.STATE.data, { equipmentSpend:[], manualReminders:[], dismissedReminders:[], readReminders:[], employees:[] });
   const items = sb.computeReminders(sb.STATE.data, at('2026-09-22T02:00:00Z'));
-  assertEqual(items.filter(i => i.type==='chase-long').map(i => i.key), ['chase-long:ch:2026-09-01'], 'computeReminders: one "decide" reminder, keyed to when chasing started');
-  assertEqual(items.filter(i => i.type==='stale-quote').map(i => i.key), ['stale-quote:q:2026-09-08'], 'computeReminders: one idle-quote reminder, keyed to the quote date');
-  assertEqual(items.filter(i => i.type==='booked-no-job').length, 0, 'computeReminders: no "booked, no job yet" reminder any more (removed 3 Oct at Ofek\'s request)');
-  sb.STATE.data.dismissedReminders = ['chase-long:ch:2026-09-01'];
-  assertEqual(sb.computeReminders(sb.STATE.data, at('2026-09-22T02:00:00Z')).filter(i => i.type==='chase-long').length, 0, 'computeReminders: a deleted "decide" reminder stays deleted');
+  // (5 Oct, Ofek: no duplicates) chasing 21+, idle quotes, lead follow-ups and late payments are My Day bubbles now.
+  assertEqual(items.filter(i => ['chase-long','stale-quote','booked-no-job','followup','unpaid'].includes(i.type)).length, 0, 'computeReminders: lead and payment items are not Reminders any more (they are My Day bubbles)');
 
   // My Day lists: the 21-day lead goes to "decide", not the daily call list; quotes due and follow-ups each keep to their own stage.
   sb.STATE.data.contacts.push(lead(), lead({ id:'old', fullName:'Backlog', createdAt:'2026-06-15', messages:[{ kind:'event', at:'2026-06-15T02:00:00Z' }] }),
@@ -542,6 +527,18 @@ function testSalesAutomations(sb){
   // a past day nobody ended: counted up to the last event, flagged open
   const day3 = sb.shiftDaySummary([E('shift_start','08:00'), E('break_start','12:00'), E('break_end','12:30')], 0, false);
   assertEqual([day3.workedMins, day3.open], [270, true], 'shiftDaySummary: a forgotten shift counts to its last event and is flagged');
+  // Late payments (Ofek 5/10): every day until paid, unless Ron set a follow-up date; done today = called / later date / paid
+  const unpaid = (extra) => Object.assign({ id:'lp', paymentStatus:'Unpaid', date:'2026-09-20', paymentContacts:[] }, extra||{});
+  assertEqual([sb.latePaymentDue(unpaid(), '2026-09-27', 7), sb.latePaymentDue(unpaid(), '2026-09-28', 7)], [false, true], 'latePaymentDue: only after 7 days');
+  assertEqual(sb.latePaymentDue(unpaid({ paymentFollowup:'2026-10-02' }), '2026-09-30', 7), false, 'latePaymentDue: waits for the follow-up date Ron set');
+  assertEqual(sb.latePaymentDue(unpaid({ paymentFollowup:'2026-10-02' }), '2026-10-02', 7), true, 'latePaymentDue: back on the follow-up date');
+  assertEqual(sb.latePaymentDue(unpaid({ paymentStatus:'Paid' }), '2026-10-02', 7), false, 'latePaymentDue: a paid job is never late');
+  assertEqual([sb.latePaymentDoneToday(unpaid({ paymentContacts:['2026-09-30'] }), '2026-09-30'), sb.latePaymentDoneToday(unpaid({ paymentContacts:['2026-09-29'] }), '2026-09-30'), sb.latePaymentDoneToday(unpaid({ paymentFollowup:'2026-10-05' }), '2026-09-30')], [true, false, true], 'latePaymentDoneToday: called today, or a later date set; yesterday\'s call does not count');
+  // Tasks (Ofek 5/10): mine = assigned to me, due today/late or from the heads-up; team = someone else's, due today/late or heads-up day
+  const ron = { fullName:'Ron', technicianName:'Ron' };
+  const task = (extra) => Object.assign({ id:'t', status:'Not Started', assignees:['Ron'], board:'ron', due:'2026-10-05', headsUp:'' }, extra||{});
+  assertEqual([sb.myTaskDue(task(), ron, '2026-10-05'), sb.myTaskDue(task({ due:'2026-10-08' }), ron, '2026-10-05'), sb.myTaskDue(task({ due:'2026-10-08', headsUp:'2026-10-04' }), ron, '2026-10-05'), sb.myTaskDue(task({ status:'Done' }), ron, '2026-10-05')], [true, false, true, false], 'myTaskDue: due today, not before (unless heads-up), never when Done');
+  assertEqual([sb.teamTaskDue(task({ assignees:['Guy'], board:'Guy' }), ron, '2026-10-05'), sb.teamTaskDue(task(), ron, '2026-10-05'), sb.teamTaskDue(task({ assignees:['Ofek'], board:'mine' }), ron, '2026-10-05'), sb.teamTaskDue(task({ assignees:['Guy'], board:'Guy', due:'2026-10-09', headsUp:'2026-10-05' }), ron, '2026-10-05')], [true, false, false, true], 'teamTaskDue: other people\'s tasks only (never Ron\'s own, never a private board), due today or on the heads-up day');
   // My Day counters: done / total per bubble, the day's % = everything done ÷ everything (Ofek 3/10).
   const K = sb.mdCounts({ new: [{done:true},{done:true},{done:true},{done:true},{done:true},{done:true},{done:false},{done:false},{done:false},{done:false}], chasing: Array.from({length:30}, () => ({done:true})) });
   // new 6/10, chasing 30/30 → 36 of 40 = 90%

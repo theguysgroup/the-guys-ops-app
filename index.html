@@ -770,14 +770,10 @@ function allMonthKeys(data, now){
 
 function computeReminders(data, now){
   const items = []; const today = parseLocalDate(todayStr(now));
-  const unpaidReminderDays = data.settings?.unpaidReminderDays ?? 7;
   const dismissed = new Set(data.dismissedReminders||[]);
+  // (5 Oct, Ofek: no duplicates) late payments, the 1-year re-offer, lead follow-ups, chasing 21+ days and idle quotes
+  // are My Day bubbles now; Reminders keeps the owners' money and admin items only.
   data.jobs.forEach(j => {
-    if (j.paymentStatus !== 'Paid') {
-      const age = daysBetween(parseLocalDate(j.date), today);
-      const key = `unpaid:${j.id}`;
-      if (age > unpaidReminderDays && !dismissed.has(key)) items.push({ key, readKey:key, type:'unpaid', severity: age>=14?'bad':'warn', date:j.date, contactId:contactForJob(j)?.id||'', title:`${j.customerName} — invoice #${j.invoiceNumber||'—'} still unpaid`, meta:`${j.technician} · ${fmtMoney(jobTotalCollected(j))} incl. GST · ${age} days since the job (the term is ${unpaidReminderDays} days)` });
-    }
     const refundKey = `refund:${j.id}`;
     if (j.partsCost > 0 && j.partsRefundStatus === 'Pending Refund' && !dismissed.has(refundKey)) items.push({ key:refundKey, readKey:refundKey, type:'refund', severity:'warn', date:j.date, title:`Parts refund pending for ${j.partsPaidBy||j.technician}`, meta:j.customerName });
   });
@@ -796,17 +792,6 @@ function computeReminders(data, now){
     });
   }
   data.equipmentSpend.forEach(e => { const key = `equipment:${e.id}`; if (e.reimbursed==='Pending' && !dismissed.has(key)) items.push({ key, readKey:key, type:'equipment', severity:'warn', date:e.date, title:`Equipment reimbursement pending for ${e.technician}`, meta:e.item }); });
-  // Repeat-service reminder: fires exactly once, 358 days after a job (365 minus a 7-day lead time),
-  // so Ron can call ahead of the 1-year mark to re-offer the service. Computed fresh every render off
-  // today's date rather than stored/expired — the day after, the same job's age is 359 and it simply
-  // stops matching, giving the "shows for 24h then disappears on its own" behaviour Ofek asked for.
-  data.jobs.forEach(j => {
-    const jobAge = daysBetween(parseLocalDate(j.date), today);
-    const key = `repeat-service:${j.id}`;
-    if (jobAge === 358 && !dismissed.has(key)) {
-      items.push({ key, readKey:key, type:'repeat-service', contactId: contactForJob(j)?.id || '', severity:'warn', date:todayStr(now), title:`${j.customerName} — re-offer ${j.jobType} service`, meta:`1 year ago this week: ${j.jobType} job done on ${fmtDateShort(j.date)} · call to check if it's time again` });
-    }
-  });
   // Manually-created reminders (from the CRM follow-up flow) sit alongside the derived ones, so Ron sees
   // one reminder list rather than two competing ones.
   (data.manualReminders||[]).forEach(r => {
@@ -814,31 +799,6 @@ function computeReminders(data, now){
     const age = daysBetween(parseLocalDate(r.date), today);
     if (age < 0) return;   // a reminder shows (and counts) from its day, not before
     items.push({ id:r.id, contactId:r.contactId, manual:true, readKey:`manual:${r.id}`, type:'followup', severity: age>=0?'bad':'warn', date:r.date, title:r.title, meta:`${r.contactName||''}${age>0?` · ${age} days overdue`:(age===0?' · due today':` · due ${fmtDateShort(r.date)}`)}${r.note?` · "${r.note}"`:''}` });
-  });
-  // A lead's own "Next follow-up" date (set directly on the Details tab or the CRM Inbox panel, not
-  // through the "Create follow-up" form) needs to show up here too — otherwise picking a date there
-  // silently goes nowhere, which is exactly the kind of dead-end Ofek asked to be caught. Skipped when
-  // an explicit reminder or task already tracks that same lead + date, so the two paths never double up.
-  (data.contacts||[]).forEach(c => {
-    if (!followupDue(c, todayStr(now))) return;
-    const hasReminder = (data.manualReminders||[]).some(r => r.contactId===c.id && !r.done && r.date===c.nextFollowUp);
-    const hasTask = (data.tasks||[]).some(t => t.client===c.fullName && t.due===c.nextFollowUp && t.status!=='Done');
-    if (hasReminder || hasTask) return;
-    const age = daysBetween(parseLocalDate(c.nextFollowUp), today);
-    items.push({ contactId:c.id, type:'followup', readKey:`followup:${c.id}`, severity: age>=0?'bad':'warn', date:c.nextFollowUp, title:`Follow up with ${c.fullName}`, meta:`${c.division}${age>0?` · ${age} days overdue`:(age===0?' · due today':` · due ${fmtDateShort(c.nextFollowUp)}`)}` });
-  });
-  // Sales automations (28 Sep): 21+ days in Chasing → decide; a quote untouched for 14+ days → call or move on.
-  // The key carries the date the clock started, so "Keep chasing" or a new quote gives a fresh reminder later.
-  (data.contacts||[]).forEach(c => {
-    if (chaseTooLong(c, now)) {
-      const key = `chase-long:${c.id}:${localDay(c.chasingSince)}`;
-      if (!dismissed.has(key)) items.push({ key, readKey:key, contactId:c.id, type:'chase-long', severity:'bad', date:localDay(c.chasingSince), title:`${c.fullName} — 21+ days in Chasing, decide`, meta:`${c.division} · chasing since ${fmtDateShort(localDay(c.chasingSince))} · keep chasing or mark Lost (no answer)` });
-    }
-    // (The "booked, no job yet" reminder was removed on 3 Oct, at Ofek's request.)
-    if (quoteStale(c, now)) {
-      const key = `stale-quote:${c.id}:${localDay(c.stageChangedAt)}`;
-      if (!dismissed.has(key)) items.push({ key, readKey:key, contactId:c.id, type:'stale-quote', severity:'bad', date:localDay(c.stageChangedAt), title:`${c.fullName} — quote idle 14+ days`, meta:`${c.division} · quoted ${fmtDateShort(localDay(c.stageChangedAt))}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` });
-    }
   });
   const read = new Set(data.readReminders||[]);
   items.forEach(it => { it.isRead = read.has(it.readKey); });
@@ -1053,8 +1013,9 @@ function jobPatchToRow(patch){
     datePaid:'date_paid', paidToTechnician:'paid_to_technician', enteredBy:'entered_by',
     cashConfirmed:'cash_confirmed', invoiceFile:'invoice_file', transferReceiptFile:'transfer_receipt_file',
     equipmentRentalFile:'equipment_rental_file', reviewTaken:'review_taken', reviewDoNotAsk:'review_do_not_ask', contactId:'contact_id',
+    paymentFollowup:'payment_followup', paymentContacts:'payment_contacts', reofferDoneAt:'reoffer_done_at',
   };
-  const nullIfEmpty = new Set(['date_paid','contact_id']);
+  const nullIfEmpty = new Set(['date_paid','contact_id','payment_followup','reoffer_done_at']);
   const row = {};
   for (const k in patch) {
     if (!map[k]) continue;
@@ -1068,7 +1029,7 @@ function jobPatchToRow(patch){
 }
 function taskPatchToRow(patch){
   const map = {
-    board:'board', title:'title', status:'status', due:'due', notes:'notes', client:'client', contactId:'contact_id',
+    board:'board', title:'title', status:'status', due:'due', notes:'notes', client:'client', contactId:'contact_id', remindedOn:'reminded_on',
     priority:'priority', assignees:'assignees', assignedTo:'assigned_to', headsUp:'heads_up',
     createdBy:'created_by', createdAt:'created_at', technician:'technician', category:'category',
     subtasks:'subtasks', updates:'updates',
@@ -1666,6 +1627,7 @@ function mapJobRow(j){
     paidToTechnician:j.paid_to_technician, enteredBy:j.entered_by||'', cashConfirmed:j.cash_confirmed,
     invoiceFile:j.invoice_file, transferReceiptFile:j.transfer_receipt_file, equipmentRentalFile:j.equipment_rental_file,
     reviewTaken:j.review_taken, reviewDoNotAsk:!!j.review_do_not_ask, contactId:j.contact_id||null,
+    paymentFollowup:j.payment_followup||'', paymentContacts:Array.isArray(j.payment_contacts)?j.payment_contacts:[], reofferDoneAt:j.reoffer_done_at||null,
   };
 }
 function mapEquipSpendRow(e){
@@ -1673,7 +1635,7 @@ function mapEquipSpendRow(e){
 }
 function mapTaskRow(t){
   return {
-    id:t.id, board:t.board, title:t.title, status:t.status, due:t.due, notes:t.notes||'', client:t.client||'', contactId:t.contact_id||null,
+    id:t.id, board:t.board, title:t.title, status:t.status, due:t.due, notes:t.notes||'', client:t.client||'', contactId:t.contact_id||null, remindedOn:t.reminded_on||'',
     priority:t.priority, assignees:t.assignees||[], assignedTo:t.assigned_to||'', headsUp:t.heads_up||'',
     createdBy:t.created_by||'', createdAt:t.created_at,
     technician:t.technician||'', category:t.category||'', subtasks:t.subtasks||[], updates:t.updates||[],
@@ -3675,7 +3637,7 @@ function setChatAutoSms(on){
 const MD_BUBBLES = [
   ['new', 'New leads'], ['chasing', 'Chasing — call today'], ['decide', 'Chasing 21+ days'],
   ['followups', 'Follow-ups due'], ['quotes', 'Quotes due'], ['reviews', 'Ask for a review'],
-  ['remind', 'Reminders today'], ['tasks', 'Open tasks today'],
+  ['late', 'Late payments'], ['reoffer', 'Re-offer after a year'], ['tasks', "Ron's tasks"], ['team', 'Remind the team'],
 ];
 const MD_FROM_STAGE = { 'New':'new', 'Quoted':'quotes', 'Follow-up':'followups' };
 let MD = { days:{}, loaded:false, pending:{}, timer:null, closedOld:false };
@@ -3707,6 +3669,72 @@ function mdReviewDone(j){
   return !!(r && (r.status==='sent' || r.status==='waiting'));
 }
 // Today's bubbles from the CRM right now, plus everything already on today's list. { key: [{ id, div, done, rec }] }
+// ── My Day bubble rules (Ofek 5/10), pure so they can be tested ──
+// Late payment: unpaid, older than N days, and its payment follow-up date (if Ron set one) has come. Every day until paid.
+function latePaymentDue(j, today, days){
+  return !!j && j.paymentStatus!=='Paid' && !!j.date && daysBetween(parseLocalDate(j.date), parseLocalDate(today)) > days && (!j.paymentFollowup || j.paymentFollowup <= today);
+}
+// …done for today when Ron talked to them today, set a later follow-up date, or the job is paid.
+function latePaymentDoneToday(j, today){
+  return !j || j.paymentStatus==='Paid' || (j.paymentContacts||[]).includes(today) || (!!j.paymentFollowup && j.paymentFollowup > today);
+}
+// Re-offer: from 358 days after the job (a week before the year) until Ron marks it, unless the customer already has a
+// newer job or came back with a new enquiry since.
+function reofferDue(j, jobs, today){
+  if (!j || !j.date || j.reofferDoneAt) return false;
+  const from = shiftDays(j.date, 358);
+  if (today < from) return false;
+  const same = o => j.contactId ? o.contactId===j.contactId : String(o.customerName||'').trim().toLowerCase()===String(j.customerName||'').trim().toLowerCase();
+  if ((jobs||[]).some(o => o.id!==j.id && o.date > j.date && same(o))) return false;
+  const c = typeof contactForJob==='function' ? contactForJob(j) : null;
+  return !(c && c.reopenedAt && localDay(c.reopenedAt) >= from);
+}
+function taskAssignedTo(t, p){ const names = assigneeNames(t); return names.includes(p.fullName) || (!!p.technicianName && names.includes(p.technicianName)); }
+// My tasks: assigned to me, not Done, due today or late — or from its heads-up date.
+function myTaskDue(t, me, today){
+  return t.status!=='Done' && taskAssignedTo(t, me) && ((!!t.due && t.due <= today) || (!!t.headsUp && t.headsUp <= today));
+}
+// Remind the team: someone else's task (not the owners' private board), not Done, due today or late, or its heads-up day.
+function teamTaskDue(t, me, today){
+  return t.status!=='Done' && t.board!=='mine' && !taskAssignedTo(t, me) && assigneeNames(t).length > 0 && ((!!t.due && t.due <= today) || t.headsUp===today);
+}
+function jobDivision(j){ const c = typeof contactForJob==='function' ? contactForJob(j) : null; return (c && c.division) || (/chimney/i.test(j.jobType||'') ? 'Chimney' : /pressure/i.test(j.jobType||'') ? 'Pressure Washing' : 'Aircon'); }
+// The actions behind those bubbles.
+function markPaymentContacted(jobId){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const j = STATE.data.jobs.find(x => x.id===jobId); if (!j) return;
+  const today = todayStr(), set = new Set(j.paymentContacts||[]);
+  if (set.has(today)) return;
+  set.add(today); j.paymentContacts = [...set].sort();
+  db.jobs.update(j.id, { paymentContacts: j.paymentContacts });
+  logJobActivity(j, getCurrentProfile()?.fullName || 'Unknown', 'Called the customer about the late payment');
+  showToast(`${j.customerName}: marked as called today`); render();
+}
+function setPaymentFollowup(jobId, v){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
+  const j = STATE.data.jobs.find(x => x.id===jobId); if (!j) return;
+  if (v && v <= todayStr()) { showToast('Pick a date after today'); render(); return; }
+  j.paymentFollowup = v || '';
+  db.jobs.update(j.id, { paymentFollowup: v || null });
+  logJobActivity(j, getCurrentProfile()?.fullName || 'Unknown', v ? `Payment follow-up set for ${fmtDateShort(v)}` : 'Payment follow-up date cleared');
+  showToast(v ? `${j.customerName}: back on ${fmtDateShort(v)}` : 'Follow-up date cleared'); render();
+}
+function markReofferDone(jobId){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const j = STATE.data.jobs.find(x => x.id===jobId); if (!j) return;
+  j.reofferDoneAt = new Date().toISOString();
+  db.jobs.update(j.id, { reofferDoneAt: j.reofferDoneAt });
+  logJobActivity(j, getCurrentProfile()?.fullName || 'Unknown', 'Re-offered the service (1 year after the job)');
+  showToast(`${j.customerName}: re-offer done`); render();
+}
+function markTeamReminded(taskId){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const t = STATE.data.tasks.find(x => x.id===taskId); if (!t) return;
+  t.remindedOn = todayStr();
+  db.tasks.update(t.id, { remindedOn: t.remindedOn });
+  logTaskActivity(t, getCurrentProfile()?.fullName || 'Unknown', `Reminded ${assigneeNames(t).join(', ')}`);
+  showToast(`Marked as reminded: ${assigneeNames(t).join(', ')}`); render();
+}
 function mdLive(data, now){
   const today = sydneyWall(now || new Date()).day, localToday = todayStr(now);
   const stored = (MD.days[today] && MD.days[today].items) || {};
@@ -3729,19 +3757,22 @@ function mdLive(data, now){
   build('decide', cs.filter(c => chaseTooLong(c, now)), c => !chaseTooLong(c, now), byId);
   build('followups', cs.filter(c => leadStage(c)==='Follow-up' && followupDue(c, localToday)), c => !(leadStage(c)==='Follow-up' && followupDue(c, localToday)), byId);
   build('quotes', cs.filter(c => leadStage(c)==='Quoted' && followupDue(c, localToday)), c => !(leadStage(c)==='Quoted' && followupDue(c, localToday)), byId);
-  // Reminders today and Open tasks today (Ofek 5/10) belong to the office assistant: "read" is per person and tasks
-  // are per assignee, so only the assistant's own browser counts them; everyone else sees what was saved.
+  // Late payments and the 1-year re-offer (Ofek 5/10): from the jobs, the same in every browser.
+  const jobsAll = data.jobs || [], lateDays = (STATE.data && STATE.data.settings && STATE.data.settings.unpaidReminderDays) || 7;
+  const jobById2 = id => jobsAll.find(j => j.id===id) || null;
+  const withDiv = j => j ? { ...j, division: jobDivision(j) } : null;
+  build('late', jobsAll.filter(j => latePaymentDue(j, localToday, lateDays)).map(withDiv), j => latePaymentDoneToday(jobById2(j.id) || j, localToday), id => withDiv(jobById2(id)));
+  build('reoffer', jobsAll.filter(j => reofferDue(j, jobsAll, localToday)).map(withDiv), j => !reofferDue(jobById2(j.id) || j, jobsAll, localToday), id => withDiv(jobById2(id)));
+  // My tasks and Remind the team belong to the office assistant (assignments are per person, and the owners' private
+  // boards are hidden from them), so only the assistant's own browser counts them; everyone else sees what was saved.
   const me = getRealProfile && getRealProfile();
   const fromStored = key => { out[key] = Object.keys(stored[key] || {}).map(id => ({ id, rec:null, div: stored[key][id].div || 'Other', done: !!stored[key][id].d })); };
   if (me && me.role==='va') {
-    const rems = remindersFor(me, data).filter(it => it.date && it.date <= localToday);
-    const remById = id => rems.find(it => it.key===id) || null;
-    build('remind', rems.filter(it => !it.isRead).map(it => ({ ...it, id: it.key, division: 'Other' })), it => { const x = remById(it.id); return !x || x.isRead; }, id => { const x = remById(id); return x ? { ...x, id, division:'Other' } : null; });
-    const mine = t => { const names = assigneeNames(t); return names.includes(me.fullName) || (me.technicianName && names.includes(me.technicianName)); };
-    const taskOpen = t => t && t.status!=='Done' && t.due && t.due <= localToday && mine(t);
     const taskById = id => (data.tasks||[]).find(t => t.id===id) || null;
-    build('tasks', (data.tasks||[]).filter(taskOpen).map(t => ({ ...t, division:'Other' })), t => !taskOpen(taskById(t.id)), id => { const t = taskById(id); return t ? { ...t, division:'Other' } : null; });
-  } else { fromStored('remind'); fromStored('tasks'); }
+    const mineDue = t => !!t && myTaskDue(t, me, localToday), teamDue = t => !!t && teamTaskDue(t, me, localToday);
+    build('tasks', (data.tasks||[]).filter(mineDue).map(t => ({ ...t, division:'Other' })), t => !mineDue(taskById(t.id)), id => { const t = taskById(id); return t ? { ...t, division:'Other' } : null; });
+    build('team', (data.tasks||[]).filter(teamDue).map(t => ({ ...t, division:'Other' })), t => { const x = taskById(t.id); return !teamDue(x) || x.remindedOn===localToday; }, id => { const t = taskById(id); return t ? { ...t, division:'Other' } : null; });
+  } else { fromStored('tasks'); fromStored('team'); }
   const jobs = mdReviewJobs(data);
   if (jobs) {
     const jobById = id => (data.jobs||[]).find(j => j.id===id);
@@ -3875,7 +3906,7 @@ function quoteDueReason(c, localToday){
 }
 // The end-of-day report (Hebrew, for the owners): Ron's tasks, then what happened in the business today.
 // Ron's tasks in Hebrew, as in the daily report: the % and done/total per bubble (also in the lunch-break message).
-const MD_HE = { new:'לידים חדשים', chasing:'מרדף', decide:'מרדף 21+ ימים', followups:'מעקבים', quotes:'הצעות מחיר', reviews:'בקשת ביקורת', remind:'תזכורות', tasks:'משימות פתוחות' };
+const MD_HE = { new:'לידים חדשים', chasing:'מרדף', decide:'מרדף 21+ ימים', followups:'מעקבים', quotes:'הצעות מחיר', reviews:'בקשת ביקורת', late:'לקוחות שמאחרים בתשלום', reoffer:'הצעה חוזרת אחרי שנה', tasks:'המשימות של רון', team:'תזכורת לצוות' };
 function mdTaskLines(k, lead){
   return [`${lead} ${k.percent===null ? '—' : k.percent + '%'} מהמשימות (${k.done} מתוך ${k.total})`,
     ...MD_BUBBLES.map(([b]) => { const x = k.by[b] || { done:0, total:0 }; return x.total ? `• ${MD_HE[b]}: ${x.done}/${x.total}` : ''; }).filter(Boolean)];
@@ -4145,6 +4176,11 @@ function toggleLeadStar(id, event){
 }
 function setLeadFollowupDate(id, value){
   const c = contactById(id); if (!c) return;
+  // A follow-up date on a New or Chasing lead moves it to Follow-up (Ofek 5/10): a lead's date always has a bubble.
+  if (value && ['New','Chasing'].includes(leadStage(c))) {
+    if (value <= todayStr()) { showToast('Pick a follow-up date after today'); render(); return; }
+    applyLeadStage(c, 'Follow-up', { nextFollowUp: value }); render(); return;
+  }
   if (leadRulesApply(c) && STAGES_NEED_DATE.includes(leadStage(c)) && !(value && value > todayStr())) { showToast(`A lead in ${stageLabel(leadStage(c))} needs a follow-up date after today`); openFollowupDatePrompt(c, leadStage(c)); return; }
   const old = c.nextFollowUp||''; c.nextFollowUp = value;
   db.contacts.update(id, { nextFollowUp: value });
@@ -4261,7 +4297,7 @@ function renderCrmInboxThreadAndDetails(c){
       ${renderMarketingSourceBlock(c)}
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost small" onclick="openLeadActivityModal('${c.id}')">💬 History (${recordActivityCount(c)})</button>
-        <button class="btn ghost small" onclick="openLeadModal('${c.id}')">Follow-up / edit</button>
+        <button class="btn ghost small" onclick="openTaskModalForContact('${c.id}')">➕ Create task</button>
       </div>
     </div>`;
 }
@@ -4481,7 +4517,7 @@ function openLeadActivityModal(contactId){
   openRecordActivityModal('contact', contactId, c.fullName, 'Lead history + notes');
 }
 function switchLeadTab(tab, contactId){
-  ['details','conversation','followup','history'].forEach(t => {
+  ['details','conversation','history'].forEach(t => {
     const el = document.getElementById('lead-tab-'+t);
     if (el) el.style.display = (t===tab) ? '' : 'none';
   });
@@ -4505,7 +4541,7 @@ function openLeadModal(contactId){
         <div class="modal-sub">${c?`Created ${fmtDateShort(c.createdAt)} · ${esc(c.source)}`:'Add a lead that came in by phone or referral'}</div>
 
         ${c ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 4px">
-          ${tabBtn('details','Details')}${tabBtn('conversation','Conversation')}${tabBtn('followup','Follow-up')}${tabBtn('history','History')}
+          ${tabBtn('details','Details')}${tabBtn('conversation','Conversation')}${tabBtn('history','History')}
         </div>` : ''}
 
         <div id="lead-tab-details" style="display:${defaultTab==='details'?'':'none'};margin-top:${c?'0':'14px'}">
@@ -4548,20 +4584,6 @@ function openLeadModal(contactId){
           ${renderLeadComposer(c.id, 'modal')}
         </div>
 
-        <div id="lead-tab-followup" style="display:${defaultTab==='followup'?'':'none'}">
-          <div class="hint" style="margin-bottom:8px">Pick a preset or write your own, choose a date, and it lands in Reminders or Tasks automatically.</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px">
-            ${FOLLOWUP_PRESETS.map((p,i)=>`<button type="button" class="btn small" onclick="applyFollowupPreset(${i})">${p.label}</button>`).join('')}
-          </div>
-          <div class="grid-3">
-            <div class="field"><label>What needs doing</label><input id="lm-fu-text" placeholder="e.g. Call about the quote"></div>
-            <div class="field"><label>Date</label>${dateCellField('lm-fu-date', today)}</div>
-            <div class="field"><label>Create as</label><select id="lm-fu-kind"><option value="reminder">Reminder</option><option value="task">Task</option></select></div>
-          </div>
-          <div class="field" style="margin-top:9px"><label>Note (optional)</label><textarea rows="2" id="lm-fu-note" placeholder="Any extra context for whoever picks this up…"></textarea></div>
-          <div style="display:flex;justify-content:flex-end;margin-top:9px"><button type="button" class="btn" onclick="createFollowup('${c.id}')">Create follow-up</button></div>
-        </div>
-
         <div id="lead-tab-history" style="display:${defaultTab==='history'?'':'none'}">
           <div class="hint" style="margin-bottom:8px">Field/stage changes and admin notes — separate from the conversation above.</div>
           <div id="lead-activity" style="max-height:190px;overflow-y:auto">${renderRecordActivityList('contact', c.id)}</div>
@@ -4583,12 +4605,6 @@ function openLeadModal(contactId){
     </div>`);
   if (defaultTab==='conversation') { const th = document.getElementById('modal-conversation-thread'); if (th) th.scrollTop = th.scrollHeight; }
 }
-function applyFollowupPreset(i){
-  const p = FOLLOWUP_PRESETS[i]; if (!p) return;
-  const textEl = document.getElementById('lm-fu-text'), kindEl = document.getElementById('lm-fu-kind');
-  if (textEl) textEl.value = p.text;
-  if (kindEl) kindEl.value = p.kind;
-}
 function postLeadNote(contactId){
   const input = document.getElementById('lead-note-input');
   const text = input.value.trim(); if (!text) return;
@@ -4599,35 +4615,6 @@ function postLeadNote(contactId){
   db.activityLog.insert('contact', contactId, actor, text);
   input.value = '';
   document.getElementById('lead-activity').innerHTML = renderRecordActivityList('contact', contactId);
-}
-async function createFollowup(contactId){
-  const c = contactById(contactId); if (!c) return;
-  const text = document.getElementById('lm-fu-text').value.trim();
-  const date = document.getElementById('lm-fu-date').value;
-  const kind = document.getElementById('lm-fu-kind').value;
-  const note = (document.getElementById('lm-fu-note')?.value||'').trim();
-  if (!text) { modalError('Write what needs doing, or pick a preset'); return; }
-  if (!date) { modalError('Pick a date for the follow-up'); return; }
-  const actor = getCurrentProfile()?.fullName || 'Unknown';
-  try {
-    if (kind==='task') {
-      const t = await db.tasks.create({
-        board:'ron', title:`${text} — ${c.fullName}`, status:'Not Started', due:date, headsUp:'',
-        notes:note||c.jobDescription||'', client:c.fullName, priority:'Medium', assignees:['Ron'], technician:'', category:'',
-        createdBy:actor, createdAt:new Date().toISOString(), subtasks:[], updates:[], activityLog:[],
-      });
-      logTaskActivity(t, actor, 'Created from a CRM follow-up');
-    } else {
-      await db.manualReminders.create({ date, title:`${text} — ${c.fullName}`, note, contactId:c.id, contactName:c.fullName, done:false });
-    }
-  } catch (err) { return; }   // the create already showed an error toast; leave the form open so it can be retried
-  c.nextFollowUp = date;
-  db.contacts.update(c.id, { nextFollowUp: c.nextFollowUp });
-  logContactActivity(c, actor, `Follow-up set for ${fmtDateShort(date)} — "${text}"${note?` (note: "${note}")`:''} (${kind})`);
-  logLeadEvent(c, `Follow-up set for ${fmtDateShort(date)} — "${text}"`);
-  LEAD_MODAL_ID = null; closeModal();
-  showToast(kind==='task'?'Task created':'Reminder created');
-  render();
 }
 function deleteLead(id){
   confirmAction('Delete this lead?', ()=>{
@@ -4641,8 +4628,10 @@ async function saveLeadModal(contactId){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   const prev = contactId ? contactById(contactId) : null;
   const before = prev ? { status:prev.status, division:prev.division, source:prev.source, nextFollowUp:prev.nextFollowUp, estimatedValue:prev.estimatedValue, bookedFor:prev.bookedFor } : null;
-  const stagePicked = document.getElementById('lm-status').value;
+  let stagePicked = document.getElementById('lm-status').value;
   const followPicked = document.getElementById('lm-followup').value;
+  // A follow-up date on a New or Chasing lead moves it to Follow-up (Ofek 5/10).
+  if (followPicked && ['New','Chasing'].includes(stagePicked)) stagePicked = 'Follow-up';
   const lostPicked = (document.getElementById('lm-lost-reason')||{}).value || '';
   // The stage rules apply to new leads, to leads under the new rules (from 27 Sep), and whenever the stage is
   // being changed — an old lead can still get its phone or email fixed without re-doing its stage.
@@ -6957,22 +6946,33 @@ function renderMyDayHistory(profile, data, L, view){
     </div>
     <div class="card"><div class="stat-label" style="margin-bottom:8px">Bookings — by division and where they came from</div>${mdBookingsTable(rows)}</div>`;
 }
-// My Day lists for the two newer bubbles (Ofek 5/10): reminders due by today that aren't opened yet, and the
-// assistant's own open tasks due today or late.
-function renderMyDayRemindersTasks(profile, data, live){
-  const rems = (live.remind || []).filter(x => !x.done && x.rec);
-  const tasks = (live.tasks || []).filter(x => !x.done && x.rec);
-  const remRows = rems.map(x => { const it = x.rec;
-    return `<div class="myday-row${it.severity==='bad' ? ' bad' : ''}" onclick="goToReminderTarget('${it.type}','${it.contactId||''}','${jsStr(it.readKey||'')}','${it.weekKey||''}')" tabindex="0">
-      <div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${esc(it.title)}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${esc(it.meta||'')}</div></div>
-      ${pill(it.severity, it.severity==='bad' ? 'Urgent' : 'Attention')}</div>`; }).join('');
-  const taskRows = tasks.map(x => { const t = x.rec, late = t.due < todayStr();
+// My Day lists for the four office bubbles (Ofek 5/10): late payments, 1-year re-offers, my tasks, remind the team.
+function renderMyDayOfficeLists(profile, data, live){
+  const today = todayStr();
+  const open = key => (live[key] || []).filter(x => !x.done && x.rec);
+  const late = open('late').map(x => { const j = x.rec, days = daysBetween(parseLocalDate(j.date), parseLocalDate(today));
+    return `<div class="myday-row bad" style="cursor:default">
+      <div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${custLink ? custLink(j.customerName, j.contactId, j.id) : esc(j.customerName)}</div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">#${esc(j.invoiceNumber||'—')} · ${fmtMoney(jobTotalCollected(j))} · job ${fmtDateShort(j.date)} · ${days} days unpaid${(j.paymentContacts||[]).length ? ` · called ${j.paymentContacts.length} time${j.paymentContacts.length===1?'':'s'}` : ''}</div></div>
+      <button class="btn small primary" onclick="markPaymentContacted('${j.id}')">Called today</button>
+      <label class="hint" style="display:flex;align-items:center;gap:6px">Next call <input type="date" min="${shiftDays(today,1)}" value="${esc(j.paymentFollowup||'')}" onchange="setPaymentFollowup('${j.id}', this.value)" style="width:auto"></label>
+    </div>`; }).join('');
+  const reoffer = open('reoffer').map(x => { const j = x.rec;
+    return `<div class="myday-row" style="cursor:default">
+      <div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${custLink ? custLink(j.customerName, j.contactId, j.id) : esc(j.customerName)}</div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${esc(j.jobType||'')} · done ${fmtDateShort(j.date)} by ${esc(j.technician||'—')} · offer the service again</div></div>
+      <button class="btn small primary" onclick="markReofferDone('${j.id}')">Contacted</button></div>`; }).join('');
+  const taskRow = (t, extra) => { const late = t.due && t.due < today;
     return `<div class="myday-row${late ? ' bad' : ''}" onclick="openTaskModal('${t.id}')" tabindex="0">
-      <div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${esc(t.title)}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${t.client ? esc(t.client) + ' · ' : ''}${esc(t.status||'')}${t.priority ? ' · ' + esc(t.priority) : ''}</div></div>
-      ${pill(late ? 'bad' : 'warn', late ? 'Late · ' + fmtDateShort(t.due) : 'Today')}</div>`; }).join('');
-  const isVa = profile.role==='va';
-  return `${myDaySection('remind', 'Reminders today', rems.length, remRows, isVa ? 'No reminders waiting. ✓' : 'Counted on the office assistant\'s screen.', 'Open each reminder (it then counts as done for today).')}
-    ${myDaySection('tasks', 'Open tasks today', tasks.length, taskRows, isVa ? 'No open tasks due today. ✓' : 'Counted on the office assistant\'s screen.', 'Your tasks due today or late. Mark a task Done (or move its date) and it counts as done.')}`;
+      <div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${esc(t.title)}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${esc(assigneeNames(t).join(', '))}${t.client ? ' · ' + esc(t.client) : ''}${t.priority ? ' · ' + esc(t.priority) : ''}</div></div>
+      ${pill(late ? 'bad' : 'warn', !t.due ? 'Heads-up' : late ? 'Late · ' + fmtDateShort(t.due) : t.due===today ? 'Today' : 'Heads-up · due ' + fmtDateShort(t.due))}${extra || ''}</div>`; };
+  const tasks = open('tasks').map(x => taskRow(x.rec)).join('');
+  const team = open('team').map(x => taskRow(x.rec, `<button class="btn small primary" onclick="event.stopPropagation();markTeamReminded('${x.rec.id}')">Reminded</button>`)).join('');
+  const notHere = profile.role==='va' ? '' : "Counted on the office assistant's screen.";
+  return `${myDaySection('late', 'Late payments', open('late').length, late, 'Nobody is late with a payment. ✓', 'Unpaid more than a week. Call each one every day until they pay, or set the day they promised as "Next call".')}
+    ${myDaySection('reoffer', 'Re-offer after a year', open('reoffer').length, reoffer, 'Nobody to re-offer today. ✓', 'Their job was about a year ago: offer the service again.')}
+    ${myDaySection('tasks', "Ron's tasks", open('tasks').length, tasks, notHere || 'No tasks due. ✓', 'Your tasks due today or late, and those with a heads-up from today. Mark Done (or move the date) when finished.')}
+    ${myDaySection('team', 'Remind the team', open('team').length, team, notHere || 'Nothing to remind the team about today. ✓', "Other people's tasks due today or late. Remind them, then press Reminded.")}`;
 }
 function renderMyDay(profile, data){
   const now = new Date();
@@ -7017,8 +7017,10 @@ function renderMyDay(profile, data){
         ${stat('followups', 'Follow-ups due', 0, L.followups.filter(c=>c.nextFollowUp<L.localToday).length ? `${L.followups.filter(c=>c.nextFollowUp<L.localToday).length} overdue` : '', 'warn')}
         ${stat('quotes', 'Quotes due', 0, 'must be done before you log out', 'bad')}
         ${stat('reviews', 'Ask for a review', 0, 'jobs not asked yet', 'warn')}
-        ${stat('remind', 'Reminders today', 0, 'done = opened', 'warn')}
-        ${stat('tasks', 'Open tasks today', 0, 'your tasks due today or late', 'warn')}
+        ${stat('late', 'Late payments', 0, 'call every day until paid', 'bad')}
+        ${stat('reoffer', 'Re-offer after a year', 0, 'customers from a year ago', 'warn')}
+        ${stat('tasks', "Ron's tasks", 0, 'due today, late or heads-up', 'warn')}
+        ${stat('team', 'Remind the team', 0, "others' tasks due today", 'warn')}
       </div>
       <div style="margin-top:10px;font-size:13px;color:var(--ink-soft)">Today so far: <b style="color:var(--ink)">${K.percent===null ? '—' : K.percent + '%'}</b> of today's tasks done (${K.done} of ${K.total})</div>
     </div>
@@ -7031,7 +7033,7 @@ function renderMyDay(profile, data){
     ${L.chaseDecide.length ? myDaySection('decide', 'Chasing 21+ days — decide', L.chaseDecide.length, decideBody, '', 'Three weeks without an answer. Mark as Lost (no answer), or keep chasing for another 21 days.') : ''}
     ${myDaySection('followups', 'Follow-ups due', L.followups.length, fuBody, 'No follow-ups due today. ✓')}
     ${myDaySection('quotes', 'Quotes due', L.quotesDue.length, quoteBody, 'No quote is due today. ✓', 'Quotes whose follow-up date has come. Call, then set the next date or move the stage. You can\'t log out while one is left.')}
-    ${renderMyDayRemindersTasks(profile, data, live)}
+    ${renderMyDayOfficeLists(profile, data, live)}
     ${myDaySection('reviews', 'Ask for a review', reviewItems.length, reviewBody, (REVIEW_REQ===null ? 'Loading…' : 'Every job has been asked, or is marked don\'t ask. ✓'), 'Jobs where the customer hasn\'t been asked for a Google review yet. Not shown: jobs marked "don\'t ask" and reviews already taken.')}
   `;
 }
@@ -7079,13 +7081,6 @@ function renderOpenTasksCalendarBlock(data){
     <div class="card" style="margin-bottom:20px">${unscheduledRows}</div>
   `;
 }
-// Quoted / Follow up leads whose follow-up day has arrived — they join Open Tasks on that day.
-function followupsDueRows(data){
-  const t = todayStr();
-  return (data.contacts||[]).filter(c => followupDue(c, t)).map(c => ({
-    kind:'Follow-up', id:c.id, raw:c, date:c.nextFollowUp, title:`${c.fullName} — ${stageLabel(leadStage(c))}`,
-    meta:`${c.division}${c.phone?' · '+c.phone:''}${c.followupNote?' · '+c.followupNote:''}`, tone: c.nextFollowUp < t ? 'bad' : 'warn' }));
-}
 // The row's title opens what the row is about: the customer for an unpaid job or a follow-up, or the task.
 function openItemTitle(r){
   if (r.kind==='Follow-up') return `<span class="xlink" onclick="goToLeadConversation('${r.id}')">${esc(r.title)}</span>`;
@@ -7106,7 +7101,7 @@ function renderOpenItemsMixedList(data){
   data.tasks.filter(t=>t.status!=='Done').forEach(t => {
     rows.push({ kind:'Task', id:t.id, raw:t, date: t.due||null, title: t.title, meta: `${taskBoardLabel(t.board)} · ${t.status}${t.client?' · '+t.client:''}${t.priority?' · '+t.priority+' priority':''}`, tone: t.priority==='Urgent'?'bad':(t.priority==='High'?'warn':'neutral') });
   });
-  followupsDueRows(data).forEach(r => rows.push(r));
+  // (5 Oct, Ofek: no duplicates) lead follow-ups live in My Day now; Open Tasks is tasks only.
   rows.sort((a,b) => (a.date||'9999-99-99').localeCompare(b.date||'9999-99-99'));
   return rows.length ? rows.map(r => `
     <tr>
@@ -7115,48 +7110,21 @@ function renderOpenItemsMixedList(data){
       <td class="mono">${r.date?fmtDateShort(r.date):'—'}</td>
       <td>${pill(r.tone, r.tone==='bad'?'Overdue':(r.tone==='warn'?'Open':'—'))}</td>
       <td>${openItemActivityButton(r)}</td>
-    </tr>`).join('') : `<tr><td colspan="5">${emptyState('Nothing open right now','Every task and follow-up is done ✓','✓')}</td></tr>`;
-}
-function renderOpenItemsNonTaskList(data){
-  // Follow-ups due + unpaid jobs — tasks live on the calendar instead. Kept visible under the calendar
-  // too (not List-view-exclusive), since these can't sensibly plot on a task calendar.
-  const today = parseLocalDate(todayStr());
-  const rows = [];
-  followupsDueRows(data).forEach(r => rows.push(r));
-  rows.sort((a,b) => (a.date||'9999-99-99').localeCompare(b.date||'9999-99-99'));
-  return rows.length ? rows.map(r => `
-    <tr>
-      <td>${pill('neutral', r.kind)}</td>
-      <td class="wrap"><div style="font-weight:600;font-size:13.4px">${openItemTitle(r)}</div><div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(r.meta)}</div></td>
-      <td class="mono">${r.date?fmtDateShort(r.date):'—'}</td>
-      <td>${pill(r.tone, r.tone==='bad'?'Overdue':(r.tone==='warn'?'Open':'—'))}</td>
-      <td>${openItemActivityButton(r)}</td>
-    </tr>`).join('') : `<tr><td colspan="5">${emptyState('No follow-ups due','Nothing to chase today ✓','✓')}</td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="5">${emptyState('Nothing open right now','Every task is done ✓','✓')}</td></tr>`;
 }
 // Unpaid invoices have one home (Late to pay / Outstanding) — Open Tasks shows a single line pointing there
 // instead of a second copy of the list.
-function openItemsUnpaidLine(profile, data){
-  const unpaid = (data.jobs||[]).filter(j => j.paymentStatus!=='Paid'); if (!unpaid.length) return '';
-  const late = unpaid.filter(j => jobIsLate(j, data));
-  const total = round2(unpaid.reduce((s,j)=>s+jobTotalCollected(j),0));
-  const where = canViewSection(profile,'outstanding') ? `<button class="btn small" onclick="goTab('outstanding')">Open the list →</button>` : '';
-  return `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px"><span>💵 <b>${unpaid.length} unpaid job${unpaid.length===1?'':'s'}</b> · ${fmtMoney(total)} incl. GST${late.length?` · <span style="color:var(--bad)">${late.length} late</span>`:''}</span>${where}</div>`;
-}
 function renderOpenItems(profile, data){
   const view = UI.openItems.view || 'list';
   const viewToggle = `<button class="btn small ${view==='list'?'primary':''}" onclick="setOpenItemsView('list')">List</button><button class="btn small ${view==='calendar'?'primary':''}" onclick="setOpenItemsView('calendar')">Calendar</button>`;
   if (view==='calendar') {
     return `
-      <div class="page-head"><div><h1 class="page-title">Open Tasks</h1><div class="page-sub">Tasks on a calendar, plus follow-ups due below</div></div><div>${viewToggle}</div></div>
-      ${openItemsUnpaidLine(profile, data)}
+      <div class="page-head"><div><h1 class="page-title">Open Tasks</h1><div class="page-sub">Every open task, from every board, on a calendar</div></div><div>${viewToggle}</div></div>
       ${renderOpenTasksCalendarBlock(data)}
-      <div class="section-title">Follow-ups due</div>
-      <div class="table-wrap"><table><thead><tr><th>Type</th><th class="wrap">Item</th><th>Date</th><th>Status</th><th>Activity</th></tr></thead><tbody>${renderOpenItemsNonTaskList(data)}</tbody></table></div>
     `;
   }
   return `
-    <div class="page-head"><div><h1 class="page-title">Open Tasks</h1><div class="page-sub">One list of everything still needing action — open tasks from every board (Ron's, Mine, and each technician's) and follow-ups due</div></div><div>${viewToggle}</div></div>
-    ${openItemsUnpaidLine(profile, data)}
+    <div class="page-head"><div><h1 class="page-title">Open Tasks</h1><div class="page-sub">Every open task, from every board (Ron's, Mine and each technician's). Lead follow-ups and late payments are on My Day.</div></div><div>${viewToggle}</div></div>
     <div class="table-wrap"><table><thead><tr><th>Type</th><th class="wrap">Item</th><th>Date</th><th>Status</th><th>Activity</th></tr></thead><tbody>${renderOpenItemsMixedList(data)}</tbody></table></div>
   `;
 }
@@ -7768,8 +7736,20 @@ function taskClientLinkedHtml(contactId){
   if (!c) return '';
   return `<span class="hint">🔗 Linked to the CRM card · </span><span class="xlink" onclick="closeModal();goToLeadConversation('${c.id}')">Open ${esc(c.fullName)}</span>`;
 }
-function openTaskModal(taskId){
+// "➕ Create task" on a customer card (Ofek 5/10): the same task form, without Category and Client (the task is linked
+// to that customer), with quick presets; it goes to the board of whoever it's assigned to, like any task.
+let TASK_CTX = null;
+function openTaskModalForContact(contactId){ const c = contactById(contactId); if (!c) return; openTaskModal(null, { contactId: c.id, name: c.fullName }); }
+function applyTaskPreset(i){ const p = FOLLOWUP_PRESETS[i]; const el = document.getElementById('tm-title'); if (p && el) { el.value = p.text; el.focus(); } }
+// A task's board follows its first assignee: the office assistant → Ron's Tasks, anyone else → their own board.
+function boardForAssignees(names){
+  const first = (names || [])[0]; if (!first) return 'ron';
+  const va = (STATE.profiles||[]).find(p => p.role==='va' && (p.fullName===first || p.technicianName===first));
+  return va || first==='Ron' ? 'ron' : first;
+}
+function openTaskModal(taskId, ctx){
   const task = taskId ? STATE.data.tasks.find(t=>t.id===taskId) : null;
+  TASK_CTX = !task && ctx ? ctx : null;
   const currentProfile = getCurrentProfile();
   MODAL_SUBTASKS = task?.subtasks ? task.subtasks.map(s=>({
     id:s.id, text:s.text, ownerName:s.ownerName||'', status: s.status || (s.done?'Done':'Not Started'), date:s.date||'',
@@ -7779,14 +7759,15 @@ function openTaskModal(taskId){
   MODAL_TASK_ID = taskId;
   EXPANDED_SUBTASK_INDEX = null;
   const isPatrickBoard = UI.tasks.board==='ron';
-  const boardDefaultAssignee = UI.tasks.board==='ron' ? 'Ron' : (UI.tasks.board==='mine' ? (currentProfile?.fullName||'') : UI.tasks.board);
+  const boardDefaultAssignee = TASK_CTX ? 'Ron' : UI.tasks.board==='ron' ? 'Ron' : (UI.tasks.board==='mine' ? (currentProfile?.fullName||'') : UI.tasks.board);
   const currentAssignees = task ? assigneeNames(task) : (boardDefaultAssignee ? [boardDefaultAssignee] : []);
   const allPeople = activeEmployeeNames(STATE.data);
   openModal(`
     <div class="modal-back" onclick="if(event.target===this) closeModal()">
       <div class="modal">
         <h2>${task?'Edit Task':'New Task'}</h2>
-        <div class="modal-sub">Board: ${esc(taskBoardLabel(UI.tasks.board))}</div>
+        <div class="modal-sub">${TASK_CTX ? `For ${esc(TASK_CTX.name)} · goes to the board of whoever it's assigned to` : `Board: ${esc(taskBoardLabel(UI.tasks.board))}`}</div>
+        ${TASK_CTX ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px">${FOLLOWUP_PRESETS.map((p,i)=>`<button type="button" class="btn small" onclick="applyTaskPreset(${i})">${esc(p.label)}</button>`).join('')}</div>` : ''}
         <div class="field"><label>Title</label><input id="tm-title" value="${esc(task?.title||'')}"></div>
         <div class="grid-3" style="margin-top:11px">
           <div class="field"><label>Status</label><select id="tm-status">${TASK_STATUSES.map(s=>`<option value="${s}" ${task?.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
@@ -7798,12 +7779,12 @@ function openTaskModal(taskId){
           <div class="field"><label>&nbsp;</label><div class="hint" style="padding-top:8px">Surfaces this task on "On your radar today" starting this date, even while the due date is still far off.</div></div>
         </div>
         <div class="grid-2" style="margin-top:11px">
-          <div class="field" style="position:relative"><label>Client <span class="hint">(type to pick a CRM customer)</span></label>
+          ${TASK_CTX ? `<input type="hidden" id="tm-client" value="${esc(TASK_CTX.name)}"><input type="hidden" id="tm-contact-id" value="${esc(TASK_CTX.contactId)}">` : `          <div class="field" style="position:relative"><label>Client <span class="hint">(type to pick a CRM customer)</span></label>
             <input id="tm-client" autocomplete="off" value="${esc(task?.client||'')}" oninput="taskClientSearch(this.value)" onfocus="taskClientSearch(this.value)" onblur="setTimeout(()=>{const m=document.getElementById('tm-client-menu'); if(m) m.hidden=true;},180)" placeholder="Start typing a name or phone…">
             <input type="hidden" id="tm-contact-id" value="${esc(task?.contactId||'')}">
             <div id="tm-client-menu" class="conv-menu" style="top:calc(100% + 2px);bottom:auto;max-height:280px;overflow:auto;width:100%" hidden></div>
             <div id="tm-client-linked" style="margin-top:5px">${taskClientLinkedHtml(task?.contactId)}</div>
-          </div>
+          </div>`}
           <div class="field"><label>Technician Tag</label><select id="tm-technician"><option value="">—</option>${technicianNames(STATE.data).map(t=>`<option value="${esc(t)}" ${task?.technician===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
         </div>
         <div class="field" style="margin-top:11px"><label>Assigned To <span class="hint">(required · one or more)</span></label>
@@ -7812,7 +7793,7 @@ function openTaskModal(taskId){
           </div>
         </div>
         <div class="grid-2" style="margin-top:11px">
-          <div class="field"><label>Category ${isPatrickBoard?'(optional on this board)':''}</label><select id="tm-category">${TASK_CATEGORIES.map(c=>`<option value="${c}" ${task?.category===c?'selected':''}>${c||'—'}</option>`).join('')}</select></div>
+          ${TASK_CTX ? `<input type="hidden" id="tm-category" value="Client-related">` : `<div class="field"><label>Category ${isPatrickBoard?'(optional on this board)':''}</label><select id="tm-category">${TASK_CATEGORIES.map(c=>`<option value="${c}" ${task?.category===c?'selected':''}>${c||'—'}</option>`).join('')}</select></div>`}
           <div class="field"><label>Created By / At</label><input disabled value="${esc(task?.createdBy || currentProfile?.fullName || '')} · ${task?.createdAt ? new Date(task.createdAt).toLocaleString('en-AU') : new Date().toLocaleString('en-AU')}"></div>
         </div>
         <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="tm-notes">${esc(task?.notes||'')}</textarea></div>
@@ -7924,7 +7905,7 @@ async function saveTaskModal(taskId, createdBy, createdAt){
   const assignees = Array.from(document.querySelectorAll('.tm-assignee-cb:checked')).map(cb=>cb.value);
   const newSubtasks = MODAL_SUBTASKS.map(s=>({...s}));
   const values = {
-    board: UI.tasks.board, title, status: document.getElementById('tm-status').value, due: document.getElementById('tm-due').value,
+    board: TASK_CTX ? boardForAssignees(assignees) : UI.tasks.board, title, status: document.getElementById('tm-status').value, due: document.getElementById('tm-due').value,
     headsUp: document.getElementById('tm-headsup').value,
     notes: document.getElementById('tm-notes').value, client: document.getElementById('tm-client').value.trim(),
     contactId: (document.getElementById('tm-contact-id')||{}).value || null,
@@ -7954,9 +7935,11 @@ async function saveTaskModal(taskId, createdBy, createdAt){
       else if (!before) logTaskActivity(task, actor, `Subtask "${s.text}" added`);
     });
   } else {
-    logTaskActivity(task, actor, 'Task created');
+    logTaskActivity(task, actor, TASK_CTX ? `Task created from ${TASK_CTX.name}'s card` : 'Task created');
+    if (TASK_CTX) { const c = contactById(TASK_CTX.contactId); if (c) logContactActivity(c, actor, `Task created: "${values.title}" for ${assignees.join(', ')}${values.due ? ` · due ${fmtDateShort(values.due)}` : ''}`); }
   }
-  closeModal(); showToast(taskId?'Task updated':'Task added'); render();
+  const fromCard = !!TASK_CTX; TASK_CTX = null;
+  closeModal(); showToast(taskId ? 'Task updated' : fromCard ? `Task added to ${taskBoardLabel(task.board)}` : 'Task added'); render();
 }
 function taskActivityCount(t){ return (t.updates||[]).length + (t.activityLog||[]).length; }
 /* ── generic financial audit trail — reused by Jobs, Equipment Spend, Employees (commission rates) ── */
