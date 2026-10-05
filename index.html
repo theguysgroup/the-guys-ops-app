@@ -619,7 +619,7 @@ function computeGstSummary(data, start, end){
 // running total was; the last bar is the net profit (or loss) from zero. lo / hi = the chart's scale.
 function profitSteps(np){
   const costs = [['Technician commissions', np.commission], ['Job expenses (parts)', np.parts], ['Equipment (excl. GST)', np.equipment||0],
-    ['Marketing (Google + Meta)', np.marketing], ['Hourly staff (Ron)', np.hourlyStaff], [`Owner salaries (${np.days} day${np.days===1?'':'s'})`, np.owners]];
+    ['Marketing (ads)', np.marketing], ['Hourly staff (Ron)', np.hourlyStaff], [`Owner salaries (${np.days} day${np.days===1?'':'s'})`, np.owners]];
   let run = Number(np.revenue)||0;
   const steps = [{ label:'Revenue (excl. GST)', from:0, to:run, value:run, kind:'in' }];
   costs.forEach(([label, v]) => { const val = Number(v)||0; steps.push({ label, from: round2(run - val), to: run, value: val, kind:'out' }); run = round2(run - val); });
