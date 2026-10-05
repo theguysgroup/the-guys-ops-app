@@ -6839,7 +6839,7 @@ function openDrill(i){
     rows = items.map(j => `<tr><td class="mono">${fmtDateShort(j.date)}</td><td>${custLink(j.customerName, j.contactId, j.id)}</td><td class="mono">${invoiceLink(j.id, j.invoiceNumber)}</td><td>${esc(j.technician||'—')}</td><td class="num">${fmtMoney(jobTotalCollected(j))}</td><td>${pill(j.paymentStatus==='Paid'?'good':'bad', j.paymentStatus)}</td></tr>`).join('');
   }
   const total = d.kind==='jobs' ? ` · ${fmtMoney(round2(items.reduce((s,j)=>s+jobTotalCollected(j),0)))} incl. GST` : d.kind==='equipment' ? ` · ${fmtMoney(round2(items.reduce((s,e)=>s+(Number(e.cost)||0),0)))} incl. GST` : '';
-  openModal(`<div class="modal-back" onclick="if(event.target===this) closeModal()"><div class="modal" style="max-width:820px">
+  openModal(`<div class="modal-back" onclick="if(event.target===this) closeModal()"><div class="modal" style="max-width:${d.kind==='equipment' ? 1040 : 820}px">
     <h2>${esc(d.title)}</h2><div class="modal-sub">${items.length} ${d.kind==='leads'?'lead':d.kind==='equipment'?'purchase':'job'}${items.length===1?'':'s'}${total}</div>
     <div class="table-wrap" style="max-height:60vh;overflow:auto"><table><thead><tr>${head}</tr></thead><tbody>${rows || `<tr><td colspan="8">${emptyState('Nothing here')}</td></tr>`}</tbody></table></div>
     <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Close</button></div>
