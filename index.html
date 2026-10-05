@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Guys Service Group</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="The Guys">
+<meta name="theme-color" content="#c31f2b">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
@@ -272,7 +278,12 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .tbar-row .v { font-variant-numeric: tabular-nums; color: var(--ink-faint); text-align:end; white-space:nowrap; }
 .tbar-row .v b { color: var(--ink); font-weight:600; }
 .period-bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
-.period-bar select { width:auto; min-width:210px; }
+.picker { position:relative; }
+.picker-btn { min-width:210px; justify-content:space-between; display:inline-flex; gap:10px; }
+.picker-list { position:absolute; top:calc(100% + 4px); inset-inline-start:0; z-index:40; min-width:100%; max-height:264px; overflow-y:auto; background: var(--surface); border:1px solid var(--line); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); padding:4px; }
+.picker-opt { display:block; width:100%; text-align:start; padding:7px 10px; border:0; background:none; color: var(--ink); border-radius:6px; font: inherit; font-size:13px; white-space:nowrap; cursor:pointer; }
+.picker-opt:hover, .picker-opt:focus-visible { background: var(--surface-2); outline:none; }
+.picker-opt.sel { font-weight:700; background: var(--primary-soft); }
 .period-bar input[type=date] { width:auto; }
 .seg { display:flex; gap:6px; margin-inline-end:6px; }
 .cmp-legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color: var(--ink-soft); margin:10px 0 4px; }
@@ -995,7 +1006,8 @@ function defaultPermissionsFor(role){
   // leads/sales are not a technician's job.
   // Payroll: a technician/VA sees only their OWN pay page (renderPayroll routes non-owners to it; RLS
   // limits payroll_weeks/sales_daily_log to their own rows anyway).
-  if (role==='technician') return { ...none, overview:true, jobs:true, finance:true, payroll:true, reminders:true, tasks:true };
+  // Jobs & Commissions is off for technicians (Ofek 6 Oct); their own jobs still reach their pay page (see filterForProfile).
+  if (role==='technician') return { ...none, overview:true, jobs:false, finance:true, payroll:true, reminders:true, tasks:true };
   // VA (Ron), per Ofek 29 Sep: everything except the owners' dashboards and their personal task boards. So CRM,
   // Closings, Jobs & Commissions (a closing creates/updates a job, which needs Jobs access), Outstanding, Open Tasks,
   // Resources, his own pay, tasks and reminders are ON. Off: Leads & Marketing / Google Ads (dashboards) and the
@@ -1656,7 +1668,8 @@ function logEquipmentActivity(item, actor, text){
 
 function filterForProfile(data, profile){
   if (profile.role==='owner' || profile.role==='manager') return data;
-  const canSeeJobs = profile.permissions.jobs || profile.permissions.finance;
+  // A technician's own jobs feed his pay page even without the Jobs & Commissions board (Ofek 6 Oct).
+  const canSeeJobs = profile.permissions.jobs || profile.permissions.finance || (profile.role==='technician' && profile.permissions.payroll);
   // equipmentSpend also feeds the Equipment & Suppliers quick-entry feed on the Closings page (item 7),
   // so it needs to be visible under the `closings` permission too, not just jobs/finance.
   const canSeeEquipmentSpend = canSeeJobs || profile.permissions.closings;
@@ -1842,7 +1855,8 @@ function mapPayrollRow(r){
   return { id:r.id, weekKey:r.week_start, person:r.person,
     cashCollected:!!r.cash_collected, cashCollectedAt:r.cash_collected_at, cashCollectedBy:r.cash_collected_by||'',
     salaryPaid:!!r.salary_paid, salaryPaidAt:r.salary_paid_at, salaryPaidBy:r.salary_paid_by||'',
-    salaryPaidAmount: r.salary_paid_amount===null || r.salary_paid_amount===undefined ? null : Number(r.salary_paid_amount) };
+    salaryPaidAmount: r.salary_paid_amount===null || r.salary_paid_amount===undefined ? null : Number(r.salary_paid_amount),
+    salaryInvoiceFile: r.salary_invoice_file||null, salaryInvoiceAt: r.salary_invoice_at||null, expensesInvoiceFile: r.expenses_invoice_file||null, expensesInvoiceAt: r.expenses_invoice_at||null };
 }
 function mapSalesLogRow(l){
   return { id:l.id, person:l.person, date:l.date, hours:Number(l.hours)||0,
@@ -1986,7 +2000,8 @@ let MODAL_TASK_ID = null; // id of the task currently open in the task modal (nu
 // Files picked on a page form (Closings: invoice photo and parts receipt; the equipment receipt) until it is posted.
 // Kept apart from MODAL_FILES, which every closeModal() empties (posting a closing can open the commission popup).
 let PAGE_FILES = {};
-const PAGE_FILE_IDS = ['cf-photo', 'cf-parts-receipt', 'eqf-receipt'];
+const START_LINK = (() => { try { const q = new URLSearchParams(location.search); const week = q.get('week'); return { tab: q.get('tab'), week: /^\d{4}-\d{2}-\d{2}$/.test(week||'') ? week : null, used: false }; } catch (e) { return { used: true }; } })();
+const PAGE_FILE_IDS = ['cf-photo', 'cf-parts-receipt', 'eqf-receipt', 'inv-salary', 'inv-expenses'];
 const fileStore = id => PAGE_FILE_IDS.includes(id) ? PAGE_FILES : MODAL_FILES;
 
 function getRealProfile(){ return STATE.profiles.find(p => p.id===STATE.currentProfileId) || null; }
@@ -6496,6 +6511,22 @@ function payrollCompareCards(data, techs, pr){
       ${renderCompareBars(rows.map(r => ({ labelHtml: techTag(r.t), cur: r.cur.avgJob, prev: r.prev.avgJob })), labels)}</div>
   </div>`;
 }
+// A short list that scrolls inside itself (Ofek 6 Oct: the native week list opened to the whole screen).
+// items: [{ value, label, selected }]; onPick = the name of the function called with the value.
+function pickerHtml(id, label, items, onPick){
+  return `<div class="picker" id="${id}"><button type="button" class="btn picker-btn" onclick="togglePicker('${id}')" aria-haspopup="listbox"><span>${esc(label)}</span><span aria-hidden="true">▾</span></button>
+    <div class="picker-list" role="listbox" hidden>${items.map(it => `<button type="button" role="option" aria-selected="${it.selected?'true':'false'}" class="picker-opt${it.selected?' sel':''}" onclick="${onPick}('${it.value}')">${esc(it.label)}</button>`).join('')}</div></div>`;
+}
+function togglePicker(id){
+  const list = document.querySelector(`#${id} .picker-list`); if (!list) return;
+  const opening = list.hidden;
+  document.querySelectorAll('.picker-list').forEach(l => { l.hidden = true; });
+  list.hidden = !opening;
+  if (opening) { const sel = list.querySelector('.sel'); if (sel) list.scrollTop = Math.max(0, sel.offsetTop - list.clientHeight / 2); }
+}
+document.addEventListener('click', e => { if (!e.target.closest || !e.target.closest('.picker')) document.querySelectorAll('.picker-list').forEach(l => { l.hidden = true; }); });
+document.addEventListener('keydown', e => { if (e.key==='Escape') document.querySelectorAll('.picker-list').forEach(l => { l.hidden = true; }); });
+if ('serviceWorker' in navigator) window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 function setPayrollMode(m){ UI.payroll.mode = m; if (m==='month' && !UI.payroll.month) UI.payroll.month = todayStr().slice(0, 7); render(); }
 function setPayrollMonth(k){ UI.payroll.month = k; render(); }
 function setPayrollRange(which, v){ UI.payroll[which] = v; render(); }
@@ -6509,14 +6540,16 @@ function renderPayrollPeriodNav(withModes){
   const modes = withModes ? `<div class="seg">${[['week','Week'],['month','Month'],['custom','Custom']].map(([k,l]) => `<button class="week-chip ${pr.mode===k?'active':''}" onclick="setPayrollMode('${k}')">${l}</button>`).join('')}</div>` : '';
   let ctl = '';
   if (pr.mode==='week') {
-    const thisWeek = payrollWeekOf(today).key, cur = payrollWeekKeyFromUI(), first = payrollWeekOf(earliest).key, opts = [];
-    for (let k = thisWeek; k >= first; k = shiftPayrollWeek(k, -1)) opts.push(`<option value="${k}" ${k===cur?'selected':''}>${payrollWeekLabel(payrollWeekOf(k))}${k===thisWeek?' · this week':''}</option>`);
-    ctl = `<button class="btn small" onclick="setPayrollWeek('${shiftPayrollWeek(cur,-1)}')" title="The week before">◀</button><select onchange="setPayrollWeek(this.value)" aria-label="Week">${opts.join('')}</select>${cur < thisWeek ? `<button class="btn small" onclick="setPayrollWeek('${shiftPayrollWeek(cur,1)}')" title="The week after">▶</button>` : ''}`;
+    const thisWeek = payrollWeekOf(today).key, cur = payrollWeekKeyFromUI(), first = payrollWeekOf(earliest).key, items = [];
+    const weekLabel = k => `${payrollWeekLabel(payrollWeekOf(k))}${k===thisWeek ? ' · this week' : ''}`;
+    for (let k = thisWeek; k >= first; k = shiftPayrollWeek(k, -1)) items.push({ value: k, label: weekLabel(k), selected: k===cur });
+    ctl = `<button class="btn small" onclick="setPayrollWeek('${shiftPayrollWeek(cur,-1)}')" title="The week before">◀</button>${pickerHtml('pp-week', weekLabel(cur), items, 'setPayrollWeek')}${cur < thisWeek ? `<button class="btn small" onclick="setPayrollWeek('${shiftPayrollWeek(cur,1)}')" title="The week after">▶</button>` : ''}`;
   } else if (pr.mode==='month') {
-    const cur = pr.start.slice(0, 7), thisMonth = today.slice(0, 7), opts = [];
-    for (let d = parseLocalDate(thisMonth + '-01'); fmtLocal(d).slice(0, 7) >= earliest.slice(0, 7); d.setMonth(d.getMonth() - 1)) { const k = fmtLocal(d).slice(0, 7); opts.push(`<option value="${k}" ${k===cur?'selected':''}>${MONTHS_FULL[d.getMonth()]} ${d.getFullYear()}${k===thisMonth?' · this month':''}</option>`); }
+    const cur = pr.start.slice(0, 7), thisMonth = today.slice(0, 7), items = [];
+    const monthLabel = k => { const d = parseLocalDate(k + '-01'); return `${MONTHS_FULL[d.getMonth()]} ${d.getFullYear()}${k===thisMonth ? ' · this month' : ''}`; };
+    for (let d = parseLocalDate(thisMonth + '-01'); fmtLocal(d).slice(0, 7) >= earliest.slice(0, 7); d.setMonth(d.getMonth() - 1)) { const k = fmtLocal(d).slice(0, 7); items.push({ value: k, label: monthLabel(k), selected: k===cur }); }
     const shift = n => { const d = parseLocalDate(cur + '-01'); d.setMonth(d.getMonth() + n); return fmtLocal(d).slice(0, 7); };
-    ctl = `<button class="btn small" onclick="setPayrollMonth('${shift(-1)}')" title="The month before">◀</button><select onchange="setPayrollMonth(this.value)" aria-label="Month">${opts.join('')}</select>${cur < thisMonth ? `<button class="btn small" onclick="setPayrollMonth('${shift(1)}')" title="The month after">▶</button>` : ''}`;
+    ctl = `<button class="btn small" onclick="setPayrollMonth('${shift(-1)}')" title="The month before">◀</button>${pickerHtml('pp-month', monthLabel(cur), items, 'setPayrollMonth')}${cur < thisMonth ? `<button class="btn small" onclick="setPayrollMonth('${shift(1)}')" title="The month after">▶</button>` : ''}`;
   } else {
     ctl = `<input type="date" value="${esc(pr.start)}" onchange="setPayrollRange('from', this.value)" aria-label="From"><span class="hint">to</span><input type="date" value="${esc(pr.end)}" onchange="setPayrollRange('to', this.value)" aria-label="To">`;
   }
@@ -6541,6 +6574,7 @@ function renderPayrollPeriodView(data, viewChips){
       <div><h1 class="page-title">Payroll</h1><div class="page-sub">${pr.mode==='month' ? 'The month' : 'This range'} by technician, against the period before · pay is marked week by week (choose Week)</div></div>
     </div>
     ${viewChips||''}
+    ${phoneNotificationsBar()}
     ${renderPayrollPeriodNav(true)}
     <div class="grid-4" style="margin-bottom:16px">
       ${tile('Revenue <span class="hint">(jobs done, excl. GST)</span>', fmtMoney(cur.revenue), deltaBadge(cur.revenue, prev.revenue), `before: ${fmtMoney(prev.revenue)}`)}
@@ -6563,6 +6597,114 @@ function renderPayrollPeriodView(data, viewChips){
       ${hourly.map(h => `<tr><td>${techTag(h.p)}</td><td class="num">${cell(h.cur.hours, h.prev.hours, v => v + 'h')}</td><td class="num">${cell(h.cur.bookings, h.prev.bookings, num)}</td><td class="num">${cell(h.cur.pay, h.prev.pay, money)}</td></tr>`).join('')}
     </tbody></table></div>` : ''}
   `;
+}
+// ── Weekly invoices (Ofek 6 Oct): each technician hands in two a week — one for his commission and one for the equipment
+// & materials he paid for (so the business claims the GST back). Files go to file storage (payroll/<week>/<person>/);
+// the row keeps where they are. When the commission invoice is in, the owners get a phone notification.
+function payrollInvoiceChips(st){
+  const chip = (file, at, name) => file
+    ? `<a href="#" class="file-chip" style="margin:0 4px 4px 0" title="Sent ${esc(at ? new Date(at).toLocaleString('en-AU') : '')}" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">🧾 ${name} ✓</a>`
+    : `<span class="hint" style="display:inline-block;margin:0 8px 4px 0">${name} —</span>`;
+  return `<div style="display:flex;flex-wrap:wrap">${chip(st.salaryInvoiceFile, st.salaryInvoiceAt, 'Commission')}${chip(st.expensesInvoiceFile, st.expensesInvoiceAt, 'Expenses')}</div>`;
+}
+function payrollInvoiceCard(c, person, weekKey){
+  const st = payrollStatus(STATE.data, weekKey, person);
+  const p = jsStr(person);
+  const slot = (kind, title, amount, sub) => {
+    const file = kind==='salary' ? st.salaryInvoiceFile : st.expensesInvoiceFile, at = kind==='salary' ? st.salaryInvoiceAt : st.expensesInvoiceAt;
+    const picked = PAGE_FILES['inv-' + kind];
+    return `<div class="mini-tile">
+      <div class="stat-label">${title}</div>
+      <div class="stat-value" style="font-size:18px">${payMoney(amount)}</div>
+      <div class="stat-sub">${sub}</div>
+      ${file ? `<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${pill('good', 'Sent ' + fmtDateShort(localDay(at)))}<a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">📄 View</a></div>` : ''}
+      <div style="margin-top:8px">${fileField(file ? 'Send a new one instead' : 'The invoice', 'inv-' + kind, picked, RECEIPT_TYPES)}</div>
+      ${picked ? `<button class="btn primary small" style="margin-top:8px" onclick="sendPayrollInvoice('${kind}','${p}','${weekKey}')">Send ${kind==='salary' ? 'commission' : 'expenses'} invoice</button>` : ''}
+    </div>`;
+  };
+  return `<div class="card" style="margin-top:14px">
+    <div class="stat-label">Your invoices for this week <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">${payrollWeekLabel(c.week)}</span></div>
+    <div class="stat-sub" style="margin:4px 0 10px">Two invoices each week: one for your commission, one for the equipment &amp; materials you paid for. Drag the file in or choose it, then press Send. When the commission invoice is in, Ofek and Noam get a message that you can be paid.</div>
+    <div class="grid-2">
+      ${slot('salary', 'Commission invoice', c.total, 'commission on the jobs paid this week')}
+      ${slot('expenses', 'Equipment &amp; materials invoice', c.materials.total, c.materials.total ? `incl. GST ${payMoney(c.materials.gst)} · what you paid for yourself` : 'nothing to claim this week')}
+    </div>
+  </div>`;
+}
+// ── Phone notifications (Ofek 6 Oct) ──
+// The app can be added to a phone's home screen (manifest + sw.js, which caches nothing). An owner turns notifications
+// on once per device; the "push" function sends them (a technician's commission invoice is in → "you can pay him").
+const PUSH = { checked:false, on:false };
+async function pushCall(body){
+  if (readOnlyReason()) return { ok:false, reason: readOnlyReason() };
+  const { data } = await sb.auth.getSession();
+  const res = await fetch(SUPABASE_URL + '/functions/v1/push', { method:'POST', headers:{ 'Content-Type':'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + (data.session && data.session.access_token) }, body: JSON.stringify(body) });
+  return res.json().catch(() => ({ ok:false }));
+}
+const isIosDevice = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
+const isInstalledApp = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone===true;
+async function checkPhoneNotifications(){
+  PUSH.checked = true;
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || Notification.permission!=='granted') { PUSH.on = false; return; }
+    const reg = await navigator.serviceWorker.getRegistration();
+    PUSH.on = !!(reg && await reg.pushManager.getSubscription());
+  } catch (e) { PUSH.on = false; }
+  if (PUSH.on && UI.tab==='payroll') renderKeepingInput();
+}
+function urlB64ToBytes(b64){ const s = (b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/'); return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+async function enablePhoneNotifications(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    showToast(isIosDevice() ? 'On iPhone: first add the app to the home screen (Share → Add to Home Screen), then open it from there and press this again.' : 'This browser cannot show notifications.');
+    return;
+  }
+  const perm = await Notification.requestPermission();
+  if (perm!=='granted') { showToast('Notifications were not allowed on this device. You can allow them in the phone settings.'); return; }
+  try {
+    const reg = await navigator.serviceWorker.register('sw.js'); await navigator.serviceWorker.ready;
+    const k = await pushCall({ step:'key' });
+    if (!k || !k.publicKey) { showToast('Could not turn notifications on. Try again.'); return; }
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: urlB64ToBytes(k.publicKey) });
+    const j = sub.toJSON();
+    const { error } = await sb.from('push_subscriptions').upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, device: navigator.userAgent.slice(0, 200) }, { onConflict:'endpoint' });
+    if (error) { showToast('Could not save this device: ' + error.message); return; }
+    PUSH.on = true; showToast('Notifications are on for this device'); render();
+  } catch (e) { showToast('Could not turn notifications on: ' + (e && e.message || e)); }
+}
+async function sendTestNotification(){
+  const r = await pushCall({ step:'test' });
+  showToast(r && r.ok ? `Test sent to ${r.sent} device${r.sent===1?'':'s'}` : 'The test was not sent' + (r && r.reason ? ': ' + r.reason : ''));
+}
+// A technician's commission invoice is in → the owners' phones (the function checks the invoice is really there).
+function notifyOwnersInvoice(week, person){ pushCall({ step:'invoice', week, person }).catch(() => {}); }
+function phoneNotificationsBar(){
+  if (!PUSH.checked) setTimeout(checkPhoneNotifications, 0);
+  const tip = isIosDevice() && !isInstalledApp() ? ' On iPhone, add the app to the home screen first (Share → Add to Home Screen) and open it from there.' : '';
+  return `<div class="card tight" style="margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <span style="font-size:18px" aria-hidden="true">📱</span>
+    <div style="flex:1 1 280px"><b>Phone notifications</b> <span class="hint">${PUSH.on ? 'On for this device: you get a message when a technician sends his commission invoice.' : 'Get a message on this phone when a technician sends his commission invoice.' + tip}</span></div>
+    ${PUSH.on ? `<button class="btn small" onclick="sendTestNotification()">Send a test</button>` : `<button class="btn small primary" onclick="enablePhoneNotifications()">Turn on for this device</button>`}
+  </div>`;
+}
+async function sendPayrollInvoice(kind, person, weekKey){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const picked = PAGE_FILES['inv-' + kind]; if (!picked) { showToast('Choose the invoice file first'); return; }
+  const me = getRealProfile && getRealProfile();
+  const ref = await storeFile(`payroll/${weekKey}/${person}`, kind + '-invoice', picked);
+  if (!ref) return;   // storeFile already said why
+  const { data, error } = await sb.rpc('submit_payroll_invoice', { p_week: weekKey, p_kind: kind, p_file: ref, p_person: me && (me.role==='owner' || me.role==='manager') ? person : null });
+  if (error) { showToast('The invoice was not saved: ' + error.message); return; }
+  const who = (data && data.person) || person;
+  if (!STATE.data.payrollWeeks) STATE.data.payrollWeeks = [];
+  let row = STATE.data.payrollWeeks.find(x => x.weekKey===weekKey && x.person===who);
+  if (!row) { row = { weekKey, person: who, cashCollected:false, salaryPaid:false }; STATE.data.payrollWeeks.push(row); }
+  const now = new Date().toISOString();
+  if (kind==='salary') { row.salaryInvoiceFile = ref; row.salaryInvoiceAt = now; } else { row.expensesInvoiceFile = ref; row.expensesInvoiceAt = now; }
+  PAGE_FILES['inv-' + kind] = null;
+  if (kind==='salary') notifyOwnersInvoice(weekKey, who);
+  showToast(kind==='salary' ? 'Commission invoice sent. Ofek and Noam will see you can be paid.' : 'Expenses invoice sent');
+  render();
 }
 // A technician's week at a glance, on the Payroll board and on his own pay page (moved from Financial Summary, Ofek
 // 6 Oct): the jobs done that week (paid / not paid), the daily average, the commission from jobs paid late, the job types.
@@ -6683,10 +6825,11 @@ function renderPayrollBoard(profile, data, viewChips){
       <td class="num">${c.materials.total ? `${payMoney(c.materials.total)}<div class="hint">incl. GST ${payMoney(c.materials.gst)}</div>` : '—'}</td>
       <td class="num" style="font-weight:700">${payMoney(c.grandTotal)}</td>
       <td class="num">${c.unpaid.length ? `${payMoney(c.expected)} <span class="hint">(${c.unpaid.length})</span>` : '—'}</td>
+      <td>${payrollInvoiceChips(st)}</td>
       <td>${cashCell}</td>
       <td>${salaryCell}</td>
       <td><button class="btn small" onclick="copyPayMessage('commission','${p}')">📋 Copy message</button></td>
-    </tr>${open ? `<tr><td colspan="9" style="background:var(--bg-soft, transparent)">${payrollWeekPanel(c, data)}${payrollJobLinesTable(c)}${payrollMaterialsTable(c)}${payrollUnpaidTable(c)}</td></tr>` : ''}`;
+    </tr>${open ? `<tr><td colspan="10" style=""background:var(--bg-soft, transparent)">${payrollWeekPanel(c, data)}${payrollJobLinesTable(c)}${payrollMaterialsTable(c)}${payrollUnpaidTable(c)}</td></tr>` : ''}`;
   }).join('');
 
   const hourlyRows = hourly.map(h => {
@@ -6710,6 +6853,7 @@ function renderPayrollBoard(profile, data, viewChips){
       <div><h1 class="page-title">Payroll</h1><div class="page-sub">Weekly pay, Sunday → Saturday · commission counts in the week the customer paid</div></div>
     </div>
     ${viewChips||''}
+    ${phoneNotificationsBar()}
     ${renderPayrollPeriodNav(true)}
     <div class="grid-4" style="margin-bottom:16px">
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Technician commissions</div><div class="stat-value">${payMoney(commTotal)}</div><div class="stat-sub">${comm.reduce((s,c)=>s+c.lines.length,0)} paid jobs this week</div></div>
@@ -6719,8 +6863,8 @@ function renderPayrollBoard(profile, data, viewChips){
     </div>
     ${(() => { const pr = payrollPeriod({ mode:'week', week: weekKey }, todayStr()); return payrollCompareCards(data, performancePeople(data, people, pr), pr); })()}
     <div class="section-title">Technicians <span class="tag">${payrollWeekLabel(wk)}</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Paid jobs</th><th class="num">Commission</th><th class="num">Equipment &amp; materials</th><th class="num">Total to pay</th><th class="num">Not paid yet</th><th>Cash to collect</th><th>Salary</th><th>Message</th></tr></thead>
-      <tbody>${commRows || `<tr><td colspan="9">${emptyState('No technicians', 'Add technicians on the Employees tab')}</td></tr>`}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Paid jobs</th><th class="num">Commission</th><th class="num">Equipment &amp; materials</th><th class="num">Total to pay</th><th class="num">Not paid yet</th><th>Invoices</th><th>Cash to collect</th><th>Salary</th><th>Message</th></tr></thead>
+      <tbody>${commRows || `<tr><td colspan="10">${emptyState('No technicians', 'Add technicians on the Employees tab')}</td></tr>`}</tbody></table></div>
     <div class="hint" style="margin-top:6px">Commission = (amount before GST − the job's expenses) × the technician's %. Independent contractors (Alessandro) cover their own expenses, so theirs is on the full amount before GST. Equipment &amp; materials = what the technician paid for himself (equipment, and parts on a job): paid back in full, on its own invoice, in the week it was entered.</div>
     <div class="section-title">Hourly staff <span class="tag">$${presentAmt(PAYROLL_HOURLY_RATE)}/hour + daily booking bonus</span></div>
     <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Hours</th><th class="num">Bookings</th><th class="num">Bonuses</th><th class="num">Total</th><th>Salary</th><th>Message</th></tr></thead>
@@ -6792,6 +6936,7 @@ function renderMyPay(profile, data, person, isPreview){
       <div class="card stat-card" style="--stat-accent:${c.cash>0 && !st.cashCollected ? 'var(--warn)' : 'var(--primary)'}"><div class="stat-label">Cash to hand over</div><div class="stat-value">${payMoney(c.cash)}</div><div class="stat-sub">${c.cash>0 ? (st.cashCollected ? 'handed over ✓' : 'not handed over yet') : 'no cash jobs this week'}</div></div>
       <div class="card stat-card" style="--stat-accent:${st.salaryPaid?'var(--good)':'var(--ink-faint)'}"><div class="stat-label">This week's salary</div><div class="stat-value" style="font-size:20px">${st.salaryPaid ? 'Paid ✓' : 'Not paid yet'}</div><div class="stat-sub">${st.salaryPaid ? payMoney(st.salaryPaidAmount) : 'paid after the week ends'}</div></div>
     </div>
+    ${payrollInvoiceCard(c, person, weekKey)}
     <div style="margin-top:14px">${payrollWeekPanel(c, data)}</div>
     ${c.materials.lines.length ? `<div class="card" style="margin-top:14px;max-width:520px">
       <div class="stat-label" style="margin-bottom:6px">This week's pay</div>
@@ -8978,6 +9123,8 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   // route guard — mirrors src/lib/permissions.ts + the (app)/layout.tsx guard:
   // never render a section the current profile isn't permitted to view.
   if (UI.tab==='finance') UI.tab = 'payroll';   // Financial Summary was removed (6 Oct): its technician part lives in Payroll
+  // Opened from a phone notification (?tab=payroll&week=…): go there once.
+  if (!START_LINK.used && START_LINK.tab) { START_LINK.used = true; UI.tab = START_LINK.tab; if (START_LINK.week) { UI.payroll.mode = 'week'; UI.payroll.week = START_LINK.week; } }
   if (!UI.tab || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);
   // board guard — a technician may only ever be looking at their OWN personal task board, regardless of
   // what UI.tasks.board was last set to (e.g. left over from another profile in this same browser tab).
