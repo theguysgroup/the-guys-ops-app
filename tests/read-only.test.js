@@ -120,7 +120,7 @@ function actionSandbox(){
     leadStage: () => 'New', chaseTooLong: () => false, isWorkday: () => true, Promise, console,
   };
   vm.createContext(ctx);
-  const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'setLeadNotes', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'setChatAutoSms', 'setMyShift'];
+  const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'setLeadNotes', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'askReviewAgain', 'markReviewLeft', 'setChatAutoSms', 'setMyShift'];
   vm.runInContext(names.map(fnText).join('\n'), ctx);
   return ctx;
 }
@@ -138,6 +138,8 @@ async function testActions(){
     await run(`setMyShift(true)`);
     await run(`convSend(contactById('c1'), 'sms', 'Hi', 'inbox')`);
     await run(`askForReview('j1')`);
+    await run(`askReviewAgain('j1')`);
+    await run(`markReviewLeft('j1')`);
     await run(`setChatAutoSms(true)`);
     await run(`mdRecordBooking(contactById('c1'))`);
     await run(`mdTick()`);

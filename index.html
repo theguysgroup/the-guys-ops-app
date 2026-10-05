@@ -1660,7 +1660,7 @@ function mapSettingsRow(r){
     gstRatePercent:r.gst_rate_percent, companyName:r.company_name,
     abn:r.abn||'', defaultPaymentTerms:r.default_payment_terms||'',
     ownerSalaries: r.owner_salaries||{},
-    phoneEnabled: !!r.phone_enabled, phoneRouting: r.phone_routing || {}, chatAutoSms: !!r.chat_auto_sms, reviewsFrom: r.reviews_from || '2026-10-03', whatsappEnabled: !!r.whatsapp_enabled,
+    phoneEnabled: !!r.phone_enabled, phoneRouting: r.phone_routing || {}, chatAutoSms: !!r.chat_auto_sms, reviewsFrom: r.reviews_from || '2026-10-03', whatsappEnabled: !!r.whatsapp_enabled, reviewRequestsAuto: !!r.review_requests_auto,
   };
 }
 function mapPayrollRow(r){
@@ -3663,10 +3663,28 @@ function mdReviewJobs(data){
   const from = (STATE.data.settings && STATE.data.settings.reviewsFrom) || '2026-10-03';
   return (data.jobs||[]).filter(j => j.date >= from && reviewInvoiceKey(j.invoiceNumber));
 }
-function mdReviewDone(j){
-  if (!j || j.reviewTaken || j.reviewDoNotAsk) return true;
-  const r = REVIEW_REQ && REVIEW_REQ[reviewInvoiceKey(j.invoiceNumber)];
-  return !!(r && (r.status==='sent' || r.status==='waiting'));
+// What a job needs in "Ask for a review" today (Ofek 5 Oct), r = its review request (or none):
+//   'ask'   = the customer hasn't been asked: never asked, the request failed, or the automatic one couldn't go (no
+//             customer card, no mobile or email on it, unknown job type). In automatic mode the system asks first, so a
+//             job from the last 2 days with no request yet is left to it.
+//   'again' = asked yesterday or before and still no Google review (the nightly review routine marks the ones who left
+//             one) → one reminder, within 2 weeks of the request.
+//   null    = nothing to do: review taken, don't ask, waiting to go, asked today, asked twice, asked too long ago.
+function reviewNeed(j, r, today, auto){
+  if (!j || j.reviewTaken || j.reviewDoNotAsk || !reviewInvoiceKey(j.invoiceNumber)) return null;
+  if (!r) return auto && j.date >= shiftDays(today, -2) ? null : 'ask';
+  if (r.status==='waiting') return null;
+  if (r.status==='sent') {
+    const day = r.sent_at ? localDay(r.sent_at) : '';
+    return (Number(r.ask_count) || 1) < 2 && !!day && day < today && day >= shiftDays(today, -14) ? 'again' : null;
+  }
+  if (r.status==='skipped' && auto && !/customer card|mobile or email|job type/i.test(r.reason || '')) return null;
+  return 'ask';
+}
+const reviewAutoOn = () => !!(STATE.data && STATE.data.settings && STATE.data.settings.reviewRequestsAuto);
+function mdReviewDone(j, today){
+  const r = REVIEW_REQ && j ? REVIEW_REQ[reviewInvoiceKey(j.invoiceNumber)] : null;
+  return !reviewNeed(j, r, today || todayStr(), reviewAutoOn());
 }
 // Today's bubbles from the CRM right now, plus everything already on today's list. { key: [{ id, div, done, rec }] }
 // ── My Day bubble rules (Ofek 5/10), pure so they can be tested ──
@@ -3777,8 +3795,8 @@ function mdLive(data, now){
   if (jobs) {
     const jobById = id => (data.jobs||[]).find(j => j.id===id);
     const div = j => { const c = contactForJob(j); return (c && c.division) || (/chimney/i.test(j.jobType||'') ? 'Chimney' : /pressure/i.test(j.jobType||'') ? 'Pressure Washing' : 'Aircon'); };
-    const due = jobs.filter(j => !mdReviewDone(j)).map(j => ({ ...j, division: div(j) }));
-    build('reviews', due, j => mdReviewDone(jobById(j.id) || j), id => { const j = jobById(id); return j ? { ...j, division: div(j) } : null; });
+    const due = jobs.filter(j => !mdReviewDone(j, localToday)).map(j => ({ ...j, division: div(j) }));
+    build('reviews', due, j => mdReviewDone(jobById(j.id) || j, localToday), id => { const j = jobById(id); return j ? { ...j, division: div(j) } : null; });
   } else out.reviews = Object.keys(stored.reviews || {}).map(id => ({ id, rec:null, div: stored.reviews[id].div || 'Other', done: !!stored.reviews[id].d }));
   return out;
 }
@@ -4879,7 +4897,7 @@ const reviewInvoiceKey = inv => String(inv||'').replace(/\D/g,'');
 function canAskReview(){ const p = getCurrentProfile(); return !!p && (p.role==='owner' || p.role==='manager' || (p.role==='va' && !!p.permissions.jobs)); }
 async function loadReviewRequests(){
   if (REVIEW_REQ_LOADING) return; REVIEW_REQ_LOADING = true;
-  const { data, error } = await sb.from('review_requests').select('invoice_number,status,sent_at,send_after,reason,source,requested_by');
+  const { data, error } = await sb.from('review_requests').select('invoice_number,status,sent_at,send_after,reason,source,requested_by,ask_count');
   REVIEW_REQ_LOADING = false;
   if (error) return;
   REVIEW_REQ = {}; (data||[]).forEach(r => { REVIEW_REQ[reviewInvoiceKey(r.invoice_number)] = r; });
@@ -4891,7 +4909,7 @@ function reviewAskCell(j){
   if (j.reviewDoNotAsk) return pill('bad', "Don't ask");
   if (j.reviewTaken) return pill('good', 'Review taken');
   const r = REVIEW_REQ[reviewInvoiceKey(j.invoiceNumber)];
-  if (r && r.status==='sent') return `<span title="${esc(r.requested_by ? 'Asked by '+r.requested_by : 'Asked automatically')}">${pill('good', 'Asked '+fmtDateShort(localDay(r.sent_at)))}</span>`;
+  if (r && r.status==='sent') return `<span title="${esc(r.requested_by ? 'Asked by '+r.requested_by : 'Asked automatically')}">${pill('good', ((Number(r.ask_count)||1) > 1 ? 'Asked again ' : 'Asked ')+fmtDateShort(localDay(r.sent_at)))}</span>`;
   if (r && r.status==='waiting') return pill('warn', 'Goes '+new Date(r.send_after).toLocaleString('en-AU', { timeZone:'Australia/Sydney', weekday:'short', hour:'numeric', minute:'2-digit' }));
   if (!j.invoiceNumber) return '<span class="hint">No invoice #</span>';
   return `${r && r.status==='error' ? pill('bad','Failed')+' ' : ''}<button class="btn primary small" onclick="askForReview('${j.id}')">Ask for review</button>`;
@@ -4899,8 +4917,8 @@ function reviewAskCell(j){
 const REVIEW_ASK_REASONS = {
   do_not_ask: "This customer is marked \"Don't ask for a review\".",
   review_taken: 'The review for this job is already taken.',
-  not_in_servicem8: 'This job number is not in ServiceM8, so there is no phone or email to send to.',
-  no_contact: 'There is no mobile or email for this job in ServiceM8.',
+  no_card: "This job isn't linked to a customer card in the CRM. Open the job, pick the customer, then ask again.",
+  no_contact: 'The customer card has no mobile or email. Add one in the CRM, then ask again.',
   unknown_job_type: 'Unknown job type, so there is no review link for it.',
   no_invoice: 'The job has no invoice number.',
   job_not_found: 'Job not found.',
@@ -4914,7 +4932,7 @@ async function askForReview(jobId, again){
     const res = await fetch(SUPABASE_URL + '/functions/v1/review-requests', { method:'POST', headers:{ 'Content-Type':'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + (data.session && data.session.access_token) }, body: JSON.stringify({ ask: { job_id: jobId, again: !!again } }) });
     const out = await res.json().catch(() => ({}));
     if (out.ok) {
-      logJobActivity(j, getCurrentProfile()?.fullName || 'Unknown', out.status==='sent' ? 'Google review request sent (text now, email from info@ shortly)' : 'Google review request scheduled for the morning');
+      logJobActivity(j, getCurrentProfile()?.fullName || 'Unknown', (again ? 'Google review reminder' : 'Google review request') + (out.status==='sent' ? ' sent (text now, email from info@ shortly)' : ' scheduled for the morning'));
       showToast(out.status==='sent' ? `Review request sent to ${j.customerName}: text now, email within 15 minutes` : `After hours: the review request goes at 10:00 tomorrow`);
     } else if (out.reason==='already_asked' || out.reason==='asked_recently') {
       const when = out.sent_at ? ` on ${fmtDateShort(localDay(out.sent_at))}` : '';
@@ -4925,6 +4943,22 @@ async function askForReview(jobId, again){
   };
   if (again) { go(); return; }
   confirmAction(`Send ${j.customerName} a Google review request? A text goes now and an email from info@ shortly (same wording as before).`, go, { danger:false, title:'Ask for a Google review', confirmLabel:'Send' });
+}
+// "Ask again" in the My Day bubble: one reminder for a customer asked yesterday or before who hasn't left a review.
+function askReviewAgain(jobId){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const j = STATE.data.jobs.find(x => x.id===jobId); if (!j) return;
+  confirmAction(`Send ${j.customerName} one reminder? The same review request goes again: a text now and an email from info@ shortly. Check Google first that they haven't left one.`,
+    () => askForReview(jobId, true), { danger:false, title:'Ask for a review again', confirmLabel:'Send reminder' });
+}
+// "Left a review ✓": the customer did leave one (the nightly routine missed it, e.g. a different name on Google).
+function markReviewLeft(jobId){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const j = STATE.data.jobs.find(x => x.id===jobId); if (!j) return;
+  j.reviewTaken = true;
+  db.jobs.update(j.id, { reviewTaken: true });
+  logJobActivity(j, getCurrentProfile()?.fullName || 'Unknown', 'Marked: the customer left a Google review');
+  showToast(`${j.customerName}: marked as reviewed`); render();
 }
 function refreshJobsTable(){
   const profile = getCurrentProfile(); if (!profile) return;
@@ -7000,10 +7034,17 @@ function renderMyDay(profile, data){
     return myDayRow(c, `${pill(over?'bad':'warn', over?'Overdue':'Today')}<button class="btn small" onclick="openFollowupDatePrompt(contactById('${c.id}'),'Quoted')">Next date</button>${leadStageControl(c)}`,
       { bad: over, meta: `${quoteDueReason(c, L.localToday)}${c.estimatedValue?` · est. ${fmtMoney(c.estimatedValue)}`:''}` }); }).join('');
   const reviewItems = (live.reviews || []).filter(x => !x.done && x.rec);
-  const reviewBody = reviewItems.map(x => { const j = x.rec;
-    return `<div class="myday-row" style="cursor:default"><div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${esc(j.customerName||'—')}</div>
-      <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">#${esc(j.invoiceNumber||'')} · ${esc(j.jobType||'—')} · ${esc(j.technician||'—')} · ${fmtDateShort(j.date)}</div></div>
-      <div style="display:flex;align-items:center;gap:8px">${reviewAskCell(j)}</div></div>`; }).join('');
+  const reviewAuto = reviewAutoOn();
+  const reviewBody = reviewItems.map(x => { const j = x.rec, r = REVIEW_REQ && REVIEW_REQ[reviewInvoiceKey(j.invoiceNumber)];
+    const again = reviewNeed(j, r, L.localToday, reviewAuto)==='again';
+    const why = again ? `asked ${fmtDateShort(localDay(r.sent_at))} · no Google review yet: check Google, then send one reminder`
+      : r && r.status==='skipped' && /customer card|mobile or email|job type/i.test(r.reason||'') ? `couldn't be asked: ${esc(r.reason)}`
+      : r && r.status==='error' ? 'the last request failed' : 'not asked yet';
+    const actions = (again ? `<button class="btn primary small" onclick="askReviewAgain('${j.id}')">Ask again</button>` : reviewAskCell(j))
+      + `<button class="btn small" onclick="markReviewLeft('${j.id}')">Left a review ✓</button>`;
+    return `<div class="myday-row" style="cursor:default"><div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${esc(j.customerName||'—')} ${again ? pill('warn','No review yet') : ''}</div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">#${esc(j.invoiceNumber||'')} · ${esc(j.jobType||'—')} · ${esc(j.technician||'—')} · ${fmtDateShort(j.date)} · ${why}</div></div>
+      <div style="display:flex;align-items:center;gap:8px">${actions}</div></div>`; }).join('');
 
   return `
     <div class="page-head"><div><h1 class="page-title">My Day</h1><div class="page-sub">${esc(dayName)} · who to call, in order. Work hours Mon–Fri 8:00–17:00.</div></div>${myShiftButton(profile)}</div>
@@ -7016,7 +7057,7 @@ function renderMyDay(profile, data){
         ${stat('decide', 'Chasing 21+ days', 0, 'decide: keep or lost', 'bad')}
         ${stat('followups', 'Follow-ups due', 0, L.followups.filter(c=>c.nextFollowUp<L.localToday).length ? `${L.followups.filter(c=>c.nextFollowUp<L.localToday).length} overdue` : '', 'warn')}
         ${stat('quotes', 'Quotes due', 0, 'must be done before you log out', 'bad')}
-        ${stat('reviews', 'Ask for a review', 0, 'jobs not asked yet', 'warn')}
+        ${stat('reviews', 'Ask for a review', 0, 'not asked, or no review a day later', 'warn')}
         ${stat('late', 'Late payments', 0, 'call every day until paid', 'bad')}
         ${stat('reoffer', 'Re-offer after a year', 0, 'customers from a year ago', 'warn')}
         ${stat('tasks', "Ron's tasks", 0, 'due today, late or heads-up', 'warn')}
@@ -7034,7 +7075,9 @@ function renderMyDay(profile, data){
     ${myDaySection('followups', 'Follow-ups due', L.followups.length, fuBody, 'No follow-ups due today. ✓')}
     ${myDaySection('quotes', 'Quotes due', L.quotesDue.length, quoteBody, 'No quote is due today. ✓', 'Quotes whose follow-up date has come. Call, then set the next date or move the stage. You can\'t log out while one is left.')}
     ${renderMyDayOfficeLists(profile, data, live)}
-    ${myDaySection('reviews', 'Ask for a review', reviewItems.length, reviewBody, (REVIEW_REQ===null ? 'Loading…' : 'Every job has been asked, or is marked don\'t ask. ✓'), 'Jobs where the customer hasn\'t been asked for a Google review yet. Not shown: jobs marked "don\'t ask" and reviews already taken.')}
+    ${myDaySection('reviews', 'Ask for a review', reviewItems.length, reviewBody, (REVIEW_REQ===null ? 'Loading…' : 'Nobody to ask today. ✓'),
+      (reviewAuto ? 'The request goes automatically when a job comes in. Here: jobs it couldn\'t go for (fix the customer card, then Ask for review), ' : 'Jobs where the customer hasn\'t been asked yet, ')
+      + 'and customers asked yesterday or before who still haven\'t left a Google review: check Google, then Ask again (once). If they did leave one, press Left a review. Not shown: "don\'t ask" and reviews already taken.')}
   `;
 }
 

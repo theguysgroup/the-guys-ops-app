@@ -51,6 +51,8 @@ const DECLS = [
   'fmtMoney', 'workClockDue', 'sydneyNowPast', 'NEW_LEAD_ALERT_FROM', 'leadArrivedAt', 'newLeadUnhandled', 'chaseTooLong', 'quoteStale', 'bookedNoJob', 'MY_DAY_NEW_DAYS', 'myDayLists',
   // My Day counters (3 Oct)
   'esc', 'quoteDueReason', 'shiftDaySummary', 'latePaymentDue', 'latePaymentDoneToday', 'reofferDue', 'assigneeNames', 'taskAssignedTo', 'myTaskDue', 'teamTaskDue', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
+  // review requests (5 Oct)
+  'reviewInvoiceKey', 'reviewNeed',
 ];
 
 function extractDecl(source, name){
@@ -588,6 +590,35 @@ function testSalesAutomations(sb){
   assertEqual(sb.newLeadUnhandled(Object.assign({}, back, { messages:[{ kind:'message', direction:'in', auto:true, at:'2026-09-29T00:00:00Z' }] }), at('2026-09-29T00:30:00Z')), true, 'newLeadUnhandled: the website\'s own "new enquiry" message does not count as handled');
 }
 
+function testReviewNeed(sb){
+  // "Ask for a review" bubble (Ofek 5 Oct): ask the ones not asked; one reminder for a customer asked yesterday or before
+  // who still hasn't left a review (the nightly routine marks the ones who did); nothing for taken / don't ask.
+  const today = '2026-10-06';
+  const j = (x) => Object.assign({ id:'j', invoiceNumber:'2500', date:'2026-10-05' }, x);
+  const sent = (day, n) => ({ status:'sent', sent_at: day + 'T01:00:00Z', ask_count: n });   // 12:00 Sydney that day
+  const N = (job, r, auto) => sb.reviewNeed(job, r, today, !!auto);
+  assertEqual(N(j({}), null), 'ask', 'reviewNeed: never asked → ask');
+  assertEqual(N(j({ reviewTaken:true }), null), null, 'reviewNeed: review taken → nothing');
+  assertEqual(N(j({ reviewDoNotAsk:true }), sent('2026-10-04', 1)), null, "reviewNeed: don't ask → nothing, even when asked before");
+  assertEqual(N(j({ invoiceNumber:'' }), null), null, 'reviewNeed: no invoice number → nothing');
+  assertEqual(N(j({}), { status:'waiting' }), null, 'reviewNeed: waiting to go → nothing');
+  assertEqual(N(j({}), sent('2026-10-06', 1)), null, 'reviewNeed: asked today → check again tomorrow');
+  assertEqual(N(j({}), sent('2026-10-05', 1)), 'again', 'reviewNeed: asked yesterday, no review → ask again');
+  assertEqual(N(j({}), sent('2026-10-05', null)), 'again', 'reviewNeed: older request rows count as asked once');
+  assertEqual(N(j({}), sent('2026-10-05', 2)), null, 'reviewNeed: already asked twice → nothing more');
+  assertEqual(N(j({}), sent('2026-09-21', 1)), null, 'reviewNeed: asked more than 2 weeks ago → no reminder');
+  assertEqual(N(j({}), sent('2026-09-22', 1)), 'again', 'reviewNeed: asked exactly 2 weeks ago → still one reminder');
+  assertEqual(N(j({}), { status:'error' }), 'ask', 'reviewNeed: the request failed → ask');
+  assertEqual(N(j({}), { status:'skipped', reason:'same customer already asked or waiting (6 months)' }), 'ask', 'reviewNeed: by hand (switched off), an old skipped one is still to ask');
+  // Automatic mode (switched on at go-live)
+  assertEqual(N(j({ date:'2026-10-06' }), null, true), null, 'reviewNeed auto: a new job with no request yet is left to the system');
+  assertEqual(N(j({ date:'2026-10-03' }), null, true), 'ask', 'reviewNeed auto: no request 3 days later → the office asks');
+  assertEqual(N(j({}), { status:'skipped', reason:'no customer card in the CRM for this job' }, true), 'ask', "reviewNeed auto: couldn't go (no card) → the office fixes and asks");
+  assertEqual(N(j({}), { status:'skipped', reason:'no mobile or email on the customer card' }, true), 'ask', "reviewNeed auto: couldn't go (no mobile/email) → ask");
+  assertEqual(N(j({}), { status:'skipped', reason:'same customer already asked or waiting (6 months)' }, true), null, 'reviewNeed auto: asked for another job lately → nothing');
+  assertEqual(N(j({}), sent('2026-10-05', 1), true), 'again', 'reviewNeed auto: sent automatically yesterday, no review → ask again');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
@@ -598,6 +629,7 @@ testPayroll(loadSandbox());
 testDashboard(loadSandbox());
 testJobCustomerLink(loadSandbox());
 testSalesAutomations(loadSandbox());
+testReviewNeed(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1,20 +1,22 @@
-// review-requests: a Google review request after every job (Ofek, 29 Sep 2026).
+// review-requests: a Google review request after every job (Ofek, 29 Sep 2026; reworked 2 and 5 Oct).
 //
-// Called every 15 minutes by a small script inside the jobs Google Sheet ("the guys group - מעקב עבודות") with the rows
-// of this week's and last week's tabs; later, jobs from the OPS app feed the same queue. For each new job number it:
-//   1. skips it if the review was already taken, the job is older than yesterday, or the job is already queued;
-//   2. gets the customer's mobile / email / first name from ServiceM8 by job number (the sheet only has a name);
-//   3. skips a customer we already asked in the last 6 months;
-//   4. queues it to go out 2 hours later, between 10:00 and 19:00 Sydney (so a review marked "Taken" in the
-//      meantime still cancels it).
-// Then, while settings.review_requests_enabled is on and it's 10:00–19:00 Sydney, it sends what is due:
-//   - the SMS through the GHL workflow (GHL_REVIEW_WEBHOOK_URL), from the business's Australian number;
-//   - the email is handed to the same Google script, which runs under info@theguyservicegroup.com and sends it from
-//     that mailbox (real sender name, no spam folder). Emails are only handed out to a caller that proves — with a
-//     Google ID token that Google itself verifies — that it is info@. Anyone else gets no customer details back.
+// Called every 15 minutes by the info@ Google script with the recent week tabs of the jobs sheet. Each run:
+//   1. keeps Jobs & Commissions in step with the sheet (syncSheetJobs);
+//   2. when settings.review_requests_auto is on (Ofek 5 Oct: switched on only at go-live), asks every new job from
+//      settings.reviews_from on that hasn't been asked: as soon as the job is in OPS, between 08:00 and 20:00 Sydney,
+//      otherwise at 10:00 the next morning. Skipped: review taken, "don't ask", a customer asked in the last 6 months.
+//      A job it can't ask for (no customer card in the CRM, no mobile or email on the card, unknown job type) is written
+//      down as skipped, and the app puts it in the "Ask for a review" bubble on My Day for the office to fix and ask;
+//   3. sends what is due while settings.review_requests_enabled is on (08:00–20:00 Sydney):
+//      - the SMS through the GHL workflow (GHL_REVIEW_WEBHOOK_URL), from the business's Australian number;
+//      - the email is handed to the same Google script, which runs under info@theguyservicegroup.com and sends it from
+//        that mailbox (real sender name, no spam folder). Emails are only handed out to a caller that proves — with a
+//        Google ID token that Google itself verifies — that it is info@. Anyone else gets no customer details back.
+// The office can also press "Ask for review" on a job, and "Ask again" once for a customer who still hasn't left a review
+// a day later (the app shows those in the bubble; the nightly review routine marks the ones who did).
 //
-// Auth: only the publishable key (the gateway requires it). Nothing from the caller is trusted for contact details —
-// phone and email always come from ServiceM8 — so the worst a forged call can do is queue a real, recent customer once.
+// The customer's mobile, email and first name come from their customer card in the OPS CRM (Ofek 5 Oct), never from
+// the caller. Texts go to mobiles only, never to a number that texted STOP.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -54,15 +56,14 @@ function sydToUtc(day: string, hour: number, minute: number): number {
   }
   return t;
 }
-const SEND_FROM = 10, SEND_UNTIL = 19;   // Sydney hours
-function sendAfter(nowMs: number): number {
-  const t = nowMs + 2 * 3600 * 1000;
-  const p = sydParts(t);
-  if (p.hour < SEND_FROM) return sydToUtc(p.day, SEND_FROM, 0);
-  if (p.hour >= SEND_UNTIL) return sydToUtc(shiftDay(p.day, 1), SEND_FROM, 0);
-  return t;
-}
+// Requests go out between 08:00 and 20:00 Sydney; one made outside those hours goes at 10:00 the next morning.
+const SEND_FROM = 8, SEND_UNTIL = 20, MORNING = 10;
 function inSendWindow(nowMs: number): boolean { const h = sydParts(nowMs).hour; return h >= SEND_FROM && h < SEND_UNTIL; }
+function sendAt(nowMs: number): number {
+  if (inSendWindow(nowMs)) return nowMs;
+  const p = sydParts(nowMs);
+  return sydToUtc(p.hour < SEND_FROM ? p.day : shiftDay(p.day, 1), MORNING, 0);
+}
 
 // ── Which profile the review goes to (the three Google review links Ofek sent on 29 Sep) ──
 const REVIEW = {
@@ -101,15 +102,38 @@ function reviewTaken(v: unknown): boolean { return /taken|yes|done|✓|true/i.te
 // that is already waiting.
 function reviewDoNotAsk(v: unknown): boolean { return /don'?t\s*ask|do\s*not\s*ask|no\s*ask|complain/i.test(String(v || "")); }
 const NO_ASK_REASON = "do not ask (unhappy customer or complaint)";
-// deno-lint-ignore no-explicit-any
-async function officeNoAskInvoices(sb: any): Promise<Set<string>> {
-  try {
-    const { data, error } = await sb.from("jobs").select("invoice_number").eq("review_do_not_ask", true);
-    if (error) return new Set();
-    return new Set((data || []).map((j: any) => String(j.invoice_number ?? "").replace(/\D/g, "")).filter(Boolean));
-  } catch { return new Set(); }
-}
 function isDay(s: unknown): s is string { return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s); }
+const digits = (v: unknown) => String(v ?? "").replace(/\D/g, "");
+
+// ── The customer's details: from their card in the OPS CRM (Ofek, 5 Oct), not from ServiceM8 ──
+// The job's linked card (jobs.contact_id); a job not linked yet uses the one card with exactly the job's customer name.
+// The text goes to a mobile only (a landline can't receive it), never to a number that texted STOP.
+const normMobile = (p: unknown) => { const e = normPhone(p); return /^\+614\d{8}$/.test(e) ? e : ""; };
+// deno-lint-ignore no-explicit-any
+async function contactFromCrm(sb: any, job: any) {
+  // deno-lint-ignore no-explicit-any
+  let c: any = null;
+  if (job.contact_id) { const { data } = await sb.from("contacts").select("id, full_name, phone, email").eq("id", job.contact_id).limit(1); c = data && data[0]; }
+  const name = String(job.customer_name || "").trim();
+  if (!c && name) {
+    const { data } = await sb.from("contacts").select("id, full_name, phone, email").ilike("full_name", name.replace(/[%_\\]/g, "\\$&")).limit(2);
+    if (data && data.length === 1) c = data[0];
+  }
+  if (!c) return null;
+  let phone = normMobile(c.phone);
+  if (phone) { const { data: stop } = await sb.from("sms_opt_outs").select("phone_key").eq("phone_key", phone.slice(-9)).limit(1); if (stop && stop.length) phone = ""; }
+  return { id: c.id, phone, email: cleanEmail(c.email), first: firstNameOf(c.full_name) };
+}
+// Why a job can't be asked, in words (kept on the skipped request; the app shows these in the My Day bubble).
+const SKIP_TEXT: Record<string, string> = {
+  no_card: "no customer card in the CRM for this job",
+  no_contact: "no mobile or email on the customer card",
+  unknown_job_type: "unknown job type, so no review link",
+  asked_recently: "same customer already asked or waiting (6 months)",
+  do_not_ask: NO_ASK_REASON,
+  review_taken: "review taken",
+  no_invoice: "no invoice number",
+};
 
 // ── ServiceM8: job number → the customer's contact details ──
 async function sm8(path: string): Promise<any[]> {
@@ -163,90 +187,135 @@ async function isMailbox(idToken: unknown): Promise<boolean> {
 
 // deno-lint-ignore no-explicit-any
 async function handle(sb: any, rows: any[], nowMs: number) {
-  const todaySyd = sydParts(nowMs).day, yesterday = shiftDay(todaySyd, -1);
-  const out = { queued: 0, skipped: 0, cancelled: 0, sent: 0, errors: 0 };
-  const clean = (Array.isArray(rows) ? rows : []).slice(0, 120)
-    .map((r) => ({ invoice: String(r?.invoice ?? "").replace(/\D/g, ""), date: r?.date, name: String(r?.name ?? "").trim(), jobType: String(r?.job_type ?? "").trim(), technician: String(r?.technician ?? "").trim(), taken: reviewTaken(r?.review), noAsk: reviewDoNotAsk(r?.review) }))
-    .filter((r) => r.invoice && r.name);
-  const officeNoAsk = await officeNoAskInvoices(sb);
-  clean.forEach((r) => { if (officeNoAsk.has(r.invoice)) r.noAsk = true; });
-  const { data: settings } = await sb.from("settings").select("review_requests_enabled, review_requests_auto").limit(1);
-  const enabled = !!(settings && settings[0] && settings[0].review_requests_enabled);
-  // Automatic requests from the sheet (Ofek switched them off on 2 Oct: the office now presses "Ask for review" on the job).
-  const auto = !!(settings && settings[0] && settings[0].review_requests_auto);
-  if (clean.length && auto) {
-    const { data: known, error } = await sb.from("review_requests").select("invoice_number, status").in("invoice_number", clean.map((r) => r.invoice));
-    if (error) throw error;
-    const byInvoice = new Map((known || []).map((k: any) => [k.invoice_number, k.status]));
-    for (const r of clean) {
-      const status = byInvoice.get(r.invoice);
-      if (status) {
-        // Marked "Taken" after it was queued (the tech got the review on site) → don't ask again.
-        // Marked "Don't ask" after it was queued (a complaint came in) → cancel it too.
-        if (status === "waiting" && (r.taken || r.noAsk)) { await sb.from("review_requests").update({ status: "skipped", reason: r.noAsk ? NO_ASK_REASON : "review taken", updated_at: new Date(nowMs).toISOString() }).eq("invoice_number", r.invoice); out.cancelled++; }
-        continue;
-      }
-      const base = { source: "sheet", invoice_number: r.invoice, job_date: isDay(r.date) ? r.date : null, customer_name: r.name, job_type: r.jobType, technician: r.technician };
-      const skip = async (reason: string, extra: Record<string, unknown> = {}) => { await sb.from("review_requests").insert({ ...base, ...extra, status: "skipped", reason }); byInvoice.set(r.invoice, "skipped"); out.skipped++; };
-      if (r.noAsk) { await skip(NO_ASK_REASON); continue; }
-      if (r.taken) { await skip("review taken"); continue; }
-      if (!isDay(r.date) || r.date < yesterday || r.date > todaySyd) { await skip("not a job from today or yesterday"); continue; }
-      const rv = reviewFor(r.jobType);
-      if (!rv) { await skip(`unknown job type "${r.jobType}"`); continue; }
-      if (!SERVICEM8_API_KEY) continue;   // can't look the customer up yet — try again on the next run
-      const c = await contactForJob(r.invoice);
-      if (!c) { await skip("job number not found in ServiceM8"); continue; }
-      if (!c.phone && !c.email) { await skip("no mobile or email in ServiceM8"); continue; }
-      // Asked in the last 6 months, or already waiting to be asked (same mobile or email — e.g. two jobs on one day) → once is enough.
-      const since = new Date(nowMs - 183 * 24 * 3600 * 1000).toISOString();
-      const ors = [c.phone ? `phone.eq.${c.phone}` : "", c.email ? `email.eq.${c.email}` : ""].filter(Boolean).join(",");
-      const { data: recent } = await sb.from("review_requests").select("id").in("status", ["sent", "waiting"]).gte("created_at", since).or(ors).limit(1);
-      const extra = { phone: c.phone || null, email: c.email || null, first_name: c.first || firstNameOf(r.name), review_link: rv.link };
-      if (recent && recent.length) { await skip("same customer already asked or waiting (6 months)", extra); continue; }
-      await sb.from("review_requests").insert({ ...base, ...extra, status: "waiting", send_after: new Date(sendAfter(nowMs)).toISOString() });
-      byInvoice.set(r.invoice, "waiting");
-      out.queued++;
-    }
-  }
-
+  const out = { queued: 0, skipped: 0, sent: 0, errors: 0 };
+  // A "don't ask" note in the sheet's Review column stops a request even before the job sync has marked the job.
+  const sheetNoAsk = new Set((Array.isArray(rows) ? rows : []).slice(0, 200).filter((r) => reviewDoNotAsk(r?.review)).map((r) => digits(r?.invoice)).filter(Boolean));
+  const { data: settings } = await sb.from("settings").select("review_requests_enabled, review_requests_auto, reviews_from").limit(1);
+  const s = (settings && settings[0]) || {};
+  const enabled = !!s.review_requests_enabled, auto = !!s.review_requests_auto;
+  if (enabled && auto) { const a = await autoAsk(sb, nowMs, s.reviews_from, sheetNoAsk); out.queued += a.queued; out.skipped += a.skipped; }
   // Release what's due — only while switched on and during sending hours in Sydney. The SMS goes out here through GHL;
   // the email is picked up by the info@ script (emailsToSend below).
-  if (enabled && inSendWindow(nowMs)) { const r = await releaseDue(sb, nowMs, officeNoAsk); out.sent += r.sent; out.skipped += r.skipped; out.errors += r.errors; }
-  return { ...out, enabled, servicem8: !!SERVICEM8_API_KEY, ghl: !!GHL_REVIEW_WEBHOOK_URL };
+  if (enabled && inSendWindow(nowMs)) { const r = await releaseDue(sb, nowMs, sheetNoAsk); out.sent += r.sent; out.skipped += r.skipped; out.errors += r.errors; }
+  return { ...out, enabled, auto, ghl: !!GHL_REVIEW_WEBHOOK_URL };
 }
-// Sends the waiting requests that are due (or just one, for a request the office made by hand).
+
+// ── One job's request, checked and put in the queue: by hand ("Ask for review", Ofek 2 Oct) or automatically when the
+// job comes in (Ofek 5 Oct). "again" = asked on purpose once more (the reminder a day later, or a customer asked for
+// another job in the last 6 months). ask_count counts the requests that actually went to this customer for this job.
+const JOB_COLS = "id, invoice_number, customer_name, date, job_type, technician, review_taken, review_do_not_ask, contact_id";
 // deno-lint-ignore no-explicit-any
-async function releaseDue(sb: any, nowMs: number, officeNoAsk: Set<string>, onlyId?: string) {
+async function queueRequest(sb: any, job: any, nowMs: number, o: { by: string | null; source: "manual" | "auto"; again: boolean; blocked?: Set<string> }) {
+  const invoice = digits(job.invoice_number);
+  if (!invoice) return { ok: false, reason: "no_invoice" };
+  if (job.review_do_not_ask || (o.blocked && o.blocked.has(invoice))) return { ok: false, reason: "do_not_ask" };
+  if (job.review_taken) return { ok: false, reason: "review_taken" };
+  const { data: existing } = await sb.from("review_requests").select("id, status, sent_at, ask_count").eq("invoice_number", invoice).limit(1);
+  const ex = existing && existing[0];
+  if (ex && (ex.status === "sent" || ex.status === "waiting") && !o.again) return { ok: false, reason: "already_asked", status: ex.status, sent_at: ex.sent_at };
+  const rv = reviewFor(job.job_type);
+  if (!rv) return { ok: false, reason: "unknown_job_type" };
+  const c = await contactFromCrm(sb, job);
+  if (!c) return { ok: false, reason: "no_card" };
+  if (!c.phone && !c.email) return { ok: false, reason: "no_contact" };
+  if (!o.again) {
+    // Asked in the last 6 months, or already waiting to be asked (same mobile or email, e.g. two jobs on one day) → once is enough.
+    const since = new Date(nowMs - 183 * 24 * 3600 * 1000).toISOString();
+    const ors = [c.phone ? `phone.eq.${c.phone}` : "", c.email ? `email.eq.${c.email}` : ""].filter(Boolean).join(",");
+    const { data: recent } = await sb.from("review_requests").select("id, invoice_number").in("status", ["sent", "waiting"]).gte("created_at", since).or(ors).limit(5);
+    // deno-lint-ignore no-explicit-any
+    if ((recent || []).some((x: any) => x.invoice_number !== invoice)) return { ok: false, reason: "asked_recently" };
+  }
+  const stamp = new Date(nowMs).toISOString(), at = sendAt(nowMs);
+  const prevCount = ex ? Number(ex.ask_count) || 1 : 0;
+  const row = {
+    source: o.source, invoice_number: invoice, job_id: job.id, job_date: job.date, customer_name: job.customer_name, job_type: job.job_type, technician: job.technician,
+    phone: c.phone || null, email: c.email || null, first_name: c.first || firstNameOf(job.customer_name), review_link: rv.link,
+    status: "waiting", reason: null, send_after: new Date(at).toISOString(), requested_by: o.by, updated_at: stamp,
+    ask_count: ex && ex.status === "sent" ? prevCount + 1 : Math.max(prevCount, 1),
+  };
+  let id = ex ? ex.id : "";
+  if (ex) await sb.from("review_requests").update({ ...row, sent_at: null, sms_sent_at: null, email_sent_at: null }).eq("id", ex.id);
+  else { const { data: ins } = await sb.from("review_requests").insert(row).select("id").single(); id = ins ? ins.id : ""; }
+  return { ok: true, id, now: at === nowMs, send_after: row.send_after };
+}
+
+// ── Automatic request when a job comes in (Ofek 5 Oct; on only while settings.review_requests_auto is on) ──
+// Jobs from settings.reviews_from (and at most a week old) that have no request yet. One the system can't ask for is
+// written down as skipped with the reason, so it isn't tried again and the office sees it in the My Day bubble.
+// deno-lint-ignore no-explicit-any
+async function autoAsk(sb: any, nowMs: number, fromDay: unknown, sheetNoAsk: Set<string>) {
+  const out = { queued: 0, skipped: 0 };
+  const today = sydParts(nowMs).day, weekAgo = shiftDay(today, -7);
+  if (!isDay(fromDay)) return out;   // never without a start date: old jobs are never asked automatically
+  const since = fromDay > weekAgo ? fromDay : weekAgo;
+  const { data: jobs } = await sb.from("jobs").select(JOB_COLS).gte("date", since).lte("date", today).limit(500);
+  // deno-lint-ignore no-explicit-any
+  const list = (jobs || []).filter((j: any) => digits(j.invoice_number) && !j.review_taken && !j.review_do_not_ask);
+  if (!list.length) return out;
+  // deno-lint-ignore no-explicit-any
+  const { data: known } = await sb.from("review_requests").select("invoice_number").in("invoice_number", list.map((j: any) => digits(j.invoice_number)));
+  // deno-lint-ignore no-explicit-any
+  const have = new Set((known || []).map((k: any) => k.invoice_number));
+  for (const j of list) {
+    const invoice = digits(j.invoice_number);
+    if (have.has(invoice)) continue;
+    have.add(invoice);
+    const q = await queueRequest(sb, j, nowMs, { by: null, source: "auto", again: false, blocked: sheetNoAsk });
+    if (q.ok) {
+      out.queued++;
+      if (q.now && q.id) await releaseDue(sb, nowMs, sheetNoAsk, q.id);
+      continue;
+    }
+    if (q.reason === "already_asked") continue;
+    await sb.from("review_requests").insert({
+      source: "auto", invoice_number: invoice, job_id: j.id, job_date: j.date, customer_name: j.customer_name, job_type: j.job_type, technician: j.technician,
+      status: "skipped", reason: SKIP_TEXT[q.reason as string] || q.reason, updated_at: new Date(nowMs).toISOString(),
+    });
+    out.skipped++;
+  }
+  return out;
+}
+
+// Sends the waiting requests that are due (or just one, right after it was made).
+// deno-lint-ignore no-explicit-any
+async function releaseDue(sb: any, nowMs: number, sheetNoAsk: Set<string>, onlyId?: string) {
   const out = { sent: 0, skipped: 0, errors: 0 };
   const todaySyd = sydParts(nowMs).day;
-  {
-    let q = sb.from("review_requests").select("*").eq("status", "waiting").lte("send_after", new Date(nowMs).toISOString());
-    if (onlyId) q = q.eq("id", onlyId);
-    const { data: due } = await q.limit(20);
-    for (const r of due || []) {
-      const stamp = new Date(nowMs).toISOString();
-      // A request the office made by hand goes whatever the job date; the old automatic ones only for recent jobs.
-      if (r.source !== "manual" && (!r.job_date || r.job_date < shiftDay(todaySyd, -2))) { await sb.from("review_requests").update({ status: "skipped", reason: "too late to ask", updated_at: stamp }).eq("id", r.id); out.skipped++; continue; }
-      if (officeNoAsk.has(String(r.invoice_number ?? "").replace(/\D/g, ""))) { await sb.from("review_requests").update({ status: "skipped", reason: NO_ASK_REASON, updated_at: stamp }).eq("id", r.id); out.skipped++; continue; }
-      const m = buildMessages(r, todaySyd);
-      try {
-        // SMS through GHL (only the phone goes — the email is sent from info@ by the Google script, see below).
-        let smsAt: string | null = null;
-        if (r.phone && GHL_REVIEW_WEBHOOK_URL) {
-          const res = await fetch(GHL_REVIEW_WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-            first_name: r.first_name || "", full_name: r.customer_name || "", phone: r.phone, email: "",
-            technician: firstNameOf(r.technician), job_type: r.job_type, job_number: r.invoice_number, review_link: r.review_link,
-            sms_text: m.sms,
-          }) });
-          if (!res.ok) throw new Error(`GHL ${res.status}`);
-          smsAt = stamp;
-        }
-        await sb.from("review_requests").update({ status: "sent", sent_at: stamp, sms_sent_at: smsAt, updated_at: stamp }).eq("id", r.id);
-        out.sent++;
-      } catch (e) {
-        await sb.from("review_requests").update({ status: "error", reason: String((e as Error).message || e).slice(0, 200), updated_at: stamp }).eq("id", r.id);
-        out.errors++;
+  let q = sb.from("review_requests").select("*").eq("status", "waiting").lte("send_after", new Date(nowMs).toISOString());
+  if (onlyId) q = q.eq("id", onlyId);
+  const { data: due } = await q.limit(20);
+  for (const r of due || []) {
+    const stamp = new Date(nowMs).toISOString();
+    const skip = async (reason: string) => { await sb.from("review_requests").update({ status: "skipped", reason, updated_at: stamp }).eq("id", r.id); out.skipped++; };
+    // Too late to ask: an automatic one for a job more than a week old (the old sheet ones: 2 days). By hand: any time.
+    const oldest = r.source === "auto" ? shiftDay(todaySyd, -7) : shiftDay(todaySyd, -2);
+    if (r.source !== "manual" && (!r.job_date || r.job_date < oldest)) { await skip("too late to ask"); continue; }
+    // Marked "review taken" or "don't ask" while it waited (the tech got the review on site, or a complaint came in).
+    const { data: jj } = r.job_id
+      ? await sb.from("jobs").select("review_taken, review_do_not_ask").eq("id", r.job_id).limit(1)
+      : await sb.from("jobs").select("review_taken, review_do_not_ask").eq("invoice_number", r.invoice_number).limit(1);
+    const job = jj && jj[0];
+    if ((job && job.review_do_not_ask) || sheetNoAsk.has(digits(r.invoice_number))) { await skip(NO_ASK_REASON); continue; }
+    if (job && job.review_taken) { await skip("review taken"); continue; }
+    const m = buildMessages(r, todaySyd);
+    try {
+      // SMS through GHL (only the phone goes — the email is sent from info@ by the Google script, see below).
+      let smsAt: string | null = null;
+      if (r.phone && GHL_REVIEW_WEBHOOK_URL) {
+        const res = await fetch(GHL_REVIEW_WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          first_name: r.first_name || "", full_name: r.customer_name || "", phone: r.phone, email: "",
+          technician: firstNameOf(r.technician), job_type: r.job_type, job_number: r.invoice_number, review_link: r.review_link,
+          sms_text: m.sms,
+        }) });
+        if (!res.ok) throw new Error(`GHL ${res.status}`);
+        smsAt = stamp;
       }
+      await sb.from("review_requests").update({ status: "sent", sent_at: stamp, sms_sent_at: smsAt, first_sent_at: r.first_sent_at || stamp, updated_at: stamp }).eq("id", r.id);
+      out.sent++;
+    } catch (e) {
+      await sb.from("review_requests").update({ status: "error", reason: String((e as Error).message || e).slice(0, 200), updated_at: stamp }).eq("id", r.id);
+      out.errors++;
     }
   }
   return out;
@@ -313,10 +382,12 @@ async function syncSheetJobs(sb: any, rows: any[], nowMs: number) {
     seen.add(j.invoice_number);
     const { data: found } = await sb.from("jobs").select("*").eq("invoice_number", j.invoice_number).limit(1);
     const ex = found && found[0];
+    const noAsk = reviewDoNotAsk(raw?.review);
     if (!ex) {
       const contactId = await linkContactForInvoice(sb, j.invoice_number, j.customer_name);
       const row = {
         ...j, job_type: j.job_type || "Other", contact_id: contactId, date_paid: j.payment_status === "Paid" ? j.date : null, paid_to_technician: "Not Paid",
+        review_do_not_ask: noAsk,
         parts_refund_status: "N/A", cash_confirmed: false, entered_by: "System (sheet sync)", notes: "Imported from the jobs Google Sheet",
         sheet_snapshot: j,
       };
@@ -338,6 +409,9 @@ async function syncSheetJobs(sb: any, rows: any[], nowMs: number) {
       const differs = ex.sheet_snapshot ? JSON.stringify(v) !== JSON.stringify(prev[f]) : JSON.stringify(v) !== JSON.stringify(ex[f]);
       if (differs) patch[f] = v;
     }
+    // "Don't ask" written in the sheet's Review column marks the job too (Ofek 1 Oct). One way only: the sheet never
+    // clears a "don't ask" ticked in the app.
+    if (noAsk && !ex.review_do_not_ask) patch.review_do_not_ask = true;
     if (!ex.sheet_snapshot && !Object.keys(patch).length) { await sb.from("jobs").update({ sheet_snapshot: j }).eq("id", ex.id); out.adopted++; continue; }
     if (!Object.keys(patch).length) { out.unchanged++; continue; }
     if (patch.payment_status === "Paid" && !ex.date_paid) patch.date_paid = today;   // commission counts in the week the customer paid
@@ -348,55 +422,21 @@ async function syncSheetJobs(sb: any, rows: any[], nowMs: number) {
   }
   return out;
 }
-// ── "Ask for review" on a job (Ofek, 2 Oct): the office presses the button on the job in Jobs & Commissions ──
-// Same texts and the same sending as before; it just starts from the button instead of the sheet. Refuses a job marked
-// "don't ask" or with the review already taken, a customer already asked (unless asked again on purpose), and a job with
-// no mobile or email in ServiceM8. Sends at once between 08:00 and 20:00 Sydney, otherwise the next morning at 10:00.
-const MANUAL_FROM = 8, MANUAL_UNTIL = 20;
-function manualSendAt(nowMs: number): number {
-  const p = sydParts(nowMs);
-  if (p.hour >= MANUAL_FROM && p.hour < MANUAL_UNTIL) return nowMs;
-  return sydToUtc(p.hour < MANUAL_FROM ? p.day : shiftDay(p.day, 1), 10, 0);
-}
+// ── "Ask for review" / "Ask again" on a job: the office presses the button (Jobs & Commissions, or the My Day bubble) ──
+// Same checks and texts as the automatic request (queueRequest); sends at once between 08:00 and 20:00 Sydney,
+// otherwise at 10:00 the next morning.
 // deno-lint-ignore no-explicit-any
 async function askForReview(sb: any, jobId: string, by: string, nowMs: number, again = false) {
-  const { data: job } = await sb.from("jobs").select("id, invoice_number, customer_name, date, job_type, technician, review_taken, review_do_not_ask").eq("id", jobId).single();
+  const { data: job } = await sb.from("jobs").select(JOB_COLS).eq("id", jobId).single();
   if (!job) return { ok: false, reason: "job_not_found" };
-  const invoice = String(job.invoice_number ?? "").replace(/\D/g, "");
-  if (!invoice) return { ok: false, reason: "no_invoice" };
-  if (job.review_do_not_ask) return { ok: false, reason: "do_not_ask" };
-  if (job.review_taken) return { ok: false, reason: "review_taken" };
-  const rv = reviewFor(job.job_type);
-  if (!rv) return { ok: false, reason: "unknown_job_type" };
-  const { data: existing } = await sb.from("review_requests").select("id, status, sent_at").eq("invoice_number", invoice).limit(1);
-  const ex = existing && existing[0];
-  if (ex && (ex.status === "sent" || ex.status === "waiting") && !again) return { ok: false, reason: "already_asked", status: ex.status, sent_at: ex.sent_at };
-  if (!SERVICEM8_API_KEY) return { ok: false, reason: "no_servicem8" };
-  const c = await contactForJob(invoice);
-  if (!c) return { ok: false, reason: "not_in_servicem8" };
-  if (!c.phone && !c.email) return { ok: false, reason: "no_contact" };
-  if (!again) {
-    const since = new Date(nowMs - 183 * 24 * 3600 * 1000).toISOString();
-    const ors = [c.phone ? `phone.eq.${c.phone}` : "", c.email ? `email.eq.${c.email}` : ""].filter(Boolean).join(",");
-    const { data: recent } = await sb.from("review_requests").select("id, invoice_number").in("status", ["sent", "waiting"]).gte("created_at", since).or(ors).limit(5);
-    // deno-lint-ignore no-explicit-any
-    if ((recent || []).some((x: any) => x.invoice_number !== invoice)) return { ok: false, reason: "asked_recently" };
-  }
-  const stamp = new Date(nowMs).toISOString();
-  const row = {
-    source: "manual", invoice_number: invoice, job_id: job.id, job_date: job.date, customer_name: job.customer_name, job_type: job.job_type, technician: job.technician,
-    phone: c.phone || null, email: c.email || null, first_name: c.first || firstNameOf(job.customer_name), review_link: rv.link,
-    status: "waiting", reason: null, send_after: new Date(manualSendAt(nowMs)).toISOString(), requested_by: by, updated_at: stamp,
-  };
-  let id = ex ? ex.id : "";
-  if (ex) await sb.from("review_requests").update({ ...row, sent_at: null, sms_sent_at: null, email_sent_at: null }).eq("id", ex.id);
-  else { const { data: ins } = await sb.from("review_requests").insert(row).select("id").single(); id = ins ? ins.id : ""; }
+  const q = await queueRequest(sb, job, nowMs, { by, source: "manual", again });
+  if (!q.ok) return q;
   const { data: settings } = await sb.from("settings").select("review_requests_enabled").limit(1);
   const enabled = !!(settings && settings[0] && settings[0].review_requests_enabled);
-  if (enabled && id && manualSendAt(nowMs) === nowMs) await releaseDue(sb, nowMs, new Set(), id);
-  const { data: after } = await sb.from("review_requests").select("status, sent_at, send_after, reason").eq("invoice_number", invoice).limit(1);
+  if (enabled && q.id && q.now) await releaseDue(sb, nowMs, new Set(), q.id);
+  const { data: after } = await sb.from("review_requests").select("status, sent_at, send_after, reason").eq("id", q.id).limit(1);
   const a = after && after[0];
-  return { ok: !!a && a.status !== "error", status: a ? a.status : "waiting", send_after: row.send_after, reason: a && a.status === "error" ? a.reason : undefined, enabled };
+  return { ok: !!a && a.status !== "error", status: a ? a.status : "waiting", send_after: q.send_after, reason: a && a.status === "error" ? a.reason : undefined, enabled };
 }
 // The signed-in person pressing the button: an owner/manager, or office staff with Jobs access (never a technician).
 // deno-lint-ignore no-explicit-any
