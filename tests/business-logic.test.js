@@ -33,7 +33,7 @@ const DECLS = [
   // CRM / attribution
   'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
-  'commissionEligibleTechnicianNames', 'computeWeek', 'computeMonth',
+  'commissionEligibleTechnicianNames', 'computeWeek',
   // business performance
   'blankPerfBucket', 'addToPerfBucket', 'finalizePerfBucket', 'computeProfitByWeekInRange', 'computeBusinessPerformance',
   'contactHasJob',
@@ -57,6 +57,8 @@ const DECLS = [
   'JOBS_RANGES', 'jobsRangeBounds',
   // equipment & materials paid back with the weekly pay (6 Oct)
   'equipReimbursedFor', 'partsRefundFor', 'partsRefundPatch', 'materialsGst', 'payrollMaterialItems', 'computePayrollMaterials', 'computeGstSummary', 'profitSteps', 'techWeekStats',
+  // Payroll periods (6 Oct)
+  'payrollPeriod', 'techPeriodStats', 'hourlyPeriodStats',
 ];
 
 function extractDecl(source, name){
@@ -129,29 +131,6 @@ function testJobAttributionTags(sb){
   assertEqual(sb.jobAttributionTags({ customerName:'Nobody Here', jobType:'Aircon' }), { airconType:null, metaPlatform:null }, 'jobAttributionTags: no matching contact -> both null');
 }
 
-function testComputeMonth(sb){
-  sb.STATE.data.jobs = [
-    { id:'1', customerName:'Lynette Trotter', jobType:'Aircon', date:'2026-09-05', amount:1000, commissionPercent:20, partsCost:50, paymentStatus:'Paid', technician:'Guy' },
-    { id:'2', customerName:'Split Sam', jobType:'Aircon', date:'2026-09-06', amount:500, commissionPercent:20, partsCost:0, paymentStatus:'Unpaid', technician:'Guy' },
-  ];
-  sb.STATE.data.contacts = [
-    { fullName:'Lynette Trotter', source:'Meta Ads', tags:['Duct System','Instagram'] },
-    { fullName:'Split Sam', source:'Google Ads', tags:['Split System'] },
-  ];
-  sb.STATE.data.employees = [{ name:'Guy', roles:['Technician'] }];
-  const m = sb.computeMonth(sb.STATE.data, '2026-09');
-  // Hand-computed: revenue = 1000+500 = 1500; commission = 200+100 = 300; parts = 50
-  assertEqual(m.revenue, 1500, 'computeMonth: revenue sums job.amount');
-  // Pay model (Sep 2026): commission is taken AFTER the job's expenses. job1: (1000-50)*20% = 190; job2: 500*20% = 100.
-  assertEqual(m.commission, 290, 'computeMonth: commission is 20% of (job.amount - partsCost)');
-  assertEqual(m.parts, 50, 'computeMonth: parts sums job.partsCost');
-  // Duct System (Lynette) = 1000; Split System (Split Sam) = 500; Instagram (Lynette) = 1000; Facebook = 0
-  assertEqual(m.airconTypeRevenue, { 'Split System':500, 'Duct System':1000, Ventilation:0 }, 'computeMonth: airconTypeRevenue splits by tag');
-  assertEqual(m.metaPlatformRevenue, { Facebook:0, Instagram:1000 }, 'computeMonth: metaPlatformRevenue splits by tag');
-  // additive invariant: sub-division revenue never exceeds the parent total
-  const airconSum = Object.values(m.airconTypeRevenue).reduce((s,v)=>s+v,0);
-  if (airconSum > m.revenue) { fail++; console.error(`FAIL: computeMonth additive invariant — airconTypeRevenue sum (${airconSum}) exceeds total revenue (${m.revenue})`); } else pass++;
-}
 
 function testComputeBusinessPerformance(sb){
   sb.STATE.data.contacts = [
@@ -750,8 +729,33 @@ function testDashboardMoneyVisuals(sb){
   assertEqual([st.types.Aircon.count, st.types.Aircon.total, st.types.Chimney.count, st.types.Chimney.total], [2, 700, 1, 500], 'techWeekStats: by job type');
 }
 
+function testPayrollPeriods(sb){
+  // Payroll period (Ofek 6 Oct): week / month / custom, compared with the matching period before (same number of days).
+  const today = '2026-10-06';   // Tuesday
+  const P = ui => { const p = sb.payrollPeriod(ui, today); return [p.start, p.effEnd, p.prevStart, p.prevEnd]; };
+  assertEqual(P({ mode:'week' }), ['2026-10-04','2026-10-06','2026-09-27','2026-09-29'], 'payrollPeriod: this week so far vs the same days of the week before');
+  assertEqual(P({ mode:'week', week:'2026-09-27' }), ['2026-09-27','2026-10-03','2026-09-20','2026-09-26'], 'payrollPeriod: a finished week vs the whole week before');
+  assertEqual(P({ mode:'month' }), ['2026-10-01','2026-10-06','2026-09-01','2026-09-06'], 'payrollPeriod: this month so far vs the same days of last month');
+  assertEqual(P({ mode:'month', month:'2026-09' }), ['2026-09-01','2026-09-30','2026-08-01','2026-08-31'], 'payrollPeriod: a finished month vs the whole month before');
+  assertEqual(P({ mode:'month', month:'2026-03' }), ['2026-03-01','2026-03-31','2026-02-01','2026-02-28'], 'payrollPeriod: March vs all of February, never past its end');
+  assertEqual(P({ mode:'custom', from:'2026-09-01', to:'2026-09-30' }), ['2026-09-01','2026-09-30','2026-08-02','2026-08-31'], 'payrollPeriod: custom 30 days vs the 30 days before');
+  assertEqual(P({ mode:'custom', from:'2026-09-30', to:'2026-09-01' }), ['2026-09-01','2026-09-30','2026-08-02','2026-08-31'], 'payrollPeriod: custom picked backwards still works');
+  sb.STATE.data.employees = [{ name:'Guy', roles:['Technician'], status:'Active', employmentType:'Freelance-commission' }];
+  const data = { jobs: [
+    { technician:'Guy', date:'2026-10-01', amount:400, partsCost:40, commissionPercent:30 },
+    { technician:'Guy', date:'2026-10-01', amount:200, partsCost:0, commissionPercent:30 },
+    { technician:'Guy', date:'2026-10-03', amount:300, partsCost:0, commissionPercent:30 },
+    { technician:'Guy', date:'2026-09-20', amount:999, partsCost:0, commissionPercent:30 },
+  ], salesLogs: [{ person:'Ron', date:'2026-10-02', hours:8, bookingsAircon:5, bookingsChimney:0, bookingsPw:0 }, { person:'Ron', date:'2026-09-02', hours:4, bookingsAircon:0, bookingsChimney:0, bookingsPw:0 }] };
+  const st = sb.techPeriodStats(data, 'Guy', '2026-10-01', '2026-10-06');
+  // revenue 900 over 3 jobs = 300 avg; commission 30% of (360 + 200 + 300) = 258; 2 days; daily (900 − 40) / 2 = 430
+  assertEqual([st.count, st.revenue, st.avgJob, st.commission, st.daysWorked, st.dailyAvg], [3, 900, 300, 258, 2, 430], 'techPeriodStats: jobs, revenue, average job, commission, days, daily average');
+  assertEqual(sb.techPeriodStats(data, 'Guy', '2026-09-01', '2026-09-06').avgJob, null, 'techPeriodStats: no jobs = no average');
+  const h = sb.hourlyPeriodStats(data, 'Ron', '2026-10-01', '2026-10-06');
+  assertEqual([h.hours, h.bookings], [8, 5], 'hourlyPeriodStats: hours and bookings in the range only');
+}
+
 testJobAttributionTags(loadSandbox());
-testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
 testFunnelLossReasonsSpeedToLead(loadSandbox());
 testComputeProfitByWeekInRange(loadSandbox());
@@ -766,6 +770,7 @@ testJobsRange(loadSandbox());
 testMaterialsPayback(loadSandbox());
 testGstSummary(loadSandbox());
 testDashboardMoneyVisuals(loadSandbox());
+testPayrollPeriods(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -243,8 +243,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .wf-row { display:grid; grid-template-columns: minmax(140px, 30%) 1fr 138px; gap:12px; align-items:center; font-size:12.5px; min-height:27px; }
 .wf-row .lbl { color: var(--ink-soft); }
 .wf-plot { position:relative; height:14px; }
-.wf-bar { position:absolute; top:0; height:14px; border-radius:4px; min-width:2px; }
-.wf-zero { position:absolute; top:-7px; bottom:-7px; width:1px; background: var(--line); }
+.wf-bar { position:absolute; top:0; height:14px; border-radius:0 4px 4px 0; min-width:2px; }
 .wf-row .v { text-align:end; font-variant-numeric: tabular-nums; color: var(--ink); white-space:nowrap; }
 .wf-row .v small { display:inline-block; min-width:34px; color: var(--ink-faint); font-size:11px; margin-inline-start:6px; }
 .wf-row.total { border-top:1px solid var(--line); margin-top:8px; padding-top:9px; font-weight:700; }
@@ -272,6 +271,21 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .tbar-row .bar { height:8px; border-radius:4px; background: var(--series-1); min-width:2px; }
 .tbar-row .v { font-variant-numeric: tabular-nums; color: var(--ink-faint); text-align:end; white-space:nowrap; }
 .tbar-row .v b { color: var(--ink); font-weight:600; }
+.period-bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+.period-bar select { width:auto; min-width:210px; }
+.period-bar input[type=date] { width:auto; }
+.seg { display:flex; gap:6px; margin-inline-end:6px; }
+.cmp-legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color: var(--ink-soft); margin:10px 0 4px; }
+.cmp-row { display:grid; grid-template-columns: 120px 1fr 64px; gap:12px; align-items:center; padding:7px 0; border-bottom:1px solid var(--line-soft); }
+.cmp-row:last-child { border-bottom:none; }
+.cmp-row .lbl { font-size:12.5px; }
+.cmp-line { display:grid; grid-template-columns: 1fr 92px; gap:8px; align-items:center; }
+.cmp-line + .cmp-line { margin-top:3px; }
+.cmp-line .bar { height:9px; border-radius:0 4px 4px 0; min-width:2px; }
+.cmp-line .v { font-size:12px; font-variant-numeric: tabular-nums; color: var(--ink); white-space:nowrap; text-align:end; }
+.cmp-line .v.prev { color: var(--ink-faint); }
+.cmp-row .d { text-align:end; white-space:nowrap; }
+.cell-delta { display:block; font-size:11px; line-height:1.2; }
 .mini-tile { background: var(--surface-2); border-radius: var(--radius-sm); padding:10px 12px; }
 .mini-tile .stat-value { font-size:20px; margin-top:4px; animation:none; }
 @media (max-width: 700px) { .wf-row { grid-template-columns: 1fr auto; } .wf-row .wf-plot { grid-column: 1 / -1; order: 3; margin-bottom:4px; } .tbar-row { grid-template-columns: 1fr auto; } .tbar-row .bar-wrap { grid-column: 1 / -1; order: 3; } }
@@ -626,6 +640,39 @@ function profitSteps(np){
   steps.push({ label:'Net profit', from: Math.min(0, run), to: Math.max(0, run), value: run, kind: run >= 0 ? 'net' : 'loss' });
   return { steps, lo: Math.min(0, ...steps.map(st => st.from)), hi: Math.max(0.01, ...steps.map(st => st.to)) };
 }
+// ── Payroll period (Ofek 6 Oct): a week (pay is done week by week), a month, or any custom range, each compared with
+// the matching period just before it: the same number of days, so a week or month still in progress is compared with
+// the same stretch of the one before (1–6 Oct with 1–6 Sep); a finished month with the whole month before.
+function payrollPeriod(ui, today){
+  const mode = ui.mode==='month' || ui.mode==='custom' ? ui.mode : 'week';
+  let start, end, prevStart;
+  if (mode==='week') { const wk = payrollWeekOf(ui.week || today); start = wk.start; end = wk.end; prevStart = shiftDays(start, -7); }
+  else if (mode==='month') { const [y, m] = String(ui.month || today.slice(0, 7)).split('-').map(Number); start = fmtLocal(new Date(y, m - 1, 1)); end = fmtLocal(new Date(y, m, 0)); prevStart = fmtLocal(new Date(y, m - 2, 1)); }
+  else { let a = ui.from || shiftDays(today, -29), b = ui.to || today; if (a > b) [a, b] = [b, a]; start = a; end = b; prevStart = shiftDays(start, -(daysBetween(parseLocalDate(start), parseLocalDate(end)) + 1)); }
+  const effEnd = end > today ? (today < start ? start : today) : end;
+  let prevEnd = shiftDays(prevStart, daysBetween(parseLocalDate(start), parseLocalDate(effEnd)));
+  if (mode==='month') {
+    const pm = parseLocalDate(prevStart), lastPrev = fmtLocal(new Date(pm.getFullYear(), pm.getMonth() + 1, 0));
+    if (prevEnd > lastPrev || effEnd===end) prevEnd = lastPrev;
+  }
+  if (prevEnd >= start) prevEnd = shiftDays(start, -1);
+  return { mode, start, end, effEnd, prevStart, prevEnd };
+}
+// A technician's jobs DONE in a date range (by job date): how many, revenue before GST, the average job, the commission
+// on them, days worked and the daily average (revenue − parts, per day worked).
+function techPeriodStats(data, person, start, end){
+  const jobs = (data.jobs||[]).filter(j => j.technician===person && j.date >= start && j.date <= end);
+  const revenue = round2(jobs.reduce((s,j) => s + (Number(j.amount)||0), 0));
+  const parts = round2(jobs.reduce((s,j) => s + (Number(j.partsCost)||0), 0));
+  const days = new Set(jobs.map(j => j.date)).size;
+  return { jobs, count: jobs.length, revenue, parts, avgJob: jobs.length ? round2(revenue / jobs.length) : null,
+    commission: round2(jobs.reduce((s,j) => s + jobCommissionAmount(j), 0)), daysWorked: days, dailyAvg: days ? round2((revenue - parts) / days) : null };
+}
+// Hourly staff (Ron) over a date range: hours, bookings, pay.
+function hourlyPeriodStats(data, person, start, end){
+  const logs = (data.salesLogs||[]).filter(l => l.person===person && l.date >= start && l.date <= end);
+  return { hours: round2(logs.reduce((s,l) => s + (Number(l.hours)||0), 0)), bookings: logs.reduce((s,l) => s + salesLogBookings(l), 0), pay: round2(logs.reduce((s,l) => s + salesLogPay(l), 0)) };
+}
 // A technician's week (moved from Financial Summary to Payroll, Ofek 6 Oct): the jobs DONE that week (by job date),
 // paid / not paid, the daily average (amount before GST − parts, per day worked) and the job types.
 function techWeekStats(data, person, weekKey){
@@ -878,30 +925,6 @@ function computeWeek(data, weekKey, technicianFilter){
   return { weekKey, jobs, equip, overview, perTech, remainingAfterTech };
 }
 
-function computeMonth(data, monthKey, technicianFilter){
-  const jobs = data.jobs.filter(j => monthOf(j.date).key===monthKey);
-  const equip = data.equipmentSpend.filter(e => monthOf(e.date).key===monthKey);
-  let revenue=0, commission=0, parts=0, equipment=0, paidTotal=0, unpaidTotal=0, paidCount=0, unpaidCount=0;
-  const names = technicianFilter ? [technicianFilter] : commissionEligibleTechnicianNames(data);
-  const perTech = {}; names.forEach(t => perTech[t] = { jobs:0, commission:0 });
-  // Additive revenue breakdown, layered on top of `revenue` above rather than replacing it — see
-  // jobAttributionTags(): only jobs whose linked lead carries a known Split/Duct or Facebook/Instagram
-  // tag land here, everything else still counts once toward the plain `revenue` total, unsplit.
-  const airconTypeRevenue = {}; AIRCON_TYPE_TAGS.forEach(t=>airconTypeRevenue[t]=0);
-  const metaPlatformRevenue = {}; META_PLATFORM_TAGS.forEach(t=>metaPlatformRevenue[t]=0);
-  jobs.forEach(j => {
-    revenue += Number(j.amount)||0; commission += jobCommissionAmount(j); parts += Number(j.partsCost)||0;
-    if (j.paymentStatus==='Paid') { paidTotal += j.amount; paidCount++; } else { unpaidTotal += j.amount; unpaidCount++; }
-    if (perTech[j.technician]) { perTech[j.technician].jobs++; perTech[j.technician].commission += jobCommissionAmount(j); }
-    const attr = jobAttributionTags(j);
-    if (attr.airconType) airconTypeRevenue[attr.airconType] += Number(j.amount)||0;
-    if (attr.metaPlatform) metaPlatformRevenue[attr.metaPlatform] += Number(j.amount)||0;
-  });
-  equip.forEach(e => equipment += Number(e.cost)||0);
-  Object.keys(airconTypeRevenue).forEach(t=>airconTypeRevenue[t]=round2(airconTypeRevenue[t]));
-  Object.keys(metaPlatformRevenue).forEach(t=>metaPlatformRevenue[t]=round2(metaPlatformRevenue[t]));
-  return { monthKey, jobs, revenue: round2(revenue), commission: round2(commission), parts: round2(parts), equipment: round2(equipment), paidTotal: round2(paidTotal), unpaidTotal: round2(unpaidTotal), paidCount, unpaidCount, perTech, net: round2(revenue-commission-parts-equipment), airconTypeRevenue, metaPlatformRevenue };
-}
 
 function allWeekKeys(data, now){
   const keys = new Set();
@@ -956,8 +979,8 @@ function computeReminders(data, now){
 }
 
 /* ── permissions / types (ported from src/lib/types.ts + permissions.ts) ── */
-const ALL_SECTIONS = ['crm','crmOverview','adsGoogle','jobs','finance','payroll','outstanding','reminders','openItems','tasks','reference','closings','settings'];
-const SECTION_ORDER = ['myDay','crm','dashboard','crmOverview','adsGoogle','closings','jobs','finance','payroll','outstanding','reminders','openItems','tasks','reference'];
+const ALL_SECTIONS = ['crm','crmOverview','adsGoogle','jobs','payroll','outstanding','reminders','openItems','tasks','reference','closings','settings'];
+const SECTION_ORDER = ['myDay','crm','dashboard','crmOverview','adsGoogle','closings','jobs','payroll','outstanding','reminders','openItems','tasks','reference'];
 const SECTION_LABEL = { myDay:'My Day', dashboard:'Dashboard', adsGoogle:'Google Ads board', crm:'CRM', crmOverview:'Leads & Marketing', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', reference:'Resources (equipment, employees, suppliers)', closings:'Closings', settings:'Permissions & Settings' };
 const ROLE_LABEL = { owner:'Owner', manager:'Manager', technician:'Technician', va:'Virtual Assistant' };
 function roleLabel(role){ return ROLE_LABEL[role] || role; }
@@ -1952,7 +1975,7 @@ function setupRealtimeSubscriptions(){
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
 }
-let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
+let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let toastMsg = null, toastTimer = null;
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
 let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task modal
@@ -2070,7 +2093,7 @@ function getCurrentProfile(){
   if (VIEW_AS_ID && real && real.role==='owner') { const v = STATE.profiles.find(p => p.id===VIEW_AS_ID); if (v) return v; }
   return real;
 }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; PAGE_FILES = {}; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; PAGE_FILES = {}; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
   toastTimer = setTimeout(()=>{
@@ -2596,7 +2619,7 @@ async function doChangePassword(){
 const NAV = [
   { group:'Sales', items:[ {id:'myDay', label:'My Day', icon:'☀'}, {id:'crm', label:'CRM', icon:'◈'}, {id:'crmOverview', label:'Leads & Marketing', icon:'📊'}, {id:'adsGoogle', label:'Google Ads', icon:'🎯'} ] },
   { group:'Overview', items:[ {id:'dashboard', label:'Dashboard', icon:'🧭'}, {id:'reminders', label:'Reminders', icon:'●'}, {id:'openItems', label:'Open Tasks', icon:'▣'} ] },
-  { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'finance', label:'Financial Summary', icon:'▦'}, {id:'payroll', label:'Payroll', icon:'💵'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
+  { group:'Finance', items:[ {id:'jobs', label:'Jobs & Commissions', icon:'▤'}, {id:'payroll', label:'Payroll', icon:'💵'}, {id:'outstanding', label:'Outstanding', icon:'▧'} ] },
   { group:'System', items:[ {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
 ];
 function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
@@ -5549,107 +5572,6 @@ function job_or_null(rec, field){ return rec ? (rec[field] ?? null) : null; }
 
 /* ── finance ─────────────────────────────────────────────────────────── */
 const JOB_TYPES = ['Aircon','Chimney','Pressure Washing','Other'];
-function renderFinance(profile, data){
-  const weeks = allWeekKeys(data), months = allMonthKeys(data), allTechs = commissionEligibleTechnicianNames(data);
-  const isTech = profile.role==='technician';
-  const techFilter = isTech ? (profile.technicianName||undefined) : undefined;
-  const cardTechs = isTech ? (techFilter?[techFilter]:[]) : allTechs;
-  const weekKey = UI.finance.week || currentWeekKey();
-  const monthKey = UI.finance.month || monthOf(todayStr()).key;
-  const canBulk = profile.role==='owner' || profile.role==='manager';
-  const showNet = canBulk; // net profit includes owners' salaries — owners/managers only
-
-  const body = UI.finance.mode==='weekly' ? renderFinanceWeekly(data, weekKey, weeks, cardTechs, techFilter, canBulk, showNet) : renderFinanceMonthly(data, monthKey, months, cardTechs, showNet);
-  return `
-    <div class="page-head">
-      <div><h1 class="page-title">Financial Summary</h1><div class="page-sub">Weekly and monthly snapshot${isTech?' — your jobs':' by technician and for the whole business'}</div></div>
-      <div style="display:flex;gap:8px">
-        <button class="btn ${UI.finance.mode==='weekly'?'primary':''}" onclick="UI.finance.mode='weekly';render()">Weekly</button>
-        <button class="btn ${UI.finance.mode==='monthly'?'primary':''}" onclick="UI.finance.mode='monthly';render()">Monthly</button>
-      </div>
-    </div>
-    ${isTech ? '' : cashStatusRow()}
-    ${renderLateToPay(data)}
-    ${body}
-  `;
-}
-function renderFinanceWeekly(data, weekKey, weeks, allTechs, techFilter, canBulk, showNet){
-  const w = computeWeek(data, weekKey, techFilter);
-  const chips = weeks.map(k => `<button class="week-chip ${k===weekKey?'active':''}" onclick="UI.finance.week='${k}';render()">${weekOf(k).label}</button>`).join('');
-  let businessOverview = '';
-  if (!techFilter) {
-    const typeChips = JOB_TYPES.map(t => {
-      const items = w.jobs.filter(j=>j.jobType===t); const total = items.reduce((s,j)=>s+j.amount,0);
-      const avg = items.length ? round2(total/items.length) : 0;
-      return `<div class="jobtype-chip"><span>${t}</span><span class="n">${items.length} · ${fmtMoney(avg)} avg · ${fmtMoney(total)}</span></div>`;
-    }).join('');
-    businessOverview = `
-      <div class="section-title">Business Overview <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">jobs done this week · money in = paid jobs, incl. GST · technicians' pay is by the week the customer paid, see Payroll</span></div>
-      <div class="grid-4">
-        <div class="card"><div class="stat-label">Cash</div><div class="stat-value">${drill(fmtMoney(w.overview.cash), 'Paid in cash — jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus==='Paid' && j.paymentMethod==='Cash'))}</div><div class="stat-sub">GST: ${fmtMoney(w.overview.gstCash)}</div></div>
-        <div class="card"><div class="stat-label">Bank Transfer</div><div class="stat-value">${drill(fmtMoney(w.overview.bankTransfer), 'Paid by bank transfer — jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus==='Paid' && j.paymentMethod==='Bank Transfer'))}</div></div>
-        <div class="card"><div class="stat-label">Credit Card</div><div class="stat-value">${drill(fmtMoney(w.overview.creditCard), 'Paid by card — jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus==='Paid' && j.paymentMethod==='Credit Card'))}</div><div class="stat-sub">GST (card+transfer): ${fmtMoney(w.overview.gstOther)}</div></div>
-        <div class="card"><div class="stat-label">After commissions &amp; expenses</div><div class="stat-value">${fmtMoney(w.remainingAfterTech)}</div></div>
-      </div>
-      <div class="grid-3" style="margin-top:12px">
-        <div class="card tight"><div class="stat-label">Jobs Paid / Unpaid</div><div class="stat-value" style="font-size:18px">${drill(w.overview.paidCount, 'Paid jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus==='Paid'))} <span style="color:var(--ink-soft);font-size:13px">/ ${drill(w.overview.unpaidCount, 'Unpaid jobs this week', 'jobs', w.jobs.filter(j=>j.paymentStatus!=='Paid'))}</span></div></div>
-        <div class="card tight"><div class="stat-label">Parts</div><div class="stat-value" style="font-size:18px">${fmtMoney(w.overview.partsTotal)}</div></div>
-        <div class="card tight"><div class="stat-label">Equipment Purchases</div><div class="stat-value" style="font-size:18px">${drill(fmtMoney(w.overview.equipmentTotal), 'Equipment purchases this week', 'equipment', w.equip)}</div></div>
-      </div>
-      ${showNet ? renderNetProfitCard(computeNetProfit(data, weekKey, fmtLocal(weekOf(weekKey).end)), 'Net profit this week') : ''}
-      <div class="section-title">Breakdown by Job Type</div>
-      <div class="grid-3">${typeChips}</div>
-    `;
-  }
-  const techCards = allTechs.length ? allTechs.map(t => {
-    const d = w.perTech[t] || { owed:0,paidThisWeek:0,balanceDue:0, jobTypeBreak:{Aircon:{count:0,total:0},Chimney:{count:0,total:0},'Pressure Washing':{count:0,total:0},Other:{count:0,total:0}}, dailyAvg:null, daysWorked:0, latePaymentTotal:0, paidCount:0, unpaidCount:0, totalJobs:0 };
-    const types = JOB_TYPES.map(jt => { const b=d.jobTypeBreak[jt]; const avg=b.count?round2(b.total/b.count):0; return `<div class="jobtype-chip"><span>${jt}</span><span class="n">${b.count} · avg ${fmtMoney(avg)} · ${fmtMoney(b.total)}</span></div>`; }).join('');
-    return `<div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">${techTag(t)}${canBulk?`<button class="btn small" onclick="openPayrollWeek('${weekKey}')" title="Technicians are paid in Payroll">Pay in Payroll →</button>`:''}</div>
-      <div class="kv"><span>Jobs done this week (paid / unpaid / total)</span><span class="v">${drill(d.paidCount, `${t} — paid jobs this week`, 'jobs', w.jobs.filter(j=>j.technician===t && j.paymentStatus==='Paid'))} / ${drill(d.unpaidCount, `${t} — unpaid jobs this week`, 'jobs', w.jobs.filter(j=>j.technician===t && j.paymentStatus!=='Paid'))} / ${drill(d.totalJobs, `${t} — jobs this week`, 'jobs', w.jobs.filter(j=>j.technician===t))}</span></div>
-      <div class="kv"><span>Daily average (${d.daysWorked} days)</span><span class="v">${d.dailyAvg===null?'—':fmtMoney(d.dailyAvg)}</span></div>
-      <div style="margin:10px 0">${types}</div>
-      <div class="kv"><span>Commission on jobs paid this week</span><span class="v">${drill(fmtMoney(d.commission||0), `${t} — jobs paid this week`, 'jobs', d.paidJobs||[])}</span></div>
-      ${d.latePaymentTotal ? `<div class="kv"><span class="hint">of which from jobs paid late</span><span class="v">${fmtMoney(d.latePaymentTotal)}</span></div>` : ''}
-      ${d.equipOwed ? `<div class="kv"><span>Equipment &amp; materials to pay back</span><span class="v">${fmtMoney(d.equipOwed)}</span></div>` : ''}
-      <div class="kv"><span>Paid in Payroll</span><span class="v">${fmtMoney(d.paidThisWeek)}</span></div>
-      ${d.unpaidJobsCount ? `<div class="kv"><span class="hint">Expected when ${d.unpaidJobsCount} unpaid job${d.unpaidJobsCount===1?' is':'s are'} paid</span><span class="v">${drill(fmtMoney(d.expected), `${t} — jobs not paid yet`, 'jobs', d.unpaidJobs||[])}</span></div>` : ''}
-      <div class="kv total"><span>Balance due</span><span class="v" style="color:${d.balanceDue>0.01?'var(--bad)':'var(--good)'}">${fmtMoney(Math.max(0,d.balanceDue))}</span></div>
-    </div>`;
-  }).join('') : emptyState('No technicians', 'Add technicians on the Employees tab');
-  return `
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${chips}</div>
-    ${businessOverview}
-    <div class="section-title">${techFilter?'Your summary':'Technicians'} <span class="tag">${weekOf(weekKey).label}</span></div>
-    <div class="grid-2">${techCards}</div>
-  `;
-}
-function renderFinanceMonthly(data, monthKey, months, allTechs, showNet){
-  const m = computeMonth(data, monthKey, allTechs.length===1 ? allTechs[0] : undefined);
-  const chips = months.map(k => { const [y,mo]=k.split('-'); return `<button class="week-chip ${k===monthKey?'active':''}" onclick="UI.finance.month='${k}';render()">${MONTHS_FULL[Number(mo)-1]} ${y}</button>`; }).join('');
-  const techCards = allTechs.map(t => { const d = m.perTech[t] || {jobs:0,commission:0}; return `<div class="card tight"><div style="margin-bottom:8px">${techTag(t)}</div><div class="kv"><span>Jobs</span><span class="v">${d.jobs}</span></div><div class="kv total"><span>Commission</span><span class="v">${fmtMoney(d.commission)}</span></div></div>`; }).join('');
-  const airconTypeRevTotal = AIRCON_TYPE_TAGS.reduce((s,t)=>s+m.airconTypeRevenue[t],0);
-  const metaPlatformRevTotal = META_PLATFORM_TAGS.reduce((s,t)=>s+m.metaPlatformRevenue[t],0);
-  const airconTypeRevBars = airconTypeRevTotal ? renderBarGroup(AIRCON_TYPE_TAGS.map(t => ({ label:t, value:m.airconTypeRevenue[t], color:'var(--primary)' }))) : '';
-  const metaPlatformRevBars = metaPlatformRevTotal ? renderBarGroup(META_PLATFORM_TAGS.map(t => ({ label:t, value:m.metaPlatformRevenue[t], color:'var(--accent)' }))) : '';
-  return `
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${chips}</div>
-    <div class="grid-4">
-      <div class="card"><div class="stat-label">Revenue (excl. GST)</div><div class="stat-value">${drill(fmtMoney(m.revenue), 'Jobs this month', 'jobs', m.jobs)}</div><div class="stat-sub">${m.jobs.length} jobs</div></div>
-      <div class="card"><div class="stat-label">Technician Commission</div><div class="stat-value">${fmtMoney(m.commission)}</div></div>
-      <div class="card"><div class="stat-label">Parts + Equipment</div><div class="stat-value">${fmtMoney(m.parts+m.equipment)}</div></div>
-      <div class="card"><div class="stat-label">After commissions &amp; expenses</div><div class="stat-value">${fmtMoney(m.net)}</div></div>
-    </div>
-    ${showNet ? (() => { const [y,mo] = monthKey.split('-').map(Number); return renderNetProfitCard(computeNetProfit(data, `${monthKey}-01`, fmtLocal(new Date(y, mo, 0))), 'Net profit this month'); })() : ''}
-    <div class="grid-3" style="margin-top:12px"><div class="card tight"><div class="stat-label">Paid / Unpaid <span class="hint">(incl. GST)</span></div><div class="stat-value" style="font-size:18px">${fmtMoney(round2(m.jobs.filter(j=>j.paymentStatus==='Paid').reduce((s,j)=>s+jobTotalCollected(j),0)))} <span style="color:var(--ink-soft);font-size:13px">/ ${fmtMoney(round2(m.jobs.filter(j=>j.paymentStatus!=='Paid').reduce((s,j)=>s+jobTotalCollected(j),0)))}</span></div></div></div>
-    ${(airconTypeRevBars || metaPlatformRevBars) ? `<div class="grid-2" style="margin-top:12px">
-      ${airconTypeRevBars ? `<div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Aircon revenue — Split vs Duct</div>${airconTypeRevBars}<div class="hint" style="margin-top:6px">Only counts jobs whose lead has a known type — still part of Revenue above either way, just unsplit when not.</div></div>` : ''}
-      ${metaPlatformRevBars ? `<div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Meta Ads revenue — Facebook vs Instagram</div>${metaPlatformRevBars}<div class="hint" style="margin-top:6px">Only counts jobs whose lead has known ad placement — still part of Revenue above either way, just unsplit when not.</div></div>` : ''}
-    </div>` : ''}
-    <div class="section-title">Commission by Technician</div>
-    <div class="grid-3">${techCards}</div>
-  `;
-}
 
 /* ── business performance (decision-making metrics — separate from the day-to-day Overview/Finance
    pages above, which stay unchanged) ──────────────────────────────────────────────────────────── */
@@ -6534,20 +6456,6 @@ function setPayrollWeek(k){ UI.payroll.week = k; render(); }
 function togglePayrollExpanded(person){ UI.payroll.expanded[person] = !UI.payroll.expanded[person]; render(); }
 function payrollActor(){ return getCurrentProfile()?.fullName || 'Unknown'; }
 function payrollWeekLabel(wk){ return `${fmtDateShort(wk.start)} – ${fmtDateShort(wk.end)}`; }
-function renderPayrollWeekNav(weekKey){
-  const thisWeek = payrollWeekOf(todayStr()).key;
-  const chips = [];
-  for (let i=5; i>=0; i--) {
-    const k = shiftPayrollWeek(thisWeek, -i);
-    chips.push(`<button class="week-chip ${k===weekKey?'active':''}" onclick="setPayrollWeek('${k}')">${payrollWeekLabel(payrollWeekOf(k))}${k===thisWeek?' · this week':''}</button>`);
-  }
-  const olderChip = weekKey < shiftPayrollWeek(thisWeek, -5) ? `<button class="week-chip active">${payrollWeekLabel(payrollWeekOf(weekKey))}</button>` : '';
-  return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
-    <button class="btn small" onclick="setPayrollWeek('${shiftPayrollWeek(weekKey,-1)}')">◀ Older</button>
-    ${olderChip}${chips.join('')}
-    ${weekKey<thisWeek ? `<button class="btn small" onclick="setPayrollWeek('${shiftPayrollWeek(weekKey,1)}')">Newer ▶</button>` : ''}
-  </div>`;
-}
 // A status that was marked paid for a smaller amount than the week now adds up to (a late payment landed
 // after the salary was sent) gets flagged instead of silently hiding the difference.
 function payrollPaidBadge(st, currentTotal){
@@ -6556,10 +6464,103 @@ function payrollPaidBadge(st, currentTotal){
   const diff = round2(currentTotal - paidAmt);
   return pill('good', `Paid ${payMoney(paidAmt)}`) + (Math.abs(diff) > 0.004 ? ' ' + pill('warn', `${diff>0?'+':''}${payMoney(diff)} since`) : '');
 }
+// This period vs the one before, one row per person (dataviz: two thin bars from the left on one scale — this period in
+// the series colour, the period before in the quiet colour; the amounts in ink beside them; the change as ▲ / ▼ %).
+// rows: [{ label, cur, prev }]; opts: { fmt, curLabel, prevLabel }.
+function renderCompareBars(rows, opts){
+  const fmt = opts.fmt || fmtMoney;
+  const max = Math.max(0.01, ...rows.flatMap(r => [Number(r.cur)||0, Number(r.prev)||0]));
+  const line = (v, prev) => `<div class="cmp-line"><div><div class="bar" style="width:${((Number(v)||0) / max * 100).toFixed(1)}%;background:${prev ? 'var(--deemph)' : 'var(--series-1)'}" title="${esc((prev ? opts.prevLabel : opts.curLabel) + ': ' + (v===null ? '—' : fmt(v)))}"></div></div><span class="v${prev ? ' prev' : ''}">${v===null ? '—' : fmt(v)}</span></div>`;
+  return `<div class="cmp-legend"><span><i class="swatch" style="background:var(--series-1)"></i>${esc(opts.curLabel)}</span><span><i class="swatch" style="background:var(--deemph)"></i>${esc(opts.prevLabel)}</span></div>
+    ${rows.map(r => `<div class="cmp-row"><span class="lbl">${r.labelHtml || esc(r.label)}</span><div>${line(r.cur, false)}${line(r.prev, true)}</div><span class="d">${deltaBadge(Number(r.cur)||0, Number(r.prev)||0) || '<span class="hint">—</span>'}</span></div>`).join('')}`;
+}
+const periodText = (a, b) => a===b ? fmtDateShort(a) : `${fmtDateShort(a)} – ${fmtDateShort(b)}`;
+// The two comparison charts (revenue and average job per technician), on the Payroll board for any period.
+function payrollCompareCards(data, techs, pr){
+  const rows = techs.map(t => ({ t, cur: techPeriodStats(data, t, pr.start, pr.effEnd), prev: techPeriodStats(data, t, pr.prevStart, pr.prevEnd) }));
+  const labels = { curLabel: `This period · ${periodText(pr.start, pr.effEnd)}`, prevLabel: `Before · ${periodText(pr.prevStart, pr.prevEnd)}` };
+  return `<div class="grid-2" style="align-items:stretch;margin-bottom:16px">
+    <div class="card stat-card money" style="--stat-accent:var(--series-1)"><div class="stat-label">Revenue by technician <span class="hint">(jobs done, excl. GST)</span></div>
+      ${renderCompareBars(rows.map(r => ({ labelHtml: techTag(r.t), cur: r.cur.revenue, prev: r.prev.revenue })), labels)}</div>
+    <div class="card stat-card money" style="--stat-accent:var(--series-1)"><div class="stat-label">Average job by technician <span class="hint">(excl. GST)</span></div>
+      ${renderCompareBars(rows.map(r => ({ labelHtml: techTag(r.t), cur: r.cur.avgJob, prev: r.prev.avgJob })), labels)}</div>
+  </div>`;
+}
+function setPayrollMode(m){ UI.payroll.mode = m; if (m==='month' && !UI.payroll.month) UI.payroll.month = todayStr().slice(0, 7); render(); }
+function setPayrollMonth(k){ UI.payroll.month = k; render(); }
+function setPayrollRange(which, v){ UI.payroll[which] = v; render(); }
+// Week / Month / Custom, then the week or month as a dropdown (Ofek 6 Oct), and what it is compared with.
+function renderPayrollPeriodNav(withModes){
+  const today = todayStr();
+  const ui = withModes ? UI.payroll : { mode:'week', week: UI.payroll.week };
+  const pr = payrollPeriod(ui, today);
+  const firstJob = (STATE.data.jobs||[]).reduce((m,j) => j.date && j.date < m ? j.date : m, today);
+  const earliest = firstJob < shiftDays(today, -728) ? shiftDays(today, -728) : firstJob;
+  const modes = withModes ? `<div class="seg">${[['week','Week'],['month','Month'],['custom','Custom']].map(([k,l]) => `<button class="week-chip ${pr.mode===k?'active':''}" onclick="setPayrollMode('${k}')">${l}</button>`).join('')}</div>` : '';
+  let ctl = '';
+  if (pr.mode==='week') {
+    const thisWeek = payrollWeekOf(today).key, cur = payrollWeekKeyFromUI(), first = payrollWeekOf(earliest).key, opts = [];
+    for (let k = thisWeek; k >= first; k = shiftPayrollWeek(k, -1)) opts.push(`<option value="${k}" ${k===cur?'selected':''}>${payrollWeekLabel(payrollWeekOf(k))}${k===thisWeek?' · this week':''}</option>`);
+    ctl = `<button class="btn small" onclick="setPayrollWeek('${shiftPayrollWeek(cur,-1)}')" title="The week before">◀</button><select onchange="setPayrollWeek(this.value)" aria-label="Week">${opts.join('')}</select>${cur < thisWeek ? `<button class="btn small" onclick="setPayrollWeek('${shiftPayrollWeek(cur,1)}')" title="The week after">▶</button>` : ''}`;
+  } else if (pr.mode==='month') {
+    const cur = pr.start.slice(0, 7), thisMonth = today.slice(0, 7), opts = [];
+    for (let d = parseLocalDate(thisMonth + '-01'); fmtLocal(d).slice(0, 7) >= earliest.slice(0, 7); d.setMonth(d.getMonth() - 1)) { const k = fmtLocal(d).slice(0, 7); opts.push(`<option value="${k}" ${k===cur?'selected':''}>${MONTHS_FULL[d.getMonth()]} ${d.getFullYear()}${k===thisMonth?' · this month':''}</option>`); }
+    const shift = n => { const d = parseLocalDate(cur + '-01'); d.setMonth(d.getMonth() + n); return fmtLocal(d).slice(0, 7); };
+    ctl = `<button class="btn small" onclick="setPayrollMonth('${shift(-1)}')" title="The month before">◀</button><select onchange="setPayrollMonth(this.value)" aria-label="Month">${opts.join('')}</select>${cur < thisMonth ? `<button class="btn small" onclick="setPayrollMonth('${shift(1)}')" title="The month after">▶</button>` : ''}`;
+  } else {
+    ctl = `<input type="date" value="${esc(pr.start)}" onchange="setPayrollRange('from', this.value)" aria-label="From"><span class="hint">to</span><input type="date" value="${esc(pr.end)}" onchange="setPayrollRange('to', this.value)" aria-label="To">`;
+  }
+  return `<div class="period-bar">${modes}${ctl}<span class="hint">compared with ${periodText(pr.prevStart, pr.prevEnd)}${pr.effEnd < pr.end ? ` (same days, as ${periodText(pr.start, pr.effEnd)} so far)` : ''}</span></div>`;
+}
+// Month or custom range: how each technician did and the hourly staff, each against the period before. Pay itself is
+// marked week by week (Week).
+function renderPayrollPeriodView(data, viewChips){
+  const pr = payrollPeriod(UI.payroll, todayStr());
+  const eligible = commissionEligibleTechnicianNames(data);
+  const techs = [...payrollCommissionPeople(data)];
+  (data.jobs||[]).forEach(j => { if (j.date >= pr.prevStart && j.date <= pr.effEnd && eligible.includes(j.technician) && !techs.includes(j.technician)) techs.push(j.technician); });
+  const rows = techs.map(t => ({ t, cur: techPeriodStats(data, t, pr.start, pr.effEnd), prev: techPeriodStats(data, t, pr.prevStart, pr.prevEnd) }));
+  const sum = (k, which) => round2(rows.reduce((s,r) => s + (Number(r[which][k])||0), 0));
+  const tot = which => { const revenue = sum('revenue', which), count = sum('count', which); return { revenue, count, avgJob: count ? round2(revenue / count) : null, commission: sum('commission', which) }; };
+  const cur = tot('cur'), prev = tot('prev');
+  const tile = (label, value, d, sub) => `<div class="card stat-card money" style="--stat-accent:var(--series-1)"><div class="stat-label">${label}</div><div class="stat-value">${value}${d}</div><div class="stat-sub">${sub}</div></div>`;
+  const cell = (v, p, fmt) => `${v===null ? '—' : fmt(v)}<span class="cell-delta">${deltaBadge(Number(v)||0, Number(p)||0)}</span>`;
+  const money = v => fmtMoney(v), num = v => String(v);
+  const hourly = payrollHourlyPeople(data).map(p => ({ p, cur: hourlyPeriodStats(data, p, pr.start, pr.effEnd), prev: hourlyPeriodStats(data, p, pr.prevStart, pr.prevEnd) }));
+  return `
+    <div class="page-head">
+      <div><h1 class="page-title">Payroll</h1><div class="page-sub">${pr.mode==='month' ? 'The month' : 'This range'} by technician, against the period before · pay is marked week by week (choose Week)</div></div>
+    </div>
+    ${viewChips||''}
+    ${renderPayrollPeriodNav(true)}
+    <div class="grid-4" style="margin-bottom:16px">
+      ${tile('Revenue <span class="hint">(technicians\' jobs, excl. GST)</span>', fmtMoney(cur.revenue), deltaBadge(cur.revenue, prev.revenue), `before: ${fmtMoney(prev.revenue)}`)}
+      ${tile('Jobs done', String(cur.count), deltaBadge(cur.count, prev.count), `before: ${prev.count}`)}
+      ${tile('Average job', cur.avgJob===null ? '—' : fmtMoney(cur.avgJob), deltaBadge(cur.avgJob||0, prev.avgJob||0), `before: ${prev.avgJob===null ? '—' : fmtMoney(prev.avgJob)}`)}
+      ${tile('Commission <span class="hint">(on jobs done)</span>', fmtMoney(cur.commission), deltaBadge(cur.commission, prev.commission), `before: ${fmtMoney(prev.commission)}`)}
+    </div>
+    ${payrollCompareCards(data, techs, pr)}
+    <div class="section-title">Technicians <span class="tag">${periodText(pr.start, pr.effEnd)}</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Jobs</th><th class="num">Revenue (excl. GST)</th><th class="num">Average job</th><th class="num">Commission</th><th class="num">Days worked</th><th class="num">Daily average</th></tr></thead><tbody>
+      ${rows.length ? rows.map(r => `<tr><td>${techTag(r.t)}</td>
+        <td class="num">${drill(r.cur.count, `${r.t} — jobs done ${periodText(pr.start, pr.effEnd)}`, 'jobs', r.cur.jobs)}<span class="cell-delta">${deltaBadge(r.cur.count, r.prev.count)}</span></td>
+        <td class="num">${cell(r.cur.revenue, r.prev.revenue, money)}</td><td class="num">${cell(r.cur.avgJob, r.prev.avgJob, money)}</td>
+        <td class="num">${cell(r.cur.commission, r.prev.commission, money)}</td><td class="num">${cell(r.cur.daysWorked, r.prev.daysWorked, num)}</td>
+        <td class="num">${cell(r.cur.dailyAvg, r.prev.dailyAvg, money)}</td></tr>`).join('') : `<tr><td colspan="7">${emptyState('No technicians')}</td></tr>`}
+    </tbody></table></div>
+    <div class="hint" style="margin-top:6px">By the date of the job. ▲ / ▼ = the change against ${periodText(pr.prevStart, pr.prevEnd)}. Daily average = revenue before GST − parts, per day worked.</div>
+    ${hourly.length ? `<div class="section-title">Hourly staff</div>
+    <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Hours</th><th class="num">Bookings</th><th class="num">Pay</th></tr></thead><tbody>
+      ${hourly.map(h => `<tr><td>${techTag(h.p)}</td><td class="num">${cell(h.cur.hours, h.prev.hours, v => v + 'h')}</td><td class="num">${cell(h.cur.bookings, h.prev.bookings, num)}</td><td class="num">${cell(h.cur.pay, h.prev.pay, money)}</td></tr>`).join('')}
+    </tbody></table></div>` : ''}
+  `;
+}
 // A technician's week at a glance, on the Payroll board and on his own pay page (moved from Financial Summary, Ofek
 // 6 Oct): the jobs done that week (paid / not paid), the daily average, the commission from jobs paid late, the job types.
 function payrollWeekPanel(c, data){
   const st = techWeekStats(data, c.person, c.week.start);
+  const pr = payrollPeriod({ mode:'week', week: c.week.start }, todayStr());
+  const avgNow = techPeriodStats(data, c.person, pr.start, pr.effEnd).avgJob, avgBefore = techPeriodStats(data, c.person, pr.prevStart, pr.prevEnd).avgJob;
   const late = c.lines.filter(l => l.late), lateTotal = round2(late.reduce((s,l) => s + l.commission, 0));
   const maxTotal = Math.max(0.01, ...Object.values(st.types).map(b => b.total));
   // Job types: one series, so one colour for every bar (length carries the amount), largest first.
@@ -6569,9 +6570,11 @@ function payrollWeekPanel(c, data){
   const who = c.person;
   return `<div class="card tight" style="margin-bottom:12px">
     <div class="stat-label" style="margin-bottom:8px">The week at a glance <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">jobs done ${payrollWeekLabel(c.week)}, by the job date</span></div>
-    <div class="grid-3">
+    <div class="grid-4">
       <div class="mini-tile"><div class="stat-label">Jobs done</div><div class="stat-value">${drill(st.totalJobs, `${who} — jobs done this week`, 'jobs', st.jobs)}</div>
         <div class="stat-sub">${drill(st.paidCount, `${who} — jobs done this week, paid`, 'jobs', st.jobs.filter(j => j.paymentStatus==='Paid'))} paid · ${drill(st.unpaidCount, `${who} — jobs done this week, not paid yet`, 'jobs', st.jobs.filter(j => j.paymentStatus!=='Paid'))} not paid yet</div></div>
+      <div class="mini-tile"><div class="stat-label">Average job</div><div class="stat-value">${avgNow===null ? '—' : fmtMoney(avgNow)}${deltaBadge(avgNow||0, avgBefore||0)}</div>
+        <div class="stat-sub">excl. GST · before: ${avgBefore===null ? '—' : fmtMoney(avgBefore)} (${periodText(pr.prevStart, pr.prevEnd)})</div></div>
       <div class="mini-tile"><div class="stat-label">Daily average</div><div class="stat-value">${st.dailyAvg===null ? '—' : fmtMoney(st.dailyAvg)}</div>
         <div class="stat-sub">before GST, after parts · ${st.daysWorked} day${st.daysWorked===1?'':'s'} worked</div></div>
       <div class="mini-tile"><div class="stat-label">From jobs paid late</div><div class="stat-value">${payMoney(lateTotal)}</div>
@@ -6637,6 +6640,7 @@ function renderPayroll(profile, data){
   return renderMyPay(profile, data, profile.technicianName || profile.fullName, false);
 }
 function renderPayrollBoard(profile, data, viewChips){
+  if ((UI.payroll.mode || 'week') !== 'week') return renderPayrollPeriodView(data, viewChips);
   const weekKey = payrollWeekKeyFromUI(); const wk = payrollWeekOf(weekKey);
   const people = payrollCommissionPeople(data);
   // An inactive technician still shows up for a week in which one of their jobs got paid.
@@ -6697,13 +6701,14 @@ function renderPayrollBoard(profile, data, viewChips){
       <div><h1 class="page-title">Payroll</h1><div class="page-sub">Weekly pay, Sunday → Saturday · commission counts in the week the customer paid</div></div>
     </div>
     ${viewChips||''}
-    ${renderPayrollWeekNav(weekKey)}
-    <div class="grid-4">
+    ${renderPayrollPeriodNav(true)}
+    <div class="grid-4" style="margin-bottom:16px">
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Technician commissions</div><div class="stat-value">${payMoney(commTotal)}</div><div class="stat-sub">${comm.reduce((s,c)=>s+c.lines.length,0)} paid jobs this week</div></div>
       <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Hourly staff</div><div class="stat-value">${payMoney(hourlyTotal)}</div><div class="stat-sub">${hourly.map(h=>`${esc(h.person)}: ${h.hours}h · ${h.bookings} bookings`).join(' · ') || '—'}</div></div>
       <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Total payroll this week</div><div class="stat-value">${payMoney(round2(commTotal+matTotal+hourlyTotal))}</div><div class="stat-sub">${matTotal ? `incl. ${payMoney(matTotal)} equipment &amp; materials · ` : ''}${unpaidPeople ? `${unpaidPeople} still to pay` : 'everyone with pay is marked paid'} · owners' fixed salaries not included</div></div>
       <div class="card stat-card" style="--stat-accent:${cashOpen>0?'var(--warn)':'var(--good)'}"><div class="stat-label">Cash still to collect</div><div class="stat-value">${payMoney(cashOpen)}</div><div class="stat-sub">cash is collected before salary is paid</div></div>
     </div>
+    ${payrollCompareCards(data, people, payrollPeriod({ mode:'week', week: weekKey }, todayStr()))}
     <div class="section-title">Technicians <span class="tag">${payrollWeekLabel(wk)}</span></div>
     <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Paid jobs</th><th class="num">Commission</th><th class="num">Equipment &amp; materials</th><th class="num">Total to pay</th><th class="num">Not paid yet</th><th>Cash to collect</th><th>Salary</th><th>Message</th></tr></thead>
       <tbody>${commRows || `<tr><td colspan="9">${emptyState('No technicians', 'Add technicians on the Employees tab')}</td></tr>`}</tbody></table></div>
@@ -6742,7 +6747,7 @@ function renderMyPay(profile, data, person, isPreview){
     const log = (data.salesLogs||[]).find(l => l.person===person && l.date===logDate) || null;
     const p = jsStr(person);
     return `${head}
-      ${renderPayrollWeekNav(weekKey)}
+      ${renderPayrollPeriodNav(false)}
       <div class="grid-4">
         <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Pay this week so far</div><div class="stat-value">${payMoney(h.total)}</div><div class="stat-sub">${h.hours}h × $${presentAmt(PAYROLL_HOURLY_RATE)} + ${payMoney(presentAmt(h.bonuses))} bonuses</div></div>
         <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Bookings this week</div><div class="stat-value">${h.bookings}</div><div class="stat-sub">Aircon ${h.byDivision.Aircon} · Chimney ${h.byDivision.Chimney} · Pressure W. ${h.byDivision['Pressure Washing']}</div></div>
@@ -6771,7 +6776,7 @@ function renderMyPay(profile, data, person, isPreview){
   const c = computePayrollCommission(data, person, weekKey);
   const deducts = commissionDeductsParts(person);
   return `${head}
-    ${renderPayrollWeekNav(weekKey)}
+    ${renderPayrollPeriodNav(false)}
     <div class="grid-4">
       <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Commission this week</div><div class="stat-value">${payMoney(c.total)}</div><div class="stat-sub">${c.lines.length} paid job${c.lines.length===1?'':'s'}${c.lines.some(l=>l.late)?` · ${c.lines.filter(l=>l.late).length} paid late`:''}</div></div>
       <div class="card stat-card" style="--stat-accent:var(--warn)"><div class="stat-label">Not paid yet</div><div class="stat-value">${payMoney(c.expected)}</div><div class="stat-sub">${c.unpaid.length} job${c.unpaid.length===1?'':'s'} · added in the week they're paid</div></div>
@@ -6944,53 +6949,32 @@ function renderTrend(series, opts){
     <div class="trend-axis"><span>${esc(series[0].label)}</span>${opts.middle ? `<span>${esc(series[Math.floor((n-1)/2)].label)}</span>` : ''}<span>${esc(opts.lastLabel || last.label)} · <b style="color:var(--ink)">${fmtMoney(last.revenue)}</b></span></div>
   </div>`;
 }
-// Net profit as steps: revenue, each cost taken off where the running total was (quiet colour, its share of revenue
-// beside the amount), then what is left in the good / bad colour (that one is a state, so status colour is right).
+// Net profit as plain bars from the left (Ofek 6 Oct): revenue, each cost (quiet colour, its share of revenue beside
+// the amount), then what is left in the good / bad colour (a state, so status colour is right). One scale for all rows.
 function renderProfitWaterfall(np, title, valueSuffix){
-  const { steps, lo, hi } = profitSteps(np);
-  const pos = v => (v - lo) / (hi - lo) * 100;
+  const { steps } = profitSteps(np);
   const rev = Number(np.revenue)||0;
+  const scale = Math.max(0.01, ...steps.map(st => Math.abs(st.value)));
   const share = v => rev > 0 ? Math.round(Math.abs(v) / rev * 100) + '%' : '';
   const fill = st => st.kind==='in' ? 'var(--series-1)' : st.kind==='out' ? 'var(--deemph)' : st.kind==='net' ? 'var(--good)' : 'var(--bad)';
-  const zero = lo < 0 ? `<span class="wf-zero" style="left:${pos(0).toFixed(2)}%"></span>` : '';
   const rows = steps.map(st => {
     const end = st.kind==='net' || st.kind==='loss';
     const amount = end ? fmtSignedMoney(st.value) : fmtMoney(st.value);
     const tip = `${st.label}: ${amount}${st.kind!=='in' && rev > 0 ? ` (${share(st.value)} of revenue)` : ''}`;
-    const bar = st.to - st.from > 0 ? `<span class="wf-bar" title="${esc(tip)}" style="left:${pos(st.from).toFixed(2)}%;width:${(pos(st.to) - pos(st.from)).toFixed(2)}%;background:${fill(st)}"></span>` : '';
+    const w = Math.abs(st.value) / scale * 100;
+    const bar = w > 0 ? `<span class="wf-bar" title="${esc(tip)}" style="left:0;width:${w.toFixed(2)}%;background:${fill(st)}"></span>` : '';
     return `<div class="wf-row${end ? ' total' : ''}"><span class="lbl">${st.kind==='out' ? '− ' : end ? '= ' : ''}${esc(st.label)}</span>
-      <div class="wf-plot">${zero}${bar}</div>
+      <div class="wf-plot">${bar}</div>
       <span class="v">${amount}<small>${st.kind!=='in' && rev > 0 ? share(st.value) : ''}</small></span></div>`;
   }).join('');
   return `<div class="card stat-card money" style="--stat-accent:${np.net>=0?'var(--good)':'var(--bad)'}">
     <div class="stat-label" style="display:flex;align-items:center;gap:8px">${esc(title||'Net profit')} ${pill(np.net >= 0 ? 'good' : 'bad', np.net >= 0 ? 'Profit' : 'Loss')}</div>
     <div class="stat-value">${fmtSignedMoney(np.net)}${valueSuffix||''}</div>
-    <div class="stat-sub">from revenue to what's left, step by step · ${np.days ? `${fmtDateShort(np.start)} – ${fmtDateShort(np.end)}` : 'no days elapsed yet'} · % = share of revenue</div>
+    <div class="stat-sub">revenue, what it costs, and what's left · ${np.days ? `${fmtDateShort(np.start)} – ${fmtDateShort(np.end)}` : 'no days elapsed yet'} · % = share of revenue</div>
     <div class="wf">${rows}</div>
   </div>`;
 }
-function renderNetProfitCard(np, title, valueSuffix){
-  const rows = [
-    ['Revenue (excl. GST)', np.revenue, false],
-    ['Technician commissions', np.commission, true],
-    ['Job expenses (parts)', np.parts, true],
-    ['Equipment purchases (excl. GST)', np.equipment||0, true],
-    ['Marketing (Google + Meta ads)', np.marketing, true],
-    ['Hourly staff (Ron: hours + bonuses)', np.hourlyStaff, true],
-    [`Owner salaries (${np.days} day${np.days===1?'':'s'})`, np.owners, true],
-  ];
-  return `<div class="card stat-card" style="--stat-accent:${np.net>=0?'var(--good)':'var(--bad)'};margin-top:12px">
-    <div class="stat-label">${esc(title||'Net profit')}</div>
-    <div class="stat-value">${fmtSignedMoney(np.net)}${valueSuffix||''}</div>
-    <div class="stat-sub">after commissions, expenses, marketing and all salaries · ${np.days ? `${fmtDateShort(np.start)} – ${fmtDateShort(np.end)}` : 'no days elapsed yet'}</div>
-    <div style="margin-top:10px;max-width:520px">
-      ${rows.map(([label, v, minus]) => `<div class="kv"><span>${minus?'− ':''}${esc(label)}</span><span class="v">${fmtMoney(v)}</span></div>`).join('')}
-      <div class="kv total"><span>= Net profit</span><span class="v" style="color:${np.net>=0?'var(--good)':'var(--bad)'}">${fmtSignedMoney(np.net)}</span></div>
-    </div>
-  </div>`;
-}
 
-function openPayrollWeek(weekKey){ UI.tab = 'payroll'; UI.payroll.week = weekKey; render(); }
 
 // Jobs/Tasks store the customer as a plain typed name — there's no structural link to a CRM contact.
 // Most of the time there won't be a match at all (most paid jobs come in through Closings, never
@@ -8984,6 +8968,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
 
   // route guard — mirrors src/lib/permissions.ts + the (app)/layout.tsx guard:
   // never render a section the current profile isn't permitted to view.
+  if (UI.tab==='finance') UI.tab = 'payroll';   // Financial Summary was removed (6 Oct): its technician part lives in Payroll
   if (!UI.tab || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);
   // board guard — a technician may only ever be looking at their OWN personal task board, regardless of
   // what UI.tasks.board was last set to (e.g. left over from another profile in this same browser tab).
@@ -8998,7 +8983,6 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   else if (UI.tab==='crmOverview') content.innerHTML = renderCrmOverview(profile, data);
   else if (UI.tab==='closings') content.innerHTML = renderClosings(profile, data);
   else if (UI.tab==='jobs') content.innerHTML = renderJobs(profile, data);
-  else if (UI.tab==='finance') content.innerHTML = renderFinance(profile, data);
   else if (UI.tab==='adsGoogle') { if (!ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = renderDashGoogle(profile, data, true); }
   else if (UI.tab==='dashboard') { if ((UI.dashboard.view==='google' || UI.dashboard.view==='meta') && !ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = UI.dashboard.view==='google' ? renderDashGoogle(profile, data) : UI.dashboard.view==='meta' ? renderDashMeta(profile, data) : UI.dashboard.view==='leads' ? renderCrmOverview(profile, data) : renderDashboard(profile, data); }
   else if (UI.tab==='payroll') content.innerHTML = renderPayroll(profile, data);
