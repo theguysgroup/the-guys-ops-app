@@ -2641,11 +2641,9 @@ const NAV = [
   { group:'System', items:[ {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
 ];
 function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
-function goTasks(board){ UI.tab = 'tasks'; UI.tasks.board = board; UI.mobileNavOpen = false; render(); }
-function goResources(tab){ UI.tab = 'reference'; UI.reference.tab = tab; UI.mobileNavOpen = false; render(); }
+function goTasks(board){ UI.tab = 'tasks'; if (board) UI.tasks.board = board; UI.mobileNavOpen = false; render(); }
+function goResources(tab){ UI.tab = 'reference'; if (tab) UI.reference.tab = tab; UI.mobileNavOpen = false; render(); }
 function toggleMobileNav(){ UI.mobileNavOpen = !UI.mobileNavOpen; render(); }
-function toggleResourcesGroup(){ UI.resourcesOpen = !UI.resourcesOpen; render(); }
-function toggleTechTasksGroup(){ UI.techTasksOpen = !UI.techTasksOpen; render(); }
 // board model: 'ron' and 'mine' are the two fixed boards; any other string is that technician's
 // own personal board (their name, e.g. 'Guy'). This function is the single source of truth for labels.
 function taskBoardLabel(board){
@@ -2688,40 +2686,14 @@ function renderShell(profile, data){
   // own personal board — never Ron's, never Mine, never another technician's. Owner/Manager/VA instead
   // get Ron's Tasks + My Tasks (the owner's own board) + a collapsible group with every active
   // technician's board listed separately, mirroring the Resources group's pattern.
+  // One "Tasks" item: the page switches between everyone's boards itself (Ron, My Tasks, each technician); a technician
+  // only ever has his own board. One "Resources" item: its tabs are inside the page (Ofek 6 Oct).
   const mgmtItems = [];
   if (canViewSection(profile,'tasks')) {
-    if (profile.role==='technician') {
-      const myBoard = profile.technicianName;
-      if (myBoard) mgmtItems.push(navButtonHtml('tasksMineTech', taskBoardLabel(myBoard), '☑', UI.tab==='tasks' && UI.tasks.board===myBoard, `goTasks('${esc(myBoard)}')`));
-    } else {
-      mgmtItems.push(navButtonHtml('tasksPatrick', "Ron's Tasks", '☐', UI.tab==='tasks' && UI.tasks.board==='ron', "goTasks('ron')"));
-      if (profile.role!=='va') mgmtItems.push(navButtonHtml('tasksMine', 'My Tasks', '☑', UI.tab==='tasks' && UI.tasks.board==='mine', "goTasks('mine')"));
-      const techs = activeTechnicianNames(data);
-      if (techs.length) {
-        const techOpen = !!UI.techTasksOpen;
-        const techSubItems = techs.map(t => navButtonHtml('tasks-'+t, taskBoardLabel(t), '☑', UI.tab==='tasks' && UI.tasks.board===t, `goTasks('${esc(t)}')`)).join('');
-        mgmtItems.push(`<div>
-          <button onclick="toggleTechTasksGroup()" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:9px 10px;border-radius:6px;border:none;background:none;color:var(--sidebar-ink-soft);font-size:13.3px;font-family:'Figtree',sans-serif;font-weight:500;text-align:start">
-            <span style="display:flex;align-items:center;gap:10px"><span style="width:18px;text-align:center;flex:none;font-size:15px">☑</span><span>Technicians</span></span>
-            <span style="font-size:10px;color:var(--sidebar-ink-faint)">${techOpen?'▾':'▸'}</span>
-          </button>
-          ${techOpen ? `<div style="padding-inline-start:16px">${techSubItems}</div>` : ''}
-        </div>`);
-      }
-    }
+    const myBoard = profile.role==='technician' ? profile.technicianName : null;
+    if (profile.role!=='technician' || myBoard) mgmtItems.push(navButtonHtml('tasks', 'Tasks', '☑', UI.tab==='tasks', myBoard ? `goTasks('${esc(myBoard)}')` : 'goTasks()'));
   }
-  if (canViewSection(profile,'reference')) {
-    const open = !!UI.resourcesOpen;
-    const subItems = [['equipment','Equipment'],['employees','Employees'],['suppliers','Suppliers']]
-      .map(([key,label]) => navButtonHtml('res-'+key, label, '▥', UI.tab==='reference' && UI.reference.tab===key, `goResources('${key}')`)).join('');
-    mgmtItems.push(`<div>
-      <button onclick="toggleResourcesGroup()" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:9px 10px;border-radius:6px;border:none;background:none;color:var(--sidebar-ink-soft);font-size:13.3px;font-family:'Figtree',sans-serif;font-weight:500;text-align:start">
-        <span style="display:flex;align-items:center;gap:10px"><span style="width:18px;text-align:center;flex:none;font-size:15px">▥</span><span>Resources</span></span>
-        <span style="font-size:10px;color:var(--sidebar-ink-faint)">${open?'▾':'▸'}</span>
-      </button>
-      ${open ? `<div style="padding-inline-start:16px">${subItems}</div>` : ''}
-    </div>`);
-  }
+  if (canViewSection(profile,'reference')) mgmtItems.push(navButtonHtml('reference', 'Resources', '▥', UI.tab==='reference', 'goResources()'));
   const mgmtHtml = mgmtItems.length ? `<div><div class="nav-group-label">Management</div>${mgmtItems.join('')}</div>` : '';
 
   return `
@@ -6620,6 +6592,7 @@ function payrollInvoiceCard(c, person, weekKey){
       <div class="stat-value" style="font-size:18px">${payMoney(amount)}</div>
       <div class="stat-sub">${sub}</div>
       ${file ? `<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${pill('good', 'Sent ' + fmtDateShort(localDay(at)))}<a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">📄 View</a></div>` : ''}
+      ${kind==='expenses' && c.materials.lines.length ? `<div style="margin-top:10px">${c.materials.lines.map(l => `<div class="split-row" style="grid-template-columns:1fr auto auto"><span>${esc(l.kind==='parts' ? `Parts · job #${l.job.invoiceNumber||'—'}${l.desc ? ' · ' + l.desc : ''}` : l.label)} <span class="hint">${fmtDateShort(l.bought)}</span></span><span class="num">${payMoney(l.amount)}</span><span>${l.receipt ? fileLinkHtml(l.receipt) : '<span class="hint">no receipt</span>'}</span></div>`).join('')}</div>` : ''}
       <div style="margin-top:8px">${fileField(file ? 'Send a new one instead' : 'The invoice', 'inv-' + kind, picked, RECEIPT_TYPES)}</div>
       ${picked ? `<button class="btn primary small" style="margin-top:8px" onclick="sendPayrollInvoice('${kind}','${p}','${weekKey}')">Send ${kind==='salary' ? 'commission' : 'expenses'} invoice</button>` : ''}
     </div>`;
@@ -9134,7 +9107,10 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   if (profile.role==='va' && UI.tasks.board==='mine') UI.tasks.board = 'ron';
 
   const data = filterForProfile(STATE.data, profile);
+  // Every click redraws the whole screen; the menu keeps where it was scrolled to instead of jumping to the top (Ofek 6 Oct).
+  const oldSide = app.querySelector('.sidebar'), sideScroll = oldSide ? oldSide.scrollTop : 0;
   app.innerHTML = renderShell(profile, data);
+  if (sideScroll) { const side = app.querySelector('.sidebar'); if (side) side.scrollTop = sideScroll; }
   const content = document.getElementById('content');
   if (!UI.tab) { content.innerHTML = renderNoAccess(profile); return; }
   if (UI.tab==='crm') content.innerHTML = renderCrm(profile, data);
