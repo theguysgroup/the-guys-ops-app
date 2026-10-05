@@ -5161,7 +5161,7 @@ function openJobModal(jobId){
           <div class="field"><label>Entered By</label><input id="jm-enteredby" value="${esc(job?.enteredBy || currentProfile?.fullName || '')}"></div>
         </div>
         <label class="checkline" style="margin-top:11px"><input type="checkbox" id="jm-review" ${job?.reviewTaken?'checked':''}> Review taken</label>
-        <label class="checkline" style="margin-top:6px"><input type="checkbox" id="jm-noask" ${job?.reviewDoNotAsk?'checked':''}> Don't ask this customer for a Google review <span class="hint" style="font-weight:400">(unhappy customer or complaint, the automatic review request is not sent)</span></label>
+        <label class="checkline" style="margin-top:6px"><input type="checkbox" id="jm-noask" ${job?.reviewDoNotAsk?'checked':''}> Don't ask this customer for a Google review <span class="hint" style="font-weight:400">(unhappy customer or complaint: the Ask for review button is blocked for this job)</span></label>
 
         <div class="modal-section">Job expenses</div>
         <div class="grid-3">
@@ -7325,7 +7325,7 @@ function renderClosings(profile, data){
         <div class="field"><label>Method</label><select id="cf-method" onchange="if(this.value==='Cash') document.getElementById('cf-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.map(m=>`<option value="${m}">${m||'—'}</option>`).join('')}</select></div>
         <div class="field"><label>Parts Cost</label><input type="number" id="cf-partscost" value="0"></div>
         <div class="field"><label>Parts Paid By</label><select id="cf-partsby"><option value="">—</option>${allTechs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}<option value="Business">Business</option></select></div>
-        <div class="field"><label>Google review</label><select id="cf-review"><option value="no">Not taken</option><option value="yes">Taken</option></select><span class="hint">Not taken = the customer gets an automatic review request</span></div>
+        <div class="field"><label>Google review</label><select id="cf-review"><option value="no">Not taken</option><option value="yes">Taken</option></select><span class="hint">Not taken = the job waits in "Ask for a review" on My Day. Nothing is sent until someone presses Ask for review</span></div>
         ${profile.role==='technician' ? '' : `<div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="cf-noask"> Don't ask for a review</label><span class="hint">Unhappy customer or a complaint: no review request</span></div>`}
       </div>
       <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="cf-notes"></textarea></div>
