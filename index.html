@@ -18,6 +18,8 @@
   --accent: #2f5b6e; --accent-soft: #e2edf0;
   --on-primary: #fff8f6;
   --good: #237a52; --good-soft: #dcf0e4; --warn: #96690f; --warn-soft: #f5e8cc; --bad: #b23a22; --bad-soft: #f8ddd2;
+  /* chart series (identity, fixed order; validated for colour-blind separation + contrast) and the quiet mark colour */
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --deemph: #c4bcb0;
   --guy: #c1652e; --dolev: #7a5ca0; --noam: #2f7d6e; --ofek: #3f7f8f;
   --shadow-sm: 0 1px 0 rgba(24,20,15,.06);
   --shadow: 0 1px 0 rgba(24,20,15,.08), 0 1px 2px rgba(24,20,15,.05);
@@ -39,6 +41,7 @@
     --accent: #6fa2b8; --accent-soft: #1c2f37;
     --on-primary: #1c0c0d;
     --good: #5fbf8e; --good-soft: #123321; --warn: #d9a94c; --warn-soft: #2e2410; --bad: #e2755a; --bad-soft: #331c14;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --deemph: #554d46;
     --guy: #e0834a; --dolev: #b092d6; --noam: #5fbfa8; --ofek: #74c3d4;
     --shadow-sm: 0 1px 0 rgba(0,0,0,.35);
     --shadow: 0 1px 0 rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
@@ -54,6 +57,7 @@
   --accent: #6fa2b8; --accent-soft: #1c2f37;
   --on-primary: #1c0c0d;
   --good: #5fbf8e; --good-soft: #123321; --warn: #d9a94c; --warn-soft: #2e2410; --bad: #e2755a; --bad-soft: #331c14;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --deemph: #554d46;
   --guy: #e0834a; --dolev: #b092d6; --noam: #5fbfa8; --ofek: #74c3d4;
   --shadow-sm: 0 1px 0 rgba(0,0,0,.35);
   --shadow: 0 1px 0 rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
@@ -230,24 +234,46 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .file-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .file-chip { display:inline-flex; align-items:center; gap:5px; font-size:12.5px; font-weight:600; color: var(--primary-strong); text-decoration:none; background: var(--primary-soft); padding:5px 10px; border-radius: 99px; }
 .file-hint { font-size:11px; color: var(--ink-faint); }
-.wf-row { display:grid; grid-template-columns: minmax(130px, 34%) 1fr auto; gap:10px; align-items:center; font-size:12.5px; padding:3px 0; }
-.wf-track { position:relative; height:16px; background: var(--surface-3); border-radius:4px; overflow:hidden; }
-.wf-bar { position:absolute; top:0; bottom:0; border-radius:3px; }
-.wf-zero { position:absolute; top:-2px; bottom:-2px; width:1px; background: var(--ink-faint); }
-.wf-row .v { font-family:'Figtree',sans-serif; font-variant-numeric: tabular-nums; text-align:end; min-width:88px; }
-.wf-row.total { border-top:1px solid var(--line); margin-top:6px; padding-top:9px; font-weight:700; }
-.stack-bar { display:flex; height:12px; border-radius:99px; overflow:hidden; background: var(--surface-3); margin-top:10px; }
-.stack-bar > span { display:block; height:100%; }
-.stack-legend { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:8px; font-size:12px; color: var(--ink-soft); }
-.stack-legend i { display:inline-block; width:9px; height:9px; border-radius:3px; margin-inline-end:5px; vertical-align:-1px; }
-.stack-legend b { color: var(--ink); font-weight:600; font-variant-numeric: tabular-nums; }
-.hbar-row { display:grid; grid-template-columns: 130px 1fr auto; gap:10px; align-items:center; font-size:12.5px; padding:4px 0; }
-.hbar-track { height:10px; background: var(--surface-3); border-radius:99px; overflow:hidden; }
-.hbar-track > span { display:block; height:100%; border-radius:99px; }
-.hbar-row .v { font-variant-numeric: tabular-nums; color: var(--ink-soft); text-align:end; }
+/* Money charts (dataviz method): thin marks with 4px rounded ends, a 2px gap between touching segments, values in ink
+   (never in the series colour), status colours only where they mean good / bad, quiet de-emphasis for everything else. */
+.money .stat-value, .mini-tile .stat-value { font-variant-numeric: proportional-nums; }
+.money .xlink, .mini-tile .xlink { color: inherit; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
+.chart-head { font-size:11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing:.07em; font-weight:700; margin-top:18px; }
+.wf { margin-top:14px; }
+.wf-row { display:grid; grid-template-columns: minmax(150px, 34%) 1fr 150px; gap:12px; align-items:center; font-size:12.5px; min-height:27px; }
+.wf-row .lbl { color: var(--ink-soft); }
+.wf-plot { position:relative; height:14px; }
+.wf-bar { position:absolute; top:0; height:14px; border-radius:4px; min-width:2px; }
+.wf-zero { position:absolute; top:-7px; bottom:-7px; width:1px; background: var(--line); }
+.wf-row .v { text-align:end; font-variant-numeric: tabular-nums; color: var(--ink); white-space:nowrap; }
+.wf-row .v small { display:inline-block; min-width:34px; color: var(--ink-faint); font-size:11px; margin-inline-start:6px; }
+.wf-row.total { border-top:1px solid var(--line); margin-top:8px; padding-top:9px; font-weight:700; }
+.wf-row.total .lbl { color: var(--ink); }
+.split { display:flex; gap:2px; height:12px; margin-top:10px; }
+.split > span { height:100%; }
+.split > span:first-child { border-radius:4px 0 0 4px; }
+.split > span:last-child { border-radius:0 4px 4px 0; }
+.split > span:only-child { border-radius:4px; }
+.split-row { display:grid; grid-template-columns: 1fr auto 40px; gap:10px; align-items:center; font-size:12.5px; padding:4px 0; }
+.split-row .num { font-variant-numeric: tabular-nums; text-align:end; color: var(--ink); }
+.split-row .pct { font-variant-numeric: tabular-nums; text-align:end; color: var(--ink-faint); font-size:11.5px; }
+.swatch { display:inline-block; width:10px; height:10px; border-radius:3px; margin-inline-end:8px; vertical-align:-1px; }
+.meter { height:8px; border-radius:99px; background: var(--surface-3); overflow:hidden; margin-top:10px; }
+.meter > span { display:block; height:100%; border-radius:99px; }
+.meter-caption { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; font-size:12px; color: var(--ink-soft); margin-top:6px; }
+.meter-caption b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.trend { position:relative; margin-top:10px; }
+.trend svg { display:block; }
+.trend-dot { position:absolute; width:9px; height:9px; border-radius:50%; background: var(--series-1); box-shadow: 0 0 0 2px var(--surface); transform: translate(-50%, -50%); pointer-events:none; }
+.trend-axis { display:flex; justify-content:space-between; gap:10px; font-size:10.5px; color: var(--ink-faint); margin-top:5px; }
+.kv-detail { display:block; font-size:11.5px; color: var(--ink-faint); font-weight:400; margin-top:2px; }
+.tbar-row { display:grid; grid-template-columns: 130px 1fr auto; gap:12px; align-items:center; font-size:12.5px; padding:4px 0; }
+.tbar-row .bar { height:8px; border-radius:4px; background: var(--series-1); min-width:2px; }
+.tbar-row .v { font-variant-numeric: tabular-nums; color: var(--ink-faint); text-align:end; white-space:nowrap; }
+.tbar-row .v b { color: var(--ink); font-weight:600; }
 .mini-tile { background: var(--surface-2); border-radius: var(--radius-sm); padding:10px 12px; }
 .mini-tile .stat-value { font-size:20px; margin-top:4px; animation:none; }
-@media (max-width: 700px) { .wf-row, .hbar-row { grid-template-columns: 1fr auto; } .wf-row .wf-track, .hbar-row .hbar-track { grid-column: 1 / -1; order: 3; } }
+@media (max-width: 700px) { .wf-row { grid-template-columns: 1fr auto; } .wf-row .wf-plot { grid-column: 1 / -1; order: 3; margin-bottom:4px; } .tbar-row { grid-template-columns: 1fr auto; } .tbar-row .bar-wrap { grid-column: 1 / -1; order: 3; } }
 .file-drop { border:1.5px dashed var(--line); border-radius:10px; padding:8px 10px; min-height:46px; transition: border-color .1s, background .1s; }
 .file-drop.drag { border-color: var(--primary); background: var(--primary-soft); }
 .svc-grid { display:grid; grid-template-columns: repeat(2,1fr); gap:6px 14px; }
@@ -6400,55 +6426,52 @@ function renderDashboard(profile, data){
     <div class="section-title">Money</div>
     <div class="grid-2" style="align-items:stretch">
       ${renderProfitWaterfall(np, 'Net profit', dashDelta(np.net, npPrev.net))}
-      <div class="card stat-card" style="--stat-accent:var(--accent)">
+      <div class="card stat-card money" style="--stat-accent:var(--series-1)">
         <div class="stat-label">Money in <span class="hint">(this period's jobs, incl. GST)</span></div>
         <div class="stat-value">${drill(fmtMoney(paidAmt), 'Paid jobs this period', 'jobs', paidJobs)}</div>
-        <div class="stat-sub">paid · ${paidJobs.length} job${paidJobs.length===1?'':'s'} paid, ${unpaidJobs.length} not paid yet · avg ${perf.avgDaysToPayment===null ? '—' : perf.avgDaysToPayment + ' days'} to get paid</div>
-        <div class="stat-label" style="margin-top:16px">How customers paid</div>
-        ${(() => { const segs = [{ label:'Card', value: pay['Credit Card'], color:'var(--accent)' }, { label:'Transfer', value: pay['Bank Transfer'], color:'var(--primary-teal)' }, { label:'Cash', value: pay.Cash, color:'var(--good)' }, ...(pay.unset ? [{ label:'Method not set', value: pay.unset, color:'var(--ink-faint)' }] : [])]; return stackBar(segs) + stackLegend(segs); })()}
-        <div class="stat-label" style="margin-top:16px">Paid vs still unpaid</div>
-        ${(() => { const segs = [{ label:'Paid', value: round2(paidAmt), color:'var(--good)', html: drill(fmtMoney(paidAmt), 'Paid jobs this period', 'jobs', paidJobs) }, { label:'Still unpaid', value: round2(unpaidAmt), color:'var(--bad)', html: drill(fmtMoney(unpaidAmt), "This period's jobs not paid yet", 'jobs', unpaidJobs) }]; return stackBar(segs) + stackLegend(segs); })()}
+        <div class="stat-sub">paid on ${paidJobs.length} job${paidJobs.length===1?'':'s'} · ${perf.avgDaysToPayment===null ? 'no payment times yet' : `paid in ${perf.avgDaysToPayment} day${perf.avgDaysToPayment===1?'':'s'} on average`}</div>
+        ${(() => { const all = paidAmt + unpaidAmt, pct = all > 0 ? Math.round(paidAmt / all * 100) : 0;
+          return `<div class="chart-head">Paid so far</div>
+          <div class="meter" role="img" aria-label="${pct}% of this period's jobs paid" title="${pct}% paid · ${fmtMoney(unpaidAmt)} still unpaid"><span style="width:${pct}%;background:var(--good)"></span></div>
+          <div class="meter-caption"><span><b>${pct}%</b> paid</span><span>${unpaidJobs.length ? `${drill(fmtMoney(unpaidAmt), "This period's jobs not paid yet", 'jobs', unpaidJobs)} still unpaid · ${unpaidJobs.length} job${unpaidJobs.length===1?'':'s'}` : 'nothing left unpaid ✓'}</span></div>`; })()}
+        ${(() => { const segs = [{ label:'Card', value: round2(pay['Credit Card']), color:'var(--series-1)' }, { label:'Bank transfer', value: round2(pay['Bank Transfer']), color:'var(--series-2)' }, { label:'Cash', value: round2(pay.Cash), color:'var(--series-3)' }, ...(pay.unset ? [{ label:'Method not set', value: round2(pay.unset), color:'var(--deemph)' }] : [])];
+          return `<div class="chart-head">How customers paid</div>${splitBar(segs)}${splitRows(segs)}`; })()}
       </div>
     </div>
     <div class="grid-3" style="align-items:stretch;margin-top:12px">
-      <div class="card stat-card" style="--stat-accent:var(--good)">
+      <div class="card stat-card money" style="--stat-accent:var(--series-3)">
         <div class="stat-label">Gross profit</div>
         <div class="stat-value">${fmtSignedMoney(gross)}</div>
-        <div class="stat-sub">${np.revenue ? Math.round(gross / np.revenue * 100) + '% of revenue · ' : ''}revenue − commissions − job expenses</div>
-        <div class="stat-label" style="margin-top:14px">Per week <span class="hint">(last 12 weeks)</span></div>
-        ${renderSparkline(profitSeries, {color:'var(--good)'}) || emptyState('Not enough weeks yet')}
+        <div class="stat-sub">${np.revenue ? `<b style="color:var(--ink)">${Math.round(gross / np.revenue * 100)}%</b> of revenue · ` : ''}revenue − commissions − job expenses</div>
+        <div class="chart-head">Per week</div>
+        ${renderTrend(profitSeries, { name:'Gross profit per week', lastLabel:'this week so far' }) || '<div class="hint">Not enough weeks yet</div>'}
       </div>
-      <div class="card stat-card" style="--stat-accent:var(--warn)">
-        <div class="stat-label">GST <span class="hint">(this period)</span></div>
+      <div class="card stat-card money" style="--stat-accent:var(--ink-faint)">
+        <div class="stat-label">GST to pay <span class="hint">(this period)</span></div>
         <div class="stat-value">${fmtSignedMoney(gstSum.toPay)}</div>
-        <div class="stat-sub">${gstSum.toPay < 0 ? 'more GST comes back than we collected' : 'to pay, after the GST we get back'}</div>
-        ${(() => { const segs = [{ label:'We get back', value: gstSum.back, color:'var(--good)' }, { label:'To pay', value: Math.max(0, gstSum.toPay), color:'var(--warn)' }]; return stackBar(segs) + stackLegend(segs); })()}
-        <div style="margin-top:10px">
-          <div class="kv"><span>GST collected <span class="hint">(paid jobs)</span></span><span class="v">${fmtMoney(gstSum.collected)}</span></div>
-          <div class="kv"><span class="hint">on cash jobs</span><span class="v hint">${fmtMoney(gstSum.collectedCash)}</span></div>
-          <div class="kv"><span class="hint">on card + transfer</span><span class="v hint">${fmtMoney(gstSum.collectedOther)}</span></div>
-          <div class="kv"><span>− GST we get back</span><span class="v">${fmtMoney(gstSum.back)}</span></div>
-          <div class="kv"><span class="hint">in equipment purchases</span><span class="v hint">${fmtMoney(gstSum.backEquipment)}</span></div>
-          <div class="kv"><span class="hint">in parts for jobs</span><span class="v hint">${fmtMoney(gstSum.backParts)}</span></div>
+        <div class="stat-sub">${gstSum.toPay < 0 ? 'more comes back than we collected' : 'what we collected, minus what comes back'}</div>
+        <div style="margin-top:12px">
+          <div class="kv"><span>GST collected<span class="kv-detail">cash ${fmtMoney(gstSum.collectedCash)} · card + transfer ${fmtMoney(gstSum.collectedOther)}</span></span><span class="v">${fmtMoney(gstSum.collected)}</span></div>
+          <div class="kv"><span>− GST we get back<span class="kv-detail">equipment ${fmtMoney(gstSum.backEquipment)} · parts on jobs ${fmtMoney(gstSum.backParts)}</span></span><span class="v">${fmtMoney(gstSum.back)}</span></div>
           <div class="kv total"><span>= GST to pay</span><span class="v">${fmtSignedMoney(gstSum.toPay)}</span></div>
         </div>
-        <div class="stat-sub" style="margin-top:6px">Google and Meta ads are not in this yet: their spend comes in without GST</div>
+        <div class="hint" style="margin-top:8px">Google and Meta ads aren't counted yet: their spend comes in without GST.</div>
       </div>
-      <div class="card stat-card" style="--stat-accent:var(--primary)">
+      <div class="card stat-card money" style="--stat-accent:var(--series-2)">
         <div class="stat-label">Equipment purchases</div>
         <div class="stat-value">${drill(fmtMoney(eqTotal), 'Equipment purchases this period', 'equipment', eqList)}</div>
-        <div class="stat-sub">bought this period, incl. GST · ${eqList.length} purchase${eqList.length===1?'':'s'} · off net profit without the GST</div>
-        ${(() => { const segs = [{ label:'By the business', value: eqBiz, color:'var(--accent)' }, { label:'By technicians', value: eqTech, color:'var(--primary)' }]; return stackBar(segs) + stackLegend(segs); })()}
-        <div style="margin-top:10px">
-          ${eqWaiting ? `<div class="kv"><span>Still to pay back <span class="hint">(with the weekly pay)</span></span><span class="v" style="color:var(--warn)">${fmtMoney(eqWaiting)}</span></div>` : ''}
-          <div class="kv"><span>GST in it <span class="hint">(claimed back)</span></span><span class="v">${fmtMoney(materialsGst(eqTotal))}</span></div>
-        </div>
+        <div class="stat-sub">bought this period, incl. GST · comes off net profit without the GST</div>
+        ${eqList.length ? (() => { const segs = [{ label:'Paid by the business', value: eqBiz, color:'var(--series-1)' }, { label:'Paid by technicians', value: eqTech, color:'var(--series-2)' }];
+          return `<div class="chart-head">Who paid</div>${splitBar(segs)}${splitRows(segs)}
+          <div style="margin-top:8px">${eqWaiting ? `<div class="kv"><span>Still to pay back <span class="hint">(with the weekly pay)</span></span><span class="v">${pill('warn', fmtMoney(eqWaiting))}</span></div>` : ''}
+          <div class="kv"><span>GST in it <span class="hint">(comes back)</span></span><span class="v">${fmtMoney(materialsGst(eqTotal))}</span></div></div>`; })()
+          : '<div class="hint" style="margin-top:14px">No equipment bought this period.</div>'}
       </div>
     </div>
-    <div class="card stat-card" style="--stat-accent:var(--primary-teal);margin-top:12px">
+    <div class="card stat-card money" style="--stat-accent:var(--series-1);margin-top:12px">
       <div class="stat-label">Revenue per week <span class="hint">(last 12 weeks, not the period above)</span></div>
-      ${renderSparkline(revSeries, {color:'var(--primary-teal)'}) || emptyState('Not enough weeks yet')}
-      <div class="stat-sub" style="margin-top:6px">Last full week ${lastFull ? `${esc(lastFull.label)}: <b>${fmtMoney(lastFull.revenue)}</b>` : '—'}</div>
+      ${renderTrend(revSeries, { name:'Revenue per week', height:84, color:'var(--series-1)', middle:true, lastLabel:'this week so far' }) || '<div class="hint">Not enough weeks yet</div>'}
+      <div class="stat-sub" style="margin-top:8px">Last full week ${lastFull ? `${esc(lastFull.label)}: <b style="color:var(--ink)">${fmtMoney(lastFull.revenue)}</b>` : '—'}</div>
     </div>
     <div style="margin-top:12px">${cashStatusRow()}</div>
 
@@ -6538,9 +6561,10 @@ function payrollWeekPanel(c, data){
   const st = techWeekStats(data, c.person, c.week.start);
   const late = c.lines.filter(l => l.late), lateTotal = round2(late.reduce((s,l) => s + l.commission, 0));
   const maxTotal = Math.max(0.01, ...Object.values(st.types).map(b => b.total));
-  const types = Object.entries(st.types).filter(([, b]) => b.count).map(([t, b]) => `<div class="hbar-row"><span>${esc(t)}</span>
-    <div class="hbar-track"><span style="width:${Math.max(3, b.total / maxTotal * 100).toFixed(1)}%;background:var(--accent)"></span></div>
-    <span class="v">${b.count} job${b.count===1?'':'s'} · avg ${fmtMoney(round2(b.total / b.count))} · <b style="color:var(--ink)">${fmtMoney(b.total)}</b></span></div>`).join('');
+  // Job types: one series, so one colour for every bar (length carries the amount), largest first.
+  const types = Object.entries(st.types).filter(([, b]) => b.count).sort((a, b) => b[1].total - a[1].total).map(([t, b]) => `<div class="tbar-row"><span>${esc(t)}</span>
+    <div class="bar-wrap"><div class="bar" style="width:${(b.total / maxTotal * 100).toFixed(1)}%" title="${esc(t)}: ${b.count} job${b.count===1?'':'s'}, ${fmtMoney(b.total)}"></div></div>
+    <span class="v">${b.count} job${b.count===1?'':'s'} · avg ${fmtMoney(round2(b.total / b.count))} · <b>${fmtMoney(b.total)}</b></span></div>`).join('');
   const who = c.person;
   return `<div class="card tight" style="margin-bottom:12px">
     <div class="stat-label" style="margin-bottom:8px">The week at a glance <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">jobs done ${payrollWeekLabel(c.week)}, by the job date</span></div>
@@ -6552,7 +6576,7 @@ function payrollWeekPanel(c, data){
       <div class="mini-tile"><div class="stat-label">From jobs paid late</div><div class="stat-value">${payMoney(lateTotal)}</div>
         <div class="stat-sub">${late.length ? `of this week's commission · ${late.length} job${late.length===1?'':'s'} from an earlier week` : 'no late payments this week'}</div></div>
     </div>
-    <div style="margin-top:10px">${types || '<div class="hint">No jobs done this week.</div>'}</div>
+    ${types ? `<div class="chart-head" style="margin-top:14px">By job type</div><div style="margin-top:4px">${types}</div>` : '<div class="hint" style="margin-top:10px">No jobs done this week.</div>'}
   </div>`;
 }
 function payrollMaterialsTable(c){
@@ -6880,34 +6904,68 @@ async function copyPayMessage(kind, person){
 }
 
 function fmtSignedMoney(n){ return n < 0 ? '−' + fmtMoney(-n) : fmtMoney(n); }
-// ── Dashboard money visuals (Ofek 6 Oct) ──
-// A bar split by share (how customers paid, paid vs unpaid…) and its legend. Segment: { label, value, color, html? }.
-function stackBar(segs){
-  const total = segs.reduce((s,x) => s + Math.max(0, Number(x.value)||0), 0);
-  if (!(total > 0)) return '<div class="stack-bar"></div>';
-  return `<div class="stack-bar" role="img" aria-label="${esc(segs.map(x => `${x.label}: ${fmtMoney(x.value)}`).join(', '))}">${segs.filter(x => x.value > 0).map(x => `<span style="width:${(x.value/total*100).toFixed(2)}%;background:${x.color}" title="${esc(x.label)}: ${fmtMoney(x.value)}"></span>`).join('')}</div>`;
+// ── Dashboard money visuals (Ofek 6 Oct; built on the dataviz method) ──
+// Part-to-whole bar: one segment per category in a fixed colour, a 2px gap between segments, its value on hover; the
+// rows under it name each colour with its amount and share, so nothing depends on colour or hover alone.
+// Segment: { label, value, color, html? (the amount, e.g. a link to the list) }.
+function splitBar(segs){
+  const live = segs.filter(x => (Number(x.value)||0) > 0), total = live.reduce((s,x) => s + Number(x.value), 0);
+  if (!(total > 0)) return '';
+  return `<div class="split" role="img" aria-label="${esc(live.map(x => `${x.label} ${fmtMoney(x.value)}`).join(', '))}">${live.map(x => `<span style="flex:${Number(x.value)} 1 0;background:${x.color}" title="${esc(x.label)}: ${fmtMoney(x.value)} (${Math.round(x.value / total * 100)}%)"></span>`).join('')}</div>`;
 }
-function stackLegend(segs){
+function splitRows(segs){
   const total = segs.reduce((s,x) => s + Math.max(0, Number(x.value)||0), 0);
-  return `<div class="stack-legend">${segs.map(x => `<span><i style="background:${x.color}"></i>${esc(x.label)} <b>${x.html || fmtMoney(x.value)}</b>${total > 0 ? ` · ${Math.round(Math.max(0, x.value)/total*100)}%` : ''}</span>`).join('')}</div>`;
+  return `<div style="margin-top:8px">${segs.map(x => `<div class="split-row"><span><i class="swatch" style="background:${x.color}"></i>${esc(x.label)}</span><span class="num">${x.html || fmtMoney(x.value)}</span><span class="pct">${total > 0 ? Math.round(Math.max(0, x.value) / total * 100) + '%' : '—'}</span></div>`).join('')}</div>`;
 }
-// Net profit as steps: revenue, then each cost taken off where the running total was, then what is left.
+// A weekly line for a stat tile: 2px line in the quiet colour with a ~10% wash, the latest week in the accent with a
+// surface ring, hover a week for its amount, first and last week named under it. series: [{ label, revenue }].
+function renderTrend(series, opts){
+  opts = opts || {};
+  const n = (series||[]).length; if (n < 2) return '';
+  const w = 600, h = opts.height || 56, pad = 7;
+  const vals = series.map(x => Number(x.revenue)||0);
+  const max = Math.max(...vals, 0), min = Math.min(...vals, 0), span = (max - min) || 1;
+  const X = i => i / (n - 1) * w, Y = v => pad + (1 - (v - min) / span) * (h - pad * 2);
+  const line = vals.map((v,i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+  const base = Y(0).toFixed(1);
+  const color = opts.color || 'var(--ink-faint)';
+  const step = w / (n - 1);
+  const hits = series.map((x,i) => `<rect x="${Math.max(0, X(i) - step/2).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${h}" fill="transparent"><title>${esc(x.label)}: ${fmtMoney(x.revenue)}</title></rect>`).join('');
+  const last = series[n-1];
+  return `<div class="trend">
+    <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" role="img" aria-label="${esc((opts.name||'Per week') + ': ' + series.map(x => `${x.label} ${fmtMoney(x.revenue)}`).join(', '))}">
+      ${min < 0 ? `<line x1="0" x2="${w}" y1="${base}" y2="${base}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"></line>` : ''}
+      <path d="${line} L${w},${base} L0,${base} Z" fill="${color}" opacity=".1"></path>
+      <path d="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+      ${hits}
+    </svg>
+    <span class="trend-dot" style="left:100%;top:${(Y(vals[n-1]) / h * 100).toFixed(1)}%"></span>
+    <div class="trend-axis"><span>${esc(series[0].label)}</span>${opts.middle ? `<span>${esc(series[Math.floor((n-1)/2)].label)}</span>` : ''}<span>${esc(opts.lastLabel || last.label)} · <b style="color:var(--ink)">${fmtMoney(last.revenue)}</b></span></div>
+  </div>`;
+}
+// Net profit as steps: revenue, each cost taken off where the running total was (quiet colour, its share of revenue
+// beside the amount), then what is left in the good / bad colour (that one is a state, so status colour is right).
 function renderProfitWaterfall(np, title, valueSuffix){
   const { steps, lo, hi } = profitSteps(np);
   const pos = v => (v - lo) / (hi - lo) * 100;
-  const color = st => st.kind==='in' ? 'var(--accent)' : st.kind==='out' ? 'color-mix(in srgb, var(--bad) 72%, transparent)' : st.kind==='net' ? 'var(--good)' : 'var(--bad)';
+  const rev = Number(np.revenue)||0;
+  const share = v => rev > 0 ? Math.round(Math.abs(v) / rev * 100) + '%' : '';
+  const fill = st => st.kind==='in' ? 'var(--series-1)' : st.kind==='out' ? 'var(--deemph)' : st.kind==='net' ? 'var(--good)' : 'var(--bad)';
   const zero = lo < 0 ? `<span class="wf-zero" style="left:${pos(0).toFixed(2)}%"></span>` : '';
   const rows = steps.map(st => {
     const end = st.kind==='net' || st.kind==='loss';
-    return `<div class="wf-row${end ? ' total' : ''}"><span>${st.kind==='out' ? '− ' : end ? '= ' : ''}${esc(st.label)}</span>
-      <div class="wf-track">${zero}<span class="wf-bar" style="left:${pos(st.from).toFixed(2)}%;width:${Math.max(0.6, pos(st.to) - pos(st.from)).toFixed(2)}%;background:${color(st)}"></span></div>
-      <span class="v"${end ? ` style="color:${st.kind==='net' ? 'var(--good)' : 'var(--bad)'}"` : ''}>${end ? fmtSignedMoney(st.value) : fmtMoney(st.value)}</span></div>`;
+    const amount = end ? fmtSignedMoney(st.value) : fmtMoney(st.value);
+    const tip = `${st.label}: ${amount}${st.kind!=='in' && rev > 0 ? ` (${share(st.value)} of revenue)` : ''}`;
+    const bar = st.to - st.from > 0 ? `<span class="wf-bar" title="${esc(tip)}" style="left:${pos(st.from).toFixed(2)}%;width:${(pos(st.to) - pos(st.from)).toFixed(2)}%;background:${fill(st)}"></span>` : '';
+    return `<div class="wf-row${end ? ' total' : ''}"><span class="lbl">${st.kind==='out' ? '− ' : end ? '= ' : ''}${esc(st.label)}</span>
+      <div class="wf-plot">${zero}${bar}</div>
+      <span class="v">${amount}<small>${st.kind!=='in' && rev > 0 ? share(st.value) : ''}</small></span></div>`;
   }).join('');
-  return `<div class="card stat-card" style="--stat-accent:${np.net>=0?'var(--good)':'var(--bad)'}">
-    <div class="stat-label">${esc(title||'Net profit')}</div>
+  return `<div class="card stat-card money" style="--stat-accent:${np.net>=0?'var(--good)':'var(--bad)'}">
+    <div class="stat-label" style="display:flex;align-items:center;gap:8px">${esc(title||'Net profit')} ${pill(np.net >= 0 ? 'good' : 'bad', np.net >= 0 ? 'Profit' : 'Loss')}</div>
     <div class="stat-value">${fmtSignedMoney(np.net)}${valueSuffix||''}</div>
-    <div class="stat-sub">revenue down to profit, step by step · ${np.days ? `${fmtDateShort(np.start)} – ${fmtDateShort(np.end)}` : 'no days elapsed yet'}</div>
-    <div style="margin-top:12px">${rows}</div>
+    <div class="stat-sub">from revenue to what's left, step by step · ${np.days ? `${fmtDateShort(np.start)} – ${fmtDateShort(np.end)}` : 'no days elapsed yet'} · % = share of revenue</div>
+    <div class="wf">${rows}</div>
   </div>`;
 }
 function renderNetProfitCard(np, title, valueSuffix){
