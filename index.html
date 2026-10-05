@@ -6398,7 +6398,7 @@ function renderDashboard(profile, data){
     </div>
 
     <div class="section-title">Money</div>
-    <div class="grid-2" style="align-items:start">
+    <div class="grid-2" style="align-items:stretch">
       ${renderProfitWaterfall(np, 'Net profit', dashDelta(np.net, npPrev.net))}
       <div class="card stat-card" style="--stat-accent:var(--accent)">
         <div class="stat-label">Money in <span class="hint">(this period's jobs, incl. GST)</span></div>
@@ -6410,7 +6410,7 @@ function renderDashboard(profile, data){
         ${(() => { const segs = [{ label:'Paid', value: round2(paidAmt), color:'var(--good)', html: drill(fmtMoney(paidAmt), 'Paid jobs this period', 'jobs', paidJobs) }, { label:'Still unpaid', value: round2(unpaidAmt), color:'var(--bad)', html: drill(fmtMoney(unpaidAmt), "This period's jobs not paid yet", 'jobs', unpaidJobs) }]; return stackBar(segs) + stackLegend(segs); })()}
       </div>
     </div>
-    <div class="grid-3" style="align-items:start;margin-top:12px">
+    <div class="grid-3" style="align-items:stretch;margin-top:12px">
       <div class="card stat-card" style="--stat-accent:var(--good)">
         <div class="stat-label">Gross profit</div>
         <div class="stat-value">${fmtSignedMoney(gross)}</div>
@@ -6435,9 +6435,9 @@ function renderDashboard(profile, data){
         <div class="stat-sub" style="margin-top:6px">Google and Meta ads are not in this yet: their spend comes in without GST</div>
       </div>
       <div class="card stat-card" style="--stat-accent:var(--primary)">
-        <div class="stat-label">Equipment purchases <span class="hint">(bought this period, incl. GST)</span></div>
+        <div class="stat-label">Equipment purchases</div>
         <div class="stat-value">${drill(fmtMoney(eqTotal), 'Equipment purchases this period', 'equipment', eqList)}</div>
-        <div class="stat-sub">${eqList.length} purchase${eqList.length===1?'':'s'} · comes off net profit without the GST</div>
+        <div class="stat-sub">bought this period, incl. GST · ${eqList.length} purchase${eqList.length===1?'':'s'} · off net profit without the GST</div>
         ${(() => { const segs = [{ label:'By the business', value: eqBiz, color:'var(--accent)' }, { label:'By technicians', value: eqTech, color:'var(--primary)' }]; return stackBar(segs) + stackLegend(segs); })()}
         <div style="margin-top:10px">
           ${eqWaiting ? `<div class="kv"><span>Still to pay back <span class="hint">(with the weekly pay)</span></span><span class="v" style="color:var(--warn)">${fmtMoney(eqWaiting)}</span></div>` : ''}
