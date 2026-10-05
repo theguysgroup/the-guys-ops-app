@@ -56,7 +56,7 @@ const DECLS = [
   // Jobs & Commissions period (6 Oct)
   'JOBS_RANGES', 'jobsRangeBounds',
   // equipment & materials paid back with the weekly pay (6 Oct)
-  'equipReimbursedFor', 'partsRefundFor', 'partsRefundPatch', 'materialsGst', 'payrollMaterialItems', 'computePayrollMaterials',
+  'equipReimbursedFor', 'partsRefundFor', 'partsRefundPatch', 'materialsGst', 'payrollMaterialItems', 'computePayrollMaterials', 'computeGstSummary',
 ];
 
 function extractDecl(source, name){
@@ -707,6 +707,23 @@ function testMaterialsPayback(sb){
   sb.STATE.data.payrollWeeks = []; sb.STATE.data.equipmentSpend = []; sb.STATE.data.jobs = [];
 }
 
+function testGstSummary(sb){
+  // GST for a period (Ofek 6 Oct): collected on paid jobs, minus what we get back from purchases (equipment + parts on
+  // jobs, both incl. GST), = what we pay. Ads are not in it yet.
+  sb.STATE.data.settings = { gstRatePercent:10 };
+  const data = {
+    jobs: [
+      { date:'2026-10-05', amount:349, includesGST:true, paymentStatus:'Paid', partsCost:44 },    // GST 34.90; parts GST 4
+      { date:'2026-10-06', amount:300, includesGST:true, paymentStatus:'Unpaid', partsCost:0 },   // not paid: no GST collected yet
+      { date:'2026-10-06', amount:250, includesGST:false, paymentStatus:'Paid', partsCost:22 },   // cash, no GST; parts GST 2
+      { date:'2026-09-20', amount:1000, includesGST:true, paymentStatus:'Paid', partsCost:110 },  // outside the period
+    ],
+    equipmentSpend: [{ date:'2026-10-04', cost:330 }, { date:'2026-09-01', cost:999 }],          // 30 in the period
+  };
+  const g = sb.computeGstSummary(data, '2026-10-04', '2026-10-10');
+  assertEqual([g.collected, g.backEquipment, g.backParts, g.back, g.toPay], [34.9, 30, 6, 36, -1.1], 'GST: collected 34.90, back 30 (equipment) + 6 (parts) = 36, to pay −1.10');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
@@ -721,6 +738,7 @@ testReviewNeed(loadSandbox());
 testClosingTotalInclGst(loadSandbox());
 testJobsRange(loadSandbox());
 testMaterialsPayback(loadSandbox());
+testGstSummary(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

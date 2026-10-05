@@ -552,6 +552,18 @@ function computePayrollMaterials(data, person, weekKey){
   const total = round2(lines.reduce((s,l)=>s+l.amount,0));
   return { lines, total, gst: materialsGst(total) };
 }
+// GST for a period (Ofek 6 Oct): collected = the GST on the period's jobs that are paid; we get back = the GST inside
+// what we bought — equipment (by purchase date) and parts on the period's jobs (receipt totals include GST). Google and
+// Meta ads are left out for now: their spend comes in without GST. To pay = collected − we get back.
+function computeGstSummary(data, start, end){
+  const inR = d => !!d && d >= start && d <= end;
+  const jobs = (data.jobs||[]).filter(j => inR(j.date));
+  const collected = round2(jobs.filter(j => j.paymentStatus==='Paid').reduce((s,j)=>s+jobGst(j),0));
+  const backEquipment = round2((data.equipmentSpend||[]).filter(e => inR(e.date)).reduce((s,e)=>s+materialsGst(e.cost),0));
+  const backParts = round2(jobs.reduce((s,j)=>s+materialsGst(j.partsCost),0));
+  const back = round2(backEquipment + backParts);
+  return { collected, back, backEquipment, backParts, toPay: round2(collected - back) };
+}
 function payrollCommissionPeople(data){ return data.employees.filter(e => e.status==='Active' && e.roles.includes('Technician') && !e.roles.includes('Owner')).map(e=>e.name); }
 function payrollHourlyPeople(data){ return data.employees.filter(e => e.status==='Active' && e.employmentType==='Hourly').map(e=>e.name); }
 function payrollStatus(data, weekKey, person){
@@ -6156,11 +6168,12 @@ function renderDashboard(profile, data){
   const overdue = unpaidAll.filter(j => jobIsLate(j, data, today));
 
   // How customers paid, for jobs done this period (amounts include GST — what actually hit the account).
-  const pay = { Cash:0, 'Bank Transfer':0, 'Credit Card':0, unset:0 }; let gst = 0, paidAmt = 0, unpaidAmt = 0;
+  const pay = { Cash:0, 'Bank Transfer':0, 'Credit Card':0, unset:0 }; let paidAmt = 0, unpaidAmt = 0;
   jobs.forEach(j => {
     const t = jobTotalCollected(j);
-    if (j.paymentStatus==='Paid') { paidAmt += t; gst += jobGst(j); pay[j.paymentMethod] !== undefined ? pay[j.paymentMethod] += t : pay.unset += t; } else unpaidAmt += t;
+    if (j.paymentStatus==='Paid') { paidAmt += t; pay[j.paymentMethod] !== undefined ? pay[j.paymentMethod] += t : pay.unset += t; } else unpaidAmt += t;
   });
+  const gstSum = computeGstSummary(data, r.start, r.effEnd);
 
   // Trend is deliberately NOT tied to the period picker: 12 weeks back from today, always, so that
   // picking "this week" still shows where the business is heading rather than a single dot.
@@ -6291,7 +6304,6 @@ function renderDashboard(profile, data){
           ${pay.unset ? `<div class="kv"><span>Paid, method not set</span><span class="v">${fmtMoney(pay.unset)}</span></div>` : ''}
           <div class="kv total"><span>Paid</span><span class="v">${drill(fmtMoney(paidAmt), 'Paid jobs this period', 'jobs', jobs.filter(j => j.paymentStatus==='Paid'))}</span></div>
           <div class="kv"><span>Still unpaid <span class="hint">(this period's jobs)</span></span><span class="v" style="color:${unpaidAmt>0?'var(--bad)':'inherit'}">${drill(fmtMoney(unpaidAmt), "This period's jobs not paid yet", 'jobs', jobs.filter(j => j.paymentStatus!=='Paid'))}</span></div>
-          <div class="kv"><span>GST collected</span><span class="v">${fmtMoney(gst)}</span></div>
           <div class="kv"><span>Avg days to get paid</span><span class="v">${perf.avgDaysToPayment===null?'—':perf.avgDaysToPayment+' days'}</span></div>
         </div>
       </div>
@@ -6305,6 +6317,19 @@ function renderDashboard(profile, data){
           <div class="kv"><span>GST in it <span class="hint">(claimed back)</span></span><span class="v">${fmtMoney(materialsGst(eqTotal))}</span></div>
         </div>
         <div class="stat-sub" style="margin-top:6px">${eqList.length} purchase${eqList.length===1?'':'s'} · comes off Net profit without the GST</div>
+      </div>
+      <div class="card stat-card" style="--stat-accent:var(--warn);margin-top:12px">
+        <div class="stat-label">GST <span class="hint">(this period)</span></div>
+        <div class="stat-value">${fmtSignedMoney(gstSum.toPay)}</div>
+        <div class="stat-sub">${gstSum.toPay < 0 ? 'more GST comes back than we collected' : 'to pay, after the GST we get back'}</div>
+        <div style="margin-top:8px">
+          <div class="kv"><span>GST collected <span class="hint">(paid jobs)</span></span><span class="v">${fmtMoney(gstSum.collected)}</span></div>
+          <div class="kv"><span>− GST we get back</span><span class="v">${fmtMoney(gstSum.back)}</span></div>
+          <div class="kv"><span class="hint">in equipment purchases</span><span class="v hint">${fmtMoney(gstSum.backEquipment)}</span></div>
+          <div class="kv"><span class="hint">in parts for jobs</span><span class="v hint">${fmtMoney(gstSum.backParts)}</span></div>
+          <div class="kv total"><span>= GST to pay</span><span class="v">${fmtSignedMoney(gstSum.toPay)}</span></div>
+        </div>
+        <div class="stat-sub" style="margin-top:6px">Google and Meta ads are not in this yet: their spend comes in without GST</div>
       </div>
     </div>
     <div class="grid-2" style="align-items:start;margin-top:12px">
