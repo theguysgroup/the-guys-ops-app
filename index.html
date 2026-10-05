@@ -468,7 +468,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .xlink:hover { text-decoration-style: solid; }
 button.xlink { background:none; border:none; padding:0; font:inherit; }
 /* The technician's invoice preview (Ofek 7 Oct): paper colours on purpose, the same in the light and dark app. */
-.inv-scroll { max-height: 62vh; overflow: auto; border-radius: 8px; background: #e9e5df; padding: 14px; }
+.inv-scroll { max-height: min(54vh, 620px); overflow: auto; border-radius: 8px; background: #e9e5df; padding: 14px; }
 .inv { background: #fff; color: #1d1b19; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,.12); padding: 32px 34px; font-size: 13px; line-height: 1.45; min-width: 560px; }
 .inv b { color: #1d1b19; }
 .inv-top { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
@@ -484,7 +484,7 @@ button.xlink { background:none; border:none; padding:0; font:inherit; }
 .inv-miss { background: #fff1cc; color: #8a5a00; border-radius: 4px; padding: 0 5px; font-weight: 600; font-size: 12px; }
 .inv-ok { color: #2e7d4f; font-weight: 600; font-size: 12px; white-space: nowrap; }
 .inv-table table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.inv-table th { text-align: left; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #6b6560; font-weight: 700; padding: 7px 8px; border-bottom: 1.5px solid #1d1b19; background: none; white-space: normal; }
+.inv-table th { position: static; text-align: left; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #6b6560; font-weight: 700; padding: 7px 8px; border-bottom: 1.5px solid #1d1b19; background: none; white-space: normal; }
 .inv-table td { padding: 8px; border-bottom: 1px solid #e3dfd9; vertical-align: top; color: #1d1b19; background: none; }
 .inv-table th:first-child, .inv-table td:first-child { padding-left: 0; }
 .inv-table th:last-child, .inv-table td:last-child { padding-right: 0; }
@@ -7051,7 +7051,14 @@ function payrollInvoicePdf(inv){
       ] },
       { margin: [0, 20, 0, 0], table: { headerRows: 1, widths, body: [header.map(h => typeof h==='string' ? { text: h.toUpperCase(), fontSize: 7.5, bold: true, color: soft } : { ...h, text: h.text.toUpperCase(), fontSize: 7.5, bold: true, color: soft }), ...body] },
         layout: { hLineWidth: (i, node) => i===0 ? 0 : i===1 ? 1.2 : 0.5, vLineWidth: () => 0, hLineColor: i => i===1 ? ink : line, paddingLeft: i => i===0 ? 0 : 6, paddingRight: (i, node) => i===node.table.widths.length - 1 ? 0 : 6, paddingTop: () => 5, paddingBottom: () => 5 } },
-      { margin: [0, 12, 0, 0], columns: [{ text: salary ? `${jobs} job${jobs===1 ? '' : 's'} paid by the customer this week` : '', color: soft }, { width: 230, table: { widths: ['*', 'auto'], body: [
+      // The signature sits beside the totals, so a normal week stays on one page.
+      { margin: [0, 12, 0, 0], unbreakable: true, columns: [{ width: '*', stack: [
+        ...(salary ? [{ text: `${jobs} job${jobs===1 ? '' : 's'} paid by the customer this week`, color: soft, margin: [0, 0, 0, 10] }] : []),
+        label('Signed'),
+        ...(inv.signature ? [{ image: inv.signature, fit: [190, 52], margin: [0, 0, 0, 2] }] : [{ text: ' ', margin: [0, 24, 0, 0] }]),
+        { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 210, y2: 0, lineWidth: 0.8, lineColor: ink }] },
+        { text: `${f.legalName}${inv.signedAt ? ' · ' + invDate(inv.signedAt) : ''}`, fontSize: 8.5, color: soft, margin: [0, 4, 0, 0] },
+      ] }, { width: 230, table: { widths: ['*', 'auto'], body: [
         ...(salary ? [] : [[{ text: 'GST inside the receipts', color: soft }, R(invMoney(tot.gst))]]),
         [{ text: 'GST on this invoice', color: soft }, R('Not charged')],
         [{ text: 'Total', bold: true, fontSize: 13, margin: [0, 4, 0, 0] }, { text: invMoney(tot.total), bold: true, fontSize: 13, alignment: 'right', margin: [0, 4, 0, 0] }],
@@ -7061,12 +7068,6 @@ function payrollInvoicePdf(inv){
         { stack: [label('Pay to'), ...(bank || [small('Bank details are not on file')])], fillColor: tint, margin: [10, 8, 10, 8] },
         { stack: [label('How it is worked out'), small(salary ? (inv.deductsParts ? 'Commission = (job amount excl. GST − parts) × the rate. A job counts in the week the customer paid.' : 'Commission = job amount excl. GST × the rate. A job counts in the week the customer paid.') : 'Paid back in full. The GST shown is inside the store receipts, which are attached in the app.')], fillColor: tint, margin: [10, 8, 10, 8] },
       ]] }, layout: { hLineWidth: () => 0, vLineWidth: (i) => i===1 ? 6 : 0, vLineColor: () => '#ffffff' } },
-      { margin: [0, 22, 0, 0], unbreakable: true, columns: [{ width: 230, stack: [
-        label('Signed'),
-        ...(inv.signature ? [{ image: inv.signature, fit: [200, 56], margin: [0, 2, 0, 2] }] : [{ text: ' ', margin: [0, 26, 0, 0] }]),
-        { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 220, y2: 0, lineWidth: 0.8, lineColor: ink }] },
-        { text: `${f.legalName}${inv.signedAt ? ' · ' + invDate(inv.signedAt) : ''}`, fontSize: 8.5, color: soft, margin: [0, 4, 0, 0] },
-      ] }, { text: '' }] },
     ],
   };
 }
