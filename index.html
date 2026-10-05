@@ -2380,12 +2380,14 @@ function readPickedFile(fieldId, file){
   reader.onload = () => {
     fileStore(fieldId)[fieldId] = reader.result;
     const row = document.getElementById(fieldId+'-row'); if (row) row.innerHTML = fileRowInner(fieldId, reader.result);
+    if (/^inv-/.test(fieldId)) renderKeepingInput();   // an invoice: show its Send button now
   };
   reader.readAsDataURL(file);
 }
 function clearFileField(fieldId){
   fileStore(fieldId)[fieldId] = null;
   const row = document.getElementById(fieldId+'-row'); if (row) row.innerHTML = fileRowInner(fieldId, null);
+  if (/^inv-/.test(fieldId)) renderKeepingInput();
 }
 // A file dropped next to a box (not on it) must not make the browser leave the app to show the file.
 ['dragover', 'drop'].forEach(t => window.addEventListener(t, e => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault(); }));
