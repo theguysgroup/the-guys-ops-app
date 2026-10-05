@@ -1068,7 +1068,7 @@ function jobPatchToRow(patch){
 }
 function taskPatchToRow(patch){
   const map = {
-    board:'board', title:'title', status:'status', due:'due', notes:'notes', client:'client',
+    board:'board', title:'title', status:'status', due:'due', notes:'notes', client:'client', contactId:'contact_id',
     priority:'priority', assignees:'assignees', assignedTo:'assigned_to', headsUp:'heads_up',
     createdBy:'created_by', createdAt:'created_at', technician:'technician', category:'category',
     subtasks:'subtasks', updates:'updates',
@@ -1673,7 +1673,7 @@ function mapEquipSpendRow(e){
 }
 function mapTaskRow(t){
   return {
-    id:t.id, board:t.board, title:t.title, status:t.status, due:t.due, notes:t.notes||'', client:t.client||'',
+    id:t.id, board:t.board, title:t.title, status:t.status, due:t.due, notes:t.notes||'', client:t.client||'', contactId:t.contact_id||null,
     priority:t.priority, assignees:t.assignees||[], assignedTo:t.assigned_to||'', headsUp:t.heads_up||'',
     createdBy:t.created_by||'', createdAt:t.created_at,
     technician:t.technician||'', category:t.category||'', subtasks:t.subtasks||[], updates:t.updates||[],
@@ -7532,7 +7532,7 @@ function renderTaskChip(t){
       <div>Assigned to: ${esc(people.join(', ')||'—')}</div>
       <div>Board: ${esc(taskBoardLabel(t.board))}</div>
       ${t.priority ? `<div>Priority: ${esc(t.priority)}</div>` : ''}
-      ${t.client ? `<div>Client: ${customerNameCell(t.client)}</div>` : ''}
+      ${t.client ? `<div>Client: ${customerNameCell(t.client, t.contactId)}</div>` : ''}
       ${t.notes ? `<div style="margin-top:4px">${esc(t.notes)}</div>` : ''}
     </div>
   </div>`;
@@ -7615,7 +7615,7 @@ function renderTasksList(profile, data){
   list = list.sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999'));
   const rows = list.length ? list.map(t => `
     <tr><td class="wrap"><div>${esc(t.title)}</div>${t.notes?`<div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(t.notes)}</div>`:''}</td>
-    <td>${t.client?customerNameCell(t.client):'—'}</td>
+    <td>${t.client?customerNameCell(t.client, t.contactId):'—'}</td>
     <td>${statusSelect('taskPriority', t.id, t.priority||'', ['', ...TASK_PRIORITIES], v=>TASK_PRIORITY_COLOR[v]||'neutral', v=>v||'—', false)}</td>
     <td>${esc(assigneeNames(t).join(', ')||'—')}</td>
     <td>${statusSelect('taskStatus', t.id, t.status, TASK_STATUSES, v=>TASK_STATUS_COLOR[v], v=>v, false)}</td>
@@ -7654,6 +7654,35 @@ function renderTasks(profile, data){
     ${view==='calendar' ? renderTasksCalendar(profile, data) : renderTasksList(profile, data)}
   `;
 }
+// Task → customer (Ofek 5/10): the Client field suggests CRM customers as you type; picking one links the task to that
+// card (tasks.contact_id), so the task opens the customer and the customer's name in task lists is a link.
+// A name that isn't in the CRM can still be typed as plain text.
+function taskClientSearch(q){
+  const menu = document.getElementById('tm-client-menu'), hid = document.getElementById('tm-contact-id');
+  if (!menu || !hid) return;
+  const linked = hid.value ? contactById(hid.value) : null;
+  if (linked && linked.fullName !== q) { hid.value = ''; document.getElementById('tm-client-linked').innerHTML = ''; }
+  const term = String(q||'').trim().toLowerCase(), digits = term.replace(/\D/g, '');
+  const cs = (STATE.data && STATE.data.contacts) || [];
+  if (!term || !cs.length) { menu.hidden = true; return; }
+  const hits = cs.filter(c => String(c.fullName||'').toLowerCase().includes(term) || (digits.length >= 3 && String(c.phone||'').replace(/\D/g,'').includes(digits)))
+    .sort((a,b) => String(b.createdAt||'').localeCompare(String(a.createdAt||''))).slice(0, 8);
+  if (!hits.length) { menu.innerHTML = `<div class="hint" style="padding:8px 10px">No CRM customer matches. The name is kept as plain text.</div>`; menu.hidden = false; return; }
+  menu.innerHTML = hits.map(c => `<button type="button" class="conv-menu-item" onmousedown="event.preventDefault();pickTaskClient('${c.id}')"><span style="flex:1"><b>${esc(c.fullName||'(no name)')}</b><br><span class="hint" style="font-size:11.5px">${esc(c.phone||'no phone')} · ${esc(c.division||'')} · ${esc(stageLabel(leadStage(c)))}</span></span></button>`).join('');
+  menu.hidden = false;
+}
+function pickTaskClient(id){
+  const c = contactById(id); if (!c) return;
+  document.getElementById('tm-client').value = c.fullName || '';
+  document.getElementById('tm-contact-id').value = c.id;
+  document.getElementById('tm-client-menu').hidden = true;
+  document.getElementById('tm-client-linked').innerHTML = taskClientLinkedHtml(c.id);
+}
+function taskClientLinkedHtml(contactId){
+  const c = contactId ? contactById(contactId) : null;
+  if (!c) return '';
+  return `<span class="hint">🔗 Linked to the CRM card · </span><span class="xlink" onclick="closeModal();goToLeadConversation('${c.id}')">Open ${esc(c.fullName)}</span>`;
+}
 function openTaskModal(taskId){
   const task = taskId ? STATE.data.tasks.find(t=>t.id===taskId) : null;
   const currentProfile = getCurrentProfile();
@@ -7684,7 +7713,12 @@ function openTaskModal(taskId){
           <div class="field"><label>&nbsp;</label><div class="hint" style="padding-top:8px">Surfaces this task on "On your radar today" starting this date, even while the due date is still far off.</div></div>
         </div>
         <div class="grid-2" style="margin-top:11px">
-          <div class="field"><label>Client</label><input id="tm-client" value="${esc(task?.client||'')}"></div>
+          <div class="field" style="position:relative"><label>Client <span class="hint">(type to pick a CRM customer)</span></label>
+            <input id="tm-client" autocomplete="off" value="${esc(task?.client||'')}" oninput="taskClientSearch(this.value)" onfocus="taskClientSearch(this.value)" onblur="setTimeout(()=>{const m=document.getElementById('tm-client-menu'); if(m) m.hidden=true;},180)" placeholder="Start typing a name or phone…">
+            <input type="hidden" id="tm-contact-id" value="${esc(task?.contactId||'')}">
+            <div id="tm-client-menu" class="conv-menu" style="top:calc(100% + 2px);bottom:auto;max-height:280px;overflow:auto;width:100%" hidden></div>
+            <div id="tm-client-linked" style="margin-top:5px">${taskClientLinkedHtml(task?.contactId)}</div>
+          </div>
           <div class="field"><label>Technician Tag</label><select id="tm-technician"><option value="">—</option>${technicianNames(STATE.data).map(t=>`<option value="${esc(t)}" ${task?.technician===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
         </div>
         <div class="field" style="margin-top:11px"><label>Assigned To <span class="hint">(select one or more)</span></label>
@@ -7806,6 +7840,7 @@ async function saveTaskModal(taskId, createdBy, createdAt){
     board: UI.tasks.board, title, status: document.getElementById('tm-status').value, due: document.getElementById('tm-due').value,
     headsUp: document.getElementById('tm-headsup').value,
     notes: document.getElementById('tm-notes').value, client: document.getElementById('tm-client').value.trim(),
+    contactId: (document.getElementById('tm-contact-id')||{}).value || null,
     priority: document.getElementById('tm-priority').value, assignees,
     technician: document.getElementById('tm-technician').value, category: document.getElementById('tm-category').value,
     createdBy, createdAt, subtasks: newSubtasks, updates: MODAL_UPDATES.map(u=>({...u})),
