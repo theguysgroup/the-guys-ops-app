@@ -53,6 +53,8 @@ const DECLS = [
   'esc', 'quoteDueReason', 'shiftDaySummary', 'latePaymentDue', 'latePaymentDoneToday', 'reofferDue', 'assigneeNames', 'taskAssignedTo', 'myTaskDue', 'teamTaskDue', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
   // review requests (5 Oct)
   'reviewInvoiceKey', 'reviewNeed',
+  // Jobs & Commissions period (6 Oct)
+  'payrollWeekOf', 'JOBS_RANGES', 'jobsRangeBounds',
 ];
 
 function extractDecl(source, name){
@@ -644,6 +646,21 @@ function testClosingTotalInclGst(sb){
   assertEqual([sb.jobGst(jCash), sb.jobCommissionAmount(jCash)], [0, 90], 'cash, no GST: commission on the full $300');
 }
 
+function testJobsRange(sb){
+  // Jobs & Commissions period (Ofek 6 Oct): All, Today, This week (Sun–Sat), This month, Custom. By the job date.
+  const today = '2026-10-06';   // a Tuesday
+  const R = (range, from, to) => sb.jobsRangeBounds({ range, customFrom: from || '', customTo: to || '' }, today);
+  assertEqual(R('all'), null, 'jobsRange: All = no date limit');
+  assertEqual(R('today'), { start:'2026-10-06', end:'2026-10-06' }, 'jobsRange: Today');
+  assertEqual(R('week'), { start:'2026-10-04', end:'2026-10-10' }, 'jobsRange: This week = Sunday to Saturday, like Payroll');
+  assertEqual(R('month'), { start:'2026-10-01', end:'2026-10-31' }, 'jobsRange: This month = the calendar month');
+  assertEqual(R('custom', '2026-09-27', '2026-10-02'), { start:'2026-09-27', end:'2026-10-02' }, 'jobsRange: Custom from–to');
+  assertEqual(R('custom', '2026-10-02', '2026-09-27'), { start:'2026-09-27', end:'2026-10-02' }, 'jobsRange: Custom picked backwards still works');
+  assertEqual(R('custom', '2026-10-01', ''), { start:'2026-10-01', end:'9999-12-31' }, 'jobsRange: Custom with only a start = from that day on');
+  assertEqual(R('custom', '', ''), null, 'jobsRange: Custom with no dates yet = everything');
+  assertEqual(sb.JOBS_RANGES.map(r => r[1]), ['All','Today','This week','This month','Custom'], 'jobsRange: the five choices, in order');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeMonth(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
@@ -656,6 +673,7 @@ testJobCustomerLink(loadSandbox());
 testSalesAutomations(loadSandbox());
 testReviewNeed(loadSandbox());
 testClosingTotalInclGst(loadSandbox());
+testJobsRange(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

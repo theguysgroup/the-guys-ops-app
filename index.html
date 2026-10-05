@@ -1808,7 +1808,7 @@ function setupRealtimeSubscriptions(){
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
 }
-let UI = { tab: null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
+let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let toastMsg = null, toastTimer = null;
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
 let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task modal
@@ -1922,7 +1922,7 @@ function getCurrentProfile(){
   if (VIEW_AS_ID && real && real.role==='owner') { const v = STATE.profiles.find(p => p.id===VIEW_AS_ID); if (v) return v; }
   return real;
 }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',week:'all',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
   toastTimer = setTimeout(()=>{
@@ -4790,11 +4790,30 @@ function jobColumnText(j, key){
     default: return '';
   }
 }
+// Jobs & Commissions period (Ofek 6 Oct): All, Today, This week (Sun–Sat, like Payroll), This month, or Custom
+// from–to (either end may be left empty). By the job date. null = no date limit.
+const JOBS_RANGES = [['all','All'],['today','Today'],['week','This week'],['month','This month'],['custom','Custom']];
+function jobsRangeBounds(ui, today){
+  const d = parseLocalDate(today);
+  if (ui.range==='today') return { start: today, end: today };
+  if (ui.range==='week') { const w = payrollWeekOf(today); return { start: w.start, end: w.end }; }
+  if (ui.range==='month') return { start: fmtLocal(new Date(d.getFullYear(), d.getMonth(), 1)), end: fmtLocal(new Date(d.getFullYear(), d.getMonth()+1, 0)) };
+  if (ui.range==='custom') {
+    let a = ui.customFrom || '', b = ui.customTo || '';
+    if (!a && !b) return null;
+    if (a && b && a > b) [a, b] = [b, a];
+    return { start: a || '0000-01-01', end: b || '9999-12-31' };
+  }
+  return null;
+}
+function setJobsRange(r){ UI.jobs.range = r; UI.jobs.page = 1; render(); }
+function setJobsCustom(which, v){ UI.jobs[which] = v; UI.jobs.page = 1; render(); }
 function computeFilteredJobs(data){
   let jobs = [...data.jobs].sort((a,b)=>b.date.localeCompare(a.date));
   if (UI.jobs.tech!=='all') jobs = jobs.filter(j=>j.technician===UI.jobs.tech);
   if (UI.jobs.status!=='all') jobs = jobs.filter(j=>j.paymentStatus===UI.jobs.status);
-  if (UI.jobs.week!=='all') jobs = jobs.filter(j=>weekOf(j.date).key===UI.jobs.week);
+  const span = jobsRangeBounds(UI.jobs, todayStr());
+  if (span) jobs = jobs.filter(j => j.date >= span.start && j.date <= span.end);
   const filters = UI.jobsFilters || {};
   Object.keys(filters).forEach(key => {
     const q = (filters[key]||'').trim().toLowerCase();
@@ -4988,7 +5007,6 @@ function setJobsPageSize(size){ UI.jobs.pageSize = Number(size); UI.jobs.page = 
 function renderJobs(profile, data){
   const canEdit = profile.role==='owner' || profile.role==='manager';
   const allTechs = technicianNames(data);
-  const weeks = allWeekKeys(data);
   const jobs = computeFilteredJobs(data);
   const { pageItems, page, totalPages, pageSize, total } = paginateRows(jobs, UI.jobs, 25);
   const activeFilters = UI.jobsFilters || {};
@@ -4996,7 +5014,7 @@ function renderJobs(profile, data){
 
   return `
     <div class="page-head">
-      <div><h1 class="page-title">Jobs &amp; Commissions</h1><div class="page-sub">${data.jobs.length} jobs total</div></div>
+      <div><h1 class="page-title">Jobs &amp; Commissions</h1><div class="page-sub">${jobs.length===data.jobs.length ? `${data.jobs.length} jobs total` : `${jobs.length} of ${data.jobs.length} jobs`}</div></div>
       <div style="display:flex;gap:8px">
         <button class="btn" onclick="exportJobsCsv()">Export CSV</button>
         ${canEdit ? `<button class="btn primary" onclick="openJobModal(null)">+ New Job</button>` : ''}
@@ -5005,7 +5023,8 @@ function renderJobs(profile, data){
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <select style="width:auto" onchange="UI.jobs.tech=this.value;render()"><option value="all">All technicians</option>${allTechs.map(t=>`<option value="${esc(t)}" ${UI.jobs.tech===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.jobs.status=this.value;render()"><option value="all" ${UI.jobs.status==='all'?'selected':''}>All statuses</option><option value="Paid" ${UI.jobs.status==='Paid'?'selected':''}>Paid</option><option value="Unpaid" ${UI.jobs.status==='Unpaid'?'selected':''}>Unpaid</option></select>
-      <select style="width:auto" onchange="UI.jobs.week=this.value;render()"><option value="all">All weeks</option>${weeks.map(w=>`<option value="${w}" ${UI.jobs.week===w?'selected':''}>${weekOf(w).label}</option>`).join('')}</select>
+      ${JOBS_RANGES.map(([k,l]) => `<button class="week-chip ${UI.jobs.range===k?'active':''}" onclick="setJobsRange('${k}')">${l}</button>`).join('')}
+      ${UI.jobs.range==='custom' ? `<input type="date" style="width:auto" value="${esc(UI.jobs.customFrom||'')}" onchange="setJobsCustom('customFrom', this.value)"><span style="color:var(--ink-faint);font-size:12px;align-self:center">to</span><input type="date" style="width:auto" value="${esc(UI.jobs.customTo||'')}" onchange="setJobsCustom('customTo', this.value)">` : ''}
       ${Object.values(activeFilters).some(v=>v) ? `<button class="btn ghost small" onclick="UI.jobsFilters={};render()">Clear column filters</button>` : ''}
     </div>
     <div class="table-wrap"><table class="jobs-table"><thead>
@@ -7217,151 +7236,9 @@ function onClosingFilePicked(inputEl){
   reader.readAsDataURL(file);
 }
 function clearClosingFile(){ CLOSING_FILE = null; const row = document.getElementById('cf-photo-row'); if (row) row.innerHTML = closingFileRow(); }
-function closingCard(c){
-  const statusTone = c.paymentStatus==='Paid' ? 'good' : 'bad';
-  const linkedJob = c.linkedJobId ? STATE.data.jobs.find(j=>j.id===c.linkedJobId) : null;
-  return `<div class="card tight" style="margin-bottom:10px">
-    <div style="display:flex;gap:12px;align-items:flex-start">
-      ${c.invoiceFileUrl ? `<a href="#" onclick="event.preventDefault();openEmbeddedFile((STATE.data.closings.find(x=>x.id==='${c.id}')||{}).invoiceFileUrl)"><img src="${c.invoiceFileUrl}" alt="Invoice photo" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex:none;display:block"></a>` : ''}
-      <div style="flex:1;min-width:0">
-        <div style="margin-bottom:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${techTag(c.technicianName)}<span class="mono" style="font-size:11.5px;color:var(--ink-soft)">${fmtDateShort(c.date)}</span>${pill('neutral', c.jobType||'—')}</div>
-        <div style="font-weight:600;font-size:13.5px;margin-bottom:3px">${custLink(c.customerName, null, c.linkedJobId)} <span class="mono" style="color:var(--ink-soft);font-weight:500">— ${c.linkedJobId ? invoiceLink(c.linkedJobId, c.invoiceNumber) : esc(c.invoiceNumber||'—')}</span></div>
-        <div class="mono" style="font-size:13px;margin-bottom:3px">${fmtMoney(jobTotalCollected(c))} <span style="color:var(--ink-soft);font-family:'Figtree',sans-serif">(${c.includesGST ? 'incl. GST '+fmtMoney(jobGst(c)) : 'no GST'})</span></div>
-        <div style="margin-bottom:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${pill(statusTone, c.paymentStatus)}${c.paymentMethod?pill('neutral', c.paymentMethod):''}${linkedJob ? `<span style="font-size:11px;color:var(--ink-soft)">→ linked to Job ${esc(linkedJob.invoiceNumber||'')}</span>` : ''}</div>
-        ${(c.partsCost>0 || c.partsPaidBy) ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:2px">Parts: ${fmtMoney(c.partsCost||0)}${c.partsPaidBy?' · paid by '+esc(c.partsPaidBy):''}</div>` : ''}
-        ${c.notes ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${esc(c.notes)}</div>` : ''}
-        ${c.reviewDoNotAsk ? `<div style="margin-top:4px">${pill('bad',"Don't ask for a review")}</div>` : ''}
-        <div style="font-size:11px;color:var(--ink-faint);margin-top:4px">Posted by ${esc(c.postedBy)} · ${new Date(c.createdAt).toLocaleString('en-AU')}</div>
-      </div>
-      ${canEditClosings() ? `<div style="display:flex;flex-direction:column;gap:6px"><button class="btn ghost small" onclick="openClosingEdit('${c.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteClosing('${c.id}')">Delete</button></div>` : ''}
-    </div>
-  </div>`;
-}
-// Deleting a closing removes the post only. The job it created or updated stays in Jobs & Commissions,
-// which is where the job itself is corrected or deleted.
-function deleteClosing(id){
-  confirmAction('Delete this closing? The job it created or updated stays in Jobs & Commissions — change or delete the job there.', () => {
-    db.closings.remove(id); showToast('Closing deleted'); render();
-  });
-}
-// Editing a closing (Ofek, 29 Sep): fixes the post, and sends only the fields that changed to the job it created or
-// updated — so anything already corrected directly in Jobs & Commissions isn't overwritten. Same people as Delete.
-let CLOSING_EDIT = null;   // { id, file } while the edit window is open
-// Owners/managers, and Ron (a VA with Jobs access — he posts the closings, so he fixes them too). Never technicians.
-function canEditClosings(){ const p = getCurrentProfile(); return !!p && (['owner','manager'].includes(p.role) || (p.role==='va' && !!p.permissions.jobs && !!p.permissions.closings)); }
-function closingEditFileRow(){
-  const f = CLOSING_EDIT && CLOSING_EDIT.file;
-  if (f) return `<a href="#" onclick="event.preventDefault();openEmbeddedFile(CLOSING_EDIT.file)" class="file-chip">📷 View photo</a><button type="button" class="btn ghost small" onclick="document.getElementById('ce-photo-input').click()">Replace</button><button type="button" class="btn ghost small" onclick="CLOSING_EDIT.file=null;document.getElementById('ce-photo-row').innerHTML=closingEditFileRow()">Remove</button>`;
-  return `<button type="button" class="btn small" onclick="document.getElementById('ce-photo-input').click()">Attach invoice photo…</button><span class="file-hint">Saved when you press Save changes</span>`;
-}
-function onClosingEditFilePicked(inputEl){
-  const file = inputEl.files && inputEl.files[0]; if (!file || !CLOSING_EDIT) return;
-  const reader = new FileReader();
-  reader.onload = () => { CLOSING_EDIT.file = reader.result; const row = document.getElementById('ce-photo-row'); if (row) row.innerHTML = closingEditFileRow(); };
-  reader.readAsDataURL(file);
-}
-function onClosingEditTechChange(){
-  const typeSelect = document.getElementById('ce-jobtype'), current = typeSelect.value;
-  const allowed = jobTypesForTech(document.getElementById('ce-tech').value);
-  typeSelect.innerHTML = allowed.map(t=>`<option value="${t}" ${t===current?'selected':''}>${t}</option>`).join('');
-  if (!allowed.includes(current)) typeSelect.value = allowed[0];
-}
-function closeClosingEdit(){ CLOSING_EDIT = null; closeModal(); }
-function openClosingEdit(id){
-  const c = STATE.data.closings.find(x => x.id===id); if (!c || !canEditClosings()) return;
-  CLOSING_EDIT = { id, file: c.invoiceFileUrl || null };
-  const allTechs = technicianNames(STATE.data);
-  const techs = !c.technicianName || allTechs.includes(c.technicianName) ? allTechs : [c.technicianName, ...allTechs];
-  const baseTypes = jobTypesForTech(c.technicianName);
-  const types = !c.jobType || baseTypes.includes(c.jobType) ? baseTypes : [c.jobType, ...baseTypes];
-  const job = c.linkedJobId ? STATE.data.jobs.find(j => j.id===c.linkedJobId) : null;
-  const opt = (v, cur, label) => `<option value="${esc(v)}" ${v===cur?'selected':''}>${esc(label===undefined?v:label)}</option>`;
-  openModal(`
-    <div class="modal-back" onclick="if(event.target===this) closeClosingEdit()">
-      <div class="modal" style="max-width:760px">
-        <h2>Edit closing</h2>
-        <div class="modal-sub">${job ? `Saving also updates job #${esc(job.invoiceNumber||'—')} in Jobs &amp; Commissions — only the fields you change here.` : 'The job this closing created is no longer in Jobs &amp; Commissions, so only the closing is updated.'}</div>
-        <div class="grid-3">
-          <div class="field"><label>Technician</label><select id="ce-tech" onchange="onClosingEditTechChange()">${techs.map(t=>opt(t, c.technicianName)).join('')}</select></div>
-          <div class="field"><label>Date</label><input type="date" id="ce-date" value="${esc(c.date||'')}"></div>
-          <div class="field"><label>Customer Name</label>${customerPickerInput('ce-customer', c.customerName, 'Start typing — pick the customer from the CRM')}</div>
-          <div class="field"><label>Invoice #</label><input id="ce-invoice" value="${esc(c.invoiceNumber||'')}"></div>
-          <div class="field"><label>Job Type</label><select id="ce-jobtype">${types.map(t=>opt(t, c.jobType)).join('')}</select></div>
-          <div class="field"><label>Total paid (incl. GST)</label><input type="number" step="0.01" id="ce-amount" value="${jobTotalCollected(c)}"></div>
-          <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="ce-nogst" ${c.includesGST?'':'checked'}> No GST</label><span class="hint">Off = the total includes GST (${STATE.data.settings.gstRatePercent}%)</span></div>
-          <div class="field"><label>Payment Status</label><select id="ce-status">${CLOSING_PAYMENT_STATUSES.map(v=>opt(v, c.paymentStatus)).join('')}</select></div>
-          <div class="field"><label>Method</label><select id="ce-method" onchange="if(this.value==='Cash') document.getElementById('ce-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.map(v=>opt(v, c.paymentMethod||'', v||'—')).join('')}</select></div>
-          <div class="field"><label>Parts Cost</label><input type="number" id="ce-partscost" value="${Number(c.partsCost)||0}"></div>
-          <div class="field"><label>Parts Paid By</label><select id="ce-partsby">${opt('', c.partsPaidBy||'', '—')}${allTechs.map(t=>opt(t, c.partsPaidBy)).join('')}${opt('Business', c.partsPaidBy)}</select></div>
-          <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="ce-noask" ${c.reviewDoNotAsk?'checked':''}> Don't ask for a review</label></div>
-        </div>
-        <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="ce-notes">${esc(c.notes||'')}</textarea></div>
-        <div class="field" style="margin-top:11px">
-          <label>Invoice Photo</label>
-          <div class="file-row" id="ce-photo-row">${closingEditFileRow()}</div>
-          <input type="file" id="ce-photo-input" accept="image/*" style="display:none" onchange="onClosingEditFilePicked(this)">
-        </div>
-        <div id="modal-error"></div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
-          <button class="btn" onclick="closeClosingEdit()">Cancel</button>
-          <button class="btn primary" onclick="saveClosingEdit()">Save changes</button>
-        </div>
-      </div>
-    </div>`);
-}
-async function saveClosingEdit(){
-  const cl = CLOSING_EDIT && STATE.data.closings.find(x => x.id===CLOSING_EDIT.id);
-  if (!cl) { closeClosingEdit(); return; }
-  const val = id => document.getElementById(id).value;
-  const pick = resolveCustomerInput('ce-customer');
-  // The window shows the total paid; the closing and the job keep the amount before GST. An untouched total keeps
-  // the stored amount exactly (no rounding change logged as an edit).
-  const includesGST = !document.getElementById('ce-nogst').checked, total = round2(Number(val('ce-amount')) || 0);
-  const amount = total===jobTotalCollected(cl) && includesGST===!!cl.includesGST ? cl.amount : amountExGst(total, includesGST);
-  const v = {
-    technicianName: val('ce-tech'), date: val('ce-date') || cl.date, customerName: pick.name, invoiceNumber: val('ce-invoice').trim(),
-    jobType: val('ce-jobtype'), amount, includesGST,
-    paymentStatus: val('ce-status'), paymentMethod: val('ce-method'), partsCost: Number(val('ce-partscost')) || 0,
-    partsPaidBy: val('ce-partsby'), notes: val('ce-notes'), invoiceFileUrl: CLOSING_EDIT.file,
-    reviewDoNotAsk: document.getElementById('ce-noask').checked,
-  };
-  if (!v.customerName) { modalError('Please enter a customer name'); return; }
-  if (!v.invoiceNumber) { modalError('Please enter an invoice number'); return; }
-  const job = cl.linkedJobId ? STATE.data.jobs.find(j => j.id===cl.linkedJobId) : null;
-  if (v.invoiceNumber !== cl.invoiceNumber && STATE.data.jobs.some(j => j.invoiceNumber===v.invoiceNumber && (!job || j.id!==job.id))) { modalError(`Invoice #${v.invoiceNumber} already belongs to another job`); return; }
-  const same = (k) => (k==='amount' || k==='partsCost') ? Number(v[k]||0)===Number(cl[k]||0) : String(v[k] ?? '')===String(cl[k] ?? '');
-  const changed = Object.keys(v).filter(k => !same(k));
-  const relink = !!(job && pick.contactId && job.contactId !== pick.contactId);
-  if (!changed.length && !relink) { closeClosingEdit(); showToast('Nothing changed'); return; }
-  const actor = getCurrentProfile()?.fullName || 'Unknown';
-  const closingPatch = {}; changed.forEach(k => { closingPatch[k] = v[k]; });
-  if (changed.length) await db.closings.update(cl.id, closingPatch);
-  let note = '';
-  if (job) {
-    const toJob = { reviewDoNotAsk:'reviewDoNotAsk', technicianName:'technician', date:'date', customerName:'customerName', invoiceNumber:'invoiceNumber', jobType:'jobType', amount:'amount', includesGST:'includesGST', paymentStatus:'paymentStatus', paymentMethod:'paymentMethod', partsCost:'partsCost', partsPaidBy:'partsPaidBy', notes:'notes', invoiceFileUrl:'invoiceFile' };
-    const jp = {}; changed.forEach(k => { if (toJob[k]) jp[toJob[k]] = v[k]; });
-    // Marked paid now → paid today (commission counts in the week the customer paid); back to unpaid → no paid date.
-    if ('paymentStatus' in jp) { if (jp.paymentStatus==='Paid' && !job.datePaid) jp.datePaid = todayStr(); if (jp.paymentStatus!=='Paid') jp.datePaid = ''; }
-    if (changed.includes('technicianName') || changed.includes('jobType')) {
-      const auto = commissionRateFor(STATE.data.commissionRates, v.technicianName, v.jobType);
-      if (auto !== null) jp.commissionPercent = auto; else note = ` — no automatic rate for ${v.technicianName} / ${v.jobType}, so the job kept its ${job.commissionPercent}% commission`;
-    }
-    if (relink) jp.contactId = pick.contactId;
-    if (Object.keys(jp).length) {
-      await db.jobs.update(job.id, jp);
-      logJobActivity(job, actor, `Updated from an edited closing: ${Object.keys(jp).join(', ')}`);
-      if ('customerName' in jp || 'contactId' in jp) await ensureContactForJob(job, pick.contactId);
-    }
-  }
-  closeClosingEdit();
-  showToast((job ? 'Closing and job updated' : 'Closing updated') + note);
-  render();
-}
 function renderClosings(profile, data){
   const allTechs = technicianNames(STATE.data);
   const defaultTech = profile.role==='technician' ? (profile.technicianName || allTechs[0] || '') : (allTechs[0] || '');
-  const feed = [...data.closings].sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
-  const feedHtml = feed.length ? feed.map(closingCard).join('') : emptyState('No closings posted yet', 'Post the first one above — it will show up here right away.');
   return `
     <div class="page-head"><div><h1 class="page-title">Closings</h1><div class="page-sub">What the team used to post over WhatsApp — now structured fields that automatically create or update the matching Job</div></div></div>
     <div class="card" style="margin-bottom:20px">
@@ -7389,8 +7266,6 @@ function renderClosings(profile, data){
       <div id="cf-error"></div>
       <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn primary" onclick="postClosing()">Post closing</button></div>
     </div>
-    <div class="section-title">Closings feed <span class="tag">${feed.length}</span></div>
-    ${feedHtml}
     ${renderEquipmentQuickFeed(profile, data)}
   `;
 }
