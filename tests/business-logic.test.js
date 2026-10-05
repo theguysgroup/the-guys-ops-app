@@ -50,7 +50,7 @@ const DECLS = [
   // sales automations + My Day
   'fmtMoney', 'workClockDue', 'sydneyNowPast', 'NEW_LEAD_ALERT_FROM', 'leadArrivedAt', 'newLeadUnhandled', 'chaseTooLong', 'quoteStale', 'bookedNoJob', 'MY_DAY_NEW_DAYS', 'myDayLists',
   // My Day counters (3 Oct)
-  'esc', 'quoteDueReason', 'shiftDaySummary', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
+  'esc', 'quoteDueReason', 'shiftDaySummary', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
 ];
 
 function extractDecl(source, name){
@@ -556,6 +556,17 @@ function testSalesAutomations(sb){
   const W = sb.mdWeekCounts([dayRow, { day:'2026-09-30', items:{}, totals:{ by:{ new:{done:4,total:4} }, done:4, total:4, percent:100 } }]);
   assertEqual([W.by.new, W.percent, W.days], [{done:5,total:6}, 84, 2], 'mdWeekCounts: bubbles summed, % = average of the days');
   assertEqual(sb.mdBookingLinesHe(dayRow), ['• מזגנים 2 – 1 מתוך 1 לידים חדשים, 1 משלבים אחרים'], 'mdBookingLinesHe: bookings per division and where they were closed from, in Hebrew');
+  // Dashboard per task (Ofek 5/10): the average of each day's % — 10 new leads a day, all handled, is 100%.
+  const dayOf = (day, b) => ({ day, closed_at:'x', totals:{ by:b } });
+  const PB = sb.mdPeriodBubbles([
+    dayOf('2026-09-28', { new:{done:10,total:10}, chasing:{done:3,total:4} }),
+    dayOf('2026-09-29', { new:{done:10,total:10} }),
+    dayOf('2026-09-30', { new:{done:10,total:10}, quotes:{done:0,total:0} }),
+  ]);
+  assertEqual([PB.new.percent, PB.new.days, PB.new.done, PB.new.total], [100, 3, 30, 30], 'mdPeriodBubbles: 10 a day, all done, every day → 100%');
+  assertEqual([PB.chasing.percent, PB.chasing.days, PB.quotes.percent, PB.quotes.days], [75, 1, null, 0], 'mdPeriodBubbles: only days with tasks count; a task never due shows no %');
+  const PB2 = sb.mdPeriodBubbles([dayOf('2026-09-28', { new:{done:10,total:10} }), dayOf('2026-09-29', { new:{done:1,total:2} })]);
+  assertEqual(PB2.new.percent, 75, 'mdPeriodBubbles: the average of the days (100% and 50%), not the total 11 of 12');
   const BT = sb.mdBookingsTable([dayRow]);
   assertEqual([/1 of 1 from New leads/.test(BT), /1 from other stages/.test(BT), /<td class="num">2<\/td>/.test(BT)], [true, true, true], 'mdBookingsTable: aircon booked 2 — 1 of its 1 new aircon lead, 1 from other stages');
   // Chasing → Lost (no answer): only leads that were chasing; days called counted inside the chase.

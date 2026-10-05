@@ -5943,13 +5943,16 @@ function sumField(rows, k){ return rows.reduce((s,r)=>s+(Number(r[k])||0),0); }
 function mdPeriodRows(start, end){
   return Object.values(MD.days||{}).filter(r => r.day >= start && r.day <= end && r.items && Object.keys(r.items).length).sort((a,b) => a.day.localeCompare(b.day));
 }
+// Per bubble over a period (Ofek 5/10): the AVERAGE of each day's % for that task, counting only days that had
+// something in the bubble — 10 new leads a day, all handled, is 100% for the week. done/total are kept for the subtitle.
 function mdPeriodBubbles(rows){
   const today = sydneyWall(new Date()).day, by = {};
-  MD_BUBBLES.forEach(([k]) => by[k] = { done:0, total:0 });
+  MD_BUBBLES.forEach(([k]) => by[k] = { done:0, total:0, pcts:[] });
   rows.forEach(r => {
     const k = r.day===today && !r.closed_at && STATE.data ? mdCounts(mdLive(filterForProfile(STATE.data, getCurrentProfile()), new Date())) : mdStoredCounts(r);
-    MD_BUBBLES.forEach(([b]) => { by[b].done += (k.by[b]||{}).done||0; by[b].total += (k.by[b]||{}).total||0; });
+    MD_BUBBLES.forEach(([b]) => { const x = k.by[b] || { done:0, total:0 }; by[b].done += x.done||0; by[b].total += x.total||0; if (x.total) by[b].pcts.push(x.done * 100 / x.total); });
   });
+  MD_BUBBLES.forEach(([b]) => { const p = by[b].pcts; by[b].days = p.length; by[b].percent = p.length ? Math.round(p.reduce((s,x) => s + x, 0) / p.length) : null; });
   return by;
 }
 function renderOfficeCards(data, r){
@@ -5964,7 +5967,9 @@ function renderOfficeCards(data, r){
   const lost = chasingLostStats(data, r.start, r.effEnd);
   const tone = perf.percent===null ? 'var(--ink-faint)' : perf.percent >= 80 ? 'var(--good)' : perf.percent >= 60 ? 'var(--warn)' : 'var(--bad)';
   const under = lost.under.map(x => `<div class="kv"><span>${drill(esc(x.c.fullName), x.c.fullName, 'leads', [x.c])}</span><span class="v" style="color:var(--bad)">called on ${x.days} day${x.days===1?'':'s'}</span></div>`).join('');
-  const bubble = (id, label) => { const b = by[id] || { done:0, total:0 }; return `<div class="myday-stat${b.total && b.done===b.total ? ' good' : ''}" style="cursor:default"><span class="myday-stat-n">${b.done}/${b.total}</span><span class="myday-stat-l">${esc(label)}</span></div>`; };
+  const bubble = (id, label) => { const b = by[id] || { percent:null, days:0, done:0, total:0 };
+    const tone = b.percent===null ? '' : b.percent >= 80 ? ' good' : b.percent >= 60 ? ' warn' : ' bad';
+    return `<div class="myday-stat${tone}" style="cursor:default"><span class="myday-stat-n">${b.percent===null ? '—' : b.percent + '%'}</span><span class="myday-stat-l">${esc(label)}</span><span class="myday-stat-s">${b.days ? `average of ${b.days} day${b.days===1?'':'s'} · ${b.done} of ${b.total}` : 'nothing in this period'}</span></div>`; };
   return `<div class="section-title">Office <span class="tag">${esc(name)} · My Day for this period</span></div>
     <div class="grid-3" style="align-items:start">
       <div class="card stat-card" style="--stat-accent:${tone}">
@@ -5985,7 +5990,7 @@ function renderOfficeCards(data, r){
       </div>
     </div>
     ${rows.length ? `<div class="card" style="margin-top:14px">
-      <div class="stat-label" style="margin-bottom:10px">Every bubble, added up over ${rows.length} day${rows.length===1?'':'s'}</div>
+      <div class="stat-label" style="margin-bottom:10px">How much of each task was completed — average per day over ${rows.length} day${rows.length===1?'':'s'}</div>
       <div class="myday-stats">${MD_BUBBLES.map(([id, label]) => bubble(id, label)).join('')}</div>
     </div>
     <div class="card" style="margin-top:14px"><div class="stat-label" style="margin-bottom:8px">Bookings — by division and where they came from</div>${mdBookingsTable(rows)}</div>` : ''}`;
