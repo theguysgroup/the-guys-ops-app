@@ -3675,6 +3675,7 @@ function setChatAutoSms(on){
 const MD_BUBBLES = [
   ['new', 'New leads'], ['chasing', 'Chasing — call today'], ['decide', 'Chasing 21+ days'],
   ['followups', 'Follow-ups due'], ['quotes', 'Quotes due'], ['reviews', 'Ask for a review'],
+  ['remind', 'Reminders today'], ['tasks', 'Open tasks today'],
 ];
 const MD_FROM_STAGE = { 'New':'new', 'Quoted':'quotes', 'Follow-up':'followups' };
 let MD = { days:{}, loaded:false, pending:{}, timer:null, closedOld:false };
@@ -3728,6 +3729,19 @@ function mdLive(data, now){
   build('decide', cs.filter(c => chaseTooLong(c, now)), c => !chaseTooLong(c, now), byId);
   build('followups', cs.filter(c => leadStage(c)==='Follow-up' && followupDue(c, localToday)), c => !(leadStage(c)==='Follow-up' && followupDue(c, localToday)), byId);
   build('quotes', cs.filter(c => leadStage(c)==='Quoted' && followupDue(c, localToday)), c => !(leadStage(c)==='Quoted' && followupDue(c, localToday)), byId);
+  // Reminders today and Open tasks today (Ofek 5/10) belong to the office assistant: "read" is per person and tasks
+  // are per assignee, so only the assistant's own browser counts them; everyone else sees what was saved.
+  const me = getRealProfile && getRealProfile();
+  const fromStored = key => { out[key] = Object.keys(stored[key] || {}).map(id => ({ id, rec:null, div: stored[key][id].div || 'Other', done: !!stored[key][id].d })); };
+  if (me && me.role==='va') {
+    const rems = remindersFor(me, data).filter(it => it.date && it.date <= localToday);
+    const remById = id => rems.find(it => it.key===id) || null;
+    build('remind', rems.filter(it => !it.isRead).map(it => ({ ...it, id: it.key, division: 'Other' })), it => { const x = remById(it.id); return !x || x.isRead; }, id => { const x = remById(id); return x ? { ...x, id, division:'Other' } : null; });
+    const mine = t => { const names = assigneeNames(t); return names.includes(me.fullName) || (me.technicianName && names.includes(me.technicianName)); };
+    const taskOpen = t => t && t.status!=='Done' && t.due && t.due <= localToday && mine(t);
+    const taskById = id => (data.tasks||[]).find(t => t.id===id) || null;
+    build('tasks', (data.tasks||[]).filter(taskOpen).map(t => ({ ...t, division:'Other' })), t => !taskOpen(taskById(t.id)), id => { const t = taskById(id); return t ? { ...t, division:'Other' } : null; });
+  } else { fromStored('remind'); fromStored('tasks'); }
   const jobs = mdReviewJobs(data);
   if (jobs) {
     const jobById = id => (data.jobs||[]).find(j => j.id===id);
@@ -3861,7 +3875,7 @@ function quoteDueReason(c, localToday){
 }
 // The end-of-day report (Hebrew, for the owners): Ron's tasks, then what happened in the business today.
 // Ron's tasks in Hebrew, as in the daily report: the % and done/total per bubble (also in the lunch-break message).
-const MD_HE = { new:'לידים חדשים', chasing:'מרדף', decide:'מרדף 21+ ימים', followups:'מעקבים', quotes:'הצעות מחיר', reviews:'בקשת ביקורת' };
+const MD_HE = { new:'לידים חדשים', chasing:'מרדף', decide:'מרדף 21+ ימים', followups:'מעקבים', quotes:'הצעות מחיר', reviews:'בקשת ביקורת', remind:'תזכורות', tasks:'משימות פתוחות' };
 function mdTaskLines(k, lead){
   return [`${lead} ${k.percent===null ? '—' : k.percent + '%'} מהמשימות (${k.done} מתוך ${k.total})`,
     ...MD_BUBBLES.map(([b]) => { const x = k.by[b] || { done:0, total:0 }; return x.total ? `• ${MD_HE[b]}: ${x.done}/${x.total}` : ''; }).filter(Boolean)];
@@ -6943,6 +6957,23 @@ function renderMyDayHistory(profile, data, L, view){
     </div>
     <div class="card"><div class="stat-label" style="margin-bottom:8px">Bookings — by division and where they came from</div>${mdBookingsTable(rows)}</div>`;
 }
+// My Day lists for the two newer bubbles (Ofek 5/10): reminders due by today that aren't opened yet, and the
+// assistant's own open tasks due today or late.
+function renderMyDayRemindersTasks(profile, data, live){
+  const rems = (live.remind || []).filter(x => !x.done && x.rec);
+  const tasks = (live.tasks || []).filter(x => !x.done && x.rec);
+  const remRows = rems.map(x => { const it = x.rec;
+    return `<div class="myday-row${it.severity==='bad' ? ' bad' : ''}" onclick="goToReminderTarget('${it.type}','${it.contactId||''}','${jsStr(it.readKey||'')}','${it.weekKey||''}')" tabindex="0">
+      <div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${esc(it.title)}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${esc(it.meta||'')}</div></div>
+      ${pill(it.severity, it.severity==='bad' ? 'Urgent' : 'Attention')}</div>`; }).join('');
+  const taskRows = tasks.map(x => { const t = x.rec, late = t.due < todayStr();
+    return `<div class="myday-row${late ? ' bad' : ''}" onclick="openTaskModal('${t.id}')" tabindex="0">
+      <div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${esc(t.title)}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${t.client ? esc(t.client) + ' · ' : ''}${esc(t.status||'')}${t.priority ? ' · ' + esc(t.priority) : ''}</div></div>
+      ${pill(late ? 'bad' : 'warn', late ? 'Late · ' + fmtDateShort(t.due) : 'Today')}</div>`; }).join('');
+  const isVa = profile.role==='va';
+  return `${myDaySection('remind', 'Reminders today', rems.length, remRows, isVa ? 'No reminders waiting. ✓' : 'Counted on the office assistant\'s screen.', 'Open each reminder (it then counts as done for today).')}
+    ${myDaySection('tasks', 'Open tasks today', tasks.length, taskRows, isVa ? 'No open tasks due today. ✓' : 'Counted on the office assistant\'s screen.', 'Your tasks due today or late. Mark a task Done (or move its date) and it counts as done.')}`;
+}
 function renderMyDay(profile, data){
   const now = new Date();
   const L = myDayLists(data, now);
@@ -6986,6 +7017,8 @@ function renderMyDay(profile, data){
         ${stat('followups', 'Follow-ups due', 0, L.followups.filter(c=>c.nextFollowUp<L.localToday).length ? `${L.followups.filter(c=>c.nextFollowUp<L.localToday).length} overdue` : '', 'warn')}
         ${stat('quotes', 'Quotes due', 0, 'must be done before you log out', 'bad')}
         ${stat('reviews', 'Ask for a review', 0, 'jobs not asked yet', 'warn')}
+        ${stat('remind', 'Reminders today', 0, 'done = opened', 'warn')}
+        ${stat('tasks', 'Open tasks today', 0, 'your tasks due today or late', 'warn')}
       </div>
       <div style="margin-top:10px;font-size:13px;color:var(--ink-soft)">Today so far: <b style="color:var(--ink)">${K.percent===null ? '—' : K.percent + '%'}</b> of today's tasks done (${K.done} of ${K.total})</div>
     </div>
@@ -6998,6 +7031,7 @@ function renderMyDay(profile, data){
     ${L.chaseDecide.length ? myDaySection('decide', 'Chasing 21+ days — decide', L.chaseDecide.length, decideBody, '', 'Three weeks without an answer. Mark as Lost (no answer), or keep chasing for another 21 days.') : ''}
     ${myDaySection('followups', 'Follow-ups due', L.followups.length, fuBody, 'No follow-ups due today. ✓')}
     ${myDaySection('quotes', 'Quotes due', L.quotesDue.length, quoteBody, 'No quote is due today. ✓', 'Quotes whose follow-up date has come. Call, then set the next date or move the stage. You can\'t log out while one is left.')}
+    ${renderMyDayRemindersTasks(profile, data, live)}
     ${myDaySection('reviews', 'Ask for a review', reviewItems.length, reviewBody, (REVIEW_REQ===null ? 'Loading…' : 'Every job has been asked, or is marked don\'t ask. ✓'), 'Jobs where the customer hasn\'t been asked for a Google review yet. Not shown: jobs marked "don\'t ask" and reviews already taken.')}
   `;
 }
