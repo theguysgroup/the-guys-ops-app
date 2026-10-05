@@ -3977,17 +3977,17 @@ async function vaSessionStart(){
   render();
 }
 function setMyDayView(v){ UI.myDayView = v; render(); }
-// The strip at the top: today, each closed day of this week, and earlier weeks merged into one chip each.
+// The strip at the top (Ofek 3/10): today, each of the last 7 days, and anything older merged into one chip per week.
 function mdHistoryStrip(today){
-  const wk = payrollWeekOf(today);
+  const recentFrom = shiftDays(today, -7);
   const rows = Object.values(MD.days).filter(r => r.day < today && r.items && Object.keys(r.items).length).sort((a,b) => b.day.localeCompare(a.day));
   const pct = k => k.percent===null || k.percent===undefined ? '—' : k.percent + '%';
   const cur = UI.myDayView || 'today';
   const chip = (v, label) => `<button class="week-chip ${cur===v?'active':''}" onclick="setMyDayView('${v}')">${label}</button>`;
-  const days = rows.filter(r => r.day >= wk.start).map(r => chip('d:'+r.day, `${parseLocalDate(r.day).toLocaleDateString('en-AU',{weekday:'short', day:'numeric'})} · ${pct(mdStoredCounts(r))}`));
+  const days = rows.filter(r => r.day >= recentFrom).map(r => chip('d:'+r.day, `${parseLocalDate(r.day).toLocaleDateString('en-AU',{weekday:'short', day:'numeric'})} · ${pct(mdStoredCounts(r))}${r.test ? ' · test' : ''}`));
   const weeks = {};
-  rows.filter(r => r.day < wk.start).forEach(r => { const w = payrollWeekOf(r.day).start; (weeks[w] = weeks[w] || []).push(r); });
-  const weekChips = Object.keys(weeks).sort().reverse().slice(0, 8).map(w => chip('w:'+w, `Week ${fmtDateShort(w)} · ${pct(mdWeekCounts(weeks[w]))}`));
+  rows.filter(r => r.day < recentFrom).forEach(r => { const w = payrollWeekOf(r.day).start; (weeks[w] = weeks[w] || []).push(r); });
+  const weekChips = Object.keys(weeks).sort().reverse().slice(0, 8).map(w => chip('w:'+w, `Week ${fmtDateShort(w)} · ${pct(mdWeekCounts(weeks[w]))}${weeks[w].some(r => r.test) ? ' · test' : ''}`));
   return `<div class="myday-days">${chip('today','Today')}${days.join('')}${weekChips.join('')}</div>`;
 }
 // A week: every bubble summed, and Ron's % = the average of his days (Ofek 3/10).
