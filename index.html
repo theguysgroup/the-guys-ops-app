@@ -6939,7 +6939,8 @@ function payrollInvoiceHtml(inv, editing){
     </div>
     <div class="inv-meta"><div><span>Invoice no.</span><b>${esc(inv.number)}</b></div><div><span>Date</span><b>${esc(invDate(inv.issued))}</b></div><div><span>Pay week</span><b>${esc(invWeek(inv))}</b></div></div>
     <div class="inv-parties">
-      <div><div class="inv-label">From</div><b>${esc(f.legalName)}</b><br>ABN ${f.abn ? esc(fmtAbn(f.abn)) : miss('missing')}${f.address ? '<br>' + esc(f.address) : ''}${f.email || f.phone ? `<br><span class="inv-sub">${esc([f.email, f.phone].filter(Boolean).join(' · '))}</span>` : ''}</div>
+      <div><div class="inv-label">From</div><b>${esc(f.legalName)}</b><br>ABN ${f.abn ? esc(fmtAbn(f.abn)) : miss('missing')}${f.address ? '<br>' + esc(f.address) : ''}${f.email || f.phone ? `<br><span class="inv-sub">${esc([f.email, f.phone].filter(Boolean).join(' · '))}</span>` : ''}
+        <div style="margin-top:6px"><span class="inv-label" style="display:inline">Pay to</span> ${bank ? esc(bank.join(' · ')) : '<span class="inv-sub">bank details are not on file</span>'}</div></div>
       <div><div class="inv-label">Bill to</div><b>${esc(t.legalName)}</b><br>ABN ${t.abn ? esc(fmtAbn(t.abn)) : miss('missing')}${t.acn ? '<br>ACN ' + esc(t.acn) : ''}</div>
     </div>
     <div class="inv-table"><table><thead>${head}</thead><tbody>${rows || `<tr><td colspan="${editing ? 8 : 7}" class="inv-sub">No lines</td></tr>`}</tbody></table></div>
@@ -6951,10 +6952,7 @@ function payrollInvoiceHtml(inv, editing){
     </div>
     ${editing ? `<div style="margin-top:12px"><div class="inv-label">Note <span class="inv-sub" style="text-transform:none;letter-spacing:0;font-weight:400">(optional, printed on the invoice)</span></div><textarea class="inv-in" rows="2" oninput="CUR_INVOICE.note=this.value">${esc(inv.note || '')}</textarea></div>`
       : inv.note ? `<div style="margin-top:12px"><div class="inv-label">Note</div>${esc(inv.note)}</div>` : ''}
-    <div class="inv-pay">
-      <div><div class="inv-label">Pay to</div>${bank ? bank.map(esc).join('<br>') : '<span class="inv-sub">Bank details are not on file</span>'}</div>
-      <div><div class="inv-label">How it is worked out</div><span class="inv-sub">${how}</span></div>
-    </div>
+    <div class="inv-sub" style="margin-top:12px">${how}</div>
   </div>`;
 }
 let INV_EDIT = false, INV_SIG = { drawn:false };
@@ -7046,14 +7044,16 @@ function payrollInvoicePdf(inv){
       ] },
       { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 507, y2: 0, lineWidth: 0.6, lineColor: line }], margin: [0, 14, 0, 14] },
       { columns: [
-        { stack: [label('From'), { text: f.legalName, bold: true, fontSize: 11 }, `ABN ${f.abn ? fmtAbn(f.abn) : 'missing'}`, ...(f.address ? [f.address] : []), ...(f.email || f.phone ? [small([f.email, f.phone].filter(Boolean).join(' · '))] : [])] },
+        { stack: [label('From'), { text: f.legalName, bold: true, fontSize: 11 }, `ABN ${f.abn ? fmtAbn(f.abn) : 'missing'}`, ...(f.address ? [f.address] : []), ...(f.email || f.phone ? [small([f.email, f.phone].filter(Boolean).join(' · '))] : []),
+          { text: [{ text: 'PAY TO  ', fontSize: 7.5, bold: true, color: soft, characterSpacing: 0.8 }, bank ? bank.join(' · ') : { text: 'bank details are not on file', color: soft }], margin: [0, 5, 0, 0] }] },
         { stack: [label('Bill to'), { text: t.legalName, bold: true, fontSize: 11 }, `ABN ${fmtAbn(t.abn)}`, ...(t.acn ? [`ACN ${t.acn}`] : [])] },
       ] },
       { margin: [0, 20, 0, 0], table: { headerRows: 1, widths, body: [header.map(h => typeof h==='string' ? { text: h.toUpperCase(), fontSize: 7.5, bold: true, color: soft } : { ...h, text: h.text.toUpperCase(), fontSize: 7.5, bold: true, color: soft }), ...body] },
         layout: { hLineWidth: (i, node) => i===0 ? 0 : i===1 ? 1.2 : 0.5, vLineWidth: () => 0, hLineColor: i => i===1 ? ink : line, paddingLeft: i => i===0 ? 0 : 6, paddingRight: (i, node) => i===node.table.widths.length - 1 ? 0 : 6, paddingTop: () => 5, paddingBottom: () => 5 } },
       // The signature sits beside the totals, so a normal week stays on one page.
       { margin: [0, 12, 0, 0], unbreakable: true, columns: [{ width: '*', stack: [
-        ...(salary ? [{ text: `${jobs} job${jobs===1 ? '' : 's'} paid by the customer this week`, color: soft, margin: [0, 0, 0, 10] }] : []),
+        ...(salary ? [{ text: `${jobs} job${jobs===1 ? '' : 's'} paid by the customer this week`, color: soft }] : []),
+        { text: salary ? (inv.deductsParts ? 'Commission = (job amount excl. GST − parts) × the rate. A job counts in the week the customer paid.' : 'Commission = job amount excl. GST × the rate. A job counts in the week the customer paid.') : 'Paid back in full. The GST shown is inside the store receipts, which are attached in the app.', fontSize: 8, color: soft, margin: [0, 2, 12, 12] },
         label('Signed'),
         ...(inv.signature ? [{ image: inv.signature, fit: [190, 52], margin: [0, 0, 0, 2] }] : [{ text: ' ', margin: [0, 24, 0, 0] }]),
         { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 210, y2: 0, lineWidth: 0.8, lineColor: ink }] },
@@ -7064,10 +7064,6 @@ function payrollInvoicePdf(inv){
         [{ text: 'Total', bold: true, fontSize: 13, margin: [0, 4, 0, 0] }, { text: invMoney(tot.total), bold: true, fontSize: 13, alignment: 'right', margin: [0, 4, 0, 0] }],
       ] }, layout: { hLineWidth: (i, node) => i===node.table.body.length - 1 ? 1.2 : 0, vLineWidth: () => 0, hLineColor: () => ink, paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 3, paddingBottom: () => 3 } }] },
       ...(inv.note ? [{ margin: [0, 14, 0, 0], stack: [label('Note'), { text: inv.note }] }] : []),
-      { margin: [0, 20, 0, 0], unbreakable: true, table: { widths: ['*', '*'], body: [[
-        { stack: [label('Pay to'), ...(bank || [small('Bank details are not on file')])], fillColor: tint, margin: [10, 8, 10, 8] },
-        { stack: [label('How it is worked out'), small(salary ? (inv.deductsParts ? 'Commission = (job amount excl. GST − parts) × the rate. A job counts in the week the customer paid.' : 'Commission = job amount excl. GST × the rate. A job counts in the week the customer paid.') : 'Paid back in full. The GST shown is inside the store receipts, which are attached in the app.')], fillColor: tint, margin: [10, 8, 10, 8] },
-      ]] }, layout: { hLineWidth: () => 0, vLineWidth: (i) => i===1 ? 6 : 0, vLineColor: () => '#ffffff' } },
     ],
   };
 }
