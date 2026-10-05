@@ -8497,8 +8497,8 @@ async function saveTaskModal(taskId, createdBy, createdAt){
   const assignees = Array.from(document.querySelectorAll('.tm-assignee-cb:checked')).map(cb=>cb.value);
   const newSubtasks = MODAL_SUBTASKS.map(s=>({...s}));
   const values = {
-    // The board follows the first assignee; a technician's tasks always stay on his own board (the database only lets
-    // him write there).
+    // The board follows the first assignee. A technician's new task goes on his own board, and a task he edits stays on
+    // its board: the database lets him write only on his board or on a task he is assigned to (Ofek 7 Oct).
     board: currentProfile?.role==='technician' ? (oldTask ? oldTask.board : currentProfile.technicianName) : boardForAssignees(assignees), title, status: document.getElementById('tm-status').value, due: document.getElementById('tm-due').value,
     headsUp: document.getElementById('tm-headsup').value,
     notes: document.getElementById('tm-notes').value, client: document.getElementById('tm-client').value.trim(),
