@@ -120,7 +120,7 @@ function actionSandbox(){
     leadStage: () => 'New', chaseTooLong: () => false, isWorkday: () => true, Promise, console,
   };
   vm.createContext(ctx);
-  const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'setLeadNotes', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'askReviewAgain', 'markReviewLeft', 'setChatAutoSms', 'setMyShift'];
+  const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'setLeadNotes', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'askReviewAgain', 'markReviewLeft', 'setChatAutoSms', 'setMyShift', 'storeFile'];
   vm.runInContext(names.map(fnText).join('\n'), ctx);
   return ctx;
 }
@@ -150,6 +150,10 @@ async function testActions(){
     await run(`setPaymentFollowup('j1', '2099-01-01')`);
     await run(`markReofferDone('j1')`);
     await run(`markTeamReminded('t1')`);
+    // A receipt or invoice picked in a form is not uploaded to file storage (the sandbox has no storage: a call would throw).
+    let stored = 'x';
+    try { stored = await vm.runInContext(`storeFile('job1', 'parts-receipt', 'data:image/png;base64,AAAA')`, ctx); } catch (e) { stored = 'threw: ' + e.message; }
+    ok(stored === null, `${mode}: a picked file is not uploaded`, stored);
     ok(ctx.log.db.length === 0, `${mode}: nothing is written (database, RPCs, activity log)`, ctx.log.db);
     ok(ctx.log.fetch.length === 0, `${mode}: no message, review request, report or status is sent`, ctx.log.fetch);
     ok(ctx.log.toasts.length >= 8 && ctx.log.toasts.every(t => /not saved/.test(t)), `${mode}: the person is told changes are not saved`, ctx.log.toasts);

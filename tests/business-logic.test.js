@@ -689,19 +689,21 @@ function testMaterialsPayback(sb){
     { id:'e5', date:'2026-10-05', createdAt:'2026-10-05T03:00:00Z', item:'Hose', technician:'Dolev', paidBy:'Dolev', cost:44, reimbursed:'Pending' },        // someone else's
   ];
   sb.STATE.data.jobs = [
-    { id:'j1', invoiceNumber:'2500', customerName:'Sarah', technician:'Guy', date:'2026-10-05', amount:349, includesGST:true, partsCost:44, partsPaidBy:'Guy', partsRefundStatus:'Pending Refund', partsPendingAt:'2026-10-06T01:00:00Z', commissionPercent:30, paymentStatus:'Paid', datePaid:'2026-10-05', paidToTechnician:'Not Paid' },
+    { id:'j1', invoiceNumber:'2500', customerName:'Sarah', technician:'Guy', date:'2026-10-05', amount:349, includesGST:true, partsCost:44, partsPaidBy:'Guy', partsRefundStatus:'Pending Refund', partsPendingAt:'2026-10-06T01:00:00Z', partsDescription:'Filter', partsReceiptFile:'sb:j1/parts-receipt-1.jpg', commissionPercent:30, paymentStatus:'Paid', datePaid:'2026-10-05', paidToTechnician:'Not Paid' },
     { id:'j2', invoiceNumber:'2501', customerName:'Tom', technician:'Guy', date:'2026-10-05', amount:200, includesGST:true, partsCost:20, partsPaidBy:'Guy', partsRefundStatus:'N/A', commissionPercent:30, paymentStatus:'Unpaid' }, // old row, never marked waiting
   ];
   const m = sb.computePayrollMaterials(sb.STATE.data, 'Guy', W);
   assertEqual(m.lines.map(l => l.label + ':' + l.amount), ['Drill:55', 'Ladder:110', 'Parts for job #2500 · Sarah:44'], 'materials: by the week entered (the ladder bought last week counts this week), the drill moves on from a paid week, not the business purchase, not someone else\'s');
   assertEqual([m.total, m.gst], [209, 19], 'materials: $209 paid back in full, $19 GST in it');
+  const partsLine = m.lines.find(l => l.kind==='parts');
+  assertEqual([partsLine.desc, partsLine.receipt], ['Filter', 'sb:j1/parts-receipt-1.jpg'], 'materials: what the parts were and the receipt go with the line');
   const mPrev = sb.computePayrollMaterials(sb.STATE.data, 'Guy', PREV);
   assertEqual(mPrev.lines.map(l => l.label), ['Gloves'], 'materials: a paid week shows what was paid back in it, nothing new');
   const c = sb.computePayrollCommission(sb.STATE.data, 'Guy', W);
   // commission: 30% of (349 - 44) = 91.50; materials 209 → total 300.50
   assertEqual([c.total, c.materials.total, c.grandTotal], [91.5, 209, 300.5], 'payroll: commission and equipment & materials separately, then the total');
   const msg = sb.buildCommissionPayMessage(c);
-  assertEqual(msg.includes('ציוד וחומרים שקנית (חשבונית נפרדת):') && msg.includes('* Ladder (2/10): $110.00') && msg.includes('עמלה: $91.50') && msg.includes('ציוד וחומרים: $209.00 (מתוך זה GST: $19.00)') && msg.includes('סה"כ לתשלום: $300.50'), true, 'pay message (Guy gets Hebrew): both amounts, the GST in the materials, and the total');
+  assertEqual(msg.includes('ציוד וחומרים שקנית (חשבונית נפרדת):') && msg.includes('* Ladder (2/10): $110.00') && msg.includes('* חלקים לעבודה #2500 - Filter (5/10): $44.00') && msg.includes('עמלה: $91.50') && msg.includes('ציוד וחומרים: $209.00 (מתוך זה GST: $19.00)') && msg.includes('סה"כ לתשלום: $300.50'), true, 'pay message (Guy gets Hebrew): both amounts, the GST in the materials, and the total');
   const plain = sb.buildCommissionPayMessage(sb.computePayrollCommission(sb.STATE.data, 'Guy', '2026-10-11'));
   assertEqual(plain.includes('ציוד'), false, 'pay message: nothing about equipment in a week without any');
   sb.STATE.data.payrollWeeks = []; sb.STATE.data.equipmentSpend = []; sb.STATE.data.jobs = [];

@@ -230,6 +230,8 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .file-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .file-chip { display:inline-flex; align-items:center; gap:5px; font-size:12.5px; font-weight:600; color: var(--primary-strong); text-decoration:none; background: var(--primary-soft); padding:5px 10px; border-radius: 99px; }
 .file-hint { font-size:11px; color: var(--ink-faint); }
+.file-drop { border:1.5px dashed var(--line); border-radius:10px; padding:8px 10px; min-height:46px; transition: border-color .1s, background .1s; }
+.file-drop.drag { border-color: var(--primary); background: var(--primary-soft); }
 .svc-grid { display:grid; grid-template-columns: repeat(2,1fr); gap:6px 14px; }
 
 .cal-grid { display:grid; grid-template-columns: repeat(7,1fr); }
@@ -534,11 +536,11 @@ function payrollMaterialItems(data, person){
   const out = [];
   (data.equipmentSpend||[]).forEach(e => {
     if (e.paidBy!==person || !((Number(e.cost)||0) > 0) || (e.reimbursed!=='Pending' && e.reimbursed!=='Reimbursed')) return;
-    out.push({ kind:'equipment', id:e.id, label:e.item, bought:e.date, entered: e.createdAt ? localDay(e.createdAt) : e.date, amount: round2(e.cost), paid: e.reimbursed==='Reimbursed', paidWeek: e.reimbursedWeek||null });
+    out.push({ kind:'equipment', id:e.id, label:e.item, bought:e.date, entered: e.createdAt ? localDay(e.createdAt) : e.date, amount: round2(e.cost), paid: e.reimbursed==='Reimbursed', paidWeek: e.reimbursedWeek||null, receipt: e.receiptFile||null });
   });
   (data.jobs||[]).forEach(j => {
     if (j.partsPaidBy!==person || !((Number(j.partsCost)||0) > 0) || (j.partsRefundStatus!=='Pending Refund' && j.partsRefundStatus!=='Refunded')) return;
-    out.push({ kind:'parts', id:j.id, job:j, label:`Parts for job #${j.invoiceNumber||'—'}${j.customerName ? ' · '+j.customerName : ''}`, bought:j.date, entered: j.partsPendingAt ? localDay(j.partsPendingAt) : j.date, amount: round2(j.partsCost), paid: j.partsRefundStatus==='Refunded', paidWeek: j.partsRefundWeek||null });
+    out.push({ kind:'parts', id:j.id, job:j, label:`Parts for job #${j.invoiceNumber||'—'}${j.customerName ? ' · '+j.customerName : ''}`, bought:j.date, entered: j.partsPendingAt ? localDay(j.partsPendingAt) : j.date, amount: round2(j.partsCost), paid: j.partsRefundStatus==='Refunded', paidWeek: j.partsRefundWeek||null, desc: j.partsDescription||'', receipt: j.partsReceiptFile||null });
   });
   return out;
 }
@@ -631,7 +633,7 @@ function buildCommissionPayMessage(p){
     return `* ${ref}${note}: ${payMoney(l.commission)}`;
   };
   const m = p.materials || { lines:[], total:0, gst:0 };
-  const matText = l => { const d = parseLocalDate(l.bought); return `* ${l.kind==='parts' ? (he ? `חלקים לעבודה #${l.job.invoiceNumber||''}` : `Parts for job #${l.job.invoiceNumber||''}`) : l.label} (${d.getDate()}/${d.getMonth()+1}): ${payMoney(l.amount)}`; };
+  const matText = l => { const d = parseLocalDate(l.bought); return `* ${l.kind==='parts' ? (he ? `חלקים לעבודה #${l.job.invoiceNumber||''}` : `Parts for job #${l.job.invoiceNumber||''}`) + (l.desc ? ` - ${l.desc}` : '') : l.label} (${d.getDate()}/${d.getMonth()+1}): ${payMoney(l.amount)}`; };
   const out = [];
   if (he) {
     out.push(`היי ${name} 👋`, `סיכום שכר שבועי (${range}):`, `עמלה על עבודות השבוע${pct}:`);
@@ -1086,7 +1088,7 @@ function jobPatchToRow(patch){
     cashConfirmed:'cash_confirmed', invoiceFile:'invoice_file', transferReceiptFile:'transfer_receipt_file',
     equipmentRentalFile:'equipment_rental_file', reviewTaken:'review_taken', reviewDoNotAsk:'review_do_not_ask', contactId:'contact_id',
     paymentFollowup:'payment_followup', paymentContacts:'payment_contacts', reofferDoneAt:'reoffer_done_at',
-    partsPendingAt:'parts_pending_at', partsRefundWeek:'parts_refund_week',
+    partsPendingAt:'parts_pending_at', partsRefundWeek:'parts_refund_week', partsDescription:'parts_description', partsReceiptFile:'parts_receipt_file',
   };
   const nullIfEmpty = new Set(['date_paid','contact_id','payment_followup','reoffer_done_at','parts_pending_at','parts_refund_week']);
   const row = {};
@@ -1168,7 +1170,7 @@ function supplierPatchToRow(patch){
   return row;
 }
 function equipmentSpendPatchToRow(patch){
-  const map = { date:'date', item:'item', technician:'technician', paidBy:'paid_by', cost:'cost', reimbursed:'reimbursed', reimbursedWeek:'reimbursed_week' };
+  const map = { date:'date', item:'item', technician:'technician', paidBy:'paid_by', cost:'cost', reimbursed:'reimbursed', reimbursedWeek:'reimbursed_week', receiptFile:'receipt_file' };
   const row = {};
   for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
   if ('date' in row && !row.date) row.date = todayStr();   // equipment_spend.date is NOT NULL, same defense as jobs.date
@@ -1701,11 +1703,11 @@ function mapJobRow(j){
     invoiceFile:j.invoice_file, transferReceiptFile:j.transfer_receipt_file, equipmentRentalFile:j.equipment_rental_file,
     reviewTaken:j.review_taken, reviewDoNotAsk:!!j.review_do_not_ask, contactId:j.contact_id||null,
     paymentFollowup:j.payment_followup||'', paymentContacts:Array.isArray(j.payment_contacts)?j.payment_contacts:[], reofferDoneAt:j.reoffer_done_at||null,
-    partsPendingAt:j.parts_pending_at||null, partsRefundWeek:j.parts_refund_week||null,
+    partsPendingAt:j.parts_pending_at||null, partsRefundWeek:j.parts_refund_week||null, partsDescription:j.parts_description||'', partsReceiptFile:j.parts_receipt_file||null,
   };
 }
 function mapEquipSpendRow(e){
-  return { id:e.id, date:e.date, item:e.item, technician:e.technician, paidBy:e.paid_by||'', cost:e.cost||0, reimbursed:e.reimbursed, createdAt:e.created_at||null, reimbursedWeek:e.reimbursed_week||null };
+  return { id:e.id, date:e.date, item:e.item, technician:e.technician, paidBy:e.paid_by||'', cost:e.cost||0, reimbursed:e.reimbursed, createdAt:e.created_at||null, reimbursedWeek:e.reimbursed_week||null, receiptFile:e.receipt_file||null };
 }
 function mapTaskRow(t){
   return {
@@ -1882,7 +1884,11 @@ let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task mod
 let EXPANDED_SUBTASK_INDEX = null; // which subtask's own updates thread is expanded in the task modal
 let MODAL_UPDATES = []; // transient per-modal Updates-log state for the task modal (append-only)
 let MODAL_TASK_ID = null; // id of the task currently open in the task modal (null while creating a new one)
-let CLOSING_FILE = null; // transient invoice-photo state for the "Post a closing" form
+// Files picked on a page form (Closings: invoice photo and parts receipt; the equipment receipt) until it is posted.
+// Kept apart from MODAL_FILES, which every closeModal() empties (posting a closing can open the commission popup).
+let PAGE_FILES = {};
+const PAGE_FILE_IDS = ['cf-photo', 'cf-parts-receipt', 'eqf-receipt'];
+const fileStore = id => PAGE_FILE_IDS.includes(id) ? PAGE_FILES : MODAL_FILES;
 
 function getRealProfile(){ return STATE.profiles.find(p => p.id===STATE.currentProfileId) || null; }
 // The person the screens are built for: the signed-in user, or (owners only) the team member they're viewing as.
@@ -1989,7 +1995,7 @@ function getCurrentProfile(){
   if (VIEW_AS_ID && real && real.role==='owner') { const v = STATE.profiles.find(p => p.id===VIEW_AS_ID); if (v) return v; }
   return real;
 }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; CLOSING_FILE = null; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, finance:{mode:'weekly',week:null,month:null}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; PAGE_FILES = {}; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
   toastTimer = setTimeout(()=>{
@@ -2194,46 +2200,81 @@ function animateRowRemove(el, then){
   setTimeout(then, 230);
 }
 
-/* ── simulated file uploads ──────────────────────────────────────────────
-   No backend exists in this preview, so "uploading" a file just reads it
-   into memory with FileReader as a data: URI and keeps it on MODAL_FILES
-   until Save copies it onto the record. Nothing is written to disk or a
-   server, and it is lost on page refresh — that's expected for a preview. */
-function fileField(label, fieldId, currentValue){
-  MODAL_FILES[fieldId] = currentValue || null;
+/* ── file uploads (invoices, receipts) ──────────────────────────────────
+   A file is picked with the button or dragged onto the box (Ofek 6 Oct). It is read into memory until the form is
+   saved, then uploaded to the private "job-attachments" storage (storeFile) and the record keeps "sb:<path>" — not
+   the file itself, so the app stays quick to load however many receipts there are. Opening one asks for a link that
+   works for 5 minutes, and storage only gives it to people who may see that job / purchase.
+   Folder = the job id, or equipment/<purchase id>. */
+function fileField(label, fieldId, currentValue, accept){
+  fileStore(fieldId)[fieldId] = currentValue || null;
   return `<div class="field file-field">
     <label>${esc(label)}</label>
-    <div class="file-row" id="${fieldId}-row">${fileRowInner(fieldId, currentValue)}</div>
-    <input type="file" id="${fieldId}-input" style="display:none" onchange="onFilePicked('${fieldId}', this)">
+    <div class="file-row file-drop" id="${fieldId}-row" ondragover="fileDragOver(event, this)" ondragleave="this.classList.remove('drag')" ondrop="onFileDropped(event, '${fieldId}')">${fileRowInner(fieldId, currentValue)}</div>
+    <input type="file" id="${fieldId}-input" ${accept ? `accept="${accept}"` : ''} style="display:none" onchange="onFilePicked('${fieldId}', this)">
   </div>`;
 }
+const RECEIPT_TYPES = 'image/*,application/pdf';
+const FILE_BUCKET = 'job-attachments', MAX_FILE_MB = 20;
+async function storeFile(folder, kind, value){
+  if (!value || !/^data:/.test(value)) return value || null;   // nothing new: keep what the record already has
+  if (readOnlyReason()) return null;
+  try {
+    const blob = await (await fetch(value)).blob();
+    const ext = ({ 'image/jpeg':'jpg', 'image/png':'png', 'image/heic':'heic', 'image/webp':'webp', 'application/pdf':'pdf' })[blob.type] || 'bin';
+    const path = `${folder}/${kind}-${Date.now()}.${ext}`;
+    const { error } = await sb.storage.from(FILE_BUCKET).upload(path, blob, { contentType: blob.type || 'application/octet-stream', upsert: false });
+    if (error) { showToast('Could not upload the file: ' + error.message); return null; }
+    return 'sb:' + path;
+  } catch (e) { showToast('Could not upload the file'); return null; }
+}
+// A small "📎 receipt" link for a stored file, anywhere in a table.
+function fileLinkHtml(ref, label){ return ref ? `<a href="#" class="file-chip" style="margin-left:6px" onclick="event.preventDefault();event.stopPropagation();openEmbeddedFile('${jsStr(ref)}')">${esc(label || '📎 receipt')}</a>` : ''; }
 // Attached files are kept inside the record itself (as an embedded file). Chrome won't open a plain link to one,
 // so "View" turns it into a temporary file first and opens that in a new tab.
 function openEmbeddedFile(u){
   if (!u) return;
+  if (/^sb:/.test(u)) {
+    const w = window.open('', '_blank');   // opened right away, so the browser doesn't block it as a popup
+    sb.storage.from(FILE_BUCKET).createSignedUrl(u.slice(3), 300).then(({ data, error }) => {
+      if (error || !data) { if (w) w.close(); showToast('Could not open the file'); return; }
+      if (w) w.location.href = data.signedUrl; else window.open(data.signedUrl, '_blank');
+    });
+    return;
+  }
   if (!/^data:/.test(u)) { window.open(u, '_blank', 'noopener'); return; }
   fetch(u).then(r => r.blob()).then(b => { const url = URL.createObjectURL(b); window.open(url, '_blank'); setTimeout(() => URL.revokeObjectURL(url), 60000); })
     .catch(() => showToast('Could not open the file'));
 }
 function fileRowInner(fieldId, value){
   if (value) {
-    return `<a href="#" onclick="event.preventDefault();openEmbeddedFile(MODAL_FILES['${fieldId}'])" class="file-chip">📄 View file</a><button type="button" class="btn ghost small" onclick="clearFileField('${fieldId}')">Remove</button>`;
+    return `<a href="#" onclick="event.preventDefault();openEmbeddedFile(fileStore('${fieldId}')['${fieldId}'])" class="file-chip">📄 View file</a><button type="button" class="btn ghost small" onclick="clearFileField('${fieldId}')">Remove</button><span class="file-hint">drag another file here to replace it</span>`;
   }
-  return `<button type="button" class="btn small" onclick="document.getElementById('${fieldId}-input').click()">Choose file…</button><span class="file-hint">Saved with this record when you press Save</span>`;
+  return `<button type="button" class="btn small" onclick="document.getElementById('${fieldId}-input').click()">Choose file…</button><span class="file-hint">or drag it here</span>`;
 }
-function onFilePicked(fieldId, inputEl){
-  const file = inputEl.files && inputEl.files[0]; if (!file) return;
+function fileDragOver(e, el){ e.preventDefault(); el.classList.add('drag'); }
+function onFileDropped(e, fieldId){
+  e.preventDefault();
+  const row = document.getElementById(fieldId+'-row'); if (row) row.classList.remove('drag');
+  const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (file) readPickedFile(fieldId, file);
+}
+function onFilePicked(fieldId, inputEl){ const file = inputEl.files && inputEl.files[0]; if (file) readPickedFile(fieldId, file); }
+function readPickedFile(fieldId, file){
+  if (file.size > MAX_FILE_MB * 1024 * 1024) { showToast(`That file is over ${MAX_FILE_MB} MB. Use a smaller photo or a PDF.`); return; }
   const reader = new FileReader();
   reader.onload = () => {
-    MODAL_FILES[fieldId] = reader.result;
+    fileStore(fieldId)[fieldId] = reader.result;
     const row = document.getElementById(fieldId+'-row'); if (row) row.innerHTML = fileRowInner(fieldId, reader.result);
   };
   reader.readAsDataURL(file);
 }
 function clearFileField(fieldId){
-  MODAL_FILES[fieldId] = null;
+  fileStore(fieldId)[fieldId] = null;
   const row = document.getElementById(fieldId+'-row'); if (row) row.innerHTML = fileRowInner(fieldId, null);
 }
+// A file dropped next to a box (not on it) must not make the browser leave the app to show the file.
+['dragover', 'drop'].forEach(t => window.addEventListener(t, e => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault(); }));
 
 /* ── CRUD actions (ported from mock-backend.ts, operating on STATE.data) ─ */
 function onStatusChange(kind, id, value){
@@ -5300,14 +5341,19 @@ function openJobModal(jobId){
           <div class="field"><label>Parts Refund Status</label><select id="jm-refund"><option value="N/A" ${(!job||job.partsRefundStatus==='N/A')?'selected':''}>N/A</option><option value="Pending Refund" ${job?.partsRefundStatus==='Pending Refund'?'selected':''}>Pending Refund</option><option value="Refunded" ${job?.partsRefundStatus==='Refunded'?'selected':''}>Refunded</option></select></div>
         </div>
 
+        <div class="grid-3" style="margin-top:11px">
+          <div class="field"><label>What were the parts</label><input id="jm-partsdesc" value="${esc(job?.partsDescription||'')}" placeholder="e.g. Filter + drain hose"></div>
+          ${fileField('Parts receipt', 'jm-partsReceiptFile', job?.partsReceiptFile, RECEIPT_TYPES)}
+        </div>
+
         <div class="modal-section">Notes</div>
         <textarea rows="2" id="jm-notes">${esc(job?.notes||'')}</textarea>
 
-        <div class="modal-section">Attachments (preview only)</div>
+        <div class="modal-section">Attachments</div>
         <div class="grid-3">
-          ${fileField('Invoice File', 'jm-invoiceFile', job?.invoiceFile)}
-          ${fileField('Transfer Receipt', 'jm-transferReceiptFile', job?.transferReceiptFile)}
-          ${fileField('Equipment Rental File', 'jm-equipmentRentalFile', job?.equipmentRentalFile)}
+          ${fileField('Invoice File', 'jm-invoiceFile', job?.invoiceFile, RECEIPT_TYPES)}
+          ${fileField('Transfer Receipt', 'jm-transferReceiptFile', job?.transferReceiptFile, RECEIPT_TYPES)}
+          ${fileField('Equipment Rental File', 'jm-equipmentRentalFile', job?.equipmentRentalFile, RECEIPT_TYPES)}
         </div>
         <div id="modal-error"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
@@ -5375,14 +5421,20 @@ async function saveJobModal(jobId){
     partsCost: Number(document.getElementById('jm-parts').value)||0,
     partsPaidBy: document.getElementById('jm-partsby').value,
     partsRefundStatus: document.getElementById('jm-refund').value,
+    partsDescription: document.getElementById('jm-partsdesc').value.trim(),
     notes: document.getElementById('jm-notes').value,
     reviewTaken: document.getElementById('jm-review').checked,
     reviewDoNotAsk: document.getElementById('jm-noask').checked,
     datePaid, paidToTechnician: prevJob?.paidToTechnician || 'Not Paid',
-    invoiceFile: MODAL_FILES['jm-invoiceFile'] ?? job_or_null(prevJob,'invoiceFile'),
-    transferReceiptFile: MODAL_FILES['jm-transferReceiptFile'] ?? job_or_null(prevJob,'transferReceiptFile'),
-    equipmentRentalFile: MODAL_FILES['jm-equipmentRentalFile'] ?? job_or_null(prevJob,'equipmentRentalFile'),
   };
+  // Files: a removed one is cleared; a new one is uploaded to file storage once the job exists (below), so the row never
+  // holds the file itself.
+  const JOB_FILES = { invoiceFile:['jm-invoiceFile','invoice'], transferReceiptFile:['jm-transferReceiptFile','transfer-receipt'], equipmentRentalFile:['jm-equipmentRentalFile','equipment-rental'], partsReceiptFile:['jm-partsReceiptFile','parts-receipt'] };
+  const newFiles = {};
+  Object.entries(JOB_FILES).forEach(([key, [fid]]) => {
+    const v = MODAL_FILES[fid] ?? job_or_null(prevJob, key);
+    if (v && /^data:/.test(v)) { newFiles[key] = v; values[key] = job_or_null(prevJob, key); } else values[key] = v || null;
+  });
   // Parts a technician paid for himself wait to be paid back with his weekly pay (Ofek 6 Oct). When the parts cost or
   // paid-by changed (or it's a new job) and the refund status was left as it was, the status follows them; a status
   // picked by hand wins.
@@ -5412,6 +5464,9 @@ async function saveJobModal(jobId){
   } else {
     logJobActivity(job, actor, 'Job created');
   }
+  const uploaded = {};
+  for (const [key, dataUrl] of Object.entries(newFiles)) { const ref = await storeFile(job.id, JOB_FILES[key][1], dataUrl); if (ref) uploaded[key] = ref; }
+  if (Object.keys(uploaded).length) { db.jobs.update(job.id, uploaded); logJobActivity(job, actor, `File${Object.keys(uploaded).length===1?'':'s'} attached`); }
   await ensureContactForJob(job, contactId);
   closeModal(); showToast(jobId?'Job updated':'Job added'); render();
 }
@@ -6430,7 +6485,7 @@ function payrollMaterialsTable(c){
   const m = c.materials; if (!m || !m.lines.length) return '';
   return `<div class="section-title" style="margin-top:14px">Equipment &amp; materials <span class="tag">${payMoney(m.total)} · incl. GST ${payMoney(m.gst)} · its own invoice</span></div>
     <div class="table-wrap"><table><thead><tr><th>Entered</th><th>Bought</th><th>What</th><th class="num">Amount (incl. GST)</th><th class="num">GST in it</th><th></th></tr></thead><tbody>
-    ${m.lines.map(l => `<tr><td class="mono">${fmtDateShort(l.entered)}</td><td class="mono">${fmtDateShort(l.bought)}</td><td>${l.kind==='parts' ? `Parts for job ${invoiceLink(l.id, l.job.invoiceNumber)}${l.job.customerName ? ' · '+esc(l.job.customerName) : ''}` : esc(l.label)}</td>
+    ${m.lines.map(l => `<tr><td class="mono">${fmtDateShort(l.entered)}</td><td class="mono">${fmtDateShort(l.bought)}</td><td>${l.kind==='parts' ? `Parts for job ${invoiceLink(l.id, l.job.invoiceNumber)}${l.job.customerName ? ' · '+esc(l.job.customerName) : ''}${l.desc ? ` <span class="hint">(${esc(l.desc)})</span>` : ''}` : esc(l.label)}${fileLinkHtml(l.receipt)}</td>
       <td class="num" style="font-weight:600">${payMoney(l.amount)}</td><td class="num">${payMoney(materialsGst(l.amount))}</td><td>${l.paid ? pill('good','paid back') : ''}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
@@ -6857,7 +6912,7 @@ function openDrill(i){
   } else if (d.kind==='equipment') {
     items.sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
     head = '<th>Bought</th><th>Entered</th><th>What</th><th>Technician</th><th>Paid by</th><th class="num">Amount (incl. GST)</th><th class="num">GST in it</th><th>Pay back</th>';
-    rows = items.map(e => `<tr><td class="mono">${fmtDateShort(e.date)}</td><td class="mono">${e.createdAt ? fmtDateShort(localDay(e.createdAt)) : '—'}</td><td>${esc(e.item||'—')}</td><td>${esc(e.technician||'—')}</td><td>${esc(e.paidBy||'—')}</td><td class="num">${fmtMoney(e.cost)}</td><td class="num">${fmtMoney(materialsGst(e.cost))}</td><td>${e.paidBy==='Business' || e.reimbursed==='N/A' ? '<span class="hint">expense only</span>' : e.reimbursed==='Reimbursed' ? pill('good','paid back') : pill('warn','with the weekly pay')}</td></tr>`).join('');
+    rows = items.map(e => `<tr><td class="mono">${fmtDateShort(e.date)}</td><td class="mono">${e.createdAt ? fmtDateShort(localDay(e.createdAt)) : '—'}</td><td>${esc(e.item||'—')}${fileLinkHtml(e.receiptFile)}</td><td>${esc(e.technician||'—')}</td><td>${esc(e.paidBy||'—')}</td><td class="num">${fmtMoney(e.cost)}</td><td class="num">${fmtMoney(materialsGst(e.cost))}</td><td>${e.paidBy==='Business' || e.reimbursed==='N/A' ? '<span class="hint">expense only</span>' : e.reimbursed==='Reimbursed' ? pill('good','paid back') : pill('warn','with the weekly pay')}</td></tr>`).join('');
   } else {
     items.sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
     head = '<th>Date</th><th>Customer</th><th>Invoice</th><th>Technician</th><th class="num">Amount (incl. GST)</th><th>Status</th>';
@@ -7376,17 +7431,6 @@ function onClosingTechChange(){
   typeSelect.innerHTML = allowed.map(t=>`<option value="${t}" ${t===current?'selected':''}>${t}</option>`).join('');
   if (!allowed.includes(current)) typeSelect.value = allowed[0];
 }
-function closingFileRow(){
-  if (CLOSING_FILE) return `<a href="#" onclick="event.preventDefault();openEmbeddedFile(CLOSING_FILE)" class="file-chip">📷 View photo</a><button type="button" class="btn ghost small" onclick="clearClosingFile()">Remove</button>`;
-  return `<button type="button" class="btn small" onclick="document.getElementById('cf-photo-input').click()">Attach invoice photo…</button><span class="file-hint">Saved with the closing when you post it</span>`;
-}
-function onClosingFilePicked(inputEl){
-  const file = inputEl.files && inputEl.files[0]; if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => { CLOSING_FILE = reader.result; const row = document.getElementById('cf-photo-row'); if (row) row.innerHTML = closingFileRow(); };
-  reader.readAsDataURL(file);
-}
-function clearClosingFile(){ CLOSING_FILE = null; const row = document.getElementById('cf-photo-row'); if (row) row.innerHTML = closingFileRow(); }
 function renderClosings(profile, data){
   const allTechs = technicianNames(STATE.data);
   const defaultTech = profile.role==='technician' ? (profile.technicianName || allTechs[0] || '') : (allTechs[0] || '');
@@ -7404,16 +7448,14 @@ function renderClosings(profile, data){
         <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="cf-nogst"> No GST</label><span class="hint">Off = the total includes GST (${STATE.data.settings.gstRatePercent}%)</span></div>
         <div class="field"><label>Payment Status</label><select id="cf-status">${CLOSING_PAYMENT_STATUSES.map(s=>`<option value="${s}">${s}</option>`).join('')}</select></div>
         <div class="field"><label>Method</label><select id="cf-method" onchange="if(this.value==='Cash') document.getElementById('cf-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.map(m=>`<option value="${m}">${m||'—'}</option>`).join('')}</select></div>
-        <div class="field"><label>Parts Cost</label><input type="number" id="cf-partscost" value="0"></div>
+        <div class="field"><label>Parts Cost</label><input type="number" step="0.01" id="cf-partscost" value="0"><span class="hint">The total on the receipt</span></div>
+        <div class="field"><label>What were the parts</label><input id="cf-partsdesc" placeholder="e.g. Filter + drain hose"></div>
+        ${fileField('Parts receipt', 'cf-parts-receipt', PAGE_FILES['cf-parts-receipt'], RECEIPT_TYPES)}
         <div class="field"><label>Parts Paid By</label><select id="cf-partsby"><option value="">—</option>${allTechs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}<option value="Business">Business</option></select></div>
         ${profile.role==='technician' ? '' : `<div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="cf-noask"> Don't ask for a review</label></div>`}
       </div>
       <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="cf-notes"></textarea></div>
-      <div class="field" style="margin-top:11px">
-        <label>Invoice Photo</label>
-        <div class="file-row" id="cf-photo-row">${closingFileRow()}</div>
-        <input type="file" id="cf-photo-input" accept="image/*" style="display:none" onchange="onClosingFilePicked(this)">
-      </div>
+      <div class="grid-3" style="margin-top:11px">${fileField('Invoice photo', 'cf-photo', PAGE_FILES['cf-photo'], RECEIPT_TYPES)}</div>
       <div id="cf-error"></div>
       <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn primary" onclick="postClosing()">Post closing</button></div>
     </div>
@@ -7440,9 +7482,11 @@ function postClosing(){
   const partsCost = Number(document.getElementById('cf-partscost').value) || 0;
   const partsPaidBy = document.getElementById('cf-partsby').value;
   const notes = document.getElementById('cf-notes').value;
-  const invoiceFileUrl = CLOSING_FILE;
+  const invoiceFileUrl = PAGE_FILES['cf-photo'] || null;
+  const partsReceiptFile = PAGE_FILES['cf-parts-receipt'] || null;
+  const partsDescription = document.getElementById('cf-partsdesc').value.trim();
   const reviewDoNotAsk = !!(document.getElementById('cf-noask') && document.getElementById('cf-noask').checked);
-  const gathered = { technicianName, date, customerName, contactId: pick.contactId, invoiceNumber, jobType, amount, includesGST, paymentStatus, paymentMethod, partsCost, partsPaidBy, notes, invoiceFileUrl, reviewDoNotAsk };
+  const gathered = { technicianName, date, customerName, contactId: pick.contactId, invoiceNumber, jobType, amount, includesGST, paymentStatus, paymentMethod, partsCost, partsPaidBy, partsDescription, partsReceiptFile, notes, invoiceFileUrl, reviewDoNotAsk };
 
   // % commission isn't a field on this form (it's Jobs-table-only) — it's looked up automatically from
   // the commission-rates table. When there's no automatic rate for this technician/job-type combo, don't
@@ -7511,14 +7555,13 @@ async function finalizeClosing(g, commissionPercent){
       customerName: g.customerName, technician: g.technicianName, date: g.date,
       jobType: g.jobType, commissionPercent, amount: g.amount, includesGST: g.includesGST,
       paymentStatus: g.paymentStatus, paymentMethod: g.paymentMethod, partsCost: g.partsCost,
-      partsPaidBy: g.partsPaidBy, notes: g.notes,
+      partsPaidBy: g.partsPaidBy, partsDescription: g.partsDescription || '', notes: g.notes,
     };
     // A later closing on the same invoice (a split payment) only adds "don't ask", never clears it.
     if (g.reviewDoNotAsk) patch.reviewDoNotAsk = true;
     Object.assign(patch, partsRefundPatch(existingJob, { ...existingJob, partsCost: g.partsCost, partsPaidBy: g.partsPaidBy }));
     if (g.paymentStatus==='Paid' && !existingJob.datePaid) patch.datePaid = g.date || todayStr();
     if (g.paymentStatus!=='Paid') patch.datePaid = '';
-    if (g.invoiceFileUrl) patch.invoiceFile = g.invoiceFileUrl;
     if (g.contactId) patch.contactId = g.contactId;
     db.jobs.update(existingJob.id, patch);
     job = existingJob;
@@ -7528,24 +7571,31 @@ async function finalizeClosing(g, commissionPercent){
       jobType: g.jobType, commissionPercent, amount: g.amount, includesGST: g.includesGST, paymentStatus: g.paymentStatus,
       paymentMethod: g.paymentMethod, partsCost: g.partsCost, partsPaidBy: g.partsPaidBy, ...partsRefundPatch(null, { partsCost: g.partsCost, partsPaidBy: g.partsPaidBy }),
       notes: g.notes || 'Created automatically from a Closings post.', datePaid: g.paymentStatus==='Paid'?(g.date || todayStr()):'',
-      paidToTechnician:'Not Paid', enteredBy: g.technicianName, cashConfirmed:false,
-      invoiceFile: g.invoiceFileUrl||null, transferReceiptFile:null, equipmentRentalFile:null,
+      paidToTechnician:'Not Paid', enteredBy: g.technicianName, cashConfirmed:false, partsDescription: g.partsDescription || '',
+      invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null,
       reviewTaken: false, reviewDoNotAsk: !!g.reviewDoNotAsk,
     };
     try { job = await db.jobs.create({ activityLog:[], ...values }); }
     catch (err) { return; }   // db.jobs.create() already showed an error toast; leave the closing form as-is so the user can retry
   }
   await ensureContactForJob(job, g.contactId);
+  // The invoice photo and the parts receipt go to file storage, in the job's folder (now that the job exists).
+  const invoiceRef = await storeFile(job.id, 'invoice', g.invoiceFileUrl);
+  const partsRef = await storeFile(job.id, 'parts-receipt', g.partsReceiptFile);
+  const filePatch = {};
+  if (invoiceRef) filePatch.invoiceFile = invoiceRef;
+  if (partsRef) filePatch.partsReceiptFile = partsRef;
+  if (Object.keys(filePatch).length) db.jobs.update(job.id, filePatch);
   const closingValues = {
     technicianName: g.technicianName, date: g.date, customerName: g.customerName, invoiceNumber: g.invoiceNumber,
     jobType: g.jobType, amount: g.amount, includesGST: g.includesGST, paymentStatus: g.paymentStatus, paymentMethod: g.paymentMethod,
-    partsCost: g.partsCost, partsPaidBy: g.partsPaidBy, notes: g.notes, invoiceFileUrl: g.invoiceFileUrl,
+    partsCost: g.partsCost, partsPaidBy: g.partsPaidBy, notes: g.notes, invoiceFileUrl: invoiceRef,
     postedBy: currentProfile?.fullName || g.technicianName, createdAt: new Date().toISOString(), linkedJobId: job.id,
     reviewTaken: false, reviewDoNotAsk: !!g.reviewDoNotAsk,
   };
   try { await db.closings.create(closingValues); }
   catch (err) { return; }   // db.closings.create() already showed an error toast
-  CLOSING_FILE = null;
+  PAGE_FILES['cf-photo'] = null; PAGE_FILES['cf-parts-receipt'] = null;
   showToast(existingJob ? 'Closing posted — existing job updated' : 'Closing posted — new job created');
   render();
 }
@@ -7585,6 +7635,7 @@ function renderEquipmentQuickFeed(profile, data){
         <div class="field"><label>Description</label><input id="eqf-desc" placeholder="e.g. Extension ladder"></div>
         <div class="field"><label>Price (incl. GST)</label><input type="number" step="0.01" id="eqf-price" value="0"><span class="hint">The total on the receipt</span></div>
         <div class="field"><label>Date Purchased</label><input type="date" id="eqf-date" value="${todayStr()}"></div>
+        ${fileField('Receipt', 'eqf-receipt', PAGE_FILES['eqf-receipt'], RECEIPT_TYPES)}
         <div class="field"><label>Paid By</label><select id="eqf-paidby">${allTechs.map(t=>`<option value="${esc(t)}" ${t===defaultTech?'selected':''}>${esc(t)}</option>`).join('')}<option value="Business">Business</option></select><span class="hint">A technician is paid back with his weekly pay. Business = an expense only</span></div>
       </div>
       <div id="eqf-error"></div>
@@ -7603,8 +7654,12 @@ async function postEquipmentQuick(){
   const cost = Number(document.getElementById('eqf-price').value) || 0;
   const date = document.getElementById('eqf-date').value || todayStr();
   const paidBy = document.getElementById('eqf-paidby').value;
-  try { await db.equipmentSpend.create({ date, item, technician, paidBy, cost, reimbursed: equipReimbursedFor(paidBy), activityLog:[] }); }
+  let rec;
+  try { rec = await db.equipmentSpend.create({ date, item, technician, paidBy, cost, reimbursed: equipReimbursedFor(paidBy), activityLog:[] }); }
   catch (err) { return; }   // db.equipmentSpend.create() already showed an error toast; the form keeps what was typed
+  const receipt = await storeFile(`equipment/${rec.id}`, 'receipt', PAGE_FILES['eqf-receipt']);
+  if (receipt) db.equipmentSpend.update(rec.id, { receiptFile: receipt });
+  PAGE_FILES['eqf-receipt'] = null;
   showToast('Equipment purchase posted');
   render();
 }
@@ -8409,7 +8464,7 @@ function renderEquipSpendTab(data){
   const allTechs = technicianNames(data);
   const list = [...data.equipmentSpend].sort((a,b)=>b.date.localeCompare(a.date));
   const rows = list.length ? list.map(e => `
-    <tr><td class="mono">${fmtDateShort(e.date)}</td><td class="mono">${e.createdAt ? fmtDateShort(localDay(e.createdAt)) : '—'}</td><td>${esc(e.item)}</td><td>${techTag(e.technician)}</td><td>${statusSelect('equipPaidBy', e.id, e.paidBy, [...allTechs, 'Business'], ()=>'neutral', v=>v, false)}</td><td class="num">${fmtMoney(e.cost)}</td>
+    <tr><td class="mono">${fmtDateShort(e.date)}</td><td class="mono">${e.createdAt ? fmtDateShort(localDay(e.createdAt)) : '—'}</td><td>${esc(e.item)}${fileLinkHtml(e.receiptFile)}</td><td>${techTag(e.technician)}</td><td>${statusSelect('equipPaidBy', e.id, e.paidBy, [...allTechs, 'Business'], ()=>'neutral', v=>v, false)}</td><td class="num">${fmtMoney(e.cost)}</td>
     <td>${statusSelect('equipReimbursed', e.id, e.reimbursed, ['Pending','Reimbursed','N/A'], v=>v==='Reimbursed'?'good':v==='Pending'?'warn':'neutral', v=>v, false)}</td>
     <td><button class="btn ghost small" onclick="openEquipActivityModal('${e.id}')">💬 ${recordActivityCount(e)}</button></td>
     <td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openEquipSpendModal('${e.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteEquipSpend('${e.id}');render()">Delete</button></td></tr>`).join('') : `<tr><td colspan="9">${emptyState('No equipment purchases yet')}</td></tr>`;
@@ -8434,6 +8489,7 @@ function openEquipSpendModal(itemId){
           <div class="field"><label>Technician (for commission)</label><select id="es-tech">${allTechs.map(t=>`<option value="${esc(t)}" ${(item?.technician||allTechs[0])===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
           <div class="field"><label>Paid By</label><select id="es-paidby">${allTechs.map(t=>`<option value="${esc(t)}" ${(item?.paidBy||allTechs[0])===t?'selected':''}>${esc(t)}</option>`).join('')}<option value="Business" ${item?.paidBy==='Business'?'selected':''}>Business</option></select></div>
           <div class="field"><label>Amount (incl. GST)</label><input type="number" step="0.01" id="es-cost" value="${item?.cost||0}"></div>
+          ${fileField('Receipt', 'es-receipt', item?.receiptFile, RECEIPT_TYPES)}
           <div class="field"><label>Refund Status</label><select id="es-reimb"><option value="Pending" ${(!item||item.reimbursed==='Pending')?'selected':''}>Pending</option><option value="Reimbursed" ${item?.reimbursed==='Reimbursed'?'selected':''}>Reimbursed</option><option value="N/A" ${item?.reimbursed==='N/A'?'selected':''}>N/A</option></select></div>
         </div>
         <div id="modal-error"></div>
@@ -8454,6 +8510,8 @@ async function saveEquipSpendModal(itemId){
   // Bought by the business = an expense only (nothing to pay back); a technician's purchase waits for his weekly pay.
   values.reimbursed = equipReimbursedFor(values.paidBy, values.reimbursed);
   if (values.reimbursed!=='Reimbursed') values.reimbursedWeek = null;
+  const receiptPicked = MODAL_FILES['es-receipt'];   // a new file (uploaded below), the one it had, or none
+  if (!(receiptPicked && /^data:/.test(receiptPicked))) values.receiptFile = receiptPicked || null;
   let item;
   if (itemId) { item = prev; db.equipmentSpend.update(item.id, values); }
   else {
@@ -8466,6 +8524,10 @@ async function saveEquipSpendModal(itemId){
     if (oldSnapshot.paidBy !== values.paidBy) logEquipmentActivity(item, actor, `Paid-by changed from "${oldSnapshot.paidBy}" to "${values.paidBy}"`);
   } else {
     logEquipmentActivity(item, actor, 'Equipment purchase logged');
+  }
+  if (receiptPicked && /^data:/.test(receiptPicked)) {
+    const ref = await storeFile(`equipment/${item.id}`, 'receipt', receiptPicked);
+    if (ref) { db.equipmentSpend.update(item.id, { receiptFile: ref }); logEquipmentActivity(item, actor, 'Receipt attached'); }
   }
   closeModal(); showToast(itemId?'Purchase updated':'Purchase added'); render();
 }
