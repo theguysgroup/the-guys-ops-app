@@ -6791,7 +6791,7 @@ function payrollInvoiceHtml(inv){
     ? `<tr><th>Job date</th><th>Job</th><th class="num">Job amount<br>excl. GST</th>${inv.deductsParts ? '<th class="num">Parts</th>' : ''}<th class="num">Rate</th><th class="num">Commission</th></tr>`
     : `<tr><th>Bought</th><th>Item</th><th>Supplier</th><th>Receipt</th><th class="num">GST in it</th><th class="num">Amount<br>incl. GST</th></tr>`;
   const rows = inv.kind==='salary'
-    ? inv.lines.map(l => `<tr><td>${esc(fmtDateShort(l.date))}</td><td>#${esc(l.invoice || '—')}${l.customer ? ' · ' + esc(l.customer) : ''}<div class="inv-sub">${esc(l.jobType)}</div></td><td class="num">${invMoney(l.amount)}</td>${inv.deductsParts ? `<td class="num">${l.parts ? invMoney(l.parts) : '—'}</td>` : ''}<td class="num">${invRate(l.rate)}</td><td class="num">${invMoney(l.commission)}</td></tr>`).join('')
+    ? inv.lines.map(l => `<tr><td>${esc(fmtDateShort(l.date))}</td><td>#${esc(l.invoice || '—')}${l.customer ? ' · ' + esc(l.customer) : ''}${l.jobType ? ` <span class="inv-sub">${esc(l.jobType)}</span>` : ''}</td><td class="num">${invMoney(l.amount)}</td>${inv.deductsParts ? `<td class="num">${l.parts ? invMoney(l.parts) : '—'}</td>` : ''}<td class="num">${invRate(l.rate)}</td><td class="num">${invMoney(l.commission)}</td></tr>`).join('')
     : inv.lines.map(l => `<tr><td>${esc(fmtDateShort(l.date))}</td><td>${esc(l.item)}${l.detail ? `<div class="inv-sub">${esc(l.detail)}</div>` : ''}</td><td>${esc(l.supplier || '—')}</td><td>${l.receipt ? '<span class="inv-ok">Attached in the app</span>' : '<span class="inv-sub">none</span>'}</td><td class="num">${invMoney(l.gst)}</td><td class="num">${invMoney(l.amount)}</td></tr>`).join('');
   const how = inv.kind==='salary'
     ? (inv.deductsParts ? 'Commission = (job amount excl. GST − parts) × the rate. A job counts in the week the customer paid.' : 'Commission = job amount excl. GST × the rate. A job counts in the week the customer paid.')
@@ -6830,7 +6830,7 @@ function payrollInvoicePdf(inv){
     ? ['Job date', 'Job', { text: 'Job amount excl. GST', alignment: 'right' }, ...(inv.deductsParts ? [{ text: 'Parts', alignment: 'right' }] : []), { text: 'Rate', alignment: 'right' }, { text: 'Commission', alignment: 'right' }]
     : ['Bought', 'Item', 'Supplier', 'Receipt', { text: 'GST in it', alignment: 'right' }, { text: 'Amount incl. GST', alignment: 'right' }];
   const body = salary
-    ? inv.lines.map(l => [fmtDateShort(l.date), { stack: [`#${l.invoice || '—'}${l.customer ? ' · ' + l.customer : ''}`, small(l.jobType)] }, { text: invMoney(l.amount), alignment: 'right' }, ...(inv.deductsParts ? [{ text: l.parts ? invMoney(l.parts) : '—', alignment: 'right' }] : []), { text: invRate(l.rate), alignment: 'right' }, { text: invMoney(l.commission), alignment: 'right' }])
+    ? inv.lines.map(l => [fmtDateShort(l.date), { text: [`#${l.invoice || '—'}${l.customer ? ' · ' + l.customer : ''}`, ...(l.jobType ? [{ text: '  ' + l.jobType, fontSize: 8.5, color: soft }] : [])] }, { text: invMoney(l.amount), alignment: 'right' }, ...(inv.deductsParts ? [{ text: l.parts ? invMoney(l.parts) : '—', alignment: 'right' }] : []), { text: invRate(l.rate), alignment: 'right' }, { text: invMoney(l.commission), alignment: 'right' }])
     : inv.lines.map(l => [fmtDateShort(l.date), { stack: [l.item, ...(l.detail ? [small(l.detail)] : [])] }, l.supplier || '—', l.receipt ? 'Attached in the app' : small('none'), { text: invMoney(l.gst), alignment: 'right' }, { text: invMoney(l.amount), alignment: 'right' }]);
   const widths = salary ? (inv.deductsParts ? [52, '*', 78, 52, 40, 70] : [52, '*', 90, 44, 76]) : [44, '*', 78, 82, 52, 70];
   const totalsRows = [
@@ -6858,12 +6858,12 @@ function payrollInvoicePdf(inv){
         { stack: [label('Bill to'), { text: t.legalName, bold: true, fontSize: 11 }, `ABN ${fmtAbn(t.abn)}`, ...(t.acn ? [`ACN ${t.acn}`] : [])] },
       ] },
       { margin: [0, 20, 0, 0], table: { headerRows: 1, widths, body: [header.map(h => typeof h==='string' ? { text: h.toUpperCase(), fontSize: 7.5, bold: true, color: soft } : { ...h, text: h.text.toUpperCase(), fontSize: 7.5, bold: true, color: soft }), ...body] },
-        layout: { hLineWidth: (i, node) => i===0 ? 0 : i===1 ? 1.2 : 0.5, vLineWidth: () => 0, hLineColor: i => i===1 ? ink : line, paddingLeft: i => i===0 ? 0 : 6, paddingRight: (i, node) => i===node.table.widths.length - 1 ? 0 : 6, paddingTop: () => 6, paddingBottom: () => 6 } },
+        layout: { hLineWidth: (i, node) => i===0 ? 0 : i===1 ? 1.2 : 0.5, vLineWidth: () => 0, hLineColor: i => i===1 ? ink : line, paddingLeft: i => i===0 ? 0 : 6, paddingRight: (i, node) => i===node.table.widths.length - 1 ? 0 : 6, paddingTop: () => 5, paddingBottom: () => 5 } },
       { margin: [0, 12, 0, 0], columns: [{ text: salary ? `${inv.lines.length} job${inv.lines.length===1 ? '' : 's'} paid by the customer this week` : '', color: soft }, { width: 230, table: { widths: ['*', 'auto'], body: [
         ...totalsRows.map(([a, b]) => [{ text: a, color: soft }, { text: b, alignment: 'right' }]),
         [{ text: 'Total', bold: true, fontSize: 13, margin: [0, 4, 0, 0] }, { text: invMoney(inv.total), bold: true, fontSize: 13, alignment: 'right', margin: [0, 4, 0, 0] }],
       ] }, layout: { hLineWidth: (i, node) => i===node.table.body.length - 1 ? 1.2 : 0, vLineWidth: () => 0, hLineColor: () => ink, paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 3, paddingBottom: () => 3 } }] },
-      { margin: [0, 22, 0, 0], table: { widths: ['*', '*'], body: [[
+      { margin: [0, 22, 0, 0], unbreakable: true, table: { widths: ['*', '*'], body: [[
         { stack: [label('Pay to'), ...(bank || [small('Bank details are not on file')])], fillColor: tint, margin: [10, 8, 10, 8] },
         { stack: [label('How it is worked out'), small(salary ? (inv.deductsParts ? 'Commission = (job amount excl. GST − parts) × the rate. A job counts in the week the customer paid.' : 'Commission = job amount excl. GST × the rate. A job counts in the week the customer paid.') : 'Paid back in full. The GST shown is inside the store receipts, which are attached in the app.')], fillColor: tint, margin: [10, 8, 10, 8] },
       ]] }, layout: { hLineWidth: () => 0, vLineWidth: (i) => i===1 ? 6 : 0, vLineColor: () => '#ffffff' } },
