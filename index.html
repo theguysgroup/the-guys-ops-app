@@ -7445,14 +7445,13 @@ function renderClosings(profile, data){
         <div class="field"><label>Invoice #</label><input id="cf-invoice" placeholder="e.g. 1008"></div>
         <div class="field"><label>Job Type</label><select id="cf-jobtype">${jobTypesForTech(defaultTech).map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
         <div class="field"><label>Total paid (incl. GST)</label><input type="number" step="0.01" id="cf-amount" value="0"></div>
-        <div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="cf-nogst"> No GST</label><span class="hint">Off = the total includes GST (${STATE.data.settings.gstRatePercent}%)</span></div>
+        <div class="field"><div style="display:flex;gap:18px;flex-wrap:wrap;padding-top:8px"><label class="checkline"><input type="checkbox" id="cf-nogst"> No GST</label>${profile.role==='technician' ? '' : `<label class="checkline"><input type="checkbox" id="cf-noask"> Don't ask for a review</label>`}</div><span class="hint">No GST off = the total includes GST (${STATE.data.settings.gstRatePercent}%)</span></div>
         <div class="field"><label>Payment Status</label><select id="cf-status">${CLOSING_PAYMENT_STATUSES.map(s=>`<option value="${s}">${s}</option>`).join('')}</select></div>
         <div class="field"><label>Method</label><select id="cf-method" onchange="if(this.value==='Cash') document.getElementById('cf-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.map(m=>`<option value="${m}">${m||'—'}</option>`).join('')}</select></div>
         <div class="field"><label>Parts Cost</label><input type="number" step="0.01" id="cf-partscost" value="0"><span class="hint">The total on the receipt</span></div>
         <div class="field"><label>What were the parts</label><input id="cf-partsdesc" placeholder="e.g. Filter + drain hose"></div>
-        ${fileField('Parts receipt', 'cf-parts-receipt', PAGE_FILES['cf-parts-receipt'], RECEIPT_TYPES)}
         <div class="field"><label>Parts Paid By</label><select id="cf-partsby"><option value="">—</option>${allTechs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}<option value="Business">Business</option></select></div>
-        ${profile.role==='technician' ? '' : `<div class="field"><label class="checkline" style="padding-top:8px"><input type="checkbox" id="cf-noask"> Don't ask for a review</label></div>`}
+        ${fileField('Parts receipt', 'cf-parts-receipt', PAGE_FILES['cf-parts-receipt'], RECEIPT_TYPES)}
       </div>
       <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="cf-notes"></textarea></div>
       <div class="grid-3" style="margin-top:11px">${fileField('Invoice photo', 'cf-photo', PAGE_FILES['cf-photo'], RECEIPT_TYPES)}</div>
