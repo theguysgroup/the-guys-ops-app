@@ -6485,7 +6485,9 @@ function performancePeople(data, base, pr){
 }
 // The two comparison charts (revenue and average job per technician), on the Payroll board for any period.
 function payrollCompareCards(data, techs, pr){
-  const rows = techs.map(t => ({ t, cur: techPeriodStats(data, t, pr.start, pr.effEnd), prev: techPeriodStats(data, t, pr.prevStart, pr.prevEnd) }));
+  const rows = techs.map(t => ({ t, cur: techPeriodStats(data, t, pr.start, pr.effEnd), prev: techPeriodStats(data, t, pr.prevStart, pr.prevEnd) }))
+    .filter(r => r.cur.count || r.prev.count);   // nobody with no jobs in either period
+  if (!rows.length) return `<div class="card" style="margin-bottom:16px"><div class="stat-sub">No jobs done in ${periodText(pr.start, pr.effEnd)} or in ${periodText(pr.prevStart, pr.prevEnd)} yet.</div></div>`;
   const labels = { curLabel: `This period · ${periodText(pr.start, pr.effEnd)}`, prevLabel: `Before · ${periodText(pr.prevStart, pr.prevEnd)}` };
   return `<div class="grid-2" style="align-items:stretch;margin-bottom:16px">
     <div class="card stat-card money" style="--stat-accent:var(--series-1)"><div class="stat-label">Revenue by technician <span class="hint">(jobs done, excl. GST)</span></div>
@@ -6525,7 +6527,8 @@ function renderPayrollPeriodNav(withModes){
 function renderPayrollPeriodView(data, viewChips){
   const pr = payrollPeriod(UI.payroll, todayStr());
   const techs = performancePeople(data, payrollCommissionPeople(data), pr);
-  const rows = techs.map(t => ({ t, cur: techPeriodStats(data, t, pr.start, pr.effEnd), prev: techPeriodStats(data, t, pr.prevStart, pr.prevEnd) }));
+  const rows = techs.map(t => ({ t, cur: techPeriodStats(data, t, pr.start, pr.effEnd), prev: techPeriodStats(data, t, pr.prevStart, pr.prevEnd) }))
+    .filter(r => r.cur.count || r.prev.count);
   const sum = (k, which) => round2(rows.reduce((s,r) => s + (Number(r[which][k])||0), 0));
   const tot = which => { const revenue = sum('revenue', which), count = sum('count', which); return { revenue, count, avgJob: count ? round2(revenue / count) : null, commission: sum('commission', which) }; };
   const cur = tot('cur'), prev = tot('prev');
