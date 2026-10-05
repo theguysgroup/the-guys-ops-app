@@ -6476,6 +6476,13 @@ function renderCompareBars(rows, opts){
     ${rows.map(r => `<div class="cmp-row"><span class="lbl">${r.labelHtml || esc(r.label)}</span><div>${line(r.cur, false)}${line(r.prev, true)}</div><span class="d">${deltaBadge(Number(r.cur)||0, Number(r.prev)||0) || '<span class="hint">—</span>'}</span></div>`).join('')}`;
 }
 const periodText = (a, b) => a===b ? fmtDateShort(a) : `${fmtDateShort(a)} – ${fmtDateShort(b)}`;
+// Everyone to compare for a period: the technicians on commission, plus anyone else who did jobs in it or in the period
+// before (the owners too: performance is about the work, pay is not).
+function performancePeople(data, base, pr){
+  const out = [...base];
+  (data.jobs||[]).forEach(j => { if (j.technician && ((j.date >= pr.prevStart && j.date <= pr.prevEnd) || (j.date >= pr.start && j.date <= pr.effEnd)) && !out.includes(j.technician)) out.push(j.technician); });
+  return out;
+}
 // The two comparison charts (revenue and average job per technician), on the Payroll board for any period.
 function payrollCompareCards(data, techs, pr){
   const rows = techs.map(t => ({ t, cur: techPeriodStats(data, t, pr.start, pr.effEnd), prev: techPeriodStats(data, t, pr.prevStart, pr.prevEnd) }));
@@ -6517,9 +6524,7 @@ function renderPayrollPeriodNav(withModes){
 // marked week by week (Week).
 function renderPayrollPeriodView(data, viewChips){
   const pr = payrollPeriod(UI.payroll, todayStr());
-  const eligible = commissionEligibleTechnicianNames(data);
-  const techs = [...payrollCommissionPeople(data)];
-  (data.jobs||[]).forEach(j => { if (j.date >= pr.prevStart && j.date <= pr.effEnd && eligible.includes(j.technician) && !techs.includes(j.technician)) techs.push(j.technician); });
+  const techs = performancePeople(data, payrollCommissionPeople(data), pr);
   const rows = techs.map(t => ({ t, cur: techPeriodStats(data, t, pr.start, pr.effEnd), prev: techPeriodStats(data, t, pr.prevStart, pr.prevEnd) }));
   const sum = (k, which) => round2(rows.reduce((s,r) => s + (Number(r[which][k])||0), 0));
   const tot = which => { const revenue = sum('revenue', which), count = sum('count', which); return { revenue, count, avgJob: count ? round2(revenue / count) : null, commission: sum('commission', which) }; };
@@ -6535,7 +6540,7 @@ function renderPayrollPeriodView(data, viewChips){
     ${viewChips||''}
     ${renderPayrollPeriodNav(true)}
     <div class="grid-4" style="margin-bottom:16px">
-      ${tile('Revenue <span class="hint">(technicians\' jobs, excl. GST)</span>', fmtMoney(cur.revenue), deltaBadge(cur.revenue, prev.revenue), `before: ${fmtMoney(prev.revenue)}`)}
+      ${tile('Revenue <span class="hint">(jobs done, excl. GST)</span>', fmtMoney(cur.revenue), deltaBadge(cur.revenue, prev.revenue), `before: ${fmtMoney(prev.revenue)}`)}
       ${tile('Jobs done', String(cur.count), deltaBadge(cur.count, prev.count), `before: ${prev.count}`)}
       ${tile('Average job', cur.avgJob===null ? '—' : fmtMoney(cur.avgJob), deltaBadge(cur.avgJob||0, prev.avgJob||0), `before: ${prev.avgJob===null ? '—' : fmtMoney(prev.avgJob)}`)}
       ${tile('Commission <span class="hint">(on jobs done)</span>', fmtMoney(cur.commission), deltaBadge(cur.commission, prev.commission), `before: ${fmtMoney(prev.commission)}`)}
@@ -6549,7 +6554,7 @@ function renderPayrollPeriodView(data, viewChips){
         <td class="num">${cell(r.cur.commission, r.prev.commission, money)}</td><td class="num">${cell(r.cur.daysWorked, r.prev.daysWorked, num)}</td>
         <td class="num">${cell(r.cur.dailyAvg, r.prev.dailyAvg, money)}</td></tr>`).join('') : `<tr><td colspan="7">${emptyState('No technicians')}</td></tr>`}
     </tbody></table></div>
-    <div class="hint" style="margin-top:6px">By the date of the job. ▲ / ▼ = the change against ${periodText(pr.prevStart, pr.prevEnd)}. Daily average = revenue before GST − parts, per day worked.</div>
+    <div class="hint" style="margin-top:6px">By the date of the job, everyone who did jobs (owners too). ▲ / ▼ = the change against ${periodText(pr.prevStart, pr.prevEnd)}. Daily average = revenue before GST − parts, per day worked.</div>
     ${hourly.length ? `<div class="section-title">Hourly staff</div>
     <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Hours</th><th class="num">Bookings</th><th class="num">Pay</th></tr></thead><tbody>
       ${hourly.map(h => `<tr><td>${techTag(h.p)}</td><td class="num">${cell(h.cur.hours, h.prev.hours, v => v + 'h')}</td><td class="num">${cell(h.cur.bookings, h.prev.bookings, num)}</td><td class="num">${cell(h.cur.pay, h.prev.pay, money)}</td></tr>`).join('')}
@@ -6709,7 +6714,7 @@ function renderPayrollBoard(profile, data, viewChips){
       <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Total payroll this week</div><div class="stat-value">${payMoney(round2(commTotal+matTotal+hourlyTotal))}</div><div class="stat-sub">${matTotal ? `incl. ${payMoney(matTotal)} equipment &amp; materials · ` : ''}${unpaidPeople ? `${unpaidPeople} still to pay` : 'everyone with pay is marked paid'} · owners' fixed salaries not included</div></div>
       <div class="card stat-card" style="--stat-accent:${cashOpen>0?'var(--warn)':'var(--good)'}"><div class="stat-label">Cash still to collect</div><div class="stat-value">${payMoney(cashOpen)}</div><div class="stat-sub">cash is collected before salary is paid</div></div>
     </div>
-    ${payrollCompareCards(data, people, payrollPeriod({ mode:'week', week: weekKey }, todayStr()))}
+    ${(() => { const pr = payrollPeriod({ mode:'week', week: weekKey }, todayStr()); return payrollCompareCards(data, performancePeople(data, people, pr), pr); })()}
     <div class="section-title">Technicians <span class="tag">${payrollWeekLabel(wk)}</span></div>
     <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Paid jobs</th><th class="num">Commission</th><th class="num">Equipment &amp; materials</th><th class="num">Total to pay</th><th class="num">Not paid yet</th><th>Cash to collect</th><th>Salary</th><th>Message</th></tr></thead>
       <tbody>${commRows || `<tr><td colspan="9">${emptyState('No technicians', 'Add technicians on the Employees tab')}</td></tr>`}</tbody></table></div>
