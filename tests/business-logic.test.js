@@ -59,6 +59,8 @@ const DECLS = [
   'equipReimbursedFor', 'partsRefundFor', 'partsRefundPatch', 'materialsGst', 'payrollMaterialItems', 'computePayrollMaterials', 'computeGstSummary', 'profitSteps', 'techWeekStats',
   // Payroll periods (6 Oct)
   'payrollPeriod', 'techPeriodStats', 'hourlyPeriodStats',
+  // Tasks views + Expenses & receipts (7 Oct)
+  'boardForAssignees', 'tasksInView', 'taskPeople', 'SPEND_CATEGORIES', 'expenseRows', 'filterExpenseRows', 'supplierNames', 'KNOWN_STORES', 'storeWords', 'storeWordMatch', 'findStoreInText',
 ];
 
 function extractDecl(source, name){
@@ -524,7 +526,7 @@ function testSalesAutomations(sb){
   const ron = { fullName:'Ron', technicianName:'Ron' };
   const task = (extra) => Object.assign({ id:'t', status:'Not Started', assignees:['Ron'], board:'ron', due:'2026-10-05', headsUp:'' }, extra||{});
   assertEqual([sb.myTaskDue(task(), ron, '2026-10-05'), sb.myTaskDue(task({ due:'2026-10-08' }), ron, '2026-10-05'), sb.myTaskDue(task({ due:'2026-10-08', headsUp:'2026-10-04' }), ron, '2026-10-05'), sb.myTaskDue(task({ status:'Done' }), ron, '2026-10-05')], [true, false, true, false], 'myTaskDue: due today, not before (unless heads-up), never when Done');
-  assertEqual([sb.teamTaskDue(task({ assignees:['Guy'], board:'Guy' }), ron, '2026-10-05'), sb.teamTaskDue(task(), ron, '2026-10-05'), sb.teamTaskDue(task({ assignees:['Ofek'], board:'mine' }), ron, '2026-10-05'), sb.teamTaskDue(task({ assignees:['Guy'], board:'Guy', due:'2026-10-09', headsUp:'2026-10-05' }), ron, '2026-10-05')], [true, false, false, true], 'teamTaskDue: other people\'s tasks only (never Ron\'s own, never a private board), due today or on the heads-up day');
+  assertEqual([sb.teamTaskDue(task({ assignees:['Guy'], board:'Guy' }), ron, '2026-10-05'), sb.teamTaskDue(task(), ron, '2026-10-05'), sb.teamTaskDue(task({ assignees:['Ofek'], board:'Ofek' }), ron, '2026-10-05'), sb.teamTaskDue(task({ assignees:['Guy'], board:'Guy', due:'2026-10-09', headsUp:'2026-10-05' }), ron, '2026-10-05')], [true, false, true, true], 'teamTaskDue: other people\'s tasks (the owners\' too, 7 Oct), never Ron\'s own, due today or on the heads-up day');
   // My Day counters: done / total per bubble, the day's % = everything done ÷ everything (Ofek 3/10).
   const K = sb.mdCounts({ new: [{done:true},{done:true},{done:true},{done:true},{done:true},{done:true},{done:false},{done:false},{done:false},{done:false}], chasing: Array.from({length:30}, () => ({done:true})) });
   // new 6/10, chasing 30/30 → 36 of 40 = 90%
@@ -755,6 +757,55 @@ function testPayrollPeriods(sb){
   assertEqual([h.hours, h.bookings], [8, 5], 'hourlyPeriodStats: hours and bookings in the range only');
 }
 
+function testTasksAndExpenses(sb){
+  // Tasks: All / Just mine / a person (a person = assigned to them, or still on their board).
+  sb.STATE.profiles = [{ role:'va', fullName:'Ron', technicianName:null }];
+  const T = (id, assignees, board) => ({ id, assignees, board, status:'Not Started' });
+  const tasks = [T('t1', ['Ron'], 'ron'), T('t2', ['Ofek','Ron'], 'Ofek'), T('t3', ['Guy'], 'Guy'), T('t4', ['Omri'], 'Omri'), T('t5', [], 'Noam')];
+  const ids = list => list.map(t => t.id);
+  const ofek = { fullName:'Ofek', technicianName:'Ofek' }, omri = { fullName:'Omri Gurna', technicianName:'Omri' }, ron = { fullName:'Ron', technicianName:null };
+  assertEqual(ids(sb.tasksInView(tasks, 'all', ofek)), ['t1','t2','t3','t4','t5'], 'tasksInView: All = everyone');
+  assertEqual([ids(sb.tasksInView(tasks, 'me', ofek)), ids(sb.tasksInView(tasks, 'me', omri)), ids(sb.tasksInView(tasks, 'me', ron))], [['t2'], ['t4'], ['t1','t2']], 'tasksInView: Just mine = assigned to whoever is logged in (shared tasks too)');
+  assertEqual([ids(sb.tasksInView(tasks, 'Ron', ofek)), ids(sb.tasksInView(tasks, 'Noam', ofek))], [['t1','t2'], ['t5']], 'tasksInView: a person = assigned to them, or on their board');
+  const emp = (name, roles, status) => ({ name, roles, status: status || 'Active' });
+  assertEqual(sb.taskPeople({ employees: [emp('Guy',['Technician']), emp('Noam',['Owner','Technician']), emp('Ron',['VA']), emp('Old',['Technician'],'Inactive'), emp('Ofek',['Owner','Technician'])] }), ['Ron','Noam','Ofek','Guy'], 'taskPeople: Ron, then the owners, then the rest; active only');
+
+  // Expenses & receipts: equipment purchases + parts for jobs, newest first; parts only when they cost something.
+  const data = {
+    equipmentSpend: [
+      { id:'e1', date:'2026-10-02', item:'Ladder', category:'Tools', supplier:'Bunnings', technician:'Guy', paidBy:'Guy', cost:330, reimbursed:'Pending', receiptFile:'sb:x' },
+      { id:'e2', date:'2026-09-20', item:'Rags', category:'', supplier:'BP', technician:'Omri', paidBy:'Business', cost:12.5, reimbursed:'N/A' },
+    ],
+    jobs: [
+      { id:'j1', date:'2026-10-04', invoiceNumber:'1008', customerName:'Sam', partsCost:55, partsDescription:'Filter', partsSupplier:'Bunnings Warehouse', technician:'Guy', partsPaidBy:'Guy', partsRefundStatus:'Pending Refund' },
+      { id:'j2', date:'2026-10-03', invoiceNumber:'1009', partsCost:0, technician:'Guy' },
+    ],
+    suppliers: [{ name:'Actrol' }, { name:'bunnings' }],
+  };
+  const rows = sb.expenseRows(data);
+  assertEqual(rows.map(r => [r.id, r.category, r.amount]), [['j1','Job parts',55], ['e1','Tools',330], ['e2','',12.5]], 'expenseRows: job parts + purchases, newest first, no $0 parts');
+  assertEqual([rows[0].item, rows[0].job, rows[0].refund], ['Filter', 'Job #1008 · Sam', 'Pending Refund'], 'expenseRows: a parts row says what and which job');
+  const f = x => sb.filterExpenseRows(rows, x).map(r => r.id);
+  assertEqual([f({ start:'2026-10-01', end:'2026-10-07' }), f({ supplier:' bUNn ' }), f({ category:'none' }), f({ tech:'Guy', category:'Tools' }), f({ category:'Job parts' })],
+    [['j1','e1'], ['j1','e1'], ['e2'], ['e1'], ['j1']], 'filterExpenseRows: dates, supplier (any part, any case), not set, technician + category, job parts');
+  assertEqual(sb.supplierNames(data), ['BP','Bunnings','Bunnings Warehouse','Actrol'], 'supplierNames: used ones first (the same name in any case once), then the Suppliers list');
+
+  // The store on a receipt.
+  const find = (text, extra) => sb.findStoreInText(text, [...sb.KNOWN_STORES, ...(extra||[])]);
+  assertEqual([
+    find('BUNNlNGS WAREHOUSE\nTAX INVOICE\nABN 26 008 672 179'),
+    find('BUNNlNGS WAREHOUSE\nTAX INVOICE', ['Bunnings Warehouse']),
+    find('Welcome to\nAMP0L Foodary Kings Park\nUnleaded 91\nMobile: 0412 345 678'),
+    find('SHELF BRACKET x2\nThanks'),
+    find('Coles Express\nShell V-Power'),
+    find('SUPERCHEAPAUTO\nRECEIPT'),
+    find('7-ELEVEN #2231'),
+    find('Visit www.bpwebsite.com'),
+    find(''),
+  ], ['Bunnings', 'Bunnings Warehouse', 'Ampol', null, 'Coles Express', 'Supercheap Auto', '7-Eleven', null, null],
+  'findStoreInText: one misread letter, 0 read as O, MOBILE is not Mobil, SHELF is not Shell, top line + longer name wins, run-together words, no store inside other words');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
 testFunnelLossReasonsSpeedToLead(loadSandbox());
@@ -771,6 +822,7 @@ testMaterialsPayback(loadSandbox());
 testGstSummary(loadSandbox());
 testDashboardMoneyVisuals(loadSandbox());
 testPayrollPeriods(loadSandbox());
+testTasksAndExpenses(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

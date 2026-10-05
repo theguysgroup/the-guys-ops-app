@@ -466,6 +466,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .editable-cell:hover { background: var(--surface-2); box-shadow: 0 0 0 1px var(--line); }
 .xlink { cursor: pointer; color: var(--primary-strong); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
 .xlink:hover { text-decoration-style: solid; }
+button.xlink { background:none; border:none; padding:0; font:inherit; }
 /* A big number that opens a list keeps the number's own color (red reads as a problem); the dotted line shows it's clickable. */
 .stat-value .xlink { color: inherit; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
 .cash-amount { font-family: 'Figtree', sans-serif; font-size: 26px; font-weight: 700; color: var(--good); letter-spacing: -.01em; }
@@ -651,6 +652,64 @@ function profitSteps(np){
   costs.forEach(([label, v]) => { const val = Number(v)||0; steps.push({ label, from: round2(run - val), to: run, value: val, kind:'out' }); run = round2(run - val); });
   steps.push({ label:'Net profit', from: Math.min(0, run), to: Math.max(0, run), value: run, kind: run >= 0 ? 'net' : 'loss' });
   return { steps, lo: Math.min(0, ...steps.map(st => st.from)), hi: Math.max(0.01, ...steps.map(st => st.to)) };
+}
+// ── Expenses & receipts (Ofek 7 Oct): every purchase in one list, on its own Payroll tab — equipment purchases (a
+// category each: Tools or Consumables) and the parts bought for jobs (category "Job parts"). Amounts include GST.
+const SPEND_CATEGORIES = ['Tools', 'Consumables'];
+function spendCategoryLabel(c){ return c==='Consumables' ? 'Consumables (used a few times, then thrown away)' : c; }
+function expenseRows(data){
+  const rows = [];
+  (data.equipmentSpend||[]).forEach(e => rows.push({ kind:'equipment', id:e.id, date:e.date||'', item:e.item||'', category:e.category||'', supplier:e.supplier||'', technician:e.technician||'', paidBy:e.paidBy||'', amount: round2(e.cost), receipt:e.receiptFile||null, refund:e.reimbursed||'', rec:e }));
+  (data.jobs||[]).forEach(j => {
+    if (!((Number(j.partsCost)||0) > 0)) return;
+    rows.push({ kind:'parts', id:j.id, date:j.date||'', item:j.partsDescription||'Parts', job:`Job #${j.invoiceNumber||'—'}${j.customerName ? ' · '+j.customerName : ''}`, category:'Job parts', supplier:j.partsSupplier||'', technician:j.technician||'', paidBy:j.partsPaidBy||'', amount: round2(j.partsCost), receipt:j.partsReceiptFile||null, refund:j.partsRefundStatus||'', rec:j });
+  });
+  return rows.sort((a,b) => b.date.localeCompare(a.date));
+}
+// f: { start, end (purchase date), tech, category ('none' = not set yet), supplier (any part of the name, any case) }.
+function filterExpenseRows(rows, f){
+  const sup = String(f.supplier||'').trim().toLowerCase();
+  return rows.filter(r => (!f.start || r.date >= f.start) && (!f.end || r.date <= f.end) && (!f.tech || r.technician===f.tech)
+    && (!f.category || (f.category==='none' ? !r.category : r.category===f.category)) && (!sup || r.supplier.toLowerCase().includes(sup)));
+}
+// Every supplier name the app knows (typed on a purchase or a job, or on the Suppliers list), the most used first.
+function supplierNames(data){
+  const count = new Map(), add = (n, w) => { const k = String(n||'').trim(); if (!k) return; const key = k.toLowerCase(); const cur = count.get(key); count.set(key, { name: cur ? cur.name : k, n: (cur ? cur.n : 0) + w }); };
+  (data.equipmentSpend||[]).forEach(e => add(e.supplier, 1));
+  (data.jobs||[]).forEach(j => add(j.partsSupplier, 1));
+  (data.suppliers||[]).forEach(x => add(x.name, 0));
+  return [...count.values()].sort((a,b) => b.n - a.n || a.name.localeCompare(b.name)).map(x => x.name);
+}
+// Reading the store off a receipt photo: common Australian stores plus every supplier already in the app. OCR slips are
+// allowed for: a digit inside a word is read as the letter it looks like (AMP0L → AMPOL), and a word of 6+ letters may
+// have one letter misread (BUNNlNGS). Otherwise a word must match exactly, so MOBILE is not Mobil and SHELF is not
+// Shell. A store named higher on the receipt wins, and on the same line the longer name (Coles Express over Coles).
+const KNOWN_STORES = ['Bunnings', 'Mitre 10', 'Total Tools', 'Sydney Tools', 'Tools Warehouse', 'Kennards Hire', 'Coates Hire', 'Blackwoods', 'Reece', 'Tradelink', "Middy's", 'Rexel', 'Haymans', 'Lawrence & Hanson', 'Actrol', 'Heatcraft', 'Kirby', 'Airefrig', 'Jaycar', 'Altronics', 'Officeworks', 'Kmart', 'Big W', 'JB Hi-Fi', 'Harvey Norman', 'IKEA', 'Costco', 'Woolworths', 'Coles', 'Coles Express', 'Aldi', 'Supercheap Auto', 'Repco', 'Autobarn', 'BP', 'Ampol', 'Caltex', 'Shell', 'Reddy Express', '7-Eleven', 'Metro Petroleum', 'United Petroleum', 'Mobil', 'Puma Energy', 'Speedway', 'Clark Rubber', 'Karcher', 'Amazon', 'eBay', 'Temu'];
+function storeWords(s){
+  return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/['’`]/g, '').replace(/&/g, ' AND ')
+    .split(/[^A-Z0-9]+/).filter(Boolean).map(w => /\d/.test(w) && /[A-Z]/.test(w) ? w.replace(/0/g, 'O').replace(/1/g, 'I').replace(/5/g, 'S').replace(/8/g, 'B') : w);
+}
+function storeWordMatch(a, w){
+  if (a===w) return true;
+  if (w.length < 6 || a.length!==w.length || /\d/.test(w)) return false;
+  let d = 0; for (let i = 0; i < w.length; i++) if (a[i]!==w[i] && ++d > 1) return false;
+  return true;
+}
+function findStoreInText(text, names){
+  const lines = String(text||'').split(/\n/).map(storeWords).filter(ws => ws.length);
+  let best = null;
+  (names||[]).forEach(name => {
+    const kw = storeWords(name); if (!kw.length) return;
+    const joined = kw.join(''), len = joined.length;
+    for (let i = 0; i < lines.length && (!best || i <= best.line); i++) {
+      const words = lines[i];
+      // Words run together: SUPERCHEAPAUTO, BUNNINGSWAREHOUSE.
+      let hit = len >= 6 && (kw.length > 1 ? words.join('').includes(joined) : words.some(x => x.length > len && x.startsWith(joined)));
+      for (let s = 0; !hit && s + kw.length <= words.length; s++) hit = kw.every((w, k) => storeWordMatch(words[s+k], w));
+      if (hit) { if (!best || i < best.line || len > best.len) best = { name, line: i, len }; break; }
+    }
+  });
+  return best ? best.name : null;
 }
 // ── Payroll period (Ofek 6 Oct): a week (pay is done week by week), a month, or any custom range, each compared with
 // the matching period just before it: the same number of days, so a week or month still in progress is compared with
@@ -1199,7 +1258,7 @@ function jobPatchToRow(patch){
     cashConfirmed:'cash_confirmed', invoiceFile:'invoice_file', transferReceiptFile:'transfer_receipt_file',
     equipmentRentalFile:'equipment_rental_file', reviewTaken:'review_taken', reviewDoNotAsk:'review_do_not_ask', contactId:'contact_id',
     paymentFollowup:'payment_followup', paymentContacts:'payment_contacts', reofferDoneAt:'reoffer_done_at',
-    partsPendingAt:'parts_pending_at', partsRefundWeek:'parts_refund_week', partsDescription:'parts_description', partsReceiptFile:'parts_receipt_file',
+    partsPendingAt:'parts_pending_at', partsRefundWeek:'parts_refund_week', partsDescription:'parts_description', partsReceiptFile:'parts_receipt_file', partsSupplier:'parts_supplier',
   };
   const nullIfEmpty = new Set(['date_paid','contact_id','payment_followup','reoffer_done_at','parts_pending_at','parts_refund_week']);
   const row = {};
@@ -1281,7 +1340,7 @@ function supplierPatchToRow(patch){
   return row;
 }
 function equipmentSpendPatchToRow(patch){
-  const map = { date:'date', item:'item', technician:'technician', paidBy:'paid_by', cost:'cost', reimbursed:'reimbursed', reimbursedWeek:'reimbursed_week', receiptFile:'receipt_file' };
+  const map = { date:'date', item:'item', technician:'technician', paidBy:'paid_by', cost:'cost', reimbursed:'reimbursed', reimbursedWeek:'reimbursed_week', receiptFile:'receipt_file', category:'category', supplier:'supplier' };
   const row = {};
   for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
   if ('date' in row && !row.date) row.date = todayStr();   // equipment_spend.date is NOT NULL, same defense as jobs.date
@@ -1679,10 +1738,8 @@ function filterForProfile(data, profile){
     ...data,
     jobs: data.jobs.filter(j => jobVisible(j.technician)),
     equipmentSpend: data.equipmentSpend.filter(e => equipVisible(e.technician)),
-    // Both the "Ron's Tasks" and "My Tasks" boards are gated by the same `tasks` permission flag —
-    // which board is showing, and whether it's filtered to just this person, is a rendering concern
-    // (see UI.tasks.board / UI.tasks.filterMode), not a data-visibility one.
-    tasks: !profile.permissions.tasks ? [] : profile.role==='va' ? data.tasks.filter(t => t.board!=='mine') : data.tasks,
+    // Ron (office) sees and creates tasks for everyone, like the owners (Ofek 7 Oct); a technician only his own tasks.
+    tasks: !profile.permissions.tasks ? [] : profile.role==='technician' ? data.tasks.filter(t => taskAssignedTo(t, profile) || t.board===profile.technicianName) : data.tasks,
     contacts: (profile.permissions.crm || profile.permissions.crmOverview) ? data.contacts : [],
     equipmentCatalog: profile.permissions.reference ? data.equipmentCatalog : [],
     suppliers: profile.permissions.reference ? data.suppliers : [],
@@ -1815,11 +1872,11 @@ function mapJobRow(j){
     invoiceFile:j.invoice_file, transferReceiptFile:j.transfer_receipt_file, equipmentRentalFile:j.equipment_rental_file,
     reviewTaken:j.review_taken, reviewDoNotAsk:!!j.review_do_not_ask, contactId:j.contact_id||null,
     paymentFollowup:j.payment_followup||'', paymentContacts:Array.isArray(j.payment_contacts)?j.payment_contacts:[], reofferDoneAt:j.reoffer_done_at||null,
-    partsPendingAt:j.parts_pending_at||null, partsRefundWeek:j.parts_refund_week||null, partsDescription:j.parts_description||'', partsReceiptFile:j.parts_receipt_file||null,
+    partsPendingAt:j.parts_pending_at||null, partsRefundWeek:j.parts_refund_week||null, partsDescription:j.parts_description||'', partsReceiptFile:j.parts_receipt_file||null, partsSupplier:j.parts_supplier||'',
   };
 }
 function mapEquipSpendRow(e){
-  return { id:e.id, date:e.date, item:e.item, technician:e.technician, paidBy:e.paid_by||'', cost:e.cost||0, reimbursed:e.reimbursed, createdAt:e.created_at||null, reimbursedWeek:e.reimbursed_week||null, receiptFile:e.receipt_file||null };
+  return { id:e.id, date:e.date, item:e.item, technician:e.technician, paidBy:e.paid_by||'', cost:e.cost||0, reimbursed:e.reimbursed, createdAt:e.created_at||null, reimbursedWeek:e.reimbursed_week||null, receiptFile:e.receipt_file||null, category:e.category||'', supplier:e.supplier||'' };
 }
 function mapTaskRow(t){
   return {
@@ -1990,7 +2047,7 @@ function setupRealtimeSubscriptions(){
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
 }
-let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
+let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let toastMsg = null, toastTimer = null;
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
 let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task modal
@@ -2109,7 +2166,7 @@ function getCurrentProfile(){
   if (VIEW_AS_ID && real && real.role==='owner') { const v = STATE.profiles.find(p => p.id===VIEW_AS_ID); if (v) return v; }
   return real;
 }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'ron', filterMode:null, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; PAGE_FILES = {}; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'calendar', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; PAGE_FILES = {}; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
   toastTimer = setTimeout(()=>{
@@ -2383,6 +2440,63 @@ function readPickedFile(fieldId, file){
     if (/^inv-/.test(fieldId)) renderKeepingInput();   // an invoice: show its Send button now
   };
   reader.readAsDataURL(file);
+  if (RECEIPT_SUPPLIER_FIELD[fieldId]) readStoreFromReceipt(fieldId, file);
+}
+// ── The store name from a receipt photo (Ofek 7 Oct, the free option): the text is read in the browser with
+// Tesseract.js, loaded the first time a receipt photo is attached, and the store found in it fills the supplier box
+// next to the receipt (see findStoreInText). Photos only: for a PDF the store is typed. The box can always be changed;
+// a store typed by hand is never replaced.
+const RECEIPT_SUPPLIER_FIELD = { 'es-receipt':'es-supplier', 'eqf-receipt':'eqf-supplier', 'cf-parts-receipt':'cf-parts-supplier', 'jm-partsReceiptFile':'jm-parts-supplier' };
+const OCR_SCRIPT = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+let OCR_WORKER = null; const OCR_RUN = {};
+function loadScriptOnce(src){
+  return new Promise((resolve, reject) => {
+    const old = [...document.scripts].find(x => x.src===src);
+    if (old && old.dataset.loaded) { resolve(); return; }
+    const el = old || document.createElement('script');
+    el.addEventListener('load', () => { el.dataset.loaded = '1'; resolve(); });
+    el.addEventListener('error', () => { el.remove(); reject(new Error('could not load ' + src)); });
+    if (!old) { el.src = src; document.head.appendChild(el); }
+  });
+}
+function ocrWorker(){
+  if (!OCR_WORKER) OCR_WORKER = loadScriptOnce(OCR_SCRIPT).then(() => window.Tesseract.createWorker('eng')).catch(e => { OCR_WORKER = null; throw e; });
+  return OCR_WORKER;
+}
+// A phone photo is shrunk to at most 1600px wide, in grey: quicker to read and just as clear.
+async function receiptImageForOcr(file){
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const scale = Math.min(1, 1600 / (img.naturalWidth || 1600));
+    const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * scale); c.height = Math.round(img.naturalHeight * scale);
+    const g = c.getContext('2d'); g.filter = 'grayscale(1) contrast(1.2)'; g.drawImage(img, 0, 0, c.width, c.height);
+    return c;
+  } finally { URL.revokeObjectURL(url); }
+}
+function storeNote(supId, html){ const el = document.getElementById(supId + '-ocr'); if (el) el.innerHTML = html; }
+async function readStoreFromReceipt(fieldId, file){
+  const supId = RECEIPT_SUPPLIER_FIELD[fieldId];
+  if (!document.getElementById(supId)) return;
+  const run = OCR_RUN[supId] = (OCR_RUN[supId] || 0) + 1;   // a newer receipt replaces this one's answer
+  if (!/^image\//.test(file.type || '')) { storeNote(supId, 'Type the store: it is read from photos only.'); return; }
+  storeNote(supId, 'Reading the store name from the receipt…');
+  let name = null;
+  try { const worker = await ocrWorker(); const { data } = await worker.recognize(await receiptImageForOcr(file)); name = findStoreInText(data && data.text, [...KNOWN_STORES, ...supplierNames(STATE.data)]); }
+  catch (e) { if (OCR_RUN[supId]===run) storeNote(supId, 'Could not read the receipt. Type the store.'); return; }
+  if (OCR_RUN[supId]!==run) return;
+  const input = document.getElementById(supId); if (!input) return;
+  if (!name) { storeNote(supId, 'Could not find the store name on the photo. Type it.'); return; }
+  const typed = input.value.trim();
+  if (!typed || input.dataset.auto==='1') { input.value = name; input.dataset.auto = '1'; input.dataset.dirty = '1'; storeNote(supId, `Read from the receipt: <b>${esc(name)}</b>. Change it if it’s wrong.`); }
+  else if (typed.toLowerCase()!==name.toLowerCase()) storeNote(supId, `The receipt says <b>${esc(name)}</b> · <button type="button" class="xlink" onclick="useReadStore('${supId}','${jsStr(name)}')">use it</button>`);
+  else storeNote(supId, '');
+}
+function useReadStore(supId, name){ const input = document.getElementById(supId); if (input) { input.value = name; input.dataset.dirty = '1'; } storeNote(supId, ''); }
+// The supplier box: suggests every supplier already used; the note under it says what was read from the receipt.
+function supplierFieldHtml(label, id, value){
+  const names = supplierNames(STATE.data);
+  return `<div class="field"><label>${esc(label)}</label><input id="${id}" list="${id}-list" autocomplete="off" value="${esc(value||'')}" placeholder="e.g. Bunnings" oninput="this.dataset.auto=''"><datalist id="${id}-list">${names.map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist><span class="hint" id="${id}-ocr" aria-live="polite"></span></div>`;
 }
 function clearFileField(fieldId){
   fileStore(fieldId)[fieldId] = null;
@@ -2498,6 +2612,12 @@ function onStatusChange(kind, id, value){
     e.reimbursed = value;
     db.equipmentSpend.update(e.id, { reimbursed: e.reimbursed });
     if (old!==value) logEquipmentActivity(e, actor, `Reimbursement status changed from "${old}" to "${value}"`);
+  } else if (kind==='equipCategory') {
+    const e = STATE.data.equipmentSpend.find(x=>x.id===id);
+    const old = e.category || '';
+    e.category = value;
+    db.equipmentSpend.update(e.id, { category: value || null });
+    if (old!==value) logEquipmentActivity(e, actor, `Category changed from "${old||'not set'}" to "${value||'not set'}"`);
   } else if (kind==='taskStatus') {
     const t = STATE.data.tasks.find(x=>x.id===id);
     t.status = value;
@@ -2625,13 +2745,9 @@ async function doChangePassword(){
 }
 
 /* ── app shell ───────────────────────────────────────────────────────── */
-// NAV is data-driven for plain single-target sections. Two spots need special handling because
-// they don't map 1:1 to a single UI.tab value: the Tasks section is split into two sidebar links
-// ("Ron's Tasks" / "My Tasks") that both render the *same* Tasks page pre-filtered to a board,
-// and Equipment/Employees/Suppliers collapse into one "Resources" group that all point at the
-// existing Reference page pre-selected to a tab — see goTasks()/goResources() and the custom
-// blocks inside renderShell() below. Both stay gated by their original single permission flag
-// (`tasks` / `reference`) so the permission model itself is untouched.
+// NAV is data-driven for plain single-target sections. Tasks and Resources are built separately inside renderShell()
+// below (one item each; the page switches views itself — see goTasks()/goResources()). Both stay gated by their
+// original single permission flag (`tasks` / `reference`) so the permission model itself is untouched.
 // navBlocks below is consumed positionally in renderShell (index 0..3) — keep this array's order and
 // length in sync with that template if you add or remove a group.
 const NAV = [
@@ -2644,11 +2760,10 @@ function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; re
 function goTasks(board){ UI.tab = 'tasks'; if (board) UI.tasks.board = board; UI.mobileNavOpen = false; render(); }
 function goResources(tab){ UI.tab = 'reference'; if (tab) UI.reference.tab = tab; UI.mobileNavOpen = false; render(); }
 function toggleMobileNav(){ UI.mobileNavOpen = !UI.mobileNavOpen; render(); }
-// board model: 'ron' and 'mine' are the two fixed boards; any other string is that technician's
-// own personal board (their name, e.g. 'Guy'). This function is the single source of truth for labels.
+// board model: 'ron' is the office assistant's board; any other string is that person's own board (their name, e.g.
+// 'Guy'). A task's board follows its first assignee (boardForAssignees). This function is the single source of truth for labels.
 function taskBoardLabel(board){
   if (board==='ron') return "Ron's Tasks";
-  if (board==='mine') return 'My Tasks';
   return `${board}'s Tasks`;
 }
 function activeTechnicianNames(data){ return data.employees.filter(e=>e.roles.includes('Technician') && e.status==='Active').map(e=>e.name); }
@@ -2680,19 +2795,11 @@ function renderShell(profile, data){
     ? `<div><div class="nav-group-label">Field</div>${navButtonHtml('closings','Closings','🧾', UI.tab==='closings', "goTab('closings')")}</div>`
     : '';
 
-  // "Management" group: task boards (split from one Tasks link, same `tasks` permission) and the
-  // collapsible Resources group (Equipment / Employees / Suppliers, same `reference` permission).
-  // Task board nav depends on role, not just the `tasks` flag: a technician gets exactly ONE link — their
-  // own personal board — never Ron's, never Mine, never another technician's. Owner/Manager/VA instead
-  // get Ron's Tasks + My Tasks (the owner's own board) + a collapsible group with every active
-  // technician's board listed separately, mirroring the Resources group's pattern.
-  // One "Tasks" item: the page switches between everyone's boards itself (Ron, My Tasks, each technician); a technician
-  // only ever has his own board. One "Resources" item: its tabs are inside the page (Ofek 6 Oct).
+  // "Management" group: Tasks (`tasks` permission) and Resources (Employees / Equipment / Suppliers, `reference` permission).
+  // One "Tasks" item: the page itself switches between All, Just mine and each person (Ofek 7 Oct); a technician only
+  // ever sees his own tasks. One "Resources" item: its tabs are inside the page (Ofek 6 Oct).
   const mgmtItems = [];
-  if (canViewSection(profile,'tasks')) {
-    const myBoard = profile.role==='technician' ? profile.technicianName : null;
-    if (profile.role!=='technician' || myBoard) mgmtItems.push(navButtonHtml('tasks', 'Tasks', '☑', UI.tab==='tasks', myBoard ? `goTasks('${esc(myBoard)}')` : 'goTasks()'));
-  }
+  if (canViewSection(profile,'tasks') && (profile.role!=='technician' || profile.technicianName)) mgmtItems.push(navButtonHtml('tasks', 'Tasks', '☑', UI.tab==='tasks', 'goTasks()'));
   if (canViewSection(profile,'reference')) mgmtItems.push(navButtonHtml('reference', 'Resources', '▥', UI.tab==='reference', 'goResources()'));
   const mgmtHtml = mgmtItems.length ? `<div><div class="nav-group-label">Management</div>${mgmtItems.join('')}</div>` : '';
 
@@ -3916,9 +4023,9 @@ function taskAssignedTo(t, p){ const names = assigneeNames(t); return names.incl
 function myTaskDue(t, me, today){
   return t.status!=='Done' && taskAssignedTo(t, me) && ((!!t.due && t.due <= today) || (!!t.headsUp && t.headsUp <= today));
 }
-// Remind the team: someone else's task (not the owners' private board), not Done, due today or late, or its heads-up day.
+// Remind the team: someone else's task, not Done, due today or late, or its heads-up day.
 function teamTaskDue(t, me, today){
-  return t.status!=='Done' && t.board!=='mine' && !taskAssignedTo(t, me) && assigneeNames(t).length > 0 && ((!!t.due && t.due <= today) || t.headsUp===today);
+  return t.status!=='Done' && !taskAssignedTo(t, me) && assigneeNames(t).length > 0 && ((!!t.due && t.due <= today) || t.headsUp===today);
 }
 function jobDivision(j){ const c = typeof contactForJob==='function' ? contactForJob(j) : null; return (c && c.division) || (/chimney/i.test(j.jobType||'') ? 'Chimney' : /pressure/i.test(j.jobType||'') ? 'Pressure Washing' : 'Aircon'); }
 // The actions behind those bubbles.
@@ -5432,6 +5539,7 @@ function openJobModal(jobId){
         <div class="grid-3" style="margin-top:11px">
           <div class="field"><label>What were the parts</label><input id="jm-partsdesc" value="${esc(job?.partsDescription||'')}" placeholder="e.g. Filter + drain hose"></div>
           ${fileField('Parts receipt', 'jm-partsReceiptFile', job?.partsReceiptFile, RECEIPT_TYPES)}
+          ${supplierFieldHtml('Parts bought at', 'jm-parts-supplier', job?.partsSupplier)}
         </div>
 
         <div class="modal-section">Notes</div>
@@ -5510,6 +5618,7 @@ async function saveJobModal(jobId){
     partsPaidBy: document.getElementById('jm-partsby').value,
     partsRefundStatus: document.getElementById('jm-refund').value,
     partsDescription: document.getElementById('jm-partsdesc').value.trim(),
+    partsSupplier: document.getElementById('jm-parts-supplier').value.trim(),
     notes: document.getElementById('jm-notes').value,
     reviewTaken: document.getElementById('jm-review').checked,
     reviewDoNotAsk: document.getElementById('jm-noask').checked,
@@ -6505,7 +6614,7 @@ function setPayrollMode(m){ UI.payroll.mode = m; if (m==='month' && !UI.payroll.
 function setPayrollMonth(k){ UI.payroll.month = k; render(); }
 function setPayrollRange(which, v){ UI.payroll[which] = v; render(); }
 // Week / Month / Custom, then the week or month as a dropdown (Ofek 6 Oct), and what it is compared with.
-function renderPayrollPeriodNav(withModes){
+function renderPayrollPeriodNav(withModes, noCompare){
   const today = todayStr();
   const ui = withModes ? UI.payroll : { mode:'week', week: UI.payroll.week };
   const pr = payrollPeriod(ui, today);
@@ -6527,7 +6636,7 @@ function renderPayrollPeriodNav(withModes){
   } else {
     ctl = `<input type="date" value="${esc(pr.start)}" onchange="setPayrollRange('from', this.value)" aria-label="From"><span class="hint">to</span><input type="date" value="${esc(pr.end)}" onchange="setPayrollRange('to', this.value)" aria-label="To">`;
   }
-  return `<div class="period-bar">${modes}${ctl}<span class="hint">compared with ${periodText(pr.prevStart, pr.prevEnd)}${pr.effEnd < pr.end ? ` (same days, as ${periodText(pr.start, pr.effEnd)} so far)` : ''}</span></div>`;
+  return `<div class="period-bar">${modes}${ctl}${noCompare ? '' : `<span class="hint">compared with ${periodText(pr.prevStart, pr.prevEnd)}${pr.effEnd < pr.end ? ` (same days, as ${periodText(pr.start, pr.effEnd)} so far)` : ''}</span>`}</div>`;
 }
 // Month or custom range: how each technician did and the hourly staff, each against the period before. Pay itself is
 // marked week by week (Week).
@@ -6758,12 +6867,87 @@ function renderPayroll(profile, data){
     // Owners can open any worker's own pay page from here (what used to be the separate Employee Views page).
     const people = [...payrollCommissionPeople(data), ...payrollHourlyPeople(data)];
     const viewAs = people.includes(UI.payroll.viewAs) ? UI.payroll.viewAs : null;
-    const chips = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="week-chip ${viewAs?'':'active'}" onclick="UI.payroll.viewAs=null;render()">Payroll board</button>${people.map(p => `<button class="week-chip ${p===viewAs?'active':''}" onclick="UI.payroll.viewAs='${jsStr(p)}';render()" title="What ${esc(p)} sees on their own pay page">👁 ${esc(p)}'s view</button>`).join('')}</div>`;
+    const expenses = !viewAs && UI.payroll.view==='expenses';
+    const chips = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="week-chip ${viewAs||expenses?'':'active'}" onclick="setPayrollView(null)">Payroll board</button><button class="week-chip ${expenses?'active':''}" onclick="setPayrollView('expenses')">🧾 Expenses &amp; receipts</button>${people.map(p => `<button class="week-chip ${p===viewAs?'active':''}" onclick="UI.payroll.viewAs='${jsStr(p)}';render()" title="What ${esc(p)} sees on their own pay page">👁 ${esc(p)}'s view</button>`).join('')}</div>`;
+    if (expenses) return renderPayrollExpenses(data, chips);
     return viewAs
       ? `<div class="page-head"><div><h1 class="page-title">Payroll</h1><div class="page-sub">Viewing as ${esc(viewAs)} — exactly what they see on their own pay page</div></div></div>${chips}${renderMyPay(profile, data, viewAs, true)}`
       : renderPayrollBoard(profile, data, chips);
   }
   return renderMyPay(profile, data, profile.technicianName || profile.fullName, false);
+}
+function setPayrollView(v){ UI.payroll.viewAs = null; UI.payroll.view = v; render(); }
+// ── Expenses & receipts tab (Ofek 7 Oct; moved here from Resources): every purchase and job-parts receipt, filtered by
+// the period above (purchase date), technician, category and supplier.
+function setExpenseFilter(key, v){ UI.payroll[key] = v; render(); }
+function expenseSupplierMenu(q){
+  const menu = document.getElementById('ex-supplier-menu'); if (!menu) return;
+  const term = String(q||'').trim().toLowerCase();
+  const hits = supplierNames(STATE.data).filter(n => !term || n.toLowerCase().includes(term)).slice(0, 12);
+  menu.innerHTML = (term ? `<div class="hint" style="padding:6px 10px">Enter = every supplier with “${esc(q.trim())}” in its name</div>` : '')
+    + (hits.length ? hits.map(n => `<button type="button" class="conv-menu-item" onmousedown="event.preventDefault();setExpenseFilter('exSupplier','${jsStr(n)}')">${esc(n)}</button>`).join('') : `<div class="hint" style="padding:6px 10px">No supplier by that name yet</div>`);
+  menu.hidden = false;
+}
+const SPEND_CATEGORY_COLOR = { Tools:'var(--series-1)', Consumables:'var(--series-2)', 'Job parts':'var(--series-3)', '':'var(--deemph)' };
+function renderPayrollExpenses(data, viewChips){
+  const pr = payrollPeriod(UI.payroll, todayStr());
+  const tech = UI.payroll.exTech || '', cat = UI.payroll.exCat || '', sup = UI.payroll.exSupplier || '';
+  const all = expenseRows(data);
+  const base = { start: pr.start, end: pr.end, tech, supplier: sup };
+  const rows = filterExpenseRows(all, { ...base, category: cat });
+  const byCat = c => filterExpenseRows(all, { ...base, category: c });
+  const sum = list => round2(list.reduce((s,r) => s + r.amount, 0));
+  const total = sum(rows), noReceipt = rows.filter(r => !r.receipt).length;
+  const waiting = sum(rows.filter(r => r.refund==='Pending' || r.refund==='Pending Refund'));
+  const techs = [...new Set([...technicianNames(data), ...all.map(r => r.technician).filter(Boolean)])];
+  const catChip = (c, label) => { const n = (c ? byCat(c) : filterExpenseRows(all, base)).length; return `<button class="week-chip ${cat===c?'active':''}" onclick="setExpenseFilter('exCat','${c}')">${esc(label)} <span class="tag">${n}</span></button>`; };
+  const unset = byCat('none').length;
+  const segs = [...SPEND_CATEGORIES, 'Job parts', ''].map(c => ({ label: c || 'Category not set', value: sum(byCat(c || 'none')), color: SPEND_CATEGORY_COLOR[c] })).filter(x => x.value > 0);
+  const refundPill = r => r.kind==='equipment'
+    ? statusSelect('equipReimbursed', r.id, r.refund, ['Pending','Reimbursed','N/A'], v=>v==='Reimbursed'?'good':v==='Pending'?'warn':'neutral', v=>v, false)
+    : pill(r.refund==='Refunded' ? 'good' : r.refund==='Pending Refund' ? 'warn' : 'neutral', r.refund==='Pending Refund' ? 'Pending' : (r.refund || 'N/A'));
+  const body = rows.length ? rows.map(r => `<tr>
+      <td class="mono">${fmtDateShort(r.date)}</td>
+      <td class="wrap"><div>${esc(r.item)}</div>${r.job ? `<div class="stat-sub">${esc(r.job)}</div>` : ''}</td>
+      <td>${r.kind==='equipment' ? statusSelect('equipCategory', r.id, r.category, ['', ...SPEND_CATEGORIES], ()=>'neutral', v=>v||'Not set', false) : pill('neutral', 'Job parts')}</td>
+      <td>${r.supplier ? `<button type="button" class="xlink" onclick="setExpenseFilter('exSupplier','${jsStr(r.supplier)}')" title="Only ${esc(r.supplier)}">${esc(r.supplier)}</button>` : '<span class="hint">—</span>'}</td>
+      <td>${r.technician ? techTag(r.technician) : '—'}</td>
+      <td>${r.kind==='equipment' ? statusSelect('equipPaidBy', r.id, r.paidBy, [...technicianNames(data), 'Business'], ()=>'neutral', v=>v, false) : esc(r.paidBy || '—')}</td>
+      <td class="num">${fmtMoney(r.amount)}</td>
+      <td>${r.receipt ? fileLinkHtml(r.receipt) : '<span class="hint">none</span>'}</td>
+      <td>${refundPill(r)}</td>
+      <td style="display:flex;gap:4px">${r.kind==='equipment'
+        ? `<button class="btn ghost small" onclick="openEquipActivityModal('${r.id}')">💬 ${recordActivityCount(r.rec)}</button><button class="btn ghost small" onclick="openEquipSpendModal('${r.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteEquipSpend('${r.id}')">Delete</button>`
+        : `<button class="btn ghost small" onclick="openJobModal('${r.id}')">Open job</button>`}</td>
+    </tr>`).join('') : `<tr><td colspan="10">${emptyState('No purchases match', 'Try another period, or clear the filters.')}</td></tr>`;
+  const tile = (label, value, sub, accent) => `<div class="card stat-card" style="--stat-accent:${accent}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div><div class="stat-sub">${sub}</div></div>`;
+  const filtered = tech || cat || sup;
+  return `
+    <div class="page-head">
+      <div><h1 class="page-title">Payroll</h1><div class="page-sub">Expenses &amp; receipts · equipment purchases and parts for jobs, by purchase date · amounts include GST</div></div>
+      <button class="btn primary" onclick="openEquipSpendModal(null)">+ Equipment Purchase</button>
+    </div>
+    ${viewChips||''}
+    ${renderPayrollPeriodNav(true, true)}
+    <div class="period-bar">
+      <select aria-label="Technician" style="width:auto;min-width:150px" onchange="setExpenseFilter('exTech', this.value)"><option value="">All technicians</option>${techs.map(t => `<option value="${esc(t)}" ${t===tech?'selected':''}>${esc(t)}</option>`).join('')}</select>
+      <div style="position:relative">
+        <input id="ex-supplier" aria-label="Supplier" autocomplete="off" style="width:220px" placeholder="Supplier: type to search" value="${esc(sup)}" oninput="expenseSupplierMenu(this.value)" onfocus="expenseSupplierMenu(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();setExpenseFilter('exSupplier', this.value.trim())}" onblur="setTimeout(()=>{const m=document.getElementById('ex-supplier-menu'); if(m) m.hidden=true;},180)">
+        <div id="ex-supplier-menu" class="conv-menu" style="top:calc(100% + 2px);bottom:auto;max-height:300px;overflow:auto" hidden></div>
+      </div>
+      ${filtered ? `<button class="btn ghost small" onclick="UI.payroll.exTech='';UI.payroll.exCat='';UI.payroll.exSupplier='';render()">Clear filters</button>` : ''}
+    </div>
+    <div class="seg" style="flex-wrap:wrap;margin-bottom:16px">${catChip('', 'All')}${SPEND_CATEGORIES.map(c => catChip(c, c)).join('')}${catChip('Job parts', 'Job parts')}${unset ? catChip('none', 'Not set') : ''}</div>
+    <div class="grid-4" style="margin-bottom:16px">
+      ${tile('Spent <span class="hint">(incl. GST)</span>', fmtMoney(total), `${rows.length} purchase${rows.length===1?'':'s'} · ${periodText(pr.start, pr.end)}`, 'var(--primary)')}
+      ${tile('GST in it <span class="hint">(comes back)</span>', fmtMoney(materialsGst(total)), 'claimed on the BAS', 'var(--good)')}
+      ${tile('Without a receipt', String(noReceipt), noReceipt ? 'attach them with Edit / Open job' : 'every purchase has its receipt', noReceipt ? 'var(--warn)' : 'var(--good)')}
+      ${tile('Still to pay back', fmtMoney(waiting), 'to technicians, with their weekly pay', waiting > 0 ? 'var(--warn)' : 'var(--good)')}
+    </div>
+    ${segs.length > 1 ? `<div class="card" style="margin-bottom:16px"><div class="stat-label" style="margin-bottom:8px">By category</div>${splitBar(segs)}${splitRows(segs)}</div>` : ''}
+    <div class="table-wrap"><table><thead><tr><th>Bought</th><th class="wrap">Item</th><th>Category</th><th>Supplier</th><th>Technician</th><th>Paid by</th><th class="num">Amount</th><th>Receipt</th><th>Paid back</th><th></th></tr></thead><tbody>${body}</tbody></table></div>
+    <div class="hint" style="margin-top:6px">Paid by a technician = paid back with his weekly pay, on its own invoice. Paid by the business = an expense only. Both come off the net profit. Parts for a job are changed on the job (Open job).</div>
+  `;
 }
 function renderPayrollBoard(profile, data, viewChips){
   if ((UI.payroll.mode || 'week') !== 'week') return renderPayrollPeriodView(data, viewChips);
@@ -7373,7 +7557,7 @@ function goToReminderTarget(type, contactId, readKey, weekKey){
   if ((type==='followup' || type==='unpaid' || type==='repeat-service' || type==='chase-long' || type==='stale-quote' || type==='booked-no-job') && contactId && can('crm')) { goToLeadConversation(contactId); return; }
   if ((type==='unpaid' || type==='refund') && can('outstanding')) { UI.tab='outstanding'; render(); return; }
   if (type==='repeat-service' && refId && can('jobs')) { goToJobFromSearch(refId); return; }
-  if (type==='equipment' && can('reference')) { UI.tab='reference'; UI.reference.tab='equipmentSpend'; render(); return; }
+  if (type==='equipment' && can('payroll')) { UI.tab='payroll'; UI.payroll.viewAs=null; UI.payroll.view='expenses'; render(); return; }
   render();   // nowhere this person is allowed to go — it's marked read and stays here
 }
 // A technician's reminders are only about their own jobs and purchases; they can mark them read but not delete them
@@ -7729,6 +7913,7 @@ function renderClosings(profile, data){
         <div class="field"><label>What were the parts</label><input id="cf-partsdesc" placeholder="e.g. Filter + drain hose"></div>
         <div class="field"><label>Parts Paid By</label><select id="cf-partsby"><option value="">—</option>${allTechs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}<option value="Business">Business</option></select></div>
         ${fileField('Parts receipt', 'cf-parts-receipt', PAGE_FILES['cf-parts-receipt'], RECEIPT_TYPES)}
+        ${supplierFieldHtml('Parts bought at', 'cf-parts-supplier', '')}
       </div>
       <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="cf-notes"></textarea></div>
       <div class="grid-3" style="margin-top:11px">${fileField('Invoice photo', 'cf-photo', PAGE_FILES['cf-photo'], RECEIPT_TYPES)}</div>
@@ -7761,8 +7946,9 @@ function postClosing(){
   const invoiceFileUrl = PAGE_FILES['cf-photo'] || null;
   const partsReceiptFile = PAGE_FILES['cf-parts-receipt'] || null;
   const partsDescription = document.getElementById('cf-partsdesc').value.trim();
+  const partsSupplier = document.getElementById('cf-parts-supplier').value.trim();
   const reviewDoNotAsk = !!(document.getElementById('cf-noask') && document.getElementById('cf-noask').checked);
-  const gathered = { technicianName, date, customerName, contactId: pick.contactId, invoiceNumber, jobType, amount, includesGST, paymentStatus, paymentMethod, partsCost, partsPaidBy, partsDescription, partsReceiptFile, notes, invoiceFileUrl, reviewDoNotAsk };
+  const gathered = { technicianName, date, customerName, contactId: pick.contactId, invoiceNumber, jobType, amount, includesGST, paymentStatus, paymentMethod, partsCost, partsPaidBy, partsDescription, partsSupplier, partsReceiptFile, notes, invoiceFileUrl, reviewDoNotAsk };
 
   // % commission isn't a field on this form (it's Jobs-table-only) — it's looked up automatically from
   // the commission-rates table. When there's no automatic rate for this technician/job-type combo, don't
@@ -7833,6 +8019,7 @@ async function finalizeClosing(g, commissionPercent){
       paymentStatus: g.paymentStatus, paymentMethod: g.paymentMethod, partsCost: g.partsCost,
       partsPaidBy: g.partsPaidBy, partsDescription: g.partsDescription || '', notes: g.notes,
     };
+    if (g.partsSupplier) patch.partsSupplier = g.partsSupplier;
     // A later closing on the same invoice (a split payment) only adds "don't ask", never clears it.
     if (g.reviewDoNotAsk) patch.reviewDoNotAsk = true;
     Object.assign(patch, partsRefundPatch(existingJob, { ...existingJob, partsCost: g.partsCost, partsPaidBy: g.partsPaidBy }));
@@ -7847,7 +8034,7 @@ async function finalizeClosing(g, commissionPercent){
       jobType: g.jobType, commissionPercent, amount: g.amount, includesGST: g.includesGST, paymentStatus: g.paymentStatus,
       paymentMethod: g.paymentMethod, partsCost: g.partsCost, partsPaidBy: g.partsPaidBy, ...partsRefundPatch(null, { partsCost: g.partsCost, partsPaidBy: g.partsPaidBy }),
       notes: g.notes || 'Created automatically from a Closings post.', datePaid: g.paymentStatus==='Paid'?(g.date || todayStr()):'',
-      paidToTechnician:'Not Paid', enteredBy: g.technicianName, cashConfirmed:false, partsDescription: g.partsDescription || '',
+      paidToTechnician:'Not Paid', enteredBy: g.technicianName, cashConfirmed:false, partsDescription: g.partsDescription || '', partsSupplier: g.partsSupplier || '',
       invoiceFile:null, transferReceiptFile:null, equipmentRentalFile:null,
       reviewTaken: false, reviewDoNotAsk: !!g.reviewDoNotAsk,
     };
@@ -7894,7 +8081,7 @@ function equipQuickCard(e){
         <button class="btn ghost small" onclick="deleteEquipSpend('${e.id}');render()">Delete</button>
       </div>
     </div>
-    <div style="font-size:12px;color:var(--ink-soft);margin-top:4px">Purchased ${fmtDateShort(e.date)} · paid by ${esc(e.paidBy||'—')}</div>
+    <div style="font-size:12px;color:var(--ink-soft);margin-top:4px">Purchased ${fmtDateShort(e.date)} · paid by ${esc(e.paidBy||'—')}${e.category ? ' · '+esc(e.category) : ''}${e.supplier ? ' · '+esc(e.supplier) : ''}${fileLinkHtml(e.receiptFile)}</div>
   </div>`;
 }
 function renderEquipmentQuickFeed(profile, data){
@@ -7909,10 +8096,12 @@ function renderEquipmentQuickFeed(profile, data){
       <div class="grid-3">
         <div class="field"><label>Technician</label><select id="eqf-tech">${allTechs.map(t=>`<option value="${esc(t)}" ${t===defaultTech?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
         <div class="field"><label>Description</label><input id="eqf-desc" placeholder="e.g. Extension ladder"></div>
+        <div class="field"><label>Category</label><select id="eqf-category"><option value="">Choose…</option>${SPEND_CATEGORIES.map(c=>`<option value="${c}">${spendCategoryLabel(c)}</option>`).join('')}</select></div>
         <div class="field"><label>Price (incl. GST)</label><input type="number" step="0.01" id="eqf-price" value="0"><span class="hint">The total on the receipt</span></div>
         <div class="field"><label>Date Purchased</label><input type="date" id="eqf-date" value="${todayStr()}"></div>
-        ${fileField('Receipt', 'eqf-receipt', PAGE_FILES['eqf-receipt'], RECEIPT_TYPES)}
         <div class="field"><label>Paid By</label><select id="eqf-paidby">${allTechs.map(t=>`<option value="${esc(t)}" ${t===defaultTech?'selected':''}>${esc(t)}</option>`).join('')}<option value="Business">Business</option></select><span class="hint">A technician is paid back with his weekly pay. Business = an expense only</span></div>
+        ${fileField('Receipt', 'eqf-receipt', PAGE_FILES['eqf-receipt'], RECEIPT_TYPES)}
+        ${supplierFieldHtml('Supplier (the store)', 'eqf-supplier', '')}
       </div>
       <div id="eqf-error"></div>
       <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn primary" onclick="postEquipmentQuick()">Post purchase</button></div>
@@ -7925,13 +8114,16 @@ async function postEquipmentQuick(){
   const item = document.getElementById('eqf-desc').value.trim();
   const errEl = document.getElementById('eqf-error');
   if (!item) { if (errEl) errEl.innerHTML = pill('bad','Please enter a description'); return; }
+  const category = document.getElementById('eqf-category').value;
+  if (!category) { if (errEl) errEl.innerHTML = pill('bad','Choose a category: Tools or Consumables'); return; }
   if (errEl) errEl.innerHTML = '';
   const technician = document.getElementById('eqf-tech').value;
   const cost = Number(document.getElementById('eqf-price').value) || 0;
   const date = document.getElementById('eqf-date').value || todayStr();
   const paidBy = document.getElementById('eqf-paidby').value;
   let rec;
-  try { rec = await db.equipmentSpend.create({ date, item, technician, paidBy, cost, reimbursed: equipReimbursedFor(paidBy), activityLog:[] }); }
+  const supplier = document.getElementById('eqf-supplier').value.trim();
+  try { rec = await db.equipmentSpend.create({ date, item, technician, paidBy, cost, category, supplier, reimbursed: equipReimbursedFor(paidBy), activityLog:[] }); }
   catch (err) { return; }   // db.equipmentSpend.create() already showed an error toast; the form keeps what was typed
   const receipt = await storeFile(`equipment/${rec.id}`, 'receipt', PAGE_FILES['eqf-receipt']);
   if (receipt) db.equipmentSpend.update(rec.id, { receiptFile: receipt });
@@ -7946,18 +8138,22 @@ const TASK_STATUS_COLOR = { 'Not Started':'neutral', 'In Progress':'warn', 'Wait
 const TASK_PRIORITIES = ['Low','Medium','High','Urgent'];
 const TASK_PRIORITY_COLOR = { Low:'neutral', Medium:'warn', High:'bad', Urgent:'bad' };
 const TASK_CATEGORIES = ['','Client-related','Financial','Personal','Operational','Marketing'];
-function taskFilterMode(profile){
-  // Owner/Manager need oversight, so they default to "All"; technician/VA profiles default to
-  // seeing just their own to-dos. Either can flip the toggle — see setTaskFilterMode().
-  if (UI.tasks.filterMode) return UI.tasks.filterMode;
-  return (profile.role==='technician' || profile.role==='va') ? 'mine' : 'all';
+// Which tasks a view shows (Ofek 7 Oct): 'all' = everyone's, 'me' = the logged-in person's (from every board), or a
+// person's name = that person's: the tasks assigned to them, plus any still on their board.
+function tasksInView(tasks, view, me){
+  if (view==='all') return tasks;
+  const name = view==='me' ? (me.technicianName || me.fullName) : view;
+  const board = boardForAssignees([name]);
+  return tasks.filter(t => (view==='me' ? taskAssignedTo(t, me) : assigneeNames(t).includes(name)) || t.board===board);
 }
-function setTaskFilterMode(mode){ UI.tasks.filterMode = mode; render(); }
+// The people with a task button, office first: Ron, then the owners, then everyone else (active employees).
+function taskPeople(data){
+  const rank = e => e.roles.includes('VA') ? 0 : e.roles.includes('Owner') ? 1 : 2;
+  return data.employees.filter(e => e.status==='Active').sort((a,b) => rank(a) - rank(b)).map(e => e.name);
+}
+function taskView(){ const v = UI.tasks.board; return v==='ron' ? 'Ron' : (!v || v==='mine') ? 'all' : v; }
 /* ── tasks: unified calendar (merged across boards) + heads-up radar ───── */
-function visibleTasksForCalendar(profile, data){
-  if (profile.role==='technician') return data.tasks.filter(t=>t.board===profile.technicianName);
-  return data.tasks;
-}
+function visibleTasksForCalendar(profile, data){ return data.tasks; }   // already only this person's own for a technician (filterForProfile)
 function setTasksView(view){ UI.tasks.view = view; render(); }
 function setTaskCalGranularity(g){ UI.tasks.calGranularity = g; render(); }
 function shiftTaskCal(delta){
@@ -8054,8 +8250,7 @@ function computeRadarItems(tasks){
   });
   return { overdue, dueSoon, headsUp };
 }
-function renderRadarPanel(profile, data){
-  const tasks = visibleTasksForCalendar(profile, data);
+function renderRadarPanel(profile, data, tasks){
   const { overdue, dueSoon, headsUp } = computeRadarItems(tasks);
   if (!overdue.length && !dueSoon.length && !headsUp.length) return '';
   const row = (t, tone) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-soft);cursor:pointer" onclick="openTaskModal('${t.id}')">
@@ -8069,52 +8264,52 @@ function renderRadarPanel(profile, data){
     ${headsUp.map(t=>row(t,'primary')).join('')}
   </div>`;
 }
-function renderTasksList(profile, data){
-  const board = UI.tasks.board;
-  const myName = profile.technicianName || profile.fullName;
-  const filterMode = taskFilterMode(profile);
-  let list = data.tasks.filter(t=>t.board===board);
-  if (filterMode==='mine') list = list.filter(t=>assigneeNames(t).includes(myName));
-  list = list.sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999'));
-  const rows = list.length ? list.map(t => `
-    <tr><td class="wrap"><div>${esc(t.title)}</div>${t.notes?`<div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(t.notes)}</div>`:''}</td>
+function renderTasksList(profile, data, list){
+  const view = taskView();
+  const open = list.filter(t => t.status!=='Done'), done = list.length - open.length;
+  const shown = (UI.tasks.showDone ? list : open).slice().sort((a,b) => (a.status==='Done') - (b.status==='Done') || (a.due||'9999').localeCompare(b.due||'9999'));
+  const emptySub = view==='me' ? 'Nothing assigned to you.' : view==='all' ? 'Click "New Task" to get started.' : `Nothing assigned to ${view}.`;
+  const rows = shown.length ? shown.map(t => `
+    <tr${t.status==='Done' ? ' style="opacity:.6"' : ''}><td class="wrap"><div>${esc(t.title)}</div>${t.notes?`<div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(t.notes)}</div>`:''}</td>
     <td>${t.client?customerNameCell(t.client, t.contactId):'—'}</td>
     <td>${statusSelect('taskPriority', t.id, t.priority||'', ['', ...TASK_PRIORITIES], v=>TASK_PRIORITY_COLOR[v]||'neutral', v=>v||'—', false)}</td>
     <td>${esc(assigneeNames(t).join(', ')||'—')}</td>
     <td>${statusSelect('taskStatus', t.id, t.status, TASK_STATUSES, v=>TASK_STATUS_COLOR[v], v=>v, false)}</td>
     <td class="mono">${t.due?fmtDateShort(t.due):'—'}</td>
     <td><button class="btn ghost small" data-activity-count="${t.id}" onclick="openTaskActivityModal('${t.id}')">💬 ${taskActivityCount(t)}</button></td>
-    <td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openTaskModal('${t.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteTask('${t.id}');render()">Delete</button></td></tr>`).join('') : `<tr><td colspan="8">${emptyState('No tasks', filterMode==='mine' ? `Nothing assigned to ${esc(myName)} on this board.` : 'Click "New Task" to get started.')}</td></tr>`;
-  const canSwitchBoards = profile.role !== 'technician';
-  const switcher = canSwitchBoards ? `
-    <button class="btn ${board==='ron'?'primary':''}" onclick="goTasks('ron')">Ron's Tasks</button>
-    ${profile.role!=='va' ? `<button class="btn ${board==='mine'?'primary':''}" onclick="goTasks('mine')">My Tasks</button>` : ''}
-    ${activeTechnicianNames(STATE.data).map(t=>`<button class="btn ${board===t?'primary':''}" onclick="goTasks('${esc(t)}')">${esc(taskBoardLabel(t))}</button>`).join('')}
-  ` : '';
+    <td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openTaskModal('${t.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteTask('${t.id}');render()">Delete</button></td></tr>`).join('') : `<tr><td colspan="8">${emptyState(done && !UI.tasks.showDone ? 'No open tasks' : 'No tasks', done && !UI.tasks.showDone ? 'Everything here is done.' : emptySub)}</td></tr>`;
   return `
-    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
-      ${switcher}
-      <span style="margin-inline-start:auto;display:flex;gap:6px;align-items:center">
-        <span style="font-size:11.5px;color:var(--ink-soft)">Showing</span>
-        <button class="btn small ${filterMode==='mine'?'primary':''}" onclick="setTaskFilterMode('mine')">Just mine</button>
-        <button class="btn small ${filterMode==='all'?'primary':''}" onclick="setTaskFilterMode('all')">All</button>
-      </span>
-    </div>
     <div class="table-wrap"><table><thead><tr><th class="wrap">Task</th><th>Client</th><th>Priority</th><th>Assigned To</th><th>Status</th><th>Due Date</th><th>Activity</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${done ? `<div style="margin-top:8px"><button class="btn ghost small" onclick="UI.tasks.showDone=!UI.tasks.showDone;render()">${UI.tasks.showDone ? 'Hide done tasks' : `Show done tasks (${done})`}</button></div>` : ''}
   `;
+}
+// All · Just mine · one button per person, each with how many open tasks it has (Ofek 7 Oct). A technician only has his own.
+function renderTaskSwitcher(profile, data){
+  if (profile.role==='technician') return '';
+  const view = taskView(), openCount = v => tasksInView(data.tasks, v, profile).filter(t => t.status!=='Done').length;
+  const btn = (v, label) => { const n = openCount(v); return `<button class="btn small ${view===v?'primary':''}" onclick="goTasks('${jsStr(v)}')">${esc(label)}${n ? ` <span class="tag">${n}</span>` : ''}</button>`; };
+  return `<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+    ${btn('all', 'All')}${btn('me', 'Just mine')}
+    <span style="width:1px;height:22px;background:var(--line);margin:0 4px"></span>
+    ${taskPeople(data).map(name => btn(name, name)).join('')}
+  </div>`;
 }
 function renderTasks(profile, data){
   const view = UI.tasks.view || 'calendar';
+  const tv = profile.role==='technician' ? 'me' : taskView();
+  const listTasks = tasksInView(data.tasks, tv, profile);
   const viewToggle = `<button class="btn small ${view==='calendar'?'primary':''}" onclick="setTasksView('calendar')">Calendar</button><button class="btn small ${view==='list'?'primary':''}" onclick="setTasksView('list')">List</button>`;
-  const title = view==='calendar' ? 'Tasks' : esc(taskBoardLabel(UI.tasks.board));
-  const sub = view==='calendar' ? 'Calendar across every board you can see' : 'Track tasks by owner';
+  const title = view==='calendar' ? 'Tasks' : tv==='all' ? 'All tasks' : tv==='me' ? 'My tasks' : esc(`${tv}'s tasks`);
+  const sub = view==='calendar' ? 'Calendar across every board you can see'
+    : tv==='all' ? "Everyone's tasks · click a name for one person's" : tv==='me' ? 'Only the tasks assigned to you' : `The tasks assigned to ${esc(tv)}`;
   return `
     <div class="page-head">
       <div><h1 class="page-title">${title}</h1><div class="page-sub">${sub}</div></div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${viewToggle}<button class="btn primary" onclick="openTaskModal(null)">+ New Task</button></div>
     </div>
-    ${renderRadarPanel(profile, data)}
-    ${view==='calendar' ? renderTasksCalendar(profile, data) : renderTasksList(profile, data)}
+    ${view==='calendar' ? '' : renderTaskSwitcher(profile, data)}
+    ${renderRadarPanel(profile, data, view==='calendar' ? visibleTasksForCalendar(profile, data) : listTasks)}
+    ${view==='calendar' ? renderTasksCalendar(profile, data) : renderTasksList(profile, data, listTasks)}
   `;
 }
 // Task → customer (Ofek 5/10): the Client field suggests CRM customers as you type; picking one links the task to that
@@ -8168,15 +8363,16 @@ function openTaskModal(taskId, ctx){
   MODAL_UPDATES = task?.updates ? task.updates.map(u=>({...u})) : [];
   MODAL_TASK_ID = taskId;
   EXPANDED_SUBTASK_INDEX = null;
-  const isPatrickBoard = UI.tasks.board==='ron';
-  const boardDefaultAssignee = TASK_CTX ? 'Ron' : UI.tasks.board==='ron' ? 'Ron' : (UI.tasks.board==='mine' ? (currentProfile?.fullName||'') : UI.tasks.board);
+  // A new task starts assigned to the person whose tasks are showing (yourself on Just mine; nobody on All — pick).
+  const tv = currentProfile?.role==='technician' ? 'me' : taskView();
+  const boardDefaultAssignee = TASK_CTX ? 'Ron' : tv==='all' ? '' : tv==='me' ? (currentProfile?.technicianName || currentProfile?.fullName || '') : tv;
   const currentAssignees = task ? assigneeNames(task) : (boardDefaultAssignee ? [boardDefaultAssignee] : []);
   const allPeople = activeEmployeeNames(STATE.data);
   openModal(`
     <div class="modal-back" onclick="if(event.target===this) closeModal()">
       <div class="modal">
         <h2>${task?'Edit Task':'New Task'}</h2>
-        <div class="modal-sub">${TASK_CTX ? `For ${esc(TASK_CTX.name)} · goes to the board of whoever it's assigned to` : `Board: ${esc(taskBoardLabel(UI.tasks.board))}`}</div>
+        <div class="modal-sub">${TASK_CTX ? `For ${esc(TASK_CTX.name)} · ` : ''}Goes to the tasks of whoever it's assigned to</div>
         ${TASK_CTX ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px">${FOLLOWUP_PRESETS.map((p,i)=>`<button type="button" class="btn small" onclick="applyTaskPreset(${i})">${esc(p.label)}</button>`).join('')}</div>` : ''}
         <div class="field"><label>Title</label><input id="tm-title" value="${esc(task?.title||'')}"></div>
         <div class="grid-3" style="margin-top:11px">
@@ -8203,7 +8399,7 @@ function openTaskModal(taskId, ctx){
           </div>
         </div>
         <div class="grid-2" style="margin-top:11px">
-          ${TASK_CTX ? `<input type="hidden" id="tm-category" value="Client-related">` : `<div class="field"><label>Category ${isPatrickBoard?'(optional on this board)':''}</label><select id="tm-category">${TASK_CATEGORIES.map(c=>`<option value="${c}" ${task?.category===c?'selected':''}>${c||'—'}</option>`).join('')}</select></div>`}
+          ${TASK_CTX ? `<input type="hidden" id="tm-category" value="Client-related">` : `<div class="field"><label>Category <span class="hint">(optional)</span></label><select id="tm-category">${TASK_CATEGORIES.map(c=>`<option value="${c}" ${task?.category===c?'selected':''}>${c||'—'}</option>`).join('')}</select></div>`}
           <div class="field"><label>Created By / At</label><input disabled value="${esc(task?.createdBy || currentProfile?.fullName || '')} · ${task?.createdAt ? new Date(task.createdAt).toLocaleString('en-AU') : new Date().toLocaleString('en-AU')}"></div>
         </div>
         <div class="field" style="margin-top:11px"><label>Notes</label><textarea rows="2" id="tm-notes">${esc(task?.notes||'')}</textarea></div>
@@ -8315,7 +8511,7 @@ async function saveTaskModal(taskId, createdBy, createdAt){
   const assignees = Array.from(document.querySelectorAll('.tm-assignee-cb:checked')).map(cb=>cb.value);
   const newSubtasks = MODAL_SUBTASKS.map(s=>({...s}));
   const values = {
-    board: TASK_CTX ? boardForAssignees(assignees) : UI.tasks.board, title, status: document.getElementById('tm-status').value, due: document.getElementById('tm-due').value,
+    board: boardForAssignees(assignees), title, status: document.getElementById('tm-status').value, due: document.getElementById('tm-due').value,
     headsUp: document.getElementById('tm-headsup').value,
     notes: document.getElementById('tm-notes').value, client: document.getElementById('tm-client').value.trim(),
     contactId: (document.getElementById('tm-contact-id')||{}).value || null,
@@ -8503,14 +8699,14 @@ function openTaskActivityModal(taskId){
 /* ── reference (employees / equipment / suppliers / equipment spend) ───── */
 function renderReference(profile, data){
   const canEditFinancial = profile.role==='owner' || profile.role==='manager';
+  // Equipment purchases moved to Payroll → Expenses & receipts (Ofek 7 Oct).
   const tabs = [['employees','Employees'],['equipment','Equipment'],['suppliers','Suppliers']];
-  if (canEditFinancial) tabs.push(['equipmentSpend','Equipment Purchases (financial)']);
+  if (!tabs.some(([id]) => id===UI.reference.tab)) UI.reference.tab = 'employees';
   const tabBtns = tabs.map(([id,label]) => `<button class="btn ${UI.reference.tab===id?'primary':''}" onclick="UI.reference.tab='${id}';render()">${label}</button>`).join('');
   let body = '';
   if (UI.reference.tab==='employees') body = renderEmployeesTab(data, canEditFinancial);
   else if (UI.reference.tab==='equipment') body = renderEquipmentCatalogTab(data, canEditFinancial);
   else if (UI.reference.tab==='suppliers') body = renderSuppliersTab(data, canEditFinancial);
-  else if (UI.reference.tab==='equipmentSpend' && canEditFinancial) body = renderEquipSpendTab(data);
   return `
     <div class="page-head"><div><h1 class="page-title">Resources</h1><div class="page-sub">Equipment, employees and suppliers</div></div></div>
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">${tabBtns}</div>
@@ -8736,22 +8932,6 @@ async function saveSupplierModal(supplierId){
   }
   closeModal(); showToast('Saved'); render();
 }
-function renderEquipSpendTab(data){
-  const allTechs = technicianNames(data);
-  const list = [...data.equipmentSpend].sort((a,b)=>b.date.localeCompare(a.date));
-  const rows = list.length ? list.map(e => `
-    <tr><td class="mono">${fmtDateShort(e.date)}</td><td class="mono">${e.createdAt ? fmtDateShort(localDay(e.createdAt)) : '—'}</td><td>${esc(e.item)}${fileLinkHtml(e.receiptFile)}</td><td>${techTag(e.technician)}</td><td>${statusSelect('equipPaidBy', e.id, e.paidBy, [...allTechs, 'Business'], ()=>'neutral', v=>v, false)}</td><td class="num">${fmtMoney(e.cost)}</td>
-    <td>${statusSelect('equipReimbursed', e.id, e.reimbursed, ['Pending','Reimbursed','N/A'], v=>v==='Reimbursed'?'good':v==='Pending'?'warn':'neutral', v=>v, false)}</td>
-    <td><button class="btn ghost small" onclick="openEquipActivityModal('${e.id}')">💬 ${recordActivityCount(e)}</button></td>
-    <td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openEquipSpendModal('${e.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteEquipSpend('${e.id}');render()">Delete</button></td></tr>`).join('') : `<tr><td colspan="9">${emptyState('No equipment purchases yet')}</td></tr>`;
-  return `
-    <div style="display:flex;justify-content:space-between;margin-bottom:12px;gap:10px;flex-wrap:wrap">
-      <div style="font-size:12.5px;color:var(--ink-soft)">Equipment bought for the business. Paid by a technician = paid back with his weekly pay (Payroll, its own invoice). Paid by the business = an expense only. Both come off the net profit.</div>
-      <button class="btn primary" onclick="openEquipSpendModal(null)">+ Equipment Purchase</button>
-    </div>
-    <div class="table-wrap"><table><thead><tr><th>Bought</th><th>Entered</th><th>Item</th><th>Technician</th><th>Paid By</th><th>Amount (incl. GST)</th><th>Refund Status</th><th>Activity</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-  `;
-}
 function openEquipSpendModal(itemId){
   const item = itemId ? STATE.data.equipmentSpend.find(x=>x.id===itemId) : null;
   const allTechs = technicianNames(STATE.data);
@@ -8762,10 +8942,12 @@ function openEquipSpendModal(itemId){
         <div class="grid-2">
           <div class="field"><label>Date</label><input type="date" id="es-date" value="${item?.date||todayStr()}"></div>
           <div class="field"><label>Item</label><input id="es-item" value="${esc(item?.item||'')}"></div>
+          <div class="field"><label>Category</label><select id="es-category"><option value="">Choose…</option>${SPEND_CATEGORIES.map(c=>`<option value="${c}" ${item?.category===c?'selected':''}>${spendCategoryLabel(c)}</option>`).join('')}</select></div>
           <div class="field"><label>Technician (for commission)</label><select id="es-tech">${allTechs.map(t=>`<option value="${esc(t)}" ${(item?.technician||allTechs[0])===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
           <div class="field"><label>Paid By</label><select id="es-paidby">${allTechs.map(t=>`<option value="${esc(t)}" ${(item?.paidBy||allTechs[0])===t?'selected':''}>${esc(t)}</option>`).join('')}<option value="Business" ${item?.paidBy==='Business'?'selected':''}>Business</option></select></div>
           <div class="field"><label>Amount (incl. GST)</label><input type="number" step="0.01" id="es-cost" value="${item?.cost||0}"></div>
           ${fileField('Receipt', 'es-receipt', item?.receiptFile, RECEIPT_TYPES)}
+          ${supplierFieldHtml('Supplier (the store)', 'es-supplier', item?.supplier)}
           <div class="field"><label>Refund Status</label><select id="es-reimb"><option value="Pending" ${(!item||item.reimbursed==='Pending')?'selected':''}>Pending</option><option value="Reimbursed" ${item?.reimbursed==='Reimbursed'?'selected':''}>Reimbursed</option><option value="N/A" ${item?.reimbursed==='N/A'?'selected':''}>N/A</option></select></div>
         </div>
         <div id="modal-error"></div>
@@ -8779,10 +8961,12 @@ function openEquipSpendModal(itemId){
 async function saveEquipSpendModal(itemId){
   const itemName = document.getElementById('es-item').value.trim();
   if (!itemName) { modalError('Please enter an item name'); return; }
+  const category = document.getElementById('es-category').value;
+  if (!category) { modalError('Choose a category: Tools or Consumables'); return; }
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   const prev = itemId ? STATE.data.equipmentSpend.find(x=>x.id===itemId) : null;
-  const oldSnapshot = prev ? { cost:prev.cost, reimbursed:prev.reimbursed, paidBy:prev.paidBy } : null;
-  const values = { date: document.getElementById('es-date').value, item: itemName, technician: document.getElementById('es-tech').value, paidBy: document.getElementById('es-paidby').value, cost: Number(document.getElementById('es-cost').value)||0, reimbursed: document.getElementById('es-reimb').value };
+  const oldSnapshot = prev ? { cost:prev.cost, reimbursed:prev.reimbursed, paidBy:prev.paidBy, category:prev.category||'', supplier:prev.supplier||'' } : null;
+  const values = { date: document.getElementById('es-date').value, item: itemName, technician: document.getElementById('es-tech').value, paidBy: document.getElementById('es-paidby').value, cost: Number(document.getElementById('es-cost').value)||0, reimbursed: document.getElementById('es-reimb').value, category, supplier: document.getElementById('es-supplier').value.trim() };
   // Bought by the business = an expense only (nothing to pay back); a technician's purchase waits for his weekly pay.
   values.reimbursed = equipReimbursedFor(values.paidBy, values.reimbursed);
   if (values.reimbursed!=='Reimbursed') values.reimbursedWeek = null;
@@ -8798,6 +8982,8 @@ async function saveEquipSpendModal(itemId){
     if (oldSnapshot.cost !== values.cost) logEquipmentActivity(item, actor, `Cost changed from ${fmtMoney(oldSnapshot.cost)} to ${fmtMoney(values.cost)}`);
     if (oldSnapshot.reimbursed !== values.reimbursed) logEquipmentActivity(item, actor, `Reimbursement status changed from "${oldSnapshot.reimbursed}" to "${values.reimbursed}"`);
     if (oldSnapshot.paidBy !== values.paidBy) logEquipmentActivity(item, actor, `Paid-by changed from "${oldSnapshot.paidBy}" to "${values.paidBy}"`);
+    if (oldSnapshot.category !== values.category) logEquipmentActivity(item, actor, `Category changed from "${oldSnapshot.category||'not set'}" to "${values.category}"`);
+    if (oldSnapshot.supplier !== values.supplier) logEquipmentActivity(item, actor, `Supplier changed from "${oldSnapshot.supplier||'—'}" to "${values.supplier||'—'}"`);
   } else {
     logEquipmentActivity(item, actor, 'Equipment purchase logged');
   }
@@ -9101,10 +9287,9 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   // Opened from a phone notification (?tab=payroll&week=…): go there once.
   if (!START_LINK.used && START_LINK.tab) { START_LINK.used = true; UI.tab = START_LINK.tab; if (START_LINK.week) { UI.payroll.mode = 'week'; UI.payroll.week = START_LINK.week; } }
   if (!UI.tab || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);
-  // board guard — a technician may only ever be looking at their OWN personal task board, regardless of
-  // what UI.tasks.board was last set to (e.g. left over from another profile in this same browser tab).
-  if (profile.role==='technician' && profile.technicianName) UI.tasks.board = profile.technicianName;
-  if (profile.role==='va' && UI.tasks.board==='mine') UI.tasks.board = 'ron';
+  // board guard — a technician only ever looks at his own tasks, whatever UI.tasks.board was last set to (e.g. left over
+  // from another profile in this same browser tab).
+  if (profile.role==='technician') UI.tasks.board = 'me';
 
   const data = filterForProfile(STATE.data, profile);
   // Every click redraws the whole screen; the menu keeps where it was scrolled to instead of jumping to the top (Ofek 6 Oct).
