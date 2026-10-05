@@ -413,6 +413,8 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .editable-cell:hover { background: var(--surface-2); box-shadow: 0 0 0 1px var(--line); }
 .xlink { cursor: pointer; color: var(--primary-strong); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
 .xlink:hover { text-decoration-style: solid; }
+/* A big number that opens a list keeps the number's own color (red reads as a problem); the dotted line shows it's clickable. */
+.stat-value .xlink { color: inherit; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
 .cash-amount { font-family: 'Figtree', sans-serif; font-size: 26px; font-weight: 700; color: var(--good); letter-spacing: -.01em; }
 .cell-edit-input { font: inherit; padding: 2px 5px; border: 1px solid var(--primary); border-radius: 4px; background: var(--surface); color: var(--ink); width: 100%; min-width: 90px; }
 
