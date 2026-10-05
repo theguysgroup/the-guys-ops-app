@@ -7028,7 +7028,7 @@ function payrollInvoicePdf(inv){
   const widths = salary ? (inv.deductsParts ? [48, '*', 78, 52, 40, 70] : [48, '*', 90, 44, 76]) : [44, '*', 78, 82, 52, 70];
   const jobs = inv.lines.filter(l => l.kind==='job').length;
   return {
-    pageSize: 'A4', pageMargins: [44, 44, 44, 60],
+    pageSize: 'A4', pageMargins: [44, 36, 44, 52],
     info: { title: `Invoice ${inv.number}`, author: f.legalName, subject: `${invTitle(inv)} · pay week ${invWeek(inv)}` },
     defaultStyle: { font: 'Roboto', fontSize: 9.5, color: ink, lineHeight: 1.2 },
     footer: (page, pages) => ({ margin: [44, 20, 44, 0], columns: [{ text: `${inv.number} · No GST has been charged: the supplier is not registered for GST.`, fontSize: 7.5, color: soft }, { text: `Page ${page} of ${pages}`, alignment: 'right', fontSize: 7.5, color: soft, width: 70 }] }),
@@ -7037,19 +7037,19 @@ function payrollInvoicePdf(inv){
         { stack: [{ text: 'INVOICE', fontSize: 26, bold: true, characterSpacing: 1 }, { text: `${invTitle(inv)} · pay week ${invWeek(inv)}`, color: soft, bold: true, margin: [0, 2, 0, 0] }] },
         { width: 170, table: { widths: ['*'], body: [[{ stack: [label('Amount due'), { text: invMoney(tot.total), fontSize: 20, bold: true }, small('with the weekly pay')], fillColor: tint, margin: [10, 8, 10, 8] }]] }, layout: 'noBorders' },
       ] },
-      { margin: [0, 18, 0, 0], columns: [
+      { margin: [0, 12, 0, 0], columns: [
         { stack: [label('Invoice no.'), { text: inv.number, bold: true }] },
         { stack: [label('Date'), { text: invDate(inv.issued), bold: true }] },
         { stack: [label('Pay week'), { text: invWeek(inv), bold: true }] },
       ] },
-      { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 507, y2: 0, lineWidth: 0.6, lineColor: line }], margin: [0, 14, 0, 14] },
+      { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 507, y2: 0, lineWidth: 0.6, lineColor: line }], margin: [0, 10, 0, 10] },
       { columns: [
         { stack: [label('From'), { text: f.legalName, bold: true, fontSize: 11 }, `ABN ${f.abn ? fmtAbn(f.abn) : 'missing'}`, ...(f.address ? [f.address] : []), ...(f.email || f.phone ? [small([f.email, f.phone].filter(Boolean).join(' · '))] : []),
           { text: [{ text: 'PAY TO  ', fontSize: 7.5, bold: true, color: soft, characterSpacing: 0.8 }, bank ? bank.join(' · ') : { text: 'bank details are not on file', color: soft }], margin: [0, 5, 0, 0] }] },
         { stack: [label('Bill to'), { text: t.legalName, bold: true, fontSize: 11 }, `ABN ${fmtAbn(t.abn)}`, ...(t.acn ? [`ACN ${t.acn}`] : [])] },
       ] },
-      { margin: [0, 20, 0, 0], table: { headerRows: 1, widths, body: [header.map(h => typeof h==='string' ? { text: h.toUpperCase(), fontSize: 7.5, bold: true, color: soft } : { ...h, text: h.text.toUpperCase(), fontSize: 7.5, bold: true, color: soft }), ...body] },
-        layout: { hLineWidth: (i, node) => i===0 ? 0 : i===1 ? 1.2 : 0.5, vLineWidth: () => 0, hLineColor: i => i===1 ? ink : line, paddingLeft: i => i===0 ? 0 : 6, paddingRight: (i, node) => i===node.table.widths.length - 1 ? 0 : 6, paddingTop: () => 5, paddingBottom: () => 5 } },
+      { margin: [0, 14, 0, 0], table: { headerRows: 1, widths, body: [header.map(h => typeof h==='string' ? { text: h.toUpperCase(), fontSize: 7.5, bold: true, color: soft } : { ...h, text: h.text.toUpperCase(), fontSize: 7.5, bold: true, color: soft }), ...body] },
+        layout: { hLineWidth: (i, node) => i===0 ? 0 : i===1 ? 1.2 : 0.5, vLineWidth: () => 0, hLineColor: i => i===1 ? ink : line, paddingLeft: i => i===0 ? 0 : 6, paddingRight: (i, node) => i===node.table.widths.length - 1 ? 0 : 6, paddingTop: () => 4, paddingBottom: () => 4 } },
       // The signature sits beside the totals, so a normal week stays on one page.
       { margin: [0, 12, 0, 0], unbreakable: true, columns: [{ width: '*', stack: [
         ...(salary ? [{ text: `${jobs} job${jobs===1 ? '' : 's'} paid by the customer this week`, color: soft }] : []),
@@ -7063,7 +7063,7 @@ function payrollInvoicePdf(inv){
         [{ text: 'GST on this invoice', color: soft }, R('Not charged')],
         [{ text: 'Total', bold: true, fontSize: 13, margin: [0, 4, 0, 0] }, { text: invMoney(tot.total), bold: true, fontSize: 13, alignment: 'right', margin: [0, 4, 0, 0] }],
       ] }, layout: { hLineWidth: (i, node) => i===node.table.body.length - 1 ? 1.2 : 0, vLineWidth: () => 0, hLineColor: () => ink, paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 3, paddingBottom: () => 3 } }] },
-      ...(inv.note ? [{ margin: [0, 14, 0, 0], stack: [label('Note'), { text: inv.note }] }] : []),
+      ...(inv.note ? [{ margin: [0, 10, 0, 0], stack: [label('Note'), { text: inv.note }] }] : []),
     ],
   };
 }
