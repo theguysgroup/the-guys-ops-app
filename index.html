@@ -467,6 +467,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .xlink { cursor: pointer; color: var(--primary-strong); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
 .xlink:hover { text-decoration-style: solid; }
 button.xlink { background:none; border:none; padding:0; font:inherit; }
+.exp-table select { min-width:0 !important; width:auto; }   /* Expenses & receipts: the in-table pickers take only the room they need */
 /* A big number that opens a list keeps the number's own color (red reads as a problem); the dotted line shows it's clickable. */
 .stat-value .xlink { color: inherit; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
 .cash-amount { font-family: 'Figtree', sans-serif; font-size: 26px; font-weight: 700; color: var(--good); letter-spacing: -.01em; }
@@ -6909,7 +6910,7 @@ function renderPayrollExpenses(data, viewChips){
     : pill(r.refund==='Refunded' ? 'good' : r.refund==='Pending Refund' ? 'warn' : 'neutral', r.refund==='Pending Refund' ? 'Pending' : (r.refund || 'N/A'));
   const body = rows.length ? rows.map(r => `<tr>
       <td class="mono">${fmtDateShort(r.date)}</td>
-      <td class="wrap" style="min-width:200px"><div>${esc(r.item)}</div>${r.job ? `<div class="stat-sub">${esc(r.job)}</div>` : ''}</td>
+      <td class="wrap" style="min-width:180px"><div>${esc(r.item)}</div>${r.job ? `<div class="stat-sub">${esc(r.job)}</div>` : ''}</td>
       <td>${r.kind==='equipment' ? statusSelect('equipCategory', r.id, r.category, ['', ...SPEND_CATEGORIES], ()=>'neutral', v=>v||'Not set', false) : pill('neutral', 'Job parts')}</td>
       <td>${r.supplier ? `<button type="button" class="xlink" onclick="setExpenseFilter('exSupplier','${jsStr(r.supplier)}')" title="Only ${esc(r.supplier)}">${esc(r.supplier)}</button>` : '<span class="hint">—</span>'}</td>
       <td>${r.technician ? techTag(r.technician) : '—'}</td>
@@ -6946,7 +6947,7 @@ function renderPayrollExpenses(data, viewChips){
       ${tile('Still to pay back', fmtMoney(waiting), 'to technicians, with their weekly pay', waiting > 0 ? 'var(--warn)' : 'var(--good)')}
     </div>
     ${segs.length > 1 ? `<div class="card" style="margin-bottom:16px"><div class="stat-label" style="margin-bottom:8px">By category</div>${splitBar(segs)}${splitRows(segs)}</div>` : ''}
-    <div class="table-wrap"><table><thead><tr><th>Bought</th><th class="wrap">Item</th><th>Category</th><th>Supplier</th><th>Technician</th><th>Paid by</th><th class="num">Amount</th><th>Receipt</th><th>Paid back</th><th></th></tr></thead><tbody>${body}</tbody></table></div>
+    <div class="table-wrap exp-table"><table><thead><tr><th>Bought</th><th class="wrap">Item</th><th>Category</th><th>Supplier</th><th>Technician</th><th>Paid by</th><th class="num">Amount</th><th>Receipt</th><th>Paid back</th><th></th></tr></thead><tbody>${body}</tbody></table></div>
     <div class="hint" style="margin-top:6px">Paid by a technician = paid back with his weekly pay, on its own invoice. Paid by the business = an expense only. Both come off the net profit. Parts for a job are changed on the job (Open job).</div>
   `;
 }
