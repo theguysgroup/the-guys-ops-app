@@ -240,7 +240,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .money .xlink, .mini-tile .xlink { color: inherit; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
 .chart-head { font-size:11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing:.07em; font-weight:700; margin-top:18px; }
 .wf { margin-top:14px; }
-.wf-row { display:grid; grid-template-columns: minmax(150px, 34%) 1fr 150px; gap:12px; align-items:center; font-size:12.5px; min-height:27px; }
+.wf-row { display:grid; grid-template-columns: minmax(140px, 30%) 1fr 138px; gap:12px; align-items:center; font-size:12.5px; min-height:27px; }
 .wf-row .lbl { color: var(--ink-soft); }
 .wf-plot { position:relative; height:14px; }
 .wf-bar { position:absolute; top:0; height:14px; border-radius:4px; min-width:2px; }
@@ -262,7 +262,8 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .meter > span { display:block; height:100%; border-radius:99px; }
 .meter-caption { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; font-size:12px; color: var(--ink-soft); margin-top:6px; }
 .meter-caption b { color: var(--ink); font-variant-numeric: tabular-nums; }
-.trend { position:relative; margin-top:10px; }
+.trend { margin-top:10px; }
+.trend-plot { position:relative; }
 .trend svg { display:block; }
 .trend-dot { position:absolute; width:9px; height:9px; border-radius:50%; background: var(--series-1); box-shadow: 0 0 0 2px var(--surface); transform: translate(-50%, -50%); pointer-events:none; }
 .trend-axis { display:flex; justify-content:space-between; gap:10px; font-size:10.5px; color: var(--ink-faint); margin-top:5px; }
@@ -6444,7 +6445,7 @@ function renderDashboard(profile, data){
         <div class="stat-value">${fmtSignedMoney(gross)}</div>
         <div class="stat-sub">${np.revenue ? `<b style="color:var(--ink)">${Math.round(gross / np.revenue * 100)}%</b> of revenue · ` : ''}revenue − commissions − job expenses</div>
         <div class="chart-head">Per week</div>
-        ${renderTrend(profitSeries, { name:'Gross profit per week', lastLabel:'this week so far' }) || '<div class="hint">Not enough weeks yet</div>'}
+        ${renderTrend(profitSeries, { name:'Gross profit per week', lastLabel:'this week so far' }) || '<div class="stat-sub">Not enough weeks yet</div>'}
       </div>
       <div class="card stat-card money" style="--stat-accent:var(--ink-faint)">
         <div class="stat-label">GST to pay <span class="hint">(this period)</span></div>
@@ -6455,7 +6456,7 @@ function renderDashboard(profile, data){
           <div class="kv"><span>− GST we get back<span class="kv-detail">equipment ${fmtMoney(gstSum.backEquipment)} · parts on jobs ${fmtMoney(gstSum.backParts)}</span></span><span class="v">${fmtMoney(gstSum.back)}</span></div>
           <div class="kv total"><span>= GST to pay</span><span class="v">${fmtSignedMoney(gstSum.toPay)}</span></div>
         </div>
-        <div class="hint" style="margin-top:8px">Google and Meta ads aren't counted yet: their spend comes in without GST.</div>
+        <div class="stat-sub" style="margin-top:10px">Google and Meta ads aren't counted yet: their spend comes in without GST.</div>
       </div>
       <div class="card stat-card money" style="--stat-accent:var(--series-2)">
         <div class="stat-label">Equipment purchases</div>
@@ -6465,12 +6466,12 @@ function renderDashboard(profile, data){
           return `<div class="chart-head">Who paid</div>${splitBar(segs)}${splitRows(segs)}
           <div style="margin-top:8px">${eqWaiting ? `<div class="kv"><span>Still to pay back <span class="hint">(with the weekly pay)</span></span><span class="v">${pill('warn', fmtMoney(eqWaiting))}</span></div>` : ''}
           <div class="kv"><span>GST in it <span class="hint">(comes back)</span></span><span class="v">${fmtMoney(materialsGst(eqTotal))}</span></div></div>`; })()
-          : '<div class="hint" style="margin-top:14px">No equipment bought this period.</div>'}
+          : '<div class="stat-sub" style="margin-top:14px">No equipment bought this period.</div>'}
       </div>
     </div>
     <div class="card stat-card money" style="--stat-accent:var(--series-1);margin-top:12px">
       <div class="stat-label">Revenue per week <span class="hint">(last 12 weeks, not the period above)</span></div>
-      ${renderTrend(revSeries, { name:'Revenue per week', height:84, color:'var(--series-1)', middle:true, lastLabel:'this week so far' }) || '<div class="hint">Not enough weeks yet</div>'}
+      ${renderTrend(revSeries, { name:'Revenue per week', height:84, color:'var(--series-1)', middle:true, lastLabel:'this week so far' }) || '<div class="stat-sub">Not enough weeks yet</div>'}
       <div class="stat-sub" style="margin-top:8px">Last full week ${lastFull ? `${esc(lastFull.label)}: <b style="color:var(--ink)">${fmtMoney(lastFull.revenue)}</b>` : '—'}</div>
     </div>
     <div style="margin-top:12px">${cashStatusRow()}</div>
@@ -6932,14 +6933,14 @@ function renderTrend(series, opts){
   const step = w / (n - 1);
   const hits = series.map((x,i) => `<rect x="${Math.max(0, X(i) - step/2).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${h}" fill="transparent"><title>${esc(x.label)}: ${fmtMoney(x.revenue)}</title></rect>`).join('');
   const last = series[n-1];
-  return `<div class="trend">
+  return `<div class="trend"><div class="trend-plot" style="height:${h}px">
     <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" role="img" aria-label="${esc((opts.name||'Per week') + ': ' + series.map(x => `${x.label} ${fmtMoney(x.revenue)}`).join(', '))}">
       ${min < 0 ? `<line x1="0" x2="${w}" y1="${base}" y2="${base}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"></line>` : ''}
       <path d="${line} L${w},${base} L0,${base} Z" fill="${color}" opacity=".1"></path>
       <path d="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
       ${hits}
     </svg>
-    <span class="trend-dot" style="left:100%;top:${(Y(vals[n-1]) / h * 100).toFixed(1)}%"></span>
+    <span class="trend-dot" style="left:100%;top:${Y(vals[n-1]).toFixed(1)}px"></span></div>
     <div class="trend-axis"><span>${esc(series[0].label)}</span>${opts.middle ? `<span>${esc(series[Math.floor((n-1)/2)].label)}</span>` : ''}<span>${esc(opts.lastLabel || last.label)} · <b style="color:var(--ink)">${fmtMoney(last.revenue)}</b></span></div>
   </div>`;
 }
