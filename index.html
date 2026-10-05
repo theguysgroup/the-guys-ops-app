@@ -282,6 +282,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .cmp-line { display:grid; grid-template-columns: 1fr 92px; gap:8px; align-items:center; }
 .cmp-line + .cmp-line { margin-top:3px; }
 .cmp-line .bar { height:9px; border-radius:0 4px 4px 0; min-width:2px; }
+.cmp-line > div { min-height:9px; }
 .cmp-line .v { font-size:12px; font-variant-numeric: tabular-nums; color: var(--ink); white-space:nowrap; text-align:end; }
 .cmp-line .v.prev { color: var(--ink-faint); }
 .cmp-row .d { text-align:end; white-space:nowrap; }
@@ -6470,7 +6471,7 @@ function payrollPaidBadge(st, currentTotal){
 function renderCompareBars(rows, opts){
   const fmt = opts.fmt || fmtMoney;
   const max = Math.max(0.01, ...rows.flatMap(r => [Number(r.cur)||0, Number(r.prev)||0]));
-  const line = (v, prev) => `<div class="cmp-line"><div><div class="bar" style="width:${((Number(v)||0) / max * 100).toFixed(1)}%;background:${prev ? 'var(--deemph)' : 'var(--series-1)'}" title="${esc((prev ? opts.prevLabel : opts.curLabel) + ': ' + (v===null ? '—' : fmt(v)))}"></div></div><span class="v${prev ? ' prev' : ''}">${v===null ? '—' : fmt(v)}</span></div>`;
+  const line = (v, prev) => `<div class="cmp-line"><div>${(Number(v)||0) > 0 ? `<div class="bar" style="width:${((Number(v)||0) / max * 100).toFixed(1)}%;background:${prev ? 'var(--deemph)' : 'var(--series-1)'}" title="${esc((prev ? opts.prevLabel : opts.curLabel) + ': ' + fmt(v))}"></div>` : ''}</div><span class="v${prev ? ' prev' : ''}">${v===null ? '—' : fmt(v)}</span></div>`;
   return `<div class="cmp-legend"><span><i class="swatch" style="background:var(--series-1)"></i>${esc(opts.curLabel)}</span><span><i class="swatch" style="background:var(--deemph)"></i>${esc(opts.prevLabel)}</span></div>
     ${rows.map(r => `<div class="cmp-row"><span class="lbl">${r.labelHtml || esc(r.label)}</span><div>${line(r.cur, false)}${line(r.prev, true)}</div><span class="d">${deltaBadge(Number(r.cur)||0, Number(r.prev)||0) || '<span class="hint">—</span>'}</span></div>`).join('')}`;
 }
