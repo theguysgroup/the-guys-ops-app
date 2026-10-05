@@ -1361,7 +1361,7 @@ const db = {
       if (!STATE.data.salesLogs) STATE.data.salesLogs = [];
       let l = STATE.data.salesLogs.find(x => x.person===person && x.date===date);
       if (!l) { l = { person, date, hours:0, bookingsAircon:0, bookingsChimney:0, bookingsPw:0 }; STATE.data.salesLogs.push(l); }
-      Object.assign(l, values);
+      Object.assign(l, values); delete l.auto;   // an owner's correction replaces the automatic day
       const row = {
         person, date, hours: Number(l.hours)||0,
         bookings_aircon: Number(l.bookingsAircon)||0, bookings_chimney: Number(l.bookingsChimney)||0, bookings_pw: Number(l.bookingsPw)||0,
@@ -1793,6 +1793,7 @@ function handleSalesLogRealtimeChange(payload){ if (PRESENT) return;
   if (payload.eventType === 'DELETE') { STATE.data.salesLogs = (STATE.data.salesLogs||[]).filter(l => l.id !== payload.old.id); renderKeepingInput(); return; }
   const m = mapSalesLogRow(payload.new);
   upsertLocalRow('salesLogs', m, l => l.person===m.person && l.date===m.date);
+  syncAutoSalesLogs();
   // Don't yank the form out from under someone mid-typing on their own daily log.
   const active = document.activeElement;
   if (active && active.id && active.id.startsWith('sl-')) return;
@@ -1872,6 +1873,27 @@ async function setMyBreak(on){
     fetch(CONV_URL + '?step=status', { method:'POST', headers:{ 'Content-Type':'application/json', apikey:SUPABASE_ANON_KEY, Authorization:'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify({ text }) }).catch(() => {});
   } catch (e) {}
 }
+// Ron's hours and bookings fill themselves (Ofek 5/10): hours = Log In → Log Out on the shift clock (breaks don't count
+// against him), bookings = every booking made that day, by division (myday_days.bookings), only on days he logged in.
+// A saved row in sales_daily_log (an owner's correction, or a day logged by hand before 5 Oct) always wins.
+function syncAutoSalesLogs(){
+  if (!STATE.data) return;
+  const stored = (STATE.data.salesLogs||[]).filter(l => !l.auto);
+  const has = new Set(stored.map(l => l.person + '|' + l.date));
+  const today = sydneyToday(), auto = [];
+  (STATE.profiles||[]).filter(p => p.role==='va').forEach(p => {
+    const person = p.technicianName || p.fullName;
+    const evs = (STATE.shiftEvents||[]).filter(e => e.profile_id===p.id);
+    [...new Set(evs.map(e => e.day))].forEach(day => {
+      if (has.has(person + '|' + day)) return;
+      const k = shiftDaySummary(evs.filter(e => e.day===day), Date.now(), day===today);
+      const b = (MD.days[day] && MD.days[day].bookings) || [];
+      const n = div => b.filter(x => x.div===div).length;
+      auto.push({ person, date: day, hours: k.hours, bookingsAircon: n('Aircon'), bookingsChimney: n('Chimney'), bookingsPw: n('Pressure Washing'), auto: true });
+    });
+  });
+  STATE.data.salesLogs = [...stored, ...auto];
+}
 // Shift clock (start/end shift, breaks) for Payroll: shift_events, own rows for Ron, everyone's for the owners.
 async function loadShiftEvents(){
   const p = getRealProfile && getRealProfile();
@@ -1879,7 +1901,8 @@ async function loadShiftEvents(){
   const { data, error } = await sb.from('shift_events').select('profile_id, kind, at, day').gte('at', new Date(Date.now() - 120*86400000).toISOString()).order('at');
   if (error) return;
   STATE.shiftEvents = data || []; STATE.shiftEventsAt = Date.now();
-  if (UI.tab==='payroll') renderKeepingInput();
+  syncAutoSalesLogs();
+  if (UI.tab==='payroll' || UI.tab==='dashboard') renderKeepingInput();
 }
 // One day of the clock: first start, last end, the breaks, and the minutes on shift. Breaks are only listed (Ofek 3/10:
 // a break is a record, it doesn't change pay), so they are not taken off.
@@ -1915,19 +1938,15 @@ function renderShiftLog(person, weekKey, isOwnPage){
     totalMins += k.workedMins;
     const brk = k.breaks.length ? k.breaks.map(b => `${t(b.from)}–${b.to ? t(b.to) : 'now'}`).join(', ') + ` (${k.breakMins} min)` : '—';
     rows.push(`<tr><td>${esc(parseLocalDate(d).toLocaleDateString('en-AU', { weekday:'short', day:'numeric', month:'short' }))}</td><td class="mono">${t(k.start)}</td><td class="mono">${k.end && !k.open ? t(k.end) : (d===today ? '<span style="color:var(--good)">on shift</span>' : '<span style="color:var(--bad)">not ended</span>')}</td><td>${brk}</td><td class="num">${(k.workedMins/60).toFixed(2)}h</td>
-      <td>${isOwnPage || getCurrentProfile().role!=='va' ? `<button class="btn ghost small" onclick="useShiftHours('${d}', ${k.hours})" title="Put these hours in the Log your day form">Use ${k.hours}h</button>` : ''}</td></tr>`);
+</tr>`);
   }
   const buttons = isOwnPage ? `<div style="margin-bottom:10px">${myShiftButton(getCurrentProfile())}</div>` : '';
   return `<div class="card" style="margin-top:14px">
     <div class="section-title" style="margin-top:0">Shift clock <span class="tag">${payrollWeekLabel(wk)}</span></div>
     ${buttons}
-    ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Day</th><th>Start</th><th>End</th><th>Breaks</th><th class="num">On shift</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
-      <div class="hint" style="margin-top:6px">On shift = from Start shift to End shift: ${(totalMins/60).toFixed(2)}h this week. Breaks are shown for the record only and don't change anything. Pay still comes from the hours in "Log your day"; "Use" copies a day's hours into that form, then press Save.</div>` : `<div class="hint">No shifts recorded this week yet. Start shift and End shift (and breaks) are recorded here automatically.</div>`}
+    ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Day</th><th>Log In</th><th>Log Out</th><th>Breaks</th><th class="num">On shift</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
+      <div class="hint" style="margin-top:6px">On shift = from Start shift to End shift: ${(totalMins/60).toFixed(2)}h this week. Breaks are shown for the record only and don't change anything. These hours are what Payroll uses (unless an owner corrected the day).</div>` : `<div class="hint">No days recorded this week yet. Log In, Log Out and breaks on My Day are recorded here automatically.</div>`}
   </div>`;
-}
-function useShiftHours(day, hours){
-  UI.payroll.logDate = day; UI.payroll.week = payrollWeekOf(day).key; render();
-  setTimeout(() => { const el = document.getElementById('sl-hours'); if (el) { el.value = hours; el.focus(); showToast(`${hours}h filled in for ${fmtDateShort(day)}. Press Save to keep it.`); } }, 50);
 }
 function getCurrentProfile(){
   const real = getRealProfile();
@@ -2372,10 +2391,8 @@ async function doSetPassword(){
 }
 async function doLogout(){
   const p = getCurrentProfile();
-  if (p && p.role==='va' && !readOnlyReason() && STATE.data && !doLogout.confirmed) { mdEndOfDay(); return; }
+  if (p && p.role==='va' && !readOnlyReason() && STATE.data && !doLogout.confirmed && onShiftToday(p)) { mdEndOfDay({ signOut: true }); return; }
   doLogout.confirmed = false;
-  if (p && p.role==='va' && !readOnlyReason() && !doLogout.silent) { try { await sb.rpc('mark_logout'); } catch (e) {} }
-  doLogout.silent = false;
   if (PRESENT) { try { localStorage.setItem('tgsg_present','0'); } catch(e) {} PRESENT = false; }   // a demo never carries over to the next login
   phoneStop(); renderPhoneWidget();
   await sb.auth.signOut();
@@ -3668,13 +3685,15 @@ async function mdLoad(){
   if (error) return;
   MD.days = {}; (data||[]).forEach(r => { MD.days[r.day] = r; });
   MD.loaded = true;
+  syncAutoSalesLogs();
   mdTick();
   renderKeepingInput();
 }
 function handleMyDayRealtime(payload){
   if (!STATE.data || !MD.loaded || payload.eventType==='DELETE' || !payload.new) return;
   MD.days[payload.new.day] = payload.new;
-  if (UI.tab==='myDay' || UI.tab==='dashboard') renderKeepingInput();
+  syncAutoSalesLogs();
+  if (UI.tab==='myDay' || UI.tab==='dashboard' || UI.tab==='payroll') renderKeepingInput();
 }
 function mdReviewJobs(data){
   if (REVIEW_REQ===null) { loadReviewRequests(); return null; }
@@ -3793,7 +3812,8 @@ function mdRecordBooking(c){
   mdFlush(today, b);
 }
 // Ron's logout (Ofek 3/10): a quote due today that wasn't handled blocks it; otherwise "good work, X%" and the day closes.
-function mdEndOfDay(){
+function mdEndOfDay(opts){
+  const signOut = !!(opts && opts.signOut);
   const p = getCurrentProfile(), now = new Date(), today = sydneyWall(now).day;
   const bubbles = mdLive(filterForProfile(STATE.data, p), now);
   const openQuotes = (bubbles.quotes || []).filter(x => !x.done && x.rec);
@@ -3819,13 +3839,18 @@ function mdEndOfDay(){
         ]);
       } catch (e) { console.error('daily report', e); }
     }
-    closePopup(); doLogout.confirmed = true; doLogout();
+    // Log Out: the shift ends and the time is kept (the next morning's "While you were out" starts here).
+    try { await sb.rpc('mark_logout'); } catch (e) {}
+    const nowIso = new Date().toISOString();
+    Object.assign(p, { onDuty:false, onDutyDate: sydneyToday(), onDutyChangedAt: nowIso, onBreak:false, onBreakSince:null, lastLogoutAt: nowIso });
+    closePopup(); loadShiftEvents();
+    if (signOut) { doLogout.confirmed = true; doLogout(); } else { showToast('Day finished. See you tomorrow!'); render(); }
   };
   window.__mdFinish = finish;
   const first = String(p.fullName || '').split(' ')[0] || 'there';
   openPopup(`<h3 style="margin:0 0 6px">Good work today, ${esc(first)}!</h3>
     <div style="font-size:15px;margin:6px 0 4px">${k.percent===null ? 'There were no tasks today.' : `You completed <b>${k.percent}%</b> of today's tasks (${k.done} of ${k.total}).`}</div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn ghost" onclick="closePopup()">Stay</button><button class="btn primary" onclick="window.__mdFinish()">Log out</button></div>`);
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn ghost" onclick="closePopup()">Not yet</button><button class="btn primary" onclick="window.__mdFinish()">${signOut ? 'Finish day and leave' : 'Finish day'}</button></div>`);
 }
 // Why a quote is in Quotes due, in one line (My Day row and the logout popup).
 function quoteDueReason(c, localToday){
@@ -3868,7 +3893,7 @@ function mdDailyReportText(k, today, ended){
   const revenue = jobs.reduce((s, j) => s + (Number(j.amount) || 0), 0);
   const chats = Object.values(CONV.sessions || {}).filter(x => sydneyWall(new Date(x.created_at)).day === today && !x.test).length;
   const hm = d => new Date(d).toLocaleTimeString('he-IL', { timeZone:'Australia/Sydney', hour:'2-digit', minute:'2-digit' });
-  const endLine = !ended ? '' : ended.auto ? `רון לא יצא מהמערכת – היום נסגר אוטומטית${ended.at ? ` (סוף משמרת ${hm(ended.at)})` : ''}` : `רון יצא מהמערכת ב-${hm(ended.at || new Date())}`;
+  const endLine = !ended ? '' : ended.auto ? `רון לא לחץ Log Out – היום נסגר אוטומטית${ended.at ? ` (סוף משמרת ${hm(ended.at)})` : ''}` : `רון סיים את היום (Log Out) ב-${hm(ended.at || new Date())}`;
   const lines = [
     `📊 דוח יומי – ${day}`,
     endLine,
@@ -3889,7 +3914,7 @@ function mdDailyReportText(k, today, ended){
    On My Day, under the bookings table: every message from an EXISTING customer (not a New lead: those are in New leads)
    that came in between the office assistant's logout and their next login, oldest first. Opening one takes Ron to the
    conversation and drops it from the list (for everyone). No bubble or counter: it just says what to look at first.
-   If the assistant is still on shift at 20:00 the system logs them out with the shift ending at 17:30
+   If the assistant hasn't pressed Log Out by 20:00 the system finishes the day with the shift ending at 17:30
    (auto_end_va_shifts), and the next morning the app tells them they forgot. */
 function vaWindow(){
   const va = (STATE.profiles||[]).find(p => p.role==='va');
@@ -3940,26 +3965,15 @@ function openWhileOutItem(contactId, key){
 async function vaSessionStart(){
   const p = getRealProfile && getRealProfile();
   if (!p || p.role!=='va' || VIEW_AS_ID || PRESENT) return;
-  await sb.rpc('mark_session_start');
   const { data } = await sb.from('profiles').select('last_logout_at, session_started_at, forgot_logout_on').eq('id', p.id).single();
   if (data) { p.lastLogoutAt = data.last_logout_at; p.sessionStartedAt = data.session_started_at; p.forgotLogoutOn = data.forgot_logout_on; }
   if (p.forgotLogoutOn) {
     openPopup(`<h3 style="margin:0 0 6px">You forgot to log out</h3>
-      <div style="font-size:14px;margin-bottom:12px">On ${esc(parseLocalDate(p.forgotLogoutOn).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' }))} you were still logged in at 8pm, so the system logged you out and ended your shift at 5:30pm. Please log out at the end of every day.</div>
+      <div style="font-size:14px;margin-bottom:12px">On ${esc(parseLocalDate(p.forgotLogoutOn).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' }))} you didn't press Log Out, so at 8pm the system finished your day with the end time 5:30pm. Please press Log Out on My Day at the end of every day.</div>
       <div style="display:flex;justify-content:flex-end"><button class="btn primary" onclick="sb.rpc('ack_forgot_logout');closePopup()">OK</button></div>`);
   }
   render();
 }
-// Still logged in at 8pm: sign out without the end-of-day screen (the system ends the shift at 5:30pm).
-setInterval(() => {
-  try {
-    const p = getRealProfile && getRealProfile();
-    if (!p || p.role!=='va' || !STATE.dataLoaded || VIEW_AS_ID || PRESENT) return;
-    if (sydneyWall(new Date()).hour < 20) return;
-    if (!onShiftToday(p)) { sb.rpc('mark_logout'); }
-    doLogout.confirmed = true; doLogout.silent = true; doLogout();
-  } catch (e) {}
-}, 60000);
 function setMyDayView(v){ UI.myDayView = v; render(); }
 // The strip at the top: today, each closed day of this week, and earlier weeks merged into one chip each.
 function mdHistoryStrip(today){
@@ -6349,22 +6363,23 @@ function renderMyPay(profile, data, person, isPreview){
         <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Bookings today</div><div class="stat-value">${todayBookings}</div><div class="stat-sub">${bookingBonus(todayBookings) ? `${payMoney(presentAmt(bookingBonus(todayBookings)))} bonus today` : 'no bonus yet'}${next ? ` · ${next.needed} more → $${presentAmt(next.bonus)}` : ' · top bonus reached 🎉'}</div></div>
         <div class="card stat-card" style="--stat-accent:${st.salaryPaid?'var(--good)':'var(--ink-faint)'}"><div class="stat-label">This week's salary</div><div class="stat-value" style="font-size:20px">${st.salaryPaid ? 'Paid ✓' : 'Not paid yet'}</div><div class="stat-sub">${st.salaryPaid ? payMoney(st.salaryPaidAmount) : 'paid after the week ends'}</div></div>
       </div>
-      ${renderShiftLog(person, weekKey, !isPreview && (profile.technicianName || profile.fullName)===person && profile.role==='va')}
-      <div class="card" style="margin-top:14px">
-        <div class="section-title" style="margin-top:0">Log your day</div>
+      ${canEditAnyDay ? `<div class="card" style="margin-top:14px">
+        <div class="section-title" style="margin-top:0">Fix a day <span class="tag">owners only</span></div>
+        <div class="hint" style="margin:-4px 0 10px">Hours and bookings fill in by themselves: hours from Log In to Log Out, bookings = every booking made that day. Change a day here only to correct it; a corrected day stays as you saved it.</div>
         <div class="grid-4" style="align-items:end">
           <div class="field"><label>Day</label><input type="date" id="sl-date" value="${logDate}" ${canEditAnyDay?'':`min="${thisWeek.start}" max="${today}"`} onchange="setSalesLogDate(this.value)"></div>
           <div class="field"><label>Hours worked</label><input type="number" id="sl-hours" min="0" max="24" step="0.25" value="${log ? log.hours : ''}" placeholder="e.g. 8.5"></div>
           <div class="field"><label>Bookings — Aircon</label><input type="number" id="sl-aircon" min="0" step="1" value="${log ? log.bookingsAircon : ''}" placeholder="0"></div>
           <div class="field"><label>Bookings — Chimney</label><input type="number" id="sl-chimney" min="0" step="1" value="${log ? log.bookingsChimney : ''}" placeholder="0"></div>
           <div class="field"><label>Bookings — Pressure Washing</label><input type="number" id="sl-pw" min="0" step="1" value="${log ? log.bookingsPw : ''}" placeholder="0"></div>
-          <div class="field"><button class="btn primary" onclick="saveSalesLog('${p}')">${log ? 'Update day' : 'Save day'}</button></div>
+          <div class="field"><button class="btn primary" onclick="saveSalesLog('${p}')">Save correction</button></div>
         </div>
         <div class="hint">Pay is $${presentAmt(PAYROLL_HOURLY_RATE)} per hour you report, plus a daily bonus on that day's total bookings: ${PAYROLL_BOOKING_BONUS.slice().reverse().map((t,i,arr)=>`${t.min}${arr[i+1]?`–${arr[i+1].min-1}`:'+'} → $${presentAmt(t.bonus)}`).join(' · ')}.</div>
-      </div>
+      </div>` : `<div class="hint" style="margin-top:14px">Your hours and bookings fill in by themselves: hours from Log In to Log Out on My Day, bookings = every booking made that day. If something looks wrong, tell Ofek or Noam.</div>`}
       <div class="section-title">This week <span class="tag">${payrollWeekLabel(wk)}</span></div>
       ${payrollDaysTable(h)}
       ${isPreview ? `<div style="margin-top:10px"><button class="btn small" onclick="copyPayMessage('hourly','${p}')">📋 Copy pay message</button></div>` : ''}
+      ${renderShiftLog(person, weekKey, !isPreview && (profile.technicianName || profile.fullName)===person && profile.role==='va')}
     `;
   }
   const c = computePayrollCommission(data, person, weekKey);
@@ -6884,11 +6899,6 @@ function renderMyDay(profile, data){
   const now = new Date();
   const L = myDayLists(data, now);
   const dayName = parseLocalDate(L.today).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' });
-  const logPeople = profile.role==='va' ? [profile.technicianName || profile.fullName] : payrollHourlyPeople(data);
-  const logRows = logPeople.map(person => {
-    const log = (data.salesLogs||[]).find(l => l.person===person && l.date===L.localToday);
-    return { person, log, bookings: log ? salesLogBookings(log) : 0 };
-  });
   // Live done / total for every bubble (Ofek 3/10); a bubble turns green when everything in it is done.
   const live = mdLive(data, now), K = mdCounts(live);
   const view = UI.myDayView || 'today';
@@ -6915,12 +6925,6 @@ function renderMyDay(profile, data){
     return `<div class="myday-row" style="cursor:default"><div style="min-width:0;flex:1 1 220px"><div style="font-weight:600;font-size:13.5px">${esc(j.customerName||'—')}</div>
       <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">#${esc(j.invoiceNumber||'')} · ${esc(j.jobType||'—')} · ${esc(j.technician||'—')} · ${fmtDateShort(j.date)}</div></div>
       <div style="display:flex;align-items:center;gap:8px">${reviewAskCell(j)}</div></div>`; }).join('');
-  const logBody = logRows.map(r => `<div class="myday-row" style="cursor:default">
-      <div style="flex:1 1 220px;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(r.person)}</div>
-      <div style="font-size:12px;color:var(--ink-soft);margin-top:2px">${r.log ? `${r.log.hours}h · ${r.bookings} booking${r.bookings===1?'':'s'} today` : 'Hours and bookings for today are not logged yet'}</div></div>
-      ${r.log ? pill('good','Logged') : pill('warn','Not logged')}
-      <button class="btn small" onclick="goTab('payroll')">${r.log ? 'Update' : 'Log today'} →</button>
-    </div>`).join('');
 
   return `
     <div class="page-head"><div><h1 class="page-title">My Day</h1><div class="page-sub">${esc(dayName)} · who to call, in order. Work hours Mon–Fri 8:00–17:00.</div></div>${myShiftButton(profile)}</div>
@@ -6947,7 +6951,6 @@ function renderMyDay(profile, data){
     ${myDaySection('followups', 'Follow-ups due', L.followups.length, fuBody, 'No follow-ups due today. ✓')}
     ${myDaySection('quotes', 'Quotes due', L.quotesDue.length, quoteBody, 'No quote is due today. ✓', 'Quotes whose follow-up date has come. Call, then set the next date or move the stage. You can\'t log out while one is left.')}
     ${myDaySection('reviews', 'Ask for a review', reviewItems.length, reviewBody, (REVIEW_REQ===null ? 'Loading…' : 'Every job has been asked, or is marked don\'t ask. ✓'), 'Jobs where the customer hasn\'t been asked for a Google review yet. Not shown: jobs marked "don\'t ask" and reviews already taken.')}
-    ${logRows.length ? myDaySection('log', 'Log your day', logRows.filter(r=>!r.log).length, logBody, '', 'Hours and bookings go on the Payroll page — that is what your pay is calculated from.', logRows.every(r=>r.log) ? 'done' : '') : ''}
   `;
 }
 
@@ -8492,15 +8495,33 @@ async function setMyShift(on){
   showToast(on ? 'Shift started: calls to the business number ring here first' : 'Shift ended: calls go to Ofek and Noam');
   render(); phoneSync();
 }
+// The office assistant's day (Ofek 5/10), at the top of My Day and on Payroll: Log In → Start Break / Finish Break and
+// Log Out. Log In starts the shift (and ends the "While you were out" window); Log Out ends the day (the quotes check,
+// "good work, X%", the daily report) without leaving the app. Hours on Payroll come from Log In → Log Out.
 function myShiftButton(profile){
   if (profile.role!=='va') return '';
   const on = onShiftToday(profile), brk = on && profile.onBreak;
   const t = iso => iso ? new Date(iso).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' }) : '';
-  const status = brk ? pill('warn', `On a break since ${t(profile.onBreakSince)}`) : on ? pill('good', 'On shift') : pill('neutral', 'Off shift');
-  // Break (Ofek 3/10): only recorded (times on Payroll) and the owners get a WhatsApp. Calls and pay don't change.
-  const breakBtn = !on ? '' : brk ? `<button class="btn primary" onclick="setMyBreak(false)">Back from break</button>` : `<button class="btn" onclick="setMyBreak(true)">☕ Start break</button>`;
-  return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${status}${breakBtn}<button class="btn ${on?'':'primary'}" onclick="setMyShift(${on?'false':'true'})">${on ? 'End shift' : 'Start shift'}</button></div>`;
+  const outToday = !on && profile.onDutyDate===sydneyToday() && profile.onDutyChangedAt;
+  const status = brk ? pill('warn', `On a break since ${t(profile.onBreakSince)}`) : on ? pill('good', `Logged in since ${t(profile.onDutyChangedAt)}`) : outToday ? pill('neutral', `Logged out at ${t(profile.onDutyChangedAt)}`) : pill('neutral', 'Not logged in');
+  if (!on) return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${status}<button class="btn primary" onclick="vaLogIn()">Log In</button></div>`;
+  // Break (Ofek 3/10): only recorded, and the owners get a WhatsApp. Calls and pay don't change.
+  const breakBtn = brk ? `<button class="btn primary" onclick="setMyBreak(false)">Finish Break</button>` : `<button class="btn" onclick="setMyBreak(true)">☕ Start Break</button>`;
+  return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${status}${breakBtn}<button class="btn" onclick="vaLogOut()">Log Out</button></div>`;
 }
+async function vaLogIn(){
+  const me = getCurrentProfile(); if (!me) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const { error } = await sb.rpc('set_phone_duty', { p_on: true });
+  if (error) { showToast('Not saved: ' + error.message); return; }
+  await sb.rpc('mark_session_start');
+  const now = new Date().toISOString();
+  me.onDuty = true; me.onDutyDate = sydneyToday(); me.onDutyChangedAt = now; me.onBreak = false; me.onBreakSince = null;
+  if (me.lastLogoutAt && (!me.sessionStartedAt || me.sessionStartedAt < me.lastLogoutAt)) me.sessionStartedAt = now;
+  showToast('Logged in: have a good day!');
+  loadShiftEvents(); render(); phoneSync();
+}
+function vaLogOut(){ if (readOnlyReason()) { showToast(readOnlyReason()); return; } mdEndOfDay({ signOut: false }); }
 /* ── settings activity log — permission/business-rule/working-day changes (no single record to attach to) ── */
 function logSettingsActivity(actor, text){
   if (!STATE.data.settingsActivityLog) STATE.data.settingsActivityLog = [];
