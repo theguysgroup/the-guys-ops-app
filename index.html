@@ -497,6 +497,16 @@ button.xlink { background:none; border:none; padding:0; font:inherit; }
 .inv-pay { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .inv-pay > div { background: #f5f2ee; border-radius: 6px; padding: 10px 12px; }
 .inv-foot { margin-top: 16px; color: #6b6560; font-size: 11.5px; }
+.inv-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #8a5a00; background: #fff1cc; border-radius: 3px; padding: 0 4px; vertical-align: 1px; }
+.inv-in { width: 100%; border: 1px dashed #b9b1a6; background: #fffdf8; color: #1d1b19; padding: 4px 7px; font: inherit; border-radius: 4px; }
+.inv-in:focus { outline: 2px solid #c8463c; outline-offset: 1px; border-style: solid; }
+.inv-in.num { width: 100px; text-align: right; font-variant-numeric: tabular-nums; }
+textarea.inv-in { resize: vertical; }
+.inv-x { border: none; background: none; color: #a33; font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 4px; }
+#inv-preview .inv { border-radius: 4px 4px 0 0; padding-bottom: 14px; }
+.inv.inv-sign { border-radius: 0 0 4px 4px; padding-top: 4px; }
+.inv-sig-pad { display: block; width: min(360px, 100%); height: 110px; margin-top: 4px; border: 1px dashed #b9b1a6; border-radius: 6px; background: #fffdf8; touch-action: none; cursor: crosshair; }
+.inv-sign-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: min(360px, 100%); margin-top: 6px; }
 .exp-table select { min-width:0 !important; width:auto; }   /* Expenses & receipts: the in-table pickers take only the room they need */
 /* A big number that opens a list keeps the number's own color (red reads as a problem); the dotted line shows it's clickable. */
 .stat-value .xlink { color: inherit; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
@@ -668,16 +678,33 @@ function payrollInvoiceNumber(person, weekKey, kind){ return `${String(person||'
 function buildPayrollInvoice(data, person, weekKey, kind, parties, issued){
   const c = computePayrollCommission(data, person, weekKey);
   const deducts = commissionDeductsParts(person);
-  const base = { kind, person, number: payrollInvoiceNumber(person, weekKey, kind), issued, weekStart: c.week.start, weekEnd: c.week.end, from: parties.from, to: parties.to };
+  const base = { kind, person, number: payrollInvoiceNumber(person, weekKey, kind), issued, weekStart: c.week.start, weekEnd: c.week.end, from: parties.from, to: parties.to, note: '' };
+  // Every line has a label and a value (what it adds to the total); both can be changed on this invoice only.
   if (kind==='salary') {
-    const lines = c.lines.map(l => ({ date: l.job.date, invoice: l.job.invoiceNumber || '', customer: l.job.customerName || '', jobType: l.job.jobType || '',
-      amount: round2(Number(l.job.amount) || 0), parts: deducts ? round2(Number(l.job.partsCost) || 0) : 0, rate: Number(l.job.commissionPercent) || 0, commission: l.commission }));
-    return { ...base, deductsParts: deducts, lines, total: c.total, gst: 0 };
+    const lines = c.lines.map(l => {
+      const label = `#${l.job.invoiceNumber || '—'}${l.job.customerName ? ' · ' + l.job.customerName : ''}`;
+      return { kind:'job', date: l.job.date, invoice: l.job.invoiceNumber || '', customer: l.job.customerName || '', jobType: l.job.jobType || '',
+        amount: round2(Number(l.job.amount) || 0), parts: deducts ? round2(Number(l.job.partsCost) || 0) : 0, rate: Number(l.job.commissionPercent) || 0, commission: l.commission,
+        label, value: l.commission, orig: { label, value: l.commission } };
+    });
+    c.bonus.lines.forEach(b => { const label = `Bonus${b.reason ? ' · ' + b.reason : ''}`; lines.push({ kind:'bonus', date: c.week.start, label, value: round2(b.amount), orig: { label, value: round2(b.amount) } }); });
+    const total = round2(c.total + c.bonus.total);
+    return { ...base, deductsParts: deducts, lines, total, computedTotal: total, gst: 0 };
   }
-  const lines = c.materials.lines.map(l => ({ date: l.bought, item: l.kind==='parts' ? (l.desc || 'Parts') : l.label,
-    detail: l.kind==='parts' ? `Job parts · job #${(l.job && l.job.invoiceNumber) || '—'}` : (l.category || ''), supplier: l.supplier || '', receipt: !!l.receipt, gst: materialsGst(l.amount), amount: l.amount }));
-  return { ...base, lines, total: c.materials.total, gst: round2(lines.reduce((s, l) => s + l.gst, 0)) };
+  const lines = c.materials.lines.map(l => {
+    const label = l.kind==='parts' ? (l.desc || 'Parts') : l.label;
+    return { kind:'expense', date: l.bought, label, detail: l.kind==='parts' ? `Job parts · job #${(l.job && l.job.invoiceNumber) || '—'}` : (l.category || ''),
+      supplier: l.supplier || '', receipt: !!l.receipt, amount: l.amount, gst: materialsGst(l.amount), value: l.amount, orig: { label, value: l.amount } };
+  });
+  return { ...base, lines, total: c.materials.total, computedTotal: c.materials.total, gst: round2(lines.reduce((s, l) => s + l.gst, 0)) };
 }
+// The totals after any change on the invoice: what it adds up to, and (expenses) the GST inside the store receipts.
+function payrollInvoiceTotals(inv){
+  const total = round2(inv.lines.reduce((s, l) => s + (Number(l.value) || 0), 0));
+  const gst = inv.kind==='expenses' ? round2(inv.lines.reduce((s, l) => s + (l.kind==='expense' ? materialsGst(Number(l.value) || 0) : 0), 0)) : 0;
+  return { total, gst };
+}
+function payrollInvoiceLineEdited(l){ return !l.orig || l.label!==l.orig.label || round2(Number(l.value) || 0)!==round2(l.orig.value); }
 // What's still missing before an invoice can be made: the ABN (without one the business has to hold back tax).
 function payrollInvoiceMissing(inv){ return inv.from && String(inv.from.abn || '').trim() ? [] : ['ABN']; }
 // GST for a period (Ofek 6 Oct): collected = the GST on the period's jobs that are paid; we get back = the GST inside
@@ -698,7 +725,8 @@ function computeGstSummary(data, start, end){
 // running total was; the last bar is the net profit (or loss) from zero. lo / hi = the chart's scale.
 function profitSteps(np){
   const costs = [['Technician commissions', np.commission], ['Job expenses (parts)', np.parts], ['Equipment (excl. GST)', np.equipment||0],
-    ['Marketing (ads)', np.marketing], ['Hourly staff (Ron)', np.hourlyStaff], [`Owner salaries (${np.days} day${np.days===1?'':'s'})`, np.owners]];
+    ['Marketing (ads)', np.marketing], ['Hourly staff (Ron)', np.hourlyStaff], [`Owner salaries (${np.days} day${np.days===1?'':'s'})`, np.owners],
+    ...((Number(np.bonuses)||0) > 0 ? [['Bonuses', np.bonuses]] : [])];
   let run = Number(np.revenue)||0;
   const steps = [{ label:'Revenue (excl. GST)', from:0, to:run, value:run, kind:'in' }];
   costs.forEach(([label, v]) => { const val = Number(v)||0; steps.push({ label, from: round2(run - val), to: run, value: val, kind:'out' }); run = round2(run - val); });
@@ -836,14 +864,20 @@ function computePayrollCommission(data, person, weekKey){
   const pcts = Array.from(new Set(pctSource.map(j => Number(j.commissionPercent)||0)));
   const total = round2(lines.reduce((s,l)=>s+l.commission,0));
   const materials = computePayrollMaterials(data, person, weekKey);
+  const bonus = payrollBonusesFor(data, person, wk.key);
   return {
     person, week: wk, lines, unpaid,
-    total, materials, grandTotal: round2(total + materials.total),
+    total, materials, bonus, grandTotal: round2(total + materials.total + bonus.total),
     onHold, onHoldTotal: round2(onHold.reduce((s,l)=>s+l.commission,0)),
     expected: round2(unpaid.reduce((s,j)=>s+jobCommissionAmount(j),0)),
     cash: round2(cashJobs.reduce((s,j)=>s+jobTotalCollected(j),0)),
     cashJobs, percent: pcts.length===1 ? pcts[0] : null,
   };
+}
+// Bonuses the owners added to someone's pay for a week (Ofek 7 Oct): on top of commission or hourly pay.
+function payrollBonusesFor(data, person, weekKey){
+  const lines = (data.payrollBonuses||[]).filter(b => b.person===person && b.weekKey===weekKey).sort((a,b) => String(a.createdAt||'').localeCompare(String(b.createdAt||'')));
+  return { lines, total: round2(lines.reduce((s,b) => s + (Number(b.amount)||0), 0)) };
 }
 function computePayrollHourly(data, person, weekKey){
   const wk = payrollWeekOf(weekKey);
@@ -857,13 +891,14 @@ function computePayrollHourly(data, person, weekKey){
       aircon: l ? (Number(l.bookingsAircon)||0) : 0, chimney: l ? (Number(l.bookingsChimney)||0) : 0, pw: l ? (Number(l.bookingsPw)||0) : 0 });
   }
   const worked = days.filter(d => d.hours>0 || d.bookings>0);
+  const extra = payrollBonusesFor(data, person, wk.key);
   return {
-    person, week: wk, days,
+    person, week: wk, days, extra,
     hours: round2(days.reduce((s,d)=>s+d.hours,0)),
     bookings: days.reduce((s,d)=>s+d.bookings,0),
     byDivision: { Aircon: days.reduce((s,d)=>s+d.aircon,0), Chimney: days.reduce((s,d)=>s+d.chimney,0), 'Pressure Washing': days.reduce((s,d)=>s+d.pw,0) },
     bonuses: days.reduce((s,d)=>s+d.bonus,0),
-    total: round2(days.reduce((s,d)=>s+d.pay,0)),
+    total: round2(days.reduce((s,d)=>s+d.pay,0) + extra.total),
     firstDay: worked.length ? worked[0].date : null, lastDay: worked.length ? worked[worked.length-1].date : null,
   };
 }
@@ -888,7 +923,9 @@ function buildCommissionPayMessage(p){
       out.push('', 'ציוד וחומרים שקנית (חשבונית נפרדת):', ...m.lines.map(matText));
       out.push('', `עמלה: ${payMoney(p.total)}`, `ציוד וחומרים: ${payMoney(m.total)} (מתוך זה GST: ${payMoney(m.gst)})`);
     }
-    out.push('', `💰 סה"כ לתשלום: ${payMoney(m.lines.length ? p.grandTotal : p.total)}`);
+    const bn = p.bonus || { lines:[], total:0 };
+    if (bn.lines.length) out.push('', 'בונוס:', ...bn.lines.map(b => `* ${b.reason || 'בונוס'}: ${payMoney(b.amount)}`));
+    out.push('', `💰 סה"כ לתשלום: ${payMoney(p.grandTotal)}`);
     if ((p.onHold||[]).length) out.push(`⏸ ${p.onHold.length===1?'עבודה אחת בהמתנה':p.onHold.length+' עבודות בהמתנה'} (${payMoney(p.onHoldTotal)}) - לא נכלל בתשלום השבוע`);
     if (p.unpaid.length===1) out.push(`⚠️ עבודה אחת עדיין לא שולמה - תיכנס לשבוע שבו תיסגר (עמלה צפויה: ${payMoney(p.expected)})`);
     else if (p.unpaid.length>1) out.push(`⚠️ ${p.unpaid.length} עבודות עדיין לא שולמו - ייכנסו לשבוע שבו ייסגרו (עמלה צפויה: ${payMoney(p.expected)})`);
@@ -901,7 +938,9 @@ function buildCommissionPayMessage(p){
       out.push('', 'Equipment & materials you paid for (separate invoice):', ...m.lines.map(matText));
       out.push('', `Commission: ${payMoney(p.total)}`, `Equipment & materials: ${payMoney(m.total)} (GST in it: ${payMoney(m.gst)})`);
     }
-    out.push('', `💰 Total to pay: ${payMoney(m.lines.length ? p.grandTotal : p.total)}`);
+    const bn = p.bonus || { lines:[], total:0 };
+    if (bn.lines.length) out.push('', 'Bonus:', ...bn.lines.map(b => `* ${b.reason || 'Bonus'}: ${payMoney(b.amount)}`));
+    out.push('', `💰 Total to pay: ${payMoney(p.grandTotal)}`);
     if ((p.onHold||[]).length) out.push(`⏸ ${p.onHold.length} job${p.onHold.length===1?'':'s'} on hold (${payMoney(p.onHoldTotal)}) - not included this week`);
     if (p.unpaid.length===1) out.push(`⚠️ 1 job is still unpaid - it will be added in the week it's paid (expected commission: ${payMoney(p.expected)})`);
     else if (p.unpaid.length>1) out.push(`⚠️ ${p.unpaid.length} jobs are still unpaid - they will be added in the week they're paid (expected commission: ${payMoney(p.expected)})`);
@@ -923,7 +962,7 @@ function shiftDays(dateStr, n){ const d = parseLocalDate(dateStr); d.setDate(d.g
 function computeNetProfit(data, startDateStr, endDateStr, now){
   const today = todayStr(now);
   const end = endDateStr > today ? today : endDateStr;
-  if (end < startDateStr) return { revenue:0, commission:0, parts:0, equipment:0, marketing:0, hourlyStaff:0, owners:0, net:0, days:0, start:startDateStr, end };
+  if (end < startDateStr) return { revenue:0, commission:0, parts:0, equipment:0, marketing:0, hourlyStaff:0, owners:0, bonuses:0, net:0, days:0, start:startDateStr, end };
   const inRange = d => d>=startDateStr && d<=end;
   const jobs = data.jobs.filter(j => inRange(j.date));
   const revenue = round2(jobs.reduce((s,j)=>s+(Number(j.amount)||0),0));
@@ -936,8 +975,10 @@ function computeNetProfit(data, startDateStr, endDateStr, now){
   const days = daysBetween(parseLocalDate(startDateStr), parseLocalDate(end)) + 1;
   const weeklyOwners = Object.values((data.settings && data.settings.ownerSalaries) || {}).reduce((s,v)=>s+(Number(v)||0),0);
   const owners = round2(weeklyOwners * days / 7);
-  const net = round2(revenue - commission - parts - equipment - marketing - hourlyStaff - owners);
-  return { revenue, commission, parts, equipment, marketing, hourlyStaff, owners, net, days, start:startDateStr, end };
+  // Bonuses the owners added to anyone's pay (Ofek 7 Oct), counted on their pay week's Sunday.
+  const bonuses = round2((data.payrollBonuses||[]).filter(b => inRange(b.weekKey)).reduce((s,b)=>s+(Number(b.amount)||0),0));
+  const net = round2(revenue - commission - parts - equipment - marketing - hourlyStaff - owners - bonuses);
+  return { revenue, commission, parts, equipment, marketing, hourlyStaff, owners, bonuses, net, days, start:startDateStr, end };
 }
 
 /* ── phone calls (Google Ads call reporting, synced daily into ad_calls) ─────────────────────────
@@ -1168,7 +1209,7 @@ async function loadFromSupabase(){
   // anything past that used to disappear without a trace. Single-row tables stay as one request.
   const LOAD_NAMES = ['leads','jobs','equipment purchases','equipment catalogue','suppliers','tasks','closings',
     'reminders','tags','deleted reminders','cash status','settings','employees','commission rates',
-    'activity history','ad spend','payroll','daily sales log','Google Ads calls','read reminders'];
+    'activity history','ad spend','payroll','daily sales log','Google Ads calls','read reminders','payroll bonuses'];
   const loadResults = await Promise.all([
     fetchAllRows('contacts', 'id'),
     fetchAllRows('jobs', 'id'),
@@ -1193,6 +1234,8 @@ async function loadFromSupabase(){
     fetchAllRows('ad_calls', 'id'),
     // Which reminders THIS person has already opened (RLS returns only their own rows).
     fetchAllRows('reminder_reads', 'key'),
+    // Bonuses the owners add to a week's pay (Ofek 7 Oct); a worker gets only his own (RLS).
+    fetchAllRows('payroll_bonuses', 'id'),
   ]);
   const [
     { data: contacts }, { data: jobs }, { data: equipmentSpend }, { data: equipmentCatalog },
@@ -1200,7 +1243,7 @@ async function loadFromSupabase(){
     { data: manualReminders }, { data: tagCatalog }, { data: dismissedReminders },
     { data: cashStatusRow }, { data: settingsRow }, { data: employees }, { data: commissionRateRows },
     { data: activityRows }, { data: adSpendRows }, { data: payrollRows }, { data: salesLogRows }, { data: adCallRows },
-    { data: readReminderRows },
+    { data: readReminderRows }, { data: bonusRows },
   ] = loadResults;
   // A table that failed to load used to look exactly like an empty one. Remember which ones failed so
   // every screen shows a red warning instead of quietly showing partial data.
@@ -1262,6 +1305,7 @@ async function loadFromSupabase(){
     commissionRates: {},
     adSpend: (adSpendRows||[]).map(a => ({ date:a.date, channel:a.channel, spend:a.spend||0, leadsReported:a.leads_reported })),
     payrollWeeks: (payrollRows||[]).map(mapPayrollRow),
+    payrollBonuses: (bonusRows||[]).map(mapBonusRow),
     salesLogs: (salesLogRows||[]).map(mapSalesLogRow),
     adCalls: (adCallRows||[]).map(c => ({ id:c.id, callId:c.call_id, source:c.source, date:c.date, startedAt:c.started_at_local, durationSeconds:Number(c.duration_seconds)||0, status:c.status||'', callType:c.call_type||'', campaign:c.campaign||'', account:c.account||'' })),
   };
@@ -1617,6 +1661,22 @@ const db = {
       }
     },
   },
+  // Bonuses on a week's pay (Ofek 7 Oct): only the owners add or remove them.
+  payrollBonuses: {
+    async add(values){
+      const { data: row, error } = await sb.from('payroll_bonuses').insert({ week_start: values.weekKey, person: values.person, amount: values.amount, reason: values.reason || '', created_by: values.createdBy || null }).select().single();
+      if (error) { showToast('The bonus was not saved: ' + error.message); return null; }
+      const b = mapBonusRow(row);
+      (STATE.data.payrollBonuses = STATE.data.payrollBonuses || []).push(b);
+      return b;
+    },
+    async remove(id){
+      const gone = (STATE.data.payrollBonuses || []).find(b => b.id===id);
+      STATE.data.payrollBonuses = (STATE.data.payrollBonuses || []).filter(b => b.id!==id);
+      const { error } = await sb.from('payroll_bonuses').delete().eq('id', id);
+      if (error) { showToast('The bonus was not removed: ' + error.message); if (gone) STATE.data.payrollBonuses.push(gone); render(); }
+    },
+  },
   // Hourly staff daily log (Ron): hours + bookings per division, one row per (person, day).
   salesLogs: {
     async set(person, date, values){
@@ -1875,7 +1935,8 @@ function presentScaleData(d){
   (d.equipmentSpend||[]).forEach(e => { e.cost = x(e.cost); });
   (d.equipmentCatalog||[]).forEach(e => { e.price = x(e.price); });
   (d.adSpend||[]).forEach(a => { a.spend = x(a.spend); });
-  (d.payrollWeeks||[]).forEach(r => { if (r.salaryPaidAmount!=null) r.salaryPaidAmount = x(r.salaryPaidAmount); });
+  (d.payrollWeeks||[]).forEach(r => { ['salaryPaidAmount', 'salaryInvoiceAmount', 'expensesInvoiceAmount'].forEach(k => { if (r[k]!=null) r[k] = x(r[k]); }); });
+  (d.payrollBonuses||[]).forEach(b => { b.amount = x(b.amount); });
   if (d.cashStatus) d.cashStatus.amount = x(d.cashStatus.amount);
   if (d.settings && d.settings.ownerSalaries) Object.keys(d.settings.ownerSalaries).forEach(n => { d.settings.ownerSalaries[n] = x(d.settings.ownerSalaries[n]); });
 }
@@ -1969,8 +2030,11 @@ function mapPayrollRow(r){
     cashCollected:!!r.cash_collected, cashCollectedAt:r.cash_collected_at, cashCollectedBy:r.cash_collected_by||'',
     salaryPaid:!!r.salary_paid, salaryPaidAt:r.salary_paid_at, salaryPaidBy:r.salary_paid_by||'',
     salaryPaidAmount: r.salary_paid_amount===null || r.salary_paid_amount===undefined ? null : Number(r.salary_paid_amount),
-    salaryInvoiceFile: r.salary_invoice_file||null, salaryInvoiceAt: r.salary_invoice_at||null, expensesInvoiceFile: r.expenses_invoice_file||null, expensesInvoiceAt: r.expenses_invoice_at||null };
+    salaryInvoiceFile: r.salary_invoice_file||null, salaryInvoiceAt: r.salary_invoice_at||null, expensesInvoiceFile: r.expenses_invoice_file||null, expensesInvoiceAt: r.expenses_invoice_at||null,
+    salaryInvoiceAmount: r.salary_invoice_amount===null || r.salary_invoice_amount===undefined ? null : Number(r.salary_invoice_amount),
+    expensesInvoiceAmount: r.expenses_invoice_amount===null || r.expenses_invoice_amount===undefined ? null : Number(r.expenses_invoice_amount) };
 }
+function mapBonusRow(b){ return { id:b.id, weekKey:b.week_start, person:b.person, amount:Number(b.amount)||0, reason:b.reason||'', createdBy:b.created_by||'', createdAt:b.created_at }; }
 function mapSalesLogRow(l){
   return { id:l.id, person:l.person, date:l.date, hours:Number(l.hours)||0,
     bookingsAircon:Number(l.bookings_aircon)||0, bookingsChimney:Number(l.bookings_chimney)||0, bookingsPw:Number(l.bookings_pw)||0,
@@ -6725,36 +6789,97 @@ function renderPayrollPeriodView(data, viewChips){
 // ── Weekly invoices (Ofek 6 Oct): each technician hands in two a week — one for his commission and one for the equipment
 // & materials he paid for (so the business claims the GST back). Files go to file storage (payroll/<week>/<person>/);
 // the row keeps where they are. When the commission invoice is in, the owners get a phone notification.
-function payrollInvoiceChips(st){
-  const chip = (file, at, name) => file
-    ? `<a href="#" class="file-chip" style="margin:0 4px 4px 0" title="Sent ${esc(at ? new Date(at).toLocaleString('en-AU') : '')}" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">🧾 ${name} ✓</a>`
-    : `<span class="hint" style="display:inline-block;margin:0 8px 4px 0">${name} —</span>`;
-  return `<div style="display:flex;flex-wrap:wrap">${chip(st.salaryInvoiceFile, st.salaryInvoiceAt, 'Commission')}${chip(st.expensesInvoiceFile, st.expensesInvoiceAt, 'Expenses')}</div>`;
+// The week's two invoices on the Payroll board: open each one; the signed amount shows, and stands out when it isn't
+// what the app worked out (c = the person's week, so the two can be compared).
+function payrollInvoiceChips(st, c){
+  const chip = (file, at, name, signed, expected) => {
+    if (!file) return `<span class="hint" style="display:inline-block;margin:0 8px 4px 0">${name} —</span>`;
+    const differs = signed!=null && expected!=null && Math.abs(signed - expected) >= 0.005;
+    return `<a href="#" class="file-chip" style="margin:0 4px 4px 0${differs ? ';outline:1.5px solid var(--warn)' : ''}" title="Saved ${esc(at ? new Date(at).toLocaleString('en-AU') : '')}${differs ? ` · the app worked out ${payMoney(expected)}` : ''}" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">🧾 ${name} ${signed!=null ? payMoney(signed) : '✓'}${differs ? ' ⚠' : ''}</a>`;
+  };
+  return `<div style="display:flex;flex-wrap:wrap">${chip(st.salaryInvoiceFile, st.salaryInvoiceAt, 'Commission', st.salaryInvoiceAmount, c ? round2(c.total + c.bonus.total) : null)}${chip(st.expensesInvoiceFile, st.expensesInvoiceAt, 'Expenses', st.expensesInvoiceAmount, c ? c.materials.total : null)}</div>`;
 }
 function payrollInvoiceCard(c, person, weekKey){
   const st = payrollStatus(STATE.data, weekKey, person);
   const p = jsStr(person);
   const slot = (kind, title, amount, sub) => {
     const file = kind==='salary' ? st.salaryInvoiceFile : st.expensesInvoiceFile, at = kind==='salary' ? st.salaryInvoiceAt : st.expensesInvoiceAt;
+    const signed = kind==='salary' ? st.salaryInvoiceAmount : st.expensesInvoiceAmount;
+    const same = signed!=null && Math.abs(signed - amount) < 0.005;
+    // The amount on the signed invoice sits next to what the app worked out; almost always the same.
+    const signedTag = !file ? '' : signed==null ? pill('good', 'Saved ' + fmtDateShort(localDay(at)))
+      : `<span class="pill ${same ? 'good' : 'warn'}" title="${same ? 'The signed invoice matches what the app worked out' : 'The signed invoice is not the amount the app worked out'}">Invoice signed ${payMoney(signed)}${same ? ' ✓' : ''}</span>`;
     return `<div class="mini-tile">
       <div class="stat-label">${title}</div>
-      <div class="stat-value" style="font-size:18px">${payMoney(amount)}</div>
-      <div class="stat-sub">${sub}</div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div class="stat-value" style="font-size:18px">${payMoney(amount)}</div>${signedTag}</div>
+      <div class="stat-sub">${sub}${file && signed!=null && !same ? ` · the signed invoice is ${payMoney(signed)}, not ${payMoney(amount)}` : ''}</div>
       ${kind==='expenses' && c.materials.lines.length ? `<div style="margin-top:10px">${c.materials.lines.map(l => `<div class="split-row" style="grid-template-columns:1fr auto auto"><span>${esc(l.kind==='parts' ? `Parts · job #${l.job.invoiceNumber||'—'}${l.desc ? ' · ' + l.desc : ''}` : l.label)} <span class="hint">${fmtDateShort(l.bought)}</span></span><span class="num">${payMoney(l.amount)}</span><span>${l.receipt ? fileLinkHtml(l.receipt) : '<span class="hint">no receipt</span>'}</span></div>`).join('')}</div>` : ''}
       <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        ${file ? `${pill('good', 'Sent ' + fmtDateShort(localDay(at)))}<a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">📄 View</a>` : ''}
-        ${amount > 0 ? `<button class="btn small ${file ? '' : 'primary'}" onclick="openPayrollInvoice('${kind}','${p}','${weekKey}')">${file ? 'Create it again' : 'Create invoice'}</button>` : (file ? '' : '<span class="hint">Nothing to invoice this week</span>')}
+        ${file ? `<a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">📄 View invoice</a>` : ''}
+        ${amount > 0 || file ? `<button class="btn small ${file ? '' : 'primary'}" onclick="openPayrollInvoice('${kind}','${p}','${weekKey}')">${file ? 'Create it again' : 'Create invoice'}</button>` : '<span class="hint">Nothing to invoice this week</span>'}
       </div>
     </div>`;
   };
+  const commission = round2(c.total + c.bonus.total);
   return `<div class="card" style="margin-top:14px">
     <div class="stat-label">Your invoices for this week <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">${payrollWeekLabel(c.week)}</span></div>
-    <div class="stat-sub" style="margin:4px 0 10px">Two invoices each week: one for your commission, one for the equipment &amp; materials you paid for. Press Create invoice: the app fills it in from this week's jobs and purchases, you check it and press Send. When the commission invoice is in, Ofek and Noam get a message that you can be paid.</div>
+    <div class="stat-sub" style="margin:4px 0 10px">Two invoices each week: one for your commission, one for the equipment &amp; materials you paid for. Press Create invoice: the app fills it in from this week's jobs and purchases. You can change a line if you need to, then sign it and press Save invoice. When the commission invoice is saved, Ofek and Noam get a message that you can be paid.</div>
     <div class="grid-2">
-      ${slot('salary', 'Commission invoice', c.total, 'commission on the jobs paid this week')}
+      ${slot('salary', 'Commission invoice', commission, `commission on the jobs paid this week${c.bonus.total ? ` + bonus ${payMoney(c.bonus.total)}` : ''}`)}
       ${slot('expenses', 'Equipment &amp; materials invoice', c.materials.total, c.materials.total ? `incl. GST ${payMoney(c.materials.gst)} · what you paid for yourself` : 'nothing to claim this week')}
     </div>
   </div>`;
+}
+// ── Bonuses (Ofek 7 Oct): the owners add a bonus to anyone's pay for a week, themselves included. It joins the week's
+// total to pay and the pay message, is a line on the commission invoice, and comes off the net profit.
+function payrollBonusList(lines, canEdit){
+  return lines.map(x => `<div class="split-row" style="grid-template-columns:1fr auto auto"><span>${esc(x.reason || 'Bonus')} <span class="hint">added by ${esc(x.createdBy || '—')}</span></span><span class="num">${payMoney(x.amount)}</span><span>${canEdit ? `<button class="btn ghost small danger" onclick="removePayrollBonus('${x.id}')">Remove</button>` : ''}</span></div>`).join('');
+}
+function payrollBonusForm(prefix, onAdd, people){
+  return `<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:10px">
+    ${people ? `<div class="field" style="flex:0 0 150px"><label>Who</label><select id="${prefix}-person"><option value="">Choose…</option>${people.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></div>` : ''}
+    <div class="field" style="flex:0 0 120px"><label>Amount</label><input type="number" step="0.01" min="0" id="${prefix}-amount" placeholder="$"></div>
+    <div class="field" style="flex:1 1 220px"><label>Reason</label><input id="${prefix}-reason" placeholder="e.g. A great week"></div>
+    <button class="btn primary small" onclick="${onAdd}">Add bonus</button>
+  </div>`;
+}
+// On one person's pay page: his bonus this week (the owners add it from here, in that person's view).
+function payrollBonusCard(data, person, weekKey, canEdit){
+  const b = payrollBonusesFor(data, person, weekKey);
+  if (!canEdit && !b.lines.length) return '';
+  return `<div class="card tight" style="margin-top:14px" data-bonus-person="${esc(person)}">
+    <div class="stat-label" style="margin-bottom:6px">Bonus this week ${b.total ? `<span class="tag">${payMoney(b.total)}</span>` : ''}</div>
+    ${payrollBonusList(b.lines, canEdit) || '<div class="hint">No bonus this week.</div>'}
+    ${canEdit ? payrollBonusForm('bn', `addPayrollBonus('bn','${weekKey}','${jsStr(person)}')`, null) : ''}
+  </div>`;
+}
+// On the Payroll board: every bonus this week, for anyone (technicians, hourly staff and the owners).
+function payrollBonusesBoardCard(data, weekKey){
+  const lines = (data.payrollBonuses||[]).filter(b => b.weekKey===weekKey).sort((a,b) => a.person.localeCompare(b.person));
+  const owners = (data.employees||[]).filter(e => e.status==='Active' && e.roles.includes('Owner')).map(e => e.name);
+  const people = [...new Set([...payrollCommissionPeople(data), ...payrollHourlyPeople(data), ...owners])];
+  const total = round2(lines.reduce((s,b) => s + b.amount, 0));
+  return `<div class="section-title">Bonuses <span class="tag">${total ? payMoney(total) : 'none this week'}</span></div>
+    <div class="card tight">
+      ${lines.length ? lines.map(b => `<div class="split-row" style="grid-template-columns:120px 1fr auto auto">${techTag(b.person)}<span>${esc(b.reason || 'Bonus')} <span class="hint">added by ${esc(b.createdBy || '—')}</span></span><span class="num">${payMoney(b.amount)}</span><button class="btn ghost small danger" onclick="removePayrollBonus('${b.id}')">Remove</button></div>`).join('') : '<div class="hint">No bonus this week. A bonus is added to that person\'s pay for the week, and comes off the net profit.</div>'}
+      ${payrollBonusForm('bnb', `addPayrollBonus('bnb','${weekKey}')`, people)}
+    </div>`;
+}
+async function addPayrollBonus(prefix, weekKey, fixedPerson){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const el = id => document.getElementById(`${prefix}-${id}`);
+  const person = fixedPerson || (el('person') && el('person').value);
+  const amount = round2(Number(el('amount') && el('amount').value) || 0);
+  const reason = ((el('reason') && el('reason').value) || '').trim();
+  if (!person) { showToast('Choose who gets the bonus'); return; }
+  if (!(amount > 0)) { showToast('Enter the bonus amount'); return; }
+  const me = (getRealProfile && getRealProfile()) || getCurrentProfile();
+  const b = await db.payrollBonuses.add({ weekKey, person, amount, reason, createdBy: me && me.fullName });
+  if (b) { showToast(`Bonus of ${payMoney(b.amount)} added for ${person}`); render(); }
+}
+function removePayrollBonus(id){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  confirmAction('Remove this bonus?', async () => { await db.payrollBonuses.remove(id); showToast('Bonus removed'); render(); });
 }
 // ── Creating the invoice (Ofek 7 Oct): the technician's details come from his employee card (Resources → Employees; a
 // technician reads only his own, through my_invoice_details), the business's from Settings. The preview is the same
@@ -6784,59 +6909,126 @@ function fmtAbn(v){ const d = String(v || '').replace(/\D/g, ''); return d.lengt
 function invRate(p){ return (Math.round(Number(p) * 100) / 100) + '%'; }
 function invTitle(inv){ return inv.kind==='salary' ? 'Commission' : 'Equipment & materials paid back'; }
 function invBank(f){ return f.bankName || f.bankBsb || f.bankAccount ? [f.bankName && `Account name ${f.bankName}`, f.bankBsb && `BSB ${f.bankBsb}`, f.bankAccount && `Account ${f.bankAccount}`].filter(Boolean) : null; }
-// The invoice on screen (paper colours on purpose: it looks the same in a light or dark app).
-function payrollInvoiceHtml(inv){
-  const f = inv.from, t = inv.to, bank = invBank(f), miss = txt => `<span class="inv-miss">${txt}</span>`;
-  const head = inv.kind==='salary'
-    ? `<tr><th>Job date</th><th>Job</th><th class="num">Job amount<br>excl. GST</th>${inv.deductsParts ? '<th class="num">Parts</th>' : ''}<th class="num">Rate</th><th class="num">Commission</th></tr>`
-    : `<tr><th>Bought</th><th>Item</th><th>Supplier</th><th>Receipt</th><th class="num">GST in it</th><th class="num">Amount<br>incl. GST</th></tr>`;
-  const rows = inv.kind==='salary'
-    ? inv.lines.map(l => `<tr><td>${esc(fmtDateShort(l.date))}</td><td>#${esc(l.invoice || '—')}${l.customer ? ' · ' + esc(l.customer) : ''}${l.jobType ? ` <span class="inv-sub">${esc(l.jobType)}</span>` : ''}</td><td class="num">${invMoney(l.amount)}</td>${inv.deductsParts ? `<td class="num">${l.parts ? invMoney(l.parts) : '—'}</td>` : ''}<td class="num">${invRate(l.rate)}</td><td class="num">${invMoney(l.commission)}</td></tr>`).join('')
-    : inv.lines.map(l => `<tr><td>${esc(fmtDateShort(l.date))}</td><td>${esc(l.item)}${l.detail ? `<div class="inv-sub">${esc(l.detail)}</div>` : ''}</td><td>${esc(l.supplier || '—')}</td><td>${l.receipt ? '<span class="inv-ok">Attached in the app</span>' : '<span class="inv-sub">none</span>'}</td><td class="num">${invMoney(l.gst)}</td><td class="num">${invMoney(l.amount)}</td></tr>`).join('');
-  const how = inv.kind==='salary'
+// The invoice on screen (paper colours on purpose: it looks the same in a light or dark app). In edit mode each line's
+// text and amount are boxes, a line can be removed or added, and there's a note (all for this invoice only).
+function invLineTag(l){ return !l.orig ? 'added' : payrollInvoiceLineEdited(l) ? 'changed' : ''; }
+function payrollInvoiceHtml(inv, editing){
+  const f = inv.from, t = inv.to, bank = invBank(f), miss = txt => `<span class="inv-miss">${txt}</span>`, tot = payrollInvoiceTotals(inv);
+  const salary = inv.kind==='salary';
+  const labelCell = (l, i, sub) => editing
+    ? `<input class="inv-in" value="${esc(l.label)}" placeholder="What it is for" oninput="invEdit(${i},'label',this.value)">${sub ? `<div class="inv-sub">${sub}</div>` : ''}`
+    : `${esc(l.label)}${sub ? ` <span class="inv-sub">${sub}</span>` : ''}${invLineTag(l) ? ` <span class="inv-tag">${invLineTag(l)}</span>` : ''}`;
+  const valueCell = (l, i) => editing ? `<input class="inv-in num" type="number" step="0.01" value="${round2(Number(l.value)||0)}" oninput="invEdit(${i},'value',this.value)">` : invMoney(l.value);
+  const removeCell = i => editing ? `<td class="num"><button type="button" class="inv-x" title="Remove this line" onclick="invRemoveLine(${i})">×</button></td>` : '';
+  const head = salary
+    ? `<tr><th>Date</th><th>Job</th><th class="num">Job amount<br>excl. GST</th>${inv.deductsParts ? '<th class="num">Parts</th>' : ''}<th class="num">Rate</th><th class="num">Commission</th>${editing ? '<th></th>' : ''}</tr>`
+    : `<tr><th>Bought</th><th>Item</th><th>Supplier</th><th>Receipt</th><th class="num">GST in it</th><th class="num">Amount<br>incl. GST</th>${editing ? '<th></th>' : ''}</tr>`;
+  const rows = inv.lines.map((l, i) => salary
+    ? (l.kind==='job'
+      ? `<tr><td>${esc(fmtDateShort(l.date))}</td><td>${labelCell(l, i, esc(l.jobType))}</td><td class="num">${invMoney(l.amount)}</td>${inv.deductsParts ? `<td class="num">${l.parts ? invMoney(l.parts) : '—'}</td>` : ''}<td class="num">${invRate(l.rate)}</td><td class="num">${valueCell(l, i)}</td>${removeCell(i)}</tr>`
+      : `<tr><td>${l.date ? esc(fmtDateShort(l.date)) : ''}</td><td>${labelCell(l, i, '')}</td><td class="num"></td>${inv.deductsParts ? '<td class="num"></td>' : ''}<td class="num"></td><td class="num">${valueCell(l, i)}</td>${removeCell(i)}</tr>`)
+    : `<tr><td>${l.date ? esc(fmtDateShort(l.date)) : ''}</td><td>${labelCell(l, i, l.detail ? esc(l.detail) : '')}</td><td>${esc(l.supplier || (l.kind==='expense' ? '—' : ''))}</td><td>${l.kind!=='expense' ? '' : l.receipt ? '<span class="inv-ok">Attached in the app</span>' : '<span class="inv-sub">none</span>'}</td><td class="num" id="inv-gst-${i}">${l.kind==='expense' ? invMoney(materialsGst(Number(l.value)||0)) : '—'}</td><td class="num">${valueCell(l, i)}</td>${removeCell(i)}</tr>`).join('');
+  const how = salary
     ? (inv.deductsParts ? 'Commission = (job amount excl. GST − parts) × the rate. A job counts in the week the customer paid.' : 'Commission = job amount excl. GST × the rate. A job counts in the week the customer paid.')
     : 'Paid back in full. The GST shown is inside the store receipts.';
+  const jobs = inv.lines.filter(l => l.kind==='job').length;
   return `<div class="inv">
     <div class="inv-top">
       <div><div class="inv-title">INVOICE</div><div class="inv-kind">${esc(invTitle(inv))} · pay week ${esc(invWeek(inv))}</div></div>
-      <div class="inv-due"><div class="inv-label">Amount due</div><div class="inv-amount">${invMoney(inv.total)}</div><div class="inv-sub">with the weekly pay</div></div>
+      <div class="inv-due"><div class="inv-label">Amount due</div><div class="inv-amount" id="inv-due">${invMoney(tot.total)}</div><div class="inv-sub">with the weekly pay</div></div>
     </div>
     <div class="inv-meta"><div><span>Invoice no.</span><b>${esc(inv.number)}</b></div><div><span>Date</span><b>${esc(invDate(inv.issued))}</b></div><div><span>Pay week</span><b>${esc(invWeek(inv))}</b></div></div>
     <div class="inv-parties">
       <div><div class="inv-label">From</div><b>${esc(f.legalName)}</b><br>ABN ${f.abn ? esc(fmtAbn(f.abn)) : miss('missing')}${f.address ? '<br>' + esc(f.address) : ''}${f.email || f.phone ? `<br><span class="inv-sub">${esc([f.email, f.phone].filter(Boolean).join(' · '))}</span>` : ''}</div>
       <div><div class="inv-label">Bill to</div><b>${esc(t.legalName)}</b><br>ABN ${t.abn ? esc(fmtAbn(t.abn)) : miss('missing')}${t.acn ? '<br>ACN ' + esc(t.acn) : ''}</div>
     </div>
-    <div class="inv-table"><table><thead>${head}</thead><tbody>${rows}</tbody></table></div>
+    <div class="inv-table"><table><thead>${head}</thead><tbody>${rows || `<tr><td colspan="${editing ? 8 : 7}" class="inv-sub">No lines</td></tr>`}</tbody></table></div>
+    ${editing ? `<div style="margin-top:8px"><button type="button" class="btn small" onclick="invAddLine()">+ Add a line</button></div>` : ''}
     <div class="inv-totals">
-      ${inv.kind==='salary' ? `<div><span>${inv.lines.length} job${inv.lines.length===1 ? '' : 's'} paid by the customer this week</span><span></span></div>` : `<div><span>GST inside the receipts</span><span>${invMoney(inv.gst)}</span></div>`}
+      ${salary ? `<div><span>${jobs} job${jobs===1 ? '' : 's'} paid by the customer this week</span><span></span></div>` : `<div><span>GST inside the receipts</span><span id="inv-gst">${invMoney(tot.gst)}</span></div>`}
       <div><span>GST on this invoice</span><span>Not charged</span></div>
-      <div class="inv-grand"><span>Total</span><span>${invMoney(inv.total)}</span></div>
+      <div class="inv-grand"><span>Total</span><span id="inv-total">${invMoney(tot.total)}</span></div>
     </div>
+    ${editing ? `<div style="margin-top:12px"><div class="inv-label">Note <span class="inv-sub" style="text-transform:none;letter-spacing:0;font-weight:400">(optional, printed on the invoice)</span></div><textarea class="inv-in" rows="2" oninput="CUR_INVOICE.note=this.value">${esc(inv.note || '')}</textarea></div>`
+      : inv.note ? `<div style="margin-top:12px"><div class="inv-label">Note</div>${esc(inv.note)}</div>` : ''}
     <div class="inv-pay">
       <div><div class="inv-label">Pay to</div>${bank ? bank.map(esc).join('<br>') : '<span class="inv-sub">Bank details are not on file</span>'}</div>
       <div><div class="inv-label">How it is worked out</div><span class="inv-sub">${how}</span></div>
     </div>
-    <div class="inv-foot">No GST has been charged: the supplier is not registered for GST. Created in The Guys app.</div>
   </div>`;
 }
-// The same invoice as a PDF (A4).
+let INV_EDIT = false, INV_SIG = { drawn:false };
+function renderInvoicePreview(){ const el = document.getElementById('inv-preview'); if (el && CUR_INVOICE) el.innerHTML = payrollInvoiceHtml(CUR_INVOICE, INV_EDIT); }
+function toggleInvoiceEdit(){
+  INV_EDIT = !INV_EDIT;
+  if (!INV_EDIT && CUR_INVOICE) CUR_INVOICE.lines = CUR_INVOICE.lines.filter(l => String(l.label||'').trim() || (Number(l.value)||0)!==0);   // drop empty new lines
+  renderInvoicePreview();
+  const b = document.getElementById('inv-edit-btn'); if (b) b.textContent = INV_EDIT ? '✓ Done' : '✏️ Edit lines';
+}
+function refreshInvoiceTotals(){
+  if (!CUR_INVOICE) return;
+  const t = payrollInvoiceTotals(CUR_INVOICE), set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('inv-due', invMoney(t.total)); set('inv-total', invMoney(t.total)); set('inv-gst', invMoney(t.gst));
+  CUR_INVOICE.lines.forEach((l, i) => { if (l.kind==='expense') set('inv-gst-' + i, invMoney(materialsGst(Number(l.value)||0))); });
+}
+function invEdit(i, field, v){
+  const l = CUR_INVOICE && CUR_INVOICE.lines[i]; if (!l) return;
+  if (field==='value') l.value = v==='' ? 0 : round2(Number(v) || 0); else l.label = v;
+  refreshInvoiceTotals();
+}
+function invRemoveLine(i){ if (!CUR_INVOICE) return; CUR_INVOICE.lines.splice(i, 1); renderInvoicePreview(); }
+function invAddLine(){
+  if (!CUR_INVOICE) return;
+  CUR_INVOICE.lines.push({ kind:'extra', date:'', label:'', value:0 });
+  renderInvoicePreview();
+  const ins = document.querySelectorAll('#inv-preview tbody tr:last-child .inv-in'); if (ins[0]) ins[0].focus();
+}
+// The signature: drawn with a finger or the mouse; an invoice can't be saved without it (Ofek 7 Oct).
+function setupSignaturePad(){
+  const c = document.getElementById('inv-sig'); if (!c) return;
+  const ratio = window.devicePixelRatio || 1;
+  c.width = Math.round(c.clientWidth * ratio); c.height = Math.round(c.clientHeight * ratio);
+  const g = c.getContext('2d'); g.scale(ratio, ratio); g.lineWidth = 2.2; g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#1d1b19';
+  INV_SIG = { drawn:false };
+  let drawing = false, last = null;
+  const pos = e => { const r = c.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  c.onpointerdown = e => { drawing = true; last = pos(e); try { c.setPointerCapture(e.pointerId); } catch (x) {} e.preventDefault(); };
+  c.onpointermove = e => {
+    if (!drawing) return;
+    const p = pos(e); g.beginPath(); g.moveTo(last.x, last.y); g.lineTo(p.x, p.y); g.stroke(); last = p;
+    if (!INV_SIG.drawn) { INV_SIG.drawn = true; updateInvoiceSaveButton(); }
+    e.preventDefault();
+  };
+  c.onpointerup = c.onpointercancel = () => { drawing = false; };
+}
+function clearInvoiceSignature(){ const c = document.getElementById('inv-sig'); if (!c) return; c.getContext('2d').clearRect(0, 0, c.width, c.height); INV_SIG.drawn = false; updateInvoiceSaveButton(); }
+function invoiceSignatureImage(){ const c = document.getElementById('inv-sig'); return c && INV_SIG.drawn ? c.toDataURL('image/png') : null; }
+function updateInvoiceSaveButton(){
+  const b = document.getElementById('inv-send'), inv = CUR_INVOICE; if (!b || !inv) return;
+  const noAbn = payrollInvoiceMissing(inv).length > 0;
+  b.disabled = noAbn || !INV_SIG.drawn;
+  b.title = noAbn ? 'Add the ABN first' : !INV_SIG.drawn ? 'Sign the invoice first' : '';
+  const hint = document.getElementById('inv-sign-hint'); if (hint) hint.textContent = INV_SIG.drawn ? 'Signed ✓' : 'Sign here to save the invoice';
+}
+// The same invoice as a PDF (A4), with the signature.
 function payrollInvoicePdf(inv){
   const ink = '#1d1b19', soft = '#6b6560', line = '#e3dfd9', tint = '#f5f2ee';
-  const f = inv.from, t = inv.to, bank = invBank(f);
+  const f = inv.from, t = inv.to, bank = invBank(f), tot = payrollInvoiceTotals(inv);
   const label = text => ({ text: text.toUpperCase(), fontSize: 7.5, bold: true, color: soft, characterSpacing: 0.8, margin: [0, 0, 0, 3] });
   const small = text => ({ text, fontSize: 8.5, color: soft });
+  const tagged = (l, extra) => ({ text: [l.label || '—', ...(extra ? [{ text: '  ' + extra, fontSize: 8.5, color: soft }] : []), ...(invLineTag(l) ? [{ text: '  ' + invLineTag(l), fontSize: 7.5, color: '#8a5a00' }] : [])] });
   const salary = inv.kind==='salary';
+  const R = text => ({ text, alignment: 'right' });
   const header = salary
-    ? ['Job date', 'Job', { text: 'Job amount excl. GST', alignment: 'right' }, ...(inv.deductsParts ? [{ text: 'Parts', alignment: 'right' }] : []), { text: 'Rate', alignment: 'right' }, { text: 'Commission', alignment: 'right' }]
-    : ['Bought', 'Item', 'Supplier', 'Receipt', { text: 'GST in it', alignment: 'right' }, { text: 'Amount incl. GST', alignment: 'right' }];
+    ? ['Date', 'Job', R('Job amount excl. GST'), ...(inv.deductsParts ? [R('Parts')] : []), R('Rate'), R('Commission')]
+    : ['Bought', 'Item', 'Supplier', 'Receipt', R('GST in it'), R('Amount incl. GST')];
   const body = salary
-    ? inv.lines.map(l => [fmtDateShort(l.date), { text: [`#${l.invoice || '—'}${l.customer ? ' · ' + l.customer : ''}`, ...(l.jobType ? [{ text: '  ' + l.jobType, fontSize: 8.5, color: soft }] : [])] }, { text: invMoney(l.amount), alignment: 'right' }, ...(inv.deductsParts ? [{ text: l.parts ? invMoney(l.parts) : '—', alignment: 'right' }] : []), { text: invRate(l.rate), alignment: 'right' }, { text: invMoney(l.commission), alignment: 'right' }])
-    : inv.lines.map(l => [fmtDateShort(l.date), { stack: [l.item, ...(l.detail ? [small(l.detail)] : [])] }, l.supplier || '—', l.receipt ? 'Attached in the app' : small('none'), { text: invMoney(l.gst), alignment: 'right' }, { text: invMoney(l.amount), alignment: 'right' }]);
-  const widths = salary ? (inv.deductsParts ? [52, '*', 78, 52, 40, 70] : [52, '*', 90, 44, 76]) : [44, '*', 78, 82, 52, 70];
-  const totalsRows = [
-    ...(salary ? [] : [['GST inside the receipts', invMoney(inv.gst)]]),
-    ['GST on this invoice', 'Not charged'],
-  ];
+    ? inv.lines.map(l => l.kind==='job'
+      ? [fmtDateShort(l.date), tagged(l, l.jobType), R(invMoney(l.amount)), ...(inv.deductsParts ? [R(l.parts ? invMoney(l.parts) : '—')] : []), R(invRate(l.rate)), R(invMoney(l.value))]
+      : [l.date ? fmtDateShort(l.date) : '', tagged(l, ''), '', ...(inv.deductsParts ? [''] : []), '', R(invMoney(l.value))])
+    : inv.lines.map(l => [l.date ? fmtDateShort(l.date) : '', { stack: [tagged(l, ''), ...(l.detail ? [small(l.detail)] : [])] }, l.supplier || (l.kind==='expense' ? '—' : ''), l.kind!=='expense' ? '' : l.receipt ? 'Attached in the app' : small('none'), R(l.kind==='expense' ? invMoney(materialsGst(Number(l.value)||0)) : '—'), R(invMoney(l.value))]);
+  const widths = salary ? (inv.deductsParts ? [48, '*', 78, 52, 40, 70] : [48, '*', 90, 44, 76]) : [44, '*', 78, 82, 52, 70];
+  const jobs = inv.lines.filter(l => l.kind==='job').length;
   return {
     pageSize: 'A4', pageMargins: [44, 44, 44, 60],
     info: { title: `Invoice ${inv.number}`, author: f.legalName, subject: `${invTitle(inv)} · pay week ${invWeek(inv)}` },
@@ -6845,7 +7037,7 @@ function payrollInvoicePdf(inv){
     content: [
       { columns: [
         { stack: [{ text: 'INVOICE', fontSize: 26, bold: true, characterSpacing: 1 }, { text: `${invTitle(inv)} · pay week ${invWeek(inv)}`, color: soft, bold: true, margin: [0, 2, 0, 0] }] },
-        { width: 170, table: { widths: ['*'], body: [[{ stack: [label('Amount due'), { text: invMoney(inv.total), fontSize: 20, bold: true }, small('with the weekly pay')], fillColor: tint, margin: [10, 8, 10, 8] }]] }, layout: 'noBorders' },
+        { width: 170, table: { widths: ['*'], body: [[{ stack: [label('Amount due'), { text: invMoney(tot.total), fontSize: 20, bold: true }, small('with the weekly pay')], fillColor: tint, margin: [10, 8, 10, 8] }]] }, layout: 'noBorders' },
       ] },
       { margin: [0, 18, 0, 0], columns: [
         { stack: [label('Invoice no.'), { text: inv.number, bold: true }] },
@@ -6859,14 +7051,22 @@ function payrollInvoicePdf(inv){
       ] },
       { margin: [0, 20, 0, 0], table: { headerRows: 1, widths, body: [header.map(h => typeof h==='string' ? { text: h.toUpperCase(), fontSize: 7.5, bold: true, color: soft } : { ...h, text: h.text.toUpperCase(), fontSize: 7.5, bold: true, color: soft }), ...body] },
         layout: { hLineWidth: (i, node) => i===0 ? 0 : i===1 ? 1.2 : 0.5, vLineWidth: () => 0, hLineColor: i => i===1 ? ink : line, paddingLeft: i => i===0 ? 0 : 6, paddingRight: (i, node) => i===node.table.widths.length - 1 ? 0 : 6, paddingTop: () => 5, paddingBottom: () => 5 } },
-      { margin: [0, 12, 0, 0], columns: [{ text: salary ? `${inv.lines.length} job${inv.lines.length===1 ? '' : 's'} paid by the customer this week` : '', color: soft }, { width: 230, table: { widths: ['*', 'auto'], body: [
-        ...totalsRows.map(([a, b]) => [{ text: a, color: soft }, { text: b, alignment: 'right' }]),
-        [{ text: 'Total', bold: true, fontSize: 13, margin: [0, 4, 0, 0] }, { text: invMoney(inv.total), bold: true, fontSize: 13, alignment: 'right', margin: [0, 4, 0, 0] }],
+      { margin: [0, 12, 0, 0], columns: [{ text: salary ? `${jobs} job${jobs===1 ? '' : 's'} paid by the customer this week` : '', color: soft }, { width: 230, table: { widths: ['*', 'auto'], body: [
+        ...(salary ? [] : [[{ text: 'GST inside the receipts', color: soft }, R(invMoney(tot.gst))]]),
+        [{ text: 'GST on this invoice', color: soft }, R('Not charged')],
+        [{ text: 'Total', bold: true, fontSize: 13, margin: [0, 4, 0, 0] }, { text: invMoney(tot.total), bold: true, fontSize: 13, alignment: 'right', margin: [0, 4, 0, 0] }],
       ] }, layout: { hLineWidth: (i, node) => i===node.table.body.length - 1 ? 1.2 : 0, vLineWidth: () => 0, hLineColor: () => ink, paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 3, paddingBottom: () => 3 } }] },
-      { margin: [0, 22, 0, 0], unbreakable: true, table: { widths: ['*', '*'], body: [[
+      ...(inv.note ? [{ margin: [0, 14, 0, 0], stack: [label('Note'), { text: inv.note }] }] : []),
+      { margin: [0, 20, 0, 0], unbreakable: true, table: { widths: ['*', '*'], body: [[
         { stack: [label('Pay to'), ...(bank || [small('Bank details are not on file')])], fillColor: tint, margin: [10, 8, 10, 8] },
         { stack: [label('How it is worked out'), small(salary ? (inv.deductsParts ? 'Commission = (job amount excl. GST − parts) × the rate. A job counts in the week the customer paid.' : 'Commission = job amount excl. GST × the rate. A job counts in the week the customer paid.') : 'Paid back in full. The GST shown is inside the store receipts, which are attached in the app.')], fillColor: tint, margin: [10, 8, 10, 8] },
       ]] }, layout: { hLineWidth: () => 0, vLineWidth: (i) => i===1 ? 6 : 0, vLineColor: () => '#ffffff' } },
+      { margin: [0, 22, 0, 0], unbreakable: true, columns: [{ width: 230, stack: [
+        label('Signed'),
+        ...(inv.signature ? [{ image: inv.signature, fit: [200, 56], margin: [0, 2, 0, 2] }] : [{ text: ' ', margin: [0, 26, 0, 0] }]),
+        { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 220, y2: 0, lineWidth: 0.8, lineColor: ink }] },
+        { text: `${f.legalName}${inv.signedAt ? ' · ' + invDate(inv.signedAt) : ''}`, fontSize: 8.5, color: soft, margin: [0, 4, 0, 0] },
+      ] }, { text: '' }] },
     ],
   };
 }
@@ -6876,31 +7076,44 @@ async function openPayrollInvoice(kind, person, weekKey){
   let parties;
   try { parties = await payrollInvoiceParties(person); } catch (e) { showToast('Could not load your details. Try again.'); return; }
   const inv = { ...buildPayrollInvoice(data, person, weekKey, kind, parties, todayStr()), weekKey };
-  CUR_INVOICE = inv;
+  CUR_INVOICE = inv; INV_EDIT = false;
   const missing = payrollInvoiceMissing(inv);
-  const owner = !!getRealProfile && ['owner', 'manager'].includes((getRealProfile() || {}).role);
+  const owner = ['owner', 'manager'].includes(((getRealProfile && getRealProfile()) || {}).role);
   const fixHint = owner ? `Add it in Resources → Employees → ${esc(person)}.` : 'Ask Ofek or Noam to add it to your employee card.';
   ensurePdfMake().catch(() => {});   // start loading the PDF maker while the person reads
   openModal(`
     <div class="modal-back" onclick="if(event.target===this) closeModal()">
-      <div class="modal" style="max-width:860px">
+      <div class="modal" style="max-width:880px">
         <h2>${kind==='salary' ? 'Commission invoice' : 'Equipment &amp; materials invoice'}</h2>
-        <div class="modal-sub">Check it, then press Send. It's saved as a PDF${kind==='salary' ? ', and Ofek and Noam get a message that you can be paid' : ''}.</div>
-        ${missing.length ? `<div class="card tight" style="margin-bottom:12px;border-color:var(--warn)">${pill('warn', 'Missing: ' + missing.join(', '))} <span class="hint">The invoice can't be sent without an ABN. ${fixHint}</span></div>` : ''}
-        <div class="inv-scroll">${payrollInvoiceHtml(inv)}</div>
+        <div class="modal-sub">Check it. If something needs changing for this invoice only, press Edit lines. Then sign at the bottom and press Save invoice${kind==='salary' ? '. Ofek and Noam then get a message that you can be paid' : ''}.</div>
+        ${missing.length ? `<div class="card tight" style="margin-bottom:12px;border-color:var(--warn)">${pill('warn', 'Missing: ' + missing.join(', '))} <span class="hint">The invoice can't be saved without an ABN. ${fixHint}</span></div>` : ''}
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button type="button" class="btn small" id="inv-edit-btn" onclick="toggleInvoiceEdit()">✏️ Edit lines</button></div>
+        <div class="inv-scroll">
+          <div id="inv-preview">${payrollInvoiceHtml(inv, false)}</div>
+          <div class="inv inv-sign">
+            <div class="inv-label">Signature <span id="inv-sign-hint" class="inv-sub" style="text-transform:none;letter-spacing:0;font-weight:400">Sign here to save the invoice</span></div>
+            <canvas id="inv-sig" class="inv-sig-pad" aria-label="Signature box: draw your signature"></canvas>
+            <div class="inv-sign-row"><span class="inv-sub">${esc(inv.from.legalName)} · ${esc(invDate(todayStr()))}</span><button type="button" class="btn ghost small" onclick="clearInvoiceSignature()">Clear</button></div>
+          </div>
+        </div>
         <div id="modal-error"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;flex-wrap:wrap">
           <button class="btn" onclick="closeModal()">Cancel</button>
           <button class="btn" onclick="downloadPayrollInvoice()">Download PDF</button>
-          <button class="btn primary" id="inv-send" ${missing.length ? 'disabled title="Add the ABN first"' : ''} onclick="sendPayrollInvoice('${kind}','${jsStr(person)}','${weekKey}')">Send invoice</button>
+          <button class="btn primary" id="inv-send" disabled title="${missing.length ? 'Add the ABN first' : 'Sign the invoice first'}" onclick="savePayrollInvoice('${kind}','${jsStr(person)}','${weekKey}')">Save invoice</button>
         </div>
       </div>
     </div>`);
+  setupSignaturePad();
+}
+// The invoice as it will be saved: empty new lines dropped, the signature and the day it was signed added.
+function finalPayrollInvoice(inv){
+  return { ...inv, lines: inv.lines.filter(l => String(l.label||'').trim() || (Number(l.value)||0)!==0), signature: invoiceSignatureImage(), signedAt: INV_SIG.drawn ? todayStr() : null };
 }
 async function payrollInvoicePdfDataUrl(inv){ const pm = await ensurePdfMake(); return new Promise(res => pm.createPdf(payrollInvoicePdf(inv)).getDataUrl(res)); }
 async function downloadPayrollInvoice(){
   const inv = CUR_INVOICE; if (!inv) return;
-  try { (await ensurePdfMake()).createPdf(payrollInvoicePdf(inv)).download(`Invoice ${inv.number}.pdf`); }
+  try { (await ensurePdfMake()).createPdf(payrollInvoicePdf(finalPayrollInvoice(inv))).download(`Invoice ${inv.number}.pdf`); }
   catch (e) { modalError('Could not make the PDF. Check the connection and try again.'); }
 }
 // ── Phone notifications (Ofek 6 Oct) ──
@@ -6959,28 +7172,33 @@ function phoneNotificationsBar(){
     ${PUSH.on ? `<button class="btn small" onclick="sendTestNotification()">Send a test</button>` : `<button class="btn small primary" onclick="enablePhoneNotifications()">Turn on for this device</button>`}
   </div>`;
 }
-async function sendPayrollInvoice(kind, person, weekKey){
+// Save the signed invoice: a PDF in file storage (payroll/<week>/<person>/), its total next to what the app worked out.
+async function savePayrollInvoice(kind, person, weekKey){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
-  const inv = CUR_INVOICE;
-  if (!inv || inv.kind!==kind || inv.person!==person || inv.weekKey!==weekKey) { showToast('Open the invoice again and press Send'); return; }
-  if (payrollInvoiceMissing(inv).length) { modalError('Add the ABN first'); return; }
-  const btn = document.getElementById('inv-send'); if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  const cur = CUR_INVOICE;
+  if (!cur || cur.kind!==kind || cur.person!==person || cur.weekKey!==weekKey) { showToast('Open the invoice again and save it'); return; }
+  if (payrollInvoiceMissing(cur).length) { modalError('Add the ABN first'); return; }
+  if (!INV_SIG.drawn) { modalError('Sign the invoice first: an invoice can\'t be saved without a signature'); return; }
+  const inv = finalPayrollInvoice(cur), total = payrollInvoiceTotals(inv).total;
+  const btn = document.getElementById('inv-send'), restore = () => { if (btn) { btn.disabled = false; btn.textContent = 'Save invoice'; } };
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   let pdf;
-  try { pdf = await payrollInvoicePdfDataUrl(inv); } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Send invoice'; } modalError('Could not make the PDF. Check the connection and try again.'); return; }
+  try { pdf = await payrollInvoicePdfDataUrl(inv); } catch (e) { restore(); modalError('Could not make the PDF. Check the connection and try again.'); return; }
   const me = getRealProfile && getRealProfile();
   const ref = await storeFile(`payroll/${weekKey}/${person}`, kind + '-invoice', pdf);
-  if (!ref) { if (btn) { btn.disabled = false; btn.textContent = 'Send invoice'; } return; }   // storeFile already said why
-  const { data, error } = await sb.rpc('submit_payroll_invoice', { p_week: weekKey, p_kind: kind, p_file: ref, p_person: me && (me.role==='owner' || me.role==='manager') ? person : null });
-  if (error) { if (btn) { btn.disabled = false; btn.textContent = 'Send invoice'; } modalError('The invoice was not saved: ' + error.message); return; }
+  if (!ref) { restore(); return; }   // storeFile already said why
+  const { data, error } = await sb.rpc('save_payroll_invoice', { p_week: weekKey, p_kind: kind, p_file: ref, p_amount: total, p_person: me && (me.role==='owner' || me.role==='manager') ? person : null });
+  if (error) { restore(); modalError('The invoice was not saved: ' + error.message); return; }
   const who = (data && data.person) || person;
   if (!STATE.data.payrollWeeks) STATE.data.payrollWeeks = [];
   let row = STATE.data.payrollWeeks.find(x => x.weekKey===weekKey && x.person===who);
   if (!row) { row = { weekKey, person: who, cashCollected:false, salaryPaid:false }; STATE.data.payrollWeeks.push(row); }
   const now = new Date().toISOString();
-  if (kind==='salary') { row.salaryInvoiceFile = ref; row.salaryInvoiceAt = now; } else { row.expensesInvoiceFile = ref; row.expensesInvoiceAt = now; }
+  if (kind==='salary') { row.salaryInvoiceFile = ref; row.salaryInvoiceAt = now; row.salaryInvoiceAmount = total; }
+  else { row.expensesInvoiceFile = ref; row.expensesInvoiceAt = now; row.expensesInvoiceAmount = total; }
   CUR_INVOICE = null; closeModal();
   if (kind==='salary') notifyOwnersInvoice(weekKey, who);
-  showToast(kind==='salary' ? 'Commission invoice sent. Ofek and Noam will see you can be paid.' : 'Expenses invoice sent');
+  showToast(kind==='salary' ? `Commission invoice saved (${payMoney(total)}). Ofek and Noam will see you can be paid.` : `Expenses invoice saved (${payMoney(total)})`);
   render();
 }
 // A technician's week at a glance, on the Payroll board and on his own pay page (moved from Financial Summary, Ofek
@@ -7153,6 +7371,9 @@ function renderPayrollBoard(profile, data, viewChips){
   const commTotal = round2(comm.reduce((s,c)=>s+c.total,0));
   const matTotal = round2(comm.reduce((s,c)=>s+c.materials.total,0));
   const hourlyTotal = round2(hourly.reduce((s,h)=>s+h.total,0));
+  // Every bonus this week, the owners' too (theirs isn't in a pay row: it shows in the Bonuses list below).
+  const bonusTotal = round2((data.payrollBonuses||[]).filter(b => b.weekKey===weekKey).reduce((s,b)=>s+b.amount,0));
+  const hourlyBonus = round2(hourly.reduce((s,h)=>s+h.extra.total,0));
   const cashOpen = round2(comm.filter(c => !payrollStatus(data, weekKey, c.person).cashCollected).reduce((s,c)=>s+c.cash,0));
   const unpaidPeople = [...comm.filter(c=>c.grandTotal>0), ...hourly.filter(h=>h.total>0)].filter(x => !payrollStatus(data, weekKey, x.person).salaryPaid).length;
 
@@ -7172,11 +7393,11 @@ function renderPayrollBoard(profile, data, viewChips){
     return `<tr>
       <td><button class="btn ghost small" onclick="togglePayrollExpanded('${p}')">${open?'▾':'▸'}</button> ${techTag(c.person)}</td>
       <td class="num">${c.lines.length}${c.lines.some(l=>l.late)?` <span class="hint">(${c.lines.filter(l=>l.late).length} late)</span>`:''}</td>
-      <td class="num">${payMoney(c.total)}</td>
+      <td class="num">${payMoney(c.total)}${c.bonus.total ? `<div class="hint">+ bonus ${payMoney(c.bonus.total)}</div>` : ''}</td>
       <td class="num">${c.materials.total ? `${payMoney(c.materials.total)}<div class="hint">incl. GST ${payMoney(c.materials.gst)}</div>` : '—'}</td>
       <td class="num" style="font-weight:700">${payMoney(c.grandTotal)}</td>
       <td class="num">${c.unpaid.length ? `${payMoney(c.expected)} <span class="hint">(${c.unpaid.length})</span>` : '—'}</td>
-      <td>${payrollInvoiceChips(st)}</td>
+      <td>${payrollInvoiceChips(st, c)}</td>
       <td>${cashCell}</td>
       <td>${salaryCell}</td>
       <td><button class="btn small" onclick="copyPayMessage('commission','${p}')">📋 Copy message</button></td>
@@ -7192,7 +7413,7 @@ function renderPayrollBoard(profile, data, viewChips){
     const open = !!UI.payroll.expanded[h.person];
     return `<tr>
       <td><button class="btn ghost small" onclick="togglePayrollExpanded('${p}')">${open?'▾':'▸'}</button> ${techTag(h.person)}</td>
-      <td class="num">${h.hours}</td><td class="num">${h.bookings}</td><td class="num">${payMoney(presentAmt(h.bonuses))}</td>
+      <td class="num">${h.hours}</td><td class="num">${h.bookings}</td><td class="num">${payMoney(presentAmt(h.bonuses))}${h.extra.total ? `<div class="hint">+ bonus ${payMoney(h.extra.total)}</div>` : ''}</td>
       <td class="num" style="font-weight:700">${payMoney(h.total)}</td>
       <td>${salaryCell}</td>
       <td><button class="btn small" onclick="copyPayMessage('hourly','${p}')">📋 Copy message</button></td>
@@ -7209,7 +7430,7 @@ function renderPayrollBoard(profile, data, viewChips){
     <div class="grid-4" style="margin-bottom:16px">
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Technician commissions</div><div class="stat-value">${payMoney(commTotal)}</div><div class="stat-sub">${comm.reduce((s,c)=>s+c.lines.length,0)} paid jobs this week</div></div>
       <div class="card stat-card" style="--stat-accent:var(--accent)"><div class="stat-label">Hourly staff</div><div class="stat-value">${payMoney(hourlyTotal)}</div><div class="stat-sub">${hourly.map(h=>`${esc(h.person)}: ${h.hours}h · ${h.bookings} bookings`).join(' · ') || '—'}</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Total payroll this week</div><div class="stat-value">${payMoney(round2(commTotal+matTotal+hourlyTotal))}</div><div class="stat-sub">${matTotal ? `incl. ${payMoney(matTotal)} equipment &amp; materials · ` : ''}${unpaidPeople ? `${unpaidPeople} still to pay` : 'everyone with pay is marked paid'} · owners' fixed salaries not included</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Total payroll this week</div><div class="stat-value">${payMoney(round2(commTotal+matTotal+hourlyTotal-hourlyBonus+bonusTotal))}</div><div class="stat-sub">${matTotal ? `incl. ${payMoney(matTotal)} equipment &amp; materials · ` : ''}${bonusTotal ? `incl. ${payMoney(bonusTotal)} bonuses · ` : ''}${unpaidPeople ? `${unpaidPeople} still to pay` : 'everyone with pay is marked paid'} · owners' fixed salaries not included</div></div>
       <div class="card stat-card" style="--stat-accent:${cashOpen>0?'var(--warn)':'var(--good)'}"><div class="stat-label">Cash still to collect</div><div class="stat-value">${payMoney(cashOpen)}</div><div class="stat-sub">cash is collected before salary is paid</div></div>
     </div>
     ${(() => { const pr = payrollPeriod({ mode:'week', week: weekKey }, todayStr()); return payrollCompareCards(data, performancePeople(data, people, pr), pr); })()}
@@ -7221,6 +7442,7 @@ function renderPayrollBoard(profile, data, viewChips){
     <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Hours</th><th class="num">Bookings</th><th class="num">Bonuses</th><th class="num">Total</th><th>Salary</th><th>Message</th></tr></thead>
       <tbody>${hourlyRows || `<tr><td colspan="7">${emptyState('No hourly staff', 'Set the employee’s Employment Type to Hourly on the Employees tab')}</td></tr>`}</tbody></table></div>
     <div class="hint" style="margin-top:6px">Daily bonus by that day's bookings: ${PAYROLL_BOOKING_BONUS.slice().reverse().map((t,i,arr)=>`${t.min}${arr[i+1]?`–${arr[i+1].min-1}`:'+'} → $${presentAmt(t.bonus)}`).join(' · ')}</div>
+    ${payrollBonusesBoardCard(data, weekKey)}
   `;
 }
 
@@ -7253,11 +7475,12 @@ function renderMyPay(profile, data, person, isPreview){
     return `${head}
       ${renderPayrollPeriodNav(false)}
       <div class="grid-4">
-        <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Pay this week so far</div><div class="stat-value">${payMoney(h.total)}</div><div class="stat-sub">${h.hours}h × $${presentAmt(PAYROLL_HOURLY_RATE)} + ${payMoney(presentAmt(h.bonuses))} bonuses</div></div>
+        <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Pay this week so far</div><div class="stat-value">${payMoney(h.total)}</div><div class="stat-sub">${h.hours}h × $${presentAmt(PAYROLL_HOURLY_RATE)} + ${payMoney(presentAmt(h.bonuses))} booking bonuses${h.extra.total ? ` + ${payMoney(h.extra.total)} bonus` : ''}</div></div>
         <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Bookings this week</div><div class="stat-value">${h.bookings}</div><div class="stat-sub">Aircon ${h.byDivision.Aircon} · Chimney ${h.byDivision.Chimney} · Pressure W. ${h.byDivision['Pressure Washing']}</div></div>
         ${payrollHoursCard(h)}
         ${payrollTasksCard(wk)}
       </div>
+      ${payrollBonusCard(data, person, weekKey, isPreview && canEditAnyDay)}
       ${canEditAnyDay ? `<div class="card" style="margin-top:14px">
         <div class="section-title" style="margin-top:0">Fix a day <span class="tag">owners only</span></div>
         <div class="hint" style="margin:-4px 0 10px">Hours and bookings fill in by themselves: hours from Log In to Log Out, bookings = every booking made that day. Change a day here only to correct it; a corrected day stays as you saved it.</div>
@@ -7287,12 +7510,14 @@ function renderMyPay(profile, data, person, isPreview){
       <div class="card stat-card" style="--stat-accent:${c.cash>0 && !st.cashCollected ? 'var(--warn)' : 'var(--primary)'}"><div class="stat-label">Cash to hand over</div><div class="stat-value">${payMoney(c.cash)}</div><div class="stat-sub">${c.cash>0 ? (st.cashCollected ? 'handed over ✓' : 'not handed over yet') : 'no cash jobs this week'}</div></div>
       <div class="card stat-card" style="--stat-accent:${st.salaryPaid?'var(--good)':'var(--ink-faint)'}"><div class="stat-label">This week's salary</div><div class="stat-value" style="font-size:20px">${st.salaryPaid ? 'Paid ✓' : 'Not paid yet'}</div><div class="stat-sub">${st.salaryPaid ? payMoney(st.salaryPaidAmount) : 'paid after the week ends'}</div></div>
     </div>
+    ${payrollBonusCard(data, person, weekKey, isPreview && (profile.role==='owner' || profile.role==='manager'))}
     ${payrollInvoiceCard(c, person, weekKey)}
     <div style="margin-top:14px">${payrollWeekPanel(c, data)}</div>
-    ${c.materials.lines.length ? `<div class="card" style="margin-top:14px;max-width:520px">
+    ${c.materials.lines.length || c.bonus.total ? `<div class="card" style="margin-top:14px;max-width:520px">
       <div class="stat-label" style="margin-bottom:6px">This week's pay</div>
       <div class="kv"><span>Commission (invoice 1)</span><span class="v">${payMoney(c.total)}</span></div>
-      <div class="kv"><span>Equipment &amp; materials (invoice 2) <span class="hint">incl. GST ${payMoney(c.materials.gst)}</span></span><span class="v">${payMoney(c.materials.total)}</span></div>
+      ${c.bonus.total ? `<div class="kv"><span>Bonus (on invoice 1)</span><span class="v">${payMoney(c.bonus.total)}</span></div>` : ''}
+      ${c.materials.lines.length ? `<div class="kv"><span>Equipment &amp; materials (invoice 2) <span class="hint">incl. GST ${payMoney(c.materials.gst)}</span></span><span class="v">${payMoney(c.materials.total)}</span></div>` : ''}
       <div class="kv total"><span>Total</span><span class="v">${payMoney(c.grandTotal)}</span></div>
     </div>` : ''}
     <div class="section-title">Jobs paid this week <span class="tag">${payrollWeekLabel(wk)}</span></div>

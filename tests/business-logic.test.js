@@ -63,6 +63,8 @@ const DECLS = [
   'boardForAssignees', 'tasksInView', 'taskPeople', 'SPEND_CATEGORIES', 'expenseRows', 'filterExpenseRows', 'supplierNames', 'KNOWN_STORES', 'storeWords', 'storeWordMatch', 'findStoreInText',
   // The technician's weekly invoices, made by the app (7 Oct)
   'payrollInvoiceNumber', 'buildPayrollInvoice', 'payrollInvoiceMissing', 'fmtAbn',
+  // Bonuses, invoice edits (7 Oct)
+  'payrollBonusesFor', 'payrollInvoiceTotals', 'payrollInvoiceLineEdited',
 ];
 
 function extractDecl(source, name){
@@ -829,12 +831,42 @@ function testPayrollInvoices(sb){
     ['GUY-260927-C', '2026-09-27', '2026-10-03', [['1012', 349, 0, 30, 104.7], ['1015', 549, 45, 30, 151.2]], 255.9, 0, true], 'buildPayrollInvoice: commission = the jobs paid that week, parts taken off, no GST');
   const e = sb.buildPayrollInvoice(data, 'Guy', '2026-09-27', 'expenses', parties, '2026-10-04');
   // parts $45 (GST 4.09) and the ladder $330 (GST 30.00): paid back $375, GST inside 34.09
-  assertEqual([e.number, e.lines.map(l => [l.item, l.detail, l.supplier, l.receipt, l.gst, l.amount]), e.total, e.gst],
+  assertEqual([e.number, e.lines.map(l => [l.label, l.detail, l.supplier, l.receipt, l.gst, l.amount]), e.total, e.gst],
     ['GUY-260927-E', [['Filter', 'Job parts · job #1015', 'Bunnings', true, 4.09, 45], ['Extension ladder', 'Tools', 'Total Tools', true, 30, 330]], 375, 34.09], 'buildPayrollInvoice: expenses = what he paid for himself, with supplier, receipt and the GST inside');
   const a = sb.buildPayrollInvoice(data, 'Alessandro', '2026-09-27', 'salary', parties, '2026-10-04');
   assertEqual([a.number, a.deductsParts, a.lines.map(l => [l.parts, l.commission]), a.total], ['ALESSANDRO-260927-C', false, [[0, 200]], 200], 'buildPayrollInvoice: an independent contractor gets the rate on the full amount (parts not taken off)');
   assertEqual([sb.payrollInvoiceMissing(c), sb.payrollInvoiceMissing({ from:{ abn:'51 695 019 339' } })], [['ABN'], []], 'payrollInvoiceMissing: no ABN, no invoice');
   assertEqual([sb.fmtAbn('51695019339'), sb.fmtAbn('51 695 019 339'), sb.fmtAbn('123')], ['51 695 019 339', '51 695 019 339', '123'], 'fmtAbn: 11 digits in the usual groups');
+
+  // Bonuses the owners add (7 Oct): on that week's pay, a line on the commission invoice, off the net profit.
+  data.payrollBonuses = [
+    { id:'b1', weekKey:'2026-09-27', person:'Guy', amount:100, reason:'5-star week', createdAt:'2026-10-03T01:00:00Z' },
+    { id:'b2', weekKey:'2026-09-27', person:'Ofek', amount:250, reason:'', createdAt:'2026-10-03T02:00:00Z' },
+    { id:'b3', weekKey:'2026-09-20', person:'Guy', amount:40, reason:'old week', createdAt:'2026-09-25T01:00:00Z' },
+  ];
+  assertEqual([sb.payrollBonusesFor(data, 'Guy', '2026-09-27').total, sb.payrollBonusesFor(data, 'Guy', '2026-09-20').total, sb.payrollBonusesFor(data, 'Dolev', '2026-09-27').total], [100, 40, 0], 'payrollBonusesFor: only that person and that week');
+  const pc = sb.computePayrollCommission(data, 'Guy', '2026-09-27');
+  // 255.90 commission + 375 equipment & materials + 100 bonus = 730.90
+  assertEqual([pc.total, pc.bonus.total, pc.grandTotal], [255.9, 100, 730.9], 'computePayrollCommission: the bonus is added to the week\'s total to pay');
+  const msg = sb.buildCommissionPayMessage(pc);
+  assertEqual([/5-star week: \$100/.test(msg), /\$730\.9/.test(msg)], [true, true], 'pay message: lists the bonus and pays the total with it');
+  const cb = sb.buildPayrollInvoice(data, 'Guy', '2026-09-27', 'salary', parties, '2026-10-04');
+  assertEqual([cb.lines.map(l => [l.kind, l.label, l.value]), cb.total, cb.computedTotal],
+    [[['job', '#1012 · Sarah M.', 104.7], ['job', '#1015 · David K.', 151.2], ['bonus', 'Bonus · 5-star week', 100]], 355.9, 355.9], 'buildPayrollInvoice: the bonus is its own line on the commission invoice');
+  // Changes made on one invoice only: a commission changed, a line added; the system's figures stay as they were.
+  // 110 + 151.20 + 100 + 12.50 = 373.70
+  cb.lines[0].value = 110; cb.lines.push({ kind:'extra', label:'Tolls', value:12.5 });
+  assertEqual([sb.payrollInvoiceTotals(cb).total, cb.lines.map(l => sb.payrollInvoiceLineEdited(l)), cb.computedTotal, sb.computePayrollCommission(data, 'Guy', '2026-09-27').total],
+    [373.7, [true, false, false, true], 355.9, 255.9], 'payrollInvoiceTotals: an edited invoice adds up its own lines; changed and added lines are marked; the payroll is not changed');
+  const eb = sb.buildPayrollInvoice(data, 'Guy', '2026-09-27', 'expenses', parties, '2026-10-04');
+  eb.lines[1].value = 220; eb.lines.push({ kind:'extra', label:'Parking', value:20 });
+  // 45 + 220 + 20 = 285; GST only inside store receipts: 4.09 + 20.00 = 24.09 (nothing on the added line)
+  assertEqual([sb.payrollInvoiceTotals(eb).total, sb.payrollInvoiceTotals(eb).gst], [285, 24.09], 'payrollInvoiceTotals: expenses GST follows the changed amounts, none on an added line');
+  sb.STATE.data.settings = { gstRatePercent:10 };
+  const npB = sb.computeNetProfit({ jobs: [], payrollBonuses: data.payrollBonuses, settings: { ownerSalaries:{} } }, '2026-09-27', '2026-10-03', new Date(2026, 9, 10));
+  assertEqual([npB.bonuses, npB.net], [350, -350], 'netProfit: the week\'s bonuses (owners\' too) come off');
+  const steps = sb.profitSteps(npB).steps.map(x => x.label);
+  assertEqual(steps.includes('Bonuses'), true, 'profitSteps: a Bonuses step when there are bonuses');
 }
 
 testJobAttributionTags(loadSandbox());
