@@ -7721,7 +7721,7 @@ function openTaskModal(taskId){
           </div>
           <div class="field"><label>Technician Tag</label><select id="tm-technician"><option value="">—</option>${technicianNames(STATE.data).map(t=>`<option value="${esc(t)}" ${task?.technician===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
         </div>
-        <div class="field" style="margin-top:11px"><label>Assigned To <span class="hint">(select one or more)</span></label>
+        <div class="field" style="margin-top:11px"><label>Assigned To <span class="hint">(required · one or more)</span></label>
           <div style="display:flex;flex-wrap:wrap;gap:6px 14px;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)">
             ${allPeople.map(name => `<label class="checkline"><input type="checkbox" class="tm-assignee-cb" value="${esc(name)}" ${currentAssignees.includes(name)?'checked':''}>${esc(name)}</label>`).join('')}
           </div>
@@ -7830,6 +7830,8 @@ function removeSubtask(i){ MODAL_SUBTASKS.splice(i,1); if (EXPANDED_SUBTASK_INDE
 async function saveTaskModal(taskId, createdBy, createdAt){
   const title = document.getElementById('tm-title').value.trim();
   if (!title) { modalError('Please enter a title'); return; }
+  // Every task must belong to someone (Ofek 5/10).
+  if (!document.querySelector('.tm-assignee-cb:checked')) { modalError('Choose who the task is assigned to'); document.querySelector('.tm-assignee-cb')?.focus(); return; }
   const currentProfile = getCurrentProfile();
   const actor = currentProfile?.fullName || 'Unknown';
   const oldTask = taskId ? STATE.data.tasks.find(t=>t.id===taskId) : null;
