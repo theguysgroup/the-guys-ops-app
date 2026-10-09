@@ -1147,7 +1147,7 @@ function computeReminders(data, now){
 const ALL_SECTIONS = ['crm','crmOverview','adsGoogle','jobs','payroll','outstanding','reminders','openItems','tasks','reference','closings','settings'];
 const SECTION_ORDER = ['myDay','crm','dashboard','crmOverview','adsGoogle','closings','jobs','payroll','outstanding','reminders','openItems','tasks','reference'];
 const SECTION_LABEL = { myDay:'My Day', dashboard:'Dashboard', adsGoogle:'Google Ads board', crm:'CRM', crmOverview:'Leads & Marketing', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', reference:'Resources (equipment, employees, suppliers)', closings:'Closings', settings:'Permissions & Settings' };
-const ROLE_LABEL = { owner:'Owner', manager:'Manager', technician:'Technician', va:'Virtual Assistant' };
+const ROLE_LABEL = { owner:'Owner', manager:'Manager', technician:'Technician', va:'Virtual Assistant', marketing:'Marketing' };
 function roleLabel(role){ return ROLE_LABEL[role] || role; }
 function defaultPermissionsFor(role){
   const none = { crm:false, crmOverview:false, overview:false, jobs:false, finance:false, payroll:false, outstanding:false, reminders:false, openItems:false, tasks:false, reference:false, closings:false, settings:false };
@@ -1166,6 +1166,9 @@ function defaultPermissionsFor(role){
   // Resources, his own pay, tasks and reminders are ON. Off: Leads & Marketing / Google Ads (dashboards) and the
   // Financial Summary (the business's revenue and profit).
   if (role==='va') return { ...none, crm:true, closings:true, payroll:true, tasks:true, reminders:true, jobs:true, outstanding:true, openItems:true, reference:true };
+  // Marketing: someone from outside, like the ads agency (Ofek 9 Oct): only the Google Ads page. The database lets this
+  // role read the Google Ads data and nothing else (no customers, jobs, money or settings).
+  if (role==='marketing') return { ...none, adsGoogle:true };
   return none;
 }
 function canViewSection(profile, section){
@@ -1182,7 +1185,7 @@ function firstAccessibleTab(profile){ return SECTION_ORDER.find(s => canViewSect
 // Where each person lands: owners/managers on the Dashboard, technicians on their own pay page (My Pay),
 // Ron on My Day (his list for today); anyone else on the first section they can open.
 function homeTabFor(profile){
-  const pref = (profile.role==='owner' || profile.role==='manager') ? 'dashboard' : profile.role==='technician' ? 'payroll' : profile.role==='va' ? 'myDay' : null;
+  const pref = (profile.role==='owner' || profile.role==='manager') ? 'dashboard' : profile.role==='technician' ? 'payroll' : profile.role==='va' ? 'myDay' : profile.role==='marketing' ? 'adsGoogle' : null;
   return (pref && canViewSection(profile, pref)) ? pref : firstAccessibleTab(profile);
 }
 
@@ -1209,7 +1212,7 @@ async function loadFromSupabase(){
   // anything past that used to disappear without a trace. Single-row tables stay as one request.
   const LOAD_NAMES = ['leads','jobs','equipment purchases','equipment catalogue','suppliers','tasks','closings',
     'reminders','tags','deleted reminders','cash status','settings','employees','commission rates',
-    'activity history','ad spend','payroll','daily sales log','Google Ads calls','read reminders','payroll bonuses'];
+    'activity history','ad spend','payroll','daily sales log','Google Ads calls','read reminders','payroll bonuses','owner salaries'];
   const loadResults = await Promise.all([
     fetchAllRows('contacts', 'id'),
     fetchAllRows('jobs', 'id'),
@@ -1236,6 +1239,8 @@ async function loadFromSupabase(){
     fetchAllRows('reminder_reads', 'key'),
     // Bonuses the owners add to a week's pay (Ofek 7 Oct); a worker gets only his own (RLS).
     fetchAllRows('payroll_bonuses', 'id'),
+    // Owner salaries live in an owners-only table (Ofek 9 Oct); everyone else gets nothing back.
+    sb.from('owner_settings').select('owner_salaries').eq('id', 1).maybeSingle(),
   ]);
   const [
     { data: contacts }, { data: jobs }, { data: equipmentSpend }, { data: equipmentCatalog },
@@ -1243,7 +1248,7 @@ async function loadFromSupabase(){
     { data: manualReminders }, { data: tagCatalog }, { data: dismissedReminders },
     { data: cashStatusRow }, { data: settingsRow }, { data: employees }, { data: commissionRateRows },
     { data: activityRows }, { data: adSpendRows }, { data: payrollRows }, { data: salesLogRows }, { data: adCallRows },
-    { data: readReminderRows }, { data: bonusRows },
+    { data: readReminderRows }, { data: bonusRows }, { data: ownerSettingsRow },
   ] = loadResults;
   // A table that failed to load used to look exactly like an empty one. Remember which ones failed so
   // every screen shows a red warning instead of quietly showing partial data.
@@ -1291,7 +1296,8 @@ async function loadFromSupabase(){
     dismissedReminders: (dismissedReminders||[]).map(d => d.key),
     readReminders: (readReminderRows||[]).map(r => r.key),
     cashStatus: { amount: cashStatusRow?.amount||0, activityLog: logsFor('cashStatus','main') },
-    settings: settingsRow ? mapSettingsRow(settingsRow) : { unpaidReminderDays:7, quoteStaleDays:5, gstRatePercent:10, companyName:'The Guys Service Group', abn:'', defaultPaymentTerms:'', ownerSalaries:{} },
+    settings: { ...(settingsRow ? mapSettingsRow(settingsRow) : { unpaidReminderDays:7, quoteStaleDays:5, gstRatePercent:10, companyName:'The Guys Service Group', abn:'', defaultPaymentTerms:'', ownerSalaries:{} }),
+      ...(ownerSettingsRow ? { ownerSalaries: ownerSettingsRow.owner_salaries || {} } : {}) },
     settingsActivityLog: logsFor('settings','global'),
     employees: (employees||[]).map(e => ({
       id:e.id, name:e.name, roles:e.roles||[], status:e.status, employmentType:e.employment_type||'',
@@ -1627,12 +1633,15 @@ const db = {
       Object.assign(STATE.data.settings, patch);
       const map = {
         unpaidReminderDays:'unpaid_reminder_days', quoteStaleDays:'quote_stale_days', gstRatePercent:'gst_rate_percent',
-        companyName:'company_name', abn:'abn', defaultPaymentTerms:'default_payment_terms', ownerSalaries:'owner_salaries',
+        companyName:'company_name', abn:'abn', defaultPaymentTerms:'default_payment_terms',
         legalName:'legal_name', acn:'acn',
         phoneEnabled:'phone_enabled', phoneRouting:'phone_routing', chatAutoSms:'chat_auto_sms',
       };
       const row = {}; for (const k in patch) if (map[k]) row[map[k]] = patch[k];
-      const { error } = await sb.from('settings').update(row).eq('id', 1);
+      // Owner salaries are kept in owner_settings, which only the owners can read (not in settings, which all staff read).
+      const { error } = 'ownerSalaries' in patch
+        ? await sb.from('owner_settings').upsert({ id: 1, owner_salaries: patch.ownerSalaries, updated_at: new Date().toISOString() })
+        : await sb.from('settings').update(row).eq('id', 1);
       if (error) { showToast('Setting not saved: '+error.message); if (!PRESENT) { Object.assign(STATE.data.settings, before); render(); } }
     },
   },
