@@ -65,6 +65,8 @@ const DECLS = [
   'payrollInvoiceNumber', 'buildPayrollInvoice', 'payrollInvoiceMissing', 'fmtAbn',
   // Bonuses, invoice edits (7 Oct)
   'payrollBonusesFor', 'payrollInvoiceTotals', 'payrollInvoiceLineEdited',
+  // Google Ads: real leads vs Google's count, tracking problems (9 Oct)
+  'adsConvKind', 'adsConvShortName', 'adsTracking',
 ];
 
 function extractDecl(source, name){
@@ -869,6 +871,30 @@ function testPayrollInvoices(sb){
   assertEqual(steps.includes('Bonuses'), true, 'profitSteps: a Bonuses step when there are bonuses');
 }
 
+function testAdsTracking(sb){
+  const P = 'The Guys Group - Main Website Sydney (web) ';
+  assertEqual(['Calls from ads', 'Call (1300 380 090)', P+'phone_click_sr', 'Click to call', P+'main_forms_sr', P+'split_system_cleaning_form_sr', P+'aircon_general_form_sr', P+'join_our_newsletter_sr', P+'email_click_sr', 'The Guys Group (web) Thank_you_conversion', P+'chat_lead_aircon_sr'].map(sb.adsConvKind),
+    ['call', 'call', 'tap', 'tap', 'form', 'form', 'form', 'other', 'other', 'other', 'chat'], 'adsConvKind: forms and calls are leads; phone taps, newsletter, email clicks, thank-you views are not');
+  const G = 'General Air Con Cleaning', X = 'PMax Air Con', D = 'Ducted & Split System';
+  const act = (campaign, item, conversions) => ({ campaign, item, conversions });
+  const set = (item, primary, counting) => ({ item, extra: { primary, inConversions: primary, counting } });
+  const idx = { '30d': { conv_action: [act(G, 'The Guys Group (web) Thank_you_conversion', 0), act(G, P+'main_forms_sr', 8.9912), act(G, P+'phone_click_sr', 1), act(G, P+'split_system_cleaning_form_sr', 16),
+      act(X, 'Call (1300 380 090)', 3), act(X, P+'aircon_general_form_sr', 1), act(X, P+'join_our_newsletter_sr', 1), act(X, P+'main_forms_sr', 5), act(X, P+'phone_click_sr', 8), act(X, P+'split_system_cleaning_form_sr', 1),
+      act(D, P+'duct_cleaning_form_sr', 1), act(D, P+'main_forms_sr', 0.0088), act(D, P+'phone_click_sr', 0)] },
+    now: { conv_setting: [set(P+'phone_click_sr', true, 'ONE_PER_CLICK'), set(P+'aircon_general_form_sr', true, 'MANY_PER_CLICK'), set(P+'main_forms_sr', true, 'ONE_PER_CLICK'), set(P+'join_our_newsletter_sr', false, 'MANY_PER_CLICK')] } };
+  const real = [{ win:'30d', kind:'form', campaign:G, n:15 }, { win:'30d', kind:'form', campaign:X, n:5 }, { win:'30d', kind:'form', campaign:D, n:1 }, { win:'30d', kind:'form', campaign:'', n:3 },
+    { win:'30d', kind:'call60', campaign:G, n:5 }, { win:'30d', kind:'call60', campaign:X, n:1 }, { win:'30d', kind:'call_short', campaign:G, n:3 }, { win:'30d', kind:'call_short', campaign:X, n:2 }, { win:'7d', kind:'form', campaign:'', n:1 }];
+  const t = sb.adsTracking(idx, real, '30d');
+  // forms 8.9912 + 16 + 1 + 5 + 1 + 1 + 0.0088 = 33; calls 3; taps 1 + 8 = 9; other (newsletter) 1 → 46
+  assertEqual([t.google, t.gTotal], [{ form:33, call:3, chat:0, tap:9, other:1 }, 46], 'adsTracking: Google conversions sorted into forms, calls, taps and others');
+  // real: forms 15 + 5 + 1 + 3 = 24, calls of a minute+ 5 + 1 = 6 (5 shorter calls left out) → 30
+  assertEqual([t.got.form, t.got.call60, t.got.call_short, t.realTotal], [24, 6, 5, 30], 'adsTracking: real leads = CRM forms + Google ad calls of a minute or more');
+  assertEqual(t.campaigns.map(c => [c.campaign, c.gLeads, c.gNot, c.real]), [[G, 25, 1, 20], [X, 10, 9, 6], [D, 1, 0, 1], ['', 0, 0, 3]], 'adsTracking: per campaign, Google leads / not leads / real leads');
+  assertEqual(t.issues.map(i => i.tone), ['bad', 'warn', 'warn', 'warn'], 'adsTracking: phone taps primary (bad), newsletter counted, a form counting every submission, Google counts more forms than reached us');
+  assertEqual([/phone_click_sr.*9 of the 46/.test(t.issues[0].text), /join_our_newsletter_sr/.test(t.issues[1].text), /aircon_general_form_sr/.test(t.issues[2].text), /33 form leads.*24 reached us/.test(t.issues[3].text)], [true, true, true, true], 'adsTracking: each problem names the action and the numbers');
+  assertEqual(sb.adsTracking({}, [], '30d').noData, true, 'adsTracking: nothing loaded yet = no problems claimed');
+}
+
 testJobAttributionTags(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
 testFunnelLossReasonsSpeedToLead(loadSandbox());
@@ -887,6 +913,7 @@ testDashboardMoneyVisuals(loadSandbox());
 testPayrollPeriods(loadSandbox());
 testTasksAndExpenses(loadSandbox());
 testPayrollInvoices(loadSandbox());
+testAdsTracking(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

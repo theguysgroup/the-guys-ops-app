@@ -6056,8 +6056,10 @@ async function loadAdsStats(){
     }
     const ins = await sb.from('ads_insights').select('*').order('day', { ascending:false }).limit(10);
     const attr = await sb.from('gads_click_attribution').select('gclid,click_date,network,campaign,ad_group,keyword,match_type');
+    // Real leads from Google (counts only): the CRM's form/chat leads and Google's ad calls (Ofek 9 Oct).
+    const real = await sb.from('gads_real_leads').select('*');
     if (PRESENT) all.forEach(r => { r.cost = (Number(r.cost)||0) * PRESENT_FACTOR; });
-    ADS_STATS.rows = all; ADS_STATS.insights = ins.data || []; ADS_STATS.attr = attr.data || []; ADS_STATS.err = '';
+    ADS_STATS.rows = all; ADS_STATS.insights = ins.data || []; ADS_STATS.attr = attr.data || []; ADS_STATS.real = real.data || []; ADS_STATS.err = '';
   } catch(e) { ADS_STATS.err = String((e && e.message) || e); }
   ADS_STATS.loading = false; render();
 }
@@ -6094,6 +6096,56 @@ function adsIndex(){
     (w[r.level] ??= []).push({ ...r, cost:+r.cost||0, conversions:+r.conversions||0, clicks:+r.clicks||0, impressions:+r.impressions||0 });
   }
   ADS_STATS._idx = idx; ADS_STATS._idxFor = ADS_STATS.rows; return idx;
+}
+// ── Real leads vs what Google counts (Ofek 9 Oct) ──
+// Google's "conversions" mix real leads with things that are not leads (a tap on the phone number, an email click, a
+// newsletter sign-up, a thank-you page view). Each conversion action is sorted by what it really is, and set against
+// the leads that really reached us from Google: forms and chats in the CRM (from a Google ad click) and calls from
+// Google ads of a minute or more. The tracking problems found are listed for everyone who sees the page (the agency too).
+function adsConvKind(name){
+  const n = String(name||'').toLowerCase();
+  if (/phone_click|click to call/.test(n)) return 'tap';
+  if (/calls from ads|^call \(/.test(n)) return 'call';
+  if (/chat_lead/.test(n)) return 'chat';
+  if (/newsletter|email_click|thank_you|purchase|qualify_lead|convert_lead/.test(n)) return 'other';
+  if (/form/.test(n)) return 'form';
+  return 'other';
+}
+function adsConvShortName(name){ return String(name||'').replace(/^The Guys Group - Main Website Sydney \(web\) /, '').replace(/^The Guys Group \(web\) /, ''); }
+function adsTracking(idx, real, win){
+  const acts = (idx[win] && idx[win].conv_action) || [];
+  const settings = (idx.now && idx.now.conv_setting) || [];
+  const r2 = x => Math.round(x * 10) / 10;
+  const google = { form:0, call:0, chat:0, tap:0, other:0 };
+  acts.forEach(r => { google[adsConvKind(r.item)] += Number(r.conversions) || 0; });
+  Object.keys(google).forEach(k => { google[k] = r2(google[k]); });
+  const got = { form:0, chat:0, call60:0, call_short:0 };
+  (real||[]).filter(x => x.win===win).forEach(x => { got[x.kind] = (got[x.kind]||0) + (Number(x.n)||0); });
+  const camps = {};
+  const camp = c => (camps[c || ''] ??= { campaign: c || '', gLeads:0, gNot:0, real:0 });
+  acts.forEach(r => { const k = adsConvKind(r.item); const c = camp(r.campaign); if (k==='form' || k==='call' || k==='chat') c.gLeads += Number(r.conversions)||0; else c.gNot += Number(r.conversions)||0; });
+  (real||[]).filter(x => x.win===win && x.kind!=='call_short').forEach(x => { camp(x.campaign).real += Number(x.n)||0; });
+  Object.values(camps).forEach(c => { c.gLeads = r2(c.gLeads); c.gNot = r2(c.gNot); });
+  const issues = [];
+  const noData = !settings.length && !acts.length;
+  if (!noData) {
+    settings.filter(st => st.extra && st.extra.primary && st.extra.inConversions && (adsConvKind(st.item)==='tap' || adsConvKind(st.item)==='other')).forEach(st => {
+      const n = r2(acts.filter(r => r.item===st.item).reduce((a, r) => a + (Number(r.conversions)||0), 0));
+      issues.push({ tone: n > 0 ? 'bad' : 'warn', text: `"${adsConvShortName(st.item)}" is not a lead (${adsConvKind(st.item)==='tap' ? 'a tap on the phone number, not a call' : 'not an enquiry'}) but it is set as a primary conversion${n > 0 ? `: ${n} of the ${r2(google.form+google.call+google.chat+google.tap+google.other)} conversions in this period are this` : ''}. Set it to secondary so Google bids on real leads only.` });
+    });
+    acts.filter(r => adsConvKind(r.item)==='other' && (Number(r.conversions)||0) > 0 && !settings.some(st => st.item===r.item && st.extra && st.extra.primary)).forEach(r => {
+      if (!issues.some(i => i.key===r.item)) issues.push({ key:r.item, tone:'warn', text: `"${adsConvShortName(r.item)}" (not a lead) was counted as a conversion ${r2(acts.filter(x => x.item===r.item).reduce((a, x) => a + (Number(x.conversions)||0), 0))} time(s) in this period, so it was primary for part of it.` });
+    });
+    settings.filter(st => st.extra && st.extra.primary && adsConvKind(st.item)==='form' && st.extra.counting==='MANY_PER_CLICK').forEach(st => {
+      issues.push({ tone:'warn', text: `"${adsConvShortName(st.item)}" counts every submission ("Every"), so one person who sends the form twice is two conversions. Leads should count once ("One").` });
+    });
+    const gForms = google.form + google.chat, rForms = got.form + got.chat;
+    if (gForms >= 3 && gForms > rForms * 1.25 + 1) issues.push({ tone:'warn', text: `Google counts ${r2(gForms)} form leads in this period, but ${rForms} reached us from Google ad clicks. Google may be counting one form twice (two tags on one form) or counting forms that were not from an ad.` });
+    if (rForms >= 3 && rForms > gForms * 1.25 + 1) issues.push({ tone:'warn', text: `${rForms} form leads reached us from Google ad clicks, but Google counts only ${r2(gForms)}. A form tag is probably not firing on some pages, so Google is bidding without some real leads.` });
+  }
+  const gTotal = r2(google.form + google.call + google.chat + google.tap + google.other);
+  const realTotal = got.form + got.chat + got.call60;
+  return { google, gTotal, got, realTotal, campaigns: Object.values(camps).sort((a, b) => (!a.campaign) - (!b.campaign) || (b.real + b.gLeads) - (a.real + a.gLeads)), issues, noData };   // "campaign not known" last
 }
 // Thresholds scale with the window so short windows are not judged by 90-day money.
 const ADS_MIN = { '7d':{ kw:10, term:5, conv:1 }, '14d':{ kw:15, term:8, conv:1 }, '30d':{ kw:20, term:10, conv:2 }, '60d':{ kw:25, term:12, conv:2 }, '90d':{ kw:30, term:15, conv:2 } };
@@ -6176,10 +6228,11 @@ function renderDashGoogle(profile, data, standalone){
     if (openJs) return `<button onclick="${openJs}" class="card stat-card" style="--stat-accent:${colour};text-align:start;cursor:pointer;font:inherit;color:inherit;width:100%">${inner}<div style="font-size:11.5px;color:var(--primary);margin-top:6px">See the leads →</div></button>`;
     return target ? `<button onclick="adsGo('${target}')" class="card stat-card" style="--stat-accent:${colour};text-align:start;cursor:pointer;font:inherit;color:inherit;width:100%">${inner}<div style="font-size:11.5px;color:var(--primary);margin-top:6px">See the list ↓</div></button>` : `<div class="card stat-card" style="--stat-accent:${colour}">${inner}</div>`;
   };
+  const TR = adsTracking(idx, ADS_STATS.real, win);
   const bigCamp = (idx[win].campaign||[]).filter(x=>x.cost>0&&x.extra&&x.extra.searchImpressionShare!=null).sort((a,b)=>b.cost-a.cost)[0];
   const cards = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
     ${card('Spend', fmtMoney(round2(tot.cost)), `${tot.clicks.toLocaleString()} clicks at ${dl(tot.cpc)} each`, 'var(--primary)', 'ads-trend')}
-    ${card('Conversions', cnt(tot.conv), `What Google counts as a lead (forms, calls). ${tot.cpl===null?'':fmtMoney(round2(tot.cpl))+' each'}`, 'var(--primary-teal)', 'ads-trend')}
+    ${card('Conversions', cnt(tot.conv), TR.google.tap || TR.google.other ? `Google's count, including ${cnt(TR.google.tap + TR.google.other)} that are not leads (phone taps and others). Real leads below.` : `What Google counts as a lead (forms, calls). ${tot.cpl===null?'':fmtMoney(round2(tot.cpl))+' each'}`, 'var(--primary-teal)', TR.noData ? 'ads-trend' : 'ads-reality')}
     ${card('Keywords to pause or rework', String(A.fixKw.length), `${fmtMoney(round2(A.fixCost))} spent, no conversion. Still switched on.`, 'var(--bad)', 'ads-fix-kw')}
     ${card('Searches to block', String(A.blockTerms.length), `${fmtMoney(round2(A.blockCost))} spent on searches that never converted.`, 'var(--bad)', 'ads-block-terms')}
     ${card('Keywords worth scaling', String(A.scaleKw.length), A.scaleKw.length?'Convert cheaply. Candidates for more bid or budget.':'None qualify in this period.', 'var(--good)', 'ads-scale-kw')}
@@ -6191,7 +6244,7 @@ function renderDashGoogle(profile, data, standalone){
   const TONES = [['bad','Problems','var(--bad)'],['warn','Watch','var(--warn)'],['good','Going well','var(--good)']];
   const opinion = ins ? `<div class="card" style="margin-top:18px;padding:18px 20px">
       <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0;font-size:16px">Assessment</h3><span style="font-size:12px;color:var(--ink-faint)">Written ${esc(fmtDateShort(ins.day))} · looks at 7, 14, 30, 60 and 90 days together · does not change with the period above</span></div>
-      <p style="margin:10px 0 14px;line-height:1.5;font-size:14.5px">${esc(presentText(ins.summary))}</p>
+      <p style="margin:10px 0 14px;line-height:1.5;font-size:14.5px">${esc(presentText(ins.summary))}</p>${!TR.noData && (TR.google.tap || TR.google.other) ? `<div style="margin:-6px 0 12px;font-size:12.5px;color:var(--warn-ink, var(--ink-soft))">⚠ This assessment counts leads the way Google does, which includes phone taps. The real numbers are in "Real leads vs what Google counts" above.</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">${TONES.map(([tone,label,colour]) => { const pts=(ins.points||[]).filter(p=>(p.tone||'warn')===tone); if(!pts.length) return ''; return `<div style="border-radius:10px;padding:12px 14px;background:color-mix(in srgb, ${colour} 12%, transparent);border:1px solid color-mix(in srgb, ${colour} 40%, transparent)"><div style="font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${colour};margin-bottom:8px">${label}</div><ul style="margin:0;padding:0;list-style:none;display:grid;gap:10px">${pts.map(pt=>`<li style="line-height:1.4;font-size:13.5px">${esc(presentText(pt.text))}${pt.target?` <a href="#" onclick="adsGo('${esc(pt.target)}');return false" style="color:var(--primary);white-space:nowrap">See list →</a>`:''}</li>`).join('')}</ul></div>`; }).join('')}</div></div>`
     : `<div class="card" style="margin-top:18px;color:var(--ink-soft)"><b>Assessment</b> — a written assessment (looking across the last 7, 14, 30, 60 and 90 days) will appear here after the next nightly run.</div>`;
 
@@ -6207,7 +6260,31 @@ function renderDashGoogle(profile, data, standalone){
     adsNum(x.leads.length ? Math.round(x.jobs.length/x.leads.length*100)+'%' : '—'),
     adsNum(x.revenue ? fmtMoney(round2(x.revenue)) : '—')]); });
   const kwJobs = (data.contacts||[]).length ? `<section id="ads-kw-jobs" style="margin-top:22px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:15px;margin:0 0 4px">From keyword to job</h3><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:10px">Which keyword brought each lead, and which of those leads became paying jobs. Matched every morning from the Google click behind the lead. So far <b>${KJ.matched}</b> of ${KJ.googleLeads} Google Ads leads since ${fmtDateShort(GCLID_CAPTURE_FROM)} are matched; phone calls and leads that came without a click id cannot be. Revenue excl. GST. Too early to judge a keyword on a handful of leads.</div>${adsTable(['Keyword',{t:'Leads',num:1},{t:'Jobs',num:1},{t:'Became a job',num:1},{t:'Revenue',num:1}], kjRows, 'No lead has been matched to a keyword yet.')}</section>` : '';
-  const summary = `<h2 style="font-size:18px;margin:0 0 12px">Summary</h2>${chipsRow}${cards}${opinion}${kwJobs}${trendTable}`;
+  // Real leads vs Google's count, and the tracking problems found (Ofek 9 Oct): seen by everyone on this page.
+  const campCost = c => ((idx[win].campaign||[]).find(x => x.campaign===c) || {}).cost || 0;
+  const cpr = TR.realTotal ? tot.cost / TR.realTotal : null;
+  const realRows = TR.campaigns.filter(c => c.campaign ? (campCost(c.campaign) > 0 || c.real || c.gLeads || c.gNot) : c.real).map(c => { const cost = c.campaign ? campCost(c.campaign) : 0; return adsRow([
+    c.campaign ? `<b>${esc(c.campaign)}</b>` : `<span style="color:var(--ink-soft)">Campaign not known</span><div style="color:var(--ink-faint);font-size:11.5px">Google leads whose click can't be traced to a campaign (often iPhone)</div>`,
+    adsNum(c.campaign ? fmtMoney(round2(cost)) : '—'), adsNum(cnt(c.gLeads)), adsNum(c.gNot ? `<span style="color:var(--bad)">${cnt(c.gNot)}</span>` : '0'), adsNum(`<b>${c.real}</b>`),
+    adsNum(c.campaign && c.real ? fmtMoney(round2(cost / c.real)) : '—')]); });
+  const settingsDay = ((idx.now && idx.now.conv_setting) || []).reduce((m, r) => r.updated_at > m ? r.updated_at : m, '');
+  const reality = TR.noData ? '' : `<section id="ads-reality" class="card" style="margin-bottom:12px;scroll-margin-top:12px">
+      <h3 style="margin:0 0 4px;font-size:16px">Real leads vs what Google counts</h3>
+      <div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:12px;line-height:1.45">Last ${W}. Real leads are the forms and chats that reached us from a Google ad click, plus calls from Google ads that lasted a minute or more. Google's conversions also include things that are not leads, like a tap on the phone number.</div>
+      <div class="grid-3">
+        <div class="mini-tile"><div class="stat-label">Google counts</div><div class="stat-value">${cnt(TR.gTotal)}</div><div class="stat-sub">forms ${cnt(TR.google.form)} · calls ${cnt(TR.google.call)}${TR.google.chat ? ' · chat ' + cnt(TR.google.chat) : ''}${TR.google.tap ? ` · <b style="color:var(--bad)">phone taps ${cnt(TR.google.tap)}</b>` : ''}${TR.google.other ? ` · <span style="color:var(--bad)">other ${cnt(TR.google.other)}</span>` : ''}</div></div>
+        <div class="mini-tile"><div class="stat-label">Really received from Google</div><div class="stat-value">${TR.realTotal}</div><div class="stat-sub">forms ${TR.got.form}${TR.got.chat ? ' · chat ' + TR.got.chat : ''} · calls of a minute or more ${TR.got.call60}${TR.got.call_short ? ` · ${TR.got.call_short} shorter call${TR.got.call_short===1?'':'s'} not counted` : ''}</div></div>
+        <div class="mini-tile"><div class="stat-label">Cost per real lead</div><div class="stat-value">${cpr===null ? '—' : fmtMoney(round2(cpr))}</div><div class="stat-sub">Google shows ${tot.cpl===null ? '—' : fmtMoney(round2(tot.cpl))} per conversion</div></div>
+      </div>
+      ${realRows.length ? `<div style="margin-top:12px">${adsTable(['Campaign',{t:'Spend',num:1},{t:'Google: leads',num:1},{t:'Google: not leads',num:1},{t:'Real leads',num:1},{t:'Cost per real lead',num:1}], realRows)}</div>` : ''}
+    </section>`;
+  const worst = TR.issues.some(i => i.tone==='bad') ? 'bad' : TR.issues.length ? 'warn' : 'good';
+  const tracking = TR.noData ? '' : `<section id="ads-tracking" class="card" style="margin-bottom:16px;border-inline-start:4px solid var(--${worst});scroll-margin-top:12px">
+      <h3 style="margin:0 0 8px;font-size:16px">Tracking problems ${TR.issues.length ? `<span class="tag">${TR.issues.length}</span>` : ''}</h3>
+      ${TR.issues.length ? `<div style="display:grid;gap:8px">${TR.issues.map(i => `<div style="display:flex;gap:10px;align-items:flex-start;line-height:1.45;font-size:13.5px"><span aria-hidden="true" style="flex:none;width:8px;height:8px;border-radius:99px;margin-top:6px;background:var(--${i.tone})"></span><span>${esc(i.text)}</span></div>`).join('')}</div>` : `<div style="color:var(--ink-soft)">No tracking problems found ✓</div>`}
+      <div style="color:var(--ink-faint);font-size:11.5px;margin-top:10px">Checked against the conversion settings in Google Ads${settingsDay ? ' (read ' + esc(fmtDateShort(localDay(settingsDay))) + ')' : ''} and the leads that really reached us.</div>
+    </section>`;
+  const summary = `<h2 style="font-size:18px;margin:0 0 12px">Summary</h2>${chipsRow}${reality}${tracking}${cards}${opinion}${kwJobs}${trendTable}`;
 
   // ── DETAILS ────────────────────────────────────────────────────────────────
   const legend = `<div style="font-size:12px;color:var(--ink-faint);margin:0 0 10px">Everything below covers the last ${W}. Dots show 7 · 14 · 30 · 60 · 90 days, left to right: <span style="color:var(--bad)">●</span> spent with no conversion, <span style="color:var(--good)">●</span> converted, <span style="color:var(--line)">●</span> no spend.</div>`;
