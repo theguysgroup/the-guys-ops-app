@@ -1212,7 +1212,7 @@ async function loadFromSupabase(){
   // anything past that used to disappear without a trace. Single-row tables stay as one request.
   const LOAD_NAMES = ['leads','jobs','equipment purchases','equipment catalogue','suppliers','tasks','closings',
     'reminders','tags','deleted reminders','cash status','settings','employees','commission rates',
-    'activity history','ad spend','payroll','daily sales log','Google Ads calls','read reminders','payroll bonuses','owner salaries'];
+    'activity history','ad spend','payroll','daily sales log','Google Ads calls','read reminders','payroll bonuses','owner salaries','lead email checks'];
   const loadResults = await Promise.all([
     fetchAllRows('contacts', 'id'),
     fetchAllRows('jobs', 'id'),
@@ -1241,6 +1241,8 @@ async function loadFromSupabase(){
     fetchAllRows('payroll_bonuses', 'id'),
     // Owner salaries live in an owners-only table (Ofek 9 Oct); everyone else gets nothing back.
     sb.from('owner_settings').select('owner_salaries').eq('id', 1).maybeSingle(),
+    // Last night's check of the lead emails in info@ against the CRM (Ofek 9 Oct); CRM staff only (RLS).
+    sb.from('lead_email_checks').select('*').gte('day', shiftDays(todayStr(), -14)),
   ]);
   const [
     { data: contacts }, { data: jobs }, { data: equipmentSpend }, { data: equipmentCatalog },
@@ -1248,11 +1250,13 @@ async function loadFromSupabase(){
     { data: manualReminders }, { data: tagCatalog }, { data: dismissedReminders },
     { data: cashStatusRow }, { data: settingsRow }, { data: employees }, { data: commissionRateRows },
     { data: activityRows }, { data: adSpendRows }, { data: payrollRows }, { data: salesLogRows }, { data: adCallRows },
-    { data: readReminderRows }, { data: bonusRows }, { data: ownerSettingsRow },
+    { data: readReminderRows }, { data: bonusRows }, { data: ownerSettingsRow }, { data: leadCheckRows },
   ] = loadResults;
   // A table that failed to load used to look exactly like an empty one. Remember which ones failed so
   // every screen shows a red warning instead of quietly showing partial data.
-  STATE.loadErrors = loadResults.map((r, i) => (r && r.error) ? LOAD_NAMES[i] : null).filter(Boolean);
+  // The lead check is extra: if it can't be read (or isn't set up yet), only the lead check line is missing, the data isn't partial.
+  const OPTIONAL_LOADS = new Set(['lead email checks']);
+  STATE.loadErrors = loadResults.map((r, i) => (r && r.error && !OPTIONAL_LOADS.has(LOAD_NAMES[i])) ? LOAD_NAMES[i] : null).filter(Boolean);
   if (STATE.loadErrors.length) console.error('Load failed for:', loadResults.filter(r => r && r.error).map(r => r.error));
 
   // Group the shared activity_log table back into each record's own .activityLog[],
@@ -1295,6 +1299,7 @@ async function loadFromSupabase(){
     tagCatalog: (tagCatalog||[]).map(t => t.tag),
     dismissedReminders: (dismissedReminders||[]).map(d => d.key),
     readReminders: (readReminderRows||[]).map(r => r.key),
+    leadChecks: leadCheckRows || [],
     cashStatus: { amount: cashStatusRow?.amount||0, activityLog: logsFor('cashStatus','main') },
     settings: { ...(settingsRow ? mapSettingsRow(settingsRow) : { unpaidReminderDays:7, quoteStaleDays:5, gstRatePercent:10, companyName:'The Guys Service Group', abn:'', defaultPaymentTerms:'', ownerSalaries:{} }),
       ...(ownerSettingsRow ? { ownerSalaries: ownerSettingsRow.owner_salaries || {} } : {}) },
@@ -6058,8 +6063,10 @@ async function loadAdsStats(){
     const attr = await sb.from('gads_click_attribution').select('gclid,click_date,network,campaign,ad_group,keyword,match_type');
     // Real leads from Google (counts only): the CRM's form/chat leads and Google's ad calls (Ofek 9 Oct).
     const real = await sb.from('gads_real_leads').select('*');
+    // The nightly check of the lead emails in info@ (counts only, no names), so the page says whether the real leads are complete.
+    const chk = await sb.from('lead_email_check_summary').select('*').order('day', { ascending:false }).limit(14);
     if (PRESENT) all.forEach(r => { r.cost = (Number(r.cost)||0) * PRESENT_FACTOR; });
-    ADS_STATS.rows = all; ADS_STATS.insights = ins.data || []; ADS_STATS.attr = attr.data || []; ADS_STATS.real = real.data || []; ADS_STATS.err = '';
+    ADS_STATS.rows = all; ADS_STATS.insights = ins.data || []; ADS_STATS.attr = attr.data || []; ADS_STATS.real = real.data || []; ADS_STATS.checks = chk.data || []; ADS_STATS.err = '';
   } catch(e) { ADS_STATS.err = String((e && e.message) || e); }
   ADS_STATS.loading = false; render();
 }
@@ -6112,6 +6119,17 @@ function adsConvKind(name){
   return 'other';
 }
 function adsConvShortName(name){ return String(name||'').replace(/^The Guys Group - Main Website Sydney \(web\) /, '').replace(/^The Guys Group \(web\) /, ''); }
+// The nightly lead check, Google part (lead_email_check_summary, newest day first): of the leads that emailed info@ from a
+// Google click over the last checked days, how many have a card in the app. Missing ones are also missing from the real
+// leads above, so the page says so. null until the first check has run.
+function adsEmailCheck(checks){
+  const ks = (checks||[]).slice(0, 7); if (!ks.length) return null;
+  const sum = k => ks.reduce((s, r) => s + (Number(r[k])||0), 0);
+  const g = sum('google_emails'), m = sum('google_matched'), all = sum('emails'), allM = sum('matched');
+  const range = `${fmtDateShort(ks[ks.length-1].day)}–${fmtDateShort(ks[0].day)}`;
+  if (g > m) return { tone:'bad', missing:g-m, text:`${g-m} of ${g} Google leads that emailed info@ (${range}) are not in the app, so the real leads here are short by ${g-m}. The office has them on My Day to add.` };
+  return { tone:'good', missing:0, text:`Checked against the lead emails in info@ (${range}): ${g===1 ? 'the 1 Google lead reached the app' : g ? `all ${g} Google leads reached the app` : 'no Google leads by email'}${all > allM ? '' : `, and all ${all} lead emails from every source did too`}.` };
+}
 function adsTracking(idx, real, win){
   const acts = (idx[win] && idx[win].conv_action) || [];
   const settings = (idx.now && idx.now.conv_setting) || [];
@@ -6229,6 +6247,8 @@ function renderDashGoogle(profile, data, standalone){
     return target ? `<button onclick="adsGo('${target}')" class="card stat-card" style="--stat-accent:${colour};text-align:start;cursor:pointer;font:inherit;color:inherit;width:100%">${inner}<div style="font-size:11.5px;color:var(--primary);margin-top:6px">See the list ↓</div></button>` : `<div class="card stat-card" style="--stat-accent:${colour}">${inner}</div>`;
   };
   const TR = adsTracking(idx, ADS_STATS.real, win);
+  const EC = adsEmailCheck(ADS_STATS.checks);
+  if (EC && EC.tone==='bad' && !TR.noData) TR.issues.unshift({ tone:'bad', text:EC.text });
   const bigCamp = (idx[win].campaign||[]).filter(x=>x.cost>0&&x.extra&&x.extra.searchImpressionShare!=null).sort((a,b)=>b.cost-a.cost)[0];
   const cards = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
     ${card('Spend', fmtMoney(round2(tot.cost)), `${tot.clicks.toLocaleString()} clicks at ${dl(tot.cpc)} each`, 'var(--primary)', 'ads-trend')}
@@ -6277,6 +6297,7 @@ function renderDashGoogle(profile, data, standalone){
         <div class="mini-tile"><div class="stat-label">Cost per real lead</div><div class="stat-value">${cpr===null ? '—' : fmtMoney(round2(cpr))}</div><div class="stat-sub">Google shows ${tot.cpl===null ? '—' : fmtMoney(round2(tot.cpl))} per conversion</div></div>
       </div>
       ${realRows.length ? `<div style="margin-top:12px">${adsTable(['Campaign',{t:'Spend',num:1},{t:'Google: leads',num:1},{t:'Google: not leads',num:1},{t:'Real leads',num:1},{t:'Cost per real lead',num:1}], realRows)}</div>` : ''}
+      ${EC ? `<div style="margin-top:10px;font-size:12.5px;line-height:1.45;color:${EC.tone==='bad' ? 'var(--bad)' : 'var(--ink-soft)'}">${EC.tone==='bad' ? '⚠' : '✓'} ${esc(EC.text)}</div>` : ''}
     </section>`;
   const worst = TR.issues.some(i => i.tone==='bad') ? 'bad' : TR.issues.length ? 'warn' : 'good';
   const tracking = TR.noData ? '' : `<section id="ads-tracking" class="card" style="margin-bottom:16px;border-inline-start:4px solid var(--${worst});scroll-margin-top:12px">
@@ -8138,6 +8159,85 @@ function myDaySection(id, title, count, body, emptyText, note, countTone){
   </section>`;
 }
 function myDayJump(id){ const el = document.getElementById('myday-'+id); if (el) el.scrollIntoView({ behavior:'smooth', block:'start' }); }
+/* ── Lead check: the info@ emails vs the app (Ofek 9 Oct) ──
+   Every website form and chat also emails info@. Each night the cloud routine sends those emails to ingest-ads-stats,
+   which looks for a card with the same phone or email and saves the result per day (lead_email_checks). My Day lists
+   the ones that reached the inbox but not the app, until someone creates the lead or marks it "Not a lead". */
+const LEAD_CHECK_DAYS = 7;
+// The last 9 digits of an Australian number (same rule as the nightly check), so 0412 345 678 and +61412345678 match.
+function leadPhoneKey(s){ let d = String(s||'').replace(/\D/g,''); if (d.startsWith('61') && d.length===11) d = '0' + d.slice(2); return d.length >= 9 ? d.slice(-9) : ''; }
+function leadCheckOpen(checks, contacts, dismissed, today){
+  const have = new Set();
+  (contacts||[]).forEach(c => { const p = leadPhoneKey(c.phone); if (p) have.add('p'+p); const e = String(c.email||'').trim().toLowerCase(); if (e) have.add('e'+e); });
+  const from = shiftDays(today, -LEAD_CHECK_DAYS), out = [];
+  (checks||[]).filter(k => k.day >= from).forEach(k => (k.missing||[]).forEach(m => {
+    if (dismissed && dismissed.has('leadmail:'+m.id)) return;
+    const p = leadPhoneKey(m.phone), e = String(m.email||'').trim().toLowerCase();
+    if ((p && have.has('p'+p)) || (e && have.has('e'+e))) return;   // a card exists now (made by hand since the check)
+    out.push({ ...m, day:k.day });
+  }));
+  return out.sort((a,b) => String(b.at||'').localeCompare(String(a.at||'')));
+}
+function leadCheckLatest(checks){ return (checks||[]).reduce((best, k) => !best || k.day > best.day ? k : best, null); }
+// Which service an email was about, from the form's name in its subject (the card can be corrected afterwards).
+function leadDivisionFromSubject(subject){
+  const t = String(subject||'').toLowerCase();
+  if (/pressure|wash/.test(t)) return 'Pressure Washing';
+  if (/chimney/.test(t)) return 'Chimney';
+  if (/\bac\b|air ?con|duct|split/.test(t)) return 'Aircon';
+  return 'Other';
+}
+function myDayLeadCheckOpen(data){ return leadCheckOpen(data.leadChecks, data.contacts, new Set(data.dismissedReminders||[]), sydneyWall(new Date()).day); }
+function myDayLeadCheckLine(data){
+  const k = leadCheckLatest(data.leadChecks); if (!k) return '';
+  const open = myDayLeadCheckOpen(data);
+  return `<div style="margin-top:6px;font-size:12.5px;color:${open.length ? 'var(--bad)' : 'var(--ink-soft)'}">${open.length
+    ? `⚠ ${open.length} lead${open.length===1?'':'s'} reached info@ by email but not the app. <a href="#" onclick="event.preventDefault();myDayJump('leadmail')">See the list</a>`
+    : `✓ Lead check: every lead email to info@ in the last week is in the app${k.emails ? ` (${k.emails} on ${esc(fmtDateShort(k.day))})` : ''}.`}</div>`;
+}
+function myDayLeadCheckSection(data){
+  const open = myDayLeadCheckOpen(data); if (!open.length) return '';
+  const rows = open.map(m => {
+    const when = m.at ? new Date(m.at).toLocaleString('en-AU', { timeZone:'Australia/Sydney', weekday:'short', day:'numeric', month:'short', hour:'numeric', minute:'2-digit' }) : fmtDateShort(m.day);
+    return `<div class="myday-row bad" style="cursor:default">
+      <div style="flex:1 1 220px;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(m.name||'(no name)')} ${m.unreadable ? pill('warn','Open the email for the details') : ''}</div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-top:2px"><span class="mono">${esc(m.phone||'no phone')}</span>${m.email ? ` · ${esc(m.email)}` : ''} · ${esc(when)} · ${esc(m.subject||'')}${m.hint ? ` · from ${esc(m.hint)}` : ''}</div></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+        <button class="btn primary small" onclick="createLeadFromEmail('${jsStr(m.id)}')">Create lead</button>
+        <button class="btn small" onclick="dismissLeadEmail('${jsStr(m.id)}', this.closest('.myday-row'))">Not a lead</button>
+      </div></div>`; }).join('');
+  return myDaySection('leadmail', 'Came by email, not in the app', open.length, rows, '',
+    'These website forms and chats reached info@, but last night\'s check found no card with the same phone or email. Create the lead, or press Not a lead (spam, a job application, a test).', 'bad');
+}
+// A card for a lead that only reached the inbox: dated the day the email came, from the ad its email names (if any).
+async function createLeadFromEmail(id){
+  const m = myDayLeadCheckOpen(STATE.data).find(x => x.id === id); if (!m) return;
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  let c;
+  try { c = await db.contacts.create({ fullName: m.name || '(no name)', phone: m.phone || '', email: m.email || '', postcode:'', division: leadDivisionFromSubject(m.subject),
+    source: LEAD_SOURCES.includes(m.hint) ? m.hint : 'Unknown', status:'New', createdAt: m.day, jobDescription:'', linkedJobId:null, activityLog:[], lastReadAt:null, starred:false, tags:[], chaseCalls:[],
+    messages: [{ id:uid(), kind:'event', at: m.at || new Date().toISOString(), text:`Lead created from the email to info@ ("${m.subject||'website form'}"): it reached the inbox but not the app` }] }); }
+  catch (err) { return; }   // db.contacts.create() already showed an error toast
+  logContactActivity(c, actor, 'Lead created from an info@ email the app had missed');
+  // Done with this email even when the card can't be matched to it (no phone or email in it, or a typo fixed on the card).
+  const key = 'leadmail:' + id;
+  if (!STATE.data.dismissedReminders) STATE.data.dismissedReminders = [];
+  STATE.data.dismissedReminders.push(key);
+  db.dismissedReminders.add(key);
+  goToLeadConversation(c.id);
+}
+function dismissLeadEmail(id, rowEl){
+  confirmAction('Mark this email as not a lead? It won\'t show here again.', () => {
+    animateRowRemove(rowEl, () => {
+      const key = 'leadmail:' + id;
+      if (!STATE.data.dismissedReminders) STATE.data.dismissedReminders = [];
+      STATE.data.dismissedReminders.push(key);
+      db.dismissedReminders.add(key);
+      showToast('Marked as not a lead');
+      render();
+    });
+  }, { danger:false, title:'Not a lead?', confirmLabel:'Not a lead' });
+}
 function chaseGiveUp(id){
   const c = contactById(id); if (!c || leadStage(c)!=='Chasing') return;
   confirmAction(`${c.fullName} has been in Chasing for 21+ days. Move them to Lost with the reason "No answer"?`, () => {
@@ -8257,10 +8357,12 @@ function renderMyDay(profile, data){
         ${stat('team', 'Remind the team', 0, "others' tasks due today", 'warn')}
       </div>
       <div style="margin-top:10px;font-size:13px;color:var(--ink-soft)">Today so far: <b style="color:var(--ink)">${K.percent===null ? '—' : K.percent + '%'}</b> of today's tasks done (${K.done} of ${K.total})</div>
+      ${myDayLeadCheckLine(data)}
     </div>
     <div class="card" style="margin-bottom:14px"><div class="stat-label" style="margin-bottom:8px">Bookings today — by division and where they came from</div>${mdBookingsTable(MD.days[L.today] ? [MD.days[L.today]] : [])}</div>
     ${renderWhileYouWereOut(data)}
     ${myDayMissedCallsSection()}
+    ${myDayLeadCheckSection(data)}
     ${myDaySection('new', 'New leads — call first', L.fresh.length, newBody, 'No new leads waiting. ✓',
       `Last ${MY_DAY_NEW_DAYS} days, newest first — the ones waiting 15+ minutes are on top in red. Move each one to its next stage once you've spoken to them.${L.backlog.length ? ` ${drill(`${L.backlog.length} older lead${L.backlog.length===1?' is':'s are'} still in New`, 'Older leads still in New', 'leads', L.backlog)} — clear them in the CRM when you have time.` : ''}`)}
     ${myDaySection('chasing', 'Chasing — call today', L.chaseToCall.length + L.chaseDone.length, L.chaseToCall.map(chaseRow).join('') + L.chaseDone.map(chaseRow).join(''), 'Nobody in Chasing right now.', 'Tick "Called today" after each call. Leads you already called today drop to the bottom.')}

@@ -67,6 +67,8 @@ const DECLS = [
   'payrollBonusesFor', 'payrollInvoiceTotals', 'payrollInvoiceLineEdited',
   // Google Ads: real leads vs Google's count, tracking problems (9 Oct)
   'adsConvKind', 'adsConvShortName', 'adsTracking',
+  // The nightly lead check: info@ emails vs the app (9 Oct)
+  'LEAD_CHECK_DAYS', 'leadPhoneKey', 'leadCheckOpen', 'leadCheckLatest', 'leadDivisionFromSubject', 'adsEmailCheck',
 ];
 
 function extractDecl(source, name){
@@ -871,6 +873,34 @@ function testPayrollInvoices(sb){
   assertEqual(steps.includes('Bonuses'), true, 'profitSteps: a Bonuses step when there are bonuses');
 }
 
+function testLeadEmailCheck(sb){
+  console.log('\nThe nightly lead check (info@ emails vs the app)');
+  assertEqual([sb.leadPhoneKey('0412 052 478'), sb.leadPhoneKey('+61412052478'), sb.leadPhoneKey('61412052478'), sb.leadPhoneKey('2042')], ['412052478', '412052478', '412052478', ''], 'leadPhoneKey: the same number written three ways, a postcode is not a phone');
+  const checks = [
+    { day:'2026-10-08', emails:4, matched:2, missing:[
+      { id:'m1', at:'2026-10-08T09:53:33Z', name:'Jackie Kettley', phone:'0433682592', email:'jacks@hotmail.com', subject:'New Lead from "The Guys Group"', hint:'' },
+      { id:'m2', at:'2026-10-08T11:00:14Z', name:'Rose', phone:'+61413610769', email:'', subject:'New message from AC Duct LP Cleaning Form', hint:'Meta Ads' },
+      { id:'m3', at:'2026-10-08T12:00:00Z', name:'Spam', phone:'', email:'spam@x.com', subject:'New message from Careers', hint:'' } ] },
+    { day:'2026-09-20', emails:1, matched:0, missing:[{ id:'old', at:'2026-09-20T01:00:00Z', name:'Too old', phone:'0400111222', email:'', subject:'x', hint:'' }] },
+    { day:'2026-10-07', emails:2, matched:2, missing:[] },
+  ];
+  const contacts = [{ phone:'0413 610 769', email:'' }, { phone:'', email:'SOMEONE@else.com' }];
+  const open = sb.leadCheckOpen(checks, contacts, new Set(['leadmail:m3']), '2026-10-09');
+  assertEqual(open.map(m => [m.id, m.day]), [['m1', '2026-10-08']], 'leadCheckOpen: Rose has a card now (phone written differently), the spam was marked Not a lead, a check older than a week is left out');
+  assertEqual(sb.leadCheckOpen(checks, [...contacts, { phone:'', email:'Jacks@Hotmail.com ' }], new Set(['leadmail:m3']), '2026-10-09').length, 0, 'leadCheckOpen: a card made by hand with the same email clears it');
+  assertEqual(sb.leadCheckLatest(checks).day, '2026-10-08', 'leadCheckLatest: the newest checked day');
+  assertEqual(sb.leadCheckLatest([]), null, 'leadCheckLatest: no check yet');
+  assertEqual(['New message from AC Duct LP Cleaning Form', 'New message from Pressure Washing Landing Page #Del', 'Chimney form', 'New Lead from "The Guys Group"', 'New website chat lead - Vivienne'].map(sb.leadDivisionFromSubject),
+    ['Aircon', 'Pressure Washing', 'Chimney', 'Other', 'Other'], 'leadDivisionFromSubject: the service from the form name');
+  const ok = sb.adsEmailCheck([{ day:'2026-10-08', emails:9, matched:9, google_emails:2, google_matched:2 }, { day:'2026-10-07', emails:5, matched:5, google_emails:1, google_matched:1 }]);
+  assertEqual([ok.tone, ok.missing, /all 3 Google leads reached the app, and all 14 lead emails/.test(ok.text)], ['good', 0, true], 'adsEmailCheck: every Google lead email has a card');
+  const bad = sb.adsEmailCheck([{ day:'2026-10-08', emails:9, matched:8, google_emails:2, google_matched:1 }]);
+  assertEqual([bad.tone, bad.missing, /1 of 2 Google leads/.test(bad.text)], ['bad', 1, true], 'adsEmailCheck: a Google lead email with no card is a problem the agency sees');
+  const other = sb.adsEmailCheck([{ day:'2026-10-08', emails:9, matched:8, google_emails:2, google_matched:2 }]);
+  assertEqual([other.tone, /lead emails from every source/.test(other.text)], ['good', false], 'adsEmailCheck: a missing non-Google lead is not the agency\'s problem (and not claimed as all fine)');
+  assertEqual(sb.adsEmailCheck([]), null, 'adsEmailCheck: nothing until the first check has run');
+}
+
 function testAdsTracking(sb){
   const P = 'The Guys Group - Main Website Sydney (web) ';
   assertEqual(['Calls from ads', 'Call (1300 380 090)', P+'phone_click_sr', 'Click to call', P+'main_forms_sr', P+'split_system_cleaning_form_sr', P+'aircon_general_form_sr', P+'join_our_newsletter_sr', P+'email_click_sr', 'The Guys Group (web) Thank_you_conversion', P+'chat_lead_aircon_sr'].map(sb.adsConvKind),
@@ -914,6 +944,7 @@ testPayrollPeriods(loadSandbox());
 testTasksAndExpenses(loadSandbox());
 testPayrollInvoices(loadSandbox());
 testAdsTracking(loadSandbox());
+testLeadEmailCheck(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
