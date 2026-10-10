@@ -393,6 +393,8 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .chat-event { align-self: center; font-size: 10.5px; color: var(--ink-faint); background: var(--surface); border-radius: 99px; padding: 3px 10px; margin: 4px 0; text-align: center; }
 .chat-event-time { color: var(--ink-faint); }
 .chat-row { display: flex; }
+.chat-bubble.chat-request { border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--line)); background: color-mix(in srgb, var(--primary) 9%, var(--surface)); }
+.chat-request .chat-bubble-text { font-size: 15px; font-weight: 600; line-height: 1.4; color: var(--ink); }
 .chat-row.in { justify-content: flex-start; }
 .chat-row.out { justify-content: flex-end; }
 .chat-bubble { max-width: 78%; border-radius: 12px; padding: 7px 11px; font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; box-shadow: var(--shadow-sm); }
@@ -3268,12 +3270,28 @@ function logLeadEvent(contact, text){
   contact.messages.push({ id:uid(), kind:'event', text, at:new Date().toISOString() });
   if (contact.id) db.contacts.update(contact.id, { messages: contact.messages });
 }
+// The website's opening line, "Lead created automatically from the website form (Meta Ads) — 2 units a small apt…", split in
+// two (Ofek 10 Oct): the arrival line (when, how, from where) and the customer's own words, which the thread shows big.
+// The same for "Sent the website form again (…) — …". Anything else returns null and shows as it always did.
+function splitLeadRequestEvent(text){
+  const t = String(text || '');
+  let m = t.match(/^Lead created automatically from the website (form|chat) \(([^)]*)\)(?: — ([\s\S]*))?$/);
+  if (m) return { label: `New lead from the website ${m[1]} · ${sourceLabel(m[2])}`, request: (m[3] || '').trim() };
+  m = t.match(/^Sent the website (form|chat) again \(([^)]*)\)(?: — ([\s\S]*?))?\.( Name on the form: [\s\S]*\.)?$/);
+  if (m) return { label: `Sent the website ${m[1]} again · ${sourceLabel(m[2])}${m[4] ? ' ·' + m[4].replace(/\.$/, '') : ''}`, request: (m[3] || '').trim() };
+  return null;
+}
 function renderLeadConversation(contactId){
   const c = contactById(contactId); if (!c) return '';
   const msgs = [...(c.messages||[]), ...convMessagesFor(c.id)].sort((a,b)=>new Date(a.at).getTime()-new Date(b.at).getTime());
   if (!msgs.length) return `<div class="empty" style="padding:26px 10px"><b>No conversation yet</b><div>Log what the customer said and what you replied — it all stays in one thread here.</div></div>`;
   return msgs.map(m => {
-    if (m.kind==='event') return `<div class="chat-event">${esc(presentText(m.text))} <span class="chat-event-time">${new Date(m.at).toLocaleString('en-AU')}</span></div>`;
+    if (m.kind==='event') {
+      const time = new Date(m.at).toLocaleString('en-AU'), sp = splitLeadRequestEvent(m.text);
+      if (!sp) return `<div class="chat-event">${esc(presentText(m.text))} <span class="chat-event-time">${time}</span></div>`;
+      return `<div class="chat-event">${esc(presentText(sp.label))} <span class="chat-event-time">${time}</span></div>`
+        + (sp.request ? `<div class="chat-row in"><div class="chat-bubble in chat-request"><div class="chat-bubble-meta">${esc(c.fullName || 'Customer')} · what they asked for</div><div class="chat-bubble-text">${esc(presentText(sp.request))}</div></div></div>` : '');
+    }
     const out = m.direction==='out';
     return `<div class="chat-row ${out?'out':'in'}">
       <div class="chat-bubble ${out?'out':'in'}">
@@ -4792,19 +4810,19 @@ function renderCrmInboxThreadAndDetails(c){
         </div>
         ${leadSubChips(c)}
       </div>
-      <div class="field"><label>📝 Notes</label><textarea rows="3" placeholder="Anything to remember about this customer: gate code, dog, best time to call…" onchange="setLeadNotes('${c.id}',this.value)">${esc(c.notes||'')}</textarea></div>
-      <div class="field" style="margin-top:9px"><label>Tags</label>${renderLeadTags(c.id, 'inbox')}</div>
+      <div class="field"><label>Source</label>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</div>
+      <div class="field" style="margin-top:9px"><label>Sub-source</label>${subSourcePicker(c)}</div>
+      <div class="field" style="margin-top:9px"><label>Division</label>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</div>
+      <div class="field" style="margin-top:9px"><label>Sub-division</label>${subDivisionPicker(c)}</div>
+      <div class="field" style="margin-top:9px"><label>📝 Notes</label><textarea rows="3" placeholder="Anything to remember about this customer: gate code, dog, best time to call…" onchange="setLeadNotes('${c.id}',this.value)">${esc(c.notes||'')}</textarea></div>
       <div class="field" style="margin-top:9px"><label>Stage</label>${leadStageControl(c)}</div>
       ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
       ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">Lost reason: <b>${esc(lostReasonLabel(lostReasonOf(c)))}</b></div>` : ''}
-      <div class="field" style="margin-top:9px"><label>Division</label>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</div>
-      <div class="field" style="margin-top:9px"><label>Sub-division</label>${subDivisionPicker(c)}</div>
-      <div class="field" style="margin-top:9px"><label>Source</label>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</div>
-      <div class="field" style="margin-top:9px"><label>Sub-source</label>${subSourcePicker(c)}</div>
       <div class="field" style="margin-top:9px"><label>Next follow-up</label>${renderDateCell('inbox-followup-'+c.id, c.nextFollowUp||'', `setLeadFollowupDate('${c.id}', v)`)}</div>
       <div class="field" style="margin-top:9px"><label>Follow-up note</label><textarea rows="2" placeholder="What needs doing when this follow-up is due…" onchange="setLeadFollowupNote('${c.id}',this.value)">${esc(c.followupNote||'')}</textarea></div>
       <div class="field" style="margin-top:9px"><label>Estimated value</label><input type="number" value="${c.estimatedValue||0}" onchange="setLeadEstimatedValue('${c.id}',this.value)"></div>
       <div class="field" style="margin-top:9px"><label>Sales value</label>${salesValueField(c, `<input type="number" value="${c.salesValue||0}" onchange="setLeadSalesValue('${c.id}',this.value)">`)}</div>
+      <div class="field" style="margin-top:9px"><label>Tags</label>${renderLeadTags(c.id, 'inbox')}</div>
       <div class="field" style="margin-top:9px"><label>What they need</label><textarea rows="3" onchange="setLeadJobDescription('${c.id}',this.value)">${esc(c.jobDescription||'')}</textarea></div>
       ${renderContactJobsBlock(c)}
       ${renderCallsBlock(c)}
@@ -5105,23 +5123,24 @@ function openLeadModal(contactId){
             <div class="field"><label>Email</label><input id="lm-email" value="${c?esc(c.email||''):''}"></div>
             <div class="field"><label>Postcode</label><input id="lm-postcode" value="${c?esc(c.postcode||''):''}"></div>
           </div>
-          <div class="grid-3" style="margin-top:11px">
-            <div class="field"><label>Division</label><select id="lm-division">${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${c&&c.division===d?'selected':''}>${d}</option>`).join('')}</select></div>
+          <div class="grid-2" style="margin-top:11px">
             <div class="field"><label>Source</label><select id="lm-source">${(c && !LEAD_SOURCES.includes(c.source) ? [c.source, ...LEAD_SOURCES] : LEAD_SOURCES).map(s=>`<option value="${s}" ${c&&c.source===s?'selected':(!c&&s==='Unknown'?'selected':'')}>${esc(sourceLabel(s))}</option>`).join('')}</select></div>
-            <div class="field"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${stageBadge('Won', 'Won — has a job')}` : `<select id="lm-status" class="stage-select" style="--stage:${stageColor(c?leadStage(c):'New')}" onchange="this.style.setProperty('--stage', stageColor(this.value));document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none';document.getElementById('lm-booked-wrap').style.display=this.value==='Booked'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
+            ${c ? `<div class="field"><label>Sub-source</label>${subSourcePicker(c)}</div>` : `<div class="field"><label>Sub-source</label><span class="hint">Pick it after saving</span></div>`}
+            <div class="field"><label>Division</label><select id="lm-division">${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${c&&c.division===d?'selected':''}>${d}</option>`).join('')}</select></div>
+            ${c ? `<div class="field"><label>Sub-division</label>${subDivisionPicker(c)}</div>` : `<div class="field"><label>Sub-division</label><span class="hint">Pick it after saving</span></div>`}
           </div>
-          ${c ? `<div class="grid-2" style="margin-top:11px"><div class="field"><label>Sub-division</label>${subDivisionPicker(c)}</div><div class="field"><label>Sub-source</label>${subSourcePicker(c)}</div></div>` : ''}
-          <div class="grid-3" style="margin-top:11px">
-            <div class="field"><label>Estimated value</label><input type="number" id="lm-value" value="${c?(c.estimatedValue||0):0}"></div>
-            <div class="field"><label>Sales value</label>${salesValueField(c, `<input type="number" id="lm-sales" value="${c?(c.salesValue||0):0}">`)}</div>
-            <div class="field"><label>Next follow-up</label>${dateCellField('lm-followup', c?(c.nextFollowUp||''):'')}</div>
-          </div>
-          <div class="field" style="margin-top:11px"><label>Follow-up note</label><textarea rows="2" id="lm-followup-note" placeholder="What needs doing when this follow-up is due…">${c?esc(c.followupNote||''):''}</textarea></div>
+          <div class="field" style="margin-top:11px"><label>📝 Notes</label><textarea rows="3" id="lm-notes" placeholder="Anything to remember about this customer: gate code, dog, best time to call…">${c?esc(c.notes||''):''}</textarea></div>
+          <div class="field" style="margin-top:11px"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${stageBadge('Won', 'Won — has a job')}` : `<select id="lm-status" class="stage-select" style="--stage:${stageColor(c?leadStage(c):'New')}" onchange="this.style.setProperty('--stage', stageColor(this.value));document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none';document.getElementById('lm-booked-wrap').style.display=this.value==='Booked'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
           <div class="field" id="lm-booked-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Booked'?'':'none'}"><label>Job booked for</label><input type="date" id="lm-booked-for" value="${c?esc(c.bookedFor||''):''}"><span class="hint">The day it's booked in ServiceM8 — 2 days after it with no job, you get a reminder</span></div>
           <div class="field" id="lm-lost-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Lost'?'':'none'}"><label>Why was it lost?</label><select id="lm-lost-reason"><option value="">— choose a reason —</option>${LOST_REASONS.map(r=>`<option value="${r.key}" ${c&&lostReasonOf(c)===r.key?'selected':''}>${esc(r.label)}</option>`).join('')}</select></div>
-          <div class="field" style="margin-top:11px"><label>What they need</label><textarea rows="2" id="lm-desc">${c?esc(c.jobDescription||''):''}</textarea></div>
-          <div class="field" style="margin-top:11px"><label>📝 Notes</label><textarea rows="3" id="lm-notes" placeholder="Anything to remember about this customer: gate code, dog, best time to call…">${c?esc(c.notes||''):''}</textarea></div>
+          <div class="field" style="margin-top:11px"><label>Next follow-up</label>${dateCellField('lm-followup', c?(c.nextFollowUp||''):'')}</div>
+          <div class="field" style="margin-top:11px"><label>Follow-up note</label><textarea rows="2" id="lm-followup-note" placeholder="What needs doing when this follow-up is due…">${c?esc(c.followupNote||''):''}</textarea></div>
+          <div class="grid-2" style="margin-top:11px">
+            <div class="field"><label>Estimated value</label><input type="number" id="lm-value" value="${c?(c.estimatedValue||0):0}"></div>
+            <div class="field"><label>Sales value</label>${salesValueField(c, `<input type="number" id="lm-sales" value="${c?(c.salesValue||0):0}">`)}</div>
+          </div>
           ${c ? `<div class="field" style="margin-top:11px"><label>Tags</label>${renderLeadTags(c.id, 'modal')}</div>` : ''}
+          <div class="field" style="margin-top:11px"><label>What they need</label><textarea rows="2" id="lm-desc">${c?esc(c.jobDescription||''):''}</textarea></div>
           ${c ? renderContactJobsBlock(c) : ''}
           ${c ? renderCallsBlock(c) : ''}
           ${c ? renderGhlHistoryBlock(c) : ''}

@@ -29,7 +29,7 @@ const DECLS = [
   'weekOf', 'monthOf', 'currentWeekKey',
   'jobGst', 'jobTotalCollected', 'amountExGst', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
-  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'SUB_DIVISIONS', 'SUB_SOURCES', 'SYSTEM_TAGS', 'leadSubDivisions', 'leadSubSource', 'visibleTags', 'subSourceOptions', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
+  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'SUB_DIVISIONS', 'SUB_SOURCES', 'SYSTEM_TAGS', 'leadSubDivisions', 'leadSubSource', 'visibleTags', 'subSourceOptions', 'LEAD_SOURCE_LABEL', 'sourceLabel', 'splitLeadRequestEvent', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
   // CRM / attribution
   'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
@@ -154,6 +154,20 @@ function testSubDivisionAndSource(sb){
   assertEqual(sb.subSourceOptions('Organic', []), [], 'no sub-source list for Organic');
   sb.STATE.data.contacts = [{ fullName:'Pat Field', division:'Aircon', source:'Meta Ads', subDivisions:['Split System'], subSource:'Instagram', tags:[] }];
   assertEqual(sb.jobAttributionTags({ customerName:'Pat Field', jobType:'Aircon' }), { airconType:'Split System', metaPlatform:'Instagram' }, 'jobs attribute to the sub-division and sub-source fields');
+}
+
+function testSplitLeadRequestEvent(sb){
+  console.log('\nThe website opening line, split into arrival + request');
+  assertEqual(sb.splitLeadRequestEvent('Lead created automatically from the website form (Meta Ads) — 2 units a small apt quotation please'),
+    { label:'New lead from the website form · Meta Ads', request:'2 units a small apt quotation please' }, 'a form lead: the arrival line and only what they asked for');
+  assertEqual(sb.splitLeadRequestEvent('Lead created automatically from the website chat (Organic) — Hi — I need a quote. Thanks'),
+    { label:'New lead from the website chat · Organic web', request:'Hi — I need a quote. Thanks' }, 'a chat lead; a dash inside the message stays in the message');
+  assertEqual(sb.splitLeadRequestEvent('Lead created automatically from the website form (Google Ads)'), { label:'New lead from the website form · Google Ads', request:'' }, 'no message: only the arrival line');
+  assertEqual(sb.splitLeadRequestEvent('Sent the website form again (Meta Ads) — Cassette type aircon. Name on the form: Chris.'),
+    { label:'Sent the website form again · Meta Ads · Name on the form: Chris', request:'Cassette type aircon' }, 'a repeat send keeps the name note on the arrival line');
+  assertEqual(sb.splitLeadRequestEvent('Sent the website form again (Organic) — Hi. Need two units.'), { label:'Sent the website form again · Organic web', request:'Hi. Need two units' }, 'a full stop inside the message stays');
+  assertEqual(sb.splitLeadRequestEvent('Stage changed from "New lead" to "Chasing"'), null, 'other events are left alone');
+  assertEqual(sb.splitLeadRequestEvent('Lead created automatically from job #2437 — Aircon, $369.00'), null, 'a lead made from a job is not a customer request');
 }
 
 function testComputeBusinessPerformance(sb){
@@ -941,6 +955,7 @@ function testAdsTracking(sb){
 
 testJobAttributionTags(loadSandbox());
 testSubDivisionAndSource(loadSandbox());
+testSplitLeadRequestEvent(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
 testFunnelLossReasonsSpeedToLead(loadSandbox());
 testComputeProfitByWeekInRange(loadSandbox());
