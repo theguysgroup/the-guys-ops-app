@@ -4701,7 +4701,7 @@ function deleteLeadNote(id, noteId){
   const c = contactById(id); if (!c) return;
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   const n = leadNotes(c).find(x => x.id===noteId); if (!n) return;
-  confirmAction(`Delete this note? "${n.text.length > 80 ? n.text.slice(0, 80) + '…' : n.text}"`, () => {
+  confirmAction(`The note "${n.text.length > 80 ? n.text.slice(0, 80) + '…' : n.text}" will be removed.`, () => {
     if (noteId==='legacy') { c.notes = ''; db.contacts.update(c.id, { notes: '' }); }
     else { c.customerNotes = (c.customerNotes||[]).filter(x => x.id!==noteId); db.contacts.update(c.id, { customerNotes: c.customerNotes }); }
     logContactActivity(c, getCurrentProfile()?.fullName || 'Unknown', `Note deleted: "${n.text.length > 90 ? n.text.slice(0, 90) + '…' : n.text}"`);
