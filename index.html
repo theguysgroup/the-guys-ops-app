@@ -27,6 +27,9 @@
   /* chart series (identity, fixed order; validated for colour-blind separation + contrast) and the quiet mark colour */
   --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --deemph: #c4bcb0;
   --guy: #c1652e; --dolev: #7a5ca0; --noam: #2f7d6e; --ofek: #3f7f8f;
+  /* CRM stage colours, the same everywhere a stage shows (Ofek 10 Oct): New white (light grey on a light page), Chasing
+     yellow, Quoted purple, Follow up blue, Booked dark green, Won bright green, Lost a muted red (strong red stays "urgent") */
+  --stage-new: #b9b2a6; --stage-chasing: #c99a06; --stage-quoted: #7a4fc2; --stage-followup: #2b6cc4; --stage-booked: #1e6b40; --stage-won: #16b45a; --stage-lost: #a5473f;
   --shadow-sm: 0 1px 0 rgba(24,20,15,.06);
   --shadow: 0 1px 0 rgba(24,20,15,.08), 0 1px 2px rgba(24,20,15,.05);
   --shadow-lg: 0 2px 0 rgba(24,20,15,.1), 0 14px 28px rgba(24,20,15,.14);
@@ -49,13 +52,14 @@
     --good: #5fbf8e; --good-soft: #123321; --warn: #d9a94c; --warn-soft: #2e2410; --bad: #e2755a; --bad-soft: #331c14;
     --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --deemph: #554d46;
     --guy: #e0834a; --dolev: #b092d6; --noam: #5fbfa8; --ofek: #74c3d4;
+    --stage-new: #f4f1ea; --stage-chasing: #f2c94c; --stage-quoted: #b18cf0; --stage-followup: #5aa2f0; --stage-booked: #2f8a55; --stage-won: #3df58a; --stage-lost: #b5524a;
     --shadow-sm: 0 1px 0 rgba(0,0,0,.35);
     --shadow: 0 1px 0 rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
     --shadow-lg: 0 2px 0 rgba(0,0,0,.45), 0 18px 36px rgba(0,0,0,.5);
     --focus-ring: 0 0 0 3px rgba(226,85,95,.5);
   }
 }
-::root[data-theme="dark"] {
+:root[data-theme="dark"] {
   --ink: #ece9e2; --ink-soft: #b0a89c; --ink-faint: #756c60;
   --paper: #121010; --surface: #1a1716; --surface-2: #221e1c; --surface-3: #2c2724;
   --line: #363028; --line-soft: #262220;
@@ -65,6 +69,7 @@
   --good: #5fbf8e; --good-soft: #123321; --warn: #d9a94c; --warn-soft: #2e2410; --bad: #e2755a; --bad-soft: #331c14;
   --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --deemph: #554d46;
   --guy: #e0834a; --dolev: #b092d6; --noam: #5fbfa8; --ofek: #74c3d4;
+  --stage-new: #f4f1ea; --stage-chasing: #f2c94c; --stage-quoted: #b18cf0; --stage-followup: #5aa2f0; --stage-booked: #2f8a55; --stage-won: #3df58a; --stage-lost: #b5524a;
   --shadow-sm: 0 1px 0 rgba(0,0,0,.35);
   --shadow: 0 1px 0 rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
   --shadow-lg: 0 2px 0 rgba(0,0,0,.45), 0 18px 36px rgba(0,0,0,.5);
@@ -119,7 +124,7 @@ td { padding: 11px 13px; border-bottom: 1px solid var(--line-soft); vertical-ali
 tbody tr:last-child td { border-bottom: none; }
 tbody tr { transition: background .1s; }
 tbody tr:hover { background: var(--surface-2); }
-.table-row-avatar { width: 20px; height: 20px; border-radius: 50%; background: var(--avatar-color, var(--primary)); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; flex: none; }
+.table-row-avatar { width: 20px; height: 20px; border-radius: 50%; background: var(--avatar-color, var(--primary)); color: var(--avatar-ink, #fff); display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; flex: none; }
 td.wrap, th.wrap { white-space: normal; }
 
 .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 99px; font-size: 11.3px; font-weight: 700; white-space: nowrap; border: none; }
@@ -331,7 +336,9 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 @keyframes leadCardIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes leadCardMoved { 0% { box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-lg); } 100% { box-shadow: var(--shadow); } }
 .lead-card-top { display: flex; align-items: center; gap: 8px; }
-.lead-card-avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--primary-soft); color: var(--primary-strong); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 10.5px; flex: none; }
+.lead-card { border-inline-start: 4px solid var(--stage, var(--line)); }
+.lead-card:hover, .lead-card:focus-visible { border-inline-start-color: var(--stage, var(--primary)); }
+.lead-card-avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--stage, var(--primary-soft)); color: var(--stage-ink, var(--primary-strong)); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 10.5px; flex: none; }
 .lead-name { font-weight: 700; font-size: 13px; overflow-wrap: anywhere; flex: 1; min-width: 0; }
 .lead-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .lead-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 99px; white-space: nowrap; color: var(--tag); background: color-mix(in srgb, var(--tag) 15%, var(--surface)); }
@@ -364,8 +371,13 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .myday-row { display: flex; align-items: center; gap: 12px; padding: 9px 8px; border-bottom: 1px solid var(--line-soft); cursor: pointer; flex-wrap: wrap; border-radius: 6px; }
 .myday-row:last-child { border-bottom: none; }
 .myday-row:hover { background: var(--surface-2); }
+.myday-row[style*="--stage"] { box-shadow: inset 3px 0 0 var(--stage); }
 .myday-row.bad { box-shadow: inset 3px 0 0 var(--bad); }
+.stage-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; line-height: 1.3; padding: 2px 9px; border-radius: 99px; border: 1px solid color-mix(in srgb, var(--stage) 55%, transparent); background: color-mix(in srgb, var(--stage) 14%, transparent); color: var(--ink); white-space: nowrap; }
+.stage-badge::before, .stage-dot { content: ''; width: 8px; height: 8px; border-radius: 99px; background: var(--stage); flex: none; display: inline-block; }
+.stage-select { border-color: color-mix(in srgb, var(--stage) 70%, var(--line)) !important; box-shadow: inset 4px 0 0 var(--stage); }
 .myday-row select { width: auto; }
+.lead-move { border-color: color-mix(in srgb, var(--stage, var(--line)) 70%, var(--line)) !important; }
 .lead-move { appearance: none; -webkit-appearance: none; font-size: 11px !important; font-weight: 600; padding: 5px 24px 5px 9px !important; min-height: 0 !important; border-radius: 99px !important; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23948a7e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>"); background-repeat: no-repeat; background-position: right 9px center; }
 @media (max-width: 900px) { .pipeline { grid-template-columns: repeat(2, minmax(0,1fr)); } }
 @media (max-width: 560px) { .pipeline { grid-template-columns: minmax(0,1fr); } }
@@ -397,8 +409,9 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .crm-inbox-tab.active { color: var(--on-primary); background: var(--primary); }
 .crm-inbox-row { display: flex; gap: 9px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--line-soft); border-inline-start: 3px solid transparent; cursor: pointer; transition: background .12s ease, border-color .12s ease; }
 .crm-inbox-row:hover { background: var(--surface); }
+.crm-inbox-row[style*="--stage"] { border-inline-start-color: var(--stage); }
 .crm-inbox-row.active { background: var(--primary-soft); border-inline-start-color: var(--primary); }
-.crm-inbox-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--avatar-color, var(--primary)); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; flex: none; box-shadow: var(--shadow-sm); }
+.crm-inbox-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--avatar-color, var(--primary)); color: var(--avatar-ink, #fff); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; flex: none; box-shadow: var(--shadow-sm); }
 .crm-inbox-row-main { flex: 1; min-width: 0; }
 .crm-inbox-row-top { display: flex; justify-content: space-between; gap: 6px; }
 .crm-inbox-row-name { font-weight: 700; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3061,7 +3074,14 @@ const LEAD_STATUSES = ['New','Chasing','Quoted','Follow-up','Booked','Won','Lost
 const LEAD_STAGE_PICKABLE = ['New','Chasing','Quoted','Follow-up','Booked','Lost'];
 const LEAD_STAGE_LABEL = { New:'New lead', Chasing:'Chasing', Quoted:'Quoted', 'Follow-up':'Follow up', Booked:'Booked', Won:'Won', Lost:'Lost' };
 function stageLabel(s){ return LEAD_STAGE_LABEL[s] || s; }
-const LEAD_STATUS_COLOR = { New:'var(--primary)', Chasing:'var(--accent)', Quoted:'var(--primary-teal)', 'Follow-up':'var(--warn)', Booked:'var(--good)', Won:'var(--good)', Lost:'var(--ink-faint)', 'Not Relevant':'var(--ink-faint)' };
+const LEAD_STATUS_COLOR = { New:'var(--stage-new)', Chasing:'var(--stage-chasing)', Quoted:'var(--stage-quoted)', 'Follow-up':'var(--stage-followup)', Booked:'var(--stage-booked)', Won:'var(--stage-won)', Lost:'var(--stage-lost)', 'Not Relevant':'var(--stage-lost)' };
+// Text on a circle filled with the stage colour: dark on the light ones (white, yellow, bright green), white on the rest.
+const LEAD_STATUS_INK = { New:'#1c1917', Chasing:'#1c1917', Won:'#0b2615' };
+function stageColor(s){ return LEAD_STATUS_COLOR[s] || 'var(--ink-faint)'; }
+function stageInk(s){ return LEAD_STATUS_INK[s] || '#fff'; }
+function stageVars(s){ return `--stage:${stageColor(s)};--stage-ink:${stageInk(s)};--avatar-color:${stageColor(s)};--avatar-ink:${stageInk(s)}`; }
+// A stage name in its colour (Ofek 10 Oct: each stage has one colour across the whole app).
+function stageBadge(s, text){ return `<span class="stage-badge" style="--stage:${stageColor(s)}">${esc(text || stageLabel(s))}</span>`; }
 const LEAD_SOURCE_COLOR = { 'Google Ads':'var(--primary)', 'Meta Ads':'var(--accent)', 'Google Maps':'var(--ink-faint)', Organic:'var(--good)', Unknown:'var(--ink-faint)', 'Phone Call':'var(--warn)' };
 // Stages that must always carry a FUTURE follow-up date.
 const STAGES_NEED_DATE = ['Quoted','Follow-up'];
@@ -4525,7 +4545,7 @@ function renderLeadCard(c){
   const today = todayStr();
   const overdue = followupDue(c, today) && c.nextFollowUp < today;
   const dueToday = followupDue(c, today) && c.nextFollowUp === today;
-  return `<div class="lead-card" data-lead-id="${c.id}" draggable="true" ondragstart="onLeadDragStart(event,'${c.id}')" onclick="goToLeadConversation('${c.id}')" tabindex="0" onkeydown="if(event.key==='Enter'){goToLeadConversation('${c.id}')}">
+  return `<div class="lead-card" style="${stageVars(leadStage(c))}" data-lead-id="${c.id}" draggable="true" ondragstart="onLeadDragStart(event,'${c.id}')" onclick="goToLeadConversation('${c.id}')" tabindex="0" onkeydown="if(event.key==='Enter'){goToLeadConversation('${c.id}')}">
     <div class="lead-card-top">
       <div class="lead-card-avatar">${esc(initials(c.fullName))}</div>
       <div class="lead-name">${esc(c.fullName)}${unreadBadge(c)}</div>
@@ -4680,8 +4700,8 @@ function renderCrmInboxList(contacts){
   const selected = UI.crm.selectedContactId;
   const tabs = [['unread',`Unread${unreadTotal?` (${unreadTotal})`:''}`],['all','All'],['recent','Recent'],['starred','Starred']];
   const rows = filtered.length ? filtered.map(c => `
-    <div class="crm-inbox-row ${c.id===selected?'active':''}" onclick="selectCrmContact('${c.id}')">
-      <div class="crm-inbox-avatar" style="--avatar-color:${LEAD_STATUS_COLOR[leadStage(c)]}">${esc(initials(c.fullName))}</div>
+    <div class="crm-inbox-row ${c.id===selected?'active':''}" style="${stageVars(leadStage(c))}" onclick="selectCrmContact('${c.id}')">
+      <div class="crm-inbox-avatar">${esc(initials(c.fullName))}</div>
       <div class="crm-inbox-row-main">
         <div class="crm-inbox-row-top">
           <span class="crm-inbox-row-name">${esc(c.fullName)}</span>
@@ -4752,9 +4772,9 @@ function renderCrmInboxThreadAndDetails(c){
 // Stage dropdown that goes through the stage rules; Won is shown, not picked.
 function leadStageControl(c){
   const st = leadStage(c);
-  if (st==='Won') return pill('good', 'Won — has a job');
+  if (st==='Won') return stageBadge('Won', 'Won — has a job');
   const opts = LEAD_STAGE_PICKABLE.map(o => `<option value="${o}" ${o===st?'selected':''}>${esc(stageLabel(o))}</option>`).join('');
-  return `<select style="min-width:130px" onchange="setLeadStage('${c.id}', this.value)">${opts}</select>`;
+  return `<select class="stage-select" style="min-width:130px;--stage:${stageColor(st)}" onchange="setLeadStage('${c.id}', this.value)">${opts}</select>`;
 }
 function renderCrmInbox(contacts){
   const selected = UI.crm.selectedContactId ? contactById(UI.crm.selectedContactId) : null;
@@ -4797,7 +4817,7 @@ function renderCrmTable(allContacts){
   const rows = contacts.length ? contacts.map(c => {
     const overdue = followupDue(c, today) && c.nextFollowUp < today;
     return `<tr>
-      <td style="border-inline-start:2px solid ${LEAD_STATUS_COLOR[leadStage(c)]};cursor:pointer" onclick="goToLeadConversation('${c.id}')"><span style="display:flex;align-items:center;gap:8px"><span class="table-row-avatar" style="--avatar-color:${LEAD_STATUS_COLOR[leadStage(c)]}">${esc(initials(c.fullName))}</span>${esc(c.fullName)}${unreadBadge(c)}</span></td>
+      <td style="border-inline-start:4px solid ${stageColor(leadStage(c))};cursor:pointer" onclick="goToLeadConversation('${c.id}')"><span style="display:flex;align-items:center;gap:8px"><span class="table-row-avatar" style="${stageVars(leadStage(c))}">${esc(initials(c.fullName))}</span>${esc(c.fullName)}${unreadBadge(c)}</span></td>
       <td class="mono">${esc(c.phone||'—')}</td>
       <td>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</td>
       <td>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</td>
@@ -4933,8 +4953,8 @@ function renderCrmOverview(profile, data){
     <div class="grid-4">
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Total leads</div><div class="stat-value">${drill(stats.total, 'All leads in this period', 'leads', contacts)}</div><div class="stat-sub">in this period</div></div>
       <div class="card stat-card" style="--stat-accent:var(--warn)"><div class="stat-label">In progress</div><div class="stat-value">${drill(stats.byStatus.Chasing + stats.byStatus.Quoted + stats.byStatus['Follow-up'] + stats.byStatus.Booked, 'In progress (chasing, quoted, follow up, booked)', 'leads', contacts.filter(c => ['Chasing','Quoted','Follow-up','Booked'].includes(leadStage(c))))}</div><div class="stat-sub">${stats.byStatus.New} new · ${stats.byStatus.Chasing} chasing · ${stats.byStatus.Quoted} quoted · ${stats.byStatus['Follow-up']} follow up · ${stats.byStatus.Booked} booked</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Won</div><div class="stat-value">${drill(stats.won, 'Won — became a job', 'leads', contacts.filter(c => contactHasJob(c, jobsAll)))}</div><div class="stat-sub">${stats.closeRate===null?'no leads yet':stats.closeRate+'% of leads became a job'} · ${stats.byStatus.Booked} booked</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--bad)"><div class="stat-label">Lost</div><div class="stat-value">${drill(stats.byStatus.Lost, 'Lost leads', 'leads', contacts.filter(c => leadStage(c)==='Lost'))}</div><div class="stat-sub">${fmtMoney(round2(contacts.filter(c => leadStage(c)==='Lost').reduce((s,c)=>s+(Number(c.estimatedValue)||0),0)))} estimated value lost</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--stage-won)"><div class="stat-label">Won</div><div class="stat-value">${drill(stats.won, 'Won — became a job', 'leads', contacts.filter(c => contactHasJob(c, jobsAll)))}</div><div class="stat-sub">${stats.closeRate===null?'no leads yet':stats.closeRate+'% of leads became a job'} · ${stats.byStatus.Booked} booked</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--stage-lost)"><div class="stat-label">Lost</div><div class="stat-value">${drill(stats.byStatus.Lost, 'Lost leads', 'leads', contacts.filter(c => leadStage(c)==='Lost'))}</div><div class="stat-sub">${fmtMoney(round2(contacts.filter(c => leadStage(c)==='Lost').reduce((s,c)=>s+(Number(c.estimatedValue)||0),0)))} estimated value lost</div></div>
     </div>
 
     <div class="section-title">Where leads come from</div>
@@ -5002,7 +5022,7 @@ function openLeadModal(contactId){
           <div class="grid-3" style="margin-top:11px">
             <div class="field"><label>Division</label><select id="lm-division">${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${c&&c.division===d?'selected':''}>${d}</option>`).join('')}</select></div>
             <div class="field"><label>Source</label><select id="lm-source">${(c && !LEAD_SOURCES.includes(c.source) ? [c.source, ...LEAD_SOURCES] : LEAD_SOURCES).map(s=>`<option value="${s}" ${c&&c.source===s?'selected':(!c&&s==='Unknown'?'selected':'')}>${esc(sourceLabel(s))}</option>`).join('')}</select></div>
-            <div class="field"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${pill('good','Won — has a job')}` : `<select id="lm-status" onchange="document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none';document.getElementById('lm-booked-wrap').style.display=this.value==='Booked'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
+            <div class="field"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${stageBadge('Won', 'Won — has a job')}` : `<select id="lm-status" class="stage-select" style="--stage:${stageColor(c?leadStage(c):'New')}" onchange="this.style.setProperty('--stage', stageColor(this.value));document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none';document.getElementById('lm-booked-wrap').style.display=this.value==='Booked'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
           </div>
           <div class="grid-3" style="margin-top:11px">
             <div class="field"><label>Estimated value</label><input type="number" id="lm-value" value="${c?(c.estimatedValue||0):0}"></div>
@@ -5507,7 +5527,7 @@ function renderSearchResults(query){
   ).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8);
   if (!leads.length && !jobs.length) return emptyState('No matches', `Try a different name, phone number, invoice or technician.${canCrm?' Old GHL contacts show below if any match.':''}`);
   const btn = searchResultBtn;
-  const leadHtml = leads.map(c => btn(`closeModal();goToLeadConversation('${c.id}')`, esc(c.fullName||'(no name)'), `${esc(c.phone||c.email||'—')} · ${esc(c.division||'')} · ${esc(sourceLabel(c.source))}`, esc(stageLabel(leadStage(c))))).join('');
+  const leadHtml = leads.map(c => btn(`closeModal();goToLeadConversation('${c.id}')`, esc(c.fullName||'(no name)'), `${esc(c.phone||c.email||'—')} · ${esc(c.division||'')} · ${esc(sourceLabel(c.source))}`, stageBadge(leadStage(c)))).join('');
   const jobHtml = jobs.map(j => btn(`goToJobFromSearch('${j.id}')`, esc(j.customerName), `${esc(j.technician)} · ${fmtDateShort(j.date)} · ${esc(j.invoiceNumber||'—')}`, fmtMoney(j.amount))).join('');
   return (leads.length ? `<div class="modal-section" style="margin-top:0">Leads &amp; customers</div>${leadHtml}` : '') + (jobs.length ? `<div class="modal-section"${leads.length?'':' style="margin-top:0"'}>Jobs</div>${jobHtml}` : '');
 }
@@ -6720,8 +6740,8 @@ function renderDashboard(profile, data){
       <div class="card stat-card" style="--stat-accent:var(--primary)">
         <div class="stat-label">Leads → won / lost</div>
         ${funnelStage('Leads came in', perf.outcome.leads, perf.outcome.leads, 'var(--primary)', drillJs('Leads that came in', 'leads', leadsIn))}
-        ${funnelStage('Won (became a job)', perf.outcome.won, perf.outcome.leads, 'var(--good)', drillJs('Won — became a job', 'leads', leadsIn.filter(isWon)))}
-        ${funnelStage('Lost', perf.outcome.lost, perf.outcome.leads, 'var(--bad)', drillJs('Lost leads', 'leads', leadsIn.filter(c => leadStage(c)==='Lost')))}
+        ${funnelStage('Won (became a job)', perf.outcome.won, perf.outcome.leads, 'var(--stage-won)', drillJs('Won — became a job', 'leads', leadsIn.filter(isWon)))}
+        ${funnelStage('Lost', perf.outcome.lost, perf.outcome.leads, 'var(--stage-lost)', drillJs('Lost leads', 'leads', leadsIn.filter(c => leadStage(c)==='Lost')))}
         ${funnelStage('Still open', perf.outcome.open, perf.outcome.leads, 'var(--warn)', drillJs('Still open', 'leads', leadsIn.filter(c => !isWon(c) && leadStage(c)!=='Lost')))}
         <div class="hint" style="margin-top:6px">Won = the customer has a job in Jobs &amp; Commissions. Form leads only; phone calls join when the phone system is live.</div>
       </div>
@@ -7891,7 +7911,7 @@ function openDrill(i){
   if (d.kind==='leads') {
     items.sort((a,b) => String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
     head = '<th>Lead</th><th>Came in</th><th>Source</th><th>Division</th><th>Stage</th>';
-    rows = items.map(c => `<tr><td>${custLink(c.fullName, c.id)}</td><td class="mono">${fmtDateShort(localDay(c.createdAt))}</td><td>${esc(sourceLabel(c.source))}</td><td>${esc(c.division||'—')}</td><td>${esc(stageLabel(leadStage(c)))}</td></tr>`).join('');
+    rows = items.map(c => `<tr><td>${custLink(c.fullName, c.id)}</td><td class="mono">${fmtDateShort(localDay(c.createdAt))}</td><td>${esc(sourceLabel(c.source))}</td><td>${esc(c.division||'—')}</td><td>${stageBadge(leadStage(c))}</td></tr>`).join('');
   } else if (d.kind==='equipment') {
     items.sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
     head = '<th>Bought</th><th>Entered</th><th>What</th><th>Technician</th><th>Paid by</th><th class="num">Amount (incl. GST)</th><th class="num">GST in it</th><th>Pay back</th>';
@@ -8144,9 +8164,9 @@ function myDayAgo(iso){
 }
 function myDayRow(c, right, opts){
   const o = opts || {};
-  return `<div class="myday-row${o.bad?' bad':''}" onclick="goToLeadConversation('${c.id}')" tabindex="0" onkeydown="if(event.key==='Enter'){goToLeadConversation('${c.id}')}">
+  return `<div class="myday-row${o.bad?' bad':''}" style="--stage:${stageColor(leadStage(c))}" onclick="goToLeadConversation('${c.id}')" tabindex="0" onkeydown="if(event.key==='Enter'){goToLeadConversation('${c.id}')}">
     <div style="min-width:0;flex:1 1 220px">
-      <div style="font-weight:600;font-size:13.5px">${esc(c.fullName)}${unreadBadge(c)} ${o.flag||''}</div>
+      <div style="font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap"><span class="stage-dot" title="${esc(stageLabel(leadStage(c)))}"></span>${esc(c.fullName)}${unreadBadge(c)} ${o.flag||''}</div>
       <div style="font-size:12px;color:var(--ink-soft);margin-top:2px"><span class="mono">${esc(c.phone||'no phone')}</span> · ${esc(c.division||'—')} · ${esc(sourceLabel(c.source))}${o.meta?` · ${o.meta}`:''}</div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end" onclick="event.stopPropagation()">${right||''}</div>
