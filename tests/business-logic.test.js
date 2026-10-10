@@ -29,7 +29,7 @@ const DECLS = [
   'weekOf', 'monthOf', 'currentWeekKey',
   'jobGst', 'jobTotalCollected', 'amountExGst', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
-  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
+  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'SUB_DIVISIONS', 'SUB_SOURCES', 'SYSTEM_TAGS', 'leadSubDivisions', 'leadSubSource', 'visibleTags', 'subSourceOptions', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
   // CRM / attribution
   'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
@@ -141,6 +141,20 @@ function testJobAttributionTags(sb){
   assertEqual(sb.jobAttributionTags({ customerName:'Nobody Here', jobType:'Aircon' }), { airconType:null, metaPlatform:null }, 'jobAttributionTags: no matching contact -> both null');
 }
 
+
+function testSubDivisionAndSource(sb){
+  console.log('\nSub-division and sub-source (their own fields since 10 Oct)');
+  const oldLead = { division:'Aircon', source:'Meta Ads', tags:['Split System','Duct System','Instagram','Too expensive','returning customer'] };
+  assertEqual([sb.leadSubDivisions(oldLead), sb.leadSubSource(oldLead)], [['Split System','Duct System'], 'Instagram'], 'a lead saved before the change still reads its old tags');
+  assertEqual(sb.visibleTags(oldLead), ['returning customer'], 'Tags shows only the free tags (not the sub-division, sub-source or lost reason)');
+  const newLead = { division:'Aircon', source:'Meta Ads', subDivisions:['Duct System'], subSource:'Facebook', tags:['Split System','Instagram'] };
+  assertEqual([sb.leadSubDivisions(newLead), sb.leadSubSource(newLead)], [['Duct System'], 'Facebook'], 'the fields win over any leftover tag');
+  assertEqual(sb.leadSubSource({ source:'Google Ads', tags:['Instagram'] }), '', 'a platform tag on a non-Meta lead is not its sub-source');
+  assertEqual(sb.subSourceOptions('Google Ads', [{ source:'Google Ads', subSource:'Brand Search' }, { source:'Meta Ads', subSource:'Instagram' }]).slice(-1), ['Brand Search'], 'a campaign already on a lead becomes a choice');
+  assertEqual(sb.subSourceOptions('Organic', []), [], 'no sub-source list for Organic');
+  sb.STATE.data.contacts = [{ fullName:'Pat Field', division:'Aircon', source:'Meta Ads', subDivisions:['Split System'], subSource:'Instagram', tags:[] }];
+  assertEqual(sb.jobAttributionTags({ customerName:'Pat Field', jobType:'Aircon' }), { airconType:'Split System', metaPlatform:'Instagram' }, 'jobs attribute to the sub-division and sub-source fields');
+}
 
 function testComputeBusinessPerformance(sb){
   sb.STATE.data.contacts = [
@@ -926,6 +940,7 @@ function testAdsTracking(sb){
 }
 
 testJobAttributionTags(loadSandbox());
+testSubDivisionAndSource(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
 testFunnelLossReasonsSpeedToLead(loadSandbox());
 testComputeProfitByWeekInRange(loadSandbox());

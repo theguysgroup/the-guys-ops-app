@@ -375,6 +375,12 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .myday-row.bad { box-shadow: inset 3px 0 0 var(--bad); }
 .stage-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; line-height: 1.3; padding: 2px 9px; border-radius: 99px; border: 1px solid color-mix(in srgb, var(--stage) 55%, transparent); background: color-mix(in srgb, var(--stage) 14%, transparent); color: var(--ink); white-space: nowrap; }
 .stage-badge::before, .stage-dot { content: ''; width: 8px; height: 8px; border-radius: 99px; background: var(--stage); flex: none; display: inline-block; }
+.sub-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.sub-chip { font: inherit; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 99px; border: 1px solid var(--line); background: transparent; color: var(--ink-soft); cursor: pointer; }
+.sub-chip.on { border-color: var(--primary); background: var(--primary-soft); color: var(--ink); }
+.sub-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.lead-sub-tags { margin-top: 4px; }
+.lead-sub-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 99px; white-space: nowrap; color: var(--ink-soft); border: 1px solid var(--line); }
 .stage-select { border-color: color-mix(in srgb, var(--stage) 70%, var(--line)) !important; box-shadow: inset 4px 0 0 var(--stage); }
 .myday-row select { width: auto; }
 .lead-move { border-color: color-mix(in srgb, var(--stage, var(--line)) 70%, var(--line)) !important; }
@@ -1289,6 +1295,7 @@ async function loadFromSupabase(){
       estimatedValue:c.estimated_value||0, salesValue:c.sales_value||0, jobDescription:c.job_description||'',
       linkedJobId:c.linked_job_id, starred:c.starred, lastReadAt:c.last_read_at,
       tags:c.tags||[], messages:c.messages||[], activityLog: logsFor('contact', c.id),
+      subDivisions:Array.isArray(c.sub_divisions)?c.sub_divisions:[], subSource:c.sub_source||'',
       utmSource:c.utm_source||'', utmMedium:c.utm_medium||'', utmCampaign:c.utm_campaign||'',
       utmTerm:c.utm_term||'', utmContent:c.utm_content||'', landingPage:c.landing_page||'',
       referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
@@ -1355,7 +1362,7 @@ function contactPatchToRow(patch){
     source:'source', status:'status', createdAt:'created_at', nextFollowUp:'next_follow_up',
     followupNote:'followup_note', notes:'notes', estimatedValue:'estimated_value', salesValue:'sales_value',
     jobDescription:'job_description', linkedJobId:'linked_job_id', starred:'starred',
-    lastReadAt:'last_read_at', tags:'tags', messages:'messages',
+    lastReadAt:'last_read_at', tags:'tags', messages:'messages', subDivisions:'sub_divisions', subSource:'sub_source',
     lostReason:'lost_reason', stageChangedAt:'stage_changed_at', chasingSince:'chasing_since', chaseCalls:'chase_calls', chaseRound:'chase_round', chaseAlertDone:'chase_alert_done',
     reopenedAt:'reopened_at', contactedAt:'contacted_at', bookedFor:'booked_for',
   };
@@ -2075,6 +2082,7 @@ function mapContactRow(c){
     estimatedValue:c.estimated_value||0, salesValue:c.sales_value||0, jobDescription:c.job_description||'',
     linkedJobId:c.linked_job_id, starred:c.starred, lastReadAt:c.last_read_at,
     tags:c.tags||[], messages:c.messages||[],
+    subDivisions:Array.isArray(c.sub_divisions)?c.sub_divisions:[], subSource:c.sub_source||'',
     utmSource:c.utm_source||'', utmMedium:c.utm_medium||'', utmCampaign:c.utm_campaign||'',
     utmTerm:c.utm_term||'', utmContent:c.utm_content||'', landingPage:c.landing_page||'',
     referrerDomain:c.referrer_domain||'', gclid:c.gclid||'', fbclid:c.fbclid||'',
@@ -2724,13 +2732,16 @@ function onStatusChange(kind, id, value){
     const c = STATE.data.contacts.find(x=>x.id===id);
     const old = c.division;
     c.division = value;
-    db.contacts.update(c.id, { division: c.division });
+    // Sub-divisions of the old division don't apply to the new one.
+    c.subDivisions = leadSubDivisions(c).filter(x => (SUB_DIVISIONS[value]||[]).includes(x));
+    db.contacts.update(c.id, { division: c.division, subDivisions: c.subDivisions });
     if (old!==value) logContactActivity(c, actor, `Division changed from "${old}" to "${value}"`);
   } else if (kind==='leadSource') {
     const c = STATE.data.contacts.find(x=>x.id===id);
     const old = c.source;
     c.source = value;
-    db.contacts.update(c.id, { source: c.source });
+    if (old!==value) c.subSource = '';   // a sub-source belongs to its source
+    db.contacts.update(c.id, { source: c.source, subSource: c.subSource||'' });
     if (old!==value) logContactActivity(c, actor, `Source changed from "${old}" to "${value}"`);
   } else if (kind==='empStatus') {
     const emp = STATE.data.employees.find(x=>x.id===id);
@@ -3156,6 +3167,34 @@ function lostReasonOf(c){
   return 'noReason';
 }
 const META_PLATFORM_TAGS = ['Facebook','Instagram'];
+// Sub-division and sub-source (Ofek 10 Oct): their own fields on the lead (contacts.sub_divisions, sub_source), not tags.
+// A lead can have more than one sub-division (split and ducted). New leads get them from the website form; Google Ads
+// leads get their campaign once the Google click is matched (gads_click_attribution).
+const SUB_DIVISIONS = {
+  Aircon: AIRCON_TYPE_TAGS,
+  'Pressure Washing': ['Driveway Cleaning','House Washing','Roof Cleaning','Exterior Soft Washing','Hard Surface Cleaning','Gutter Cleaning','Solar Panels'],
+  Chimney: ['Chimney Sweep','Chimney Repair','Chimney Inspection'],
+  Other: [],
+};
+const SUB_SOURCES = {
+  'Meta Ads': META_PLATFORM_TAGS,
+  'Google Ads': ['General Air Con Cleaning','PMax Air Con','Ducted & Split System','Air Con Service'],
+  'Google Maps': ['Aircon profile','Chimney profile','Pressure Washing profile'],
+};
+// What used to be written as tags and now has its own field (sub-division, sub-source, the lost reason): never a tag again.
+const SYSTEM_TAGS = new Set([...AIRCON_TYPE_TAGS, ...META_PLATFORM_TAGS, ...LOST_REASONS.map(r => r.label)]);
+function leadSubDivisions(c){
+  const own = Array.isArray(c.subDivisions) ? c.subDivisions : [];
+  return own.length ? own : (c.tags||[]).filter(t => AIRCON_TYPE_TAGS.includes(t));   // leads saved before 10 Oct kept them as tags
+}
+function leadSubSource(c){ return c.subSource || (c.source==='Meta Ads' ? (META_PLATFORM_TAGS.find(t => (c.tags||[]).includes(t)) || '') : ''); }
+function visibleTags(c){ return (c.tags||[]).filter(t => !SYSTEM_TAGS.has(t)); }
+// The choices for a source: the fixed ones plus any value already on a lead (e.g. a new Google Ads campaign).
+function subSourceOptions(source, contacts){
+  const set = new Set(SUB_SOURCES[source] || []);
+  (contacts||[]).forEach(c => { if (c.source===source && c.subSource) set.add(c.subSource); });
+  return [...set];
+}
 // Read-only — populated once, at creation, by the intake-lead Edge Function (or blank for every
 // lead entered directly in the app). Shared between the CRM Inbox details panel and the lead
 // modal's Details tab so the two never drift. Renders nothing at all if there's no data, which is
@@ -3330,8 +3369,8 @@ function computeCrmStats(contacts){
     }
     // Sub-tags only ever refine their parent bucket, never replace it — an Aircon lead tagged
     // "Duct System" still counts under Aircon above; this just additionally answers "which kind".
-    if (c.division==='Aircon') (c.tags||[]).forEach(t => { if (stats.byAirconType[t]!==undefined) stats.byAirconType[t]++; });
-    if (c.source==='Meta Ads') (c.tags||[]).forEach(t => { if (stats.byMetaPlatform[t]!==undefined) stats.byMetaPlatform[t]++; });
+    if (c.division==='Aircon') leadSubDivisions(c).forEach(t => { if (stats.byAirconType[t]!==undefined) stats.byAirconType[t]++; });
+    if (c.source==='Meta Ads') { const t = leadSubSource(c); if (stats.byMetaPlatform[t]!==undefined) stats.byMetaPlatform[t]++; }
     if (st==='Booked' || st==='Won') stats.wonValue += Number(c.estimatedValue)||0;
   });
   // Won = the lead became a job (same rule as the Dashboard); close rate = won out of every lead in the period.
@@ -3358,6 +3397,8 @@ function crmFilteredContactsUnsorted(data){
   if (UI.crm.division!=='all') list = list.filter(c=>c.division===UI.crm.division);
   if (UI.crm.status!=='all') list = list.filter(c=>leadStage(c)===UI.crm.status);
   if (UI.crm.tag && UI.crm.tag!=='all') list = list.filter(c=>(c.tags||[]).includes(UI.crm.tag));
+  if (UI.crm.subDivision && UI.crm.subDivision!=='all') list = list.filter(c=>leadSubDivisions(c).includes(UI.crm.subDivision));
+  if (UI.crm.subSource && UI.crm.subSource!=='all') list = list.filter(c=>leadSubSource(c)===UI.crm.subSource);
   const q = (UI.crm.search||'').trim().toLowerCase();
   if (q) list = list.filter(c => [c.fullName,c.phone,c.email,c.postcode,c.jobDescription].some(v => (v||'').toLowerCase().indexOf(q)!==-1));
   return list;
@@ -3393,7 +3434,7 @@ function jsStr(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 function allKnownTags(){
   const set = new Set(STATE.data.tagCatalog||[]);
   (STATE.data.contacts||[]).forEach(c => (c.tags||[]).forEach(t=>set.add(t))); // defensive: a tag on a contact always stays selectable even if the catalog somehow drifted
-  return [...set].sort();
+  return [...set].filter(t => !SYSTEM_TAGS.has(t)).sort();
 }
 function registerTag(tag){
   if (!STATE.data.tagCatalog) STATE.data.tagCatalog = [];
@@ -3426,7 +3467,7 @@ function refreshLeadTagsUI(contactId){
 }
 function renderLeadTags(contactId, scope){
   const c = contactById(contactId); if (!c) return '';
-  const tags = c.tags||[];
+  const tags = visibleTags(c);
   const inputId = `tag-input-${scope}-${contactId}`;
   return `<div class="lead-tags-block" data-contact="${contactId}" data-scope="${scope}">
     <div class="lead-tags-chips">
@@ -3564,9 +3605,7 @@ function openLostReasonPrompt(c, after){
 }
 function confirmLostReason(id, key){
   const c = contactById(id); if (!c) return;
-  const label = lostReasonLabel(key);
-  const tags = (c.tags||[]).includes(label) ? c.tags : [...(c.tags||[]), label];
-  applyLeadStage(c, 'Lost', { lostReason:key, tags });
+  applyLeadStage(c, 'Lost', { lostReason:key });   // the reason is its own field (shown under the stage), not a tag
   finishPopup();
 }
 function openBookedDatePrompt(c, after){
@@ -4550,9 +4589,12 @@ function renderLeadCard(c){
       <div class="lead-card-avatar">${esc(initials(c.fullName))}</div>
       <div class="lead-name">${esc(c.fullName)}${unreadBadge(c)}</div>
     </div>
-    <div class="lead-tags">
-      ${leadTagChip(c.division, LEAD_STATUS_COLOR[leadStage(c)])}
-      ${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}
+    <div>
+      <div class="lead-tags">
+        ${leadTagChip(c.division, LEAD_STATUS_COLOR[leadStage(c)])}
+        ${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}
+      </div>
+      ${leadSubChips(c)}
     </div>
     <div class="lead-meta mono">${esc(c.phone||'—')}</div>
     ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
@@ -4743,9 +4785,12 @@ function renderCrmInboxThreadAndDetails(c){
       <div class="crm-inbox-composer">${renderLeadComposer(c.id, 'inbox')}</div>
     </div>
     <div class="crm-inbox-details">
-      <div class="lead-tags" style="margin-bottom:14px">
-        ${leadTagChip(c.division, LEAD_STATUS_COLOR[leadStage(c)])}
-        ${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}
+      <div style="margin-bottom:14px">
+        <div class="lead-tags">
+          ${leadTagChip(c.division, LEAD_STATUS_COLOR[leadStage(c)])}
+          ${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}
+        </div>
+        ${leadSubChips(c)}
       </div>
       <div class="field"><label>📝 Notes</label><textarea rows="3" placeholder="Anything to remember about this customer: gate code, dog, best time to call…" onchange="setLeadNotes('${c.id}',this.value)">${esc(c.notes||'')}</textarea></div>
       <div class="field" style="margin-top:9px"><label>Tags</label>${renderLeadTags(c.id, 'inbox')}</div>
@@ -4753,7 +4798,9 @@ function renderCrmInboxThreadAndDetails(c){
       ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
       ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">Lost reason: <b>${esc(lostReasonLabel(lostReasonOf(c)))}</b></div>` : ''}
       <div class="field" style="margin-top:9px"><label>Division</label>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</div>
+      <div class="field" style="margin-top:9px"><label>Sub-division</label>${subDivisionPicker(c)}</div>
       <div class="field" style="margin-top:9px"><label>Source</label>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</div>
+      <div class="field" style="margin-top:9px"><label>Sub-source</label>${subSourcePicker(c)}</div>
       <div class="field" style="margin-top:9px"><label>Next follow-up</label>${renderDateCell('inbox-followup-'+c.id, c.nextFollowUp||'', `setLeadFollowupDate('${c.id}', v)`)}</div>
       <div class="field" style="margin-top:9px"><label>Follow-up note</label><textarea rows="2" placeholder="What needs doing when this follow-up is due…" onchange="setLeadFollowupNote('${c.id}',this.value)">${esc(c.followupNote||'')}</textarea></div>
       <div class="field" style="margin-top:9px"><label>Estimated value</label><input type="number" value="${c.estimatedValue||0}" onchange="setLeadEstimatedValue('${c.id}',this.value)"></div>
@@ -4768,6 +4815,43 @@ function renderCrmInboxThreadAndDetails(c){
         <button class="btn ghost small" onclick="openTaskModalForContact('${c.id}')">➕ Create task</button>
       </div>
     </div>`;
+}
+function setLeadSubDivisions(id, list){
+  const c = contactById(id); if (!c) return;
+  c.subDivisions = list;
+  db.contacts.update(c.id, { subDivisions: list });
+  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Sub-division: ${list.length ? list.join(', ') : 'none'}`);
+  render();
+  document.querySelectorAll(`[data-subdiv="${id}"]`).forEach(el => { el.outerHTML = subDivisionPicker(c); });
+}
+function toggleLeadSubDivision(id, value){
+  const c = contactById(id); if (!c) return;
+  const cur = leadSubDivisions(c);
+  setLeadSubDivisions(id, cur.includes(value) ? cur.filter(x => x!==value) : [...cur, value]);
+}
+function setLeadSubSource(id, value){
+  const c = contactById(id); if (!c) return;
+  c.subSource = value;
+  db.contacts.update(c.id, { subSource: value });
+  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Sub-source: ${value || 'none'}`);
+  render();
+}
+// Sub-division: one click per option (a lead can have several); sub-source: one choice.
+function subDivisionPicker(c){
+  const opts = SUB_DIVISIONS[c.division] || [], cur = leadSubDivisions(c);
+  if (!opts.length) return `<span class="hint" data-subdiv="${c.id}">None for ${esc(c.division||'this division')}</span>`;
+  return `<div class="sub-picker" data-subdiv="${c.id}">${opts.map(o => `<button type="button" class="sub-chip${cur.includes(o)?' on':''}" aria-pressed="${cur.includes(o)}" onclick="event.stopPropagation();toggleLeadSubDivision('${c.id}','${jsStr(o)}')">${esc(o)}</button>`).join('')}</div>`;
+}
+function subSourcePicker(c){
+  const cur = leadSubSource(c), opts = subSourceOptions(c.source, STATE.data && STATE.data.contacts);
+  const all = cur && !opts.includes(cur) ? [cur, ...opts] : opts;
+  if (!all.length) return `<span class="hint" data-subsrc="${c.id}">None for ${esc(sourceLabel(c.source))}</span>`;
+  return `<select data-subsrc="${c.id}" onchange="setLeadSubSource('${c.id}', this.value)"><option value="">—</option>${all.map(o => `<option value="${esc(o)}" ${o===cur?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+}
+// The chips under the division and source chips: the sub-division(s) and the sub-source.
+function leadSubChips(c){
+  const list = [...leadSubDivisions(c), leadSubSource(c)].filter(Boolean);
+  return list.length ? `<div class="lead-tags lead-sub-tags">${list.map(t => `<span class="lead-sub-tag">${esc(t)}</span>`).join('')}</div>` : '';
 }
 // Stage dropdown that goes through the stage rules; Won is shown, not picked.
 function leadStageControl(c){
@@ -4800,7 +4884,7 @@ function renderCrmPipeline(contacts){
     <div class="hint" style="margin-top:10px">Drag a card between columns, or use the stage dropdown on the card. Won fills itself once the customer has a job.</div>`;
 }
 function renderTableTagsCell(c){
-  const tags = c.tags||[];
+  const tags = visibleTags(c);
   const chips = tags.map(t=>`<span class="lead-tag-chip" style="font-size:10px;padding:1px 6px 1px 8px">${esc(t)}<span class="lead-tag-x" onclick="event.stopPropagation();removeLeadTag('${c.id}','${jsStr(t)}')">×</span></span>`).join('');
   const inputId = `table-tag-input-${c.id}`;
   return `<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;max-width:220px" onclick="event.stopPropagation()">
@@ -4819,8 +4903,8 @@ function renderCrmTable(allContacts){
     return `<tr>
       <td style="border-inline-start:4px solid ${stageColor(leadStage(c))};cursor:pointer" onclick="goToLeadConversation('${c.id}')"><span style="display:flex;align-items:center;gap:8px"><span class="table-row-avatar" style="${stageVars(leadStage(c))}">${esc(initials(c.fullName))}</span>${esc(c.fullName)}${unreadBadge(c)}</span></td>
       <td class="mono">${esc(c.phone||'—')}</td>
-      <td>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</td>
-      <td>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</td>
+      <td>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}${leadSubDivisions(c).length ? `<div class="hint" style="margin-top:3px;font-size:11px">${esc(leadSubDivisions(c).join(', '))}</div>` : ''}</td>
+      <td>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}${leadSubSource(c) ? `<div class="hint" style="margin-top:3px;font-size:11px">${esc(leadSubSource(c))}</div>` : ''}</td>
       <td>${leadStageControl(c)}${leadStage(c)==='Chasing'?`<div style="margin-top:4px">${chaseTick(c)}</div>`:''}${quoteStale(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ Idle 14+ days</div>`:''}${chaseTooLong(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ 21+ days — decide</div>`:''}${leadStage(c)==='Booked' && c.bookedFor ? `<div class="lead-due" style="margin-top:4px">Job ${fmtDateShort(c.bookedFor)}</div>` : ''}</td>
       <td class="wrap">${renderTableTagsCell(c)}</td>
       <td class="mono">${fmtDateShort(c.createdAt)}</td>
@@ -4882,6 +4966,8 @@ function renderCrm(profile, data){
       <select style="width:auto" onchange="UI.crm.division=this.value;render()"><option value="all">All divisions</option>${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${UI.crm.division===d?'selected':''}>${d}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.source=this.value;render()"><option value="all">All sources</option>${LEAD_SOURCES.map(s=>`<option value="${s}" ${UI.crm.source===s?'selected':''}>${esc(sourceLabel(s))}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.tag=this.value;render()"><option value="all">All tags</option>${allKnownTags().map(t=>`<option value="${esc(t)}" ${UI.crm.tag===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
+      <select style="width:auto" onchange="UI.crm.subDivision=this.value;render()" aria-label="Sub-division"><option value="all">All sub-divisions</option>${Object.entries(SUB_DIVISIONS).filter(([,l])=>l.length).map(([d,l])=>`<optgroup label="${esc(d)}">${l.map(t=>`<option value="${esc(t)}" ${UI.crm.subDivision===t?'selected':''}>${esc(t)}</option>`).join('')}</optgroup>`).join('')}</select>
+      <select style="width:auto" onchange="UI.crm.subSource=this.value;render()" aria-label="Sub-source"><option value="all">All sub-sources</option>${Object.keys(SUB_SOURCES).map(src=>`<optgroup label="${esc(sourceLabel(src))}">${subSourceOptions(src, data.contacts).map(t=>`<option value="${esc(t)}" ${UI.crm.subSource===t?'selected':''}>${esc(t)}</option>`).join('')}</optgroup>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.status=this.value;render()"><option value="all">All stages</option>${LEAD_STATUSES.map(s=>`<option value="${s}" ${UI.crm.status===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>
       ${isTable ? `<select style="width:auto" onchange="UI.crm.sortBy=this.value;render()">
         <option value="stage" ${UI.crm.sortBy==='stage'?'selected':''}>By stage (New first)</option>
@@ -4923,8 +5009,8 @@ function renderCrmOverview(profile, data){
   // has leads this period, so an account with no Aircon/Meta activity yet doesn't show empty charts.
   const airconTypeTotal = AIRCON_TYPE_TAGS.reduce((s,t)=>s+stats.byAirconType[t],0);
   const metaPlatformTotal = META_PLATFORM_TAGS.reduce((s,t)=>s+stats.byMetaPlatform[t],0);
-  const airconTypeBars = airconTypeTotal ? renderBarGroup(AIRCON_TYPE_TAGS.map(t => ({ label:t, value:stats.byAirconType[t], color:'var(--primary)', onclick: drillJs(`Aircon — ${t}`, 'leads', contacts.filter(c => c.division==='Aircon' && (c.tags||[]).includes(t))) })), { fmt:(n)=>String(n) }) : '';
-  const metaPlatformBars = metaPlatformTotal ? renderBarGroup(META_PLATFORM_TAGS.map(t => ({ label:t, value:stats.byMetaPlatform[t], color:'var(--accent)', onclick: drillJs(`Meta Ads — ${t}`, 'leads', contacts.filter(c => c.source==='Meta Ads' && (c.tags||[]).includes(t))) })), { fmt:(n)=>String(n) }) : '';
+  const airconTypeBars = airconTypeTotal ? renderBarGroup(AIRCON_TYPE_TAGS.map(t => ({ label:t, value:stats.byAirconType[t], color:'var(--primary)', onclick: drillJs(`Aircon — ${t}`, 'leads', contacts.filter(c => c.division==='Aircon' && leadSubDivisions(c).includes(t))) })), { fmt:(n)=>String(n) }) : '';
+  const metaPlatformBars = metaPlatformTotal ? renderBarGroup(META_PLATFORM_TAGS.map(t => ({ label:t, value:stats.byMetaPlatform[t], color:'var(--accent)', onclick: drillJs(`Meta Ads — ${t}`, 'leads', contacts.filter(c => c.source==='Meta Ads' && leadSubSource(c)===t)) })), { fmt:(n)=>String(n) }) : '';
 
   // Sales by technician for this period's leads: each of the customer's jobs counts for the technician who did
   // that job (a customer with jobs by two technicians is split between them). A lead with an agreed sales value
@@ -5024,6 +5110,7 @@ function openLeadModal(contactId){
             <div class="field"><label>Source</label><select id="lm-source">${(c && !LEAD_SOURCES.includes(c.source) ? [c.source, ...LEAD_SOURCES] : LEAD_SOURCES).map(s=>`<option value="${s}" ${c&&c.source===s?'selected':(!c&&s==='Unknown'?'selected':'')}>${esc(sourceLabel(s))}</option>`).join('')}</select></div>
             <div class="field"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${stageBadge('Won', 'Won — has a job')}` : `<select id="lm-status" class="stage-select" style="--stage:${stageColor(c?leadStage(c):'New')}" onchange="this.style.setProperty('--stage', stageColor(this.value));document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none';document.getElementById('lm-booked-wrap').style.display=this.value==='Booked'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
           </div>
+          ${c ? `<div class="grid-2" style="margin-top:11px"><div class="field"><label>Sub-division</label>${subDivisionPicker(c)}</div><div class="field"><label>Sub-source</label>${subSourcePicker(c)}</div></div>` : ''}
           <div class="grid-3" style="margin-top:11px">
             <div class="field"><label>Estimated value</label><input type="number" id="lm-value" value="${c?(c.estimatedValue||0):0}"></div>
             <div class="field"><label>Sales value</label>${salesValueField(c, `<input type="number" id="lm-sales" value="${c?(c.salesValue||0):0}">`)}</div>
@@ -5129,7 +5216,7 @@ async function saveLeadModal(contactId){
     values.stageChangedAt = new Date().toISOString();
     if (stagePicked==='Chasing') { values.chasingSince = values.stageChangedAt; values.chaseAlertDone = false; }
   }
-  if (stagePicked==='Lost') { values.lostReason = lostPicked; values.nextFollowUp = ''; if (lostPicked) { const lbl = lostReasonLabel(lostPicked); if (prev && !(prev.tags||[]).includes(lbl)) values.tags = [...(prev.tags||[]), lbl]; } }
+  if (stagePicked==='Lost') { values.lostReason = lostPicked; values.nextFollowUp = ''; }
   else if (stagePicked!=='Won') values.lostReason = '';
   if (stagePicked==='Booked') { values.nextFollowUp = ''; if (bookedPicked) values.bookedFor = bookedPicked; }
   let c;
@@ -6623,14 +6710,14 @@ function renderDashboard(profile, data){
 
   // ── divisions: one table, Split/Duct nested under Aircon ──
   const divLeads = div => (data.contacts||[]).filter(c => c.division===div && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
-  const typeLeads = tag => (data.contacts||[]).filter(c => c.division==='Aircon' && (c.tags||[]).includes(tag) && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
+  const typeLeads = tag => (data.contacts||[]).filter(c => c.division==='Aircon' && leadSubDivisions(c).includes(tag) && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
   const divRow = (label, leads, callsN, b, sub, L) => `<tr${sub?' style="color:var(--ink-soft)"':''}>
     <td>${sub?'&nbsp;&nbsp;↳ ':''}${esc(label)}</td><td class="num">${drill(leads, `${label} — form leads`, 'leads', L.leads)}</td><td class="num">${callsN===null?'—':callsN}</td>
     <td class="num">${drill(b.count, `${label} — jobs`, 'jobs', L.jobs)}</td><td class="num" style="font-weight:700">${drill(fmtMoney(b.revenue), `${label} — jobs`, 'jobs', L.jobs)}</td><td class="num">${b.count?fmtMoney(b.avgDeal):'—'}</td>
     <td class="num">${fmtMoney(b.profit)}</td><td class="num">${b.margin===null||b.margin===undefined?'—':pill(marginTone(b.margin), b.margin+'%')}</td></tr>`;
   const divisionRows = LEAD_DIVISIONS.map(d => {
     let html = divRow(d, divLeads(d), cs.byDivision[d]||0, perf.byDivision[d], false, { leads: leadsIn.filter(c => c.division===d), jobs: jobs.filter(j => j.jobType===d) });
-    if (d==='Aircon') html += AIRCON_TYPE_TAGS.map(t => divRow(t, typeLeads(t), null, perf.bySubDivision[t], true, { leads: leadsIn.filter(c => c.division==='Aircon' && (c.tags||[]).includes(t)), jobs: jobs.filter(j => jobAttributionTags(j).airconType===t) })).join('');
+    if (d==='Aircon') html += AIRCON_TYPE_TAGS.map(t => divRow(t, typeLeads(t), null, perf.bySubDivision[t], true, { leads: leadsIn.filter(c => c.division==='Aircon' && leadSubDivisions(c).includes(t)), jobs: jobs.filter(j => jobAttributionTags(j).airconType===t) })).join('');
     return html;
   }).join('')
     + `<tr style="font-weight:700;border-top:2px solid var(--line)"><td>All divisions</td><td class="num">${drill(perf.totalLeads, 'All form leads', 'leads', leadsIn)}</td><td class="num">${cs.total}</td>
@@ -7947,10 +8034,10 @@ function renderContactJobsBlock(c){
 function jobAttributionTags(job){
   const c = contactForJob(job);
   if (!c) return { airconType:null, metaPlatform:null };
-  const tags = c.tags || [];
+  const subs = leadSubDivisions(c), sub = leadSubSource(c);
   return {
-    airconType: job.jobType==='Aircon' ? (AIRCON_TYPE_TAGS.find(t=>tags.includes(t)) || null) : null,
-    metaPlatform: c.source==='Meta Ads' ? (META_PLATFORM_TAGS.find(t=>tags.includes(t)) || null) : null,
+    airconType: job.jobType==='Aircon' ? (AIRCON_TYPE_TAGS.find(t=>subs.includes(t)) || null) : null,
+    metaPlatform: c.source==='Meta Ads' ? (META_PLATFORM_TAGS.includes(sub) ? sub : null) : null,
   };
 }
 // Ofek's call: every customer, however they arrived, is a lead — so every job (whether it came in
@@ -8262,9 +8349,7 @@ function dismissLeadEmail(id, rowEl){
 function chaseGiveUp(id){
   const c = contactById(id); if (!c || leadStage(c)!=='Chasing') return;
   confirmAction(`${c.fullName} has been in Chasing for 21+ days. Move them to Lost with the reason "No answer"?`, () => {
-    const label = lostReasonLabel('noAnswer');
-    const tags = (c.tags||[]).includes(label) ? c.tags : [...(c.tags||[]), label];
-    applyLeadStage(c, 'Lost', { lostReason:'noAnswer', tags });
+    applyLeadStage(c, 'Lost', { lostReason:'noAnswer' });
     render();
   }, { danger:false, title:'Mark as Lost?', confirmLabel:'Mark as Lost' });
 }
