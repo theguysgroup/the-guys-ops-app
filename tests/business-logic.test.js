@@ -29,7 +29,7 @@ const DECLS = [
   'weekOf', 'monthOf', 'currentWeekKey',
   'jobGst', 'jobTotalCollected', 'amountExGst', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
-  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'SUB_DIVISIONS', 'SUB_SOURCES', 'LEAD_TAGS', 'leadTagOn', 'leadSubDivisions', 'leadSubSource', 'visibleTags', 'subSourceOptions', 'LEAD_SOURCE_LABEL', 'sourceLabel', 'splitLeadRequestEvent', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
+  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'SUB_DIVISIONS', 'SUB_SOURCES', 'LEAD_TAGS', 'leadTagOn', 'DIVISION_COLOR', 'divColor', 'leadSubDivisions', 'leadSubSource', 'visibleTags', 'subSourceOptions', 'LEAD_SOURCE_LABEL', 'sourceLabel', 'splitLeadRequestEvent', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
   // CRM / attribution
   'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
@@ -149,6 +149,8 @@ function testSubDivisionAndSource(sb){
   assertEqual(sb.visibleTags(oldLead), ['Returning customer'], 'Tags shows only the four tags (not the sub-division, sub-source or lost reason), whatever the spelling');
   assertEqual(sb.visibleTags({ tags:['Refunded','facebook','Callback','duct system','Complaint','Returning customer'] }), ['Returning customer','Callback','Complaint','Refunded'], 'the four tags, in their fixed order; nothing else');
   assertEqual(sb.visibleTags({}), [], 'no tags');
+  assertEqual(['Aircon','Chimney','Pressure Washing','Other'].map(sb.divColor), ['var(--div-aircon)','var(--div-chimney)','var(--div-pw)','var(--div-other)'], 'each division has its own colour (Aircon blue, Chimney orange, Pressure Washing purple)');
+  assertEqual(['Chimney Sweep','pressure washing','Air Con','',undefined].map(sb.divColor), ['var(--div-chimney)','var(--div-pw)','var(--div-aircon)','var(--div-other)','var(--div-other)'], 'an odd job-type spelling still gets its division colour');
   const newLead = { division:'Aircon', source:'Meta Ads', subDivisions:['Duct System'], subSource:'Facebook', tags:['Split System','Instagram'] };
   assertEqual([sb.leadSubDivisions(newLead), sb.leadSubSource(newLead)], [['Duct System'], 'Facebook'], 'the fields win over any leftover tag');
   assertEqual(sb.leadSubSource({ source:'Google Ads', tags:['Instagram'] }), '', 'a platform tag on a non-Meta lead is not its sub-source');

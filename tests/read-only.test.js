@@ -96,7 +96,7 @@ function testStaticScan(){
 // ── 3. the click actions in a read-only mode ──────────────────────────────────────────────────────
 function actionSandbox(){
   const log = { toasts: [], db: [], fetch: [], nav: [] };
-  const contact = { id: 'c1', fullName: 'Sarah', notes: '', phone: '0412 345 678', email: 'a@b.co' };
+  const contact = { id: 'c1', fullName: 'Sarah', notes: '', customerNotes: [{ id: 'n1', text: 'Gate code 1234', by: 'Ofek', at: '2026-10-10T01:00:00.000Z' }], phone: '0412 345 678', email: 'a@b.co' };
   const job = { id: 'j1', customerName: 'Sarah', invoiceNumber: '2400' };
   const anyDb = new Proxy({}, { get: (t, table) => new Proxy({}, { get: (t2, op) => (...a) => { log.db.push(`${String(table)}.${String(op)}`); return Promise.resolve(true); } }) });
   const ctx = {
@@ -120,7 +120,7 @@ function actionSandbox(){
     leadStage: () => 'New', chaseTooLong: () => false, isWorkday: () => true, Promise, console,
   };
   vm.createContext(ctx);
-  const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'setLeadNotes', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'askReviewAgain', 'markReviewLeft', 'setChatAutoSms', 'setMyShift', 'storeFile', 'savePayrollInvoice'];
+  const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'leadNotes', 'addLeadNote', 'deleteLeadNote', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'askReviewAgain', 'markReviewLeft', 'setChatAutoSms', 'setMyShift', 'storeFile', 'savePayrollInvoice'];
   vm.runInContext(names.map(fnText).join('\n'), ctx);
   return ctx;
 }
@@ -130,8 +130,9 @@ async function testActions(){
     ctx.PRESENT = present; ctx.VIEW_AS_ID = viewAs;
     // An action that got past its read-only check runs into the stubs and may throw: that is a failure too.
     const run = async (code) => { try { await vm.runInContext(code, ctx); } catch (e) { ok(false, `${mode}: ${code} ran past its read-only check`, String(e.message || e).slice(0, 120)); } };
-    await run(`setLeadNotes('c1', 'Gate code 1234')`);
-    ok(ctx.contactById('c1').notes === '', `${mode}: a customer note is not changed`);
+    await run(`addLeadNote('c1', 'inbox')`);
+    await run(`deleteLeadNote('c1', 'n1')`);
+    ok(ctx.contactById('c1').notes === '' && JSON.stringify(ctx.contactById('c1').customerNotes) === '[{"id":"n1","text":"Gate code 1234","by":"Ofek","at":"2026-10-10T01:00:00.000Z"}]', `${mode}: customer notes are not added or deleted`);
     await run(`vaLogIn()`);
     await run(`vaLogOut()`);
     await run(`setMyBreak(true)`);
