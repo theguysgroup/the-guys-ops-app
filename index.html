@@ -356,6 +356,9 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .jobs-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
 .jobs-split.with-panel { grid-template-columns: minmax(0, 1fr) 340px; }
 .jobs-list td { padding-top: 8px; padding-bottom: 8px; vertical-align: middle; white-space: nowrap; }
+.jobs-list .num { text-align: end; }
+.jobs-filters .jobs-tech { width: auto; min-height: 34px; border-radius: 99px; padding-inline: 14px 30px; font-size: 12.5px; font-weight: 600; }
+.jobs-filters .jobs-tech.on { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
 .jobs-list tbody tr { cursor: pointer; transition: background-color .12s ease; }
 .jobs-list tbody tr:hover { background: var(--surface-2); }
 .jobs-list tbody tr:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--primary); }
@@ -5536,7 +5539,7 @@ function renderJobRows(jobs){
       <td class="num">${fmtMoney(j.amount)}<span class="job-sub">${j.includesGST ? 'GST '+fmtMoney(jobGst(j)) : 'no GST'}</span></td>
       <td>${pill(paid ? 'good' : 'bad', paid ? 'Paid' : 'Unpaid')}<span class="job-sub">${paid ? esc(j.paymentMethod||'—') : `${jobDaysWaiting(j)} days`}</span></td>
       <td class="num">${com ? fmtMoney(com) : '—'}<span class="job-sub">${j.commissionPercent||0}%</span></td>
-      <td onclick="event.stopPropagation()">${ask ? reviewAskCell(j) : jobReviewState(j)}</td>
+      <td onclick="event.stopPropagation()">${ask ? reviewAskCell(j, true) : jobReviewState(j)}</td>
     </tr>`;
   }).join('');
 }
@@ -5622,7 +5625,7 @@ async function loadReviewRequests(){
   if (UI.tab==='jobs') refreshJobsTable();
   else if (UI.tab==='myDay' || UI.tab==='dashboard') renderKeepingInput();
 }
-function reviewAskCell(j){
+function reviewAskCell(j, quiet){   // quiet: a plain button, for a list where every row has one
   if (REVIEW_REQ===null) { loadReviewRequests(); return '<span class="hint">…</span>'; }
   if (j.reviewDoNotAsk) return pill('bad', "Don't ask");
   if (j.reviewTaken) return pill('good', 'Review taken');
@@ -5630,7 +5633,7 @@ function reviewAskCell(j){
   if (r && r.status==='sent') return `<span title="${esc(r.requested_by ? 'Asked by '+r.requested_by : 'Asked automatically')}">${pill('good', ((Number(r.ask_count)||1) > 1 ? 'Asked again ' : 'Asked ')+fmtDateShort(localDay(r.sent_at)))}</span>`;
   if (r && r.status==='waiting') return pill('warn', 'Goes '+new Date(r.send_after).toLocaleString('en-AU', { timeZone:'Australia/Sydney', weekday:'short', hour:'numeric', minute:'2-digit' }));
   if (!j.invoiceNumber) return '<span class="hint">No invoice #</span>';
-  return `${r && r.status==='error' ? pill('bad','Failed')+' ' : ''}<button class="btn primary small" onclick="askForReview('${j.id}')">Ask for review</button>`;
+  return `${r && r.status==='error' ? pill('bad','Failed')+' ' : ''}<button class="btn ${quiet ? 'ghost' : 'primary'} small" onclick="askForReview('${j.id}')">Ask for review</button>`;
 }
 const REVIEW_ASK_REASONS = {
   do_not_ask: "This customer is marked \"Don't ask for a review\".",
@@ -5720,7 +5723,7 @@ function renderJobs(profile, data){
       <input class="jobs-search" type="search" value="${esc(UI.jobs.q||'')}" placeholder="Search customer, invoice #, technician…" oninput="setJobsSearch(this.value)" aria-label="Search jobs">
       ${JOBS_RANGES.map(([k, l]) => chip(UI.jobs.range===k, l, `setJobsRange('${k}')`)).join('')}
       ${UI.jobs.range==='custom' ? `<input type="date" style="width:auto" value="${esc(UI.jobs.customFrom||'')}" onchange="setJobsCustom('customFrom', this.value)"><span style="color:var(--ink-faint);font-size:12px">to</span><input type="date" style="width:auto" value="${esc(UI.jobs.customTo||'')}" onchange="setJobsCustom('customTo', this.value)">` : ''}
-      ${techs.length > 1 ? `<span class="sep"></span>${chip(UI.jobs.tech==='all', 'All techs', "UI.jobs.tech='all';UI.jobs.page=1;render()")}${techs.map(t => chip(UI.jobs.tech===t, esc(t), `UI.jobs.tech='${jsStr(t)}';UI.jobs.page=1;render()`)).join('')}` : ''}
+      ${techs.length > 1 ? `<span class="sep"></span><select class="jobs-tech${UI.jobs.tech!=='all' ? ' on' : ''}" aria-label="Technician" onchange="UI.jobs.tech=this.value;UI.jobs.page=1;render()"><option value="all">All technicians</option>${techs.map(t => `<option value="${esc(t)}" ${UI.jobs.tech===t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
       <span class="sep"></span>
       ${chip(UI.jobs.status==='Unpaid', 'Unpaid', `UI.jobs.status=UI.jobs.status==='Unpaid'?'all':'Unpaid';UI.jobs.page=1;render()`)}
       ${chip(UI.jobs.noReview, 'No review yet', 'UI.jobs.noReview=!UI.jobs.noReview;UI.jobs.page=1;render()', 'Not reviewed and not asked yet')}
