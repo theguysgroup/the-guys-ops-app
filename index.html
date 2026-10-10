@@ -366,7 +366,8 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 /* the open job slides in over the page from the right, so the table keeps its full width */
 .job-panel { position: fixed; top: 0; bottom: 0; inset-inline-end: 0; width: 380px; max-width: 100vw; z-index: 80; overflow-y: auto; overscroll-behavior: contain;
   background: var(--surface); border-inline-start: 1px solid var(--line); padding: 18px 20px 24px; box-shadow: -28px 0 60px -12px rgba(8,6,4,.45);
-  animation: jobPanelIn .32s cubic-bezier(.22,1,.36,1) both; }
+}
+.job-panel.anim { animation: jobPanelIn .32s cubic-bezier(.22,1,.36,1) both; }
 @keyframes jobPanelIn { from { transform: translateX(28px); opacity: 0; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .job-panel { animation: none; } }
 .job-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
@@ -378,6 +379,29 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .job-panel .grp { border-top: 1px solid var(--line); margin: 14px 0 10px; padding-top: 10px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; font-weight: 700; color: var(--ink-faint); }
 .job-ro { font-size: 13px; padding: 4px 0; overflow-wrap: anywhere; }
 .job-panel-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+.emp-panel { width: 420px; }
+.emp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+.emp-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 14px 16px; cursor: pointer; display: flex; flex-direction: column; gap: 9px;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.emp-card:hover { border-color: color-mix(in srgb, var(--primary) 35%, var(--line)); box-shadow: var(--shadow-lg); transform: translateY(-1px); }
+.emp-card:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.emp-card.sel { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.emp-card.inactive { opacity: .62; }
+.emp-card-top { display: flex; align-items: center; gap: 11px; }
+.emp-avatar { width: 40px; height: 40px; border-radius: 99px; flex: none; display: inline-flex; align-items: center; justify-content: center; font-family: 'Figtree', sans-serif; font-weight: 700; font-size: 16px;
+  color: var(--c); background: color-mix(in srgb, var(--c) 16%, var(--surface)); border: 1px solid color-mix(in srgb, var(--c) 38%, transparent); }
+.emp-name { font-weight: 700; font-size: 15px; }
+.emp-role { font-size: 12px; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.emp-line { font-size: 12.5px; color: var(--ink-soft); }
+.emp-rates { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; }
+.emp-flags { display: flex; gap: 6px; flex-wrap: wrap; }
+.doc-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); align-items: center; }
+.doc-row:last-child { border-bottom: 0; }
+.doc-name { font-weight: 600; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.doc-files { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+.doc-exp { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--ink-soft); }
+.job-panel .doc-exp input { width: auto; }
+.mask { font-family: 'Figtree', sans-serif; letter-spacing: .08em; }
 @media (max-width: 560px) { .job-panel { width: 100vw; } }
 @media (max-width: 900px) { .jobs-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .filter-row th { position: static !important; background: var(--surface); }
@@ -1231,6 +1255,16 @@ function computeReminders(data, now){
       if (h.total > 0 && !payrollStatus(data, wk, p).salaryPaid && !dismissed.has(key)) items.push({ key, readKey:key, type:'commission', weekKey:wk, severity:'warn', date:h.week.end, title:`Pay ${p} for ${range}`, meta:`${fmtMoney(h.total)} (hours + bonuses) · not marked paid in Payroll yet` });
     });
   }
+  // Employee documents (Ofek 10 Oct): a licence, passport, visa, certificate or insurance that expires within 30 days
+  // or has expired. Only owners and managers have employees to check (the table is closed to everyone else).
+  (data.employees||[]).filter(e => !e.status || e.status==='Active').forEach(e => EMP_DOCS.forEach(d => {
+    const doc = (e.documents||{})[d.kind], x = employeeDocExpiry(doc, todayStr(now));
+    if (!x || x.tone==='good') return;
+    const key = `empdoc:${e.id}:${d.kind}:${doc.expiry}`;
+    if (!dismissed.has(key)) items.push({ key, readKey:key, type:'employee-doc', severity: x.days < 0 ? 'bad' : 'warn', date: doc.expiry,
+      title: `${e.name}'s ${d.label.replace(/ \(.*\)$/, '').toLowerCase()} ${x.days < 0 ? 'has expired' : `expires in ${x.days} day${x.days===1 ? '' : 's'}`}`,
+      meta: `${x.days < 0 ? 'Expired' : 'Expires'} ${fmtDateYear(doc.expiry)} · upload the new one on their card (Resources → Employees)` });
+  }));
   data.equipmentSpend.forEach(e => { const key = `equipment:${e.id}`; if (e.reimbursed==='Pending' && !dismissed.has(key)) items.push({ key, readKey:key, type:'equipment', severity:'warn', date:e.date, title:`Equipment reimbursement pending for ${e.technician}`, meta:e.item }); });
   // Manually-created reminders (from the CRM follow-up flow) sit alongside the derived ones, so Ron sees
   // one reminder list rather than two competing ones.
@@ -1416,6 +1450,8 @@ async function loadFromSupabase(){
       legalName:e.legal_name||'', bankName:e.bank_name||'', bankBsb:e.bank_bsb||'', bankAccount:e.bank_account||'',
       department:e.department||'', contractFile:e.contract_file, passportPhotoFile:e.passport_photo_file,
       licensePhotoFile:e.license_photo_file, localLicenseFile:e.local_license_file,
+      documents:(e.documents && typeof e.documents==='object') ? e.documents : {}, visaType:e.visa_type||'',
+      emergencyName:e.emergency_name||'', emergencyPhone:e.emergency_phone||'',
       activityLog: logsFor('employee', e.id),
     })),
     commissionRates: {},
@@ -1523,6 +1559,7 @@ function employeePatchToRow(patch){
     legalName:'legal_name', bankName:'bank_name', bankBsb:'bank_bsb', bankAccount:'bank_account',
     department:'department', contractFile:'contract_file', passportPhotoFile:'passport_photo_file',
     licensePhotoFile:'license_photo_file', localLicenseFile:'local_license_file',
+    documents:'documents', visaType:'visa_type', emergencyName:'emergency_name', emergencyPhone:'emergency_phone',
   };
   const nullIfEmpty = new Set(['start_date','end_date']);
   const row = {};
@@ -2648,6 +2685,14 @@ function fileLinkHtml(ref, label){ return ref ? `<a href="#" class="file-chip" s
 // so "View" turns it into a temporary file first and opens that in a new tab.
 function openEmbeddedFile(u){
   if (!u) return;
+  if (/^doc:/.test(u)) {   // an employee document (private folder, owners and managers only)
+    const w = window.open('', '_blank');
+    sb.storage.from(EMP_DOC_BUCKET).createSignedUrl(u.slice(4), 300).then(({ data, error }) => {
+      if (error || !data) { if (w) w.close(); showToast('Could not open the file'); return; }
+      if (w) w.location.href = data.signedUrl; else window.open(data.signedUrl, '_blank');
+    });
+    return;
+  }
   if (/^sb:/.test(u)) {
     const w = window.open('', '_blank');   // opened right away, so the browser doesn't block it as a popup
     sb.storage.from(FILE_BUCKET).createSignedUrl(u.slice(3), 300).then(({ data, error }) => {
@@ -2999,7 +3044,7 @@ const NAV = [
   { group:'Finance', items:[ {id:'closings', label:'Closings', icon:'🧾'}, {id:'outstanding', label:'Outstanding', icon:'▧'}, {id:'jobs', label:'Jobs & Commissions', icon:'▤'} ] },
   { group:'Management', items:[ {id:'reference', label:'Resources', icon:'▥', go:'goResources()'}, {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
 ];
-function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; if (UI.jobs) UI.jobs.selectedId = null; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
+function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; if (UI.jobs) UI.jobs.selectedId = null; if (UI.reference) UI.reference.empId = null; PANEL_OPEN_FOR = {}; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 function goTasks(board){ UI.tab = 'tasks'; if (board) UI.tasks.board = board; UI.mobileNavOpen = false; render(); }
 function goResources(tab){ UI.tab = 'reference'; if (tab) UI.reference.tab = tab; UI.mobileNavOpen = false; render(); }
 function toggleMobileNav(){ UI.mobileNavOpen = !UI.mobileNavOpen; render(); }
@@ -5523,7 +5568,6 @@ function commitJobCellEdit(jobId, field, rawValue, inputType){
 }
 /* ── Jobs & Commissions (Ofek 10 Oct, option A): eight quiet columns, no menus in the rows; a click on a row opens the
    job in a panel beside the table, where everything is edited (saved on the spot, as before). ── */
-function jobDaysWaiting(j){ return Math.max(0, Math.round((parseLocalDate(todayStr()) - parseLocalDate(j.date)) / 864e5)); }
 function jobReviewState(j){
   if (j.reviewDoNotAsk) return pill('bad', "Don't ask");
   if (j.reviewTaken) return pill('good', 'Review taken');
@@ -5603,14 +5647,18 @@ function renderJobsStats(data, jobs){
         <div class="l">Unpaid</div><div class="v"${unpaid.length ? ' style="color:var(--bad)"' : ''}>${fmtMoney(round2(unpaid.reduce((s, j) => s + j.amount, 0)))}</div>
         <div class="s">${unpaid.length ? `${unpaid.length} job${unpaid.length===1?'':'s'} · oldest ${oldest} days` : 'nothing waiting'}</div></button>`;
 }
+// A side panel (the open job, the employee card) slides in when it opens, not each time the page redraws behind it.
+let PANEL_OPEN_FOR = {};
+function panelAnimClass(key, id){ const was = PANEL_OPEN_FOR[key]; PANEL_OPEN_FOR[key] = id || null; return id && !was ? ' anim' : ''; }
 function selectJob(id){
   UI.jobs.selectedId = id && UI.jobs.selectedId!==id ? id : null;
   refreshJobsTable();
 }
 // Esc closes the open job (unless a window is open on top of it).
 document.addEventListener('keydown', e => {
-  if (e.key!=='Escape' || UI.tab!=='jobs' || !UI.jobs || !UI.jobs.selectedId || document.querySelector('.modal-back, .confirm-back')) return;
-  selectJob(null);
+  if (e.key!=='Escape' || document.querySelector('.modal-back, .confirm-back')) return;
+  if (UI.tab==='jobs' && UI.jobs && UI.jobs.selectedId) selectJob(null);
+  else if (UI.tab==='reference' && UI.reference && UI.reference.empId) selectEmployee(null);
 });
 function showUnpaidJobs(){ Object.assign(UI.jobs, { status:'Unpaid', range:'all', page:1 }); render(); }
 function setJobsSearch(v){ UI.jobs.q = v; UI.jobs.page = 1; refreshJobsTable(); }
@@ -5701,7 +5749,8 @@ function refreshJobsTable(){
   set('jobs-pager', renderPager(page, totalPages, total, pageSize, 'setJobsPage', 'setJobsPageSize'));
   const sel = UI.jobs.selectedId ? data.jobs.find(j => j.id===UI.jobs.selectedId) : null;
   set('jobs-panel', renderJobPanel(sel, canEdit));
-  const panel = document.getElementById('jobs-panel'); if (panel) panel.hidden = !sel;
+  const panel = document.getElementById('jobs-panel');
+  if (panel) { panel.classList.toggle('anim', !!panelAnimClass('job', sel && sel.id)); panel.hidden = !sel; }
 }
 function jobsCountLine(data, jobs){ return jobs.length===data.jobs.length ? `${data.jobs.length} jobs total` : `${jobs.length} of ${data.jobs.length} jobs`; }
 function setJobsPage(page){ UI.jobs.page = Math.max(1, page); refreshJobsTable(); }
@@ -5738,7 +5787,7 @@ function renderJobs(profile, data){
       <div class="table-wrap"><table class="jobs-list"><thead><tr>
         <th>Date</th><th>Customer</th><th>Technician</th><th>Division</th><th class="num">Amount</th><th>Payment</th><th class="num">Commission</th><th>Review</th>
       </tr></thead><tbody id="jobs-tbody">${renderJobRows(pageItems)}</tbody></table><div id="jobs-pager">${renderPager(page, totalPages, total, pageSize, 'setJobsPage', 'setJobsPageSize')}</div></div>
-      <aside class="job-panel" id="jobs-panel"${sel ? '' : ' hidden'}>${renderJobPanel(sel, canEdit)}</aside>
+      <aside class="job-panel${panelAnimClass('job', sel && sel.id)}" id="jobs-panel"${sel ? '' : ' hidden'}>${renderJobPanel(sel, canEdit)}</aside>
     </div>
   `;
 }
@@ -8291,7 +8340,7 @@ function renderOutstanding(profile, data){
 }
 
 /* ── reminders ───────────────────────────────────────────────────────── */
-const REMINDER_ICONS = { unpaid:'💵', commission:'🧾', refund:'♻️', equipment:'🧰', followup:'📞', 'repeat-service':'🔁', 'chase-long':'⏳', 'stale-quote':'📄', 'booked-no-job':'📅' };
+const REMINDER_ICONS = { 'employee-doc':'🪪', unpaid:'💵', commission:'🧾', refund:'♻️', equipment:'🧰', followup:'📞', 'repeat-service':'🔁', 'chase-long':'⏳', 'stale-quote':'📄', 'booked-no-job':'📅' };
 function deleteManualReminder(id, rowEl){
   confirmAction('Delete this reminder?', ()=>{
     animateRowRemove(rowEl, ()=>{
@@ -8365,6 +8414,7 @@ function goToReminderTarget(type, contactId, readKey, weekKey){
   if ((type==='unpaid' || type==='refund') && can('outstanding')) { UI.tab='outstanding'; render(); return; }
   if (type==='repeat-service' && refId && can('jobs')) { goToJobFromSearch(refId); return; }
   if (type==='equipment' && can('payroll')) { UI.tab='payroll'; UI.payroll.viewAs=null; UI.payroll.view='expenses'; render(); return; }
+  if (type==='employee-doc' && can('reference')) { UI.tab='reference'; UI.reference.tab='employees'; UI.reference.empId = refId.split(':')[0]; render(); return; }
   render();   // nowhere this person is allowed to go — it's marked read and stays here
 }
 // A technician's reminders are only about their own jobs and purchases; they can mark them read but not delete them
@@ -9603,17 +9653,223 @@ const EMPLOYEE_STATUSES = ['Active','Inactive'];
 // 'Independent Contractor' = covers own expenses (commission on the full ex-GST amount, e.g. Alessandro);
 // 'Hourly' = paid per reported hour + booking bonus on the Payroll board (e.g. Ron).
 const EMPLOYMENT_TYPES = ['Freelance-commission','Independent Contractor','Hourly','Salaried'];
+/* ── The employee card (Ofek 10 Oct): a card per person on Resources → Employees, and a panel from the right with
+   everything about them: details, emergency contact, pay, ABN and bank, visa, and documents. Owners and managers only
+   (the employees table and the employee-documents folder are closed to everyone else in the database itself). ── */
+const EMP_DOC_BUCKET = 'employee-documents';
+const EMP_DOCS = [
+  { kind:'license', label:'Driver licence', expiry:true, back:true },
+  { kind:'passport', label:'Passport', expiry:true },
+  { kind:'visa', label:'Visa (grant notice or VEVO)', expiry:true },
+  { kind:'contract', label:'Contract', expiry:false },
+  { kind:'heights', label:'Working at heights', expiry:true },
+  { kind:'arc', label:'Refrigerant licence (ARC)', expiry:true },
+  { kind:'insurance', label:'Public liability insurance', expiry:true },
+];
+const EMP_DOC_WARN_DAYS = 30;   // Reminders and the card flag a document this many days before it expires
+const VISA_TYPES = ['Citizen','Permanent resident','Working Holiday (417)','Work and Holiday (462)','Student (500)','Skilled (482)','Bridging','Other'];
+function fmtDateYear(s){ return s ? parseLocalDate(s).toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' }) : '—'; }
+// An ABN is 11 digits with a check: take 1 off the first digit, weight the digits, and the sum divides by 89.
+function abnValid(abn){
+  const d = String(abn||'').replace(/\s/g,'');
+  if (!/^\d{11}$/.test(d)) return false;
+  const w = [10,1,3,5,7,9,11,13,15,17,19], n = d.split('').map(Number); n[0] -= 1;
+  return n.reduce((sum, x, i) => sum + x * w[i], 0) % 89 === 0;
+}
+// A document's expiry against today: null (no date), or how many days are left and how urgent that is.
+function employeeDocExpiry(doc, today){
+  if (!doc || !doc.expiry) return null;
+  const days = Math.round((parseLocalDate(doc.expiry) - parseLocalDate(today)) / 864e5);
+  return { days, tone: days < 0 ? 'bad' : days <= EMP_DOC_WARN_DAYS ? 'warn' : 'good',
+    text: days < 0 ? `expired ${fmtDateYear(doc.expiry)}` : `${days <= EMP_DOC_WARN_DAYS ? 'expires' : 'valid until'} ${fmtDateYear(doc.expiry)}` };
+}
+// What an active person's card is still missing: ABN and bank for anyone paid by invoice, a licence for technicians,
+// and an emergency contact for everyone.
+function employeeMissing(e){
+  if (e.status && e.status!=='Active') return [];
+  const docs = e.documents || {}, out = [];
+  const invoices = e.employmentType==='Freelance-commission' || e.employmentType==='Independent Contractor';
+  if (invoices && !e.abn) out.push('ABN');
+  if (invoices && !(e.bankBsb && e.bankAccount)) out.push('bank');
+  if ((e.roles||[]).includes('Technician') && !(docs.license && docs.license.file)) out.push('licence');
+  if (!e.emergencyName && !e.emergencyPhone) out.push('emergency contact');
+  return out;
+}
+function empAvatar(e, size){ return `<span class="emp-avatar" style="--c:${techColor(e.name)}${size ? `;width:${size}px;height:${size}px` : ''}">${esc((e.name||'?').slice(0,1).toUpperCase())}</span>`; }
+function empRatesHtml(rates){
+  const r = rates || {};
+  const items = ['Aircon','Chimney','Pressure Washing'].filter(d => r[d]!=null).map(d => divName(d, `${d==='Pressure Washing' ? 'Pressure W.' : d} ${r[d]}%`));
+  return items.length ? items.join('') : '';
+}
+function renderEmployeeCards(data, selId){
+  const today = todayStr();
+  const list = [...data.employees].sort((a, b) => (a.status==='Active' ? 0 : 1) - (b.status==='Active' ? 0 : 1) || a.name.localeCompare(b.name));
+  return list.map(e => {
+    const missing = employeeMissing(e);
+    const docFlags = EMP_DOCS.map(d => ({ d, x: employeeDocExpiry((e.documents||{})[d.kind], today) })).filter(o => o.x && o.x.tone!=='good')
+      .map(o => pill(o.x.tone, `${o.d.label.replace(/ \(.*\)$/, '')} ${o.x.days < 0 ? 'expired' : `in ${o.x.days} days`}`)).join('');
+    return `<div class="emp-card${selId===e.id ? ' sel' : ''}${e.status==='Active' ? '' : ' inactive'}" role="button" tabindex="0" onclick="selectEmployee('${e.id}')" onkeydown="if(event.key==='Enter'){event.preventDefault();selectEmployee('${e.id}');}">
+      <div class="emp-card-top">${empAvatar(e)}<div style="min-width:0;flex:1"><div class="emp-name">${esc(e.name)}</div><div class="emp-role">${esc((e.roles||[]).join(', ') || '—')}${e.employmentType ? ' · ' + esc(e.employmentType) : ''}</div></div>${pill(e.status==='Active' ? 'good' : 'neutral', e.status||'Active')}</div>
+      <div class="emp-line mono">${esc(e.phone || 'no phone yet')}</div>
+      ${empRatesHtml(data.commissionRates[e.name]) ? `<div class="emp-rates">${empRatesHtml(data.commissionRates[e.name])}</div>` : ''}
+      ${missing.length || docFlags ? `<div class="emp-flags">${docFlags}${missing.length ? pill('neutral', 'Missing: ' + missing.join(' · ')) : ''}</div>` : ''}
+    </div>`;
+  }).join('');
+}
 function renderEmployeesTab(data, canEdit){
-  const rows = data.employees.length ? data.employees.map(e => { const r = data.commissionRates[e.name]; return `
-    <tr><td>${esc(e.name)}</td><td>${e.roles.join(', ')}</td><td>${statusSelect('empStatus', e.id, e.status||'Active', EMPLOYEE_STATUSES, v=>v==='Active'?'good':'neutral', v=>v, !canEdit)}</td>
-    <td>${esc(e.employmentType||'—')}</td><td>${esc(e.phone||'—')}</td>
-    <td>${r?.Aircon!=null?r.Aircon+'%':'—'}</td><td>${r?.Chimney!=null?r.Chimney+'%':'—'}</td><td>${r?.['Pressure Washing']!=null?r['Pressure Washing']+'%':'—'}</td>
-    <td><button class="btn ghost small" onclick="openEmployeeActivityModal('${e.id}')">💬 ${recordActivityCount(e)}</button></td>
-    ${canEdit?`<td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openEmployeeModal('${e.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteEmployee('${e.id}');render()">Delete</button></td>`:''}</tr>`; }).join('') : `<tr><td colspan="${canEdit?9:8}">${emptyState('No employees yet')}</td></tr>`;
+  const sel = UI.reference.empId ? data.employees.find(e => e.id===UI.reference.empId) : null;
+  const cards = renderEmployeeCards(data, sel && sel.id);
   return `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">${canEdit?`<button class="btn primary" onclick="openEmployeeModal(null)">+ Employee</button>`:''}</div>
-    <div class="table-wrap"><table><thead><tr><th>Name</th><th>Role(s)</th><th>Status</th><th>Employment Type</th><th>Phone</th><th>${divName('Aircon', 'Aircon %')}</th><th>${divName('Chimney', 'Chimney %')}</th><th>${divName('Pressure Washing', 'Pressure Washing %')}</th><th>Rate History</th>${canEdit?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table></div>
-  `;
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">${canEdit ? `<button class="btn primary" onclick="openEmployeeModal(null)">+ Employee</button>` : ''}</div>
+    <div class="emp-grid">${cards || emptyState('No employees yet', 'Add the first one.')}</div>
+    <aside class="job-panel emp-panel${panelAnimClass('emp', sel && sel.id)}" id="emp-panel"${sel ? '' : ' hidden'}>${renderEmployeePanel(sel, data, canEdit)}</aside>`;
+}
+function selectEmployee(id){
+  UI.reference.empId = id && UI.reference.empId!==id ? id : null;
+  UI.reference.showBank = null;
+  render();
+}
+// The panel: everything about one person. Plain fields save as soon as they're changed (without redrawing, so moving
+// on with Tab keeps its place); the name, roles and commission rates go through the edit window, which handles a rename.
+function renderEmployeePanel(e, data, canEdit){
+  if (!e) return '';
+  const today = todayStr();
+  const ro = !canEdit;
+  const input = (field, value, attrs) => ro ? `<div class="job-ro">${esc(value || '—')}</div>` : `<input value="${esc(value||'')}" ${attrs||''} onchange="setEmployeeField('${e.id}','${field}',this.value)">`;
+  const field = (label, html, full) => `<div class="field${full ? ' full' : ''}"><label>${label}</label>${html}</div>`;
+  const sel = (fieldName, value, options, blank) => ro ? `<div class="job-ro">${esc(value || '—')}</div>` : `<select onchange="setEmployeeField('${e.id}','${fieldName}',this.value)">${blank ? `<option value="">${blank}</option>` : ''}${(options.includes(value) || !value ? options : [value, ...options]).map(o => `<option value="${esc(o)}" ${o===value ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  const months = e.startDate ? Math.max(0, Math.round((parseLocalDate(e.endDate || today) - parseLocalDate(e.startDate)) / (864e5 * 30.44))) : null;
+  const tenure = months===null ? '' : months < 1 ? 'less than a month' : months < 24 ? `${months} month${months===1 ? '' : 's'}` : `${Math.floor(months / 12)} years`;
+  const acct = String(e.bankAccount||''), showBank = UI.reference.showBank===e.id;
+  const bankAcct = showBank || !acct ? input('bankAccount', acct, 'inputmode="numeric" autocomplete="off"')
+    : `<div class="job-ro" style="display:flex;align-items:center;gap:8px"><span class="mask">•••• ${esc(acct.slice(-4))}</span><button type="button" class="btn ghost small" onclick="UI.reference.showBank='${e.id}';render()">Show</button></div>`;
+  const abnHint = !e.abn ? '' : abnValid(e.abn) ? '<span class="job-sub" style="color:var(--good)">✓ A valid ABN</span>' : '<span class="job-sub" style="color:var(--bad)">This ABN fails the check: look for a typo</span>';
+  const docRow = d => {
+    const doc = (e.documents||{})[d.kind] || {}, x = employeeDocExpiry(doc, today);
+    const slot = (side, ref) => ref
+      ? `<a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(ref)}')">📄 ${side==='back' ? 'Back' : d.back ? 'Front' : 'View'}</a>${ro ? '' : `<button type="button" class="btn ghost small" onclick="pickEmployeeDoc('${e.id}','${d.kind}','${side}')">Replace</button><button type="button" class="lead-note-del" onclick="removeEmployeeDoc('${e.id}','${d.kind}','${side}')">Remove</button>`}`
+      : (ro ? '<span class="hint">—</span>' : `<button type="button" class="btn ghost small" onclick="pickEmployeeDoc('${e.id}','${d.kind}','${side}')">Upload${d.back ? (side==='back' ? ' back' : ' front') : ''}</button>`);
+    return `<div class="doc-row">
+      <div class="doc-name">${esc(d.label)}${x ? ' ' + pill(x.tone, x.text) : ''}</div>
+      <div class="doc-files">${slot('file', doc.file)}${d.back ? slot('back', doc.back) : ''}</div>
+      ${d.expiry ? `<div class="doc-exp"><span>Expiry</span>${ro ? `<span>${fmtDateYear(doc.expiry)}</span>` : `<input type="date" value="${esc(doc.expiry||'')}" onchange="setEmployeeDocExpiry('${e.id}','${d.kind}',this.value)">`}${doc.at ? `<span class="hint">uploaded ${fmtDateShort(localDay(doc.at))}${doc.by ? ' by ' + esc(doc.by) : ''}</span>` : ''}</div>` : ''}
+    </div>`;
+  };
+  const rates = data.commissionRates[e.name];
+  return `<div class="job-panel-head">
+      <div style="display:flex;gap:12px;align-items:center;min-width:0">${empAvatar(e, 46)}<div style="min-width:0"><h3>${esc(e.name)}</h3><div class="meta" style="margin:0">${esc((e.roles||[]).join(', ') || '—')}${tenure ? ` · with us ${tenure}` : ''}</div></div></div>
+      <button type="button" class="btn ghost small" onclick="selectEmployee(null)" aria-label="Close" title="Close">✕</button>
+    </div>
+    <div class="job-panel-acts" style="margin:12px 0 2px">
+      ${canEdit ? `<button type="button" class="btn ghost small" onclick="openEmployeeModal('${e.id}')">Edit name, roles and rates</button>` : ''}
+      <button type="button" class="btn ghost small" onclick="openEmployeeActivityModal('${e.id}')">💬 History (${recordActivityCount(e)})</button>
+    </div>
+    <div class="grp">Details</div>
+    <div class="f">
+      ${field('Status', statusSelect('empStatus', e.id, e.status||'Active', EMPLOYEE_STATUSES, v => v==='Active' ? 'good' : 'neutral', v => v, ro))}
+      ${field('Employment type', sel('employmentType', e.employmentType, EMPLOYMENT_TYPES))}
+      ${field('Phone', input('phone', e.phone, 'type="tel"') + (e.phone ? `<a class="job-sub xlink" href="tel:${esc(String(e.phone).replace(/[^\d+]/g, ''))}">Call</a>` : ''))}
+      ${field('Email', input('email', e.email, 'type="email"'))}
+      ${field('Address', input('address', e.address), true)}
+      ${field('Start date', ro ? `<div class="job-ro">${fmtDateYear(e.startDate)}</div>` : `<input type="date" value="${esc(e.startDate||'')}" onchange="setEmployeeField('${e.id}','startDate',this.value)">`)}
+      ${field('End date', ro ? `<div class="job-ro">${fmtDateYear(e.endDate)}</div>` : `<input type="date" value="${esc(e.endDate||'')}" onchange="setEmployeeField('${e.id}','endDate',this.value)">`)}
+    </div>
+    <div class="grp">Emergency contact</div>
+    <div class="f">
+      ${field('Name', input('emergencyName', e.emergencyName, 'placeholder="Who to call"'))}
+      ${field('Phone', input('emergencyPhone', e.emergencyPhone, 'type="tel"'))}
+    </div>
+    <div class="grp">Pay</div>
+    <div class="f">
+      ${field('Commission per division', `<div class="emp-rates" style="padding-top:4px">${empRatesHtml(rates) || '<span class="hint">None set</span>'}</div>`, true)}
+      ${e.commissionNotes ? field('Commission notes', `<div class="job-ro">${esc(e.commissionNotes)}</div>`, true) : ''}
+    </div>
+    <div class="grp">ABN and bank</div>
+    <div class="f">
+      ${field('Legal name (as on the ABN)', input('legalName', e.legalName), true)}
+      ${field('ABN', input('abn', e.abn, 'inputmode="numeric" placeholder="11 digits"') + `<span id="emp-abn-hint">${abnHint}</span>`, true)}
+      ${field('Account name', input('bankName', e.bankName, 'autocomplete="off"'), true)}
+      ${field('BSB', input('bankBsb', e.bankBsb, 'inputmode="numeric" autocomplete="off" placeholder="000-000"'))}
+      ${field('Account number', bankAcct)}
+    </div>
+    <div class="grp">Visa</div>
+    <div class="f">
+      ${field('Visa type', sel('visaType', e.visaType, VISA_TYPES, '—'), true)}
+    </div>
+    <div class="grp">Documents <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">· only owners and managers can open these</span></div>
+    <div>${EMP_DOCS.map(docRow).join('')}</div>`;
+}
+const EMP_FIELD_LABEL = { employmentType:'Employment type', phone:'Phone', email:'Email', address:'Address', startDate:'Start date', endDate:'End date',
+  emergencyName:'Emergency contact', emergencyPhone:'Emergency contact phone', legalName:'Legal name', abn:'ABN', bankName:'Bank account name',
+  bankBsb:'BSB', bankAccount:'Bank account number', visaType:'Visa type' };
+function setEmployeeField(empId, field, raw){
+  const e = STATE.data.employees.find(x => x.id===empId); if (!e || !EMP_FIELD_LABEL[field]) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const v = String(raw ?? '').trim();
+  if ((e[field] || '') === v) return;
+  db.employees.update(e.id, { [field]: v });
+  // Bank details and the ABN are logged without their values, so the history never shows them.
+  const secret = field==='bankAccount' || field==='bankBsb' || field==='abn';
+  logEmployeeActivity(e, getCurrentProfile()?.fullName || 'Unknown', secret ? `${EMP_FIELD_LABEL[field]} updated` : `${EMP_FIELD_LABEL[field]}: ${v || 'cleared'}`);
+  showToast('Saved');
+  if (field==='abn') { const h = document.getElementById('emp-abn-hint'); if (h) h.innerHTML = !v ? '' : abnValid(v) ? '<span class="job-sub" style="color:var(--good)">✓ A valid ABN</span>' : '<span class="job-sub" style="color:var(--bad)">This ABN fails the check: look for a typo</span>'; }
+  // The cards behind the panel (missing details, type) are redrawn; the panel itself keeps its place.
+  const grid = document.querySelector('.emp-grid'); if (grid) grid.innerHTML = renderEmployeeCards(STATE.data, UI.reference.empId);
+}
+function empDocLabel(kind, side){ const d = EMP_DOCS.find(x => x.kind===kind); return (d ? d.label : kind) + (side==='back' ? ' (back)' : ''); }
+function pickEmployeeDoc(empId, kind, side){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*,application/pdf';
+  inp.onchange = () => uploadEmployeeDoc(empId, kind, side, inp.files && inp.files[0]);
+  inp.click();
+}
+async function uploadEmployeeDoc(empId, kind, side, file){
+  const e = STATE.data.employees.find(x => x.id===empId); if (!e || !file) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (file.size > MAX_FILE_MB * 1024 * 1024) { showToast(`That file is over ${MAX_FILE_MB} MB`); return; }
+  const ext = (String(file.name).split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+  const path = `${e.id}/${kind}${side==='back' ? '-back' : ''}-${Date.now()}.${ext}`;
+  showToast('Uploading…');
+  const { error } = await sb.storage.from(EMP_DOC_BUCKET).upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+  if (error) { showToast('Could not upload the file: ' + error.message); return; }
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  const docs = { ...(e.documents || {}) }, cur = { ...(docs[kind] || {}) };
+  const old = side==='back' ? cur.back : cur.file;
+  cur[side==='back' ? 'back' : 'file'] = 'doc:' + path; cur.at = new Date().toISOString(); cur.by = actor;
+  docs[kind] = cur;
+  await db.employees.update(e.id, { documents: docs });
+  // The copy it replaces is deleted, so no old passport or licence is left lying in storage.
+  if (old && /^doc:/.test(old)) sb.storage.from(EMP_DOC_BUCKET).remove([old.slice(4)]);
+  logEmployeeActivity(e, actor, `${empDocLabel(kind, side)} ${old ? 'replaced' : 'uploaded'}`);
+  showToast(`${empDocLabel(kind, side)} saved`);
+  render();
+}
+function setEmployeeDocExpiry(empId, kind, value){
+  const e = STATE.data.employees.find(x => x.id===empId); if (!e) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const docs = { ...(e.documents || {}) }, cur = { ...(docs[kind] || {}) };
+  if ((cur.expiry || '') === (value || '')) return;
+  cur.expiry = value || ''; docs[kind] = cur;
+  db.employees.update(e.id, { documents: docs });
+  logEmployeeActivity(e, getCurrentProfile()?.fullName || 'Unknown', `${empDocLabel(kind)} expiry: ${value ? fmtDateYear(value) : 'cleared'}`);
+  showToast('Saved');
+  render();
+}
+function removeEmployeeDoc(empId, kind, side){
+  const e = STATE.data.employees.find(x => x.id===empId); if (!e) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  confirmAction(`Remove ${e.name}'s ${empDocLabel(kind, side).toLowerCase()}? The file is deleted.`, async () => {
+    const docs = { ...(e.documents || {}) }, cur = { ...(docs[kind] || {}) };
+    const ref = side==='back' ? cur.back : cur.file;
+    delete cur[side==='back' ? 'back' : 'file'];
+    if (!cur.file && !cur.back && !cur.expiry) delete docs[kind]; else docs[kind] = cur;
+    await db.employees.update(e.id, { documents: docs });
+    if (ref && /^doc:/.test(ref)) sb.storage.from(EMP_DOC_BUCKET).remove([ref.slice(4)]);
+    logEmployeeActivity(e, getCurrentProfile()?.fullName || 'Unknown', `${empDocLabel(kind, side)} removed`);
+    showToast('Removed');
+    render();
+  });
 }
 function openEmployeeModal(empId){
   const emp = empId ? STATE.data.employees.find(e=>e.id===empId) : null;
@@ -9658,13 +9914,6 @@ function openEmployeeModal(empId){
           <div class="field"><label>Pressure Washing %</label><input type="number" id="em-pw" value="${rates?.['Pressure Washing'] ?? ''}"></div>
           <div class="field"><label>Other % (blank = manual)</label><input type="number" id="em-other" value="${rates?.Other ?? ''}"></div>
         </div>
-        <div class="modal-section">Documents (preview only)</div>
-        <div class="grid-2">
-          ${fileField('Contract', 'em-contractFile', emp?.contractFile)}
-          ${fileField('Passport Photo', 'em-passportPhotoFile', emp?.passportPhotoFile)}
-          ${fileField('License Photo', 'em-licensePhotoFile', emp?.licensePhotoFile)}
-          ${fileField('Local License', 'em-localLicenseFile', emp?.localLicenseFile)}
-        </div>
         <div id="modal-error"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
           <button class="btn" onclick="closeModal()">Cancel</button>
@@ -9701,10 +9950,6 @@ async function saveEmployeeModal(empId){
     legalName: document.getElementById('em-legalname').value.trim(), bankName: document.getElementById('em-bankname').value.trim(),
     bankBsb: document.getElementById('em-bankbsb').value.trim(), bankAccount: document.getElementById('em-bankaccount').value.trim(),
     commissionNotes: document.getElementById('em-commissionnotes').value,
-    contractFile: MODAL_FILES['em-contractFile'] ?? job_or_null(prev,'contractFile'),
-    passportPhotoFile: MODAL_FILES['em-passportPhotoFile'] ?? job_or_null(prev,'passportPhotoFile'),
-    licensePhotoFile: MODAL_FILES['em-licensePhotoFile'] ?? job_or_null(prev,'licensePhotoFile'),
-    localLicenseFile: MODAL_FILES['em-localLicenseFile'] ?? job_or_null(prev,'localLicenseFile'),
   };
   let emp;
   if (prev && oldName && oldName!==name) {
@@ -9729,7 +9974,7 @@ async function saveEmployeeModal(empId){
       });
     }
   }
-  if (!prev) logEmployeeActivity(emp, actor, 'Employee added');
+  if (!prev) { logEmployeeActivity(emp, actor, 'Employee added'); if (UI.tab==='reference') UI.reference.empId = emp.id; }   // a new person opens on their card
   closeModal(); showToast(empId?'Employee updated':'Employee added');
   if (prev && oldName && oldName!==name) { await loadFromSupabase(); }   // every screen now shows the new name
   render();

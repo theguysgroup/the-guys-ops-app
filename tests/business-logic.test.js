@@ -38,7 +38,7 @@ const DECLS = [
   'blankPerfBucket', 'addToPerfBucket', 'finalizePerfBucket', 'computeProfitByWeekInRange', 'computeBusinessPerformance',
   'contactHasJob',
   // reminders
-  'fmtDateShort', 'computeReminders',
+  'fmtDateShort', 'computeReminders', 'EMP_DOCS', 'EMP_DOC_WARN_DAYS', 'fmtDateYear', 'employeeDocExpiry', 'abnValid', 'employeeMissing',
   // payroll + net profit
   'PAYROLL_HOURLY_RATE', 'PAYROLL_BOOKING_BONUS', 'PAYROLL_HEBREW_NAMES', 'bookingBonus', 'nextBookingTier',
   'salesLogBookings', 'salesLogPay', 'payrollWeekOf', 'shiftPayrollWeek', 'payrollRangeText', 'payMoney', 'jobPaidDate',
@@ -962,6 +962,28 @@ function testAdsTracking(sb){
   assertEqual(sb.adsTracking({}, [], '30d').noData, true, 'adsTracking: nothing loaded yet = no problems claimed');
 }
 
+function testEmployeeCard(sb){
+  console.log('\nThe employee card: ABN check, document expiry, missing details, reminders');
+  assertEqual(['51 824 753 556', '51824753556', '51824753557', '1234', ''].map(sb.abnValid), [true, true, false, false, false], 'abnValid: the ATO check (a one-digit typo fails)');
+  const today = '2026-10-10';
+  const x = d => { const r = sb.employeeDocExpiry(d, today); return r && [r.tone, r.days]; };
+  assertEqual([x({ expiry:'2026-10-01' }), x({ expiry:'2026-10-10' }), x({ expiry:'2026-11-09' }), x({ expiry:'2026-11-10' }), x({ file:'doc:a' }), x(null)],
+    [['bad', -9], ['warn', 0], ['warn', 30], ['good', 31], null, null], 'employeeDocExpiry: expired, due within 30 days, fine after that, nothing without a date');
+  const guy = { name:'Guy', status:'Active', roles:['Technician'], employmentType:'Freelance-commission', abn:'', bankBsb:'062-000', bankAccount:'', documents:{}, emergencyName:'', emergencyPhone:'' };
+  assertEqual(sb.employeeMissing(guy), ['ABN', 'bank', 'licence', 'emergency contact'], 'employeeMissing: a commission technician needs an ABN, bank, licence and emergency contact');
+  assertEqual(sb.employeeMissing({ ...guy, abn:'51824753556', bankAccount:'12345678', documents:{ license:{ file:'doc:x' } }, emergencyPhone:'0400' }), [], 'employeeMissing: nothing once they are in');
+  assertEqual(sb.employeeMissing({ name:'Ron', status:'Active', roles:['VA'], employmentType:'Hourly', documents:{}, emergencyName:'Mum' }), [], 'employeeMissing: an hourly VA needs no ABN, bank or licence');
+  assertEqual(sb.employeeMissing({ ...guy, status:'Inactive' }), [], 'employeeMissing: nothing is asked of someone inactive');
+  Object.assign(sb.STATE.data, { jobs:[], contacts:[], equipmentSpend:[], quotes:[], manualReminders:[], dismissedReminders:['empdoc:e2:passport:2026-10-20'], readReminders:[],
+    employees:[
+      { id:'e1', name:'Guy', status:'Active', roles:['Technician'], documents:{ license:{ file:'doc:l', expiry:'2026-10-05' }, visa:{ expiry:'2026-11-01' }, passport:{ expiry:'2030-01-01' } } },
+      { id:'e2', name:'Omri', status:'Active', roles:['Technician'], documents:{ passport:{ expiry:'2026-10-20' } } },
+      { id:'e3', name:'Old', status:'Inactive', roles:[], documents:{ visa:{ expiry:'2026-10-01' } } } ] });
+  sb.JOB_CACHE.index = null;
+  const items = sb.computeReminders(sb.STATE.data, sb.parseLocalDate(today)).filter(it => it.type==='employee-doc');
+  assertEqual(items.map(it => [it.title, it.severity]), [["Guy's driver licence has expired", 'bad'], ["Guy's visa expires in 22 days", 'warn']], 'computeReminders: expired and soon-to-expire documents of active people, not one that was dismissed, not an inactive person');
+}
+
 testJobAttributionTags(loadSandbox());
 testSubDivisionAndSource(loadSandbox());
 testSplitLeadRequestEvent(loadSandbox());
@@ -984,6 +1006,7 @@ testTasksAndExpenses(loadSandbox());
 testPayrollInvoices(loadSandbox());
 testAdsTracking(loadSandbox());
 testLeadEmailCheck(loadSandbox());
+testEmployeeCard(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
