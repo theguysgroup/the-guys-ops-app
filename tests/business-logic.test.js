@@ -29,7 +29,7 @@ const DECLS = [
   'weekOf', 'monthOf', 'currentWeekKey',
   'jobGst', 'jobTotalCollected', 'amountExGst', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
-  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'SUB_DIVISIONS', 'SUB_SOURCES', 'SYSTEM_TAGS', 'leadSubDivisions', 'leadSubSource', 'visibleTags', 'subSourceOptions', 'LEAD_SOURCE_LABEL', 'sourceLabel', 'splitLeadRequestEvent', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
+  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'SUB_DIVISIONS', 'SUB_SOURCES', 'LEAD_TAGS', 'leadTagOn', 'leadSubDivisions', 'leadSubSource', 'visibleTags', 'subSourceOptions', 'LEAD_SOURCE_LABEL', 'sourceLabel', 'splitLeadRequestEvent', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
   // CRM / attribution
   'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
@@ -146,7 +146,9 @@ function testSubDivisionAndSource(sb){
   console.log('\nSub-division and sub-source (their own fields since 10 Oct)');
   const oldLead = { division:'Aircon', source:'Meta Ads', tags:['Split System','Duct System','Instagram','Too expensive','returning customer'] };
   assertEqual([sb.leadSubDivisions(oldLead), sb.leadSubSource(oldLead)], [['Split System','Duct System'], 'Instagram'], 'a lead saved before the change still reads its old tags');
-  assertEqual(sb.visibleTags(oldLead), ['returning customer'], 'Tags shows only the free tags (not the sub-division, sub-source or lost reason)');
+  assertEqual(sb.visibleTags(oldLead), ['Returning customer'], 'Tags shows only the four tags (not the sub-division, sub-source or lost reason), whatever the spelling');
+  assertEqual(sb.visibleTags({ tags:['Refunded','facebook','Callback','duct system','Complaint','Returning customer'] }), ['Returning customer','Callback','Complaint','Refunded'], 'the four tags, in their fixed order; nothing else');
+  assertEqual(sb.visibleTags({}), [], 'no tags');
   const newLead = { division:'Aircon', source:'Meta Ads', subDivisions:['Duct System'], subSource:'Facebook', tags:['Split System','Instagram'] };
   assertEqual([sb.leadSubDivisions(newLead), sb.leadSubSource(newLead)], [['Duct System'], 'Facebook'], 'the fields win over any leftover tag');
   assertEqual(sb.leadSubSource({ source:'Google Ads', tags:['Instagram'] }), '', 'a platform tag on a non-Meta lead is not its sub-source');
@@ -159,13 +161,18 @@ function testSubDivisionAndSource(sb){
 function testSplitLeadRequestEvent(sb){
   console.log('\nThe website opening line, split into arrival + request');
   assertEqual(sb.splitLeadRequestEvent('Lead created automatically from the website form (Meta Ads) — 2 units a small apt quotation please'),
-    { label:'New lead from the website form · Meta Ads', request:'2 units a small apt quotation please' }, 'a form lead: the arrival line and only what they asked for');
+    { label:'New lead from the website form · Meta Ads', request:'2 units a small apt quotation please', note:'' }, 'a form lead: the arrival line and only what they asked for');
   assertEqual(sb.splitLeadRequestEvent('Lead created automatically from the website chat (Organic) — Hi — I need a quote. Thanks'),
-    { label:'New lead from the website chat · Organic web', request:'Hi — I need a quote. Thanks' }, 'a chat lead; a dash inside the message stays in the message');
-  assertEqual(sb.splitLeadRequestEvent('Lead created automatically from the website form (Google Ads)'), { label:'New lead from the website form · Google Ads', request:'' }, 'no message: only the arrival line');
+    { label:'New lead from the website chat · Organic web', request:'Hi — I need a quote. Thanks', note:'' }, 'a chat lead; a dash inside the message stays in the message');
+  assertEqual(sb.splitLeadRequestEvent('Lead created automatically from the website form (Google Ads)'), { label:'New lead from the website form · Google Ads', request:'', note:'' }, 'no message: only the arrival line');
   assertEqual(sb.splitLeadRequestEvent('Sent the website form again (Meta Ads) — Cassette type aircon. Name on the form: Chris.'),
-    { label:'Sent the website form again · Meta Ads · Name on the form: Chris', request:'Cassette type aircon' }, 'a repeat send keeps the name note on the arrival line');
-  assertEqual(sb.splitLeadRequestEvent('Sent the website form again (Organic) — Hi. Need two units.'), { label:'Sent the website form again · Organic web', request:'Hi. Need two units' }, 'a full stop inside the message stays');
+    { label:'Sent the website form again · Meta Ads', request:'Cassette type aircon', note:'Name on the form: Chris.' }, 'a repeat send: the name on the form goes under the request');
+  assertEqual(sb.splitLeadRequestEvent('Sent the website form again (Organic) — Hi. Need two units.'), { label:'Sent the website form again · Organic web', request:'Hi. Need two units', note:'' }, 'a full stop inside the message stays');
+  const ret = t => sb.splitLeadRequestEvent('🔁 Returning customer — new enquiry from the website ' + t);
+  assertEqual(ret('form (Meta Ads) — Cassette type aircon.'), { label:'🔁 Returning customer · new enquiry from the website form · Meta Ads', request:'Cassette type aircon', note:'' }, 'a returning customer: one card, the request highlighted');
+  assertEqual(ret('form (Meta Ads). Name on the form: Praneel prasad.'), { label:'🔁 Returning customer · new enquiry from the website form · Meta Ads', request:'', note:'Name on the form: Praneel prasad.' }, 'a returning customer with no message');
+  assertEqual(ret('chat (Google Ads) — Hi,\n\nThe unit is dripping. Please call.\n0400 000 000. Name on the form: Jo Smith. Before: Chimney.'),
+    { label:'🔁 Returning customer · new enquiry from the website chat · Google Ads', request:'Hi,\n\nThe unit is dripping. Please call.\n0400 000 000', note:'Name on the form: Jo Smith. · Before: Chimney.' }, 'a long returning message: lines kept, the name and the earlier division under it');
   assertEqual(sb.splitLeadRequestEvent('Stage changed from "New lead" to "Chasing"'), null, 'other events are left alone');
   assertEqual(sb.splitLeadRequestEvent('Lead created automatically from job #2437 — Aircon, $369.00'), null, 'a lead made from a job is not a customer request');
 }

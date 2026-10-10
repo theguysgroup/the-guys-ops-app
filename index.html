@@ -380,6 +380,8 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .sub-chip.on { border-color: var(--primary); background: var(--primary-soft); color: var(--ink); }
 .sub-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .lead-sub-tags { margin-top: 4px; }
+.lead-chip-edit { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+.lead-chip-edit-title { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px; }
 .lead-sub-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 99px; white-space: nowrap; color: var(--ink-soft); border: 1px solid var(--line); }
 .stage-select { border-color: color-mix(in srgb, var(--stage) 70%, var(--line)) !important; box-shadow: inset 4px 0 0 var(--stage); }
 .myday-row select { width: auto; }
@@ -393,8 +395,14 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .chat-event { align-self: center; font-size: 10.5px; color: var(--ink-faint); background: var(--surface); border-radius: 99px; padding: 3px 10px; margin: 4px 0; text-align: center; }
 .chat-event-time { color: var(--ink-faint); }
 .chat-row { display: flex; }
-.chat-bubble.chat-request { border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--line)); background: color-mix(in srgb, var(--primary) 9%, var(--surface)); }
-.chat-request .chat-bubble-text { font-size: 15px; font-weight: 600; line-height: 1.4; color: var(--ink); }
+.lead-request { margin: 4px 0; padding: 9px 13px 11px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: var(--radius-lg); }
+.lead-request-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 11px; line-height: 1.35; }
+.lead-request-head b { font-weight: 700; color: var(--accent); }
+.lead-request-head span { flex: none; font-size: 10px; color: var(--ink-faint); }
+.lead-request-text { margin-top: 5px; font-size: 15px; font-weight: 600; line-height: 1.45; color: var(--ink); white-space: pre-line; overflow-wrap: anywhere; }
+.lead-request-text.long { font-size: 13.5px; font-weight: 500; }
+.lead-request-text.none { font-size: 12px; font-weight: 500; color: var(--ink-faint); }
+.lead-request-note { margin-top: 5px; font-size: 11px; color: var(--ink-soft); }
 .chat-row.in { justify-content: flex-start; }
 .chat-row.out { justify-content: flex-end; }
 .chat-bubble { max-width: 78%; border-radius: 12px; padding: 7px 11px; font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; box-shadow: var(--shadow-sm); }
@@ -471,17 +479,12 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .date-picker-day.today { box-shadow: inset 0 0 0 1px var(--primary); }
 .date-picker-foot { margin-top: 6px; text-align: end; }
 
-/* Free-form contact tags */
+/* Contact tags: a fixed list of four (Ofek 10 Oct) */
 .lead-tags-block { display: flex; flex-direction: column; gap: 7px; }
 .lead-tags-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .lead-tag-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 6px 3px 9px; border-radius: 99px; background: var(--primary-soft); color: var(--primary-strong); }
 .lead-tag-x { cursor: pointer; font-size: 12px; line-height: 1; opacity: .7; }
 .lead-tag-x:hover { opacity: 1; }
-.lead-tags-add { display: flex; gap: 6px; }
-.lead-tags-add input { flex: 1; min-width: 0; }
-.tag-suggest-popup { position: absolute; z-index: 200; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); max-height: 180px; overflow-y: auto; }
-.tag-suggest-item { padding: 6px 10px; font-size: 12px; cursor: pointer; }
-.tag-suggest-item:hover { background: var(--surface-2); }
 
 .editable-cell { cursor: text; border-radius: 4px; padding: 2px 4px; margin: -2px -4px; display: inline-block; }
 .editable-cell:hover { background: var(--surface-2); box-shadow: 0 0 0 1px var(--line); }
@@ -3183,14 +3186,15 @@ const SUB_SOURCES = {
   'Google Ads': ['General Air Con Cleaning','PMax Air Con','Ducted & Split System','Air Con Service'],
   'Google Maps': ['Aircon profile','Chimney profile','Pressure Washing profile'],
 };
-// What used to be written as tags and now has its own field (sub-division, sub-source, the lost reason): never a tag again.
-const SYSTEM_TAGS = new Set([...AIRCON_TYPE_TAGS, ...META_PLATFORM_TAGS, ...LOST_REASONS.map(r => r.label)]);
 function leadSubDivisions(c){
   const own = Array.isArray(c.subDivisions) ? c.subDivisions : [];
   return own.length ? own : (c.tags||[]).filter(t => AIRCON_TYPE_TAGS.includes(t));   // leads saved before 10 Oct kept them as tags
 }
 function leadSubSource(c){ return c.subSource || (c.source==='Meta Ads' ? (META_PLATFORM_TAGS.find(t => (c.tags||[]).includes(t)) || '') : ''); }
-function visibleTags(c){ return (c.tags||[]).filter(t => !SYSTEM_TAGS.has(t)); }
+// The lead's tags out of the fixed four (LEAD_TAGS), in that order. Older leads may still carry other tags (a sub-division,
+// a platform, a lost reason, or a lowercase spelling); those aren't shown as tags.
+function leadTagOn(c, tag){ const k = String(tag).toLowerCase(); return (c.tags||[]).some(t => String(t).toLowerCase()===k); }
+function visibleTags(c){ return LEAD_TAGS.map(x => x.tag).filter(t => leadTagOn(c, t)); }
 // The choices for a source: the fixed ones plus any value already on a lead (e.g. a new Google Ads campaign).
 function subSourceOptions(source, contacts){
   const set = new Set(SUB_SOURCES[source] || []);
@@ -3270,28 +3274,37 @@ function logLeadEvent(contact, text){
   contact.messages.push({ id:uid(), kind:'event', text, at:new Date().toISOString() });
   if (contact.id) db.contacts.update(contact.id, { messages: contact.messages });
 }
-// The website's opening line, "Lead created automatically from the website form (Meta Ads) — 2 units a small apt…", split in
-// two (Ofek 10 Oct): the arrival line (when, how, from where) and the customer's own words, which the thread shows big.
-// The same for "Sent the website form again (…) — …". Anything else returns null and shows as it always did.
+// What the website writes when an enquiry comes in: "Lead created automatically from the website form (Meta Ads) — 2 units a
+// small apt…", "Sent the website form again (…) — …" and a returning customer's "🔁 Returning customer — new enquiry from the
+// website form (…) — …". The thread shows each as one request card (Ofek 10 Oct): a small line saying how, from where and
+// when, then the customer's own words big. A card across the thread, not a bubble, so it doesn't read as a message the
+// customer typed. Anything else returns null and shows as it always did.
 function splitLeadRequestEvent(text){
   const t = String(text || '');
   let m = t.match(/^Lead created automatically from the website (form|chat) \(([^)]*)\)(?: — ([\s\S]*))?$/);
-  if (m) return { label: `New lead from the website ${m[1]} · ${sourceLabel(m[2])}`, request: (m[3] || '').trim() };
+  if (m) return { label: `New lead from the website ${m[1]} · ${sourceLabel(m[2])}`, request: (m[3] || '').trim(), note: '' };
   m = t.match(/^Sent the website (form|chat) again \(([^)]*)\)(?: — ([\s\S]*?))?\.( Name on the form: [\s\S]*\.)?$/);
-  if (m) return { label: `Sent the website ${m[1]} again · ${sourceLabel(m[2])}${m[4] ? ' ·' + m[4].replace(/\.$/, '') : ''}`, request: (m[3] || '').trim() };
+  if (m) return { label: `Sent the website ${m[1]} again · ${sourceLabel(m[2])}`, request: (m[3] || '').trim(), note: (m[4] || '').trim() };
+  m = t.match(/^🔁 Returning customer — new enquiry from the website (form|chat) \(([^)]*)\)(?: — ([\s\S]*?))?\.?( Name on the form: [\s\S]*?\.)?( Before: [^.]*\.)?$/u);
+  if (m) return { label: `🔁 Returning customer · new enquiry from the website ${m[1]} · ${sourceLabel(m[2])}`, request: (m[3] || '').trim(), note: [m[4], m[5]].filter(Boolean).map(x => x.trim()).join(' · ') };
   return null;
+}
+function leadRequestCard(sp, at){
+  const req = presentText(sp.request);
+  return `<div class="lead-request">
+    <div class="lead-request-head"><b>${esc(presentText(sp.label))}</b><span>${new Date(at).toLocaleString('en-AU')}</span></div>
+    <div class="lead-request-text${!req ? ' none' : req.length > 220 ? ' long' : ''}">${req ? esc(req) : 'No message written'}</div>
+    ${sp.note ? `<div class="lead-request-note">${esc(sp.note)}</div>` : ''}
+  </div>`;
 }
 function renderLeadConversation(contactId){
   const c = contactById(contactId); if (!c) return '';
   const msgs = [...(c.messages||[]), ...convMessagesFor(c.id)].sort((a,b)=>new Date(a.at).getTime()-new Date(b.at).getTime());
   if (!msgs.length) return `<div class="empty" style="padding:26px 10px"><b>No conversation yet</b><div>Log what the customer said and what you replied — it all stays in one thread here.</div></div>`;
   return msgs.map(m => {
-    if (m.kind==='event') {
-      const time = new Date(m.at).toLocaleString('en-AU'), sp = splitLeadRequestEvent(m.text);
-      if (!sp) return `<div class="chat-event">${esc(presentText(m.text))} <span class="chat-event-time">${time}</span></div>`;
-      return `<div class="chat-event">${esc(presentText(sp.label))} <span class="chat-event-time">${time}</span></div>`
-        + (sp.request ? `<div class="chat-row in"><div class="chat-bubble in chat-request"><div class="chat-bubble-meta">${esc(c.fullName || 'Customer')} · what they asked for</div><div class="chat-bubble-text">${esc(presentText(sp.request))}</div></div></div>` : '');
-    }
+    const sp = (m.kind==='event' || (m.auto && m.direction!=='out')) ? splitLeadRequestEvent(m.text) : null;
+    if (sp) return leadRequestCard(sp, m.at);
+    if (m.kind==='event') return `<div class="chat-event">${esc(presentText(m.text))} <span class="chat-event-time">${new Date(m.at).toLocaleString('en-AU')}</span></div>`;
     const out = m.direction==='out';
     return `<div class="chat-row ${out?'out':'in'}">
       <div class="chat-bubble ${out?'out':'in'}">
@@ -3414,7 +3427,7 @@ function crmFilteredContactsUnsorted(data){
   if (UI.crm.source!=='all') list = list.filter(c=>c.source===UI.crm.source);
   if (UI.crm.division!=='all') list = list.filter(c=>c.division===UI.crm.division);
   if (UI.crm.status!=='all') list = list.filter(c=>leadStage(c)===UI.crm.status);
-  if (UI.crm.tag && UI.crm.tag!=='all') list = list.filter(c=>(c.tags||[]).includes(UI.crm.tag));
+  if (UI.crm.tag && UI.crm.tag!=='all' && LEAD_TAGS.some(x=>x.tag===UI.crm.tag)) list = list.filter(c=>leadTagOn(c, UI.crm.tag)); // an old free tag left in the filter is ignored
   if (UI.crm.subDivision && UI.crm.subDivision!=='all') list = list.filter(c=>leadSubDivisions(c).includes(UI.crm.subDivision));
   if (UI.crm.subSource && UI.crm.subSource!=='all') list = list.filter(c=>leadSubSource(c)===UI.crm.subSource);
   const q = (UI.crm.search||'').trim().toLowerCase();
@@ -3445,142 +3458,34 @@ function updateCrmSearch(v){
 function leadTagChip(text, color){
   return `<span class="lead-tag" style="--tag:${color}">${esc(text)}</span>`;
 }
-/* ── free-form contact tags (like GHL's tags) — add via typing + a suggestion dropdown of every tag
-   already used across contacts, remove with a click. Unlike Division/Source/Stage this is multi-value
-   and open-vocabulary, so it doesn't fit the statusSelect single-value pattern. ── */
+/* ── contact tags: a fixed list of four (Ofek 10 Oct). Division, sub-division, source, sub-source, the stage and the lost
+   reason all have their own fields, so a tag only says something about the customer. One click turns a tag on or off.
+   "Returning customer" is also set by the website when someone who's been a customer sends a form again. ── */
+const LEAD_TAGS = [
+  { tag:'Returning customer', hint:'Has had a job with us before' },
+  { tag:'Callback', hint:'We need to go back and fix something' },
+  { tag:'Complaint', hint:'Complained about the job' },
+  { tag:'Refunded', hint:'Got money back' },
+];
 function jsStr(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
-function allKnownTags(){
-  const set = new Set(STATE.data.tagCatalog||[]);
-  (STATE.data.contacts||[]).forEach(c => (c.tags||[]).forEach(t=>set.add(t))); // defensive: a tag on a contact always stays selectable even if the catalog somehow drifted
-  return [...set].filter(t => !SYSTEM_TAGS.has(t)).sort();
-}
-function registerTag(tag){
-  if (!STATE.data.tagCatalog) STATE.data.tagCatalog = [];
-  if (!STATE.data.tagCatalog.includes(tag)) { STATE.data.tagCatalog.push(tag); db.tagCatalog.add(tag); }
-}
-function addLeadTag(contactId, rawTag){
-  const c = contactById(contactId); if (!c) return;
-  const tag = (rawTag||'').trim().toLowerCase(); if (!tag) return;
-  if (!c.tags) c.tags = [];
-  registerTag(tag);
-  if (c.tags.includes(tag)) { refreshLeadTagsUI(contactId); return; }
-  c.tags.push(tag);
+function toggleLeadTag(contactId, tag){
+  const c = contactById(contactId); if (!c || !LEAD_TAGS.some(t => t.tag===tag)) return;
+  const on = leadTagOn(c, tag);
+  c.tags = on ? c.tags.filter(t => String(t).toLowerCase()!==tag.toLowerCase()) : [...(c.tags||[]), tag];
   db.contacts.update(c.id, { tags: c.tags });
-  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Tag added: "${tag}"`);
+  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Tag ${on ? 'removed' : 'added'}: "${tag}"`);
   refreshLeadTagsUI(contactId);
-  render(); // the CRM page's "All tags" filter (and any other tags-block open elsewhere) only
-            // rebuilds on a full render — without this it silently goes stale until something
-            // else happens to trigger one, even though the tag is really saved.
-}
-function removeLeadTag(contactId, tag){
-  const c = contactById(contactId); if (!c) return;
-  c.tags = (c.tags||[]).filter(t=>t!==tag);
-  db.contacts.update(c.id, { tags: c.tags });
-  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Tag removed: "${tag}"`);
-  refreshLeadTagsUI(contactId);
-  render();
+  render(); // the CRM table's tags column and the tag filter only rebuild on a full render
 }
 function refreshLeadTagsUI(contactId){
   document.querySelectorAll(`.lead-tags-block[data-contact="${contactId}"]`).forEach(host => { host.outerHTML = renderLeadTags(contactId, host.dataset.scope); });
 }
 function renderLeadTags(contactId, scope){
   const c = contactById(contactId); if (!c) return '';
-  const tags = visibleTags(c);
-  const inputId = `tag-input-${scope}-${contactId}`;
+  const cur = visibleTags(c);
   return `<div class="lead-tags-block" data-contact="${contactId}" data-scope="${scope}">
-    <div class="lead-tags-chips">
-      ${tags.length?tags.map(t=>`<span class="lead-tag-chip">${esc(t)}<span class="lead-tag-x" onclick="removeLeadTag('${contactId}','${jsStr(t)}')">×</span></span>`).join(''):'<span class="hint">No tags yet</span>'}
-    </div>
-    <form class="lead-tags-add" onsubmit="event.preventDefault(); addLeadTag('${contactId}', document.getElementById('${inputId}').value); closeTagSuggestions();">
-      <input id="${inputId}" placeholder="Add a tag…" autocomplete="off" oninput="updateTagSuggestions('${inputId}','${contactId}')" onfocus="updateTagSuggestions('${inputId}','${contactId}')">
-      <button type="submit" class="btn ghost small">Add</button>
-    </form>
-    ${getCurrentProfile()?.role==='owner' ? `<button type="button" class="btn ghost small" style="align-self:flex-start" onclick="goToCrmSettings()">Manage all tags…</button>` : ''}
+    <div class="sub-picker">${LEAD_TAGS.map(({ tag, hint }) => `<button type="button" class="sub-chip${cur.includes(tag)?' on':''}" aria-pressed="${cur.includes(tag)}" title="${esc(hint)}" onclick="event.stopPropagation();toggleLeadTag('${contactId}','${jsStr(tag)}')">${esc(tag)}</button>`).join('')}</div>
   </div>`;
-}
-function goToCrmSettings(){ UI.tab = 'settings'; render(); }
-/* ── custom tag-suggestion popup — deliberately NOT a native <datalist>: Chrome's own datalist
-   dropdown intercepts the Enter keystroke for itself, so "type a tag and press Enter" silently did
-   nothing (confirmed live) even though the Add button worked. This dropdown is plain DOM/JS, so
-   nothing but our own code ever sees the keystroke — same reasoning as the date-picker popup. ── */
-let OPEN_TAG_SUGGEST = null;
-function closeTagSuggestions(){
-  const el = document.getElementById('tag-suggest-popup');
-  if (el) el.remove();
-  document.removeEventListener('click', tagSuggestOutsideClick, true);
-  OPEN_TAG_SUGGEST = null;
-}
-function tagSuggestOutsideClick(e){
-  const popup = document.getElementById('tag-suggest-popup');
-  const input = OPEN_TAG_SUGGEST && document.getElementById(OPEN_TAG_SUGGEST.inputId);
-  if (popup && !popup.contains(e.target) && e.target!==input) closeTagSuggestions();
-}
-function updateTagSuggestions(inputId, contactId){
-  const input = document.getElementById(inputId); if (!input) return;
-  const q = input.value.trim().toLowerCase();
-  const c = contactById(contactId);
-  const existing = (c && c.tags) || [];
-  const matches = allKnownTags().filter(t => !existing.includes(t) && (!q || t.includes(q))).slice(0,8);
-  if (!matches.length) { closeTagSuggestions(); return; }
-  let popup = document.getElementById('tag-suggest-popup');
-  if (!popup) {
-    popup = document.createElement('div');
-    popup.id = 'tag-suggest-popup';
-    popup.className = 'tag-suggest-popup';
-    document.body.appendChild(popup);
-    setTimeout(()=>document.addEventListener('click', tagSuggestOutsideClick, true), 0);
-  }
-  const rect = input.getBoundingClientRect();
-  popup.style.top = (rect.bottom+window.scrollY+2)+'px';
-  popup.style.left = (rect.left+window.scrollX)+'px';
-  popup.style.width = rect.width+'px';
-  popup.innerHTML = matches.map(t=>`<div class="tag-suggest-item" onclick="pickTagSuggestion('${contactId}','${jsStr(t)}')">${esc(t)}</div>`).join('');
-  OPEN_TAG_SUGGEST = { inputId, contactId };
-}
-function pickTagSuggestion(contactId, tag){
-  addLeadTag(contactId, tag);
-  closeTagSuggestions();
-}
-/* ── manage-tags modal: pre-create a tag with nobody on it yet (so it appears in filters/autocomplete
-   right away), or delete one entirely — which strips it off every lead that has it, so a deleted tag
-   can never be filtered by again. ── */
-function addCatalogTag(){
-  const input = document.getElementById('new-tag-input'); if (!input) return;
-  const tag = input.value.trim().toLowerCase(); if (!tag) return;
-  registerTag(tag);
-  input.value = '';
-  refreshManageTagsModal();
-  render();
-}
-function deleteTagGlobally(tag){
-  const affected = (STATE.data.contacts||[]).filter(c => (c.tags||[]).includes(tag)).length;
-  confirmAction(`Delete the tag "${tag}"?${affected?` It will be removed from ${affected} lead${affected===1?'':'s'}.`:''}`, ()=>{
-    STATE.data.tagCatalog = (STATE.data.tagCatalog||[]).filter(t=>t!==tag);
-    db.tagCatalog.remove(tag);
-    (STATE.data.contacts||[]).forEach(c => {
-      if (c.tags && c.tags.includes(tag)) { c.tags = c.tags.filter(t=>t!==tag); db.contacts.update(c.id, { tags: c.tags }); }
-    });
-    if (UI.crm.tag===tag) UI.crm.tag = 'all';
-    showToast(`Tag "${tag}" deleted`);
-    refreshManageTagsModal();
-    render();
-  });
-}
-function refreshManageTagsModal(){
-  const host = document.getElementById('manage-tags-list');
-  if (host) host.innerHTML = renderManageTagsList();
-}
-function renderManageTagsList(){
-  const tags = allKnownTags();
-  if (!tags.length) return emptyState('No tags yet', 'Add one below.');
-  return tags.map(t => {
-    const count = (STATE.data.contacts||[]).filter(c=>(c.tags||[]).includes(t)).length;
-    return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-soft)">
-      <span class="lead-tag-chip">${esc(t)}</span>
-      <span style="font-size:11.5px;color:var(--ink-soft);flex:1">${count} lead${count===1?'':'s'}</span>
-      <button type="button" class="btn ghost small danger" onclick="deleteTagGlobally('${jsStr(t)}')">Delete</button>
-    </div>`;
-  }).join('');
 }
 /* ── Pipeline stage rules (Ofek, 2026-09-27) ────────────────────────────────────────────────────────
    Every way of changing a stage (dropdowns, drag & drop, the lead form) goes through setLeadStage, so the rules hold everywhere:
@@ -4803,18 +4708,8 @@ function renderCrmInboxThreadAndDetails(c){
       <div class="crm-inbox-composer">${renderLeadComposer(c.id, 'inbox')}</div>
     </div>
     <div class="crm-inbox-details">
-      <div style="margin-bottom:14px">
-        <div class="lead-tags">
-          ${leadTagChip(c.division, LEAD_STATUS_COLOR[leadStage(c)])}
-          ${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}
-        </div>
-        ${leadSubChips(c)}
-      </div>
-      <div class="field"><label>Source</label>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</div>
-      <div class="field" style="margin-top:9px"><label>Sub-source</label>${subSourcePicker(c)}</div>
-      <div class="field" style="margin-top:9px"><label>Division</label>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</div>
-      <div class="field" style="margin-top:9px"><label>Sub-division</label>${subDivisionPicker(c)}</div>
-      <div class="field" style="margin-top:9px"><label>📝 Notes</label><textarea rows="3" placeholder="Anything to remember about this customer: gate code, dog, best time to call…" onchange="setLeadNotes('${c.id}',this.value)">${esc(c.notes||'')}</textarea></div>
+      <div style="margin-bottom:14px">${leadChipsRow(c)}</div>
+      <div class="field"><label>📝 Notes</label><textarea rows="3" placeholder="Anything to remember about this customer: gate code, dog, best time to call…" onchange="setLeadNotes('${c.id}',this.value)">${esc(c.notes||'')}</textarea></div>
       <div class="field" style="margin-top:9px"><label>Stage</label>${leadStageControl(c)}</div>
       ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
       ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">Lost reason: <b>${esc(lostReasonLabel(lostReasonOf(c)))}</b></div>` : ''}
@@ -4832,6 +4727,13 @@ function renderCrmInboxThreadAndDetails(c){
         <button class="btn ghost small" onclick="openLeadActivityModal('${c.id}')">💬 History (${recordActivityCount(c)})</button>
         <button class="btn ghost small" onclick="openTaskModalForContact('${c.id}')">➕ Create task</button>
       </div>
+      <div class="lead-chip-edit">
+        <div class="lead-chip-edit-title">Change the chips at the top</div>
+        <div class="field"><label>Source</label>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</div>
+        <div class="field" style="margin-top:9px"><label>Sub-source</label>${subSourcePicker(c)}</div>
+        <div class="field" style="margin-top:9px"><label>Division</label>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</div>
+        <div class="field" style="margin-top:9px"><label>Sub-division</label>${subDivisionPicker(c)}</div>
+      </div>
     </div>`;
 }
 function setLeadSubDivisions(id, list){
@@ -4841,7 +4743,10 @@ function setLeadSubDivisions(id, list){
   logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Sub-division: ${list.length ? list.join(', ') : 'none'}`);
   render();
   document.querySelectorAll(`[data-subdiv="${id}"]`).forEach(el => { el.outerHTML = subDivisionPicker(c); });
+  refreshLeadModalChips(c);
 }
+// The Full profile isn't redrawn by render(), so its chips row is refreshed by hand.
+function refreshLeadModalChips(c){ const el = document.getElementById('lm-chips'); if (el && LEAD_MODAL_ID===c.id) el.innerHTML = leadChipsRow(c); }
 function toggleLeadSubDivision(id, value){
   const c = contactById(id); if (!c) return;
   const cur = leadSubDivisions(c);
@@ -4853,6 +4758,7 @@ function setLeadSubSource(id, value){
   db.contacts.update(c.id, { subSource: value });
   logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Sub-source: ${value || 'none'}`);
   render();
+  refreshLeadModalChips(c);
 }
 // Sub-division: one click per option (a lead can have several); sub-source: one choice.
 function subDivisionPicker(c){
@@ -4865,6 +4771,11 @@ function subSourcePicker(c){
   const all = cur && !opts.includes(cur) ? [cur, ...opts] : opts;
   if (!all.length) return `<span class="hint" data-subsrc="${c.id}">None for ${esc(sourceLabel(c.source))}</span>`;
   return `<select data-subsrc="${c.id}" onchange="setLeadSubSource('${c.id}', this.value)"><option value="">—</option>${all.map(o => `<option value="${esc(o)}" ${o===cur?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+}
+// The chips at the top of a lead (the CRM panel and the Full profile): division and source, then the sub-division(s) and the
+// sub-source under them. They're changed at the bottom of the panel (Ofek 10 Oct), as they rarely need it.
+function leadChipsRow(c){
+  return `<div class="lead-tags">${leadTagChip(c.division, LEAD_STATUS_COLOR[leadStage(c)])}${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}</div>${leadSubChips(c)}`;
 }
 // The chips under the division and source chips: the sub-division(s) and the sub-source.
 function leadSubChips(c){
@@ -4902,13 +4813,11 @@ function renderCrmPipeline(contacts){
     <div class="hint" style="margin-top:10px">Drag a card between columns, or use the stage dropdown on the card. Won fills itself once the customer has a job.</div>`;
 }
 function renderTableTagsCell(c){
-  const tags = visibleTags(c);
-  const chips = tags.map(t=>`<span class="lead-tag-chip" style="font-size:10px;padding:1px 6px 1px 8px">${esc(t)}<span class="lead-tag-x" onclick="event.stopPropagation();removeLeadTag('${c.id}','${jsStr(t)}')">×</span></span>`).join('');
-  const inputId = `table-tag-input-${c.id}`;
+  const tags = visibleTags(c), rest = LEAD_TAGS.map(x => x.tag).filter(t => !tags.includes(t));
+  const chips = tags.map(t=>`<span class="lead-tag-chip" style="font-size:10px;padding:1px 6px 1px 8px">${esc(t)}<span class="lead-tag-x" title="Remove" onclick="event.stopPropagation();toggleLeadTag('${c.id}','${jsStr(t)}')">×</span></span>`).join('');
   return `<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;max-width:220px" onclick="event.stopPropagation()">
     ${chips}
-    <input id="${inputId}" placeholder="+ tag" style="width:56px;font-size:10.5px;padding:2px 4px;border:1px dashed var(--line);background:transparent"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();addLeadTag('${c.id}', this.value); this.value='';}">
+    ${rest.length ? `<select aria-label="Add a tag" style="width:auto;font-size:10.5px;padding:1px 4px;min-height:0;border:1px dashed var(--line);background:transparent" onchange="if(this.value) toggleLeadTag('${c.id}', this.value)"><option value="">+ tag</option>${rest.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select>` : ''}
   </div>`;
 }
 function setCrmPage(page){ UI.crm.page = Math.max(1, page); render(); }
@@ -4983,7 +4892,7 @@ function renderCrm(profile, data){
       <input value="${esc(UI.crm.search||'')}" placeholder="Search name, phone, email…" oninput="updateCrmSearch(this.value)" style="width:auto;min-width:220px;flex:1">
       <select style="width:auto" onchange="UI.crm.division=this.value;render()"><option value="all">All divisions</option>${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${UI.crm.division===d?'selected':''}>${d}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.source=this.value;render()"><option value="all">All sources</option>${LEAD_SOURCES.map(s=>`<option value="${s}" ${UI.crm.source===s?'selected':''}>${esc(sourceLabel(s))}</option>`).join('')}</select>
-      <select style="width:auto" onchange="UI.crm.tag=this.value;render()"><option value="all">All tags</option>${allKnownTags().map(t=>`<option value="${esc(t)}" ${UI.crm.tag===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
+      <select style="width:auto" onchange="UI.crm.tag=this.value;render()"><option value="all">All tags</option>${LEAD_TAGS.map(x=>x.tag).map(t=>`<option value="${esc(t)}" ${UI.crm.tag===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.subDivision=this.value;render()" aria-label="Sub-division"><option value="all">All sub-divisions</option>${Object.entries(SUB_DIVISIONS).filter(([,l])=>l.length).map(([d,l])=>`<optgroup label="${esc(d)}">${l.map(t=>`<option value="${esc(t)}" ${UI.crm.subDivision===t?'selected':''}>${esc(t)}</option>`).join('')}</optgroup>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.subSource=this.value;render()" aria-label="Sub-source"><option value="all">All sub-sources</option>${Object.keys(SUB_SOURCES).map(src=>`<optgroup label="${esc(sourceLabel(src))}">${subSourceOptions(src, data.contacts).map(t=>`<option value="${esc(t)}" ${UI.crm.subSource===t?'selected':''}>${esc(t)}</option>`).join('')}</optgroup>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.status=this.value;render()"><option value="all">All stages</option>${LEAD_STATUSES.map(s=>`<option value="${s}" ${UI.crm.status===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>
@@ -5111,6 +5020,7 @@ function openLeadModal(contactId){
       <div class="modal">
         <h2>${c?esc(c.fullName):'New Lead'}</h2>
         <div class="modal-sub">${c?`Created ${fmtDateShort(c.createdAt)} · ${esc(c.source)}`:'Add a lead that came in by phone or referral'}</div>
+        ${c ? `<div id="lm-chips" style="margin-top:8px">${leadChipsRow(c)}</div>` : ''}
 
         ${c ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 4px">
           ${tabBtn('details','Details')}${tabBtn('conversation','Conversation')}${tabBtn('history','History')}
@@ -5122,12 +5032,6 @@ function openLeadModal(contactId){
             <div class="field"><label>Phone</label><input id="lm-phone" value="${c?esc(c.phone||''):''}"></div>
             <div class="field"><label>Email</label><input id="lm-email" value="${c?esc(c.email||''):''}"></div>
             <div class="field"><label>Postcode</label><input id="lm-postcode" value="${c?esc(c.postcode||''):''}"></div>
-          </div>
-          <div class="grid-2" style="margin-top:11px">
-            <div class="field"><label>Source</label><select id="lm-source">${(c && !LEAD_SOURCES.includes(c.source) ? [c.source, ...LEAD_SOURCES] : LEAD_SOURCES).map(s=>`<option value="${s}" ${c&&c.source===s?'selected':(!c&&s==='Unknown'?'selected':'')}>${esc(sourceLabel(s))}</option>`).join('')}</select></div>
-            ${c ? `<div class="field"><label>Sub-source</label>${subSourcePicker(c)}</div>` : `<div class="field"><label>Sub-source</label><span class="hint">Pick it after saving</span></div>`}
-            <div class="field"><label>Division</label><select id="lm-division">${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${c&&c.division===d?'selected':''}>${d}</option>`).join('')}</select></div>
-            ${c ? `<div class="field"><label>Sub-division</label>${subDivisionPicker(c)}</div>` : `<div class="field"><label>Sub-division</label><span class="hint">Pick it after saving</span></div>`}
           </div>
           <div class="field" style="margin-top:11px"><label>📝 Notes</label><textarea rows="3" id="lm-notes" placeholder="Anything to remember about this customer: gate code, dog, best time to call…">${c?esc(c.notes||''):''}</textarea></div>
           <div class="field" style="margin-top:11px"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${stageBadge('Won', 'Won — has a job')}` : `<select id="lm-status" class="stage-select" style="--stage:${stageColor(c?leadStage(c):'New')}" onchange="this.style.setProperty('--stage', stageColor(this.value));document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none';document.getElementById('lm-booked-wrap').style.display=this.value==='Booked'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
@@ -5145,6 +5049,15 @@ function openLeadModal(contactId){
           ${c ? renderCallsBlock(c) : ''}
           ${c ? renderGhlHistoryBlock(c) : ''}
           ${c ? renderMarketingSourceBlock(c) : ''}
+          <div ${c ? 'class="lead-chip-edit"' : 'style="margin-top:11px"'}>
+            ${c ? '<div class="lead-chip-edit-title">Change the chips at the top</div>' : ''}
+            <div class="grid-2">
+              <div class="field"><label>Source</label><select id="lm-source">${(c && !LEAD_SOURCES.includes(c.source) ? [c.source, ...LEAD_SOURCES] : LEAD_SOURCES).map(s=>`<option value="${s}" ${c&&c.source===s?'selected':(!c&&s==='Unknown'?'selected':'')}>${esc(sourceLabel(s))}</option>`).join('')}</select></div>
+              ${c ? `<div class="field"><label>Sub-source</label>${subSourcePicker(c)}</div>` : `<div class="field"><label>Sub-source</label><span class="hint">Pick it after saving</span></div>`}
+              <div class="field"><label>Division</label><select id="lm-division">${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${c&&c.division===d?'selected':''}>${d}</option>`).join('')}</select></div>
+              ${c ? `<div class="field"><label>Sub-division</label>${subDivisionPicker(c)}</div>` : `<div class="field"><label>Sub-division</label><span class="hint">Pick it after saving</span></div>`}
+            </div>
+          </div>
         </div>
 
         ${c ? `
@@ -6694,8 +6607,8 @@ function renderDashboard(profile, data){
     <input type="date" style="width:auto" value="${UI.dashboard.customTo||''}" onchange="UI.dashboard.customTo=this.value;render()">` : '';
 
   // ── marketing: one table, one row per channel ──
-  const tagLeads = tag => (data.contacts||[]).filter(c => c.source==='Meta Ads' && (c.tags||[]).includes(tag) && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
-  const subWon = tag => { const ls = (data.contacts||[]).filter(c => c.source==='Meta Ads' && (c.tags||[]).includes(tag) && inRange(localDay(c.createdAt), r.start, r.effEnd)); const won = ls.filter(c => contactHasJob(c, data.jobs)).length; return { leads:ls.length, won, closeRate: ls.length ? Math.round(won/ls.length*100) : null, spend:null, revenue: perf.bySubDivision[tag].revenue }; };
+  const tagLeads = tag => (data.contacts||[]).filter(c => c.source==='Meta Ads' && leadSubSource(c)===tag && inRange(localDay(c.createdAt), r.start, r.effEnd)).length;
+  const subWon = tag => { const ls = (data.contacts||[]).filter(c => c.source==='Meta Ads' && leadSubSource(c)===tag && inRange(localDay(c.createdAt), r.start, r.effEnd)); const won = ls.filter(c => contactHasJob(c, data.jobs)).length; return { leads:ls.length, won, closeRate: ls.length ? Math.round(won/ls.length*100) : null, spend:null, revenue: perf.bySubDivision[tag].revenue }; };
   const chRow = (name, ch, callCount, sub, L) => {
     const forms = ch.leads, total = forms + (callCount||0);
     const spend = ch.spend;
@@ -6715,7 +6628,7 @@ function renderDashboard(profile, data){
   };
   const C = perf.byChannel;
   const chLists = src => ({ leads: leadsIn.filter(c => c.source===src), jobs: jobs.filter(j => contactForJob(j)?.source===src) });
-  const tagLists = tag => ({ leads: leadsIn.filter(c => c.source==='Meta Ads' && (c.tags||[]).includes(tag)), jobs: jobs.filter(j => jobAttributionTags(j).metaPlatform===tag) });
+  const tagLists = tag => ({ leads: leadsIn.filter(c => c.source==='Meta Ads' && leadSubSource(c)===tag), jobs: jobs.filter(j => jobAttributionTags(j).metaPlatform===tag) });
   const channelRows = [
     chRow('Google Ads', C['Google Ads'], cs.total, false, chLists('Google Ads')),
     chRow('Meta Ads', C['Meta Ads'], null, false, chLists('Meta Ads')),
@@ -9780,17 +9693,6 @@ function renderSettings(profile){
     <div class="section-title">Phone</div>
     ${renderPhoneSettings(s)}
     ${renderChatSettings(s)}
-
-    <div class="section-title">CRM Settings</div>
-    <div class="card">
-      <div style="font-family:'Figtree',sans-serif;font-weight:700;font-size:15.5px;margin-bottom:4px">Tags</div>
-      <div class="hint" style="margin-bottom:12px">Every tag used across CRM leads — add one before assigning it, or delete one to remove it everywhere and from the tag filter.</div>
-      <div style="display:flex;gap:8px;margin-bottom:14px">
-        <input id="new-tag-input" placeholder="New tag name…" onkeydown="if(event.key==='Enter'){event.preventDefault();addCatalogTag();}">
-        <button type="button" class="btn" onclick="addCatalogTag()">Add</button>
-      </div>
-      <div id="manage-tags-list" style="max-height:280px;overflow-y:auto">${renderManageTagsList()}</div>
-    </div>
 
     <div class="section-title">Technician commission rates &amp; working days</div>
     ${techCards}
