@@ -175,14 +175,64 @@ function buildMessages(r: { first_name: string; technician: string; review_link:
   return { sms, subject, html, text };
 }
 // True only when Google confirms the token belongs to the business mailbox (checked with Google, not by us).
-async function isMailbox(idToken: unknown): Promise<boolean> {
+// Google id tokens (from the info@ script's ScriptApp.getIdentityToken) are checked here against Google's published signing
+// keys. Until 10 Oct every call asked Google's tokeninfo endpoint, which Google rate-limits; the jobs-sheet sync stopped
+// getting through on 3 Oct, when the chat emails started calling every minute, most likely for that reason. tokeninfo stays
+// only as a fallback when the keys can't be fetched. Every refusal is now logged, so it can't go unnoticed again.
+let GOOGLE_KEYS: { at: number; keys: any[] } | null = null;
+async function googleSigningKeys(): Promise<any[]> {
+  if (GOOGLE_KEYS && Date.now() - GOOGLE_KEYS.at < 3600 * 1000) return GOOGLE_KEYS.keys;
+  const r = await fetch("https://www.googleapis.com/oauth2/v3/certs");
+  if (!r.ok) throw new Error("Google signing keys: HTTP " + r.status);
+  const j = await r.json();
+  GOOGLE_KEYS = { at: Date.now(), keys: Array.isArray(j.keys) ? j.keys : [] };
+  return GOOGLE_KEYS.keys;
+}
+function base64UrlBytes(s: string): Uint8Array {
+  const b = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4));
+  return Uint8Array.from(b, (c) => c.charCodeAt(0));
+}
+// The token's claims when its signature, issuer and expiry are good; null when they're not (the reason is logged).
+// deno-lint-ignore no-explicit-any
+async function verifyGoogleIdToken(token: string, nowMs = Date.now()): Promise<any | null> {
+  const parts = token.split(".");
+  if (parts.length !== 3) { console.warn("id token: not a JWT"); return null; }
+  const header = JSON.parse(new TextDecoder().decode(base64UrlBytes(parts[0])));
+  const claims = JSON.parse(new TextDecoder().decode(base64UrlBytes(parts[1])));
+  if (header.alg !== "RS256") { console.warn("id token: unexpected alg", header.alg); return null; }
+  const jwk = (await googleSigningKeys()).find((k) => k.kid === header.kid);
+  if (!jwk) { console.warn("id token: unknown signing key", header.kid); return null; }
+  const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+  const good = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, base64UrlBytes(parts[2]), new TextEncoder().encode(parts[0] + "." + parts[1]));
+  if (!good) { console.warn("id token: bad signature"); return null; }
+  if (claims.iss !== "accounts.google.com" && claims.iss !== "https://accounts.google.com") { console.warn("id token: wrong issuer", claims.iss); return null; }
+  if (!(Number(claims.exp) * 1000 > nowMs)) { console.warn("id token: expired"); return null; }
+  return claims;
+}
+// deno-lint-ignore no-explicit-any
+function claimsAreMailbox(t: any): boolean {
+  return String(t?.email || "").toLowerCase() === MAILBOX && String(t?.email_verified) === "true";
+}
+async function googleSaysMailbox(idToken: unknown): Promise<boolean> {
   if (typeof idToken !== "string" || idToken.length < 20) return false;
   try {
-    const r = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
-    if (!r.ok) return false;
-    const t = await r.json();
-    return String(t.email || "").toLowerCase() === MAILBOX && String(t.email_verified) === "true" && Number(t.exp) * 1000 > Date.now();
-  } catch { return false; }
+    const t = await verifyGoogleIdToken(idToken);
+    if (!t) return false;
+    const ok = claimsAreMailbox(t);
+    if (!ok) console.warn("id token: not the info@ mailbox", String(t.email || ""));
+    return ok;
+  } catch (e) {
+    console.warn("id token: key check failed, asking tokeninfo instead:", String((e as Error).message || e));
+    try {
+      const r = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+      if (!r.ok) { console.warn("id token: tokeninfo HTTP", r.status); return false; }
+      const t = await r.json();
+      return claimsAreMailbox(t) && Number(t.exp) * 1000 > Date.now();
+    } catch (e2) { console.warn("id token: tokeninfo failed:", String((e2 as Error).message || e2)); return false; }
+  }
+}
+async function isMailbox(idToken: unknown): Promise<boolean> {
+  return await googleSaysMailbox(idToken);
 }
 
 // deno-lint-ignore no-explicit-any
