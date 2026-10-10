@@ -395,11 +395,13 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .emp-line { font-size: 12.5px; color: var(--ink-soft); }
 .emp-rates { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; }
 .emp-flags { display: flex; gap: 6px; flex-wrap: wrap; }
-.doc-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); align-items: center; }
+.emp-flags .pill { white-space: normal; line-height: 1.35; }
+.doc-row { display: flex; flex-direction: column; gap: 7px; padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
 .doc-row:last-child { border-bottom: 0; }
 .doc-name { font-weight: 600; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.doc-files { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
-.doc-exp { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--ink-soft); }
+.doc-files { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.doc-slot { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 2px; border: 1px solid var(--line); border-radius: var(--radius); }
+.doc-exp { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--ink-soft); }
 .job-panel .doc-exp input { width: auto; }
 .mask { font-family: 'Figtree', sans-serif; letter-spacing: .08em; }
 @media (max-width: 560px) { .job-panel { width: 100vw; } }
@@ -9747,7 +9749,7 @@ function renderEmployeePanel(e, data, canEdit){
   const docRow = d => {
     const doc = (e.documents||{})[d.kind] || {}, x = employeeDocExpiry(doc, today);
     const slot = (side, ref) => ref
-      ? `<a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(ref)}')">📄 ${side==='back' ? 'Back' : d.back ? 'Front' : 'View'}</a>${ro ? '' : `<button type="button" class="btn ghost small" onclick="pickEmployeeDoc('${e.id}','${d.kind}','${side}')">Replace</button><button type="button" class="lead-note-del" onclick="removeEmployeeDoc('${e.id}','${d.kind}','${side}')">Remove</button>`}`
+      ? `<span class="doc-slot"><a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(ref)}')">📄 ${side==='back' ? 'Back' : d.back ? 'Front' : 'View'}</a>${ro ? '' : `<button type="button" class="btn ghost small" onclick="pickEmployeeDoc('${e.id}','${d.kind}','${side}')">Replace</button><button type="button" class="lead-note-del" onclick="removeEmployeeDoc('${e.id}','${d.kind}','${side}')">Remove</button>`}</span>`
       : (ro ? '<span class="hint">—</span>' : `<button type="button" class="btn ghost small" onclick="pickEmployeeDoc('${e.id}','${d.kind}','${side}')">Upload${d.back ? (side==='back' ? ' back' : ' front') : ''}</button>`);
     return `<div class="doc-row">
       <div class="doc-name">${esc(d.label)}${x ? ' ' + pill(x.tone, x.text) : ''}</div>
