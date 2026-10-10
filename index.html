@@ -342,6 +342,38 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .task-tip { display:none; position:absolute; z-index:10; top:100%; inset-inline-start:0; margin-top:4px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-sm); padding:10px 12px; width:220px; box-shadow:var(--shadow-lg); font-size:11.5px; line-height:1.5; color:var(--ink); }
 .task-chip:hover .task-tip { display:block; }
 .jobs-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); }
+.jobs-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.jobs-stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; text-align: start; font: inherit; color: inherit; min-width: 0; }
+.jobs-stat .l { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; font-weight: 700; color: var(--ink-soft); font-family: 'Figtree', sans-serif; }
+.jobs-stat .v { font-family: 'Figtree', sans-serif; font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; margin-top: 2px; }
+.jobs-stat .s { font-size: 11.5px; color: var(--ink-faint); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+button.jobs-stat { cursor: pointer; transition: border-color .15s ease, background-color .15s ease; }
+button.jobs-stat:hover, button.jobs-stat.on { border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); }
+button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.jobs-filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.jobs-filters .jobs-search { flex: 1 1 240px; min-width: 200px; width: auto; }
+.jobs-filters .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+.jobs-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+.jobs-split.with-panel { grid-template-columns: minmax(0, 1fr) 340px; }
+.jobs-list td { padding-top: 8px; padding-bottom: 8px; vertical-align: middle; white-space: nowrap; }
+.jobs-list tbody tr { cursor: pointer; transition: background-color .12s ease; }
+.jobs-list tbody tr:hover { background: var(--surface-2); }
+.jobs-list tbody tr:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--primary); }
+.jobs-list tbody tr.sel { background: color-mix(in srgb, var(--primary) 9%, var(--surface)); box-shadow: inset 3px 0 0 var(--primary); }
+.job-cust { font-weight: 600; }
+.job-sub { display: block; font-size: 11px; font-weight: 400; color: var(--ink-faint); margin-top: 1px; }
+.job-panel { position: sticky; top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 14px 16px 16px; max-height: calc(100vh - 32px); overflow-y: auto; box-shadow: var(--shadow); }
+.job-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.job-panel-head h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.job-panel .meta { color: var(--ink-soft); font-size: 12px; margin: 2px 0 12px; }
+.job-panel .f { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.job-panel .f .full { grid-column: 1 / -1; }
+.job-panel select, .job-panel input, .job-panel textarea { width: 100%; min-width: 0 !important; }
+.job-panel .grp { border-top: 1px solid var(--line); margin: 14px 0 10px; padding-top: 10px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; font-weight: 700; color: var(--ink-faint); }
+.job-ro { font-size: 13px; padding: 4px 0; overflow-wrap: anywhere; }
+.job-panel-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+@media (max-width: 1100px) { .jobs-split.with-panel { grid-template-columns: minmax(0, 1fr); } .job-panel { position: static; order: -1; max-height: none; } }
+@media (max-width: 900px) { .jobs-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .filter-row th { position: static !important; background: var(--surface); }
 /* CRM pipeline board */
 .pipeline { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; align-items: start; }
@@ -2249,7 +2281,7 @@ function setupRealtimeSubscriptions(){
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
 }
-let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
+let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25,q:'',noReview:false,selectedId:null}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let toastMsg = null, toastTimer = null;
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
 let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task modal
@@ -2368,7 +2400,7 @@ function getCurrentProfile(){
   if (VIEW_AS_ID && real && real.role==='owner') { const v = STATE.profiles.find(p => p.id===VIEW_AS_ID); if (v) return v; }
   return real;
 }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25}, jobsFilters:{}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; PAGE_FILES = {}; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25,q:'',noReview:false,selectedId:null}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; PAGE_FILES = {}; }
 function showToast(msg){
   toastMsg = msg; clearTimeout(toastTimer); render();
   toastTimer = setTimeout(()=>{
@@ -5358,16 +5390,7 @@ function exportJobsCsv(){
 }
 
 /* ── jobs ────────────────────────────────────────────────────────────── */
-// Column order is fixed per spec: Technician, Date, Customer Name, Invoice, Job Type, Amount, GST,
-// Status, Method, GST Amount, Parts Cost, Parts Paid By, %, Commission, Tech Paid, Review, Notes.
-// "GST" is a yes/no indicator; "GST Amount" is the actual computed dollar figure (jobGst(j)).
-const JOB_COLUMNS = [
-  {key:'technician', label:'Technician'}, {key:'date', label:'Date'}, {key:'customer', label:'Customer'},
-  {key:'invoice', label:'Invoice'}, {key:'type', label:'Type'}, {key:'amount', label:'Amount'},
-  {key:'gst', label:'GST'}, {key:'status', label:'Status'}, {key:'method', label:'Method'},
-  {key:'gstAmount', label:'GST Amount'}, {key:'partsCost', label:'Parts Cost'}, {key:'partsPaidBy', label:'Parts Paid By'},
-  {key:'percent', label:'%'}, {key:'commission', label:'Commission'}, {key:'techPaid', label:'Tech Paid'}, {key:'review', label:'Review'}, {key:'notes', label:'Notes'},
-];
+// A job's field as text, for the search box.
 function jobColumnText(j, key){
   switch(key){
     case 'technician': return j.technician||'';
@@ -5414,12 +5437,17 @@ function computeFilteredJobs(data){
   if (UI.jobs.status!=='all') jobs = jobs.filter(j=>j.paymentStatus===UI.jobs.status);
   const span = jobsRangeBounds(UI.jobs, todayStr());
   if (span) jobs = jobs.filter(j => j.date >= span.start && j.date <= span.end);
-  const filters = UI.jobsFilters || {};
-  Object.keys(filters).forEach(key => {
-    const q = (filters[key]||'').trim().toLowerCase();
-    if (q) jobs = jobs.filter(j => jobColumnText(j,key).toLowerCase().indexOf(q)!==-1);
-  });
+  // One search box (Ofek 10 Oct): customer, invoice #, technician, division, payment method or notes.
+  const q = String(UI.jobs.q||'').trim().toLowerCase();
+  if (q) jobs = jobs.filter(j => ['customer','invoice','technician','type','method','notes'].some(k => jobColumnText(j, k).toLowerCase().includes(q)));
+  if (UI.jobs.noReview) jobs = jobs.filter(jobNeedsReview);
   return jobs;
+}
+// Not reviewed, not "don't ask", and no request sent or waiting (requests still loading count as not asked).
+function jobNeedsReview(j){
+  if (j.reviewTaken || j.reviewDoNotAsk) return false;
+  const r = REVIEW_REQ && REVIEW_REQ[reviewInvoiceKey(j.invoiceNumber)];
+  return !(r && (r.status==='sent' || r.status==='waiting'));
 }
 /* ── inline double-click cell editing (in addition to the full Edit modal, not instead of it) ── */
 function contactEditableCell(contactId, field, displayHtml, inputType){
@@ -5487,35 +5515,97 @@ function commitJobCellEdit(jobId, field, rawValue, inputType){
   }
   refreshJobsTable();
 }
-function renderJobRows(jobs, canEdit){
-  if (!jobs.length) return `<tr><td colspan="${canEdit?19:18}">${emptyState('No jobs match these filters', canEdit ? 'Try clearing a column filter, or click "New Job" to get started.' : undefined)}</td></tr>`;
+/* ── Jobs & Commissions (Ofek 10 Oct, option A): eight quiet columns, no menus in the rows; a click on a row opens the
+   job in a panel beside the table, where everything is edited (saved on the spot, as before). ── */
+function jobDaysWaiting(j){ return Math.max(0, Math.round((parseLocalDate(todayStr()) - parseLocalDate(j.date)) / 864e5)); }
+function jobReviewState(j){
+  if (j.reviewDoNotAsk) return pill('bad', "Don't ask");
+  if (j.reviewTaken) return pill('good', 'Review taken');
+  return '<span class="hint">—</span>';
+}
+function renderJobRows(jobs){
+  if (!jobs.length) return `<tr><td colspan="8">${emptyState('No jobs match', 'Try another search, period or filter.')}</td></tr>`;
+  const ask = canAskReview(), sel = UI.jobs.selectedId;
   return jobs.map(j => {
-    const accent = j.paymentStatus==='Paid' ? 'var(--good)' : 'var(--bad)';
-    return `
-    <tr>
-      <td style="border-inline-start:3px solid ${accent}">${statusSelect('jobTechnician', j.id, j.technician, technicianNames(STATE.data), ()=>'neutral', v=>v, !canEdit)}</td>
-      <td class="mono">${jobEditableCell(j.id,'date', fmtDateShort(j.date), 'date')}</td>
-      <td>${custLink(j.customerName, j.contactId, j.id)}</td>
-      <td class="mono">${canEdit ? `<span class="xlink" onclick="openJobModal('${j.id}')" title="Open / edit the job">${esc(j.invoiceNumber||'—')}</span>` : esc(j.invoiceNumber||'—')}</td>
-      <td>${statusSelect('jobType', j.id, j.jobType, jobTypesForTech(j.technician), ()=>'neutral', v=>v, !canEdit)}</td>
-      <td class="num">${jobEditableCell(j.id,'amount', fmtMoney(j.amount), 'number')}</td>
-      <td>${statusSelect('jobGst', j.id, j.includesGST?'Yes':'No', ['Yes','No'], v=>v==='Yes'?'good':'neutral', v=>v, !canEdit)}</td>
-      <td>${statusSelect('jobStatus', j.id, j.paymentStatus, ['Unpaid','Paid'], v=>v==='Paid'?'good':'bad', v=>v==='Paid'?'Paid':'Unpaid', !canEdit)}</td>
-      <td><div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${statusSelect('jobPaymentMethod', j.id, j.paymentMethod||'', CLOSING_PAYMENT_METHODS, ()=>'neutral', v=>v||'—', !canEdit)}</div></td>
-      <td class="num">${j.includesGST ? fmtMoney(jobGst(j)) : '—'}</td>
-      <td class="num">${jobEditableCell(j.id,'partsCost', j.partsCost?fmtMoney(j.partsCost):'—', 'number')}</td>
-      <td>${statusSelect('jobPartsPaidBy', j.id, j.partsPaidBy||'', ['', ...technicianNames(STATE.data), 'Business'], ()=>'neutral', v=>v||'—', !canEdit)}</td>
-      <td class="num">${jobEditableCell(j.id,'commissionPercent', j.commissionPercent+'%', 'number')}</td>
-      <td class="num">${fmtMoney(jobCommissionAmount(j))}</td>
-      <td>${j.paidToTechnician==='Paid' ? `<span title="Marked paid in Payroll (undo it there)">${pill('good','Paid')}</span>` : statusSelect('jobPaidTech', j.id, j.paidToTechnician||'Not Paid', ['Not Paid','Stuck'], v=>v==='Stuck'?'neutral':'bad', v=>v, !canEdit)}</td>
-      <td>${statusSelect('jobReview', j.id, j.reviewTaken?'Yes':'No', ['Yes','No'], v=>v==='Yes'?'good':'neutral', v=>v, !canEdit)}</td>
-      <td class="wrap">${jobEditableCell(j.id,'notes', esc(j.notes||'—'), 'text')}</td>
-      <td><button class="btn ghost small" onclick="openJobActivityModal('${j.id}')">💬 ${recordActivityCount(j)}</button></td>
-      ${canEdit ? `<td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openJobModal('${j.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteJob('${j.id}');render()">Delete</button></td>` : ''}
-      ${canAskReview() ? `<td style="white-space:nowrap">${reviewAskCell(j)}</td>` : ''}
+    const paid = j.paymentStatus==='Paid', com = jobCommissionAmount(j);
+    return `<tr class="${j.id===sel ? 'sel' : ''}" tabindex="0" onclick="selectJob('${j.id}')" onkeydown="if(event.key==='Enter'){event.preventDefault();selectJob('${j.id}');}">
+      <td class="mono">${fmtDateShort(j.date)}</td>
+      <td><span class="job-cust">${esc(j.customerName||'—')}</span><span class="job-sub">${j.invoiceNumber ? '#'+esc(j.invoiceNumber) : 'no invoice #'}</span></td>
+      <td>${techTag(j.technician)}</td>
+      <td>${divName(j.jobType||'')}</td>
+      <td class="num">${fmtMoney(j.amount)}<span class="job-sub">${j.includesGST ? 'GST '+fmtMoney(jobGst(j)) : 'no GST'}</span></td>
+      <td>${pill(paid ? 'good' : 'bad', paid ? 'Paid' : 'Unpaid')}<span class="job-sub">${paid ? esc(j.paymentMethod||'—') : `${jobDaysWaiting(j)} days`}</span></td>
+      <td class="num">${com ? fmtMoney(com) : '—'}<span class="job-sub">${j.commissionPercent||0}%</span></td>
+      <td onclick="event.stopPropagation()">${ask ? reviewAskCell(j) : jobReviewState(j)}</td>
     </tr>`;
   }).join('');
 }
+// The open job: every field, editable for owners and managers (read-only for everyone else).
+function renderJobPanel(j, canEdit){
+  if (!j) return '';
+  const field = (label, html, full) => `<div class="field${full ? ' full' : ''}"><label>${label}</label>${html}</div>`;
+  const num = (f, v, step) => canEdit ? `<input type="number" step="${step||'any'}" value="${v ?? ''}" onchange="commitJobCellEdit('${j.id}','${f}',this.value,'number')">` : `<div class="job-ro">${esc(String(v ?? '—'))}</div>`;
+  const c = contactForJob(j), pr = getCurrentProfile();
+  const crm = c && pr && canViewSection(pr, 'crm') ? ` · <span class="xlink" onclick="goToLeadConversation('${c.id}')">customer card</span>` : '';
+  const com = jobCommissionAmount(j);
+  return `<div class="job-panel-head">
+      <div style="min-width:0"><h3>${esc(j.customerName||'—')}</h3><div class="meta">${j.invoiceNumber ? '#'+esc(j.invoiceNumber)+' · ' : ''}${fmtDateShort(j.date)}${crm}</div></div>
+      <button type="button" class="btn ghost small" onclick="selectJob(null)" aria-label="Close" title="Close">✕</button>
+    </div>
+    <div class="f">
+      ${field('Technician', statusSelect('jobTechnician', j.id, j.technician, technicianNames(STATE.data), ()=>'neutral', v=>v, !canEdit))}
+      ${field('Division', statusSelect('jobType', j.id, j.jobType, jobTypesForTech(j.technician), ()=>'neutral', v=>v, !canEdit))}
+      ${field('Date', canEdit ? `<input type="date" value="${esc(j.date||'')}" onchange="if(this.value) commitJobCellEdit('${j.id}','date',this.value,'date')">` : `<div class="job-ro">${fmtDateShort(j.date)}</div>`)}
+      ${field('Amount', num('amount', j.amount))}
+      ${field('GST included', statusSelect('jobGst', j.id, j.includesGST?'Yes':'No', ['Yes','No'], v=>v==='Yes'?'good':'neutral', v=>v, !canEdit) + (j.includesGST ? `<span class="job-sub">GST ${fmtMoney(jobGst(j))}</span>` : ''))}
+      ${field('Payment', statusSelect('jobStatus', j.id, j.paymentStatus, ['Unpaid','Paid'], v=>v==='Paid'?'good':'bad', v=>v, !canEdit) + (j.paymentStatus!=='Paid' ? `<span class="job-sub">${jobDaysWaiting(j)} days since the job</span>` : ''))}
+      ${field('Method', statusSelect('jobPaymentMethod', j.id, j.paymentMethod||'', CLOSING_PAYMENT_METHODS, ()=>'neutral', v=>v||'—', !canEdit))}
+    </div>
+    <div class="grp">Commission and parts</div>
+    <div class="f">
+      ${field('Commission %', num('commissionPercent', j.commissionPercent, '0.5') + `<span class="job-sub">= ${fmtMoney(com)}</span>`)}
+      ${field('Paid to tech', j.paidToTechnician==='Paid' ? `<span title="Marked paid in Payroll (undo it there)">${pill('good','Paid')}</span>` : statusSelect('jobPaidTech', j.id, j.paidToTechnician||'Not Paid', ['Not Paid','Stuck'], v=>v==='Stuck'?'neutral':'bad', v=>v, !canEdit))}
+      ${field('Parts cost', num('partsCost', j.partsCost||0))}
+      ${field('Parts paid by', statusSelect('jobPartsPaidBy', j.id, j.partsPaidBy||'', ['', ...technicianNames(STATE.data), 'Business'], ()=>'neutral', v=>v||'—', !canEdit))}
+    </div>
+    <div class="grp">Review and notes</div>
+    <div class="f">
+      ${field('Google review', canAskReview() ? reviewAskCell(j) : jobReviewState(j))}
+      ${field('Review taken', statusSelect('jobReview', j.id, j.reviewTaken?'Yes':'No', ['Yes','No'], v=>v==='Yes'?'good':'neutral', v=>v, !canEdit))}
+      ${field('Notes', canEdit ? `<textarea rows="3" placeholder="Add a note…" onchange="commitJobCellEdit('${j.id}','notes',this.value,'text')">${esc(j.notes||'')}</textarea>` : `<div class="job-ro">${esc(j.notes||'—')}</div>`, true)}
+    </div>
+    <div class="job-panel-acts">
+      <button type="button" class="btn ghost small" onclick="openJobActivityModal('${j.id}')">💬 History (${recordActivityCount(j)})</button>
+      ${canEdit ? `<button type="button" class="btn ghost small" onclick="openJobModal('${j.id}')">Edit all details</button>
+      <button type="button" class="btn ghost small danger" onclick="deleteJob('${j.id}')">Delete job</button>` : ''}
+    </div>`;
+}
+// The figures above the table, for the jobs shown; "Unpaid" is every unpaid job, whatever the period, and a click shows them.
+function renderJobsStats(data, jobs){
+  const sum = f => round2(jobs.reduce((s, j) => s + (f(j)||0), 0));
+  const byTech = {}; jobs.forEach(j => { byTech[j.technician] = (byTech[j.technician]||0) + 1; });
+  const techLine = Object.entries(byTech).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => `${esc(t)} ${n}`).join(' · ');
+  const period = (JOBS_RANGES.find(r => r[0]===UI.jobs.range) || [,'All'])[1];
+  const unpaid = (data.jobs||[]).filter(j => j.paymentStatus!=='Paid');
+  const oldest = unpaid.length ? Math.max(...unpaid.map(jobDaysWaiting)) : 0;
+  const stat = (label, value, sub, extra) => `<div class="jobs-stat"${extra||''}><div class="l">${label}</div><div class="v">${value}</div><div class="s">${sub}</div></div>`;
+  return stat('Jobs', jobs.length, techLine || '—')
+    + stat('Revenue', fmtMoney(sum(j => j.amount)), period==='All' ? 'all time' : esc(period.toLowerCase()))
+    + stat('GST', fmtMoney(sum(jobGst)), 'on these jobs')
+    + stat('Commissions', fmtMoney(sum(jobCommissionAmount)), 'on these jobs')
+    + `<button type="button" class="jobs-stat jobs-stat-unpaid${UI.jobs.status==='Unpaid' && UI.jobs.range==='all' ? ' on' : ''}" onclick="showUnpaidJobs()" title="Show every unpaid job">
+        <div class="l">Unpaid</div><div class="v"${unpaid.length ? ' style="color:var(--bad)"' : ''}>${fmtMoney(round2(unpaid.reduce((s, j) => s + j.amount, 0)))}</div>
+        <div class="s">${unpaid.length ? `${unpaid.length} job${unpaid.length===1?'':'s'} · oldest ${oldest} days` : 'nothing waiting'}</div></button>`;
+}
+function selectJob(id){
+  UI.jobs.selectedId = id && UI.jobs.selectedId!==id ? id : null;
+  refreshJobsTable();
+  const p = document.getElementById('jobs-panel');
+  if (p && UI.jobs.selectedId && window.innerWidth <= 1100) p.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function showUnpaidJobs(){ Object.assign(UI.jobs, { status:'Unpaid', range:'all', page:1 }); render(); }
+function setJobsSearch(v){ UI.jobs.q = v; UI.jobs.page = 1; refreshJobsTable(); }
+function clearJobsFilters(){ Object.assign(UI.jobs, { tech:'all', status:'all', range:'all', customFrom:'', customTo:'', q:'', noReview:false, page:1 }); render(); }
 /* ── "Ask for review" (Ofek, 2 Oct): the office sends the Google review request from the job, by hand ──
    Same text and sending as the old automatic request (review-requests function: SMS through GHL now, the email from
    info@ within 15 minutes). The cell shows what the technician wrote in the closing (review taken / don't ask) and
@@ -5588,51 +5678,60 @@ function markReviewLeft(jobId){
   logJobActivity(j, getCurrentProfile()?.fullName || 'Unknown', 'Marked: the customer left a Google review');
   showToast(`${j.customerName}: marked as reviewed`); render();
 }
+// Redraws everything below the filters (figures, table, pager, panel) but not the search box, so typing keeps its place.
 function refreshJobsTable(){
   const profile = getCurrentProfile(); if (!profile) return;
   const data = filterForProfile(STATE.data, profile);
   const canEdit = profile.role==='owner' || profile.role==='manager';
-  const { pageItems, page, totalPages, pageSize, total } = paginateRows(computeFilteredJobs(data), UI.jobs, 25);
-  const tbody = document.getElementById('jobs-tbody');
-  if (tbody) tbody.innerHTML = renderJobRows(pageItems, canEdit);
-  const pager = document.getElementById('jobs-pager');
-  if (pager) pager.innerHTML = renderPager(page, totalPages, total, pageSize, 'setJobsPage', 'setJobsPageSize');
+  const jobs = computeFilteredJobs(data);
+  const { pageItems, page, totalPages, pageSize, total } = paginateRows(jobs, UI.jobs, 25);
+  const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+  set('jobs-count', jobsCountLine(data, jobs));
+  set('jobs-stats', renderJobsStats(data, jobs));
+  set('jobs-tbody', renderJobRows(pageItems));
+  set('jobs-pager', renderPager(page, totalPages, total, pageSize, 'setJobsPage', 'setJobsPageSize'));
+  const sel = UI.jobs.selectedId ? data.jobs.find(j => j.id===UI.jobs.selectedId) : null;
+  set('jobs-panel', renderJobPanel(sel, canEdit));
+  const split = document.getElementById('jobs-split'); if (split) split.classList.toggle('with-panel', !!sel);
+  const panel = document.getElementById('jobs-panel'); if (panel) panel.hidden = !sel;
 }
-function updateJobColumnFilter(key, value){
-  UI.jobsFilters = UI.jobsFilters || {};
-  UI.jobsFilters[key] = value;
-  UI.jobs.page = 1;
-  refreshJobsTable();
-}
+function jobsCountLine(data, jobs){ return jobs.length===data.jobs.length ? `${data.jobs.length} jobs total` : `${jobs.length} of ${data.jobs.length} jobs`; }
 function setJobsPage(page){ UI.jobs.page = Math.max(1, page); refreshJobsTable(); }
 function setJobsPageSize(size){ UI.jobs.pageSize = Number(size); UI.jobs.page = 1; refreshJobsTable(); }
 function renderJobs(profile, data){
   const canEdit = profile.role==='owner' || profile.role==='manager';
-  const allTechs = technicianNames(data);
   const jobs = computeFilteredJobs(data);
   const { pageItems, page, totalPages, pageSize, total } = paginateRows(jobs, UI.jobs, 25);
-  const activeFilters = UI.jobsFilters || {};
-  const filterRow = JOB_COLUMNS.map(c => `<th style="padding:4px 6px"><input value="${esc(activeFilters[c.key]||'')}" placeholder="Filter…" oninput="updateJobColumnFilter('${c.key}', this.value)" style="width:100%;font-size:10.5px;padding:3px 5px;font-weight:400;text-transform:none;letter-spacing:normal"></th>`).join('');
-
+  const sel = UI.jobs.selectedId ? data.jobs.find(j => j.id===UI.jobs.selectedId) : null;
+  const withJobs = new Set(data.jobs.map(j => j.technician));
+  const techs = technicianNames(data).filter(t => withJobs.has(t));
+  const chip = (on, label, onclick, title) => `<button type="button" class="week-chip${on ? ' active' : ''}" onclick="${onclick}"${title ? ` title="${title}"` : ''}>${label}</button>`;
+  const filtered = UI.jobs.tech!=='all' || UI.jobs.status!=='all' || UI.jobs.range!=='all' || UI.jobs.noReview || String(UI.jobs.q||'').trim();
   return `
     <div class="page-head">
-      <div><h1 class="page-title">Jobs &amp; Commissions</h1><div class="page-sub">${jobs.length===data.jobs.length ? `${data.jobs.length} jobs total` : `${jobs.length} of ${data.jobs.length} jobs`}</div></div>
+      <div><h1 class="page-title">Jobs &amp; Commissions</h1><div class="page-sub" id="jobs-count">${jobsCountLine(data, jobs)}</div></div>
       <div style="display:flex;gap:8px">
         <button class="btn" onclick="exportJobsCsv()">Export CSV</button>
         ${canEdit ? `<button class="btn primary" onclick="openJobModal(null)">+ New Job</button>` : ''}
       </div>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-      <select style="width:auto" onchange="UI.jobs.tech=this.value;render()"><option value="all">All technicians</option>${allTechs.map(t=>`<option value="${esc(t)}" ${UI.jobs.tech===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
-      <select style="width:auto" onchange="UI.jobs.status=this.value;render()"><option value="all" ${UI.jobs.status==='all'?'selected':''}>All statuses</option><option value="Paid" ${UI.jobs.status==='Paid'?'selected':''}>Paid</option><option value="Unpaid" ${UI.jobs.status==='Unpaid'?'selected':''}>Unpaid</option></select>
-      ${JOBS_RANGES.map(([k,l]) => `<button class="week-chip ${UI.jobs.range===k?'active':''}" onclick="setJobsRange('${k}')">${l}</button>`).join('')}
-      ${UI.jobs.range==='custom' ? `<input type="date" style="width:auto" value="${esc(UI.jobs.customFrom||'')}" onchange="setJobsCustom('customFrom', this.value)"><span style="color:var(--ink-faint);font-size:12px;align-self:center">to</span><input type="date" style="width:auto" value="${esc(UI.jobs.customTo||'')}" onchange="setJobsCustom('customTo', this.value)">` : ''}
-      ${Object.values(activeFilters).some(v=>v) ? `<button class="btn ghost small" onclick="UI.jobsFilters={};render()">Clear column filters</button>` : ''}
+    <div class="jobs-stats" id="jobs-stats">${renderJobsStats(data, jobs)}</div>
+    <div class="jobs-filters">
+      <input class="jobs-search" type="search" value="${esc(UI.jobs.q||'')}" placeholder="Search customer, invoice #, technician…" oninput="setJobsSearch(this.value)" aria-label="Search jobs">
+      ${JOBS_RANGES.map(([k, l]) => chip(UI.jobs.range===k, l, `setJobsRange('${k}')`)).join('')}
+      ${UI.jobs.range==='custom' ? `<input type="date" style="width:auto" value="${esc(UI.jobs.customFrom||'')}" onchange="setJobsCustom('customFrom', this.value)"><span style="color:var(--ink-faint);font-size:12px">to</span><input type="date" style="width:auto" value="${esc(UI.jobs.customTo||'')}" onchange="setJobsCustom('customTo', this.value)">` : ''}
+      ${techs.length > 1 ? `<span class="sep"></span>${chip(UI.jobs.tech==='all', 'All techs', "UI.jobs.tech='all';UI.jobs.page=1;render()")}${techs.map(t => chip(UI.jobs.tech===t, esc(t), `UI.jobs.tech='${jsStr(t)}';UI.jobs.page=1;render()`)).join('')}` : ''}
+      <span class="sep"></span>
+      ${chip(UI.jobs.status==='Unpaid', 'Unpaid', `UI.jobs.status=UI.jobs.status==='Unpaid'?'all':'Unpaid';UI.jobs.page=1;render()`)}
+      ${chip(UI.jobs.noReview, 'No review yet', 'UI.jobs.noReview=!UI.jobs.noReview;UI.jobs.page=1;render()', 'Not reviewed and not asked yet')}
+      ${filtered ? `<button type="button" class="btn ghost small" onclick="clearJobsFilters()">Clear</button>` : ''}
     </div>
-    <div class="table-wrap"><table class="jobs-table"><thead>
-      <tr><th>Technician</th><th>Date</th><th>Customer</th><th>Invoice</th><th>Type</th><th>Amount</th><th>GST</th><th>Status</th><th>Method</th><th>GST Amount</th><th>Parts Cost</th><th>Parts Paid By</th><th>%</th><th>Commission</th><th>Tech Paid</th><th>Review</th><th class="wrap">Notes</th><th>Activity</th>${canEdit?'<th></th>':''}${canAskReview()?'<th>Google review</th>':''}</tr>
-      <tr class="filter-row">${filterRow}<th></th>${canEdit?'<th></th>':''}${canAskReview()?'<th></th>':''}</tr>
-    </thead><tbody id="jobs-tbody">${renderJobRows(pageItems, canEdit)}</tbody></table><div id="jobs-pager">${renderPager(page, totalPages, total, pageSize, 'setJobsPage', 'setJobsPageSize')}</div></div>
+    <div class="jobs-split${sel ? ' with-panel' : ''}" id="jobs-split">
+      <div class="table-wrap"><table class="jobs-list"><thead><tr>
+        <th>Date</th><th>Customer</th><th>Technician</th><th>Division</th><th class="num">Amount</th><th>Payment</th><th class="num">Commission</th><th>Review</th>
+      </tr></thead><tbody id="jobs-tbody">${renderJobRows(pageItems)}</tbody></table><div id="jobs-pager">${renderPager(page, totalPages, total, pageSize, 'setJobsPage', 'setJobsPageSize')}</div></div>
+      <aside class="job-panel" id="jobs-panel"${sel ? '' : ' hidden'}>${renderJobPanel(sel, canEdit)}</aside>
+    </div>
   `;
 }
 
@@ -5780,9 +5879,10 @@ function goToJobFromSearch(jobId){
   leaveLeadThen(null, () => openJobFromSearch(jobId, profile));
 }
 function openJobFromSearch(jobId, profile){
-  UI.tab = 'jobs'; UI.jobs = {tech:'all', status:'all', week:'all'};
+  const j = (STATE.data.jobs||[]).find(x => x.id===jobId);
+  UI.tab = 'jobs';
+  UI.jobs = { ...UI.jobs, tech:'all', status:'all', range:'all', customFrom:'', customTo:'', noReview:false, page:1, q: j ? (j.invoiceNumber || j.customerName || '') : '', selectedId: jobId };
   render();
-  if (profile.role==='owner' || profile.role==='manager') openJobModal(jobId);
 }
 
 function openJobModal(jobId){
