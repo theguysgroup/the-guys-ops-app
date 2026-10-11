@@ -5639,7 +5639,7 @@ function renderJobsStats(data, jobs){
   const techLine = Object.entries(byTech).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => `${esc(t)} ${n}`).join(' · ');
   const period = (JOBS_RANGES.find(r => r[0]===UI.jobs.range) || [,'All'])[1];
   const unpaid = (data.jobs||[]).filter(j => j.paymentStatus!=='Paid');
-  const oldest = unpaid.length ? Math.max(...unpaid.map(jobDaysWaiting)) : 0;
+  const oldest = unpaid.length ? Math.max(...unpaid.map(j => jobDaysWaiting(j))) : 0;   // not .map(jobDaysWaiting): map's index would land in its "today"
   const stat = (label, value, sub, extra) => `<div class="jobs-stat"${extra||''}><div class="l">${label}</div><div class="v">${value}</div><div class="s">${sub}</div></div>`;
   return stat('Jobs', jobs.length, techLine || '—')
     + stat('Revenue', fmtMoney(sum(j => j.amount)), period==='All' ? 'all time' : esc(period.toLowerCase()))
