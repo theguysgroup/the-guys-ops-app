@@ -7838,7 +7838,7 @@ function renderDashGoogle(profile, data, standalone){
     const when = new Date(oldest).toLocaleString('en-AU',{ timeZone:'Australia/Sydney', dateStyle:'medium', timeStyle:'short' });
     return `<div style="flex-basis:100%;font-size:12px;color:var(--warn-ink, var(--ink-soft))">⚠ The ${levels.join(' and ')} lists${wins.length ? ' for ' + wins.map(w => ADS_WIN_LABEL[w]).join(', ') : ''} were not refreshed last night; they are from ${esc(when)}.</div>`;
   })();
-  const pausedTag = name => (A && A.campSt && (A.campSt[name]==='PAUSED' || A.campSt[name]==='REMOVED')) ? ` <span class="tag" style="font-weight:600">${A.campSt[name]==='PAUSED' ? 'Paused' : 'Removed'}</span>` : '';
+  const pausedTag = name => (A && A.campSt && (A.campSt[name]==='PAUSED' || A.campSt[name]==='REMOVED')) ? ` <span class="pill neutral" style="margin-inline-start:6px;vertical-align:1px">${A.campSt[name]==='PAUSED' ? 'Paused' : 'Removed'}</span>` : '';
   const dl = (x) => x===null||x===undefined ? '—' : fmtMoney(round2(x));
   const cnt = x => String(Math.round(x*10)/10);
   const W = ADS_WIN_LABEL[win];
@@ -7926,7 +7926,7 @@ function renderDashGoogle(profile, data, standalone){
   const kwRow = k => adsRow([kwName(k), adsNum(fmtMoney(round2(k.r.cost))), adsNum(k.r.clicks.toLocaleString()), adsNum(cnt(k.r.conversions)), adsNum(k.r.conversions>0?dl(k.r.cost/k.r.conversions):'—'), adsNum((k.r.extra&&k.r.extra.qs)||'—'), adsDots(k.dots)]);
   const termHead = ['What people searched',{t:'Spent',num:1},{t:'Clicks',num:1},{t:'Conversions',num:1},'7·14·30·60·90d'];
   // A one-word search blocked as a broad negative also blocks every good search containing that word (Google Ads Master 13 Oct: "eco").
-  const oneWord = t => !/\s/.test(String(t.r.item || '').trim()) ? ` <span class="tag" style="font-weight:600;background:color-mix(in srgb, var(--warn) 18%, transparent)" title="Block it as an exact match only: a one-word broad negative also blocks good searches that contain the word.">One word: exact match only</span>` : '';
+  const oneWord = t => !/\s/.test(String(t.r.item || '').trim()) ? ` <span class="pill warn" style="margin-inline-start:6px;vertical-align:1px" title="Block it as an exact match only: a one-word broad negative also blocks good searches that contain the word.">One word: exact match only</span>` : '';
   const termRow = t => adsRow([`<b>${esc(t.r.item)}</b>${oneWord(t)}${sub(t.r)}`, adsNum(fmtMoney(round2(t.r.cost))), adsNum(t.r.clicks.toLocaleString()), adsNum(cnt(t.r.conversions)), adsDots(t.dots)]);
   const th = A.th;
   const JW = ADS_WIN_LABEL[A.jw], jr = A.jRange;
