@@ -11673,7 +11673,7 @@ function renderPeoplePage(){
       : `${p.role!=='owner' && p.role!=='manager' ? `<button class="btn small ghost" onclick="setSettingsPage('access')">Access</button>` : ''}${owner && a ? `<button class="btn small ghost" onclick="teamLink('${p.id}')">${a.joined ? 'Password link' : 'Join link'}</button>` : ''}${owner && a && p.role!=='owner' ? `<button class="btn small ghost${a.accessOff ? '' : ' danger'}" onclick="teamAccess('${p.id}', ${a.accessOff ? 'true' : 'false'})">${a.accessOff ? 'Turn access on' : 'Turn access off'}</button>` : ''}${owner && !VIEW_AS_ID ? `<button class="btn small ghost" onclick="enterViewAs('${p.id}')">View as</button>` : ''}`;
     return `<tr><td><span class="who"><span class="who-av" style="background:${colors[i % colors.length]}">${esc(initials(p.fullName))}</span><span>${esc(p.fullName)}<small>${esc([a && a.email, seen].filter(Boolean).join(' · ') || (p.technicianName && p.technicianName!==p.fullName ? p.technicianName : ''))}</small></span></span></td><td>${esc(roleLabel(p.role))}</td><td>${status}</td><td class="set-actions">${actions}</td></tr>`;
   }).join('');
-  return setBlock('Team', `${people.length} people`, `<div class="table-wrap set-table"><table><thead><tr><th>Name</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+  return (TEAM.error && !(TEAM.list || []).length ? `<div class="set-note">${ico('alert', 16)}<span>${esc(TEAM.error)} Emails, sign-ins and invites show here once it is.</span></div>` : '') + setBlock('Team', `${people.length} people`, `<div class="table-wrap set-table"><table><thead><tr><th>Name</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="cat-foot"><button class="btn small primary" onclick="openInvite()">${ico('plus', 14)} Invite someone</button></div>`);
 }
 
@@ -11682,7 +11682,10 @@ const TEAM = { list: null, busy: false };
 const TEAM_URL = SUPABASE_URL + '/functions/v1/team';
 async function teamCall(body){
   const { data } = await sb.auth.getSession();
-  const r = await fetch(TEAM_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify(body) });
+  let r;
+  try { r = await fetch(TEAM_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify(body) }); }
+  catch (e) { throw new Error('The invite service isn\'t installed on the server yet.'); }
+  if (r.status===404) throw new Error('The invite service isn\'t installed on the server yet.');
   const out = await r.json().catch(() => ({}));
   if (!r.ok || !out.ok) throw new Error(out.reason || out.error || ('HTTP ' + r.status));
   return out;
