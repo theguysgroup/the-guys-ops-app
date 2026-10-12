@@ -285,7 +285,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
   /* the CRM's six filters fold away behind one button */
   .crm-filters > select { display: none; }
   .crm-filters.open > select { display: block; flex: 1 1 calc(50% - 4px); min-width: 0; width: auto !important; }
-  .crm-filters > input { min-width: 0 !important; flex: 1 1 0 !important; }
+  .crm-filters > input { min-width: 150px !important; flex: 1 1 0 !important; }   /* keeps the search on the first row, the filters under it */
   .crm-filter-toggle { display: inline-flex; flex: none; }
   .crm-filter-toggle .filter-count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--primary); color: var(--on-primary); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
   /* the pipeline: one column per screen, swiped sideways, with the stages above it */
@@ -302,6 +302,9 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
   .pipe-body { max-height: calc(100dvh - 290px); }
   body.pipe-dragging .pipeline { scroll-snap-type: none; }
   /* the reply box: the text gets the whole width, the channel and Send go under it */
+  .crm-inbox-thread-head { flex-wrap: wrap; padding: 10px 12px; }
+  .crm-inbox-thread-head > span:first-child { flex: 1 1 100%; }
+  .crm-inbox-thread-head > span:last-child { flex: 1 1 100%; justify-content: flex-start; flex-wrap: wrap; }
   .composer-row { flex-wrap: wrap; }
   .composer-row > textarea { order: -1; flex: 1 1 100% !important; }
   .composer-row > .btn { margin-inline-start: auto; }
@@ -309,6 +312,13 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
   .modal-back { padding: 0 !important; }
   .modal { margin-top: auto; max-width: 100% !important; border-radius: 16px 16px 0 0; border-bottom: 0; padding: 18px 16px calc(22px + env(safe-area-inset-bottom, 0px)) !important; animation: sheetUp .34s cubic-bezier(.22,1,.36,1) both; }
   .bulk-check { width: 20px; height: 20px; }
+  /* figures two to a row instead of one big card per screen */
+  .grid-2:has(> .stat-card), .grid-3:has(> .stat-card), .grid-4:has(> .stat-card) { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .grid-3:has(> .stat-card) > .stat-card:last-child:nth-child(odd), .grid-4:has(> .stat-card) > .stat-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .stat-card { padding: 14px 12px 14px 18px; }
+  .stat-value { font-size: 24px; overflow-wrap: anywhere; }
+  .stat-label { font-size: 10.5px; letter-spacing: .05em; }
+  .table-wrap td > .empty { position: sticky; left: 0; width: calc(100vw - 30px); }   /* an empty wide table says so in the middle of the screen, not of the table */
   [style*="grid-template-columns:repeat(3,1fr)"] { grid-template-columns: 1fr 1fr !important; }
 }
 @keyframes sheetUp { from { opacity: .5; transform: translateY(48px); } to { opacity: 1; transform: none; } }
@@ -10896,7 +10906,7 @@ function renderSettings(profile){
     <div class="page-head">
       <div><h1 class="page-title">Permissions &amp; Settings</h1><div class="page-sub">Decide exactly what each person sees — including Ron, whenever you choose. A change reaches that person the next time they open or refresh the app.</div></div>
       <span style="display:flex;gap:8px">
-        <button class="btn ghost small" onclick="exportDataAsJson()">⬇️ Export all data (JSON)</button>
+        <button class="btn ghost small" onclick="exportDataAsJson()">${ico('incoming')} Export all data (JSON)</button>
         <button class="btn ghost small" onclick="openSettingsActivityModal()">${ico('history')} Settings activity</button>
       </span>
     </div>
