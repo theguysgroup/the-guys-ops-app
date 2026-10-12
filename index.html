@@ -14,6 +14,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script id="theme-boot">try { var t = localStorage.getItem('theme'); if (t==='dark' || t==='light') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
 
 <style>
 :root {
@@ -99,20 +100,14 @@ a { color: var(--primary-strong); }
 .card.tight { padding: var(--space-4) var(--space-4); }
 .card.flat { box-shadow: none; }
 .stat-label { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .07em; font-weight: 700; font-family: 'Figtree', sans-serif; }
-.stat-value { font-size: 28px; font-weight: 700; margin-top: var(--space-2); font-family: 'Figtree', sans-serif; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; animation: statPop .5s cubic-bezier(.26,1.35,.4,1) .08s both; }
+.stat-value { font-size: 28px; font-weight: 700; margin-top: var(--space-2); font-family: 'Figtree', sans-serif; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .stat-sub { font-size: 12px; color: var(--ink-soft); margin-top: var(--space-1); }
-.stat-card { position: relative; overflow: hidden; padding-inline-start: 22px; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; animation: statCardIn .38s cubic-bezier(.2,.85,.25,1) both; }
+.stat-card { position: relative; overflow: hidden; padding-inline-start: 22px; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
 .stat-card::before { content:''; position:absolute; inset-inline-start:0; top:9px; bottom:9px; width:3px; border-radius: 99px; background: var(--stat-accent, var(--primary-teal)); }
 .stat-card::after { content:''; position:absolute; top:-40%; inset-inline-end:-15%; width:110px; height:110px; border-radius:99px; background: var(--stat-accent, var(--primary-teal)); opacity:.05; pointer-events:none; }
 .stat-card:hover { border-color: color-mix(in srgb, var(--stat-accent, var(--primary-teal)) 40%, var(--line)); box-shadow: var(--shadow-lg); transform: translateY(-2px); }
 @keyframes statCardIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform:none; } }
 @keyframes statPop { from { opacity:0; transform: scale(.85); } to { opacity:1; transform: scale(1); } }
-.grid-2 > .stat-card:nth-child(2), .grid-3 > .stat-card:nth-child(2), .grid-4 > .stat-card:nth-child(2) { animation-delay: .05s; }
-.grid-2 > .stat-card:nth-child(2) .stat-value, .grid-3 > .stat-card:nth-child(2) .stat-value, .grid-4 > .stat-card:nth-child(2) .stat-value { animation-delay: .13s; }
-.grid-3 > .stat-card:nth-child(3), .grid-4 > .stat-card:nth-child(3) { animation-delay: .1s; }
-.grid-3 > .stat-card:nth-child(3) .stat-value, .grid-4 > .stat-card:nth-child(3) .stat-value { animation-delay: .18s; }
-.grid-4 > .stat-card:nth-child(4) { animation-delay: .15s; }
-.grid-4 > .stat-card:nth-child(4) .stat-value { animation-delay: .23s; }
 
 .page-head { display:flex; align-items:center; justify-content:space-between; gap: var(--space-4); margin-bottom: var(--space-6); flex-wrap: wrap; }
 .page-title { font-size: 28px; margin: 0; font-weight: 700; font-family: 'Oswald', 'Figtree', sans-serif; text-wrap: balance; letter-spacing: -0.005em; text-transform: uppercase; }
@@ -300,6 +295,43 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .trend-plot { position:relative; }
 .trend svg { display:block; }
 .trend-dot { position:absolute; width:9px; height:9px; border-radius:50%; background: var(--series-1); box-shadow: 0 0 0 2px var(--surface); transform: translate(-50%, -50%); pointer-events:none; }
+/* Motion (Ofek 12 Oct): a page's blocks come in one after another, numbers count up, bars grow and lines draw, only
+   when a page is entered (or its period changes), never on the redraw after each click; reduced-motion gets none. */
+:root { --ease-out: cubic-bezier(.22,1,.36,1); }
+@keyframes enterUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes growX { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes growY { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes fadeInSoft { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dotPop { from { opacity: 0; transform: translate(-50%, -50%) scale(.3); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+.enter-item { animation: enterUp .48s var(--ease-out) both; animation-delay: var(--d, 0ms); }
+.enter-row { animation: enterUp .36s var(--ease-out) both; animation-delay: var(--d, 0ms); }
+.entering .grow-x { transform-origin: left center; animation: growX .75s var(--ease-out) both; animation-delay: var(--gd, 140ms); }
+.entering .grow-y { transform-origin: center bottom; animation: growY .75s var(--ease-out) both; animation-delay: var(--gd, 140ms); }
+.entering .reveal-rect { transform-box: fill-box; transform-origin: left center; animation: growX 1.05s var(--ease-out) both; animation-delay: 160ms; }
+.entering .trend-dot { animation: dotPop .35s var(--ease-out) both; animation-delay: 1.05s; }
+@media (prefers-reduced-motion: reduce) { .enter-item, .enter-row, .entering .grow-x, .entering .grow-y, .entering .reveal-rect, .entering .trend-dot { animation: none !important; } }
+/* Every chart shows its exact numbers on hover: one tooltip for the whole app */
+#chart-tip { position: fixed; z-index: 400; pointer-events: none; min-width: 120px; max-width: 280px; padding: 8px 11px; border-radius: 8px; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); box-shadow: var(--shadow-lg); font-size: 12px; line-height: 1.45; opacity: 0; transform: translateY(4px); transition: opacity .12s ease, transform .12s ease; }
+#chart-tip.on { opacity: 1; transform: none; }
+#chart-tip b { display: block; font-size: 12.5px; margin-bottom: 1px; }
+#chart-tip span { display: block; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+[data-tip] { cursor: default; }
+[data-tip][onclick] { cursor: pointer; }
+.trend-guide { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--ink-faint) 70%, transparent); pointer-events: none; opacity: 0; transition: opacity .12s ease; }
+.trend-plot.hovering .trend-guide { opacity: 1; }
+.trend-dot { transition: left .12s ease, top .12s ease; }
+.bar, .wf-bar, .meter > span, .grow-y { transition: filter .12s ease; }
+[data-tip]:hover > .bar, .wf-row[data-tip]:hover .wf-bar, .meter[data-tip]:hover > span, [data-tip]:hover .grow-y, [data-tip]:hover .grow-x { filter: brightness(1.18) saturate(1.1); }
+/* Dark or light, one click (sits beside the search box) */
+.theme-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; padding: 0; border-radius: var(--radius-sm); border: 1px solid var(--sidebar-line);
+  background: var(--sidebar-bg-hover); color: var(--sidebar-ink-soft); cursor: pointer; transition: background-color .15s ease, color .15s ease, border-color .15s ease; }
+.theme-btn:hover { background: var(--sidebar-bg-active); color: var(--sidebar-ink); border-color: color-mix(in srgb, var(--sidebar-accent) 45%, var(--sidebar-line)); }
+.theme-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.theme-btn svg { width: 17px; height: 17px; }
+.theme-btn.just svg { animation: iconSpin .5s var(--ease-out) both; }
+@keyframes iconSpin { from { opacity: 0; transform: rotate(-120deg) scale(.5); } to { opacity: 1; transform: none; } }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .28s; }
 .trend-axis { display:flex; justify-content:space-between; gap:10px; font-size:10.5px; color: var(--ink-faint); margin-top:5px; }
 .kv-detail { display:block; font-size:11.5px; color: var(--ink-faint); font-weight:400; margin-top:2px; }
 .tbar-row { display:grid; grid-template-columns: 130px 1fr auto; gap:12px; align-items:center; font-size:12.5px; padding:4px 0; }
@@ -418,7 +450,7 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .pipe-count { font-family: 'Figtree', sans-serif; font-size: 11px; font-weight: 700; color: var(--on-primary); background: var(--stage, var(--ink-soft)); border-radius: 99px; padding: 2px 9px; }
 .pipe-body { padding: 11px; display: flex; flex-direction: column; gap: 9px; min-height: 90px; max-height: calc(100vh - 230px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }  /* each column scrolls on its own (Ofek 3/10) */
 .pipe-empty { font-size: 11.5px; color: var(--ink-faint); text-align: center; padding: 14px 0; }
-.lead-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 11px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 7px; transition: border-color .15s ease, box-shadow .15s ease, transform .15s cubic-bezier(.2,.85,.25,1); animation: leadCardIn .3s ease both; }
+.lead-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 11px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 7px; transition: border-color .15s ease, box-shadow .15s ease, transform .15s cubic-bezier(.2,.85,.25,1); }
 .lead-card:hover, .lead-card:focus-visible { border-color: var(--primary); box-shadow: var(--shadow-lg); transform: translateY(-2px); }
 .lead-card.just-moved { animation: leadCardMoved .7s ease; }
 @keyframes leadCardIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -3126,6 +3158,7 @@ function renderShell(profile, data){
           <span style="display:flex;align-items:center;gap:7px">🔍 Search</span>
           <span style="font-size:10px;color:var(--sidebar-ink-faint);border:1px solid var(--sidebar-line);border-radius:4px;padding:1px 5px">⌘K</span>
         </button>
+        ${themeButton()}
         ${navPinButton()}
         </div>
         <nav>${navHtml}</nav>
@@ -3198,12 +3231,14 @@ function renderBarGroup(items, opts){
   // money so the existing Overview call sites keep working unchanged.
   const fmt = (opts && opts.fmt) || fmtMoney;
   const max = Math.max(...items.map(i=>i.value), 0.0001);
-  const bars = items.map(it => {
+  const total = items.reduce((sum, i) => sum + (Number(i.value)||0), 0);
+  const bars = items.map((it, idx) => {
     const pct = it.value>0 ? Math.max(4, Math.round((it.value/max)*100)) : 2;
-    return `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;min-width:0${it.onclick?';cursor:pointer':''}"${it.onclick?` onclick="${it.onclick}" title="Show the list"`:''}>
+    const share = total > 0 ? ` · ${Math.round((Number(it.value)||0) / total * 100)}% of all` : '';
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;min-width:0${it.onclick?';cursor:pointer':''}"${it.onclick?` onclick="${it.onclick}"`:''}${tipAttr(it.label, [fmt(it.value) + share, it.onclick ? 'Click for the list' : ''])}>
       <div class="mono${it.onclick?' xlink':''}" style="font-size:12px;font-weight:600;white-space:nowrap">${fmt(it.value)}</div>
       <div style="width:100%;height:64px;display:flex;align-items:flex-end;background:var(--surface-3);border-radius:4px;overflow:hidden">
-        <div style="width:100%;height:${pct}%;background:${it.color};transition:height .2s"></div>
+        <div class="grow-y" style="width:100%;height:${pct}%;background:${it.color};--gd:${140 + idx * 70}ms"></div>
       </div>
       <div style="font-size:10.3px;color:var(--ink-soft);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%">${esc(it.label)}</div>
     </div>`;
@@ -5746,7 +5781,7 @@ function refreshJobsTable(){
   const { pageItems, page, totalPages, pageSize, total } = paginateRows(jobs, UI.jobs, 25);
   const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
   set('jobs-count', jobsCountLine(data, jobs));
-  set('jobs-stats', renderJobsStats(data, jobs));
+  motionSwap(document.getElementById('jobs-stats'), renderJobsStats(data, jobs));
   set('jobs-tbody', renderJobRows(pageItems));
   set('jobs-pager', renderPager(page, totalPages, total, pageSize, 'setJobsPage', 'setJobsPageSize'));
   const sel = UI.jobs.selectedId ? data.jobs.find(j => j.id===UI.jobs.selectedId) : null;
@@ -6323,12 +6358,12 @@ function closeRateTone(rate){ if (rate===null) return 'neutral'; return rate>=50
 function marginTone(margin){ if (margin===null) return 'neutral'; return margin>=40 ? 'good' : (margin>=20 ? 'warn' : 'bad'); }
 function funnelStage(label, count, totalForPct, color, clickJs){
   const pct = totalForPct ? Math.round((count/totalForPct)*100) : 0;
-  return `<div style="margin-bottom:10px">
+  return `<div style="margin-bottom:10px"${tipAttr(label, [`${count} (${pct}% of the leads)`])}>
     <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-      <span>${esc(label)}</span><span class="mono${clickJs?' xlink':''}" style="font-weight:600"${clickJs?` onclick="${clickJs}" title="Show the list"`:''}>${count} <span style="color:var(--ink-soft);font-weight:400">(${pct}%)</span></span>
+      <span>${esc(label)}</span><span class="mono${clickJs?' xlink':''}" style="font-weight:600"${clickJs?` onclick="${clickJs}"`:''}>${count} <span style="color:var(--ink-soft);font-weight:400">(${pct}%)</span></span>
     </div>
     <div style="height:20px;border-radius:5px;background:var(--surface-3);overflow:hidden">
-      <div style="height:100%;width:${count?Math.max(pct,3):0}%;background:${color};border-radius:5px;transition:width .2s"></div>
+      <div class="grow-x" style="height:100%;width:${count?Math.max(pct,3):0}%;background:${color};border-radius:5px"></div>
     </div>
   </div>`;
 }
@@ -6530,7 +6565,7 @@ function adsAnalyse(idx, win){
   const trend = ADS_WINS.map(w => { const c = get(w,'campaign'); const cost = sum(c,r=>r.cost), conv = sum(c,r=>r.conversions), clicks = sum(c,r=>r.clicks), imp = sum(c,r=>r.impressions); return { w, cost, conv, clicks, imp, cpc: clicks?cost/clicks:null, cpl: conv>0?cost/conv:null }; });
   return { get, fixKw, scaleKw, lowQs, blockTerms, addTerms, trend, fixCost:sum(fixKw,x=>x.r.cost), blockCost:sum(blockTerms,x=>x.r.cost), lowQsCost:sum(lowQs,x=>x.r.cost), th };
 }
-function adsDots(d){ const lab = { bad:'spent, no conversion', good:'converted', none:'no spend' }; return `<span style="display:inline-flex;gap:3px;align-items:center">${d.map((x,i)=>`<span title="${ADS_WINS[i]}: ${lab[x]}" style="width:9px;height:9px;border-radius:50%;background:${x==='bad'?'var(--bad)':x==='good'?'var(--good)':'var(--line)'}"></span>`).join('')}</span>`; }
+function adsDots(d){ const lab = { bad:'spent, no conversion', good:'converted', none:'no spend' }; return `<span style="display:inline-flex;gap:3px;align-items:center">${d.map((x,i)=>`<span${tipAttr(ADS_WINS[i], [lab[x]])} style="width:9px;height:9px;border-radius:50%;background:${x==='bad'?'var(--bad)':x==='good'?'var(--good)':'var(--line)'}"></span>`).join('')}</span>`; }
 function adsLimited(id, rows){ const all = !!ADS_UI.all[id]; const shown = all ? rows : rows.slice(0, ADS_ROW_LIMIT); const more = rows.length > ADS_ROW_LIMIT ? `<div style="margin-top:8px"><button class="btn" onclick="adsToggleAll('${id}')">${all?'Show top '+ADS_ROW_LIMIT+' only':'Show all '+rows.length}</button></div>` : ''; return { shown, more }; }
 function adsListSection(id, title, what, headers, rows, rowFn, empty){
   const { shown, more } = adsLimited(id, rows);
@@ -7003,7 +7038,7 @@ function renderDashboard(profile, data){
         <div class="stat-sub">paid on ${paidJobs.length} job${paidJobs.length===1?'':'s'} · ${perf.avgDaysToPayment===null ? 'no payment times yet' : `paid in ${perf.avgDaysToPayment} day${perf.avgDaysToPayment===1?'':'s'} on average`}</div>
         ${(() => { const all = paidAmt + unpaidAmt, pct = all > 0 ? Math.round(paidAmt / all * 100) : 0;
           return `<div class="chart-head">Paid so far</div>
-          <div class="meter" role="img" aria-label="${pct}% of this period's jobs paid" title="${pct}% paid · ${fmtMoney(unpaidAmt)} still unpaid"><span style="width:${pct}%;background:var(--good)"></span></div>
+          <div class="meter" role="img" aria-label="${pct}% of this period's jobs paid"${tipAttr(`${pct}% paid`, [`${fmtMoney(unpaidAmt)} still unpaid`])}><span class="grow-x" style="width:${pct}%;background:var(--good)"></span></div>
           <div class="meter-caption"><span><b>${pct}%</b> paid</span><span>${unpaidJobs.length ? `${drill(fmtMoney(unpaidAmt), "This period's jobs not paid yet", 'jobs', unpaidJobs)} still unpaid · ${unpaidJobs.length} job${unpaidJobs.length===1?'':'s'}` : 'nothing left unpaid ✓'}</span></div>`; })()}
         ${(() => { const segs = [{ label:'Card', value: round2(pay['Credit Card']), color:'var(--series-1)' }, { label:'Bank transfer', value: round2(pay['Bank Transfer']), color:'var(--series-2)' }, { label:'Cash', value: round2(pay.Cash), color:'var(--series-3)' }, ...(pay.unset ? [{ label:'Method not set', value: round2(pay.unset), color:'var(--deemph)' }] : [])];
           return `<div class="chart-head">How customers paid</div>${splitBar(segs)}${splitRows(segs)}`; })()}
@@ -7118,7 +7153,8 @@ function payrollPaidBadge(st, currentTotal){
 function renderCompareBars(rows, opts){
   const fmt = opts.fmt || fmtMoney;
   const max = Math.max(0.01, ...rows.flatMap(r => [Number(r.cur)||0, Number(r.prev)||0]));
-  const line = (v, prev) => `<div class="cmp-line"><div>${(Number(v)||0) > 0 ? `<div class="bar" style="width:${((Number(v)||0) / max * 100).toFixed(1)}%;background:${prev ? 'var(--deemph)' : 'var(--series-1)'}" title="${esc((prev ? opts.prevLabel : opts.curLabel) + ': ' + fmt(v))}"></div>` : ''}</div><span class="v${prev ? ' prev' : ''}">${v===null ? '—' : fmt(v)}</span></div>`;
+  let k = 0;
+  const line = (v, prev) => `<div class="cmp-line"${tipAttr(prev ? opts.prevLabel : opts.curLabel, [fmt(v)])}><div>${(Number(v)||0) > 0 ? `<div class="bar grow-x" style="width:${((Number(v)||0) / max * 100).toFixed(1)}%;background:${prev ? 'var(--deemph)' : 'var(--series-1)'};--gd:${140 + (k++) * 40}ms"></div>` : ''}</div><span class="v${prev ? ' prev' : ''}">${v===null ? '—' : fmt(v)}</span></div>`;
   return `<div class="cmp-legend"><span><i class="swatch" style="background:var(--series-1)"></i>${esc(opts.curLabel)}</span><span><i class="swatch" style="background:var(--deemph)"></i>${esc(opts.prevLabel)}</span></div>
     ${rows.map(r => `<div class="cmp-row"><span class="lbl">${r.labelHtml || esc(r.label)}</span><div>${line(r.cur, false)}${line(r.prev, true)}</div><span class="d">${deltaBadge(Number(r.cur)||0, Number(r.prev)||0) || '<span class="hint">—</span>'}</span></div>`).join('')}`;
 }
@@ -7652,7 +7688,7 @@ function payrollWeekPanel(c, data){
   const maxTotal = Math.max(0.01, ...Object.values(st.types).map(b => b.total));
   // Job types, largest first; each bar in its division's colour (length carries the amount).
   const types = Object.entries(st.types).filter(([, b]) => b.count).sort((a, b) => b[1].total - a[1].total).map(([t, b]) => `<div class="tbar-row"><span>${divName(t)}</span>
-    <div class="bar-wrap"><div class="bar" style="width:${(b.total / maxTotal * 100).toFixed(1)}%;background:${divColor(t)}" title="${esc(t)}: ${b.count} job${b.count===1?'':'s'}, ${fmtMoney(b.total)}"></div></div>
+    <div class="bar-wrap"${tipAttr(t, [`${b.count} job${b.count===1?'':'s'} · ${fmtMoney(b.total)}`, `average ${fmtMoney(round2(b.total / b.count))}`])}><div class="bar grow-x" style="width:${(b.total / maxTotal * 100).toFixed(1)}%;background:${divColor(t)}"></div></div>
     <span class="v">${b.count} job${b.count===1?'':'s'} · avg ${fmtMoney(round2(b.total / b.count))} · <b>${fmtMoney(b.total)}</b></span></div>`).join('');
   const who = c.person;
   return `<div class="card tight" style="margin-bottom:12px">
@@ -8096,6 +8132,7 @@ function splitRows(segs){
 }
 // A weekly line for a stat tile: 2px line in the quiet colour with a ~10% wash, the latest week in the accent with a
 // surface ring, hover a week for its amount, first and last week named under it. series: [{ label, revenue }].
+let TREND_ID = 0;
 function renderTrend(series, opts){
   opts = opts || {};
   const n = (series||[]).length; if (n < 2) return '';
@@ -8107,15 +8144,21 @@ function renderTrend(series, opts){
   const base = Y(0).toFixed(1);
   const color = opts.color || 'var(--ink-faint)';
   const step = w / (n - 1);
-  const hits = series.map((x,i) => `<rect x="${Math.max(0, X(i) - step/2).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${h}" fill="transparent"><title>${esc(x.label)}: ${fmtMoney(x.revenue)}</title></rect>`).join('');
+  // One invisible strip per week: hovering it shows that week's exact amount and moves the dot and guide there.
+  const hits = series.map((x,i) => `<rect x="${Math.max(0, X(i) - step/2).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${h}" fill="transparent"${tipAttr(x.label, [`${opts.name || 'Per week'}: ${fmtMoney(x.revenue)}`, i===n-1 && opts.lastLabel ? opts.lastLabel : ''])} data-dot-x="${(X(i) / w * 100).toFixed(2)}" data-dot-y="${Y(vals[i]).toFixed(1)}"></rect>`).join('');
   const last = series[n-1];
+  const clip = 'trend-clip-' + (++TREND_ID);
   return `<div class="trend"><div class="trend-plot" style="height:${h}px">
     <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" role="img" aria-label="${esc((opts.name||'Per week') + ': ' + series.map(x => `${x.label} ${fmtMoney(x.revenue)}`).join(', '))}">
+      <defs><clipPath id="${clip}"><rect class="reveal-rect" x="0" y="0" width="${w}" height="${h}"></rect></clipPath></defs>
       ${min < 0 ? `<line x1="0" x2="${w}" y1="${base}" y2="${base}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"></line>` : ''}
-      <path d="${line} L${w},${base} L0,${base} Z" fill="${color}" opacity=".1"></path>
-      <path d="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+      <g clip-path="url(#${clip})">
+        <path d="${line} L${w},${base} L0,${base} Z" fill="${color}" opacity=".1"></path>
+        <path d="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+      </g>
       ${hits}
     </svg>
+    <span class="trend-guide"></span>
     <span class="trend-dot" style="left:100%;top:${Y(vals[n-1]).toFixed(1)}px"></span></div>
     <div class="trend-axis"><span>${esc(series[0].label)}</span>${opts.middle ? `<span>${esc(series[Math.floor((n-1)/2)].label)}</span>` : ''}<span>${esc(opts.lastLabel || last.label)} · <b style="color:var(--ink)">${fmtMoney(last.revenue)}</b></span></div>
   </div>`;
@@ -8131,10 +8174,9 @@ function renderProfitWaterfall(np, title, valueSuffix){
   const rows = steps.map(st => {
     const end = st.kind==='net' || st.kind==='loss';
     const amount = end ? fmtSignedMoney(st.value) : fmtMoney(st.value);
-    const tip = `${st.label}: ${amount}${st.kind!=='in' && rev > 0 ? ` (${share(st.value)} of revenue)` : ''}`;
     const w = Math.abs(st.value) / scale * 100;
-    const bar = w > 0 ? `<span class="wf-bar" title="${esc(tip)}" style="left:0;width:${w.toFixed(2)}%;background:${fill(st)}"></span>` : '';
-    return `<div class="wf-row${end ? ' total' : ''}"><span class="lbl">${st.kind==='out' ? '− ' : end ? '= ' : ''}${esc(st.label)}</span>
+    const bar = w > 0 ? `<span class="wf-bar grow-x" style="left:0;width:${w.toFixed(2)}%;background:${fill(st)}"></span>` : '';
+    return `<div class="wf-row${end ? ' total' : ''}"${tipAttr(st.label, [amount + (st.kind!=='in' && rev > 0 ? ` · ${share(st.value)} of revenue` : '')])}><span class="lbl">${st.kind==='out' ? '− ' : end ? '= ' : ''}${esc(st.label)}</span>
       <div class="wf-plot">${bar}</div>
       <span class="v">${amount}<small>${st.kind!=='in' && rev > 0 ? share(st.value) : ''}</small></span></div>`;
   }).join('');
@@ -10393,6 +10435,171 @@ function renderNoAccess(profile){
 }
 
 /* ── main render loop ───────────────────────────────────────────────── */
+/* ── Motion (Ofek 12 Oct, part 1) ─────────────────────────────────────────────────────────────────────────────────
+   The whole screen is redrawn on every click, so nothing may animate just because it was redrawn. A page's entrance (its
+   blocks one after another, numbers counting up from 0, bars growing, lines drawing) runs when the page is entered; when
+   only its period changes the charts grow again and the numbers run to their new values; otherwise only a number that
+   changed runs, from what it showed to what it shows now. */
+const MOTION = { page: null, data: null, token: 0 };
+function motionReduced(){ try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
+function motionPageKey(){
+  const sub = { dashboard: UI.dashboard && UI.dashboard.view, crm: UI.crm && UI.crm.view, payroll: UI.payroll && `${UI.payroll.view}:${UI.payroll.viewAs||''}`,
+    reference: UI.reference && UI.reference.tab, tasks: UI.tasks && UI.tasks.board }[UI.tab];
+  return `${UI.tab}|${sub || ''}`;
+}
+function motionDataKey(){
+  const d = UI.dashboard || {}, p = UI.payroll || {}, j = UI.jobs || {}, o = UI.crmOverview || {};
+  return `${motionPageKey()}|${d.range}:${d.customFrom}:${d.customTo}|${p.mode}:${p.week}:${p.period}|${j.range}:${j.tech}:${j.status}|${o.range}:${o.division}`;
+}
+const COUNT_SEL = '.stat-value, .jobs-stat .v, .myday-count, [data-count]';
+function countKey(el, i){
+  const card = el.closest('.stat-card, .jobs-stat, .card, .myday-section');
+  const lab = card && card.querySelector('.stat-label, .l, h2');
+  return `${lab ? lab.textContent.trim().slice(0, 40) : ''}#${i}`;
+}
+function numberTextNode(el){
+  const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let n; while ((n = w.nextNode())) if (/\d/.test(n.nodeValue)) return n;
+  return null;
+}
+function parseShownNumber(text){
+  if (/:\d|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/.test(text)) return null;   // a date or a time is not a count
+  const m = String(text).match(/\d[\d,]*(?:\.\d+)?/); if (!m) return null;
+  return { value: parseFloat(m[0].replace(/,/g, '')), decimals: (m[0].split('.')[1] || '').length, commas: m[0].includes(','), pre: text.slice(0, m.index), post: text.slice(m.index + m[0].length) };
+}
+function formatShownNumber(v, p){
+  let t = Math.abs(v).toFixed(p.decimals);
+  if (p.commas) { const [a, b] = t.split('.'); t = a.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (b ? '.' + b : ''); }
+  return p.pre + t + p.post;
+}
+function countNumbers(root, prev){
+  const out = {};
+  root.querySelectorAll(COUNT_SEL).forEach((el, i) => { const n = numberTextNode(el), p = n && parseShownNumber(n.nodeValue); if (p) out[countKey(el, i)] = p.value; });
+  return out;
+}
+// Runs one number from `from` to what the element shows now (fast, then settling).
+function tweenNumber(node, p, from, dur, token){
+  const to = p.value, t0 = performance.now(), ease = t => 1 - Math.pow(1 - t, 3);
+  node.nodeValue = formatShownNumber(from, p);
+  const step = now => {
+    if (token !== MOTION.token || !node.isConnected) { node.nodeValue = formatShownNumber(to, p); return; }
+    const k = Math.min(1, (now - t0) / dur);
+    node.nodeValue = formatShownNumber(from + (to - from) * ease(k), p);
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+// fromZero: every number counts up from 0 (a page entered); otherwise only the ones that differ from `before` run.
+function runNumbers(root, before, fromZero){
+  const token = MOTION.token;
+  root.querySelectorAll(COUNT_SEL).forEach((el, i) => {
+    const n = numberTextNode(el), p = n && parseShownNumber(n.nodeValue); if (!p || !p.value) return;
+    const was = before ? before[countKey(el, i)] : undefined;
+    if (fromZero) tweenNumber(n, p, 0, 950, token);
+    else if (was!==undefined && was!==p.value) tweenNumber(n, p, was, 650, token);
+  });
+}
+// Blocks come in one after another (cards, tables, sections; never inside a side panel), then a table's first rows.
+const ENTER_SEL = '.page-head, .stat-card, .jobs-stat, .card, .table-wrap, .myday-section, .emp-card, .crm-inbox, .pipe-col, .jobs-filters, .mini-tile';
+function staggerPage(root){
+  let i = 0;
+  root.querySelectorAll(ENTER_SEL).forEach(el => {
+    if (el.closest('.enter-item') || el.closest('.job-panel')) return;
+    el.classList.add('enter-item'); el.style.setProperty('--d', Math.min(i * 45, 480) + 'ms'); i++;
+  });
+  root.querySelectorAll('.table-wrap tbody').forEach(tb => [...tb.rows].slice(0, 14).forEach((tr, k) => { tr.classList.add('enter-row'); tr.style.setProperty('--d', (140 + k * 26) + 'ms'); }));
+}
+function motionCapture(){ const c = document.getElementById('content'); return c ? countNumbers(c) : null; }
+function motionAfterRender(before){
+  const content = document.getElementById('content'); if (!content) return;
+  const page = motionPageKey(), data = motionDataKey();
+  const entering = page!==MOTION.page, periodChanged = !entering && data!==MOTION.data;
+  MOTION.page = page; MOTION.data = data; MOTION.token++;
+  if (motionReduced()) return;
+  if (entering || periodChanged) { content.classList.add('entering'); setTimeout(() => content.classList.remove('entering'), 1900); }
+  if (entering) staggerPage(content);
+  runNumbers(content, before, entering);
+}
+// For a part of the page redrawn without a full render (e.g. the figures above the jobs table while searching).
+function motionSwap(el, html){
+  if (!el) return;
+  const before = motionReduced() ? null : countNumbers(el);
+  el.innerHTML = html;
+  if (before) runNumbers(el, before, false);
+}
+
+/* ── Chart tooltips: anything with data-tip="Title\nline\nline" shows those exact numbers beside the pointer. On a
+   weekly trend line the dot and a guide line follow the week under the pointer. ── */
+function tipAttr(title, lines){ return ` data-tip="${esc([title, ...(lines || [])].filter(x => x!=='' && x!=null).join('\n'))}"`; }
+(function chartTips(){
+  let tip = null, current = null;
+  const ensure = () => { if (!tip) { tip = document.createElement('div'); tip.id = 'chart-tip'; tip.setAttribute('role', 'tooltip'); document.body.appendChild(tip); } return tip; };
+  const place = (x, y) => {
+    const t = ensure(), r = t.getBoundingClientRect();
+    let left = x + 14, top = y + 16;
+    if (left + r.width > window.innerWidth - 8) left = x - r.width - 14;
+    if (top + r.height > window.innerHeight - 8) top = y - r.height - 12;
+    t.style.left = Math.max(8, left) + 'px'; t.style.top = Math.max(8, top) + 'px';
+  };
+  const trendHover = (el, on) => {
+    const plot = el.closest('.trend-plot'); if (!plot) return;
+    const dot = plot.querySelector('.trend-dot'), guide = plot.querySelector('.trend-guide');
+    if (dot && !dot.dataset.home) dot.dataset.home = `${dot.style.left}|${dot.style.top}`;
+    if (on && el.dataset.dotX) {
+      plot.classList.add('hovering');
+      if (guide) guide.style.left = el.dataset.dotX + '%';
+      if (dot) { dot.style.left = el.dataset.dotX + '%'; dot.style.top = el.dataset.dotY + 'px'; }
+    } else {
+      plot.classList.remove('hovering');
+      if (dot && dot.dataset.home) { const [l, t] = dot.dataset.home.split('|'); dot.style.left = l; dot.style.top = t; }
+    }
+  };
+  const show = (el, e) => {
+    const lines = String(el.dataset.tip || '').split('\n');
+    const t = ensure();
+    t.innerHTML = `<b>${esc(lines[0] || '')}</b>${lines.slice(1).map(l => `<span>${esc(l)}</span>`).join('')}`;
+    t.classList.add('on'); place(e.clientX, e.clientY); trendHover(el, true);
+  };
+  const hide = () => { if (current) trendHover(current, false); current = null; if (tip) tip.classList.remove('on'); };
+  document.addEventListener('mouseover', e => {
+    const el = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (el===current) return;
+    if (current) trendHover(current, false);
+    current = el;
+    if (el) show(el, e); else hide();
+  });
+  document.addEventListener('mousemove', e => { if (current && tip) place(e.clientX, e.clientY); }, { passive: true });
+  document.addEventListener('scroll', hide, { passive: true, capture: true });
+  document.addEventListener('mousedown', () => { if (tip) tip.classList.remove('on'); });
+})();
+
+/* ── Dark or light, one click (Ofek 12 Oct). Until it's clicked the app follows the computer's setting, as before; the
+   choice is kept in this browser. The switch cross-fades the whole screen where the browser can. ── */
+function currentTheme(){
+  const t = document.documentElement.getAttribute('data-theme');
+  if (t==='dark' || t==='light') return t;
+  try { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch (e) { return 'light'; }
+}
+function themeButton(){
+  const dark = currentTheme()==='dark';
+  const icon = dark
+    ? '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>'
+    : '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.5 12h-2M21.5 12h-2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>';
+  const label = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  return `<button type="button" class="theme-btn" title="${label}" aria-label="${label}" onclick="event.stopPropagation();toggleTheme()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></button>`;
+}
+function toggleTheme(){
+  const next = currentTheme()==='dark' ? 'light' : 'dark';
+  const apply = () => {
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('theme', next); } catch (e) {}
+    document.querySelectorAll('.theme-btn').forEach(b => { b.outerHTML = themeButton(); });
+    document.querySelectorAll('.theme-btn').forEach(b => b.classList.add('just'));
+  };
+  if (document.startViewTransition && !motionReduced()) document.startViewTransition(apply); else apply();
+}
+try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => document.querySelectorAll('.theme-btn').forEach(b => { b.outerHTML = themeButton(); })); } catch (e) {}
+
 function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderChaseBubbles, 0); setTimeout(mdTick, 0); } catch(e) {}
   const app = document.getElementById('app');
   if (AUTH.status === 'loading') { app.innerHTML = renderAuthLoading(); return; }
@@ -10426,6 +10633,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   const data = filterForProfile(STATE.data, profile);
   // Every click redraws the whole screen; the menu keeps where it was scrolled to instead of jumping to the top (Ofek 6 Oct).
   const oldSide = app.querySelector('.sidebar'), sideScroll = oldSide ? oldSide.scrollTop : 0;
+  const motionBefore = motionCapture();
   app.innerHTML = renderShell(profile, data);
   if (sideScroll) { const side = app.querySelector('.sidebar'); if (side) side.scrollTop = sideScroll; }
   const content = document.getElementById('content');
@@ -10445,6 +10653,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   else if (UI.tab==='reference') content.innerHTML = renderReference(profile, data);
   else if (UI.tab==='settings') content.innerHTML = renderSettings(profile);
   if (STATE.loadErrors && STATE.loadErrors.length) content.insertAdjacentHTML('afterbegin', `<div class="card" style="border:1px solid var(--bad);background:var(--bad-soft);margin-bottom:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Some data did not load: ${esc(STATE.loadErrors.join(', '))}.</b> What you see may be incomplete. Don't re-enter anything that looks missing.</div><button class="btn small" onclick="location.reload()">Reload</button></div>`);
+  motionAfterRender(motionBefore);
 }
 
 document.addEventListener('keydown', (e) => {
