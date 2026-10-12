@@ -5123,7 +5123,12 @@ function pipeDragUp(){
   d.ghost.classList.remove('lifted'); d.ghost.classList.add('landing');
   d.ghost.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
   const id = d.id;
-  setTimeout(() => { pipeDragCleanup(); if (moving) { MOTION.noFlip = id; moveLead(id, status); } }, motionReduced() ? 0 : 230);
+  setTimeout(() => {
+    pipeDragCleanup();
+    if (!moving) return;
+    MOTION.noFlip = id; moveLead(id, status);
+    if (leadStage(contactById(id))!==status) MOTION.noFlip = null;   // it asks first (why lost, which day): the card flies over once answered
+  }, motionReduced() ? 0 : 230);
 }
 function pipeDragCancel(){ if (PIPE_DRAG && PIPE_DRAG.dragging) PIPE_DRAG_ENDED = Date.now(); pipeDragCleanup(); }
 function pipeDragCleanup(){
