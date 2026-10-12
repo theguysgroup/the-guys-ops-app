@@ -2666,7 +2666,7 @@ function showToast(msg, opts){
   t.onclick = e => { if (!e.target.closest('.toast-undo')) toastDismiss(t); };
   stack.appendChild(t);
   const showing = [...stack.children].filter(x => !x.classList.contains('leaving'));
-  if (showing.length > 3) toastDismiss(showing[0]);   // three at most: the oldest goes
+  if (showing.length > 3) toastDismiss(showing.find(x => !x.classList.contains('toast-error')) || showing[0]);   // three at most: the oldest goes (a failure stays)
   t._timer = setTimeout(() => toastDismiss(t), ms);
 }
 // Puts a message away: it fades, and the ones above it slide down into its place.
