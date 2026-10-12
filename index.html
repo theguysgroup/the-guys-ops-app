@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>The Guys Service Group</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -262,6 +262,56 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
   .sk-side .sk-nav, .sk-side .sk-search { display: none; }
   .sk-main { padding: 18px 14px; }
 }
+/* Phone polish (Ofek 12 Oct: "it has to look 100% on the phone too"). */
+.crm-filter-toggle, .pipe-jump { display: none; }
+@media (max-width: 900px) {
+  .app-grid { grid-template-rows: auto 1fr; }   /* a short page no longer stretches the top bar */
+  .jobs-stats > :last-child:nth-child(odd) { grid-column: 1 / -1; }   /* no figure left alone on its row */
+}
+@media (max-width: 640px) {
+  input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]), select, textarea { font-size: 16px !important; }   /* an iPhone zooms into any field with smaller text */
+  button, a, [onclick], select, label { -webkit-tap-highlight-color: transparent; }
+  .sidebar { padding-top: calc(10px + env(safe-area-inset-top, 0px)) !important; padding-bottom: 10px !important; }
+  .sidebar-topbar .workspace-card { padding: 6px 9px; }
+  .sidebar-topbar .brand-mark { width: 30px !important; height: 30px !important; }
+  .sidebar-topbar .workspace-card span { display: none; }
+  /* rows of chips scroll sideways on one line instead of wrapping onto three */
+  .myday-days, .fresh-strip { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; margin-inline: -14px; padding-inline: 14px; }
+  .myday-days::-webkit-scrollbar, .fresh-strip::-webkit-scrollbar { display: none; }
+  .myday-days > *, .fresh-strip > * { flex: none; white-space: nowrap; }
+  div:has(> .week-chip) { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; margin-inline: -14px; padding-inline: 14px; }
+  div:has(> .week-chip)::-webkit-scrollbar { display: none; }
+  div:has(> .week-chip) > * { flex: none; white-space: nowrap; }
+  /* the CRM's six filters fold away behind one button */
+  .crm-filters > select { display: none; }
+  .crm-filters.open > select { display: block; flex: 1 1 calc(50% - 4px); min-width: 0; width: auto !important; }
+  .crm-filters > input { min-width: 0 !important; flex: 1 1 0 !important; }
+  .crm-filter-toggle { display: inline-flex; flex: none; }
+  .crm-filter-toggle .filter-count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--primary); color: var(--on-primary); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+  /* the pipeline: one column per screen, swiped sideways, with the stages above it */
+  .pipe-jump { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 -14px 10px; padding: 2px 14px; }
+  .pipe-jump::-webkit-scrollbar { display: none; }
+  .pipe-jump button { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; transition: background-color .15s ease, color .15s ease; }
+  .pipe-jump button i { width: 8px; height: 8px; border-radius: 99px; background: var(--stage); }
+  .pipe-jump button b { font-weight: 700; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+  .pipe-jump button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .pipe-jump button.on b { color: color-mix(in srgb, var(--paper) 70%, transparent); }
+  .pipeline { display: flex !important; overflow-x: auto; scroll-snap-type: x mandatory; gap: 12px; margin-inline: -14px; padding: 2px 14px 10px; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .pipeline::-webkit-scrollbar { display: none; }
+  .pipe-col { flex: 0 0 86%; scroll-snap-align: center; }
+  .pipe-body { max-height: calc(100dvh - 290px); }
+  body.pipe-dragging .pipeline { scroll-snap-type: none; }
+  /* the reply box: the text gets the whole width, the channel and Send go under it */
+  .composer-row { flex-wrap: wrap; }
+  .composer-row > textarea { order: -1; flex: 1 1 100% !important; }
+  .composer-row > .btn { margin-inline-start: auto; }
+  /* windows open as a sheet from the bottom of the screen */
+  .modal-back { padding: 0 !important; }
+  .modal { margin-top: auto; max-width: 100% !important; border-radius: 16px 16px 0 0; border-bottom: 0; padding: 18px 16px calc(22px + env(safe-area-inset-bottom, 0px)) !important; animation: sheetUp .34s cubic-bezier(.22,1,.36,1) both; }
+  .bulk-check { width: 20px; height: 20px; }
+  [style*="grid-template-columns:repeat(3,1fr)"] { grid-template-columns: 1fr 1fr !important; }
+}
+@keyframes sheetUp { from { opacity: .5; transform: translateY(48px); } to { opacity: 1; transform: none; } }
 /* On a phone the main pages sit in a bar at the bottom, within thumb reach (Ofek 12 Oct, suggestion 14). */
 .bottom-bar { display: none; }
 @media (max-width: 640px) {
@@ -532,7 +582,7 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 @keyframes leadLand { 0% { transform: none; box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-lg); } 40% { transform: scale(.985); } 100% { transform: none; box-shadow: var(--shadow); } }
 .lead-card { touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 /* A pipeline column shows a few cards at a time; the rest aren't laid out until scrolled to (the pipeline drew 3-6x faster). */
-.pipe-body > .lead-card { content-visibility: auto; contain-intrinsic-size: auto 150px; }
+.pipe-body > .lead-card { content-visibility: auto; contain-intrinsic-size: auto 150px; flex-shrink: 0; }   /* without flex-shrink a card not yet drawn was squeezed to 24px, and the column jumped while scrolling */
 body.pipe-dragging .pipe-body > .lead-card:hover { transform: none; box-shadow: none; }
 .lead-card.drag-origin { opacity: .32; border-style: dashed; transform: none !important; box-shadow: none !important; }
 .drag-ghost { position: fixed; left: 0; top: 0; z-index: 500; pointer-events: none; will-change: transform; }
@@ -3861,11 +3911,12 @@ function renderLeadConversation(contactId){
 // The same composer markup/logic backs both the lead modal ("modal" scope) and the CRM Inbox's
 // inline thread pane ("inbox" scope) — each scope gets its own element ids so the two can never
 // collide if both happen to be in the DOM at once.
+function isPhoneWidth(){ return window.matchMedia && matchMedia('(max-width: 640px)').matches; }
 function renderLeadComposer(contactId, scope){
   return `
-    <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-start">
+    <div class="composer-row" style="display:flex;gap:8px;margin-top:10px;align-items:flex-start">
       <div style="position:relative"><span id="${scope}-conv-ch">${convChannelButton(contactId, scope)}</span><div id="${scope}-conv-menu" class="conv-menu" hidden></div></div>
-      <textarea rows="2" id="${scope}-msg-out-text" placeholder="Reply… (Enter to send, Shift+Enter for a new line)" style="flex:1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendLeadReply('${contactId}','${scope}');}"></textarea>
+      <textarea rows="2" id="${scope}-msg-out-text" placeholder="${isPhoneWidth() ? 'Write a reply…' : 'Reply… (Enter to send, Shift+Enter for a new line)'}" style="flex:1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendLeadReply('${contactId}','${scope}');}"></textarea>
       <button type="button" class="btn primary small" onclick="sendLeadReply('${contactId}','${scope}')">Send</button>
     </div>
     <div id="${scope}-conv-bar">${convComposerBar(contactId, scope)}</div>
@@ -5227,9 +5278,25 @@ function pipeDragMove(e){
   }
   e.preventDefault();
   pipeDragPlace();
+  pipeDragOver();
+  if (d.y < 70) window.scrollBy(0, -14); else if (d.y > window.innerHeight - 70) window.scrollBy(0, 14);   // near an edge: the page scrolls
+  // On a phone the columns sit side by side off screen: held near the left or right edge, the pipeline scrolls along.
+  const pipe = document.querySelector('#content .pipeline');
+  d.edgeX = 0;
+  if (pipe && pipe.scrollWidth > pipe.clientWidth + 4) { const r = pipe.getBoundingClientRect(); d.edgeX = d.x < r.left + 40 ? -1 : d.x > r.right - 40 ? 1 : 0; }
+  if (d.edgeX && !d.edgeLoop) { d.edgeLoop = true; requestAnimationFrame(pipeEdgeLoop); }
+}
+function pipeDragOver(){
+  const d = PIPE_DRAG; if (!d) return;
   const under = document.elementFromPoint(d.x, d.y), col = under && under.closest('.pipe-col');
   if (col!==d.over) { if (d.over) d.over.classList.remove('drag-over'); if (col) col.classList.add('drag-over'); d.over = col; }
-  if (d.y < 70) window.scrollBy(0, -14); else if (d.y > window.innerHeight - 70) window.scrollBy(0, 14);   // near an edge: the page scrolls
+}
+function pipeEdgeLoop(){
+  const d = PIPE_DRAG, pipe = document.querySelector('#content .pipeline');
+  if (!d || !d.dragging || !d.edgeX || !pipe) { if (d) d.edgeLoop = false; return; }
+  pipe.scrollLeft += d.edgeX * 10;
+  pipeDragOver();
+  requestAnimationFrame(pipeEdgeLoop);
 }
 function pipeDragUp(){
   const d = PIPE_DRAG; if (!d) return;
@@ -5296,7 +5363,8 @@ function pipelinePatchMove(c, from){
   if (!fromBody.querySelector('.lead-card')) fromBody.insertAdjacentHTML('afterbegin', '<div class="pipe-empty">No leads</div>');
   // the counts come from the data (the text may still be counting up from the page's entrance)
   const tally = {}; crmFilteredContactsUnsorted(filterForProfile(STATE.data, getCurrentProfile())).forEach(x => { const st = leadStage(x); tally[st] = (tally[st] || 0) + 1; });
-  const setCount = (col, st) => { const el = col.querySelector('.pipe-count'); if (!el) return; el.textContent = tally[st] || 0; if (el.animate && !motionReduced()) el.animate([{ transform: 'scale(1.3)' }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' }); };
+  const setCount = (col, st) => { const chip = document.querySelector(`#content .pipe-jump button[data-status="${st}"] b`); if (chip) chip.textContent = tally[st] || 0;
+    const el = col.querySelector('.pipe-count'); if (!el) return; el.textContent = tally[st] || 0; if (el.animate && !motionReduced()) el.animate([{ transform: 'scale(1.3)' }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' }); };
   setCount(fromCol, from); setCount(toCol, to);
   flipPlay(board, around, c.id);
   // moved from its dropdown: it flies from where it was (a dragged card already flew)
@@ -5648,8 +5716,28 @@ function renderCrmPipeline(contacts){
       </div>
     </div>`;
   }).join('');
-  return `<div class="pipeline">${cols}</div>
+  const jump = `<div class="pipe-jump" aria-label="Stages">${LEAD_STATUSES.map((st, i) => `<button type="button" data-status="${st}" style="--stage:${LEAD_STATUS_COLOR[st]}" class="${i ? '' : 'on'}" onclick="pipeJump(${i})"><i></i>${esc(stageLabel(st))} <b>${(byStage[st] || []).length}</b></button>`).join('')}</div>`;
+  return `${jump}<div class="pipeline" onscroll="pipeJumpSync(this)">${cols}</div>
     <div class="hint" style="margin-top:10px">Drag a card between columns, or use the stage dropdown on the card. Won fills itself once the customer has a job.</div>`;
+}
+// On a phone the pipeline shows one column at a time; the stage strip above it jumps to a column and follows the swipe.
+function pipeJump(i){
+  const p = document.querySelector('#content .pipeline'), col = p && p.children[i];
+  if (col) p.scrollTo({ left: col.offsetLeft - p.offsetLeft - (p.clientWidth - col.offsetWidth) / 2, behavior: motionReduced() ? 'auto' : 'smooth' });
+}
+let PIPE_JUMP_RAF = 0;
+function pipeJumpSync(p){
+  if (PIPE_JUMP_RAF) return;
+  PIPE_JUMP_RAF = requestAnimationFrame(() => {
+    PIPE_JUMP_RAF = 0;
+    const cols = [...p.children]; if (!cols.length) return;
+    const mid = p.scrollLeft + p.clientWidth / 2;
+    let i = 0; cols.forEach((c, k) => { if (Math.abs(c.offsetLeft - p.offsetLeft + c.offsetWidth / 2 - mid) < Math.abs(cols[i].offsetLeft - p.offsetLeft + cols[i].offsetWidth / 2 - mid)) i = k; });
+    const strip = document.querySelector('#content .pipe-jump'); if (!strip) return;
+    [...strip.children].forEach((b, k) => b.classList.toggle('on', k===i));
+    const b = strip.children[i];
+    if (b && (b.offsetLeft < strip.scrollLeft || b.offsetLeft + b.offsetWidth > strip.scrollLeft + strip.clientWidth)) strip.scrollTo({ left: b.offsetLeft - 14, behavior: 'smooth' });
+  });
 }
 function renderTableTagsCell(c){
   const tags = visibleTags(c), rest = LEAD_TAGS.map(x => x.tag).filter(t => !tags.includes(t));
@@ -5658,6 +5746,13 @@ function renderTableTagsCell(c){
     ${chips}
     ${rest.length ? `<select aria-label="Add a tag" style="width:auto;font-size:10.5px;padding:1px 4px;min-height:0;border:1px dashed var(--line);background:transparent" onchange="if(this.value) toggleLeadTag('${c.id}', this.value)"><option value="">+ tag</option>${rest.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select>` : ''}
   </div>`;
+}
+// On a phone the CRM's filters fold away behind one button, which says how many are on (Ofek 12 Oct).
+function crmActiveFilterCount(){ return ['source', 'division', 'status', 'tag', 'subDivision', 'subSource'].filter(k => UI.crm[k] && UI.crm[k]!=='all').length; }
+function toggleCrmFilters(btn){
+  UI.crm.filtersOpen = !UI.crm.filtersOpen;
+  const box = btn && btn.closest('.crm-filters'); if (box) box.classList.toggle('open', UI.crm.filtersOpen);
+  if (btn) btn.setAttribute('aria-expanded', UI.crm.filtersOpen);
 }
 function setCrmPage(page){ UI.crm.page = Math.max(1, page); render(); }
 function setCrmPageSize(size){ UI.crm.pageSize = Number(size); UI.crm.page = 1; render(); }
@@ -5728,8 +5823,9 @@ function renderCrm(profile, data){
         </div>`; }).join('')}
     </div>` : ''}
 
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+    <div class="crm-filters${UI.crm.filtersOpen ? ' open' : ''}" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
       <input value="${esc(UI.crm.search||'')}" placeholder="Search name, phone, email…" oninput="updateCrmSearch(this.value)" style="width:auto;min-width:220px;flex:1">
+      <button type="button" class="btn crm-filter-toggle" onclick="toggleCrmFilters(this)" aria-expanded="${!!UI.crm.filtersOpen}">${ico('sliders', 15)} Filters${crmActiveFilterCount() ? ` <span class="filter-count">${crmActiveFilterCount()}</span>` : ''}</button>
       <select style="width:auto${UI.crm.division!=='all' ? ';--div:' + divColor(UI.crm.division) : ''}" ${UI.crm.division!=='all' ? 'class="div-select"' : ''} onchange="UI.crm.division=this.value;render()"><option value="all">All divisions</option>${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${UI.crm.division===d?'selected':''}>${d}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.source=this.value;render()"><option value="all">All sources</option>${LEAD_SOURCES.map(s=>`<option value="${s}" ${UI.crm.source===s?'selected':''}>${esc(sourceLabel(s))}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.tag=this.value;render()"><option value="all">All tags</option>${LEAD_TAGS.map(x=>x.tag).map(t=>`<option value="${esc(t)}" ${UI.crm.tag===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
@@ -11354,7 +11450,11 @@ function keepListScroll(){
   const saved = [];
   document.querySelectorAll('#content .pipe-col .pipe-body').forEach(b => { if (b.scrollTop) saved.push([`.pipe-col[data-status="${b.closest('.pipe-col').dataset.status}"] .pipe-body`, b.scrollTop]); });
   const inbox = document.querySelector('#content .crm-inbox-scroll'); if (inbox && inbox.scrollTop) saved.push(['.crm-inbox-scroll', inbox.scrollTop]);
-  return saved.length ? () => saved.forEach(([sel, top]) => { const el = document.querySelector('#content ' + sel); if (el) el.scrollTop = top; }) : null;
+  const pipe = document.querySelector('#content .pipeline'), left = pipe ? pipe.scrollLeft : 0;   // on a phone: the column on screen
+  return saved.length || left ? () => {
+    saved.forEach(([sel, top]) => { const el = document.querySelector('#content ' + sel); if (el) el.scrollTop = top; });
+    const p = document.querySelector('#content .pipeline'); if (p && left) { p.style.scrollBehavior = 'auto'; p.scrollLeft = left; p.style.scrollBehavior = ''; pipeJumpSync(p); }
+  } : null;
 }
 
 document.addEventListener('keydown', (e) => {
