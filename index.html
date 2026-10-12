@@ -449,6 +449,10 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .pipe-title { font-family: 'Figtree', sans-serif; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink); }
 .pipe-count { font-family: 'Figtree', sans-serif; font-size: 11px; font-weight: 700; color: var(--on-primary); background: var(--stage, var(--ink-soft)); border-radius: 99px; padding: 2px 9px; }
 .pipe-body { padding: 11px; display: flex; flex-direction: column; gap: 9px; min-height: 90px; max-height: calc(100vh - 230px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }  /* each column scrolls on its own (Ofek 3/10) */
+.list-more { font: inherit; font-size: 12px; font-weight: 600; width: 100%; padding: 9px 10px; border: 1px dashed var(--line); border-radius: var(--radius-sm); background: transparent; color: var(--ink-soft); cursor: pointer; transition: background-color .15s ease, color .15s ease, border-color .15s ease; }
+.list-more span { font-weight: 400; color: var(--ink-faint); }
+.list-more:hover { background: var(--surface); color: var(--ink); border-color: color-mix(in srgb, var(--primary) 40%, var(--line)); }
+.crm-inbox-scroll > .list-more { width: calc(100% - 20px); margin: 10px; }
 .pipe-empty { font-size: 11.5px; color: var(--ink-faint); text-align: center; padding: 14px 0; }
 .lead-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 11px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 7px; transition: border-color .15s ease, box-shadow .15s ease, transform .15s cubic-bezier(.2,.85,.25,1); }
 .lead-card:hover, .lead-card:focus-visible { border-color: var(--primary); box-shadow: var(--shadow-lg); transform: translateY(-2px); }
@@ -4830,7 +4834,7 @@ function moveLead(id, status){
 /* ── CRM Inbox — the 3-pane working view (list · thread · details), modelled on the
    unified-inbox layout Ofek uses day to day (screenshots he sent), since this screen is where
    Ron spends most of his time and needs to live entirely in conversations, not a modal per lead. */
-function setCrmInboxFilter(f){ UI.crm.inboxFilter = f; render(); }
+function setCrmInboxFilter(f){ UI.crm.inboxFilter = f; UI.crm.inboxShow = 0; render(); }
 function selectCrmContact(id){ const go = () => { UI.crm.selectedContactId = id; render(); }; if (UI.crm.selectedContactId && UI.crm.selectedContactId!==id && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 function clearCrmSelection(){ const go = () => { UI.crm.selectedContactId = null; render(); }; if (!leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 // Clicking a lead's name anywhere (Pipeline card, Table row, the Reminders follow-up banner) jumps
@@ -4985,12 +4989,21 @@ function crmInboxFilterList(contacts){
   if (f==='recent') { const cutoff = Date.now()-7*86400000; return contacts.filter(c=>new Date(lastContactedAt(c)).getTime()>=cutoff); }
   return contacts;
 }
+// The inbox list draws its first 100 rows (and the open lead wherever it is), with "Show more" for the rest: drawing all
+// ~1,000 on every click cost about 0.7 s a click (Ofek 12 Oct).
+const INBOX_PAGE = 100, PIPE_PAGE = 40;
+function showMoreInbox(){ UI.crm.inboxShow = (UI.crm.inboxShow || INBOX_PAGE) + INBOX_PAGE; render(); }
+function showMorePipe(status){ UI.crm.pipeShow = UI.crm.pipeShow || {}; UI.crm.pipeShow[status] = (UI.crm.pipeShow[status] || PIPE_PAGE) + PIPE_PAGE; render(); }
 function renderCrmInboxList(contacts){
   const filtered = crmInboxFilterList(contacts);
   const unreadTotal = contacts.filter(c=>unreadCountFor(c)>0).length;
   const selected = UI.crm.selectedContactId;
   const tabs = [['unread',`Unread${unreadTotal?` (${unreadTotal})`:''}`],['all','All'],['recent','Recent'],['starred','Starred']];
-  const rows = filtered.length ? filtered.map(c => `
+  const limit = UI.crm.inboxShow || INBOX_PAGE;
+  const shown = filtered.slice(0, limit);
+  if (selected && !shown.some(c => c.id===selected)) { const sel = filtered.find(c => c.id===selected); if (sel) shown.push(sel); }
+  const more = filtered.length - limit;
+  const rows = filtered.length ? shown.map(c => `
     <div class="crm-inbox-row ${c.id===selected?'active':''}" data-key="${c.id}" style="${stageVars(leadStage(c))}" onclick="selectCrmContact('${c.id}')">
       <div class="crm-inbox-avatar">${esc(initials(c.fullName))}</div>
       <div class="crm-inbox-row-main">
@@ -5002,10 +5015,10 @@ function renderCrmInboxList(contacts){
       </div>
       ${unreadBadge(c)}
       <span class="crm-inbox-star ${c.starred?'on':''}" onclick="toggleLeadStar('${c.id}', event)">★</span>
-    </div>`).join('') : `<div class="crm-inbox-empty">No leads in this view</div>`;
+    </div>`).join('') + (more > 0 ? `<button type="button" class="list-more" onclick="showMoreInbox()">Show ${Math.min(INBOX_PAGE, more)} more <span>· ${more} not shown</span></button>` : '') : `<div class="crm-inbox-empty">No leads in this view</div>`;
   return `
     <div class="crm-inbox-tabs">${tabs.map(([k,l])=>`<div class="crm-inbox-tab ${UI.crm.inboxFilter===k||(!UI.crm.inboxFilter&&k==='all')?'active':''}" onclick="setCrmInboxFilter('${k}')">${l}</div>`).join('')}</div>
-    <div style="overflow-y:auto;flex:1">${rows}</div>`;
+    <div class="crm-inbox-scroll" style="overflow-y:auto;flex:1">${rows}</div>`;
 }
 function renderCrmInboxThreadAndDetails(c){
   if (!c) return `<div class="crm-inbox-thread-col"><div class="crm-inbox-empty">Select a lead on the left to see the conversation</div></div><div class="crm-inbox-details"></div>`;
@@ -5125,13 +5138,15 @@ function renderCrmInbox(contacts){
 function renderCrmPipeline(contacts){
   const cols = LEAD_STATUSES.map(status => {
     const inCol = contacts.filter(c=>leadStage(c)===status);
+    const limit = (UI.crm.pipeShow || {})[status] || PIPE_PAGE, more = inCol.length - limit;
     return `<div class="pipe-col" style="--stage:${LEAD_STATUS_COLOR[status]}" data-status="${status}">
       <div class="pipe-head">
         <span class="pipe-title-wrap"><span class="pipe-dot"></span><span class="pipe-title">${esc(stageLabel(status))}</span></span>
         <span class="pipe-count">${inCol.length}</span>
       </div>
       <div class="pipe-body">
-        ${inCol.length ? inCol.map(renderLeadCard).join('') : `<div class="pipe-empty">No leads</div>`}
+        ${inCol.length ? inCol.slice(0, limit).map(renderLeadCard).join('') : `<div class="pipe-empty">No leads</div>`}
+        ${more > 0 ? `<button type="button" class="list-more" onclick="showMorePipe('${status}')">Show ${Math.min(PIPE_PAGE, more)} more <span>· ${more} not shown</span></button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -10603,7 +10618,7 @@ function motionAfterRender(before, flipBefore){
 // ones fade in. Items carry data-key; only the first 80 are animated.
 // Where an item is: inside its own scrolling list when it has one (the inbox list, a pipeline column, a table), so a
 // list that comes back scrolled to the top doesn't make every row slide; on the page otherwise.
-const FLIP_SCROLLERS = '.crm-inbox-list, .pipe-body, .table-wrap';
+const FLIP_SCROLLERS = '.crm-inbox-scroll, .pipe-body, .table-wrap';
 function flipPos(el){
   const r = el.getBoundingClientRect(), sc = el.closest(FLIP_SCROLLERS);
   if (!sc) return { box: 'page', x: r.left + window.scrollX, y: r.top + window.scrollY, vx: r.left, vy: r.top };
@@ -10792,7 +10807,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
 function keepListScroll(){
   const saved = [];
   document.querySelectorAll('#content .pipe-col .pipe-body').forEach(b => { if (b.scrollTop) saved.push([`.pipe-col[data-status="${b.closest('.pipe-col').dataset.status}"] .pipe-body`, b.scrollTop]); });
-  const inbox = document.getElementById('crm-inbox-list'); if (inbox && inbox.scrollTop) saved.push(['#crm-inbox-list', inbox.scrollTop]);
+  const inbox = document.querySelector('#content .crm-inbox-scroll'); if (inbox && inbox.scrollTop) saved.push(['.crm-inbox-scroll', inbox.scrollTop]);
   return saved.length ? () => saved.forEach(([sel, top]) => { const el = document.querySelector('#content ' + sel); if (el) el.scrollTop = top; }) : null;
 }
 
