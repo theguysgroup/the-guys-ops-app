@@ -330,6 +330,11 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .bar, .wf-bar, .meter > span, .grow-y { transition: filter .12s ease; }
 [data-tip]:hover > .bar, .wf-row[data-tip]:hover .wf-bar, .meter[data-tip]:hover > span, [data-tip]:hover .grow-y, [data-tip]:hover .grow-x { filter: brightness(1.18) saturate(1.1); }
 /* Dark or light, one click (sits beside the search box) */
+.ico { flex: none; vertical-align: -3px; }
+.btn .ico, .file-chip .ico, .lead-sales-chip .ico, .followup-context-banner .ico, .lead-notes-banner-text .ico, .hint .ico { vertical-align: -2.5px; }
+.followup-context-banner, .lead-sales-chip, .file-chip { display: inline-flex; align-items: center; gap: 6px; }
+.followup-context-banner { display: flex; }
+.reminder-ic .ico { color: var(--ink); opacity: .8; }
 .theme-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; padding: 0; border-radius: var(--radius-sm); border: 1px solid var(--sidebar-line);
   background: var(--sidebar-bg-hover); color: var(--sidebar-ink-soft); cursor: pointer; transition: background-color .15s ease, color .15s ease, border-color .15s ease; }
 .theme-btn:hover { background: var(--sidebar-bg-active); color: var(--sidebar-ink); border-color: color-mix(in srgb, var(--sidebar-accent) 45%, var(--sidebar-line)); }
@@ -2114,7 +2119,7 @@ function openViewAsModal(){
       <div class="modal" style="max-width:420px">
         <h2>View as</h2>
         <div class="modal-sub">See the app exactly as this person sees it: their menu, home page and pages. Read-only, nothing is saved.</div>
-        ${people.map(p => searchResultBtn(`enterViewAs('${p.id}')`, esc(p.fullName||'—'), esc(roleLabel(p.role)), '👁')).join('')}
+        ${people.map(p => searchResultBtn(`enterViewAs('${p.id}')`, esc(p.fullName||'—'), esc(roleLabel(p.role)), ico('eye'))).join('')}
       </div>
     </div>`);
 }
@@ -2522,6 +2527,57 @@ function showToast(msg, opts){
   toastTimer = setTimeout(() => { t.classList.add('leaving'); setTimeout(() => t.remove(), 200); }, ms);
 }
 
+/* ── Icons (Ofek 12 Oct, suggestion 5): one set of thin line icons instead of emoji, in the app's own colours. ── */
+const ICONS = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  tasks: '<rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  gauge: '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M7 16v-4M12 16V8M17 16v-7"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
+  wallet: '<path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3h-4a2 2 0 0 0 0 4h4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/>',
+  receipt: '<path d="M5 2v20l2-1.3 2 1.3 2-1.3 2 1.3 2-1.3 2 1.3 2-1.3V2l-2 1.3L15 2l-2 1.3L11 2 9 3.3 7 2Z"/><path d="M9 8h6M9 12h6M9 16h4"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  briefcase: '<rect x="2.5" y="7" width="19" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1.5 14h5M9.5 8h5M17.5 16h5"/>',
+  search: '<circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/>',
+  history: '<path d="M3 12a9 9 0 1 0 2.64-6.36L3 8.3"/><path d="M3 3.5v4.8h4.8"/><path d="M12 7.5v4.5l3 2"/>',
+  message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  note: '<path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5Z"/><path d="M15 3v6h6"/>',
+  incoming: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  pin: '<path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3Z"/>',
+  dollar: '<path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+  file: '<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z"/><path d="M14 2v6h6"/>',
+  clip: '<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l8.6-8.6a4 4 0 1 1 5.7 5.7l-8.6 8.6a2 2 0 1 1-2.8-2.8l8.5-8.5"/>',
+  copy: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+  pencil: '<path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+  phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.4 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>',
+  mobile: '<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M12 18h.01"/>',
+  mail: '<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m21.5 7-9.5 6L2.5 7"/>',
+  chat: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
+  repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  lock: '<rect x="4" y="11" width="16" height="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  coffee: '<path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><path d="M6 2v2M10 2v2M14 2v2"/>',
+  flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.1-2.1-.2-4 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  idcard: '<rect x="2.5" y="5" width="19" height="14" rx="2"/><circle cx="8.5" cy="12" r="2"/><path d="M14 10h4M14 14h4"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
+  wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  alert: '<path d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3"/><path d="M12 9v4M12 17h.01"/>',
+  hourglass: '<path d="M5 22h14M5 2h14"/><path d="M17 22v-4.2a2 2 0 0 0-.6-1.4L12 12l-4.4 4.4a2 2 0 0 0-.6 1.4V22"/><path d="M7 2v4.2a2 2 0 0 0 .6 1.4L12 12l4.4-4.4a2 2 0 0 0 .6-1.4V2"/>',
+};
+function ico(name, size){
+  const p = ICONS[name]; if (!p) return '';
+  const z = size || 16;
+  return `<svg class="ico" viewBox="0 0 24 24" width="${z}" height="${z}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+}
+
 /* ── small render helpers ────────────────────────────────────────────── */
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtMoney(n){ n = round2(n); const isInt = Math.abs(n-Math.round(n)) < 1e-9; return '$' + n.toLocaleString('en-US', { minimumFractionDigits:isInt?0:2, maximumFractionDigits:2 }); }
@@ -2681,7 +2737,7 @@ function confirmAction(message, onConfirm, opts){
   document.getElementById('modal-root').insertAdjacentHTML('beforeend', `
     <div class="confirm-back" onclick="if(event.target===this) closeConfirmModal()">
       <div class="confirm-card">
-        <div class="confirm-ic${danger?'':' info'}">${danger?'🗑':'?'}</div>
+        <div class="confirm-ic${danger?'':' info'}">${danger?ico('trash', 22):'?'}</div>
         <div class="confirm-title">${esc(title)}</div>
         <div class="confirm-msg">${esc(message)}</div>
         <div class="confirm-actions">
@@ -2749,7 +2805,7 @@ async function storeFile(folder, kind, value){
   } catch (e) { showToast('Could not upload the file'); return null; }
 }
 // A small "📎 receipt" link for a stored file, anywhere in a table.
-function fileLinkHtml(ref, label){ return ref ? `<a href="#" class="file-chip" style="margin-left:6px" onclick="event.preventDefault();event.stopPropagation();openEmbeddedFile('${jsStr(ref)}')">${esc(label || '📎 receipt')}</a>` : ''; }
+function fileLinkHtml(ref, label){ return ref ? `<a href="#" class="file-chip" style="margin-left:6px" onclick="event.preventDefault();event.stopPropagation();openEmbeddedFile('${jsStr(ref)}')">${label ? esc(label) : ico('clip', 13) + ' receipt'}</a>` : ''; }
 // Attached files are kept inside the record itself (as an embedded file). Chrome won't open a plain link to one,
 // so "View" turns it into a temporary file first and opens that in a new tab.
 function openEmbeddedFile(u){
@@ -2776,7 +2832,7 @@ function openEmbeddedFile(u){
 }
 function fileRowInner(fieldId, value){
   if (value) {
-    return `<a href="#" onclick="event.preventDefault();openEmbeddedFile(fileStore('${fieldId}')['${fieldId}'])" class="file-chip">📄 View file</a><button type="button" class="btn ghost small" onclick="clearFileField('${fieldId}')">Remove</button><span class="file-hint">drag another file here to replace it</span>`;
+    return `<a href="#" onclick="event.preventDefault();openEmbeddedFile(fileStore('${fieldId}')['${fieldId}'])" class="file-chip">${ico('file', 14)} View file</a><button type="button" class="btn ghost small" onclick="clearFileField('${fieldId}')">Remove</button><span class="file-hint">drag another file here to replace it</span>`;
   }
   return `<button type="button" class="btn small" onclick="document.getElementById('${fieldId}-input').click()">Choose file…</button><span class="file-hint">or drag it here</span>`;
 }
@@ -3108,11 +3164,11 @@ async function doChangePassword(){
 // allowed to see that section; `go` is the click for an item that opens a page with its own inner tabs.
 // Open Tasks is left out of the menu: the Tasks page shows the same open tasks (All, and its Calendar).
 const NAV = [
-  { group:'Operation', items:[ {id:'myDay', label:'My Day', icon:'☀'}, {id:'reminders', label:'Reminders', icon:'●'}, {id:'tasks', label:'Tasks', icon:'☑', go:'goTasks()'} ] },
-  { group:'CRM', items:[ {id:'crm', label:'CRM', icon:'◈'} ] },
-  { group:'Overview', items:[ {id:'dashboard', label:'Dashboard', icon:'🧭'}, {id:'crmOverview', label:'Leads & Marketing', icon:'📊'}, {id:'adsGoogle', label:'Google Ads', icon:'🎯'}, {id:'payroll', label:'Payroll', icon:'💵'} ] },
-  { group:'Finance', items:[ {id:'closings', label:'Closings', icon:'🧾'}, {id:'outstanding', label:'Outstanding', icon:'▧'}, {id:'jobs', label:'Jobs & Commissions', icon:'▤'} ] },
-  { group:'Management', items:[ {id:'reference', label:'Resources', icon:'▥', go:'goResources()'}, {id:'settings', label:'Permissions & Settings', icon:'⚙'} ] },
+  { group:'Operation', items:[ {id:'myDay', label:'My Day', icon:'sun'}, {id:'reminders', label:'Reminders', icon:'bell'}, {id:'tasks', label:'Tasks', icon:'tasks', go:'goTasks()'} ] },
+  { group:'CRM', items:[ {id:'crm', label:'CRM', icon:'inbox'} ] },
+  { group:'Overview', items:[ {id:'dashboard', label:'Dashboard', icon:'gauge'}, {id:'crmOverview', label:'Leads & Marketing', icon:'chart'}, {id:'adsGoogle', label:'Google Ads', icon:'target'}, {id:'payroll', label:'Payroll', icon:'wallet'} ] },
+  { group:'Finance', items:[ {id:'closings', label:'Closings', icon:'receipt'}, {id:'outstanding', label:'Outstanding', icon:'hourglass'}, {id:'jobs', label:'Jobs & Commissions', icon:'briefcase'} ] },
+  { group:'Management', items:[ {id:'reference', label:'Resources', icon:'folder', go:'goResources()'}, {id:'settings', label:'Permissions & Settings', icon:'sliders'} ] },
 ];
 function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; if (UI.jobs) UI.jobs.selectedId = null; if (UI.reference) UI.reference.empId = null; PANEL_OPEN_FOR = {}; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 function goTasks(board){ UI.tab = 'tasks'; if (board) UI.tasks.board = board; UI.mobileNavOpen = false; render(); }
@@ -3128,7 +3184,7 @@ function activeTechnicianNames(data){ return data.employees.filter(e=>e.roles.in
 
 function navButtonHtml(id, label, icon, active, onClick, badge){
   return `<button onclick="${onClick}" onmouseover="if(!${active}) this.style.background='var(--sidebar-bg-hover)'" onmouseout="if(!${active}) this.style.background='none'" style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:6px;color:${active?'#fff':'var(--sidebar-ink-soft)'};font-size:13.3px;font-family:'Figtree',sans-serif;font-weight:${active?'700':'500'};border:none;box-shadow:${active?'inset 3px 0 0 var(--sidebar-accent)':'none'};background:${active?'var(--sidebar-bg-active)':'none'};text-align:start;width:100%;transition:background .1s">
-    <span style="width:18px;text-align:center;flex:none;font-size:15px;opacity:${active?'1':'.75'};color:${active?'var(--sidebar-accent)':'inherit'}">${icon}</span><span>${esc(label)}</span>${badge||''}
+    <span style="width:18px;display:inline-flex;justify-content:center;flex:none;opacity:${active?'1':'.75'};color:${active?'var(--sidebar-accent)':'inherit'}">${ico(icon, 17)}</span><span>${esc(label)}</span>${badge||''}
   </button>`;
 }
 
@@ -3191,7 +3247,7 @@ function renderShell(profile, data){
         <div class="sidebar-collapsible">
         <div style="display:flex;gap:6px;margin-bottom:10px">
         <button onclick="openSearchModal()" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex:1;min-width:0;padding:8px 10px;border-radius:var(--radius-sm);border:1px solid var(--sidebar-line);background:var(--sidebar-bg-hover);color:var(--sidebar-ink-soft);font-size:12.3px;font-family:'Figtree',sans-serif;cursor:pointer">
-          <span style="display:flex;align-items:center;gap:7px">🔍 Search</span>
+          <span style="display:flex;align-items:center;gap:7px">${ico('search', 15)} Search</span>
           <span style="font-size:10px;color:var(--sidebar-ink-faint);border:1px solid var(--sidebar-line);border-radius:4px;padding:1px 5px">⌘K</span>
         </button>
         ${themeButton()}
@@ -3201,7 +3257,7 @@ function renderShell(profile, data){
         <div class="footer-block" style="margin-top:auto;padding:10px 8px 0;font-size:11px;border-top:1px solid var(--line);padding-top:12px">
           <div style="margin-bottom:9px;display:flex;align-items:center;justify-content:space-between"><span>${esc(profile.fullName)} · ${roleLabel(profile.role)}</span></div>
           <div style="display:flex;flex-direction:column;gap:6px">
-            ${profile.role==='owner' ? `<button class="btn ghost small" onclick="togglePresentationMode()" title="Hide the real figures when showing the app to someone">${PRESENT?'👁 Presentation mode: ON':'Presentation mode'}</button>` : ''}
+            ${profile.role==='owner' ? `<button class="btn ghost small" onclick="togglePresentationMode()" title="Hide the real figures when showing the app to someone">${PRESENT ? ico('eye', 14) + ' Presentation mode: ON' : 'Presentation mode'}</button>` : ''}
             ${VIEW_AS_ID ? `<button class="btn primary small" onclick="exitViewAs()">Exit view as ${esc(profile.fullName)}</button>` : profile.role==='owner' ? `<button class="btn ghost small" onclick="openViewAsModal()" title="See the app as a team member sees it (read-only)">👁 View as…</button>` : ''}
             ${VIEW_AS_ID ? '' : `<button class="btn ghost small" onclick="openChangePasswordModal()">Change password</button>`}
             <button class="btn ghost small" onclick="doLogout()">Log out</button>
@@ -3210,7 +3266,7 @@ function renderShell(profile, data){
         </div>
       </div>
       <div class="main-col" style="padding:24px 30px 60px;width:100%;min-width:0;margin:0 auto">
-        ${VIEW_AS_ID ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid var(--primary);background:var(--surface)"><span>👁 Viewing as <b>${esc(profile.fullName)}</b> (${esc(roleLabel(profile.role))}). This is their menu and their pages. Read-only: nothing you do here is saved.</span><button class="btn primary small" onclick="exitViewAs()">Exit</button></div>` : ''}
+        ${VIEW_AS_ID ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid var(--primary);background:var(--surface)"><span style="display:inline-flex;align-items:center;gap:6px">${ico('eye', 15)} Viewing as <b>${esc(profile.fullName)}</b> (${esc(roleLabel(profile.role))}). This is their menu and their pages. Read-only: nothing you do here is saved.</span><button class="btn primary small" onclick="exitViewAs()">Exit</button></div>` : ''}
         <div id="content"></div>
       </div>
     </div>
@@ -3527,13 +3583,13 @@ function splitLeadRequestEvent(text){
   m = t.match(/^Sent the website (form|chat) again \(([^)]*)\)(?: — ([\s\S]*?))?\.( Name on the form: [\s\S]*\.)?$/);
   if (m) return { label: `Sent the website ${m[1]} again · ${sourceLabel(m[2])}`, request: (m[3] || '').trim(), note: (m[4] || '').trim() };
   m = t.match(/^🔁 Returning customer — new enquiry from the website (form|chat) \(([^)]*)\)(?: — ([\s\S]*?))?\.?( Name on the form: [\s\S]*?\.)?( Before: [^.]*\.)?$/u);
-  if (m) return { label: `🔁 Returning customer · new enquiry from the website ${m[1]} · ${sourceLabel(m[2])}`, request: (m[3] || '').trim(), note: [m[4], m[5]].filter(Boolean).map(x => x.trim()).join(' · ') };
+  if (m) return { returning: true, label: `Returning customer · new enquiry from the website ${m[1]} · ${sourceLabel(m[2])}`, request: (m[3] || '').trim(), note: [m[4], m[5]].filter(Boolean).map(x => x.trim()).join(' · ') };
   return null;
 }
 function leadRequestCard(sp, at, division){
   const req = presentText(sp.request);
   return `<div class="lead-request" style="--div:${divColor(division)}">
-    <div class="lead-request-head"><b>${esc(presentText(sp.label))}</b><span>${new Date(at).toLocaleString('en-AU')}</span></div>
+    <div class="lead-request-head"><b>${sp.returning ? ico('repeat', 13) + ' ' : ''}${esc(presentText(sp.label))}</b><span>${new Date(at).toLocaleString('en-AU')}</span></div>
     <div class="lead-request-text${!req ? ' none' : req.length > 220 ? ' long' : ''}">${req ? esc(req) : 'No message written'}</div>
     ${sp.note ? `<div class="lead-request-note">${esc(sp.note)}</div>` : ''}
   </div>`;
@@ -3568,7 +3624,7 @@ function renderLeadComposer(contactId, scope){
     </div>
     <div id="${scope}-conv-bar">${convComposerBar(contactId, scope)}</div>
     <div style="margin-top:6px">
-      <button type="button" class="btn ghost small" onclick="toggleLogIncoming('${scope}')">📥 Log what they said</button>
+      <button type="button" class="btn ghost small" onclick="toggleLogIncoming('${scope}')">${ico('incoming')} Log what they said</button>
       <div id="${scope}-log-incoming-box" style="display:none;margin-top:6px">
         <div style="display:flex;gap:8px;align-items:flex-start">
           <textarea rows="2" id="${scope}-msg-in-text" placeholder="What did they say, and where? (Enter to log, Shift+Enter for a new line)" style="flex:1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();logIncomingMessage('${contactId}','${scope}');}"></textarea>
@@ -3957,12 +4013,12 @@ function renderChaseBubbles(){
   if (!host) { host = document.createElement('div'); host.id = 'chase-bubbles'; host.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:1500;display:flex;flex-direction:column;gap:10px;max-width:340px'; document.body.appendChild(host); }
   host.innerHTML = fresh.slice(0,3).map(c => `<div class="card" style="box-shadow:0 8px 28px rgba(0,0,0,.35);border-inline-start:4px solid var(--bad);padding:12px 14px;position:relative">
       <button onclick="dismissNewLeadBubble('${c.id}')" aria-label="Dismiss" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--ink-soft);font-size:18px;cursor:pointer">×</button>
-      <div style="font-weight:700;margin-bottom:4px;padding-right:18px">🔥 New lead waiting: ${esc(c.fullName)}</div>
+      <div style="font-weight:700;margin-bottom:4px;padding-right:18px;display:flex;align-items:center;gap:6px">${ico('flame')} New lead waiting: ${esc(c.fullName)}</div>
       <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">Came in ${esc(myDayAgo(leadArrivedAt(c)))} and nobody has handled it yet. ${esc(c.phone||'')}</div>
       <button class="btn primary small" onclick="goToLeadConversation('${c.id}')">Open customer card</button>
     </div>`).join('') + due.slice(0,5).map(c => `<div class="card" style="box-shadow:0 8px 28px rgba(0,0,0,.35);border-inline-start:4px solid var(--accent);padding:12px 14px;position:relative">
       <button onclick="dismissChaseBubble('${c.id}')" aria-label="Dismiss" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--ink-soft);font-size:18px;cursor:pointer">×</button>
-      <div style="font-weight:700;margin-bottom:4px;padding-right:18px">📞 Call ${esc(c.fullName)} now</div>
+      <div style="font-weight:700;margin-bottom:4px;padding-right:18px;display:flex;align-items:center;gap:6px">${ico('phone')} Call ${esc(c.fullName)} now</div>
       <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">3 hours since they didn't answer. ${esc(c.phone||'')}</div>
       <button class="btn primary small" onclick="goToLeadConversation('${c.id}')">Open customer card</button>
     </div>`).join('') + (due.length>5 ? `<div class="hint" style="text-align:right">+${due.length-5} more in Chasing</div>` : '');
@@ -4046,7 +4102,7 @@ function phoneHangup(){ try { if (PHONE.call) PHONE.call.disconnect(); } catch(e
 function phoneMute(){ if (!PHONE.call) return; PHONE.muted = !PHONE.muted; PHONE.call.mute(PHONE.muted); renderPhoneWidget(); }
 function phoneCallButton(c){
   if (!phoneWanted() || !c || !c.phone) return '';
-  return `<button class="btn primary small" onclick="event.stopPropagation();phoneCall('${jsStr(c.phone)}','${c.id}')" ${PHONE.status==='ready' && !PHONE.call ? '' : 'disabled'} title="Call from the business number">📞 Call</button>`;
+  return `<button class="btn primary small" onclick="event.stopPropagation();phoneCall('${jsStr(c.phone)}','${c.id}')" ${PHONE.status==='ready' && !PHONE.call ? '' : 'disabled'} title="Call from the business number">${ico('phone', 14)} Call</button>`;
 }
 // The small phone in the bottom-left corner: status, an incoming call, or the call in progress.
 function renderPhoneWidget(){
@@ -4056,7 +4112,7 @@ function renderPhoneWidget(){
   const box = (inner, edge) => `<div class="card" style="box-shadow:0 8px 28px rgba(0,0,0,.35);border-inline-start:4px solid ${edge};padding:12px 14px">${inner}</div>`;
   if (PHONE.incoming) {
     const call = PHONE.incoming, name = callParam(call, 'callerName'), from = (call.parameters && call.parameters.From) || '';
-    host.innerHTML = box(`<div style="font-weight:700;margin-bottom:2px">📞 Incoming call</div><div style="font-size:14px;margin-bottom:10px">${esc(name || from || 'Unknown caller')}${name && from ? `<div class="hint">${esc(from)}</div>` : ''}</div>
+    host.innerHTML = box(`<div style="font-weight:700;margin-bottom:2px;display:flex;align-items:center;gap:6px">${ico('phone')} Incoming call</div><div style="font-size:14px;margin-bottom:10px">${esc(name || from || 'Unknown caller')}${name && from ? `<div class="hint">${esc(from)}</div>` : ''}</div>
       <div style="display:flex;gap:8px"><button class="btn primary small" onclick="phoneAnswer()">Answer</button><button class="btn small danger" onclick="phoneDecline()">Decline</button></div>`, 'var(--good)');
     return;
   }
@@ -4067,7 +4123,7 @@ function renderPhoneWidget(){
     return;
   }
   const missed = PHONE.missed.length;
-  const label = PHONE.status==='ready' ? '📞 Phone ready' : PHONE.status==='connecting' ? '📞 Connecting…' : '📞 Phone offline';
+  const label = ico('phone', 14) + ' ' + (PHONE.status==='ready' ? 'Phone ready' : PHONE.status==='connecting' ? 'Connecting…' : 'Phone offline');
   host.innerHTML = `<div style="display:flex;gap:8px;align-items:center">
     <button class="btn small" onclick="${PHONE.status==='ready' ? (missed ? "goTab('myDay');setTimeout(()=>myDayJump('missed'),50)" : '') : 'phoneStop();phoneSync()'}" title="${esc(PHONE.err || (PHONE.status==='ready' ? 'Calls to the business number ring here' : 'Click to reconnect'))}" style="border-inline-start:4px solid ${PHONE.status==='ready' ? 'var(--good)' : 'var(--bad)'}">${label}${missed ? ` · <b style="color:var(--bad)">${missed} missed</b>` : ''}</button></div>`;
 }
@@ -4097,7 +4153,7 @@ function myDayMissedCallsSection(){
     const when = new Date(m.started_at).toLocaleString('en-AU', { timeZone:'Australia/Sydney', weekday:'short', hour:'numeric', minute:'2-digit' });
     return `<div class="myday-row bad" ${c ? `onclick="goToLeadConversation('${c.id}')"` : ''} style="${c ? '' : 'cursor:default'}">
       <div style="flex:1 1 220px;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(name)}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px">Missed ${esc(when)}${m.sms_sent ? ' · texted them' : ''} · ${esc(m.from_number || '')}</div></div>
-      <button class="btn primary small" onclick="event.stopPropagation();phoneCall('${jsStr(m.from_number||'')}', ${c ? `'${c.id}'` : 'null'})" ${PHONE.status==='ready' && !PHONE.call ? '' : 'disabled'}>📞 Call back</button>
+      <button class="btn primary small" onclick="event.stopPropagation();phoneCall('${jsStr(m.from_number||'')}', ${c ? `'${c.id}'` : 'null'})" ${PHONE.status==='ready' && !PHONE.call ? '' : 'disabled'}>${ico('phone', 14)} Call back</button>
       <button class="btn small" onclick="event.stopPropagation();markCallbackDone('${m.id}')">Done</button>
     </div>`; }).join('');
   return myDaySection('missed', 'Missed calls — call back', PHONE.missed.length, rows, 'No missed calls waiting. ✓', 'Nobody answered these calls. The caller got a text; call them back. Calling back from here clears it.');
@@ -4179,7 +4235,7 @@ function handleLeadMessageRealtime(payload){
   convRefreshContact(r.contact_id);
   if (isNew && r.direction==='in' && convOpenContactId()!==r.contact_id) {
     const c = contactById(r.contact_id);
-    showToast(`${r.channel==='sms' ? '📱 New text' : '💬 New website chat message'} from ${c ? c.fullName : (r.author || 'a customer')}`);
+    showToast(`${r.channel==='sms' ? 'New text' : 'New website chat message'} from ${c ? c.fullName : (r.author || 'a customer')}`);
     if (UI.tab!=='crm') renderKeepingInput();   // My Day's counts (the message used to redraw the page)
   }
 }
@@ -4198,8 +4254,8 @@ function convChannels(c){
   return { sess, chat, mobile, opted, email, smsOn: !!st.phoneEnabled, sms: mobile && !opted && !!st.phoneEnabled, wa: mobile && !opted && !!st.whatsappEnabled };
 }
 // Channels in the menu (Ofek 3/10, like GHL): SMS, WhatsApp, Live chat, Email, Internal note.
-const CONV_CHANNELS = [['sms','📱','SMS'], ['whatsapp','🟢','WhatsApp'], ['chat','💬','Live chat'], ['email','✉️','Email'], ['note','📝','Internal note']];
-const CONV_CHANNEL_LABEL = { sms:'📱 SMS', whatsapp:'🟢 WhatsApp', chat:'💬 Website chat', email:'✉️ Email' };
+const CONV_CHANNELS = [['sms','mobile','SMS'], ['whatsapp','chat','WhatsApp'], ['chat','message','Live chat'], ['email','mail','Email'], ['note','note','Internal note']];
+const CONV_CHANNEL_LABEL = { sms:'SMS', whatsapp:'WhatsApp', chat:'Website chat', email:'Email' };
 function convAvail(c){
   const ch = convChannels(c);
   const stop = 'This customer replied STOP, so no messages';
@@ -4225,7 +4281,7 @@ function convChannelButton(contactId, scope){
   const c = contactById(contactId);
   const cur = c ? convChannel(c) : 'note';
   const d = CONV_CHANNELS.find(x => x[0]===cur) || CONV_CHANNELS[4];
-  return `<button type="button" class="btn small" style="white-space:nowrap" onclick="toggleConvMenu('${contactId}','${scope}', event)" title="Choose how this message goes">${d[1]} ${d[2]} ▾</button>`;
+  return `<button type="button" class="btn small" style="white-space:nowrap" onclick="toggleConvMenu('${contactId}','${scope}', event)" title="Choose how this message goes">${ico(d[1], 14)} ${d[2]} ▾</button>`;
 }
 function toggleConvMenu(contactId, scope, ev){
   if (ev) ev.stopPropagation();
@@ -4234,7 +4290,7 @@ function toggleConvMenu(contactId, scope, ev){
   const c = contactById(contactId); if (!c) return;
   const av = CONV.loaded ? convAvail(c) : { note:[true,''] }, cur = convChannel(c);
   m.innerHTML = CONV_CHANNELS.map(([k, ic, label]) => { const [ok, why] = av[k] || [false, 'Loading…'];
-    return `<button type="button" class="conv-menu-item" ${ok ? '' : 'disabled'} onclick="event.stopPropagation();setConvChannel('${contactId}','${k}','${scope}')"><span>${ic}</span><span style="flex:1"><b>${label}</b>${ok ? '' : `<br><span class="hint" style="font-size:11.5px">${esc(why)}</span>`}</span>${cur===k ? '<span style="color:var(--primary)">✓</span>' : ''}</button>`; }).join('');
+    return `<button type="button" class="conv-menu-item" ${ok ? '' : 'disabled'} onclick="event.stopPropagation();setConvChannel('${contactId}','${k}','${scope}')"><span>${ico(ic)}</span><span style="flex:1"><b>${label}</b>${ok ? '' : `<br><span class="hint" style="font-size:11.5px">${esc(why)}</span>`}</span>${cur===k ? '<span style="color:var(--primary)">✓</span>' : ''}</button>`; }).join('');
   m.hidden = false;
   setTimeout(() => { const close = () => { m.hidden = true; document.removeEventListener('click', close); }; document.addEventListener('click', close); }, 0);
 }
@@ -4784,7 +4840,7 @@ function renderLeadCard(c){
     ${chaseTooLong(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Chasing 21+ days — decide</div>` : ''}
     ${leadStage(c)==='Booked' && c.bookedFor ? `<div class="lead-due" style="margin-top:4px">Job ${fmtDateShort(c.bookedFor)}</div>` : ''}
     ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">${esc(lostReasonLabel(lostReasonOf(c)))}</div>` : ''}
-    ${(contactJobsTotal(c) ?? c.salesValue) ? `<div class="lead-sales-chip">💰 ${fmtMoney(contactJobsTotal(c) ?? c.salesValue)}</div>` : ''}
+    ${(contactJobsTotal(c) ?? c.salesValue) ? `<div class="lead-sales-chip">${ico('dollar', 13)} ${fmtMoney(contactJobsTotal(c) ?? c.salesValue)}</div>` : ''}
     ${c.nextFollowUp ? `<div class="lead-due ${overdue?'overdue':(dueToday?'today':'')}">${overdue?'⚠ Overdue':(dueToday?'● Due today':'○ Follow up')} · ${fmtDateShort(c.nextFollowUp)}</div>` : ''}
     ${leadStage(c)==='Won' ? '' : `<select class="lead-move" onclick="event.stopPropagation()" onchange="moveLead('${c.id}',this.value)" aria-label="Move ${esc(c.fullName)} to another stage">
       ${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${leadStage(c)===s?'selected':''}>${stageLabel(s)}</option>`).join('')}
@@ -4998,7 +5054,7 @@ function refreshLeadNotesUI(c){
 function leadNotesBanner(c, scope){
   const list = leadNotes(c);
   return `<div class="lead-notes-banner" data-notes-for="${c.id}" data-notes-kind="banner" data-scope="${scope}"${list.length ? '' : ' hidden'}>
-    ${list.map(n => `<div class="lead-notes-banner-row${n.id===NOTE_JUST_ADDED ? ' note-new' : ''}"><span class="lead-notes-banner-text">📝 ${esc(n.text)}</span><span class="lead-notes-banner-by">${noteByline(n)}</span></div>`).join('')}
+    ${list.map(n => `<div class="lead-notes-banner-row${n.id===NOTE_JUST_ADDED ? ' note-new' : ''}"><span class="lead-notes-banner-text">${ico('note', 14)} ${esc(n.text)}</span><span class="lead-notes-banner-by">${noteByline(n)}</span></div>`).join('')}
   </div>`;
 }
 // In the details: a box to add a note, then the notes, newest first, each with a delete.
@@ -5127,14 +5183,14 @@ function renderCrmInboxThreadAndDetails(c){
           <button class="btn ghost small" onclick="openLeadModal('${c.id}')">Full profile</button>
         </span>
       </div>
-      ${ctx ? `<div class="followup-context-banner">📌 Follow-up: ${esc(ctx)}</div>` : ''}
+      ${ctx ? `<div class="followup-context-banner">${ico('pin', 14)} Follow-up: ${esc(ctx)}</div>` : ''}
       ${leadNotesBanner(c, 'inbox')}
       <div id="inbox-conversation-thread" class="chat-thread crm-inbox-thread-body">${renderLeadConversation(c.id)}</div>
       <div class="crm-inbox-composer">${renderLeadComposer(c.id, 'inbox')}</div>
     </div>
     <div class="crm-inbox-details">
       <div style="margin-bottom:14px">${leadChipsRow(c)}</div>
-      <div class="field"><label>📝 Notes</label>${leadNotesField(c, 'inbox')}</div>
+      <div class="field"><label>Notes</label>${leadNotesField(c, 'inbox')}</div>
       <div class="field" style="margin-top:9px"><label>Stage</label>${leadStageControl(c)}</div>
       ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
       ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">Lost reason: <b>${esc(lostReasonLabel(lostReasonOf(c)))}</b></div>` : ''}
@@ -5149,8 +5205,8 @@ function renderCrmInboxThreadAndDetails(c){
       ${renderGhlHistoryBlock(c)}
       ${renderMarketingSourceBlock(c)}
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn ghost small" onclick="openLeadActivityModal('${c.id}')">💬 History (${recordActivityCount(c)})</button>
-        <button class="btn ghost small" onclick="openTaskModalForContact('${c.id}')">➕ Create task</button>
+        <button class="btn ghost small" onclick="openLeadActivityModal('${c.id}')">${ico('history')} History (${recordActivityCount(c)})</button>
+        <button class="btn ghost small" onclick="openTaskModalForContact('${c.id}')">${ico('plus')} Create task</button>
       </div>
       <div class="lead-chip-edit">
         <div class="lead-chip-edit-title">Change the chips at the top</div>
@@ -5266,7 +5322,7 @@ function renderCrmTable(allContacts){
       <td class="mono" style="${overdue?'color:var(--bad);font-weight:600':''}">${c.nextFollowUp?fmtDateShort(c.nextFollowUp):'—'}</td>
       <td class="num">${c.estimatedValue?fmtMoney(c.estimatedValue):'—'}</td>
       <td class="num">${contactJobsTotal(c)!==null ? `<span title="The total of this customer's jobs">${fmtMoney(contactJobsTotal(c))}</span>` : contactEditableCell(c.id,'salesValue', c.salesValue?fmtMoney(c.salesValue):'—', 'number')}</td>
-      <td><button class="btn ghost small" onclick="openLeadActivityModal('${c.id}')">💬 ${recordActivityCount(c)}</button></td>
+      <td><button class="btn ghost small" onclick="openLeadActivityModal('${c.id}')">${ico('history')} ${recordActivityCount(c)}</button></td>
       <td><button class="btn ghost small" onclick="openLeadModal('${c.id}')">Open</button></td>
     </tr>`;
   }).join('') : `<tr><td colspan="13">${emptyState('No leads match these filters','Try clearing a filter.')}</td></tr>`;
@@ -5460,7 +5516,7 @@ function openLeadModal(contactId){
             <div class="field"><label>Email</label><input id="lm-email" value="${c?esc(c.email||''):''}"></div>
             <div class="field"><label>Postcode</label><input id="lm-postcode" value="${c?esc(c.postcode||''):''}"></div>
           </div>
-          <div class="field" style="margin-top:11px"><label>📝 Notes</label>${c ? leadNotesField(c, 'modal') : `<textarea rows="3" id="lm-notes" placeholder="Anything to remember about this customer: gate code, dog, best time to call…"></textarea>`}</div>
+          <div class="field" style="margin-top:11px"><label>Notes</label>${c ? leadNotesField(c, 'modal') : `<textarea rows="3" id="lm-notes" placeholder="Anything to remember about this customer: gate code, dog, best time to call…"></textarea>`}</div>
           <div class="field" style="margin-top:11px"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${stageBadge('Won', 'Won — has a job')}` : `<select id="lm-status" class="stage-select" style="--stage:${stageColor(c?leadStage(c):'New')}" onchange="this.style.setProperty('--stage', stageColor(this.value));document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none';document.getElementById('lm-booked-wrap').style.display=this.value==='Booked'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
           <div class="field" id="lm-booked-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Booked'?'':'none'}"><label>Job booked for</label><input type="date" id="lm-booked-for" value="${c?esc(c.bookedFor||''):''}"><span class="hint">The day it's booked in ServiceM8 — 2 days after it with no job, you get a reminder</span></div>
           <div class="field" id="lm-lost-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Lost'?'':'none'}"><label>Why was it lost?</label><select id="lm-lost-reason"><option value="">— choose a reason —</option>${LOST_REASONS.map(r=>`<option value="${r.key}" ${c&&lostReasonOf(c)===r.key?'selected':''}>${esc(r.label)}</option>`).join('')}</select></div>
@@ -5493,7 +5549,7 @@ function openLeadModal(contactId){
             <div class="hint" style="flex:1">One unified thread, however the customer actually reached you — not live-connected to SMS/Facebook yet, so replies here just log what you sent.</div>
             <button id="modal-mark-read-btn" class="btn ghost small" style="display:${unreadCountFor(c)>0?'':'none'};flex:none" onclick="markLeadReadManually('${c.id}','modal')">Mark as read</button>
           </div>
-          ${leadFollowupContextFor(c) ? `<div class="followup-context-banner">📌 Follow-up: ${esc(leadFollowupContextFor(c))}</div>` : ''}
+          ${leadFollowupContextFor(c) ? `<div class="followup-context-banner">${ico('pin', 14)} Follow-up: ${esc(leadFollowupContextFor(c))}</div>` : ''}
           ${leadNotesBanner(c, 'modal')}
           <div id="modal-conversation-thread" class="chat-thread">${renderLeadConversation(c.id)}</div>
           ${renderLeadComposer(c.id, 'modal')}
@@ -5833,7 +5889,7 @@ function renderJobPanel(j, canEdit){
       ${field('Notes', canEdit ? `<textarea rows="3" placeholder="Add a note…" onchange="commitJobCellEdit('${j.id}','notes',this.value,'text')">${esc(j.notes||'')}</textarea>` : `<div class="job-ro">${esc(j.notes||'—')}</div>`, true)}
     </div>
     <div class="job-panel-acts">
-      <button type="button" class="btn ghost small" onclick="openJobActivityModal('${j.id}')">💬 History (${recordActivityCount(j)})</button>
+      <button type="button" class="btn ghost small" onclick="openJobActivityModal('${j.id}')">${ico('history')} History (${recordActivityCount(j)})</button>
       ${canEdit ? `<button type="button" class="btn ghost small" onclick="openJobModal('${j.id}')">Edit all details</button>
       <button type="button" class="btn ghost small danger" onclick="deleteJob('${j.id}')">Delete job</button>` : ''}
     </div>`;
@@ -7180,9 +7236,9 @@ function renderDashboard(profile, data){
   const invCounts = {}; data.jobs.forEach(j => { if (j.invoiceNumber) { const k = j.invoiceNumber+'|'+Number(j.amount); invCounts[k] = (invCounts[k]||0) + 1; } });
   const dupInvoices = new Set(Object.keys(invCounts).filter(k => invCounts[k]>1).map(k => k.split('|')[0])).size;
   const attention = [
-    overdue.length ? `<button class="btn" onclick="adsGo('late-to-pay')">💵 ${overdue.length} unpaid job${overdue.length===1?'':'s'} past the ${paymentTermDays(data)}-day term · ${fmtMoney(round2(overdue.reduce((s,j)=>s+jobTotalCollected(j),0)))} →</button>` : '',
-    cashToCollect>0 ? `<button class="btn" onclick="goTab('payroll')">💰 ${fmtMoney(cashToCollect)} cash to collect from technicians this week →</button>` : '',
-    openReminders ? `<button class="btn" onclick="goTab('reminders')">🔔 ${openReminders} open reminder${openReminders===1?'':'s'} →</button>` : '',
+    overdue.length ? `<button class="btn" onclick="adsGo('late-to-pay')">${ico('dollar')} ${overdue.length} unpaid job${overdue.length===1?'':'s'} past the ${paymentTermDays(data)}-day term · ${fmtMoney(round2(overdue.reduce((s,j)=>s+jobTotalCollected(j),0)))} →</button>` : '',
+    cashToCollect>0 ? `<button class="btn" onclick="goTab('payroll')">${ico('wallet')} ${fmtMoney(cashToCollect)} cash to collect from technicians this week →</button>` : '',
+    openReminders ? `<button class="btn" onclick="goTab('reminders')">${ico('bell')} ${openReminders} open reminder${openReminders===1?'':'s'} →</button>` : '',
     dupInvoices ? `<button class="btn" onclick="${drillJs('Invoices on more than one job (same amount)', 'jobs', data.jobs.filter(j => j.invoiceNumber && invCounts[j.invoiceNumber+'|'+Number(j.amount)]>1))}">⚠️ ${dupInvoices} invoice number${dupInvoices===1?' is':'s are'} on more than one job →</button>` : '',
   ].filter(Boolean).join('');
 
@@ -7257,7 +7313,7 @@ function renderDashboard(profile, data){
     <div class="section-title">Marketing <span class="tag">ad spend ${fmtMoney(totalSpend)}</span></div>
     <div class="table-wrap"><table><thead><tr><th>Channel</th><th class="num">Form leads</th><th class="num">Calls</th><th class="num">Enquiries</th><th class="num">Ad spend</th><th class="num">Cost / enquiry</th><th class="num">Won</th><th class="num">Close rate</th><th class="num">Revenue</th><th class="num">ROAS</th></tr></thead>
       <tbody>${channelRows}</tbody></table></div>
-    <div class="hint" style="margin-top:6px">📞 Google Ads calls this period: <b>${cs.total}</b> · answered ${cs.answered} · missed ${cs.missed} · 30 s or longer ${cs.over30s}. Calls from Google Maps and from people who dial the 1300 number off the website aren't tracked yet — that comes with the phone system (Twilio). Won = leads from this period that already have a job in Jobs &amp; Commissions; close rate = Won ÷ form leads. Recent leads may still turn into jobs, so the latest period always looks lower.</div>
+    <div class="hint" style="margin-top:6px">${ico('phone', 13)} Google Ads calls this period: <b>${cs.total}</b> · answered ${cs.answered} · missed ${cs.missed} · 30 s or longer ${cs.over30s}. Calls from Google Maps and from people who dial the 1300 number off the website aren't tracked yet — that comes with the phone system (Twilio). Won = leads from this period that already have a job in Jobs &amp; Commissions; close rate = Won ÷ form leads. Recent leads may still turn into jobs, so the latest period always looks lower.</div>
     <div class="grid-3" style="margin-top:12px;align-items:start">
       <div class="card stat-card" style="--stat-accent:var(--primary)">
         <div class="stat-label">Leads → won / lost</div>
@@ -7446,7 +7502,7 @@ function payrollInvoiceChips(st, c){
   const chip = (file, at, name, signed, expected) => {
     if (!file) return `<span class="hint" style="display:inline-block;margin:0 8px 4px 0">${name} —</span>`;
     const differs = signed!=null && expected!=null && Math.abs(signed - expected) >= 0.005;
-    return `<a href="#" class="file-chip" style="margin:0 4px 4px 0${differs ? ';outline:1.5px solid var(--warn)' : ''}" title="Saved ${esc(at ? new Date(at).toLocaleString('en-AU') : '')}${differs ? ` · the app worked out ${payMoney(expected)}` : ''}" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">🧾 ${name} ${signed!=null ? payMoney(signed) : '✓'}${differs ? ' ⚠' : ''}</a>`;
+    return `<a href="#" class="file-chip" style="margin:0 4px 4px 0${differs ? ';outline:1.5px solid var(--warn)' : ''}" title="Saved ${esc(at ? new Date(at).toLocaleString('en-AU') : '')}${differs ? ` · the app worked out ${payMoney(expected)}` : ''}" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">${ico('receipt', 13)} ${name} ${signed!=null ? payMoney(signed) : '✓'}${differs ? ' ' + ico('alert', 13) : ''}</a>`;
   };
   return `<div style="display:flex;flex-wrap:wrap">${chip(st.salaryInvoiceFile, st.salaryInvoiceAt, 'Commission', st.salaryInvoiceAmount, c ? round2(c.total + c.bonus.total) : null)}${chip(st.expensesInvoiceFile, st.expensesInvoiceAt, 'Expenses', st.expensesInvoiceAmount, c ? c.materials.total : null)}</div>`;
 }
@@ -7466,7 +7522,7 @@ function payrollInvoiceCard(c, person, weekKey){
       <div class="stat-sub">${sub}${file && signed!=null && !same ? ` · the signed invoice is ${payMoney(signed)}, not ${payMoney(amount)}` : ''}</div>
       ${kind==='expenses' && c.materials.lines.length ? `<div style="margin-top:10px">${c.materials.lines.map(l => `<div class="split-row" style="grid-template-columns:1fr auto auto"><span>${esc(l.kind==='parts' ? `Parts · job #${l.job.invoiceNumber||'—'}${l.desc ? ' · ' + l.desc : ''}` : l.label)} <span class="hint">${fmtDateShort(l.bought)}</span></span><span class="num">${payMoney(l.amount)}</span><span>${l.receipt ? fileLinkHtml(l.receipt) : '<span class="hint">no receipt</span>'}</span></div>`).join('')}</div>` : ''}
       <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        ${file ? `<a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">📄 View invoice</a>` : ''}
+        ${file ? `<a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(file)}')">${ico('file', 14)} View invoice</a>` : ''}
         ${amount > 0 || file ? `<button class="btn small ${file ? '' : 'primary'}" onclick="openPayrollInvoice('${kind}','${p}','${weekKey}')">${file ? 'Create it again' : 'Create invoice'}</button>` : '<span class="hint">Nothing to invoice this week</span>'}
       </div>
     </div>`;
@@ -7612,7 +7668,7 @@ function toggleInvoiceEdit(){
   INV_EDIT = !INV_EDIT;
   if (!INV_EDIT && CUR_INVOICE) CUR_INVOICE.lines = CUR_INVOICE.lines.filter(l => String(l.label||'').trim() || (Number(l.value)||0)!==0);   // drop empty new lines
   renderInvoicePreview();
-  const b = document.getElementById('inv-edit-btn'); if (b) b.textContent = INV_EDIT ? '✓ Done' : '✏️ Edit lines';
+  const b = document.getElementById('inv-edit-btn'); if (b) b.innerHTML = INV_EDIT ? '✓ Done' : `${ico('pencil', 14)} Edit lines`;
 }
 function refreshInvoiceTotals(){
   if (!CUR_INVOICE) return;
@@ -7735,7 +7791,7 @@ async function openPayrollInvoice(kind, person, weekKey){
         <h2>${kind==='salary' ? 'Commission invoice' : 'Equipment &amp; materials invoice'}</h2>
         <div class="modal-sub">Check it. If something needs changing for this invoice only, press Edit lines. Then sign at the bottom and press Save invoice${kind==='salary' ? '. Ofek and Noam then get a message that you can be paid' : ''}.</div>
         ${missing.length ? `<div class="card tight" style="margin-bottom:12px;border-color:var(--warn)">${pill('warn', 'Missing: ' + missing.join(', '))} <span class="hint">The invoice can't be saved without an ABN. ${fixHint}</span></div>` : ''}
-        <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button type="button" class="btn small" id="inv-edit-btn" onclick="toggleInvoiceEdit()">✏️ Edit lines</button></div>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button type="button" class="btn small" id="inv-edit-btn" onclick="toggleInvoiceEdit()">${ico('pencil', 14)} Edit lines</button></div>
         <div class="inv-scroll">
           <div id="inv-preview">${payrollInvoiceHtml(inv, false)}</div>
           <div class="inv inv-sign">
@@ -7815,7 +7871,7 @@ function phoneNotificationsBar(){
   if (!PUSH.checked) setTimeout(checkPhoneNotifications, 0);
   const tip = isIosDevice() && !isInstalledApp() ? ' On iPhone, add the app to the home screen first (Share → Add to Home Screen) and open it from there.' : '';
   return `<div class="card tight" style="margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-    <span style="font-size:18px" aria-hidden="true">📱</span>
+    <span style="display:inline-flex" aria-hidden="true">${ico('mobile', 20)}</span>
     <div style="flex:1 1 280px"><b>Phone notifications</b> <span class="hint">${PUSH.on ? 'On for this device: you get a message when a technician sends his commission invoice.' : 'Get a message on this phone when a technician sends his commission invoice.' + tip}</span></div>
     ${PUSH.on ? `<button class="btn small" onclick="sendTestNotification()">Send a test</button>` : `<button class="btn small primary" onclick="enablePhoneNotifications()">Turn on for this device</button>`}
   </div>`;
@@ -7927,7 +7983,7 @@ function renderPayroll(profile, data){
     const people = [...payrollCommissionPeople(data), ...payrollHourlyPeople(data)];
     const viewAs = people.includes(UI.payroll.viewAs) ? UI.payroll.viewAs : null;
     const expenses = !viewAs && UI.payroll.view==='expenses';
-    const chips = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="week-chip ${viewAs||expenses?'':'active'}" onclick="setPayrollView(null)">Payroll board</button><button class="week-chip ${expenses?'active':''}" onclick="setPayrollView('expenses')">🧾 Expenses &amp; receipts</button>${people.map(p => `<button class="week-chip ${p===viewAs?'active':''}" onclick="UI.payroll.viewAs='${jsStr(p)}';render()" title="What ${esc(p)} sees on their own pay page">👁 ${esc(p)}'s view</button>`).join('')}</div>`;
+    const chips = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="week-chip ${viewAs||expenses?'':'active'}" onclick="setPayrollView(null)">Payroll board</button><button class="week-chip ${expenses?'active':''}" onclick="setPayrollView('expenses')">${ico('receipt', 14)} Expenses &amp; receipts</button>${people.map(p => `<button class="week-chip ${p===viewAs?'active':''}" onclick="UI.payroll.viewAs='${jsStr(p)}';render()" title="What ${esc(p)} sees on their own pay page">${ico('eye', 14)} ${esc(p)}'s view</button>`).join('')}</div>`;
     if (expenses) return renderPayrollExpenses(data, chips);
     return viewAs
       ? `<div class="page-head"><div><h1 class="page-title">Payroll</h1><div class="page-sub">Viewing as ${esc(viewAs)} — exactly what they see on their own pay page</div></div></div>${chips}${renderMyPay(profile, data, viewAs, true)}`
@@ -7975,7 +8031,7 @@ function renderPayrollExpenses(data, viewChips){
       <td class="num">${fmtMoney(r.amount)}</td>
       <td>${refundPill(r)}</td>
       <td><div style="display:flex;gap:4px">${r.kind==='equipment'
-        ? `<button class="btn ghost small" onclick="openEquipActivityModal('${r.id}')">💬 ${recordActivityCount(r.rec)}</button><button class="btn ghost small" onclick="openEquipSpendModal('${r.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteEquipSpend('${r.id}')">Delete</button>`
+        ? `<button class="btn ghost small" onclick="openEquipActivityModal('${r.id}')">${ico('history')} ${recordActivityCount(r.rec)}</button><button class="btn ghost small" onclick="openEquipSpendModal('${r.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteEquipSpend('${r.id}')">Delete</button>`
         : `<button class="btn ghost small" onclick="openJobModal('${r.id}')">Open job</button>`}</div></td>
     </tr>`).join('') : `<tr><td colspan="9">${emptyState('No purchases match', 'Try another period, or clear the filters.')}</td></tr>`;
   const tile = (label, value, sub, accent) => `<div class="card stat-card" style="--stat-accent:${accent}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div><div class="stat-sub">${sub}</div></div>`;
@@ -8048,7 +8104,7 @@ function renderPayrollBoard(profile, data, viewChips){
       <td>${payrollInvoiceChips(st, c)}</td>
       <td>${cashCell}</td>
       <td>${salaryCell}</td>
-      <td><button class="btn small" onclick="copyPayMessage('commission','${p}')">📋 Copy message</button></td>
+      <td><button class="btn small" onclick="copyPayMessage('commission','${p}')">${ico('copy')} Copy message</button></td>
     </tr>${open ? `<tr><td colspan="10" style=""background:var(--bg-soft, transparent)">${payrollWeekPanel(c, data)}${payrollJobLinesTable(c)}${payrollMaterialsTable(c)}${payrollUnpaidTable(c)}</td></tr>` : ''}`;
   }).join('');
 
@@ -8064,7 +8120,7 @@ function renderPayrollBoard(profile, data, viewChips){
       <td class="num">${h.hours}</td><td class="num">${h.bookings}</td><td class="num">${payMoney(presentAmt(h.bonuses))}${h.extra.total ? `<div class="hint">+ bonus ${payMoney(h.extra.total)}</div>` : ''}</td>
       <td class="num" style="font-weight:700">${payMoney(h.total)}</td>
       <td>${salaryCell}</td>
-      <td><button class="btn small" onclick="copyPayMessage('hourly','${p}')">📋 Copy message</button></td>
+      <td><button class="btn small" onclick="copyPayMessage('hourly','${p}')">${ico('copy')} Copy message</button></td>
     </tr>${open ? `<tr><td colspan="7">${payrollDaysTable(h)}</td></tr>` : ''}`;
   }).join('');
 
@@ -8144,7 +8200,7 @@ function renderMyPay(profile, data, person, isPreview){
       </div>` : `<div class="hint" style="margin-top:14px">Your hours and bookings fill in by themselves: hours from Log In to Log Out on My Day, bookings = every booking made that day. If something looks wrong, tell Ofek or Noam.</div>`}
       <div class="section-title">This week <span class="tag">${payrollWeekLabel(wk)}</span></div>
       ${payrollDaysTable(h)}
-      ${isPreview ? `<div style="margin-top:10px"><button class="btn small" onclick="copyPayMessage('hourly','${p}')">📋 Copy pay message</button></div>` : ''}
+      ${isPreview ? `<div style="margin-top:10px"><button class="btn small" onclick="copyPayMessage('hourly','${p}')">${ico('copy')} Copy pay message</button></div>` : ''}
       ${renderShiftLog(person, weekKey, !isPreview && (profile.technicianName || profile.fullName)===person && profile.role==='va')}
     `;
   }
@@ -8173,7 +8229,7 @@ function renderMyPay(profile, data, person, isPreview){
     ${payrollMaterialsTable(c)}
     ${payrollUnpaidTable(c)}
     <div class="hint" style="margin-top:8px">${deducts ? 'Commission = (amount before GST − the job\'s expenses) × your %.' : 'Commission = amount before GST × your %.'} It counts in the week the customer pays.</div>
-    ${isPreview ? `<div style="margin-top:10px"><button class="btn small" onclick="copyPayMessage('commission','${jsStr(person)}')">📋 Copy pay message</button></div>` : ''}
+    ${isPreview ? `<div style="margin-top:10px"><button class="btn small" onclick="copyPayMessage('commission','${jsStr(person)}')">${ico('copy')} Copy pay message</button></div>` : ''}
   `;
 }
 function setSalesLogDate(v){ if (!v) return; UI.payroll.logDate = v; UI.payroll.week = payrollWeekOf(v).key; render(); }
@@ -8385,7 +8441,7 @@ function crmLinkButton(contactId){
   if (!contactId) return '';
   const pr = getCurrentProfile();
   if (!pr || !canViewSection(pr, 'crm')) return '';
-  return `<button class="btn ghost small" style="padding:0 6px;margin-inline-start:6px" title="Open the conversation with this customer" onclick="event.stopPropagation();goToLeadConversation('${contactId}')">💬</button>`;
+  return `<button class="btn ghost small" style="padding:0 6px;margin-inline-start:6px" title="Open the conversation with this customer" onclick="event.stopPropagation();goToLeadConversation('${contactId}')">${ico('message', 14)}</button>`;
 }
 // Customer picker for the Job modal and the Closings form: typing shows the CRM customers (name · phone) so the
 // person choosing picks the real customer instead of retyping a name that later fails to match.
@@ -8555,7 +8611,7 @@ function renderOutstanding(profile, data){
 }
 
 /* ── reminders ───────────────────────────────────────────────────────── */
-const REMINDER_ICONS = { 'employee-doc':'🪪', unpaid:'💵', commission:'🧾', refund:'♻️', equipment:'🧰', followup:'📞', 'repeat-service':'🔁', 'chase-long':'⏳', 'stale-quote':'📄', 'booked-no-job':'📅' };
+const REMINDER_ICONS = { 'employee-doc':'idcard', unpaid:'dollar', commission:'receipt', refund:'refresh', equipment:'wrench', followup:'phone', 'repeat-service':'repeat', 'chase-long':'hourglass', 'stale-quote':'file', 'booked-no-job':'calendar' };
 function deleteManualReminder(id, rowEl){
   confirmAction('Delete this reminder?', ()=>{
     animateRowRemove(rowEl, ()=>{
@@ -8644,7 +8700,7 @@ function renderReminders(profile, data){
   const canDelete = profile.role!=='technician';
   const list = items.length ? items.map(it => `
     <div class="reminder-item" style="cursor:pointer${it.isRead?';opacity:.55':''}" onclick="goToReminderTarget('${it.type}','${it.contactId||''}','${jsStr(it.readKey||'')}','${it.weekKey||''}')">
-      <div class="reminder-ic" style="background:${it.severity==='bad'?'var(--bad-soft)':'var(--warn-soft)'};cursor:pointer" title="Mark as read" onclick="event.stopPropagation();markReminderReadOnly('${jsStr(it.readKey||'')}')">${REMINDER_ICONS[it.type]}</div>
+      <div class="reminder-ic" style="background:${it.severity==='bad'?'var(--bad-soft)':'var(--warn-soft)'};cursor:pointer" title="Mark as read" onclick="event.stopPropagation();markReminderReadOnly('${jsStr(it.readKey||'')}')">${ico(REMINDER_ICONS[it.type], 18)}</div>
       <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13.5px">${esc(it.title)}</div><div style="color:var(--ink-soft);font-size:12px;margin-top:2px">${esc(it.meta)}</div></div>
       ${it.isRead ? pill('neutral','Read') : pill(it.severity, it.severity==='bad'?'Urgent':'Attention')}
       ${!canDelete ? '' : it.manual ? `<button class="btn ghost small danger" onclick="event.stopPropagation();deleteManualReminder('${it.id}', this.closest('.reminder-item'))">Delete</button>` : (it.type==='followup' && !it.key && it.contactId ? `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissLeadFollowup('${it.contactId}', this.closest('.reminder-item'))">Delete</button>` : `<button class="btn ghost small danger" onclick="event.stopPropagation();dismissReminder('${it.key}', this.closest('.reminder-item'))">Delete</button>`)}
@@ -8976,8 +9032,8 @@ function openItemTitle(r){
 }
 function openItemActivityButton(r){
   if (r.kind==='Follow-up') return `<button class="btn ghost small" onclick="goToLeadConversation('${r.id}')">Open card</button>`;
-  if (r.kind==='Task') return `<button class="btn ghost small" data-activity-count="${r.id}" onclick="openTaskActivityModal('${r.id}')">💬 ${taskActivityCount(r.raw)}</button>`;
-  return `<button class="btn ghost small" onclick="openJobActivityModal('${r.id}')">💬 ${recordActivityCount(r.raw)}</button>`;
+  if (r.kind==='Task') return `<button class="btn ghost small" data-activity-count="${r.id}" onclick="openTaskActivityModal('${r.id}')">${ico('history')} ${taskActivityCount(r.raw)}</button>`;
+  return `<button class="btn ghost small" onclick="openJobActivityModal('${r.id}')">${ico('history')} ${recordActivityCount(r.raw)}</button>`;
 }
 function renderOpenItemsMixedList(data){
   const today = parseLocalDate(todayStr());
@@ -9228,7 +9284,7 @@ function equipQuickCard(e){
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${techTag(e.technician)}<span style="font-weight:600;font-size:13.3px">${esc(e.item)}</span></div>
       <div style="display:flex;align-items:center;gap:10px">
         <span class="mono" style="font-size:13px">${fmtMoney(e.cost)}</span>
-        <button class="btn ghost small" onclick="openEquipActivityModal('${e.id}')">💬 ${recordActivityCount(e)}</button>
+        <button class="btn ghost small" onclick="openEquipActivityModal('${e.id}')">${ico('history')} ${recordActivityCount(e)}</button>
         <button class="btn ghost small" onclick="deleteEquipSpend('${e.id}');render()">Delete</button>
       </div>
     </div>
@@ -9425,7 +9481,7 @@ function renderTasksList(profile, data, list){
     <td>${esc(assigneeNames(t).join(', ')||'—')}</td>
     <td>${statusSelect('taskStatus', t.id, t.status, TASK_STATUSES, v=>TASK_STATUS_COLOR[v], v=>v, false)}</td>
     <td class="mono">${t.due?fmtDateShort(t.due):'—'}</td>
-    <td><button class="btn ghost small" data-activity-count="${t.id}" onclick="openTaskActivityModal('${t.id}')">💬 ${taskActivityCount(t)}</button></td>
+    <td><button class="btn ghost small" data-activity-count="${t.id}" onclick="openTaskActivityModal('${t.id}')">${ico('history')} ${taskActivityCount(t)}</button></td>
     <td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openTaskModal('${t.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteTask('${t.id}');render()">Delete</button></td></tr>`).join('') : `<tr><td colspan="8">${emptyState(done && !UI.tasks.showDone ? 'No open tasks' : 'No tasks', done && !UI.tasks.showDone ? 'Everything here is done.' : emptySub)}</td></tr>`;
   return `
     <div class="table-wrap"><table><thead><tr><th class="wrap">Task</th><th>Client</th><th>Priority</th><th>Assigned To</th><th>Status</th><th>Due Date</th><th>Activity</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -9488,7 +9544,7 @@ function pickTaskClient(id){
 function taskClientLinkedHtml(contactId){
   const c = contactId ? contactById(contactId) : null;
   if (!c) return '';
-  return `<span class="hint">🔗 Linked to the CRM card · </span><span class="xlink" onclick="closeModal();goToLeadConversation('${c.id}')">Open ${esc(c.fullName)}</span>`;
+  return `<span class="hint">${ico('link', 13)} Linked to the CRM card · </span><span class="xlink" onclick="closeModal();goToLeadConversation('${c.id}')">Open ${esc(c.fullName)}</span>`;
 }
 // "➕ Create task" on a customer card (Ofek 5/10): the same task form, without Category and Client (the task is linked
 // to that customer), with quick presets; it goes to the board of whoever it's assigned to, like any task.
@@ -9610,7 +9666,7 @@ function renderSubtasksList(){
         <td><select onchange="updateSubtaskField(${i},'status',this.value)">${TASK_STATUSES.map(st=>`<option value="${st}" ${(s.status||'Not Started')===st?'selected':''}>${st}</option>`).join('')}</select></td>
         <td><input type="date" value="${s.date||''}" onchange="updateSubtaskField(${i},'date',this.value)" style="min-width:130px"></td>
         <td style="display:flex;gap:4px;align-items:center;white-space:nowrap">
-          <button type="button" class="btn ghost small" onclick="toggleSubtaskUpdates(${i})">💬 ${(s.updates||[]).length}</button>
+          <button type="button" class="btn ghost small" onclick="toggleSubtaskUpdates(${i})">${ico('history')} ${(s.updates||[]).length}</button>
           <button type="button" class="btn ghost small danger" onclick="removeSubtask(${i})">✕</button>
         </td>
       </tr>
@@ -9756,10 +9812,10 @@ function cashStatusRow(){
   const cs = STATE.data.cashStatus || { amount:0, activityLog:[] };
   return `<div class="table-wrap" style="padding:4px 18px;margin-bottom:18px">
     <div class="reminder-item">
-      <div class="reminder-ic" style="background:var(--good-soft)">💰</div>
+      <div class="reminder-ic" style="background:var(--good-soft)">${ico('dollar', 18)}</div>
       <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px">Cash Status</div></div>
       <span class="cash-amount editable-cell" ondblclick="startCashAmountEdit(this)" title="Double-click to edit">${fmtMoney(cs.amount)}</span>
-      <button class="btn ghost small" onclick="openRecordActivityModal('cashStatus','main','Cash Status','Weekly cash on hand — updates from Ofek & Noam')">💬 ${(cs.activityLog||[]).length}</button>
+      <button class="btn ghost small" onclick="openRecordActivityModal('cashStatus','main','Cash Status','Weekly cash on hand — updates from Ofek & Noam')">${ico('history')} ${(cs.activityLog||[]).length}</button>
     </div>
   </div>`;
 }
@@ -9825,7 +9881,7 @@ function postQuickTaskUpdate(taskId){
   input.value = '';
   document.getElementById('quick-activity-list').innerHTML = renderTaskActivityList(taskId);
   const btn = document.querySelector(`[data-activity-count="${taskId}"]`);
-  if (btn) btn.textContent = `💬 ${taskActivityCount(task)}`;
+  if (btn) btn.innerHTML = `${ico('history')} ${taskActivityCount(task)}`;
 }
 function openTaskActivityModal(taskId){
   const task = STATE.data.tasks.find(t=>t.id===taskId); if (!task) return;
@@ -9962,7 +10018,7 @@ function renderEmployeePanel(e, data, canEdit){
   const docRow = d => {
     const doc = (e.documents||{})[d.kind] || {}, x = employeeDocExpiry(doc, today);
     const slot = (side, ref) => ref
-      ? `<span class="doc-slot"><a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(ref)}')">📄 ${side==='back' ? 'Back' : d.back ? 'Front' : 'View'}</a>${ro ? '' : `<button type="button" class="btn ghost small" onclick="pickEmployeeDoc('${e.id}','${d.kind}','${side}')">Replace</button><button type="button" class="lead-note-del" onclick="removeEmployeeDoc('${e.id}','${d.kind}','${side}')">Remove</button>`}</span>`
+      ? `<span class="doc-slot"><a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(ref)}')">${ico('file', 14)} ${side==='back' ? 'Back' : d.back ? 'Front' : 'View'}</a>${ro ? '' : `<button type="button" class="btn ghost small" onclick="pickEmployeeDoc('${e.id}','${d.kind}','${side}')">Replace</button><button type="button" class="lead-note-del" onclick="removeEmployeeDoc('${e.id}','${d.kind}','${side}')">Remove</button>`}</span>`
       : (ro ? '<span class="hint">—</span>' : `<button type="button" class="btn ghost small" onclick="pickEmployeeDoc('${e.id}','${d.kind}','${side}')">Upload${d.back ? (side==='back' ? ' back' : ' front') : ''}</button>`);
     return `<div class="doc-row">
       <div class="doc-name">${esc(d.label)}${x ? ' ' + pill(x.tone, x.text) : ''}</div>
@@ -9977,7 +10033,7 @@ function renderEmployeePanel(e, data, canEdit){
     </div>
     <div class="job-panel-acts" style="margin:12px 0 2px">
       ${canEdit ? `<button type="button" class="btn ghost small" onclick="openEmployeeModal('${e.id}')">Edit name, roles and rates</button>` : ''}
-      <button type="button" class="btn ghost small" onclick="openEmployeeActivityModal('${e.id}')">💬 History (${recordActivityCount(e)})</button>
+      <button type="button" class="btn ghost small" onclick="openEmployeeActivityModal('${e.id}')">${ico('history')} History (${recordActivityCount(e)})</button>
     </div>
     <div class="grp">Details</div>
     <div class="f">
@@ -10355,7 +10411,7 @@ function renderTechnicianSettingsCard(emp){
   return `<div class="card" style="margin-bottom:14px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       ${techTag(emp.name)}
-      <button class="btn ghost small" onclick="openEmployeeActivityModal('${emp.id}')">💬 Rate history</button>
+      <button class="btn ghost small" onclick="openEmployeeActivityModal('${emp.id}')">${ico('history')} Rate history</button>
     </div>
     <div class="stat-label" style="margin-bottom:6px">Commission % by job type</div>
     <div class="grid-4" style="margin-bottom:14px">
@@ -10388,7 +10444,7 @@ function renderSettings(profile){
       <div><h1 class="page-title">Permissions &amp; Settings</h1><div class="page-sub">Decide exactly what each person sees — including Ron, whenever you choose. A change reaches that person the next time they open or refresh the app.</div></div>
       <span style="display:flex;gap:8px">
         <button class="btn ghost small" onclick="exportDataAsJson()">⬇️ Export all data (JSON)</button>
-        <button class="btn ghost small" onclick="openSettingsActivityModal()">💬 Settings activity</button>
+        <button class="btn ghost small" onclick="openSettingsActivityModal()">${ico('history')} Settings activity</button>
       </span>
     </div>
     <div class="banner">Manager accounts automatically see everything an owner sees except this Settings page, so they aren't listed below.</div>
@@ -10522,7 +10578,7 @@ function myShiftButton(profile){
   const status = brk ? pill('warn', `On a break since ${t(profile.onBreakSince)}`) : on ? pill('good', `Logged in since ${t(profile.onDutyChangedAt)}`) : outToday ? pill('neutral', `Logged out at ${t(profile.onDutyChangedAt)}`) : pill('neutral', 'Not logged in');
   if (!on) return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${status}<button class="btn primary" onclick="vaLogIn()">Log In</button></div>`;
   // Break (Ofek 3/10): only recorded, and the owners get a WhatsApp. Calls and pay don't change.
-  const breakBtn = brk ? `<button class="btn primary" onclick="setMyBreak(false)">Finish Break</button>` : `<button class="btn" onclick="setMyBreak(true)">☕ Start Break</button>`;
+  const breakBtn = brk ? `<button class="btn primary" onclick="setMyBreak(false)">Finish Break</button>` : `<button class="btn" onclick="setMyBreak(true)">${ico('coffee')} Start Break</button>`;
   return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${status}${breakBtn}<button class="btn" onclick="vaLogOut()">Log Out</button></div>`;
 }
 async function vaLogIn(){
@@ -10600,7 +10656,7 @@ function updateCommissionRateFromSettings(techName, jobType, rawValue){
 
 function renderNoAccess(profile){
   return `<div class="card" style="max-width:480px;margin:60px auto;padding:30px;text-align:center">
-    <div style="font-size:34px;margin-bottom:10px">🔒</div>
+    <div style="margin-bottom:10px;color:var(--ink-faint)">${ico('lock', 34)}</div>
     <h1 style="font-family:'Figtree',sans-serif;font-size:20px;font-weight:700;margin-bottom:8px">You don't have access to any section yet</h1>
     <p style="color:var(--ink-soft);font-size:14px;line-height:1.7">Hi ${esc(profile.fullName)}, Noam needs to open at least one section for you (Jobs, Finance, Tasks, etc.) on his Settings screen. Once he does, that section will automatically appear in your sidebar.</p>
   </div>`;

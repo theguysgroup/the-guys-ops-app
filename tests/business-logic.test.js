@@ -172,10 +172,10 @@ function testSplitLeadRequestEvent(sb){
     { label:'Sent the website form again · Meta Ads', request:'Cassette type aircon', note:'Name on the form: Chris.' }, 'a repeat send: the name on the form goes under the request');
   assertEqual(sb.splitLeadRequestEvent('Sent the website form again (Organic) — Hi. Need two units.'), { label:'Sent the website form again · Organic web', request:'Hi. Need two units', note:'' }, 'a full stop inside the message stays');
   const ret = t => sb.splitLeadRequestEvent('🔁 Returning customer — new enquiry from the website ' + t);
-  assertEqual(ret('form (Meta Ads) — Cassette type aircon.'), { label:'🔁 Returning customer · new enquiry from the website form · Meta Ads', request:'Cassette type aircon', note:'' }, 'a returning customer: one card, the request highlighted');
-  assertEqual(ret('form (Meta Ads). Name on the form: Praneel prasad.'), { label:'🔁 Returning customer · new enquiry from the website form · Meta Ads', request:'', note:'Name on the form: Praneel prasad.' }, 'a returning customer with no message');
+  assertEqual(ret('form (Meta Ads) — Cassette type aircon.'), { returning:true, label:'Returning customer · new enquiry from the website form · Meta Ads', request:'Cassette type aircon', note:'' }, 'a returning customer: one card, the request highlighted');
+  assertEqual(ret('form (Meta Ads). Name on the form: Praneel prasad.'), { returning:true, label:'Returning customer · new enquiry from the website form · Meta Ads', request:'', note:'Name on the form: Praneel prasad.' }, 'a returning customer with no message');
   assertEqual(ret('chat (Google Ads) — Hi,\n\nThe unit is dripping. Please call.\n0400 000 000. Name on the form: Jo Smith. Before: Chimney.'),
-    { label:'🔁 Returning customer · new enquiry from the website chat · Google Ads', request:'Hi,\n\nThe unit is dripping. Please call.\n0400 000 000', note:'Name on the form: Jo Smith. · Before: Chimney.' }, 'a long returning message: lines kept, the name and the earlier division under it');
+    { returning:true, label:'Returning customer · new enquiry from the website chat · Google Ads', request:'Hi,\n\nThe unit is dripping. Please call.\n0400 000 000', note:'Name on the form: Jo Smith. · Before: Chimney.' }, 'a long returning message: lines kept, the name and the earlier division under it');
   assertEqual(sb.splitLeadRequestEvent('Stage changed from "New lead" to "Chasing"'), null, 'other events are left alone');
   assertEqual(sb.splitLeadRequestEvent('Lead created automatically from job #2437 — Aircon, $369.00'), null, 'a lead made from a job is not a customer request');
 }
