@@ -68,6 +68,7 @@ const DECLS = [
   // Google Ads: real leads vs Google's count, tracking problems (9 Oct)
   'adsConvKind', 'adsConvShortName', 'adsTracking',
   // The nightly lead check: info@ emails vs the app (9 Oct)
+  'parseShownNumber', 'formatShownNumber',
   'LEAD_CHECK_DAYS', 'leadPhoneKey', 'leadCheckOpen', 'leadCheckLatest', 'leadDivisionFromSubject', 'adsEmailCheck',
 ];
 
@@ -962,6 +963,16 @@ function testAdsTracking(sb){
   assertEqual(sb.adsTracking({}, [], '30d').noData, true, 'adsTracking: nothing loaded yet = no problems claimed');
 }
 
+function testCountingNumbers(sb){
+  console.log('\nCounting numbers: what is read off the screen and how it is written while it runs');
+  const p = t => { const r = sb.parseShownNumber(t); return r && [r.value, r.decimals, r.commas, r.pre, r.post]; };
+  assertEqual([p('$21,355.63 '), p('53 '), p('99%'), p('$13.6k'), p('29 days'), p('—')],
+    [[21355.63, 2, true, '$', ' '], [53, 0, false, '', ' '], [99, 0, false, '', '%'], [13.6, 1, false, '$', 'k'], [29, 0, false, '', ' days'], null], 'parseShownNumber: money, counts, %, k, units; a dash is not a number');
+  assertEqual([p('8 Oct'), p('00:42:12'), p('Oct 2026')], [null, null, null], 'parseShownNumber: a date or a time never counts');
+  const f = (v, t) => sb.formatShownNumber(v, sb.parseShownNumber(t));
+  assertEqual([f(0, '$21,355.63'), f(1234.5, '$21,355.63'), f(999.4, '$21,355.63'), f(6.66, '$13.6k'), f(12.4, '53 leads')], ['$0.00', '$1,234.50', '$999.40', '$6.7k', '12 leads'], 'formatShownNumber: keeps the $, decimals, thousands commas and the words around it');
+}
+
 function testEmployeeCard(sb){
   console.log('\nThe employee card: ABN check, document expiry, missing details, reminders');
   assertEqual(['51 824 753 556', '51824753556', '51824753557', '1234', ''].map(sb.abnValid), [true, true, false, false, false], 'abnValid: the ATO check (a one-digit typo fails)');
@@ -1007,6 +1018,7 @@ testPayrollInvoices(loadSandbox());
 testAdsTracking(loadSandbox());
 testLeadEmailCheck(loadSandbox());
 testEmployeeCard(loadSandbox());
+testCountingNumbers(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
