@@ -314,6 +314,65 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .set-num span { align-self: stretch; display: flex; align-items: center; padding: 0 10px; font-size: 12.3px; color: var(--ink-soft); background: var(--surface-2); white-space: nowrap; }
 .set-num:focus-within { border-color: var(--primary); box-shadow: var(--focus-ring); }
 .set-page > .card { margin-bottom: 14px; }
+/* Settings, stage 3 pages. */
+.set-fixed { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-soft); padding: 5px 10px; border-radius: 6px; background: var(--surface-2); }
+.setup-progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 12px 20px 4px; }
+.setup-progress i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--primary), color-mix(in srgb, var(--primary) 55%, #f0a04b)); }
+.setup-list { padding: 4px 20px 12px; }
+.setup-step { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line-soft); }
+.setup-step:first-child { border-top: 0; }
+.setup-mark { width: 24px; height: 24px; border-radius: 99px; display: grid; place-items: center; border: 1.5px solid var(--line); color: transparent; }
+.setup-step.done .setup-mark { background: var(--good); border-color: var(--good); color: #fff; }
+.setup-step b { display: block; font-size: 13.5px; }
+.setup-step span { font-size: 12.2px; color: var(--ink-soft); }
+.setup-stats { display: flex; gap: 26px; flex-wrap: wrap; padding: 14px 20px 18px; font-size: 12.5px; color: var(--ink-soft); }
+.setup-stats b { display: block; font-size: 22px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.hours-list { margin-top: 6px; }
+.hours-row { display: grid; grid-template-columns: 110px 44px minmax(0, 1fr); align-items: center; gap: 14px; padding: 9px 20px; border-top: 1px solid var(--line-soft); }
+.hours-row:first-child { border-top: 0; }
+.hours-row b { font-size: 13.3px; font-weight: 600; }
+.hours-times { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-soft); }
+.hours-times input { width: 118px; }
+.dayoff-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.dayoff-add input { width: auto; flex: 0 1 200px; }
+.set-table { border: 0; border-radius: 0; box-shadow: none; margin-top: 6px; }
+.set-table table { font-size: 13px; }
+.set-table th { font-size: 10.8px; }
+.set-actions { text-align: right; white-space: nowrap; }
+.who { display: flex; align-items: center; gap: 10px; }
+.who small { display: block; color: var(--ink-faint); font-size: 11.5px; }
+.who-av { width: 30px; height: 30px; border-radius: 99px; display: grid; place-items: center; color: #fff; font-size: 11.5px; font-weight: 700; flex: none; }
+.role-table .role-col { text-align: center; width: 104px; }
+.role-table input[type=checkbox] { width: 17px; height: 17px; }
+.role-on { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 99px; background: var(--good-soft); color: var(--good); }
+.role-foot td { border-top: 1px solid var(--line); padding-top: 12px; padding-bottom: 12px; }
+.tpl-list { padding: 4px 0 6px; }
+.tpl-item { padding: 12px 20px; border-top: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 8px; }
+.tpl-item:first-child { border-top: 0; }
+.tpl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tpl-head b { font-size: 13.5px; }
+.tpl-text { font-size: 12.8px; background: var(--surface-2); border-radius: 12px 12px 12px 3px; padding: 9px 12px; max-width: 64ch; line-height: 1.5; }
+.tpl-var { color: var(--accent); font-weight: 700; }
+.conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; padding: 14px 20px 18px; }
+.conn-card { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 14px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.conn-card:hover { border-color: color-mix(in srgb, var(--primary) 30%, var(--line)); box-shadow: var(--shadow-lg); transform: translateY(-1px); }
+.conn-top { display: flex; align-items: center; gap: 10px; }
+.conn-top b { flex: 1; min-width: 0; font-size: 13.6px; }
+.conn-logo { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 12.5px; flex: none; }
+.conn-card p { margin: 0; font-size: 12.2px; color: var(--ink-soft); }
+.conn-meta { font-size: 11.5px; color: var(--ink-faint); margin-top: auto; }
+.brand-swatches { display: flex; gap: 7px; flex-wrap: wrap; }
+.brand-swatches button { width: 26px; height: 26px; border-radius: 99px; border: 0; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.18); transition: transform .12s ease; }
+.brand-swatches button:hover { transform: scale(1.12); }
+.brand-swatches button.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+.plan-name { font-family: 'Oswald', 'Figtree', sans-serif; font-weight: 700; font-size: 22px; text-transform: uppercase; }
+@media (max-width: 640px) {
+  .hours-row { grid-template-columns: minmax(0, 1fr) auto; padding: 10px 14px; gap: 8px 10px; }
+  .hours-times { grid-column: 1 / -1; }
+  .setup-list, .setup-progress { margin-left: 14px; margin-right: 14px; padding-left: 0; padding-right: 0; }
+  .conn-grid, .setup-stats { padding-left: 14px; padding-right: 14px; }
+  .tpl-item { padding: 12px 14px; }
+}
 /* Editable lists in Settings (stage 2). */
 .cat-list { margin-top: 8px; }
 .cat-row { display: grid; grid-template-columns: 18px 16px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 20px; border-top: 1px solid var(--line-soft); background: var(--surface); position: relative; }
@@ -2896,6 +2955,12 @@ function toastDismiss(t, now){
 /* ── Icons (Ofek 12 Oct, suggestion 5): one set of thin line icons instead of emoji, in the app's own colours. ── */
 const ICONS = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  rocket: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/>',
+  palette: '<circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2a10 10 0 0 0 0 20c.93 0 1.5-.75 1.5-1.6 0-.42-.16-.8-.44-1.1-.27-.3-.43-.68-.43-1.1 0-.9.73-1.6 1.6-1.6H16a6 6 0 0 0 6-6c0-4.4-4.5-8.6-10-8.6Z"/>',
+  card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
+  check: '<path d="m5.5 12.5 4 4L18.5 7.5"/>',
   layers: '<path d="m12 2 10 5-10 5L2 7l10-5Z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
   kanban: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 7v7M12 7v4M16 7v9"/>',
   tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1.2"/>',
@@ -3693,7 +3758,7 @@ function renderShell(profile, data){
         <div class="workspace-card">
           <div class="brand-mark" style="width:34px;height:34px;box-shadow:none">
           <img src="logo.png" alt=""></div>
-          <div style="line-height:1.2"><b style="font-family:'Figtree',sans-serif;font-size:15.5px;font-weight:700;display:block;color:#fff">The Guys</b><span style="font-size:11.3px;color:var(--sidebar-ink-soft)">The Guys Service Group</span></div>
+          <div style="line-height:1.2"><b style="font-family:'Figtree',sans-serif;font-size:15.5px;font-weight:700;display:block;color:#fff">${esc(brandName())}</b><span style="font-size:11.3px;color:var(--sidebar-ink-soft)">${esc((STATE.data && STATE.data.settings && STATE.data.settings.companyName) || 'The Guys Service Group')}</span></div>
         </div>
         <button class="mobile-nav-toggle" onclick="toggleMobileNav()" aria-label="Menu">${UI.mobileNavOpen?'✕':'☰'}</button>
         </div>
@@ -4467,7 +4532,40 @@ function applyCatalog(){
   if (typeof MD_BUBBLES!=='undefined') { const b = MD_BUBBLES.find(x => x[0]==='decide'); if (b) b[1] = `Chasing ${n}+ days`; }
   if (typeof MD_HE!=='undefined') MD_HE.decide = `מרדף ${n}+ ימים`;
   if (typeof MD_FROM_HE!=='undefined') MD_FROM_HE.decide = `במרדף ${n}+ ימים`;
+  // Office hours and days off
+  const hrs = catalogHours();
+  for (let d = 0; d < 7; d++) { const x = hrs.days[d], f = x && x.on ? hhmmToMins(x.from) : null, t = x && x.on ? hhmmToMins(x.to) : null; OFFICE.days[d] = f!==null && t!==null && f < t ? { from: f, to: t } : null; }
+  if (!Object.values(OFFICE.days).some(Boolean)) for (let d = 1; d <= 5; d++) OFFICE.days[d] = { from: 480, to: 1020 };   // never no office day at all
+  OFFICE.holidays = {};
+  if (hrs.nsw) Object.assign(OFFICE.holidays, NSW_HOLIDAYS);
+  (hrs.extra || []).forEach(x => { if (x && x.date) OFFICE.holidays[x.date] = x.name || 'Day off'; });
+  if (typeof applyBranding==='function') applyBranding();
   if (typeof JOB_CACHE!=='undefined') JOB_CACHE.index = null;   // every lead's stage is worked out again
+}
+function catalogHours(){
+  const def = { days: { 0: { on: false, from: '08:00', to: '17:00' }, 1: { on: true, from: '08:00', to: '17:00' }, 2: { on: true, from: '08:00', to: '17:00' }, 3: { on: true, from: '08:00', to: '17:00' }, 4: { on: true, from: '08:00', to: '17:00' }, 5: { on: true, from: '08:00', to: '17:00' }, 6: { on: false, from: '08:00', to: '17:00' } }, nsw: false, extra: [] };
+  const saved = ((STATE.data && STATE.data.settings && STATE.data.settings.catalog) || {}).hours || {};
+  const days = {}; for (let d = 0; d < 7; d++) days[d] = { ...def.days[d], ...((saved.days || {})[d] || {}) };
+  return { days, nsw: saved.nsw ?? def.nsw, extra: Array.isArray(saved.extra) ? saved.extra.map(x => ({ ...x })) : [] };
+}
+function catalogObject(section){ return { ...(((STATE.data && STATE.data.settings && STATE.data.settings.catalog) || {})[section] || {}) }; }
+// Look and branding (settings stage 3): the app's name, its main colour and the theme new people start in.
+function brandName(){ return (catalogObject('branding').appName || '').trim() || 'The Guys'; }
+function applyBranding(){
+  const b = catalogObject('branding');
+  try { document.title = (b.appName || '').trim() ? `${b.appName.trim()} · OPS` : 'The Guys Service Group'; } catch (e) {}
+  let st = document.getElementById('brand-css');
+  const c = /^#[0-9a-f]{6}$/i.test(b.color || '') ? b.color : null;
+  if (!c) { if (st) st.remove(); }
+  else {
+    if (!st) { st = document.createElement('style'); st.id = 'brand-css'; document.head.appendChild(st); }
+    const light = `--primary:${c};--primary-strong:color-mix(in srgb, ${c} 72%, #000);--primary-soft:color-mix(in srgb, ${c} 13%, #fff);--on-primary:${inkFor(c)==='#fff' ? '#fff8f6' : '#1c1917'};--focus-ring:0 0 0 3px color-mix(in srgb, ${c} 40%, transparent);--sidebar-accent:color-mix(in srgb, ${c} 80%, #fff);--sidebar-bg-active:color-mix(in srgb, ${c} 30%, #17130f);`;
+    const dark = `--primary:color-mix(in srgb, ${c} 78%, #fff);--primary-strong:color-mix(in srgb, ${c} 55%, #fff);--primary-soft:color-mix(in srgb, ${c} 22%, #121010);--on-primary:#1c0c0d;--focus-ring:0 0 0 3px color-mix(in srgb, ${c} 50%, transparent);--sidebar-accent:color-mix(in srgb, ${c} 80%, #fff);--sidebar-bg-active:color-mix(in srgb, ${c} 30%, #17130f);`;
+    st.textContent = `:root{${light}} @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){${dark}}} :root[data-theme="dark"]{${dark}}`;
+  }
+  // The theme someone starts in, until they pick one themselves with the sun / moon button.
+  let mine = null; try { mine = localStorage.getItem('theme'); } catch (e) {}
+  if (!mine) { if (b.theme==='light' || b.theme==='dark') document.documentElement.setAttribute('data-theme', b.theme); else document.documentElement.removeAttribute('data-theme'); }
 }
 function tagColor(t){ const x = LEAD_TAGS.find(y => y.tag===t); return x && x.color ? x.color : null; }
 function lostReasonLabel(k){ const r = LOST_REASONS.find(x=>x.key===k); return r ? r.label : 'No reason given'; }
@@ -4560,30 +4658,52 @@ function sydneyWall(d){
   const p = Object.fromEntries(fmt.formatToParts(d).map(x=>[x.type,x.value]));
   return { day:`${p.year}-${p.month}-${p.day}`, hour:Number(p.hour)%24, minute:Number(p.minute), dow:p.weekday };
 }
-function isWorkday(dayStr){ const dw = parseLocalDate(dayStr).getDay(); return dw>=1 && dw<=5; }
+// Office hours and days off (Ofek 12 Oct, settings stage 3). Set in Settings → Office hours and holidays; until then
+// Monday to Friday 8:00–17:00 and no days off, as before. The chasing clocks, the new-lead alert and My Day follow them.
+// NSW public holidays come from nsw.gov.au (checked 12 Oct 2026); the 3 Aug / 2 Aug bank holiday is not a public holiday.
+const NSW_HOLIDAYS = { '2026-01-01': "New Year's Day", '2026-01-26': 'Australia Day', '2026-04-03': 'Good Friday', '2026-04-04': 'Easter Saturday', '2026-04-05': 'Easter Sunday', '2026-04-06': 'Easter Monday', '2026-04-25': 'Anzac Day', '2026-04-27': 'Anzac Day (additional day)', '2026-06-08': "King's Birthday", '2026-10-05': 'Labour Day', '2026-12-25': 'Christmas Day', '2026-12-26': 'Boxing Day', '2026-12-28': 'Boxing Day (additional day)',
+  '2027-01-01': "New Year's Day", '2027-01-26': 'Australia Day', '2027-03-26': 'Good Friday', '2027-03-27': 'Easter Saturday', '2027-03-28': 'Easter Sunday', '2027-03-29': 'Easter Monday', '2027-04-25': 'Anzac Day', '2027-04-26': 'Anzac Day (additional day)', '2027-06-14': "King's Birthday", '2027-10-04': 'Labour Day', '2027-12-25': 'Christmas Day', '2027-12-26': 'Boxing Day', '2027-12-27': 'Christmas Day (additional day)', '2027-12-28': 'Boxing Day (additional day)' };
+const OFFICE = { days: { 0: null, 1: { from: 480, to: 1020 }, 2: { from: 480, to: 1020 }, 3: { from: 480, to: 1020 }, 4: { from: 480, to: 1020 }, 5: { from: 480, to: 1020 }, 6: null }, holidays: {} };
+function officeHoursFor(dayStr){ if (OFFICE.holidays[dayStr]) return null; return OFFICE.days[parseLocalDate(dayStr).getDay()] || null; }
+function isWorkday(dayStr){ return !!officeHoursFor(dayStr); }
+function nextOfficeDay(day){ for (let i = 0; i < 60 && !officeHoursFor(day); i++) day = shiftDays(day, 1); return day; }
+function hhmmToMins(t){ const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; }
+function minsToHhmm(n){ return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`; }
+// "Mon–Fri 8:00–17:00", days with the same hours together.
+function officeHoursText(){
+  const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], order = [1, 2, 3, 4, 5, 6, 0], parts = [];
+  let run = null;
+  order.forEach(d => {
+    const h = OFFICE.days[d], key = h ? `${minsToHhmm(h.from)}–${minsToHhmm(h.to)}` : null;
+    if (key && run && run.key===key && run.last===order[order.indexOf(d) - 1]) { run.last = d; run.end = names[d]; }
+    else { if (run) parts.push(run); run = key ? { key, start: names[d], end: names[d], last: d } : null; }
+  });
+  if (run) parts.push(run);
+  return parts.map(r => `${r.start}${r.end!==r.start ? '–' + r.end : ''} ${r.key}`).join(', ') || 'no office days set';
+}
 // When Ron should be told to call again: 3 hours after the lead went to Chasing, pushed to the next working morning if that lands outside hours.
 function chaseAlertDue(sinceIso){
   const w = sydneyWall(new Date(sinceIso));
   let day = w.day, mins = w.hour*60 + w.minute + 180;
   if (mins >= 24*60) { day = shiftDays(day, 1); mins -= 24*60; }
-  if (!isWorkday(day) || mins >= 17*60) { day = shiftDays(day, 1); mins = 8*60; }
-  else if (mins < 8*60) mins = 8*60;
-  while (!isWorkday(day)) day = shiftDays(day, 1);
-  return { day, mins };
+  const h = officeHoursFor(day);
+  if (h && mins < h.to) return { day, mins: Math.max(mins, h.from) };
+  day = nextOfficeDay(shiftDays(day, 1));
+  return { day, mins: (officeHoursFor(day) || { from: 8*60 }).from };
 }
 // When a clock that starts at `sinceIso` has run `minutes` of WORKING time (Mon–Fri 08:00–17:00 Sydney).
 function workClockDue(sinceIso, minutes){
-  const w = sydneyWall(new Date(sinceIso));
-  let day = w.day, start = w.hour*60 + w.minute;
-  if (!isWorkday(day) || start >= 17*60) { day = shiftDays(day, 1); start = 8*60; } else if (start < 8*60) start = 8*60;
-  while (!isWorkday(day)) day = shiftDays(day, 1);
+  const w = sydneyWall(new Date(sinceIso)), hoursOf = d => officeHoursFor(d) || { from: 8*60, to: 17*60 };
+  let day = w.day, start = w.hour*60 + w.minute, h = officeHoursFor(day);
+  if (!h || start >= h.to) { day = nextOfficeDay(shiftDays(day, 1)); h = hoursOf(day); start = h.from; }
+  else if (start < h.from) start = h.from;
   let left = minutes;
   for (let guard = 0; guard < 400; guard++) {
-    const room = 17*60 - start;
+    const room = h.to - start;
     if (left <= room) return { day, mins: start + left };
-    left -= room; day = shiftDays(day, 1); while (!isWorkday(day)) day = shiftDays(day, 1); start = 8*60;
+    left -= room; day = nextOfficeDay(shiftDays(day, 1)); h = hoursOf(day); start = h.from;
   }
-  return { day, mins: 17*60 };
+  return { day, mins: h.to };
 }
 function sydneyNowPast(due, now){ const w = sydneyWall(now || new Date()); return w.day > due.day || (w.day===due.day && w.hour*60+w.minute >= due.mins); }
 // Automation 1 (Ofek, 28 Sep): a new website lead nobody has handled within 15 working minutes alerts Ron.
@@ -9651,7 +9771,7 @@ function renderMyDay(profile, data){
       <div style="display:flex;align-items:center;gap:8px">${actions}</div></div>`; }).join('');
 
   return `
-    <div class="page-head"><div><h1 class="page-title">My Day</h1><div class="page-sub">${esc(dayName)} · who to call, in order. Work hours Mon–Fri 8:00–17:00.</div></div>${myShiftButton(profile)}</div>
+    <div class="page-head"><div><h1 class="page-title">My Day</h1><div class="page-sub">${esc(dayName)} · who to call, in order. Work hours ${esc(officeHoursText())}.</div></div>${myShiftButton(profile)}</div>
     ${mdHistoryStrip(L.today)}
     <div class="myday-summary card">
       <div class="stat-label" style="margin-bottom:10px">Daily summary</div>
@@ -11148,12 +11268,19 @@ function renderSettings(profile){
   // Settings in one place with a menu of its own, like Stripe or Jobber (Ofek 12 Oct: approved from the mockup; stage 1
   // moves what exists today into the new structure — the other pages of the mockup come in stages 2 and 3).
   const pages = [
+    { group: 'Start', id: 'setup', icon: 'rocket', title: 'Get set up', desc: 'A new business goes through these once. Each step ticks itself off, so it\'s always clear what is left.', body: () => renderSetupPage() },
     { group: 'Business', id: 'profile', icon: 'briefcase', title: 'Business details', desc: 'Shown on invoices and messages to customers, and in the app.', body: () => setBlock('Company', '', `<div class="set-fields">
         <div class="field"><label>Trading name</label><input value="${esc(s.companyName)}" onchange="updateBusinessProfileField('companyName', this.value.trim(), 'Company name')"></div>
         <div class="field"><label>Legal name <span class="hint">(on invoices)</span></label><input value="${esc(s.legalName)}" placeholder="The Guys Service Group Pty Ltd" onchange="updateBusinessProfileField('legalName', this.value.trim(), 'Legal name')"></div>
         <div class="field"><label>ABN</label><input value="${esc(s.abn)}" inputmode="numeric" placeholder="11 digits" onchange="updateBusinessProfileField('abn', this.value.trim(), 'ABN')"></div>
         <div class="field"><label>ACN</label><input value="${esc(s.acn)}" inputmode="numeric" placeholder="9 digits" onchange="updateBusinessProfileField('acn', this.value.trim(), 'ACN')"></div>
-      </div>`) },
+      </div>`) + (() => { const b = catalogObject('business'); const f = (key, label, ph, type) => `<div class="field"><label>${label}</label><input${type ? ` type="${type}"` : ''} value="${esc(b[key] || '')}" placeholder="${esc(ph)}" onchange="setBusinessInfo('${key}', this.value)"></div>`;
+        return setBlock('Contact details', 'What customers see in texts and emails.', `<div class="set-fields">${f('phone', 'Main phone', '1300 000 000', 'tel')}${f('email', 'Email', 'info@yourbusiness.com.au', 'email')}${f('website', 'Website', 'yourbusiness.com.au')}${f('address', 'Business address', 'Street, suburb, state, postcode')}</div>`); })()
+        + setBlock('Region and format', 'Times, money and weeks across the whole app follow these. They are fixed for this business for now.', setRows([
+          ['Time zone', '', '<span class="set-fixed">Australia/Sydney</span>'], ['Currency', '', '<span class="set-fixed">AUD ($)</span>'],
+          ['Week starts on', 'Payroll weeks run Sunday to Saturday.', '<span class="set-fixed">Sunday</span>'], ['Financial year starts', '', '<span class="set-fixed">1 July</span>'],
+        ])) },
+    { group: 'Business', id: 'hours', icon: 'clock', title: 'Office hours and holidays', desc: 'Chasing clocks, the new-lead alert and My Day follow these.', body: () => renderOfficeHoursPage() },
     { group: 'Business', id: 'services', icon: 'layers', title: 'Services', desc: 'What the business does. Each service has its own colour, used everywhere in the app, and its own list of jobs.', body: () =>
         setBlock('Services and what they include', 'Drag to change the order. A service switched off leaves the forms but keeps its history and stays in the reports.', catalogListHtml('services', { name: true, subs: true, toggle: true, color: true }) + catalogAddButton('services', 'Add a service'))
         + setBlock('Job types', 'The job types in Jobs & Commissions and Closings.', setRows([['Job types follow the services', 'One job type per service, in the same order.', setToggle(true, '', true)]])) },
@@ -11163,7 +11290,9 @@ function renderSettings(profile){
         ['Default payment terms', 'For example "7 days".', `<input class="set-input" value="${esc(s.defaultPaymentTerms)}" placeholder="e.g. 7 days" onchange="updateBusinessProfileField('defaultPaymentTerms', this.value.trim(), 'Default payment terms')">`],
         ['Flag a job as unpaid after', 'It shows in Outstanding and in Reminders.', `<span class="set-num"><input type="number" min="1" value="${s.unpaidReminderDays}" onchange="updateBusinessSetting('unpaidReminderDays', this.value, 'Unpaid reminder threshold')"><span>days</span></span>`],
       ])) + setBlock('Payment methods', 'The choices in Closings and Jobs. One switched off leaves the forms; jobs paid that way keep it.', catalogListHtml('payments', { toggle: true }) + catalogAddButton('payments', 'Add a payment method')) },
-    { group: 'Team', id: 'access', icon: 'idcard', title: 'People and access', desc: 'Exactly what each person sees, including Ron. A change reaches them the next time they open or refresh the app.', body: () => `<div class="set-note">${ico('alert', 16)}<span>Manager accounts see everything an owner sees except Settings, so they aren't listed here.</span></div>${cards}` },
+    { group: 'Team', id: 'people', icon: 'users', title: 'People', desc: 'Who can sign in and what they do.', body: () => renderPeoplePage() },
+    { group: 'Team', id: 'roles', icon: 'shield', title: 'Roles and access', desc: 'What each role can open. A new person gets their role\'s pages; anyone can still get an exception on their own.', body: () => renderRolesPage() },
+    { group: 'Team', id: 'access', icon: 'idcard', title: 'Access for each person', desc: 'Exceptions, person by person, including Ron. A change reaches them the next time they open or refresh the app.', body: () => `<div class="set-note">${ico('alert', 16)}<span>Manager accounts see everything an owner sees except Settings, so they aren't listed here.</span></div>${cards}` },
     { group: 'Team', id: 'pay', icon: 'wallet', title: 'Pay and commissions', desc: 'How everyone is paid. Payroll works it out from these.', body: () => `<div class="set-sub">Technicians: commission and working days</div>${techCards}`
         + setBlock('Owners', 'A fixed weekly wage, not commission, seen only by owners.', setRows(owners.map(o => [esc(o.fullName), '', `<span class="set-num"><input type="number" min="0" value="${(s.ownerSalaries||{})[o.fullName]||0}" onchange="setOwnerSalary('${jsStr(o.fullName)}', this.value)"><span>$/week</span></span>`]))) },
     { group: 'Sales', id: 'pipeline', icon: 'kanban', title: 'Pipeline', desc: 'The stages a lead goes through, and the rules that keep leads from falling through the cracks.', body: () => {
@@ -11173,7 +11302,7 @@ function renderSettings(profile){
             ['Quoted and Follow up need a date in the future', 'The lead can\'t be left there without one, so it never falls through the cracks.', setToggle(r.needDate, "setCatalogRule('needDate', !this.classList.contains('on'))")],
             ['Warn when a quote has been idle for', 'A red line on the card and in the table.', `<span class="set-num"><input type="number" min="1" value="${RULES.quoteIdleDays}" onchange="setCatalogRule('quoteIdleDays', this.value)"><span>days</span></span>`],
             ['Chasing: ask to decide (keep or lost) after', 'It shows on My Day and on the card.', `<span class="set-num"><input type="number" min="1" value="${RULES.chaseDecideDays}" onchange="setCatalogRule('chaseDecideDays', this.value)"><span>days</span></span>`],
-            ['Chasing calls count on office days only', 'Monday to Friday, 8:00 to 17:00. Office hours come to Settings in the next stage.', setToggle(true, '', true)],
+            ['Chasing calls count on office days only', `${officeHoursText()} (set in Office hours and holidays).`, setToggle(true, '', true)],
           ]))
           + setBlock('Reasons a lead is lost', 'Shown when a lead moves to Lost, and in the Leads & Marketing report.', catalogListHtml('lostReasons', { name: true, toggle: true }) + catalogAddButton('lostReasons', 'Add a reason'));
       } },
@@ -11183,12 +11312,19 @@ function renderSettings(profile){
         setBlock('Tags', 'A tag switched off leaves the menus but stays on the leads that have it.', catalogListHtml('tags', { hint: true, toggle: true, color: true }) + catalogAddButton('tags', 'Add a tag')) },
     { group: 'Customers', id: 'phone', icon: 'phone', title: 'Phone', desc: 'Who answers the business number, and what happens when nobody does.', body: () => renderPhoneSettings(s) },
     { group: 'Customers', id: 'chat', icon: 'chat', title: 'Website chat and texts', desc: 'Conversations with customers from the website chat and by text.', body: () => renderChatSettings(s) },
+    { group: 'Customers', id: 'templates', icon: 'mail', title: 'Message templates', desc: 'The words of every automatic message to customers. The blue parts fill in by themselves.', body: () => renderTemplatesPage() },
+    { group: 'Customers', id: 'reviews', icon: 'star', title: 'Google reviews', desc: 'Asking happy customers for a review after the job.', body: () => renderReviewsPage(s) },
+    { group: 'Customers', id: 'notifications', icon: 'bell', title: 'Notifications', desc: 'Who hears about what. Phone notifications need the app added to the phone\'s home screen.', body: () => renderNotificationsPage() },
+    { group: 'Connections', id: 'connections', icon: 'link', title: 'Connections', desc: 'The services the app talks to, whether each is working, and when it last updated.', body: () => renderConnectionsPage(s) },
     { group: 'Account', id: 'data', icon: 'folder', title: 'Data', desc: 'Your data is yours: take it out, and see who changed what.', body: () => setBlock('Export and history', '', setRows([
         ['Export everything', 'One file with all the data (JSON).', `<button class="btn small" onclick="exportDataAsJson()">${ico('incoming')} Export</button>`],
         ['Settings history', 'Every change on these pages: who and when.', `<button class="btn small" onclick="openSettingsActivityModal()">${ico('history')} Open</button>`],
       ])) },
+    { group: 'Account', id: 'security', icon: 'lock', title: 'Security', desc: 'Keeping the business\'s data safe.', body: () => renderSecurityPage() },
+    { group: 'Account', id: 'branding', icon: 'palette', title: 'Look and branding', desc: 'How the app looks for everyone in the business.', body: () => renderBrandingPage() },
+    { group: 'Account', id: 'billing', icon: 'card', title: 'Plan and billing', desc: 'For when the app is offered to other businesses. Nothing is charged today.', body: () => renderBillingPage() },
   ];
-  const ui = UI.settings || (UI.settings = { page: 'profile', open: false });
+  const ui = UI.settings || (UI.settings = { page: 'setup', open: false });
   const cur = pages.find(pg => pg.id===ui.page) || pages[0];
   let group = '';
   const nav = pages.map(pg => {
@@ -11218,7 +11354,7 @@ function setBlock(title, desc, body){ return `<div class="set-block"><div class=
 function setRows(rows){ return `<div class="set-rows">${rows.map(([label, desc, ctl]) => `<div class="set-row"><div class="set-row-text"><b>${label}</b>${desc ? `<span>${esc(desc)}</span>` : ''}</div><div class="set-row-ctl">${ctl}</div></div>`).join('')}</div>`; }
 // A switch, as in the mockup. Locked ones show the rule but can't be changed here.
 function setToggle(on, onclick, locked){ return `<button type="button" class="set-toggle${on ? ' on' : ''}" role="switch" aria-checked="${!!on}"${locked ? ' disabled title="Always on"' : ` onclick="${onclick}"`}></button>`; }
-const CAT_NAMES = { services: 'Services', stages: 'Pipeline stages', sources: 'Lead sources', tags: 'Tags', lostReasons: 'Reasons a lead is lost', payments: 'Payment methods' };
+const CAT_NAMES = { services: 'Services', stages: 'Pipeline stages', sources: 'Lead sources', tags: 'Tags', lostReasons: 'Reasons a lead is lost', payments: 'Payment methods', rules: 'Pipeline rules', hours: 'Office hours', business: 'Business details', roles: 'Roles and access', branding: 'Look and branding' };
 const CAT_SWATCHES = ['#1f66c9', '#2b6cc4', '#0e8a8a', '#16a34a', '#c99a06', '#c4580f', '#d03b5c', '#7746c9', '#a5473f', '#776e64'];
 function STAGE_RULE_TEXT(k){
   return ({ New: 'Every new enquiry starts here', Chasing: `Calls counted on office days · decide after ${RULES.chaseDecideDays} days`,
@@ -11253,10 +11389,10 @@ function catalogAddButton(section, label){ return `<div class="cat-foot"><button
 function catalogSave(section, list, what){
   if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
   const cat = JSON.parse(JSON.stringify(STATE.data.settings.catalog || {}));
-  if (section==='rules') cat.rules = list; else cat[section] = list;
+  cat[section] = list;
   db.settings.update({ catalog: cat });
   applyCatalog();
-  logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `${section==='rules' ? 'Pipeline rules' : CAT_NAMES[section]}: ${what}`);
+  logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `${CAT_NAMES[section] || section}: ${what}`);
   showToast('Saved');
   render();
 }
@@ -11355,6 +11491,203 @@ function catalogDragEnd(){
   const order = [...d.list.querySelectorAll('.cat-row')].map(r => r.dataset.key);
   const list = catalogList(d.section).sort((a, b) => order.indexOf(catalogId(d.section, a)) - order.indexOf(catalogId(d.section, b)));
   catalogSave(d.section, list, 'order changed');
+}
+const NEXT_UPDATE = '<span class="pill neutral" title="Needs a change on the server, coming in the next update">Next update</span>';
+function setBusinessInfo(key, value){ const b = catalogObject('business'); const v = String(value || '').trim(); if ((b[key] || '')===v) return; b[key] = v; catalogSave('business', b, `${{ phone: 'main phone', email: 'email', website: 'website', address: 'address' }[key] || key} ${v ? 'set to ' + v : 'cleared'}`); }
+
+// Get set up: each step ticks itself off from what is really there.
+function renderSetupPage(){
+  if (!FRESH) loadFreshness().then(() => { if (UI.tab==='settings' && (UI.settings || {}).page==='setup') render(); });
+  const st = STATE.data.settings, F = FRESH || {}, b = catalogObject('business');
+  const techs = STATE.data.employees.filter(e => e.status==='Active' && e.roles.includes('Technician') && !e.roles.includes('Owner'));
+  const ratesSet = techs.filter(e => Object.values((STATE.data.commissionRates || {})[e.name] || {}).some(v => Number(v) > 0)).length;
+  const newestLead = STATE.data.contacts.reduce((m, c) => { const a = leadArrivedAt(c) || c.createdAt; return a && a > m ? a : m; }, '');
+  const fresh = (iso, h) => !!iso && Date.now() - new Date(iso).getTime() < h * 36e5;
+  const steps = [
+    [!!(st.companyName && (st.abn || st.legalName) && b.phone), 'Business details', 'Name, ABN, contact details', 'profile'],
+    [LEAD_DIVISIONS.length > 0, 'Services', `${LEAD_DIVISIONS.length} services and what each includes`, 'services'],
+    [true, 'Office hours', officeHoursText(), 'hours'],
+    [true, 'Pipeline', 'Stages, follow-up rules and reasons a lead is lost', 'pipeline'],
+    [STATE.profiles.length > 1, 'Invite the team', `${STATE.profiles.length} ${STATE.profiles.length===1 ? 'person has' : 'people have'} access`, 'people'],
+    [techs.length > 0 && ratesSet===techs.length, 'Pay and commissions', techs.length ? `Commission rates for ${ratesSet} of ${techs.length} technicians` : 'No technicians yet', 'pay'],
+    [fresh(F.google, 48) || fresh(F.meta, 48), 'Connect the ads', fresh(F.google, 48) && fresh(F.meta, 48) ? 'Google Ads and Meta Ads are connected' : 'Google Ads or Meta Ads not updating', 'connections'],
+    [fresh(newestLead, 24 * 7), 'Website forms', newestLead ? 'New enquiries arrive in the CRM by themselves' : 'No enquiry has arrived yet', 'connections'],
+    [!!st.phoneEnabled, 'Business phone', st.phoneEnabled ? 'Calls ring in the app' : 'Waiting for the phone account (Twilio)', 'phone'],
+    [!!st.reviewRequestsAuto, 'Automatic review requests', st.reviewRequestsAuto ? 'Sent by themselves after each job' : 'Built, switched off until go-live', 'reviews'],
+  ];
+  const done = steps.filter(x => x[0]).length;
+  const users = STATE.profiles.length, leads = STATE.data.contacts.length;
+  return setBlock('Your setup', `${done} of ${steps.length} steps done`, `<div class="setup-progress"><i style="width:${Math.round(done / steps.length * 100)}%"></i></div>
+      <div class="setup-list">${steps.map(([ok, t, sub, go]) => `<div class="setup-step${ok ? ' done' : ''}"><span class="setup-mark">${ico('check', 14)}</span><div><b>${esc(t)}</b><span>${esc(sub)}</span></div><button type="button" class="btn small ${ok ? 'ghost' : 'primary'}" onclick="setSettingsPage('${go}')">${ok ? 'Open' : 'Finish'}</button></div>`).join('')}</div>`)
+    + setBlock('At a glance', '', `<div class="setup-stats"><div><b>${users}</b>people</div><div><b>${LEAD_DIVISIONS.filter(d => !ACTIVE.divisions || ACTIVE.divisions.has(d)).length}</b>services</div><div><b>${leads.toLocaleString('en-AU')}</b>leads</div><div><b>${STATE.data.jobs.length.toLocaleString('en-AU')}</b>jobs</div></div>`);
+}
+
+// Office hours and holidays.
+function renderOfficeHoursPage(){
+  const h = catalogHours(), names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const today = todayStr();
+  const nsw = Object.entries(NSW_HOLIDAYS).filter(([d]) => d >= today).slice(0, 8);
+  const extra = (h.extra || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  return setBlock('Office hours', `Now: ${officeHoursText()}.`, `<div class="hours-list">${[1, 2, 3, 4, 5, 6, 0].map(d => { const x = h.days[d]; return `<div class="hours-row"><b>${names[d]}</b>${setToggle(x.on, `setOfficeDay(${d},'on',!this.classList.contains('on'))`)}<div class="hours-times">${x.on ? `<input type="time" value="${esc(x.from)}" aria-label="${names[d]} from" onchange="setOfficeDay(${d},'from',this.value)"><span>to</span><input type="time" value="${esc(x.to)}" aria-label="${names[d]} to" onchange="setOfficeDay(${d},'to',this.value)">` : '<span class="hint">Closed</span>'}</div></div>`; }).join('')}</div>`)
+    + setBlock('Public holidays', 'On these days the office is closed and the chasing clocks don\'t run.', setRows([
+        ['New South Wales public holidays', h.nsw ? `Next: ${nsw.slice(0, 3).map(([d, n]) => `${fmtDateShort(d)} ${n}`).join(' · ')}` : 'Switched off: public holidays count as office days.', setToggle(h.nsw, "setOfficeNsw(!this.classList.contains('on'))")],
+      ]))
+    + setBlock('Days off of your own', 'Like the Christmas break.', `${extra.length ? `<div class="set-rows">${extra.map(x => `<div class="set-row"><div class="set-row-text"><b>${esc(fmtDateShort(x.date))} ${esc(x.date.slice(0, 4))}</b><span>${esc(x.name || 'Day off')}</span></div><div class="set-row-ctl"><button class="btn small ghost" onclick="removeDayOff('${x.date}')">Remove</button></div></div>`).join('')}</div>` : ''}
+        <div class="cat-foot dayoff-add"><input type="date" id="dayoff-date" aria-label="Day off"><input id="dayoff-name" placeholder="What it is (e.g. Christmas break)" aria-label="What it is"><button type="button" class="btn small" onclick="addDayOff()">${ico('plus', 14)} Add a day off</button></div>`)
+    + setBlock('Outside office hours', '', setRows([['Owners take calls', 'Set in Phone.', `<button class="btn small ghost" onclick="setSettingsPage('phone')">Open Phone</button>`]]));
+}
+function setOfficeDay(d, field, value){
+  const h = catalogHours(), x = h.days[d], names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  if (field==='on' && !value && Object.values(h.days).filter(y => y.on).length <= 1) { showToast('At least one day has to be an office day', { kind: 'warn' }); render(); return; }
+  x[field] = value;
+  if (field!=='on' && hhmmToMins(x.from) >= hhmmToMins(x.to)) { showToast('The office has to close after it opens', { kind: 'warn' }); render(); return; }
+  catalogSave('hours', h, field==='on' ? `${names[d]} ${value ? 'is an office day' : 'is closed'}` : `${names[d]} ${x.from}–${x.to}`);
+}
+function setOfficeNsw(on){ const h = catalogHours(); h.nsw = !!on; catalogSave('hours', h, `NSW public holidays ${on ? 'are days off' : 'count as office days'}`); }
+function addDayOff(){
+  const date = (document.getElementById('dayoff-date') || {}).value, name = String((document.getElementById('dayoff-name') || {}).value || '').trim();
+  if (!date) { showToast('Pick the day', { kind: 'warn' }); return; }
+  const h = catalogHours(); if (h.extra.some(x => x.date===date)) { showToast('That day is already off', { kind: 'warn' }); return; }
+  h.extra.push({ date, name: name || 'Day off' });
+  catalogSave('hours', h, `${date} added as a day off`);
+}
+function removeDayOff(date){ const h = catalogHours(); h.extra = h.extra.filter(x => x.date!==date); catalogSave('hours', h, `${date} is no longer a day off`); }
+
+// People: everyone who can sign in.
+function renderPeoplePage(){
+  const me = getCurrentProfile(), colors = ['#c1652e', '#7a5ca0', '#2f7d6e', '#3f7f8f', '#7746c9', '#1f66c9', '#a5473f'];
+  const order = { owner: 0, manager: 1, va: 2, technician: 3, marketing: 4 };
+  const people = STATE.profiles.slice().sort((a, b) => (order[a.role] ?? 9) - (order[b.role] ?? 9) || String(a.fullName).localeCompare(String(b.fullName)));
+  const rows = people.map((p, i) => {
+    const status = p.role==='va' ? (onShiftToday(p) ? (p.onBreak ? pill('warn', 'On a break') : pill('good', 'On shift')) : pill('neutral', 'Off shift')) : pill('good', 'Active');
+    const actions = p.id===(me && me.id) ? '<span class="hint">You</span>'
+      : `${p.role!=='owner' && p.role!=='manager' ? `<button class="btn small ghost" onclick="setSettingsPage('access')">Access</button>` : ''}${me && me.role==='owner' && !VIEW_AS_ID ? `<button class="btn small ghost" onclick="enterViewAs('${p.id}')">View as</button>` : ''}`;
+    return `<tr><td><span class="who"><span class="who-av" style="background:${colors[i % colors.length]}">${esc(initials(p.fullName))}</span><span>${esc(p.fullName)}${p.technicianName && p.technicianName!==p.fullName ? `<small>${esc(p.technicianName)}</small>` : ''}</span></span></td><td>${esc(roleLabel(p.role))}</td><td>${status}</td><td class="set-actions">${actions}</td></tr>`;
+  }).join('');
+  return setBlock('Team', `${people.length} people`, `<div class="table-wrap set-table"><table><thead><tr><th>Name</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="cat-foot"><button class="btn small" disabled>${ico('plus', 14)} Invite someone</button> ${NEXT_UPDATE}</div>`)
+    + `<div class="set-note">${ico('alert', 16)}<span>Inviting someone by email needs a small server addition, coming in the next update. Until then a new person is added as today.</span></div>`;
+}
+
+// Roles and access: a page list per role. "Apply" gives everyone with that role exactly those pages.
+const ROLE_COLUMNS = [['va', 'Office (VA)'], ['technician', 'Technician'], ['marketing', 'Marketing']];
+function roleTemplates(){
+  const saved = catalogObject('roles'), grantable = ALL_SECTIONS.filter(x => x!=='settings'), out = {};
+  ROLE_COLUMNS.forEach(([r]) => {
+    const first = STATE.profiles.find(p => p.role===r);
+    out[r] = saved[r] ? { ...saved[r] } : Object.fromEntries(grantable.map(sec => [sec, !!(first && first.permissions[sec])]));
+  });
+  return out;
+}
+function renderRolesPage(){
+  const t = roleTemplates(), grantable = ALL_SECTIONS.filter(x => x!=='settings');
+  const count = r => STATE.profiles.filter(p => p.role===r).length;
+  const differs = r => STATE.profiles.filter(p => p.role===r && grantable.some(sec => !!p.permissions[sec]!==!!t[r][sec])).length;
+  const head = `<tr><th>Page</th><th class="role-col">Owner ${ico('lock', 12)}</th><th class="role-col">Manager ${ico('lock', 12)}</th>${ROLE_COLUMNS.map(([r, l]) => `<th class="role-col">${esc(l)}</th>`).join('')}</tr>`;
+  const rows = grantable.map(sec => `<tr><td>${esc(SECTION_LABEL[sec] || sec)}</td><td class="role-col"><span class="role-on">${ico('check', 13)}</span></td><td class="role-col"><span class="role-on">${ico('check', 13)}</span></td>${ROLE_COLUMNS.map(([r]) => `<td class="role-col"><input type="checkbox" ${t[r][sec] ? 'checked' : ''} aria-label="${esc(SECTION_LABEL[sec] || sec)} for ${r}" onchange="setRolePage('${r}','${sec}',this.checked)"></td>`).join('')}</tr>`).join('')
+    + `<tr><td>Settings</td><td class="role-col"><span class="role-on">${ico('check', 13)}</span></td><td class="role-col">—</td>${ROLE_COLUMNS.map(() => '<td class="role-col">—</td>').join('')}</tr>`;
+  const foot = `<tr class="role-foot"><td></td><td></td><td></td>${ROLE_COLUMNS.map(([r]) => `<td class="role-col">${count(r) ? `<button class="btn small${differs(r) ? ' primary' : ''}" onclick="applyRoleToPeople('${r}')" title="${differs(r) ? `${differs(r)} of them have other pages` : 'Everyone has these pages'}">Apply to ${count(r)}</button>` : '<span class="hint">Nobody yet</span>'}</td>`).join('')}</tr>`;
+  return setBlock('Pages by role', 'Owners see everything; managers see everything but Settings; a technician only ever sees their own jobs and pay. "Apply" gives everyone with that role exactly these pages.', `<div class="table-wrap set-table"><table class="role-table"><thead>${head}</thead><tbody>${rows}${foot}</tbody></table></div>`);
+}
+function setRolePage(role, sec, on){ const all = catalogObject('roles'), t = roleTemplates(); all[role] = { ...t[role], [sec]: !!on }; catalogSave('roles', all, `${(ROLE_COLUMNS.find(x => x[0]===role) || [])[1]}: ${SECTION_LABEL[sec] || sec} ${on ? 'on' : 'off'}`); }
+function applyRoleToPeople(role){
+  const t = roleTemplates()[role], people = STATE.profiles.filter(p => p.role===role), label = (ROLE_COLUMNS.find(x => x[0]===role) || [])[1];
+  confirmAction(`Give ${people.map(p => p.fullName).join(', ')} exactly the ${label} pages? Any exception they had is replaced.`, () => {
+    if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+    people.forEach(p => db.profiles.update(p.id, { permissions: { ...p.permissions, ...t } }));
+    logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `Roles and access: ${label} pages applied to ${people.map(p => p.fullName).join(', ')}`);
+    showToast(`Applied to ${people.length} ${people.length===1 ? 'person' : 'people'}`);
+    render();
+  }, { danger: false });
+}
+
+// Message templates: the real words customers get today (they live on the server; editing them here is the next update).
+function renderTemplatesPage(){
+  const v = t => esc(t).replace(/\{(\w+)\}/g, '<span class="tpl-var">{$1}</span>');
+  const items = [
+    ['Review request', 'Text', 'Hi {first_name}, {technician} from The Guys Service Group here - thanks for having us! {result} Our team works really hard and would truly appreciate a quick Google review: {review_link} Thank you!'],
+    ['Review request', 'Email', 'Hi {first_name}, Thanks for having us - it was a pleasure. {result} Our team works really hard to do every job properly, and a Google review from you would mean a lot to them. It takes 30 seconds. [Leave a quick Google review] Thank you! {technician}, The Guys Service Group'],
+    ['Missed call', 'Text', "Hi, it's The Guys Service Group. Sorry we missed your call! We'll call you back shortly. If it's easier, reply here with what you need and your suburb."],
+    ['Website chat not answered (office open)', 'Text', "{hi}, Ron here from {brand}. I saw your message about {service} - I'm just finishing up another call and will get back to you very shortly. Feel free to reply here in the meantime."],
+    ['Website chat not answered (office closed)', 'Text', "{hi}, it's Ron from {brand}. You sent us a message on our website chat about {service}. I'll call you first thing when our office opens, or you can reply here."],
+  ];
+  return `<div class="set-note">${ico('alert', 16)}<span>These are the exact words customers get today. They are kept on the server; editing them here comes in the next update.</span></div>`
+    + setBlock('Templates', '', `<div class="tpl-list">${items.map(([n, ch, t]) => `<div class="tpl-item"><div class="tpl-head"><b>${esc(n)}</b><span class="pill neutral">${esc(ch)}</span>${NEXT_UPDATE}</div><div class="tpl-text">${v(t)}</div></div>`).join('')}</div>`);
+}
+function renderReviewsPage(s){
+  const links = [['Aircon', 'https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU'], ['Chimney', 'https://g.page/r/CZUuKFAccuR4EBM/review'], ['Pressure Washing', 'https://g.page/r/CZjy0MO5zKE7EBM/review']];
+  return setBlock('Review links', 'Each service asks for a review on its own Google profile.', setRows(links.map(([d, url]) => [divName(d), '', `<a class="btn small ghost" href="${url}" target="_blank" rel="noopener">Open ${ico('link', 13)}</a>`])))
+    + setBlock('Asking', '', setRows([
+      ['Ask automatically when a job is entered', 'A text now and an email within 15 minutes, between 8:00 and 20:00; later ones wait for the morning.', s.reviewRequestsAuto ? pill('good', 'On') : pill('warn', 'Off until go-live')],
+      ['A reminder if there\'s no review after a day', 'Shown on My Day, so the office can ask again.', pill('good', 'On')],
+      ['Never ask customers marked "Don\'t ask"', 'Set on the job.', pill('good', 'Always')],
+    ]));
+}
+function renderNotificationsPage(){
+  return phoneNotificationsBar()
+    + setBlock('What sends a notification', '', `<div class="table-wrap set-table"><table><thead><tr><th>When</th><th>Who</th><th>Phone</th><th></th></tr></thead><tbody>
+      <tr><td>A technician sends his commission invoice</td><td>Owners</td><td>${pill('good', 'On')}</td><td></td></tr>
+      ${['A new lead', 'A missed call', 'A new lead waiting 15+ minutes', 'A job unpaid for a week', 'An employee document about to expire', 'A new Google review'].map(t => `<tr><td>${t}</td><td>Owners / office</td><td>${pill('neutral', 'Off')}</td><td>${NEXT_UPDATE}</td></tr>`).join('')}
+    </tbody></table></div>`);
+}
+// Connections: status from what the app really sees (the same times as the dashboard's "updated" line).
+function renderConnectionsPage(s){
+  if (!FRESH) loadFreshness().then(() => { if (UI.tab==='settings' && (UI.settings || {}).page==='connections') render(); });
+  const F = FRESH || {};
+  const newestLead = STATE.data.contacts.reduce((m, c) => { const a = leadArrivedAt(c) || c.createdAt; return a && a > m ? a : m; }, '');
+  const newestJob = STATE.data.jobs.reduce((m, j) => j.date > m ? j.date : m, '');
+  const card = (logo, bg, name, desc, iso, okH, warnH, meta) => {
+    const tone = iso===undefined ? null : !iso ? 'bad' : freshTone(iso, okH, warnH);
+    const p = tone===null ? meta : `${pill(tone==='good' ? 'good' : tone==='warn' ? 'warn' : 'bad', tone==='good' ? 'Working' : tone==='warn' ? 'Late' : 'Not updating')}`;
+    return `<div class="conn-card"><div class="conn-top"><span class="conn-logo" style="background:${bg}">${logo}</span><b>${esc(name)}</b>${p}</div><p>${esc(desc)}</p><span class="conn-meta">${iso ? 'Updated ' + esc(freshAgo(iso)) : iso===null ? 'No update yet' : ''}</span></div>`;
+  };
+  return setBlock('Connected services', '', `<div class="conn-grid">
+      ${card('G', '#4285f4', 'Google Ads', 'Spend, clicks and calls, and which keyword brought each job.', F.google ?? null, 26, 50)}
+      ${card('f', '#1877f2', 'Meta Ads', 'Spend and leads from Facebook and Instagram.', F.meta ?? null, 26, 50)}
+      ${card('☎', '#34a853', 'Google Ads calls', 'Calls from the ads, every night.', F.calls ?? null, 26, 50)}
+      ${card('AI', '#7746c9', 'Nightly AI check', 'The overnight assessment of the ads and the leads.', F.insight ?? null, 26, 50)}
+      ${card('@', '#ea4335', 'Email (info@)', 'Lead emails checked against the CRM every night.', F.check ?? null, 26, 50)}
+      ${card('W', '#c31f2b', 'Website forms and chat', 'Enquiries arrive in the CRM by themselves.', newestLead || null, 72, 168)}
+      ${card('S', '#0f9d58', 'Jobs spreadsheet', 'Jobs come in from the Google Sheet every 15 minutes.', newestJob ? newestJob + 'T12:00:00' : null, 72, 168)}
+      ${card('T', '#f22f46', 'Twilio phone', 'The business number and texts in the app.', undefined, 0, 0, s.phoneEnabled ? pill('good', 'On') : pill('warn', 'Not connected yet'))}
+      ${card('H', '#ff7a59', 'GoHighLevel', 'Old contacts, kept for search and history.', undefined, 0, 0, pill('neutral', 'Archive only'))}
+    </div>`);
+}
+function renderSecurityPage(){
+  const me = getCurrentProfile();
+  return setBlock('Signing in', '', setRows([
+      ['Change my password', '', `<button class="btn small" onclick="openChangePasswordModal()">Change</button>`],
+      ['Sign out of every device', 'Your account on every phone and computer, including this one.', `<button class="btn small danger" onclick="signOutEverywhere()">Sign out everywhere</button>`],
+      ['Two-step sign-in for owners and managers', 'A code from the phone as well as the password.', NEXT_UPDATE],
+      ['The office logs out by itself at', 'If Ron forgets, the day is closed at 20:00 and he is told the next morning.', '<span class="set-fixed">20:00</span>'],
+    ]))
+    + (me && me.role==='owner' ? setBlock('Showing the app to someone', '', setRows([
+      ['Presentation mode', 'Money shows changed and nothing can be saved.', `<button class="btn small" onclick="togglePresentationMode()">${PRESENT ? 'Turn off' : 'Turn on'}</button>`],
+      ['View the app as someone else', 'See exactly what Ron or a technician sees.', `<button class="btn small" onclick="openViewAsModal()">Choose a person</button>`],
+    ])) : '');
+}
+function signOutEverywhere(){
+  confirmAction('Sign out of every device, including this one?', async () => {
+    try { await sb.auth.signOut({ scope: 'global' }); } catch (e) {}
+    location.reload();
+  });
+}
+function renderBrandingPage(){
+  const b = catalogObject('branding'), cur = /^#[0-9a-f]{6}$/i.test(b.color || '') ? b.color.toLowerCase() : '';
+  const colors = ['', '#1f66c9', '#0e8a8a', '#16a34a', '#c99a06', '#c4580f', '#7746c9', '#d03b5c', '#17130f'];
+  return setBlock('Branding', '', setRows([
+      ['App name', 'In the menu and the browser tab.', `<input class="set-input" value="${esc(b.appName || '')}" placeholder="The Guys" onchange="setBranding('appName', this.value)">`],
+      ['Main colour', 'Buttons, the menu and highlights. The original crimson is the first.', `<div class="brand-swatches">${colors.map(c => `<button type="button" class="${c===cur ? 'on' : ''}" style="background:${c || '#c31f2b'}" aria-label="${c || 'Original crimson'}" onclick="setBranding('color','${c}')"></button>`).join('')}</div>`],
+      ['Theme for new people', 'Until someone picks their own with the sun / moon button.', `<select class="set-input" onchange="setBranding('theme', this.value)">${[['system', 'Follow the device'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<option value="${k}" ${(b.theme || 'system')===k ? 'selected' : ''}>${l}</option>`).join('')}</select>`],
+      ['Logo', 'The current logo is used in the menu and on the phone\'s home screen.', NEXT_UPDATE],
+    ]))
+    + setBlock('Service colours', 'Each service\'s colour is set with the service.', setRows([['Services', '', `<button class="btn small ghost" onclick="setSettingsPage('services')">Open Services</button>`]]));
+}
+function setBranding(key, value){ const b = catalogObject('branding'); const v = String(value || '').trim(); if ((b[key] || '')===v) return; b[key] = v; catalogSave('branding', b, key==='color' ? (v ? `main colour ${v}` : 'main colour back to the original') : key==='appName' ? `app name ${v || 'back to The Guys'}` : `theme for new people: ${v}`); }
+function renderBillingPage(){
+  return `<div class="set-note">${ico('alert', 16)}<span>This page is ready for when the app is offered to other businesses. Nothing is charged today, and there is no card on file.</span></div>`
+    + setBlock('Plan', '', `<div class="set-fields"><div><div class="plan-name">The Guys</div><div class="hint">Every feature · ${STATE.profiles.length} people</div></div></div>`)
+    + setBlock('Usage', '', `<div class="setup-stats"><div><b>${STATE.profiles.length}</b>people</div><div><b>${STATE.data.contacts.length.toLocaleString('en-AU')}</b>leads</div><div><b>${STATE.data.jobs.length.toLocaleString('en-AU')}</b>jobs</div></div>`);
 }
 function setSettingsPage(id){
   UI.settings = UI.settings || {}; UI.settings.page = id; UI.settings.open = true;

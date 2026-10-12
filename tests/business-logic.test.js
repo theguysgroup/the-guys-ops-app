@@ -68,7 +68,7 @@ const DECLS = [
   // Google Ads: real leads vs Google's count, tracking problems (9 Oct)
   'adsConvKind', 'adsConvShortName', 'adsTracking',
   // The nightly lead check: info@ emails vs the app (9 Oct)
-  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'toastKind', 'RULES', 'ACTIVE', 'DIV_LABEL', 'CATALOG', 'LEAD_STAGE_PICKABLE', 'LEAD_STATUS_COLOR', 'LEAD_STATUS_INK', 'stageColor', 'stageInk', 'replaceArr', 'divLabel', 'activeOnly', 'inkFor', 'catalogBase', 'catalogId', 'catalogList', 'catalogRules', 'applyCatalog', 'tagColor', 'sameLiveRow', 'sameValue', 'LOCAL_WRITES', 'noteLocalWrite', 'settleLocalWrites',
+  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'toastKind', 'NSW_HOLIDAYS', 'OFFICE', 'officeHoursFor', 'nextOfficeDay', 'hhmmToMins', 'minsToHhmm', 'officeHoursText', 'catalogHours', 'catalogObject', 'brandName', 'RULES', 'ACTIVE', 'DIV_LABEL', 'CATALOG', 'LEAD_STAGE_PICKABLE', 'LEAD_STATUS_COLOR', 'LEAD_STATUS_INK', 'stageColor', 'stageInk', 'replaceArr', 'divLabel', 'activeOnly', 'inkFor', 'catalogBase', 'catalogId', 'catalogList', 'catalogRules', 'applyCatalog', 'tagColor', 'sameLiveRow', 'sameValue', 'LOCAL_WRITES', 'noteLocalWrite', 'settleLocalWrites',
   'LEAD_CHECK_DAYS', 'leadPhoneKey', 'leadCheckOpen', 'leadCheckLatest', 'leadDivisionFromSubject', 'adsEmailCheck',
 ];
 
@@ -1044,6 +1044,22 @@ function testCatalog(sb){
   assertEqual([sb.inkFor('#f2c94c'), sb.inkFor('#1f66c9')], ['#1c1917', '#fff'], 'inkFor: dark text on a light colour, white on a dark one');
 }
 
+function testOfficeHours(sb){
+  console.log('\nOffice hours and days off (Settings, stage 3)');
+  sb.STATE.data.jobs = []; sb.STATE.data.settings = { catalog: { hours: { days: { 6: { on: true, from: '09:00', to: '13:00' } }, nsw: true, extra: [{ date: '2026-10-20', name: 'Team day' }] } } };
+  sb.applyCatalog();
+  assertEqual([sb.isWorkday('2026-10-10'), sb.officeHoursFor('2026-10-10'), sb.isWorkday('2026-10-05'), sb.isWorkday('2026-10-20'), sb.officeHoursText()],
+    [true, { from: 540, to: 780 }, false, false, 'Mon–Fri 8:00–17:00, Sat 9:00–13:00'], 'office hours: Saturday mornings on, Labour Day (NSW) and an own day off closed');
+  // Friday 9 Oct 16:50 Sydney (05:50 UTC): 10 working minutes left that day, the other 20 on Saturday from 9:00
+  assertEqual(sb.workClockDue('2026-10-09T05:50:00Z', 30), { day: '2026-10-10', mins: 560 }, 'workClockDue: runs on into Saturday\'s hours');
+  // Friday 15:30 Sydney + 3 hours is after closing: the next office morning is Saturday 9:00
+  assertEqual(sb.chaseAlertDue('2026-10-09T04:30:00Z'), { day: '2026-10-10', mins: 540 }, 'chaseAlertDue: the next office morning, Saturday');
+  sb.STATE.data.settings.catalog = {};
+  sb.applyCatalog();
+  assertEqual([sb.isWorkday('2026-10-10'), sb.isWorkday('2026-10-05'), sb.workClockDue('2026-10-09T05:50:00Z', 30), sb.officeHoursText()],
+    [false, true, { day: '2026-10-12', mins: 500 }, 'Mon–Fri 8:00–17:00'], 'office hours: nothing saved = Monday to Friday 8–17 and no days off, as before');
+}
+
 function testEmployeeCard(sb){
   console.log('\nThe employee card: ABN check, document expiry, missing details, reminders');
   assertEqual(['51 824 753 556', '51824753556', '51824753557', '1234', ''].map(sb.abnValid), [true, true, false, false, false], 'abnValid: the ATO check (a one-digit typo fails)');
@@ -1094,6 +1110,7 @@ testFieldChecks(loadSandbox());
 testLiveRowsAndStageMemo(loadSandbox());
 testToastKinds(loadSandbox());
 testCatalog(loadSandbox());
+testOfficeHours(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
