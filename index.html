@@ -10610,25 +10610,33 @@ function flipPos(el){
   const b = sc.getBoundingClientRect(), col = sc.closest('.pipe-col');
   return { box: sc.className.split(' ')[0] + (col ? ':' + col.dataset.status : ''), x: r.left - b.left + sc.scrollLeft, y: r.top - b.top + sc.scrollTop, vx: r.left, vy: r.top };
 }
+// Only what is on screen is measured and animated (a pipeline column can hold hundreds of cards, most out of sight).
+function flipOnScreen(pos){ return pos.vy > -80 && pos.vy < window.innerHeight + 80 && pos.vx > -80 && pos.vx < window.innerWidth + 80; }
 function flipMeasure(root){
   const before = new Map();
   if (!root || motionReduced() || document.hidden) return before;
-  const all = root.querySelectorAll('[data-key]');
-  for (let i = 0; i < all.length && before.size < 120; i++) before.set(all[i].dataset.key, flipPos(all[i]));
+  for (const el of root.querySelectorAll('[data-key]')) {
+    const pos = flipPos(el);
+    if (flipOnScreen(pos)) { before.set(el.dataset.key, pos); if (before.size >= 200) break; }
+  }
   return before;
 }
 function flipPlay(root, before, skipKey){
   if (!root || !before || !before.size) return;
-  [...root.querySelectorAll('[data-key]')].slice(0, 120).forEach(el => {
-    if (!el.animate || el.dataset.key===skipKey) return;
+  let fades = 0;
+  for (const el of root.querySelectorAll('[data-key]')) {
+    if (!el.animate || el.dataset.key===skipKey) continue;
     const was = before.get(el.dataset.key);
     if (was) {
       const now = flipPos(el);
       // same list: by its place in the list; moved to another list (a pipeline column): by where it was on screen
       const dx = was.box===now.box ? was.x - now.x : was.vx - now.vx, dy = was.box===now.box ? was.y - now.y : was.vy - now.vy;
       if (Math.abs(dx) > 1 || Math.abs(dy) > 1) el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.22,1,.36,1)' });
-    } else el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'ease-out' });
-  });
+    } else if (fades < 120) {
+      const now = el.getBoundingClientRect();
+      if (now.bottom > 0 && now.top < window.innerHeight) { fades++; el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'ease-out' }); }
+    }
+  }
 }
 function flipSwap(host, html){
   if (!host) return;
