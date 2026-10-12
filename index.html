@@ -333,6 +333,13 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .ico { flex: none; vertical-align: -3px; }
 input.invalid { border-color: var(--bad) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 18%, transparent) !important; }
 .field-check { font-size: 11.5px; color: var(--bad); margin-top: 4px; animation: fadeInSoft .18s ease; }
+.bulk-bar { position: sticky; top: 8px; z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 12px; margin-bottom: 10px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--line)); background: color-mix(in srgb, var(--primary) 9%, var(--surface)); box-shadow: var(--shadow-lg); animation: fadeInSoft .18s ease; }
+.bulk-bar[hidden] { display: none; }
+.bulk-bar b { font-size: 13px; margin-inline-end: 4px; }
+.bulk-bar select { width: auto; min-height: 32px; padding-block: 5px; font-size: 12.5px; }
+.bulk-td { width: 36px; padding-inline: 10px 4px !important; }
+input.bulk-check { width: 16px !important; height: 16px; padding: 0; margin: 0; accent-color: var(--primary); cursor: pointer; vertical-align: middle; }
+tr.bulk-on > td { background: color-mix(in srgb, var(--primary) 7%, transparent); }
 .fresh-strip { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: -12px 0 18px; font-size: 11.5px; color: var(--ink-soft); }
 .fresh-chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .fresh-chip i { width: 7px; height: 7px; border-radius: 99px; background: var(--ink-faint); flex: none; }
@@ -3850,7 +3857,7 @@ function setLeadStage(id, stage, after){
   if (after) after(); else render();
 }
 const STAGE_UNDO_FIELDS = ['status','stageChangedAt','nextFollowUp','chasingSince','chaseAlertDone','chaseRound','lostReason','bookedFor'];
-function applyLeadStage(c, stage, extra){
+function applyLeadStage(c, stage, extra, quiet){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   const old = stageLabel(leadStage(c)), fromStage = leadStage(c);
   const before = {}; STAGE_UNDO_FIELDS.forEach(k => { before[k] = c[k] ?? null; });
@@ -3865,10 +3872,11 @@ function applyLeadStage(c, stage, extra){
   logContactActivity(c, actor, `Stage changed from "${old}" to "${stageLabel(stage)}"${extra.lostReason?` (${lostReasonLabel(extra.lostReason)})`:''}`);
   logLeadEvent(c, `Stage changed from "${old}" to "${stageLabel(stage)}"`);
   // Undo for a few seconds (Ofek 12 Oct). Not for Booked: that also counts a booking for the day (Ron's bonus).
-  showToast(`${c.fullName} → ${stageLabel(stage)}`, stage==='Booked' ? null : { undo: () => undoLeadStage(c.id, before, fromStage) });
+  if (!quiet) showToast(`${c.fullName} → ${stageLabel(stage)}`, stage==='Booked' ? null : { undo: () => undoLeadStage(c.id, before, fromStage) });
+  return { id: c.id, before, fromStage };
 }
 // Puts a lead back exactly as it was before a stage change (the fields the change touched), and says so in its history.
-function undoLeadStage(id, before, fromStage){
+function undoLeadStage(id, before, fromStage, quiet){
   const c = contactById(id); if (!c) return;
   const now = leadStage(c);
   const patch = {}; STAGE_UNDO_FIELDS.forEach(k => { patch[k] = before[k] ?? (k==='nextFollowUp' || k==='lostReason' || k==='bookedFor' ? '' : null); });
@@ -3877,8 +3885,89 @@ function undoLeadStage(id, before, fromStage){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   logContactActivity(c, actor, `Stage change undone: back to "${stageLabel(fromStage)}"`);
   logLeadEvent(c, `Stage change undone: back to "${stageLabel(fromStage)}"`);
+  if (quiet) return;
   if (!pipelinePatchMove(c, now)) render();
   showToast(`${c.fullName} is back in ${stageLabel(fromStage)}`);
+}
+/* ── Several leads at once (Ofek 12 Oct, suggestion 11): tick leads in the CRM table (or a whole page with the box in the
+   header) and a bar offers moving them to a stage, or adding or removing a tag, in one go, with one Undo for all of them.
+   A stage that needs something (Lost: why; Quoted / Follow up / Booked: a day) asks once for all of them. ── */
+function bulkIds(){ if (!Array.isArray(UI.crm.bulk)) UI.crm.bulk = []; return UI.crm.bulk; }
+function bulkContacts(){ return bulkIds().map(contactById).filter(Boolean); }
+function toggleBulk(id, on){ const b = bulkIds(), i = b.indexOf(id); if (on && i < 0) b.push(id); if (!on && i >= 0) b.splice(i, 1); refreshBulkBar(); }
+function toggleBulkPage(on){ document.querySelectorAll('#content [data-bulk]').forEach(box => { box.checked = on; toggleBulk(box.dataset.bulk, on); }); }
+function clearBulk(){ UI.crm.bulk = []; document.querySelectorAll('#content [data-bulk]').forEach(box => { box.checked = false; }); refreshBulkBar(); }
+function renderBulkBar(){
+  const n = bulkIds().length;
+  return `<div class="bulk-bar" id="bulk-bar"${n ? '' : ' hidden'}>
+    <b>${n} selected</b>
+    <select aria-label="Move the selected leads to a stage" onchange="if(this.value){ bulkStage(this.value); this.value=''; }"><option value="">Move to stage…</option>${LEAD_STAGE_PICKABLE.map(st => `<option value="${st}">${esc(stageLabel(st))}</option>`).join('')}</select>
+    <select aria-label="Add a tag to the selected leads" onchange="if(this.value){ bulkTag(this.value, true); this.value=''; }"><option value="">Add a tag…</option>${LEAD_TAGS.map(t => `<option value="${esc(t.tag)}">${esc(t.tag)}</option>`).join('')}</select>
+    <select aria-label="Remove a tag from the selected leads" onchange="if(this.value){ bulkTag(this.value, false); this.value=''; }"><option value="">Remove a tag…</option>${LEAD_TAGS.map(t => `<option value="${esc(t.tag)}">${esc(t.tag)}</option>`).join('')}</select>
+    <button type="button" class="btn ghost small" onclick="clearBulk()">Clear</button>
+  </div>`;
+}
+function refreshBulkBar(){
+  const bar = document.getElementById('bulk-bar'); if (bar) bar.outerHTML = renderBulkBar();
+  const all = document.getElementById('bulk-all'), boxes = [...document.querySelectorAll('#content [data-bulk]')];
+  if (all) { all.checked = boxes.length > 0 && boxes.every(b => b.checked); all.indeterminate = !all.checked && boxes.some(b => b.checked); }
+}
+function bulkStage(stage){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const list = bulkContacts().filter(c => leadStage(c)!=='Won' && leadStage(c)!==stage);
+  if (!list.length) { showToast(`They're all in ${stageLabel(stage)} already`); return; }
+  const n = list.length, who = `${n} lead${n===1 ? '' : 's'}`;
+  if (stage==='Lost') {
+    openPopup(`<h3 style="margin:0 0 6px">Why were these ${who} lost?</h3>
+      <div class="hint" style="margin-bottom:10px">One reason for all of them. It feeds "Why leads were lost" on the Dashboard.</div>
+      <div style="display:grid;gap:6px">${LOST_REASONS.map(r => `<button class="btn" style="justify-content:flex-start" onclick="closePopup();applyBulkStage('Lost', { lostReason:'${r.key}' })">${esc(r.label)}</button>`).join('')}</div>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn ghost" onclick="closePopup()">Cancel</button></div>`);
+    return;
+  }
+  const needsDay = stage==='Booked' || STAGES_NEED_DATE.includes(stage);
+  if (needsDay) {
+    const tomorrow = shiftDays(todayStr(), 1), field = stage==='Booked' ? 'bookedFor' : 'nextFollowUp';
+    openPopup(`<h3 style="margin:0 0 6px">${stage==='Booked' ? `Which day are these ${who} booked for?` : `When is the next follow-up with these ${who}?`}</h3>
+      <div class="hint" style="margin-bottom:10px">One day for all of them; each lead can be changed on its own afterwards.</div>
+      <input type="date" id="popup-bulk-date" min="${stage==='Booked' ? '' : tomorrow}" value="${tomorrow}" style="width:100%">
+      <div id="popup-error" style="color:var(--bad);font-size:12px;margin-top:6px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="btn ghost" onclick="closePopup()">Cancel</button>
+        <button class="btn primary" onclick="const v = document.getElementById('popup-bulk-date').value; if (!v || ('${field}'==='nextFollowUp' && v <= todayStr())) { document.getElementById('popup-error').textContent = 'Pick a day after today.'; return; } closePopup(); applyBulkStage('${stage}', { ${field}: v })">Move ${who}</button>
+      </div>`);
+    return;
+  }
+  applyBulkStage(stage, {});
+}
+function applyBulkStage(stage, extra){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const list = bulkContacts().filter(c => leadStage(c)!=='Won' && leadStage(c)!==stage);
+  const done = list.map(c => applyLeadStage(c, stage, { ...extra }, true));
+  UI.crm.bulk = [];
+  render();
+  const n = done.length, who = `${n} lead${n===1 ? '' : 's'}`;
+  showToast(`${who} → ${stageLabel(stage)}`, stage==='Booked' ? null : { undo: () => {
+    done.forEach(d => undoLeadStage(d.id, d.before, d.fromStage, true));
+    render(); showToast(`${who} are back where they were`);
+  } });
+}
+function bulkTag(tag, on){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  const list = bulkContacts().filter(c => leadTagOn(c, tag)!==on);
+  if (!list.length) { showToast(on ? `They all have "${tag}" already` : `None of them has "${tag}"`); return; }
+  const before = list.map(c => [c.id, [...(c.tags || [])]]);
+  list.forEach(c => {
+    c.tags = on ? [...(c.tags || []), tag] : (c.tags || []).filter(t => String(t).toLowerCase()!==tag.toLowerCase());
+    db.contacts.update(c.id, { tags: c.tags });
+    logContactActivity(c, actor, `Tag ${on ? 'added' : 'removed'}: "${tag}"`);
+  });
+  render();
+  const who = `${list.length} lead${list.length===1 ? '' : 's'}`;
+  showToast(`"${tag}" ${on ? 'added to' : 'removed from'} ${who}`, { undo: () => {
+    before.forEach(([id, tags]) => { const c = contactById(id); if (!c) return; c.tags = tags; db.contacts.update(id, { tags }); logContactActivity(c, actor, `Tag change undone: "${tag}"`); });
+    render(); showToast('Tags put back');
+  } });
 }
 function lostReasonLabel(k){ const r = LOST_REASONS.find(x=>x.key===k); return r ? r.label : 'No reason given'; }
 function openLostReasonPrompt(c, after){
@@ -5358,7 +5447,8 @@ function renderCrmTable(allContacts){
   const { pageItems: contacts, page, totalPages, pageSize, total } = paginateRows(allContacts, UI.crm, 25);
   const rows = contacts.length ? contacts.map(c => {
     const overdue = followupDue(c, today) && c.nextFollowUp < today;
-    return `<tr data-key="${c.id}">
+    return `<tr data-key="${c.id}"${bulkIds().includes(c.id) ? ' class="bulk-on"' : ''}>
+      <td class="bulk-td" onclick="event.stopPropagation()"><input type="checkbox" class="bulk-check" data-bulk="${c.id}" ${bulkIds().includes(c.id) ? 'checked' : ''} aria-label="Select ${esc(c.fullName)}" onchange="toggleBulk('${c.id}', this.checked);this.closest('tr').classList.toggle('bulk-on', this.checked)"></td>
       <td style="border-inline-start:4px solid ${stageColor(leadStage(c))};cursor:pointer" onclick="goToLeadConversation('${c.id}')"><span style="display:flex;align-items:center;gap:8px"><span class="table-row-avatar" style="${stageVars(leadStage(c))}">${esc(initials(c.fullName))}</span>${esc(c.fullName)}${unreadBadge(c)}</span></td>
       <td class="mono">${esc(c.phone||'—')}</td>
       <td>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}${leadSubDivisions(c).length ? `<div class="hint" style="margin-top:3px;font-size:11px">${esc(leadSubDivisions(c).join(', '))}</div>` : ''}</td>
@@ -5373,9 +5463,9 @@ function renderCrmTable(allContacts){
       <td><button class="btn ghost small" onclick="openLeadActivityModal('${c.id}')">${ico('history')} ${recordActivityCount(c)}</button></td>
       <td><button class="btn ghost small" onclick="openLeadModal('${c.id}')">Open</button></td>
     </tr>`;
-  }).join('') : `<tr><td colspan="13">${emptyState('No leads match these filters', 'Clear the filters to see every lead again.', 'search', { label:'Clear filters', onclick:'clearCrmFilters()' })}</td></tr>`;
-  return `<div class="table-wrap"><table class="jobs-table"><thead><tr>
-    <th>Name</th><th>Phone</th><th>Division</th><th>Source</th><th>Stage</th><th>Tags</th><th>Created</th><th>Last Contact</th><th>Follow-up</th><th>Est. Value</th><th>Sales Value</th><th>Activity</th><th></th>
+  }).join('') : `<tr><td colspan="14">${emptyState('No leads match these filters', 'Clear the filters to see every lead again.', 'search', { label:'Clear filters', onclick:'clearCrmFilters()' })}</td></tr>`;
+  return `${renderBulkBar()}<div class="table-wrap"><table class="jobs-table"><thead><tr>
+    <th class="bulk-td"><input type="checkbox" class="bulk-check" id="bulk-all" aria-label="Select every lead on this page" onclick="toggleBulkPage(this.checked)"></th><th>Name</th><th>Phone</th><th>Division</th><th>Source</th><th>Stage</th><th>Tags</th><th>Created</th><th>Last Contact</th><th>Follow-up</th><th>Est. Value</th><th>Sales Value</th><th>Activity</th><th></th>
   </tr></thead><tbody>${rows}</tbody></table>${renderPager(page, totalPages, total, pageSize, 'setCrmPage', 'setCrmPageSize')}</div>`;
 }
 function renderCrmBody(data){
