@@ -314,6 +314,11 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .set-num span { align-self: stretch; display: flex; align-items: center; padding: 0 10px; font-size: 12.3px; color: var(--ink-soft); background: var(--surface-2); white-space: nowrap; }
 .set-num:focus-within { border-color: var(--primary); box-shadow: var(--focus-ring); }
 .set-page > .card { margin-bottom: 14px; }
+/* Sign in with Google */
+.google-btn { width: 100%; margin-top: 14px; gap: 10px; background: var(--surface); border-color: var(--line); font-weight: 600; }
+.google-btn:hover { background: var(--surface-2); }
+.login-or { display: flex; align-items: center; gap: 10px; margin: 14px 0 0; color: var(--ink-faint); font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; }
+.login-or::before, .login-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 /* Settings, stage 3 pages. */
 .set-fixed { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-soft); padding: 5px 10px; border-radius: 6px; background: var(--surface-2); }
 .setup-progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 12px 20px 4px; }
@@ -2499,8 +2504,12 @@ let AUTH = {
 };
 let AUTH_DATA_LOADING = false;   // guards loadFromSupabase() against double-firing
 
+// Two-step sign-in state (see mfaCheck): declared before the sign-in handler that reads it.
+const MFA = { userId: null, checked: false, need: false, busy: false, factorId: null, factors: null, error: '' };
 sb.auth.onAuthStateChange((event, session) => {
   AUTH.session = session;
+  const uid = session && session.user ? session.user.id : null;
+  if (uid!==MFA.userId) { MFA.userId = uid; MFA.checked = false; MFA.need = false; MFA.factors = null; }
   if (event === 'PASSWORD_RECOVERY') {
     AUTH.status = 'needsPassword';
   } else if (session) {
@@ -3559,6 +3568,7 @@ function renderLogin(){
   const err = AUTH.error ? `<div class="banner" style="margin-top:14px;border-color:var(--bad);background:var(--bad-soft);color:var(--bad)">${esc(AUTH.error)}</div>` : '';
   return loginCardShell(`
     ${err}
+    ${AUTH_PROVIDERS===null ? (loadAuthProviders(), '') : AUTH_PROVIDERS.google ? `<button type="button" class="btn google-btn" onclick="signInWithGoogle()">${GOOGLE_G} Continue with Google</button><div class="login-or"><span>or</span></div>` : ''}
     <p style="font-size:12.5px;color:var(--ink-soft);margin:14px 0 10px">Sign in with your work email:</p>
     <div style="display:flex;flex-direction:column;gap:10px">
       <div class="field"><label>Email</label><input id="auth-email" type="email" autocomplete="username" placeholder="you@company.com"></div>
@@ -3567,6 +3577,100 @@ function renderLogin(){
       <button class="btn ghost small" style="align-self:center" onclick="doForgotPassword()">Forgot your password?</button>
     </div>
   `);
+}
+/* ── Two-step sign-in (Ofek 12 Oct, settings stage 3b): an authenticator app's 6-digit code as well as the password.
+   Turned on per person in Settings → Security (Supabase's own TOTP, free). Someone who has it gives the code before
+   any data loads. Owners can ask every owner and manager to set it up (a reminder at the top of every page). ── */
+async function mfaCheck(){
+  if (MFA.busy) return; MFA.busy = true;
+  try {
+    const { data } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+    MFA.need = !!data && data.nextLevel==='aal2' && data.currentLevel!=='aal2';
+    if (MFA.need) { const f = await sb.auth.mfa.listFactors(); MFA.factorId = (((f.data && f.data.totp) || []).find(x => x.status==='verified') || {}).id || null; if (!MFA.factorId) MFA.need = false; }
+  } catch (e) { MFA.need = false; }
+  MFA.checked = true; MFA.busy = false;
+  render();
+}
+function renderMfaPrompt(){
+  return loginCardShell(`
+    ${MFA.error ? `<div class="banner" style="margin-top:14px;border-color:var(--bad);background:var(--bad-soft);color:var(--bad)">${esc(MFA.error)}</div>` : ''}
+    <p style="font-size:13px;color:var(--ink-soft);margin:14px 0 10px">Enter the 6-digit code from your authenticator app.</p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="mfa-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123 456" style="font-size:22px;letter-spacing:.3em;text-align:center" onkeydown="if(event.key==='Enter'){verifyMfa()}">
+      <button class="btn primary" style="width:100%" onclick="verifyMfa()">Continue</button>
+      <button class="btn ghost small" style="align-self:center" onclick="doLogout()">Sign out</button>
+    </div>`);
+}
+async function verifyMfa(){
+  const code = String((document.getElementById('mfa-code') || {}).value || '').replace(/\D/g, '');
+  if (code.length!==6) { MFA.error = 'The code has 6 digits.'; render(); return; }
+  const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: MFA.factorId, code });
+  if (error) { MFA.error = 'That code didn\'t work. Check the app and try the new one.'; render(); return; }
+  MFA.error = ''; MFA.need = false; render();
+}
+async function mfaFactors(){
+  try { const f = await sb.auth.mfa.listFactors(); MFA.factors = (f.data && f.data.totp) || []; } catch (e) { MFA.factors = []; }
+  if (UI.tab==='settings' && (UI.settings || {}).page==='security') render();
+}
+async function startMfaEnroll(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  try {
+    for (const f of (MFA.factors || []).filter(x => x.status!=='verified')) await sb.auth.mfa.unenroll({ factorId: f.id });   // a half-finished one from before
+    const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'OPS ' + new Date().toISOString().slice(0, 10) });
+    if (error) throw error;
+    const qr = String(data.totp.qr_code || '');
+    openPopup(`<h3 style="margin:0 0 6px">Turn on two-step sign-in</h3>
+      <div class="hint" style="margin-bottom:10px">1. Open an authenticator app on your phone (Google Authenticator, Microsoft Authenticator or 1Password) and scan this. 2. Type the 6-digit code it shows.</div>
+      <div style="display:flex;justify-content:center;margin:6px 0 10px"><img src="${esc(qr)}" alt="QR code" style="width:180px;height:180px;background:#fff;border-radius:10px;padding:6px"></div>
+      <div class="hint" style="text-align:center;margin-bottom:10px">Can't scan? Type this key into the app: <b class="mono">${esc(data.totp.secret || '')}</b></div>
+      <input id="mfa-new-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123 456" style="font-size:20px;letter-spacing:.3em;text-align:center;width:100%">
+      <div id="popup-error" style="color:var(--bad);font-size:12px;margin-top:6px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn ghost" onclick="closePopup()">Cancel</button><button class="btn primary" onclick="confirmMfaEnroll('${data.id}')">Turn on</button></div>`);
+  } catch (e) { showToast('Could not start two-step sign-in: ' + (e.message || e)); }
+}
+async function confirmMfaEnroll(factorId){
+  const code = String((document.getElementById('mfa-new-code') || {}).value || '').replace(/\D/g, ''), err = document.getElementById('popup-error');
+  if (code.length!==6) { if (err) err.textContent = 'The code has 6 digits.'; return; }
+  const { error } = await sb.auth.mfa.challengeAndVerify({ factorId, code });
+  if (error) { if (err) err.textContent = 'That code didn\'t work. Try the new one the app shows.'; return; }
+  closePopup();
+  logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', 'Security: turned on two-step sign-in for their account');
+  showToast('Two-step sign-in is on');
+  MFA.factors = null; mfaFactors();
+}
+function turnOffMfa(){
+  const f = (MFA.factors || []).find(x => x.status==='verified'); if (!f) return;
+  confirmAction('Turn off two-step sign-in for your account?', async () => {
+    const { error } = await sb.auth.mfa.unenroll({ factorId: f.id });
+    if (error) { showToast('Not turned off: ' + error.message); return; }
+    logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', 'Security: turned off two-step sign-in for their account');
+    showToast('Two-step sign-in is off'); MFA.factors = null; mfaFactors();
+  });
+}
+// The reminder at the top of every page while an owner or manager hasn't set it up, when the owners require it.
+function mfaReminderHtml(){
+  const p = getCurrentProfile();
+  if (!p || (p.role!=='owner' && p.role!=='manager') || !catalogObject('security').requireMfa || VIEW_AS_ID) return '';
+  if (MFA.factors===null) { mfaFactors(); return ''; }
+  if (MFA.factors.some(x => x.status==='verified')) return '';
+  return `<div class="banner" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">${ico('lock', 16)}<span style="flex:1">Two-step sign-in is required for owners and managers. It takes two minutes.</span><button class="btn small primary" onclick="goTab('settings');setSettingsPage('security')">Set it up</button></div>`;
+}
+
+// Sign in with Google (Ofek 12 Oct; free, unlike Apple's). The button shows once Google is switched on in Supabase →
+// Authentication → Providers. Only someone who already has an account here gets in: a Google account with no profile
+// sees "your account isn't set up".
+let AUTH_PROVIDERS = null;
+const GOOGLE_G = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 38.2 44 33 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
+async function loadAuthProviders(){
+  if (loadAuthProviders.busy) return; loadAuthProviders.busy = true;
+  try { const r = await fetch(`${SUPABASE_URL}/auth/v1/settings`, { headers: { apikey: SUPABASE_ANON_KEY } }); const j = await r.json(); AUTH_PROVIDERS = (j && j.external) || {}; }
+  catch (e) { AUTH_PROVIDERS = {}; }
+  if (AUTH.status==='signedOut' && AUTH_PROVIDERS.google) render();
+}
+async function signInWithGoogle(){
+  AUTH.error = null;
+  const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } });
+  if (error) { AUTH.error = error.message; render(); }
 }
 async function doSignIn(){
   AUTH.error = null;
@@ -3757,7 +3861,7 @@ function renderShell(profile, data){
         <div class="sidebar-topbar">
         <div class="workspace-card">
           <div class="brand-mark" style="width:34px;height:34px;box-shadow:none">
-          <img src="logo.png" alt=""></div>
+          <img src="${esc(brandLogo())}" alt=""></div>
           <div style="line-height:1.2"><b style="font-family:'Figtree',sans-serif;font-size:15.5px;font-weight:700;display:block;color:#fff">${esc(brandName())}</b><span style="font-size:11.3px;color:var(--sidebar-ink-soft)">${esc((STATE.data && STATE.data.settings && STATE.data.settings.companyName) || 'The Guys Service Group')}</span></div>
         </div>
         <button class="mobile-nav-toggle" onclick="toggleMobileNav()" aria-label="Menu">${UI.mobileNavOpen?'✕':'☰'}</button>
@@ -5519,7 +5623,7 @@ async function vaSessionStart(){
   if (data) { p.lastLogoutAt = data.last_logout_at; p.sessionStartedAt = data.session_started_at; p.forgotLogoutOn = data.forgot_logout_on; }
   if (p.forgotLogoutOn) {
     openPopup(`<h3 style="margin:0 0 6px">You forgot to log out</h3>
-      <div style="font-size:14px;margin-bottom:12px">On ${esc(parseLocalDate(p.forgotLogoutOn).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' }))} you didn't press Log Out, so at 8pm the system finished your day with the end time 5:30pm. Please press Log Out on My Day at the end of every day.</div>
+      <div style="font-size:14px;margin-bottom:12px">On ${esc(parseLocalDate(p.forgotLogoutOn).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' }))} you didn't press Log Out, so at ${esc(autoLogoutTime())} the system finished your day with the end time 5:30pm. Please press Log Out on My Day at the end of every day.</div>
       <div style="display:flex;justify-content:flex-end"><button class="btn primary" onclick="sb.rpc('ack_forgot_logout');closePopup()">OK</button></div>`);
   }
   render();
@@ -11354,7 +11458,7 @@ function setBlock(title, desc, body){ return `<div class="set-block"><div class=
 function setRows(rows){ return `<div class="set-rows">${rows.map(([label, desc, ctl]) => `<div class="set-row"><div class="set-row-text"><b>${label}</b>${desc ? `<span>${esc(desc)}</span>` : ''}</div><div class="set-row-ctl">${ctl}</div></div>`).join('')}</div>`; }
 // A switch, as in the mockup. Locked ones show the rule but can't be changed here.
 function setToggle(on, onclick, locked){ return `<button type="button" class="set-toggle${on ? ' on' : ''}" role="switch" aria-checked="${!!on}"${locked ? ' disabled title="Always on"' : ` onclick="${onclick}"`}></button>`; }
-const CAT_NAMES = { services: 'Services', stages: 'Pipeline stages', sources: 'Lead sources', tags: 'Tags', lostReasons: 'Reasons a lead is lost', payments: 'Payment methods', rules: 'Pipeline rules', hours: 'Office hours', business: 'Business details', roles: 'Roles and access', branding: 'Look and branding' };
+const CAT_NAMES = { services: 'Services', stages: 'Pipeline stages', sources: 'Lead sources', tags: 'Tags', lostReasons: 'Reasons a lead is lost', payments: 'Payment methods', rules: 'Pipeline rules', security: 'Security', myday: 'My Day', notify: 'Notifications', hours: 'Office hours', business: 'Business details', roles: 'Roles and access', branding: 'Look and branding' };
 const CAT_SWATCHES = ['#1f66c9', '#2b6cc4', '#0e8a8a', '#16a34a', '#c99a06', '#c4580f', '#d03b5c', '#7746c9', '#a5473f', '#776e64'];
 function STAGE_RULE_TEXT(k){
   return ({ New: 'Every new enquiry starts here', Chasing: `Calls counted on office days · decide after ${RULES.chaseDecideDays} days`,
@@ -11558,15 +11662,91 @@ function renderPeoplePage(){
   const me = getCurrentProfile(), colors = ['#c1652e', '#7a5ca0', '#2f7d6e', '#3f7f8f', '#7746c9', '#1f66c9', '#a5473f'];
   const order = { owner: 0, manager: 1, va: 2, technician: 3, marketing: 4 };
   const people = STATE.profiles.slice().sort((a, b) => (order[a.role] ?? 9) - (order[b.role] ?? 9) || String(a.fullName).localeCompare(String(b.fullName)));
+  if (TEAM.list===null && me && me.role==='owner') loadTeam();
+  const acct = id => (TEAM.list || []).find(x => x.id===id);
   const rows = people.map((p, i) => {
-    const status = p.role==='va' ? (onShiftToday(p) ? (p.onBreak ? pill('warn', 'On a break') : pill('good', 'On shift')) : pill('neutral', 'Off shift')) : pill('good', 'Active');
-    const actions = p.id===(me && me.id) ? '<span class="hint">You</span>'
-      : `${p.role!=='owner' && p.role!=='manager' ? `<button class="btn small ghost" onclick="setSettingsPage('access')">Access</button>` : ''}${me && me.role==='owner' && !VIEW_AS_ID ? `<button class="btn small ghost" onclick="enterViewAs('${p.id}')">View as</button>` : ''}`;
-    return `<tr><td><span class="who"><span class="who-av" style="background:${colors[i % colors.length]}">${esc(initials(p.fullName))}</span><span>${esc(p.fullName)}${p.technicianName && p.technicianName!==p.fullName ? `<small>${esc(p.technicianName)}</small>` : ''}</span></span></td><td>${esc(roleLabel(p.role))}</td><td>${status}</td><td class="set-actions">${actions}</td></tr>`;
+    const a = acct(p.id);
+    const status = a && a.accessOff ? pill('bad', 'Access off') : a && !a.joined ? pill('warn', 'Invited') : p.role==='va' ? (onShiftToday(p) ? (p.onBreak ? pill('warn', 'On a break') : pill('good', 'On shift')) : pill('neutral', 'Off shift')) : pill('good', 'Active');
+    const seen = a && a.lastSignIn ? `Signed in ${freshAgo(a.lastSignIn)}` : a && !a.joined ? 'Not joined yet' : '';
+    const owner = me && me.role==='owner', self = p.id===(me && me.id);
+    const actions = self ? '<span class="hint">You</span>'
+      : `${p.role!=='owner' && p.role!=='manager' ? `<button class="btn small ghost" onclick="setSettingsPage('access')">Access</button>` : ''}${owner && a ? `<button class="btn small ghost" onclick="teamLink('${p.id}')">${a.joined ? 'Password link' : 'Join link'}</button>` : ''}${owner && a && p.role!=='owner' ? `<button class="btn small ghost${a.accessOff ? '' : ' danger'}" onclick="teamAccess('${p.id}', ${a.accessOff ? 'true' : 'false'})">${a.accessOff ? 'Turn access on' : 'Turn access off'}</button>` : ''}${owner && !VIEW_AS_ID ? `<button class="btn small ghost" onclick="enterViewAs('${p.id}')">View as</button>` : ''}`;
+    return `<tr><td><span class="who"><span class="who-av" style="background:${colors[i % colors.length]}">${esc(initials(p.fullName))}</span><span>${esc(p.fullName)}<small>${esc([a && a.email, seen].filter(Boolean).join(' · ') || (p.technicianName && p.technicianName!==p.fullName ? p.technicianName : ''))}</small></span></span></td><td>${esc(roleLabel(p.role))}</td><td>${status}</td><td class="set-actions">${actions}</td></tr>`;
   }).join('');
   return setBlock('Team', `${people.length} people`, `<div class="table-wrap set-table"><table><thead><tr><th>Name</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="cat-foot"><button class="btn small" disabled>${ico('plus', 14)} Invite someone</button> ${NEXT_UPDATE}</div>`)
-    + `<div class="set-note">${ico('alert', 16)}<span>Inviting someone by email needs a small server addition, coming in the next update. Until then a new person is added as today.</span></div>`;
+      <div class="cat-foot"><button class="btn small primary" onclick="openInvite()">${ico('plus', 14)} Invite someone</button></div>`);
+}
+
+// The team server function (supabase/functions/team): accounts, join links and access. Owners only.
+const TEAM = { list: null, busy: false };
+const TEAM_URL = SUPABASE_URL + '/functions/v1/team';
+async function teamCall(body){
+  const { data } = await sb.auth.getSession();
+  const r = await fetch(TEAM_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify(body) });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok || !out.ok) throw new Error(out.reason || out.error || ('HTTP ' + r.status));
+  return out;
+}
+async function loadTeam(){
+  if (TEAM.busy) return; TEAM.busy = true;
+  try { TEAM.list = (await teamCall({ step: 'list' })).people || []; } catch (e) { TEAM.list = []; TEAM.error = String(e.message || e); }
+  TEAM.busy = false;
+  if (UI.tab==='settings' && (UI.settings || {}).page==='people') render();
+}
+function openInvite(){
+  const techs = STATE.data.employees.filter(e => e.status==='Active' && e.roles.includes('Technician')).map(e => e.name);
+  openPopup(`<h3 style="margin:0 0 4px">Invite someone</h3>
+    <div class="hint" style="margin-bottom:12px">They get the pages of their role (Settings → Roles and access). You send them the link to join: by WhatsApp, text or email.</div>
+    <div class="field"><label>Name</label><input id="inv-name" autocomplete="off"></div>
+    <div class="field" style="margin-top:10px"><label>Email</label><input id="inv-email" type="email" autocomplete="off" data-check="email"></div>
+    <div class="field" style="margin-top:10px"><label>Role</label><select id="inv-role" onchange="document.getElementById('inv-tech-wrap').hidden = this.value!=='technician'"><option value="va">Office (VA)</option><option value="technician">Technician</option><option value="manager">Manager</option><option value="marketing">Marketing</option></select></div>
+    <div class="field" id="inv-tech-wrap" hidden style="margin-top:10px"><label>Their name in Jobs &amp; Commissions</label><select id="inv-tech"><option value="">The same as above</option>${techs.map(t => `<option>${esc(t)}</option>`).join('')}</select></div>
+    <div id="popup-error" style="color:var(--bad);font-size:12px;margin-top:8px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn ghost" onclick="closePopup()">Cancel</button><button class="btn primary" id="inv-go" onclick="sendInvite()">Make the invite</button></div>`);
+  setTimeout(() => { const i = document.getElementById('inv-name'); if (i) i.focus(); }, 30);
+}
+async function sendInvite(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const v = id => String((document.getElementById(id) || {}).value || '').trim(), err = document.getElementById('popup-error'), go = document.getElementById('inv-go');
+  const body = { step: 'invite', fullName: v('inv-name'), email: v('inv-email'), role: v('inv-role'), technicianName: v('inv-tech') };
+  if (!body.fullName || !body.email) { if (err) err.textContent = 'Their name and email are needed.'; return; }
+  if (go) { go.disabled = true; go.textContent = 'Making it…'; }
+  try {
+    const out = await teamCall(body);
+    logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `People: invited ${body.fullName} (${roleLabel(body.role)})`);
+    closePopup(); showJoinLink(body.fullName, out.link, 'join');
+    TEAM.list = null; await reloadProfiles();
+  } catch (e) { if (err) err.textContent = String(e.message || e); if (go) { go.disabled = false; go.textContent = 'Make the invite'; } }
+}
+async function reloadProfiles(){
+  const { data } = await sb.from('profiles').select('*');
+  if (Array.isArray(data)) data.forEach(p => { if (!STATE.profiles.some(x => x.id===p.id)) STATE.profiles.push({ id: p.id, fullName: p.full_name, role: p.role, technicianName: p.technician_name, permissions: p.permissions || {} }); });
+  render();
+}
+// The link is shown once, to send by hand: it signs the person in, so it goes only to them.
+function showJoinLink(name, link, kind){
+  const text = kind==='join' ? `Hi ${name.split(' ')[0]}, here is your link to join The Guys OPS app: ${link}` : `Hi ${name.split(' ')[0]}, here is a link to set a new password for The Guys OPS app: ${link}`;
+  openPopup(`<h3 style="margin:0 0 6px">${kind==='join' ? `Send ${esc(name)} the link to join` : `A new-password link for ${esc(name)}`}</h3>
+    <div class="hint" style="margin-bottom:10px">It works once and for a limited time. Send it only to them: it signs them in.</div>
+    <textarea id="join-link-text" readonly rows="4" style="width:100%;font-size:12.5px">${esc(text)}</textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('join-link-text').value).then(() => showToast('Copied'))">${ico('copy', 14)} Copy</button>
+      <a class="btn" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a>
+      <button class="btn primary" onclick="closePopup()">Done</button>
+    </div>`);
+}
+async function teamLink(id){
+  const p = STATE.profiles.find(x => x.id===id); if (!p) return;
+  try { const out = await teamCall({ step: 'link', id }); showJoinLink(p.fullName, out.link, out.kind==='join' ? 'join' : 'password'); }
+  catch (e) { showToast('Could not make the link: ' + (e.message || e)); }
+}
+function teamAccess(id, on){
+  const p = STATE.profiles.find(x => x.id===id); if (!p) return;
+  confirmAction(on ? `Let ${p.fullName} sign in again?` : `Stop ${p.fullName} from signing in? Their history stays, and you can turn it back on.`, async () => {
+    if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+    try { await teamCall({ step: 'access', id, on }); logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `People: ${p.fullName}'s access turned ${on ? 'on' : 'off'}`); showToast(on ? `${p.fullName} can sign in again` : `${p.fullName} can't sign in any more`); TEAM.list = null; render(); }
+    catch (e) { showToast('Not changed: ' + (e.message || e)); }
+  }, { danger: !on });
 }
 
 // Roles and access: a page list per role. "Apply" gives everyone with that role exactly those pages.
@@ -11623,13 +11803,17 @@ function renderReviewsPage(s){
       ['Never ask customers marked "Don\'t ask"', 'Set on the job.', pill('good', 'Always')],
     ]));
 }
+const NOTIFY_EVENTS = [['newLead', 'A new lead comes in', true], ['leadWaiting', 'A new lead nobody has picked up for 15 minutes (8:00–20:00)', true], ['missedCall', 'A missed call (once the business phone is on)', true], ['unpaid', 'A job turns 7 days unpaid', false], ['docExpiry', 'An employee document expires within 30 days', false]];
 function renderNotificationsPage(){
+  const N = catalogObject('notify');
   return phoneNotificationsBar()
-    + setBlock('What sends a notification', '', `<div class="table-wrap set-table"><table><thead><tr><th>When</th><th>Who</th><th>Phone</th><th></th></tr></thead><tbody>
-      <tr><td>A technician sends his commission invoice</td><td>Owners</td><td>${pill('good', 'On')}</td><td></td></tr>
-      ${['A new lead', 'A missed call', 'A new lead waiting 15+ minutes', 'A job unpaid for a week', 'An employee document about to expire', 'A new Google review'].map(t => `<tr><td>${t}</td><td>Owners / office</td><td>${pill('neutral', 'Off')}</td><td>${NEXT_UPDATE}</td></tr>`).join('')}
+    + setBlock('What sends a notification', 'To the owners\' phones; tick "Office" to send it to Ron and the managers too. Checked every 10 minutes; each piece of news is sent once.', `<div class="table-wrap set-table"><table><thead><tr><th>When</th><th>Phone</th><th>Office</th></tr></thead><tbody>
+      <tr><td>A technician sends his commission invoice</td><td>${setToggle(true, '', true)}</td><td></td></tr>
+      ${NOTIFY_EVENTS.map(([k, label, office]) => { const x = N[k] || {}; return `<tr><td>${esc(label)}</td><td>${setToggle(!!x.on, `setNotify('${k}','on',!this.classList.contains('on'))`)}</td><td>${office ? `<input type="checkbox" ${x.office ? 'checked' : ''} ${x.on ? '' : 'disabled'} aria-label="Office too" onchange="setNotify('${k}','office',this.checked)">` : ''}</td></tr>`; }).join('')}
+      <tr><td>A new Google review</td><td>${NEXT_UPDATE}</td><td></td></tr>
     </tbody></table></div>`);
 }
+function setNotify(k, field, value){ const N = catalogObject('notify'); N[k] = { ...(N[k] || {}), [field]: !!value }; catalogSave('notify', N, `${(NOTIFY_EVENTS.find(x => x[0]===k) || [k, k])[1]}: ${field==='on' ? (value ? 'on' : 'off') : (value ? 'office too' : 'owners only')}`); }
 // Connections: status from what the app really sees (the same times as the dashboard's "updated" line).
 function renderConnectionsPage(s){
   if (!FRESH) loadFreshness().then(() => { if (UI.tab==='settings' && (UI.settings || {}).page==='connections') render(); });
@@ -11655,17 +11839,28 @@ function renderConnectionsPage(s){
 }
 function renderSecurityPage(){
   const me = getCurrentProfile();
+  if (AUTH_PROVIDERS===null) loadAuthProviders().then(() => { if (UI.tab==='settings' && (UI.settings || {}).page==='security') render(); });
+  if (MFA.factors===null) mfaFactors();
   return setBlock('Signing in', '', setRows([
       ['Change my password', '', `<button class="btn small" onclick="openChangePasswordModal()">Change</button>`],
       ['Sign out of every device', 'Your account on every phone and computer, including this one.', `<button class="btn small danger" onclick="signOutEverywhere()">Sign out everywhere</button>`],
-      ['Two-step sign-in for owners and managers', 'A code from the phone as well as the password.', NEXT_UPDATE],
-      ['The office logs out by itself at', 'If Ron forgets, the day is closed at 20:00 and he is told the next morning.', '<span class="set-fixed">20:00</span>'],
+      ['Sign in with Google', AUTH_PROVIDERS && AUTH_PROVIDERS.google ? 'On: the sign-in page offers "Continue with Google". Only people who already have an account here get in.' : 'Free. It is switched on in Supabase with a Google key; once it is, the sign-in page offers it by itself.', AUTH_PROVIDERS && AUTH_PROVIDERS.google ? pill('good', 'On') : pill('neutral', 'Off')],
+      ['Two-step sign-in for your account', MFA.factors===null ? 'Checking…' : MFA.factors.some(x => x.status==='verified') ? 'On: you give a code from your authenticator app when you sign in.' : 'A 6-digit code from an authenticator app on your phone, as well as the password.', MFA.factors===null ? '' : MFA.factors.some(x => x.status==='verified') ? `${pill('good', 'On')} <button class="btn small ghost danger" onclick="turnOffMfa()">Turn off</button>` : `<button class="btn small primary" onclick="startMfaEnroll()">Turn on</button>`],
+      ...(me && me.role==='owner' ? [['Require it for owners and managers', 'Until they set it up, they see a reminder at the top of every page.', setToggle(!!catalogObject('security').requireMfa, "setRequireMfa(!this.classList.contains('on'))")]] : []),
+      ['The office logs out by itself at', `If Ron forgets to log out, the day is closed at this time (the shift ends at 17:30) and he is told the next morning.`, `<input type="time" class="set-input" style="width:130px" value="${esc(autoLogoutTime())}" onchange="setAutoLogout(this.value)">`],
     ]))
     + (me && me.role==='owner' ? setBlock('Showing the app to someone', '', setRows([
       ['Presentation mode', 'Money shows changed and nothing can be saved.', `<button class="btn small" onclick="togglePresentationMode()">${PRESENT ? 'Turn off' : 'Turn on'}</button>`],
       ['View the app as someone else', 'See exactly what Ron or a technician sees.', `<button class="btn small" onclick="openViewAsModal()">Choose a person</button>`],
     ])) : '');
 }
+function autoLogoutTime(){ const t = catalogObject('myday').autoLogout; return /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(t || '') ? t : '20:00'; }
+function setAutoLogout(v){
+  if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(v || '')) { showToast('Pick a time', { kind: 'warn' }); render(); return; }
+  if (v < '17:30') { showToast('Pick a time after 17:30, when the shift ends', { kind: 'warn' }); render(); return; }
+  const m = catalogObject('myday'); m.autoLogout = v; catalogSave('myday', m, `the office logs out by itself at ${v}`);
+}
+function setRequireMfa(on){ const x = catalogObject('security'); x.requireMfa = !!on; catalogSave('security', x, `two-step sign-in ${on ? 'required' : 'no longer required'} for owners and managers`); }
 function signOutEverywhere(){
   confirmAction('Sign out of every device, including this one?', async () => {
     try { await sb.auth.signOut({ scope: 'global' }); } catch (e) {}
@@ -11679,11 +11874,24 @@ function renderBrandingPage(){
       ['App name', 'In the menu and the browser tab.', `<input class="set-input" value="${esc(b.appName || '')}" placeholder="The Guys" onchange="setBranding('appName', this.value)">`],
       ['Main colour', 'Buttons, the menu and highlights. The original crimson is the first.', `<div class="brand-swatches">${colors.map(c => `<button type="button" class="${c===cur ? 'on' : ''}" style="background:${c || '#c31f2b'}" aria-label="${c || 'Original crimson'}" onclick="setBranding('color','${c}')"></button>`).join('')}</div>`],
       ['Theme for new people', 'Until someone picks their own with the sun / moon button.', `<select class="set-input" onchange="setBranding('theme', this.value)">${[['system', 'Follow the device'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<option value="${k}" ${(b.theme || 'system')===k ? 'selected' : ''}>${l}</option>`).join('')}</select>`],
-      ['Logo', 'The current logo is used in the menu and on the phone\'s home screen.', NEXT_UPDATE],
+      ['Logo', 'In the menu. PNG, JPG or WebP up to 2 MB, square works best. (The phone\'s home-screen icon stays the one made for it.)', `<span style="display:flex;align-items:center;gap:10px"><img src="${esc(brandLogo())}" alt="" style="width:40px;height:40px;object-fit:contain;border-radius:8px;background:#17130f;padding:3px"><label class="btn small">${ico('incoming', 14)} Upload<input type="file" accept="image/png,image/jpeg,image/webp" hidden onchange="uploadBrandLogo(this)"></label>${b.logo ? `<button class="btn small ghost" onclick="setBranding('logo','')">Use the original</button>` : ''}</span>`],
     ]))
     + setBlock('Service colours', 'Each service\'s colour is set with the service.', setRows([['Services', '', `<button class="btn small ghost" onclick="setSettingsPage('services')">Open Services</button>`]]));
 }
-function setBranding(key, value){ const b = catalogObject('branding'); const v = String(value || '').trim(); if ((b[key] || '')===v) return; b[key] = v; catalogSave('branding', b, key==='color' ? (v ? `main colour ${v}` : 'main colour back to the original') : key==='appName' ? `app name ${v || 'back to The Guys'}` : `theme for new people: ${v}`); }
+function brandLogo(){ const u = (catalogObject('branding').logo || '').trim(); return /^https:\/\/[a-z0-9.-]+\.supabase\.co\/storage\/v1\/object\/public\/branding\//.test(u) ? u : 'logo.png'; }
+async function uploadBrandLogo(input){
+  const f = input.files && input.files[0]; if (!f) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (!/^image\/(png|jpeg|webp)$/.test(f.type)) { showToast('Use a PNG, JPG or WebP picture', { kind: 'warn' }); return; }
+  if (f.size > 2 * 1024 * 1024) { showToast('That picture is over 2 MB', { kind: 'warn' }); return; }
+  showToast('Uploading…');
+  const path = `logo-${Date.now()}.${f.type.split('/')[1].replace('jpeg', 'jpg')}`;
+  const { error } = await sb.storage.from('branding').upload(path, f, { contentType: f.type, cacheControl: '31536000' });
+  if (error) { showToast('Could not upload the logo: ' + error.message); return; }
+  const { data } = sb.storage.from('branding').getPublicUrl(path);
+  setBranding('logo', data.publicUrl);
+}
+function setBranding(key, value){ const b = catalogObject('branding'); const v = String(value || '').trim(); if ((b[key] || '')===v) return; b[key] = v; catalogSave('branding', b, key==='color' ? (v ? `main colour ${v}` : 'main colour back to the original') : key==='appName' ? `app name ${v || 'back to The Guys'}` : key==='logo' ? (v ? 'new logo' : 'logo back to the original') : `theme for new people: ${v}`); }
 function renderBillingPage(){
   return `<div class="set-note">${ico('alert', 16)}<span>This page is ready for when the app is offered to other businesses. Nothing is charged today, and there is no card on file.</span></div>`
     + setBlock('Plan', '', `<div class="set-fields"><div><div class="plan-name">The Guys</div><div class="hint">Every feature · ${STATE.profiles.length} people</div></div></div>`)
@@ -12249,6 +12457,8 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   if (AUTH.status === 'needsPassword') { app.innerHTML = renderSetPassword(); return; }
   // AUTH.status === 'ready' from here — a real Supabase session exists.
   if (!STATE.dataLoaded) {
+    if (!MFA.checked) { if (!app.querySelector('.sk-app')) app.innerHTML = renderSkeleton(); mfaCheck(); return; }
+    if (MFA.need) { app.innerHTML = renderMfaPrompt(); return; }
     if (!app.querySelector('.sk-app')) app.innerHTML = renderSkeleton();
     if (!AUTH_DATA_LOADING) {
       AUTH_DATA_LOADING = true;
@@ -12297,6 +12507,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   else if (UI.tab==='tasks') content.innerHTML = renderTasks(profile, data);
   else if (UI.tab==='reference') content.innerHTML = renderReference(profile, data);
   else if (UI.tab==='settings') content.innerHTML = renderSettings(profile);
+  { const r = mfaReminderHtml(); if (r) content.insertAdjacentHTML('afterbegin', r); }
   if (STATE.loadErrors && STATE.loadErrors.length) content.insertAdjacentHTML('afterbegin', `<div class="card" style="border:1px solid var(--bad);background:var(--bad-soft);margin-bottom:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Some data did not load: ${esc(STATE.loadErrors.join(', '))}.</b> What you see may be incomplete. Don't re-enter anything that looks missing.</div><button class="btn small" onclick="location.reload()">Reload</button></div>`);
   if (listScroll) listScroll();
   if (UI.tab==='dashboard' || UI.tab==='adsGoogle') { const head = content.querySelector('.page-head'); if (head) { head.insertAdjacentHTML('afterend', renderFreshness()); loadFreshness(); } }
