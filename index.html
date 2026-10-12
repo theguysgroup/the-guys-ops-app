@@ -4553,7 +4553,7 @@ function catalogObject(section){ return { ...(((STATE.data && STATE.data.setting
 function brandName(){ return (catalogObject('branding').appName || '').trim() || 'The Guys'; }
 function applyBranding(){
   const b = catalogObject('branding');
-  try { document.title = (b.appName || '').trim() ? `${b.appName.trim()} · OPS` : 'The Guys Service Group'; } catch (e) {}
+  try { document.title = (b.appName || '').trim() || 'The Guys Service Group'; } catch (e) {}
   let st = document.getElementById('brand-css');
   const c = /^#[0-9a-f]{6}$/i.test(b.color || '') ? b.color : null;
   if (!c) { if (st) st.remove(); }
