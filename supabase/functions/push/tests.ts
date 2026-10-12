@@ -10,13 +10,14 @@ function fakeDb(seed: Record<string, any[]> = {}) {
     const b: any = {
       select() { return b; }, insert(p: any) { op = "insert"; payload = p; return b; }, delete() { op = "delete"; return b; },
       eq(k: string, v: any) { filters.push((r) => r[k] === v); return b; },
+      gte(k: string, v: any) { filters.push((r) => r[k] >= v); return b; },
       in(k: string, list: any[]) { filters.push((r) => list.includes(r[k])); return b; },
       limit(n: number) { lim = n; return b; }, single() { single = true; return b; },
       then(res: any, rej: any) { return Promise.resolve(run()).then(res, rej); },
     };
     function run() {
       const m = () => rows().filter((r) => filters.every((f) => f(r)));
-      if (op === "insert") { if (table === "app_keys" && rows().some((r) => r.name === payload.name)) return { data: null, error: { message: "duplicate" } }; rows().push({ ...payload }); return { data: null, error: null }; }
+      if (op === "insert") { if ((table === "app_keys" && rows().some((r) => r.name === payload.name)) || (table === "push_sent" && rows().some((r) => r.key === payload.key))) return { data: null, error: { message: "duplicate" } }; rows().push({ ...payload }); return { data: null, error: null }; }
       if (op === "delete") { const gone = m(); T[table] = rows().filter((r) => !gone.includes(r)); return { data: gone, error: null }; }
       const out = m().slice(0, lim).map((r) => ({ ...r }));
       return { data: single ? out[0] || null : out, error: null };
@@ -83,6 +84,39 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   const st = await handle(db, { step: "selftest" }, OFEK);
   eq([st.status, st.body.ok, st.body.method], [200, true, "POST"], "selftest: builds a signed, encrypted message without sending it");
   eq((await handle(db, { step: "nope" }, OFEK)).status, 400, "unknown step");
+
+  // scan: the news switched on in Settings → Notifications, each sent once
+  eq([sydParts(Date.parse("2026-10-12T03:30:00Z")).day, sydParts(Date.parse("2026-10-12T03:30:00Z")).hour, shiftDay("2026-10-01", -7)], ["2026-10-12", 14, "2026-09-24"], "scan helpers: Sydney time (AEDT) and day shifts");
+  const NOW = Date.parse("2026-10-12T03:30:00Z");   // Monday 12 Oct, 14:30 Sydney
+  const sdb = fakeDb({
+    profiles: [OFEK, NOAM, GUY, { id: "u-ron", role: "va", full_name: "Ron" }],
+    push_subscriptions: [
+      { id: "p1", user_id: "u-ofek", endpoint: "https://push/ofek", p256dh: "k", auth: "a" },
+      { id: "p2", user_id: "u-ron", endpoint: "https://push/ron", p256dh: "k", auth: "a" },
+    ],
+    settings: [{ id: 1, catalog: {} }],
+    contacts: [
+      { id: "c1", full_name: "Sam New", division: "Aircon", source: "Google Ads", status: "New", created_at: "2026-10-12", messages: [{ at: "2026-10-12T03:00:00Z" }], tags: [] },   // 30 min ago, untouched
+      { id: "c2", full_name: "Old Lead", division: "Aircon", source: "Meta Ads", status: "New", created_at: "2026-10-11", messages: [{ at: "2026-10-11T01:00:00Z" }], tags: [] },  // a day ago: not news
+      { id: "c3", full_name: "Test Person", division: "Other", source: "Organic", status: "New", created_at: "2026-10-12", messages: [{ at: "2026-10-12T03:20:00Z" }], tags: ["Test"] },
+      { id: "c4", full_name: "Called Already", division: "Chimney", source: "Organic", status: "Chasing", created_at: "2026-10-12", messages: [{ at: "2026-10-12T02:50:00Z" }], tags: [] },
+    ],
+    calls: [{ id: "k1", from_number: "+61400000000", missed: true, started_at: "2026-10-12T03:10:00Z", division: "Aircon" }],
+    jobs: [{ id: "j1", customer_name: "Jo", amount: 450, date: "2026-10-05", payment_status: "Unpaid" }, { id: "j2", customer_name: "Older", amount: 300, date: "2026-10-01", payment_status: "Unpaid" }],
+    employees: [{ id: "e1", name: "Guy", status: "Active", documents: { license: { expiry: "2026-10-30" }, passport: { expiry: "2030-01-01" } } }],
+    push_sent: [],
+  });
+  sent.length = 0;
+  eq((await scan(sdb, NOW)).off, true, "scan: everything switched off = nothing happens");
+  sdb.T.settings[0].catalog = { notify: { newLead: { on: true, office: true }, leadWaiting: { on: true }, missedCall: { on: true }, unpaid: { on: true }, docExpiry: { on: true } } };
+  const r1 = await scan(sdb, NOW);
+  const got = sent.map((x) => `${x.to.replace("https://push/", "")}:${x.msg.title}`).sort();
+  eq(got, ["ofek:Guy's driver licence expires soon", "ofek:Missed call", "ofek:New lead: Called Already", "ofek:New lead: Sam New", "ofek:Unpaid for a week: Jo", "ofek:Waiting 15+ minutes: Sam New", "ron:New lead: Called Already", "ron:New lead: Sam New"],
+    "scan: new leads (to the office too, as chosen), a lead untouched 15+ minutes, a missed call, a job turning 7 days unpaid, a document expiring; not a day-old lead, not a test, not a lead someone is chasing, not an older unpaid job");
+  sent.length = 0;
+  eq([(await scan(sdb, NOW + 60000)).busy, sent.length], [true, 0], "scan: a second call in the same window does nothing");
+  const r3 = await scan(sdb, NOW + 9 * 60000);
+  eq([r3.sent, r3.skipped > 0, sent.length], [0, true, 0], "scan: the next window sends nothing again (each piece of news once)");
 
   console.log(`push: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);

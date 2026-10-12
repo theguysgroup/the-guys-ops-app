@@ -12,6 +12,11 @@
 //   test     → the caller's own devices get a test notification (owners and managers).
 //   selftest → builds one encrypted, signed message for a made-up device without sending it, to prove the sending
 //              code works here (owners and managers).
+//   scan     → (every 10 minutes, from pg_cron; added 12 Oct) the news switched on in Settings → Notifications
+//              (settings.catalog.notify), each sent once: a new lead, a new lead still untouched after 15 minutes, a missed
+//              call, a job that has just turned 7 days unpaid, an employee document expiring within 30 days. To the owners,
+//              and to the office (VA and managers) when chosen. Anyone may call it: it only ever sends what push_sent hasn't
+//              recorded yet, and does nothing while everything is switched off.
 // A device that the phone's push service says is gone (404 / 410) is removed.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -87,12 +92,86 @@ export async function sendTo(sb: any, userIds: string[], payload: Record<string,
 }
 
 const isOffice = (me: { role?: string } | null) => !!me && (me.role === "owner" || me.role === "manager");
+
+// ── scan: news for the phones (Settings → Notifications) ──
+export const NOTIFY_KINDS = ["newLead", "leadWaiting", "missedCall", "unpaid", "docExpiry"];
+const DOC_LABEL: Record<string, string> = { license: "driver licence", passport: "passport", visa: "visa", heights: "working-at-heights ticket", arc: "refrigerant licence", insurance: "public liability insurance" };
+export function sydParts(ms: number) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  return { day: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) % 24, minute: Number(p.minute) };
+}
+export function shiftDay(day: string, n: number) { const [y, m, d] = day.split("-").map(Number); const t = new Date(Date.UTC(y, m - 1, d + n)); return t.toISOString().slice(0, 10); }
+const TEST_TAG = (tags: unknown) => Array.isArray(tags) && tags.some((t) => String(t).toLowerCase() === "test");
+// deno-lint-ignore no-explicit-any
+const arrivedAt = (c: any) => c.reopened_at || (Array.isArray(c.messages) && c.messages[0] && c.messages[0].at) || null;
+// deno-lint-ignore no-explicit-any
+export async function scan(sb: any, nowMs: number) {
+  const { data: st } = await sb.from("settings").select("catalog").eq("id", 1).single();
+  const N = (st && st.catalog && st.catalog.notify) || {};
+  const on = (k: string) => !!(N[k] && N[k].on);
+  if (!NOTIFY_KINDS.some(on)) return { ok: true, off: true, sent: 0 };
+  // one scan at a time: the first call in each 8-minute window claims it
+  const { error: busy } = await sb.from("push_sent").insert({ key: `scan:${Math.floor(nowMs / (8 * 60000))}` });
+  if (busy) return { ok: true, busy: true, sent: 0 };
+  const now = sydParts(nowMs), today = now.day;
+  // deno-lint-ignore no-explicit-any
+  const events: { key: string; kind: string; payload: any }[] = [];
+  if (on("newLead") || on("leadWaiting")) {
+    const { data: leads } = await sb.from("contacts").select("id, full_name, division, source, status, created_at, contacted_at, last_read_at, tags, messages, reopened_at").gte("created_at", shiftDay(today, -1));
+    for (const c of leads || []) {
+      const at = arrivedAt(c); if (!at || TEST_TAG(c.tags)) continue;
+      const atMs = Date.parse(at), age = nowMs - atMs;
+      if (!(age >= 0 && age < 6 * 3600e3)) continue;   // only what came in in the last 6 hours, never a backlog
+      const what = [c.division, c.source].filter(Boolean).join(" · ");
+      if (on("newLead")) events.push({ key: `lead:${c.id}:${at}`, kind: "newLead", payload: { title: `New lead: ${c.full_name || "no name"}`, body: what || "A new enquiry came in.", url: `${APP_URL}?tab=crm`, tag: `lead-${c.id}` } });
+      const touched = (c.status && c.status !== "New") || (c.contacted_at && Date.parse(c.contacted_at) >= atMs) || (c.last_read_at && Date.parse(c.last_read_at) >= atMs);
+      if (on("leadWaiting") && !touched && age >= 15 * 60000 && now.hour >= 8 && now.hour < 20) events.push({ key: `waiting:${c.id}:${at}`, kind: "leadWaiting", payload: { title: `Waiting 15+ minutes: ${c.full_name || "a new lead"}`, body: `Nobody has picked up this ${c.division || ""} lead yet.`.replace("  ", " "), url: `${APP_URL}?tab=crm`, tag: `waiting-${c.id}` } });
+    }
+  }
+  if (on("missedCall")) {
+    const { data: calls } = await sb.from("calls").select("id, from_number, missed, started_at, division").eq("missed", true).gte("started_at", new Date(nowMs - 6 * 3600e3).toISOString());
+    for (const c of calls || []) events.push({ key: `call:${c.id}`, kind: "missedCall", payload: { title: "Missed call", body: `${c.from_number || "A caller"}${c.division ? " · " + c.division : ""}. Call them back.`, url: `${APP_URL}?tab=myDay`, tag: `call-${c.id}` } });
+  }
+  if (on("unpaid")) {
+    const { data: jobs } = await sb.from("jobs").select("id, customer_name, amount, date, payment_status").eq("payment_status", "Unpaid").eq("date", shiftDay(today, -7));
+    for (const j of jobs || []) events.push({ key: `unpaid:${j.id}`, kind: "unpaid", payload: { title: `Unpaid for a week: ${j.customer_name || "a job"}`, body: `$${Number(j.amount || 0).toLocaleString("en-AU")} from ${j.date}. Time to chase it.`, url: `${APP_URL}?tab=outstanding`, tag: `unpaid-${j.id}` } });
+  }
+  if (on("docExpiry")) {
+    const { data: emps } = await sb.from("employees").select("id, name, status, documents");
+    for (const e of emps || []) {
+      if (e.status !== "Active") continue;
+      for (const [kind, d] of Object.entries(e.documents || {})) {
+        // deno-lint-ignore no-explicit-any
+        const exp = (d as any) && (d as any).expiry; if (!exp || !/^\d{4}-\d{2}-\d{2}$/.test(exp)) continue;
+        if (exp < today || exp > shiftDay(today, 30)) continue;
+        events.push({ key: `doc:${e.id}:${kind}:${exp}`, kind: "docExpiry", payload: { title: `${e.name}'s ${DOC_LABEL[kind] || kind} expires soon`, body: `On ${exp}. Ask for the new one.`, url: `${APP_URL}?tab=reference`, tag: `doc-${e.id}-${kind}` } });
+      }
+    }
+  }
+  if (!events.length) return { ok: true, sent: 0 };
+  const { data: people } = await sb.from("profiles").select("id, role");
+  // deno-lint-ignore no-explicit-any
+  const owners = (people || []).filter((p: any) => p.role === "owner").map((p: any) => p.id);
+  // deno-lint-ignore no-explicit-any
+  const office = (people || []).filter((p: any) => p.role === "va" || p.role === "manager").map((p: any) => p.id);
+  const keys = await vapidKeys(sb);
+  let sent = 0, skipped = 0;
+  for (const ev of events.slice(0, 30)) {
+    const { error: dup } = await sb.from("push_sent").insert({ key: ev.key });   // claimed once, ever
+    if (dup) { skipped++; continue; }
+    const to = [...owners, ...(N[ev.kind] && N[ev.kind].office ? office : [])];
+    const r = await sendTo(sb, to, ev.payload, keys);
+    sent += r.sent;
+  }
+  return { ok: true, events: events.length, skipped, sent };
+}
 const isDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 // deno-lint-ignore no-explicit-any
 export async function handle(sb: any, body: any, me: any) {
   const step = String(body?.step || "");
   if (step === "key") { const k = await vapidKeys(sb); return { status: 200, body: { ok: true, publicKey: k.publicKey } }; }
+  if (step === "scan") return { status: 200, body: await scan(sb, Date.now()) };
   if (!me) return { status: 401, body: { ok: false, reason: "unauthorized" } };
 
   if (step === "test") {
@@ -153,7 +232,7 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     try { body = await req.json(); } catch { return json({ error: "Could not parse request body" }, 400); }
     try {
       const sb = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
-      const me = body.step === "key" ? null : await caller(sb, req);
+      const me = body.step === "key" || body.step === "scan" ? null : await caller(sb, req);
       const r = await handle(sb, body, me);
       return json(r.body, r.status);
     } catch (e) {
