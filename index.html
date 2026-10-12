@@ -11908,6 +11908,8 @@ function tplPreviewHtml(m, values){
   const text = fillTemplate(values[m.fields[0].key], TPL_EXAMPLE), sp = smsParts(text);
   return `<div class="tpl-bubble">${esc(text)}</div><div class="tpl-count${sp.parts > 2 || sp.unicode ? ' warn' : ''}">${sp.chars} characters · ${sp.parts===1 ? '1 text' : sp.parts + ' texts'}${sp.unicode ? ' · a curly quote, emoji or special character makes each text hold 70 characters instead of 160' : ''}</div>`;
 }
+// "Back to the original" shows as soon as the words differ from the approved ones.
+function tplActionsHtml(m, values){ return `<button class="btn small primary" onclick="saveTemplateEdit()">Save</button><button class="btn small ghost" onclick="cancelTemplateEdit()">Cancel</button>${m.fields.some(f => values[f.key]!==f.text) ? '<button class="btn small ghost" onclick="templateBackToOriginal()">Back to the original</button>' : ''}`; }
 function tplProblemsHtml(m, values){ const p = templateProblems(m, values); return p.length ? `<div class="tpl-problems">${p.map(x => `<div>${ico('alert', 14)}<span>${esc(x)}</span></div>`).join('')}</div>` : ''; }
 function renderTemplatesPage(){
   const saved = ((STATE.data.settings || {}).catalog || {}).templates || {};
@@ -11916,16 +11918,16 @@ function renderTemplatesPage(){
     const open = !!(TPL_EDIT && TPL_EDIT.id===m.id);
     const head = `<div class="tpl-head"><b>${esc(m.name)}</b><span class="pill neutral">${esc(m.channel)}</span>${edited(m) ? '<span class="pill tpl-edited">Edited</span>' : ''}<span class="tpl-head-btns">${open ? '' : `<button class="btn small ghost" onclick="startTemplateEdit('${m.id}')">Edit</button>`}</span></div><div class="tpl-when">${esc(m.when)}</div>`;
     if (!open) return `<div class="tpl-item">${head}${m.fields.map(f => `${f.label ? `<div class="tpl-label">${esc(f.label)}</div>` : ''}<div class="tpl-text">${tplHighlight(msgTemplateText(f.key))}</div>`).join('')}</div>`;
-    const V = TPL_EDIT.values, changed = m.fields.some(f => V[f.key]!==f.text);
+    const V = TPL_EDIT.values;
     return `<div class="tpl-item editing">${head}
       ${m.vars.length ? `<div class="tpl-chips"><span>Blanks</span>${m.vars.map(([k, hint]) => `<button type="button" class="tpl-chip" title="${esc(hint)}" onmousedown="event.preventDefault()" onclick="insertTemplateVar('${k}')">{${k}}</button>`).join('')}</div>` : '<div class="tpl-when">This message has no blanks.</div>'}
       ${m.fields.map(f => `<label class="tpl-field">${f.label ? `<span>${esc(f.label)}</span>` : ''}${f.line
         ? `<input class="set-input" id="tpl-f-${f.key}" value="${esc(V[f.key])}" onfocus="TPL_EDIT.focus='${f.key}'" oninput="templateEditInput('${f.key}', this.value)">`
-        : `<textarea id="tpl-f-${f.key}" rows="${f.rows || 4}" onfocus="TPL_EDIT.focus='${f.key}'" oninput="templateEditInput('${f.key}', this.value)">${esc(V[f.key])}</textarea>`}</label>`).join('')}
+        : `<textarea id="tpl-f-${f.key}" rows="${f.rows || 5}" onfocus="TPL_EDIT.focus='${f.key}'" oninput="templateEditInput('${f.key}', this.value)">${esc(V[f.key])}</textarea>`}</label>`).join('')}
       <div class="tpl-preview-label">What the customer gets</div>
       <div id="tpl-preview">${tplPreviewHtml(m, V)}</div>
       <div id="tpl-problems">${tplProblemsHtml(m, V)}</div>
-      <div class="tpl-actions"><button class="btn small primary" onclick="saveTemplateEdit()">Save</button><button class="btn small ghost" onclick="cancelTemplateEdit()">Cancel</button>${changed ? '<button class="btn small ghost" onclick="templateBackToOriginal()">Back to the original</button>' : ''}</div>
+      <div class="tpl-actions" id="tpl-actions">${tplActionsHtml(m, V)}</div>
     </div>`;
   };
   return `<div class="set-note">${ico('alert', 16)}<span>Customers get exactly these words. The blue parts fill in by themselves. Edit one to see what the customer gets before you save it; "Back to the original" brings back the approved words.</span></div>`
@@ -11941,9 +11943,10 @@ function startTemplateEdit(id){
 function templateEditInput(key, value){
   if (!TPL_EDIT) return;
   TPL_EDIT.values[key] = value;
-  const m = MSG_TEMPLATES.find(x => x.id===TPL_EDIT.id), p = document.getElementById('tpl-preview'), q = document.getElementById('tpl-problems');
+  const m = MSG_TEMPLATES.find(x => x.id===TPL_EDIT.id), p = document.getElementById('tpl-preview'), q = document.getElementById('tpl-problems'), a = document.getElementById('tpl-actions');
   if (p) p.innerHTML = tplPreviewHtml(m, TPL_EDIT.values);
   if (q) q.innerHTML = tplProblemsHtml(m, TPL_EDIT.values);
+  if (a) a.innerHTML = tplActionsHtml(m, TPL_EDIT.values);
 }
 function insertTemplateVar(k){
   if (!TPL_EDIT) return;
