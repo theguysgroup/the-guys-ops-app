@@ -331,6 +331,8 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 [data-tip]:hover > .bar, .wf-row[data-tip]:hover .wf-bar, .meter[data-tip]:hover > span, [data-tip]:hover .grow-y, [data-tip]:hover .grow-x { filter: brightness(1.18) saturate(1.1); }
 /* Dark or light, one click (sits beside the search box) */
 .ico { flex: none; vertical-align: -3px; }
+input.invalid { border-color: var(--bad) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 18%, transparent) !important; }
+.field-check { font-size: 11.5px; color: var(--bad); margin-top: 4px; animation: fadeInSoft .18s ease; }
 .fresh-strip { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: -12px 0 18px; font-size: 11.5px; color: var(--ink-soft); }
 .fresh-chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .fresh-chip i { width: 7px; height: 7px; border-radius: 99px; background: var(--ink-faint); flex: none; }
@@ -2597,6 +2599,38 @@ function emptyState(title, sub, icon, action){
   const ic = icon ? (ICONS[icon] ? ico(icon, 22) : esc(icon)) : '';
   return `<div class="empty">${ic ? `<div class="ic">${ic}</div>` : ''}<b>${esc(title)}</b>${sub ? `<div>${esc(sub)}</div>` : ''}${action ? `<button type="button" class="btn small" style="margin-top:14px" onclick="${action.onclick}">${action.icon ? ico(action.icon) + ' ' : ''}${esc(action.label)}</button>` : ''}</div>`;
 }
+/* ── Phone and email checked while typing (Ofek 12 Oct, suggestion 9): any input with data-check="phone" or "email"
+   shows a short note under it when what's typed can't be right. It doesn't stop a save (an overseas number is fine);
+   it only says so, once the field has been left or enough has been typed. ── */
+function checkPhone(v){
+  const d = String(v||'').replace(/[\s\-().]/g, '');
+  if (!d) return '';
+  if (/^(\+?61|0)4\d{8}$/.test(d) || /^(\+?61|0)[2378]\d{8}$/.test(d) || /^1[38]00\d{6}$/.test(d) || /^13\d{4}$/.test(d)) return '';
+  if (/^\+(?!61)\d{7,15}$/.test(d)) return '';   // an overseas number in full international form
+  if (/[^\d+]/.test(d)) return 'Only digits, spaces and + belong in a phone number';
+  const digits = d.replace(/\D/g, '');
+  if (/^0?4/.test(digits) && digits.length !== (digits.startsWith('0') ? 10 : 9)) return `An Australian mobile has 10 digits (04xx xxx xxx). This one has ${digits.length}.`;
+  return 'Check the number: a mobile is 04xx xxx xxx, a landline 02 xxxx xxxx';
+}
+function checkEmail(v){
+  const t = String(v||'').trim();
+  if (!t) return '';
+  if (/\s/.test(t)) return 'An email address has no spaces';
+  if (!/^[^@]+@[^@]+\.[a-z]{2,}$/i.test(t)) return 'Check the email: it should look like name@example.com';
+  return '';
+}
+function runFieldCheck(el, leaving){
+  const kind = el.dataset.check, v = el.value;
+  const msg = kind==='phone' ? checkPhone(v) : kind==='email' ? checkEmail(v) : '';
+  const show = msg && (leaving || el.dataset.checked==='1' || String(v).replace(/\D/g, '').length >= (kind==='phone' ? 11 : 99));
+  if (leaving && String(v).trim()) el.dataset.checked = '1';
+  let note = el.nextElementSibling && el.nextElementSibling.classList.contains('field-check') ? el.nextElementSibling : null;
+  el.classList.toggle('invalid', !!show);
+  if (show) { if (!note) { note = document.createElement('div'); note.className = 'field-check'; el.insertAdjacentElement('afterend', note); } note.textContent = msg; }
+  else if (note) note.remove();
+}
+document.addEventListener('input', e => { const el = e.target; if (el && el.dataset && el.dataset.check) runFieldCheck(el, false); });
+document.addEventListener('focusout', e => { const el = e.target; if (el && el.dataset && el.dataset.check) runFieldCheck(el, true); });
 function clearCrmFilters(){ Object.assign(UI.crm, { source:'all', division:'all', status:'all', tag:'all', subDivision:'all', subSource:'all', search:'', page:1 }); render(); }
 /* ── generic table pagination — shared by any long list (Jobs, CRM table, Outstanding, …) so a growing
    table never becomes an unbounded scroll. `ns` is the UI.<namespace> object holding {page, pageSize}
@@ -5526,8 +5560,8 @@ function openLeadModal(contactId){
         <div id="lead-tab-details" style="display:${defaultTab==='details'?'':'none'};margin-top:${c?'0':'14px'}">
           <div class="grid-2">
             <div class="field"><label>Full name</label><input id="lm-name" value="${c?esc(c.fullName):''}"></div>
-            <div class="field"><label>Phone</label><input id="lm-phone" value="${c?esc(c.phone||''):''}"></div>
-            <div class="field"><label>Email</label><input id="lm-email" value="${c?esc(c.email||''):''}"></div>
+            <div class="field"><label>Phone</label><input id="lm-phone" type="tel" data-check="phone" value="${c?esc(c.phone||''):''}"></div>
+            <div class="field"><label>Email</label><input id="lm-email" type="email" data-check="email" value="${c?esc(c.email||''):''}"></div>
             <div class="field"><label>Postcode</label><input id="lm-postcode" value="${c?esc(c.postcode||''):''}"></div>
           </div>
           <div class="field" style="margin-top:11px"><label>Notes</label>${c ? leadNotesField(c, 'modal') : `<textarea rows="3" id="lm-notes" placeholder="Anything to remember about this customer: gate code, dog, best time to call…"></textarea>`}</div>
@@ -10053,8 +10087,8 @@ function renderEmployeePanel(e, data, canEdit){
     <div class="f">
       ${field('Status', statusSelect('empStatus', e.id, e.status||'Active', EMPLOYEE_STATUSES, v => v==='Active' ? 'good' : 'neutral', v => v, ro))}
       ${field('Employment type', sel('employmentType', e.employmentType, EMPLOYMENT_TYPES))}
-      ${field('Phone', input('phone', e.phone, 'type="tel"') + (e.phone ? `<a class="job-sub xlink" href="tel:${esc(String(e.phone).replace(/[^\d+]/g, ''))}">Call</a>` : ''))}
-      ${field('Email', input('email', e.email, 'type="email"'))}
+      ${field('Phone', input('phone', e.phone, 'type="tel" data-check="phone"') + (e.phone ? `<a class="job-sub xlink" href="tel:${esc(String(e.phone).replace(/[^\d+]/g, ''))}">Call</a>` : ''))}
+      ${field('Email', input('email', e.email, 'type="email" data-check="email"'))}
       ${field('Address', input('address', e.address), true)}
       ${field('Start date', ro ? `<div class="job-ro">${fmtDateYear(e.startDate)}</div>` : `<input type="date" value="${esc(e.startDate||'')}" onchange="setEmployeeField('${e.id}','startDate',this.value)">`)}
       ${field('End date', ro ? `<div class="job-ro">${fmtDateYear(e.endDate)}</div>` : `<input type="date" value="${esc(e.endDate||'')}" onchange="setEmployeeField('${e.id}','endDate',this.value)">`)}
@@ -10062,7 +10096,7 @@ function renderEmployeePanel(e, data, canEdit){
     <div class="grp">Emergency contact</div>
     <div class="f">
       ${field('Name', input('emergencyName', e.emergencyName, 'placeholder="Who to call"'))}
-      ${field('Phone', input('emergencyPhone', e.emergencyPhone, 'type="tel"'))}
+      ${field('Phone', input('emergencyPhone', e.emergencyPhone, 'type="tel" data-check="phone"'))}
     </div>
     <div class="grp">Pay</div>
     <div class="f">
@@ -10177,8 +10211,8 @@ function openEmployeeModal(empId){
           </div>
           <div class="field"><label>Status</label><select id="em-status">${EMPLOYEE_STATUSES.map(s=>`<option value="${s}" ${(emp?.status||'Active')===s?'selected':''}>${s}</option>`).join('')}</select></div>
           <div class="field"><label>Employment Type</label><select id="em-emptype">${EMPLOYMENT_TYPES.map(s=>`<option value="${s}" ${emp?.employmentType===s?'selected':''}>${s}</option>`).join('')}</select><div class="hint">Independent Contractor = pays own expenses (commission on the full amount before GST) · Hourly = paid per hour on the Payroll board</div></div>
-          <div class="field"><label>Phone</label><input id="em-phone" value="${esc(emp?.phone||'')}"></div>
-          <div class="field"><label>Email</label><input id="em-email" value="${esc(emp?.email||'')}"></div>
+          <div class="field"><label>Phone</label><input id="em-phone" type="tel" data-check="phone" value="${esc(emp?.phone||'')}"></div>
+          <div class="field"><label>Email</label><input id="em-email" type="email" data-check="email" value="${esc(emp?.email||'')}"></div>
           <div class="field"><label>Address</label><input id="em-address" value="${esc(emp?.address||'')}"></div>
           <div class="field"><label>ABN</label><input id="em-abn" value="${esc(emp?.abn||'')}"></div>
           <div class="field"><label>Start Date</label><input type="date" id="em-startdate" value="${emp?.startDate||''}"></div>
@@ -10332,8 +10366,8 @@ function openSupplierModal(supplierId){
           <div class="field"><label>Name</label><input id="sp-name" value="${esc(s?.name||'')}"></div>
           <div class="field"><label>Supply Type</label><input id="sp-supplytype" value="${esc(s?.supplyType||'')}" placeholder="e.g. Equipment & Parts"></div>
           <div class="field"><label>Contact Person</label><input id="sp-contactperson" value="${esc(s?.contactPerson||'')}"></div>
-          <div class="field"><label>Phone</label><input id="sp-phone" value="${esc(s?.phone||'')}"></div>
-          <div class="field"><label>Email</label><input id="sp-email" value="${esc(s?.email||'')}"></div>
+          <div class="field"><label>Phone</label><input id="sp-phone" type="tel" data-check="phone" value="${esc(s?.phone||'')}"></div>
+          <div class="field"><label>Email</label><input id="sp-email" type="email" data-check="email" value="${esc(s?.email||'')}"></div>
           <div class="field"><label>Payment Terms</label><input id="sp-paymentterms" value="${esc(s?.paymentTerms||'')}" placeholder="e.g. Net 30"></div>
         </div>
         <div class="field" style="margin-top:11px"><label>Address / Website</label><input id="sp-addresswebsite" value="${esc(s?.addressWebsite||'')}"></div>

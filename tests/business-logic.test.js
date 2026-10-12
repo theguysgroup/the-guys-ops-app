@@ -68,7 +68,7 @@ const DECLS = [
   // Google Ads: real leads vs Google's count, tracking problems (9 Oct)
   'adsConvKind', 'adsConvShortName', 'adsTracking',
   // The nightly lead check: info@ emails vs the app (9 Oct)
-  'parseShownNumber', 'formatShownNumber',
+  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail',
   'LEAD_CHECK_DAYS', 'leadPhoneKey', 'leadCheckOpen', 'leadCheckLatest', 'leadDivisionFromSubject', 'adsEmailCheck',
 ];
 
@@ -973,6 +973,14 @@ function testCountingNumbers(sb){
   assertEqual([f(0, '$21,355.63'), f(1234.5, '$21,355.63'), f(999.4, '$21,355.63'), f(6.66, '$13.6k'), f(12.4, '53 leads')], ['$0.00', '$1,234.50', '$999.40', '$6.7k', '12 leads'], 'formatShownNumber: keeps the $, decimals, thousands commas and the words around it');
 }
 
+function testFieldChecks(sb){
+  console.log('\nPhone and email checked while typing');
+  const ok = v => sb.checkPhone(v)==='';
+  assertEqual(['0412 345 678', '+61 412 345 678', '61412345678', '02 9876 5432', '1300 123 456', '131 234', '+972 50 123 4567', ''].map(ok), [true, true, true, true, true, true, true, true], 'checkPhone: mobiles, landlines, 1300/13, overseas in full form, empty');
+  assertEqual(['0412 345 67', '0412345678 9', '04a12', '9876 5432'].map(ok), [false, false, false, false], 'checkPhone: a digit short or extra, letters, no area code');
+  assertEqual(['ofek@theguys.com.au', 'a@b.co', '', 'name@gmail', 'bad email@x.com'].map(v => sb.checkEmail(v)===''), [true, true, true, false, false], 'checkEmail: real addresses pass, a missing domain or a space does not');
+}
+
 function testEmployeeCard(sb){
   console.log('\nThe employee card: ABN check, document expiry, missing details, reminders');
   assertEqual(['51 824 753 556', '51824753556', '51824753557', '1234', ''].map(sb.abnValid), [true, true, false, false, false], 'abnValid: the ATO check (a one-digit typo fails)');
@@ -1019,6 +1027,7 @@ testAdsTracking(loadSandbox());
 testLeadEmailCheck(loadSandbox());
 testEmployeeCard(loadSandbox());
 testCountingNumbers(loadSandbox());
+testFieldChecks(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
