@@ -10479,15 +10479,22 @@ function countNumbers(root, prev){
 }
 // Runs one number from `from` to what the element shows now (fast, then settling).
 function tweenNumber(node, p, from, dur, token){
-  const to = p.value, t0 = performance.now(), ease = t => 1 - Math.pow(1 - t, 3);
+  if (document.hidden) return;   // a tab in the background doesn't animate (the browser pauses it): keep the real number
+  const to = p.value, final = node.nodeValue, ease = t => 1 - Math.pow(1 - t, 3);
+  let t0 = null, done = false;
   node.nodeValue = formatShownNumber(from, p);
+  const finish = () => { if (!done) { done = true; node.nodeValue = final; } };
   const step = now => {
-    if (token !== MOTION.token || !node.isConnected) { node.nodeValue = formatShownNumber(to, p); return; }
+    if (done) return;
+    if (token !== MOTION.token || !node.isConnected) { finish(); return; }
+    if (t0===null) t0 = now;
     const k = Math.min(1, (now - t0) / dur);
+    if (k >= 1) { finish(); return; }
     node.nodeValue = formatShownNumber(from + (to - from) * ease(k), p);
-    if (k < 1) requestAnimationFrame(step);
+    requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
+  setTimeout(finish, dur + 400);   // never left showing a number in between, whatever the browser does with frames
 }
 // fromZero: every number counts up from 0 (a page entered); otherwise only the ones that differ from `before` run.
 function runNumbers(root, before, fromZero){
