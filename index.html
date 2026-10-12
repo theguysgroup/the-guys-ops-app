@@ -4803,7 +4803,7 @@ function pipeDragUp(){
   d.ghost.classList.remove('lifted'); d.ghost.classList.add('landing');
   d.ghost.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
   const id = d.id;
-  setTimeout(() => { pipeDragCleanup(); if (moving) moveLead(id, status); }, motionReduced() ? 0 : 230);
+  setTimeout(() => { pipeDragCleanup(); if (moving) { MOTION.noFlip = id; moveLead(id, status); } }, motionReduced() ? 0 : 230);
 }
 function pipeDragCancel(){ if (PIPE_DRAG && PIPE_DRAG.dragging) PIPE_DRAG_ENDED = Date.now(); pipeDragCleanup(); }
 function pipeDragCleanup(){
@@ -10510,7 +10510,7 @@ function renderNoAccess(profile){
    blocks one after another, numbers counting up from 0, bars growing, lines drawing) runs when the page is entered; when
    only its period changes the charts grow again and the numbers run to their new values; otherwise only a number that
    changed runs, from what it showed to what it shows now. */
-const MOTION = { page: null, data: null, token: 0 };
+const MOTION = { page: null, data: null, token: 0, noFlip: null };
 function motionReduced(){ try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
 function motionPageKey(){
   const sub = { dashboard: UI.dashboard && UI.dashboard.view, crm: UI.crm && UI.crm.view, payroll: UI.payroll && `${UI.payroll.view}:${UI.payroll.viewAs||''}`,
@@ -10587,7 +10587,7 @@ function staggerPage(root){
   root.querySelectorAll('.table-wrap tbody').forEach(tb => [...tb.rows].slice(0, 14).forEach((tr, k) => { tr.classList.add('enter-row'); tr.style.setProperty('--d', (140 + k * 26) + 'ms'); }));
 }
 function motionCapture(){ const c = document.getElementById('content'); return c ? countNumbers(c) : null; }
-function motionAfterRender(before){
+function motionAfterRender(before, flipBefore){
   const content = document.getElementById('content'); if (!content) return;
   const page = motionPageKey(), data = motionDataKey();
   const entering = page!==MOTION.page, periodChanged = !entering && data!==MOTION.data;
@@ -10595,24 +10595,46 @@ function motionAfterRender(before){
   if (motionReduced()) return;
   if (entering || periodChanged) { content.classList.add('entering'); setTimeout(() => content.classList.remove('entering'), 1900); }
   if (entering) staggerPage(content);
+  else flipPlay(content, flipBefore, MOTION.noFlip);
+  MOTION.noFlip = null;
   runNumbers(content, before, entering);
 }
 // A list redrawn in place (search, filters) moves instead of jumping: rows that stay slide to their new place and new
 // ones fade in. Items carry data-key; only the first 80 are animated.
+// Where an item is: inside its own scrolling list when it has one (the inbox list, a pipeline column, a table), so a
+// list that comes back scrolled to the top doesn't make every row slide; on the page otherwise.
+const FLIP_SCROLLERS = '.crm-inbox-list, .pipe-body, .table-wrap';
+function flipPos(el){
+  const r = el.getBoundingClientRect(), sc = el.closest(FLIP_SCROLLERS);
+  if (!sc) return { box: 'page', x: r.left + window.scrollX, y: r.top + window.scrollY, vx: r.left, vy: r.top };
+  const b = sc.getBoundingClientRect(), col = sc.closest('.pipe-col');
+  return { box: sc.className.split(' ')[0] + (col ? ':' + col.dataset.status : ''), x: r.left - b.left + sc.scrollLeft, y: r.top - b.top + sc.scrollTop, vx: r.left, vy: r.top };
+}
+function flipMeasure(root){
+  const before = new Map();
+  if (!root || motionReduced() || document.hidden) return before;
+  const all = root.querySelectorAll('[data-key]');
+  for (let i = 0; i < all.length && before.size < 120; i++) before.set(all[i].dataset.key, flipPos(all[i]));
+  return before;
+}
+function flipPlay(root, before, skipKey){
+  if (!root || !before || !before.size) return;
+  [...root.querySelectorAll('[data-key]')].slice(0, 120).forEach(el => {
+    if (!el.animate || el.dataset.key===skipKey) return;
+    const was = before.get(el.dataset.key);
+    if (was) {
+      const now = flipPos(el);
+      // same list: by its place in the list; moved to another list (a pipeline column): by where it was on screen
+      const dx = was.box===now.box ? was.x - now.x : was.vx - now.vx, dy = was.box===now.box ? was.y - now.y : was.vy - now.vy;
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.22,1,.36,1)' });
+    } else el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'ease-out' });
+  });
+}
 function flipSwap(host, html){
   if (!host) return;
-  if (motionReduced() || document.hidden) { host.innerHTML = html; return; }
-  const before = new Map();
-  host.querySelectorAll('[data-key]').forEach(el => { if (before.size < 80) before.set(el.dataset.key, el.getBoundingClientRect()); });
+  const before = flipMeasure(host);
   host.innerHTML = html;
-  [...host.querySelectorAll('[data-key]')].slice(0, 80).forEach(el => {
-    const was = before.get(el.dataset.key);
-    if (!el.animate) return;
-    if (was) {
-      const now = el.getBoundingClientRect(), dx = was.left - now.left, dy = was.top - now.top;
-      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 300, easing: 'cubic-bezier(.22,1,.36,1)' });
-    } else if (before.size) el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'ease-out' });
-  });
+  flipPlay(host, before);
 }
 // For a part of the page redrawn without a full render (e.g. the figures above the jobs table while searching).
 function motionSwap(el, html){
@@ -10728,6 +10750,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   // Every click redraws the whole screen; the menu keeps where it was scrolled to instead of jumping to the top (Ofek 6 Oct).
   const oldSide = app.querySelector('.sidebar'), sideScroll = oldSide ? oldSide.scrollTop : 0;
   const motionBefore = motionCapture();
+  const flipBefore = motionPageKey()===MOTION.page ? flipMeasure(document.getElementById('content')) : null;
   app.innerHTML = renderShell(profile, data);
   if (sideScroll) { const side = app.querySelector('.sidebar'); if (side) side.scrollTop = sideScroll; }
   const content = document.getElementById('content');
@@ -10747,7 +10770,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   else if (UI.tab==='reference') content.innerHTML = renderReference(profile, data);
   else if (UI.tab==='settings') content.innerHTML = renderSettings(profile);
   if (STATE.loadErrors && STATE.loadErrors.length) content.insertAdjacentHTML('afterbegin', `<div class="card" style="border:1px solid var(--bad);background:var(--bad-soft);margin-bottom:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Some data did not load: ${esc(STATE.loadErrors.join(', '))}.</b> What you see may be incomplete. Don't re-enter anything that looks missing.</div><button class="btn small" onclick="location.reload()">Reload</button></div>`);
-  motionAfterRender(motionBefore);
+  motionAfterRender(motionBefore, flipBefore);
 }
 
 document.addEventListener('keydown', (e) => {
