@@ -68,7 +68,7 @@ const DECLS = [
   // Google Ads: real leads vs Google's count, tracking problems (9 Oct)
   'adsConvKind', 'adsConvShortName', 'adsTracking',
   // The nightly lead check: info@ emails vs the app (9 Oct)
-  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'sameLiveRow', 'sameValue', 'LOCAL_WRITES', 'noteLocalWrite', 'settleLocalWrites',
+  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'toastKind', 'sameLiveRow', 'sameValue', 'LOCAL_WRITES', 'noteLocalWrite', 'settleLocalWrites',
   'LEAD_CHECK_DAYS', 'leadPhoneKey', 'leadCheckOpen', 'leadCheckLatest', 'leadDivisionFromSubject', 'adsEmailCheck',
 ];
 
@@ -1010,6 +1010,15 @@ function testLiveRowsAndStageMemo(sb){
   assertEqual([first, second, third, fourth], ['New', 'Chasing', 'Won', 'Lost'], 'leadStage: the remembered stage follows a new status and a new job');
 }
 
+function testToastKinds(sb){
+  console.log('\nThe kind of each message at the bottom of the screen');
+  const k = sb.toastKind;
+  assertEqual(['Note added', 'Shy Barnes → Chasing', 'Day finished. See you tomorrow!', 'Password reset email sent — check your inbox', 'Test sent to 2 devices'].map(k), ['ok', 'ok', 'ok', 'ok', 'ok'], 'toastKind: things that worked');
+  assertEqual(['Could not save lead: timeout', 'Not saved: network', 'Not sent: unknown error', 'The bonus was not saved: x', 'Reminder not deleted: x', 'Not deleted (job): x', 'Lead created, but the link to the GHL archive was not saved: x'].map(k), ['error', 'error', 'error', 'error', 'error', 'error', 'error'], 'toastKind: things that failed');
+  assertEqual(['Pick a day first', 'Hours must be between 0 and 24', 'Simon already has a job, so the lead stays Won', "They're all in Chasing already", 'Presentation mode is on, changes are not saved', 'Notifications were not allowed on this device. You can allow them in the phone settings.', 'Won is set automatically once the customer has a job in Jobs & Commissions', 'None of them has "Callback"'].map(k), ['warn', 'warn', 'warn', 'warn', 'warn', 'warn', 'warn', 'warn'], 'toastKind: things that need a look (read-only mode is not a failure)');
+  assertEqual(['New text from Simon', 'Email to a@b.co goes from info@ within a minute', 'Uploading…'].map(k), ['info', 'info', 'info'], 'toastKind: news');
+}
+
 function testEmployeeCard(sb){
   console.log('\nThe employee card: ABN check, document expiry, missing details, reminders');
   assertEqual(['51 824 753 556', '51824753556', '51824753557', '1234', ''].map(sb.abnValid), [true, true, false, false, false], 'abnValid: the ATO check (a one-digit typo fails)');
@@ -1058,6 +1067,7 @@ testEmployeeCard(loadSandbox());
 testCountingNumbers(loadSandbox());
 testFieldChecks(loadSandbox());
 testLiveRowsAndStageMemo(loadSandbox());
+testToastKinds(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
