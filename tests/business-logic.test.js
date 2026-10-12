@@ -68,7 +68,7 @@ const DECLS = [
   // Google Ads: real leads vs Google's count, tracking problems (9 Oct)
   'adsConvKind', 'adsConvShortName', 'adsTracking',
   // The nightly lead check: info@ emails vs the app (9 Oct)
-  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'toastKind', 'sameLiveRow', 'sameValue', 'LOCAL_WRITES', 'noteLocalWrite', 'settleLocalWrites',
+  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'toastKind', 'RULES', 'ACTIVE', 'DIV_LABEL', 'CATALOG', 'LEAD_STAGE_PICKABLE', 'LEAD_STATUS_COLOR', 'LEAD_STATUS_INK', 'stageColor', 'stageInk', 'replaceArr', 'divLabel', 'activeOnly', 'inkFor', 'catalogBase', 'catalogId', 'catalogList', 'catalogRules', 'applyCatalog', 'tagColor', 'sameLiveRow', 'sameValue', 'LOCAL_WRITES', 'noteLocalWrite', 'settleLocalWrites',
   'LEAD_CHECK_DAYS', 'leadPhoneKey', 'leadCheckOpen', 'leadCheckLatest', 'leadDivisionFromSubject', 'adsEmailCheck',
 ];
 
@@ -1019,6 +1019,31 @@ function testToastKinds(sb){
   assertEqual(['New text from Simon', 'Email to a@b.co goes from info@ within a minute', 'Uploading…'].map(k), ['info', 'info', 'info'], 'toastKind: news');
 }
 
+function testCatalog(sb){
+  console.log('\nThe business\'s own lists (Settings, stage 2)');
+  sb.STATE.data.jobs = []; sb.STATE.data.settings = { catalog: {} };
+  sb.applyCatalog();
+  const before = [sb.LEAD_DIVISIONS.slice(), sb.stageLabel('New'), sb.divLabel('Aircon'), sb.STAGES_NEED_DATE.slice(), sb.RULES.chaseDecideDays];
+  assertEqual(before, [['Aircon', 'Chimney', 'Pressure Washing', 'Other'], 'New lead', 'Aircon', ['Quoted', 'Follow-up'], 21], 'applyCatalog: nothing saved = the lists the app ships with');
+  sb.STATE.data.settings.catalog = {
+    services: [{ key: 'Aircon', label: 'Air conditioning', color: '#16a34a', active: true, subs: ['Split System', 'Duct System'] }, { key: 'Solar', label: 'Solar', color: '#c99a06', active: true, subs: [] }, { key: 'Other', label: 'Other', color: null, active: false, subs: [] }],
+    stages: [{ key: 'New', label: 'Fresh lead', color: '#d03b5c' }],
+    tags: [{ tag: 'Complaint', hint: 'Complained', color: '#a5473f', active: false }],
+    rules: { needDate: false, quoteIdleDays: 10, chaseDecideDays: 30 },
+  };
+  sb.applyCatalog();
+  assertEqual(sb.LEAD_DIVISIONS.slice(), ['Aircon', 'Solar', 'Other', 'Chimney', 'Pressure Washing'], 'applyCatalog: the saved order, a new service, and the services it did not mention kept at the end');
+  assertEqual([sb.divLabel('Aircon'), sb.divColor('Aircon'), sb.SUB_DIVISIONS.Aircon], ['Air conditioning', '#16a34a', ['Split System', 'Duct System']], 'applyCatalog: a service renamed and recoloured, its sub-services as saved');
+  assertEqual([sb.activeOnly(sb.LEAD_DIVISIONS, sb.ACTIVE.divisions), sb.activeOnly(sb.LEAD_DIVISIONS, sb.ACTIVE.divisions, 'Other')], [['Aircon', 'Solar', 'Chimney', 'Pressure Washing'], ['Aircon', 'Solar', 'Other', 'Chimney', 'Pressure Washing']], 'activeOnly: a switched-off service leaves the forms, but a lead that has it still shows it');
+  assertEqual([sb.stageLabel('New'), sb.stageColor('New'), sb.stageInk('New'), sb.LEAD_STATUSES.length, sb.leadStage({ id: 'x', fullName: 'X', status: 'New' })], ['Fresh lead', '#d03b5c', '#fff', 7, 'New'], 'applyCatalog: a stage renamed and recoloured keeps its key, so leads keep their stage');
+  assertEqual([sb.ACTIVE.tags.has('Complaint'), sb.LEAD_TAGS.some(t => t.tag==='Complaint'), sb.tagColor('Complaint')], [false, true, '#a5473f'], 'applyCatalog: a switched-off tag stays on the leads that have it');
+  assertEqual([sb.RULES.quoteIdleDays, sb.RULES.chaseDecideDays, sb.STAGES_NEED_DATE.slice()], [10, 30, []], 'applyCatalog: the pipeline rules');
+  sb.STATE.data.settings.catalog = {};
+  sb.applyCatalog();
+  assertEqual([sb.LEAD_DIVISIONS.slice(), sb.divLabel('Aircon'), sb.divColor('Aircon'), sb.stageLabel('New'), sb.stageInk('New'), sb.STAGES_NEED_DATE.slice(), sb.RULES.chaseDecideDays], [['Aircon', 'Chimney', 'Pressure Washing', 'Other'], 'Aircon', 'var(--div-aircon)', 'New lead', '#1c1917', ['Quoted', 'Follow-up'], 21], 'applyCatalog: back to nothing saved = back to the app\'s own lists');
+  assertEqual([sb.inkFor('#f2c94c'), sb.inkFor('#1f66c9')], ['#1c1917', '#fff'], 'inkFor: dark text on a light colour, white on a dark one');
+}
+
 function testEmployeeCard(sb){
   console.log('\nThe employee card: ABN check, document expiry, missing details, reminders');
   assertEqual(['51 824 753 556', '51824753556', '51824753557', '1234', ''].map(sb.abnValid), [true, true, false, false, false], 'abnValid: the ATO check (a one-digit typo fails)');
@@ -1068,6 +1093,7 @@ testCountingNumbers(loadSandbox());
 testFieldChecks(loadSandbox());
 testLiveRowsAndStageMemo(loadSandbox());
 testToastKinds(loadSandbox());
+testCatalog(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

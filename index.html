@@ -314,6 +314,47 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .set-num span { align-self: stretch; display: flex; align-items: center; padding: 0 10px; font-size: 12.3px; color: var(--ink-soft); background: var(--surface-2); white-space: nowrap; }
 .set-num:focus-within { border-color: var(--primary); box-shadow: var(--focus-ring); }
 .set-page > .card { margin-bottom: 14px; }
+/* Editable lists in Settings (stage 2). */
+.cat-list { margin-top: 8px; }
+.cat-row { display: grid; grid-template-columns: 18px 16px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 20px; border-top: 1px solid var(--line-soft); background: var(--surface); position: relative; }
+.cat-row:first-child { border-top: 0; }
+.cat-row.off .cat-main { opacity: .55; }
+.cat-row.dragging { z-index: 2; box-shadow: var(--shadow-lg); border-radius: 8px; cursor: grabbing; }
+.cat-grip { display: flex; color: var(--ink-faint); cursor: grab; touch-action: none; }
+.cat-grip:hover { color: var(--ink-soft); }
+.cat-dot { width: 14px; height: 14px; padding: 0; border: 0; border-radius: 99px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.14); cursor: pointer; transition: transform .15s ease; }
+.cat-dot:hover { transform: scale(1.2); }
+.cat-dot:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cat-dot.plain { background: var(--surface-3); cursor: default; }
+.cat-dot.plain:hover { transform: none; }
+.cat-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cat-name, .cat-hint { border: 1px solid transparent !important; background: transparent !important; box-shadow: none; padding: 3px 6px !important; margin-left: -7px; min-height: 0 !important; width: 100%; max-width: 360px; border-radius: 6px; }
+.cat-name { font-weight: 600; font-size: 13.5px !important; }
+.cat-hint { font-size: 12.3px !important; color: var(--ink-soft); }
+.cat-name:hover, .cat-hint:hover { border-color: var(--line) !important; }
+.cat-name:focus, .cat-hint:focus { border-color: var(--primary) !important; background: var(--surface) !important; box-shadow: var(--focus-ring) !important; }
+.cat-name-text { font-size: 13.5px; font-weight: 600; }
+.cat-sub { font-size: 12.2px; color: var(--ink-soft); }
+.cat-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; align-items: center; }
+.cat-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 9px; border-radius: 99px; font-size: 11.5px; font-weight: 600; background: var(--surface-2); color: var(--ink-soft); }
+.cat-chip button { border: 0; background: none; color: var(--ink-faint); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 4px; border-radius: 99px; }
+.cat-chip button:hover { color: var(--bad); background: var(--bad-soft); }
+.cat-chip-add { width: 88px !important; min-height: 0 !important; padding: 2px 9px !important; font-size: 11.5px !important; border-radius: 99px !important; border: 1px dashed var(--line) !important; background: transparent !important; }
+.cat-chip-add:focus { width: 160px !important; border-style: solid !important; border-color: var(--primary) !important; }
+.cat-ctl { display: flex; align-items: center; gap: 8px; }
+.cat-lock { display: inline-flex; color: var(--ink-faint); }
+.cat-foot { padding: 10px 20px 14px; border-top: 1px solid var(--line-soft); }
+.cat-swatches { position: fixed; z-index: 470; display: grid; grid-template-columns: repeat(5, 24px); gap: 7px; padding: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lg); animation: lhIn .14s ease-out; }
+.cat-swatches button { width: 24px; height: 24px; border-radius: 99px; border: 0; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); transition: transform .12s ease; }
+.cat-swatches button:hover { transform: scale(1.15); }
+.cat-swatches .cat-swatch-reset { grid-column: 1 / -1; width: auto; height: auto; border-radius: 6px; background: var(--surface-2); color: var(--ink-soft); font: inherit; font-size: 12px; font-weight: 600; padding: 5px; box-shadow: none; }
+.set-toggle { position: relative; width: 38px; height: 22px; border-radius: 99px; background: var(--surface-3); border: 0; cursor: pointer; flex: none; transition: background-color .18s ease; }
+.set-toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 99px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .22s cubic-bezier(.3,1.4,.5,1); }
+.set-toggle.on { background: var(--good); }
+.set-toggle.on::after { transform: translateX(16px); }
+.set-toggle[disabled] { opacity: .55; cursor: not-allowed; }
+.set-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.lead-tag-chip[style*="--tag-c"] { background: color-mix(in srgb, var(--tag-c) 16%, var(--surface)) !important; color: color-mix(in srgb, var(--tag-c) 75%, var(--ink)) !important; }
 @media (max-width: 900px) { .set-layout { grid-template-columns: 200px minmax(0, 1fr); gap: 18px; } }
 @media (max-width: 640px) {
   .set-layout { grid-template-columns: minmax(0, 1fr); }
@@ -328,6 +369,8 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
   .set-block-head { padding: 14px 16px 0; }
   .set-block > .set-fields { padding: 12px 16px 16px; }
   .set-input { width: 100%; }
+  .cat-row { padding: 10px 14px; gap: 10px; }
+  .cat-foot { padding: 10px 14px 12px; }
 }
 /* Customer hover card (Ofek 12 Oct, suggestion 7). */
 .lead-hover { position: fixed; z-index: 450; width: 292px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 13px 14px 10px; font-size: 12.5px; line-height: 1.4; animation: lhIn .16s cubic-bezier(.2,.9,.3,1.15); }
@@ -2073,14 +2116,14 @@ const db = {
         unpaidReminderDays:'unpaid_reminder_days', quoteStaleDays:'quote_stale_days', gstRatePercent:'gst_rate_percent',
         companyName:'company_name', abn:'abn', defaultPaymentTerms:'default_payment_terms',
         legalName:'legal_name', acn:'acn',
-        phoneEnabled:'phone_enabled', phoneRouting:'phone_routing', chatAutoSms:'chat_auto_sms',
+        phoneEnabled:'phone_enabled', phoneRouting:'phone_routing', chatAutoSms:'chat_auto_sms', catalog:'catalog',
       };
       const row = {}; for (const k in patch) if (map[k]) row[map[k]] = patch[k];
       // Owner salaries are kept in owner_settings, which only the owners can read (not in settings, which all staff read).
       const { error } = 'ownerSalaries' in patch
         ? await sb.from('owner_settings').upsert({ id: 1, owner_salaries: patch.ownerSalaries, updated_at: new Date().toISOString() })
         : await sb.from('settings').update(row).eq('id', 1);
-      if (error) { showToast('Setting not saved: '+error.message); if (!PRESENT) { Object.assign(STATE.data.settings, before); render(); } }
+      if (error) { showToast('Setting not saved: '+error.message); if (!PRESENT) { Object.assign(STATE.data.settings, before); if ('catalog' in patch) applyCatalog(); render(); } }
     },
   },
   // Payroll board statuses — one row per (week, person), upserted on the unique key.
@@ -2470,6 +2513,7 @@ function mapSettingsRow(r){
     abn:r.abn||'', defaultPaymentTerms:r.default_payment_terms||'', legalName:r.legal_name||'', acn:r.acn||'',
     ownerSalaries: r.owner_salaries||{},
     phoneEnabled: !!r.phone_enabled, phoneRouting: r.phone_routing || {}, chatAutoSms: !!r.chat_auto_sms, reviewsFrom: r.reviews_from || '2026-10-03', whatsappEnabled: !!r.whatsapp_enabled, reviewRequestsAuto: !!r.review_requests_auto,
+    catalog: r.catalog && typeof r.catalog==='object' ? r.catalog : {},
   };
 }
 function mapPayrollRow(r){
@@ -2643,7 +2687,7 @@ function handleListRealtimeChange(listKey, mapRow){
   };
 }
 function handleSettingsRealtimeChange(payload){ if (PRESENT || !STATE.data || payload.eventType==='DELETE') return;
-  Object.assign(STATE.data.settings, mapSettingsRow(payload.new)); renderKeepingInput(); phoneSync();
+  Object.assign(STATE.data.settings, mapSettingsRow(payload.new)); applyCatalog(); renderKeepingInput(); phoneSync();
 }
 function handleCommissionRatesRealtimeChange(payload){ if (PRESENT || !STATE.data) return;
   if (payload.eventType === 'DELETE') delete STATE.data.commissionRates[payload.old.technician_name];
@@ -2852,6 +2896,10 @@ function toastDismiss(t, now){
 /* ── Icons (Ofek 12 Oct, suggestion 5): one set of thin line icons instead of emoji, in the app's own colours. ── */
 const ICONS = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  layers: '<path d="m12 2 10 5-10 5L2 7l10-5Z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
+  kanban: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 7v7M12 7v4M16 7v9"/>',
+  tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1.2"/>',
+  grip: '<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>',
   trophy: '<path d="M8 21h8M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M17 5.5h2.5V7a3 3 0 0 1-3 3M7 5.5H4.5V7a3 3 0 0 0 3 3"/>',
   calendarCheck: '<rect x="3" y="4.5" width="18" height="16.5" rx="2"/><path d="M16 2.5v4M8 2.5v4M3 9.5h18"/><path d="m9 15 2 2 4-4"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -3786,7 +3834,7 @@ function divColor(d){
   return DIVISION_COLOR[/chimney/i.test(t) ? 'Chimney' : /pressure|wash/i.test(t) ? 'Pressure Washing' : /air ?con/i.test(t) ? 'Aircon' : 'Other'];
 }
 // A division (or job type) written in its colour, with a dot: for tables, lists and meta lines.
-function divName(d, text){ return d ? `<span class="div-name" style="--div:${divColor(d)}">${esc(text ?? d)}</span>` : esc(text ?? ''); }
+function divName(d, text){ return d ? `<span class="div-name" style="--div:${divColor(d)}">${esc(text ?? divLabel(d))}</span>` : esc(text ?? ''); }
 // Pipeline stages (Ofek, 2026-09-27). Stored values keep 'New' and 'Follow-up' so older rows need no rewrite; the legacy
 // 'Not Relevant' reads as Lost. Won is never picked by hand: a lead is Won as soon as its customer has a job.
 const LEAD_STATUSES = ['New','Chasing','Quoted','Follow-up','Booked','Won','Lost'];
@@ -4202,7 +4250,7 @@ function renderLeadTags(contactId, scope){
   const c = contactById(contactId); if (!c) return '';
   const cur = visibleTags(c);
   return `<div class="lead-tags-block" data-contact="${contactId}" data-scope="${scope}">
-    <div class="sub-picker">${LEAD_TAGS.map(({ tag, hint }) => `<button type="button" class="sub-chip${cur.includes(tag)?' on':''}" aria-pressed="${cur.includes(tag)}" title="${esc(hint)}" onclick="event.stopPropagation();toggleLeadTag('${contactId}','${jsStr(tag)}')">${esc(tag)}</button>`).join('')}</div>
+    <div class="sub-picker">${LEAD_TAGS.filter(t => !ACTIVE.tags || ACTIVE.tags.has(t.tag) || cur.includes(t.tag)).map(({ tag, hint }) => `<button type="button" class="sub-chip${cur.includes(tag)?' on':''}" aria-pressed="${cur.includes(tag)}" title="${esc(hint)}" onclick="event.stopPropagation();toggleLeadTag('${contactId}','${jsStr(tag)}')">${esc(tag)}</button>`).join('')}</div>
   </div>`;
 }
 /* ── Pipeline stage rules (Ofek, 2026-09-27) ────────────────────────────────────────────────────────
@@ -4267,7 +4315,7 @@ function renderBulkBar(){
   return `<div class="bulk-bar" id="bulk-bar"${n ? '' : ' hidden'}>
     <b>${n} selected</b>
     <select aria-label="Move the selected leads to a stage" onchange="if(this.value){ bulkStage(this.value); this.value=''; }"><option value="">Move to stage…</option>${LEAD_STAGE_PICKABLE.map(st => `<option value="${st}">${esc(stageLabel(st))}</option>`).join('')}</select>
-    <select aria-label="Add a tag to the selected leads" onchange="if(this.value){ bulkTag(this.value, true); this.value=''; }"><option value="">Add a tag…</option>${LEAD_TAGS.map(t => `<option value="${esc(t.tag)}">${esc(t.tag)}</option>`).join('')}</select>
+    <select aria-label="Add a tag to the selected leads" onchange="if(this.value){ bulkTag(this.value, true); this.value=''; }"><option value="">Add a tag…</option>${LEAD_TAGS.filter(t => !ACTIVE.tags || ACTIVE.tags.has(t.tag)).map(t => `<option value="${esc(t.tag)}">${esc(t.tag)}</option>`).join('')}</select>
     <select aria-label="Remove a tag from the selected leads" onchange="if(this.value){ bulkTag(this.value, false); this.value=''; }"><option value="">Remove a tag…</option>${LEAD_TAGS.map(t => `<option value="${esc(t.tag)}">${esc(t.tag)}</option>`).join('')}</select>
     <button type="button" class="btn ghost small" onclick="clearBulk()">Clear</button>
   </div>`;
@@ -4285,7 +4333,7 @@ function bulkStage(stage){
   if (stage==='Lost') {
     openPopup(`<h3 style="margin:0 0 6px">Why were these ${who} lost?</h3>
       <div class="hint" style="margin-bottom:10px">One reason for all of them. It feeds "Why leads were lost" on the Dashboard.</div>
-      <div style="display:grid;gap:6px">${LOST_REASONS.map(r => `<button class="btn" style="justify-content:flex-start" onclick="closePopup();applyBulkStage('Lost', { lostReason:'${r.key}' })">${esc(r.label)}</button>`).join('')}</div>
+      <div style="display:grid;gap:6px">${LOST_REASONS.filter(r => !ACTIVE.lost || ACTIVE.lost.has(r.key)).map(r => `<button class="btn" style="justify-content:flex-start" onclick="closePopup();applyBulkStage('Lost', { lostReason:'${r.key}' })">${esc(r.label)}</button>`).join('')}</div>
       <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn ghost" onclick="closePopup()">Cancel</button></div>`);
     return;
   }
@@ -4334,12 +4382,100 @@ function bulkTag(tag, on){
     render(); showToast('Tags put back');
   } });
 }
+/* ── The business's own lists (Ofek 12 Oct, settings stage 2): services, pipeline stages, lead sources, tags, reasons a
+   lead is lost and payment methods are renamed, recoloured, reordered, added to and switched off in Settings. Saved in
+   settings.catalog. Every entry keeps the key its data is saved with (a lead's division, source and stage, a job's type
+   and payment method, a tag), so nothing saved before changes. A switched-off entry leaves the forms but stays in the
+   reports and on every lead and job that has it. Stages can be renamed, recoloured and reordered, not added or removed:
+   several are tied to rules (Won fills itself, Lost asks why, Booked counts a booking). ── */
+const ACTIVE = { divisions: null, sources: null, tags: null, lost: null, payments: null };
+const RULES = { quoteIdleDays: 14, chaseDecideDays: 21 };
+const DIV_LABEL = {};
+const CATALOG = { base: null };
+function replaceArr(arr, items){ arr.splice(0, arr.length, ...items); return arr; }
+function divLabel(d){ return DIV_LABEL[d] || d; }
+// What a form offers: the entries switched on, plus the one already chosen (so an old lead still shows its value).
+function activeOnly(list, set, current){ return set ? list.filter(k => set.has(k) || (current && k===current)) : list.slice(); }
+// Text on a chosen colour: dark on light colours, white on dark ones.
+function inkFor(hex){
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '')); if (!m) return '#fff';
+  const n = parseInt(m[1], 16);
+  return (0.299 * (n >> 16 & 255) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) > 165 ? '#1c1917' : '#fff';
+}
+// The lists as the app ships them, taken once before anything saved is applied.
+function catalogBase(){
+  if (CATALOG.base) return CATALOG.base;
+  const pays = typeof CLOSING_PAYMENT_METHODS!=='undefined' ? CLOSING_PAYMENT_METHODS : ['', 'Cash', 'Bank Transfer', 'Credit Card'];
+  CATALOG.base = {
+    services: LEAD_DIVISIONS.map(k => ({ key: k, label: k, color: null, active: true, subs: [...(SUB_DIVISIONS[k] || [])] })),
+    stages: LEAD_STATUSES.map(k => ({ key: k, label: LEAD_STAGE_LABEL[k] || k, color: null })),
+    sources: LEAD_SOURCES.map(k => ({ key: k, label: LEAD_SOURCE_LABEL[k] || k, color: null, active: true, subs: [...(SUB_SOURCES[k] || [])] })),
+    tags: LEAD_TAGS.map(t => ({ tag: t.tag, hint: t.hint || '', color: null, active: true })),
+    lostReasons: LOST_REASONS.map(r => ({ key: r.key, label: r.label, active: true })),
+    payments: pays.filter(Boolean).map(k => ({ key: k, label: k, active: true })),
+    rules: { needDate: true, quoteIdleDays: 14, chaseDecideDays: 21 },
+    fixed: { divColor: { ...DIVISION_COLOR }, stageLabel: { ...LEAD_STAGE_LABEL }, stageColor: { ...LEAD_STATUS_COLOR }, stageInk: { ...LEAD_STATUS_INK },
+      sourceLabel: { ...LEAD_SOURCE_LABEL }, sourceColor: { ...LEAD_SOURCE_COLOR }, subSources: Object.keys(SUB_SOURCES),
+      lostMatch: Object.fromEntries(LOST_REASONS.map(r => [r.key, r.match])), needDate: [...STAGES_NEED_DATE] },
+  };
+  return CATALOG.base;
+}
+function catalogId(section, x){ return section==='tags' ? x.tag : x.key; }
+// One list as it stands: what was saved, else what the app ships with. A key the data uses is never lost (a saved list
+// missing one gets it back at the end).
+function catalogList(section){
+  const base = catalogBase()[section], saved = ((STATE.data && STATE.data.settings && STATE.data.settings.catalog) || {})[section];
+  const copy = x => ({ ...x, ...(x.subs ? { subs: [...x.subs] } : {}) });
+  if (!Array.isArray(saved) || !saved.length) return base.map(copy);
+  const out = saved.map(copy);
+  base.forEach(b => { if (!out.some(x => catalogId(section, x)===catalogId(section, b))) out.push(copy(b)); });
+  return out;
+}
+function catalogRules(){ return { ...catalogBase().rules, ...(((STATE.data && STATE.data.settings && STATE.data.settings.catalog) || {}).rules || {}) }; }
+// Puts the lists into the ones the whole app reads (in place, so every page picks them up on its next redraw).
+function applyCatalog(){
+  const fx = catalogBase().fixed;
+  const svc = catalogList('services'), st = catalogList('stages'), src = catalogList('sources'), tags = catalogList('tags'), lost = catalogList('lostReasons'), pay = catalogList('payments'), rules = catalogRules();
+  replaceArr(LEAD_DIVISIONS, svc.map(x => x.key));
+  if (typeof JOB_TYPES!=='undefined') replaceArr(JOB_TYPES, svc.map(x => x.key));
+  svc.forEach(x => { DIVISION_COLOR[x.key] = x.color || fx.divColor[x.key] || 'var(--div-other)'; DIV_LABEL[x.key] = x.label || x.key; SUB_DIVISIONS[x.key] = [...(x.subs || [])]; });
+  ACTIVE.divisions = new Set(svc.filter(x => x.active!==false).map(x => x.key));
+  replaceArr(LEAD_STATUSES, st.map(x => x.key));
+  replaceArr(LEAD_STAGE_PICKABLE, st.map(x => x.key).filter(k => k!=='Won'));
+  st.forEach(x => {
+    LEAD_STAGE_LABEL[x.key] = x.label || fx.stageLabel[x.key] || x.key;
+    LEAD_STATUS_COLOR[x.key] = x.color || fx.stageColor[x.key] || 'var(--ink-faint)';
+    if (x.color) LEAD_STATUS_INK[x.key] = inkFor(x.color); else if (fx.stageInk[x.key]) LEAD_STATUS_INK[x.key] = fx.stageInk[x.key]; else delete LEAD_STATUS_INK[x.key];
+  });
+  replaceArr(LEAD_SOURCES, src.map(x => x.key));
+  src.forEach(x => {
+    if (x.label && x.label!==x.key) LEAD_SOURCE_LABEL[x.key] = x.label; else if (fx.sourceLabel[x.key]) LEAD_SOURCE_LABEL[x.key] = fx.sourceLabel[x.key]; else delete LEAD_SOURCE_LABEL[x.key];
+    LEAD_SOURCE_COLOR[x.key] = x.color || fx.sourceColor[x.key] || 'var(--ink-faint)';
+    if ((x.subs || []).length || fx.subSources.includes(x.key)) SUB_SOURCES[x.key] = [...(x.subs || [])]; else delete SUB_SOURCES[x.key];
+  });
+  ACTIVE.sources = new Set(src.filter(x => x.active!==false).map(x => x.key));
+  replaceArr(LEAD_TAGS, tags.map(t => ({ tag: t.tag, hint: t.hint || '', color: t.color || null })));
+  ACTIVE.tags = new Set(tags.filter(t => t.active!==false).map(t => t.tag));
+  replaceArr(LOST_REASONS, lost.map(r => ({ key: r.key, label: r.label, match: fx.lostMatch[r.key] || (t => t.includes(String(r.label).toLowerCase())) })));
+  ACTIVE.lost = new Set(lost.filter(r => r.active!==false).map(r => r.key));
+  if (typeof CLOSING_PAYMENT_METHODS!=='undefined') replaceArr(CLOSING_PAYMENT_METHODS, ['', ...pay.map(x => x.key)]);
+  ACTIVE.payments = new Set(pay.filter(x => x.active!==false).map(x => x.key));
+  replaceArr(STAGES_NEED_DATE, rules.needDate ? fx.needDate : []);
+  RULES.quoteIdleDays = Math.max(1, Math.round(Number(rules.quoteIdleDays)) || 14);
+  RULES.chaseDecideDays = Math.max(1, Math.round(Number(rules.chaseDecideDays)) || 21);
+  const n = RULES.chaseDecideDays;
+  if (typeof MD_BUBBLES!=='undefined') { const b = MD_BUBBLES.find(x => x[0]==='decide'); if (b) b[1] = `Chasing ${n}+ days`; }
+  if (typeof MD_HE!=='undefined') MD_HE.decide = `מרדף ${n}+ ימים`;
+  if (typeof MD_FROM_HE!=='undefined') MD_FROM_HE.decide = `במרדף ${n}+ ימים`;
+  if (typeof JOB_CACHE!=='undefined') JOB_CACHE.index = null;   // every lead's stage is worked out again
+}
+function tagColor(t){ const x = LEAD_TAGS.find(y => y.tag===t); return x && x.color ? x.color : null; }
 function lostReasonLabel(k){ const r = LOST_REASONS.find(x=>x.key===k); return r ? r.label : 'No reason given'; }
 function openLostReasonPrompt(c, after){
   POPUP_AFTER = after || null;
   openPopup(`<h3 style="margin:0 0 6px">Why was ${esc(c.fullName)} lost?</h3>
     <div class="hint" style="margin-bottom:10px">A lost lead always needs a reason — it feeds "Why leads were lost" on the Dashboard.</div>
-    <div style="display:grid;gap:6px">${LOST_REASONS.map(r=>`<button class="btn" style="justify-content:flex-start" onclick="confirmLostReason('${c.id}','${r.key}')">${esc(r.label)}</button>`).join('')}</div>
+    <div style="display:grid;gap:6px">${LOST_REASONS.filter(r => !ACTIVE.lost || ACTIVE.lost.has(r.key)).map(r=>`<button class="btn" style="justify-content:flex-start" onclick="confirmLostReason('${c.id}','${r.key}')">${esc(r.label)}</button>`).join('')}</div>
     <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn ghost" onclick="closePopup();render()">Cancel</button></div>`);
 }
 function confirmLostReason(id, key){
@@ -4467,12 +4603,12 @@ function newLeadUnhandled(c, now){
   return sydneyNowPast(workClockDue(at, 15), now);
 }
 // Automation 2: a lead chased for 21+ days without an answer — Ron decides (lost as "no answer", or keep going).
-function chaseTooLong(c, now){ return leadStage(c)==='Chasing' && !!c.chasingSince && daysBetween(parseLocalDate(localDay(c.chasingSince)), parseLocalDate(sydneyWall(now||new Date()).day)) >= 21; }
+function chaseTooLong(c, now){ return leadStage(c)==='Chasing' && !!c.chasingSince && daysBetween(parseLocalDate(localDay(c.chasingSince)), parseLocalDate(sydneyWall(now||new Date()).day)) >= RULES.chaseDecideDays; }
 // Booked with no job (Ofek, 29 Sep): Ron picks the job date when he sets Booked; 2 days after that date, if the customer
 // still has no job in Jobs & Commissions (a job makes the lead Won), Ron is told to check what happened.
 function bookedNoJob(c, now){ return leadStage(c)==='Booked' && !!c.bookedFor && sydneyWall(now||new Date()).day >= shiftDays(c.bookedFor, 2); }
 // Automation 3: a quote with no movement for 14+ days is flagged red.
-function quoteStale(c, now){ return leadStage(c)==='Quoted' && !!c.stageChangedAt && daysBetween(parseLocalDate(localDay(c.stageChangedAt)), parseLocalDate(sydneyWall(now||new Date()).day)) >= 14; }
+function quoteStale(c, now){ return leadStage(c)==='Quoted' && !!c.stageChangedAt && daysBetween(parseLocalDate(localDay(c.stageChangedAt)), parseLocalDate(sydneyWall(now||new Date()).day)) >= RULES.quoteIdleDays; }
 function chaseAlertIsDue(c, now){
   if (leadStage(c)!=='Chasing' || !c.chasingSince || c.chaseAlertDone) return false;
   const due = chaseAlertDue(c.chasingSince), w = sydneyWall(now || new Date());
@@ -5332,15 +5468,15 @@ function renderLeadCard(c){
     </div>
     <div>
       <div class="lead-tags">
-        ${leadTagChip(c.division, divColor(c.division))}
+        ${leadTagChip(divLabel(c.division), divColor(c.division))}
         ${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}
       </div>
       ${leadSubChips(c)}
     </div>
     <div class="lead-meta mono">${esc(c.phone||'—')}</div>
     ${stage==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
-    ${quoteStale(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Quote idle 14+ days</div>` : ''}
-    ${chaseTooLong(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Chasing 21+ days — decide</div>` : ''}
+    ${quoteStale(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Quote idle ${RULES.quoteIdleDays}+ days</div>` : ''}
+    ${chaseTooLong(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Chasing ${RULES.chaseDecideDays}+ days — decide</div>` : ''}
     ${stage==='Booked' && c.bookedFor ? `<div class="lead-due" style="margin-top:4px">Job ${fmtDateShort(c.bookedFor)}</div>` : ''}
     ${stage==='Lost' ? `<div class="hint" style="margin-top:4px">${esc(lostReasonLabel(lostReasonOf(c)))}</div>` : ''}
     ${(contactJobsTotal(c) ?? c.salesValue) ? `<div class="lead-sales-chip">${ico('dollar', 13)} ${fmtMoney(contactJobsTotal(c) ?? c.salesValue)}</div>` : ''}
@@ -5750,9 +5886,9 @@ function renderCrmInboxThreadAndDetails(c){
       </div>
       <div class="lead-chip-edit">
         <div class="lead-chip-edit-title">Change the chips at the top</div>
-        <div class="field"><label>Source</label>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}</div>
+        <div class="field"><label>Source</label>${statusSelect('leadSource', c.id, c.source, activeOnly(LEAD_SOURCES, ACTIVE.sources, c.source), ()=>'neutral', sourceLabel, false)}</div>
         <div class="field" style="margin-top:9px"><label>Sub-source</label>${subSourcePicker(c)}</div>
-        <div class="field" style="margin-top:9px"><label>Division</label>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}</div>
+        <div class="field" style="margin-top:9px"><label>Division</label>${statusSelect('leadDivision', c.id, c.division, activeOnly(LEAD_DIVISIONS, ACTIVE.divisions, c.division), ()=>'neutral', divLabel, false)}</div>
         <div class="field" style="margin-top:9px"><label>Sub-division</label>${subDivisionPicker(c)}</div>
       </div>
     </div>`;
@@ -5796,7 +5932,7 @@ function subSourcePicker(c){
 // The chips at the top of a lead (the CRM panel and the Full profile): division and source, then the sub-division(s) and the
 // sub-source under them. They're changed at the bottom of the panel (Ofek 10 Oct), as they rarely need it.
 function leadChipsRow(c){
-  return `<div class="lead-tags">${leadTagChip(c.division, divColor(c.division))}${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}</div>${leadSubChips(c)}`;
+  return `<div class="lead-tags">${leadTagChip(divLabel(c.division), divColor(c.division))}${leadTagChip(sourceLabel(c.source), LEAD_SOURCE_COLOR[c.source]||'var(--ink-faint)')}</div>${leadSubChips(c)}`;
 }
 // The chips under the division and source chips: the sub-division(s) and the sub-source.
 function leadSubChips(c){
@@ -5857,8 +5993,8 @@ function pipeJumpSync(p){
   });
 }
 function renderTableTagsCell(c){
-  const tags = visibleTags(c), rest = LEAD_TAGS.map(x => x.tag).filter(t => !tags.includes(t));
-  const chips = tags.map(t=>`<span class="lead-tag-chip" style="font-size:10px;padding:1px 6px 1px 8px">${esc(t)}<span class="lead-tag-x" title="Remove" onclick="event.stopPropagation();toggleLeadTag('${c.id}','${jsStr(t)}')">×</span></span>`).join('');
+  const tags = visibleTags(c), rest = LEAD_TAGS.map(x => x.tag).filter(t => !tags.includes(t) && (!ACTIVE.tags || ACTIVE.tags.has(t)));
+  const chips = tags.map(t=>`<span class="lead-tag-chip" style="font-size:10px;padding:1px 6px 1px 8px${tagColor(t) ? ';--tag-c:' + tagColor(t) : ''}">${esc(t)}<span class="lead-tag-x" title="Remove" onclick="event.stopPropagation();toggleLeadTag('${c.id}','${jsStr(t)}')">×</span></span>`).join('');
   return `<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;max-width:220px" onclick="event.stopPropagation()">
     ${chips}
     ${rest.length ? `<select aria-label="Add a tag" style="width:auto;font-size:10.5px;padding:1px 4px;min-height:0;border:1px dashed var(--line);background:transparent" onchange="if(this.value) toggleLeadTag('${c.id}', this.value)"><option value="">+ tag</option>${rest.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select>` : ''}
@@ -5882,9 +6018,9 @@ function renderCrmTable(allContacts){
       <td class="bulk-td" onclick="event.stopPropagation()"><input type="checkbox" class="bulk-check" data-bulk="${c.id}" ${bulkIds().includes(c.id) ? 'checked' : ''} aria-label="Select ${esc(c.fullName)}" onchange="toggleBulk('${c.id}', this.checked);this.closest('tr').classList.toggle('bulk-on', this.checked)"></td>
       <td style="border-inline-start:4px solid ${stageColor(leadStage(c))};cursor:pointer" onclick="goToLeadConversation('${c.id}')"><span style="display:flex;align-items:center;gap:8px"${leadHoverAttr(c)}><span class="table-row-avatar" style="${stageVars(leadStage(c))}">${esc(initials(c.fullName))}</span>${esc(c.fullName)}${unreadBadge(c)}</span></td>
       <td class="mono">${esc(c.phone||'—')}</td>
-      <td>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}${leadSubDivisions(c).length ? `<div class="hint" style="margin-top:3px;font-size:11px">${esc(leadSubDivisions(c).join(', '))}</div>` : ''}</td>
-      <td>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}${leadSubSource(c) ? `<div class="hint" style="margin-top:3px;font-size:11px">${esc(leadSubSource(c))}</div>` : ''}</td>
-      <td>${leadStageControl(c)}${leadStage(c)==='Chasing'?`<div style="margin-top:4px">${chaseTick(c)}</div>`:''}${quoteStale(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ Idle 14+ days</div>`:''}${chaseTooLong(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ 21+ days — decide</div>`:''}${leadStage(c)==='Booked' && c.bookedFor ? `<div class="lead-due" style="margin-top:4px">Job ${fmtDateShort(c.bookedFor)}</div>` : ''}</td>
+      <td>${statusSelect('leadDivision', c.id, c.division, activeOnly(LEAD_DIVISIONS, ACTIVE.divisions, c.division), ()=>'neutral', divLabel, false)}${leadSubDivisions(c).length ? `<div class="hint" style="margin-top:3px;font-size:11px">${esc(leadSubDivisions(c).join(', '))}</div>` : ''}</td>
+      <td>${statusSelect('leadSource', c.id, c.source, activeOnly(LEAD_SOURCES, ACTIVE.sources, c.source), ()=>'neutral', sourceLabel, false)}${leadSubSource(c) ? `<div class="hint" style="margin-top:3px;font-size:11px">${esc(leadSubSource(c))}</div>` : ''}</td>
+      <td>${leadStageControl(c)}${leadStage(c)==='Chasing'?`<div style="margin-top:4px">${chaseTick(c)}</div>`:''}${quoteStale(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ Idle ${RULES.quoteIdleDays}+ days</div>`:''}${chaseTooLong(c)?`<div class="lead-due overdue" style="margin-top:4px">⚠ ${RULES.chaseDecideDays}+ days — decide</div>`:''}${leadStage(c)==='Booked' && c.bookedFor ? `<div class="lead-due" style="margin-top:4px">Job ${fmtDateShort(c.bookedFor)}</div>` : ''}</td>
       <td class="wrap">${renderTableTagsCell(c)}</td>
       <td class="mono">${fmtDateShort(c.createdAt)}</td>
       <td class="mono">${fmtDateShort(lastContactedAt(c))}</td>
@@ -5943,7 +6079,7 @@ function renderCrm(profile, data){
     <div class="crm-filters${UI.crm.filtersOpen ? ' open' : ''}" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
       <input value="${esc(UI.crm.search||'')}" placeholder="Search name, phone, email…" oninput="updateCrmSearch(this.value)" style="width:auto;min-width:220px;flex:1">
       <button type="button" class="btn crm-filter-toggle" onclick="toggleCrmFilters(this)" aria-expanded="${!!UI.crm.filtersOpen}">${ico('sliders', 15)} Filters${crmActiveFilterCount() ? ` <span class="filter-count">${crmActiveFilterCount()}</span>` : ''}</button>
-      <select style="width:auto${UI.crm.division!=='all' ? ';--div:' + divColor(UI.crm.division) : ''}" ${UI.crm.division!=='all' ? 'class="div-select"' : ''} onchange="UI.crm.division=this.value;render()"><option value="all">All divisions</option>${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${UI.crm.division===d?'selected':''}>${d}</option>`).join('')}</select>
+      <select style="width:auto${UI.crm.division!=='all' ? ';--div:' + divColor(UI.crm.division) : ''}" ${UI.crm.division!=='all' ? 'class="div-select"' : ''} onchange="UI.crm.division=this.value;render()"><option value="all">All divisions</option>${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${UI.crm.division===d?'selected':''}>${esc(divLabel(d))}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.source=this.value;render()"><option value="all">All sources</option>${LEAD_SOURCES.map(s=>`<option value="${s}" ${UI.crm.source===s?'selected':''}>${esc(sourceLabel(s))}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.tag=this.value;render()"><option value="all">All tags</option>${LEAD_TAGS.map(x=>x.tag).map(t=>`<option value="${esc(t)}" ${UI.crm.tag===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.subDivision=this.value;render()" aria-label="Sub-division"><option value="all">All sub-divisions</option>${Object.entries(SUB_DIVISIONS).filter(([,l])=>l.length).map(([d,l])=>`<optgroup label="${esc(d)}">${l.map(t=>`<option value="${esc(t)}" ${UI.crm.subDivision===t?'selected':''}>${esc(t)}</option>`).join('')}</optgroup>`).join('')}</select>
@@ -6013,7 +6149,7 @@ function renderCrmOverview(profile, data){
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
       ${rangeChips}${customInputs}
       <select style="width:auto" onchange="UI.crmOverview.source=this.value;render()"><option value="all">All sources</option>${LEAD_SOURCES.map(s=>`<option value="${s}" ${UI.crmOverview.source===s?'selected':''}>${esc(sourceLabel(s))}</option>`).join('')}</select>
-      <select style="width:auto${UI.crmOverview.division!=='all' ? ';--div:' + divColor(UI.crmOverview.division) : ''}" ${UI.crmOverview.division!=='all' ? 'class="div-select"' : ''} onchange="UI.crmOverview.division=this.value;render()"><option value="all">All divisions</option>${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${UI.crmOverview.division===d?'selected':''}>${d}</option>`).join('')}</select>
+      <select style="width:auto${UI.crmOverview.division!=='all' ? ';--div:' + divColor(UI.crmOverview.division) : ''}" ${UI.crmOverview.division!=='all' ? 'class="div-select"' : ''} onchange="UI.crmOverview.division=this.value;render()"><option value="all">All divisions</option>${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${UI.crmOverview.division===d?'selected':''}>${esc(divLabel(d))}</option>`).join('')}</select>
     </div>
 
     <div class="grid-4">
@@ -6089,7 +6225,7 @@ function openLeadModal(contactId){
           <div class="field" style="margin-top:11px"><label>Notes</label>${c ? leadNotesField(c, 'modal') : `<textarea rows="3" id="lm-notes" placeholder="Anything to remember about this customer: gate code, dog, best time to call…"></textarea>`}</div>
           <div class="field" style="margin-top:11px"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${stageBadge('Won', 'Won — has a job')}` : `<select id="lm-status" class="stage-select" style="--stage:${stageColor(c?leadStage(c):'New')}" onchange="this.style.setProperty('--stage', stageColor(this.value));document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none';document.getElementById('lm-booked-wrap').style.display=this.value==='Booked'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
           <div class="field" id="lm-booked-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Booked'?'':'none'}"><label>Job booked for</label><input type="date" id="lm-booked-for" value="${c?esc(c.bookedFor||''):''}"><span class="hint">The day it's booked in ServiceM8 — 2 days after it with no job, you get a reminder</span></div>
-          <div class="field" id="lm-lost-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Lost'?'':'none'}"><label>Why was it lost?</label><select id="lm-lost-reason"><option value="">— choose a reason —</option>${LOST_REASONS.map(r=>`<option value="${r.key}" ${c&&lostReasonOf(c)===r.key?'selected':''}>${esc(r.label)}</option>`).join('')}</select></div>
+          <div class="field" id="lm-lost-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Lost'?'':'none'}"><label>Why was it lost?</label><select id="lm-lost-reason"><option value="">— choose a reason —</option>${LOST_REASONS.filter(r => !ACTIVE.lost || ACTIVE.lost.has(r.key) || (c && lostReasonOf(c)===r.key)).map(r=>`<option value="${r.key}" ${c&&lostReasonOf(c)===r.key?'selected':''}>${esc(r.label)}</option>`).join('')}</select></div>
           <div class="field" style="margin-top:11px"><label>Next follow-up</label>${dateCellField('lm-followup', c?(c.nextFollowUp||''):'')}</div>
           <div class="field" style="margin-top:11px"><label>Follow-up note</label><textarea rows="2" id="lm-followup-note" placeholder="What needs doing when this follow-up is due…">${c?esc(c.followupNote||''):''}</textarea></div>
           <div class="grid-2" style="margin-top:11px">
@@ -6105,9 +6241,9 @@ function openLeadModal(contactId){
           <div ${c ? 'class="lead-chip-edit"' : 'style="margin-top:11px"'}>
             ${c ? '<div class="lead-chip-edit-title">Change the chips at the top</div>' : ''}
             <div class="grid-2">
-              <div class="field"><label>Source</label><select id="lm-source">${(c && !LEAD_SOURCES.includes(c.source) ? [c.source, ...LEAD_SOURCES] : LEAD_SOURCES).map(s=>`<option value="${s}" ${c&&c.source===s?'selected':(!c&&s==='Unknown'?'selected':'')}>${esc(sourceLabel(s))}</option>`).join('')}</select></div>
+              <div class="field"><label>Source</label><select id="lm-source">${(c && !LEAD_SOURCES.includes(c.source) ? [c.source, ...activeOnly(LEAD_SOURCES, ACTIVE.sources)] : activeOnly(LEAD_SOURCES, ACTIVE.sources, c && c.source)).map(s=>`<option value="${s}" ${c&&c.source===s?'selected':(!c&&s==='Unknown'?'selected':'')}>${esc(sourceLabel(s))}</option>`).join('')}</select></div>
               ${c ? `<div class="field"><label>Sub-source</label>${subSourcePicker(c)}</div>` : `<div class="field"><label>Sub-source</label><span class="hint">Pick it after saving</span></div>`}
-              <div class="field"><label>Division</label><select id="lm-division">${LEAD_DIVISIONS.map(d=>`<option value="${d}" ${c&&c.division===d?'selected':''}>${d}</option>`).join('')}</select></div>
+              <div class="field"><label>Division</label><select id="lm-division">${activeOnly(LEAD_DIVISIONS, ACTIVE.divisions, c && c.division).map(d=>`<option value="${d}" ${c&&c.division===d?'selected':''}>${esc(divLabel(d))}</option>`).join('')}</select></div>
               ${c ? `<div class="field"><label>Sub-division</label>${subDivisionPicker(c)}</div>` : `<div class="field"><label>Sub-division</label><span class="hint">Pick it after saving</span></div>`}
             </div>
           </div>
@@ -6443,7 +6579,7 @@ function renderJobPanel(j, canEdit){
       ${field('Amount', num('amount', j.amount))}
       ${field('GST included', statusSelect('jobGst', j.id, j.includesGST?'Yes':'No', ['Yes','No'], v=>v==='Yes'?'good':'neutral', v=>v, !canEdit) + (j.includesGST ? `<span class="job-sub">GST ${fmtMoney(jobGst(j))}</span>` : ''))}
       ${field('Payment', statusSelect('jobStatus', j.id, j.paymentStatus, ['Unpaid','Paid'], v=>v==='Paid'?'good':'bad', v=>v, !canEdit) + (j.paymentStatus!=='Paid' ? `<span class="job-sub">${jobDaysWaiting(j)} days since the job</span>` : ''))}
-      ${field('Method', statusSelect('jobPaymentMethod', j.id, j.paymentMethod||'', CLOSING_PAYMENT_METHODS, ()=>'neutral', v=>v||'—', !canEdit))}
+      ${field('Method', statusSelect('jobPaymentMethod', j.id, j.paymentMethod||'', CLOSING_PAYMENT_METHODS.filter(m => !m || !ACTIVE.payments || ACTIVE.payments.has(m) || m===(j.paymentMethod||'')), ()=>'neutral', v=>v||'—', !canEdit))}
     </div>
     <div class="grp">Commission and parts</div>
     <div class="f">
@@ -9166,7 +9302,7 @@ function renderOutstanding(profile, data){
   const today = parseLocalDate(todayStr());
   // Status/Method controls write directly to the same job records Jobs & Commissions reads — marking
   // paid here is automatically reflected there (and vice versa), since it's the same underlying data.
-  const unpaidRows = unpaidJobs.length ? unpaidJobs.map(j => { const age = daysBetween(parseLocalDate(j.date), today); return `<tr><td class="mono">${fmtDateShort(j.date)}</td><td>${customerNameCell(j.customerName, j.contactId)}${crmLinkButton(j.contactId)}</td><td class="mono">${esc(j.invoiceNumber||'—')}</td><td>${esc(j.technician)}</td><td class="num">${fmtMoney(jobTotalCollected(j))}</td><td>${pill(jobIsLate(j, data)?'bad':'neutral', age+' days')}</td><td>${statusSelect('jobStatus', j.id, j.paymentStatus, ['Unpaid','Paid'], v=>v==='Paid'?'good':'bad', v=>v, !canEdit)}</td><td>${statusSelect('jobPaymentMethod', j.id, j.paymentMethod||'', CLOSING_PAYMENT_METHODS, ()=>'neutral', v=>v||'—', !canEdit)}</td></tr>`; }).join('') : `<tr><td colspan="8">${emptyState('No outstanding balances','All customers have paid ✓')}</td></tr>`;
+  const unpaidRows = unpaidJobs.length ? unpaidJobs.map(j => { const age = daysBetween(parseLocalDate(j.date), today); return `<tr><td class="mono">${fmtDateShort(j.date)}</td><td>${customerNameCell(j.customerName, j.contactId)}${crmLinkButton(j.contactId)}</td><td class="mono">${esc(j.invoiceNumber||'—')}</td><td>${esc(j.technician)}</td><td class="num">${fmtMoney(jobTotalCollected(j))}</td><td>${pill(jobIsLate(j, data)?'bad':'neutral', age+' days')}</td><td>${statusSelect('jobStatus', j.id, j.paymentStatus, ['Unpaid','Paid'], v=>v==='Paid'?'good':'bad', v=>v, !canEdit)}</td><td>${statusSelect('jobPaymentMethod', j.id, j.paymentMethod||'', CLOSING_PAYMENT_METHODS.filter(m => !m || !ACTIVE.payments || ACTIVE.payments.has(m) || m===(j.paymentMethod||'')), ()=>'neutral', v=>v||'—', !canEdit)}</td></tr>`; }).join('') : `<tr><td colspan="8">${emptyState('No outstanding balances','All customers have paid ✓')}</td></tr>`;
   const partsRows = pendingParts.length ? pendingParts.map(j=>`<tr><td class="mono">${fmtDateShort(j.date)}</td><td>${customerNameCell(j.customerName, j.contactId)}</td><td>${esc(j.partsPaidBy)}</td><td class="num">${fmtMoney(j.partsCost)}</td></tr>`).join('') : `<tr><td colspan="4">${emptyState('No pending parts refunds')}</td></tr>`;
   const equipRows = pendingEquip.length ? pendingEquip.map(e=>`<tr><td class="mono">${fmtDateShort(e.date)}</td><td>${esc(e.item)}</td><td>${esc(e.technician)}</td><td class="num">${fmtMoney(e.cost)}</td></tr>`).join('') : `<tr><td colspan="4">${emptyState('No pending equipment refunds')}</td></tr>`;
   return `
@@ -9417,7 +9553,7 @@ function dismissLeadEmail(id, rowEl){
 }
 function chaseGiveUp(id){
   const c = contactById(id); if (!c || leadStage(c)!=='Chasing') return;
-  confirmAction(`${c.fullName} has been in Chasing for 21+ days. Move them to Lost with the reason "No answer"?`, () => {
+  confirmAction(`${c.fullName} has been in Chasing for ${RULES.chaseDecideDays}+ days. Move them to Lost with the reason "No answer"?`, () => {
     applyLeadStage(c, 'Lost', { lostReason:'noAnswer' });
     render();
   }, { danger:false, title:'Mark as Lost?', confirmLabel:'Mark as Lost' });
@@ -9427,8 +9563,8 @@ function chaseKeepGoing(id){
   // Another 21-day round (Ofek 3/10), marked "Round 2", "Round 3"… wherever the lead shows.
   c.chasingSince = new Date().toISOString(); c.chaseRound = (Number(c.chaseRound) || 1) + 1;
   db.contacts.update(c.id, { chasingSince: c.chasingSince, chaseRound: c.chaseRound });
-  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Kept chasing after 21 days: round ${c.chaseRound} started`);
-  showToast(`${c.fullName} stays in Chasing: round ${c.chaseRound}, asked again in 21 days`);
+  logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Kept chasing after ${RULES.chaseDecideDays} days: round ${c.chaseRound} started`);
+  showToast(`${c.fullName} stays in Chasing: round ${c.chaseRound}, asked again in ${RULES.chaseDecideDays} days`);
   render();
 }
 // A past day or week on My Day: the bubbles as they ended, Ron's %, and the bookings table.
@@ -9522,7 +9658,7 @@ function renderMyDay(profile, data){
       <div class="myday-stats">
         ${stat('new', 'New leads', 0, L.unhandled.length ? `${L.unhandled.length} waiting 15+ min` : 'done = moved to the next stage', L.unhandled.length ? 'bad' : 'warn')}
         ${stat('chasing', 'Chasing — call today', 0, 'done = called today', 'warn')}
-        ${stat('decide', 'Chasing 21+ days', 0, 'decide: keep or lost', 'bad')}
+        ${stat('decide', `Chasing ${RULES.chaseDecideDays}+ days`, 0, 'decide: keep or lost', 'bad')}
         ${stat('followups', 'Follow-ups due', 0, L.followups.filter(c=>c.nextFollowUp<L.localToday).length ? `${L.followups.filter(c=>c.nextFollowUp<L.localToday).length} overdue` : '', 'warn')}
         ${stat('quotes', 'Quotes due', 0, 'must be done before you log out', 'bad')}
         ${stat('reviews', 'Ask for a review', 0, 'not asked, or no review a day later', 'warn')}
@@ -9541,7 +9677,7 @@ function renderMyDay(profile, data){
     ${myDaySection('new', 'New leads — call first', L.fresh.length, newBody, 'No new leads waiting. ✓',
       `Last ${MY_DAY_NEW_DAYS} days, newest first — the ones waiting 15+ minutes are on top in red. Move each one to its next stage once you've spoken to them.${L.backlog.length ? ` ${drill(`${L.backlog.length} older lead${L.backlog.length===1?' is':'s are'} still in New`, 'Older leads still in New', 'leads', L.backlog)} — clear them in the CRM when you have time.` : ''}`)}
     ${myDaySection('chasing', 'Chasing — call today', L.chaseToCall.length + L.chaseDone.length, L.chaseToCall.map(chaseRow).join('') + L.chaseDone.map(chaseRow).join(''), 'Nobody in Chasing right now.', 'Tick "Called today" after each call. Leads you already called today drop to the bottom.')}
-    ${L.chaseDecide.length ? myDaySection('decide', 'Chasing 21+ days — decide', L.chaseDecide.length, decideBody, '', 'Three weeks without an answer. Mark as Lost (no answer), or keep chasing for another 21 days.') : ''}
+    ${L.chaseDecide.length ? myDaySection('decide', `Chasing ${RULES.chaseDecideDays}+ days — decide`, L.chaseDecide.length, decideBody, '', `${RULES.chaseDecideDays} days without an answer. Mark as Lost (no answer), or keep chasing for another ${RULES.chaseDecideDays} days.`) : ''}
     ${myDaySection('followups', 'Follow-ups due', L.followups.length, fuBody, 'No follow-ups due today. ✓')}
     ${myDaySection('quotes', 'Quotes due', L.quotesDue.length, quoteBody, 'No quote is due today. ✓', 'Quotes whose follow-up date has come. Call, then set the next date or move the stage. You can\'t log out while one is left.')}
     ${renderMyDayOfficeLists(profile, data, live)}
@@ -9685,7 +9821,7 @@ function renderClosings(profile, data){
         <div class="field"><label>Total paid (incl. GST)</label><input type="number" step="0.01" id="cf-amount" value="0"></div>
         <div class="field"><div style="display:flex;gap:18px;flex-wrap:wrap;padding-top:8px"><label class="checkline"><input type="checkbox" id="cf-nogst"> No GST</label>${profile.role==='technician' ? '' : `<label class="checkline"><input type="checkbox" id="cf-noask"> Don't ask for a review</label>`}</div><span class="hint">No GST off = the total includes GST (${STATE.data.settings.gstRatePercent}%)</span></div>
         <div class="field"><label>Payment Status</label><select id="cf-status">${CLOSING_PAYMENT_STATUSES.map(s=>`<option value="${s}">${s}</option>`).join('')}</select></div>
-        <div class="field"><label>Method</label><select id="cf-method" onchange="if(this.value==='Cash') document.getElementById('cf-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.map(m=>`<option value="${m}">${m||'—'}</option>`).join('')}</select></div>
+        <div class="field"><label>Method</label><select id="cf-method" onchange="if(this.value==='Cash') document.getElementById('cf-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.filter(m => !m || !ACTIVE.payments || ACTIVE.payments.has(m)).map(m=>`<option value="${m}">${m||'—'}</option>`).join('')}</select></div>
         <div class="field"><label>Parts Cost</label><input type="number" step="0.01" id="cf-partscost" value="0"><span class="hint">The total on the receipt</span></div>
         <div class="field"><label>What were the parts</label><input id="cf-partsdesc" placeholder="e.g. Filter + drain hose"></div>
         <div class="field"><label>Parts Paid By</label><select id="cf-partsby"><option value="">—</option>${allTechs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}<option value="Business">Business</option></select></div>
@@ -11018,15 +11154,33 @@ function renderSettings(profile){
         <div class="field"><label>ABN</label><input value="${esc(s.abn)}" inputmode="numeric" placeholder="11 digits" onchange="updateBusinessProfileField('abn', this.value.trim(), 'ABN')"></div>
         <div class="field"><label>ACN</label><input value="${esc(s.acn)}" inputmode="numeric" placeholder="9 digits" onchange="updateBusinessProfileField('acn', this.value.trim(), 'ACN')"></div>
       </div>`) },
+    { group: 'Business', id: 'services', icon: 'layers', title: 'Services', desc: 'What the business does. Each service has its own colour, used everywhere in the app, and its own list of jobs.', body: () =>
+        setBlock('Services and what they include', 'Drag to change the order. A service switched off leaves the forms but keeps its history and stays in the reports.', catalogListHtml('services', { name: true, subs: true, toggle: true, color: true }) + catalogAddButton('services', 'Add a service'))
+        + setBlock('Job types', 'The job types in Jobs & Commissions and Closings.', setRows([['Job types follow the services', 'One job type per service, in the same order.', setToggle(true, '', true)]])) },
     { group: 'Business', id: 'money', icon: 'dollar', title: 'Tax and payments', desc: 'How amounts are counted and when money owed is flagged.', body: () => setBlock('GST', '', setRows([
         ['GST rate', 'Used to split the GST out of amounts that include it.', `<span class="set-num"><input type="number" min="0" max="100" value="${s.gstRatePercent}" onchange="updateBusinessSetting('gstRatePercent', this.value, 'GST rate')"><span>%</span></span>`],
       ])) + setBlock('Getting paid', '', setRows([
         ['Default payment terms', 'For example "7 days".', `<input class="set-input" value="${esc(s.defaultPaymentTerms)}" placeholder="e.g. 7 days" onchange="updateBusinessProfileField('defaultPaymentTerms', this.value.trim(), 'Default payment terms')">`],
         ['Flag a job as unpaid after', 'It shows in Outstanding and in Reminders.', `<span class="set-num"><input type="number" min="1" value="${s.unpaidReminderDays}" onchange="updateBusinessSetting('unpaidReminderDays', this.value, 'Unpaid reminder threshold')"><span>days</span></span>`],
-      ])) },
+      ])) + setBlock('Payment methods', 'The choices in Closings and Jobs. One switched off leaves the forms; jobs paid that way keep it.', catalogListHtml('payments', { toggle: true }) + catalogAddButton('payments', 'Add a payment method')) },
     { group: 'Team', id: 'access', icon: 'idcard', title: 'People and access', desc: 'Exactly what each person sees, including Ron. A change reaches them the next time they open or refresh the app.', body: () => `<div class="set-note">${ico('alert', 16)}<span>Manager accounts see everything an owner sees except Settings, so they aren't listed here.</span></div>${cards}` },
     { group: 'Team', id: 'pay', icon: 'wallet', title: 'Pay and commissions', desc: 'How everyone is paid. Payroll works it out from these.', body: () => `<div class="set-sub">Technicians: commission and working days</div>${techCards}`
         + setBlock('Owners', 'A fixed weekly wage, not commission, seen only by owners.', setRows(owners.map(o => [esc(o.fullName), '', `<span class="set-num"><input type="number" min="0" value="${(s.ownerSalaries||{})[o.fullName]||0}" onchange="setOwnerSalary('${jsStr(o.fullName)}', this.value)"><span>$/week</span></span>`]))) },
+    { group: 'Sales', id: 'pipeline', icon: 'kanban', title: 'Pipeline', desc: 'The stages a lead goes through, and the rules that keep leads from falling through the cracks.', body: () => {
+        const r = catalogRules();
+        return setBlock('Stages', 'Rename, recolour and drag to reorder. Stages can\'t be added or removed for now: several are tied to rules.', catalogListHtml('stages', { name: true, color: true, locked: ['Won'], sub: x => STAGE_RULE_TEXT(x.key) }))
+          + setBlock('Rules', '', setRows([
+            ['Quoted and Follow up need a date in the future', 'The lead can\'t be left there without one, so it never falls through the cracks.', setToggle(r.needDate, "setCatalogRule('needDate', !this.classList.contains('on'))")],
+            ['Warn when a quote has been idle for', 'A red line on the card and in the table.', `<span class="set-num"><input type="number" min="1" value="${RULES.quoteIdleDays}" onchange="setCatalogRule('quoteIdleDays', this.value)"><span>days</span></span>`],
+            ['Chasing: ask to decide (keep or lost) after', 'It shows on My Day and on the card.', `<span class="set-num"><input type="number" min="1" value="${RULES.chaseDecideDays}" onchange="setCatalogRule('chaseDecideDays', this.value)"><span>days</span></span>`],
+            ['Chasing calls count on office days only', 'Monday to Friday, 8:00 to 17:00. Office hours come to Settings in the next stage.', setToggle(true, '', true)],
+          ]))
+          + setBlock('Reasons a lead is lost', 'Shown when a lead moves to Lost, and in the Leads & Marketing report.', catalogListHtml('lostReasons', { name: true, toggle: true }) + catalogAddButton('lostReasons', 'Add a reason'));
+      } },
+    { group: 'Sales', id: 'sources', icon: 'target', title: 'Lead sources', desc: 'Where leads come from. Each source has a colour and its own campaigns, platforms or profiles.', body: () =>
+        setBlock('Sources', 'Drag to change the order. A source switched off leaves the forms; its leads keep it and stay in the reports.', catalogListHtml('sources', { name: true, subs: true, toggle: true, color: true, locked: ['Unknown'] }) + catalogAddButton('sources', 'Add a source')) },
+    { group: 'Sales', id: 'tags', icon: 'tag', title: 'Tags', desc: 'Short labels on a lead, for things the stage doesn\'t say.', body: () =>
+        setBlock('Tags', 'A tag switched off leaves the menus but stays on the leads that have it.', catalogListHtml('tags', { hint: true, toggle: true, color: true }) + catalogAddButton('tags', 'Add a tag')) },
     { group: 'Customers', id: 'phone', icon: 'phone', title: 'Phone', desc: 'Who answers the business number, and what happens when nobody does.', body: () => renderPhoneSettings(s) },
     { group: 'Customers', id: 'chat', icon: 'chat', title: 'Website chat and texts', desc: 'Conversations with customers from the website chat and by text.', body: () => renderChatSettings(s) },
     { group: 'Account', id: 'data', icon: 'folder', title: 'Data', desc: 'Your data is yours: take it out, and see who changed what.', body: () => setBlock('Export and history', '', setRows([
@@ -11062,6 +11216,146 @@ function renderSettings(profile){
 // The parts every settings page is made of: a block (a card with a title) and rows of label + control, as in the mockup.
 function setBlock(title, desc, body){ return `<div class="set-block"><div class="set-block-head"><h3>${esc(title)}</h3>${desc ? `<p>${esc(desc)}</p>` : ''}</div>${body}</div>`; }
 function setRows(rows){ return `<div class="set-rows">${rows.map(([label, desc, ctl]) => `<div class="set-row"><div class="set-row-text"><b>${label}</b>${desc ? `<span>${esc(desc)}</span>` : ''}</div><div class="set-row-ctl">${ctl}</div></div>`).join('')}</div>`; }
+// A switch, as in the mockup. Locked ones show the rule but can't be changed here.
+function setToggle(on, onclick, locked){ return `<button type="button" class="set-toggle${on ? ' on' : ''}" role="switch" aria-checked="${!!on}"${locked ? ' disabled title="Always on"' : ` onclick="${onclick}"`}></button>`; }
+const CAT_NAMES = { services: 'Services', stages: 'Pipeline stages', sources: 'Lead sources', tags: 'Tags', lostReasons: 'Reasons a lead is lost', payments: 'Payment methods' };
+const CAT_SWATCHES = ['#1f66c9', '#2b6cc4', '#0e8a8a', '#16a34a', '#c99a06', '#c4580f', '#d03b5c', '#7746c9', '#a5473f', '#776e64'];
+function STAGE_RULE_TEXT(k){
+  return ({ New: 'Every new enquiry starts here', Chasing: `Calls counted on office days · decide after ${RULES.chaseDecideDays} days`,
+    Quoted: STAGES_NEED_DATE.includes('Quoted') ? 'Needs a follow-up date in the future' : '', 'Follow-up': STAGES_NEED_DATE.includes('Follow-up') ? 'Needs a follow-up date in the future' : '',
+    Booked: 'Asks for the job date · counts a booking for the day', Won: 'Set by the app when the customer has a job', Lost: 'Asks for the reason' })[k] || '';
+}
+function catalogColorOf(section, id){
+  if (section==='services') return divColor(id);
+  if (section==='stages') return stageColor(id);
+  if (section==='sources') return LEAD_SOURCE_COLOR[id] || 'var(--ink-faint)';
+  if (section==='tags') return tagColor(id) || 'var(--surface-3)';
+  return 'var(--surface-3)';
+}
+// One editable list: drag to reorder, the name typed in place, its colour, its sub-items as chips, a switch.
+function catalogListHtml(section, o){
+  const items = catalogList(section), locked = o.locked || [];
+  return `<div class="cat-list" data-section="${section}">${items.map(x => {
+    const id = catalogId(section, x), isLocked = locked.includes(id), q = `'${section}','${jsStr(id)}'`;
+    const name = o.name ? `<input class="cat-name" value="${esc(x.label)}" aria-label="Name" onchange="setCatalogField(${q},'label',this.value)">` : `<b class="cat-name-text">${esc(x.label || x.tag)}</b>`;
+    const sub = o.hint ? `<input class="cat-hint" value="${esc(x.hint || '')}" placeholder="What it means" aria-label="What ${esc(x.tag)} means" onchange="setCatalogField(${q},'hint',this.value)">`
+      : o.sub && o.sub(x) ? `<span class="cat-sub">${esc(o.sub(x))}</span>` : '';
+    const chips = o.subs ? `<div class="cat-chips">${(x.subs || []).map(v => `<span class="cat-chip">${esc(v)}<button type="button" aria-label="Remove ${esc(v)}" onclick="removeCatalogSub(${q},'${jsStr(v)}')">×</button></span>`).join('')}<input class="cat-chip-add" placeholder="+ Add" aria-label="Add to ${esc(x.label)}" onkeydown="if(event.key==='Enter'){event.preventDefault();addCatalogSub(${q},this.value)}"></div>` : '';
+    return `<div class="cat-row${x.active===false ? ' off' : ''}" data-key="${esc(id)}">
+      <span class="cat-grip" title="Drag to change the order" onpointerdown="catalogDragStart(event,'${section}')">${ico('grip', 16)}</span>
+      ${o.color ? `<button type="button" class="cat-dot" style="background:${catalogColorOf(section, id)}" aria-label="Colour of ${esc(x.label || x.tag)}" onclick="openCatalogColor(event,${q})"></button>` : '<span class="cat-dot plain"></span>'}
+      <div class="cat-main">${name}${sub}${chips}</div>
+      <div class="cat-ctl">${isLocked ? `<span class="cat-lock" title="Set by the app">${ico('lock', 14)}</span>` : o.toggle ? setToggle(x.active!==false, `setCatalogField(${q},'active',!this.classList.contains('on'))`) : ''}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+function catalogAddButton(section, label){ return `<div class="cat-foot"><button type="button" class="btn small" onclick="openCatalogAdd('${section}')">${ico('plus', 14)} ${esc(label)}</button></div>`; }
+function catalogSave(section, list, what){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
+  const cat = JSON.parse(JSON.stringify(STATE.data.settings.catalog || {}));
+  if (section==='rules') cat.rules = list; else cat[section] = list;
+  db.settings.update({ catalog: cat });
+  applyCatalog();
+  logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `${section==='rules' ? 'Pipeline rules' : CAT_NAMES[section]}: ${what}`);
+  showToast('Saved');
+  render();
+}
+function setCatalogField(section, id, field, value){
+  const list = catalogList(section), x = list.find(y => catalogId(section, y)===id); if (!x) return;
+  let v = value;
+  if (field==='label' || field==='hint') { v = String(value || '').trim(); if (field==='label' && !v) { render(); return; } }
+  if ((x[field] ?? null)===(v ?? null)) return;
+  const was = x[field]; x[field] = v;
+  const name = x.label || x.tag;
+  catalogSave(section, list, field==='active' ? `${name} switched ${v ? 'on' : 'off'}` : field==='color' ? `${name}'s colour changed` : field==='label' ? `"${was}" renamed to "${v}"` : `${name}: description changed`);
+}
+function addCatalogSub(section, id, value){
+  const v = String(value || '').trim(), list = catalogList(section), x = list.find(y => catalogId(section, y)===id); if (!v || !x) return;
+  x.subs = x.subs || [];
+  if (x.subs.some(t => t.toLowerCase()===v.toLowerCase())) { showToast(`${x.label} already has "${v}"`); return; }
+  x.subs.push(v);
+  catalogSave(section, list, `"${v}" added to ${x.label}`);
+}
+function removeCatalogSub(section, id, value){
+  const list = catalogList(section), x = list.find(y => catalogId(section, y)===id); if (!x) return;
+  x.subs = (x.subs || []).filter(t => t!==value);
+  catalogSave(section, list, `"${value}" removed from ${x.label} (leads that have it keep it)`);
+}
+function setCatalogRule(field, value){
+  const r = catalogRules();
+  r[field] = field==='needDate' ? !!value : Math.max(1, Math.round(Number(value)) || r[field]);
+  catalogSave('rules', r, field==='needDate' ? `future date for Quoted and Follow up ${r.needDate ? 'required' : 'no longer required'}` : field==='quoteIdleDays' ? `quotes idle after ${r.quoteIdleDays} days` : `chasing decided after ${r.chaseDecideDays} days`);
+}
+// Its colour: a small palette under the dot (Default goes back to the app's own colour, which suits light and dark).
+function openCatalogColor(e, section, id){
+  e.stopPropagation();
+  document.querySelectorAll('.cat-swatches').forEach(x => x.remove());
+  const pop = document.createElement('div'); pop.className = 'cat-swatches';
+  pop.innerHTML = CAT_SWATCHES.map(c => `<button type="button" style="background:${c}" aria-label="Colour ${c}" onclick="pickCatalogColor('${section}','${jsStr(id)}','${c}')"></button>`).join('')
+    + `<button type="button" class="cat-swatch-reset" onclick="pickCatalogColor('${section}','${jsStr(id)}','')">Default</button>`;
+  document.body.appendChild(pop);
+  const r = e.currentTarget.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(r.left - 6, window.innerWidth - pop.offsetWidth - 8)) + 'px';
+  pop.style.top = (r.bottom + 6) + 'px';
+  const off = ev => { if (!ev.target.closest('.cat-swatches')) { pop.remove(); document.removeEventListener('pointerdown', off, true); } };
+  setTimeout(() => document.addEventListener('pointerdown', off, true), 0);
+}
+function pickCatalogColor(section, id, c){ document.querySelectorAll('.cat-swatches').forEach(x => x.remove()); setCatalogField(section, id, 'color', c || null); }
+function openCatalogAdd(section){
+  const what = { services: 'service', sources: 'source', tags: 'tag', lostReasons: 'reason', payments: 'payment method' }[section];
+  openPopup(`<h3 style="margin:0 0 10px">Add a ${what}</h3>
+    <div class="field"><label>Name</label><input id="cat-new-name" autofocus onkeydown="if(event.key==='Enter') confirmCatalogAdd('${section}')"></div>
+    ${section==='tags' ? `<div class="field" style="margin-top:10px"><label>What it means</label><input id="cat-new-hint" placeholder="e.g. Pays by invoice" onkeydown="if(event.key==='Enter') confirmCatalogAdd('${section}')"></div>` : ''}
+    <div id="popup-error" style="color:var(--bad);font-size:12px;margin-top:6px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn ghost" onclick="closePopup()">Cancel</button><button class="btn primary" onclick="confirmCatalogAdd('${section}')">Add</button></div>`);
+  setTimeout(() => { const i = document.getElementById('cat-new-name'); if (i) i.focus(); }, 30);
+}
+function confirmCatalogAdd(section){
+  const name = String((document.getElementById('cat-new-name') || {}).value || '').trim();
+  const err = document.getElementById('popup-error');
+  if (!name) { if (err) err.textContent = 'Type a name.'; return; }
+  const list = catalogList(section);
+  if (list.some(x => [x.key, x.label, x.tag].filter(Boolean).some(t => String(t).toLowerCase()===name.toLowerCase()))) { if (err) err.textContent = 'There is already one with that name.'; return; }
+  const color = CAT_SWATCHES[list.length % CAT_SWATCHES.length];
+  const item = section==='tags' ? { tag: name, hint: String((document.getElementById('cat-new-hint') || {}).value || '').trim(), color: null, active: true }
+    : section==='lostReasons' ? { key: 'r' + Date.now().toString(36), label: name, active: true }
+    : section==='payments' ? { key: name, label: name, active: true }
+    : { key: name, label: name, color, active: true, subs: [] };
+  list.push(item);
+  closePopup();
+  catalogSave(section, list, `"${name}" added`);
+}
+// Drag a row by its handle to change the order; the rows around it slide out of the way.
+let CAT_DRAG = null;
+function catalogDragStart(e, section){
+  if (e.button > 0) return;
+  const row = e.currentTarget.closest('.cat-row'); if (!row) return;
+  e.preventDefault();
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+  CAT_DRAG = { section, row, list: row.parentElement, y: e.clientY, moved: false };
+  row.classList.add('dragging');
+  document.addEventListener('pointermove', catalogDragMove);
+  document.addEventListener('pointerup', catalogDragEnd);
+  document.addEventListener('pointercancel', catalogDragEnd);
+}
+function catalogDragMove(e){
+  const d = CAT_DRAG; if (!d) return;
+  const dy = e.clientY - d.y, row = d.row, prev = row.previousElementSibling, next = row.nextElementSibling;
+  const slide = (el, by) => { if (el.animate && !motionReduced()) el.animate([{ transform: `translateY(${by}px)` }, { transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.22,1,.36,1)' }); };
+  if (next && dy > next.offsetHeight / 2) { const h = next.offsetHeight; d.list.insertBefore(next, row); d.y += h; d.moved = true; slide(next, h); }
+  else if (prev && dy < -prev.offsetHeight / 2) { const h = prev.offsetHeight; d.list.insertBefore(row, prev); d.y -= h; d.moved = true; slide(prev, -h); }
+  row.style.transform = `translateY(${e.clientY - d.y}px)`;
+}
+function catalogDragEnd(){
+  const d = CAT_DRAG; CAT_DRAG = null;
+  document.removeEventListener('pointermove', catalogDragMove); document.removeEventListener('pointerup', catalogDragEnd); document.removeEventListener('pointercancel', catalogDragEnd);
+  if (!d) return;
+  d.row.classList.remove('dragging'); d.row.style.transform = '';
+  if (!d.moved) return;
+  const order = [...d.list.querySelectorAll('.cat-row')].map(r => r.dataset.key);
+  const list = catalogList(d.section).sort((a, b) => order.indexOf(catalogId(d.section, a)) - order.indexOf(catalogId(d.section, b)));
+  catalogSave(d.section, list, 'order changed');
+}
 function setSettingsPage(id){
   UI.settings = UI.settings || {}; UI.settings.page = id; UI.settings.open = true;
   render();
@@ -11626,7 +11920,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
     if (!AUTH_DATA_LOADING) {
       AUTH_DATA_LOADING = true;
       loadFromSupabase()
-        .then(() => { STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); phoneSync(); convLoad(); mdLoad(); loadShiftEvents(); vaSessionStart(); })
+        .then(() => { applyCatalog(); STATE.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions(); render(); phoneSync(); convLoad(); mdLoad(); loadShiftEvents(); vaSessionStart(); })
         .catch(err => { AUTH_DATA_LOADING = false; AUTH.error = err.message; AUTH.status = 'signedOut'; render(); });
     }
     return;
