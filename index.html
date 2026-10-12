@@ -331,6 +331,13 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 [data-tip]:hover > .bar, .wf-row[data-tip]:hover .wf-bar, .meter[data-tip]:hover > span, [data-tip]:hover .grow-y, [data-tip]:hover .grow-x { filter: brightness(1.18) saturate(1.1); }
 /* Dark or light, one click (sits beside the search box) */
 .ico { flex: none; vertical-align: -3px; }
+.fresh-strip { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: -12px 0 18px; font-size: 11.5px; color: var(--ink-soft); }
+.fresh-chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.fresh-chip i { width: 7px; height: 7px; border-radius: 99px; background: var(--ink-faint); flex: none; }
+.fresh-chip.good i { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 20%, transparent); }
+.fresh-chip.warn i { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 20%, transparent); }
+.fresh-chip.bad i { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 20%, transparent); }
+.fresh-chip.loading i { animation: fadeInSoft .9s ease infinite alternate; }
 .btn .ico, .file-chip .ico, .lead-sales-chip .ico, .followup-context-banner .ico, .lead-notes-banner-text .ico, .hint .ico { vertical-align: -2.5px; }
 .followup-context-banner, .lead-sales-chip, .file-chip { display: inline-flex; align-items: center; gap: 6px; }
 .followup-context-banner { display: flex; }
@@ -10893,6 +10900,51 @@ function toggleTheme(){
 }
 try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => document.querySelectorAll('.theme-btn').forEach(b => { b.outerHTML = themeButton(); })); } catch (e) {}
 
+/* ── How fresh the data is (Ofek 12 Oct, suggestion 8): a row under the dashboard's title with a dot per source (green:
+   updated within a day, orange: up to two days, red: older) and how long ago it was updated. The nightly sources come from
+   their own sync times; leads from the newest lead's arrival; jobs from the spreadsheet have no sync time, so the newest
+   job's date is shown instead. Read once every 10 minutes at most. ── */
+let FRESH = null, FRESH_LOADING = false, FRESH_AT = 0;
+async function loadFreshness(){
+  if (FRESH_LOADING || (FRESH && Date.now() - FRESH_AT < 10 * 60 * 1000)) return;
+  FRESH_LOADING = true;
+  try {
+    const [sp, calls, ins, chk] = await Promise.all([
+      sb.from('ad_spend').select('channel,synced_at').order('synced_at', { ascending: false }).limit(40),
+      sb.from('ad_calls').select('synced_at').order('synced_at', { ascending: false }).limit(1),
+      sb.from('ads_insights').select('created_at').order('created_at', { ascending: false }).limit(1),
+      sb.from('lead_email_checks').select('checked_at').order('checked_at', { ascending: false }).limit(1),
+    ]);
+    const newest = ch => ((sp.data || []).find(r => r.channel===ch) || {}).synced_at || null;
+    FRESH = { google: newest('Google Ads'), meta: newest('Meta Ads'), calls: ((calls.data || [])[0] || {}).synced_at || null,
+      insight: ((ins.data || [])[0] || {}).created_at || null, check: ((chk.data || [])[0] || {}).checked_at || null };
+    FRESH_AT = Date.now();
+  } catch (e) { FRESH = FRESH || {}; }
+  FRESH_LOADING = false;
+  const strip = document.getElementById('fresh-strip'); if (strip) strip.outerHTML = renderFreshness();
+}
+function freshAgo(iso){
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return mins < 60 ? `${mins} min ago` : mins < 48 * 60 ? `${Math.round(mins / 60)} h ago` : `${Math.round(mins / 1440)} days ago`;
+}
+function freshTone(iso, okHours, warnHours){
+  if (!iso) return 'bad';
+  const h = (Date.now() - new Date(iso).getTime()) / 36e5;
+  return h <= okHours ? 'good' : h <= warnHours ? 'warn' : 'bad';
+}
+function renderFreshness(){
+  const data = STATE.data || {};
+  const newestLead = (data.contacts || []).reduce((m, c) => { const t = String(leadArrivedAt(c) || ''); return t > m ? t : m; }, '');
+  const newestJob = (data.jobs || []).reduce((m, j) => (j.date || '') > m ? j.date : m, '');
+  const nightly = [['Google Ads', 'google'], ['Meta Ads', 'meta'], ['Google calls', 'calls'], ['AI assessment', 'insight'], ['Lead check', 'check']];
+  const chip = (label, iso, tone) => `<span class="fresh-chip ${tone}" title="${iso ? esc(new Date(iso).toLocaleString('en-AU')) : ''}"><i></i>${esc(label)} · ${iso ? freshAgo(iso) : (tone==='loading' ? '…' : 'never')}</span>`;
+  return `<div class="fresh-strip" id="fresh-strip">
+    ${nightly.map(([label, k]) => FRESH ? chip(label, FRESH[k], freshTone(FRESH[k], 26, 50)) : chip(label, null, 'loading')).join('')}
+    ${chip('Newest lead', newestLead || null, freshTone(newestLead || null, 24, 72))}
+    <span class="fresh-chip info" title="The jobs spreadsheet has no sync time: this is the newest job's date"><i></i>Newest job · ${newestJob ? fmtDateShort(newestJob) : '—'}</span>
+  </div>`;
+}
+
 function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderChaseBubbles, 0); setTimeout(mdTick, 0); } catch(e) {}
   const app = document.getElementById('app');
   if (AUTH.status === 'loading') { app.innerHTML = renderAuthLoading(); return; }
@@ -10950,6 +11002,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   else if (UI.tab==='settings') content.innerHTML = renderSettings(profile);
   if (STATE.loadErrors && STATE.loadErrors.length) content.insertAdjacentHTML('afterbegin', `<div class="card" style="border:1px solid var(--bad);background:var(--bad-soft);margin-bottom:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Some data did not load: ${esc(STATE.loadErrors.join(', '))}.</b> What you see may be incomplete. Don't re-enter anything that looks missing.</div><button class="btn small" onclick="location.reload()">Reload</button></div>`);
   if (listScroll) listScroll();
+  if (UI.tab==='dashboard' || UI.tab==='adsGoogle') { const head = content.querySelector('.page-head'); if (head) { head.insertAdjacentHTML('afterend', renderFreshness()); loadFreshness(); } }
   motionAfterRender(motionBefore, flipBefore);
 }
 // A redraw of the same page keeps each pipeline column and the inbox list where they were scrolled (Ofek 12 Oct: after
