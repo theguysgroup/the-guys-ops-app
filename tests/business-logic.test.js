@@ -68,7 +68,7 @@ const DECLS = [
   // Google Ads: real leads vs Google's count, tracking problems (9 Oct)
   'adsConvKind', 'adsConvShortName', 'adsTracking',
   // The nightly lead check: info@ emails vs the app (9 Oct)
-  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail',
+  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'sameLiveRow',
   'LEAD_CHECK_DAYS', 'leadPhoneKey', 'leadCheckOpen', 'leadCheckLatest', 'leadDivisionFromSubject', 'adsEmailCheck',
 ];
 
@@ -981,6 +981,23 @@ function testFieldChecks(sb){
   assertEqual(['ofek@theguys.com.au', 'a@b.co', '', 'name@gmail', 'bad email@x.com'].map(v => sb.checkEmail(v)===''), [true, true, true, false, false], 'checkEmail: real addresses pass, a missing domain or a space does not');
 }
 
+function testLiveRowsAndStageMemo(sb){
+  console.log('\nLive updates that change nothing, and the remembered stage');
+  const local = { id:'a', status:'Chasing', stageChangedAt:'2026-10-12T08:00:00.000Z', tags:['Callback'], nextFollowUp:'', activityLog:[1] };
+  assertEqual(sb.sameLiveRow(local, { id:'a', status:'Chasing', stageChangedAt:'2026-10-12T08:00:00+00:00', tags:['Callback'], nextFollowUp:'' }), true, 'sameLiveRow: the echo of a change made here (time written differently by the database) is the same');
+  assertEqual(sb.sameLiveRow(local, { id:'a', status:'Quoted', stageChangedAt:'2026-10-12T08:00:00+00:00', tags:['Callback'], nextFollowUp:'' }), false, 'sameLiveRow: another stage is a change');
+  assertEqual(sb.sameLiveRow(local, { id:'a', status:'Chasing', stageChangedAt:'2026-10-12T08:00:01+00:00', tags:['Callback'], nextFollowUp:'' }), false, 'sameLiveRow: another moment is a change');
+  assertEqual(sb.sameLiveRow(local, { id:'a', status:'Chasing', tags:['Callback', 'Complaint'] }), false, 'sameLiveRow: a new tag is a change');
+  assertEqual(sb.sameLiveRow({ id:'a' }, { id:'a', email:'' }), false, 'sameLiveRow: a field this screen does not have yet is a change');
+  assertEqual(sb.sameLiveRow(undefined, { id:'a' }), false, 'sameLiveRow: a lead this screen does not have is new');
+  sb.STATE.data.jobs = []; sb.JOB_CACHE.index = null;
+  const c = { id:'m1', fullName:'Memo Person', status:'New' };
+  const first = sb.leadStage(c); c.status = 'Chasing'; const second = sb.leadStage(c);
+  sb.STATE.data.jobs.push({ id:'j1', contactId:'m1', customerName:'Memo Person', date:'2026-10-01' }); const third = sb.leadStage(c);
+  c.status = 'Not Relevant'; sb.STATE.data.jobs = []; sb.JOB_CACHE.index = null; const fourth = sb.leadStage(c);
+  assertEqual([first, second, third, fourth], ['New', 'Chasing', 'Won', 'Lost'], 'leadStage: the remembered stage follows a new status and a new job');
+}
+
 function testEmployeeCard(sb){
   console.log('\nThe employee card: ABN check, document expiry, missing details, reminders');
   assertEqual(['51 824 753 556', '51824753556', '51824753557', '1234', ''].map(sb.abnValid), [true, true, false, false, false], 'abnValid: the ATO check (a one-digit typo fails)');
@@ -1028,6 +1045,7 @@ testLeadEmailCheck(loadSandbox());
 testEmployeeCard(loadSandbox());
 testCountingNumbers(loadSandbox());
 testFieldChecks(loadSandbox());
+testLiveRowsAndStageMemo(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -486,6 +486,9 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .lead-card.just-moved { animation: leadLand .55s cubic-bezier(.34,1.56,.64,1); }
 @keyframes leadLand { 0% { transform: translateY(-6px) scale(1.03); box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-lg); } 60% { transform: translateY(1px) scale(.995); } 100% { transform: none; box-shadow: var(--shadow); } }
 .lead-card { touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* A pipeline column shows a few cards at a time; the rest aren't laid out until scrolled to (the pipeline drew 3-6x faster). */
+.pipe-body > .lead-card { content-visibility: auto; contain-intrinsic-size: auto 150px; }
+body.pipe-dragging .pipe-body > .lead-card:hover { transform: none; box-shadow: none; }
 .lead-card.drag-origin { opacity: .32; border-style: dashed; transform: none !important; box-shadow: none !important; }
 .drag-ghost { position: fixed; left: 0; top: 0; z-index: 500; pointer-events: none; will-change: transform; }
 .drag-ghost > .lead-card { margin: 0; cursor: grabbing; transition: transform .18s var(--ease-out), box-shadow .18s ease; }
@@ -2295,7 +2298,18 @@ function mapContactRow(c){
 // the middle of typing — a reply, a Closing form, a setting — and where their cursor is, instead of wiping it.
 function fieldKey(el){ return el.id ? '#'+el.id : (el.getAttribute('onchange') || el.getAttribute('oninput') || el.getAttribute('name') || ''); }
 document.addEventListener('input', e => { const t = e.target; if (t && t.matches && t.matches('input,textarea,select')) t.dataset.dirty = '1'; }, true);
+// Live updates often come in bursts (a lead's row and its messages, several leads at once), so they're drawn together a
+// moment later, and never while a pipeline card is being dragged: a redraw mid-drag took the card and its column out
+// from under the pointer (Ofek 12 Oct: the pipeline didn't feel smooth).
+let LIVE_RENDER_TIMER = null;
 function renderKeepingInput(){
+  if (LIVE_RENDER_TIMER) return;
+  LIVE_RENDER_TIMER = setTimeout(() => {
+    LIVE_RENDER_TIMER = null;
+    if (PIPE_DRAG && PIPE_DRAG.dragging) renderKeepingInput(); else renderKeepingInputNow();
+  }, 120);
+}
+function renderKeepingInputNow(){
   const app = document.getElementById('app');
   if (!app) { render(); return; }
   const keep = [...app.querySelectorAll('input,textarea,select')].filter(el => el.dataset.dirty==='1' && el.type!=='file')
@@ -2325,9 +2339,23 @@ function handleContactRealtimeChange(payload){ if (PRESENT) return;
   } else {
     // Preserve the existing activityLog — it isn't part of the contacts row itself
     // (comes from the separate activity_log table, joined only at initial load).
-    STATE.data.contacts[idx] = { ...mapContactRow(payload.new), activityLog: STATE.data.contacts[idx].activityLog };
+    const fresh = mapContactRow(payload.new), same = sameLiveRow(STATE.data.contacts[idx], fresh);
+    STATE.data.contacts[idx] = { ...fresh, activityLog: STATE.data.contacts[idx].activityLog };
+    // The echo of a change made on this screen, already drawn: it used to redraw the whole page (after every pipeline
+    // move). Only the floating alerts are brought up to date (a reply clears "new lead waiting").
+    if (same) { try { renderChaseBubbles(); } catch (e) {} return; }
   }
   renderKeepingInput();
+}
+// True when a row from the database (a lead, a job) holds what this screen already has (times compared as moments, since the
+// database writes "…+00:00" where the app wrote "…Z").
+function sameLiveRow(local, fresh){
+  if (!local) return false;
+  return Object.keys(fresh).every(k => {
+    const a = local[k], b = fresh[k];
+    if (a===b || JSON.stringify(a)===JSON.stringify(b)) return true;
+    return typeof a==='string' && typeof b==='string' && /^\d{4}-\d\d-\d\dT/.test(a) && /^\d{4}-\d\d-\d\dT/.test(b) && Date.parse(a)===Date.parse(b);
+  });
 }
 // Jobs + the Payroll tables live-update too, so the Payroll board's commission totals move the moment
 // someone marks a job Paid (or a payroll status / Ron's daily log changes) on another device.
@@ -2336,7 +2364,11 @@ function handleJobRealtimeChange(payload){ if (PRESENT) return;
   if (payload.eventType === 'DELETE') { STATE.data.jobs = STATE.data.jobs.filter(j => j.id !== payload.old.id); renderKeepingInput(); return; }
   const idx = STATE.data.jobs.findIndex(j => j.id === payload.new.id);
   if (idx === -1) STATE.data.jobs.push({ ...mapJobRow(payload.new), activityLog: [] });
-  else STATE.data.jobs[idx] = { ...mapJobRow(payload.new), activityLog: STATE.data.jobs[idx].activityLog };
+  else {
+    const fresh = mapJobRow(payload.new), same = sameLiveRow(STATE.data.jobs[idx], fresh);
+    STATE.data.jobs[idx] = { ...fresh, activityLog: STATE.data.jobs[idx].activityLog };
+    if (same) return;   // a sync that rewrote a job without changing it, or the echo of a change made here
+  }
   renderKeepingInput();
 }
 function upsertLocalRow(listKey, mapped, match){
@@ -3455,11 +3487,17 @@ const LEAD_SOURCE_COLOR = { 'Google Ads':'var(--primary)', 'Meta Ads':'var(--acc
 const STAGES_NEED_DATE = ['Quoted','Follow-up'];
 // The stage rules (date lock) apply to leads created or moved from this day on; older leads get them when the old data is migrated.
 const PIPELINE_RULES_FROM = '2026-09-27';
+// Kept per lead in the job index (so it starts fresh on every redraw and whenever the jobs change): a redraw asks for
+// each lead's stage several times, ~6,000 times on the pipeline (Ofek 12 Oct: the pipeline was slow).
 function leadStage(c){
   if (!c) return 'New';
-  if (c.status==='Won' || leadWonByJob(c)) return 'Won';
-  if (c.status==='Lost' || c.status==='Not Relevant') return 'Lost';
-  return LEAD_STATUSES.includes(c.status) ? c.status : 'New';
+  const memo = jobIndex().stages, m = memo.get(c);
+  if (m && m.status===c.status && m.name===c.fullName && m.reopened===c.reopenedAt) return m.stage;
+  const stage = (c.status==='Won' || leadWonByJob(c)) ? 'Won'
+    : (c.status==='Lost' || c.status==='Not Relevant') ? 'Lost'
+    : LEAD_STATUSES.includes(c.status) ? c.status : 'New';
+  memo.set(c, { status: c.status, name: c.fullName, reopened: c.reopenedAt, stage });
+  return stage;
 }
 // Same answer as contactHasJob (job linked by id, else same customer name), but from an index rebuilt once per render,
 // because the CRM asks it for every lead many times while sorting and drawing.
@@ -3472,7 +3510,7 @@ function jobIndex(){
     const ids = new Map(), names = new Map();
     const keep = (m, k, d) => { if (k && (!m.has(k) || String(d||'') > m.get(k))) m.set(k, String(d||'')); };
     jobs.forEach(j => { keep(ids, j.contactId, j.date); keep(names, (j.customerName||'').trim().toLowerCase(), j.date); });
-    ix = JOB_CACHE.index = { jobs, len: jobs.length, ids, names };
+    ix = JOB_CACHE.index = { jobs, len: jobs.length, ids, names, stages: new WeakMap() };
   }
   return ix;
 }
@@ -4966,7 +5004,8 @@ function renderLeadCard(c){
   const today = todayStr();
   const overdue = followupDue(c, today) && c.nextFollowUp < today;
   const dueToday = followupDue(c, today) && c.nextFollowUp === today;
-  return `<div class="lead-card" style="${stageVars(leadStage(c))}" data-lead-id="${c.id}" data-key="${c.id}" onpointerdown="pipeDragDown(event,'${c.id}')" onclick="if(!pipeJustDragged()) goToLeadConversation('${c.id}')" tabindex="0" onkeydown="if(event.key==='Enter'){goToLeadConversation('${c.id}')}">
+  const stage = leadStage(c);
+  return `<div class="lead-card" style="${stageVars(stage)}" data-lead-id="${c.id}" data-key="${c.id}" onpointerdown="pipeDragDown(event,'${c.id}')" onclick="if(!pipeJustDragged()) goToLeadConversation('${c.id}')" tabindex="0" onkeydown="if(event.key==='Enter'){goToLeadConversation('${c.id}')}">
     <div class="lead-card-top">
       <div class="lead-card-avatar">${esc(initials(c.fullName))}</div>
       <div class="lead-name">${esc(c.fullName)}${unreadBadge(c)}</div>
@@ -4979,17 +5018,24 @@ function renderLeadCard(c){
       ${leadSubChips(c)}
     </div>
     <div class="lead-meta mono">${esc(c.phone||'—')}</div>
-    ${leadStage(c)==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
+    ${stage==='Chasing' ? `<div style="margin-top:6px">${chaseTick(c)}</div>` : ''}
     ${quoteStale(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Quote idle 14+ days</div>` : ''}
     ${chaseTooLong(c) ? `<div class="lead-due overdue" style="margin-top:4px">⚠ Chasing 21+ days — decide</div>` : ''}
-    ${leadStage(c)==='Booked' && c.bookedFor ? `<div class="lead-due" style="margin-top:4px">Job ${fmtDateShort(c.bookedFor)}</div>` : ''}
-    ${leadStage(c)==='Lost' ? `<div class="hint" style="margin-top:4px">${esc(lostReasonLabel(lostReasonOf(c)))}</div>` : ''}
+    ${stage==='Booked' && c.bookedFor ? `<div class="lead-due" style="margin-top:4px">Job ${fmtDateShort(c.bookedFor)}</div>` : ''}
+    ${stage==='Lost' ? `<div class="hint" style="margin-top:4px">${esc(lostReasonLabel(lostReasonOf(c)))}</div>` : ''}
     ${(contactJobsTotal(c) ?? c.salesValue) ? `<div class="lead-sales-chip">${ico('dollar', 13)} ${fmtMoney(contactJobsTotal(c) ?? c.salesValue)}</div>` : ''}
     ${c.nextFollowUp ? `<div class="lead-due ${overdue?'overdue':(dueToday?'today':'')}">${overdue?'⚠ Overdue':(dueToday?'● Due today':'○ Follow up')} · ${fmtDateShort(c.nextFollowUp)}</div>` : ''}
-    ${leadStage(c)==='Won' ? '' : `<select class="lead-move" onclick="event.stopPropagation()" onchange="moveLead('${c.id}',this.value)" aria-label="Move ${esc(c.fullName)} to another stage">
-      ${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${leadStage(c)===s?'selected':''}>${stageLabel(s)}</option>`).join('')}
+    ${stage==='Won' ? '' : `<select class="lead-move" onpointerdown="fillStageSelect(this)" onfocus="fillStageSelect(this)" onclick="event.stopPropagation()" onchange="moveLead('${c.id}',this.value)" aria-label="Move ${esc(c.fullName)} to another stage">
+      <option value="${stage}" selected>${stageLabel(stage)}</option>
     </select>`}
   </div>`;
+}
+// A card's stage dropdown is drawn with just its current stage and gets the others as it's about to open (pressed, or
+// reached with the keyboard): ~200 dropdowns with every stage in them made the pipeline slow to draw (Ofek 12 Oct).
+function fillStageSelect(sel){
+  if (!sel || sel.options.length > 1) return;
+  const cur = sel.value;
+  sel.innerHTML = LEAD_STAGE_PICKABLE.map(s => `<option value="${s}" ${s===cur ? 'selected' : ''}>${stageLabel(s)}</option>`).join('');
 }
 /* ── Pipeline drag (Ofek 12 Oct, part 2, from the video): the card lifts off, tilts and follows the pointer, a faint
    copy stays where it was, the column under it lights up, and on letting go it flies into the column and lands with a
@@ -5483,7 +5529,7 @@ function renderCrmBody(data){
 }
 function renderCrm(profile, data){
   const today = todayStr();
-  const contacts = opsFilteredContacts(data);
+  const shownCount = crmFilteredContactsUnsorted(data).length;
   const needsAction = data.contacts.filter(c => followupDue(c, today));
   const chasing = data.contacts.filter(c => leadStage(c)==='Chasing');
   const chasingCalledToday = chasing.filter(c => chaseCounter(c).calledToday).length;
@@ -5492,7 +5538,7 @@ function renderCrm(profile, data){
 
   return `
     <div class="page-head">
-      <div><h1 class="page-title">CRM</h1><div class="page-sub">${contacts.length} lead${contacts.length===1?'':'s'} · Ron's day-to-day working board</div></div>
+      <div><h1 class="page-title">CRM</h1><div class="page-sub">${shownCount} lead${shownCount===1?'':'s'} · Ron's day-to-day working board</div></div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn small ${isInbox?'primary':''}" onclick="setCrmView('inbox')">Inbox</button>
         <button class="btn small ${UI.crm.view==='pipeline'?'primary':''}" onclick="setCrmView('pipeline')">Pipeline</button>
