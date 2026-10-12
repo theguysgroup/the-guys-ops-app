@@ -4884,8 +4884,10 @@ function pipelinePatchMove(c, from){
   body.insertBefore(card, body.firstChild); body.scrollTop = 0;
   const fromBody = fromCol.querySelector('.pipe-body');
   if (!fromBody.querySelector('.lead-card')) fromBody.insertAdjacentHTML('afterbegin', '<div class="pipe-empty">No leads</div>');
-  const bump = (col, d) => { const el = col.querySelector('.pipe-count'); if (!el) return; el.textContent = Math.max(0, (parseInt(el.textContent, 10) || 0) + d); if (el.animate && !motionReduced()) el.animate([{ transform: 'scale(1.3)' }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' }); };
-  bump(fromCol, -1); bump(toCol, +1);
+  // the counts come from the data (the text may still be counting up from the page's entrance)
+  const shown = opsFilteredContacts(filterForProfile(STATE.data, getCurrentProfile()));
+  const setCount = (col, st) => { const el = col.querySelector('.pipe-count'); if (!el) return; el.textContent = shown.filter(x => leadStage(x)===st).length; if (el.animate && !motionReduced()) el.animate([{ transform: 'scale(1.3)' }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' }); };
+  setCount(fromCol, from); setCount(toCol, to);
   // moved from its dropdown: it flies from where it was (a dragged card already flew)
   if (was && card.animate && !motionReduced() && MOTION.noFlip!==c.id) { const now = card.getBoundingClientRect(); card.animate([{ transform: `translate(${was.left - now.left}px, ${was.top - now.top}px)` }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.22,1,.36,1)' }); }
   MOTION.noFlip = null;
