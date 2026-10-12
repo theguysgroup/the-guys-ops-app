@@ -262,6 +262,43 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
   .sk-side .sk-nav, .sk-side .sk-search { display: none; }
   .sk-main { padding: 18px 14px; }
 }
+/* Customer hover card (Ofek 12 Oct, suggestion 7). */
+.lead-hover { position: fixed; z-index: 450; width: 292px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 13px 14px 10px; font-size: 12.5px; line-height: 1.4; animation: lhIn .16s cubic-bezier(.2,.9,.3,1.15); }
+.lead-hover.leaving { opacity: 0; transform: translateY(3px); transition: opacity .12s ease, transform .12s ease; }
+@keyframes lhIn { from { opacity: 0; transform: translateY(5px) scale(.98); } to { opacity: 1; transform: none; } }
+.lh-head { display: flex; gap: 10px; align-items: center; margin-bottom: 9px; }
+.lh-head b { font-size: 14px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lh-avatar { width: 36px; height: 36px; border-radius: 99px; flex: none; display: grid; place-items: center; font-weight: 700; font-size: 12.5px; background: var(--stage, var(--primary-soft)); color: var(--stage-ink, var(--primary-strong)); }
+.lh-chips { display: flex; gap: 6px; margin-top: 3px; flex-wrap: wrap; align-items: center; font-size: 11px; }
+.lh-row { display: flex; gap: 8px; align-items: center; padding: 3px 0; color: var(--ink-soft); min-width: 0; }
+.lh-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.lh-row .ico { color: var(--ink-faint); }
+.lh-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.lh-tags span { font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 99px; background: var(--surface-2); color: var(--ink-soft); }
+.lh-foot { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line-soft); font-size: 11px; color: var(--ink-faint); }
+[data-lead-hover] { cursor: pointer; }
+/* A lead won and a new booking each get their own small moment (Ofek 12 Oct, suggestion 9). */
+.celebrate { position: fixed; top: calc(18px + env(safe-area-inset-top, 0px)); left: 50%; z-index: 460; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 9px 18px 9px 9px; border-radius: 99px; background: var(--ink); color: var(--paper); font-size: 13.5px; font-weight: 700; box-shadow: var(--shadow-lg); pointer-events: none; white-space: nowrap; max-width: calc(100vw - 32px); }
+.celebrate > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.celebrate-ico { position: relative; width: 30px; height: 30px; border-radius: 99px; display: grid; place-items: center; flex: none; color: #fff; }
+.celebrate.won .celebrate-ico { background: linear-gradient(135deg, #f2c94c, var(--stage-won)); }
+.celebrate.booked .celebrate-ico { background: var(--stage-booked); }
+.celebrate.won { animation: winIn .55s cubic-bezier(.34,1.56,.64,1) both; }
+.celebrate.booked { animation: bookIn .5s cubic-bezier(.22,1,.36,1) both; }
+.celebrate.booked .celebrate-ico .ico { animation: stamp .55s .18s cubic-bezier(.34,1.56,.64,1) both; }
+.celebrate.leaving { opacity: 0; transform: translateX(-50%) translateY(-10px) scale(.96); transition: opacity .3s ease, transform .3s ease; }
+@keyframes winIn { from { opacity: 0; transform: translateX(-50%) scale(.6); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
+@keyframes bookIn { from { opacity: 0; transform: translateX(-50%) translateY(-28px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+@keyframes stamp { from { opacity: 0; transform: scale(1.7) rotate(-14deg); } to { opacity: 1; transform: none; } }
+.celebrate-ring { position: absolute; inset: 0; border-radius: 99px; border: 2px solid var(--stage-booked); animation: ring 1s .25s ease-out both; }
+.celebrate-ring + .celebrate-ring { animation-delay: .45s; }
+@keyframes ring { from { opacity: .8; transform: scale(1); } to { opacity: 0; transform: scale(2.4); } }
+.celebrate-bit { position: absolute; left: 15px; top: 15px; width: 6px; height: 6px; border-radius: 2px; pointer-events: none; }
+.lead-card.won-glow, .crm-inbox-row.won-glow { animation: wonGlow 1.4s ease-out; }
+.lead-card.booked-glow, .crm-inbox-row.booked-glow { animation: bookedGlow 1.4s ease-out; }
+@keyframes wonGlow { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--stage-won) 60%, transparent); } 35% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--stage-won) 18%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@keyframes bookedGlow { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--stage-booked) 60%, transparent); } 35% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--stage-booked) 18%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .celebrate, .celebrate .ico, .celebrate-ring { animation: none !important; } .celebrate-ring, .celebrate-bit { display: none; } }
 /* Phone polish (Ofek 12 Oct: "it has to look 100% on the phone too"). */
 .crm-filter-toggle, .pipe-jump { display: none; }
 @media (max-width: 900px) {
@@ -2748,6 +2785,8 @@ function toastDismiss(t, now){
 /* ── Icons (Ofek 12 Oct, suggestion 5): one set of thin line icons instead of emoji, in the app's own colours. ── */
 const ICONS = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  trophy: '<path d="M8 21h8M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M17 5.5h2.5V7a3 3 0 0 1-3 3M7 5.5H4.5V7a3 3 0 0 0 3 3"/>',
+  calendarCheck: '<rect x="3" y="4.5" width="18" height="16.5" rx="2"/><path d="M16 2.5v4M8 2.5v4M3 9.5h18"/><path d="m9 15 2 2 4-4"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   tasks: '<rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
@@ -5381,6 +5420,7 @@ function pipelinePatchMove(c, from){
   if (was && card.animate && !motionReduced() && MOTION.noFlip!==c.id) { const now = card.getBoundingClientRect(); card.animate([{ transform: `translate(${was.left - now.left}px, ${was.top - now.top}px)` }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.22,1,.36,1)' }); }
   MOTION.noFlip = null;
   try { renderChaseBubbles(); } catch (e) {}
+  trackCelebrations();
   return true;
 }
 
@@ -5773,7 +5813,7 @@ function renderCrmTable(allContacts){
     const overdue = followupDue(c, today) && c.nextFollowUp < today;
     return `<tr data-key="${c.id}"${bulkIds().includes(c.id) ? ' class="bulk-on"' : ''}>
       <td class="bulk-td" onclick="event.stopPropagation()"><input type="checkbox" class="bulk-check" data-bulk="${c.id}" ${bulkIds().includes(c.id) ? 'checked' : ''} aria-label="Select ${esc(c.fullName)}" onchange="toggleBulk('${c.id}', this.checked);this.closest('tr').classList.toggle('bulk-on', this.checked)"></td>
-      <td style="border-inline-start:4px solid ${stageColor(leadStage(c))};cursor:pointer" onclick="goToLeadConversation('${c.id}')"><span style="display:flex;align-items:center;gap:8px"><span class="table-row-avatar" style="${stageVars(leadStage(c))}">${esc(initials(c.fullName))}</span>${esc(c.fullName)}${unreadBadge(c)}</span></td>
+      <td style="border-inline-start:4px solid ${stageColor(leadStage(c))};cursor:pointer" onclick="goToLeadConversation('${c.id}')"><span style="display:flex;align-items:center;gap:8px"${leadHoverAttr(c)}><span class="table-row-avatar" style="${stageVars(leadStage(c))}">${esc(initials(c.fullName))}</span>${esc(c.fullName)}${unreadBadge(c)}</span></td>
       <td class="mono">${esc(c.phone||'—')}</td>
       <td>${statusSelect('leadDivision', c.id, c.division, LEAD_DIVISIONS, ()=>'neutral', v=>v, false)}${leadSubDivisions(c).length ? `<div class="hint" style="margin-top:3px;font-size:11px">${esc(leadSubDivisions(c).join(', '))}</div>` : ''}</td>
       <td>${statusSelect('leadSource', c.id, c.source, LEAD_SOURCES, ()=>'neutral', sourceLabel, false)}${leadSubSource(c) ? `<div class="hint" style="margin-top:3px;font-size:11px">${esc(leadSubSource(c))}</div>` : ''}</td>
@@ -6307,7 +6347,7 @@ function renderJobRows(jobs){
     const paid = j.paymentStatus==='Paid', com = jobCommissionAmount(j);
     return `<tr class="${j.id===sel ? 'sel' : ''}" data-key="${j.id}" tabindex="0" onclick="selectJob('${j.id}')" onkeydown="if(event.key==='Enter'){event.preventDefault();selectJob('${j.id}');}">
       <td class="mono">${fmtDateShort(j.date)}</td>
-      <td><span class="job-cust">${esc(j.customerName||'—')}</span><span class="job-sub">${j.invoiceNumber ? '#'+esc(j.invoiceNumber) : 'no invoice #'}</span></td>
+      <td><span class="job-cust"${canViewSection(getCurrentProfile(), 'crm') ? leadHoverAttr(contactForJob(j)) : ''}>${esc(j.customerName||'—')}</span><span class="job-sub">${j.invoiceNumber ? '#'+esc(j.invoiceNumber) : 'no invoice #'}</span></td>
       <td>${techTag(j.technician)}</td>
       <td>${divName(j.jobType||'')}</td>
       <td class="num">${fmtMoney(j.amount)}<span class="job-sub">${j.includesGST ? 'GST '+fmtMoney(jobGst(j)) : 'no GST'}</span></td>
@@ -8927,7 +8967,7 @@ function resolveCustomerInput(id){
 function customerNameCell(name, contactId){
   const c = contactId ? ((STATE.data.contacts||[]).find(x => x.id===contactId) || findContactByName(name)) : findContactByName(name);
   if (!c) return esc(name);
-  return `<span style="cursor:pointer;color:var(--primary-strong);text-decoration:underline;text-decoration-style:dotted" onclick="event.stopPropagation();goToLeadConversation('${c.id}')" title="Open conversation with ${esc(c.fullName)}">${esc(name)}</span>`;
+  return `<span style="cursor:pointer;color:var(--primary-strong);text-decoration:underline;text-decoration-style:dotted"${leadHoverAttr(c)} onclick="event.stopPropagation();goToLeadConversation('${c.id}')" aria-label="Open conversation with ${esc(c.fullName)}">${esc(name)}</span>`;
 }
 // Every customer name opens that customer: their CRM card when this person can see the CRM and the name
 // belongs to a lead, otherwise the job itself. Every invoice number opens its job.
@@ -8935,7 +8975,7 @@ function custLink(name, contactId, jobId){
   const pr = getCurrentProfile();
   const job = jobId ? (STATE.data.jobs||[]).find(j => j.id===jobId) : null;
   const c = contactId ? contactById(contactId) : (job ? contactForJob(job) : findContactByName(name));
-  if (c && pr && canViewSection(pr,'crm')) return `<span class="xlink" onclick="event.stopPropagation();closeModal();goToLeadConversation('${c.id}')" title="Open ${esc(c.fullName)}'s card">${esc(name||c.fullName)}</span>`;
+  if (c && pr && canViewSection(pr,'crm')) return `<span class="xlink"${leadHoverAttr(c)} onclick="event.stopPropagation();closeModal();goToLeadConversation('${c.id}')" aria-label="Open ${esc(c.fullName)}'s card">${esc(name||c.fullName)}</span>`;
   if (jobId && pr && canViewSection(pr,'jobs')) return `<span class="xlink" onclick="event.stopPropagation();goToJobFromSearch('${jobId}')" title="Open the job">${esc(name||'—')}</span>`;
   return esc(name||'—');
 }
@@ -11277,6 +11317,100 @@ function motionSwap(el, html){
   if (before) runNumbers(el, before, false);
 }
 
+/* ── Customer hover card (Ofek 12 Oct, suggestion 7): resting the mouse on a customer's name shows a small card with who
+   they are and where they stand (stage, phone, last contact, jobs), without opening anything. Computers only: a phone has
+   no hover, and a tap there opens the customer as before. ── */
+function leadHoverAttr(c){ return c ? ` data-lead-hover="${c.id}"` : ''; }
+function renderLeadHoverCard(c){
+  const st = leadStage(c), jobs = (STATE.data.jobs || []).filter(j => j.contactId===c.id).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const total = jobs.reduce((sum, j) => sum + (Number(j.amount) || 0), 0), last = jobs[0], lc = lastContactedAt(c), tags = visibleTags(c);
+  const row = (icon, html) => html ? `<div class="lh-row">${ico(icon, 14)}<span>${html}</span></div>` : '';
+  return `<div class="lh-head"><span class="lh-avatar" style="${stageVars(st)}">${esc(initials(c.fullName))}</span>
+      <div style="min-width:0"><b>${esc(c.fullName)}</b><div class="lh-chips">${stageBadge(st)}${c.division ? divName(c.division) : ''}</div></div></div>
+    ${row('phone', c.phone ? `<span class="mono">${esc(c.phone)}</span>` : '')}
+    ${row('mail', c.email ? esc(c.email) : '')}
+    ${row('target', esc(sourceLabel(c.source)) + (leadSubSource(c) ? ' · ' + esc(leadSubSource(c)) : ''))}
+    ${row('history', lc ? 'Last contact ' + esc(freshAgo(lc)) : '')}
+    ${row('calendar', c.nextFollowUp ? 'Follow up ' + esc(fmtDateShort(c.nextFollowUp)) : '')}
+    ${row('briefcase', jobs.length ? `${jobs.length} job${jobs.length===1 ? '' : 's'} · ${fmtMoney(total)}${last ? ` · last ${esc(fmtDateShort(last.date))}${last.technician ? ' with ' + esc(last.technician) : ''}` : ''}` : '')}
+    ${tags.length ? `<div class="lh-tags">${tags.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+    <div class="lh-foot">Click to open</div>`;
+}
+(function leadHoverCards(){
+  if (!window.matchMedia || !matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+  let card = null, anchor = null, showT = 0, hideT = 0;
+  const hide = () => {
+    clearTimeout(showT); clearTimeout(hideT); anchor = null;
+    if (card) { const old = card; card = null; old.classList.add('leaving'); setTimeout(() => old.remove(), 130); }
+  };
+  const show = el => {
+    const c = contactById(el.dataset.leadHover);
+    if (!c || !el.isConnected || PIPE_DRAG) return;
+    if (card) card.remove();
+    card = document.createElement('div'); card.className = 'lead-hover'; card.setAttribute('role', 'tooltip');
+    card.innerHTML = renderLeadHoverCard(c);
+    card.addEventListener('mouseenter', () => clearTimeout(hideT));
+    card.addEventListener('mouseleave', () => { hideT = setTimeout(hide, 160); });
+    document.body.appendChild(card);
+    const r = el.getBoundingClientRect(), w = card.offsetWidth, h = card.offsetHeight;
+    let y = r.bottom + 8; if (y + h > window.innerHeight - 8) y = Math.max(8, r.top - h - 8);
+    card.style.left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8) + 'px'; card.style.top = y + 'px';
+  };
+  document.addEventListener('mouseover', e => {
+    const el = e.target.closest && e.target.closest('[data-lead-hover]'); if (!el) return;
+    if (el===anchor) { clearTimeout(hideT); return; }
+    clearTimeout(showT); clearTimeout(hideT);
+    anchor = el; showT = setTimeout(() => { if (anchor===el) show(el); }, 420);
+  });
+  document.addEventListener('mouseout', e => {
+    const el = e.target.closest && e.target.closest('[data-lead-hover]');
+    if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+    clearTimeout(showT); hideT = setTimeout(hide, 160);
+  });
+  ['scroll', 'mousedown', 'keydown'].forEach(type => document.addEventListener(type, ev => {
+    if (ev.target && ev.target.closest && ev.target.closest('.lead-hover')) return;
+    hide();
+  }, true));
+})();
+
+/* ── A lead won and a new booking (Ofek 12 Oct, suggestion 9): each gets its own small moment at the top of the screen.
+   Won: a trophy that pops in with a few sparks. A booking: a calendar that stamps a tick, with a ripple. The lead's card
+   or row glows if it is on screen. It follows every change, including someone else's (Ron books, a job comes in from
+   the spreadsheet), and several at once become one message. Only for people who see the CRM. ── */
+const CELEBRATE = { stages: null, busy: 0 };
+function trackCelebrations(){
+  const p = getCurrentProfile();
+  if (!STATE.dataLoaded || PRESENT || !p || !canViewSection(p, 'crm')) return;
+  const now = new Map(), fresh = [];
+  for (const c of STATE.data.contacts) now.set(c.id, leadStage(c));
+  if (CELEBRATE.stages) now.forEach((st, id) => { const was = CELEBRATE.stages.get(id); if (was && was!==st && (st==='Won' || st==='Booked')) fresh.push({ id, st }); });
+  CELEBRATE.stages = now;
+  const won = fresh.filter(x => x.st==='Won'), booked = fresh.filter(x => x.st==='Booked');
+  if (won.length) celebrate('won', won);
+  if (booked.length) setTimeout(() => celebrate('booked', booked), won.length ? 1400 : 0);
+}
+function celebrate(kind, items){
+  const c = contactById(items[0].id); if (!c) return;
+  const many = items.length > 1;
+  const text = kind==='won' ? (many ? `${items.length} leads won` : `${c.fullName} is won`) : (many ? `${items.length} new bookings` : `New booking: ${c.fullName}`);
+  document.querySelectorAll('.celebrate').forEach(x => x.remove());
+  const el = document.createElement('div');
+  el.className = 'celebrate ' + kind; el.setAttribute('role', 'status');
+  el.innerHTML = `<span class="celebrate-ico">${kind==='booked' ? '<span class="celebrate-ring"></span><span class="celebrate-ring"></span>' : ''}${ico(kind==='won' ? 'trophy' : 'calendarCheck', 17)}</span><span>${esc(text)}</span>`;
+  document.body.appendChild(el);
+  if (kind==='won' && !motionReduced() && el.animate) {
+    const icon = el.querySelector('.celebrate-ico'), colors = ['#f2c94c', 'var(--stage-won)', '#ffffff', '#f0914c'];
+    for (let i = 0; i < 16; i++) {
+      const bit = document.createElement('span'); bit.className = 'celebrate-bit'; bit.style.background = colors[i % colors.length];
+      icon.appendChild(bit);
+      const a = (Math.PI * 2 * i) / 16 + Math.random() * .3, d = 26 + Math.random() * 22;
+      bit.animate([{ transform: 'translate(-50%,-50%) scale(1)', opacity: 1 }, { transform: `translate(calc(-50% + ${Math.cos(a) * d}px), calc(-50% + ${Math.sin(a) * d + 10}px)) rotate(${Math.random() * 360}deg) scale(.6)`, opacity: 0 }], { duration: 750 + Math.random() * 300, delay: 120, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'both' });
+    }
+  }
+  items.forEach(x => document.querySelectorAll(`.lead-card[data-lead-id="${x.id}"], .crm-inbox-row[data-key="${x.id}"]`).forEach(n => { n.classList.remove('won-glow', 'booked-glow'); void n.offsetWidth; n.classList.add(kind + '-glow'); setTimeout(() => n.classList.remove(kind + '-glow'), 1500); }));
+  setTimeout(() => { el.classList.add('leaving'); setTimeout(() => el.remove(), 320); }, 2800);
+}
+
 /* ── Chart tooltips: anything with data-tip="Title\nline\nline" shows those exact numbers beside the pointer. On a
    weekly trend line the dot and a guide line follow the week under the pointer. ── */
 function tipAttr(title, lines){ return ` data-tip="${esc([title, ...(lines || [])].filter(x => x!=='' && x!=null).join('\n'))}"`; }
@@ -11453,6 +11587,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   if (listScroll) listScroll();
   if (UI.tab==='dashboard' || UI.tab==='adsGoogle') { const head = content.querySelector('.page-head'); if (head) { head.insertAdjacentHTML('afterend', renderFreshness()); loadFreshness(); } }
   motionAfterRender(motionBefore, flipBefore);
+  trackCelebrations();
 }
 // A redraw of the same page keeps each pipeline column and the inbox list where they were scrolled (Ofek 12 Oct: after
 // moving a card, every column used to jump back to the top). Returns a function that puts them back.
