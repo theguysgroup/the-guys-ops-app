@@ -277,6 +277,58 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
   .sk-side .sk-nav, .sk-side .sk-search { display: none; }
   .sk-main { padding: 18px 14px; }
 }
+/* Settings: its own menu on the left, the page on the right; on a phone the menu is a list that opens each page (Ofek 12 Oct). */
+.set-layout { display: grid; grid-template-columns: 228px minmax(0, 1fr); gap: 28px; align-items: start; }
+.set-nav { position: sticky; top: 18px; display: flex; flex-direction: column; gap: 1px; }
+.set-search { position: relative; display: block; margin-bottom: 8px; }
+.set-search .ico { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); pointer-events: none; }
+.set-search input { padding-left: 32px; font-size: 13px; }
+.set-group { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); margin: 14px 10px 4px; }
+.set-link { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 7px; background: none; color: var(--ink-soft); font: inherit; font-size: 13.3px; text-align: left; cursor: pointer; transition: background-color .12s ease, color .12s ease; }
+.set-link:hover { background: var(--surface-2); color: var(--ink); }
+.set-link.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow); }
+.set-link.on .ico { color: var(--primary); }
+.set-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.set-page { min-width: 0; }
+.set-back { display: none; }
+.set-title { font-size: 21px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+.set-desc { color: var(--ink-soft); font-size: 13.3px; margin: 4px 0 18px; max-width: 70ch; }
+.set-sub { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 10px; }
+.set-note { display: flex; gap: 10px; align-items: flex-start; padding: 11px 14px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 12.5px; margin-bottom: 14px; }
+.set-block { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); margin-bottom: 16px; overflow: hidden; }
+.set-block-head { padding: 16px 20px 0; }
+.set-block-head h3 { font-size: 14.5px; margin: 0; font-weight: 700; }
+.set-block-head p { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-soft); }
+.set-block > .set-fields { padding: 14px 20px 18px; }
+.set-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px 16px; }
+.set-rows { margin-top: 6px; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 13px 20px; border-top: 1px solid var(--line-soft); }
+.set-row:first-child { border-top: 0; }
+.set-row-text { min-width: 0; }
+.set-row-text b { display: block; font-size: 13.5px; font-weight: 600; }
+.set-row-text span { display: block; font-size: 12.3px; color: var(--ink-soft); }
+.set-row-ctl { flex: none; display: flex; align-items: center; gap: 8px; }
+.set-input { width: 180px; }
+.set-num { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
+.set-num input { width: 76px; border: 0 !important; border-radius: 0; text-align: right; box-shadow: none !important; font-variant-numeric: tabular-nums; }
+.set-num span { align-self: stretch; display: flex; align-items: center; padding: 0 10px; font-size: 12.3px; color: var(--ink-soft); background: var(--surface-2); white-space: nowrap; }
+.set-num:focus-within { border-color: var(--primary); box-shadow: var(--focus-ring); }
+.set-page > .card { margin-bottom: 14px; }
+@media (max-width: 900px) { .set-layout { grid-template-columns: 200px minmax(0, 1fr); gap: 18px; } }
+@media (max-width: 640px) {
+  .set-layout { grid-template-columns: minmax(0, 1fr); }
+  .set-layout.show-page .set-nav { display: none; }
+  .set-layout:not(.show-page) .set-page { display: none; }
+  .set-nav { position: static; }
+  .set-link { padding: 12px 10px; font-size: 15px; border-radius: 10px; }
+  .set-link::after { content: '›'; margin-left: auto; color: var(--ink-faint); font-size: 18px; line-height: 1; }
+  .set-back { display: inline-flex; align-items: center; border: 0; background: none; color: var(--primary); font: inherit; font-weight: 600; font-size: 14.5px; padding: 2px 0 10px; cursor: pointer; }
+  .set-row { flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 16px; }
+  .set-row-ctl { flex-wrap: wrap; }
+  .set-block-head { padding: 14px 16px 0; }
+  .set-block > .set-fields { padding: 12px 16px 16px; }
+  .set-input { width: 100%; }
+}
 /* Customer hover card (Ofek 12 Oct, suggestion 7). */
 .lead-hover { position: fixed; z-index: 450; width: 292px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 13px 14px 10px; font-size: 12.5px; line-height: 1.4; animation: lhIn .16s cubic-bezier(.2,.9,.3,1.15); }
 .lead-hover.leaving { opacity: 0; transform: translateY(3px); transition: opacity .12s ease, transform .12s ease; }
@@ -10957,53 +11009,73 @@ function renderSettings(profile){
   const techs = STATE.data.employees.filter(e=>e.roles.includes('Technician') && !e.roles.includes('Owner'));
   const techCards = techs.length ? techs.map(renderTechnicianSettingsCard).join('') : emptyState('No technicians yet');
   const s = STATE.data.settings;
+  // Settings in one place with a menu of its own, like Stripe or Jobber (Ofek 12 Oct: approved from the mockup; stage 1
+  // moves what exists today into the new structure — the other pages of the mockup come in stages 2 and 3).
+  const pages = [
+    { group: 'Business', id: 'profile', icon: 'briefcase', title: 'Business details', desc: 'Shown on invoices and messages to customers, and in the app.', body: () => setBlock('Company', '', `<div class="set-fields">
+        <div class="field"><label>Trading name</label><input value="${esc(s.companyName)}" onchange="updateBusinessProfileField('companyName', this.value.trim(), 'Company name')"></div>
+        <div class="field"><label>Legal name <span class="hint">(on invoices)</span></label><input value="${esc(s.legalName)}" placeholder="The Guys Service Group Pty Ltd" onchange="updateBusinessProfileField('legalName', this.value.trim(), 'Legal name')"></div>
+        <div class="field"><label>ABN</label><input value="${esc(s.abn)}" inputmode="numeric" placeholder="11 digits" onchange="updateBusinessProfileField('abn', this.value.trim(), 'ABN')"></div>
+        <div class="field"><label>ACN</label><input value="${esc(s.acn)}" inputmode="numeric" placeholder="9 digits" onchange="updateBusinessProfileField('acn', this.value.trim(), 'ACN')"></div>
+      </div>`) },
+    { group: 'Business', id: 'money', icon: 'dollar', title: 'Tax and payments', desc: 'How amounts are counted and when money owed is flagged.', body: () => setBlock('GST', '', setRows([
+        ['GST rate', 'Used to split the GST out of amounts that include it.', `<span class="set-num"><input type="number" min="0" max="100" value="${s.gstRatePercent}" onchange="updateBusinessSetting('gstRatePercent', this.value, 'GST rate')"><span>%</span></span>`],
+      ])) + setBlock('Getting paid', '', setRows([
+        ['Default payment terms', 'For example "7 days".', `<input class="set-input" value="${esc(s.defaultPaymentTerms)}" placeholder="e.g. 7 days" onchange="updateBusinessProfileField('defaultPaymentTerms', this.value.trim(), 'Default payment terms')">`],
+        ['Flag a job as unpaid after', 'It shows in Outstanding and in Reminders.', `<span class="set-num"><input type="number" min="1" value="${s.unpaidReminderDays}" onchange="updateBusinessSetting('unpaidReminderDays', this.value, 'Unpaid reminder threshold')"><span>days</span></span>`],
+      ])) },
+    { group: 'Team', id: 'access', icon: 'idcard', title: 'People and access', desc: 'Exactly what each person sees, including Ron. A change reaches them the next time they open or refresh the app.', body: () => `<div class="set-note">${ico('alert', 16)}<span>Manager accounts see everything an owner sees except Settings, so they aren't listed here.</span></div>${cards}` },
+    { group: 'Team', id: 'pay', icon: 'wallet', title: 'Pay and commissions', desc: 'How everyone is paid. Payroll works it out from these.', body: () => `<div class="set-sub">Technicians: commission and working days</div>${techCards}`
+        + setBlock('Owners', 'A fixed weekly wage, not commission, seen only by owners.', setRows(owners.map(o => [esc(o.fullName), '', `<span class="set-num"><input type="number" min="0" value="${(s.ownerSalaries||{})[o.fullName]||0}" onchange="setOwnerSalary('${jsStr(o.fullName)}', this.value)"><span>$/week</span></span>`]))) },
+    { group: 'Customers', id: 'phone', icon: 'phone', title: 'Phone', desc: 'Who answers the business number, and what happens when nobody does.', body: () => renderPhoneSettings(s) },
+    { group: 'Customers', id: 'chat', icon: 'chat', title: 'Website chat and texts', desc: 'Conversations with customers from the website chat and by text.', body: () => renderChatSettings(s) },
+    { group: 'Account', id: 'data', icon: 'folder', title: 'Data', desc: 'Your data is yours: take it out, and see who changed what.', body: () => setBlock('Export and history', '', setRows([
+        ['Export everything', 'One file with all the data (JSON).', `<button class="btn small" onclick="exportDataAsJson()">${ico('incoming')} Export</button>`],
+        ['Settings history', 'Every change on these pages: who and when.', `<button class="btn small" onclick="openSettingsActivityModal()">${ico('history')} Open</button>`],
+      ])) },
+  ];
+  const ui = UI.settings || (UI.settings = { page: 'profile', open: false });
+  const cur = pages.find(pg => pg.id===ui.page) || pages[0];
+  let group = '';
+  const nav = pages.map(pg => {
+    const label = pg.group!==group ? `<div class="set-group">${esc(pg.group)}</div>` : ''; group = pg.group;
+    return `${label}<button type="button" class="set-link${pg.id===cur.id ? ' on' : ''}" data-search="${esc((pg.title + ' ' + pg.desc + ' ' + pg.group).toLowerCase())}" onclick="setSettingsPage('${pg.id}')">${ico(pg.icon, 16)}<span>${esc(pg.title)}</span></button>`;
+  }).join('');
   return `
     <div class="page-head">
-      <div><h1 class="page-title">Permissions &amp; Settings</h1><div class="page-sub">Decide exactly what each person sees — including Ron, whenever you choose. A change reaches that person the next time they open or refresh the app.</div></div>
-      <span style="display:flex;gap:8px">
-        <button class="btn ghost small" onclick="exportDataAsJson()">${ico('incoming')} Export all data (JSON)</button>
-        <button class="btn ghost small" onclick="openSettingsActivityModal()">${ico('history')} Settings activity</button>
-      </span>
+      <div><h1 class="page-title">Settings</h1><div class="page-sub">How the app works for the business, in one place. Changes save as you make them.</div></div>
     </div>
-    <div class="banner">Manager accounts automatically see everything an owner sees except this Settings page, so they aren't listed below.</div>
-
-    <div class="section-title">Access permissions</div>
-    ${cards}
-
-    <div class="section-title">Phone</div>
-    ${renderPhoneSettings(s)}
-    ${renderChatSettings(s)}
-
-    <div class="section-title">Technician commission rates &amp; working days</div>
-    ${techCards}
-
-    <div class="section-title">Owner salaries</div>
-    <div class="hint" style="margin-bottom:10px">Fixed weekly wage, not commission — visible only here, to owners.</div>
-    <div class="card" style="margin-bottom:14px">
-      <div class="grid-3">
-        ${owners.map(o => `<div class="field"><label>${esc(o.fullName)} — weekly ($)</label><input type="number" min="0" value="${(s.ownerSalaries||{})[o.fullName]||0}" onchange="setOwnerSalary('${jsStr(o.fullName)}', this.value)"></div>`).join('')}
-      </div>
-    </div>
-
-    <div class="section-title">Business rules</div>
-    <div class="card" style="margin-bottom:14px">
-      <div class="grid-3">
-        <div class="field"><label>Unpaid reminder threshold (days)</label><input type="number" min="1" value="${s.unpaidReminderDays}" onchange="updateBusinessSetting('unpaidReminderDays', this.value, 'Unpaid reminder threshold')"></div>
-        <div class="field"><label>GST rate (%)</label><input type="number" min="0" max="100" value="${s.gstRatePercent}" onchange="updateBusinessSetting('gstRatePercent', this.value, 'GST rate')"></div>
-      </div>
-    </div>
-
-    <div class="section-title">Business profile</div>
-    <div class="card">
-      <div class="grid-3">
-        <div class="field"><label>Company name</label><input value="${esc(s.companyName)}" onchange="updateBusinessProfileField('companyName', this.value.trim(), 'Company name')"></div>
-        <div class="field"><label>ABN</label><input value="${esc(s.abn)}" onchange="updateBusinessProfileField('abn', this.value.trim(), 'ABN')"></div>
-        <div class="field"><label>Legal name <span class="hint">(on invoices)</span></label><input value="${esc(s.legalName)}" placeholder="The Guys Service Group Pty Ltd" onchange="updateBusinessProfileField('legalName', this.value.trim(), 'Legal name')"></div>
-        <div class="field"><label>ACN</label><input value="${esc(s.acn)}" onchange="updateBusinessProfileField('acn', this.value.trim(), 'ACN')"></div>
-        <div class="field"><label>Default payment terms</label><input value="${esc(s.defaultPaymentTerms)}" placeholder="e.g. 7 days" onchange="updateBusinessProfileField('defaultPaymentTerms', this.value.trim(), 'Default payment terms')"></div>
-      </div>
+    <div class="set-layout${ui.open ? ' show-page' : ''}">
+      <nav class="set-nav" aria-label="Settings sections">
+        <label class="set-search">${ico('search', 15)}<input placeholder="Search settings" aria-label="Search settings" oninput="filterSettingsNav(this.value)"></label>
+        ${nav}
+      </nav>
+      <section class="set-page">
+        <button type="button" class="set-back" onclick="closeSettingsPage()">‹ Settings</button>
+        <h2 class="set-title">${esc(cur.title)}</h2>
+        <p class="set-desc">${esc(cur.desc)}</p>
+        ${cur.body()}
+      </section>
     </div>
   `;
+}
+// The parts every settings page is made of: a block (a card with a title) and rows of label + control, as in the mockup.
+function setBlock(title, desc, body){ return `<div class="set-block"><div class="set-block-head"><h3>${esc(title)}</h3>${desc ? `<p>${esc(desc)}</p>` : ''}</div>${body}</div>`; }
+function setRows(rows){ return `<div class="set-rows">${rows.map(([label, desc, ctl]) => `<div class="set-row"><div class="set-row-text"><b>${label}</b>${desc ? `<span>${esc(desc)}</span>` : ''}</div><div class="set-row-ctl">${ctl}</div></div>`).join('')}</div>`; }
+function setSettingsPage(id){
+  UI.settings = UI.settings || {}; UI.settings.page = id; UI.settings.open = true;
+  render();
+  if (isPhoneWidth()) window.scrollTo(0, 0);
+}
+function closeSettingsPage(){ UI.settings.open = false; render(); window.scrollTo(0, 0); }
+function filterSettingsNav(q){
+  const t = String(q || '').toLowerCase().trim();
+  document.querySelectorAll('#content .set-link').forEach(b => { b.hidden = !!t && !b.dataset.search.includes(t); });
+  document.querySelectorAll('#content .set-group').forEach(g => {
+    let n = g.nextElementSibling, any = false;
+    while (n && !n.classList.contains('set-group')) { if (n.classList.contains('set-link') && !n.hidden) any = true; n = n.nextElementSibling; }
+    g.hidden = !any;
+  });
 }
 
 /* ── Settings → Phone (Ofek, 2 Oct): who answers the business number, and when ──
