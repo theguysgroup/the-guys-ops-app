@@ -7700,6 +7700,7 @@ function adsTracking(idx, real, win){
   (real||[]).filter(x => x.win===win).forEach(x => { got[x.kind] = (got[x.kind]||0) + (Number(x.n)||0); });
   const camps = {};
   const camp = c => (camps[c || ''] ??= { campaign: c || '', gLeads:0, gNot:0, real:0 });
+  ((idx[win] && idx[win].campaign) || []).filter(r => (Number(r.cost)||0) > 0).forEach(r => camp(r.campaign));   // a campaign that spent with no lead at all is the one to see
   acts.forEach(r => { const k = adsConvKind(r.item); const c = camp(r.campaign); if (k==='form' || k==='call' || k==='chat') c.gLeads += Number(r.conversions)||0; else c.gNot += Number(r.conversions)||0; });
   (real||[]).filter(x => x.win===win && x.kind!=='call_short').forEach(x => { camp(x.campaign).real += Number(x.n)||0; });
   Object.values(camps).forEach(c => { c.gLeads = r2(c.gLeads); c.gNot = r2(c.gNot); });
@@ -7724,34 +7725,69 @@ function adsTracking(idx, real, win){
   const realTotal = got.form + got.chat + got.call60;
   return { google, gTotal, got, realTotal, campaigns: Object.values(camps).sort((a, b) => (!a.campaign) - (!b.campaign) || (b.real + b.gLeads) - (a.real + a.gLeads)), issues, noData };   // "campaign not known" last
 }
+// Each window ends the day before the night it was pulled (Sydney) and runs back N days: pulled on the morning of 13 Oct,
+// "14 days" is 29 Sep–12 Oct. From 29 Sep every real lead is counted as a conversion (website calls from 29 Sep, the
+// combined page's forms from about 2 Oct, Google Ads Master 13 Oct); before that "no conversion" is not reliable, so the
+// no-conversion lists are judged only on a window that starts on or after this day.
+const ADS_CLEAN_FROM = '2026-09-29';
+const ADS_WIN_DAYS = { '7d':7, '14d':14, '30d':30, '60d':60, '90d':90 };
+function adsWinRange(idx, w){
+  const rows = (idx[w] && (idx[w].campaign || [])) || [];
+  const at = rows.reduce((m, r) => r.updated_at > m ? r.updated_at : m, '');
+  if (!at) return null;
+  const pulled = new Date(at).toLocaleDateString('en-CA', { timeZone:'Australia/Sydney' });   // the Sydney day of the pull
+  const end = shiftDays(pulled, -1), start = shiftDays(end, -(ADS_WIN_DAYS[w] - 1));
+  return { start, end };
+}
+// The window the no-conversion lists are judged on: the chosen one if it starts on or after the clean day, otherwise the
+// longest window that does (the shortest one if none does).
+function adsJudgeWin(idx, win){
+  const ok = w => { const r = adsWinRange(idx, w); return !!r && r.start >= ADS_CLEAN_FROM; };
+  if (ok(win)) return win;
+  return [...ADS_WINS].reverse().find(ok) || '7d';
+}
+// Campaign status as Google reported it at the last pull (the campaign rows carry it in item).
+function adsCampStatus(idx){
+  const st = {};
+  ADS_WINS.forEach(w => ((idx[w] && idx[w].campaign) || []).forEach(r => { if (r.item) st[r.campaign] = r.item; }));
+  return st;
+}
+// Parts of the data that last night's update did not refresh (more than 6 hours older than the newest part).
+function adsStaleParts(rows){
+  const g = {};
+  (rows || []).filter(r => r.platform==='google').forEach(r => { const k = r.win + '|' + r.level; if (!g[k] || r.updated_at > g[k]) g[k] = r.updated_at; });
+  const newest = Object.values(g).reduce((m, x) => x > m ? x : m, '');
+  if (!newest) return [];
+  const cut = new Date(new Date(newest).getTime() - 6 * 3600 * 1000).toISOString();
+  return Object.entries(g).filter(([, at]) => at < cut).map(([k, at]) => { const [win, level] = k.split('|'); return { win, level, at }; });
+}
 // Thresholds scale with the window so short windows are not judged by 90-day money.
 const ADS_MIN = { '7d':{ kw:10, term:5, conv:1 }, '14d':{ kw:15, term:8, conv:1 }, '30d':{ kw:20, term:10, conv:2 }, '60d':{ kw:25, term:12, conv:2 }, '90d':{ kw:30, term:15, conv:2 } };
 function adsAnalyse(idx, win){
   const get = (w,l) => (idx[w] && idx[w][l]) || [];
+  const jw = adsJudgeWin(idx, win), campSt = adsCampStatus(idx);
+  const live = r => campSt[r.campaign] !== 'PAUSED' && campSt[r.campaign] !== 'REMOVED';
   const keyOf = r => [r.campaign, r.ad_group, r.item, r.item2].join('\u0001');
   const kw = {}, tm = {};
   ADS_WINS.forEach(w => { kw[w] = new Map(get(w,'keyword').map(r=>[keyOf(r),r])); tm[w] = new Map(get(w,'search_term').map(r=>[keyOf(r),r])); });
   const dots = (maps, key) => ADS_WINS.map(w => { const r = maps[w].get(key); return !r || r.cost<=0 ? 'none' : (r.conversions>0 ? 'good' : 'bad'); });
-  const th = ADS_MIN[win] || ADS_MIN['30d'];
+  const th = ADS_MIN[win] || ADS_MIN['30d'], thJ = ADS_MIN[jw] || ADS_MIN['14d'];
   const fixKw = [], scaleKw = [], lowQs = [], blockTerms = [], addTerms = [];
+  const enabled = r => ((r.extra && r.extra.status) || '')==='ENABLED' && live(r);
+  for (const [key, r] of kw[jw]) if (enabled(r) && r.conversions===0 && r.cost>=thJ.kw) fixKw.push({ r, dots:dots(kw,key) });
   for (const [key, r] of kw[win]) {
-    const status = (r.extra && r.extra.status) || '';
-    if (status!=='ENABLED') continue;
-    if (r.conversions===0 && r.cost>=th.kw) fixKw.push({ r, dots:dots(kw,key) });
+    if (!enabled(r)) continue;
     if (r.conversions>=th.conv && r.cost/r.conversions<=100) scaleKw.push({ r, dots:dots(kw,key) });
     const qs = Number(r.extra && r.extra.qs);
     if (qs>0 && qs<=4 && r.cost>0) lowQs.push({ r, dots:dots(kw,key) });
   }
-  for (const [key, r] of tm[win]) {
-    if (r.item2!=='NONE') continue;
-    if (r.conversions===0 && r.cost>=th.term) blockTerms.push({ r, dots:dots(tm,key) });
-    if (r.conversions>=1) addTerms.push({ r, dots:dots(tm,key) });
-  }
+  for (const [key, r] of tm[jw]) if (r.item2==='NONE' && live(r) && r.conversions===0 && r.cost>=thJ.term) blockTerms.push({ r, dots:dots(tm,key) });
+  for (const [key, r] of tm[win]) if (r.item2==='NONE' && r.conversions>=1) addTerms.push({ r, dots:dots(tm,key) });
   fixKw.sort((a,b)=>b.r.cost-a.r.cost); blockTerms.sort((a,b)=>b.r.cost-a.r.cost);
   scaleKw.sort((a,b)=>(a.r.cost/a.r.conversions)-(b.r.cost/b.r.conversions)); lowQs.sort((a,b)=>b.r.cost-a.r.cost); addTerms.sort((a,b)=>b.r.conversions-a.r.conversions||a.r.cost-b.r.cost);
   const sum = (rows,f) => rows.reduce((t,x)=>t+f(x),0);
   const trend = ADS_WINS.map(w => { const c = get(w,'campaign'); const cost = sum(c,r=>r.cost), conv = sum(c,r=>r.conversions), clicks = sum(c,r=>r.clicks), imp = sum(c,r=>r.impressions); return { w, cost, conv, clicks, imp, cpc: clicks?cost/clicks:null, cpl: conv>0?cost/conv:null }; });
-  return { get, fixKw, scaleKw, lowQs, blockTerms, addTerms, trend, fixCost:sum(fixKw,x=>x.r.cost), blockCost:sum(blockTerms,x=>x.r.cost), lowQsCost:sum(lowQs,x=>x.r.cost), th };
+  return { get, fixKw, scaleKw, lowQs, blockTerms, addTerms, trend, fixCost:sum(fixKw,x=>x.r.cost), blockCost:sum(blockTerms,x=>x.r.cost), lowQsCost:sum(lowQs,x=>x.r.cost), th, thJ, jw, jRange:adsWinRange(idx, jw), campSt };
 }
 function adsDots(d){ const lab = { bad:'spent, no conversion', good:'converted', none:'no spend' }; return `<span style="display:inline-flex;gap:3px;align-items:center">${d.map((x,i)=>`<span${tipAttr(ADS_WINS[i], [lab[x]])} style="width:9px;height:9px;border-radius:50%;background:${x==='bad'?'var(--bad)':x==='good'?'var(--good)':'var(--line)'}"></span>`).join('')}</span>`; }
 function adsLimited(id, rows){ const all = !!ADS_UI.all[id]; const shown = all ? rows : rows.slice(0, ADS_ROW_LIMIT); const more = rows.length > ADS_ROW_LIMIT ? `<div style="margin-top:8px"><button class="btn" onclick="adsToggleAll('${id}')">${all?'Show top '+ADS_ROW_LIMIT+' only':'Show all '+rows.length}</button></div>` : ''; return { shown, more }; }
@@ -7792,6 +7828,17 @@ function renderDashGoogle(profile, data, standalone){
   const A = adsAnalyse(idx, win);
   const updated = (ADS_STATS.rows||[]).filter(r=>r.platform==='google').reduce((m,r)=>r.updated_at>m?r.updated_at:m,'');
   const stamp = updated ? new Date(updated).toLocaleString('en-AU',{ timeZone:'Australia/Sydney', dateStyle:'medium', timeStyle:'short' }) : '—';
+  // Say plainly when part of the data is older than the rest (a night when the update did not finish every list).
+  const stale = adsStaleParts(ADS_STATS.rows);
+  const staleNote = (() => {
+    if (!stale.length) return '';
+    const lv = { keyword:'keyword', search_term:'search', campaign:'campaign', ad:'ad', hour:'hour', dow:'day', device:'device', conv_action:'conversion', conv_setting:'conversion-setting' };
+    const levels = [...new Set(stale.map(x => lv[x.level] || x.level))], wins = [...new Set(stale.map(x => x.win))].filter(w => ADS_WIN_LABEL[w]).sort((a, b) => ADS_WIN_DAYS[a] - ADS_WIN_DAYS[b]);
+    const oldest = stale.reduce((m, x) => x.at < m ? x.at : m, stale[0].at);
+    const when = new Date(oldest).toLocaleString('en-AU',{ timeZone:'Australia/Sydney', dateStyle:'medium', timeStyle:'short' });
+    return `<div style="flex-basis:100%;font-size:12px;color:var(--warn-ink, var(--ink-soft))">⚠ The ${levels.join(' and ')} lists${wins.length ? ' for ' + wins.map(w => ADS_WIN_LABEL[w]).join(', ') : ''} were not refreshed last night; they are from ${esc(when)}.</div>`;
+  })();
+  const pausedTag = name => (A && A.campSt && (A.campSt[name]==='PAUSED' || A.campSt[name]==='REMOVED')) ? ` <span class="tag" style="font-weight:600">${A.campSt[name]==='PAUSED' ? 'Paused' : 'Removed'}</span>` : '';
   const dl = (x) => x===null||x===undefined ? '—' : fmtMoney(round2(x));
   const cnt = x => String(Math.round(x*10)/10);
   const W = ADS_WIN_LABEL[win];
@@ -7799,7 +7846,7 @@ function renderDashGoogle(profile, data, standalone){
 
   // ── SUMMARY ────────────────────────────────────────────────────────────────
   const winChips = ADS_WINS.map(w => `<button class="week-chip ${win===w?'active':''}" onclick="setDashAdsWin('${w}')">${ADS_WIN_LABEL[w]}</button>`).join('');
-  const chipsRow = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px"><b style="margin-inline-end:4px">Show the last</b>${winChips}<span style="color:var(--ink-faint);font-size:12px;margin-inline-start:8px">Data synced ${esc(stamp)}</span></div>`;
+  const chipsRow = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px"><b style="margin-inline-end:4px">Show the last</b>${winChips}<span style="color:var(--ink-faint);font-size:12px;margin-inline-start:8px">Data synced ${esc(stamp)}</span>${staleNote}</div>`;
   const card = (label, val, sub, colour, target, openJs) => {
     const inner = `<div class="stat-label">${esc(label)}</div><div class="stat-value">${val}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:4px;line-height:1.35">${sub}</div>`;
     if (openJs) return `<button onclick="${openJs}" class="card stat-card" style="--stat-accent:${colour};text-align:start;cursor:pointer;font:inherit;color:inherit;width:100%">${inner}<div style="font-size:11.5px;color:var(--primary);margin-top:6px">See the leads →</div></button>`;
@@ -7808,21 +7855,24 @@ function renderDashGoogle(profile, data, standalone){
   const TR = adsTracking(idx, ADS_STATS.real, win);
   const EC = adsEmailCheck(ADS_STATS.checks);
   if (EC && EC.tone==='bad' && !TR.noData) TR.issues.unshift({ tone:'bad', text:EC.text });
-  const bigCamp = (idx[win].campaign||[]).filter(x=>x.cost>0&&x.extra&&x.extra.searchImpressionShare!=null).sort((a,b)=>b.cost-a.cost)[0];
+  const bigCamp = (idx[win].campaign||[]).filter(x=>x.cost>0&&x.extra&&x.extra.searchImpressionShare!=null&&A.campSt[x.campaign]!=='PAUSED').sort((a,b)=>b.cost-a.cost)[0];
+  // Missed searches split (Google Ads Master 13 Oct): budget and ad rank call for different fixes, more money vs better quality and bids.
+  const missedSub = !bigCamp ? '' : (() => { const x = bigCamp.extra, b = x.searchBudgetLostImpressionShare, r = x.searchRankLostImpressionShare;
+    return `Of eligible searches, ${esc(bigCamp.campaign)} did not show${b!=null && r!=null ? `: <b>${adsPct(b)}</b> for lack of budget, <b>${adsPct(r)}</b> lost on ad rank (quality and bids)` : ''}. See the campaign table.`; })();
   const cards = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
     ${card('Spend', fmtMoney(round2(tot.cost)), `${tot.clicks.toLocaleString()} clicks at ${dl(tot.cpc)} each`, 'var(--primary)', 'ads-trend')}
     ${card('Conversions', cnt(tot.conv), TR.google.tap || TR.google.other ? `Google's count, including ${cnt(TR.google.tap + TR.google.other)} that are not leads (phone taps and others). Real leads below.` : `What Google counts as a lead (forms, calls). ${tot.cpl===null?'':fmtMoney(round2(tot.cpl))+' each'}`, 'var(--primary-teal)', TR.noData ? 'ads-trend' : 'ads-reality')}
-    ${card('Keywords to pause or rework', String(A.fixKw.length), `${fmtMoney(round2(A.fixCost))} spent, no conversion. Still switched on.`, 'var(--bad)', 'ads-fix-kw')}
-    ${card('Searches to block', String(A.blockTerms.length), `${fmtMoney(round2(A.blockCost))} spent on searches that never converted.`, 'var(--bad)', 'ads-block-terms')}
+    ${card('Keywords to pause or rework', String(A.fixKw.length), `${fmtMoney(round2(A.fixCost))} spent with no conversion in the last ${ADS_WIN_LABEL[A.jw]}. Still switched on.`, 'var(--bad)', 'ads-fix-kw')}
+    ${card('Searches to block', String(A.blockTerms.length), `${fmtMoney(round2(A.blockCost))} spent in the last ${ADS_WIN_LABEL[A.jw]} on searches that never converted.`, 'var(--bad)', 'ads-block-terms')}
     ${card('Keywords worth scaling', String(A.scaleKw.length), A.scaleKw.length?'Convert cheaply. Candidates for more bid or budget.':'None qualify in this period.', 'var(--good)', 'ads-scale-kw')}
     ${card('Poor quality-score keywords', String(A.lowQs.length), `${fmtMoney(round2(A.lowQsCost))} spent. Google rates the ad or page a weak match.`, 'var(--warn)', 'ads-low-qs')}
-    ${card('Searches missed', bigCamp?adsPct(1-bigCamp.extra.searchImpressionShare):'—', bigCamp?`Of eligible searches, ${esc(bigCamp.campaign)} did not show. See why in the campaign table.`:'', 'var(--primary)', 'ads-campaigns')}
+    ${card('Searches missed', bigCamp?adsPct(1-bigCamp.extra.searchImpressionShare):'—', missedSub, 'var(--primary)', 'ads-campaigns')}
   </div>`;
 
   const ins = (ADS_STATS.insights||[]).filter(i=>i.platform==='google').sort((a,b)=>String(b.day).localeCompare(String(a.day)))[0];
   const TONES = [['bad','Problems','var(--bad)'],['warn','Watch','var(--warn)'],['good','Going well','var(--good)']];
   const opinion = ins ? `<div class="card" style="margin-top:18px;padding:18px 20px">
-      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0;font-size:16px">Assessment</h3><span style="font-size:12px;color:var(--ink-faint)">Written ${esc(fmtDateShort(ins.day))} · looks at 7, 14, 30, 60 and 90 days together${ins.basis === 'real' ? ' · leads = the real leads, not Google\'s count' : ''} · does not change with the period above</span></div>
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0;font-size:16px">Assessment</h3><span style="font-size:12px;color:var(--ink-faint)">Covers up to ${esc(fmtDateShort(ins.day))}${ins.created_at ? ' · written ' + esc(new Date(ins.created_at).toLocaleString('en-AU',{ timeZone:'Australia/Sydney', day:'numeric', month:'short', hour:'numeric', minute:'2-digit' })) : ''} · looks at 7, 14, 30, 60 and 90 days together${ins.basis === 'real' ? ' · leads = the real leads, not Google\'s count' : ''} · does not change with the period above</span></div>
       <p style="margin:10px 0 14px;line-height:1.5;font-size:14.5px">${esc(presentText(ins.summary))}</p>${ins.basis !== 'real' && !TR.noData && (TR.google.tap || TR.google.other) ? `<div style="margin:-6px 0 12px;font-size:12.5px;color:var(--warn-ink, var(--ink-soft))">⚠ This assessment counts leads the way Google does, which includes phone taps. The real numbers are in "Real leads vs what Google counts" below.</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">${TONES.map(([tone,label,colour]) => { const pts=(ins.points||[]).filter(p=>(p.tone||'warn')===tone); if(!pts.length) return ''; return `<div style="border-radius:10px;padding:12px 14px;background:color-mix(in srgb, ${colour} 12%, transparent);border:1px solid color-mix(in srgb, ${colour} 40%, transparent)"><div style="font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${colour};margin-bottom:8px">${label}</div><ul style="margin:0;padding:0;list-style:none;display:grid;gap:10px">${pts.map(pt=>`<li style="line-height:1.4;font-size:13.5px">${esc(presentText(pt.text))}${pt.target?` <a href="#" onclick="adsGo('${esc(pt.target)}');return false" style="color:var(--primary);white-space:nowrap">See list →</a>`:''}</li>`).join('')}</ul></div>`; }).join('')}</div></div>`
     : `<div class="card" style="margin-top:18px;color:var(--ink-soft)"><b>Assessment</b> — a written assessment (looking across the last 7, 14, 30, 60 and 90 days) will appear here after the next nightly run.</div>`;
@@ -7843,7 +7893,7 @@ function renderDashGoogle(profile, data, standalone){
   const campCost = c => ((idx[win].campaign||[]).find(x => x.campaign===c) || {}).cost || 0;
   const cpr = TR.realTotal ? tot.cost / TR.realTotal : null;
   const realRows = TR.campaigns.filter(c => c.campaign ? (campCost(c.campaign) > 0 || c.real || c.gLeads || c.gNot) : c.real).map(c => { const cost = c.campaign ? campCost(c.campaign) : 0; return adsRow([
-    c.campaign ? `<b>${esc(c.campaign)}</b>` : `<span style="color:var(--ink-soft)">Campaign not known</span><div style="color:var(--ink-faint);font-size:11.5px">Google leads whose click can't be traced to a campaign (often iPhone)</div>`,
+    c.campaign ? `<b>${esc(c.campaign)}</b>${pausedTag(c.campaign)}` : `<span style="color:var(--ink-soft)">Campaign not known</span><div style="color:var(--ink-faint);font-size:11.5px">Google leads whose click can't be traced to a campaign (often iPhone)</div>`,
     adsNum(c.campaign ? fmtMoney(round2(cost)) : '—'), adsNum(cnt(c.gLeads)), adsNum(c.gNot ? `<span style="color:var(--bad)">${cnt(c.gNot)}</span>` : '0'), adsNum(`<b>${c.real}</b>`),
     adsNum(c.campaign && c.real ? fmtMoney(round2(cost / c.real)) : '—')]); });
   const settingsDay = ((idx.now && idx.now.conv_setting) || []).reduce((m, r) => r.updated_at > m ? r.updated_at : m, '');
@@ -7871,21 +7921,25 @@ function renderDashGoogle(profile, data, standalone){
   const legend = `<div style="font-size:12px;color:var(--ink-faint);margin:0 0 10px">Everything below covers the last ${W}. Dots show 7 · 14 · 30 · 60 · 90 days, left to right: <span style="color:var(--bad)">●</span> spent with no conversion, <span style="color:var(--good)">●</span> converted, <span style="color:var(--line)">●</span> no spend.</div>`;
   const where = r => `${esc(r.campaign)} › ${esc(r.ad_group)}`;
   const sub = r => `<div style="color:var(--ink-faint);font-size:11.5px;margin-top:2px">${where(r)}</div>`;
-  const kwName = k => `<b>${esc(k.r.item)}</b> <span style="color:var(--ink-faint);font-size:11px">${esc(({BROAD:'broad',PHRASE:'phrase',EXACT:'exact'})[k.r.item2]||k.r.item2.toLowerCase())}</span>${sub(k.r)}`;
+  const kwName = k => `<b>${esc(k.r.item)}</b>${pausedTag(k.r.campaign)} <span style="color:var(--ink-faint);font-size:11px">${esc(({BROAD:'broad',PHRASE:'phrase',EXACT:'exact'})[k.r.item2]||k.r.item2.toLowerCase())}</span>${sub(k.r)}`;
   const kwHead = ['Keyword',{t:'Spent',num:1},{t:'Clicks',num:1},{t:'Conversions',num:1},{t:'Cost / conv.',num:1},{t:'Quality',num:1},'7·14·30·60·90d'];
   const kwRow = k => adsRow([kwName(k), adsNum(fmtMoney(round2(k.r.cost))), adsNum(k.r.clicks.toLocaleString()), adsNum(cnt(k.r.conversions)), adsNum(k.r.conversions>0?dl(k.r.cost/k.r.conversions):'—'), adsNum((k.r.extra&&k.r.extra.qs)||'—'), adsDots(k.dots)]);
   const termHead = ['What people searched',{t:'Spent',num:1},{t:'Clicks',num:1},{t:'Conversions',num:1},'7·14·30·60·90d'];
-  const termRow = t => adsRow([`<b>${esc(t.r.item)}</b>${sub(t.r)}`, adsNum(fmtMoney(round2(t.r.cost))), adsNum(t.r.clicks.toLocaleString()), adsNum(cnt(t.r.conversions)), adsDots(t.dots)]);
+  // A one-word search blocked as a broad negative also blocks every good search containing that word (Google Ads Master 13 Oct: "eco").
+  const oneWord = t => !/\s/.test(String(t.r.item || '').trim()) ? ` <span class="tag" style="font-weight:600;background:color-mix(in srgb, var(--warn) 18%, transparent)" title="Block it as an exact match only: a one-word broad negative also blocks good searches that contain the word.">One word: exact match only</span>` : '';
+  const termRow = t => adsRow([`<b>${esc(t.r.item)}</b>${oneWord(t)}${sub(t.r)}`, adsNum(fmtMoney(round2(t.r.cost))), adsNum(t.r.clicks.toLocaleString()), adsNum(cnt(t.r.conversions)), adsDots(t.dots)]);
   const th = A.th;
-  const fix = adsListSection('ads-fix-kw', 'Keywords to pause or rework', `Switched on, spent ${fmtMoney(th.kw)} or more in the last ${W} and got no conversion. Check the search terms first — the keyword may be fine and only attracting the wrong searches.`, kwHead, A.fixKw, kwRow, 'No keyword meets this rule in this period.');
-  const block = adsListSection('ads-block-terms', 'Searches to block (add as negative keywords)', `Real searches that cost ${fmtMoney(th.term)} or more in the last ${W}, never converted, and are not blocked yet. Block the irrelevant ones; keep the ones that are just unlucky.`, termHead, A.blockTerms, termRow, 'No unblocked search meets this rule in this period.');
+  const JW = ADS_WIN_LABEL[A.jw], jr = A.jRange;
+  const cleanNote = A.jw !== win ? ` Judged on the last ${JW}${jr ? ` (${fmtDateShort(jr.start)}–${fmtDateShort(jr.end)})` : ''}, not ${W}: before ${fmtDateShort(ADS_CLEAN_FROM)} website calls and the combined page's forms were not counted as conversions, so "no conversion" over a longer period is not reliable.` : '';
+  const fix = adsListSection('ads-fix-kw', 'Keywords to pause or rework', `Switched on (in a campaign that is running), spent ${fmtMoney(A.thJ.kw)} or more in the last ${JW} and got no conversion. Check the search terms first — the keyword may be fine and only attracting the wrong searches.${cleanNote}`, kwHead, A.fixKw, kwRow, 'No keyword meets this rule in this period.');
+  const block = adsListSection('ads-block-terms', 'Searches to block (add as negative keywords)', `Real searches that cost ${fmtMoney(A.thJ.term)} or more in the last ${JW}, never converted, and are not blocked yet. Block the irrelevant ones as <b>exact match</b>; keep the ones that are just unlucky. Never block a single word as broad: it also blocks the good searches that contain it.${cleanNote}`, termHead, A.blockTerms, termRow, 'No unblocked search meets this rule in this period.');
   const scale = adsListSection('ads-scale-kw', 'Keywords worth scaling', `${th.conv} or more conversion${th.conv>1?'s':''} in the last ${W} at $100 or less each. Candidates for a higher bid or more budget.`, kwHead, A.scaleKw, kwRow, 'No keyword meets this rule in this period.');
   const addT = adsListSection('ads-add-terms', 'Converting searches to add as keywords', 'Searches that produced conversions but are not keywords yet, so Google matches them loosely.', termHead, A.addTerms, termRow, 'Nothing to add in this period.');
   const lowq = adsListSection('ads-low-qs', 'Poor quality-score keywords that are spending', 'Score 4 or lower out of 10: the same click costs more. Usually fixed by making the ad text and landing page match the keyword.', kwHead, A.lowQs, kwRow, 'No spending keyword has a score of 4 or lower.');
 
   const lv = l => ((idx[win]||{})[l]||[]);
   const camps = lv('campaign').filter(c=>c.impressions>0||c.cost>0).sort((a,b)=>b.cost-a.cost);
-  const campRows = camps.map(c => { const x = c.extra||{}; return adsRow([`<b>${esc(c.campaign)}</b>`, adsNum(fmtMoney(round2(c.cost))), adsNum(c.clicks.toLocaleString()), adsNum(adsPct(adsRatio(c.clicks,c.impressions))), adsNum(cnt(c.conversions)), adsNum(c.conversions>0?dl(c.cost/c.conversions):'—'), adsNum(x.searchImpressionShare!=null?adsPct(x.searchImpressionShare):'—'), adsNum(x.searchBudgetLostImpressionShare!=null?adsPct(x.searchBudgetLostImpressionShare):'—'), adsNum(x.searchRankLostImpressionShare!=null?adsPct(x.searchRankLostImpressionShare):'—')]); });
+  const campRows = camps.map(c => { const x = c.extra||{}; return adsRow([`<b>${esc(c.campaign)}</b>${pausedTag(c.campaign)}`, adsNum(fmtMoney(round2(c.cost))), adsNum(c.clicks.toLocaleString()), adsNum(adsPct(adsRatio(c.clicks,c.impressions))), adsNum(cnt(c.conversions)), adsNum(c.conversions>0?dl(c.cost/c.conversions):'—'), adsNum(x.searchImpressionShare!=null?adsPct(x.searchImpressionShare):'—'), adsNum(x.searchBudgetLostImpressionShare!=null?adsPct(x.searchBudgetLostImpressionShare):'—'), adsNum(x.searchRankLostImpressionShare!=null?adsPct(x.searchRankLostImpressionShare):'—')]); });
   const campTable = adsTable(['Campaign',{t:'Spent',num:1},{t:'Clicks',num:1},{t:'Click rate',num:1},{t:'Conversions',num:1},{t:'Cost / conv.',num:1},{t:'Searches won',num:1},{t:'Missed: budget',num:1},{t:'Missed: ad rank',num:1}], campRows, 'No campaign data.');
   const campSec = `<section id="ads-campaigns" style="margin-top:28px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:16px;margin:0 0 4px">Campaigns</h3><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:10px"><b>Searches won</b> is the share of eligible searches where the ad showed. <b>Missed: budget</b> = would have shown with more money. <b>Missed: ad rank</b> = lost to competitors on bid or quality. Performance Max only reports at campaign level.</div>${campTable}</section>`;
   const adRows = lv('ad').sort((a,b)=>b.cost-a.cost).map(a => adsRow([esc(a.item2||('Ad '+a.item)), where(a), adsNum(fmtMoney(round2(a.cost))), adsNum(a.clicks.toLocaleString()), adsNum(adsPct(adsRatio(a.clicks,a.impressions))), adsNum(cnt(a.conversions)), adsNum(a.conversions>0?dl(a.cost/a.conversions):'—')]));
@@ -7966,7 +8020,7 @@ function renderDashMeta(profile, data){
   const ins = (ADS_STATS.insights||[]).filter(i=>i.platform==='meta').sort((a,b)=>String(b.day).localeCompare(String(a.day)))[0];
   const TONES = [['bad','Problems','var(--bad)'],['warn','Watch','var(--warn)'],['good','Going well','var(--good)']];
   const opinion = ins ? `<div class="card" style="margin-top:18px;padding:18px 20px">
-      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0;font-size:16px">Assessment</h3><span style="font-size:12px;color:var(--ink-faint)">Written ${esc(fmtDateShort(ins.day))} · looks at 7, 14, 30, 60 and 90 days together · does not change with the period above</span></div>
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0;font-size:16px">Assessment</h3><span style="font-size:12px;color:var(--ink-faint)">Covers up to ${esc(fmtDateShort(ins.day))}${ins.created_at ? ' · written ' + esc(new Date(ins.created_at).toLocaleString('en-AU',{ timeZone:'Australia/Sydney', day:'numeric', month:'short', hour:'numeric', minute:'2-digit' })) : ''} · looks at 7, 14, 30, 60 and 90 days together · does not change with the period above</span></div>
       <p style="margin:10px 0 14px;line-height:1.5;font-size:14.5px">${esc(presentText(ins.summary))}</p>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">${TONES.map(([tone,label,colour]) => { const pts=(ins.points||[]).filter(p=>(p.tone||'warn')===tone); if(!pts.length) return ''; return `<div style="border-radius:10px;padding:12px 14px;background:color-mix(in srgb, ${colour} 12%, transparent);border:1px solid color-mix(in srgb, ${colour} 40%, transparent)"><div style="font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${colour};margin-bottom:8px">${label}</div><ul style="margin:0;padding:0;list-style:none;display:grid;gap:10px">${pts.map(pt=>`<li style="line-height:1.4;font-size:13.5px">${esc(presentText(pt.text))}${pt.target?` <a href="#" onclick="adsGo('${esc(pt.target)}');return false" style="color:var(--primary);white-space:nowrap">See list →</a>`:''}</li>`).join('')}</ul></div>`; }).join('')}</div></div>`
     : `<div class="card" style="margin-top:18px;color:var(--ink-soft)"><b>Assessment</b> — a written assessment will appear here after the next nightly run.</div>`;
