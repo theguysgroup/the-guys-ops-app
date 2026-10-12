@@ -313,7 +313,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
   .modal { margin-top: auto; max-width: 100% !important; border-radius: 16px 16px 0 0; border-bottom: 0; padding: 18px 16px calc(22px + env(safe-area-inset-bottom, 0px)) !important; animation: sheetUp .34s cubic-bezier(.22,1,.36,1) both; }
   .bulk-check { width: 20px; height: 20px; }
   /* figures two to a row instead of one big card per screen */
-  .grid-2:has(> .stat-card), .grid-3:has(> .stat-card), .grid-4:has(> .stat-card) { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .grid-3:has(> .stat-card), .grid-4:has(> .stat-card) { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }   /* not .grid-2: those hold charts */
   .grid-3:has(> .stat-card) > .stat-card:last-child:nth-child(odd), .grid-4:has(> .stat-card) > .stat-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .stat-card { padding: 14px 12px 14px 18px; }
   .stat-value { font-size: 24px; overflow-wrap: anywhere; }
