@@ -5,6 +5,8 @@
 // Since 9 Oct it also takes Google's conversion settings and conversions per action (conv_setting / conv_action, for
 // the Tracking problems list), hands the nightly routine the real leads (realLeads), and checks the lead emails in
 // info@ against the CRM (leadEmails), saved per day in lead_email_checks.
+// Since 13 Oct it also issues short upload tickets (issueTicket), so the key never has to go into the outside sandbox
+// where the Google Ads data is pulled: see "upload ticket" below.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const INTAKE_SECRET = Deno.env.get("INTAKE_SHARED_SECRET");
@@ -14,6 +16,47 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
+
+// --- upload ticket (13 Oct, Ofek approved) ---
+// The nightly routine pulls Google Ads data inside an outside sandbox (Composio). The shared key must never go there
+// (the run's own safety check refused it on 12 Oct, and it was right), so the routine asks for a ticket here with the
+// key, from its own machine, and gives the sandbox only the ticket. A ticket lasts at most 3 hours and only lets its
+// holder replace ad-stat rows and read the real-lead counts (without names); everything else still needs the key.
+const TICKET_MAX_SECONDS = 3 * 3600;
+export const TICKET_ALLOWS = new Set(["rows", "realLeads"]);
+async function ticketSig(secret: string, exp: number): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("ads-rows:v1:" + exp));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+export async function makeTicket(secret: string, nowSec: number, minutes: number): Promise<{ ticket: string; expires: number }> {
+  const exp = nowSec + Math.max(60, Math.min(TICKET_MAX_SECONDS, Math.round((Number(minutes) || 0) * 60)));
+  return { ticket: `v1.${exp}.${await ticketSig(secret, exp)}`, expires: exp };
+}
+export async function ticketOk(secret: string, ticket: string, nowSec: number): Promise<boolean> {
+  const m = /^v1\.(\d{10})\.([0-9a-f]{64})$/.exec(String(ticket || ""));
+  if (!m || !secret) return false;
+  const exp = Number(m[1]);
+  if (exp <= nowSec || exp > nowSec + TICKET_MAX_SECONDS) return false;
+  const want = await ticketSig(secret, exp);
+  let diff = 0;
+  for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ m[2].charCodeAt(i);
+  return diff === 0;
+}
+// What a request asks for, in the same order the handler below checks it.
+// deno-lint-ignore no-explicit-any
+export function requestKind(body: any): string {
+  if (!body || typeof body !== "object") return "rows";
+  if (body.issueTicket) return "issueTicket";
+  if (body.pendingGclids) return "pendingGclids";
+  if (Array.isArray(body.clickAttribution)) return "clickAttribution";
+  if (body.crmDigest) return "crmDigest";
+  if (body.insight) return "insight";
+  if (body.realLeads) return "realLeads";
+  if (body.leadEmails) return "leadEmails";
+  return "rows";
+}
+// --- end upload ticket ---
 
 const LEVELS = new Set(["campaign", "keyword", "search_term", "ad", "hour", "dow", "device", "geo", "adset", "placement", "conv_setting", "conv_action"]);
 
@@ -89,13 +132,20 @@ function checkLeadEmails(emails: any[], contacts: any[], today: string, from = "
 }
 // --- end lead email check ---
 
-Deno.serve(async (req: Request) => {
+// deno-lint-ignore no-explicit-any
+if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && !(globalThis as any).__INGEST_TEST__) Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
   const provided = req.headers.get("x-intake-secret") || "";
-  if (!INTAKE_SECRET || provided !== INTAKE_SECRET) return json({ ok: false, error: "unauthorized" }, 401);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const viaSecret = !!INTAKE_SECRET && provided === INTAKE_SECRET;
+  const viaTicket = !viaSecret && !!INTAKE_SECRET && await ticketOk(INTAKE_SECRET, req.headers.get("x-ingest-ticket") || "", nowSec);
+  if (!viaSecret && !viaTicket) return json({ ok: false, error: "unauthorized" }, 401);
 
   let body: any;
   try { body = await req.json(); } catch { return json({ ok: false, error: "invalid json" }, 400); }
+  const what = requestKind(body);
+  if (viaTicket && !TICKET_ALLOWS.has(what)) return json({ ok: false, error: "a ticket can only replace ad-stat rows and read the real-lead counts" }, 403);
+  if (what === "issueTicket") return json({ ok: true, ...(await makeTicket(INTAKE_SECRET!, nowSec, Number(body.issueTicket.minutes) || 150)) });
   // Keyword -> job attribution (30 Sep). The nightly Google routine asks which leads carry a Google click id (gclid)
   // that is not matched yet (pendingGclids), looks each up in Google Ads click_view (clicks are kept ~90 days), and
   // sends back campaign / ad group / keyword (clickAttribution), saved in gads_click_attribution.
@@ -173,7 +223,12 @@ Deno.serve(async (req: Request) => {
     if (rq.error) return json({ ok: false, error: "real leads failed: " + rq.error.message }, 500);
     const kq = await sbr.from("lead_email_checks").select("day,emails,matched,missing,mismatch,google_emails,google_matched").order("day", { ascending: false }).limit(7);
     if (kq.error) return json({ ok: false, error: "lead checks failed: " + kq.error.message }, 500);
-    return json({ ok: true, real: rq.data || [], checks: kq.data || [] });
+    // The last assessment written, so tonight's can say what changed since (13 Oct).
+    const iq = await sbr.from("ads_insights").select("day,summary,points").eq("platform", "google").order("day", { ascending: false }).limit(1);
+    // A ticket holder (the outside sandbox) gets the counts only, never the names of the leads that are missing.
+    // deno-lint-ignore no-explicit-any
+    const checks = (kq.data || []).map((k: any) => viaTicket ? { day: k.day, emails: k.emails, matched: k.matched, google_emails: k.google_emails, google_matched: k.google_matched, missing_count: (k.missing || []).length, mismatch_count: (k.mismatch || []).length } : k);
+    return json({ ok: true, real: rq.data || [], checks, lastInsight: (iq.data || [])[0] || null });
   }
   if (body && body.leadEmails) {
     const list = Array.isArray(body.leadEmails.emails) ? body.leadEmails.emails.slice(0, 500) : null;
