@@ -1572,7 +1572,7 @@ function computeReminders(data, now){
 /* ── permissions / types (ported from src/lib/types.ts + permissions.ts) ── */
 const ALL_SECTIONS = ['crm','crmOverview','adsGoogle','jobs','payroll','outstanding','reminders','openItems','tasks','reference','closings','settings'];
 const SECTION_ORDER = ['myDay','crm','dashboard','crmOverview','adsGoogle','closings','jobs','payroll','outstanding','reminders','openItems','tasks','reference'];
-const SECTION_LABEL = { myDay:'My Day', dashboard:'Dashboard', adsGoogle:'Google Ads board', crm:'CRM', crmOverview:'Leads & Marketing', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', reference:'Resources (equipment, employees, suppliers)', closings:'Closings', settings:'Permissions & Settings' };
+const SECTION_LABEL = { myDay:'My Day', dashboard:'Dashboard', adsGoogle:'Google Ads board', crm:'CRM', crmOverview:'Leads & Marketing', jobs:'Jobs & Commissions', finance:'Financial Summary', payroll:'Payroll', outstanding:'Outstanding', reminders:'Reminders', openItems:'Open Tasks', tasks:'Tasks', reference:'Resources (equipment, employees, suppliers)', closings:'Closings', settings:'Settings' };
 const ROLE_LABEL = { owner:'Owner', manager:'Manager', technician:'Technician', va:'Virtual Assistant', marketing:'Marketing' };
 function roleLabel(role){ return ROLE_LABEL[role] || role; }
 function defaultPermissionsFor(role){
@@ -3550,7 +3550,7 @@ const NAV = [
   { group:'CRM', items:[ {id:'crm', label:'CRM', icon:'inbox'} ] },
   { group:'Overview', items:[ {id:'dashboard', label:'Dashboard', icon:'gauge'}, {id:'crmOverview', label:'Leads & Marketing', icon:'chart'}, {id:'adsGoogle', label:'Google Ads', icon:'target'}, {id:'payroll', label:'Payroll', icon:'wallet'} ] },
   { group:'Finance', items:[ {id:'closings', label:'Closings', icon:'receipt'}, {id:'outstanding', label:'Outstanding', icon:'hourglass'}, {id:'jobs', label:'Jobs & Commissions', icon:'briefcase'} ] },
-  { group:'Management', items:[ {id:'reference', label:'Resources', icon:'folder', go:'goResources()'}, {id:'settings', label:'Permissions & Settings', icon:'sliders'} ] },
+  { group:'Management', items:[ {id:'reference', label:'Resources', icon:'folder', go:'goResources()'}, {id:'settings', label:'Settings', icon:'sliders'} ] },
 ];
 function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; if (UI.jobs) UI.jobs.selectedId = null; if (UI.reference) UI.reference.empId = null; PANEL_OPEN_FOR = {}; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 function goTasks(board){ UI.tab = 'tasks'; if (board) UI.tasks.board = board; UI.mobileNavOpen = false; render(); }
