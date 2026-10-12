@@ -33,6 +33,12 @@ const SELF_URL = env("CONVERSATIONS_FUNCTION_URL");       // https://<project>.s
 const MAILBOX = "info@theguyservicegroup.com";
 const TEST_PHONES = ["+61418638552"];                     // the only number Ofek approved for real test texts
 
+// The words customers get, as edited in Settings → Message templates (settings.catalog.templates, Ofek 12 Oct). Taken from
+// the settings row on each minute run; a template nobody has edited keeps the approved text below, word for word.
+let TPL: Record<string, string> = {};
+// deno-lint-ignore no-explicit-any
+export function useTemplates(catalog: any) { const t = catalog && catalog.templates; TPL = t && typeof t === "object" ? t : {}; }
+export function tpl(key: string, fallback: string): string { const v = TPL[key]; return typeof v === "string" && v.trim() ? v : fallback; }
 // ── approved texts (Ofek). {hi} = "Hi Sarah" or "Hi there" when there is no first name ──
 const SMS_CLOSED = "{hi}, it's Ron from {brand}. You sent us a message on our website chat about {service}. I'll call you first thing when our office opens, or you can reply here.";
 // Approved by Ofek 3/10 (the longer of the two versions). Live once settings.chat_auto_sms is switched on.
@@ -103,11 +109,11 @@ export function cleanFirstName(name: unknown): string {
 export function fill(template: string, s: { first_name?: string; brand?: string; service_text?: string }): string {
   const first = cleanFirstName(s.first_name);
   return template
-    .replace("{hi}", first ? `Hi ${first}` : "Hi there")
-    .replace("{brand}", s.brand || "The Guys Group")
-    .replace("{service}", s.service_text || "your enquiry");
+    .replace(/\{hi\}/g, first ? `Hi ${first}` : "Hi there")
+    .replace(/\{brand\}/g, s.brand || "The Guys Group")
+    .replace(/\{service\}/g, s.service_text || "your enquiry");
 }
-export const introFor = (s: { first_name?: string; brand?: string; service_text?: string }) => fill(INTRO, s);
+export const introFor = (s: { first_name?: string; brand?: string; service_text?: string }) => fill(tpl("chatIntro", INTRO), s);
 
 // ── small helpers ──
 const sha256 = async (s: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -418,9 +424,10 @@ export async function reply(sb: any, user: any, body: any, nowMs: number) {
 export async function tick(sb: any, nowMs: number) {
   const out = { sent: 0, skipped: 0, waiting: 0 };
   // No secret needed: a run only does what is already due, and runs closer than 40 seconds apart are ignored.
-  const { data: st } = await sb.from("settings").select("id, chat_auto_sms, chat_tick_at").limit(1);
+  const { data: st } = await sb.from("settings").select("id, chat_auto_sms, chat_tick_at, catalog").limit(1);
   const set = st && st[0];
   if (!set || !set.chat_auto_sms) return { ...out, off: true };
+  useTemplates(set.catalog);
   if (set.chat_tick_at && nowMs - Date.parse(set.chat_tick_at) < 40 * 1000) return { ...out, busy: true };
   await sb.from("settings").update({ chat_tick_at: new Date(nowMs).toISOString() }).eq("id", set.id);
   const from = new Date(nowMs - 2 * 3600 * 1000).toISOString(), to = new Date(nowMs - 5 * 60 * 1000).toISOString();
@@ -444,7 +451,7 @@ export async function tick(sb: any, nowMs: number) {
     const { count: recent } = await sb.from("lead_messages").select("id", { count: "exact", head: true }).eq("phone", s.phone).eq("auto", true).eq("channel", "sms").gte("at", since);
     if ((recent || 0) > 0) { await skip("one_a_day"); continue; }
     const open = officeOpen(nowMs);
-    const text = fill(open ? SMS_OPEN : SMS_CLOSED, s);
+    const text = fill(open ? tpl("chatOpen", SMS_OPEN) : tpl("chatClosed", SMS_CLOSED), s);
     const r = await io.sendSms(s.phone, text);
     if (!r.ok && r.error === "sms_not_set_up") { out.waiting++; continue; }   // tried again next minute, until the 2 hours are up
     const at = new Date(nowMs).toISOString();

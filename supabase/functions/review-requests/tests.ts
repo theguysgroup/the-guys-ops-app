@@ -190,6 +190,43 @@ const job = (id: string, inv: string, extra: any = {}) => ({ id, invoice_number:
     eq(j("2903").review_do_not_ask, true, "new job from the sheet with the note: marked from the start");
   }
 
+  // ── message templates (Settings → Message templates, Ofek 12 Oct): nothing edited = the approved words, exactly ──
+  {
+    const has = (s: string, part: string, name: string) => eq(s.includes(part), true, `${name} (looking for ${JSON.stringify(part)})`);
+    const r = { first_name: "Sarah", technician: "Guy Cohen", review_link: "https://g.page/r/x/review", job_type: "Aircon", job_date: "2026-10-06" };
+    useTemplates({});
+    const d = buildMessages(r, "2026-10-06");
+    eq(d.sms, "Hi Sarah, Guy from The Guys Service Group here - thanks for having us today! Enjoy the fresh, clean air! Our team works really hard and would truly appreciate a quick Google review: https://g.page/r/x/review Thank you!", "no template: the approved text, word for word");
+    eq(d.subject, "A quick favour, Sarah?", "no template: the approved subject");
+    useTemplates({ templates: { reviewSms: "   " } });
+    eq(buildMessages(r, "2026-10-06"), d, "a blank template counts as not edited");
+    useTemplates(null);
+    eq(buildMessages(r, "2026-10-06"), d, "no catalog at all: the approved words");
+    // The approved words written as templates give the same text and the same email.
+    useTemplates({ templates: {
+      reviewSms: "{hi}, {technician} from The Guys Service Group here - thanks for having us{today}! {result} Our team works really hard and would truly appreciate a quick Google review: {review_link} Thank you!",
+      reviewEmailSubject: "A quick favour, {first_name}?",
+      reviewEmailBody: "{hi},\n\nThanks for having us{today} - it was a pleasure. {result}\n\nOur team works really hard to do every job properly, and a Google review from you would mean a lot to them. It takes 30 seconds.\n\n{review_button}\n\nThank you!\n{technician}\nThe Guys Service Group",
+    } });
+    const t = buildMessages(r, "2026-10-06");
+    eq([t.sms, t.subject, t.html], [d.sms, d.subject, d.html], "the approved words as a template: same text, subject and email");
+    const noName = { ...r, first_name: "", job_date: "2026-10-01" };
+    useTemplates({}); const dn = buildMessages(noName, "2026-10-06");
+    useTemplates({ templates: { reviewSms: "{hi}, {technician} from The Guys Service Group here - thanks for having us{today}! {result} Our team works really hard and would truly appreciate a quick Google review: {review_link} Thank you!", reviewEmailSubject: "A quick favour, {first_name}?" } });
+    const tn = buildMessages(noName, "2026-10-06");
+    eq([tn.sms, tn.subject], [dn.sms, dn.subject], "no first name, not today: same as the approved words (\"Hi, Guy…\", \"A quick favour?\")");
+    eq(fillReview("Hi {first_name}, thanks!", { first_name: "" }), "Hi, thanks!", "an empty blank takes its space");
+    // An edited text is used; an edited email body without the button still gets it; customer names can't inject HTML.
+    useTemplates({ templates: { reviewSms: "Thanks {first_name}! Review us: {review_link}", reviewEmailBody: "Hi {first_name},\n\nThanks from {technician}." } });
+    const e = buildMessages({ ...r, first_name: "<b>Sam</b>" }, "2026-10-06");
+    eq(e.sms, "Thanks <b>Sam</b>! Review us: https://g.page/r/x/review", "edited text is used");
+    has(e.html, "<p>Hi &lt;b&gt;Sam&lt;/b&gt;,</p>", "names are escaped in the email");
+    has(e.html, 'href="https://g.page/r/x/review"', "the review button is added when the body leaves it out");
+    eq(e.subject, "A quick favour, <b>Sam</b>?", "subject not edited: the approved one");
+    has(e.text, "Thanks from Guy.\n\nhttps://g.page/r/x/review", "plain-text email ends with the link");
+    useTemplates({});
+  }
+
   console.log(`review-requests: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);
 })();

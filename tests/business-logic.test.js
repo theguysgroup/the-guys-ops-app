@@ -51,6 +51,8 @@ const DECLS = [
   'fmtMoney', 'workClockDue', 'sydneyNowPast', 'NEW_LEAD_ALERT_FROM', 'leadArrivedAt', 'newLeadUnhandled', 'chaseTooLong', 'quoteStale', 'bookedNoJob', 'MY_DAY_NEW_DAYS', 'myDayLists',
   // My Day counters (3 Oct)
   'esc', 'quoteDueReason', 'shiftDaySummary', 'latePaymentDue', 'latePaymentDoneToday', 'reofferDue', 'assigneeNames', 'taskAssignedTo', 'myTaskDue', 'teamTaskDue', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
+  // message templates (12 Oct)
+  'REVIEW_TPL_VARS', 'CHAT_TPL_VARS', 'MSG_TEMPLATES', 'msgTemplateText', 'fillTemplate', 'SMS_GSM', 'smsParts', 'templateProblems',
   // review requests (5 Oct)
   'reviewInvoiceKey', 'reviewNeed',
   // Jobs & Commissions period (6 Oct)
@@ -1044,6 +1046,29 @@ function testCatalog(sb){
   assertEqual([sb.inkFor('#f2c94c'), sb.inkFor('#1f66c9')], ['#1c1917', '#fff'], 'inkFor: dark text on a light colour, white on a dark one');
 }
 
+// Message templates (Settings, 12 Oct): the app's originals are the server functions' own words, letter for letter,
+// and the preview fills blanks exactly as the server does.
+function testMessageTemplates(sb){
+  console.log('\nMessage templates (Settings, stage 3b)');
+  const fnSrc = f => fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', f, 'index.ts'), 'utf8');
+  const constOf = (src, name) => JSON.parse(src.match(new RegExp(`^const ${name} = (".*");$`, 'm'))[1]);
+  const orig = key => sb.MSG_TEMPLATES.flatMap(m => m.fields).find(f => f.key===key).text;
+  const voice = fnSrc('voice'), conv = fnSrc('conversations');
+  assertEqual([orig('missedCall'), orig('missedCallClosed')], [constOf(voice, 'SMS_MISSED'), constOf(voice, 'SMS_CLOSED')], 'templates: missed-call originals are the voice function\'s words');
+  assertEqual([orig('chatOpen'), orig('chatClosed'), orig('chatIntro')], [constOf(conv, 'SMS_OPEN'), constOf(conv, 'SMS_CLOSED'), constOf(conv, 'INTRO')], 'templates: chat originals are the conversations function\'s words');
+  const V = { hi: 'Hi Sarah', first_name: 'Sarah', technician: 'Guy', result: 'Enjoy the fresh, clean air!', review_link: 'https://g.page/r/x/review', today: ' today' };
+  assertEqual(sb.fillTemplate(orig('reviewSms'), V), "Hi Sarah, Guy from The Guys Service Group here - thanks for having us today! Enjoy the fresh, clean air! Our team works really hard and would truly appreciate a quick Google review: https://g.page/r/x/review Thank you!", 'templates: review text original fills to the approved text');
+  assertEqual([sb.fillTemplate(orig('reviewEmailSubject'), V), sb.fillTemplate(orig('reviewEmailSubject'), { ...V, first_name: '' }), sb.fillTemplate('Hi {first_name}, {x}', { first_name: '' })],
+    ['A quick favour, Sarah?', 'A quick favour?', 'Hi, {x}'], 'templates: an empty blank takes its comma; an unknown blank stays');
+  sb.STATE.data.settings = { catalog: { templates: { missedCall: 'Edited words', chatOpen: '   ' } } };
+  assertEqual([sb.msgTemplateText('missedCall'), sb.msgTemplateText('chatOpen'), sb.msgTemplateText('chatIntro')], ['Edited words', orig('chatOpen'), orig('chatIntro')], 'templates: saved words win; blank or none = the original');
+  assertEqual([sb.smsParts('a'.repeat(160)), sb.smsParts('a'.repeat(161)), sb.smsParts('It\u2019s ' + 'a'.repeat(70)), sb.smsParts('[]')],
+    [{ chars: 160, parts: 1, unicode: false }, { chars: 161, parts: 2, unicode: false }, { chars: 75, parts: 2, unicode: true }, { chars: 4, parts: 1, unicode: false }], 'templates: texts counted like the phone networks do (curly quote → 70 a text)');
+  const m = id => sb.MSG_TEMPLATES.find(x => x.id===id);
+  assertEqual([sb.templateProblems(m('reviewText'), { reviewSms: orig('reviewSms') }).length, sb.templateProblems(m('reviewText'), { reviewSms: 'Thanks {first_name}!' }).length,
+    sb.templateProblems(m('missedCall'), { missedCall: 'Hi {first_name}' }).length, sb.templateProblems(m('chatOpen'), { chatOpen: ' ' }).length],
+    [0, 1, 1, 1], 'templates: the original saves; no review link, a blank it can\'t fill, or empty words are stopped');
+}
 function testOfficeHours(sb){
   console.log('\nOffice hours and days off (Settings, stage 3)');
   sb.STATE.data.jobs = []; sb.STATE.data.settings = { catalog: { hours: { days: { 6: { on: true, from: '09:00', to: '13:00' } }, nsw: true, extra: [{ date: '2026-10-20', name: 'Team day' }] } } };
@@ -1111,6 +1136,7 @@ testLiveRowsAndStageMemo(loadSandbox());
 testToastKinds(loadSandbox());
 testCatalog(loadSandbox());
 testOfficeHours(loadSandbox());
+testMessageTemplates(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

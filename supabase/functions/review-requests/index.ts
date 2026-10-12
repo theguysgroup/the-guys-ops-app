@@ -158,6 +158,27 @@ async function contactForJob(jobNumber: string) {
   return { found: true, phone: normPhone(c.mobile) || normPhone(c.phone), email: cleanEmail(c.email), first: titleCase(String(c.first || "").trim()) };
 }
 
+// The words customers get, as edited in Settings → Message templates (settings.catalog.templates, Ofek 12 Oct). Read once
+// per request; a template nobody has edited keeps the approved text below, word for word.
+let TPL: Record<string, string> = {};
+// deno-lint-ignore no-explicit-any
+export async function loadTemplates(sb: any) {
+  try { const { data } = await sb.from("settings").select("catalog").limit(1); useTemplates(data && data[0] && data[0].catalog); }
+  catch { TPL = {}; }
+}
+// deno-lint-ignore no-explicit-any
+export function useTemplates(catalog: any) { const t = catalog && catalog.templates; TPL = t && typeof t === "object" ? t : {}; }
+export function tpl(key: string, fallback: string): string { const v = TPL[key]; return typeof v === "string" && v.trim() ? v : fallback; }
+// A template's blanks: {hi} "Hi Sarah" (or "Hi"), {first_name}, {technician}, {result} (the line for that service),
+// {review_link}, {today} (" today" when the job was today). In the email, {review_button} is the big review button.
+// A blank with nothing to put in (no first name) takes its loose comma or space with it: "A quick favour, {first_name}?"
+// becomes "A quick favour?" and "Hi {first_name}," becomes "Hi,". The app's preview uses the same rules (fillReviewTemplate).
+export function fillReview(t: string, v: Record<string, string>): string {
+  const E = "\u0000";
+  return t.replace(/\{(hi|first_name|technician|result|review_link|today|review_button)\}/g, (_m, k) => v[k] || E)
+    .replace(/,[ \t]*\u0000(?=[?!.])/g, "").replace(/[ \t]+\u0000(?=[,?!.])/g, "").replace(/[ \t]*\u0000/g, "").replace(/^[ \t]+/gm, "");
+}
+function escHtml(x: string): string { return x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 // ── The messages (text approved by Ofek on 29 Sep) ──
 function buildMessages(r: { first_name: string; technician: string; review_link: string; job_type: string; job_date: string }, todaySyd: string) {
   const rv = reviewFor(r.job_type)!;
@@ -172,7 +193,18 @@ function buildMessages(r: { first_name: string; technician: string; review_link:
 <p><a href="${r.review_link}" style="display:inline-block;background:#1a73e8;color:#ffffff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold">&#11088;&#11088;&#11088;&#11088;&#11088; Leave a quick Google review</a></p>
 <p>Thank you!<br>${tech}<br>The Guys Service Group</p>`;
   const text = `Hi${name},\n\nThanks for having us${when} - it was a pleasure. ${rv.result}\n\nOur team works really hard to do every job properly, and a Google review from you would mean a lot to them. It takes 30 seconds:\n${r.review_link}\n\nThank you!\n${tech}\nThe Guys Service Group`;
-  return { sms, subject, html, text };
+  // Edited in Settings → Message templates: those parts use the edited words (the rest stays as above).
+  const smsT = tpl("reviewSms", ""), subjT = tpl("reviewEmailSubject", ""), bodyT = tpl("reviewEmailBody", "");
+  if (!smsT && !subjT && !bodyT) return { sms, subject, html, text };
+  const vars: Record<string, string> = { hi: `Hi${name}`, first_name: r.first_name || "", technician: tech, result: rv.result, review_link: r.review_link, today: when };
+  const button = `<a href="${r.review_link}" style="display:inline-block;background:#1a73e8;color:#ffffff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold">&#11088;&#11088;&#11088;&#11088;&#11088; Leave a quick Google review</a>`;
+  const paras = bodyT ? (bodyT.includes("{review_button}") ? bodyT : bodyT + "\n\n{review_button}").split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean) : null;
+  return {
+    sms: smsT ? fillReview(smsT, vars) : sms,
+    subject: subjT ? fillReview(subjT, vars) : subject,
+    html: paras ? paras.map((x) => `<p>${escHtml(fillReview(x, { ...vars, review_button: "\u0001" })).replace(/\n/g, "<br>").replace(/\u0001/g, button)}</p>`).join("\n") : html,
+    text: paras ? paras.map((x) => fillReview(x, { ...vars, review_button: r.review_link })).join("\n\n") : text,
+  };
 }
 // True only when Google confirms the token belongs to the business mailbox (checked with Google, not by us).
 // Google id tokens (from the info@ script's ScriptApp.getIdentityToken) are checked here against Google's published signing
@@ -525,6 +557,7 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
       } catch (e) { return json({ ok: false, error: String((e as Error).message || e) }, 502); }
     }
     const sb = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
+    await loadTemplates(sb);
     if (body.ask && body.ask.job_id) {
       try {
         const p = await officeUser(sb, req);

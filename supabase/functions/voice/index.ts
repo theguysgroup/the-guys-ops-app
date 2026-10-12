@@ -30,6 +30,17 @@ const NOTICE = "Thanks for calling The Guys Service Group. This call may be reco
 const MENU = "For air conditioning, press 1. For chimney, press 2. For pressure washing, press 3.";
 const CLOSED = "Thanks for calling The Guys Service Group. Our office is closed right now. Please leave a short message after the tone with your name, your suburb and what you need, and we'll call you back first thing. We'll also send you a text.";
 const MISSED = "Sorry, we couldn't get to the phone. Please leave a short message after the tone with your name, your suburb and what you need, and we'll call you back shortly. We'll also send you a text.";
+// The words customers get, as edited in Settings → Message templates (settings.catalog.templates, Ofek 12 Oct). Read once
+// per request; a template nobody has edited keeps the approved text below, word for word.
+let TPL: Record<string, string> = {};
+// deno-lint-ignore no-explicit-any
+export async function loadTemplates(sb: any) {
+  try { const { data } = await sb.from("settings").select("catalog").limit(1); useTemplates(data && data[0] && data[0].catalog); }
+  catch { TPL = {}; }
+}
+// deno-lint-ignore no-explicit-any
+export function useTemplates(catalog: any) { const t = catalog && catalog.templates; TPL = t && typeof t === "object" ? t : {}; }
+export function tpl(key: string, fallback: string): string { const v = TPL[key]; return typeof v === "string" && v.trim() ? v : fallback; }
 const SMS_MISSED = "Hi, it's The Guys Service Group. Sorry we missed your call! We'll call you back shortly. If it's easier, reply here with what you need and your suburb.";
 const SMS_CLOSED = "Hi, it's The Guys Service Group. Thanks for calling - our office is closed right now, we'll call you back first thing. If it's easier, reply here with what you need and your suburb.";
 const DIVISIONS = ["Aircon", "Chimney", "Pressure Washing"];
@@ -195,7 +206,8 @@ function dialOwners(R: Routing, mobiles: string[], div: string, from: string): s
 // deno-lint-ignore no-explicit-any
 async function voicemail(sb: any, p: Record<string, string>, closed: boolean): Promise<string> {
   const from = toE164(p.From);
-  const smsOk = await sendSms(from, closed ? SMS_CLOSED : SMS_MISSED);
+  await loadTemplates(sb);
+  const smsOk = await sendSms(from, closed ? tpl("missedCallClosed", SMS_CLOSED) : tpl("missedCall", SMS_MISSED));
   await sb.from("calls").update({ status: "missed", missed: true, sms_sent: smsOk }).eq("call_sid", p.CallSid || "");
   const { data: call } = await sb.from("calls").select("contact_id").eq("call_sid", p.CallSid || "").single();
   if (call && call.contact_id) await addToCard(sb, call.contact_id, `📞 Missed call from ${pretty(from || p.From || "")}${closed ? " (office closed)" : ""}${smsOk ? " · we sent them a text" : ""}. Call them back.`, true);

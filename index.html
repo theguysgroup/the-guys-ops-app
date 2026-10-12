@@ -362,8 +362,33 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .tpl-item:first-child { border-top: 0; }
 .tpl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tpl-head b { font-size: 13.5px; }
-.tpl-text { font-size: 12.8px; background: var(--surface-2); border-radius: 12px 12px 12px 3px; padding: 9px 12px; max-width: 64ch; line-height: 1.5; }
+.tpl-text { font-size: 12.8px; background: var(--surface-2); border-radius: 12px 12px 12px 3px; padding: 9px 12px; max-width: 64ch; line-height: 1.5; overflow-wrap: anywhere; }
 .tpl-var { color: var(--accent); font-weight: 700; }
+.tpl-head-btns { margin-left: auto; display: flex; gap: 6px; }
+.pill.tpl-edited { background: var(--accent-soft); color: var(--accent); }
+.tpl-when { font-size: 12px; color: var(--ink-faint); margin-top: -4px; }
+.tpl-label { font-size: 11px; font-weight: 700; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .05em; }
+.tpl-item.editing { background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+.tpl-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tpl-chips > span { font-size: 11.5px; color: var(--ink-faint); margin-right: 2px; }
+.tpl-chip { font: inherit; font-size: 12px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border: 0; border-radius: 99px; padding: 4px 10px; cursor: pointer; transition: filter .12s ease; }
+.tpl-chip:hover { filter: brightness(.94); }
+.tpl-field { display: flex; flex-direction: column; gap: 5px; }
+.tpl-field > span { font-size: 11.5px; font-weight: 700; color: var(--ink-soft); }
+.tpl-field textarea, .tpl-field input.set-input { width: 100%; max-width: 72ch; font-size: 13px; line-height: 1.5; }
+.tpl-preview-label { font-size: 11px; font-weight: 700; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }
+.tpl-bubble { font-size: 13px; line-height: 1.45; background: var(--surface-2); border-radius: 16px 16px 16px 4px; padding: 9px 13px; max-width: 60ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tpl-count { font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; margin-top: 5px; }
+.tpl-count.warn { color: var(--warn); }
+.tpl-mail { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); padding: 12px 16px; max-width: 64ch; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.tpl-mail p { margin: 0 0 10px; }
+.tpl-mail p:last-child { margin-bottom: 0; }
+.tpl-mail-subj { font-weight: 700; padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid var(--line-soft); }
+.tpl-mail-subj span { font-weight: 400; color: var(--ink-faint); margin-right: 6px; }
+.tpl-mail-btn { display: inline-block; background: #1a73e8; color: #fff; padding: 9px 16px; border-radius: 6px; font-weight: 700; }
+.tpl-problems { display: flex; flex-direction: column; gap: 4px; font-size: 12.3px; color: var(--bad); }
+.tpl-problems div { display: flex; gap: 6px; align-items: flex-start; }
+.tpl-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; padding: 14px 20px 18px; }
 .conn-card { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 14px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
 .conn-card:hover { border-color: color-mix(in srgb, var(--primary) 30%, var(--line)); box-shadow: var(--shadow-lg); transform: translateY(-1px); }
@@ -5066,7 +5091,6 @@ async function playCallRecording(callId, btn){
 // recent, or by SMS from the business number; "Note only" keeps the old log-only behaviour.
 const CONV_URL = SUPABASE_URL + '/functions/v1/conversations';
 const CONV_BRANDS = { Aircon:'The AC Cleaning Guys', Chimney:'The Chimney Guys', 'Pressure Washing':'The Pressure Washing Guys' };
-const CONV_INTRO = "{hi}, it's Ron from {brand}. You sent us a message on our website chat about {service}. I'll give you a call shortly, or you can reply here.";
 const CONV_ERRORS = { no_chat:'This customer has no recent website chat. Send a text instead.', not_mobile:'There is no mobile number on the card.', opted_out:'This customer replied STOP, so no texts.', sms_not_set_up:'Texts start when the business phone is switched on.', unauthorized:'Please sign in again.', empty:'Write a message first.', no_email:'There is no email address on the card.', whatsapp_not_set_up:'WhatsApp starts once it is connected (Twilio).' };
 let CONV = { msgs:{}, sessions:{}, optOut:new Set(), channel:{}, loaded:false };
 function convE164(v){ let d = String(v||'').replace(/\D/g,''); if (d.startsWith('61')) d = d.slice(2); if (d.startsWith('0')) d = d.slice(1); return /^\d{9}$/.test(d) ? '+61'+d : ''; }
@@ -5189,7 +5213,7 @@ function convInsertIntro(contactId, scope){
   const c = contactById(contactId), s = CONV.sessions[contactId];
   if (!c || !s) return;
   const first = String(s.first_name || '').trim();
-  const text = CONV_INTRO.replace('{hi}', first ? 'Hi ' + first : 'Hi there').replace('{brand}', s.brand || CONV_BRANDS[c.division] || 'The Guys Group').replace('{service}', s.service_text || 'your enquiry');
+  const text = fillTemplate(msgTemplateText('chatIntro'), { hi: first ? 'Hi ' + first : 'Hi there', brand: s.brand || CONV_BRANDS[c.division] || 'The Guys Group', service: s.service_text || 'your enquiry' });
   if (convChannels(c).sms) setConvChannel(contactId, 'sms', scope);
   const ta = document.getElementById(scope+'-msg-out-text'); if (ta) { ta.value = text; ta.focus(); }
 }
@@ -11465,7 +11489,7 @@ function setBlock(title, desc, body){ return `<div class="set-block"><div class=
 function setRows(rows){ return `<div class="set-rows">${rows.map(([label, desc, ctl]) => `<div class="set-row"><div class="set-row-text"><b>${label}</b>${desc ? `<span>${esc(desc)}</span>` : ''}</div><div class="set-row-ctl">${ctl}</div></div>`).join('')}</div>`; }
 // A switch, as in the mockup. Locked ones show the rule but can't be changed here.
 function setToggle(on, onclick, locked){ return `<button type="button" class="set-toggle${on ? ' on' : ''}" role="switch" aria-checked="${!!on}"${locked ? ' disabled title="Always on"' : ` onclick="${onclick}"`}></button>`; }
-const CAT_NAMES = { services: 'Services', stages: 'Pipeline stages', sources: 'Lead sources', tags: 'Tags', lostReasons: 'Reasons a lead is lost', payments: 'Payment methods', rules: 'Pipeline rules', security: 'Security', myday: 'My Day', notify: 'Notifications', hours: 'Office hours', business: 'Business details', roles: 'Roles and access', branding: 'Look and branding' };
+const CAT_NAMES = { services: 'Services', stages: 'Pipeline stages', sources: 'Lead sources', tags: 'Tags', lostReasons: 'Reasons a lead is lost', payments: 'Payment methods', rules: 'Pipeline rules', security: 'Security', myday: 'My Day', notify: 'Notifications', hours: 'Office hours', business: 'Business details', roles: 'Roles and access', branding: 'Look and branding', templates: 'Message templates' };
 const CAT_SWATCHES = ['#1f66c9', '#2b6cc4', '#0e8a8a', '#16a34a', '#c99a06', '#c4580f', '#d03b5c', '#7746c9', '#a5473f', '#776e64'];
 function STAGE_RULE_TEXT(k){
   return ({ New: 'Every new enquiry starts here', Chasing: `Calls counted on office days · decide after ${RULES.chaseDecideDays} days`,
@@ -11810,18 +11834,146 @@ function applyRoleToPeople(role){
   }, { danger: false });
 }
 
-// Message templates: the real words customers get today (they live on the server; editing them here is the next update).
+// Message templates (Ofek 12 Oct: the code may change; the words only with his OK). The server functions (review-requests,
+// voice, conversations) use the words saved here in settings.catalog.templates; a message nobody has edited keeps the
+// approved words below, which are exactly the ones the functions have (tests check the two match).
+const REVIEW_TPL_VARS = [['hi', 'Hi Sarah (just "Hi" with no first name)'], ['first_name', 'Sarah'], ['technician', 'the technician, e.g. Guy'], ['result', 'the line for that service, e.g. Enjoy the fresh, clean air!'], ['review_link', 'the Google review link for that service'], ['today', '" today" when the job was today, otherwise nothing']];
+const CHAT_TPL_VARS = [['hi', 'Hi Sarah (Hi there with no first name)'], ['brand', 'the service\'s name, e.g. The AC Cleaning Guys'], ['service', 'what they asked about']];
+const MSG_TEMPLATES = [
+  { id: 'reviewText', name: 'Review request', channel: 'Text', when: 'When the office asks for a review, and on its own once automatic asking is on.', vars: REVIEW_TPL_VARS, need: ['review_link'],
+    fields: [{ key: 'reviewSms', text: "{hi}, {technician} from The Guys Service Group here - thanks for having us{today}! {result} Our team works really hard and would truly appreciate a quick Google review: {review_link} Thank you!" }] },
+  { id: 'reviewEmail', name: 'Review request', channel: 'Email', when: 'Sent with the text when the card has an email address. The review button is added at the end if the message leaves it out.', vars: [...REVIEW_TPL_VARS, ['review_button', 'the big "Leave a quick Google review" button']],
+    fields: [{ key: 'reviewEmailSubject', label: 'Subject', line: true, text: 'A quick favour, {first_name}?' },
+      { key: 'reviewEmailBody', label: 'Message', rows: 12, text: "{hi},\n\nThanks for having us{today} - it was a pleasure. {result}\n\nOur team works really hard to do every job properly, and a Google review from you would mean a lot to them. It takes 30 seconds.\n\n{review_button}\n\nThank you!\n{technician}\nThe Guys Service Group" }] },
+  { id: 'missedCall', name: 'Missed call', channel: 'Text', when: 'To a mobile caller nobody answered, once the business phone is on.', vars: [],
+    fields: [{ key: 'missedCall', text: "Hi, it's The Guys Service Group. Sorry we missed your call! We'll call you back shortly. If it's easier, reply here with what you need and your suburb." }] },
+  { id: 'missedCallClosed', name: 'Missed call (office closed)', channel: 'Text', when: 'The same, when the call comes in after hours.', vars: [],
+    fields: [{ key: 'missedCallClosed', text: "Hi, it's The Guys Service Group. Thanks for calling - our office is closed right now, we'll call you back first thing. If it's easier, reply here with what you need and your suburb." }] },
+  { id: 'chatOpen', name: 'Website chat not answered (office open)', channel: 'Text', when: '5 minutes after a website chat nobody answered, once automatic texts are on.', vars: CHAT_TPL_VARS,
+    fields: [{ key: 'chatOpen', text: "{hi}, Ron here from {brand}. I saw your message about {service} - I'm just finishing up another call and will get back to you very shortly. Feel free to reply here in the meantime." }] },
+  { id: 'chatClosed', name: 'Website chat not answered (office closed)', channel: 'Text', when: 'The same, after hours.', vars: CHAT_TPL_VARS,
+    fields: [{ key: 'chatClosed', text: "{hi}, it's Ron from {brand}. You sent us a message on our website chat about {service}. I'll call you first thing when our office opens, or you can reply here." }] },
+  { id: 'chatIntro', name: 'Moving a website chat to text', channel: 'Text', when: 'Filled in when the office moves a chat to text. They can still change it before sending.', vars: CHAT_TPL_VARS,
+    fields: [{ key: 'chatIntro', text: "{hi}, it's Ron from {brand}. You sent us a message on our website chat about {service}. I'll give you a call shortly, or you can reply here." }] },
+];
+// The words in use for one template: the saved ones, or the approved original.
+function msgTemplateText(key){
+  const t = ((((STATE.data && STATE.data.settings && STATE.data.settings.catalog) || {}).templates) || {})[key];
+  if (typeof t==='string' && t.trim()) return t;
+  const f = MSG_TEMPLATES.flatMap(m => m.fields).find(x => x.key===key);
+  return f ? f.text : '';
+}
+// Fills the blanks the way the server does (review-requests fillReview): a blank with nothing to put in takes its loose
+// comma or space with it ("A quick favour, {first_name}?" → "A quick favour?"); a blank this message doesn't know stays.
+function fillTemplate(t, v){
+  return String(t || '').replace(/\{(\w+)\}/g, (m, k) => Object.prototype.hasOwnProperty.call(v, k) ? (v[k] || '\u0000') : m)
+    .replace(/,[ \t]*\u0000(?=[?!.])/g, '').replace(/[ \t]+\u0000(?=[,?!.])/g, '').replace(/[ \t]*\u0000/g, '').replace(/^[ \t]+/gm, '');
+}
+// How many texts a message costs: 160 characters fit in one (153 each once split). A curly quote, an emoji or another
+// special character switches the whole message to 70 (67 each), which is easy to do by accident when typing on a phone.
+// (\u003b is the semicolon, written that way so the test extractor's statement scan isn't cut short.)
+const SMS_GSM = "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:\u003b<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà", SMS_GSM_EXT = "^{}\\[~]|€";
+function smsParts(text){
+  const chars = [...String(text || '')];
+  if (chars.every(ch => SMS_GSM.includes(ch) || SMS_GSM_EXT.includes(ch))) {
+    const n = chars.reduce((a, ch) => a + (SMS_GSM_EXT.includes(ch) ? 2 : 1), 0);
+    return { chars: n, parts: n <= 160 ? 1 : Math.ceil(n / 153), unicode: false };
+  }
+  const n = chars.reduce((a, ch) => a + (ch.codePointAt(0) > 0xffff ? 2 : 1), 0);
+  return { chars: n, parts: n <= 70 ? 1 : Math.ceil(n / 67), unicode: true };
+}
+// What stops a template from being saved: an empty field, a blank this message can't fill, or a missing review link.
+function templateProblems(m, values){
+  const allowed = new Set(m.vars.map(v => v[0])), out = [];
+  m.fields.forEach(f => {
+    const t = String(values[f.key] || '');
+    if (!t.trim()) out.push(`${f.label ? f.label + ' is' : 'The message is'} empty. Write it, or use "Back to the original".`);
+    const bad = [...new Set((t.match(/\{[^{}\s]*\}/g) || []).map(x => x.slice(1, -1)).filter(k => !allowed.has(k)))];
+    if (bad.length) out.push(`${bad.map(k => '{' + k + '}').join(', ')} can't be filled in here. ${allowed.size ? 'Use the blanks above the message.' : 'This message has no blanks.'}`);
+  });
+  (m.need || []).forEach(k => { if (!m.fields.some(f => String(values[f.key] || '').includes('{' + k + '}'))) out.push(`Keep {${k}} in the message, or customers won't get the link.`); });
+  return out;
+}
+let TPL_EDIT = null;   // the template open for editing: { id, values: { key: words }, focus: the field the blanks go into }
+const TPL_EXAMPLE = { hi: 'Hi Sarah', first_name: 'Sarah', technician: 'Guy', result: 'Enjoy the fresh, clean air!', review_link: 'https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU', today: ' today', brand: 'The AC Cleaning Guys', service: 'aircon cleaning' };
+function tplHighlight(t){ return esc(t).replace(/\{(\w+)\}/g, '<span class="tpl-var">{$1}</span>').replace(/\n/g, '<br>'); }
+// What the customer gets, with example details (Sarah, an aircon clean by Guy, today).
+function tplPreviewHtml(m, values){
+  if (m.channel==='Email') {
+    const subject = fillTemplate(values.reviewEmailSubject, TPL_EXAMPLE);
+    let body = String(values.reviewEmailBody || ''); if (!body.includes('{review_button}')) body += '\n\n{review_button}';
+    const paras = body.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
+    return `<div class="tpl-mail"><div class="tpl-mail-subj"><span>Subject</span>${esc(subject)}</div>${paras.map(x => `<p>${esc(fillTemplate(x, { ...TPL_EXAMPLE, review_button: '\u0001' })).replace(/\n/g, '<br>').replace(/\u0001/g, '<span class="tpl-mail-btn">&#11088;&#11088;&#11088;&#11088;&#11088; Leave a quick Google review</span>')}</p>`).join('')}</div>`;
+  }
+  const text = fillTemplate(values[m.fields[0].key], TPL_EXAMPLE), sp = smsParts(text);
+  return `<div class="tpl-bubble">${esc(text)}</div><div class="tpl-count${sp.parts > 2 || sp.unicode ? ' warn' : ''}">${sp.chars} characters · ${sp.parts===1 ? '1 text' : sp.parts + ' texts'}${sp.unicode ? ' · a curly quote, emoji or special character makes each text hold 70 characters instead of 160' : ''}</div>`;
+}
+function tplProblemsHtml(m, values){ const p = templateProblems(m, values); return p.length ? `<div class="tpl-problems">${p.map(x => `<div>${ico('alert', 14)}<span>${esc(x)}</span></div>`).join('')}</div>` : ''; }
 function renderTemplatesPage(){
-  const v = t => esc(t).replace(/\{(\w+)\}/g, '<span class="tpl-var">{$1}</span>');
-  const items = [
-    ['Review request', 'Text', 'Hi {first_name}, {technician} from The Guys Service Group here - thanks for having us! {result} Our team works really hard and would truly appreciate a quick Google review: {review_link} Thank you!'],
-    ['Review request', 'Email', 'Hi {first_name}, Thanks for having us - it was a pleasure. {result} Our team works really hard to do every job properly, and a Google review from you would mean a lot to them. It takes 30 seconds. [Leave a quick Google review] Thank you! {technician}, The Guys Service Group'],
-    ['Missed call', 'Text', "Hi, it's The Guys Service Group. Sorry we missed your call! We'll call you back shortly. If it's easier, reply here with what you need and your suburb."],
-    ['Website chat not answered (office open)', 'Text', "{hi}, Ron here from {brand}. I saw your message about {service} - I'm just finishing up another call and will get back to you very shortly. Feel free to reply here in the meantime."],
-    ['Website chat not answered (office closed)', 'Text', "{hi}, it's Ron from {brand}. You sent us a message on our website chat about {service}. I'll call you first thing when our office opens, or you can reply here."],
-  ];
-  return `<div class="set-note">${ico('alert', 16)}<span>These are the exact words customers get today. They are kept on the server; editing them here comes in the next update.</span></div>`
-    + setBlock('Templates', '', `<div class="tpl-list">${items.map(([n, ch, t]) => `<div class="tpl-item"><div class="tpl-head"><b>${esc(n)}</b><span class="pill neutral">${esc(ch)}</span>${NEXT_UPDATE}</div><div class="tpl-text">${v(t)}</div></div>`).join('')}</div>`);
+  const saved = ((STATE.data.settings || {}).catalog || {}).templates || {};
+  const edited = m => m.fields.some(f => typeof saved[f.key]==='string' && saved[f.key].trim());
+  const item = m => {
+    const open = !!(TPL_EDIT && TPL_EDIT.id===m.id);
+    const head = `<div class="tpl-head"><b>${esc(m.name)}</b><span class="pill neutral">${esc(m.channel)}</span>${edited(m) ? '<span class="pill tpl-edited">Edited</span>' : ''}<span class="tpl-head-btns">${open ? '' : `<button class="btn small ghost" onclick="startTemplateEdit('${m.id}')">Edit</button>`}</span></div><div class="tpl-when">${esc(m.when)}</div>`;
+    if (!open) return `<div class="tpl-item">${head}${m.fields.map(f => `${f.label ? `<div class="tpl-label">${esc(f.label)}</div>` : ''}<div class="tpl-text">${tplHighlight(msgTemplateText(f.key))}</div>`).join('')}</div>`;
+    const V = TPL_EDIT.values, changed = m.fields.some(f => V[f.key]!==f.text);
+    return `<div class="tpl-item editing">${head}
+      ${m.vars.length ? `<div class="tpl-chips"><span>Blanks</span>${m.vars.map(([k, hint]) => `<button type="button" class="tpl-chip" title="${esc(hint)}" onmousedown="event.preventDefault()" onclick="insertTemplateVar('${k}')">{${k}}</button>`).join('')}</div>` : '<div class="tpl-when">This message has no blanks.</div>'}
+      ${m.fields.map(f => `<label class="tpl-field">${f.label ? `<span>${esc(f.label)}</span>` : ''}${f.line
+        ? `<input class="set-input" id="tpl-f-${f.key}" value="${esc(V[f.key])}" onfocus="TPL_EDIT.focus='${f.key}'" oninput="templateEditInput('${f.key}', this.value)">`
+        : `<textarea id="tpl-f-${f.key}" rows="${f.rows || 4}" onfocus="TPL_EDIT.focus='${f.key}'" oninput="templateEditInput('${f.key}', this.value)">${esc(V[f.key])}</textarea>`}</label>`).join('')}
+      <div class="tpl-preview-label">What the customer gets</div>
+      <div id="tpl-preview">${tplPreviewHtml(m, V)}</div>
+      <div id="tpl-problems">${tplProblemsHtml(m, V)}</div>
+      <div class="tpl-actions"><button class="btn small primary" onclick="saveTemplateEdit()">Save</button><button class="btn small ghost" onclick="cancelTemplateEdit()">Cancel</button>${changed ? '<button class="btn small ghost" onclick="templateBackToOriginal()">Back to the original</button>' : ''}</div>
+    </div>`;
+  };
+  return `<div class="set-note">${ico('alert', 16)}<span>Customers get exactly these words. The blue parts fill in by themselves. Edit one to see what the customer gets before you save it; "Back to the original" brings back the approved words.</span></div>`
+    + setBlock('Templates', '', `<div class="tpl-list">${MSG_TEMPLATES.map(item).join('')}</div>`);
+}
+function startTemplateEdit(id){
+  const m = MSG_TEMPLATES.find(x => x.id===id); if (!m) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  TPL_EDIT = { id, values: Object.fromEntries(m.fields.map(f => [f.key, msgTemplateText(f.key)])), focus: m.fields[m.fields.length - 1].key };
+  render();
+  const el = document.getElementById('tpl-f-' + TPL_EDIT.focus); if (el) el.focus();
+}
+function templateEditInput(key, value){
+  if (!TPL_EDIT) return;
+  TPL_EDIT.values[key] = value;
+  const m = MSG_TEMPLATES.find(x => x.id===TPL_EDIT.id), p = document.getElementById('tpl-preview'), q = document.getElementById('tpl-problems');
+  if (p) p.innerHTML = tplPreviewHtml(m, TPL_EDIT.values);
+  if (q) q.innerHTML = tplProblemsHtml(m, TPL_EDIT.values);
+}
+function insertTemplateVar(k){
+  if (!TPL_EDIT) return;
+  const el = document.getElementById('tpl-f-' + TPL_EDIT.focus); if (!el) return;
+  const a = el.selectionStart ?? el.value.length, b = el.selectionEnd ?? a, ins = '{' + k + '}';
+  el.value = el.value.slice(0, a) + ins + el.value.slice(b); el.dataset.dirty = '1';
+  el.focus(); try { el.setSelectionRange(a + ins.length, a + ins.length); } catch(e) {}
+  templateEditInput(TPL_EDIT.focus, el.value);
+}
+function cancelTemplateEdit(){ TPL_EDIT = null; render(); }
+function templateBackToOriginal(){
+  if (!TPL_EDIT) return;
+  MSG_TEMPLATES.find(x => x.id===TPL_EDIT.id).fields.forEach(f => { TPL_EDIT.values[f.key] = f.text; });
+  render();
+}
+// Saved only when the words differ from the approved original; the original itself is never stored, so it stays the
+// server's own text.
+function saveTemplateEdit(){
+  if (!TPL_EDIT) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const m = MSG_TEMPLATES.find(x => x.id===TPL_EDIT.id), V = TPL_EDIT.values;
+  const probs = templateProblems(m, V); if (probs.length) { showToast(probs[0], { kind: 'warn' }); return; }
+  const all = catalogObject('templates'), next = { ...all };
+  m.fields.forEach(f => { const v = String(V[f.key]).replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').trim(); if (v===f.text) delete next[f.key]; else next[f.key] = v; });
+  if (m.fields.every(f => (all[f.key] ?? null)===(next[f.key] ?? null))) { TPL_EDIT = null; render(); return; }
+  const original = m.fields.every(f => next[f.key]===undefined);
+  confirmAction(original ? `Go back to the original words for "${m.name}" (${m.channel.toLowerCase()})?` : `From now on customers get these words for "${m.name}" (${m.channel.toLowerCase()}). Save?`, () => {
+    TPL_EDIT = null;
+    catalogSave('templates', next, `${m.name} (${m.channel.toLowerCase()}) ${original ? 'back to the original words' : 'changed'}`);
+  }, { danger: false });
 }
 function renderReviewsPage(s){
   const links = [['Aircon', 'https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU'], ['Chimney', 'https://g.page/r/CZUuKFAccuR4EBM/review'], ['Pressure Washing', 'https://g.page/r/CZjy0MO5zKE7EBM/review']];

@@ -168,6 +168,23 @@ const IN = { From: "+61412345678", To: "+61400000001" };
   await step(db, "status", { CallSid: "CA13", CallStatus: "completed", CallDuration: "40" }, {}, FRI_10);
   eq([db.T.calls.find((c: any) => c.call_sid === "CA13").status, !!db.T.calls.find((c: any) => c.id === "m1").callback_done_at], ["answered", true], "called back → cleared");
 
+  // 16b. Message templates (Settings → Message templates, Ofek 12 Oct): nothing edited = the approved words, exactly;
+  // an edited one is used; a blank one keeps the approved words.
+  db = fakeDb(); sms.length = 0;
+  await step(db, "incoming", { CallSid: "CT1", ...IN }, {}, FRI_10);
+  await step(db, "after_owners", { CallSid: "CT1", DialCallStatus: "no-answer", ...IN }, { div: "Aircon" }, FRI_10);
+  eq(sms[0] && sms[0].Body, "Hi, it's The Guys Service Group. Sorry we missed your call! We'll call you back shortly. If it's easier, reply here with what you need and your suburb.", "missed call, nothing edited: the approved text");
+  db = fakeDb({ ronOn: false }); sms.length = 0;
+  await step(db, "incoming", { CallSid: "CT2", ...IN }, {}, FRI_21);
+  eq(sms[0] && sms[0].Body, "Hi, it's The Guys Service Group. Thanks for calling - our office is closed right now, we'll call you back first thing. If it's easier, reply here with what you need and your suburb.", "office closed, nothing edited: the approved text");
+  db = fakeDb(); db.T.settings[0].catalog = { templates: { missedCall: "Sorry we missed you - we'll ring back soon.", missedCallClosed: " " } }; sms.length = 0;
+  await step(db, "incoming", { CallSid: "CT3", ...IN }, {}, FRI_10);
+  await step(db, "after_owners", { CallSid: "CT3", DialCallStatus: "no-answer", ...IN }, { div: "Aircon" }, FRI_10);
+  eq(sms[0] && sms[0].Body, "Sorry we missed you - we'll ring back soon.", "missed call: the edited text");
+  db = fakeDb({ ronOn: false }); db.T.settings[0].catalog = { templates: { missedCall: "edited", missedCallClosed: " " } }; sms.length = 0;
+  await step(db, "incoming", { CallSid: "CT4", ...IN }, {}, FRI_21);
+  eq(sms[0] && /^Hi, it's The Guys Service Group\. Thanks for calling/.test(sms[0].Body), true, "office closed, its template blank: the approved text");
+
   // 17. Landline callers get no text.
   db = fakeDb({ ronOn: false }); sms.length = 0;
   await step(db, "incoming", { CallSid: "CA15", From: "+61298765432", To: IN.To }, {}, FRI_21);

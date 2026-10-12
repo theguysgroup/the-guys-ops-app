@@ -232,6 +232,25 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   db = fakeDb({ chat_sessions: [mk({ created_at: new Date(MON_1000 - 3 * 3600000).toISOString() })] });
   eq((await tick(db, MON_1000)).sent, 0, "a chat older than 2 hours is left alone");
 
+  // ── message templates (Settings → Message templates, Ofek 12 Oct) ──
+  // Edited words are used for the automatic text; a blank one, or none, keeps the approved words (checked above too).
+  db = fakeDb({ chat_sessions: [mk({})] });
+  db.T.settings[0].catalog = { templates: { chatOpen: "{hi}! {brand} got your message about {service}. {hi} again from Ron.", chatClosed: "" } };
+  sent.length = 0;
+  await tick(db, MON_1000);
+  eq(sent[0] && sent[0].body, "Hi Sarah! The Chimney Guys got your message about chimney cleaning. Hi Sarah again from Ron.", "office open: the edited text, every blank filled");
+  db = fakeDb({ chat_sessions: [mk({ created_at: new Date(SAT - 6 * 60000).toISOString() })] });
+  db.T.settings[0].catalog = { templates: { chatOpen: "edited", chatClosed: "  " } };
+  sent.length = 0;
+  await tick(db, SAT);
+  eq(sent[0] && sent[0].body, "Hi Sarah, it's Ron from The Chimney Guys. You sent us a message on our website chat about chimney cleaning. I'll call you first thing when our office opens, or you can reply here.", "office closed, its template blank: the approved words");
+  db = fakeDb({ chat_sessions: [mk({})] });
+  sent.length = 0;
+  await tick(db, MON_1000);
+  eq(sent[0] && sent[0].body && sent[0].body.startsWith("Hi Sarah, Ron here from The Chimney Guys."), true, "the next run with no templates: back to the approved words (nothing left over)");
+  useTemplates({});
+  eq(introFor({ first_name: "sarah", brand: "The Chimney Guys", service_text: "chimney cleaning" }), "Hi Sarah, it's Ron from The Chimney Guys. You sent us a message on our website chat about chimney cleaning. I'll give you a call shortly, or you can reply here.", "intro: the approved words");
+
   // ── a customer's text in ──
   db = fakeDb({ contacts: [{ id: "c9", full_name: "Sarah Jones", phone: "0412 345 678", created_at: "2026-09-01" }] });
   await smsIn(db, { From: "+61412345678", Body: "Yes Tuesday works", MessageSid: "SM1" }, MON_1000);

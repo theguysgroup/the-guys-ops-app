@@ -3,9 +3,12 @@
 `index.ts` is deployed as the Supabase Edge Function `voice` (JWT verification OFF: Twilio cannot send a Supabase
 token; every Twilio request is checked with X-Twilio-Signature instead, and `token`/`play` check the signed-in user).
 
-Tests: `tests.ts` holds the test cases. To run them, build a test file from `index.ts` (swap the supabase import for
-`const createClient = null as any;`, drop `export`), prepend a fake `Deno.env` with test values and a `SIG_EXPECTED`
-computed with Python's `hmac` (SHA1, auth token `testtoken`), then `npx tsx voice_test.ts`.
+Tests: `bash run_tests.sh` runs `tests.ts`. It builds a test file from `index.ts` (swaps the supabase import for
+`const createClient = null as any;`, drops `export`), prepends a fake `Deno.env` with test values and a `SIG_EXPECTED`
+computed with Python's `hmac` (SHA1, auth token `testtoken`), then runs it with `npx tsx`.
+
+The missed-call texts use the words saved in the app (Settings → Message templates, `settings.catalog.templates`
+keys `missedCall` / `missedCallClosed`); with nothing saved they are the approved `SMS_MISSED` / `SMS_CLOSED`.
 
 ## Secrets (Supabase → Edge Functions → Secrets)
 TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_API_KEY_SID, TWILIO_API_KEY_SECRET, TWILIO_TWIML_APP_SID,
