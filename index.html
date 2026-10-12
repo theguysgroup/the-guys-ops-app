@@ -454,7 +454,7 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .lead-card:hover, .lead-card:focus-visible { border-color: var(--primary); box-shadow: var(--shadow-lg); transform: translateY(-2px); }
 .lead-card.just-moved { animation: leadLand .55s cubic-bezier(.34,1.56,.64,1); }
 @keyframes leadLand { 0% { transform: translateY(-6px) scale(1.03); box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-lg); } 60% { transform: translateY(1px) scale(.995); } 100% { transform: none; box-shadow: var(--shadow); } }
-.lead-card { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.lead-card { touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .lead-card.drag-origin { opacity: .32; border-style: dashed; transform: none !important; box-shadow: none !important; }
 .drag-ghost { position: fixed; left: 0; top: 0; z-index: 500; pointer-events: none; will-change: transform; }
 .drag-ghost > .lead-card { margin: 0; cursor: grabbing; transition: transform .18s var(--ease-out), box-shadow .18s ease; }
@@ -10621,9 +10621,11 @@ function flipMeasure(root){
   }
   return before;
 }
+// Reads every position first, then starts the animations: reading a position after an animation has started makes the
+// browser lay the page out again, and over a pipeline of ~1,000 cards that froze the screen for many seconds (12 Oct).
 function flipPlay(root, before, skipKey){
   if (!root || !before || !before.size) return;
-  let fades = 0;
+  const moves = [], fades = [], vh = window.innerHeight;
   for (const el of root.querySelectorAll('[data-key]')) {
     if (!el.animate || el.dataset.key===skipKey) continue;
     const was = before.get(el.dataset.key);
@@ -10631,12 +10633,14 @@ function flipPlay(root, before, skipKey){
       const now = flipPos(el);
       // same list: by its place in the list; moved to another list (a pipeline column): by where it was on screen
       const dx = was.box===now.box ? was.x - now.x : was.vx - now.vx, dy = was.box===now.box ? was.y - now.y : was.vy - now.vy;
-      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.22,1,.36,1)' });
-    } else if (fades < 120) {
-      const now = el.getBoundingClientRect();
-      if (now.bottom > 0 && now.top < window.innerHeight) { fades++; el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'ease-out' }); }
+      if ((Math.abs(dx) > 1 || Math.abs(dy) > 1) && moves.length < 160) moves.push([el, dx, dy]);
+    } else if (fades.length < 60) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom > 0 && r.top < vh && r.width) fades.push(el);
     }
   }
+  moves.forEach(([el, dx, dy]) => el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.22,1,.36,1)' }));
+  fades.forEach(el => el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'ease-out' }));
 }
 function flipSwap(host, html){
   if (!host) return;
@@ -10758,7 +10762,9 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   // Every click redraws the whole screen; the menu keeps where it was scrolled to instead of jumping to the top (Ofek 6 Oct).
   const oldSide = app.querySelector('.sidebar'), sideScroll = oldSide ? oldSide.scrollTop : 0;
   const motionBefore = motionCapture();
-  const flipBefore = motionPageKey()===MOTION.page ? flipMeasure(document.getElementById('content')) : null;
+  const samePage = motionPageKey()===MOTION.page;
+  const flipBefore = samePage ? flipMeasure(document.getElementById('content')) : null;
+  const listScroll = samePage ? keepListScroll() : null;
   app.innerHTML = renderShell(profile, data);
   if (sideScroll) { const side = app.querySelector('.sidebar'); if (side) side.scrollTop = sideScroll; }
   const content = document.getElementById('content');
@@ -10778,7 +10784,16 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   else if (UI.tab==='reference') content.innerHTML = renderReference(profile, data);
   else if (UI.tab==='settings') content.innerHTML = renderSettings(profile);
   if (STATE.loadErrors && STATE.loadErrors.length) content.insertAdjacentHTML('afterbegin', `<div class="card" style="border:1px solid var(--bad);background:var(--bad-soft);margin-bottom:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Some data did not load: ${esc(STATE.loadErrors.join(', '))}.</b> What you see may be incomplete. Don't re-enter anything that looks missing.</div><button class="btn small" onclick="location.reload()">Reload</button></div>`);
+  if (listScroll) listScroll();
   motionAfterRender(motionBefore, flipBefore);
+}
+// A redraw of the same page keeps each pipeline column and the inbox list where they were scrolled (Ofek 12 Oct: after
+// moving a card, every column used to jump back to the top). Returns a function that puts them back.
+function keepListScroll(){
+  const saved = [];
+  document.querySelectorAll('#content .pipe-col .pipe-body').forEach(b => { if (b.scrollTop) saved.push([`.pipe-col[data-status="${b.closest('.pipe-col').dataset.status}"] .pipe-body`, b.scrollTop]); });
+  const inbox = document.getElementById('crm-inbox-list'); if (inbox && inbox.scrollTop) saved.push(['#crm-inbox-list', inbox.scrollTop]);
+  return saved.length ? () => saved.forEach(([sel, top]) => { const el = document.querySelector('#content ' + sel); if (el) el.scrollTop = top; }) : null;
 }
 
 document.addEventListener('keydown', (e) => {
