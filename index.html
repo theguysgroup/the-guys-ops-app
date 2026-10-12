@@ -484,7 +484,7 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .lead-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 11px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 7px; transition: border-color .15s ease, box-shadow .15s ease, transform .15s cubic-bezier(.2,.85,.25,1); }
 .lead-card:hover, .lead-card:focus-visible { border-color: var(--primary); box-shadow: var(--shadow-lg); transform: translateY(-2px); }
 .lead-card.just-moved { animation: leadLand .55s cubic-bezier(.34,1.56,.64,1); }
-@keyframes leadLand { 0% { transform: translateY(-6px) scale(1.03); box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-lg); } 60% { transform: translateY(1px) scale(.995); } 100% { transform: none; box-shadow: var(--shadow); } }
+@keyframes leadLand { 0% { transform: none; box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-lg); } 40% { transform: scale(.985); } 100% { transform: none; box-shadow: var(--shadow); } }
 .lead-card { touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 /* A pipeline column shows a few cards at a time; the rest aren't laid out until scrolled to (the pipeline drew 3-6x faster). */
 .pipe-body > .lead-card { content-visibility: auto; contain-intrinsic-size: auto 150px; }
@@ -496,7 +496,6 @@ body.pipe-dragging .pipe-body > .lead-card:hover { transform: none; box-shadow: 
 .drag-ghost.landing { transition: transform .22s var(--ease-out), opacity .22s ease; opacity: .85; }
 body.pipe-dragging, body.pipe-dragging * { cursor: grabbing !important; user-select: none !important; }
 .pipe-col { transition: background .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
-.pipe-col.drag-over { transform: translateY(-2px); }
 @keyframes leadCardIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes leadCardMoved { 0% { box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-lg); } 100% { box-shadow: var(--shadow); } }
 .lead-card-top { display: flex; align-items: center; gap: 8px; }
@@ -1723,8 +1722,9 @@ const db = {
     async update(id, patch){
       const j = STATE.data.jobs.find(x=>x.id===id);
       if (j) Object.assign(j, patch);
+      noteLocalWrite('jobs', id, patch);
       const { error } = await sb.from('jobs').update(jobPatchToRow(patch)).eq('id', id);
-      if (error) await restoreAfterFailedSave('jobs', 'jobs', id, mapJobRow, 'job', error);
+      if (error) { LOCAL_WRITES.delete('jobs:' + id); await restoreAfterFailedSave('jobs', 'jobs', id, mapJobRow, 'job', error); }
     },
     async remove(id){
       const gone = STATE.data.jobs.find(x=>x.id===id);
@@ -1786,8 +1786,9 @@ const db = {
     async update(id, patch){
       const c = STATE.data.contacts.find(x=>x.id===id);
       if (c) Object.assign(c, patch);
+      noteLocalWrite('contacts', id, patch);
       const { error } = await sb.from('contacts').update(contactPatchToRow(patch)).eq('id', id);
-      if (error) await restoreAfterFailedSave('contacts', 'contacts', id, mapContactRow, 'lead', error);
+      if (error) { LOCAL_WRITES.delete('contacts:' + id); await restoreAfterFailedSave('contacts', 'contacts', id, mapContactRow, 'lead', error); }
     },
     async remove(id){
       const gone = STATE.data.contacts.find(x=>x.id===id);
@@ -2339,23 +2340,48 @@ function handleContactRealtimeChange(payload){ if (PRESENT) return;
   } else {
     // Preserve the existing activityLog — it isn't part of the contacts row itself
     // (comes from the separate activity_log table, joined only at initial load).
-    const fresh = mapContactRow(payload.new), same = sameLiveRow(STATE.data.contacts[idx], fresh);
-    STATE.data.contacts[idx] = { ...fresh, activityLog: STATE.data.contacts[idx].activityLog };
+    const local = STATE.data.contacts[idx], fresh = mapContactRow(payload.new);
+    settleLocalWrites('contacts', fresh.id, fresh, local);
+    const same = sameLiveRow(local, fresh);
+    STATE.data.contacts[idx] = { ...fresh, activityLog: local.activityLog };
     // The echo of a change made on this screen, already drawn: it used to redraw the whole page (after every pipeline
     // move). Only the floating alerts are brought up to date (a reply clears "new lead waiting").
     if (same) { try { renderChaseBubbles(); } catch (e) {} return; }
   }
   renderKeepingInput();
 }
-// True when a row from the database (a lead, a job) holds what this screen already has (times compared as moments, since the
-// database writes "…+00:00" where the app wrote "…Z").
-function sameLiveRow(local, fresh){
-  if (!local) return false;
-  return Object.keys(fresh).every(k => {
-    const a = local[k], b = fresh[k];
-    if (a===b || JSON.stringify(a)===JSON.stringify(b)) return true;
-    return typeof a==='string' && typeof b==='string' && /^\d{4}-\d\d-\d\dT/.test(a) && /^\d{4}-\d\d-\d\dT/.test(b) && Date.parse(a)===Date.parse(b);
+// True when a row from the database (a lead, a job) holds what this screen already has.
+function sameLiveRow(local, fresh){ return !!local && Object.keys(fresh).every(k => sameValue(local[k], fresh[k])); }
+// Same value, the way the database sends it back: times compared as moments ("…+00:00" for the app's "…Z"), and the
+// fields of a history entry in any order (the database stores {at, id, kind, text} for the app's {id, kind, text, at}).
+function sameValue(a, b){
+  if (a===b) return true;
+  if (typeof a==='string' && typeof b==='string') return /^\d{4}-\d\d-\d\dT/.test(a) && /^\d{4}-\d\d-\d\dT/.test(b) && Date.parse(a)===Date.parse(b);
+  if (!a || !b || typeof a!=='object' || typeof b!=='object' || Array.isArray(a)!==Array.isArray(b)) return false;
+  const ka = Object.keys(a).filter(k => a[k]!==undefined), kb = Object.keys(b).filter(k => b[k]!==undefined);
+  return ka.length===kb.length && ka.every(k => sameValue(a[k], b[k]));
+}
+// What this screen saved and the database hasn't sent back yet, per row ('contacts:<id>' → field → { value, at }).
+// A stage change is saved in three steps (the stage, "contacted", the lead's history) and each comes back live on its
+// own, the first two still holding the older history: they looked like someone else's change and redrew the page twice
+// after every pipeline move (Ofek 12 Oct: "everything jumps after I let go, and again a second later").
+const LOCAL_WRITES = new Map();
+function noteLocalWrite(table, id, patch){
+  const key = table + ':' + id, m = LOCAL_WRITES.get(key) || {}, at = Date.now();
+  Object.keys(patch).forEach(k => { m[k] = { value: patch[k], at }; });
+  LOCAL_WRITES.set(key, m);
+}
+// A live row for something this screen saved: a field still on its way keeps what the screen shows (the row is from before
+// that save landed, and live rows come in the order they were saved); a field that came back as saved stops waiting.
+function settleLocalWrites(table, id, fresh, local){
+  const key = table + ':' + id, m = LOCAL_WRITES.get(key);
+  if (!m || !local) return;
+  const now = Date.now();
+  Object.keys(m).forEach(k => {
+    if (now - m[k].at > 15000 || sameValue(fresh[k], m[k].value)) delete m[k];
+    else if (k in fresh) fresh[k] = local[k];
   });
+  if (!Object.keys(m).length) LOCAL_WRITES.delete(key);
 }
 // Jobs + the Payroll tables live-update too, so the Payroll board's commission totals move the moment
 // someone marks a job Paid (or a payroll status / Ron's daily log changes) on another device.
@@ -2365,8 +2391,10 @@ function handleJobRealtimeChange(payload){ if (PRESENT) return;
   const idx = STATE.data.jobs.findIndex(j => j.id === payload.new.id);
   if (idx === -1) STATE.data.jobs.push({ ...mapJobRow(payload.new), activityLog: [] });
   else {
-    const fresh = mapJobRow(payload.new), same = sameLiveRow(STATE.data.jobs[idx], fresh);
-    STATE.data.jobs[idx] = { ...fresh, activityLog: STATE.data.jobs[idx].activityLog };
+    const local = STATE.data.jobs[idx], fresh = mapJobRow(payload.new);
+    settleLocalWrites('jobs', fresh.id, fresh, local);
+    const same = sameLiveRow(local, fresh);
+    STATE.data.jobs[idx] = { ...fresh, activityLog: local.activityLog };
     if (same) return;   // a sync that rewrote a job without changing it, or the echo of a change made here
   }
   renderKeepingInput();
@@ -5055,7 +5083,7 @@ function pipeDragDown(e, id){
 function pipeDragBegin(){
   const d = PIPE_DRAG; if (!d || d.dragging) return;
   const r = d.card.getBoundingClientRect();
-  d.dragging = true; d.dx = d.x0 - r.left; d.dy = d.y0 - r.top; d.from = r;
+  d.dragging = true; d.dx = d.x0 - r.left; d.dy = d.y0 - r.top;
   const ghost = document.createElement('div');
   ghost.className = 'drag-ghost'; ghost.style.width = r.width + 'px';
   const clone = d.card.cloneNode(true); clone.removeAttribute('onclick'); clone.removeAttribute('onpointerdown'); clone.removeAttribute('tabindex');
@@ -5084,9 +5112,14 @@ function pipeDragUp(){
   PIPE_DRAG_ENDED = Date.now();
   const col = d.over, status = col && col.dataset.status, c = contactById(d.id);
   const moving = status && c && leadStage(c)!==status;
-  // Fly into the column (top of its list), or back home when it was let go nowhere new.
-  const body = moving && col.querySelector('.pipe-body'), to = moving ? body.getBoundingClientRect() : d.from;
-  const tx = moving ? to.left + 11 : to.left, ty = moving ? to.top + 11 : to.top;
+  // Fly to exactly where the card will sit (the top of the column's list, which scrolls up meanwhile), or back home when it
+  // was let go nowhere new.
+  let tx, ty;
+  if (moving) {
+    const body = col.querySelector('.pipe-body'), r = body.getBoundingClientRect(), cs = getComputedStyle(body);
+    tx = r.left + body.clientLeft + parseFloat(cs.paddingLeft); ty = r.top + body.clientTop + parseFloat(cs.paddingTop);
+    if (body.scrollTop) body.scrollTo({ top: 0, behavior: motionReduced() ? 'auto' : 'smooth' });
+  } else { const r = d.card.getBoundingClientRect(); tx = r.left; ty = r.top; }
   d.ghost.classList.remove('lifted'); d.ghost.classList.add('landing');
   d.ghost.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
   const id = d.id;
@@ -5122,6 +5155,7 @@ function pipelinePatchMove(c, from){
   if (UI.tab!=='crm' || UI.crm.view!=='pipeline' || (UI.crm.status && UI.crm.status!=='all')) return false;
   const fromCol = document.querySelector(`#content .pipe-col[data-status="${from}"]`), toCol = document.querySelector(`#content .pipe-col[data-status="${to}"]`);
   if (!fromCol || !toCol || from===to) return false;
+  const board = toCol.closest('.pipeline'), around = flipMeasure(board);   // the cards around it slide to their new places
   const old = fromCol.querySelector(`.lead-card[data-lead-id="${c.id}"]`), was = old ? old.getBoundingClientRect() : null;
   const tmp = document.createElement('div'); tmp.innerHTML = renderLeadCard(c).trim();
   const card = tmp.firstElementChild, body = toCol.querySelector('.pipe-body');
@@ -5134,6 +5168,7 @@ function pipelinePatchMove(c, from){
   const tally = {}; crmFilteredContactsUnsorted(filterForProfile(STATE.data, getCurrentProfile())).forEach(x => { const st = leadStage(x); tally[st] = (tally[st] || 0) + 1; });
   const setCount = (col, st) => { const el = col.querySelector('.pipe-count'); if (!el) return; el.textContent = tally[st] || 0; if (el.animate && !motionReduced()) el.animate([{ transform: 'scale(1.3)' }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' }); };
   setCount(fromCol, from); setCount(toCol, to);
+  flipPlay(board, around, c.id);
   // moved from its dropdown: it flies from where it was (a dragged card already flew)
   if (was && card.animate && !motionReduced() && MOTION.noFlip!==c.id) { const now = card.getBoundingClientRect(); card.animate([{ transform: `translate(${was.left - now.left}px, ${was.top - now.top}px)` }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.22,1,.36,1)' }); }
   MOTION.noFlip = null;

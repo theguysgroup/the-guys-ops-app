@@ -68,7 +68,7 @@ const DECLS = [
   // Google Ads: real leads vs Google's count, tracking problems (9 Oct)
   'adsConvKind', 'adsConvShortName', 'adsTracking',
   // The nightly lead check: info@ emails vs the app (9 Oct)
-  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'sameLiveRow',
+  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'sameLiveRow', 'sameValue', 'LOCAL_WRITES', 'noteLocalWrite', 'settleLocalWrites',
   'LEAD_CHECK_DAYS', 'leadPhoneKey', 'leadCheckOpen', 'leadCheckLatest', 'leadDivisionFromSubject', 'adsEmailCheck',
 ];
 
@@ -990,6 +990,18 @@ function testLiveRowsAndStageMemo(sb){
   assertEqual(sb.sameLiveRow(local, { id:'a', status:'Chasing', tags:['Callback', 'Complaint'] }), false, 'sameLiveRow: a new tag is a change');
   assertEqual(sb.sameLiveRow({ id:'a' }, { id:'a', email:'' }), false, 'sameLiveRow: a field this screen does not have yet is a change');
   assertEqual(sb.sameLiveRow(undefined, { id:'a' }), false, 'sameLiveRow: a lead this screen does not have is new');
+  assertEqual(sb.sameLiveRow({ messages:[{ id:'m', kind:'event', text:'x', at:'2026-10-12T08:00:00.000Z', author:undefined }] }, { messages:[{ at:'2026-10-12T08:00:00.000Z', id:'m', kind:'event', text:'x' }] }), true, 'sameLiveRow: a history entry the database stored with its fields in another order is the same');
+  // A stage change saved in three steps comes back as three live rows; the first two still hold the older history.
+  const lead = { id:'s1', status:'Chasing', contactedAt:'2026-10-12T08:00:01.000Z', messages:[{ id:'e1', text:'old' }, { id:'e2', text:'Stage changed' }] };
+  sb.noteLocalWrite('contacts', 's1', { status:'Chasing' }); sb.noteLocalWrite('contacts', 's1', { contactedAt: lead.contactedAt }); sb.noteLocalWrite('contacts', 's1', { messages: lead.messages });
+  const echo = extra => ({ id:'s1', status:'Chasing', contactedAt:null, messages:[{ text:'old', id:'e1' }], ...extra });
+  const steps = [echo({}), echo({ contactedAt:'2026-10-12T08:00:01+00:00' }), echo({ contactedAt:'2026-10-12T08:00:01+00:00', messages:[{ text:'old', id:'e1' }, { text:'Stage changed', id:'e2' }] })]
+    .map(row => { sb.settleLocalWrites('contacts', 's1', row, lead); return sb.sameLiveRow(lead, row); });
+  assertEqual([steps, sb.LOCAL_WRITES.has('contacts:s1')], [[true, true, true], false], 'settleLocalWrites: the three echoes of a move made here change nothing on screen, and nothing is left waiting');
+  sb.noteLocalWrite('contacts', 's2', { status:'Quoted' });
+  const other = { id:'s2', status:'Quoted', tags:[] }, theirs = { id:'s2', status:'Quoted', tags:['Complaint'] };
+  sb.settleLocalWrites('contacts', 's2', theirs, other);
+  assertEqual([sb.sameLiveRow(other, theirs), theirs.tags], [false, ['Complaint']], 'settleLocalWrites: someone else\'s change to another field still shows');
   sb.STATE.data.jobs = []; sb.JOB_CACHE.index = null;
   const c = { id:'m1', fullName:'Memo Person', status:'New' };
   const first = sb.leadStage(c); c.status = 'Chasing'; const second = sb.leadStage(c);
