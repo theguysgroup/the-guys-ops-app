@@ -403,7 +403,7 @@ select 'F-backup ok';
 --
 -- READ-ONLY CHECK before the app is uploaded (Ofek runs it in the SQL editor; it changes nothing).
 -- The export pages through each table ordered by these columns, so each set must be the table's primary key:
---   shift_events (at, profile_id, kind) · myday_days (day) · commission_rates (technician_name)
+--   shift_events (id, checked live 14 Oct) · myday_days (day) · commission_rates (technician_name)
 --   contractor_private (supplier_id) · every other table below: id
 -- If a line differs, tell Claude before the upload (the keys are set in EXPORT_AREAS in index.html).
 --

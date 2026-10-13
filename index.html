@@ -8275,7 +8275,7 @@ const EXPORT_AREAS = [
   { id: 'convos', name: 'Conversations (chat and texts)', desc: 'Website chat and texts answered in OPS.', note: 'Chats answered in GHL aren\'t here until the website chat moves to OPS.', parts: [
     { title: 'Conversations', table: 'chat_sessions', keys: ['id'] }, { title: 'Messages', table: 'lead_messages', keys: ['id'] }] },
   { id: 'shifts', name: 'Shifts', desc: 'Office shifts: start, end, breaks, auto-logouts.', parts: [
-    { title: 'Shift events', table: 'shift_events', keys: ['at', 'profile_id', 'kind'] }, { title: 'Days', table: 'myday_days', keys: ['day'] }] },
+    { title: 'Shift events', table: 'shift_events', keys: ['id'] }, { title: 'Days', table: 'myday_days', keys: ['day'] }] },
   { id: 'reviews', name: 'Review requests', desc: 'Each review request: who, when, how, sent or not.', parts: [{ table: 'review_requests', keys: ['id'] }] },
   { id: 'ads', name: 'Ad stats', desc: 'Google Ads and Meta per day: spend, clicks, leads.', parts: [
     { title: 'Ad stats', table: 'ads_stats', keys: ['id'] }, { title: 'Daily ad spend', table: 'ad_spend', keys: ['id'] }, { title: 'Google Ads calls', table: 'ad_calls', keys: ['id'] }] },
