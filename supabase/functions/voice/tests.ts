@@ -185,6 +185,47 @@ const IN = { From: "+61412345678", To: "+61400000001" };
   await step(db, "incoming", { CallSid: "CT4", ...IN }, {}, FRI_21);
   eq(sms[0] && /^Hi, it's The Guys Service Group\. Thanks for calling/.test(sms[0].Body), true, "office closed, its template blank: the approved text");
 
+  // 16c. Settings → Phone (Ofek 13 Oct): nothing saved = the same menu and spoken words, word for word.
+  eq(menuText(menuOf({})), "For air conditioning, press 1. For chimney, press 2. For pressure washing, press 3.", "menu, nothing saved: the original words");
+  eq(menuOf({ menu: [{ key: " ", say: "x" }, { key: "Aircon" }] }).length, 3, "a menu with no usable rows falls back to the original three");
+  db = fakeDb();
+  x = await body(await step(db, "incoming", { CallSid: "CM1", ...IN }, {}, FRI_10));
+  has(x, "Thanks for calling The Guys Service Group. This call may be recorded for quality and training.", "greeting, nothing edited: the approved words");
+  has(x, "For air conditioning, press 1. For chimney, press 2. For pressure washing, press 3.", "menu, nothing edited: the original words");
+  // A menu of two, in a new order, and an edited greeting: the menu says it, the keys map to it, 3 is now "Other".
+  const two = JSON.parse(JSON.stringify(ROUTING)); two.menu = [{ key: "Chimney", say: "chimney sweeping" }, { key: "Aircon", say: "air con" }];
+  db = fakeDb({ routing: two }); db.T.settings[0].catalog = { templates: { phoneGreeting: "Hi, you've reached The Guys." } };
+  x = await body(await step(db, "incoming", { CallSid: "CM2", ...IN }, {}, FRI_10));
+  has(x, "Hi, you've reached The Guys.", "edited greeting is spoken");
+  hasNot(x, "This call may be recorded", "…instead of the original");
+  has(x, "For chimney sweeping, press 1. For air con, press 2.", "menu from the settings");
+  hasNot(x, "press 3", "only two options");
+  await step(db, "menu", { CallSid: "CM2", Digits: "2", ...IN }, {}, FRI_10);
+  eq(db.T.calls.find((c: any) => c.call_sid === "CM2").division, "Aircon", "key 2 = the second service");
+  db = fakeDb({ routing: two });
+  await step(db, "incoming", { CallSid: "CM3", ...IN }, {}, FRI_10);
+  await step(db, "menu", { CallSid: "CM3", Digits: "3", ...IN }, {}, FRI_10);
+  eq(db.T.calls.find((c: any) => c.call_sid === "CM3").division, "Other", "a key past the menu = Other");
+  // A known Pressure Washing customer when Pressure Washing is not in the menu: they hear the menu.
+  db = fakeDb({ routing: two }); db.T.contacts[0].division = "Pressure Washing";
+  x = await body(await step(db, "incoming", { CallSid: "CM4", From: "0466103709", To: IN.To }, {}, FRI_10));
+  has(x, "<Gather", "known customer of a service not in the menu hears the menu");
+  eq(db.T.calls.find((c: any) => c.call_sid === "CM4").division, null, "…and the call has no service yet");
+  // Edited closed and missed voicemail words; ring times from the settings, out-of-range = 20.
+  db = fakeDb({ ronOn: false }); db.T.settings[0].catalog = { templates: { phoneClosed: "We're closed - leave a message.", phoneMissed: " " } };
+  x = await body(await step(db, "incoming", { CallSid: "CM5", ...IN }, {}, FRI_21));
+  has(x, "We're closed - leave a message.", "edited closed words are spoken");
+  db = fakeDb({ routing: bothAway }); db.T.settings[0].catalog = { templates: { phoneMissed: " " } };
+  await step(db, "incoming", { CallSid: "CM6", ...IN }, {}, FRI_10);
+  x = await body(await step(db, "after_office", { CallSid: "CM6", DialCallStatus: "no-answer", ...IN }, { div: "Aircon" }, FRI_10));
+  has(x, "Sorry, we couldn't get to the phone.", "missed words blank: the approved words");
+  const rings = JSON.parse(JSON.stringify(ROUTING)); rings.officeRingSeconds = 30; rings.backupRingSeconds = 300;
+  db = fakeDb({ routing: rings });
+  x = await body(await step(db, "incoming", { CallSid: "CM7", From: "0466103709", To: IN.To }, {}, FRI_10));
+  has(x, 'timeout="30"', "office rings for the set seconds");
+  x = await body(await step(db, "after_office", { CallSid: "CM7", DialCallStatus: "no-answer", From: "+61466103709", To: IN.To }, { div: "Chimney" }, FRI_10));
+  has(x, 'timeout="20"', "out-of-range backup ring = 20 seconds");
+
   // 17. Landline callers get no text.
   db = fakeDb({ ronOn: false }); sms.length = 0;
   await step(db, "incoming", { CallSid: "CA15", From: "+61298765432", To: IN.To }, {}, FRI_21);

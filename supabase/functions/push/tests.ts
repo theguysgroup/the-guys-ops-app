@@ -118,6 +118,30 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   const r3 = await scan(sdb, NOW + 9 * 60000);
   eq([r3.sent, r3.skipped > 0, sent.length], [0, true, 0], "scan: the next window sends nothing again (each piece of news once)");
 
+  // The technician invoice notification can be switched off in Settings (13 Oct).
+  db.T.settings = [{ id: 1, catalog: { notify: { invoice: { on: false } } } }];
+  sent.length = 0;
+  const off = await handle(db, { step: "invoice", week: "2026-10-04", person: "Guy" }, GUY);
+  eq([off.status, off.body.off, sent.length], [200, true, 0], "invoice: switched off = nothing sent");
+  db.T.settings = [];
+
+  // The numbers from Settings (13 Oct): nothing set = 15 minutes, 8 to 20, 30 days, the business's unpaid days (7).
+  eq(notifyRules({}, undefined), { waitMinutes: 15, from: 8, until: 20, docDays: 30, unpaidDays: 7 }, "rules: the originals");
+  eq(notifyRules({ rules: { waitMinutes: 30, from: 20, until: 7, docDays: 60 } }, 10), { waitMinutes: 30, from: 8, until: 20, docDays: 60, unpaidDays: 10 }, "rules: saved numbers used; impossible hours fall back");
+  const ndb = fakeDb({
+    profiles: [OFEK], push_subscriptions: [{ id: "p1", user_id: "u-ofek", endpoint: "https://push/ofek", p256dh: "k", auth: "a" }],
+    settings: [{ id: 1, unpaid_reminder_days: 10, catalog: { notify: { leadWaiting: { on: true }, unpaid: { on: true }, docExpiry: { on: true }, rules: { waitMinutes: 45, docDays: 10 } } } }],
+    contacts: [{ id: "c1", full_name: "Sam New", division: "Aircon", source: "Google Ads", status: "New", created_at: "2026-10-12", messages: [{ at: "2026-10-12T03:00:00Z" }], tags: [] }],
+    calls: [], jobs: [{ id: "j1", customer_name: "Jo", amount: 450, date: "2026-10-05", payment_status: "Unpaid" }, { id: "j3", customer_name: "Ten", amount: 99, date: "2026-10-02", payment_status: "Unpaid" }],
+    employees: [{ id: "e1", name: "Guy", status: "Active", documents: { license: { expiry: "2026-10-30" } } }], push_sent: [],
+  });
+  sent.length = 0;
+  await scan(ndb, NOW);
+  eq(sent.map((x) => x.msg.title).sort(), ["Unpaid for 10 days: Ten"], "scan with saved numbers: 30 minutes is not yet 45, a 7-day job is not 10, a licence 18 days off is outside 10");
+  sent.length = 0;
+  await scan(ndb, NOW + 20 * 60000);
+  eq(sent.map((x) => x.msg.title), ["Waiting 45+ minutes: Sam New"], "scan with saved numbers: 50 minutes passes 45");
+
   console.log(`push: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);
 })();

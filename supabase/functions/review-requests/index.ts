@@ -56,13 +56,26 @@ function sydToUtc(day: string, hour: number, minute: number): number {
   }
   return t;
 }
-// Requests go out between 08:00 and 20:00 Sydney; one made outside those hours goes at 10:00 the next morning.
-const SEND_FROM = 8, SEND_UNTIL = 20, MORNING = 10;
-function inSendWindow(nowMs: number): boolean { const h = sydParts(nowMs).hour; return h >= SEND_FROM && h < SEND_UNTIL; }
+// Requests go out between 08:00 and 20:00 Sydney; one made outside those hours goes at 10:00 the next morning. Since
+// 13 Oct these are settings (Settings → Google reviews, catalog.reviews); nothing saved = these numbers.
+const REVIEW_RULES = { sendFrom: 8, sendUntil: 20, morning: 10, askAgainMonths: 6 };
+// deno-lint-ignore no-explicit-any
+let RCFG: any = {};
+// deno-lint-ignore no-explicit-any
+export function useReviewSettings(catalog: any) { const r = catalog && catalog.reviews; RCFG = r && typeof r === "object" ? r : {}; }
+export function reviewRules() {
+  const d = REVIEW_RULES;
+  const int = (k: string, lo: number, hi: number, def: number) => { const v = Number(RCFG[k]); return Number.isInteger(v) && v >= lo && v <= hi ? v : def; };
+  let sendFrom = int("sendFrom", 0, 23, d.sendFrom), sendUntil = int("sendUntil", 1, 24, d.sendUntil), morning = int("morning", 0, 23, d.morning);
+  if (sendUntil <= sendFrom) { sendFrom = d.sendFrom; sendUntil = d.sendUntil; }
+  if (morning < sendFrom || morning >= sendUntil) morning = sendFrom;
+  return { sendFrom, sendUntil, morning, askAgainMonths: int("askAgainMonths", 0, 36, d.askAgainMonths) };
+}
+function inSendWindow(nowMs: number): boolean { const h = sydParts(nowMs).hour, r = reviewRules(); return h >= r.sendFrom && h < r.sendUntil; }
 function sendAt(nowMs: number): number {
   if (inSendWindow(nowMs)) return nowMs;
-  const p = sydParts(nowMs);
-  return sydToUtc(p.hour < SEND_FROM ? p.day : shiftDay(p.day, 1), MORNING, 0);
+  const p = sydParts(nowMs), r = reviewRules();
+  return sydToUtc(p.hour < r.sendFrom ? p.day : shiftDay(p.day, 1), r.morning, 0);
 }
 
 // ── Which profile the review goes to (the three Google review links Ofek sent on 29 Sep) ──
@@ -71,12 +84,24 @@ const REVIEW = {
   chimney: { link: "https://g.page/r/CZUuKFAccuR4EBM/review", result: "Enjoy your clean, safe fireplace!" },
   pw: { link: "https://g.page/r/CZjy0MO5zKE7EBM/review", result: "Enjoy your fresh, clean outdoor area!" },
 };
-function reviewFor(jobType: string) {
+function reviewDefault(jobType: string) {
   const t = String(jobType || "").toLowerCase();
   if (/chim|flue|fire/.test(t)) return REVIEW.chimney;
   if (/\bpw\b|pressure|wash|surface|roof|driveway|solar/.test(t)) return REVIEW.pw;
   if (/air|\bac\b|split|duct|vent|hvac/.test(t)) return REVIEW.aircon;
   return null;
+}
+// The link and thank-you line saved for the job's service in Settings (catalog.reviews.links, by service name = job type),
+// else the original above. A service with its own link can be asked even if the original doesn't know it.
+export function reviewFor(jobType: string) {
+  const base = reviewDefault(jobType);
+  const links = RCFG.links && typeof RCFG.links === "object" ? RCFG.links : {};
+  const own = links[String(jobType || "")];
+  if (!own || typeof own !== "object") return base;
+  const ownLink = String(own.link || "").trim();
+  const link = /^https:\/\/\S+$/.test(ownLink) ? ownLink : base && base.link;
+  if (!link) return null;
+  return { link, result: String(own.result ?? "").trim() || (base ? base.result : "") };
 }
 
 // ── Small helpers ──
@@ -129,7 +154,7 @@ const SKIP_TEXT: Record<string, string> = {
   no_card: "no customer card in the CRM for this job",
   no_contact: "no mobile or email on the customer card",
   unknown_job_type: "unknown job type, so no review link",
-  asked_recently: "same customer already asked or waiting (6 months)",
+  asked_recently: "same customer already asked or waiting (within the months set in Settings)",
   do_not_ask: NO_ASK_REASON,
   review_taken: "review taken",
   no_invoice: "no invoice number",
@@ -163,8 +188,8 @@ async function contactForJob(jobNumber: string) {
 let TPL: Record<string, string> = {};
 // deno-lint-ignore no-explicit-any
 export async function loadTemplates(sb: any) {
-  try { const { data } = await sb.from("settings").select("catalog").limit(1); useTemplates(data && data[0] && data[0].catalog); }
-  catch { TPL = {}; }
+  try { const { data } = await sb.from("settings").select("catalog").limit(1); useTemplates(data && data[0] && data[0].catalog); useReviewSettings(data && data[0] && data[0].catalog); }
+  catch { TPL = {}; RCFG = {}; }
 }
 // deno-lint-ignore no-explicit-any
 export function useTemplates(catalog: any) { const t = catalog && catalog.templates; TPL = t && typeof t === "object" ? t : {}; }
@@ -181,18 +206,19 @@ export function fillReview(t: string, v: Record<string, string>): string {
 function escHtml(x: string): string { return x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 // ── The messages (text approved by Ofek on 29 Sep) ──
 function buildMessages(r: { first_name: string; technician: string; review_link: string; job_type: string; job_date: string }, todaySyd: string) {
-  const rv = reviewFor(r.job_type)!;
+  // The link is the one stored on the request; the thank-you line is today's (none if the service has no link any more).
+  const rv = { result: (reviewFor(r.job_type) || { result: "" }).result };
   const name = r.first_name ? ` ${r.first_name}` : "";
   const tech = firstNameOf(r.technician) || "The team";
   const when = r.job_date === todaySyd ? " today" : "";
-  const sms = `Hi${name}, ${tech} from The Guys Service Group here - thanks for having us${when}! ${rv.result} Our team works really hard and would truly appreciate a quick Google review: ${r.review_link} Thank you!`;
+  const sms = `Hi${name}, ${tech} from The Guys Service Group here - thanks for having us${when}! ${rv.result ? rv.result + " " : ""}Our team works really hard and would truly appreciate a quick Google review: ${r.review_link} Thank you!`;
   const subject = `A quick favour${r.first_name ? ", " + r.first_name : ""}?`;
   const html = `<p>Hi${name},</p>
-<p>Thanks for having us${when} - it was a pleasure. ${rv.result}</p>
+<p>Thanks for having us${when} - it was a pleasure.${rv.result ? " " + rv.result : ""}</p>
 <p>Our team works really hard to do every job properly, and a Google review from you would mean a lot to them. It takes 30 seconds.</p>
 <p><a href="${r.review_link}" style="display:inline-block;background:#1a73e8;color:#ffffff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold">&#11088;&#11088;&#11088;&#11088;&#11088; Leave a quick Google review</a></p>
 <p>Thank you!<br>${tech}<br>The Guys Service Group</p>`;
-  const text = `Hi${name},\n\nThanks for having us${when} - it was a pleasure. ${rv.result}\n\nOur team works really hard to do every job properly, and a Google review from you would mean a lot to them. It takes 30 seconds:\n${r.review_link}\n\nThank you!\n${tech}\nThe Guys Service Group`;
+  const text = `Hi${name},\n\nThanks for having us${when} - it was a pleasure.${rv.result ? " " + rv.result : ""}\n\nOur team works really hard to do every job properly, and a Google review from you would mean a lot to them. It takes 30 seconds:\n${r.review_link}\n\nThank you!\n${tech}\nThe Guys Service Group`;
   // Edited in Settings → Message templates: those parts use the edited words (the rest stays as above).
   const smsT = tpl("reviewSms", ""), subjT = tpl("reviewEmailSubject", ""), bodyT = tpl("reviewEmailBody", "");
   if (!smsT && !subjT && !bodyT) return { sms, subject, html, text };
@@ -302,7 +328,7 @@ async function queueRequest(sb: any, job: any, nowMs: number, o: { by: string | 
   if (!c.phone && !c.email) return { ok: false, reason: "no_contact" };
   if (!o.again) {
     // Asked in the last 6 months, or already waiting to be asked (same mobile or email, e.g. two jobs on one day) → once is enough.
-    const since = new Date(nowMs - 183 * 24 * 3600 * 1000).toISOString();
+    const since = new Date(nowMs - Math.round(reviewRules().askAgainMonths * 30.5) * 24 * 3600 * 1000).toISOString();
     const ors = [c.phone ? `phone.eq.${c.phone}` : "", c.email ? `email.eq.${c.email}` : ""].filter(Boolean).join(",");
     const { data: recent } = await sb.from("review_requests").select("id, invoice_number").in("status", ["sent", "waiting"]).gte("created_at", since).or(ors).limit(5);
     // deno-lint-ignore no-explicit-any

@@ -27,7 +27,6 @@ const BUSINESS_NUMBER = env("TWILIO_NUMBER");             // +61 4… the Twilio
 const SELF_URL = env("VOICE_FUNCTION_URL");                // https://<project>.supabase.co/functions/v1/voice (signatures cover this exact URL)
 const VOICE = `voice="Polly.Olivia" language="en-AU"`;
 const NOTICE = "Thanks for calling The Guys Service Group. This call may be recorded for quality and training.";
-const MENU = "For air conditioning, press 1. For chimney, press 2. For pressure washing, press 3.";
 const CLOSED = "Thanks for calling The Guys Service Group. Our office is closed right now. Please leave a short message after the tone with your name, your suburb and what you need, and we'll call you back first thing. We'll also send you a text.";
 const MISSED = "Sorry, we couldn't get to the phone. Please leave a short message after the tone with your name, your suburb and what you need, and we'll call you back shortly. We'll also send you a text.";
 // The words customers get, as edited in Settings → Message templates (settings.catalog.templates, Ofek 12 Oct). Read once
@@ -43,7 +42,18 @@ export function useTemplates(catalog: any) { const t = catalog && catalog.templa
 export function tpl(key: string, fallback: string): string { const v = TPL[key]; return typeof v === "string" && v.trim() ? v : fallback; }
 const SMS_MISSED = "Hi, it's The Guys Service Group. Sorry we missed your call! We'll call you back shortly. If it's easier, reply here with what you need and your suburb.";
 const SMS_CLOSED = "Hi, it's The Guys Service Group. Thanks for calling - our office is closed right now, we'll call you back first thing. If it's easier, reply here with what you need and your suburb.";
-const DIVISIONS = ["Aircon", "Chimney", "Pressure Washing"];
+// The menu a new caller hears (Settings → Phone, phone_routing.menu, Ofek 13 Oct): the services in order, each with the
+// words spoken for it. Nothing saved = the original three, so the caller hears exactly the same menu:
+// "For air conditioning, press 1. For chimney, press 2. For pressure washing, press 3."
+const DEFAULT_MENU = [{ key: "Aircon", say: "air conditioning" }, { key: "Chimney", say: "chimney" }, { key: "Pressure Washing", say: "pressure washing" }];
+// deno-lint-ignore no-explicit-any
+export function menuOf(r: any): { key: string; say: string }[] {
+  // deno-lint-ignore no-explicit-any
+  const m = Array.isArray(r && r.menu) ? r.menu.filter((x: any) => x && typeof x.key === "string" && x.key.trim() && typeof x.say === "string" && x.say.trim()).slice(0, 9) : [];
+  // deno-lint-ignore no-explicit-any
+  return m.length ? m.map((x: any) => ({ key: x.key.trim(), say: x.say.trim() })) : DEFAULT_MENU;
+}
+export const menuText = (menu: { say: string }[]) => menu.map((m, i) => `For ${m.say}, press ${i + 1}.`).join(" ");
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -83,16 +93,19 @@ const hm = (s: string) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")
 
 // ── routing settings (Settings → Phone) ──
 type Person = { name: string; mobile: string; available: boolean };
-type Routing = { people: Record<string, Person>; divisions: Record<string, string[]>; backupHours: { from: string; to: string; days: number[] }; officeRingSeconds: number; backupRingSeconds: number; callerId: string };
+type Routing = { people: Record<string, Person>; divisions: Record<string, string[]>; backupHours: { from: string; to: string; days: number[] }; officeRingSeconds: number; backupRingSeconds: number; callerId: string; menu: { key: string; say: string }[] };
+const ringSeconds = (v: unknown) => { const n = Math.round(Number(v)); return n >= 5 && n <= 60 ? n : 20; };
+// The routing and, in the same read, the words (Settings → Message templates), so a call never waits on a second query.
 // deno-lint-ignore no-explicit-any
 async function routing(sb: any): Promise<Routing> {
-  const { data } = await sb.from("settings").select("phone_routing").limit(1);
+  const { data } = await sb.from("settings").select("phone_routing, catalog").limit(1);
   const r = (data && data[0] && data[0].phone_routing) || {};
+  useTemplates(data && data[0] && data[0].catalog);
   return {
     people: r.people || {}, divisions: r.divisions || {},
     backupHours: r.backupHours || { from: "08:00", to: "20:00", days: [0, 1, 2, 3, 4, 5, 6] },
-    officeRingSeconds: Number(r.officeRingSeconds) || 20, backupRingSeconds: Number(r.backupRingSeconds) || 20,
-    callerId: toE164(r.callerId) || BUSINESS_NUMBER,
+    officeRingSeconds: ringSeconds(r.officeRingSeconds), backupRingSeconds: ringSeconds(r.backupRingSeconds),
+    callerId: toE164(r.callerId) || BUSINESS_NUMBER, menu: menuOf(r),
   };
 }
 function backupOpen(R: Routing, nowMs: number): boolean {
@@ -169,7 +182,7 @@ type Caller = { id: string; name: string; division: string };
 async function contactForCaller(sb: any, e164: string, nowMs: number): Promise<Caller | null> {
   if (!e164) return null;
   const c = await findContact(sb, e164);
-  if (c) return { id: c.id, name: c.full_name || pretty(e164), division: DIVISIONS.includes(c.division) ? c.division : "" };
+  if (c) return { id: c.id, name: c.full_name || pretty(e164), division: String(c.division || "") };
   const row = {
     full_name: `Caller ${pretty(e164)}`, phone: pretty(e164), email: "", postcode: "", division: "Other", source: "Unknown", status: "New",
     created_at: sydney(nowMs).day, job_description: "", tags: [],
@@ -211,7 +224,7 @@ async function voicemail(sb: any, p: Record<string, string>, closed: boolean): P
   await sb.from("calls").update({ status: "missed", missed: true, sms_sent: smsOk }).eq("call_sid", p.CallSid || "");
   const { data: call } = await sb.from("calls").select("contact_id").eq("call_sid", p.CallSid || "").single();
   if (call && call.contact_id) await addToCard(sb, call.contact_id, `📞 Missed call from ${pretty(from || p.From || "")}${closed ? " (office closed)" : ""}${smsOk ? " · we sent them a text" : ""}. Call them back.`, true);
-  return `<Say ${VOICE}>${esc(closed ? CLOSED : MISSED)}</Say>` +
+  return `<Say ${VOICE}>${esc(closed ? tpl("phoneClosed", CLOSED) : tpl("phoneMissed", MISSED))}</Say>` +
     `<Record maxLength="120" playBeep="true" trim="trim-silence" action="${esc(stepUrl("voicemail_done"))}" recordingStatusCallback="${esc(stepUrl("voicemail"))}" recordingStatusCallbackEvent="completed"/>`;
 }
 // Where a call goes once we know the service.
@@ -233,16 +246,19 @@ export async function step(sb: any, name: string, p: Record<string, string>, q: 
   if (name === "incoming") {
     const from = toE164(p.From);
     const caller = await contactForCaller(sb, from, nowMs);
-    await sb.from("calls").insert({ call_sid: callSid, direction: "inbound", from_number: from || p.From || "", to_number: toE164(p.To) || p.To || "", contact_id: caller ? caller.id : null, status: "ringing", division: caller && caller.division ? caller.division : null });
+    // A known customer's service counts only when it is one of the menu's services.
+    const known = caller && R.menu.some((m) => m.key === caller.division) ? caller.division : "";
+    await sb.from("calls").insert({ call_sid: callSid, direction: "inbound", from_number: from || p.From || "", to_number: toE164(p.To) || p.To || "", contact_id: caller ? caller.id : null, status: "ringing", division: known || null });
     // Nobody on shift and outside the owners' hours: straight to the "office closed" voicemail.
     if (!(await onShift(sb, nowMs)).length && !backupOpen(R, nowMs)) return xml(await voicemail(sb, p, true));
-    const notice = `<Say ${VOICE}>${esc(NOTICE)}</Say>`;
+    const notice = `<Say ${VOICE}>${esc(tpl("phoneGreeting", NOTICE))}</Say>`;
     // A known customer goes by their service; a new caller picks one (no key pressed counts as "Other").
-    if (caller && caller.division) return xml(notice + await route(sb, R, p, caller.division, nowMs, caller));
-    return xml(notice + `<Gather input="dtmf" numDigits="1" timeout="6" action="${esc(stepUrl("menu"))}"><Say ${VOICE}>${esc(MENU)}</Say></Gather><Redirect method="POST">${esc(stepUrl("menu"))}</Redirect>`);
+    if (caller && known) return xml(notice + await route(sb, R, p, known, nowMs, caller));
+    return xml(notice + `<Gather input="dtmf" numDigits="1" timeout="6" action="${esc(stepUrl("menu"))}"><Say ${VOICE}>${esc(menuText(R.menu))}</Say></Gather><Redirect method="POST">${esc(stepUrl("menu"))}</Redirect>`);
   }
   if (name === "menu") {
-    const div = ({ "1": "Aircon", "2": "Chimney", "3": "Pressure Washing" } as Record<string, string>)[p.Digits || ""] || "Other";
+    const pick = R.menu[Number(p.Digits || "0") - 1];
+    const div = pick ? pick.key : "Other";
     await sb.from("calls").update({ division: div }).eq("call_sid", callSid);
     const { data: call } = await sb.from("calls").select("contact_id").eq("call_sid", callSid).single();
     let caller: Caller | null = null;
@@ -353,7 +369,7 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     } catch (e) {
       console.error("voice failed:", name, e);
       // Never leave a caller in silence.
-      if (["incoming", "menu", "after_office", "after_owners"].includes(name)) return xml(`<Say ${VOICE}>${esc(MISSED)}</Say><Record maxLength="120" playBeep="true" action="${esc(stepUrl("voicemail_done"))}"/>`);
+      if (["incoming", "menu", "after_office", "after_owners"].includes(name)) return xml(`<Say ${VOICE}>${esc(tpl("phoneMissed", MISSED))}</Say><Record maxLength="120" playBeep="true" action="${esc(stepUrl("voicemail_done"))}"/>`);
       return json({ error: "failed" }, 500);
     }
   });

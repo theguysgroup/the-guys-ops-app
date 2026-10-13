@@ -104,10 +104,21 @@ export function shiftDay(day: string, n: number) { const [y, m, d] = day.split("
 const TEST_TAG = (tags: unknown) => Array.isArray(tags) && tags.some((t) => String(t).toLowerCase() === "test");
 // deno-lint-ignore no-explicit-any
 const arrivedAt = (c: any) => c.reopened_at || (Array.isArray(c.messages) && c.messages[0] && c.messages[0].at) || null;
+// The numbers behind the notifications, set in Settings → Notifications (catalog.notify.rules, Ofek 13 Oct); "unpaid"
+// follows the business's own "Flag a job as unpaid after" (settings.unpaid_reminder_days). Nothing set = the originals.
+// deno-lint-ignore no-explicit-any
+export function notifyRules(N: any, unpaidDays: unknown) {
+  const r = (N && N.rules && typeof N.rules === "object") ? N.rules : {};
+  const int = (v: unknown, lo: number, hi: number, def: number) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : def; };
+  let from = int(r.from, 0, 23, 8), until = int(r.until, 1, 24, 20);
+  if (until <= from) { from = 8; until = 20; }
+  return { waitMinutes: int(r.waitMinutes, 5, 240, 15), from, until, docDays: int(r.docDays, 1, 180, 30), unpaidDays: int(unpaidDays, 1, 365, 7) };
+}
 // deno-lint-ignore no-explicit-any
 export async function scan(sb: any, nowMs: number) {
-  const { data: st } = await sb.from("settings").select("catalog").eq("id", 1).single();
+  const { data: st } = await sb.from("settings").select("catalog, unpaid_reminder_days").eq("id", 1).single();
   const N = (st && st.catalog && st.catalog.notify) || {};
+  const R = notifyRules(N, st && st.unpaid_reminder_days);
   const on = (k: string) => !!(N[k] && N[k].on);
   if (!NOTIFY_KINDS.some(on)) return { ok: true, off: true, sent: 0 };
   // one scan at a time: the first call in each 8-minute window claims it
@@ -125,7 +136,7 @@ export async function scan(sb: any, nowMs: number) {
       const what = [c.division, c.source].filter(Boolean).join(" · ");
       if (on("newLead")) events.push({ key: `lead:${c.id}:${at}`, kind: "newLead", payload: { title: `New lead: ${c.full_name || "no name"}`, body: what || "A new enquiry came in.", url: `${APP_URL}?tab=crm`, tag: `lead-${c.id}` } });
       const touched = (c.status && c.status !== "New") || (c.contacted_at && Date.parse(c.contacted_at) >= atMs) || (c.last_read_at && Date.parse(c.last_read_at) >= atMs);
-      if (on("leadWaiting") && !touched && age >= 15 * 60000 && now.hour >= 8 && now.hour < 20) events.push({ key: `waiting:${c.id}:${at}`, kind: "leadWaiting", payload: { title: `Waiting 15+ minutes: ${c.full_name || "a new lead"}`, body: `Nobody has picked up this ${c.division || ""} lead yet.`.replace("  ", " "), url: `${APP_URL}?tab=crm`, tag: `waiting-${c.id}` } });
+      if (on("leadWaiting") && !touched && age >= R.waitMinutes * 60000 && now.hour >= R.from && now.hour < R.until) events.push({ key: `waiting:${c.id}:${at}`, kind: "leadWaiting", payload: { title: `Waiting ${R.waitMinutes}+ minutes: ${c.full_name || "a new lead"}`, body: `Nobody has picked up this ${c.division || ""} lead yet.`.replace("  ", " "), url: `${APP_URL}?tab=crm`, tag: `waiting-${c.id}` } });
     }
   }
   if (on("missedCall")) {
@@ -133,8 +144,8 @@ export async function scan(sb: any, nowMs: number) {
     for (const c of calls || []) events.push({ key: `call:${c.id}`, kind: "missedCall", payload: { title: "Missed call", body: `${c.from_number || "A caller"}${c.division ? " · " + c.division : ""}. Call them back.`, url: `${APP_URL}?tab=myDay`, tag: `call-${c.id}` } });
   }
   if (on("unpaid")) {
-    const { data: jobs } = await sb.from("jobs").select("id, customer_name, amount, date, payment_status").eq("payment_status", "Unpaid").eq("date", shiftDay(today, -7));
-    for (const j of jobs || []) events.push({ key: `unpaid:${j.id}`, kind: "unpaid", payload: { title: `Unpaid for a week: ${j.customer_name || "a job"}`, body: `$${Number(j.amount || 0).toLocaleString("en-AU")} from ${j.date}. Time to chase it.`, url: `${APP_URL}?tab=outstanding`, tag: `unpaid-${j.id}` } });
+    const { data: jobs } = await sb.from("jobs").select("id, customer_name, amount, date, payment_status").eq("payment_status", "Unpaid").eq("date", shiftDay(today, -R.unpaidDays));
+    for (const j of jobs || []) events.push({ key: `unpaid:${j.id}`, kind: "unpaid", payload: { title: `${R.unpaidDays === 7 ? "Unpaid for a week" : `Unpaid for ${R.unpaidDays} days`}: ${j.customer_name || "a job"}`, body: `$${Number(j.amount || 0).toLocaleString("en-AU")} from ${j.date}. Time to chase it.`, url: `${APP_URL}?tab=outstanding`, tag: `unpaid-${j.id}` } });
   }
   if (on("docExpiry")) {
     const { data: emps } = await sb.from("employees").select("id, name, status, documents");
@@ -143,7 +154,7 @@ export async function scan(sb: any, nowMs: number) {
       for (const [kind, d] of Object.entries(e.documents || {})) {
         // deno-lint-ignore no-explicit-any
         const exp = (d as any) && (d as any).expiry; if (!exp || !/^\d{4}-\d{2}-\d{2}$/.test(exp)) continue;
-        if (exp < today || exp > shiftDay(today, 30)) continue;
+        if (exp < today || exp > shiftDay(today, R.docDays)) continue;
         events.push({ key: `doc:${e.id}:${kind}:${exp}`, kind: "docExpiry", payload: { title: `${e.name}'s ${DOC_LABEL[kind] || kind} expires soon`, body: `On ${exp}. Ask for the new one.`, url: `${APP_URL}?tab=reference`, tag: `doc-${e.id}-${kind}` } });
       }
     }
@@ -176,7 +187,7 @@ export async function handle(sb: any, body: any, me: any) {
 
   if (step === "test") {
     if (!isOffice(me)) return { status: 403, body: { ok: false, reason: "owners only" } };
-    const r = await sendTo(sb, [me.id], { title: "Notifications are on", body: "This phone will get a message when a technician sends his commission invoice.", url: APP_URL + "?tab=payroll", tag: "test" }, await vapidKeys(sb));
+    const r = await sendTo(sb, [me.id], { title: "Notifications are on", body: "This phone will get the notifications that are switched on in Settings → Notifications.", url: APP_URL + "?tab=payroll", tag: "test" }, await vapidKeys(sb));
     return { status: 200, body: { ok: r.sent > 0, ...r } };
   }
 
@@ -198,6 +209,10 @@ export async function handle(sb: any, body: any, me: any) {
     if (!isOffice(me) && !self) return { status: 403, body: { ok: false, reason: "not your invoice" } };
     const { data: rows } = await sb.from("payroll_weeks").select("salary_invoice_file").eq("week_start", week).eq("person", person).limit(1);
     if (!rows || !rows[0] || !rows[0].salary_invoice_file) return { status: 409, body: { ok: false, reason: "no commission invoice on that week" } };
+    // Switched off in Settings → Notifications (on unless someone turned it off, as before 13 Oct).
+    const { data: st } = await sb.from("settings").select("catalog").eq("id", 1).single();
+    const inv = st && st.catalog && st.catalog.notify && st.catalog.notify.invoice;
+    if (inv && inv.on === false) return { status: 200, body: { ok: true, off: true, sent: 0 } };
     const { data: owners } = await sb.from("profiles").select("id").eq("role", "owner");
     // deno-lint-ignore no-explicit-any
     const r = await sendTo(sb, (owners || []).map((o: any) => o.id), {

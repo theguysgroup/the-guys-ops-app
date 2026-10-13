@@ -251,6 +251,24 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   useTemplates({});
   eq(introFor({ first_name: "sarah", brand: "The Chimney Guys", service_text: "chimney cleaning" }), "Hi Sarah, it's Ron from The Chimney Guys. You sent us a message on our website chat about chimney cleaning. I'll give you a call shortly, or you can reply here.", "intro: the approved words");
 
+  // ── office hours, chat timings and brands from Settings (13 Oct); nothing saved = Mon–Fri 8–17, 5 min, 2 h, one a day ──
+  useCatalog({});
+  const MON_0730 = Date.parse("2026-10-11T20:30:00Z"), SAT_10 = Date.parse("2026-10-09T23:00:00Z"), MON_LABOUR = Date.parse("2026-10-04T23:00:00Z");   // Mon 12 Oct 7:30, Sat 10 Oct 10:00, Mon 5 Oct (Labour Day) 10:00
+  eq([officeOpen(MON_1000), officeOpen(MON_0730), officeOpen(SAT_10), officeOpen(MON_LABOUR)], [true, false, false, true], "office hours: the original Mon-Fri 8-17, public holidays not off");
+  eq(chatRules(), { waitMinutes: 5, windowHours: 2, oneADay: true }, "chat rules: the originals");
+  useCatalog({ hours: { days: { 1: { on: true, from: "07:00", to: "17:00" }, 6: { on: true, from: "09:00", to: "13:00" } }, nsw: true, extra: [{ date: "2026-09-28", name: "Team day" }] }, chat: { waitMinutes: 10, windowHours: 4, oneADay: false }, brands: { Chimney: "Chimney Pros" } });
+  eq([officeOpen(MON_0730), officeOpen(SAT_10), officeOpen(MON_LABOUR), officeOpen(MON_1000)], [true, true, false, false], "office hours from Settings: Monday from 7:00, Saturday morning open, Labour Day off (NSW on), own day off closed");
+  eq([chatRules(), brandFor("Chimney", "The Chimney Guys"), brandFor("Aircon", "The AC Cleaning Guys")], [{ waitMinutes: 10, windowHours: 4, oneADay: false }, "Chimney Pros", "The AC Cleaning Guys"], "chat rules and a renamed brand from Settings");
+  useCatalog({ chat: { waitMinutes: 120, windowHours: 2 } });
+  eq(chatRules().windowHours, 3, "the window is always longer than the wait (a 2-hour wait with a 2-hour window would never send)");
+  useCatalog({ hours: { days: { 0: { on: false }, 1: { on: false }, 2: { on: false }, 3: { on: false }, 4: { on: false }, 5: { on: false }, 6: { on: false } } } });
+  eq(officeOpen(MON_1000), true, "no office day at all falls back to Mon-Fri 8-17");
+  // the minute run follows the saved wait: 6 minutes is too early for a 10-minute wait
+  db = fakeDb({ chat_sessions: [mk({})] });
+  db.T.settings[0].catalog = { chat: { waitMinutes: 10 } };
+  eq((await tick(db, MON_1000)).sent, 0, "a 10-minute wait: a 6-minute-old chat is left alone");
+  useCatalog({});
+
   // ── a customer's text in ──
   db = fakeDb({ contacts: [{ id: "c9", full_name: "Sarah Jones", phone: "0412 345 678", created_at: "2026-09-01" }] });
   await smsIn(db, { From: "+61412345678", Body: "Yes Tuesday works", MessageSid: "SM1" }, MON_1000);

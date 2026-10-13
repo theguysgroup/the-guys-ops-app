@@ -227,6 +227,29 @@ const job = (id: string, inv: string, extra: any = {}) => ({ id, invoice_number:
     useTemplates({});
   }
 
+  // ── review rules from Settings (Ofek 13 Oct): nothing saved = the original hours, months, links and lines ──
+  {
+    useReviewSettings({});
+    eq(reviewRules(), { sendFrom: 8, sendUntil: 20, morning: 10, askAgainMonths: 6 }, "no settings: 8 to 20, 10 am, 6 months");
+    eq(reviewFor("Aircon"), REVIEW.aircon, "no settings: the original aircon link and line");
+    const TUE_0700 = Date.parse("2026-10-05T20:00:00Z"), TUE_2100 = Date.parse("2026-10-06T10:00:00Z");   // Tue 7:00 and 21:00 Sydney
+    eq([inSendWindow(TUE_0700), new Date(sendAt(TUE_0700)).toISOString()], [false, "2026-10-05T23:00:00.000Z"], "7 am: waits for 10 am the same day");
+    useReviewSettings({ reviews: { sendFrom: 7, sendUntil: 21, morning: 9, askAgainMonths: 3, links: { Aircon: { link: "https://g.page/r/new/review", result: "Breathe easy!" }, Gutters: { link: "https://g.page/r/gutter/review", result: "" } } } });
+    eq([inSendWindow(TUE_0700), inSendWindow(TUE_2100)], [true, false], "7 am now inside the window, 9 pm outside");
+    eq(new Date(sendAt(TUE_2100)).toISOString(), "2026-10-06T22:00:00.000Z", "a 9 pm request goes at 9 am the next day");
+    eq(reviewFor("Aircon"), { link: "https://g.page/r/new/review", result: "Breathe easy!" }, "the saved link and line are used");
+    eq(reviewFor("Chimney"), REVIEW.chimney, "a service with nothing saved keeps its original");
+    eq(reviewFor("Gutters"), { link: "https://g.page/r/gutter/review", result: "" }, "a new service with its own link can be asked");
+    const m = buildMessages({ first_name: "Sam", technician: "Guy", review_link: "https://g.page/r/gutter/review", job_type: "Gutters", job_date: "2026-10-01" }, "2026-10-06");
+    eq(m.sms, "Hi Sam, Guy from The Guys Service Group here - thanks for having us! Our team works really hard and would truly appreciate a quick Google review: https://g.page/r/gutter/review Thank you!", "no thank-you line: no double space");
+    // A request queued for a service whose link was later cleared still goes, with its stored link and no line (no crash).
+    useReviewSettings({ reviews: { links: { Gutters: { link: "", result: "" } } } });
+    eq(buildMessages({ first_name: "Sam", technician: "Guy", review_link: "https://g.page/r/gutter/review", job_type: "Gutters", job_date: "2026-10-01" }, "2026-10-06").sms, m.sms, "link cleared after queueing: still sends with the stored link");
+    useReviewSettings({ reviews: { sendFrom: 20, sendUntil: 8, morning: 30, links: { Aircon: { link: "javascript:alert(1)", result: "" } } } });
+    eq([reviewRules().sendFrom, reviewRules().sendUntil, reviewRules().morning, reviewFor("Aircon")], [8, 20, 10, REVIEW.aircon], "impossible hours and a bad link fall back to the originals");
+    useReviewSettings({});
+  }
+
   console.log(`review-requests: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);
 })();

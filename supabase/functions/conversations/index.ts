@@ -95,9 +95,46 @@ export function sydney(nowMs: number) {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false }).formatToParts(new Date(nowMs)).map((x) => [x.type, x.value]));
   return { day: `${p.year}-${p.month}-${p.day}`, minutes: (Number(p.hour) % 24) * 60 + Number(p.minute), dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(String(p.weekday)) };
 }
+// The business's own settings (Ofek 13 Oct): office hours and days off (Settings → Office hours and holidays, the same
+// rules as the app), the chat timings and the brand of each service (Settings → Website chat and texts). Nothing saved
+// = Mon–Fri 8:00–17:00, 5 minutes, 2 hours, one text a day and the original brands.
+// deno-lint-ignore no-explicit-any
+let CAT: any = {};
+// deno-lint-ignore no-explicit-any
+export function useCatalog(catalog: any) { CAT = catalog && typeof catalog === "object" ? catalog : {}; useTemplates(CAT); }
+// deno-lint-ignore no-explicit-any
+export async function loadCatalog(sb: any) {
+  try { const { data } = await sb.from("settings").select("catalog").limit(1); useCatalog(data && data[0] && data[0].catalog); }
+  catch { useCatalog({}); }
+}
+const NSW_HOLIDAYS = new Set(["2026-01-01", "2026-01-26", "2026-04-03", "2026-04-04", "2026-04-05", "2026-04-06", "2026-04-25", "2026-04-27", "2026-06-08", "2026-10-05", "2026-12-25", "2026-12-26", "2026-12-28",
+  "2027-01-01", "2027-01-26", "2027-03-26", "2027-03-27", "2027-03-28", "2027-03-29", "2027-04-25", "2027-04-26", "2027-06-14", "2027-10-04", "2027-12-25", "2027-12-26", "2027-12-27", "2027-12-28"]);
+const hm = (t: unknown) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || "")); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 export function officeOpen(nowMs: number): boolean {
-  const t = sydney(nowMs);
-  return t.dow >= 1 && t.dow <= 5 && t.minutes >= 8 * 60 && t.minutes < 17 * 60;
+  const t = sydney(nowMs), h = (CAT.hours && typeof CAT.hours === "object") ? CAT.hours : {};
+  if (h.nsw && NSW_HOLIDAYS.has(t.day)) return false;
+  // deno-lint-ignore no-explicit-any
+  if (Array.isArray(h.extra) && h.extra.some((x: any) => x && x.date === t.day)) return false;
+  const days: ({ from: number; to: number } | null)[] = [];
+  for (let d = 0; d < 7; d++) {
+    const x = { on: d >= 1 && d <= 5, from: "08:00", to: "17:00", ...((h.days || {})[d] || {}) };
+    const f = hm(x.from), to = hm(x.to);
+    days[d] = x.on && f !== null && to !== null && f < to ? { from: f, to } : null;
+  }
+  if (!days.some(Boolean)) for (let d = 1; d <= 5; d++) days[d] = { from: 480, to: 1020 };   // never no office day at all
+  const today = days[t.dow];
+  return !!today && t.minutes >= today.from && t.minutes < today.to;
+}
+export function chatRules() {
+  const c = (CAT.chat && typeof CAT.chat === "object") ? CAT.chat : {};
+  const int = (v: unknown, lo: number, hi: number, def: number) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : def; };
+  const waitMinutes = int(c.waitMinutes, 1, 120, 5);
+  // The window has to be longer than the wait, or no chat would ever be old enough and still young enough for the text.
+  return { waitMinutes, windowHours: Math.max(int(c.windowHours, 1, 48, 2), Math.floor(waitMinutes / 60) + 1), oneADay: c.oneADay !== false };
+}
+export function brandFor(division: string, fallback: string): string {
+  const b = CAT.brands && CAT.brands[division];
+  return typeof b === "string" && b.trim() ? b.trim() : fallback;
 }
 
 // ── texts ──
@@ -263,6 +300,7 @@ async function findContact(sb: any, e164: string): Promise<any | null> {
 // ── chat: start ──
 // deno-lint-ignore no-explicit-any
 export async function chatStart(sb: any, body: any, ip: string, nowMs: number) {
+  await loadCatalog(sb);   // the brand of each service (Settings → Website chat and texts)
   const name = clip(body.name, 40);
   const e164 = toE164(body.phone);
   if (!validName(name)) return { ok: false, reason: "bad_name" };
@@ -317,7 +355,7 @@ export async function chatStart(sb: any, body: any, ip: string, nowMs: number) {
   const token = newToken();
   const { data: s, error } = await sb.from("chat_sessions").insert({
     token_hash: await sha256(token), contact_id: contactId, first_name: cleanFirstName(name), full_name: name, phone: e164,
-    service_key: SERVICES[key] ? key : "other", brand: svc.brand, service_text: svc.text || "your enquiry", first_message: first,
+    service_key: SERVICES[key] ? key : "other", brand: brandFor(svc.division, svc.brand), service_text: svc.text || "your enquiry", first_message: first,
     page, test, ip_hash: ipHash || null, created_at: new Date(nowMs).toISOString(), alert_subject: alertSubject, alert_body: alertBody,
   }).select("*").single();
   if (error) throw error;
@@ -376,6 +414,7 @@ export async function chatPoll(sb: any, body: any, nowMs: number) {
 // ── the office answers (from the app) ──
 // deno-lint-ignore no-explicit-any
 export async function reply(sb: any, user: any, body: any, nowMs: number) {
+  await loadCatalog(sb);
   const contactId = String(body.contact_id || "");
   const text = String(body.text || "").trim().slice(0, 1200);
   const channel = ["sms", "whatsapp", "email"].includes(body.channel) ? body.channel : "chat";
@@ -398,7 +437,7 @@ export async function reply(sb: any, user: any, body: any, nowMs: number) {
     // the business address the customer knows. Their reply lands in the info@ inbox.
     const email = String(body.email || c.email || "").trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, reason: "no_email" };
-    const brand = BRANDS[c.division] || "The Guys Service Group";
+    const brand = brandFor(c.division, BRANDS[c.division] || "The Guys Service Group");
     await sb.from("lead_messages").insert({ contact_id: contactId, channel: "email", direction: "out", body: text, subject: `Your enquiry - ${brand}`, author, author_id: user.id, email, status: "queued", at });
     return { ok: true, channel, queued: true };
   }
@@ -427,10 +466,11 @@ export async function tick(sb: any, nowMs: number) {
   const { data: st } = await sb.from("settings").select("id, chat_auto_sms, chat_tick_at, catalog").limit(1);
   const set = st && st[0];
   if (!set || !set.chat_auto_sms) return { ...out, off: true };
-  useTemplates(set.catalog);
+  useCatalog(set.catalog);
+  const rules = chatRules();
   if (set.chat_tick_at && nowMs - Date.parse(set.chat_tick_at) < 40 * 1000) return { ...out, busy: true };
   await sb.from("settings").update({ chat_tick_at: new Date(nowMs).toISOString() }).eq("id", set.id);
-  const from = new Date(nowMs - 2 * 3600 * 1000).toISOString(), to = new Date(nowMs - 5 * 60 * 1000).toISOString();
+  const from = new Date(nowMs - rules.windowHours * 3600 * 1000).toISOString(), to = new Date(nowMs - rules.waitMinutes * 60 * 1000).toISOString();
   const { data: due } = await sb.from("chat_sessions").select("*").is("auto_sms_at", null).is("auto_sms_skip", null).gte("created_at", from).lte("created_at", to).order("created_at").limit(20);
   for (const s of due || []) {
     const skip = async (why: string) => { await sb.from("chat_sessions").update({ auto_sms_skip: why }).eq("id", s.id); out.skipped++; };
@@ -449,7 +489,7 @@ export async function tick(sb: any, nowMs: number) {
     if (await optedOut(sb, s.phone)) { await skip("opted_out"); continue; }
     const since = new Date(nowMs - 24 * 3600 * 1000).toISOString();
     const { count: recent } = await sb.from("lead_messages").select("id", { count: "exact", head: true }).eq("phone", s.phone).eq("auto", true).eq("channel", "sms").gte("at", since);
-    if ((recent || 0) > 0) { await skip("one_a_day"); continue; }
+    if (rules.oneADay && (recent || 0) > 0) { await skip("one_a_day"); continue; }
     const open = officeOpen(nowMs);
     const text = fill(open ? tpl("chatOpen", SMS_OPEN) : tpl("chatClosed", SMS_CLOSED), s);
     const r = await io.sendSms(s.phone, text);
