@@ -151,6 +151,34 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   eq([custEmail && custEmail.to, custEmail && /Here is the quote\.\n\nRon\nThe Guys Service Group/.test(custEmail.text)], ["sarah@example.com", true], "info@ gets the customer email, signed by Ron");
   await alerts(db, { id_token: "good-token-good-token", sent: ["m:" + em.id] }, MON_1000 + 2000);
   eq(em.status, "sent", "marked sent once info@ sent it");
+
+  // ── the weekly backup email (backup function → backup_runs), sent by the same info@ script ──
+  {
+    const bdb = fakeDb({ backup_runs: [
+      { id: "r1", email_status: "queued", email_queued_at: new Date(MON_1000 - 3600e3).toISOString(), email_to: "owner@example.com", email_subject: "Weekly backup of the OPS app, Sun 27 Sep 2026 (locked)", email_body: "The weekly backup is ready…\nhttps://signed/1" },
+      { id: "r-old", email_status: "queued", email_queued_at: new Date(MON_1000 - 49 * 3600e3).toISOString(), email_to: "owner@example.com", email_subject: "old", email_body: "old" },
+      { id: "r-sent", email_status: "sent", email_queued_at: new Date(MON_1000 - 3600e3).toISOString(), email_to: "owner@example.com", email_subject: "x", email_body: "x" },
+    ] });
+    eq((await alerts(bdb, { id_token: "forged-token-forged" }, MON_1000)), { ok: false, reason: "unauthorized" }, "backup email: a forged token gets nothing");
+    const a1: any = await alerts(bdb, { id_token: "good-token-good-token" }, MON_1000);
+    eq(a1.emails, [{ id: "b:r1", to: "owner@example.com", subject: "Weekly backup of the OPS app, Sun 27 Sep 2026 (locked)", text: "The weekly backup is ready…\nhttps://signed/1" }], "backup email: only the queued one of the last 48 h, to the chosen address, as written (no signature)");
+    await alerts(bdb, { id_token: "good-token-good-token", sent: ["b:r1"] }, MON_1000 + 60000);
+    const r1 = bdb.T.backup_runs.find((r: any) => r.id === "r1");
+    eq([r1.email_status, r1.email_sent_at, (await alerts(bdb, { id_token: "good-token-good-token" }, MON_1000 + 61000)).emails.length], ["sent", new Date(MON_1000 + 60000).toISOString(), 0], "backup email: marked sent once, then no longer handed out");
+    await alerts(bdb, { id_token: "good-token-good-token", sent: ["b:r1"] }, MON_1000 + 120000);
+    eq(r1.email_sent_at, new Date(MON_1000 + 60000).toISOString(), "backup email: a second report doesn't change the sent time");
+    // no backup_runs table yet (the SQL not run): exactly today's answer
+    const plain = fakeDb({ chat_sessions: [{ id: "s9", alert_subject: "New chat", alert_body: "b", created_at: new Date(MON_1000).toISOString() }] });
+    const want = await alerts(plain, { id_token: "good-token-good-token" }, MON_1000);
+    const broken = fakeDb({ chat_sessions: [{ id: "s9", alert_subject: "New chat", alert_body: "b", created_at: new Date(MON_1000).toISOString() }] });
+    const realFrom = broken.from;
+    (broken as any).from = (t: string) => t === "backup_runs" ? { select: () => { throw new Error("relation \"public.backup_runs\" does not exist"); } } : realFrom(t);
+    eq([await alerts(broken, { id_token: "good-token-good-token" }, MON_1000), want], [{ ok: true, emails: [{ id: "s9", to: "info@theguyservicegroup.com", subject: "New chat", text: "b" }] }, { ok: true, emails: [{ id: "s9", to: "info@theguyservicegroup.com", subject: "New chat", text: "b" }] }], "no backup_runs table: the answer is exactly as before");
+    const errDb = fakeDb({ chat_sessions: [] });
+    const errFrom = errDb.from;
+    (errDb as any).from = (t: string) => { if (t !== "backup_runs") return errFrom(t); const b: any = { select: () => b, eq: () => b, gte: () => b, order: () => b, limit: () => b, update: () => b, then: (res: any) => Promise.resolve({ data: null, error: { message: "does not exist" } }).then(res) }; return b; };
+    eq(await alerts(errDb, { id_token: "good-token-good-token", sent: ["b:r1"] }, MON_1000), { ok: true, emails: [] }, "a table error is ignored too (and a 'b:' report doesn't break)");
+  }
   db.T.sms_opt_outs.length = 0;
   db.T.settings[0].whatsapp_enabled = false;
   eq((await reply(db, user, { contact_id: "c-new", channel: "whatsapp", text: "Hi" }, MON_1000)).reason, "whatsapp_not_set_up", "WhatsApp off in settings → refused");

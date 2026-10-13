@@ -83,14 +83,15 @@ function enclosingFunction(idx){
   return { name, text: name ? fnText(name) : '' , at };
 }
 function testStaticScan(){
-  const re = /fetch\(\s*(CONV_URL|VOICE_URL|`\$\{VOICE_URL\}|SUPABASE_URL \+ '\/functions\/v1\/)/g; let m; const seen = [];
+  const re = /fetch\(\s*(CONV_URL|VOICE_URL|PASSKEY_URL|BACKUP_URL|`\$\{VOICE_URL\}|SUPABASE_URL \+ '\/functions\/v1\/)/g; let m; const seen = [];
   while ((m = re.exec(SRC))) {
     const f = enclosingFunction(m.index);
     seen.push(f.name);
     if (NOT_A_WRITE[f.name]) continue;
     ok(/readOnlyReason\(\)/.test(f.text), `${f.name}() sends data to a server function and must check readOnlyReason() first`);
   }
-  ok(seen.length >= 6, 'static scan found the server calls (setMyBreak, convSend, mdCloseOldDays, mdEndOfDay, askForReview, voiceFetch)', seen);
+  ok(seen.length >= 7 && seen.includes('passkeyCall'), 'static scan found the server calls (setMyBreak, convSend, mdCloseOldDays, mdEndOfDay, askForReview, voiceFetch, passkeyCall)', seen);
+  ok(seen.includes('backupFetch') && seen.includes('downloadFullBackup'), 'static scan found the backup function calls (backupFetch, downloadFullBackup)', seen);
   // Business details (14 Oct): the insurance certificate upload and the week-start change stop in a read-only mode.
   ok(['pickBusinessCertificate', 'setWeekStart'].every(n => /readOnlyReason\(\)/.test(fnText(n))), 'business certificate upload and week start check read-only mode');
 }
@@ -249,11 +250,145 @@ function testBrandingReadOnly(){
   ok(rw.log.db.includes('activity: Look and branding: background colour #5b6b82'), 'normal mode: the settings history names the change', rw.log.db);
 }
 
+// Settings → Security (14 Oct): setting up Face ID / fingerprint is a change, so it is refused in a read-only mode; the unlock
+// itself (status, password, Face ID, Google, lock) must still work there, so the owner can open Security to turn Presentation
+// mode off. Removing a key is refused before anything is asked.
+async function testSecurityReadOnly(){
+  for (const [mode, present, viewAs] of [['presentation mode', true, null], ['View as', false, 'ron']]) {
+    const log = { fetch: [], toasts: [], db: [] };
+    const ctx = {
+      log, PRESENT: present, VIEW_AS_ID: viewAs, JSON, Promise, Date,
+      PASSKEY_URL: 'https://x/functions/v1/passkey', SUPABASE_ANON_KEY: 'k',
+      sb: { auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) }, from: () => { log.db.push('from'); throw new Error('no database in a read-only mode'); } },
+      fetch: (u, o) => { log.fetch.push(JSON.parse(o.body).action); return Promise.resolve({ status: 200, ok: true, json: async () => ({ ok: true }) }); },
+      showToast: (m) => log.toasts.push(m),
+      SEC: { keys: [{ id: 'k1', credential_id: 'c1', device_name: "Ofek's Mac" }], regOpts: { options: { challenge: 'AQID' }, at: Date.now() }, until: Date.now() + 60e3 },
+      navigator: { credentials: { create: () => { log.db.push('create'); return Promise.resolve({}); }, get: () => { log.db.push('get'); return Promise.resolve({}); } }, userAgent: 'x', maxTouchPoints: 0 },
+      openModal: () => log.db.push('opened'), confirmAction: () => log.db.push('confirm'), modalError: () => {}, closeModal: () => {}, render: () => {},
+      document: { getElementById: () => null, body: { contains: () => false } },
+    };
+    vm.createContext(ctx);
+    vm.runInContext(['readOnlyReason', 'passkeyCall', 'openPasskeySetup', 'secRegisterPasskey', 'removePasskey'].map(fnText).join('\n'), ctx);
+    const msg = vm.runInContext('readOnlyReason()', ctx);
+    for (const a of ['reg-options', 'reg-verify']) {
+      let err = '';
+      try { await vm.runInContext(`passkeyCall({ action: '${a}' })`, ctx); } catch (e) { err = String(e.message); }
+      ok(err === msg, `${mode}: passkeyCall('${a}') is refused with the read-only message`, err);
+    }
+    ok(log.fetch.length === 0, `${mode}: setting up a key never reaches the server`, log.fetch);
+    for (const a of ['status', 'password', 'auth-options', 'auth-verify', 'google', 'lock']) await vm.runInContext(`passkeyCall({ action: '${a}' })`, ctx);
+    ok(log.fetch.join() === 'status,password,auth-options,auth-verify,google,lock', `${mode}: the unlock still works (so Presentation mode can be turned off)`, log.fetch);
+    log.fetch.length = 0;
+    await vm.runInContext(`openPasskeySetup()`, ctx);
+    await vm.runInContext(`secRegisterPasskey()`, ctx);
+    await vm.runInContext(`removePasskey('k1')`, ctx);
+    ok(log.db.length === 0 && log.fetch.length === 0, `${mode}: no set-up window, no new key, no removal`, [log.db, log.fetch]);
+    ok(log.toasts.length === 3 && log.toasts.every(t => t === msg), `${mode}: each one says changes are not saved`, log.toasts);
+  }
+  ok(/readOnlyReason\(\)/.test(fnText('passkeyCall')), 'passkeyCall checks readOnlyReason()');
+  ok(/return secUnlocked\(\) \? renderSecurityUnlocked\(\) : renderSecurityLock\('page'\);/.test(fnText('renderSecurityPage')), 'Security draws its unlocked page only when this session is unlocked');
+}
+
+// Settings → Data (14 Oct): the weekly backup's address, day and time and "Download full backup" do nothing in a read-only
+// mode: no step-up window, no server call, no database write; the person is told.
+async function testBackupReadOnly(){
+  for (const [mode, present, viewAs] of [['presentation mode', true, null], ['View as', false, 'ron']]) {
+    const log = { fetch: [], toasts: [], db: [], lock: 0 };
+    const ctx = {
+      log, PRESENT: present, VIEW_AS_ID: viewAs, JSON, Promise, Date, Number, String,
+      BACKUP_URL: 'https://x/functions/v1/backup', SUPABASE_ANON_KEY: 'k', DAY_NAMES: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+      BACKUP_ST: { ok: true, config: { email: 'info@theguyservicegroup.com', day: 0, time: '03:00' } },
+      sb: { auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) }, from: () => { log.db.push('from'); throw new Error('no database in a read-only mode'); } },
+      db: new Proxy({}, { get: () => { log.db.push('db'); throw new Error('no database in a read-only mode'); } }),
+      fetch: (u, o) => { log.fetch.push(String(u)); return Promise.resolve({ status: 200, ok: true, json: async () => ({ ok: true }), text: async () => '{}' }); },
+      showToast: (m) => log.toasts.push(m), render: () => {}, logSettingsActivity: () => log.db.push('activity'),
+      secEnsureUnlocked: () => { log.lock++; }, openPopup: () => { log.lock++; },
+    };
+    vm.createContext(ctx);
+    vm.runInContext(['readOnlyReason', 'backupEmailOk', 'backupFetch', 'backupWithStepUp', 'backupConfigDone', 'saveBackupEmail', 'saveBackupWhen', 'downloadFullBackup'].map(fnText).join('\n'), ctx);
+    const msg = vm.runInContext('readOnlyReason()', ctx);
+    await vm.runInContext(`saveBackupEmail('someone@else.com')`, ctx);
+    await vm.runInContext(`saveBackupWhen('day', '3')`, ctx);
+    await vm.runInContext(`saveBackupWhen('time', '23:30')`, ctx);
+    await vm.runInContext(`downloadFullBackup()`, ctx);
+    const r = await vm.runInContext(`backupFetch({ step: 'config', day: 2 })`, ctx);
+    ok(log.fetch.length === 0 && log.db.length === 0 && log.lock === 0, `${mode}: no backup change or download reaches the server, the database or the Security lock`, log);
+    ok(r && r.ok === false && r.reason === msg, `${mode}: backupFetch refuses a change with the read-only message`, r);
+    const want = [msg, msg, msg, present ? 'Exports are off in presentation mode' : msg];
+    ok(JSON.stringify(log.toasts) === JSON.stringify(want), `${mode}: each one says so`, log.toasts);
+    ok(vm.runInContext('BACKUP_ST.config.email', ctx) === 'info@theguyservicegroup.com', `${mode}: the address on screen is unchanged`);
+    await vm.runInContext(`backupFetch({ step: 'status' })`, ctx);
+    ok(log.fetch.length === 1, `${mode}: reading the status still works (it changes nothing)`, log.fetch);
+  }
+}
+
+// Settings → Data → Export to Excel (14 Oct): in a read-only mode the sensitive tick and the Excel download do nothing: no
+// Face ID window, no SheetJS, no database read or write, no server call; ticking areas still works (it saves nothing).
+// Outside those modes the sensitive tick asks for the step-up first and stays unticked until it says yes.
+function constText(name){
+  const at = SRC.search(new RegExp(`\\bconst ${name}\\s*=`));
+  if (at === -1) throw new Error(`const ${name} not found in index.html`);
+  let i = at, depth = 0;
+  for (; i < SRC.length; i++) { const c = SRC[i]; if ('([{'.includes(c)) depth++; else if (')]}'.includes(c)) depth--; else if (c === ';' && depth === 0) { i++; break; } }
+  return SRC.slice(at, i);
+}
+function exportSandbox(present, viewAs, unlocked){
+  const log = { fetch: [], toasts: [], db: [], lock: [], xlsx: 0, renders: 0 };
+  const ctx = {
+    log, PRESENT: present, VIEW_AS_ID: viewAs, Promise, Set,
+    sb: { from: (t) => { log.db.push('from:' + t); throw new Error('no database in a read-only mode'); }, rpc: (n) => { log.db.push('rpc:' + n); } },
+    db: new Proxy({}, { get: () => { log.db.push('db'); throw new Error('no database in a read-only mode'); } }),
+    fetch: (u) => { log.fetch.push(String(u)); return Promise.resolve({ ok: true, json: async () => ({}) }); },
+    showToast: (m) => log.toasts.push(m), render: () => { log.renders++; }, logSettingsActivity: () => log.db.push('activity'),
+    secUnlocked: () => unlocked, secEnsureUnlocked: (why, then) => { log.lock.push({ why, then }); },
+    ensureXlsx: () => { log.xlsx++; return Promise.reject(new Error('SheetJS must not load here')); },
+    UI: { tab: 'settings', settings: { page: 'data', open: true } }, settingsPageKey: (k) => k,
+    document: { getElementById: () => null }, console,
+  };
+  vm.createContext(ctx);
+  vm.runInContext([constText('EXPORT_AREAS'), 'var DATA_EXPORT = { sel: null, sens: false, busy: false, step: \'\', counts: null, countsBusy: false };',
+    ...['readOnlyReason', 'exportDefaultSelection', 'dataExportSel', 'dataPageOpen', 'setExportArea', 'setExportAll', 'setExportSensitive', 'dataExportProgress', 'downloadDataExcel'].map(fnText)].join('\n'), ctx);
+  return ctx;
+}
+async function testExportReadOnly(){
+  for (const [mode, present, viewAs] of [['presentation mode', true, null], ['View as', false, 'ron']]) {
+    const ctx = exportSandbox(present, viewAs, true), log = ctx.log, msg = vm.runInContext('readOnlyReason()', ctx);
+    const want = present ? 'Exports are off in presentation mode' : msg;
+    await vm.runInContext(`setExportSensitive(true)`, ctx);
+    ok(vm.runInContext('DATA_EXPORT.sens', ctx) === false, `${mode}: the sensitive tick stays off`);
+    await vm.runInContext(`downloadDataExcel()`, ctx);
+    await vm.runInContext(`DATA_EXPORT.sens = true; downloadDataExcel()`, ctx);
+    ok(log.db.length === 0 && log.fetch.length === 0 && log.lock.length === 0 && log.xlsx === 0, `${mode}: no database, no server call, no Face ID window, no SheetJS`, log);
+    ok(JSON.stringify(log.toasts) === JSON.stringify([want, want, want]), `${mode}: each one says why ("${want}")`, log.toasts);
+    vm.runInContext(`setExportAll(false); setExportArea('jobs', true); setExportArea('ghl', true)`, ctx);
+    ok(vm.runInContext('[...dataExportSel()].join()', ctx) === 'jobs,ghl' && log.db.length === 0, `${mode}: ticking areas still works and saves nothing`);
+    vm.runInContext(`setExportAll(true)`, ctx);
+    ok(vm.runInContext('dataExportSel().size', ctx) === 15, `${mode}: Select all ticks the 15 areas`);
+  }
+  // Normal mode, Security locked: the tick asks for the step-up and stays off until it says yes; cancelled = off.
+  const ctx = exportSandbox(false, null, false), log = ctx.log;
+  await vm.runInContext(`setExportSensitive(true)`, ctx);
+  ok(log.lock.length === 1 && log.lock[0].why === 'Include sensitive details in the Excel' && vm.runInContext('DATA_EXPORT.sens', ctx) === false, 'the sensitive tick asks for Face ID / the password first and stays off meanwhile', log.lock.map(x => x.why));
+  log.lock[0].then();
+  ok(vm.runInContext('DATA_EXPORT.sens', ctx) === true, 'after the step-up the sensitive tick is on');
+  await vm.runInContext(`downloadDataExcel()`, ctx);
+  ok(log.lock.length === 2 && log.xlsx === 0 && vm.runInContext('DATA_EXPORT.sens', ctx) === false, 'a download with the tick after the 30 minutes ran out asks again and downloads nothing until then');
+  await vm.runInContext(`setExportSensitive(false)`, ctx);
+  ok(log.lock.length === 2 && vm.runInContext('DATA_EXPORT.sens', ctx) === false && log.db.length === 0, 'unticking needs nothing');
+  // E calls group G (Security's lock) and group F (the backup) by these names: E can't ship without them.
+  ok(['secUnlocked', 'secEnsureUnlocked', 'downloadFullBackup', 'backupWithStepUp', 'renderFullBackupBlock'].every(n => { try { return !!fnText(n); } catch (e) { return false; } }), 'the Security lock and the Full backup that Export to Excel uses exist');
+  ok(!/exportDataAsJson|exportDataFile/.test(SRC), 'the old "Export everything" (a JSON of the screen\'s data, scaled ×3 in presentation mode) is gone');
+  ok(/readOnlyReason\(\)/.test(fnText('downloadDataExcel')) && /readOnlyReason\(\)/.test(fnText('setExportSensitive')), 'the download and the sensitive tick check read-only mode');
+}
+
 (async () => {
   await testGuard();
   testStaticScan();
   await testActions();
   testBrandingReadOnly();
+  await testSecurityReadOnly();
+  await testBackupReadOnly();
+  await testExportReadOnly();
   console.log(`read-only: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

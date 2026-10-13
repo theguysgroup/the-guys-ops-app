@@ -333,6 +333,101 @@ a.btn { text-decoration: none; }
 /* Sign in with Google */
 .google-btn { width: 100%; margin-top: 14px; gap: 10px; background: var(--surface); border-color: var(--line); font-weight: 600; }
 .google-btn:hover { background: var(--surface-2); }
+/* Settings → Data: "Open a locked backup" (14 Oct, approved mockup round2-data-security) */
+.bk-modal .hint { font-size: 12px; color: var(--ink-soft); }
+.bk-h { font-size: 13px; font-weight: 700; margin: 14px 0 4px; }
+.bk-g { font-size: 12px; font-weight: 600; color: var(--ink-soft); margin-top: 8px; }
+.bk-areas { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 2px 16px; margin: 4px 0 12px; font-size: 12.5px; }
+.bk-areas span { display: flex; justify-content: space-between; gap: 8px; min-width: 0; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+.bk-areas b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bk-areas em { font-style: normal; color: var(--ink-soft); flex: none; }
+.bk-pre { max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0 0; }
+.bk-files { display: grid; gap: 4px; margin-top: 4px; }
+.bk-file { display: flex; align-items: center; gap: 10px; font-size: 12.5px; min-width: 0; }
+.bk-file .bk-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bk-file .hint { flex: none; }
+/* Settings → Data: the "Export to Excel" board (14 Oct, approved mockup round2-data-security) */
+.ex-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 12px 20px 0; }
+.ex-tools .hint { margin-inline-start: 4px; }
+.ex-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; padding: 12px 20px 16px; }
+.ex-card { display: flex; gap: 11px; align-items: flex-start; padding: 12px 13px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); cursor: pointer; transition: border-color .15s, background-color .15s; min-width: 0; }
+.ex-card:hover { border-color: color-mix(in srgb, var(--primary) 35%, var(--line)); }
+.ex-card.on { border-color: color-mix(in srgb, var(--primary) 55%, var(--line)); background: color-mix(in srgb, var(--primary-soft) 40%, var(--surface)); }
+.ex-card input, .ex-sens input { width: 16px; height: 16px; flex: none; padding: 0; margin: 2px 0 0; accent-color: var(--primary); cursor: pointer; }
+.ex-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.ex-name { font-weight: 700; font-size: 13.5px; line-height: 1.3; }
+.ex-desc { font-size: 12.3px; color: var(--ink-soft); line-height: 1.45; }
+.ex-note { font-size: 12px; color: var(--accent); font-weight: 600; line-height: 1.4; }
+.ex-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 2px; }
+.ex-count { font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.ex-foot { display: flex; flex-direction: column; gap: 12px; padding: 14px 20px 16px; border-top: 1px solid var(--line-soft); background: var(--surface-2); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+.ex-sens { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.ex-sens b { display: block; font-size: 13.3px; font-weight: 600; }
+.ex-sens small { display: block; font-size: 12.3px; color: var(--ink-soft); }
+.ex-sens.on small { color: var(--warn); font-weight: 600; }
+.ex-go { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ex-sum { font-size: 12.5px; color: var(--ink-soft); }
+.ex-sum b { color: var(--ink); }
+@media (max-width: 640px) {
+  /* the download bar stays on screen, just above the app's bottom bar, while the board is in view */
+  .ex-tools { padding-left: 16px; padding-right: 16px; }
+  .ex-grid { padding: 12px 16px 14px; grid-template-columns: 1fr; gap: 8px; }
+  .ex-card { padding: 10px 12px; }
+  .set-block.ex-block { overflow: visible; overflow: clip; }
+  .ex-foot { position: sticky; bottom: var(--bottom-bar-h, 0px); z-index: 2; padding: 12px 16px; gap: 10px; box-shadow: 0 -10px 18px -10px rgba(0,0,0,.25); }
+  .ex-sens:not(.on) small { display: none; }
+  .ex-go .btn { flex: 1 1 auto; }
+  .ex-go .ex-sum { display: none; }   /* on a phone the button already says "one sheet per area" and the tools row counts the ticks */
+}
+/* Settings → Security: the lock, Face ID / fingerprint keys, Settings history (14 Oct, approved mockup round2-data-security) */
+.set-title .pill { margin-left: 8px; vertical-align: middle; }
+.set-block-head.has-right { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.set-block-head.has-right > div:first-child { flex: 1 1 320px; min-width: 0; }
+.lock-wrap { display: grid; place-items: center; padding: 30px 0 10px; }
+.lock-card { width: 100%; max-width: 410px; background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--primary); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 24px 20px 20px; text-align: center; }
+.modal .lock-card { max-width: none; border: 0; box-shadow: none; padding: 10px 0 0; }
+.lock-badge { width: 60px; height: 60px; border-radius: 99px; margin: 0 auto 14px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
+.lock-card h3 { margin: 0 0 6px; font-size: 18px; }
+.lock-card p { margin: 0 0 18px; color: var(--ink-soft); font-size: 13.3px; }
+.lock-card .btn.primary, .lock-card .lock-google { width: 100%; }
+.lock-card .lock-google { margin-top: 0; }
+.lock-card .pw { display: grid; gap: 8px; text-align: left; margin-bottom: 10px; }
+.lock-card .pw input { width: 100%; }
+.lock-alt { margin-top: 10px; }
+.lock-err { color: var(--bad); font-size: 12px; min-height: 16px; text-align: left; }
+.lock-err.lock-err-c { text-align: center; margin-top: 8px; min-height: 0; }
+.lock-foot { margin-top: 14px; font-size: 11.8px; color: var(--ink-faint); }
+.unlocked-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 9px 14px; border-radius: 8px; background: var(--good-soft); color: var(--good); font-size: 12.8px; font-weight: 600; margin-bottom: 14px; }
+.unlocked-bar .btn { color: var(--good); border-color: color-mix(in srgb, var(--good) 35%, transparent); background: transparent; }
+.pk-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 12px 20px; border-top: 1px solid var(--line-soft); }
+.pk-ic { width: 36px; height: 36px; border-radius: 10px; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.pk-text { flex: 1 1 170px; min-width: 0; }
+.pk-text b { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; font-weight: 600; }
+.pk-text span:not(.pill) { display: block; font-size: 12.3px; color: var(--ink-soft); }
+.pk-row > .btn { margin-left: auto; }
+.hist-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px 20px 4px; }
+.hist-tools input { flex: 1 1 200px; max-width: 280px; }
+.hist-list { padding: 4px 0 6px; }
+.hist-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 11px; align-items: start; padding: 9px 20px; border-top: 1px solid var(--line-soft); }
+.hist-row:first-child { border-top: 0; }
+.hist-av { width: 28px; height: 28px; border-radius: 99px; display: grid; place-items: center; flex: none; font-size: 12px; font-weight: 700; color: var(--c); background: color-mix(in srgb, var(--c) 16%, var(--surface)); border: 1px solid color-mix(in srgb, var(--c) 38%, transparent); }
+.hist-what { font-size: 13px; line-height: 1.4; min-width: 0; overflow-wrap: anywhere; }
+.hist-what small { display: block; color: var(--ink-faint); font-size: 11.8px; }
+.hist-when { font-size: 11.8px; color: var(--ink-faint); white-space: nowrap; padding-top: 2px; }
+.hist-foot { padding: 10px 20px 14px; border-top: 1px solid var(--line-soft); }
+.note-link { font-size: 12.5px; color: var(--ink-soft); background: var(--surface); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; }
+.note-link a { color: var(--primary-strong); font-weight: 600; }
+.code-in { font-size: 20px !important; letter-spacing: .3em; text-align: center; width: 100%; }
+@media (max-width: 640px) {
+  .pk-row { padding: 12px 16px; }
+  .hist-tools { padding-left: 16px; padding-right: 16px; }
+  .hist-tools input { flex-basis: 100%; max-width: none; }
+  .hist-row { padding: 9px 16px; grid-template-columns: 30px minmax(0, 1fr); }
+  .hist-when { grid-column: 2; padding-top: 0; }
+  .hist-foot { padding: 10px 16px 14px; }
+  .lock-card { padding: 22px 16px 18px; }
+  .modal .lock-card { padding: 10px 0 0; }
+}
 .login-or { display: flex; align-items: center; gap: 10px; margin: 14px 0 0; color: var(--ink-faint); font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; }
 .login-or::before, .login-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 /* Settings, stage 3 pages. */
@@ -3217,10 +3312,37 @@ let AUTH_DATA_LOADING = false;   // guards loadFromSupabase() against double-fir
 
 // Two-step sign-in state (see mfaCheck): declared before the sign-in handler that reads it.
 const MFA = { userId: null, checked: false, need: false, busy: false, factorId: null, factors: null, error: '' };
+// Settings → Security's lock (settings round 2, phase 3: plan item 6, P4, M6). Opening Security asks for Face ID /
+// fingerprint (a passkey), the password (+ the 6-digit code) or a fresh "Continue with Google"; the passkey server
+// function checks it and unlocks THIS sign-in session for 30 minutes (a step_up row the database itself reads).
+const SEC_LOCK_MINUTES = 30;   // the same as the passkey function's STEP_UP_MINUTES (a test checks)
+const PASSKEY_URL = SUPABASE_URL + '/functions/v1/passkey';
+// anyKey: does this person have a Face ID / fingerprint key on the server (null = not asked yet)? A key synced to this
+// device (iCloud Keychain, Google Password Manager) works here although this browser never made it.
+function secBlank(){ return { until: 0, method: '', step: null, pw: '', err: '', busy: false, checked: false, keys: null, keysErr: '', hist: null, histErr: '', histQ: '', histWho: 'all', histAll: false, authOpts: null, regOpts: null, platform: null, after: null, afterIntent: null, anyKey: null }; }
+let SEC = secBlank();
+// "Continue with Google" leaves the page, so what the lock was opened for goes with it (sessionStorage, this tab only):
+// { at, page (the Settings page it was opened on), after: { action, page, email } }. Read back at most 10 minutes later;
+// anything else is ignored. The actions: download (full backup), sens (the sensitive tick), email (a new weekly address),
+// password (Change my password).
+const SEC_INTENTS = ['download', 'sens', 'email', 'password'];
+function secGoogleParse(raw, nowMs){
+  let v = null;
+  try { v = JSON.parse(String(raw || '')); } catch (e) { v = null; }
+  if (typeof v==='number') v = { at: v };   // the format of the first build
+  if (!v || typeof v!=='object' || Array.isArray(v)) return null;
+  const at = Number(v.at);
+  if (!(at > 0) || nowMs - at >= 10 * 60e3 || at > nowMs + 60e3) return null;
+  const a = v.after && typeof v.after==='object' && SEC_INTENTS.includes(v.after.action) ? v.after : null;
+  const page = x => typeof x==='string' && /^[a-z-]{1,40}$/i.test(x) ? x : '';
+  return { used: false, page: page(v.page), after: a ? { action: a.action, page: page(a.page), email: a.action==='email' ? String(a.email || '').slice(0, 254) : '' } : null };
+}
+// Coming back from "Continue with Google" on the lock: unlock once the app has loaded, then do what it was opened for.
+const SEC_GOOGLE = (() => { try { const raw = sessionStorage.getItem('tgsg_stepup_google'); sessionStorage.removeItem('tgsg_stepup_google'); return secGoogleParse(raw, Date.now()); } catch (e) { return null; } })();
 sb.auth.onAuthStateChange((event, session) => {
   AUTH.session = session;
   const uid = session && session.user ? session.user.id : null;
-  if (uid!==MFA.userId) { MFA.userId = uid; MFA.checked = false; MFA.need = false; MFA.factors = null; }
+  if (uid!==MFA.userId) { MFA.userId = uid; MFA.checked = false; MFA.need = false; MFA.factors = null; SEC = secBlank(); }
   if (event === 'PASSWORD_RECOVERY') {
     AUTH.status = 'needsPassword';
   } else if (session) {
@@ -3749,6 +3871,12 @@ const ICONS = {
   unplug: '<path d="m19 5 3-3M2 22l3-3"/><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4z"/><path d="m7.5 13.5 2.5-2.5M10.5 16.5 13 14"/><path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0z"/>',
   external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   hand: '<path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15"/>',
+  // Security: Face ID / fingerprint (14 Oct)
+  finger: '<path d="M12 11v3a8 8 0 0 1-1.5 4.7"/><path d="M8 11a4 4 0 0 1 8 0v2a12 12 0 0 1-.8 4.3"/><path d="M5 10a7 7 0 0 1 14 0v2.5"/><path d="M5 14.5V13M19 16.5c-.2 1.2-.5 2.3-.9 3.3M8 15c0 1.8-.4 3.5-1.1 5"/>',
+  face: '<path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M9 9v1.5M15 9v1.5M12 9v4h-1M9.5 16a3.5 3.5 0 0 0 5 0"/>',
+  laptop: '<rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20"/>',
+  // Data: Export to Excel (14 Oct)
+  sheet: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>',
 };
 function ico(name, size){
   const p = ICONS[name]; if (!p) return '';
@@ -4315,6 +4443,7 @@ function renderLogin(){
       <div class="field"><label>Password</label><input id="auth-password" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter'){doSignIn()}"></div>
       <button class="btn primary" style="width:100%" onclick="doSignIn()">Sign in</button>
       <button class="btn ghost small" style="align-self:center" onclick="doForgotPassword()">Forgot your password?</button>
+      <button type="button" class="btn ghost small" style="align-self:center" onclick="openLockedBackup()">${ico('lock', 14)} Open a locked backup</button>
     </div>
   `);
 }
@@ -4392,13 +4521,14 @@ async function confirmMfaEnroll(factorId){
   MFA.factors = null; mfaFactors();
 }
 function turnOffMfa(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   const f = (MFA.factors || []).find(x => x.status==='verified'); if (!f) return;
-  confirmAction('Turn off two-step sign-in for your account?', async () => {
+  confirmAction('Your account will sign in with the password only, with no 6-digit code.', async () => {
     const { error } = await sb.auth.mfa.unenroll({ factorId: f.id });
     if (error) { showToast('Not turned off: ' + error.message); return; }
     logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', 'Security: turned off two-step sign-in for their account');
     showToast('Two-step sign-in is off'); MFA.factors = null; mfaFactors();
-  });
+  }, { title: 'Turn off two-step sign-in?', confirmLabel: 'Turn off' });
 }
 
 // Sign in with Google (Ofek 12 Oct; free, unlike Apple's). The button shows once Google is switched on in Supabase →
@@ -4472,13 +4602,20 @@ async function doLogout(){
   teardownRealtimeSubscriptions();
   STATE.data = null; STATE.dataLoaded = false; STATE.profiles = []; STATE.currentProfileId = null;
   CPRIV = { map:{}, loaded:false, loading:false, err:'', pending:null };   // ABN, bank and agreements never stay in memory for the next login
+  SEC = secBlank();   // Security locks again, and its history leaves memory
   resetUI();
   // onAuthStateChange fires SIGNED_OUT and calls render() itself
 }
 // Lets anyone signed in replace their own password (e.g. the temporary one Ofek set manually via
 // the Supabase dashboard for onboarding) — available in the sidebar for every role, not gated by
-// any permission, since everyone needs to be able to do this for themselves.
+// any permission, since everyone needs to be able to do this for themselves. It asks for the Security step-up first
+// (Face ID / fingerprint, or the CURRENT password), so someone holding an unlocked phone can't set a new password and
+// then use it to open Security (settings round 2, P4).
 function openChangePasswordModal(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  secEnsureUnlocked('Change my password', openChangePasswordForm, { action: 'password', page: UI.tab==='settings' ? settingsPageKey((UI.settings || {}).page) : '' });
+}
+function openChangePasswordForm(){
   openModal(`
     <div class="modal-back" onclick="if(event.target===this) closeModal()">
       <div class="modal" style="max-width:420px">
@@ -4498,6 +4635,7 @@ async function doChangePassword(){
   const p2 = document.getElementById('cp-new2').value;
   if (!p1 || p1.length < 8) { modalError('Password must be at least 8 characters.'); return; }
   if (p1 !== p2) { modalError("Passwords don't match."); return; }
+  if (!secUnlocked()) { closeModal(); SEC = secLockedState(); render(); showToast(secReasonText('locked')); return; }   // the 30 minutes ran out
   const { error } = await sb.auth.updateUser({ password: p1 });
   if (error) { modalError(error.message); return; }
   closeModal();
@@ -8107,19 +8245,679 @@ function downloadCsv(filename, rows){
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(url), 1000);
 }
-// A full backup of everything in this browser's test data — Ofek asked for this specifically so
-// nothing from his CRM testing gets lost when Stage 3 (the real backend) replaces this local-only
-// storage. Downloads the exact same object the app itself reads/writes (STATE.data), so it's a
-// complete, faithful snapshot, not a partial export of just one section.
-function exportDataAsJson(){
-  const json = JSON.stringify(STATE.data, null, 2);
-  const blob = new Blob([json], {type:'application/json;charset=utf-8;'});
+/* ── Settings → Data: export to Excel (14 Oct, item 5, M6 answers 1 and 6) ──
+   One .xlsx with one sheet per ticked area, built here in the owner's browser: Settings is owners-only and RLS already lets
+   owners read every table below, so nothing new is needed on the server. Big tables are read 1,000 rows per request.
+   SheetJS (cdnjs, pinned) loads only when the button is pressed, and is only ever used to WRITE a file, never to read one.
+   Bank details, ABN and owner salaries are left out unless "Include sensitive details" is ticked: that asks for the
+   Security step-up (Face ID / password, 30 minutes) and unticks itself after each download. Secret-like columns (tokens,
+   hashes, passwords) are never in the Excel. The step-up is a gate in the app only, not a server barrier for reading: the
+   owner's session can read those tables anyway (People and Payroll show them). Any area that fails stops the whole
+   download, so a half file is never saved. A part: { table, keys (the paging order = the table's primary key), title?,
+   activity? (record_kind of its History lines, added as the last column), filter?: [col, val], special?, sensOnly?,
+   sensCols? (whole columns left out without the sensitive tick, e.g. the agreement text, which names the ABN) }. */
+const EXPORT_AREAS = [
+  { id: 'leads', name: 'Leads & customers', desc: 'Each lead: contact, source, stage, tags, activity.', parts: [{ table: 'contacts', keys: ['id'], activity: 'contact' }] },
+  { id: 'jobs', name: 'Jobs', desc: 'Each job: who, when, service, amount, GST, paid.', parts: [{ table: 'jobs', keys: ['id'] }] },
+  { id: 'closings', name: 'Closings', desc: 'Each closing form: work done, payment, review.', parts: [{ table: 'closings', keys: ['id'] }] },
+  { id: 'payroll', name: 'Payroll & sales logs', desc: 'Weekly payroll, bonuses, hours worked, sales logs.', sens: 'owner salaries', parts: [
+    { title: 'Weekly payroll', table: 'payroll_weeks', keys: ['id'] }, { title: 'Bonuses', table: 'payroll_bonuses', keys: ['id'] },
+    { title: 'Sales logs', table: 'sales_daily_log', keys: ['id'] }, { title: 'Hourly pay and booking bonus', special: 'payRates' },
+    { title: 'Commission rates', table: 'commission_rates', keys: ['technician_name'] }, { title: 'Owner salaries', special: 'ownerSalaries', sensOnly: true }] },
+  { id: 'employees', name: 'Employees', desc: 'Each person: details, role, access, pay, documents.', sens: 'bank, ABN', parts: [
+    { title: 'People', table: 'employees', keys: ['id'] }, { title: 'Logins and the pages they can open', table: 'profiles', keys: ['id'] }] },
+  { id: 'contractors', name: 'Contractors', desc: 'Services, what we agreed, agreement, insurance.', sens: 'bank, ABN', parts: [
+    { title: 'Contractors', table: 'suppliers', keys: ['id'] }, { title: 'Agreements and private details', table: 'contractor_private', keys: ['supplier_id'], sensCols: ['agreement'] }] },
+  { id: 'expenses', name: 'Expenses & equipment', desc: 'Expenses from Payroll, and the equipment list.', parts: [
+    { title: 'Expenses', table: 'equipment_spend', keys: ['id'] }, { title: 'Equipment', table: 'equipment_catalog', keys: ['id'] }] },
+  { id: 'tasks', name: 'Tasks & reminders', desc: 'Each task and reminder: whose, due, when done.', parts: [
+    { title: 'Tasks', table: 'tasks', keys: ['id'] }, { title: 'Reminders', table: 'manual_reminders', keys: ['id'] }] },
+  { id: 'convos', name: 'Conversations (chat and texts)', desc: 'Website chat and texts answered in OPS.', note: 'Chats answered in GHL aren\'t here until the website chat moves to OPS.', parts: [
+    { title: 'Conversations', table: 'chat_sessions', keys: ['id'] }, { title: 'Messages', table: 'lead_messages', keys: ['id'] }] },
+  { id: 'shifts', name: 'Shifts', desc: 'Office shifts: start, end, breaks, auto-logouts.', parts: [
+    { title: 'Shift events', table: 'shift_events', keys: ['at', 'profile_id', 'kind'] }, { title: 'Days', table: 'myday_days', keys: ['day'] }] },
+  { id: 'reviews', name: 'Review requests', desc: 'Each review request: who, when, how, sent or not.', parts: [{ table: 'review_requests', keys: ['id'] }] },
+  { id: 'ads', name: 'Ad stats', desc: 'Google Ads and Meta per day: spend, clicks, leads.', parts: [
+    { title: 'Ad stats', table: 'ads_stats', keys: ['id'] }, { title: 'Daily ad spend', table: 'ad_spend', keys: ['id'] }, { title: 'Google Ads calls', table: 'ad_calls', keys: ['id'] }] },
+  { id: 'organic', name: 'Organic stats', desc: 'Search Console and Google Analytics: impressions, clicks, position.', parts: [{ table: 'organic_stats', keys: ['id'] }] },
+  { id: 'settings', name: 'Settings', desc: 'Every setting here. No pay figures (see Payroll).', parts: [{ special: 'settings' }] },
+  { id: 'ghl', name: 'Old contacts (GHL archive)', desc: 'Contacts from the old GHL account, kept apart from the leads.', off: true, parts: [{ table: 'ghl_archive', keys: ['id'] }] },
+];
+function exportDefaultSelection(){ return new Set(EXPORT_AREAS.filter(a => !a.off).map(a => a.id)); }
+const EXPORT_SECRET_COL = /(^|_)(token|secret|password|hash)(_|$)/;
+const EXPORT_SENS_COL = /^(bank(_|$)|abn$|tfn$|tax_file)/;
+// A table column that is never in the Excel (secrets), or only with the sensitive tick (bank, ABN, TFN if one is ever added).
+// The Settings rows never pass through here, so the business's own ABN stays in them.
+function exportHiddenColumn(col, sens){ return EXPORT_SECRET_COL.test(col) || (!sens && EXPORT_SENS_COL.test(col)); }
+const EXPORT_UPPER_WORDS = ['id', 'utm', 'gst', 'abn', 'acn', 'bsb', 'url', 'sms', 'ai', 'gsc', 'ga4', 'ip'];
+// 'full_name' → 'Full name', 'utm_source' → 'UTM source', 'id' → 'ID'
+function exportHeader(col){
+  return String(col == null ? '' : col).split('_').filter(w => w!=='').map((w, i) => {
+    const l = w.toLowerCase();
+    if (EXPORT_UPPER_WORDS.includes(l)) return l.toUpperCase();
+    return i===0 ? l.charAt(0).toUpperCase() + l.slice(1) : l;
+  }).join(' ');
+}
+const EXPORT_CELL_MAX = 32767;   // the most characters one Excel cell holds (SheetJS throws past it)
+const EXPORT_FILE_TEXT = '[file, in the full backup]';
+// One value as one Excel cell. Text stays text (SheetJS writes strings as text, never as a formula).
+function exportCell(v){
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (typeof v === 'number') return Number.isFinite(v) ? v : '';
+  let s;
+  if (typeof v === 'string') s = v.startsWith('data:') ? EXPORT_FILE_TEXT : v;
+  else if (Array.isArray(v) && v.every(x => typeof x === 'string' || (typeof x === 'number' && Number.isFinite(x)))) s = v.map(x => typeof x === 'string' && x.startsWith('data:') ? EXPORT_FILE_TEXT : String(x)).join(', ');
+  else { try { s = JSON.stringify(v, (k, x) => typeof x === 'string' && x.startsWith('data:') ? EXPORT_FILE_TEXT : x); } catch (e) { s = String(v); } }
+  s = s == null ? '' : String(s);
+  const cut = ' … (cut: too long for one Excel cell; whole in the full backup)';
+  return s.length > EXPORT_CELL_MAX ? s.slice(0, EXPORT_CELL_MAX - cut.length) + cut : s;
+}
+// A record's History lines as one cell, oldest first: "2026-10-01 09:05 · Ron · Called".
+function exportActivityText(lines){
+  return (Array.isArray(lines) ? lines : []).filter(Boolean).slice().sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')))
+    .map(l => `${String(l.at || '').slice(0, 16).replace('T', ' ')} · ${l.actor || ''} · ${l.text || ''}`).join('\n');
+}
+// One sheet as rows of cells. sections = [{ title?, rows, table?, sensCols? }]. One section: a header row and the rows.
+// Several: each with its title row, header, rows and a blank row. Columns = every key in the rows, in first-seen order.
+function exportSheetAoa(sections, sens){
+  const list = Array.isArray(sections) ? sections : [], one = list.length === 1, aoa = [];
+  list.forEach(s => {
+    const rows = Array.isArray(s.rows) ? s.rows : [], cols = [], seen = new Set();
+    rows.forEach(r => Object.keys(r || {}).forEach(k => { if (!seen.has(k)) { seen.add(k); cols.push(k); } }));
+    const shown = s.table ? cols.filter(c => !exportHiddenColumn(c, sens) && !(!sens && (s.sensCols || []).includes(c))) : cols;
+    if (s.title && (!one || !rows.length)) aoa.push([s.title]);
+    if (!rows.length) aoa.push(['(nothing yet)']);
+    else {
+      aoa.push(s.table ? shown.map(exportHeader) : shown.slice());
+      rows.forEach(r => aoa.push(shown.map(c => exportCell((r || {})[c]))));
+    }
+    if (!one) aoa.push([]);
+  });
+  return aoa;
+}
+// Column widths that follow the longest text (its longest line) in the first 300 rows, between 8 and 60 characters.
+function exportColWidths(aoa){
+  const widths = [];
+  (Array.isArray(aoa) ? aoa : []).slice(0, 300).forEach(row => (row || []).forEach((v, i) => {
+    const longest = String(v == null ? '' : v).split('\n').reduce((m, l) => Math.max(m, l.length), 0);
+    widths[i] = Math.max(widths[i] || 0, longest);
+  }));
+  return Array.from(widths, w => ({ wch: Math.min(60, Math.max(8, w || 0)) }));
+}
+// A sheet name Excel accepts: no : \ / ? * [ ], at most 31 characters, and not one already used (any case).
+function exportSheetName(name, used){
+  const base = String(name == null ? '' : name).replace(/[:\\/?*[\]]/g, '').trim().slice(0, 31).trim() || 'Sheet';
+  const taken = s => used.some(u => String(u).toLowerCase() === s.toLowerCase());
+  let out = base;
+  for (let i = 2; taken(out); i++) { const tail = ` (${i})`; out = base.slice(0, 31 - tail.length).trimEnd() + tail; }
+  used.push(out);
+  return out;
+}
+// The Settings sheet: every column of the settings row, then each part of the catalog. The pay FIGURES (catalog.pay.hourly)
+// and who gets the pay message in Hebrew are in Payroll; every other pay setting (e.g. the job types per technician) is
+// here. Owner salaries (an old column) only with the sensitive tick, in Payroll.
+const PAY_SETTING_NAMES = { jobTypes: 'job types per technician' };
+function settingsExportRows(row){
+  const r = row && typeof row === 'object' ? row : {}, out = [];
+  Object.keys(r).forEach(k => { if (k !== 'id' && k !== 'owner_salaries' && k !== 'catalog') out.push({ Setting: exportHeader(k), Value: exportCell(r[k]) }); });
+  const cat = r.catalog && typeof r.catalog === 'object' && !Array.isArray(r.catalog) ? r.catalog : {};
+  Object.keys(cat).forEach(k => {
+    if (k !== 'pay') { out.push({ Setting: CAT_NAMES[k] || exportHeader(k), Value: exportCell(cat[k]) }); return; }
+    const pay = cat.pay && typeof cat.pay === 'object' && !Array.isArray(cat.pay) ? cat.pay : {};
+    Object.keys(pay).forEach(pk => { if (pk !== 'hourly' && pk !== 'hebrew') out.push({ Setting: `${CAT_NAMES.pay}: ${PAY_SETTING_NAMES[pk] || exportHeader(pk.replace(/([a-z])([A-Z])/g, '$1_$2')).toLowerCase()}`, Value: exportCell(pay[pk]) }); });
+  });
+  return out;
+}
+// Hourly pay over time (catalog.pay.hourly), oldest first, and who gets the pay message in Hebrew.
+function payRateRows(pay){
+  const p = pay && typeof pay === 'object' ? pay : {};
+  const bonus = t => Array.isArray(t) ? t.filter(x => x && typeof x === 'object').map(x => `${x.min}+ bookings: $${x.bonus}`).join(', ') : exportCell(t);
+  const rows = (Array.isArray(p.hourly) ? p.hourly : []).filter(h => h && typeof h === 'object')
+    .slice().sort((a, b) => String(a.from || '').localeCompare(String(b.from || '')))
+    .map(h => ({ From: h.from || '', 'Rate per hour': exportCell(h.rate), 'Booking bonus': bonus(h.tiers) }));
+  const heb = Object.keys(p.hebrew && typeof p.hebrew === 'object' && !Array.isArray(p.hebrew) ? p.hebrew : {});
+  if (heb.length) rows.push({ From: 'Hebrew pay messages', 'Rate per hour': '', 'Booking bonus': heb.join(', ') });
+  return rows;
+}
+function ownerSalaryRows(obj){ return Object.keys(obj && typeof obj === 'object' ? obj : {}).map(k => ({ Owner: k, 'Weekly salary': Number(obj[k]) || 0 })); }
+function countWord(n, one, many){ return `${Number(n || 0).toLocaleString('en-AU')} ${n === 1 ? one : many}`; }
+// The count line on each card: from what the app already holds, or from counts (the tables it doesn't hold; null = still
+// counting; a count of null = it could not be read, so the line is empty rather than wrong).
+function exportCountText(id, data, counts){
+  const d = data || {}, len = k => Array.isArray(d[k]) ? d[k].length : 0;
+  switch (id) {
+    case 'leads': return `${countWord(len('contacts'), 'card', 'cards')} · ${countWord((d.contacts || []).reduce((s, c) => s + ((c && Array.isArray(c.activityLog)) ? c.activityLog.length : 0), 0), 'activity line', 'activity lines')}`;
+    case 'jobs': return countWord(len('jobs'), 'job', 'jobs');
+    case 'closings': return countWord(len('closings'), 'closing', 'closings');
+    case 'payroll': return `${countWord(new Set((d.payrollWeeks || []).map(w => w && w.weekKey).filter(Boolean)).size, 'week', 'weeks')} · ${countWord(len('salesLogs'), 'sales log', 'sales logs')}`;
+    case 'employees': return countWord(len('employees'), 'person', 'people');
+    case 'contractors': return countWord(len('suppliers'), 'contractor', 'contractors');
+    case 'expenses': return `${countWord(len('equipmentSpend'), 'expense', 'expenses')} · ${countWord(len('equipmentCatalog'), 'item', 'items')}`;
+    case 'tasks': return `${countWord(len('tasks'), 'task', 'tasks')} · ${countWord(len('manualReminders'), 'reminder', 'reminders')}`;
+    case 'settings': return 'One row per setting';
+  }
+  const FROM_COUNTS = { convos: [['chat_sessions', 'conversation', 'conversations'], ['lead_messages', 'message', 'messages']], shifts: [['shift_events', 'shift event', 'shift events'], ['myday_days', 'day', 'days']],
+    reviews: [['review_requests', 'request', 'requests']], organic: [['organic_stats', 'row', 'rows']], ghl: [['ghl_archive', 'contact', 'contacts']] };
+  if (id !== 'ads' && !FROM_COUNTS[id]) return '';
+  if (!counts) return 'Counting…';
+  if (id === 'ads') return counts.ads_stats == null ? '' : countWord(Number(counts.ads_stats) + len('adSpend') + len('adCalls'), 'row', 'rows');
+  const parts = FROM_COUNTS[id];
+  if (parts.some(([t]) => counts[t] == null)) return '';
+  return parts.map(([t, one, many]) => countWord(Number(counts[t]), one, many)).join(' · ');
+}
+// 'the-guys-service-group-export-2026-10-14.xlsx' (the business's name as it is in Business details)
+function exportFileName(kind, day){
+  const slug = String(brandName() || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'ops-service';
+  return `${slug}-${kind}-${day}.xlsx`;
+}
+function exportSummaryHtml(n, sens){ return n ? `<b>One Excel file</b>, ${n} sheet${n === 1 ? '' : 's'}, one per area${sens ? ', with sensitive details' : ''}.` : 'Tick at least one area.'; }
+// Every row of a table, 1,000 per request, in a fixed order (keys) so no row is read twice or skipped between pages.
+// The startup load keeps its own fetchAllRows; this one takes the client, several order columns and a filter.
+async function exportFetchAll(client, table, keys, filter){
+  const out = [], size = 1000;
+  for (let from = 0; ; from += size) {
+    let q = client.from(table).select('*');
+    if (filter) q = q.eq(filter[0], filter[1]);
+    (keys || []).forEach(k => { q = q.order(k, { ascending: true }); });
+    const { data, error } = await q.range(from, from + size - 1);
+    if (error) return { data: out, error };
+    out.push(...(data || []));
+    if (!data || data.length < size) return { data: out, error: null };
+  }
+}
+// One area's sections for its sheet. ctx is shared by the areas of one download (the settings row and History lines are
+// read once). Throws on any read that fails, with the area's name.
+async function exportAreaSections(area, sens, ctx){
+  const out = [], fail = (error) => { throw new Error(`${area.name}: ${(error && error.message) || error}`); };
+  const settingsRow = async () => {
+    if (ctx.settingsRow === undefined) {
+      const { data, error } = await sb.from('settings').select('*').eq('id', 1).maybeSingle();
+      if (error) fail(error);
+      ctx.settingsRow = data || {};
+    }
+    return ctx.settingsRow;
+  };
+  for (const part of area.parts) {
+    if (part.sensOnly && !sens) continue;
+    if (part.special === 'settings') { out.push({ title: part.title, rows: settingsExportRows(await settingsRow()) }); continue; }
+    if (part.special === 'payRates') { const row = await settingsRow(); out.push({ title: part.title, rows: payRateRows((row.catalog || {}).pay) }); continue; }
+    if (part.special === 'ownerSalaries') {
+      const { data, error } = await sb.from('owner_settings').select('owner_salaries').eq('id', 1).maybeSingle();
+      if (error) fail(error);
+      out.push({ title: part.title, rows: ownerSalaryRows(data && data.owner_salaries) });
+      continue;
+    }
+    const { data: rows, error } = await exportFetchAll(sb, part.table, part.keys, part.filter);
+    if (error) fail(error);
+    if (part.activity) {
+      const kind = part.activity;
+      if (!ctx.activity[kind]) ctx.activity[kind] = exportFetchAll(sb, 'activity_log', ['id'], ['record_kind', kind]);
+      const act = await ctx.activity[kind];
+      if (act.error) fail(act.error);
+      const by = {};
+      act.data.forEach(a => { (by[String(a.record_id)] ||= []).push(a); });
+      rows.forEach(r => { r.activity = exportActivityText(by[String(r.id)] || []); });
+    }
+    out.push({ title: part.title, table: part.table, rows, sensCols: part.sensCols });
+  }
+  return out;
+}
+// SheetJS 0.18.5 mini (cdnjs, the latest there; writes .xlsx). Its published CVEs are in READING files, which the app never does.
+const XLSX_SCRIPT = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.mini.min.js';
+let XLSX_LIB = null;
+function ensureXlsx(){
+  if (!XLSX_LIB) XLSX_LIB = loadScriptOnce(XLSX_SCRIPT).then(() => { if (!window.XLSX) throw new Error('no XLSX'); return window.XLSX; }).catch(e => { XLSX_LIB = null; throw e; });
+  return XLSX_LIB;
+}
+// The board's state, in memory only: the ticks reset on a reload, the sensitive tick after every download and on leaving Data.
+let DATA_EXPORT = { sel: null, sens: false, busy: false, step: '', counts: null, countsBusy: false };
+function dataExportSel(){ return DATA_EXPORT.sel || (DATA_EXPORT.sel = exportDefaultSelection()); }
+function dataPageOpen(){ return UI.tab === 'settings' && settingsPageKey((UI.settings || {}).page) === 'data'; }
+// Ticking areas changes nothing saved, so it works in Presentation mode and View as too.
+function setExportArea(id, on){ const s = dataExportSel(); if (on) s.add(id); else s.delete(id); render(); }
+function setExportAll(on){ DATA_EXPORT.sel = on ? new Set(EXPORT_AREAS.map(a => a.id)) : new Set(); render(); }
+// The counts of the tables the app doesn't hold (read-only head counts, so they run in every mode).
+const EXPORT_COUNT_TABLES = ['chat_sessions', 'lead_messages', 'shift_events', 'myday_days', 'review_requests', 'ads_stats', 'organic_stats', 'ghl_archive'];
+async function loadExportCounts(){
+  if (DATA_EXPORT.counts || DATA_EXPORT.countsBusy) return;
+  DATA_EXPORT.countsBusy = true;
+  const res = await Promise.all(EXPORT_COUNT_TABLES.map(t => Promise.resolve().then(() => sb.from(t).select('*', { count: 'exact', head: true })).then(r => [t, r && !r.error && Number.isFinite(r.count) ? r.count : null], () => [t, null])));
+  DATA_EXPORT.counts = Object.fromEntries(res);
+  DATA_EXPORT.countsBusy = false;
+  if (dataPageOpen()) render();
+}
+// "Include sensitive details": asks for the Security step-up first. The box stays unticked until it says yes, also when the
+// window is cancelled.
+function setExportSensitive(on){
+  if (!on) { DATA_EXPORT.sens = false; render(); return; }
+  const ro = readOnlyReason();
+  if (ro) { DATA_EXPORT.sens = false; showToast(PRESENT ? 'Exports are off in presentation mode' : ro); render(); return; }
+  if (DATA_EXPORT.busy) { render(); return; }
+  if (secUnlocked()) { DATA_EXPORT.sens = true; render(); return; }
+  DATA_EXPORT.sens = false; render();
+  secEnsureUnlocked('Include sensitive details in the Excel', () => { if (dataPageOpen() && !readOnlyReason()) DATA_EXPORT.sens = true; render(); }, { action: 'sens', page: 'data' });
+}
+function dataExportProgress(){ const el = document.getElementById('dx-go'); if (el) el.textContent = 'Preparing… ' + DATA_EXPORT.step; }
+// "Download Excel": one sheet per ticked area. Reads only; one Settings history line says it was downloaded.
+async function downloadDataExcel(){
+  const ro = readOnlyReason();
+  if (ro) { showToast(PRESENT ? 'Exports are off in presentation mode' : ro); return; }
+  if (DATA_EXPORT.busy) return;
+  const areas = EXPORT_AREAS.filter(a => dataExportSel().has(a.id));
+  if (!areas.length) return;
+  if (DATA_EXPORT.sens && !secUnlocked()) {
+    // The 30 minutes ran out after the tick: ask again. Cancelled = nothing is downloaded and the box is unticked.
+    DATA_EXPORT.sens = false; render();
+    secEnsureUnlocked('Include sensitive details in the Excel', () => { if (dataPageOpen() && !readOnlyReason()) { DATA_EXPORT.sens = true; downloadDataExcel(); } else render(); }, { action: 'sens', page: 'data' });
+    return;
+  }
+  const sens = DATA_EXPORT.sens;
+  DATA_EXPORT.busy = true; render();
+  try {
+    let X;
+    try { X = await ensureXlsx(); } catch (e) { throw new Error('the Excel maker could not be loaded. Check the internet connection and try again'); }
+    const wb = X.utils.book_new(), used = [], ctx = { activity: {} };
+    for (const a of areas) {
+      DATA_EXPORT.step = a.name; dataExportProgress();
+      const aoa = exportSheetAoa(await exportAreaSections(a, sens, ctx), sens);
+      const ws = X.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = exportColWidths(aoa);
+      if (a.parts.length === 1 && aoa.length > 1 && ws['!ref']) ws['!autofilter'] = { ref: ws['!ref'] };
+      X.utils.book_append_sheet(wb, ws, exportSheetName(a.name, used));
+    }
+    const name = exportFileName('export', todayStr());
+    X.writeFile(wb, name, { bookType: 'xlsx', compression: true });
+    const n = areas.length, sheets = `${n} sheet${n === 1 ? '' : 's'}`;
+    logSettingsActivity((getRealProfile() || {}).fullName || 'Unknown', `Data: Excel downloaded (${n} area${n === 1 ? '' : 's'}: ${areas.map(a => a.name).join(', ')})${sens ? ', with sensitive details' : ''}`);
+    showToast(`Downloaded ${name}: ${sheets}${sens ? ', with sensitive details' : ''}`);
+  } catch (e) {
+    console.error(e);
+    showToast(`Could not download the Excel: ${(e && e.message) || e}. Nothing was downloaded.`, { kind: 'warn' });
+  } finally {
+    DATA_EXPORT.busy = false; DATA_EXPORT.step = ''; DATA_EXPORT.sens = false;
+    if (dataPageOpen()) render();
+  }
+}
+// One area's card (the mockup's label card): tick, name, what it holds, an optional note, the count and the sensitive pill.
+function exportCardHtml(a, on, sens, countText){
+  return `<label class="ex-card${on ? ' on' : ''}"><input type="checkbox" ${on ? 'checked' : ''} onchange="setExportArea('${esc(jsStr(a.id))}', this.checked)"><span class="ex-body">`
+    + `<span class="ex-name">${esc(a.name)}</span><span class="ex-desc">${esc(a.desc)}</span>${a.note ? `<span class="ex-note">${esc(a.note)}</span>` : ''}`
+    + `<span class="ex-meta"><span class="ex-count">${esc(countText)}</span>${a.sens ? (sens ? pill('warn', 'Includes ' + a.sens) : pill('neutral', 'Left out: ' + a.sens)) : ''}</span></span></label>`;
+}
+// Settings → Data → "Export to Excel" (the approved mockup's board).
+function renderExportBlock(){
+  if (!DATA_EXPORT.counts) loadExportCounts();
+  if (DATA_EXPORT.sens && !secUnlocked()) DATA_EXPORT.sens = false;   // the 30 minutes ran out
+  const sel = dataExportSel(), n = EXPORT_AREAS.filter(a => sel.has(a.id)).length, all = EXPORT_AREAS.length, sens = DATA_EXPORT.sens, busy = DATA_EXPORT.busy;
+  const tools = `<div class="ex-tools"><button type="button" class="btn ghost small" ${n === all ? 'disabled' : ''} onclick="setExportAll(true)">Select all</button><button type="button" class="btn ghost small" ${n ? '' : 'disabled'} onclick="setExportAll(false)">Clear</button><span class="hint">${n} of ${all} areas ticked</span></div>`;
+  const grid = `<div class="ex-grid">${EXPORT_AREAS.map(a => exportCardHtml(a, sel.has(a.id), sens, exportCountText(a.id, STATE.data, DATA_EXPORT.counts))).join('')}</div>`;
+  const foot = `<div class="ex-foot"><label class="ex-sens${sens ? ' on' : ''}"><input type="checkbox" ${sens ? 'checked' : ''} ${busy ? 'disabled' : ''} onchange="setExportSensitive(this.checked)"><span><b>Include sensitive details (bank, ABN, owner salaries)</b><small>${sens ? 'For this download only: the Excel will have bank details, ABN and owner salaries. Keep the file safe and don\'t email it.' : 'Left out unless you tick this. It unticks itself after each download.'}</small></span></label>`
+    + `<div class="ex-go"><span class="ex-sum">${exportSummaryHtml(n, sens)}</span><button type="button" class="btn primary" id="dx-go" ${n && !busy ? '' : 'disabled'} onclick="downloadDataExcel()">${busy ? esc('Preparing… ' + DATA_EXPORT.step) : ico('sheet') + ' Download Excel (one sheet per area)'}</button></div></div>`;
+  return setBlock('Export to Excel', 'Tick the areas you want. Each one becomes its own sheet in one Excel file.', tools + grid + foot, '', 'ex-block');
+}
+/* ── Settings → Data: the full backup (settings round 2, phase 3: plan item 5, P5, M6 answers 1-2; approved mockup
+   round2-data-security). "Download full backup" asks for the Security step-up (Face ID / password, 30 minutes) and
+   gets the plain JSON from the backup server function (supabase/functions/backup), with every uploaded file put in one
+   .zip next to it. The weekly backup is made by that function, locked with the BACKUP_PASSWORD secret (only Ofek sets
+   it), and its download links are emailed. "Open a locked backup" opens those files HERE, in the browser. No restore.
+   LOCKED FILE FORMAT (the same as the function's, see the top of supabase/functions/backup/index.ts): a 40-byte header
+   ('TGBKUP', version 1, kind 1 = data (gzip of the JSON) / 2 = file pack, PBKDF2 iterations as uint32 big-endian,
+   16-byte salt, 12-byte IV), then AES-256-GCM with its 16-byte tag; the header is the authenticated data. Key =
+   PBKDF2-HMAC-SHA-256(password, salt, iterations) → AES-GCM 256. A pack: uint32 big-endian length L of a JSON header
+   {v:1, id, files:[{bucket, path, type, size, offset}]}, the header, then the files' bytes (offsets from after it). ── */
+const BACKUP_URL = SUPABASE_URL + '/functions/v1/backup';
+const JSZIP_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+const BACKUP_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];   // Monday … Sunday, as in the mockup (0 = Sunday, as the function stores it)
+const BACKUP_TABLE_LABELS = { contacts: 'Leads & customers', jobs: 'Jobs', closings: 'Closings', tasks: 'Tasks', manual_reminders: 'Reminders', employees: 'Employees', suppliers: 'Contractors', contractor_private: 'Contractors: bank, ABN and signed agreements',
+  equipment_spend: 'Expenses and receipts', equipment_catalog: 'Equipment', payroll_weeks: 'Payroll weeks', payroll_bonuses: 'Bonuses', sales_daily_log: 'Daily sales log', owner_settings: 'Owner pay settings', commission_rates: 'Commission rates', cash_status: 'Cash',
+  settings: 'Settings', activity_log: 'History (with Settings history)', tag_catalog: 'Tags', dismissed_reminders: 'Dismissed reminders', reminder_reads: 'Read reminders', ad_spend: 'Ad spend', ad_calls: 'Ad calls', ads_stats: 'Ad stats', ads_insights: 'Ad insights',
+  organic_stats: 'Organic stats', seo_suggestions: 'SEO suggestions', lead_messages: 'Conversations (messages)', chat_sessions: 'Website chats', sms_opt_outs: 'Text opt-outs', shift_events: 'Shifts', myday_days: 'My Day', review_requests: 'Review requests',
+  ghl_archive: 'GHL archive (old contacts)', profiles: 'Logins and roles', calls: 'Calls', gads_real_leads: 'Google Ads real leads', gads_click_attribution: 'Keyword to job', lead_email_checks: 'Lead email checks', lead_email_check_summary: 'Lead email check summary',
+  push_sent: 'Push notices sent', backup_settings: 'Weekly backup settings' };
+const BACKUP_BUCKET_LABELS = { 'job-attachments': 'Job files and receipts', 'employee-documents': 'Employee and business documents', branding: 'Logos' };
+let BACKUP_ST = null;    // null = not asked yet; { loading: true }; { error: '…' }; or the function's status answer
+let JSZIP = null;
+let LOCKED = null;       // what "Open a locked backup" opened (in memory only, until the window closes)
+
+function backupEmailOk(v){ const s = String(v == null ? '' : v); return s.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s); }
+function backupDayLabel(d){ return DAY_NAMES[Number(d)] || ''; }
+// "Sunday 11 Oct, 3:00 am" (Sydney)
+function backupWhenText(iso){
+  const t = Date.parse(iso); if (isNaN(t)) return '';
+  const w = sydneyWall(new Date(t)), dow = new Date(w.day + 'T12:00:00Z').getUTCDay();
+  return `${DAY_NAMES[dow]} ${Number(w.day.slice(8, 10))} ${MONTHS[Number(w.day.slice(5, 7)) - 1]}, ${w.hour % 12 || 12}:${String(w.minute).padStart(2, '0')} ${w.hour < 12 ? 'am' : 'pm'}`;
+}
+// "Sunday 26 Oct" (Sydney)
+function backupDateText(iso){ const s = backupWhenText(iso); return s ? s.split(',')[0] : ''; }
+function backupSizeText(bytes){
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+// What the Full backup block shows for a status answer (st) at nowMs: the head pill, the password row, the "Last sent" row,
+// the day/time/address, and what is switched off.
+function backupStatusView(st, nowMs){
+  const PW_SET = 'With the password you set in Supabase (we never see it). Keep it in your password manager: without it the file can\'t be opened.';
+  const PW_NOT = 'Your step: add a secret called BACKUP_PASSWORD in Supabase (Edge Functions, then Secrets). We never see it. Nothing is sent until it is set.';
+  const dash = { tone: 'neutral', label: '…', desc: '…' };
+  const base = { head: { tone: 'neutral', label: 'Checking…' }, pw: dash, last: dash, when: { email: '', day: 0, time: '03:00' }, inputsOff: true, downloadOff: false, timerNote: '' };
+  if (!st || st.loading) return base;
+  if (st.error || !st.ok) {
+    const notSetUp = (st.error || st.reason) === 'not_set_up';
+    return { ...base, head: { tone: 'neutral', label: notSetUp ? 'Not set up yet' : 'Could not check' }, pw: { tone: 'neutral', label: 'Not yet', desc: PW_NOT },
+      last: { tone: 'neutral', label: 'Not yet', desc: notSetUp ? 'The weekly backup isn\'t switched on yet.' : `Could not check the weekly backup: ${st.error || st.reason || 'no answer'}.` }, downloadOff: notSetUp };
+  }
+  const c = st.config || {}, when = { email: c.email || '', day: Number.isInteger(Number(c.day)) ? Number(c.day) : 0, time: c.time || '03:00' };
+  const pwSet = !!st.passwordSet, r = st.last || null, dayName = backupDayLabel(when.day);
+  const head = !pwSet ? { tone: 'warn', label: 'Waiting for your password' } : !st.timerOk ? { tone: 'warn', label: 'Weekly timer not running' } : { tone: 'good', label: 'Weekly email on' };
+  const pw = pwSet ? { tone: 'good', label: 'Password set', desc: PW_SET } : { tone: 'warn', label: 'Waiting for you', desc: PW_NOT };
+  const notYet = pwSet ? `Nothing yet. The first one goes out on ${st.nextAt ? backupWhenText(st.nextAt) : 'the chosen day'}.` : `Nothing yet. The first one goes out on the first ${dayName} after the password is set.`;
+  let last = { tone: 'neutral', label: 'Not yet', desc: notYet };
+  if (r && r.status==='running') last = { tone: 'neutral', label: 'In progress', desc: `Being made now (started ${backupWhenText(r.started_at)}).` };
+  else if (r && r.status==='failed') last = { tone: 'bad', label: 'Failed', desc: `The last one didn't finish (${backupWhenText(r.finished_at || r.started_at)}): ${r.error || 'unknown error'}. It tries again by itself.` };
+  else if (r && r.status==='no_email') last = { tone: 'neutral', label: 'Not yet', desc: `Nothing sent on ${backupWhenText(r.slot || r.started_at)}: no email address.` };
+  else if (r && r.status==='done') {
+    const at = `${backupWhenText(r.finished_at || r.started_at)}, to ${r.email_to || when.email}`;
+    if (r.email_status==='sent') last = { tone: 'good', label: 'Sent', desc: `${at} · download link sent (works until ${backupDateText(r.links_expire_at)}).` };
+    else if (nowMs - Date.parse(r.email_queued_at || r.finished_at) > 2 * 3600e3) last = { tone: 'warn', label: 'Not sent yet', desc: `${at} · the email hasn't gone out yet: the info@ sender may be stopped.` };
+    else last = { tone: 'neutral', label: 'Sending', desc: `${at} · the email is on its way.` };
+    // Packing stops before the project passes the free plan's 1 GB of files (the function's STORAGE_SAFE).
+    const full = Number(r.storage_full) || 0;
+    if (full) last = { tone: 'warn', label: last.label, desc: `${last.desc} ${full} uploaded file${full===1 ? ' was' : 's were'} left out: the free plan's storage (1 GB) is nearly full. "Download full backup" still has them.` };
+  }
+  return { head, pw, last, when, inputsOff: false, downloadOff: false, timerNote: pwSet && !st.timerOk ? ' The weekly timer isn\'t running yet: it needs the backup timer secret (owner step).' : '' };
+}
+// A locked file's header (see the format above), or null when it isn't one (or its numbers are outside what the app makes).
+function backupParseHeader(u8){
+  if (!u8 || u8.length < 56) return null;
+  const magic = 'TGBKUP';
+  for (let i = 0; i < 6; i++) if (u8[i]!==magic.charCodeAt(i)) return null;
+  if (u8[6]!==1 || (u8[7]!==1 && u8[7]!==2)) return null;
+  const iterations = new DataView(u8.buffer, u8.byteOffset, u8.byteLength).getUint32(8, false);
+  if (iterations < 100000 || iterations > 10000000) return null;
+  return { version: 1, kind: u8[7], iterations, salt: u8.slice(12, 28), iv: u8.slice(28, 40), header: u8.slice(0, 40) };
+}
+// A decrypted pack's own index: { id, files, start } (offsets count from start), or null when it doesn't add up.
+function backupReadPack(u8){
+  if (!u8 || u8.length < 4) return null;
+  const L = new DataView(u8.buffer, u8.byteOffset, u8.byteLength).getUint32(0, false);
+  if (4 + L > u8.length) return null;
+  try {
+    const h = JSON.parse(new TextDecoder().decode(u8.subarray(4, 4 + L))), start = 4 + L;
+    if (!h || h.v!==1 || !Array.isArray(h.files)) return null;
+    if (h.files.some(f => !f || !(Number(f.offset) >= 0) || !(Number(f.size) >= 0) || start + Number(f.offset) + Number(f.size) > u8.length)) return null;
+    return { id: String(h.id || ''), files: h.files, start };
+  } catch (e) { return null; }
+}
+// Decrypts one locked file with the password. The key is made once per salt + iterations (cache, for this open only).
+async function backupDecrypt(password, u8, cache){
+  const h = backupParseHeader(u8); if (!h) throw new Error('not a locked backup');
+  const id = h.iterations + ':' + Array.from(h.salt).join('.');
+  let key = cache ? cache[id] : null;
+  if (!key) {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+    key = await crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: h.salt, iterations: h.iterations }, base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    if (cache) cache[id] = key;
+  }
+  return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: h.iv, additionalData: h.header, tagLength: 128 }, key, u8.subarray(40)));
+}
+async function backupGunzipText(u8){ return await new Response(new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'))).text(); }
+function backupReasonText(reason){
+  return ({ not_set_up: 'the backup isn\'t set up yet', email: 'that email address doesn\'t look right', day: 'pick a day', time: 'pick a time', 'owners only': 'only owners can change it', step_up: 'Security wasn\'t unlocked' })[reason] || String(reason || 'no answer');
+}
+
+// The backup function: status (works in Presentation mode and View as: it changes nothing), config and download.
+async function backupFetch(body){
+  if (body.step!=='status' && readOnlyReason()) return { ok: false, reason: readOnlyReason() };
+  const { data } = await sb.auth.getSession();
+  let res;
+  try { res = await fetch(BACKUP_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify(body) }); }
+  catch (e) { return { ok: false, reason: 'not_set_up' }; }
+  if (res.status===404) return { ok: false, reason: 'not_set_up' };
+  const out = await res.json().catch(() => null);
+  return out && typeof out==='object' ? { ...out, status: res.status } : { ok: false, reason: 'HTTP ' + res.status, status: res.status };
+}
+function backupUid(){ return (AUTH.session && AUTH.session.user && AUTH.session.user.id) || ''; }
+async function loadBackupStatus(){
+  if (BACKUP_ST!==null) return;
+  const mine = BACKUP_ST = { loading: true, uid: backupUid() };
+  const r = await backupFetch({ step: 'status' });
+  if (BACKUP_ST!==mine) return;
+  BACKUP_ST = r.ok ? { ...r, uid: mine.uid, at: Date.now() } : { error: r.reason || 'no answer', uid: mine.uid, at: Date.now() };
+  if (UI.tab==='settings' && settingsPageKey((UI.settings || {}).page)==='data') render();
+}
+// The Security step-up (Face ID / password, 30 minutes), the same lock as Security, before act(). The server checks it too:
+// when it says the unlock has run out there, the lock is shown once more and act() runs once more.
+// intent = what to do again after "Continue with Google" (a full-page round trip that loses act): see secReplay.
+function backupWithStepUp(why, act, again, intent){
+  secEnsureUnlocked(why, async () => {
+    const r = await act();
+    if (!r || r.reason!=='step_up') return;
+    if (again) { showToast('Security couldn\'t be unlocked. Try again.', { kind: 'warn' }); render(); return; }
+    SEC = secLockedState(); render();
+    backupWithStepUp(why, act, true, intent);
+  }, intent);
+}
+// A saved change: the function wrote the Settings history line; here it only shows in this browser's list.
+function backupConfigDone(r){
+  if (r && r.ok) {
+    BACKUP_ST = { ...(BACKUP_ST || {}), config: r.config, nextAt: r.nextAt };
+    if (r.text) {
+      const entry = { id: uid(), at: new Date().toISOString(), actor: (getRealProfile() || {}).fullName || 'Unknown', text: r.text };
+      if (!STATE.data.settingsActivityLog) STATE.data.settingsActivityLog = [];
+      STATE.data.settingsActivityLog.push(entry);
+      if (Array.isArray(SEC.hist)) SEC.hist.unshift({ ...entry, ...settingsHistParts(r.text) });
+    }
+    showToast('Saved'); render(); return r;
+  }
+  if (!r || r.reason!=='step_up') { showToast('Not saved: ' + backupReasonText(r && r.reason), { kind: 'warn' }); render(); }
+  return r;
+}
+// "Send it to": a new address decides where all the data goes each week, so it asks for the Security step-up first.
+function saveBackupEmail(v){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
+  const email = String(v == null ? '' : v).trim().toLowerCase();
+  if (!backupEmailOk(email)) { showToast('That email address doesn\'t look right', { kind: 'warn' }); render(); return; }
+  if (BACKUP_ST && BACKUP_ST.config && email===BACKUP_ST.config.email) return;
+  render();   // the box shows the saved address until the new one is saved (also when the lock is cancelled)
+  backupWithStepUp('Change where the weekly backup goes', async () => backupConfigDone(await backupFetch({ step: 'config', email })), false, { action: 'email', page: 'data', email });
+}
+// "Day and time": no step-up.
+async function saveBackupWhen(field, value){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
+  const body = { step: 'config' };
+  if (field==='day') {
+    const d = Number(value);
+    if (!Number.isInteger(d) || d < 0 || d > 6 || value==='' || value==null) { render(); return; }
+    if (BACKUP_ST && BACKUP_ST.config && d===BACKUP_ST.config.day) return;
+    body.day = d;
+  } else if (field==='time') {
+    const t = String(value == null ? '' : value);
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) { showToast('Pick a time', { kind: 'warn' }); render(); return; }
+    if (BACKUP_ST && BACKUP_ST.config && t===BACKUP_ST.config.time) return;
+    body.time = t;
+  } else return;
+  backupConfigDone(await backupFetch(body));
+}
+function ensureJsZip(){
+  if (!JSZIP) JSZIP = loadScriptOnce(JSZIP_SRC).then(() => window.JSZip).catch(e => { JSZIP = null; throw e; });
+  return JSZIP;
+}
+function backupSaveBlob(blob, name){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `the-guys-data-backup-${todayStr()}.json`;
+  a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(()=>URL.revokeObjectURL(url), 1000);
-  showToast('Data exported');
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+// A storage path as a safe place inside the .zip (no empty, "." or ".." parts).
+function backupZipPath(bucket, path){ return ['files', ...[bucket, ...String(path || '').split('/')].map(s => String(s || '')).filter(s => s && s!=='.' && s!=='..')].join('/'); }
+// "Download full backup" (M6-1: the step-up first). Everything, sensitive details included, NOT locked (the mockup).
+function downloadFullBackup(){
+  if (typeof PRESENT!=='undefined' && PRESENT) { showToast('Exports are off in presentation mode'); return; }
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  backupWithStepUp('Download a full backup', async () => {
+    if (readOnlyReason()) return { ok: false, reason: readOnlyReason() };
+    showToast('Preparing the full backup…');
+    const { data } = await sb.auth.getSession();
+    let res;
+    try { res = await fetch(BACKUP_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify({ step: 'download' }) }); }
+    catch (e) { showToast('Could not make the backup', { kind: 'warn' }); return { ok: false }; }
+    if (res.status===403) { const o = await res.json().catch(() => ({})); if (o && o.reason==='step_up') return { ok: false, reason: 'step_up' }; }
+    if (res.status===404) { showToast('The backup isn\'t set up yet', { kind: 'warn' }); return { ok: false }; }
+    if (!res.ok) { showToast('Could not make the backup', { kind: 'warn' }); return { ok: false }; }
+    let text = '', obj = null;
+    try { text = await res.text(); obj = JSON.parse(text); } catch (e) { obj = null; }
+    if (!obj || obj.format!=='the-guys-backup' || !obj.tables) { showToast('The backup was cut off. Try again.', { kind: 'warn' }); return { ok: false }; }
+    const day = todayStr(), files = Array.isArray(obj.files) ? obj.files : [];
+    if (!files.length) { backupSaveBlob(new Blob([text], { type: 'application/json;charset=utf-8;' }), `the-guys-full-backup-${day}.json`); showToast('Full backup downloaded' + (Array.isArray(obj.files_missing) && obj.files_missing.length ? `, ${obj.files_missing.length} files could not be added` : '')); return { ok: true }; }
+    let Zip;
+    try { Zip = await ensureJsZip(); } catch (e) { showToast('Could not load the zip maker. Try again.', { kind: 'warn' }); return { ok: false }; }
+    const zip = new Zip(), missing = (Array.isArray(obj.files_missing) ? obj.files_missing : []).map(m => `${m.bucket}/${m.path} (${m.reason || 'could not be added'})`);
+    text = '';   // the file list without its links goes in backup.json below
+    zip.file('backup.json', JSON.stringify({ ...obj, files: files.map(({ url, ...f }) => f) }));
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      if (i % 10===0) showToast(`Adding files ${i + 1} of ${files.length}…`);
+      // No link = never fetched: fetch('') would load this page and save it under the file's name.
+      if (!f || typeof f.url!=='string' || !/^https:\/\//.test(f.url)) { missing.push(`${f && f.bucket}/${f && f.path} (no download link)`); continue; }
+      try {
+        const r = await fetch(f.url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        zip.file(backupZipPath(f.bucket, f.path), await r.blob());
+      } catch (e) { missing.push(`${f.bucket}/${f.path}`); }
+    }
+    if (missing.length) zip.file('files-missing.txt', 'These uploaded files could not be added (try the download again later):\n' + missing.join('\n') + '\n');
+    backupSaveBlob(await zip.generateAsync({ type: 'blob' }), `the-guys-full-backup-${day}.zip`);
+    showToast('Full backup downloaded' + (missing.length ? `, ${missing.length} files could not be added` : ''));
+    return { ok: true };
+  }, false, { action: 'download', page: 'data' });
+}
+
+// Settings → Data (the mockup's renderData): the note, Export to Excel, Full backup, the no-restore note.
+function renderDataPage(){
+  return `<div class="set-note">${ico('alert', 16)}<span>There are no automatic daily backups of your data, so keep these files safe: they are your copy outside the app.</span></div>`
+    + renderExportBlock()
+    + renderFullBackupBlock()
+    + `<div class="set-note">${ico('shield', 16)}<span><b>No restore button, on purpose.</b> Restoring a backup overwrites the live data, so if it is ever needed, restoring is done together, carefully.</span></div>`;
+}
+function renderFullBackupBlock(){
+  if (BACKUP_ST && (BACKUP_ST.uid!==backupUid() || (BACKUP_ST.at && Date.now() - BACKUP_ST.at > 5 * 60e3))) BACKUP_ST = null;   // someone else signed in, or 5 minutes old
+  if (BACKUP_ST===null) setTimeout(loadBackupStatus, 0);
+  const v = backupStatusView(BACKUP_ST, Date.now()), off = v.inputsOff ? ' disabled' : '';
+  const days = BACKUP_DAY_ORDER.map(d => `<option value="${d}"${d===v.when.day ? ' selected' : ''}>${esc(backupDayLabel(d))}</option>`).join('');
+  const rows = setRows([
+    ['Download a full backup now', 'One file with all the data in the app and the uploaded files. Not locked with a password: keep it somewhere safe.', `<button type="button" class="btn" onclick="downloadFullBackup()"${v.downloadOff ? ' disabled' : ''}>${ico('incoming')} Download full backup</button>`],
+    ['Send it to', 'Any address you choose. It doesn\'t have to be someone with a login.', `<input class="set-input" type="email" aria-label="Send the weekly backup to" value="${esc(v.when.email)}" onchange="saveBackupEmail(this.value)"${off}>`],
+    ['Day and time', 'Sydney time, best at night.' + v.timerNote, `<select aria-label="Day" onchange="saveBackupWhen('day', this.value)"${off}>${days}</select><input type="time" aria-label="Time" value="${esc(v.when.time)}" style="width:120px" onchange="saveBackupWhen('time', this.value)"${off}>`],
+    ['Locked with a password', v.pw.desc, pill(v.pw.tone, v.pw.label)],
+    ['Last sent', v.last.desc, pill(v.last.tone, v.last.label)],
+    ['Open a locked backup', 'Opens a weekly backup file you downloaded, here in this browser, with the backup password. Nothing is uploaded.', `<button type="button" class="btn small" onclick="openLockedBackup()">${ico('lock', 14)} Open</button>`],
+  ]);
+  return setBlock('Full backup', 'Everything, for keeping safe: every area and the uploaded files, sensitive details included, nothing to tick. A copy locked with a password is also sent every week by email, as a download link.', rows, pill(v.head.tone, v.head.label));
+}
+
+// "Open a locked backup": choose the files from the weekly email and type the password; it all happens in this browser.
+function openLockedBackup(){
+  LOCKED = null;
+  openModal(`<div class="modal-back" onclick="if(event.target===this) closeLockedBackup()">
+    <div class="modal bk-modal" style="max-width:560px">
+      <h2>Open a locked backup</h2>
+      <div class="modal-sub">Choose the files from the weekly backup email (the data file, and the file parts if you need the uploaded files), then type the backup password. Everything is opened here in this browser: nothing is uploaded.</div>
+      <div class="field"><label for="bk-files">Backup files</label><input type="file" id="bk-files" multiple accept=".locked"></div>
+      <div class="field" style="margin-top:11px"><label for="bk-pw">Password</label><input type="password" id="bk-pw" autocomplete="off" onkeydown="if(event.key==='Enter')openLockedBackupFiles()"></div>
+      <div id="modal-error"></div>
+      <div class="modal-acts"><button type="button" class="btn" onclick="closeLockedBackup()">Cancel</button><button type="button" class="btn primary" id="bk-go" onclick="openLockedBackupFiles()">Open</button></div>
+    </div>
+  </div>`);
+}
+function closeLockedBackup(){ LOCKED = null; closeModal(); }
+// The weekly email's link (?open=backup) opens this window at once. It needs no sign-in (also on the sign-in page), so the
+// locked files open even when the app's database is gone.
+function lockedBackupLinkOpen(search){ return /(?:^\?|&)open=backup(?:&|$)/.test(String(search || '')); }
+if (lockedBackupLinkOpen(location.search)) window.addEventListener('load', () => setTimeout(openLockedBackup, 0));
+async function openLockedBackupFiles(){
+  const fi = document.getElementById('bk-files'), pi = document.getElementById('bk-pw'), go = document.getElementById('bk-go');
+  const files = fi && fi.files ? [...fi.files] : [], pw = pi ? pi.value : '';
+  if (!files.length) { modalError('Choose at least one file.'); return; }
+  if (!pw) { modalError('Type the backup password.'); return; }
+  if (!(window.crypto && crypto.subtle) || typeof DecompressionStream==='undefined') { modalError('This browser can\'t open backups. Use a recent Chrome, Safari or Edge.'); return; }
+  if (go && go.disabled) return;
+  modalError('');
+  if (go) { go.disabled = true; go.textContent = 'Opening…'; }
+  const cache = {}, out = { data: null, dataText: '', packs: [] };
+  let problem = '';
+  for (const f of files) {
+    const u8 = new Uint8Array(await f.arrayBuffer()), h = backupParseHeader(u8);
+    if (!h) { problem = 'This isn\'t a locked backup file from the app.'; break; }
+    let plain;
+    try { plain = await backupDecrypt(pw, u8, cache); } catch (e) { problem = `That password doesn't open ${f.name}.`; break; }
+    try {
+      if (h.kind===1) { const text = await backupGunzipText(plain), obj = JSON.parse(text); if (!obj || obj.format!=='the-guys-backup') throw new Error('format'); out.data = obj; out.dataText = text; }
+      else { const p = backupReadPack(plain); if (!p) throw new Error('pack'); out.packs.push({ ...p, bytes: plain }); }
+    } catch (e) { problem = 'This isn\'t a locked backup file from the app.'; break; }
+  }
+  if (pi) pi.value = '';
+  if (problem) { if (go) { go.disabled = false; go.textContent = 'Open'; } modalError(problem); return; }
+  // One list of the uploaded files: from the data file's index, or (only parts chosen) from the parts themselves.
+  const packs = {}; out.packs.forEach(p => { packs[p.id] = p; });
+  const list = out.data && Array.isArray(out.data.files) ? out.data.files.map(x => ({ ...x }))
+    : out.packs.flatMap(p => p.files.map(x => ({ ...x, pack: p.id })));
+  out.list = list.map(x => ({ bucket: String(x.bucket || ''), path: String(x.path || ''), type: String(x.type || ''), size: Number(x.size) || 0, offset: Number(x.offset) || 0, pack: String(x.pack || '') }))
+    .map(x => ({ ...x, here: !!packs[x.pack] && packs[x.pack].start + x.offset + x.size <= packs[x.pack].bytes.length }));
+  out.packById = packs;
+  LOCKED = out;
+  renderLockedResult();
+}
+function renderLockedResult(){
+  const L = LOCKED; if (!L) return;
+  const d = L.data, name = p => String(p || '').split('/').pop() || p;
+  let body = '';
+  if (d) {
+    const tables = Object.keys(d.tables || {}), counts = d.counts || {};
+    body += `<div class="modal-sub">Backup made on ${esc(d.created_sydney || '')} (Sydney)</div>
+      <div class="bk-h">Areas (${tables.length})</div>
+      <div class="bk-areas">${tables.map(t => `<span><b title="${esc(t)}">${esc(BACKUP_TABLE_LABELS[t] || t)}</b><em>${esc(String(counts[t] != null ? counts[t] : (d.tables[t] || []).length))}</em></span>`).join('')}</div>
+      <button type="button" class="btn small" onclick="lockedDownloadData()">${ico('incoming', 14)} Download the data (JSON)</button>
+      <div class="field" style="margin-top:12px"><label for="bk-area">Look at an area</label><select id="bk-area" onchange="lockedShowArea(this.value)"><option value="">Choose an area</option>${tables.map(t => `<option value="${esc(t)}">${esc(BACKUP_TABLE_LABELS[t] || t)}</option>`).join('')}</select></div>
+      <pre class="hint bk-pre" id="bk-pre" hidden></pre>`;
+  } else body += `<div class="modal-sub">Only file parts were chosen: the uploaded files in them are below. Choose the data file too to see the areas.</div>`;
+  const groups = {};
+  L.list.forEach((f, i) => { (groups[f.bucket] = groups[f.bucket] || []).push(i); });
+  body += `<div class="bk-h">Uploaded files (${L.list.length})</div>`;
+  if (!L.list.length) body += `<div class="hint">No uploaded files in this backup.</div>`;
+  Object.keys(groups).sort().forEach(b => {
+    body += `<div class="bk-g">${esc(BACKUP_BUCKET_LABELS[b] || b)}</div><div class="bk-files">${groups[b].map(i => { const f = L.list[i];
+      return `<div class="bk-file"><span class="bk-name" title="${esc(f.path)}">${esc(name(f.path))}</span><span class="hint">${esc(backupSizeText(f.size))}</span>${f.here ? `<button type="button" class="btn ghost small" onclick="lockedDownloadFile(${i})">Download</button>` : `<span class="hint">In a file part you didn't choose</span>`}</div>`; }).join('')}</div>`;
+  });
+  const missing = d && Array.isArray(d.files_missing) ? d.files_missing : [];
+  if (missing.length) body += `<div class="bk-files" style="margin-top:8px">${missing.map(m => `<div class="bk-file"><span class="bk-name" title="${esc(m.path || '')}">${esc(name(m.path))}</span><span class="hint">Not in this backup: ${esc(m.reason || 'unknown')}</span></div>`).join('')}</div>`;
+  openModal(`<div class="modal-back" onclick="if(event.target===this) closeLockedBackup()">
+    <div class="modal bk-modal" style="max-width:640px">
+      <h2>Open a locked backup</h2>
+      ${body}
+      <div class="hint" style="margin-top:14px">There is no restore button: restoring is done together, carefully.</div>
+      <div class="modal-acts"><button type="button" class="btn" onclick="closeLockedBackup()">Close</button></div>
+    </div>
+  </div>`);
+}
+function lockedShowArea(t){
+  const el = document.getElementById('bk-pre'), d = LOCKED && LOCKED.data; if (!el || !d) return;
+  const rows = d.tables && Array.isArray(d.tables[t]) ? d.tables[t] : null;
+  el.hidden = !rows;
+  if (rows) el.innerHTML = esc(rows.length ? JSON.stringify(rows.slice(0, 20), null, 2) + (rows.length > 20 ? `\n… and ${rows.length - 20} more` : '') : 'No rows.');
+}
+function lockedDownloadData(){
+  const L = LOCKED; if (!L || !L.dataText) return;
+  const t = Date.parse(L.data.created_at), day = isNaN(t) ? todayStr() : sydneyWall(new Date(t)).day;
+  backupSaveBlob(new Blob([L.dataText], { type: 'application/json;charset=utf-8;' }), `the-guys-full-backup-${day}.json`);
+}
+function lockedDownloadFile(i){
+  const L = LOCKED, f = L && L.list[i], p = f && L.packById[f.pack]; if (!f || !p || !f.here) return;
+  backupSaveBlob(new Blob([p.bytes.subarray(p.start + f.offset, p.start + f.offset + f.size)], { type: f.type || 'application/octet-stream' }), String(f.path).split('/').pop() || 'file');
 }
 function exportJobsCsv(){
   const profile = getCurrentProfile(); if (!profile) return;
@@ -13550,11 +14348,9 @@ function renderSettings(profile){
     // Connectors (14 Oct, items 7/16): was "Connections"; the old page key still opens it (OLD_SETTINGS_PAGES). A connector's
     // own page brings its own header (bare).
     { group: 'Connectors', id: 'connectors', icon: 'link', title: 'Connectors', desc: 'The services the app gets data from. Open one to see exactly what comes in, how and how often, and to switch any part off.', keywords: 'connections integrations add-ons', bare: () => !!connOpenDef(), body: () => renderConnectorsPage() },
-    { group: 'Account', id: 'data', icon: 'folder', title: 'Data', desc: 'Your data is yours: take it out, and see who changed what.', body: () => setBlock('Export and history', '', setRows([
-        ['Export everything', 'One file with all the data (JSON).', `<button class="btn small" onclick="exportDataAsJson()">${ico('incoming')} Export</button>`],
-        ['Settings history', 'Every change on these pages: who and when.', `<button class="btn small" onclick="openSettingsActivityModal()">${ico('history')} Open</button>`],
-      ])) },
-    { group: 'Account', id: 'security', icon: 'lock', title: 'Security', desc: 'Keeping the business\'s data safe.', body: () => renderSecurityPage() },
+    { group: 'Account', id: 'data', icon: 'folder', title: 'Data', desc: 'Your data is yours: choose what to take out, and keep a weekly backup.', keywords: 'export excel spreadsheet download backup', body: () => renderDataPage() + `<div class="note-link">Settings history has moved to <a href="#" onclick="setSettingsPage('security');return false">Settings → Security</a>.</div>` },
+    // Security opens behind its lock (14 Oct, plan item 6 / P4): the pill in the title says which.
+    { group: 'Account', id: 'security', icon: 'lock', title: 'Security', desc: 'Keeping the business\'s data safe.', keywords: 'face id fingerprint passkey touch id history presentation view as two-step', titleExtra: () => secUnlocked() ? pill('good', 'Unlocked') : pill('neutral', 'Locked'), body: () => renderSecurityPage() },
     { group: 'Account', id: 'branding', icon: 'palette', title: 'Look and branding', desc: 'How the app looks for everyone in the business.', body: () => renderBrandingPage() },
     // Plan and billing (renderBillingPage) stays hidden until the app is offered to other businesses (Ofek 13 Oct).
   ];
@@ -13577,7 +14373,7 @@ function renderSettings(profile){
       </nav>
       <section class="set-page">
         ${cur.bare && cur.bare() ? '' : `<button type="button" class="set-back" onclick="closeSettingsPage()">‹ Settings</button>
-        <h2 class="set-title">${esc(cur.title)}</h2>
+        <h2 class="set-title">${esc(cur.title)}${cur.titleExtra ? ' ' + cur.titleExtra() : ''}</h2>
         <p class="set-desc">${esc(cur.pageDesc ? cur.pageDesc() : cur.desc)}</p>`}
         ${cur.body()}
       </section>
@@ -13585,7 +14381,13 @@ function renderSettings(profile){
   `;
 }
 // The parts every settings page is made of: a block (a card with a title) and rows of label + control, as in the mockup.
-function setBlock(title, desc, body){ return `<div class="set-block"><div class="set-block-head"><h3>${esc(title)}</h3>${desc ? `<p>${esc(desc)}</p>` : ''}</div>${body}</div>`; }
+// right (optional): what sits on the right of the block's head (e.g. Settings history's count), already HTML.
+// cls (optional): one more class on the block (e.g. 'ex-block'). Without it the markup is exactly as before.
+function setBlock(title, desc, body, right, cls){
+  const open = `<div class="set-block${cls ? ' ' + cls : ''}">`;
+  if (right) return `${open}<div class="set-block-head has-right"><div><h3>${esc(title)}</h3>${desc ? `<p>${esc(desc)}</p>` : ''}</div>${right}</div>${body}</div>`;
+  return `${open}<div class="set-block-head"><h3>${esc(title)}</h3>${desc ? `<p>${esc(desc)}</p>` : ''}</div>${body}</div>`;
+}
 // A row's optional 4th part { cls, html }: a class on the row, and a description that is already HTML (escaped by the caller).
 function setRows(rows){ return `<div class="set-rows">${rows.map(([label, desc, ctl, o]) => `<div class="set-row${o && o.cls ? ' ' + o.cls : ''}"><div class="set-row-text"><b>${label}</b>${desc ? `<span>${o && o.html ? desc : esc(desc)}</span>` : ''}</div><div class="set-row-ctl">${ctl}</div></div>`).join('')}</div>`; }
 // A switch, as in the mockup. Locked ones show the rule but can't be changed here (locked as text = why, on hover).
@@ -14679,6 +15481,20 @@ async function teamCall(body){
   if (!r.ok || !out.ok) throw new Error(out.reason || out.error || ('HTTP ' + r.status));
   return out;
 }
+// The passkey server function (supabase/functions/passkey): Security's lock. Unlock, status and lock work in Presentation
+// mode and View as (they change no business data, and the owner must be able to open Security to turn Presentation mode
+// off); setting up a key is a change, so it is refused there. The answer always comes back (with its status), so the
+// lock can say why it failed; only a missing function (or no network) throws.
+async function passkeyCall(body){
+  if ((body.action==='reg-options' || body.action==='reg-verify') && readOnlyReason()) throw new Error(readOnlyReason());
+  const { data } = await sb.auth.getSession();
+  let r;
+  try { r = await fetch(PASSKEY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify(body) }); }
+  catch (e) { throw new Error('The Security check isn\'t installed on the server yet.'); }
+  const out = await r.json().catch(() => ({}));
+  if (r.status===404 && !(out && out.reason)) throw new Error('The Security check isn\'t installed on the server yet.');
+  return { ...(out && typeof out==='object' ? out : {}), status: r.status };
+}
 async function loadTeam(){
   if (TEAM.busy) return; TEAM.busy = true;
   try { TEAM.list = (await teamCall({ step: 'list' })).people || []; } catch (e) { TEAM.list = []; TEAM.error = String(e.message || e); }
@@ -15546,22 +16362,594 @@ function connAddConnectedSource(name){
   openConnector(cid);
   if (added) showToast(`"${item.label || item.key}" added to Lead sources. Finish connecting it here.`);
 }
-function renderSecurityPage(){
-  const me = getCurrentProfile();
-  if (AUTH_PROVIDERS===null) loadAuthProviders().then(() => { if (UI.tab==='settings' && (UI.settings || {}).page==='security') render(); });
-  if (MFA.factors===null) mfaFactors();
-  return setBlock('Signing in', '', setRows([
-      ['Change my password', '', `<button class="btn small" onclick="openChangePasswordModal()">Change</button>`],
-      ['Sign out of every device', 'Your account on every phone and computer, including this one.', `<button class="btn small danger" onclick="signOutEverywhere()">Sign out everywhere</button>`],
-      ['Sign in with Google', AUTH_PROVIDERS && AUTH_PROVIDERS.google ? 'On: the sign-in page offers "Continue with Google". Only people who already have an account here get in.' : 'Free. It is switched on in Supabase with a Google key; once it is, the sign-in page offers it by itself.', AUTH_PROVIDERS && AUTH_PROVIDERS.google ? pill('good', 'On') : pill('neutral', 'Off')],
-      ['Two-step sign-in for your account', MFA.factors===null ? 'Checking…' : MFA.factors.some(x => x.status==='verified') ? 'On: you give a code from your authenticator app when you sign in.' : 'A 6-digit code from an authenticator app on your phone, as well as the password.', MFA.factors===null ? '' : MFA.factors.some(x => x.status==='verified') ? `${pill('good', 'On')} <button class="btn small ghost danger" onclick="turnOffMfa()">Turn off</button>` : `<button class="btn small primary" onclick="startMfaEnroll()">Turn on</button>`],
-      ['The office assistant\'s automatic log-out', 'Set for each person in their card under People: when they are logged out, and the end time recorded if they forgot.', `<button class="btn small" onclick="setSettingsPage('people')">Open People</button>`],
-    ]))
-    + (me && me.role==='owner' ? setBlock('Showing the app to someone', '', setRows([
-      ['Presentation mode', `Money shows changed and nothing can be saved.${PRESENT ? ' On now: nothing in the menu shows it, so turn it off here (signing out turns it off too).' : ''}`, `<button class="btn small" onclick="togglePresentationMode()">${PRESENT ? 'Turn off' : 'Turn on'}</button>`],
-      ['View the app as someone else', 'See exactly what Ron or a technician sees.', `<button class="btn small" onclick="openViewAsModal()">Choose a person</button>`],
-    ])) : '');
+// ── Settings → Security: the lock, Face ID / fingerprint (passkeys) and the 30-minute unlock (settings round 2, phase 3;
+// plan item 6, P4, M6 answers 3-5; approved mockup round2-data-security.html, screens "lock" and "security") ──
+// Pure helpers first (tested in tests/business-logic.test.js), then the lock, the unlocked page and the server calls.
+// base64url without padding, with its own table (no atob/btoa/TextEncoder), as WebAuthn and the passkey function use it.
+function bytesToB64url(x){
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  const b = ArrayBuffer.isView(x) ? new Uint8Array(x.buffer, x.byteOffset, x.byteLength) : Object.prototype.toString.call(x)==='[object ArrayBuffer]' ? new Uint8Array(x) : new Uint8Array(Array.isArray(x) ? x : []);
+  let s = '';
+  for (let i = 0; i < b.length; i += 3) {
+    const n = (b[i] << 16) | ((b[i + 1] || 0) << 8) | (b[i + 2] || 0);
+    s += A[(n >> 18) & 63] + A[(n >> 12) & 63] + (i + 1 < b.length ? A[(n >> 6) & 63] : '') + (i + 2 < b.length ? A[n & 63] : '');
+  }
+  return s;
 }
+function b64urlToBytes(s){
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  const t = String(s || '').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const out = []; let bits = 0, val = 0;
+  for (const ch of t) {
+    const v = A.indexOf(ch); if (v < 0) continue;
+    val = ((val << 6) | v) & 0xffff; bits += 6;
+    if (bits >= 8) { bits -= 8; out.push((val >> bits) & 255); }
+  }
+  return new Uint8Array(out);
+}
+// The passkey function's options (JSON) as the browser wants them: the challenge and the key ids as bytes.
+function pkCreationOptions(o){
+  const c = { ...o, challenge: b64urlToBytes(o.challenge) };
+  if (o.user) c.user = { ...o.user, id: b64urlToBytes(o.user.id) };
+  if (Array.isArray(o.excludeCredentials)) c.excludeCredentials = o.excludeCredentials.map(x => ({ ...x, id: b64urlToBytes(x.id) }));
+  return c;
+}
+function pkRequestOptions(o){
+  const c = { ...o, challenge: b64urlToBytes(o.challenge) };
+  if (Array.isArray(o.allowCredentials)) c.allowCredentials = o.allowCredentials.map(x => ({ ...x, id: b64urlToBytes(x.id) }));
+  return c;
+}
+// What the browser gives back, as JSON for the passkey function (the shape @simplewebauthn/server reads).
+function pkAttestationJSON(cred){
+  const r = cred.response || {};
+  return { id: cred.id, rawId: bytesToB64url(cred.rawId), type: cred.type,
+    response: { clientDataJSON: bytesToB64url(r.clientDataJSON), attestationObject: bytesToB64url(r.attestationObject), transports: typeof r.getTransports==='function' ? r.getTransports() : [] },
+    clientExtensionResults: typeof cred.getClientExtensionResults==='function' ? cred.getClientExtensionResults() : {},
+    authenticatorAttachment: cred.authenticatorAttachment || undefined };
+}
+function pkAssertionJSON(cred){
+  const r = cred.response || {};
+  return { id: cred.id, rawId: bytesToB64url(cred.rawId), type: cred.type,
+    response: { clientDataJSON: bytesToB64url(r.clientDataJSON), authenticatorData: bytesToB64url(r.authenticatorData), signature: bytesToB64url(r.signature), userHandle: r.userHandle ? bytesToB64url(r.userHandle) : undefined },
+    clientExtensionResults: typeof cred.getClientExtensionResults==='function' ? cred.getClientExtensionResults() : {},
+    authenticatorAttachment: cred.authenticatorAttachment || undefined };
+}
+// This device, from the browser: its name for the key list, what unlocks it, and its icon. An iPad says "Macintosh" but has touch.
+function pkDeviceInfo(ua, touchPoints){
+  const u = String(ua || ''), t = Number(touchPoints) || 0, d = (name, kind, icon) => ({ name, kind, icon });
+  if (/iPhone|iPod/.test(u)) return d('iPhone', 'Face ID', 'mobile');
+  if (/iPad/.test(u) || (/Macintosh/.test(u) && t > 1)) return d('iPad', 'Face ID', 'mobile');
+  if (/Android/.test(u)) return /Mobile/.test(u) ? d('Android phone', 'Fingerprint', 'mobile') : d('Android tablet', 'Fingerprint', 'mobile');
+  if (/Windows/.test(u)) return d('Windows computer', 'Windows Hello', 'laptop');
+  if (/CrOS/.test(u)) return d('Chromebook', 'Fingerprint', 'laptop');
+  if (/Macintosh|Mac OS X/.test(u)) return d('Mac', 'Fingerprint', 'laptop');
+  return d('This device', 'Fingerprint', 'laptop');
+}
+function bioIcoFor(kind){ return kind==='Face ID' ? 'face' : 'finger'; }
+// "Unlocked with …"
+function secMethodWord(method, kind){
+  if (method==='passkey') return kind==='Face ID' ? 'Face ID' : kind==='Windows Hello' ? 'Windows Hello' : 'your fingerprint';
+  return { password: 'your password', 'password+code': 'your password and code', google: 'Google' }[method] || 'your password';
+}
+// Which ways this person can unlock on this device, and the one the lock shows first. Someone who signs in with Google
+// only has no password: their way is Google. Someone who HAS a password never gets the Google way (M6-3): on a phone
+// already signed in to Google, signing in again asks for no secret, so it would not stop someone holding the phone.
+function secUnlockMethods(o){
+  const p = Array.isArray(o.providers) ? o.providers : [];
+  const passkey = !!o.hasKey && !!o.webauthn, password = !p.length || p.includes('email'), google = p.includes('google') && !p.includes('email') && !!o.googleOn;
+  return { passkey, password, google, first: passkey ? 'prompt' : password ? 'pw' : google ? 'google' : 'pw' };
+}
+function secLeft(untilMs, nowMs){ const s = Math.max(0, Math.round((untilMs - nowMs) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+// "Today, 4:20 pm", "Yesterday, 4:20 pm", "12 Oct, 8:40 pm" (another year adds it), in Sydney time.
+function secWhen(iso, nowMs){
+  const t = iso ? new Date(iso).getTime() : NaN; if (isNaN(t)) return '';
+  const w = connWhen(iso, nowMs), time = w.split(' ').slice(-2).join(' ');
+  const day = connSydDay(t), today = connSydDay(nowMs == null ? Date.now() : nowMs);
+  const yesterday = new Date(Date.parse(today + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
+  if (day===today) return 'Today, ' + time;
+  if (day===yesterday) return 'Yesterday, ' + time;
+  return `${Number(day.slice(8, 10))} ${MONTHS[Number(day.slice(5, 7)) - 1]}${day.slice(0, 4)!==today.slice(0, 4) ? ' ' + day.slice(0, 4) : ''}, ${time}`;
+}
+// A Settings history line split into where (the Settings page) and what: "Pipeline stages: Quotes idle…".
+function settingsHistParts(text){
+  const t = String(text == null ? '' : text), m = /^([^:\n]{1,60}):\s+([\s\S]*)$/.exec(t);
+  if (m && [...Object.values(CAT_NAMES), 'People', 'Google review requests'].includes(m[1])) return { where: m[1], what: m[2] };
+  return { where: 'Settings', what: t };
+}
+function settingsHistFilter(rows, q, who){
+  const qy = String(q || '').trim().toLowerCase();
+  return (rows || []).filter(r => (!who || who==='all' || r.actor===who) && (!qy || `${r.what} ${r.where} ${r.actor}`.toLowerCase().includes(qy)));
+}
+// The person chips: the 3 people with the most changes (then by name).
+function secHistChips(rows){
+  const n = {}; (rows || []).forEach(r => { if (r.actor) n[r.actor] = (n[r.actor] || 0) + 1; });
+  return Object.keys(n).sort((a, b) => n[b] - n[a] || a.localeCompare(b)).slice(0, 3);
+}
+function secRecentCount(rows, nowMs){ return (rows || []).filter(r => { const t = Date.parse(r.at); return !isNaN(t) && t >= nowMs - 14 * 864e5 && t <= nowMs + 60e3; }).length; }
+function secReasonText(reason){
+  return ({
+    'wrong-password': 'That password didn\'t work.',
+    'wrong-code': 'That code didn\'t work. Try the new one the app shows.',
+    'too-many': 'Too many tries. Wait 15 minutes and try again.',
+    'not-fresh': 'Signing in with Google again didn\'t finish in time. Try again.',
+    'expired': 'That took too long. Try again.',
+    'not-verified': 'Face ID / fingerprint couldn\'t be checked. Try again, or use your password.',
+    'not-found': 'This device\'s Face ID / fingerprint was removed. Use your password, then set it up again.',
+    'no-passkey': 'This device\'s Face ID / fingerprint was removed. Use your password, then set it up again.',
+    'locked': 'Security locked again. Unlock it first.',
+    'already': 'Face ID / fingerprint is already set up on this device.',
+    'use-password': 'Your account has a password: use it, or Face ID / fingerprint, to open Security.',
+  })[reason] || 'Something went wrong. Try again.';
+}
+
+// This device's own key: the browser remembers which key it made (its credential id), so the lock knows to offer it.
+function secKeyName(){ return 'tgsg_passkey_' + ((AUTH.session && AUTH.session.user && AUTH.session.user.id) || ''); }
+function secLocalKey(){ try { return localStorage.getItem(secKeyName()) || ''; } catch (e) { return ''; } }
+function secSetLocalKey(id){ try { localStorage.setItem(secKeyName(), String(id || '')); } catch (e) {} }
+function secClearLocalKey(){ try { localStorage.removeItem(secKeyName()); } catch (e) {} }
+function secProviders(){ return (AUTH.session && AUTH.session.user && AUTH.session.user.app_metadata && AUTH.session.user.app_metadata.providers) || []; }
+function secGoogleOnly(){ const p = secProviders(); return !!p.length && !p.includes('email'); }
+function secUnlocked(){ return SEC.until > Date.now(); }
+function secPageOpen(){ return UI.tab==='settings' && settingsPageKey((UI.settings || {}).page)==='security'; }
+function secMethods(){
+  // Google counts as on until the providers list has loaded, and always for someone whose own sign-in used Google (that
+  // proves it works, also when the list couldn't be read). Face ID / fingerprint is offered when this browser made a key
+  // OR the server has one for this person (a synced key, or this browser's note was cleared).
+  return secUnlockMethods({ providers: secProviders(), hasKey: !!secLocalKey() || SEC.anyKey===true, googleOn: AUTH_PROVIDERS===null || !!AUTH_PROVIDERS.google || secProviders().includes('google'), webauthn: SEC.platform!==false });
+}
+function secLockedState(){ return { ...secBlank(), checked: true, platform: SEC.platform, anyKey: SEC.anyKey }; }
+// Redraws the lock where it is: the small window (secEnsureUnlocked) or the Security page.
+function secRerender(){
+  const pop = SEC.after && document.getElementById('sec-lock-pop');
+  if (pop) { pop.innerHTML = renderSecurityLock('popup'); return; }
+  if (secPageOpen()) render();
+}
+function secFocus(id){ setTimeout(() => { const el = document.getElementById(id); if (el) el.focus(); }, 30); }
+async function secPlatformCheck(){
+  if (SEC.platform!==null || secPlatformCheck.busy) return; secPlatformCheck.busy = true;
+  let ok = false;
+  try { ok = !!(window.PublicKeyCredential && typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable==='function' && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch (e) { ok = false; }
+  secPlatformCheck.busy = false; SEC.platform = ok;
+  secRerender();
+}
+// Is this sign-in session already unlocked on the server (a reload within the 30 minutes)?
+async function secStatus(){
+  if (SEC.checked) return; SEC.checked = true;
+  const mine = SEC;
+  try {
+    const out = await passkeyCall({ action: 'status' });
+    if (SEC!==mine || !out.ok || !out.until) return;
+    SEC.until = secUntil(out); SEC.method = out.method || '';
+    secStartTimer(); secLoadKeys(); secLoadHist();
+    if (secPageOpen()) render();
+  } catch (e) { /* not installed yet: the lock says so when it is used */ }
+}
+// The unlock's end on this device's clock (the server's "seconds left", so a wrong device clock can't shorten it).
+function secUntil(out){ return Number(out.left) > 0 ? Date.now() + Number(out.left) * 1000 : (Date.parse(out.until) || 0); }
+function secOpen(out){
+  SEC.until = secUntil(out); SEC.method = out.method || ''; SEC.pw = ''; SEC.step = null; SEC.err = ''; SEC.authOpts = null; SEC.busy = false;
+  secStartTimer(); secLoadKeys(); secLoadHist();
+  if (SEC.after) { const then = SEC.after; SEC.after = null; SEC.afterIntent = null; closePopup(); then(); return; }
+  showToast('Security unlocked');
+  render();
+}
+let SEC_TIMER = null;
+function secStartTimer(){
+  if (SEC_TIMER) return;
+  SEC_TIMER = setInterval(() => {
+    if (!SEC.until) return;
+    const el = document.getElementById('sec-left'); if (el) el.textContent = secLeft(SEC.until, Date.now());
+    if (SEC.until > Date.now()) return;
+    SEC = secLockedState();   // its history and keys leave memory too
+    if (secPageOpen()) { render(); showToast('Security locked again'); }
+  }, 1000);
+}
+async function secLockNow(){
+  const done = passkeyCall({ action: 'lock' }).catch(() => {});
+  SEC = secLockedState();
+  render();
+  await done;
+}
+// Face ID / fingerprint has to start straight from the tap (Safari refuses it after a wait), so the options are fetched
+// as soon as the lock shows and the tap uses them at once. One fetch at a time: each one replaces the server's challenge.
+let SEC_AUTH_LOAD = null;
+function secPrefetchAuth(){
+  if (SEC_AUTH_LOAD) return SEC_AUTH_LOAD;
+  const mine = SEC;
+  SEC_AUTH_LOAD = passkeyCall({ action: 'auth-options' })
+    .catch(e => ({ ok: false, reason: '', message: String(e.message || e) }))
+    .then(out => {
+      SEC_AUTH_LOAD = null;
+      if (SEC===mine) {
+        const got = SEC.authOpts = out.ok ? { options: out.options, at: Date.now() } : { options: null, at: Date.now(), reason: out.reason || '', message: out.message || '' };
+        const had = SEC.anyKey;
+        if (out.ok) SEC.anyKey = true; else if (out.reason==='no-passkey') SEC.anyKey = false;
+        if (out.reason==='no-passkey' && !SEC.busy) {
+          // Only a key this browser noted is news ("was removed"); with none noted nothing on the lock changes.
+          if (secLocalKey()) { secClearLocalKey(); SEC.step = null; SEC.err = secReasonText('no-passkey'); secRerender(); }
+        }
+        // A key found on the server: the lock now starts with Face ID / fingerprint (unless a password is being typed).
+        if (out.ok && had!==true && !secLocalKey() && !SEC.step && !SEC.busy) { const el = document.getElementById('sec-pw'); if (!el || !el.value) secRerender(); }
+        // Still on the lock after 4 minutes (the server keeps a challenge 5): fresh options, so the next tap starts at once.
+        if (out.ok) setTimeout(() => { if (SEC===mine && SEC.authOpts===got && !SEC.busy && !secUnlocked() && (secPageOpen() || SEC.after)) { SEC.authOpts = null; secPrefetchAuth(); } }, 4 * 60e3 - 5000);
+      }
+      return out;
+    });
+  return SEC_AUTH_LOAD;
+}
+function secCancelledText(e){ return e && (e.name==='NotAllowedError' || e.name==='AbortError'); }
+async function secUnlockPasskey(){
+  if (SEC.busy) return;
+  const a = SEC.authOpts, pre = a && a.options && Date.now() - a.at < 4 * 60e3 ? a.options : null;
+  SEC.authOpts = null; SEC.err = ''; SEC.busy = true;
+  let pending = null;
+  try {
+    if (pre) pending = navigator.credentials.get({ publicKey: pkRequestOptions(pre) });   // straight from the tap: no wait before it
+    secRerender();
+    if (!pending) {
+      const o = await (SEC_AUTH_LOAD || secPrefetchAuth());
+      SEC.authOpts = null;
+      if (!o.ok) { const er = new Error(o.message || secReasonText(o.reason)); er.reason = o.reason; throw er; }
+      pending = navigator.credentials.get({ publicKey: pkRequestOptions(o.options) });
+    }
+    const cred = await pending;
+    const out = await passkeyCall({ action: 'auth-verify', response: pkAssertionJSON(cred) });
+    if (out.ok) { secKeepKeyHere(cred); secOpen(out); return; }
+    secFailReason(out.reason);
+  } catch (e) {
+    if (secCancelledText(e)) SEC.err = 'Face ID / fingerprint was cancelled. Try again, or use your password.';
+    else if (e.reason) secFailReason(e.reason);
+    else SEC.err = String(e.message || e);
+  }
+  SEC.busy = false;
+  secRerender();
+}
+// A key that just worked on THIS device (not a phone used over Bluetooth / a QR code) is this device's key from now on.
+function secKeepKeyHere(cred){ if (cred && cred.id && cred.authenticatorAttachment!=='cross-platform') secSetLocalKey(cred.id); }
+function secFailReason(reason){
+  if (reason==='not-found' || reason==='no-passkey') { secClearLocalKey(); SEC.step = null; }
+  SEC.err = secReasonText(reason);
+}
+function secGoStep(step){
+  SEC.step = step; SEC.err = ''; if (step!=='code') SEC.pw = '';
+  secRerender();
+  if (step==='pw') secFocus('sec-pw');
+}
+function secTwoStepOn(){ return (MFA.factors || []).some(x => x.status==='verified'); }
+async function secUnlockPw(){
+  if (SEC.busy) return;
+  const el = document.getElementById('sec-pw'), pw = el ? el.value : '';
+  if (!pw) { SEC.step = 'pw'; SEC.err = 'Type your password.'; secRerender(); secFocus('sec-pw'); return; }
+  if (secTwoStepOn()) { SEC.pw = pw; SEC.step = 'code'; SEC.err = ''; secRerender(); secFocus('sec-code'); return; }
+  await secSendPassword(pw, '');
+}
+async function secUnlockCode(){
+  if (SEC.busy) return;
+  const el = document.getElementById('sec-code'), code = String(el ? el.value : '').replace(/\D/g, '');
+  if (!SEC.pw) { secGoStep('pw'); return; }
+  if (code.length!==6) { SEC.err = 'The code has 6 digits.'; secRerender(); secFocus('sec-code'); return; }
+  await secSendPassword(SEC.pw, code);
+}
+// The password (and code) go to the passkey function only, which checks them and forgets them.
+async function secSendPassword(pw, code){
+  SEC.busy = true; SEC.err = ''; secRerender();
+  try {
+    const out = await passkeyCall(code ? { action: 'password', password: pw, code } : { action: 'password', password: pw });
+    SEC.busy = false;
+    if (out.ok) { secOpen(out); return; }
+    if (out.needCode) { SEC.pw = pw; SEC.step = 'code'; secRerender(); secFocus('sec-code'); return; }
+    if (out.reason!=='wrong-code') { SEC.pw = ''; SEC.step = 'pw'; }
+    SEC.err = secReasonText(out.reason);
+  } catch (e) { SEC.busy = false; SEC.err = String(e.message || e); }
+  secRerender();
+  secFocus(SEC.step==='code' ? 'sec-code' : 'sec-pw');
+}
+// "Continue with Google": sign in with Google again (same return address as the sign-in page) and unlock on the way back,
+// on the page the lock was opened from, then doing what it was opened for (secReplay).
+async function secUnlockGoogle(){
+  if (SEC.busy) return;
+  const page = UI.tab==='settings' ? settingsPageKey((UI.settings || {}).page) : '';
+  try { sessionStorage.setItem('tgsg_stepup_google', JSON.stringify({ at: Date.now(), page, after: SEC.after ? SEC.afterIntent || null : null })); } catch (e) {}
+  SEC.busy = true; SEC.err = ''; secRerender();
+  const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: 'select_account' } } });
+  if (error) { try { sessionStorage.removeItem('tgsg_stepup_google'); } catch (e) {} SEC.busy = false; SEC.err = error.message; secRerender(); }
+}
+// Back from Google (render, once the app has loaded): back to the page the lock was opened from (Security when it was
+// Security's own lock), unlocked, and what it was opened for is done once (Settings is owners only; Change my password
+// is for everyone).
+function secGoogleFinish(profile){
+  const g = SEC_GOOGLE;
+  if (!g || g.used || !profile) return;
+  const after = g.after;
+  if (profile.role!=='owner' && !(after && after.action==='password')) return;
+  g.used = true;
+  // An owner goes back to the Settings page the lock was opened on (Security for its own lock); a lock opened outside
+  // Settings (Change password from the menu) leaves the tab as it is.
+  if (profile.role==='owner') { const page = after ? after.page || g.page : g.page || 'security'; if (page) { UI.tab = 'settings'; UI.settings = { ...(UI.settings || {}), page, open: true }; } }
+  passkeyCall({ action: 'google' })
+    .then(out => {
+      if (!out.ok) { showToast(secReasonText(out.reason)); render(); return; }
+      if (after) { SEC.after = () => secReplay(after); SEC.afterIntent = after; }
+      secOpen(out);
+    })
+    .catch(e => showToast(String(e.message || e)));
+}
+// What the lock was opened for, done again after the Google round trip (each one checks again that it may run).
+function secReplay(a){
+  if (!a) { render(); return; }
+  if (a.action==='download') { render(); downloadFullBackup(); }
+  else if (a.action==='sens') { if (dataPageOpen() && !readOnlyReason()) DATA_EXPORT.sens = true; render(); }
+  else if (a.action==='email') { render(); if (a.email) saveBackupEmail(a.email); }
+  else if (a.action==='password') { render(); openChangePasswordForm(); }
+  else render();
+}
+
+// The lock card: on the Security page ('page'), or inside the small window ('popup').
+function renderSecurityLock(where){
+  const m = secMethods(), info = pkDeviceInfo(navigator.userAgent, navigator.maxTouchPoints), bio = bioIcoFor(info.kind);
+  let step = SEC.step || m.first;
+  if ((step==='prompt' && !m.passkey) || (step==='google' && !m.google)) step = m.first;
+  const busy = SEC.busy, err = SEC.err, twoStep = secTwoStepOn(), dis = busy ? ' disabled' : '';
+  // Face ID / fingerprint's options are fetched as soon as the lock shows; with no key noted here, the same call tells
+  // whether the server has one for this person (a synced key), and then the lock starts with Face ID / fingerprint.
+  if ((step==='prompt' || (SEC.anyKey===null && SEC.platform!==false)) && !busy && !SEC.authOpts && !SEC_AUTH_LOAD) secPrefetchAuth();
+  const googleBtn = `<button type="button" class="btn google-btn" onclick="secUnlockGoogle()"${dis}>${GOOGLE_G} Continue with Google</button>`;
+  let inner;
+  if (step==='prompt') inner = `<div class="lock-badge">${ico(bio, 30)}</div><h3>Confirm it's you</h3>
+      <p>Security opens with Face ID / fingerprint on this device, so someone holding your unlocked phone or computer can't change it.</p>
+      <button type="button" class="btn primary" onclick="secUnlockPasskey()"${dis}>${busy ? 'Checking…' : `${ico(bio)} Use Face ID / fingerprint`}</button>
+      ${err ? `<div class="lock-err lock-err-c" role="alert">${esc(err)}</div>` : ''}
+      <div class="lock-alt">${m.password ? `<button type="button" class="btn ghost small" onclick="secGoStep('pw')">Use password instead</button>` : ''}${m.google ? googleBtn : ''}</div>`;
+  else if (step==='google') inner = `<div class="lock-badge">${GOOGLE_G.replace('width="18" height="18"', 'width="28" height="28"')}</div><h3>Confirm it's you</h3>
+      <p>Sign in with Google again to open Security. You come straight back here.</p>
+      <button type="button" class="btn google-btn lock-google" onclick="secUnlockGoogle()"${dis}>${GOOGLE_G} ${busy ? 'Opening Google…' : 'Continue with Google'}</button>
+      ${err ? `<div class="lock-err lock-err-c" role="alert">${esc(err)}</div>` : ''}
+      ${m.passkey ? `<div class="lock-alt"><button type="button" class="btn ghost small" onclick="secGoStep('prompt')">Use Face ID / fingerprint instead</button></div>` : ''}`;
+  else if (step==='code') inner = `<div class="lock-badge">${ico('shield', 30)}</div><h3>Type the 6-digit code</h3>
+      <p>From the authenticator app on your phone. Two-step sign-in is on for your account.</p>
+      <div class="pw"><div class="field"><label for="sec-code">Code</label><input id="sec-code" class="code-in" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" onkeydown="if(event.key==='Enter')secUnlockCode()"></div><div class="lock-err" id="sec-code-err" role="alert">${esc(err)}</div></div>
+      <button type="button" class="btn primary" onclick="secUnlockCode()"${dis}>${busy ? 'Checking…' : 'Unlock Security'}</button>
+      <div class="lock-alt"><button type="button" class="btn ghost small" onclick="secGoStep('pw')">Back</button></div>`;
+  else {
+    const foot = [m.passkey ? '' : SEC.platform===false ? 'This device has no Face ID or fingerprint the browser can use.' : 'Face ID / fingerprint isn\'t set up on this device yet. Once you\'re in, you can set it up here.', twoStep ? 'Two-step sign-in is on, so the 6-digit code comes next.' : ''].filter(Boolean).join(' ');
+    inner = `<div class="lock-badge">${ico('key', 30)}</div><h3>Type your password</h3>
+      <p>The same password you sign in to the app with.</p>
+      <div class="pw"><div class="field"><label for="sec-pw">Password</label><input id="sec-pw" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')secUnlockPw()"></div><div class="lock-err" id="sec-pw-err" role="alert">${esc(err)}</div></div>
+      <button type="button" class="btn primary" onclick="secUnlockPw()"${dis}>${busy ? 'Checking…' : twoStep ? 'Continue' : 'Unlock Security'}</button>
+      ${m.passkey || m.google ? `<div class="lock-alt">${m.passkey ? `<button type="button" class="btn ghost small" onclick="secGoStep('prompt')">Use Face ID / fingerprint instead</button>` : ''}${m.google ? googleBtn : ''}</div>` : ''}
+      ${foot ? `<div class="lock-foot">${esc(foot)}</div>` : ''}`;
+  }
+  const card = `<div class="lock-card">${inner}</div>`;
+  return where==='popup' ? card : `<div class="lock-wrap">${card}</div>`;
+}
+// Opening Security: the lock first; the page itself only once the server has unlocked this session.
+function renderSecurityPage(){
+  if (AUTH_PROVIDERS===null) loadAuthProviders().then(() => { if (secPageOpen()) secRerender(); });
+  if (MFA.factors===null) mfaFactors();
+  if (SEC.platform===null) secPlatformCheck();
+  if (!SEC.checked) secStatus();
+  return secUnlocked() ? renderSecurityUnlocked() : renderSecurityLock('page');
+}
+function renderSecurityUnlocked(){
+  const me = getRealProfile(), info = pkDeviceInfo(navigator.userAgent, navigator.maxTouchPoints), bio = bioIcoFor(info.kind);
+  const mine = secLocalKey(), keys = SEC.keys, fb = secGoogleOnly() ? 'asks you to sign in with Google' : 'asks for your password';
+  const done = !!mine && (keys===null || keys.some(k => k.credential_id===mine));
+  const setupRow = SEC.platform===false
+    ? ['Set up Face ID / fingerprint on this device', `This device has no Face ID or fingerprint the browser can use, so Security ${fb} here.`, '']
+    : ['Set up Face ID / fingerprint on this device', done ? 'Done: Security opens with Face ID / fingerprint on this device.' : `Not set up on this device yet, so Security ${fb} here. Each phone or computer is set up once.`,
+      done ? pill('good', 'Set up') : `<button type="button" class="btn small primary" onclick="openPasskeySetup()">${ico(bio)} Set up</button>`];
+  const list = keys===null ? `<div class="pk-row"><span class="hint">Loading…</span></div>`
+    : SEC.keysErr ? `<div class="pk-row"><span class="hint">Could not load: ${esc(SEC.keysErr)}</span></div>`
+    : keys.map(k => {
+      const icon = k.device_kind==='Face ID' || /iPhone|iPad|Android/.test(k.device_name || '') ? 'mobile' : 'laptop', here = !!mine && k.credential_id===mine;
+      const added = k.created_at ? fmtDateYear(connSydDay(Date.parse(k.created_at))) : '—';
+      return `<div class="pk-row"><span class="pk-ic">${ico(icon, 19)}</span><div class="pk-text"><b>${esc(k.device_name || 'A device')}${here ? pill('neutral', 'This device') : ''}</b><span>${esc(k.device_kind || 'Fingerprint')} · added ${esc(added)} · last used ${esc(k.last_used_at ? secWhen(k.last_used_at, Date.now()) : 'not yet')}</span></div><button type="button" class="btn ghost small danger" onclick="removePasskey('${esc(jsStr(k.id))}')">${ico('trash', 14)} Remove</button></div>`;
+    }).join('');
+  const mfaOn = MFA.factors!==null && secTwoStepOn();
+  const signing = setRows([
+    ['Change my password', 'Also what opens Security on a device without Face ID / fingerprint.', `<button class="btn small" onclick="openChangePasswordModal()">Change</button>`],
+    ['Two-step sign-in for your account', MFA.factors===null ? 'Checking…' : mfaOn ? 'On: you give a code from your authenticator app when you sign in, and after your password when Security asks for it.' : 'A 6-digit code from an authenticator app on your phone, as well as the password.', MFA.factors===null ? '' : mfaOn ? `${pill('good', 'On')} <button class="btn small ghost danger" onclick="turnOffMfa()">Turn off</button>` : `<button class="btn small primary" onclick="startMfaEnroll()">Turn on</button>`],
+    ['Sign in with Google', AUTH_PROVIDERS && AUTH_PROVIDERS.google ? 'On: the sign-in page offers "Continue with Google". Only people who already have an account here get in.' : 'Free. It is switched on in Supabase with a Google key; once it is, the sign-in page offers it by itself.', AUTH_PROVIDERS && AUTH_PROVIDERS.google ? pill('good', 'On') : pill('neutral', 'Off')],
+    ['Sign out of every device', 'Your account on every phone and computer, including this one.', `<button class="btn small danger" onclick="signOutEverywhere()">Sign out everywhere</button>`],
+  ]);
+  const showing = me && me.role==='owner' ? setBlock('Showing the app to someone', 'No longer in the main menu.', setRows([
+    ['Presentation mode', PRESENT ? 'On: money shows changed and nothing can be saved, on this device. On now: nothing in the menu shows it, so turn it off here (signing out turns it off too).' : 'For showing the app in a meeting: money shows changed and nothing can be saved.', `${PRESENT ? pill('warn', 'On') : ''}<button class="btn small" onclick="togglePresentationMode()">${PRESENT ? 'Turn off' : 'Turn on'}</button>`],
+    ['View the app as someone else', 'See exactly what Ron or a technician sees. Nothing you do there is saved as them.', `<button class="btn small" onclick="openViewAsModal()">${ico('eye')} Choose a person</button>`],
+  ])) : '';
+  const hist = SEC.hist, n = Array.isArray(hist) ? secRecentCount(hist, Date.now()) : 0;
+  const chips = Array.isArray(hist) ? ['all', ...secHistChips(hist)].map(w => `<button type="button" class="week-chip${SEC.histWho===w ? ' active' : ''}" onclick="secHistWho('${esc(jsStr(w))}')">${esc(w==='all' ? 'Everyone' : String(w).split(' ')[0])}</button>`).join('') : '';
+  const history = `<div class="hist-tools"><input id="sec-hq" placeholder="Search the history" aria-label="Search the history" value="${esc(SEC.histQ)}" oninput="secHistInput(this.value)">${chips ? `<div class="chip-row">${chips}</div>` : ''}</div><div id="sec-hist">${secHistHtml()}</div>`;
+  return `<div class="unlocked-bar"><span>${ico('check')} Unlocked with ${esc(secMethodWord(SEC.method, info.kind))} · locks again in <span id="sec-left" class="num">${secLeft(SEC.until, Date.now())}</span></span><button type="button" class="btn small" onclick="secLockNow()">${ico('lock', 14)} Lock now</button></div>`
+    + setBlock('Face ID / fingerprint', 'What opens this page. Each device you set up is listed here.', setRows([setupRow]) + list)
+    + setBlock('Signing in', '', signing)
+    + showing
+    + setBlock('Settings history', 'Every change on the Settings pages: who and when. Moved here from Data.', history, Array.isArray(hist) ? `<span class="hint">${n} change${n===1 ? '' : 's'} in the last 2 weeks</span>` : '')
+    + `<div class="note-link">The office auto-logout time has moved to <a href="#" onclick="setSettingsPage('people');return false">Settings → People</a>, in each VA's card.</div>`;
+}
+function secHistHtml(){
+  if (SEC.histErr) return `<div class="hist-list"><div class="hist-row"><span></span><span class="hint">Could not load the history: ${esc(SEC.histErr)}</span><button type="button" class="btn small" onclick="secLoadHist()">Try again</button></div></div>`;
+  if (!Array.isArray(SEC.hist)) return `<div class="hist-list"><div class="hist-row"><span></span><span class="hint">Loading…</span><span></span></div></div>`;
+  const rows = settingsHistFilter(SEC.hist, SEC.histQ, SEC.histWho), shown = SEC.histAll ? rows : rows.slice(0, 6), now = Date.now();
+  return `<div class="hist-list">${shown.map(h => {
+      const first = String(h.actor || '?').split(' ')[0] || '?';
+      return `<div class="hist-row"><span class="hist-av" style="--c:${techColor(first)}">${esc(first.slice(0, 1).toUpperCase())}</span><div class="hist-what">${esc(presentText(h.what))}<small>${esc(h.actor)} · ${esc(h.where)}</small></div><span class="hist-when">${esc(secWhen(h.at, now))}</span></div>`;
+    }).join('') || '<div class="hist-row"><span></span><span class="hint">No changes match.</span><span></span></div>'}</div>`
+    + (rows.length > 6 ? `<div class="hist-foot"><button type="button" class="btn small" onclick="secHistToggleAll()">${SEC.histAll ? 'Show fewer' : `Show all ${rows.length}`}</button></div>` : '');
+}
+// Typing in the search redraws only the list, so the field keeps its focus.
+function secHistInput(v){ SEC.histQ = String(v || ''); SEC.histAll = false; const el = document.getElementById('sec-hist'); if (el) el.innerHTML = secHistHtml(); }
+function secHistWho(w){ SEC.histWho = w; SEC.histAll = false; render(); }
+function secHistToggleAll(){ SEC.histAll = !SEC.histAll; const el = document.getElementById('sec-hist'); if (el) el.innerHTML = secHistHtml(); }
+// The keys of the signed-in person (the database shows each person their own only).
+async function secLoadKeys(){
+  const mine = SEC;
+  const { data, error } = await sb.from('passkeys').select('id, credential_id, device_name, device_kind, created_at, last_used_at').order('created_at');
+  if (SEC!==mine) return;
+  if (error) { SEC.keysErr = error.message; SEC.keys = SEC.keys || []; }
+  else {
+    SEC.keys = data || []; SEC.keysErr = '';
+    const here = secLocalKey(); if (here && !SEC.keys.some(k => k.credential_id===here)) secClearLocalKey();   // removed from another device
+  }
+  if (secPageOpen()) render();
+}
+// Settings history, read only while unlocked (the database returns no settings rows otherwise), 1,000 rows a page.
+async function secLoadHist(){
+  const mine = SEC;
+  if (SEC.histErr) { SEC.histErr = ''; SEC.hist = null; if (secPageOpen()) render(); }
+  try {
+    const rows = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await sb.from('activity_log').select('id, at, actor, text, manual').eq('record_kind', 'settings').order('at', { ascending: false }).range(from, from + 999);
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+    if (SEC!==mine) return;
+    SEC.hist = rows.map(r => ({ id: r.id, at: r.at, actor: r.actor || 'Unknown', text: r.text || '', ...settingsHistParts(r.text) }));
+  } catch (e) { if (SEC!==mine) return; SEC.histErr = String(e.message || e); }
+  if (secPageOpen()) render();
+}
+// Set up Face ID / fingerprint on this device: the window, and the key made by the browser.
+let SEC_REG_LOAD = null;
+function secPrefetchReg(){
+  if (SEC_REG_LOAD) return SEC_REG_LOAD;
+  const mine = SEC;
+  SEC_REG_LOAD = passkeyCall({ action: 'reg-options' })
+    .catch(e => ({ ok: false, reason: '', message: String(e.message || e) }))
+    .then(out => { SEC_REG_LOAD = null; if (SEC===mine) SEC.regOpts = out.ok ? { options: out.options, at: Date.now() } : null; return out; });
+  return SEC_REG_LOAD;
+}
+function openPasskeySetup(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (!secUnlocked()) { SEC = secLockedState(); render(); showToast(secReasonText('locked')); return; }
+  const bio = bioIcoFor(pkDeviceInfo(navigator.userAgent, navigator.maxTouchPoints).kind);
+  SEC.regOpts = null;
+  openModal(`
+    <div class="modal-back" onclick="if(event.target===this) closeModal()">
+      <div class="modal" style="max-width:460px">
+        <h2>Set up Face ID / fingerprint on this device</h2>
+        <div class="modal-sub">This device asks for Face ID or your fingerprint once, to save a key for ${esc(productName(brandSource()))}. The key never leaves the device, and the server checks it every time Security opens.</div>
+        <div class="set-note">${ico('alert', 16)}<span>Do this on each phone or computer you use. A device without it asks for your password instead, so you are never locked out.</span></div>
+        <div id="modal-error"></div>
+        <div class="modal-acts"><button type="button" class="btn" onclick="closeModal()">Cancel</button><button type="button" class="btn primary" id="pk-go" onclick="secRegisterPasskey()">${ico(bio)} Continue</button></div>
+      </div>
+    </div>`);
+  secPrefetchReg();
+}
+async function secRegisterPasskey(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (secRegisterPasskey.busy) return;
+  const r0 = SEC.regOpts, pre = r0 && r0.options && Date.now() - r0.at < 4 * 60e3 ? r0.options : null;
+  SEC.regOpts = null; secRegisterPasskey.busy = true;
+  const btn = document.getElementById('pk-go'), label = btn ? btn.innerHTML : '';
+  modalError('');
+  try {
+    let pending = pre ? navigator.credentials.create({ publicKey: pkCreationOptions(pre) }) : null;   // straight from the tap
+    if (btn) { btn.disabled = true; btn.textContent = 'Waiting…'; }
+    if (!pending) {
+      const o = await (SEC_REG_LOAD || secPrefetchReg());
+      SEC.regOpts = null;
+      if (!o.ok) { const er = new Error(o.message || secReasonText(o.reason)); er.reason = o.reason; throw er; }
+      pending = navigator.credentials.create({ publicKey: pkCreationOptions(o.options) });
+    }
+    const cred = await pending;
+    const info = pkDeviceInfo(navigator.userAgent, navigator.maxTouchPoints), first = String((getRealProfile() || {}).fullName || '').trim().split(' ')[0];
+    const out = await passkeyCall({ action: 'reg-verify', response: pkAttestationJSON(cred), deviceName: first ? `${first}'s ${info.name}` : info.name, deviceKind: info.kind });
+    if (!out.ok) { const er = new Error(secReasonText(out.reason)); er.reason = out.reason; throw er; }
+    secSetLocalKey(out.passkey.credential_id);
+    secRegisterPasskey.busy = false;
+    closeModal();
+    showToast('Face ID / fingerprint is set up on this device');
+    logSettingsActivity((getRealProfile() || {}).fullName || 'Unknown', `Security: Face ID / fingerprint added on ${out.passkey.device_name}`);
+    secLoadKeys(); render();
+    return;
+  } catch (e) {
+    secRegisterPasskey.busy = false;
+    if (e.reason==='locked') { closeModal(); SEC = secLockedState(); render(); showToast(secReasonText('locked')); return; }
+    if (e.name==='InvalidStateError') {
+      // This device already holds one of your keys (synced from another device, or this browser forgot it made it):
+      // use it here instead. The next tap is Face ID / fingerprint with that key (a fresh tap: Safari needs one).
+      modalError('Face ID / fingerprint is already saved on this device (it came with your Apple or Google account). Tap Continue to use it here.');
+      if (btn && document.body.contains(btn)) { btn.disabled = false; btn.innerHTML = label; btn.setAttribute('onclick', 'secAdoptPasskey()'); }
+      secPrefetchAuth();
+      return;
+    }
+    if (e.reason==='already') modalError(secReasonText('already'));
+    else if (secCancelledText(e)) modalError('Face ID / fingerprint was cancelled. Try again.');
+    else modalError(e.reason ? secReasonText(e.reason) : String(e.message || e));
+    if (btn && document.body.contains(btn)) { btn.disabled = false; btn.innerHTML = label; }
+    if (document.getElementById('pk-go')) secPrefetchReg();   // fresh options for the next tap
+  }
+}
+// "Use it here": Face ID / fingerprint with the key this device already holds; the server checks it (and the 30 minutes
+// start again), and it becomes this device's key.
+async function secAdoptPasskey(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (secAdoptPasskey.busy) return;
+  const a = SEC.authOpts, pre = a && a.options && Date.now() - a.at < 4 * 60e3 ? a.options : null;
+  SEC.authOpts = null; secAdoptPasskey.busy = true;
+  const btn = document.getElementById('pk-go'), label = btn ? btn.innerHTML : '';
+  modalError('');
+  try {
+    let pending = pre ? navigator.credentials.get({ publicKey: pkRequestOptions(pre) }) : null;   // straight from the tap
+    if (btn) { btn.disabled = true; btn.textContent = 'Waiting…'; }
+    if (!pending) {
+      const o = await (SEC_AUTH_LOAD || secPrefetchAuth());
+      SEC.authOpts = null;
+      if (!o.ok) { const er = new Error(o.message || secReasonText(o.reason)); er.reason = o.reason; throw er; }
+      pending = navigator.credentials.get({ publicKey: pkRequestOptions(o.options) });
+    }
+    const cred = await pending;
+    const out = await passkeyCall({ action: 'auth-verify', response: pkAssertionJSON(cred) });
+    if (!out.ok) { const er = new Error(secReasonText(out.reason)); er.reason = out.reason; throw er; }
+    secKeepKeyHere(cred);
+    SEC.until = secUntil(out); SEC.method = out.method || SEC.method; secStartTimer();
+    secAdoptPasskey.busy = false;
+    closeModal();
+    showToast('Face ID / fingerprint works on this device');
+    secLoadKeys(); render();
+  } catch (e) {
+    secAdoptPasskey.busy = false;
+    modalError(secCancelledText(e) ? 'Face ID / fingerprint was cancelled. Try again.' : e.reason ? secReasonText(e.reason) : String(e.message || e));
+    if (btn && document.body.contains(btn)) { btn.disabled = false; btn.innerHTML = label; }
+    if (document.getElementById('pk-go')) secPrefetchAuth();   // fresh options for the next tap
+  }
+}
+function removePasskey(id){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const k = (SEC.keys || []).find(x => x.id===id); if (!k) return;
+  const here = !!secLocalKey() && k.credential_id===secLocalKey(), g = secGoogleOnly();
+  const msg = here ? (g ? 'This device will ask you to sign in with Google to open Security instead.' : 'This device will ask for your password to open Security instead.')
+    : (g ? `${k.device_name || 'That device'} will ask to sign in with Google to open Security instead.` : `${k.device_name || 'That device'} will ask for the password to open Security instead.`);
+  confirmAction(msg, async () => {
+    const { data, error } = await sb.from('passkeys').delete().eq('id', id).select('id');
+    if (error) { showToast('Not removed: ' + error.message); return; }
+    if (!data || !data.length) {   // the database refused: Security is locked on the server (or it was already removed)
+      const st = await passkeyCall({ action: 'status' }).catch(() => null);
+      if (st && st.ok && st.until) { showToast('Already removed'); secLoadKeys(); }
+      else { SEC = secLockedState(); render(); showToast(secReasonText('locked')); }
+      return;
+    }
+    if (here) secClearLocalKey();
+    showToast('Removed');
+    logSettingsActivity((getRealProfile() || {}).fullName || 'Unknown', `Security: Face ID / fingerprint removed from ${k.device_name || 'a device'}`);
+    secLoadKeys();
+  }, { title: 'Remove Face ID / fingerprint?', confirmLabel: 'Remove' });
+}
+// For a download with sensitive details (M6-1, e.g. Export everything): the same lock in a small window; then() runs once
+// this session is unlocked (at once when it already is).
+// intent ({ action, page, email }, see SEC_INTENTS) is what is done again after "Continue with Google", which leaves the page.
+async function secEnsureUnlocked(why, then, intent){
+  if (!SEC.checked) await secStatus();
+  if (secUnlocked()) { then(); return; }
+  if (AUTH_PROVIDERS===null) loadAuthProviders().then(() => secRerender());
+  if (MFA.factors===null) mfaFactors();
+  if (SEC.platform===null) secPlatformCheck();
+  SEC.after = then; SEC.afterIntent = intent && SEC_INTENTS.includes(intent.action) ? intent : null; SEC.step = null; SEC.err = ''; SEC.pw = '';
+  openPopup(`<h3 style="margin:0 0 6px">${esc(why)}</h3><div id="sec-lock-pop">${renderSecurityLock('popup')}</div>
+    <div class="modal-acts"><button type="button" class="btn ghost" onclick="secCancelPop()">Cancel</button></div>`);
+}
+function secCancelPop(){ SEC.after = null; SEC.afterIntent = null; SEC.step = null; SEC.err = ''; SEC.pw = ''; SEC.busy = false; closePopup(); }
 function signOutEverywhere(){
   confirmAction('Sign out of every device, including this one?', async () => {
     try { await sb.auth.signOut({ scope: 'global' }); } catch (e) {}
@@ -15807,12 +17195,14 @@ function setSettingsPage(id){
     dropBrandTry();   // a colour tried on Look and branding and not saved never outlives the page
     UI.settings = UI.settings || {}; UI.settings.page = id; UI.settings.open = true; UI.settings.conn = null;
     if (id!=='people') { PEOPLE_UI.sel = null; PEOPLE_UI.draft = null; }
+    if (id!=='data') DATA_EXPORT.sens = false;   // the sensitive tick never outlives the Data page
+    else if (!DATA_EXPORT.countsBusy) DATA_EXPORT.counts = null;   // the card counts are read again each time Data opens
     render();
     if (isPhoneWidth()) window.scrollTo(0, 0);
   };
   if (id!=='people') guardPeoplePay(go); else go();
 }
-function closeSettingsPage(){ dropBrandTry(); UI.settings.open = false; render(); window.scrollTo(0, 0); }
+function closeSettingsPage(){ dropBrandTry(); DATA_EXPORT.sens = false; UI.settings.open = false; render(); window.scrollTo(0, 0); }
 function filterSettingsNav(q){
   const t = String(q || '').toLowerCase().trim();
   document.querySelectorAll('#content .set-link').forEach(b => { b.hidden = !!t && !b.dataset.search.includes(t); });
@@ -16124,11 +17514,10 @@ function vaLogOut(){ if (readOnlyReason()) { showToast(readOnlyReason()); return
 /* ── settings activity log — permission/business-rule/working-day changes (no single record to attach to) ── */
 function logSettingsActivity(actor, text){
   if (!STATE.data.settingsActivityLog) STATE.data.settingsActivityLog = [];
-  STATE.data.settingsActivityLog.push({ id: uid(), at: new Date().toISOString(), actor, text });
+  const entry = { id: uid(), at: new Date().toISOString(), actor, text };
+  STATE.data.settingsActivityLog.push(entry);
+  if (Array.isArray(SEC.hist)) SEC.hist.unshift({ ...entry, ...settingsHistParts(text) });   // the unlocked Security page shows it at once
   db.activityLog.insert('settings', 'global', actor, text);
-}
-function openSettingsActivityModal(){
-  openRecordActivityModal('settings', 'global', 'Settings Activity', 'Permission and business-rule changes, plus your own notes');
 }
 function togglePermission(profileId, section, value){
   if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
@@ -16653,7 +18042,11 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   if (UI.tab==='finance') UI.tab = 'payroll';   // Financial Summary was removed (6 Oct): its technician part lives in Payroll
   // Opened from a phone notification (?tab=payroll&week=…, ?tab=settings&page=…): go there once.
   if (!START_LINK.used && START_LINK.tab) { START_LINK.used = true; UI.tab = START_LINK.tab; if (START_LINK.week) { UI.payroll.mode = 'week'; UI.payroll.week = START_LINK.week; } if (START_LINK.page && START_LINK.tab==='settings') UI.settings = { ...(UI.settings || {}), page: START_LINK.page, open: true }; }
+  // Back from "Continue with Google" on Security's lock: open Security and unlock it (once).
+  secGoogleFinish(profile);
   if (!UI.tab || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);
+  // The sensitive tick never outlives the Data page, whichever way it was left (the menu, a link, a notification).
+  if (DATA_EXPORT.sens && !dataPageOpen()) DATA_EXPORT.sens = false;
   // board guard — a technician only ever looks at his own tasks, whatever UI.tasks.board was last set to (e.g. left over
   // from another profile in this same browser tab).
   if (profile.role==='technician') UI.tasks.board = 'me';

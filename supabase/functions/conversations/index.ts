@@ -12,7 +12,9 @@
 //   daily_report  Ron's end-of-day report (sent when he logs out) → WhatsApp to the owners, or by email until WhatsApp is on.
 // Twilio (signed webhooks): sms_in (a customer's text, STOP/START), sms_status (delivery).
 // The info@ Apps Script, every minute: alerts — the new-chat emails, handed only to the verified info@ mailbox, which
-//   sends them to itself (so the office gets the email within a minute, from its own address).
+//   sends them to itself (so the office gets the email within a minute, from its own address). Also the queued emails
+//   of lead_messages, and (since 14 Oct) the weekly backup email of the backup function (backup_runs, id 'b:<run id>',
+//   to the address chosen in Settings → Data, with its 7-day download links).
 // A scheduler every minute: tick — the automatic text when Ron hasn't answered a chat in 5 minutes:
 //   • office open (Mon–Fri 08:00–17:00 Sydney, no public holidays — Ofek 3/10): a human "I'm on another call" text;
 //   • office closed: "I'll call you first thing when our office opens".
@@ -510,17 +512,28 @@ export async function alerts(sb: any, body: any, nowMs: number) {
   const at = new Date(nowMs).toISOString();
   for (const id of sent) {
     if (id.startsWith("m:")) await sb.from("lead_messages").update({ status: "sent" }).eq("id", id.slice(2)).eq("status", "queued");
+    else if (id.startsWith("b:")) await sb.from("backup_runs").update({ email_status: "sent", email_sent_at: at }).eq("id", id.slice(2)).eq("email_status", "queued");
     else await sb.from("chat_sessions").update({ alert_sent_at: at }).eq("id", id).is("alert_sent_at", null);
   }
   const since = new Date(nowMs - 24 * 3600 * 1000).toISOString();
   const { data } = await sb.from("chat_sessions").select("id, alert_subject, alert_body").is("alert_sent_at", null).gte("created_at", since).order("created_at").limit(20);
   const { data: queued } = await sb.from("lead_messages").select("id, email, subject, body, author").eq("channel", "email").eq("status", "queued").gte("at", since).order("at").limit(20);
   const sign = (m: { author?: string; email?: string }) => m.email === MAILBOX ? "" : `\n\n${String(m.author || "Ron").split(" ")[0]}\nThe Guys Service Group\n1300 380 090`;
+  // The weekly backup emails (backup function): owners-only rows, sent as written (no signature). Before the backup SQL
+  // is run the table doesn't exist yet: then there are simply none.
+  // deno-lint-ignore no-explicit-any
+  let backups: any[] = [];
+  try {
+    const r = await sb.from("backup_runs").select("id, email_to, email_subject, email_body").eq("email_status", "queued").gte("email_queued_at", new Date(nowMs - 48 * 3600 * 1000).toISOString()).order("email_queued_at").limit(5);
+    backups = r.error ? [] : (r.data || []);
+  } catch { backups = []; }
   return { ok: true, emails: [
     // deno-lint-ignore no-explicit-any
     ...(data || []).filter((r: any) => r.alert_subject).map((r: any) => ({ id: r.id, to: MAILBOX, subject: r.alert_subject, text: r.alert_body })),
     // deno-lint-ignore no-explicit-any
     ...(queued || []).filter((m: any) => m.email).map((m: any) => ({ id: "m:" + m.id, to: m.email, subject: m.subject || "The Guys Service Group", text: m.body + sign(m) })),
+    // deno-lint-ignore no-explicit-any
+    ...backups.filter((b: any) => b.email_to && b.email_body).map((b: any) => ({ id: "b:" + b.id, to: b.email_to, subject: b.email_subject || "Weekly backup", text: b.email_body })),
   ] };
 }
 

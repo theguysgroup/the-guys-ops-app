@@ -98,6 +98,15 @@ const DECLS = [
   'freshTone', 'CONN_HOW', 'CONN_HOW_ORDER', 'CONN_LATE_HOURS', 'CONN_ACCOUNTS', 'CONNECTORS', 'CONN_ADDONS', 'CONN_GUIDE_LINKS', 'connCfgOf', 'connItemOn', 'connAccountOn', 'connPatched',
   'connSourceDef', 'connDefs', 'connState', 'connIsLive', 'SOURCE_HOW', 'sourceRowInfo', 'connFreshItems', 'connOldest', 'connTone', 'connGhlArchiveText', 'connStepsFor', 'connNextStep', 'connHows', 'connMatches',
   'connStopsAll', 'connPendingReaders', 'fmtAdsAccount', 'connDayName', 'connSydDay', 'connWhen', 'connAddonsShown', 'CONN_LOG_SRC', 'connLogRows',
+  // Settings → Security: Face ID / fingerprint (passkeys), the 30-minute lock, Settings history (14 Oct)
+  'CAT_NAMES', 'setBlock', 'SEC_LOCK_MINUTES', 'bytesToB64url', 'b64urlToBytes', 'pkCreationOptions', 'pkRequestOptions', 'pkAttestationJSON', 'pkAssertionJSON', 'pkDeviceInfo', 'bioIcoFor', 'secMethodWord',
+  'secUnlockMethods', 'lockedBackupLinkOpen', 'SEC_INTENTS', 'secGoogleParse', 'PAY_SETTING_NAMES', 'secLeft', 'secWhen', 'settingsHistParts', 'settingsHistFilter', 'secHistChips', 'secRecentCount', 'secReasonText',
+  // Settings → Data: the full backup, the weekly locked backup and "Open a locked backup" (14 Oct)
+  'BACKUP_DAY_ORDER', 'BACKUP_TABLE_LABELS', 'BACKUP_BUCKET_LABELS', 'backupEmailOk', 'backupDayLabel', 'backupWhenText', 'backupDateText', 'backupSizeText', 'backupStatusView',
+  'backupParseHeader', 'backupReadPack', 'backupDecrypt', 'backupGunzipText', 'backupZipPath', 'backupReasonText',
+  // Settings → Data: Export to Excel (14 Oct)
+  'pill', 'jsStr', 'EXPORT_AREAS', 'exportDefaultSelection', 'EXPORT_SECRET_COL', 'EXPORT_SENS_COL', 'exportHiddenColumn', 'EXPORT_UPPER_WORDS', 'exportHeader', 'EXPORT_CELL_MAX', 'EXPORT_FILE_TEXT', 'exportCell',
+  'exportActivityText', 'exportSheetAoa', 'exportColWidths', 'exportSheetName', 'settingsExportRows', 'payRateRows', 'ownerSalaryRows', 'countWord', 'exportCountText', 'exportFileName', 'exportSummaryHtml', 'exportFetchAll', 'exportCardHtml',
 ];
 
 function extractDecl(source, name){
@@ -112,7 +121,7 @@ function extractDecl(source, name){
       else if (source[i] === '}') depth--;
       i++;
     }
-    return source.slice(fnIdx, i);
+    return source.slice(source.slice(fnIdx - 6, fnIdx)==='async ' ? fnIdx - 6 : fnIdx, i);   // keeps "async" on an async function
   }
   // const NAME = <expr>; — scan for the statement-ending ";" outside any (), [], {}
   let i = constIdx, depth = 0;
@@ -1693,8 +1702,9 @@ function testSettingsRound2Small(sb){
   const shell = extractDecl(script, 'renderShell');
   assertEqual([shell.includes('openViewAsModal()'), shell.includes('exitViewAs()'), shell.includes('togglePresentationMode'), shell.includes('Presentation mode: ON')],
     [false, true, false, false], 'main menu (item 4): no View as start, no Presentation mode at all (it would show the viewer of a demo); View as keeps its way back out');
-  assertEqual(extractDecl(script, 'renderSecurityPage').includes('togglePresentationMode()'), true, 'Settings → Security still turns Presentation mode on and off');
-  const sec = extractDecl(script, 'renderSecurityPage');
+  // Since 14 Oct (Face ID / fingerprint) these sit on the unlocked Security page, behind the lock.
+  assertEqual(extractDecl(script, 'renderSecurityUnlocked').includes('togglePresentationMode()'), true, 'Settings → Security still turns Presentation mode on and off');
+  const sec = extractDecl(script, 'renderSecurityUnlocked');
   assertEqual([sec.includes('togglePresentationMode()'), sec.includes('openViewAsModal()'), sec.includes('startMfaEnroll()'), sec.includes('turnOffMfa()')],
     [true, true, true, true], 'Security keeps Showing the app and the per-person two-step sign-in');
   const enroll = extractDecl(script, 'startMfaEnroll');
@@ -1911,6 +1921,334 @@ function testPeopleTabs(sb){
   assertEqual((html2.match(/db\.commissionRates\.set\(/g) || []).length, 2, 'commission rates are written in two places only: one rate on the Pay tab, and the move on a rename');
 }
 
+function testSecurityFaceId(sb){
+  console.log('\nSettings → Security: Face ID / fingerprint and the 30-minute lock (14 Oct)');
+  const fnSrc = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'passkey', 'index.ts'), 'utf8');
+  const stepUp = /export const STEP_UP_MINUTES = (\d+);/.exec(fnSrc);
+  assertEqual([sb.SEC_LOCK_MINUTES, stepUp && Number(stepUp[1])], [30, 30], 'lock: the app re-locks after 30 minutes, the same as the server (M6-5), so both lock together');
+  assertEqual((fnSrc.match(/console\.[^\n]*/g) || []), ['console.error("passkey failed:", (e as Error).message);'], 'passkey function: its only log line prints the error message, never the request (which can hold the password)');
+  assertEqual(/@simplewebauthn\/server@13\.3\.3"/.test(fnSrc) && /RP_ID = "theguysgroup\.github\.io"/.test(fnSrc), true, 'passkey function: the WebAuthn library is pinned to 13.3.3; the site is the app\'s');
+
+  // base64url: the same as the server's (and Node's own), with no atob / btoa / TextEncoder.
+  const B = sb.bytesToB64url, D = sb.b64urlToBytes, U = a => Array.from(a);
+  const all = Array.from({ length: 256 }, (_, i) => i);
+  assertEqual(U(D(B(new Uint8Array(all)))), all, 'b64url: a round trip of every byte value');
+  assertEqual([B(new Uint8Array([104, 101, 108, 108, 111])), B(new Uint8Array([251, 255])), B(new Uint8Array([])), B(new Uint8Array([1, 2, 3]).buffer), B(new Uint8Array([9, 1, 2, 3]).subarray(1)), B(undefined)],
+    ['aGVsbG8', '-_8', '', 'AQID', 'AQID', ''], 'bytesToB64url: the server\'s vectors, an ArrayBuffer, a part of a bigger buffer, nothing');
+  assertEqual([U(D('aGVsbG8')), U(D('-_8')), U(D('aGVsbG8=')), U(D('+/8')), U(D(''))], [[104, 101, 108, 108, 111], [251, 255], [104, 101, 108, 108, 111], [251, 255], []], 'b64urlToBytes: the vectors back; padding and plain base64 are read too');
+  let same = true; for (let n = 0; n < 40; n++) { const a = Array.from({ length: n }, (_, i) => (i * 37 + n * 11) % 256); if (B(new Uint8Array(a)) !== Buffer.from(a).toString('base64url')) same = false; }
+  assertEqual(same, true, 'bytesToB64url: the same as Node\'s base64url for every length 0..39');
+
+  // The server's JSON options → what the browser wants (bytes), everything else untouched.
+  const isBytes = x => Object.prototype.toString.call(x)==='[object Uint8Array]';
+  const regJson = { challenge: 'AQID', rp: { id: 'theguysgroup.github.io', name: 'OPS Service' }, user: { id: 'aGVsbG8', name: 'o@x.com', displayName: 'Ofek' }, pubKeyCredParams: [{ alg: -7, type: 'public-key' }], excludeCredentials: [{ id: '-_8', type: 'public-key', transports: ['internal'] }], authenticatorSelection: { userVerification: 'required' }, timeout: 60000 };
+  const co = sb.pkCreationOptions(regJson);
+  assertEqual([isBytes(co.challenge), U(co.challenge), isBytes(co.user.id), U(co.user.id), co.user.name, co.user.displayName, isBytes(co.excludeCredentials[0].id), U(co.excludeCredentials[0].id), co.excludeCredentials[0].transports, co.rp, co.pubKeyCredParams, co.authenticatorSelection, co.timeout],
+    [true, [1, 2, 3], true, [104, 101, 108, 108, 111], 'o@x.com', 'Ofek', true, [251, 255], ['internal'], regJson.rp, regJson.pubKeyCredParams, regJson.authenticatorSelection, 60000], 'pkCreationOptions: the challenge, user id and key ids become bytes; the rest stays');
+  assertEqual([regJson.challenge, regJson.user.id, regJson.excludeCredentials[0].id], ['AQID', 'aGVsbG8', '-_8'], 'pkCreationOptions: the server\'s options are not changed');
+  const ro = sb.pkRequestOptions({ challenge: 'AQID', rpId: 'theguysgroup.github.io', allowCredentials: [{ id: '-_8', type: 'public-key', transports: ['internal', 'hybrid'] }], userVerification: 'required', timeout: 60000 });
+  assertEqual([U(ro.challenge), U(ro.allowCredentials[0].id), ro.allowCredentials[0].transports, ro.rpId, ro.userVerification], [[1, 2, 3], [251, 255], ['internal', 'hybrid'], 'theguysgroup.github.io', 'required'], 'pkRequestOptions: the challenge and key ids become bytes');
+  assertEqual(sb.pkRequestOptions({ challenge: 'AQID' }).allowCredentials, undefined, 'pkRequestOptions: no key list stays no key list');
+
+  // What the browser gives back → JSON for the server.
+  const buf = a => new Uint8Array(a).buffer;
+  const made = { id: 'cid', rawId: buf([1, 2, 3]), type: 'public-key', authenticatorAttachment: 'platform', response: { clientDataJSON: buf([104, 101, 108, 108, 111]), attestationObject: buf([251, 255]), getTransports(){ return ['internal', 'hybrid']; } }, getClientExtensionResults(){ return { credProps: { rk: true } }; } };
+  assertEqual(sb.pkAttestationJSON(made), { id: 'cid', rawId: 'AQID', type: 'public-key', response: { clientDataJSON: 'aGVsbG8', attestationObject: '-_8', transports: ['internal', 'hybrid'] }, clientExtensionResults: { credProps: { rk: true } }, authenticatorAttachment: 'platform' }, 'pkAttestationJSON: every part as base64url, with its transports');
+  const bare = sb.pkAttestationJSON({ id: 'c2', rawId: buf([1]), type: 'public-key', response: { clientDataJSON: buf([]), attestationObject: buf([]) } });
+  assertEqual([bare.response.transports, bare.clientExtensionResults, bare.authenticatorAttachment], [[], {}, undefined], 'pkAttestationJSON: a browser without getTransports / extensions still works');
+  const signed = { id: 'cid', rawId: buf([1, 2, 3]), type: 'public-key', response: { clientDataJSON: buf([104, 101, 108, 108, 111]), authenticatorData: buf([9]), signature: buf([251, 255]), userHandle: buf([104, 101, 108, 108, 111]) }, getClientExtensionResults(){ return {}; } };
+  assertEqual(sb.pkAssertionJSON(signed), { id: 'cid', rawId: 'AQID', type: 'public-key', response: { clientDataJSON: 'aGVsbG8', authenticatorData: 'CQ', signature: '-_8', userHandle: 'aGVsbG8' }, clientExtensionResults: {} }, 'pkAssertionJSON: every part as base64url');
+  const noHandle = sb.pkAssertionJSON({ ...signed, response: { ...signed.response, userHandle: null }, getClientExtensionResults: undefined });
+  assertEqual(['userHandle' in noHandle.response, noHandle.response.userHandle, noHandle.clientExtensionResults], [true, undefined, {}], 'pkAssertionJSON: no user handle → left out; no extensions → {}');
+
+  // This device.
+  const I = (ua, t) => { const d = sb.pkDeviceInfo(ua, t); return [d.name, d.kind, d.icon]; };
+  assertEqual([
+    I('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1', 5),
+    I('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15', 5),
+    I('Mozilla/5.0 (iPad; CPU OS 16_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1', 5),
+    I('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36', 0),
+    I('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0', 0),
+    I('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36', 5),
+    I('Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36', 5),
+    I('Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36', 0),
+    I('curl/8.4', 0), I(undefined, undefined),
+  ], [['iPhone', 'Face ID', 'mobile'], ['iPad', 'Face ID', 'mobile'], ['iPad', 'Face ID', 'mobile'], ['Mac', 'Fingerprint', 'laptop'], ['Windows computer', 'Windows Hello', 'laptop'], ['Android phone', 'Fingerprint', 'mobile'], ['Android tablet', 'Fingerprint', 'mobile'], ['Chromebook', 'Fingerprint', 'laptop'], ['This device', 'Fingerprint', 'laptop'], ['This device', 'Fingerprint', 'laptop']],
+    'pkDeviceInfo: iPhone, an iPad (also one that says Macintosh), a Mac, Windows, Android phone and tablet, a Chromebook, anything else');
+  assertEqual([sb.bioIcoFor('Face ID'), sb.bioIcoFor('Fingerprint'), sb.bioIcoFor('Windows Hello')], ['face', 'finger', 'finger'], 'bioIcoFor: a face for Face ID, a fingerprint otherwise');
+  assertEqual([sb.secMethodWord('passkey', 'Face ID'), sb.secMethodWord('passkey', 'Fingerprint'), sb.secMethodWord('passkey', 'Windows Hello'), sb.secMethodWord('password', 'Face ID'), sb.secMethodWord('password+code', 'Face ID'), sb.secMethodWord('google', 'Face ID'), sb.secMethodWord('', 'Face ID')],
+    ['Face ID', 'your fingerprint', 'Windows Hello', 'your password', 'your password and code', 'Google', 'your password'], 'secMethodWord: "Unlocked with …" for every way in');
+
+  // Which ways the lock offers.
+  const M = (providers, hasKey, googleOn, webauthn) => { const m = sb.secUnlockMethods({ providers, hasKey, googleOn, webauthn }); return [m.first, m.passkey, m.password, m.google]; };
+  assertEqual([M(['email'], true, false, true), M(['email'], false, false, true), M(['google'], false, true, true), M(['google'], false, false, true), M(['email', 'google'], false, true, true), M(['email', 'google'], true, true, true), M(['email'], true, false, false), M([], false, false, true), M(undefined, true, false, true)],
+    [['prompt', true, true, false], ['pw', false, true, false], ['google', false, false, true], ['pw', false, false, false], ['pw', false, true, false], ['prompt', true, true, false], ['pw', false, true, false], ['pw', false, true, false], ['prompt', true, true, false]],
+    'secUnlockMethods: a set-up device starts with Face ID; no key → password; Google-only → Google; a password AND Google → never the Google way (M6-3: one tap on a phone signed in to Google); no WebAuthn → password');
+
+  // "Continue with Google" leaves the page: what the lock was opened for comes back (10 minutes at most).
+  const GP = (v, now) => sb.secGoogleParse(typeof v === 'string' ? v : JSON.stringify(v), now);
+  const T = 1_800_000_000_000;
+  assertEqual([GP({ at: T - 1000, page: 'data', after: { action: 'download', page: 'data' } }, T), GP({ at: T - 1000, page: 'data', after: { action: 'email', page: 'data', email: 'me@x.com' } }, T), GP({ at: T - 1000, page: 'security' }, T), GP(String(T - 5000), T)],
+    [{ used: false, page: 'data', after: { action: 'download', page: 'data', email: '' } }, { used: false, page: 'data', after: { action: 'email', page: 'data', email: 'me@x.com' } }, { used: false, page: 'security', after: null }, { used: false, page: '', after: null }],
+    'secGoogleParse: the page and the action come back (also the first build\'s plain time)');
+  assertEqual([GP({ at: T - 10 * 60e3 }, T), GP({ at: T + 5 * 60e3 }, T), GP('junk', T), GP('', T), GP('[1]', T), GP({ at: T - 1000, page: '<img>', after: { action: 'delete-all', page: 'data' } }, T)],
+    [null, null, null, null, null, { used: false, page: '', after: null }], 'secGoogleParse: too old, in the future, junk → nothing; an unknown action or a strange page is dropped');
+  assertEqual(sb.SEC_INTENTS, ['download', 'sens', 'email', 'password'], 'SEC_INTENTS: the four things a lock is opened for');
+  assertEqual(['?open=backup', '?tab=settings&open=backup', '?open=Backup', '?open=', '', undefined].map(sb.lockedBackupLinkOpen), [true, true, false, false, false, false], 'lockedBackupLinkOpen: the weekly email\'s link (?open=backup) only');
+  {
+    const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    assertEqual([extractDecl(script, 'renderLogin').includes('onclick="openLockedBackup()"'), /if \(lockedBackupLinkOpen\(location\.search\)\) window\.addEventListener\('load'/.test(script), ['openLockedBackup', 'openLockedBackupFiles', 'renderLockedResult'].some(n => /\bsb\.|backupFetch|passkeyCall|getSession/.test(extractDecl(script, n)))], [true, true, false], 'Open a locked backup works without signing in: on the sign-in page and from the email link, and it never calls Supabase');
+  }
+  {
+    const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const meth = extractDecl(script, 'secMethods'), unl = extractDecl(script, 'secUnlockPasskey'), reg = extractDecl(script, 'secRegisterPasskey'), fin = extractDecl(script, 'secGoogleFinish'), goo = extractDecl(script, 'secUnlockGoogle');
+    assertEqual([meth.includes("SEC.anyKey===true"), meth.includes("secProviders().includes('google')"), unl.includes('secKeepKeyHere(cred); secOpen(out)'), extractDecl(script, 'secKeepKeyHere').includes("authenticatorAttachment!=='cross-platform'")], [true, true, true, true], 'Face ID is offered when the server has a key (a synced one too); a Google sign-in proves Google works; a key that worked here becomes this device\'s key');
+    assertEqual([reg.includes("e.name==='InvalidStateError'") && reg.includes("secAdoptPasskey()"), extractDecl(script, 'secAdoptPasskey').includes("secKeepKeyHere(cred)")], [true, true], 'setting up on a device that already holds the key uses that key instead of failing');
+    assertEqual([goo.includes("after: SEC.after ? SEC.afterIntent || null : null"), fin.includes("after ? after.page || g.page : g.page || 'security'"), fin.includes('secReplay(after)')], [true, true, true], 'back from Google: the page the lock was opened from, and what it was opened for is done');
+    const cp = extractDecl(script, 'openChangePasswordModal'), dcp = extractDecl(script, 'doChangePassword');
+    assertEqual([cp.includes("secEnsureUnlocked('Change my password', openChangePasswordForm"), dcp.indexOf('secUnlocked()') < dcp.indexOf('updateUser'), dcp.includes('updateUser')], [true, true, true], 'Change password asks for the Security step-up first (the lock can\'t be passed by setting a new password)');
+  }
+
+  assertEqual([sb.secLeft(30 * 60e3, 0), sb.secLeft(61e3, 0), sb.secLeft(5e3, 0), sb.secLeft(0, 1000), sb.secLeft(29 * 60e3 + 59400, 0)], ['30:00', '1:01', '0:05', '0:00', '29:59'], 'secLeft: m:ss, never below 0:00');
+  const now = Date.parse('2026-10-14T08:00:00Z');   // 7 pm in Sydney (daylight time, UTC+11)
+  assertEqual([sb.secWhen('2026-10-14T05:20:00Z', now), sb.secWhen('2026-10-13T05:20:00Z', now), sb.secWhen('2026-10-12T09:40:00Z', now), sb.secWhen('2026-10-13T14:30:00Z', now), sb.secWhen('2025-12-31T01:00:00Z', now), sb.secWhen('', now), sb.secWhen('junk', now)],
+    ['Today, 4:20 pm', 'Yesterday, 4:20 pm', '12 Oct, 8:40 pm', 'Today, 1:30 am', '31 Dec 2025, 12:00 pm', '', ''], 'secWhen: today, yesterday, an older day, a UTC date that is already the next day in Sydney, another year');
+
+  // Settings history: where, what, search, people.
+  const P = t => { const x = sb.settingsHistParts(t); return [x.where, x.what]; };
+  assertEqual([P('Pipeline stages: Quotes idle for 7 days'), P('People: invited Ron (VA)'), P('Granted "Payroll" access for Ron'), P('Note: call the bank'), P('Look and branding: background colour #5b6b82'), P('Security: Face ID / fingerprint added on Ofek\'s Mac'), P('Google review requests: asking 2 days after the job'), P('Role defaults: Ron gets Jobs'), P(null), P('Lead sources:no space')],
+    [['Pipeline stages', 'Quotes idle for 7 days'], ['People', 'invited Ron (VA)'], ['Settings', 'Granted "Payroll" access for Ron'], ['Settings', 'Note: call the bank'], ['Look and branding', 'background colour #5b6b82'], ['Security', 'Face ID / fingerprint added on Ofek\'s Mac'], ['Google review requests', 'asking 2 days after the job'], ['Role defaults', 'Ron gets Jobs'], ['Settings', ''], ['Settings', 'Lead sources:no space']],
+    'settingsHistParts: a known page name before ": " is where; anything else is Settings');
+  const H = [
+    { actor: 'Ofek Shamir', where: 'Pipeline stages', what: 'Quotes idle for 7 days', at: '2026-10-14T01:00:00Z' },
+    { actor: 'Noam Gal', where: 'People', what: 'invited Ron (VA)', at: '2026-10-13T01:00:00Z' },
+    { actor: 'Ofek Shamir', where: 'Settings', what: 'Granted "Payroll" access for Ron', at: '2026-10-01T01:00:00Z' },
+    { actor: 'Ron', where: 'Tags', what: 'Callback colour', at: '2026-09-01T01:00:00Z' },
+    { actor: 'Noam Gal', where: 'Security', what: 'turned on two-step sign-in', at: '2026-10-14T02:00:00Z' },
+    { actor: 'Ofek Shamir', where: 'Look and branding', what: 'background colour', at: '2026-10-14T03:00:00Z' },
+    { actor: 'Ron', where: 'Tags', what: 'x', at: 'junk' },
+    { actor: 'Dolev', where: 'Tags', what: 'y', at: '2026-10-14T03:00:00Z' },
+  ];
+  const F = (q, who) => sb.settingsHistFilter(H, q, who).map(r => r.what);
+  assertEqual([F('', 'all'), F('PEOPLE', 'all'), F('noam', 'all'), F('ron', 'all'), F('', 'Noam Gal'), F('ron', 'Noam Gal'), F('nothing like it', 'all'), F('  ', undefined).length],
+    [H.map(r => r.what), ['invited Ron (VA)'], ['invited Ron (VA)', 'turned on two-step sign-in'], ['invited Ron (VA)', 'Granted "Payroll" access for Ron', 'Callback colour', 'x'], ['invited Ron (VA)', 'turned on two-step sign-in'], ['invited Ron (VA)'], [], 8],
+    'settingsHistFilter: searches what, where and who (any case); the person chip keeps that person only');
+  assertEqual([sb.secHistChips(H), sb.secHistChips([]), sb.secHistChips([{ actor: '' }, { actor: 'Zed' }, { actor: 'Amy' }])], [['Ofek Shamir', 'Noam Gal', 'Ron'], [], ['Amy', 'Zed']], 'secHistChips: the 3 people with the most changes, a tie by name, no empty name');
+  const rn = Date.parse('2026-10-14T12:00:00Z');
+  assertEqual(sb.secRecentCount([{ at: new Date(rn - 14 * 864e5).toISOString() }, { at: new Date(rn - 14 * 864e5 - 1000).toISOString() }, { at: new Date(rn - 3600e3).toISOString() }, { at: 'junk' }, {}], rn), 2, 'secRecentCount: changes in the last 14 days (the boundary counts)');
+  assertEqual(['wrong-password', 'wrong-code', 'too-many', 'not-fresh', 'expired', 'not-verified', 'not-found', 'no-passkey', 'locked', 'already', 'server', undefined].map(sb.secReasonText),
+    ['That password didn\'t work.', 'That code didn\'t work. Try the new one the app shows.', 'Too many tries. Wait 15 minutes and try again.', 'Signing in with Google again didn\'t finish in time. Try again.', 'That took too long. Try again.', 'Face ID / fingerprint couldn\'t be checked. Try again, or use your password.', 'This device\'s Face ID / fingerprint was removed. Use your password, then set it up again.', 'This device\'s Face ID / fingerprint was removed. Use your password, then set it up again.', 'Security locked again. Unlock it first.', 'Face ID / fingerprint is already set up on this device.', 'Something went wrong. Try again.', 'Something went wrong. Try again.'],
+    'secReasonText: a plain sentence for every answer of the server');
+
+  // setBlock: the new right-hand slot, and the old markup exactly when it isn't used.
+  assertEqual(sb.setBlock('Signing in', '', '<x>'), '<div class="set-block"><div class="set-block-head"><h3>Signing in</h3></div><x></div>', 'setBlock: without a right-hand part the markup is as before');
+  assertEqual(sb.setBlock('Settings history', 'Who & when', '<x>', '<span class="hint">3 changes</span>'), '<div class="set-block"><div class="set-block-head has-right"><div><h3>Settings history</h3><p>Who &amp; when</p></div><span class="hint">3 changes</span></div><x></div>', 'setBlock: a right-hand part sits in the head');
+
+  // The page wiring (read from the page's own code).
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const settingsFn = extractDecl(script, 'renderSettings'), page = extractDecl(script, 'renderSecurityPage'), unlocked = extractDecl(script, 'renderSecurityUnlocked');
+  assertEqual([script.includes('openSettingsActivityModal'), /Settings history has moved to <a href="#" onclick="setSettingsPage\('security'\)/.test(settingsFn), /titleExtra: \(\) => secUnlocked\(\) \? pill\('good', 'Unlocked'\) : pill\('neutral', 'Locked'\)/.test(settingsFn), settingsFn.includes("${cur.titleExtra ? ' ' + cur.titleExtra() : ''}")],
+    [false, true, true, true], 'Settings history moved from Data to Security; the Security title says Locked / Unlocked');
+  assertEqual([/return secUnlocked\(\) \? renderSecurityUnlocked\(\) : renderSecurityLock\('page'\);/.test(page), (script.match(/renderSecurityUnlocked\(/g) || []).length], [true, 2], 'Security: nothing of the unlocked page is drawn unless this session is unlocked');
+  assertEqual(['secLockNow()', 'openPasskeySetup()', 'removePasskey(', 'openChangePasswordModal()', 'signOutEverywhere()', 'togglePresentationMode()', 'openViewAsModal()', 'secHistInput(this.value)', "setSettingsPage('people')"].filter(x => !unlocked.includes(x)), [], 'Security, unlocked: lock now, set up / remove a key, signing in, showing the app, the history and the People note');
+  assertEqual([unlocked.includes("The office assistant\\'s automatic log-out"), extractDecl(script, 'renderShell').includes('openViewAsModal()')], [false, false], 'Security: the auto log-out row became the note to People; View as is still not in the main menu');
+  // "Export everything" (the old JSON of the screen's data) was replaced by Export to Excel + Full backup (group E, 14 Oct).
+  assertEqual([script.includes('exportDataAsJson'), script.includes('exportDataFile'), extractDecl(script, 'logSettingsActivity').includes('SEC.hist.unshift')], [false, false, true], 'the old Export everything is gone; a new change shows in the open history at once');
+  assertEqual([extractDecl(script, 'turnOffMfa').includes("title: 'Turn off two-step sign-in?'"), extractDecl(script, 'turnOffMfa').includes('readOnlyReason()')], [true, true], 'two-step off: the approved wording, and not in a read-only mode');
+}
+
+// Settings → Data (14 Oct, approved mockup round2-data-security): the Full backup block's states, and opening a locked
+// weekly backup in the browser. The locked files here are made with node:crypto from the format text (not by the app's
+// own code), so these tests prove the format.
+// Settings → Data → Export to Excel (14 Oct, item 5, M6 answers 1 and 6): the areas, the sensitive columns, the cells
+// and sheets Excel accepts, the counts on the cards, and reading big tables 1,000 rows at a time.
+async function testDataExport(sb){
+  console.log('\nSettings → Data: Export to Excel');
+  const A = Array.from(sb.EXPORT_AREAS);
+  assertEqual(A.map(a => a.id), ['leads', 'jobs', 'closings', 'payroll', 'employees', 'contractors', 'expenses', 'tasks', 'convos', 'shifts', 'reviews', 'ads', 'organic', 'settings', 'ghl'], 'EXPORT_AREAS: the 15 areas, in the mockup\'s order');
+  assertEqual(new Set(A.map(a => a.id)).size, 15, 'EXPORT_AREAS: ids are unique');
+  assertEqual(A.filter(a => a.name.length > 31 || /[:\\/?*[\]]/.test(a.name)).map(a => a.name), [], 'EXPORT_AREAS: every name is a valid sheet name (31 characters at most, none of : \\ / ? * [ ])');
+  assertEqual(A.filter(a => a.off).map(a => a.id), ['ghl'], 'EXPORT_AREAS: only the GHL archive is off by default');
+  assertEqual(A.filter(a => a.sens).map(a => [a.id, a.sens]), [['payroll', 'owner salaries'], ['employees', 'bank, ABN'], ['contractors', 'bank, ABN']], 'EXPORT_AREAS: the sensitive labels (no TFN: the app stores none)');
+  const parts = A.flatMap(a => a.parts.map(p => ({ ...p, area: a.id })));
+  assertEqual(parts.filter(p => p.sensOnly).map(p => p.title), ['Owner salaries'], 'EXPORT_AREAS: owner salaries is the only sensitive-only part');
+  assertEqual(parts.filter(p => p.table && !(Array.isArray(p.keys) && p.keys.length)).length, 0, 'EXPORT_AREAS: every table part has paging keys');
+  assertEqual(parts.filter(p => p.sensCols).map(p => [p.table, p.sensCols]), [['contractor_private', ['agreement']]], 'EXPORT_AREAS: the agreement text (it names the ABN) is left out without the sensitive tick');
+  assertEqual([...sb.exportDefaultSelection()], ['leads', 'jobs', 'closings', 'payroll', 'employees', 'contractors', 'expenses', 'tasks', 'convos', 'shifts', 'reviews', 'ads', 'organic', 'settings'], 'exportDefaultSelection: 14 areas, not the GHL archive');
+
+  // Columns: secrets never, bank / ABN / TFN only with the sensitive tick.
+  const H = sb.exportHiddenColumn;
+  assertEqual(['token_hash', 'ip_hash', 'sign_token', 'sign_token_expires', 'password'].map(c => [H(c, false), H(c, true)]), [[true, true], [true, true], [true, true], [true, true], [true, true]], 'exportHiddenColumn: token and hash columns are never exported');
+  assertEqual(['bank_account', 'bank_bsb', 'bank_name', 'bank_details', 'abn', 'tfn'].map(c => [H(c, false), H(c, true)]), Array(6).fill([true, false]), 'exportHiddenColumn: bank, ABN and TFN only with the sensitive tick');
+  assertEqual(['banking_notes', 'full_name', 'hashtag'].map(c => [H(c, false), H(c, true)]), Array(3).fill([false, false]), 'exportHiddenColumn: look-alike names stay');
+  assertEqual(['full_name', 'utm_source', 'id', 'includes_gst', 'bank_bsb', 'ga4_sessions'].map(sb.exportHeader), ['Full name', 'UTM source', 'ID', 'Includes GST', 'Bank BSB', 'GA4 sessions'], 'exportHeader');
+
+  // Cells.
+  const C = sb.exportCell;
+  assertEqual([C(null), C(undefined), C(true), C(false), C(12.5), C(0), C(['a', 'b']), C({ x: 1 })], ['', '', 'Yes', 'No', 12.5, 0, 'a, b', '{"x":1}'], 'exportCell: empty, yes/no, numbers, lists, objects');
+  assertEqual([C('data:image/png;base64,AAA'), C({ sig: 'data:image/png;base64,AAA' })], ['[file, in the full backup]', '{"sig":"[file, in the full backup]"}'], 'exportCell: a file inside the data is named, not copied');
+  const long = C('x'.repeat(40000));
+  assertEqual([long.length <= 32767, long.endsWith('(cut: too long for one Excel cell; whole in the full backup)')], [true, true], 'exportCell: a cell is cut to what Excel holds, with a note');
+  assertEqual(C('=HYPERLINK("x")'), '=HYPERLINK("x")', 'exportCell: text that looks like a formula stays text');
+  assertEqual(sb.exportActivityText([{ at: '2026-10-02T10:00:00Z', actor: 'Ofek', text: 'Booked' }, { at: '2026-10-01T09:05:12Z', actor: 'Ron', text: 'Called' }]), '2026-10-01 09:05 · Ron · Called\n2026-10-02 10:00 · Ofek · Booked', 'exportActivityText: oldest first, one line each');
+  assertEqual(sb.exportActivityText([]), '', 'exportActivityText: no lines');
+
+  // Sheets.
+  const rows = [{ id: 1, full_name: 'Sarah', bank_account: '123' }, { id: 2, full_name: 'Tom', bank_account: '456' }];
+  assertEqual(sb.exportSheetAoa([{ table: 'employees', rows }], false), [['ID', 'Full name'], [1, 'Sarah'], [2, 'Tom']], 'exportSheetAoa: one section, bank left out');
+  assertEqual(sb.exportSheetAoa([{ table: 'employees', rows }], true), [['ID', 'Full name', 'Bank account'], [1, 'Sarah', '123'], [2, 'Tom', '456']], 'exportSheetAoa: with the sensitive tick the bank is in');
+  assertEqual(sb.exportSheetAoa([{ table: 't', rows: [{ a: 1 }, { b: 2, a: 3 }] }], false), [['A', 'B'], [1, ''], [3, 2]], 'exportSheetAoa: every column, in first-seen order, empty where a row has none');
+  assertEqual(sb.exportSheetAoa([{ title: 'Tasks', table: 'tasks', rows: [{ id: 1 }] }, { title: 'Reminders', table: 'manual_reminders', rows: [] }], false), [['Tasks'], ['ID'], [1], [], ['Reminders'], ['(nothing yet)'], []], 'exportSheetAoa: several sections, each with its title; an empty one says so');
+  assertEqual(sb.exportSheetAoa([{ table: 'jobs', rows: [] }], false), [['(nothing yet)']], 'exportSheetAoa: an empty area');
+  assertEqual(sb.exportSheetAoa([{ title: 'Agreements', table: 'contractor_private', sensCols: ['agreement'], rows: [{ supplier_id: 's1', agreement: { html: 'ABN 1' }, sign_token: 'x' }] }], false), [['Supplier ID'], ['s1']], 'exportSheetAoa: the agreement and the signing link are left out without the tick');
+  assertEqual(sb.exportSheetAoa([{ rows: [{ Setting: 'ABN', Value: '12 345' }] }], false), [['Setting', 'Value'], ['ABN', '12 345']], 'exportSheetAoa: the Settings rows keep their own headings (and the business ABN)');
+  const w = sb.exportColWidths([['ID', 'x'.repeat(100)], [1, 'abc'], ['line one\nmuch longer second line']]);
+  assertEqual(w.map(x => x.wch), [23, 60], 'exportColWidths: the longest line, between 8 and 60');
+  assertEqual(sb.exportColWidths([['a']]).map(x => x.wch), [8], 'exportColWidths: at least 8');
+  { const used = []; assertEqual([sb.exportSheetName('a/b:c', used), sb.exportSheetName('x'.repeat(40), used), sb.exportSheetName('Jobs', used), sb.exportSheetName('jobs', used), sb.exportSheetName('JOBS', used)], ['abc', 'x'.repeat(31), 'Jobs', 'jobs (2)', 'JOBS (3)'], 'exportSheetName: bad characters dropped, 31 characters, no duplicate in any case'); }
+  { const used = []; const a = sb.exportSheetName('y'.repeat(31), used), b = sb.exportSheetName('y'.repeat(31), used); assertEqual([a.length, b.length <= 31, b.endsWith(' (2)')], [31, true, true], 'exportSheetName: a 31-character duplicate stays within 31 with its number'); }
+
+  // The Settings, pay and owner salary rows.
+  const set = sb.settingsExportRows({ id: 1, owner_salaries: { Ofek: 1200 }, abn: '12 345', company_name: 'X', catalog: { pay: { hourly: [{ from: '2026-10-01', rate: 10 }], hebrew: { Guy: true }, jobTypes: { Guy: ['Aircon'] }, extraKey: 3 }, tags: [{ tag: 'Complaint' }], connectors: {} } });
+  assertEqual(set.map(r => r.Setting), ['ABN', 'Company name', 'Pay: job types per technician', 'Pay: extra key', 'Tags', 'Connectors'], 'settingsExportRows: no ID, owner salaries or pay figures; the other pay settings (job types per technician) are kept; the business ABN stays');
+  assertEqual(set.map(r => r.Value), ['12 345', 'X', '{"Guy":["Aircon"]}', 3, '[{"tag":"Complaint"}]', '{}'], 'settingsExportRows: the values (no hourly rate anywhere in the sheet)');
+  assertEqual(sb.settingsExportRows({ catalog: { pay: 'junk' } }), [], 'settingsExportRows: a broken pay setting adds nothing');
+  assertEqual(sb.payRateRows({ hourly: [{ from: '2026-10-05', rate: 12, tiers: [{ min: 8, bonus: 15 }] }, { from: '2026-09-01', rate: 10 }], hebrew: { Guy: 'גיא' } }),
+    [{ From: '2026-09-01', 'Rate per hour': 10, 'Booking bonus': '' }, { From: '2026-10-05', 'Rate per hour': 12, 'Booking bonus': '8+ bookings: $15' }, { From: 'Hebrew pay messages', 'Rate per hour': '', 'Booking bonus': 'Guy' }], 'payRateRows: oldest first, the numbers kept, then who gets Hebrew');
+  assertEqual([sb.payRateRows(undefined), sb.payRateRows({})], [[], []], 'payRateRows: nothing saved');
+  assertEqual(sb.ownerSalaryRows({ Ofek: 1200, Noam: '1200' }), [{ Owner: 'Ofek', 'Weekly salary': 1200 }, { Owner: 'Noam', 'Weekly salary': 1200 }], 'ownerSalaryRows');
+  assertEqual(sb.ownerSalaryRows(null), [], 'ownerSalaryRows: none');
+
+  // The cards' count lines, the file name and the summary.
+  assertEqual([sb.countWord(1, 'job', 'jobs'), sb.countWord(1438, 'card', 'cards'), sb.countWord(0, 'job', 'jobs')], ['1 job', '1,438 cards', '0 jobs'], 'countWord');
+  const data = { contacts: [{ activityLog: [1, 2, 3] }, { activityLog: [1] }], payrollWeeks: [{ weekKey: '2026-10-04' }, { weekKey: '2026-10-04' }, { weekKey: '2026-10-11' }], salesLogs: [{}], jobs: [{}], employees: [{}, {}], suppliers: [{}], equipmentSpend: [], equipmentCatalog: [{}], tasks: [{}], manualReminders: [], adSpend: [{}, {}], adCalls: [{}] };
+  const T = (id, counts) => sb.exportCountText(id, data, counts);
+  assertEqual([T('leads', null), T('payroll', null), T('jobs', null), T('employees', null), T('expenses', null), T('tasks', null), T('settings', null)], ['2 cards · 4 activity lines', '2 weeks · 1 sales log', '1 job', '2 people', '0 expenses · 1 item', '1 task · 0 reminders', 'One row per setting'], 'exportCountText: from what the app holds');
+  assertEqual([T('convos', null), T('convos', { chat_sessions: null, lead_messages: 5 }), T('convos', { chat_sessions: 2, lead_messages: 1 }), T('ghl', { ghl_archive: 4602 }), T('ads', { ads_stats: 10 }), T('ads', { ads_stats: null })], ['Counting…', '', '2 conversations · 1 message', '4,602 contacts', '13 rows', ''], 'exportCountText: from the counts; still counting; could not be read');
+  sb.STATE.data.settings.companyName = 'The Guys Service Group';
+  assertEqual(sb.exportFileName('export', '2026-10-14'), 'the-guys-service-group-export-2026-10-14.xlsx', 'exportFileName: the business name');
+  sb.STATE.data.settings.companyName = '';
+  assertEqual(/^[a-z0-9]+(-[a-z0-9]+)*-export-2026-10-14\.xlsx$/.test(sb.exportFileName('export', '2026-10-14')), true, 'exportFileName: no name saved still gives a clean name');
+  sb.STATE.data.settings.companyName = '!!!';
+  assertEqual(sb.exportFileName('export', '2026-10-14'), 'ops-service-export-2026-10-14.xlsx', 'exportFileName: a name with no letters');
+  sb.STATE.data.settings.companyName = 'The Guys Service Group';
+  assertEqual([sb.exportSummaryHtml(0, false), sb.exportSummaryHtml(1, false), sb.exportSummaryHtml(3, true)], ['Tick at least one area.', '<b>One Excel file</b>, 1 sheet, one per area.', '<b>One Excel file</b>, 3 sheets, one per area, with sensitive details.'], 'exportSummaryHtml');
+
+  // A card.
+  const emp = A.find(a => a.id === 'employees'), ghl = A.find(a => a.id === 'ghl');
+  const off = sb.exportCardHtml(emp, true, false, '2 people'), on = sb.exportCardHtml(emp, true, true, '2 people'), g = sb.exportCardHtml(ghl, sb.exportDefaultSelection().has('ghl'), false, '');
+  assertEqual([off.includes('<span class="pill neutral">Left out: bank, ABN</span>'), on.includes('<span class="pill warn">Includes bank, ABN</span>'), off.includes(`onchange="setExportArea('employees', this.checked)"`), off.includes(' checked'), g.includes(' checked'), g.includes('class="ex-card"')], [true, true, true, true, false, true], 'exportCardHtml: the sensitive pill, the handler, the GHL card unticked');
+  { const cv = sb.exportCardHtml(A.find(a => a.id === 'convos'), false, false, ''); assertEqual([/<span class="ex-note">Chats answered in GHL aren.{1,6}t here until the website chat moves to OPS\.<\/span>/.test(cv), cv.includes(' checked')], [true, false], 'exportCardHtml: the note on Conversations; an unticked card'); }
+
+  // Reading big tables page by page.
+  const fake = (total, failAt) => {
+    const log = [];
+    return { log, from(t){ const ops = []; const q = {
+      select(){ ops.push('select'); return q; }, eq(c, v){ ops.push(`eq:${c}=${v}`); return q; }, order(k, o){ ops.push(`order:${k}:${o && o.ascending}`); return q; },
+      range(a, z){ log.push({ t, a, z, ops: ops.slice() }); if (log.length === failAt) return Promise.resolve({ data: null, error: { message: 'boom' } });
+        const n = Math.max(0, Math.min(z, total - 1) - a + 1); return Promise.resolve({ data: Array.from({ length: n }, (_, i) => ({ id: a + i })), error: null }); } }; return q; } };
+  };
+  { const c = fake(2350); const r = await sb.exportFetchAll(c, 'organic_stats', ['at', 'profile_id'], ['record_kind', 'contact']);
+    assertEqual([r.data.length, r.error, c.log.map(x => [x.a, x.z])], [2350, null, [[0, 999], [1000, 1999], [2000, 2999]]], 'exportFetchAll: 2,350 rows in 3 pages');
+    assertEqual(c.log.every(x => JSON.stringify(x.ops) === JSON.stringify(['select', 'eq:record_kind=contact', 'order:at:true', 'order:profile_id:true'])), true, 'exportFetchAll: the filter and each order key on every page, in order'); }
+  { const c = fake(5000, 2); const r = await sb.exportFetchAll(c, 'x', ['id']); assertEqual([r.data.length, r.error && r.error.message, c.log.length], [1000, 'boom', 2], 'exportFetchAll: an error on page 2 returns the first 1,000 and the error'); }
+  { const c = fake(1000); const r = await sb.exportFetchAll(c, 'x', ['id']); assertEqual([r.data.length, c.log.length], [1000, 2], 'exportFetchAll: exactly 1,000 rows asks once more, gets none, and stops'); }
+
+  // The page wiring (read from the page's own code).
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const page = extractDecl(script, 'renderDataPage'), block = extractDecl(script, 'renderExportBlock');
+  assertEqual([page.indexOf('There are no automatic daily backups') < page.indexOf('renderExportBlock()'), page.indexOf('renderExportBlock()') < page.indexOf('renderFullBackupBlock()')], [true, true], 'Data page: the note, then Export to Excel, then the Full backup');
+  assertEqual(['Select all', 'Clear', 'areas ticked', 'Include sensitive details (bank, ABN, owner salaries)', 'It unticks itself after each download.', 'For this download only: the Excel will have bank details, ABN and owner salaries.', 'Download Excel (one sheet per area)', "'ex-block'", 'id="dx-go"'].filter(x => !block.includes(x)), [], 'Export to Excel: the mockup\'s controls and wording');
+  assertEqual([/TFN/.test(block), /const XLSX_SCRIPT = 'https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/xlsx\/0\.18\.5\/xlsx\.mini\.min\.js'/.test(script), extractDecl(script, 'ensureXlsx').includes('XLSX_LIB = null')], [false, true, true], 'no TFN in the wording; SheetJS 0.18.5 from cdnjs, loaded when needed and retried after a failure');
+  const dl = extractDecl(script, 'downloadDataExcel');
+  assertEqual([dl.indexOf('readOnlyReason()') < dl.indexOf('ensureXlsx()'), dl.includes('DATA_EXPORT.sens = false; render();\n    secEnsureUnlocked('), /finally \{[^}]*DATA_EXPORT\.sens = false/.test(dl), dl.includes("logSettingsActivity(")], [true, true, true, true], 'the download: read-only check first, the step-up again when it ran out, the tick unticks after every download, one history line');
+  assertEqual([extractDecl(script, 'setSettingsPage').includes("if (id!=='data') DATA_EXPORT.sens = false;"), extractDecl(script, 'closeSettingsPage').includes('DATA_EXPORT.sens = false'), extractDecl(script, 'render').includes('if (DATA_EXPORT.sens && !dataPageOpen()) DATA_EXPORT.sens = false;')], [true, true, true], 'leaving Data unticks the sensitive details (also through the main menu: every render off Data clears it)');
+  assertEqual(sb.setBlock('A', '', '<x>', '', 'ex-block'), '<div class="set-block ex-block"><div class="set-block-head"><h3>A</h3></div><x></div>', 'setBlock: an extra class on the block');
+}
+
+async function testFullBackup(sb){
+  console.log('\nSettings → Data: the full backup and "Open a locked backup"');
+  const nodeCrypto = require('crypto'), zlib = require('zlib');
+  Object.assign(sb, { crypto: globalThis.crypto, TextEncoder, TextDecoder, Response, Blob, DecompressionStream });
+  assertEqual(['info@theguyservicegroup.com', 'a.b-c@x.co'].map(sb.backupEmailOk), [true, true], 'backupEmailOk: real addresses');
+  assertEqual(['', 'a@b', 'a b@c.com', 'x'.repeat(250) + '@b.co', null].map(sb.backupEmailOk), [false, false, false, false, false], 'backupEmailOk: empty, no dot, a space, 255 characters');
+  assertEqual(Array.from(sb.BACKUP_DAY_ORDER).map(sb.backupDayLabel), ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'], 'the day list runs Monday to Sunday');
+  assertEqual([sb.backupWhenText('2026-10-10T16:00:00Z'), sb.backupWhenText('2026-10-19T02:30:00Z'), sb.backupDateText('2026-10-25T16:07:00Z'), sb.backupWhenText('x')], ['Sunday 11 Oct, 3:00 am', 'Monday 19 Oct, 1:30 pm', 'Monday 26 Oct', ''], 'backupWhenText (Sydney time)');
+  assertEqual([0, 900, 2048, 3.2 * 1024 * 1024, 2.5 * 1024 ** 3].map(sb.backupSizeText), ['0 B', '900 B', '2 KB', '3.2 MB', '2.50 GB'], 'backupSizeText');
+  assertEqual([sb.BACKUP_TABLE_LABELS.contacts, sb.BACKUP_TABLE_LABELS.ghl_archive, sb.BACKUP_BUCKET_LABELS['job-attachments']], ['Leads & customers', 'GHL archive (old contacts)', 'Job files and receipts'], 'labels for the areas and the uploaded files');
+  assertEqual(sb.backupZipPath('job-attachments', '/../a/./b/../c.png'), 'files/job-attachments/a/b/c.png', 'a storage path stays inside the zip');
+
+  const NOW = Date.parse('2026-10-18T05:00:00Z');
+  const cfg = { email: 'info@theguyservicegroup.com', day: 0, time: '03:00', updated_at: '2026-10-01T00:00:00Z' };
+  const view = st => sb.backupStatusView(st, NOW);
+  const L = v => [v.head.tone, v.head.label, v.pw.tone, v.pw.label, v.last.tone, v.last.label, v.last.desc];
+  assertEqual(L(view(null)).slice(0, 2).concat([view({ loading: true }).inputsOff]), ['neutral', 'Checking…', true], 'loading: Checking…, the boxes are off');
+  const nsu = view({ error: 'not_set_up' });
+  assertEqual([nsu.head.label, nsu.last.desc, nsu.inputsOff, nsu.downloadOff], ['Not set up yet', 'The weekly backup isn\'t switched on yet.', true, true], 'not set up: says so, boxes and download off');
+  const np = view({ ok: true, passwordSet: false, timerOk: true, config: cfg, nextAt: '2026-10-24T16:00:00Z', last: null });
+  assertEqual(L(np), ['warn', 'Waiting for your password', 'warn', 'Waiting for you', 'neutral', 'Not yet', 'Nothing yet. The first one goes out on the first Sunday after the password is set.'], 'password not set: the mockup\'s words');
+  assertEqual(np.pw.desc, 'Your step: add a secret called BACKUP_PASSWORD in Supabase (Edge Functions, then Secrets). We never see it. Nothing is sent until it is set.', 'password not set: the owner step');
+  const ps = view({ ok: true, passwordSet: true, timerOk: true, config: cfg, nextAt: '2026-10-24T16:00:00Z', last: null });
+  assertEqual(L(ps), ['good', 'Weekly email on', 'good', 'Password set', 'neutral', 'Not yet', 'Nothing yet. The first one goes out on Sunday 25 Oct, 3:00 am.'], 'password set, nothing sent yet');
+  assertEqual([ps.pw.desc, ps.timerNote, ps.inputsOff], ['With the password you set in Supabase (we never see it). Keep it in your password manager: without it the file can\'t be opened.', '', false], 'password set: the mockup\'s description');
+  const nt = view({ ok: true, passwordSet: true, timerOk: false, config: cfg, nextAt: null, last: null });
+  assertEqual([nt.head.tone, nt.head.label, nt.timerNote], ['warn', 'Weekly timer not running', ' The weekly timer isn\'t running yet: it needs the backup timer secret (owner step).'], 'timer not running: a warning and the owner step');
+  const done = { status: 'done', started_at: '2026-10-17T16:00:00Z', finished_at: '2026-10-17T16:07:00Z', email_to: 'owner@example.com', email_status: 'sent', email_queued_at: '2026-10-17T16:07:00Z', links_expire_at: '2026-10-24T16:07:00Z' };
+  assertEqual(L(view({ ok: true, passwordSet: true, timerOk: true, config: cfg, last: done })).slice(4), ['good', 'Sent', 'Sunday 18 Oct, 3:07 am, to owner@example.com · download link sent (works until Sunday 25 Oct).'], 'sent: the link wording (not "attached")');
+  assertEqual(L(view({ ok: true, passwordSet: true, timerOk: true, config: cfg, last: { ...done, email_status: 'queued', email_queued_at: new Date(NOW - 3600e3).toISOString() } })).slice(4, 6), ['neutral', 'Sending'], 'queued under 2 hours: Sending');
+  assertEqual(L(view({ ok: true, passwordSet: true, timerOk: true, config: cfg, last: { ...done, email_status: 'queued' } })).slice(4), ['warn', 'Not sent yet', 'Sunday 18 Oct, 3:07 am, to owner@example.com · the email hasn\'t gone out yet: the info@ sender may be stopped.'], 'queued over 2 hours: warns');
+  assertEqual(L(view({ ok: true, passwordSet: true, timerOk: true, config: cfg, last: { status: 'failed', started_at: '2026-10-17T16:00:00Z', finished_at: '2026-10-17T17:00:00Z', error: 'database down' } })).slice(4), ['bad', 'Failed', 'The last one didn\'t finish (Sunday 18 Oct, 4:00 am): database down. It tries again by itself.'], 'failed');
+  assertEqual(L(view({ ok: true, passwordSet: true, timerOk: true, config: cfg, last: { status: 'running', started_at: '2026-10-17T16:00:00Z' } })).slice(4), ['neutral', 'In progress', 'Being made now (started Sunday 18 Oct, 3:00 am).'], 'running');
+  assertEqual(view({ ok: true, passwordSet: true, timerOk: true, config: { ...cfg, day: 3, time: '23:30' }, last: null }).when, { email: 'info@theguyservicegroup.com', day: 3, time: '23:30' }, 'the saved day, time and address');
+
+  // Locked files made with node:crypto, straight from the format text.
+  const PW = 'a long backup passphrase', ITER = 100000;
+  const seal = (kind, plain, pw, salt) => {
+    const iv = nodeCrypto.randomBytes(12), header = Buffer.alloc(40);
+    header.write('TGBKUP', 0, 'ascii'); header[6] = 1; header[7] = kind; header.writeUInt32BE(ITER, 8); salt.copy(header, 12); iv.copy(header, 28);
+    const key = nodeCrypto.pbkdf2Sync(Buffer.from(pw, 'utf8'), salt, ITER, 32, 'sha256');
+    const c = nodeCrypto.createCipheriv('aes-256-gcm', key, iv); c.setAAD(header);
+    return new Uint8Array(Buffer.concat([header, c.update(plain), c.final(), c.getAuthTag()]));
+  };
+  const salt = nodeCrypto.randomBytes(16);
+  const dataObj = { format: 'the-guys-backup', version: 1, kind: 'weekly', created_sydney: 'Sunday 18 Oct 2026, 3:07 am', files: [], tables: { contacts: [{ id: 'c1', full_name: '<b>Sarah</b>' }] }, counts: { contacts: 1 } };
+  const lockedData = seal(1, zlib.gzipSync(Buffer.from(JSON.stringify(dataObj))), PW, salt);
+  const head = Buffer.from(JSON.stringify({ v: 1, id: '20261018-abcd1234', files: [{ bucket: 'job-attachments', path: 'r/a.png', type: 'image/png', size: 3, offset: 0 }, { bucket: 'branding', path: 'logo.svg', type: 'image/svg+xml', size: 2, offset: 3 }] }));
+  const lenBuf = Buffer.alloc(4); lenBuf.writeUInt32BE(head.length, 0);
+  const packPlain = Buffer.concat([lenBuf, head, Buffer.from([1, 2, 3, 9, 8])]);
+  const lockedPack = seal(2, packPlain, PW, salt);
+  const h = sb.backupParseHeader(lockedData);
+  assertEqual([h.kind, h.iterations, Buffer.from(h.salt).equals(salt), h.iv.length, h.header.length, sb.backupParseHeader(lockedPack).kind], [1, ITER, true, 12, 40, 2], 'backupParseHeader reads a node:crypto locked file');
+  assertEqual([sb.backupParseHeader(new TextEncoder().encode(JSON.stringify(dataObj))), sb.backupParseHeader(new Uint8Array(10))], [null, null], 'a plain JSON file or a tiny file is not a locked backup');
+  { const low = lockedData.slice(); new DataView(low.buffer).setUint32(8, 1000, false); assertEqual(sb.backupParseHeader(low), null, 'iterations outside 100,000-10,000,000 are refused'); }
+  const cache = {};
+  const plainData = await sb.backupDecrypt(PW, lockedData, cache);
+  assertEqual(JSON.parse(await sb.backupGunzipText(plainData)), dataObj, 'backupDecrypt + gunzip give the same JSON');
+  assertEqual(Object.keys(cache).length, 1, 'the key is made once for the salt');
+  const plainPack = await sb.backupDecrypt(PW, lockedPack, cache);
+  assertEqual(Object.keys(cache).length, 1, 'the second file with the same salt reuses the key');
+  const pk = sb.backupReadPack(plainPack);
+  assertEqual([pk.id, pk.files.map(f => [f.path, f.offset, f.size]), Array.from(plainPack.subarray(pk.start + 3, pk.start + 5))], ['20261018-abcd1234', [['r/a.png', 0, 3], ['logo.svg', 3, 2]], [9, 8]], 'backupReadPack: the files and their offsets');
+  let wrong = 'no error';
+  try { await sb.backupDecrypt('not the password', lockedData, {}); } catch (e) { wrong = 'rejected'; }
+  assertEqual(wrong, 'rejected', 'the wrong password is rejected');
+  let tamper = 'no error';
+  try { const t = lockedData.slice(); t[7] = 2; await sb.backupDecrypt(PW, t, {}); } catch (e) { tamper = 'rejected'; }
+  assertEqual(tamper, 'rejected', 'a changed header byte is rejected (authenticated)');
+  { const bad = new Uint8Array(packPlain); new DataView(bad.buffer).setUint32(0, 99999, false); assertEqual(sb.backupReadPack(bad), null, 'a pack header length beyond the buffer → null'); }
+  assertEqual(sb.backupReadPack(new Uint8Array(packPlain).slice(0, packPlain.length - 1)), null, 'a file running past the end → null');
+
+  // The page wiring (read from the page's own code).
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const page = extractDecl(script, 'renderDataPage'), block = extractDecl(script, 'renderFullBackupBlock'), dl = extractDecl(script, 'downloadFullBackup'), em = extractDecl(script, 'saveBackupEmail'), when = extractDecl(script, 'saveBackupWhen');
+  assertEqual([page.indexOf('There are no automatic daily backups') < page.indexOf('renderFullBackupBlock()'), page.indexOf('renderFullBackupBlock()') < page.indexOf('No restore button, on purpose.')], [true, true], 'Data page: the note, the Full backup block, the no-restore note, in that order');
+  assertEqual(['Download a full backup now', 'Send it to', 'Day and time', 'Locked with a password', 'Last sent', 'Open a locked backup', 'aria-label="Send the weekly backup to"', 'aria-label="Day"', 'aria-label="Time"', 'openLockedBackup()', "setBlock('Full backup'"].filter(x => !block.includes(x)), [], 'Full backup: the mockup\'s rows and controls, plus Open a locked backup');
+  assertEqual([/restore/i.test(block), ['renderDataPage', 'renderFullBackupBlock', 'openLockedBackup', 'renderLockedResult'].some(n => /onclick="[^"]*restore/i.test(extractDecl(script, n))), /function \w*[Rr]estoreBackup/.test(script)], [false, false, false], 'no restore control anywhere on Data or in the open tool');
+  assertEqual([dl.includes("backupWithStepUp('Download a full backup'"), em.includes("backupWithStepUp('Change where the weekly backup goes'"), when.includes('backupWithStepUp')], [true, true, false], 'the download and a new address ask for the step-up; day and time don\'t');
+  assertEqual([/if \(!f \|\| typeof f\.url!=='string' \|\| !\/\^https:/.test(dl) && dl.indexOf("(no download link)") < dl.indexOf('await fetch(f.url)'), dl.includes('obj.files_missing')], [true, true], 'the download: a file without a link is listed in files-missing.txt and never fetched (fetch(\'\') would save this page)');
+  assertEqual([dl.includes('the-guys-full-backup-${day}.zip'), dl.includes('the-guys-full-backup-${day}.json'), extractDecl(script, 'ensureJsZip').includes('JSZIP_SRC'), /const JSZIP_SRC = 'https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/jszip\/3\.10\.1\/jszip\.min\.js'/.test(script)], [true, true, true, true], 'the download: one .zip (or .json without files), JSZip 3.10.1 from cdnjs, loaded when needed');
+}
+
 testRepeatServiceReminder(loadSandbox());
 testPayroll(loadSandbox());
 testDashboard(loadSandbox());
@@ -1953,6 +2291,11 @@ testPeopleTabs(loadSandbox());
 testBranding(loadSandbox());
 testNotificationCards(loadSandbox());
 testConnectors(loadSandbox());
+testSecurityFaceId(loadSandbox());
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+(async () => {
+  await testFullBackup(loadSandbox());
+  await testDataExport(loadSandbox());
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+})().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });
