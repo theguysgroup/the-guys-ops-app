@@ -2293,7 +2293,26 @@ testNotificationCards(loadSandbox());
 testConnectors(loadSandbox());
 testSecurityFaceId(loadSandbox());
 
+// The Security page froze the browser on 14 Oct: while the sign-in options were loading, every redraw started another
+// load that returned at once and asked for another redraw, an endless loop. Now a second call gets the SAME promise,
+// so nothing can redraw before the real answer comes.
+async function testAuthProvidersNoLoop(){
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  let calls = 0, release = null;
+  const ctx = { console, SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'k', AUTH: { status: 'signedIn' }, render(){},
+    fetch(){ calls++; return new Promise(r => { release = () => r({ json: async () => ({ external: { google: true } }) }); }); } };
+  vm.createContext(ctx);
+  vm.runInContext('let AUTH_PROVIDERS = null;\n' + extractDecl(script, 'loadAuthProviders') + '\nthis.__lap = loadAuthProviders; this.__ap = () => AUTH_PROVIDERS;', ctx);
+  const p1 = ctx.__lap(), p2 = ctx.__lap();
+  let resolvedEarly = false; p2.then(() => { resolvedEarly = true; });
+  await new Promise(r => setTimeout(r, 0));
+  assertEqual([p1 === p2, calls, resolvedEarly, ctx.__ap()], [true, 1, false, null], 'security page: a second load of the sign-in options waits for the first one (no endless redraw loop)');
+  release(); await p2;
+  assertEqual([ctx.__ap(), ctx.__lap() === p1, calls], [{ google: true }, true, 1], 'security page: the options arrive once and are kept');
+}
+
 (async () => {
+  await testAuthProvidersNoLoop();
   await testFullBackup(loadSandbox());
   await testDataExport(loadSandbox());
   console.log(`\n${pass} passed, ${fail} failed`);
