@@ -401,6 +401,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 @media (max-width: 760px) { .review-link-row { grid-template-columns: minmax(0, 1fr); padding: 12px 14px; } .review-link-name { padding-bottom: 0; } }
 .phone-key { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; margin-right: 9px; background: var(--surface-2); border: 1px solid var(--line); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; vertical-align: -1px; }
 .phone-key.off { color: var(--ink-faint); }
+.set-row-text b .phone-key { display: inline-grid; }
 .phone-preview { margin: 4px 20px 16px; padding: 11px 13px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: 12.8px; line-height: 1.5; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
 .phone-preview > span { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); width: 100%; }
 .phone-preview .btn { margin-left: auto; }
@@ -9007,7 +9008,7 @@ function phoneNotificationsBar(){
   const tip = isIosDevice() && !isInstalledApp() ? ' On iPhone, add the app to the home screen first (Share → Add to Home Screen) and open it from there.' : '';
   return `<div class="card tight" style="margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
     <span style="display:inline-flex" aria-hidden="true">${ico('mobile', 20)}</span>
-    <div style="flex:1 1 280px"><b>Phone notifications</b> <span class="hint">${PUSH.on ? 'On for this device: you get a message when a technician sends his commission invoice.' : 'Get a message on this phone when a technician sends his commission invoice.' + tip}</span></div>
+    <div style="flex:1 1 280px"><b>Phone notifications</b> <span class="hint">${PUSH.on ? 'On for this device: it gets the notifications switched on in Settings → Notifications.' : 'Get the notifications switched on in Settings → Notifications on this phone.' + tip}</span></div>
     ${PUSH.on ? `<button class="btn small" onclick="sendTestNotification()">Send a test</button>` : `<button class="btn small primary" onclick="enablePhoneNotifications()">Turn on for this device</button>`}
   </div>`;
 }
@@ -12538,7 +12539,7 @@ function setPhoneRing(field, value){
   const n = Number(value);
   if (!Number.isInteger(n) || n < 5 || n > 60) { showToast('Enter 5 to 60 seconds', { kind: 'warn' }); render(); return; }
   const R = phoneRoutingCopy(); R[field] = n;
-  savePhoneRouting(R, `${field==='officeRingSeconds' ? 'Office phone' : 'Backup phones'} ring for ${n} seconds`);
+  savePhoneRouting(R, `${field==='officeRingSeconds' ? 'The office phone rings' : 'The backup phones ring'} for ${n} seconds`);
 }
 function setPhoneMenuOn(key, on){
   const R = phoneRoutingCopy(); let menu = phoneMenuOf(R);
@@ -12602,7 +12603,7 @@ function renderPhoneSettings(s){
   const routeRows = menu.map(m => routeRow(m.key, esc(divLabel(m.key)))).concat([routeRow('Other', 'New caller who didn\'t choose')]);
   const personRows = keys.map(k => { const pp = people[k], q = esc(jsStr(k)); return `<div class="phone-person">
       <div class="field"><label>Name</label><input value="${esc(pp.name || k)}" onchange="setPhonePerson('${q}','name',this.value)"></div>
-      <div class="field"><label>Mobile</label><input value="${esc(pp.mobile || '')}" inputmode="tel" onchange="setPhonePerson('${q}','mobile',this.value)"></div>
+      <div class="field"><label>Mobile</label><input value="${esc(phonePretty(pp.mobile || ''))}" inputmode="tel" onchange="setPhonePerson('${q}','mobile',this.value)"></div>
       <div class="phone-person-ctl"><span class="hint">${pp.available!==false ? 'Available' : 'Away'}</span>${setToggle(pp.available!==false, `setPhonePerson('${q}','available',!this.classList.contains('on'))`)}<button type="button" class="btn small ghost" title="Remove" aria-label="Remove ${esc(pp.name || k)}" onclick="removePhonePerson('${q}')">${ico('trash', 14)}</button></div>
     </div>`; }).join('');
   const addRow = `<div class="phone-person add">
