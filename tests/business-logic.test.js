@@ -1135,6 +1135,7 @@ function testPeopleContractorsEquipment(sb){
   const k = sb.contractorAgreementInputs(c, { abn:'1' });
   assertEqual([k===sb.contractorAgreementInputs({ ...c }, { abn:'1' }), k===sb.contractorAgreementInputs({ ...c, deal:{ ...c.deal, amount:12 } }, { abn:'1' }), k===sb.contractorAgreementInputs(c, { abn:'2' }), k===sb.contractorAgreementInputs({ ...c, phone:'0412' }, { abn:'1' })],
     [true, false, false, true], 'contractors: the agreement goes out of date when the deal or the ABN changes, not the phone');
+  assertEqual(k===sb.contractorAgreementInputs({ ...c, deal:{ note:'Only jobs we pass on.', type:'commission', amount:10 } }, { abn:'1' }), true, 'contractors: the same deal read back from the database (keys in another order) is not a change');
   // Equipment: the categories (nothing saved = four), an old "Consumable" item belongs to "Consumables".
   sb.STATE.data.settings = { catalog: {} };
   assertEqual(sb.equipmentCategories().map(x => x.name), ['Tools','Chemicals','Consumables','Safety gear'], 'equipment: the default categories');

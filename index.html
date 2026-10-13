@@ -11867,7 +11867,9 @@ function contractorAgreementHtml(c, priv){
 <h4>9. General</h4><p>This agreement is governed by the laws of New South Wales. Any change has to be agreed in writing by both of us.</p>`;
 }
 // What the agreement depends on: when any of it changes, the agreement made from it is out of date.
-function contractorAgreementInputs(c, priv){ return JSON.stringify([c.name, c.contactPerson, (priv && priv.abn) || '', c.services || [], c.deal || {}, c.paymentTerms || '']); }
+// The deal is compared field by field: the database keeps its keys in its own order, so the object as a whole would
+// look changed after a reload.
+function contractorAgreementInputs(c, priv){ const d = c.deal || {}; return JSON.stringify([c.name || '', c.contactPerson || '', (priv && priv.abn) || '', c.services || [], [d.type || '', contractorDealAmount(d), String(d.note || '').trim()], c.paymentTerms || '']); }
 function contractorAgreementState(c){
   const priv = contractorPrivate(c.id), a = priv.agreement || {};
   const status = c.agreementStatus || 'none';

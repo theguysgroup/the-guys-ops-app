@@ -129,7 +129,8 @@ function initPad(){
 }
 function clearPad(){ const cv = document.getElementById('pad'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); drawn = false; document.getElementById('ph').style.display = ''; upd(); }
 // Turned before signing: the pad is set up again at its new size, so the line is sharp.
-addEventListener('resize', () => { if (document.getElementById('pad') && !drawn) initPad(); });
+// Only a change of width counts: on a phone the height changes whenever the address bar shows or hides.
+addEventListener('resize', () => { const cv = document.getElementById('pad'); if (cv && !drawn && Math.round(cv.getBoundingClientRect().width * (window.devicePixelRatio || 1)) !== cv.width) initPad(); });
 async function sign(){
   if (PREVIEW) return;
   const b = document.getElementById('go'), err = document.getElementById('err');
