@@ -53,7 +53,7 @@ const DECLS = [
   'esc', 'quoteDueReason', 'shiftDaySummary', 'latePaymentDue', 'latePaymentDoneToday', 'reofferDue', 'assigneeNames', 'taskAssignedTo', 'myTaskDue', 'teamTaskDue', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
   // message templates (12 Oct)
   'TECH_JOB_TYPES', 'jobTypesForTech',
-  'EQUIPMENT_CATEGORY_DEFAULTS', 'equipmentCategories', 'equipmentCategoryOf', 'contractorDealAmount', 'contractorDealLine', 'contractorDealNote', 'contractorAgreementHtml', 'contractorAgreementInputs', 'ROLE_LABEL', 'roleLabel', 'peopleList', 'personActive', 'personRoles', 'personInGroup',
+  'EQUIPMENT_CATEGORY_DEFAULTS', 'equipmentCategories', 'equipmentCategoryOf', 'contractorDealAmount', 'contractorDealLine', 'contractorDealNote', 'contractorStatusFromPrivate', 'contractorAgreementHtml', 'contractorAgreementInputs', 'ROLE_LABEL', 'roleLabel', 'peopleList', 'personActive', 'personRoles', 'personInGroup',
   'ORG_CTR', 'orgExpectedCtr', 'ORG_CLEAN_FROM', 'orgPath', 'orgWindow', 'orgIsLead', 'orgLeadStats', 'ORG_EV_LABEL', 'orgEvidenceText',
   'PHONE_MENU_DEFAULT', 'phoneMenuOf', 'phoneMenuText', 'phoneSayDefault', 'phoneRingSeconds', 'phoneE164', 'phonePretty',
   'REVIEW_TPL_VARS', 'CHAT_TPL_VARS', 'MSG_TEMPLATES', 'msgTemplateText', 'fillTemplate', 'SMS_GSM', 'smsParts', 'templateProblems',
@@ -1130,6 +1130,8 @@ function testPeopleContractorsEquipment(sb){
   const noAmt = { ...c, deal:{ type:'commission', amount:'', note:'10% of the first job only.' } }, h2 = sb.contractorAgreementHtml(noAmt, {});
   assertEqual([sb.contractorDealLine(noAmt), sb.contractorDealNote(noAmt), sb.contractorDealNote(c), h2.includes('Also agreed'), (h2.match(/10% of the first job only\./g) || []).length, sb.contractorDealAmount({ type:'fixed', amount:'abc' }), sb.contractorDealAmount({ type:'other', amount:5 })],
     ['10% of the first job only.', '', 'Only jobs we pass on.', false, 1, null, null], 'contractors: with no amount the note is the deal, shown once (not again as "also agreed")');
+  assertEqual([{}, { agreement:{} }, { agreement:{ html:'x', state:'ready' } }, { agreement:{ html:'x', state:'opened' } }, { agreement:{ html:'x', state:'signed' } }, { agreement:{ html:'x' } }].map(sb.contractorStatusFromPrivate),
+    ['none', 'none', 'ready', 'opened', 'signed', 'ready'], 'contractors: the card status comes from the private agreement when the two differ');
   const k = sb.contractorAgreementInputs(c, { abn:'1' });
   assertEqual([k===sb.contractorAgreementInputs({ ...c }, { abn:'1' }), k===sb.contractorAgreementInputs({ ...c, deal:{ ...c.deal, amount:12 } }, { abn:'1' }), k===sb.contractorAgreementInputs(c, { abn:'2' }), k===sb.contractorAgreementInputs({ ...c, phone:'0412' }, { abn:'1' })],
     [true, false, false, true], 'contractors: the agreement goes out of date when the deal or the ABN changes, not the phone');

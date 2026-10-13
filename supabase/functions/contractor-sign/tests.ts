@@ -14,7 +14,7 @@ function fakeDb(priv: any[], sup: any[]) {
       eq: (k: string, v: any) => { st.f.push((r: any) => val(r, k) === v); return api; },
       in: (k: string, vs: any[]) => { st.f.push((r: any) => vs.includes(val(r, k))); return api; },
       update: (o: any) => { st.upd = o; return api; },
-      then: (ok: any, bad: any) => { if (st.upd) { const hit = rows(); hit.forEach((r: any) => Object.assign(r, st.upd)); return Promise.resolve({ data: hit.map((r: any) => ({ supplier_id: r.supplier_id })), error: null }).then(ok, bad); } return Promise.resolve({ data: rows(), error: null }).then(ok, bad); },
+      then: (ok: any, bad: any) => { if (st.upd) { const hit = rows(); hit.forEach((r: any) => Object.assign(r, st.upd)); return Promise.resolve({ data: hit.map((r: any) => ({ supplier_id: r.supplier_id })), error: null }).then(ok, bad); } return Promise.resolve({ data: rows().map((r: any) => JSON.parse(JSON.stringify(r))), error: null }).then(ok, bad); },
     };
     return api;
   };
@@ -60,7 +60,20 @@ const mk = (over: any = {}) => fakeDb(
   const realFrom = db.from; let reads = 0;
   (db as any).from = (t: string) => { const q = realFrom(t); if (t === "contractor_private" && ++reads === 2) db.T.contractor_private[0].sign_token = "NewTokenNewTokenNewToken0000"; return q; };
   r = await handle(db, { step: "sign", t: TOKEN, name: "Jake Morrison", agree: true, signature: SIG }, "", "", NOW);
-  eq([r.status, (r.body as any).reason, db.T.contractor_private[0].agreement.state, db.T.suppliers[0].agreement_status], [409, "already_signed", "sent", "sent"], "a signature on a replaced link changes nothing");
+  eq([r.status, (r.body as any).reason, db.T.contractor_private[0].agreement.state, db.T.suppliers[0].agreement_status], [409, "link", "sent", "sent"], "a signature on a replaced link changes nothing (and says the link no longer works)");
+  // The office sent it again between reading and saving: the signature goes onto the new copy, keeping when it was sent.
+  db = mk(); db.T.contractor_private[0].updated_at = "2026-10-13T01:00:00.000001+00:00";
+  const from2 = db.from; let n2 = 0;
+  (db as any).from = (t: string) => { const q = from2(t); if (t === "contractor_private" && ++n2 === 2) Object.assign(db.T.contractor_private[0], { updated_at: "2026-10-13T02:00:00+00:00", agreement: { ...db.T.contractor_private[0].agreement, sent_at: "2026-10-13T02:00:00Z", sent_via: "by text" } }); return q; };
+  r = await handle(db, { step: "sign", t: TOKEN, name: "Jake Morrison", agree: true, signature: SIG }, "", "", NOW);
+  const a2 = db.T.contractor_private[0].agreement;
+  eq([r.status, a2.state, a2.signed?.name, a2.sent_via, db.T.suppliers[0].agreement_status], [200, "signed", "Jake Morrison", "by text", "signed"], "sent again at the same moment: signed, and the new send is kept");
+  // An open counted only on the row as it was read.
+  db = mk(); db.T.contractor_private[0].updated_at = "a";
+  const from3 = db.from; let n3 = 0;
+  (db as any).from = (t: string) => { const q = from3(t); if (t === "contractor_private" && ++n3 === 2) db.T.contractor_private[0].updated_at = "b"; return q; };
+  await handle(db, { step: "get", t: TOKEN }, "", "", NOW);
+  eq([db.T.contractor_private[0].agreement.state, db.T.suppliers[0].agreement_status], ["sent", "sent"], "changed while opening: the open is not written over it");
   eq((await handle(mk({ html: "" }), { step: "get", t: TOKEN }, "", "", NOW)).status, 404, "no agreement text: nothing to sign");
   console.log(`contractor-sign: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);

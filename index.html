@@ -161,6 +161,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .checkline { display:flex; align-items:center; gap:6px; font-size:12.6px; }
 .checkline input[type=checkbox] { width:auto; }
 
+a.btn { text-decoration: none; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 8px 16px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 13px; font-weight: 600; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease, transform .12s cubic-bezier(.34,1.56,.64,1); white-space: nowrap; }
 .btn:hover { background: var(--surface-2); transform: translateY(-1px); }
 .btn:active { transform: translateY(0) scale(.96); transition-duration: .07s; }
@@ -887,7 +888,7 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .eq-row.editing { grid-template-columns: minmax(0, 1fr) 200px auto; background: var(--surface-2); }
 .eq-acts { display: inline-flex; gap: 4px; }
 .cat-pill { display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 99px; background: color-mix(in srgb, var(--c) 13%, var(--surface)); color: color-mix(in srgb, var(--c) 85%, var(--ink)); white-space: nowrap; }
-.cat-edit-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+.cat-edit-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 4.2em auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
 .cat-edit-row input[type=color] { width: 34px; height: 30px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
 .pp-rows { display: grid; gap: 5px; font-size: 12.5px; color: var(--ink-soft); }
@@ -3878,7 +3879,7 @@ async function doLogout(){
   await sb.auth.signOut();
   teardownRealtimeSubscriptions();
   STATE.data = null; STATE.dataLoaded = false; STATE.profiles = []; STATE.currentProfileId = null;
-  CPRIV = { map:{}, loaded:false, loading:false, err:'' };   // ABN, bank and agreements never stay in memory for the next login
+  CPRIV = { map:{}, loaded:false, loading:false, err:'', pending:null };   // ABN, bank and agreements never stay in memory for the next login
   resetUI();
   // onAuthStateChange fires SIGNED_OUT and calls render() itself
 }
@@ -11752,26 +11753,52 @@ function contractorServiceColor(s){ return CONTRACTOR_SERVICE_COLOR[s] || (LEAD_
 const CONTRACTOR_TERMS = ['On receipt','7 days','14 days','30 days'];
 const CONTRACTOR_AGREEMENT_VERSION = 1;
 const SIGN_LINK_DAYS = 14;
-let CPRIV = { map:{}, loaded:false, loading:false, err:'' };
+let CPRIV = { map:{}, loaded:false, loading:false, err:'', pending:null };
 let CON_UI = { filter:'all', q:'', showBank:null };
 function canSeeContractorPrivate(){ return canEditCatalog(); }
 async function loadContractorPrivate(){
   if (CPRIV.loading || !canSeeContractorPrivate()) return;
-  CPRIV.loading = true;
+  const mine = CPRIV; mine.loading = true;
   const { data, error } = await sb.from('contractor_private').select('*');
-  CPRIV.loading = false;
+  mine.loading = false;
+  if (CPRIV !== mine) return;   // signed out meanwhile: nothing is kept for the next login
   if (error) { CPRIV.err = error.message; CPRIV.loaded = false; render(); return; }
   CPRIV.err = ''; CPRIV.loaded = true;
   CPRIV.map = {}; (data || []).forEach(r => { CPRIV.map[r.supplier_id] = r; });
+  (STATE.data?.suppliers || []).forEach(c => healContractorStatus(c.id));
   render();
 }
-// The row as it is now in the database (a contractor may have signed since the page loaded).
+// The row as it is now in the database (a contractor may have signed since the page loaded). Waits for a detail
+// that is still being saved, so an ABN typed a moment ago is in the row that is read.
 async function freshContractorPrivate(id){
+  const mine = CPRIV;
+  await mine.pending;
   const { data, error } = await sb.from('contractor_private').select('*').eq('supplier_id', id).limit(1);
+  if (CPRIV !== mine) return null;
   if (error) { showToast('Could not read the agreement: ' + error.message, { kind: 'error' }); return null; }
   const row = (data || [])[0] || null;
   if (row) CPRIV.map[id] = row; else delete CPRIV.map[id];
   return contractorPrivate(id);
+}
+// The agreement's progress is kept in two places: in the private row (the real one, written by the signing page) and
+// on the contractor's card (what everyone with the Resources page sees). When they differ (a save that failed half way),
+// the card is set from the private row.
+function contractorStatusFromPrivate(priv){ const a = (priv && priv.agreement) || {}; return !a.html ? 'none' : ['ready','sent','opened','signed'].includes(a.state) ? a.state : 'ready'; }
+function healContractorStatus(id){
+  const c = (STATE.data?.suppliers || []).find(x => x.id===id); if (!c || !contractorPrivateReady() || readOnlyReason()) return;
+  const a = contractorPrivate(id).agreement || {}, want = contractorStatusFromPrivate(contractorPrivate(id));
+  const patch = want==='signed' ? { agreementStatus: want, agreementSignedAt: (a.signed && a.signed.at) || c.agreementSignedAt || null, agreementSigner: (a.signed && a.signed.name) || c.agreementSigner || '' }
+    : { agreementStatus: want, agreementSignedAt: null, agreementSigner: '' };
+  if ((c.agreementStatus || 'none')===patch.agreementStatus && (c.agreementSignedAt || null)===patch.agreementSignedAt && (c.agreementSigner || '')===patch.agreementSigner) return;
+  db.suppliers.update(id, patch);
+}
+// Opening a card reads both again: a signature that came in since shows straight away, without reloading the page.
+async function refreshContractor(id){
+  const sq = await sb.from('suppliers').select('agreement_status, agreement_signed_at, agreement_signer').eq('id', id).limit(1);
+  const c = (STATE.data?.suppliers || []).find(x => x.id===id), r = (sq.data || [])[0];
+  if (c && r) Object.assign(c, { agreementStatus: r.agreement_status || 'none', agreementSignedAt: r.agreement_signed_at || null, agreementSigner: r.agreement_signer || '' });
+  if (canSeeContractorPrivate() && await freshContractorPrivate(id)) healContractorStatus(id);
+  if (UI.tab==='reference') render();
 }
 const contractorPrivateReady = () => canSeeContractorPrivate() && CPRIV.loaded && !CPRIV.err;
 // An agreement change is saved only if the row is still exactly as it was read: a contractor may sign at that very
@@ -11796,11 +11823,16 @@ function contractorPrivate(id){ return CPRIV.map[id] || { supplier_id: id, legal
 async function saveContractorPrivate(id, patch){
   if (readOnlyReason()) { showToast(readOnlyReason()); return false; }
   if (!contractorPrivateReady()) { showToast('The private details have not loaded yet. Try again in a moment.'); return false; }
-  const row = { supplier_id: id, ...patch, updated_at: new Date().toISOString() };
-  const { error } = await sb.from('contractor_private').upsert(row, { onConflict: 'supplier_id' });
-  if (error) { showToast('Not saved: ' + error.message, { kind: 'error' }); return false; }
-  CPRIV.map[id] = { ...contractorPrivate(id), ...row };
-  return true;
+  const mine = CPRIV;
+  const run = (mine.pending || Promise.resolve()).then(async () => {
+    const row = { supplier_id: id, ...patch, updated_at: new Date().toISOString() };
+    const { error } = await sb.from('contractor_private').upsert(row, { onConflict: 'supplier_id' });
+    if (error) { showToast('Not saved: ' + error.message, { kind: 'error' }); return false; }
+    if (CPRIV===mine) CPRIV.map[id] = { ...contractorPrivate(id), ...row };
+    return true;
+  });
+  mine.pending = run.catch(() => false);
+  return run;
 }
 // "What we agreed", in one sentence (the card, the panel, the agreement and the signing page all use it).
 // The amount, when the deal is a commission or a fixed sum with a real number; otherwise null (the note says it).
@@ -11882,8 +11914,7 @@ function renderContractorsTab(data){
 }
 function openContractor(id){
   UI.reference.contractorId = id && UI.reference.contractorId!==id ? id : null; CON_UI.showBank = null; render();
-  // Opening a card reads the private details again, so a signature that came in since shows straight away.
-  if (UI.reference.contractorId && canSeeContractorPrivate()) freshContractorPrivate(UI.reference.contractorId).then(() => render());
+  if (UI.reference.contractorId) refreshContractor(UI.reference.contractorId);
 }
 function refreshContractorCards(){ const g = document.querySelector('.con-grid'); if (g) g.innerHTML = renderContractorCards(STATE.data) || '<div class="hint">No contractor matches.</div>'; }
 function renderContractorPanel(c){
@@ -12067,7 +12098,7 @@ async function makeContractorAgreement(id, again){
     // A new agreement gets a new link: the old link stops working.
     const ok = await saveContractorAgreementRow(id, priv, { agreement, sign_token: newSignToken(), sign_token_expires: new Date(Date.now() + SIGN_LINK_DAYS * 864e5).toISOString() });
     if (!ok) return;
-    db.suppliers.update(id, { agreementStatus: 'ready', agreementSignedAt: null, agreementSigner: '' });
+    healContractorStatus(id);   // the card: Agreement made, not sent
     showToast(again ? 'A new agreement is made: send them the new link' : 'Agreement made');
     render(); openContractorAgreement(id);
   };
@@ -12096,9 +12127,10 @@ function printContractorAgreement(){
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Subcontractor agreement</title><style>body{font-family:Georgia,serif;color:#1d1a16;max-width:720px;margin:30px auto;padding:0 24px;line-height:1.6;font-size:14.5px}h1{font-family:Arial,sans-serif;font-size:20px;margin:0}.agr-sub{font-family:Arial,sans-serif;font-size:12px;color:#6b6258;margin-bottom:16px}h4{font-family:Arial,sans-serif;font-size:13.5px;margin:14px 0 3px}p{margin:0 0 8px}mark{background:none;color:inherit;font-weight:600}.agr-sig{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:24px;font-family:Arial,sans-serif;font-size:12px}.agr-sig div{border-top:1px solid #b9b0a3;padding-top:6px}.agr-sig img{height:60px;max-width:100%;object-fit:contain;display:block}.hint{color:#8a8175}</style></head><body>${doc.innerHTML}</body></html>`);
   w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
 }
-function openSendAgreement(id){
+async function openSendAgreement(id){
   const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
-  const priv = contractorPrivate(id);
+  const priv = await freshContractorPrivate(id); if (!priv) return;
+  if ((priv.agreement || {}).state==='signed') { healContractorStatus(id); render(); showToast('They have already signed it'); return; }
   if (!priv.sign_token || !priv.agreement || !priv.agreement.html) { showToast('Make the agreement first'); return; }
   const expired = !priv.sign_token_expires || Date.parse(priv.sign_token_expires) <= Date.now();
   const url = contractorSignUrl(priv.sign_token), me = (getCurrentProfile()?.fullName || '').split(' ')[0];
@@ -12107,23 +12139,24 @@ function openSendAgreement(id){
   const sms = phone && smsOk ? `sms:${phone}${ios ? '&' : '?'}body=${encodeURIComponent(text)}` : '', mail = c.email ? `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Subcontractor agreement · The Guys Service Group')}&body=${encodeURIComponent(text)}` : '';
   openPopup(`<h3 style="margin:0 0 4px">Send the signing link</h3><div class="hint" style="margin-bottom:12px">${esc(c.contactPerson || c.name)} opens it on their phone, reads the agreement and signs with a finger. The link works for ${SIGN_LINK_DAYS} days and only for this agreement.${expired ? ' <b>The last link had expired: it works again for another ' + SIGN_LINK_DAYS + ' days.</b>' : ''}</div>
     <div style="display:grid;gap:8px">
-      ${sms ? `<a class="btn" style="justify-content:flex-start" href="${esc(sms)}" onclick="markAgreementSent('${c.id}','by text')">${ico('phone', 14)} Text to ${esc(c.phone)}</a>` : ''}
-      ${mail ? `<a class="btn" style="justify-content:flex-start" href="${esc(mail)}" onclick="markAgreementSent('${c.id}','by email')">${ico('mail', 14)} Email to ${esc(c.email)}</a>` : ''}
-      <button class="btn" style="justify-content:flex-start" onclick="navigator.clipboard.writeText(document.getElementById('agr-msg').value).then(()=>{showToast('Copied');markAgreementSent('${c.id}','by a copied link')})">${ico('copy', 14)} Copy the message with the link</button>
+      ${sms ? `<a class="btn" style="justify-content:flex-start" href="${esc(sms)}" onclick="markAgreementSent('${c.id}','by text','${esc(priv.sign_token)}')">${ico('phone', 14)} Text to ${esc(c.phone)}</a>` : ''}
+      ${mail ? `<a class="btn" style="justify-content:flex-start" href="${esc(mail)}" onclick="markAgreementSent('${c.id}','by email','${esc(priv.sign_token)}')">${ico('mail', 14)} Email to ${esc(c.email)}</a>` : ''}
+      <button class="btn" style="justify-content:flex-start" onclick="navigator.clipboard.writeText(document.getElementById('agr-msg').value).then(()=>{showToast('Copied');markAgreementSent('${c.id}','by a copied link','${esc(priv.sign_token)}')})">${ico('copy', 14)} Copy the message with the link</button>
     </div>
     <textarea id="agr-msg" readonly rows="4" style="width:100%;margin-top:12px;font-size:12.5px">${esc(text)}</textarea>
     <div class="hint" style="margin-top:6px">The text and email open on this device, so you send them yourself.</div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><a class="btn ghost" href="${esc(url + '&preview=1')}" target="_blank" rel="noopener">See what they see</a><button class="btn primary" onclick="closePopup()">Done</button></div>`);
-  if (expired) saveContractorPrivate(id, { sign_token_expires: new Date(Date.now() + SIGN_LINK_DAYS * 864e5).toISOString() });
+  if (expired && !readOnlyReason()) saveContractorAgreementRow(id, priv, { sign_token_expires: new Date(Date.now() + SIGN_LINK_DAYS * 864e5).toISOString() });
 }
-async function markAgreementSent(id, via){
+async function markAgreementSent(id, via, token){
   const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
   const priv = await freshContractorPrivate(id); if (!priv) return;
-  if ((priv.agreement || {}).state==='signed') { render(); return; }   // signed meanwhile: nothing to mark
+  if ((priv.agreement || {}).state==='signed') { healContractorStatus(id); render(); return; }   // signed meanwhile: nothing to mark
+  if (token && priv.sign_token!==token) { render(); showToast('A new agreement was made a moment ago, so this link no longer works. Open "Send" again for the new link.', { kind: 'error' }); return; }
   const a = { ...(priv.agreement || {}) };
   a.sent_at = new Date().toISOString(); a.sent_via = via; if (a.state==='ready') a.state = 'sent';
   const ok = await saveContractorAgreementRow(id, priv, { agreement: a });
-  if (ok && (c.agreementStatus==='ready' || c.agreementStatus==='none')) db.suppliers.update(id, { agreementStatus: 'sent' });
+  if (ok) healContractorStatus(id);   // the card: Waiting for signature
   render();
 }
 function openEquipSpendModal(itemId){
