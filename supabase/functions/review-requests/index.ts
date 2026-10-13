@@ -2,12 +2,14 @@
 //
 // Called every 15 minutes by the info@ Google script with the recent week tabs of the jobs sheet. Each run:
 //   1. keeps Jobs & Commissions in step with the sheet (syncSheetJobs);
-//   2. when settings.review_requests_auto is on (Ofek 5 Oct: switched on only at go-live), asks every new job from
+//   2. when settings.review_requests_auto is on (the one "Ask automatically" switch: automatic asking depends on it alone,
+//      Ofek 13 Oct; switched on only at go-live, Ofek 5 Oct), asks every new job from
 //      settings.reviews_from on that hasn't been asked: as soon as the job is in OPS, between 08:00 and 20:00 Sydney,
 //      otherwise at 10:00 the next morning. Skipped: review taken, "don't ask", a customer asked in the last 6 months.
 //      A job it can't ask for (no customer card in the CRM, no mobile or email on the card, unknown job type) is written
 //      down as skipped, and the app puts it in the "Ask for a review" bubble on My Day for the office to fix and ask;
-//   3. sends what is due while settings.review_requests_enabled is on (08:00–20:00 Sydney):
+//   3. sends what is due (08:00–20:00 Sydney) while automatic asking is on, or while settings.review_requests_enabled
+//      (no switch in the app; it lets requests asked by hand go out) is on:
 //      - the SMS through the GHL workflow (GHL_REVIEW_WEBHOOK_URL), from the business's Australian number;
 //      - the email is handed to the same Google script, which runs under info@theguyservicegroup.com and sends it from
 //        that mailbox (real sender name, no spam folder). Emails are only handed out to a caller that proves — with a
@@ -293,6 +295,16 @@ async function isMailbox(idToken: unknown): Promise<boolean> {
   return await googleSaysMailbox(idToken);
 }
 
+// The one switch (Ofek 13 Oct): "Ask automatically" in Settings → Google reviews = settings.review_requests_auto. It alone
+// decides whether new jobs are asked by themselves, and an automatic request goes out with it on. The older
+// review_requests_enabled (no switch in the app) still lets requests asked by hand go out, as before.
+// deno-lint-ignore no-explicit-any
+export function reviewSwitches(s: any) {
+  const enabled = !!(s && s.review_requests_enabled), auto = !!(s && s.review_requests_auto);
+  return { enabled, auto, send: enabled || auto };
+}
+const AUTO_OFF_REASON = "automatic asking is off";
+
 // deno-lint-ignore no-explicit-any
 async function handle(sb: any, rows: any[], nowMs: number) {
   const out = { queued: 0, skipped: 0, sent: 0, errors: 0 };
@@ -300,12 +312,12 @@ async function handle(sb: any, rows: any[], nowMs: number) {
   const sheetNoAsk = new Set((Array.isArray(rows) ? rows : []).slice(0, 200).filter((r) => reviewDoNotAsk(r?.review)).map((r) => digits(r?.invoice)).filter(Boolean));
   const { data: settings } = await sb.from("settings").select("review_requests_enabled, review_requests_auto, reviews_from").limit(1);
   const s = (settings && settings[0]) || {};
-  const enabled = !!s.review_requests_enabled, auto = !!s.review_requests_auto;
-  if (enabled && auto) { const a = await autoAsk(sb, nowMs, s.reviews_from, sheetNoAsk); out.queued += a.queued; out.skipped += a.skipped; }
-  // Release what's due — only while switched on and during sending hours in Sydney. The SMS goes out here through GHL;
-  // the email is picked up by the info@ script (emailsToSend below).
-  if (enabled && inSendWindow(nowMs)) { const r = await releaseDue(sb, nowMs, sheetNoAsk); out.sent += r.sent; out.skipped += r.skipped; out.errors += r.errors; }
-  return { ...out, enabled, auto, ghl: !!GHL_REVIEW_WEBHOOK_URL };
+  const { enabled, auto, send } = reviewSwitches(s);
+  if (auto) { const a = await autoAsk(sb, nowMs, s.reviews_from, sheetNoAsk); out.queued += a.queued; out.skipped += a.skipped; }
+  // Release what's due, during sending hours in Sydney. The SMS goes out here through GHL; the email is picked up by the
+  // info@ script (emailsToSend below). An automatic request still waiting after the switch went off is not sent.
+  if (send && inSendWindow(nowMs)) { const r = await releaseDue(sb, nowMs, sheetNoAsk, undefined, auto); out.sent += r.sent; out.skipped += r.skipped; out.errors += r.errors; }
+  return { ...out, enabled, auto, send, ghl: !!GHL_REVIEW_WEBHOOK_URL };
 }
 
 // ── One job's request, checked and put in the queue: by hand ("Ask for review", Ofek 2 Oct) or automatically when the
@@ -387,7 +399,7 @@ async function autoAsk(sb: any, nowMs: number, fromDay: unknown, sheetNoAsk: Set
 
 // Sends the waiting requests that are due (or just one, right after it was made).
 // deno-lint-ignore no-explicit-any
-async function releaseDue(sb: any, nowMs: number, sheetNoAsk: Set<string>, onlyId?: string) {
+async function releaseDue(sb: any, nowMs: number, sheetNoAsk: Set<string>, onlyId?: string, autoOn = true) {
   const out = { sent: 0, skipped: 0, errors: 0 };
   const todaySyd = sydParts(nowMs).day;
   let q = sb.from("review_requests").select("*").eq("status", "waiting").lte("send_after", new Date(nowMs).toISOString());
@@ -399,6 +411,8 @@ async function releaseDue(sb: any, nowMs: number, sheetNoAsk: Set<string>, onlyI
     // Too late to ask: an automatic one for a job more than a week old (the old sheet ones: 2 days). By hand: any time.
     const oldest = r.source === "auto" ? shiftDay(todaySyd, -7) : shiftDay(todaySyd, -2);
     if (r.source !== "manual" && (!r.job_date || r.job_date < oldest)) { await skip("too late to ask"); continue; }
+    // Automatic asking switched off while this one waited (Ofek 13 Oct: off = nobody is asked by themselves).
+    if (r.source === "auto" && !autoOn) { await skip(AUTO_OFF_REASON); continue; }
     // Marked "review taken" or "don't ask" while it waited (the tech got the review on site, or a complaint came in).
     const { data: jj } = r.job_id
       ? await sb.from("jobs").select("review_taken, review_do_not_ask").eq("id", r.job_id).limit(1)
@@ -539,8 +553,8 @@ async function askForReview(sb: any, jobId: string, by: string, nowMs: number, a
   if (!job) return { ok: false, reason: "job_not_found" };
   const q = await queueRequest(sb, job, nowMs, { by, source: "manual", again });
   if (!q.ok) return q;
-  const { data: settings } = await sb.from("settings").select("review_requests_enabled").limit(1);
-  const enabled = !!(settings && settings[0] && settings[0].review_requests_enabled);
+  const { data: settings } = await sb.from("settings").select("review_requests_enabled, review_requests_auto").limit(1);
+  const enabled = reviewSwitches(settings && settings[0]).send;
   if (enabled && q.id && q.now) await releaseDue(sb, nowMs, new Set(), q.id);
   const { data: after } = await sb.from("review_requests").select("status, sent_at, send_after, reason").eq("id", q.id).limit(1);
   const a = after && after[0];
@@ -600,7 +614,7 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
       // The info@ script also sends the recent week tabs: keep Jobs & Commissions in step with the sheet.
       const jobs = mailbox && Array.isArray(body.jobs) ? await syncSheetJobs(sb, body.jobs, Date.now()) : null;
       const result = await handle(sb, body.rows || [], Date.now());
-      return json({ ok: true, ...result, mailbox, jobs, emails: mailbox && result.enabled ? await emailsToSend(sb, Date.now()) : [] });
+      return json({ ok: true, ...result, mailbox, jobs, emails: mailbox && result.send ? await emailsToSend(sb, Date.now()) : [] });
     }
     catch (e) { console.error("review-requests failed:", e); return json({ error: String((e as Error).message || e) }, 500); }
   });

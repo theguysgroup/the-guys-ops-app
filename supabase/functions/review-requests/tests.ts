@@ -176,6 +176,59 @@ const job = (id: string, inv: string, extra: any = {}) => ({ id, invoice_number:
     eq(bad.T.review_requests.find((r: any) => r.invoice_number === "2701").status, "error", "text failed → error, the office sees it");
   }
 
+  // ── one switch, "Ask automatically" (Ofek 13 Oct): review_requests_auto alone decides automatic asking ──
+  {
+    eq(reviewSwitches({ review_requests_enabled: true, review_requests_auto: false }), { enabled: true, auto: false, send: true }, "today's live values: nothing automatic, asked by hand goes out");
+    eq(reviewSwitches({ review_requests_enabled: false, review_requests_auto: true }), { enabled: false, auto: true, send: true }, "the hidden flag off, the switch on: sends");
+    eq(reviewSwitches({ review_requests_enabled: false, review_requests_auto: false }), { enabled: false, auto: false, send: false }, "both off: nothing goes");
+    eq(reviewSwitches(null), { enabled: false, auto: false, send: false }, "no settings row: nothing goes");
+    eq(reviewSwitches(undefined), { enabled: false, auto: false, send: false }, "no settings at all: nothing goes");
+    const seed = () => ({
+      contacts: [card("c1", "Sarah Smith", "0412 345 678", "sarah@example.com")],
+      jobs: [job("j1", "2701", { contact_id: "c1" })],
+    });
+    const by = (db: any, inv: string) => db.T.review_requests.find((r: any) => r.invoice_number === inv);
+    // Live values (enabled on, switch off): nothing automatic.
+    const live = fakeDb(seed()); texts.length = 0;
+    const o0 = await handle(live, [], TUE_1000);
+    eq([o0.queued, live.T.review_requests.length, texts.length, o0.auto, o0.send], [0, 0, 0, false, true], "live values: nothing is asked by itself");
+    // The hidden flag is no longer a second gate.
+    const flagOff = fakeDb(seed()); flagOff.T.settings[0].review_requests_enabled = false; flagOff.T.settings[0].review_requests_auto = true; texts.length = 0;
+    const o1 = await handle(flagOff, [], TUE_1000);
+    eq([by(flagOff, "2701").status, by(flagOff, "2701").source, texts.map((t) => t.job_number), o1.send], ["sent", "auto", ["2701"], true], "switch on, hidden flag off: asked at once");
+    // At night with the hidden flag off: waits, then goes in the morning.
+    const nightOff = fakeDb(seed()); nightOff.T.settings[0].review_requests_enabled = false; nightOff.T.settings[0].review_requests_auto = true; texts.length = 0;
+    await handle(nightOff, [], Date.parse("2026-10-06T10:00:00Z"));
+    eq([by(nightOff, "2701").status, by(nightOff, "2701").send_after], ["waiting", "2026-10-06T23:00:00.000Z"], "hidden flag off, entered at 21:00: waits for 10:00");
+    await handle(nightOff, [], Date.parse("2026-10-06T23:00:00Z"));
+    eq([by(nightOff, "2701").status, texts.filter((t) => t.job_number === "2701").length], ["sent", 1], "hidden flag off: goes at 10:00");
+    // Switched off while an automatic request waits overnight: not sent; the office sees it.
+    const turnedOff = fakeDb(seed()); turnedOff.T.settings[0].review_requests_auto = true; texts.length = 0;
+    await handle(turnedOff, [], Date.parse("2026-10-06T10:00:00Z"));
+    eq(by(turnedOff, "2701").status, "waiting", "entered at 21:00 with the switch on: waits");
+    turnedOff.T.settings[0].review_requests_auto = false;
+    await handle(turnedOff, [], Date.parse("2026-10-06T23:00:00Z"));
+    eq([by(turnedOff, "2701").status, by(turnedOff, "2701").reason, texts.filter((t) => t.job_number === "2701").length], ["skipped", "automatic asking is off", 0], "switched off overnight: not sent in the morning");
+    // Asked by hand at night with the switch off (live values): goes in the morning as today.
+    const NIGHT = Date.parse("2026-10-06T10:00:00Z");
+    const db2 = fakeDb({ contacts: [card("c1", "Sarah Smith", "0412 345 678")], jobs: [job("j1", "2601", { contact_id: "c1" })] }); texts.length = 0;
+    const r2 = await askForReview(db2, "j1", "Ron", NIGHT);
+    eq([r2.ok, r2.status], [true, "waiting"], "by hand at 21:00, switch off: waits");
+    await handle(db2, [], Date.parse("2026-10-06T23:00:00Z"));
+    eq([by(db2, "2601").status, texts.map((t) => t.job_number)], ["sent", ["2601"]], "by hand: goes at 10:00 with the switch off");
+    // Both off: asked by hand is queued and never sent (as before).
+    const both = fakeDb(seed()); both.T.settings[0].review_requests_enabled = false; texts.length = 0;
+    const r3 = await askForReview(both, "j1", "Ron", TUE_1000);
+    eq([r3.ok, r3.status, r3.enabled, texts.length], [true, "waiting", false, 0], "both off: by hand is only queued");
+    const o3 = await handle(both, [], TUE_1000 + 15 * 60000);
+    eq([o3.sent, by(both, "2701").status], [0, "waiting"], "both off: still not sent");
+    // Switch on, hidden flag off: asked by hand goes at once.
+    const manualOn = fakeDb({ ...seed(), jobs: [job("j1", "2701", { contact_id: "c1", date: "2026-10-02" })] });
+    manualOn.T.settings[0].review_requests_enabled = false; manualOn.T.settings[0].review_requests_auto = true; texts.length = 0;
+    const r4 = await askForReview(manualOn, "j1", "Ron", TUE_1000);
+    eq([r4.ok, r4.status, r4.enabled, texts.length], [true, "sent", true, 1], "switch on, hidden flag off: by hand goes at once");
+  }
+
   // ── jobs sheet → OPS: a "don't ask" note marks the job (one way) ──
   {
     const db = fakeDb({ jobs: [

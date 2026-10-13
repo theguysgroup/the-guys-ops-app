@@ -38,7 +38,7 @@ const DECLS = [
   'blankPerfBucket', 'addToPerfBucket', 'finalizePerfBucket', 'computeProfitByWeekInRange', 'computeBusinessPerformance',
   'contactHasJob',
   // reminders
-  'fmtDateShort', 'computeReminders', 'EMP_DOCS', 'EMP_DOC_WARN_DAYS', 'fmtDateYear', 'employeeDocExpiry', 'abnValid', 'employeeMissing',
+  'fmtDateShort', 'computeReminders', 'TECH_REMINDER_TYPES', 'OWNER_REMINDER_TYPES', 'remindersFor', 'EMP_DOCS', 'EMP_DOC_WARN_DAYS', 'fmtDateYear', 'employeeDocExpiry', 'abnValid', 'employeeMissing',
   // payroll + net profit
   'PAYROLL_HOURLY_RATE', 'PAYROLL_BOOKING_BONUS', 'PAYROLL_HEBREW_NAMES', 'payCatalog', 'payTiersOk', 'payHourlyFor', 'payHebrewNames', 'bookingBonus', 'nextBookingTier',
   'salesLogBookings', 'salesLogPay', 'payrollWeekOf', 'shiftPayrollWeek', 'payrollRangeText', 'payMoney', 'jobPaidDate',
@@ -55,10 +55,12 @@ const DECLS = [
   'TECH_JOB_TYPES', 'jobTypesForTech',
   'EQUIPMENT_CATEGORY_DEFAULTS', 'equipmentCategories', 'equipmentCategoryOf', 'contractorDealAmount', 'contractorDealLine', 'contractorDealNote', 'contractorStatusFromPrivate', 'contractorAgreementHtml', 'contractorAgreementInputs', 'ROLE_LABEL', 'roleLabel', 'peopleList', 'personActive', 'personRoles', 'personInGroup',
   'ORG_CTR', 'orgExpectedCtr', 'ORG_CLEAN_FROM', 'orgPath', 'orgWindow', 'orgIsLead', 'orgLeadStats', 'ORG_EV_LABEL', 'orgEvidenceText',
-  'PHONE_MENU_DEFAULT', 'phoneMenuOf', 'phoneMenuText', 'phoneSayDefault', 'phoneRingSeconds', 'phoneE164', 'phonePretty',
+  'PHONE_MENU_DEFAULT', 'phoneMenuOf', 'phoneMenuText', 'phoneSayDefault', 'phoneRingSeconds', 'phoneE164', 'phonePretty', 'PHONE_BACKUP_DAY', 'phoneBackupHours', 'phoneBackupDayOk', 'phonePersonKeyFor',
   'REVIEW_TPL_VARS', 'CHAT_TPL_VARS', 'MSG_TEMPLATES', 'msgTemplateText', 'fillTemplate', 'SMS_GSM', 'smsParts', 'templateProblems',
   // review requests (5 Oct)
   'reviewInvoiceKey', 'reviewNeed', 'REVIEW_DEFAULTS', 'reviewCfg', 'reviewDefaultFor', 'reviewLinkFor',
+  // one "Ask automatically" switch, the Closings box and the message preview (13 Oct)
+  'reviewAutoOn', 'closingShowsNoAsk', 'TPL_EXAMPLE', 'tplPreviewHtml', 'reviewPreviewValues',
   // Jobs & Commissions period (6 Oct)
   'JOBS_RANGES', 'jobsRangeBounds',
   // equipment & materials paid back with the weekly pay (6 Oct)
@@ -74,8 +76,15 @@ const DECLS = [
   // Google Ads: real leads vs Google's count, tracking problems (9 Oct)
   'adsConvKind', 'adsConvShortName', 'adsTracking',
   // The nightly lead check: info@ emails vs the app (9 Oct)
-  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'toastKind', 'NSW_HOLIDAYS', 'OFFICE', 'officeHoursFor', 'nextOfficeDay', 'hhmmToMins', 'minsToHhmm', 'officeHoursText', 'catalogHours', 'catalogObject', 'brandName', 'RULES', 'ACTIVE', 'DIV_LABEL', 'CATALOG', 'LEAD_STAGE_PICKABLE', 'LEAD_STATUS_COLOR', 'LEAD_STATUS_INK', 'stageColor', 'stageInk', 'replaceArr', 'divLabel', 'activeOnly', 'inkFor', 'catalogBase', 'catalogId', 'catalogList', 'catalogRules', 'applyCatalog', 'tagColor', 'sameLiveRow', 'sameValue', 'LOCAL_WRITES', 'noteLocalWrite', 'settleLocalWrites',
+  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'toastKind', 'NSW_HOLIDAYS', 'OFFICE', 'officeHoursFor', 'nextOfficeDay', 'hhmmToMins', 'minsToHhmm', 'officeHoursText', 'catalogHours', 'catalogObject', 'brandName', 'RULES', 'ACTIVE', 'DIV_LABEL', 'CATALOG', 'LEAD_STAGE_PICKABLE', 'LEAD_STATUS_COLOR', 'LEAD_STATUS_INK', 'stageColor', 'stageInk', 'replaceArr', 'divLabel', 'activeOnly', 'inkFor', 'catalogBase', 'catalogId', 'catalogList', 'catalogRules', 'lostReasonLabel', 'lostReasonCanDelete', 'catalogShown', 'catalogFindByName', 'SOURCE_HOSTS', 'sourceHost', 'sourceSetupSteps', 'sourceLeadStats', 'applyCatalog', 'STAGE_CORE', 'stageOn', 'stagesPickable', 'stagesShown', 'stagesInProgress', 'stageIsBuiltin', 'stageLeadsIn', 'stageStoredOnly', 'stageMovePlan', 'stageListWithNew', 'STAGE_RULE_TEXT', 'CAT_SWATCHES', 'tagColor', 'sameLiveRow', 'sameValue', 'LOCAL_WRITES', 'noteLocalWrite', 'settleLocalWrites',
   'LEAD_CHECK_DAYS', 'leadPhoneKey', 'leadCheckOpen', 'leadCheckLatest', 'leadDivisionFromSubject', 'adsEmailCheck',
+  // Settings round 2, small fixes (13 Oct)
+  'mfaStaleFactors', 'mfaFriendlyName', 'pushCanTest', 'phoneBarMode',
+  // Region and format, business details (14 Oct)
+  'DAY_NAMES', 'WEEK_RULES_MEMO', 'weekRules', 'weekRulesNow', 'weekBounds', 'weekStartDay', 'weekDaysName', 'weekOneOff', 'weekKeysInRange', 'weekChangePlan',
+  'fyStartMonth', 'financialYearOf', 'DATE_FORMATS', 'dateFormatOf', 'fmtDateNumeric', 'invDate', 'invWeek', 'AU_STATES', 'businessAddress', 'BIZ_INSURANCE', 'businessInsuranceStatus',
+  // VA automatic log-out, per person (13 Oct)
+  'VA_SHIFT_DEFAULT', 'vaShiftTimes', 'vaShiftTimeProblem', 'vaEndTimeText',
 ];
 
 function extractDecl(source, name){
@@ -411,6 +420,8 @@ function testPayroll(sb){
     { person:'Ron', date:'2026-09-21', hours:8,   bookingsAircon:9, bookingsChimney:9, bookingsPw:9 },  // next week: excluded
   ];
   const h = sb.computePayrollHourly(sb.STATE.data, 'Ron', '2026-09-13');
+  // A key that isn't a date never loops forever (found by the 13 Oct differential test): no days, total 0.
+  assertEqual(['', 'garbage'].map(k => { const x = sb.computePayrollHourly(sb.STATE.data, 'Ron', k); return [x.days.length, x.total]; }), [[0, 0], [0, 0]], 'payroll hourly: a bad week key gives an empty week, not an endless loop');
   assertEqual(h.hours, 40, 'hourly: hours this week');
   assertEqual(h.bookings, 36, 'hourly: bookings this week');
   assertEqual(h.bonuses, 60, 'hourly: bonuses 10+15+25+0+10');
@@ -1068,6 +1079,39 @@ function testReviewSettings(sb){
   const c1 = sb.reviewCfg();
   assertEqual([c1.sendFrom, c1.sendUntil, sb.reviewLinkFor('Chimney').link, sb.reviewLinkFor('Chimney').result], [8, 20, 'https://g.page/r/x/review', 'Enjoy your clean, safe fireplace!'], 'reviews: impossible hours fall back; a saved link with an empty line keeps the original line');
 }
+// One "Ask automatically" switch (13 Oct): the Closings "Don't ask" box only while it is on, and the Reviews page's
+// preview of the request is the service's own link and line in the Message templates words.
+function testReviewPreview(sb){
+  console.log('\nGoogle reviews: one switch and the message preview');
+  assertEqual([sb.closingShowsNoAsk('owner', true), sb.closingShowsNoAsk('va', true), sb.closingShowsNoAsk('manager', true), sb.closingShowsNoAsk('technician', true), sb.closingShowsNoAsk('owner', false), sb.closingShowsNoAsk('owner', undefined)],
+    [true, true, true, false, false, false], 'reviews: the Closings "Don\'t ask" box shows only while asking is automatic, never for a technician');
+  sb.STATE.data.settings = { reviewRequestsAuto: true };
+  const on = sb.reviewAutoOn();
+  sb.STATE.data.settings = {};
+  assertEqual([on, sb.reviewAutoOn()], [true, false], 'reviews: the switch is review_requests_auto');
+  sb.STATE.data.settings = { catalog: {} };
+  const a = sb.reviewPreviewValues('Aircon'), g = sb.reviewPreviewValues('Gutters');
+  assertEqual([a.hasLink, a.vars.first_name, a.vars.technician, a.vars.today, a.vars.result, a.vars.review_link], [true, 'Sarah', 'Guy', ' today', 'Enjoy the fresh, clean air!', 'https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU'], 'reviews preview: nothing saved = the original aircon link and line');
+  assertEqual([g.hasLink, g.vars.review_link], [false, ''], 'reviews preview: a service without a link can\'t be asked');
+  const chimney = { Chimney: { link: 'https://g.page/r/x/review', result: 'Warm and safe!' } };
+  sb.STATE.data.settings = { catalog: { reviews: { links: chimney } } };
+  const c = sb.reviewPreviewValues('Chimney');
+  assertEqual([c.vars.result, c.vars.review_link, sb.reviewPreviewValues('Pressure Washing').vars.result], ['Warm and safe!', 'https://g.page/r/x/review', 'Enjoy your fresh, clean outdoor area!'], 'reviews preview: the saved link and line; nothing saved = the original');
+  const mT = sb.MSG_TEMPLATES.find(m => m.id==='reviewText'), mE = sb.MSG_TEMPLATES.find(m => m.id==='reviewEmail');
+  const VT = { reviewSms: sb.msgTemplateText('reviewSms') }, VE = { reviewEmailSubject: sb.msgTemplateText('reviewEmailSubject'), reviewEmailBody: sb.msgTemplateText('reviewEmailBody') };
+  assertEqual(sb.tplPreviewHtml(mT, VT, c.vars).includes('<div class="tpl-bubble">Hi Sarah, Guy from The Guys Service Group here - thanks for having us today! Warm and safe! Our team works really hard and would truly appreciate a quick Google review: https://g.page/r/x/review Thank you!</div>'), true, 'reviews preview: the text with the service\'s link and line');
+  const mail = sb.tplPreviewHtml(mE, VE, c.vars);
+  assertEqual([mail.includes('<span>Subject</span>A quick favour, Sarah?'), mail.includes('Warm and safe!'), mail.includes('tpl-mail-btn')], [true, true, true], 'reviews preview: the email with the subject, the line and the button');
+  assertEqual([sb.tplPreviewHtml(mT, VT) === sb.tplPreviewHtml(mT, VT, sb.TPL_EXAMPLE), sb.tplPreviewHtml(mE, VE) === sb.tplPreviewHtml(mE, VE, sb.TPL_EXAMPLE)], [true, true], 'reviews preview: Message templates (no details given) still shows the example');
+  sb.STATE.data.settings = { catalog: { reviews: { links: chimney }, templates: { reviewSms: 'Thanks {first_name}! {result} {review_link}' } } };
+  assertEqual(sb.tplPreviewHtml(mT, { reviewSms: sb.msgTemplateText('reviewSms') }, sb.reviewPreviewValues('Chimney').vars).includes('Thanks Sarah! Warm and safe! https://g.page/r/x/review'), true, 'reviews preview: edited words from Message templates are used');
+  // A waiting automatic request skipped because the switch went off is the office's to ask (the server's own reason).
+  const fn = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'review-requests', 'index.ts'), 'utf8');
+  const offReason = fn.match(/const AUTO_OFF_REASON = "(.*)";/)[1];
+  const j = { id: 'j', invoiceNumber: '2500', date: '2026-10-05' }, r = { status: 'skipped', reason: offReason };
+  assertEqual([offReason, sb.reviewNeed(j, r, '2026-10-06', true), sb.reviewNeed(j, r, '2026-10-06', false)], ['automatic asking is off', 'ask', 'ask'], 'reviews: skipped because the switch went off → the office asks');
+  sb.STATE.data.settings = { gstRatePercent: 10 };
+}
 function testMessageTemplates(sb){
   console.log('\nMessage templates (Settings, stage 3b)');
   const fnSrc = f => fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', f, 'index.ts'), 'utf8');
@@ -1170,6 +1214,49 @@ function testPhoneSettings(sb){
   const voice = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'voice', 'index.ts'), 'utf8');
   const def = JSON.parse(voice.match(/^const DEFAULT_MENU = (\[.*\]);$/m)[1].replace(/(\w+):/g, '"$1":'));
   assertEqual(sb.PHONE_MENU_DEFAULT, def, 'phone: the app and the voice function start from the same menu');
+  // Backup hours per weekday (Ofek 13 Oct), read with the voice function's rules (backupDay).
+  const D = (on, from, to) => ({ on, from, to }), all = x => [0, 1, 2, 3, 4, 5, 6].map(() => x);
+  assertEqual(Object.values(sb.phoneBackupHours({}).days), all(D(true, '08:00', '20:00')), 'phone backup: nothing saved = every day 08:00–20:00, as the voice function');
+  assertEqual(Object.values(sb.phoneBackupHours({ backupHours: { from: '09:00', to: '17:00', days: [1, 2, 3, 4, 5] } }).days), [D(false, '09:00', '17:00'), D(true, '09:00', '17:00'), D(true, '09:00', '17:00'), D(true, '09:00', '17:00'), D(true, '09:00', '17:00'), D(true, '09:00', '17:00'), D(false, '09:00', '17:00')], 'phone backup: the old shape is read day by day');
+  assertEqual([Object.values(sb.phoneBackupHours({ backupHours: { from: '08:00', to: '20:00', days: [] } }).days).map(x => x.on), Object.values(sb.phoneBackupHours({ backupHours: { from: '08:00', to: '20:00' } }).days).map(x => x.on)], [all(false), all(false)], 'phone backup: as before, no days ticked = no backup');
+  const nd = sb.phoneBackupHours({ backupHours: { days: { 6: { on: false }, 1: { from: '07:00' } } } }).days;
+  assertEqual([nd[6], nd[1], nd[3]], [D(false, '08:00', '20:00'), D(true, '07:00', '20:00'), D(true, '08:00', '20:00')], 'phone backup: per day, a missing day or field takes the default');
+  const a = sb.phoneBackupHours({ backupHours: { from: '09:00', to: '17:00', days: [1] } });
+  assertEqual(sb.phoneBackupHours(JSON.parse(JSON.stringify({ backupHours: a }))), a, 'phone backup: saved per day and read back the same (string keys from JSON too)');
+  const R0 = { backupHours: { from: '09:00', to: '17:00', days: [1] } }, before = JSON.stringify(R0); sb.phoneBackupHours(R0);
+  assertEqual(JSON.stringify(R0), before, 'phone backup: reading never changes the saved settings');
+  assertEqual(Object.values(sb.phoneBackupHours({ backupHours: 'x' }).days).map(x => x.on), all(false), 'phone backup: odd data = no backup, as the voice function');
+  // A day only counts with both times set and the end after the start (backupDay in the voice function); an empty time
+  // must not pass (null < 1200 is true in JS).
+  assertEqual([D(true, '08:00', '20:00'), D(true, '', '20:00'), D(true, '09:00', ''), D(true, '', ''), D(true, '20:00', '08:00'), D(true, '09:00', '09:00'), D(true, 'x', '20:00'), null].map(sb.phoneBackupDayOk),
+    [true, false, false, false, false, false, false, false], 'phoneBackupDayOk: both times real, end after start');
+  const half = sb.phoneBackupHours({ backupHours: { days: [1, 2, 3] } }).days[1];
+  assertEqual([half, sb.phoneBackupDayOk(half)], [D(true, '', ''), false], 'phoneBackupDayOk: an old saved range with no times is not a usable day');
+  // Which backup phone is the signed-in owner or manager (the sidebar switch).
+  const R = { people: { ofek: { name: 'Ofek', mobile: '+61418638552', available: true }, noam: { name: 'Noam', mobile: '0407 735 994', available: true } } };
+  const profiles = [{ id: 'o', fullName: 'Ofek Shamir', role: 'owner' }, { id: 'n', fullName: 'Noam Gal', role: 'owner' }, { id: 'r', fullName: 'Ron', role: 'va' }];
+  const pk = (p, r = R, emps = [], profs = profiles) => sb.phonePersonKeyFor(r, p, emps, profs);
+  assertEqual([pk(profiles[1]), pk(profiles[0]), pk({ id: 'x', fullName: 'Ofek', role: 'manager' })], ['noam', 'ofek', 'ofek'], 'phone switch: an owner or manager is found by name');
+  assertEqual([pk(profiles[2]), pk({ id: 'y', fullName: 'Ofek', role: 'va' }), pk({ id: 'd', fullName: 'Dana Levi', role: 'manager' }), pk(null), sb.phonePersonKeyFor(undefined, profiles[0], [], profiles)], [null, null, null, null, null], 'phone switch: nobody else, and no guess');
+  const R2 = { people: { boss: { name: 'The boss', mobile: '0412 345 678' } } }, dana = { id: 'd', fullName: 'Dana Levi', role: 'manager' };
+  assertEqual([pk(dana, R2, [{ name: 'Dana Levi', phone: '+61412345678' }], [dana]), pk(dana, R2, [{ name: 'Dana Levi', phone: '0499 999 999' }], [dana])], ['boss', null], 'phone switch: else by the mobile on their employee card');
+  const R3 = { people: { a: { name: 'Noam Gal' }, b: { name: 'Noam Cohen' } } };
+  assertEqual([pk({ id: 'n', fullName: 'Noam', role: 'owner' }, R3, [], []), pk({ id: 'n2', fullName: 'noam  COHEN', role: 'owner' }, R3, [], [])], [null, 'b'], 'phone switch: two backup phones with the first name = no switch; the full name still matches');
+  const twins = [{ id: '1', fullName: 'Noam Gal', role: 'owner' }, { id: '2', fullName: 'Noam Levi', role: 'manager' }], R4 = { people: { noam: { name: 'Noam' } } };
+  assertEqual([pk(twins[0], R4, [], twins), pk(twins[1], R4, [], twins)], [null, null], 'phone switch: two owners/managers with the same first name = no switch');
+  // The first name alone only matches a backup phone named with just that first name, and only when no other person of
+  // any role (profile or employee card) has that first name.
+  const omri = { id: 'm', fullName: 'Omri Cohen', role: 'manager' }, R5 = { people: { noam: { name: 'Noam Gal' }, omri: { name: 'Omri Levi' } } };
+  assertEqual(pk(omri, R5, [], [omri]), null, 'phone switch: "Omri Levi" (someone else) never matches Omri Cohen');
+  const R6 = { people: { omri: { name: 'Omri' } } };
+  assertEqual([pk(omri, R6, [], [omri]), pk(omri, R6, [], [omri, { id: 't', fullName: 'Omri Levi', role: 'technician' }]), pk(omri, R6, [{ name: 'Omri Levi' }], [omri]), pk(omri, R6, [{ name: 'Omri Cohen' }], [omri])],
+    ['omri', null, null, 'omri'], 'phone switch: "Omri" matches only when no technician, VA or employee is also called Omri (their own card is fine)');
+  const solo = { id: 'n', fullName: 'Noam Gal', role: 'owner' };
+  assertEqual(pk(solo, { people: { noam: { mobile: '0407735994' } } }, [], [solo]), 'noam', 'phone switch: a backup phone with no name goes by its key');
+  // The business number is never written into the page (it's SaaS): it comes from the settings.
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  const fnText = name => { const i = html.indexOf(`function ${name}(`); return i < 0 ? '' : html.slice(i, html.indexOf('\n}\n', i)); };
+  assertEqual([fnText('renderPhoneSettings').includes("'Who answers the business phone'"), fnText('renderPhoneSettings').includes('1300 380 090'), fnText('setPhoneCallerId').includes('1300 380 090'), fnText('setPhoneCallerId').length > 0], [true, false, false, true], 'phone: the business number comes from the settings, never written in');
 }
 function testOfficeHours(sb){
   console.log('\nOffice hours and days off (Settings, stage 3)');
@@ -1185,6 +1272,140 @@ function testOfficeHours(sb){
   sb.applyCatalog();
   assertEqual([sb.isWorkday('2026-10-10'), sb.isWorkday('2026-10-05'), sb.workClockDue('2026-10-09T05:50:00Z', 30), sb.officeHoursText()],
     [false, true, { day: '2026-10-12', mins: 500 }, 'Mon–Fri 8:00–17:00'], 'office hours: nothing saved = Monday to Friday 8–17 and no days off, as before');
+}
+
+function testChaseCountSetting(sb){
+  console.log('\nChasing calls: office days only, or every day (Settings → Pipeline, 13 Oct)');
+  sb.STATE.data.jobs = []; sb.STATE.data.settings = { catalog: {} }; sb.applyCatalog();
+  // Lead in Mon 21 Sep; called Mon 21, Sat 26 and Mon 28; it is Mon 28 Sep, 12:00 Sydney.
+  const lead = { createdAt: '2026-09-21', chaseCalls: ['2026-09-21', '2026-09-26', '2026-09-28'] }, mon = new Date('2026-09-28T02:00:00Z');
+  assertEqual([sb.RULES.chaseOfficeDays, sb.chaseCounter(lead, mon)], [true, { x: 2, y: 6, calledToday: true }], 'chaseCounter: office days: Sat 26 not counted, 6 workdays 21–25 + 28');
+  sb.STATE.data.settings.catalog = { rules: { chaseDecideDays: 30 } }; sb.applyCatalog();
+  assertEqual([sb.RULES.chaseOfficeDays, sb.catalogRules().chaseOfficeDays, sb.chaseCounter(lead, mon)], [true, true, { x: 2, y: 6, calledToday: true }], 'chaseCounter: rules saved before the switch existed still count office days only');
+  sb.STATE.data.settings.catalog = { rules: { chaseOfficeDays: false } }; sb.applyCatalog();
+  assertEqual([sb.RULES.chaseOfficeDays, sb.chaseCounter(lead, mon)], [false, { x: 3, y: 8, calledToday: true }], 'chaseCounter: switched off: 21..28 = 8 days, Saturday\'s call counts');
+  // 'Decide after 21 days' stays calendar days either way: 7 Sep → 28 Sep = 21 days, 8 Sep → 20.
+  const tooLong = () => [sb.chaseTooLong({ id:'t', fullName:'T', status:'Chasing', chasingSince:'2026-09-07', createdAt:'2026-09-07' }, mon), sb.chaseTooLong({ id:'t2', fullName:'T2', status:'Chasing', chasingSince:'2026-09-08', createdAt:'2026-09-08' }, mon)];
+  assertEqual(tooLong(), [true, false], 'chaseTooLong: switch off: still 21 calendar days');
+  sb.STATE.data.settings.catalog = { rules: { chaseOfficeDays: true } }; sb.applyCatalog();
+  assertEqual(tooLong(), [true, false], 'chaseTooLong: switch on: the same 21 calendar days');
+  sb.STATE.data.settings.catalog = {}; sb.applyCatalog();
+  assertEqual(sb.RULES.chaseOfficeDays, true, 'chaseCounter: nothing saved = office days only, as before');
+}
+
+function testLostReasonDelete(sb){
+  console.log('\nLost reasons can be deleted (13 Oct)');
+  sb.STATE.data.jobs = [];
+  sb.STATE.data.settings = { catalog: { lostReasons: [{ key:'noAnswer', label:'No answer', active:true }, { key:'spam', label:'Spam', active:true, deleted:true, deletedAt:'2026-10-14T00:00:00Z' }, { key:'rabc', label:'Went with a friend', active:true }] } };
+  sb.applyCatalog();
+  assertEqual(sb.LOST_REASONS.map(r => r.key), ['noAnswer', 'spam', 'rabc', 'outsideArea', 'wrongNumber', 'wrongDetails', 'tooExpensive', 'notInterested'], 'LOST_REASONS: a deleted reason is kept (for history); built-ins missing from the saved list come back at the end, as before');
+  assertEqual([sb.ACTIVE.lost.has('spam'), sb.ACTIVE.lost.has('rabc'), sb.ACTIVE.lost.has('outsideArea')], [false, true, true], 'ACTIVE.lost: a deleted reason is not offered');
+  assertEqual(sb.catalogShown('lostReasons').map(x => x.key), ['noAnswer', 'rabc', 'outsideArea', 'wrongNumber', 'wrongDetails', 'tooExpensive', 'notInterested'], 'catalogShown: Settings does not list a deleted reason');
+  assertEqual([sb.lostReasonLabel('spam'), sb.lostReasonLabel('noAnswer'), sb.lostReasonLabel('rabc'), sb.lostReasonLabel('zzz')], ['Spam (deleted reason)', 'No answer', 'Went with a friend', 'No reason given'], 'lostReasonLabel: a deleted reason keeps its name, with a note');
+  assertEqual([sb.lostReasonOf({ lostReason:'spam' }), sb.lostReasonOf({ lostReason:'rabc' }), sb.lostReasonOf({ tags:['SPAM lead'] }), sb.lostReasonOf({ tags:['not interested - price'] })], ['spam', 'rabc', 'spam', 'tooExpensive'], 'lostReasonOf: a deleted built-in still classifies old GHL tags');
+  // Dashboard: A and C were spam (C by its old tag), B went with a friend.
+  sb.STATE.data.contacts = [
+    { fullName:'A', status:'Lost', lostReason:'spam', createdAt:'2026-10-02', source:'Organic', division:'Aircon' },
+    { fullName:'B', status:'Lost', lostReason:'rabc', createdAt:'2026-10-03', source:'Organic', division:'Aircon' },
+    { fullName:'C', status:'Lost', tags:['spam lead'], createdAt:'2026-10-04', source:'Organic', division:'Aircon' } ];
+  sb.JOB_CACHE.index = null;
+  const reasons = () => sb.computeBusinessPerformance(sb.STATE.data, '2026-10-01', '2026-10-31').lossReasons;
+  assertEqual(reasons(), { noReason:0, noAnswer:0, spam:2, rabc:1, outsideArea:0, wrongNumber:0, wrongDetails:0, tooExpensive:0, notInterested:0 }, 'Dashboard: leads with a deleted reason still count under it');
+  sb.STATE.data.settings.catalog.lostReasons.push({ key:'rnew', label:'Booked elsewhere', active:true });
+  sb.applyCatalog();
+  const r2 = reasons();
+  assertEqual([r2.rnew, r2.spam], [0, 2], 'Dashboard: a new reason is there straight after the save, with no reload');
+  sb.LOST_REASONS.splice(sb.LOST_REASONS.findIndex(r => r.key==='tooExpensive'), 1);
+  assertEqual(sb.lostReasonOf({ tags:['price'] }), 'noReason', 'lostReasonOf: a reason missing from the list does not throw');
+  sb.applyCatalog();
+  assertEqual([sb.lostReasonCanDelete([{ key:'a', active:true }, { key:'b', active:false }, { key:'c', active:true, deleted:true }], 'a'), sb.lostReasonCanDelete([{ key:'a', active:true }, { key:'d', active:true }], 'a')],
+    [false, true], 'lostReasonCanDelete: the last reason switched on cannot be deleted');
+  const found = sb.catalogFindByName(sb.catalogList('lostReasons'), ' spam ');
+  assertEqual([found && found.key, found && found.deleted, sb.catalogFindByName(sb.catalogList('lostReasons'), ''), sb.catalogFindByName(sb.catalogList('lostReasons'), 'nothing like it')],
+    ['spam', true, null, null], 'catalogFindByName: finds a deleted reason by name (so adding it again brings it back)');
+  sb.STATE.data.settings.catalog = { lostReasons: [{ key:'noAnswer', label:'No answer', active:false }] };
+  sb.applyCatalog();
+  assertEqual([sb.LOST_REASONS.length, sb.LOST_REASONS.every(r => r.deleted===false), sb.ACTIVE.lost.has('noAnswer'), sb.ACTIVE.lost.size], [7, true, false, 6], 'lost reasons saved before delete existed read as before');
+  sb.STATE.data.settings.catalog = {};
+  sb.applyCatalog();
+  assertEqual([sb.LOST_REASONS.map(r => r.label), sb.ACTIVE.lost.size], [['No answer', 'Outside service area', 'Spam', 'Wrong number', 'Wrong details', 'Too expensive', 'Not interested'], 7], 'lost reasons: nothing saved = the 7 shipped ones');
+  assertEqual(sb.toastKind('At least one reason must be switched on: a lost lead always needs one'), 'warn', 'the "last reason" message is a warning');
+}
+
+function testPipelineStages(sb){
+  console.log('\nPipeline stages: add, delete, switch off (13 Oct, item 17 + P7)');
+  sb.STATE.data.jobs = [{ id:'j1', customerName:'Zed', contactId:'c-won', date:'2026-10-01' }];
+  sb.STATE.data.settings = { catalog: { stages: [{ key:'Chasing', label:'Chasing', color:null, active:false }, { key:'sx1', label:'Site visit', color:'#7746c9', active:true }] } };
+  sb.JOB_CACHE.index = null;
+  sb.applyCatalog();
+  assertEqual(sb.LEAD_STATUSES.slice(), ['Chasing', 'sx1', 'New', 'Quoted', 'Follow-up', 'Booked', 'Won', 'Lost'], 'applyCatalog: the saved order first, then the built-in stages it did not mention (a switched-off one stays in the list)');
+  assertEqual(sb.LEAD_STAGE_PICKABLE.slice(), ['Chasing', 'sx1', 'New', 'Quoted', 'Follow-up', 'Booked', 'Lost'], 'LEAD_STAGE_PICKABLE: every stage but Won');
+  assertEqual([sb.stageLabel('sx1'), sb.stageColor('sx1'), sb.stageInk('sx1')], ['Site visit', '#7746c9', '#fff'], 'a custom stage: its name, colour and text colour');
+  assertEqual([sb.stageOn('Chasing'), sb.stageOn('sx1'), sb.stageOn('New'), sb.stageOn('Quoted')], [false, true, true, true], 'stageOn: Chasing switched off, the others on');
+  assertEqual([sb.leadStage({ id:'h', fullName:'H', status:'Chasing' }), sb.leadStage({ id:'k', fullName:'K', status:'sx1' }), sb.leadStage({ id:'d', fullName:'D', status:'sGONE' })], ['Chasing', 'sx1', 'New'], 'leadStage: a lead keeps a switched-off stage, reads a custom one, and a deleted custom stage reads as New');
+  assertEqual(sb.stagesPickable(), ['sx1', 'New', 'Quoted', 'Follow-up', 'Booked', 'Lost'], 'stagesPickable: the menus leave out a switched-off stage');
+  assertEqual(sb.stagesPickable('Chasing'), ['Chasing', 'sx1', 'New', 'Quoted', 'Follow-up', 'Booked', 'Lost'], 'stagesPickable: but a lead still in it sees its own stage');
+  assertEqual(sb.stagesShown({}), ['sx1', 'New', 'Quoted', 'Follow-up', 'Booked', 'Won', 'Lost'], 'stagesShown: an empty switched-off stage has no column');
+  assertEqual(sb.stagesShown({ Chasing: 2 }), ['Chasing', 'sx1', 'New', 'Quoted', 'Follow-up', 'Booked', 'Won', 'Lost'], 'stagesShown: one with leads keeps its column, so no lead is hidden');
+  assertEqual(sb.stagesInProgress(), ['Chasing', 'sx1', 'Quoted', 'Follow-up', 'Booked'], 'stagesInProgress: every stage but New, Won and Lost, custom ones included');
+  assertEqual([sb.stageIsBuiltin('Chasing'), sb.stageIsBuiltin('Won'), sb.stageIsBuiltin('sx1')], [true, true, false], 'stageIsBuiltin');
+  const contacts = [{ id:'a', fullName:'A', status:'sx1' }, { id:'c-won', fullName:'B', status:'sx1' }, { id:'c', fullName:'C', status:'New' }];
+  assertEqual(sb.stageLeadsIn(contacts, 'sx1').map(c => c.id), ['a'], 'stageLeadsIn: a lead with a job is Won, not in the stage');
+  assertEqual([sb.stageStoredOnly(contacts, 'sx1').map(c => c.id), sb.stageStoredOnly(contacts, 'New'), sb.stageStoredOnly(null, 'sx1')], [['c-won'], [], []], 'stageStoredOnly: the Won-by-job lead that still stores the stage (moved even when the stage has no lead)');
+  assertEqual(sb.stageMovePlan(contacts.filter(c => c.id==='c-won'), 'sx1', 'New', {}, 'T', '2026-10-14'), [{ id:'c-won', patch:{ status:'New' }, quiet:true }], 'stageMovePlan: an empty stage: its stored-only lead moves to New quietly');
+  const before = JSON.stringify(contacts);
+  assertEqual(sb.stageMovePlan(contacts, 'sx1', 'Chasing', {}, 'T', '2026-10-14'),
+    [{ id:'a', patch:{ status:'Chasing', stageChangedAt:'T', chasingSince:'T', chaseAlertDone:false, chaseRound:1, lostReason:'' }, quiet:false }, { id:'c-won', patch:{ status:'Chasing' }, quiet:true }],
+    'stageMovePlan: to Chasing starts the counter; a Won lead only gets its stored value moved, quietly');
+  assertEqual(JSON.stringify(contacts), before, 'stageMovePlan: the leads themselves are not changed');
+  assertEqual(sb.stageMovePlan([{ id:'a', fullName:'A', status:'sx1', nextFollowUp:'2026-10-20' }], 'sx1', 'Lost', { lostReason:'tooExpensive' }, 'T', '2026-10-14')[0].patch,
+    { status:'Lost', stageChangedAt:'T', nextFollowUp:'', lostReason:'tooExpensive' }, 'stageMovePlan: to Lost clears the follow-up date and keeps the reason');
+  assertEqual(sb.stageMovePlan([{ id:'a', fullName:'A', status:'sx1' }, { id:'b', fullName:'B2', status:'sx1', bookedFor:'2026-10-18' }], 'sx1', 'Booked', { bookedFor:'2026-10-20' }, 'T', '2026-10-14').map(p => p.patch),
+    [{ status:'Booked', stageChangedAt:'T', nextFollowUp:'', lostReason:'', bookedFor:'2026-10-20' }, { status:'Booked', stageChangedAt:'T', nextFollowUp:'', lostReason:'' }], 'stageMovePlan: to Booked: an existing booked day is kept');
+  // Lost can't be switched off, even when saved off; nor can New or Won.
+  sb.STATE.data.settings.catalog = { stages: [{ key:'New', active:false }, { key:'Won', active:false }, { key:'Lost', active:false }, { key:'Quoted', active:false }] };
+  sb.applyCatalog();
+  assertEqual([sb.stageOn('New'), sb.stageOn('Won'), sb.stageOn('Lost'), sb.stageOn('Quoted')], [true, true, true, false], 'New, Won and Lost are always on, even when saved off');
+  // Saved before stages could be switched off: everything on.
+  sb.STATE.data.settings.catalog = { stages: [{ key:'New', label:'Fresh lead', color:'#d03b5c' }] };
+  sb.applyCatalog();
+  assertEqual([sb.LEAD_STATUSES.length, sb.LEAD_STATUSES.every(sb.stageOn), sb.stageLabel('New')], [7, true, 'Fresh lead'], 'stages saved in the old shape (no on/off) are all on');
+  sb.STATE.data.settings.catalog = {};
+  sb.applyCatalog();
+  assertEqual(sb.LEAD_STATUSES.every(sb.stageOn), true, 'nothing saved: every stage on');
+  sb.JOB_CACHE.index = null;
+  assertEqual(sb.stageMovePlan([{ id:'a', fullName:'A', status:'Quoted', nextFollowUp:'2026-10-30' }, { id:'b', fullName:'B2', status:'Quoted', nextFollowUp:'2026-10-01' }], 'Quoted', 'Follow-up', { nextFollowUp:'2026-10-21' }, 'T', '2026-10-14').map(p => p.patch),
+    [{ status:'Follow-up', stageChangedAt:'T', lostReason:'' }, { status:'Follow-up', stageChangedAt:'T', lostReason:'', nextFollowUp:'2026-10-21' }], 'stageMovePlan: to Follow up: a later date is kept, a past one gets the new day');
+  const list = sb.catalogList('stages'), added = sb.stageListWithNew(list, 'Site visit', 1000);
+  assertEqual(added.map(x => x.key), ['New', 'Chasing', 'Quoted', 'Follow-up', 'Booked', 'srs', 'Won', 'Lost'], 'stageListWithNew: a new stage goes before Won and Lost, with a made-up key');
+  assertEqual([added[5], list.length], [{ key:'srs', label:'Site visit', color:'#7746c9', active:true }, 7], 'stageListWithNew: its name and colour; the list it was given is not changed');
+  assertEqual(sb.stageListWithNew([{ key:'New' }], 'X', 1000).map(x => x.key), ['New', 'srs'], 'stageListWithNew: at the end when there is no Won or Lost');
+  assertEqual([sb.STAGE_RULE_TEXT('New'), sb.STAGE_RULE_TEXT('Won'), sb.STAGE_RULE_TEXT('sx9')], ['Always on: every new lead lands here', 'Always on: set automatically when the lead has a job', 'Your own stage: no automatic rules'], 'STAGE_RULE_TEXT: the always-on stages and a custom one');
+  assertEqual([/decide after 21 days/.test(sb.STAGE_RULE_TEXT('Chasing')), /office days/.test(sb.STAGE_RULE_TEXT('Chasing')), /Needs a follow-up date/.test(sb.STAGE_RULE_TEXT('Quoted'))], [true, true, true], 'STAGE_RULE_TEXT: Chasing and Quoted follow the rules');
+  sb.STATE.data.settings.catalog = { rules: { needDate: false, chaseOfficeDays: false } };
+  sb.applyCatalog();
+  assertEqual([/Needs a follow-up date/.test(sb.STAGE_RULE_TEXT('Quoted')), /every day/.test(sb.STAGE_RULE_TEXT('Chasing'))], [false, true], 'STAGE_RULE_TEXT: with the date rule off, Quoted no longer says it needs one; Chasing says every day');
+  sb.STATE.data.settings.catalog = {};
+  sb.applyCatalog();
+  assertEqual([sb.LEAD_STATUSES.length, sb.ACTIVE.stages.size], [7, 7], 'back to nothing saved: the 7 shipped stages, all on');
+}
+
+function testConnectedSources(sb){
+  console.log('\nConnected lead sources (13 Oct)');
+  assertEqual([sb.sourceHost('ChatGPT'), sb.sourceHost('Chat GPT'), sb.sourceHost('Perplexity AI'), sb.sourceHost('Bing Copilot'), sb.sourceHost('Local Newsletter')],
+    ['chatgpt.com', 'chatgpt.com', 'perplexity.ai', 'copilot.microsoft.com', 'localnewsletter'], 'sourceHost: known AI sites by name; anything else becomes its own utm value');
+  const g = sb.sourceSetupSteps('ChatGPT');
+  assertEqual([g.length, g[0].includes('utm_source=chatgpt.com'), g[0].includes('chatgpt.com as the site'), g[2].includes('"ChatGPT"'), g[3].includes('?utm_source=chatgpt.com')], [4, true, true, true, true], 'sourceSetupSteps: the four steps for ChatGPT');
+  assertEqual(sb.sourceSetupSteps('Car Magnet')[0].startsWith('Links you share for Car Magnet need "utm_source=carmagnet"'), true, 'sourceSetupSteps: an unknown source gets a tagged link');
+  assertEqual([sb.sourceLeadStats('ChatGPT', [{ source:'ChatGPT', createdAt:'2026-10-02' }, { source:'ChatGPT', createdAt:'2026-10-09', messages:[{ at:'2026-10-10' }] }, { source:'Organic', createdAt:'2026-10-11' }]), sb.sourceLeadStats('ChatGPT', [])],
+    [{ count:2, last:'2026-10-10' }, { count:0, last:'' }], 'sourceLeadStats: its leads and the day the last one arrived');
+  sb.STATE.data.jobs = [];
+  sb.STATE.data.settings = { catalog: { sources: [{ key:'ChatGPT', label:'ChatGPT', color:'#1f66c9', active:true, subs:[], kind:'connected' }] } };
+  sb.applyCatalog();
+  const src = sb.catalogList('sources');
+  assertEqual([sb.LEAD_SOURCES.includes('ChatGPT'), src.find(x => x.key==='ChatGPT').kind, src.filter(x => x.key!=='ChatGPT').every(x => x.kind===undefined)], [true, 'connected', true], 'sources: a connected source is saved with kind; the built-in ones have none (manual)');
+  sb.STATE.data.settings.catalog = {};
+  sb.applyCatalog();
 }
 
 function testEmployeeCard(sb){
@@ -1209,12 +1430,194 @@ function testEmployeeCard(sb){
   assertEqual(items.map(it => [it.title, it.severity]), [["Guy's driver licence has expired", 'bad'], ["Guy's visa expires in 22 days", 'warn']], 'computeReminders: expired and soon-to-expire documents of active people, not one that was dismissed, not an inactive person');
 }
 
+function testRegionAndWeeks(sb){
+  console.log('\nRegion and format: weeks, financial year, date format (14 Oct)');
+  // A NEW settings object every time: weekRulesNow() remembers the rules by the region object's identity.
+  const setRegion = region => { sb.STATE.data.settings = { gstRatePercent: 10, catalog: region===undefined ? {} : { region } }; };
+  // Nothing saved = Sunday → Saturday, exactly as before.
+  setRegion();
+  assertEqual(sb.weekRules(null), [{ weekStart:0, from:'' }], 'weekRules: nothing saved = Sunday since forever');
+  assertEqual(sb.payrollWeekOf('2026-10-13'), { key:'2026-10-11', start:'2026-10-11', end:'2026-10-17' }, 'default: payrollWeekOf is Sunday → Saturday');
+  assertEqual(sb.weekOf('2026-10-13').label, '11 Oct – 17 Oct', 'default: weekOf label');
+  assertEqual([sb.shiftPayrollWeek('2026-10-11', 1), sb.shiftPayrollWeek('2026-10-11', -2)], ['2026-10-18', '2026-09-27'], 'default: shiftPayrollWeek steps 7 days');
+  assertEqual(sb.weekBounds('2026-10-13').days, 7, 'default: a week has 7 days');
+  assertEqual([sb.weekDaysName('2026-10-13'), sb.weekDaysName('2026-10-13', ' → '), sb.weekStartDay('2026-10-13'), sb.weekOneOff('2026-10-13')], ['Sunday to Saturday', 'Sunday → Saturday', 0, ''], 'default: the week is named Sunday to Saturday, not a one-off');
+  // Bad saved data is ignored; two changes from the same day = the last one.
+  assertEqual(sb.weekRules({ weeks:[{ weekStart:7, from:'2026-10-18' }, { weekStart:'1', from:'2026-10-18' }, { weekStart:2, from:'x' }, null, { weekStart:3, from:'2026-11-01' }, { weekStart:4, from:'2026-11-01' }] }),
+    [{ weekStart:0, from:'' }, { weekStart:4, from:'2026-11-01' }], 'weekRules: bad entries ignored, the last change of a day wins');
+
+  // Monday from Sunday 18 Oct: one long 8-day week (18–25 Oct), then Monday → Sunday. Past weeks untouched (P6).
+  setRegion({ weeks:[{ weekStart:1, from:'2026-10-18' }] });
+  assertEqual(sb.payrollWeekOf('2026-09-19').start, '2026-09-13', 'Monday change: a week long before keeps its Sunday');
+  assertEqual(sb.payrollWeekOf('2026-10-17'), { key:'2026-10-11', start:'2026-10-11', end:'2026-10-17' }, 'Monday change: the week before the change is untouched');
+  assertEqual([sb.payrollWeekOf('2026-10-18'), sb.payrollWeekOf('2026-10-25')], [{ key:'2026-10-18', start:'2026-10-18', end:'2026-10-25' }, { key:'2026-10-18', start:'2026-10-18', end:'2026-10-25' }], 'Monday change: one 8-day transition week');
+  assertEqual([sb.payrollWeekOf('2026-10-26').end, sb.payrollWeekOf('2026-11-02').start, sb.payrollWeekOf('2026-11-08').start], ['2026-11-01', '2026-11-02', '2026-11-02'], 'Monday change: then Monday → Sunday');
+  assertEqual([sb.shiftPayrollWeek('2026-10-11', 1), sb.shiftPayrollWeek('2026-10-11', 2), sb.shiftPayrollWeek('2026-11-02', -2), sb.shiftPayrollWeek('2026-11-02', -3)],
+    ['2026-10-18', '2026-10-26', '2026-10-18', '2026-10-11'], 'Monday change: shiftPayrollWeek walks real weeks (the long week is one step)');
+  assertEqual([sb.weekStartDay('2026-10-17'), sb.weekStartDay('2026-10-18')], [0, 1], 'weekStartDay: by the rule in force that day');
+  assertEqual([sb.weekDaysName('2026-10-26', ' → '), sb.weekDaysName('2026-10-20'), sb.weekDaysName('2026-10-17')], ['Monday → Sunday', 'Monday to Sunday', 'Sunday to Saturday'], 'weekDaysName: the rule in force, also during the 8-day transition week (not "Sunday to Sunday")');
+  assertEqual([sb.weekOneOff('2026-10-20'), sb.weekOneOff('2026-10-25'), sb.weekOneOff('2026-10-26'), sb.weekOneOff('2026-10-17')], ['a one-off 8-day week (18 Oct – 25 Oct)', 'a one-off 8-day week (18 Oct – 25 Oct)', '', ''], 'weekOneOff: only the transition week is noted');
+  // Thursday from Sunday 18 Oct: a short 4-day week (18–21 Oct) named by the new rule, not "Sunday to Wednesday".
+  setRegion({ weeks:[{ weekStart:4, from:'2026-10-18' }] });
+  assertEqual([sb.weekDaysName('2026-10-19'), sb.weekOneOff('2026-10-19'), sb.weekOneOff('2026-10-22')], ['Thursday to Wednesday', 'a one-off 4-day week (18 Oct – 21 Oct)', ''], 'weekDaysName / weekOneOff: a short transition week');
+  setRegion({ weeks:[{ weekStart:1, from:'2026-10-18' }] });
+  assertEqual(sb.weekKeysInRange('2026-10-01', '2026-11-03'), ['2026-09-27', '2026-10-04', '2026-10-11', '2026-10-18', '2026-10-26', '2026-11-02'], 'weekKeysInRange: every week, across the change');
+  assertEqual(sb.weekOf('2026-10-20').label, '18 Oct – 25 Oct', 'weekOf: the transition week label');
+  // Ron's hours over the 8-day week: both Sundays count.
+  const h = sb.computePayrollHourly({ salesLogs:[{ person:'Ron', date:'2026-10-18', hours:8, bookingsAircon:0, bookingsChimney:0, bookingsPw:0 }, { person:'Ron', date:'2026-10-25', hours:8, bookingsAircon:0, bookingsChimney:0, bookingsPw:0 }] }, 'Ron', '2026-10-18');
+  assertEqual([h.days.length, h.days[0].date, h.days[7].date, h.hours, h.total], [8, '2026-10-18', '2026-10-25', 16, 160], 'computePayrollHourly: every day of an 8-day week ($10 an hour)');
+  // The week before a new week is the transition week, compared over the same number of days.
+  const P = ui => { const p = sb.payrollPeriod(ui, '2026-11-05'); return [p.start, p.effEnd, p.prevStart, p.prevEnd]; };
+  assertEqual(P({ mode:'week', week:'2026-10-26' }), ['2026-10-26', '2026-11-01', '2026-10-18', '2026-10-24'], 'payrollPeriod: previous week = the transition week, same 7 days');
+  const D = r => { const x = sb.resolveDashboardRange({ range:r }, new Date(2026, 10, 4)); return [x.start, x.end, x.prevStart, x.prevEnd]; };
+  assertEqual(D('week'), ['2026-11-02', '2026-11-08', '2026-10-26', '2026-10-28'], 'resolveDashboardRange: this week vs the same days of last week');
+  assertEqual(D('lastWeek').slice(0, 2), ['2026-10-26', '2026-11-01'], 'resolveDashboardRange: last week');
+
+  // Saturday from 18 Oct: one short 6-day week (18–23 Oct) that a +7 day step would have skipped.
+  setRegion({ weeks:[{ weekStart:6, from:'2026-10-18' }] });
+  assertEqual([sb.weekBounds('2026-10-20'), sb.weekBounds('2026-10-24')], [{ start:'2026-10-18', end:'2026-10-23', days:6 }, { start:'2026-10-24', end:'2026-10-30', days:7 }], 'Saturday change: one 6-day week, then Saturday → Friday');
+  assertEqual(sb.weekKeysInRange('2026-10-17', '2026-10-31'), ['2026-10-11', '2026-10-18', '2026-10-24', '2026-10-31'], 'weekKeysInRange: the short week is not skipped');
+  sb.STATE.data.equipmentSpend = []; sb.STATE.data.employees = [];
+  sb.STATE.data.jobs = [{ date:'2026-10-20', amount:100, partsCost:0, commissionPercent:0, technician:'X', paymentStatus:'Paid' }];
+  const pw = sb.computeProfitByWeekInRange(sb.STATE.data, '2026-10-17', '2026-10-31');
+  assertEqual([pw.map(w => w.label), pw.map(w => w.revenue)], [['11 Oct – 17 Oct', '18 Oct – 23 Oct', '24 Oct – 30 Oct', '31 Oct – 6 Nov'], [0, 100, 0, 0]], 'computeProfitByWeekInRange: the short week has its own bar');
+  sb.STATE.data.jobs = [];
+
+  // Planning a change (P6): it starts the day after this week; a change not started yet is replaced or cancelled.
+  const plan = (region, today, ws) => sb.weekChangePlan(region, today, ws);
+  assertEqual(plan({}, '2026-10-13', 1), { weeks:[{ weekStart:1, from:'2026-10-18' }], from:'2026-10-18', first:{ start:'2026-10-18', end:'2026-10-25', days:8 } }, 'weekChangePlan: Monday from next week, one 8-day week');
+  assertEqual([plan({}, '2026-10-13', 3).first, plan({}, '2026-10-13', 4).first.days, plan({}, '2026-10-13', 4).first.end, plan({}, '2026-10-13', 6).first.end, plan({}, '2026-10-13', 6).first.days],
+    [{ start:'2026-10-18', end:'2026-10-27', days:10 }, 4, '2026-10-21', '2026-10-23', 6], 'weekChangePlan: the first week is 4 to 10 days, never 1 to 3');
+  assertEqual([plan({}, '2026-10-13', 0), plan({}, '2026-10-13', 7), plan({}, '2026-10-13', 'x')], [null, null, null], 'weekChangePlan: the same day or a bad day = nothing to do');
+  const pend = { weeks:[{ weekStart:1, from:'2026-10-18' }] };
+  const p2 = plan(pend, '2026-10-13', 2);
+  assertEqual([p2.weeks, p2.first.end, p2.first.days], [[{ weekStart:2, from:'2026-10-18' }], '2026-10-26', 9], 'weekChangePlan: a change not started yet is replaced');
+  assertEqual([plan(pend, '2026-10-13', 0), plan(pend, '2026-10-13', 1)], [{ weeks:[], from:null, first:null }, null], 'weekChangePlan: picking the old day again cancels it; the same new day is nothing');
+  const p3 = plan(pend, '2026-10-20', 3);
+  assertEqual([p3.weeks, p3.first], [[{ weekStart:1, from:'2026-10-18' }, { weekStart:3, from:'2026-10-26' }], { start:'2026-10-26', end:'2026-11-03', days:9 }], 'weekChangePlan: during the transition week, the next change starts after it');
+  assertEqual(plan(pend, '2026-10-20', 1), null, 'weekChangePlan: the day in force = nothing to do');
+
+  // Financial year.
+  assertEqual([sb.fyStartMonth({}), sb.fyStartMonth({ fyStart:13 }), sb.fyStartMonth({ fyStart:4 }), sb.fyStartMonth(null)], [7, 7, 4, 7], 'fyStartMonth: 1 July unless a month 1–12 is saved');
+  assertEqual(sb.financialYearOf('2026-10-13', 7), { start:'2026-07-01', end:'2027-06-30', label:'FY 2026–27' }, 'financialYearOf: July year');
+  assertEqual(sb.financialYearOf('2026-06-30', 7), { start:'2025-07-01', end:'2026-06-30', label:'FY 2025–26' }, 'financialYearOf: the last day of the year');
+  assertEqual(sb.financialYearOf('2026-10-13', 1), { start:'2026-01-01', end:'2026-12-31', label:'FY 2026' }, 'financialYearOf: a calendar year');
+
+  // Date format: full dates only; the default prints exactly as before.
+  setRegion();
+  assertEqual([sb.fmtDateYear('2026-10-05'), sb.fmtDateYear(''), sb.invDate('2026-09-05')], ['5 Oct 2026', '—', '5 Sep 2026'], 'date format default: unchanged');
+  assertEqual(sb.fmtDateYear('2026-09-05'), new Date(2026, 8, 5).toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' }), 'date format default: fmtDateYear is byte-identical to before');
+  assertEqual([sb.dateFormatOf({ dateFormat:'yyyy-mm-dd' }), sb.dateFormatOf(null)], ['d mmm yyyy', 'd mmm yyyy'], 'dateFormatOf: an unknown format = the default');
+  setRegion({ dateFormat:'dd/mm/yyyy' });
+  assertEqual([sb.fmtDateYear('2026-10-05'), sb.invDate('2026-10-05'), sb.fmtDateShort('2026-10-05'), sb.fmtDateNumeric('2026-01-09')], ['05/10/2026', '05/10/2026', '5 Oct', '09/01/2026'], 'date format dd/mm/yyyy: full dates only; short dates stay');
+  setRegion();
+  assertEqual([sb.invWeek({ weekStart:'2026-10-04', weekEnd:'2026-10-10' }), sb.invWeek({ weekStart:'2026-10-18', weekEnd:'2026-10-25' }), sb.invWeek({ weekStart:'2026-10-26', weekEnd:'2026-11-01' })],
+    ['Sun 4 Oct – Sat 10 Oct 2026', 'Sun 18 Oct – Sun 25 Oct 2026', 'Mon 26 Oct – Sun 1 Nov 2026'], 'invWeek: the real first and last day');
+}
+
+function testBusinessDetails(sb){
+  console.log('\nBusiness details: address and insurance (14 Oct)');
+  assertEqual(sb.businessAddress({ address:'12 Smith St, Parramatta NSW 2150' }), { street:'12 Smith St, Parramatta NSW 2150', suburb:'', state:'', postcode:'', line:'12 Smith St, Parramatta NSW 2150' }, 'businessAddress: the old one-line address reads as the street');
+  assertEqual(sb.businessAddress({ street:'12 Smith St', suburb:'Parramatta', state:'NSW', postcode:'2150', address:'old' }).line, '12 Smith St, Parramatta NSW 2150', 'businessAddress: the parts make the line');
+  const part = sb.businessAddress({ street:'', suburb:'Parramatta', address:'old line' });
+  assertEqual([part.street, part.line], ['', 'Parramatta'], 'businessAddress: a saved address in parts never brings the old line back');
+  assertEqual(sb.businessAddress(null), { street:'', suburb:'', state:'', postcode:'', line:'' }, 'businessAddress: nothing saved');
+  assertEqual(sb.AU_STATES.length, 8, 'AU_STATES: 8 states and territories');
+  const today = '2026-10-10';
+  assertEqual([sb.businessInsuranceStatus(undefined, today), sb.businessInsuranceStatus({ insurer:'QBE' }, today)], [{ tone:'neutral', text:'Not on file' }, { tone:'neutral', text:'No expiry date' }], 'businessInsuranceStatus: nothing / no date');
+  assertEqual([sb.businessInsuranceStatus({ expiry:'2026-10-01' }, today), sb.businessInsuranceStatus({ expiry:'2026-10-11' }, today), sb.businessInsuranceStatus({ expiry:'2026-11-09' }, today), sb.businessInsuranceStatus({ expiry:'2026-11-10' }, today)],
+    [{ tone:'bad', text:'Expired 1 Oct 2026' }, { tone:'warn', text:'Expires in 1 day' }, { tone:'warn', text:'Expires in 30 days' }, { tone:'good', text:'Valid until 10 Nov 2026' }], 'businessInsuranceStatus: expired, due within 30 days, fine after that');
+  // Reminders: the business's insurance like an employee document.
+  const base = { jobs:[], contacts:[], equipmentSpend:[], quotes:[], manualReminders:[], employees:[], readReminders:[], dismissedReminders:[] };
+  const rem = (ins, extra) => { sb.STATE.data = Object.assign({}, base, { settings: { gstRatePercent:10, catalog: ins ? { business: { insurance: ins } } : undefined } }, extra || {}); if (!ins) delete sb.STATE.data.settings.catalog; sb.JOB_CACHE.index = null;
+    return sb.computeReminders(sb.STATE.data, sb.parseLocalDate(today)).filter(it => it.type==='business-insurance').map(it => [it.title, it.severity]); };
+  assertEqual(rem({ workers:{ expiry:'2026-10-20' }, liability:{ expiry:'2027-01-01' } }), [['Workers compensation insurance expires in 10 days', 'warn']], 'computeReminders: business insurance due soon');
+  assertEqual(rem({ workers:{ expiry:'2026-10-20' } }, { dismissedReminders:['bizins:workers:2026-10-20'] }), [], 'computeReminders: a dismissed one stays away');
+  assertEqual(rem({ workers:{ expiry:'2026-10-01' } }), [['Workers compensation insurance has expired', 'bad']], 'computeReminders: expired business insurance');
+  assertEqual(rem(null), [], 'computeReminders: nothing saved = nothing');
+  // Owners only (settings.catalog is readable by every role, and a Delete would hide it from the owners too).
+  rem({ workers:{ expiry:'2026-10-20' } });
+  const forRole = role => sb.remindersFor({ role }, sb.STATE.data, sb.parseLocalDate(today)).filter(it => it.type==='business-insurance').length;
+  assertEqual(['owner', 'manager', 'va', 'technician'].map(forRole), [1, 0, 0, 0], 'remindersFor: business insurance shows to owners only');
+}
+
+function testSettingsRound2Small(sb){
+  console.log('\nSettings round 2, small fixes (13 Oct)');
+  // Two-step sign-in: a cancelled setup leaves an unverified factor; it is removed, and every new setup gets its own name.
+  assertEqual(sb.mfaStaleFactors([{ id:'a', factor_type:'totp', status:'verified', friendly_name:'OPS 2026-10-12' }, { id:'b', factor_type:'totp', status:'unverified', friendly_name:'OPS 2026-10-13' }, { id:'c', factor_type:'phone', status:'unverified' }, { id:'d', factor_type:'webauthn', status:'unverified' }]).map(f => f.id),
+    ['b'], '2FA: only half-finished authenticator-app setups are cleaned up; verified, phone and passkey factors are kept');
+  assertEqual([sb.mfaStaleFactors(undefined), sb.mfaStaleFactors(null), sb.mfaStaleFactors([null])], [[], [], []], '2FA: nothing to clean up when the list is missing');
+  const t = Date.UTC(2026, 9, 13, 9, 5, 7);
+  assertEqual([sb.mfaFriendlyName(t, []), sb.mfaFriendlyName(t, ['OPS 2026-10-13']), sb.mfaFriendlyName(t, undefined)],
+    ['OPS 2026-10-13 09:05:07', 'OPS 2026-10-13 09:05:07', 'OPS 2026-10-13 09:05:07'], '2FA: the name has the time, so an old-style name from the same day does not clash (the bug)');
+  assertEqual([sb.mfaFriendlyName(t, ['OPS 2026-10-13 09:05:07']), sb.mfaFriendlyName(t, ['OPS 2026-10-13 09:05:07', 'OPS 2026-10-13 09:05:07 (2)'])],
+    ['OPS 2026-10-13 09:05:07 (2)', 'OPS 2026-10-13 09:05:07 (3)'], '2FA: a name already taken gets a number');
+  // Phone notifications: who can send a test, and what the bar shows.
+  assertEqual([sb.pushCanTest({ role:'owner' }), sb.pushCanTest({ role:'manager' }), sb.pushCanTest({ role:'va' }), sb.pushCanTest({ role:'technician' }), sb.pushCanTest(null)],
+    [true, true, false, false, false], 'notifications: only owners and managers can send a test');
+  const M = sb.phoneBarMode;
+  assertEqual([M('payroll', { checked:false, on:false }, false, true), M('payroll', { checked:false, on:false }, true, true), M('settings', { checked:false, on:false }, true, true)],
+    ['off', 'hide', 'off'], 'notifications: before the device check, a tested device does not flash "Turn on" on Payroll');
+  assertEqual([M('payroll', { checked:true, on:false }, true, true), M('payroll', { checked:true, on:true }, false, true), M('payroll', { checked:true, on:true }, true, true), M('payroll', { checked:true, on:true }, false, false), M('settings', { checked:true, on:true }, true, true), M('payroll', null, false, true)],
+    ['off', 'on', 'hide', 'hide', 'on', 'off'], 'notifications: Payroll hides the bar once tested (or when there is nothing to offer); Settings keeps Send a test; a lost subscription offers Turn on again');
+  assertEqual([sb.toastKind('Notifications are on for this device. A test was sent to 1 device.'), sb.toastKind('Notifications are on for this device')], ['ok', 'ok'], 'notifications: the turned-on message is a success');
+  // What is gone and what stays (read from the page's own code).
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  assertEqual([script.includes('mfaReminderHtml'), script.includes('setRequireMfa'), script.includes('requireMfa'), script.includes('Job types follow the services')],
+    [false, false, false, false], 'settings: no "require two-step sign-in" switch, no reminder, no "Job types" row');
+  const shell = extractDecl(script, 'renderShell');
+  assertEqual([shell.includes('openViewAsModal()'), shell.includes('exitViewAs()'), shell.includes('togglePresentationMode'), shell.includes('Presentation mode: ON')],
+    [false, true, false, false], 'main menu (item 4): no View as start, no Presentation mode at all (it would show the viewer of a demo); View as keeps its way back out');
+  assertEqual(extractDecl(script, 'renderSecurityPage').includes('togglePresentationMode()'), true, 'Settings → Security still turns Presentation mode on and off');
+  const sec = extractDecl(script, 'renderSecurityPage');
+  assertEqual([sec.includes('togglePresentationMode()'), sec.includes('openViewAsModal()'), sec.includes('startMfaEnroll()'), sec.includes('turnOffMfa()')],
+    [true, true, true, true], 'Security keeps Showing the app and the per-person two-step sign-in');
+  const enroll = extractDecl(script, 'startMfaEnroll');
+  assertEqual([enroll.includes('data.all'), enroll.includes('mfaStaleFactors('), enroll.includes('mfaFriendlyName(')], [true, true, true], '2FA: setup looks in all factors, cleans up and picks a unique name');
+  assertEqual([extractDecl(script, 'enablePhoneNotifications').includes("step:'test'"), extractDecl(script, 'sendTestNotification').includes('markPushTestedHere()'), extractDecl(script, 'keepListScroll').includes('.set-nav')],
+    [true, true, true], 'notifications: a test goes out by itself and is remembered; the Settings menu keeps its scroll');
+  assertEqual([/\.set-nav \{[^}]*position: sticky[^}]*max-height:[^}]*overflow-y: auto/.test(html), html.includes('.set-layout.show-page .set-nav { display: none; }')],
+    [true, true], 'settings menu: its own scroll on a wide screen; still list → page on a phone');
+}
+
 testJobAttributionTags(loadSandbox());
 testSubDivisionAndSource(loadSandbox());
 testSplitLeadRequestEvent(loadSandbox());
 testComputeBusinessPerformance(loadSandbox());
 testFunnelLossReasonsSpeedToLead(loadSandbox());
 testComputeProfitByWeekInRange(loadSandbox());
+function testVaAutoLogout(sb){
+  console.log('\nVA automatic log-out, per person (Settings → People, 13 Oct)');
+  const cat = c => { sb.STATE.data.settings = { catalog: c }; };
+  const D = { logoutAt: '22:00', endAt: '17:30', logoutFrom: 'default' };
+  cat({});
+  assertEqual(sb.vaShiftTimes('p1'), D, 'va log-out: nothing saved = 22:00, and 17:30 recorded when they forget');
+  cat({ myday: { autoLogout: '20:30' } });
+  assertEqual(sb.vaShiftTimes('p1'), { logoutAt: '20:30', endAt: '17:30', logoutFrom: 'office' }, 'va log-out: the old office-wide setting (Security) still reads');
+  cat({ myday: { autoLogout: '20:30', people: { p1: { logoutAt: '21:15', endAt: '18:00' } } } });
+  assertEqual([sb.vaShiftTimes('p1'), sb.vaShiftTimes('p2')], [{ logoutAt: '21:15', endAt: '18:00', logoutFrom: 'person' }, { logoutAt: '20:30', endAt: '17:30', logoutFrom: 'office' }], 'va log-out: per person; the others keep the fallback');
+  cat({ myday: { autoLogout: 'x', people: { p1: { logoutAt: '25:00', endAt: '5pm' } } } });
+  assertEqual(sb.vaShiftTimes('p1'), D, 'va log-out: bad saved values fall back');
+  cat({ myday: { people: { p1: { logoutAt: '23:55' }, p2: { logoutAt: '19:00', endAt: '20:00' } } } });
+  assertEqual([sb.vaShiftTimes('p1').logoutAt, sb.vaShiftTimes('p2').endAt], ['23:30', '19:00'], 'va log-out: capped before midnight; the end is never after the log-out');
+  const odd = [{ myday: { people: ['x'] } }, { myday: { people: { p1: 'oops' } } }, { myday: { people: null } }].map(c => { cat(c); try { return sb.vaShiftTimes('p1'); } catch (e) { return 'threw: ' + e.message; } });
+  assertEqual(odd, [D, D, D], 'va log-out: odd saved shapes read as the default, no error');
+  const cur = { logoutAt: '22:00', endAt: '17:30' }, P = (f, v) => sb.vaShiftTimeProblem(f, v, cur);
+  assertEqual([P('logoutAt', '21:00'), P('endAt', '18:15'), P('logoutAt', ''), P('logoutAt', '23:45'), P('logoutAt', '17:30'), P('endAt', '22:00')],
+    ['', '', 'Pick a time', 'Pick a time by 23:30, so the day is closed before midnight', 'Pick a time after 17:30, the end time recorded when they forget', 'Pick a time before 22:00, when they are logged out'], 'va log-out: which times can be saved, and why not');
+  // Sydney is AEDT (+11) on 13 Oct 2026 and AEST (+10) in June.
+  const E = sb.vaEndTimeText;
+  assertEqual([E('2026-10-13', '2026-10-13T06:30:00Z'), E('2026-10-13', '2026-10-13T07:42:00Z'), E('2026-10-13', '2026-10-12T13:05:00Z'), E('2026-06-15', '2026-06-15T07:30:00Z')], ['5:30pm', '6:42pm', '12:05am', '5:30pm'], 'va log-out: the recorded end time shown in Sydney time');
+  assertEqual([E('2026-10-13', '2026-10-12T06:30:00Z'), E('2026-10-13', null), E('2026-10-13', 'garbage')], ['', '', ''], 'va log-out: no time shown when it is another day or missing');
+  // The SQL (Ofek applies it) and the app use the same defaults and the same settings keys.
+  const sql = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'settings-round2-phase1.sql'), 'utf8');
+  const fnSql = (sql.match(/create or replace function public\.auto_end_va_shifts\(\)[\s\S]*?\$function\$;/i) || [''])[0];
+  const V = sb.VA_SHIFT_DEFAULT;
+  assertEqual([`time '${V.logoutAt}'`, `time '${V.endAt}'`, `time '${V.latest}'`, "'people'", "'logoutAt'", "'endAt'", "'autoLogout'"].filter(x => !fnSql.includes(x)), [], 'va log-out: the SQL reads the same keys with the same defaults as the app');
+  assertEqual([V.logoutAt, V.endAt, V.latest], ['22:00', '17:30', '23:30'], 'va log-out: defaults 22:00 / 17:30, latest 23:30');
+  assertEqual(/^-- ROLLBACK \(G7\)/m.test(sql) && /^-- .*time '20:00'/m.test(sql.slice(sql.indexOf('-- ROLLBACK (G7)'))) && !/time '20:00'/.test(fnSql), true, 'va log-out: the SQL keeps a commented rollback to the live 20:00 version');
+}
+
 testRepeatServiceReminder(loadSandbox());
 testPayroll(loadSandbox());
 testDashboard(loadSandbox());
@@ -1238,12 +1641,21 @@ testLiveRowsAndStageMemo(loadSandbox());
 testToastKinds(loadSandbox());
 testCatalog(loadSandbox());
 testOfficeHours(loadSandbox());
+testChaseCountSetting(loadSandbox());
+testLostReasonDelete(loadSandbox());
+testPipelineStages(loadSandbox());
+testConnectedSources(loadSandbox());
 testMessageTemplates(loadSandbox());
 testReviewSettings(loadSandbox());
+testReviewPreview(loadSandbox());
 testPhoneSettings(loadSandbox());
 testPaySettings(loadSandbox());
 testPeopleContractorsEquipment(loadSandbox());
 testOrganicBoard(loadSandbox());
+testSettingsRound2Small(loadSandbox());
+testRegionAndWeeks(loadSandbox());
+testBusinessDetails(loadSandbox());
+testVaAutoLogout(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

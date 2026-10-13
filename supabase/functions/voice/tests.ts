@@ -226,6 +226,55 @@ const IN = { From: "+61412345678", To: "+61400000001" };
   x = await body(await step(db, "after_office", { CallSid: "CM7", DialCallStatus: "no-answer", From: "+61466103709", To: IN.To }, { div: "Chimney" }, FRI_10));
   has(x, 'timeout="20"', "out-of-range backup ring = 20 seconds");
 
+  // 16b. Backup hours per weekday (Ofek 13 Oct). The old shape ({ from, to, days: [..] }) still reads the same; the
+  // ROUTING fixture above keeps it, so every test before this one proves that too.
+  const SAT_10 = Date.parse("2026-10-03T00:00:00Z");    // Saturday 10:00 Sydney
+  const FRI_1830 = Date.parse("2026-10-02T08:30:00Z");  // Friday 18:30 Sydney
+  const SAT_1330 = Date.parse("2026-10-03T03:30:00Z");  // Saturday 13:30 Sydney
+  const at = (h: any, ms: number) => backupOpen({ backupHours: h } as any, ms);
+  const oldAll = { from: "08:00", to: "20:00", days: [0, 1, 2, 3, 4, 5, 6] }, oldWeek = { from: "08:00", to: "20:00", days: [1, 2, 3, 4, 5] };
+  eq([at(oldAll, FRI_10), at(oldAll, FRI_21), at(oldAll, SAT_0730)], [true, false, false], "old shape: every day 08:00–20:00");
+  eq([at(oldWeek, FRI_10), at(oldWeek, SAT_10)], [true, false], "old shape: an unticked day has no backup");
+  eq([at({ from: "08:00", to: "20:00", days: [] }, FRI_10), at({ from: "08:00", to: "20:00" }, FRI_10)], [false, false], "old shape: no days ticked = no backup, as before");
+  const perDayH = { days: { 5: { on: true, from: "09:00", to: "17:00" }, 6: { on: false, from: "08:00", to: "20:00" } } };
+  eq([at(perDayH, FRI_10), at(perDayH, FRI_1830), at(perDayH, SAT_10)], [true, false, false], "per day: Friday 09:00–17:00, Saturday off");
+  eq(at({ days: { 5: { on: true, from: "08:00", to: "21:30" } } }, FRI_21), true, "per day: a late Friday");
+  eq([at({ days: {} }, FRI_10), at({ days: {} }, FRI_21)], [true, false], "per day: a missing day is on, 08:00–20:00");
+  eq(at({ days: { 5: { on: true, from: "17:00", to: "09:00" } } }, FRI_10), false, "per day: end before start = no backup");
+  eq(at({ days: { 5: { on: true, from: "bad", to: "20:00" } } }, FRI_10), false, "per day: a bad time = no backup");
+  eq([at(null, FRI_10), at("x", FRI_10), at({ days: 5 }, FRI_10)], [false, false, false], "odd data never throws, just no backup");
+  eq(backupOpen({ backupHours: JSON.parse('{"days":{"5":{"on":true,"from":"08:00","to":"12:00"}}}') } as any, FRI_10), true, "per day: string keys from JSON");
+  eq(backupDay(JSON.parse('{"days":{"5":{"on":true,"from":"09:00","to":"17:00"}}}'), 5), { from: 540, to: 1020 }, "backupDay in minutes");
+  const perDay = JSON.parse(JSON.stringify(ROUTING));
+  perDay.backupHours = { days: { 0: { on: false }, 1: { on: true, from: "08:00", to: "20:00" }, 2: { on: true, from: "08:00", to: "20:00" }, 3: { on: true, from: "08:00", to: "20:00" }, 4: { on: true, from: "08:00", to: "20:00" }, 5: { on: false, from: "08:00", to: "20:00" }, 6: { on: true, from: "09:00", to: "13:00" } } };
+  db = fakeDb({ ronOn: false, routing: perDay });
+  x = await body(await step(db, "incoming", { CallSid: "CB1", ...IN }, {}, FRI_10));
+  has(x, "Our office is closed", "per day: no backup on Friday → closed");
+  has(x, "<Record ", "…voicemail");
+  db = fakeDb({ ronOn: false, ronDate: "2026-10-03", routing: perDay });
+  x = await body(await step(db, "incoming", { CallSid: "CB2", From: "0466103709", To: IN.To }, {}, SAT_10));
+  has(x, "<Number>+61407735994</Number>", "per day: Saturday 10:00 open, chimney → Noam");
+  db = fakeDb({ ronOn: false, ronDate: "2026-10-03", routing: perDay });
+  x = await body(await step(db, "incoming", { CallSid: "CB3", From: "0466103709", To: IN.To }, {}, SAT_1330));
+  has(x, "Our office is closed", "per day: Saturday after 13:00 closed");
+  db = fakeDb({ ronDate: "2026-10-02", routing: perDay });
+  await step(db, "incoming", { CallSid: "CB4", From: "0466103709", To: IN.To }, {}, FRI_10);
+  x = await body(await step(db, "after_office", { CallSid: "CB4", DialCallStatus: "no-answer", From: "+61466103709", To: IN.To }, { div: "Chimney" }, FRI_10));
+  has(x, "Our office is closed", "per day: Ron didn't answer on a day with no backup → closed voicemail");
+  const nothing = { people: ROUTING.people, divisions: ROUTING.divisions };
+  db = fakeDb({ ronOn: false, routing: nothing });
+  x = await body(await step(db, "incoming", { CallSid: "CB5", From: "0466103709", To: IN.To }, {}, FRI_10));
+  has(x, "<Number>+61407735994</Number>", "nothing saved: backup at 10:00");
+  db = fakeDb({ ronOn: false, routing: nothing });
+  x = await body(await step(db, "incoming", { CallSid: "CB6", ...IN }, {}, FRI_21));
+  has(x, "Our office is closed", "nothing saved: closed at 21:00");
+  const perDayAway = JSON.parse(JSON.stringify(perDay)); perDayAway.people.noam.available = false;
+  db = fakeDb({ ronDate: "2026-10-03", routing: perDayAway });
+  await step(db, "incoming", { CallSid: "CB7", ...IN }, {}, SAT_10);
+  x = await body(await step(db, "after_office", { CallSid: "CB7", DialCallStatus: "no-answer", ...IN }, { div: "Aircon" }, SAT_10));
+  has(x, "<Number>+61418638552</Number></Dial>", "per day + Noam not available → aircon goes to Ofek");
+  hasNot(x, "+61407735994", "…not Noam");
+
   // 17. Landline callers get no text.
   db = fakeDb({ ronOn: false }); sms.length = 0;
   await step(db, "incoming", { CallSid: "CA15", From: "+61298765432", To: IN.To }, {}, FRI_21);

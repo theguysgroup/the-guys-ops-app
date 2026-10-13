@@ -280,8 +280,8 @@ a.btn { text-decoration: none; }
 }
 /* Settings: its own menu on the left, the page on the right; on a phone the menu is a list that opens each page (Ofek 12 Oct). */
 .set-layout { display: grid; grid-template-columns: 228px minmax(0, 1fr); gap: 28px; align-items: start; }
-.set-nav { position: sticky; top: 18px; display: flex; flex-direction: column; gap: 1px; }
-.set-search { position: relative; display: block; margin-bottom: 8px; }
+.set-nav { position: sticky; top: 18px; display: flex; flex-direction: column; gap: 1px; max-height: calc(100vh - 36px); max-height: calc(100dvh - 36px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0 4px 12px; margin: 0 -4px; }   /* its own scroll, as tall as the screen, separate from the page (Ofek 13 Oct); the padding keeps the active item's shadow and focus ring from being cut off */
+.set-search { position: sticky; top: 0; z-index: 1; display: block; margin-bottom: 0; padding-bottom: 8px; background: var(--paper); }
 .set-search .ico { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); pointer-events: none; }
 .set-search input { padding-left: 32px; font-size: 13px; }
 .set-group { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); margin: 14px 10px 4px; }
@@ -295,6 +295,7 @@ a.btn { text-decoration: none; }
 .set-title { font-size: 21px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
 .set-desc { color: var(--ink-soft); font-size: 13.3px; margin: 4px 0 18px; max-width: 70ch; }
 .set-sub { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 10px; }
+.set-note ol { margin: 6px 0 0; padding-left: 18px; }
 .set-note { display: flex; gap: 10px; align-items: flex-start; padding: 11px 14px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 12.5px; margin-bottom: 14px; }
 .set-block { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); margin-bottom: 16px; overflow: hidden; }
 .set-block-head { padding: 16px 20px 0; }
@@ -496,7 +497,8 @@ a.btn { text-decoration: none; }
   .set-layout { grid-template-columns: minmax(0, 1fr); }
   .set-layout.show-page .set-nav { display: none; }
   .set-layout:not(.show-page) .set-page { display: none; }
-  .set-nav { position: static; }
+  .set-nav { position: static; max-height: none; overflow: visible; padding: 0; margin: 0; }
+  .set-search { position: relative; background: none; }
   .set-link { padding: 12px 10px; font-size: 15px; border-radius: 10px; }
   .set-link::after { content: '›'; margin-left: auto; color: var(--ink-faint); font-size: 18px; line-height: 1; }
   .set-back { display: inline-flex; align-items: center; border: 0; background: none; color: var(--primary); font: inherit; font-weight: 600; font-size: 14.5px; padding: 2px 0 10px; cursor: pointer; }
@@ -1198,15 +1200,116 @@ function todayStr(now){ return fmtLocal(now||new Date()); }
 function localDay(ts){ if (!ts) return ''; const s = String(ts); return s.length<=10 ? s : fmtLocal(new Date(s)); }
 function daysBetween(a,b){ return Math.round((b.getTime()-a.getTime())/86400000); }
 function round2(n){ return Math.round((Number(n)||0)*100)/100; }
-// Weeks run Sunday → Saturday everywhere in the app — the same weeks Payroll pays by — so a week in
-// Financial Summary, Jobs, the Dashboard and Payroll always covers the same seven days.
+// Business weeks follow Settings → Region and format (Sunday → Saturday unless changed) everywhere in the app — the same
+// weeks Payroll pays by — so a week in Jobs, the Dashboard and Payroll always covers the same days. A change starts with
+// the next week, so past weeks keep their days (P6, Ofek 13 Oct).
+const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+// weekRulesNow() remembers the rules of the saved catalog.region by object identity (catalogSave always saves a fresh
+// copy), so catalog.region must never be changed in place. cache = weekBounds per date under those rules.
+const WEEK_RULES_MEMO = { src: null, rules: null, cache: null };
+// catalog.region.weeks = [{ weekStart: 0–6 (0 = Sunday), from: 'YYYY-MM-DD' }]: from that day on, weeks start on that
+// weekday. Bad entries are ignored; two changes from the same day = the last one. The first rule (Sunday) is implicit.
+function weekRules(region){
+  const list = (region && Array.isArray(region.weeks) ? region.weeks : [])
+    .filter(x => x && Number.isInteger(x.weekStart) && x.weekStart >= 0 && x.weekStart <= 6 && /^\d{4}-\d{2}-\d{2}$/.test(String(x.from || '')))
+    .map(x => ({ weekStart: x.weekStart, from: x.from }))
+    .sort((a, b) => a.from < b.from ? -1 : a.from > b.from ? 1 : 0)
+    .filter((x, i, a) => i===a.length - 1 || a[i + 1].from!==x.from);
+  return [{ weekStart: 0, from: '' }, ...list];
+}
+function weekRulesNow(){
+  const reg = (((STATE.data && STATE.data.settings && STATE.data.settings.catalog) || {}).region) || null;
+  if (!WEEK_RULES_MEMO.rules || WEEK_RULES_MEMO.src!==reg) { WEEK_RULES_MEMO.src = reg; WEEK_RULES_MEMO.rules = weekRules(reg); WEEK_RULES_MEMO.cache = new Map(); }
+  return WEEK_RULES_MEMO.rules;
+}
+// The business week a day falls in: { start, end, days } (YYYY-MM-DD). A rule's first week runs from its 'from' to the
+// first chosen weekday at least 4 days on (one short 4–6 or long 8–10 day week, P6); a later rule cuts the week before it.
+// Without rules (the saved ones are used); the result is shared, so never change it.
+function weekBounds(dateStr, rules){
+  const d = String(dateStr).slice(0, 10);
+  const R = rules || weekRulesNow(), cache = rules ? null : WEEK_RULES_MEMO.cache;
+  if (cache && cache.has(d)) return cache.get(d);
+  let i = R.length - 1; while (i > 0 && R[i].from > d) i--;
+  const r = R[i], next = R[i + 1] ? R[i + 1].from : null;
+  const back = (x, w) => shiftDays(x, -((parseLocalDate(x).getDay() - w + 7) % 7));
+  let start, end;
+  if (r.from) {
+    const k = (r.weekStart - parseLocalDate(r.from).getDay() + 7) % 7, first = shiftDays(r.from, k===0 ? 7 : k >= 4 ? k : k + 7);
+    if (d < first) { start = r.from; end = shiftDays(first, -1); }
+  }
+  if (!start) { start = back(d, r.weekStart); end = shiftDays(start, 6); }
+  if (next && end >= next) end = shiftDays(next, -1);
+  const out = { start, end, days: daysBetween(parseLocalDate(start), parseLocalDate(end)) + 1 };
+  if (cache) cache.set(d, out);
+  return out;
+}
 function weekOf(dateStr){
-  const d = parseLocalDate(dateStr);
-  const start = new Date(d); start.setDate(d.getDate() - d.getDay());
-  const end = new Date(start); end.setDate(start.getDate() + 6);
-  const key = fmtLocal(start);
+  const b = weekBounds(dateStr), start = parseLocalDate(b.start), end = parseLocalDate(b.end);
   const label = `${start.getDate()} ${MONTHS[start.getMonth()]} – ${end.getDate()} ${MONTHS[end.getMonth()]}`;
-  return { key, label, start, end };
+  return { key: b.start, label, start, end };
+}
+// The weekday weeks start on for that date (0 = Sunday), by the rule in force then.
+function weekStartDay(dateStr){
+  const R = weekRulesNow(), d = String(dateStr).slice(0, 10);
+  let i = R.length - 1; while (i > 0 && R[i].from > d) i--;
+  return R[i].weekStart;
+}
+// "Sunday to Saturday": how weeks run on that date, by the rule in force then. Not the days of that one week, so a short or
+// long transition week (P6) never names a wrong pattern like "Sunday to Sunday".
+function weekDaysName(dateStr, sep = ' to '){ const w = weekStartDay(dateStr); return `${DAY_NAMES[w]}${sep}${DAY_NAMES[(w + 6) % 7]}`; }
+// "a one-off 8-day week (18 Oct – 25 Oct)" while the week of that date isn't 7 days (a transition week), else ''.
+function weekOneOff(dateStr){ const b = weekBounds(dateStr); return b.days===7 ? '' : `a one-off ${b.days}-day week (${fmtDateShort(b.start)} – ${fmtDateShort(b.end)})`; }
+// The keys (first days) of every business week that touches startDateStr..endDateStr, in order. Walks real weeks, so a
+// short transition week is never skipped (a +7 day step could jump over it).
+function weekKeysInRange(startDateStr, endDateStr){
+  const keys = []; let k = weekBounds(startDateStr).start;
+  const endKey = weekBounds(endDateStr).start;
+  for (let guard = 0; guard < 60; guard++) { keys.push(k); if (k >= endKey) break; k = shiftDays(weekBounds(k).end, 1); }
+  return keys;
+}
+// What saving a new week start does (P6): null = nothing to do, else { weeks, from, first } with the rules to save, the
+// day the change starts (null = a change not started yet is cancelled) and that first week. The change starts the day
+// after this week ends; a change not started yet is replaced (or cancelled when the old day is picked again); this week
+// and every week before are never touched.
+function weekChangePlan(region, today, weekStart){
+  const ws = Number(weekStart); if (!Number.isInteger(ws) || ws < 0 || ws > 6) return null;
+  const all = weekRules(region), kept = all.filter(r => !r.from || r.from <= today), pending = all.filter(r => r.from > today);
+  const saved = kept.filter(r => r.from);
+  if (pending.length && pending[pending.length - 1].weekStart===ws) return null;
+  if (ws===kept[kept.length - 1].weekStart) return pending.length ? { weeks: saved, from: null, first: null } : null;
+  const from = shiftDays(weekBounds(today, kept).end, 1), weeks = [...saved, { weekStart: ws, from }];
+  return { weeks, from, first: weekBounds(from, weekRules({ weeks })) };
+}
+// The financial year (Settings → Region and format, catalog.region.fyStart = its first month, 1–12; 1 July if not set).
+function fyStartMonth(region){ const n = Number(region && region.fyStart); return Number.isInteger(n) && n >= 1 && n <= 12 ? n : 7; }
+function financialYearOf(dateStr, fyMonth){
+  const m = fyMonth || 7, d = parseLocalDate(dateStr), y = d.getMonth() + 1 >= m ? d.getFullYear() : d.getFullYear() - 1;
+  return { start: fmtLocal(new Date(y, m - 1, 1)), end: fmtLocal(new Date(y + 1, m - 1, 0)), label: m===1 ? `FY ${y}` : `FY ${y}–${String(y + 1).slice(2)}` };
+}
+// Date format (catalog.region.dateFormat) is for FULL dates only: fmtDateYear and the invoices' invDate (documents,
+// insurance, reminders, agreements, invoices). Short day-month dates (fmtDateShort, "5 Oct", in narrow table columns)
+// and Ofek's pay-message ranges (payrollRangeText) stay as they are.
+const DATE_FORMATS = [['d mmm yyyy', '5 Oct 2026'], ['dd/mm/yyyy', '05/10/2026']];
+function dateFormatOf(region){ return region && region.dateFormat==='dd/mm/yyyy' ? 'dd/mm/yyyy' : 'd mmm yyyy'; }
+function fmtDateNumeric(s){ const d = parseLocalDate(s); return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`; }
+// ── Business details (Ofek 14 Oct, Settings → Business details; catalog.business) ──
+// The address in parts (street, suburb, state, postcode) for invoices and Xero later. Saved before 14 Oct as one line in
+// 'address': until a part is saved, that line shows as the street. line = the one-line address (also kept in 'address').
+const AU_STATES = ['NSW','VIC','QLD','WA','SA','TAS','ACT','NT'];
+function businessAddress(b){
+  const x = b || {}, parts = ['street','suburb','state','postcode'], has = parts.some(k => x[k]!==undefined);
+  const street = String((has ? x.street : x.address) || ''), suburb = String(x.suburb || ''), state = String(x.state || ''), postcode = String(x.postcode || '');
+  return { street, suburb, state, postcode, line: [street, [suburb, state, postcode].filter(Boolean).join(' ')].filter(Boolean).join(', ') };
+}
+// The business's own insurance (catalog.business.insurance[key] = { insurer, policy, cover, expiry, file, fileAt }).
+// Reminders and the push function's docExpiry scan warn before it expires.
+const BIZ_INSURANCE = [{ key: 'workers', label: 'Workers compensation' }, { key: 'liability', label: 'Public liability' }];
+function businessInsuranceStatus(ins, today){
+  const x = ins || {};
+  if (!x.expiry && !x.insurer && !x.policy && !x.file) return { tone: 'neutral', text: 'Not on file' };
+  const e = employeeDocExpiry({ expiry: x.expiry }, today);
+  if (!e) return { tone: 'neutral', text: 'No expiry date' };
+  return { tone: e.tone, text: e.days < 0 ? `Expired ${fmtDateYear(x.expiry)}` : e.tone==='warn' ? `Expires in ${e.days} day${e.days===1 ? '' : 's'}` : `Valid until ${fmtDateYear(x.expiry)}` };
 }
 function monthOf(dateStr){
   const d = parseLocalDate(dateStr);
@@ -1253,7 +1356,7 @@ function commissionEligibleTechnicianNames(data){ return data.employees.filter(e
 function activeEmployeeNames(data){ return data.employees.filter(e=>e.status==='Active').map(e=>e.name); }
 
 /* ── payroll (the Payroll board) ──────────────────────────────────────────
-   Weeks run Sunday → Saturday. A technician's commission lands in the week the job was PAID (not the
+   Weeks are the business weeks (weekBounds; Sunday → Saturday unless changed). A technician's commission lands in the week the job was PAID (not the
    week it was done), so a late-paid job shows up in the week its money arrived, flagged as late.
    Hourly staff (Ron) are paid hours × rate + a daily bonus tier on that day's total bookings. */
 const PAYROLL_HOURLY_RATE = 10; // AUD per reported hour
@@ -1284,13 +1387,14 @@ function salesLogBookings(l){ return (Number(l.bookingsAircon)||0) + (Number(l.b
 // Money shown in presentation mode is scaled everywhere, including Ron's hourly rate and bonus amounts.
 function presentAmt(n){ return (typeof PRESENT!=='undefined' && PRESENT) ? n * PRESENT_FACTOR : n; }
 function salesLogPay(l){ return round2(((Number(l.hours)||0) * payHourlyFor(l.date).rate + bookingBonus(salesLogBookings(l), l.date)) * (typeof PRESENT!=='undefined' && PRESENT ? PRESENT_FACTOR : 1)); }
-function payrollWeekOf(dateStr){
-  const d = parseLocalDate(dateStr);
-  const sun = new Date(d); sun.setDate(d.getDate() - d.getDay());
-  const sat = new Date(sun); sat.setDate(sun.getDate() + 6);
-  return { key: fmtLocal(sun), start: fmtLocal(sun), end: fmtLocal(sat) };
+function payrollWeekOf(dateStr){ const b = weekBounds(dateStr); return { key: b.start, start: b.start, end: b.end }; }
+// Walks real business weeks (not 7 days), so a short or long transition week is one step.
+function shiftPayrollWeek(weekKey, deltaWeeks){
+  let k = weekBounds(weekKey).start;
+  const n = Math.trunc(Number(deltaWeeks) || 0);
+  for (let i = 0; i < Math.abs(n); i++) k = n > 0 ? shiftDays(weekBounds(k).end, 1) : weekBounds(shiftDays(k, -1)).start;
+  return k;
 }
-function shiftPayrollWeek(weekKey, deltaWeeks){ const d = parseLocalDate(weekKey); d.setDate(d.getDate() + 7*deltaWeeks); return fmtLocal(d); }
 // "23-29/8", or "30/8-5/9" across a month boundary — the format Ofek's pay messages use.
 function payrollRangeText(startStr, endStr){
   const a = parseLocalDate(startStr), b = parseLocalDate(endStr);
@@ -1342,8 +1446,8 @@ function computePayrollMaterials(data, person, weekKey){
 // ── The technician's weekly invoices, made by the app (Ofek 7 Oct; replaces uploading a file). Two a week: his commission
 // (the jobs the customer paid that week, as on the Payroll board) and the equipment & materials he paid for himself.
 // No technician is registered for GST, so neither invoice charges GST; the expenses one shows the GST inside the
-// receipts, and he is paid back the full amount. Number = name + the week's Sunday + C (commission) or E (expenses).
-// parties: { from:{ name, legalName, abn, address, email, phone, bankName, bankBsb, bankAccount }, to:{ legalName, abn, acn } }.
+// receipts, and he is paid back the full amount. Number = name + the week's first day + C (commission) or E (expenses).
+// parties: { from:{ name, legalName, abn, address, email, phone, bankName, bankBsb, bankAccount }, to:{ legalName, abn, acn, address } }.
 function payrollInvoiceNumber(person, weekKey, kind){ return `${String(person||'').toUpperCase().replace(/[^A-Z0-9]/g, '')}-${payrollWeekOf(weekKey).start.slice(2).replace(/-/g, '')}-${kind==='salary' ? 'C' : 'E'}`; }
 function buildPayrollInvoice(data, person, weekKey, kind, parties, issued){
   const c = computePayrollCommission(data, person, weekKey);
@@ -1468,7 +1572,7 @@ function findStoreInText(text, names){
 function payrollPeriod(ui, today){
   const mode = ui.mode==='month' || ui.mode==='custom' ? ui.mode : 'week';
   let start, end, prevStart;
-  if (mode==='week') { const wk = payrollWeekOf(ui.week || today); start = wk.start; end = wk.end; prevStart = shiftDays(start, -7); }
+  if (mode==='week') { const wk = payrollWeekOf(ui.week || today); start = wk.start; end = wk.end; prevStart = payrollWeekOf(shiftDays(start, -1)).start; }
   else if (mode==='month') { const [y, m] = String(ui.month || today.slice(0, 7)).split('-').map(Number); start = fmtLocal(new Date(y, m - 1, 1)); end = fmtLocal(new Date(y, m, 0)); prevStart = fmtLocal(new Date(y, m - 2, 1)); }
   else { let a = ui.from || shiftDays(today, -29), b = ui.to || today; if (a > b) [a, b] = [b, a]; start = a; end = b; prevStart = shiftDays(start, -(daysBetween(parseLocalDate(start), parseLocalDate(end)) + 1)); }
   const effEnd = end > today ? (today < start ? start : today) : end;
@@ -1553,8 +1657,8 @@ function computePayrollHourly(data, person, weekKey){
   const wk = payrollWeekOf(weekKey);
   const logs = (data.salesLogs||[]).filter(l => l.person===person && l.date>=wk.start && l.date<=wk.end);
   const days = [];
-  for (let i=0; i<7; i++) {
-    const d = parseLocalDate(wk.start); d.setDate(d.getDate()+i); const date = fmtLocal(d);
+  // At most 13 days (the longest transition week), and nothing for a key that isn't a real date: never an endless loop.
+  for (let date = wk.start, i = 0; /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= wk.end && i < 13; date = shiftDays(date, 1), i++) {
     const l = logs.find(x => x.date===date) || null;
     const bookings = l ? salesLogBookings(l) : 0;
     days.push({ date, log:l, hours: l ? (Number(l.hours)||0) : 0, bookings, bonus: l ? bookingBonus(bookings, date) : 0, pay: l ? salesLogPay(l) : 0,
@@ -1672,7 +1776,7 @@ function summarizeCalls(calls){
   });
   return out;
 }
-// Dashboard periods. Weeks are Sunday → Saturday, the same as Payroll. The comparison period is the
+// Dashboard periods. Weeks are the business weeks, the same as Payroll. The comparison period is the
 // same length right before it (for "this month": the same days of last month), capped at today so a
 // half-finished period is never compared against a full one.
 const DASH_RANGES = [['week','This week'],['lastWeek','Last week'],['month','This month'],['lastMonth','Last month'],['30d','Last 30 days'],['90d','Last 90 days'],['custom','Custom']];
@@ -1689,7 +1793,7 @@ function resolveDashboardRange(ui, now){
   const effEnd = end > today ? today : end;
   const spanDays = Math.max(1, daysBetween(parseLocalDate(start), parseLocalDate(effEnd)) + 1);
   let prevStart;
-  if (unit==='week') prevStart = shiftDays(start, -7);
+  if (unit==='week') prevStart = payrollWeekOf(shiftDays(start, -1)).start;
   else if (unit==='month') { const s0 = parseLocalDate(start); prevStart = fmtLocal(new Date(s0.getFullYear(), s0.getMonth()-1, 1)); }
   else prevStart = shiftDays(start, -spanDays);
   let prevEnd = shiftDays(prevStart, spanDays - 1);
@@ -1788,7 +1892,7 @@ function computeReminders(data, now){
   // marked paid yet (not one per job). Weeks before the Payroll board existed were paid outside the app.
   const payNow = payrollWeekOf(todayStr(now)).start;
   for (let wk = PAYROLL_REMINDERS_FROM; wk < payNow; wk = shiftPayrollWeek(wk, 1)) {
-    const range = payrollRangeText(wk, shiftDays(wk, 6));
+    const w = payrollWeekOf(wk); const range = payrollRangeText(w.start, w.end);
     payrollCommissionPeople(data).forEach(p => {
       const c = computePayrollCommission(data, p, wk); const key = `payroll:${wk}:${p}`;
       if (c.grandTotal > 0 && !payrollStatus(data, wk, p).salaryPaid && !dismissed.has(key)) items.push({ key, readKey:key, type:'commission', weekKey:wk, severity:'warn', date:c.week.end, title:`Pay ${p} for ${range}`, meta:`${fmtMoney(c.total)} commission${c.materials.total ? ` + ${fmtMoney(c.materials.total)} equipment & materials` : ''} · not marked paid in Payroll yet` });
@@ -1808,6 +1912,16 @@ function computeReminders(data, now){
       title: `${e.name}'s ${d.label.replace(/ \(.*\)$/, '').toLowerCase()} ${x.days < 0 ? 'has expired' : `expires in ${x.days} day${x.days===1 ? '' : 's'}`}`,
       meta: `${x.days < 0 ? 'Expired' : 'Expires'} ${fmtDateYear(doc.expiry)} · upload the new one on their card (Resources → Employees)` });
   }));
+  // The business's own workers compensation and public liability insurance (Ofek 14 Oct), the same way.
+  const bizIns = ((((data.settings || {}).catalog) || {}).business || {}).insurance || {};
+  BIZ_INSURANCE.forEach(x => {
+    const ins = bizIns[x.key], e = employeeDocExpiry(ins, todayStr(now));
+    if (!e || e.tone==='good') return;
+    const key = `bizins:${x.key}:${ins.expiry}`;
+    if (!dismissed.has(key)) items.push({ key, readKey:key, type:'business-insurance', severity: e.days < 0 ? 'bad' : 'warn', date: ins.expiry,
+      title: `${x.label} insurance ${e.days < 0 ? 'has expired' : `expires in ${e.days} day${e.days===1 ? '' : 's'}`}`,
+      meta: `${e.days < 0 ? 'Expired' : 'Expires'} ${fmtDateYear(ins.expiry)} · upload the new certificate in Settings → Business details` });
+  });
   data.equipmentSpend.forEach(e => { const key = `equipment:${e.id}`; if (e.reimbursed==='Pending' && !dismissed.has(key)) items.push({ key, readKey:key, type:'equipment', severity:'warn', date:e.date, title:`Equipment reimbursement pending for ${e.technician}`, meta:e.item }); });
   // Manually-created reminders (from the CRM follow-up flow) sit alongside the derived ones, so Ron sees
   // one reminder list rather than two competing ones.
@@ -2944,7 +3058,7 @@ let MODAL_TASK_ID = null; // id of the task currently open in the task modal (nu
 // Files picked on a page form (Closings: invoice photo and parts receipt; the equipment receipt) until it is posted.
 // Kept apart from MODAL_FILES, which every closeModal() empties (posting a closing can open the commission popup).
 let PAGE_FILES = {};
-const START_LINK = (() => { try { const q = new URLSearchParams(location.search); const week = q.get('week'); return { tab: q.get('tab'), week: /^\d{4}-\d{2}-\d{2}$/.test(week||'') ? week : null, used: false }; } catch (e) { return { used: true }; } })();
+const START_LINK = (() => { try { const q = new URLSearchParams(location.search); const week = q.get('week'); return { tab: q.get('tab'), week: /^\d{4}-\d{2}-\d{2}$/.test(week||'') ? week : null, page: /^[a-z]+$/.test(q.get('page') || '') ? q.get('page') : null, used: false }; } catch (e) { return { used: true }; } })();
 const PAGE_FILE_IDS = ['cf-photo', 'cf-parts-receipt', 'eqf-receipt'];
 const fileStore = id => PAGE_FILE_IDS.includes(id) ? PAGE_FILES : MODAL_FILES;
 
@@ -3031,7 +3145,7 @@ function renderShiftLog(person, weekKey, isOwnPage){
   const t = iso => iso ? new Date(iso).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' }) : '—';
   const mine = (STATE.shiftEvents||[]).filter(e => e.profile_id===prof.id);
   const rows = []; let totalMins = 0;
-  for (let d = wk.start; d <= wk.end; d = shiftDays(d, 1)) {
+  for (let d = wk.start, i = 0; /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= wk.end && i < 13; d = shiftDays(d, 1), i++) {
     const evs = mine.filter(e => e.day===d);
     if (!evs.length) continue;
     const k = shiftDaySummary(evs, Date.now(), d===today);
@@ -3731,9 +3845,20 @@ function renderLogin(){
     </div>
   `);
 }
-/* ── Two-step sign-in (Ofek 12 Oct, settings stage 3b): an authenticator app's 6-digit code as well as the password.
-   Turned on per person in Settings → Security (Supabase's own TOTP, free). Someone who has it gives the code before
-   any data loads. Owners can ask every owner and manager to set it up (a reminder at the top of every page). ── */
+/* ── Two-step sign-in (Ofek 12 Oct, settings stage 3b; 13 Oct: no "require it" switch and no reminder): an authenticator
+   app's 6-digit code as well as the password. Turned on per person in Settings → Security (Supabase's own TOTP, free).
+   Someone who has a VERIFIED factor gives the code before any data loads (mfaCheck). ── */
+// A setup that was started and never finished (Cancel, or the popup closed) leaves an UNVERIFIED factor behind.
+// listFactors().data.totp lists verified ones only, so these are found in data.all and removed before a new setup (Ofek 13 Oct, P15).
+function mfaStaleFactors(all){ return (Array.isArray(all) ? all : []).filter(f => f && f.factor_type==='totp' && f.status==='unverified'); }
+// Every setup gets its own name: Supabase refuses a second factor with a name the person already has.
+function mfaFriendlyName(now, taken){
+  const base = 'OPS ' + new Date(now).toISOString().slice(0, 19).replace('T', ' ');
+  const used = new Set((taken || []).map(String));
+  let name = base, n = 2;
+  while (used.has(name)) name = base + ' (' + (n++) + ')';
+  return name;
+}
 async function mfaCheck(){
   if (MFA.busy) return; MFA.busy = true;
   try {
@@ -3768,8 +3893,10 @@ async function mfaFactors(){
 async function startMfaEnroll(){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   try {
-    for (const f of (MFA.factors || []).filter(x => x.status!=='verified')) await sb.auth.mfa.unenroll({ factorId: f.id });   // a half-finished one from before
-    const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'OPS ' + new Date().toISOString().slice(0, 10) });
+    const f = await sb.auth.mfa.listFactors(); if (f.error) throw f.error;
+    const all = (f.data && f.data.all) || [];
+    for (const x of mfaStaleFactors(all)) { try { await sb.auth.mfa.unenroll({ factorId: x.id }); } catch (e) {} }   // a half-finished one from before
+    const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: mfaFriendlyName(Date.now(), all.map(x => x.friendly_name)) });
     if (error) throw error;
     const qr = String(data.totp.qr_code || '');
     openPopup(`<h3 style="margin:0 0 6px">Turn on two-step sign-in</h3>
@@ -3799,14 +3926,6 @@ function turnOffMfa(){
     logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', 'Security: turned off two-step sign-in for their account');
     showToast('Two-step sign-in is off'); MFA.factors = null; mfaFactors();
   });
-}
-// The reminder at the top of every page while an owner or manager hasn't set it up, when the owners require it.
-function mfaReminderHtml(){
-  const p = getCurrentProfile();
-  if (!p || (p.role!=='owner' && p.role!=='manager') || !catalogObject('security').requireMfa || VIEW_AS_ID) return '';
-  if (MFA.factors===null) { mfaFactors(); return ''; }
-  if (MFA.factors.some(x => x.status==='verified')) return '';
-  return `<div class="banner" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">${ico('lock', 16)}<span style="flex:1">Two-step sign-in is required for owners and managers. It takes two minutes.</span><button class="btn small primary" onclick="goTab('settings');setSettingsPage('security')">Set it up</button></div>`;
 }
 
 // Sign in with Google (Ofek 12 Oct; free, unlike Apple's). The button shows once Google is switched on in Supabase →
@@ -4008,6 +4127,9 @@ function renderShell(profile, data){
     return `<div><div class="nav-group-label">${esc(g.group)}</div>${itemsHtml}</div>`;
   }).join('');
 
+  // In the footer: Presentation mode and View as are started from Settings → Security or People (Ofek 13 Oct, item 4).
+  // Presentation mode leaves no trace here, so the person watching a demo can't tell (it's turned off in Security or by
+  // signing out); View as keeps its way back out.
   return `
     <div class="app-grid${NAV_AUTO ? ' nav-auto' : ''}${NAV_AUTO && NAV_PEEK ? ' nav-peek' : ''}" style="display:grid;grid-template-columns:240px 1fr;min-height:100vh">
       <div class="nav-edge" aria-hidden="true" onmouseenter="navEdgeEnter()" onmouseleave="navEdgeLeave()"></div>
@@ -4033,8 +4155,8 @@ function renderShell(profile, data){
         <div class="footer-block" style="margin-top:auto;padding:10px 8px 0;font-size:11px;border-top:1px solid var(--line);padding-top:12px">
           <div style="margin-bottom:9px;display:flex;align-items:center;justify-content:space-between"><span>${esc(profile.fullName)} · ${roleLabel(profile.role)}</span></div>
           <div style="display:flex;flex-direction:column;gap:6px">
-            ${profile.role==='owner' ? `<button class="btn ghost small" onclick="togglePresentationMode()" title="Hide the real figures when showing the app to someone">${PRESENT ? ico('eye', 14) + ' Presentation mode: ON' : 'Presentation mode'}</button>` : ''}
-            ${VIEW_AS_ID ? `<button class="btn primary small" onclick="exitViewAs()">Exit view as ${esc(profile.fullName)}</button>` : profile.role==='owner' ? `<button class="btn ghost small" onclick="openViewAsModal()" title="See the app as a team member sees it (read-only)">👁 View as…</button>` : ''}
+            ${phoneAvailButton(profile)}
+            ${VIEW_AS_ID ? `<button class="btn primary small" onclick="exitViewAs()">Exit view as ${esc(profile.fullName)}</button>` : ''}
             ${VIEW_AS_ID ? '' : `<button class="btn ghost small" onclick="openChangePasswordModal()">Change password</button>`}
             <button class="btn ghost small" onclick="doLogout()">Log out</button>
           </div>
@@ -4083,15 +4205,7 @@ function resolveOverviewRange(ui, now){
   return { start: fmtLocal(w.start), end: fmtLocal(w.end), label: `Week of ${w.label}` };
 }
 function computeRevenueByWeekInRange(data, startDateStr, endDateStr, technicianFilter){
-  const keys = []; const seen = new Set();
-  let d = parseLocalDate(startDateStr);
-  const endKey = weekOf(endDateStr).key;
-  for (let guard=0; guard<60; guard++) {
-    const wk = weekOf(fmtLocal(d)).key;
-    if (!seen.has(wk)) { seen.add(wk); keys.push(wk); }
-    if (wk===endKey) break;
-    d.setDate(d.getDate()+7);
-  }
+  const keys = weekKeysInRange(startDateStr, endDateStr);
   return keys.map(k => ({ label: weekOf(k).label, revenue: round2(computeWeek(data, k, technicianFilter).jobs.reduce((s,j)=>s+j.amount,0)) }));
 }
 function renderBarGroup(items, opts){
@@ -4160,9 +4274,13 @@ function divColor(d){
 function divName(d, text){ return d ? `<span class="div-name" style="--div:${divColor(d)}">${esc(text ?? divLabel(d))}</span>` : esc(text ?? ''); }
 // Pipeline stages (Ofek, 2026-09-27). Stored values keep 'New' and 'Follow-up' so older rows need no rewrite; the legacy
 // 'Not Relevant' reads as Lost. Won is never picked by hand: a lead is Won as soon as its customer has a job.
+// Stages can be added in Settings → Pipeline (Ofek 13 Oct; a custom stage's key looks like 's…'), and the built-in ones
+// can be switched off there, except New, Won and Lost.
 const LEAD_STATUSES = ['New','Chasing','Quoted','Follow-up','Booked','Won','Lost'];
 const LEAD_STAGE_PICKABLE = ['New','Chasing','Quoted','Follow-up','Booked','Lost'];
 const LEAD_STAGE_LABEL = { New:'New lead', Chasing:'Chasing', Quoted:'Quoted', 'Follow-up':'Follow up', Booked:'Booked', Won:'Won', Lost:'Lost' };
+// New, Won and Lost are always on (Ofek 13 Oct, P7): every new lead lands in New, a job makes a lead Won, Lost asks why. They can be renamed and recoloured only.
+const STAGE_CORE = ['New','Won','Lost'];
 function stageLabel(s){ return LEAD_STAGE_LABEL[s] || s; }
 const LEAD_STATUS_COLOR = { New:'var(--stage-new)', Chasing:'var(--stage-chasing)', Quoted:'var(--stage-quoted)', 'Follow-up':'var(--stage-followup)', Booked:'var(--stage-booked)', Won:'var(--stage-won)', Lost:'var(--stage-lost)', 'Not Relevant':'var(--stage-lost)' };
 // Text on a circle filled with the stage colour: dark on the light ones (white, yellow, bright green), white on the rest.
@@ -4172,6 +4290,45 @@ function stageInk(s){ return LEAD_STATUS_INK[s] || '#fff'; }
 function stageVars(s){ return `--stage:${stageColor(s)};--stage-ink:${stageInk(s)};--avatar-color:${stageColor(s)};--avatar-ink:${stageInk(s)}`; }
 // A stage name in its colour (Ofek 10 Oct: each stage has one colour across the whole app).
 function stageBadge(s, text){ return `<span class="stage-badge" style="--stage:${stageColor(s)}">${esc(text || stageLabel(s))}</span>`; }
+// A stage switched off in Settings leaves the stage menus, the filter and (once it is empty) the pipeline. It stays in
+// LEAD_STATUSES, so a lead still in it keeps its stage, its column and its count.
+function stageOn(k){ return !ACTIVE.stages || ACTIVE.stages.has(k) || STAGE_CORE.includes(k); }
+// What a stage menu offers: the stages switched on (never Won), plus the lead's own stage so it still shows.
+function stagesPickable(current){ return LEAD_STAGE_PICKABLE.filter(k => stageOn(k) || k===current); }
+// The pipeline's columns: a switched-off stage keeps its column while it still has leads, so no lead is ever hidden.
+function stagesShown(counts){ return LEAD_STATUSES.filter(k => stageOn(k) || (counts && counts[k] > 0)); }
+// "In progress" on the CRM Overview: every stage between New and Won / Lost, custom ones included.
+function stagesInProgress(){ return LEAD_STATUSES.filter(k => !STAGE_CORE.includes(k)); }
+function stageIsBuiltin(k){ return catalogBase().stages.some(b => b.key===k); }
+function stageLeadsIn(contacts, k){ return (contacts || []).filter(c => leadStage(c)===k); }
+// Leads that only STORE a stage but read as another one (a job makes them Won): not counted in the stage, yet they fall
+// back into it if their job is deleted or unlinked.
+function stageStoredOnly(contacts, k){ return (contacts || []).filter(c => c.status===k && leadStage(c)!==k); }
+// The changes that move every lead out of a stage that is being deleted or switched off: one patch per lead, with the same
+// fields a stage change by hand sets (applyLeadStage). A lead that has a job reads as Won, so only its stored value moves
+// (quietly). extra holds what the new stage asks for: lostReason, bookedFor (kept when a lead already has a booked day),
+// nextFollowUp (kept when a lead already has a later one). The contacts themselves are not changed.
+function stageMovePlan(contacts, from, to, extra, nowIso, today){
+  extra = extra || {};
+  return (contacts || []).filter(c => c.status===from || leadStage(c)===from).map(c => {
+    if (leadStage(c)!==from) return { id: c.id, patch: { status: to }, quiet: true };
+    const p = { status: to, stageChangedAt: nowIso };
+    if (to==='Chasing') { p.chasingSince = nowIso; p.chaseAlertDone = false; p.chaseRound = 1; }
+    if (to==='Booked' || to==='Lost') p.nextFollowUp = '';
+    p.lostReason = to==='Lost' ? (extra.lostReason || '') : '';
+    if (to==='Booked' && !c.bookedFor && extra.bookedFor) p.bookedFor = extra.bookedFor;
+    if (STAGES_NEED_DATE.includes(to) && !(c.nextFollowUp && c.nextFollowUp > today) && extra.nextFollowUp) p.nextFollowUp = extra.nextFollowUp;
+    return { id: c.id, patch: p, quiet: false };
+  });
+}
+// The stage list with a new custom stage added before Won and Lost. Its key is made up ('s' + the time), never the typed
+// name: keys go into the pipeline's selectors and buttons, and a name could clash with an old stored value.
+function stageListWithNew(list, name, now){
+  const item = { key: 's' + Number(now).toString(36), label: name, color: CAT_SWATCHES[list.length % CAT_SWATCHES.length], active: true };
+  const out = list.slice(), at = out.findIndex(x => x.key==='Won' || x.key==='Lost');
+  out.splice(at < 0 ? out.length : at, 0, item);
+  return out;
+}
 const LEAD_SOURCE_COLOR = { 'Google Ads':'var(--primary)', 'Meta Ads':'var(--accent)', 'Google Maps':'var(--ink-faint)', Organic:'var(--good)', Unknown:'var(--ink-faint)', 'Phone Call':'var(--warn)' };
 // Stages that must always carry a FUTURE follow-up date.
 const STAGES_NEED_DATE = ['Quoted','Follow-up'];
@@ -4235,6 +4392,7 @@ function leadNeedsFutureDate(c){ return leadRulesApply(c) && STAGES_NEED_DATE.in
 const AIRCON_TYPE_TAGS = ['Split System','Duct System','Ventilation'];
 // Why a lead was lost — the fixed list Ofek set on 2026-09-27. Until the Lost stage makes one of these mandatory, older leads
 // are classified from their free-form tags (first match wins; price before 'not interested' because GHL wrote 'not interested - price').
+// Built-in and added reasons can be deleted (Ofek 13 Oct): a deleted one stays in the saved list as {deleted:true}, so old leads keep its name.
 const LOST_REASONS = [
   { key:'noAnswer',      label:'No answer',             match:t => t.includes('no answer') || t.includes('not answering') },
   { key:'outsideArea',   label:'Outside service area',  match:t => t.includes('outside service area') || t.includes('outside area') },
@@ -4248,7 +4406,7 @@ function lostReasonOf(c){
   if (c.lostReason && LOST_REASONS.some(r=>r.key===c.lostReason)) return c.lostReason;
   const tags = (c.tags||[]).map(t=>String(t).toLowerCase());
   const order = ['tooExpensive','outsideArea','spam','wrongNumber','wrongDetails','noAnswer','notInterested'];
-  for (const k of order) { const r = LOST_REASONS.find(x=>x.key===k); if (tags.some(r.match)) return k; }
+  for (const k of order) { const r = LOST_REASONS.find(x=>x.key===k); if (r && r.match && tags.some(r.match)) return k; }
   return 'noReason';
 }
 const META_PLATFORM_TAGS = ['Facebook','Instagram'];
@@ -4280,6 +4438,24 @@ function subSourceOptions(source, contacts){
   const set = new Set(SUB_SOURCES[source] || []);
   (contacts||[]).forEach(c => { if (c.source===source && c.subSource) set.add(c.subSource); });
   return [...set];
+}
+// Connected sources (Ofek 13 Oct): the site a source's visitors come from, the steps to connect it, and its leads so far.
+const SOURCE_HOSTS = { chatgpt: 'chatgpt.com', openai: 'chatgpt.com', perplexity: 'perplexity.ai', gemini: 'gemini.google.com', copilot: 'copilot.microsoft.com', bing: 'bing.com', claude: 'claude.ai' };
+function sourceHost(name){ const n = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, ''); const k = Object.keys(SOURCE_HOSTS).find(x => n.includes(x)); return k ? SOURCE_HOSTS[k] : n; }
+function sourceSetupSteps(name){
+  const h = sourceHost(name), known = Object.values(SOURCE_HOSTS).includes(h);
+  return [
+    known ? `Visitors from ${name} reach the website with "utm_source=${h}" at the end of the link, or with ${h} as the site they came from.`
+      : `Links you share for ${name} need "utm_source=${h}" at the end, so the website can tell where the visitor came from.`,
+    'The website form and chat already pass this on with every enquiry.',
+    `One step is left: the lead intake has to give those enquiries the source "${name}". Ask for it to be set up; until then, pick the source on the lead by hand.`,
+    `To check: open the website with "?utm_source=${h}" at the end of the address, send a test enquiry, and see it arrive with this source.`,
+  ];
+}
+function sourceLeadStats(key, contacts){
+  const mine = (contacts || []).filter(c => c.source===key);
+  const last = mine.reduce((m, c) => { const d = localDay(leadArrivedAt(c) || c.createdAt); return d > m ? d : m; }, '');
+  return { count: mine.length, last };
 }
 // Read-only — populated once, at creation, by the intake-lead Edge Function (or blank for every
 // lead entered directly in the app). Shared between the CRM Inbox details panel and the lead
@@ -4509,7 +4685,7 @@ function crmFilteredContactsUnsorted(data){
   let list = data.contacts.slice();
   if (UI.crm.source!=='all') list = list.filter(c=>c.source===UI.crm.source);
   if (UI.crm.division!=='all') list = list.filter(c=>c.division===UI.crm.division);
-  if (UI.crm.status!=='all') list = list.filter(c=>leadStage(c)===UI.crm.status);
+  if (UI.crm.status!=='all' && LEAD_STATUSES.includes(UI.crm.status)) list = list.filter(c=>leadStage(c)===UI.crm.status); // a deleted stage left in the filter is ignored
   if (UI.crm.tag && UI.crm.tag!=='all' && LEAD_TAGS.some(x=>x.tag===UI.crm.tag)) list = list.filter(c=>leadTagOn(c, UI.crm.tag)); // an old free tag left in the filter is ignored
   if (UI.crm.subDivision && UI.crm.subDivision!=='all') list = list.filter(c=>leadSubDivisions(c).includes(UI.crm.subDivision));
   if (UI.crm.subSource && UI.crm.subSource!=='all') list = list.filter(c=>leadSubSource(c)===UI.crm.subSource);
@@ -4585,6 +4761,8 @@ function setLeadStage(id, stage, after){
   const cur = leadStage(c);
   if (stage==='Won') { showToast('Won is set automatically once the customer has a job in Jobs & Commissions'); render(); return; }
   if (cur==='Won') { showToast(`${c.fullName} already has a job, so the lead stays Won`); render(); return; }
+  // A menu still open on another device, or a card dropped on a switched-off column that still shows its last leads.
+  if (stage!==cur && (!LEAD_STATUSES.includes(stage) || !stageOn(stage))) { showToast(`${stageLabel(stage)} is switched off in Settings → Pipeline`); render(); return; }
   if (stage===cur && stage!=='Lost') { if (after) after(); return; }
   if (stage==='Lost') { openLostReasonPrompt(c, after); return; }
   if (stage==='Booked') { openBookedDatePrompt(c, after); return; }
@@ -4637,7 +4815,7 @@ function renderBulkBar(){
   const n = bulkIds().length;
   return `<div class="bulk-bar" id="bulk-bar"${n ? '' : ' hidden'}>
     <b>${n} selected</b>
-    <select aria-label="Move the selected leads to a stage" onchange="if(this.value){ bulkStage(this.value); this.value=''; }"><option value="">Move to stage…</option>${LEAD_STAGE_PICKABLE.map(st => `<option value="${st}">${esc(stageLabel(st))}</option>`).join('')}</select>
+    <select aria-label="Move the selected leads to a stage" onchange="if(this.value){ bulkStage(this.value); this.value=''; }"><option value="">Move to stage…</option>${stagesPickable().map(st => `<option value="${esc(st)}">${esc(stageLabel(st))}</option>`).join('')}</select>
     <select aria-label="Add a tag to the selected leads" onchange="if(this.value){ bulkTag(this.value, true); this.value=''; }"><option value="">Add a tag…</option>${LEAD_TAGS.filter(t => !ACTIVE.tags || ACTIVE.tags.has(t.tag)).map(t => `<option value="${esc(t.tag)}">${esc(t.tag)}</option>`).join('')}</select>
     <select aria-label="Remove a tag from the selected leads" onchange="if(this.value){ bulkTag(this.value, false); this.value=''; }"><option value="">Remove a tag…</option>${LEAD_TAGS.map(t => `<option value="${esc(t.tag)}">${esc(t.tag)}</option>`).join('')}</select>
     <button type="button" class="btn ghost small" onclick="clearBulk()">Clear</button>
@@ -4650,6 +4828,7 @@ function refreshBulkBar(){
 }
 function bulkStage(stage){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (!LEAD_STATUSES.includes(stage) || !stageOn(stage)) { showToast(`${stageLabel(stage)} is switched off in Settings → Pipeline`); render(); return; }
   const list = bulkContacts().filter(c => leadStage(c)!=='Won' && leadStage(c)!==stage);
   if (!list.length) { showToast(`They're all in ${stageLabel(stage)} already`); return; }
   const n = list.length, who = `${n} lead${n===1 ? '' : 's'}`;
@@ -4709,10 +4888,11 @@ function bulkTag(tag, on){
    lead is lost and payment methods are renamed, recoloured, reordered, added to and switched off in Settings. Saved in
    settings.catalog. Every entry keeps the key its data is saved with (a lead's division, source and stage, a job's type
    and payment method, a tag), so nothing saved before changes. A switched-off entry leaves the forms but stays in the
-   reports and on every lead and job that has it. Stages can be renamed, recoloured and reordered, not added or removed:
-   several are tied to rules (Won fills itself, Lost asks why, Booked counts a booking). ── */
-const ACTIVE = { divisions: null, sources: null, tags: null, lost: null, payments: null };
-const RULES = { quoteIdleDays: 14, chaseDecideDays: 21 };
+   reports and on every lead and job that has it. Stages (Ofek 13 Oct): custom ones can be added and deleted; the built-in
+   ones can be switched off but not deleted, except New, Won and Lost, which are always on (Won fills itself, Lost asks why,
+   every new lead lands in New). A stage is deleted or switched off only after its leads are moved to another stage. ── */
+const ACTIVE = { divisions: null, sources: null, tags: null, lost: null, payments: null, stages: null };
+const RULES = { quoteIdleDays: 14, chaseDecideDays: 21, chaseOfficeDays: true };
 const DIV_LABEL = {};
 const CATALOG = { base: null };
 function replaceArr(arr, items){ arr.splice(0, arr.length, ...items); return arr; }
@@ -4736,7 +4916,7 @@ function catalogBase(){
     tags: LEAD_TAGS.map(t => ({ tag: t.tag, hint: t.hint || '', color: null, active: true })),
     lostReasons: LOST_REASONS.map(r => ({ key: r.key, label: r.label, active: true })),
     payments: pays.filter(Boolean).map(k => ({ key: k, label: k, active: true })),
-    rules: { needDate: true, quoteIdleDays: 14, chaseDecideDays: 21 },
+    rules: { needDate: true, quoteIdleDays: 14, chaseDecideDays: 21, chaseOfficeDays: true },
     fixed: { divColor: { ...DIVISION_COLOR }, stageLabel: { ...LEAD_STAGE_LABEL }, stageColor: { ...LEAD_STATUS_COLOR }, stageInk: { ...LEAD_STATUS_INK },
       sourceLabel: { ...LEAD_SOURCE_LABEL }, sourceColor: { ...LEAD_SOURCE_COLOR }, subSources: Object.keys(SUB_SOURCES),
       lostMatch: Object.fromEntries(LOST_REASONS.map(r => [r.key, r.match])), needDate: [...STAGES_NEED_DATE] },
@@ -4754,6 +4934,10 @@ function catalogList(section){
   base.forEach(b => { if (!out.some(x => catalogId(section, x)===catalogId(section, b))) out.push(copy(b)); });
   return out;
 }
+// What Settings lists: deleted entries stay saved (for the history), but aren't shown.
+function catalogShown(section){ return catalogList(section).filter(x => !x.deleted); }
+// The entry with this name (its key, label or tag, any case), deleted ones included; null if none.
+function catalogFindByName(list, name){ const n = String(name || '').trim().toLowerCase(); return n ? list.find(x => [x.key, x.label, x.tag].filter(Boolean).some(t => String(t).toLowerCase()===n)) || null : null; }
 function catalogRules(){ return { ...catalogBase().rules, ...(((STATE.data && STATE.data.settings && STATE.data.settings.catalog) || {}).rules || {}) }; }
 // Puts the lists into the ones the whole app reads (in place, so every page picks them up on its next redraw).
 function applyCatalog(){
@@ -4770,6 +4954,8 @@ function applyCatalog(){
     LEAD_STATUS_COLOR[x.key] = x.color || fx.stageColor[x.key] || 'var(--ink-faint)';
     if (x.color) LEAD_STATUS_INK[x.key] = inkFor(x.color); else if (fx.stageInk[x.key]) LEAD_STATUS_INK[x.key] = fx.stageInk[x.key]; else delete LEAD_STATUS_INK[x.key];
   });
+  // Switched-off stages stay in LEAD_STATUSES (their leads keep their stage and count); New, Won and Lost are always on.
+  ACTIVE.stages = new Set(st.filter(x => x.active!==false || STAGE_CORE.includes(x.key)).map(x => x.key));
   replaceArr(LEAD_SOURCES, src.map(x => x.key));
   src.forEach(x => {
     if (x.label && x.label!==x.key) LEAD_SOURCE_LABEL[x.key] = x.label; else if (fx.sourceLabel[x.key]) LEAD_SOURCE_LABEL[x.key] = fx.sourceLabel[x.key]; else delete LEAD_SOURCE_LABEL[x.key];
@@ -4779,13 +4965,14 @@ function applyCatalog(){
   ACTIVE.sources = new Set(src.filter(x => x.active!==false).map(x => x.key));
   replaceArr(LEAD_TAGS, tags.map(t => ({ tag: t.tag, hint: t.hint || '', color: t.color || null })));
   ACTIVE.tags = new Set(tags.filter(t => t.active!==false).map(t => t.tag));
-  replaceArr(LOST_REASONS, lost.map(r => ({ key: r.key, label: r.label, match: fx.lostMatch[r.key] || (t => t.includes(String(r.label).toLowerCase())) })));
-  ACTIVE.lost = new Set(lost.filter(r => r.active!==false).map(r => r.key));
+  replaceArr(LOST_REASONS, lost.map(r => ({ key: r.key, label: r.label, deleted: !!r.deleted, match: fx.lostMatch[r.key] || (t => t.includes(String(r.label).toLowerCase())) })));
+  ACTIVE.lost = new Set(lost.filter(r => r.active!==false && !r.deleted).map(r => r.key));
   if (typeof CLOSING_PAYMENT_METHODS!=='undefined') replaceArr(CLOSING_PAYMENT_METHODS, ['', ...pay.map(x => x.key)]);
   ACTIVE.payments = new Set(pay.filter(x => x.active!==false).map(x => x.key));
   replaceArr(STAGES_NEED_DATE, rules.needDate ? fx.needDate : []);
   RULES.quoteIdleDays = Math.max(1, Math.round(Number(rules.quoteIdleDays)) || 14);
   RULES.chaseDecideDays = Math.max(1, Math.round(Number(rules.chaseDecideDays)) || 21);
+  RULES.chaseOfficeDays = rules.chaseOfficeDays !== false;   // Ofek 13 Oct: off = chasing calls count on every day
   const n = RULES.chaseDecideDays;
   if (typeof MD_BUBBLES!=='undefined') { const b = MD_BUBBLES.find(x => x[0]==='decide'); if (b) b[1] = `Chasing ${n}+ days`; }
   if (typeof MD_HE!=='undefined') MD_HE.decide = `מרדף ${n}+ ימים`;
@@ -4826,7 +5013,9 @@ function applyBranding(){
   if (!mine) { if (b.theme==='light' || b.theme==='dark') document.documentElement.setAttribute('data-theme', b.theme); else document.documentElement.removeAttribute('data-theme'); }
 }
 function tagColor(t){ const x = LEAD_TAGS.find(y => y.tag===t); return x && x.color ? x.color : null; }
-function lostReasonLabel(k){ const r = LOST_REASONS.find(x=>x.key===k); return r ? r.label : 'No reason given'; }
+function lostReasonLabel(k){ const r = LOST_REASONS.find(x=>x.key===k); return r ? r.label + (r.deleted ? ' (deleted reason)' : '') : 'No reason given'; }
+// A lost lead always needs a reason, so the last one still switched on can't be deleted.
+function lostReasonCanDelete(list, key){ return list.some(x => x.key!==key && !x.deleted && x.active!==false); }
 function openLostReasonPrompt(c, after){
   POPUP_AFTER = after || null;
   openPopup(`<h3 style="margin:0 0 6px">Why was ${esc(c.fullName)} lost?</h3>
@@ -4909,7 +5098,7 @@ function openPopup(html){
 function closePopup(){ const el = document.getElementById('app-popup'); if (el) el.remove(); }
 function finishPopup(){ closePopup(); const a = POPUP_AFTER; POPUP_AFTER = null; if (a) a(); else render(); }
 
-// ── Chasing: workdays are Mon–Fri, 08:00–17:00 Sydney ──
+// ── Chasing: workdays are the office days set in Settings (Mon–Fri, 08:00–17:00 Sydney until changed) ──
 function sydneyWall(d){
   // The formatter is built once and kept on the function — the lead alerts ask for Sydney time many times per screen.
   const fmt = sydneyWall.fmt || (sydneyWall.fmt = new Intl.DateTimeFormat('en-CA',{ timeZone:'Australia/Sydney', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false, weekday:'short' }));
@@ -4992,12 +5181,14 @@ function chaseAlertIsDue(c, now){
   const due = chaseAlertDue(c.chasingSince), w = sydneyWall(now || new Date());
   return w.day > due.day || (w.day===due.day && w.hour*60+w.minute >= due.mins);
 }
-// X / Y: working days Ron ticked "called" / working days since the lead came in (both inclusive of today).
+// X / Y: days Ron ticked "called" / days since the lead came in (both inclusive of today). Office days only unless
+// switched off in Settings → Pipeline (Ofek 13 Oct).
 function chaseCounter(c, now){
   const today = sydneyWall(now || new Date()).day;
   const start = localDay(c.createdAt) || today;
-  let y = 0; for (let d = start; d <= today; d = shiftDays(d, 1)) { if (isWorkday(d)) y++; if (y > 400) break; }
-  const called = new Set((c.chaseCalls||[]).filter(d => d>=start && d<=today && isWorkday(d)));
+  const counts = d => !RULES.chaseOfficeDays || isWorkday(d);
+  let y = 0; for (let d = start; d <= today; d = shiftDays(d, 1)) { if (counts(d)) y++; if (y > 400) break; }
+  const called = new Set((c.chaseCalls||[]).filter(d => d>=start && d<=today && counts(d)));
   return { x: called.size, y, calledToday: (c.chaseCalls||[]).includes(today) };
 }
 function toggleChaseCalledToday(id, ev){
@@ -5436,7 +5627,8 @@ function mdReviewJobs(data){
 }
 // What a job needs in "Ask for a review" today (Ofek 5 Oct), r = its review request (or none):
 //   'ask'   = the customer hasn't been asked: never asked, the request failed, or the automatic one couldn't go (no
-//             customer card, no mobile or email on it, unknown job type). In automatic mode the system asks first, so a
+//             customer card, no mobile or email on it, unknown job type, or automatic asking was switched off while it
+//             waited). In automatic mode the system asks first, so a
 //             job from the last 2 days with no request yet is left to it.
 //   'again' = asked yesterday or before and still no Google review (the nightly review routine marks the ones who left
 //             one) → one reminder, within 2 weeks of the request.
@@ -5449,10 +5641,13 @@ function reviewNeed(j, r, today, auto){
     const day = r.sent_at ? localDay(r.sent_at) : '', c = reviewCfg();
     return (Number(r.ask_count) || 1) < 2 && !!day && day <= shiftDays(today, -c.remindAfterDays) && day >= shiftDays(today, -c.remindWithinDays) ? 'again' : null;
   }
-  if (r.status==='skipped' && auto && !/customer card|mobile or email|job type/i.test(r.reason || '')) return null;
+  if (r.status==='skipped' && auto && !/customer card|mobile or email|job type|asking is off/i.test(r.reason || '')) return null;
   return 'ask';
 }
 const reviewAutoOn = () => !!(STATE.data && STATE.data.settings && STATE.data.settings.reviewRequestsAuto);
+// The Closings "Don't ask for a review" box (Ofek 13 Oct): only while asking is automatic, and never for a technician.
+// With asking by hand nothing goes by itself, so the box is hidden; customers marked before stay marked.
+function closingShowsNoAsk(role, auto){ return role!=='technician' && !!auto; }
 // Google review requests (Ofek 13 Oct): every rule here is a setting (Settings → Google reviews, catalog.reviews). The
 // review-requests function reads the same values and keeps these defaults when nothing is saved.
 const REVIEW_DEFAULTS = { sendFrom: 8, sendUntil: 20, morning: 10, askAgainMonths: 6, remindAfterDays: 1, remindWithinDays: 14,
@@ -5484,6 +5679,12 @@ function reviewLinkFor(key){
   const own = reviewCfg().links[key] || {}, def = reviewDefaultFor(key);
   const link = /^https:\/\/\S+$/.test(String(own.link || '').trim()) ? String(own.link).trim() : (def.link || '');
   return { link, result: String(own.result ?? '').trim() || def.result || '', custom: !!(own.link || own.result) };
+}
+// The review request preview in Settings → Google reviews: the example customer (Sarah, a job by Guy today) with this
+// service's own link and thank-you line, filled into the words from Message templates exactly as the server does.
+function reviewPreviewValues(service){
+  const l = reviewLinkFor(service);
+  return { vars: { ...TPL_EXAMPLE, result: l.result, review_link: l.link }, hasLink: !!l.link };
 }
 function mdReviewDone(j, today){
   const r = REVIEW_REQ && j ? REVIEW_REQ[reviewInvoiceKey(j.invoiceNumber)] : null;
@@ -5782,7 +5983,8 @@ function mdDailyReportText(k, today, ended){
    On My Day, under the bookings table: every message from an EXISTING customer (not a New lead: those are in New leads)
    that came in between the office assistant's logout and their next login, oldest first. Opening one takes Ron to the
    conversation and drops it from the list (for everyone). No bubble or counter: it just says what to look at first.
-   If the assistant hasn't pressed Log Out by 20:00 the system finishes the day with the shift ending at 17:30
+   If the assistant hasn't pressed Log Out by their own log-out time (their People card, 22:00 when not set) the system
+   finishes the day: the end is their set time (17:30 when not set) or their own last action that day if later
    (auto_end_va_shifts), and the next morning the app tells them they forgot. */
 function vaWindow(){
   const va = (STATE.profiles||[]).find(p => p.role==='va');
@@ -5828,16 +6030,46 @@ function openWhileOutItem(contactId, key){
   if (!readOnlyReason()) sb.rpc('myday_merge', { p_day: today, p_items: { inboxSeen: { [key]: { a: nowIso, d: nowIso } } }, p_booking: null }).then(({ error }) => { if (error) console.error('inboxSeen', error); });
   goToLeadConversation(contactId);
 }
-// Office assistant opens the app: the end of the "while you were out" window, and "you forgot to log out" if the system
-// closed the day at 20:00.
+// The office assistant's automatic log-out, per person (Ofek 13 Oct, item 3): Settings → People → their card.
+// catalog.myday.people[<profile id>] = { logoutAt, endAt }. Until a person has their own, the old office-wide
+// catalog.myday.autoLogout (Settings → Security until 13 Oct) is used, then 22:00. Same rules as auto_end_va_shifts().
+const VA_SHIFT_DEFAULT = { logoutAt: '22:00', endAt: '17:30', latest: '23:30' };
+function vaShiftTimes(profileId){
+  const ok = t => /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(t || '');
+  const m = catalogObject('myday'), people = m.people && typeof m.people==='object' && !Array.isArray(m.people) ? m.people : {};
+  const mine = people[profileId] && typeof people[profileId]==='object' ? people[profileId] : {};
+  const logoutFrom = ok(mine.logoutAt) ? 'person' : ok(m.autoLogout) ? 'office' : 'default';
+  let logoutAt = logoutFrom==='person' ? mine.logoutAt : logoutFrom==='office' ? m.autoLogout : VA_SHIFT_DEFAULT.logoutAt;
+  if (logoutAt > VA_SHIFT_DEFAULT.latest) logoutAt = VA_SHIFT_DEFAULT.latest;
+  let endAt = ok(mine.endAt) ? mine.endAt : VA_SHIFT_DEFAULT.endAt;
+  if (endAt > logoutAt) endAt = logoutAt;
+  return { logoutAt, endAt, logoutFrom };
+}
+// Why a time can't be saved ('' when it can): the day must close before midnight, and the end comes before the log-out.
+function vaShiftTimeProblem(field, v, cur){
+  if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(v || '')) return 'Pick a time';
+  if (field==='logoutAt' && v > VA_SHIFT_DEFAULT.latest) return `Pick a time by ${VA_SHIFT_DEFAULT.latest}, so the day is closed before midnight`;
+  if (field==='logoutAt' && v <= cur.endAt) return `Pick a time after ${cur.endAt}, the end time recorded when they forget`;
+  if (field==='endAt' && v >= cur.logoutAt) return `Pick a time before ${cur.logoutAt}, when they are logged out`;
+  return '';
+}
+// The end time the system recorded (profiles.last_logout_at) as "6:42pm", only if it is on that day ('' otherwise).
+function vaEndTimeText(day, iso){
+  const d = iso ? new Date(iso) : null; if (!d || isNaN(d.getTime())) return '';
+  const w = sydneyWall(d); if (w.day!==day) return '';
+  return `${w.hour % 12 || 12}:${String(w.minute).padStart(2, '0')}${w.hour < 12 ? 'am' : 'pm'}`;
+}
+// Office assistant opens the app: the end of the "while you were out" window, and "you forgot to log out" with the end
+// time the system recorded (auto_end_va_shifts).
 async function vaSessionStart(){
   const p = getRealProfile && getRealProfile();
   if (!p || p.role!=='va' || VIEW_AS_ID || PRESENT) return;
   const { data } = await sb.from('profiles').select('last_logout_at, session_started_at, forgot_logout_on').eq('id', p.id).single();
   if (data) { p.lastLogoutAt = data.last_logout_at; p.sessionStartedAt = data.session_started_at; p.forgotLogoutOn = data.forgot_logout_on; }
   if (p.forgotLogoutOn) {
+    const end = vaEndTimeText(p.forgotLogoutOn, p.lastLogoutAt);
     openPopup(`<h3 style="margin:0 0 6px">You forgot to log out</h3>
-      <div style="font-size:14px;margin-bottom:12px">On ${esc(parseLocalDate(p.forgotLogoutOn).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' }))} you didn't press Log Out, so at ${esc(autoLogoutTime())} the system finished your day with the end time 5:30pm. Please press Log Out on My Day at the end of every day.</div>
+      <div style="font-size:14px;margin-bottom:12px">On ${esc(parseLocalDate(p.forgotLogoutOn).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' }))} you didn't press Log Out, so the system finished your day by itself${end ? `, with the end time ${esc(end)}` : ''}. Please press Log Out on My Day at the end of every day.</div>
       <div style="display:flex;justify-content:flex-end"><button class="btn primary" onclick="sb.rpc('ack_forgot_logout');closePopup()">OK</button></div>`);
   }
   render();
@@ -5920,7 +6152,7 @@ function renderLeadCard(c){
     ${(contactJobsTotal(c) ?? c.salesValue) ? `<div class="lead-sales-chip">${ico('dollar', 13)} ${fmtMoney(contactJobsTotal(c) ?? c.salesValue)}</div>` : ''}
     ${c.nextFollowUp ? `<div class="lead-due ${overdue?'overdue':(dueToday?'today':'')}">${overdue?'⚠ Overdue':(dueToday?'● Due today':'○ Follow up')} · ${fmtDateShort(c.nextFollowUp)}</div>` : ''}
     ${stage==='Won' ? '' : `<select class="lead-move" onpointerdown="fillStageSelect(this)" onfocus="fillStageSelect(this)" onclick="event.stopPropagation()" onchange="moveLead('${c.id}',this.value)" aria-label="Move ${esc(c.fullName)} to another stage">
-      <option value="${stage}" selected>${stageLabel(stage)}</option>
+      <option value="${esc(stage)}" selected>${esc(stageLabel(stage))}</option>
     </select>`}
   </div>`;
 }
@@ -5929,7 +6161,7 @@ function renderLeadCard(c){
 function fillStageSelect(sel){
   if (!sel || sel.options.length > 1) return;
   const cur = sel.value;
-  sel.innerHTML = LEAD_STAGE_PICKABLE.map(s => `<option value="${s}" ${s===cur ? 'selected' : ''}>${stageLabel(s)}</option>`).join('');
+  sel.innerHTML = stagesPickable(cur).map(s => `<option value="${esc(s)}" ${s===cur ? 'selected' : ''}>${esc(stageLabel(s))}</option>`).join('');
 }
 /* ── Pipeline drag (Ofek 12 Oct, part 2, from the video): the card lifts off, tilts and follows the pointer, a faint
    copy stays where it was, the column under it lights up, and on letting go it flies into the column and lands with a
@@ -6041,7 +6273,7 @@ function pipelinePatchMove(c, from){
   const to = leadStage(c);
   if (UI.tab!=='crm' || UI.crm.view!=='pipeline' || (UI.crm.status && UI.crm.status!=='all')) return false;
   const fromCol = document.querySelector(`#content .pipe-col[data-status="${from}"]`), toCol = document.querySelector(`#content .pipe-col[data-status="${to}"]`);
-  if (!fromCol || !toCol || from===to) return false;
+  if (!fromCol || !toCol || from===to || !stageOn(from)) return false;   // out of a switched-off column: redraw, so it goes once empty
   const board = toCol.closest('.pipeline'), around = flipMeasure(board);   // the cards around it slide to their new places
   const old = fromCol.querySelector(`.lead-card[data-lead-id="${c.id}"]`), was = old ? old.getBoundingClientRect() : null;
   const tmp = document.createElement('div'); tmp.innerHTML = renderLeadCard(c).trim();
@@ -6196,7 +6428,8 @@ function toggleLeadStar(id, event){
 function setLeadFollowupDate(id, value){
   const c = contactById(id); if (!c) return;
   // A follow-up date on a New or Chasing lead moves it to Follow-up (Ofek 5/10): a lead's date always has a bubble.
-  if (value && ['New','Chasing'].includes(leadStage(c))) {
+  // With Follow up switched off in Settings, the lead keeps its stage and just gets the date.
+  if (value && ['New','Chasing'].includes(leadStage(c)) && stageOn('Follow-up')) {
     if (value <= todayStr()) { showToast('Pick a follow-up date after today'); render(); return; }
     applyLeadStage(c, 'Follow-up', { nextFollowUp: value }); render(); return;
   }
@@ -6381,7 +6614,7 @@ function leadSubChips(c){
 function leadStageControl(c){
   const st = leadStage(c);
   if (st==='Won') return stageBadge('Won', 'Won — has a job');
-  const opts = LEAD_STAGE_PICKABLE.map(o => `<option value="${o}" ${o===st?'selected':''}>${esc(stageLabel(o))}</option>`).join('');
+  const opts = stagesPickable(st).map(o => `<option value="${esc(o)}" ${o===st?'selected':''}>${esc(stageLabel(o))}</option>`).join('');
   return `<select class="stage-select" style="min-width:130px;--stage:${stageColor(st)}" onchange="setLeadStage('${c.id}', this.value)">${opts}</select>`;
 }
 function renderCrmInbox(contacts){
@@ -6393,21 +6626,23 @@ function renderCrmInbox(contacts){
 }
 function renderCrmPipeline(contacts){
   const byStage = {}; contacts.forEach(c => { const st = leadStage(c); (byStage[st] = byStage[st] || []).push(c); });
-  const cols = LEAD_STATUSES.map(status => {
+  const counts = Object.fromEntries(Object.entries(byStage).map(([k, v]) => [k, v.length]));
+  const shown = stagesShown(counts);
+  const cols = shown.map(status => {
     const inCol = byStage[status] || [];
     const limit = (UI.crm.pipeShow || {})[status] || PIPE_PAGE, more = inCol.length - limit;
-    return `<div class="pipe-col" style="--stage:${LEAD_STATUS_COLOR[status]}" data-status="${status}">
+    return `<div class="pipe-col" style="--stage:${LEAD_STATUS_COLOR[status]}" data-status="${esc(status)}">
       <div class="pipe-head">
         <span class="pipe-title-wrap"><span class="pipe-dot"></span><span class="pipe-title">${esc(stageLabel(status))}</span></span>
         <span class="pipe-count">${inCol.length}</span>
       </div>
       <div class="pipe-body">
         ${inCol.length ? inCol.slice(0, limit).map(renderLeadCard).join('') : `<div class="pipe-empty">No leads</div>`}
-        ${more > 0 ? `<button type="button" class="list-more" onclick="showMorePipe('${status}')">Show ${Math.min(PIPE_PAGE, more)} more <span>· ${more} not shown</span></button>` : ''}
+        ${more > 0 ? `<button type="button" class="list-more" onclick="showMorePipe('${esc(jsStr(status))}')">Show ${Math.min(PIPE_PAGE, more)} more <span>· ${more} not shown</span></button>` : ''}
       </div>
     </div>`;
   }).join('');
-  const jump = `<div class="pipe-jump" aria-label="Stages">${LEAD_STATUSES.map((st, i) => `<button type="button" data-status="${st}" style="--stage:${LEAD_STATUS_COLOR[st]}" class="${i ? '' : 'on'}" onclick="pipeJump(${i})"><i></i>${esc(stageLabel(st))} <b>${(byStage[st] || []).length}</b></button>`).join('')}</div>`;
+  const jump = `<div class="pipe-jump" aria-label="Stages">${shown.map((st, i) => `<button type="button" data-status="${esc(st)}" style="--stage:${LEAD_STATUS_COLOR[st]}" class="${i ? '' : 'on'}" onclick="pipeJump(${i})"><i></i>${esc(stageLabel(st))} <b>${(byStage[st] || []).length}</b></button>`).join('')}</div>`;
   return `${jump}<div class="pipeline" onscroll="pipeJumpSync(this)">${cols}</div>
     <div class="hint" style="margin-top:10px">Drag a card between columns, or use the stage dropdown on the card. Won fills itself once the customer has a job.</div>`;
 }
@@ -6522,7 +6757,7 @@ function renderCrm(profile, data){
       <select style="width:auto" onchange="UI.crm.tag=this.value;render()"><option value="all">All tags</option>${LEAD_TAGS.map(x=>x.tag).map(t=>`<option value="${esc(t)}" ${UI.crm.tag===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.subDivision=this.value;render()" aria-label="Sub-division"><option value="all">All sub-divisions</option>${Object.entries(SUB_DIVISIONS).filter(([,l])=>l.length).map(([d,l])=>`<optgroup label="${esc(d)}">${l.map(t=>`<option value="${esc(t)}" ${UI.crm.subDivision===t?'selected':''}>${esc(t)}</option>`).join('')}</optgroup>`).join('')}</select>
       <select style="width:auto" onchange="UI.crm.subSource=this.value;render()" aria-label="Sub-source"><option value="all">All sub-sources</option>${Object.keys(SUB_SOURCES).map(src=>`<optgroup label="${esc(sourceLabel(src))}">${subSourceOptions(src, data.contacts).map(t=>`<option value="${esc(t)}" ${UI.crm.subSource===t?'selected':''}>${esc(t)}</option>`).join('')}</optgroup>`).join('')}</select>
-      <select style="width:auto" onchange="UI.crm.status=this.value;render()"><option value="all">All stages</option>${LEAD_STATUSES.map(s=>`<option value="${s}" ${UI.crm.status===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>
+      <select style="width:auto" onchange="UI.crm.status=this.value;render()"><option value="all">All stages</option>${LEAD_STATUSES.filter(s => stageOn(s) || s===UI.crm.status).map(s=>`<option value="${esc(s)}" ${UI.crm.status===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>
       ${isTable ? `<select style="width:auto" onchange="UI.crm.sortBy=this.value;render()">
         <option value="stage" ${UI.crm.sortBy==='stage'?'selected':''}>By stage (New first)</option>
         <option value="newest" ${UI.crm.sortBy==='newest'?'selected':''}>Newest lead first</option>
@@ -6577,6 +6812,8 @@ function renderCrmOverview(profile, data){
   });
   const salesByTechEntries = Object.entries(salesByTech).sort((a,b)=>b[1]-a[1]);
   const salesByTechTotal = round2(salesByTechEntries.reduce((s,[,v])=>s+v,0));
+  // "In progress": every stage between New and Won / Lost, custom ones included; a switched-off one is named only while it has leads.
+  const prog = stagesInProgress(), progShown = prog.filter(k => stageOn(k) || stats.byStatus[k]);
 
   return `
     <div class="page-head">
@@ -6592,8 +6829,8 @@ function renderCrmOverview(profile, data){
 
     <div class="grid-4">
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Total leads</div><div class="stat-value">${drill(stats.total, 'All leads in this period', 'leads', contacts)}</div><div class="stat-sub">in this period</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--warn)"><div class="stat-label">In progress</div><div class="stat-value">${drill(stats.byStatus.Chasing + stats.byStatus.Quoted + stats.byStatus['Follow-up'] + stats.byStatus.Booked, 'In progress (chasing, quoted, follow up, booked)', 'leads', contacts.filter(c => ['Chasing','Quoted','Follow-up','Booked'].includes(leadStage(c))))}</div><div class="stat-sub">${stats.byStatus.New} new · ${stats.byStatus.Chasing} chasing · ${stats.byStatus.Quoted} quoted · ${stats.byStatus['Follow-up']} follow up · ${stats.byStatus.Booked} booked</div></div>
-      <div class="card stat-card" style="--stat-accent:var(--stage-won)"><div class="stat-label">Won</div><div class="stat-value">${drill(stats.won, 'Won — became a job', 'leads', contacts.filter(c => contactHasJob(c, jobsAll)))}</div><div class="stat-sub">${stats.closeRate===null?'no leads yet':stats.closeRate+'% of leads became a job'} · ${stats.byStatus.Booked} booked</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--warn)"><div class="stat-label">In progress</div><div class="stat-value">${drill(prog.reduce((n, k) => n + (stats.byStatus[k] || 0), 0), `In progress (${progShown.map(k => stageLabel(k).toLowerCase()).join(', ')})`, 'leads', contacts.filter(c => prog.includes(leadStage(c))))}</div><div class="stat-sub">${stats.byStatus.New} new${progShown.map(k => ` · ${stats.byStatus[k] || 0} ${esc(stageLabel(k).toLowerCase())}`).join('')}</div></div>
+      <div class="card stat-card" style="--stat-accent:var(--stage-won)"><div class="stat-label">Won</div><div class="stat-value">${drill(stats.won, 'Won — became a job', 'leads', contacts.filter(c => contactHasJob(c, jobsAll)))}</div><div class="stat-sub">${stats.closeRate===null?'no leads yet':stats.closeRate+'% of leads became a job'}${stageOn('Booked') || stats.byStatus.Booked ? ` · ${stats.byStatus.Booked} booked` : ''}</div></div>
       <div class="card stat-card" style="--stat-accent:var(--stage-lost)"><div class="stat-label">Lost</div><div class="stat-value">${drill(stats.byStatus.Lost, 'Lost leads', 'leads', contacts.filter(c => leadStage(c)==='Lost'))}</div><div class="stat-sub">${fmtMoney(round2(contacts.filter(c => leadStage(c)==='Lost').reduce((s,c)=>s+(Number(c.estimatedValue)||0),0)))} estimated value lost</div></div>
     </div>
 
@@ -6661,9 +6898,9 @@ function openLeadModal(contactId){
             <div class="field"><label>Postcode</label><input id="lm-postcode" value="${c?esc(c.postcode||''):''}"></div>
           </div>
           <div class="field" style="margin-top:11px"><label>Notes</label>${c ? leadNotesField(c, 'modal') : `<textarea rows="3" id="lm-notes" placeholder="Anything to remember about this customer: gate code, dog, best time to call…"></textarea>`}</div>
-          <div class="field" style="margin-top:11px"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${stageBadge('Won', 'Won — has a job')}` : `<select id="lm-status" class="stage-select" style="--stage:${stageColor(c?leadStage(c):'New')}" onchange="this.style.setProperty('--stage', stageColor(this.value));document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none';document.getElementById('lm-booked-wrap').style.display=this.value==='Booked'?'':'none'">${LEAD_STAGE_PICKABLE.map(s=>`<option value="${s}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
+          <div class="field" style="margin-top:11px"><label>Stage</label>${c && leadStage(c)==='Won' ? `<input id="lm-status" type="hidden" value="Won">${stageBadge('Won', 'Won — has a job')}` : `<select id="lm-status" class="stage-select" style="--stage:${stageColor(c?leadStage(c):'New')}" onchange="this.style.setProperty('--stage', stageColor(this.value));document.getElementById('lm-lost-wrap').style.display=this.value==='Lost'?'':'none';document.getElementById('lm-booked-wrap').style.display=this.value==='Booked'?'':'none'">${stagesPickable(c ? leadStage(c) : 'New').map(s=>`<option value="${esc(s)}" ${(c?leadStage(c):'New')===s?'selected':''}>${esc(stageLabel(s))}</option>`).join('')}</select>`}</div>
           <div class="field" id="lm-booked-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Booked'?'':'none'}"><label>Job booked for</label><input type="date" id="lm-booked-for" value="${c?esc(c.bookedFor||''):''}"><span class="hint">The day it's booked in ServiceM8 — 2 days after it with no job, you get a reminder</span></div>
-          <div class="field" id="lm-lost-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Lost'?'':'none'}"><label>Why was it lost?</label><select id="lm-lost-reason"><option value="">— choose a reason —</option>${LOST_REASONS.filter(r => !ACTIVE.lost || ACTIVE.lost.has(r.key) || (c && lostReasonOf(c)===r.key)).map(r=>`<option value="${r.key}" ${c&&lostReasonOf(c)===r.key?'selected':''}>${esc(r.label)}</option>`).join('')}</select></div>
+          <div class="field" id="lm-lost-wrap" style="margin-top:11px;display:${c&&leadStage(c)==='Lost'?'':'none'}"><label>Why was it lost?</label><select id="lm-lost-reason"><option value="">— choose a reason —</option>${LOST_REASONS.filter(r => !ACTIVE.lost || ACTIVE.lost.has(r.key) || (c && lostReasonOf(c)===r.key)).map(r=>`<option value="${r.key}" ${c&&lostReasonOf(c)===r.key?'selected':''}>${esc(lostReasonLabel(r.key))}</option>`).join('')}</select></div>
           <div class="field" style="margin-top:11px"><label>Next follow-up</label>${dateCellField('lm-followup', c?(c.nextFollowUp||''):'')}</div>
           <div class="field" style="margin-top:11px"><label>Follow-up note</label><textarea rows="2" id="lm-followup-note" placeholder="What needs doing when this follow-up is due…">${c?esc(c.followupNote||''):''}</textarea></div>
           <div class="grid-2" style="margin-top:11px">
@@ -6745,12 +6982,13 @@ async function saveLeadModal(contactId){
   const before = prev ? { status:prev.status, division:prev.division, source:prev.source, nextFollowUp:prev.nextFollowUp, estimatedValue:prev.estimatedValue, bookedFor:prev.bookedFor } : null;
   let stagePicked = document.getElementById('lm-status').value;
   const followPicked = document.getElementById('lm-followup').value;
-  // A follow-up date on a New or Chasing lead moves it to Follow-up (Ofek 5/10).
-  if (followPicked && ['New','Chasing'].includes(stagePicked)) stagePicked = 'Follow-up';
+  // A follow-up date on a New or Chasing lead moves it to Follow-up (Ofek 5/10), unless Follow up is switched off.
+  if (followPicked && ['New','Chasing'].includes(stagePicked) && stageOn('Follow-up')) stagePicked = 'Follow-up';
   const lostPicked = (document.getElementById('lm-lost-reason')||{}).value || '';
   // The stage rules apply to new leads, to leads under the new rules (from 27 Sep), and whenever the stage is
   // being changed — an old lead can still get its phone or email fixed without re-doing its stage.
   const stageChanging = !prev || stagePicked !== leadStage(prev);
+  if (stageChanging && (!LEAD_STATUSES.includes(stagePicked) || !stageOn(stagePicked))) { modalError(`${stageLabel(stagePicked)} is switched off in Settings → Pipeline`); return; }
   const rulesOn = stageChanging || leadRulesApply(prev);
   if (rulesOn && stagePicked==='Lost' && !lostPicked) { modalError('Choose why the lead was lost'); return; }
   const bookedPicked = (document.getElementById('lm-booked-for')||{}).value || '';
@@ -6872,7 +7110,7 @@ function jobColumnText(j, key){
     default: return '';
   }
 }
-// Jobs & Commissions period (Ofek 6 Oct): All, Today, This week (Sun–Sat, like Payroll), This month, or Custom
+// Jobs & Commissions period (Ofek 6 Oct): All, Today, This week (the business week, like Payroll), This month, or Custom
 // from–to (either end may be left empty). By the job date. null = no date limit.
 const JOBS_RANGES = [['all','All'],['today','Today'],['week','This week'],['month','This month'],['custom','Custom']];
 function jobsRangeBounds(ui, today){
@@ -7564,15 +7802,7 @@ function finalizePerfBucket(b){
 // instead of raw amount — reuses the {label, revenue} shape renderSparkline already expects (the "revenue"
 // key just holds profit here) so the trend chart needs no changes to that shared renderer.
 function computeProfitByWeekInRange(data, startDateStr, endDateStr, technicianFilter){
-  const keys = []; const seen = new Set();
-  let d = parseLocalDate(startDateStr);
-  const endKey = weekOf(endDateStr).key;
-  for (let guard=0; guard<60; guard++) {
-    const wk = weekOf(fmtLocal(d)).key;
-    if (!seen.has(wk)) { seen.add(wk); keys.push(wk); }
-    if (wk===endKey) break;
-    d.setDate(d.getDate()+7);
-  }
+  const keys = weekKeysInRange(startDateStr, endDateStr);
   return keys.map(k => {
     const jobs = computeWeek(data, k, technicianFilter).jobs;
     const profit = jobs.reduce((s,j) => s + (Number(j.amount)||0) - jobCommissionAmount(j) - (Number(j.partsCost)||0), 0);
@@ -8573,7 +8803,7 @@ function renderDashboard(profile, data){
 
   // Trend is deliberately NOT tied to the period picker: 12 weeks back from today, always, so that
   // picking "this week" still shows where the business is heading rather than a single dot.
-  const trendStart = shiftDays(payrollWeekOf(today).start, -7*11);
+  const trendStart = shiftPayrollWeek(payrollWeekOf(today).start, -11);
   const revSeries = computeRevenueByWeekInRange(data, trendStart, today);
   const profitSeries = computeProfitByWeekInRange(data, trendStart, today);
   const lastFull = revSeries.length>1 ? revSeries[revSeries.length-2] : null;
@@ -8662,7 +8892,7 @@ function renderDashboard(profile, data){
   const thisPayWeek = payrollWeekOf(today).key;
   const cashToCollect = round2(payrollCommissionPeople(data).map(p => computePayrollCommission(data, p, thisPayWeek))
     .filter(c => !payrollStatus(data, thisPayWeek, c.person).cashCollected).reduce((s,c)=>s+c.cash,0));
-  const openReminders = computeReminders(data).filter(it => !it.isRead).length;
+  const openReminders = remindersFor(profile, data).filter(it => !it.isRead).length;
   // Same invoice number AND same amount = the same job logged twice. Different amounts on one invoice are
   // split payments (e.g. 2284: $150 card + $250 cash) and are real money, so they aren't flagged.
   const invCounts = {}; data.jobs.forEach(j => { if (j.invoiceNumber) { const k = j.invoiceNumber+'|'+Number(j.amount); invCounts[k] = (invCounts[k]||0) + 1; } });
@@ -8757,7 +8987,7 @@ function renderDashboard(profile, data){
       </div>
       <div class="card stat-card" style="--stat-accent:var(--bad)">
         <div class="stat-label">Why leads were lost</div>
-        ${perf.outcome.lost ? renderBarGroup([...LOST_REASONS.map((x,i) => ({ label:x.label, value:perf.lossReasons[x.key], onclick: drillJs(`Lost — ${x.label}`, 'leads', leadsIn.filter(c => leadStage(c)==='Lost' && lostReasonOf(c)===x.key)), color:['var(--ink-faint)','var(--warn)','var(--bad)','var(--ink-faint)','var(--ink-faint)','var(--bad)','var(--accent)'][i] })), { label:'No reason given', value:perf.lossReasons.noReason, onclick: drillJs('Lost — no reason given', 'leads', leadsIn.filter(c => leadStage(c)==='Lost' && lostReasonOf(c)==='noReason')), color:'var(--line)' }].filter(b => b.value>0), {fmt:(n)=>String(n)}) : emptyState('No lost leads this period')}
+        ${perf.outcome.lost ? renderBarGroup([...LOST_REASONS.map(x => ({ label:lostReasonLabel(x.key), value:perf.lossReasons[x.key], onclick: drillJs(`Lost — ${lostReasonLabel(x.key)}`, 'leads', leadsIn.filter(c => leadStage(c)==='Lost' && lostReasonOf(c)===x.key)), color:({ noAnswer:'var(--ink-faint)', outsideArea:'var(--warn)', spam:'var(--bad)', wrongNumber:'var(--ink-faint)', wrongDetails:'var(--ink-faint)', tooExpensive:'var(--bad)', notInterested:'var(--accent)' })[x.key] || 'var(--ink-faint)' })), { label:'No reason given', value:perf.lossReasons.noReason, onclick: drillJs('Lost — no reason given', 'leads', leadsIn.filter(c => leadStage(c)==='Lost' && lostReasonOf(c)==='noReason')), color:'var(--line)' }].filter(b => b.value>0), {fmt:(n)=>String(n)}) : emptyState('No lost leads this period')}
       </div>
       <div class="card stat-card" style="--stat-accent:var(--accent)">
         <div class="stat-label">Speed to lead</div>
@@ -8901,7 +9131,7 @@ function renderPayrollPeriodView(data, viewChips){
       <div><h1 class="page-title">Payroll</h1><div class="page-sub">${pr.mode==='month' ? 'The month' : 'This range'} by technician, against the period before · pay is marked week by week (choose Week)</div></div>
     </div>
     ${viewChips||''}
-    ${phoneNotificationsBar()}
+    ${phoneNotificationsBar('payroll')}
     ${renderPayrollPeriodNav(true)}
     <div class="grid-4" style="margin-bottom:16px">
       ${tile('Revenue <span class="hint">(jobs done, excl. GST)</span>', fmtMoney(cur.revenue), deltaBadge(cur.revenue, prev.revenue), `before: ${fmtMoney(prev.revenue)}`)}
@@ -9031,7 +9261,7 @@ function ensurePdfMake(){
 }
 async function payrollInvoiceParties(person){
   const s = STATE.data.settings || {};
-  const to = { legalName: s.legalName || s.companyName || 'The Guys Service Group Pty Ltd', abn: s.abn || '', acn: s.acn || '' };
+  const to = { legalName: s.legalName || s.companyName || 'The Guys Service Group Pty Ltd', abn: s.abn || '', acn: s.acn || '', address: businessAddress(catalogObject('business')).line };
   let e = (STATE.data.employees || []).find(x => x.name===person);
   if (!e) {   // a technician can't read the team list: his own card comes from the database function
     const { data } = await sb.rpc('my_invoice_details');
@@ -9042,8 +9272,8 @@ async function payrollInvoiceParties(person){
   return { to, from: { name: person, legalName: e.legalName || (prof && prof.fullName) || person, abn: e.abn || '', address: e.address || '', email: e.email || '', phone: e.phone || '', bankName: e.bankName || '', bankBsb: e.bankBsb || '', bankAccount: e.bankAccount || '' } };
 }
 function invMoney(n){ return '$' + round2(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function invDate(d){ const x = parseLocalDate(d); return `${x.getDate()} ${MONTHS[x.getMonth()]} ${x.getFullYear()}`; }
-function invWeek(inv){ const a = parseLocalDate(inv.weekStart), b = parseLocalDate(inv.weekEnd); return `Sun ${a.getDate()} ${MONTHS[a.getMonth()]} – Sat ${b.getDate()} ${MONTHS[b.getMonth()]} ${b.getFullYear()}`; }
+function invDate(d){ if (dateFormatOf(catalogObject('region'))==='dd/mm/yyyy') return fmtDateNumeric(d); const x = parseLocalDate(d); return `${x.getDate()} ${MONTHS[x.getMonth()]} ${x.getFullYear()}`; }
+function invWeek(inv){ const a = parseLocalDate(inv.weekStart), b = parseLocalDate(inv.weekEnd); return `${DAY_NAMES[a.getDay()].slice(0, 3)} ${a.getDate()} ${MONTHS[a.getMonth()]} – ${DAY_NAMES[b.getDay()].slice(0, 3)} ${b.getDate()} ${MONTHS[b.getMonth()]} ${b.getFullYear()}`; }
 function fmtAbn(v){ const d = String(v || '').replace(/\D/g, ''); return d.length===11 ? `${d.slice(0,2)} ${d.slice(2,5)} ${d.slice(5,8)} ${d.slice(8)}` : String(v || ''); }
 function invRate(p){ return (Math.round(Number(p) * 100) / 100) + '%'; }
 function invTitle(inv){ return inv.kind==='salary' ? 'Commission' : 'Equipment & materials paid back'; }
@@ -9080,7 +9310,7 @@ function payrollInvoiceHtml(inv, editing){
     <div class="inv-parties">
       <div><div class="inv-label">From</div><b>${esc(f.legalName)}</b><br>ABN ${f.abn ? esc(fmtAbn(f.abn)) : miss('missing')}${f.address ? '<br>' + esc(f.address) : ''}${f.email || f.phone ? `<br><span class="inv-sub">${esc([f.email, f.phone].filter(Boolean).join(' · '))}</span>` : ''}
         <div style="margin-top:6px"><span class="inv-label" style="display:inline">Pay to</span> ${bank ? esc(bank.join(' · ')) : '<span class="inv-sub">bank details are not on file</span>'}</div></div>
-      <div><div class="inv-label">Bill to</div><b>${esc(t.legalName)}</b><br>ABN ${t.abn ? esc(fmtAbn(t.abn)) : miss('missing')}${t.acn ? '<br>ACN ' + esc(t.acn) : ''}</div>
+      <div><div class="inv-label">Bill to</div><b>${esc(t.legalName)}</b><br>ABN ${t.abn ? esc(fmtAbn(t.abn)) : miss('missing')}${t.acn ? '<br>ACN ' + esc(t.acn) : ''}${t.address ? '<br>' + esc(t.address) : ''}</div>
     </div>
     <div class="inv-table"><table><thead>${head}</thead><tbody>${rows || `<tr><td colspan="${editing ? 8 : 7}" class="inv-sub">No lines</td></tr>`}</tbody></table></div>
     ${editing ? `<div style="margin-top:8px"><button type="button" class="btn small" onclick="invAddLine()">+ Add a line</button></div>` : ''}
@@ -9185,7 +9415,7 @@ function payrollInvoicePdf(inv){
       { columns: [
         { stack: [label('From'), { text: f.legalName, bold: true, fontSize: 11 }, `ABN ${f.abn ? fmtAbn(f.abn) : 'missing'}`, ...(f.address ? [f.address] : []), ...(f.email || f.phone ? [small([f.email, f.phone].filter(Boolean).join(' · '))] : []),
           { text: [{ text: 'PAY TO  ', fontSize: 7.5, bold: true, color: soft, characterSpacing: 0.8 }, bank ? bank.join(' · ') : { text: 'bank details are not on file', color: soft }], margin: [0, 5, 0, 0] }] },
-        { stack: [label('Bill to'), { text: t.legalName, bold: true, fontSize: 11 }, `ABN ${fmtAbn(t.abn)}`, ...(t.acn ? [`ACN ${t.acn}`] : [])] },
+        { stack: [label('Bill to'), { text: t.legalName, bold: true, fontSize: 11 }, `ABN ${fmtAbn(t.abn)}`, ...(t.acn ? [`ACN ${t.acn}`] : []), ...(t.address ? [t.address] : [])] },
       ] },
       { margin: [0, 14, 0, 0], table: { headerRows: 1, widths, body: [header.map(h => typeof h==='string' ? { text: h.toUpperCase(), fontSize: 7.5, bold: true, color: soft } : { ...h, text: h.text.toUpperCase(), fontSize: 7.5, bold: true, color: soft }), ...body] },
         layout: { hLineWidth: (i, node) => i===0 ? 0 : i===1 ? 1.2 : 0.5, vLineWidth: () => 0, hLineColor: i => i===1 ? ink : line, paddingLeft: i => i===0 ? 0 : 6, paddingRight: (i, node) => i===node.table.widths.length - 1 ? 0 : 6, paddingTop: () => 4, paddingBottom: () => 4 } },
@@ -9255,7 +9485,21 @@ async function downloadPayrollInvoice(){
 // ── Phone notifications (Ofek 6 Oct) ──
 // The app can be added to a phone's home screen (manifest + sw.js, which caches nothing). An owner turns notifications
 // on once per device; the "push" function sends them (a technician's commission invoice is in → "you can pay him").
-const PUSH = { checked:false, on:false };
+const PUSH = { checked:false, on:false, busy:false };
+// Once notifications are turned on, a test goes out by itself. After a test has gone out from this device, Payroll stops
+// showing the bar (Ofek 13 Oct). Remembered per device; Settings → Notifications keeps "Send a test".
+const PUSH_TESTED_KEY = 'tgsg_push_tested';
+function pushTestedHere(){ try { return localStorage.getItem(PUSH_TESTED_KEY)==='1'; } catch (e) { return false; } }
+function markPushTestedHere(){ try { localStorage.setItem(PUSH_TESTED_KEY, '1'); } catch (e) {} }
+// Only owners and managers can send a test (the push function's isOffice).
+function pushCanTest(p){ return !!p && (p.role==='owner' || p.role==='manager'); }
+// What the phone-notifications bar shows: 'off' (Turn on for this device), 'on' (Send a test) or 'hide'. Before the
+// device check finishes, Payroll waits instead of flashing "Turn on" on a device that already has it.
+function phoneBarMode(where, push, tested, canTest){
+  if (!push || !push.checked) return where==='payroll' && tested ? 'hide' : 'off';
+  if (!push.on) return 'off';
+  return where==='payroll' && (tested || !canTest) ? 'hide' : 'on';
+}
 async function pushCall(body){
   if (readOnlyReason()) return { ok:false, reason: readOnlyReason() };
   const { data } = await sb.auth.getSession();
@@ -9265,13 +9509,20 @@ async function pushCall(body){
 const isIosDevice = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
 const isInstalledApp = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone===true;
 async function checkPhoneNotifications(){
-  PUSH.checked = true;
+  if (PUSH.busy || PUSH.checked) return; PUSH.busy = true;
+  let on = false;
   try {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window) || Notification.permission!=='granted') { PUSH.on = false; return; }
-    const reg = await navigator.serviceWorker.getRegistration();
-    PUSH.on = !!(reg && await reg.pushManager.getSubscription());
-  } catch (e) { PUSH.on = false; }
-  if (PUSH.on && UI.tab==='payroll') renderKeepingInput();
+    if ('serviceWorker' in navigator && 'PushManager' in window && Notification.permission==='granted') {
+      const reg = await navigator.serviceWorker.getRegistration();
+      on = !!(reg && await reg.pushManager.getSubscription());
+    }
+  } catch (e) { on = false; }
+  if (!PUSH.checked) { PUSH.on = on; PUSH.checked = true; }   // turned on meanwhile → that answer stands
+  PUSH.busy = false;
+  // Until now the bar showed its "not checked yet" look; redraw only when the answer changes what it shows.
+  const where = UI.tab==='payroll' ? 'payroll' : 'settings', tested = pushTestedHere(), canTest = pushCanTest(getRealProfile());
+  const onPage = UI.tab==='payroll' || (UI.tab==='settings' && (UI.settings || {}).page==='notifications');
+  if (onPage && phoneBarMode(where, PUSH, tested, canTest)!==phoneBarMode(where, { checked:false, on:false }, tested, canTest)) renderKeepingInput();
 }
 function urlB64ToBytes(b64){ const s = (b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/'); return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
 async function enablePhoneNotifications(){
@@ -9290,22 +9541,33 @@ async function enablePhoneNotifications(){
     const j = sub.toJSON();
     const { error } = await sb.from('push_subscriptions').upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, device: navigator.userAgent.slice(0, 200) }, { onConflict:'endpoint' });
     if (error) { showToast('Could not save this device: ' + error.message); return; }
-    PUSH.on = true; showToast('Notifications are on for this device'); render();
+    PUSH.on = true; PUSH.checked = true;
+    if (pushCanTest(getRealProfile())) {
+      const r = await pushCall({ step:'test' }).catch(() => null);   // the automatic test (Ofek 13 Oct)
+      if (r && r.ok) { markPushTestedHere(); showToast(`Notifications are on for this device. A test was sent to ${r.sent} device${r.sent===1?'':'s'}.`); }
+      else showToast('Notifications are on for this device, but the test was not sent' + (r && r.reason ? ': ' + r.reason : '') + '. Press Send a test to try again.', { kind: 'warn' });
+    } else showToast('Notifications are on for this device');
+    render();
   } catch (e) { showToast('Could not turn notifications on: ' + (e && e.message || e)); }
 }
 async function sendTestNotification(){
   const r = await pushCall({ step:'test' });
+  if (r && r.ok) markPushTestedHere();
   showToast(r && r.ok ? `Test sent to ${r.sent} device${r.sent===1?'':'s'}` : 'The test was not sent' + (r && r.reason ? ': ' + r.reason : ''));
+  if (r && r.ok && UI.tab==='payroll') render();   // the Payroll bar goes away after a test
 }
 // A technician's commission invoice is in → the owners' phones (the function checks the invoice is really there).
-function notifyOwnersInvoice(week, person){ pushCall({ step:'invoice', week, person }).catch(() => {}); }
-function phoneNotificationsBar(){
+// end = the week's last day, so a short or long transition week is named right in the notification.
+function notifyOwnersInvoice(week, person, end){ pushCall({ step:'invoice', week, person, ...(end ? { end } : {}) }).catch(() => {}); }
+function phoneNotificationsBar(where){
   if (!PUSH.checked) setTimeout(checkPhoneNotifications, 0);
+  const mode = phoneBarMode(where, PUSH, pushTestedHere(), pushCanTest(getRealProfile()));
+  if (mode==='hide') return '';
   const tip = isIosDevice() && !isInstalledApp() ? ' On iPhone, add the app to the home screen first (Share → Add to Home Screen) and open it from there.' : '';
   return `<div class="card tight" style="margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
     <span style="display:inline-flex" aria-hidden="true">${ico('mobile', 20)}</span>
-    <div style="flex:1 1 280px"><b>Phone notifications</b> <span class="hint">${PUSH.on ? 'On for this device: it gets the notifications switched on in Settings → Notifications.' : 'Get the notifications switched on in Settings → Notifications on this phone.' + tip}</span></div>
-    ${PUSH.on ? `<button class="btn small" onclick="sendTestNotification()">Send a test</button>` : `<button class="btn small primary" onclick="enablePhoneNotifications()">Turn on for this device</button>`}
+    <div style="flex:1 1 280px"><b>Phone notifications</b> <span class="hint">${mode==='on' ? 'On for this device: it gets the notifications switched on in Settings → Notifications.' : 'Get the notifications switched on in Settings → Notifications on this phone.' + tip}</span></div>
+    ${mode==='on' ? `<button class="btn small" onclick="sendTestNotification()">Send a test</button>` : `<button class="btn small primary" onclick="enablePhoneNotifications()">Turn on for this device</button>`}
   </div>`;
 }
 // Save the signed invoice: a PDF in file storage (payroll/<week>/<person>/), its total next to what the app worked out.
@@ -9333,7 +9595,7 @@ async function savePayrollInvoice(kind, person, weekKey){
   if (kind==='salary') { row.salaryInvoiceFile = ref; row.salaryInvoiceAt = now; row.salaryInvoiceAmount = total; }
   else { row.expensesInvoiceFile = ref; row.expensesInvoiceAt = now; row.expensesInvoiceAmount = total; }
   CUR_INVOICE = null; closeModal();
-  if (kind==='salary') notifyOwnersInvoice(weekKey, who);
+  if (kind==='salary') notifyOwnersInvoice(weekKey, who, payrollWeekOf(weekKey).end);
   showToast(kind==='salary' ? `Commission invoice saved (${payMoney(total)}). Ofek and Noam will see you can be paid.` : `Expenses invoice saved (${payMoney(total)})`);
   render();
 }
@@ -9558,10 +9820,10 @@ function renderPayrollBoard(profile, data, viewChips){
 
   return `
     <div class="page-head">
-      <div><h1 class="page-title">Payroll</h1><div class="page-sub">Weekly pay, Sunday → Saturday · commission counts in the week the customer paid</div></div>
+      <div><h1 class="page-title">Payroll</h1><div class="page-sub">Weekly pay, ${weekDaysName(todayStr(), ' → ')}${weekOneOff(todayStr()) ? ` (this week is ${weekOneOff(todayStr())})` : ''} · commission counts in the week the customer paid</div></div>
     </div>
     ${viewChips||''}
-    ${phoneNotificationsBar()}
+    ${phoneNotificationsBar('payroll')}
     ${renderPayrollPeriodNav(true)}
     <div class="grid-4" style="margin-bottom:16px">
       <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Technician commissions</div><div class="stat-value">${payMoney(commTotal)}</div><div class="stat-sub">${comm.reduce((s,c)=>s+c.lines.length,0)} paid jobs this week</div></div>
@@ -9598,7 +9860,7 @@ function renderMyPay(profile, data, person, isPreview){
   const weekKey = payrollWeekKeyFromUI(); const wk = payrollWeekOf(weekKey);
   const isHourly = payrollHourlyPeople(data).includes(person) || (data.salesLogs||[]).some(l => l.person===person);
   const st = payrollStatus(data, weekKey, person);
-  const head = isPreview ? '' : `<div class="page-head"><div><h1 class="page-title">My pay</h1><div class="page-sub">Your week, Sunday → Saturday</div></div></div>`;
+  const head = isPreview ? '' : `<div class="page-head"><div><h1 class="page-title">My pay</h1><div class="page-sub">Your week, ${weekDaysName(todayStr(), ' → ')}${weekOneOff(todayStr()) ? ` (this week is ${weekOneOff(todayStr())})` : ''}</div></div></div>`;
   if (isHourly) {
     const h = computePayrollHourly(data, person, weekKey);
     const today = todayStr();
@@ -10043,7 +10305,7 @@ function renderOutstanding(profile, data){
 }
 
 /* ── reminders ───────────────────────────────────────────────────────── */
-const REMINDER_ICONS = { 'employee-doc':'idcard', unpaid:'dollar', commission:'receipt', refund:'refresh', equipment:'wrench', followup:'phone', 'repeat-service':'repeat', 'chase-long':'hourglass', 'stale-quote':'file', 'booked-no-job':'calendar' };
+const REMINDER_ICONS = { 'employee-doc':'idcard', 'business-insurance':'idcard', unpaid:'dollar', commission:'receipt', refund:'refresh', equipment:'wrench', followup:'phone', 'repeat-service':'repeat', 'chase-long':'hourglass', 'stale-quote':'file', 'booked-no-job':'calendar' };
 function deleteManualReminder(id, rowEl){
   confirmAction('Delete this reminder?', ()=>{
     animateRowRemove(rowEl, ()=>{
@@ -10118,14 +10380,19 @@ function goToReminderTarget(type, contactId, readKey, weekKey){
   if (type==='repeat-service' && refId && can('jobs')) { goToJobFromSearch(refId); return; }
   if (type==='equipment' && can('payroll')) { UI.tab='payroll'; UI.payroll.viewAs=null; UI.payroll.view='expenses'; render(); return; }
   if (type==='employee-doc' && can('settings')) { goTab('settings'); PEOPLE_UI.sel = 'e:' + refId.split(':')[0]; setSettingsPage('people'); return; }
+  if (type==='business-insurance' && can('settings')) { goTab('settings'); setSettingsPage('profile'); return; }
   render();   // nowhere this person is allowed to go — it's marked read and stays here
 }
 // A technician's reminders are only about their own jobs and purchases; they can mark them read but not delete them
 // (a delete hides a reminder for everyone). Sales and pay reminders are for the office.
 const TECH_REMINDER_TYPES = ['unpaid','refund','equipment'];
-function remindersFor(profile, data){
-  const items = computeReminders(data);
-  return profile && profile.role==='technician' ? items.filter(it => TECH_REMINDER_TYPES.includes(it.type)) : items;
+// The business's own insurance is for owners only (as the push), and settings.catalog is readable by every role: without
+// this the office could see it, and its Delete would hide it from the owners too.
+const OWNER_REMINDER_TYPES = ['business-insurance'];
+function remindersFor(profile, data, now){
+  const items = computeReminders(data, now);
+  if (profile && profile.role==='technician') return items.filter(it => TECH_REMINDER_TYPES.includes(it.type));
+  return profile && profile.role==='owner' ? items : items.filter(it => !OWNER_REMINDER_TYPES.includes(it.type));
 }
 function renderReminders(profile, data){
   const items = remindersFor(profile, data);
@@ -10279,6 +10546,7 @@ function dismissLeadEmail(id, rowEl){
 }
 function chaseGiveUp(id){
   const c = contactById(id); if (!c || leadStage(c)!=='Chasing') return;
+  if (ACTIVE.lost && !ACTIVE.lost.has('noAnswer')) { openLostReasonPrompt(c); return; }   // "No answer" deleted or switched off: pick a reason
   confirmAction(`${c.fullName} has been in Chasing for ${RULES.chaseDecideDays}+ days. Move them to Lost with the reason "No answer"?`, () => {
     applyLeadStage(c, 'Lost', { lostReason:'noAnswer' });
     render();
@@ -10368,7 +10636,7 @@ function renderMyDay(profile, data){
   const reviewBody = reviewItems.map(x => { const j = x.rec, r = REVIEW_REQ && REVIEW_REQ[reviewInvoiceKey(j.invoiceNumber)];
     const again = reviewNeed(j, r, L.localToday, reviewAuto)==='again';
     const why = again ? `asked ${fmtDateShort(localDay(r.sent_at))} · no Google review yet: check Google, then send one reminder`
-      : r && r.status==='skipped' && /customer card|mobile or email|job type/i.test(r.reason||'') ? `couldn't be asked: ${esc(r.reason)}`
+      : r && r.status==='skipped' && /customer card|mobile or email|job type|asking is off/i.test(r.reason||'') ? `couldn't be asked: ${esc(r.reason)}`
       : r && r.status==='error' ? 'the last request failed' : 'not asked yet';
     const actions = (again ? `<button class="btn primary small" onclick="askReviewAgain('${j.id}')">Ask again</button>` : reviewAskCell(j))
       + `<button class="btn small" onclick="markReviewLeft('${j.id}')">Left a review ✓</button>`;
@@ -10429,7 +10697,7 @@ function renderOpenTasksCalendarBlock(data){
   const tasksByDate = {}; const unscheduled = [];
   tasks.forEach(t => { if (t.due) (tasksByDate[t.due] = tasksByDate[t.due]||[]).push(t); else unscheduled.push(t); });
   const today = todayStr();
-  const dowLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const ws = weekStartDay(today), dowLabels = Array.from({ length: 7 }, (_, i) => DAY_NAMES[(ws + i) % 7].slice(0, 3));
   const headerRow = UI.openItems.calGranularity==='month' ? dowLabels.map(d=>`<div style="font-size:10.5px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;text-align:center;padding:4px 0">${d}</div>`).join('') : '';
   const cells = days.map(day => renderCalendarDayCell(day, tasksByDate, day.dateStr===today)).join('');
   const unscheduledRows = unscheduled.length ? unscheduled.sort((a,b)=>(a.title||'').localeCompare(b.title||'')).map(t => `
@@ -10545,7 +10813,7 @@ function renderClosings(profile, data){
         <div class="field"><label>Invoice #</label><input id="cf-invoice" placeholder="e.g. 1008"></div>
         <div class="field"><label>Job Type</label><select id="cf-jobtype">${jobTypesForTech(defaultTech).map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
         <div class="field"><label>Total paid (incl. GST)</label><input type="number" step="0.01" id="cf-amount" value="0"></div>
-        <div class="field"><div style="display:flex;gap:18px;flex-wrap:wrap;padding-top:8px"><label class="checkline"><input type="checkbox" id="cf-nogst"> No GST</label>${profile.role==='technician' ? '' : `<label class="checkline"><input type="checkbox" id="cf-noask"> Don't ask for a review</label>`}</div><span class="hint">No GST off = the total includes GST (${STATE.data.settings.gstRatePercent}%)</span></div>
+        <div class="field"><div style="display:flex;gap:18px;flex-wrap:wrap;padding-top:8px"><label class="checkline"><input type="checkbox" id="cf-nogst"> No GST</label>${closingShowsNoAsk(profile.role, reviewAutoOn()) ? `<label class="checkline"><input type="checkbox" id="cf-noask"> Don't ask for a review</label>` : ''}</div><span class="hint">No GST off = the total includes GST (${STATE.data.settings.gstRatePercent}%)</span></div>
         <div class="field"><label>Payment Status</label><select id="cf-status">${CLOSING_PAYMENT_STATUSES.map(s=>`<option value="${s}">${s}</option>`).join('')}</select></div>
         <div class="field"><label>Method</label><select id="cf-method" onchange="if(this.value==='Cash') document.getElementById('cf-nogst').checked=true;">${CLOSING_PAYMENT_METHODS.filter(m => !m || !ACTIVE.payments || ACTIVE.payments.has(m)).map(m=>`<option value="${m}">${m||'—'}</option>`).join('')}</select></div>
         <div class="field"><label>Parts Cost</label><input type="number" step="0.01" id="cf-partscost" value="0"><span class="hint">The total on the receipt</span></div>
@@ -10800,21 +11068,24 @@ function shiftTaskCal(delta){
   UI.tasks.calAnchor = fmtLocal(anchor); render();
 }
 function goToTaskCalToday(){ UI.tasks.calAnchor = null; render(); }
+// A plain 7-day display grid whose columns start on the weekday weeks start on today (never the transition week).
 function computeCalendarDays(granularity, anchorDateStr){
   const anchor = parseLocalDate(anchorDateStr);
+  const ws = weekStartDay(todayStr());
   if (granularity==='month') {
     const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
     const last = new Date(anchor.getFullYear(), anchor.getMonth()+1, 0);
-    const gridStart = new Date(first); gridStart.setDate(first.getDate() - first.getDay());
-    const gridEnd = new Date(last); gridEnd.setDate(last.getDate() + (6 - last.getDay()));
+    const gridStart = new Date(first); gridStart.setDate(first.getDate() - ((first.getDay() - ws + 7) % 7));
+    const gridEnd = new Date(last); gridEnd.setDate(last.getDate() + ((ws + 6 - last.getDay() + 7) % 7));
     const days = []; let d = new Date(gridStart);
     while (d <= gridEnd) { days.push({ dateStr: fmtLocal(d), inMonth: d.getMonth()===anchor.getMonth() }); d.setDate(d.getDate()+1); }
     return { days, label: monthOf(anchorDateStr).label };
   }
-  const w = weekOf(anchorDateStr);
-  const days = []; let d = new Date(w.start);
+  const s = new Date(anchor); s.setDate(anchor.getDate() - ((anchor.getDay() - ws + 7) % 7));
+  const e = new Date(s); e.setDate(s.getDate() + 6);
+  const days = []; let d = new Date(s);
   for (let i=0;i<7;i++) { days.push({ dateStr: fmtLocal(d), inMonth: true }); d.setDate(d.getDate()+1); }
-  return { days, label: w.label };
+  return { days, label: `${s.getDate()} ${MONTHS[s.getMonth()]} – ${e.getDate()} ${MONTHS[e.getMonth()]}` };
 }
 function renderTaskChip(t){
   const people = assigneeNames(t);
@@ -10848,7 +11119,7 @@ function renderTasksCalendar(profile, data, tasks){
   const tasksByDate = {}; const unscheduled = [];
   tasks.forEach(t => { if (t.due) (tasksByDate[t.due] = tasksByDate[t.due]||[]).push(t); else unscheduled.push(t); });
   const today = todayStr();
-  const dowLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const ws = weekStartDay(today), dowLabels = Array.from({ length: 7 }, (_, i) => DAY_NAMES[(ws + i) % 7].slice(0, 3));
   const headerRow = UI.tasks.calGranularity==='month' ? dowLabels.map(d=>`<div style="font-size:10.5px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;text-align:center;padding:4px 0">${d}</div>`).join('') : '';
   const cells = days.map(day => renderCalendarDayCell(day, tasksByDate, day.dateStr===today)).join('');
   const unscheduledRows = unscheduled.length ? unscheduled.sort((a,b)=>(a.title||'').localeCompare(b.title||'')).map(t => `
@@ -11370,7 +11641,10 @@ const EMP_DOCS = [
 ];
 const EMP_DOC_WARN_DAYS = 30;   // Reminders and the card flag a document this many days before it expires (default; Settings → Notifications)
 const VISA_TYPES = ['Citizen','Permanent resident','Working Holiday (417)','Work and Holiday (462)','Student (500)','Skilled (482)','Bridging','Other'];
-function fmtDateYear(s){ return s ? parseLocalDate(s).toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' }) : '—'; }
+function fmtDateYear(s){
+  if (!s) return '—';
+  return dateFormatOf(catalogObject('region'))==='dd/mm/yyyy' ? fmtDateNumeric(s) : parseLocalDate(s).toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' });
+}
 // An ABN is 11 digits with a check: take 1 off the first digit, weight the digits, and the sum divides by 89.
 function abnValid(abn){
   const d = String(abn||'').replace(/\s/g,'');
@@ -12344,15 +12618,13 @@ function renderSettings(profile){
         <div class="field"><label>ABN</label><input value="${esc(s.abn)}" inputmode="numeric" placeholder="11 digits" onchange="updateBusinessProfileField('abn', this.value.trim(), 'ABN')"></div>
         <div class="field"><label>ACN</label><input value="${esc(s.acn)}" inputmode="numeric" placeholder="9 digits" onchange="updateBusinessProfileField('acn', this.value.trim(), 'ACN')"></div>
       </div>`) + (() => { const b = catalogObject('business'); const f = (key, label, ph, type) => `<div class="field"><label>${label}</label><input${type ? ` type="${type}"` : ''} value="${esc(b[key] || '')}" placeholder="${esc(ph)}" onchange="setBusinessInfo('${key}', this.value)"></div>`;
-        return setBlock('Contact details', 'What customers see in texts and emails.', `<div class="set-fields">${f('phone', 'Main phone', '1300 000 000', 'tel')}${f('email', 'Email', 'info@yourbusiness.com.au', 'email')}${f('website', 'Website', 'yourbusiness.com.au')}${f('address', 'Business address', 'Street, suburb, state, postcode')}</div>`); })()
-        + setBlock('Region and format', 'Times, money and weeks across the whole app follow these. They are fixed for this business for now.', setRows([
-          ['Time zone', '', '<span class="set-fixed">Australia/Sydney</span>'], ['Currency', '', '<span class="set-fixed">AUD ($)</span>'],
-          ['Week starts on', 'Payroll weeks run Sunday to Saturday.', '<span class="set-fixed">Sunday</span>'], ['Financial year starts', '', '<span class="set-fixed">1 July</span>'],
-        ])) },
+        return setBlock('Contact details', 'What customers see in texts and emails.', `<div class="set-fields">${f('phone', 'Main phone', '1300 000 000', 'tel')}${f('email', 'Email', 'info@yourbusiness.com.au', 'email')}${f('website', 'Website', 'yourbusiness.com.au')}</div>`); })()
+        + setBlock('Business address', 'On invoices, and for Xero later.', renderBusinessAddressFields())
+        + BIZ_INSURANCE.map(x => setBlock(x.key==='workers' ? 'Workers compensation' : 'Public liability insurance', x.key==='workers' ? 'The policy that covers your staff.' : 'Cover for damage or injury caused by your work.', renderBusinessInsurance(x))).join('')
+        + setBlock('Region and format', 'Times, money and weeks across the whole app follow these.', renderRegionRows()) },
     { group: 'Business', id: 'hours', icon: 'clock', title: 'Office hours and holidays', desc: 'Chasing clocks, the new-lead alert and My Day follow these.', body: () => renderOfficeHoursPage() },
     { group: 'Business', id: 'services', icon: 'layers', title: 'Services', desc: 'What the business does. Each service has its own colour, used everywhere in the app, and its own list of jobs.', body: () =>
-        setBlock('Services and what they include', 'Drag to change the order. A service switched off leaves the forms but keeps its history and stays in the reports.', catalogListHtml('services', { name: true, subs: true, toggle: true, color: true }) + catalogAddButton('services', 'Add a service'))
-        + setBlock('Job types', 'The job types in Jobs & Commissions and Closings.', setRows([['Job types follow the services', 'One job type per service, in the same order.', pill('neutral', 'Always')]])) },
+        setBlock('Services and what they include', 'Drag to change the order. A service switched off leaves the forms but keeps its history and stays in the reports.', catalogListHtml('services', { name: true, subs: true, toggle: true, color: true }) + catalogAddButton('services', 'Add a service')) },
     { group: 'Business', id: 'money', icon: 'dollar', title: 'Tax and payments', desc: 'How amounts are counted and when money owed is flagged.', body: () => setBlock('GST', '', setRows([
         ['GST rate', 'Used to split the GST out of amounts that include it.', `<span class="set-num"><input type="number" min="0" max="100" value="${s.gstRatePercent}" onchange="updateBusinessSetting('gstRatePercent', this.value, 'GST rate')"><span>%</span></span>`],
       ])) + setBlock('Getting paid', '', setRows([
@@ -12367,17 +12639,17 @@ function renderSettings(profile){
         + setBlock('Owners', 'A fixed weekly wage, not commission, seen only by owners.', setRows(owners.map(o => [esc(o.fullName), '', `<span class="set-num"><input type="number" min="0" value="${(s.ownerSalaries||{})[o.fullName]||0}" onchange="setOwnerSalary('${jsStr(o.fullName)}', this.value)"><span>$/week</span></span>`]))) },
     { group: 'Sales', id: 'pipeline', icon: 'kanban', title: 'Pipeline', desc: 'The stages a lead goes through, and the rules that keep leads from falling through the cracks.', body: () => {
         const r = catalogRules();
-        return setBlock('Stages', 'Rename, recolour and drag to reorder. Stages can\'t be added or removed for now: several are tied to rules.', catalogListHtml('stages', { name: true, color: true, locked: ['Won'], sub: x => STAGE_RULE_TEXT(x.key) }))
+        return setBlock('Stages', 'Rename, recolour and drag to reorder. Add your own stages and delete them; the built-in stages can be switched off but not deleted, and New, Won and Lost are always on.', catalogListHtml('stages', { name: true, color: true, sub: x => STAGE_RULE_TEXT(x.key), ctl: stageRowCtl }) + catalogAddButton('stages', 'Add a stage'))
           + setBlock('Rules', '', setRows([
             ['Quoted and Follow up need a date in the future', 'The lead can\'t be left there without one, so it never falls through the cracks.', setToggle(r.needDate, "setCatalogRule('needDate', !this.classList.contains('on'))")],
             ['Warn when a quote has been idle for', 'A red line on the card and in the table.', `<span class="set-num"><input type="number" min="1" value="${RULES.quoteIdleDays}" onchange="setCatalogRule('quoteIdleDays', this.value)"><span>days</span></span>`],
             ['Chasing: ask to decide (keep or lost) after', 'It shows on My Day and on the card.', `<span class="set-num"><input type="number" min="1" value="${RULES.chaseDecideDays}" onchange="setCatalogRule('chaseDecideDays', this.value)"><span>days</span></span>`],
-            ['Chasing calls count on office days only', `${officeHoursText()} (set in Office hours and holidays).`, pill('neutral', 'Always')],
+            ['Chasing calls count on office days only', r.chaseOfficeDays ? `${officeHoursText()} (set in Office hours and holidays).` : 'Switched off: every day counts, weekends and days off too.', setToggle(r.chaseOfficeDays, "setCatalogRule('chaseOfficeDays', !this.classList.contains('on'))")],
           ]))
-          + setBlock('Reasons a lead is lost', 'Shown when a lead moves to Lost, and in the Leads & Marketing report.', catalogListHtml('lostReasons', { name: true, toggle: true }) + catalogAddButton('lostReasons', 'Add a reason'));
+          + setBlock('Reasons a lead is lost', 'Shown when a lead moves to Lost, and on the Dashboard. A deleted reason leaves the list; leads that have it keep it, marked "deleted reason".', catalogListHtml('lostReasons', { name: true, toggle: true, remove: true }) + catalogAddButton('lostReasons', 'Add a reason'));
       } },
     { group: 'Sales', id: 'sources', icon: 'target', title: 'Lead sources', desc: 'Where leads come from. Each source has a colour and its own campaigns, platforms or profiles.', body: () =>
-        setBlock('Sources', 'Drag to change the order. A source switched off leaves the forms; its leads keep it and stay in the reports.', catalogListHtml('sources', { name: true, subs: true, toggle: true, color: true, locked: ['Unknown'] }) + catalogAddButton('sources', 'Add a source')) },
+        setBlock('Sources', 'Drag to change the order. A source switched off leaves the forms; its leads keep it and stay in the reports.', catalogListHtml('sources', { name: true, subs: true, toggle: true, color: true, locked: ['Unknown'], sub: x => x.kind==='connected' ? 'Connected source: how to connect it is in Connections' : '' }) + catalogAddButton('sources', 'Add a source')) },
     { group: 'Sales', id: 'tags', icon: 'tag', title: 'Tags', desc: 'Short labels on a lead, for things the stage doesn\'t say.', body: () =>
         setBlock('Tags', 'A tag switched off leaves the menus but stays on the leads that have it.', catalogListHtml('tags', { hint: true, toggle: true, color: true }) + catalogAddButton('tags', 'Add a tag')) },
     { group: 'Customers', id: 'phone', icon: 'phone', title: 'Phone', desc: 'Who answers the business number, and what happens when nobody does.', body: () => renderPhoneSettings(s) },
@@ -12424,12 +12696,131 @@ function setBlock(title, desc, body){ return `<div class="set-block"><div class=
 function setRows(rows){ return `<div class="set-rows">${rows.map(([label, desc, ctl]) => `<div class="set-row"><div class="set-row-text"><b>${label}</b>${desc ? `<span>${esc(desc)}</span>` : ''}</div><div class="set-row-ctl">${ctl}</div></div>`).join('')}</div>`; }
 // A switch, as in the mockup. Locked ones show the rule but can't be changed here.
 function setToggle(on, onclick, locked){ return `<button type="button" class="set-toggle${on ? ' on' : ''}" role="switch" aria-checked="${!!on}"${locked ? ' disabled title="Always on"' : ` onclick="${onclick}"`}></button>`; }
-const CAT_NAMES = { services: 'Services', stages: 'Pipeline stages', sources: 'Lead sources', tags: 'Tags', lostReasons: 'Reasons a lead is lost', payments: 'Payment methods', rules: 'Pipeline rules', security: 'Security', myday: 'My Day', notify: 'Notifications', hours: 'Office hours', business: 'Business details', roles: 'Roles and access', branding: 'Look and branding', templates: 'Message templates', reviews: 'Google reviews', chat: 'Website chat and texts', brands: 'Brands', pay: 'Pay' };
+const CAT_NAMES = { services: 'Services', stages: 'Pipeline stages', sources: 'Lead sources', tags: 'Tags', lostReasons: 'Reasons a lead is lost', payments: 'Payment methods', rules: 'Pipeline rules', security: 'Security', myday: 'My Day', notify: 'Notifications', hours: 'Office hours', business: 'Business details', region: 'Region and format', roles: 'Roles and access', branding: 'Look and branding', templates: 'Message templates', reviews: 'Google reviews', chat: 'Website chat and texts', brands: 'Brands', pay: 'Pay' };
 const CAT_SWATCHES = ['#1f66c9', '#2b6cc4', '#0e8a8a', '#16a34a', '#c99a06', '#c4580f', '#d03b5c', '#7746c9', '#a5473f', '#776e64'];
+// One line under each stage in Settings: the rule it carries (Ofek 13 Oct, P7), or that it is the business's own.
 function STAGE_RULE_TEXT(k){
-  return ({ New: 'Every new enquiry starts here', Chasing: `Calls counted on office days · decide after ${RULES.chaseDecideDays} days`,
-    Quoted: STAGES_NEED_DATE.includes('Quoted') ? 'Needs a follow-up date in the future' : '', 'Follow-up': STAGES_NEED_DATE.includes('Follow-up') ? 'Needs a follow-up date in the future' : '',
-    Booked: 'Asks for the job date · counts a booking for the day', Won: 'Set by the app when the customer has a job', Lost: 'Asks for the reason' })[k] || '';
+  const needDate = s => STAGES_NEED_DATE.includes(s) ? 'Needs a follow-up date in the future · ' : '';
+  return ({ New: 'Always on: every new lead lands here', Won: 'Always on: set automatically when the lead has a job', Lost: 'Always on: asks for one of the reasons a lead is lost (below)',
+    Chasing: `The chasing call counter: calls counted on ${RULES.chaseOfficeDays ? 'office days' : 'every day'}, a call-back alert after 3 hours, decide after ${RULES.chaseDecideDays} days`,
+    Quoted: needDate('Quoted') + `warns when idle ${RULES.quoteIdleDays}+ days · on My Day when the date comes`,
+    'Follow-up': needDate('Follow-up') + 'a follow-up date on a New or Chasing lead moves it here · on My Day when the date comes',
+    Booked: 'Asks for the job date · counts a booking for the day (My Day, booking bonus) · reminds 2 days after it if there is no job' })[k] || 'Your own stage: no automatic rules';
+}
+// The control on a stage's row: a lock for New, Won and Lost, a switch for the other built-in stages, Delete for the business's own.
+function stageRowCtl(x){
+  if (STAGE_CORE.includes(x.key)) return `<span class="cat-lock" title="Always on">${ico('lock', 14)}</span>`;
+  if (stageIsBuiltin(x.key)) return setToggle(x.active!==false, `setStageActive('${esc(jsStr(x.key))}', !this.classList.contains('on'))`);
+  return `<button type="button" class="btn ghost small" aria-label="Delete ${esc(x.label)}" title="Delete this stage" onclick="removeStage('${esc(jsStr(x.key))}')">${ico('trash', 14)}</button>`;
+}
+// Switch a built-in stage on or off. Off moves its leads to another stage first (openStageRemove).
+function setStageActive(key, on){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
+  if (STAGE_CORE.includes(key) || !stageIsBuiltin(key)) { showToast(`${stageLabel(key)} is always on`); render(); return; }
+  if (on) { setCatalogField('stages', key, 'active', true); return; }
+  openStageRemove(key, 'hide');
+}
+// Delete a custom stage. Its leads are moved to another stage first (openStageRemove).
+function removeStage(key){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (stageIsBuiltin(key)) { showToast('Built-in stages can be switched off, not deleted'); return; }
+  openStageRemove(key, 'delete');
+}
+// What switching a built-in stage off stops, said in the confirm.
+const STAGE_OFF_WARN = {
+  Booked: ' Bookings are counted when a lead moves to Booked (My Day and the booking bonus); switched off, none are counted.',
+  Chasing: ' The chasing counter, the call-back alert and the My Day chasing lists stop.',
+  'Follow-up': ' A follow-up date no longer moves a New or Chasing lead to Follow up.',
+};
+// Deleting or switching off a stage (mode 'delete' / 'hide'). With leads in it, asks first where they go.
+function openStageRemove(key, mode){
+  const n = stageLeadsIn(STATE.data.contacts, key).length, label = stageLabel(key), warn = STAGE_OFF_WARN[key] || '', del = mode==='delete';
+  if (!n) {
+    confirmAction(del ? `Delete the stage "${label}"? No lead is in it.` : `Switch off "${label}"? It leaves the pipeline, the stage menus and the filters. You can switch it back on any time.${warn}`,
+      () => finishEmptyStageRemove(key, mode), { danger: del, title: del ? 'Delete this stage?' : 'Switch off this stage?', confirmLabel: del ? 'Delete' : 'Switch off' });
+    return;
+  }
+  const targets = stagesPickable().filter(k => k!==key);
+  const reasons = LOST_REASONS.filter(r => !ACTIVE.lost || ACTIVE.lost.has(r.key));
+  openPopup(`<h3 style="margin:0 0 6px">${n} lead${n===1 ? '' : 's'} ${n===1 ? 'is' : 'are'} in ${esc(label)}</h3>
+    <div class="hint" style="margin-bottom:10px">Pick the stage to move them to first. Then the stage is ${del ? 'deleted' : 'switched off'}.${esc(warn)}</div>
+    <div class="field"><label>Move them to</label><select id="stage-move-to" onchange="stageMoveFields()">${targets.map(k => `<option value="${esc(k)}">${esc(stageLabel(k))}</option>`).join('')}</select></div>
+    <div class="field" id="stage-move-lost" style="margin-top:10px" hidden><label>Why were they lost?</label><select id="stage-move-reason"><option value="">Choose a reason…</option>${reasons.map(r => `<option value="${esc(r.key)}">${esc(r.label)}</option>`).join('')}</select></div>
+    <div class="field" id="stage-move-day" style="margin-top:10px" hidden><label id="stage-move-day-label"></label><input type="date" id="stage-move-date" style="width:100%"></div>
+    <div id="popup-error" style="color:var(--bad);font-size:12px;margin-top:6px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn ghost" onclick="closePopup()">Cancel</button>
+      <button class="btn primary" onclick="confirmStageRemove('${esc(jsStr(key))}','${del ? 'delete' : 'hide'}')">Move ${n} and ${del ? 'delete' : 'switch off'}</button>
+    </div>`);
+  stageMoveFields();
+}
+// Shows what the chosen stage asks for: a reason for Lost, a day for Booked, Quoted and Follow up.
+function stageMoveFields(){
+  const to = (document.getElementById('stage-move-to') || {}).value || '';
+  const lost = document.getElementById('stage-move-lost'), day = document.getElementById('stage-move-day'), label = document.getElementById('stage-move-day-label'), date = document.getElementById('stage-move-date');
+  if (lost) lost.hidden = to!=='Lost';
+  const booked = to==='Booked', needs = booked || STAGES_NEED_DATE.includes(to);
+  if (day) day.hidden = !needs;
+  if (label) label.textContent = booked ? 'Which day are they booked for? Leads that already have a day keep it.' : 'Next follow-up date. Leads that already have a later one keep theirs.';
+  if (date) { date.min = booked ? '' : shiftDays(todayStr(), 1); if (!date.value) date.value = shiftDays(todayStr(), 1); }
+}
+async function confirmStageRemove(key, mode){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const v = id => (document.getElementById(id) || {}).value || '';
+  const to = v('stage-move-to'), reason = v('stage-move-reason'), day = v('stage-move-date'), today = todayStr();
+  const err = m => { const e = document.getElementById('popup-error'); if (e) e.textContent = m; };
+  if (!to || to===key) { err('Pick a stage to move them to.'); return; }
+  const leads = stageLeadsIn(STATE.data.contacts, key), label = stageLabel(key);
+  const extra = {};
+  if (to==='Lost') { if (!reason) { err('Choose why they were lost.'); return; } extra.lostReason = reason; }
+  if (to==='Booked' && leads.some(c => !c.bookedFor)) { if (!day) { err('Pick the day they are booked for.'); return; } extra.bookedFor = day; }
+  if (STAGES_NEED_DATE.includes(to) && leads.some(c => !(c.nextFollowUp && c.nextFollowUp > today))) { if (!(day && day > today)) { err('Pick a day after today.'); return; } extra.nextFollowUp = day; }
+  closePopup();
+  showToast(`Moving ${leads.length} lead${leads.length===1 ? '' : 's'}…`);
+  const moved = await moveStageLeads(key, to, extra, mode);
+  if (moved===false) return;
+  // A save that failed puts its lead back (restoreAfterFailedSave), and a lead may have arrived meanwhile: keep the stage then.
+  if (stageLeadsIn(STATE.data.contacts, key).length) { showToast(`Some leads are still in ${label}, so it was kept. Try again.`); render(); return; }
+  finishStageRemove(key, mode, ` (${moved} lead${moved===1 ? '' : 's'} moved to ${stageLabel(to)})`);
+}
+// Moves every lead out of a stage, 20 at a time, one request per lead (the history event goes in the same patch).
+// Not a stage change by hand: it doesn't count a booking (mdRecordBooking: a clean-up is not a booking, and Ron's bonus
+// counts bookings) and doesn't mark the leads as contacted (logContactActivity would set contacted_at).
+async function moveStageLeads(from, to, extra, mode){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return false; }
+  const plan = stageMovePlan(STATE.data.contacts, from, to, extra || {}, new Date().toISOString(), todayStr());
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  const text = `Stage changed from "${stageLabel(from)}" to "${stageLabel(to)}" (${stageLabel(from)} ${mode==='delete' ? 'deleted' : 'switched off'} in Settings)`;
+  for (let i = 0; i < plan.length; i += 20) {
+    await Promise.all(plan.slice(i, i + 20).map(p => {
+      const c = contactById(p.id); if (!c) return null;
+      const patch = { ...p.patch };
+      if (!p.quiet) {
+        patch.messages = [...(c.messages || []), { id: uid(), kind: 'event', text, at: p.patch.stageChangedAt }];
+        logActivity(c, actor, text);
+        db.activityLog.insert('contact', c.id, actor, text);
+      }
+      return db.contacts.update(c.id, patch);
+    }));
+  }
+  return plan.filter(p => !p.quiet).length;
+}
+// A stage with no lead in it. A lead that reads as Won (it has a job) may still store it: that stored value moves to New
+// first, quietly, so the lead can't fall back into a deleted or switched-off stage if its job is deleted later.
+async function finishEmptyStageRemove(key, mode){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (stageLeadsIn(STATE.data.contacts, key).length) { openStageRemove(key, mode); return; }   // a lead arrived meanwhile
+  if (stageStoredOnly(STATE.data.contacts, key).length && await moveStageLeads(key, 'New', {}, mode)===false) return;
+  finishStageRemove(key, mode, '');
+}
+// The stage leaves the list (a custom one) or is switched off (a built-in one), once it has no leads.
+function finishStageRemove(key, mode, movedText){
+  const label = stageLabel(key);
+  let list = catalogList('stages'), what;
+  if (mode==='delete') { list = list.filter(x => x.key!==key); what = `"${label}" deleted${movedText}`; }
+  else { const x = list.find(y => y.key===key); if (x) x.active = false; what = `"${label}" switched off${movedText}`; }
+  if (UI.crm && UI.crm.status===key) UI.crm.status = 'all';
+  catalogSave('stages', list, what);
 }
 function catalogColorOf(section, id){
   if (section==='services') return divColor(id);
@@ -12440,9 +12831,9 @@ function catalogColorOf(section, id){
 }
 // One editable list: drag to reorder, the name typed in place, its colour, its sub-items as chips, a switch.
 function catalogListHtml(section, o){
-  const items = catalogList(section), locked = o.locked || [];
+  const items = catalogShown(section), locked = o.locked || [];
   return `<div class="cat-list" data-section="${section}">${items.map(x => {
-    const id = catalogId(section, x), isLocked = locked.includes(id), q = `'${section}','${jsStr(id)}'`;
+    const id = catalogId(section, x), isLocked = locked.includes(id), q = `'${section}','${esc(jsStr(id))}'`;
     const name = o.name ? `<input class="cat-name" value="${esc(x.label)}" aria-label="Name" onchange="setCatalogField(${q},'label',this.value)">` : `<b class="cat-name-text">${esc(x.label || x.tag)}</b>`;
     const sub = o.hint ? `<input class="cat-hint" value="${esc(x.hint || '')}" placeholder="What it means" aria-label="What ${esc(x.tag)} means" onchange="setCatalogField(${q},'hint',this.value)">`
       : o.sub && o.sub(x) ? `<span class="cat-sub">${esc(o.sub(x))}</span>` : '';
@@ -12451,7 +12842,8 @@ function catalogListHtml(section, o){
       <span class="cat-grip" title="Drag to change the order" onpointerdown="catalogDragStart(event,'${section}')">${ico('grip', 16)}</span>
       ${o.color ? `<button type="button" class="cat-dot" style="background:${catalogColorOf(section, id)}" aria-label="Colour of ${esc(x.label || x.tag)}" onclick="openCatalogColor(event,${q})"></button>` : '<span class="cat-dot plain"></span>'}
       <div class="cat-main">${name}${sub}${chips}</div>
-      <div class="cat-ctl">${isLocked ? `<span class="cat-lock" title="Set by the app">${ico('lock', 14)}</span>` : o.toggle ? setToggle(x.active!==false, `setCatalogField(${q},'active',!this.classList.contains('on'))`) : ''}</div>
+      <div class="cat-ctl">${o.ctl ? o.ctl(x, id) : isLocked ? `<span class="cat-lock" title="Set by the app">${ico('lock', 14)}</span>` : (o.toggle ? setToggle(x.active!==false, `setCatalogField(${q},'active',!this.classList.contains('on'))`) : '')
+        + (o.remove ? `<button type="button" class="btn ghost small danger" aria-label="Delete ${esc(x.label || x.tag)}" title="Delete" onclick="deleteCatalogItem(${q})">${ico('trash', 14)}</button>` : '')}</div>
     </div>`;
   }).join('')}</div>`;
 }
@@ -12460,11 +12852,12 @@ function catalogSave(section, list, what){
   if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
   const cat = JSON.parse(JSON.stringify(STATE.data.settings.catalog || {}));
   cat[section] = list;
-  db.settings.update({ catalog: cat });
+  const saved = db.settings.update({ catalog: cat });
   applyCatalog();
   logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `${CAT_NAMES[section] || section}: ${what}`);
   showToast('Saved');
   render();
+  return saved;   // for a caller that must know the save is done (a failed one has put the old values back by then)
 }
 function setCatalogField(section, id, field, value){
   const list = catalogList(section), x = list.find(y => catalogId(section, y)===id); if (!x) return;
@@ -12475,6 +12868,22 @@ function setCatalogField(section, id, field, value){
   const name = x.label || x.tag;
   catalogSave(section, list, field==='active' ? `${name} switched ${v ? 'on' : 'off'}` : field==='color' ? `${name}'s colour changed` : field==='label' ? `"${was}" renamed to "${v}"` : `${name}: description changed`);
 }
+// Delete a reason (Ofek 13 Oct). It leaves Settings and the pick lists; it stays saved as {deleted:true} so the leads that
+// have it, and the Dashboard, keep its name.
+function deleteLostReason(key){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const list = catalogList('lostReasons'), x = list.find(y => y.key===key); if (!x || x.deleted) return;
+  if (!lostReasonCanDelete(list, key)) { showToast('At least one reason must be switched on: a lost lead always needs one'); return; }
+  const n = (STATE.data.contacts || []).filter(c => leadStage(c)==='Lost' && lostReasonOf(c)===key).length;
+  confirmAction(`"${x.label}" leaves the list of reasons. ${n ? `${n} lost lead${n===1 ? '' : 's'} keep it, and the Dashboard still shows ${n===1 ? 'it' : 'them'} under "${x.label} (deleted reason)".` : 'No lead has it.'}`, () => {
+    const now = catalogList('lostReasons'), y = now.find(z => z.key===key); if (!y || y.deleted) return;
+    if (!lostReasonCanDelete(now, key)) { showToast('At least one reason must be switched on: a lost lead always needs one'); return; }
+    y.deleted = true; y.deletedAt = new Date().toISOString();
+    catalogSave('lostReasons', now, `"${y.label}" deleted`);
+  }, { title: 'Delete this reason?', confirmLabel: 'Delete' });
+}
+// The delete button on a Settings list row. Only lost reasons can be deleted for now.
+function deleteCatalogItem(section, id){ if (section==='lostReasons') deleteLostReason(id); }
 function addCatalogSub(section, id, value){
   const v = String(value || '').trim(), list = catalogList(section), x = list.find(y => catalogId(section, y)===id); if (!v || !x) return;
   x.subs = x.subs || [];
@@ -12489,8 +12898,10 @@ function removeCatalogSub(section, id, value){
 }
 function setCatalogRule(field, value){
   const r = catalogRules();
-  r[field] = field==='needDate' ? !!value : Math.max(1, Math.round(Number(value)) || r[field]);
-  catalogSave('rules', r, field==='needDate' ? `future date for Quoted and Follow up ${r.needDate ? 'required' : 'no longer required'}` : field==='quoteIdleDays' ? `quotes idle after ${r.quoteIdleDays} days` : `chasing decided after ${r.chaseDecideDays} days`);
+  const flag = field==='needDate' || field==='chaseOfficeDays';
+  r[field] = flag ? !!value : Math.max(1, Math.round(Number(value)) || r[field]);
+  catalogSave('rules', r, field==='needDate' ? `future date for Quoted and Follow up ${r.needDate ? 'required' : 'no longer required'}` : field==='quoteIdleDays' ? `quotes idle after ${r.quoteIdleDays} days`
+    : field==='chaseOfficeDays' ? `chasing calls counted on ${r.chaseOfficeDays ? 'office days only' : 'every day'}` : `chasing decided after ${r.chaseDecideDays} days`);
 }
 // Its colour: a small palette under the dot (Default goes back to the app's own colour, which suits light and dark).
 function openCatalogColor(e, section, id){
@@ -12507,29 +12918,48 @@ function openCatalogColor(e, section, id){
   setTimeout(() => document.addEventListener('pointerdown', off, true), 0);
 }
 function pickCatalogColor(section, id, c){ document.querySelectorAll('.cat-swatches').forEach(x => x.remove()); setCatalogField(section, id, 'color', c || null); }
-function openCatalogAdd(section){
-  const what = { services: 'service', sources: 'source', tags: 'tag', lostReasons: 'reason', payments: 'payment method' }[section];
+// A new source first asks how its leads come in (Ofek 13 Oct): connected (e.g. ChatGPT) or picked by hand.
+function openCatalogAdd(section, kind){
+  if (section==='sources' && !kind) { openSourceTypeChooser(); return; }
+  const what = { services: 'service', stages: 'stage', sources: kind==='connected' ? 'connected source' : 'manual source', tags: 'tag', lostReasons: 'reason', payments: 'payment method' }[section];
+  const go = `confirmCatalogAdd('${section}','${kind || ''}')`;
   openPopup(`<h3 style="margin:0 0 10px">Add a ${what}</h3>
-    <div class="field"><label>Name</label><input id="cat-new-name" autofocus onkeydown="if(event.key==='Enter') confirmCatalogAdd('${section}')"></div>
-    ${section==='tags' ? `<div class="field" style="margin-top:10px"><label>What it means</label><input id="cat-new-hint" placeholder="e.g. Pays by invoice" onkeydown="if(event.key==='Enter') confirmCatalogAdd('${section}')"></div>` : ''}
+    <div class="field"><label>Name</label><input id="cat-new-name" autofocus onkeydown="if(event.key==='Enter') ${go}"></div>
+    ${section==='sources' && kind==='connected' ? '<div class="hint" style="margin-top:6px">Next you\'ll see how to connect it.</div>' : ''}
+    ${section==='tags' ? `<div class="field" style="margin-top:10px"><label>What it means</label><input id="cat-new-hint" placeholder="e.g. Pays by invoice" onkeydown="if(event.key==='Enter') ${go}"></div>` : ''}
     <div id="popup-error" style="color:var(--bad);font-size:12px;margin-top:6px"></div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn ghost" onclick="closePopup()">Cancel</button><button class="btn primary" onclick="confirmCatalogAdd('${section}')">Add</button></div>`);
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn ghost" onclick="closePopup()">Cancel</button><button class="btn primary" onclick="${go}">Add</button></div>`);
   setTimeout(() => { const i = document.getElementById('cat-new-name'); if (i) i.focus(); }, 30);
 }
-function confirmCatalogAdd(section){
+function openSourceTypeChooser(){
+  const opt = 'justify-content:flex-start;flex-direction:column;align-items:flex-start;gap:2px;height:auto;padding:10px 12px;text-align:left;white-space:normal';
+  openPopup(`<h3 style="margin:0 0 6px">Add a source</h3><div class="hint" style="margin-bottom:10px">How do its leads reach you?</div>
+    <div style="display:grid;gap:6px">
+      <button type="button" class="btn" style="${opt}" onclick="openCatalogAdd('sources','connected')"><b>Connected source</b><span class="hint">Leads come in by themselves once it is set up, e.g. ChatGPT.</span></button>
+      <button type="button" class="btn" style="${opt}" onclick="openCatalogAdd('sources','manual')"><b>Manual source</b><span class="hint">You pick it on the lead yourself, e.g. a referral or the car magnet.</span></button>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn ghost" onclick="closePopup()">Cancel</button></div>`);
+}
+function confirmCatalogAdd(section, kind){
   const name = String((document.getElementById('cat-new-name') || {}).value || '').trim();
   const err = document.getElementById('popup-error');
   if (!name) { if (err) err.textContent = 'Type a name.'; return; }
-  const list = catalogList(section);
-  if (list.some(x => [x.key, x.label, x.tag].filter(Boolean).some(t => String(t).toLowerCase()===name.toLowerCase()))) { if (err) err.textContent = 'There is already one with that name.'; return; }
+  const list = catalogList(section), hit = catalogFindByName(list, name);
+  // A deleted entry with that name comes back with its old key, so the leads that have it join it again.
+  if (hit && hit.deleted) { delete hit.deleted; delete hit.deletedAt; hit.active = true; if (section!=='tags') hit.label = name; closePopup(); catalogSave(section, list, `"${name}" added back`); return; }
+  if (hit) { if (err) err.textContent = 'There is already one with that name.'; return; }
+  if (section==='stages') { closePopup(); catalogSave('stages', stageListWithNew(list, name, Date.now()), `"${name}" added`); return; }
+  const connected = section==='sources' && kind==='connected';
   const color = CAT_SWATCHES[list.length % CAT_SWATCHES.length];
   const item = section==='tags' ? { tag: name, hint: String((document.getElementById('cat-new-hint') || {}).value || '').trim(), color: null, active: true }
     : section==='lostReasons' ? { key: 'r' + Date.now().toString(36), label: name, active: true }
     : section==='payments' ? { key: name, label: name, active: true }
-    : { key: name, label: name, color, active: true, subs: [] };
+    : { key: name, label: name, color, active: true, subs: [], ...(connected ? { kind: 'connected' } : {}) };
   list.push(item);
   closePopup();
-  catalogSave(section, list, `"${name}" added`);
+  catalogSave(section, list, connected ? `"${name}" added (connected source)` : `"${name}" added`);
+  // A connected source: on to Connections, where the guide to connect it waits.
+  if (connected && !readOnlyReason()) { UI.settings = UI.settings || {}; UI.settings.guide = name; setSettingsPage('connections'); }
 }
 // Drag a row by its handle to change the order; the rows around it slide out of the way.
 let CAT_DRAG = null;
@@ -12559,8 +12989,117 @@ function catalogDragEnd(){
   d.row.classList.remove('dragging'); d.row.style.transform = '';
   if (!d.moved) return;
   const order = [...d.list.querySelectorAll('.cat-row')].map(r => r.dataset.key);
-  const list = catalogList(d.section).sort((a, b) => order.indexOf(catalogId(d.section, a)) - order.indexOf(catalogId(d.section, b)));
+  const pos = k => { const i = order.indexOf(k); return i < 0 ? order.length : i; };   // deleted entries aren't on screen: they stay at the end
+  const list = catalogList(d.section).sort((a, b) => pos(catalogId(d.section, a)) - pos(catalogId(d.section, b)));
   catalogSave(d.section, list, 'order changed');
+}
+// Business details (Ofek 14 Oct): the address in parts, the business's insurance, and Region and format.
+function renderBusinessAddressFields(){
+  const b = catalogObject('business'), a = businessAddress(b);
+  const oldLine = !['street','suburb','state','postcode'].some(k => b[k]!==undefined) && !!String(b.address || '').trim();
+  const f = (part, label, ph, extra) => `<div class="field"><label>${label}</label><input value="${esc(a[part])}" placeholder="${esc(ph)}"${extra || ''} onchange="setBusinessAddress('${part}', this.value)"></div>`;
+  return `<div class="set-fields">${f('street', 'Street', '12 Example St')}${f('suburb', 'Suburb', 'Parramatta')}
+    <div class="field"><label>State</label><select onchange="setBusinessAddress('state', this.value)"><option value="">—</option>${AU_STATES.map(x => `<option ${x===a.state ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+    ${f('postcode', 'Postcode', '2150', ' inputmode="numeric" maxlength="4"')}</div>${oldLine ? '<div class="hint">Moved from the old one-line address: split it into the boxes.</div>' : ''}`;
+}
+function renderBusinessInsurance(x){
+  const ins = ((catalogObject('business').insurance || {})[x.key]) || {}, st = businessInsuranceStatus(ins, todayStr());
+  const f = (field, label, ph, type) => `<div class="field"><label>${label}</label><input${type ? ` type="${type}"` : ''} value="${esc(ins[field] || '')}" placeholder="${esc(ph)}" onchange="setBusinessInsurance('${x.key}','${field}',this.value)"></div>`;
+  const cert = ins.file ? `<span class="doc-slot"><a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${esc(jsStr(ins.file))}')">${ico('file', 14)} View</a><button type="button" class="btn ghost small" onclick="pickBusinessCertificate('${x.key}')">Replace</button></span>`
+    : `<button type="button" class="btn ghost small" onclick="pickBusinessCertificate('${x.key}')">Upload</button>`;
+  return `<div class="set-fields">
+    <div class="field"><label>Status</label><div>${pill(st.tone, st.text)}</div></div>
+    ${f('insurer', 'Insurer', 'e.g. QBE')}${f('policy', 'Policy number', '')}${f('cover', 'Cover amount', x.key==='liability' ? 'e.g. $20 million' : 'e.g. statutory')}${f('expiry', 'Expiry', '', 'date')}
+    <div class="field"><label>Certificate of currency</label><div>${cert}</div></div></div>`;
+}
+function renderRegionRows(){
+  const region = catalogObject('region'), rules = weekRules(region), today = todayStr(), pend = rules.filter(r => r.from > today).pop();
+  const shown = pend ? pend.weekStart : weekStartDay(today), fy = financialYearOf(today, fyStartMonth(region)), fmt = dateFormatOf(region);
+  let weekDesc;
+  if (pend) { const first = weekBounds(pend.from, rules); weekDesc = `From ${fmtDateShort(pend.from)}: one ${first.days}-day week (${fmtDateShort(first.start)} – ${fmtDateShort(first.end)}), then ${DAY_NAMES[pend.weekStart]} to ${DAY_NAMES[(pend.weekStart + 6) % 7]}. This week and the weeks before stay as they were paid.`; }
+  else weekDesc = `Payroll weeks run ${weekDaysName(today)}.${weekOneOff(today) ? ` This week is ${weekOneOff(today)}.` : ''} A change starts from next week; past weeks stay as they were paid.`;
+  return setRows([
+    ['Time zone', 'Comes with the SaaS stage.', '<span class="set-fixed">Australia/Sydney</span>'],
+    ['Currency', 'Comes with the SaaS stage.', '<span class="set-fixed">AUD ($)</span>'],
+    ['Week starts on', weekDesc, `<select class="set-input" onchange="setWeekStart(this.value)">${DAY_NAMES.map((n, i) => `<option value="${i}" ${i===shown ? 'selected' : ''}>${n}</option>`).join('')}</select>`],
+    ['Financial year starts', `This one: ${fmtDateYear(fy.start)} – ${fmtDateYear(fy.end)}.`, `<select class="set-input" onchange="setRegionField('fyStart', this.value)">${MONTHS_FULL.map((m, i) => `<option value="${i + 1}" ${i + 1===fyStartMonth(region) ? 'selected' : ''}>1 ${m}</option>`).join('')}</select>`],
+    ['Date format', 'For full dates: documents, insurance and invoices. Short dates like 5 Oct stay as they are.', `<select class="set-input" onchange="setRegionField('dateFormat', this.value)">${DATE_FORMATS.map(([v, label]) => `<option value="${v}" ${v===fmt ? 'selected' : ''}>${label}</option>`).join('')}</select>`],
+  ]);
+}
+function setBusinessAddress(part, value){
+  if (!['street','suburb','state','postcode'].includes(part)) return;
+  const b = catalogObject('business'), cur = businessAddress(b), v = String(value || '').trim();
+  if (part==='postcode' && v && !/^\d{4}$/.test(v)) { showToast('A postcode is 4 digits', { kind: 'warn' }); render(); return; }
+  if (part==='state' && v && !AU_STATES.includes(v)) { render(); return; }
+  if (cur[part]===v) return;
+  // The first save writes all four parts, so an old one-line address moves into the street (and stays in 'address').
+  const next = { ...cur, [part]: v };
+  b.street = next.street; b.suburb = next.suburb; b.state = next.state; b.postcode = next.postcode;
+  b.address = businessAddress(b).line;
+  catalogSave('business', b, `address: ${part} ${v ? 'set to ' + v : 'cleared'}`);
+}
+function setBusinessInsurance(kind, field, raw){
+  const x = BIZ_INSURANCE.find(y => y.key===kind);
+  if (!x || !['insurer','policy','cover','expiry'].includes(field)) return;
+  const v = String(raw ?? '').trim();
+  if (field==='expiry' && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) { render(); return; }
+  const b = catalogObject('business'), ins = { ...(b.insurance || {}) }, cur = { ...(ins[kind] || {}) };
+  if ((cur[field] || '')===v) return;
+  cur[field] = v; ins[kind] = cur; b.insurance = ins;
+  catalogSave('business', b, `${x.label} insurance: ${({ insurer: 'insurer', policy: 'policy number', cover: 'cover', expiry: 'expiry' })[field]} ${v ? 'set to ' + (field==='expiry' ? fmtDateYear(v) : v) : 'cleared'}`);
+}
+// The certificate goes in the private employee-documents folder (owners and managers only), not with the job files:
+// settings.catalog is readable by every role, so only a 'doc:' reference is kept there.
+function pickBusinessCertificate(kind){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (!BIZ_INSURANCE.some(y => y.key===kind)) return;
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*,application/pdf';
+  inp.onchange = () => uploadBusinessCertificate(kind, inp.files && inp.files[0]);
+  inp.click();
+}
+async function uploadBusinessCertificate(kind, file){
+  const x = BIZ_INSURANCE.find(y => y.key===kind); if (!x || !file) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (file.size > MAX_FILE_MB * 1024 * 1024) { showToast(`That file is over ${MAX_FILE_MB} MB`); return; }
+  const ext = (String(file.name).split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+  const path = `business/${kind}-insurance-${Date.now()}.${ext}`;
+  showToast('Uploading…');
+  const { error } = await sb.storage.from(EMP_DOC_BUCKET).upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+  if (error) { showToast('Could not upload the file: ' + error.message); return; }
+  // read the saved details again after the upload: something may have changed meanwhile
+  const b = catalogObject('business'), ins = { ...(b.insurance || {}) }, old = ins[kind] && ins[kind].file;
+  ins[kind] = { ...(ins[kind] || {}), file: 'doc:' + path, fileAt: new Date().toISOString() }; b.insurance = ins;
+  await catalogSave('business', b, `${x.label} insurance: certificate ${old ? 'replaced' : 'uploaded'}`);
+  // Once the new one is saved, the copy it replaces is deleted, so no old certificate is left lying in storage.
+  const now = ((catalogObject('business').insurance || {})[kind] || {}).file;
+  if (now==='doc:' + path && old && /^doc:/.test(old)) sb.storage.from(EMP_DOC_BUCKET).remove([old.slice(4)]);
+}
+// A week-start change applies from the next week only; this week and every week before stay as they were paid (P6).
+function setWeekStart(value){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
+  const me = getCurrentProfile();
+  if (!me || me.role!=='owner') { showToast('Only an owner can change the week'); render(); return; }
+  const region = catalogObject('region'), ws = Number(value), plan = weekChangePlan(region, todayStr(), ws);
+  if (!plan) { render(); return; }
+  const save = () => catalogSave('region', { ...region, weeks: plan.weeks }, plan.from ? `week starts on ${DAY_NAMES[ws]} from ${fmtDateYear(plan.from)} (first week ${plan.first.days} days)` : 'week start change cancelled');
+  if (!plan.from) { save(); return; }
+  render();   // puts the box back to the saved day, in case the question is cancelled
+  confirmAction(`Weeks will start on ${DAY_NAMES[ws]} from next week. This week and every week before stay exactly as they were paid. The first new week runs ${fmtDateShort(plan.first.start)} – ${fmtDateShort(plan.first.end)} (${plan.first.days} days), then ${DAY_NAMES[ws]} to ${DAY_NAMES[(ws + 6) % 7]}.`,
+    save, { danger: false, title: 'Change the week start?', confirmLabel: 'Change it' });
+}
+function setRegionField(key, value){
+  const region = catalogObject('region');
+  if (key==='fyStart') {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1 || n > 12) { render(); return; }
+    if (fyStartMonth(region)===n) return;
+    catalogSave('region', { ...region, fyStart: n }, `financial year starts 1 ${MONTHS_FULL[n - 1]}`);
+  } else if (key==='dateFormat') {
+    const f = DATE_FORMATS.find(x => x[0]===value);
+    if (!f) { render(); return; }
+    if (dateFormatOf(region)===value) return;
+    catalogSave('region', { ...region, dateFormat: value }, `date format: ${f[1]}`);
+  }
 }
 function setBusinessInfo(key, value){ const b = catalogObject('business'); const v = String(value || '').trim(); if ((b[key] || '')===v) return; b[key] = v; catalogSave('business', b, `${{ phone: 'main phone', email: 'email', website: 'website', address: 'address' }[key] || key} ${v ? 'set to ' + v : 'cleared'}`); }
 
@@ -12742,12 +13281,36 @@ function personAccessBox(x){
     ${acts ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${acts}</div>` : ''}
   </div>`;
 }
+// The office assistant's automatic log-out, per person (Ofek 13 Oct, item 3). Owners change it; the SQL auto_end_va_shifts() reads it.
+function vaShiftBox(p){
+  if (!p || p.role!=='va') return '';
+  const me = getCurrentProfile(), owner = me && me.role==='owner', t = vaShiftTimes(p.id), first = esc(String(p.fullName || '').split(' ')[0] || p.fullName || 'They');
+  const time = (field, v) => owner ? `<input type="time" class="set-input" style="width:130px" value="${esc(v)}" aria-label="${field==='logoutAt' ? 'Logs out automatically at' : 'If they forgot, the shift ends at'}" onchange="setVaShiftTime('${p.id}','${field}',this.value)">` : `<span>${esc(v)}</span>`;
+  return `<div class="grp">Automatic log-out</div><div class="pp-access">
+    <div class="pp-kv" style="align-items:center"><span>Logs out automatically at</span>${time('logoutAt', t.logoutAt)}</div>
+    ${t.logoutFrom==='office' ? '<div class="hint">From the old office-wide setting until you change it here.</div>' : ''}
+    <div class="pp-kv" style="align-items:center"><span>If they forgot, the shift ends at</span>${time('endAt', t.endAt)}</div>
+    <div class="hint" style="margin-top:6px">If ${first} hasn't pressed Log Out by ${esc(t.logoutAt)}, the day is closed by itself. The end time recorded is ${esc(t.endAt)}, or ${first}'s own last action that day if it was later (the shift clock, notes, calls, stage changes, replies), never anyone else's. ${first} is told the next morning.</div>
+  </div>`;
+}
+function setVaShiftTime(profileId, field, v){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
+  const p = (STATE.profiles || []).find(x => x.id===profileId); if (!p || (field!=='logoutAt' && field!=='endAt')) return;
+  const cur = vaShiftTimes(profileId), why = vaShiftTimeProblem(field, v, cur);
+  if (why) { showToast(why, { kind: 'warn' }); render(); return; }
+  if (cur[field]===v && cur.logoutFrom==='person') return;
+  // Both times are saved for the person, so the card shows exactly what the log-out will use.
+  const m = catalogObject('myday'), people = { ...(m.people && typeof m.people==='object' && !Array.isArray(m.people) ? m.people : {}) };
+  people[profileId] = { logoutAt: cur.logoutAt, endAt: cur.endAt, [field]: v };
+  m.people = people;
+  catalogSave('myday', m, field==='logoutAt' ? `${p.fullName} is logged out automatically at ${v}` : `if ${p.fullName} forgets to log out, the shift ends at ${v}`);
+}
 function renderPersonPanel(x, data){
-  const me = getCurrentProfile(), canEdit = !!me && (me.role==='owner' || me.role==='manager');
-  if (x.emp) return renderEmployeePanel(x.emp, data, canEdit, `<div class="grp">Access</div>${personAccessBox(x)}`, x.name);
+  const me = getCurrentProfile(), canEdit = !!me && (me.role==='owner' || me.role==='manager'), va = vaShiftBox(x.prof);
+  if (x.emp) return renderEmployeePanel(x.emp, data, canEdit, `<div class="grp">Access</div>${personAccessBox(x)}${va}`, x.name);
   return `<div class="job-panel-head"><div style="display:flex;gap:12px;align-items:center;min-width:0">${empAvatar({ name: x.name }, 46)}<div style="min-width:0"><h3>${esc(x.name)}</h3><div class="meta" style="margin:0">${esc(personRoles(x).join(', '))}</div></div></div>
       <button type="button" class="btn ghost small" onclick="openPersonCard(null)" aria-label="Close" title="Close">✕</button></div>
-    <div class="grp">Access</div>${personAccessBox(x)}
+    <div class="grp">Access</div>${personAccessBox(x)}${va}
     <div class="grp">Details</div>
     <div class="hint" style="margin-bottom:10px">No employee details yet: phone, pay, documents and bank are not filled in. Someone from the ads agency usually doesn't need them.</div>
     ${canEdit ? `<button type="button" class="btn small" onclick="openEmployeeModal(null, { name: '${esc(jsStr(x.name))}' })">${ico('plus', 13)} Add employee details</button>` : ''}`;
@@ -12998,19 +13561,20 @@ function templateProblems(m, values){
 let TPL_EDIT = null;   // the template open for editing: { id, values: { key: words }, focus: the field the blanks go into }
 const TPL_EXAMPLE = { hi: 'Hi Sarah', first_name: 'Sarah', technician: 'Guy', result: 'Enjoy the fresh, clean air!', review_link: 'https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU', today: ' today', brand: 'The AC Cleaning Guys', service: 'aircon cleaning' };
 function tplHighlight(t){ return esc(t).replace(/\{(\w+)\}/g, '<span class="tpl-var">{$1}</span>').replace(/\n/g, '<br>'); }
-// What the customer gets, with example details (Sarah, an aircon clean by Guy, today).
-function tplPreviewHtml(m, values){
+// What the customer gets, with example details (Sarah, an aircon clean by Guy, today), or the ones given.
+function tplPreviewHtml(m, values, ex){
+  ex = ex || TPL_EXAMPLE;
   if (m.channel==='Email') {
-    const subject = fillTemplate(values.reviewEmailSubject, TPL_EXAMPLE);
+    const subject = fillTemplate(values.reviewEmailSubject, ex);
     let body = String(values.reviewEmailBody || ''); if (!body.includes('{review_button}')) body += '\n\n{review_button}';
     const paras = body.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
-    return `<div class="tpl-mail"><div class="tpl-mail-subj"><span>Subject</span>${esc(subject)}</div>${paras.map(x => `<p>${esc(fillTemplate(x, { ...TPL_EXAMPLE, review_button: '\u0001' })).replace(/\n/g, '<br>').replace(/\u0001/g, '<span class="tpl-mail-btn">&#11088;&#11088;&#11088;&#11088;&#11088; Leave a quick Google review</span>')}</p>`).join('')}</div>`;
+    return `<div class="tpl-mail"><div class="tpl-mail-subj"><span>Subject</span>${esc(subject)}</div>${paras.map(x => `<p>${esc(fillTemplate(x, { ...ex, review_button: '\u0001' })).replace(/\n/g, '<br>').replace(/\u0001/g, '<span class="tpl-mail-btn">&#11088;&#11088;&#11088;&#11088;&#11088; Leave a quick Google review</span>')}</p>`).join('')}</div>`;
   }
   if (m.channel==='Call') {
     const said = String(values[m.fields[0].key] || ''), words = said.trim() ? said.trim().split(/\s+/).length : 0;
     return `<div class="tpl-bubble tpl-spoken">${ico('phone', 14)} ${esc(said)}</div><div class="tpl-count">Read out by the phone voice · about ${Math.max(1, Math.round(words / 2.5))} seconds</div>`;
   }
-  const text = fillTemplate(values[m.fields[0].key], TPL_EXAMPLE), sp = smsParts(text);
+  const text = fillTemplate(values[m.fields[0].key], ex), sp = smsParts(text);
   return `<div class="tpl-bubble">${esc(text)}</div><div class="tpl-count${sp.parts > 2 || sp.unicode ? ' warn' : ''}">${sp.chars} characters · ${sp.parts===1 ? '1 text' : sp.parts + ' texts'}${sp.unicode ? ' · a curly quote, emoji or special character makes each text hold 70 characters instead of 160' : ''}</div>`;
 }
 // "Back to the original" shows as soon as the words differ from the approved ones.
@@ -13093,8 +13657,16 @@ function renderReviewsPage(s){
       <div class="field"><label>Google review link</label><input value="${esc(l.link)}" placeholder="https://g.page/r/…/review" onchange="setReviewLink('${k}', 'link', this.value)"></div>
       <div class="field"><label>Thank-you line</label><input value="${esc(l.result)}" placeholder="Enjoy the fresh, clean air!" onchange="setReviewLink('${k}', 'result', this.value)"></div>
       <div class="review-link-act">${l.link ? `<a class="btn small ghost" href="${esc(l.link)}" target="_blank" rel="noopener">Test ${ico('link', 13)}</a>` : ''}</div></div>`; }).join('');
-  return setBlock('Asking customers', auto ? 'Each new job gets a request by itself. On the job, the "Ask for review" button is replaced by whether the request went.' : 'The office asks with the "Ask for review" button on the job or in My Day. After the click the job shows "Sent ✓".', setRows([
-      ['Ask automatically when a job is entered', auto ? `On since ${s.reviewsFrom ? fmtDateShort(s.reviewsFrom) : '—'}: jobs from that day on are asked by themselves; older ones keep the button.` : 'Off.', setToggle(auto, "setReviewAuto(!this.classList.contains('on'))")],
+  const svc = svcs.includes((UI.settings || {}).reviewPreview) ? UI.settings.reviewPreview : svcs[0];
+  const pv = reviewPreviewValues(svc), mT = MSG_TEMPLATES.find(m => m.id==='reviewText'), mE = MSG_TEMPLATES.find(m => m.id==='reviewEmail');
+  const words = m => Object.fromEntries(m.fields.map(f => [f.key, msgTemplateText(f.key)]));
+  const pick = svcs.length ? `<select class="set-input" style="width:auto" onchange="setReviewPreviewService(this.value)">${svcs.map(d => `<option value="${esc(d)}" ${d===svc ? 'selected' : ''}>${esc(divLabel(d))}</option>`).join('')}</select>` : '';
+  const preview = `<div class="set-fields" style="display:block"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">${pick}<button type="button" class="btn small ghost" onclick="setSettingsPage('templates')">Edit the message</button></div>`
+    + (pv.hasLink ? `<div class="tpl-preview-label" style="margin-bottom:6px">Text</div>${tplPreviewHtml(mT, words(mT), pv.vars)}<div class="tpl-preview-label" style="margin:14px 0 6px">Email</div>${tplPreviewHtml(mE, words(mE), pv.vars)}`
+      : `<div class="hint">This service has no review link, so its customers can't be asked. Add the link above.</div>`) + '</div>';
+  return `<div class="set-note">${ico('alert', 16)}<span>Today the text goes through GHL and the email from info@. Once GHL is removed (after the website chat moves into the app), review requests go by email only until the business phone (Twilio) is on.</span></div>`
+    + setBlock('Asking customers', auto ? 'Each new job gets a request by itself. On the job, the "Ask for review" button is replaced by whether the request went.' : 'The office asks with the "Ask for review" button on the job or in My Day. After the click the job shows "Sent ✓".', setRows([
+      ['Ask automatically', auto ? `On since ${s.reviewsFrom ? fmtDateShort(s.reviewsFrom) : '—'}: every new job is asked by itself unless it is marked "Don't ask" (the box shows in Closings). Older jobs keep the button.` : 'Off. Nobody is asked by themselves: the office uses the "Ask for review" button. The "Don\'t ask for a review" box is hidden in Closings.', setToggle(auto, "setReviewAuto(!this.classList.contains('on'))")],
       ['Send between', 'Texts and emails only go in these hours (Sydney time).', `<span style="display:inline-flex;gap:6px;align-items:center">${hourSel('sendFrom', c.sendFrom, 0, 23)}<span class="hint">to</span>${hourSel('sendUntil', c.sendUntil, 1, 24)}</span>`],
       ['A request made outside those hours goes at', 'The next morning, or later the same day if it is still early.', hourSel('morning', c.morning, c.sendFrom, c.sendUntil - 1)],
       ["Don't ask the same customer again within", 'Counts all their jobs. 0 asks every job.', num('askAgainMonths', c.askAgainMonths, 0, 36, 'months')],
@@ -13102,9 +13674,10 @@ function renderReviewsPage(s){
       ['…until', 'After this the reminder is no longer offered.', num('remindWithinDays', c.remindWithinDays, 1, 120, 'days after')],
     ]))
     + setBlock('Review link and thank-you line, for each service', 'The link opens the review form on that service\'s Google profile. The line goes in the text and the email, after "thanks for having us!". Empty = the original.', `<div class="review-links">${linkRows}</div>`)
+    + setBlock('What the customer gets', 'Example: Sarah, a job by Guy today. The words come from Message templates; the link and thank-you line are the service\'s (above).', preview)
     + setBlock('Who left a review', '', setRows([
       ['Marked on each job', 'The nightly review check ticks the customers it finds on Google. Anyone can also mark it on the job ("Left a review?") or in the job\'s Review taken field.', ''],
-      ['Never ask customers marked "Don\'t ask"', 'Set on the job.', pill('good', 'Always')],
+      ['Never ask customers marked "Don\'t ask"', 'Set on the job, or with the box in Closings while asking is automatic. Customers marked before stay marked, whichever way they are asked.', pill('good', 'Always')],
     ]));
 }
 function setReviewCfg(key, value){
@@ -13120,6 +13693,8 @@ function setReviewCfg(key, value){
   const label = { sendFrom: 'send from', sendUntil: 'send until', morning: 'late requests go at', askAgainMonths: "don't ask again within (months)", remindAfterDays: 'offer "Ask again" from (days)', remindWithinDays: 'offer "Ask again" until (days)' }[key] || key;
   catalogSave('reviews', next, `${label}: ${n}`);
 }
+// Which service the message preview shows. Only the page's own state: nothing is saved.
+function setReviewPreviewService(v){ (UI.settings || (UI.settings = {})).reviewPreview = v; render(); }
 function setReviewLink(key, field, value){
   const c = catalogObject('reviews'), links = { ...(c.links || {}) }, v = String(value || '').trim();
   if (field==='link' && v && !/^https:\/\/\S+$/.test(v)) { showToast('The link has to start with https://', { kind: 'warn' }); render(); return; }
@@ -13136,7 +13711,7 @@ function setReviewAuto(on){
     render();
   };
   if (!on) { go(); return; }
-  confirmAction(`From today, every new job gets a Google review request by itself: a text and an email, between ${c.sendFrom}:00 and ${c.sendUntil}:00. Jobs from before today keep the "Ask for review" button. Turn it on?`, go, { danger: false, title: 'Ask for reviews automatically', confirmLabel: 'Turn on' });
+  confirmAction(`From today, every new job gets a Google review request by itself: a text and an email, between ${c.sendFrom}:00 and ${c.sendUntil}:00. The "Don't ask for a review" box shows in Closings while it is on. Jobs from before today keep the "Ask for review" button. Turn it on?`, go, { danger: false, title: 'Ask for reviews automatically', confirmLabel: 'Turn on' });
 }
 // The numbers behind the notifications (Ofek 13 Oct): set here, read by the push function (catalog.notify.rules). "Unpaid"
 // follows "Flag a job as unpaid after" in Tax and payments, so the two never disagree.
@@ -13149,14 +13724,14 @@ function notifyRulesApp(){
 function notifyEvents(){
   const R = notifyRulesApp();
   return [['newLead', 'A new lead comes in', true], ['leadWaiting', `A new lead nobody has picked up for ${R.waitMinutes} minutes (${R.from}:00–${R.until}:00)`, true], ['missedCall', 'A missed call (once the business phone is on)', true],
-    ['unpaid', `A job turns ${R.unpaidDays} days unpaid`, false], ['docExpiry', `An employee document expires within ${R.docDays} days`, false]];
+    ['unpaid', `A job turns ${R.unpaidDays} days unpaid`, false], ['docExpiry', `An employee document or the business insurance expires within ${R.docDays} days`, false]];
 }
 function renderNotificationsPage(){
   const N = catalogObject('notify'), R = notifyRulesApp(), invOn = !(N.invoice && N.invoice.on === false);
   const hour = h => h===0 ? '12 am' : h < 12 ? h + ' am' : h===12 ? '12 pm' : h===24 ? 'midnight' : (h - 12) + ' pm';
   const hourSel = (key, val, lo, hi) => `<select class="set-input" style="width:118px" onchange="setNotifyRule('${key}', this.value)">${Array.from({ length: hi - lo + 1 }, (_, i) => lo + i).map(h => `<option value="${h}" ${h===val ? 'selected' : ''}>${hour(h)}</option>`).join('')}</select>`;
   const num = (key, val, lo, hi, unit) => `<span class="set-num"><input type="number" min="${lo}" max="${hi}" value="${val}" onchange="setNotifyRule('${key}', this.value)"><span>${unit}</span></span>`;
-  return phoneNotificationsBar()
+  return phoneNotificationsBar('settings')
     + setBlock('What sends a notification', 'To the owners\' phones; tick "Office" to send it to the office assistant and the managers too. Checked every 10 minutes; each piece of news is sent once.', `<div class="table-wrap set-table"><table><thead><tr><th>When</th><th>Phone</th><th>Office</th></tr></thead><tbody>
       <tr><td>A technician sends his commission invoice</td><td>${setToggle(invOn, `setNotify('invoice','on',!this.classList.contains('on'))`)}</td><td></td></tr>
       ${notifyEvents().map(([k, label, office]) => { const x = N[k] || {}; return `<tr><td>${esc(label)}</td><td>${setToggle(!!x.on, `setNotify('${k}','on',!this.classList.contains('on'))`)}</td><td>${office ? `<input type="checkbox" ${x.office ? 'checked' : ''} ${x.on ? '' : 'disabled'} aria-label="Office too" onchange="setNotify('${k}','office',this.checked)">` : ''}</td></tr>`; }).join('')}
@@ -13165,7 +13740,7 @@ function renderNotificationsPage(){
     + setBlock('The numbers', 'Used by the notifications above.', setRows([
       ['A new lead counts as waiting after', 'Nobody opened, called or moved it.', num('waitMinutes', R.waitMinutes, 5, 240, 'minutes')],
       ['Waiting-lead notifications only between', 'Sydney time.', `<span style="display:inline-flex;gap:6px;align-items:center">${hourSel('from', R.from, 0, 23)}<span class="hint">and</span>${hourSel('until', R.until, 1, 24)}</span>`],
-      ['Warn about an employee document', 'Before it expires.', num('docDays', R.docDays, 1, 180, 'days before')],
+      ['Warn about a document or insurance', 'Before it expires.', num('docDays', R.docDays, 1, 180, 'days before')],
       ['A job counts as unpaid after', 'The same setting as in Tax and payments.', `<button class="btn small ghost" onclick="setSettingsPage('money')">${R.unpaidDays} days · change</button>`],
     ]));
 }
@@ -13190,7 +13765,15 @@ function renderConnectionsPage(s){
     const p = tone===null ? meta : `${pill(tone==='good' ? 'good' : tone==='warn' ? 'warn' : 'bad', tone==='good' ? 'Working' : tone==='warn' ? 'Late' : 'Not updating')}`;
     return `<div class="conn-card"><div class="conn-top"><span class="conn-logo" style="background:${bg}">${logo}</span><b>${esc(name)}</b>${p}</div><p>${esc(desc)}</p><span class="conn-meta">${iso ? 'Updated ' + esc(freshAgo(iso)) : iso===null ? 'No update yet' : ''}</span></div>`;
   };
-  return setBlock('Connected services', '', `<div class="conn-grid">
+  // Lead sources added as "connected" (Ofek 13 Oct): how many leads each has brought, and until the first one, how to connect it.
+  const guide = (UI.settings || {}).guide;
+  const conn = catalogShown('sources').filter(x => x.kind==='connected' && x.active!==false).sort((a, b) => (b.key===guide) - (a.key===guide));
+  const connBlock = !conn.length ? '' : setBlock('Connected lead sources', 'Sources whose leads should arrive by themselves.', conn.map(x => {
+    const st = sourceLeadStats(x.key, STATE.data.contacts);
+    return setRows([[esc(x.label), st.count ? `Last lead ${fmtDateShort(st.last)}` : 'No lead from it yet', st.count ? pill('good', `${st.count} lead${st.count===1 ? '' : 's'}`) : pill('warn', 'Waiting for the first lead')]])
+      + (st.count ? '' : `<div class="set-note" style="margin:0 20px 14px">${ico('link', 16)}<div><b>How to connect ${esc(x.label)}</b><ol>${sourceSetupSteps(x.label).map(t => `<li>${esc(t)}</li>`).join('')}</ol></div></div>`);
+  }).join(''));
+  return connBlock + setBlock('Connected services', '', `<div class="conn-grid">
       ${card('G', '#4285f4', 'Google Ads', 'Spend, clicks and calls, and which keyword brought each job.', F.google ?? null, 26, 50)}
       ${card('f', '#1877f2', 'Meta Ads', 'Spend and leads from Facebook and Instagram.', F.meta ?? null, 26, 50)}
       ${card('☎', '#34a853', 'Google Ads calls', 'Calls from the ads, every night.', F.calls ?? null, 26, 50)}
@@ -13211,21 +13794,13 @@ function renderSecurityPage(){
       ['Sign out of every device', 'Your account on every phone and computer, including this one.', `<button class="btn small danger" onclick="signOutEverywhere()">Sign out everywhere</button>`],
       ['Sign in with Google', AUTH_PROVIDERS && AUTH_PROVIDERS.google ? 'On: the sign-in page offers "Continue with Google". Only people who already have an account here get in.' : 'Free. It is switched on in Supabase with a Google key; once it is, the sign-in page offers it by itself.', AUTH_PROVIDERS && AUTH_PROVIDERS.google ? pill('good', 'On') : pill('neutral', 'Off')],
       ['Two-step sign-in for your account', MFA.factors===null ? 'Checking…' : MFA.factors.some(x => x.status==='verified') ? 'On: you give a code from your authenticator app when you sign in.' : 'A 6-digit code from an authenticator app on your phone, as well as the password.', MFA.factors===null ? '' : MFA.factors.some(x => x.status==='verified') ? `${pill('good', 'On')} <button class="btn small ghost danger" onclick="turnOffMfa()">Turn off</button>` : `<button class="btn small primary" onclick="startMfaEnroll()">Turn on</button>`],
-      ...(me && me.role==='owner' ? [['Require it for owners and managers', 'Until they set it up, they see a reminder at the top of every page.', setToggle(!!catalogObject('security').requireMfa, "setRequireMfa(!this.classList.contains('on'))")]] : []),
-      ['The office logs out by itself at', `If Ron forgets to log out, the day is closed at this time (the shift ends at 17:30) and he is told the next morning.`, `<input type="time" class="set-input" style="width:130px" value="${esc(autoLogoutTime())}" onchange="setAutoLogout(this.value)">`],
+      ['The office assistant\'s automatic log-out', 'Set for each person in their card under People: when they are logged out, and the end time recorded if they forgot.', `<button class="btn small" onclick="setSettingsPage('people')">Open People</button>`],
     ]))
     + (me && me.role==='owner' ? setBlock('Showing the app to someone', '', setRows([
-      ['Presentation mode', 'Money shows changed and nothing can be saved.', `<button class="btn small" onclick="togglePresentationMode()">${PRESENT ? 'Turn off' : 'Turn on'}</button>`],
+      ['Presentation mode', `Money shows changed and nothing can be saved.${PRESENT ? ' On now: nothing in the menu shows it, so turn it off here (signing out turns it off too).' : ''}`, `<button class="btn small" onclick="togglePresentationMode()">${PRESENT ? 'Turn off' : 'Turn on'}</button>`],
       ['View the app as someone else', 'See exactly what Ron or a technician sees.', `<button class="btn small" onclick="openViewAsModal()">Choose a person</button>`],
     ])) : '');
 }
-function autoLogoutTime(){ const t = catalogObject('myday').autoLogout; return /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(t || '') ? t : '20:00'; }
-function setAutoLogout(v){
-  if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(v || '')) { showToast('Pick a time', { kind: 'warn' }); render(); return; }
-  if (v < '17:30') { showToast('Pick a time after 17:30, when the shift ends', { kind: 'warn' }); render(); return; }
-  const m = catalogObject('myday'); m.autoLogout = v; catalogSave('myday', m, `the office logs out by itself at ${v}`);
-}
-function setRequireMfa(on){ const x = catalogObject('security'); x.requireMfa = !!on; catalogSave('security', x, `two-step sign-in ${on ? 'required' : 'no longer required'} for owners and managers`); }
 function signOutEverywhere(){
   confirmAction('Sign out of every device, including this one?', async () => {
     try { await sb.auth.signOut({ scope: 'global' }); } catch (e) {}
@@ -13283,7 +13858,25 @@ function filterSettingsNav(q){
    Stored in settings.phone_routing and read by the `voice` function on every call: the office assistant on shift → their
    browser phone → the backup phone(s) set for that service during the backup hours → voicemail + text. The menu a new
    caller hears, the ring times and the backup people are all here; the spoken words are in Message templates. */
-const PHONE_DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const PHONE_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const PHONE_BACKUP_DAY = { on: true, from: '08:00', to: '20:00' };
+// Backup hours per weekday (Ofek 13 Oct), like the office hours: { days: { 0..6: { on, from, to } } }. Saved before that as
+// one range for the ticked days ({ from, to, days: [0..6] }); both are read with the voice function's rules (backupDay):
+// nothing saved = every day 08:00–20:00, a day missing from the per-day shape is on 08:00–20:00, no days ticked = no backup.
+function phoneBackupHours(R){
+  const h = R && R.backupHours, days = {};
+  for (let d = 0; d < 7; d++) {
+    if (!h) days[d] = { ...PHONE_BACKUP_DAY };
+    else if (typeof h!=='object') days[d] = { on: false, from: '08:00', to: '20:00' };
+    else if (Array.isArray(h.days)) days[d] = { on: h.days.map(Number).includes(d), from: String(h.from || ''), to: String(h.to || '') };
+    else if (h.days && typeof h.days==='object') { const x = { ...PHONE_BACKUP_DAY, ...(h.days[d] || {}) }; days[d] = { on: !!x.on, from: String(x.from || ''), to: String(x.to || '') }; }
+    else days[d] = { on: false, from: String(h.from || '08:00'), to: String(h.to || '20:00') };
+  }
+  return { days };
+}
+// A backup day the voice function can use (backupDay there): both times real and the end after the start. An empty or odd
+// time must not pass: hhmmToMins gives null for it, and null < a number is true in JS.
+function phoneBackupDayOk(x){ const f = hhmmToMins(x && x.from), t = hhmmToMins(x && x.to); return f!==null && t!==null && f < t; }
 // Nothing saved = the original menu, word for word ("For air conditioning, press 1. For chimney, press 2. …").
 const PHONE_MENU_DEFAULT = [{ key:'Aircon', say:'air conditioning' }, { key:'Chimney', say:'chimney' }, { key:'Pressure Washing', say:'pressure washing' }];
 // The same rules as the voice function (menuOf / menuText): rows with a service and words, at most 9 (one key each).
@@ -13314,13 +13907,58 @@ function phonePretty(v){
 function sydneyToday(){ return new Intl.DateTimeFormat('en-CA', { timeZone:'Australia/Sydney' }).format(new Date()); }
 function onShiftToday(p){ return !!(p && p.onDuty && p.onDutyDate === sydneyToday()); }
 function phoneRoutingCopy(){ return JSON.parse(JSON.stringify((STATE.data.settings && STATE.data.settings.phoneRouting) || {})); }
-function savePhoneRouting(R, logText){
+function savePhoneRouting(R, logText, toast){
   if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
   db.settings.update({ phoneRouting: R });
   logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', logText);
-  showToast('Phone setting saved'); render();
+  showToast(toast || 'Phone setting saved'); render();
 }
 function phonePersonName(R, k){ return ((R.people || {})[k] || {}).name || k; }
+// The backup phone that is this signed-in owner or manager (Ofek 13 Oct), for the switch in their sidebar. Profiles have no
+// phone, so: a backup phone with their full name; else the one whose mobile is the phone on their employee card; else a
+// backup phone named with just their first name ("Noam" for Noam Gal), when no other profile or employee of any role has
+// that first name. A backup phone with a different full name ("Omri Levi" for Omri Cohen) never matches. One clear match
+// only, never a guess: nobody can flip someone else's phone.
+function phonePersonKeyFor(R, profile, employees, profiles){
+  if (!profile || !(profile.role==='owner' || profile.role==='manager')) return null;
+  const people = (R && R.people) || {}, keys = Object.keys(people).filter(k => people[k] && typeof people[k]==='object');
+  const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const full = norm(profile.fullName), first = full.split(' ')[0];
+  if (!full) return null;
+  const one = l => l.length===1 ? l[0] : null, nameOf = k => norm(people[k].name || k);
+  const byFull = keys.filter(k => nameOf(k)===full);
+  if (byFull.length) return one(byFull);
+  const emp = (employees || []).find(e => e && norm(e.name)===full), tel = emp ? phoneE164(emp.phone) : '';
+  const byTel = tel ? keys.filter(k => phoneE164(people[k].mobile)===tel) : [];
+  if (byTel.length) return one(byTel);
+  const firstOf = s => norm(s).split(' ')[0];
+  const twin = (profiles || []).some(p => p && p.id!==profile.id && firstOf(p.fullName)===first)
+    || (employees || []).some(e => e && norm(e.name)!==full && firstOf(e.name)===first);
+  if (twin) return null;
+  return one(keys.filter(k => nameOf(k)===first));
+}
+// The quick switch in an owner's or manager's own sidebar (Ofek 13 Oct): their backup phone in Settings → Phone. While
+// they are not available, the voice function gives their calls to the other backup phone(s) from the next call on.
+function phoneAvailButton(profile){
+  const R = (STATE.data && STATE.data.settings && STATE.data.settings.phoneRouting) || {};
+  const k = phonePersonKeyFor(R, profile, (STATE.data && STATE.data.employees) || [], STATE.profiles || []);
+  if (!k) return '';
+  const on = R.people[k].available !== false;
+  return `<button class="btn ${on ? 'ghost' : 'primary'} small" aria-pressed="${on}" onclick="toggleMyPhoneAvailable()" title="${on ? 'Calls the office doesn\'t answer can come to you. Click if you can\'t take calls.' : 'Your calls go to the other backup phone. Click when you can take calls again.'}">${ico('phone', 14)} ${on ? 'Available for calls' : 'Not available for calls'}</button>`;
+}
+async function toggleMyPhoneAvailable(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  // The routing as saved right now, so a change made on another device in the meantime isn't overwritten.
+  const { data, error } = await sb.from('settings').select('phone_routing').eq('id', 1).maybeSingle();
+  if (error) { showToast('Not saved: ' + error.message); return; }
+  STATE.data.settings.phoneRouting = (data && data.phone_routing) || {};
+  const R = phoneRoutingCopy(), k = phonePersonKeyFor(R, getCurrentProfile(), STATE.data.employees || [], STATE.profiles || []);
+  if (!k) { showToast('You are not one of the backup phones in Settings → Phone', { kind: 'warn' }); render(); return; }
+  const on = R.people[k].available === false, name = phonePersonName(R, k);
+  R.people[k].available = on;
+  const others = Object.keys(R.people).filter(x => x!==k && R.people[x] && R.people[x].available!==false).map(x => phonePersonName(R, x));
+  savePhoneRouting(R, `${name} is now ${on ? 'available' : 'away'} for phone backup (sidebar)`, on ? 'Available for calls again' : others.length ? `Not available for calls: they go to ${others.join(' and ')}` : 'Not available for calls: with nobody else available, they go to voicemail');
+}
 function setPhonePerson(key, field, value){
   const R = phoneRoutingCopy(); R.people = R.people || {};
   if (!R.people[key]) { render(); return; }
@@ -13368,16 +14006,24 @@ function setPhoneDivision(div, value){
   R.divisions[div] = value==='all' ? Object.keys(R.people||{}) : [value];
   savePhoneRouting(R, `Calls for ${div==='Other' ? 'new callers who didn\'t choose' : divLabel(div)} now go to ${value==='all' ? 'everyone' : phonePersonName(R, value)} when the office doesn't answer`);
 }
-function setPhoneHours(field, value){
-  const R = phoneRoutingCopy(); R.backupHours = R.backupHours || { from:'08:00', to:'20:00', days:[0,1,2,3,4,5,6] };
-  if (field==='day') { const d = Number(value.day); const set = new Set(R.backupHours.days||[]); value.on ? set.add(d) : set.delete(d); R.backupHours.days = [...set].sort(); }
-  else {
+function setPhoneHours(d, field, value){
+  const R = phoneRoutingCopy(), h = phoneBackupHours(R), x = h.days[d];
+  if (!x) { render(); return; }
+  if (field==='on') {
+    x.on = !!value;
+    // A day taken over from an odd old setting gets the usual hours when it is switched on.
+    if (x.on && !phoneBackupDayOk(x)) { x.from = PHONE_BACKUP_DAY.from; x.to = PHONE_BACKUP_DAY.to; }
+  } else {
+    if (field!=='from' && field!=='to') { render(); return; }
     if (!/^\d{2}:\d{2}$/.test(value)) { render(); return; }
-    const next = { ...R.backupHours, [field]: value };
-    if (next.to <= next.from) { showToast('The end has to be after the start', { kind: 'warn' }); render(); return; }
-    R.backupHours[field] = value;
+    // The other time taken over empty or odd from old data gets the usual one, so the day is never saved half set.
+    const other = field==='from' ? 'to' : 'from', next = { ...x, [field]: value };
+    if (hhmmToMins(next[other])===null) next[other] = PHONE_BACKUP_DAY[other];
+    if (!phoneBackupDayOk(next)) { showToast('The end has to be after the start', { kind: 'warn' }); render(); return; }
+    x.from = next.from; x.to = next.to;
   }
-  savePhoneRouting(R, `Phone backup hours changed`);
+  R.backupHours = h;   // saved per day from now on (the voice function reads both shapes)
+  savePhoneRouting(R, field==='on' ? `Phone backup on ${PHONE_DAYS[d]}: ${x.on ? 'on' : 'off'}` : `Phone backup on ${PHONE_DAYS[d]}: ${x.from}–${x.to}`);
 }
 function setPhoneRing(field, value){
   const n = Number(value);
@@ -13413,7 +14059,7 @@ function movePhoneMenu(key, dir){
 }
 function setPhoneCallerId(value){
   const v = String(value || '').trim();
-  if (!phoneE164(v)) { showToast('Enter a phone number, e.g. 1300 380 090', { kind: 'warn' }); render(); return; }
+  if (!phoneE164(v)) { showToast('Enter a phone number, e.g. 1300 123 456', { kind: 'warn' }); render(); return; }
   const R = phoneRoutingCopy(); R.callerId = v; savePhoneRouting(R, `Number shown on outgoing calls changed to ${phonePretty(v)}`);
 }
 function setPhoneEnabled(on){
@@ -13424,7 +14070,7 @@ function setPhoneEnabled(on){
 }
 function renderPhoneSettings(s){
   const R = s.phoneRouting || {}, people = R.people || {}, divs = R.divisions || {};
-  const hrs = R.backupHours || { from:'08:00', to:'20:00', days:[0,1,2,3,4,5,6] };
+  const hrs = phoneBackupHours(R);
   const keys = Object.keys(people), menu = phoneMenuOf(R);
   const office = phoneRingSeconds(R.officeRingSeconds), backup = phoneRingSeconds(R.backupRingSeconds);
   const num = (field, val) => `<span class="set-num"><input type="number" min="5" max="60" value="${val}" onchange="setPhoneRing('${field}', this.value)"><span>seconds</span></span>`;
@@ -13455,8 +14101,8 @@ function renderPhoneSettings(s){
       <div class="field"><label>Mobile</label><input id="ph-new-mobile" inputmode="tel" placeholder="0412 345 678"></div>
       <div class="phone-person-ctl"><button type="button" class="btn small" onclick="addPhonePerson()">${ico('plus', 14)} Add</button></div>
     </div>`;
-  const number = R.callerId ? phonePretty(R.callerId) : 'the business number';
-  return setBlock('Business phone', `Who answers ${number}. While the office assistant is logged in (Log In on My Day), their browser phone rings first. If nobody answers there, or nobody is logged in, the call goes to the backup phone set for that service, during the backup hours. Outside them, or if nobody answers, the caller leaves a voicemail and gets a text, and the call waits on My Day to be returned.`, setRows([
+  const number = R.callerId ? phonePretty(R.callerId) : '';
+  return setBlock('Who answers the business phone', `${number ? `Calls to ${number}. ` : ''}While the office assistant is logged in (Log In on My Day), their browser phone rings first. If nobody answers there, or nobody is logged in, the call goes to the backup phone set for that service, during that day's backup hours. Outside them, or if nobody answers, the caller leaves a voicemail and gets a text, and the call waits on My Day to be returned.`, setRows([
       ['Business phone in the app', '', setToggle(!!s.phoneEnabled, "setPhoneEnabled(!this.classList.contains('on'))")],
       ['The office phone rings for', 'Before the call moves on to the backup phones.', num('officeRingSeconds', office)],
       ['The backup phones ring for', 'Before the caller is asked to leave a voicemail.', num('backupRingSeconds', backup)],
@@ -13464,13 +14110,9 @@ function renderPhoneSettings(s){
     ].concat(shiftRows)))
     + setBlock('Menu for new callers', 'A new caller hears the greeting, then this menu, and presses a key. A known customer skips it and goes straight by their service. Pressing nothing, or a key that isn\'t here, counts as a new caller who didn\'t choose.', setRows(menuRows)
       + `<div class="phone-preview"><span>Callers hear</span>"${esc(msgTemplateText('phoneGreeting'))} ${esc(phoneMenuText(menu))}"<button type="button" class="btn small ghost" onclick="setSettingsPage('templates')">Edit the spoken words</button></div>`)
-    + setBlock('When the office doesn\'t answer, the call goes to', 'During the backup hours. Someone marked Away is skipped; if everyone set for a service is away, the others get the call.', setRows(routeRows))
+    + setBlock('When the office doesn\'t answer, the call goes to', 'During that day\'s backup hours. Someone marked Away is skipped; if everyone set for a service is away, the others get the call.', setRows(routeRows))
     + setBlock('Backup phones', 'The mobiles that take calls the office doesn\'t answer. Switch someone to Away while they\'re on holiday.', `<div class="phone-people">${personRows}${addRow}</div>`)
-    + setBlock('Backup hours (Sydney time)', 'Outside these hours, a call nobody in the office answers goes straight to voicemail.', setRows([
-      ['From', '', `<input class="set-input" type="time" style="width:130px" value="${esc(hrs.from)}" onchange="setPhoneHours('from', this.value)">`],
-      ['To', '', `<input class="set-input" type="time" style="width:130px" value="${esc(hrs.to)}" onchange="setPhoneHours('to', this.value)">`],
-      ['Days', '', `<span class="check-row">${PHONE_DAYS.map((d, i) => `<label class="checkline"><input type="checkbox" ${(hrs.days||[]).includes(i) ? 'checked' : ''} onchange="setPhoneHours('day', { day:${i}, on:this.checked })"> ${d}</label>`).join('')}</span>`],
-    ]));
+    + setBlock('Backup hours (Sydney time)', 'Set for each day. Outside these hours, a call nobody in the office answers goes straight to voicemail.', `<div class="hours-list">${[1, 2, 3, 4, 5, 6, 0].map(d => { const x = hrs.days[d]; return `<div class="hours-row"><b>${PHONE_DAYS[d]}</b>${setToggle(x.on, `setPhoneHours(${d},'on',!this.classList.contains('on'))`)}<div class="hours-times">${x.on ? `<input type="time" value="${esc(x.from)}" aria-label="${PHONE_DAYS[d]} from" onchange="setPhoneHours(${d},'from',this.value)"><span>to</span><input type="time" value="${esc(x.to)}" aria-label="${PHONE_DAYS[d]} to" onchange="setPhoneHours(${d},'to',this.value)">${phoneBackupDayOk(x) ? '' : '<span class="hint" style="color:var(--bad)">Set both times: until then calls go to voicemail</span>'}` : '<span class="hint">Off: straight to voicemail</span>'}</div></div>`; }).join('')}</div>`);
 }
 // Ron's shift (My Day): while on shift, the business number rings his browser phone first. A shift ends by itself at midnight.
 async function setMyShift(on){
@@ -13967,8 +14609,8 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   // route guard — mirrors src/lib/permissions.ts + the (app)/layout.tsx guard:
   // never render a section the current profile isn't permitted to view.
   if (UI.tab==='finance') UI.tab = 'payroll';   // Financial Summary was removed (6 Oct): its technician part lives in Payroll
-  // Opened from a phone notification (?tab=payroll&week=…): go there once.
-  if (!START_LINK.used && START_LINK.tab) { START_LINK.used = true; UI.tab = START_LINK.tab; if (START_LINK.week) { UI.payroll.mode = 'week'; UI.payroll.week = START_LINK.week; } }
+  // Opened from a phone notification (?tab=payroll&week=…, ?tab=settings&page=…): go there once.
+  if (!START_LINK.used && START_LINK.tab) { START_LINK.used = true; UI.tab = START_LINK.tab; if (START_LINK.week) { UI.payroll.mode = 'week'; UI.payroll.week = START_LINK.week; } if (START_LINK.page && START_LINK.tab==='settings') UI.settings = { ...(UI.settings || {}), page: START_LINK.page, open: true }; }
   if (!UI.tab || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);
   // board guard — a technician only ever looks at his own tasks, whatever UI.tasks.board was last set to (e.g. left over
   // from another profile in this same browser tab).
@@ -13999,7 +14641,6 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   else if (UI.tab==='tasks') content.innerHTML = renderTasks(profile, data);
   else if (UI.tab==='reference') content.innerHTML = renderReference(profile, data);
   else if (UI.tab==='settings') content.innerHTML = renderSettings(profile);
-  { const r = mfaReminderHtml(); if (r) content.insertAdjacentHTML('afterbegin', r); }
   if (STATE.loadErrors && STATE.loadErrors.length) content.insertAdjacentHTML('afterbegin', `<div class="card" style="border:1px solid var(--bad);background:var(--bad-soft);margin-bottom:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Some data did not load: ${esc(STATE.loadErrors.join(', '))}.</b> What you see may be incomplete. Don't re-enter anything that looks missing.</div><button class="btn small" onclick="location.reload()">Reload</button></div>`);
   if (listScroll) listScroll();
   if (UI.tab==='dashboard' || UI.tab==='adsGoogle') { const head = content.querySelector('.page-head'); if (head) { head.insertAdjacentHTML('afterend', renderFreshness()); loadFreshness(); } }
@@ -14012,6 +14653,7 @@ function keepListScroll(){
   const saved = [];
   document.querySelectorAll('#content .pipe-col .pipe-body').forEach(b => { if (b.scrollTop) saved.push([`.pipe-col[data-status="${b.closest('.pipe-col').dataset.status}"] .pipe-body`, b.scrollTop]); });
   const inbox = document.querySelector('#content .crm-inbox-scroll'); if (inbox && inbox.scrollTop) saved.push(['.crm-inbox-scroll', inbox.scrollTop]);
+  const setNav = document.querySelector('#content .set-nav'); if (setNav && setNav.scrollTop) saved.push(['.set-nav', setNav.scrollTop]);   // the Settings menu scrolls on its own (Ofek 13 Oct)
   const pipe = document.querySelector('#content .pipeline'), left = pipe ? pipe.scrollLeft : 0;   // on a phone: the column on screen
   return saved.length || left ? () => {
     saved.forEach(([sel, top]) => { const el = document.querySelector('#content ' + sel); if (el) el.scrollTop = top; });

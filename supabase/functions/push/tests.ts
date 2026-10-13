@@ -142,6 +142,43 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   await scan(ndb, NOW + 20 * 60000);
   eq(sent.map((x) => x.msg.title), ["Waiting 45+ minutes: Sam New"], "scan with saved numbers: 50 minutes passes 45");
 
+  // A short or long week after a week-start change (14 Oct): the invoice names the real last day.
+  eq(weekText("2026-10-18", "2026-10-25"), "18–25 Oct", "weekText: an 8-day week");
+  eq(weekText("2026-10-25", "2026-11-01"), "25 Oct – 1 Nov", "weekText: an end across two months");
+  eq(weekText("2026-10-18", "x"), "18–24 Oct", "weekText: an end that is not a date is ignored");
+  eq(weekText("2026-10-18", "2026-10-10"), "18–24 Oct", "weekText: an end before the start is ignored");
+  eq(weekText("2026-10-18", "2026-11-30"), "18–24 Oct", "weekText: an end more than 13 days on is ignored");
+  sent.length = 0;
+  await handle(db, { step: "invoice", week: "2026-10-04", person: "Guy", end: "2026-10-11" }, GUY);
+  eq(sent[0] && sent[0].msg.body, "Guy sent his commission invoice for 4–11 Oct. You can pay him.", "invoice: with the week's end");
+
+  // The business's own insurance (14 Oct): within the document days, to the owners only (not the office), once.
+  const bizDb = (catalog: any) => fakeDb({
+    profiles: [OFEK, { id: "u-ron", role: "va", full_name: "Ron" }],
+    push_subscriptions: [
+      { id: "p1", user_id: "u-ofek", endpoint: "https://push/ofek", p256dh: "k", auth: "a" },
+      { id: "p2", user_id: "u-ron", endpoint: "https://push/ron", p256dh: "k", auth: "a" },
+    ],
+    settings: [{ id: 1, catalog }], employees: [], push_sent: [],
+  });
+  const bdb = bizDb({ notify: { docExpiry: { on: true, office: true } }, business: { insurance: { workers: { expiry: "2026-11-01" }, liability: { expiry: "2027-03-01" }, other: { expiry: "2026-10-20" } } } });
+  sent.length = 0;
+  await scan(bdb, NOW);
+  eq(sent.map((x) => ({ to: x.to.replace("https://push/", ""), title: x.msg.title })), [{ to: "ofek", title: "Business insurance: workers compensation expires soon" }],
+    "business insurance: owners only even with Office ticked; liability is outside 30 days; an unknown kind is ignored");
+  eq([sent[0] && sent[0].msg.body, sent[0] && sent[0].msg.url], ["On 2026-11-01. Renew it and upload the new certificate in Settings → Business details.", "https://theguysgroup.github.io/the-guys-ops-app/?tab=settings&page=profile"], "business insurance: what it says and where it opens");
+  sent.length = 0;
+  const b2 = await scan(bdb, NOW + 9 * 60000);
+  eq([b2.sent, b2.skipped > 0, sent.length], [0, true, 0], "business insurance: sent once only");
+  bdb.T.settings[0].catalog.business.insurance.workers.expiry = "2026-10-30";
+  await scan(bdb, NOW + 18 * 60000);
+  eq(sent.map((x) => x.msg.title), ["Business insurance: workers compensation expires soon"], "business insurance: a renewed expiry is news again");
+  const bizNothing = async (catalog: any, name: string) => { sent.length = 0; const r = await scan(bizDb(catalog), NOW); eq(sent.length, 0, name); return r; };
+  await bizNothing({ notify: { docExpiry: { on: true } }, business: { insurance: { workers: { expiry: "2026-10-01" } } } }, "business insurance: already expired = nothing sent");
+  await bizNothing({ notify: { docExpiry: { on: true } }, business: { insurance: { workers: { expiry: "1/11/2026" } } } }, "business insurance: a bad date = nothing sent");
+  eq((await bizNothing({ notify: { docExpiry: { on: false } }, business: { insurance: { workers: { expiry: "2026-11-01" } } } }, "business insurance: switch off = nothing sent")).off, true, "business insurance: rides on the document switch");
+  await bizNothing({ notify: { docExpiry: { on: true }, rules: { docDays: 10 } }, business: { insurance: { workers: { expiry: "2026-11-01" } } } }, "business insurance: 20 days off is outside 10 saved days");
+
   console.log(`push: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);
 })();

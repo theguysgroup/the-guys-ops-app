@@ -6,17 +6,19 @@
 //   key      → the public key a device subscribes with. The key pair is made here on first use and kept in
 //              public.app_keys, which has no access rules, so only this function (service role) can read it — no key
 //              is ever typed in by a person.
-//   invoice  → { week, person }: a technician's commission invoice for that pay week is in → every owner's devices get
-//              "you can pay <person>". Only that technician or an owner/manager may ask, and only when the invoice is
-//              really on the week's row.
+//   invoice  → { week, person, end? }: a technician's commission invoice for that pay week is in → every owner's devices
+//              get "you can pay <person>". Only that technician or an owner/manager may ask, and only when the invoice is
+//              really on the week's row. end = the week's last day (a short or long week after a week-start change).
 //   test     → the caller's own devices get a test notification (owners and managers).
 //   selftest → builds one encrypted, signed message for a made-up device without sending it, to prove the sending
 //              code works here (owners and managers).
 //   scan     → (every 10 minutes, from pg_cron; added 12 Oct) the news switched on in Settings → Notifications
 //              (settings.catalog.notify), each sent once: a new lead, a new lead still untouched after 15 minutes, a missed
-//              call, a job that has just turned 7 days unpaid, an employee document expiring within 30 days. To the owners,
-//              and to the office (VA and managers) when chosen. Anyone may call it: it only ever sends what push_sent hasn't
-//              recorded yet, and does nothing while everything is switched off.
+//              call, a job that has just turned 7 days unpaid, an employee document expiring within 30 days, and the
+//              business's own workers compensation / public liability insurance (catalog.business.insurance, owners only,
+//              added 14 Oct; it rides on the employee-document switch until the one notification engine takes it over).
+//              To the owners, and to the office (VA and managers) when chosen. Anyone may call it: it only ever sends what
+//              push_sent hasn't recorded yet, and does nothing while everything is switched off.
 // A device that the phone's push service says is gone (404 / 410) is removed.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -60,9 +62,12 @@ export async function vapidKeys(sb: any): Promise<{ publicKey: string; privateKe
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-export function weekText(week: string): string {
+// end = the week's last day when the week is not 7 days (the first week after a week-start change: 4 to 10 days). An end
+// that is not a date, not after the start or more than 13 days on is ignored (a normal 7-day week).
+export function weekText(week: string, end?: unknown): string {
   const [y, m, d] = week.split("-").map(Number);
-  const a = new Date(Date.UTC(y, m - 1, d)), b = new Date(Date.UTC(y, m - 1, d + 6));
+  const e = typeof end === "string" && /^\d{4}-\d{2}-\d{2}$/.test(end) && end > week && end <= shiftDay(week, 13) ? end.split("-").map(Number) : null;
+  const a = new Date(Date.UTC(y, m - 1, d)), b = e ? new Date(Date.UTC(e[0], e[1] - 1, e[2])) : new Date(Date.UTC(y, m - 1, d + 6));
   return a.getUTCMonth() === b.getUTCMonth()
     ? `${a.getUTCDate()}–${b.getUTCDate()} ${MONTHS[b.getUTCMonth()]}`
     : `${a.getUTCDate()} ${MONTHS[a.getUTCMonth()]} – ${b.getUTCDate()} ${MONTHS[b.getUTCMonth()]}`;
@@ -96,6 +101,7 @@ const isOffice = (me: { role?: string } | null) => !!me && (me.role === "owner" 
 // ── scan: news for the phones (Settings → Notifications) ──
 export const NOTIFY_KINDS = ["newLead", "leadWaiting", "missedCall", "unpaid", "docExpiry"];
 const DOC_LABEL: Record<string, string> = { license: "driver licence", passport: "passport", visa: "visa", heights: "working-at-heights ticket", arc: "refrigerant licence", insurance: "public liability insurance" };
+const BIZ_INSURANCE_LABEL: Record<string, string> = { workers: "workers compensation", liability: "public liability" };
 export function sydParts(ms: number) {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
   return { day: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) % 24, minute: Number(p.minute) };
@@ -158,6 +164,14 @@ export async function scan(sb: any, nowMs: number) {
         events.push({ key: `doc:${e.id}:${kind}:${exp}`, kind: "docExpiry", payload: { title: `${e.name}'s ${DOC_LABEL[kind] || kind} expires soon`, body: `On ${exp}. Ask for the new one.`, url: `${APP_URL}?tab=reference`, tag: `doc-${e.id}-${kind}` } });
       }
     }
+    // The business's own insurance (Settings → Business details), within the same number of days.
+    const ins = (st && st.catalog && st.catalog.business && st.catalog.business.insurance) || {};
+    for (const kind of Object.keys(BIZ_INSURANCE_LABEL)) {
+      const exp = ins[kind] && ins[kind].expiry;
+      if (typeof exp !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(exp)) continue;
+      if (exp < today || exp > shiftDay(today, R.docDays)) continue;
+      events.push({ key: `bizins:${kind}:${exp}`, kind: "bizInsurance", payload: { title: `Business insurance: ${BIZ_INSURANCE_LABEL[kind]} expires soon`, body: `On ${exp}. Renew it and upload the new certificate in Settings → Business details.`, url: `${APP_URL}?tab=settings&page=profile`, tag: `bizins-${kind}` } });
+    }
   }
   if (!events.length) return { ok: true, sent: 0 };
   const { data: people } = await sb.from("profiles").select("id, role");
@@ -170,7 +184,8 @@ export async function scan(sb: any, nowMs: number) {
   for (const ev of events.slice(0, 30)) {
     const { error: dup } = await sb.from("push_sent").insert({ key: ev.key });   // claimed once, ever
     if (dup) { skipped++; continue; }
-    const to = [...owners, ...(N[ev.kind] && N[ev.kind].office ? office : [])];
+    // the business insurance goes to the owners only
+    const to = [...owners, ...(ev.kind !== "bizInsurance" && N[ev.kind] && N[ev.kind].office ? office : [])];
     const r = await sendTo(sb, to, ev.payload, keys);
     sent += r.sent;
   }
@@ -217,7 +232,7 @@ export async function handle(sb: any, body: any, me: any) {
     // deno-lint-ignore no-explicit-any
     const r = await sendTo(sb, (owners || []).map((o: any) => o.id), {
       title: `Invoice in: ${person}`,
-      body: `${person} sent his commission invoice for ${weekText(week)}. You can pay him.`,
+      body: `${person} sent his commission invoice for ${weekText(week, body?.end)}. You can pay him.`,
       url: `${APP_URL}?tab=payroll&week=${week}`,
       tag: `invoice-${week}-${person}`,
     }, await vapidKeys(sb));

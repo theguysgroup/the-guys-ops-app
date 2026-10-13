@@ -3,7 +3,8 @@
 // How a call is routed (set in the app: Settings → Phone, stored in settings.phone_routing):
 //   • Ron is "on shift" (Start/End shift on his My Day; a shift only counts on the day it was started): his browser
 //     phone rings first, 20 seconds.
-//   • Not answered, or Ron is off shift: the owners are the backup during their hours (every day 08:00–20:00), split by
+//   • Not answered, or Ron is off shift: the owners are the backup during their hours (set per weekday in Settings → Phone;
+//     nothing saved = every day 08:00–20:00), split by
 //     service — aircon and chimney to Noam, pressure washing to Ofek — skipping anyone marked away (then the other one).
 //   • Nobody answers, or it's outside those hours with Ron off shift: voicemail ("office closed" after hours), a text to
 //     the caller, and a call-back item in Ron's My Day with the recording.
@@ -93,7 +94,11 @@ const hm = (s: string) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")
 
 // ── routing settings (Settings → Phone) ──
 type Person = { name: string; mobile: string; available: boolean };
-type Routing = { people: Record<string, Person>; divisions: Record<string, string[]>; backupHours: { from: string; to: string; days: number[] }; officeRingSeconds: number; backupRingSeconds: number; callerId: string; menu: { key: string; say: string }[] };
+type BackupDay = { on?: boolean; from?: string; to?: string };
+// Backup hours: per weekday since 13 Oct ({ days: { 0..6: { on, from, to } } }, Sunday = 0); before that one range for the
+// ticked days ({ from, to, days: [0..6] }).
+type BackupHours = { from?: string; to?: string; days?: number[] | Record<string, BackupDay> };
+type Routing = { people: Record<string, Person>; divisions: Record<string, string[]>; backupHours: BackupHours; officeRingSeconds: number; backupRingSeconds: number; callerId: string; menu: { key: string; say: string }[] };
 const ringSeconds = (v: unknown) => { const n = Math.round(Number(v)); return n >= 5 && n <= 60 ? n : 20; };
 // The routing and, in the same read, the words (Settings → Message templates), so a call never waits on a second query.
 // deno-lint-ignore no-explicit-any
@@ -108,9 +113,24 @@ async function routing(sb: any): Promise<Routing> {
     callerId: toE164(r.callerId) || BUSINESS_NUMBER, menu: menuOf(r),
   };
 }
+const BACKUP_DAY_DEFAULT = { on: true, from: "08:00", to: "20:00" };
+// One day's backup window in minutes, or null when there is no backup that day. Reads both shapes (see BackupHours); the
+// app reads them with the same rules (phoneBackupHours). A day missing from the per-day shape is on, 08:00–20:00.
+export function backupDay(h: BackupHours, dow: number): { from: number; to: number } | null {
+  if (!h || typeof h !== "object") return null;
+  let x: BackupDay | null = null;
+  if (Array.isArray(h.days)) x = h.days.map(Number).includes(dow) ? { on: true, from: h.from, to: h.to } : null;
+  else if (h.days && typeof h.days === "object") {
+    const d = { ...BACKUP_DAY_DEFAULT, ...((h.days as Record<string, BackupDay>)[String(dow)] || {}) };
+    x = d.on ? d : null;
+  }
+  if (!x) return null;
+  const from = hm(x.from || ""), to = hm(x.to || "");
+  return from >= 0 && to > from ? { from, to } : null;
+}
 function backupOpen(R: Routing, nowMs: number): boolean {
-  const t = sydney(nowMs), from = hm(R.backupHours.from), to = hm(R.backupHours.to);
-  return (R.backupHours.days || []).includes(t.dow) && from >= 0 && to > from && t.minutes >= from && t.minutes < to;
+  const t = sydney(nowMs), w = backupDay(R.backupHours, t.dow);
+  return !!w && t.minutes >= w.from && t.minutes < w.to;
 }
 // The owners' mobiles for a service: the ones set for it who aren't away; if all of them are away, anyone who isn't.
 function ownersFor(R: Routing, division: string): string[] {

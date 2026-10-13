@@ -91,6 +91,8 @@ function testStaticScan(){
     ok(/readOnlyReason\(\)/.test(f.text), `${f.name}() sends data to a server function and must check readOnlyReason() first`);
   }
   ok(seen.length >= 6, 'static scan found the server calls (setMyBreak, convSend, mdCloseOldDays, mdEndOfDay, askForReview, voiceFetch)', seen);
+  // Business details (14 Oct): the insurance certificate upload and the week-start change stop in a read-only mode.
+  ok(['pickBusinessCertificate', 'setWeekStart'].every(n => /readOnlyReason\(\)/.test(fnText(n))), 'business certificate upload and week start check read-only mode');
 }
 
 // ── 3. the click actions in a read-only mode ──────────────────────────────────────────────────────
@@ -118,9 +120,11 @@ function actionSandbox(){
     document: { getElementById: () => null, querySelector: () => null },
     CONV_URL: 'https://x/functions/v1/conversations', SUPABASE_URL: 'https://x', SUPABASE_ANON_KEY: 'k',
     leadStage: () => 'New', chaseTooLong: () => false, isWorkday: () => true, Promise, console,
+    // Settings → Pipeline stages: reaching any of these means the read-only check was skipped.
+    catalogList: () => { log.db.push('opened'); return []; }, stageIsBuiltin: () => { log.db.push('opened'); return true; }, openStageRemove: () => log.db.push('opened'),
   };
   vm.createContext(ctx);
-  const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'leadNotes', 'addLeadNote', 'deleteLeadNote', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'askReviewAgain', 'markReviewLeft', 'setChatAutoSms', 'setMyShift', 'storeFile', 'savePayrollInvoice'];
+  const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'leadNotes', 'addLeadNote', 'deleteLeadNote', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'askReviewAgain', 'markReviewLeft', 'setChatAutoSms', 'setMyShift', 'toggleMyPhoneAvailable', 'storeFile', 'savePayrollInvoice', 'deleteLostReason', 'moveStageLeads', 'setStageActive', 'removeStage', 'setVaShiftTime'];
   vm.runInContext(names.map(fnText).join('\n'), ctx);
   return ctx;
 }
@@ -137,6 +141,7 @@ async function testActions(){
     await run(`vaLogOut()`);
     await run(`setMyBreak(true)`);
     await run(`setMyShift(true)`);
+    await run(`toggleMyPhoneAvailable()`);
     await run(`convSend(contactById('c1'), 'sms', 'Hi', 'inbox')`);
     await run(`askForReview('j1')`);
     await run(`askReviewAgain('j1')`);
@@ -152,6 +157,13 @@ async function testActions(){
     await run(`setPaymentFollowup('j1', '2099-01-01')`);
     await run(`markReofferDone('j1')`);
     await run(`markTeamReminded('t1')`);
+    await run(`deleteLostReason('spam')`);
+    let moved = 'x';
+    try { moved = await vm.runInContext(`moveStageLeads('sx1', 'Lost', { lostReason: 'spam' }, 'delete')`, ctx); } catch (e) { moved = 'threw: ' + e.message; }
+    ok(moved === false, `${mode}: moving a stage's leads in Settings stops before any save`, moved);
+    await run(`setStageActive('Quoted', false)`);
+    await run(`removeStage('sx1')`);
+    await run(`setVaShiftTime('ron', 'logoutAt', '21:00')`);
     // A receipt or invoice picked in a form is not uploaded to file storage (the sandbox has no storage: a call would throw).
     let stored = 'x';
     try { stored = await vm.runInContext(`storeFile('job1', 'parts-receipt', 'data:image/png;base64,AAAA')`, ctx); } catch (e) { stored = 'threw: ' + e.message; }
