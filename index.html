@@ -417,6 +417,18 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .pay-tier-ctl { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pay-tier-ctl .set-num input { width: 64px; }
 @media (max-width: 760px) { .phone-person { grid-template-columns: minmax(0, 1fr); padding: 12px 14px; } .phone-preview { margin: 4px 14px 14px; } }
+.org-sugg-list { display: grid; gap: 10px; }
+.org-sugg { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px; background: var(--surface); display: grid; gap: 6px; }
+.org-sugg.closed { background: var(--surface-2); }
+.org-sugg.closed .org-sugg-head b { color: var(--ink-soft); }
+.org-sugg-head { display: flex; gap: 8px; align-items: baseline; }
+.org-sugg-head b { font-size: 14px; line-height: 1.35; }
+.org-sugg-meta { font-size: 12px; color: var(--ink-faint); display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.org-sugg-ev { font-size: 12.3px; color: var(--ink-soft); line-height: 1.45; font-variant-numeric: tabular-nums; }
+.org-sugg-do { font-size: 13.3px; line-height: 1.45; }
+.org-sugg-do span { display: block; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2px; }
+.org-sugg-gain { font-size: 12.3px; color: var(--good); }
+.org-sugg-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
 .conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; padding: 14px 20px 18px; }
 .conn-card { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 14px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
 .conn-card:hover { border-color: color-mix(in srgb, var(--primary) 30%, var(--line)); box-shadow: var(--shadow-lg); transform: translateY(-1px); }
@@ -7725,9 +7737,9 @@ function dashHeadCard(label, value, sub, accent, delta, onclick){
 // Detail pages read public.ads_stats: keyword / search-term / ad / campaign / hour / weekday / device
 // snapshots per window (30d, 90d), replaced by the ingest-ads-stats Edge Function. Loaded lazily (the table
 // is a few thousand rows, so it is paged) and only for owners/managers (RLS).
-const DASH_VIEWS = [['summary','Business summary'],['leads','Leads & Marketing'],['google','Google Ads'],['meta','Meta Ads (Facebook & Instagram)']];
+const DASH_VIEWS = [['summary','Business summary'],['leads','Leads & Marketing'],['google','Google Ads'],['meta','Meta Ads (Facebook & Instagram)'],['organic','Organic (Google search, Maps, AI)']];
 let ADS_STATS = { rows:null, insights:[], loading:false, err:'', tried:false };
-function setDashboardView(v){ UI.dashboard.view = v; if (v!=='summary' && !ADS_STATS.rows) loadAdsStats(); else render(); }
+function setDashboardView(v){ UI.dashboard.view = v; if (v==='organic') { if (!ORG.rows && !ORG.loading) loadOrganic(); else render(); return; } if (v!=='summary' && !ADS_STATS.rows) loadAdsStats(); else render(); }
 function setDashAdsWin(w){ UI.dashboard.adsWin = w; render(); }
 async function loadAdsStats(){
   if (ADS_STATS.loading) return;
@@ -8081,6 +8093,224 @@ function renderDashGoogle(profile, data, standalone){
     <div style="margin:10px 0 0">${chipsRow.replace('Show the last','Period')}</div>
     ${legend}${fix}${block}${scale}${addT}${lowq}
     ${campSec}${adSec}${hourSec}${daySec}${devSec}</div>`;
+  return head + summary + details;
+}
+
+// ── Organic board (Ofek 13 Oct, plan E) ───────────────────────────────────────────────────────────────
+// Free traffic in one place: Google search (Search Console), the website's visits (GA4), the weekly map-pack / AI / reviews
+// check, and the leads, jobs and revenue that came from them (the CRM). The point is the suggestions list: what to improve
+// next, each with the numbers behind it. The nightly run writes suggestions by fixed rules (ingest-ads-stats
+// organicFindings) and the SEO chat adds its own; the owner marks each one. Owners and managers only (RLS).
+let ORG = { rows:null, sugg:[], insight:null, loading:false, err:'', tried:false, filter:'open', all:{} };
+// Usual click rate by average position (the same table as expectedCtr in the ingest-ads-stats function; a test keeps them equal).
+const ORG_CTR = [[1.5, 0.25], [2.5, 0.14], [3.5, 0.1], [4.5, 0.07], [5.5, 0.055], [6.5, 0.045], [7.5, 0.035], [8.5, 0.03], [10.5, 0.025], [15.5, 0.012], [20.5, 0.008]];
+function orgExpectedCtr(pos){ for (const [p, c] of ORG_CTR) if (pos <= p) return c; return 0.004; }
+// Leads saved as Organic web before click ids were stored (10 Sep) include Google ad leads: not comparable before then.
+const ORG_CLEAN_FROM = '2026-09-10';
+const ORG_GBP_PATH = '/services/air-conditioning-cleaning/';
+const ORG_WINS = [['7d', '7 days'], ['28d', '28 days']];
+function orgPath(u){ const p = String(u || '').replace(/^[a-z]+:\/\/[^/]+/i, '').replace(/[?#].*$/, '') || '/'; return p.endsWith('/') ? p : p + '/'; }
+async function loadOrganic(){
+  if (ORG.loading) return;
+  ORG.loading = true; ORG.tried = true; render();
+  try {
+    let all = [], from = 0;
+    for (;;) {
+      const { data, error } = await sb.from('organic_stats').select('*').order('id', { ascending:true }).range(from, from + 999);
+      if (error) throw error;
+      all = all.concat(data || []);
+      if (!data || data.length < 1000) break;
+      from += 1000;
+    }
+    const s = await sb.from('seo_suggestions').select('*').order('created_at', { ascending:false }).limit(2000);
+    if (s.error) throw s.error;
+    const ins = await sb.from('ads_insights').select('*').eq('platform', 'organic').order('day', { ascending:false }).limit(1);
+    ORG.rows = all.map(r => ({ ...r, clicks: Number(r.clicks) || 0, impressions: Number(r.impressions) || 0, position: r.position==null ? null : Number(r.position), extra: r.extra || {} }));
+    ORG.sugg = s.data || []; ORG.insight = (ins.data || [])[0] || null; ORG.err = '';
+  } catch (e) {
+    const m = String((e && e.message) || e);
+    ORG.err = /does not exist|schema cache/i.test(m) ? 'setup' : m;
+  }
+  ORG.loading = false; render();
+}
+function orgGet(src, win, level){ return (ORG.rows || []).filter(r => r.source===src && r.win===win && r.level===level); }
+// The CRM side for a window ending yesterday: leads whose source is Organic web or Google Maps, and the jobs linked to them.
+function orgWindow(win, end){ const n = win==='7d' ? 7 : 28; const e = end || shiftDays(todayStr(new Date()), -1); return { start: shiftDays(e, -(n - 1)), end: e, prevStart: shiftDays(e, -(2 * n - 1)), prevEnd: shiftDays(e, -n) }; }
+function orgIsLead(c){ return c.source==='Organic' || c.source==='Google Maps'; }
+function orgLeadStats(contacts, jobs, start, end, linkFn){
+  const leads = (contacts || []).filter(c => orgIsLead(c)).filter(c => { const d = localDay(c.createdAt); return d >= start && d <= end; });
+  const ids = new Set(leads.map(c => c.id)), groups = {}, services = {};
+  const g = (m, k) => (m[k] ??= { key:k, leads:[], jobs:[], revenue:0 });
+  leads.forEach(c => { g(groups, c.source==='Google Maps' ? 'Google Maps · ' + (c.subSource || 'profile not set') : 'Organic web').leads.push(c); g(services, c.division || 'Other').leads.push(c); });
+  const jobsOut = [];
+  (jobs || []).forEach(j => { const c = linkFn(j); if (!c || !ids.has(c.id)) return; jobsOut.push(j);
+    const a = g(groups, c.source==='Google Maps' ? 'Google Maps · ' + (c.subSource || 'profile not set') : 'Organic web'), b = g(services, c.division || 'Other');
+    a.jobs.push(j); b.jobs.push(j); a.revenue += Number(j.amount) || 0; b.revenue += Number(j.amount) || 0; });
+  return { leads, jobs: jobsOut, revenue: jobsOut.reduce((t, j) => t + (Number(j.amount) || 0), 0), web: leads.filter(c => c.source==='Organic').length, maps: leads.filter(c => c.source==='Google Maps').length,
+    groups: Object.values(groups).sort((a, b) => (a.key==='Organic web' ? -1 : b.key==='Organic web' ? 1 : b.leads.length - a.leads.length)), services: Object.values(services).sort((a, b) => b.leads.length - a.leads.length) };
+}
+// The weekly map / AI / reviews check: the newest week and the one before.
+function orgWeeks(){ const ws = [...new Set((ORG.rows || []).filter(r => r.source==='serp').map(r => r.win))].sort(); return { wk: ws[ws.length - 1] || null, pwk: ws[ws.length - 2] || null }; }
+const ORG_EV_LABEL = { window:'Period', impressions:'Shown', clicks:'Clicks', ctr_pct:'Click rate %', usual_ctr_pct:'Usual click rate %', position:'Position', prev_clicks:'Clicks before', prev_impressions:'Shown before', prev_position:'Position before', why:'Why', week:'Week of', previous_week:'Week before', newest_review_days:'Newest review (days)', reviews:'Reviews', rating:'Rating', runs:'AI answers checked', mentioned:'Named us', named_instead:'Named instead', note:'Note', competitors:'Competitors', top:'Map pack' };
+function orgEvidenceText(ev){
+  return Object.entries(ev || {}).filter(([, v]) => v!==null && v!==undefined && v!=='' && !(Array.isArray(v) && !v.length)).map(([k, v]) => {
+    let val = v;
+    if (Array.isArray(v)) val = v.map(x => x && typeof x==='object' ? (x.name || '') + (x.reviews!=null ? ' ' + x.reviews : '') : String(x)).filter(Boolean).join(', ');
+    else if (typeof v==='number') val = v.toLocaleString('en-AU');
+    else if (typeof v==='object') val = JSON.stringify(v);
+    return `${ORG_EV_LABEL[k] || k}: ${val}`;
+  }).join(' · ');
+}
+const ORG_PRI_TONE = { P0:'bad', P1:'warn', P2:'neutral', P3:'neutral' };
+const ORG_STATUS = { open:['Open', 'neutral'], in_progress:['Being worked on', 'warn'], done:['Done', 'good'], rejected:['Not relevant', 'neutral'], resolved:['Solved by itself', 'good'] };
+const ORG_SOURCE = { nightly:'Nightly check', seo_chat:'SEO chat', owner:'Owner' };
+const ORG_SURFACE = { search:'Google search', local:'Google Maps', ai:'AI answers', site:'Website', content:'Content', tech:'Technical' };
+async function setSuggestionStatus(id, status){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const s = ORG.sugg.find(x => x.id===id); if (!s) return;
+  const go = async () => {
+    const me = getCurrentProfile()?.fullName || 'Unknown', now = new Date().toISOString();
+    const closed = status==='done' || status==='rejected';
+    const patch = { status, updated_at: now, done_at: closed ? now : null, done_by: closed ? me : null };
+    const { error } = await sb.from('seo_suggestions').update(patch).eq('id', id);
+    if (error) { showToast('Not saved: ' + error.message, { kind:'error' }); return; }
+    Object.assign(s, patch);
+    showToast(({ in_progress:'Marked as being worked on', done:'Marked done', rejected:'Marked not relevant', open:'Opened again' })[status] || 'Saved');
+    render();
+  };
+  if (status==='rejected') confirmAction(`Mark "${s.title}" as not relevant? The nightly check won't raise it again.`, go, { danger:false, title:'Not relevant?', confirmLabel:'Not relevant' });
+  else go();
+}
+function setOrgFilter(f){ ORG.filter = f; render(); }
+function setOrgWin(w){ UI.dashboard.orgWin = w; render(); }
+function orgToggleAll(id){ ORG.all[id] = !ORG.all[id]; render(); }
+function renderDashOrganic(profile, data){
+  const head = `<div class="page-head"><div><h1 class="page-title">Organic</h1><div class="page-sub">Google search, Google Maps and AI answers · free traffic · refreshed every night · owners only</div></div><div>${dashViewSelect()}</div></div>`;
+  if (ORG.loading && !ORG.rows) return head + `<div role="status" aria-label="Loading organic data">${skeletonBlock(5)}</div>`;
+  if (ORG.err==='setup') return head + `<div class="card">The organic data is being set up. It appears here after the first nightly run.</div>`;
+  if (ORG.err) return head + `<div class="card" style="border-inline-start:4px solid var(--bad)">Could not load the data: ${esc(ORG.err)}</div>`;
+  if (!ORG.rows) return head + `<div role="status" aria-label="Loading organic data">${skeletonBlock(5)}</div>`;
+  const win = UI.dashboard.orgWin==='7d' ? '7d' : '28d', W = win==='7d' ? '7 days' : '28 days', prevWin = 'prev' + win;
+  const f1 = x => Math.round(x * 10) / 10, pctx = x => x==null ? '—' : f1(x * 100) + '%';
+  const delta = (now, before) => { if (before==null) return ''; const d = now - before; if (!d) return ' <span style="color:var(--ink-faint)">(same)</span>'; return ` <span style="color:var(--${d > 0 ? 'good' : 'bad'})">(${d > 0 ? '+' : ''}${d.toLocaleString('en-AU')})</span>`; };
+  const gscAt = (ORG.rows || []).filter(r => r.source==='gsc').reduce((m, r) => r.updated_at > m ? r.updated_at : m, '');
+  const stamp = gscAt ? new Date(gscAt).toLocaleString('en-AU', { timeZone:'Australia/Sydney', dateStyle:'medium', timeStyle:'short' }) : '—';
+  const stale = gscAt && Date.now() - new Date(gscAt).getTime() > 36 * 3600 * 1000;
+  const T = orgGet('gsc', win, 'total')[0], TP = orgGet('gsc', prevWin, 'total')[0];
+  const gscRange = T && T.extra && T.extra.start ? ` (${fmtDateShort(T.extra.start)}–${fmtDateShort(T.extra.end)})` : '';
+  const winChips = ORG_WINS.map(([w, l]) => `<button class="week-chip ${win===w ? 'active' : ''}" onclick="setOrgWin('${w}')">${l}</button>`).join('');
+  const chipsRow = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px"><b style="margin-inline-end:4px">Show the last</b>${winChips}<span style="color:var(--ink-faint);font-size:12px;margin-inline-start:8px">Search data synced ${esc(stamp)} · Google's search numbers run about 3 days behind</span>${stale ? `<div style="flex-basis:100%;font-size:12px;color:var(--warn)">⚠ Last night's update did not refresh the search numbers; they are from ${esc(stamp)}.</div>` : ''}</div>`;
+  // CRM
+  const OW = orgWindow(win);
+  const now = orgLeadStats(data.contacts, data.jobs, OW.start, OW.end, contactForJob), before = orgLeadStats(data.contacts, data.jobs, OW.prevStart, OW.prevEnd, contactForJob);
+  const prevOk = OW.prevStart >= ORG_CLEAN_FROM;
+  // GA4
+  const ch = (w, name) => orgGet('ga4', w, 'channel').find(r => r.item===name);
+  const os = ch(win, 'Organic Search'), osP = ch(prevWin, 'Organic Search'), ai = ch(win, 'AI Assistant');
+  // Weekly
+  const { wk, pwk } = orgWeeks();
+  const lp = wk ? orgGet('serp', wk, 'localpack') : [], aim = wk ? orgGet('serp', wk, 'aimode') : [];
+  const first = lp.filter(r => r.position===1).length;
+  const open = ORG.sugg.filter(s => s.status==='open' || s.status==='in_progress');
+  const pc = p => open.filter(s => s.priority===p).length;
+  const card = (label, val, sub, colour, target) => `<button onclick="adsGo('${target}')" class="card stat-card" style="--stat-accent:${colour};text-align:start;cursor:pointer;font:inherit;color:inherit;width:100%"><div class="stat-label">${esc(label)}</div><div class="stat-value">${val}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:4px;line-height:1.35">${sub}</div><div style="font-size:11.5px;color:var(--primary);margin-top:6px">See below ↓</div></button>`;
+  const cards = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+    ${card('Suggestions to do', String(open.length), open.length ? `${pc('P0') ? `<b style="color:var(--bad)">${pc('P0')} urgent</b> · ` : ''}${pc('P1')} important · ${pc('P2') + pc('P3')} when there is time` : 'Nothing open.', 'var(--primary)', 'org-suggestions')}
+    ${card('Leads from organic', String(now.leads.length) + (prevOk ? delta(now.leads.length, before.leads.length) : ''), `Organic web ${now.web} · Google Maps ${now.maps}${prevOk ? '' : ` · the ${W} before are not comparable (before ${fmtDateShort(ORG_CLEAN_FROM)})`}`, 'var(--good)', 'org-leads')}
+    ${card('Jobs from those leads', String(now.jobs.length), `${fmtMoney(round2(now.revenue))} revenue excl. GST`, 'var(--good)', 'org-leads')}
+    ${card('Clicks from Google search', T ? T.clicks.toLocaleString('en-AU') + (TP ? delta(T.clicks, TP.clicks) : '') : '—', T ? `Shown ${T.impressions.toLocaleString('en-AU')} times · average position ${T.position ?? '—'}${gscRange}` : 'No search data yet.', 'var(--primary-teal)', 'org-search')}
+    ${card('Website visits from search', os ? os.clicks.toLocaleString('en-AU') + (osP ? delta(os.clicks, osP.clicks) : '') : '—', os ? `AI assistants sent ${ai ? ai.clicks : 0} more` : 'No visit data yet.', 'var(--primary-teal)', 'org-site')}
+    ${card('Google Maps: #1', lp.length ? `${first} of ${lp.length}` : '—', lp.length ? `searches checked in Sydney (week of ${fmtDateShort(wk)})` : 'Comes with the weekly check (Mondays).', 'var(--warn)', 'org-local')}
+    ${card('AI answers name us', aim.length ? `${aim.reduce((t, r) => t + r.clicks, 0)} of ${aim.reduce((t, r) => t + r.impressions, 0)}` : '—', aim.length ? 'Google AI Mode answers checked this week' : 'Comes with the weekly check (Mondays).', 'var(--warn)', 'org-local')}
+  </div>`;
+  const ins = ORG.insight;
+  const TONES = [['bad','Problems','var(--bad)'],['warn','Watch','var(--warn)'],['good','Going well','var(--good)']];
+  const opinion = ins ? `<div class="card" style="margin-top:18px;padding:18px 20px">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0;font-size:16px">Assessment</h3><span style="font-size:12px;color:var(--ink-faint)">Covers up to ${esc(fmtDateShort(ins.day))}${ins.created_at ? ' · written ' + esc(new Date(ins.created_at).toLocaleString('en-AU',{ timeZone:'Australia/Sydney', day:'numeric', month:'short', hour:'numeric', minute:'2-digit' })) : ''} · looks at 7 and 28 days and the weekly check together</span></div>
+      <p style="margin:10px 0 14px;line-height:1.5;font-size:14.5px">${esc(presentText(ins.summary))}</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">${TONES.map(([tone,label,colour]) => { const pts=(ins.points||[]).filter(p=>(p.tone||'warn')===tone); if(!pts.length) return ''; return `<div style="border-radius:10px;padding:12px 14px;background:color-mix(in srgb, ${colour} 12%, transparent);border:1px solid color-mix(in srgb, ${colour} 40%, transparent)"><div style="font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${colour};margin-bottom:8px">${label}</div><ul style="margin:0;padding:0;list-style:none;display:grid;gap:10px">${pts.map(pt=>`<li style="line-height:1.4;font-size:13.5px">${esc(presentText(pt.text))}${pt.target && /^org-[a-z-]+$/.test(pt.target) ? ` <a href="#" onclick="adsGo('${pt.target}');return false" style="color:var(--primary);white-space:nowrap">See →</a>` : ''}</li>`).join('')}</ul></div>`; }).join('')}</div></div>`
+    : `<div class="card" style="margin-top:18px;color:var(--ink-soft)"><b>Assessment</b> — a short written assessment appears here after the next nightly run.</div>`;
+  // ── Suggestions (the point of the page) ──
+  const PRI = ['P0', 'P1', 'P2', 'P3'];
+  const shown = ORG.sugg.filter(s => ORG.filter==='all' ? true : ORG.filter==='done' ? !(s.status==='open' || s.status==='in_progress') : (s.status==='open' || s.status==='in_progress'))
+    .sort((a, b) => PRI.indexOf(a.priority) - PRI.indexOf(b.priority) || String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)));
+  const fChip = (f, l, n) => `<button class="week-chip ${ORG.filter===f ? 'active' : ''}" onclick="setOrgFilter('${f}')">${l} (${n})</button>`;
+  const doneCount = ORG.sugg.length - open.length;
+  const sRow = s => { const st = ORG_STATUS[s.status] || [s.status, 'neutral'], isOpen = s.status==='open' || s.status==='in_progress';
+    const id = esc(jsStr(s.id));
+    const btns = isOpen ? `${s.status==='open' ? `<button class="btn small" onclick="setSuggestionStatus('${id}','in_progress')">Working on it</button>` : ''}<button class="btn small primary" onclick="setSuggestionStatus('${id}','done')">Done</button><button class="btn small ghost" onclick="setSuggestionStatus('${id}','rejected')">Not relevant</button>`
+      : `<button class="btn small ghost" onclick="setSuggestionStatus('${id}','open')">Open again</button>`;
+    return `<div class="org-sugg${isOpen ? '' : ' closed'}">
+      <div class="org-sugg-head"><span class="pill ${ORG_PRI_TONE[s.priority] || 'neutral'}">${esc(s.priority)}</span><b>${esc(s.title)}</b></div>
+      <div class="org-sugg-meta">${esc(ORG_SURFACE[s.surface] || s.surface || '')}${s.page_url ? ' · ' + esc(orgPath(s.page_url)) : ''} · ${esc(ORG_SOURCE[s.source] || s.source || '')} · since ${esc(fmtDateShort(localDay(s.created_at)))} · <span class="pill ${st[1]}">${esc(st[0])}</span>${s.done_by && !isOpen ? ` by ${esc(s.done_by)}` : ''}</div>
+      ${Object.keys(s.evidence || {}).length ? `<div class="org-sugg-ev">${esc(orgEvidenceText(s.evidence))}</div>` : ''}
+      ${s.proposed_action ? `<div class="org-sugg-do"><span>What to do</span>${esc(s.proposed_action)}</div>` : ''}
+      ${s.expected_impact ? `<div class="org-sugg-gain">${esc(s.expected_impact)}</div>` : ''}
+      ${s.note ? `<div class="org-sugg-ev">${esc(s.note)}</div>` : ''}
+      <div class="org-sugg-btns">${btns}</div>
+    </div>`; };
+  const SL = ORG.all['org-suggestions'] ? shown : shown.slice(0, 12);
+  const suggestions = `<section id="org-suggestions" class="card" style="margin-top:18px;scroll-margin-top:12px">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0;font-size:16px">What to improve</h3><span style="font-size:12px;color:var(--ink-faint)">The nightly check adds a suggestion only when the numbers show it; the SEO chat adds its own and marks what it did.</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">${fChip('open', 'To do', open.length)}${fChip('done', 'Closed', doneCount)}${fChip('all', 'All', ORG.sugg.length)}</div>
+      ${SL.length ? `<div class="org-sugg-list">${SL.map(sRow).join('')}</div>` : `<div style="color:var(--ink-soft)">${ORG.filter==='open' ? 'Nothing to do right now ✓' : 'Nothing here yet.'}</div>`}
+      ${shown.length > 12 ? `<div style="margin-top:10px"><button class="btn" onclick="orgToggleAll('org-suggestions')">${ORG.all['org-suggestions'] ? 'Show the first 12' : 'Show all ' + shown.length}</button></div>` : ''}
+    </section>`;
+  // ── Leads, jobs, revenue ──
+  const gRows = now.groups.map(x => adsRow([`<b>${esc(x.key)}</b>`, adsNum(drill(String(x.leads.length), `Organic leads: ${x.key}`, 'leads', x.leads)), adsNum(x.jobs.length ? drill(String(x.jobs.length), `Jobs from organic leads: ${x.key}`, 'jobs', x.jobs) : '0'), adsNum(x.leads.length ? Math.round(x.jobs.length / x.leads.length * 100) + '%' : '—'), adsNum(x.revenue ? fmtMoney(round2(x.revenue)) : '—')]));
+  const svRows = now.services.map(x => adsRow([esc(divLabel(x.key)), adsNum(String(x.leads.length)), adsNum(String(x.jobs.length)), adsNum(x.revenue ? fmtMoney(round2(x.revenue)) : '—')]));
+  const leadsSec = `<section id="org-leads" style="margin-top:22px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:15px;margin:0 0 4px">Leads, jobs and revenue from organic</h3><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:10px">Last ${W} (${fmtDateShort(OW.start)}–${fmtDateShort(OW.end)}): leads in the app whose source is Organic web or Google Maps, and the jobs linked to them. Revenue excl. GST. Organic web can still include a few Google ad leads from iPhones (Google does not pass a click id we can store).</div>
+    ${adsTable(['Where from',{t:'Leads',num:1},{t:'Jobs',num:1},{t:'Became a job',num:1},{t:'Revenue',num:1}], gRows, 'No organic leads in this period.')}
+    ${svRows.length ? `<div style="margin-top:10px">${adsTable(['Service',{t:'Leads',num:1},{t:'Jobs',num:1},{t:'Revenue',num:1}], svRows)}</div>` : ''}</section>`;
+  // ── Google search ──
+  const tRow = (label, r) => adsRow([`<b>${label}</b>`, adsNum(r ? r.clicks.toLocaleString('en-AU') : '—'), adsNum(r ? r.impressions.toLocaleString('en-AU') : '—'), adsNum(r && r.impressions ? pctx(r.clicks / r.impressions) : '—'), adsNum(r && r.position!=null ? String(r.position) : '—')]);
+  const totTable = adsTable(['Period',{t:'Clicks',num:1},{t:'Shown',num:1},{t:'Click rate',num:1},{t:'Avg position',num:1}], [tRow('Last 7 days', orgGet('gsc','7d','total')[0]), tRow('The 7 days before', orgGet('gsc','prev7d','total')[0]), tRow('Last 28 days', orgGet('gsc','28d','total')[0]), tRow('The 28 days before', orgGet('gsc','prev28d','total')[0])]);
+  const days = orgGet('gsc', '90d', 'date').sort((a, b) => String(a.item).localeCompare(String(b.item)));
+  const chart = days.length > 7 ? (() => { const max = Math.max(1, ...days.map(d => d.clicks)), Wd = 600, H = 90, bw = Wd / days.length;
+    return `<figure style="margin:12px 0 0"><svg viewBox="0 0 ${Wd} ${H + 16}" style="width:100%;height:auto;display:block" role="img" aria-label="Clicks from Google search per day, last 90 days">${days.map((d, i) => { const h = Math.max(1, d.clicks / max * H); return `<rect x="${(i * bw).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${Math.max(1, bw - 1).toFixed(1)}" height="${h.toFixed(1)}" fill="var(--primary-teal)"><title>${esc(fmtDateShort(d.item))}: ${d.clicks} clicks</title></rect>`; }).join('')}<line x1="0" y1="${H}" x2="${Wd}" y2="${H}" stroke="var(--line)"/><text x="0" y="${H + 13}" font-size="10" fill="var(--ink-faint)">${esc(fmtDateShort(days[0].item))}</text><text x="${Wd}" y="${H + 13}" font-size="10" fill="var(--ink-faint)" text-anchor="end">${esc(fmtDateShort(days[days.length - 1].item))}</text><text x="0" y="10" font-size="10" fill="var(--ink-faint)">${max} a day</text></svg><figcaption style="font-size:12px;color:var(--ink-faint)">Clicks from Google search per day, last 90 days.</figcaption></figure>`; })() : '';
+  const prevP = new Map(orgGet('gsc', prevWin, 'page').map(r => [orgPath(r.item), r]));
+  const flag = (clicks, imp, pos) => { if (pos==null || imp < 100) return ''; const rate = clicks / imp, exp = orgExpectedCtr(pos);
+    return rate < exp * 0.4 && pos <= 10 ? ` <span class="pill bad" style="margin-inline-start:4px">Few clicks for its position</span>` : pos > 7.5 && pos <= 20 ? ` <span class="pill warn" style="margin-inline-start:4px">Close to page 1</span>` : ''; };
+  const pages = orgGet('gsc', win, 'page').sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions);
+  const pRow = r => { const p = prevP.get(orgPath(r.item)), path = orgPath(r.item); return adsRow([`<b>${esc(path)}</b>${path===ORG_GBP_PATH ? `<div style="color:var(--ink-faint);font-size:11.5px">The aircon map profile links here, so its position includes the map pack.</div>` : ''}${flag(r.clicks, r.impressions, r.position)}`,
+    adsNum(r.clicks.toLocaleString('en-AU') + (p ? delta(r.clicks, p.clicks) : '')), adsNum(r.impressions.toLocaleString('en-AU')), adsNum(r.impressions ? pctx(r.clicks / r.impressions) : '—'), adsNum(r.position!=null ? pctx(orgExpectedCtr(r.position)) : '—'), adsNum(r.position!=null ? String(r.position) + (p && p.position!=null ? ` <span style="color:var(--ink-faint)">(${p.position})</span>` : '') : '—')]); };
+  const PL = ORG.all['org-pages'] ? pages : pages.slice(0, 25);
+  const pagesSec = `<section id="org-pages" style="margin-top:22px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:15px;margin:0 0 4px">Pages in Google search</h3><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:10px">Last ${W}${gscRange}, searches from Australia. In brackets: the ${W} before. "Usual" is the normal click rate for that position, so a page far below it is losing clicks it should get. The ad landing pages are left out.</div>${adsTable(['Page',{t:'Clicks',num:1},{t:'Shown',num:1},{t:'Click rate',num:1},{t:'Usual',num:1},{t:'Position',num:1}], PL.map(pRow), 'No search data for this period yet.')}${pages.length > 25 ? `<div style="margin-top:8px"><button class="btn" onclick="orgToggleAll('org-pages')">${ORG.all['org-pages'] ? 'Show the top 25' : 'Show all ' + pages.length}</button></div>` : ''}</section>`;
+  const queries = orgGet('gsc', '28d', 'query').filter(r => r.impressions >= 20).sort((a, b) => b.impressions - a.impressions);
+  const qRow = r => adsRow([`<b>${esc(r.item)}</b>${flag(r.clicks, r.impressions, r.position)}`, adsNum(r.clicks.toLocaleString('en-AU')), adsNum(r.impressions.toLocaleString('en-AU')), adsNum(r.impressions ? pctx(r.clicks / r.impressions) : '—'), adsNum(r.position!=null ? pctx(orgExpectedCtr(r.position)) : '—'), adsNum(r.position!=null ? String(r.position) : '—')]);
+  const QL = ORG.all['org-queries'] ? queries : queries.slice(0, 25);
+  const queriesSec = `<section id="org-queries" style="margin-top:22px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:15px;margin:0 0 4px">What people searched</h3><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:10px">Last 28 days, searches shown at least 20 times, most shown first. Average position mixes the map pack, AI answers and the normal results, so check a search on a phone before acting on it.</div>${adsTable(['Search',{t:'Clicks',num:1},{t:'Shown',num:1},{t:'Click rate',num:1},{t:'Usual',num:1},{t:'Position',num:1}], QL.map(qRow), 'No search data yet.')}${queries.length > 25 ? `<div style="margin-top:8px"><button class="btn" onclick="orgToggleAll('org-queries')">${ORG.all['org-queries'] ? 'Show the top 25' : 'Show all ' + queries.length}</button></div>` : ''}</section>`;
+  const searchSec = `<section id="org-search" style="margin-top:22px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:15px;margin:0 0 8px">Google search, all periods</h3>${totTable}${chart}</section>`;
+  // ── Map pack, AI answers, reviews (weekly) ──
+  const localSec = (() => {
+    if (!wk) return `<section id="org-local" class="card" style="margin-top:22px;scroll-margin-top:12px"><h3 style="margin:0 0 4px;font-size:16px">Google Maps and AI answers</h3><div style="color:var(--ink-soft)">The weekly check (Mondays) fills this in: our place in the map pack by search and area, whether Google's AI answers name us, and reviews against competitors.</div></section>`;
+    const regions = [...new Set(lp.map(r => r.item2))], qs = [...new Set(lp.map(r => r.item))];
+    const prevLp = new Map((pwk ? orgGet('serp', pwk, 'localpack') : []).map(r => [r.item + '|' + r.item2, r.position]));
+    const cell = (q, rg) => { const r = lp.find(x => x.item===q && x.item2===rg); if (!r) return '<span style="color:var(--ink-faint)">—</span>'; const was = prevLp.get(q + '|' + rg);
+      const txt = r.position==null ? '<span class="pill bad">Not in pack</span>' : `<b style="color:var(--${r.position===1 ? 'good' : r.position<=3 ? 'warn' : 'bad'})">#${r.position}</b>`;
+      const ch_ = was===undefined ? '' : was==null && r.position!=null ? ' <span style="color:var(--good)">new</span>' : was!=null && r.position==null ? '' : was!=null && r.position!=null && was!==r.position ? ` <span style="color:var(--${r.position < was ? 'good' : 'bad'})">(${r.position < was ? '↑' : '↓'} from #${was})</span>` : '';
+      return txt + ch_; };
+    const grid = `<div class="table-wrap"><table><thead><tr><th>Search</th>${regions.map(rg => `<th>${esc(rg)}</th>`).join('')}</tr></thead><tbody>${qs.map(q => `<tr><td><b>${esc(q)}</b></td>${regions.map(rg => `<td>${cell(q, rg)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    const aiRows = aim.map(r => adsRow([`<b>${esc(r.item)}</b>`, adsNum(`<b style="color:var(--${r.clicks ? 'good' : 'bad'})">${r.clicks} of ${r.impressions}</b>`), esc((r.extra.named || []).slice(0, 6).join(', ') || '—')]));
+    const rv = orgGet('serp', wk, 'reviews'), us = rv.find(r => r.item2==='us'), comp = rv.filter(r => r.item2==='competitor').sort((a, b) => b.clicks - a.clicks);
+    const nd = us && us.extra ? Number(us.extra.newestDays) : NaN;
+    const rvBlock = us ? `<div class="grid-3" style="margin-top:12px"><div class="mini-tile"><div class="stat-label">Our reviews (aircon profile)</div><div class="stat-value">${us.clicks}</div><div class="stat-sub">rating ${us.position ?? '—'} · ${us.extra.thisWeek ?? '—'} new this week</div></div>
+        <div class="mini-tile"><div class="stat-label">Newest review</div><div class="stat-value" style="color:var(--${nd >= 21 ? 'bad' : nd >= 14 ? 'warn' : 'good'})">${Number.isFinite(nd) ? nd + ' days' : '—'}</div><div class="stat-sub">${nd >= 14 ? 'After about 3 weeks without a new review the map position usually slips.' : 'ago'}</div></div>
+        <div class="mini-tile"><div class="stat-label">Competitors</div><div class="stat-sub" style="margin-top:6px;line-height:1.5">${comp.map(c => `${esc(c.item)} <b>${c.clicks}</b>`).join('<br>') || '—'}</div></div></div>` : '';
+    return `<section id="org-local" class="card" style="margin-top:22px;scroll-margin-top:12px"><h3 style="margin:0 0 4px;font-size:16px">Google Maps and AI answers</h3><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:12px">Weekly check of ${esc(fmtDateShort(wk))}${pwk ? `, compared with ${esc(fmtDateShort(pwk))}` : ''}: our aircon profile's place in the map pack, searched from each area on a phone. AI answers vary from run to run, so they are shown as "named us X of Y".</div>${grid}
+      ${aiRows.length ? `<div style="margin-top:12px">${adsTable(['AI Mode question',{t:'Named us',num:1},'Named instead'], aiRows)}</div>` : ''}${rvBlock}</section>`;
+  })();
+  // ── Website visits (GA4) ──
+  const chans = orgGet('ga4', win, 'channel').sort((a, b) => b.clicks - a.clicks), chP = new Map(orgGet('ga4', prevWin, 'channel').map(r => [r.item, r]));
+  const ORGANIC_CH = new Set(['Organic Search', 'AI Assistant', 'Organic Maps', 'Organic Social', 'Organic Video', 'Organic Shopping', 'Referral', 'Direct']);
+  const cRows = chans.filter(r => ORGANIC_CH.has(r.item)).map(r => { const p = chP.get(r.item); return adsRow([`<b>${esc(r.item)}</b>`, adsNum(r.clicks.toLocaleString('en-AU') + (p ? delta(r.clicks, p.clicks) : '')), adsNum(String(Number(r.extra.engaged) || 0)), adsNum(String(Math.round(Number(r.extra.keyEvents) || 0)))]); });
+  const lands = orgGet('ga4', win, 'landing').sort((a, b) => b.clicks - a.clicks).slice(0, 15);
+  const lRows = lands.map(r => adsRow([`<b>${esc(orgPath(r.item))}</b>`, adsNum(r.clicks.toLocaleString('en-AU')), adsNum(String(Number(r.extra.engaged) || 0)), adsNum(String(Math.round(Number(r.extra.keyEvents) || 0)))]));
+  const aiSrc = orgGet('ga4', win, 'ai_source').sort((a, b) => b.clicks - a.clicks);
+  const siteSec = `<section id="org-site" style="margin-top:22px;scroll-margin-top:12px;border-radius:var(--radius)"><h3 style="font-size:15px;margin:0 0 4px">Website visits</h3><div style="color:var(--ink-soft);font-size:12.5px;margin-bottom:10px">Last ${W}, from Google Analytics. Key actions are the forms, chats and calls the site counts. Paid channels are on the ads pages.${aiSrc.length ? ` AI assistants that sent visits: ${aiSrc.map(r => `${esc(r.item)} ${r.clicks}`).join(', ')}.` : ''}</div>${adsTable(['Channel',{t:'Visits',num:1},{t:'Engaged',num:1},{t:'Key actions',num:1}], cRows, 'No visit data yet.')}
+    ${lRows.length ? `<h4 style="font-size:13.5px;margin:14px 0 6px">Pages people landed on from Google search</h4>${adsTable(['Page',{t:'Visits',num:1},{t:'Engaged',num:1},{t:'Key actions',num:1}], lRows)}` : ''}</section>`;
+  const summary = `<h2 style="font-size:18px;margin:0 0 12px">Summary</h2>${chipsRow}${cards}${opinion}${suggestions}${leadsSec}`;
+  const details = `<div style="margin-top:40px;padding-top:20px;border-top:1px solid var(--line)"><h2 style="font-size:18px;margin:0 0 4px">Details</h2><div style="color:var(--ink-soft);font-size:12.5px">The numbers behind the summary. Read-only: nothing here changes the website or the Google profiles.</div>${localSec}${searchSec}${pagesSec}${queriesSec}${siteSec}</div>`;
   return head + summary + details;
 }
 
@@ -13148,7 +13378,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   else if (UI.tab==='closings') content.innerHTML = renderClosings(profile, data);
   else if (UI.tab==='jobs') content.innerHTML = renderJobs(profile, data);
   else if (UI.tab==='adsGoogle') { if (!ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = renderDashGoogle(profile, data, true); }
-  else if (UI.tab==='dashboard') { if ((UI.dashboard.view==='google' || UI.dashboard.view==='meta') && !ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); content.innerHTML = UI.dashboard.view==='google' ? renderDashGoogle(profile, data) : UI.dashboard.view==='meta' ? renderDashMeta(profile, data) : UI.dashboard.view==='leads' ? renderCrmOverview(profile, data) : renderDashboard(profile, data); }
+  else if (UI.tab==='dashboard') { if ((UI.dashboard.view==='google' || UI.dashboard.view==='meta') && !ADS_STATS.rows && !ADS_STATS.loading && !ADS_STATS.tried) setTimeout(loadAdsStats, 0); if (UI.dashboard.view==='organic' && !ORG.rows && !ORG.loading && !ORG.tried) setTimeout(loadOrganic, 0); content.innerHTML = UI.dashboard.view==='google' ? renderDashGoogle(profile, data) : UI.dashboard.view==='meta' ? renderDashMeta(profile, data) : UI.dashboard.view==='organic' ? renderDashOrganic(profile, data) : UI.dashboard.view==='leads' ? renderCrmOverview(profile, data) : renderDashboard(profile, data); }
   else if (UI.tab==='payroll') content.innerHTML = renderPayroll(profile, data);
   else if (UI.tab==='outstanding') content.innerHTML = renderOutstanding(profile, data);
   else if (UI.tab==='myDay') content.innerHTML = renderMyDay(profile, data);

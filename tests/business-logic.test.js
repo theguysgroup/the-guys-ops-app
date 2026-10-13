@@ -53,6 +53,7 @@ const DECLS = [
   'esc', 'quoteDueReason', 'shiftDaySummary', 'latePaymentDue', 'latePaymentDoneToday', 'reofferDue', 'assigneeNames', 'taskAssignedTo', 'myTaskDue', 'teamTaskDue', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
   // message templates (12 Oct)
   'TECH_JOB_TYPES', 'jobTypesForTech',
+  'ORG_CTR', 'orgExpectedCtr', 'ORG_CLEAN_FROM', 'orgPath', 'orgWindow', 'orgIsLead', 'orgLeadStats', 'ORG_EV_LABEL', 'orgEvidenceText',
   'PHONE_MENU_DEFAULT', 'phoneMenuOf', 'phoneMenuText', 'phoneSayDefault', 'phoneRingSeconds', 'phoneE164', 'phonePretty',
   'REVIEW_TPL_VARS', 'CHAT_TPL_VARS', 'MSG_TEMPLATES', 'msgTemplateText', 'fillTemplate', 'SMS_GSM', 'smsParts', 'templateProblems',
   // review requests (5 Oct)
@@ -1088,6 +1089,27 @@ function testMessageTemplates(sb){
     sb.templateProblems(m('missedCall'), { missedCall: 'Hi {first_name}' }).length, sb.templateProblems(m('chatOpen'), { chatOpen: ' ' }).length],
     [0, 1, 1, 1], 'templates: the original saves; no review link, a blank it can\'t fill, or empty words are stopped');
 }
+function testOrganicBoard(sb){
+  console.log('\nOrganic board (13 Oct)');
+  const fn = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'ingest-ads-stats', 'index.ts'), 'utf8');
+  const table = JSON.parse(fn.match(/const t: \[number, number\]\[\] = (\[.*?\]);/)[1]);
+  assertEqual(sb.ORG_CTR, table, 'organic: the usual click rate by position is the same table as the nightly rules');
+  assertEqual([sb.orgExpectedCtr(1), sb.orgExpectedCtr(13.8), sb.orgExpectedCtr(30)], [0.25, 0.012, 0.004], 'organic: usual click rate by position');
+  assertEqual(sb.ORG_CLEAN_FROM, fn.match(/ORGANIC_CLEAN_FROM = "([\d-]+)"/)[1], 'organic: the app and the nightly digest use the same "comparable from" day');
+  assertEqual([sb.orgPath('https://theguyservicegroup.com/services/air-conditioning-cleaning'), sb.orgPath('/x/?a=1')], ['/services/air-conditioning-cleaning/', '/x/'], 'organic: pages compare by path');
+  assertEqual(sb.orgWindow('28d', '2026-10-12'), { start:'2026-09-15', end:'2026-10-12', prevStart:'2026-08-18', prevEnd:'2026-09-14' }, 'organic: a 28-day window and the 28 days before');
+  assertEqual(sb.orgWindow('7d', '2026-10-12'), { start:'2026-10-06', end:'2026-10-12', prevStart:'2026-09-29', prevEnd:'2026-10-05' }, 'organic: a 7-day window and the 7 days before');
+  const contacts = [
+    { id:'a', source:'Organic', createdAt:'2026-10-10T02:00:00Z', division:'Aircon' },
+    { id:'b', source:'Google Maps', subSource:'Chimney profile', createdAt:'2026-10-01T02:00:00Z', division:'Chimney' },
+    { id:'c', source:'Google Ads', createdAt:'2026-10-02T02:00:00Z', division:'Aircon' },
+    { id:'d', source:'Google Maps', subSource:'', createdAt:'2026-09-01T02:00:00Z', division:'Aircon' } ];
+  const jobs = [{ id:1, contactId:'b', amount:400 }, { id:2, contactId:'c', amount:300 }, { id:3, contactId:'b', amount:100 }];
+  const st = sb.orgLeadStats(contacts, jobs, '2026-09-15', '2026-10-12', j => contacts.find(c => c.id===j.contactId));
+  assertEqual([st.leads.map(c => c.id), st.web, st.maps, st.jobs.length, st.revenue, st.groups.map(g => [g.key, g.leads.length, g.jobs.length, g.revenue]), st.services.map(g => [g.key, g.leads.length])],
+    [['a','b'], 1, 1, 2, 500, [['Organic web', 1, 0, 0], ['Google Maps · Chimney profile', 1, 2, 500]], [['Aircon', 1], ['Chimney', 1]]], 'organic: leads from Organic web and Google Maps in the window, their jobs and revenue, by profile and service (Google Ads leads and older leads left out)');
+  assertEqual(sb.orgEvidenceText({ window:'28 days', impressions:2000, ctr_pct:0.2, note:'', named_instead:['A Grade','Coolguys'], competitors:[{ name:'Eco Aircon', reviews:181 }] }), 'Period: 28 days · Shown: 2,000 · Click rate %: 0.2 · Named instead: A Grade, Coolguys · Competitors: Eco Aircon 181', 'organic: the evidence line, in words');
+}
 function testPaySettings(sb){
   console.log('\nPay settings (Settings, 13 Oct)');
   const log = (date, hours, n) => ({ date, hours, bookingsAircon: n, bookingsChimney: 0, bookingsPw: 0 });
@@ -1186,6 +1208,7 @@ testMessageTemplates(loadSandbox());
 testReviewSettings(loadSandbox());
 testPhoneSettings(loadSandbox());
 testPaySettings(loadSandbox());
+testOrganicBoard(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
