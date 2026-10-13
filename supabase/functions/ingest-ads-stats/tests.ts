@@ -115,6 +115,16 @@ function eq(got: unknown, want: unknown, name: string) {
     lines.findIndex((l) => l.includes("P0 [being worked on] Reviews")) < lines.findIndex((l) => l.includes("P2 AI")), has("PREVIOUS ORGANIC ASSESSMENT: none")],
     [true, true, true, true, true, true, true, true, true, true], "the digest: search, visits, leads by window (the old window flagged), map pack vs the week before, reviews, suggestions by priority");
 
+  // Bigger tables are read page by page: Supabase gives at most 1,000 rows per request (3,048 organic rows on 13 Oct).
+  const table = Array.from({ length: 2048 }, (_, i) => ({ id: i }));
+  const calls: string[] = [];
+  const all = await readAll(async (a: number, b: number) => { calls.push(a + "-" + b); return { data: table.slice(a, Math.min(b + 1, a + 1000)), error: null }; });
+  eq([all.error, all.data.length, all.data[2047].id, calls], [null, 2048, 2047, ["0-999", "1000-1999", "2000-2999"]], "all 2,048 rows read in three pages");
+  const exact = await readAll(async (a: number, b: number) => ({ data: table.slice(0, 1000).slice(a, b + 1), error: null }));
+  eq(exact.data.length, 1000, "exactly 1,000 rows: one more (empty) page, nothing lost");
+  const bad = await readAll(async (a: number) => a === 0 ? { data: table.slice(0, 1000), error: null } : { data: null, error: { message: "boom" } });
+  eq([bad.error?.message, bad.data.length], ["boom", 1000], "an error on a later page is reported, not hidden");
+
   console.log(`ingest-ads-stats: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);
 })();

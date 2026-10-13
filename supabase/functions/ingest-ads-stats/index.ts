@@ -16,6 +16,20 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
+// Supabase returns at most 1,000 rows per request whatever the limit says, so a table that can be bigger is read page
+// by page (in a fixed order, so no row is skipped or read twice).
+// deno-lint-ignore no-explicit-any
+export async function readAll(page: (from: number, to: number) => any, size = 1000, max = 50000): Promise<{ data: any[]; error: any }> {
+  // deno-lint-ignore no-explicit-any
+  const out: any[] = [];
+  for (let from = 0; from < max; from += size) {
+    const r = await page(from, from + size - 1);
+    if (r.error) return { data: out, error: r.error };
+    out.push(...(r.data || []));
+    if ((r.data || []).length < size) break;
+  }
+  return { data: out, error: null };
+}
 
 // --- upload ticket (13 Oct, Ofek approved) ---
 // The nightly routine pulls Google Ads data inside an outside sandbox (Composio). The shared key must never go there
@@ -453,7 +467,7 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) return json({ ok: false, error: "invalid end" }, 400);
     const sbd = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
     const sinceIso = new Date(Date.now() - 110 * 86400000).toISOString();
-    const cq = await sbd.from("contacts").select("id,created_at,source,utm_source,utm_content,fbclid").gte("created_at", sinceIso).limit(5000);
+    const cq = await readAll((a, b) => sbd.from("contacts").select("id,created_at,source,utm_source,utm_content,fbclid").gte("created_at", sinceIso).order("id").range(a, b));
     if (cq.error) return json({ ok: false, error: "contacts failed: " + cq.error.message }, 500);
     const sydDay = (ts: string) => new Date(ts).toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" });
     // One definition everywhere (app Dashboard, Meta board, this digest): a Meta lead is a lead whose source is Meta Ads.
@@ -461,9 +475,13 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     const isMeta = (c: any) => c.source === "Meta Ads";
     const leads = (cq.data || []).filter(isMeta).map((c: any) => ({ id: c.id, day: sydDay(c.created_at), adset: c.utm_content || "" }));
     const ids = leads.map((l: any) => l.id);
-    const jq = ids.length ? await sbd.from("jobs").select("contact_id,amount").in("contact_id", ids) : { data: [], error: null };
     const rev: Record<string, { jobs: number; revenue: number }> = {};
-    for (const j of (jq.data || []) as any[]) { const r = (rev[j.contact_id] ||= { jobs: 0, revenue: 0 }); r.jobs++; r.revenue += Number(j.amount) || 0; }
+    // In groups of 200: a long list of ids in one request is too long for the address and fails.
+    for (let i = 0; i < ids.length; i += 200) {
+      const jq = await sbd.from("jobs").select("contact_id,amount").in("contact_id", ids.slice(i, i + 200));
+      if (jq.error) return json({ ok: false, error: "jobs failed: " + jq.error.message }, 500);
+      for (const j of (jq.data || []) as any[]) { const r = (rev[j.contact_id] ||= { jobs: 0, revenue: 0 }); r.jobs++; r.revenue += Number(j.amount) || 0; }
+    }
     const out: Record<string, any> = {};
     for (const [w, n] of [["7d", 7], ["14d", 14], ["30d", 30], ["60d", 60], ["90d", 90]] as [string, number][]) {
       const endD = new Date(end + "T00:00:00Z"); const startD = new Date(endD.getTime() - (n - 1) * 86400000);
@@ -506,7 +524,7 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     const list = Array.isArray(body.leadEmails.emails) ? body.leadEmails.emails.slice(0, 500) : null;
     if (!list) return json({ ok: false, error: "invalid leadEmails.emails: expected an array" }, 400);
     const sbl = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
-    const cq = await sbl.from("contacts").select("id,phone,email,source,created_at").order("created_at", { ascending: false }).limit(20000);
+    const cq = await readAll((a, b) => sbl.from("contacts").select("id,phone,email,source,created_at").order("created_at", { ascending: false }).order("id").range(a, b));
     if (cq.error) return json({ ok: false, error: "contacts failed: " + cq.error.message }, 500);
     const from = /^\d{4}-\d{2}-\d{2}$/.test(String(body.leadEmails.from || "")) ? String(body.leadEmails.from) : "";
     const res = checkLeadEmails(list, cq.data || [], sydneyDay(Date.now()), from);
@@ -552,11 +570,11 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
   }
   if (what === "organicFindings" || what === "organicDigest") {
     const sbf = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
-    const rq = await sbf.from("organic_stats").select("source,win,level,item,item2,clicks,impressions,position,extra").limit(20000);
+    const rq = await readAll((a, b) => sbf.from("organic_stats").select("source,win,level,item,item2,clicks,impressions,position,extra").order("id").range(a, b));
     if (rq.error) return json({ ok: false, error: "organic rows failed: " + rq.error.message }, 500);
     // deno-lint-ignore no-explicit-any
     const rows = (rq.data || []).map((r: any) => ({ ...r, clicks: Number(r.clicks) || 0, impressions: Number(r.impressions) || 0, position: r.position === null ? null : Number(r.position), extra: r.extra || {} }));
-    const sq = await sbf.from("seo_suggestions").select("id,source,dedupe_key,issue_type,status,priority,title").limit(5000);
+    const sq = await readAll((a, b) => sbf.from("seo_suggestions").select("id,source,dedupe_key,issue_type,status,priority,title").order("id").range(a, b));
     if (sq.error) return json({ ok: false, error: "suggestions failed: " + sq.error.message }, 500);
     if (what === "organicFindings") {
       const { findings, evaluated } = organicFindings(rows);
@@ -569,7 +587,7 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     const end = String(body.organicDigest.end || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) return json({ ok: false, error: "invalid end" }, 400);
     const since = new Date(Date.parse(end + "T00:00:00Z") - 60 * 86400000).toISOString();
-    const cq = await sbf.from("contacts").select("id,created_at,source,sub_source,division").in("source", ["Organic", "Google Maps"]).gte("created_at", since).limit(5000);
+    const cq = await readAll((a, b) => sbf.from("contacts").select("id,created_at,source,sub_source,division").in("source", ["Organic", "Google Maps"]).gte("created_at", since).order("id").range(a, b));
     if (cq.error) return json({ ok: false, error: "contacts failed: " + cq.error.message }, 500);
     // deno-lint-ignore no-explicit-any
     const leads = (cq.data || []).map((c: any) => ({ id: c.id, day: sydneyDay(c.created_at), source: c.source, sub_source: c.sub_source || "", division: c.division || "" }));
