@@ -2,9 +2,12 @@
 //
 // POST with the signed-in owner's token, { step, ... }:
 //   list   → everyone with a profile: email, when they last signed in, whether they have joined, whether access is off.
-//   invite → { email, fullName, role, technicianName? } → makes the account and its profile (with that role's pages from
-//            Settings → Roles and access) and returns a one-time link to join. The owner sends it (WhatsApp, text or email):
-//            Supabase's own email only reaches the project's team, so the app never relies on it.
+//   invite → { email, fullName, role, technicianName?, permissions? } → makes the account and its profile and returns a
+//            one-time link to join (and the pages it was given). The pages: the ones an owner ticked for this one person
+//            (permissions), else the role's defaults from People → Role defaults (settings.catalog.roles), else the
+//            built-in defaults below (the same as the app's). Settings can never be given. A technician also gets
+//            `finance`, which their own pay page needs (see newProfilePermissions). The owner sends the link
+//            (WhatsApp, text or email): Supabase's own email only reaches the project's team, so the app never relies on it.
 //   link   → { id } → a fresh link: to join (someone who hasn't yet) or to set a new password (someone who has).
 //   access → { id, on } → stops or restores someone's sign-in. Their profile and history stay.
 // The service role key lives only here (Supabase secret SUPABASE_SERVICE_ROLE_KEY); nothing is typed in by a person.
@@ -15,6 +18,40 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const APP_URL = "https://theguysgroup.github.io/the-guys-ops-app/";
 export const ROLES = ["manager", "va", "technician", "marketing"];
+// The pages an owner can give someone (every page but Settings), as the app's PAGE_PICK, and each role's built-in pages
+// when nothing is saved in People → Role defaults: the app's roleDefaultPages(role, {}) (a test in the app checks both).
+export const PAGES = ["crm", "crmOverview", "adsGoogle", "closings", "jobs", "payroll", "outstanding", "reminders", "openItems", "tasks", "reference"];
+export const ROLE_DEFAULTS: Record<string, Record<string, boolean>> = {
+  manager: { crm: true, crmOverview: true, adsGoogle: false, closings: true, jobs: true, payroll: true, outstanding: true, reminders: true, openItems: true, tasks: true, reference: true },
+  va: { crm: true, crmOverview: false, adsGoogle: false, closings: true, jobs: true, payroll: true, outstanding: true, reminders: true, openItems: true, tasks: true, reference: true },
+  technician: { crm: false, crmOverview: false, adsGoogle: false, closings: false, jobs: false, payroll: true, outstanding: false, reminders: true, openItems: false, tasks: true, reference: false },
+  marketing: { crm: false, crmOverview: false, adsGoogle: true, closings: false, jobs: false, payroll: false, outstanding: false, reminders: false, openItems: false, tasks: false, reference: false },
+};
+// A page map cut down to the pages that can be given, as true/false (null when it isn't a map at all).
+// deno-lint-ignore no-explicit-any
+export function cleanPages(p: any): Record<string, boolean> | null {
+  if (!p || typeof p !== "object" || Array.isArray(p)) return null;
+  return Object.fromEntries(PAGES.map((k) => [k, !!p[k]]));
+}
+// The pages a new profile gets: the ones ticked for this person (not for a manager, whose pages are fixed), else the
+// role's saved defaults, else the built-in defaults. A map counts only when it names at least one page.
+// deno-lint-ignore no-explicit-any
+function namesAPage(p: any) { return !!p && typeof p === "object" && !Array.isArray(p) && PAGES.some((k) => k in p); }
+// deno-lint-ignore no-explicit-any
+export function rolePages(catalog: any, role: string, chosen?: any): Record<string, boolean> {
+  if (role !== "manager" && namesAPage(chosen)) return cleanPages(chosen)!;
+  const saved = catalog && catalog.roles && catalog.roles[role];
+  if (namesAPage(saved)) return cleanPages(saved)!;
+  return { ...(ROLE_DEFAULTS[role] || cleanPages({})!) };
+}
+// What a new profile is saved with: its pages, plus `finance` for a technician. finance is not a page anyone picks: the
+// database lets a technician read their own jobs and commission rates through it, so without it their pay page is empty
+// (the app's defaultPermissionsFor('technician') has it too).
+// deno-lint-ignore no-explicit-any
+export function newProfilePermissions(catalog: any, role: string, chosen?: any): Record<string, boolean> {
+  const pages = rolePages(catalog, role, chosen);
+  return role === "technician" ? { ...pages, finance: true } : pages;
+}
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -62,10 +99,10 @@ export async function handle(sb: any, body: any, me: any) {
     const { data: link, error } = await sb.auth.admin.generateLink({ type: "invite", email, options: { data: { full_name: fullName }, redirectTo: APP_URL } });
     if (error || !link || !link.user) return { status: 400, body: { ok: false, reason: (error && error.message) || "The account could not be made." } };
     const { data: st } = await sb.from("settings").select("catalog").eq("id", 1).single();
-    const permissions = (st && st.catalog && st.catalog.roles && st.catalog.roles[role]) || {};
+    const permissions = newProfilePermissions(st && st.catalog, role, body?.permissions);
     const { error: pe } = await sb.from("profiles").insert({ id: link.user.id, full_name: fullName, role, technician_name: role === "technician" ? (technicianName || fullName) : null, permissions });
     if (pe) { await sb.auth.admin.deleteUser(link.user.id); return { status: 400, body: { ok: false, reason: pe.message } }; }
-    return { status: 200, body: { ok: true, id: link.user.id, link: link.properties && link.properties.action_link } };
+    return { status: 200, body: { ok: true, id: link.user.id, link: link.properties && link.properties.action_link, permissions } };
   }
 
   if (step === "link") {

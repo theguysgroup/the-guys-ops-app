@@ -115,6 +115,34 @@ function eq(got: unknown, want: unknown, name: string) {
     lines.findIndex((l) => l.includes("P0 [being worked on] Reviews")) < lines.findIndex((l) => l.includes("P2 AI")), has("PREVIOUS ORGANIC ASSESSMENT: none")],
     [true, true, true, true, true, true, true, true, true, true], "the digest: search, visits, leads by window (the old window flagged), map pack vs the week before, reviews, suggestions by priority");
 
+  // ── connector switches (P11, 14 Oct): a part switched off in Settings → Connectors is not written ──
+  const C = (e: any) => ({ connectors: e });
+  eq([connectorOff(null, "gads", "stats"), connectorOff({}, "gads", "stats"), connectorOff(C({ meta: { off: { ads: true } } }), "gads", "stats"), connectorOff(C({ gads: { off: { stats: false } } }), "gads", "stats"), connectorOff(C({ gads: "x" }), "gads", "stats"), connectorOff(C({ gads: [] }), "gads", "stats")],
+    [false, false, false, false, false, false], "connectorOff: no catalog, another connector, an item that is on, or a broken entry: nothing is off");
+  eq([connectorOff(C({ gads: { off: { stats: true } } }), "gads", "stats"), connectorOff(C({ gads: { off: { stats: true } } }), "gads", "conv"), connectorOff(C({ gads: { disconnected: true } }), "gads", "conv"), connectorOff(C({ gads: { removed: true } }), "gads")],
+    [true, false, true, true], "connectorOff: the item that is off; a disconnected or removed connector is off for every item");
+  eq([connectorOff(C({ gads: { accountsOff: { "6569440597": true } } }), "gads", null, "656-944-0597"), connectorOff(C({ gads: { accountsOff: { "6569440597": true } } }), "gads", null, "3782562798"),
+    connectorOff(C({ meta: { accountsOff: { "*": true } } }), "meta", null, "act_123"), connectorOff(C({ gads: { accountsOff: { "6569440597": true } } }), "gads", "stats")],
+    [true, false, true, false], "connectorOff: an account by its digits; '*' is every account; an item asked without an account ignores the accounts");
+  eq([rowsSwitch("google", "keyword"), rowsSwitch("google", "conv_action"), rowsSwitch("google", "conv_setting"), rowsSwitch("meta", "placement")],
+    [["gads", "stats"], ["gads", "conv"], ["gads", "conv"], ["meta", "ads"]], "rowsSwitch: Google conversion levels are 'conv', other Google levels 'stats', Meta 'ads'");
+  const statsOff = C({ gads: { off: { stats: true } } });
+  const g1 = rowsGate(statsOff, "google", "keyword", "6569440597");
+  eq([typeof g1 === "string" && g1.includes("switched off") && g1.includes("keywords"), rowsGate(statsOff, "google", "conv_setting", "6569440597"), rowsGate({}, "google", "keyword", "1")], [true, null, null], "rowsGate: stats off stops keyword rows, not the conversion settings");
+  const airOff = C({ gads: { accountsOff: { "6569440597": true } } });
+  eq([String(rowsGate(airOff, "google", "keyword", "6569440597")).includes("(this account)"), rowsGate(airOff, "google", "keyword", "3782562798"), String(rowsGate(C({ meta: { accountsOff: { "*": true } } }), "meta", "ad", "anything")).includes("(this account)"), rowsGate(airOff, "meta", "ad", "6569440597")],
+    [true, null, true, null], "rowsGate: an unticked Google account stops only its own rows; Meta's '*' stops Meta's");
+  const gscOff = C({ organic: { off: { gsc: true } } }), aiOff = C({ organic: { off: { ai: true } } }), orgDisc = C({ organic: { disconnected: true } });
+  eq([!!organicGate(gscOff, "gsc", "page"), organicGate(gscOff, "ga4", "channel"), !!organicGate(aiOff, "serp", "aimode"), organicGate(aiOff, "serp", "localpack"), ["gsc", "ga4", "serp"].every((src) => !!organicGate(orgDisc, src, "page"))],
+    [true, null, true, null, true], "organicGate: each part by its own switch; map pack and reviews only stop with the whole connector");
+  eq(organicRowsOn(gscOff, night).every((r) => r.source !== "gsc") && organicRowsOn(gscOff, night).length === night.filter((r) => r.source !== "gsc").length, true, "organicRowsOn drops exactly the switched-off rows");
+  const evOn = organicFindings(night).evaluated, evOff = organicFindings(organicRowsOn(gscOff, night)).evaluated;
+  eq([evOn, evOff], [["ctr", "near", "drop", "map", "reviews", "ai"], ["map", "reviews", "ai"]], "with Search Console off its rules don't run (their suggestions are left alone); the weekly rules still do");
+  const kwRows = [{ gclid: "a", account: "6569440597" }, { gclid: "b", account: "3782562798" }, { gclid: "c", account: null }];
+  eq([kwRowsOn(C({ gads: { off: { kw: true } } }), kwRows).length, kwRowsOn(airOff, kwRows).map((r) => r.gclid), kwRowsOn({}, kwRows).length], [0, ["b"], 3], "kwRowsOn: none when the switch is off; an unticked account's rows (and rows without an account, which are aircon's) are left out");
+  eq([insightGate({}), !!insightGate(C({ nightly: { off: { assess: true } } })), insightGate(C({ nightly: { off: { real: true } } })), emailCheckGate(null), !!emailCheckGate(C({ email: { off: { check: true } } }))], [null, true, null, null, true], "insightGate / emailCheckGate: only their own switch");
+  eq([switchedOffLines({}), switchedOffLines(gscOff), switchedOffLines(orgDisc).length], [[], ["SWITCHED OFF in Settings → Connectors: Search Console"], 1], "switchedOffLines: nothing when all is on; names what is off");
+
   // Bigger tables are read page by page: Supabase gives at most 1,000 rows per request (3,048 organic rows on 13 Oct).
   const table = Array.from({ length: 2048 }, (_, i) => ({ id: i }));
   const calls: string[] = [];

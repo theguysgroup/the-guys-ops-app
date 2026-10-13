@@ -53,7 +53,7 @@ const DECLS = [
   'esc', 'quoteDueReason', 'shiftDaySummary', 'latePaymentDue', 'latePaymentDoneToday', 'reofferDue', 'assigneeNames', 'taskAssignedTo', 'myTaskDue', 'teamTaskDue', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
   // message templates (12 Oct)
   'TECH_JOB_TYPES', 'jobTypesForTech',
-  'EQUIPMENT_CATEGORY_DEFAULTS', 'equipmentCategories', 'equipmentCategoryOf', 'contractorDealAmount', 'contractorDealLine', 'contractorDealNote', 'contractorStatusFromPrivate', 'contractorAgreementHtml', 'contractorAgreementInputs', 'ROLE_LABEL', 'roleLabel', 'peopleList', 'personActive', 'personRoles', 'personInGroup',
+  'EQUIPMENT_CATEGORY_DEFAULTS', 'equipmentCategories', 'equipmentCategoryOf', 'contractorDealAmount', 'contractorDealLine', 'contractorDealNote', 'contractorStatusFromPrivate', 'contractorAgreementHtml', 'contractorAgreementInputs', 'ROLE_LABEL', 'roleLabel', 'peopleList', 'personActive', 'personRoles', 'personInGroup', 'ownerLoginsWithoutCard',
   'ORG_CTR', 'orgExpectedCtr', 'ORG_CLEAN_FROM', 'orgPath', 'orgWindow', 'orgIsLead', 'orgLeadStats', 'ORG_EV_LABEL', 'orgEvidenceText',
   'PHONE_MENU_DEFAULT', 'phoneMenuOf', 'phoneMenuText', 'phoneSayDefault', 'phoneRingSeconds', 'phoneE164', 'phonePretty', 'PHONE_BACKUP_DAY', 'phoneBackupHours', 'phoneBackupDayOk', 'phonePersonKeyFor',
   'REVIEW_TPL_VARS', 'CHAT_TPL_VARS', 'MSG_TEMPLATES', 'msgTemplateText', 'fillTemplate', 'SMS_GSM', 'smsParts', 'templateProblems',
@@ -83,8 +83,21 @@ const DECLS = [
   // Region and format, business details (14 Oct)
   'DAY_NAMES', 'WEEK_RULES_MEMO', 'weekRules', 'weekRulesNow', 'weekBounds', 'weekStartDay', 'weekDaysName', 'weekOneOff', 'weekKeysInRange', 'weekChangePlan',
   'fyStartMonth', 'financialYearOf', 'DATE_FORMATS', 'dateFormatOf', 'fmtDateNumeric', 'invDate', 'invWeek', 'AU_STATES', 'businessAddress', 'BIZ_INSURANCE', 'businessInsuranceStatus',
+  // Settings → Notifications as cards (14 Oct)
+  'BIZ_INSURANCE_WARN_DAYS', 'hourLabel', 'NOTIFY_OFFICE_KINDS', 'notifyOn', 'notifyPeopleText', 'notifyCards',
   // VA automatic log-out, per person (13 Oct)
   'VA_SHIFT_DEFAULT', 'vaShiftTimes', 'vaShiftTimeProblem', 'vaEndTimeText',
+  // Settings → People with tabs: pages, role defaults, pay (14 Oct)
+  'ALL_SECTIONS', 'SECTION_ORDER', 'defaultPermissionsFor', 'PAGE_PICK', 'roleDefaultPages', 'pagesDiff', 'cleanPages', 'newProfilePermissions', 'listJoin', 'OLD_SETTINGS_PAGES', 'settingsPageKey', 'hhmm12',
+  'payHourlyList', 'payHourlyNext', 'payHourlyBase', 'payHourlyKey', 'payHourlyUpsert', 'payHourlyHistory', 'payServicesFor', 'personPayKind', 'missingRates', 'divName', 'empRatesHtml',
+  // Branding + colour picker (14 Oct)
+  'normHex', 'hexRgb', 'rgbHex', 'mixHex', 'hexHsl', 'hslHex', 'relLum', 'contrastRatio', 'BRAND_INK', 'bestInk', 'liftColor', 'BRAND_ORIGINAL', 'BRAND_MARK', 'BRAND_MARK_NAME', 'BRAND_BASE',
+  'brandBgTokens', 'brandSideTokens', 'brandSecTokens', 'brandOverrides', 'brandTokens', 'brandCssText', 'brandChecks', 'THEME_OPTS', 'themeChoice', 'productName', 'brandLogoKind', 'brandLogoFile',
+  'joinLinkText', 'SEC_SWATCHES', 'BG_SWATCHES', 'CAT_PALETTE', 'palChosenHtml',
+  // Settings → Connectors (14 Oct)
+  'freshTone', 'CONN_HOW', 'CONN_HOW_ORDER', 'CONN_LATE_HOURS', 'CONN_ACCOUNTS', 'CONNECTORS', 'CONN_ADDONS', 'CONN_GUIDE_LINKS', 'connCfgOf', 'connItemOn', 'connAccountOn', 'connPatched',
+  'connSourceDef', 'connDefs', 'connState', 'connIsLive', 'SOURCE_HOW', 'sourceRowInfo', 'connFreshItems', 'connOldest', 'connTone', 'connGhlArchiveText', 'connStepsFor', 'connNextStep', 'connHows', 'connMatches',
+  'connStopsAll', 'connPendingReaders', 'fmtAdsAccount', 'connDayName', 'connSydDay', 'connWhen', 'connAddonsShown', 'CONN_LOG_SRC', 'connLogRows',
 ];
 
 function extractDecl(source, name){
@@ -1061,6 +1074,63 @@ function testCatalog(sb){
   assertEqual([sb.inkFor('#f2c94c'), sb.inkFor('#1f66c9')], ['#1c1917', '#fff'], 'inkFor: dark text on a light colour, white on a dark one');
 }
 
+// Look and branding (14 Oct): colour maths, the tokens made from two colours, the theme choice, names, logo, picker text.
+function testBranding(sb){
+  console.log('\nLook and branding + the colour picker (14 Oct)');
+  assertEqual([sb.normHex('#ABC'), sb.normHex('c31f2b'), sb.normHex(' #C31F2B '), sb.normHex('red'), sb.normHex('#12345'), sb.normHex(''), sb.normHex(null)], ['#aabbcc', '#c31f2b', '#c31f2b', null, null, null, null], 'normHex: 3 or 6 digits, # optional, lowercase; anything else is not a colour');
+  assertEqual([Math.round(sb.contrastRatio('#ffffff', '#000000') * 10) / 10, sb.contrastRatio('#777777', '#777777'), sb.contrastRatio('#1f66c9', '#f2f0eb')===sb.contrastRatio('#f2f0eb', '#1f66c9')], [21, 1, true], 'contrastRatio: white on black is 21, a colour on itself 1, either order the same');
+  assertEqual([sb.hslHex(0, 0, 93), sb.hexHsl('#ff0000'), sb.rgbHex([300, -4, 15.6]), sb.mixHex('#ffffff', '#000000', .5)], ['#ededed', [0, 100, 50], '#ff0010', '#808080'], 'hsl: 93% grey is #ededed (0.93 × 255 = 237), pure red is 0° 100% 50%; rgbHex clamps and rounds; mixHex halfway');
+  assertEqual([sb.bestInk('#f2c230'), sb.bestInk('#1f66c9'), sb.bestInk('#ffffff')], ['#1c1917', '#ffffff', '#1c1917'], 'bestInk: black on yellow and white, white on blue');
+  // The text on a button is the better of the two inks; with only black and white the worst case (a mid-tone) is about 4.2.
+  const inks = [];
+  sb.SEC_SWATCHES.forEach(([c]) => ['light', 'dark'].forEach(mode => { const t = sb.brandTokens(null, c, mode), other = t['on-primary']==='#ffffff' ? '#1c1917' : '#ffffff';
+    if (c===sb.BRAND_ORIGINAL || (sb.contrastRatio(t['on-primary'], t.primary) >= sb.contrastRatio(other, t.primary) && sb.contrastRatio(t['on-primary'], t.primary) >= 4.1)) return; inks.push(`${c} ${mode}`); }));
+  assertEqual(inks, [], 'buttons: for every suggested buttons colour, in both modes, the button text is the more readable ink (at least 4.1 : 1)');
+  const lifted = sb.liftColor('#ffff00', '#ffffff', 3);
+  assertEqual([sb.contrastRatio(lifted, '#ffffff') >= 3, sb.liftColor('#1f66c9', '#ffffff', 3)], [true, '#1f66c9'], 'liftColor: a pale yellow is darkened until it stands out on white; a colour that already does is unchanged');
+  // The original crimson gives exactly today's values.
+  assertEqual(sb.brandSecTokens(sb.BRAND_ORIGINAL, 'light', sb.BRAND_BASE.light, false), { primary: '#c31f2b', 'primary-strong': '#8c1620', 'primary-soft': '#fbe4e2', 'on-primary': '#fff8f6', 'focus-ring': '0 0 0 3px rgba(195,31,43,.4)', 'sidebar-accent': '#e2454f', 'sidebar-bg-active': '#3c1015' }, 'brandSecTokens: the original crimson in light mode is the app as it ships');
+  assertEqual(sb.brandSecTokens(sb.BRAND_ORIGINAL, 'dark', sb.BRAND_BASE.dark, false), { primary: '#e2555f', 'primary-strong': '#f0838a', 'primary-soft': '#3a1518', 'on-primary': '#1c0c0d', 'focus-ring': '0 0 0 3px rgba(226,85,95,.5)', 'sidebar-accent': '#e2454f', 'sidebar-bg-active': '#3c1015' }, 'brandSecTokens: the original crimson in dark mode is the app as it ships');
+  const css = sb.brandCssText('#5b6b82', sb.BRAND_ORIGINAL);
+  assertEqual([sb.brandCssText('', ''), sb.brandCssText(null, sb.BRAND_ORIGINAL), css.includes('--paper:'), css.includes('--sidebar-bg:'), css.includes(':root[data-theme="dark"]{'), css.includes('@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){')], ['', '', true, true, true, true], 'brandCssText: nothing chosen = no CSS at all; a background colour tints the page and the menu in both modes');
+  const blue = sb.brandCssText(null, '#1f66c9');
+  assertEqual([blue.includes('--primary:#1f66c9;'), blue.includes('--paper:'), blue.includes('--sidebar-bg:')], [true, false, false], 'brandCssText: only a buttons colour changes only the buttons tokens');
+  assertEqual([sb.brandBgTokens(null, 'light'), sb.brandBgTokens('#ffffff', 'light').paper, sb.brandBgTokens('#ffffff', 'light').surface, sb.brandSideTokens(null)], [{}, '#ededed', '#ffffff', {}], 'background: none = nothing changes; white has no colour, so a plain grey page (93% = #ededed) with white cards');
+  const menus = sb.BG_SWATCHES.filter(([c]) => c).map(([c, n]) => { const t = sb.brandSideTokens(c)['sidebar-bg']; return sb.relLum(t) < .02 && sb.contrastRatio('#ece9e2', t) >= 12 ? '' : n; }).filter(Boolean);
+  assertEqual(menus, [], 'background: with every suggested background colour the side menu stays dark and its text easy to read');
+  const tinted = sb.brandTokens('#5b6b82', '#f2c230', 'dark');
+  assertEqual([tinted['sidebar-bg']===sb.brandSideTokens('#5b6b82')['sidebar-bg'], sb.contrastRatio(tinted['sidebar-accent'], tinted['sidebar-bg']) >= 3], [true, true], 'background + buttons: the line on the open menu item stays visible on the tinted menu');
+  // The base tokens are the CSS's own :root values (a drift guard).
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  const vars = block => { const o = {}; block.replace(/--([a-z0-9-]+):\s*([^;]+);/g, (m, k, v) => { o[k] = v.trim(); }); return o; };
+  const lightCss = vars(html.match(/:root \{([\s\S]*?)\n\}/)[1]), darkCss = vars(html.match(/:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/)[1]);
+  const keys = ['ink', 'paper', 'surface', 'surface-2', 'line', 'primary', 'primary-strong', 'primary-soft', 'on-primary', 'focus-ring', 'accent', 'good', 'bad'];
+  assertEqual(keys.concat(['sidebar-bg', 'sidebar-bg-active', 'sidebar-accent', 'sidebar-line']).filter(k => sb.BRAND_BASE.light[k]!==lightCss[k]), [], 'BRAND_BASE.light matches the :root block of index.html');
+  assertEqual(keys.filter(k => sb.BRAND_BASE.dark[k]!==darkCss[k]), [], 'BRAND_BASE.dark matches the :root[data-theme="dark"] block of index.html');
+  const yellow = sb.brandChecks(sb.brandTokens(null, '#ffff00', 'light'), 'light'), orig = sb.brandChecks(sb.brandTokens(null, sb.BRAND_ORIGINAL, 'light'), 'light');
+  assertEqual([yellow.find(c => c.label==='Buttons and selected chips').lv, orig.map(c => c.label), orig.every(c => c.lv==='good')], ['bad', ['Text on the buttons', 'Buttons and selected chips', 'Links', 'Line on the open menu item', 'The open menu item'], true], 'brandChecks: yellow almost disappears on white cards; the original crimson passes all 5 checks');
+  // The theme: this device's choice, else the business default, else the device.
+  assertEqual([sb.themeChoice(null, ''), sb.themeChoice(null, 'dark'), sb.themeChoice('light', 'dark'), sb.themeChoice('system', 'dark'), sb.themeChoice('bogus', 'light'), sb.themeChoice(null, 'bogus')], ['system', 'dark', 'light', 'system', 'light', 'system'], 'themeChoice: my own choice wins (Follow the device included), else the business default, else the device');
+  assertEqual(sb.THEME_OPTS.map(x => x[0]), ['light', 'dark', 'system'], 'THEME_OPTS: one order everywhere');
+  // Names and logo.
+  assertEqual([sb.productName({}), sb.productName({ appName: '  Acme ' }), sb.productName(undefined)], ['OPS Service', 'Acme', 'OPS Service'], 'productName: OPS Service unless an app name is set');
+  sb.STATE.data.settings = { companyName: 'X Pty' };
+  const named = sb.brandName();
+  sb.STATE.data.settings = {};
+  assertEqual([named, sb.brandName()], ['X Pty', 'The Guys Service Group'], 'brandName: the business\'s trading name, for the menu');
+  const up = 'https://abc.supabase.co/storage/v1/object/public/branding/logo-1.png';
+  assertEqual([sb.brandLogoKind({}), sb.brandLogoKind({ logo: '' }), sb.brandLogoKind({ logo: 'ops-mark' }), sb.brandLogoKind({ logo: up }), sb.brandLogoKind({ logo: 'https://evil.com/x.png' })],
+    [{ kind: 'legacy', src: 'logo.png' }, { kind: 'legacy', src: 'logo.png' }, { kind: 'mark' }, { kind: 'upload', src: up }, { kind: 'legacy', src: 'logo.png' }], 'brandLogoKind: nothing = logo.png (as before), the OPS mark, an upload only from the branding bucket');
+  assertEqual([sb.brandLogoFile({}), sb.brandLogoFile({ logo: 'ops-mark' }), sb.brandLogoFile({ logo: up })], ['logo.png', sb.BRAND_MARK_NAME, 'logo-1.png'], 'brandLogoFile: the name shown next to the logo');
+  assertEqual([sb.joinLinkText('Ron Cruz', 'L', 'join', 'OPS Service'), sb.joinLinkText('Ron Cruz', 'L', 'password', 'OPS Service')], ['Hi Ron, here is your link to join the OPS Service app: L', 'Hi Ron, here is a link to set a new password for the OPS Service app: L'], 'joinLinkText: the product name in the join and new-password messages');
+  // The picker's "Chosen:" line.
+  const P = sb.palChosenHtml;
+  assertEqual([P('sec', '#c31f2b', sb.SEC_SWATCHES), P('sec', '#123456', sb.SEC_SWATCHES), P('bg', null, sb.BG_SWATCHES), P('bg', '#5b6b82', sb.BG_SWATCHES), P('tag', null, sb.CAT_PALETTE), P('cat', null, sb.CAT_PALETTE), P('tag', '#1f66c9', sb.CAT_PALETTE, true), P('sec', '#123456', [['#123456', '<b>']])],
+    ['Chosen: <b>Original crimson</b>', 'Chosen: <b>Your own colour #123456</b>', 'Chosen: <b>Original stone</b>: the app as it is today', 'Chosen: <b>Slate</b>: a light tint in light mode, a deep shade in dark mode', 'Chosen: <b>Default</b>: follows the buttons colour', 'Chosen: <b>Default</b>', '<b>Blue</b>', 'Chosen: <b>&lt;b&gt;</b>'], 'palChosenHtml: a named colour, your own colour, the defaults, a peek, and a name escaped');
+  const lists = [].concat(sb.SEC_SWATCHES, sb.BG_SWATCHES.filter(([c]) => c), sb.CAT_PALETTE).filter(([c]) => sb.normHex(c)!==c).map(x => x[1]);
+  assertEqual([lists, sb.BG_SWATCHES[0], sb.CAT_SWATCHES], [[], [null, 'Original stone'], ['#1f66c9', '#2b6cc4', '#0e8a8a', '#16a34a', '#c99a06', '#c4580f', '#d03b5c', '#7746c9', '#a5473f', '#776e64']], 'swatches: every suggested colour is a clean code; CAT_SWATCHES (the automatic colour of new rows) is unchanged');
+}
+
 // Message templates (Settings, 12 Oct): the app's originals are the server functions' own words, letter for letter,
 // and the preview fills blanks exactly as the server does.
 // Google review rules as settings (13 Oct): nothing saved = the original rules; saved ones are used and checked.
@@ -1163,7 +1233,13 @@ function testPeopleContractorsEquipment(sb){
   const L = sb.peopleList(employees, profiles);
   assertEqual(L.map(x => [x.key, x.name, x.prof ? x.prof.id : null]), [['e:e1','Guy Galili','p1'], ['e:e2','Dolev',null], ['e:e3','Ofek','p2'], ['e:e4','Ron','p4'], ['p:p3','Manuel Baez','p3']], 'people: employee and login merged (by Jobs name or full name); a login with no card and a card with no login each get a card');
   const g = f => L.filter(x => sb.personInGroup(x, f)).map(x => x.key);
-  assertEqual([g('active').length, g('tech'), g('office'), g('owners'), g('inactive')], [4, ['e:e1','e:e3'], ['e:e1','e:e4','p:p3'], ['e:e3'], ['e:e2']], 'people: the filters (sales counts as office; not active only under Not active)');
+  assertEqual([g('active').length, g('tech'), g('office'), g('owners'), g('inactive')], [4, ['e:e1','e:e3'], ['e:e4','p:p3'], ['e:e3'], ['e:e2']], 'people: the filters (office = VA and Marketing, as in the approved mockup: a technician who also sells is not office; not active only under Not active)');
+  const mgr = sb.peopleList([{ id:'m1', name:'Mia', roles:['Manager'], status:'Active' }], [{ id:'pm', fullName:'Max', role:'manager' }]);
+  assertEqual(mgr.map(x => sb.personInGroup(x, 'office')), [false, false], 'people: a manager is not under Office (the approved mockup leaves managers out)');
+  // An owner login no employee card is joined to (the names differ) still has a place for the weekly wage (P: owner salary).
+  const loose = sb.peopleList([{ id:'n1', name:'Noam', roles:['Owner','Technician'], status:'Active' }, { id:'e9', name:'Guy', roles:['Technician'], status:'Active' }],
+    [{ id:'pn', fullName:'Noam Gal', role:'owner', technicianName:'' }, { id:'po', fullName:'Ofek', role:'owner' }, { id:'pg', fullName:'Guy', role:'technician' }, { id:'pk', fullName:'Kim', role:'va' }]);
+  assertEqual([sb.ownerLoginsWithoutCard(loose).map(p => p.id), sb.ownerLoginsWithoutCard([]), sb.ownerLoginsWithoutCard(null), sb.personPayKind(loose[0])], [['pn', 'po'], [], [], 'ownerNoLogin'], 'people: owner logins with no card joined (their wage is set from their own card or an unjoined owner card)');
   // Contractors: the deal line, the agreement text and when it is out of date.
   const c = { id:'s1', name:'Spark <Line> Electrical', contactPerson:'Jake', services:['Electrical'], paymentTerms:'7 days', deal:{ type:'commission', amount:10, note:'Only jobs we pass on.' } };
   assertEqual([sb.contractorDealLine(c), sb.contractorDealLine({ ...c, deal:{ type:'fixed', amount:50 } }), sb.contractorDealLine({ ...c, deal:{ type:'other', note:'A swap of jobs.' } }), sb.contractorDealLine({ ...c, deal:{ type:'commission', amount:null } })],
@@ -1515,6 +1591,55 @@ function testRegionAndWeeks(sb){
     ['Sun 4 Oct – Sat 10 Oct 2026', 'Sun 18 Oct – Sun 25 Oct 2026', 'Mon 26 Oct – Sun 1 Nov 2026'], 'invWeek: the real first and last day');
 }
 
+function testNotificationCards(sb){
+  console.log('\nSettings → Notifications as cards (14 Oct)');
+  assertEqual([0, 8, 11, 12, 13, 20, 23, 24].map(sb.hourLabel), ['12 am', '8 am', '11 am', '12 pm', '1 pm', '8 pm', '11 pm', 'midnight'], 'hourLabel: am / pm, noon, midnight');
+  assertEqual(sb.NOTIFY_OFFICE_KINDS, ['newLead', 'leadWaiting', 'missedCall'], 'NOTIFY_OFFICE_KINDS: only these can go to the office');
+  // notifyOn: off unless switched on; the invoice one on unless switched off; the business insurance follows the document switch.
+  const on = sb.notifyOn;
+  assertEqual(['newLead', 'leadWaiting', 'missedCall', 'unpaid', 'docExpiry', 'invoice', 'bizInsurance', 'googleReview'].map(k => on({}, k)),
+    [false, false, false, false, false, true, false, false], 'notifyOn: nothing saved');
+  assertEqual([on({ invoice: { on: false } }, 'invoice'), on({ invoice: { on: true } }, 'invoice'), on(undefined, 'invoice'), on(null, 'newLead')], [false, true, true, false], 'notifyOn: the invoice switch; nothing saved at all');
+  assertEqual([on({ docExpiry: { on: true } }, 'bizInsurance'), on({ docExpiry: { on: false } }, 'bizInsurance'), on({ docExpiry: { on: true }, bizInsurance: { on: false } }, 'bizInsurance'), on({ docExpiry: { on: false }, bizInsurance: { on: true } }, 'bizInsurance'), on({ docExpiry: { on: true }, bizInsurance: { on: 'yes' } }, 'bizInsurance'), on({ docExpiry: { on: false }, bizInsurance: { office: true } }, 'bizInsurance')],
+    [true, false, false, true, true, false], 'notifyOn: the business insurance follows the document switch until it has its own true / false');
+  assertEqual(on({ googleReview: { on: true } }, 'googleReview'), false, 'notifyOn: a Google review cannot be on before its connector');
+  // Who Owners and Office are, in words.
+  const team = [{ role:'owner', fullName:'Ofek Shamir' }, { role:'owner', fullName:'Noam Gal' }, { role:'va', fullName:'Ron' }, { role:'manager', fullName:'Omri X' }, { role:'technician', fullName:'Guy' }];
+  assertEqual(sb.notifyPeopleText(team), { owners:'Ofek and Noam', office:'Ron and any manager' }, 'notifyPeopleText: first names, the mockup\'s words');
+  assertEqual(sb.notifyPeopleText(team.filter(p => p.role!=='va')).office, 'any manager', 'notifyPeopleText: no VA = any manager');
+  assertEqual(sb.notifyPeopleText([{ role:'owner', fullName:'A x' }, { role:'owner', fullName:'B' }, { role:'owner', fullName:' C  y ' }]).owners, 'A, B and C', 'notifyPeopleText: three owners');
+  assertEqual([sb.notifyPeopleText([]), sb.notifyPeopleText(undefined), sb.notifyPeopleText([{ role:'owner', fullName:'' }, { role:'va' }])], [{ owners:'the owners', office:'any manager' }, { owners:'the owners', office:'any manager' }, { owners:'the owners', office:'any manager' }], 'notifyPeopleText: nobody named');
+  // The cards.
+  const R = { waitMinutes: 15, from: 8, until: 20, docDays: 30, unpaidDays: 7 };
+  const cards = sb.notifyCards({}, R, { phoneEnabled: false });
+  assertEqual(cards.map(c => c.id), ['newLead', 'leadWaiting', 'missedCall', 'unpaid', 'invoice', 'docExpiry', 'bizInsurance', 'googleReview'], 'notifyCards: 8 cards in the mockup\'s order');
+  // hand count: nothing saved = only the invoice one on (1 of 8); documents on = invoice, documents and insurance (3 of 8)
+  assertEqual([cards.filter(c => c.on).map(c => c.id), sb.notifyCards({ docExpiry: { on: true } }, R, {}).filter(c => c.on).map(c => c.id)],
+    [['invoice'], ['invoice', 'docExpiry', 'bizInsurance']], 'notifyCards: how many are on');
+  const R2 = { waitMinutes: 45, from: 8, until: 20, docDays: 60, unpaidDays: 10 }, named = sb.notifyCards({}, R2, {});
+  const nm = id => named.find(c => c.id===id).name;
+  assertEqual([nm('leadWaiting'), nm('unpaid'), nm('docExpiry'), nm('bizInsurance')],
+    ['A new lead nobody picked up for 45 minutes', 'A job is 10 days unpaid', 'An employee document expires within 60 days', 'Business insurance expires within 30 days'], 'notifyCards: the names carry the numbers; the insurance always 30');
+  const N = { newLead: { on: true, office: true }, missedCall: { on: false, office: true }, unpaid: { on: true, office: true }, docExpiry: { on: true, office: true }, googleReview: { on: true, office: true } };
+  const off = sb.notifyCards(N, R, {});
+  assertEqual(off.filter(c => c.office).map(c => c.id), ['newLead', 'missedCall'], 'notifyCards: office only on cards that allow it (an unpaid job saved with office stays owners only), never on the locked one');
+  assertEqual(off.filter(c => !c.officeOk).map(c => [c.id, c.only]), [['unpaid', 'money'], ['invoice', 'pay'], ['docExpiry', 'private details'], ['bizInsurance', 'business insurance']], 'notifyCards: owners-only cards say why');
+  const g = off.find(c => c.id==='googleReview');
+  assertEqual([g.locked, g.on, g.office, g.lockedLine, g.flags], [true, false, false, 'Turns on once Google Business Profile is connected.', [{ tone:'neutral', text:'Comes with the Google Business Profile connector' }]], 'notifyCards: the Google review card waits for its connector');
+  const flags = (o, id) => sb.notifyCards({}, R, o).find(c => c.id===id).flags;
+  assertEqual([flags({ phoneEnabled: false }, 'missedCall'), flags({ phoneEnabled: true }, 'missedCall'), flags(undefined, 'missedCall').length], [[{ tone:'warn', text:'Starts when the business phone is connected' }], [], 1], 'notifyCards: the missed-call card says the phone is not connected yet');
+  assertEqual([flags({}, 'bizInsurance'), flags({}, 'newLead'), off.find(c => c.id==='newLead').locked, off.find(c => c.id==='leadWaiting').hasWhen], [[{ tone:'neutral', text:'New' }], [], false, 'leadWaiting'], 'notifyCards: the insurance card is new; the rest have defaults');
+  // The insurance warns 30 days before, whatever the document days; other documents keep the passed / default window.
+  const today = '2026-10-10';
+  assertEqual([sb.employeeDocExpiry({ expiry:'2026-11-19' }, today, 30).tone, sb.employeeDocExpiry({ expiry:'2026-11-19' }, today, 60).tone, sb.employeeDocExpiry({ expiry:'2026-11-19' }, today).tone, sb.employeeDocExpiry({ expiry:'2026-11-09' }, today).tone],
+    ['good', 'warn', 'good', 'warn'], 'employeeDocExpiry: 40 days out is fine at 30, due at 60; without a window it uses 30');
+  assertEqual([sb.businessInsuranceStatus({ expiry:'2026-11-04' }, today).text, sb.businessInsuranceStatus({ expiry:'2026-11-14' }, today).text], ['Expires in 25 days', 'Valid until 14 Nov 2026'], 'businessInsuranceStatus: always 30 days');
+  // Reminders follow the fixed 30 days too, even with other document days saved.
+  sb.STATE.data = { jobs:[], contacts:[], equipmentSpend:[], quotes:[], manualReminders:[], employees:[], readReminders:[], dismissedReminders:[], settings: { gstRatePercent:10, catalog: { notify: { rules: { docDays: 60 } }, business: { insurance: { workers: { expiry:'2026-11-04' }, liability: { expiry:'2026-11-14' } } } } } };
+  sb.JOB_CACHE.index = null;
+  assertEqual(sb.computeReminders(sb.STATE.data, sb.parseLocalDate(today)).filter(it => it.type==='business-insurance').map(it => it.title), ['Workers compensation insurance expires in 25 days'], 'computeReminders: business insurance 25 days out is a reminder, 35 days out is not');
+}
+
 function testBusinessDetails(sb){
   console.log('\nBusiness details: address and insurance (14 Oct)');
   assertEqual(sb.businessAddress({ address:'12 Smith St, Parramatta NSW 2150' }), { street:'12 Smith St, Parramatta NSW 2150', suburb:'', state:'', postcode:'', line:'12 Smith St, Parramatta NSW 2150' }, 'businessAddress: the old one-line address reads as the street');
@@ -1580,6 +1705,93 @@ function testSettingsRound2Small(sb){
     [true, true], 'settings menu: its own scroll on a wide screen; still list → page on a phone');
 }
 
+function testConnectors(sb){
+  console.log('\nSettings → Connectors (14 Oct)');
+  const D = id => sb.CONNECTORS.find(d => d.id===id);
+  // Lead sources rows (approved mockup): the tag, how leads are recognised, and the connector each one opens.
+  const SR = (x, cat, n) => { const r = sb.sourceRowInfo(x, cat || {}, n || 0); return [r.type, r.conn, r.gone]; };
+  assertEqual([SR({ key:'Google Ads' }), SR({ key:'Meta Ads' }), SR({ key:'Google Maps' }), SR({ key:'Organic' }), SR({ key:'Referral' }), SR({ key:'Unknown' })],
+    [['conn','gads',false], ['conn','meta',false], ['conn','web',false], ['conn','web',false], ['manual',null,false], ['manual',null,false]], 'lead sources: the built-in ones open their connector; the rest are picked by hand');
+  assertEqual([SR({ key:'ChatGPT', kind:'connected' }), SR({ key:'ChatGPT', kind:'connected' }, {}, 3), SR({ key:'ChatGPT', kind:'connected', active:false }), SR({ key:'ChatGPT', kind:'connected' }, { connectors:{ 'src:ChatGPT': { removed:true } } }), SR({ key:'Google Ads' }, { connectors:{ gads: { removed:true } } })],
+    [['guide','src:ChatGPT',false], ['conn','src:ChatGPT',false], ['guide',null,false], ['guide','src:ChatGPT',true], ['conn','gads',true]], 'lead sources: a connected one is "Setting up" until its first lead; switched off it has no connector page; a removed connector is said');
+  assertEqual([sb.sourceRowInfo({ key:'Google Ads' }, {}, 0).how, sb.sourceRowInfo({ key:'Referral' }, {}, 0).how, sb.sourceRowInfo({ key:'Unknown' }, {}, 0).how], ['Recognised by the ad\'s click code', 'Manual: the office picks it on the lead', 'When nobody knows where the lead came from'], 'lead sources: the line under each source, as in the mockup');
+  assertEqual(Object.values(sb.SOURCE_HOW).every(([id]) => !!D(id)) && Object.keys(sb.SOURCE_HOW).every(k => sb.LEAD_SOURCES.includes(k)), true, 'lead sources: every built-in source maps to a real connector');
+  const cfg = (e, id) => sb.connCfgOf({ connectors: e }, id);
+  const empty = { off:{}, accountsOff:{}, auto:{}, disconnected:false, removed:false, formSent:'' };
+  assertEqual([sb.connCfgOf(undefined, 'gads'), sb.connCfgOf({ connectors: { gads: 'x' } }, 'gads'), sb.connCfgOf({ connectors: null }, 'gads'), sb.connCfgOf({ connectors: { gads: { off: [1] } } }, 'gads')], [empty, empty, empty, empty], 'connCfgOf: nothing saved (or something broken) = everything on');
+  const cat = { connectors: { gads: { off: { stats: true } } } }, c1 = sb.connCfgOf(cat, 'gads');
+  c1.off.conv = true;
+  assertEqual(cat.connectors.gads.off, { stats: true }, 'connCfgOf: a copy, so changing it never changes the saved catalog');
+  // the saved shape: only what is off
+  const p1 = sb.connPatched({}, 'gads', c => { c.off = { stats: true }; });
+  assertEqual(p1, { gads: { off: { stats: true } } }, 'connPatched: an item switched off is saved as off:{item:true}');
+  assertEqual([sb.connPatched(p1, 'gads', c => { c.off.stats = false; }), sb.connPatched(p1, 'gads', c => { delete c.off.stats; })], [{}, {}], 'connPatched: switched back on = nothing saved (pruned)');
+  const both = { meta: { off: { ads: true } }, gads: { off: { stats: true } } }, before = JSON.stringify(both);
+  assertEqual([sb.connPatched(both, 'gads', c => { c.disconnected = true; }), JSON.stringify(both)===before], [{ meta: { off: { ads: true } }, gads: { off: { stats: true }, disconnected: true } }, true], 'connPatched: other connectors untouched, the input not changed');
+  assertEqual([sb.connPatched({}, 'meta', c => { c.accountsOff = { '*': true }; }), sb.connPatched({ gbp: { formSent: '2026-10-14' } }, 'gbp', c => { c.removed = false; c.disconnected = 'yes'; })], [{ meta: { accountsOff: { '*': true } } }, { gbp: { formSent: '2026-10-14' } }], "connPatched: '*' kept; only a real true is saved for disconnected / removed");
+  assertEqual([sb.connItemOn(cfg({ gads: { off: { stats: true } } }, 'gads'), 'stats'), sb.connItemOn(cfg({ gads: { off: { stats: true } } }, 'gads'), 'conv'), sb.connAccountOn(cfg({ meta: { accountsOff: { '*': true } } }, 'meta'), 'act_1'), sb.connAccountOn(cfg({}, 'gads'), '6569440597'), sb.connAccountOn(cfg({ gads: { accountsOff: { '6569440597': true } } }, 'gads'), '3782562798')],
+    [false, true, false, true, true], "connItemOn / connAccountOn: an item off; '*' = every account; anything missing is on");
+  // the state of each connector
+  const st = (id, e, ctx) => sb.connState(D(id), cfg(e || {}, id), ctx || {});
+  const src0 = sb.connSourceDef({ key: 'ChatGPT', label: 'ChatGPT', kind: 'connected' }, { count: 0 }), src3 = sb.connSourceDef({ key: 'ChatGPT', label: 'ChatGPT', kind: 'connected' }, { count: 3, last: '2026-10-12' });
+  assertEqual([st('gads'), st('gads', { gads: { disconnected: true } }), st('ghl', { ghl: { disconnected: true } }), st('gbp'), st('gbp', { gbp: { formSent: '2026-10-14' } }), st('xero'), st('wp'), st('twilio', {}, { phoneEnabled: false }), st('twilio', {}, { phoneEnabled: true }), sb.connState(src0, cfg({}, src0.id), {}), sb.connState(src3, cfg({}, src3.id), {})],
+    ['ok', 'disc', 'legacy', 'notstarted', 'wait', 'setup', 'setup', 'off', 'ok', 'guide', 'ok'], 'connState: working, paused, GoHighLevel (never paused), GBP before / after the form, set up needed, Twilio off / on, a source before / after its first lead');
+  assertEqual(['ok', 'legacy', 'disc', 'guide', 'off'].map(sb.connIsLive), [true, true, false, false, false], 'connIsLive: working and GoHighLevel count as connected');
+  // freshness: a connector is as fresh as its oldest part that is on (now = 14 Oct 00:00 UTC)
+  vm.runInContext("Date.now = () => Date.parse('2026-10-14T00:00:00Z')", sb);
+  const F = { google: '2026-10-13T22:00:00Z', calls: '2026-10-13T23:00:00Z', gadsStats: '2026-10-12T18:00:00Z' };
+  const gc = cfg({}, 'gads'), gOff = cfg({ gads: { off: { stats: true, conv: true } } }, 'gads');
+  assertEqual([sb.connTone(D('gads'), gc, F), sb.connOldest(D('gads'), gc, F), sb.connTone(D('gads'), gOff, F), sb.connOldest(D('gads'), gOff, F)], ['warn', '2026-10-12T18:00:00Z', 'good', '2026-10-13T22:00:00Z'], 'connTone / connOldest: stats 30 h old = Late; with stats and conversions off it is Working again');
+  assertEqual([sb.connTone(D('gads'), gc, { ...F, calls: null }), sb.connOldest(D('gads'), gc, { ...F, calls: null })], ['bad', null], 'connTone / connOldest: a part that never updated = Not updating');
+  assertEqual([sb.connTone(D('web'), cfg({}, 'web'), { lead: '2026-10-10T16:00:00Z' }), sb.connTone(D('meta'), cfg({}, 'meta'), { meta: '2026-10-10T16:00:00Z', metaStats: '2026-10-13T20:00:00Z' })], ['warn', 'bad'], 'connTone: leads use 72 / 168 hours (80 h = Late); the morning runs 26 / 50 (80 h = Not updating)');
+  assertEqual([sb.connTone(D('xero'), cfg({}, 'xero'), F), sb.connOldest(D('xero'), cfg({}, 'xero'), F), sb.connTone(src3, cfg({}, src3.id), {}), sb.connTone(src0, cfg({}, src0.id), {})], [null, undefined, 'good', null], 'connTone: nothing to measure = null; a source with leads is working');
+  // guides
+  const twSteps = D('twilio').steps.map((x, i) => ({ ...x, st: i < 2 ? 'done' : i===2 ? 'now' : 'todo' }));
+  assertEqual([sb.connNextStep(sb.connStepsFor(D('xero'), cfg({}, 'xero'))), sb.connNextStep(sb.connStepsFor(src0, cfg({}, src0.id))), sb.connNextStep(twSteps), sb.connNextStep(twSteps.map(x => ({ ...x, st: 'done' }))), sb.connNextStep(undefined)],
+    ['Step 1 of 6 is yours', "Step 3 of 4 is Claude's", 'Step 3 of 4: you and Claude', '', ''], 'connNextStep: whose step is next');
+  assertEqual([sb.connStepsFor(D('gbp'), cfg({}, 'gbp')).map(x => x.st), sb.connStepsFor(D('gbp'), cfg({ gbp: { formSent: '2026-10-14' } }, 'gbp')).map(x => x.st), sb.connStepsFor(D('ghl'), cfg({}, 'ghl'), 'removal').map(x => x.st), sb.connStepsFor(D('gads'), cfg({}, 'gads'))],
+    [['now', 'todo', 'todo', 'todo'], ['done', 'now', 'todo', 'todo'], ['now', 'todo', 'todo', 'todo'], []], "connStepsFor: GBP's first step is done once the form is marked as sent; GoHighLevel's removal steps; no guide for a live connector");
+  assertEqual([sb.connStepsFor(D('ghl'), cfg({}, 'ghl'), 'removal', 4602)[1].d.includes('including the 4,602 already kept as an archive'), sb.connStepsFor(D('ghl'), cfg({}, 'ghl'), 'removal', 0)[1].d.startsWith('All of them, including the ones already kept as an archive.')], [true, true], 'the GoHighLevel archive step uses the live count (or no number)');
+  // tags, search, what stops
+  assertEqual([sb.connHows(D('gads')), sb.connHows(D('email')), sb.connHows(D('ghl')), sb.connHows(D('xero'))], [['routine'], ['routine', 'script'], ['out'], ['api', 'webhook']], 'connHows: every way the items come in, in the legend order');
+  assertEqual([sb.connMatches(D('gads'), 'keyword'), sb.connMatches(D('xero'), 'PROFIT AND LOSS'), sb.connMatches(D('gbp'), 'zzz'), sb.connMatches(D('gbp'), '  ')], [true, true, false, true], 'connMatches: name, description and item names, any case');
+  const gStops = sb.connStopsAll(D('gads'), cfg({ gads: { off: { stats: true } } }, 'gads'));
+  assertEqual([gStops.length, gStops.some(t => t.includes('keywords, search terms and ads stay')), sb.connStopsAll(D('gads'), cfg({}, 'gads')).length], [7, false, 8], 'connStopsAll: what stops with the whole connector, without the parts already off');
+  assertEqual([sb.connPendingReaders(D('gads'), cfg({}, 'gads')), sb.connPendingReaders(D('gads'), cfg({}, 'gads'), ['stats']), sb.connPendingReaders(D('nightly'), cfg({}, 'nightly'), ['assess', 'real']), sb.connPendingReaders(D('xero'), cfg({}, 'xero'))],
+    [['the 7:00 morning run'], [], ['the 7:50 nightly check'], []], 'connPendingReaders: who still has to read a switch (not the parts ingest-ads-stats already honours)');
+  // connected lead sources
+  const cg = src0, cm = sb.connSourceDef({ key: 'Car Magnet', label: 'Car Magnet', kind: 'connected' }, { count: 0 });
+  assertEqual([cg.id, cg.logo, cg.items.map(i => i.k), cg.note.includes('arrives from chatgpt.com') && cg.note.includes('utm_source=chatgpt.com'), cg.steps[2].who, cg.steps[0].t],
+    ['src:ChatGPT', 'AI', ['ref', 'utm'], true, 'Claude', 'Add "ChatGPT" as a lead source'], 'connSourceDef: ChatGPT is recognised by the site it comes from or its link tag');
+  assertEqual([cm.logo, cm.items.map(i => i.k), cm.note.includes('utm_source=carmagnet') && cm.note.includes('Add it to the links you share for Car Magnet'), cm.items[0].stops[0]], ['CM', ['utm'], true, 'New Car Magnet leads arrive as "Organic web".'], 'connSourceDef: another source needs the tag on its links');
+  const defs = sb.connDefs([{ key: 'ChatGPT', label: 'ChatGPT', kind: 'connected', active: true }, { key: 'Off', kind: 'connected', active: false }, { key: 'Gone', kind: 'connected', deleted: true }, { key: 'Referral', label: 'Referral', active: true }],
+    [{ source: 'ChatGPT', createdAt: '2026-10-02' }, { source: 'ChatGPT', createdAt: '2026-10-09' }, { source: 'Organic', createdAt: '2026-10-11' }]);
+  assertEqual([defs.length, defs.slice(-1)[0].id, defs.slice(-1)[0].leads, defs.slice(-1)[0].last], [sb.CONNECTORS.length + 1, 'src:ChatGPT', 2, '2026-10-09'], 'connDefs: the built-in connectors and each connected source that is on (not off, deleted or manual)');
+  // accounts, times
+  assertEqual([sb.fmtAdsAccount('6569440597'), sb.fmtAdsAccount('*'), sb.fmtAdsAccount(3782562798)], ['656-944-0597', '*', '378-256-2798'], 'fmtAdsAccount: 10 digits as Google writes them');
+  const NOW = Date.parse('2026-10-13T21:30:00Z');   // Wed 14 Oct, 8:30 am in Sydney
+  assertEqual([sb.connWhen('2026-10-13T20:52:00Z', NOW), sb.connWhen('2026-10-12T20:51:00Z', NOW), sb.connWhen('2026-10-13T03:05:00Z', NOW), sb.connWhen('2026-10-11T20:51:00Z', NOW), sb.connWhen('', NOW), sb.connWhen('garbage', NOW), sb.connDayName('2026-10-12')],
+    ['Today 7:52 am', 'Yesterday 7:51 am', 'Yesterday 2:05 pm', 'Mon 12 Oct 7:51 am', '', '', 'Mon 12 Oct'], 'connWhen: today, yesterday or the date, in Sydney time');
+  // add-ons
+  const ad = (c, f, q) => sb.connAddonsShown(c, sb.CONNECTORS, f, q);
+  assertEqual([ad({}, 'All', '').length, ad({}, 'Money', '').length, ad({}, 'All', 'xero').map(a => a.name), ad(undefined, 'Lead sources', 'ZZZ').length], [12, 4, ['QuickBooks'], 0], 'connAddonsShown: 12 add-ons, by category and by the search words (descriptions too)');
+  const rem = ad({ gads: { removed: true } }, 'All', '');
+  assertEqual([rem.length, rem[0].id, rem[0].cat, rem[0].act, ad({ gads: { removed: true } }, 'Money', '').length], [13, 'gads', 'Removed connectors', 'connect', 4], 'connAddonsShown: a removed connector comes first, to connect again');
+  // the list itself
+  const ids = sb.CONNECTORS.map(d => d.id);
+  assertEqual([ids, new Set(ids).size], [['gads', 'meta', 'organic', 'nightly', 'email', 'web', 'sheet', 'twilio', 'ghl', 'gbp', 'xero', 'wp'], 12], 'CONNECTORS: the 12 connectors in the mockup order, each once');
+  const bad = sb.CONNECTORS.flatMap(d => d.items.filter(i => !i.k || !i.n || !i.freq || !i.feeds || !(i.how===null || sb.CONN_HOW[i.how]) || typeof i.reader!=='string').map(i => d.id + '.' + i.k));
+  assertEqual(bad, [], 'CONNECTORS: every item has a key, name, how (a known tag or none), how often, what it feeds and who reads its switch');
+  assertEqual(sb.CONNECTORS.flatMap(d => d.items.filter(i => i.reader==='fn').map(i => d.id + '.' + i.k)).sort(), ['email.check', 'gads.conv', 'gads.kw', 'gads.stats', 'meta.ads', 'nightly.assess', 'organic.ai', 'organic.ga4', 'organic.gsc'], "CONNECTORS: the switches ingest-ads-stats honours are exactly the server's list");
+  assertEqual([D('ghl').items.filter(i => i.lock).map(i => i.k), D('xero').items.filter(i => i.auto).map(i => i.k), D('web').bg, sb.CONN_ACCOUNTS.gads.map(a => a.key)], [['chat', 'chatmail'], ['inv'], 'var(--primary)', ['6569440597', '3782562798']], 'GoHighLevel: the chat parts are locked (P1); Xero invoices have "Send automatically"; the two Google accounts');
+  // recent syncs
+  const log = { insights: [{ platform: 'google', created_at: '2026-10-13T20:52:00Z' }, { platform: 'meta', created_at: '2026-10-12T20:45:00Z' }],
+    checks: [{ day: '2026-10-13', checked_at: '2026-10-13T20:53:00Z', emails: 5, matched: 4 }, { day: '2026-10-12', checked_at: '2026-10-13T20:53:00Z', emails: 3, matched: 3 }] };
+  assertEqual(sb.connLogRows('gads', log, NOW), [['Today 7:52 am', 'good', 'OK', 'Assessment written'], ['Tue 13 Oct', 'bad', "Didn't run", 'Nothing came in.'], ['Mon 12 Oct', 'bad', "Didn't run", 'Nothing came in.'], ['Sun 11 Oct', 'bad', "Didn't run", 'Nothing came in.']], 'connLogRows: the last 4 Sydney days, today first');
+  assertEqual([sb.connLogRows('meta', log, NOW)[0], sb.connLogRows('meta', log, NOW).length, sb.connLogRows('meta', log, Date.parse('2026-10-14T00:30:00Z'))[0]], [['Yesterday 7:45 am', 'good', 'OK', 'Assessment written'], 3, ['Wed 14 Oct', 'bad', "Didn't run", 'Nothing came in.']], "connLogRows: today shows \"Didn't run\" only after 10 am");
+  assertEqual([sb.connLogRows('email', log, NOW)[0], sb.connLogRows('nightly', log, NOW)[0][3], sb.connLogRows('web', log, NOW), sb.connLogRows('gads', null, NOW)], [['Today 7:53 am', 'good', 'OK', '5 emails checked, 4 in the CRM'], 'Assessment written (google)', [], []], 'connLogRows: the lead check names its numbers; connectors with no daily trace have no log');
+}
+
 testJobAttributionTags(loadSandbox());
 testSubDivisionAndSource(loadSandbox());
 testSplitLeadRequestEvent(loadSandbox());
@@ -1616,6 +1828,87 @@ function testVaAutoLogout(sb){
   assertEqual([`time '${V.logoutAt}'`, `time '${V.endAt}'`, `time '${V.latest}'`, "'people'", "'logoutAt'", "'endAt'", "'autoLogout'"].filter(x => !fnSql.includes(x)), [], 'va log-out: the SQL reads the same keys with the same defaults as the app');
   assertEqual([V.logoutAt, V.endAt, V.latest], ['22:00', '17:30', '23:30'], 'va log-out: defaults 22:00 / 17:30, latest 23:30');
   assertEqual(/^-- ROLLBACK \(G7\)/m.test(sql) && /^-- .*time '20:00'/m.test(sql.slice(sql.indexOf('-- ROLLBACK (G7)'))) && !/time '20:00'/.test(fnSql), true, 'va log-out: the SQL keeps a commented rollback to the live 20:00 version');
+}
+function testPeopleTabs(sb){
+  console.log('\nSettings → People with tabs (14 Oct)');
+  const keys = sb.PAGE_PICK.map(x => x[0]);
+  const on = m => keys.filter(k => m[k]);
+  // The pages a person can be given: every page but Settings, in the menu's order.
+  assertEqual([keys, keys.length], [['crm','crmOverview','adsGoogle','closings','jobs','payroll','outstanding','reminders','openItems','tasks','reference'], 11], 'pages: the 11 pages that can be given, in the menu order');
+  assertEqual(sb.ALL_SECTIONS.filter(k => k!=='settings').slice().sort(), keys.slice().sort(), 'pages: the same pages as ALL_SECTIONS without Settings');
+  assertEqual(keys.slice().sort((a, b) => sb.SECTION_ORDER.indexOf(a) - sb.SECTION_ORDER.indexOf(b)), keys, 'pages: in SECTION_ORDER order');
+  // Role defaults: nothing saved = the built-in defaults; a saved map wins; an empty or odd one falls back.
+  const R = (r, saved) => sb.roleDefaultPages(r, saved);
+  assertEqual([on(R('technician', {})), on(R('va', {})), on(R('marketing', {})), on(R('manager', {}))],
+    [['payroll','reminders','tasks'], ['crm','closings','jobs','payroll','outstanding','reminders','openItems','tasks','reference'], ['adsGoogle'], ['crm','crmOverview','closings','jobs','payroll','outstanding','reminders','openItems','tasks','reference']], 'role defaults: the built-in pages per role');
+  assertEqual([Object.keys(R('technician', {})), 'settings' in R('owner', {}), Object.keys(R('owner', {})).length], [keys, false, 11], 'role defaults: always the 11 pages in order, never Settings');
+  assertEqual(on(R('technician', { technician: { crm: true, settings: true } })), ['crm'], 'role defaults: a saved map wins; pages it leaves out are off; Settings is never given');
+  assertEqual([on(R('technician', { technician: {} })), on(R('va', { va: 'x' })), on(R('va', { va: ['crm'] })), on(R('technician', null))], [['payroll','reminders','tasks'], on(R('va', {})), on(R('va', {})), ['payroll','reminders','tasks']], 'role defaults: an empty or odd saved value falls back to the built-in pages');
+  assertEqual(sb.pagesDiff({ crm: true, payroll: false, reminders: true, tasks: true }, R('technician', {})), { add: ['crm'], off: ['payroll'] }, 'pages: what differs from the role defaults (added, taken away)');
+  assertEqual(sb.pagesDiff(R('va', {}), R('va', {})), { add: [], off: [] }, 'pages: the same as the defaults');
+  const c = sb.cleanPages({ crm: 1, settings: true, x: true });
+  assertEqual([sb.cleanPages(null), sb.cleanPages([1]), sb.cleanPages('x'), Object.keys(c), c.crm, on(c)], [null, null, null, keys, true, ['crm']], 'pages: cleanPages keeps the 11 pages as true/false, nothing else');
+  assertEqual([sb.listJoin([]), sb.listJoin(['A']), sb.listJoin(['A', 'B']), sb.listJoin(['A', 'B', 'C']), sb.listJoin(['A', '', null, 'B'])], ['', 'A', 'A and B', 'A, B and C', 'A and B'], 'listJoin: names in a sentence');
+  assertEqual([sb.settingsPageKey('pay'), sb.settingsPageKey('access'), sb.settingsPageKey('roles'), sb.settingsPageKey('profile'), sb.settingsPageKey('people')], ['people', 'people', 'people', 'profile', 'people'], 'settings: the old Pay, Access and Roles pages open People');
+  assertEqual([sb.hhmm12('17:30'), sb.hhmm12('00:05'), sb.hhmm12('12:00'), sb.hhmm12('23:59'), sb.hhmm12('bad'), sb.hhmm12('24:00'), sb.hhmm12(null)], ['5:30pm', '12:05am', '12:00pm', '11:59pm', '', '', ''], 'hhmm12: 24-hour time in words');
+  // Hourly pay over time: a change saved for a later day is the editor's starting point, but is not paid until its day.
+  const t1 = [{ min: 5, bonus: 10 }, { min: 8, bonus: 15 }];
+  sb.STATE.data.settings = { catalog: { pay: { hourly: [{ from: '2026-10-20', rate: 12, tiers: [{ min: 6, bonus: 20 }] }, { from: '2026-10-01', rate: 10, tiers: t1 }, { from: 'nope', rate: 99 }] } } };
+  assertEqual(sb.payHourlyList().map(x => x.from), ['2026-10-01', '2026-10-20'], 'hourly: saved entries oldest first, a bad date left out');
+  assertEqual([sb.payHourlyNext('2026-10-14').from, sb.payHourlyBase('2026-10-14').rate, sb.payHourlyFor('2026-10-14').rate, sb.payHourlyFor('2026-10-20').rate, sb.payHourlyNext('2026-10-20'), sb.payHourlyBase('2026-10-21').rate],
+    ['2026-10-20', 12, 10, 12, null, 12], 'hourly: a change saved for the 20th is edited from, but paid only from the 20th');
+  assertEqual(sb.payHourlyKey({ rate: 10, tiers: [{ min: 8, bonus: 15 }, { min: 5, bonus: 10 }] })===sb.payHourlyKey({ rate: '10', tiers: t1 }), true, 'hourly: the same pay whatever order the bonuses are in');
+  assertEqual(sb.payHourlyKey({ rate: 10, tiers: t1 })===sb.payHourlyKey({ rate: 10.5, tiers: t1 }), false, 'hourly: a new rate is a change');
+  const list = [{ from: '2026-10-01', rate: 10, tiers: t1 }], before = JSON.stringify(list);
+  const up1 = sb.payHourlyUpsert(list, '2026-10-01', 11, t1), up2 = sb.payHourlyUpsert(list, '2026-09-01', 9, []);
+  assertEqual([up1.map(x => [x.from, x.rate]), up2.map(x => [x.from, x.rate]), JSON.stringify(list)===before, up1[0].tiers], [[['2026-10-01', 11]], [['2026-09-01', 9], ['2026-10-01', 10]], true, [{ min: 8, bonus: 15 }, { min: 5, bonus: 10 }]], 'hourly: a change on the same day replaces it, another day is added in date order; the list passed in is unchanged');
+  const H = sb.payHourlyHistory([{ from: '2026-10-01', rate: 10, tiers: t1 }, { from: '2026-10-20', rate: 12, tiers: [] }, { from: '2026-08-04', rate: 9, tiers: [] }], '2026-10-14');
+  assertEqual(H.map(x => [x.from, x.state]), [['2026-10-20', 'next'], ['2026-10-01', 'now'], ['2026-08-04', 'past']], 'hourly: pay over time, newest first (next, now, past)');
+  assertEqual([sb.payHourlyHistory([{ from: '2026-11-01', rate: 12, tiers: [] }], '2026-10-14').map(x => [x.from, x.state, x.rate]), sb.payHourlyHistory([], '2026-10-14').map(x => [x.from, x.state, x.rate])],
+    [[['2026-11-01', 'next', 12], [null, 'now', 10]], [[null, 'now', 10]]], 'hourly: with nothing paid from a saved entry yet, the built-in $10 is paid now');
+  // The services on someone's Pay tab: every active one, plus a switched-off one they do or have a rate for.
+  const types = ['Aircon', 'Chimney', 'Pressure Washing', 'Other', 'Solar'], active = new Set(['Aircon', 'Pressure Washing', 'Other', 'Solar']);
+  assertEqual(sb.payServicesFor(types, active, ['Aircon', 'Chimney'], { Aircon: 30, 'Pressure Washing': null }).map(x => [x.key, x.active, x.does, x.rate]),
+    [['Aircon', true, true, 30], ['Chimney', false, true, null], ['Pressure Washing', true, false, null], ['Other', true, false, null], ['Solar', true, false, null]], 'pay tab: every active service, and a switched-off one they still do');
+  assertEqual(sb.payServicesFor(types, active, ['Aircon'], { Aircon: 30 }).map(x => x.key), ['Aircon', 'Pressure Washing', 'Other', 'Solar'], 'pay tab: a switched-off service they don\'t do and have no rate for is left out');
+  assertEqual(sb.payServicesFor(types, active, ['Aircon'], { Chimney: 25 }).map(x => x.key), types, 'pay tab: a switched-off service with a saved rate still shows');
+  sb.STATE.data.settings = { catalog: { pay: { jobTypes: { Guy: ['Aircon', 'Other'] } } } };
+  assertEqual([sb.missingRates('Guy', { Aircon: 30 }), sb.missingRates('Guy', { Aircon: 30, Other: 0 }), sb.missingRates('Alessandro', {}), sb.missingRates('Guy', null)], [['Other'], [], ['Pressure Washing'], ['Aircon', 'Other']], 'pay tab: the services they do with no rate yet (0% is a rate)');
+  const html = sb.empRatesHtml({ Aircon: 30, Other: 25, Chimney: 40 }, ['Aircon', 'Other']);
+  assertEqual([html.includes('Aircon 30%'), html.includes('Other 25%'), html.includes('Chimney'), sb.empRatesHtml({ 'Pressure Washing': 50 }).includes('Pressure W. 50%'), sb.empRatesHtml({}), sb.empRatesHtml(null)], [true, true, false, true, '', ''], 'cards: rates for the services they do, Other included (it used to be left out)');
+  sb.STATE.data.settings = { gstRatePercent: 10 };
+  // Who is paid how: the same rules as Payroll (payrollCommissionPeople / payrollHourlyPeople).
+  const E = (roles, employmentType, status) => ({ name: roles.join('') + employmentType, roles, employmentType, status: status || 'Active' });
+  const fx = [
+    { emp: null, prof: { role: 'marketing' } },
+    { emp: E(['Owner', 'Technician'], 'Salaried'), prof: { role: 'owner', fullName: 'Ofek' } },
+    { emp: E(['Owner'], 'Salaried'), prof: null },
+    { emp: E(['Technician', 'Sales'], 'Freelance-commission'), prof: { role: 'technician' } },
+    { emp: E(['VA'], 'Hourly'), prof: { role: 'va' } },
+    { emp: E(['Manager'], 'Salaried'), prof: { role: 'manager' } },
+  ];
+  assertEqual(fx.map(sb.personPayKind), ['none', 'owner', 'ownerNoLogin', { hourly: false, commission: true, other: false }, { hourly: true, commission: false, other: false }, { hourly: false, commission: false, other: true }], 'pay tab: owner wage (only with the owner login), commission, hourly or neither');
+  const data = { employees: fx.filter(x => x.emp).map(x => x.emp) };
+  assertEqual([sb.payrollCommissionPeople(data), sb.payrollHourlyPeople(data)], [[fx[3].emp.name], [fx[4].emp.name]], 'pay tab: the same people Payroll pays by commission and by the hour');
+  // The team server function starts from the same pages (P9).
+  const team = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'team', 'index.ts'), 'utf8');
+  const pages = Function('return ' + team.match(/export const PAGES = (\[[^\]]*\]);/)[1])();
+  const defs = Function('return ' + team.match(/export const ROLE_DEFAULTS: [^=]+= (\{[\s\S]*?\n\});/)[1])();
+  assertEqual(pages, keys, 'team function: the same pages as the app');
+  // A new technician's profile also gets finance (not a page): the database lets them read their own jobs and rates by it.
+  assertEqual([sb.newProfilePermissions('technician', R('technician', {})), sb.newProfilePermissions('va', { crm: true, finance: true }), sb.newProfilePermissions('technician', null), sb.newProfilePermissions('technician', { finance: false })],
+    [{ ...R('technician', {}), finance: true }, sb.cleanPages({ crm: true }), null, { ...sb.cleanPages({}), finance: true }], 'new profile: the pages ticked, plus finance for a technician only (as defaultPermissionsFor)');
+  assertEqual(sb.defaultPermissionsFor('technician').finance, true, 'new profile: the built-in technician permissions have finance too');
+  assertEqual(/newProfilePermissions\(st && st\.catalog/.test(team) && /role === "technician" \? \{ \.\.\.pages, finance: true \}/.test(team), true, 'team function: a new technician gets finance as well');
+  assertEqual(['manager', 'va', 'technician', 'marketing'].map(r => JSON.stringify(defs[r])===JSON.stringify(R(r, {}))), [true, true, true, true], 'team function: the same built-in pages per role as the app');
+  // The three old Settings pages are gone; every function lives on in People.
+  const html2 = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  const fnText = n => { const i = html2.search(new RegExp(`function ${n}\\(`)); if (i < 0) return ''; let j = html2.indexOf('{', i) + 1, d = 1; while (d) { if (html2[j]==='{') d++; else if (html2[j]==='}') d--; j++; } return html2.slice(i, j); };
+  const settingsFn = fnText('renderSettings');
+  assertEqual([/id: 'pay'/.test(settingsFn), /id: 'access'/.test(settingsFn), /id: 'roles'/.test(settingsFn), /id: 'people'/.test(settingsFn), /settingsPageKey\(ui\.page\)/.test(settingsFn)], [false, false, false, true, true], 'settings: Pay and commissions, Access for each person and Roles and access are gone; an old page key opens People');
+  assertEqual(['renderTechnicianSettingsCard', 'renderRolesPage', 'renderHourlyPaySettings', 'renderEmployeePanel', 'setPayRate', 'addPayTier'].filter(n => fnText(n)), [], 'settings: the old page renderers are deleted');
+  assertEqual([fnText('openEmployeeModal').includes('em-aircon'), /commissionRates\.set\(name, rates\)/.test(fnText('saveEmployeeModal')), /getElementById\('em-(aircon|chimney|pw|other)'\)/.test(fnText('saveEmployeeModal'))], [false, false, false], 'edit window: no rate inputs, so saving it never rewrites (or wipes) a commission rate');
+  assertEqual((html2.match(/db\.commissionRates\.set\(/g) || []).length, 2, 'commission rates are written in two places only: one rate on the Pay tab, and the move on a rename');
 }
 
 testRepeatServiceReminder(loadSandbox());
@@ -1656,6 +1949,10 @@ testSettingsRound2Small(loadSandbox());
 testRegionAndWeeks(loadSandbox());
 testBusinessDetails(loadSandbox());
 testVaAutoLogout(loadSandbox());
+testPeopleTabs(loadSandbox());
+testBranding(loadSandbox());
+testNotificationCards(loadSandbox());
+testConnectors(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

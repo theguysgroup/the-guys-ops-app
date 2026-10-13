@@ -122,9 +122,15 @@ function actionSandbox(){
     leadStage: () => 'New', chaseTooLong: () => false, isWorkday: () => true, Promise, console,
     // Settings → Pipeline stages: reaching any of these means the read-only check was skipped.
     catalogList: () => { log.db.push('opened'); return []; }, stageIsBuiltin: () => { log.db.push('opened'); return true; }, openStageRemove: () => log.db.push('opened'),
+    // Settings → Connectors: reaching any of these means the read-only check was skipped (closing a window is fine).
+    catalogObject: () => { log.db.push('opened'); return {}; }, openModal: () => log.db.push('opened'), closeModal: () => {}, closePopup: () => {},
   };
   vm.createContext(ctx);
-  const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'leadNotes', 'addLeadNote', 'deleteLeadNote', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'askReviewAgain', 'markReviewLeft', 'setChatAutoSms', 'setMyShift', 'toggleMyPhoneAvailable', 'storeFile', 'savePayrollInvoice', 'deleteLostReason', 'moveStageLeads', 'setStageActive', 'removeStage', 'setVaShiftTime'];
+  const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'leadNotes', 'addLeadNote', 'deleteLeadNote', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'askReviewAgain', 'markReviewLeft', 'setChatAutoSms', 'setMyShift', 'toggleMyPhoneAvailable', 'storeFile', 'savePayrollInvoice', 'deleteLostReason', 'moveStageLeads', 'setStageActive', 'removeStage', 'setVaShiftTime',
+    // Settings → People (14 Oct): pages, pay and role defaults
+    'togglePermission', 'resetPersonPages', 'setOwnerSalary', 'updateCommissionRateFromSettings', 'setTechJobType', 'setPayHebrew', 'setPayHebrewName', 'savePeopleHourly', 'applyRoleToPeople', 'setRolePage',
+    // Settings → Connectors (14 Oct): every switch, Disconnect / Remove, the add-ons and a new connected source
+    'connToggleItem', 'connItemOff', 'connToggleAccount', 'connAccountOff', 'connToggleAuto', 'openConnDisconnect', 'openConnRemove', 'connOpenStopWindow', 'connDisconnect', 'connReconnect', 'connRemove', 'connAddonConnect', 'connGbpSent', 'connAddConnectedSource'];
   vm.runInContext(names.map(fnText).join('\n'), ctx);
   return ctx;
 }
@@ -164,6 +170,41 @@ async function testActions(){
     await run(`setStageActive('Quoted', false)`);
     await run(`removeStage('sx1')`);
     await run(`setVaShiftTime('ron', 'logoutAt', '21:00')`);
+    // Settings → People: every change checks the mode before it touches anything (these fixtures would throw past it).
+    const before = ctx.log.toasts.length;
+    await run(`togglePermission('p1', 'crm', true)`);
+    await run(`resetPersonPages('p1')`);
+    await run(`setOwnerSalary('Ofek', '1300')`);
+    await run(`updateCommissionRateFromSettings('Guy', 'Aircon', '30')`);
+    await run(`setTechJobType('Guy', 'Aircon', false)`);
+    await run(`setPayHebrew('Guy', true)`);
+    await run(`setPayHebrewName('Guy', 'גיא')`);
+    await run(`applyRoleToPeople('va')`);
+    await run(`setRolePage('va', 'crm', true)`);
+    let savedHourly = 'x';
+    try { savedHourly = await vm.runInContext(`savePeopleHourly()`, ctx); } catch (e) { savedHourly = 'threw: ' + e.message; }
+    ok(savedHourly === false, `${mode}: an hourly pay change is not saved`, savedHourly);
+    ok(ctx.log.toasts.length - before === 10, `${mode}: each People change says it is not saved`, ctx.log.toasts.slice(before));
+    ok(ctx.STATE.data.commissionRates === undefined && ctx.STATE.data.settings.ownerSalaries === undefined, `${mode}: no rate or salary is changed on screen either`);
+    // Settings → Connectors (14 Oct): nothing is switched, disconnected, removed or added, and no window opens.
+    const beforeConn = ctx.log.toasts.length;
+    await run(`var connEv = { prevented: 0, preventDefault(){ this.prevented++; } }`);
+    await run(`connToggleItem('gads', 'stats')`);
+    await run(`connItemOff('gads', 'stats')`);
+    await run(`connToggleAccount(connEv, 'gads', '6569440597')`);
+    await run(`connToggleAccount(connEv, 'meta', '*')`);
+    await run(`connAccountOff('gads', '6569440597')`);
+    await run(`connToggleAuto('xero', 'inv')`);
+    await run(`openConnDisconnect('gads')`);
+    await run(`openConnRemove('xero')`);
+    await run(`connDisconnect('gads')`);
+    await run(`connReconnect('gads')`);
+    await run(`connRemove('xero')`);
+    await run(`connAddonConnect('chatgpt')`);
+    await run(`connGbpSent()`);
+    await run(`connAddConnectedSource('ChatGPT')`);
+    ok(vm.runInContext('connEv.prevented', ctx) === 2, `${mode}: an account tickbox clicked in a read-only mode stays as it was`);
+    ok(ctx.log.toasts.length - beforeConn === 14 && ctx.log.toasts.slice(beforeConn).every(t => /not saved/.test(t)), `${mode}: each Connectors change says it is not saved`, ctx.log.toasts.slice(beforeConn));
     // A receipt or invoice picked in a form is not uploaded to file storage (the sandbox has no storage: a call would throw).
     let stored = 'x';
     try { stored = await vm.runInContext(`storeFile('job1', 'parts-receipt', 'data:image/png;base64,AAAA')`, ctx); } catch (e) { stored = 'threw: ' + e.message; }
@@ -175,10 +216,44 @@ async function testActions(){
   }
 }
 
+// Look and branding and the colour picker (14 Oct): a colour picked in a read-only mode is not saved, and a colour being
+// tried on screen is dropped (the save guard is catalogSave's; this pins it for the new setters).
+function brandingSandbox(present){
+  const log = { toasts: [], db: [], applied: 0 };
+  const ctx = {
+    log, PRESENT: present, VIEW_AS_ID: null, JSON,
+    showToast: (m) => log.toasts.push(m), render: () => {}, applyCatalog: () => {}, applyBranding: () => { log.applied++; },
+    logSettingsActivity: (who, what) => log.db.push('activity: ' + what), getCurrentProfile: () => ({ fullName: 'Ofek' }),
+    db: { settings: { update: (patch) => { log.db.push('settings.update'); ctx.STATE.data.settings.catalog = patch.catalog; return Promise.resolve(true); } } },
+    STATE: { data: { settings: { catalog: { branding: { color: '' }, tags: [{ tag: 'Complaint', hint: '', color: '#A5473F', active: true }] } } } },
+  };
+  ctx.catalogList = (section) => JSON.parse(JSON.stringify(ctx.STATE.data.settings.catalog[section] || []));
+  vm.createContext(ctx);
+  const consts = ['BRAND_ORIGINAL', 'BRAND_MARK', 'THEME_OPTS', 'CAT_NAMES'].map(n => SRC.match(new RegExp(`const ${n} = [^\\n]+`))[0]).join('\n');
+  vm.runInContext(`var BRAND_PREVIEW = { bg: '#000000' };\n${consts}\n` + ['readOnlyReason', 'normHex', 'catalogObject', 'catalogId', 'catalogSave', 'setCatalogField', 'setBranding'].map(fnText).join('\n'), ctx);
+  return ctx;
+}
+function testBrandingReadOnly(){
+  const ro = brandingSandbox(true);
+  vm.runInContext(`setBranding('bg', '#5b6b82'); setCatalogField('tags', 'Complaint', 'color', '#1f66c9');`, ro);
+  ok(ro.log.db.length === 0, 'presentation mode: a background colour or a tag colour is not saved', ro.log.db);
+  ok(ro.log.toasts.length === 2 && ro.log.toasts.every(t => /not saved/.test(t)), 'presentation mode: each colour change says it is not saved', ro.log.toasts);
+  ok(JSON.stringify(vm.runInContext('BRAND_PREVIEW', ro)) === '{}' && ro.log.applied === 1, 'presentation mode: a colour being tried is dropped and the saved colours are put back', ro.log.applied);
+  ok(ro.STATE.data.settings.catalog.tags[0].color === '#A5473F' && ro.STATE.data.settings.catalog.branding.bg === undefined, 'presentation mode: nothing changes on screen either');
+  const rw = brandingSandbox(false);
+  vm.runInContext(`setCatalogField('tags', 'Complaint', 'color', '#a5473f'); setBranding('color', '#C31F2B');`, rw);
+  ok(rw.log.db.length === 0, 'the same colour written another way (or the original crimson) is not saved again', rw.log.db);
+  vm.runInContext(`setCatalogField('tags', 'Complaint', 'color', '#1F66C9'); setBranding('bg', '5B6B82');`, rw);
+  const cat = rw.STATE.data.settings.catalog;
+  ok(cat.tags[0].color === '#1f66c9' && cat.branding.bg === '#5b6b82' && rw.log.db.filter(x => x === 'settings.update').length === 2, 'normal mode: a new colour is saved as a clean lowercase code', cat);
+  ok(rw.log.db.includes('activity: Look and branding: background colour #5b6b82'), 'normal mode: the settings history names the change', rw.log.db);
+}
+
 (async () => {
   await testGuard();
   testStaticScan();
   await testActions();
+  testBrandingReadOnly();
   console.log(`read-only: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

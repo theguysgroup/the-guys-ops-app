@@ -1,6 +1,6 @@
 {
-  "name": "The Guys OPS",
-  "short_name": "The Guys",
+  "name": "OPS Service",
+  "short_name": "OPS Service",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

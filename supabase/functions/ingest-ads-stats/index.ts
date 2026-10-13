@@ -77,6 +77,93 @@ export function requestKind(body: any): string {
 }
 // --- end upload ticket ---
 
+// --- connector switches (P11, 14 Oct) ---
+// Settings → Connectors in the app keeps a switch for each part of each connector in settings.catalog.connectors:
+// { <id>: { off: { <item>: true }, accountsOff: { <account digits> | "*": true }, disconnected: true, removed: true } }.
+// Only what is off is saved. Whatever this function writes for a part that is switched off is skipped, and the reply
+// says so (skipped); the reply keeps ok:true and its old keys, so a routine that doesn't know about switches still works.
+// If the settings can't be read, nothing is skipped (fail open): losing a night's data is worse than writing it.
+const digits = (v: unknown) => String(v ?? "").replace(/\D/g, "");
+// deno-lint-ignore no-explicit-any
+export function connectorOff(catalog: any, id: string, item?: string | null, account?: string | null): boolean {
+  const all = catalog && typeof catalog === "object" ? catalog.connectors : null;
+  const e = all && typeof all === "object" ? all[id] : null;
+  if (!e || typeof e !== "object" || Array.isArray(e)) return false;
+  if (e.disconnected === true || e.removed === true) return true;
+  if (item && e.off && typeof e.off === "object" && e.off[item] === true) return true;
+  if (account !== undefined && account !== null && e.accountsOff && typeof e.accountsOff === "object") {
+    if (e.accountsOff["*"] === true) return true;
+    const d = digits(account);
+    if (d && e.accountsOff[d] === true) return true;
+  }
+  return false;
+}
+export const CONN_LABEL: Record<string, string> = {
+  "gads.stats": "Google Ads: keywords, search terms, ads and campaigns",
+  "gads.conv": "Google Ads: conversion settings and conversions per action",
+  "gads.kw": "Google Ads: which keyword brought each job",
+  "meta.ads": "Meta Ads: ad and placement stats",
+  "organic.gsc": "Search Console",
+  "organic.ga4": "GA4",
+  "organic.ai": "AI answers",
+  "organic": "Google Search Console + GA4",
+  "nightly.assess": "Nightly AI check: assessment",
+  "email.check": "Email (info@): lead emails checked against the CRM",
+};
+export function skipText(key: string, accountOff = false): string {
+  return `${CONN_LABEL[key] || key}${accountOff ? " (this account)" : ""} is switched off in Settings → Connectors; nothing was written`;
+}
+// Which switch an ad-stat batch belongs to: Google's conversion levels are "conv", the rest of Google "stats", Meta "ads".
+export function rowsSwitch(platform: string, level: string): [string, string] {
+  if (platform === "google") return ["gads", level === "conv_setting" || level === "conv_action" ? "conv" : "stats"];
+  return ["meta", "ads"];
+}
+// The skip text for an ad-stat batch, or null to write it. A Google account is matched by its digits; Meta has one
+// account ("*" in the app).
+// deno-lint-ignore no-explicit-any
+export function rowsGate(catalog: any, platform: string, level: string, account: string): string | null {
+  const [id, item] = rowsSwitch(platform, level), key = `${id}.${item}`;
+  if (connectorOff(catalog, id, item)) return skipText(key);
+  if (connectorOff(catalog, id, null, platform === "google" ? account : "*")) return skipText(key, true);
+  return null;
+}
+// The organic rows: Search Console, GA4, and the weekly check's AI answers. The weekly map pack and reviews have no
+// switch of their own: only a disconnected or removed Organic connector stops them.
+export function organicSwitch(source: string, level: string): [string, string | null] {
+  if (source === "gsc") return ["organic", "gsc"];
+  if (source === "ga4") return ["organic", "ga4"];
+  if (source === "serp" && level === "aimode") return ["organic", "ai"];
+  return ["organic", null];
+}
+// deno-lint-ignore no-explicit-any
+export function organicGate(catalog: any, source: string, level: string): string | null {
+  const [id, item] = organicSwitch(source, level);
+  return connectorOff(catalog, id, item) ? skipText(item ? `${id}.${item}` : id) : null;
+}
+// deno-lint-ignore no-explicit-any
+export function organicRowsOn<T extends { source: string; level: string }>(catalog: any, rows: T[]): T[] {
+  return rows.filter((r) => organicGate(catalog, r.source, r.level) === null);
+}
+// Keyword → job lookups: none when the switch is off; otherwise only the accounts that are on (a row without an account
+// is the aircon account, as the handler saves it).
+// deno-lint-ignore no-explicit-any
+export function kwRowsOn<T extends { account?: unknown }>(catalog: any, rows: T[]): T[] {
+  if (connectorOff(catalog, "gads", "kw")) return [];
+  return rows.filter((r) => !connectorOff(catalog, "gads", null, String(r?.account ?? "").trim() || "6569440597"));
+}
+// deno-lint-ignore no-explicit-any
+export function insightGate(catalog: any): string | null { return connectorOff(catalog, "nightly", "assess") ? skipText("nightly.assess") : null; }
+// deno-lint-ignore no-explicit-any
+export function emailCheckGate(catalog: any): string | null { return connectorOff(catalog, "email", "check") ? skipText("email.check") : null; }
+// Lines for the top of the organic digest, so the assessment doesn't read a switched-off part as "no data".
+// deno-lint-ignore no-explicit-any
+export function switchedOffLines(catalog: any): string[] {
+  if (connectorOff(catalog, "organic")) return [`SWITCHED OFF in Settings → Connectors: ${CONN_LABEL.organic} (nothing new comes in)`];
+  const off = ["gsc", "ga4", "ai"].filter((k) => connectorOff(catalog, "organic", k)).map((k) => CONN_LABEL[`organic.${k}`]);
+  return off.length ? [`SWITCHED OFF in Settings → Connectors: ${off.join(", ")}`] : [];
+}
+// --- end connector switches ---
+
 const LEVELS = new Set(["campaign", "keyword", "search_term", "ad", "hour", "dow", "device", "geo", "adset", "placement", "conv_setting", "conv_action"]);
 
 // --- lead email check (pure) ---
@@ -418,6 +505,16 @@ export function organicDigest(rows: OrgRow[], leads: any[], rev: Record<string, 
 }
 // --- end organic ---
 
+// The connector switches (settings.catalog), or null when they can't be read (then nothing is skipped: fail open).
+// deno-lint-ignore no-explicit-any
+async function loadCatalog(sb: any): Promise<any> {
+  try {
+    const { data, error } = await sb.from("settings").select("catalog").eq("id", 1).maybeSingle();
+    if (error) { console.warn("connector switches not read:", error.message); return null; }
+    return (data && data.catalog) || {};
+  } catch (e) { console.warn("connector switches not read:", String((e as Error)?.message || e)); return null; }
+}
+
 // deno-lint-ignore no-explicit-any
 if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && !(globalThis as any).__INGEST_TEST__) Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
@@ -437,6 +534,8 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
   // sends back campaign / ad group / keyword (clickAttribution), saved in gads_click_attribution.
   if (body && body.pendingGclids) {
     const sbp = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
+    const catK = await loadCatalog(sbp);
+    if (catK && connectorOff(catK, "gads", "kw")) return json({ ok: true, pending: [], skipped: skipText("gads.kw") });
     const since = new Date(Date.now() - 85 * 86400000).toISOString().slice(0, 10);
     const cq = await sbp.from("contacts").select("gclid, created_at").not("gclid", "is", null).neq("gclid", "").gte("created_at", since);
     if (cq.error) return json({ ok: false, error: "contacts failed: " + cq.error.message }, 500);
@@ -457,9 +556,13 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     }));
     if (!rows.length) return json({ ok: true, saved: 0 });
     const sba = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
-    const up = await sba.from("gads_click_attribution").upsert(rows, { onConflict: "gclid" });
+    const catA = await loadCatalog(sba);
+    const keep = catA ? kwRowsOn(catA, rows) : rows;
+    const skipped = keep.length < rows.length ? skipText("gads.kw", !connectorOff(catA, "gads", "kw")) : null;
+    if (!keep.length) return json({ ok: true, saved: 0, ...(skipped ? { skipped } : {}) });
+    const up = await sba.from("gads_click_attribution").upsert(keep, { onConflict: "gclid" });
     if (up.error) return json({ ok: false, error: up.error.message }, 500);
-    return json({ ok: true, saved: rows.length });
+    return json({ ok: true, saved: keep.length, ...(skipped ? { skipped } : {}) });
   }
   if (body && body.crmDigest) {
     // Read-only digest of Meta-sourced CRM leads per ad set (utm_content) for the nightly Meta assessment.
@@ -500,6 +603,8 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     const day = String(ins.day || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return json({ ok: false, error: "invalid insight day" }, 400);
     const sbi = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
+    const offI = insightGate(await loadCatalog(sbi));
+    if (offI) return json({ ok: true, insight: false, skipped: offI });
     // basis "real" (since 9 Oct): the Google assessment is written from the real leads, not Google's conversion count.
     const up = await sbi.from("ads_insights").upsert({ platform: p, account: String(body.account || ""), day, summary: String(ins.summary || ""), points: Array.isArray(ins.points) ? ins.points : [], ...(ins.basis === "real" ? { basis: "real" } : {}) }, { onConflict: "platform,account,day" });
     if (up.error) return json({ ok: false, error: "insight failed: " + up.error.message }, 500);
@@ -524,6 +629,8 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     const list = Array.isArray(body.leadEmails.emails) ? body.leadEmails.emails.slice(0, 500) : null;
     if (!list) return json({ ok: false, error: "invalid leadEmails.emails: expected an array" }, 400);
     const sbl = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
+    const offE = emailCheckGate(await loadCatalog(sbl));
+    if (offE) return json({ ok: true, saved: 0, need_body: [], days: [], skipped: offE });
     const cq = await readAll((a, b) => sbl.from("contacts").select("id,phone,email,source,created_at").order("created_at", { ascending: false }).order("id").range(a, b));
     if (cq.error) return json({ ok: false, error: "contacts failed: " + cq.error.message }, 500);
     const from = /^\d{4}-\d{2}-\d{2}$/.test(String(body.leadEmails.from || "")) ? String(body.leadEmails.from) : "";
@@ -543,6 +650,8 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     const b = organicBatch(body.organic);
     if (!b.ok) return json({ ok: false, error: b.error }, 400);
     const sbo = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
+    const offO = organicGate(await loadCatalog(sbo), b.source, b.level);
+    if (offO) return json({ ok: true, rowsWritten: 0, skipped: offO });
     const del = await sbo.from("organic_stats").delete().eq("source", b.source).eq("win", b.win).eq("level", b.level);
     if (del.error) return json({ ok: false, error: "delete failed: " + del.error.message }, 500);
     const at = new Date().toISOString();
@@ -556,24 +665,31 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     const w = weeklyBatches(body.seoWeekly);
     if (!w.ok) return json({ ok: false, error: w.error }, 400);
     const sbw = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
-    const at = new Date().toISOString(), written: Record<string, number> = {};
+    const catW = await loadCatalog(sbw);
+    const at = new Date().toISOString(), written: Record<string, number> = {}, skipped: string[] = [];
     for (const raw of w.batches) {
       const b = organicBatch(raw);
       if (!b.ok) return json({ ok: false, error: b.error }, 400);
+      const off = organicGate(catW, b.source, b.level);
+      if (off) { written[b.level] = 0; skipped.push(`${b.level}: ${off}`); continue; }
       const del = await sbw.from("organic_stats").delete().eq("source", b.source).eq("win", b.win).eq("level", b.level);
       if (del.error) return json({ ok: false, error: "delete failed: " + del.error.message }, 500);
       const ins = await sbw.from("organic_stats").insert(b.rows.map((r) => ({ ...r, updated_at: at })));
       if (ins.error) return json({ ok: false, error: "insert failed: " + ins.error.message }, 500);
       written[b.level] = b.rows.length;
     }
-    return json({ ok: true, week: w.week, written });
+    return json({ ok: true, week: w.week, written, ...(skipped.length ? { skipped } : {}) });
   }
   if (what === "organicFindings" || what === "organicDigest") {
     const sbf = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
     const rq = await readAll((a, b) => sbf.from("organic_stats").select("source,win,level,item,item2,clicks,impressions,position,extra").order("id").range(a, b));
     if (rq.error) return json({ ok: false, error: "organic rows failed: " + rq.error.message }, 500);
+    // A part switched off in Settings → Connectors is left out: its rules don't run (their open suggestions are left
+    // alone, not marked solved) and the digest says it is off.
+    const catF = await loadCatalog(sbf);
     // deno-lint-ignore no-explicit-any
-    const rows = (rq.data || []).map((r: any) => ({ ...r, clicks: Number(r.clicks) || 0, impressions: Number(r.impressions) || 0, position: r.position === null ? null : Number(r.position), extra: r.extra || {} }));
+    const allRows = (rq.data || []).map((r: any) => ({ ...r, clicks: Number(r.clicks) || 0, impressions: Number(r.impressions) || 0, position: r.position === null ? null : Number(r.position), extra: r.extra || {} }));
+    const rows = catF ? organicRowsOn(catF, allRows) : allRows;
     const sq = await readAll((a, b) => sbf.from("seo_suggestions").select("id,source,dedupe_key,issue_type,status,priority,title").order("id").range(a, b));
     if (sq.error) return json({ ok: false, error: "suggestions failed: " + sq.error.message }, 500);
     if (what === "organicFindings") {
@@ -602,7 +718,7 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     // deno-lint-ignore no-explicit-any
     const open = (sq.data || []).filter((s: any) => s.status === "open" || s.status === "in_progress");
     const iq = await sbf.from("ads_insights").select("day,summary,points").eq("platform", "organic").order("day", { ascending: false }).limit(1);
-    return json({ ok: true, lines: organicDigest(rows, leads, rev, open, (iq.data || [])[0] || null, end) });
+    return json({ ok: true, lines: [...(catF ? switchedOffLines(catF) : []), ...organicDigest(rows, leads, rev, open, (iq.data || [])[0] || null, end)] });
   }
   const platform = String(body?.platform || "");
   const account = String(body?.account || "");
@@ -634,6 +750,9 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
   }
 
   const sb = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
+  // Switched off in Settings → Connectors: nothing is deleted or written, so the last snapshot stays.
+  const offR = rowsGate(await loadCatalog(sb), platform, level, account);
+  if (offR) return json({ ok: true, rowsWritten: 0, skipped: offR });
   const del = await sb.from("ads_stats").delete().eq("platform", platform).eq("account", account).eq("win", win).eq("level", level);
   if (del.error) return json({ ok: false, error: "delete failed: " + del.error.message }, 500);
   for (let i = 0; i < rows.length; i += 500) {

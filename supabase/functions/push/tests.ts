@@ -177,7 +177,70 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   await bizNothing({ notify: { docExpiry: { on: true } }, business: { insurance: { workers: { expiry: "2026-10-01" } } } }, "business insurance: already expired = nothing sent");
   await bizNothing({ notify: { docExpiry: { on: true } }, business: { insurance: { workers: { expiry: "1/11/2026" } } } }, "business insurance: a bad date = nothing sent");
   eq((await bizNothing({ notify: { docExpiry: { on: false } }, business: { insurance: { workers: { expiry: "2026-11-01" } } } }, "business insurance: switch off = nothing sent")).off, true, "business insurance: rides on the document switch");
-  await bizNothing({ notify: { docExpiry: { on: true }, rules: { docDays: 10 } }, business: { insurance: { workers: { expiry: "2026-11-01" } } } }, "business insurance: 20 days off is outside 10 saved days");
+  // Its window is always 30 days (14 Oct, the Notifications card says "Always 30 days before"), whatever the document days.
+  sent.length = 0;
+  await scan(bizDb({ notify: { docExpiry: { on: true }, rules: { docDays: 10 } }, business: { insurance: { workers: { expiry: "2026-11-01" } } } }), NOW);
+  eq(sent.map((x) => x.msg.title), ["Business insurance: workers compensation expires soon"], "business insurance: 20 days off is sent even with 10 saved document days (always 30)");
+  await bizNothing({ notify: { docExpiry: { on: true }, rules: { docDays: 60 } }, business: { insurance: { workers: { expiry: "2026-11-12" } } } }, "business insurance: 31 days off is not sent, even with 60 saved document days");
+
+  // Its own switch (14 Oct). No bizInsurance key = it follows the document switch (above).
+  const empDocs = [{ id: "e1", name: "Guy", status: "Active", documents: { license: { expiry: "2026-10-30" } } }];
+  const own = async (notify: any) => { const d = bizDb({ notify, business: { insurance: { workers: { expiry: "2026-11-01" } } } }); d.T.employees = empDocs; sent.length = 0; const r = await scan(d, NOW); return { r, titles: sent.map((x) => x.msg.title).sort() }; };
+  eq((await own({ docExpiry: { on: true }, bizInsurance: { on: false } })).titles, ["Guy's driver licence expires soon"], "business insurance: its own switch off = the employee document still goes, the insurance does not");
+  const onlyIns = await own({ bizInsurance: { on: true } });
+  eq([onlyIns.titles, onlyIns.r.off], [["Business insurance: workers compensation expires soon"], undefined], "business insurance: its own switch on with documents off = only the insurance, and the scan is not 'off'");
+  eq((await own({ docExpiry: { on: false }, bizInsurance: { on: "yes" } })).r.off, true, "business insurance: a saved value that is not true / false follows the document switch");
+
+  // notifyOn: the same rule as the app's.
+  eq([notifyOn({}, "newLead"), notifyOn({}, "unpaid"), notifyOn({}, "docExpiry"), notifyOn({}, "invoice"), notifyOn({ invoice: { on: false } }, "invoice"), notifyOn(undefined, "invoice")],
+    [false, false, false, true, false, true], "notifyOn: off unless switched on; the invoice one on unless switched off");
+  eq([notifyOn({ docExpiry: { on: true } }, "bizInsurance"), notifyOn({ docExpiry: { on: false } }, "bizInsurance"), notifyOn({ docExpiry: { on: true }, bizInsurance: { on: false } }, "bizInsurance"), notifyOn({ bizInsurance: { on: true } }, "bizInsurance"), notifyOn({ docExpiry: { on: true }, bizInsurance: {} }, "bizInsurance")],
+    [true, false, false, true, true], "notifyOn: the business insurance follows the document switch until it has its own");
+
+  // Office only for a new lead, a waiting lead and a missed call (14 Oct): money and private details stay with the owners.
+  const odb = fakeDb({
+    profiles: [OFEK, { id: "u-ron", role: "va", full_name: "Ron" }],
+    push_subscriptions: [{ id: "p1", user_id: "u-ofek", endpoint: "https://push/ofek", p256dh: "k", auth: "a" }, { id: "p2", user_id: "u-ron", endpoint: "https://push/ron", p256dh: "k", auth: "a" }],
+    settings: [{ id: 1, catalog: { notify: { unpaid: { on: true, office: true }, docExpiry: { on: true, office: true } } } }],
+    jobs: [{ id: "j1", customer_name: "Jo", amount: 450, date: "2026-10-05", payment_status: "Unpaid" }], employees: empDocs, push_sent: [],
+  });
+  sent.length = 0;
+  await scan(odb, NOW);
+  eq(sent.map((x) => `${x.to.replace("https://push/", "")}:${x.msg.title}`).sort(), ["ofek:Guy's driver licence expires soon", "ofek:Unpaid for a week: Jo"], "office: an unpaid job and a document go to the owners only, even with office saved on them");
+
+  // "Send a test" on one card (14 Oct): the real wording, "Test · " in front, its own tag; never recorded as sent.
+  const R0 = notifyRules({}, undefined), TODAY = "2026-10-13";
+  const tp = (k: string) => { const p = testPayload(k, R0, TODAY); return p && [p.title, p.body, p.tag]; };
+  eq(tp("newLead"), ["Test · New lead: Sarah Mitchell", "Aircon · Google Ads", "test-newLead"], "testPayload: new lead");
+  eq(tp("leadWaiting"), ["Test · Waiting 15+ minutes: James Nguyen", "Nobody has picked up this Chimney lead yet.", "test-leadWaiting"], "testPayload: waiting lead");
+  eq(tp("missedCall"), ["Test · Missed call", "0491 570 156 · Aircon. Call them back.", "test-missedCall"], "testPayload: missed call");
+  eq(tp("unpaid"), ["Test · Unpaid for a week: Daniel Russo", "$480 from 2026-10-06. Time to chase it.", "test-unpaid"], "testPayload: unpaid job");
+  eq(tp("invoice"), ["Test · Invoice in: Sample Technician", "Sample Technician sent his commission invoice for 6–12 Oct. You can pay him.", "test-invoice"], "testPayload: commission invoice");
+  eq(tp("docExpiry"), ["Test · Sample Employee's refrigerant licence expires soon", "On 2026-11-12. Ask for the new one.", "test-docExpiry"], "testPayload: employee document");
+  eq(tp("bizInsurance"), ["Test · Business insurance: public liability expires soon", "On 2026-11-12. Renew it and upload the new certificate in Settings → Business details.", "test-bizInsurance"], "testPayload: business insurance");
+  eq([testPayload("googleReview", R0, TODAY), testPayload("nope", R0, TODAY)], [null, null], "testPayload: no Google review yet, nothing for an unknown kind");
+  eq(testPayload("unpaid", notifyRules({}, 10), TODAY)?.title, "Test · Unpaid for 10 days: Daniel Russo", "testPayload: uses the saved numbers");
+  eq([testPayload("newLead", R0, TODAY)?.url, testPayload("bizInsurance", R0, TODAY)?.url], [APP_URL + "?tab=crm", APP_URL + "?tab=settings&page=profile"], "testPayload: opens where the real one does");
+  const tdb = fakeDb({
+    profiles: [OFEK, NOAM, GUY],
+    push_subscriptions: [{ id: "p1", user_id: "u-ofek", endpoint: "https://push/ofek", p256dh: "k", auth: "a" }, { id: "p2", user_id: "u-noam", endpoint: "https://push/noam", p256dh: "k", auth: "a" }],
+    settings: [{ id: 1, unpaid_reminder_days: 7, catalog: {} }], push_sent: [],
+  });
+  sent.length = 0;
+  const tk = await handle(tdb, { step: "test", kind: "newLead" }, OFEK);
+  eq([tk.status, tk.body.ok, tk.body.sent, sent.map((x) => x.to), sent[0] && sent[0].msg.title, sent[0] && sent[0].msg.tag, tdb.T.push_sent.length],
+    [200, true, 1, ["https://push/ofek"], "Test · New lead: Sarah Mitchell", "test-newLead", 0], "test with a kind: only the caller's devices, that card's wording, nothing recorded as sent");
+  sent.length = 0;
+  await handle(tdb, { step: "test" }, OFEK);
+  eq(sent[0] && sent[0].msg, { title: "Notifications are on", body: "This phone will get the notifications that are switched on in Settings → Notifications.", url: APP_URL + "?tab=payroll", tag: "test" }, "test without a kind: exactly the original message");
+  sent.length = 0;
+  await handle(tdb, { step: "test", kind: "" }, OFEK);
+  eq(sent[0] && sent[0].msg.tag, "test", "test with an empty kind: the original message");
+  const bad = await handle(tdb, { step: "test", kind: "nope" }, OFEK);
+  eq([bad.status, bad.body.reason], [400, "unknown notification"], "test: an unknown kind is refused");
+  eq((await handle(tdb, { step: "test", kind: "newLead" }, GUY)).status, 403, "test with a kind: owners and managers only");
+  const none = await handle(tdb, { step: "test", kind: "newLead" }, { id: "u-nobody", role: "owner" });
+  eq([none.body.ok, none.body.devices], [false, 0], "test: no devices = not ok, 0 devices");
 
   console.log(`push: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);

@@ -9,16 +9,20 @@
 //   invoice  → { week, person, end? }: a technician's commission invoice for that pay week is in → every owner's devices
 //              get "you can pay <person>". Only that technician or an owner/manager may ask, and only when the invoice is
 //              really on the week's row. end = the week's last day (a short or long week after a week-start change).
-//   test     → the caller's own devices get a test notification (owners and managers).
+//   test     → the caller's own devices get a test notification (owners and managers). { kind } (optional, 14 Oct): one
+//              notification's real wording on sample data, titled "Test · …" (Settings → Notifications, "Send a test" on
+//              a card); without it the original "Notifications are on" test. A test is never recorded in push_sent.
 //   selftest → builds one encrypted, signed message for a made-up device without sending it, to prove the sending
 //              code works here (owners and managers).
 //   scan     → (every 10 minutes, from pg_cron; added 12 Oct) the news switched on in Settings → Notifications
 //              (settings.catalog.notify), each sent once: a new lead, a new lead still untouched after 15 minutes, a missed
 //              call, a job that has just turned 7 days unpaid, an employee document expiring within 30 days, and the
 //              business's own workers compensation / public liability insurance (catalog.business.insurance, owners only,
-//              added 14 Oct; it rides on the employee-document switch until the one notification engine takes it over).
-//              To the owners, and to the office (VA and managers) when chosen. Anyone may call it: it only ever sends what
-//              push_sent hasn't recorded yet, and does nothing while everything is switched off.
+//              added 14 Oct): always 30 days before, with its own switch (catalog.notify.bizInsurance); until that is
+//              set it follows the employee-document switch. To the owners, and to the office (VA and managers) when
+//              chosen, for a new lead, a waiting lead and a missed call only (money and private details: owners only).
+//              Anyone may call it: it only ever sends what push_sent hasn't recorded yet, and does nothing while
+//              everything is switched off.
 // A device that the phone's push service says is gone (404 / 410) is removed.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -99,7 +103,10 @@ export async function sendTo(sb: any, userIds: string[], payload: Record<string,
 const isOffice = (me: { role?: string } | null) => !!me && (me.role === "owner" || me.role === "manager");
 
 // ── scan: news for the phones (Settings → Notifications) ──
-export const NOTIFY_KINDS = ["newLead", "leadWaiting", "missedCall", "unpaid", "docExpiry"];
+export const NOTIFY_KINDS = ["newLead", "leadWaiting", "missedCall", "unpaid", "docExpiry", "bizInsurance"];
+// Only these may also go to the office (VA and managers); the rest are money and private details, for the owners only.
+export const OFFICE_KINDS = ["newLead", "leadWaiting", "missedCall"];
+export const BIZ_INSURANCE_DAYS = 30;   // the business insurance is always flagged 30 days before (Ofek 14 Oct)
 const DOC_LABEL: Record<string, string> = { license: "driver licence", passport: "passport", visa: "visa", heights: "working-at-heights ticket", arc: "refrigerant licence", insurance: "public liability insurance" };
 const BIZ_INSURANCE_LABEL: Record<string, string> = { workers: "workers compensation", liability: "public liability" };
 export function sydParts(ms: number) {
@@ -120,12 +127,64 @@ export function notifyRules(N: any, unpaidDays: unknown) {
   if (until <= from) { from = 8; until = 20; }
   return { waitMinutes: int(r.waitMinutes, 5, 240, 15), from, until, docDays: int(r.docDays, 1, 180, 30), unpaidDays: int(unpaidDays, 1, 365, 7) };
 }
+// Is a notification switched on? The same rule as the app's notifyOn: the invoice one is on unless turned off; the business
+// insurance follows the document switch until it has its own (a true / false saved on it).
+// deno-lint-ignore no-explicit-any
+export function notifyOn(N: any, k: string): boolean {
+  const x = N && N[k];
+  if (k === "invoice") return !(x && x.on === false);
+  if (k === "bizInsurance" && !(x && typeof x.on === "boolean")) return notifyOn(N, "docExpiry");
+  return !!(x && x.on);
+}
+
+// What each notification says (title, body, where it opens, tag). scan, the invoice step and the test step share them.
+// deno-lint-ignore no-explicit-any
+export function leadPayload(c: any) {
+  const what = [c.division, c.source].filter(Boolean).join(" · ");
+  return { title: `New lead: ${c.full_name || "no name"}`, body: what || "A new enquiry came in.", url: `${APP_URL}?tab=crm`, tag: `lead-${c.id}` };
+}
+// deno-lint-ignore no-explicit-any
+export function waitingPayload(c: any, R: { waitMinutes: number }) {
+  return { title: `Waiting ${R.waitMinutes}+ minutes: ${c.full_name || "a new lead"}`, body: `Nobody has picked up this ${c.division || ""} lead yet.`.replace("  ", " "), url: `${APP_URL}?tab=crm`, tag: `waiting-${c.id}` };
+}
+// deno-lint-ignore no-explicit-any
+export function callPayload(c: any) {
+  return { title: "Missed call", body: `${c.from_number || "A caller"}${c.division ? " · " + c.division : ""}. Call them back.`, url: `${APP_URL}?tab=myDay`, tag: `call-${c.id}` };
+}
+// deno-lint-ignore no-explicit-any
+export function unpaidPayload(j: any, R: { unpaidDays: number }) {
+  return { title: `${R.unpaidDays === 7 ? "Unpaid for a week" : `Unpaid for ${R.unpaidDays} days`}: ${j.customer_name || "a job"}`, body: `$${Number(j.amount || 0).toLocaleString("en-AU")} from ${j.date}. Time to chase it.`, url: `${APP_URL}?tab=outstanding`, tag: `unpaid-${j.id}` };
+}
+// deno-lint-ignore no-explicit-any
+export function docPayload(e: any, kind: string, exp: string) {
+  return { title: `${e.name}'s ${DOC_LABEL[kind] || kind} expires soon`, body: `On ${exp}. Ask for the new one.`, url: `${APP_URL}?tab=reference`, tag: `doc-${e.id}-${kind}` };
+}
+export function bizInsurancePayload(kind: string, exp: string) {
+  return { title: `Business insurance: ${BIZ_INSURANCE_LABEL[kind]} expires soon`, body: `On ${exp}. Renew it and upload the new certificate in Settings → Business details.`, url: `${APP_URL}?tab=settings&page=profile`, tag: `bizins-${kind}` };
+}
+export function invoicePayload(person: string, week: string, end?: unknown) {
+  return { title: `Invoice in: ${person}`, body: `${person} sent his commission invoice for ${weekText(week, end)}. You can pay him.`, url: `${APP_URL}?tab=payroll&week=${week}`, tag: `invoice-${week}-${person}` };
+}
+// "Send a test" on one card in Settings → Notifications: the real wording on made-up data, titled "Test · …" so nobody
+// takes it for a real lead or call. null for a kind that has no notification yet (a Google review) or does not exist.
+export function testPayload(kind: string, R: { waitMinutes: number; unpaidDays: number; docDays: number }, today: string) {
+  const p = kind === "newLead" ? leadPayload({ id: "test", full_name: "Sarah Mitchell", division: "Aircon", source: "Google Ads" })
+    : kind === "leadWaiting" ? waitingPayload({ id: "test", full_name: "James Nguyen", division: "Chimney" }, R)
+    : kind === "missedCall" ? callPayload({ id: "test", from_number: "0491 570 156", division: "Aircon" })
+    : kind === "unpaid" ? unpaidPayload({ id: "test", customer_name: "Daniel Russo", amount: 480, date: shiftDay(today, -R.unpaidDays) }, R)
+    : kind === "invoice" ? invoicePayload("Sample Technician", shiftDay(today, -7))
+    : kind === "docExpiry" ? docPayload({ id: "test", name: "Sample Employee" }, "arc", shiftDay(today, R.docDays))
+    : kind === "bizInsurance" ? bizInsurancePayload("liability", shiftDay(today, BIZ_INSURANCE_DAYS))
+    : null;
+  return p ? { ...p, title: `Test · ${p.title}`, tag: `test-${kind}` } : null;
+}
+
 // deno-lint-ignore no-explicit-any
 export async function scan(sb: any, nowMs: number) {
   const { data: st } = await sb.from("settings").select("catalog, unpaid_reminder_days").eq("id", 1).single();
   const N = (st && st.catalog && st.catalog.notify) || {};
   const R = notifyRules(N, st && st.unpaid_reminder_days);
-  const on = (k: string) => !!(N[k] && N[k].on);
+  const on = (k: string) => notifyOn(N, k);
   if (!NOTIFY_KINDS.some(on)) return { ok: true, off: true, sent: 0 };
   // one scan at a time: the first call in each 8-minute window claims it
   const { error: busy } = await sb.from("push_sent").insert({ key: `scan:${Math.floor(nowMs / (8 * 60000))}` });
@@ -139,19 +198,18 @@ export async function scan(sb: any, nowMs: number) {
       const at = arrivedAt(c); if (!at || TEST_TAG(c.tags)) continue;
       const atMs = Date.parse(at), age = nowMs - atMs;
       if (!(age >= 0 && age < 6 * 3600e3)) continue;   // only what came in in the last 6 hours, never a backlog
-      const what = [c.division, c.source].filter(Boolean).join(" · ");
-      if (on("newLead")) events.push({ key: `lead:${c.id}:${at}`, kind: "newLead", payload: { title: `New lead: ${c.full_name || "no name"}`, body: what || "A new enquiry came in.", url: `${APP_URL}?tab=crm`, tag: `lead-${c.id}` } });
+      if (on("newLead")) events.push({ key: `lead:${c.id}:${at}`, kind: "newLead", payload: leadPayload(c) });
       const touched = (c.status && c.status !== "New") || (c.contacted_at && Date.parse(c.contacted_at) >= atMs) || (c.last_read_at && Date.parse(c.last_read_at) >= atMs);
-      if (on("leadWaiting") && !touched && age >= R.waitMinutes * 60000 && now.hour >= R.from && now.hour < R.until) events.push({ key: `waiting:${c.id}:${at}`, kind: "leadWaiting", payload: { title: `Waiting ${R.waitMinutes}+ minutes: ${c.full_name || "a new lead"}`, body: `Nobody has picked up this ${c.division || ""} lead yet.`.replace("  ", " "), url: `${APP_URL}?tab=crm`, tag: `waiting-${c.id}` } });
+      if (on("leadWaiting") && !touched && age >= R.waitMinutes * 60000 && now.hour >= R.from && now.hour < R.until) events.push({ key: `waiting:${c.id}:${at}`, kind: "leadWaiting", payload: waitingPayload(c, R) });
     }
   }
   if (on("missedCall")) {
     const { data: calls } = await sb.from("calls").select("id, from_number, missed, started_at, division").eq("missed", true).gte("started_at", new Date(nowMs - 6 * 3600e3).toISOString());
-    for (const c of calls || []) events.push({ key: `call:${c.id}`, kind: "missedCall", payload: { title: "Missed call", body: `${c.from_number || "A caller"}${c.division ? " · " + c.division : ""}. Call them back.`, url: `${APP_URL}?tab=myDay`, tag: `call-${c.id}` } });
+    for (const c of calls || []) events.push({ key: `call:${c.id}`, kind: "missedCall", payload: callPayload(c) });
   }
   if (on("unpaid")) {
     const { data: jobs } = await sb.from("jobs").select("id, customer_name, amount, date, payment_status").eq("payment_status", "Unpaid").eq("date", shiftDay(today, -R.unpaidDays));
-    for (const j of jobs || []) events.push({ key: `unpaid:${j.id}`, kind: "unpaid", payload: { title: `${R.unpaidDays === 7 ? "Unpaid for a week" : `Unpaid for ${R.unpaidDays} days`}: ${j.customer_name || "a job"}`, body: `$${Number(j.amount || 0).toLocaleString("en-AU")} from ${j.date}. Time to chase it.`, url: `${APP_URL}?tab=outstanding`, tag: `unpaid-${j.id}` } });
+    for (const j of jobs || []) events.push({ key: `unpaid:${j.id}`, kind: "unpaid", payload: unpaidPayload(j, R) });
   }
   if (on("docExpiry")) {
     const { data: emps } = await sb.from("employees").select("id, name, status, documents");
@@ -161,16 +219,18 @@ export async function scan(sb: any, nowMs: number) {
         // deno-lint-ignore no-explicit-any
         const exp = (d as any) && (d as any).expiry; if (!exp || !/^\d{4}-\d{2}-\d{2}$/.test(exp)) continue;
         if (exp < today || exp > shiftDay(today, R.docDays)) continue;
-        events.push({ key: `doc:${e.id}:${kind}:${exp}`, kind: "docExpiry", payload: { title: `${e.name}'s ${DOC_LABEL[kind] || kind} expires soon`, body: `On ${exp}. Ask for the new one.`, url: `${APP_URL}?tab=reference`, tag: `doc-${e.id}-${kind}` } });
+        events.push({ key: `doc:${e.id}:${kind}:${exp}`, kind: "docExpiry", payload: docPayload(e, kind, exp) });
       }
     }
-    // The business's own insurance (Settings → Business details), within the same number of days.
+  }
+  if (on("bizInsurance")) {
+    // The business's own insurance (Settings → Business details), always 30 days before.
     const ins = (st && st.catalog && st.catalog.business && st.catalog.business.insurance) || {};
     for (const kind of Object.keys(BIZ_INSURANCE_LABEL)) {
       const exp = ins[kind] && ins[kind].expiry;
       if (typeof exp !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(exp)) continue;
-      if (exp < today || exp > shiftDay(today, R.docDays)) continue;
-      events.push({ key: `bizins:${kind}:${exp}`, kind: "bizInsurance", payload: { title: `Business insurance: ${BIZ_INSURANCE_LABEL[kind]} expires soon`, body: `On ${exp}. Renew it and upload the new certificate in Settings → Business details.`, url: `${APP_URL}?tab=settings&page=profile`, tag: `bizins-${kind}` } });
+      if (exp < today || exp > shiftDay(today, BIZ_INSURANCE_DAYS)) continue;
+      events.push({ key: `bizins:${kind}:${exp}`, kind: "bizInsurance", payload: bizInsurancePayload(kind, exp) });
     }
   }
   if (!events.length) return { ok: true, sent: 0 };
@@ -184,8 +244,8 @@ export async function scan(sb: any, nowMs: number) {
   for (const ev of events.slice(0, 30)) {
     const { error: dup } = await sb.from("push_sent").insert({ key: ev.key });   // claimed once, ever
     if (dup) { skipped++; continue; }
-    // the business insurance goes to the owners only
-    const to = [...owners, ...(ev.kind !== "bizInsurance" && N[ev.kind] && N[ev.kind].office ? office : [])];
+    // the office only for a new lead, a waiting lead and a missed call, when chosen; the rest to the owners only
+    const to = [...owners, ...(OFFICE_KINDS.includes(ev.kind) && N[ev.kind] && N[ev.kind].office ? office : [])];
     const r = await sendTo(sb, to, ev.payload, keys);
     sent += r.sent;
   }
@@ -202,7 +262,16 @@ export async function handle(sb: any, body: any, me: any) {
 
   if (step === "test") {
     if (!isOffice(me)) return { status: 403, body: { ok: false, reason: "owners only" } };
-    const r = await sendTo(sb, [me.id], { title: "Notifications are on", body: "This phone will get the notifications that are switched on in Settings → Notifications.", url: APP_URL + "?tab=payroll", tag: "test" }, await vapidKeys(sb));
+    const kind = body?.kind == null || body.kind === "" ? "" : String(body.kind);
+    let payload: Record<string, unknown> = { title: "Notifications are on", body: "This phone will get the notifications that are switched on in Settings → Notifications.", url: APP_URL + "?tab=payroll", tag: "test" };
+    if (kind) {
+      // One card's test: its real wording with the saved numbers (Settings → Notifications).
+      const { data: st } = await sb.from("settings").select("catalog, unpaid_reminder_days").eq("id", 1).single();
+      const p = testPayload(kind, notifyRules(st?.catalog?.notify, st?.unpaid_reminder_days), sydParts(Date.now()).day);
+      if (!p) return { status: 400, body: { ok: false, reason: "unknown notification" } };
+      payload = p;
+    }
+    const r = await sendTo(sb, [me.id], payload, await vapidKeys(sb));
     return { status: 200, body: { ok: r.sent > 0, ...r } };
   }
 
@@ -230,12 +299,7 @@ export async function handle(sb: any, body: any, me: any) {
     if (inv && inv.on === false) return { status: 200, body: { ok: true, off: true, sent: 0 } };
     const { data: owners } = await sb.from("profiles").select("id").eq("role", "owner");
     // deno-lint-ignore no-explicit-any
-    const r = await sendTo(sb, (owners || []).map((o: any) => o.id), {
-      title: `Invoice in: ${person}`,
-      body: `${person} sent his commission invoice for ${weekText(week, body?.end)}. You can pay him.`,
-      url: `${APP_URL}?tab=payroll&week=${week}`,
-      tag: `invoice-${week}-${person}`,
-    }, await vapidKeys(sb));
+    const r = await sendTo(sb, (owners || []).map((o: any) => o.id), invoicePayload(person, week, body?.end), await vapidKeys(sb));
     return { status: 200, body: { ok: true, ...r } };
   }
   return { status: 400, body: { ok: false, reason: "unknown step" } };
