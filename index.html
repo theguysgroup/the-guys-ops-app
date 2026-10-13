@@ -378,6 +378,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .tpl-field textarea, .tpl-field input.set-input { width: 100%; max-width: 72ch; font-size: 13px; line-height: 1.5; }
 .tpl-preview-label { font-size: 11px; font-weight: 700; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }
 .tpl-bubble { font-size: 13px; line-height: 1.45; background: var(--surface-2); border-radius: 16px 16px 16px 4px; padding: 9px 13px; max-width: 60ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tpl-bubble.tpl-spoken { border-radius: 10px; border: 1px dashed var(--line); background: var(--surface); }
 .tpl-count { font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; margin-top: 5px; }
 .tpl-count.warn { color: var(--warn); }
 .tpl-mail { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); padding: 12px 16px; max-width: 64ch; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -389,6 +390,30 @@ select:focus, input:focus, textarea:focus { border-color: var(--primary); outlin
 .tpl-problems { display: flex; flex-direction: column; gap: 4px; font-size: 12.3px; color: var(--bad); }
 .tpl-problems div { display: flex; gap: 6px; align-items: flex-start; }
 .tpl-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.review-cell { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.review-cell .btn { padding: 2px 6px; height: auto; font-size: 11.5px; }
+.review-links { display: flex; flex-direction: column; }
+.review-link-row { display: grid; grid-template-columns: 170px minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 12px; align-items: end; padding: 12px 20px; border-top: 1px solid var(--line-soft); }
+.review-link-row:first-child { border-top: 0; }
+.review-link-name { display: flex; align-items: center; gap: 8px; padding-bottom: 9px; flex-wrap: wrap; }
+.review-link-name .dot { width: 9px; height: 9px; border-radius: 99px; flex: none; }
+.review-link-row .field input { width: 100%; }
+@media (max-width: 760px) { .review-link-row { grid-template-columns: minmax(0, 1fr); padding: 12px 14px; } .review-link-name { padding-bottom: 0; } }
+.phone-key { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; margin-right: 9px; background: var(--surface-2); border: 1px solid var(--line); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; vertical-align: -1px; }
+.phone-key.off { color: var(--ink-faint); }
+.phone-preview { margin: 4px 20px 16px; padding: 11px 13px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: 12.8px; line-height: 1.5; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.phone-preview > span { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); width: 100%; }
+.phone-preview .btn { margin-left: auto; }
+.phone-people { display: flex; flex-direction: column; }
+.phone-person { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 12px; align-items: end; padding: 12px 20px; border-top: 1px solid var(--line-soft); }
+.phone-person:first-child { border-top: 0; }
+.phone-person.add { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
+.phone-person .field input { width: 100%; }
+.phone-person-ctl { display: flex; align-items: center; gap: 8px; padding-bottom: 6px; }
+.check-row { display: flex; gap: 6px 14px; flex-wrap: wrap; }
+.pay-tier-ctl { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pay-tier-ctl .set-num input { width: 64px; }
+@media (max-width: 760px) { .phone-person { grid-template-columns: minmax(0, 1fr); padding: 12px 14px; } .phone-preview { margin: 4px 14px 14px; } }
 .conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; padding: 14px 20px 18px; }
 .conn-card { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 14px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
 .conn-card:hover { border-color: color-mix(in srgb, var(--primary) 30%, var(--line)); box-shadow: var(--shadow-lg); transform: translateY(-1px); }
@@ -1162,12 +1187,30 @@ const PAYROLL_HOURLY_RATE = 10; // AUD per reported hour
 const PAYROLL_REMINDERS_FROM = '2026-09-20'; // first week paid through the Payroll board — earlier weeks were paid outside the app
 const PAYROLL_BOOKING_BONUS = [ { min:12, bonus:25 }, { min:8, bonus:15 }, { min:5, bonus:10 } ]; // checked top-down
 const PAYROLL_HEBREW_NAMES = { Guy:'גיא', Dolev:'דולב', Omri:'עומרי' }; // these people get their pay message in Hebrew; everyone else in English
-function bookingBonus(bookings){ const t = PAYROLL_BOOKING_BONUS.find(t => (Number(bookings)||0) >= t.min); return t ? t.bonus : 0; }
-function nextBookingTier(bookings){ const n = Number(bookings)||0; const t = PAYROLL_BOOKING_BONUS.slice().reverse().find(t => n < t.min); return t ? { needed: t.min - n, bonus: t.bonus } : null; }
+// Pay settings (Ofek 13 Oct, Settings → Pay and commissions; settings.catalog.pay). The hourly rate and the booking bonus
+// change from a date on (catalog.pay.hourly = [{ from, rate, tiers }]), so the days before keep what they were paid at;
+// nothing saved = the values above.
+function payCatalog(){ return ((STATE.data && STATE.data.settings && STATE.data.settings.catalog) || {}).pay || {}; }
+function payTiersOk(t){
+  if (!Array.isArray(t)) return null;
+  return t.map(x => ({ min: Math.round(Number(x && x.min)), bonus: Number(x && x.bonus) }))
+    .filter(x => x.min >= 1 && x.min <= 500 && Number.isFinite(x.bonus) && x.bonus >= 0 && x.bonus <= 10000)
+    .sort((a, b) => b.min - a.min).filter((x, i, a) => !i || a[i - 1].min !== x.min);
+}
+function payHourlyFor(day){
+  const d = day || new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date());
+  const all = Array.isArray(payCatalog().hourly) ? payCatalog().hourly : [];
+  const v = all.filter(x => x && /^\d{4}-\d{2}-\d{2}$/.test(x.from) && x.from <= d).sort((a, b) => a.from < b.from ? 1 : -1)[0];
+  const rate = v ? Number(v.rate) : NaN, tiers = v ? payTiersOk(v.tiers) : null;
+  return { rate: v && v.rate!==null && v.rate!=='' && Number.isFinite(rate) && rate >= 0 && rate <= 500 ? rate : PAYROLL_HOURLY_RATE, tiers: tiers || PAYROLL_BOOKING_BONUS, from: v ? v.from : null };
+}
+function payHebrewNames(){ const h = payCatalog().hebrew; return h && typeof h==='object' && !Array.isArray(h) ? h : PAYROLL_HEBREW_NAMES; }
+function bookingBonus(bookings, day){ const t = payHourlyFor(day).tiers.find(t => (Number(bookings)||0) >= t.min); return t ? t.bonus : 0; }
+function nextBookingTier(bookings, day){ const n = Number(bookings)||0; const t = payHourlyFor(day).tiers.slice().reverse().find(t => n < t.min); return t ? { needed: t.min - n, bonus: t.bonus } : null; }
 function salesLogBookings(l){ return (Number(l.bookingsAircon)||0) + (Number(l.bookingsChimney)||0) + (Number(l.bookingsPw)||0); }
 // Money shown in presentation mode is scaled everywhere, including Ron's hourly rate and bonus amounts.
 function presentAmt(n){ return (typeof PRESENT!=='undefined' && PRESENT) ? n * PRESENT_FACTOR : n; }
-function salesLogPay(l){ return round2(((Number(l.hours)||0) * PAYROLL_HOURLY_RATE + bookingBonus(salesLogBookings(l))) * (typeof PRESENT!=='undefined' && PRESENT ? PRESENT_FACTOR : 1)); }
+function salesLogPay(l){ return round2(((Number(l.hours)||0) * payHourlyFor(l.date).rate + bookingBonus(salesLogBookings(l), l.date)) * (typeof PRESENT!=='undefined' && PRESENT ? PRESENT_FACTOR : 1)); }
 function payrollWeekOf(dateStr){
   const d = parseLocalDate(dateStr);
   const sun = new Date(d); sun.setDate(d.getDate() - d.getDay());
@@ -1441,7 +1484,7 @@ function computePayrollHourly(data, person, weekKey){
     const d = parseLocalDate(wk.start); d.setDate(d.getDate()+i); const date = fmtLocal(d);
     const l = logs.find(x => x.date===date) || null;
     const bookings = l ? salesLogBookings(l) : 0;
-    days.push({ date, log:l, hours: l ? (Number(l.hours)||0) : 0, bookings, bonus: l ? bookingBonus(bookings) : 0, pay: l ? salesLogPay(l) : 0,
+    days.push({ date, log:l, hours: l ? (Number(l.hours)||0) : 0, bookings, bonus: l ? bookingBonus(bookings, date) : 0, pay: l ? salesLogPay(l) : 0,
       aircon: l ? (Number(l.bookingsAircon)||0) : 0, chimney: l ? (Number(l.bookingsChimney)||0) : 0, pw: l ? (Number(l.bookingsPw)||0) : 0 });
   }
   const worked = days.filter(d => d.hours>0 || d.bookings>0);
@@ -1457,8 +1500,8 @@ function computePayrollHourly(data, person, weekKey){
   };
 }
 function buildCommissionPayMessage(p){
-  const he = !!PAYROLL_HEBREW_NAMES[p.person];
-  const name = he ? PAYROLL_HEBREW_NAMES[p.person] : p.person;
+  const heNames = payHebrewNames(), he = !!heNames[p.person];
+  const name = he ? heNames[p.person] : p.person;
   const range = payrollRangeText(p.week.start, p.week.end);
   const pct = p.percent!==null ? ` (${p.percent}%)` : '';
   const lineText = l => {
@@ -2212,6 +2255,7 @@ const db = {
         companyName:'company_name', abn:'abn', defaultPaymentTerms:'default_payment_terms',
         legalName:'legal_name', acn:'acn',
         phoneEnabled:'phone_enabled', phoneRouting:'phone_routing', chatAutoSms:'chat_auto_sms', catalog:'catalog',
+        reviewRequestsAuto:'review_requests_auto', reviewsFrom:'reviews_from',
       };
       const row = {}; for (const k in patch) if (map[k]) row[map[k]] = patch[k];
       // Owner salaries are kept in owner_settings, which only the owners can read (not in settings, which all staff read).
@@ -5213,7 +5257,7 @@ function convInsertIntro(contactId, scope){
   const c = contactById(contactId), s = CONV.sessions[contactId];
   if (!c || !s) return;
   const first = String(s.first_name || '').trim();
-  const text = fillTemplate(msgTemplateText('chatIntro'), { hi: first ? 'Hi ' + first : 'Hi there', brand: s.brand || CONV_BRANDS[c.division] || 'The Guys Group', service: s.service_text || 'your enquiry' });
+  const text = fillTemplate(msgTemplateText('chatIntro'), { hi: first ? 'Hi ' + first : 'Hi there', brand: s.brand || brandOf(c.division) || 'The Guys Group', service: s.service_text || 'your enquiry' });
   if (convChannels(c).sms) setConvChannel(contactId, 'sms', scope);
   const ta = document.getElementById(scope+'-msg-out-text'); if (ta) { ta.value = text; ta.focus(); }
 }
@@ -5235,11 +5279,40 @@ async function convSend(c, channel, text, scope){
   } catch (e) { showToast('Not sent: ' + ((e && e.message) || e)); }
   finally { if (ta) { ta.disabled = false; ta.focus(); } }
 }
+// Website chat and texts (Ofek 13 Oct): the timings and each service's brand are settings, read by the conversations
+// function (catalog.chat, catalog.brands); nothing saved = 5 minutes, 2 hours, one text a day and the original brands.
+function chatRulesApp(){
+  const c = catalogObject('chat'), int = (v, lo, hi, d) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : d; };
+  const waitMinutes = int(c.waitMinutes, 1, 120, 5);
+  // The window has to be longer than the wait, or no chat would ever be old enough and still young enough for the text.
+  return { waitMinutes, windowHours: Math.max(int(c.windowHours, 1, 48, 2), Math.floor(waitMinutes / 60) + 1), oneADay: c.oneADay !== false };
+}
+function brandOf(division){ const b = catalogObject('brands')[division]; return typeof b==='string' && b.trim() ? b.trim() : (CONV_BRANDS[division] || ''); }
 function renderChatSettings(s){
-  return `<div class="card" style="margin-bottom:14px">
-    <label class="checkline" style="font-weight:700;font-size:14.5px"><input type="checkbox" ${s.chatAutoSms ? 'checked' : ''} onchange="setChatAutoSms(this.checked)"> Automatic text when a website chat isn't answered</label>
-    <div class="hint" style="margin-top:6px">If nobody in the office answers a website chat within 5 minutes, the customer gets one text from the business number. Answering means a reply in the chat, a text, or a call that connected. When the office is open (Mon–Fri 8am–5pm) the text says Ron is finishing another call. When it's closed, it says he'll call first thing when the office opens. Each number gets at most one automatic text a day, only mobiles get them, and nobody who replied STOP gets one. It only works once the business phone is switched on.</div>
-  </div>`;
+  const R = chatRulesApp();
+  const num = (key, val, lo, hi, unit) => `<span class="set-num"><input type="number" min="${lo}" max="${hi}" value="${val}" onchange="setChatRule('${key}', this.value)"><span>${unit}</span></span>`;
+  const svcs = activeOnly(LEAD_DIVISIONS, ACTIVE.divisions).filter(d => d !== 'Other');
+  return setBlock('Automatic text when a website chat isn\'t answered', `If nobody in the office answers a website chat in time, the customer gets one text from the business number. Answering means a reply in the chat, a text, or a call that connected. During office hours (${officeHoursText()}) the text says the office is finishing another call; outside them, that they'll call first thing. Only mobiles get it, never anyone who replied STOP, and only once the business phone is on. The words are in Message templates.`, setRows([
+      ['Send the automatic text', '', setToggle(!!s.chatAutoSms, "setChatAutoSms(!this.classList.contains('on'))")],
+      ['Wait before sending', 'Time the office has to answer first.', num('waitMinutes', R.waitMinutes, 1, 120, 'minutes')],
+      ['Still send it for chats up to', 'An older chat that was missed gets no text.', num('windowHours', R.windowHours, 1, 48, 'hours old')],
+      ['At most one automatic text a day per number', '', setToggle(R.oneADay, "setChatRule('oneADay', !this.classList.contains('on'))")],
+    ]))
+    + setBlock('Brand for each service', 'The name the customer sees in texts and emails about that service ({brand} in the templates).', setRows(svcs.map(d => [esc(divLabel(d)), '', `<input class="set-input" style="width:240px" value="${esc(brandOf(d))}" placeholder="${esc(CONV_BRANDS[d] || brandName())}" onchange="setBrandFor('${esc(jsStr(d))}', this.value)">`])));
+}
+function setChatRule(key, value){
+  const c = catalogObject('chat');
+  if (key==='oneADay') { catalogSave('chat', { ...c, oneADay: !!value }, `at most one automatic text a day: ${value ? 'yes' : 'no'}`); return; }
+  const n = Number(value), lim = key==='waitMinutes' ? [1, 120] : [1, 48];
+  if (!Number.isInteger(n) || n < lim[0] || n > lim[1]) { showToast(`Enter a whole number from ${lim[0]} to ${lim[1]}`, { kind: 'warn' }); render(); return; }
+  if (key==='windowHours' && n * 60 <= chatRulesApp().waitMinutes) { showToast('This has to be longer than the wait before sending', { kind: 'warn' }); render(); return; }
+  if (key==='waitMinutes' && n >= chatRulesApp().windowHours * 60) { showToast('The wait has to be shorter than the oldest chat that still gets a text', { kind: 'warn' }); render(); return; }
+  catalogSave('chat', { ...c, [key]: n }, key==='waitMinutes' ? `wait ${n} minutes before the automatic text` : `automatic text for chats up to ${n} hours old`);
+}
+function setBrandFor(division, value){
+  const b = catalogObject('brands'), v = String(value || '').trim();
+  if (v) b[division] = v; else delete b[division];
+  catalogSave('brands', b, `${divLabel(division)}: brand ${v ? '"' + v + '"' : 'back to the original'}`);
 }
 function setChatAutoSms(on){
   if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
@@ -5295,13 +5368,45 @@ function reviewNeed(j, r, today, auto){
   if (!r) return auto && j.date >= shiftDays(today, -2) ? null : 'ask';
   if (r.status==='waiting') return null;
   if (r.status==='sent') {
-    const day = r.sent_at ? localDay(r.sent_at) : '';
-    return (Number(r.ask_count) || 1) < 2 && !!day && day < today && day >= shiftDays(today, -14) ? 'again' : null;
+    const day = r.sent_at ? localDay(r.sent_at) : '', c = reviewCfg();
+    return (Number(r.ask_count) || 1) < 2 && !!day && day <= shiftDays(today, -c.remindAfterDays) && day >= shiftDays(today, -c.remindWithinDays) ? 'again' : null;
   }
   if (r.status==='skipped' && auto && !/customer card|mobile or email|job type/i.test(r.reason || '')) return null;
   return 'ask';
 }
 const reviewAutoOn = () => !!(STATE.data && STATE.data.settings && STATE.data.settings.reviewRequestsAuto);
+// Google review requests (Ofek 13 Oct): every rule here is a setting (Settings → Google reviews, catalog.reviews). The
+// review-requests function reads the same values and keeps these defaults when nothing is saved.
+const REVIEW_DEFAULTS = { sendFrom: 8, sendUntil: 20, morning: 10, askAgainMonths: 6, remindAfterDays: 1, remindWithinDays: 14,
+  links: {
+    Aircon: { link: 'https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU', result: 'Enjoy the fresh, clean air!' },
+    Chimney: { link: 'https://g.page/r/CZUuKFAccuR4EBM/review', result: 'Enjoy your clean, safe fireplace!' },
+    'Pressure Washing': { link: 'https://g.page/r/CZjy0MO5zKE7EBM/review', result: 'Enjoy your fresh, clean outdoor area!' },
+  } };
+function reviewCfg(){
+  const c = catalogObject('reviews'), d = REVIEW_DEFAULTS;
+  const int = (k, lo, hi) => { const v = Number(c[k]); return Number.isInteger(v) && v >= lo && v <= hi ? v : d[k]; };
+  let sendFrom = int('sendFrom', 0, 23), sendUntil = int('sendUntil', 1, 24), morning = int('morning', 0, 23);
+  if (sendUntil <= sendFrom) { sendFrom = d.sendFrom; sendUntil = d.sendUntil; }
+  if (morning < sendFrom || morning >= sendUntil) morning = sendFrom;
+  const remindAfterDays = int('remindAfterDays', 1, 60), remindWithinDays = Math.max(remindAfterDays, int('remindWithinDays', 1, 120));
+  return { sendFrom, sendUntil, morning, askAgainMonths: int('askAgainMonths', 0, 36), remindAfterDays, remindWithinDays, links: (c.links && typeof c.links==='object') ? c.links : {} };
+}
+// The review link and thank-you line for a service: the one saved in Settings, else the original.
+// The original for a service: by its name, else by what it sounds like (as reviewDefault in the review-requests function).
+function reviewDefaultFor(key){
+  if (REVIEW_DEFAULTS.links[key]) return REVIEW_DEFAULTS.links[key];
+  const t = String(key || '').toLowerCase();
+  if (/chim|flue|fire/.test(t)) return REVIEW_DEFAULTS.links.Chimney;
+  if (/\bpw\b|pressure|wash|surface|roof|driveway|solar/.test(t)) return REVIEW_DEFAULTS.links['Pressure Washing'];
+  if (/air|\bac\b|split|duct|vent|hvac/.test(t)) return REVIEW_DEFAULTS.links.Aircon;
+  return {};
+}
+function reviewLinkFor(key){
+  const own = reviewCfg().links[key] || {}, def = reviewDefaultFor(key);
+  const link = /^https:\/\/\S+$/.test(String(own.link || '').trim()) ? String(own.link).trim() : (def.link || '');
+  return { link, result: String(own.result ?? '').trim() || def.result || '', custom: !!(own.link || own.result) };
+}
 function mdReviewDone(j, today){
   const r = REVIEW_REQ && j ? REVIEW_REQ[reviewInvoiceKey(j.invoiceNumber)] : null;
   return !reviewNeed(j, r, today || todayStr(), reviewAutoOn());
@@ -6904,14 +7009,24 @@ async function loadReviewRequests(){
   if (UI.tab==='jobs') refreshJobsTable();
   else if (UI.tab==='myDay' || UI.tab==='dashboard') renderKeepingInput();
 }
+// A job's review request (Ofek 13 Oct). Asking by hand: the "Ask for review" button, then "Sent ✓". Asking automatically
+// (Settings → Google reviews): no button for jobs the system asks for, only whether the request went; jobs from before
+// it was switched on keep the button. Both say whether the customer left a review, and it can be marked by hand.
 function reviewAskCell(j, quiet){   // quiet: a plain button, for a list where every row has one
   if (REVIEW_REQ===null) { loadReviewRequests(); return '<span class="hint">…</span>'; }
   if (j.reviewDoNotAsk) return pill('bad', "Don't ask");
-  if (j.reviewTaken) return pill('good', 'Review taken');
+  if (j.reviewTaken) return `<span title="Marked on the job; click Review taken to change it in the job">${pill('good', 'Review left ✓')}</span>`;
   const r = REVIEW_REQ[reviewInvoiceKey(j.invoiceNumber)];
-  if (r && r.status==='sent') return `<span title="${esc(r.requested_by ? 'Asked by '+r.requested_by : 'Asked automatically')}">${pill('good', ((Number(r.ask_count)||1) > 1 ? 'Asked again ' : 'Asked ')+fmtDateShort(localDay(r.sent_at)))}</span>`;
+  const mark = `<button class="btn ghost small" onclick="markReviewLeft('${j.id}')" title="The customer left a Google review">Left a review?</button>`;
+  if (r && r.status==='sent') return `<span class="review-cell"><span title="${esc(r.requested_by ? 'Asked by '+r.requested_by : 'Asked automatically')}">${pill('good', ((Number(r.ask_count)||1) > 1 ? 'Sent again ✓ ' : 'Sent ✓ ')+fmtDateShort(localDay(r.sent_at)))}</span><span class="job-sub">No review yet</span>${mark}</span>`;
   if (r && r.status==='waiting') return pill('warn', 'Goes '+new Date(r.send_after).toLocaleString('en-AU', { timeZone:'Australia/Sydney', weekday:'short', hour:'numeric', minute:'2-digit' }));
   if (!j.invoiceNumber) return '<span class="hint">No invoice #</span>';
+  const s = STATE.data.settings || {};
+  // Automatic asking covers new jobs; one entered late (older than 2 days with no request) keeps the button, as on My Day.
+  if (reviewAutoOn() && j.date >= (s.reviewsFrom || '') && (r || j.date >= shiftDays(todayStr(), -2))) {
+    if (r && (r.status==='skipped' || r.status==='error')) return `<span class="review-cell"><span title="${esc(r.reason || 'The request failed')}">${pill('bad', 'Not sent')}</span><span class="job-sub">${esc(r.reason || 'the request failed')}</span><button class="btn ghost small" onclick="askForReview('${j.id}')">Try again</button></span>`;
+    return `<span title="Asked automatically between ${esc(String(reviewCfg().sendFrom))}:00 and ${esc(String(reviewCfg().sendUntil))}:00">${pill('neutral', 'Not sent yet')}</span>`;
+  }
   return `${r && r.status==='error' ? pill('bad','Failed')+' ' : ''}<button class="btn ${quiet ? 'ghost' : 'primary'} small" onclick="askForReview('${j.id}')">Ask for review</button>`;
 }
 const REVIEW_ASK_REASONS = {
@@ -6933,10 +7048,11 @@ async function askForReview(jobId, again){
     const out = await res.json().catch(() => ({}));
     if (out.ok) {
       logJobActivity(j, getCurrentProfile()?.fullName || 'Unknown', (again ? 'Google review reminder' : 'Google review request') + (out.status==='sent' ? ' sent (text now, email from info@ shortly)' : ' scheduled for the morning'));
-      showToast(out.status==='sent' ? `Review request sent to ${j.customerName}: text now, email within 15 minutes` : `After hours: the review request goes at 10:00 tomorrow`);
+      const goes = out.send_after ? new Date(out.send_after).toLocaleString('en-AU', { timeZone:'Australia/Sydney', weekday:'short', hour:'numeric', minute:'2-digit' }) : '';
+      showToast(out.status==='sent' ? `Review request sent to ${j.customerName}: text now, email within 15 minutes` : `Outside the sending hours: the review request goes ${goes || 'when they start'}`);
     } else if (out.reason==='already_asked' || out.reason==='asked_recently') {
       const when = out.sent_at ? ` on ${fmtDateShort(localDay(out.sent_at))}` : '';
-      confirmAction(out.reason==='already_asked' ? `${j.customerName} was already asked for a review for this job${when}. Ask again?` : `${j.customerName} was already asked for a review in the last 6 months (another job). Ask again anyway?`,
+      confirmAction(out.reason==='already_asked' ? `${j.customerName} was already asked for a review for this job${when}. Ask again?` : `${j.customerName} was already asked for a review in the last ${reviewCfg().askAgainMonths} months (another job). Ask again anyway?`,
         () => askForReview(jobId, true), { danger:false, title:'Already asked', confirmLabel:'Ask again' });
     } else showToast('Not sent: ' + (REVIEW_ASK_REASONS[out.reason] || out.reason || 'unknown error'));
     REVIEW_REQ = null; loadReviewRequests();
@@ -7241,7 +7357,11 @@ function openJobModal(jobId){
 // technician is selected. Anyone not listed here (owners, managers, or a future hire) keeps every
 // job type, since they aren't limited to a single specialty.
 const TECH_JOB_TYPES = { Guy:['Aircon','Chimney','Other'], Dolev:['Aircon','Chimney','Other'], Omri:['Aircon','Chimney','Other'], Alessandro:['Pressure Washing'] };
-function jobTypesForTech(name){ return TECH_JOB_TYPES[name] || JOB_TYPES; }
+// Saved in Settings → Pay and commissions (catalog.pay.jobTypes, Ofek 13 Oct); nothing saved = the list above.
+function jobTypesForTech(name){
+  const saved = (payCatalog().jobTypes || {})[name], ok = Array.isArray(saved) ? JOB_TYPES.filter(t => saved.includes(t)) : [];
+  return ok.length ? ok : (TECH_JOB_TYPES[name] || JOB_TYPES);
+}
 function onJobTechChange(){
   const tech = document.getElementById('jm-tech').value;
   const typeSelect = document.getElementById('jm-type');
@@ -9157,10 +9277,10 @@ function renderPayrollBoard(profile, data, viewChips){
     <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Paid jobs</th><th class="num">Commission</th><th class="num">Equipment &amp; materials</th><th class="num">Total to pay</th><th class="num">Not paid yet</th><th>Invoices</th><th>Cash to collect</th><th>Salary</th><th>Message</th></tr></thead>
       <tbody>${commRows || `<tr><td colspan="10">${emptyState('No technicians', 'Add technicians on the Employees tab')}</td></tr>`}</tbody></table></div>
     <div class="hint" style="margin-top:6px">Commission = (amount before GST − the job's expenses) × the technician's %. Independent contractors (Alessandro) cover their own expenses, so theirs is on the full amount before GST. Equipment &amp; materials = what the technician paid for himself (equipment, and parts on a job): paid back in full, on its own invoice, in the week it was entered.</div>
-    <div class="section-title">Hourly staff <span class="tag">$${presentAmt(PAYROLL_HOURLY_RATE)}/hour + daily booking bonus</span></div>
+    <div class="section-title">Hourly staff <span class="tag">$${presentAmt(payHourlyFor(wk.end).rate)}/hour + daily booking bonus</span></div>
     <div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Hours</th><th class="num">Bookings</th><th class="num">Bonuses</th><th class="num">Total</th><th>Salary</th><th>Message</th></tr></thead>
       <tbody>${hourlyRows || `<tr><td colspan="7">${emptyState('No hourly staff', 'Set the employee’s Employment Type to Hourly on the Employees tab')}</td></tr>`}</tbody></table></div>
-    <div class="hint" style="margin-top:6px">Daily bonus by that day's bookings: ${PAYROLL_BOOKING_BONUS.slice().reverse().map((t,i,arr)=>`${t.min}${arr[i+1]?`–${arr[i+1].min-1}`:'+'} → $${presentAmt(t.bonus)}`).join(' · ')}</div>
+    <div class="hint" style="margin-top:6px">Daily bonus by that day's bookings: ${payHourlyFor(wk.end).tiers.slice().reverse().map((t,i,arr)=>`${t.min}${arr[i+1]?`–${arr[i+1].min-1}`:'+'} → $${presentAmt(t.bonus)}`).join(' · ')}</div>
     ${payrollBonusesBoardCard(data, weekKey)}
   `;
 }
@@ -9194,7 +9314,7 @@ function renderMyPay(profile, data, person, isPreview){
     return `${head}
       ${renderPayrollPeriodNav(false)}
       <div class="grid-4">
-        <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Pay this week so far</div><div class="stat-value">${payMoney(h.total)}</div><div class="stat-sub">${h.hours}h × $${presentAmt(PAYROLL_HOURLY_RATE)} + ${payMoney(presentAmt(h.bonuses))} booking bonuses${h.extra.total ? ` + ${payMoney(h.extra.total)} bonus` : ''}</div></div>
+        <div class="card stat-card" style="--stat-accent:var(--good)"><div class="stat-label">Pay this week so far</div><div class="stat-value">${payMoney(h.total)}</div><div class="stat-sub">${h.hours}h × $${presentAmt(payHourlyFor(wk.end).rate)} + ${payMoney(presentAmt(h.bonuses))} booking bonuses${h.extra.total ? ` + ${payMoney(h.extra.total)} bonus` : ''}</div></div>
         <div class="card stat-card" style="--stat-accent:var(--primary)"><div class="stat-label">Bookings this week</div><div class="stat-value">${h.bookings}</div><div class="stat-sub">${divName('Aircon')} ${h.byDivision.Aircon} · ${divName('Chimney')} ${h.byDivision.Chimney} · ${divName('Pressure Washing', 'Pressure W.')} ${h.byDivision['Pressure Washing']}</div></div>
         ${payrollHoursCard(h)}
         ${payrollTasksCard(wk)}
@@ -9211,7 +9331,7 @@ function renderMyPay(profile, data, person, isPreview){
           <div class="field"><label>Bookings — Pressure Washing</label><input type="number" id="sl-pw" min="0" step="1" value="${log ? log.bookingsPw : ''}" placeholder="0"></div>
           <div class="field"><button class="btn primary" onclick="saveSalesLog('${p}')">Save correction</button></div>
         </div>
-        <div class="hint">Pay is $${presentAmt(PAYROLL_HOURLY_RATE)} per hour you report, plus a daily bonus on that day's total bookings: ${PAYROLL_BOOKING_BONUS.slice().reverse().map((t,i,arr)=>`${t.min}${arr[i+1]?`–${arr[i+1].min-1}`:'+'} → $${presentAmt(t.bonus)}`).join(' · ')}.</div>
+        <div class="hint">Pay is $${presentAmt(payHourlyFor(wk.end).rate)} per hour you report, plus a daily bonus on that day's total bookings: ${payHourlyFor(wk.end).tiers.slice().reverse().map((t,i,arr)=>`${t.min}${arr[i+1]?`–${arr[i+1].min-1}`:'+'} → $${presentAmt(t.bonus)}`).join(' · ')}.</div>
       </div>` : `<div class="hint" style="margin-top:14px">Your hours and bookings fill in by themselves: hours from Log In to Log Out on My Day, bookings = every booking made that day. If something looks wrong, tell Ofek or Noam.</div>`}
       <div class="section-title">This week <span class="tag">${payrollWeekLabel(wk)}</span></div>
       ${payrollDaysTable(h)}
@@ -10952,7 +11072,7 @@ const EMP_DOCS = [
   { kind:'arc', label:'Refrigerant licence (ARC)', expiry:true },
   { kind:'insurance', label:'Public liability insurance', expiry:true },
 ];
-const EMP_DOC_WARN_DAYS = 30;   // Reminders and the card flag a document this many days before it expires
+const EMP_DOC_WARN_DAYS = 30;   // Reminders and the card flag a document this many days before it expires (default; Settings → Notifications)
 const VISA_TYPES = ['Citizen','Permanent resident','Working Holiday (417)','Work and Holiday (462)','Student (500)','Skilled (482)','Bridging','Other'];
 function fmtDateYear(s){ return s ? parseLocalDate(s).toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' }) : '—'; }
 // An ABN is 11 digits with a check: take 1 off the first digit, weight the digits, and the sum divides by 89.
@@ -10966,8 +11086,9 @@ function abnValid(abn){
 function employeeDocExpiry(doc, today){
   if (!doc || !doc.expiry) return null;
   const days = Math.round((parseLocalDate(doc.expiry) - parseLocalDate(today)) / 864e5);
-  return { days, tone: days < 0 ? 'bad' : days <= EMP_DOC_WARN_DAYS ? 'warn' : 'good',
-    text: days < 0 ? `expired ${fmtDateYear(doc.expiry)}` : `${days <= EMP_DOC_WARN_DAYS ? 'expires' : 'valid until'} ${fmtDateYear(doc.expiry)}` };
+  const warn = typeof notifyRulesApp==='function' ? notifyRulesApp().docDays : EMP_DOC_WARN_DAYS;
+  return { days, tone: days < 0 ? 'bad' : days <= warn ? 'warn' : 'good',
+    text: days < 0 ? `expired ${fmtDateYear(doc.expiry)}` : `${days <= warn ? 'expires' : 'valid until'} ${fmtDateYear(doc.expiry)}` };
 }
 // What an active person's card is still missing: ABN and bank for anyone paid by invoice, a licence for technicians,
 // and an emergency contact for everyone.
@@ -11422,7 +11543,8 @@ async function saveEquipSpendModal(itemId){
 /* ── settings ────────────────────────────────────────────────────────── */
 function renderTechnicianSettingsCard(emp){
   const rates = STATE.data.commissionRates[emp.name] || { Aircon:null, Chimney:null, 'Pressure Washing':null, Other:null };
-  const allowedTypes = jobTypesForTech(emp.name);
+  const allowedTypes = jobTypesForTech(emp.name), n = esc(jsStr(emp.name));
+  const heName = payHebrewNames()[emp.name], he = !!heName;
   return `<div class="card" style="margin-bottom:14px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       ${techTag(emp.name)}
@@ -11434,7 +11556,82 @@ function renderTechnicianSettingsCard(emp){
         <div class="field"><label>${jt}</label><input type="number" min="0" max="100" placeholder="—" value="${rates[jt]!=null?rates[jt]:''}" ${allowedTypes.includes(jt)?'':'disabled'} onchange="updateCommissionRateFromSettings('${esc(emp.name)}','${jt}',this.value)"></div>
       `).join('')}
     </div>
+    <div class="stat-label" style="margin-bottom:6px">Jobs they do</div>
+    <div class="check-row">${JOB_TYPES.map(t => `<label class="checkline"><input type="checkbox" ${allowedTypes.includes(t) ? 'checked' : ''} onchange="setTechJobType('${n}','${esc(jsStr(t))}',this.checked)"> ${esc(divLabel(t))}</label>`).join('')}</div>
+    <div class="hint" style="margin:4px 0 14px">Once they're picked on a job, only these job types are offered.</div>
+    <div class="stat-label" style="margin-bottom:6px">Weekly pay message</div>
+    <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+      <div class="field"><label>Language</label><select onchange="setPayHebrew('${n}', this.value==='he')"><option value="en" ${he ? '' : 'selected'}>English</option><option value="he" ${he ? 'selected' : ''}>Hebrew</option></select></div>
+      ${he ? `<div class="field"><label>Name in the message</label><input dir="rtl" value="${esc(heName)}" onchange="setPayHebrewName('${n}', this.value)"></div>` : ''}
+    </div>
   </div>`;
+}
+// Settings → Pay and commissions (Ofek 13 Oct). Saved in settings.catalog.pay; see payHourlyFor.
+function payTodayStr(){ return new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date()); }
+function payCatalogCopy(){ return JSON.parse(JSON.stringify(payCatalog())); }
+// A change to the rate or the bonus starts today: today's entry is added or replaced, the earlier ones stay as they were.
+function savePayHourly(rate, tiers, what){
+  const c = payCatalogCopy(), today = payTodayStr();
+  c.hourly = (Array.isArray(c.hourly) ? c.hourly : []).filter(v => v && v.from !== today).concat([{ from: today, rate, tiers }]);
+  catalogSave('pay', c, what);
+}
+function setPayRate(value){
+  const n = Number(value);
+  if (String(value).trim()==='' || !Number.isFinite(n) || n < 0 || n > 500) { showToast('Enter an amount from 0 to 500', { kind: 'warn' }); render(); return; }
+  const cur = payHourlyFor(); if (round2(n)===cur.rate) return;
+  savePayHourly(round2(n), cur.tiers, `hourly rate $${round2(n)} from today`);
+}
+function setPayTier(min, field, value){
+  const cur = payHourlyFor(), tiers = cur.tiers.map(t => ({ ...t })), t = tiers.find(x => x.min===min), n = Number(value);
+  if (!t) { render(); return; }
+  if (field==='min' && (!Number.isInteger(n) || n < 1 || n > 500)) { showToast('Enter a whole number of bookings', { kind: 'warn' }); render(); return; }
+  if (field==='min' && n!==min && tiers.some(x => x.min===n)) { showToast(`There is already a bonus from ${n} bookings`, { kind: 'warn' }); render(); return; }
+  if (field==='bonus' && (String(value).trim()==='' || !Number.isFinite(n) || n < 0 || n > 10000)) { showToast('Enter an amount', { kind: 'warn' }); render(); return; }
+  if (t[field]===n) return;
+  t[field] = field==='bonus' ? round2(n) : n;
+  savePayHourly(cur.rate, payTiersOk(tiers), `booking bonus from ${t.min} bookings: $${t.bonus} a day, from today`);
+}
+function addPayTier(){
+  const minEl = document.getElementById('pay-new-min'), bonusEl = document.getElementById('pay-new-bonus');
+  const min = Number(minEl && minEl.value), bonus = Number(bonusEl && bonusEl.value);
+  if (!Number.isInteger(min) || min < 1 || min > 500) { showToast('Enter a whole number of bookings', { kind: 'warn' }); return; }
+  if (!bonusEl || String(bonusEl.value).trim()==='' || !Number.isFinite(bonus) || bonus < 0 || bonus > 10000) { showToast('Enter an amount', { kind: 'warn' }); return; }
+  const cur = payHourlyFor();
+  if (cur.tiers.some(x => x.min===min)) { showToast(`There is already a bonus from ${min} bookings`, { kind: 'warn' }); return; }
+  savePayHourly(cur.rate, payTiersOk(cur.tiers.concat([{ min, bonus: round2(bonus) }])), `booking bonus added: from ${min} bookings, $${round2(bonus)} a day, from today`);
+}
+function removePayTier(min){
+  confirmAction(`Remove the bonus from ${min} bookings a day? It stops from today; days before keep it.`, () => {
+    const cur = payHourlyFor();
+    savePayHourly(cur.rate, cur.tiers.filter(x => x.min!==min), `booking bonus from ${min} bookings removed, from today`);
+  }, { title: 'Remove this bonus?', confirmLabel: 'Remove' });
+}
+function setPayHebrew(name, on){
+  const c = payCatalogCopy(), h = { ...payHebrewNames() };
+  if (on) h[name] = h[name] || name; else delete h[name];
+  c.hebrew = h;
+  catalogSave('pay', c, `${name}'s weekly pay message in ${on ? 'Hebrew' : 'English'}`);
+}
+function setPayHebrewName(name, value){
+  const v = String(value || '').trim();
+  if (!v) { showToast('Enter the name for the message', { kind: 'warn' }); render(); return; }
+  const c = payCatalogCopy(), h = { ...payHebrewNames() }; h[name] = v; c.hebrew = h;
+  catalogSave('pay', c, `${name}'s name in the pay message: ${v}`);
+}
+function setTechJobType(name, type, on){
+  const cur = jobTypesForTech(name), next = JOB_TYPES.filter(t => t===type ? on : cur.includes(t));
+  if (!next.length) { showToast('Keep at least one job type', { kind: 'warn' }); render(); return; }
+  const c = payCatalogCopy(); c.jobTypes = { ...(c.jobTypes || {}), [name]: next };
+  catalogSave('pay', c, `${name} does: ${next.map(divLabel).join(', ')}`);
+}
+function renderHourlyPaySettings(){
+  const cur = payHourlyFor(), asc = cur.tiers.slice().reverse();
+  const money = (val, onchange) => `<span class="set-num"><span>$</span><input type="number" min="0" step="0.5" value="${val}" onchange="${onchange}"></span>`;
+  const tierRows = asc.map((t, i) => { const next = asc[i + 1]; return [`${t.min}${next ? '–' + (next.min - 1) : '+'} bookings in a day`, '', `<span class="pay-tier-ctl"><span class="set-num"><input type="number" min="1" value="${t.min}" aria-label="From bookings" onchange="setPayTier(${t.min},'min',this.value)"><span>bookings</span></span>${money(t.bonus, `setPayTier(${t.min},'bonus',this.value)`)}<button type="button" class="btn small ghost" title="Remove" aria-label="Remove this bonus" onclick="removePayTier(${t.min})">${ico('trash', 14)}</button></span>`]; });
+  tierRows.push(['Add a bonus', 'From how many bookings in a day, and how much.', `<span class="pay-tier-ctl"><span class="set-num"><input type="number" min="1" id="pay-new-min" placeholder="15" aria-label="From bookings"><span>bookings</span></span><span class="set-num"><span>$</span><input type="number" min="0" step="0.5" id="pay-new-bonus" placeholder="35" aria-label="Bonus"></span><button type="button" class="btn small" onclick="addPayTier()">${ico('plus', 14)} Add</button></span>`]);
+  return setBlock('Hourly staff', `Office staff paid by the hour (Employment type Hourly on the employee). Payroll counts the hours from Log In to Log Out, plus a bonus for that day's bookings. A change counts from today; the days before keep what they were paid.${cur.from ? ` These amounts since ${fmtDateShort(cur.from)}.` : ''}`, setRows([
+      ['Hourly rate', '', `<span class="set-num"><span>$</span><input type="number" min="0" step="0.5" value="${cur.rate}" onchange="setPayRate(this.value)"><span>per hour</span></span>`],
+    ].concat(tierRows)));
 }
 function renderSettings(profile){
   const others = STATE.profiles.filter(p => p.role==='technician' || p.role==='va');
@@ -11472,17 +11669,18 @@ function renderSettings(profile){
     { group: 'Business', id: 'hours', icon: 'clock', title: 'Office hours and holidays', desc: 'Chasing clocks, the new-lead alert and My Day follow these.', body: () => renderOfficeHoursPage() },
     { group: 'Business', id: 'services', icon: 'layers', title: 'Services', desc: 'What the business does. Each service has its own colour, used everywhere in the app, and its own list of jobs.', body: () =>
         setBlock('Services and what they include', 'Drag to change the order. A service switched off leaves the forms but keeps its history and stays in the reports.', catalogListHtml('services', { name: true, subs: true, toggle: true, color: true }) + catalogAddButton('services', 'Add a service'))
-        + setBlock('Job types', 'The job types in Jobs & Commissions and Closings.', setRows([['Job types follow the services', 'One job type per service, in the same order.', setToggle(true, '', true)]])) },
+        + setBlock('Job types', 'The job types in Jobs & Commissions and Closings.', setRows([['Job types follow the services', 'One job type per service, in the same order.', pill('neutral', 'Always')]])) },
     { group: 'Business', id: 'money', icon: 'dollar', title: 'Tax and payments', desc: 'How amounts are counted and when money owed is flagged.', body: () => setBlock('GST', '', setRows([
         ['GST rate', 'Used to split the GST out of amounts that include it.', `<span class="set-num"><input type="number" min="0" max="100" value="${s.gstRatePercent}" onchange="updateBusinessSetting('gstRatePercent', this.value, 'GST rate')"><span>%</span></span>`],
       ])) + setBlock('Getting paid', '', setRows([
         ['Default payment terms', 'For example "7 days".', `<input class="set-input" value="${esc(s.defaultPaymentTerms)}" placeholder="e.g. 7 days" onchange="updateBusinessProfileField('defaultPaymentTerms', this.value.trim(), 'Default payment terms')">`],
-        ['Flag a job as unpaid after', 'It shows in Outstanding and in Reminders.', `<span class="set-num"><input type="number" min="1" value="${s.unpaidReminderDays}" onchange="updateBusinessSetting('unpaidReminderDays', this.value, 'Unpaid reminder threshold')"><span>days</span></span>`],
+        ['Flag a job as unpaid after', 'It shows in Outstanding and in Reminders.', `<span class="set-num"><input type="number" min="1" max="365" value="${s.unpaidReminderDays}" onchange="updateBusinessSetting('unpaidReminderDays', this.value, 'Unpaid reminder threshold')"><span>days</span></span>`],
       ])) + setBlock('Payment methods', 'The choices in Closings and Jobs. One switched off leaves the forms; jobs paid that way keep it.', catalogListHtml('payments', { toggle: true }) + catalogAddButton('payments', 'Add a payment method')) },
     { group: 'Team', id: 'people', icon: 'users', title: 'People', desc: 'Who can sign in and what they do.', body: () => renderPeoplePage() },
     { group: 'Team', id: 'roles', icon: 'shield', title: 'Roles and access', desc: 'What each role can open. A new person gets their role\'s pages; anyone can still get an exception on their own.', body: () => renderRolesPage() },
     { group: 'Team', id: 'access', icon: 'idcard', title: 'Access for each person', desc: 'Exceptions, person by person, including Ron. A change reaches them the next time they open or refresh the app.', body: () => `<div class="set-note">${ico('alert', 16)}<span>Manager accounts see everything an owner sees except Settings, so they aren't listed here.</span></div>${cards}` },
-    { group: 'Team', id: 'pay', icon: 'wallet', title: 'Pay and commissions', desc: 'How everyone is paid. Payroll works it out from these.', body: () => `<div class="set-sub">Technicians: commission and working days</div>${techCards}`
+    { group: 'Team', id: 'pay', icon: 'wallet', title: 'Pay and commissions', desc: 'How everyone is paid. Payroll works it out from these.', body: () => `<div class="set-sub">Technicians: commission, jobs and pay message</div>${techCards}`
+        + renderHourlyPaySettings()
         + setBlock('Owners', 'A fixed weekly wage, not commission, seen only by owners.', setRows(owners.map(o => [esc(o.fullName), '', `<span class="set-num"><input type="number" min="0" value="${(s.ownerSalaries||{})[o.fullName]||0}" onchange="setOwnerSalary('${jsStr(o.fullName)}', this.value)"><span>$/week</span></span>`]))) },
     { group: 'Sales', id: 'pipeline', icon: 'kanban', title: 'Pipeline', desc: 'The stages a lead goes through, and the rules that keep leads from falling through the cracks.', body: () => {
         const r = catalogRules();
@@ -11491,7 +11689,7 @@ function renderSettings(profile){
             ['Quoted and Follow up need a date in the future', 'The lead can\'t be left there without one, so it never falls through the cracks.', setToggle(r.needDate, "setCatalogRule('needDate', !this.classList.contains('on'))")],
             ['Warn when a quote has been idle for', 'A red line on the card and in the table.', `<span class="set-num"><input type="number" min="1" value="${RULES.quoteIdleDays}" onchange="setCatalogRule('quoteIdleDays', this.value)"><span>days</span></span>`],
             ['Chasing: ask to decide (keep or lost) after', 'It shows on My Day and on the card.', `<span class="set-num"><input type="number" min="1" value="${RULES.chaseDecideDays}" onchange="setCatalogRule('chaseDecideDays', this.value)"><span>days</span></span>`],
-            ['Chasing calls count on office days only', `${officeHoursText()} (set in Office hours and holidays).`, setToggle(true, '', true)],
+            ['Chasing calls count on office days only', `${officeHoursText()} (set in Office hours and holidays).`, pill('neutral', 'Always')],
           ]))
           + setBlock('Reasons a lead is lost', 'Shown when a lead moves to Lost, and in the Leads & Marketing report.', catalogListHtml('lostReasons', { name: true, toggle: true }) + catalogAddButton('lostReasons', 'Add a reason'));
       } },
@@ -11511,7 +11709,7 @@ function renderSettings(profile){
       ])) },
     { group: 'Account', id: 'security', icon: 'lock', title: 'Security', desc: 'Keeping the business\'s data safe.', body: () => renderSecurityPage() },
     { group: 'Account', id: 'branding', icon: 'palette', title: 'Look and branding', desc: 'How the app looks for everyone in the business.', body: () => renderBrandingPage() },
-    { group: 'Account', id: 'billing', icon: 'card', title: 'Plan and billing', desc: 'For when the app is offered to other businesses. Nothing is charged today.', body: () => renderBillingPage() },
+    // Plan and billing (renderBillingPage) stays hidden until the app is offered to other businesses (Ofek 13 Oct).
   ];
   const ui = UI.settings || (UI.settings = { page: 'setup', open: false });
   const cur = pages.find(pg => pg.id===ui.page) || pages[0];
@@ -11543,7 +11741,7 @@ function setBlock(title, desc, body){ return `<div class="set-block"><div class=
 function setRows(rows){ return `<div class="set-rows">${rows.map(([label, desc, ctl]) => `<div class="set-row"><div class="set-row-text"><b>${label}</b>${desc ? `<span>${esc(desc)}</span>` : ''}</div><div class="set-row-ctl">${ctl}</div></div>`).join('')}</div>`; }
 // A switch, as in the mockup. Locked ones show the rule but can't be changed here.
 function setToggle(on, onclick, locked){ return `<button type="button" class="set-toggle${on ? ' on' : ''}" role="switch" aria-checked="${!!on}"${locked ? ' disabled title="Always on"' : ` onclick="${onclick}"`}></button>`; }
-const CAT_NAMES = { services: 'Services', stages: 'Pipeline stages', sources: 'Lead sources', tags: 'Tags', lostReasons: 'Reasons a lead is lost', payments: 'Payment methods', rules: 'Pipeline rules', security: 'Security', myday: 'My Day', notify: 'Notifications', hours: 'Office hours', business: 'Business details', roles: 'Roles and access', branding: 'Look and branding', templates: 'Message templates' };
+const CAT_NAMES = { services: 'Services', stages: 'Pipeline stages', sources: 'Lead sources', tags: 'Tags', lostReasons: 'Reasons a lead is lost', payments: 'Payment methods', rules: 'Pipeline rules', security: 'Security', myday: 'My Day', notify: 'Notifications', hours: 'Office hours', business: 'Business details', roles: 'Roles and access', branding: 'Look and branding', templates: 'Message templates', reviews: 'Google reviews', chat: 'Website chat and texts', brands: 'Brands', pay: 'Pay' };
 const CAT_SWATCHES = ['#1f66c9', '#2b6cc4', '#0e8a8a', '#16a34a', '#c99a06', '#c4580f', '#d03b5c', '#7746c9', '#a5473f', '#776e64'];
 function STAGE_RULE_TEXT(k){
   return ({ New: 'Every new enquiry starts here', Chasing: `Calls counted on office days · decide after ${RULES.chaseDecideDays} days`,
@@ -11681,7 +11879,6 @@ function catalogDragEnd(){
   const list = catalogList(d.section).sort((a, b) => order.indexOf(catalogId(d.section, a)) - order.indexOf(catalogId(d.section, b)));
   catalogSave(d.section, list, 'order changed');
 }
-const NEXT_UPDATE = '<span class="pill neutral" title="Needs a change on the server, coming in the next update">Next update</span>';
 function setBusinessInfo(key, value){ const b = catalogObject('business'); const v = String(value || '').trim(); if ((b[key] || '')===v) return; b[key] = v; catalogSave('business', b, `${{ phone: 'main phone', email: 'email', website: 'website', address: 'address' }[key] || key} ${v ? 'set to ' + v : 'cleared'}`); }
 
 // Get set up: each step ticks itself off from what is really there.
@@ -11903,7 +12100,13 @@ const MSG_TEMPLATES = [
     fields: [{ key: 'missedCall', text: "Hi, it's The Guys Service Group. Sorry we missed your call! We'll call you back shortly. If it's easier, reply here with what you need and your suburb." }] },
   { id: 'missedCallClosed', name: 'Missed call (office closed)', channel: 'Text', when: 'The same, when the call comes in after hours.', vars: [],
     fields: [{ key: 'missedCallClosed', text: "Hi, it's The Guys Service Group. Thanks for calling - our office is closed right now, we'll call you back first thing. If it's easier, reply here with what you need and your suburb." }] },
-  { id: 'chatOpen', name: 'Website chat not answered (office open)', channel: 'Text', when: '5 minutes after a website chat nobody answered, once automatic texts are on.', vars: CHAT_TPL_VARS,
+  { id: 'phoneGreeting', name: 'Phone greeting', channel: 'Call', when: 'Read out to every caller while the phones are answered, before the menu (the menu is in Settings → Phone).', vars: [],
+    fields: [{ key: 'phoneGreeting', text: "Thanks for calling The Guys Service Group. This call may be recorded for quality and training." }] },
+  { id: 'phoneClosed', name: 'Voicemail (office closed)', channel: 'Call', when: 'Read out when a call comes in outside the hours, before the caller leaves a message.', vars: [],
+    fields: [{ key: 'phoneClosed', rows: 4, text: "Thanks for calling The Guys Service Group. Our office is closed right now. Please leave a short message after the tone with your name, your suburb and what you need, and we'll call you back first thing. We'll also send you a text." }] },
+  { id: 'phoneMissed', name: 'Voicemail (nobody answered)', channel: 'Call', when: 'Read out when nobody picks up, before the caller leaves a message.', vars: [],
+    fields: [{ key: 'phoneMissed', rows: 4, text: "Sorry, we couldn't get to the phone. Please leave a short message after the tone with your name, your suburb and what you need, and we'll call you back shortly. We'll also send you a text." }] },
+  { id: 'chatOpen', name: 'Website chat not answered (office open)', channel: 'Text', when: 'A few minutes after a website chat nobody answered (the wait is in Website chat and texts), once automatic texts are on.', vars: CHAT_TPL_VARS,
     fields: [{ key: 'chatOpen', text: "{hi}, Ron here from {brand}. I saw your message about {service} - I'm just finishing up another call and will get back to you very shortly. Feel free to reply here in the meantime." }] },
   { id: 'chatClosed', name: 'Website chat not answered (office closed)', channel: 'Text', when: 'The same, after hours.', vars: CHAT_TPL_VARS,
     fields: [{ key: 'chatClosed', text: "{hi}, it's Ron from {brand}. You sent us a message on our website chat about {service}. I'll call you first thing when our office opens, or you can reply here." }] },
@@ -11959,6 +12162,10 @@ function tplPreviewHtml(m, values){
     const paras = body.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
     return `<div class="tpl-mail"><div class="tpl-mail-subj"><span>Subject</span>${esc(subject)}</div>${paras.map(x => `<p>${esc(fillTemplate(x, { ...TPL_EXAMPLE, review_button: '\u0001' })).replace(/\n/g, '<br>').replace(/\u0001/g, '<span class="tpl-mail-btn">&#11088;&#11088;&#11088;&#11088;&#11088; Leave a quick Google review</span>')}</p>`).join('')}</div>`;
   }
+  if (m.channel==='Call') {
+    const said = String(values[m.fields[0].key] || ''), words = said.trim() ? said.trim().split(/\s+/).length : 0;
+    return `<div class="tpl-bubble tpl-spoken">${ico('phone', 14)} ${esc(said)}</div><div class="tpl-count">Read out by the phone voice · about ${Math.max(1, Math.round(words / 2.5))} seconds</div>`;
+  }
   const text = fillTemplate(values[m.fields[0].key], TPL_EXAMPLE), sp = smsParts(text);
   return `<div class="tpl-bubble">${esc(text)}</div><div class="tpl-count${sp.parts > 2 || sp.unicode ? ' warn' : ''}">${sp.chars} characters · ${sp.parts===1 ? '1 text' : sp.parts + ' texts'}${sp.unicode ? ' · a curly quote, emoji or special character makes each text hold 70 characters instead of 160' : ''}</div>`;
 }
@@ -11978,7 +12185,7 @@ function renderTemplatesPage(){
       ${m.fields.map(f => `<label class="tpl-field">${f.label ? `<span>${esc(f.label)}</span>` : ''}${f.line
         ? `<input class="set-input" id="tpl-f-${f.key}" value="${esc(V[f.key])}" onfocus="TPL_EDIT.focus='${f.key}'" oninput="templateEditInput('${f.key}', this.value)">`
         : `<textarea id="tpl-f-${f.key}" rows="${f.rows || 5}" onfocus="TPL_EDIT.focus='${f.key}'" oninput="templateEditInput('${f.key}', this.value)">${esc(V[f.key])}</textarea>`}</label>`).join('')}
-      <div class="tpl-preview-label">What the customer gets</div>
+      <div class="tpl-preview-label">${m.channel==='Call' ? 'What the caller hears' : 'What the customer gets'}</div>
       <div id="tpl-preview">${tplPreviewHtml(m, V)}</div>
       <div id="tpl-problems">${tplProblemsHtml(m, V)}</div>
       <div class="tpl-actions" id="tpl-actions">${tplActionsHtml(m, V)}</div>
@@ -12033,25 +12240,101 @@ function saveTemplateEdit(){
   }, { danger: false });
 }
 function renderReviewsPage(s){
-  const links = [['Aircon', 'https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU'], ['Chimney', 'https://g.page/r/CZUuKFAccuR4EBM/review'], ['Pressure Washing', 'https://g.page/r/CZjy0MO5zKE7EBM/review']];
-  return setBlock('Review links', 'Each service asks for a review on its own Google profile.', setRows(links.map(([d, url]) => [divName(d), '', `<a class="btn small ghost" href="${url}" target="_blank" rel="noopener">Open ${ico('link', 13)}</a>`])))
-    + setBlock('Asking', '', setRows([
-      ['Ask automatically when a job is entered', 'A text now and an email within 15 minutes, between 8:00 and 20:00; later ones wait for the morning.', s.reviewRequestsAuto ? pill('good', 'On') : pill('warn', 'Off until go-live')],
-      ['A reminder if there\'s no review after a day', 'Shown on My Day, so the office can ask again.', pill('good', 'On')],
+  const c = reviewCfg(), auto = !!s.reviewRequestsAuto;
+  const hour = h => h===0 ? '12 am' : h < 12 ? h + ' am' : h===12 ? '12 pm' : h===24 ? 'midnight' : (h - 12) + ' pm';
+  const hourSel = (key, val, lo, hi) => `<select class="set-input" style="width:118px" onchange="setReviewCfg('${key}', this.value)">${Array.from({ length: hi - lo + 1 }, (_, i) => lo + i).map(h => `<option value="${h}" ${h===val ? 'selected' : ''}>${hour(h)}</option>`).join('')}</select>`;
+  const num = (key, val, lo, hi, unit) => `<span class="set-num"><input type="number" min="${lo}" max="${hi}" value="${val}" onchange="setReviewCfg('${key}', this.value)"><span>${unit}</span></span>`;
+  const svcs = activeOnly(LEAD_DIVISIONS, ACTIVE.divisions).filter(d => d !== 'Other');
+  const linkRows = svcs.map(d => { const l = reviewLinkFor(d), k = esc(jsStr(d)); return `<div class="review-link-row"><div class="review-link-name"><span class="dot" style="background:${divColor(d)}"></span><b>${esc(divLabel(d))}</b>${l.custom ? '' : '<span class="hint">original</span>'}</div>
+      <div class="field"><label>Google review link</label><input value="${esc(l.link)}" placeholder="https://g.page/r/…/review" onchange="setReviewLink('${k}', 'link', this.value)"></div>
+      <div class="field"><label>Thank-you line</label><input value="${esc(l.result)}" placeholder="Enjoy the fresh, clean air!" onchange="setReviewLink('${k}', 'result', this.value)"></div>
+      <div class="review-link-act">${l.link ? `<a class="btn small ghost" href="${esc(l.link)}" target="_blank" rel="noopener">Test ${ico('link', 13)}</a>` : ''}</div></div>`; }).join('');
+  return setBlock('Asking customers', auto ? 'Each new job gets a request by itself. On the job, the "Ask for review" button is replaced by whether the request went.' : 'The office asks with the "Ask for review" button on the job or in My Day. After the click the job shows "Sent ✓".', setRows([
+      ['Ask automatically when a job is entered', auto ? `On since ${s.reviewsFrom ? fmtDateShort(s.reviewsFrom) : '—'}: jobs from that day on are asked by themselves; older ones keep the button.` : 'Off.', setToggle(auto, "setReviewAuto(!this.classList.contains('on'))")],
+      ['Send between', 'Texts and emails only go in these hours (Sydney time).', `<span style="display:inline-flex;gap:6px;align-items:center">${hourSel('sendFrom', c.sendFrom, 0, 23)}<span class="hint">to</span>${hourSel('sendUntil', c.sendUntil, 1, 24)}</span>`],
+      ['A request made outside those hours goes at', 'The next morning, or later the same day if it is still early.', hourSel('morning', c.morning, c.sendFrom, c.sendUntil - 1)],
+      ["Don't ask the same customer again within", 'Counts all their jobs. 0 asks every job.', num('askAgainMonths', c.askAgainMonths, 0, 36, 'months')],
+      ['Offer "Ask again" once, from', 'For a customer who was asked and has not left a review. It shows on My Day.', num('remindAfterDays', c.remindAfterDays, 1, 60, 'days after')],
+      ['…until', 'After this the reminder is no longer offered.', num('remindWithinDays', c.remindWithinDays, 1, 120, 'days after')],
+    ]))
+    + setBlock('Review link and thank-you line, for each service', 'The link opens the review form on that service\'s Google profile. The line goes in the text and the email, after "thanks for having us!". Empty = the original.', `<div class="review-links">${linkRows}</div>`)
+    + setBlock('Who left a review', '', setRows([
+      ['Marked on each job', 'The nightly review check ticks the customers it finds on Google. Anyone can also mark it on the job ("Left a review?") or in the job\'s Review taken field.', ''],
       ['Never ask customers marked "Don\'t ask"', 'Set on the job.', pill('good', 'Always')],
     ]));
 }
-const NOTIFY_EVENTS = [['newLead', 'A new lead comes in', true], ['leadWaiting', 'A new lead nobody has picked up for 15 minutes (8:00–20:00)', true], ['missedCall', 'A missed call (once the business phone is on)', true], ['unpaid', 'A job turns 7 days unpaid', false], ['docExpiry', 'An employee document expires within 30 days', false]];
-function renderNotificationsPage(){
-  const N = catalogObject('notify');
-  return phoneNotificationsBar()
-    + setBlock('What sends a notification', 'To the owners\' phones; tick "Office" to send it to Ron and the managers too. Checked every 10 minutes; each piece of news is sent once.', `<div class="table-wrap set-table"><table><thead><tr><th>When</th><th>Phone</th><th>Office</th></tr></thead><tbody>
-      <tr><td>A technician sends his commission invoice</td><td>${setToggle(true, '', true)}</td><td></td></tr>
-      ${NOTIFY_EVENTS.map(([k, label, office]) => { const x = N[k] || {}; return `<tr><td>${esc(label)}</td><td>${setToggle(!!x.on, `setNotify('${k}','on',!this.classList.contains('on'))`)}</td><td>${office ? `<input type="checkbox" ${x.office ? 'checked' : ''} ${x.on ? '' : 'disabled'} aria-label="Office too" onchange="setNotify('${k}','office',this.checked)">` : ''}</td></tr>`; }).join('')}
-      <tr><td>A new Google review</td><td>${NEXT_UPDATE}</td><td></td></tr>
-    </tbody></table></div>`);
+function setReviewCfg(key, value){
+  const c = catalogObject('reviews'), n = Number(value);
+  const lim = { sendFrom: [0, 23], sendUntil: [1, 24], morning: [0, 23], askAgainMonths: [0, 36], remindAfterDays: [1, 60], remindWithinDays: [1, 120] }[key] || [0, 999];
+  if (!Number.isInteger(n) || n < lim[0] || n > lim[1]) { showToast(`Enter a whole number from ${lim[0]} to ${lim[1]}`, { kind: 'warn' }); render(); return; }
+  const next = { ...c, [key]: n }, cur = reviewCfg();
+  const test = { ...cur, ...next };
+  if (key==='sendUntil' && n <= cur.sendFrom) { showToast('The end has to be after the start', { kind: 'warn' }); render(); return; }
+  if (key==='sendFrom' && n >= cur.sendUntil) { showToast('The start has to be before the end', { kind: 'warn' }); render(); return; }
+  if (key==='remindWithinDays' && n < cur.remindAfterDays) { showToast('This has to be at least the first day', { kind: 'warn' }); render(); return; }
+  if ((key==='sendFrom' || key==='sendUntil') && (test.morning < test.sendFrom || test.morning >= test.sendUntil)) next.morning = test.sendFrom;
+  const label = { sendFrom: 'send from', sendUntil: 'send until', morning: 'late requests go at', askAgainMonths: "don't ask again within (months)", remindAfterDays: 'offer "Ask again" from (days)', remindWithinDays: 'offer "Ask again" until (days)' }[key] || key;
+  catalogSave('reviews', next, `${label}: ${n}`);
 }
-function setNotify(k, field, value){ const N = catalogObject('notify'); N[k] = { ...(N[k] || {}), [field]: !!value }; catalogSave('notify', N, `${(NOTIFY_EVENTS.find(x => x[0]===k) || [k, k])[1]}: ${field==='on' ? (value ? 'on' : 'off') : (value ? 'office too' : 'owners only')}`); }
+function setReviewLink(key, field, value){
+  const c = catalogObject('reviews'), links = { ...(c.links || {}) }, v = String(value || '').trim();
+  if (field==='link' && v && !/^https:\/\/\S+$/.test(v)) { showToast('The link has to start with https://', { kind: 'warn' }); render(); return; }
+  links[key] = { ...(links[key] || {}), [field]: v };
+  catalogSave('reviews', { ...c, links }, `${divLabel(key)}: review ${field==='link' ? 'link' : 'thank-you line'} ${v ? 'changed' : 'back to the original'}`);
+}
+function setReviewAuto(on){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
+  const c = reviewCfg(), go = () => {
+    const from = sydneyToday();
+    db.settings.update(on ? { reviewRequestsAuto: true, reviewsFrom: from } : { reviewRequestsAuto: false });
+    logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `Google review requests: ${on ? 'asked automatically from ' + from : 'asked by hand'}`);
+    showToast(on ? 'Review requests now go by themselves for new jobs' : 'Review requests are asked by hand again');
+    render();
+  };
+  if (!on) { go(); return; }
+  confirmAction(`From today, every new job gets a Google review request by itself: a text and an email, between ${c.sendFrom}:00 and ${c.sendUntil}:00. Jobs from before today keep the "Ask for review" button. Turn it on?`, go, { danger: false, title: 'Ask for reviews automatically', confirmLabel: 'Turn on' });
+}
+// The numbers behind the notifications (Ofek 13 Oct): set here, read by the push function (catalog.notify.rules). "Unpaid"
+// follows "Flag a job as unpaid after" in Tax and payments, so the two never disagree.
+function notifyRulesApp(){
+  const r = catalogObject('notify').rules || {}, int = (v, lo, hi, d) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : d; };
+  let from = int(r.from, 0, 23, 8), until = int(r.until, 1, 24, 20);
+  if (until <= from) { from = 8; until = 20; }
+  return { waitMinutes: int(r.waitMinutes, 5, 240, 15), from, until, docDays: int(r.docDays, 1, 180, 30), unpaidDays: int((STATE.data.settings || {}).unpaidReminderDays, 1, 365, 7) };
+}
+function notifyEvents(){
+  const R = notifyRulesApp();
+  return [['newLead', 'A new lead comes in', true], ['leadWaiting', `A new lead nobody has picked up for ${R.waitMinutes} minutes (${R.from}:00–${R.until}:00)`, true], ['missedCall', 'A missed call (once the business phone is on)', true],
+    ['unpaid', `A job turns ${R.unpaidDays} days unpaid`, false], ['docExpiry', `An employee document expires within ${R.docDays} days`, false]];
+}
+function renderNotificationsPage(){
+  const N = catalogObject('notify'), R = notifyRulesApp(), invOn = !(N.invoice && N.invoice.on === false);
+  const hour = h => h===0 ? '12 am' : h < 12 ? h + ' am' : h===12 ? '12 pm' : h===24 ? 'midnight' : (h - 12) + ' pm';
+  const hourSel = (key, val, lo, hi) => `<select class="set-input" style="width:118px" onchange="setNotifyRule('${key}', this.value)">${Array.from({ length: hi - lo + 1 }, (_, i) => lo + i).map(h => `<option value="${h}" ${h===val ? 'selected' : ''}>${hour(h)}</option>`).join('')}</select>`;
+  const num = (key, val, lo, hi, unit) => `<span class="set-num"><input type="number" min="${lo}" max="${hi}" value="${val}" onchange="setNotifyRule('${key}', this.value)"><span>${unit}</span></span>`;
+  return phoneNotificationsBar()
+    + setBlock('What sends a notification', 'To the owners\' phones; tick "Office" to send it to the office assistant and the managers too. Checked every 10 minutes; each piece of news is sent once.', `<div class="table-wrap set-table"><table><thead><tr><th>When</th><th>Phone</th><th>Office</th></tr></thead><tbody>
+      <tr><td>A technician sends his commission invoice</td><td>${setToggle(invOn, `setNotify('invoice','on',!this.classList.contains('on'))`)}</td><td></td></tr>
+      ${notifyEvents().map(([k, label, office]) => { const x = N[k] || {}; return `<tr><td>${esc(label)}</td><td>${setToggle(!!x.on, `setNotify('${k}','on',!this.classList.contains('on'))`)}</td><td>${office ? `<input type="checkbox" ${x.office ? 'checked' : ''} ${x.on ? '' : 'disabled'} aria-label="Office too" onchange="setNotify('${k}','office',this.checked)">` : ''}</td></tr>`; }).join('')}
+      <tr><td>A new Google review <div class="hint" style="margin-top:2px">Comes with the Google Business Profile connection.</div></td><td><button class="btn small ghost" onclick="setSettingsPage('connections')">Connections</button></td><td></td></tr>
+    </tbody></table></div>`)
+    + setBlock('The numbers', 'Used by the notifications above.', setRows([
+      ['A new lead counts as waiting after', 'Nobody opened, called or moved it.', num('waitMinutes', R.waitMinutes, 5, 240, 'minutes')],
+      ['Waiting-lead notifications only between', 'Sydney time.', `<span style="display:inline-flex;gap:6px;align-items:center">${hourSel('from', R.from, 0, 23)}<span class="hint">and</span>${hourSel('until', R.until, 1, 24)}</span>`],
+      ['Warn about an employee document', 'Before it expires.', num('docDays', R.docDays, 1, 180, 'days before')],
+      ['A job counts as unpaid after', 'The same setting as in Tax and payments.', `<button class="btn small ghost" onclick="setSettingsPage('money')">${R.unpaidDays} days · change</button>`],
+    ]));
+}
+function setNotifyRule(key, value){
+  const n = Number(value), N = catalogObject('notify'), r = { ...(N.rules || {}) }, cur = notifyRulesApp();
+  const lim = { waitMinutes: [5, 240], from: [0, 23], until: [1, 24], docDays: [1, 180] }[key] || [0, 999];
+  if (!Number.isInteger(n) || n < lim[0] || n > lim[1]) { showToast(`Enter a whole number from ${lim[0]} to ${lim[1]}`, { kind: 'warn' }); render(); return; }
+  if (key==='until' && n <= cur.from) { showToast('The end has to be after the start', { kind: 'warn' }); render(); return; }
+  if (key==='from' && n >= cur.until) { showToast('The start has to be before the end', { kind: 'warn' }); render(); return; }
+  r[key] = n;
+  catalogSave('notify', { ...N, rules: r }, `${({ waitMinutes: 'a lead counts as waiting after (minutes)', from: 'waiting-lead notifications from', until: 'waiting-lead notifications until', docDays: 'document warning (days before)' })[key] || key}: ${n}`);
+}
+function setNotify(k, field, value){ const N = catalogObject('notify'); N[k] = { ...(N[k] || {}), [field]: !!value }; const label = k==='invoice' ? 'A technician sends his commission invoice' : (notifyEvents().find(x => x[0]===k) || [k, k])[1]; catalogSave('notify', N, `${label}: ${field==='on' ? (value ? 'on' : 'off') : (value ? 'office too' : 'owners only')}`); }
 // Connections: status from what the app really sees (the same times as the dashboard's "updated" line).
 function renderConnectionsPage(s){
   if (!FRESH) loadFreshness().then(() => { if (UI.tab==='settings' && (UI.settings || {}).page==='connections') render(); });
@@ -12151,37 +12434,145 @@ function filterSettingsNav(q){
   });
 }
 
-/* ── Settings → Phone (Ofek, 2 Oct): who answers the business number, and when ──
-   Stored in settings.phone_routing and read by the `voice` function on every call:
-   Ron on shift → his browser phone (20 s) → the owner(s) for that service during the backup hours → voicemail + text. */
-const PHONE_DIVISIONS = [['Aircon','Air conditioning'],['Chimney','Chimney'],['Pressure Washing','Pressure washing'],['Other','New caller who didn\'t choose']];
+/* ── Settings → Phone (Ofek, 2 Oct; made fully editable 13 Oct): who answers the business number, and when ──
+   Stored in settings.phone_routing and read by the `voice` function on every call: the office assistant on shift → their
+   browser phone → the backup phone(s) set for that service during the backup hours → voicemail + text. The menu a new
+   caller hears, the ring times and the backup people are all here; the spoken words are in Message templates. */
 const PHONE_DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+// Nothing saved = the original menu, word for word ("For air conditioning, press 1. For chimney, press 2. …").
+const PHONE_MENU_DEFAULT = [{ key:'Aircon', say:'air conditioning' }, { key:'Chimney', say:'chimney' }, { key:'Pressure Washing', say:'pressure washing' }];
+// The same rules as the voice function (menuOf / menuText): rows with a service and words, at most 9 (one key each).
+function phoneMenuOf(R){
+  const m = Array.isArray(R && R.menu) ? R.menu.filter(x => x && typeof x.key==='string' && x.key.trim() && typeof x.say==='string' && x.say.trim()).slice(0, 9) : [];
+  return (m.length ? m : PHONE_MENU_DEFAULT).map(x => ({ key: x.key.trim(), say: x.say.trim() }));
+}
+function phoneMenuText(menu){ return menu.map((m, i) => `For ${m.say}, press ${i + 1}.`).join(' '); }
+function phoneSayDefault(key){ const d = PHONE_MENU_DEFAULT.find(x => x.key===key); return d ? d.say : divLabel(key).toLowerCase(); }
+function phoneRingSeconds(v){ const n = Math.round(Number(v)); return n >= 5 && n <= 60 ? n : 20; }
+// Phone numbers the way the voice function reads them (toE164 / pretty there).
+function phoneE164(v){
+  let d = String(v || '').replace(/[^\d+]/g, '');
+  if (d.startsWith('+')) return /^\+\d{8,15}$/.test(d) ? d : '';
+  d = d.replace(/\D/g, '');
+  if (/^1[38]00\d{6}$/.test(d)) return '+61' + d;
+  if (d.startsWith('61')) d = d.slice(2);
+  if (d.startsWith('0')) d = d.slice(1);
+  return /^\d{9}$/.test(d) ? '+61' + d : '';
+}
+function phonePretty(v){
+  const e = phoneE164(v); if (!e) return String(v || '');
+  const d = e.startsWith('+61') ? (/^\+611[38]00/.test(e) ? e.slice(3) : '0' + e.slice(3)) : e;
+  if (/^04\d{8}$/.test(d) || /^1[38]00\d{6}$/.test(d)) return d.replace(/^(\d{4})(\d{3})(\d{3})$/, '$1 $2 $3');
+  if (/^0\d{9}$/.test(d)) return d.replace(/^(\d{2})(\d{4})(\d{4})$/, '$1 $2 $3');
+  return d;
+}
 function sydneyToday(){ return new Intl.DateTimeFormat('en-CA', { timeZone:'Australia/Sydney' }).format(new Date()); }
 function onShiftToday(p){ return !!(p && p.onDuty && p.onDutyDate === sydneyToday()); }
 function phoneRoutingCopy(){ return JSON.parse(JSON.stringify((STATE.data.settings && STATE.data.settings.phoneRouting) || {})); }
 function savePhoneRouting(R, logText){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
   db.settings.update({ phoneRouting: R });
   logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', logText);
   showToast('Phone setting saved'); render();
 }
+function phonePersonName(R, k){ return ((R.people || {})[k] || {}).name || k; }
 function setPhonePerson(key, field, value){
-  const R = phoneRoutingCopy(); R.people = R.people || {}; R.people[key] = R.people[key] || { name:key };
-  R.people[key][field] = value;
-  savePhoneRouting(R, field==='available' ? `${R.people[key].name||key} is now ${value ? 'available' : 'away'} for phone backup` : `${R.people[key].name||key}'s mobile changed`);
+  const R = phoneRoutingCopy(); R.people = R.people || {};
+  if (!R.people[key]) { render(); return; }
+  const was = phonePersonName(R, key);
+  if (field==='name') {
+    const v = String(value || '').trim();
+    if (!v) { showToast('Enter a name', { kind: 'warn' }); render(); return; }
+    R.people[key].name = v; savePhoneRouting(R, `Backup phone "${was}" renamed to "${v}"`); return;
+  }
+  if (field==='mobile') {
+    const v = String(value || '').trim();
+    if (!phoneE164(v) || /^\+611[38]00/.test(phoneE164(v))) { showToast('Enter a mobile or landline number, e.g. 0412 345 678', { kind: 'warn' }); render(); return; }
+    R.people[key].mobile = v; savePhoneRouting(R, `${was}'s backup number changed`); return;
+  }
+  R.people[key].available = !!value;
+  savePhoneRouting(R, `${was} is now ${value ? 'available' : 'away'} for phone backup`);
+}
+// A new backup phone joins every service that was set to "Everyone together", so that still means everyone.
+function addPhonePerson(){
+  const nameEl = document.getElementById('ph-new-name'), numEl = document.getElementById('ph-new-mobile');
+  const name = String(nameEl && nameEl.value || '').trim(), num = String(numEl && numEl.value || '').trim();
+  if (!name) { showToast('Enter a name', { kind: 'warn' }); return; }
+  if (!phoneE164(num) || /^\+611[38]00/.test(phoneE164(num))) { showToast('Enter a mobile or landline number, e.g. 0412 345 678', { kind: 'warn' }); return; }
+  const R = phoneRoutingCopy(); R.people = R.people || {}; R.divisions = R.divisions || {};
+  const before = Object.keys(R.people);
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '') || 'person';
+  let key = base; for (let i = 2; R.people[key]; i++) key = base + i;
+  Object.keys(R.divisions).forEach(d => { const l = R.divisions[d] || []; if (before.length && before.every(k => l.includes(k))) l.push(key); });
+  R.people[key] = { name, mobile: num, available: true };
+  savePhoneRouting(R, `Backup phone added: ${name}`);
+}
+function removePhonePerson(key){
+  const R0 = phoneRoutingCopy(), name = phonePersonName(R0, key);
+  const last = Object.keys(R0.people || {}).length <= 1;
+  confirmAction(last ? `Remove ${name}? With no backup phone left, calls the office doesn't answer go straight to voicemail.` : `Remove ${name} from the backup phones? Their services go to the person set for new callers who didn't choose.`, () => {
+    const R = phoneRoutingCopy(); R.people = R.people || {}; R.divisions = R.divisions || {};
+    delete R.people[key];
+    Object.keys(R.divisions).forEach(d => { const l = (R.divisions[d] || []).filter(k => k !== key); if (l.length) R.divisions[d] = l; else delete R.divisions[d]; });
+    savePhoneRouting(R, `Backup phone removed: ${name}`);
+  }, { title: 'Remove this backup phone?', confirmLabel: 'Remove' });
 }
 function setPhoneDivision(div, value){
   const R = phoneRoutingCopy(); R.divisions = R.divisions || {};
+  if (value==='custom') return;
   R.divisions[div] = value==='all' ? Object.keys(R.people||{}) : [value];
-  savePhoneRouting(R, `Calls for ${div} now go to ${value==='all' ? 'everyone' : ((R.people||{})[value]||{}).name||value} when the office doesn't answer`);
+  savePhoneRouting(R, `Calls for ${div==='Other' ? 'new callers who didn\'t choose' : divLabel(div)} now go to ${value==='all' ? 'everyone' : phonePersonName(R, value)} when the office doesn't answer`);
 }
 function setPhoneHours(field, value){
   const R = phoneRoutingCopy(); R.backupHours = R.backupHours || { from:'08:00', to:'20:00', days:[0,1,2,3,4,5,6] };
   if (field==='day') { const d = Number(value.day); const set = new Set(R.backupHours.days||[]); value.on ? set.add(d) : set.delete(d); R.backupHours.days = [...set].sort(); }
-  else R.backupHours[field] = value;
+  else {
+    if (!/^\d{2}:\d{2}$/.test(value)) { render(); return; }
+    const next = { ...R.backupHours, [field]: value };
+    if (next.to <= next.from) { showToast('The end has to be after the start', { kind: 'warn' }); render(); return; }
+    R.backupHours[field] = value;
+  }
   savePhoneRouting(R, `Phone backup hours changed`);
 }
-function setPhoneCallerId(value){ const R = phoneRoutingCopy(); R.callerId = value.trim(); savePhoneRouting(R, `Number shown on outgoing calls changed to ${R.callerId}`); }
+function setPhoneRing(field, value){
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 5 || n > 60) { showToast('Enter 5 to 60 seconds', { kind: 'warn' }); render(); return; }
+  const R = phoneRoutingCopy(); R[field] = n;
+  savePhoneRouting(R, `${field==='officeRingSeconds' ? 'Office phone' : 'Backup phones'} ring for ${n} seconds`);
+}
+function setPhoneMenuOn(key, on){
+  const R = phoneRoutingCopy(); let menu = phoneMenuOf(R);
+  if (on && !menu.some(m => m.key===key)) {
+    if (menu.length >= 9) { showToast('The menu holds up to 9 services', { kind: 'warn' }); render(); return; }
+    menu.push({ key, say: phoneSayDefault(key) });
+  }
+  if (!on) {
+    menu = menu.filter(m => m.key !== key);
+    if (!menu.length) { showToast('Keep at least one service in the menu', { kind: 'warn' }); render(); return; }
+  }
+  R.menu = menu;
+  savePhoneRouting(R, `Phone menu: ${divLabel(key)} ${on ? 'added' : 'taken out'}`);
+}
+function setPhoneMenuSay(key, value){
+  const R = phoneRoutingCopy(), menu = phoneMenuOf(R), m = menu.find(x => x.key===key); if (!m) { render(); return; }
+  const v = String(value || '').trim().replace(/[.,]+$/, '') || phoneSayDefault(key);
+  if (v===m.say) { render(); return; }
+  m.say = v; R.menu = menu;
+  savePhoneRouting(R, `Phone menu: ${divLabel(key)} is now read as "${v}"`);
+}
+function movePhoneMenu(key, dir){
+  const R = phoneRoutingCopy(), menu = phoneMenuOf(R), i = menu.findIndex(x => x.key===key), j = i + dir;
+  if (i < 0 || j < 0 || j >= menu.length) return;
+  [menu[i], menu[j]] = [menu[j], menu[i]]; R.menu = menu;
+  savePhoneRouting(R, `Phone menu: ${divLabel(key)} is now key ${j + 1}`);
+}
+function setPhoneCallerId(value){
+  const v = String(value || '').trim();
+  if (!phoneE164(v)) { showToast('Enter a phone number, e.g. 1300 380 090', { kind: 'warn' }); render(); return; }
+  const R = phoneRoutingCopy(); R.callerId = v; savePhoneRouting(R, `Number shown on outgoing calls changed to ${phonePretty(v)}`);
+}
 function setPhoneEnabled(on){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
   db.settings.update({ phoneEnabled: on });
   logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `Business phone in the app switched ${on ? 'on' : 'off'}`);
   render(); phoneSync();
@@ -12189,35 +12580,52 @@ function setPhoneEnabled(on){
 function renderPhoneSettings(s){
   const R = s.phoneRouting || {}, people = R.people || {}, divs = R.divisions || {};
   const hrs = R.backupHours || { from:'08:00', to:'20:00', days:[0,1,2,3,4,5,6] };
-  const keys = Object.keys(people);
+  const keys = Object.keys(people), menu = phoneMenuOf(R);
+  const office = phoneRingSeconds(R.officeRingSeconds), backup = phoneRingSeconds(R.backupRingSeconds);
+  const num = (field, val) => `<span class="set-num"><input type="number" min="5" max="60" value="${val}" onchange="setPhoneRing('${field}', this.value)"><span>seconds</span></span>`;
+  const time = iso => new Date(iso).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' });
   const vas = STATE.profiles.filter(p => p.role==='va');
-  const shiftLine = vas.length ? vas.map(p => `<div class="kv"><span>${esc(p.fullName)}</span><span class="v">${onShiftToday(p) && p.onBreak ? pill('warn', 'On a break since ' + new Date(p.onBreakSince).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' })) : onShiftToday(p) ? pill('good', 'On shift' + (p.onDutyChangedAt ? ' since ' + new Date(p.onDutyChangedAt).toLocaleTimeString('en-AU', { timeZone:'Australia/Sydney', hour:'numeric', minute:'2-digit' }) : '')) : pill('neutral', 'Off shift')}</span></div>`).join('') : '<div class="hint">No office assistant yet.</div>';
-  const divRows = PHONE_DIVISIONS.map(([key, label]) => {
-    const cur = divs[key] || [];
-    const val = cur.length > 1 || !cur.length ? 'all' : cur[0];
-    return `<div class="field"><label>${esc(label)}</label><select onchange="setPhoneDivision('${jsStr(key)}', this.value)">${keys.map(k => `<option value="${esc(k)}" ${val===k?'selected':''}>${esc(people[k].name||k)}</option>`).join('')}<option value="all" ${val==='all'?'selected':''}>Everyone together</option></select></div>`;
-  }).join('');
-  const personRows = keys.map(k => { const pp = people[k]; return `<div class="grid-3" style="align-items:end;margin-bottom:8px">
-      <div class="field"><label>${esc(pp.name||k)} — mobile</label><input value="${esc(pp.mobile||'')}" onchange="setPhonePerson('${jsStr(k)}','mobile',this.value.trim())"></div>
-      <label class="checkline" style="padding-bottom:10px"><input type="checkbox" ${pp.available!==false?'checked':''} onchange="setPhonePerson('${jsStr(k)}','available',this.checked)"> Available <span class="hint" style="font-weight:400">(untick on holiday: their calls go to the other)</span></label>
+  const shiftRows = vas.map(p => [esc(p.fullName), 'Logs in and out on My Day.', onShiftToday(p) && p.onBreak ? pill('warn', 'On a break since ' + time(p.onBreakSince)) : onShiftToday(p) ? pill('good', 'On shift' + (p.onDutyChangedAt ? ' since ' + time(p.onDutyChangedAt) : '')) : pill('neutral', 'Off shift')]);
+  // The services a caller can pick: the menu, in order, then the other services that are switched on.
+  const others = activeOnly(LEAD_DIVISIONS, ACTIVE.divisions).filter(d => d !== 'Other' && !menu.some(m => m.key===d));
+  const menuRows = menu.map((m, i) => { const k = esc(jsStr(m.key)); return [`<span class="phone-key">${i + 1}</span>${esc(divLabel(m.key))}`, '', `<input class="set-input" value="${esc(m.say)}" aria-label="Read out as" onchange="setPhoneMenuSay('${k}', this.value)">
+      <button type="button" class="btn small ghost" title="Earlier in the menu" ${i===0 ? 'disabled' : ''} onclick="movePhoneMenu('${k}', -1)">↑</button>
+      <button type="button" class="btn small ghost" title="Later in the menu" ${i===menu.length - 1 ? 'disabled' : ''} onclick="movePhoneMenu('${k}', 1)">↓</button>
+      ${setToggle(true, `setPhoneMenuOn('${k}', false)`)}`]; })
+    .concat(others.map(d => [`<span class="phone-key off">–</span>${esc(divLabel(d))}`, 'Not in the menu. A known customer of this service hears the menu too.', setToggle(false, `setPhoneMenuOn('${esc(jsStr(d))}', true)`)]));
+  const routeRow = (key, label) => {
+    // Nothing set for a service = the same people as new callers who didn't choose (the voice function does the same).
+    const cur = (divs[key] ? (divs[key].length ? divs[key] : keys) : key !== 'Other' && divs.Other ? (divs.Other.length ? divs.Other : keys) : keys).filter(k => people[k]);
+    const val = cur.length===1 ? cur[0] : !cur.length || keys.every(k => cur.includes(k)) ? 'all' : 'custom';
+    return [label, key !== 'Other' && !divs[key] ? 'Not set yet: the same as new callers who didn\'t choose.' : '', keys.length ? `<select class="set-input" onchange="setPhoneDivision('${esc(jsStr(key))}', this.value)">${keys.map(k => `<option value="${esc(k)}" ${val===k ? 'selected' : ''}>${esc(people[k].name || k)}</option>`).join('')}${keys.length > 1 ? `<option value="all" ${val==='all' ? 'selected' : ''}>Everyone together</option>` : ''}${val==='custom' ? `<option value="custom" selected>${esc(cur.map(k => phonePersonName(R, k)).join(' + '))}</option>` : ''}</select>` : '<span class="hint">Add a backup phone first</span>'];
+  };
+  const routeRows = menu.map(m => routeRow(m.key, esc(divLabel(m.key)))).concat([routeRow('Other', 'New caller who didn\'t choose')]);
+  const personRows = keys.map(k => { const pp = people[k], q = esc(jsStr(k)); return `<div class="phone-person">
+      <div class="field"><label>Name</label><input value="${esc(pp.name || k)}" onchange="setPhonePerson('${q}','name',this.value)"></div>
+      <div class="field"><label>Mobile</label><input value="${esc(pp.mobile || '')}" inputmode="tel" onchange="setPhonePerson('${q}','mobile',this.value)"></div>
+      <div class="phone-person-ctl"><span class="hint">${pp.available!==false ? 'Available' : 'Away'}</span>${setToggle(pp.available!==false, `setPhonePerson('${q}','available',!this.classList.contains('on'))`)}<button type="button" class="btn small ghost" title="Remove" aria-label="Remove ${esc(pp.name || k)}" onclick="removePhonePerson('${q}')">${ico('trash', 14)}</button></div>
     </div>`; }).join('');
-  return `<div class="card" style="margin-bottom:14px">
-    <label class="checkline" style="font-weight:700;font-size:14.5px"><input type="checkbox" ${s.phoneEnabled?'checked':''} onchange="setPhoneEnabled(this.checked)"> Business phone in the app</label>
-    <div class="hint" style="margin:6px 0 14px">Who answers 1300 380 090 and the old mobile. While Ron is on shift (his Start shift button on My Day) his browser phone rings first for ${R.officeRingSeconds||20} seconds. If he doesn't answer, or he's off shift, the call goes to the person set for that service below, during the backup hours. Outside them, or if nobody answers, the caller leaves a voicemail and gets a text, and it waits in Ron's My Day. A known customer goes by their service; a new caller picks one from a short menu.</div>
-    <div style="font-weight:600;margin-bottom:6px">Office shift today</div>
-    <div style="margin-bottom:14px">${shiftLine}</div>
-    <div style="font-weight:600;margin-bottom:6px">When the office doesn't answer, the call goes to</div>
-    <div class="grid-3" style="margin-bottom:14px">${divRows}</div>
-    <div style="font-weight:600;margin-bottom:6px">Backup phones</div>
-    ${personRows}
-    <div style="font-weight:600;margin:10px 0 6px">Backup hours (Sydney time)</div>
-    <div class="grid-3" style="align-items:end">
-      <div class="field"><label>From</label><input type="time" value="${esc(hrs.from)}" onchange="setPhoneHours('from', this.value)"></div>
-      <div class="field"><label>To</label><input type="time" value="${esc(hrs.to)}" onchange="setPhoneHours('to', this.value)"></div>
-      <div class="field"><label>Outgoing calls show</label><input value="${esc(R.callerId||'')}" onchange="setPhoneCallerId(this.value)"></div>
-    </div>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">${PHONE_DAYS.map((d,i) => `<label class="checkline"><input type="checkbox" ${(hrs.days||[]).includes(i)?'checked':''} onchange="setPhoneHours('day', { day:${i}, on:this.checked })"> ${d}</label>`).join('')}</div>
-  </div>`;
+  const addRow = `<div class="phone-person add">
+      <div class="field"><label>Name</label><input id="ph-new-name" placeholder="Name"></div>
+      <div class="field"><label>Mobile</label><input id="ph-new-mobile" inputmode="tel" placeholder="0412 345 678"></div>
+      <div class="phone-person-ctl"><button type="button" class="btn small" onclick="addPhonePerson()">${ico('plus', 14)} Add</button></div>
+    </div>`;
+  const number = R.callerId ? phonePretty(R.callerId) : 'the business number';
+  return setBlock('Business phone', `Who answers ${number}. While the office assistant is logged in (Log In on My Day), their browser phone rings first. If nobody answers there, or nobody is logged in, the call goes to the backup phone set for that service, during the backup hours. Outside them, or if nobody answers, the caller leaves a voicemail and gets a text, and the call waits on My Day to be returned.`, setRows([
+      ['Business phone in the app', '', setToggle(!!s.phoneEnabled, "setPhoneEnabled(!this.classList.contains('on'))")],
+      ['The office phone rings for', 'Before the call moves on to the backup phones.', num('officeRingSeconds', office)],
+      ['The backup phones ring for', 'Before the caller is asked to leave a voicemail.', num('backupRingSeconds', backup)],
+      ['Outgoing calls show', 'The number customers see when the office calls them.', `<input class="set-input" value="${esc(R.callerId ? phonePretty(R.callerId) : '')}" inputmode="tel" onchange="setPhoneCallerId(this.value)">`],
+    ].concat(shiftRows)))
+    + setBlock('Menu for new callers', 'A new caller hears the greeting, then this menu, and presses a key. A known customer skips it and goes straight by their service. Pressing nothing, or a key that isn\'t here, counts as a new caller who didn\'t choose.', setRows(menuRows)
+      + `<div class="phone-preview"><span>Callers hear</span>"${esc(msgTemplateText('phoneGreeting'))} ${esc(phoneMenuText(menu))}"<button type="button" class="btn small ghost" onclick="setSettingsPage('templates')">Edit the spoken words</button></div>`)
+    + setBlock('When the office doesn\'t answer, the call goes to', 'During the backup hours. Someone marked Away is skipped; if everyone set for a service is away, the others get the call.', setRows(routeRows))
+    + setBlock('Backup phones', 'The mobiles that take calls the office doesn\'t answer. Switch someone to Away while they\'re on holiday.', `<div class="phone-people">${personRows}${addRow}</div>`)
+    + setBlock('Backup hours (Sydney time)', 'Outside these hours, a call nobody in the office answers goes straight to voicemail.', setRows([
+      ['From', '', `<input class="set-input" type="time" style="width:130px" value="${esc(hrs.from)}" onchange="setPhoneHours('from', this.value)">`],
+      ['To', '', `<input class="set-input" type="time" style="width:130px" value="${esc(hrs.to)}" onchange="setPhoneHours('to', this.value)">`],
+      ['Days', '', `<span class="check-row">${PHONE_DAYS.map((d, i) => `<label class="checkline"><input type="checkbox" ${(hrs.days||[]).includes(i) ? 'checked' : ''} onchange="setPhoneHours('day', { day:${i}, on:this.checked })"> ${d}</label>`).join('')}</span>`],
+    ]));
 }
 // Ron's shift (My Day): while on shift, the business number rings his browser phone first. A shift ends by itself at midnight.
 async function setMyShift(on){
@@ -12227,7 +12635,7 @@ async function setMyShift(on){
   if (error) { showToast('Not saved: ' + error.message); return; }
   me.onDuty = on; me.onDutyDate = sydneyToday(); me.onDutyChangedAt = new Date().toISOString(); if (!on) { me.onBreak = false; me.onBreakSince = null; }
   loadShiftEvents();
-  showToast(on ? 'Shift started: calls to the business number ring here first' : 'Shift ended: calls go to Ofek and Noam');
+  showToast(on ? 'Shift started: calls to the business number ring here first' : 'Shift ended: calls go to the backup phones');
   render(); phoneSync();
 }
 // The office assistant's day (Ofek 5/10), at the top of My Day and on Payroll: Log In → Start Break / Finish Break and
@@ -12279,7 +12687,8 @@ function updateBusinessSetting(key, rawValue, label){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   const old = STATE.data.settings[key];
   const value = Number(rawValue);
-  if (isNaN(value) || value===old) return;
+  if (String(rawValue).trim()==='' || isNaN(value) || value < 0 || value > 1000) { showToast('Enter a number from 0 to 1000', { kind: 'warn' }); render(); return; }
+  if (value===old) return;
   db.settings.update({ [key]: value });
   logSettingsActivity(actor, `${label} changed from ${old} to ${value}`);
   render();

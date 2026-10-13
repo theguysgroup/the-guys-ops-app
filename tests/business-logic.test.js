@@ -40,7 +40,7 @@ const DECLS = [
   // reminders
   'fmtDateShort', 'computeReminders', 'EMP_DOCS', 'EMP_DOC_WARN_DAYS', 'fmtDateYear', 'employeeDocExpiry', 'abnValid', 'employeeMissing',
   // payroll + net profit
-  'PAYROLL_HOURLY_RATE', 'PAYROLL_BOOKING_BONUS', 'PAYROLL_HEBREW_NAMES', 'bookingBonus', 'nextBookingTier',
+  'PAYROLL_HOURLY_RATE', 'PAYROLL_BOOKING_BONUS', 'PAYROLL_HEBREW_NAMES', 'payCatalog', 'payTiersOk', 'payHourlyFor', 'payHebrewNames', 'bookingBonus', 'nextBookingTier',
   'salesLogBookings', 'salesLogPay', 'payrollWeekOf', 'shiftPayrollWeek', 'payrollRangeText', 'payMoney', 'jobPaidDate',
   'computePayrollCommission', 'computePayrollHourly', 'buildCommissionPayMessage', 'buildHourlyPayMessage', 'shiftDays',
   'PAYROLL_REMINDERS_FROM', 'payrollStatus', 'payrollCommissionPeople', 'payrollHourlyPeople', 'paymentTermDays', 'jobDaysWaiting', 'jobIsLate',
@@ -52,9 +52,11 @@ const DECLS = [
   // My Day counters (3 Oct)
   'esc', 'quoteDueReason', 'shiftDaySummary', 'latePaymentDue', 'latePaymentDoneToday', 'reofferDue', 'assigneeNames', 'taskAssignedTo', 'myTaskDue', 'teamTaskDue', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
   // message templates (12 Oct)
+  'TECH_JOB_TYPES', 'jobTypesForTech',
+  'PHONE_MENU_DEFAULT', 'phoneMenuOf', 'phoneMenuText', 'phoneSayDefault', 'phoneRingSeconds', 'phoneE164', 'phonePretty',
   'REVIEW_TPL_VARS', 'CHAT_TPL_VARS', 'MSG_TEMPLATES', 'msgTemplateText', 'fillTemplate', 'SMS_GSM', 'smsParts', 'templateProblems',
   // review requests (5 Oct)
-  'reviewInvoiceKey', 'reviewNeed',
+  'reviewInvoiceKey', 'reviewNeed', 'REVIEW_DEFAULTS', 'reviewCfg', 'reviewDefaultFor', 'reviewLinkFor',
   // Jobs & Commissions period (6 Oct)
   'JOBS_RANGES', 'jobsRangeBounds',
   // equipment & materials paid back with the weekly pay (6 Oct)
@@ -1048,6 +1050,22 @@ function testCatalog(sb){
 
 // Message templates (Settings, 12 Oct): the app's originals are the server functions' own words, letter for letter,
 // and the preview fills blanks exactly as the server does.
+// Google review rules as settings (13 Oct): nothing saved = the original rules; saved ones are used and checked.
+function testReviewSettings(sb){
+  console.log('\nGoogle review rules (Settings)');
+  sb.STATE.data.settings = { catalog: {} };
+  const c0 = sb.reviewCfg();
+  assertEqual([c0.sendFrom, c0.sendUntil, c0.morning, c0.askAgainMonths, c0.remindAfterDays, c0.remindWithinDays], [8, 20, 10, 6, 1, 14], 'reviews: no settings = the original rules');
+  assertEqual(sb.reviewLinkFor('Chimney').result, 'Enjoy your clean, safe fireplace!', 'reviews: the original thank-you line');
+  const job = { invoiceNumber: '2701', date: '2026-10-01' }, today = '2026-10-10';
+  const sent = d => ({ status: 'sent', sent_at: d + 'T01:00:00Z', ask_count: 1 });
+  assertEqual([sb.reviewNeed(job, sent('2026-10-09'), today, false), sb.reviewNeed(job, sent('2026-10-10'), today, false), sb.reviewNeed(job, sent('2026-09-25'), today, false)], ['again', null, null], 'reviews: reminder from 1 day, until 14 days (original)');
+  assertEqual([sb.reviewLinkFor('Ducted aircon').result, sb.reviewLinkFor('Roof cleaning').result, sb.reviewLinkFor('Gutters').link], ['Enjoy the fresh, clean air!', 'Enjoy your fresh, clean outdoor area!', ''], 'reviews: a new service gets the original that the server would use');
+  sb.STATE.data.settings = { catalog: { reviews: { remindAfterDays: 3, remindWithinDays: 30, sendFrom: 9, sendUntil: 7, links: { Chimney: { link: 'https://g.page/r/x/review', result: '' } } } } };
+  assertEqual([sb.reviewNeed(job, sent('2026-10-09'), today, false), sb.reviewNeed(job, sent('2026-10-07'), today, false), sb.reviewNeed(job, sent('2026-09-15'), today, false)], [null, 'again', 'again'], 'reviews: reminder from 3 days until 30 when set');
+  const c1 = sb.reviewCfg();
+  assertEqual([c1.sendFrom, c1.sendUntil, sb.reviewLinkFor('Chimney').link, sb.reviewLinkFor('Chimney').result], [8, 20, 'https://g.page/r/x/review', 'Enjoy your clean, safe fireplace!'], 'reviews: impossible hours fall back; a saved link with an empty line keeps the original line');
+}
 function testMessageTemplates(sb){
   console.log('\nMessage templates (Settings, stage 3b)');
   const fnSrc = f => fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', f, 'index.ts'), 'utf8');
@@ -1055,6 +1073,7 @@ function testMessageTemplates(sb){
   const orig = key => sb.MSG_TEMPLATES.flatMap(m => m.fields).find(f => f.key===key).text;
   const voice = fnSrc('voice'), conv = fnSrc('conversations');
   assertEqual([orig('missedCall'), orig('missedCallClosed')], [constOf(voice, 'SMS_MISSED'), constOf(voice, 'SMS_CLOSED')], 'templates: missed-call originals are the voice function\'s words');
+  assertEqual([orig('phoneGreeting'), orig('phoneClosed'), orig('phoneMissed')], [constOf(voice, 'NOTICE'), constOf(voice, 'CLOSED'), constOf(voice, 'MISSED')], 'templates: spoken phone originals are the voice function\'s words');
   assertEqual([orig('chatOpen'), orig('chatClosed'), orig('chatIntro')], [constOf(conv, 'SMS_OPEN'), constOf(conv, 'SMS_CLOSED'), constOf(conv, 'INTRO')], 'templates: chat originals are the conversations function\'s words');
   const V = { hi: 'Hi Sarah', first_name: 'Sarah', technician: 'Guy', result: 'Enjoy the fresh, clean air!', review_link: 'https://g.page/r/x/review', today: ' today' };
   assertEqual(sb.fillTemplate(orig('reviewSms'), V), "Hi Sarah, Guy from The Guys Service Group here - thanks for having us today! Enjoy the fresh, clean air! Our team works really hard and would truly appreciate a quick Google review: https://g.page/r/x/review Thank you!", 'templates: review text original fills to the approved text');
@@ -1068,6 +1087,33 @@ function testMessageTemplates(sb){
   assertEqual([sb.templateProblems(m('reviewText'), { reviewSms: orig('reviewSms') }).length, sb.templateProblems(m('reviewText'), { reviewSms: 'Thanks {first_name}!' }).length,
     sb.templateProblems(m('missedCall'), { missedCall: 'Hi {first_name}' }).length, sb.templateProblems(m('chatOpen'), { chatOpen: ' ' }).length],
     [0, 1, 1, 1], 'templates: the original saves; no review link, a blank it can\'t fill, or empty words are stopped');
+}
+function testPaySettings(sb){
+  console.log('\nPay settings (Settings, 13 Oct)');
+  const log = (date, hours, n) => ({ date, hours, bookingsAircon: n, bookingsChimney: 0, bookingsPw: 0 });
+  sb.STATE.data.settings = { catalog: {} };
+  assertEqual([sb.salesLogPay(log('2026-10-01', 8, 9)), sb.bookingBonus(5, '2026-10-01'), sb.jobTypesForTech('Alessandro'), sb.payHebrewNames().Guy], [95, 10, ['Pressure Washing'], 'גיא'], 'pay: nothing saved = $10/hour, the original bonus, job types and Hebrew names');
+  sb.STATE.data.settings = { catalog: { pay: { hourly: [{ from: '2026-10-13', rate: 12, tiers: [{ min: 6, bonus: 20 }, { min: 10, bonus: 40 }] }],
+    hebrew: { Dolev: 'דולב' }, jobTypes: { Guy: ['Aircon'], Omri: ['Nope'] } } } };
+  assertEqual([sb.salesLogPay(log('2026-10-12', 8, 9)), sb.salesLogPay(log('2026-10-13', 8, 9)), sb.salesLogPay(log('2026-10-14', 8, 5)), sb.salesLogPay(log('2026-10-14', 8, 12))], [95, 116, 96, 136], 'pay: a new rate and bonus count from their day on; the days before keep the old ones');
+  assertEqual([sb.nextBookingTier(7, '2026-10-14'), sb.nextBookingTier(3, '2026-10-01')], [{ needed: 3, bonus: 40 }, { needed: 2, bonus: 10 }], 'pay: the next bonus follows the day\'s tiers');
+  assertEqual([!!sb.payHebrewNames().Guy, sb.payHebrewNames().Dolev], [false, 'דולב'], 'pay: the saved Hebrew list replaces the original one');
+  assertEqual([sb.jobTypesForTech('Guy'), sb.jobTypesForTech('Omri'), sb.jobTypesForTech('Someone new')], [['Aircon'], ['Aircon', 'Chimney', 'Other'], ['Aircon', 'Chimney', 'Pressure Washing', 'Other']], 'pay: saved job types win; an unusable list keeps the original');
+  sb.STATE.data.settings = { catalog: { pay: { hourly: [{ from: '2026-10-13', rate: 'x', tiers: [] }] } } };
+  assertEqual([sb.salesLogPay(log('2026-10-14', 8, 12)), sb.payTiersOk([{ min: 5, bonus: 10 }, { min: 5, bonus: 20 }, { min: 0, bonus: 5 }])], [80, [{ min: 5, bonus: 10 }]], 'pay: a bad rate keeps $10; no tiers = no bonus; duplicate or zero tiers are dropped');
+  sb.STATE.data.settings = { gstRatePercent: 10 };
+}
+function testPhoneSettings(sb){
+  console.log('\nPhone settings (Settings, 13 Oct)');
+  assertEqual(sb.phoneMenuText(sb.phoneMenuOf({})), 'For air conditioning, press 1. For chimney, press 2. For pressure washing, press 3.', 'phone: nothing saved = the original menu, word for word');
+  assertEqual(sb.phoneMenuOf({ menu: [{ key: 'Chimney', say: ' chimney sweeping ' }, { key: '', say: 'x' }, { key: 'Aircon' }] }), [{ key: 'Chimney', say: 'chimney sweeping' }], 'phone: a saved menu keeps only rows with a service and words');
+  assertEqual(sb.phoneMenuOf({ menu: Array.from({ length: 12 }, (_, i) => ({ key: 'S' + i, say: 's' + i })) }).length, 9, 'phone: at most 9 services (one key each)');
+  assertEqual([sb.phoneRingSeconds(30), sb.phoneRingSeconds(3), sb.phoneRingSeconds(300), sb.phoneRingSeconds('x')], [30, 20, 20, 20], 'phone: ring times 5–60 seconds, otherwise 20 (as the voice function)');
+  assertEqual([sb.phoneE164('0412 345 678'), sb.phoneE164('1300 380 090'), sb.phoneE164('+611300380090'), sb.phoneE164('12')], ['+61412345678', '+611300380090', '+611300380090', ''], 'phone: numbers read like the voice function');
+  assertEqual([sb.phonePretty('+611300380090'), sb.phonePretty('0412345678'), sb.phonePretty('+61298765432')], ['1300 380 090', '0412 345 678', '02 9876 5432'], 'phone: numbers shown the usual way');
+  const voice = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'voice', 'index.ts'), 'utf8');
+  const def = JSON.parse(voice.match(/^const DEFAULT_MENU = (\[.*\]);$/m)[1].replace(/(\w+):/g, '"$1":'));
+  assertEqual(sb.PHONE_MENU_DEFAULT, def, 'phone: the app and the voice function start from the same menu');
 }
 function testOfficeHours(sb){
   console.log('\nOffice hours and days off (Settings, stage 3)');
@@ -1137,6 +1183,9 @@ testToastKinds(loadSandbox());
 testCatalog(loadSandbox());
 testOfficeHours(loadSandbox());
 testMessageTemplates(loadSandbox());
+testReviewSettings(loadSandbox());
+testPhoneSettings(loadSandbox());
+testPaySettings(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
