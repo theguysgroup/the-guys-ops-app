@@ -51,3 +51,7 @@ create policy "seo_suggestions: owners and managers add" on public.seo_suggestio
 drop policy if exists "seo_suggestions: owners and managers update" on public.seo_suggestions;
 create policy "seo_suggestions: owners and managers update" on public.seo_suggestions for update using (is_owner_or_manager()) with check (is_owner_or_manager());
 -- No delete policy: a suggestion is closed with a status (done / not relevant), never deleted from the app.
+
+-- Added after the first run (13 Oct): the upload function (service role) needs the row counter of organic_stats
+-- (bigserial). ads_stats uses an identity column, which needs no such grant.
+grant usage, select on sequence public.organic_stats_id_seq to service_role;
