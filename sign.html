@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Agreement · The Guys Service Group</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+<style>
+/* The page a contractor opens from the signing link (Ofek 13 Oct, approved mockup). Light only, like a paper document. */
+:root { --ink: #1d1a16; --soft: #6b6258; --faint: #8a8175; --line: #e3ddd2; --paper: #f7f5f1; --card: #fff; --brand: #c31f2b; --brand-strong: #8c1620; --good: #237a52; --good-soft: #dcf0e4; --bad: #b23a22; --top: #17130f; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--paper); color: var(--ink); font-family: 'Figtree', system-ui, -apple-system, sans-serif; font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+.top { background: var(--top); color: #fff; padding: 16px 18px 14px; display: flex; align-items: center; gap: 11px; }
+.logo { width: 36px; height: 36px; border-radius: 8px; background: var(--brand); display: grid; place-items: center; font-weight: 700; font-size: 13px; letter-spacing: .02em; flex: none; }
+.top b { display: block; font-size: 14.5px; } .top span { font-size: 12px; color: #b9b0a3; }
+.wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px 40px; display: flex; flex-direction: column; gap: 14px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.card h2 { margin: 0 0 6px; font-size: 11.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); font-weight: 700; }
+.deal { font-weight: 700; font-size: 16.5px; line-height: 1.35; }
+.deal-note { font-size: 13.5px; color: var(--soft); margin-top: 4px; }
+.doc { font-family: 'Source Serif 4', Georgia, serif; font-size: 15px; line-height: 1.6; }
+.doc h4 { font-family: 'Figtree', sans-serif; font-size: 14px; margin: 14px 0 3px; }
+.doc p { margin: 0 0 8px; }
+.doc mark { background: none; color: inherit; padding: 0; font-weight: 600; }
+.doc .sig, .doc .sub, .doc h1 { display: none; }
+label.l { font-size: 13px; font-weight: 600; color: var(--soft); display: block; margin-bottom: 5px; }
+input.t { width: 100%; border: 1px solid #d6cfc3; border-radius: 10px; padding: 12px; font: inherit; font-size: 16px; background: #fff; color: var(--ink); }
+input.t:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(195,31,43,.25); }
+.agree { display: flex; gap: 10px; align-items: flex-start; font-size: 14.5px; }
+.agree input { width: 22px; height: 22px; accent-color: var(--brand); margin-top: 1px; flex: none; }
+.pad-head { display: flex; justify-content: space-between; align-items: baseline; }
+.clear { border: 0; background: none; color: var(--brand); font: inherit; font-weight: 600; font-size: 14px; padding: 4px; cursor: pointer; }
+.pad { position: relative; border: 1.5px dashed #b9b0a3; border-radius: 12px; background: #fff; height: 170px; touch-action: none; }
+.pad canvas { width: 100%; height: 100%; display: block; border-radius: 12px; cursor: crosshair; }
+.ph { position: absolute; inset: 0; display: grid; place-items: center; color: #a39a8d; font-size: 14px; pointer-events: none; }
+.btn { width: 100%; min-height: 52px; border: 0; border-radius: 12px; background: var(--brand); color: #fff; font: inherit; font-size: 16.5px; font-weight: 700; cursor: pointer; }
+.btn:hover { background: var(--brand-strong); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn.dark { background: var(--top); }
+.small { font-size: 12.5px; color: var(--faint); text-align: center; }
+.err { color: var(--bad); font-size: 14px; text-align: center; }
+.done { text-align: center; padding: 26px 16px; }
+.done .big { width: 74px; height: 74px; border-radius: 99px; background: var(--good-soft); color: var(--good); display: grid; place-items: center; font-size: 36px; margin: 0 auto 14px; }
+.msg { text-align: center; padding: 40px 18px; color: var(--soft); }
+.preview { border: 1px dashed var(--brand); border-radius: 12px; padding: 14px; text-align: center; font-size: 14px; color: var(--brand); font-weight: 600; }
+.sigbox { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; font-size: 12.5px; color: #4b443c; margin-top: 18px; }
+.sigbox div { border-top: 1px solid #b9b0a3; padding-top: 6px; }
+.sigbox img { max-width: 100%; height: 60px; object-fit: contain; display: block; }
+.print-only { display: none; }
+@media print {
+  body { background: #fff; } .top, .no-print { display: none !important; }
+  .print-only { display: block; } .wrap { max-width: none; padding: 0; } .card { border: 0; padding: 0; }
+  .doc .sub, .doc h1 { display: block; } .doc h1 { font-family: 'Figtree', sans-serif; font-size: 20px; margin: 0; }
+  .doc .sub { font-family: 'Figtree', sans-serif; font-size: 12px; color: #6b6258; margin-bottom: 14px; }
+}
+</style>
+</head>
+<body>
+<div class="top"><span class="logo">TG</span><div><b>The Guys Service Group</b><span id="sub">Subcontractor agreement</span></div></div>
+<main class="wrap" id="app"><div class="msg">Loading the agreement…</div></main>
+<script>
+// Talks only to the contractor-sign function; the link's token is the only key. Nothing is stored on this device.
+const FN = 'https://dszlllazwmllmoklzjwl.supabase.co/functions/v1/contractor-sign';
+const PK = 'sb_publishable_CYDF61njgAU74Dm3PvkLGQ_4N6qfvIi';
+const Q = new URLSearchParams(location.search), T = Q.get('t') || '';
+const PREVIEW = Q.get('preview') === '1';   // "See what they see" from the app: nothing is recorded and signing is off
+const app = document.getElementById('app');
+const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// The agreement text comes from the business's own app. It is still rebuilt from an allow-list before showing it:
+// only headings, paragraphs and highlights, with no attributes; anything else keeps its text only. DOMParser runs no
+// scripts and loads nothing while it reads.
+const KEEP = { H4: 1, P: 1, MARK: 1, B: 1, STRONG: 1, I: 1, EM: 1, BR: 1 };
+function clean(html){
+  const doc = new DOMParser().parseFromString('<!doctype html><body>' + String(html || ''), 'text/html');
+  const copy = (from, to) => from.childNodes.forEach(n => {
+    if (n.nodeType === 3) to.appendChild(document.createTextNode(n.nodeValue));
+    else if (n.nodeType === 1 && KEEP[n.tagName]) { const el = document.createElement(n.tagName.toLowerCase()); copy(n, el); to.appendChild(el); }
+    else if (n.nodeType === 1 && !/^(SCRIPT|STYLE|TEMPLATE|NOSCRIPT|TITLE)$/.test(n.tagName)) copy(n, to);
+  });
+  const box = document.createElement('div'); copy(doc.body, box);
+  return box.innerHTML;
+}
+async function call(body){
+  const r = await fetch(FN, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: PK, Authorization: 'Bearer ' + PK }, body: JSON.stringify({ ...body, t: T }) });
+  let out = {}; try { out = await r.json(); } catch (e) {}
+  return out;
+}
+const fmt = iso => iso ? new Date(iso).toLocaleString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+let A = null, drawn = false;
+function signedBlock(a){
+  return `<div class="sigbox"><div>For The Guys Service Group<br><b>${esc(a.ourSigner || 'The Guys Service Group')}</b></div><div>For ${esc(a.company)}<br>${a.signature ? `<img alt="Signature" src="${esc(a.signature)}">` : ''}<b>${esc(a.signer)}</b> · ${esc(fmt(a.signedAt))}</div></div>`;
+}
+function showSigned(a, fresh){
+  document.getElementById('sub').textContent = 'Agreement for ' + a.company;
+  app.innerHTML = `<div class="card no-print"><div class="done"><div class="big">✓</div><h2 style="font-size:20px;color:var(--ink);text-transform:none;letter-spacing:0;margin:0 0 6px">${fresh ? `Signed, thank you ${esc(String(a.signer).split(' ')[0])}` : 'This agreement is signed'}</h2>
+      <p style="color:var(--soft);margin:0 0 16px">Signed by ${esc(a.signer)} on ${esc(fmt(a.signedAt))}. Keep a copy for your records.</p>
+      <button class="btn dark" onclick="print()">Save a copy (PDF)</button></div></div>
+    <div class="card"><div class="doc"><h1>Subcontractor agreement</h1><div class="sub">The Guys Service Group Pty Ltd · version ${esc(a.version)} · made ${esc(a.madeOn)}</div>${clean(a.html)}</div>${signedBlock(a)}</div>`;
+}
+function showForm(a){
+  document.getElementById('sub').textContent = 'Agreement for ' + a.company;
+  app.innerHTML = `
+    <div class="card"><h2>What we agreed</h2><div class="deal">${esc(a.dealLine)}</div>${a.dealNote ? `<div class="deal-note">${esc(a.dealNote)}</div>` : ''}</div>
+    <div class="card"><h2>The agreement</h2><div class="doc">${clean(a.html)}</div></div>
+    <div><label class="l" for="nm">Your full name</label><input class="t" id="nm" autocomplete="name" placeholder="As you sign it" value="${esc(a.person)}"></div>
+    <label class="agree"><input type="checkbox" id="ok"><span>I have read the agreement and agree to it on behalf of ${esc(a.company)}.</span></label>
+    <div><div class="pad-head"><label class="l">Sign with your finger</label><button class="clear" type="button" onclick="clearPad()">Clear</button></div><div class="pad"><canvas id="pad" aria-label="Signature pad"></canvas><div class="ph" id="ph">Sign here</div></div></div>
+    <div class="err" id="err" hidden></div>
+    ${PREVIEW ? '<div class="preview">Preview: this is what the contractor sees. Signing is off here, and opening it is not recorded.</div>' : '<button class="btn" id="go" disabled onclick="sign()">Sign the agreement</button>'}
+    <div class="small">Your signature, the time and your device are saved with the agreement.</div>`;
+  document.getElementById('nm').oninput = upd; document.getElementById('ok').onchange = upd;
+  initPad(); upd();
+}
+function upd(){ const n = (document.getElementById('nm') || {}).value || ''; const ok = (document.getElementById('ok') || {}).checked; const b = document.getElementById('go'); if (b) b.disabled = !(n.trim().length >= 2 && ok && drawn); }
+function initPad(){
+  const cv = document.getElementById('pad'), dpr = window.devicePixelRatio || 1, r = cv.getBoundingClientRect();
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  const g = cv.getContext('2d'); g.scale(dpr, dpr); g.lineWidth = 2.6; g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#1d3c8f';
+  let on = false, lx = 0, ly = 0;
+  // The finger is mapped to the drawing's own size, so the line stays under it after the phone is turned.
+  const pt = e => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left) * cv.width / dpr / (b.width || 1), (e.clientY - b.top) * cv.height / dpr / (b.height || 1)]; };
+  cv.onpointerdown = e => { on = true; [lx, ly] = pt(e); cv.setPointerCapture(e.pointerId); g.beginPath(); g.arc(lx, ly, 1.2, 0, 7); g.fillStyle = '#1d3c8f'; g.fill(); };
+  cv.onpointermove = e => { if (!on) return; const [x, y] = pt(e); g.beginPath(); g.moveTo(lx, ly); g.lineTo(x, y); g.stroke(); [lx, ly] = [x, y]; if (!drawn) { drawn = true; document.getElementById('ph').style.display = 'none'; upd(); } };
+  cv.onpointerup = cv.onpointercancel = () => { on = false; };
+}
+function clearPad(){ const cv = document.getElementById('pad'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); drawn = false; document.getElementById('ph').style.display = ''; upd(); }
+// Turned before signing: the pad is set up again at its new size, so the line is sharp.
+addEventListener('resize', () => { if (document.getElementById('pad') && !drawn) initPad(); });
+async function sign(){
+  if (PREVIEW) return;
+  const b = document.getElementById('go'), err = document.getElementById('err');
+  b.disabled = true; b.textContent = 'Signing…'; err.hidden = true;
+  // The drawing is saved on a white background, so it reads the same in any viewer.
+  const cv = document.getElementById('pad'), out = document.createElement('canvas'); out.width = cv.width; out.height = cv.height;
+  const g = out.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, out.width, out.height); g.drawImage(cv, 0, 0);
+  const res = await call({ step: 'sign', name: document.getElementById('nm').value.trim(), agree: document.getElementById('ok').checked === true, signature: out.toDataURL('image/png') }).catch(() => ({}));
+  if (res.ok) { showSigned(res, true); scrollTo(0, 0); return; }
+  const why = { name: 'Please write your full name.', agree: 'Please tick that you have read and agree.', signature: 'Please sign in the box.', already_signed: 'This agreement is already signed.', expired: 'This link has expired. Ask us for a new one.', link: 'This link does not work. Ask us for a new one.' }[res.reason] || 'Something went wrong. Please try again.';
+  err.textContent = why; err.hidden = false; b.textContent = 'Sign the agreement'; upd();
+  if (res.reason === 'already_signed') load();
+}
+async function load(){
+  if (!T) { app.innerHTML = '<div class="msg">This link is not complete. Please open the full link you were sent.</div>'; return; }
+  const a = await call(PREVIEW ? { step: 'get', preview: true } : { step: 'get' }).catch(() => ({}));
+  A = a;
+  if (a.ok && a.state === 'signed') return showSigned(a, false);
+  if (a.ok) return showForm(a);
+  app.innerHTML = `<div class="msg">${a.reason === 'expired' ? 'This link has expired. Please ask The Guys Service Group for a new one.' : a.reason === 'link' ? 'This link does not work any more. Please ask The Guys Service Group for a new one.' : 'We could not load the agreement. Please check your connection and try again.'}</div>`;
+}
+load();
+</script>
+</body>
+</html>

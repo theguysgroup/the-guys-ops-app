@@ -53,6 +53,7 @@ const DECLS = [
   'esc', 'quoteDueReason', 'shiftDaySummary', 'latePaymentDue', 'latePaymentDoneToday', 'reofferDue', 'assigneeNames', 'taskAssignedTo', 'myTaskDue', 'teamTaskDue', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
   // message templates (12 Oct)
   'TECH_JOB_TYPES', 'jobTypesForTech',
+  'EQUIPMENT_CATEGORY_DEFAULTS', 'equipmentCategories', 'equipmentCategoryOf', 'contractorDealAmount', 'contractorDealLine', 'contractorDealNote', 'contractorAgreementHtml', 'contractorAgreementInputs', 'ROLE_LABEL', 'roleLabel', 'peopleList', 'personActive', 'personRoles', 'personInGroup',
   'ORG_CTR', 'orgExpectedCtr', 'ORG_CLEAN_FROM', 'orgPath', 'orgWindow', 'orgIsLead', 'orgLeadStats', 'ORG_EV_LABEL', 'orgEvidenceText',
   'PHONE_MENU_DEFAULT', 'phoneMenuOf', 'phoneMenuText', 'phoneSayDefault', 'phoneRingSeconds', 'phoneE164', 'phonePretty',
   'REVIEW_TPL_VARS', 'CHAT_TPL_VARS', 'MSG_TEMPLATES', 'msgTemplateText', 'fillTemplate', 'SMS_GSM', 'smsParts', 'templateProblems',
@@ -839,7 +840,7 @@ function testTasksAndExpenses(sb){
   const f = x => sb.filterExpenseRows(rows, x).map(r => r.id);
   assertEqual([f({ start:'2026-10-01', end:'2026-10-07' }), f({ supplier:' bUNn ' }), f({ category:'none' }), f({ tech:'Guy', category:'Tools' }), f({ category:'Job parts' })],
     [['j1','e1'], ['j1','e1'], ['e2'], ['e1'], ['j1']], 'filterExpenseRows: dates, supplier (any part, any case), not set, technician + category, job parts');
-  assertEqual(sb.supplierNames(data), ['BP','Bunnings','Bunnings Warehouse','Actrol'], 'supplierNames: used ones first (the same name in any case once), then the Suppliers list');
+  assertEqual(sb.supplierNames(data), ['BP','Bunnings','Bunnings Warehouse'], 'supplierNames: used ones first (the same name in any case once); the Contractors list is not shops, so not suggested (13 Oct)');
 
   // The store on a receipt.
   const find = (text, extra) => sb.findStoreInText(text, [...sb.KNOWN_STORES, ...(extra||[])]);
@@ -1110,6 +1111,36 @@ function testOrganicBoard(sb){
     [['a','b'], 1, 1, 2, 500, [['Organic web', 1, 0, 0], ['Google Maps · Chimney profile', 1, 2, 500]], [['Aircon', 1], ['Chimney', 1]]], 'organic: leads from Organic web and Google Maps in the window, their jobs and revenue, by profile and service (Google Ads leads and older leads left out)');
   assertEqual(sb.orgEvidenceText({ window:'28 days', impressions:2000, ctr_pct:0.2, note:'', named_instead:['A Grade','Coolguys'], competitors:[{ name:'Eco Aircon', reviews:181 }] }), 'Period: 28 days · Shown: 2,000 · Click rate %: 0.2 · Named instead: A Grade, Coolguys · Competitors: Eco Aircon 181', 'organic: the evidence line, in words');
 }
+function testPeopleContractorsEquipment(sb){
+  console.log('\nPeople, Contractors, Equipment (13 Oct)');
+  // People: one card per person, the employee card and the login merged by Jobs & Commissions name or full name.
+  const employees = [{ id:'e1', name:'Guy', roles:['Technician','Sales'], status:'Active' }, { id:'e2', name:'Dolev', roles:['Technician'], status:'Inactive' }, { id:'e3', name:'Ofek', roles:['Owner','Technician'], status:'Active' }, { id:'e4', name:'Ron', roles:['VA'], status:'Active' }];
+  const profiles = [{ id:'p1', fullName:'Guy Galili', role:'technician', technicianName:'Guy' }, { id:'p2', fullName:'Ofek', role:'owner', technicianName:'Ofek' }, { id:'p3', fullName:'Manuel Baez', role:'marketing', technicianName:'' }, { id:'p4', fullName:'Ron', role:'va', technicianName:'' }];
+  const L = sb.peopleList(employees, profiles);
+  assertEqual(L.map(x => [x.key, x.name, x.prof ? x.prof.id : null]), [['e:e1','Guy Galili','p1'], ['e:e2','Dolev',null], ['e:e3','Ofek','p2'], ['e:e4','Ron','p4'], ['p:p3','Manuel Baez','p3']], 'people: employee and login merged (by Jobs name or full name); a login with no card and a card with no login each get a card');
+  const g = f => L.filter(x => sb.personInGroup(x, f)).map(x => x.key);
+  assertEqual([g('active').length, g('tech'), g('office'), g('owners'), g('inactive')], [4, ['e:e1','e:e3'], ['e:e1','e:e4','p:p3'], ['e:e3'], ['e:e2']], 'people: the filters (sales counts as office; not active only under Not active)');
+  // Contractors: the deal line, the agreement text and when it is out of date.
+  const c = { id:'s1', name:'Spark <Line> Electrical', contactPerson:'Jake', services:['Electrical'], paymentTerms:'7 days', deal:{ type:'commission', amount:10, note:'Only jobs we pass on.' } };
+  assertEqual([sb.contractorDealLine(c), sb.contractorDealLine({ ...c, deal:{ type:'fixed', amount:50 } }), sb.contractorDealLine({ ...c, deal:{ type:'other', note:'A swap of jobs.' } }), sb.contractorDealLine({ ...c, deal:{ type:'commission', amount:null } })],
+    ['We get 10% of every job we pass to Spark <Line> Electrical.', 'We get $50 for every job we pass to Spark <Line> Electrical.', 'A swap of jobs.', 'Nothing agreed yet.'], 'contractors: what we agreed, in one sentence');
+  const html = sb.contractorAgreementHtml(c, { abn:'51 824 753 556' });
+  assertEqual([html.includes('Spark &lt;Line&gt; Electrical'), html.includes('<Line>'), html.includes('<mark>10%</mark> of the job price before GST, within <mark>7 days</mark>'), html.includes('ABN <mark>51 824 753 556</mark>'), html.includes('Also agreed: <mark>Only jobs we pass on.</mark>'), (html.match(/<h4>/g) || []).length],
+    [true, false, true, true, true, 9], 'contractors: the agreement is filled in (escaped), with the money clause, the ABN and the note; 9 sections');
+  const noAmt = { ...c, deal:{ type:'commission', amount:'', note:'10% of the first job only.' } }, h2 = sb.contractorAgreementHtml(noAmt, {});
+  assertEqual([sb.contractorDealLine(noAmt), sb.contractorDealNote(noAmt), sb.contractorDealNote(c), h2.includes('Also agreed'), (h2.match(/10% of the first job only\./g) || []).length, sb.contractorDealAmount({ type:'fixed', amount:'abc' }), sb.contractorDealAmount({ type:'other', amount:5 })],
+    ['10% of the first job only.', '', 'Only jobs we pass on.', false, 1, null, null], 'contractors: with no amount the note is the deal, shown once (not again as "also agreed")');
+  const k = sb.contractorAgreementInputs(c, { abn:'1' });
+  assertEqual([k===sb.contractorAgreementInputs({ ...c }, { abn:'1' }), k===sb.contractorAgreementInputs({ ...c, deal:{ ...c.deal, amount:12 } }, { abn:'1' }), k===sb.contractorAgreementInputs(c, { abn:'2' }), k===sb.contractorAgreementInputs({ ...c, phone:'0412' }, { abn:'1' })],
+    [true, false, false, true], 'contractors: the agreement goes out of date when the deal or the ABN changes, not the phone');
+  // Equipment: the categories (nothing saved = four), an old "Consumable" item belongs to "Consumables".
+  sb.STATE.data.settings = { catalog: {} };
+  assertEqual(sb.equipmentCategories().map(x => x.name), ['Tools','Chemicals','Consumables','Safety gear'], 'equipment: the default categories');
+  sb.STATE.data.settings = { catalog: { equipmentCategories: [{ name:' Pumps ', color:'#123456' }, { name:'' }, { name:'Hoses', color:'red' }] } };
+  assertEqual(sb.equipmentCategories(), [{ name:'Pumps', color:'#123456' }, { name:'Hoses', color:'#776e64' }], 'equipment: saved categories (blank dropped, a bad colour replaced)');
+  assertEqual([sb.equipmentCategoryOf({ category:'Consumable' }), sb.equipmentCategoryOf({ category:'Tools' }), sb.equipmentCategoryOf({})], ['Consumables', 'Tools', ''], 'equipment: an old Consumable item counts as Consumables');
+  sb.STATE.data.settings = { gstRatePercent: 10 };
+}
 function testPaySettings(sb){
   console.log('\nPay settings (Settings, 13 Oct)');
   const log = (date, hours, n) => ({ date, hours, bookingsAircon: n, bookingsChimney: 0, bookingsPw: 0 });
@@ -1208,6 +1239,7 @@ testMessageTemplates(loadSandbox());
 testReviewSettings(loadSandbox());
 testPhoneSettings(loadSandbox());
 testPaySettings(loadSandbox());
+testPeopleContractorsEquipment(loadSandbox());
 testOrganicBoard(loadSandbox());
 
 console.log(`\n${pass} passed, ${fail} failed`);

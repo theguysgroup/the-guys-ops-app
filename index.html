@@ -842,6 +842,63 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .emp-rates { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; }
 .emp-flags { display: flex; gap: 6px; flex-wrap: wrap; }
 .emp-flags .pill { white-space: normal; line-height: 1.35; }
+/* Resources → Contractors and Equipment, Settings → People (Ofek 13 Oct, approved mockup) */
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+.con-search, .people-search { flex: 1 1 220px; max-width: 320px; }
+.res-moved { font-size: 12.5px; color: var(--ink-soft); background: var(--surface); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; }
+.emp-avatar.sq { border-radius: 10px; }
+.con-deal { font-size: 13.3px; font-weight: 600; color: var(--ink); padding: 8px 10px; border-radius: 8px; background: var(--surface-2); line-height: 1.35; }
+.svc-dot { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+.svc-dot i { width: 8px; height: 8px; border-radius: 99px; background: var(--c); }
+.svc-pick { display: flex; gap: 6px; flex-wrap: wrap; }
+.svc { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 4px 11px; font-size: 12px; font-weight: 600; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.svc i { width: 8px; height: 8px; border-radius: 99px; background: var(--c); }
+.svc.on { border-color: color-mix(in srgb, var(--c) 60%, var(--line)); background: color-mix(in srgb, var(--c) 12%, var(--surface)); color: var(--ink); }
+.con-dealbox { border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--line)); border-radius: 10px; padding: 12px 14px; background: color-mix(in srgb, var(--primary-soft) 55%, var(--surface)); }
+.con-dealline { font-size: 14px; font-weight: 600; line-height: 1.4; margin-top: 8px; }
+.con-stale { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+.job-panel .grp .pill { text-transform: none; letter-spacing: 0; vertical-align: 1px; margin-inline-start: 6px; }
+.agr-steps { display: grid; margin: 4px 0 2px; }
+.agr-step { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; font-size: 13px; position: relative; padding-bottom: 10px; }
+.agr-step::before { content: ''; position: absolute; left: 8px; top: 18px; bottom: 0; width: 2px; background: var(--line); }
+.agr-step:last-child::before { display: none; }
+.agr-dot { width: 18px; height: 18px; border-radius: 99px; border: 2px solid var(--line); background: var(--surface); display: grid; place-items: center; font-size: 10px; color: #fff; margin-top: 1px; }
+.agr-step.done .agr-dot { background: var(--good); border-color: var(--good); }
+.agr-step.now .agr-dot { border-color: var(--warn); background: var(--warn-soft); }
+.agr-step small { display: block; color: var(--ink-faint); font-size: 11.5px; }
+.modal.agr-modal { max-width: 820px; width: 100%; padding: 0; display: flex; flex-direction: column; }
+.agr-head { padding: 18px 22px 12px; }
+.agr-wrap { background: var(--surface-2); padding: 22px; overflow: auto; max-height: 62vh; }
+.agr-doc { background: #fffdf8; color: #1d1a16; max-width: 680px; margin: 0 auto; padding: 36px 42px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,.15); font-family: Georgia, 'Times New Roman', serif; font-size: 14.5px; line-height: 1.6; }
+.agr-doc h1 { font-family: 'Figtree', sans-serif; font-size: 19px; margin: 0 0 2px; }
+.agr-doc .agr-sub { font-family: 'Figtree', sans-serif; font-size: 12px; color: #6b6258; margin-bottom: 16px; }
+.agr-doc h4 { font-family: 'Figtree', sans-serif; font-size: 13.5px; margin: 14px 0 3px; }
+.agr-doc p { margin: 0 0 8px; }
+.agr-doc mark { background: #fbe6b5; color: inherit; padding: 0 3px; border-radius: 3px; }
+.agr-sig { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 22px; font-family: 'Figtree', sans-serif; font-size: 12px; color: #4b443c; }
+.agr-sig div { border-top: 1px solid #b9b0a3; padding-top: 6px; }
+.agr-sig img { height: 60px; max-width: 100%; object-fit: contain; display: block; }
+.agr-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.eq-add { display: grid; grid-template-columns: minmax(0, 1fr) 200px auto; gap: 8px; margin-bottom: 14px; }
+.eq-list { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; }
+.eq-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--line-soft); }
+.eq-row:first-child { border-top: 0; }
+.eq-row b { font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
+.eq-row.editing { grid-template-columns: minmax(0, 1fr) 200px auto; background: var(--surface-2); }
+.eq-acts { display: inline-flex; gap: 4px; }
+.cat-pill { display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 99px; background: color-mix(in srgb, var(--c) 13%, var(--surface)); color: color-mix(in srgb, var(--c) 85%, var(--ink)); white-space: nowrap; }
+.cat-edit-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+.cat-edit-row input[type=color] { width: 34px; height: 30px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+.pp-rows { display: grid; gap: 5px; font-size: 12.5px; color: var(--ink-soft); }
+.pp-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pp-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-row .ico { color: var(--ink-faint); }
+.pp-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--line-soft); padding-top: 9px; }
+.pp-access { border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 10px; padding: 12px 14px; background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface)); }
+.pp-kv { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 3px 0; }
+.pp-kv span:first-child { color: var(--ink-soft); }
+@media (max-width: 760px) { .eq-add, .eq-row.editing { grid-template-columns: 1fr; } .agr-doc { padding: 24px 18px; } }
 .doc-row { display: flex; flex-direction: column; gap: 7px; padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
 .doc-row:last-child { border-bottom: 0; }
 .doc-name { font-weight: 600; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -1364,13 +1421,13 @@ function filterExpenseRows(rows, f){
   return rows.filter(r => (!f.start || r.date >= f.start) && (!f.end || r.date <= f.end) && (!f.tech || r.technician===f.tech)
     && (!f.category || (f.category==='none' ? !r.category : r.category===f.category)) && (!sup || r.supplier.toLowerCase().includes(sup)));
 }
-// Every supplier name the app knows (typed on a purchase or a job, or on the Suppliers list), the most used first.
+// Every supplier (shop) name the app knows (typed on a purchase or a job), the most used first. The Contractors list
+// (Resources) is not shops, so it is not suggested here (Ofek 13 Oct).
 function supplierNames(data){
   data = data || {};
   const count = new Map(), add = (n, w) => { const k = String(n||'').trim(); if (!k) return; const key = k.toLowerCase(); const cur = count.get(key); count.set(key, { name: cur ? cur.name : k, n: (cur ? cur.n : 0) + w }); };
   (data.equipmentSpend||[]).forEach(e => add(e.supplier, 1));
   (data.jobs||[]).forEach(j => add(j.partsSupplier, 1));
-  (data.suppliers||[]).forEach(x => add(x.name, 0));
   return [...count.values()].sort((a,b) => b.n - a.n || a.name.localeCompare(b.name)).map(x => x.name);
 }
 // Reading the store off a receipt photo: common Australian stores plus every supplier already in the app. OCR slips are
@@ -1832,7 +1889,7 @@ async function loadFromSupabase(){
 
   // Every list table is read page by page (fetchAllRows): one request returns at most 1,000 rows, and
   // anything past that used to disappear without a trace. Single-row tables stay as one request.
-  const LOAD_NAMES = ['leads','jobs','equipment purchases','equipment catalogue','suppliers','tasks','closings',
+  const LOAD_NAMES = ['leads','jobs','equipment purchases','equipment catalogue','contractors','tasks','closings',
     'reminders','tags','deleted reminders','cash status','settings','employees','commission rates',
     'activity history','ad spend','payroll','daily sales log','Google Ads calls','read reminders','payroll bonuses','owner salaries','lead email checks'];
   const loadResults = await Promise.all([
@@ -1913,9 +1970,12 @@ async function loadFromSupabase(){
       id:x.id, name:x.name, supplierId:x.supplier_id, otherSource:x.other_source||'', price:x.price||0,
       category:x.category||'', description:x.description||'', purchaseDate:x.purchase_date,
     })),
+    // The "suppliers" table holds the Contractors (Ofek 13 Oct): name = the company, contactPerson = the person.
     suppliers: (suppliers||[]).map(s => ({
       id:s.id, name:s.name, supplyType:s.supply_type||'', contactPerson:s.contact_person||'', phone:s.phone||'',
       email:s.email||'', addressWebsite:s.address_website||'', paymentTerms:s.payment_terms||'',
+      services:Array.isArray(s.services)?s.services:[], deal:s.deal&&typeof s.deal==='object'?s.deal:{}, insurance:s.insurance&&typeof s.insurance==='object'?s.insurance:{},
+      agreementStatus:s.agreement_status||'none', agreementSignedAt:s.agreement_signed_at||null, agreementSigner:s.agreement_signer||'', createdAt:s.created_at||null,
     })),
     tasks: (tasks||[]).map(t => ({ ...mapTaskRow(t), activityLog: logsFor('task', t.id) })),
     closings: (closings||[]).map(mapClosingRow),
@@ -2071,6 +2131,7 @@ function supplierPatchToRow(patch){
   const map = {
     name:'name', supplyType:'supply_type', contactPerson:'contact_person', phone:'phone',
     email:'email', addressWebsite:'address_website', paymentTerms:'payment_terms',
+    services:'services', deal:'deal', insurance:'insurance', agreementStatus:'agreement_status', agreementSignedAt:'agreement_signed_at', agreementSigner:'agreement_signer',
   };
   const row = {};
   for (const k in patch) { if (map[k]) row[map[k]] = patch[k]; }
@@ -2409,8 +2470,8 @@ const db = {
   suppliers: {
     async create(values){
       const { data: row, error } = await sb.from('suppliers').insert(supplierPatchToRow(values)).select().single();
-      if (error) { showToast('Could not save supplier: '+error.message); throw error; }
-      const s = { ...values, id: row.id };
+      if (error) { showToast('Could not save the contractor: '+error.message); throw error; }
+      const s = { services:[], deal:{}, insurance:{}, agreementStatus:'none', agreementSignedAt:null, agreementSigner:'', ...values, id: row.id, createdAt: row.created_at };
       STATE.data.suppliers.push(s);
       return s;
     },
@@ -2423,7 +2484,7 @@ const db = {
     async remove(id){
       STATE.data.suppliers = STATE.data.suppliers.filter(x=>x.id!==id);
       const { error } = await sb.from('suppliers').delete().eq('id', id);
-      if (error) showToast('Could not delete supplier: '+error.message);
+      if (error) showToast('Could not delete the contractor: '+error.message);
     },
   },
   equipmentSpend: {
@@ -2489,7 +2550,7 @@ function filterForProfile(data, profile){
   if (profile.role==='owner' || profile.role==='manager') return data;
   // A technician's own jobs feed his pay page even without the Jobs & Commissions board (Ofek 6 Oct).
   const canSeeJobs = profile.permissions.jobs || profile.permissions.finance || (profile.role==='technician' && profile.permissions.payroll);
-  // equipmentSpend also feeds the Equipment & Suppliers quick-entry feed on the Closings page (item 7),
+  // equipmentSpend also feeds the Equipment quick-entry feed on the Closings page (item 7),
   // so it needs to be visible under the `closings` permission too, not just jobs/finance.
   const canSeeEquipmentSpend = canSeeJobs || profile.permissions.closings;
   const jobVisible = (name) => { if (!canSeeJobs) return false; if (profile.role==='technician') return name===profile.technicianName; return true; };
@@ -2873,7 +2934,7 @@ function setupRealtimeSubscriptions(){
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
 }
-let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25,q:'',noReview:false,selectedId:null}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
+let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25,q:'',noReview:false,selectedId:null}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'contractors'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
 let MODAL_SUBTASKS = []; // transient per-modal checklist state for the task modal
 let EXPANDED_SUBTASK_INDEX = null; // which subtask's own updates thread is expanded in the task modal
@@ -2991,7 +3052,7 @@ function getCurrentProfile(){
   if (VIEW_AS_ID && real && real.role==='owner') { const v = STATE.profiles.find(p => p.id===VIEW_AS_ID); if (v) return v; }
   return real;
 }
-function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25,q:'',noReview:false,selectedId:null}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'employees'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; PAGE_FILES = {}; }
+function resetUI(){ UI = { tab:null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25,q:'',noReview:false,selectedId:null}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'contractors'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false }; PAGE_FILES = {}; }
 // The messages at the bottom of the screen (Ofek 12 Oct, suggestions 2 and 7). Each is shown on its own, without redrawing
 // the page. Its icon says what happened: a tick when something worked, ! when it needs a look, × when it failed (it stays
 // longer), i for news. A few stack up instead of replacing each other, so a message with Undo isn't lost to the next one;
@@ -3817,6 +3878,7 @@ async function doLogout(){
   await sb.auth.signOut();
   teardownRealtimeSubscriptions();
   STATE.data = null; STATE.dataLoaded = false; STATE.profiles = []; STATE.currentProfileId = null;
+  CPRIV = { map:{}, loaded:false, loading:false, err:'' };   // ABN, bank and agreements never stay in memory for the next login
   resetUI();
   // onAuthStateChange fires SIGNED_OUT and calls render() itself
 }
@@ -3860,7 +3922,7 @@ const NAV = [
   { group:'Finance', items:[ {id:'closings', label:'Closings', icon:'receipt'}, {id:'outstanding', label:'Outstanding', icon:'hourglass'}, {id:'jobs', label:'Jobs & Commissions', icon:'briefcase'} ] },
   { group:'Management', items:[ {id:'reference', label:'Resources', icon:'folder', go:'goResources()'}, {id:'settings', label:'Settings', icon:'sliders'} ] },
 ];
-function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; if (UI.jobs) UI.jobs.selectedId = null; if (UI.reference) UI.reference.empId = null; PANEL_OPEN_FOR = {}; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
+function goTab(id){ const go = () => { UI.tab = id; UI.mobileNavOpen = false; if (UI.jobs) UI.jobs.selectedId = null; if (UI.reference) UI.reference.contractorId = null; PEOPLE_UI.sel = null; PANEL_OPEN_FOR = {}; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 function goTasks(board){ UI.tab = 'tasks'; if (board) UI.tasks.board = board; UI.mobileNavOpen = false; render(); }
 function goResources(tab){ UI.tab = 'reference'; if (tab) UI.reference.tab = tab; UI.mobileNavOpen = false; render(); }
 function toggleMobileNav(){ UI.mobileNavOpen = !UI.mobileNavOpen; render(); }
@@ -7003,7 +7065,8 @@ function selectJob(id){
 document.addEventListener('keydown', e => {
   if (e.key!=='Escape' || document.querySelector('.modal-back, .confirm-back')) return;
   if (UI.tab==='jobs' && UI.jobs && UI.jobs.selectedId) selectJob(null);
-  else if (UI.tab==='reference' && UI.reference && UI.reference.empId) selectEmployee(null);
+  else if (UI.tab==='reference' && UI.reference && UI.reference.contractorId) openContractor(null);
+  else if (UI.tab==='settings' && PEOPLE_UI.sel) openPersonCard(null);
 });
 function showUnpaidJobs(){ Object.assign(UI.jobs, { status:'Unpaid', range:'all', page:1 }); render(); }
 function setJobsSearch(v){ UI.jobs.q = v; UI.jobs.page = 1; refreshJobsTable(); }
@@ -10053,7 +10116,7 @@ function goToReminderTarget(type, contactId, readKey, weekKey){
   if ((type==='unpaid' || type==='refund') && can('outstanding')) { UI.tab='outstanding'; render(); return; }
   if (type==='repeat-service' && refId && can('jobs')) { goToJobFromSearch(refId); return; }
   if (type==='equipment' && can('payroll')) { UI.tab='payroll'; UI.payroll.viewAs=null; UI.payroll.view='expenses'; render(); return; }
-  if (type==='employee-doc' && can('reference')) { UI.tab='reference'; UI.reference.tab='employees'; UI.reference.empId = refId.split(':')[0]; render(); return; }
+  if (type==='employee-doc' && can('settings')) { goTab('settings'); PEOPLE_UI.sel = 'e:' + refId.split(':')[0]; setSettingsPage('people'); return; }
   render();   // nowhere this person is allowed to go — it's marked read and stays here
 }
 // A technician's reminders are only about their own jobs and purchases; they can mark them read but not delete them
@@ -11273,18 +11336,17 @@ function openTaskActivityModal(taskId){
 
 /* ── reference (employees / equipment / suppliers / equipment spend) ───── */
 function renderReference(profile, data){
-  const canEditFinancial = profile.role==='owner' || profile.role==='manager';
-  // Equipment purchases moved to Payroll → Expenses & receipts (Ofek 7 Oct).
-  const tabs = [['employees','Employees'],['equipment','Equipment'],['suppliers','Suppliers']];
-  if (!tabs.some(([id]) => id===UI.reference.tab)) UI.reference.tab = 'employees';
-  const tabBtns = tabs.map(([id,label]) => `<button class="btn ${UI.reference.tab===id?'primary':''}" onclick="UI.reference.tab='${id}';render()">${label}</button>`).join('');
-  let body = '';
-  if (UI.reference.tab==='employees') body = renderEmployeesTab(data, canEditFinancial);
-  else if (UI.reference.tab==='equipment') body = renderEquipmentCatalogTab(data, canEditFinancial);
-  else if (UI.reference.tab==='suppliers') body = renderSuppliersTab(data, canEditFinancial);
+  // Equipment purchases moved to Payroll → Expenses & receipts (Ofek 7 Oct). Employees moved to Settings → People and
+  // Suppliers became Contractors (Ofek 13 Oct).
+  const tabs = [['contractors','Contractors'],['equipment','Equipment']];
+  if (!tabs.some(([id]) => id===UI.reference.tab)) UI.reference.tab = 'contractors';
+  const tabBtns = tabs.map(([id,label]) => `<button class="btn ${UI.reference.tab===id?'primary':''}" onclick="UI.reference.tab='${id}';UI.reference.contractorId=null;render()">${label}</button>`).join('');
+  const body = UI.reference.tab==='equipment' ? renderEquipmentCatalogTab(data) : renderContractorsTab(data);
+  const owner = profile.role==='owner';
   return `
-    <div class="page-head"><div><h1 class="page-title">Resources</h1><div class="page-sub">Equipment, employees and suppliers</div></div></div>
+    <div class="page-head"><div><h1 class="page-title">Resources</h1><div class="page-sub">Contractors and equipment</div></div></div>
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">${tabBtns}</div>
+    ${owner ? `<div class="res-moved">Employees have moved to <a href="#" onclick="event.preventDefault();goTab('settings');setSettingsPage('people')">Settings → People</a>.</div>` : ''}
     ${body}
   `;
 }
@@ -11341,37 +11403,9 @@ function empRatesHtml(rates){
   const items = ['Aircon','Chimney','Pressure Washing'].filter(d => r[d]!=null).map(d => divName(d, `${d==='Pressure Washing' ? 'Pressure W.' : d} ${r[d]}%`));
   return items.length ? items.join('') : '';
 }
-function renderEmployeeCards(data, selId){
-  const today = todayStr();
-  const list = [...data.employees].sort((a, b) => (a.status==='Active' ? 0 : 1) - (b.status==='Active' ? 0 : 1) || a.name.localeCompare(b.name));
-  return list.map(e => {
-    const missing = employeeMissing(e);
-    const docFlags = EMP_DOCS.map(d => ({ d, x: employeeDocExpiry((e.documents||{})[d.kind], today) })).filter(o => o.x && o.x.tone!=='good')
-      .map(o => pill(o.x.tone, `${o.d.label.replace(/ \(.*\)$/, '')} ${o.x.days < 0 ? 'expired' : `in ${o.x.days} days`}`)).join('');
-    return `<div class="emp-card${selId===e.id ? ' sel' : ''}${e.status==='Active' ? '' : ' inactive'}" role="button" tabindex="0" onclick="selectEmployee('${e.id}')" onkeydown="if(event.key==='Enter'){event.preventDefault();selectEmployee('${e.id}');}">
-      <div class="emp-card-top">${empAvatar(e)}<div style="min-width:0;flex:1"><div class="emp-name">${esc(e.name)}</div><div class="emp-role">${esc((e.roles||[]).join(', ') || '—')}${e.employmentType ? ' · ' + esc(e.employmentType) : ''}</div></div>${pill(e.status==='Active' ? 'good' : 'neutral', e.status||'Active')}</div>
-      <div class="emp-line mono">${esc(e.phone || 'no phone yet')}</div>
-      ${empRatesHtml(data.commissionRates[e.name]) ? `<div class="emp-rates">${empRatesHtml(data.commissionRates[e.name])}</div>` : ''}
-      ${missing.length || docFlags ? `<div class="emp-flags">${docFlags}${missing.length ? pill('neutral', 'Missing: ' + missing.join(' · ')) : ''}</div>` : ''}
-    </div>`;
-  }).join('');
-}
-function renderEmployeesTab(data, canEdit){
-  const sel = UI.reference.empId ? data.employees.find(e => e.id===UI.reference.empId) : null;
-  const cards = renderEmployeeCards(data, sel && sel.id);
-  return `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">${canEdit ? `<button class="btn primary" onclick="openEmployeeModal(null)">+ Employee</button>` : ''}</div>
-    <div class="emp-grid">${cards || emptyState('No employees yet', 'Add the first one.', 'idcard', { label:'Add an employee', icon:'plus', onclick:'openEmployeeModal(null)' })}</div>
-    <aside class="job-panel emp-panel${panelAnimClass('emp', sel && sel.id)}" id="emp-panel"${sel ? '' : ' hidden'}>${renderEmployeePanel(sel, data, canEdit)}</aside>`;
-}
-function selectEmployee(id){
-  UI.reference.empId = id && UI.reference.empId!==id ? id : null;
-  UI.reference.showBank = null;
-  render();
-}
 // The panel: everything about one person. Plain fields save as soon as they're changed (without redrawing, so moving
 // on with Tab keeps its place); the name, roles and commission rates go through the edit window, which handles a rename.
-function renderEmployeePanel(e, data, canEdit){
+function renderEmployeePanel(e, data, canEdit, extraTop, displayName){
   if (!e) return '';
   const today = todayStr();
   const ro = !canEdit;
@@ -11397,13 +11431,14 @@ function renderEmployeePanel(e, data, canEdit){
   };
   const rates = data.commissionRates[e.name];
   return `<div class="job-panel-head">
-      <div style="display:flex;gap:12px;align-items:center;min-width:0">${empAvatar(e, 46)}<div style="min-width:0"><h3>${esc(e.name)}</h3><div class="meta" style="margin:0">${esc((e.roles||[]).join(', ') || '—')}${tenure ? ` · with us ${tenure}` : ''}</div></div></div>
+      <div style="display:flex;gap:12px;align-items:center;min-width:0">${empAvatar(e, 46)}<div style="min-width:0"><h3>${esc(displayName || e.name)}</h3><div class="meta" style="margin:0">${esc((e.roles||[]).join(', ') || '—')}${tenure ? ` · with us ${tenure}` : ''}</div></div></div>
       <button type="button" class="btn ghost small" onclick="selectEmployee(null)" aria-label="Close" title="Close">✕</button>
     </div>
     <div class="job-panel-acts" style="margin:12px 0 2px">
       ${canEdit ? `<button type="button" class="btn ghost small" onclick="openEmployeeModal('${e.id}')">Edit name, roles and rates</button>` : ''}
       <button type="button" class="btn ghost small" onclick="openEmployeeActivityModal('${e.id}')">${ico('history')} History (${recordActivityCount(e)})</button>
     </div>
+    ${extraTop || ''}
     <div class="grp">Details</div>
     <div class="f">
       ${field('Status', statusSelect('empStatus', e.id, e.status||'Active', EMPLOYEE_STATUSES, v => v==='Active' ? 'good' : 'neutral', v => v, ro))}
@@ -11454,7 +11489,7 @@ function setEmployeeField(empId, field, raw){
   showToast('Saved');
   if (field==='abn') { const h = document.getElementById('emp-abn-hint'); if (h) h.innerHTML = !v ? '' : abnValid(v) ? '<span class="job-sub" style="color:var(--good)">✓ A valid ABN</span>' : '<span class="job-sub" style="color:var(--bad)">This ABN fails the check: look for a typo</span>'; }
   // The cards behind the panel (missing details, type) are redrawn; the panel itself keeps its place.
-  const grid = document.querySelector('.emp-grid'); if (grid) grid.innerHTML = renderEmployeeCards(STATE.data, UI.reference.empId);
+  refreshPeopleGrid();
 }
 function empDocLabel(kind, side){ const d = EMP_DOCS.find(x => x.kind===kind); return (d ? d.label : kind) + (side==='back' ? ' (back)' : ''); }
 function pickEmployeeDoc(empId, kind, side){
@@ -11511,7 +11546,7 @@ function removeEmployeeDoc(empId, kind, side){
     render();
   });
 }
-function openEmployeeModal(empId){
+function openEmployeeModal(empId, prefill){
   const emp = empId ? STATE.data.employees.find(e=>e.id===empId) : null;
   const rates = emp ? STATE.data.commissionRates[emp.name] : null;
   const isTech = emp?.roles.includes('Technician') || false, isOwner = emp?.roles.includes('Owner') || false, isVA = emp?.roles.includes('VA') || false, isManager = emp?.roles.includes('Manager') || false;
@@ -11521,7 +11556,7 @@ function openEmployeeModal(empId){
       <div class="modal">
         <h2>${emp?'Edit Employee':'New Employee'}</h2>
         <div class="grid-2">
-          <div class="field"><label>Name</label><input id="em-name" value="${esc(emp?.name||'')}"></div>
+          <div class="field"><label>Name</label><input id="em-name" value="${esc(emp?.name||(prefill && prefill.name)||'')}"></div>
           <div class="field"><label>Role(s)</label>
             <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding-top:6px">
               <label class="checkline"><input type="checkbox" id="em-owner" ${isOwner?'checked':''}> Owner</label>
@@ -11614,102 +11649,482 @@ async function saveEmployeeModal(empId){
       });
     }
   }
-  if (!prev) { logEmployeeActivity(emp, actor, 'Employee added'); if (UI.tab==='reference') UI.reference.empId = emp.id; }   // a new person opens on their card
+  if (!prev) { logEmployeeActivity(emp, actor, 'Employee added'); if (UI.tab==='settings') PEOPLE_UI.sel = 'e:' + emp.id; }   // a new person opens on their card
   closeModal(); showToast(empId?'Employee updated':'Employee added');
   if (prev && oldName && oldName!==name) { await loadFromSupabase(); }   // every screen now shows the new name
   render();
 }
-const EQUIPMENT_CATEGORIES = ['Tools','Consumable'];
-function renderEquipmentCatalogTab(data, canEdit){
-  const supplierName = (id) => { const s = data.suppliers.find(x=>x.id===id); return s?s.name:null; };
-  const rows = data.equipmentCatalog.length ? data.equipmentCatalog.map(item => `
-    <tr><td>${esc(item.name)}</td><td>${pill('neutral', item.category||'—')}</td>
-    <td>${esc(supplierName(item.supplierId) || item.otherSource || '—')}</td>
-    <td class="num">${item.price?fmtMoney(item.price):'—'}</td><td class="mono">${item.purchaseDate?fmtDateShort(item.purchaseDate):'—'}</td>
-    <td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openEquipmentCatalogModal('${item.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteRefItem('equipmentCatalog','${item.id}');render()">Delete</button></td></tr>`).join('') : `<tr><td colspan="6">${emptyState('No equipment records yet')}</td></tr>`;
-  return `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:12px"><button class="btn primary" onclick="openEquipmentCatalogModal(null)">+ Add Equipment</button></div>
-    <div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Supplier / Source</th><th>Price</th><th>Purchase Date</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-  `;
+/* ── Equipment (Ofek 13 Oct, approved mockup): only the product name and its category. Purchases (price, shop, date)
+   are recorded under Payroll → Expenses & receipts. The categories can be renamed, recoloured, added and removed
+   (settings.catalog.equipmentCategories); nothing saved = the four below. ── */
+const EQUIPMENT_CATEGORY_DEFAULTS = [{ name:'Tools', color:'#2a78d6' }, { name:'Chemicals', color:'#7746c9' }, { name:'Consumables', color:'#c4580f' }, { name:'Safety gear', color:'#237a52' }];
+function equipmentCategories(){
+  const saved = ((STATE.data && STATE.data.settings && STATE.data.settings.catalog) || {}).equipmentCategories;
+  const ok = Array.isArray(saved) ? saved.filter(c => c && typeof c.name==='string' && c.name.trim()).map(c => ({ name: c.name.trim(), color: /^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : '#776e64' })) : [];
+  return ok.length ? ok : EQUIPMENT_CATEGORY_DEFAULTS.map(c => ({ ...c }));
 }
-function openEquipmentCatalogModal(itemId){
-  const item = itemId ? STATE.data.equipmentCatalog.find(x=>x.id===itemId) : null;
-  const suppliers = STATE.data.suppliers;
-  openModal(`
-    <div class="modal-back" onclick="if(event.target===this) closeModal()">
-      <div class="modal">
-        <h2>${item?'Edit Equipment':'Add Equipment'}</h2>
-        <div class="grid-2">
-          <div class="field"><label>Name</label><input id="eq-name" value="${esc(item?.name||'')}"></div>
-          <div class="field"><label>Category</label><select id="eq-category">${EQUIPMENT_CATEGORIES.map(c=>`<option value="${c}" ${item?.category===c?'selected':''}>${c}</option>`).join('')}</select></div>
-          <div class="field"><label>Supplier</label><select id="eq-supplier" onchange="document.getElementById('eq-othersource-wrap').style.display=this.value===''?'flex':'none'"><option value="">— Other source —</option>${suppliers.map(s=>`<option value="${s.id}" ${item?.supplierId===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
-          <div class="field" id="eq-othersource-wrap" style="display:${(!item||!item.supplierId)?'flex':'none'}"><label>Other Source (if not a supplier)</label><input id="eq-othersource" value="${esc(item?.otherSource||'')}" placeholder="e.g. Bunnings, cash purchase"></div>
-          <div class="field"><label>Price</label><input type="number" id="eq-price" value="${item?.price||0}"></div>
-          <div class="field"><label>Purchase Date</label><input type="date" id="eq-purchasedate" value="${item?.purchaseDate||todayStr()}"></div>
-        </div>
-        <div class="field" style="margin-top:11px"><label>Description</label><textarea rows="2" id="eq-description">${esc(item?.description||'')}</textarea></div>
-        <div id="modal-error"></div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
-          <button class="btn" onclick="closeModal()">Cancel</button>
-          <button class="btn primary" onclick="saveEquipmentCatalogModal(${item?`'${item.id}'`:'null'})">Save</button>
-        </div>
-      </div>
-    </div>`);
+// An item's category as shown: an older item saved as "Consumable" belongs to "Consumables".
+function equipmentCategoryOf(item){ const c = String(item.category || ''); return c==='Consumable' ? 'Consumables' : c; }
+let EQ_UI = { filter:'all', editId:null };
+function canEditCatalog(){ const p = getCurrentProfile(); return !!p && (p.role==='owner' || p.role==='manager'); }
+function renderEquipmentCatalogTab(data){
+  const cats = equipmentCategories(), col = n => (cats.find(c => c.name===n) || { color:'#776e64' }).color;
+  const items = [...data.equipmentCatalog].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const f = EQ_UI.filter, list = items.filter(x => f==='all' || equipmentCategoryOf(x)===f);
+  const opts = sel => cats.map(c => `<option ${c.name===sel ? 'selected' : ''}>${esc(c.name)}</option>`).join('') + (sel && !cats.some(c => c.name===sel) ? `<option selected>${esc(sel)}</option>` : '');
+  const row = x => EQ_UI.editId===x.id
+    ? `<div class="eq-row editing"><input id="eq-edit-name" value="${esc(x.name)}" aria-label="Product name" onkeydown="if(event.key==='Enter')saveEquipmentEdit('${x.id}');if(event.key==='Escape'){EQ_UI.editId=null;render()}"><select id="eq-edit-cat" aria-label="Category">${opts(equipmentCategoryOf(x))}</select><span class="eq-acts"><button class="btn small primary" onclick="saveEquipmentEdit('${x.id}')">Save</button><button class="btn small ghost" onclick="EQ_UI.editId=null;render()">Cancel</button></span></div>`
+    : `<div class="eq-row"><b>${esc(x.name)}</b><span class="cat-pill" style="--c:${col(equipmentCategoryOf(x))}">${esc(equipmentCategoryOf(x) || 'No category')}</span><span class="eq-acts"><button class="btn ghost small" aria-label="Edit ${esc(x.name)}" title="Edit" onclick="EQ_UI.editId='${x.id}';render();setTimeout(()=>{const i=document.getElementById('eq-edit-name');if(i)i.focus()},0)">${ico('pencil', 14)}</button><button class="btn ghost small danger" aria-label="Delete ${esc(x.name)}" title="Delete" onclick="deleteEquipmentItem('${x.id}')">${ico('trash', 14)}</button></span></div>`;
+  const chip = (k, l, n) => `<button class="week-chip ${f===k ? 'active' : ''}" onclick="EQ_UI.filter='${esc(jsStr(k))}';render()">${esc(l)} (${n})</button>`;
+  return `<div class="eq-add"><input id="eq-new-name" placeholder="Product name, e.g. Coil cleaner 5 L" aria-label="Product name" onkeydown="if(event.key==='Enter')addEquipmentItem()"><select id="eq-new-cat" aria-label="Category">${opts(f!=='all' ? f : cats[0].name)}</select><button class="btn primary" onclick="addEquipmentItem()">${ico('plus', 14)} Add</button></div>
+    <div class="toolbar">${chip('all', 'All', items.length)}${cats.map(c => chip(c.name, c.name, items.filter(x => equipmentCategoryOf(x)===c.name).length)).join('')}<span style="flex:1"></span>${canEditCatalog() ? `<button class="btn small" onclick="openEquipmentCategories()">Edit categories</button>` : ''}</div>
+    <div class="eq-list">${list.map(row).join('') || `<div class="eq-row"><span class="hint">${items.length ? 'Nothing in this category.' : 'No equipment yet. Add the first item above.'}</span></div>`}</div>`;
 }
-async function saveEquipmentCatalogModal(itemId){
-  const name = document.getElementById('eq-name').value.trim();
-  if (!name) { modalError('Please enter an equipment name'); return; }
-  const supplierId = document.getElementById('eq-supplier').value;
-  const values = { name, category: document.getElementById('eq-category').value, supplierId: supplierId||'', otherSource: supplierId?'':document.getElementById('eq-othersource').value.trim(), price: Number(document.getElementById('eq-price').value)||0, purchaseDate: document.getElementById('eq-purchasedate').value, description: document.getElementById('eq-description').value };
-  if (itemId) { db.equipmentCatalog.update(itemId, values); }
-  else {
-    try { await db.equipmentCatalog.create(values); }
-    catch (err) { return; }   // db.equipmentCatalog.create() already showed an error toast; leave the modal open so the user can retry
+async function addEquipmentItem(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const n = document.getElementById('eq-new-name'), name = String(n && n.value || '').trim();
+  if (!name) { showToast('Write the product name', { kind: 'warn' }); if (n) n.focus(); return; }
+  try { await db.equipmentCatalog.create({ name, category: document.getElementById('eq-new-cat').value }); } catch (e) { return; }
+  showToast('Added'); render();
+  setTimeout(() => { const i = document.getElementById('eq-new-name'); if (i) i.focus(); }, 0);
+}
+function saveEquipmentEdit(id){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const name = String((document.getElementById('eq-edit-name') || {}).value || '').trim();
+  if (!name) { showToast('Write the product name', { kind: 'warn' }); return; }
+  db.equipmentCatalog.update(id, { name, category: document.getElementById('eq-edit-cat').value });
+  EQ_UI.editId = null; showToast('Saved'); render();
+}
+function deleteEquipmentItem(id){
+  const x = STATE.data.equipmentCatalog.find(i => i.id===id); if (!x) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  confirmAction(`Delete "${x.name}" from the equipment list?`, () => { db.equipmentCatalog.remove(id); showToast('Deleted'); render(); });
+}
+function openEquipmentCategories(){
+  const cats = equipmentCategories(), count = n => STATE.data.equipmentCatalog.filter(x => equipmentCategoryOf(x)===n).length;
+  openPopup(`<h3 style="margin:0 0 4px">Equipment categories</h3><div class="hint" style="margin-bottom:10px">Rename, recolour, add or remove. Items move with their category when you rename it.</div>
+    ${cats.map((c, i) => `<div class="cat-edit-row"><input type="color" value="${esc(c.color)}" aria-label="Colour of ${esc(c.name)}" onchange="setEquipmentCategory(${i},'color',this.value)"><input value="${esc(c.name)}" aria-label="Category name" onchange="setEquipmentCategory(${i},'name',this.value)"><span class="hint">${count(c.name)} item${count(c.name)===1 ? '' : 's'}</span><button class="btn ghost small danger" aria-label="Remove ${esc(c.name)}" onclick="removeEquipmentCategory(${i})">${ico('trash', 14)}</button></div>`).join('')}
+    <div style="display:flex;gap:8px;margin-top:12px"><input id="eq-cat-new" placeholder="New category" style="flex:1" onkeydown="if(event.key==='Enter')addEquipmentCategory()"><button class="btn" onclick="addEquipmentCategory()">${ico('plus', 14)} Add</button></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn primary" onclick="closePopup()">Done</button></div>`);
+}
+function saveEquipmentCategories(list, what){ catalogSave('equipmentCategories', list, what); if (document.getElementById('app-popup')) openEquipmentCategories(); }
+function setEquipmentCategory(i, field, value){
+  if (readOnlyReason()) { showToast(readOnlyReason()); openEquipmentCategories(); return; }
+  const list = equipmentCategories(), c = list[i]; if (!c) return;
+  const v = String(value || '').trim();
+  if (field==='name') {
+    if (!v) { showToast('A category needs a name', { kind: 'warn' }); openEquipmentCategories(); return; }
+    if (v!==c.name && list.some(x => x.name.toLowerCase()===v.toLowerCase())) { showToast('There is already a category with that name', { kind: 'warn' }); openEquipmentCategories(); return; }
+    const old = c.name; c.name = v;
+    // Every item in the old category moves with it (an old "Consumable" item counts as "Consumables").
+    STATE.data.equipmentCatalog.filter(x => equipmentCategoryOf(x)===old).forEach(x => db.equipmentCatalog.update(x.id, { category: v }));
+    if (EQ_UI.filter===old) EQ_UI.filter = v;
+    saveEquipmentCategories(list, `"${old}" renamed to "${v}"`); return;
   }
-  closeModal(); showToast('Saved'); render();
+  c.color = /^#[0-9a-f]{6}$/i.test(v) ? v : c.color;
+  saveEquipmentCategories(list, `${c.name}: colour changed`);
 }
-function renderSuppliersTab(data, canEdit){
-  const rows = data.suppliers.length ? data.suppliers.map(s => `
-    <tr><td>${esc(s.name)}</td><td>${esc(s.supplyType||'—')}</td><td>${esc(s.contactPerson||'—')}</td><td>${esc(s.phone||'—')}</td><td>${esc(s.email||'—')}</td><td>${esc(s.paymentTerms||'—')}</td>
-    <td style="display:flex;gap:4px"><button class="btn ghost small" onclick="openSupplierModal('${s.id}')">Edit</button><button class="btn ghost small danger" onclick="deleteRefItem('suppliers','${s.id}');render()">Delete</button></td></tr>`).join('') : `<tr><td colspan="7">${emptyState('No suppliers yet')}</td></tr>`;
-  return `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:12px"><button class="btn primary" onclick="openSupplierModal(null)">+ Add Supplier</button></div>
-    <div class="table-wrap"><table><thead><tr><th>Name</th><th>Supply Type</th><th>Contact Person</th><th>Phone</th><th>Email</th><th>Payment Terms</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-  `;
+function addEquipmentCategory(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const i = document.getElementById('eq-cat-new'), v = String(i && i.value || '').trim(), list = equipmentCategories();
+  if (!v) return;
+  if (list.some(x => x.name.toLowerCase()===v.toLowerCase())) { showToast('There is already a category with that name', { kind: 'warn' }); return; }
+  list.push({ name: v, color: '#3f7f8f' });
+  saveEquipmentCategories(list, `category "${v}" added`);
 }
-function openSupplierModal(supplierId){
-  const s = supplierId ? STATE.data.suppliers.find(x=>x.id===supplierId) : null;
-  openModal(`
-    <div class="modal-back" onclick="if(event.target===this) closeModal()">
-      <div class="modal">
-        <h2>${s?'Edit Supplier':'Add Supplier'}</h2>
-        <div class="grid-2">
-          <div class="field"><label>Name</label><input id="sp-name" value="${esc(s?.name||'')}"></div>
-          <div class="field"><label>Supply Type</label><input id="sp-supplytype" value="${esc(s?.supplyType||'')}" placeholder="e.g. Equipment & Parts"></div>
-          <div class="field"><label>Contact Person</label><input id="sp-contactperson" value="${esc(s?.contactPerson||'')}"></div>
-          <div class="field"><label>Phone</label><input id="sp-phone" type="tel" data-check="phone" value="${esc(s?.phone||'')}"></div>
-          <div class="field"><label>Email</label><input id="sp-email" type="email" data-check="email" value="${esc(s?.email||'')}"></div>
-          <div class="field"><label>Payment Terms</label><input id="sp-paymentterms" value="${esc(s?.paymentTerms||'')}" placeholder="e.g. Net 30"></div>
-        </div>
-        <div class="field" style="margin-top:11px"><label>Address / Website</label><input id="sp-addresswebsite" value="${esc(s?.addressWebsite||'')}"></div>
-        <div id="modal-error"></div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
-          <button class="btn" onclick="closeModal()">Cancel</button>
-          <button class="btn primary" onclick="saveSupplierModal(${s?`'${s.id}'`:'null'})">Save</button>
-        </div>
-      </div>
-    </div>`);
+function removeEquipmentCategory(i){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const list = equipmentCategories(), c = list[i]; if (!c) return;
+  const n = STATE.data.equipmentCatalog.filter(x => equipmentCategoryOf(x)===c.name).length;
+  if (n) { showToast(`Move or delete its ${n} item${n===1 ? '' : 's'} first`, { kind: 'warn' }); return; }
+  if (list.length===1) { showToast('Keep at least one category', { kind: 'warn' }); return; }
+  list.splice(i, 1);
+  saveEquipmentCategories(list, `category "${c.name}" removed`);
 }
-async function saveSupplierModal(supplierId){
-  const name = document.getElementById('sp-name').value.trim();
-  if (!name) { modalError('Please enter a supplier name'); return; }
-  const values = { name, supplyType: document.getElementById('sp-supplytype').value.trim(), contactPerson: document.getElementById('sp-contactperson').value.trim(), phone: document.getElementById('sp-phone').value.trim(), email: document.getElementById('sp-email').value.trim(), addressWebsite: document.getElementById('sp-addresswebsite').value.trim(), paymentTerms: document.getElementById('sp-paymentterms').value.trim() };
-  if (supplierId) { db.suppliers.update(supplierId, values); }
-  else {
-    try { await db.suppliers.create(values); }
-    catch (err) { return; }   // db.suppliers.create() already showed an error toast; leave the modal open so the user can retry
+
+/* ── Contractors (Ofek 13 Oct, approved mockup; the old "Suppliers"). One card per contractor: what they do, what we
+   agreed, and whether the agreement is signed and the insurance current. The panel holds everything; the agreement is
+   made with one button, sent as a link, and signed on the contractor's phone (sign.html → contractor-sign function).
+   ABN, bank and the agreement itself live in contractor_private, which only owners and managers can read. ── */
+const CONTRACTOR_SERVICES = ['Aircon','Chimney','Pressure Washing','Electrical','Plumbing','Roof & gutters','Other'];
+const CONTRACTOR_SERVICE_COLOR = { Electrical:'#c9a20a', Plumbing:'#2f7d6e', 'Roof & gutters':'#8a6a4f' };
+function contractorServiceColor(s){ return CONTRACTOR_SERVICE_COLOR[s] || (LEAD_DIVISIONS.includes(s) ? divColor(s) : 'var(--div-other)'); }
+const CONTRACTOR_TERMS = ['On receipt','7 days','14 days','30 days'];
+const CONTRACTOR_AGREEMENT_VERSION = 1;
+const SIGN_LINK_DAYS = 14;
+let CPRIV = { map:{}, loaded:false, loading:false, err:'' };
+let CON_UI = { filter:'all', q:'', showBank:null };
+function canSeeContractorPrivate(){ return canEditCatalog(); }
+async function loadContractorPrivate(){
+  if (CPRIV.loading || !canSeeContractorPrivate()) return;
+  CPRIV.loading = true;
+  const { data, error } = await sb.from('contractor_private').select('*');
+  CPRIV.loading = false;
+  if (error) { CPRIV.err = error.message; CPRIV.loaded = false; render(); return; }
+  CPRIV.err = ''; CPRIV.loaded = true;
+  CPRIV.map = {}; (data || []).forEach(r => { CPRIV.map[r.supplier_id] = r; });
+  render();
+}
+// The row as it is now in the database (a contractor may have signed since the page loaded).
+async function freshContractorPrivate(id){
+  const { data, error } = await sb.from('contractor_private').select('*').eq('supplier_id', id).limit(1);
+  if (error) { showToast('Could not read the agreement: ' + error.message, { kind: 'error' }); return null; }
+  const row = (data || [])[0] || null;
+  if (row) CPRIV.map[id] = row; else delete CPRIV.map[id];
+  return contractorPrivate(id);
+}
+const contractorPrivateReady = () => canSeeContractorPrivate() && CPRIV.loaded && !CPRIV.err;
+// An agreement change is saved only if the row is still exactly as it was read: a contractor may sign at that very
+// moment, and their signature must never be overwritten.
+async function saveContractorAgreementRow(id, priv, patch){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return false; }
+  const row = { ...patch, updated_at: new Date().toISOString() };
+  const res = priv.updated_at
+    ? await sb.from('contractor_private').update(row).eq('supplier_id', id).eq('updated_at', priv.updated_at).select('*')
+    : await sb.from('contractor_private').insert({ supplier_id: id, ...row }).select('*');
+  if (res.error) { showToast('Not saved: ' + res.error.message, { kind: 'error' }); return false; }
+  if (!(res.data || []).length) {
+    await freshContractorPrivate(id); render();
+    showToast('The agreement changed a moment ago (maybe they signed). Have a look and try again.', { kind: 'error' });
+    return false;
   }
-  closeModal(); showToast('Saved'); render();
+  CPRIV.map[id] = res.data[0];
+  return true;
+}
+function contractorPrivate(id){ return CPRIV.map[id] || { supplier_id: id, legal_name:'', abn:'', bank_name:'', bank_bsb:'', bank_account:'', agreement:{}, sign_token:null, sign_token_expires:null }; }
+// Only the changed columns are written, so a field edit never writes back an old copy of the agreement.
+async function saveContractorPrivate(id, patch){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return false; }
+  if (!contractorPrivateReady()) { showToast('The private details have not loaded yet. Try again in a moment.'); return false; }
+  const row = { supplier_id: id, ...patch, updated_at: new Date().toISOString() };
+  const { error } = await sb.from('contractor_private').upsert(row, { onConflict: 'supplier_id' });
+  if (error) { showToast('Not saved: ' + error.message, { kind: 'error' }); return false; }
+  CPRIV.map[id] = { ...contractorPrivate(id), ...row };
+  return true;
+}
+// "What we agreed", in one sentence (the card, the panel, the agreement and the signing page all use it).
+// The amount, when the deal is a commission or a fixed sum with a real number; otherwise null (the note says it).
+function contractorDealAmount(d){
+  d = d || {}; if (d.type!=='commission' && d.type!=='fixed') return null;
+  const amt = d.amount===null || d.amount===undefined || d.amount==='' ? null : Number(d.amount);
+  return amt!==null && Number.isFinite(amt) ? amt : null;
+}
+function contractorDealLine(c){
+  const d = c.deal || {}, who = c.name || 'them', amt = contractorDealAmount(d);
+  if (amt!==null) return d.type==='commission' ? `We get ${amt}% of every job we pass to ${who}.` : `We get $${amt} for every job we pass to ${who}.`;
+  return String(d.note || '').trim() || 'Nothing agreed yet.';
+}
+// The note shown under the deal line, only when the line itself is not already the note.
+function contractorDealNote(c){ const d = c.deal || {}; return contractorDealAmount(d)!==null ? String(d.note || '').trim() : ''; }
+// The standard agreement (approved 13 Oct). The highlighted parts come from the contractor's card and "What we agreed".
+function contractorAgreementHtml(c, priv){
+  const d = c.deal || {}, terms = c.paymentTerms || '7 days', m = v => `<mark>${esc(v)}</mark>`;
+  const amt = contractorDealAmount(d), numeric = amt!==null;
+  const pay = d.type==='commission' && numeric ? `For every job we pass to you, you pay us ${m(amt + '%')} of the job price before GST, within ${m(terms)} of the customer paying you. We send you an invoice for it.`
+    : d.type==='fixed' && numeric ? `For every job we pass to you, you pay us ${m('$' + amt)} (plus GST), within ${m(terms)} of the customer paying you. We send you an invoice for it.`
+    : m(String(d.note || 'What we agreed').trim());
+  const abn = priv && priv.abn ? ` (ABN ${m(priv.abn)})` : '';
+  return `<h4>1. Who this agreement is between</h4><p>The Guys Service Group Pty Ltd ("we", "us") and ${m(c.name)}${abn}, represented by ${m(c.contactPerson || c.name)} ("you").</p>
+<h4>2. What it covers</h4><p>From time to time we may offer you jobs for ${m((c.services || []).join(', ').toLowerCase() || 'the work we agree')}. You can accept or decline each one. Every job you accept is done under this agreement.</p>
+<h4>3. You are an independent contractor</h4><p>You run your own business. You are not our employee, partner or agent. You are responsible for your own tax, GST, superannuation, workers compensation, tools, vehicles and staff.</p>
+<h4>4. What we agreed about money</h4><p>${pay}</p>${d.note && numeric ? `<p>Also agreed: ${m(String(d.note).trim())}</p>` : ''}
+<h4>5. Doing the work</h4><p>You hold every licence the work needs, do it safely and to Australian standards, follow work health and safety laws, and fix any fault in your work at your own cost.</p>
+<h4>6. Insurance</h4><p>You keep public liability insurance of at least $10 million for as long as this agreement runs, and give us a current certificate. You tell us straight away if it lapses.</p>
+<h4>7. Our customers</h4><p>You treat the customers we pass to you professionally and keep their details private. For 12 months after a job, you don't offer those customers other work without telling us first.</p>
+<h4>8. Ending the agreement</h4><p>Either of us can end this agreement with 7 days' notice in writing (a text or email is enough). Jobs already accepted are finished, and money already owed is still paid.</p>
+<h4>9. General</h4><p>This agreement is governed by the laws of New South Wales. Any change has to be agreed in writing by both of us.</p>`;
+}
+// What the agreement depends on: when any of it changes, the agreement made from it is out of date.
+function contractorAgreementInputs(c, priv){ return JSON.stringify([c.name, c.contactPerson, (priv && priv.abn) || '', c.services || [], c.deal || {}, c.paymentTerms || '']); }
+function contractorAgreementState(c){
+  const priv = contractorPrivate(c.id), a = priv.agreement || {};
+  const status = c.agreementStatus || 'none';
+  const stale = !!a.html && a.inputsKey!==contractorAgreementInputs(c, priv);
+  return { a, status, stale, signed: status==='signed' };
+}
+function contractorAgreementPill(c){
+  const s = c.agreementStatus || 'none';
+  if (s==='signed') return pill('good', 'Agreement signed' + (c.agreementSignedAt ? ' ' + fmtDateShort(localDay(c.agreementSignedAt)) : ''));
+  if (s==='sent' || s==='opened') return pill('warn', s==='opened' ? 'Opened, not signed yet' : 'Waiting for signature');
+  if (s==='ready') return pill('neutral', 'Agreement made, not sent');
+  return pill('neutral', 'No agreement yet');
+}
+function contractorInsurance(c){
+  const ins = c.insurance || {};
+  if (!ins.expiry && !ins.insurer && !ins.file) return { tone:'bad', text:'No insurance on file' };
+  const x = employeeDocExpiry({ expiry: ins.expiry }, todayStr());
+  if (!x) return { tone:'neutral', text:'Insurance: no expiry date' };
+  return { tone: x.tone, text: x.days < 0 ? 'Insurance expired' : x.tone==='warn' ? `Insurance expires in ${x.days} days` : `Insured until ${fmtDateYear(ins.expiry)}` };
+}
+function contractorMissing(c){ const p = contractorPrivate(c.id), out = []; if (canSeeContractorPrivate() && CPRIV.loaded) { if (!p.abn) out.push('ABN'); if (!(p.bank_bsb && p.bank_account)) out.push('bank'); } return out; }
+function renderContractorCards(data){
+  const q = CON_UI.q.trim().toLowerCase(), f = CON_UI.filter;
+  const list = [...data.suppliers].filter(c => (f==='all' || (c.services || []).includes(f)) && (!q || [c.name, c.contactPerson, c.phone, c.email, ...(c.services || [])].some(v => String(v || '').toLowerCase().includes(q))))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  return list.map(c => { const ins = contractorInsurance(c), miss = contractorMissing(c);
+    return `<div class="emp-card con-card${UI.reference.contractorId===c.id ? ' sel' : ''}" role="button" tabindex="0" onclick="openContractor('${c.id}')" onkeydown="if(event.key==='Enter'){event.preventDefault();openContractor('${c.id}');}">
+      <div class="emp-card-top"><span class="emp-avatar sq" style="--c:${(c.services || [])[0] ? contractorServiceColor(c.services[0]) : 'var(--div-other)'}">${esc(String(c.name || '?').slice(0, 1).toUpperCase())}</span><div style="min-width:0;flex:1"><div class="emp-name">${esc(c.name)}</div><div class="emp-role">${esc(c.contactPerson || '—')}</div></div></div>
+      ${(c.services || []).length ? `<div class="emp-rates">${c.services.map(s => `<span class="svc-dot" style="--c:${contractorServiceColor(s)}"><i></i>${esc(s)}</span>`).join('')}</div>` : ''}
+      <div class="con-deal">${esc(contractorDealLine(c))}</div>
+      <div class="emp-line">${[c.phone, c.email].filter(Boolean).map(esc).join(' · ') || 'No phone or email yet'}</div>
+      <div class="emp-flags">${contractorAgreementPill(c)}${pill(ins.tone, ins.text)}${miss.length ? pill('neutral', 'Missing: ' + miss.join(' · ')) : ''}</div>
+    </div>`; }).join('');
+}
+function renderContractorsTab(data){
+  if (canSeeContractorPrivate() && !CPRIV.loaded && !CPRIV.loading && !CPRIV.err) setTimeout(loadContractorPrivate, 0);
+  const sel = UI.reference.contractorId ? data.suppliers.find(c => c.id===UI.reference.contractorId) : null;
+  const used = [...new Set(data.suppliers.flatMap(c => c.services || []))].sort((a, b) => CONTRACTOR_SERVICES.indexOf(a) - CONTRACTOR_SERVICES.indexOf(b));
+  const chip = (k, l, n) => `<button class="week-chip ${CON_UI.filter===k ? 'active' : ''}" onclick="CON_UI.filter='${esc(jsStr(k))}';render()">${esc(l)}${n!==undefined ? ` (${n})` : ''}</button>`;
+  const cards = renderContractorCards(data);
+  return `<div class="toolbar"><input class="con-search" placeholder="Search contractors" aria-label="Search contractors" value="${esc(CON_UI.q)}" oninput="CON_UI.q=this.value;refreshContractorCards()">${chip('all', 'All', data.suppliers.length)}${used.map(s => chip(s, s)).join('')}<span style="flex:1"></span><button class="btn primary" onclick="openAddContractor()">${ico('plus', 14)} Add contractor</button></div>
+    <div class="emp-grid con-grid">${cards || (data.suppliers.length ? '<div class="hint">No contractor matches.</div>' : emptyState('No contractors yet', 'Add the first one: who they are, what they do and what you agreed.', 'idcard', { label:'Add a contractor', icon:'plus', onclick:'openAddContractor()' }))}</div>
+    <aside class="job-panel emp-panel${panelAnimClass('con', sel && sel.id)}" id="con-panel"${sel ? '' : ' hidden'}>${renderContractorPanel(sel)}</aside>`;
+}
+function openContractor(id){
+  UI.reference.contractorId = id && UI.reference.contractorId!==id ? id : null; CON_UI.showBank = null; render();
+  // Opening a card reads the private details again, so a signature that came in since shows straight away.
+  if (UI.reference.contractorId && canSeeContractorPrivate()) freshContractorPrivate(UI.reference.contractorId).then(() => render());
+}
+function refreshContractorCards(){ const g = document.querySelector('.con-grid'); if (g) g.innerHTML = renderContractorCards(STATE.data) || '<div class="hint">No contractor matches.</div>'; }
+function renderContractorPanel(c){
+  if (!c) return '';
+  const priv = contractorPrivate(c.id), canPriv = contractorPrivateReady(), ins = c.insurance || {}, d = c.deal || {};
+  const A = contractorAgreementState(c), a = A.a;
+  const pub = (field, value, attrs) => `<input value="${esc(value || '')}" ${attrs || ''} onchange="setContractorField('${c.id}','${field}',this.value)">`;
+  const prv = (field, value, attrs) => `<input value="${esc(value || '')}" ${attrs || ''} autocomplete="off" onchange="setContractorPrivateField('${c.id}','${field}',this.value)">`;
+  const field = (label, html, full) => `<div class="field${full ? ' full' : ''}"><label>${label}</label>${html}</div>`;
+  const acct = String(priv.bank_account || ''), showBank = CON_UI.showBank===c.id;
+  const bankAcct = showBank || !acct ? prv('bank_account', acct, 'inputmode="numeric"') : `<div class="job-ro" style="display:flex;align-items:center;gap:8px"><span class="mask">•••• ${esc(acct.slice(-4))}</span><button type="button" class="btn ghost small" onclick="CON_UI.showBank='${c.id}';render()">Show</button></div>`;
+  const abnHint = !priv.abn ? '' : abnValid(priv.abn) ? '<span class="job-sub" style="color:var(--good)">✓ A valid ABN</span>' : '<span class="job-sub" style="color:var(--bad)">This ABN fails the check: look for a typo</span>';
+  const insX = contractorInsurance(c);
+  const t = iso => iso ? new Date(iso).toLocaleString('en-AU', { timeZone:'Australia/Sydney', day:'numeric', month:'short', hour:'numeric', minute:'2-digit' }) : '';
+  const st = A.status;
+  const step = (done, now, title, sub) => `<div class="agr-step${done ? ' done' : now ? ' now' : ''}"><span class="agr-dot">${done ? '✓' : ''}</span><div>${esc(title)}${sub ? `<small>${esc(sub)}</small>` : ''}</div></div>`;
+  const steps = !canPriv ? '' : !a.html ? '' : `<div class="agr-steps">
+      ${step(true, false, 'Agreement made' + (a.version > 1 ? ` (version ${a.version})` : ''), t(a.made_at) + (a.made_by ? ' · ' + a.made_by : ''))}
+      ${step(!!a.sent_at, !a.sent_at, a.sent_at ? 'Signing link sent' : 'Not sent yet', a.sent_at ? t(a.sent_at) + (a.sent_via ? ', ' + a.sent_via : '') : 'Send them the link to sign on their phone')}
+      ${a.sent_at ? step(!!a.opened_at || st==='opened' || st==='signed', !(a.opened_at || st==='opened' || st==='signed'), (a.opened_at || st==='opened' || st==='signed') ? 'Opened by the contractor' : 'Not opened yet', a.opened_at ? t(a.opened_at) : `The link works for ${SIGN_LINK_DAYS} days`) : ''}
+      ${a.sent_at ? step(st==='signed', false, st==='signed' ? 'Signed by ' + (c.agreementSigner || (a.signed && a.signed.name) || '') : 'Signature', st==='signed' ? t(c.agreementSignedAt || (a.signed && a.signed.at)) + ' · signature, time and device kept with the agreement' : 'Waiting') : ''}
+    </div>`;
+  const agrBtns = !canSeeContractorPrivate() ? '<span class="hint">Only owners and managers can see, make or send the agreement.</span>'
+    : CPRIV.err ? `<span class="hint" style="color:var(--bad)">Could not load the agreement and bank details: ${esc(CPRIV.err)}</span> <button class="btn small" onclick="loadContractorPrivate()">Try again</button>`
+    : !canPriv ? '<span class="hint">Loading…</span>'
+    : !a.html ? `<button class="btn small primary" onclick="makeContractorAgreement('${c.id}')">${ico('pencil', 14)} Create the agreement</button>`
+    : st==='signed' ? `<button class="btn small" onclick="openContractorAgreement('${c.id}')">${ico('file', 14)} View the signed agreement</button>${A.stale ? `<button class="btn small" onclick="makeContractorAgreement('${c.id}', true)">Make a new version</button>` : ''}`
+    : `<button class="btn small" onclick="openContractorAgreement('${c.id}')">${ico('file', 14)} View the agreement</button><button class="btn small primary" onclick="openSendAgreement('${c.id}')">${a.sent_at ? 'Send the link again' : 'Send signing link'}</button>${A.stale ? `<button class="btn small" onclick="makeContractorAgreement('${c.id}', true)">Make it again</button>` : ''}`;
+  const stale = A.stale ? `<div class="con-stale">${ico('alert', 14)} <span>${st==='signed' ? 'The details or what you agreed changed after signing. Make a new version and send it to sign again.' : 'The details or what you agreed changed after the agreement was made. Make it again before sending.'}</span></div>` : '';
+  return `<div class="job-panel-head">
+      <div style="display:flex;gap:12px;align-items:center;min-width:0"><span class="emp-avatar sq" style="--c:${(c.services || [])[0] ? contractorServiceColor(c.services[0]) : 'var(--div-other)'};width:46px;height:46px">${esc(String(c.name || '?').slice(0, 1).toUpperCase())}</span><div style="min-width:0"><h3>${esc(c.name)}</h3><div class="meta" style="margin:0">${esc([c.contactPerson, (c.services || []).join(', ')].filter(Boolean).join(' · ') || 'Contractor')}</div></div></div>
+      <button type="button" class="btn ghost small" onclick="openContractor(null)" aria-label="Close" title="Close">✕</button>
+    </div>
+    <div class="grp">What we agreed</div>
+    <div class="con-dealbox">
+      <div class="f">
+        ${field('Type', `<select onchange="setContractorDeal('${c.id}','type',this.value)"><option value="commission" ${d.type==='commission' ? 'selected' : ''}>Commission, % of each job</option><option value="fixed" ${d.type==='fixed' ? 'selected' : ''}>Fixed amount per job</option><option value="other" ${d.type==='other' || !d.type ? 'selected' : ''}>Something else</option></select>`)}
+        ${field(d.type==='commission' ? 'Percent' : d.type==='fixed' ? 'Amount per job ($)' : 'Amount', `<input type="number" min="0" step="0.5" value="${d.amount ?? ''}" ${d.type==='commission' || d.type==='fixed' ? '' : 'disabled placeholder="—"'} onchange="setContractorDeal('${c.id}','amount',this.value)">`)}
+        ${field('Note', `<textarea rows="2" placeholder="Anything else you agreed" onchange="setContractorDeal('${c.id}','note',this.value)">${esc(d.note || '')}</textarea>`, true)}
+      </div>
+      <div class="con-dealline" id="con-dealline">${esc(contractorDealLine(c))}</div>
+    </div>
+    <div class="grp">Agreement ${contractorAgreementPill(c)}</div>
+    ${stale}${steps || (canPriv && !a.html ? '<div class="hint" style="margin-bottom:8px">No agreement yet. Create it with one button: it fills in the contractor, the services and what you agreed. Then send them the link to sign on their phone.</div>' : '')}
+    <div class="job-panel-acts" style="margin-top:6px">${agrBtns}</div>
+    <div class="grp">Details</div>
+    <div class="f">
+      ${field('Company', pub('name', c.name), true)}
+      ${field('Contact person', pub('contactPerson', c.contactPerson))}
+      ${field('Phone', pub('phone', c.phone, 'type="tel" data-check="phone"') + (c.phone ? `<a class="job-sub xlink" href="tel:${esc(String(c.phone).replace(/[^\d+]/g, ''))}">Call</a>` : ''))}
+      ${field('Email', pub('email', c.email, 'type="email" data-check="email"'), true)}
+      ${field('What they do', `<div class="svc-pick">${CONTRACTOR_SERVICES.map(s => `<button type="button" class="svc${(c.services || []).includes(s) ? ' on' : ''}" style="--c:${contractorServiceColor(s)}" aria-pressed="${(c.services || []).includes(s)}" onclick="toggleContractorService('${c.id}','${esc(jsStr(s))}')"><i></i>${esc(s)}</button>`).join('')}</div>`, true)}
+    </div>
+    <div class="grp">Payment</div>
+    ${canPriv ? `<div class="f">
+      ${field('ABN', prv('abn', priv.abn, 'inputmode="numeric" placeholder="11 digits"') + `<span id="con-abn-hint">${abnHint}</span>`, true)}
+      ${field('Account name', prv('bank_name', priv.bank_name), true)}
+      ${field('BSB', prv('bank_bsb', priv.bank_bsb, 'inputmode="numeric" placeholder="000-000"'))}
+      ${field('Account number', bankAcct)}
+      ${field('Payment terms', `<select onchange="setContractorField('${c.id}','paymentTerms',this.value)">${(CONTRACTOR_TERMS.includes(c.paymentTerms) || !c.paymentTerms ? CONTRACTOR_TERMS : [c.paymentTerms, ...CONTRACTOR_TERMS]).map(o => `<option ${o===(c.paymentTerms || '7 days') ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`)}
+    </div>` : `<div class="hint">${canSeeContractorPrivate() ? (CPRIV.err ? 'Could not load the ABN and bank details.' : 'Loading…') : 'ABN and bank details are seen only by owners and managers.'}</div>`}
+    <div class="grp">Insurance ${pill(insX.tone, insX.text)}</div>
+    <div class="f">
+      ${field('Insurer', `<input value="${esc(ins.insurer || '')}" onchange="setContractorInsurance('${c.id}','insurer',this.value)">`)}
+      ${field('Policy number', `<input value="${esc(ins.policy || '')}" onchange="setContractorInsurance('${c.id}','policy',this.value)">`)}
+      ${field('Public liability cover', `<input value="${esc(ins.cover || '')}" placeholder="e.g. $20 million" onchange="setContractorInsurance('${c.id}','cover',this.value)">`)}
+      ${field('Expiry', `<input type="date" value="${esc(ins.expiry || '')}" onchange="setContractorInsurance('${c.id}','expiry',this.value)">`)}
+      ${field('Certificate of currency', ins.file ? `<span class="doc-slot"><a href="#" class="file-chip" onclick="event.preventDefault();openEmbeddedFile('${jsStr(ins.file)}')">${ico('file', 14)} View</a><button type="button" class="btn ghost small" onclick="pickContractorCertificate('${c.id}')">Replace</button></span>` : `<button type="button" class="btn ghost small" onclick="pickContractorCertificate('${c.id}')">Upload</button>`, true)}
+    </div>
+    ${canEditCatalog() ? `<div class="grp"></div>
+    <button type="button" class="btn ghost small danger" onclick="deleteContractor('${c.id}')">${ico('trash', 14)} Remove this contractor</button>` : ''}`;
+}
+function setContractorField(id, field, raw){
+  const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const v = String(raw ?? '').trim();
+  if (field==='name' && !v) { showToast('A contractor needs a company name', { kind: 'warn' }); render(); return; }
+  if ((c[field] || '')===v) return;
+  db.suppliers.update(id, { [field]: v });
+  showToast('Saved');
+  if (field==='name') render(); else refreshContractorCards();
+}
+function setContractorPrivateField(id, field, raw){
+  const v = String(raw ?? '').trim(), cur = contractorPrivate(id);
+  if ((cur[field] || '')===v) return;
+  saveContractorPrivate(id, { [field]: v }).then(ok => {
+    if (!ok) return;
+    showToast('Saved');
+    if (field==='abn') { const h = document.getElementById('con-abn-hint'); if (h) h.innerHTML = !v ? '' : abnValid(v) ? '<span class="job-sub" style="color:var(--good)">✓ A valid ABN</span>' : '<span class="job-sub" style="color:var(--bad)">This ABN fails the check: look for a typo</span>'; }
+    refreshContractorCards();
+  });
+}
+function setContractorDeal(id, key, raw){
+  const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
+  const deal = { ...(c.deal || {}) };
+  if (key==='amount') { const n = Number(raw); if (String(raw).trim()==='') deal.amount = null; else if (!Number.isFinite(n) || n < 0) { showToast('Enter a number', { kind: 'warn' }); render(); return; } else deal.amount = n; }
+  else if (key==='type') deal.type = ['commission', 'fixed', 'other'].includes(raw) ? raw : 'other';
+  else deal.note = String(raw || '').trim();
+  db.suppliers.update(id, { deal });
+  showToast('Saved');
+  if (key==='type') render(); else { const l = document.getElementById('con-dealline'); if (l) l.textContent = contractorDealLine(c); refreshContractorCards(); }
+}
+function toggleContractorService(id, s){
+  const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const cur = c.services || [], next = cur.includes(s) ? cur.filter(x => x!==s) : CONTRACTOR_SERVICES.filter(x => x===s || cur.includes(x));
+  db.suppliers.update(id, { services: next });
+  render();
+}
+function setContractorInsurance(id, key, raw){
+  const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const v = String(raw ?? '').trim(), insurance = { ...(c.insurance || {}) };
+  if ((insurance[key] || '')===v) return;
+  insurance[key] = v;
+  db.suppliers.update(id, { insurance });
+  showToast('Saved');
+  if (key==='expiry') render(); else refreshContractorCards();
+}
+function pickContractorCertificate(id){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*,application/pdf';
+  inp.onchange = () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    if (f.size > MAX_FILE_MB * 1024 * 1024) { showToast(`That file is over ${MAX_FILE_MB} MB`); return; }
+    const r = new FileReader();
+    r.onload = async () => {
+      showToast('Uploading…');
+      const ref = await storeFile(`contractors/${id}`, 'insurance', r.result);
+      if (!ref) return;
+      const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
+      db.suppliers.update(id, { insurance: { ...(c.insurance || {}), file: ref, fileAt: new Date().toISOString() } });
+      showToast('Certificate saved'); render();
+    };
+    r.readAsDataURL(f);
+  };
+  inp.click();
+}
+function deleteContractor(id){
+  const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (!canEditCatalog()) { showToast('Only owners and managers can remove a contractor'); return; }
+  confirmAction(`Remove ${c.name}? Their details, ABN, bank and agreement are deleted.`, () => { db.suppliers.remove(id); delete CPRIV.map[id]; UI.reference.contractorId = null; showToast('Removed'); render(); }, { title:'Remove this contractor?', confirmLabel:'Remove' });
+}
+function openAddContractor(){
+  openPopup(`<h3 style="margin:0 0 4px">Add a contractor</h3><div class="hint" style="margin-bottom:12px">The rest (payment, insurance, what you agreed) goes on their card.</div>
+    <div class="field"><label>Company</label><input id="ac-name" placeholder="e.g. Spark Line Electrical Pty Ltd" autocomplete="off"></div>
+    <div class="field" style="margin-top:10px"><label>Contact person</label><input id="ac-person" autocomplete="off"></div>
+    <div class="grid-2" style="margin-top:10px"><div class="field"><label>Phone</label><input id="ac-phone" type="tel" data-check="phone"></div><div class="field"><label>Email</label><input id="ac-email" type="email" data-check="email"></div></div>
+    <div class="field" style="margin-top:10px"><label>What they do</label><div class="svc-pick" id="ac-svcs">${CONTRACTOR_SERVICES.map(s => `<button type="button" class="svc" style="--c:${contractorServiceColor(s)}" data-s="${esc(s)}" aria-pressed="false" onclick="this.classList.toggle('on');this.setAttribute('aria-pressed',this.classList.contains('on'))"><i></i>${esc(s)}</button>`).join('')}</div></div>
+    <div id="popup-error" style="color:var(--bad);font-size:12px;margin-top:8px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn ghost" onclick="closePopup()">Cancel</button><button class="btn primary" onclick="saveAddContractor()">Add contractor</button></div>`);
+  setTimeout(() => { const i = document.getElementById('ac-name'); if (i) i.focus(); }, 30);
+}
+async function saveAddContractor(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const v = id => String((document.getElementById(id) || {}).value || '').trim();
+  if (!v('ac-name')) { const e = document.getElementById('popup-error'); if (e) e.textContent = 'The company name is needed.'; return; }
+  const services = [...document.querySelectorAll('#ac-svcs .svc.on')].map(b => b.dataset.s);
+  let c;
+  try { c = await db.suppliers.create({ name: v('ac-name'), contactPerson: v('ac-person'), phone: v('ac-phone'), email: v('ac-email'), services, paymentTerms: '7 days', deal: { type: 'commission', amount: null, note: '' } }); } catch (e) { return; }
+  closePopup(); UI.reference.contractorId = c.id; showToast('Contractor added'); render();
+}
+// The agreement: a snapshot of the text as it was made, so a signed agreement never changes afterwards.
+function newSignToken(){ const b = new Uint8Array(24); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function contractorSignUrl(token){ return location.origin + location.pathname.replace(/[^/]*$/, '') + 'sign.html?t=' + encodeURIComponent(token); }
+async function makeContractorAgreement(id, again){
+  const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (!contractorPrivateReady()) { showToast('The private details have not loaded yet. Try again in a moment.'); return; }
+  const priv = await freshContractorPrivate(id); if (!priv) return;
+  const old = priv.agreement || {};
+  const go = async () => {
+    const me = getCurrentProfile()?.fullName || '';
+    const history = Array.isArray(old.history) ? old.history.slice() : [];
+    if (old.html && old.state==='signed') history.push({ version: old.version, made_at: old.made_at, html: old.html, dealLine: old.dealLine, signed: old.signed });
+    const agreement = { version: old.html ? (Number(old.version) || 1) + (old.state==='signed' ? 1 : 0) : 1, template: CONTRACTOR_AGREEMENT_VERSION, state: 'ready',
+      html: contractorAgreementHtml(c, priv), dealLine: contractorDealLine(c), dealNote: contractorDealNote(c), inputsKey: contractorAgreementInputs(c, priv),
+      made_at: new Date().toISOString(), made_by: me, history };
+    // A new agreement gets a new link: the old link stops working.
+    const ok = await saveContractorAgreementRow(id, priv, { agreement, sign_token: newSignToken(), sign_token_expires: new Date(Date.now() + SIGN_LINK_DAYS * 864e5).toISOString() });
+    if (!ok) return;
+    db.suppliers.update(id, { agreementStatus: 'ready', agreementSignedAt: null, agreementSigner: '' });
+    showToast(again ? 'A new agreement is made: send them the new link' : 'Agreement made');
+    render(); openContractorAgreement(id);
+  };
+  if (old.state==='signed') confirmAction(`Make version ${(Number(old.version) || 1) + 1} of the agreement with ${c.name}? The signed one stays in their history, and they sign the new one.`, go, { danger:false, title:'New version', confirmLabel:'Make it' });
+  else go();
+}
+function contractorAgreementDoc(c, a){
+  const t = iso => iso ? new Date(iso).toLocaleString('en-AU', { timeZone:'Australia/Sydney', day:'numeric', month:'short', year:'numeric', hour:'numeric', minute:'2-digit' }) : '';
+  const s = a.signed;
+  return `<div class="agr-doc"><h1>Subcontractor agreement</h1><div class="agr-sub">The Guys Service Group Pty Ltd · version ${esc(a.version || 1)} · made ${esc(fmtDateYear(localDay(a.made_at)))}</div>${a.html}
+    <div class="agr-sig"><div>For The Guys Service Group<br><b>${esc(a.made_by || '')}</b></div><div>For ${esc(c.name)}<br>${s ? `${s.signature ? `<img alt="Signature" src="${esc(s.signature)}">` : ''}<b>${esc(s.name)}</b> · ${esc(t(s.at))}${s.ip ? `<br><span class="hint">from ${esc(s.ip)}</span>` : ''}` : '<i>Waiting for signature</i>'}</div></div></div>`;
+}
+function openContractorAgreement(id){
+  const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
+  const a = contractorPrivate(id).agreement || {}; if (!a.html) return;
+  const signed = (c.agreementStatus || '')==='signed';
+  openModal(`<div class="modal-back" onclick="if(event.target===this) closeModal()"><div class="modal agr-modal">
+      <div class="agr-head"><h2 style="margin:0">Agreement · ${esc(c.name)}</h2><div class="hint">${signed ? 'Signed: this is the copy both of you have.' : 'Made from the contractor\'s card and "What we agreed". The highlighted parts come from them.'}</div></div>
+      <div class="agr-wrap" id="agr-print">${contractorAgreementDoc(c, a)}</div>
+      <div class="agr-foot"><span class="hint">Standard wording, the same for every contractor.</span><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="closeModal()">Close</button><button class="btn" onclick="printContractorAgreement()">${ico('file', 14)} Print / save as PDF</button>${signed ? '' : `<button class="btn primary" onclick="closeModal();openSendAgreement('${c.id}')">Send signing link</button>`}</div></div>
+    </div></div>`);
+}
+function printContractorAgreement(){
+  const doc = document.getElementById('agr-print'); if (!doc) return;
+  const w = window.open('', '_blank'); if (!w) { showToast('Allow pop-ups to print'); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Subcontractor agreement</title><style>body{font-family:Georgia,serif;color:#1d1a16;max-width:720px;margin:30px auto;padding:0 24px;line-height:1.6;font-size:14.5px}h1{font-family:Arial,sans-serif;font-size:20px;margin:0}.agr-sub{font-family:Arial,sans-serif;font-size:12px;color:#6b6258;margin-bottom:16px}h4{font-family:Arial,sans-serif;font-size:13.5px;margin:14px 0 3px}p{margin:0 0 8px}mark{background:none;color:inherit;font-weight:600}.agr-sig{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:24px;font-family:Arial,sans-serif;font-size:12px}.agr-sig div{border-top:1px solid #b9b0a3;padding-top:6px}.agr-sig img{height:60px;max-width:100%;object-fit:contain;display:block}.hint{color:#8a8175}</style></head><body>${doc.innerHTML}</body></html>`);
+  w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+}
+function openSendAgreement(id){
+  const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
+  const priv = contractorPrivate(id);
+  if (!priv.sign_token || !priv.agreement || !priv.agreement.html) { showToast('Make the agreement first'); return; }
+  const expired = !priv.sign_token_expires || Date.parse(priv.sign_token_expires) <= Date.now();
+  const url = contractorSignUrl(priv.sign_token), me = (getCurrentProfile()?.fullName || '').split(' ')[0];
+  const text = `Hi ${String(c.contactPerson || '').split(' ')[0] || 'there'}, it's ${me || 'us'} from The Guys Service Group. Here's our subcontractor agreement to sign on your phone: ${url} Thanks!`;
+  const phone = String(c.phone || '').replace(/[^\d+]/g, ''), ios = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent), smsOk = /iPhone|iPad|iPod|Android|Macintosh/.test(navigator.userAgent);
+  const sms = phone && smsOk ? `sms:${phone}${ios ? '&' : '?'}body=${encodeURIComponent(text)}` : '', mail = c.email ? `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent('Subcontractor agreement · The Guys Service Group')}&body=${encodeURIComponent(text)}` : '';
+  openPopup(`<h3 style="margin:0 0 4px">Send the signing link</h3><div class="hint" style="margin-bottom:12px">${esc(c.contactPerson || c.name)} opens it on their phone, reads the agreement and signs with a finger. The link works for ${SIGN_LINK_DAYS} days and only for this agreement.${expired ? ' <b>The last link had expired: it works again for another ' + SIGN_LINK_DAYS + ' days.</b>' : ''}</div>
+    <div style="display:grid;gap:8px">
+      ${sms ? `<a class="btn" style="justify-content:flex-start" href="${esc(sms)}" onclick="markAgreementSent('${c.id}','by text')">${ico('phone', 14)} Text to ${esc(c.phone)}</a>` : ''}
+      ${mail ? `<a class="btn" style="justify-content:flex-start" href="${esc(mail)}" onclick="markAgreementSent('${c.id}','by email')">${ico('mail', 14)} Email to ${esc(c.email)}</a>` : ''}
+      <button class="btn" style="justify-content:flex-start" onclick="navigator.clipboard.writeText(document.getElementById('agr-msg').value).then(()=>{showToast('Copied');markAgreementSent('${c.id}','by a copied link')})">${ico('copy', 14)} Copy the message with the link</button>
+    </div>
+    <textarea id="agr-msg" readonly rows="4" style="width:100%;margin-top:12px;font-size:12.5px">${esc(text)}</textarea>
+    <div class="hint" style="margin-top:6px">The text and email open on this device, so you send them yourself.</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><a class="btn ghost" href="${esc(url + '&preview=1')}" target="_blank" rel="noopener">See what they see</a><button class="btn primary" onclick="closePopup()">Done</button></div>`);
+  if (expired) saveContractorPrivate(id, { sign_token_expires: new Date(Date.now() + SIGN_LINK_DAYS * 864e5).toISOString() });
+}
+async function markAgreementSent(id, via){
+  const c = STATE.data.suppliers.find(x => x.id===id); if (!c) return;
+  const priv = await freshContractorPrivate(id); if (!priv) return;
+  if ((priv.agreement || {}).state==='signed') { render(); return; }   // signed meanwhile: nothing to mark
+  const a = { ...(priv.agreement || {}) };
+  a.sent_at = new Date().toISOString(); a.sent_via = via; if (a.state==='ready') a.state = 'sent';
+  const ok = await saveContractorAgreementRow(id, priv, { agreement: a });
+  if (ok && (c.agreementStatus==='ready' || c.agreementStatus==='none')) db.suppliers.update(id, { agreementStatus: 'sent' });
+  render();
 }
 function openEquipSpendModal(itemId){
   const item = itemId ? STATE.data.equipmentSpend.find(x=>x.id===itemId) : null;
@@ -11909,7 +12324,7 @@ function renderSettings(profile){
         ['Default payment terms', 'For example "7 days".', `<input class="set-input" value="${esc(s.defaultPaymentTerms)}" placeholder="e.g. 7 days" onchange="updateBusinessProfileField('defaultPaymentTerms', this.value.trim(), 'Default payment terms')">`],
         ['Flag a job as unpaid after', 'It shows in Outstanding and in Reminders.', `<span class="set-num"><input type="number" min="1" max="365" value="${s.unpaidReminderDays}" onchange="updateBusinessSetting('unpaidReminderDays', this.value, 'Unpaid reminder threshold')"><span>days</span></span>`],
       ])) + setBlock('Payment methods', 'The choices in Closings and Jobs. One switched off leaves the forms; jobs paid that way keep it.', catalogListHtml('payments', { toggle: true }) + catalogAddButton('payments', 'Add a payment method')) },
-    { group: 'Team', id: 'people', icon: 'users', title: 'People', desc: 'Who can sign in and what they do.', body: () => renderPeoplePage() },
+    { group: 'Team', id: 'people', icon: 'users', title: 'People', desc: 'Everyone in the business: their details, pay, documents and app login. Open a card to see and change everything about the person.', body: () => renderPeoplePage() },
     { group: 'Team', id: 'roles', icon: 'shield', title: 'Roles and access', desc: 'What each role can open. A new person gets their role\'s pages; anyone can still get an exception on their own.', body: () => renderRolesPage() },
     { group: 'Team', id: 'access', icon: 'idcard', title: 'Access for each person', desc: 'Exceptions, person by person, including Ron. A change reaches them the next time they open or refresh the app.', body: () => `<div class="set-note">${ico('alert', 16)}<span>Manager accounts see everything an owner sees except Settings, so they aren't listed here.</span></div>${cards}` },
     { group: 'Team', id: 'pay', icon: 'wallet', title: 'Pay and commissions', desc: 'How everyone is paid. Payroll works it out from these.', body: () => `<div class="set-sub">Technicians: commission, jobs and pay message</div>${techCards}`
@@ -12173,22 +12588,183 @@ function addDayOff(){
 function removeDayOff(date){ const h = catalogHours(); h.extra = h.extra.filter(x => x.date!==date); catalogSave('hours', h, `${date} is no longer a day off`); }
 
 // People: everyone who can sign in.
+/* ── Settings → People (Ofek 13 Oct, approved mockup): one card per person, merging their employee card (the employees
+   table: details, pay, documents) and their app login (profiles). They are the same person when the login's Jobs &
+   Commissions name, or its full name, is the employee's name. A login with no employee card, or an employee with no
+   login, gets a card too. The Resources → Employees tab is gone; its panel opens from here. ── */
+let PEOPLE_UI = { filter:'active', q:'', sel:null };   // sel: 'e:<employee id>' or 'p:<profile id>'
+function peopleList(employees, profiles){
+  const used = new Set(), out = [];
+  (employees || []).forEach(e => {
+    const p = (profiles || []).find(x => !used.has(x.id) && ((x.technicianName && x.technicianName===e.name) || x.fullName===e.name));
+    if (p) used.add(p.id);
+    out.push({ key: 'e:' + e.id, emp: e, prof: p || null, name: p ? p.fullName : e.name });
+  });
+  (profiles || []).filter(p => !used.has(p.id)).forEach(p => out.push({ key: 'p:' + p.id, emp: null, prof: p, name: p.fullName }));
+  return out;
+}
+function personActive(x){ return x.emp ? (x.emp.status || 'Active')==='Active' : true; }
+function personRoles(x){ return x.emp ? (x.emp.roles || []) : [x.prof ? roleLabel(x.prof.role) : '']; }
+function personInGroup(x, f){
+  const roles = personRoles(x).join(' '), r = x.prof ? x.prof.role : '';
+  if (f==='inactive') return !personActive(x);
+  if (!personActive(x)) return false;
+  if (f==='tech') return /Technician/.test(roles) || r==='technician';
+  if (f==='office') return /VA|Manager|Sales/.test(roles) || ['va', 'manager', 'marketing'].includes(r);
+  if (f==='owners') return /Owner/.test(roles) || r==='owner';
+  return true;
+}
+function personAccount(x){ return x.prof ? (TEAM.list || []).find(a => a.id===x.prof.id) || null : null; }
+function personStatusPill(x){
+  const a = personAccount(x), p = x.prof;
+  if (!personActive(x)) return pill('neutral', 'Not active');
+  if (a && a.accessOff) return pill('bad', 'Access off');
+  if (a && !a.joined) return pill('warn', 'Invited');
+  if (p && p.role==='va' && onShiftToday(p)) return p.onBreak ? pill('warn', 'On a break') : pill('good', 'On shift');
+  return pill('good', 'Active');
+}
+function personAccessText(x){
+  const me = getCurrentProfile(), p = x.prof, a = personAccount(x);
+  if (!p) return 'No app login';
+  const when = p.id===(me && me.id) ? 'you' : a && a.accessOff ? 'access off' : a && !a.joined ? 'invited, not joined yet' : a && a.lastSignIn ? 'last seen ' + freshAgo(a.lastSignIn) : 'signs in';
+  return `${roleLabel(p.role)} · ${when}`;
+}
+function personPay(x, data){
+  const e = x.emp; if (!e) return '';
+  const rates = empRatesHtml(data.commissionRates[e.name]);
+  if (rates) return `<div class="emp-rates">${rates}</div>`;
+  const owner = (data.settings && data.settings.ownerSalaries || {})[x.prof ? x.prof.fullName : e.name];
+  const txt = e.employmentType==='Hourly' ? `$${payHourlyFor().rate} / hour + booking bonus` : owner ? `${fmtMoney(owner)} / week` : '';
+  return txt ? `<div class="pp-row">${ico('wallet', 14)}<span>${esc(txt)}</span></div>` : '';
+}
+function personTenure(e){
+  if (!e || !e.startDate) return '';
+  const m = Math.max(0, Math.round((parseLocalDate(e.endDate || todayStr()) - parseLocalDate(e.startDate)) / (864e5 * 30.44)));
+  return m < 1 ? 'less than a month' : m < 24 ? `${m} month${m===1 ? '' : 's'}` : `${Math.floor(m / 12)} years`;
+}
+function personCard(x, data){
+  const e = x.emp, today = todayStr(), me = getCurrentProfile(), owner = me && me.role==='owner';
+  const docFlags = e ? EMP_DOCS.map(d => ({ d, v: employeeDocExpiry((e.documents || {})[d.kind], today) })).filter(o => o.v && o.v.tone!=='good').map(o => pill(o.v.tone, `${o.d.label.replace(/ \(.*\)$/, '')} ${o.v.days < 0 ? 'expired' : `in ${o.v.days} days`}`)).join('') : '';
+  const missing = e ? employeeMissing(e) : [];
+  const flags = docFlags + (missing.length ? pill('neutral', 'Missing: ' + missing.join(' · ')) : '') + (!e ? pill('neutral', 'No employee details yet') : '');
+  const a = personAccount(x), email = (e && e.email) || (a && a.email) || '';
+  const phone = (e && e.phone) || '';
+  const self = x.prof && me && x.prof.id===me.id;
+  const action = self ? '<span class="hint">You</span>' : !owner ? '' : x.prof ? `<button class="btn small" onclick="event.stopPropagation();openPersonMenu(event,'${x.prof.id}')" aria-haspopup="menu">Manage ${ico('chevronDown', 13)}</button>` : `<button class="btn small" onclick="event.stopPropagation();invitePerson('${x.key}')">${ico('plus', 13)} Invite</button>`;
+  const role = personRoles(x).filter(Boolean).join(', ') + (e && e.employmentType ? ' · ' + e.employmentType : '');
+  return `<div class="emp-card${PEOPLE_UI.sel===x.key ? ' sel' : ''}${personActive(x) ? '' : ' inactive'}" role="button" tabindex="0" onclick="openPersonCard('${x.key}')" onkeydown="if(event.key==='Enter'){event.preventDefault();openPersonCard('${x.key}');}">
+    <div class="emp-card-top">${empAvatar({ name: e ? e.name : x.name })}<div style="min-width:0;flex:1"><div class="emp-name">${esc(x.name)}</div><div class="emp-role">${esc(role || '—')}</div></div>${personStatusPill(x)}</div>
+    <div class="pp-rows">
+      <div class="pp-row">${ico('lock', 14)}<span>${esc(personAccessText(x))}</span></div>
+      ${phone || email ? `<div class="pp-row">${phone ? `${ico('phone', 14)}<span class="mono">${esc(phone)}</span>` : ''}${phone && email ? '<span style="color:var(--ink-faint)">·</span>' : ''}${email ? `${ico('mail', 14)}<span>${esc(email)}</span>` : ''}</div>` : ''}
+      ${personPay(x, data)}
+    </div>
+    ${flags ? `<div class="emp-flags">${flags}</div>` : ''}
+    <div class="pp-foot"><span class="hint">${e && e.startDate ? 'With us ' + personTenure(e) : !e ? 'Login only' : '&nbsp;'}</span>${action}</div>
+  </div>`;
+}
+function renderPeopleCards(data){
+  const q = PEOPLE_UI.q.trim().toLowerCase();
+  const list = peopleList(data.employees, STATE.profiles).filter(x => personInGroup(x, PEOPLE_UI.filter))
+    .filter(x => !q || [x.name, x.emp && x.emp.phone, x.emp && x.emp.email, (personAccount(x) || {}).email, ...personRoles(x)].some(v => String(v || '').toLowerCase().includes(q)))
+    .sort((a, b) => (personActive(a) ? 0 : 1) - (personActive(b) ? 0 : 1) || String(a.name).localeCompare(String(b.name)));
+  return list.map(x => personCard(x, data)).join('') || '<div class="hint">Nobody here.</div>';
+}
+function refreshPeopleGrid(){ const g = document.querySelector('.people-grid'); if (g) g.innerHTML = renderPeopleCards(STATE.data); }
+function openPersonCard(key){ PEOPLE_UI.sel = key && PEOPLE_UI.sel!==key ? key : null; UI.reference.showBank = null; render(); }
+// Older calls (the employee panel's close button, the document reminders) still work through this.
+function selectEmployee(id){ openPersonCard(id ? 'e:' + id : null); }
 function renderPeoplePage(){
-  const me = getCurrentProfile(), colors = ['#c1652e', '#7a5ca0', '#2f7d6e', '#3f7f8f', '#7746c9', '#1f66c9', '#a5473f'];
-  const order = { owner: 0, manager: 1, va: 2, technician: 3, marketing: 4 };
-  const people = STATE.profiles.slice().sort((a, b) => (order[a.role] ?? 9) - (order[b.role] ?? 9) || String(a.fullName).localeCompare(String(b.fullName)));
+  const me = getCurrentProfile(), data = STATE.data;
   if (TEAM.list===null && me && me.role==='owner') loadTeam();
-  const acct = id => (TEAM.list || []).find(x => x.id===id);
-  const rows = people.map((p, i) => {
-    const a = acct(p.id);
-    const status = a && a.accessOff ? pill('bad', 'Access off') : a && !a.joined ? pill('warn', 'Invited') : p.role==='va' ? (onShiftToday(p) ? (p.onBreak ? pill('warn', 'On a break') : pill('good', 'On shift')) : pill('neutral', 'Off shift')) : pill('good', 'Active');
-    const seen = a && a.lastSignIn ? `Signed in ${freshAgo(a.lastSignIn)}` : a && !a.joined ? 'Not joined yet' : '';
-    const owner = me && me.role==='owner', self = p.id===(me && me.id);
-    const actions = self ? '<span class="hint">You</span>' : owner ? `<button class="btn small" onclick="openPersonMenu(event,'${p.id}')" aria-haspopup="menu">Manage ${ico('chevronDown', 13)}</button>` : '';
-    return `<tr><td><span class="who"><span class="who-av" style="background:${colors[i % colors.length]}">${esc(initials(p.fullName))}</span><span>${esc(p.fullName)}<small>${esc([a && a.email, seen].filter(Boolean).join(' · ') || (p.technicianName && p.technicianName!==p.fullName ? p.technicianName : ''))}</small></span></span></td><td>${esc(roleLabel(p.role))}</td><td>${status}</td><td class="set-actions">${actions}</td></tr>`;
-  }).join('');
-  return (TEAM.error && !(TEAM.list || []).length ? `<div class="set-note">${ico('alert', 16)}<span>${esc(TEAM.error)} Emails, sign-ins and invites show here once it is.</span></div>` : '') + setBlock('Team', `${people.length} people`, `<div class="table-wrap set-table"><table><thead><tr><th>Name</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="cat-foot"><button class="btn small primary" onclick="openInvite()">${ico('plus', 14)} Invite someone</button></div>`);
+  const all = peopleList(data.employees, STATE.profiles);
+  const n = f => all.filter(x => personInGroup(x, f)).length;
+  const chip = (f, l) => `<button class="week-chip ${PEOPLE_UI.filter===f ? 'active' : ''}" onclick="PEOPLE_UI.filter='${f}';render()">${l} (${n(f)})</button>`;
+  const sel = PEOPLE_UI.sel ? all.find(x => x.key===PEOPLE_UI.sel) : null;
+  return (TEAM.error && !(TEAM.list || []).length ? `<div class="set-note">${ico('alert', 16)}<span>${esc(TEAM.error)} Emails, sign-ins and invites show here once it is.</span></div>` : '')
+    + `<div class="toolbar"><input class="people-search" placeholder="Search by name, phone or email" aria-label="Search people" value="${esc(PEOPLE_UI.q)}" oninput="PEOPLE_UI.q=this.value;refreshPeopleGrid()">${chip('active', 'Everyone active')}${chip('tech', 'Technicians')}${chip('office', 'Office')}${chip('owners', 'Owners')}${chip('inactive', 'Not active')}<span style="flex:1"></span>${me && me.role==='owner' ? `<button class="btn primary" onclick="openAddPerson()">${ico('plus', 14)} Add person</button>` : ''}</div>
+      <div class="people-grid">${renderPeopleCards(data)}</div>
+      <aside class="job-panel emp-panel${panelAnimClass('person', sel && sel.key)}" id="emp-panel"${sel ? '' : ' hidden'}>${sel ? renderPersonPanel(sel, data) : ''}</aside>`;
+}
+// The App login box at the top of the panel: the same actions as the Manage menu, as buttons.
+function personAccessBox(x){
+  const me = getCurrentProfile(), owner = me && me.role==='owner', p = x.prof, a = personAccount(x);
+  if (!p) return `<div class="pp-access"><b style="font-size:13.5px">App login</b><div class="hint" style="margin:4px 0 8px">${esc(x.name)} has no login to the app.</div>${owner ? `<button class="btn small primary" onclick="invitePerson('${x.key}')">${ico('plus', 13)} Invite to the app</button>` : ''}</div>`;
+  const self = me && p.id===me.id;
+  const seen = self ? 'You, now' : a && !a.joined ? 'Not joined yet' : a && a.lastSignIn ? freshAgo(a.lastSignIn) : '—';
+  const btn = (icon, label, js, cls) => `<button type="button" class="btn small${cls ? ' ' + cls : ''}" onclick="${js}">${ico(icon, 13)} ${esc(label)}</button>`;
+  const acts = self || !owner ? '' : [
+    p.role!=='owner' && p.role!=='manager' ? btn('idcard', 'Pages they can open', "setSettingsPage('access')") : '',
+    a ? btn('link', a.joined ? 'Link to set a new password' : 'Link to join', `teamLink('${p.id}')`) : '',
+    !VIEW_AS_ID ? btn('eye', `See the app as ${p.fullName.split(' ')[0]}`, `enterViewAs('${p.id}')`) : '',
+    a && p.role!=='owner' ? btn('lock', a.accessOff ? 'Turn access back on' : 'Turn access off', `teamAccess('${p.id}', ${a.accessOff ? 'true' : 'false'})`, a.accessOff ? '' : 'danger') : '',
+  ].filter(Boolean).join('');
+  return `<div class="pp-access">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:13.5px">App login</b>${a && a.accessOff ? pill('bad', 'Access off') : a && !a.joined ? pill('warn', 'Invited') : pill('good', 'Can sign in')}</div>
+    <div class="pp-kv"><span>Email to sign in</span><span>${esc((a && a.email) || '—')}</span></div>
+    <div class="pp-kv"><span>Role in the app</span><span>${esc(roleLabel(p.role))}</span></div>
+    <div class="pp-kv"><span>Last seen</span><span>${esc(seen)}</span></div>
+    ${acts ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${acts}</div>` : ''}
+  </div>`;
+}
+function renderPersonPanel(x, data){
+  const me = getCurrentProfile(), canEdit = !!me && (me.role==='owner' || me.role==='manager');
+  if (x.emp) return renderEmployeePanel(x.emp, data, canEdit, `<div class="grp">Access</div>${personAccessBox(x)}`, x.name);
+  return `<div class="job-panel-head"><div style="display:flex;gap:12px;align-items:center;min-width:0">${empAvatar({ name: x.name }, 46)}<div style="min-width:0"><h3>${esc(x.name)}</h3><div class="meta" style="margin:0">${esc(personRoles(x).join(', '))}</div></div></div>
+      <button type="button" class="btn ghost small" onclick="openPersonCard(null)" aria-label="Close" title="Close">✕</button></div>
+    <div class="grp">Access</div>${personAccessBox(x)}
+    <div class="grp">Details</div>
+    <div class="hint" style="margin-bottom:10px">No employee details yet: phone, pay, documents and bank are not filled in. Someone from the ads agency usually doesn't need them.</div>
+    ${canEdit ? `<button type="button" class="btn small" onclick="openEmployeeModal(null, { name: '${esc(jsStr(x.name))}' })">${ico('plus', 13)} Add employee details</button>` : ''}`;
+}
+// Add person: their employee card, and (if they need one) the link to join the app, in one step.
+function openAddPerson(){
+  openPopup(`<h3 style="margin:0 0 4px">Add a person</h3><div class="hint" style="margin-bottom:12px">One step for both: their card, and (if they need it) a link to join the app.</div>
+    <div class="field"><label>Name</label><input id="ap-name" autocomplete="off" placeholder="Full name"></div>
+    <div class="field" style="margin-top:10px"><label>Role</label><select id="ap-role"><option value="technician">Technician</option><option value="va">Office (VA)</option><option value="manager">Manager</option><option value="marketing">Marketing (login only)</option></select></div>
+    <div class="grid-2" style="margin-top:10px"><div class="field"><label>Phone</label><input id="ap-phone" type="tel" data-check="phone"></div><div class="field"><label>Email</label><input id="ap-email" type="email" data-check="email"></div></div>
+    <label class="checkline" style="margin-top:12px;font-size:13px"><input type="checkbox" id="ap-invite" checked> Make a link to join the app</label>
+    <div id="popup-error" style="color:var(--bad);font-size:12px;margin-top:8px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn ghost" onclick="closePopup()">Cancel</button><button class="btn primary" id="ap-go" onclick="saveAddPerson()">Add person</button></div>`);
+  setTimeout(() => { const i = document.getElementById('ap-name'); if (i) i.focus(); }, 30);
+}
+async function saveAddPerson(){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const v = id => String((document.getElementById(id) || {}).value || '').trim(), err = document.getElementById('popup-error'), go = document.getElementById('ap-go');
+  const name = v('ap-name'), role = v('ap-role'), email = v('ap-email'), invite = !!(document.getElementById('ap-invite') || {}).checked;
+  if (!name) { if (err) err.textContent = 'Their name is needed.'; return; }
+  if ((invite || role==='marketing') && !email) { if (err) err.textContent = 'An email is needed for the link to join.'; return; }
+  if (role!=='marketing' && STATE.data.employees.some(e => e.name.toLowerCase()===name.toLowerCase())) { if (err) err.textContent = 'There is already someone with that name.'; return; }
+  if (go) { go.disabled = true; go.textContent = 'Adding…'; }
+  let emp = null;
+  if (role!=='marketing') {
+    const roles = role==='technician' ? ['Technician'] : role==='va' ? ['VA'] : ['Manager'];
+    try { emp = await db.employees.create({ activityLog: [], name, roles, status: 'Active', employmentType: role==='va' ? 'Hourly' : role==='technician' ? 'Freelance-commission' : 'Salaried', phone: v('ap-phone'), email }); }
+    catch (e) { if (go) { go.disabled = false; go.textContent = 'Add person'; } return; }
+    logEmployeeActivity(emp, getCurrentProfile()?.fullName || 'Unknown', 'Employee added');
+  }
+  if (invite || role==='marketing') {
+    try {
+      const out = await teamCall({ step: 'invite', fullName: name, email, role, technicianName: role==='technician' ? name : '' });
+      logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `People: invited ${name} (${roleLabel(role)})`);
+      closePopup(); showJoinLink(name, out.link, 'join');
+      TEAM.list = null; await reloadProfiles();
+    } catch (e) { if (err) err.textContent = (emp ? 'Their card is saved, but the invite failed: ' : '') + String(e.message || e); if (go) { go.disabled = false; go.textContent = 'Add person'; } return; }
+  } else closePopup();
+  if (emp) PEOPLE_UI.sel = 'e:' + emp.id;
+  showToast('Added'); render();
+}
+// Invite someone who has a card but no login: the invite window, filled in from their card.
+function invitePerson(key){
+  const x = peopleList(STATE.data.employees, STATE.profiles).find(y => y.key===key); if (!x) return;
+  openInvite();
+  setTimeout(() => {
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+    set('inv-name', x.name); set('inv-email', x.emp && x.emp.email);
+    const roles = (x.emp && x.emp.roles) || [], r = roles.includes('Technician') ? 'technician' : roles.includes('VA') ? 'va' : roles.includes('Manager') ? 'manager' : '';
+    const sel = document.getElementById('inv-role'); if (sel && r) { sel.value = r; sel.dispatchEvent(new Event('change')); }
+    const t = document.getElementById('inv-tech'); if (t && r==='technician' && x.emp) t.value = x.emp.name;
+  }, 40);
 }
 
 // One person's actions, in a small menu under Manage (a row of buttons didn't fit).
@@ -12653,6 +13229,7 @@ function renderBillingPage(){
 }
 function setSettingsPage(id){
   UI.settings = UI.settings || {}; UI.settings.page = id; UI.settings.open = true;
+  if (id!=='people') PEOPLE_UI.sel = null;
   render();
   if (isPhoneWidth()) window.scrollTo(0, 0);
 }
