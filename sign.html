@@ -64,9 +64,12 @@ input.t:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px
 <main class="wrap" id="app"><div class="msg">Loading the agreement…</div></main>
 <script>
 // Talks only to the contractor-sign function; the link's token is the only key. Nothing is stored on this device.
-const FN = 'https://dszlllazwmllmoklzjwl.supabase.co/functions/v1/contractor-sign';
-const PK = 'sb_publishable_CYDF61njgAU74Dm3PvkLGQ_4N6qfvIi';
+// A copy running on this computer (localhost) talks to the test project ("ops-staging", fake data) unless ?env=live.
 const Q = new URLSearchParams(location.search), T = Q.get('t') || '';
+const STAGING = /^(localhost|127\.0\.0\.1|\[::1\]|.+\.localhost)$/.test(location.hostname) && Q.get('env') !== 'live';
+const FN = STAGING ? 'https://wblsrpmjiqwuxmrmuklc.supabase.co/functions/v1/contractor-sign'
+                   : 'https://dszlllazwmllmoklzjwl.supabase.co/functions/v1/contractor-sign';
+const PK = STAGING ? 'sb_publishable_BAduck_8kTrLzBvea4zckw_ZoSGDQb0' : 'sb_publishable_CYDF61njgAU74Dm3PvkLGQ_4N6qfvIi';
 const PREVIEW = Q.get('preview') === '1';   // "See what they see" from the app: nothing is recorded and signing is off
 const app = document.getElementById('app');
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

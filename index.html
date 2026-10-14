@@ -3462,8 +3462,35 @@ function filterForProfile(data, profile){
    project, not a secret. Row Level Security on the database side (see
    stage3_schema.sql) is the actual access-control boundary, same as any
    Supabase app. Never put the service_role key here or anywhere client-side. */
-const SUPABASE_URL = 'https://dszlllazwmllmoklzjwl.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_CYDF61njgAU74Dm3PvkLGQ_4N6qfvIi';
+// Two environments (round 3, stage 0): the live project, and a separate test project ("ops-staging") that holds only
+// fake demo data. The live site always uses live. A copy running on this computer (localhost, 127.0.0.1, *.localhost)
+// uses the test project unless the address says ?env=live; the choice is remembered on that device (?env=staging/live).
+const OPS_ENVS = {
+  live:    { url: 'https://dszlllazwmllmoklzjwl.supabase.co', key: 'sb_publishable_CYDF61njgAU74Dm3PvkLGQ_4N6qfvIi' },
+  staging: { url: 'https://wblsrpmjiqwuxmrmuklc.supabase.co', key: 'sb_publishable_BAduck_8kTrLzBvea4zckw_ZoSGDQb0' },
+};
+const OPS_ENV = (() => {
+  try {
+    if (!/^(localhost|127\.0\.0\.1|\[::1\]|.+\.localhost)$/.test(location.hostname)) return 'live';
+    const asked = new URLSearchParams(location.search).get('env');
+    if (asked === 'staging' || asked === 'live') localStorage.setItem('opsEnv', asked);
+    return localStorage.getItem('opsEnv') === 'live' ? 'live' : 'staging';
+  } catch (e) { return 'live'; }
+})();
+const SUPABASE_URL = OPS_ENVS[OPS_ENV].url;
+const SUPABASE_ANON_KEY = OPS_ENVS[OPS_ENV].key;
+// On the test project a small badge stays at the bottom of the screen, so nobody mistakes it for the real business.
+if (OPS_ENV === 'staging' && typeof document !== 'undefined') {
+  const addEnvBadge = () => {
+    if (document.getElementById('env-badge')) return;
+    const b = document.createElement('div');
+    b.id = 'env-badge'; b.textContent = 'Test environment · demo data';
+    b.style.cssText = 'position:fixed;left:50%;bottom:8px;transform:translateX(-50%);z-index:99999;background:#b45309;color:#fff;'
+      + 'font:600 12px/1 system-ui,sans-serif;padding:6px 10px;border-radius:999px;pointer-events:none;opacity:.92';
+    document.body.appendChild(b);
+  };
+  if (document.body) addEnvBadge(); else document.addEventListener('DOMContentLoaded', addEnvBadge);
+}
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // ── Presentation mode (owner toggle, per browser) ──────────────────────────────────────────────────
 // For showing the app to someone without revealing real figures: every money value is multiplied by
