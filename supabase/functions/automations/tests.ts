@@ -906,6 +906,31 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     eq(["Ron", "The Guys", "1300 380"].filter((w) => new RegExp("\\b" + w + "\\b").test(code)), [], "no 'Ron', 'The Guys' or '1300 380' in the engine's code");
   }
 
+  // ── 28. an MCP import made with automations off (quiet) is not a new lead; a quiet imported job never "closes" ──
+  {
+    const quietLead = (id: string, o: any = {}) => lead(id, { messages: [{ id: "m1", kind: "event", at: isoMs(NOW - 2 * MIN), text: "Imported from Fake CRM (Leads), automatic messages off", quiet: true }], last_read_at: isoMs(NOW - 2 * MIN), ...o });
+    const emailAuto = () => auto({ steps: [emailStep()] });
+    let db = world({ contacts: [quietLead("q1")], automations: [emailAuto()] });
+    await tickAt(db, NOW); await tickAt(db, NOW + MIN);
+    eq([db.T.automation_runs.length, db.T.lead_messages.length], [0, 0], "quiet import: no newLead run, no email queued");
+    eq((await handle(db, { step: "event", type: "newLead", id: "q1" }, OWNER, false)).body, { ok: true, runs: 0, reason: "no event" }, "quiet import: the app's 'look now' → no event");
+    db = world({ contacts: [quietLead("q2", { reopened_at: isoMs(NOW - MIN) })], automations: [emailAuto()] });
+    await tickAt(db, NOW);
+    eq([db.T.automation_runs.length, db.T.lead_messages.length], [1, 1], "quiet import reopened by the customer: a real new arrival, it fires");
+    db = world({ contacts: [lead("q3", { messages: [{ at: isoMs(NOW - 2 * MIN), quiet: false }] })], automations: [emailAuto()] });
+    await tickAt(db, NOW);
+    eq([db.T.automation_runs.length, db.T.lead_messages.length], [1, 1], "quiet:false fires as before");
+    eq([quietArrival({ first_quiet: "true" }), quietArrival({ first_quiet: null, messages: [{ quiet: true }] }), quietArrival({ first_quiet: "false" }), quietArrival({ first_quiet: null }), quietArrival({ messages: [] }), quietArrival({ messages: [{ quiet: "yes" }] })],
+      [true, true, false, false, false, false], "quietArrival: the scan column (first_quiet) or the full thread");
+    const jobAuto = () => auto({ trigger: { type: "jobClosed", params: {} }, steps: [emailStep()] });
+    db = world({ automations: [jobAuto()], contacts: [lead("c1")], jobs: [{ id: "jq", contact_id: "c1", date: "2026-10-14", created_at: null, review_do_not_ask: true }] });
+    await tickAt(db, NOW);
+    eq(db.T.automation_runs.length, 0, "a quiet imported job (created_at null, done today) starts no jobClosed run");
+    db = world({ automations: [jobAuto()], contacts: [lead("c1")], jobs: [{ id: "jn", contact_id: "c1", date: "2026-10-14", created_at: isoMs(NOW - MIN) }] });
+    await tickAt(db, NOW);
+    eq(db.T.automation_runs.map((r: any) => r.event_type), ["jobClosed"], "the same job with created_at = now does");
+  }
+
   console.log(`automations: ${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
 })().catch((e) => { console.error("automations tests crashed:", e); process.exit(1); });

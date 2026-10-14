@@ -508,7 +508,7 @@ export type Ev = { key: string; type: string; recordKind: string; recordId: stri
 const CONTACT_COLS = "id, full_name, phone, email, postcode, division, source, status, tags, created_at, contacted_at, last_read_at, reopened_at, messages, stage_changed_at, linked_job_id";
 // What the minute scans read of a card: no thread (messages can be large and the scans run 1,440 times a day on the free
 // plan's egress), only the time of its first entry.
-const SCAN_CONTACT_COLS = "id, status, tags, created_at, reopened_at, stage_changed_at, linked_job_id, first_at:messages->0->>at";
+const SCAN_CONTACT_COLS = "id, status, tags, created_at, reopened_at, stage_changed_at, linked_job_id, first_at:messages->0->>at, first_quiet:messages->0->>quiet";
 const JOB_COLS = "id, customer_name, invoice_number, date, job_type, technician, amount, payment_status, review_do_not_ask, contact_id, created_at";
 const CALL_COLS = "id, from_number, to_number, direction, missed, started_at, created_at, division, contact_id, status";
 const CHAT_COLS = "id, contact_id, phone, first_name, full_name, service_key, brand, service_text, test, created_at";
@@ -521,6 +521,10 @@ export const arrivedAt = (c: any): string | null => {
   const a = c.reopened_at || c.first_at || (Array.isArray(c.messages) && c.messages[0] && c.messages[0].at) || (typeof c.created_at === "string" && c.created_at.includes("T") ? c.created_at : null);
   return okTime(a) ? a : null;
 };
+// A card the MCP import made with automations off says so on its first thread entry (quiet): its arrival is not a new
+// lead. A later reopen is a real new arrival and counts as usual. (The import writes the key; mcp/index.ts QUIET_KEY.)
+// deno-lint-ignore no-explicit-any
+export const quietArrival = (c: any): boolean => String(c.first_quiet ?? (Array.isArray(c.messages) && c.messages[0] ? c.messages[0].quiet : "") ?? "") === "true";
 // A stage set when the card was made (or reopened) is its arrival, not a move: the lead never moved.
 const ARRIVAL_SLACK_MS = 30e3;   // the app sets the stage just before it saves the new card, and its first entry just after
 // The app's Undo after a stage move runs 6.5 s; a move younger than this is not acted on yet (an undone misclick never fires).
@@ -546,6 +550,7 @@ export const TRIGGERS: Record<string, Trigger> = {
     fromRecord: (c, S) => {
       if (!c || isTestRecord(c.tags, S)) return null;
       if (c.linked_job_id && !c.reopened_at) return null;
+      if (!c.reopened_at && quietArrival(c)) return null;
       const at = arrivedAt(c); if (!at) return null;
       return ev("newLead", "contact", c, `${c.id}:${c.reopened_at || "new"}`, at, c.id);
     },

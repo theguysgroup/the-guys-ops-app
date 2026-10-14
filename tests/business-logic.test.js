@@ -102,6 +102,11 @@ const DECLS = [
   'freshTone', 'CONN_HOW', 'CONN_HOW_ORDER', 'CONN_LATE_HOURS', 'CONN_ACCOUNTS', 'CONNECTORS', 'CONN_ADDONS', 'CONN_GUIDE_LINKS', 'connCfgOf', 'connItemOn', 'connAccountOn', 'connPatched',
   'connSourceDef', 'connDefs', 'connState', 'connIsLive', 'SOURCE_HOW', 'sourceRowInfo', 'connFreshItems', 'connOldest', 'connTone', 'connGhlArchiveText', 'connStepsFor', 'connNextStep', 'connHows', 'connMatches',
   'connStopsAll', 'connPendingReaders', 'fmtAdsAccount', 'connDayName', 'connWhen', 'connAddonsShown', 'CONN_LOG_SRC', 'connLogRows',
+  // Settings > Connectors > Private connector (MCP), stage 5
+  'canUseMcp', 'MCP_SETTINGS_DEFAULTS', 'mcpSettingsOf', 'MCP_SETTING_LIMITS', 'mcpSettingProblem', 'mcpUrls', 'mcpTokenLooksRight', 'mcpWhen', 'mcpKeyLists', 'mcpKeyMeta', 'MCP_LOG_STATUS', 'mcpLogStatus',
+  'MCP_TOOL_NAMES', 'mcpHostBlocked', 'MCP_RESERVED_HEADERS', 'mcpServerProblems', 'MCP_IMPORT_KINDS', 'MCP_IMPORT_FIELDS', 'MCP_IMPORT_REQUIRED', 'mcpFieldLabel', 'mcpMappingRows', 'mcpMappingFromRows', 'mcpDedupeDefault',
+  'mcpPathOk', 'mcpRuleProblems', 'mcpParseArgs', 'mcpArgsTemplate', 'mcpResultData', 'mcpItemsAt', 'mcpSamplePaths', 'mcpPreviewCounts', 'mcpPreviewColumns', 'mcpPreviewText', 'mcpRunLine', 'mcpCanUndo',
+  'mcpPeopleRows', 'mcpReasonText', 'mcpLoadErrorText', 'mcpServerMeta', 'mcpRuleMeta',
   // Settings → Security: Face ID / fingerprint (passkeys), the 30-minute lock, Settings history (14 Oct)
   'CAT_NAMES', 'setBlock', 'SEC_LOCK_MINUTES', 'bytesToB64url', 'b64urlToBytes', 'pkCreationOptions', 'pkRequestOptions', 'pkAttestationJSON', 'pkAssertionJSON', 'pkDeviceInfo', 'bioIcoFor', 'secMethodWord',
   'secUnlockMethods', 'lockedBackupLinkOpen', 'SEC_INTENTS', 'secGoogleParse', 'PAY_SETTING_NAMES', 'secLeft', 'secWhen', 'settingsHistParts', 'settingsHistFilter', 'secHistChips', 'secRecentCount', 'secReasonText',
@@ -2148,7 +2153,7 @@ function testConnectors(sb){
   assertEqual([rem.length, rem[0].id, rem[0].cat, rem[0].act, ad({ gads: { removed: true } }, 'Money', '').length], [13, 'gads', 'Removed connectors', 'connect', 4], 'connAddonsShown: a removed connector comes first, to connect again');
   // the list itself
   const ids = sb.CONNECTORS.map(d => d.id);
-  assertEqual([ids, new Set(ids).size], [['gads', 'meta', 'organic', 'nightly', 'email', 'web', 'sheet', 'twilio', 'ghl', 'gbp', 'xero', 'wp'], 12], 'CONNECTORS: the 12 connectors in the mockup order, each once');
+  assertEqual([ids, new Set(ids).size], [['gads', 'meta', 'organic', 'nightly', 'email', 'web', 'sheet', 'twilio', 'ghl', 'gbp', 'xero', 'wp', 'mcp'], 13], 'CONNECTORS: the 13 connectors: the 12 of the mockup, then the private connector, each once');
   const bad = sb.CONNECTORS.flatMap(d => d.items.filter(i => !i.k || !i.n || !i.freq || !i.feeds || !(i.how===null || sb.CONN_HOW[i.how]) || typeof i.reader!=='string').map(i => d.id + '.' + i.k));
   assertEqual(bad, [], 'CONNECTORS: every item has a key, name, how (a known tag or none), how often, what it feeds and who reads its switch');
   assertEqual(sb.CONNECTORS.flatMap(d => d.items.filter(i => i.reader==='fn').map(i => d.id + '.' + i.k)).sort(), ['email.check', 'gads.conv', 'gads.kw', 'gads.stats', 'meta.ads', 'nightly.assess', 'organic.ai', 'organic.ga4', 'organic.gsc'], "CONNECTORS: the switches ingest-ads-stats honours are exactly the server's list");
@@ -2159,6 +2164,140 @@ function testConnectors(sb){
   assertEqual(sb.connLogRows('gads', log, NOW), [['Today 7:52 am', 'good', 'OK', 'Assessment written'], ['Tue 13 Oct', 'bad', "Didn't run", 'Nothing came in.'], ['Mon 12 Oct', 'bad', "Didn't run", 'Nothing came in.'], ['Sun 11 Oct', 'bad', "Didn't run", 'Nothing came in.']], 'connLogRows: the last 4 Sydney days, today first');
   assertEqual([sb.connLogRows('meta', log, NOW)[0], sb.connLogRows('meta', log, NOW).length, sb.connLogRows('meta', log, Date.parse('2026-10-14T00:30:00Z'))[0]], [['Yesterday 7:45 am', 'good', 'OK', 'Assessment written'], 3, ['Wed 14 Oct', 'bad', "Didn't run", 'Nothing came in.']], "connLogRows: today shows \"Didn't run\" only after 10 am");
   assertEqual([sb.connLogRows('email', log, NOW)[0], sb.connLogRows('nightly', log, NOW)[0][3], sb.connLogRows('web', log, NOW), sb.connLogRows('gads', null, NOW)], [['Today 7:53 am', 'good', 'OK', '5 emails checked, 4 in the CRM'], 'Assessment written (google)', [], []], 'connLogRows: the lead check names its numbers; connectors with no daily trace have no log');
+}
+
+function testMcpConnector(sb){
+  console.log('\nSettings → Connectors → Private connector (MCP), stage 5');
+  sb.URL = URL;   // mcpServerProblems parses addresses (a vm context has no URL of its own)
+  const script = fs.readFileSync(INDEX_HTML_PATH, 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+  const D = id => sb.CONNECTORS.find(d => d.id===id), cfg = (e, id) => sb.connCfgOf({ connectors: e }, id);
+  // the tile: a registry entry with no switches, so every connector helper keeps working
+  assertEqual([sb.connState(D('mcp'), cfg({}, 'mcp'), {}), sb.connTone(D('mcp'), cfg({}, 'mcp'), {}), sb.connHows(D('mcp')), sb.connStopsAll(D('mcp'), cfg({}, 'mcp')), sb.connMatches(D('mcp'), 'mcp'), sb.connMatches(D('mcp'), 'import leads'), D('mcp').kind],
+    ['ok', null, [], [], true, true, 'mcp'], 'MCP tile: connected (Ready), nothing to measure, no tags, nothing stops, found by name and description');
+  // who may make keys
+  const P = (role, permissions) => ({ role, permissions });
+  assertEqual([sb.canUseMcp(P('owner')), sb.canUseMcp(P('manager')), sb.canUseMcp(P('va', {})), sb.canUseMcp(P('va', { mcp: true })), sb.canUseMcp(P('technician', { mcp: false })), sb.canUseMcp(P('marketing', { mcp: true })), sb.canUseMcp({ role: 'va' }), sb.canUseMcp(null), sb.canUseMcp(P('va', { mcp: 'yes' }))],
+    [true, true, false, true, false, true, false, false, false], 'canUseMcp: owners and managers always; anyone else only with permissions.mcp switched on (true, as the function checks)');
+  // settings
+  const inS = { mcp: { rateLimitPerMin: 30, logKeepDays: 5000, importSource: '  Partner feed ' } }, inCopy = JSON.stringify(inS);
+  assertEqual([sb.mcpSettingsOf(undefined), sb.mcpSettingsOf(inS), sb.mcpSettingsOf({ mcp: { rateLimitPerMin: 'abc', logKeepDays: 2, importSource: '' } }), sb.mcpSettingsOf({ mcp: 'x' }), sb.mcpSettingsOf({ mcp: { rateLimitPerMin: '30', logKeepDays: 365.5 } }), JSON.stringify(inS)===inCopy],
+    [{ rateLimitPerMin: 60, logKeepDays: 90, importSource: 'MCP import' }, { rateLimitPerMin: 30, logKeepDays: 90, importSource: 'Partner feed' }, { rateLimitPerMin: 60, logKeepDays: 90, importSource: 'MCP import' }, { rateLimitPerMin: 60, logKeepDays: 90, importSource: 'MCP import' }, { rateLimitPerMin: 60, logKeepDays: 90, importSource: 'MCP import' }, true],
+    'mcpSettingsOf: as the function reads it (a value out of range or not a whole number = the default), trimmed; the input is not changed');
+  assertEqual(sb.mcpSettingsOf({ mcp: { importSource: 'x'.repeat(70) } }).importSource.length, 60, 'mcpSettingsOf: the import source is cut to 60 characters, as the function does');
+  assertEqual([sb.mcpSettingProblem('rateLimitPerMin', '0'), sb.mcpSettingProblem('rateLimitPerMin', '2.5'), sb.mcpSettingProblem('rateLimitPerMin', '61'), sb.mcpSettingProblem('rateLimitPerMin', '601'), sb.mcpSettingProblem('logKeepDays', '3'), sb.mcpSettingProblem('logKeepDays', '3650'), sb.mcpSettingProblem('importSource', '  '), sb.mcpSettingProblem('importSource', 'x'.repeat(61)), sb.mcpSettingProblem('importSource', ' Feed ')],
+    ['Enter a whole number from 1 to 600.', 'Enter a whole number from 1 to 600.', '', 'Enter a whole number from 1 to 600.', 'Enter a whole number of days from 7 to 3650.', '', 'Give imported leads a source name.', 'Keep the source name to 60 characters.', ''], 'mcpSettingProblem: the same limits as set_mcp_settings');
+  // addresses and keys
+  const U = { url: 'https://x.supabase.co/functions/v1/mcp', pathUrl: 'https://x.supabase.co/functions/v1/mcp/t/ops_mcp_abc' };
+  assertEqual([sb.mcpUrls('https://x.supabase.co/', 'ops_mcp_abc'), sb.mcpUrls('https://x.supabase.co', 'ops_mcp_abc')], [U, U], 'mcpUrls: the plain address and the one with the key, with or without a trailing slash');
+  const T = 'ops_mcp_';
+  assertEqual([sb.mcpTokenLooksRight(T + 'A'.repeat(43)), sb.mcpTokenLooksRight(T + 'a'.repeat(41) + '-_'), sb.mcpTokenLooksRight(T + 'A'.repeat(42)), sb.mcpTokenLooksRight(T + 'A'.repeat(42) + '='), sb.mcpTokenLooksRight('ops_mcq_' + 'A'.repeat(43)), sb.mcpTokenLooksRight(undefined)],
+    [true, true, false, false, false, false], 'mcpTokenLooksRight: ops_mcp_ and exactly 43 url-safe characters');
+  const tk = [{ id: 'a', user_id: 'u1', created_at: '2026-10-01T00:00:00Z' }, { id: 'b', user_id: 'u1', created_at: '2026-10-05T00:00:00Z', revoked_at: '2026-10-06T00:00:00Z' }, { id: 'c', user_id: 'u2', created_at: '2026-10-03T00:00:00Z' }, { id: 'd', user_id: 'u1', created_at: '2026-10-04T00:00:00Z' }];
+  const kl = sb.mcpKeyLists(tk, 'u1');
+  assertEqual([kl.mine.map(t => t.id), kl.all.map(t => t.id), tk.map(t => t.id), sb.mcpKeyLists(null, 'u1').all], [['d', 'a', 'b'], ['d', 'c', 'a', 'b'], ['a', 'b', 'c', 'd'], []], 'mcpKeyLists: working keys first (newest first), then revoked; mine = my keys; the input order is kept');
+  const NOW = Date.parse('2026-10-13T21:30:00Z');   // Wed 14 Oct, 8:30 am in Sydney
+  const k0 = { token_prefix: 'ops_mcp_AbCd', created_at: '2026-10-13T20:52:00Z' };
+  assertEqual([sb.mcpKeyMeta(k0, NOW), sb.mcpKeyMeta({ ...k0, last_used_at: '2026-10-12T20:51:00Z' }, NOW), sb.mcpKeyMeta({ ...k0, revoked_at: '2026-10-13T21:00:00Z' }, NOW).endsWith(' · revoked Today 8:00 am'), sb.mcpWhen('', NOW), sb.mcpWhen(null, NOW)],
+    ['ops_mcp_AbCd… · made Today 7:52 am · never used', 'ops_mcp_AbCd… · made Today 7:52 am · last used Yesterday 7:51 am', true, 'Never', 'Never'], 'mcpKeyMeta / mcpWhen: prefix, made, last used and revoked, in Sydney time');
+  assertEqual(['ok', 'denied', 'error', 'rate_limited', 'odd', undefined].map(sb.mcpLogStatus), [['good', 'OK'], ['warn', 'Not allowed'], ['bad', 'Error'], ['warn', 'Too many calls'], ['neutral', 'odd'], ['neutral', '']], 'mcpLogStatus: the access log\'s result pills');
+  // the address guard (a convenience copy of the function's)
+  const blocked = ['localhost', 'api.localhost', 'printer.local', 'metadata.google.internal', '127.0.0.1', '10.2.3.4', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '[::1]', '[fd00::1]', '[fe80::1]', '[::ffff:127.0.0.1]', '[::ffff:7f00:1]', 'LOCALHOST.'];
+  const open = ['172.32.0.1', '8.8.8.8', 'example.com', 'mcp.example.com.au', 'fcbarcelona.com', 'fe80.example.com', '[2001:4860::8888]', '[::ffff:8.8.8.8]'];
+  assertEqual([blocked.filter(h => !sb.mcpHostBlocked(h)), open.filter(h => sb.mcpHostBlocked(h))], [[], []], 'mcpHostBlocked: local names, private / loopback / link-local / CGNAT IPv4, and IPv6 loopback, ULA, link-local and mapped forms');
+  const sp = s => sb.mcpServerProblems(s);
+  assertEqual([sp({ name: '', url: 'http://x.com' }), sp({ name: 'CRM', url: 'https://10.0.0.1/mcp' }), sp({ name: 'CRM', url: 'https://crm.example.com/mcp', auth_header: 'X Key' }), sp({ name: 'CRM', url: 'https://crm.example.com/mcp', auth_header: 'Cookie' }), sp({ name: 'CRM', url: 'not a url' }), sp({ name: 'CRM', url: 'https://crm.example.com/mcp', auth_header: 'Authorization' }), sp({ name: 'x'.repeat(81), url: 'https://[::1]/' })],
+    [['Give it a name.', 'The address must start with https://.'], ['That address is on a private network. Use the server\'s public https address.'], ['The header name can only have letters, numbers and dashes.'], ['That header can\'t be used.'], ['That address doesn\'t look right.'], [], ['Keep the name to 80 characters.', 'That address is on a private network. Use the server\'s public https address.']],
+    'mcpServerProblems: name, https only, no private address, and a usable header name');
+  // the import fields: the app's own columns, each once
+  const fieldsOf = n => [...extractDecl(script, n).matchAll(/:\s*'([a-z_]+)'/g)].map(m => m[1]);
+  const cols = { contacts: fieldsOf('contactPatchToRow'), jobs: fieldsOf('jobPatchToRow'), tasks: fieldsOf('taskPatchToRow') };
+  assertEqual([Object.keys(sb.MCP_IMPORT_FIELDS), Object.keys(sb.MCP_IMPORT_KINDS)], [['contacts', 'jobs', 'tasks'], ['contacts', 'jobs', 'tasks']], 'MCP_IMPORT_FIELDS: leads, jobs and tasks, as MCP_IMPORT_KINDS');
+  assertEqual(Object.entries(sb.MCP_IMPORT_FIELDS).flatMap(([k, list]) => list.filter(([t]) => !cols[k].includes(t)).map(([t]) => k + '.' + t)), [], 'MCP_IMPORT_FIELDS: every target is a column the app itself writes (contactPatchToRow / jobPatchToRow / taskPatchToRow)');
+  assertEqual(Object.values(sb.MCP_IMPORT_FIELDS).map(list => new Set(list.map(f => f[0])).size===list.length), [true, true, true], 'MCP_IMPORT_FIELDS: no field twice');
+  // the mapping editor's rows, both ways
+  const mr = sb.mcpMappingRows('contacts', { full_name: { path: 'name' }, source: { value: 'Partner' }, bogus: { path: 'x' }, phone: 'tel' });
+  assertEqual([mr.length, mr[0], mr.find(r => r.target==='source'), mr.find(r => r.target==='phone'), mr.filter(r => !r.mode).length, sb.mcpMappingRows('x', {}), sb.mcpMappingRows('tasks', null).length],
+    [13, { target: 'full_name', label: 'Name', mode: 'path', text: 'name' }, { target: 'source', label: 'Lead source', mode: 'value', text: 'Partner' }, { target: 'phone', label: 'Phone', mode: 'path', text: 'tel' }, 10, [], 8], 'mcpMappingRows: one row per field in order ({ path }, a plain path string or { value }); unknown targets are ignored');
+  assertEqual([sb.mcpMappingFromRows('contacts', mr), sb.mcpMappingFromRows('contacts', [{ target: 'email', mode: 'path', text: '   ' }, { target: 'notes', mode: 'value', text: ' hi ' }, { target: 'bogus', mode: 'path', text: 'x' }, { target: 'phone', mode: '', text: 'p' }])],
+    [{ full_name: { path: 'name' }, phone: { path: 'tel' }, source: { value: 'Partner' } }, { notes: { value: 'hi' } }], 'mcpMappingFromRows: back to { path } / { value }; blank text, no mode or an unknown target is dropped; text trimmed');
+  assertEqual(['contacts', 'jobs', 'tasks', 'x'].map(sb.mcpDedupeDefault), [{ fields: ['phone', 'email'], match: 'any' }, { fields: ['invoice_number'], match: 'any' }, { fields: ['title', 'due'], match: 'all' }, { fields: [], match: 'any' }], 'mcpDedupeDefault: the function\'s starting duplicate check');
+  assertEqual(['', 'items', 'data.items', 'data.items[0].x', 'a-b.$c', 'data/items', '__proto__', 'a..b', 'a.' + 'b.'.repeat(12) + 'c'].map(sb.mcpPathOk), [true, true, true, true, true, false, false, false, false], 'mcpPathOk: the function\'s path rules');
+  // what is wrong with a rule
+  const good = { name: 'Leads', kind: 'contacts', tool: 'list', mode: 'manual', mapping: { full_name: { path: 'n' }, phone: { path: 'p' }, email: { path: 'e' } }, dedupe: { fields: ['phone', 'email'], match: 'any' }, items_path: 'items' };
+  const rp = (patch, tools) => sb.mcpRuleProblems({ ...good, ...patch }, tools || ['list']);
+  assertEqual(sb.mcpRuleProblems({ name: '', kind: 'contacts', tool: '', mode: 'manual', mapping: {}, dedupe: { fields: [], match: 'any' } }, []), ['Give the import a name.', 'Pick the tool to call.', 'Map the name.', 'Pick at least one field for the duplicate check.'], 'mcpRuleProblems: an empty rule');
+  assertEqual([rp({}), rp({ kind: 'jobs', mapping: {}, dedupe: { fields: [], match: 'any' } }).includes('Map the customer.'), rp({ kind: 'tasks', mapping: {}, dedupe: { fields: [], match: 'any' } }).includes('Map the title.'), rp({ kind: 'x' }).includes('Pick what to import.')],
+    [[], true, true, true], 'mcpRuleProblems: a good rule has none; jobs need the customer, tasks the title');
+  assertEqual([rp({ mapping: { full_name: { path: 'n' }, phone: { path: 'p' } } }), rp({ mapping: { ...good.mapping, email: { value: 'x@y.z' } } }), rp({ dedupe: { fields: ['phone', 'email', 'notes', 'postcode', 'source'], match: 'any' } }).includes('Pick at most 4 fields for the duplicate check.')],
+    [['The duplicate check uses Email, but Email isn\'t mapped.'], ['The duplicate check uses Email, so map it from the data, not as a fixed value.'], true], 'mcpRuleProblems: every duplicate-check field must be mapped from the data');
+  assertEqual([rp({ tool: 'b' }, ['a']), rp({ tool: 'b' }, []), rp({ mode: 'daily' }), rp({ items_path: 'data/items' }), rp({ mapping: { ...good.mapping, notes: { path: 'a b' } } })],
+    [['Pick one of the server\'s tools (test the connection again if it changed).'], [], ['Pick manual or every hour.'], ['The list\'s place can only have letters, numbers, dots and _ (like data.items).'], ['Notes: the place in the data should look like customer.phone.']], 'mcpRuleProblems: the tool, the mode and the places');
+  // tool arguments and answers
+  assertEqual([sb.mcpParseArgs(''), sb.mcpParseArgs('{"limit": 5}'), ...['[1]', 'null', '5', '{bad'].map(t => sb.mcpParseArgs(t).error), sb.mcpParseArgs('x'.repeat(10001)).error],
+    [{ ok: true, value: {} }, { ok: true, value: { limit: 5 } }, ...Array(4).fill('The arguments must be a JSON object, like {"limit": 10}.'), 'Keep the arguments under 10,000 characters.'], 'mcpParseArgs: blank = {}; only a JSON object');
+  assertEqual([sb.mcpArgsTemplate({ type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', default: 20 }, active: { type: 'boolean' }, tags: { type: 'array' }, since: { type: 'string', examples: ['2026-10-01'] }, odd: {} } }), sb.mcpArgsTemplate(null), sb.mcpArgsTemplate({ type: 'string' })],
+    [JSON.stringify({ query: '', limit: 20, active: false, tags: [], since: '2026-10-01', odd: '' }, null, 2), '{}', '{}'], 'mcpArgsTemplate: defaults, examples or empty values from the tool\'s schema');
+  assertEqual([sb.mcpResultData({ structuredContent: { items: [1] } }), sb.mcpResultData({ content: [{ type: 'text', text: '{"a":1}' }] }), sb.mcpResultData({ content: [{ type: 'text', text: 'hello' }] }), sb.mcpResultData(undefined), sb.mcpResultData({ ok: true, preview: '[{"a":1}]' })],
+    [{ items: [1] }, { a: 1 }, null, null, [{ a: 1 }]], 'mcpResultData: structured content, else the first text item (or the function\'s preview) as JSON; never throws');
+  assertEqual([sb.mcpItemsAt({ data: { items: [{ a: 1 }] } }, 'data.items'), sb.mcpItemsAt([{ a: 1 }], ''), sb.mcpItemsAt({ x: 1 }, 'items'), sb.mcpItemsAt({ items: 'no' }, 'items'), sb.mcpItemsAt({ pages: [{ rows: [2] }] }, 'pages[0].rows'), sb.mcpItemsAt({}, '__proto__')],
+    [[{ a: 1 }], [{ a: 1 }], null, null, [2], null], 'mcpItemsAt: the list at a place in the answer, or null');
+  const sample = [{ name: 'A', phone: '1', address: { suburb: 'X', geo: { lat: 1, deep: { z: 1 } } }, tags: ['a'] }, { email: 'e', name: 'B', 'bad key': 1 }];
+  assertEqual([sb.mcpSamplePaths(sample), sb.mcpSamplePaths(sample, 2), sb.mcpSamplePaths([]), sb.mcpSamplePaths(null)], [['name', 'phone', 'address.suburb', 'address.geo.lat', 'tags', 'email'], ['name', 'phone'], [], []], 'mcpSamplePaths: places of the values, 3 levels deep, lists as one value, each once');
+  assertEqual([sb.mcpPreviewCounts([{ status: 'new' }, { status: 'duplicate' }, { status: 'new' }, { status: 'error' }, null]), sb.mcpPreviewColumns('contacts', { phone: { path: 'p' }, full_name: { path: 'n' }, notes: { value: 'x' } }),
+    sb.mcpPreviewColumns('contacts', { full_name: { path: 'a' }, phone: { path: 'b' }, email: { path: 'c' }, postcode: { path: 'd' }, division: { path: 'e' }, source: { path: 'f' } })],
+    [{ new: 2, duplicate: 1, error: 1 }, ['full_name', 'phone', 'notes'], ['full_name', 'phone', 'email', 'postcode', 'division']], 'mcpPreviewCounts / mcpPreviewColumns: the counts, and the first 5 mapped fields in field order');
+  assertEqual([sb.mcpPreviewText('abc'), sb.mcpPreviewText({ a: 1 }), sb.mcpPreviewText('x'.repeat(20), 12), sb.mcpPreviewText(undefined), sb.mcpPreviewText('y'.repeat(5000)).endsWith('… (cut at 4,000 characters)')],
+    ['abc', '{\n  "a": 1\n}', 'x'.repeat(12) + '\n… (cut at 12 characters)', '', true], 'mcpPreviewText: a tool\'s answer as text, cut with a note');
+  // import history
+  const run = { started_at: '2026-10-13T20:52:00Z', status: 'done', fetched: 14, inserted: 12, duplicates: 2, errors: [] };
+  assertEqual([sb.mcpRunLine(run, NOW), sb.mcpRunLine({ ...run, status: 'partial', errors: [{ i: 3, reason: 'x' }] }, NOW), sb.mcpRunLine({ ...run, undone_at: '2026-10-13T21:00:00Z' }, NOW), sb.mcpRunLine({ started_at: run.started_at, status: 'failed', errors: [{ reason: 'Timed out' }] }, NOW), sb.mcpRunLine({ started_at: run.started_at, status: 'running' }, NOW)],
+    ['Today 7:52 am · 14 fetched, 12 added, 2 already in the app', 'Today 7:52 am · 14 fetched, 12 added, 2 already in the app, 1 with problems', 'Today 7:52 am · 14 fetched, 12 added, 2 already in the app · undone Today 8:00 am', 'Today 7:52 am · Failed: Timed out', 'Today 7:52 am · Running…'], 'mcpRunLine: what each import did');
+  assertEqual([sb.mcpCanUndo({ inserted: 3, status: 'done' }), sb.mcpCanUndo({ inserted: 3, status: 'partial' }), sb.mcpCanUndo({ inserted: 0, status: 'done' }), sb.mcpCanUndo({ inserted: 3, status: 'done', undone_at: 'x' }), sb.mcpCanUndo({ inserted: 3, status: 'running' }), sb.mcpCanUndo(null)],
+    [true, true, false, false, false, false], 'mcpCanUndo: once, when it added something and has finished');
+  // people, reasons, lines
+  const pr = sb.mcpPeopleRows([{ id: 't', fullName: 'Ben', role: 'technician', permissions: {} }, { id: 'v', fullName: 'Kim', role: 'va', permissions: { mcp: true } }, { id: 'm', fullName: 'Max', role: 'manager' }, { id: 'o', fullName: 'Ann', role: 'owner', permissions: {} }]);
+  assertEqual([pr.map(r => r.id), pr.map(r => r.always), pr.map(r => r.on)], [['o', 'm', 't', 'v'], [true, true, false, false], [true, true, false, true]], 'mcpPeopleRows: owners, managers (always on), then everyone else by name');
+  assertEqual([sb.mcpReasonText('owners only'), sb.mcpReasonText('Ask an owner to switch on the private connector for you.').includes('Settings > People'), sb.mcpReasonText('not allowed').includes('Settings > People'), sb.mcpReasonText('host blocked'), sb.mcpReasonText('That address is private or local, so OPS won\'t call it.'), sb.mcpReasonText('The server took too long.'), sb.mcpReasonText(''), sb.mcpReasonText('Weird thing'), sb.mcpReasonText('server')],
+    ['Only an owner can do this.', true, true, 'That address isn\'t allowed: it must be a public https address.', 'That address isn\'t allowed: it must be a public https address.', 'The server didn\'t answer within 15 seconds.', 'Something went wrong. Try again.', 'Weird thing', 'Something went wrong on the server. Try again.'], 'mcpReasonText: the function\'s reasons in plain words');
+  assertEqual([sb.mcpLoadErrorText({ code: '42P01' }), sb.mcpLoadErrorText({ message: 'relation "mcp_tokens" does not exist' }), sb.mcpLoadErrorText({ message: 'x' })], ['The private connector isn\'t set up on the server yet.', 'The private connector isn\'t set up on the server yet.', 'Could not load: x'], 'mcpLoadErrorText: a missing table says the server is not set up yet');
+  assertEqual([sb.mcpServerMeta({ url: 'https://crm.example.com/mcp', hasSecret: true, last_test_at: '2026-10-13T20:52:00Z', last_test_ok: true, last_tools: [{}, {}] }, NOW), sb.mcpServerMeta({ url: 'https://crm.example.com/mcp', hasSecret: false, last_test_at: '2026-10-13T20:52:00Z', last_test_ok: false, last_tools: [{}] }, NOW), sb.mcpServerMeta({ url: 'https://a.b/c' }, NOW)],
+    ['crm.example.com · key saved · connected Today 7:52 am · 2 tools', 'crm.example.com · no key · failed Today 7:52 am · 1 tool', 'a.b · no key · not tested yet'], 'mcpServerMeta: host, key, last test and tools');
+  assertEqual([sb.mcpRuleMeta({ kind: 'contacts', tool: 'list', mode: 'hourly', run_automations: true, last_run_at: '2026-10-13T20:52:00Z' }, NOW), sb.mcpRuleMeta({ kind: 'tasks', tool: 't', mode: 'manual' }, NOW)], ['Leads · list · every hour · starts automations · last run Today 7:52 am', 'Tasks · t · manual'], 'mcpRuleMeta: what, which tool, how often');
+  // parity with the mcp function (supabase/functions/mcp/index.ts)
+  const fn = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'mcp', 'index.ts'), 'utf8');
+  const toolsSrc = fn.slice(fn.indexOf('export const TOOLS'), fn.indexOf('\n];', fn.indexOf('export const TOOLS')));
+  assertEqual([...toolsSrc.matchAll(/\n {4}name: "(\w+)", title:/g)].map(m => m[1]).sort(), sb.MCP_TOOL_NAMES.slice().sort(), 'mcp function: the same read-only tools as the access log filter');
+  const fieldsSrc = fn.slice(fn.indexOf('export const IMPORT_FIELDS'), fn.indexOf('\n};', fn.indexOf('export const IMPORT_FIELDS')));
+  const fnFields = {}; let kindNow = null;
+  fieldsSrc.split('\n').forEach(l => { const k = /^ {2}(\w+): \{$/.exec(l), f = /^ {4}(\w+): \{ label: "([^"]+)"(.*)$/.exec(l); if (k) { kindNow = k[1]; fnFields[kindNow] = []; } else if (f && kindNow) fnFields[kindNow].push([f[1], f[2], /required: true/.test(f[3])]); });
+  assertEqual([Object.keys(fnFields), Object.entries(fnFields).map(([k, list]) => JSON.stringify(list.map(f => [f[0], f[1]]))===JSON.stringify(sb.MCP_IMPORT_FIELDS[k]))], [['contacts', 'jobs', 'tasks'], [true, true, true]], 'mcp function: the same import fields and labels, in the same order');
+  assertEqual(Object.fromEntries(Object.entries(fnFields).map(([k, list]) => [k, list.filter(f => f[2]).map(f => f[0]).join()])), sb.MCP_IMPORT_REQUIRED, 'mcp function: the same required field per kind');
+  const fnObj = re => Function('return ' + fn.match(re)[1])();
+  assertEqual([fnObj(/export const MCP_DEFAULTS = (\{[^}]*\});/), fnObj(/export const DEFAULT_DEDUPE = (\{[^\n]*\});/), fnObj(/const RESERVED_HEADERS = (\[[^\]]*\]);/)],
+    [sb.MCP_SETTINGS_DEFAULTS, { contacts: sb.mcpDedupeDefault('contacts'), jobs: sb.mcpDedupeDefault('jobs'), tasks: sb.mcpDedupeDefault('tasks') }, sb.MCP_RESERVED_HEADERS], 'mcp function: the same settings defaults, starting duplicate checks and refused header names');
+  const canFn = (fn.match(/export const canUseMcp = [^\n]*/) || [''])[0];
+  assertEqual([/role === "owner"/.test(canFn), /role === "manager"/.test(canFn), /permissions\.mcp === true/.test(canFn), fn.includes('export const TOKEN_RE = /^ops_mcp_[A-Za-z0-9_-]{43}$/;')], [true, true, true, true], 'mcp function: canUseMcp checks owner, manager and permissions.mcp; its keys look like mcpTokenLooksRight');
+  assertEqual([/logKeepDays: intIn\(m\.logKeepDays, 7, 3650/.test(fn), /rateLimitPerMin: intIn\(m\.rateLimitPerMin, 1, 600/.test(fn), /trim\(\)\.slice\(0, 60\)/.test(fn)], [true, true, true], 'mcp function: the same setting limits as mcpSettingsOf');
+  // static checks on the page code: no render loops, safe handlers, the key never kept
+  const T2 = n => extractDecl(script, n);
+  assertEqual([T2('mcpLoad').includes('if (MCP_UI.loading) { if (force) MCP_UI.again = true; return MCP_UI.loading; }'), /\brender\(\)/.test(T2('mcpLoad')), T2('mcpLoadLog').includes('if (MCP_UI.logLoading) return MCP_UI.logLoading'), /\brender\(\)/.test(T2('mcpLoadLog'))], [true, false, true, false], 'MCP loaders: memoized, and never render() themselves (only mcpRedraw, after the read)');
+  assertEqual([/if \(MCP_UI\.again\) return;/.test(T2('mcpLoad')), T2('mcpLoad').includes('if (MCP_UI.again) { MCP_UI.again = false; mcpLoad(true); } else mcpRedraw();')], [true, true],
+    'mcpLoad: a forced read asked for during a running one drops that answer (it may be from before the change) and reads once more');
+  assertEqual([T2('mcpRedraw').includes("getElementById('mcp-keys-list')"), T2('mcpRedraw').includes('mcpKeepTyping(render)'), T2('mcpRuleModal').includes("if (!open && !document.querySelector('#modal-root .mcp-rule'))"), (script.match(/mcpRuleModal\(true\)/g) || []).length],
+    [true, true, true, 1], 'MCP redraws: only the key list (a name being typed stays) and the page keeps typed text; the rule editor opens from one place and a late redraw never reopens it');
+  assertEqual([T2('mcpSaveServer').includes('if (go && go.isConnected) closeModal()'), T2('mcpCommit').includes('if (go && go.isConnected) mcpPreviewClose()'), T2('mcpPreview').includes("document.getElementById('modal-root').innerHTML.trim()")],
+    [true, true, true], 'MCP async steps close or open only their own window (not one opened while they waited)');
+  const unsafe = ['renderMcpPage', 'mcpKeysHtml', 'mcpAllKeysBlock', 'mcpServersBlock', 'mcpImportsBlock', 'mcpRunHtml', 'mcpWhoBlock', 'mcpEditServer', 'mcpOpenRunTool', 'mcpRuleModal', 'mcpPreviewModal'].flatMap(n => {
+    const t = T2(n);
+    return [...t.matchAll(/on(?:click|change)="[a-zA-Z]+\('\$\{([^}]*)\}/g)].map(m => m[1]).filter(x => !x.startsWith('esc(jsStr(') && !new RegExp(`\\b${x}\\s*=\\s*esc\\(jsStr\\(`).test(t)).map(x => n + ': ' + x);
+  });
+  assertEqual(unsafe, [], 'MCP page: every id in an inline handler goes through esc(jsStr())');
+  assertEqual(['mcpShowNewKey', 'mcpCreateKey', 'mcpCopy'].filter(n => /localStorage|sessionStorage|console\.|MCP_UI\.\w+\s*=[^;\n]*token/.test(T2(n))), [], 'MCP key: never stored, logged or kept in MCP_UI');
+  const reveal = T2('mcpShowNewKey');
+  assertEqual([reveal.includes(`onclick="mcpCopy('\${id}')"`) && ['mcp-reveal-path', 'mcp-reveal-key', 'mcp-reveal-url'].every(id => reveal.includes(`row('${id}'`)) && !/on\w+="[^"]*\$\{(token|v|url|pathUrl)\}/.test(reveal), T2('mcpCall').indexOf('readOnlyReason()') < T2('mcpCall').indexOf('fetch(')], [true, true], 'MCP key: the copy buttons name a field, never the key; mcpCall checks read-only mode before it sends');
+  assertEqual([T2('renderShell').includes("${VIEW_AS_ID ? '' : mcpFooterButton(profile)}"), T2('personAccessTab').includes('setMcpPermission('), T2('personAccessTab').includes('setRows(PAGE_PICK.map(([k, l, desc]) => [esc(l)')], [true, true, true], 'the way in: the footer button (not while viewing as someone), and the People > Access switch next to the unchanged page switches');
+  assertEqual([sb.PAGE_PICK.some(p => p[0]==='mcp'), /\bmcp\b/.test(T2('canViewSection')), /\bmcp\b/.test(extractDecl(script, 'SECTION_LABEL')), /\bmcp\b/.test(extractDecl(script, 'ALL_SECTIONS'))], [false, false, false, false], 'the mcp permission is not a page: PAGE_PICK, SECTION_LABEL, ALL_SECTIONS and canViewSection are unchanged');
+  assertEqual([sb.CAT_NAMES.mcp, sb.settingsHistParts('Private connector (MCP): key "x" made')], ['Private connector (MCP)', { where: 'Private connector (MCP)', what: 'key "x" made' }], 'Settings history: the private connector\'s lines are grouped under it');
 }
 
 testJobAttributionTags(loadSandbox());
@@ -2844,6 +2983,7 @@ testBranding(loadSandbox());
 testNotificationCards(loadSandbox());
 testConnectors(loadSandbox());
 testUxRound3(loadSandbox());
+testMcpConnector(loadSandbox());
 testSecurityFaceId(loadSandbox());
 testAutomationEventBody(loadSandbox());
 testFlowView(loadSandbox());

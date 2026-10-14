@@ -104,6 +104,7 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
       { id: "c2", full_name: "Old Lead", division: "Aircon", source: "Meta Ads", status: "New", created_at: "2026-10-11", messages: [{ at: "2026-10-11T01:00:00Z" }], tags: [] },  // a day ago: not news
       { id: "c3", full_name: "Test Person", division: "Other", source: "Organic", status: "New", created_at: "2026-10-12", messages: [{ at: "2026-10-12T03:20:00Z" }], tags: ["Test"] },
       { id: "c4", full_name: "Called Already", division: "Chimney", source: "Organic", status: "Chasing", created_at: "2026-10-12", messages: [{ at: "2026-10-12T02:50:00Z" }], tags: [] },
+      { id: "c5", full_name: "Quiet Import", division: "Other", source: "MCP import", status: "New", created_at: "2026-10-12", messages: [{ at: "2026-10-12T03:00:00Z", quiet: true }], tags: [] },   // an MCP import with automations off: no news
     ],
     calls: [{ id: "k1", from_number: "+61400000000", missed: true, started_at: "2026-10-12T03:10:00Z", division: "Aircon" }],
     jobs: [{ id: "j1", customer_name: "Jo", amount: 450, date: "2026-10-05", payment_status: "Unpaid" }, { id: "j2", customer_name: "Older", amount: 300, date: "2026-10-01", payment_status: "Unpaid" }],
@@ -121,6 +122,15 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   eq([(await scan(sdb, NOW + 60000)).busy, sent.length], [true, 0], "scan: a second call in the same window does nothing");
   const r3 = await scan(sdb, NOW + 9 * 60000);
   eq([r3.sent, r3.skipped > 0, sent.length], [0, true, 0], "scan: the next window sends nothing again (each piece of news once)");
+  // A quiet MCP import is no news; once the customer comes back (reopened) it is.
+  const qdb = fakeDb({
+    profiles: [OFEK], push_subscriptions: [{ id: "p1", user_id: "u-ofek", endpoint: "https://push/ofek", p256dh: "k", auth: "a" }],
+    settings: [{ id: 1, catalog: { notify: { newLead: { on: true }, leadWaiting: { on: true } } } }], push_sent: [], calls: [], jobs: [], employees: [],
+    contacts: [{ id: "q1", full_name: "Back Again", division: "Aircon", source: "MCP import", status: "New", created_at: "2026-10-12", messages: [{ at: "2026-10-11T03:00:00Z", quiet: true }], reopened_at: "2026-10-12T03:00:00Z", tags: [] }],
+  });
+  sent.length = 0;
+  await scan(qdb, NOW);
+  eq(sent.map((x) => x.msg.title).sort(), ["New lead: Back Again", "Waiting 15+ minutes: Back Again"], "scan: a quiet import reopened 30 minutes ago is news again (New lead + Waiting)");
 
   // The business's day (Region and format): at 14:30 Monday in Sydney it is still Sunday 11 Oct in Chicago, so the job of
   // 4 Oct (not 5 Oct) turns a week unpaid; the amount is in the business's currency.
