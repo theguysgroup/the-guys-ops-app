@@ -2,6 +2,7 @@
 # Runs the voice function tests locally (the steps in README.md): the function with its esm.sh import stubbed, a pretend
 # Deno.env with test values, and the expected Twilio signature for auth token "testtoken"; then tests.ts, with npx tsx.
 set -e
+set -o pipefail   # a failing test (exit 1) fails the run even through the grep below
 DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="${1:-$DIR/index.ts}"
 OUT="${TMPDIR:-/tmp}/voice_test_$$.ts"

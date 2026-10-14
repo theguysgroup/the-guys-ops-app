@@ -8,6 +8,8 @@
 //     the others).
 //   • Nobody answers, or it's outside those hours with nobody on shift: voicemail ("office closed" after hours), a text to
 //     the caller, and a call-back item on the office's My Day with the recording.
+//   • Someone on vacation with "Calls not routed to them" (stage 3) is skipped: their browser phone doesn't ring and their
+//     backup phone counts as away (then the next in line, as above).
 //   • The service: a known customer goes by their card's division; a new caller hears a 3-option menu.
 //   • Answered calls are recorded after a recording notice (Australian law requires notice).
 //
@@ -206,13 +208,115 @@ const stepUrl = (step: string, div?: string) => `${SELF_URL}?step=${step}${div ?
 let TZ = REGION_DEFAULTS.timeZone;
 const hm = (s: string) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")); return m ? Number(m[1]) * 60 + Number(m[2]) : -1; };
 
+// ── vacations (stage 3): ONE block, byte-identical in push, automations and voice (automations' tests check) ──
+// A vacation is a row of employee_vacations (.claude/sql/stage3-vacation.sql). Who is away is worked out here the same way
+// as the app (vacationOnDay) and SQL (vacation_in_force): options.autoBack is ON unless it is the boolean false, every other
+// key only when it is the boolean true; starts_on = the first day away, ends_on = the last; in force on a day when not
+// cancelled, from starts_on, before the business day it was ended on, and up to ends_on unless autoBack is off. The day is
+// in the business time zone (settings.catalog.region.timezone, else Sydney). A login is the employee whose name is its
+// technician_name, else its full_name (the app's peopleList). FAIL-OPEN: no table, an error or a throw = nobody is away.
+export const VAC_COLS = "id, employee_id, starts_on, ends_on, stand_in_id, options, ended_at, cancelled_at, reminded_at";
+// deno-lint-ignore no-explicit-any
+export type VacCtx = { day: string; tz: string; vacs: any[]; employees: any[]; profiles: any[] };
+const vacIsDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+// deno-lint-ignore no-explicit-any
+export function vacTz(catalog: any): string {
+  const tz = catalog && catalog.region && catalog.region.timezone;
+  if (typeof tz === "string" && tz) { try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); return tz; } catch { /* not a zone */ } }
+  return "Australia/Sydney";
+}
+export function vacDay(ms: number, tz: string): string {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
+}
+// deno-lint-ignore no-explicit-any
+export function vacOpt(v: any, key: string): boolean {
+  const o = v && v.options && typeof v.options === "object" ? v.options : {};
+  return key === "autoBack" ? o.autoBack !== false : o[key] === true;
+}
+// deno-lint-ignore no-explicit-any
+export function vacOnDay(v: any, day: string, tz: string): boolean {
+  if (!v || v.cancelled_at || !vacIsDay(v.starts_on) || !vacIsDay(day) || v.starts_on > day) return false;
+  if (v.ended_at) { const t = Date.parse(v.ended_at); if (isNaN(t) || !(day < vacDay(t, tz))) return false; }
+  return !vacOpt(v, "autoBack") || (vacIsDay(v.ends_on) && day <= v.ends_on);
+}
+// deno-lint-ignore no-explicit-any
+export function vacEmployeeOf(p: any, employees: any[]): any {
+  if (!p) return null;
+  return (p.technician_name && employees.find((e) => e.name === p.technician_name)) || (p.full_name && employees.find((e) => e.name === p.full_name)) || null;
+}
+// deno-lint-ignore no-explicit-any
+export function vacProfilesOf(e: any, C: VacCtx): any[] {
+  if (!e) return [];
+  return C.profiles.filter((p) => { const x = vacEmployeeOf(p, C.employees); return !!x && x.id === e.id; });
+}
+// The vacation in force today for this employee with that option ticked (the latest start when two are), or null.
+// deno-lint-ignore no-explicit-any
+export function vacAway(C: VacCtx, employeeId: string, key: string): any {
+  // deno-lint-ignore no-explicit-any
+  let best: any = null;
+  for (const v of C.vacs) if (v.employee_id === employeeId && vacOnDay(v, C.day, C.tz) && vacOpt(v, key) && (!best || v.starts_on > best.starts_on)) best = v;
+  return best;
+}
+// deno-lint-ignore no-explicit-any
+export function vacAwayProfile(C: VacCtx, profileId: string, key: string): any {
+  const e = vacEmployeeOf(C.profiles.find((p) => p.id === profileId), C.employees);
+  return e ? vacAway(C, e.id, key) : null;
+}
+// Who gets a notification: in order, once each. Away with "No notifications" → left out; away with "A stand-in gets their
+// notifications" → the stand-in's logins too (an Active stand-in; one who is away too passes it on, at most 5 steps, never
+// in a loop). A login with no employee card is always kept. roles: the roles that kind may go to (money and private
+// details: ["owner"]); a stand-in's login with another role never gets it. Left out = any role.
+export function vacRecipients(ids: string[], C: VacCtx, roles?: string[]): string[] {
+  if (!C.vacs.length) return [...new Set(ids)];
+  const out: string[] = [], seen = new Set<string>();
+  const visit = (id: string, steps: number) => {
+    if (!id || seen.has(id)) return;
+    // deno-lint-ignore no-explicit-any
+    if (steps && roles && !roles.includes(String((C.profiles.find((p: any) => p.id === id) || {}).role))) return;
+    seen.add(id);
+    const e = vacEmployeeOf(C.profiles.find((p) => p.id === id), C.employees);
+    if (!e) { out.push(id); return; }
+    if (!vacAway(C, e.id, "noNotify")) out.push(id);
+    const v = vacAway(C, e.id, "standIn");
+    if (!v || !v.stand_in_id || steps >= 5) return;
+    const s = C.employees.find((x) => x.id === v.stand_in_id);
+    if (!s || (s.status && s.status !== "Active")) return;
+    for (const p of vacProfilesOf(s, C)) visit(p.id, steps + 1);
+  };
+  for (const id of ids) visit(id, 0);
+  return out;
+}
+// The day n days after a 'YYYY-MM-DD' day.
+export const vacShiftDay = (day: string, n: number): string => new Date(Date.parse(day + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+// The vacations that can be in force from today to aheadDays on (started by then, and not over before today: ends_on from
+// today on, or left open with autoBack off), and the people they need, read once. Nobody away = no more reads. A vacation
+// that is over is never read again, so the table can grow without slowing a call down.
+// deno-lint-ignore no-explicit-any
+export async function vacContext(sb: any, nowMs: number, catalog: any, aheadDays = 0): Promise<VacCtx> {
+  const tz = vacTz(catalog), empty: VacCtx = { day: vacDay(nowMs, tz), tz, vacs: [], employees: [], profiles: [] };
+  try {
+    const { data: vacs, error } = await sb.from("employee_vacations").select(VAC_COLS).is("cancelled_at", null).is("ended_at", null)
+      .lte("starts_on", vacShiftDay(empty.day, aheadDays)).or(`ends_on.gte.${empty.day},options->>autoBack.eq.false`);
+    if (error || !Array.isArray(vacs) || !vacs.length) return empty;
+    const [emps, profs] = await Promise.all([sb.from("employees").select("id, name, phone, status"), sb.from("profiles").select("id, full_name, technician_name, role")]);
+    if (emps.error || profs.error) return empty;
+    return { ...empty, vacs, employees: emps.data || [], profiles: profs.data || [] };
+  } catch (e) {
+    console.error("vacations not read:", e);
+    return empty;
+  }
+}
+// ── end vacations ──
+
 // ── routing settings (Settings → Phone) ──
 type Person = { name: string; mobile: string; available: boolean };
 type BackupDay = { on?: boolean; from?: string; to?: string };
 // Backup hours: per weekday since 13 Oct ({ days: { 0..6: { on, from, to } } }, Sunday = 0); before that one range for the
 // ticked days ({ from, to, days: [0..6] }).
 type BackupHours = { from?: string; to?: string; days?: number[] | Record<string, BackupDay> };
-type Routing = { people: Record<string, Person>; divisions: Record<string, string[]>; backupHours: BackupHours; officeRingSeconds: number; backupRingSeconds: number; callerId: string; menu: { key: string; say: string }[] };
+// deno-lint-ignore no-explicit-any
+type Routing = { people: Record<string, Person>; divisions: Record<string, string[]>; backupHours: BackupHours; officeRingSeconds: number; backupRingSeconds: number; callerId: string; menu: { key: string; say: string }[]; cat: any };
 const ringSeconds = (v: unknown) => { const n = Math.round(Number(v)); return n >= 5 && n <= 60 ? n : 20; };
 // The routing and, in the same read, the words (Settings → Message templates), so a call never waits on a second query.
 // deno-lint-ignore no-explicit-any
@@ -226,6 +330,7 @@ async function routing(sb: any): Promise<Routing> {
     backupHours: r.backupHours || { from: "08:00", to: "20:00", days: [0, 1, 2, 3, 4, 5, 6] },
     officeRingSeconds: ringSeconds(r.officeRingSeconds), backupRingSeconds: ringSeconds(r.backupRingSeconds),
     callerId: toE164(r.callerId) || BUSINESS_NUMBER, menu: menuOf(r),
+    cat: (data && data[0] && data[0].catalog) || {},
   };
 }
 const BACKUP_DAY_DEFAULT = { on: true, from: "08:00", to: "20:00" };
@@ -248,20 +353,54 @@ function backupOpen(R: Routing, nowMs: number): boolean {
   return !!w && t.minutes >= w.from && t.minutes < w.to;
 }
 // The owners' mobiles for a service: the ones set for it who aren't away; if all of them are away, anyone who isn't.
-function ownersFor(R: Routing, division: string): string[] {
-  const avail = (k: string) => !!(R.people[k] && R.people[k].available !== false && toE164(R.people[k].mobile));
+// away = the people on vacation with "Calls not routed to them" (vacPhoneAway), skipped like someone marked away.
+function ownersFor(R: Routing, division: string, away: Set<string> = new Set()): string[] {
+  const avail = (k: string) => !!(R.people[k] && R.people[k].available !== false && !away.has(k) && toE164(R.people[k].mobile));
   const set = (R.divisions[division] || R.divisions["Other"] || Object.keys(R.people)).filter(avail);
   const pick = set.length ? set : Object.keys(R.people).filter(avail);
   return [...new Set(pick.map((k) => toE164(R.people[k].mobile)))];
 }
-const identityFor = (profileId: string) => `office-${profileId}`;
-// Browser phones on shift: VAs with CRM access who pressed "Start shift" today (a shift never carries over to the next day).
+// The employee a backup phone (a phone_routing.people entry) belongs to: one clear match, never a guess, in the app's order
+// (vacationPhoneEmployee): the same mobile; else the same full name; else their first name when nobody else has it (no
+// other employee, and no login of any role that isn't theirs: the owner "Noam Gal" with no employee card is a twin of the
+// technician "Noam Levi", as in phonePersonKeyFor). More than one match at a step, or none at all = null.
 // deno-lint-ignore no-explicit-any
-async function onShift(sb: any, nowMs: number): Promise<string[]> {
+export function vacPhoneEmployee(pp: Person, key: string, C: VacCtx): any {
+  const norm = (s: unknown) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const first = (s: unknown) => norm(s).split(" ")[0];
+  // deno-lint-ignore no-explicit-any
+  const one = (l: any[]) => l.length === 1 ? l[0] : null;
+  const emps = C.employees, nm = norm((pp && pp.name) || key), tel = toE164(pp && pp.mobile);
+  if (tel) { const l = emps.filter((e) => toE164(e.phone) === tel); if (l.length) return one(l); }
+  if (!nm) return null;
+  const byFull = emps.filter((e) => norm(e.name) === nm);
+  if (byFull.length) return one(byFull);
+  const e = one(emps.filter((x) => first(x.name) === nm));
+  if (!e) return null;
+  const twin = C.profiles.some((p) => (first(p.full_name) === nm || first(p.technician_name) === nm) && (vacEmployeeOf(p, emps) || {}).id !== e.id);
+  return twin ? null : e;
+}
+// The backup people (phone_routing.people keys) who are on vacation with "Calls not routed to them" (their employee, as
+// above).
+export function vacPhoneAway(people: Record<string, Person>, C: VacCtx): Set<string> {
+  const away = new Set<string>();
+  if (!C.vacs.length) return away;
+  for (const k of Object.keys(people || {})) {
+    if (!people[k] || typeof people[k] !== "object") continue;
+    const e = vacPhoneEmployee(people[k], k, C);
+    if (e && vacAway(C, e.id, "noCalls")) away.add(k);
+  }
+  return away;
+}
+const identityFor = (profileId: string) => `office-${profileId}`;
+// Browser phones on shift: VAs with CRM access who pressed "Start shift" today (a shift never carries over to the next day),
+// and not on vacation with "Calls not routed to them".
+// deno-lint-ignore no-explicit-any
+async function onShift(sb: any, nowMs: number, C?: VacCtx): Promise<string[]> {
   const today = bizParts(nowMs, TZ).day;
   const { data } = await sb.from("profiles").select("id, role, permissions, on_duty, on_duty_date");
   // deno-lint-ignore no-explicit-any
-  return (data || []).filter((p: any) => p.role === "va" && p.permissions && p.permissions.crm && p.on_duty && String(p.on_duty_date) === today).map((p: any) => identityFor(p.id));
+  return (data || []).filter((p: any) => p.role === "va" && p.permissions && p.permissions.crm && p.on_duty && String(p.on_duty_date) === today && !(C && vacAwayProfile(C, p.id, "noCalls"))).map((p: any) => identityFor(p.id));
 }
 
 // ── Twilio request signature (https://www.twilio.com/docs/usage/security#validating-requests) ──
@@ -362,13 +501,14 @@ async function voicemail(sb: any, p: Record<string, string>, closed: boolean): P
   return `<Say ${VOICE}>${esc(closed ? tpl("phoneClosed", CLOSED) : tpl("phoneMissed", MISSED))}</Say>` +
     `<Record maxLength="120" playBeep="true" trim="trim-silence" action="${esc(stepUrl("voicemail_done"))}" recordingStatusCallback="${esc(stepUrl("voicemail"))}" recordingStatusCallbackEvent="completed"/>`;
 }
-// Where a call goes once we know the service.
+// Where a call goes once we know the service. vac = who is on vacation (read once per request).
 // deno-lint-ignore no-explicit-any
-async function route(sb: any, R: Routing, p: Record<string, string>, div: string, nowMs: number, caller: Caller | null): Promise<string> {
-  const clients = await onShift(sb, nowMs);
+async function route(sb: any, R: Routing, p: Record<string, string>, div: string, nowMs: number, caller: Caller | null, vac: () => Promise<VacCtx>): Promise<string> {
+  const Cx = await vac();
+  const clients = await onShift(sb, nowMs, Cx);
   if (clients.length) return dialOffice(R, clients, div, caller);
   const open = backupOpen(R, nowMs);
-  const owners = open ? ownersFor(R, div) : [];
+  const owners = open ? ownersFor(R, div, vacPhoneAway(R.people, Cx)) : [];
   if (owners.length) return dialOwners(R, owners, div, toE164(p.From));
   return await voicemail(sb, p, !open);
 }
@@ -378,6 +518,9 @@ async function route(sb: any, R: Routing, p: Record<string, string>, div: string
 export async function step(sb: any, name: string, p: Record<string, string>, q: Record<string, string> = {}, nowMs = Date.now()): Promise<Response> {
   const callSid = p.CallSid || "";
   const R = await routing(sb);
+  // who is on vacation (stage 3): read at most once per request, only when a call is routed; fail-open (nobody away)
+  let C: VacCtx | null = null;
+  const vac = async () => C || (C = await vacContext(sb, nowMs, R.cat));
   if (name === "incoming") {
     const from = toE164(p.From);
     const caller = await contactForCaller(sb, from, nowMs);
@@ -385,10 +528,10 @@ export async function step(sb: any, name: string, p: Record<string, string>, q: 
     const known = caller && R.menu.some((m) => m.key === caller.division) ? caller.division : "";
     await sb.from("calls").insert({ call_sid: callSid, direction: "inbound", from_number: from || p.From || "", to_number: toE164(p.To) || p.To || "", contact_id: caller ? caller.id : null, status: "ringing", division: known || null });
     // Nobody on shift and outside the owners' hours: straight to the "office closed" voicemail.
-    if (!(await onShift(sb, nowMs)).length && !backupOpen(R, nowMs)) return xml(await voicemail(sb, p, true));
+    if (!(await onShift(sb, nowMs, await vac())).length && !backupOpen(R, nowMs)) return xml(await voicemail(sb, p, true));
     const notice = `<Say ${VOICE}>${esc(tpl("phoneGreeting", NOTICE))}</Say>`;
     // A known customer goes by their service; a new caller picks one (no key pressed counts as "Other").
-    if (caller && known) return xml(notice + await route(sb, R, p, known, nowMs, caller));
+    if (caller && known) return xml(notice + await route(sb, R, p, known, nowMs, caller, vac));
     return xml(notice + `<Gather input="dtmf" numDigits="1" timeout="6" action="${esc(stepUrl("menu"))}"><Say ${VOICE}>${esc(menuText(R.menu))}</Say></Gather><Redirect method="POST">${esc(stepUrl("menu"))}</Redirect>`);
   }
   if (name === "menu") {
@@ -404,7 +547,7 @@ export async function step(sb: any, name: string, p: Record<string, string>, q: 
         if (div !== "Other" && (!c.division || c.division === "Other")) await sb.from("contacts").update({ division: div }).eq("id", c.id);
       }
     }
-    return xml(await route(sb, R, p, div, nowMs, caller));
+    return xml(await route(sb, R, p, div, nowMs, caller, vac));
   }
   if (name === "after_office" || name === "after_owners") {
     const div = q.div || "Other";
@@ -414,7 +557,7 @@ export async function step(sb: any, name: string, p: Record<string, string>, q: 
     }
     const open = backupOpen(R, nowMs);
     if (name === "after_office" && open) {
-      const owners = ownersFor(R, div);
+      const owners = ownersFor(R, div, vacPhoneAway(R.people, await vac()));
       if (owners.length) return xml(dialOwners(R, owners, div, toE164(p.From)));
     }
     return xml(await voicemail(sb, p, !open));

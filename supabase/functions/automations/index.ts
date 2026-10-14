@@ -42,6 +42,8 @@
 //     guard moves it), never fires it, and a waiting run from before that stops; a run more than max_late_hours late
 //     acts no more; a run whose automation was switched off, changed or deleted stops. A stage move younger than the
 //     app's Undo (STAGE_SETTLE_MS) is not acted on, and a stage run stops when the move was undone.
+//   • People on vacation (stage 3): a notification skips them and goes to their stand-in when chosen; a task for them goes
+//     to the stand-in when they are not assignable.
 // Emails go the existing way (P3: nothing live changes): a queued lead_messages row, sent by the info@ Apps Script
 // through conversations' alerts step, which adds its own signature from the author's first word (signatureOf below
 // shows it in the preview). The author is the business's signer or the automation maker's first name, never a phrase;
@@ -234,6 +236,107 @@ export async function sendTo(sb: any, userIds: string[], payload: Record<string,
   }
   return out;
 }
+
+// ── vacations (stage 3): ONE block, byte-identical in push, automations and voice (automations' tests check) ──
+// A vacation is a row of employee_vacations (.claude/sql/stage3-vacation.sql). Who is away is worked out here the same way
+// as the app (vacationOnDay) and SQL (vacation_in_force): options.autoBack is ON unless it is the boolean false, every other
+// key only when it is the boolean true; starts_on = the first day away, ends_on = the last; in force on a day when not
+// cancelled, from starts_on, before the business day it was ended on, and up to ends_on unless autoBack is off. The day is
+// in the business time zone (settings.catalog.region.timezone, else Sydney). A login is the employee whose name is its
+// technician_name, else its full_name (the app's peopleList). FAIL-OPEN: no table, an error or a throw = nobody is away.
+export const VAC_COLS = "id, employee_id, starts_on, ends_on, stand_in_id, options, ended_at, cancelled_at, reminded_at";
+// deno-lint-ignore no-explicit-any
+export type VacCtx = { day: string; tz: string; vacs: any[]; employees: any[]; profiles: any[] };
+const vacIsDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+// deno-lint-ignore no-explicit-any
+export function vacTz(catalog: any): string {
+  const tz = catalog && catalog.region && catalog.region.timezone;
+  if (typeof tz === "string" && tz) { try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); return tz; } catch { /* not a zone */ } }
+  return "Australia/Sydney";
+}
+export function vacDay(ms: number, tz: string): string {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
+}
+// deno-lint-ignore no-explicit-any
+export function vacOpt(v: any, key: string): boolean {
+  const o = v && v.options && typeof v.options === "object" ? v.options : {};
+  return key === "autoBack" ? o.autoBack !== false : o[key] === true;
+}
+// deno-lint-ignore no-explicit-any
+export function vacOnDay(v: any, day: string, tz: string): boolean {
+  if (!v || v.cancelled_at || !vacIsDay(v.starts_on) || !vacIsDay(day) || v.starts_on > day) return false;
+  if (v.ended_at) { const t = Date.parse(v.ended_at); if (isNaN(t) || !(day < vacDay(t, tz))) return false; }
+  return !vacOpt(v, "autoBack") || (vacIsDay(v.ends_on) && day <= v.ends_on);
+}
+// deno-lint-ignore no-explicit-any
+export function vacEmployeeOf(p: any, employees: any[]): any {
+  if (!p) return null;
+  return (p.technician_name && employees.find((e) => e.name === p.technician_name)) || (p.full_name && employees.find((e) => e.name === p.full_name)) || null;
+}
+// deno-lint-ignore no-explicit-any
+export function vacProfilesOf(e: any, C: VacCtx): any[] {
+  if (!e) return [];
+  return C.profiles.filter((p) => { const x = vacEmployeeOf(p, C.employees); return !!x && x.id === e.id; });
+}
+// The vacation in force today for this employee with that option ticked (the latest start when two are), or null.
+// deno-lint-ignore no-explicit-any
+export function vacAway(C: VacCtx, employeeId: string, key: string): any {
+  // deno-lint-ignore no-explicit-any
+  let best: any = null;
+  for (const v of C.vacs) if (v.employee_id === employeeId && vacOnDay(v, C.day, C.tz) && vacOpt(v, key) && (!best || v.starts_on > best.starts_on)) best = v;
+  return best;
+}
+// deno-lint-ignore no-explicit-any
+export function vacAwayProfile(C: VacCtx, profileId: string, key: string): any {
+  const e = vacEmployeeOf(C.profiles.find((p) => p.id === profileId), C.employees);
+  return e ? vacAway(C, e.id, key) : null;
+}
+// Who gets a notification: in order, once each. Away with "No notifications" → left out; away with "A stand-in gets their
+// notifications" → the stand-in's logins too (an Active stand-in; one who is away too passes it on, at most 5 steps, never
+// in a loop). A login with no employee card is always kept. roles: the roles that kind may go to (money and private
+// details: ["owner"]); a stand-in's login with another role never gets it. Left out = any role.
+export function vacRecipients(ids: string[], C: VacCtx, roles?: string[]): string[] {
+  if (!C.vacs.length) return [...new Set(ids)];
+  const out: string[] = [], seen = new Set<string>();
+  const visit = (id: string, steps: number) => {
+    if (!id || seen.has(id)) return;
+    // deno-lint-ignore no-explicit-any
+    if (steps && roles && !roles.includes(String((C.profiles.find((p: any) => p.id === id) || {}).role))) return;
+    seen.add(id);
+    const e = vacEmployeeOf(C.profiles.find((p) => p.id === id), C.employees);
+    if (!e) { out.push(id); return; }
+    if (!vacAway(C, e.id, "noNotify")) out.push(id);
+    const v = vacAway(C, e.id, "standIn");
+    if (!v || !v.stand_in_id || steps >= 5) return;
+    const s = C.employees.find((x) => x.id === v.stand_in_id);
+    if (!s || (s.status && s.status !== "Active")) return;
+    for (const p of vacProfilesOf(s, C)) visit(p.id, steps + 1);
+  };
+  for (const id of ids) visit(id, 0);
+  return out;
+}
+// The day n days after a 'YYYY-MM-DD' day.
+export const vacShiftDay = (day: string, n: number): string => new Date(Date.parse(day + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+// The vacations that can be in force from today to aheadDays on (started by then, and not over before today: ends_on from
+// today on, or left open with autoBack off), and the people they need, read once. Nobody away = no more reads. A vacation
+// that is over is never read again, so the table can grow without slowing a call down.
+// deno-lint-ignore no-explicit-any
+export async function vacContext(sb: any, nowMs: number, catalog: any, aheadDays = 0): Promise<VacCtx> {
+  const tz = vacTz(catalog), empty: VacCtx = { day: vacDay(nowMs, tz), tz, vacs: [], employees: [], profiles: [] };
+  try {
+    const { data: vacs, error } = await sb.from("employee_vacations").select(VAC_COLS).is("cancelled_at", null).is("ended_at", null)
+      .lte("starts_on", vacShiftDay(empty.day, aheadDays)).or(`ends_on.gte.${empty.day},options->>autoBack.eq.false`);
+    if (error || !Array.isArray(vacs) || !vacs.length) return empty;
+    const [emps, profs] = await Promise.all([sb.from("employees").select("id, name, phone, status"), sb.from("profiles").select("id, full_name, technician_name, role")]);
+    if (emps.error || profs.error) return empty;
+    return { ...empty, vacs, employees: emps.data || [], profiles: profs.data || [] };
+  } catch (e) {
+    console.error("vacations not read:", e);
+    return empty;
+  }
+}
+// ── end vacations ──
 
 // The timer's secret, compared without an early exit. Both must be set. (Copied from backup/index.ts.)
 const enc = new TextEncoder();
@@ -929,7 +1032,7 @@ export function audienceOf(a: any): "team" | "customer" {
 // The engine
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // deno-lint-ignore no-explicit-any
-export type TickCtx = { S: Settings; cat: any; company: string; agent?: string; autos: Map<string, any>; counts: Record<string, number> };
+export type TickCtx = { S: Settings; cat: any; company: string; agent?: string; autos: Map<string, any>; counts: Record<string, number>; vac?: VacCtx };
 const newCounts = () => ({ events: 0, enqueued: 0, processed: 0, sent: 0, queued: 0, skipped: 0, deferred: 0 });
 // deno-lint-ignore no-explicit-any
 export async function loadContext(sb: any, nowMs = Date.now()): Promise<TickCtx> {
@@ -946,6 +1049,10 @@ export async function loadContext(sb: any, nowMs = Date.now()): Promise<TickCtx>
   try { agent = agentOf(await rows(sb.from("profiles").select("full_name, role, on_duty, on_duty_date").eq("role", "va")), zoneParts(nowMs, S.timezone).day, cat); } catch { /* the office's name */ }
   return { S, cat, company: String(set.company_name || "").trim(), agent, autos: new Map(), counts: newCounts() };
 }
+// Who is on vacation, read once per tick (the vacations block; fail-open). A year ahead too: a task is checked against its
+// due day, at most 365 days on.
+// deno-lint-ignore no-explicit-any
+async function vacOf(sb: any, T: TickCtx, nowMs: number): Promise<VacCtx> { return T.vac || (T.vac = await vacContext(sb, nowMs, T.cat, 366)); }
 // deno-lint-ignore no-explicit-any
 async function enabledAutomations(sb: any): Promise<any[]> {
   return await rows(sb.from("automations").select("*").eq("business_id", BUSINESS_ID).eq("enabled", true));
@@ -1056,23 +1163,42 @@ export function boardFor(names: string[], profiles: any[], employees: any[] = []
   return va ? "ron" : first;
 }
 // deno-lint-ignore no-explicit-any
-async function pushRecipients(sb: any, st: any): Promise<{ ids: string[]; names: string[] }> {
+async function pushRecipients(sb: any, st: any, C: VacCtx): Promise<{ ids: string[]; names: string[] }> {
   const to = obj(st.to), people = (Array.isArray(to.people) ? to.people : []).map(String), roles = (Array.isArray(to.roles) ? to.roles : []).map(String);
   const list = await rows(sb.from("profiles").select("id, full_name, role"));
   // deno-lint-ignore no-explicit-any
   const chosen = list.filter((p: any) => people.includes(String(p.id)) || roles.includes(String(p.role)));
+  // someone on vacation: skipped, or their stand-in instead (stage 3). A stand-in only gets it when their role could have
+  // been picked: the roles chosen, or those of the people chosen (an owners-only message never reaches a technician).
   // deno-lint-ignore no-explicit-any
-  const ids = [...new Set(chosen.map((p: any) => String(p.id)))] as string[];
+  const allowed = [...new Set([...roles, ...list.filter((p: any) => people.includes(String(p.id))).map((p: any) => String(p.role))])];
+  // deno-lint-ignore no-explicit-any
+  const ids = vacRecipients([...new Set(chosen.map((p: any) => String(p.id)))] as string[], C, allowed);
   // deno-lint-ignore no-explicit-any
   return { ids, names: ids.map((id) => (list.find((p: any) => String(p.id) === id) || {}).full_name || "").filter(Boolean) };
 }
+// day: the task's due day ('YYYY-MM-DD'; today when it has none), as the app checks it (saveTaskModal, tm-due).
 // deno-lint-ignore no-explicit-any
-async function taskPeople(sb: any, st: any): Promise<string[]> {
+async function taskPeople(sb: any, st: any, C: VacCtx, day?: string): Promise<string[]> {
   const ids = (Array.isArray(st.assignees) ? st.assignees : []).map(String);
   if (!ids.length) return [];
   const list = await rows(sb.from("employees").select("id, name, status").in("id", ids));
   // deno-lint-ignore no-explicit-any
-  return ids.map((id: string) => list.find((e: any) => String(e.id) === id && e.status === "Active")).filter(Boolean).map((e: any) => String(e.name));
+  return vacTaskPeople(ids.map((id: string) => list.find((e: any) => String(e.id) === id && e.status === "Active")).filter(Boolean), C, day);
+}
+// A task for someone on vacation with "Not assignable" on its due day (today without one) goes to their stand-in (when
+// chosen, Active and not away that day too); everyone else stays (in the app it is a warning, never a block). Names, once
+// each, in order.
+// deno-lint-ignore no-explicit-any
+export function vacTaskPeople(emps: any[], C: VacCtx, day?: string): string[] {
+  const out: string[] = [], D: VacCtx = day && day !== C.day ? { ...C, day } : C;
+  for (const e of emps) {
+    const v = vacAway(D, e.id, "notAssignable");
+    const s = v && vacOpt(v, "standIn") && v.stand_in_id ? D.employees.find((x) => x.id === v.stand_in_id) : null;
+    const name = String(s && (!s.status || s.status === "Active") && !vacAway(D, s.id, "notAssignable") ? s.name : e.name);
+    if (!out.includes(name)) out.push(name);
+  }
+  return out;
 }
 type Exec = { status: string; reason?: string; recipient?: string; ref?: string };
 // The actions themselves. A customer action only runs after customerGuard said ok.
@@ -1081,19 +1207,20 @@ export async function execute(sb: any, st: any, a: any, f: Facts, T: TickCtx, no
   const known = fieldsFor(f.type), vars = mergeVars(f, a), fill = (x: unknown) => fillMerge(String(x ?? ""), vars, known);
   const recordId = String((f.contact && f.kind === "contact" ? f.contact.id : (f.job || f.call || f.chat || {}).id) || "");
   if (st.type === "push") {
-    const r = await pushRecipients(sb, st);
+    const r = await pushRecipients(sb, st, await vacOf(sb, T, nowMs));
     const payload = { title: fill(st.title), body: fill(st.body || ""), url: APP_URL + (DEEP_LINK[f.kind] || ""), tag: `auto-${String(a.id).slice(0, 8)}-${recordId}` };
     const sent = await sendTo(sb, r.ids, payload, await vapidKeys(sb));
     return sent.sent > 0 ? { status: "sent", recipient: clip(r.names.join(", "), 200) } : { status: "failed", reason: "no device", recipient: clip(r.names.join(", "), 200) };
   }
   if (st.type === "task") {
-    const names = await taskPeople(sb, st);
+    const due = st.due_days == null ? null : shiftDay(zoneParts(nowMs, T.S.timezone).day, Number(st.due_days));
+    const names = await taskPeople(sb, st, await vacOf(sb, T, nowMs), due || undefined);
     const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
     const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
     const c = f.contact;
     const row = {
       board: boardFor(names, profiles, employees), title: clip(fill(st.title), LIMITS.title), status: "Not Started",
-      due: st.due_days == null ? null : shiftDay(zoneParts(nowMs, T.S.timezone).day, Number(st.due_days)),
+      due,
       notes: clip(fill(st.notes || ""), LIMITS.notes), client: (c && c.full_name) || "", contact_id: c ? c.id : null,
       priority: TASK_PRIORITIES.includes(st.priority) ? st.priority : "Medium", assignees: names, assigned_to: names[0] || "", heads_up: "",
       created_by: clip("Automation: " + String(a.name || ""), 200), created_at: iso(nowMs), technician: "", category: c ? "Client-related" : "", subtasks: [], updates: [],
@@ -1494,14 +1621,15 @@ async function previewStep(sb: any, body: any, me: any, nowMs: number) {
     }
     const act = ACTIONS[st.type];
     if (st.type === "push") {
-      const r = await pushRecipients(sb, st);
+      const r = await pushRecipients(sb, st, await vacOf(sb, T, nowMs));
       out.push({ id: st.id, kind: "action", type: "push", would: "send", to: r.names, title: fillMerge(st.title, vars, known), body: fillMerge(st.body || "", vars, known) });
     } else if (st.type === "task") {
-      const names = await taskPeople(sb, st);
+      const due = st.due_days == null ? null : shiftDay(zoneParts(at, tz).day, Number(st.due_days));
+      const names = await taskPeople(sb, st, await vacOf(sb, T, nowMs), due || undefined);
       const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
       const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
       out.push({ id: st.id, kind: "action", type: "task", would: "add", board: boardFor(names, profiles, employees), assignees: names, title: fillMerge(st.title, vars, known), notes: fillMerge(st.notes || "", vars, known),
-        due: st.due_days == null ? null : shiftDay(zoneParts(at, tz).day, Number(st.due_days)) });
+        due });
     } else {
       const msg = messageOf(st, T.cat);
       const texts = st.type === "email" ? [fillMerge(st.subject, vars, known), fillMerge(msg ?? "{template}", vars, known)] : [fillMerge(msg ?? "{template}", vars, known)];
