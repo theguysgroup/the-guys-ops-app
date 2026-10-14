@@ -1,13 +1,13 @@
 // voice: the business phone line on Twilio (Ofek, 1–2 Oct 2026). Replaces GHL's phone so the office can leave GHL.
 //
 // How a call is routed (set in the app: Settings → Phone, stored in settings.phone_routing):
-//   • Ron is "on shift" (Start/End shift on his My Day; a shift only counts on the day it was started): his browser
-//     phone rings first, 20 seconds.
-//   • Not answered, or Ron is off shift: the owners are the backup during their hours (set per weekday in Settings → Phone;
-//     nothing saved = every day 08:00–20:00), split by
-//     service — aircon and chimney to Noam, pressure washing to Ofek — skipping anyone marked away (then the other one).
-//   • Nobody answers, or it's outside those hours with Ron off shift: voicemail ("office closed" after hours), a text to
-//     the caller, and a call-back item in Ron's My Day with the recording.
+//   • An office person (a VA) is "on shift" (Log In on their My Day; a shift only counts on the day it was started): their
+//     browser phone rings first, 20 seconds.
+//   • Not answered, or nobody in the office is on shift: the backup phones during their hours (set per weekday in Settings
+//     → Phone; nothing saved = every day 08:00–20:00), split by service as set there — skipping anyone marked away (then
+//     the others).
+//   • Nobody answers, or it's outside those hours with nobody on shift: voicemail ("office closed" after hours), a text to
+//     the caller, and a call-back item on the office's My Day with the recording.
 //   • The service: a known customer goes by their card's division; a new caller hears a 3-option menu.
 //   • Answered calls are recorded after a recording notice (Australian law requires notice).
 //
@@ -27,22 +27,35 @@ const TWIML_APP_SID = env("TWILIO_TWIML_APP_SID");
 const BUSINESS_NUMBER = env("TWILIO_NUMBER");             // +61 4… the Twilio number: answers calls, sends the texts
 const SELF_URL = env("VOICE_FUNCTION_URL");                // https://<project>.supabase.co/functions/v1/voice (signatures cover this exact URL)
 const VOICE = `voice="Polly.Olivia" language="en-AU"`;
-const NOTICE = "Thanks for calling The Guys Service Group. This call may be recorded for quality and training.";
-const CLOSED = "Thanks for calling The Guys Service Group. Our office is closed right now. Please leave a short message after the tone with your name, your suburb and what you need, and we'll call you back first thing. We'll also send you a text.";
+const NOTICE = "Thanks for calling {business_name}. This call may be recorded for quality and training.";
+const CLOSED = "Thanks for calling {business_name}. Our office is closed right now. Please leave a short message after the tone with your name, your suburb and what you need, and we'll call you back first thing. We'll also send you a text.";
 const MISSED = "Sorry, we couldn't get to the phone. Please leave a short message after the tone with your name, your suburb and what you need, and we'll call you back shortly. We'll also send you a text.";
 // The words customers get, as edited in Settings → Message templates (settings.catalog.templates, Ofek 12 Oct). Read once
-// per request; a template nobody has edited keeps the approved text below, word for word.
+// per request; a template nobody has edited keeps the approved text below, word for word. {business_name} = the business
+// name (settings.company_name, Business details; round 3, T1.9), read with them.
 let TPL: Record<string, string> = {};
+let BIZ = "";
 // deno-lint-ignore no-explicit-any
+// A failed read (supabase-js answers { data: null, error } without throwing) keeps what was read last (a warm instance):
+// never "nothing saved", so a caller doesn't hear the greeting without the business's name because of one bad read.
 export async function loadTemplates(sb: any) {
-  try { const { data } = await sb.from("settings").select("catalog").limit(1); useTemplates(data && data[0] && data[0].catalog); }
-  catch { TPL = {}; }
+  try {
+    const { data, error } = await sb.from("settings").select("catalog, company_name").limit(1);
+    if (error || !Array.isArray(data)) throw new Error(error ? error.message : "no settings");
+    useTemplates(data[0] && data[0].catalog, data[0] && data[0].company_name);
+  } catch (e) { console.error("voice: settings not read:", (e as Error).message || e); }
 }
 // deno-lint-ignore no-explicit-any
-export function useTemplates(catalog: any) { const t = catalog && catalog.templates; TPL = t && typeof t === "object" ? t : {}; }
-export function tpl(key: string, fallback: string): string { const v = TPL[key]; return typeof v === "string" && v.trim() ? v : fallback; }
-const SMS_MISSED = "Hi, it's The Guys Service Group. Sorry we missed your call! We'll call you back shortly. If it's easier, reply here with what you need and your suburb.";
-const SMS_CLOSED = "Hi, it's The Guys Service Group. Thanks for calling - our office is closed right now, we'll call you back first thing. If it's easier, reply here with what you need and your suburb.";
+export function useTemplates(catalog: any, company?: unknown) { const t = catalog && catalog.templates; TPL = t && typeof t === "object" ? t : {}; BIZ = String(company || "").trim(); }
+// {business_name} filled the way review-requests' fillReview fills a blank: with no name it takes its loose comma or space
+// with it ("Thanks for calling {business_name}." → "Thanks for calling.").
+export function fillBiz(t: string): string {
+  return String(t ?? "").replace(/\{business_name\}/g, () => BIZ || "\u0000")
+    .replace(/,[ \t]*\u0000(?=[?!.])/g, "").replace(/[ \t]+\u0000(?=[,?!.])/g, "").replace(/[ \t]*\u0000/g, "").replace(/^[ \t]+/gm, "");
+}
+export function tpl(key: string, fallback: string): string { const v = TPL[key]; return fillBiz(typeof v === "string" && v.trim() ? v : fallback); }
+const SMS_MISSED = "Hi, it's {business_name}. Sorry we missed your call! We'll call you back shortly. If it's easier, reply here with what you need and your suburb.";
+const SMS_CLOSED = "Hi, it's {business_name}. Thanks for calling - our office is closed right now, we'll call you back first thing. If it's easier, reply here with what you need and your suburb.";
 // The menu a new caller hears (Settings → Phone, phone_routing.menu, Ofek 13 Oct): the services in order, each with the
 // words spoken for it. Nothing saved = the original three, so the caller hears exactly the same menu:
 // "For air conditioning, press 1. For chimney, press 2. For pressure washing, press 3."
@@ -63,6 +76,110 @@ const CORS = {
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 const xml = (body: string) => new Response(`<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`, { headers: { "Content-Type": "text/xml" } });
+
+// ── region (Settings → Business details → Region and format; the same rules as the app's bizTz/moneyText/holidayDaysOf). Copied into every function — keep the copies identical (tests/business-logic.test.js checks). ──
+// Nothing saved = this business's values until 14 Oct: Sydney time, "$" amounts, GST, New South Wales (T1.2/T1.3).
+export const REGION_DEFAULTS = { timeZone: "Australia/Sydney", currency: "AUD", country: "AU", state: "NSW" };
+export const TAX_NAMES: Record<string, string> = { AU: "GST", NZ: "GST", CA: "GST", SG: "GST", IN: "GST", GB: "VAT", IE: "VAT", ZA: "VAT", AE: "VAT", US: "Sales tax" };
+export const MONEY_FORMATS = [["1,234.56", ",", "."], ["1.234,56", ".", ","], ["1 234,56", " ", ","]];
+const REGION_TZ_OK = new Map<string, boolean>();
+const REGION_FMT = new Map<string, Intl.DateTimeFormat>();
+export function tzValid(tz: unknown): boolean {
+  if (typeof tz !== "string" || !tz.trim()) return false;
+  if (!REGION_TZ_OK.has(tz)) { let ok = true; try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); } catch { ok = false; } REGION_TZ_OK.set(tz, ok); }
+  return REGION_TZ_OK.get(tz) === true;
+}
+// deno-lint-ignore no-explicit-any
+export function regionOf(cat: any): Record<string, any> { const r = cat && typeof cat === "object" ? cat.region : null; return r && typeof r === "object" ? r : {}; }
+// The business's time zone (settings.catalog.region.timeZone; a name the runtime doesn't know counts as not set).
+// deno-lint-ignore no-explicit-any
+export function bizTzOf(cat: any): string { const r = regionOf(cat); return tzValid(r.timeZone) ? r.timeZone : REGION_DEFAULTS.timeZone; }
+// deno-lint-ignore no-explicit-any
+export function bizTzSet(cat: any): boolean { return tzValid(regionOf(cat).timeZone); }
+// 'AU-NSW', 'US-TX', 'SG': the place the stored public holidays were worked out for (nothing chosen = AU-NSW).
+// deno-lint-ignore no-explicit-any
+export function regionKeyOf(r: any): string {
+  const x = r && typeof r === "object" ? r : {};
+  const country = /^[A-Z]{2}$/.test(String(x.country || "")) ? x.country : REGION_DEFAULTS.country;
+  const state = x.country ? String(x.state || "") : REGION_DEFAULTS.state;
+  return state ? `${country}-${state}` : country;
+}
+// The wall clock in tz at an instant: { day 'YYYY-MM-DD', dow 0 = Sunday, hour, minute, minutes after midnight }.
+export function bizParts(ms: number, tz: string) {
+  let f = REGION_FMT.get(tz);
+  if (!f) { f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false }); REGION_FMT.set(tz, f); }
+  const p = Object.fromEntries(f.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  const hour = Number(p.hour) % 24, minute = Number(p.minute);
+  return { day: `${p.year}-${p.month}-${p.day}`, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(String(p.weekday)), hour, minute, minutes: hour * 60 + minute };
+}
+// The UTC instant of a wall-clock time in tz (two passes handle daylight saving).
+export function bizToUtc(day: string, hh: number, mm: number, tz: string): number {
+  const [y, m, d] = day.split("-").map(Number);
+  let t = Date.UTC(y, m - 1, d, hh, mm);
+  const want = Date.UTC(y, m - 1, d, hh, mm);
+  const wall = (ms: number) => { const p = bizParts(ms, tz), [py, pm, pd] = p.day.split("-").map(Number); return Date.UTC(py, pm - 1, pd, p.hour, p.minute); };
+  for (let i = 0; i < 2; i++) t -= wall(t) - want;
+  // a wall time the clocks jump over (a daylight-saving gap, at midnight in some zones): the same time after the jump on
+  // the same day, never the evening before
+  const got = wall(t);
+  if (got < want) t += want - got;
+  return t;
+}
+// A business day for a timestamptz column that used to get the bare date ('2026-10-14' = midnight UTC): the same bare
+// date where midnight UTC is still that day in the zone (Sydney: exactly as before), else noon that day in the zone, so
+// zones west of UTC don't file the record under the day before.
+export function bizDayStamp(day: string, tz: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return bizParts(Date.UTC(y, m - 1, d), tz).day === day ? day : new Date(bizToUtc(day, 12, 0, tz)).toISOString();
+}
+// A word the owner typed, kept free of HTML and quote characters.
+export function regionWord(v: unknown, max: number): string { return String(v || "").replace(/[<>&"'`\\]/g, "").trim().slice(0, max); }
+// What the sales tax is called (GST / VAT / Sales tax / the business's own word).
+// deno-lint-ignore no-explicit-any
+export function taxNameOf(cat: any): string {
+  const r = regionOf(cat), country = /^[A-Z]{2}$/.test(String(r.country || "")) ? r.country : REGION_DEFAULTS.country;
+  return regionWord(r.taxName, 20) || TAX_NAMES[country] || "Tax";
+}
+export function currencySymbolOf(code: string): string {
+  try { const p = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" }).formatToParts(0).find((x) => x.type === "currency"); return p ? p.value : code; }
+  catch { return code; }
+}
+// The currency's cents: 2 for AUD/USD, 0 for JPY/KRW, 3 for KWD/BHD (2 when the runtime doesn't know the code).
+export function currencyDecimalsOf(code: string): number {
+  try { const n = new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions().maximumFractionDigits; return Number.isInteger(n) ? n : 2; }
+  catch { return 2; }
+}
+// An amount as the business writes it. digits: "auto" = no cents on whole amounts, 2 = always cents, "plain" = as the
+// number comes ("$1,234.5"), "raw" = no thousands separator ("$1234"). Nothing saved = exactly what the functions wrote
+// before 14 Oct.
+// deno-lint-ignore no-explicit-any
+export function moneyText(n: number, cat: any, digits: "auto" | 2 | "plain" | "raw" = "plain"): string {
+  const r = regionOf(cat), x = Number(n);
+  const code = /^[A-Z]{3}$/.test(String(r.currency || "")) ? r.currency : REGION_DEFAULTS.currency;
+  const sym = regionWord(r.currencySymbol, 4) || currencySymbolOf(code), dec = currencyDecimalsOf(code);
+  const fmt = MONEY_FORMATS.find((f) => f[0] === r.moneyFormat) || MONEY_FORMATS[0];
+  // "cents" = the currency's own: none for JPY, three for KWD
+  const opts = digits === "auto" ? { minimumFractionDigits: Math.abs(x - Math.round(x)) < 1e-9 ? 0 : dec, maximumFractionDigits: dec }
+    : digits === 2 ? { minimumFractionDigits: dec, maximumFractionDigits: dec } : undefined;
+  let s = digits === "raw" ? String(x) : x.toLocaleString("en-US", opts);
+  if (fmt !== MONEY_FORMATS[0]) s = s.replace(/[,.]/g, (ch) => ch === "," ? fmt[1] : fmt[2]);
+  return r.symbolAfter === true ? `${s} ${sym}` : sym + s;
+}
+// One key per public holiday, its moved ("additional"/"substitute") day included.
+export function holidayKey(name: unknown): string { return String(name || "").replace(/\s*\((?:additional|substitute) day\)\s*$/i, "").trim().toLowerCase(); }
+// The public holidays that are days off: none while the switch is off (hours.publicOn, or the old hours.nsw), none when the
+// stored list (catalog.holidays, worked out by the app) is for another region, minus the ones switched off (hours.holidayOff).
+// deno-lint-ignore no-explicit-any
+export function holidayDaysOf(cat: any): Record<string, string> {
+  const c = cat && typeof cat === "object" ? cat : {}, h = c.hours && typeof c.hours === "object" ? c.hours : {};
+  if (!(h.publicOn ?? h.nsw)) return {};
+  const ph = c.holidays;
+  if (!ph || !ph.days || typeof ph.days !== "object" || ph.region !== regionKeyOf(c.region || {})) return {};
+  const off = new Set(Array.isArray(h.holidayOff) ? h.holidayOff : []), out: Record<string, string> = {};
+  for (const [d, name] of Object.entries(ph.days)) if (/^\d{4}-\d{2}-\d{2}$/.test(d) && !off.has(holidayKey(name))) out[d] = String(name);
+  return out;
+}
+// ── end region ──
 
 // ── phone numbers: E.164 (+61…); the last 9 digits are the key used everywhere in the CRM ──
 function toE164(v: unknown): string {
@@ -85,11 +202,8 @@ function pretty(e164: string): string {
 const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const stepUrl = (step: string, div?: string) => `${SELF_URL}?step=${step}${div ? `&div=${encodeURIComponent(div)}` : ""}`;
 
-// ── Sydney time ──
-function sydney(nowMs: number) {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false }).formatToParts(new Date(nowMs)).map((x) => [x.type, x.value]));
-  return { day: `${p.year}-${p.month}-${p.day}`, minutes: (Number(p.hour) % 24) * 60 + Number(p.minute), dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(String(p.weekday)) };
-}
+// ── business time (Settings → Region and format; read with the routing at the start of every call step) ──
+let TZ = REGION_DEFAULTS.timeZone;
 const hm = (s: string) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")); return m ? Number(m[1]) * 60 + Number(m[2]) : -1; };
 
 // ── routing settings (Settings → Phone) ──
@@ -103,9 +217,10 @@ const ringSeconds = (v: unknown) => { const n = Math.round(Number(v)); return n 
 // The routing and, in the same read, the words (Settings → Message templates), so a call never waits on a second query.
 // deno-lint-ignore no-explicit-any
 async function routing(sb: any): Promise<Routing> {
-  const { data } = await sb.from("settings").select("phone_routing, catalog").limit(1);
+  const { data, error } = await sb.from("settings").select("phone_routing, catalog, company_name").limit(1);
   const r = (data && data[0] && data[0].phone_routing) || {};
-  useTemplates(data && data[0] && data[0].catalog);
+  // a failed read keeps the words and time zone read last (loadTemplates), never "nothing saved"
+  if (!error && Array.isArray(data)) { useTemplates(data[0] && data[0].catalog, data[0] && data[0].company_name); TZ = bizTzOf(data[0] && data[0].catalog); }
   return {
     people: r.people || {}, divisions: r.divisions || {},
     backupHours: r.backupHours || { from: "08:00", to: "20:00", days: [0, 1, 2, 3, 4, 5, 6] },
@@ -129,7 +244,7 @@ export function backupDay(h: BackupHours, dow: number): { from: number; to: numb
   return from >= 0 && to > from ? { from, to } : null;
 }
 function backupOpen(R: Routing, nowMs: number): boolean {
-  const t = sydney(nowMs), w = backupDay(R.backupHours, t.dow);
+  const t = bizParts(nowMs, TZ), w = backupDay(R.backupHours, t.dow);
   return !!w && t.minutes >= w.from && t.minutes < w.to;
 }
 // The owners' mobiles for a service: the ones set for it who aren't away; if all of them are away, anyone who isn't.
@@ -143,7 +258,7 @@ const identityFor = (profileId: string) => `office-${profileId}`;
 // Browser phones on shift: VAs with CRM access who pressed "Start shift" today (a shift never carries over to the next day).
 // deno-lint-ignore no-explicit-any
 async function onShift(sb: any, nowMs: number): Promise<string[]> {
-  const today = sydney(nowMs).day;
+  const today = bizParts(nowMs, TZ).day;
   const { data } = await sb.from("profiles").select("id, role, permissions, on_duty, on_duty_date");
   // deno-lint-ignore no-explicit-any
   return (data || []).filter((p: any) => p.role === "va" && p.permissions && p.permissions.crm && p.on_duty && String(p.on_duty_date) === today).map((p: any) => identityFor(p.id));
@@ -205,7 +320,7 @@ async function contactForCaller(sb: any, e164: string, nowMs: number): Promise<C
   if (c) return { id: c.id, name: c.full_name || pretty(e164), division: String(c.division || "") };
   const row = {
     full_name: `Caller ${pretty(e164)}`, phone: pretty(e164), email: "", postcode: "", division: "Other", source: "Unknown", status: "New",
-    created_at: sydney(nowMs).day, job_description: "", tags: [],
+    created_at: bizDayStamp(bizParts(nowMs, TZ).day, TZ), job_description: "", tags: [],
     messages: [{ id: crypto.randomUUID(), kind: "event", text: "Lead created automatically from an incoming phone call", at: new Date(nowMs).toISOString() }],
   };
   const { data, error } = await sb.from("contacts").insert(row).select("id").single();

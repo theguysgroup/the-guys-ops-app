@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<title>Agreement · The Guys Service Group</title>
+<title>Agreement</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
@@ -16,6 +16,7 @@ html, body { margin: 0; }
 body { background: var(--paper); color: var(--ink); font-family: 'Figtree', system-ui, -apple-system, sans-serif; font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
 .top { background: var(--top); color: #fff; padding: 16px 18px 14px; display: flex; align-items: center; gap: 11px; }
 .logo { width: 36px; height: 36px; border-radius: 8px; background: var(--brand); display: grid; place-items: center; font-weight: 700; font-size: 13px; letter-spacing: .02em; flex: none; }
+.logo:empty { display: none; }
 .top b { display: block; font-size: 14.5px; } .top span { font-size: 12px; color: #b9b0a3; }
 .wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px 40px; display: flex; flex-direction: column; gap: 14px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
@@ -60,7 +61,7 @@ input.t:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px
 </style>
 </head>
 <body>
-<div class="top"><span class="logo">TG</span><div><b>The Guys Service Group</b><span id="sub">Subcontractor agreement</span></div></div>
+<div class="top"><span class="logo" id="logo"></span><div><b id="biz"></b><span id="sub">Subcontractor agreement</span></div></div>
 <main class="wrap" id="app"><div class="msg">Loading the agreement…</div></main>
 <script>
 // Talks only to the contractor-sign function; the link's token is the only key. Nothing is stored on this device.
@@ -92,19 +93,31 @@ async function call(body){
   let out = {}; try { out = await r.json(); } catch (e) {}
   return out;
 }
-const fmt = iso => iso ? new Date(iso).toLocaleString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+// Dates in the business's time zone (sent with the agreement; Sydney when it isn't there).
+const fmt = iso => { if (!iso) return ''; const o = { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' };
+  try { return new Date(iso).toLocaleString('en-AU', { ...o, timeZone: (A && A.tz) || 'Australia/Sydney' }); } catch (e) { return new Date(iso).toLocaleString('en-AU', { ...o, timeZone: 'Australia/Sydney' }); } };
 let A = null, drawn = false;
+// The business's name (sent with the agreement: the name it was made under, from Business details): the tab, the header
+// and its initials as the logo ("Acme Home Services" → "AH").
+function showBiz(a){
+  const n = String((a && a.ourName) || '').trim();
+  document.title = n ? `Agreement · ${n}` : 'Agreement';
+  document.getElementById('biz').textContent = n;
+  document.getElementById('logo').textContent = n.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+}
 function signedBlock(a){
-  return `<div class="sigbox"><div>For The Guys Service Group<br><b>${esc(a.ourSigner || 'The Guys Service Group')}</b></div><div>For ${esc(a.company)}<br>${a.signature ? `<img alt="Signature" src="${esc(a.signature)}">` : ''}<b>${esc(a.signer)}</b> · ${esc(fmt(a.signedAt))}</div></div>`;
+  return `<div class="sigbox"><div>For ${esc(a.ourName || 'us')}<br><b>${esc(a.ourSigner || a.ourName || '')}</b></div><div>For ${esc(a.company)}<br>${a.signature ? `<img alt="Signature" src="${esc(a.signature)}">` : ''}<b>${esc(a.signer)}</b> · ${esc(fmt(a.signedAt))}</div></div>`;
 }
 function showSigned(a, fresh){
+  showBiz(a);
   document.getElementById('sub').textContent = 'Agreement for ' + a.company;
   app.innerHTML = `<div class="card no-print"><div class="done"><div class="big">✓</div><h2 style="font-size:20px;color:var(--ink);text-transform:none;letter-spacing:0;margin:0 0 6px">${fresh ? `Signed, thank you ${esc(String(a.signer).split(' ')[0])}` : 'This agreement is signed'}</h2>
       <p style="color:var(--soft);margin:0 0 16px">Signed by ${esc(a.signer)} on ${esc(fmt(a.signedAt))}. Keep a copy for your records.</p>
       <button class="btn dark" onclick="print()">Save a copy (PDF)</button></div></div>
-    <div class="card"><div class="doc"><h1>Subcontractor agreement</h1><div class="sub">The Guys Service Group Pty Ltd · version ${esc(a.version)} · made ${esc(a.madeOn)}</div>${clean(a.html)}</div>${signedBlock(a)}</div>`;
+    <div class="card"><div class="doc"><h1>Subcontractor agreement</h1><div class="sub">${esc(a.ourLegalName || a.ourName)} · version ${esc(a.version)} · made ${esc(a.madeOn)}</div>${clean(a.html)}</div>${signedBlock(a)}</div>`;
 }
 function showForm(a){
+  showBiz(a);
   document.getElementById('sub').textContent = 'Agreement for ' + a.company;
   app.innerHTML = `
     <div class="card"><h2>What we agreed</h2><div class="deal">${esc(a.dealLine)}</div>${a.dealNote ? `<div class="deal-note">${esc(a.dealNote)}</div>` : ''}</div>
@@ -153,7 +166,8 @@ async function load(){
   A = a;
   if (a.ok && a.state === 'signed') return showSigned(a, false);
   if (a.ok) return showForm(a);
-  app.innerHTML = `<div class="msg">${a.reason === 'expired' ? 'This link has expired. Please ask The Guys Service Group for a new one.' : a.reason === 'link' ? 'This link does not work any more. Please ask The Guys Service Group for a new one.' : 'We could not load the agreement. Please check your connection and try again.'}</div>`;
+  showBiz(a);
+  app.innerHTML = `<div class="msg">${a.reason === 'expired' ? `This link has expired. Please ask ${esc(a.ourName || 'the business that sent it')} for a new one.` : a.reason === 'link' ? 'This link does not work any more. Please ask the business that sent it for a new one.' : 'We could not load the agreement. Please check your connection and try again.'}</div>`;
 }
 load();
 </script>

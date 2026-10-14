@@ -73,7 +73,9 @@ function eq(got: unknown, want: unknown, name: string) {
     R("serp", "2026-10-19", "reviews", "The AC Cleaning Guys", "us", 104, 0, 5, { newestDays: 22, thisWeek: 0 }),
     R("serp", "2026-10-19", "aimode", "aircon cleaning sydney", "", 0, 2, null, { named: ["A Grade"] }),
     R("serp", "2026-10-19", "aimode", "split system cleaning sydney", "", 1, 2, null, { named: [] }) ];
-  const F = organicFindings(night as any);
+  // this business's words as the C-names SQL saves them (catalog.business.gbpLinkedPage / gbpLinkedLabel); no region = Sydney
+  const OURS = { business: { gbpLinkedPage: "/services/air-conditioning-cleaning/", gbpLinkedLabel: "aircon" } };
+  const F = organicFindings(night as any, OURS);
   eq(F.findings.map((f) => [f.issue_type, f.priority, f.dedupe_key]), [
     ["ctr", "P1", "ctr|/services/air-conditioning-cleaning/|aircon cleaning sydney"],
     ["ctr", "P1", "ctr|/services/chimney-sweep-sydney/|chimney sweep sydney"],
@@ -87,6 +89,14 @@ function eq(got: unknown, want: unknown, name: string) {
   ], "the nightly rules: low click rate for the position, close to page 1, dropped pages, map pack, reviews, AI Mode (brand and small searches left out)");
   const gbp = F.findings.find((f) => f.dedupe_key.startsWith("ctr|/services/air-conditioning-cleaning/"))!;
   eq([!!(gbp.evidence as any).note, (F.findings.find((f) => f.issue_type === "drop")!.evidence as any).why], [true, "its average position fell from 8.2 to 11.5"], "the map-linked page carries its caveat; a drop says why");
+  eq([(gbp.evidence as any).note, gbp.proposed_action.startsWith(`Search "aircon cleaning sydney" on a phone in Sydney first.`)],
+    ["This page is the aircon Google Business Profile's website link, so its position includes the map pack.", true], "today's words with this business's settings (Sydney, the aircon profile)");
+  { const us = organicFindings(night as any, { region: { country: "US", state: "TX", stateName: "Texas", timeZone: "America/Chicago" } });
+    const g2 = us.findings.find((f) => f.dedupe_key.startsWith("ctr|/services/air-conditioning-cleaning/"));
+    eq([g2 && g2.proposed_action.includes("on a phone in Texas first"), g2 && (g2.evidence as any).note, us.findings.some((f) => f.dedupe_key.startsWith("near|/services/air-conditioning-cleaning/"))],
+      [true, undefined, false], "another region: its place; no profile page saved = no caveat");
+    eq([organicPlace({}), organicPlace({ region: { timeZone: "America/Los_Angeles" } }), organicPlace({ region: { country: "GB", countryName: "United Kingdom" } }), gbpLinked({ business: { gbpLinkedPage: "https://x.com/a/b" } })],
+      ["Sydney", "Los Angeles", "United Kingdom", { path: "/a/b/", label: "" }], "organicPlace / gbpLinked: the place and the profile's page from the settings"); }
   eq(F.findings.find((f) => f.issue_type === "map" && f.query === "aircon cleaning sydney")!.title, `#3 in the map pack for "aircon cleaning sydney" in Parramatta (was #1)`, "a fall in the map pack says where it was");
   eq(F.evaluated, ["ctr", "near", "drop", "map", "reviews", "ai"], "the rules that had data tonight");
   eq(organicFindings([R("serp", "2026-10-19", "localpack", "aircon cleaning sydney", "Sydney CBD", 0, 0, 1)] as any).evaluated, ["map"], "no Search Console data: those rules are not run");
@@ -106,7 +116,7 @@ function eq(got: unknown, want: unknown, name: string) {
   // The digest the assessment is written from.
   const lines = organicDigest([...night, R("gsc", "7d", "total", "", "", 30, 3800, 9.5, { start: "2026-10-04", end: "2026-10-10" }), R("ga4", "28d", "channel", "Organic Search", "", 415, 0, null, { keyEvents: 45 }), R("ga4", "28d", "channel", "AI Assistant", "", 8, 0, null, {})] as any,
     [{ id: "a", day: "2026-10-12", source: "Organic", sub_source: "" }, { id: "b", day: "2026-10-01", source: "Google Maps", sub_source: "Aircon profile" }, { id: "c", day: "2026-08-30", source: "Organic", sub_source: "" }],
-    { b: { jobs: 1, revenue: 349 } }, [{ priority: "P2", status: "open", title: "AI" }, { priority: "P0", status: "in_progress", title: "Reviews" }], null, "2026-10-12");
+    { b: { jobs: 1, revenue: 349 } }, [{ priority: "P2", status: "open", title: "AI" }, { priority: "P0", status: "in_progress", title: "Reviews" }], null, "2026-10-12", OURS);
   const has = (part: string) => lines.some((l) => l.includes(part));
   eq([has("last 7 days (2026-10-04..2026-10-10): clicks 30, shown 3800 times, click rate 0.8%, average position 9.5"), has("Organic Search 415 visits (45 key actions), AI Assistant 8"),
     has("last 7 days (2026-10-06..2026-10-12): 1 leads (Organic web 1, Google Maps 0), 0 jobs"), has("last 28 days (2026-09-15..2026-10-12): 2 leads (Organic web 1, Google Maps 1: Aircon profile 1), 1 jobs so far, $349"),
@@ -152,6 +162,14 @@ function eq(got: unknown, want: unknown, name: string) {
   eq(exact.data.length, 1000, "exactly 1,000 rows: one more (empty) page, nothing lost");
   const bad = await readAll(async (a: number) => a === 0 ? { data: table.slice(0, 1000), error: null } : { data: null, error: { message: "boom" } });
   eq([bad.error?.message, bad.data.length], ["boom", 1000], "an error on a later page is reported, not hidden");
+
+  // The region (Settings → Region and format, T1.2): the lead emails go by the business's day; the digest's money and tax.
+  const mail = [{ id: "e1", date: "2026-10-14T03:00:00Z", subject: "New website form", body: "Name: Sam Smith Phone: 0412 345 678" }];
+  eq([checkLeadEmails(mail, [], "2026-10-20").days.map((d: any) => d.day), checkLeadEmails(mail, [], "2026-10-20", "", "America/Chicago").days.map((d: any) => d.day)],
+    [["2026-10-14"], ["2026-10-13"]], "lead emails: Sydney's day by default, Chicago's when that is the business's time zone");
+  const dg = (cat?: any) => organicDigest([], [{ id: "b", day: "2026-10-01", source: "Google Maps", sub_source: "" }], { b: { jobs: 1, revenue: 12345.6 } }, [], null, "2026-10-12", cat).find((l) => l.includes("last 28 days (2026-09-15"));
+  eq([dg()?.includes("$12346 revenue before GST"), dg({ region: { country: "US" } })?.includes("$12346 revenue before Sales tax"), dg({ region: { currency: "EUR", symbolAfter: true, taxName: "VAT" } })?.includes("12346 € revenue before VAT")],
+    [true, true, true], "the digest: the amount written as before ($12346, GST) unless the business set another currency or tax name");
 
   console.log(`ingest-ads-stats: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);

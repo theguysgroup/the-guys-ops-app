@@ -2,9 +2,11 @@
 // (the runner swaps the esm.sh import for a stub, appends this file and runs it with npx tsx).
 // deno-lint-ignore-file no-explicit-any
 
+// The business's own names as the C-names SQL saves them (round 3): today's words, now coming from the settings row.
+const SETTINGS_ROW = () => ({ company_name: "The Guys Service Group", catalog: { business: { phone: "1300 380 090", shortName: "The Guys Group" }, brands: { Aircon: "The AC Cleaning Guys", Chimney: "The Chimney Guys", "Pressure Washing": "The Pressure Washing Guys" } } });
 // ── a small in-memory stand-in for the Supabase client ──
 function fakeDb(seed: Record<string, any[]> = {}) {
-  const T: Record<string, any[]> = { contacts: [], chat_sessions: [], lead_messages: [], sms_opt_outs: [], calls: [], settings: [{ id: 1, chat_auto_sms: true, chat_tick_at: null }], ...seed };
+  const T: Record<string, any[]> = { contacts: [], chat_sessions: [], lead_messages: [], sms_opt_outs: [], calls: [], settings: [{ id: 1, chat_auto_sms: true, chat_tick_at: null, ...SETTINGS_ROW() }], profiles: [{ full_name: "Ron", role: "va" }], ...seed };
   function q(table: string) {
     const rows = () => (T[table] = T[table] || []);
     const filters: ((r: any) => boolean)[] = [];
@@ -77,6 +79,7 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   eq(officeOpen(Date.parse("2026-10-04T20:59:00Z")), false, "Mon 5 Oct 07:59 AEDT closed");
 
   // ── texts ──
+  useSettings(SETTINGS_ROW());
   eq(fill("{hi}, it's Ron from {brand} about {service}.", { first_name: "sarah", brand: "The Chimney Guys", service_text: "chimney cleaning" }), "Hi Sarah, it's Ron from The Chimney Guys about chimney cleaning.", "fill with name");
   eq(fill("{hi}, from {brand} about {service}.", { first_name: "", brand: "", service_text: "" }), "Hi there, from The Guys Group about your enquiry.", "fill without name");
   eq(cleanFirstName("TEST 10 - Claude"), "TEST", "first word only");
@@ -101,6 +104,19 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   const r2: any = await chatStart(db, { name: "Bob", phone: "0498765432", service: "nonsense" }, "", MON_1000);
   const s2 = db.T.chat_sessions.find((s: any) => s.id === r2.session);
   eq([s2.service_key, s2.brand, s2.service_text, db.T.lead_messages.find((m: any) => m.session_id === s2.id).body, intakes[1].division], ["other", "The Guys Group", "your enquiry", "Hi, I'd like a quote.", "Other"], "something else");
+  // the settings can't be read when a chat starts (cold instance, { data: null, error }): the chat is stored without a
+  // brand, and its texts get the service's brand once the settings are read again
+  {
+    const bad = fakeDb(), from0 = bad.from;
+    bad.from = (t: string) => t === "settings" ? { select: () => ({ limit: async () => ({ data: null, error: { message: "timeout" } }) }) } : from0(t);
+    useSettings(null);
+    const rb: any = await chatStart(bad, { name: "Tia", phone: "0433333333", service: "split" }, "", MON_1000);
+    const sb3 = bad.T.chat_sessions.find((s: any) => s.id === rb.session);
+    useSettings(SETTINGS_ROW());
+    eq([rb.ok, sb3.brand, fill("from {brand}", sb3)], [true, "", "from The AC Cleaning Guys"], "a failed settings read: no empty brand in the texts (the service's brand once read)");
+    await loadCatalog(bad);
+    eq(fill("from {brand}", { brand: "", service_key: "pw" }), "from The Pressure Washing Guys", "a failed read keeps the settings read last (never 'nothing saved')");
+  }
   for (let i = 0; i < 5; i++) await chatStart(db, { name: "Sam", phone: "0411111111", service: "pw" }, "", MON_1000);
   eq((await chatStart(db, { name: "Sam", phone: "0411111111", service: "pw" }, "", MON_1000)).reason, "limit", "a 6th chat in a day from one phone is refused");
   const keepIntake = io.intake;
@@ -277,14 +293,14 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   await tick(db, MON_1000);
   eq(sent[0] && sent[0].body && sent[0].body.startsWith("Hi Sarah, Ron here from The Chimney Guys."), true, "the next run with no templates: back to the approved words (nothing left over)");
   useTemplates({});
-  eq(introFor({ first_name: "sarah", brand: "The Chimney Guys", service_text: "chimney cleaning" }), "Hi Sarah, it's Ron from The Chimney Guys. You sent us a message on our website chat about chimney cleaning. I'll give you a call shortly, or you can reply here.", "intro: the approved words");
+  eq(introFor({ first_name: "sarah", brand: "The Chimney Guys", service_text: "chimney cleaning" }, "Ron"), "Hi Sarah, it's Ron from The Chimney Guys. You sent us a message on our website chat about chimney cleaning. I'll give you a call shortly, or you can reply here.", "intro: the approved words");
 
   // ── office hours, chat timings and brands from Settings (13 Oct); nothing saved = Mon–Fri 8–17, 5 min, 2 h, one a day ──
   useCatalog({});
   const MON_0730 = Date.parse("2026-10-11T20:30:00Z"), SAT_10 = Date.parse("2026-10-09T23:00:00Z"), MON_LABOUR = Date.parse("2026-10-04T23:00:00Z");   // Mon 12 Oct 7:30, Sat 10 Oct 10:00, Mon 5 Oct (Labour Day) 10:00
   eq([officeOpen(MON_1000), officeOpen(MON_0730), officeOpen(SAT_10), officeOpen(MON_LABOUR)], [true, false, false, true], "office hours: the original Mon-Fri 8-17, public holidays not off");
   eq(chatRules(), { waitMinutes: 5, windowHours: 2, oneADay: true }, "chat rules: the originals");
-  useCatalog({ hours: { days: { 1: { on: true, from: "07:00", to: "17:00" }, 6: { on: true, from: "09:00", to: "13:00" } }, nsw: true, extra: [{ date: "2026-09-28", name: "Team day" }] }, chat: { waitMinutes: 10, windowHours: 4, oneADay: false }, brands: { Chimney: "Chimney Pros" } });
+  useCatalog({ hours: { days: { 1: { on: true, from: "07:00", to: "17:00" }, 6: { on: true, from: "09:00", to: "13:00" } }, nsw: true, extra: [{ date: "2026-09-28", name: "Team day" }] }, holidays: { region: "AU-NSW", days: { "2026-10-05": "Labour Day" } }, chat: { waitMinutes: 10, windowHours: 4, oneADay: false }, brands: { Chimney: "Chimney Pros" } });
   eq([officeOpen(MON_0730), officeOpen(SAT_10), officeOpen(MON_LABOUR), officeOpen(MON_1000)], [true, true, false, false], "office hours from Settings: Monday from 7:00, Saturday morning open, Labour Day off (NSW on), own day off closed");
   eq([chatRules(), brandFor("Chimney", "The Chimney Guys"), brandFor("Aircon", "The AC Cleaning Guys")], [{ waitMinutes: 10, windowHours: 4, oneADay: false }, "Chimney Pros", "The AC Cleaning Guys"], "chat rules and a renamed brand from Settings");
   useCatalog({ chat: { waitMinutes: 120, windowHours: 2 } });
@@ -307,6 +323,83 @@ const MON_1000 = Date.parse("2026-09-28T00:00:00Z");          // Mon 28 Sep 10:0
   eq(db.T.sms_opt_outs.length, 0, "START → back in");
   await smsIn(db, { From: "+61455555555", Body: "Hi do you clean gutters?" }, MON_1000);
   eq(db.T.contacts.find((c: any) => c.id !== "c9").full_name, "Text from 0455 555 555", "unknown number → a new card");
+  // the new card's day is the business's day (its time zone, read with the catalog): Mon 28 Sep 10:00 Sydney = Sun 27 Sep in Chicago
+  db = fakeDb({ contacts: [] }); db.T.settings[0].catalog = { region: { timeZone: "America/Chicago" } };
+  await smsIn(db, { From: "+61466666666", Body: "hello" }, MON_1000);
+  // (a bare date is midnight UTC in the timestamptz column = the evening before in Chicago, so west of UTC it is noon that day)
+  eq(db.T.contacts[0] && db.T.contacts[0].created_at, "2026-09-27T17:00:00.000Z", "a text from a new number: the card is on the business's day (noon Sun 27 Sep in Chicago)");
+  eq([bizDayStamp("2026-10-14", "Australia/Sydney"), bizDayStamp("2026-10-14", "UTC"), bizDayStamp("2026-10-14", "America/Chicago"), bizParts(Date.parse(bizDayStamp("2026-10-14", "America/Los_Angeles")), "America/Los_Angeles").day],
+    ["2026-10-14", "2026-10-14", "2026-10-14T17:00:00.000Z", "2026-10-14"], "bizDayStamp: the bare date where midnight UTC is that day (Sydney as before), else noon that day in the zone");
+  db = fakeDb({ contacts: [] });
+  await smsIn(db, { From: "+61466666666", Body: "hello" }, MON_1000);
+  eq(db.T.contacts[0] && db.T.contacts[0].created_at, "2026-09-28", "…and Sydney's day when no time zone is saved");
+
+  // ── the region (T1.2/T1.3): office hours in the business's time zone; public holidays from the stored list ──
+  useCatalog({ region: { timeZone: "America/Chicago" } });
+  eq([officeOpen(Date.parse("2026-09-28T13:00:00Z")), officeOpen(Date.parse("2026-09-28T12:59:00Z"))], [true, false], "office hours follow the business's time zone (Mon 08:00 / 07:59 in Chicago)");
+  useCatalog({ hours: { nsw: true }, holidays: { region: "AU-NSW", days: { "2026-10-05": "Labour Day" } } });
+  eq(officeOpen(MON_LABOUR), false, "the stored public holidays with the old NSW switch: Labour Day closed");
+  useCatalog({ hours: { nsw: true } });
+  eq(officeOpen(MON_LABOUR), true, "the old NSW switch with no stored list = no public holidays (the SQL stores the list first)");
+  useCatalog({ hours: { publicOn: true, holidayOff: ["labour day"] }, holidays: { region: "AU-NSW", days: { "2026-10-05": "Labour Day" } } });
+  eq(officeOpen(MON_LABOUR), true, "a public holiday switched off is an office day");
+  useCatalog({});
+
+  // ── the business's names (round 3, T1.7/T1.9): the office's name, Business details, the office person ──
+  {
+    eq(signatureOf("Ron Smith", { name: "Acme", phone: "" }), "\n\nRon\nAcme", "signature: the author's first word and the business name (no phone saved)");
+    eq(signatureOf("", { name: "Acme", phone: "02 1", office: "Reception" }), "\n\nReception\nAcme\n02 1", "signature: no author = the office's name");
+    eq(signatureOf("", {}), "\n\nOffice", "signature: nothing at all = Office");
+    useCatalog({});
+    const DAY = "2026-09-28";
+    eq(agentName([{ full_name: "Zoe Lee", role: "va" }, { full_name: "kim day", role: "va", on_duty: true, on_duty_date: DAY }, { full_name: "Adam", role: "owner" }], DAY), "Kim", "agent: the VA on shift today first");
+    eq(agentName([{ full_name: "Zoe Lee", role: "va" }, { full_name: "Kim Day", role: "va", on_duty: true, on_duty_date: "2026-09-27" }], DAY), "Kim", "agent: nobody on shift today = A–Z");
+    eq(agentName([{ full_name: "Adam", role: "owner" }], DAY), "Office", "agent: no VA = Office");
+    useCatalog({ labels: { office: " Reception " } });
+    eq([agentName([], DAY), officeLabel()], ["Reception", "Reception"], "agent: no VA = the office's name");
+    useCatalog({});
+    // the automatic text is from the VA on shift; the log says who
+    let ndb = fakeDb({ chat_sessions: [mk({})], profiles: [{ full_name: "Ron", role: "va" }, { full_name: "Kim Day", role: "va", on_duty: true, on_duty_date: "2026-09-28" }] });
+    sent.length = 0;
+    await tick(ndb, MON_1000);
+    eq([sent[0] && sent[0].body.startsWith("Hi Sarah, Kim here from The Chimney Guys."), ndb.T.lead_messages[0].author], [true, "Kim (automatic)"], "tick: the text names the VA on shift");
+    ndb = fakeDb({ chat_sessions: [mk({})], profiles: [] });
+    ndb.T.settings[0].catalog = { ...ndb.T.settings[0].catalog, labels: { office: "Reception" } };
+    sent.length = 0;
+    await tick(ndb, MON_1000);
+    eq([sent[0] && sent[0].body.startsWith("Hi Sarah, Reception here from The Chimney Guys."), ndb.T.lead_messages[0].author], [true, "Reception (automatic)"], "tick: no VA = the office's name");
+    // 'something else' in the chat: the short name, else the business name
+    ndb = fakeDb();
+    const ro: any = await chatStart(ndb, { name: "Bob", phone: "0498765432", service: "other" }, "", MON_1000);
+    eq(ndb.T.chat_sessions.find((s: any) => s.id === ro.session).brand, "The Guys Group", "chat about something else: the short name");
+    ndb = fakeDb(); ndb.T.settings[0] = { id: 1, chat_auto_sms: true, company_name: "Acme Plumbing", catalog: {} };
+    const ro2: any = await chatStart(ndb, { name: "Bob", phone: "0498765432", service: "split" }, "", MON_1000);
+    eq(ndb.T.chat_sessions.find((s: any) => s.id === ro2.session).brand, "Acme Plumbing", "no short name and no brand saved: the business name");
+    // the customer's window shows the replier's first name
+    ndb.T.contacts.push({ id: "c-new", phone: "0498765432" });
+    ndb.T.chat_sessions[0].contact_id = "c-new";
+    await reply(ndb, { id: "u1", full_name: "kim day" }, { contact_id: "c-new", channel: "chat", text: "Hi Bob" }, MON_1000 + 1000);
+    eq((await chatPoll(ndb, { session: ro2.session, token: ro2.token }, MON_1000 + 2000)).messages.map((m: any) => m.author), ["Kim"], "chat poll: the author is the replier's first name");
+    // the email signature and subject from Business details
+    ndb.T.contacts[0].email = "bob@example.com"; ndb.T.contacts[0].division = "Other";
+    ndb.T.settings[0] = { id: 1, chat_auto_sms: true, company_name: "Acme", catalog: {} };
+    const er: any = await reply(ndb, { id: "u1", full_name: "Ron" }, { contact_id: "c-new", channel: "email", text: "Quote attached." }, MON_1000);
+    const qm = ndb.T.lead_messages[ndb.T.lead_messages.length - 1];
+    eq([er.ok, qm.subject], [true, "Your enquiry - Acme"], "email subject: no brand for the service = the business name");
+    qm.subject = "";
+    const ae2: any = await alerts(ndb, { id_token: "good-token-good-token" }, MON_1000 + 1000);
+    const m2 = ae2.emails.find((x: any) => x.id === "m:" + qm.id);
+    eq([m2 && m2.text, m2 && m2.subject], ["Quote attached.\n\nRon\nAcme", "Acme"], "alerts: signed with the business name (no phone saved); an empty subject = the business name");
+    // the daily report with no name on the login: the office's name
+    ndb.T.myday_days = []; ndb.T.settings[0].catalog = { labels: { office: "Dispatch" } };
+    await dailyReport(ndb, { id: "u2", full_name: "" }, { day: "2026-09-28", text: "Report" }, MON_1000);
+    eq(ndb.T.lead_messages[ndb.T.lead_messages.length - 1].author, "Dispatch", "daily report: no name = the office's name");
+    useSettings(SETTINGS_ROW());
+    // no person's or business's name left in the code (comments aside)
+    const fs: any = await import("node:fs");
+    const code = String(fs.readFileSync("index.ts", "utf8")).split("\n").filter((l: string) => !/^\s*\/\//.test(l)).join("\n");
+    eq(["Ron", "The Guys", "1300 380"].filter((w) => new RegExp("\\b" + w + "\\b").test(code)), [], "no 'Ron', 'The Guys' or '1300 380' in the code");
+  }
 
   // ── Twilio signature ──
   const url = "https://x.supabase.co/functions/v1/conversations?step=sms_in";

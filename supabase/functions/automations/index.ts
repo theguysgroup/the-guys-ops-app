@@ -82,6 +82,9 @@ export const io = {
   build: (sub: any, payload: string, opts: any) => webpush.generateRequestDetails(sub, payload, opts),
   generate: () => webpush.generateVAPIDKeys() as { publicKey: string; privateKey: string },
   now: () => Date.now(),
+  // The public holiday library (the same version the app loads from jsdelivr), loaded only when the stored list needs it.
+  // deno-lint-ignore no-explicit-any
+  holidayLib: async (): Promise<any> => (await import("npm:date-holidays@3.37.0")).default,
   // The timer answers at once (pg_net gives up after 10 s) and keeps working in the background.
   waitUntil: (p: Promise<unknown>) => {
     // deno-lint-ignore no-explicit-any
@@ -89,6 +92,110 @@ export const io = {
     if (er && typeof er.waitUntil === "function") er.waitUntil(p);
   },
 };
+
+// ── region (Settings → Business details → Region and format; the same rules as the app's bizTz/moneyText/holidayDaysOf). Copied into every function — keep the copies identical (tests/business-logic.test.js checks). ──
+// Nothing saved = this business's values until 14 Oct: Sydney time, "$" amounts, GST, New South Wales (T1.2/T1.3).
+export const REGION_DEFAULTS = { timeZone: "Australia/Sydney", currency: "AUD", country: "AU", state: "NSW" };
+export const TAX_NAMES: Record<string, string> = { AU: "GST", NZ: "GST", CA: "GST", SG: "GST", IN: "GST", GB: "VAT", IE: "VAT", ZA: "VAT", AE: "VAT", US: "Sales tax" };
+export const MONEY_FORMATS = [["1,234.56", ",", "."], ["1.234,56", ".", ","], ["1 234,56", " ", ","]];
+const REGION_TZ_OK = new Map<string, boolean>();
+const REGION_FMT = new Map<string, Intl.DateTimeFormat>();
+export function tzValid(tz: unknown): boolean {
+  if (typeof tz !== "string" || !tz.trim()) return false;
+  if (!REGION_TZ_OK.has(tz)) { let ok = true; try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); } catch { ok = false; } REGION_TZ_OK.set(tz, ok); }
+  return REGION_TZ_OK.get(tz) === true;
+}
+// deno-lint-ignore no-explicit-any
+export function regionOf(cat: any): Record<string, any> { const r = cat && typeof cat === "object" ? cat.region : null; return r && typeof r === "object" ? r : {}; }
+// The business's time zone (settings.catalog.region.timeZone; a name the runtime doesn't know counts as not set).
+// deno-lint-ignore no-explicit-any
+export function bizTzOf(cat: any): string { const r = regionOf(cat); return tzValid(r.timeZone) ? r.timeZone : REGION_DEFAULTS.timeZone; }
+// deno-lint-ignore no-explicit-any
+export function bizTzSet(cat: any): boolean { return tzValid(regionOf(cat).timeZone); }
+// 'AU-NSW', 'US-TX', 'SG': the place the stored public holidays were worked out for (nothing chosen = AU-NSW).
+// deno-lint-ignore no-explicit-any
+export function regionKeyOf(r: any): string {
+  const x = r && typeof r === "object" ? r : {};
+  const country = /^[A-Z]{2}$/.test(String(x.country || "")) ? x.country : REGION_DEFAULTS.country;
+  const state = x.country ? String(x.state || "") : REGION_DEFAULTS.state;
+  return state ? `${country}-${state}` : country;
+}
+// The wall clock in tz at an instant: { day 'YYYY-MM-DD', dow 0 = Sunday, hour, minute, minutes after midnight }.
+export function bizParts(ms: number, tz: string) {
+  let f = REGION_FMT.get(tz);
+  if (!f) { f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false }); REGION_FMT.set(tz, f); }
+  const p = Object.fromEntries(f.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  const hour = Number(p.hour) % 24, minute = Number(p.minute);
+  return { day: `${p.year}-${p.month}-${p.day}`, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(String(p.weekday)), hour, minute, minutes: hour * 60 + minute };
+}
+// The UTC instant of a wall-clock time in tz (two passes handle daylight saving).
+export function bizToUtc(day: string, hh: number, mm: number, tz: string): number {
+  const [y, m, d] = day.split("-").map(Number);
+  let t = Date.UTC(y, m - 1, d, hh, mm);
+  const want = Date.UTC(y, m - 1, d, hh, mm);
+  const wall = (ms: number) => { const p = bizParts(ms, tz), [py, pm, pd] = p.day.split("-").map(Number); return Date.UTC(py, pm - 1, pd, p.hour, p.minute); };
+  for (let i = 0; i < 2; i++) t -= wall(t) - want;
+  // a wall time the clocks jump over (a daylight-saving gap, at midnight in some zones): the same time after the jump on
+  // the same day, never the evening before
+  const got = wall(t);
+  if (got < want) t += want - got;
+  return t;
+}
+// A business day for a timestamptz column that used to get the bare date ('2026-10-14' = midnight UTC): the same bare
+// date where midnight UTC is still that day in the zone (Sydney: exactly as before), else noon that day in the zone, so
+// zones west of UTC don't file the record under the day before.
+export function bizDayStamp(day: string, tz: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return bizParts(Date.UTC(y, m - 1, d), tz).day === day ? day : new Date(bizToUtc(day, 12, 0, tz)).toISOString();
+}
+// A word the owner typed, kept free of HTML and quote characters.
+export function regionWord(v: unknown, max: number): string { return String(v || "").replace(/[<>&"'`\\]/g, "").trim().slice(0, max); }
+// What the sales tax is called (GST / VAT / Sales tax / the business's own word).
+// deno-lint-ignore no-explicit-any
+export function taxNameOf(cat: any): string {
+  const r = regionOf(cat), country = /^[A-Z]{2}$/.test(String(r.country || "")) ? r.country : REGION_DEFAULTS.country;
+  return regionWord(r.taxName, 20) || TAX_NAMES[country] || "Tax";
+}
+export function currencySymbolOf(code: string): string {
+  try { const p = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" }).formatToParts(0).find((x) => x.type === "currency"); return p ? p.value : code; }
+  catch { return code; }
+}
+// The currency's cents: 2 for AUD/USD, 0 for JPY/KRW, 3 for KWD/BHD (2 when the runtime doesn't know the code).
+export function currencyDecimalsOf(code: string): number {
+  try { const n = new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions().maximumFractionDigits; return Number.isInteger(n) ? n : 2; }
+  catch { return 2; }
+}
+// An amount as the business writes it. digits: "auto" = no cents on whole amounts, 2 = always cents, "plain" = as the
+// number comes ("$1,234.5"), "raw" = no thousands separator ("$1234"). Nothing saved = exactly what the functions wrote
+// before 14 Oct.
+// deno-lint-ignore no-explicit-any
+export function moneyText(n: number, cat: any, digits: "auto" | 2 | "plain" | "raw" = "plain"): string {
+  const r = regionOf(cat), x = Number(n);
+  const code = /^[A-Z]{3}$/.test(String(r.currency || "")) ? r.currency : REGION_DEFAULTS.currency;
+  const sym = regionWord(r.currencySymbol, 4) || currencySymbolOf(code), dec = currencyDecimalsOf(code);
+  const fmt = MONEY_FORMATS.find((f) => f[0] === r.moneyFormat) || MONEY_FORMATS[0];
+  // "cents" = the currency's own: none for JPY, three for KWD
+  const opts = digits === "auto" ? { minimumFractionDigits: Math.abs(x - Math.round(x)) < 1e-9 ? 0 : dec, maximumFractionDigits: dec }
+    : digits === 2 ? { minimumFractionDigits: dec, maximumFractionDigits: dec } : undefined;
+  let s = digits === "raw" ? String(x) : x.toLocaleString("en-US", opts);
+  if (fmt !== MONEY_FORMATS[0]) s = s.replace(/[,.]/g, (ch) => ch === "," ? fmt[1] : fmt[2]);
+  return r.symbolAfter === true ? `${s} ${sym}` : sym + s;
+}
+// One key per public holiday, its moved ("additional"/"substitute") day included.
+export function holidayKey(name: unknown): string { return String(name || "").replace(/\s*\((?:additional|substitute) day\)\s*$/i, "").trim().toLowerCase(); }
+// The public holidays that are days off: none while the switch is off (hours.publicOn, or the old hours.nsw), none when the
+// stored list (catalog.holidays, worked out by the app) is for another region, minus the ones switched off (hours.holidayOff).
+// deno-lint-ignore no-explicit-any
+export function holidayDaysOf(cat: any): Record<string, string> {
+  const c = cat && typeof cat === "object" ? cat : {}, h = c.hours && typeof c.hours === "object" ? c.hours : {};
+  if (!(h.publicOn ?? h.nsw)) return {};
+  const ph = c.holidays;
+  if (!ph || !ph.days || typeof ph.days !== "object" || ph.region !== regionKeyOf(c.region || {})) return {};
+  const off = new Set(Array.isArray(h.holidayOff) ? h.holidayOff : []), out: Record<string, string> = {};
+  for (const [d, name] of Object.entries(ph.days)) if (/^\d{4}-\d{2}-\d{2}$/.test(d) && !off.has(holidayKey(name))) out[d] = String(name);
+  return out;
+}
+// ── end region ──
 
 // ── phone notifications: copied byte for byte from push/index.ts (a test fails if the two copies ever differ) ──
 // deno-lint-ignore no-explicit-any
@@ -211,9 +318,7 @@ export function hm(t: unknown): number | null {
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
 // Office hours and days off (Settings → Office hours and holidays): the same rules and defaults as conversations'
-// officeOpen (copied), in the business's time zone.
-const NSW_HOLIDAYS = new Set(["2026-01-01", "2026-01-26", "2026-04-03", "2026-04-04", "2026-04-05", "2026-04-06", "2026-04-25", "2026-04-27", "2026-06-08", "2026-10-05", "2026-12-25", "2026-12-26", "2026-12-28",
-  "2027-01-01", "2027-01-26", "2027-03-26", "2027-03-27", "2027-03-28", "2027-03-29", "2027-04-25", "2027-04-26", "2027-06-14", "2027-10-04", "2027-12-25", "2027-12-26", "2027-12-27", "2027-12-28"]);
+// officeOpen (copied), in the business's time zone. Public holidays: the stored list of the region (holidayDaysOf).
 const looseHm = (t: unknown) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || "")); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 // deno-lint-ignore no-explicit-any
 function officeDays(cat: any): ({ from: number; to: number } | null)[] {
@@ -229,9 +334,58 @@ function officeDays(cat: any): ({ from: number; to: number } | null)[] {
 // deno-lint-ignore no-explicit-any
 function officeClosedDay(cat: any, day: string): boolean {
   const h = obj(cat && cat.hours);
-  if (h.nsw && NSW_HOLIDAYS.has(day)) return true;
+  if (holidayDaysOf(cat)[day]) return true;
   // deno-lint-ignore no-explicit-any
   return Array.isArray(h.extra) && h.extra.some((x: any) => x && x.date === day);
+}
+// ── The stored public holidays, kept up to date by the server too (T1.3) ──
+// The app works catalog.holidays out in an owner's session; the timer does the same when nobody has opened the app, so
+// the office's days off never depend on an owner's browser. Same rules as the app's holidaysFromLib / holidaysStale.
+export const HOLIDAY_SOURCE = "date-holidays@3.37.0";
+// How a country names a holiday moved to a weekday (the library says "substitute day"): AU says "additional day".
+export const HOLIDAY_WORDING: Record<string, [RegExp, string][]> = { AU: [[/\s*\(substitute day\)$/i, " (additional day)"]] };
+// deno-lint-ignore no-explicit-any
+export function holidaysFromLib(H: any, country: string, state: string, fromYear: number, years: number, nowIso: string) {
+  const hd = state ? new H(country, state, { types: ["public"] }) : new H(country, { types: ["public"] });
+  const words = HOLIDAY_WORDING[country] || [], days: Record<string, string> = {};
+  for (let y = fromYear; y < fromYear + years; y++) {
+    for (const x of hd.getHolidays(y, "en") || []) {
+      const d = String((x && x.date) || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || days[d]) continue;
+      days[d] = words.reduce((t, [re, to]) => t.replace(re, to), String(x.name || "Public holiday"));
+    }
+  }
+  const sorted: Record<string, string> = {}; Object.keys(days).sort().forEach((d) => { sorted[d] = days[d]; });
+  return { region: state ? `${country}-${state}` : country, source: HOLIDAY_SOURCE, generatedAt: nowIso, from: `${fromYear}-01-01`, to: `${fromYear + years - 1}-12-31`, days: sorted };
+}
+// Why the stored list must be worked out again: 'missing', 'region' (made for another region), 'coverage' (under a year left), '' = fine.
+// deno-lint-ignore no-explicit-any
+export function holidaysStale(cat: any, today: string): string {
+  const c = cat && typeof cat === "object" ? cat : {}, ph = c.holidays;
+  if (!ph || !ph.days || typeof ph.days !== "object" || !/^\d{4}-\d{2}-\d{2}$/.test(String(ph.to || ""))) return "missing";
+  if (ph.region !== regionKeyOf(c.region || {})) return "region";
+  const ms = (d: string) => { const [y, m, dd] = d.split("-").map(Number); return Date.UTC(y, m - 1, dd); };
+  return Math.round((ms(String(ph.to)) - ms(today)) / DAY) < 365 ? "coverage" : "";
+}
+let HOLIDAYS_TRIED = "";
+// Once a day per region at most (a failure is not retried every minute): when the switch is on and the stored list is
+// stale, work it out for this year and the next two and save ONLY catalog.holidays (set_catalog_holidays), so an owner's
+// other settings are never overwritten. cat.holidays is updated for this run. Returns what it did.
+// deno-lint-ignore no-explicit-any
+export async function refreshHolidays(sb: any, cat: any, nowMs: number): Promise<string> {
+  const h = obj(cat && cat.hours);
+  if (!(h.publicOn ?? h.nsw)) return "off";
+  const today = bizParts(nowMs, bizTzOf(cat)).day, why = holidaysStale(cat, today);
+  if (!why) return "";
+  const r = regionOf(cat), country = /^[A-Z]{2}$/.test(String(r.country || "")) ? r.country : REGION_DEFAULTS.country;
+  const state = r.country ? String(r.state || "") : REGION_DEFAULTS.state, key = `${country}-${state}|${today}`;
+  if (HOLIDAYS_TRIED === key) return "tried";
+  HOLIDAYS_TRIED = key;
+  const year = Number(today.slice(0, 4)), list = holidaysFromLib(await io.holidayLib(), country, state, year, 3, iso(nowMs));
+  const { error } = await sb.rpc("set_catalog_holidays", { p_holidays: list });
+  if (error) throw new Error(String(error.message || error));
+  cat.holidays = list;
+  return why;
 }
 // The allowed stretches of one local day, in minutes: [{ from, to }].
 // deno-lint-ignore no-explicit-any
@@ -458,7 +612,8 @@ const ALL_TRIGGERS = Object.keys(TRIGGERS);
 
 // What the engine knows about one record when it checks conditions and fills messages (always read fresh).
 // deno-lint-ignore no-explicit-any
-export type Facts = { kind: string; type: string; contact: any; job: any; call: any; chat: any; ctx: Record<string, any>; eventAt: string; S: Settings; cat: any; company: string; nowMs: number };
+// agent = the office person's first name ({agent}; TickCtx.agent).
+export type Facts = { kind: string; type: string; contact: any; job: any; call: any; chat: any; ctx: Record<string, any>; eventAt: string; S: Settings; cat: any; company: string; nowMs: number; agent?: string };
 const stageNow = (c: { status?: string; linked_job_id?: unknown }) => c.linked_job_id ? "Won" : String(c.status || "");
 const customerPhone = (f: Facts) => (f.contact && f.contact.phone) || (f.call && f.call.from_number) || (f.chat && f.chat.phone) || "";
 
@@ -618,6 +773,7 @@ export const MERGE_FIELDS: Record<string, { label: string; events: string[] }> =
   service: { label: "Service", events: ALL_TRIGGERS },
   brand: { label: "Brand of the service", events: ALL_TRIGGERS },
   business_name: { label: "Business name", events: ALL_TRIGGERS },
+  agent: { label: "Office person's first name", events: ALL_TRIGGERS },
   suburb: { label: "Suburb or postcode", events: ALL_TRIGGERS },
   source: { label: "Lead source", events: ALL_TRIGGERS },
   stage: { label: "Pipeline stage", events: ALL_TRIGGERS },
@@ -647,26 +803,48 @@ export function mergeVars(f: Facts, a: any): Record<string, string> {
   const name = String((c && c.full_name) || (chat && chat.full_name) || (j && j.customer_name) || "").trim();
   const first = cleanFirstName((chat && chat.first_name) || name);
   const division = String((c && c.division) || (j && j.job_type) || (call && call.division) || "");
+  // The service's brand, else the business name (as before 14 Oct; the short name is only the chat and text word).
   const brands = obj(f.cat && f.cat.brands), brand = typeof brands[division] === "string" && brands[division].trim() ? brands[division].trim() : f.company;
   const phone = String(customerPhone(f)), e164 = toE164(phone);
   const minutes = firstWaitMinutes(a);
   return {
     hi: first ? `Hi ${first}` : "Hi there", first_name: first, name,
     service: (chat && chat.service_text) || catLabel(f.cat, "services", division),
-    brand, business_name: f.company, suburb: String((c && (c.suburb || c.postcode)) || ""),
+    brand, business_name: f.company, agent: String(f.agent || "").trim() || officeOf(f.cat), suburb: String((c && (c.suburb || c.postcode)) || ""),
     source: c && c.source ? catLabel(f.cat, "sources", c.source) : "",
     stage: c ? catLabel(f.cat, "stages", stageNow(c)) : "",
     number: e164 ? pretty(e164) : phone,
     technician: j ? cleanFirstName(j.technician) : "",
-    amount: j && j.amount != null && j.amount !== "" && Number.isFinite(Number(j.amount)) ? "$" + Number(j.amount).toLocaleString("en-AU") : "",
+    amount: j && j.amount != null && j.amount !== "" && Number.isFinite(Number(j.amount)) ? moneyText(Number(j.amount), f.cat, "plain") : "",
     job_date: j ? String(j.date || "") : "",
     minutes: minutes ? String(minutes) : "", automation: String(a.name || ""),
   };
 }
-// What conversations' alerts step adds under every email it hands to the info@ mailbox (shown in the builder's preview).
-// It signs with the FIRST WORD of the author, then a fixed name and number (P3: conversations does not change in this
-// phase; moving the signature into settings is part of moving the email path into the engine).
-export function signatureOf(author: string): string { return `\n\n${String(author || "Ron").split(" ")[0]}\nThe Guys Service Group\n1300 380 090`; }
+// What conversations' alerts step adds under every email it hands to the info@ mailbox (shown in the builder's preview):
+// the FIRST WORD of the author (else the office's name), then the business name and main phone from Business details
+// (round 3, T1.7). Identical to the conversations copy (a test compares the two).
+export function signatureOf(author: string, biz: { name?: string; phone?: string; office?: string }): string {
+  const who = String(author || "").trim().split(" ")[0] || String(biz.office || "").trim() || "Office";
+  return "\n\n" + [who, String(biz.name || "").trim(), String(biz.phone || "").trim()].filter(Boolean).join("\n");
+}
+// The office's name (Settings → Phone, catalog.labels.office); nothing saved = "Office".
+// deno-lint-ignore no-explicit-any
+export function officeOf(cat: any): string { const v = String(obj(obj(cat).labels).office || "").trim(); return v ? v.slice(0, 30) : "Office"; }
+// The business details the signature uses: its name (settings.company_name), main phone and the office's name.
+// deno-lint-ignore no-explicit-any
+export function bizOf(company: string, cat: any) { const b = obj(cat && cat.business); return { name: String(company || "").trim(), phone: String(b.phone || "").trim(), office: officeOf(cat) }; }
+// {agent}: the office person a message is from, as conversations' agentName: the VA on shift today first, then A–Z by
+// name; none = the office's name.
+// deno-lint-ignore no-explicit-any
+export function agentOf(profiles: any[], day: string, cat: any): string {
+  // deno-lint-ignore no-explicit-any
+  const vas = (profiles || []).filter((p: any) => p && p.role === "va" && String(p.full_name || "").trim());
+  // deno-lint-ignore no-explicit-any
+  const on = (p: any) => !!p.on_duty && String(p.on_duty_date) === day;
+  // deno-lint-ignore no-explicit-any
+  vas.sort((a: any, b: any) => (on(a) === on(b) ? String(a.full_name).localeCompare(String(b.full_name)) : on(a) ? -1 : 1));
+  return (vas.length && cleanFirstName(vas[0].full_name)) || officeOf(cat);
+}
 // Who signs an automatic email: the business's signer (Automations → Safety), else the first name of the person who made
 // the automation. Never a phrase ("The team" would be signed "The"); none = the email is not sent.
 // deno-lint-ignore no-explicit-any
@@ -746,14 +924,22 @@ export function audienceOf(a: any): "team" | "customer" {
 // The engine
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // deno-lint-ignore no-explicit-any
-export type TickCtx = { S: Settings; cat: any; company: string; autos: Map<string, any>; counts: Record<string, number> };
+export type TickCtx = { S: Settings; cat: any; company: string; agent?: string; autos: Map<string, any>; counts: Record<string, number> };
 const newCounts = () => ({ events: 0, enqueued: 0, processed: 0, sent: 0, queued: 0, skipped: 0, deferred: 0 });
 // deno-lint-ignore no-explicit-any
-export async function loadContext(sb: any): Promise<TickCtx> {
+export async function loadContext(sb: any, nowMs = Date.now()): Promise<TickCtx> {
   const { data: srow } = await sb.from("automation_settings").select("*").eq("business_id", BUSINESS_ID).maybeSingle();
-  const { data: st } = await sb.from("settings").select("company_name, catalog").limit(1);
-  const set = (st && st[0]) || {};
-  return { S: normSettings(srow), cat: obj(set.catalog), company: String(set.company_name || "").trim(), autos: new Map(), counts: newCounts() };
+  const { data: st, error: stErr } = await sb.from("settings").select("company_name, catalog").limit(1);
+  // the names, brands and days off are in the settings: a failed read stops this run (the next minute tries again), it
+  // never runs as if nothing were saved
+  if (stErr) throw new Error("settings not read: " + String(stErr.message || stErr));
+  const set = (st && st[0]) || {}, cat = obj(set.catalog), S = normSettings(srow);
+  // One time zone (T1.2): the business's (Region and format) wins; else the old automation_settings value; else Sydney.
+  if (bizTzSet(cat)) S.timezone = bizTzOf(cat);
+  // {agent} (T1.7): the office people, read once a run; if they can't be read, the office's name.
+  let agent = officeOf(cat);
+  try { agent = agentOf(await rows(sb.from("profiles").select("full_name, role, on_duty, on_duty_date").eq("role", "va")), zoneParts(nowMs, S.timezone).day, cat); } catch { /* the office's name */ }
+  return { S, cat, company: String(set.company_name || "").trim(), agent, autos: new Map(), counts: newCounts() };
 }
 // deno-lint-ignore no-explicit-any
 async function enabledAutomations(sb: any): Promise<any[]> {
@@ -775,7 +961,7 @@ export async function loadFacts(sb: any, run: any, T: TickCtx, nowMs: number): P
     if (error) throw new Error(String(error.message || error));
     return data || null;
   };
-  const f: Facts = { kind: run.record_kind, type: run.event_type, contact: null, job: null, call: null, chat: null, ctx: obj(run.context), eventAt: run.event_at, S: T.S, cat: T.cat, company: T.company, nowMs };
+  const f: Facts = { kind: run.record_kind, type: run.event_type, contact: null, job: null, call: null, chat: null, ctx: obj(run.context), eventAt: run.event_at, S: T.S, cat: T.cat, company: T.company, nowMs, agent: T.agent };
   const kind = run.record_kind, id = run.record_id;
   if (kind === "contact") { f.contact = await one("contacts", CONTACT_COLS, id); if (!f.contact) return null; return f; }
   const table = kind === "job" ? "jobs" : kind === "call" ? "calls" : kind === "chat" ? "chat_sessions" : "";
@@ -854,12 +1040,15 @@ export async function customerGuard(sb: any, S: Settings, f: Facts, channel: str
 
 const DEEP_LINK: Record<string, string> = { contact: "?tab=crm", job: "?tab=jobs", call: "?tab=myDay", chat: "?tab=crm" };
 const TASK_PRIORITIES = ["Low", "Medium", "High", "Urgent"];
-// The app's board rule (index.html boardForAssignees): a VA's or Ron's tasks — and tasks with no one — go on the 'ron' board.
+// The app's board rule (index.html boardForAssignees): the office's tasks — a VA login (full name, technician name or the
+// first word of the full name) or an employee with the VA role — and tasks with no one go on the office's board (its
+// storage key stays 'ron'); anyone else's on their own board.
 // deno-lint-ignore no-explicit-any
-export function boardFor(names: string[], profiles: any[]): string {
+export function boardFor(names: string[], profiles: any[], employees: any[] = []): string {
   const first = names[0]; if (!first) return "ron";
-  const va = profiles.find((p) => p.role === "va" && (p.full_name === first || p.technician_name === first));
-  return va || first === "Ron" ? "ron" : first;
+  const va = profiles.find((p) => p.role === "va" && (p.full_name === first || p.technician_name === first || String(p.full_name || "").trim().split(/\s+/)[0] === first))
+    || employees.some((e) => e && e.name === first && Array.isArray(e.roles) && e.roles.includes("VA"));
+  return va ? "ron" : first;
 }
 // deno-lint-ignore no-explicit-any
 async function pushRecipients(sb: any, st: any): Promise<{ ids: string[]; names: string[] }> {
@@ -895,9 +1084,10 @@ export async function execute(sb: any, st: any, a: any, f: Facts, T: TickCtx, no
   if (st.type === "task") {
     const names = await taskPeople(sb, st);
     const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
+    const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
     const c = f.contact;
     const row = {
-      board: boardFor(names, profiles), title: clip(fill(st.title), LIMITS.title), status: "Not Started",
+      board: boardFor(names, profiles, employees), title: clip(fill(st.title), LIMITS.title), status: "Not Started",
       due: st.due_days == null ? null : shiftDay(zoneParts(nowMs, T.S.timezone).day, Number(st.due_days)),
       notes: clip(fill(st.notes || ""), LIMITS.notes), client: (c && c.full_name) || "", contact_id: c ? c.id : null,
       priority: TASK_PRIORITIES.includes(st.priority) ? st.priority : "Medium", assignees: names, assigned_to: names[0] || "", heads_up: "",
@@ -1177,7 +1367,10 @@ export async function tick(sb: any, nowMs: number) {
   if (!got) return { ok: true, busy: true };
   const started = io.now();
   try {
-    const T = await loadContext(sb);
+    const T = await loadContext(sb, nowMs);
+    // the stored public holidays, worked out again when they run short or the region changed (never stops the run)
+    try { const h = await refreshHolidays(sb, T.cat, nowMs); if (h && h !== "off" && h !== "tried") console.log(`automations: public holidays worked out again (${h})`); }
+    catch (e) { console.error("automations: public holidays not worked out:", clip(String((e as Error).message || e), 200)); }
     const autos = await enabledAutomations(sb);
     for (const a of autos) T.autos.set(String(a.id), a);
     const valid = autos.filter((a) => !validateAutomation(a, T.cat).length);
@@ -1230,7 +1423,7 @@ async function eventStep(sb: any, body: any, me: any, nowMs: number) {
   const trig = TRIGGERS[type];
   const { data: row, error } = await sb.from(trig.table).select(trig.cols).eq("id", id).maybeSingle();
   if (error || !row) return { status: 404, body: { ok: false, reason: "not found" } };
-  const T = await loadContext(sb);
+  const T = await loadContext(sb, nowMs);
   const e = trig.fromRecord(row, T.S);
   if (!e) return { status: 200, body: { ok: true, runs: 0, reason: "no event" } };
   if (Date.parse(e.at) < nowMs - T.S.lookback_hours * HOUR) return { status: 200, body: { ok: true, runs: 0, reason: "old" } };
@@ -1253,7 +1446,7 @@ async function eventStep(sb: any, body: any, me: any, nowMs: number) {
 // deno-lint-ignore no-explicit-any
 async function previewStep(sb: any, body: any, me: any, nowMs: number) {
   if (!isOffice(me)) return { status: 403, body: { ok: false, reason: "owners and managers only" } };
-  const T = await loadContext(sb);
+  const T = await loadContext(sb, nowMs);
   // deno-lint-ignore no-explicit-any
   let a: any = body.automation && typeof body.automation === "object" ? body.automation : null;
   if (!a && body.automation_id) a = await readAutomation(sb, String(body.automation_id));
@@ -1301,7 +1494,8 @@ async function previewStep(sb: any, body: any, me: any, nowMs: number) {
     } else if (st.type === "task") {
       const names = await taskPeople(sb, st);
       const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
-      out.push({ id: st.id, kind: "action", type: "task", would: "add", board: boardFor(names, profiles), assignees: names, title: fillMerge(st.title, vars, known), notes: fillMerge(st.notes || "", vars, known),
+      const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
+      out.push({ id: st.id, kind: "action", type: "task", would: "add", board: boardFor(names, profiles, employees), assignees: names, title: fillMerge(st.title, vars, known), notes: fillMerge(st.notes || "", vars, known),
         due: st.due_days == null ? null : shiftDay(zoneParts(at, tz).day, Number(st.due_days)) });
     } else {
       const msg = messageOf(st, T.cat);
@@ -1309,7 +1503,7 @@ async function previewStep(sb: any, body: any, me: any, nowMs: number) {
       const author = st.type === "email" ? emailAuthor(T.S, a) : "";
       const g = st.type === "email" && !author ? { skip: "no email signer set" } : await customerGuard(sb, T.S, f, st.type, at, { ...a, enabled: true }, texts, T.cat);
       const verdict = "defer" in g ? { would: "wait", until: iso(g.defer) } : "skip" in g ? { would: "skip", reason: g.skip } : { would: st.type === "text" ? "wait for the business phone" : "queue", to: g.to };
-      out.push({ id: st.id, kind: "action", type: st.type, audience: act.audience, ...verdict, ...(st.type === "email" ? { subject: texts[0], body: emailBody(texts[1], T.S), signature: author ? signatureOf(author) : "" } : { body: texts[0] }),
+      out.push({ id: st.id, kind: "action", type: st.type, audience: act.audience, ...verdict, ...(st.type === "email" ? { subject: texts[0], body: emailBody(texts[1], T.S), signature: author ? signatureOf(author, bizOf(T.company, T.cat)) : "" } : { body: texts[0] }),
         ...(a.enabled ? {} : { note: "this automation is off: nothing is sent" }) });
     }
   }

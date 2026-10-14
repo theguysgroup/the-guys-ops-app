@@ -4,11 +4,11 @@
 //   1. keeps Jobs & Commissions in step with the sheet (syncSheetJobs);
 //   2. when settings.review_requests_auto is on (the one "Ask automatically" switch: automatic asking depends on it alone,
 //      Ofek 13 Oct; switched on only at go-live, Ofek 5 Oct), asks every new job from
-//      settings.reviews_from on that hasn't been asked: as soon as the job is in OPS, between 08:00 and 20:00 Sydney,
+//      settings.reviews_from on that hasn't been asked: as soon as the job is in OPS, between 08:00 and 20:00 business time,
 //      otherwise at 10:00 the next morning. Skipped: review taken, "don't ask", a customer asked in the last 6 months.
 //      A job it can't ask for (no customer card in the CRM, no mobile or email on the card, unknown job type) is written
 //      down as skipped, and the app puts it in the "Ask for a review" bubble on My Day for the office to fix and ask;
-//   3. sends what is due (08:00–20:00 Sydney) while automatic asking is on, or while settings.review_requests_enabled
+//   3. sends what is due (08:00–20:00 business time) while automatic asking is on, or while settings.review_requests_enabled
 //      (no switch in the app; it lets requests asked by hand go out) is on:
 //      - the SMS through the GHL workflow (GHL_REVIEW_WEBHOOK_URL), from the business's Australian number;
 //      - the email is handed to the same Google script, which runs under info@theguyservicegroup.com and sends it from
@@ -37,34 +37,123 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
 }
 
-// ── Sydney time ──
-const SYD = new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
-function sydParts(ms: number) {
-  const p = Object.fromEntries(SYD.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
-  return { day: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) % 24, minute: Number(p.minute) };
+// ── region (Settings → Business details → Region and format; the same rules as the app's bizTz/moneyText/holidayDaysOf). Copied into every function — keep the copies identical (tests/business-logic.test.js checks). ──
+// Nothing saved = this business's values until 14 Oct: Sydney time, "$" amounts, GST, New South Wales (T1.2/T1.3).
+export const REGION_DEFAULTS = { timeZone: "Australia/Sydney", currency: "AUD", country: "AU", state: "NSW" };
+export const TAX_NAMES: Record<string, string> = { AU: "GST", NZ: "GST", CA: "GST", SG: "GST", IN: "GST", GB: "VAT", IE: "VAT", ZA: "VAT", AE: "VAT", US: "Sales tax" };
+export const MONEY_FORMATS = [["1,234.56", ",", "."], ["1.234,56", ".", ","], ["1 234,56", " ", ","]];
+const REGION_TZ_OK = new Map<string, boolean>();
+const REGION_FMT = new Map<string, Intl.DateTimeFormat>();
+export function tzValid(tz: unknown): boolean {
+  if (typeof tz !== "string" || !tz.trim()) return false;
+  if (!REGION_TZ_OK.has(tz)) { let ok = true; try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); } catch { ok = false; } REGION_TZ_OK.set(tz, ok); }
+  return REGION_TZ_OK.get(tz) === true;
 }
+// deno-lint-ignore no-explicit-any
+export function regionOf(cat: any): Record<string, any> { const r = cat && typeof cat === "object" ? cat.region : null; return r && typeof r === "object" ? r : {}; }
+// The business's time zone (settings.catalog.region.timeZone; a name the runtime doesn't know counts as not set).
+// deno-lint-ignore no-explicit-any
+export function bizTzOf(cat: any): string { const r = regionOf(cat); return tzValid(r.timeZone) ? r.timeZone : REGION_DEFAULTS.timeZone; }
+// deno-lint-ignore no-explicit-any
+export function bizTzSet(cat: any): boolean { return tzValid(regionOf(cat).timeZone); }
+// 'AU-NSW', 'US-TX', 'SG': the place the stored public holidays were worked out for (nothing chosen = AU-NSW).
+// deno-lint-ignore no-explicit-any
+export function regionKeyOf(r: any): string {
+  const x = r && typeof r === "object" ? r : {};
+  const country = /^[A-Z]{2}$/.test(String(x.country || "")) ? x.country : REGION_DEFAULTS.country;
+  const state = x.country ? String(x.state || "") : REGION_DEFAULTS.state;
+  return state ? `${country}-${state}` : country;
+}
+// The wall clock in tz at an instant: { day 'YYYY-MM-DD', dow 0 = Sunday, hour, minute, minutes after midnight }.
+export function bizParts(ms: number, tz: string) {
+  let f = REGION_FMT.get(tz);
+  if (!f) { f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false }); REGION_FMT.set(tz, f); }
+  const p = Object.fromEntries(f.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  const hour = Number(p.hour) % 24, minute = Number(p.minute);
+  return { day: `${p.year}-${p.month}-${p.day}`, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(String(p.weekday)), hour, minute, minutes: hour * 60 + minute };
+}
+// The UTC instant of a wall-clock time in tz (two passes handle daylight saving).
+export function bizToUtc(day: string, hh: number, mm: number, tz: string): number {
+  const [y, m, d] = day.split("-").map(Number);
+  let t = Date.UTC(y, m - 1, d, hh, mm);
+  const want = Date.UTC(y, m - 1, d, hh, mm);
+  const wall = (ms: number) => { const p = bizParts(ms, tz), [py, pm, pd] = p.day.split("-").map(Number); return Date.UTC(py, pm - 1, pd, p.hour, p.minute); };
+  for (let i = 0; i < 2; i++) t -= wall(t) - want;
+  // a wall time the clocks jump over (a daylight-saving gap, at midnight in some zones): the same time after the jump on
+  // the same day, never the evening before
+  const got = wall(t);
+  if (got < want) t += want - got;
+  return t;
+}
+// A business day for a timestamptz column that used to get the bare date ('2026-10-14' = midnight UTC): the same bare
+// date where midnight UTC is still that day in the zone (Sydney: exactly as before), else noon that day in the zone, so
+// zones west of UTC don't file the record under the day before.
+export function bizDayStamp(day: string, tz: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return bizParts(Date.UTC(y, m - 1, d), tz).day === day ? day : new Date(bizToUtc(day, 12, 0, tz)).toISOString();
+}
+// A word the owner typed, kept free of HTML and quote characters.
+export function regionWord(v: unknown, max: number): string { return String(v || "").replace(/[<>&"'`\\]/g, "").trim().slice(0, max); }
+// What the sales tax is called (GST / VAT / Sales tax / the business's own word).
+// deno-lint-ignore no-explicit-any
+export function taxNameOf(cat: any): string {
+  const r = regionOf(cat), country = /^[A-Z]{2}$/.test(String(r.country || "")) ? r.country : REGION_DEFAULTS.country;
+  return regionWord(r.taxName, 20) || TAX_NAMES[country] || "Tax";
+}
+export function currencySymbolOf(code: string): string {
+  try { const p = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" }).formatToParts(0).find((x) => x.type === "currency"); return p ? p.value : code; }
+  catch { return code; }
+}
+// The currency's cents: 2 for AUD/USD, 0 for JPY/KRW, 3 for KWD/BHD (2 when the runtime doesn't know the code).
+export function currencyDecimalsOf(code: string): number {
+  try { const n = new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions().maximumFractionDigits; return Number.isInteger(n) ? n : 2; }
+  catch { return 2; }
+}
+// An amount as the business writes it. digits: "auto" = no cents on whole amounts, 2 = always cents, "plain" = as the
+// number comes ("$1,234.5"), "raw" = no thousands separator ("$1234"). Nothing saved = exactly what the functions wrote
+// before 14 Oct.
+// deno-lint-ignore no-explicit-any
+export function moneyText(n: number, cat: any, digits: "auto" | 2 | "plain" | "raw" = "plain"): string {
+  const r = regionOf(cat), x = Number(n);
+  const code = /^[A-Z]{3}$/.test(String(r.currency || "")) ? r.currency : REGION_DEFAULTS.currency;
+  const sym = regionWord(r.currencySymbol, 4) || currencySymbolOf(code), dec = currencyDecimalsOf(code);
+  const fmt = MONEY_FORMATS.find((f) => f[0] === r.moneyFormat) || MONEY_FORMATS[0];
+  // "cents" = the currency's own: none for JPY, three for KWD
+  const opts = digits === "auto" ? { minimumFractionDigits: Math.abs(x - Math.round(x)) < 1e-9 ? 0 : dec, maximumFractionDigits: dec }
+    : digits === 2 ? { minimumFractionDigits: dec, maximumFractionDigits: dec } : undefined;
+  let s = digits === "raw" ? String(x) : x.toLocaleString("en-US", opts);
+  if (fmt !== MONEY_FORMATS[0]) s = s.replace(/[,.]/g, (ch) => ch === "," ? fmt[1] : fmt[2]);
+  return r.symbolAfter === true ? `${s} ${sym}` : sym + s;
+}
+// One key per public holiday, its moved ("additional"/"substitute") day included.
+export function holidayKey(name: unknown): string { return String(name || "").replace(/\s*\((?:additional|substitute) day\)\s*$/i, "").trim().toLowerCase(); }
+// The public holidays that are days off: none while the switch is off (hours.publicOn, or the old hours.nsw), none when the
+// stored list (catalog.holidays, worked out by the app) is for another region, minus the ones switched off (hours.holidayOff).
+// deno-lint-ignore no-explicit-any
+export function holidayDaysOf(cat: any): Record<string, string> {
+  const c = cat && typeof cat === "object" ? cat : {}, h = c.hours && typeof c.hours === "object" ? c.hours : {};
+  if (!(h.publicOn ?? h.nsw)) return {};
+  const ph = c.holidays;
+  if (!ph || !ph.days || typeof ph.days !== "object" || ph.region !== regionKeyOf(c.region || {})) return {};
+  const off = new Set(Array.isArray(h.holidayOff) ? h.holidayOff : []), out: Record<string, string> = {};
+  for (const [d, name] of Object.entries(ph.days)) if (/^\d{4}-\d{2}-\d{2}$/.test(d) && !off.has(holidayKey(name))) out[d] = String(name);
+  return out;
+}
+// ── end region ──
+
+// ── business time (Settings → Region and format; read with the catalog in loadTemplates) ──
+let TZ = REGION_DEFAULTS.timeZone;
 function shiftDay(day: string, n: number): string {
   const [y, m, d] = day.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
-// The UTC instant of a Sydney wall-clock time (handles daylight saving).
-function sydToUtc(day: string, hour: number, minute: number): number {
-  const [y, m, d] = day.split("-").map(Number);
-  let t = Date.UTC(y, m - 1, d, hour, minute);
-  for (let i = 0; i < 2; i++) {
-    const p = sydParts(t);
-    const [py, pm, pd] = p.day.split("-").map(Number);
-    t -= Date.UTC(py, pm - 1, pd, p.hour, p.minute) - Date.UTC(y, m - 1, d, hour, minute);
-  }
-  return t;
-}
-// Requests go out between 08:00 and 20:00 Sydney; one made outside those hours goes at 10:00 the next morning. Since
+// Requests go out between 08:00 and 20:00 business time; one made outside those hours goes at 10:00 the next morning. Since
 // 13 Oct these are settings (Settings → Google reviews, catalog.reviews); nothing saved = these numbers.
 const REVIEW_RULES = { sendFrom: 8, sendUntil: 20, morning: 10, askAgainMonths: 6 };
 // deno-lint-ignore no-explicit-any
 let RCFG: any = {};
 // deno-lint-ignore no-explicit-any
-export function useReviewSettings(catalog: any) { const r = catalog && catalog.reviews; RCFG = r && typeof r === "object" ? r : {}; }
+export function useReviewSettings(catalog: any) { const r = catalog && catalog.reviews; RCFG = r && typeof r === "object" ? r : {}; TZ = bizTzOf(catalog); }
 export function reviewRules() {
   const d = REVIEW_RULES;
   const int = (k: string, lo: number, hi: number, def: number) => { const v = Number(RCFG[k]); return Number.isInteger(v) && v >= lo && v <= hi ? v : def; };
@@ -73,28 +162,28 @@ export function reviewRules() {
   if (morning < sendFrom || morning >= sendUntil) morning = sendFrom;
   return { sendFrom, sendUntil, morning, askAgainMonths: int("askAgainMonths", 0, 36, d.askAgainMonths) };
 }
-function inSendWindow(nowMs: number): boolean { const h = sydParts(nowMs).hour, r = reviewRules(); return h >= r.sendFrom && h < r.sendUntil; }
+function inSendWindow(nowMs: number): boolean { const h = bizParts(nowMs, TZ).hour, r = reviewRules(); return h >= r.sendFrom && h < r.sendUntil; }
 function sendAt(nowMs: number): number {
   if (inSendWindow(nowMs)) return nowMs;
-  const p = sydParts(nowMs), r = reviewRules();
-  return sydToUtc(p.hour < r.sendFrom ? p.day : shiftDay(p.day, 1), r.morning, 0);
+  const p = bizParts(nowMs, TZ), r = reviewRules();
+  return bizToUtc(p.hour < r.sendFrom ? p.day : shiftDay(p.day, 1), r.morning, 0, TZ);
 }
 
-// ── Which profile the review goes to (the three Google review links Ofek sent on 29 Sep) ──
-const REVIEW = {
-  aircon: { link: "https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU", result: "Enjoy the fresh, clean air!" },
-  chimney: { link: "https://g.page/r/CZUuKFAccuR4EBM/review", result: "Enjoy your clean, safe fireplace!" },
-  pw: { link: "https://g.page/r/CZjy0MO5zKE7EBM/review", result: "Enjoy your fresh, clean outdoor area!" },
-};
+// ── Which profile the review goes to: the Google review link saved for each service (Settings → Google reviews,
+// catalog.reviews.links; round 3, T1.9: no links in the code) ──
+// Services of the same kind share a Google profile: a job type with no link of its own uses the saved link of another
+// service of its kind (checked in this order; the app's REVIEW_FAMILIES is the same list).
+export const REVIEW_FAMILIES = [/chim|flue|fire/, /\bpw\b|pressure|wash|surface|roof|driveway|solar/, /air|\bac\b|split|duct|vent|hvac/];
 function reviewDefault(jobType: string) {
-  const t = String(jobType || "").toLowerCase();
-  if (/chim|flue|fire/.test(t)) return REVIEW.chimney;
-  if (/\bpw\b|pressure|wash|surface|roof|driveway|solar/.test(t)) return REVIEW.pw;
-  if (/air|\bac\b|split|duct|vent|hvac/.test(t)) return REVIEW.aircon;
-  return null;
+  const links = RCFG.links && typeof RCFG.links === "object" ? RCFG.links : {}, key = String(jobType || ""), t = key.toLowerCase();
+  const fam = REVIEW_FAMILIES.find((re) => re.test(t));
+  if (!fam) return null;
+  const ok = (k: string) => links[k] && /^https:\/\/\S+$/.test(String(links[k].link || "").trim());
+  const hit = Object.keys(links).find((k) => k !== key && ok(k) && fam.test(k.toLowerCase()));
+  return hit ? { link: String(links[hit].link).trim(), result: String(links[hit].result || "").trim() } : null;
 }
 // The link and thank-you line saved for the job's service in Settings (catalog.reviews.links, by service name = job type),
-// else the original above. A service with its own link can be asked even if the original doesn't know it.
+// else those of a saved service of the same kind; none = the job can't be asked (unknown_job_type).
 export function reviewFor(jobType: string) {
   const base = reviewDefault(jobType);
   const links = RCFG.links && typeof RCFG.links === "object" ? RCFG.links : {};
@@ -186,45 +275,55 @@ async function contactForJob(jobNumber: string) {
 }
 
 // The words customers get, as edited in Settings → Message templates (settings.catalog.templates, Ofek 12 Oct). Read once
-// per request; a template nobody has edited keeps the approved text below, word for word.
+// per request; a template nobody has edited keeps the approved text below, word for word. The business name signs them
+// (settings.company_name, Business details; round 3, T1.9).
 let TPL: Record<string, string> = {};
+let BIZ = "";
+// false when this request's settings read failed: the review links live only in the settings, so a failed read must never
+// look like "no link saved" (that would write permanent 'unknown job type' skips, or send without the thank-you line).
+let SETTINGS_READ = true;
+export function useBusinessName(company: unknown) { BIZ = String(company || "").trim(); }
 // deno-lint-ignore no-explicit-any
 export async function loadTemplates(sb: any) {
-  try { const { data } = await sb.from("settings").select("catalog").limit(1); useTemplates(data && data[0] && data[0].catalog); useReviewSettings(data && data[0] && data[0].catalog); }
-  catch { TPL = {}; RCFG = {}; }
+  try {
+    const { data, error } = await sb.from("settings").select("catalog, company_name").limit(1);
+    if (error || !Array.isArray(data)) throw new Error(error ? error.message : "no settings");
+    useTemplates(data[0] && data[0].catalog); useReviewSettings(data[0] && data[0].catalog); useBusinessName(data[0] && data[0].company_name);
+    SETTINGS_READ = true;
+  } catch (e) { TPL = {}; RCFG = {}; BIZ = ""; SETTINGS_READ = false; console.error("review-requests: settings not read:", (e as Error).message || e); }
 }
 // deno-lint-ignore no-explicit-any
 export function useTemplates(catalog: any) { const t = catalog && catalog.templates; TPL = t && typeof t === "object" ? t : {}; }
 export function tpl(key: string, fallback: string): string { const v = TPL[key]; return typeof v === "string" && v.trim() ? v : fallback; }
 // A template's blanks: {hi} "Hi Sarah" (or "Hi"), {first_name}, {technician}, {result} (the line for that service),
-// {review_link}, {today} (" today" when the job was today). In the email, {review_button} is the big review button.
+// {review_link}, {today} (" today" when the job was today), {business_name}. In the email, {review_button} is the big review button.
 // A blank with nothing to put in (no first name) takes its loose comma or space with it: "A quick favour, {first_name}?"
 // becomes "A quick favour?" and "Hi {first_name}," becomes "Hi,". The app's preview uses the same rules (fillReviewTemplate).
 export function fillReview(t: string, v: Record<string, string>): string {
   const E = "\u0000";
-  return t.replace(/\{(hi|first_name|technician|result|review_link|today|review_button)\}/g, (_m, k) => v[k] || E)
+  return t.replace(/\{(hi|first_name|technician|result|review_link|today|review_button|business_name)\}/g, (_m, k) => v[k] || E)
     .replace(/,[ \t]*\u0000(?=[?!.])/g, "").replace(/[ \t]+\u0000(?=[,?!.])/g, "").replace(/[ \t]*\u0000/g, "").replace(/^[ \t]+/gm, "");
 }
 function escHtml(x: string): string { return x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 // ── The messages (text approved by Ofek on 29 Sep) ──
-function buildMessages(r: { first_name: string; technician: string; review_link: string; job_type: string; job_date: string }, todaySyd: string) {
+function buildMessages(r: { first_name: string; technician: string; review_link: string; job_type: string; job_date: string }, today: string) {
   // The link is the one stored on the request; the thank-you line is today's (none if the service has no link any more).
   const rv = { result: (reviewFor(r.job_type) || { result: "" }).result };
   const name = r.first_name ? ` ${r.first_name}` : "";
   const tech = firstNameOf(r.technician) || "The team";
-  const when = r.job_date === todaySyd ? " today" : "";
-  const sms = `Hi${name}, ${tech} from The Guys Service Group here - thanks for having us${when}! ${rv.result ? rv.result + " " : ""}Our team works really hard and would truly appreciate a quick Google review: ${r.review_link} Thank you!`;
+  const when = r.job_date === today ? " today" : "";
+  const sms = `Hi${name}, ${tech}${BIZ ? " from " + BIZ : ""} here - thanks for having us${when}! ${rv.result ? rv.result + " " : ""}Our team works really hard and would truly appreciate a quick Google review: ${r.review_link} Thank you!`;
   const subject = `A quick favour${r.first_name ? ", " + r.first_name : ""}?`;
   const html = `<p>Hi${name},</p>
 <p>Thanks for having us${when} - it was a pleasure.${rv.result ? " " + rv.result : ""}</p>
 <p>Our team works really hard to do every job properly, and a Google review from you would mean a lot to them. It takes 30 seconds.</p>
 <p><a href="${r.review_link}" style="display:inline-block;background:#1a73e8;color:#ffffff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold">&#11088;&#11088;&#11088;&#11088;&#11088; Leave a quick Google review</a></p>
-<p>Thank you!<br>${tech}<br>The Guys Service Group</p>`;
-  const text = `Hi${name},\n\nThanks for having us${when} - it was a pleasure.${rv.result ? " " + rv.result : ""}\n\nOur team works really hard to do every job properly, and a Google review from you would mean a lot to them. It takes 30 seconds:\n${r.review_link}\n\nThank you!\n${tech}\nThe Guys Service Group`;
+<p>Thank you!<br>${tech}${BIZ ? "<br>" + escHtml(BIZ) : ""}</p>`;
+  const text = `Hi${name},\n\nThanks for having us${when} - it was a pleasure.${rv.result ? " " + rv.result : ""}\n\nOur team works really hard to do every job properly, and a Google review from you would mean a lot to them. It takes 30 seconds:\n${r.review_link}\n\nThank you!\n${tech}${BIZ ? "\n" + BIZ : ""}`;
   // Edited in Settings → Message templates: those parts use the edited words (the rest stays as above).
   const smsT = tpl("reviewSms", ""), subjT = tpl("reviewEmailSubject", ""), bodyT = tpl("reviewEmailBody", "");
   if (!smsT && !subjT && !bodyT) return { sms, subject, html, text };
-  const vars: Record<string, string> = { hi: `Hi${name}`, first_name: r.first_name || "", technician: tech, result: rv.result, review_link: r.review_link, today: when };
+  const vars: Record<string, string> = { hi: `Hi${name}`, first_name: r.first_name || "", technician: tech, result: rv.result, review_link: r.review_link, today: when, business_name: BIZ };
   const button = `<a href="${r.review_link}" style="display:inline-block;background:#1a73e8;color:#ffffff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold">&#11088;&#11088;&#11088;&#11088;&#11088; Leave a quick Google review</a>`;
   const paras = bodyT ? (bodyT.includes("{review_button}") ? bodyT : bodyT + "\n\n{review_button}").split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean) : null;
   return {
@@ -313,8 +412,10 @@ async function handle(sb: any, rows: any[], nowMs: number) {
   const { data: settings } = await sb.from("settings").select("review_requests_enabled, review_requests_auto, reviews_from").limit(1);
   const s = (settings && settings[0]) || {};
   const { enabled, auto, send } = reviewSwitches(s);
+  // The settings (links, thank-you lines, names) couldn't be read this time: ask nobody and send nothing; the next run tries again.
+  if (!SETTINGS_READ) return { ...out, enabled, auto, send, ghl: !!GHL_REVIEW_WEBHOOK_URL, settings_unread: true };
   if (auto) { const a = await autoAsk(sb, nowMs, s.reviews_from, sheetNoAsk); out.queued += a.queued; out.skipped += a.skipped; }
-  // Release what's due, during sending hours in Sydney. The SMS goes out here through GHL; the email is picked up by the
+  // Release what's due, during sending hours (business time). The SMS goes out here through GHL; the email is picked up by the
   // info@ script (emailsToSend below). An automatic request still waiting after the switch went off is not sent.
   if (send && inSendWindow(nowMs)) { const r = await releaseDue(sb, nowMs, sheetNoAsk, undefined, auto); out.sent += r.sent; out.skipped += r.skipped; out.errors += r.errors; }
   return { ...out, enabled, auto, send, ghl: !!GHL_REVIEW_WEBHOOK_URL };
@@ -333,6 +434,7 @@ async function queueRequest(sb: any, job: any, nowMs: number, o: { by: string | 
   const { data: existing } = await sb.from("review_requests").select("id, status, sent_at, ask_count").eq("invoice_number", invoice).limit(1);
   const ex = existing && existing[0];
   if (ex && (ex.status === "sent" || ex.status === "waiting") && !o.again) return { ok: false, reason: "already_asked", status: ex.status, sent_at: ex.sent_at };
+  if (!SETTINGS_READ) return { ok: false, reason: "settings_unread" };   // never a lasting skip from a failed read
   const rv = reviewFor(job.job_type);
   if (!rv) return { ok: false, reason: "unknown_job_type" };
   const c = await contactFromCrm(sb, job);
@@ -366,7 +468,7 @@ async function queueRequest(sb: any, job: any, nowMs: number, o: { by: string | 
 // deno-lint-ignore no-explicit-any
 async function autoAsk(sb: any, nowMs: number, fromDay: unknown, sheetNoAsk: Set<string>) {
   const out = { queued: 0, skipped: 0 };
-  const today = sydParts(nowMs).day, weekAgo = shiftDay(today, -7);
+  const today = bizParts(nowMs, TZ).day, weekAgo = shiftDay(today, -7);
   if (!isDay(fromDay)) return out;   // never without a start date: old jobs are never asked automatically
   const since = fromDay > weekAgo ? fromDay : weekAgo;
   const { data: jobs } = await sb.from("jobs").select(JOB_COLS).gte("date", since).lte("date", today).limit(500);
@@ -387,7 +489,7 @@ async function autoAsk(sb: any, nowMs: number, fromDay: unknown, sheetNoAsk: Set
       if (q.now && q.id) await releaseDue(sb, nowMs, sheetNoAsk, q.id);
       continue;
     }
-    if (q.reason === "already_asked") continue;
+    if (q.reason === "already_asked" || q.reason === "settings_unread") continue;
     await sb.from("review_requests").insert({
       source: "auto", invoice_number: invoice, job_id: j.id, job_date: j.date, customer_name: j.customer_name, job_type: j.job_type, technician: j.technician,
       status: "skipped", reason: SKIP_TEXT[q.reason as string] || q.reason, updated_at: new Date(nowMs).toISOString(),
@@ -401,7 +503,7 @@ async function autoAsk(sb: any, nowMs: number, fromDay: unknown, sheetNoAsk: Set
 // deno-lint-ignore no-explicit-any
 async function releaseDue(sb: any, nowMs: number, sheetNoAsk: Set<string>, onlyId?: string, autoOn = true) {
   const out = { sent: 0, skipped: 0, errors: 0 };
-  const todaySyd = sydParts(nowMs).day;
+  const today = bizParts(nowMs, TZ).day;
   let q = sb.from("review_requests").select("*").eq("status", "waiting").lte("send_after", new Date(nowMs).toISOString());
   if (onlyId) q = q.eq("id", onlyId);
   const { data: due } = await q.limit(20);
@@ -409,7 +511,7 @@ async function releaseDue(sb: any, nowMs: number, sheetNoAsk: Set<string>, onlyI
     const stamp = new Date(nowMs).toISOString();
     const skip = async (reason: string) => { await sb.from("review_requests").update({ status: "skipped", reason, updated_at: stamp }).eq("id", r.id); out.skipped++; };
     // Too late to ask: an automatic one for a job more than a week old (the old sheet ones: 2 days). By hand: any time.
-    const oldest = r.source === "auto" ? shiftDay(todaySyd, -7) : shiftDay(todaySyd, -2);
+    const oldest = r.source === "auto" ? shiftDay(today, -7) : shiftDay(today, -2);
     if (r.source !== "manual" && (!r.job_date || r.job_date < oldest)) { await skip("too late to ask"); continue; }
     // Automatic asking switched off while this one waited (Ofek 13 Oct: off = nobody is asked by themselves).
     if (r.source === "auto" && !autoOn) { await skip(AUTO_OFF_REASON); continue; }
@@ -420,7 +522,7 @@ async function releaseDue(sb: any, nowMs: number, sheetNoAsk: Set<string>, onlyI
     const job = jj && jj[0];
     if ((job && job.review_do_not_ask) || sheetNoAsk.has(digits(r.invoice_number))) { await skip(NO_ASK_REASON); continue; }
     if (job && job.review_taken) { await skip("review taken"); continue; }
-    const m = buildMessages(r, todaySyd);
+    const m = buildMessages(r, today);
     try {
       // SMS through GHL (only the phone goes — the email is sent from info@ by the Google script, see below).
       let smsAt: string | null = null;
@@ -496,7 +598,7 @@ async function linkContactForInvoice(sb: any, invoice: string, name: string): Pr
 // deno-lint-ignore no-explicit-any
 async function syncSheetJobs(sb: any, rows: any[], nowMs: number) {
   const out = { inserted: 0, updated: 0, adopted: 0, unchanged: 0, skipped: 0 };
-  const today = sydParts(nowMs).day;
+  const today = bizParts(nowMs, TZ).day;
   const seen = new Set<string>();
   for (const raw of (Array.isArray(rows) ? rows : []).slice(0, 200)) {
     const j = sheetRowToJob(raw);
@@ -545,7 +647,7 @@ async function syncSheetJobs(sb: any, rows: any[], nowMs: number) {
   return out;
 }
 // ── "Ask for review" / "Ask again" on a job: the office presses the button (Jobs & Commissions, or the My Day bubble) ──
-// Same checks and texts as the automatic request (queueRequest); sends at once between 08:00 and 20:00 Sydney,
+// Same checks and texts as the automatic request (queueRequest); sends at once between 08:00 and 20:00 business time,
 // otherwise at 10:00 the next morning.
 // deno-lint-ignore no-explicit-any
 async function askForReview(sb: any, jobId: string, by: string, nowMs: number, again = false) {
@@ -575,10 +677,10 @@ async function officeUser(sb: any, req: Request): Promise<any | null> {
 // hasn't gone yet. Only ever returned to the verified mailbox.
 // deno-lint-ignore no-explicit-any
 async function emailsToSend(sb: any, nowMs: number) {
-  const todaySyd = sydParts(nowMs).day;
+  const today = bizParts(nowMs, TZ).day;
   const since = new Date(nowMs - 2 * 24 * 3600 * 1000).toISOString();
   const { data } = await sb.from("review_requests").select("*").eq("status", "sent").is("email_sent_at", null).gte("sent_at", since).limit(20);
-  return (data || []).filter((r: any) => r.email).map((r: any) => { const m = buildMessages(r, todaySyd); return { id: r.id, to: r.email, subject: m.subject, html: m.html, text: m.text }; });
+  return (data || []).filter((r: any) => r.email).map((r: any) => { const m = buildMessages(r, today); return { id: r.id, to: r.email, subject: m.subject, html: m.html, text: m.text }; });
 }
 
 if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && !(globalThis as any).__REVIEW_TEST__) {

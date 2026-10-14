@@ -91,6 +91,11 @@ function fakeDb(seed: Record<string, any[]> = {}) {
       s.tick_lease_until = isoMs(Date.parse(a.p_now) + Math.max(a.p_seconds, 10) * 1000); s.last_tick_at = a.p_now;
       return { data: true, error: null };
     }
+    if (name === "set_catalog_holidays") {
+      const st = (T.settings || [])[0]; if (!st) return { data: null, error: null };
+      st.catalog = { ...(st.catalog || {}), holidays: a.p_holidays };
+      return { data: null, error: null };
+    }
     if (name === "automation_claim_due") {
       const due = (T.automation_runs || []).filter((x) => x.business_id === a.p_business && ((x.status === "waiting" && cmp(x.due_at, a.p_now) <= 0) || (x.status === "running" && x.lease_until && cmp(x.lease_until, a.p_now) < 0)))
         .sort((x, y) => cmp(x.due_at, y.due_at)).slice(0, Math.min(Math.max(a.p_limit, 1), 50));
@@ -143,6 +148,8 @@ const CATALOG = {
   brands: { Aircon: "Fresh Air Co" },
   templates: { welcomeEmail: "{hi}, thanks for asking {business_name} about {service}." },
   hours: { nsw: true, extra: [{ date: "2026-10-20" }] },
+  // the stored public holidays of the region (settings.catalog.holidays, worked out by the app; nothing chosen = AU-NSW)
+  holidays: { region: "AU-NSW", days: { "2026-10-05": "Labour Day" } },
 };
 function lead(id: string, o: any = {}) {
   return { id, full_name: "Sam Smith", phone: "0412 345 678", email: "sam@example.com", postcode: "2000", division: "Aircon", source: "Google Ads", status: "New", tags: [],
@@ -199,8 +206,11 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     ok(keyA.length > 200 && keyA === keyB, "vapidKeys is byte-identical to push/index.ts");
     ok(fnSource(mine, "export function sameSecret(") === fnSource(backup, "export function sameSecret(") && fnSource(mine, "export function sameSecret(").length > 50, "sameSecret is the backup function's");
     const conv = src("../conversations/index.ts");
-    ok(conv.includes('`\\n\\n${String(m.author || "Ron").split(" ")[0]}\\nThe Guys Service Group\\n1300 380 090`'), "conversations' alerts still adds the signature the preview shows");
-    eq(signatureOf("Ron Smith"), "\n\nRon\nThe Guys Service Group\n1300 380 090", "signatureOf mirrors alerts");
+    const sigA = fnSource(mine, "export function signatureOf("), sigB = fnSource(conv, "export function signatureOf(");
+    ok(sigA.length > 100 && sigA === sigB, "signatureOf is byte-identical to the one conversations' alerts adds (the preview shows it)");
+    ok(/m\.email === MAILBOX \? "" : signatureOf\(m\.author \|\| "", bizSig\(\)\)/.test(conv), "conversations' alerts signs with signatureOf and the business details");
+    eq(signatureOf("Ron Smith", bizOf("The Guys Service Group", { business: { phone: "1300 380 090" } })), "\n\nRon\nThe Guys Service Group\n1300 380 090", "signatureOf: with today's settings, today's exact signature");
+    eq([signatureOf("", bizOf("Acme", {})), signatureOf("", bizOf("Acme", { labels: { office: "Reception" } }))], ["\n\nOffice\nAcme", "\n\nReception\nAcme"], "signatureOf: no author = the office's name; no phone saved = none");
     // fillMerge = review-requests' fillReview for its keys
     const rr = src("../review-requests/index.ts");
     const fr = fnSource(rr, "export function fillReview(").replace(/^export function fillReview\([^)]*\): string \{/, "function (t, v) {");
@@ -240,6 +250,9 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     eq(isoMs(nextAllowed(syd("2026-10-05", 10), { mode: "office" }, tz, CATALOG) as number), isoMs(syd("2026-10-06", 8)), "office: Labour Day (NSW holiday) → Tuesday 08:00");
     eq(nextAllowed(syd("2026-10-05", 10), { mode: "office" }, tz, {}), syd("2026-10-05", 10), "office: without the NSW holidays chosen, the holiday is a work day");
     eq(isoMs(nextAllowed(syd("2026-10-19", 18), { mode: "office" }, tz, CATALOG) as number), isoMs(syd("2026-10-21", 8)), "office: an extra day off is skipped");
+    eq(nextAllowed(syd("2026-10-05", 10), { mode: "office" }, tz, { hours: { nsw: true } }), syd("2026-10-05", 10), "office: the old NSW switch with no stored list = no holidays (the SQL stores the list first)");
+    eq(nextAllowed(syd("2026-10-05", 10), { mode: "office" }, tz, { ...CATALOG, hours: { ...CATALOG.hours, holidayOff: ["labour day"] } }), syd("2026-10-05", 10), "office: a public holiday switched off is a work day");
+    eq(nextAllowed(syd("2026-10-05", 10), { mode: "office" }, tz, { ...CATALOG, region: { country: "US", state: "TX" } }), syd("2026-10-05", 10), "office: a list stored for another region is not used"); 
     eq(inWindow(syd("2026-10-14", 7), { mode: "outsideOffice" }, tz, CATALOG), true, "outside office: 07:00 on a work day");
     eq(isoMs(nextAllowed(syd("2026-10-14", 10), { mode: "outsideOffice" }, tz, CATALOG) as number), isoMs(syd("2026-10-14", 17)), "outside office: 10:00 → 17:00 the same day");
     eq(inWindow(syd("2026-10-14", 10), { mode: "office" }, tz, { hours: { days: { 3: { on: true, from: "11:00", to: "15:00" } } } }), false, "office: a day's own hours from settings");
@@ -640,7 +653,7 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     const p = await handle(db, { step: "preview", automation_id: "a-prev", record: { kind: "contact", id: "c1" } }, OWNER, false);
     eq([p.status, p.body.ok, p.body.steps.map((s: any) => s.would)], [200, true, ["wait", "go on", "queue", "wait for the business phone", "send", "add"]], "preview: what each step would do");
     const em = p.body.steps[2];
-    eq([em.subject, em.body, em.signature, em.to, em.note], ["Your Aircon cleaning enquiry", "Hi Sam, thanks for contacting Acme Home Services." + FOOT, "\n\nOlivia\nThe Guys Service Group\n1300 380 090", "sam@example.com", "this automation is off: nothing is sent"], "preview: the filled email with its way out, the signature the mailbox adds (a real first name), and that it is off");
+    eq([em.subject, em.body, em.signature, em.to, em.note], ["Your Aircon cleaning enquiry", "Hi Sam, thanks for contacting Acme Home Services." + FOOT, "\n\nOlivia\nAcme Home Services", "sam@example.com", "this automation is off: nothing is sent"], "preview: the filled email with its way out, the signature the mailbox adds (a real first name), and that it is off");
     eq([p.body.steps[4].to, p.body.steps[5].board, p.body.steps[5].due], [["Olivia Owner"], "ron", "2026-10-16"], "preview: recipients and the task");
     eq([JSON.stringify(db.T) === before, sent.length], [true, 0], "preview: writes nothing and sends nothing");
     const bad = await handle(db, { step: "preview", automation: { name: "x", trigger: { type: "newLead" }, steps: [{ id: "q", kind: "action", type: "fax" }] }, record: { kind: "contact", id: "c1" } }, MANAGER, false);
@@ -808,7 +821,7 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     eq([db.T.lead_messages.length, logOf(db)], [0, ["e1:skipped:no email signer set"]], "no signer and no maker's name: the email is not sent (never signed 'The')");
     db = world({ automations: [auto({ created_by_name: "", steps: [emailStep()] })], contacts: [lead("c1")], automation_settings: [{ business_id: "default", email_signer: "Dana Lee", email_footer: "Reply STOP to opt out." }] });
     await tickAt(db, NOW);
-    eq([db.T.lead_messages[0].author, signatureOf(db.T.lead_messages[0].author).split("\n")[2], db.T.lead_messages[0].body.endsWith("\n\nReply STOP to opt out.")], ["Dana Lee", "Dana", true], "the business's signer and its own way out");
+    eq([db.T.lead_messages[0].author, signatureOf(db.T.lead_messages[0].author, bizOf("Acme Home Services", CATALOG)).split("\n")[2], db.T.lead_messages[0].body.endsWith("\n\nReply STOP to opt out.")], ["Dana Lee", "Dana", true], "the business's signer and its own way out");
     eq([emailAuthor(normSettings({}), { created_by_name: "The team" }), emailAuthor(normSettings({}), { created_by_name: "Olivia Owner" })], ["", "Olivia"], "emailAuthor: never a phrase");
     // withdrawn when the customer hours close
     const at = syd("2026-10-14", 19, 59);
@@ -831,6 +844,66 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     eq(db.T.automation_runs.length, ENQUEUE_MAX, "300 leads moved at once: the first 200 (oldest first) start this minute");
     await tickAt(db, NOW + MIN);
     eq([db.T.automation_runs.length, new Set(db.T.automation_runs.map((r: any) => r.record_id)).size], [300, 300], "…and the other 100 the next minute (not the same 200 again)");
+  }
+
+  // ── 27. the region (Settings → Region and format, T1.2/T1.3): one time zone, money, the copied block ──
+  {
+    let db = world({ automation_settings: [{ business_id: "default", timezone: "Australia/Sydney" }], settings: [{ id: 1, company_name: "Acme", catalog: { ...CATALOG, region: { timeZone: "America/Chicago" } } }] });
+    eq((await loadContext(db)).S.timezone, "America/Chicago", "region: the business's time zone wins over automation_settings");
+    db = world({ automation_settings: [{ business_id: "default", timezone: "Australia/Perth" }] });
+    eq((await loadContext(db)).S.timezone, "Australia/Perth", "region: with no region zone saved, the old automation_settings value stays");
+    db = world();
+    eq((await loadContext(db)).S.timezone, "Australia/Sydney", "region: nothing saved = Sydney");
+    const fj = (amount: unknown, cat: any): any => ({ kind: "job", type: "jobClosed", contact: null, job: { id: "j1", amount, technician: "Guy" }, call: null, chat: null, ctx: {}, eventAt: isoMs(NOW), S: normSettings({}), cat, company: "Acme", nowMs: NOW });
+    eq([mergeVars(fj(480, CATALOG), { name: "x", steps: [] }).amount, mergeVars(fj(1234.5, CATALOG), { name: "x", steps: [] }).amount], ["$480", "$1,234.5"], "{amount}: nothing saved = exactly as before");
+    eq(mergeVars(fj(1234.5, { ...CATALOG, region: { currency: "EUR", moneyFormat: "1.234,56", symbolAfter: true } }), { name: "x", steps: [] }).amount, "1.234,5 €", "{amount}: the business's currency and format");
+    for (const tz of ["Australia/Sydney", "America/Chicago"]) {
+      const ms = Date.parse("2026-10-14T03:00:00Z"), z = zoneParts(ms, tz), b = bizParts(ms, tz);
+      eq([b.day, b.dow, b.minutes, bizToUtc("2026-10-04", 9, 30, tz)], [z.day, z.dow, z.minutes, zoneToUtc("2026-10-04", 9, 30, tz)], `region block: bizParts / bizToUtc agree with the engine's own (${tz})`);
+    }
+    eq([taxNameOf({}), taxNameOf({ region: { country: "US" } }), bizTzOf({ region: { timeZone: "Mars/Base" } }), regionKeyOf({}), regionKeyOf({ country: "US", state: "TX" })], ["GST", "Sales tax", "Australia/Sydney", "AU-NSW", "US-TX"], "region block: the defaults and the place key");    // a settings read that fails ({ data: null, error }) stops the run: never "nothing saved" (no names, brands or days off)
+    { const bad = world(), from0 = bad.from; let err = "";
+      bad.from = (t: string) => t === "settings" ? { select: () => ({ limit: async () => ({ data: null, error: { message: "timeout" } }) }) } : from0(t);
+      try { await loadContext(bad); } catch (e) { err = String((e as Error).message); }
+      eq(err, "settings not read: timeout", "loadContext: a failed settings read stops the run (the next minute tries again)"); }
+  }
+
+  // ── 27b. the stored public holidays, worked out by the timer when no owner opens the app (T1.3) ──
+  {
+    const keepLib = io.holidayLib; let loads = 0;
+    // a fake date-holidays: two holidays a year, one of them moved
+    class FakeH { constructor(public c: string, public s: any) {} getHolidays(y: number) { return [{ date: `${y}-01-01 00:00:00`, name: "New Year's Day" }, { date: `${y}-12-28 00:00:00`, name: "Boxing Day (substitute day)" }]; } }
+    io.holidayLib = async () => { loads++; return FakeH; };
+    const at = Date.parse("2028-02-01T01:00:00Z");   // 1 Feb 2028 in Sydney: the seeded list (to 2028-12-31) has under a year left
+    const seeded = { region: "AU-NSW", to: "2028-12-31", days: { "2028-01-26": "Australia Day" } };
+    let db = world({ settings: [{ id: 1, company_name: "Acme", catalog: { ...CATALOG, hours: { nsw: true }, holidays: seeded } }] });
+    const cat1: any = { ...CATALOG, hours: { nsw: true }, holidays: seeded };
+    eq([await refreshHolidays(db, cat1, at), cat1.holidays.from, cat1.holidays.to, cat1.holidays.days["2030-12-28"], db.T.settings[0].catalog.holidays.region, db.T.settings[0].catalog.company_name ?? db.T.settings[0].company_name],
+      ["coverage", "2028-01-01", "2030-12-31", "Boxing Day (additional day)", "AU-NSW", "Acme"], "under a year left: worked out for 3 years and saved (only the holidays key), AU wording");
+    eq([await refreshHolidays(db, { ...cat1 }, at), loads], ["", 1], "fresh now: nothing to do");
+    eq([await refreshHolidays(db, { hours: { publicOn: false }, holidays: seeded }, at), loads], ["off", 1], "the switch off: never loads the library");
+    const cat2: any = { hours: { publicOn: true }, holidays: seeded, region: { country: "US", state: "TX" } };
+    eq([await refreshHolidays(db, cat2, at), cat2.holidays.region, loads], ["region", "US-TX", 2], "another region: worked out for it");
+    io.holidayLib = async () => { loads++; throw new Error("offline"); };
+    const cat3: any = { hours: { publicOn: true }, region: { country: "NZ" } }; let e3 = "";
+    try { await refreshHolidays(db, cat3, at); } catch (e) { e3 = String((e as Error).message); }
+    eq([e3, await refreshHolidays(db, cat3, at), loads], ["offline", "tried", 3], "a failure is not retried every minute (once a day per region)");
+    io.holidayLib = keepLib;
+    eq([holidaysStale({}, "2026-10-14"), holidaysStale({ holidays: seeded, region: { country: "US" } }, "2026-10-14"), holidaysStale({ holidays: seeded }, "2026-10-14"), holidaysStale({ holidays: seeded }, "2028-01-05")],
+      ["missing", "region", "", "coverage"], "holidaysStale: the app's rules");
+  }
+
+  // ── the business's names (round 3, T1.7/T1.9): the office's board, {agent}, the brand fallback ──
+  {
+    eq([boardFor(["Ron"], [{ role: "va", full_name: "Ron Cruz" }]), boardFor(["Kim"], [], [{ name: "Kim", roles: ["VA"] }]), boardFor(["Guy"], []), boardFor([], []), boardFor(["Ron"], [])],
+      ["ron", "ron", "Guy", "ron", "Ron"], "boardFor: a VA login (first word too) or a VA employee = the office's board; no built-in name");
+    const fa = (o: any = {}): any => ({ kind: "contact", type: "newLead", contact: lead("c1", { division: "Gutters" }), job: null, call: null, chat: null, ctx: {}, eventAt: isoMs(NOW), S: normSettings({}), cat: CATALOG, company: "Acme Home Services", nowMs: NOW, ...o });
+    eq([mergeVars(fa({ agent: "Kim" }), { name: "x", steps: [] }).agent, mergeVars(fa(), { name: "x", steps: [] }).agent, mergeVars(fa({ cat: { ...CATALOG, labels: { office: "Dispatch" } } }), { name: "x", steps: [] }).agent], ["Kim", "Office", "Dispatch"], "{agent}: the run's office person, else the office's name");
+    eq([mergeVars(fa(), { name: "x", steps: [] }).brand, mergeVars(fa({ cat: { ...CATALOG, business: { shortName: "Acme Group" } } }), { name: "x", steps: [] }).brand], ["Acme Home Services", "Acme Home Services"], "{brand} of a service with none: the business name, even with a short name saved (as before 14 Oct)");
+    const db = world({ profiles: [OWNER, { ...VA, full_name: "Adam Va" }, { ...VA, id: "u-va2", full_name: "Kim Va", on_duty: true, on_duty_date: "2026-10-14" }] });
+    eq([(await loadContext(db, Date.parse("2026-10-14T01:00:00Z"))).agent, (await loadContext(db, Date.parse("2026-10-15T01:00:00Z"))).agent, (await loadContext(world({ profiles: [OWNER] }))).agent], ["Kim", "Adam", "Office"], "loadContext: {agent} = the VA on shift today, else A–Z, else the office's name");
+    const code = src("index.ts").split("\n").filter((l: string) => !/^\s*\/\//.test(l)).join("\n");
+    eq(["Ron", "The Guys", "1300 380"].filter((w) => new RegExp("\\b" + w + "\\b").test(code)), [], "no 'Ron', 'The Guys' or '1300 380' in the engine's code");
   }
 
   console.log(`automations: ${pass} passed, ${fail} failed`);

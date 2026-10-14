@@ -102,6 +102,110 @@ export async function sendTo(sb: any, userIds: string[], payload: Record<string,
 
 const isOffice = (me: { role?: string } | null) => !!me && (me.role === "owner" || me.role === "manager");
 
+// ── region (Settings → Business details → Region and format; the same rules as the app's bizTz/moneyText/holidayDaysOf). Copied into every function — keep the copies identical (tests/business-logic.test.js checks). ──
+// Nothing saved = this business's values until 14 Oct: Sydney time, "$" amounts, GST, New South Wales (T1.2/T1.3).
+export const REGION_DEFAULTS = { timeZone: "Australia/Sydney", currency: "AUD", country: "AU", state: "NSW" };
+export const TAX_NAMES: Record<string, string> = { AU: "GST", NZ: "GST", CA: "GST", SG: "GST", IN: "GST", GB: "VAT", IE: "VAT", ZA: "VAT", AE: "VAT", US: "Sales tax" };
+export const MONEY_FORMATS = [["1,234.56", ",", "."], ["1.234,56", ".", ","], ["1 234,56", " ", ","]];
+const REGION_TZ_OK = new Map<string, boolean>();
+const REGION_FMT = new Map<string, Intl.DateTimeFormat>();
+export function tzValid(tz: unknown): boolean {
+  if (typeof tz !== "string" || !tz.trim()) return false;
+  if (!REGION_TZ_OK.has(tz)) { let ok = true; try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); } catch { ok = false; } REGION_TZ_OK.set(tz, ok); }
+  return REGION_TZ_OK.get(tz) === true;
+}
+// deno-lint-ignore no-explicit-any
+export function regionOf(cat: any): Record<string, any> { const r = cat && typeof cat === "object" ? cat.region : null; return r && typeof r === "object" ? r : {}; }
+// The business's time zone (settings.catalog.region.timeZone; a name the runtime doesn't know counts as not set).
+// deno-lint-ignore no-explicit-any
+export function bizTzOf(cat: any): string { const r = regionOf(cat); return tzValid(r.timeZone) ? r.timeZone : REGION_DEFAULTS.timeZone; }
+// deno-lint-ignore no-explicit-any
+export function bizTzSet(cat: any): boolean { return tzValid(regionOf(cat).timeZone); }
+// 'AU-NSW', 'US-TX', 'SG': the place the stored public holidays were worked out for (nothing chosen = AU-NSW).
+// deno-lint-ignore no-explicit-any
+export function regionKeyOf(r: any): string {
+  const x = r && typeof r === "object" ? r : {};
+  const country = /^[A-Z]{2}$/.test(String(x.country || "")) ? x.country : REGION_DEFAULTS.country;
+  const state = x.country ? String(x.state || "") : REGION_DEFAULTS.state;
+  return state ? `${country}-${state}` : country;
+}
+// The wall clock in tz at an instant: { day 'YYYY-MM-DD', dow 0 = Sunday, hour, minute, minutes after midnight }.
+export function bizParts(ms: number, tz: string) {
+  let f = REGION_FMT.get(tz);
+  if (!f) { f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false }); REGION_FMT.set(tz, f); }
+  const p = Object.fromEntries(f.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  const hour = Number(p.hour) % 24, minute = Number(p.minute);
+  return { day: `${p.year}-${p.month}-${p.day}`, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(String(p.weekday)), hour, minute, minutes: hour * 60 + minute };
+}
+// The UTC instant of a wall-clock time in tz (two passes handle daylight saving).
+export function bizToUtc(day: string, hh: number, mm: number, tz: string): number {
+  const [y, m, d] = day.split("-").map(Number);
+  let t = Date.UTC(y, m - 1, d, hh, mm);
+  const want = Date.UTC(y, m - 1, d, hh, mm);
+  const wall = (ms: number) => { const p = bizParts(ms, tz), [py, pm, pd] = p.day.split("-").map(Number); return Date.UTC(py, pm - 1, pd, p.hour, p.minute); };
+  for (let i = 0; i < 2; i++) t -= wall(t) - want;
+  // a wall time the clocks jump over (a daylight-saving gap, at midnight in some zones): the same time after the jump on
+  // the same day, never the evening before
+  const got = wall(t);
+  if (got < want) t += want - got;
+  return t;
+}
+// A business day for a timestamptz column that used to get the bare date ('2026-10-14' = midnight UTC): the same bare
+// date where midnight UTC is still that day in the zone (Sydney: exactly as before), else noon that day in the zone, so
+// zones west of UTC don't file the record under the day before.
+export function bizDayStamp(day: string, tz: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return bizParts(Date.UTC(y, m - 1, d), tz).day === day ? day : new Date(bizToUtc(day, 12, 0, tz)).toISOString();
+}
+// A word the owner typed, kept free of HTML and quote characters.
+export function regionWord(v: unknown, max: number): string { return String(v || "").replace(/[<>&"'`\\]/g, "").trim().slice(0, max); }
+// What the sales tax is called (GST / VAT / Sales tax / the business's own word).
+// deno-lint-ignore no-explicit-any
+export function taxNameOf(cat: any): string {
+  const r = regionOf(cat), country = /^[A-Z]{2}$/.test(String(r.country || "")) ? r.country : REGION_DEFAULTS.country;
+  return regionWord(r.taxName, 20) || TAX_NAMES[country] || "Tax";
+}
+export function currencySymbolOf(code: string): string {
+  try { const p = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" }).formatToParts(0).find((x) => x.type === "currency"); return p ? p.value : code; }
+  catch { return code; }
+}
+// The currency's cents: 2 for AUD/USD, 0 for JPY/KRW, 3 for KWD/BHD (2 when the runtime doesn't know the code).
+export function currencyDecimalsOf(code: string): number {
+  try { const n = new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions().maximumFractionDigits; return Number.isInteger(n) ? n : 2; }
+  catch { return 2; }
+}
+// An amount as the business writes it. digits: "auto" = no cents on whole amounts, 2 = always cents, "plain" = as the
+// number comes ("$1,234.5"), "raw" = no thousands separator ("$1234"). Nothing saved = exactly what the functions wrote
+// before 14 Oct.
+// deno-lint-ignore no-explicit-any
+export function moneyText(n: number, cat: any, digits: "auto" | 2 | "plain" | "raw" = "plain"): string {
+  const r = regionOf(cat), x = Number(n);
+  const code = /^[A-Z]{3}$/.test(String(r.currency || "")) ? r.currency : REGION_DEFAULTS.currency;
+  const sym = regionWord(r.currencySymbol, 4) || currencySymbolOf(code), dec = currencyDecimalsOf(code);
+  const fmt = MONEY_FORMATS.find((f) => f[0] === r.moneyFormat) || MONEY_FORMATS[0];
+  // "cents" = the currency's own: none for JPY, three for KWD
+  const opts = digits === "auto" ? { minimumFractionDigits: Math.abs(x - Math.round(x)) < 1e-9 ? 0 : dec, maximumFractionDigits: dec }
+    : digits === 2 ? { minimumFractionDigits: dec, maximumFractionDigits: dec } : undefined;
+  let s = digits === "raw" ? String(x) : x.toLocaleString("en-US", opts);
+  if (fmt !== MONEY_FORMATS[0]) s = s.replace(/[,.]/g, (ch) => ch === "," ? fmt[1] : fmt[2]);
+  return r.symbolAfter === true ? `${s} ${sym}` : sym + s;
+}
+// One key per public holiday, its moved ("additional"/"substitute") day included.
+export function holidayKey(name: unknown): string { return String(name || "").replace(/\s*\((?:additional|substitute) day\)\s*$/i, "").trim().toLowerCase(); }
+// The public holidays that are days off: none while the switch is off (hours.publicOn, or the old hours.nsw), none when the
+// stored list (catalog.holidays, worked out by the app) is for another region, minus the ones switched off (hours.holidayOff).
+// deno-lint-ignore no-explicit-any
+export function holidayDaysOf(cat: any): Record<string, string> {
+  const c = cat && typeof cat === "object" ? cat : {}, h = c.hours && typeof c.hours === "object" ? c.hours : {};
+  if (!(h.publicOn ?? h.nsw)) return {};
+  const ph = c.holidays;
+  if (!ph || !ph.days || typeof ph.days !== "object" || ph.region !== regionKeyOf(c.region || {})) return {};
+  const off = new Set(Array.isArray(h.holidayOff) ? h.holidayOff : []), out: Record<string, string> = {};
+  for (const [d, name] of Object.entries(ph.days)) if (/^\d{4}-\d{2}-\d{2}$/.test(d) && !off.has(holidayKey(name))) out[d] = String(name);
+  return out;
+}
+// ── end region ──
+
 // ── scan: news for the phones (Settings → Notifications) ──
 export const NOTIFY_KINDS = ["newLead", "leadWaiting", "missedCall", "unpaid", "docExpiry", "bizInsurance"];
 // Only these may also go to the office (VA and managers); the rest are money and private details, for the owners only.
@@ -109,10 +213,6 @@ export const OFFICE_KINDS = ["newLead", "leadWaiting", "missedCall"];
 export const BIZ_INSURANCE_DAYS = 30;   // the business insurance is always flagged 30 days before (Ofek 14 Oct)
 const DOC_LABEL: Record<string, string> = { license: "driver licence", passport: "passport", visa: "visa", heights: "working-at-heights ticket", arc: "refrigerant licence", insurance: "public liability insurance" };
 const BIZ_INSURANCE_LABEL: Record<string, string> = { workers: "workers compensation", liability: "public liability" };
-export function sydParts(ms: number) {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
-  return { day: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) % 24, minute: Number(p.minute) };
-}
 export function shiftDay(day: string, n: number) { const [y, m, d] = day.split("-").map(Number); const t = new Date(Date.UTC(y, m - 1, d + n)); return t.toISOString().slice(0, 10); }
 const TEST_TAG = (tags: unknown) => Array.isArray(tags) && tags.some((t) => String(t).toLowerCase() === "test");
 // deno-lint-ignore no-explicit-any
@@ -152,8 +252,10 @@ export function callPayload(c: any) {
   return { title: "Missed call", body: `${c.from_number || "A caller"}${c.division ? " · " + c.division : ""}. Call them back.`, url: `${APP_URL}?tab=myDay`, tag: `call-${c.id}` };
 }
 // deno-lint-ignore no-explicit-any
-export function unpaidPayload(j: any, R: { unpaidDays: number }) {
-  return { title: `${R.unpaidDays === 7 ? "Unpaid for a week" : `Unpaid for ${R.unpaidDays} days`}: ${j.customer_name || "a job"}`, body: `$${Number(j.amount || 0).toLocaleString("en-AU")} from ${j.date}. Time to chase it.`, url: `${APP_URL}?tab=outstanding`, tag: `unpaid-${j.id}` };
+// The amount as the business writes it (cat = settings.catalog: its currency; nothing saved = "$480").
+// deno-lint-ignore no-explicit-any
+export function unpaidPayload(j: any, R: { unpaidDays: number }, cat?: any) {
+  return { title: `${R.unpaidDays === 7 ? "Unpaid for a week" : `Unpaid for ${R.unpaidDays} days`}: ${j.customer_name || "a job"}`, body: `${moneyText(Number(j.amount || 0), cat, "plain")} from ${j.date}. Time to chase it.`, url: `${APP_URL}?tab=outstanding`, tag: `unpaid-${j.id}` };
 }
 // deno-lint-ignore no-explicit-any
 export function docPayload(e: any, kind: string, exp: string) {
@@ -167,11 +269,12 @@ export function invoicePayload(person: string, week: string, end?: unknown) {
 }
 // "Send a test" on one card in Settings → Notifications: the real wording on made-up data, titled "Test · …" so nobody
 // takes it for a real lead or call. null for a kind that has no notification yet (a Google review) or does not exist.
-export function testPayload(kind: string, R: { waitMinutes: number; unpaidDays: number; docDays: number }, today: string) {
+// deno-lint-ignore no-explicit-any
+export function testPayload(kind: string, R: { waitMinutes: number; unpaidDays: number; docDays: number }, today: string, cat?: any) {
   const p = kind === "newLead" ? leadPayload({ id: "test", full_name: "Sarah Mitchell", division: "Aircon", source: "Google Ads" })
     : kind === "leadWaiting" ? waitingPayload({ id: "test", full_name: "James Nguyen", division: "Chimney" }, R)
     : kind === "missedCall" ? callPayload({ id: "test", from_number: "0491 570 156", division: "Aircon" })
-    : kind === "unpaid" ? unpaidPayload({ id: "test", customer_name: "Daniel Russo", amount: 480, date: shiftDay(today, -R.unpaidDays) }, R)
+    : kind === "unpaid" ? unpaidPayload({ id: "test", customer_name: "Daniel Russo", amount: 480, date: shiftDay(today, -R.unpaidDays) }, R, cat)
     : kind === "invoice" ? invoicePayload("Sample Technician", shiftDay(today, -7))
     : kind === "docExpiry" ? docPayload({ id: "test", name: "Sample Employee" }, "arc", shiftDay(today, R.docDays))
     : kind === "bizInsurance" ? bizInsurancePayload("liability", shiftDay(today, BIZ_INSURANCE_DAYS))
@@ -189,7 +292,7 @@ export async function scan(sb: any, nowMs: number) {
   // one scan at a time: the first call in each 8-minute window claims it
   const { error: busy } = await sb.from("push_sent").insert({ key: `scan:${Math.floor(nowMs / (8 * 60000))}` });
   if (busy) return { ok: true, busy: true, sent: 0 };
-  const now = sydParts(nowMs), today = now.day;
+  const now = bizParts(nowMs, bizTzOf(st && st.catalog)), today = now.day;   // the business's day and hour (Region and format)
   // deno-lint-ignore no-explicit-any
   const events: { key: string; kind: string; payload: any }[] = [];
   if (on("newLead") || on("leadWaiting")) {
@@ -209,7 +312,7 @@ export async function scan(sb: any, nowMs: number) {
   }
   if (on("unpaid")) {
     const { data: jobs } = await sb.from("jobs").select("id, customer_name, amount, date, payment_status").eq("payment_status", "Unpaid").eq("date", shiftDay(today, -R.unpaidDays));
-    for (const j of jobs || []) events.push({ key: `unpaid:${j.id}`, kind: "unpaid", payload: unpaidPayload(j, R) });
+    for (const j of jobs || []) events.push({ key: `unpaid:${j.id}`, kind: "unpaid", payload: unpaidPayload(j, R, st && st.catalog) });
   }
   if (on("docExpiry")) {
     const { data: emps } = await sb.from("employees").select("id, name, status, documents");
@@ -267,7 +370,7 @@ export async function handle(sb: any, body: any, me: any) {
     if (kind) {
       // One card's test: its real wording with the saved numbers (Settings → Notifications).
       const { data: st } = await sb.from("settings").select("catalog, unpaid_reminder_days").eq("id", 1).single();
-      const p = testPayload(kind, notifyRules(st?.catalog?.notify, st?.unpaid_reminder_days), sydParts(Date.now()).day);
+      const p = testPayload(kind, notifyRules(st?.catalog?.notify, st?.unpaid_reminder_days), bizParts(Date.now(), bizTzOf(st?.catalog)).day, st?.catalog);
       if (!p) return { status: 400, body: { ok: false, reason: "unknown notification" } };
       payload = p;
     }

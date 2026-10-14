@@ -26,10 +26,14 @@ const INDEX_HTML_PATH = path.join(__dirname, '..', 'index.html');
 const DECLS = [
   // date/money primitives
   'MONTHS', 'MONTHS_FULL', 'pad2', 'parseLocalDate', 'fmtLocal', 'daysBetween', 'round2', 'todayStr',
+  // Region and format: time zone, money, tax name, place, public holidays (T1.2/T1.3, 14 Oct)
+  'REGION_DEFAULTS', 'TAX_NAMES', 'BIZ_NUMBER_LABELS', 'MONEY_FORMATS', 'TZ_ALLOWED', 'TZ_FALLBACK', 'TZ_VALID', 'REGION_NONE', 'REGION_MEMO', 'BIZ_WALL', 'BIZ_DAY_MEMO', 'regionNow', 'tzValid', 'regionMemo', 'bizTz', 'bizWall', 'bizDayOf', 'bizDayMemo',
+  'bizNowPast', 'bizTzLabel', 'regionCountry', 'regionState', 'regionKeyOf', 'countryName', 'regionPlaceName', 'regionPlaceShort', 'regionWord', 'regionLabels', 'taxName', 'bizNumberLabel', 'currencySymbolOf', 'currencyDecimalsOf', 'moneyCfg', 'moneyText', 'curSym',
+  'HOLIDAY_LIB_URL', 'HOLIDAY_SOURCE', 'HOLIDAY_WORDING', 'holidayKey', 'holidaysFromLib', 'holidayDaysOf', 'holidaysStale', 'bizNumberHint', 'invMoney', 'fmtSignedMoney',
   'weekOf', 'monthOf', 'currentWeekKey',
   'jobGst', 'jobTotalCollected', 'amountExGst', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
-  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'SUB_DIVISIONS', 'SUB_SOURCES', 'LEAD_TAGS', 'leadTagOn', 'DIVISION_COLOR', 'divColor', 'leadSubDivisions', 'leadSubSource', 'visibleTags', 'subSourceOptions', 'LEAD_SOURCE_LABEL', 'sourceLabel', 'splitLeadRequestEvent', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'sydneyWall', 'chaseAlertDue',
+  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'SUB_DIVISIONS', 'SUB_SOURCES', 'LEAD_TAGS', 'leadTagOn', 'DIVISION_COLOR', 'divColor', 'leadSubDivisions', 'leadSubSource', 'visibleTags', 'subSourceOptions', 'LEAD_SOURCE_LABEL', 'sourceLabel', 'splitLeadRequestEvent', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'chaseAlertDue',
   // CRM / attribution
   'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
@@ -40,7 +44,7 @@ const DECLS = [
   // reminders
   'fmtDateShort', 'computeReminders', 'TECH_REMINDER_TYPES', 'OWNER_REMINDER_TYPES', 'remindersFor', 'EMP_DOCS', 'EMP_DOC_WARN_DAYS', 'fmtDateYear', 'employeeDocExpiry', 'abnValid', 'employeeMissing',
   // payroll + net profit
-  'PAYROLL_HOURLY_RATE', 'PAYROLL_BOOKING_BONUS', 'PAYROLL_HEBREW_NAMES', 'payCatalog', 'payTiersOk', 'payHourlyFor', 'payHebrewNames', 'bookingBonus', 'nextBookingTier',
+  'PAYROLL_HOURLY_RATE', 'PAYROLL_BOOKING_BONUS', 'payCatalog', 'payTiersOk', 'payHourlyFor', 'payHebrewNames', 'bookingBonus', 'nextBookingTier',
   'salesLogBookings', 'salesLogPay', 'payrollWeekOf', 'shiftPayrollWeek', 'payrollRangeText', 'payMoney', 'jobPaidDate',
   'computePayrollCommission', 'computePayrollHourly', 'buildCommissionPayMessage', 'buildHourlyPayMessage', 'shiftDays',
   'PAYROLL_REMINDERS_FROM', 'payrollStatus', 'payrollCommissionPeople', 'payrollHourlyPeople', 'paymentTermDays', 'jobDaysWaiting', 'jobIsLate',
@@ -48,15 +52,15 @@ const DECLS = [
   // dashboard
   'localDay', 'GOOGLE_ADS_AIRCON_ACCOUNT', 'callDivision', 'summarizeCalls', 'DASH_RANGES', 'resolveDashboardRange',
   // sales automations + My Day
-  'fmtMoney', 'workClockDue', 'sydneyNowPast', 'NEW_LEAD_ALERT_FROM', 'leadArrivedAt', 'newLeadUnhandled', 'chaseTooLong', 'quoteStale', 'bookedNoJob', 'MY_DAY_NEW_DAYS', 'myDayLists',
+  'fmtMoney', 'workClockDue', 'NEW_LEAD_ALERT_FROM', 'leadArrivedAt', 'newLeadUnhandled', 'chaseTooLong', 'quoteStale', 'bookedNoJob', 'MY_DAY_NEW_DAYS', 'myDayLists',
   // My Day counters (3 Oct)
   'esc', 'quoteDueReason', 'shiftDaySummary', 'latePaymentDue', 'latePaymentDoneToday', 'reofferDue', 'assigneeNames', 'taskAssignedTo', 'myTaskDue', 'teamTaskDue', 'MD_BUBBLES', 'MD_HE', 'mdTaskLines', 'DIV_HE', 'MD_FROM_HE', 'mdBookingLinesHe', 'mdPeriodBubbles', 'mdCounts', 'mdStoredCounts', 'mdWeekCounts', 'mdBookingsTable', 'chasingLostStats',
   // message templates (12 Oct)
-  'TECH_JOB_TYPES', 'jobTypesForTech',
+  'jobTypesForTech',
   'EQUIPMENT_CATEGORY_DEFAULTS', 'equipmentCategories', 'equipmentCategoryOf', 'contractorDealAmount', 'contractorDealLine', 'contractorDealNote', 'contractorStatusFromPrivate', 'contractorAgreementHtml', 'contractorAgreementInputs', 'ROLE_LABEL', 'roleLabel', 'peopleList', 'personActive', 'personRoles', 'personInGroup', 'ownerLoginsWithoutCard',
   'ORG_CTR', 'orgExpectedCtr', 'ORG_CLEAN_FROM', 'orgPath', 'orgWindow', 'orgIsLead', 'orgLeadStats', 'ORG_EV_LABEL', 'orgEvidenceText',
   'PHONE_MENU_DEFAULT', 'phoneMenuOf', 'phoneMenuText', 'phoneSayDefault', 'phoneRingSeconds', 'phoneE164', 'phonePretty', 'PHONE_BACKUP_DAY', 'phoneBackupHours', 'phoneBackupDayOk', 'phonePersonKeyFor',
-  'REVIEW_TPL_VARS', 'CHAT_TPL_VARS', 'MSG_TEMPLATES', 'msgTemplateText', 'fillTemplate', 'SMS_GSM', 'smsParts', 'templateProblems',
+  'BIZ_TPL_VAR', 'REVIEW_TPL_VARS', 'CHAT_TPL_VARS', 'MSG_TEMPLATES', 'msgTemplateText', 'fillTemplate', 'SMS_GSM', 'smsParts', 'templateProblems',
   // review requests (5 Oct)
   'reviewInvoiceKey', 'reviewNeed', 'REVIEW_DEFAULTS', 'reviewCfg', 'reviewDefaultFor', 'reviewLinkFor',
   // one "Ask automatically" switch, the Closings box and the message preview (13 Oct)
@@ -74,9 +78,9 @@ const DECLS = [
   // Bonuses, invoice edits (7 Oct)
   'payrollBonusesFor', 'payrollInvoiceTotals', 'payrollInvoiceLineEdited',
   // Google Ads: real leads vs Google's count, tracking problems (9 Oct)
-  'adsConvKind', 'adsConvShortName', 'adsTracking',
+  'adsConvKind', 'adsOwnNames', 'adsConvShortName', 'adsTracking',
   // The nightly lead check: info@ emails vs the app (9 Oct)
-  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'toastKind', 'NSW_HOLIDAYS', 'OFFICE', 'officeHoursFor', 'nextOfficeDay', 'hhmmToMins', 'minsToHhmm', 'officeHoursText', 'catalogHours', 'catalogObject', 'brandName', 'RULES', 'ACTIVE', 'DIV_LABEL', 'CATALOG', 'LEAD_STAGE_PICKABLE', 'LEAD_STATUS_COLOR', 'LEAD_STATUS_INK', 'stageColor', 'stageInk', 'replaceArr', 'divLabel', 'activeOnly', 'inkFor', 'catalogBase', 'catalogId', 'catalogList', 'catalogRules', 'lostReasonLabel', 'lostReasonCanDelete', 'catalogShown', 'catalogFindByName', 'SOURCE_HOSTS', 'sourceHost', 'sourceSetupSteps', 'sourceLeadStats', 'applyCatalog', 'STAGE_CORE', 'stageOn', 'stagesPickable', 'stagesShown', 'stagesInProgress', 'stageIsBuiltin', 'stageLeadsIn', 'stageStoredOnly', 'stageMovePlan', 'stageListWithNew', 'STAGE_RULE_TEXT', 'CAT_SWATCHES', 'tagColor', 'sameLiveRow', 'sameValue', 'LOCAL_WRITES', 'noteLocalWrite', 'settleLocalWrites',
+  'parseShownNumber', 'formatShownNumber', 'checkPhone', 'checkEmail', 'toastKind', 'OFFICE', 'officeHoursFor', 'nextOfficeDay', 'hhmmToMins', 'minsToHhmm', 'officeHoursText', 'catalogHours', 'catalogObject', 'brandName', 'RULES', 'ACTIVE', 'DIV_LABEL', 'CATALOG', 'LEAD_STAGE_PICKABLE', 'LEAD_STATUS_COLOR', 'LEAD_STATUS_INK', 'stageColor', 'stageInk', 'replaceArr', 'divLabel', 'activeOnly', 'inkFor', 'catalogBase', 'catalogId', 'catalogList', 'catalogRules', 'lostReasonLabel', 'lostReasonCanDelete', 'catalogShown', 'catalogFindByName', 'SOURCE_HOSTS', 'sourceHost', 'sourceSetupSteps', 'sourceLeadStats', 'applyCatalog', 'STAGE_CORE', 'stageOn', 'stagesPickable', 'stagesShown', 'stagesInProgress', 'stageIsBuiltin', 'stageLeadsIn', 'stageStoredOnly', 'stageMovePlan', 'stageListWithNew', 'STAGE_RULE_TEXT', 'CAT_SWATCHES', 'tagColor', 'sameLiveRow', 'sameValue', 'LOCAL_WRITES', 'noteLocalWrite', 'settleLocalWrites',
   'LEAD_CHECK_DAYS', 'leadPhoneKey', 'leadCheckOpen', 'leadCheckLatest', 'leadDivisionFromSubject', 'adsEmailCheck',
   // Settings round 2, small fixes (13 Oct)
   'mfaStaleFactors', 'mfaFriendlyName', 'pushCanTest', 'phoneBarMode',
@@ -97,7 +101,7 @@ const DECLS = [
   // Settings → Connectors (14 Oct)
   'freshTone', 'CONN_HOW', 'CONN_HOW_ORDER', 'CONN_LATE_HOURS', 'CONN_ACCOUNTS', 'CONNECTORS', 'CONN_ADDONS', 'CONN_GUIDE_LINKS', 'connCfgOf', 'connItemOn', 'connAccountOn', 'connPatched',
   'connSourceDef', 'connDefs', 'connState', 'connIsLive', 'SOURCE_HOW', 'sourceRowInfo', 'connFreshItems', 'connOldest', 'connTone', 'connGhlArchiveText', 'connStepsFor', 'connNextStep', 'connHows', 'connMatches',
-  'connStopsAll', 'connPendingReaders', 'fmtAdsAccount', 'connDayName', 'connSydDay', 'connWhen', 'connAddonsShown', 'CONN_LOG_SRC', 'connLogRows',
+  'connStopsAll', 'connPendingReaders', 'fmtAdsAccount', 'connDayName', 'connWhen', 'connAddonsShown', 'CONN_LOG_SRC', 'connLogRows',
   // Settings → Security: Face ID / fingerprint (passkeys), the 30-minute lock, Settings history (14 Oct)
   'CAT_NAMES', 'setBlock', 'SEC_LOCK_MINUTES', 'bytesToB64url', 'b64urlToBytes', 'pkCreationOptions', 'pkRequestOptions', 'pkAttestationJSON', 'pkAssertionJSON', 'pkDeviceInfo', 'bioIcoFor', 'secMethodWord',
   'secUnlockMethods', 'lockedBackupLinkOpen', 'SEC_INTENTS', 'secGoogleParse', 'PAY_SETTING_NAMES', 'secLeft', 'secWhen', 'settingsHistParts', 'settingsHistFilter', 'secHistChips', 'secRecentCount', 'secReasonText',
@@ -121,8 +125,18 @@ const DECLS = [
   'autoPeopleText', 'autoTaskWho', 'autoDueText', 'autoHoursShort', 'autoDoShort', 'autoFlowChips', 'autoWhenShort', 'autoSentence', 'autoBadBlanks', 'autoStepIssues', 'autoStepProblems', 'autoProblems', 'autoTriggersOn', 'autoMatches', 'autoTplUsers', 'autoPreviewHtml',
   'autoReadyRows', 'autoGatePill', 'autoStatusPill', 'autoRowHtml', 'autoListsHtml',
   // the 14 Oct review: safety settings, opt-outs, "Try it", versions, ready-mades off the list
-  'AUTO_SAFETY_DEFAULTS', 'AUTO_EMAIL_FOOTER_DEFAULT', 'AUTO_TIMEZONES', 'autoSafetyNorm', 'autoSafetyProblems', 'autoSafetyPatch', 'autoTzLabel', 'autoSafetyLine', 'autoEmailSigner',
+  'AUTO_SAFETY_DEFAULTS', 'AUTO_EMAIL_FOOTER_DEFAULT', 'autoSafetyNorm', 'autoSafetyProblems', 'autoSafetyPatch', 'autoTzLabel', 'autoSafetyLine', 'autoEmailSigner',
   'autoCustomerChannels', 'autoNewVersion', 'autoTryRecords', 'autoTryWhen', 'autoTryResultHtml', 'autoRemovedHtml', 'optOutKeys', 'optOutRowsFor', 'optOutInserts', 'optOutControlHtml',
+  // Names and labels (round 3, C-names)
+  'officeLabel', 'officePossessive', 'bizShortName', 'ownerNamesText', 'officeAgentName', 'officeAssignee', 'taskBoardLabel', 'PERSON_COLORS', 'techColor', 'personReportName', 'payCashTo',
+  'brandCacheRead', 'brandSource', 'tplExample', 'brandOf', 'contractorServices', 'CONTRACTOR_TRADES', 'REVIEW_FAMILIES', 'AU_STATE_NAMES', 'COUNTRY_ADJ', 'agreementPlace', 'bizLegalName', 'connWordsIn', 'connWordsNow', 'contractorServiceColor', 'CONTRACTOR_SERVICE_COLOR',
+  // Deleting services, People details in place, Pipeline settings as columns (round 3, D-settings)
+  'DIV_DELETED', 'serviceDeleted', 'liveDivisions', 'SERVICE_CATCH_ALL', 'serviceDeleteProblem', 'serviceUsage', 'serviceUseText', 'serviceMovePlan', 'phoneMenuWithout',
+  'EMP_ROLES', 'empRolesNext', 'empNameProblem', 'empRolesForLogin', 'empTypeForRole', 'empRoleLabel', 'EMP_FIELD_LABEL',
+  'stageColStyle', 'pipeHeadHtml', 'stageCounts', 'catalogReorder', 'stageMoveBy', 'stageRowCtl', 'stageColumnHtml',
+  // Saving keeps the place, the settings search, drag & drop on every upload (round 3, A-ux: T1.8, T1.10, T1.1)
+  'motionPageKey', 'renderViewKey', 'renderScrollPlan', 'settingsNavText', 'settingsNavMatch',
+  'RECEIPT_TYPES', 'MAX_FILE_MB', 'DROP_RULES', 'dropFileType', 'dropAccepts', 'dropCheck', 'dropRoutePlan', 'dropZoneAttrs',
 ];
 
 function extractDecl(source, name){
@@ -170,6 +184,19 @@ function loadSandbox(){
 }
 
 let pass = 0, fail = 0;
+// This business's names as the C-names SQL saves them in settings.catalog (round 3: no names in the code). Fixtures that
+// check today's words use these, so the words are the same as before.
+const TODAY_NAMES = {
+  pay: { hebrew: { Guy:'גיא', Dolev:'דולב', Omri:'עומרי' }, cashTo: 'Ofek',
+    jobTypes: { Guy:['Aircon','Chimney','Other'], Dolev:['Aircon','Chimney','Other'], Omri:['Aircon','Chimney','Other'], Alessandro:['Pressure Washing'] } },
+  people: { Guy:{ color:'person-1' }, Dolev:{ color:'person-2' }, Noam:{ color:'person-3' }, Ofek:{ color:'person-4', reportName:'אופק' }, Ron:{ reportName:'רון' } },
+  brands: { Aircon:'The AC Cleaning Guys', Chimney:'The Chimney Guys', 'Pressure Washing':'The Pressure Washing Guys' },
+  business: { phone:'1300 380 090', website:'theguyservicegroup.com', shortName:'The Guys Group' },
+  reviews: { links: {
+    Aircon: { link:'https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU', result:'Enjoy the fresh, clean air!' },
+    Chimney: { link:'https://g.page/r/CZUuKFAccuR4EBM/review', result:'Enjoy your clean, safe fireplace!' },
+    'Pressure Washing': { link:'https://g.page/r/CZjy0MO5zKE7EBM/review', result:'Enjoy your fresh, clean outdoor area!' } } },
+};
 function assertEqual(actual, expected, label){
   const a = JSON.stringify(actual), e = JSON.stringify(expected);
   if (a === e) { pass++; return; }
@@ -425,6 +452,8 @@ function testPayroll(sb){
   assertEqual(c.expected, 120, 'payroll: expected commission of the unpaid job');
   assertEqual(c.cash, 350, 'payroll: cash to collect = cash jobs paid this week (no GST on this one)');
   assertEqual(c.percent, 30, 'payroll: single rate shown in the message header');
+  const keepSettings = sb.STATE.data.settings;
+  sb.STATE.data.settings = { ...keepSettings, catalog: { ...(keepSettings.catalog || {}), pay: TODAY_NAMES.pay, people: TODAY_NAMES.people } };   // today's names, from the settings
   const msg = sb.buildCommissionPayMessage(c);
   const expectedMsg = [
     'היי גיא 👋',
@@ -444,6 +473,18 @@ function testPayroll(sb){
   const aMsg = sb.buildCommissionPayMessage(sb.computePayrollCommission(sb.STATE.data, 'Alessandro', '2026-09-13'));
   assertEqual(aMsg.split('\n')[0], 'Hi Alessandro 👋', 'payroll: Alessandro gets his message in English');
   assertEqual(aMsg.includes('💰 Total to pay: $300.00'), true, 'payroll: Alessandro 50% of 600 (parts not deducted) = 300');
+  // Who the cash goes to (round 3, T1.9): the person set in Tax and payments (their name in the owners' reports in Hebrew), else the owners.
+  assertEqual([sb.payCashTo(false), sb.payCashTo(true)], ['Ofek', 'אופק'], 'payCashTo: the saved person, in Hebrew by their report name');
+  assertEqual(aMsg.includes('please transfer to Ofek') || !aMsg.includes('Cash collected'), true, 'payroll: the English message names the same person');
+  sb.STATE.data.settings = { ...keepSettings, catalog: {} };
+  assertEqual([sb.payCashTo(false), sb.payCashTo(true), JSON.stringify(sb.payHebrewNames())], ['the owners', 'בעלים', '{}'], 'payCashTo: nothing saved = the owners; nobody gets Hebrew');
+  sb.STATE.data.settings = { ...keepSettings, catalog: { pay: { hebrew: TODAY_NAMES.pay.hebrew } } };
+  assertEqual(sb.buildCommissionPayMessage(c).split('\n').slice(-2)[0], 'מזומן שנאסף השבוע: $350.00 - צריך להעביר לבעלים', 'payroll: Hebrew message with no cash person = to the owners');
+  sb.STATE.data.settings = { ...keepSettings, catalog: { pay: { cashTo: 'Ofek' } } };
+  assertEqual([sb.buildCommissionPayMessage(c).split('\n').slice(-2)[0], sb.payCashTo(true)], ['Cash collected this week: $350.00 - please transfer to Ofek', 'Ofek'], 'payroll: English message names the person; no report name = their first name');
+  sb.STATE.data.settings = { ...keepSettings, catalog: {} };
+  assertEqual(sb.buildCommissionPayMessage(c).split('\n').slice(-2)[0], 'Cash collected this week: $350.00 - please transfer to the owners', 'payroll: English message with no cash person = to the owners');
+  sb.STATE.data.settings = keepSettings;
 
   // Ron: $10/h + daily bonus on that day's bookings (5-7 -> $10, 8-11 -> $15, 12+ -> $25).
   assertEqual([4,5,7,8,11,12,30].map(n=>sb.bookingBonus(n)).join(','), '0,10,10,15,15,25,25', 'bookingBonus tiers');
@@ -750,7 +791,7 @@ function testMaterialsPayback(sb){
   // Equipment & materials a technician paid for himself (Ofek 6 Oct): paid back in full (GST included) with his weekly
   // pay, on a second invoice next to the commission one; it lands in the week it was ENTERED; a week already marked
   // paid takes nothing new. Bought by the business = an expense only.
-  sb.STATE.data.settings = { gstRatePercent:10 };
+  sb.STATE.data.settings = { gstRatePercent:10, catalog: { pay: TODAY_NAMES.pay, people: TODAY_NAMES.people } };   // Guy's message in Hebrew (today's settings)
   assertEqual([sb.equipReimbursedFor('Business'), sb.equipReimbursedFor('Guy'), sb.equipReimbursedFor('Guy', 'Reimbursed'), sb.equipReimbursedFor('Guy', 'N/A')], ['N/A','Pending','Reimbursed','Pending'], 'equipReimbursedFor: business = nothing to pay back; a technician = waiting, unless already paid back');
   assertEqual(sb.partsRefundFor({ partsCost:40, partsPaidBy:'Guy' }), 'Pending Refund', 'partsRefundFor: parts the technician paid for wait to be paid back');
   assertEqual([sb.partsRefundFor({ partsCost:40, partsPaidBy:'Business' }), sb.partsRefundFor({ partsCost:0, partsPaidBy:'Guy' }), sb.partsRefundFor({ partsCost:40, partsPaidBy:'' })], ['N/A','N/A','N/A'], 'partsRefundFor: business-paid, no parts, or nobody = nothing to pay back');
@@ -1142,7 +1183,7 @@ function testBranding(sb){
   sb.STATE.data.settings = { companyName: 'X Pty' };
   const named = sb.brandName();
   sb.STATE.data.settings = {};
-  assertEqual([named, sb.brandName()], ['X Pty', 'The Guys Service Group'], 'brandName: the business\'s trading name, for the menu');
+  assertEqual([named, sb.brandName()], ['X Pty', 'OPS Service'], 'brandName: the business\'s trading name, for the menu; none = the product\'s name (no business name in the code)');
   const up = 'https://abc.supabase.co/storage/v1/object/public/branding/logo-1.png';
   assertEqual([sb.brandLogoKind({}), sb.brandLogoKind({ logo: '' }), sb.brandLogoKind({ logo: 'ops-mark' }), sb.brandLogoKind({ logo: up }), sb.brandLogoKind({ logo: 'https://evil.com/x.png' })],
     [{ kind: 'legacy', src: 'logo.png' }, { kind: 'legacy', src: 'logo.png' }, { kind: 'mark' }, { kind: 'upload', src: up }, { kind: 'legacy', src: 'logo.png' }], 'brandLogoKind: nothing = logo.png (as before), the OPS mark, an upload only from the branding bucket');
@@ -1164,15 +1205,21 @@ function testReviewSettings(sb){
   sb.STATE.data.settings = { catalog: {} };
   const c0 = sb.reviewCfg();
   assertEqual([c0.sendFrom, c0.sendUntil, c0.morning, c0.askAgainMonths, c0.remindAfterDays, c0.remindWithinDays], [8, 20, 10, 6, 1, 14], 'reviews: no settings = the original rules');
-  assertEqual(sb.reviewLinkFor('Chimney').result, 'Enjoy your clean, safe fireplace!', 'reviews: the original thank-you line');
+  assertEqual([sb.reviewLinkFor('Chimney'), sb.reviewDefaultFor('Ducted')], [{ link: '', result: '', custom: false }, {}], 'reviews: nothing saved = no link and no line (no links in the code)');
+  sb.STATE.data.settings = { catalog: { reviews: TODAY_NAMES.reviews } };
+  assertEqual(sb.reviewLinkFor('Chimney').result, 'Enjoy your clean, safe fireplace!', 'reviews: today\'s saved thank-you line');
   const job = { invoiceNumber: '2701', date: '2026-10-01' }, today = '2026-10-10';
   const sent = d => ({ status: 'sent', sent_at: d + 'T01:00:00Z', ask_count: 1 });
   assertEqual([sb.reviewNeed(job, sent('2026-10-09'), today, false), sb.reviewNeed(job, sent('2026-10-10'), today, false), sb.reviewNeed(job, sent('2026-09-25'), today, false)], ['again', null, null], 'reviews: reminder from 1 day, until 14 days (original)');
-  assertEqual([sb.reviewLinkFor('Ducted aircon').result, sb.reviewLinkFor('Roof cleaning').result, sb.reviewLinkFor('Gutters').link], ['Enjoy the fresh, clean air!', 'Enjoy your fresh, clean outdoor area!', ''], 'reviews: a new service gets the original that the server would use');
-  sb.STATE.data.settings = { catalog: { reviews: { remindAfterDays: 3, remindWithinDays: 30, sendFrom: 9, sendUntil: 7, links: { Chimney: { link: 'https://g.page/r/x/review', result: '' } } } } };
+  assertEqual([sb.reviewLinkFor('Ducted aircon').result, sb.reviewLinkFor('Roof cleaning').result, sb.reviewLinkFor('Gutters').link], ['Enjoy the fresh, clean air!', 'Enjoy your fresh, clean outdoor area!', ''], 'reviews: a new service gets the saved one of its kind, as the server does');
+  sb.STATE.data.settings = { catalog: { reviews: { links: { Aircon: { link: 'https://a/x', result: 'R' } } } } };
+  assertEqual([sb.reviewLinkFor('Ducted clean').link, sb.reviewLinkFor('Chimney').link, sb.reviewLinkFor('Aircon').custom, sb.reviewLinkFor('Ducted clean').custom], ['https://a/x', '', true, false], 'reviews: only Aircon saved: a ducted service gets its link, a chimney none');
+  sb.STATE.data.settings = { catalog: { reviews: { links: { Aircon: { link: 'javascript:x', result: '' }, Ducted: { link: 'https://d/x', result: 'D' } } } } };
+  assertEqual([sb.reviewLinkFor('Aircon').link, sb.reviewLinkFor('Aircon').result], ['https://d/x', 'D'], 'reviews: a bad saved link is never used (another of its kind instead)');
+  sb.STATE.data.settings = { catalog: { reviews: { remindAfterDays: 3, remindWithinDays: 30, sendFrom: 9, sendUntil: 7, links: { ...TODAY_NAMES.reviews.links, Chimney: { link: 'https://g.page/r/x/review', result: '' } } } } };
   assertEqual([sb.reviewNeed(job, sent('2026-10-09'), today, false), sb.reviewNeed(job, sent('2026-10-07'), today, false), sb.reviewNeed(job, sent('2026-09-15'), today, false)], [null, 'again', 'again'], 'reviews: reminder from 3 days until 30 when set');
   const c1 = sb.reviewCfg();
-  assertEqual([c1.sendFrom, c1.sendUntil, sb.reviewLinkFor('Chimney').link, sb.reviewLinkFor('Chimney').result], [8, 20, 'https://g.page/r/x/review', 'Enjoy your clean, safe fireplace!'], 'reviews: impossible hours fall back; a saved link with an empty line keeps the original line');
+  assertEqual([c1.sendFrom, c1.sendUntil, sb.reviewLinkFor('Chimney').link, sb.reviewLinkFor('Chimney').result], [8, 20, 'https://g.page/r/x/review', ''], 'reviews: impossible hours fall back; a saved link with an empty line has no line (no built-in lines)');
 }
 // One "Ask automatically" switch (13 Oct): the Closings "Don't ask" box only while it is on, and the Reviews page's
 // preview of the request is the service's own link and line in the Message templates words.
@@ -1185,19 +1232,21 @@ function testReviewPreview(sb){
   sb.STATE.data.settings = {};
   assertEqual([on, sb.reviewAutoOn()], [true, false], 'reviews: the switch is review_requests_auto');
   sb.STATE.data.settings = { catalog: {} };
+  assertEqual(sb.reviewPreviewValues('Aircon').hasLink, false, 'reviews preview: nothing saved = no link (none in the code)');
+  sb.STATE.data.settings = { companyName: 'The Guys Service Group', catalog: { reviews: TODAY_NAMES.reviews } };
   const a = sb.reviewPreviewValues('Aircon'), g = sb.reviewPreviewValues('Gutters');
-  assertEqual([a.hasLink, a.vars.first_name, a.vars.technician, a.vars.today, a.vars.result, a.vars.review_link], [true, 'Sarah', 'Guy', ' today', 'Enjoy the fresh, clean air!', 'https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU'], 'reviews preview: nothing saved = the original aircon link and line');
+  assertEqual([a.hasLink, a.vars.first_name, a.vars.technician, a.vars.today, a.vars.result, a.vars.review_link, a.vars.business_name], [true, 'Sarah', 'Sam', ' today', 'Enjoy the fresh, clean air!', 'https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU', 'The Guys Service Group'], 'reviews preview: today\'s saved aircon link and line, the business name');
   assertEqual([g.hasLink, g.vars.review_link], [false, ''], 'reviews preview: a service without a link can\'t be asked');
   const chimney = { Chimney: { link: 'https://g.page/r/x/review', result: 'Warm and safe!' } };
-  sb.STATE.data.settings = { catalog: { reviews: { links: chimney } } };
+  sb.STATE.data.settings = { companyName: 'The Guys Service Group', catalog: { reviews: { links: { ...TODAY_NAMES.reviews.links, ...chimney } } } };
   const c = sb.reviewPreviewValues('Chimney');
-  assertEqual([c.vars.result, c.vars.review_link, sb.reviewPreviewValues('Pressure Washing').vars.result], ['Warm and safe!', 'https://g.page/r/x/review', 'Enjoy your fresh, clean outdoor area!'], 'reviews preview: the saved link and line; nothing saved = the original');
+  assertEqual([c.vars.result, c.vars.review_link, sb.reviewPreviewValues('Pressure Washing').vars.result], ['Warm and safe!', 'https://g.page/r/x/review', 'Enjoy your fresh, clean outdoor area!'], 'reviews preview: the changed link and line; the others as saved');
   const mT = sb.MSG_TEMPLATES.find(m => m.id==='reviewText'), mE = sb.MSG_TEMPLATES.find(m => m.id==='reviewEmail');
   const VT = { reviewSms: sb.msgTemplateText('reviewSms') }, VE = { reviewEmailSubject: sb.msgTemplateText('reviewEmailSubject'), reviewEmailBody: sb.msgTemplateText('reviewEmailBody') };
-  assertEqual(sb.tplPreviewHtml(mT, VT, c.vars).includes('<div class="tpl-bubble">Hi Sarah, Guy from The Guys Service Group here - thanks for having us today! Warm and safe! Our team works really hard and would truly appreciate a quick Google review: https://g.page/r/x/review Thank you!</div>'), true, 'reviews preview: the text with the service\'s link and line');
+  assertEqual(sb.tplPreviewHtml(mT, VT, c.vars).includes('<div class="tpl-bubble">Hi Sarah, Sam from The Guys Service Group here - thanks for having us today! Warm and safe! Our team works really hard and would truly appreciate a quick Google review: https://g.page/r/x/review Thank you!</div>'), true, 'reviews preview: the text with the service\'s link and line');
   const mail = sb.tplPreviewHtml(mE, VE, c.vars);
   assertEqual([mail.includes('<span>Subject</span>A quick favour, Sarah?'), mail.includes('Warm and safe!'), mail.includes('tpl-mail-btn')], [true, true, true], 'reviews preview: the email with the subject, the line and the button');
-  assertEqual([sb.tplPreviewHtml(mT, VT) === sb.tplPreviewHtml(mT, VT, sb.TPL_EXAMPLE), sb.tplPreviewHtml(mE, VE) === sb.tplPreviewHtml(mE, VE, sb.TPL_EXAMPLE)], [true, true], 'reviews preview: Message templates (no details given) still shows the example');
+  assertEqual([sb.tplPreviewHtml(mT, VT) === sb.tplPreviewHtml(mT, VT, sb.tplExample()), sb.tplPreviewHtml(mE, VE) === sb.tplPreviewHtml(mE, VE, sb.tplExample())], [true, true], 'reviews preview: Message templates (no details given) shows the example with this business\'s words');
   sb.STATE.data.settings = { catalog: { reviews: { links: chimney }, templates: { reviewSms: 'Thanks {first_name}! {result} {review_link}' } } };
   assertEqual(sb.tplPreviewHtml(mT, { reviewSms: sb.msgTemplateText('reviewSms') }, sb.reviewPreviewValues('Chimney').vars).includes('Thanks Sarah! Warm and safe! https://g.page/r/x/review'), true, 'reviews preview: edited words from Message templates are used');
   // A waiting automatic request skipped because the switch went off is the office's to ask (the server's own reason).
@@ -1216,7 +1265,7 @@ function testMessageTemplates(sb){
   assertEqual([orig('missedCall'), orig('missedCallClosed')], [constOf(voice, 'SMS_MISSED'), constOf(voice, 'SMS_CLOSED')], 'templates: missed-call originals are the voice function\'s words');
   assertEqual([orig('phoneGreeting'), orig('phoneClosed'), orig('phoneMissed')], [constOf(voice, 'NOTICE'), constOf(voice, 'CLOSED'), constOf(voice, 'MISSED')], 'templates: spoken phone originals are the voice function\'s words');
   assertEqual([orig('chatOpen'), orig('chatClosed'), orig('chatIntro')], [constOf(conv, 'SMS_OPEN'), constOf(conv, 'SMS_CLOSED'), constOf(conv, 'INTRO')], 'templates: chat originals are the conversations function\'s words');
-  const V = { hi: 'Hi Sarah', first_name: 'Sarah', technician: 'Guy', result: 'Enjoy the fresh, clean air!', review_link: 'https://g.page/r/x/review', today: ' today' };
+  const V = { hi: 'Hi Sarah', first_name: 'Sarah', technician: 'Guy', result: 'Enjoy the fresh, clean air!', review_link: 'https://g.page/r/x/review', today: ' today', business_name: 'The Guys Service Group' };
   assertEqual(sb.fillTemplate(orig('reviewSms'), V), "Hi Sarah, Guy from The Guys Service Group here - thanks for having us today! Enjoy the fresh, clean air! Our team works really hard and would truly appreciate a quick Google review: https://g.page/r/x/review Thank you!", 'templates: review text original fills to the approved text');
   assertEqual([sb.fillTemplate(orig('reviewEmailSubject'), V), sb.fillTemplate(orig('reviewEmailSubject'), { ...V, first_name: '' }), sb.fillTemplate('Hi {first_name}, {x}', { first_name: '' })],
     ['A quick favour, Sarah?', 'A quick favour?', 'Hi, {x}'], 'templates: an empty blank takes its comma; an unknown blank stays');
@@ -1228,6 +1277,15 @@ function testMessageTemplates(sb){
   assertEqual([sb.templateProblems(m('reviewText'), { reviewSms: orig('reviewSms') }).length, sb.templateProblems(m('reviewText'), { reviewSms: 'Thanks {first_name}!' }).length,
     sb.templateProblems(m('missedCall'), { missedCall: 'Hi {first_name}' }).length, sb.templateProblems(m('chatOpen'), { chatOpen: ' ' }).length],
     [0, 1, 1, 1], 'templates: the original saves; no review link, a blank it can\'t fill, or empty words are stopped');
+  // Names come from the settings (round 3, T1.7/T1.9): {business_name} and {agent} instead of the business's and Ron's names.
+  assertEqual(sb.MSG_TEMPLATES.filter(t => sb.templateProblems(t, Object.fromEntries(t.fields.map(f => [f.key, f.text]))).length).map(t => t.id), [], 'templates: every original passes its own checks ({business_name} and {agent} included)');
+  assertEqual([sb.fillTemplate(orig('chatOpen'), { hi: 'Hi Sarah', agent: 'Ron', brand: 'The Chimney Guys', service: 'chimney cleaning' }), sb.fillTemplate(orig('chatIntro'), { hi: 'Hi Sarah', agent: 'Ron', brand: 'The Chimney Guys', service: 'chimney cleaning' })],
+    ["Hi Sarah, Ron here from The Chimney Guys. I saw your message about chimney cleaning - I'm just finishing up another call and will get back to you very shortly. Feel free to reply here in the meantime.",
+     "Hi Sarah, it's Ron from The Chimney Guys. You sent us a message on our website chat about chimney cleaning. I'll give you a call shortly, or you can reply here."], 'templates: with today\'s office person and brand, the chat texts are the approved words exactly');
+  assertEqual([sb.fillTemplate(orig('missedCall'), { business_name: 'The Guys Service Group' }), sb.fillTemplate(orig('phoneGreeting'), { business_name: 'The Guys Service Group' })],
+    ["Hi, it's The Guys Service Group. Sorry we missed your call! We'll call you back shortly. If it's easier, reply here with what you need and your suburb.", 'Thanks for calling The Guys Service Group. This call may be recorded for quality and training.'], 'templates: with today\'s business name, the phone words are the approved words exactly');
+  assertEqual([sb.templateProblems(m('missedCall'), { missedCall: 'Hi from {business_name}' }), sb.templateProblems(m('chatOpen'), { chatOpen: '{agent} from {brand}' })], [[], []], 'templates: {business_name} and {agent} can be used where they are filled');
+  assertEqual(sb.fillTemplate(orig('reviewEmailBody'), { ...V, review_button: '[button]' }).endsWith('Thank you!\nGuy\nThe Guys Service Group'), true, 'templates: the review email is signed with the business name');
 }
 function testOrganicBoard(sb){
   console.log('\nOrganic board (13 Oct)');
@@ -1293,13 +1351,15 @@ function testPaySettings(sb){
   console.log('\nPay settings (Settings, 13 Oct)');
   const log = (date, hours, n) => ({ date, hours, bookingsAircon: n, bookingsChimney: 0, bookingsPw: 0 });
   sb.STATE.data.settings = { catalog: {} };
-  assertEqual([sb.salesLogPay(log('2026-10-01', 8, 9)), sb.bookingBonus(5, '2026-10-01'), sb.jobTypesForTech('Alessandro'), sb.payHebrewNames().Guy], [95, 10, ['Pressure Washing'], 'גיא'], 'pay: nothing saved = $10/hour, the original bonus, job types and Hebrew names');
+  assertEqual([sb.salesLogPay(log('2026-10-01', 8, 9)), sb.bookingBonus(5, '2026-10-01'), sb.jobTypesForTech('Alessandro'), JSON.stringify(sb.payHebrewNames())], [95, 10, ['Aircon', 'Chimney', 'Pressure Washing', 'Other'], '{}'], 'pay: nothing saved = $10/hour, the original bonus, every job type and nobody in Hebrew (no names in the code)');
+  sb.STATE.data.settings = { catalog: { pay: TODAY_NAMES.pay } };
+  assertEqual([sb.jobTypesForTech('Alessandro'), sb.jobTypesForTech('Guy'), sb.payHebrewNames().Guy], [['Pressure Washing'], ['Aircon', 'Chimney', 'Other'], 'גיא'], 'pay: today\'s saved job types and Hebrew names give the same as before');
   sb.STATE.data.settings = { catalog: { pay: { hourly: [{ from: '2026-10-13', rate: 12, tiers: [{ min: 6, bonus: 20 }, { min: 10, bonus: 40 }] }],
     hebrew: { Dolev: 'דולב' }, jobTypes: { Guy: ['Aircon'], Omri: ['Nope'] } } } };
   assertEqual([sb.salesLogPay(log('2026-10-12', 8, 9)), sb.salesLogPay(log('2026-10-13', 8, 9)), sb.salesLogPay(log('2026-10-14', 8, 5)), sb.salesLogPay(log('2026-10-14', 8, 12))], [95, 116, 96, 136], 'pay: a new rate and bonus count from their day on; the days before keep the old ones');
   assertEqual([sb.nextBookingTier(7, '2026-10-14'), sb.nextBookingTier(3, '2026-10-01')], [{ needed: 3, bonus: 40 }, { needed: 2, bonus: 10 }], 'pay: the next bonus follows the day\'s tiers');
   assertEqual([!!sb.payHebrewNames().Guy, sb.payHebrewNames().Dolev], [false, 'דולב'], 'pay: the saved Hebrew list replaces the original one');
-  assertEqual([sb.jobTypesForTech('Guy'), sb.jobTypesForTech('Omri'), sb.jobTypesForTech('Someone new')], [['Aircon'], ['Aircon', 'Chimney', 'Other'], ['Aircon', 'Chimney', 'Pressure Washing', 'Other']], 'pay: saved job types win; an unusable list keeps the original');
+  assertEqual([sb.jobTypesForTech('Guy'), sb.jobTypesForTech('Omri'), sb.jobTypesForTech('Someone new')], [['Aircon'], ['Aircon', 'Chimney', 'Pressure Washing', 'Other'], ['Aircon', 'Chimney', 'Pressure Washing', 'Other']], 'pay: saved job types win; an unusable list = every job type');
   sb.STATE.data.settings = { catalog: { pay: { hourly: [{ from: '2026-10-13', rate: 'x', tiers: [] }] } } };
   assertEqual([sb.salesLogPay(log('2026-10-14', 8, 12)), sb.payTiersOk([{ min: 5, bonus: 10 }, { min: 5, bonus: 20 }, { min: 0, bonus: 5 }])], [80, [{ min: 5, bonus: 10 }]], 'pay: a bad rate keeps $10; no tiers = no bonus; duplicate or zero tiers are dropped');
   sb.STATE.data.settings = { gstRatePercent: 10 };
@@ -1361,7 +1421,9 @@ function testPhoneSettings(sb){
 }
 function testOfficeHours(sb){
   console.log('\nOffice hours and days off (Settings, stage 3)');
-  sb.STATE.data.jobs = []; sb.STATE.data.settings = { catalog: { hours: { days: { 6: { on: true, from: '09:00', to: '13:00' } }, nsw: true, extra: [{ date: '2026-10-20', name: 'Team day' }] } } };
+  // The public holidays come from the stored list (catalog.holidays, seeded by round3-stage1.sql B4), not a list in the code.
+  sb.STATE.data.jobs = []; sb.STATE.data.settings = { catalog: { hours: { days: { 6: { on: true, from: '09:00', to: '13:00' } }, nsw: true, extra: [{ date: '2026-10-20', name: 'Team day' }] },
+    holidays: { region: 'AU-NSW', days: { '2026-10-05': 'Labour Day' } } } };
   sb.applyCatalog();
   assertEqual([sb.isWorkday('2026-10-10'), sb.officeHoursFor('2026-10-10'), sb.isWorkday('2026-10-05'), sb.isWorkday('2026-10-20'), sb.officeHoursText()],
     [true, { from: 540, to: 780 }, false, false, 'Mon–Fri 8:00–17:00, Sat 9:00–13:00'], 'office hours: Saturday mornings on, Labour Day (NSW) and an own day off closed');
@@ -1373,6 +1435,199 @@ function testOfficeHours(sb){
   sb.applyCatalog();
   assertEqual([sb.isWorkday('2026-10-10'), sb.isWorkday('2026-10-05'), sb.workClockDue('2026-10-09T05:50:00Z', 30), sb.officeHoursText()],
     [false, true, { day: '2026-10-12', mins: 500 }, 'Mon–Fri 8:00–17:00'], 'office hours: nothing saved = Monday to Friday 8–17 and no days off, as before');
+  // the switch on but Labour Day switched off (an office day every year); the old switch with no stored list = no holidays
+  sb.STATE.data.settings.catalog = { hours: { publicOn: true, holidayOff: ['labour day'] }, holidays: { region: 'AU-NSW', days: { '2026-10-05': 'Labour Day', '2026-12-25': 'Christmas Day' } } };
+  sb.applyCatalog();
+  assertEqual([sb.isWorkday('2026-10-05'), sb.isWorkday('2026-12-25')], [true, false], 'office hours: a public holiday switched off is an office day; the others stay off');
+  sb.STATE.data.settings.catalog = { hours: { nsw: true } };
+  sb.applyCatalog();
+  assertEqual(sb.isWorkday('2026-10-05'), true, 'office hours: the old NSW switch with no stored list = no public holidays (the SQL stores the list before the app ships)');
+}
+
+// ── Region and format: time zone, money, tax name, place (T1.2, Ofek 14 Oct) ──
+function testRegionCore(sb){
+  console.log('\nRegion and format: the business\'s time zone, money and words (T1.2)');
+  const setRegion = r => { sb.STATE.data.settings = { gstRatePercent: 10, catalog: r ? { region: r } : {} }; };
+  setRegion(null);
+  assertEqual(sb.bizTz(), 'Australia/Sydney', 'bizTz: nothing saved = Sydney');
+  setRegion({ timeZone: 'America/Chicago' });
+  assertEqual(sb.bizTz(), 'America/Chicago', 'bizTz: the saved zone');
+  setRegion({ timeZone: 'Mars/Base' });
+  assertEqual([sb.bizTz(), sb.tzValid('Mars/Base'), sb.tzValid(''), sb.tzValid('UTC')], ['Australia/Sydney', false, false, true], 'bizTz: a zone the browser doesn\'t know counts as not set');
+  // the memo follows a NEW catalog.region object (catalogSave always saves a fresh copy)
+  setRegion({ timeZone: 'America/Chicago' }); const a = sb.bizTz();
+  sb.STATE.data.settings.catalog = { region: { timeZone: 'Europe/London' } };
+  assertEqual([a, sb.bizTz()], ['America/Chicago', 'Europe/London'], 'bizTz: never stale after the region is saved again');
+  // 2026-10-14T03:00Z = 14:00 Wed in Sydney, 22:00 Tue in Chicago
+  const t = new Date('2026-10-14T03:00:00Z');
+  setRegion(null);
+  assertEqual([sb.todayStr(t), sb.bizWall(t), sb.bizDayOf('2026-10-14T03:00:00Z'), sb.localDay('2026-10-14T03:00:00Z'), sb.localDay('2026-10-14'), sb.bizDayOf(''), sb.bizDayOf('nonsense')],
+    ['2026-10-14', { day: '2026-10-14', hour: 14, minute: 0, dow: 'Wed' }, '2026-10-14', '2026-10-14', '2026-10-14', '', ''], 'business day and wall clock: Sydney by default; plain dates pass through');
+  setRegion({ timeZone: 'America/Chicago' });
+  assertEqual([sb.todayStr(t), sb.bizWall(t), sb.bizDayOf(t.getTime()), sb.localDay('2026-10-14T03:00:00Z'), sb.bizTzLabel()],
+    ['2026-10-13', { day: '2026-10-13', hour: 22, minute: 0, dow: 'Tue' }, '2026-10-13', '2026-10-13', 'Chicago time'], 'business day and wall clock: Chicago when the region says so (the device zone doesn\'t matter)');
+  // the remembered days: the same answers, emptied when the zone changes (the Chicago line above already re-read a text
+  // Sydney had remembered), and today without an instant = the wall clock now
+  { const memo = sb.BIZ_DAY_MEMO; assertEqual([memo.tz, memo.days.get('2026-10-14T03:00:00Z'), sb.todayStr(), sb.todayStr()===sb.bizWall(new Date()).day],
+      ['America/Chicago', '2026-10-13', sb.bizWall(new Date()).day, true], 'bizDayOf / todayStr: remembered per zone, the same answers');
+    setRegion(null); assertEqual([sb.localDay('2026-10-14T03:00:00Z'), memo.tz, memo.days.size], ['2026-10-14', 'Australia/Sydney', 1], 'bizDayOf: a new zone forgets what the old one remembered'); }
+  // Sydney moves to summer time on Sunday 4 Oct 2026 at 02:00 → 03:00
+  setRegion(null);
+  assertEqual([sb.bizWall(new Date('2026-10-03T15:59:00Z')).hour, sb.bizWall(new Date('2026-10-03T16:00:00Z')).hour, sb.bizWall(new Date('2026-10-03T16:00:00Z')).day],
+    [1, 3, '2026-10-04'], 'bizWall: across the 4 Oct 2026 summer-time change');
+  // bizNowPast keeps the old sydneyNowPast rule
+  const due = { day: '2026-10-14', mins: 14 * 60 };
+  assertEqual([sb.bizNowPast(due, new Date('2026-10-14T02:59:00Z')), sb.bizNowPast(due, new Date('2026-10-14T03:00:00Z')), sb.bizNowPast(due, new Date('2026-10-15T00:00:00Z')), sb.bizNowPast({ day: '2026-10-15', mins: 0 }, t)],
+    [false, true, true, false], 'bizNowPast: before / at / a later day / an earlier day');
+  // money: today's texts byte for byte (hand-checked), then 200 values against the old formulas
+  assertEqual([0, 5, -5, 0.5, 12.345, 1234, 1234.5, 1e6].map(sb.fmtMoney), ['$0', '$5', '$-5', '$0.50', '$12.35', '$1,234', '$1,234.50', '$1,000,000'], 'fmtMoney: default output exactly as before');
+  assertEqual(sb.fmtSignedMoney(-12), '−$12', 'fmtSignedMoney: as before');
+  assertEqual([sb.payMoney(0), sb.payMoney(1234.5), sb.payMoney(-1234.56), sb.invMoney(1234567.891), sb.invMoney(999.999)], ['$0.00', '$1,234.50', '$-1,234.56', '$1,234,567.89', '$1,000.00'], 'payMoney / invMoney: default output exactly as before');
+  const oldFmt = n => { n = sb.round2(n); const isInt = Math.abs(n-Math.round(n)) < 1e-9; return '$' + n.toLocaleString('en-US', { minimumFractionDigits:isInt?0:2, maximumFractionDigits:2 }); };
+  const oldPay = n => '$' + sb.round2(n).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  const oldInv = n => '$' + sb.round2(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const vals = Array.from({ length: 200 }, (_, i) => (i % 2 ? -1 : 1) * ((i * 7919.37) % 250000) / (i % 3 ? 1 : 100));
+  assertEqual(vals.filter(v => sb.fmtMoney(v)!==oldFmt(v) || sb.payMoney(v)!==oldPay(v) || sb.invMoney(v)!==oldInv(v)), [], 'money: 200 amounts written exactly as the old formulas did');
+  assertEqual([sb.curSym(), sb.moneyText(480, 'plain')], ['$', '$480'], 'money: the symbol and an amount as it comes');
+  setRegion({ currency: 'USD' }); assertEqual(sb.fmtMoney(1234.5), '$1,234.50', 'money: USD');
+  setRegion({ currency: 'GBP' }); assertEqual([sb.fmtMoney(1234.5), sb.curSym()], ['£1,234.50', '£'], 'money: GBP');
+  setRegion({ currency: 'EUR', moneyFormat: '1.234,56', symbolAfter: true }); assertEqual([sb.fmtMoney(1234.5), sb.curSym()], ['1.234,50 €', '€'], 'money: EUR written 1.234,56 with the symbol after');
+  setRegion({ currency: 'USD', currencySymbol: 'US$' }); assertEqual(sb.fmtMoney(1234.5), 'US$1,234.50', 'money: an own symbol');
+  setRegion({ currency: 'EUR', moneyFormat: '1 234,56', symbolAfter: true }); assertEqual(sb.payMoney(1234.5), '1 234,50 €', 'money: spaces between thousands');
+  setRegion({ currencySymbol: '<b>' }); assertEqual(sb.curSym(), 'b', 'money: an own symbol never carries HTML');
+  setRegion({ currency: 'JPY' }); assertEqual([sb.payMoney(12345), sb.invMoney(12345.4), sb.fmtMoney(12345), sb.fmtMoney(12345.5)], ['¥12,345', '¥12,345', '¥12,345', '¥12,346'], 'money: JPY has no cents, also where cents are always written');
+  setRegion({ currency: 'KWD' }); assertEqual([sb.moneyCfg().dec, sb.moneyText(1.5, 2).endsWith('1.500'), sb.moneyText(2, 'auto').endsWith('2')], [3, true, true], 'money: KWD has three decimals');
+  assertEqual([sb.currencyDecimalsOf('AUD'), sb.currencyDecimalsOf('JPY'), sb.currencyDecimalsOf('XYZ1')], [2, 0, 2], 'currencyDecimalsOf: AUD 2, JPY 0, an unknown code 2');
+  // presentation mode scales the amounts written in texts the way the business writes money
+  {
+    const script = fs.readFileSync(INDEX_HTML_PATH, 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+    const names = ['REGION_DEFAULTS', 'MONEY_FORMATS', 'TZ_VALID', 'REGION_NONE', 'REGION_MEMO', 'regionNow', 'tzValid', 'regionMemo', 'regionWord', 'currencySymbolOf', 'currencyDecimalsOf', 'moneyCfg', 'moneyText', 'curSym', 'PRESENT_FACTOR', 'presentText'];
+    const ctx = { STATE: { data: { settings: { catalog: {} } } } };
+    vm.createContext(ctx); vm.runInContext('var PRESENT = true;\n' + names.map(n => extractDecl(script, n)).join('\n'), ctx);
+    const pt = (region, t) => { ctx.STATE.data.settings = { catalog: region ? { region } : {} }; return ctx.presentText(t); };
+    const oldPt = t => String(t).replace(/\$\s?([\d,]+(?:\.\d+)?)(\s?[Kk])?/g, (m, n, kk) => { const v = parseFloat(n.replace(/,/g,''))*3; return kk ? '$'+(Math.round(v*10)/10)+'K' : '$'+(Math.round(v*100)/100).toLocaleString('en-US'); });
+    const samples = ['Spent $1,234.5 for 3 leads', 'CPL $85, revenue $12.3K and $ 40', 'cost $0.33 per click', 'no money here', '$1,000,000 total, $2k'];
+    assertEqual(samples.map(t => pt(null, t)), samples.map(oldPt), 'presentText: nothing saved = exactly the old texts');
+    assertEqual([pt({ currency: 'EUR', moneyFormat: '1.234,56', symbolAfter: true }, '1.234 € revenue, 2,5K € spend'), pt({ currency: 'EUR', moneyFormat: '1.234,56' }, 'revenue €1.234,56 today'),
+      pt({ currency: 'EUR', moneyFormat: '1 234,56', symbolAfter: true }, 'revenue 1 234,5 € from 3 jobs')],
+      ['3.702 € revenue, 7,5K € spend', 'revenue €3.703,68 today', 'revenue 3 703,5 € from 3 jobs'], 'presentText: symbol after, "1.234,56" and "1 234,56" amounts are found and scaled');
+  }
+  // tax name, business number, place
+  setRegion(null);
+  assertEqual([sb.taxName(), sb.bizNumberLabel(), sb.regionKeyOf({}), sb.regionPlaceName({}), sb.regionPlaceShort({}), sb.regionCountry({}), sb.regionState({})],
+    ['GST', 'ABN', 'AU-NSW', 'New South Wales', 'NSW', 'AU', 'NSW'], 'labels: nothing saved = GST, ABN, New South Wales');
+  setRegion({ country: 'US', state: 'TX', stateName: 'Texas' });
+  assertEqual([sb.taxName(), sb.bizNumberLabel(), sb.regionKeyOf(), sb.regionPlaceName(), sb.regionPlaceShort()], ['Sales tax', 'Tax ID', 'US-TX', 'Texas', 'TX'], 'labels: US / Texas');
+  setRegion({ country: 'GB' }); assertEqual([sb.taxName(), sb.regionKeyOf()], ['VAT', 'GB'], 'labels: GB = VAT, a country without a state');
+  setRegion({ country: 'JP' }); assertEqual(sb.taxName(), 'Tax', 'labels: an unknown country = Tax');
+  setRegion({ taxName: '  VAT  ', bizNumberLabel: 'EIN' }); assertEqual([sb.taxName(), sb.bizNumberLabel()], ['VAT', 'EIN'], 'labels: the business\'s own words');
+  setRegion({ taxName: '<script>"x"</script>' }); assertEqual(sb.taxName(), 'scriptx/script', 'labels: an own word never carries HTML or quotes');
+  assertEqual(sb.regionKeyOf({ country: 'SG' }), 'SG', 'regionKeyOf: no state = the country');
+  setRegion(null); assertEqual(sb.regionLabels('Contractors: bank, ABN and signed agreements · amount, GST'), 'Contractors: bank, ABN and signed agreements · amount, GST', 'regionLabels: nothing saved = the text as written');
+  setRegion({ country: 'US' }); assertEqual(sb.regionLabels('bank, ABN · amount, GST'), 'bank, Tax ID · amount, Sales tax', 'regionLabels: the fixed texts in the business\'s words');
+  // the ABN check and its grouping only for an Australian business
+  setRegion(null);
+  assertEqual([sb.bizNumberHint('51 824 753 556').includes('A valid ABN'), sb.bizNumberHint('12 345 678 901').includes('fails the check'), sb.bizNumberHint(''), sb.fmtAbn('51824753556')], [true, true, '', '51 824 753 556'], 'ABN: checked and grouped in Australia');
+  setRegion({ country: 'US' });
+  assertEqual([sb.bizNumberHint('51 824 753 556'), sb.fmtAbn('51824753556')], ['', '51824753556'], 'ABN: no AU check or grouping elsewhere');
+  setRegion(null);
+}
+
+// ── Public holidays (T1.3, Ofek 14 Oct) ──
+function testPublicHolidays(sb){
+  console.log('\nPublic holidays follow Country + State (T1.3)');
+  assertEqual([sb.holidayKey('Boxing Day (additional day)'), sb.holidayKey('Boxing Day'), sb.holidayKey('Anzac Day (substitute day)')], ['boxing day', 'boxing day', 'anzac day'], 'holidayKey: a moved day has its holiday\'s key');
+  // a fake library class: 2026 only, a substitute day and a duplicate date
+  class FakeH {
+    constructor(country, state, opts){ this.args = [country, state, opts]; }
+    getHolidays(y){ return y===2026 ? [{ date: '2026-04-27 00:00:00', name: 'Anzac Day (substitute day)' }, { date: '2026-01-01 00:00:00', name: "New Year's Day" }, { date: '2026-01-01 00:00:00', name: 'Duplicate' }, { date: 'bad', name: 'x' }] : []; }
+  }
+  const out = sb.holidaysFromLib(FakeH, 'AU', 'NSW', 2026, 3, '2026-10-14T00:00:00.000Z');
+  assertEqual(out, { region: 'AU-NSW', source: 'date-holidays@3.37.0', generatedAt: '2026-10-14T00:00:00.000Z', from: '2026-01-01', to: '2028-12-31', days: { '2026-01-01': "New Year's Day", '2026-04-27': 'Anzac Day (additional day)' } },
+    'holidaysFromLib: AU wording, one name per day, sorted, 3 years');
+  assertEqual(Object.keys(out.days), ['2026-01-01', '2026-04-27'], 'holidaysFromLib: days in date order');
+  assertEqual(sb.holidaysFromLib(FakeH, 'SG', '', 2026, 1, 'x').region, 'SG', 'holidaysFromLib: a country without a state');
+  const list = { region: 'AU-NSW', to: '2028-12-31', days: { '2026-12-25': 'Christmas Day', '2026-12-26': 'Boxing Day', '2026-12-28': 'Boxing Day (additional day)' } };
+  assertEqual([sb.holidayDaysOf({ hours: { publicOn: false }, holidays: list }), sb.holidayDaysOf({ hours: { nsw: true }, holidays: list }), sb.holidayDaysOf({ hours: { nsw: true } }),
+    sb.holidayDaysOf({ hours: { nsw: true }, holidays: list, region: { country: 'US', state: 'TX' } }), sb.holidayDaysOf({ hours: { publicOn: true, holidayOff: ['boxing day'] }, holidays: list }),
+    sb.holidayDaysOf({ hours: { publicOn: false, nsw: true }, holidays: list })],
+    [{}, list.days, {}, {}, { '2026-12-25': 'Christmas Day' }, {}], 'holidayDaysOf: off / the old switch / no stored list / another region / switched-off holiday (with its additional day) / the new switch wins');
+  assertEqual([sb.holidaysStale({}, '2026-10-14'), sb.holidaysStale({ holidays: list, region: { country: 'US', state: 'TX' } }, '2026-10-14'), sb.holidaysStale({ holidays: { ...list, to: '2027-06-30' } }, '2026-10-14'), sb.holidaysStale({ holidays: list }, '2026-10-14')],
+    ['missing', 'region', 'coverage', ''], 'holidaysStale: missing / another region / under a year left / fine');
+  // the list stored by the SQL (round3-stage1.sql B4) gives exactly the NSW days the app had written in for 2026–27
+  const sql = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'round3-stage1.sql'), 'utf8');
+  const seed = JSON.parse(sql.split('$json$')[1]);
+  const OLD_NSW = { '2026-01-01': "New Year's Day", '2026-01-26': 'Australia Day', '2026-04-03': 'Good Friday', '2026-04-04': 'Easter Saturday', '2026-04-05': 'Easter Sunday', '2026-04-06': 'Easter Monday', '2026-04-25': 'Anzac Day', '2026-04-27': 'Anzac Day (additional day)', '2026-06-08': "King's Birthday", '2026-10-05': 'Labour Day', '2026-12-25': 'Christmas Day', '2026-12-26': 'Boxing Day', '2026-12-28': 'Boxing Day (additional day)',
+    '2027-01-01': "New Year's Day", '2027-01-26': 'Australia Day', '2027-03-26': 'Good Friday', '2027-03-27': 'Easter Saturday', '2027-03-28': 'Easter Sunday', '2027-03-29': 'Easter Monday', '2027-04-25': 'Anzac Day', '2027-04-26': 'Anzac Day (additional day)', '2027-06-14': "King's Birthday", '2027-10-04': 'Labour Day', '2027-12-25': 'Christmas Day', '2027-12-26': 'Boxing Day', '2027-12-27': 'Christmas Day (additional day)', '2027-12-28': 'Boxing Day (additional day)' };
+  assertEqual([seed.region, Object.fromEntries(Object.entries(seed.days).filter(([d]) => d < '2028')), Object.keys(OLD_NSW).length], ['AU-NSW', OLD_NSW, 27], 'the stored AU-NSW list = the old NSW 2026–27 list, day for day');
+  assertEqual([sb.holidaysStale({ holidays: seed }, '2026-10-15'), sb.holidaysStale({ holidays: seed }, '2028-01-05')], ['', 'coverage'], 'the stored list is fresh now and is worked out again in its last year');
+  sb.STATE.data.settings = { catalog: { hours: { nsw: true }, holidays: seed } }; sb.applyCatalog();
+  assertEqual([sb.isWorkday('2026-10-05'), sb.isWorkday('2027-12-27'), sb.isWorkday('2028-10-02'), sb.isWorkday('2026-10-06')], [false, false, false, true], 'office days: the stored list with the old switch keeps today\'s days off (and 2028 works)');
+  sb.STATE.data.settings = { catalog: {} }; sb.applyCatalog();
+  // signed in with no profile yet: loadFromSupabase leaves STATE.data = null and applyCatalog still runs (no crash, so the
+  // "ask the owner to finish your access" screen shows instead of a sign-out loop)
+  { const keep = sb.STATE.data; sb.STATE.data = null; let err = null; try { sb.applyCatalog(); } catch (e) { err = e.message; } sb.STATE.data = keep;
+    assertEqual(err, null, 'applyCatalog: no data (no profile yet) does not throw'); }
+}
+
+// The holiday library loads once at a time and never redraws from inside a render (T1.3).
+async function testHolidayLoaders(){
+  console.log('\nPublic holidays: the library loader and the refresh (no loops)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const names = ['REGION_DEFAULTS', 'REGION_NONE', 'REGION_MEMO', 'BIZ_WALL', 'BIZ_DAY_MEMO', 'TZ_VALID', 'regionNow', 'tzValid', 'regionMemo', 'bizTz', 'bizWall', 'bizDayMemo', 'todayStr', 'regionCountry', 'regionState', 'regionKeyOf', 'regionPlaceName', 'countryName',
+    'HOLIDAY_LIB_URL', 'HOLIDAY_SOURCE', 'HOLIDAY_WORDING', 'holidaysFromLib', 'HOLIDAYS_UI', 'holidayLib', 'holidaysTryKey', 'holidaysRefresh', 'pad2', 'fmtLocal'];
+  let loads = 0, release = null, failNext = false, renders = 0, role = 'owner', ro = '';
+  const saves = [];
+  class FakeH { constructor(){} getHolidays(y){ return [{ date: `${y}-12-25`, name: 'Christmas Day' }]; } }
+  const ctx = { console, Promise, Date, Intl, Error,
+    STATE: { data: { settings: { catalog: {} } } }, window: { Holidays: FakeH },
+    loadScriptOnce: () => { loads++; return new Promise((res, rej) => { release = () => (failNext ? rej(new Error('offline')) : res()); }); },
+    getCurrentProfile: () => ({ role }), readOnlyReason: () => ro,
+    catalogSave: (...a) => { saves.push(a); return Promise.resolve(); }, render: () => { renders++; }, showToast: () => {} };
+  vm.createContext(ctx);
+  vm.runInContext(names.map(n => extractDecl(script, n)).join('\n') + '\nthis.__x = { holidayLib, holidaysRefresh, HOLIDAYS_UI };', ctx);
+  const X = ctx.__x, tick = () => new Promise(r => setTimeout(r, 0));
+  const p1 = X.holidayLib(), p2 = X.holidayLib();
+  assertEqual([p1===p2, loads], [true, 1], 'holidayLib: a second call while loading gets the same promise (one load)');
+  failNext = true; release(); await p1.catch(() => {}); failNext = false;
+  const p3 = X.holidayLib(); assertEqual([p3!==p1, loads], [true, 2], 'holidayLib: a failed load is tried again next time');
+  release(); await p3;
+  const r1 = X.holidaysRefresh(false), r2 = X.holidaysRefresh(false);
+  assertEqual([r1===r2, renders], [true, 0], 'holidaysRefresh: a second call while working gets the same promise; nothing redraws at once');
+  assertEqual(await r1, true, 'holidaysRefresh: resolves true when saved');
+  assertEqual([saves.length, saves[0][0], saves[0][1].region, saves[0][3]], [1, 'holidays', 'AU-NSW', { toast: false }], 'holidaysRefresh: one quiet save of the stored list');
+  assertEqual([await X.holidaysRefresh(false), saves.length, loads], [false, 1, 2], 'holidaysRefresh: the same region and year are not tried twice (no loop after a failure)');
+  const forced = X.holidaysRefresh(true); assertEqual([await forced, saves.length], [true, 2], 'holidaysRefresh: "Try again" runs it again');
+  role = 'va'; assertEqual([await X.holidaysRefresh(true), saves.length], [false, 2], 'holidaysRefresh: only an owner works the list out');
+  role = 'owner'; ro = 'Presentation mode is on, changes are not saved'; assertEqual([await X.holidaysRefresh(true), saves.length], [false, 2], 'holidaysRefresh: never in a read-only mode');
+  ro = ''; X.HOLIDAYS_UI.lib = null; X.HOLIDAYS_UI.tried = '';
+  const bad = X.holidaysRefresh(true); failNext = true; await tick(); release(); failNext = false;
+  assertEqual([await bad, renders, !!X.HOLIDAYS_UI.error, X.HOLIDAYS_UI.busy], [false, 1, true, null], 'holidaysRefresh: a failed load shows the error (one redraw, from the promise) and frees the next try');
+}
+
+// Static checks: one time zone source, no list of holidays or '$' left in the code.
+function testRegionStatic(){
+  console.log('\nRegion and format: nothing fixed left (static checks)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const sydLines = script.split('\n').filter(l => l.includes("'Australia/Sydney'") && !/^\s*\/\//.test(l)).map(l => (l.match(/const (\w+)/) || [])[1]);
+  assertEqual(sydLines, ['REGION_DEFAULTS', 'TZ_FALLBACK', 'AUTO_SAFETY_DEFAULTS'], 'Australia/Sydney is written only in the defaults (and the automation_settings column default the engine pins)');
+  const fnText = n => extractDecl(script, n);
+  // until the shift RPCs use the business's zone (a later SQL group), no other zone can be saved
+  const srf = fnText('setRegionField');
+  assertEqual([vm.runInNewContext(fnText('REGION_DEFAULTS') + fnText('TZ_ALLOWED') + 'TZ_ALLOWED'), srf.indexOf('TZ_ALLOWED.includes(v)') > 0 && srf.indexOf('TZ_ALLOWED.includes(v)') < srf.indexOf("catalogSave('region', { ...region, timeZone: v }")],
+    [['Australia/Sydney'], true], 'time zone: only Sydney can be saved while the office shift RPCs still write Sydney dates');
+  assertEqual([/NSW_HOLIDAYS|New South Wales/.test(fnText('renderOfficeHoursPage') + fnText('renderPublicHolidays')), ['fmtMoney', 'payMoney', 'invMoney'].some(n => fnText(n).includes("'$'")), script.includes('NSW_HOLIDAYS'), /function (sydneyWall|sydneyToday|payTodayStr|connSydDay)\(/.test(script)],
+    [false, false, false, false], 'no NSW list, no "$" in the money writers, no Sydney helpers left');
+  assertEqual([fnText('autoSafetyHtml').includes("autoSafetySet('timezone'"), fnText('autoSafetySave').includes('timezone: bizTz()'), fnText('holidaysAutoCheck').includes('render('), /setTimeout\(holidaysAutoCheck, 5000\)/.test(script)],
+    [false, true, false, true], 'automations: no time zone picker of their own, the saved column mirrors the region; the holiday check runs once after loading, never redraws by itself');
+  assertEqual([fnText('autoWindowFieldsHtml').includes('bizTzLabel()'), /autoSafetyNorm\(AUTO\.safety\)\.timezone/.test(script)], [true, false], 'automations: the "Only on" hours are labelled with the business\'s time zone, never the old column');
+  assertEqual(/shortName/.test(fnText('autoSample')), false, 'automations preview: {brand} falls back to the business name like the engine, never the short name');
+  // the edge functions carry the same region block, word for word
+  const fns = ['automations', 'backup', 'conversations', 'push', 'review-requests', 'voice', 'ingest-ads-stats', 'contractor-sign'];
+  const blocks = fns.map(f => { const t = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', f, 'index.ts'), 'utf8'); const a = t.indexOf('// ── region ('), b = t.indexOf('// ── end region ──'); return { f, t, block: a >= 0 && b > a ? t.slice(a, b) : '' }; });
+  assertEqual(blocks.filter(x => !x.block || x.block!==blocks[0].block).map(x => x.f), [], 'every edge function has the same region block');
+  assertEqual(blocks.filter(x => x.t.includes('NSW_HOLIDAYS')).map(x => x.f), [], 'no edge function keeps a list of NSW holidays');
+  assertEqual(blocks.filter(x => (x.t.replace(x.block, '').match(/Australia\/Sydney/g) || []).length > (x.f==='automations' ? 1 : 0)).map(x => x.f), [], 'Australia/Sydney appears only in the region block (and the engine\'s DEFAULT_SETTINGS)');
 }
 
 function testChaseCountSetting(sb){
@@ -1489,6 +1744,94 @@ function testPipelineStages(sb){
   sb.STATE.data.settings.catalog = {};
   sb.applyCatalog();
   assertEqual([sb.LEAD_STATUSES.length, sb.ACTIVE.stages.size], [7, 7], 'back to nothing saved: the 7 shipped stages, all on');
+}
+
+// Round 3, D-settings: deleting a service (item 4), People details in place (item 6), Pipeline settings as columns (item 7).
+function testServicesPeoplePipeline(sb){
+  console.log('\nDeleting services, People details in place, Pipeline settings as columns (round 3)');
+  const base = () => [{ key: 'Aircon', label: 'Aircon', color: null, active: true, subs: ['Split System', 'Duct System'] }, { key: 'Chimney', label: 'Chimney', color: null, active: true, subs: ['Chimney Sweep'] },
+    { key: 'Pressure Washing', label: 'Pressure Washing', color: null, active: true, subs: [] }, { key: 'Other', label: 'Other', color: null, active: true, subs: [] }];
+  // Nothing saved: nothing deleted, every service on (as today).
+  sb.STATE.data.jobs = []; sb.STATE.data.contacts = []; sb.STATE.data.settings = { catalog: {} };
+  sb.applyCatalog();
+  assertEqual([sb.DIV_DELETED.size, [...sb.ACTIVE.divisions], sb.liveDivisions()], [0, ['Aircon', 'Chimney', 'Pressure Washing', 'Other'], ['Aircon', 'Chimney', 'Pressure Washing', 'Other']], 'services: nothing saved = nothing deleted, all four on');
+  // Chimney deleted.
+  const svc = base(); svc[1].deleted = true; svc[1].deletedAt = '2026-10-14T00:00:00.000Z'; svc[1].color = '#123456'; svc[1].label = 'Chimneys';
+  sb.STATE.data.settings = { catalog: { services: svc, pay: TODAY_NAMES.pay } };
+  sb.applyCatalog();
+  assertEqual(sb.LEAD_DIVISIONS.slice(), ['Aircon', 'Chimney', 'Pressure Washing', 'Other'], 'services: a deleted one stays in LEAD_DIVISIONS (reports and old records)');
+  assertEqual([sb.ACTIVE.divisions.has('Chimney'), sb.serviceDeleted('Chimney'), sb.serviceDeleted('Aircon'), sb.divLabel('Chimney'), sb.divColor('Chimney')], [false, true, false, 'Chimneys', '#123456'], 'services: deleted = out of the active set; its name and colour stay for the history');
+  assertEqual([sb.activeOnly(sb.LEAD_DIVISIONS, sb.ACTIVE.divisions), sb.activeOnly(sb.LEAD_DIVISIONS, sb.ACTIVE.divisions, 'Chimney'), sb.liveDivisions()],
+    [['Aircon', 'Pressure Washing', 'Other'], ['Aircon', 'Chimney', 'Pressure Washing', 'Other'], ['Aircon', 'Pressure Washing', 'Other']], 'services: every picker leaves it out, except on a record that already has it');
+  const listed = sb.catalogList('services');
+  assertEqual([listed.filter(x => x.key==='Chimney').length, listed.find(x => x.key==='Chimney').deleted, sb.catalogShown('services').map(x => x.key)], [1, true, ['Aircon', 'Pressure Washing', 'Other']], 'catalogList: the deleted built-in service is not re-added as a live copy; Settings doesn\'t show it');
+  // The job types offered to a technician.
+  assertEqual([sb.jobTypesForTech('Guy'), sb.jobTypesForTech('Alessandro'), sb.jobTypesForTech('Someone new')], [['Aircon', 'Other'], ['Pressure Washing'], ['Aircon', 'Pressure Washing', 'Other']], 'jobTypesForTech: a deleted service is never offered');
+  sb.STATE.data.settings.catalog.pay = { jobTypes: { Sam: ['Chimney'] } };
+  assertEqual(sb.jobTypesForTech('Sam'), ['Aircon', 'Pressure Washing', 'Other'], 'jobTypesForTech: a list of only deleted services = every service still offered');
+  sb.STATE.data.settings.catalog.services = base().map(x => x.key==='Other' ? x : { ...x, deleted: true });
+  sb.applyCatalog();
+  assertEqual([sb.jobTypesForTech('Sam'), sb.jobTypesForTech('Anyone')], [['Other'], ['Other']], 'jobTypesForTech: everything deleted but Other = Other');
+  // Restored: back as it was.
+  sb.STATE.data.settings = { catalog: { services: base(), pay: TODAY_NAMES.pay } };
+  sb.applyCatalog();
+  assertEqual([sb.DIV_DELETED.size, sb.ACTIVE.divisions.has('Chimney'), sb.jobTypesForTech('Guy'), sb.jobTypesForTech('Someone new')], [0, true, ['Aircon', 'Chimney', 'Other'], ['Aircon', 'Chimney', 'Pressure Washing', 'Other']], 'services: restored = back in every list; with nothing deleted the job types are exactly as before');
+  sb.STATE.data.settings = { catalog: {} };
+  sb.applyCatalog();
+  // Can it be deleted, and what uses it.
+  assertEqual([sb.serviceDeleteProblem(base(), 'Other'), sb.serviceDeleteProblem([{ key: 'Aircon', active: true }, { key: 'Chimney', active: false }, { key: 'Other', active: true, deleted: true }], 'Aircon'), sb.serviceDeleteProblem(base(), 'Chimney')],
+    ['Other is where calls, texts and imported leads land, so it can\'t be deleted. You can switch it off.', 'Keep at least one service switched on', ''], 'serviceDeleteProblem: the catch-all never; never the last one switched on; otherwise yes');
+  const contacts = [{ id: 'c1', division: 'Chimney', subDivisions: ['Chimney Sweep', 'Split System'] }, { id: 'c2', division: 'Chimney', tags: ['Split System'] }, { id: 'c3', division: 'Aircon' }];
+  const jobs = [{ id: 'j1', jobType: 'Chimney' }, { id: 'j2', jobType: 'Aircon' }];
+  assertEqual(sb.serviceUsage(contacts, jobs, 'Chimney'), { leads: 2, jobs: 1 }, 'serviceUsage: 2 Chimney leads and 1 Chimney job');
+  assertEqual([sb.serviceUseText({ leads: 2, jobs: 1 }), sb.serviceUseText({ leads: 1, jobs: 0 }), sb.serviceUseText({ leads: 0, jobs: 3 }), sb.serviceUseText({ leads: 0, jobs: 0 })], ['2 leads and 1 job', '1 lead', '3 jobs', ''], 'serviceUseText');
+  const before = JSON.stringify([contacts, jobs]);
+  assertEqual(sb.serviceMovePlan(contacts, jobs, 'Chimney', 'Aircon', ['Split System', 'Duct System']),
+    [{ kind: 'contact', id: 'c1', patch: { division: 'Aircon', subDivisions: ['Split System'] } }, { kind: 'contact', id: 'c2', patch: { division: 'Aircon', subDivisions: ['Split System'] } }, { kind: 'job', id: 'j1', patch: { jobType: 'Aircon' } }],
+    'serviceMovePlan: its leads first (sub-services the new one lacks dropped; an old lead\'s tag kept), then its jobs');
+  assertEqual(JSON.stringify([contacts, jobs]), before, 'serviceMovePlan: the records themselves are not changed');
+  const menu = [{ key: 'Aircon', say: 'a' }, { key: 'Chimney', say: 'c' }];
+  assertEqual([sb.phoneMenuWithout(menu, 'Chimney'), sb.phoneMenuWithout(menu, 'Solar'), sb.phoneMenuWithout([{ key: 'Chimney', say: 'c' }], 'Chimney'), menu.length], [[{ key: 'Aircon', say: 'a' }], null, null, 2], 'phoneMenuWithout: takes it out; null when it isn\'t there or the menu would be empty');
+  // Source: the Settings list, the delete flow and the pickers.
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const fnText = n => { try { return extractDecl(script, n); } catch (e) { return ''; } };
+  assertEqual([/typeof o\.remove==='function' \? o\.remove\(x\)/.test(fnText('catalogListHtml')), /catalogListHtml\('services', \{[^}]*remove: x => x\.key!==SERVICE_CATCH_ALL \}\)/.test(fnText('renderSettings')), /section==='services'\) openServiceDelete\(id\)/.test(fnText('deleteCatalogItem'))],
+    [true, true, true], 'settings: a service row has Delete (not the catch-all), which asks first');
+  assertEqual([fnText('commissionBlock').includes('JOB_TYPES.filter(k => !serviceDeleted(k))'), /jobTypeOpts = job\?\.jobType && !techTypes\.includes\(job\.jobType\) \? \[job\.jobType, \.\.\.techTypes\]/.test(fnText('openJobModal')), /jobTypeOpts\.map/.test(fnText('openJobModal'))], [true, true, true], 'pickers: Pay leaves deleted services out; a job keeps its own type in the Job type list');
+  const mv = fnText('moveServiceRecords'), cd = fnText('confirmServiceDelete');
+  assertEqual([mv.includes('db.activityLog.insert('), /logContactActivity|automationEvent/.test(mv), cd.indexOf('serviceUsage(') > cd.indexOf('moveServiceRecords(') && cd.indexOf('serviceUsage(') < cd.indexOf('x.deleted = true')], [true, false, true], 'delete: the move logs history but never marks a lead contacted nor starts an automation; the service is deleted only once nothing has it');
+  assertEqual(['stageBoardHtml', 'stageColumnHtml', 'deletedServicesHtml'].filter(n => /\brender\(/.test(fnText(n))), [], 'render path: the new HTML builders never redraw');
+  // People: roles and names.
+  assertEqual([sb.empRolesNext(['VA'], 'Owner', true), sb.empRolesNext(['Owner', 'Technician'], 'Owner', false), sb.empRolesNext(['Driver', 'Technician'], 'Manager', true), sb.empRolesNext(null, 'VA', true)],
+    [['Owner', 'VA'], ['Technician'], ['Manager', 'Technician', 'Driver'], ['VA']], 'empRolesNext: in the fixed order; a role it doesn\'t know stays at the end');
+  const emps = [{ id: 'e1', name: 'Sam Taylor' }, { id: 'e2', name: 'Alex' }];
+  assertEqual([sb.empNameProblem(emps, 'e1', '  '), sb.empNameProblem(emps, 'e1', 'alex'), sb.empNameProblem(emps, 'e1', 'SAM TAYLOR'), sb.empNameProblem(emps, 'e1', 'Sam T')], ['Enter a name', 'There is already someone called alex', '', ''], 'empNameProblem: blank, someone else\'s name (any case), their own name, a new one');
+  assertEqual(['owner', 'manager', 'technician', 'va', 'marketing'].map(sb.empRolesForLogin), [['Owner'], ['Manager'], ['Technician'], ['VA'], []], 'empRolesForLogin');
+  assertEqual(['va', 'technician', 'manager', 'owner'].map(sb.empTypeForRole), ['Hourly', 'Freelance-commission', 'Salaried', 'Salaried'], 'empTypeForRole: as Add person always did');
+  assertEqual([sb.empRoleLabel('VA'), sb.empRoleLabel('Owner')], ['Office (VA)', 'Owner'], 'empRoleLabel: VA shows as the office (no name saved = Office); the saved value stays VA');
+  // Pipeline: one head, one colour source.
+  assertEqual(sb.pipeHeadHtml('Quoted', 3), '<div class="pipe-head"><span class="pipe-title-wrap"><span class="pipe-dot"></span><span class="pipe-title">Quoted</span></span><span class="pipe-count">3</span></div>', 'pipeHeadHtml: the CRM column head');
+  assertEqual(sb.pipeHeadHtml('New', 0, '<i>g</i>'), '<div class="pipe-head"><i>g</i><span class="pipe-title-wrap"><span class="pipe-dot"></span><span class="pipe-title">New lead</span></span><span class="pipe-count">0</span></div>', 'pipeHeadHtml: with the drag handle first');
+  assertEqual([sb.stageColStyle('Quoted'), sb.stageColStyle('nope')], ['--stage:var(--stage-quoted)', '--stage:var(--ink-faint)'], 'stageColStyle: the stage colour (stageColor)');
+  const crm = fnText('renderCrmPipeline');
+  assertEqual([crm.includes('pipeHeadHtml('), crm.includes('stageColStyle('), crm.includes('LEAD_STATUS_COLOR[')], [true, true, false], 'CRM board: the shared head and colour');
+  sb.STATE.data.jobs = [{ id: 'j9', customerName: 'Won One', contactId: 'cw', date: '2026-10-01' }]; sb.JOB_CACHE.index = null;
+  // New, New, Chasing, and a Quoted lead that has a job (so Won).
+  assertEqual(sb.stageCounts([{ id: 'a', fullName: 'A', status: 'New' }, { id: 'b', fullName: 'B', status: 'New' }, { id: 'c', fullName: 'C', status: 'Chasing' }, { id: 'cw', fullName: 'W', status: 'Quoted' }]), { New: 2, Chasing: 1, Won: 1 }, 'stageCounts: as the CRM board counts them');
+  sb.STATE.data.jobs = []; sb.JOB_CACHE.index = null;
+  const st = [{ key: 'New' }, { key: 'Gone', deleted: true }, { key: 'Quoted' }, { key: 'Won' }];
+  assertEqual([sb.catalogReorder(st, 'stages', ['Won', 'Quoted', 'New']).map(x => x.key), sb.catalogReorder(st, 'stages', ['Quoted']).map(x => x.key)], [['Won', 'Quoted', 'New', 'Gone'], ['Quoted', 'New', 'Gone', 'Won']], 'catalogReorder: the order on screen; anything not on screen at the end, in its own order');
+  assertEqual([sb.stageMoveBy(st, 'Quoted', -1).map(x => x.key), sb.stageMoveBy(st, 'New', 1).map(x => x.key), sb.stageMoveBy(st, 'New', -1), sb.stageMoveBy(st, 'Won', 1), sb.stageMoveBy(st, 'Nope', 1), st.map(x => x.key)],
+    [['Quoted', 'Gone', 'New', 'Won'], ['Quoted', 'Gone', 'New', 'Won'], null, null, null, ['New', 'Gone', 'Quoted', 'Won']], 'stageMoveBy: swaps with the neighbour past a deleted one; null at either end or for an unknown stage; the list given is not changed');
+  sb.STATE.data.settings = { catalog: { stages: [{ key: 'sx1', label: 'Site visit', color: '#7746c9', active: true }] } };
+  sb.applyCatalog();
+  const q = sb.stageColumnHtml({ key: 'Quoted', label: 'Quoted', active: true }, 2), n = sb.stageColumnHtml({ key: 'New', label: 'New lead' }, 0), cx = sb.stageColumnHtml({ key: 'sx1', label: 'Site visit', active: true }, 1);
+  assertEqual([q.includes('data-key="Quoted"'), q.includes('style="--stage:' + sb.stageColor('Quoted') + '"'), q.includes(sb.esc(sb.STAGE_RULE_TEXT('Quoted'))), q.includes("openStageEditor('Quoted')"), q.includes('role="switch"'), q.includes('<span class="pipe-count">2</span>'), q.includes("catalogDragStart(event,'stages','x')")],
+    [true, true, true, true, true, true, true], 'stageColumnHtml: a built-in stage: its colour, rule, count, Edit, switch and drag handle');
+  assertEqual([n.includes('cat-lock'), n.includes('role="switch"'), cx.includes("removeStage('sx1')"), cx.includes('--stage:#7746c9'), sb.stageColumnHtml({ key: 'Booked', label: 'Booked', active: false }, 0).includes('stage-col off')], [true, false, true, true, true], 'stageColumnHtml: New has the lock, a custom stage Delete, a switched-off one is greyed');
+  assertEqual([/stageBoardHtml\(\)/.test(fnText('renderSettings')), /catalogListHtml\('stages'/.test(fnText('renderSettings')), fnText('keepListScroll').includes('.stage-board')], [true, false, true], 'settings: Pipeline draws the columns; the board keeps its sideways scroll on a redraw');
+  sb.STATE.data.settings = { catalog: {} };
+  sb.applyCatalog();
 }
 
 function testConnectedSources(sb){
@@ -1898,7 +2241,7 @@ function testPeopleTabs(sb){
     [['Aircon', true, true, 30], ['Chimney', false, true, null], ['Pressure Washing', true, false, null], ['Other', true, false, null], ['Solar', true, false, null]], 'pay tab: every active service, and a switched-off one they still do');
   assertEqual(sb.payServicesFor(types, active, ['Aircon'], { Aircon: 30 }).map(x => x.key), ['Aircon', 'Pressure Washing', 'Other', 'Solar'], 'pay tab: a switched-off service they don\'t do and have no rate for is left out');
   assertEqual(sb.payServicesFor(types, active, ['Aircon'], { Chimney: 25 }).map(x => x.key), types, 'pay tab: a switched-off service with a saved rate still shows');
-  sb.STATE.data.settings = { catalog: { pay: { jobTypes: { Guy: ['Aircon', 'Other'] } } } };
+  sb.STATE.data.settings = { catalog: { pay: { jobTypes: { Guy: ['Aircon', 'Other'], Alessandro: ['Pressure Washing'] } } } };
   assertEqual([sb.missingRates('Guy', { Aircon: 30 }), sb.missingRates('Guy', { Aircon: 30, Other: 0 }), sb.missingRates('Alessandro', {}), sb.missingRates('Guy', null)], [['Other'], [], ['Pressure Washing'], ['Aircon', 'Other']], 'pay tab: the services they do with no rate yet (0% is a rate)');
   const html = sb.empRatesHtml({ Aircon: 30, Other: 25, Chimney: 40 }, ['Aircon', 'Other']);
   assertEqual([html.includes('Aircon 30%'), html.includes('Other 25%'), html.includes('Chimney'), sb.empRatesHtml({ 'Pressure Washing': 50 }).includes('Pressure W. 50%'), sb.empRatesHtml({}), sb.empRatesHtml(null)], [true, true, false, true, '', ''], 'cards: rates for the services they do, Other included (it used to be left out)');
@@ -1933,7 +2276,17 @@ function testPeopleTabs(sb){
   const settingsFn = fnText('renderSettings');
   assertEqual([/id: 'pay'/.test(settingsFn), /id: 'access'/.test(settingsFn), /id: 'roles'/.test(settingsFn), /id: 'people'/.test(settingsFn), /settingsPageKey\(ui\.page\)/.test(settingsFn)], [false, false, false, true, true], 'settings: Pay and commissions, Access for each person and Roles and access are gone; an old page key opens People');
   assertEqual(['renderTechnicianSettingsCard', 'renderRolesPage', 'renderHourlyPaySettings', 'renderEmployeePanel', 'setPayRate', 'addPayTier'].filter(n => fnText(n)), [], 'settings: the old page renderers are deleted');
-  assertEqual([fnText('openEmployeeModal').includes('em-aircon'), /commissionRates\.set\(name, rates\)/.test(fnText('saveEmployeeModal')), /getElementById\('em-(aircon|chimney|pw|other)'\)/.test(fnText('saveEmployeeModal'))], [false, false, false], 'edit window: no rate inputs, so saving it never rewrites (or wipes) a commission rate');
+  // Round 3 item 6: no edit window any more. Name and roles are edited in place on Details; a rename still asks first and
+  // goes through rename_team_member.
+  assertEqual([fnText('openEmployeeModal'), fnText('saveEmployeeModal'), /openEmployeeModal|saveEmployeeModal|EMP_RENAME_OK|id="em-/.test(html2), /Edit name and roles/.test(fnText('renderPersonPanel'))], ['', '', false, false], 'people: the edit window, its save and its button are gone');
+  assertEqual([fnText('personDetailsTab').includes('setEmployeeName('), fnText('personDetailsTab').includes('setEmployeeRole('), fnText('renameEmployee').includes("sb.rpc('rename_team_member'"), fnText('setEmployeeName').includes('confirmAction('), fnText('noRecordNote').includes('addEmployeeCard(')],
+    [true, true, true, true, true], 'people: Details edits the name (confirmed, then renamed everywhere by the RPC) and the roles; a login with no card gets one straight away');
+  { const rn = fnText('renameEmployee'), iPay = rn.indexOf("await catalogSave('pay'"), iPeople = rn.indexOf("await catalogSave('people'"), iLoad = rn.indexOf('await loadFromSupabase()');
+    assertEqual([iPay > 0, iPeople > iPay, iLoad > iPeople, /[^t] catalogSave\(/.test(rn.replace(/await catalogSave\(/g, ''))], [true, true, true, false], 'rename: the pay and people saves are waited for one after the other, both before the reload (no racing whole-catalog saves)'); }
+  const tabsText = ['personDetailsTab', 'personPayTab', 'personDocsTab'].map(fnText).join('\n');
+  const once = f => (tabsText.match(new RegExp(`(setEmployeeField\\('\\$\\{e\\.id\\}','${f}'|input\\('${f}'|sel\\('${f}')`, 'g')) || []).length;
+  assertEqual(Object.keys(sb.EMP_FIELD_LABEL).filter(f => once(f)!==1).concat(['setEmployeeName(', 'setEmployeeRole(', "'empStatus'"].filter(t => tabsText.split(t).length - 1!==1)), [], 'people: every field is on the tabs exactly once');
+  assertEqual([fnText('personPayTab').includes("'commissionNotes'"), fnText('personDetailsTab').includes("'commissionNotes'")], [true, false], 'people: commission notes are on the Pay tab only');
   assertEqual((html2.match(/db\.commissionRates\.set\(/g) || []).length, 2, 'commission rates are written in two places only: one rate on the Pay tab, and the move on a rename');
 }
 
@@ -2353,7 +2706,7 @@ async function testDataExport(sb){
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   const page = extractDecl(script, 'renderDataPage'), block = extractDecl(script, 'renderExportBlock');
   assertEqual([page.indexOf('There are no automatic daily backups') < page.indexOf('renderExportBlock()'), page.indexOf('renderExportBlock()') < page.indexOf('renderFullBackupBlock()')], [true, true], 'Data page: the note, then Export to Excel, then the Full backup');
-  assertEqual(['Select all', 'Clear', 'areas ticked', 'Include sensitive details (bank, ABN, owner salaries)', 'It unticks itself after each download.', 'For this download only: the Excel will have bank details, ABN and owner salaries.', 'Download Excel (one sheet per area)', "'ex-block'", 'id="dx-go"'].filter(x => !block.includes(x)), [], 'Export to Excel: the mockup\'s controls and wording');
+  assertEqual(['Select all', 'Clear', 'areas ticked', 'Include sensitive details (bank, ${bizNumberLabel()}, owner salaries)', 'It unticks itself after each download.', 'For this download only: the Excel will have bank details, ${bizNumberLabel()} and owner salaries.', 'Download Excel (one sheet per area)', "'ex-block'", 'id="dx-go"'].filter(x => !block.includes(x)), [], 'Export to Excel: the mockup\'s controls and wording');
   assertEqual([/TFN/.test(block), /const XLSX_SCRIPT = 'https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/xlsx\/0\.18\.5\/xlsx\.mini\.min\.js'/.test(script), extractDecl(script, 'ensureXlsx').includes('XLSX_LIB = null')], [false, true, true], 'no TFN in the wording; SheetJS 0.18.5 from cdnjs, loaded when needed and retried after a failure');
   const dl = extractDecl(script, 'downloadDataExcel');
   assertEqual([dl.indexOf('readOnlyReason()') < dl.indexOf('ensureXlsx()'), dl.includes('DATA_EXPORT.sens = false; render();\n    secEnsureUnlocked('), /finally \{[^}]*DATA_EXPORT\.sens = false/.test(dl), dl.includes("logSettingsActivity(")], [true, true, true, true], 'the download: read-only check first, the step-up again when it ran out, the tick unticks after every download, one history line');
@@ -2467,10 +2820,14 @@ testLiveRowsAndStageMemo(loadSandbox());
 testToastKinds(loadSandbox());
 testCatalog(loadSandbox());
 testOfficeHours(loadSandbox());
+testRegionCore(loadSandbox());
+testPublicHolidays(loadSandbox());
+testRegionStatic();
 testChaseCountSetting(loadSandbox());
 testLostReasonDelete(loadSandbox());
 testPipelineStages(loadSandbox());
 testConnectedSources(loadSandbox());
+testServicesPeoplePipeline(loadSandbox());
 testMessageTemplates(loadSandbox());
 testReviewSettings(loadSandbox());
 testReviewPreview(loadSandbox());
@@ -2486,12 +2843,230 @@ testPeopleTabs(loadSandbox());
 testBranding(loadSandbox());
 testNotificationCards(loadSandbox());
 testConnectors(loadSandbox());
+testUxRound3(loadSandbox());
 testSecurityFaceId(loadSandbox());
 testAutomationEventBody(loadSandbox());
 testFlowView(loadSandbox());
 testAutomationsBuilder(loadSandbox());
+testNamesAndLabels(loadSandbox());
 testAutomationsEditor();
 testAutomationsEditorKeys();
+
+// ── Saving keeps the place, the settings menu as a panel, drag & drop on every upload (round 3, A-ux) ──
+// No promise-memo test here on purpose: this group adds no loader (nothing it adds fetches or redraws on its own).
+function testUxRound3(sb){
+  console.log('\nSaving keeps the place, settings menu panel, drag & drop (round 3, A-ux)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  // T1.8: which view a render draws, and what it does with the window's scroll.
+  const ph = { tab: 'settings', settings: { page: 'phone', open: true } };
+  const k = sb.renderViewKey(ph);
+  assertEqual([k === sb.renderViewKey({ ...ph, mobileNavOpen: true, settings: { ...ph.settings, q: 'pho', reviewPreview: 'x' } }),
+    k === sb.renderViewKey({ tab: 'settings', settings: { page: 'hours', open: true } }), k === sb.renderViewKey({ tab: 'settings', settings: { page: 'phone', open: true, conn: 'gads' } }),
+    k === sb.renderViewKey({ tab: 'settings', settings: { page: 'phone', open: false } })],
+    [true, false, false, false], 'view key: the same settings page whatever else changed; another page, a connector or the list is another view');
+  assertEqual(sb.renderViewKey({ tab: 'dashboard', dashboard: { view: 'google' } }) === sb.renderViewKey({ tab: 'dashboard', dashboard: { view: 'meta' } }), false, 'view key: the dashboard\'s Google and Meta views differ');
+  assertEqual(sb.renderViewKey({ tab: 'settings', settings: { page: 'connections', open: true } }), sb.renderViewKey({ tab: 'settings', settings: { page: 'connectors', open: true } }), 'view key: an old settings page name is the same view as its new name');
+  assertEqual([sb.motionPageKey({ tab: 'dashboard', dashboard: { view: 'google' } }), sb.motionPageKey({ tab: 'payroll', payroll: { view: 'week' } }), sb.motionPageKey({ tab: 'settings', settings: { page: 'phone' } }), sb.motionPageKey({ tab: 'jobs' })],
+    ['dashboard|google', 'payroll|week:', 'settings|', 'jobs|'], 'motionPageKey(ui): the same keys as before');
+  assertEqual([sb.renderScrollPlan(null, k, 'crm'), sb.renderScrollPlan({ key: k, tab: 'settings' }, k, 'settings'),
+    sb.renderScrollPlan({ key: 'settings||open:phone:', tab: 'settings' }, 'settings||open:hours:', 'settings'), sb.renderScrollPlan({ key: 'crm|pipeline', tab: 'crm' }, 'jobs|', 'jobs')],
+    ['none', 'keep', 'none', 'top'], 'scroll plan: first render none, same view keeps, another settings page is left to its opener, another main page goes to the top');
+  // T1.8: the settings search.
+  const dataPg = { title: 'Data', desc: 'Your data is yours', group: 'Account', keywords: 'export excel spreadsheet' }, phonePg = { title: 'Phone', desc: 'Who answers the business number', group: 'Customers' };
+  assertEqual([sb.settingsNavMatch(sb.settingsNavText(phonePg), ''), sb.settingsNavMatch(sb.settingsNavText(phonePg), '   '), sb.settingsNavMatch(sb.settingsNavText(phonePg), '  PHONE '),
+    sb.settingsNavMatch(sb.settingsNavText(dataPg), 'excel'), sb.settingsNavMatch(sb.settingsNavText(phonePg), 'excel'), sb.settingsNavText(phonePg)],
+    [true, true, true, true, false, 'phone who answers the business number customers '], 'settings search: empty finds all, case and spaces ignored, keywords count, no match hides');
+  // T1.8: render() puts the menu's scroll back only after the page is drawn, and keeps the window where it was.
+  const r = extractDecl(script, 'render');
+  assertEqual([r.indexOf('putSide();   // only now') > r.indexOf("content.innerHTML = renderSettings(profile)"), r.slice(0, r.indexOf('const content =')).includes('const putSide = () =>') && !/\n\s*if \(sideScroll\) \{ const side/.test(r.slice(0, r.indexOf('const content ='))),
+    r.includes('renderScrollPlan('), r.includes('window.scrollTo(0, winY)'), r.includes('RENDER_LAST = { key: view, tab: UI.tab }'),
+    r.indexOf('refocus = keepFocus()') > -1 && r.indexOf('refocus = keepFocus()') < r.indexOf('app.innerHTML = renderShell'), r.indexOf('motionAfterRender(motionBefore') > r.indexOf('window.scrollTo(0, winY)'),
+    r.includes('putSide(); RENDER_LAST = null; return;')],
+    [true, true, true, true, true, true, true, true], 'render: menu scroll set after the page is drawn, window scroll kept, focus kept, motion after the restore');
+  const rs = extractDecl(script, 'renderSettings'), fs2 = extractDecl(script, 'filterSettingsNav'), ssp = extractDecl(script, 'setSettingsPage');
+  assertEqual([rs.includes('data-keep-focus="set-search"'), rs.includes('value="${esc(ui.q || \'\')}"'), rs.includes('settingsNavMatch(settingsNavText(pg), ui.q)'), /\.q = /.test(fs2), fs2.includes('settingsNavMatch('),
+    ssp.includes('isPhoneWidth()'), ssp.includes('window.scrollTo(0, 0)'), ['closeSettingsPage', 'openConnector', 'closeConnector'].every(n => extractDecl(script, n).includes('window.scrollTo(0, 0)'))],
+    [true, true, true, true, true, false, true, true], 'settings: the search keeps its text and filter; a different settings page opens at its top on every width');
+  assertEqual([extractDecl(script, 'updateBusinessSetting').includes("showToast('Saved')"), extractDecl(script, 'updateBusinessProfileField').includes("showToast('Saved')")], [true, true], 'settings: a business setting saved says Saved');
+  // keepFocus with a fake document: puts the focus and caret back on the same field after a redraw.
+  const kf = { calls: [] }, fresh = { focus: (o) => kf.calls.push(['focus', o]), setSelectionRange: (a, b) => kf.calls.push(['sel', a, b]) };
+  const doc = { activeElement: { dataset: { keepFocus: 'set-search' }, selectionStart: 2, selectionEnd: 4 }, querySelector: (q) => { kf.calls.push(['q', q]); return fresh; } };
+  const kctx = { document: doc }; vm.createContext(kctx); vm.runInContext(extractDecl(script, 'keepFocus') + '\nthis.keepFocus = keepFocus;', kctx);
+  const back = kctx.keepFocus(); back();
+  doc.activeElement = { dataset: {} };
+  assertEqual([kf.calls, kctx.keepFocus()], [[['q', '#content [data-keep-focus="set-search"]'], ['focus', { preventScroll: true }], ['sel', 2, 4]], null], 'keepFocus: focus and caret come back; a field without the mark is left alone');
+  // T1.10: the settings menu as its own full-height panel on a computer.
+  const fixedRule = (html.match(/\.app-grid\.on-settings \.set-nav \{[^}]*\}/) || [''])[0];
+  const before901 = html.lastIndexOf('@media (min-width: 901px)', html.indexOf(fixedRule));
+  assertEqual([extractDecl(script, 'renderShell').includes("UI.tab==='settings' ? ' on-settings' : ''"), ['position: fixed', 'top: 0', 'bottom: 0', 'border-inline-end: 1px solid var(--line)'].every(x => fixedRule.includes(x)),
+    before901 > -1 && !html.slice(before901, html.indexOf(fixedRule)).includes('\n}\n'), html.includes('.app-grid.on-settings.nav-auto .set-nav { inset-inline-start: 0; }')],
+    [true, true, true, true], 'settings menu: a fixed full-height panel with a divider on a computer, next to the app menu (or the edge when it is hidden)');
+  const newRules = (html.match(/[^\n{}]*(?:on-settings|\.set-nav)[^{}\n]*\{[^}]*\}/g) || []).join('\n');
+  assertEqual([/#[0-9a-fA-F]{3,8}\b/.test(newRules), /\.set-nav \{[^}]*position: sticky[^}]*max-height:[^}]*overflow-y: auto/.test(html), html.includes('.set-layout.show-page .set-nav { display: none; }'), html.includes('.sidebar, .main-col, .nav-edge::before, .set-nav { transition: none !important; }'), html.includes('.set-link[hidden] { display: none; }')],
+    [false, true, true, true, true], 'settings menu: colours from the theme only (light, dark, branding); a phone keeps list → page; no slide with reduced motion');
+  // T1.1: the rules each upload box checks a file against.
+  const R = sb.DROP_RULES, MB = 1024 * 1024;
+  assertEqual(['file', 'empDoc', 'contractorCert', 'bizCert'].map(x => [R[x].accept === sb.RECEIPT_TYPES, R[x].maxMb === sb.MAX_FILE_MB]), [[true, true], [true, true], [true, true], [true, true]], 'drop rules: photos and PDFs up to 20 MB, like their pickers');
+  assertEqual([sb.MAX_FILE_MB, sb.dropFileType({ type: 'IMAGE/PNG' }), sb.dropFileType({ type: '', name: 'IMG_1.HEIC' }), sb.dropFileType({ type: '', name: 'x.locked' })], [20, 'image/png', 'image/heic', ''], 'dropFileType: from the browser, else from the name');
+  assertEqual([sb.dropAccepts({ type: 'image/jpeg', name: 'a.jpg' }, sb.RECEIPT_TYPES), sb.dropAccepts({ type: 'application/pdf', name: 'a.pdf' }, sb.RECEIPT_TYPES),
+    sb.dropAccepts({ type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', name: 'a.docx' }, sb.RECEIPT_TYPES), sb.dropAccepts({ type: 'image/heic', name: 'a.heic' }, 'image/*'),
+    sb.dropAccepts({ type: '', name: 'data.LOCKED' }, '.locked'), sb.dropAccepts({ type: 'application/zip', name: 'data.zip' }, '.locked'), sb.dropAccepts({ type: 'x/y', name: 'z' }, ''),
+    sb.dropAccepts({ type: 'image/gif', name: 'a.gif' }, R.logo.accept), sb.dropAccepts({ type: 'image/webp', name: 'a.webp' }, R.logo.accept)],
+    [true, true, false, true, true, false, true, false, true], 'dropAccepts: the same accept list as the picker');
+  const f = (name, type, mb) => ({ name, type, size: mb * MB });
+  assertEqual([sb.dropCheck([], R.file), sb.dropCheck([f('a.pdf', 'application/pdf', 1), f('b.pdf', 'application/pdf', 1)], R.file).msg,
+    sb.dropCheck([f('a.locked', '', 1), f('b.locked', '', 1)], R.backup).files.length, sb.dropCheck([f('a.gif', 'image/gif', 1)], R.logo).msg,
+    sb.dropCheck([f('a.pdf', 'application/pdf', 21)], R.file).msg, sb.dropCheck([f('a.pdf', 'application/pdf', 21)], R.empDoc).msg, sb.dropCheck([f('a.png', 'image/png', 3)], R.logo).msg,
+    sb.dropCheck([f('a.locked', '', 500)], R.backup).ok],
+    [{ ok: false, msg: '' }, 'One file at a time here.', 2, 'Use a PNG, JPG or WebP picture', 'That file is over 20 MB. Use a smaller photo or a PDF.', 'That file is over 20 MB', 'That picture is over 2 MB', true],
+    'dropCheck: one file at a time (backups take several), the type, then the size; backups have no size limit');
+  assertEqual([0, 1, 2, 5].map(sb.dropRoutePlan), ['none', 'one', 'many', 'many'], 'dropRoutePlan: none, one box straight in, several highlighted');
+  const za = sb.dropZoneAttrs('empDoc', { emp: 'e"1', kind: 'licence', side: 'back', Bad: 'x', empty: '' });
+  assertEqual([za.includes('data-drop-zone="empDoc"'), za.includes('data-emp="e&quot;1"'), za.includes('ondrop="dropZoneDrop(event, this)"'), za.includes('data-Bad'), za.includes('data-empty'), za.includes('title="Or drag a file here"'),
+    sb.dropZoneAttrs('backup', { title: 'Or drag the files here' }).includes('title="Or drag the files here"') && !sb.dropZoneAttrs('backup', { title: 'x' }).includes('data-title')],
+    [true, true, true, false, false, true, true], 'dropZoneAttrs: escaped data, only plain lower-case keys, the hover text');
+  // T1.1: the nine places, and the page-level drop.
+  const has = (fn, x) => extractDecl(script, fn).includes(x);
+  assertEqual([has('fileField', "dropZoneAttrs('file'"), has('personDocsTab', "dropZoneAttrs('empDoc'"), has('renderContractorPanel', "dropZoneAttrs('contractorCert'"), has('renderBusinessInsurance', "dropZoneAttrs('bizCert'"),
+    has('renderBrandingPage', "dropZoneAttrs('logo'"), has('openLockedBackup', "dropZoneAttrs('backup'"), ['pickEmployeeDoc', 'pickContractorCertificate', 'pickBusinessCertificate'].every(n => has(n, 'DROP_RULES.')),
+    ['file', 'empDoc', 'contractorCert', 'bizCert', 'logo', 'backup'].every(x => has('dropTake', `'${x}'`))],
+    [true, true, true, true, true, true, true, true], 'drag & drop: every upload box takes a dropped file, through the same code as its picker');
+  const dropL = script.slice(script.indexOf("window.addEventListener('drop'"), script.indexOf("window.addEventListener('drop'") + 400);
+  assertEqual([script.includes('function fileDragOver('), script.includes('function onFileDropped('), script.includes("['dragover', 'drop'].forEach("), dropL.includes('routeDroppedFiles('),
+    has('routeDroppedFiles', "'Nothing on this page takes a file'"), has('routeDroppedFiles', "'Drop it on one of the highlighted boxes'"), has('dropZonesShown', "getElementById('app-popup')")],
+    [false, false, false, true, true, true, true], 'drag & drop: a file dropped outside a box goes to the page\'s box; the old swallow is gone');
+}
+
+// ── Names and labels (round 3, C-names: T1.7 the office's name, T1.9 no business or person names in the code) ──
+function testNamesAndLabels(sb){
+  console.log('\nNames and labels (round 3, C-names)');
+  const html0 = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html0.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const set = (catalog, extra) => { sb.STATE.data.settings = { gstRatePercent: 10, ...(extra || {}), catalog: catalog || {} }; };
+  // the office's name (Settings → Phone)
+  set({});
+  assertEqual([sb.officeLabel(), sb.officePossessive(), sb.taskBoardLabel('ron'), sb.taskBoardLabel('Guy')], ['Office', "Office's", 'Office Tasks', "Guy's Tasks"], 'office: nothing saved = Office');
+  set({ labels: { office: '  Reception ' } });
+  assertEqual([sb.officeLabel(), sb.taskBoardLabel('ron')], ['Reception', 'Reception Tasks'], 'office: the saved name, trimmed, on the office\'s board');
+  sb.applyCatalog();
+  assertEqual(sb.MD_BUBBLES.find(x => x[0]==='tasks')[1], "Reception tasks", 'office: My Day\'s tasks bubble follows the name (applyCatalog)');
+  set({ labels: { office: 'x'.repeat(40) } });
+  assertEqual(sb.officeLabel().length, 30, 'office: at most 30 characters');
+  set({ labels: { office: 'Dispatch Team' } });
+  const p1 = sb.officePossessive();
+  set({ labels: { office: 'Ops Desks' } });
+  assertEqual([p1, sb.officePossessive()], ["Dispatch Team's", "Ops Desks'"], "office: possessive ('s, or ' after an s)");
+  set({}); sb.applyCatalog();
+  assertEqual(sb.MD_BUBBLES.find(x => x[0]==='tasks')[1], "Office tasks", 'office: back to Office');
+  // the office's board: a VA login (full name, technician name or first word) or an employee with the VA role
+  sb.STATE.profiles = [{ role: 'va', fullName: 'Ron Cruz', technicianName: null }];
+  sb.STATE.data.employees = [];
+  const b1 = [sb.boardForAssignees(['Ron']), sb.boardForAssignees(['Ron Cruz']), sb.boardForAssignees(['Guy']), sb.boardForAssignees([])];
+  sb.STATE.profiles = [];
+  sb.STATE.data.employees = [{ name: 'Kim', roles: ['VA'], status: 'Active' }];
+  assertEqual([...b1, sb.boardForAssignees(['Kim']), sb.boardForAssignees(['Ron'])], ['ron', 'ron', 'Guy', 'ron', 'ron', 'Ron'], 'board: the office person (login or employee card) → the office\'s board; no built-in name');
+  assertEqual(/'Ron'|"Ron"/.test(extractDecl(script, 'boardForAssignees')), false, 'board: no person\'s name written in boardForAssignees');
+  // the office's view on the tasks page: the first active VA employee
+  const emp = (name, roles, status) => ({ name, roles, status: status || 'Active' });
+  assertEqual([sb.officeAssignee({ employees: [emp('Guy', ['Technician']), emp('Old', ['VA'], 'Inactive'), emp('Ron', ['VA'])] }), sb.officeAssignee({ employees: [emp('Guy', ['Technician'])] }), sb.officeAssignee(null)], ['Ron', '', ''], 'officeAssignee: the first active VA, else none');
+  sb.STATE.profiles = [{ role: 'va', fullName: 'Ron', technicianName: null }];
+  const T = (id, assignees, board) => ({ id, assignees, board, status: 'Not Started' });
+  const tasks = [T('t1', ['Ron'], 'ron'), T('t2', ['Ofek', 'Ron'], 'Ofek'), T('t3', ['Guy'], 'Guy'), T('t5', [], 'Noam')];
+  const who = sb.officeAssignee({ employees: [emp('Ron', ['VA'])] });
+  assertEqual(sb.tasksInView(tasks, who, { fullName: 'Ofek' }).map(t => t.id), ['t1', 't2'], 'office view: the same tasks as the old "Ron" view');
+  // owners and the office person by name, from the logins
+  const P = [{ role: 'owner', fullName: 'Ofek Shamir' }, { role: 'owner', fullName: 'Noam Gal' }, { role: 'va', fullName: 'Ron' }];
+  assertEqual([sb.ownerNamesText(P, 'and'), sb.ownerNamesText(P, 'or'), sb.ownerNamesText([], 'or'), sb.ownerNamesText(undefined), sb.ownerNamesText([P[0]])], ['Noam and Ofek', 'Noam or Ofek', 'the owners', 'the owners', 'Ofek'], 'ownerNamesText: first names A–Z, or the owners');
+  assertEqual([sb.listJoin(['A', 'B', 'C'], 'or'), sb.listJoin(['A', 'B']), sb.listJoin(['A'])], ['A, B or C', 'A and B', 'A'], 'listJoin: "or" when asked, "and" as before');
+  assertEqual([sb.officeAgentName([{ role: 'va', fullName: 'Zoe Lee' }, { role: 'va', fullName: 'Kim Day' }, { role: 'owner', fullName: 'Al' }]), sb.officeAgentName([]), sb.officeAgentName(undefined)], ['Kim', '', ''], 'officeAgentName: the first VA A–Z, first name');
+  // people's colours and names in the owners' reports (catalog.people)
+  set({ people: { Noam: { color: 'person-3' }, Guy: { color: '#2F7D6E' }, Bad: { color: 'bogus' } } });
+  assertEqual([sb.techColor('Noam'), sb.techColor('Guy'), sb.techColor('Bad'), sb.techColor('Sam'), sb.techColor(undefined)], ['var(--person-3)', '#2f7d6e', sb.techColor('Bad'), 'hsl(79,45%,45%)', 'hsl(0,45%,45%)'], 'techColor: a theme colour, a saved #hex, else the colour made from the name (Sam = 82879 % 360 = 79)');
+  assertEqual(sb.techColor('Bad').startsWith('hsl('), true, 'techColor: an unusable saved colour = the made one');
+  assertEqual(sb.PERSON_COLORS.map(p => p[0]), ['person-1', 'person-2', 'person-3', 'person-4'], 'PERSON_COLORS: the four theme colours');
+  assertEqual([['--guy', '--dolev', '--noam', '--ofek'].filter(v => html0.includes(v)), (html0.match(/--person-1: #/g) || []).length], [[], 3], 'colours: the person colours are --person-1..4 in all three themes; no person names in the CSS');
+  set({ people: { Ron: { reportName: 'רון' }, Ofek: { reportName: 'אופק' } } });
+  assertEqual([sb.personReportName('Ron Cruz'), sb.personReportName('Kim Day'), sb.personReportName(''), sb.personReportName('Ofek')], ['רון', 'Kim', '', 'אופק'], 'personReportName: the saved name (full name or first name), else the first name');
+  // the Hebrew report: whose tasks
+  const K = sb.mdCounts({ tasks: [{ done: true }, { done: false }] });
+  assertEqual([sb.mdTaskLines(K, 'רון השלים', 'רון')[1], sb.mdTaskLines(K, 'x', '')[1]], ['• המשימות של רון: 1/2', '• המשימות של המשרד: 1/2'], 'mdTaskLines: the tasks bubble names the office person (or "the office")');
+  // the net-profit steps name the hourly staff from Payroll
+  const np = { revenue: 1000, commission: 300, parts: 50, equipment: 50, marketing: 100, hourlyStaff: 80, owners: 600, days: 7, net: -180 };
+  const s1 = sb.profitSteps(np, 'Office'), s0 = sb.profitSteps(np);
+  assertEqual([s1.steps[5].label, s0.steps[5].label, s1.steps.map(x => [x.from, x.to])], ['Hourly staff (Office)', 'Hourly staff', [[0,1000],[700,1000],[650,700],[600,650],[500,600],[420,500],[-180,420],[-180,0]]], 'profitSteps: the hourly staff under the office\'s name (T1.7); the numbers unchanged');
+  assertEqual([/officeAssignee\(data\)/.test(extractDecl(script, 'renderTasks')), extractDecl(script, 'renderTaskSwitcher').includes("name===office ? officeLabel() : name"), script.includes('profitSteps(np, officeLabel())')],
+    [true, true, true], 'office task board and the hourly staff step: the office\'s name, not the person on it (T1.7)');
+  // the business's own names
+  set({}, { companyName: 'X Pty' });
+  assertEqual([sb.brandName(), sb.bizShortName(), sb.bizLegalName()], ['X Pty', 'X Pty', 'X Pty'], 'names: the trading name; no short or legal name = the trading name');
+  set({ business: { shortName: 'The Guys Group' }, brands: { Chimney: 'The Chimney Guys' } }, { companyName: 'X Pty', legalName: 'X Pty Ltd' });
+  assertEqual([sb.bizShortName(), sb.bizLegalName(), sb.brandOf('Chimney'), sb.brandOf('Aircon')], ['The Guys Group', 'X Pty Ltd', 'The Chimney Guys', ''], 'names: the short name, the legal name, a saved brand; none = ""');
+  set({});
+  assertEqual([sb.brandName(), sb.bizShortName(), sb.brandOf('Chimney')], ['OPS Service', 'OPS Service', ''], 'names: nothing saved = the product\'s name, no brand');
+  // the example in the template previews
+  sb.STATE.profiles = [{ role: 'va', fullName: 'Ron' }];
+  set({ brands: { Aircon: 'The AC Cleaning Guys' }, reviews: { links: { Aircon: { link: 'https://g.page/r/a/review', result: 'Fresh air!' } } } }, { companyName: 'X Pty' });
+  const ex = sb.tplExample();
+  assertEqual([ex.brand, ex.service, ex.review_link, ex.result, ex.agent, ex.business_name, ex.technician], ['The AC Cleaning Guys', 'aircon', 'https://g.page/r/a/review', 'Fresh air!', 'Ron', 'X Pty', 'Sam'], 'tplExample: this business\'s brand, service, link, line, office person and name');
+  sb.STATE.profiles = []; set({});
+  const ex0 = sb.tplExample();
+  assertEqual([ex0.brand, ex0.review_link, ex0.result, ex0.agent, ex0.business_name], ['OPS Service', sb.TPL_EXAMPLE.review_link, sb.TPL_EXAMPLE.result, 'Kim', 'OPS Service'], 'tplExample: nothing saved = the neutral example');
+  const mT = sb.MSG_TEMPLATES.find(m => m.id==='chatOpen'), vT = { chatOpen: sb.msgTemplateText('chatOpen') };
+  assertEqual(sb.tplPreviewHtml(mT, vT) === sb.tplPreviewHtml(mT, vT, sb.tplExample()), true, 'tplPreviewHtml: the default example is tplExample()');
+  const mG = sb.MSG_TEMPLATES.find(m => m.id==='phoneGreeting');
+  assertEqual([sb.tplPreviewHtml(mG, { phoneGreeting: sb.msgTemplateText('phoneGreeting') }, { business_name: 'Acme' }).includes('Thanks for calling Acme. This call'), sb.tplPreviewHtml(mG, { phoneGreeting: sb.msgTemplateText('phoneGreeting') }).includes('{business_name}')], [true, false], 'tplPreviewHtml: the spoken words are shown with the business name filled in');
+  // no names in the registries, no person-keyed constants left
+  const NAMES = ['Ron', 'Ofek', 'Noam', 'Guy', 'Dolev', 'Omri', 'Alessandro', 'The Guys', '1300 380', 'theguyservicegroup', 'רון', 'אופק'];
+  const regs = ['TPL_EXAMPLE', 'REVIEW_TPL_VARS', 'CHAT_TPL_VARS', 'MSG_TEMPLATES', 'REVIEW_DEFAULTS', 'PERSON_COLORS', 'CONTRACTOR_TRADES', 'AUTO_FIELDS', 'BIZ_TPL_VAR', 'CONNECTORS'].map(n => extractDecl(script, n)).join('\n');
+  assertEqual(NAMES.filter(w => new RegExp('(^|[^A-Za-z])' + w + '(?![A-Za-z])').test(regs)), [], 'registries: no business, person or phone number written in');
+  assertEqual(['TECH_COLORS', 'TECH_JOB_TYPES', 'PAYROLL_HEBREW_NAMES', 'CONV_BRANDS', 'CONTRACTOR_SERVICES'].filter(n => script.includes(n)), [], 'no constants keyed by a person or holding the brands');
+  // contractors: the services list, then other trades
+  set({});
+  assertEqual(sb.contractorServices(), ['Aircon', 'Chimney', 'Pressure Washing', 'Electrical', 'Plumbing', 'Roof & gutters', 'Other'], 'contractorServices: the same list as before when nothing is changed');
+  const keepActive = sb.ACTIVE.divisions;
+  sb.ACTIVE.divisions = new Set(['Aircon', 'Pressure Washing', 'Other']);
+  assertEqual(sb.contractorServices(), ['Aircon', 'Pressure Washing', 'Electrical', 'Plumbing', 'Roof & gutters', 'Other'], 'contractorServices: a switched-off service is left out, Other once');
+  sb.ACTIVE.divisions = keepActive;
+  // the agreement: the legal name and the region's law and standards
+  const c = { name: 'Spark', contactPerson: 'Jake', services: ['Electrical'], deal: { type: 'commission', amount: 10 } };
+  set({ region: { country: 'AU', state: 'VIC', stateName: 'Victoria' } }, { legalName: 'Acme Pty Ltd' });
+  const hv = sb.contractorAgreementHtml(c, {});
+  assertEqual([hv.includes('Acme Pty Ltd ("we", "us")'), hv.includes('to Australian standards'), hv.includes('the laws of Victoria'), (hv.match(/<h4>/g) || []).length], [true, true, true, 9], 'agreement: the legal name, Australian standards, the laws of Victoria; 9 sections');
+  set({}, { companyName: 'The Guys Service Group', legalName: 'The Guys Service Group Pty Ltd' });
+  const hn = sb.contractorAgreementHtml(c, {});
+  assertEqual([hn.includes('The Guys Service Group Pty Ltd ("we", "us")'), hn.includes('to Australian standards'), hn.includes('the laws of New South Wales')], [true, true, true], 'agreement: nothing saved for the region = today\'s words (New South Wales, Australian)');
+  set({ region: { country: 'US', state: 'TX' } }, { companyName: 'Acme' });
+  const hu = sb.contractorAgreementHtml(c, {});
+  assertEqual([hu.includes('Acme ("we", "us")'), hu.includes('to US standards'), hu.includes('the laws of TX')], [true, true, true], 'agreement: another country: its standards and its state');
+  assertEqual([hn.includes('your own tax, GST, superannuation, workers compensation'), hn.includes('at least $10 million'), hu.includes('superannuation'), hu.includes('your own tax, Sales tax, workers compensation')], [true, true, false, true], 'agreement: superannuation only in Australia; the cover in the business\'s currency ($ by default)');
+  set({ region: { country: 'GB', currency: 'GBP' } }, { companyName: 'Acme' });
+  assertEqual(sb.contractorAgreementHtml(c, {}).includes('at least £10 million'), true, 'agreement: the insurance cover in pounds for a GBP business');
+  set({ region: { country: 'FR' } }, { companyName: 'Acme' });
+  assertEqual([sb.agreementPlace().standards, sb.agreementPlace().law.length > 0], ['local', true], 'agreement: a country with no word = local standards');
+  assertEqual(sb.contractorAgreementHtml(c, {}, { legalName: 'Old Name Pty', law: 'Queensland', standards: 'Australian' }).includes('Old Name Pty ("we", "us")'), true, 'agreement: the names given win');
+  // connector texts: the office's name, the website and the brands
+  set({ business: { website: 'theguyservicegroup.com' }, brands: { Aircon: 'A Guys', Chimney: 'C Guys' } });
+  const before = JSON.stringify(sb.CONNECTORS);
+  const defs = sb.connDefs([], []);
+  const ghl = defs.find(d => d.id==='ghl'), web = defs.find(d => d.id==='web'), wp = defs.find(d => d.id==='wp'), gbp = defs.find(d => d.id==='gbp');
+  assertEqual([JSON.stringify(web).includes('The office still answers'), JSON.stringify(ghl).includes('and the office answers there'), wp.howText.startsWith('The app reads the website (theguyservicegroup.com): '), JSON.stringify(gbp).includes('A Guys and C Guys.'), /\{(office|site|brands)\}/.test(JSON.stringify(defs)), JSON.stringify(sb.CONNECTORS)===before],
+    [true, true, true, true, false, true], 'connectors: the office, the website and the brands filled in; CONNECTORS itself unchanged');
+  set({ labels: { office: 'Reception' } });
+  const d2 = sb.connDefs([], []);
+  assertEqual([d2.find(d => d.id==='wp').howText.startsWith('The app reads the website: '), JSON.stringify(d2.find(d => d.id==='web')).includes('The reception still answers'), JSON.stringify(d2.find(d => d.id==='gbp')).includes('OPS Service.')], [true, true, true], 'connectors: no website saved; the office renamed; no brands = the business name');
+  const w = { office: 'desk', site: '', brands: 'B' }, nested = { a: ['{office} x', { b: '{site}{brands} {other}' }], n: 3, f: null };
+  assertEqual(sb.connWordsIn(nested, w), { a: ['desk x', { b: 'B {other}' }], n: 3, f: null }, 'connWordsIn: nested texts filled, other values and unknown blanks kept');
+  assertEqual(nested.a[0], '{office} x', 'connWordsIn: makes a copy');
+  // Google Ads: a website conversion's short name, whatever the brand
+  sb.STATE.data.settings = { companyName: 'The Guys Service Group', catalog: { business: TODAY_NAMES.business, brands: TODAY_NAMES.brands } };
+  assertEqual([sb.adsConvShortName('The Guys Group - Main Website Sydney (web) Lead form'), sb.adsConvShortName('The Guys Group (web) Thank_you'), sb.adsConvShortName('Calls from ads'),
+    sb.adsConvShortName('AO Green Solutions (web) purchase'), sb.adsConvShortName('AO Green Solutions (web) Thank_you_page'), sb.adsConvShortName('The AC Cleaning Guys (web) Form')],
+    ['Lead form', 'Thank_you', 'Calls from ads', 'AO Green Solutions (web) purchase', 'AO Green Solutions (web) Thank_you_page', 'Form'], 'adsConvShortName: only this business\'s own names come off (today\'s two prefixes, a brand); a legacy account keeps its name');
+  assertEqual([sb.adsConvShortName('Acme - Site (web) Form', ['Acme']), sb.adsConvShortName('Acmeco (web) Form', ['Acme'])], ['Form', 'Acmeco (web) Form'], 'adsConvShortName: another business\'s own name; a longer name is not it');
+  // no new loaders: the names are read straight from the settings and the logins (nothing to load, nothing to memoise)
+  const scan = ['renderPhoneSettings', 'personDetailsTab', 'personInAppGroup', 'payCashToSelect', 'officeLabel', 'officeAgentName', 'ownerNamesText', 'tplExample', 'connWordsNow'].map(n => extractDecl(script, n)).join('\n');
+  assertEqual([/\bload[A-Z]\w*\(/.test(scan), /\bawait\b|\bfetch\(|\bsb\.|\bdb\./.test(scan)], [false, false], 'no loader or database call in the Phone page, the Details tab or the name helpers');
+  sb.STATE.profiles = undefined; set({});
+}
 
 // ── Automations: the BUILDER (settings round 2, phase 4, group I) ──
 // The builder's context, the way autoCtx() makes it from the business's settings (a fixture here: no business names).
@@ -2658,7 +3233,7 @@ function autoSandbox(extra){
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   const autoNames = [...new Set([...script.matchAll(/\n(?:async )?function (auto\w*)\(/g)].map(m => m[1]).concat([...script.matchAll(/\nconst (AUTO\w*)\s*=/g)].map(m => m[1])))].filter(n => !DECLS.includes(n) && !/^automation/i.test(n));
   const more = ['readOnlyReason', 'flowEd', 'flowCtx', 'flowRenderBlocked', 'flowMainHtml', 'flowSideHtml', 'flowPanelHtml', 'flowIsInline', 'tplHighlight', 'renderTemplatesPage', 'TPL_EXAMPLE', 'tplPreviewHtml', 'tplActionsHtml', 'tplProblemsHtml',
-    'toggleAutomation', 'deleteAutomation', 'duplicateAutomation', 'openAutoEditor', 'openAutoPage', 'loadAutomations', 'loadAutoRunCounts', 'renderAutomationsPage', 'renderNotificationsPage', 'newMsgTemplate', 'editMsgTemplate', 'saveMsgTemplate', 'deleteMsgTemplate', 'cancelMsgTemplate', 'brandOf', 'CONV_BRANDS'];
+    'toggleAutomation', 'deleteAutomation', 'duplicateAutomation', 'openAutoEditor', 'openAutoPage', 'loadAutomations', 'loadAutoRunCounts', 'renderAutomationsPage', 'renderNotificationsPage', 'newMsgTemplate', 'editMsgTemplate', 'saveMsgTemplate', 'deleteMsgTemplate', 'cancelMsgTemplate', 'brandOf'];
   const src = DECLS.map(n => extractDecl(script, n)).concat(autoNames.map(n => extractDecl(script, n)), more.filter(n => !autoNames.includes(n) && !DECLS.includes(n)).map(n => extractDecl(script, n))).join('\n\n');
   const log = { toasts: [], confirms: [], db: [], renders: 0, opened: [], modal: '' };
   const sandbox = {
@@ -2667,7 +3242,7 @@ function autoSandbox(extra){
     showToast: (m, o) => log.toasts.push(m), confirmAction: (m, fn, o) => log.confirms.push({ m, fn, o }), render: () => { log.renders++; }, renderKeepingInput: () => { log.renders++; },
     logSettingsActivity: (a, t) => log.db.push('activity: ' + t), getCurrentProfile: () => ({ fullName: 'Alex Owner', role: 'owner' }), getRealProfile: () => ({ id: 'p-own', role: 'owner' }),
     applyCatalog: () => {}, closeModal: () => { log.modal = ''; }, reopenModal: (h) => { log.modal = h; }, openModal: (h) => { log.modal = h; }, setSettingsPage: (id) => log.opened.push('page:' + id),
-    startTemplateEdit: () => {}, sydneyToday: () => '2026-10-14', weekStartDay: () => 1, motionReduced: () => true, brandLogoHtml: () => '<svg></svg>',
+    startTemplateEdit: () => {}, weekStartDay: () => 1, motionReduced: () => true, brandLogoHtml: () => '<svg></svg>',
     window: { matchMedia: () => ({ matches: false }) }, document: { getElementById: () => null, querySelector: () => null },
     phoneNotificationsBar: () => '', notifyCardHtml: (c) => `<article>${c.id}</article>`, localStorage: { getItem: () => null, setItem: () => {} },
     db: { settings: { update: (p) => { log.db.push('settings.update'); Object.assign(sandbox.STATE.data.settings, p); return Promise.resolve(); } } },
@@ -2931,6 +3506,9 @@ async function testAutomationsReview14Oct(){
   assertEqual([patch.email_signer, patch.email_footer, patch.customer_days, Object.keys(patch).includes('business_id')], [null, null, [1, 3], false], 'safety: an empty signer or way out is "not set"; days once each, in order; the business never changes');
   assertEqual([m.autoTzLabel('Australia/Perth'), m.autoTzLabel('Pacific/Auckland'), m.autoTzLabel('')], ['Perth time', 'Auckland time', 'local time'], 'safety: the time zone in words (no fixed "Sydney time")');
   assertEqual(m.autoSafetyLine(null), 'Customers only get automatic messages every day, 8 am–8 pm (Sydney time), at most 1 a day each; a later one waits for the morning.', 'safety: the line the editor shows next to a customer email');
+  { const keep = m.STATE.data.settings; m.STATE.data.settings = { ...keep, catalog: { region: { timeZone: 'America/Chicago' } } };
+    assertEqual([m.autoSafetyLine({ timezone: 'Australia/Perth' }).includes('(Chicago time)'), m.autoSafetyNorm(null).timezone], [true, 'Australia/Sydney'], 'safety: the line follows the business\'s time zone (Region and format), not the old column; the column default stays the engine\'s');
+    m.STATE.data.settings = keep; }
   assertEqual([m.autoEmailSigner({ email_signer: 'Dana Lee' }, 'Olivia Owner'), m.autoEmailSigner({}, 'Olivia Owner'), m.autoEmailSigner({}, 'The team'), m.autoEmailSigner({}, '')], ['Dana Lee', 'Olivia', '', ''], 'safety: who signs (never "The")');
   const A = sb.__get('AUTO');
   Object.assign(A, { safetyLoaded: true, safetyError: '', safety: { email_footer: '<script>x</script>', dont_contact_tags: ['<b>VIP</b>'] }, safetyDraft: null });
@@ -2938,7 +3516,7 @@ async function testAutomationsReview14Oct(){
   assertEqual([h.includes('<script>'), h.includes('&lt;script&gt;'), h.includes('&lt;b&gt;VIP'), h.includes('autoSafetyEdit()')], [false, true, true, true], 'safety: the read view escapes every saved word, with a Change button');
   A.safetyDraft = m.autoSafetyNorm(A.safety);
   h = sb.autoSafetyHtml(A, ['VIP']);
-  assertEqual([h.includes('autoSafetySave()'), h.includes('aria-label="Time zone"'), h.includes('Perth time'), (h.match(/class="au-day[ "]/g) || []).length], [true, true, true, 7], 'safety: the edit view has the days, hours, time zone and Save');
+  assertEqual([h.includes('autoSafetySave()'), h.includes('aria-label="Time zone"'), h.includes('Change in Region and format'), h.includes('(Sydney time)'), (h.match(/class="au-day[ "]/g) || []).length], [true, false, true, true, 7], 'safety: the edit view has the days, hours and Save; the time zone is the business\'s (Region and format), no picker of its own');
   Object.assign(A, { safetyError: 'relation does not exist' });
   assertEqual(/could not be loaded/.test(sb.autoSafetyHtml(A, [])), true, 'safety: a failed load says so (the defaults still apply)');
   Object.assign(A, { safetyError: '', safetyDraft: null });
@@ -3102,6 +3680,7 @@ function loadOptOutSandbox(script){
   await testAutomationEventsGate();
   await testAutomationsCustomerSafety();
   await testAutomationsReview14Oct();
+  await testHolidayLoaders();
   await testFullBackup(loadSandbox());
   await testDataExport(loadSandbox());
   console.log(`\n${pass} passed, ${fail} failed`);

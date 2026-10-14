@@ -230,11 +230,31 @@ function nodeOpen(password: string, u8: Uint8Array) {
   eq(new Date(nextSlot(SUN3, Date.parse("2026-10-03T15:59:00Z"))!).toISOString(), "2026-10-03T16:00:00.000Z", "nextSlot over the change");
   eq(new Date(lastSlot(SUN3, Date.parse("2026-04-05T20:00:00Z"))!).toISOString(), "2026-04-04T17:00:00.000Z", "Sunday 5 Apr 03:00 (summer time ends at 03:00, back to 02:00) = 03:00 AEST = 17:00 UTC");
   eq(new Date(lastSlot(SUN3, Date.parse("2026-04-12T20:00:00Z"))!).toISOString(), "2026-04-11T17:00:00.000Z", "the next Sunday 03:00 AEST = 17:00 UTC too");
-  { const t = lastSlot({ send_day: 0, send_time: "02:30" }, Date.parse("2026-10-05T00:00:00Z"))!; eq([sydParts(t).day, t === lastSlot({ send_day: 0, send_time: "02:30" }, Date.parse("2026-10-05T00:00:00Z"))], ["2026-10-04", true], "02:30 on 4 Oct does not exist: the slot stays on that Sunday and is the same each time"); }
+  { const t = lastSlot({ send_day: 0, send_time: "02:30" }, Date.parse("2026-10-05T00:00:00Z"))!; eq([bizParts(t, REGION_DEFAULTS.timeZone).day, t === lastSlot({ send_day: 0, send_time: "02:30" }, Date.parse("2026-10-05T00:00:00Z"))], ["2026-10-04", true], "02:30 on 4 Oct does not exist: the slot stays on that Sunday and is the same each time"); }
   eq(new Date(lastSlot({ send_day: 1, send_time: "23:30" }, Date.parse("2026-10-19T13:00:00Z"))!).toISOString(), "2026-10-19T12:30:00.000Z", "Monday 23:30 Sydney = 12:30 UTC the same Monday");
   eq(new Date(nextSlot({ send_day: 1, send_time: "23:30" }, Date.parse("2026-10-19T12:31:00Z"))!).toISOString(), "2026-10-26T12:30:00.000Z", "and the next one is a week later");
   eq(lastSlot({ send_day: 7, send_time: "03:00" }, NOW), null, "unreadable settings → no slot");
-  eq([sydWhen(Date.parse("2026-10-18T16:07:00Z")), sydDateShort(Date.parse("2026-10-18T16:07:00Z")), sydDateLong(Date.parse("2026-10-25T16:07:00Z")), timeText("15:05"), timeText("00:00")], ["Monday 19 Oct 2026, 3:07 am", "Mon 19 Oct 2026", "Monday 26 Oct", "3:05 pm", "12:00 am"], "Sydney texts");
+  eq([bizWhen(Date.parse("2026-10-18T16:07:00Z")), bizDateShort(Date.parse("2026-10-18T16:07:00Z")), bizDateLong(Date.parse("2026-10-25T16:07:00Z")), timeText("15:05"), timeText("00:00")], ["Monday 19 Oct 2026, 3:07 am", "Mon 19 Oct 2026", "Monday 26 Oct", "3:05 pm", "12:00 am"], "Sydney texts");
+  // the business's time zone (Region and format): the same Monday 23:30 in Chicago = 04:30 UTC the next day
+  useRegion({ region: { timeZone: "America/Chicago" } });
+  eq([new Date(lastSlot({ send_day: 1, send_time: "23:30" }, Date.parse("2026-10-20T05:00:00Z"))!).toISOString(), bizDateShort(Date.parse("2026-10-18T16:07:00Z"))], ["2026-10-20T04:30:00.000Z", "Sun 18 Oct 2026"], "Chicago: the weekly slot and the dates follow the business's time zone");
+  // a zone whose clocks jump at midnight (Santiago, 6 Sep 2026: 00:00 → 01:00): Sunday 00:30 runs after the jump that
+  // Sunday, never on Saturday evening
+  useRegion({ region: { timeZone: "America/Santiago" } });
+  { const t = lastSlot({ send_day: 0, send_time: "00:30" }, Date.parse("2026-09-07T12:00:00Z"))!; const p = bizParts(t, "America/Santiago");
+    eq([p.day, p.dow, p.hour, p.minute, bizDateShort(t)], ["2026-09-06", 0, 1, 30, "Sun 6 Sep 2026"], "a midnight daylight-saving gap: the slot stays on Sunday (01:30, after the jump)"); }
+  eq([bizToUtc("2026-09-06", 0, 30, "America/Santiago"), bizToUtc("2026-09-06", 9, 0, "America/Santiago")].map((t) => new Date(t).toISOString()), ["2026-09-06T04:30:00.000Z", "2026-09-06T12:00:00.000Z"], "bizToUtc: a missing wall time moves forward, an ordinary one is exact");
+  eq([moneyText(1234.5, {}, 2), moneyText(1234, {}, "auto"), moneyText(12345, { region: { currency: "JPY" } }, 2), moneyText(12345.4, { region: { currency: "JPY" } }, "auto"), moneyText(1.5, { region: { currency: "KWD" } }, 2)],
+    ["$1,234.50", "$1,234", "¥12,345", "¥12,345", "KWD 1.500".replace("KWD ", currencySymbolOf("KWD"))], "moneyText: the currency's own cents (none for JPY, three for KWD); nothing saved = $ with cents");
+  {
+    const rdb: any = { from: (t: string) => { const q: any = { select: () => q, eq: () => q, maybeSingle: async () => (t === "settings" ? { data: { catalog: {} }, error: null } : { data: null, error: null }) }; return q; } };
+    await loadRegion(rdb);
+    eq(bizDateShort(Date.parse("2026-10-18T16:07:00Z")), "Mon 19 Oct 2026", "loadRegion: no time zone saved = Sydney again");
+    const broken: any = { from: () => { throw new Error("down"); } };
+    useRegion({ region: { timeZone: "America/Chicago" } }); await loadRegion(broken);
+    eq(bizDateShort(Date.parse("2026-10-18T16:07:00Z")), "Sun 18 Oct 2026", "loadRegion: settings that can't be read keep the time zone");
+    useRegion({});
+  }
 
   // ── DUE RULES ──
   const slot = Date.parse("2026-10-17T16:00:00Z");   // Sun 18 Oct 03:00 AEDT

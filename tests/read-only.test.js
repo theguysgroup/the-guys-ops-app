@@ -95,6 +95,30 @@ function testStaticScan(){
   ok(seen.includes('automationEvent'), 'static scan found the automation engine\'s "look now" (automationEvent)', seen);
   // Business details (14 Oct): the insurance certificate upload and the week-start change stop in a read-only mode.
   ok(['pickBusinessCertificate', 'setWeekStart'].every(n => /readOnlyReason\(\)/.test(fnText(n))), 'business certificate upload and week start check read-only mode');
+  // Drag & drop (round 3, T1.1): a dropped file goes through the same upload functions as a picked one; each checks the mode.
+  const dropUploads = ['pickBusinessCertificate', 'setWeekStart', 'uploadContractorCertificate', 'uploadBrandLogoFile', 'uploadEmployeeDoc', 'uploadBusinessCertificate'];
+  ok(dropUploads.every(n => /readOnlyReason\(\)/.test(fnText(n))), 'every upload a dropped file reaches checks read-only mode', dropUploads.filter(n => !/readOnlyReason\(\)/.test(fnText(n))));
+}
+
+// Drag & drop (round 3, T1.1): a certificate or logo dropped in a read-only mode is not read, stored or uploaded.
+async function testDropUploadsReadOnly(){
+  for (const [mode, present, viewAs] of [['presentation mode', true, null], ['View as', false, 'ron']]) {
+    const log = { toasts: [], touched: [] };
+    const ctx = { PRESENT: present, VIEW_AS_ID: viewAs, MAX_FILE_MB: 20, console,
+      showToast: (m) => log.toasts.push(m), render: () => log.touched.push('render'),
+      FileReader: function(){ log.touched.push('FileReader'); this.readAsDataURL = () => {}; },
+      storeFile: async () => { log.touched.push('storeFile'); return 'sb:x'; },
+      sb: { storage: { from: () => { log.touched.push('sb.storage'); return { upload: async () => ({ error: null }), getPublicUrl: () => ({ data: { publicUrl: 'x' } }) }; } } },
+      setBranding: () => log.touched.push('setBranding'),
+      db: { suppliers: { update: () => log.touched.push('suppliers.update') } },
+      STATE: { data: { suppliers: [{ id: 'c1', insurance: {} }] } } };
+    vm.createContext(ctx);
+    vm.runInContext(['readOnlyReason', 'uploadContractorCertificate', 'uploadBrandLogoFile'].map(fnText).join('\n'), ctx);
+    vm.runInContext(`uploadContractorCertificate('c1', { size: 1, name: 'a.pdf', type: 'application/pdf' })`, ctx);
+    await vm.runInContext(`uploadBrandLogoFile({ size: 1, name: 'a.png', type: 'image/png' })`, ctx);
+    ok(log.touched.length === 0, `${mode}: a dropped certificate or logo is not read, stored or uploaded`, log.touched);
+    ok(log.toasts.length === 2 && log.toasts.every(t => /not saved/.test(t)), `${mode}: the person is told it is not saved`, log.toasts);
+  }
 }
 
 // ── 3. the click actions in a read-only mode ──────────────────────────────────────────────────────
@@ -115,7 +139,7 @@ function actionSandbox(){
     STATE: { data: { jobs: [job], contacts: [contact], tasks: [{ id:'t1', title:'x', assignees:['Guy'] }], settings: {} }, profiles: [] },
     MD: { loaded: true, days: {}, pending: {} },
     UI: { tab: 'myDay' },
-    sydneyWall: () => ({ day: '2026-10-05', hour: 10, minute: 0, dow: 'Mon' }),
+    bizWall: () => ({ day: '2026-10-05', hour: 10, minute: 0, dow: 'Mon' }), todayStr: () => '2026-10-05',
     goToLeadConversation: (id) => log.nav.push(id),
     render: () => {}, renderKeepingInput: () => {}, phoneSync: () => {}, loadShiftEvents: () => {},
     logContactActivity: () => log.db.push('activity'), logSettingsActivity: () => log.db.push('activity'),
@@ -126,11 +150,17 @@ function actionSandbox(){
     catalogList: () => { log.db.push('opened'); return []; }, stageIsBuiltin: () => { log.db.push('opened'); return true; }, openStageRemove: () => log.db.push('opened'),
     // Settings → Connectors: reaching any of these means the read-only check was skipped (closing a window is fine).
     catalogObject: () => { log.db.push('opened'); return {}; }, openModal: () => log.db.push('opened'), closeModal: () => {}, closePopup: () => {},
+    // Services, People and Pipeline (round 3, D-settings): reaching any of these means the read-only check was skipped.
+    openPopup: () => log.db.push('opened'), confirmAction: () => log.db.push('opened'), catalogSave: () => log.db.push('opened'),
   };
   vm.createContext(ctx);
   const names = ['readOnlyReason', 'markPaymentContacted', 'setPaymentFollowup', 'markReofferDone', 'markTeamReminded', 'leadNotes', 'addLeadNote', 'deleteLeadNote', 'vaLogIn', 'vaLogOut', 'setMyBreak', 'convSend', 'openWhileOutItem', 'mdRecordBooking', 'mdTick', 'mdEndOfDay', 'mdCloseOldDays', 'askForReview', 'askReviewAgain', 'markReviewLeft', 'setChatAutoSms', 'setMyShift', 'toggleMyPhoneAvailable', 'storeFile', 'savePayrollInvoice', 'deleteLostReason', 'moveStageLeads', 'setStageActive', 'removeStage', 'setVaShiftTime',
     // Settings → People (14 Oct): pages, pay and role defaults
     'togglePermission', 'resetPersonPages', 'setOwnerSalary', 'updateCommissionRateFromSettings', 'setTechJobType', 'setPayHebrew', 'setPayHebrewName', 'savePeopleHourly', 'applyRoleToPeople', 'setRolePage',
+    // Names and labels (round 3, C-names): the office's name, a person's colour / report name, who gets the cash
+    'setOfficeLabel', 'setPersonSetting', 'setPayCashTo',
+    // Deleting services, People details in place, Pipeline columns (round 3, D-settings)
+    'openServiceDelete', 'confirmServiceDelete', 'moveServiceRecords', 'restoreService', 'setEmployeeName', 'renameEmployee', 'setEmployeeRole', 'addEmployeeCard', 'moveStage',
     // Settings → Connectors (14 Oct): every switch, Disconnect / Remove, the add-ons and a new connected source
     'connToggleItem', 'connItemOff', 'connToggleAccount', 'connAccountOff', 'connToggleAuto', 'openConnDisconnect', 'openConnRemove', 'connOpenStopWindow', 'connDisconnect', 'connReconnect', 'connRemove', 'connAddonConnect', 'connGbpSent', 'connAddConnectedSource'];
   vm.runInContext(names.map(fnText).join('\n'), ctx);
@@ -183,11 +213,28 @@ async function testActions(){
     await run(`setPayHebrewName('Guy', 'גיא')`);
     await run(`applyRoleToPeople('va')`);
     await run(`setRolePage('va', 'crm', true)`);
+    await run(`setOfficeLabel('Reception')`);
+    await run(`setPersonSetting('Guy', 'color', 'person-1')`);
+    await run(`setPayCashTo('Ofek')`);
     let savedHourly = 'x';
     try { savedHourly = await vm.runInContext(`savePeopleHourly()`, ctx); } catch (e) { savedHourly = 'threw: ' + e.message; }
     ok(savedHourly === false, `${mode}: an hourly pay change is not saved`, savedHourly);
-    ok(ctx.log.toasts.length - before === 10, `${mode}: each People change says it is not saved`, ctx.log.toasts.slice(before));
+    ok(ctx.log.toasts.length - before === 13, `${mode}: each People change says it is not saved`, ctx.log.toasts.slice(before));
     ok(ctx.STATE.data.commissionRates === undefined && ctx.STATE.data.settings.ownerSalaries === undefined, `${mode}: no rate or salary is changed on screen either`);
+    // Services, People and Pipeline (round 3, D-settings): nothing is deleted, moved, restored, renamed, added or reordered.
+    const beforeD = ctx.log.toasts.length;
+    let movedSvc = 'x';
+    try { movedSvc = await vm.runInContext(`moveServiceRecords('Chimney', 'Aircon')`, ctx); } catch (e) { movedSvc = 'threw: ' + e.message; }
+    ok(movedSvc === false, `${mode}: moving a deleted service's leads and jobs stops before any save`, movedSvc);
+    await run(`openServiceDelete('Chimney')`);
+    await run(`confirmServiceDelete('Chimney')`);
+    await run(`restoreService('Chimney')`);
+    await run(`setEmployeeName('e1', 'New name')`);
+    await run(`renameEmployee('e1', 'New name')`);
+    await run(`setEmployeeRole('e1', 'Owner', true)`);
+    await run(`addEmployeeCard('p1')`);
+    await run(`moveStage('Quoted', 1)`);
+    ok(ctx.log.toasts.length - beforeD === 9 && ctx.log.toasts.slice(beforeD).every(t => /not saved/.test(t)), `${mode}: each Services, People and Pipeline change says it is not saved`, ctx.log.toasts.slice(beforeD));
     // Settings → Connectors (14 Oct): nothing is switched, disconnected, removed or added, and no window opens.
     const beforeConn = ctx.log.toasts.length;
     await run(`var connEv = { prevented: 0, preventDefault(){ this.prevented++; } }`);
@@ -495,6 +542,7 @@ async function testAutomationsReadOnly(){
 (async () => {
   await testGuard();
   testStaticScan();
+  await testDropUploadsReadOnly();
   await testActions();
   testBrandingReadOnly();
   await testSecurityReadOnly();

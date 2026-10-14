@@ -75,6 +75,30 @@ const mk = (over: any = {}) => fakeDb(
   await handle(db, { step: "get", t: TOKEN }, "", "", NOW);
   eq([db.T.contractor_private[0].agreement.state, db.T.suppliers[0].agreement_status], ["sent", "sent"], "changed while opening: the open is not written over it");
   eq((await handle(mk({ html: "" }), { step: "get", t: TOKEN }, "", "", NOW)).status, 404, "no agreement text: nothing to sign");
+  // The business's time zone goes with the agreement (Region and format), for the dates on the page.
+  db = mk();
+  eq(((await handle(db, { step: "get", t: TOKEN, preview: true }, "", "", NOW)).body as any).tz, "Australia/Sydney", "the page's time zone: Sydney when none is saved");
+  (db.T as any).settings = [{ id: 1, catalog: { region: { timeZone: "America/Chicago" } } }];
+  eq(((await handle(db, { step: "get", t: TOKEN, preview: true }, "", "", NOW)).body as any).tz, "America/Chicago", "the page's time zone: the business's");
+  (db.T as any).settings = [{ id: 1, catalog: { region: { timeZone: "Nowhere/Land" } } }];
+  eq(((await handle(db, { step: "get", t: TOKEN, preview: true }, "", "", NOW)).body as any).tz, "Australia/Sydney", "a zone that doesn't exist: Sydney");
+  // The business's names (round 3, T1.9): the ones the agreement was made under, else today's from the settings row.
+  db = mk({ ours: { name: "Acme", legalName: "Acme Pty Ltd" } });
+  (db.T as any).settings = [{ id: 1, company_name: "Other Name", legal_name: "Other Pty Ltd", catalog: {} }];
+  let v: any = (await handle(db, { step: "get", t: TOKEN, preview: true }, "", "", NOW)).body;
+  eq([v.ourName, v.ourLegalName], ["Acme", "Acme Pty Ltd"], "names: the ones the agreement was made under");
+  db = mk();
+  (db.T as any).settings = [{ id: 1, company_name: "The Guys Service Group", legal_name: "The Guys Service Group Pty Ltd", catalog: {} }];
+  v = (await handle(db, { step: "get", t: TOKEN, preview: true }, "", "", NOW)).body;
+  eq([v.ourName, v.ourLegalName], ["The Guys Service Group", "The Guys Service Group Pty Ltd"], "names: an older agreement shows today's from Business details");
+  (db.T as any).settings = [{ id: 1, company_name: "Acme", catalog: {} }];
+  eq(((await handle(db, { step: "get", t: TOKEN, preview: true }, "", "", NOW)).body as any).ourLegalName, "Acme", "no legal name saved: the trading name");
+  eq(publicView({ name: "x" }, { agreement: { html: "h" } }, "ok").ourName, "", "publicView: no names given = none");
+  v = await handle(db, { step: "get", t: TOKEN }, "", "", Date.parse("2026-10-28T00:00:00Z"));
+  eq([v.status, v.body], [410, { ok: false, reason: "expired", ourName: "Acme" }], "an expired link says who to ask for a new one");
+  v = await handle(db, { step: "get", t: "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ" }, "", "", NOW);
+  eq([v.status, v.body], [404, { ok: false, reason: "link" }], "an unknown link says nothing about the business");
+  eq((await businessInfo({ from: () => { throw new Error("down"); } })), { tz: "Australia/Sydney", name: "", legalName: "" }, "settings can't be read: Sydney and no names (the page still works)");
   console.log(`contractor-sign: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);
 })();

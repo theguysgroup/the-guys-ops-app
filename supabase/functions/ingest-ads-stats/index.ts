@@ -13,6 +13,110 @@ const INTAKE_SECRET = Deno.env.get("INTAKE_SHARED_SECRET");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
+// ── region (Settings → Business details → Region and format; the same rules as the app's bizTz/moneyText/holidayDaysOf). Copied into every function — keep the copies identical (tests/business-logic.test.js checks). ──
+// Nothing saved = this business's values until 14 Oct: Sydney time, "$" amounts, GST, New South Wales (T1.2/T1.3).
+export const REGION_DEFAULTS = { timeZone: "Australia/Sydney", currency: "AUD", country: "AU", state: "NSW" };
+export const TAX_NAMES: Record<string, string> = { AU: "GST", NZ: "GST", CA: "GST", SG: "GST", IN: "GST", GB: "VAT", IE: "VAT", ZA: "VAT", AE: "VAT", US: "Sales tax" };
+export const MONEY_FORMATS = [["1,234.56", ",", "."], ["1.234,56", ".", ","], ["1 234,56", " ", ","]];
+const REGION_TZ_OK = new Map<string, boolean>();
+const REGION_FMT = new Map<string, Intl.DateTimeFormat>();
+export function tzValid(tz: unknown): boolean {
+  if (typeof tz !== "string" || !tz.trim()) return false;
+  if (!REGION_TZ_OK.has(tz)) { let ok = true; try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); } catch { ok = false; } REGION_TZ_OK.set(tz, ok); }
+  return REGION_TZ_OK.get(tz) === true;
+}
+// deno-lint-ignore no-explicit-any
+export function regionOf(cat: any): Record<string, any> { const r = cat && typeof cat === "object" ? cat.region : null; return r && typeof r === "object" ? r : {}; }
+// The business's time zone (settings.catalog.region.timeZone; a name the runtime doesn't know counts as not set).
+// deno-lint-ignore no-explicit-any
+export function bizTzOf(cat: any): string { const r = regionOf(cat); return tzValid(r.timeZone) ? r.timeZone : REGION_DEFAULTS.timeZone; }
+// deno-lint-ignore no-explicit-any
+export function bizTzSet(cat: any): boolean { return tzValid(regionOf(cat).timeZone); }
+// 'AU-NSW', 'US-TX', 'SG': the place the stored public holidays were worked out for (nothing chosen = AU-NSW).
+// deno-lint-ignore no-explicit-any
+export function regionKeyOf(r: any): string {
+  const x = r && typeof r === "object" ? r : {};
+  const country = /^[A-Z]{2}$/.test(String(x.country || "")) ? x.country : REGION_DEFAULTS.country;
+  const state = x.country ? String(x.state || "") : REGION_DEFAULTS.state;
+  return state ? `${country}-${state}` : country;
+}
+// The wall clock in tz at an instant: { day 'YYYY-MM-DD', dow 0 = Sunday, hour, minute, minutes after midnight }.
+export function bizParts(ms: number, tz: string) {
+  let f = REGION_FMT.get(tz);
+  if (!f) { f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false }); REGION_FMT.set(tz, f); }
+  const p = Object.fromEntries(f.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  const hour = Number(p.hour) % 24, minute = Number(p.minute);
+  return { day: `${p.year}-${p.month}-${p.day}`, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(String(p.weekday)), hour, minute, minutes: hour * 60 + minute };
+}
+// The UTC instant of a wall-clock time in tz (two passes handle daylight saving).
+export function bizToUtc(day: string, hh: number, mm: number, tz: string): number {
+  const [y, m, d] = day.split("-").map(Number);
+  let t = Date.UTC(y, m - 1, d, hh, mm);
+  const want = Date.UTC(y, m - 1, d, hh, mm);
+  const wall = (ms: number) => { const p = bizParts(ms, tz), [py, pm, pd] = p.day.split("-").map(Number); return Date.UTC(py, pm - 1, pd, p.hour, p.minute); };
+  for (let i = 0; i < 2; i++) t -= wall(t) - want;
+  // a wall time the clocks jump over (a daylight-saving gap, at midnight in some zones): the same time after the jump on
+  // the same day, never the evening before
+  const got = wall(t);
+  if (got < want) t += want - got;
+  return t;
+}
+// A business day for a timestamptz column that used to get the bare date ('2026-10-14' = midnight UTC): the same bare
+// date where midnight UTC is still that day in the zone (Sydney: exactly as before), else noon that day in the zone, so
+// zones west of UTC don't file the record under the day before.
+export function bizDayStamp(day: string, tz: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return bizParts(Date.UTC(y, m - 1, d), tz).day === day ? day : new Date(bizToUtc(day, 12, 0, tz)).toISOString();
+}
+// A word the owner typed, kept free of HTML and quote characters.
+export function regionWord(v: unknown, max: number): string { return String(v || "").replace(/[<>&"'`\\]/g, "").trim().slice(0, max); }
+// What the sales tax is called (GST / VAT / Sales tax / the business's own word).
+// deno-lint-ignore no-explicit-any
+export function taxNameOf(cat: any): string {
+  const r = regionOf(cat), country = /^[A-Z]{2}$/.test(String(r.country || "")) ? r.country : REGION_DEFAULTS.country;
+  return regionWord(r.taxName, 20) || TAX_NAMES[country] || "Tax";
+}
+export function currencySymbolOf(code: string): string {
+  try { const p = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" }).formatToParts(0).find((x) => x.type === "currency"); return p ? p.value : code; }
+  catch { return code; }
+}
+// The currency's cents: 2 for AUD/USD, 0 for JPY/KRW, 3 for KWD/BHD (2 when the runtime doesn't know the code).
+export function currencyDecimalsOf(code: string): number {
+  try { const n = new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions().maximumFractionDigits; return Number.isInteger(n) ? n : 2; }
+  catch { return 2; }
+}
+// An amount as the business writes it. digits: "auto" = no cents on whole amounts, 2 = always cents, "plain" = as the
+// number comes ("$1,234.5"), "raw" = no thousands separator ("$1234"). Nothing saved = exactly what the functions wrote
+// before 14 Oct.
+// deno-lint-ignore no-explicit-any
+export function moneyText(n: number, cat: any, digits: "auto" | 2 | "plain" | "raw" = "plain"): string {
+  const r = regionOf(cat), x = Number(n);
+  const code = /^[A-Z]{3}$/.test(String(r.currency || "")) ? r.currency : REGION_DEFAULTS.currency;
+  const sym = regionWord(r.currencySymbol, 4) || currencySymbolOf(code), dec = currencyDecimalsOf(code);
+  const fmt = MONEY_FORMATS.find((f) => f[0] === r.moneyFormat) || MONEY_FORMATS[0];
+  // "cents" = the currency's own: none for JPY, three for KWD
+  const opts = digits === "auto" ? { minimumFractionDigits: Math.abs(x - Math.round(x)) < 1e-9 ? 0 : dec, maximumFractionDigits: dec }
+    : digits === 2 ? { minimumFractionDigits: dec, maximumFractionDigits: dec } : undefined;
+  let s = digits === "raw" ? String(x) : x.toLocaleString("en-US", opts);
+  if (fmt !== MONEY_FORMATS[0]) s = s.replace(/[,.]/g, (ch) => ch === "," ? fmt[1] : fmt[2]);
+  return r.symbolAfter === true ? `${s} ${sym}` : sym + s;
+}
+// One key per public holiday, its moved ("additional"/"substitute") day included.
+export function holidayKey(name: unknown): string { return String(name || "").replace(/\s*\((?:additional|substitute) day\)\s*$/i, "").trim().toLowerCase(); }
+// The public holidays that are days off: none while the switch is off (hours.publicOn, or the old hours.nsw), none when the
+// stored list (catalog.holidays, worked out by the app) is for another region, minus the ones switched off (hours.holidayOff).
+// deno-lint-ignore no-explicit-any
+export function holidayDaysOf(cat: any): Record<string, string> {
+  const c = cat && typeof cat === "object" ? cat : {}, h = c.hours && typeof c.hours === "object" ? c.hours : {};
+  if (!(h.publicOn ?? h.nsw)) return {};
+  const ph = c.holidays;
+  if (!ph || !ph.days || typeof ph.days !== "object" || ph.region !== regionKeyOf(c.region || {})) return {};
+  const off = new Set(Array.isArray(h.holidayOff) ? h.holidayOff : []), out: Record<string, string> = {};
+  for (const [d, name] of Object.entries(ph.days)) if (/^\d{4}-\d{2}-\d{2}$/.test(d) && !off.has(holidayKey(name))) out[d] = String(name);
+  return out;
+}
+// ── end region ──
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
@@ -170,7 +274,6 @@ const LEVELS = new Set(["campaign", "keyword", "search_term", "ad", "hour", "dow
 // Every website form and chat also sends an email to info@. The nightly routine reads those emails and sends them
 // here; each one is matched to a CRM card by phone or email, so a lead that reached the inbox but not the app shows
 // up the next morning. A repeat enquiry matches the customer's existing card (intake adds it there), which is right.
-const sydneyDay = (ts: string | number | Date) => new Date(ts).toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" });
 const decodeHtml = (s: string) => s.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 // The last 9 digits of an Australian number, so 0412 345 678, +61412345678 and 61412345678 are the same person.
 function phoneKey(s: unknown): string {
@@ -197,11 +300,12 @@ function parseLeadEmail(e: any) {
     (!phone && /(?<!\d)1[38]00[\s-]?\d{3}[\s-]?\d{3}(?!\d)/.test(subject + " " + text));
   return { subject, name, phone, phoneKey: phoneKey(phone), email, kind: /chat/i.test(subject) ? "chat" : "form", hint: google ? "Google Ads" : meta ? "Meta Ads" : "", test };
 }
-// emails: [{ id, date, subject, sender?, snippet, body? }] from the routine; contacts: CRM cards, newest first; today: Sydney
-// day (today's emails are left for tomorrow night, when the day is complete); from: the first day the routine read in full
+// emails: [{ id, date, subject, sender?, snippet, body? }] from the routine; contacts: CRM cards, newest first; today: the
+// business's day (today's emails are left for tomorrow night, when the day is complete); from: the first day the routine read in full
 // (days before it are left alone, so a partly-read day never replaces a complete one). Replies and forwards in the same
 // thread, and mail not sent by the website forms (info@) or the chat (apptbot), are not lead emails. One summary per day.
-function checkLeadEmails(emails: any[], contacts: any[], today: string, from = "") {
+// tz: the business's time zone (Region and format), which decides the day of each email.
+function checkLeadEmails(emails: any[], contacts: any[], today: string, from = "", tz = REGION_DEFAULTS.timeZone) {
   const byPhone = new Map<string, any>(), byEmail = new Map<string, any>();
   for (const c of contacts) {
     const k = phoneKey(c.phone); if (k && !byPhone.has(k)) byPhone.set(k, c);
@@ -211,7 +315,7 @@ function checkLeadEmails(emails: any[], contacts: any[], today: string, from = "
   for (const e of emails) {
     const id = String(e?.id || ""); if (!id || seen.has(id)) continue; seen.add(id);
     const at = new Date(e.date); if (isNaN(at.getTime())) continue;
-    const day = sydneyDay(at); if (day >= today || (from && day < from)) continue;
+    const day = bizParts(at.getTime(), tz).day; if (day >= today || (from && day < from)) continue;
     if (/^\s*(?:re|fwd?|aw)\s*:/i.test(String(e.subject || ""))) continue;
     if (e.sender && !/info@theguyservicegroup\.com|apptbot\.ai/i.test(String(e.sender))) continue;
     const p = parseLeadEmail(e);
@@ -250,10 +354,25 @@ export const ORGANIC_LEVELS: Record<string, string[]> = {
 const ORGANIC_WINS = new Set(["7d", "prev7d", "28d", "prev28d", "90d"]);
 // The three ad landing pages (posts 5296, 5275 and 6424) get paid traffic only: never part of organic.
 export const PPC_PATHS = new Set(["/aircon-split-system-cleaning-service/", "/aircon-duct-system-cleaning-service/", "/aircon-cleaning-service/"]);
-// The aircon Google Business Profile links to this page, so Search Console gives it the map pack's positions too.
-export const GBP_LINKED_PATH = "/services/air-conditioning-cleaning/";
 export function urlPath(u: unknown): string {
   try { const p = new URL(String(u || ""), "https://theguyservicegroup.com").pathname; return p.endsWith("/") ? p : p + "/"; } catch { return ""; }
+}
+// The page the business's Google Business Profile links to (Search Console then gives it the map pack's positions too)
+// and that profile's word ("aircon"), from Business details (catalog.business.gbpLinkedPage / gbpLinkedLabel; the
+// C-names SQL saved this business's). None saved = no page gets the map-pack caveat.
+// deno-lint-ignore no-explicit-any
+export function gbpLinked(cat: any): { path: string; label: string } {
+  const b = cat && typeof cat === "object" && cat.business && typeof cat.business === "object" ? cat.business : {};
+  const raw = String(b.gbpLinkedPage || "").trim();
+  return { path: raw ? urlPath(raw) : "", label: regionWord(b.gbpLinkedLabel, 30) };
+}
+// Where to search from (round 3, T1.9): the region's state or country (Region and format), else the city of the
+// business's time zone (nothing saved = Sydney, the words used before).
+// deno-lint-ignore no-explicit-any
+export function organicPlace(cat: any): string {
+  const r = regionOf(cat);
+  if (r.country) return regionWord(r.stateName || r.state || r.countryName || r.country, 60);
+  return String(bizTzOf(cat).split("/").pop() || "").replace(/_/g, " ");
 }
 export const isPpcUrl = (u: unknown) => PPC_PATHS.has(urlPath(u));
 type OrgRow = { source: string; win: string; level: string; item: string; item2: string; clicks: number; impressions: number; position: number | null; extra: Record<string, unknown> };
@@ -315,8 +434,10 @@ export function expectedCtr(pos: number): number {
 export const BRAND_RE = /\bguys?\s*(service|group)\b|\bthe guys\b|ac cleaning guys|chimney guys|pressure washing guys/i;
 export type Finding = { dedupe_key: string; surface: string; page_url: string | null; query: string | null; issue_type: string; title: string; evidence: Record<string, unknown>; proposed_action: string; expected_impact: string | null; priority: string };
 // The nightly suggestions. Each rule needs its own data from tonight; a rule whose data is missing is not run (and its open
-// suggestions are left alone, not marked as solved).
-export function organicFindings(rows: OrgRow[]): { findings: Finding[]; evaluated: string[] } {
+// suggestions are left alone, not marked as solved). cat: settings.catalog (the region and the profile's page).
+// deno-lint-ignore no-explicit-any
+export function organicFindings(rows: OrgRow[], cat: any = {}): { findings: Finding[]; evaluated: string[] } {
+  const gl = gbpLinked(cat), place = organicPlace(cat);
   const get = (src: string, win: string, lvl: string) => rows.filter((r) => r.source === src && r.win === win && r.level === lvl);
   const pct = (x: number) => Math.round(x * 1000) / 10;
   const out: Finding[] = [], evaluated: string[] = [];
@@ -326,13 +447,13 @@ export function organicFindings(rows: OrgRow[]): { findings: Finding[]; evaluate
     const ctr: Finding[] = [], near: Finding[] = [];
     for (const r of pq) {
       const path = urlPath(r.item), pos = r.position as number, exp = expectedCtr(pos), rate = r.impressions ? r.clicks / r.impressions : 0;
-      const gbp = path === GBP_LINKED_PATH;
+      const gbp = !!gl.path && path === gl.path;
       if (r.impressions >= 150 && pos <= 10 && rate < exp * 0.4) {
         const more = Math.round(r.impressions * exp - r.clicks);
         ctr.push({ dedupe_key: `ctr|${path}|${r.item2.toLowerCase()}`, surface: "search", page_url: path, query: r.item2, issue_type: "ctr", priority: r.impressions >= 500 ? "P1" : "P2",
           title: `Few clicks for "${r.item2}" at position ${Math.round(pos * 10) / 10}`,
-          evidence: { window: "28 days", impressions: r.impressions, clicks: r.clicks, ctr_pct: pct(rate), position: pos, usual_ctr_pct: pct(exp), ...(gbp ? { note: "This page is the aircon Google Business Profile's website link, so its position includes the map pack." } : {}) },
-          proposed_action: `Search "${r.item2}" on a phone in Sydney first. If a map pack or an AI answer sits above our blue link, the fix is the Google Business Profile, not the page. If our blue link shows and people skip it, rewrite ${path}'s title and description to answer this search directly.`,
+          evidence: { window: "28 days", impressions: r.impressions, clicks: r.clicks, ctr_pct: pct(rate), position: pos, usual_ctr_pct: pct(exp), ...(gbp ? { note: `This page is the ${gl.label ? gl.label + " " : ""}Google Business Profile's website link, so its position includes the map pack.` } : {}) },
+          proposed_action: `Search "${r.item2}" on a phone in ${place} first. If a map pack or an AI answer sits above our blue link, the fix is the Google Business Profile, not the page. If our blue link shows and people skip it, rewrite ${path}'s title and description to answer this search directly.`,
           expected_impact: more > 0 ? `About ${more} more clicks a month at the usual click rate for this position.` : null });
       } else if (pos > 7.5 && pos <= 20 && r.impressions >= 100 && !gbp) {
         const more = Math.round(r.impressions * expectedCtr(5) - r.clicks);
@@ -440,9 +561,11 @@ export function crmWindows(end: string) {
 }
 // What the nightly organic assessment is written from: numbers only, already worked out, one fact per line.
 // leads: CRM cards whose source is Organic (web) or Google Maps: { id, day, source, sub_source, division }; rev: jobs and
-// revenue (before GST) per card; open: the open suggestions; last: the previous organic assessment.
+// revenue (before tax) per card; open: the open suggestions; last: the previous organic assessment; cat: settings.catalog
+// (the business's currency and tax name; nothing saved = "$" and GST).
 // deno-lint-ignore no-explicit-any
-export function organicDigest(rows: OrgRow[], leads: any[], rev: Record<string, { jobs: number; revenue: number }>, open: any[], last: any, end: string): string[] {
+export function organicDigest(rows: OrgRow[], leads: any[], rev: Record<string, { jobs: number; revenue: number }>, open: any[], last: any, end: string, cat?: any): string[] {
+  const gl = gbpLinked(cat);   // the page the Google Business Profile links to, and its word (Business details)
   const L: string[] = [];
   const get = (src: string, win: string, lvl: string) => rows.filter((r) => r.source === src && r.win === win && r.level === lvl);
   const sum = (a: OrgRow[], k: "clicks" | "impressions") => a.reduce((t, r) => t + r[k], 0);
@@ -455,7 +578,7 @@ export function organicDigest(rows: OrgRow[], leads: any[], rev: Record<string, 
   const prevPages = new Map(get("gsc", "prev28d", "page").map((r) => [urlPath(r.item), r]));
   if (pages.length) {
     L.push(`TOP PAGES, last 28 days (clicks, then the 28 days before; position):`);
-    for (const r of pages) { const p = prevPages.get(urlPath(r.item)); L.push(`  ${urlPath(r.item)}: ${r.clicks} clicks (before ${p ? p.clicks : 0}), shown ${r.impressions}, position ${r.position ?? "-"}${p && p.position !== null ? ` (before ${p.position})` : ""}${urlPath(r.item) === GBP_LINKED_PATH ? " [the aircon map profile links here, so its position includes the map pack]" : ""}`); }
+    for (const r of pages) { const p = prevPages.get(urlPath(r.item)); L.push(`  ${urlPath(r.item)}: ${r.clicks} clicks (before ${p ? p.clicks : 0}), shown ${r.impressions}, position ${r.position ?? "-"}${p && p.position !== null ? ` (before ${p.position})` : ""}${gl.path && urlPath(r.item) === gl.path ? ` [the ${gl.label ? gl.label + " " : ""}map profile links here, so its position includes the map pack]` : ""}`); }
   }
   const ch = (w: string) => { const a = get("ga4", w, "channel"); const by = (n: string) => a.find((r) => r.item === n); const os = by("Organic Search"), ai = by("AI Assistant"), om = by("Organic Maps"), soc = by("Organic Social");
     // deno-lint-ignore no-explicit-any
@@ -472,7 +595,7 @@ export function organicDigest(rows: OrgRow[], leads: any[], rev: Record<string, 
     const prof: Record<string, number> = {}; maps.forEach((l) => { const k = l.sub_source || "profile not set"; prof[k] = (prof[k] || 0) + 1; });
     const jobs = a.reduce((t, l) => t + (rev[l.id]?.jobs || 0), 0), money = a.reduce((t, l) => t + (rev[l.id]?.revenue || 0), 0);
     const shaky = W[w][0] < ORGANIC_CLEAN_FROM ? " [Organic web NOT reliable in this window: before 10 Sep Google ad leads were saved as Organic]" : "";
-    return `${a.length} leads (Organic web ${web.length}, Google Maps ${maps.length}${maps.length ? ": " + Object.entries(prof).map(([k, v]) => `${k} ${v}`).join(", ") : ""}), ${jobs} jobs so far, $${Math.round(money)} revenue before GST${shaky}`;
+    return `${a.length} leads (Organic web ${web.length}, Google Maps ${maps.length}${maps.length ? ": " + Object.entries(prof).map(([k, v]) => `${k} ${v}`).join(", ") : ""}), ${jobs} jobs so far, ${moneyText(Math.round(money), cat, "raw")} revenue before ${taxNameOf(cat)}${shaky}`;
   };
   L.push(`LEADS IN THE APP FROM ORGANIC (cards with source Organic web or Google Maps; jobs = jobs linked to those cards):`);
   for (const w of ["7d", "prev7d", "28d", "prev28d"]) L.push(`  ${({ "7d": "last 7 days", prev7d: "the 7 days before", "28d": "last 28 days", prev28d: "the 28 days before" } as Record<string, string>)[w]} (${W[w][0]}..${W[w][1]}): ${desc(w)}`);
@@ -482,7 +605,7 @@ export function organicDigest(rows: OrgRow[], leads: any[], rev: Record<string, 
   if (wk) {
     const lp = (w: string) => rows.filter((r) => r.source === "serp" && r.win === w && r.level === "localpack");
     const prevLp = new Map((pwk ? lp(pwk) : []).map((r) => [r.item + "|" + r.item2, r.position]));
-    L.push(`MAP PACK (weekly check of ${wk}${pwk ? `, compared with ${pwk}` : ""}; our aircon profile's place in the Google map results, by search and area):`);
+    L.push(`MAP PACK (weekly check of ${wk}${pwk ? `, compared with ${pwk}` : ""}; our ${gl.label ? gl.label + " " : ""}profile's place in the Google map results, by search and area):`);
     for (const r of lp(wk)) { const was = prevLp.get(r.item + "|" + r.item2); L.push(`  "${r.item}" in ${r.item2}: ${r.position === null ? "not in the pack" : "#" + r.position}${pwk ? ` (week before: ${was === undefined ? "not checked" : was === null ? "not in the pack" : "#" + was})` : ""}`); }
     const ai = rows.filter((r) => r.source === "serp" && r.win === wk && r.level === "aimode");
     // deno-lint-ignore no-explicit-any
@@ -490,7 +613,7 @@ export function organicDigest(rows: OrgRow[], leads: any[], rev: Record<string, 
     const rv = rows.filter((r) => r.source === "serp" && r.win === wk && r.level === "reviews");
     const us = rv.find((r) => r.item2 === "us");
     // deno-lint-ignore no-explicit-any
-    if (us) L.push(`REVIEWS (aircon profile): ${us.clicks} reviews, rating ${us.position ?? "-"}, ${(us.extra as any).thisWeek ?? "?"} new this week, newest ${(us.extra as any).newestDays ?? "?"} days old; competitors: ${rv.filter((r) => r.item2 === "competitor").map((r) => `${r.item} ${r.clicks}`).join(", ") || "-"}`);
+    if (us) L.push(`REVIEWS (${gl.label ? gl.label + " profile" : "our profile"}): ${us.clicks} reviews, rating ${us.position ?? "-"}, ${(us.extra as any).thisWeek ?? "?"} new this week, newest ${(us.extra as any).newestDays ?? "?"} days old; competitors: ${rv.filter((r) => r.item2 === "competitor").map((r) => `${r.item} ${r.clicks}`).join(", ") || "-"}`);
   } else L.push(`MAP PACK / AI MODE / REVIEWS: no weekly check has been loaded yet.`);
   const pr = ["P0", "P1", "P2", "P3"];
   // deno-lint-ignore no-explicit-any
@@ -572,11 +695,12 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     const sinceIso = new Date(Date.now() - 110 * 86400000).toISOString();
     const cq = await readAll((a, b) => sbd.from("contacts").select("id,created_at,source,utm_source,utm_content,fbclid").gte("created_at", sinceIso).order("id").range(a, b));
     if (cq.error) return json({ ok: false, error: "contacts failed: " + cq.error.message }, 500);
-    const sydDay = (ts: string) => new Date(ts).toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" });
+    const tzD = bizTzOf(await loadCatalog(sbd));
+    const bizDay = (ts: string) => { const t = Date.parse(ts); return Number.isFinite(t) ? bizParts(t, tzD).day : ""; };   // the business's day of each lead
     // One definition everywhere (app Dashboard, Meta board, this digest): a Meta lead is a lead whose source is Meta Ads.
     // An fbclid alone isn't enough — it also comes with organic Facebook shares.
     const isMeta = (c: any) => c.source === "Meta Ads";
-    const leads = (cq.data || []).filter(isMeta).map((c: any) => ({ id: c.id, day: sydDay(c.created_at), adset: c.utm_content || "" }));
+    const leads = (cq.data || []).filter(isMeta).map((c: any) => ({ id: c.id, day: bizDay(c.created_at), adset: c.utm_content || "" }));
     const ids = leads.map((l: any) => l.id);
     const rev: Record<string, { jobs: number; revenue: number }> = {};
     // In groups of 200: a long list of ids in one request is too long for the address and fails.
@@ -629,12 +753,12 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     const list = Array.isArray(body.leadEmails.emails) ? body.leadEmails.emails.slice(0, 500) : null;
     if (!list) return json({ ok: false, error: "invalid leadEmails.emails: expected an array" }, 400);
     const sbl = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
-    const offE = emailCheckGate(await loadCatalog(sbl));
+    const catE = await loadCatalog(sbl), offE = emailCheckGate(catE);
     if (offE) return json({ ok: true, saved: 0, need_body: [], days: [], skipped: offE });
     const cq = await readAll((a, b) => sbl.from("contacts").select("id,phone,email,source,created_at").order("created_at", { ascending: false }).order("id").range(a, b));
     if (cq.error) return json({ ok: false, error: "contacts failed: " + cq.error.message }, 500);
     const from = /^\d{4}-\d{2}-\d{2}$/.test(String(body.leadEmails.from || "")) ? String(body.leadEmails.from) : "";
-    const res = checkLeadEmails(list, cq.data || [], sydneyDay(Date.now()), from);
+    const tzE = bizTzOf(catE), res = checkLeadEmails(list, cq.data || [], bizParts(Date.now(), tzE).day, from, tzE);
     if (res.days.length) {
       const now = new Date().toISOString();
       const up = await sbl.from("lead_email_checks").upsert(res.days.map((d: any) => ({ ...d, checked_at: now })), { onConflict: "day" });
@@ -693,7 +817,9 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     const sq = await readAll((a, b) => sbf.from("seo_suggestions").select("id,source,dedupe_key,issue_type,status,priority,title").order("id").range(a, b));
     if (sq.error) return json({ ok: false, error: "suggestions failed: " + sq.error.message }, 500);
     if (what === "organicFindings") {
-      const { findings, evaluated } = organicFindings(rows);
+      // the suggestions' words (the place, the profile's page) come from the settings: none tonight rather than wrong ones
+      if (!catF) return json({ ok: false, error: "settings not read: no suggestions tonight" }, 503);
+      const { findings, evaluated } = organicFindings(rows, catF);
       const nowIso = new Date().toISOString();
       const ch = syncSuggestions(findings, sq.data || [], evaluated, nowIso);
       if (ch.inserts.length) { const r = await sbf.from("seo_suggestions").insert(ch.inserts); if (r.error) return json({ ok: false, error: "insert failed: " + r.error.message }, 500); }
@@ -705,8 +831,10 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     const since = new Date(Date.parse(end + "T00:00:00Z") - 60 * 86400000).toISOString();
     const cq = await readAll((a, b) => sbf.from("contacts").select("id,created_at,source,sub_source,division").in("source", ["Organic", "Google Maps"]).gte("created_at", since).order("id").range(a, b));
     if (cq.error) return json({ ok: false, error: "contacts failed: " + cq.error.message }, 500);
+    const tzF = bizTzOf(catF);
+    const bizDay = (ts: string) => { const t = Date.parse(ts); return Number.isFinite(t) ? bizParts(t, tzF).day : ""; };   // the business's day of each lead
     // deno-lint-ignore no-explicit-any
-    const leads = (cq.data || []).map((c: any) => ({ id: c.id, day: sydneyDay(c.created_at), source: c.source, sub_source: c.sub_source || "", division: c.division || "" }));
+    const leads = (cq.data || []).map((c: any) => ({ id: c.id, day: bizDay(c.created_at), source: c.source, sub_source: c.sub_source || "", division: c.division || "" }));
     const ids = leads.map((l) => l.id);
     const rev: Record<string, { jobs: number; revenue: number }> = {};
     for (let i = 0; i < ids.length; i += 200) {
@@ -718,7 +846,7 @@ if (typeof Deno !== "undefined" && typeof (Deno as any).serve === "function" && 
     // deno-lint-ignore no-explicit-any
     const open = (sq.data || []).filter((s: any) => s.status === "open" || s.status === "in_progress");
     const iq = await sbf.from("ads_insights").select("day,summary,points").eq("platform", "organic").order("day", { ascending: false }).limit(1);
-    return json({ ok: true, lines: [...(catF ? switchedOffLines(catF) : []), ...organicDigest(rows, leads, rev, open, (iq.data || [])[0] || null, end)] });
+    return json({ ok: true, lines: [...(catF ? switchedOffLines(catF) : []), ...organicDigest(rows, leads, rev, open, (iq.data || [])[0] || null, end, catF)] });
   }
   const platform = String(body?.platform || "");
   const account = String(body?.account || "");

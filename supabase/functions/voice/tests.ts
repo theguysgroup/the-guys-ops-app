@@ -17,7 +17,7 @@ function fakeDb(opts: { ronOn?: boolean; ronDate?: string; ronBreak?: boolean; r
     contacts: [{ id: "c-known", full_name: "Kevin Love", phone: "+61466103709", division: "Chimney", created_at: "2026-09-23", messages: [], contacted_at: null }],
     calls: [],
     profiles: [{ id: "ron1", role: "va", permissions: { crm: true }, on_duty: opts.ronOn !== false, on_duty_date: opts.ronDate || "2026-10-02", on_break: !!opts.ronBreak }, { id: "tech1", role: "technician", permissions: { crm: false }, on_duty: true, on_duty_date: "2026-10-02" }, { id: "own1", role: "owner", permissions: {} }],
-    settings: [{ phone_routing: opts.routing || JSON.parse(JSON.stringify(ROUTING)) }],
+    settings: [{ phone_routing: opts.routing || JSON.parse(JSON.stringify(ROUTING)), company_name: "The Guys Service Group" }],
   };
   const from = (t: string) => {
     const st: any = { f: [] as any[], upd: null as any, range: null as any };
@@ -185,6 +185,36 @@ const IN = { From: "+61412345678", To: "+61400000001" };
   await step(db, "incoming", { CallSid: "CT4", ...IN }, {}, FRI_21);
   eq(sms[0] && /^Hi, it's The Guys Service Group\. Thanks for calling/.test(sms[0].Body), true, "office closed, its template blank: the approved text");
 
+  // 16b2. The business name in the words (round 3, T1.9): settings.company_name fills {business_name}.
+  db = fakeDb(); db.T.settings[0].company_name = "Acme Plumbing"; sms.length = 0;
+  x = await body(await step(db, "incoming", { CallSid: "CB1", ...IN }, {}, FRI_10));
+  has(x, "Thanks for calling Acme Plumbing. This call may be recorded for quality and training.", "greeting: the business name from Business details");
+  await step(db, "after_owners", { CallSid: "CB1", DialCallStatus: "no-answer", ...IN }, { div: "Aircon" }, FRI_10);
+  eq(sms[0] && sms[0].Body.startsWith("Hi, it's Acme Plumbing. Sorry we missed your call!"), true, "missed-call text: the business name from Business details");
+  db = fakeDb(); db.T.settings[0].company_name = "Acme Plumbing"; db.T.settings[0].catalog = { templates: { phoneGreeting: "You reached {business_name}!" } };
+  x = await body(await step(db, "incoming", { CallSid: "CB2", ...IN }, {}, FRI_10));
+  has(x, "You reached Acme Plumbing!", "an edited greeting with {business_name} is filled");
+  db = fakeDb(); db.T.settings[0].company_name = "";
+  x = await body(await step(db, "incoming", { CallSid: "CB3", ...IN }, {}, FRI_10));
+  has(x, "Thanks for calling. This call may be recorded for quality and training.", "no business name: the blank goes cleanly (no double space)");
+  // A settings read that fails ({ data: null, error }, no throw) keeps the words read last, never "no business name".
+  db = fakeDb(); db.T.settings[0].company_name = "Acme Plumbing";
+  await body(await step(db, "incoming", { CallSid: "CB4", ...IN }, {}, FRI_10));
+  { const bad = fakeDb(), from0 = bad.from;
+    bad.from = (t: string) => t === "settings" ? { select: () => ({ limit: async () => ({ data: null, error: { message: "timeout" } }) }) } : from0(t);
+    x = await body(await step(bad, "incoming", { CallSid: "CB5", ...IN }, {}, FRI_10));
+    has(x, "Thanks for calling Acme Plumbing. This call may be recorded", "a failed settings read keeps the business name read last"); }
+  // A new caller's card is on the business's day: Fri 10:00 Sydney = Thu 19:00 in Chicago → noon Thu 1 Oct Chicago
+  // (a bare date would be midnight UTC = Wednesday evening there); Sydney keeps the bare date as before.
+  db = fakeDb(); db.T.settings[0].catalog = { region: { timeZone: "America/Chicago" } };
+  await step(db, "incoming", { CallSid: "CB6", ...IN }, {}, FRI_10);
+  const syd = fakeDb(); await step(syd, "incoming", { CallSid: "CB7", ...IN }, {}, FRI_10);
+  eq([db.T.contacts[1] && db.T.contacts[1].created_at, syd.T.contacts[1] && syd.T.contacts[1].created_at], ["2026-10-01T17:00:00.000Z", "2026-10-02"], "new caller's card: the business's day (Chicago noon; Sydney's bare date as before)");
+  useTemplates({}, "Acme");
+  eq([fillBiz("Hi, it's {business_name}."), fillBiz("No blank here."), fillBiz("{business_name} and {other}")], ["Hi, it's Acme.", "No blank here.", "Acme and {other}"], "fillBiz: fills only {business_name}");
+  useTemplates({}, "");
+  eq([fillBiz("Thanks for calling {business_name}. Bye"), fillBiz("Hi, it's {business_name}."), fillBiz("Hello {business_name}, hi")], ["Thanks for calling. Bye", "Hi, it's.", "Hello, hi"], "fillBiz: no name takes its loose space with it");
+
   // 16c. Settings → Phone (Ofek 13 Oct): nothing saved = the same menu and spoken words, word for word.
   eq(menuText(menuOf({})), "For air conditioning, press 1. For chimney, press 2. For pressure washing, press 3.", "menu, nothing saved: the original words");
   eq(menuOf({ menu: [{ key: " ", say: "x" }, { key: "Aircon" }] }).length, 3, "a menu with no usable rows falls back to the original three");
@@ -245,6 +275,14 @@ const IN = { From: "+61412345678", To: "+61400000001" };
   eq([at(null, FRI_10), at("x", FRI_10), at({ days: 5 }, FRI_10)], [false, false, false], "odd data never throws, just no backup");
   eq(backupOpen({ backupHours: JSON.parse('{"days":{"5":{"on":true,"from":"08:00","to":"12:00"}}}') } as any, FRI_10), true, "per day: string keys from JSON");
   eq(backupDay(JSON.parse('{"days":{"5":{"on":true,"from":"09:00","to":"17:00"}}}'), 5), { from: 540, to: 1020 }, "backupDay in minutes");
+  // The business's time zone (Region and format), read with the routing: Fri 2 Oct 15:00 UTC = Fri 10:00 in Chicago,
+  // Sat 01:00 in Sydney.
+  { const FRI_10_CHI = Date.parse("2026-10-02T15:00:00Z"), rdb = fakeDb();
+    eq(at(oldAll, FRI_10_CHI), false, "time zone: nothing saved = Sydney (01:00, no backup)");
+    rdb.T.settings[0].catalog = { region: { timeZone: "America/Chicago" } }; await routing(rdb);
+    eq(at(oldAll, FRI_10_CHI), true, "time zone: Chicago's 10:00 once the routing has read the region");
+    rdb.T.settings[0].catalog = {}; await routing(rdb);
+    eq(at(oldAll, FRI_10_CHI), false, "time zone: back to Sydney when it is cleared"); }
   const perDay = JSON.parse(JSON.stringify(ROUTING));
   perDay.backupHours = { days: { 0: { on: false }, 1: { on: true, from: "08:00", to: "20:00" }, 2: { on: true, from: "08:00", to: "20:00" }, 3: { on: true, from: "08:00", to: "20:00" }, 4: { on: true, from: "08:00", to: "20:00" }, 5: { on: false, from: "08:00", to: "20:00" }, 6: { on: true, from: "09:00", to: "13:00" } } };
   db = fakeDb({ ronOn: false, routing: perDay });

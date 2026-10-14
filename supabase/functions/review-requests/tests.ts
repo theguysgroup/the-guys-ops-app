@@ -4,7 +4,7 @@
 
 // ── a small in-memory stand-in for the Supabase client ──
 function fakeDb(seed: Record<string, any[]> = {}) {
-  const T: Record<string, any[]> = { contacts: [], jobs: [], review_requests: [], sms_opt_outs: [], activity_log: [], settings: [{ id: 1, review_requests_enabled: true, review_requests_auto: false, reviews_from: "2026-10-03" }], ...seed };
+  const T: Record<string, any[]> = { contacts: [], jobs: [], review_requests: [], sms_opt_outs: [], activity_log: [], settings: [{ id: 1, review_requests_enabled: true, review_requests_auto: false, reviews_from: "2026-10-03", company_name: "The Guys Service Group", catalog: TODAY }], ...seed };
   function q(table: string) {
     const rows = () => (T[table] = T[table] || []);
     const filters: ((r: any) => boolean)[] = [];
@@ -68,7 +68,18 @@ let NOW_ISO = new Date(TUE_1000).toISOString();
 const card = (id: string, full_name: string, phone: string, email = "") => ({ id, full_name, phone, email, created_at: "2026-10-01" });
 const job = (id: string, inv: string, extra: any = {}) => ({ id, invoice_number: inv, customer_name: "Sarah Smith", date: "2026-10-06", job_type: "Aircon", technician: "Guy", review_taken: false, review_do_not_ask: false, contact_id: null, ...extra });
 
+// Today's three Google review links and thank-you lines, as the C-names SQL saves them in settings (round 3: no links in
+// the code). REVIEW = the expected values by family.
+const TODAY_LINKS: Record<string, { link: string; result: string }> = {
+  Aircon: { link: "https://search.google.com/local/writereview?placeid=ChIJx33jOtfwSSgRs09ybCNrVbU", result: "Enjoy the fresh, clean air!" },
+  Chimney: { link: "https://g.page/r/CZUuKFAccuR4EBM/review", result: "Enjoy your clean, safe fireplace!" },
+  "Pressure Washing": { link: "https://g.page/r/CZjy0MO5zKE7EBM/review", result: "Enjoy your fresh, clean outdoor area!" },
+};
+const REVIEW = { aircon: TODAY_LINKS.Aircon, chimney: TODAY_LINKS.Chimney, pw: TODAY_LINKS["Pressure Washing"] };
+const TODAY = { reviews: { links: TODAY_LINKS } };
+
 (async () => {
+  useReviewSettings(TODAY); useBusinessName("The Guys Service Group");   // what loadTemplates reads from the live settings row
   // ── sending hours ──
   eq(new Date(sendAt(TUE_1000)).toISOString(), new Date(TUE_1000).toISOString(), "10:00 → goes at once");
   eq(new Date(sendAt(Date.parse("2026-10-05T20:30:00Z"))).toISOString(), "2026-10-05T23:00:00.000Z", "07:30 → 10:00 the same morning");
@@ -280,27 +291,85 @@ const job = (id: string, inv: string, extra: any = {}) => ({ id, invoice_number:
     useTemplates({});
   }
 
-  // ── review rules from Settings (Ofek 13 Oct): nothing saved = the original hours, months, links and lines ──
+  // ── review rules from Settings (Ofek 13 Oct): nothing saved = the original hours and months; the links are the saved ones ──
   {
-    useReviewSettings({});
-    eq(reviewRules(), { sendFrom: 8, sendUntil: 20, morning: 10, askAgainMonths: 6 }, "no settings: 8 to 20, 10 am, 6 months");
-    eq(reviewFor("Aircon"), REVIEW.aircon, "no settings: the original aircon link and line");
+    useReviewSettings(TODAY);
+    eq(reviewRules(), { sendFrom: 8, sendUntil: 20, morning: 10, askAgainMonths: 6 }, "no rules saved: 8 to 20, 10 am, 6 months");
+    eq([reviewFor("Aircon"), reviewFor("Chimney"), reviewFor("Pressure Washing")], [REVIEW.aircon, REVIEW.chimney, REVIEW.pw], "today's saved links and lines");
+    eq([reviewFor("Ducted"), reviewFor("Solar panels"), reviewFor("Fireplace"), reviewFor("Other")], [REVIEW.aircon, REVIEW.pw, REVIEW.chimney, null], "a job type with no link of its own: the saved one of its kind (as before)");
     const TUE_0700 = Date.parse("2026-10-05T20:00:00Z"), TUE_2100 = Date.parse("2026-10-06T10:00:00Z");   // Tue 7:00 and 21:00 Sydney
     eq([inSendWindow(TUE_0700), new Date(sendAt(TUE_0700)).toISOString()], [false, "2026-10-05T23:00:00.000Z"], "7 am: waits for 10 am the same day");
-    useReviewSettings({ reviews: { sendFrom: 7, sendUntil: 21, morning: 9, askAgainMonths: 3, links: { Aircon: { link: "https://g.page/r/new/review", result: "Breathe easy!" }, Gutters: { link: "https://g.page/r/gutter/review", result: "" } } } });
+    useReviewSettings({ reviews: { sendFrom: 7, sendUntil: 21, morning: 9, askAgainMonths: 3, links: { ...TODAY_LINKS, Aircon: { link: "https://g.page/r/new/review", result: "Breathe easy!" }, Gutters: { link: "https://g.page/r/gutter/review", result: "" } } } });
     eq([inSendWindow(TUE_0700), inSendWindow(TUE_2100)], [true, false], "7 am now inside the window, 9 pm outside");
     eq(new Date(sendAt(TUE_2100)).toISOString(), "2026-10-06T22:00:00.000Z", "a 9 pm request goes at 9 am the next day");
     eq(reviewFor("Aircon"), { link: "https://g.page/r/new/review", result: "Breathe easy!" }, "the saved link and line are used");
-    eq(reviewFor("Chimney"), REVIEW.chimney, "a service with nothing saved keeps its original");
+    eq(reviewFor("Chimney"), REVIEW.chimney, "a service not changed keeps its saved link");
     eq(reviewFor("Gutters"), { link: "https://g.page/r/gutter/review", result: "" }, "a new service with its own link can be asked");
     const m = buildMessages({ first_name: "Sam", technician: "Guy", review_link: "https://g.page/r/gutter/review", job_type: "Gutters", job_date: "2026-10-01" }, "2026-10-06");
     eq(m.sms, "Hi Sam, Guy from The Guys Service Group here - thanks for having us! Our team works really hard and would truly appreciate a quick Google review: https://g.page/r/gutter/review Thank you!", "no thank-you line: no double space");
     // A request queued for a service whose link was later cleared still goes, with its stored link and no line (no crash).
     useReviewSettings({ reviews: { links: { Gutters: { link: "", result: "" } } } });
     eq(buildMessages({ first_name: "Sam", technician: "Guy", review_link: "https://g.page/r/gutter/review", job_type: "Gutters", job_date: "2026-10-01" }, "2026-10-06").sms, m.sms, "link cleared after queueing: still sends with the stored link");
-    useReviewSettings({ reviews: { sendFrom: 20, sendUntil: 8, morning: 30, links: { Aircon: { link: "javascript:alert(1)", result: "" } } } });
-    eq([reviewRules().sendFrom, reviewRules().sendUntil, reviewRules().morning, reviewFor("Aircon")], [8, 20, 10, REVIEW.aircon], "impossible hours and a bad link fall back to the originals");
+    useReviewSettings({ reviews: { sendFrom: 20, sendUntil: 8, morning: 30, links: { Aircon: { link: "javascript:alert(1)", result: "" }, Ducted: { link: "https://g.page/r/duct/review", result: "Cool!" } } } });
+    eq([reviewRules().sendFrom, reviewRules().sendUntil, reviewRules().morning, reviewFor("Aircon")], [8, 20, 10, { link: "https://g.page/r/duct/review", result: "Cool!" }], "impossible hours fall back; a bad link is never used (the saved link of its kind instead)");
+    useReviewSettings({ reviews: { links: { Aircon: { link: "javascript:alert(1)", result: "" } } } });
+    eq(reviewFor("Aircon"), null, "a bad link and no other of its kind: can't be asked");
+    useReviewSettings(TODAY);
+  }
+
+  // ── the business's names (round 3, T1.9): links and the business name come from the settings, never the code ──
+  {
+    const r = { first_name: "Sarah", technician: "Guy Cohen", review_link: "https://g.page/r/x/review", job_type: "Aircon", job_date: "2026-10-06" };
+    useTemplates({}); useBusinessName("Acme");
+    const a = buildMessages(r, "2026-10-06");
+    eq([a.sms.startsWith("Hi Sarah, Guy from Acme here - thanks for having us today!"), a.text.endsWith("Thank you!\nGuy\nAcme"), a.html.includes("<p>Thank you!<br>Guy<br>Acme</p>")], [true, true, true], "the business name from Business details signs the text and the email");
+    useBusinessName("A&B <Co>");
+    eq(buildMessages(r, "2026-10-06").html.includes("<br>A&amp;B &lt;Co&gt;</p>"), true, "the business name is escaped in the email");
+    useBusinessName("");
+    const n = buildMessages(r, "2026-10-06");
+    eq([n.sms.startsWith("Hi Sarah, Guy here - thanks"), n.text.endsWith("Thank you!\nGuy"), n.html.includes("<p>Thank you!<br>Guy</p>")], [true, true, true], "no business name: the lines stay clean");
+    useBusinessName("Acme"); useTemplates({ templates: { reviewSms: "{hi}, it's {technician} from {business_name}: {review_link}" } });
+    eq(buildMessages(r, "2026-10-06").sms, "Hi Sarah, it's Guy from Acme: https://g.page/r/x/review", "a template with {business_name} is filled");
+    useTemplates({}); useBusinessName("The Guys Service Group");
+    useReviewSettings({ reviews: { links: { Aircon: TODAY_LINKS.Aircon } } });
+    eq([reviewFor("Ducted aircon"), reviewFor("Chimney")], [REVIEW.aircon, null], "only Aircon saved: a ducted job gets Aircon's link, a chimney job none");
     useReviewSettings({});
+    const db = fakeDb({ contacts: [card("c1", "Sarah Smith", "0412 345 678")], jobs: [job("j1", "2701", { contact_id: "c1" })] });
+    eq((await askForReview(db, "j1", "Ron", TUE_1000)).reason, "unknown_job_type", "no links saved at all: nobody can be asked (no built-in links)");
+    useBusinessName(""); useReviewSettings({});
+    const ldb = fakeDb(); ldb.T.settings[0].company_name = "Acme Plumbing";
+    await loadTemplates(ldb);
+    eq([buildMessages(r, "2026-10-06").sms.startsWith("Hi Sarah, Guy from Acme Plumbing here"), reviewFor("Aircon")], [true, REVIEW.aircon], "loadTemplates reads the business name and the links from the settings row");
+    // A settings read that fails (supabase-js answers { data: null, error } without throwing) is not "nothing saved":
+    // nobody is asked, no lasting skip is written, nothing waiting is sent; the next run (settings readable) asks as usual.
+    {
+      const bad = fakeDb({ contacts: [card("c1", "Sarah Smith", "0412 345 678")], jobs: [job("j1", "2701", { contact_id: "c1" })] });
+      bad.T.settings[0].review_requests_auto = true;
+      bad.T.review_requests.push({ id: "w1", source: "manual", status: "waiting", invoice_number: "2690", job_date: "2026-10-06", job_type: "Aircon", phone: "+61412345678", first_name: "Sarah", review_link: TODAY_LINKS.Aircon.link, send_after: "2026-10-06T00:00:00Z" });
+      const failing: any = { T: bad.T, from: (t: string) => t === "settings" ? { select: () => ({ limit: async () => ({ data: null, error: { message: "timeout" } }) }) } : bad.from(t) };
+      texts.length = 0;
+      await loadTemplates(failing);
+      const o = await handle(bad, [], TUE_1000);
+      eq([o.settings_unread, o.queued, o.skipped, o.sent, bad.T.review_requests.length, bad.T.review_requests[0].status, texts.length], [true, 0, 0, 0, 1, "waiting", 0], "settings unreadable: nobody asked, no skip written, nothing sent");
+      eq((await askForReview(bad, "j1", "Ron", TUE_1000)).reason, "settings_unread", "by hand too: a clear 'try again', never 'unknown job type'");
+      await loadTemplates(bad);
+      const o2 = await handle(bad, [], TUE_1000);
+      eq([o2.settings_unread, bad.T.review_requests.find((x: any) => x.invoice_number === "2701")?.status], [undefined, "sent"], "the next run with the settings readable asks as usual");
+    }
+    useReviewSettings(TODAY); useBusinessName("The Guys Service Group");
+    const fs: any = await import("node:fs");
+    const code = String(fs.readFileSync("index.ts", "utf8")).split("\n").filter((l: string) => !/^\s*\/\//.test(l)).join("\n");
+    eq(["The Guys", "g.page/r/", "writereview", "Enjoy the"].filter((w) => code.includes(w)), [], "no business name, review link or thank-you line in the code");
+  }
+
+  // ── the business's time zone (Settings → Region and format, T1.2) ──
+  {
+    useReviewSettings({ region: { timeZone: "America/Chicago" } });
+    eq([inSendWindow(Date.parse("2026-10-14T13:30:00Z")), inSendWindow(Date.parse("2026-10-14T12:30:00Z"))], [true, false], "Chicago: 08:30 inside the sending hours, 07:30 outside");
+    eq(new Date(sendAt(Date.parse("2026-10-14T12:30:00Z"))).toISOString(), "2026-10-14T15:00:00.000Z", "Chicago: a 07:30 request goes at 10:00 Chicago time");
+    eq(new Date(sendAt(Date.parse("2026-10-15T01:30:00Z"))).toISOString(), "2026-10-15T15:00:00.000Z", "Chicago: a 20:30 request goes at 10:00 the next Chicago morning");
+    useReviewSettings({});
+    eq(inSendWindow(Date.parse("2026-10-14T13:30:00Z")), false, "nothing saved: Sydney again (00:30 there)");
   }
 
   console.log(`review-requests: ${pass} passed, ${fail} failed`);

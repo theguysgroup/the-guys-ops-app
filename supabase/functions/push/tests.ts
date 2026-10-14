@@ -86,7 +86,11 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   eq((await handle(db, { step: "nope" }, OFEK)).status, 400, "unknown step");
 
   // scan: the news switched on in Settings → Notifications, each sent once
-  eq([sydParts(Date.parse("2026-10-12T03:30:00Z")).day, sydParts(Date.parse("2026-10-12T03:30:00Z")).hour, shiftDay("2026-10-01", -7)], ["2026-10-12", 14, "2026-09-24"], "scan helpers: Sydney time (AEDT) and day shifts");
+  const SYD = REGION_DEFAULTS.timeZone;
+  eq([bizParts(Date.parse("2026-10-12T03:30:00Z"), SYD).day, bizParts(Date.parse("2026-10-12T03:30:00Z"), SYD).hour, shiftDay("2026-10-01", -7)], ["2026-10-12", 14, "2026-09-24"], "scan helpers: Sydney time (AEDT) and day shifts");
+  eq([bizParts(Date.parse("2026-10-12T03:30:00Z"), "America/Chicago").day, bizParts(Date.parse("2026-10-12T03:30:00Z"), "America/Chicago").hour], ["2026-10-11", 22], "scan helpers: the same moment in Chicago");
+  eq([unpaidPayload({ id: "j", customer_name: "Jo", amount: 480, date: "2026-10-05" }, { unpaidDays: 7 }).body, unpaidPayload({ id: "j", customer_name: "Jo", amount: 480, date: "2026-10-05" }, { unpaidDays: 7 }, { region: { currency: "GBP" } }).body],
+    ["$480 from 2026-10-05. Time to chase it.", "£480 from 2026-10-05. Time to chase it."], "unpaid: the amount as before, or in the business's currency");
   const NOW = Date.parse("2026-10-12T03:30:00Z");   // Monday 12 Oct, 14:30 Sydney
   const sdb = fakeDb({
     profiles: [OFEK, NOAM, GUY, { id: "u-ron", role: "va", full_name: "Ron" }],
@@ -117,6 +121,18 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   eq([(await scan(sdb, NOW + 60000)).busy, sent.length], [true, 0], "scan: a second call in the same window does nothing");
   const r3 = await scan(sdb, NOW + 9 * 60000);
   eq([r3.sent, r3.skipped > 0, sent.length], [0, true, 0], "scan: the next window sends nothing again (each piece of news once)");
+
+  // The business's day (Region and format): at 14:30 Monday in Sydney it is still Sunday 11 Oct in Chicago, so the job of
+  // 4 Oct (not 5 Oct) turns a week unpaid; the amount is in the business's currency.
+  const cdb = fakeDb({
+    profiles: [OFEK], push_subscriptions: [{ id: "p1", user_id: "u-ofek", endpoint: "https://push/ofek", p256dh: "k", auth: "a" }],
+    settings: [{ id: 1, catalog: { region: { timeZone: "America/Chicago", currency: "GBP" }, notify: { unpaid: { on: true } } } }],
+    contacts: [], calls: [], employees: [], push_sent: [],
+    jobs: [{ id: "j1", customer_name: "Jo", amount: 450, date: "2026-10-05", payment_status: "Unpaid" }, { id: "j4", customer_name: "Four", amount: 120, date: "2026-10-04", payment_status: "Unpaid" }],
+  });
+  sent.length = 0;
+  await scan(cdb, NOW);
+  eq(sent.map((x) => `${x.msg.title} | ${x.msg.body}`), ["Unpaid for a week: Four | £120 from 2026-10-04. Time to chase it."], "scan: the business's day and currency (Chicago, pounds)");
 
   // The technician invoice notification can be switched off in Settings (13 Oct).
   db.T.settings = [{ id: 1, catalog: { notify: { invoice: { on: false } } } }];

@@ -6,8 +6,8 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 
 self.addEventListener('push', (event) => {
   let d = {};
-  try { d = event.data ? event.data.json() : {}; } catch (e) { d = { title: 'The Guys', body: event.data ? event.data.text() : '' }; }
-  event.waitUntil(self.registration.showNotification(d.title || 'The Guys', {
+  try { d = event.data ? event.data.json() : {}; } catch (e) { d = { title: 'OPS Service', body: event.data ? event.data.text() : '' }; }
+  event.waitUntil(self.registration.showNotification(d.title || 'OPS Service', {
     body: d.body || '',
     icon: 'icon-192.png',
     badge: 'icon-192.png',
