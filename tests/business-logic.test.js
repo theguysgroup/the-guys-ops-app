@@ -107,6 +107,22 @@ const DECLS = [
   // Settings → Data: Export to Excel (14 Oct)
   'pill', 'jsStr', 'EXPORT_AREAS', 'exportDefaultSelection', 'EXPORT_SECRET_COL', 'EXPORT_SENS_COL', 'exportHiddenColumn', 'EXPORT_UPPER_WORDS', 'exportHeader', 'EXPORT_CELL_MAX', 'EXPORT_FILE_TEXT', 'exportCell',
   'exportActivityText', 'exportSheetAoa', 'exportColWidths', 'exportSheetName', 'settingsExportRows', 'payRateRows', 'ownerSalaryRows', 'countWord', 'exportCountText', 'exportFileName', 'exportSummaryHtml', 'exportFetchAll', 'exportCardHtml',
+  // the automation engine's "look now" from the app (settings round 2, phase 4)
+  'automationEventBody',
+  // Automations: the flow view (phase 4, group J)
+  'ICONS', 'ico', 'FLOW_MAX_STEPS_DEFAULT', 'FLOW_MAX_STEPS_CEILING', 'FLOW_STEP_KINDS', 'flowRegs', 'flowSafe', 'flowLc', 'flowCap', 'flowLocked', 'flowStepId', 'flowCanMove', 'flowMove',
+  'flowInsert', 'flowRemove', 'flowDropIndex', 'flowFormSlots', 'flowIsFormShaped', 'flowCompact', 'flowMaxSteps', 'flowWaitPhrase', 'flowClock', 'flowDaysText', 'flowOfficeWindow', 'flowWindowPhrase',
+  'flowValueLabel', 'flowCondPhrase', 'flowIfPhrase', 'flowActionPhrase', 'flowTriggerPhrase', 'flowStepSummary', 'flowSentence', 'flowStepLook', 'flowAvailable', 'flowProblems', 'flowAddMenuItems',
+  'flowViewPref', 'setFlowViewPref', 'flowMoveLabel', 'flowViewToggleHtml', 'flowOpenInnerHtml', 'flowMsgHtml', 'flowCanvasHtml', 'flowMoreStepsHtml', 'flowFormSetSlot', 'flowFormSetAction',
+  // Automations builder (14 Oct, phase 4)
+  'chatRulesApp', 'notifyRulesApp', 'notifyCardsNow', 'setRows', 'setToggle',
+  'AUTO_TABLE', 'AUTO_BUSINESS_ID', 'AUTO_TRIGGERS', 'AUTO_MIRROR_TRIGGERS', 'AUTO_CONDS', 'AUTO_OP_WORDS', 'AUTO_ACTIONS', 'AUTO_FIELDS', 'AUTO_WAIT_UNITS', 'AUTO_DUE', 'AUTO_LIMITS', 'AUTO_PUSH_DEFAULT', 'AUTO_TPL_MIRROR',
+  'autoTrig', 'autoValueLabel', 'autoCondValues', 'autoCondFits', 'autoFieldsFor', 'autoDefaultPush', 'autoHm', 'autoHhmm', 'autoAndList', 'autoIsCustomerStep', 'autoHasCustomer', 'autoAudience', 'autoCleanStep', 'autoNormalize',
+  'autoPeopleText', 'autoTaskWho', 'autoDueText', 'autoHoursShort', 'autoDoShort', 'autoFlowChips', 'autoWhenShort', 'autoSentence', 'autoBadBlanks', 'autoStepIssues', 'autoStepProblems', 'autoProblems', 'autoTriggersOn', 'autoMatches', 'autoTplUsers', 'autoPreviewHtml',
+  'autoReadyRows', 'autoGatePill', 'autoStatusPill', 'autoRowHtml', 'autoListsHtml',
+  // the 14 Oct review: safety settings, opt-outs, "Try it", versions, ready-mades off the list
+  'AUTO_SAFETY_DEFAULTS', 'AUTO_EMAIL_FOOTER_DEFAULT', 'AUTO_TIMEZONES', 'autoSafetyNorm', 'autoSafetyProblems', 'autoSafetyPatch', 'autoTzLabel', 'autoSafetyLine', 'autoEmailSigner',
+  'autoCustomerChannels', 'autoNewVersion', 'autoTryRecords', 'autoTryWhen', 'autoTryResultHtml', 'autoRemovedHtml', 'optOutKeys', 'optOutRowsFor', 'optOutInserts', 'optOutControlHtml',
 ];
 
 function extractDecl(source, name){
@@ -1921,6 +1937,185 @@ function testPeopleTabs(sb){
   assertEqual((html2.match(/db\.commissionRates\.set\(/g) || []).length, 2, 'commission rates are written in two places only: one rate on the Pay tab, and the move on a rename');
 }
 
+// The app tells the automation engine "look now" only for what it saves itself: a stage move, a lead made by hand, a new job.
+function testAutomationEventBody(sb){
+  console.log('\nAutomation engine: the app\'s "look now" (phase 4)');
+  const B = sb.automationEventBody;
+  assertEqual(B('stage', 'abc'), { step:'event', type:'stage', id:'abc' }, 'a stage move');
+  assertEqual([B('newLead', ' c1 ').id, B('jobClosed', 42)], ['c1', { step:'event', type:'jobClosed', id:'42' }], 'a new lead and a new job (the id as text)');
+  assertEqual([B('rain', 'abc'), B('stage', ''), B('stage', null), B('stage', '  ')], [null, null, null, null], 'an unknown event or no id: nothing');
+  assertEqual([B('missedCall', 'k1'), B('chat', 's1')], [null, null], 'missed calls and chats are never sent by the app (the timer finds them)');
+}
+// Automations: the flow view (phase 4, group J). Every list comes from a registry fixture and a catalog fixture, the
+// same way the builder passes its own (ctx.registry) — nothing about one business is written into the flow code.
+function flowFixture(){
+  const REG = {
+    triggers: {
+      stage: { label: 'A lead moves to a stage', icon: 'kanban', customer: true, phrase: t => `a lead moves to ${t.params && t.params.stage}` },
+      newLead: { label: 'A new lead comes in', icon: 'userPlus', customer: true },
+      shift: { label: 'A team member starts a shift', customer: false },
+    },
+    conds: {
+      service: { label: 'Service', valueSource: 'catalog.services', appliesTo: ['stage', 'newLead'] },
+      tag: { label: 'Tag', valueSource: 'catalog.tags', appliesTo: ['stage', 'newLead', 'shift'] },
+      has_email: { label: 'Has an email address', appliesTo: ['stage', 'newLead'] },
+      stage_unchanged: { label: 'Still in the stage that started it', fits: t => !!t && t.type==='stage' },
+    },
+    actions: {
+      push: { label: 'A phone notification to team members', icon: 'bell', audience: 'team' },
+      task: { label: 'A task in the app', icon: 'tasks', audience: 'team', make: () => ({ title: 'Call them back' }) },
+      email: { label: 'An email to the customer', icon: 'mail', audience: 'customer', make: () => ({ subject: '', body: '' }) },
+      text: { label: 'A text message to the customer', icon: 'message', audience: 'customer',
+        available: ctx => ctx.phoneLive ? { ok: true } : { ok: false, why: 'Needs the business phone (Twilio)' } },
+    },
+  };
+  const ctx = { registry: REG, phoneLive: false, sample: { first_name: 'Sam' },
+    catalog: { services: [{ key: 'Aircon', label: 'Aircon' }], tags: [{ tag: 'VIP' }], stages: [{ key: 'Quoted', label: 'Quoted' }] } };
+  return { REG, ctx };
+}
+function testFlowView(sb){
+  console.log('\nAutomations: the flow view (phase 4, group J)');
+  const J = x => JSON.stringify(x), ids = list => list.map(s => s.id);
+  const { REG, ctx } = flowFixture();
+  const W = (id, n) => ({ id, kind: 'wait', n: n || 1, unit: 'days' }), D = (id, type) => ({ id, kind: 'action', type: type || 'email' });
+  const WIN = id => ({ id, kind: 'window', days: [1, 2, 3, 4, 5], from: '09:00', until: '17:00', outside: 'next' }), IF = (id, conds) => ({ id, kind: 'if', match: 'all', conds: conds || [] });
+
+  // ids and the pure list moves
+  const idIn = [{ id: 's1' }, { id: 's4' }, { id: 'x' }, { id: 's10a' }], idBefore = J(idIn);
+  assertEqual([sb.flowStepId([]), sb.flowStepId(idIn), J(idIn)===idBefore], ['s1', 's5', true], 'flowStepId: s1 for none; the largest sN + 1 (ignores x and s10a); the input untouched');
+  const abcd = ['a', 'b', 'c', 'd'].map(id => ({ id, kind: 'wait', n: 1, unit: 'days' })), abcdJ = J(abcd);
+  const mv = (f, t, list) => ids(sb.flowMove(list || abcd, f, t));
+  assertEqual([mv(0, 2), mv(3, 0), mv(1, 1), mv(-1, 2), mv(0, 4)], [['b', 'c', 'a', 'd'], ['d', 'a', 'b', 'c'], ['a', 'b', 'c', 'd'], ['a', 'b', 'c', 'd'], ['a', 'b', 'c', 'd']], 'flowMove: 0→2, 3→0; the same place, or out of range, leaves the order');
+  const locked = abcd.map((s, i) => i===0 ? { ...s, lock: true } : s);
+  assertEqual([mv(0, 2, locked), sb.flowMove(abcd, 0, 2)!==abcd, J(abcd)===abcdJ], [['a', 'b', 'c', 'd'], true, true], 'flowMove: a locked step stays; the result is a new array; the input is never changed');
+  assertEqual([sb.flowCanMove(abcd, 0, 2), sb.flowCanMove(locked, 0, 2), sb.flowCanMove(abcd, 1, 1), sb.flowCanMove(abcd, 0.5, 2), sb.flowCanMove(abcd, 0, '2')], [true, false, false, false, false], 'flowCanMove: only an unlocked, in-range, real move');
+  assertEqual(ids(sb.flowMove([{ id: 'u', kind: 'later' }, ...abcd], 0, 2))[0], 'u', 'a step of a kind this app version does not know can\'t be moved (kept as it is)');
+  const ins = sb.flowInsert(abcd, -3, { kind: 'wait', n: 2, unit: 'hours' });
+  assertEqual([ids(ins)[0], ins[0].id, ids(sb.flowInsert(abcd, 99, { id: 'z', kind: 'if', conds: [] }))[4], J(abcd)===abcdJ], ['s1', 's1', 'z', true], 'flowInsert: clamps to the start / the end; a new step gets the next free id, one with an id keeps it; the input untouched');
+  const rm = sb.flowRemove(abcd, 1), rmL = sb.flowRemove(locked, 0), rmO = sb.flowRemove(abcd, 9);
+  assertEqual([ids(rm.steps), rm.removed.id, rmL.removed, ids(rmL.steps), rmO.removed, J(abcd)===abcdJ], [['a', 'c', 'd'], 'b', null, ['a', 'b', 'c', 'd'], null, true], 'flowRemove: the middle step comes out and is returned; a locked or missing one is refused');
+  const M = [10, 30, 50, 70];
+  assertEqual([sb.flowDropIndex(M, 35, 0), sb.flowDropIndex(M, 5, 0), sb.flowDropIndex(M, 100, 0), sb.flowDropIndex(M, 25, 3), sb.flowDropIndex(M, 50, 2)], [1, 0, 3, 1, 2], 'flowDropIndex: counts the other blocks\' midpoints above the dragged one');
+
+  // what the form can show
+  const S = (...kinds) => kinds.map((k, i) => ({ id: 's' + (i + 1), kind: k }));
+  assertEqual(sb.flowFormSlots(S('wait', 'window', 'if', 'action', 'action')), { wait: 0, window: 1, if: 2, doFrom: 3, doTo: 4, extra: false }, 'form slots: wait, window, condition, then two Do steps — all in the form');
+  const fi = sb.flowFormSlots(S('if', 'wait', 'action'));
+  assertEqual([fi.wait, fi.if, fi.extra], [1, 0, false], 'form slots: a condition before the wait is still form-shaped');
+  const wdwd = sb.flowFormSlots(S('wait', 'action', 'wait', 'action'));
+  assertEqual([wdwd.doFrom, wdwd.doTo, wdwd.extra, sb.flowIsFormShaped(S('wait', 'action', 'wait', 'action'))], [1, 1, true, false], 'form slots: wait, do, wait, do has more than the form can show');
+  assertEqual([sb.flowFormSlots(S('wait', 'wait', 'action')).extra, sb.flowFormSlots([]), sb.flowFormSlots(S('action'))], [true, { wait: -1, window: -1, if: -1, doFrom: -1, doTo: -1, extra: false }, { wait: -1, window: -1, if: -1, doFrom: 0, doTo: 0, extra: false }], 'form slots: two waits before the first Do → extra; none; a single Do');
+  assertEqual(sb.flowFormSlots([{ id: 'u', kind: 'later' }, D('s2')]).extra, true, 'form slots: a step the app does not know is never hidden by the form (it shows under "More steps")');
+  const comp = [IF('a'), W('b'), { ...IF('c'), lock: true }, IF('d', [{ field: 'has_email', op: 'true' }]), { id: 'e', kind: 'later' }], compJ = J(comp);
+  assertEqual([ids(sb.flowCompact(comp)), J(comp)===compJ], [['b', 'c', 'd', 'e'], true], 'flowCompact (on Save): an empty "Only if" goes; a locked one, the rest and unknown kinds stay, in order');
+  assertEqual([undefined, 5, 0, 500, 'abc', 25].map(v => sb.flowMaxSteps({ maxSteps: v })), [20, 5, 1, 30, 20, 25], 'max steps: a setting (default 20), between 1 and the database\'s 30');
+
+  // problems
+  const has = (list, t) => list.some(p => p.text===t);
+  assertEqual([has(sb.flowProblems({ steps: [D('s1')] }, ctx), 'Pick what starts it.'), has(sb.flowProblems({ trigger: { type: 'newLead' }, steps: [] }, ctx), 'Add at least one Do step.')], [true, true], 'problems: nothing starts it; no Do step');
+  const last = sb.flowProblems({ trigger: { type: 'newLead' }, steps: [D('s1'), W('s2')] }, ctx).find(p => p.id==='s2');
+  assertEqual(last && last.text, 'Step 2: The last step does nothing. End with a Do step, or remove it.', 'problems: a last step that does nothing is named by its place');
+  const many = Array.from({ length: 21 }, (_, i) => D('s' + (i + 1), 'push'));
+  assertEqual([has(sb.flowProblems({ trigger: { type: 'newLead' }, steps: many }, ctx), 'At most 20 steps.'), has(sb.flowProblems({ trigger: { type: 'newLead' }, steps: many }, { ...ctx, maxSteps: 25 }), 'At most 25 steps.')], [true, false], 'problems: more steps than the business allows');
+  assertEqual(sb.flowProblems({ trigger: { type: 'shift' }, steps: [D('s1', 'email')] }, ctx).map(p => p.text), ['Step 1: There is no customer to send to for this start.'], 'problems: a customer message under a start with no customer');
+  assertEqual(sb.flowProblems({ trigger: { type: 'newLead' }, steps: [IF('s1', [{ field: 'stage_unchanged', op: 'true' }]), D('s2', 'push')] }, ctx).map(p => p.text), ['Step 1: This condition doesn\'t fit what starts it.'], 'problems: a condition that does not fit the start (the registry decides)');
+  assertEqual(sb.flowProblems({ trigger: { type: 'stage', params: { stage: 'Quoted' } }, steps: [W('s1', 3), D('s2', 'email')] }, ctx), [], 'problems: a valid wait + email under a customer start: none');
+
+  // the "+" menu comes from the registry
+  const menu = (type, c) => sb.flowAddMenuItems({ trigger: type ? { type } : null, steps: [] }, c || ctx);
+  const byA = (list, a) => list.find(x => x.action===a);
+  const team = menu('shift');
+  assertEqual([team.slice(0, 3).map(x => x.kind), byA(team, 'email').disabled, byA(team, 'email').why, byA(team, 'push').disabled], [['wait', 'window', 'if'], true, 'There is no customer for this start', false], '+ menu: wait, window, condition; under a team-only start every customer action is off, with why');
+  const t0 = byA(menu('newLead'), 'text'), t1 = byA(menu('newLead', { ...ctx, phoneLive: true }), 'text');
+  assertEqual([t0.disabled, /business phone/.test(t0.why), t1.disabled], [true, true, false], '+ menu: a text needs the business phone (Twilio); on once it is live');
+  REG.actions.slack = { label: 'A message to a team chat', icon: 'chat', audience: 'team' };
+  assertEqual([byA(menu('newLead'), 'slack').label, menu('newLead').length], ['Do: A message to a team chat', 8], '+ menu: one more action in the registry = one more line, no flow code changed');
+  delete REG.actions.slack;
+
+  // phrases: registries + the business's catalog, never fixed names
+  const def = { trigger: { type: 'stage', params: { stage: 'Quoted' } }, steps: [W('s1', 3), WIN('s2'), IF('s3', [{ field: 'service', op: 'is', v: 'Aircon' }]),
+    { id: 's4', kind: 'action', type: 'email', subject: 'Quote follow-up', body: '{first_name}, any questions about the quote?' }, W('s5', 2), { id: 's6', kind: 'action', type: 'task', title: 'Call them' }] };
+  const sentence = 'When a lead moves to Quoted, then wait 3 days, then only Mon–Fri, 9 am–5 pm (otherwise wait), then only if service is Aircon, then an email to the customer: Quote follow-up, then wait 2 days, then a task in the app: Call them.';
+  assertEqual(sb.flowSentence(def, ctx), sentence, 'the sentence: When …, then each step in order, ending with a full stop');
+  const renamed = { ...ctx, catalog: { ...ctx.catalog, services: [{ key: 'Aircon', label: 'Air conditioning' }] } };
+  assertEqual(sb.flowSentence(def, renamed).includes('only if service is Air conditioning'), true, 'the service\'s name comes from the business\'s own catalog (renamed there → renamed here)');
+  assertEqual([sb.flowStepSummary(W('x', 1), def, ctx), sb.flowStepSummary({ id: 'u', kind: 'later' }, def, ctx), sb.flowStepSummary(IF('x'), def, ctx)], ['Wait 1 day', 'Unknown step', 'Only if … (no condition yet)'], 'summaries: one day; an unknown kind; an empty condition');
+  assertEqual([sb.flowWindowPhrase({ days: [0, 1, 2, 3, 4, 5, 6], from: '08:00', until: '24:00', outside: 'skip' }), sb.flowWindowPhrase({ mode: 'office', outside: 'at', at: '08:30' }), sb.flowDaysText([1, 3, 5]), sb.flowDaysText([6, 0])],
+    ['Only every day, 8 am–midnight (otherwise stop)', 'Only in office hours (otherwise at 8:30 am on the next allowed day)', 'Mon, Wed, Fri', 'Sat, Sun'], 'windows in plain words');
+  assertEqual(sb.flowMoveLabel('Wait 3 days', 2, 6), 'Moved "Wait 3 days" to step 3 of 6.', 'the screen-reader line after a move');
+
+  // the canvas
+  const four = { trigger: { type: 'newLead' }, steps: [W('s1'), WIN('s2'), IF('s3', [{ field: 'has_email', op: 'true' }]), { id: 's4', kind: 'action', type: 'email', subject: 'Hello', body: '{first_name}, thanks!' }] };
+  const html = sb.flowCanvasHtml(four, ctx, { sel: 's2' });
+  const count = (h, re) => (h.match(re) || []).length;
+  assertEqual([count(html, /class="flow-block/g), count(html, /class="flow-add"/g), count(html, /class="flow-grip"/g)], [5, 5, 4], 'canvas: 4 steps + the start = 5 blocks, 5 "+", 4 handles');
+  const block = id => html.slice(html.indexOf(`data-step="${id}"`), html.indexOf('</li>', html.indexOf(`data-step="${id}"`)));
+  assertEqual([/aria-label="Move up" title="Move up" disabled/.test(block('s1')), /aria-label="Move down" title="Move down" disabled/.test(block('s4')), /aria-label="Move down" title="Move down" disabled/.test(block('s1'))], [true, true, false], 'canvas: the first can\'t go up, the last can\'t go down');
+  assertEqual([/flow-block k-window sel"/.test(html), /aria-expanded="true" aria-controls="flow-panel" onclick="flowSelect\('s2'\)"/.test(html), count(html, /aria-expanded="true"/g)], [true, true, 1], 'canvas: the chosen step is marked and its button says it is open');
+  assertEqual(/<div class="flow-msg"[^>]*><b>Hello<\/b> · Sam, thanks!<\/div>/.test(html), true, 'canvas: a Do step carries its message, filled with sample words');
+  assertEqual(sb.flowCanvasHtml({ trigger: { type: 'newLead' }, steps: [{ id: 't1', kind: 'action', type: 'task', title: 'Call them' }] }, ctx, {}).includes('flow-msg'), false, 'canvas: a Do step with no words of its own has no message card (its title is already in the block)');
+  assertEqual([sb.flowMsgHtml({ id: 'm1', kind: 'action', type: 'email', subject: 'For {first_name}', body: 'Hi <b>{first_name}</b>' }, ctx), sb.flowMsgHtml(W('w1'), ctx), sb.flowMsgHtml({ id: "q'1", kind: 'action', type: 'email', body: 'x' }, ctx).includes("flowSelect('q\\'1')")],
+    ['<div class="flow-msg" onclick="flowSelect(\'m1\')"><b>For Sam</b> · Hi &lt;b&gt;Sam&lt;/b&gt;</div>', '', true], 'message card: its name and words are filled with sample values and escaped; none on a non-Do step');
+  assertEqual(sb.flowOpenInnerHtml('Wait', 'Wait <3> days', true).replace(/<span class="pill[\s\S]*$/, ''), '<small>Wait</small><b>Wait &lt;3&gt; days</b><span class="flow-warn">', 'a block\'s words are escaped; "Needs a look" when Save would object');
+  const atMax = sb.flowCanvasHtml(four, { ...ctx, maxSteps: 4 }, {});
+  assertEqual([count(atMax, /class="flow-add"[^>]* disabled title="At most 4 steps"/g)], [5], 'canvas: at the business\'s maximum every "+" is off');
+  const mir = sb.flowCanvasHtml(four, ctx, { locked: true });
+  assertEqual([count(mir, /class="flow-grip"/g), count(mir, /class="flow-add"/g), count(mir, /Delete this step/g), count(mir, /Move up/g), count(mir, /class="flow-lock"/g)], [0, 0, 0, 0, 4], 'canvas: a ready-made mirror has no handle, no "+", no bin and no moves (its order is fixed)');
+  const tail = { trigger: { type: 'newLead' }, steps: [D('s1', 'push'), W('s2')] };
+  assertEqual([sb.flowCanvasHtml(tail, ctx, {}).includes('Needs a look'), sb.flowCanvasHtml(tail, ctx, { locked: true }).includes('Needs a look')], [true, false], 'canvas: "Needs a look" marks a step Save would object to; never on a ready-made mirror (it runs on its existing code)');
+  const evil = '"><img src=x onerror=alert(1)>';
+  const xs = sb.flowCanvasHtml({ trigger: { type: 'newLead' }, steps: [IF("a'b", [{ field: 'tag', op: 'has', v: evil }]), D('s2', 'push')] }, { ...ctx, catalog: { ...ctx.catalog, tags: [{ tag: evil }] } }, {});
+  assertEqual([xs.includes('&lt;img'), xs.includes('<img'), xs.includes("flowSelect('a\\'b')"), xs.includes("flowSelect('a'b')")], [true, false, true, false], 'canvas: a tag name with HTML is shown as text; a step id with a quote is escaped in the handlers');
+  assertEqual(/#[0-9a-f]{3,6}\b|rgb\(/i.test(html.replace(/<svg[\s\S]*?<\/svg>/g, '')), false, 'canvas: no colour literal (tokens only)');
+  const inl = sb.flowCanvasHtml(four, ctx, { sel: 's3', inline: true, panelHtml: '<section id="flow-panel">P</section>' });
+  assertEqual([count(inl, /flow-inline-panel/g), inl.indexOf('flow-inline-panel') > inl.indexOf('data-step="s3"') && inl.indexOf('flow-inline-panel') < inl.indexOf('data-step="s4"')], [1, true], 'canvas on a phone: the panel opens under the chosen block');
+
+  // nothing on the render path redraws (the phase-3 freeze)
+  let renders = 0, edRenders = 0; sb.render = () => { renders++; }; sb.autoEdRender = () => { edRenders++; };
+  for (let k = 0; k < 3; k++) { sb.flowCanvasHtml(def, ctx, { sel: 's1' }); sb.flowSentence(def, ctx); sb.flowProblems(def, ctx); sb.flowFormSlots(def.steps); sb.flowMoreStepsHtml(def, ctx); }
+  assertEqual([renders, edRenders], [0, 0], 'drawing the flow view never asks for a redraw (no loader, nothing async)');
+
+  // the viewer's choice of view
+  sb.localStorage = { getItem(){ throw new Error('blocked'); }, setItem(){ throw new Error('blocked'); } };
+  let threw = false; try { sb.setFlowViewPref('flow'); } catch (e) { threw = true; }
+  const pref = [sb.flowViewPref(), threw];
+  const store = {}; sb.localStorage = { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = v; } };
+  sb.setFlowViewPref('flow'); pref.push(sb.flowViewPref()); store['ops.autoEditorView'] = 'xyz'; pref.push(sb.flowViewPref());
+  assertEqual(pref, ['form', false, 'flow', 'form'], 'the view choice: blocked storage → Form, no error; Flow is remembered; anything else → Form');
+  const tog = sb.flowViewToggleHtml('flow');
+  assertEqual([/role="radiogroup" aria-label="How to edit"/.test(tog), /aria-checked="true" tabindex="0" onclick="flowSetView\('flow'\)">Flow/.test(tog)], [true, true], 'the Form / Flow switch is a radio group');
+
+  // the form writes into the same steps (round trip)
+  const formDef = [W('s1', 3), IF('s2', [{ field: 'has_email', op: 'true' }]), D('s3', 'email')];
+  const rightAway = sb.flowFormSetSlot(formDef, 'wait', null, ctx), after = sb.flowFormSetSlot(rightAway, 'wait', { n: 3, unit: 'days' }, ctx);
+  assertEqual([ids(rightAway), [after[0].kind, after[0].n, after[0].unit, after[0].id], J(after.slice(1))===J(formDef.slice(1)), after.length], [['s2', 's3'], ['wait', 3, 'days', 's4'], true, 3], 'form: "Right away" removes the wait, "After 3 days" puts it back first (only its id is new)');
+  const win = sb.flowFormSetSlot(formDef, 'window', { outside: 'skip' }, { ...ctx, office: { days: { 1: { from: 540, to: 1020 }, 2: { from: 540, to: 1020 } } } });
+  assertEqual([win[1].kind, win[1].days, win[1].from, win[1].until, win[1].outside], ['window', [1, 2], '09:00', '17:00', 'skip'], 'form: unticking "Any day, any time" adds a window after the wait, from the business\'s office hours');
+  const noIf = [W('s1'), D('s2')];
+  assertEqual([ids(sb.flowFormSetSlot(noIf, 'if', { conds: [] }, ctx)), sb.flowFormSetSlot(noIf, 'if', { conds: [{ field: 'has_email', op: 'true' }] }, ctx).map(s => s.kind)], [['s1', 's2'], ['wait', 'if', 'action']], 'form: the first condition adds an "Only if" just before the Do steps');
+  const withTask = sb.flowFormSetAction(formDef, 'task', true, ctx, { type: 'newLead' });
+  assertEqual([withTask.map(s => s.type || s.kind), withTask[2].title, ids(sb.flowFormSetAction(withTask, 'email', false, ctx))], [['wait', 'if', 'task', 'email'], 'Call them back', ['s1', 's2', 's4']], 'form: a channel switch adds its Do step in the registry\'s order (a task before an email), and removes it');
+  const push = sb.flowFormSetAction(formDef, 'push', true, ctx, { type: 'newLead' });
+  assertEqual(push.map(s => s.type || s.kind), ['wait', 'if', 'push', 'email'], 'form: a notification goes before the email (registry order)');
+  const seq = [W('s1'), D('s2', 'email'), W('s3', 2), D('s4', 'task')];
+  assertEqual([ids(sb.flowFormSetSlot(seq, 'wait', null, ctx)), ids(sb.flowFormSetAction(seq, 'task', false, ctx))], [['s2', 's3', 's4'], ['s1', 's2', 's3', 's4']], 'form on a longer automation: only the first part changes (the later task stays)');
+  const more = sb.flowMoreStepsHtml({ trigger: { type: 'newLead' }, steps: seq }, ctx);
+  assertEqual([/More steps/.test(more), /<b>Step 3<\/b> Wait 2 days/.test(more), /<b>Step 4<\/b> A task in the app/.test(more), /Step 1/.test(more), /flowSetView\('flow'\)/.test(more), sb.flowMoreStepsHtml({ steps: formDef }, ctx)], [true, true, true, false, true, ''], '"More steps" lists every step the form can\'t show, with the way to Flow; nothing for a form-shaped one');
+  const made = sb.FLOW_STEP_KINDS.action.make(ctx, { type: 'newLead' }, 'email');
+  assertEqual([made.kind, made.type], ['action', 'email'], 'a new Do step is the engine\'s own shape (kind action + type)');
+
+  // the static rules of the flow view's code
+  const html0 = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html0.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const fns = [...script.matchAll(/function ((?:flow|setFlow)\w*)\(/g)].map(m => m[1]);
+  const bodyOf = n => extractDecl(script, n);
+  assertEqual(['pointermove', 'pointerup', 'pointercancel', 'keydown'].map(ev => bodyOf('flowDragStart').includes(`addEventListener('${ev}'`) && bodyOf('flowDragCleanup').includes(`removeEventListener('${ev}'`)), [true, true, true, true], 'drag: the four listeners go on at the start and all come off in the one cleanup');
+  assertEqual([/flowDragCleanup\(\)/.test(bodyOf('flowDragEnd')), /flowDragCleanup\(\)/.test(bodyOf('flowDragCancel'))], [true, true], 'drag: the end and the cancel both use that cleanup');
+  assertEqual(fns.filter(n => /\brender\(\)|\bdb\.|\bsb\.|fetch\(/.test(bodyOf(n))), [], 'no flow function redraws the whole app, touches the database or calls a server');
+  assertEqual([fns.length >= 40, /FLOW_DRAG/.test(bodyOf('renderKeepingInput'))], [true, true], 'live updates wait while a flow block is dragged');
+  assertEqual([/flowRefreshBlocks\(\)/.test(bodyOf('autoEdRefresh')), /autoEdRender|flowRedraw|\brender\(|focus\(/.test(bodyOf('flowRefreshBlocks'))], [true, false], 'typing in a panel updates the blocks in place (no redraw, no focus change)');
+  const css = html0.slice(html0.indexOf('/* flow view */'), html0.indexOf('/* /flow view */'));
+  assertEqual([css.length > 500, /#[0-9a-f]{3,6}\b|rgb\(/i.test(css)], [true, false], 'the flow view\'s CSS uses the theme tokens only');
+}
 function testSecurityFaceId(sb){
   console.log('\nSettings → Security: Face ID / fingerprint and the 30-minute lock (14 Oct)');
   const fnSrc = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'passkey', 'index.ts'), 'utf8');
@@ -2292,7 +2487,412 @@ testBranding(loadSandbox());
 testNotificationCards(loadSandbox());
 testConnectors(loadSandbox());
 testSecurityFaceId(loadSandbox());
+testAutomationEventBody(loadSandbox());
+testFlowView(loadSandbox());
+testAutomationsBuilder(loadSandbox());
+testAutomationsEditor();
+testAutomationsEditorKeys();
 
+// ── Automations: the BUILDER (settings round 2, phase 4, group I) ──
+// The builder's context, the way autoCtx() makes it from the business's settings (a fixture here: no business names).
+function autoFixtureCtx(sb, over){
+  const reg = { triggers: { ...sb.AUTO_TRIGGERS, ...sb.AUTO_MIRROR_TRIGGERS }, conds: sb.AUTO_CONDS, actions: sb.AUTO_ACTIONS };
+  const words = { my_q: '{hi}, any questions about the {service} quote?', my_amt: 'Paid {amount}?', my_empty: '' };
+  return { registry: reg, phoneLive: false, maxSteps: 20,
+    catalog: { services: [{ key: 'svcA', label: 'Window cleaning' }, { key: 'svcB', label: 'Gutters' }], stages: [{ key: 'New', label: 'New' }, { key: 'Quoted', label: 'Quote sent' }],
+      sources: [{ key: 'web', label: 'Website' }], tags: [{ key: 'VIP', tag: 'VIP', label: 'VIP' }] },
+    profiles: [{ id: 'p-own', name: 'Alex Owner', role: 'owner' }, { id: 'p-va', name: 'Kim Office', role: 'va' }],
+    employees: [{ id: 'e1', name: 'Kim Office' }],
+    sample: { hi: 'Hi Sarah', first_name: 'Sarah', name: 'Sarah Mitchell', service: 'window cleaning', brand: 'Brand', business_name: 'Biz', suburb: '2000', source: 'Website', stage: 'New', number: '0412 345 678', technician: 'Sam', amount: '$420', job_date: '2026-10-14', minutes: '15', automation: 'A' },
+    templateText: k => words[k] ?? sb.msgTemplateText(k), templateLabel: k => k, ...(over || {}) };
+}
+function testAutomationsBuilder(sb){
+  console.log('\nAutomations: the builder (phase 4, group I)');
+  const html0 = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html0.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const ctx = autoFixtureCtx(sb);
+  // registries: data only, no business names; every start a condition or blank names exists
+  const regSrc = ['AUTO_TRIGGERS', 'AUTO_MIRROR_TRIGGERS', 'AUTO_CONDS', 'AUTO_ACTIONS', 'AUTO_FIELDS', 'AUTO_PUSH_DEFAULT', 'AUTO_DUE', 'AUTO_OP_WORDS'].map(n => extractDecl(script, n)).join('\n');
+  assertEqual(['Aircon', 'Chimney', 'Pressure', 'Ron', 'Noam', 'Ofek', 'The Guys', '1300'].filter(w => regSrc.includes(w)), [], 'registries: no business, person or phone number is written in');
+  const trig = Object.keys(sb.AUTO_TRIGGERS);
+  assertEqual(Object.values(sb.AUTO_CONDS).flatMap(c => c.appliesTo || []).filter(t => !trig.includes(t)), [], 'registries: every start a condition is limited to exists');
+  assertEqual(Object.values(sb.AUTO_FIELDS).flatMap(f => Array.isArray(f.triggers) ? f.triggers : []).filter(t => !trig.includes(t)), [], 'registries: every start a blank is limited to exists');
+  // parity with the engine's registries (supabase/functions/automations): the same keys, limits and starts
+  const eng = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'automations', 'index.ts'), 'utf8');
+  const keysOf = name => { const at = eng.indexOf(`export const ${name}`), body = eng.slice(eng.indexOf('{', at), eng.indexOf('\n};', at)); return [...body.matchAll(/\n  (\w+): \{/g)].map(m => m[1]).sort(); };
+  assertEqual([Object.keys(sb.AUTO_TRIGGERS).sort(), Object.keys(sb.AUTO_CONDS).sort(), Object.keys(sb.AUTO_ACTIONS).sort(), Object.keys(sb.AUTO_FIELDS).sort()],
+    [keysOf('TRIGGERS'), keysOf('CONDITIONS'), keysOf('ACTIONS'), keysOf('MERGE_FIELDS')], 'registries: the same starts, conditions, actions and blanks as the engine');
+  const lim = JSON.parse(eng.match(/export const LIMITS = (\{[^}]*\})/)[1].replace(/(\w+):/g, '"$1":'));
+  assertEqual(sb.AUTO_LIMITS, lim, 'registries: the same length limits as the engine');
+  const engApplies = k => { const m = new RegExp(`\\n  ${k}: \\{[\\s\\S]*?appliesTo: (ALL_TRIGGERS|\\[[^\\]]*\\])`).exec(eng.slice(eng.indexOf('export const CONDITIONS'))); return m[1]==='ALL_TRIGGERS' ? null : JSON.parse(m[1]); };
+  assertEqual(Object.keys(sb.AUTO_CONDS).filter(k => JSON.stringify(sb.AUTO_CONDS[k].appliesTo)!==JSON.stringify(engApplies(k))), [], 'registries: each condition fits the same starts as in the engine');
+  const engOps = { LIST_OPS: ['is', 'is_not', 'in', 'not_in'], BOOL_OPS: ['true', 'false'], NUM_OPS: ['lte', 'gte'] };
+  const opsOf = k => { const m = new RegExp(`\\n  ${k}: \\{[^\\n]*?ops: (\\w+_OPS|\\[[^\\]]*\\])`).exec(eng.slice(eng.indexOf('export const CONDITIONS'))); return engOps[m[1]] || JSON.parse(m[1]); };
+  assertEqual(Object.keys(sb.AUTO_CONDS).filter(k => !sb.AUTO_CONDS[k].ops.every(o => opsOf(k).includes(o))), [], 'registries: every comparison the builder offers is one the engine accepts');
+  const engEvents = k => { const m = new RegExp(`\\n  ${k}: \\{[^\\n]*events: (ALL_TRIGGERS|\\[[^\\]]*\\])`).exec(eng.slice(eng.indexOf('export const MERGE_FIELDS'))); return m[1]==='ALL_TRIGGERS' ? '*' : JSON.parse(m[1]); };
+  assertEqual(Object.keys(sb.AUTO_FIELDS).filter(k => JSON.stringify(sb.AUTO_FIELDS[k].triggers)!==JSON.stringify(engEvents(k))), [], 'registries: each blank fills for the same starts as in the engine');
+  assertEqual(sb.AUTO_ACTIONS.text.available().ok, false, 'a text to a customer is never available (the engine has no text code until the business phone)');
+  // values come from the business's own lists
+  assertEqual(sb.autoCondValues('services', ctx), [{ key: 'svcA', label: 'Window cleaning' }, { key: 'svcB', label: 'Gutters' }], 'condition values: the business\'s own services, by key');
+  sb.STATE.data.settings = { catalog: { services: [{ key: 'Lawns', label: 'Lawn mowing' }] } };
+  assertEqual(sb.catalogShown('services').some(x => x.key==='Lawns'), true, 'a service added in Settings is in the list the builder offers');
+  // autoNormalize
+  const n0 = sb.autoNormalize({ id: 'a1', name: 'X', enabled: 'yes', trigger: 'nope', steps: 'nope' });
+  assertEqual([n0.def, n0.enabled, n0.audience], [{ trigger: null, steps: [] }, false, 'team'], 'normalise: a missing or broken definition is empty, "yes" is not on');
+  const n1 = sb.autoNormalize({ id: 'a2', name: 'Y', enabled: true, template_key: 'review', created_by_name: 'Kim', trigger: { type: 'newLead' }, steps: [
+    { id: 's1', kind: 'wait', n: 5000, unit: 'minutes' }, { id: 's2', kind: 'wait', n: 0, unit: 'days' }, { id: 's3', kind: 'window', days: [5, 1, 1, 9, -1, 3], from: '17:00', until: '09:00', outside: 'next' },
+    { id: 's4', kind: 'teleport', to: 'mars' }, { id: 's5', kind: 'action', type: 'email', subject: 's', templateKey: 'my_q' }], deleted_at: '2026-10-14T00:00:00Z' });
+  const st = n1.def.steps;
+  assertEqual([st[0].n, st[1].n, st[2].days, st[2].until, st[3], n1.audience, n1.baseKey, n1.createdByName, n1.deleted, n1.def.trigger],
+    [1440, 1, [1, 3, 5], '18:00', { id: 's4', kind: 'teleport', to: 'mars' }, 'customer', 'review', 'Kim', true, { type: 'newLead', params: {} }],
+    'normalise: waits inside their limits, days 0–6 once each, an end after the start, an unknown step kept as it is');
+  // problems
+  const P = (def, o) => sb.autoProblems(def, ctx, o || {});
+  const T = (def, o) => P(def, o).map(p => (p.block ? '' : '~') + p.text);
+  const push = { id: 's9', kind: 'action', type: 'push', to: { roles: ['owner'], people: [] }, title: 'New lead: {name}', body: '' };
+  assertEqual(T({ trigger: null, steps: [] }), ['Pick what starts it (step 1).', 'Pick at least one thing to do (step 5).'], 'problems: nothing yet');
+  assertEqual(T({ trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'wait', n: 0, unit: 'minutes' }, push] }), ['The wait has to be a whole number from 1 to 1440 (step 2).'], 'problems: a wait out of range (minutes)');
+  assertEqual(T({ trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'wait', n: 400, unit: 'days' }, push] }), ['The wait has to be a whole number from 1 to 365 (step 2).'], 'problems: a wait out of range (days)');
+  assertEqual(T({ trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'window', days: [], from: '17:00', until: '09:00', outside: 'next' }, push] }), ['Pick at least one day (step 3).', 'The end time has to be after the start (step 3).'], 'problems: no day, the end before the start');
+  assertEqual(T({ trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'if', match: 'all', conds: [{ field: 'asked_within_months', op: 'true' }, { field: 'unpaid', op: 'true' }, { field: 'service', op: 'is', v: '' }] }, push] }),
+    ['A condition needs a whole number from 1 to 36 (step 4).', '"The job is still unpaid" can\'t be used with "A new lead comes in" (step 4).', 'Pick a value for "Service" (step 4).'], 'problems: a missing number, a condition that doesn\'t fit the start, no value');
+  assertEqual(T({ trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'if', match: 'all', conds: [{ field: 'service', op: 'is', v: 'gone' }] }, push] }), ['~"gone" is no longer in Settings, so "Service" may never match (step 4).'], 'problems: a value deleted from Settings is a warning, not a stop');
+  assertEqual(T({ trigger: { type: 'jobClosed' }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: '', templateKey: 'my_empty' }] }), ['The email needs a subject (step 6).', 'The email has no words yet (step 6).'], 'problems: an email with no subject and no words');
+  assertEqual(T({ trigger: { type: 'jobClosed' }, steps: [{ id: 's1', kind: 'action', type: 'text', templateKey: '' }] }),
+    ['~Text to the customer waits for the business phone: it is saved, but nothing is texted until then.', 'The text has no words yet (step 6).'], 'problems: a text with no words; a text always waits for the phone (a warning)');
+  assertEqual(T({ trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: [], people: [] }, title: ' ' }] }), ['Pick who gets the notification (step 5).', 'Write the notification (step 6).'], 'problems: a notification to nobody, with no title');
+  assertEqual(T({ trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'task', title: '', assignees: [], due_days: 0 }] }), ['Pick who the task is for (step 5).', 'Write the task (step 6).'], 'problems: a task for nobody, with no words');
+  assertEqual(T({ trigger: { type: 'newLead' }, steps: [{ ...push, title: 'Lead {name}: {amount}' }] }), ['{amount} can\'t be filled in for "A new lead comes in" (step 6).'], 'problems: a blank this start can\'t fill');
+  assertEqual(T({ trigger: { type: 'jobClosed' }, steps: [{ ...push, to: { roles: ['owner', 'va', 'manager'], people: [] }, title: 'Paid {amount}' }] }), ['~{amount} is money, and this notification also goes to people who are not owners.'], 'problems: money to people who are not owners is a warning');
+  assertEqual(T({ trigger: { type: 'jobClosed' }, steps: [{ ...push, to: { roles: [], people: ['p-own'] }, title: 'Paid {amount}' }] }), [], 'problems: money to an owner by name is fine');
+  const mirrors = [{ name: 'A new lead comes in', on: true, def: { trigger: { type: 'newLead' }, steps: [push] } }, { name: 'Off one', on: false, def: { trigger: { type: 'newLead' }, steps: [push] } }];
+  assertEqual(T({ trigger: { type: 'newLead' }, steps: [push] }, { mirrors }), ['~The ready-made "A new lead comes in" is on and does the same when this happens: both will go.'], 'problems: doubling a ready-made one that is on is a warning');
+  assertEqual(T({ trigger: { type: 'newLead' }, steps: [push, { id: 's2', kind: 'wait', n: 1, unit: 'days' }] }), ['The last step does nothing. End with a Do step, or remove it.'], 'problems: a last step that does nothing');
+  assertEqual(T({ trigger: { type: 'invoice' }, steps: [push] }), ['This start can\'t be used in an automation of your own yet (step 1).'], 'problems: a start only a ready-made has');
+  assertEqual(T({ trigger: { type: 'newLead' }, steps: [push, { ...push }] }), ['Two steps share the same inside name: remove one and add it again.'], 'problems: two steps with the same id (the engine would refuse it)');
+  assertEqual(sb.autoStepProblems({ id: 'x', kind: 'action', type: 'push', to: {}, title: '' }, { trigger: { type: 'newLead' } }, ctx), ['Pick who gets the notification.', 'Write the notification.'], 'the flow view\'s "Needs a look" uses the same checks, without the step number');
+  // the sentence and the chips: registries + the business's own names; every name escaped
+  const quote = { trigger: { type: 'stage', params: { stage: 'Quoted' } }, steps: [{ id: 's1', kind: 'wait', n: 3, unit: 'days' }, { id: 's2', kind: 'window', days: [1, 2, 3, 4, 5], from: '09:00', until: '17:00', outside: 'skip' },
+    { id: 's3', kind: 'if', match: 'all', conds: [{ field: 'service', op: 'is', v: 'svcA' }, { field: 'has_email', op: 'true' }] }, { id: 's4', kind: 'action', type: 'email', subject: 'Your quote', templateKey: 'my_q' },
+    { id: 's5', kind: 'action', type: 'task', title: 'Call {name}', assignees: ['e1'], due_days: 1 }] };
+  assertEqual(sb.autoSentence(quote, ctx), 'When <b>a lead moves to Quote sent</b>, then <b>wait 3 days</b>, then <b>only Mon–Fri, 9 am–5 pm (otherwise stop)</b>, then <b>only if the service is Window cleaning and the customer has an email address</b>, then <b>email the customer &quot;Your quote&quot;</b>, then <b>give Kim a task due the next day</b>.', 'sentence: a quote follow-up, from the registries and the business\'s names');
+  assertEqual(sb.autoSentence({ trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'wait', n: 15, unit: 'minutes' }, { id: 's2', kind: 'if', match: 'all', conds: [{ field: 'not_picked', op: 'true' }] }, push] }, ctx),
+    'When <b>a new lead comes in</b>, then <b>wait 15 minutes</b>, then <b>only if nobody has opened, called or moved the lead</b>, then <b>send a notification to the owners</b>.', 'sentence: a waiting-lead alert');
+  assertEqual(sb.autoSentence({ trigger: { type: 'jobClosed' }, steps: [] }, ctx), 'When <b>a job is closed</b>, then… <span class="hint">(pick what to do in step 5)</span>', 'sentence: nothing to do yet');
+  const renamed = autoFixtureCtx(sb, { catalog: { ...ctx.catalog, services: [{ key: 'svcA', label: 'Glass' }] } });
+  assertEqual([sb.autoSentence(quote, renamed).includes('the service is Glass'), quote.steps[2].conds[0].v], [true, 'svcA'], 'sentence: a service renamed in Settings is renamed here; the saved key stays');
+  const gone = autoFixtureCtx(sb, { catalog: { ...ctx.catalog, services: [] } });
+  assertEqual(sb.autoSentence(quote, gone).includes('svcA (deleted)'), true, 'sentence: a deleted value says so');
+  const evil = '<script>alert(1)</script>';
+  const evilCtx = autoFixtureCtx(sb, { catalog: { ...ctx.catalog, stages: [{ key: 'Quoted', label: evil }] } });
+  const es = sb.autoSentence(quote, evilCtx);
+  assertEqual([es.includes('<script>'), es.includes('&lt;script&gt;')], [false, true], 'sentence: a stage name with HTML is shown as text');
+  assertEqual(sb.autoFlowChips(quote, ctx), ['Moves to a stage: Quote sent', 'After 3 days', 'Mon–Fri, 9 am–5 pm', '2 conditions', 'Email + Task for Kim'], 'chips: start › wait › hours › conditions › what it does');
+  assertEqual(sb.autoFlowChips({ trigger: { type: 'newLead' }, steps: [push, { id: 's2', kind: 'wait', n: 2, unit: 'hours' }, { ...push, id: 's3' }] }, ctx), ['New lead', 'Right away', 'Any day, any time', 'Push to the owners', '+2 more steps'], 'chips: a longer automation says how many more steps it has');
+  assertEqual(sb.autoWhenShort(quote, ctx), '3 days after a lead moves to Quote sent, Mon–Fri, 9 am–5 pm', 'when, in short: the wait, the start and the hours');
+  // autoTriggersOn: only automations of your own that are on, not deleted, with a start the app saves itself
+  const L = [{ enabled: true, def: { trigger: { type: 'newLead' } } }, { enabled: false, def: { trigger: { type: 'stage' } } }, { enabled: true, deleted: true, def: { trigger: { type: 'jobClosed' } } },
+    { enabled: true, def: { trigger: { type: 'missedCall' } } }, { enabled: true, def: { trigger: { type: 'chat' } } }, { enabled: true, ready: true, def: { trigger: { type: 'invoice' } } }];
+  assertEqual(sb.autoTriggersOn(L), { newLead: true }, 'events from the app: only for an automation of your own that is on (never missed calls, chats or ready-made ones)');
+  // the ready-made rows, from today's settings
+  sb.STATE.data.settings = { reviewRequestsAuto: false, chatAutoSms: true, phoneEnabled: false, unpaidReminderDays: 9,
+    catalog: { reviews: { sendFrom: 9, askAgainMonths: 4 }, chat: { waitMinutes: 7, windowHours: 3, oneADay: false }, notify: { newLead: { on: true, office: true }, leadWaiting: { on: false }, rules: { waitMinutes: 20, from: 7, until: 19, docDays: 45 } } } };
+  sb.STATE.profiles = [];
+  const R = sb.autoReadyRows(), by = k => R.find(r => r.key===k);
+  assertEqual([by('ready:review').on, by('ready:review').gate, sb.autoGatePill(by('ready:review')).includes('Off until go-live'), by('ready:review').notes[0], by('ready:review').toggle], [false, 'golive', true, 'Texts go through GoHighLevel for now.', ['setReviewAuto', true]], 'ready-made review: off until go-live, through GoHighLevel, its switch is the existing one (with its own confirm)');
+  const rv = by('ready:review').def.steps;
+  assertEqual([rv[0].from, rv[0].until, rv[0].at, rv[1].conds.map(c => c.field + (c.n ? ':' + c.n : '')), rv.slice(2).map(s => s.templateKey)], ['09:00', '20:00', '10:00', ['dont_ask', 'asked_within_months:4'], ['reviewSms', 'reviewEmailBody']], 'ready-made review: the hours and months are the Google reviews settings; the words are the built-in messages');
+  const ch = by('ready:chatText');
+  assertEqual([ch.on, ch.gate, ch.def.steps[0].n, ch.def.steps[1].conds[1].n, ch.notes[0].includes('one automatic text a day')], [true, 'phone', 7, 3, false], 'ready-made chat text: its switch, wait, oldest chat and one-a-day are the Website chat settings');
+  assertEqual([by('ready:missedText').locked, by('ready:missedText').on], ['On whenever the business phone is on. Its own switch comes when it moves here.', false], 'ready-made missed-call text: its switch is locked (no switch of its own today)');
+  const cards = sb.notifyCardsNow(), teams = R.filter(r => r.key.startsWith('ready:team:'));
+  assertEqual(teams.map(r => [r.card.id, r.on, r.card.office]), cards.map(c => [c.id, c.on, c.office]), 'ready-made team rows: one per Notifications card, on and office as there');
+  const lw = by('ready:team:leadWaiting').def.steps;
+  assertEqual([lw[0].n, lw[1].from, lw[1].until, lw[1].outside, by('ready:team:unpaid').def.steps[0].n, by('ready:team:docExpiry').def.trigger.params.days, by('ready:team:newLead').def.steps[0].to.roles],
+    [20, '07:00', '19:00', 'skip', 9, 45, ['owner', 'va', 'manager']], 'ready-made team rows: their numbers are the Notifications numbers (unpaid = Tax and payments)');
+  assertEqual(R.every(r => !/Aircon|Chimney|The Guys|1300|Ofek|Noam/.test(r.name)), true, 'ready-made rows name no business');
+  // chips and search over the list
+  const custom = sb.autoNormalize({ id: 'c1', name: 'Quote follow-up', enabled: true, created_by_name: 'Kim', trigger: quote.trigger, steps: quote.steps });
+  const rows = [...R, { key: 'c1', ready: false, name: custom.name, on: true, audience: custom.audience, def: custom.def, createdByName: 'Kim' }];
+  const count = f => rows.filter(r => sb.autoMatches(r, f, '', ctx)).length;
+  assertEqual([count('all'), count('customer'), count('team'), count('ready'), count('mine')], [rows.length, 4, teams.length, R.length, 1], 'chips: All / To customers / To the team / Ready-made / Made by you');
+  assertEqual([rows.filter(r => sb.autoMatches(r, 'all', 'quote', ctx)).map(r => r.key), rows.filter(r => sb.autoMatches(r, 'all', 'window cleaning', ctx)).map(r => r.key)], [['c1'], ['c1']], 'search: by name and by the sentence (a service name)');
+  // the list's HTML: mirrors, gate pills, escaped names and handlers
+  const evilRow = { key: "c'2", ready: false, name: '<img src=x onerror=alert(1)>', on: false, audience: 'team', def: { trigger: { type: 'newLead' }, steps: [push] }, createdByName: '<b>x</b>' };
+  const lists = sb.autoListsHtml([...rows, evilRow], ctx, { filter: 'all', q: '', loaded: true, error: '' });
+  assertEqual([lists.includes('Review request after a closed job'), lists.includes('Off until go-live'), lists.includes('Waits for the business phone'), lists.includes('Ready-made'), lists.includes('Made by you'),
+    lists.includes('<img'), lists.includes('&lt;img'), lists.includes("openAutoEditor('c\\'2')"), lists.includes('&lt;b&gt;x')], [true, true, true, true, true, false, true, true, true], 'list: the ready-made rows with their pills; a typed name and its id are escaped');
+  assertEqual(/To customers[\s\S]*To the team/.test(lists), true, 'list: two blocks, To customers then To the team');
+  const lerr = sb.autoListsHtml(R, ctx, { filter: 'all', q: '', loaded: true, error: 'relation "automations" does not exist' });
+  assertEqual([lerr.includes('Automations could not be loaded. The ready-made ones below still work as before.'), lerr.includes('Review request after a closed job'), lerr.includes('does not exist')], [true, true, false], 'list: before the SQL is run, the ready-made rows still show, with a plain message');
+  assertEqual(sb.autoListsHtml(R, ctx, { filter: 'all', q: '', loaded: false, error: '' }).includes('Loading your automations…'), true, 'list: says it is loading');
+  assertEqual(sb.autoListsHtml(R, ctx, { filter: 'mine', q: '', loaded: true, error: '' }).includes('Nothing matches.'), true, 'list: nothing of your own yet');
+  // previews: words escaped first, then filled; texts counted like phones do
+  const pv = sb.autoPreviewHtml('text', '', '{hi}, it’s <b>us</b>', ctx.sample);
+  assertEqual([pv.includes('Hi Sarah, it’s &lt;b&gt;us&lt;/b&gt;'), /\d+ characters · 1 text · a curly quote/.test(pv)], [true, true], 'preview: a text bubble, escaped, with its count (a curly quote warns)');
+  const pe = sb.autoPreviewHtml('email', 'Hi {first_name}', 'Line one\n\nLine {name}', ctx.sample);
+  assertEqual([pe.includes('<span>Subject</span>Hi Sarah'), pe.includes('<p>Line one</p><p>Line Sarah Mitchell</p>')], [true, true], 'preview: an email with its subject and paragraphs');
+  // the form and the flow view edit the same steps (J's slot helpers with the builder's registry)
+  const tail = [{ id: 's1', kind: 'wait', n: 1, unit: 'days' }, { id: 's2', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'A' }, { id: 's3', kind: 'wait', n: 2, unit: 'days' }, { id: 's4', kind: 'action', type: 'task', title: 'B', assignees: ['e1'] }];
+  const tailJ = JSON.stringify(tail.slice(2));
+  const edited = sb.flowFormSetSlot(tail, 'wait', { n: 5, unit: 'hours' }, ctx);
+  assertEqual([sb.flowIsFormShaped(tail), edited[0].n, edited[0].unit, edited[0].id, JSON.stringify(edited.slice(2))===tailJ], [false, 5, 'hours', 's1', true], 'form on a longer automation: the first part changes, the rest is kept byte for byte, ids stay');
+  const added = sb.flowFormSetAction([{ id: 's1', kind: 'wait', n: 1, unit: 'days' }], 'email', true, ctx, { type: 'newLead' });
+  assertEqual([added[1].kind, added[1].type, added[1].subject, added[1].templateKey, added[1].id], ['action', 'email', '', '', 's2'], 'form: ticking Email adds the engine\'s own email step');
+  const pushMade = sb.AUTO_ACTIONS.push.make(ctx, { type: 'newLead' });
+  assertEqual([pushMade.to, pushMade.title, pushMade.body], [{ roles: ['owner'], people: [] }, 'New lead: {name}', '{service} · {source}'], 'a new notification goes to the owners with blanks for that start');
+  // library templates: who uses one
+  assertEqual(sb.autoTplUsers('my_q', [custom, { ...custom, id: 'c3', deleted: true }]).map(a => a.id), ['c1'], 'template users: the automations whose messages use it (not deleted ones)');
+  // differential sanity: with no automations the settings the live functions read are exactly as before
+  sb.STATE.data.settings = { catalog: {} };
+  assertEqual([sb.reviewCfg().sendFrom, sb.reviewCfg().sendUntil, sb.reviewCfg().morning, sb.reviewCfg().askAgainMonths, sb.chatRulesApp(), sb.notifyRulesApp()],
+    [8, 20, 10, 6, { waitMinutes: 5, windowHours: 2, oneADay: true }, { waitMinutes: 15, from: 8, until: 20, docDays: 30, unpaidDays: 7 }], 'nothing saved: the review, chat and notification numbers are the originals');
+  assertEqual(sb.MSG_TEMPLATES.flatMap(m => m.fields).every(f => sb.msgTemplateText(f.key)===f.text), true, 'nothing saved: every built-in message is its approved words');
+  const als = extractDecl(script, 'applyLeadStage');
+  assertEqual([als.includes('const patch = { status: stage, stageChangedAt: nowIso, ...extra };'), /db\.contacts\.update\(c\.id, patch\)\.then\(saved => \{ if \(saved\) autoEmitStage\(c\.id, stage\); \}\)/.test(als)], [true, true], 'a stage move saves the same patch; the engine is told only after the save (and the Undo)');
+  // the pure helpers never redraw or touch the database
+  const pure = ['autoNormalize', 'autoProblems', 'autoStepIssues', 'autoSentence', 'autoFlowChips', 'autoTriggersOn', 'autoMatches', 'autoReadyRows', 'autoRowHtml', 'autoListsHtml', 'autoPreviewHtml'];
+  assertEqual(pure.filter(n => /\brender\(|\bdb\.|\bsb\.|fetch\(/.test(extractDecl(script, n))), [], 'the builder\'s pure helpers never redraw, read the database or call a server');
+}
+// A sandbox with the whole builder (every auto* function and AUTO* constant) for its windows and saves.
+function autoSandbox(extra){
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const autoNames = [...new Set([...script.matchAll(/\n(?:async )?function (auto\w*)\(/g)].map(m => m[1]).concat([...script.matchAll(/\nconst (AUTO\w*)\s*=/g)].map(m => m[1])))].filter(n => !DECLS.includes(n) && !/^automation/i.test(n));
+  const more = ['readOnlyReason', 'flowEd', 'flowCtx', 'flowRenderBlocked', 'flowMainHtml', 'flowSideHtml', 'flowPanelHtml', 'flowIsInline', 'tplHighlight', 'renderTemplatesPage', 'TPL_EXAMPLE', 'tplPreviewHtml', 'tplActionsHtml', 'tplProblemsHtml',
+    'toggleAutomation', 'deleteAutomation', 'duplicateAutomation', 'openAutoEditor', 'openAutoPage', 'loadAutomations', 'loadAutoRunCounts', 'renderAutomationsPage', 'renderNotificationsPage', 'newMsgTemplate', 'editMsgTemplate', 'saveMsgTemplate', 'deleteMsgTemplate', 'cancelMsgTemplate', 'brandOf', 'CONV_BRANDS'];
+  const src = DECLS.map(n => extractDecl(script, n)).concat(autoNames.map(n => extractDecl(script, n)), more.filter(n => !autoNames.includes(n) && !DECLS.includes(n)).map(n => extractDecl(script, n))).join('\n\n');
+  const log = { toasts: [], confirms: [], db: [], renders: 0, opened: [], modal: '' };
+  const sandbox = {
+    STATE: { data: { settings: { catalog: {} }, contacts: [], jobs: [], employees: [{ id: 'e1', name: 'Kim Office', status: 'Active', roles: ['VA'] }] }, profiles: [{ id: 'p-own', fullName: 'Alex Owner', role: 'owner' }] },
+    console, log, PRESENT: false, VIEW_AS_ID: null, UI: { tab: 'settings', settings: { page: 'templates' } },
+    showToast: (m, o) => log.toasts.push(m), confirmAction: (m, fn, o) => log.confirms.push({ m, fn, o }), render: () => { log.renders++; }, renderKeepingInput: () => { log.renders++; },
+    logSettingsActivity: (a, t) => log.db.push('activity: ' + t), getCurrentProfile: () => ({ fullName: 'Alex Owner', role: 'owner' }), getRealProfile: () => ({ id: 'p-own', role: 'owner' }),
+    applyCatalog: () => {}, closeModal: () => { log.modal = ''; }, reopenModal: (h) => { log.modal = h; }, openModal: (h) => { log.modal = h; }, setSettingsPage: (id) => log.opened.push('page:' + id),
+    startTemplateEdit: () => {}, sydneyToday: () => '2026-10-14', weekStartDay: () => 1, motionReduced: () => true, brandLogoHtml: () => '<svg></svg>',
+    window: { matchMedia: () => ({ matches: false }) }, document: { getElementById: () => null, querySelector: () => null },
+    phoneNotificationsBar: () => '', notifyCardHtml: (c) => `<article>${c.id}</article>`, localStorage: { getItem: () => null, setItem: () => {} },
+    db: { settings: { update: (p) => { log.db.push('settings.update'); Object.assign(sandbox.STATE.data.settings, p); return Promise.resolve(); } } },
+    sb: { from: () => { throw new Error('no database in this test'); } },
+    setTimeout: (fn) => { fn(); return 0; },
+    ...(extra || {}),
+  };
+  vm.createContext(sandbox);
+  vm.runInContext('var AUTO_ED = null, AUTO_TPL_EDIT = null, TPL_EDIT = null, FLOW_DRAG = null, FLOW_EDRENDER_PENDING = false;\n' + src + '\nthis.__get = n => eval(n); this.__set = (n, v) => eval(n + " = v");', sandbox, { filename: 'index.html (builder)' });
+  return sandbox;
+}
+function testAutomationsEditor(){
+  console.log('\nAutomations: the editor window and the Message templates tab (phase 4, group I)');
+  const sb = autoSandbox(), AUTO = sb.__get('AUTO'), log = sb.log;
+  // a new automation: 6 steps, the flow switch in the head, nothing saved by opening it
+  sb.openAutoEditor(null);
+  let h = log.modal;
+  assertEqual([...['When', 'Wait', 'Only on', 'Only if', 'Do', 'Message'].map(t => h.includes(`<h4>${t}</h4>`)), h.includes('role="radiogroup" aria-label="How to edit"'), h.includes('Save automation'), h.includes('Pick what starts it (step 1).'), log.db.length],
+    [true, true, true, true, true, true, true, true, true, 0], 'new automation: the 6 steps, the Form / Flow switch, "Before you save", and nothing written');
+  assertEqual([h.includes('A new lead comes in'), h.includes('A call is missed'), h.includes('Starts once the business phone is connected')], [true, true, true], 'new automation: the starts come from the registry (a missed call waits for the phone)');
+  // pick a start, add a notification to the office, write it
+  sb.autoEdSetTrigger('newLead');
+  sb.autoEdWho('', 'role:office');
+  const ed = sb.__get('AUTO_ED'), push = ed.def.steps.find(s => s.type==='push');
+  assertEqual([push.to, push.title], [{ roles: ['va', 'manager'], people: [] }, 'New lead: {name}'], 'form: picking "The office" adds a notification to the office, with words for that start');
+  sb.autoEdAction('email', true);
+  const email = ed.def.steps.find(s => s.type==='email');
+  assertEqual([!!email, /^my_\w+$/.test(email.templateKey), ed.drafts[email.templateKey].channel], [true, true, 'email'], 'form: ticking Email starts a new template of your own (a draft until Save)');
+  sb.autoEdAction('text', true);
+  assertEqual([ed.def.steps.some(s => s.type==='text'), log.toasts.slice(-1)[0]], [false, 'Needs the business phone (Twilio). It turns on here once the phone is connected.'], 'form: a text can\'t be added before the business phone');
+  h = sb.autoEditorHtml();
+  assertEqual([h.includes('Not available yet'), h.includes('This one messages customers. It is saved off'), h.includes('id="au-step-6"')], [true, true, true], 'form: the text card says why; a customer automation says it is saved off');
+  // the editor's On switch on a NEW customer automation stays off
+  sb.autoEdToggle();
+  assertEqual([ed.enabled, /saved off/.test(log.toasts.slice(-1)[0])], [false, true], 'a new automation that messages customers can\'t be switched on before it is saved');
+  // escaping in the editor
+  ed.name = '"><script>x</script>';
+  h = sb.autoEditorHtml();
+  assertEqual([h.includes('<script>x'), h.includes('&quot;&gt;&lt;script&gt;')], [false, true], 'editor: a typed name is escaped');
+  // ready-made mirrors open on their live settings
+  sb.STATE.data.settings = { reviewRequestsAuto: false, phoneEnabled: false, catalog: { reviews: { sendFrom: 9 } } };
+  sb.openAutoEditor('ready:review');
+  h = log.modal;
+  assertEqual([h.includes('Ready-made automation'), h.includes('This sends to real customers. It stays off until you turn it on at go-live.'), h.includes('Through GoHighLevel for now'), h.includes("autoReadyAct('setReviewCfg', 'sendFrom', this.value)"),
+    h.includes('<option value="9" selected>9 am</option>'), h.includes('Back to the default'), h.includes('Duplicate'), h.includes('>Delete<'), h.includes('readonly')],
+    [true, true, true, true, true, true, true, false, true], 'ready-made review: its live hours with the Google reviews setter, go-live banner, Back to the default and Duplicate, no Delete');
+  sb.openAutoEditor('ready:missedText');
+  h = log.modal;
+  assertEqual([h.includes('disabled title="On whenever the business phone is on. Its own switch comes when it moves here."'), h.includes('Back to the default')], [true, false], 'ready-made missed-call text: its switch is locked, nothing to put back');
+  sb.openAutoEditor('ready:team:leadWaiting');
+  h = log.modal;
+  assertEqual([h.includes("autoReadyAct('setNotifyNumber', 'waitMinutes', this.value)"), h.includes("sendNotifyTest('leadWaiting')"), h.includes("autoReadyAct('toggleNotifyOffice', 'leadWaiting')")], [true, true, true], 'ready-made team alert: its numbers and "Office" use the Notifications setters; Send a test');
+  // Duplicate a ready-made: the built-in words are COPIED, never pointed at; nothing is saved; it is off
+  sb.duplicateAutomation('ready:review');
+  const dup = sb.__get('AUTO_ED'), keys = dup.def.steps.filter(s => s.kind==='action').map(s => s.templateKey);
+  assertEqual([dup.isNew, dup.enabled, dup.baseKey, dup.name, keys.every(k => /^my_/.test(k)), keys.some(k => ['reviewSms', 'reviewEmailBody'].includes(k)), dup.drafts[keys[0]].body===sb.msgTemplateText('reviewSms'), log.db.length],
+    [true, false, 'review', 'Copy of Review request after a closed job', true, false, true, 0], 'duplicate a ready-made: a new automation (not saved, off) with COPIES of the built-in words');
+  assertEqual(sb.autoProblems(dup.def, sb.autoCtx(), {}).some(p => p.block && /\{review_link\}/.test(p.text)), true, 'the copied review words keep {review_link}, which the engine can\'t fill: it has to be changed before saving');
+  // deleting a template of your own is refused while an automation uses it
+  sb.STATE.data.settings = { catalog: { msgTemplates: { my_a: { name: 'Quote', channel: 'email' } }, templates: { my_a: 'Hi' } } };
+  AUTO.list = [sb.autoNormalize({ id: 'c1', name: 'Quote follow-up', enabled: false, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'x', templateKey: 'my_a' }] })];
+  const c0 = log.confirms.length;
+  sb.deleteMsgTemplate('my_a');
+  assertEqual([log.confirms.length===c0, /Used by "Quote follow-up"/.test(log.toasts.slice(-1)[0])], [true, true], 'a template of your own can\'t be deleted while an automation uses it');
+  // the Message templates tab: who sends each built-in message, and when (live numbers)
+  sb.STATE.data.settings = { reviewRequestsAuto: false, chatAutoSms: false, phoneEnabled: false, catalog: { reviews: { sendFrom: 9 }, msgTemplates: { my_a: { name: 'Quote', channel: 'email' } }, templates: { my_a: 'Hi {first_name}' } } };
+  const tp = sb.renderTemplatesPage();
+  assertEqual([tp.includes("openAutoPage('auto', 'ready:review')\">"), /Review request after a closed job<\/button><span class="pill warn">Off until go-live<\/span><span>· right after a job is closed, every day, 9 am–8 pm<\/span>/.test(tp), tp.includes("openAutoPage('auto', 'ready:chatText')"), tp.includes('Also used when the office presses "Ask for review" on a job or in My Day.')],
+    [true, true, true, true], 'templates tab: the review messages say "Sent by Review request after a closed job" and its live hours (9 am)');
+  const hand = tp.slice(tp.indexOf('<h3>Used by hand or by the phone</h3>'), tp.indexOf('<h3>Your templates</h3>'));
+  assertEqual([['Phone greeting', 'Voicemail (office closed)', 'Moving a website chat to text'].every(n => hand.includes(n)), hand.includes('Review request')], [true, false], 'templates tab: the phone messages and the chat-to-text words are under "Used by hand or by the phone"');
+  const mine = tp.slice(tp.indexOf('<h3>Your templates</h3>'));
+  assertEqual([mine.includes('Quote'), mine.includes('Made by you'), mine.includes('Sent by'), mine.includes('Quote follow-up')], [true, true, true, true], 'templates tab: your own templates, with the automations that send them');
+}
+// The editor's Escape and redraws (14 Oct): a question asked over the editor (the review request's go-live switch asks
+// first) survives a redraw of the window, and Escape never drops the editor or its changes through the app's own
+// "Escape closes any window".
+function testAutomationsEditorKeys(){
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const calls = [];
+  let ask = null, popup = null;
+  const root = { children: [], appendChild(el){ calls.push('append:' + el.id); this.children.push(el); }, querySelector: () => null };
+  const ctx = { console, calls,
+    document: { querySelector: s => s.includes('confirm-back') ? ask : (s==='.auto-ed' || s==='#modal-root .auto-ed') ? {} : null, getElementById: id => id==='modal-root' ? root : id==='app-popup' ? popup : null },
+    reopenModal: () => { calls.push('reopen'); }, autoEditorHtml: () => '<div class="auto-ed"></div>', flowRenderBlocked: () => false,
+    closePopup: () => calls.push('closePopup'), closeConfirmModal: () => calls.push('closeConfirm'), autoCloseEditor: () => calls.push('closeEditor'), flowDragCancel: () => calls.push('dragCancel') };
+  vm.createContext(ctx);
+  vm.runInContext('var AUTO_ED = { mirror: true }, FLOW_DRAG = null;\n' + ['autoEdRender', 'autoEdKey'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__set = (k, v) => { if (k==="drag") FLOW_DRAG = v; else AUTO_ED = v; };', ctx);
+  ask = { id: 'ask' };
+  ctx.autoEdRender();
+  assertEqual(calls, ['reopen', 'append:ask'], 'editor: a question open over it stays open (and on top) when the window redraws');
+  calls.length = 0; ask = null; ctx.autoEdRender();
+  assertEqual(calls, ['reopen'], 'editor: with no question open, only the window redraws');
+  const key = (k) => { const e = { key: k, stopped: false, prevented: false, stopPropagation(){ this.stopped = true; }, preventDefault(){ this.prevented = true; } }; ctx.autoEdKey(e); return e; };
+  calls.length = 0; ask = { id: 'ask' };
+  let e = key('Escape');
+  assertEqual([calls, e.stopped], [['closeConfirm'], true], 'Escape with a question open closes only the question (the app\'s own Escape never sees it)');
+  calls.length = 0; ask = null; e = key('Escape');
+  assertEqual([calls, e.stopped], [['closeEditor'], true], 'Escape closes the editor through its own check (changes are asked about first)');
+  calls.length = 0; ctx.__set('drag', { started: true }); e = key('Escape');
+  assertEqual(calls, ['dragCancel'], 'Escape while a block is dragged only ends the drag');
+  calls.length = 0; ctx.__set('drag', null); popup = {}; ask = { id: 'ask' }; e = key('Escape');
+  assertEqual(calls, ['closePopup'], 'Escape with the "Add a step" menu open closes only the menu');
+  popup = null; ask = null;
+  calls.length = 0; e = key('Enter');
+  assertEqual([calls, e.stopped], [[], false], 'other keys pass through');
+  const glob = script.slice(script.lastIndexOf("document.addEventListener('keydown'"));
+  assertEqual(/if \(e\.key==='Escape'\) \{\s*\/\/[^\n]*\n\s*if \(typeof AUTO_ED!=='undefined' && AUTO_ED && document\.querySelector\('#modal-root \.auto-ed'\)\) \{ autoEdKey\(e\); return; \}/.test(glob), true, 'the app\'s own Escape hands an open automation editor to its own handler');
+}
+// The page's loader can't loop: a second call while it loads gets the SAME promise; the page never redraws by itself
+// until the answer is in, and then once, later (renderKeepingInput); a failed load is not retried by itself.
+async function testAutomationsLoaderNoLoop(){
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  let queries = 0, release = null, fail = false, renders = 0, keeps = 0, safetyQueries = 0, safetyRelease = null;
+  const q = { select(){ return q; }, eq(){ return q; }, order(){ return q; }, gte(){ return q; }, in(){ return q; },
+    maybeSingle(){ safetyQueries++; return new Promise(res => { safetyRelease = () => res({ data: { business_id: 'default', customer_from: '07:00', customer_until: '21:00' }, error: null }); }); },
+    range(){ queries++; return new Promise((res, rej) => { release = () => fail ? rej(new Error('relation "automations" does not exist')) : res({ data: [{ id: 'a1', name: 'X', enabled: true, trigger: { type: 'newLead' }, steps: [] }], error: null }); }); } };
+  const ctx = { console, sb: { from: () => q }, UI: { tab: 'settings', settings: { page: 'templates' } }, AUTO_TABLE: 'automations', AUTO_BUSINESS_ID: 'default', STATE: { profiles: [], data: {} },
+    render(){ renders++; throw new Error('render() must not be called from the page'); }, renderKeepingInput(){ keeps++; },
+    autoNormalize: r => ({ id: r.id, name: r.name, enabled: r.enabled, def: { trigger: r.trigger, steps: r.steps }, audience: 'team', deleted: false }),
+    autoCtx: () => ({}), autoAllRows: () => [], autoListsHtml: () => '', autoMatches: () => true, renderTemplatesPage: () => '', ico: () => '', esc: s => String(s),
+    phoneNotificationsBar: () => '', notifyRulesApp: () => ({}), notifyPeopleText: () => ({}), notifyCardsNow: () => [], notifyCardHtml: () => '', flowSentence: () => '', setToggle: () => '', pill: () => '', jsStr: s => s,
+    autoSafetyHtml: () => '', autoRemovedHtml: () => '', autoHiddenReady: () => [], autoReadyRows: () => [] };
+  vm.createContext(ctx);
+  vm.runInContext('var AUTO_ED = null;\n' + ['AUTO', 'loadAutomations', 'loadAutoRunCounts', 'loadAutoSafety', 'autoPageOpen', 'renderAutomationsPage', 'renderNotificationsPage'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__A = AUTO; this.__load = loadAutomations; this.__safety = loadAutoSafety; this.__page = renderAutomationsPage; this.__np = renderNotificationsPage;', ctx);
+  const A = ctx.__A;
+  const p1 = ctx.__load(), p2 = ctx.__load();
+  ctx.__page(); ctx.__page(); ctx.__np(); ctx.__np();
+  const s1 = ctx.__safety(), s2 = ctx.__safety();
+  await new Promise(r => setTimeout(r, 0));
+  assertEqual([p1===p2, queries, A.loaded, renders, keeps], [true, 1, false, 0, 0], 'automations: a second load (and four page draws) while one runs start no other query and draw nothing');
+  assertEqual([s1===s2, safetyQueries, A.safetyLoaded], [true, 1, false], 'safety settings: a second load (and the page draws) while one runs is the same promise, one query');
+  release(); await p2;
+  assertEqual([A.loaded, A.list.map(a => a.id), A.error, renders, keeps], [true, ['a1'], '', 0, 1], 'automations: the list arrives once; the page is drawn again once, later');
+  ctx.__page(); ctx.__page();
+  await new Promise(r => setTimeout(r, 0));
+  assertEqual(queries, 2, 'automations: once loaded, drawing the page again only reads how often they ran (one query), never the list again');
+  release(); await new Promise(r => setTimeout(r, 0));
+  ctx.__page();
+  assertEqual(queries, 2, 'automations: and that only once');
+  const keeps0 = keeps; safetyRelease(); await s2;
+  ctx.__page(); ctx.__page(); await new Promise(r => setTimeout(r, 0));
+  assertEqual([A.safetyLoaded, A.safety && A.safety.customer_from, safetyQueries, keeps - keeps0, renders], [true, '07:00', 1, 1, 0], 'safety settings: they arrive once, the page is drawn again once, and drawing it again reads nothing more');
+  A.loaded = false; fail = true;
+  const p3 = ctx.__load(); assertEqual(ctx.__load()===p3, true, 'automations: a load started again (outside a draw) is one load too');
+  await new Promise(r => setTimeout(r, 0));
+  release(); await p3;
+  ctx.__page(); ctx.__page();
+  assertEqual([A.loaded, A.list, /does not exist/.test(A.error), queries], [true, [], true, 3], 'automations: a failed load shows its message and is not tried again by itself');
+}
+// The app tells the engine only for automations of your own that are on; a stage move only after its Undo ran out.
+async function testAutomationEventsGate(){
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const all = [], posts = [], timers = { get length(){ return all.filter(x => x.ms===6500).length; } };
+  const stageTimer = i => all.filter(x => x.ms===6500)[i];
+  const lead = { id: 'c-1', stage: 'Quoted' };
+  const ctx = { console, PRESENT: false, VIEW_AS_ID: null, SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'k',
+    STATE: { data: { settings: { catalog: {} } }, profiles: [] }, getRealProfile: () => ({ id: 'p', role: 'va' }),
+    sb: { auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) } },
+    fetch: (u, o) => { posts.push({ u, body: JSON.parse(o.body) }); return Promise.reject(new Error('offline')); },
+    setTimeout: (fn, ms) => { all.push({ fn, ms }); return all.length; },
+    contactById: id => id===lead.id ? lead : null, leadStage: c => c.stage };
+  vm.createContext(ctx);
+  vm.runInContext(['readOnlyReason', 'catalogObject', 'automationEventBody', 'AUTOMATIONS_URL', 'AUTOMATION_EVENTS_SENT', 'automationEvent', 'autoEventWanted', 'autoEmitStage'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__ev = automationEvent; this.__st = autoEmitStage;', ctx);
+  const flush = () => new Promise(r => setImmediate(r));
+  await ctx.__ev('newLead', 'c-9'); await flush();
+  assertEqual(posts.length, 0, 'events: nothing is sent while no automation of your own waits for it');
+  ctx.STATE.data.settings.catalog.automationEvents = { newLead: true, stage: true };
+  ctx.PRESENT = true; await ctx.__ev('newLead', 'c-9'); ctx.__st('c-1', 'Quoted'); await flush();
+  assertEqual([posts.length, timers.length], [0, 0], 'events: in presentation mode nothing is sent or waited for');
+  ctx.PRESENT = false;
+  let threw = false; try { await ctx.__ev('newLead', 'c-9'); await flush(); } catch (e) { threw = true; }
+  assertEqual([threw, posts.length, posts[0] && posts[0].body, posts[0] && posts[0].u], [false, 1, { step: 'event', type: 'newLead', id: 'c-9' }, 'https://x.supabase.co/functions/v1/automations'], 'events: only the kind and the id are sent; a failed call never breaks the action');
+  ctx.__st('c-1', 'Quoted');
+  assertEqual([timers.length, posts.length], [1, 1], 'events: a stage move waits for its Undo (6.5 seconds) first');
+  stageTimer(0).fn(); await flush();
+  assertEqual(posts.slice(-1)[0].body, { step: 'event', type: 'stage', id: 'c-1' }, 'events: then it is told, the lead still being in that stage');
+  ctx.__st('c-1', 'Quoted'); lead.stage = 'New'; stageTimer(1).fn(); await flush();
+  assertEqual(posts.length, 2, 'events: a stage move undone in time is never told');
+  ctx.STATE.data.settings.catalog.automationEvents = {};
+  ctx.__st('c-1', 'New');
+  assertEqual(timers.length, 2, 'events: no stage automation on, no wait either');
+}
+// Saving and switching on: a customer automation is never switched on by the builder without the owner's own yes.
+async function testAutomationsCustomerSafety(){
+  const writes = [];
+  const table = { insert(row){ writes.push(['insert', row]); this.row = { id: 'n1', ...row }; return this; }, update(row){ writes.push(['update', row]); this.row = { id: 'c1', name: 'Team alert', trigger: { type: 'newLead' }, steps: [], ...row }; return this; },
+    eq(){ return this; }, select(){ return this; }, single(){ return Promise.resolve({ data: this.row, error: null }); } };
+  const sb = autoSandbox({ sb: { from: () => table } }), A = sb.__get('AUTO'), log = sb.log;
+  sb.openAutoEditor(null);
+  const ed = sb.__get('AUTO_ED');
+  ed.name = 'Thanks'; ed.enabled = true;
+  ed.def = { trigger: { type: 'jobClosed', params: {} }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'Thanks {first_name}', templateKey: 'my_t' }] };
+  ed.drafts = { my_t: { name: 'Thanks', channel: 'email', body: '{hi}, thanks!' } };
+  await sb.autoSaveEditor();
+  assertEqual([writes[0][0], writes[0][1].enabled, writes[0][1].business_id, sb.STATE.data.settings.catalog.templates.my_t, sb.STATE.data.settings.catalog.msgTemplates.my_t.channel, sb.__get('AUTO_ED')],
+    ['insert', false, 'default', '{hi}, thanks!', 'email', null], 'save: a NEW automation that emails customers is written OFF, even with its switch on; its words go to the library');
+  // an ON team automation gets an email: it is saved off, and says so
+  A.list = [sb.autoNormalize({ id: 'c1', name: 'Team alert', enabled: true, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'New' }] })];
+  sb.openAutoEditor('c1');
+  const e2 = sb.__get('AUTO_ED');
+  e2.def.steps.push({ id: 's2', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' });
+  writes.length = 0;
+  await sb.autoSaveEditor();
+  assertEqual([writes[0][0], writes[0][1].enabled, /It is off: switch it on from the list/.test(log.toasts.slice(-1)[0])], ['update', false, true], 'save: adding a customer email to an automation that is on saves it OFF, and says so');
+  // switching on from the list
+  A.list = [sb.autoNormalize({ id: 'c1', name: 'Mail', enabled: false, trigger: { type: 'jobClosed' }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' }] }),
+    sb.autoNormalize({ id: 'c2', name: 'Team', enabled: false, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'New' }] })];
+  writes.length = 0; const c0 = log.confirms.length;
+  sb.toggleAutomation('c1');
+  assertEqual([log.confirms.length - c0, writes.length, /This sends to real customers/.test(log.confirms.slice(-1)[0].m)], [1, 0, true], 'switching on a customer automation asks first and writes nothing until yes');
+  await log.confirms.slice(-1)[0].fn(); await new Promise(r => setImmediate(r));
+  assertEqual(writes.map(w => [w[0], w[1]]), [['update', { enabled: true }]], 'after yes: only "enabled" is written');
+  writes.length = 0;
+  sb.toggleAutomation('c2'); await new Promise(r => setImmediate(r));
+  assertEqual([log.confirms.length - c0, writes.map(w => w[1])], [1, [{ enabled: true }]], 'a team automation switches on without asking');
+  // a broken automation can't be switched on
+  A.list = [sb.autoNormalize({ id: 'c3', name: 'Broken', enabled: false, trigger: { type: 'newLead' }, steps: [] })];
+  writes.length = 0; sb.toggleAutomation('c3');
+  assertEqual([writes.length, /^Fix it first/.test(log.toasts.slice(-1)[0])], [0, true], 'an automation with a problem can\'t be switched on');
+  // the events the app sends follow the automations that are on
+  A.list = [sb.autoNormalize({ id: 'c4', name: 'On', enabled: true, trigger: { type: 'stage', params: {} }, steps: [] })];
+  sb.autoSyncEvents();
+  assertEqual(sb.STATE.data.settings.catalog.automationEvents, { stage: true }, 'the starts the app reports are kept in settings (a silent write)');
+}
 // The Security page froze the browser on 14 Oct: while the sign-in options were loading, every redraw started another
 // load that returned at once and asked for another redraw, an endless loop. Now a second call gets the SAME promise,
 // so nothing can redraw before the real answer comes.
@@ -2311,8 +2911,197 @@ async function testAuthProvidersNoLoop(){
   assertEqual([ctx.__ap(), ctx.__lap() === p1, calls], [{ google: true }, true, 1], 'security page: the options arrive once and are kept');
 }
 
+// The 14 Oct review of phase 4: customer safety in the builder, the lead card's "Stop automatic messages", the Safety
+// settings, "Try it", ready-made automations taken off the list, the flow view's drag scrolling.
+async function testAutomationsReview14Oct(){
+  console.log('\nAutomations: the 14 Oct review fixes (phase 4)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const eng = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'automations', 'index.ts'), 'utf8');
+  const sb = autoSandbox(), m = loadSandbox(), ctx = autoFixtureCtx(m);
+  // Safety settings: the engine's defaults, the database's limits
+  const D = m.autoSafetyNorm(null);
+  assertEqual([D.timezone, D.customer_from, D.customer_until, D.customer_daily_cap, D.max_late_hours, D.lookback_hours, D.customer_days.length, D.email_signer, D.email_footer],
+    ['Australia/Sydney', '08:00', '20:00', 1, 24, 6, 7, '', ''], 'safety: nothing saved = the engine\'s defaults (every day 8 am–8 pm, one a day)');
+  const engFooter = JSON.parse(eng.match(/email_footer: ("(?:[^"\\]|\\.)*")/)[1]);
+  assertEqual(m.AUTO_EMAIL_FOOTER_DEFAULT, engFooter, 'safety: the way out the builder shows is the one the engine adds');
+  assertEqual([/timezone: "Australia\/Sydney", customer_days: \[0, 1, 2, 3, 4, 5, 6\], customer_from: "08:00", customer_until: "20:00"/.test(eng), /customer_daily_cap: 1,/.test(eng), /max_late_hours: 24, lookback_hours: 6/.test(eng)], [true, true, true], 'safety: the same defaults as the engine\'s DEFAULT_SETTINGS');
+  assertEqual(m.autoSafetyProblems({ ...D, customer_days: [], customer_from: '20:00', customer_until: '08:00', customer_daily_cap: 0, max_late_hours: 9999, email_signer: 'x'.repeat(61) }).length, 5, 'safety: no day, an end before the start, a cap of 0, 9999 hours late and a long signer are each refused');
+  assertEqual(m.autoSafetyProblems(D), [], 'safety: the defaults are fine');
+  const patch = m.autoSafetyPatch({ ...D, email_signer: '  ', email_footer: '', customer_days: [3, 1, 1] });
+  assertEqual([patch.email_signer, patch.email_footer, patch.customer_days, Object.keys(patch).includes('business_id')], [null, null, [1, 3], false], 'safety: an empty signer or way out is "not set"; days once each, in order; the business never changes');
+  assertEqual([m.autoTzLabel('Australia/Perth'), m.autoTzLabel('Pacific/Auckland'), m.autoTzLabel('')], ['Perth time', 'Auckland time', 'local time'], 'safety: the time zone in words (no fixed "Sydney time")');
+  assertEqual(m.autoSafetyLine(null), 'Customers only get automatic messages every day, 8 am–8 pm (Sydney time), at most 1 a day each; a later one waits for the morning.', 'safety: the line the editor shows next to a customer email');
+  assertEqual([m.autoEmailSigner({ email_signer: 'Dana Lee' }, 'Olivia Owner'), m.autoEmailSigner({}, 'Olivia Owner'), m.autoEmailSigner({}, 'The team'), m.autoEmailSigner({}, '')], ['Dana Lee', 'Olivia', '', ''], 'safety: who signs (never "The")');
+  const A = sb.__get('AUTO');
+  Object.assign(A, { safetyLoaded: true, safetyError: '', safety: { email_footer: '<script>x</script>', dont_contact_tags: ['<b>VIP</b>'] }, safetyDraft: null });
+  let h = sb.autoSafetyHtml(A, ['VIP']);
+  assertEqual([h.includes('<script>'), h.includes('&lt;script&gt;'), h.includes('&lt;b&gt;VIP'), h.includes('autoSafetyEdit()')], [false, true, true, true], 'safety: the read view escapes every saved word, with a Change button');
+  A.safetyDraft = m.autoSafetyNorm(A.safety);
+  h = sb.autoSafetyHtml(A, ['VIP']);
+  assertEqual([h.includes('autoSafetySave()'), h.includes('aria-label="Time zone"'), h.includes('Perth time'), (h.match(/class="au-day[ "]/g) || []).length], [true, true, true, 7], 'safety: the edit view has the days, hours, time zone and Save');
+  Object.assign(A, { safetyError: 'relation does not exist' });
+  assertEqual(/could not be loaded/.test(sb.autoSafetyHtml(A, [])), true, 'safety: a failed load says so (the defaults still apply)');
+  Object.assign(A, { safetyError: '', safetyDraft: null });
+  // the editor: who signs, 'at' inside the hours, the review-ask warning, gate conditions
+  const email = { id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_q' };
+  const def = { trigger: { type: 'newLead', params: {} }, steps: [email] };
+  assertEqual([m.autoStepIssues(email, def, { ...ctx, signer: '' }).some(p => p.block && /Nobody signs this email/.test(p.text)), m.autoStepIssues(email, def, { ...ctx, signer: 'Alex' }).some(p => /Nobody signs/.test(p.text)), m.autoStepIssues(email, def, ctx).some(p => /Nobody signs/.test(p.text))],
+    [true, false, false], 'editor: an email nobody would sign can\'t be saved (only once the safety settings are known)');
+  const win = { id: 'w1', kind: 'window', days: [1, 2, 3, 4, 5], from: '09:00', until: '17:00', outside: 'at', at: '20:00' };
+  assertEqual([m.autoStepIssues(win, def, ctx).some(p => p.block && /inside those hours/.test(p.text)), m.autoStepIssues({ ...win, at: '10:00' }, def, ctx).length], [true, 0], 'editor: a 9–5 window can\'t "go at 8 pm"');
+  const ask = { trigger: { type: 'jobClosed', params: {} }, steps: [{ id: 'i1', kind: 'if', match: 'all', conds: [{ field: 'asked_within_months', op: 'true', n: 6 }] }, email] };
+  assertEqual(m.autoProblems(ask, ctx, {}).some(p => !p.block && /"Ask for review" button doesn't see them/.test(p.text)), true, 'editor: an automation that asks for reviews warns that the office\'s button doesn\'t see its asks');
+  const any = { id: 'i1', kind: 'if', match: 'any', conds: [{ field: 'service', op: 'is', v: 'svcA' }, { field: 'source', op: 'is', v: 'web' }, { field: 'stage_unchanged', op: 'true' }] };
+  assertEqual(m.flowIfPhrase(any, { trigger: { type: 'stage' } }, ctx), 'Only if (the service is Window cleaning or the lead source is Website) and the lead is still in that stage', 'editor: "Still in the stage" reads as an AND in an "any" group (as the engine runs it)');
+  assertEqual([m.AUTO_CONDS.stage_unchanged.gate, m.AUTO_CONDS.stage_move_stands.hidden, /stage_unchanged: \{[^\n]*gate: true/.test(eng)], [true, true, true], 'editor: the gate is the engine\'s; the undo check is never offered');
+  // customer channels and new versions (the database's rules)
+  assertEqual([m.autoCustomerChannels({ steps: [email, { kind: 'action', type: 'text' }, { kind: 'action', type: 'push' }, { ...email, id: 's9' }] }), m.autoCustomerChannels({ steps: [] })], [['email', 'text'], []], 'channels: the customer channels it uses');
+  const base = { trigger: { type: 'stage', params: { stage: 'Lost', x: 1 } }, steps: [{ id: 'w', kind: 'wait', n: 1, unit: 'days' }, { id: 'p', kind: 'action', type: 'push', title: 'a' }] };
+  const V = (o) => m.autoNewVersion(base, { ...base, ...o });
+  assertEqual([V({}), V({ steps: [base.steps[0], { ...base.steps[1], title: 'b', to: { roles: ['va'] } }] }), V({ steps: [{ ...base.steps[0], n: 3 }, base.steps[1]] }), V({ trigger: { type: 'stage', params: { x: 1, stage: 'Lost' } } }),
+    V({ trigger: { type: 'stage', params: { stage: 'Quoted', x: 1 } } }), V({ steps: [base.steps[1], base.steps[0]] }), V({ steps: [base.steps[0]] }), m.autoNewVersion(null, base)],
+    [false, false, false, false, true, true, true, false], 'versions: words, numbers and recipients keep what is waiting; another start, or steps added, moved or removed, start it afresh');
+  // saving an automation that is on: another channel → off; another start → asked first
+  const writes = [];
+  const table = { _q: null, insert(row){ writes.push(['insert', row]); this.row = { id: 'n1', ...row }; return this; }, update(row){ writes.push(['update', row]); this.row = { id: 'c1', name: 'X', trigger: { type: 'newLead' }, steps: [], ...row }; return this; },
+    eq(){ return this; }, in(){ return Promise.resolve({ count: 3, error: null }); }, select(){ return this; }, single(){ return Promise.resolve({ data: this.row, error: null }); } };
+  const s2 = autoSandbox({ sb: { from: () => table } }), A2 = s2.__get('AUTO'), log2 = s2.log;
+  s2.STATE.data.settings = { catalog: { templates: { my_t: '{hi}, thanks for asking.' }, msgTemplates: { my_t: { name: 'Thanks', channel: 'email' } } } };
+  A2.list = [s2.autoNormalize({ id: 'c1', name: 'Texts', enabled: true, created_by_name: 'Alex Owner', trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'text', templateKey: 'my_t' }] })];
+  s2.openAutoEditor('c1');
+  let e2 = s2.__get('AUTO_ED');
+  e2.def.steps = [{ id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' }];
+  await s2.autoSaveEditor();
+  assertEqual([writes.length, writes[0] && writes[0][1].enabled, /It is off/.test(log2.toasts.slice(-1)[0])], [1, false, true], 'save: an automation that is on and swaps its text for an email is saved OFF (a new channel needs its own switch-on)');
+  A2.list = [s2.autoNormalize({ id: 'c1', name: 'Team', enabled: true, created_by_name: 'Alex Owner', trigger: { type: 'stage', params: { stage: 'Lost' } }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'Moved' }] })];
+  writes.length = 0; const c0 = log2.confirms.length;
+  s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
+  e2.def.trigger = { type: 'stage', params: { stage: 'Quoted' } };
+  await s2.autoSaveEditor();
+  assertEqual([writes.length, log2.confirms.length - c0, /3 runs are waiting to act/.test(log2.confirms.slice(-1)[0].m), /only acts on what happens after you save/.test(log2.confirms.slice(-1)[0].m)], [0, 1, true, true], 'save: an automation that is on and gets another start asks first, with the runs waiting, and writes nothing yet');
+  await log2.confirms.slice(-1)[0].fn(); await new Promise(r => setImmediate(r));
+  assertEqual([writes.length, writes[0] && writes[0][1].trigger.params.stage, writes[0] && writes[0][1].enabled], [1, 'Quoted', true], 'save: after yes it is saved (still on; the database re-arms it)');
+  writes.length = 0; const c1 = log2.confirms.length;
+  s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
+  e2.def.steps[0].title = 'New words';
+  await s2.autoSaveEditor();
+  assertEqual([writes.length, log2.confirms.length - c1], [1, 0], 'save: new words only: saved at once, nothing waiting stops');
+  // ready-made automations taken off the list
+  const s3 = autoSandbox(), log3 = s3.log;
+  s3.STATE.data.settings = { catalog: { notify: { newLead: { on: true } } } };
+  const team = s3.autoReadyRows().find(r => r.base==='team:newLead');
+  assertEqual(!!team && team.on, true, 'ready-made: the new-lead notification is on');
+  s3.autoRemoveReady(team.key);
+  assertEqual(log3.db.filter(x => x==='settings.update').length, 0, 'ready-made: removing asks first');
+  log3.confirms.slice(-1)[0].fn();
+  const cat3 = s3.STATE.data.settings.catalog;
+  assertEqual([log3.db.filter(x => x==='settings.update').length, cat3.notify.newLead.on, cat3.automations.hiddenReady, s3.autoReadyRows().some(r => r.base==='team:newLead'), s3.autoReadyRows(true).some(r => r.base==='team:newLead')],
+    [1, false, ['team:newLead'], false, true], 'ready-made: removed = switched off and off the list in ONE settings write; it still exists for "Put back"');
+  assertEqual(/Put back/.test(s3.autoRemovedHtml(['team:newLead'], s3.autoReadyRows(true))) && s3.autoRemovedHtml([], s3.autoReadyRows(true))==='', true, 'ready-made: the removed ones are listed under the list, with "Put back"');
+  s3.autoRestoreReady('team:newLead');
+  assertEqual([s3.STATE.data.settings.catalog.automations.hiddenReady, s3.STATE.data.settings.catalog.notify.newLead.on], [[], false], 'ready-made: put back on the list, still off');
+  // Try it
+  const data = { contacts: [{ id: 'c1', fullName: 'Old <b>', createdAt: '2026-01-01', status: 'New' }, { id: 'c2', fullName: 'New one', createdAt: '2026-10-14', status: 'Quoted' }], jobs: [{ id: 'j1', customerName: 'Pat', date: '2026-10-13' }] };
+  assertEqual([m.autoTryRecords('stage', data).map(r => r.id), m.autoTryRecords('jobClosed', data).map(r => r.kind + ':' + r.id), m.autoTryRecords('chat', data)], [['c2', 'c1'], ['job:j1'], []], 'try it: the latest leads for a lead start, jobs for a job start');
+  const res = { ok: true, steps: [{ id: 'w', kind: 'wait', would: 'wait', until: '2026-10-14T21:00:00.000Z' }, { id: 'e1', kind: 'action', type: 'email', would: 'queue', to: 'sam@x.com', subject: '<img src=x>', body: 'Hi Sam', signature: '\n\nAlex', note: 'this automation is off: nothing is sent' }, { id: 'p1', kind: 'action', type: 'push', would: 'skip', reason: 'condition: <b>' }] };
+  const out = m.autoTryResultHtml(res, { safety: { timezone: 'Australia/Sydney' } });
+  assertEqual([out.includes('<img'), out.includes('&lt;img'), out.includes('Stops: condition: &lt;b&gt;'), /Waits until <b>Thu/.test(out), out.includes('nothing is sent')], [false, true, true, true, true], 'try it: every word from the server escaped; waits in the business\'s time; stops say why');
+  assertEqual([/could not be reached/.test(m.autoTryResultHtml({ error: 'The automations service could not be reached. Try again in a moment.' })), /record not found/.test(m.autoTryResultHtml({ ok: false, problems: ['record not found'] }))], [true, true], 'try it: a failure says so');
+  {
+    let calls = 0, release = null; const shown = {};
+    const tctx = { console, PRESENT: false, VIEW_AS_ID: null, AUTOMATIONS_URL: 'u', SUPABASE_ANON_KEY: 'k', AUTO: { tryOut: null }, AUTO_ED: { token: 't1', mirror: false, name: 'X', def: { trigger: { type: 'newLead' }, steps: [] }, enabled: false },
+      sb: { auth: { getSession: async () => ({ data: { session: { access_token: 'a' } } }) } }, showToast(){}, autoCtx: () => ({}), autoTryResultHtml: (r) => 'RESULT:' + JSON.stringify(r), flowCompact: x => x,
+      document: { getElementById: id => id==='au-try-rec' ? { value: 'contact:c1' } : (shown[id] = shown[id] || { innerHTML: '' }) },
+      fetch(u, o){ calls++; tctx.body = JSON.parse(o.body); return new Promise(r => { release = () => r({ json: async () => ({ ok: true, steps: [] }) }); }); } };
+    vm.createContext(tctx);
+    vm.runInContext(['readOnlyReason', 'autoTryIt'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__try = autoTryIt;', tctx);
+    const p1 = tctx.__try(), p2 = tctx.__try();
+    await new Promise(r => setImmediate(r));
+    assertEqual([p1===p2, calls, tctx.body.step, tctx.body.record, shown['au-try-out'].innerHTML], [true, 1, 'preview', { kind: 'contact', id: 'c1' }, '<div class="hint">Working it out…</div>'], 'try it: one question at a time (a second click waits for the same answer); only the preview step');
+    release(); await p2;
+    assertEqual([shown['au-try-out'].innerHTML, !!tctx.AUTO.tryOut], ['RESULT:{"ok":true,"steps":[]}', true], 'try it: the answer fills the card only (no redraw)');
+    tctx.PRESENT = true; calls = 0;
+    assertEqual([tctx.__try(), calls], [null, 0], 'try it: in a read-only mode no server is called');
+  }
+  // the lead card's "Stop automatic messages"
+  const o = loadOptOutSandbox(script);
+  const C = { id: 'c1', fullName: 'Sam <Smith>', email: ' Sam@Example.com ', phone: '0412 345 678' };
+  assertEqual([o.optOutKeys(C), o.optOutKeys({ email: 'nope', phone: '12' })], [['sam@example.com', '412345678'], []], 'opt-out: the card\'s addresses (lower-case email, the phone\'s last 9 digits)');
+  assertEqual(o.optOutInserts(C, 'default', 'Asked to stop').map(r => [r.business_id, r.contact_id, r.channel, r.value_key]), [['default', 'c1', 'all', 'sam@example.com'], ['default', 'c1', 'all', '412345678']], 'opt-out: one row per address, so it outlives the card');
+  assertEqual(o.optOutRowsFor({ id: 'c2', email: 'sam@example.com' }, [{ id: 'x', contact_id: 'c1', value_key: 'sam@example.com' }, { id: 'y', contact_id: 'c9', value_key: 'kim@x.com' }]).map(r => r.id), ['x'], 'opt-out: another card with the same email is stopped too');
+  assertEqual([o.optOutControlHtml(C, { loaded: false, rows: [] }), /Stop automatic messages/.test(o.optOutControlHtml(C, { loaded: true, rows: [] })), /No automatic messages[\s\S]*Allow again/.test(o.optOutControlHtml(C, { loaded: true, rows: [{ contact_id: 'c1' }] }))], ['', true, true], 'opt-out: the card shows the stop, or that it is stopped');
+  const p1 = o.loadCustomerOptOuts(), p2 = o.loadCustomerOptOuts();
+  await new Promise(r => setImmediate(r));
+  assertEqual([p1===p2, o.__q.reads], [true, 1], 'opt-out: a second load while one runs is the same promise (one read, no redraw)');
+  o.__q.release(); await p2;
+  assertEqual([o.OPTOUTS.loaded, o.__renders()], [true, 0], 'opt-out: loaded; the page is never redrawn by it');
+  o.stopAutoMessages('c1');
+  assertEqual(o.__q.writes.length, 0, 'opt-out: stopping asks first');
+  await o.__confirms.slice(-1)[0].fn();
+  assertEqual([o.__q.writes[0][0], o.__q.writes[0][1].map(r => r.value_key), o.OPTOUTS.rows.length, o.__acts.slice(-1)[0]], ['insert', ['sam@example.com', '412345678'], 2, 'Automatic messages stopped (the customer asked)'], 'opt-out: after yes, both addresses are written and the card\'s history says so');
+  o.allowAutoMessages('c1'); await o.__confirms.slice(-1)[0].fn();
+  assertEqual([o.__q.writes[1][0], o.__q.writes[1][1].length, o.OPTOUTS.rows.length], ['delete', 2, 0], 'opt-out: "Allow again" removes them (after a yes)');
+  o.__ctx.PRESENT = true; const w0 = o.__q.writes.length, k0 = o.__confirms.length;
+  o.stopAutoMessages('c1');
+  assertEqual([o.__q.writes.length - w0, o.__confirms.length - k0], [0, 0], 'opt-out: nothing in a read-only mode');
+  // the flow view's drag: never the page behind the editor
+  {
+    // scrollTop clamps to the end, as a browser does
+    const node = (o2) => { let top = 0; const n = { parentElement: null, scrollHeight: 100, clientHeight: 100, id: '', cls: [], matches(sel){ return sel.split(',').some(x => this.cls.includes(x.trim().slice(1))); }, getBoundingClientRect: () => ({ top: 0, bottom: 600 }), ...o2 };
+      Object.defineProperty(n, 'scrollTop', { get: () => top, set: v => { top = Math.max(0, Math.min(n.scrollHeight - n.clientHeight, v)); } }); return n; };
+    const docEl = node({ cls: [] }), styles = new Map();
+    const fctx = { console, document: { scrollingElement: docEl, documentElement: docEl }, window: { innerHeight: 800 }, getComputedStyle: el => ({ overflowY: styles.get(el) || 'visible' }), requestAnimationFrame: () => 7, FLOW_DRAG: null };
+    vm.createContext(fctx);
+    vm.runInContext(['flowScroller', 'flowScrollTop', 'flowDropIndex', 'flowDragUpdate', 'flowDragEdge'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__sc = flowScroller; this.__edge = flowDragEdge; this.__set = d => { FLOW_DRAG = d; };', fctx);
+    const back = node({ cls: ['modal-back'] }), modal = node({ cls: ['modal', 'auto-ed'], parentElement: back }), body = node({ cls: ['au-ed-body'], parentElement: modal }), main = node({ cls: ['ed-main'], parentElement: body }), canvas = node({ cls: ['flow'], parentElement: main });
+    styles.set(modal, 'hidden'); styles.set(back, 'hidden'); styles.set(main, 'auto');
+    assertEqual(fctx.__sc(canvas)===main, true, 'drag: a short flow in the editor scrolls the editor\'s own area (even when it is not longer than it shows), never the page');
+    styles.set(main, 'visible'); styles.set(body, 'visible');
+    assertEqual(fctx.__sc(canvas), null, 'drag: no scroll area in the window = nothing scrolls');
+    const loose = node({ cls: ['flow'], parentElement: node({ cls: ['card'] }) });
+    assertEqual(fctx.__sc(loose)===docEl, true, 'drag: outside a window the page scrolls');
+    const item = { style: {} }, d = { started: true, scroller: null, y: 790, y0: 300, scroll0: 0, item, items: [item], mids: [100], from: 0, to: 0, h: 50, raf: 1 };
+    fctx.__set(d); fctx.__edge();
+    assertEqual([d.raf, docEl.scrollTop], [null, 0], 'drag: at the bottom edge with nothing to scroll, the frame loop stops and the page stays put');
+    styles.set(main, 'auto'); d.scroller = main; d.raf = 1; main.scrollHeight = 100; main.clientHeight = 100;
+    fctx.__edge();
+    assertEqual([d.raf, main.scrollTop], [null, 0], 'drag: an area already at its end stops the loop too (no endless frames)');
+  }
+  // the job's event is told after its card is linked (both ways a job is made)
+  const sj = extractDecl(script, 'saveJobModal'), fc = extractDecl(script, 'finalizeClosing');
+  assertEqual([sj.indexOf("automationEvent('jobClosed'") > sj.indexOf('await ensureContactForJob(job, contactId)'), fc.indexOf("automationEvent('jobClosed'") > fc.indexOf('await ensureContactForJob(job, g.contactId)'), (sj.match(/automationEvent\('jobClosed'/g) || []).length, (fc.match(/automationEvent\('jobClosed'/g) || []).length],
+    [true, true, 1, 1], 'events: a new job is reported once, after its customer card is linked');
+}
+// A small context for the lead card's opt-out control: a fake table that holds its read until released.
+function loadOptOutSandbox(script){
+  const q = { reads: 0, writes: [], release: null };
+  const rows = [];
+  const table = () => {
+    const b = { op: 'select', payload: null,
+      select(){ return b; }, eq(){ return b; },
+      insert(p){ b.op = 'insert'; b.payload = p; return b; }, delete(){ b.op = 'delete'; return b; },
+      in(k, ids){ q.writes.push(['delete', ids]); return Promise.resolve({ error: null }); },
+      range(){ q.reads++; return new Promise(r => { q.release = () => r({ data: rows, error: null }); }); },
+      then(res, rej){ if (b.op==='insert') { q.writes.push(['insert', b.payload]); return Promise.resolve({ data: b.payload.map((x, i) => ({ id: 'o' + i, ...x })), error: null }).then(res, rej); } return Promise.resolve({ data: [], error: null }).then(res, rej); } };
+    return b;
+  };
+  let renders = 0; const confirms = [], acts = [];
+  const ctx = { console, PRESENT: false, VIEW_AS_ID: null, AUTO_BUSINESS_ID: 'default', LEAD_MODAL_ID: 'c1', sb: { from: table },
+    STATE: { data: { contacts: [{ id: 'c1', fullName: 'Sam', email: 'sam@example.com', phone: '0412 345 678' }] } },
+    render(){ renders++; }, renderKeepingInput(){ renders++; }, showToast(){}, confirmAction: (m, fn) => confirms.push({ m, fn }), logContactActivity: (c, a, t) => acts.push(t), getCurrentProfile: () => ({ fullName: 'Alex' }),
+    document: { getElementById: () => ({ innerHTML: '' }) } };
+  vm.createContext(ctx);
+  vm.runInContext(['esc', 'jsStr', 'pill', 'readOnlyReason', 'contactById', 'OPTOUTS', 'optOutKeys', 'optOutRowsFor', 'optOutInserts', 'optOutControlHtml', 'loadCustomerOptOuts', 'optOutRefresh', 'stopAutoMessages', 'allowAutoMessages'].map(n => extractDecl(script, n)).join('\n')
+    + '\nthis.__x = { OPTOUTS, optOutKeys, optOutRowsFor, optOutInserts, optOutControlHtml, loadCustomerOptOuts, stopAutoMessages, allowAutoMessages };', ctx);
+  return { ...ctx.__x, __q: q, __ctx: ctx, __renders: () => renders, __confirms: confirms, __acts: acts };
+}
+
 (async () => {
   await testAuthProvidersNoLoop();
+  await testAutomationsLoaderNoLoop();
+  await testAutomationEventsGate();
+  await testAutomationsCustomerSafety();
+  await testAutomationsReview14Oct();
   await testFullBackup(loadSandbox());
   await testDataExport(loadSandbox());
   console.log(`\n${pass} passed, ${fail} failed`);

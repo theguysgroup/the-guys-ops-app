@@ -83,7 +83,7 @@ function enclosingFunction(idx){
   return { name, text: name ? fnText(name) : '' , at };
 }
 function testStaticScan(){
-  const re = /fetch\(\s*(CONV_URL|VOICE_URL|PASSKEY_URL|BACKUP_URL|`\$\{VOICE_URL\}|SUPABASE_URL \+ '\/functions\/v1\/)/g; let m; const seen = [];
+  const re = /fetch\(\s*(CONV_URL|VOICE_URL|PASSKEY_URL|BACKUP_URL|AUTOMATIONS_URL|`\$\{VOICE_URL\}|SUPABASE_URL \+ '\/functions\/v1\/)/g; let m; const seen = [];
   while ((m = re.exec(SRC))) {
     const f = enclosingFunction(m.index);
     seen.push(f.name);
@@ -92,6 +92,7 @@ function testStaticScan(){
   }
   ok(seen.length >= 7 && seen.includes('passkeyCall'), 'static scan found the server calls (setMyBreak, convSend, mdCloseOldDays, mdEndOfDay, askForReview, voiceFetch, passkeyCall)', seen);
   ok(seen.includes('backupFetch') && seen.includes('downloadFullBackup'), 'static scan found the backup function calls (backupFetch, downloadFullBackup)', seen);
+  ok(seen.includes('automationEvent'), 'static scan found the automation engine\'s "look now" (automationEvent)', seen);
   // Business details (14 Oct): the insurance certificate upload and the week-start change stop in a read-only mode.
   ok(['pickBusinessCertificate', 'setWeekStart'].every(n => /readOnlyReason\(\)/.test(fnText(n))), 'business certificate upload and week start check read-only mode');
 }
@@ -381,6 +382,116 @@ async function testExportReadOnly(){
   ok(/readOnlyReason\(\)/.test(fnText('downloadDataExcel')) && /readOnlyReason\(\)/.test(fnText('setExportSensitive')), 'the download and the sensitive tick check read-only mode');
 }
 
+// Automations, the flow view (phase 4, group J): moving, adding and removing steps, switching Form / Flow and a whole
+// drag change only the editor's own copy (AUTO_ED). In a read-only mode, as in any other, nothing reaches the database
+// or a server (saving stays the editor's Save, which checks readOnlyReason()). One drag redraws the editor exactly once,
+// and never the whole app.
+function flowSandbox(present){
+  const log = { db: [], fetch: [], render: 0, edRender: 0, toasts: [], popups: 0 };
+  const ctx = {
+    log, PRESENT: present, VIEW_AS_ID: null, console,
+    sb: new Proxy({}, { get: () => { log.db.push('sb'); throw new Error('no database here'); } }),
+    db: new Proxy({}, { get: () => { log.db.push('db'); throw new Error('no database here'); } }),
+    fetch: (u) => { log.fetch.push(String(u)); return Promise.resolve({ ok: true, json: async () => ({}) }); },
+    render: () => { log.render++; }, autoEdRender: () => { log.edRender++; },
+    showToast: (m, o) => { log.toasts.push({ m, o }); }, openPopup: () => { log.popups++; }, closePopup: () => {},
+    motionReduced: () => true, CSS: { escape: s => String(s) },
+    window: { matchMedia: () => ({ matches: false }) },
+    document: { getElementById: () => null, querySelector: () => null, addEventListener: () => {}, removeEventListener: () => {} },
+    localStorage: { getItem: () => null, setItem: () => {} },
+    cancelAnimationFrame: () => {}, requestAnimationFrame: () => 0,
+    autoCtx: () => ({ phoneLive: false, catalog: {}, registry: { triggers: { newLead: { label: 'A new lead comes in', customer: true } }, conds: {},
+      actions: { push: { label: 'A phone notification', audience: 'team' }, email: { label: 'An email to the customer', audience: 'customer' },
+        text: { label: 'A text', audience: 'customer', available: c => ({ ok: !!c.phoneLive, why: 'Needs the business phone (Twilio)' }) } } } }),
+  };
+  vm.createContext(ctx);
+  const names = [...SRC.matchAll(/function ((?:flow|setFlow)\w*)\(/g)].map(m => m[1]);
+  vm.runInContext([constText('FLOW_MAX_STEPS_DEFAULT'), constText('FLOW_MAX_STEPS_CEILING'), constText('FLOW_STEP_KINDS'), constText('ICONS'),
+    'let FLOW_DRAG = null, FLOW_EDRENDER_PENDING = false;',
+    'var AUTO_ED = { token: 7, view: "form", sel: null, mirror: false, dirty: false, def: { trigger: { type: "newLead" }, steps: [{ id: "s1", kind: "wait", n: 1, unit: "days" }, { id: "s2", kind: "action", type: "push", title: "New lead" }, { id: "s3", kind: "wait", n: 2, unit: "hours" }] } };',
+    ...['readOnlyReason', 'esc', 'jsStr', 'ico', 'pill', 'fillTemplate', ...names].map(fnText)].join('\n'), ctx);
+  return ctx;
+}
+function testFlowViewReadOnly(){
+  const ids = ctx => vm.runInContext('AUTO_ED.def.steps.map(s => s.id).join(",")', ctx);
+  for (const present of [true, false]) {
+    const mode = present ? 'presentation mode' : 'normal mode', ctx = flowSandbox(present), log = ctx.log;
+    const before = vm.runInContext('JSON.stringify(AUTO_ED.def)', ctx);
+    vm.runInContext('flowSetView("flow"); flowSetView("form"); flowSetView("flow")', ctx);
+    ok(vm.runInContext('JSON.stringify(AUTO_ED.def)', ctx) === before && vm.runInContext('AUTO_ED.view', ctx) === 'flow', `${mode}: switching Form ↔ Flow keeps the automation byte for byte`);
+    vm.runInContext('flowMoveBy("s1", 1)', ctx);
+    ok(ids(ctx) === 's2,s1,s3', `${mode}: Move down changes the editor's copy`, ids(ctx));
+    vm.runInContext('flowAddPick(3, "action", "email")', ctx);
+    ok(ids(ctx) === 's2,s1,s3,s4' && vm.runInContext('AUTO_ED.sel', ctx) === 's4', `${mode}: "+" adds a Do step at its place and opens it`, ids(ctx));
+    vm.runInContext('flowAddPick(0, "action", "text")', ctx);
+    ok(ids(ctx) === 's2,s1,s3,s4', `${mode}: a text can't be added before the business phone is live (not even by calling the handler)`, ids(ctx));
+    vm.runInContext('flowRemoveStep("s1")', ctx);
+    ok(ids(ctx) === 's2,s3,s4' && log.toasts.length === 1 && /^Removed "Wait 1 day"$/.test(log.toasts[0].m), `${mode}: the bin removes the step and offers Undo`, log.toasts.map(x => x.m));
+    log.toasts[0].o.undo();
+    ok(ids(ctx) === 's2,s1,s3,s4', `${mode}: Undo puts it back where it was`, ids(ctx));
+    vm.runInContext('AUTO_ED.token = 8', ctx); vm.runInContext('flowRemoveStep("s1")', ctx); vm.runInContext('AUTO_ED.token = 9', ctx);
+    log.toasts[1].o.undo();
+    ok(ids(ctx) === 's2,s3,s4', `${mode}: Undo after the editor moved on does nothing`, ids(ctx));
+    // A whole drag: nothing redraws while it moves (a live update is held), then the editor redraws exactly once.
+    const r0 = log.edRender;
+    vm.runInContext(`FLOW_DRAG = { id: 's4', from: 2, to: 0, started: true, pointerId: 1, raf: null, items: [], item: { classList: { remove(){} } }, canvas: { classList: { remove(){} } }, grip: { releasePointerCapture(){} } };
+      flowRedraw(); flowRedraw();`, ctx);
+    ok(log.edRender === r0 && vm.runInContext('FLOW_EDRENDER_PENDING', ctx) === true, `${mode}: no redraw while a block is dragged`);
+    vm.runInContext('flowDragEnd({ pointerId: 1 })', ctx);
+    ok(ids(ctx) === 's4,s2,s3' && log.edRender === r0 + 1 && vm.runInContext('FLOW_DRAG', ctx) === null, `${mode}: the drop moves the step and redraws the editor once`, [ids(ctx), log.edRender - r0]);
+    vm.runInContext('AUTO_ED.mirror = true; flowMoveBy("s4", 1); flowRemoveStep("s4"); flowAddPick(0, "wait", ""); flowAddAt(0)', ctx);
+    ok(ids(ctx) === 's4,s2,s3' && log.popups === 0, `${mode}: a ready-made mirror's steps can't be moved, removed or added to`);
+    ok(log.db.length === 0 && log.fetch.length === 0 && log.render === 0, `${mode}: no database, no server call, no whole-app redraw`, log);
+  }
+  const fns = [...SRC.matchAll(/function ((?:flow|setFlow)\w*)\(/g)].map(m => m[1]);
+  ok(fns.length > 30 && fns.every(n => !/fetch\(|\bdb\.|\bsb\./.test(fnText(n))), 'no flow function sends anything to a server or the database (layer 2 stays complete)', fns.filter(n => /fetch\(|\bdb\.|\bsb\./.test(fnText(n))));
+}
+
+
+// Automations, the builder (phase 4, group I): in a read-only mode no automation, template, switch or ready-made setting
+// is saved, no event reaches the engine, and the person is told (the events, which nobody clicked, stay silent).
+async function testAutomationsReadOnly(){
+  for (const [mode, present, viewAs] of [['presentation mode', true, null], ['View as', false, 'ron']]) {
+    const log = { toasts: [], touched: [], fetch: [], timers: 0 };
+    const touch = what => (...a) => { log.touched.push(what); return Promise.resolve({ data: null, error: null }); };
+    const ctx = {
+      log, PRESENT: present, VIEW_AS_ID: viewAs, console, Promise, JSON,
+      showToast: (m) => log.toasts.push(m), render: () => {}, closeModal: () => {}, autoEdRender: () => {},
+      db: new Proxy({}, { get: (t, k) => { log.touched.push('db.' + String(k)); throw new Error('no database in a read-only mode'); } }),
+      sb: new Proxy({}, { get: (t, k) => { log.touched.push('sb.' + String(k)); throw new Error('no database in a read-only mode'); } }),
+      fetch: (u) => { log.fetch.push(String(u)); return Promise.resolve({ json: async () => ({}) }); },
+      setTimeout: () => { log.timers++; return 0; },
+      confirmAction: touch('confirm'), openAutoEditor: touch('editor'), catalogSave: touch('catalogSave'), logSettingsActivity: touch('activity'),
+      autoCatalogWrite: touch('catalogWrite'), autoReadyRow: () => ({ key: 'ready:review', base: 'review', name: 'Review request after a closed job', def: { trigger: { type: 'jobClosed' }, steps: [] } }),
+      window: { setReviewCfg: touch('setReviewCfg'), setChatAutoSms: touch('setChatAutoSms'), toggleNotifyCard: touch('toggleNotifyCard') },
+      AUTO: { list: [{ id: 'a1', name: 'Quote', enabled: false, def: { trigger: { type: 'newLead' }, steps: [] } }] },
+      AUTO_ED: { id: 'a1', isNew: false, mirror: false, def: { trigger: { type: 'newLead' }, steps: [] }, drafts: {} },
+      AUTO_TPL_EDIT: { key: 'my_a', name: 'Quote', channel: 'text', body: 'Hi' },
+      AUTO_READY_SETTERS: ['setReviewCfg', 'setChatAutoSms', 'toggleNotifyCard'],
+      STATE: { data: { settings: { catalog: { automationEvents: { newLead: true, stage: true } } } }, profiles: [] },
+      getRealProfile: () => ({ id: 'p', role: 'owner' }), SUPABASE_URL: 'https://x', SUPABASE_ANON_KEY: 'k', contactById: () => ({ id: 'c1' }), leadStage: () => 'Quoted',
+    };
+    vm.createContext(ctx);
+    vm.runInContext([constText('AUTOMATIONS_URL'), constText('AUTOMATION_EVENTS_SENT'), ...['readOnlyReason', 'catalogObject', 'automationEventBody', 'automationEvent', 'autoEventWanted', 'autoEmitStage', 'autoSyncEvents',
+      'saveMsgTemplate', 'deleteMsgTemplate', 'newMsgTemplate', 'editMsgTemplate', 'autoSaveEditor', 'toggleAutomation', 'autoWriteEnabled', 'deleteAutomation', 'duplicateAutomation',
+      'autoBackToDefault', 'autoReadyBackToDefault', 'autoReadyAct'].map(fnText)].join('\n'), ctx);
+    const msg = vm.runInContext('readOnlyReason()', ctx);
+    const run = async (code) => { try { await vm.runInContext(code, ctx); } catch (e) { ok(false, `${mode}: ${code} ran past its read-only check`, String(e.message || e).slice(0, 120)); } };
+    for (const c of [`saveMsgTemplate()`, `deleteMsgTemplate('my_a')`, `newMsgTemplate()`, `editMsgTemplate('my_a')`, `autoSaveEditor()`, `toggleAutomation('a1')`, `autoWriteEnabled(AUTO.list[0], true)`,
+      `deleteAutomation('a1')`, `duplicateAutomation('ready:review')`, `autoBackToDefault('ready:review')`, `autoReadyBackToDefault()`, `autoReadyAct('setReviewCfg', 'sendFrom', '9')`, `autoReadyAct('setChatAutoSms', true)`]) await run(c);
+    ok(log.touched.length === 0 && log.fetch.length === 0, `${mode}: no automation, template, switch or ready-made setting is saved, and no window opens`, log);
+    ok(log.toasts.length === 13 && log.toasts.every(t => t === msg), `${mode}: each one says changes are not saved`, log.toasts);
+    const before = log.toasts.length;
+    await run(`automationEvent('newLead', 'c1')`); await run(`autoEmitStage('c1', 'Quoted')`); await run(`autoSyncEvents()`);
+    await new Promise(r => setImmediate(r));
+    ok(log.fetch.length === 0 && log.timers === 0 && log.touched.length === 0 && log.toasts.length === before, `${mode}: no event reaches the engine, nothing waits to send one, and nobody is told (nobody clicked)`, log);
+    ok(JSON.stringify(ctx.AUTO.list[0].enabled) === 'false' && ctx.AUTO_TPL_EDIT.key === 'my_a', `${mode}: nothing changes on screen either`);
+  }
+  for (const n of ['autoSaveEditor', 'toggleAutomation', 'autoWriteEnabled', 'deleteAutomation', 'duplicateAutomation', 'saveMsgTemplate', 'deleteMsgTemplate', 'newMsgTemplate', 'autoBackToDefault', 'autoReadyBackToDefault', 'autoReadyAct', 'autoCatalogWrite', 'autoSyncEvents', 'autoEmitStage'])
+    ok(/readOnlyReason\(\)/.test(fnText(n)), `${n}() checks readOnlyReason()`);
+  ok(/if \(!autoEventWanted\(type\)\) return;/.test(fnText('automationEvent')), 'automationEvent only tells the engine when an automation of your own waits for that event');
+}
+
 (async () => {
   await testGuard();
   testStaticScan();
@@ -389,6 +500,8 @@ async function testExportReadOnly(){
   await testSecurityReadOnly();
   await testBackupReadOnly();
   await testExportReadOnly();
+  testFlowViewReadOnly();
+  await testAutomationsReadOnly();
   console.log(`read-only: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
