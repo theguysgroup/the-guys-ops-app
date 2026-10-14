@@ -1494,6 +1494,8 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .pill.vac { background: var(--accent-soft); color: var(--accent); }
 .vac-opts { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
 .vac-opt { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
+.vac-opt input[type=checkbox] { width: auto; flex: none; margin-top: 2px; }
+.vac-opt > span { flex: 1; min-width: 0; }
 .vac-opt small { display: block; color: var(--ink-soft); font-size: 11.5px; }
 .vac-off { color: var(--ink-faint); }
 .vac-off .vac-note { font-size: 11px; color: var(--accent); margin-left: 4px; }
@@ -1501,6 +1503,8 @@ button.jobs-stat:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .vac-banner { margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
 .vac-banner .btn { margin-left: auto; }
 .vac-pay { display: flex; gap: 14px; flex-wrap: wrap; }
+.vac-pay .checkline { white-space: nowrap; }
+.vac-pay input[type=radio] { width: auto; flex: none; }
 .vac-items { display: grid; gap: 6px; }
 .vac-item { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; font-size: 12.5px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
 .vac-item > span { min-width: 0; overflow-wrap: anywhere; }
@@ -19212,10 +19216,10 @@ function vacationDraft(empId, vacId, rows, employees, catalog, today){
   return { id: null, employeeId: empId || '', startsOn: today, endsOn: '', standInId: s && (s.status || 'Active')==='Active' ? s.id : null,
     options: empId ? vacationOptionsFor(list, who, catalog) : vacationDefaults(catalog), note: '', fromPrev: !!prev };
 }
-// What stops the window from saving: who, the vacations block's checks (the database makes the same), a stand-in who is on
-// vacation in those dates too, and a stand-in with no app login (loginIds, from vacationLoginIds; null = not known): their
-// copy of the notifications would go to nobody.
-function vacationFormProblems(d, rows, employees, tz, loginIds){
+// What stops the window from saving: who, the vacations block's checks (the database makes the same) and a stand-in who is on
+// vacation in those dates too. A stand-in with no app login is only a warning (vacationStandInWarning): open items can still
+// move to them, and without a login their copy of the notifications goes to nobody, as with no stand-in at all.
+function vacationFormProblems(d, rows, employees, tz){
   const out = [], o = (d && d.options) || {};
   if (!d || !d.employeeId) out.push('Pick who is going on vacation');
   out.push(...vacationProblems(d, rows, tz));
@@ -19226,11 +19230,14 @@ function vacationFormProblems(d, rows, employees, tz, loginIds){
       out.push(`${(s && s.name) || 'The stand-in'} is on vacation then too: pick another stand-in`);
     }
   }
-  if (d && o.standIn===true && d.standInId && d.standInId!==d.employeeId && loginIds && !loginIds.has(d.standInId)) {
-    const s = (employees || []).find(e => e.id===d.standInId);
-    out.push(`${(s && s.name) || 'The stand-in'} has no app login, so they can't get the notifications: pick someone who has one`);
-  }
   return out;
+}
+// Shown under the stand-in (loginIds from vacationLoginIds; null = not known): a stand-in with no app login gets no notifications.
+function vacationStandInWarning(d, employees, loginIds){
+  const o = (d && d.options) || {};
+  if (!d || o.standIn!==true || !d.standInId || d.standInId===d.employeeId || !loginIds || loginIds.has(d.standInId)) return '';
+  const s = (employees || []).find(e => e.id===d.standInId);
+  return `${(s && s.name) || 'The stand-in'} has no app login, so their copy of the notifications goes to nobody. Open items can still move to them.`;
 }
 // The phone_routing.people entry's employee, the voice function's rule (vacPhoneEmployee), one clear match, never a guess:
 // the same mobile; else the same full name; else their first name when nobody else has it (no other employee, and no login
@@ -19422,7 +19429,7 @@ function vacExtraHtml(){
   const logins = vacationLoginIds(STATE.profiles, data.employees);
   const owner = (STATE.profiles || []).some(p => p.role==='owner' && (vacationEmployeeOfProfile(p, data.employees) || {}).id===d.employeeId);
   const stand = o.standIn===true
-    ? `<div class="field" style="margin-top:11px"><label>Stand-in</label><select onchange="vacSet('standInId', this.value)"><option value="">Pick the stand-in</option>${people.map(e => `<option value="${esc(e.id)}" ${e.id===d.standInId ? 'selected' : ''}>${esc(e.name)}${awayThen(e) ? ' · on vacation then' : ''}${logins && !logins.has(e.id) ? ' · no app login: gets no notifications' : ''}</option>`).join('')}</select><span class="job-sub">Gets their notifications${o.flagOpen===true ? ', and their open items move to them with one click (jobs only to a technician)' : ''}.${owner ? ' Money and private owner alerts only go to a stand-in who is an owner.' : ''}</span></div>`
+    ? `<div class="field" style="margin-top:11px"><label>Stand-in</label><select onchange="vacSet('standInId', this.value)"><option value="">Pick the stand-in</option>${people.map(e => `<option value="${esc(e.id)}" ${e.id===d.standInId ? 'selected' : ''}>${esc(e.name)}${awayThen(e) ? ' · on vacation then' : ''}${logins && !logins.has(e.id) ? ' · no app login: gets no notifications' : ''}</option>`).join('')}</select><span class="job-sub">Gets their notifications${o.flagOpen===true ? ', and their open items move to them with one click (jobs only to a technician)' : ''}.${owner ? ' Money and private owner alerts only go to a stand-in who is an owner.' : ''}</span>${(w => w ? `<span class="job-sub" style="display:block;margin-top:3px;color:var(--warn)">${esc(w)}</span>` : '')(vacationStandInWarning(d, data.employees, logins))}</div>`
     : o.flagOpen===true ? `<div class="hint" style="margin-top:8px">Tick "${esc(standLabel)}" to move their open items to someone with one click.</div>` : '';
   const pay = o.payroll===true
     ? `<div class="field" style="margin-top:11px"><label>Leave on the payroll board</label><div class="vac-pay">${VACATION_PAY.map(p => `<label class="checkline"><input type="radio" name="vac-pay" value="${esc(p)}" ${o.pay===p ? 'checked' : ''} onchange="vacSet('pay', this.value)">${p==='paid' ? 'Paid leave' : 'Unpaid leave'}</label>`).join('')}</div></div>` : '';
@@ -19435,7 +19442,7 @@ function vacSet(field, value){
   if (field==='pay') d.options = { ...d.options, pay: value };
   else if (field==='standInId') d.standInId = value || null;
   else if (field==='startsOn' || field==='endsOn' || field==='note') d[field] = value || '';
-  if (field==='startsOn' || field==='endsOn') { const x = document.getElementById('vac-extra'); if (x) x.innerHTML = vacExtraHtml(); }
+  if (field==='startsOn' || field==='endsOn' || field==='standInId') { const x = document.getElementById('vac-extra'); if (x) x.innerHTML = vacExtraHtml(); }
 }
 function vacToggleOpt(key, on){
   if (!VAC_UI || !VACATION_OPTIONS.some(o => o.key===key)) return;
@@ -19468,7 +19475,7 @@ async function saveVacationModal(){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   if (!VAC_UI || VAC_UI.saving || !canSetVacation()) return;
   const d = VAC_UI.draft, data = STATE.data, tz = vacationTz(), today = vacationToday();
-  const problems = vacationFormProblems(d, data.vacations || [], data.employees || [], tz, vacationLoginIds(STATE.profiles, data.employees));
+  const problems = vacationFormProblems(d, data.vacations || [], data.employees || [], tz);
   if (problems.length) { modalError(problems[0]); return; }
   const emp = (data.employees || []).find(e => e.id===d.employeeId), first = String((emp && emp.name) || '').split(' ')[0] || 'them';
   const ui = VAC_UI;   // the window this save belongs to: closed (or another one opened) while saving = left alone

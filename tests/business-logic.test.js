@@ -150,7 +150,7 @@ const DECLS = [
   'vacationOverdue', 'vacationPickerInfo', 'vacationAssignText', 'vacationPayrollLines', 'vacationOpenItems', 'vacationMoveTaskPatch', 'vacationErrorText', 'mapVacationRow',
   // On vacation, the UI (stage 3)
   'vacationRangeText', 'vacationUsableStandIn', 'vacationWho', 'vacationAssignInfo', 'vacationPickerLabel', 'vacationAssignConflicts', 'vacationTaskDay', 'vacationTaskFlag', 'vacationJobFlag',
-  'vacationMovableItems', 'vacationPayLines', 'vacationAwayOn', 'vacationTeamRows', 'vacationAllTicked', 'vacationBannerText', 'vacationDraft', 'vacationFormProblems', 'vacationPhoneEmployee',
+  'vacationMovableItems', 'vacationPayLines', 'vacationAwayOn', 'vacationTeamRows', 'vacationAllTicked', 'vacationBannerText', 'vacationDraft', 'vacationFormProblems', 'vacationStandInWarning','vacationPhoneEmployee',
   // stage 3 review fixes: the login ↔ employee rule, job stand-ins, the phone rule shared with voice
   'vacationEmployeeOfProfile', 'vacationLoginIds', 'vacationJobStandIn', 'vacationPhoneAway',
 ];
@@ -2756,9 +2756,10 @@ function testVacationUi(sb){
   assertEqual(P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30' }), [], 'problems: a vacation changed does not overlap itself');
   assertEqual(P({ ...ok, note: 'x'.repeat(501) }), ['The note can be at most 500 characters'], 'problems: a long note');
   assertEqual(P({ ...ok, options: { payroll: true, pay: 'later' } }), ['Paid or unpaid leave?'], 'problems: payroll ticked, paid or unpaid missing');
-  const PL2 = (d, ids) => sb.vacationFormProblems(d, rows, employees, SYD, ids);
-  assertEqual([PL2(ok, new Set(['e1', 'e2'])), PL2(ok, new Set(['e1'])), PL2(ok, null), PL2({ ...ok, options: { standIn: false } }, new Set())],
-    [[], ['Sam has no app login, so they can\'t get the notifications: pick someone who has one'], [], []], 'problems: a stand-in with no app login (only when the logins are known and the stand-in is ticked)');
+  const SW = (d, ids) => sb.vacationStandInWarning(d, employees, ids);
+  assertEqual(P(ok), [], 'problems: a stand-in with no app login never blocks the save');
+  assertEqual([SW(ok, new Set(['e1', 'e2'])), SW(ok, new Set(['e1'])), SW(ok, null), SW({ ...ok, options: { standIn: false } }, new Set())],
+    ['', 'Sam has no app login, so their copy of the notifications goes to nobody. Open items can still move to them.', '', ''], 'stand-in warning: only when the logins are known, the stand-in is ticked and has no login');
 
   // the person's own banner
   assertEqual(sb.vacationBannerText(v1, 'Sam', '2026-10-21', SYD, true), "You're on vacation until 24 Oct. No notifications come to you, Sam gets them. No shift clock while you're away. The app works as usual.", 'banner: every tick, office staff');
