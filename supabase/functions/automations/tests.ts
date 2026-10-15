@@ -922,6 +922,11 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     eq([db.T.automation_runs.length, db.T.lead_messages.length], [1, 1], "quiet:false fires as before");
     eq([quietArrival({ first_quiet: "true" }), quietArrival({ first_quiet: null, messages: [{ quiet: true }] }), quietArrival({ first_quiet: "false" }), quietArrival({ first_quiet: null }), quietArrival({ messages: [] }), quietArrival({ messages: [{ quiet: "yes" }] })],
       [true, true, false, false, false, false], "quietArrival: the scan column (first_quiet) or the full thread");
+    // the marker column (SQL M5-review): set by the import on every row it makes, read before the thread
+    db = world({ contacts: [lead("q4", { import_quiet: true, messages: [{ at: isoMs(NOW - 2 * MIN) }] }), lead("q5", { import_quiet: false, messages: [{ at: isoMs(NOW - 2 * MIN) }] })], automations: [emailAuto()] });
+    await tickAt(db, NOW); await tickAt(db, NOW + MIN);
+    eq(db.T.automation_runs.map((r: any) => r.record_id || r.contact_id), ["q5"], "import_quiet: a quiet import (column only) is not a new lead; import_quiet false fires as before");
+    eq([quietArrival({ import_quiet: true }), quietArrival({ import_quiet: false, first_quiet: null }), quietArrival({ import_quiet: true, first_quiet: "false" })], [true, false, true], "quietArrival: the import_quiet column first");
     const jobAuto = () => auto({ trigger: { type: "jobClosed", params: {} }, steps: [emailStep()] });
     db = world({ automations: [jobAuto()], contacts: [lead("c1")], jobs: [{ id: "jq", contact_id: "c1", date: "2026-10-14", created_at: null, review_do_not_ask: true }] });
     await tickAt(db, NOW);

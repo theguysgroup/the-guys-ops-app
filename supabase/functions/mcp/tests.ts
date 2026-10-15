@@ -4,7 +4,7 @@
 // deno-lint-ignore-file no-explicit-any
 
 // ── a small in-memory stand-in for the Supabase client (conversations/tests.ts, plus what this function uses) ──
-function fakeDb(seed: Record<string, any[]>, opts: { users?: Record<string, any>; jwts?: Record<string, string>; fail?: string[] } = {}) {
+function fakeDb(seed: Record<string, any[]>, opts: { users?: Record<string, any>; jwts?: Record<string, string>; fail?: string[]; maxRows?: number } = {}) {
   const T: Record<string, any[]> = { mcp_tokens: [], mcp_access_log: [], ...seed };
   const ranges: Record<string, number> = {};          // .range() calls per table
   const ors: string[][] = [];                          // every .or() filter, as its clauses
@@ -84,7 +84,7 @@ function fakeDb(seed: Record<string, any[]>, opts: { users?: Record<string, any>
       });
       const count = m.length;
       if (range) m = m.slice(range[0], range[1] + 1);
-      m = m.slice(0, lim);
+      m = m.slice(0, Math.min(lim, opts.maxRows ?? Infinity));   // the server's row cap, as Supabase answers (max-rows)
       if (head) return { data: null, count, error: null };
       const out = m.map((r) => JSON.parse(JSON.stringify(r)));
       if (single === 1) return out.length === 1 ? { data: out[0], error: null } : { data: null, error: { message: "not one row" } };
@@ -137,61 +137,60 @@ const D = (role: string) => APP.defaultPermissionsFor(role);
 const CAT = {
   // Weeks start on Sunday until a change to Monday weeks from Wed 7 Oct: Sun 4–Tue 6 (cut short by the change), then the
   // transition week Wed 7–Sun 11 (5 days), then Mon 12–Sun 18.
-  region: { weeks: [{ weekStart: 1, from: "2026-10-07" }] },
+  region: { timeZone: "Australia/Sydney", weeks: [{ weekStart: 1, from: "2026-10-07" }] },
   // Hourly pay changes from Thu 8 Oct: $12 an hour, bonus $20 from 6 bookings, $5 from 3 (before: $10, 5/8/12 → 10/15/25).
   pay: { hourly: [{ from: "2026-10-08", rate: 12, tiers: [{ min: 6, bonus: 20 }, { min: 3, bonus: 5 }] }] },
   other: { keep: true },
 };
 const C1 = "11111111-1111-4111-8111-111111111111", C2 = "22222222-2222-4222-8222-222222222222", C3 = "33333333-3333-4333-8333-333333333333";
 const PROFILES = [
-  { id: "u-owner", full_name: "Ofek", role: "owner", technician_name: null, permissions: D("owner") },
+  { id: "u-owner", full_name: "Odette", role: "owner", technician_name: null, permissions: D("owner") },
   { id: "u-mgr", full_name: "Maya", role: "manager", technician_name: null, permissions: D("manager") },
-  { id: "u-ron", full_name: "Ron", role: "va", technician_name: null, permissions: { ...D("va"), mcp: true } },
+  { id: "u-riley", full_name: "Riley", role: "va", technician_name: null, permissions: { ...D("va"), mcp: true } },
   { id: "u-dana", full_name: "Dana", role: "va", technician_name: null, permissions: { ...D("va"), tasks: false, mcp: true } },
   { id: "u-pia", full_name: "Pia", role: "va", technician_name: null, permissions: D("va") },                       // MCP not switched on
-  { id: "u-guy", full_name: "Guy Galili", role: "technician", technician_name: "Guy", permissions: { ...D("technician"), mcp: true } },
-  { id: "u-ale", full_name: "Alessandro", role: "technician", technician_name: "Ale", permissions: { ...D("technician"), jobs: true, crm: true, closings: true, outstanding: true, crmOverview: true, adsGoogle: true, mcp: true } },
+  { id: "u-gabe", full_name: "Gabe Green", role: "technician", technician_name: "Gabe", permissions: { ...D("technician"), mcp: true } },
+  { id: "u-alex", full_name: "Alexandra", role: "technician", technician_name: "Alex", permissions: { ...D("technician"), jobs: true, crm: true, closings: true, outstanding: true, crmOverview: true, adsGoogle: true, mcp: true } },
   { id: "u-tal", full_name: "Tal", role: "technician", technician_name: null, permissions: { ...D("technician"), mcp: true } },
   { id: "u-mkt", full_name: "Agency", role: "marketing", technician_name: null, permissions: { ...D("marketing"), mcp: true } },
   { id: "u-mkt2", full_name: "Agency Two", role: "marketing", technician_name: null, permissions: { ...D("marketing"), crmOverview: true, mcp: true } },
 ];
 const job = (id: string, o: any) => ({ id, customer_name: "Customer " + id, invoice_number: "INV-" + id, job_type: "Aircon", commission_percent: 30, includes_gst: false, payment_method: null, parts_cost: 0, parts_paid_by: null, parts_refund_status: "N/A", date_paid: null, paid_to_technician: null, parts_pending_at: null, parts_refund_week: null, contact_id: null, ...o });
-const msgs = Array.from({ length: 12 }, (_, i) => ({ id: "m" + i, kind: "message", direction: i % 2 ? "in" : "out", author: i % 2 ? "Ann" : "Ron", at: `2026-10-1${i < 10 ? 0 : 1}T0${i % 10}:00:00Z`, text: i === 11 ? "x".repeat(800) : "hello " + i }));
+const msgs = Array.from({ length: 12 }, (_, i) => ({ id: "m" + i, kind: "message", direction: i % 2 ? "in" : "out", author: i % 2 ? "Ann" : "Riley", at: `2026-10-1${i < 10 ? 0 : 1}T0${i % 10}:00:00Z`, text: i === 11 ? "x".repeat(800) : "hello " + i }));
 const SEED: Record<string, any[]> = {
   settings: [{ id: 1, company_name: "Demo Home Services", gst_rate_percent: 10, catalog: CAT }],
-  automation_settings: [{ business_id: "default", timezone: "Australia/Sydney" }],
   profiles: PROFILES,
   employees: [
-    { id: "e1", name: "Guy", roles: ["Technician"], status: "Active", employment_type: "Freelance" },
-    { id: "e2", name: "Ale", roles: ["Technician"], status: "Active", employment_type: "Independent Contractor" },
-    { id: "e3", name: "Ron", roles: ["VA"], status: "Active", employment_type: "Hourly" },
-    { id: "e4", name: "Ofek", roles: ["Owner", "Technician"], status: "Active", employment_type: "" },
+    { id: "e1", name: "Gabe", roles: ["Technician"], status: "Active", employment_type: "Freelance" },
+    { id: "e2", name: "Alex", roles: ["Technician"], status: "Active", employment_type: "Independent Contractor" },
+    { id: "e3", name: "Riley", roles: ["VA"], status: "Active", employment_type: "Hourly" },
+    { id: "e4", name: "Odette", roles: ["Owner", "Technician"], status: "Active", employment_type: "" },
     { id: "e5", name: "Old", roles: ["Technician"], status: "Inactive", employment_type: "Freelance" },
   ],
   jobs: [
-    job("j1", { date: "2026-10-05", technician: "Guy", amount: 200, includes_gst: true, payment_status: "Paid", payment_method: "Cash", date_paid: "2026-10-05", parts_cost: 20, parts_paid_by: "Guy", parts_refund_status: "Pending Refund", parts_pending_at: "2026-10-05T03:00:00Z", contact_id: C1 }),
-    job("j2", { date: "2026-10-08", technician: "Guy", amount: 300, payment_status: "Paid", payment_method: "Bank Transfer", date_paid: "2026-10-09" }),
-    job("j3", { date: "2026-10-09", technician: "Ale", job_type: "Pressure Washing", commission_percent: 40, amount: 500, includes_gst: true, payment_status: "Paid", payment_method: "Credit Card", date_paid: "2026-10-12", parts_cost: 50, parts_paid_by: "Business" }),
-    job("j4", { date: "2026-10-12", technician: "Guy", amount: 150, includes_gst: true, payment_status: "Unpaid" }),
-    job("j5", { date: "2026-10-13", technician: "Guy", amount: 250, includes_gst: true, payment_status: "Paid", payment_method: "Cash", date_paid: "2026-10-13", paid_to_technician: "Stuck" }),
+    job("j1", { date: "2026-10-05", technician: "Gabe", amount: 200, includes_gst: true, payment_status: "Paid", payment_method: "Cash", date_paid: "2026-10-05", parts_cost: 20, parts_paid_by: "Gabe", parts_refund_status: "Pending Refund", parts_pending_at: "2026-10-05T03:00:00Z", contact_id: C1 }),
+    job("j2", { date: "2026-10-08", technician: "Gabe", amount: 300, payment_status: "Paid", payment_method: "Bank Transfer", date_paid: "2026-10-09" }),
+    job("j3", { date: "2026-10-09", technician: "Alex", job_type: "Pressure Washing", commission_percent: 40, amount: 500, includes_gst: true, payment_status: "Paid", payment_method: "Credit Card", date_paid: "2026-10-12", parts_cost: 50, parts_paid_by: "Business" }),
+    job("j4", { date: "2026-10-12", technician: "Gabe", amount: 150, includes_gst: true, payment_status: "Unpaid" }),
+    job("j5", { date: "2026-10-13", technician: "Gabe", amount: 250, includes_gst: true, payment_status: "Paid", payment_method: "Cash", date_paid: "2026-10-13", paid_to_technician: "Stuck" }),
     job("j6", { date: "2026-10-13", technician: null, amount: 100, payment_status: null, commission_percent: 0 }),
-    job("j7", { date: "2026-10-10", technician: "Ale", commission_percent: 40, amount: 400, payment_status: "Unpaid" }),
+    job("j7", { date: "2026-10-10", technician: "Alex", commission_percent: 40, amount: 400, payment_status: "Unpaid" }),
   ],
   equipment_spend: [
-    { id: "eq1", date: "2026-10-06", item: "Vacuum", technician: "Guy", paid_by: "Guy", cost: 110, reimbursed: "Pending", created_at: "2026-10-06T02:00:00Z", reimbursed_week: null },
-    { id: "eq2", date: "2026-10-12", item: "Ladder", technician: "Ale", paid_by: "Business", cost: 80, reimbursed: "N/A", created_at: "2026-10-12T02:00:00Z", reimbursed_week: null },
-    { id: "eq3", date: "2026-10-01", item: "Hose", technician: "Guy", paid_by: "Guy", cost: 30, reimbursed: "Reimbursed", created_at: "2026-10-01T02:00:00Z", reimbursed_week: "2026-10-04" },
+    { id: "eq1", date: "2026-10-06", item: "Vacuum", technician: "Gabe", paid_by: "Gabe", cost: 110, reimbursed: "Pending", created_at: "2026-10-06T02:00:00Z", reimbursed_week: null },
+    { id: "eq2", date: "2026-10-12", item: "Ladder", technician: "Alex", paid_by: "Business", cost: 80, reimbursed: "N/A", created_at: "2026-10-12T02:00:00Z", reimbursed_week: null },
+    { id: "eq3", date: "2026-10-01", item: "Hose", technician: "Gabe", paid_by: "Gabe", cost: 30, reimbursed: "Reimbursed", created_at: "2026-10-01T02:00:00Z", reimbursed_week: "2026-10-04" },
   ],
   closings: [
-    { id: "cl1", date: "2026-10-08", technician_name: "Guy", customer_name: "Ann Lee", invoice_number: "INV-j2", job_type: "Aircon", amount: 300, includes_gst: false, payment_status: "Paid", payment_method: "Bank Transfer", parts_cost: 0, posted_by: "Ron", linked_job_id: "j2" },
-    { id: "cl2", date: "2026-10-09", technician_name: "Ale", customer_name: "Bob Stone", invoice_number: "INV-j3", job_type: "Pressure Washing", amount: 550, includes_gst: true, payment_status: "Paid", payment_method: "Credit Card", parts_cost: 50, posted_by: "Ron", linked_job_id: "j3" },
+    { id: "cl1", date: "2026-10-08", technician_name: "Gabe", customer_name: "Ann Lee", invoice_number: "INV-j2", job_type: "Aircon", amount: 300, includes_gst: false, payment_status: "Paid", payment_method: "Bank Transfer", parts_cost: 0, posted_by: "Riley", linked_job_id: "j2" },
+    { id: "cl2", date: "2026-10-09", technician_name: "Alex", customer_name: "Bob Stone", invoice_number: "INV-j3", job_type: "Pressure Washing", amount: 550, includes_gst: true, payment_status: "Paid", payment_method: "Credit Card", parts_cost: 50, posted_by: "Riley", linked_job_id: "j3" },
   ],
   tasks: [
-    { id: "t1", title: "Call Ann", board: "Ron", status: "To do", due: "2026-10-15", assignees: ["Ron"], assigned_to: null, contact_id: C1, notes: "n".repeat(400), subtasks: [{ t: 1 }, { t: 2 }] },
-    { id: "t2", title: "Restock van", board: "Guy", status: "Doing", due: null, assignees: [], assigned_to: null, contact_id: null },
-    { id: "t3", title: "Quote Bob", board: "Ofek", status: "To do", due: "2026-10-14", assignees: ["Guy", "Ron"], assigned_to: null, contact_id: null },
-    { id: "t4", title: "Old task", board: "Ofek", status: "To do", due: "2026-10-20", assignees: null, assigned_to: "Ron", contact_id: null },
-    { id: "t5", title: "Wash quote", board: "Noam", status: "Done", due: "2026-10-01", assignees: ["Ale"], assigned_to: null, contact_id: C1 },
+    { id: "t1", title: "Call Ann", board: "Riley", status: "To do", due: "2026-10-15", assignees: ["Riley"], assigned_to: null, contact_id: C1, notes: "n".repeat(400), subtasks: [{ t: 1 }, { t: 2 }] },
+    { id: "t2", title: "Restock van", board: "Gabe", status: "Doing", due: null, assignees: [], assigned_to: null, contact_id: null },
+    { id: "t3", title: "Quote Bob", board: "Odette", status: "To do", due: "2026-10-14", assignees: ["Gabe", "Riley"], assigned_to: null, contact_id: null },
+    { id: "t4", title: "Old task", board: "Odette", status: "To do", due: "2026-10-20", assignees: null, assigned_to: "Riley", contact_id: null },
+    { id: "t5", title: "Wash quote", board: "Nora", status: "Done", due: "2026-10-01", assignees: ["Alex"], assigned_to: null, contact_id: C1 },
   ],
   contacts: [
     { id: C1, full_name: "Ann Lee", phone: "0412345678", email: "ann@example.com", postcode: "2000", division: "Aircon", source: "Google Ads", status: "New", created_at: "2026-10-10T01:00:00Z", next_follow_up: "2026-10-16", tags: ["vip"], estimated_value: 500, sales_value: 0, notes: "Two units", followup_note: "", job_description: "Clean two splits", lost_reason: "", sub_source: "", messages: msgs },
@@ -214,15 +213,15 @@ const SEED: Record<string, any[]> = {
     { id: "ac2", date: "2026-10-07", status: "ANSWERED", duration_seconds: 45, campaign: "Chimney", account: "2" },
     { id: "ac3", date: "2026-10-08", status: "ANSWERED", duration_seconds: 10, campaign: "Chimney", account: "2" },
   ],
-  payroll_weeks: [{ id: "pw1", week_start: "2026-10-04", person: "Guy", cash_collected: true, salary_paid: true, salary_paid_amount: null }],
+  payroll_weeks: [{ id: "pw1", week_start: "2026-10-04", person: "Gabe", cash_collected: true, salary_paid: true, salary_paid_amount: null }],
   payroll_bonuses: [
-    { id: "b1", week_start: "2026-10-12", person: "Guy", amount: 50, reason: "Great reviews", created_at: "2026-10-13T00:00:00Z" },
-    { id: "b2", week_start: "2026-10-07", person: "Ron", amount: 20, reason: "Extra shift", created_at: "2026-10-09T00:00:00Z" },
+    { id: "b1", week_start: "2026-10-12", person: "Gabe", amount: 50, reason: "Great reviews", created_at: "2026-10-13T00:00:00Z" },
+    { id: "b2", week_start: "2026-10-07", person: "Riley", amount: 20, reason: "Extra shift", created_at: "2026-10-09T00:00:00Z" },
   ],
   sales_daily_log: [
-    { id: "s1", person: "Ron", date: "2026-10-07", hours: 4, bookings_aircon: 3, bookings_chimney: 1, bookings_pw: 0 },
-    { id: "s2", person: "Ron", date: "2026-10-08", hours: 6, bookings_aircon: 5, bookings_chimney: 0, bookings_pw: 1 },
-    { id: "s3", person: "Ron", date: "2026-10-13", hours: 5, bookings_aircon: 8, bookings_chimney: 2, bookings_pw: 2 },
+    { id: "s1", person: "Riley", date: "2026-10-07", hours: 4, bookings_aircon: 3, bookings_chimney: 1, bookings_pw: 0 },
+    { id: "s2", person: "Riley", date: "2026-10-08", hours: 6, bookings_aircon: 5, bookings_chimney: 0, bookings_pw: 1 },
+    { id: "s3", person: "Riley", date: "2026-10-13", hours: 5, bookings_aircon: 8, bookings_chimney: 2, bookings_pw: 2 },
   ],
 };
 const USERS = () => Object.fromEntries(PROFILES.map((p) => [p.id, { id: p.id, banned_until: null }]));
@@ -266,19 +265,39 @@ async function http(sb: any, o: any = {}) {
   return { status: res.status, headers: res.headers, text, body: parsed };
 }
 let rid = 0;
-const rpc = (sb: any, token: string, method: string, params?: any, extra: any = {}) => http(sb, { token, body: { jsonrpc: "2.0", id: ++rid, method, ...(params === undefined ? {} : { params }) }, ...extra });
+// Keys are for owners and managers only (Ofek 15 Oct): anyone else's key (made before, when a per-person switch existed)
+// is refused over HTTP. The role scope still guards every tool (defence in depth, and stage 8 reuses it), so the role
+// tests run those people's calls past the key check, straight into handleRpc with their own key row (direct below).
+// Over http() a legacy key is always refused.
+const LEGACY = new Set<string>();
+async function direct(sb: any, token: string, msg: any, at?: number) {
+  const hash = await sha256Hex(token), row = sb.T.mcp_tokens.find((x: any) => x.token_hash === hash && !x.revoked_at);
+  const p = row && sb.T.profiles.find((x: any) => x.id === row.user_id);
+  if (!p) return { status: 401, headers: new Headers(), text: "", body: null };
+  const nowMs = at ?? (clock += 3000);
+  const r = await handleRpc(msg, { sb, s: scopeOf(appProfile(p)), biz: await loadBusiness(sb), nowMs, token: row });
+  return { status: r.status, headers: new Headers(r.headers || {}), text: JSON.stringify(r.body), body: r.body };
+}
+const rpc = (sb: any, token: string, method: string, params?: any, extra: any = {}) => {
+  const msg = { jsonrpc: "2.0", id: ++rid, method, ...(params === undefined ? {} : { params }) };
+  return LEGACY.has(token) && !extra.path && !extra.headers ? direct(sb, token, msg, extra.at) : http(sb, { token, body: msg, ...extra });
+};
 const call = (sb: any, token: string, name: string, args?: any, extra: any = {}) => rpc(sb, token, "tools/call", { name, ...(args === undefined ? {} : { arguments: args }) }, extra);
 const sc = (r: any) => r.body && r.body.result && r.body.result.structuredContent;
 const errText = (r: any) => (r.body && r.body.result && r.body.result.isError ? r.body.result.content[0].text : null);
 const ids = (rows: any[]) => rows.map((x: any) => x.id);
 const manage = (sb: any, step: string, me: string | null, extra: any = {}, at?: number) => http(sb, { path: "/functions/v1/mcp/manage", body: { step, ...extra }, headers: me ? { authorization: "Bearer jwt-" + me } : {}, at });
-// Every MCP-able person's key, made through create_token (so the hashes are real).
+// A key for everyone: owners and managers through create_token (so the hashes are real); everyone else a key made
+// before 15 Oct (written straight into mcp_tokens, as the per-person switch allowed then), used by the role tests
+// (LEGACY, direct above). Pia never had the switch: no key.
 async function keysFor(sb: any) {
   const out: Record<string, string> = {};
   for (const p of PROFILES) {
-    if (!canUseMcp(prof(p.id))) continue;
-    const r = await manage(sb, "create_token", p.id, { name: "Laptop" });
-    out[p.id] = r.body.token;
+    if (canUseMcp(prof(p.id))) { out[p.id] = (await manage(sb, "create_token", p.id, { name: "Laptop" })).body.token; continue; }
+    if (p.id === "u-pia") continue;
+    const token = newToken();
+    sb.T.mcp_tokens.push({ id: crypto.randomUUID(), business_id: "default", user_id: p.id, name: "Old laptop", token_prefix: tokenPrefix(token), token_hash: await sha256Hex(token), scopes: ["read"], created_at: "2026-10-14T00:00:00Z", revoked_at: null, last_used_at: null });
+    LEGACY.add(token); out[p.id] = token;
   }
   return out;
 }
@@ -360,22 +379,32 @@ function fakeRemote(o: any = {}) {
   const rq = (auth?: string) => new Request("https://x.test/mcp", { headers: auth ? { authorization: auth } : {} });
   eq([tokenFrom(rq("Bearer " + t1), {}), tokenFrom(rq("Bearer sb_publishable_x"), {}), tokenFrom(rq(), {}), tokenFrom(rq("Bearer " + t1), { pathToken: "" })], [t1, "", "", ""], "tokenFrom: an ops_mcp_ bearer key, else none; a path key wins");
 
-  // ── time zone ──
-  eq([dayStartUtcIso("2026-10-04", "Australia/Sydney"), dayStartUtcIso("2026-10-05", "Australia/Sydney"), dayStartUtcIso("2027-04-04", "Australia/Sydney"), dayStartUtcIso("2027-04-05", "Australia/Sydney")],
-    ["2026-10-03T14:00:00.000Z", "2026-10-04T13:00:00.000Z", "2027-04-03T13:00:00.000Z", "2027-04-04T14:00:00.000Z"], "dayStartUtcIso: midnight in Sydney across both daylight-saving changes");
-  eq(dayStartUtcIso("2026-07-01", "UTC"), "2026-07-01T00:00:00.000Z", "dayStartUtcIso: UTC");
-  eq([validTz("Europe/London"), validTz("Mars/Base"), validTz(""), validTz(null)], ["Europe/London", "Australia/Sydney", "Australia/Sydney", "Australia/Sydney"], "validTz");
-  eq([dayIn(NOW, "Australia/Sydney"), dayIn(Date.parse("2026-10-13T20:00:00Z"), "Australia/Sydney"), dayIn(Date.parse("2026-10-13T20:00:00Z"), "UTC")], ["2026-10-14", "2026-10-14", "2026-10-13"], "dayIn");
+  // ── time zone: the business's (settings.catalog.region.timeZone, the region block shared with every function) ──
+  const SYD = "Australia/Sydney", CHI = "America/Chicago";
+  const midnight = (day: string, tz: string) => new Date(bizToUtc(day, 0, 0, tz)).toISOString();
+  eq([midnight("2026-10-04", SYD), midnight("2026-10-05", SYD), midnight("2027-04-04", SYD), midnight("2027-04-05", SYD)],
+    ["2026-10-03T14:00:00.000Z", "2026-10-04T13:00:00.000Z", "2027-04-03T13:00:00.000Z", "2027-04-04T14:00:00.000Z"], "bizToUtc: midnight in Sydney across both daylight-saving changes");
+  eq([midnight("2026-07-01", "UTC"), midnight("2026-11-01", CHI)], ["2026-07-01T00:00:00.000Z", "2026-11-01T05:00:00.000Z"], "bizToUtc: UTC, and Chicago on its daylight-saving night");
+  eq([bizTzOf({ region: { timeZone: "Europe/London" } }), bizTzOf({ region: { timeZone: "Mars/Base" } }), bizTzOf({ region: {} }), bizTzOf({}), bizTzOf(null)], ["Europe/London", SYD, SYD, SYD, SYD], "bizTzOf: the saved zone; a zone the runtime doesn't know or nothing saved = the default");
+  eq([bizParts(NOW, SYD).day, bizParts(Date.parse("2026-10-13T20:00:00Z"), SYD).day, bizParts(Date.parse("2026-10-13T20:00:00Z"), "UTC").day, bizParts(NOW, CHI).day], ["2026-10-14", "2026-10-14", "2026-10-13", "2026-10-13"], "bizParts: the business day at an instant");
   eq([shiftDay("2026-10-31", 1), shiftDay("2026-03-01", -1), shiftDay("2028-02-28", 1)], ["2026-11-01", "2026-02-28", "2028-02-29"], "shiftDay");
-  eq(rangeOf({}, "Australia/Sydney", NOW), { from: "2026-09-15", to: "2026-10-14", fromIso: "2026-09-14T14:00:00.000Z", toIso: "2026-10-14T13:00:00.000Z" }, "rangeOf: the last 30 days ending today in the business time zone");
-  const rerr = (a: any) => { try { rangeOf(a, "Australia/Sydney", NOW); return null; } catch (e) { return [(e as any) instanceof ToolError, (e as Error).message]; } };
+  eq(rangeOf({}, SYD, NOW), { from: "2026-09-15", to: "2026-10-14", fromIso: "2026-09-14T14:00:00.000Z", toIso: "2026-10-14T13:00:00.000Z" }, "rangeOf: the last 30 days ending today in the business time zone");
+  eq(rangeOf({}, CHI, NOW), { from: "2026-09-14", to: "2026-10-13", fromIso: "2026-09-14T05:00:00.000Z", toIso: "2026-10-14T05:00:00.000Z" }, "rangeOf: Chicago: 11:00 Wed in Sydney is still Tuesday there, and its days start at its midnight");
+  const rerr = (a: any) => { try { rangeOf(a, SYD, NOW); return null; } catch (e) { return [(e as any) instanceof ToolError, (e as Error).message]; } };
   eq([rerr({ from: "2026-10-10", to: "2026-10-01" }), rerr({ from: "x" }), rerr({ from: "2025-01-01", to: "2026-02-04" }), rerr({ from: "2025-10-14", to: "2026-10-14" })],
     [[true, "'from' must be on or before 'to'."], [true, "'from' must be a date (YYYY-MM-DD)."], [true, "Pick a range of at most 366 days."], null], "rangeOf: refuses from > to, a non-date and more than 366 days (366 is fine)");
   eq(rangeOf({ to: "2026-10-01" }, "UTC", NOW).from, "2026-09-02", "rangeOf: only 'to' given = the 30 days ending then");
   {
-    const w1 = world({ automation_settings: [{ business_id: "default", timezone: "Mars/Base" }] }), w2 = world({}, { fail: ["automation_settings"] });
-    eq([(await loadBusiness(w1)).tz, (await loadBusiness(w2)).tz], ["Australia/Sydney", "Australia/Sydney"], "loadBusiness: an invalid or missing time zone = Australia/Sydney");
-    eq(await loadBusiness(world()), { companyName: "Demo Home Services", gstRate: 10, catalog: CAT, tz: "Australia/Sydney", mcp: { rateLimitPerMin: 60, logKeepDays: 90, importSource: "MCP import" } }, "loadBusiness");
+    const zoned = (timeZone: unknown) => world({ settings: [{ id: 1, company_name: "Demo Home Services", gst_rate_percent: 10, catalog: { ...CAT, region: { ...CAT.region, timeZone } } }] });
+    eq([(await loadBusiness(zoned("Mars/Base"))).tz, (await loadBusiness(zoned(undefined))).tz, (await loadBusiness(zoned(CHI))).tz], [SYD, SYD, CHI], "loadBusiness: the zone of Settings → Region and format; an invalid or missing one = the default");
+    // automation_settings.timezone is not read any more (stage 1: one zone for the whole business)
+    const w = world({ automation_settings: [{ business_id: "default", timezone: "Europe/London" }] });
+    eq([(await loadBusiness(w)).tz, w.selects.some(([t]: any) => t === "automation_settings")], [SYD, false], "loadBusiness: never reads automation_settings");
+    eq(await loadBusiness(world()), { companyName: "Demo Home Services", gstRate: 10, catalog: CAT, tz: SYD, mcp: { rateLimitPerMin: 60, logKeepDays: 90, importSource: "MCP import" } }, "loadBusiness");
+    // the whole function in Chicago: whoami's day, and a list's default range
+    const wc = zoned(CHI), kc = await keysFor(wc);
+    const who = sc(await call(wc, kc["u-owner"], "whoami"));
+    eq([who.timeZone, who.today], [CHI, "2026-10-13"], "whoami in Chicago: its zone and its day");
   }
 
   // ── arguments ──
@@ -406,15 +435,14 @@ function fakeRemote(o: any = {}) {
       if (p.role !== "technician") eq(server, mine, `filterForProfile parity: ${p.id} sees exactly the app's rows`);
       else eq(Object.keys(mine).filter((k) => !sub((server as any)[k], (mine as any)[k])), [], `filterForProfile parity: technician ${p.id} sees a subset of the app's rows`);
     }
-    const sGuy = scopeOf(prof("u-guy")), sAle = scopeOf(prof("u-ale")), sTal = scopeOf(prof("u-tal"));
-    eq(ids(S.jobs.filter((r: any) => jobVisible(sGuy, r))), ids(APP.filterForProfile(data, appProf("u-guy")).jobs), "technician: own jobs equal the app's");
-    eq([ids(S.closings.filter((r: any) => closingVisible(sAle, r))), ids(APP.filterForProfile(data, appProf("u-ale")).closings)], [["cl2"], ["cl1", "cl2"]], "technician: only their own closings (the app shows all with the Closings page)");
+    const sGuy = scopeOf(prof("u-gabe")), sAle = scopeOf(prof("u-alex")), sTal = scopeOf(prof("u-tal"));
+    eq(ids(S.jobs.filter((r: any) => jobVisible(sGuy, r))), ids(APP.filterForProfile(data, appProf("u-gabe")).jobs), "technician: own jobs equal the app's");
+    eq([ids(S.closings.filter((r: any) => closingVisible(sAle, r))), ids(APP.filterForProfile(data, appProf("u-alex")).closings)], [["cl2"], ["cl1", "cl2"]], "technician: only their own closings (the app shows all with the Closings page)");
     eq([ids(S.jobs.filter((r: any) => jobVisible(sTal, r))), ids(APP.filterForProfile(data, appProf("u-tal")).jobs)], [[], ["j6"]], "technician without a technician name: no jobs (the app would show the unassigned job)");
     eq([jobVisible(sTal, { technician: "" }), equipVisible(sTal, { technician: "" }), closingVisible(sTal, { technician_name: "" }), taskVisible(sTal, { board: "", assignees: [""] })], [false, false, false, false], "technician without a technician name: nothing matches an empty name either");
     eq(ids(S.tasks.filter((r: any) => taskVisible(sGuy, r))), ["t2", "t3"], "technician tasks: assigned to him (t3) or on his board (t2)");
-    eq([Object.keys(redactForTech(sAle, S.contacts[0])).includes("estimated_value"), Object.keys(redactForTech(scopeOf(prof("u-ron")), S.contacts[0])).includes("estimated_value")], [false, true], "redactForTech: a contact's money only goes to non-technicians");
-    eq([assigneeNames(S.tasks[0]), assigneeNames(S.tasks[3]), APP.assigneeNames(APP.mapTaskRow(S.tasks[3]))], [["Ron"], [], []], "assigneeNames reads a row as the app does (a missing assignees list is an empty one)");
-    eq([canUseMcp(prof("u-owner")), canUseMcp(prof("u-mgr")), canUseMcp(prof("u-ron")), canUseMcp(prof("u-pia"))], [true, true, true, false], "canUseMcp: owners, managers, and anyone switched on");
+    eq([Object.keys(redactForTech(sAle, S.contacts[0])).includes("estimated_value"), Object.keys(redactForTech(scopeOf(prof("u-riley")), S.contacts[0])).includes("estimated_value")], [false, true], "redactForTech: a contact's money only goes to non-technicians");
+    eq([assigneeNames(S.tasks[0]), assigneeNames(S.tasks[3]), APP.assigneeNames(APP.mapTaskRow(S.tasks[3]))], [["Riley"], [], []], "assigneeNames reads a row as the app does (a missing assignees list is an empty one)");
   }
 
   // ── calc parity with the app (the app's functions run on the same fixture) ──
@@ -437,31 +465,31 @@ function fakeRemote(o: any = {}) {
     eq([weekBounds("2026-10-08", weekRules(CAT.region)), weekBounds("2026-10-05", weekRules(REGIONS[2])).days], [{ start: "2026-10-07", end: "2026-10-11", days: 5 }, 10], "weekBounds: the 5-day and the 10-day transition weeks");
     const keys = ["2026-09-27", "2026-10-04", "2026-10-07", "2026-10-12", "2026-10-19"];
     eq(keys.map((k) => [payrollWeekOf(d, k), shiftPayrollWeek(d, k, 1), shiftPayrollWeek(d, k, -2)]), keys.map((k) => [APP.payrollWeekOf(k), APP.shiftPayrollWeek(k, 1), APP.shiftPayrollWeek(k, -2)]), "payrollWeekOf / shiftPayrollWeek parity");
-    // Commission: Ale is an Independent Contractor (no parts taken off): j3 = 500 × 40% = 200 (a regular technician: (500 − 50) × 40% = 180).
+    // Commission: Alex is an Independent Contractor (no parts taken off): j3 = 500 × 40% = 200 (a regular technician: (500 − 50) × 40% = 180).
     const j3 = jobFromRow(SEED.jobs[2]), j1 = jobFromRow(SEED.jobs[0]);
     eq([jobCommissionAmount(d, j3), APP.jobCommissionAmount(APP.mapJobRow(SEED.jobs[2])), jobCommissionAmount({ ...d, employees: [] }, j3)], [200, 200, 180], "jobCommissionAmount: Independent Contractor (parts not deducted) = the app's");
     eq([jobCommissionAmount(d, j1), APP.jobCommissionAmount(APP.mapJobRow(SEED.jobs[0])), jobGst(d, j1), jobTotalCollected(d, j1)], [54, 54, 20, 220], "jobCommissionAmount: a regular technician (200 − 20 parts) × 30% = 54; GST 20, total 220");
     const pick = (x: any) => [x.total, x.grandTotal, x.onHoldTotal, x.expected, x.materials.total, x.bonus.total, x.cash, x.percent];
-    for (const k of keys) for (const person of ["Guy", "Ale"]) {
+    for (const k of keys) for (const person of ["Gabe", "Alex"]) {
       const s = computePayrollCommission(d, person, k), a = APP.computePayrollCommission(data, person, k);
       eq([...pick(s), s.paidJobs, s.unpaidJobs, s.materials.gst], [...pick(a), a.lines.length, a.unpaid.length, a.materials.gst], `computePayrollCommission parity ${person} ${k}`);
-      const h = computePayrollHourly(d, "Ron", k), ah = APP.computePayrollHourly(data, "Ron", k);
-      eq([h.hours, h.bookings, h.bonuses, h.total, h.extra.total], [ah.hours, ah.bookings, ah.bonuses, ah.total, ah.extra.total], `computePayrollHourly parity Ron ${k}`);
+      const h = computePayrollHourly(d, "Riley", k), ah = APP.computePayrollHourly(data, "Riley", k);
+      eq([h.hours, h.bookings, h.bonuses, h.total, h.extra.total], [ah.hours, ah.bookings, ah.bonuses, ah.total, ah.extra.total], `computePayrollHourly parity Riley ${k}`);
     }
-    // Hand-computed: Guy, week Wed 7–Sun 11: j2 paid 9 Oct, 300 × 30% = 90; the Vacuum (110) and j1's parts (20) were entered
+    // Hand-computed: Gabe, week Wed 7–Sun 11: j2 paid 9 Oct, 300 × 30% = 90; the Vacuum (110) and j1's parts (20) were entered
     // in the week of 4 Oct, which is already paid, so they move to this week: 130 (GST in it 130 × 10/110 = 11.82). 90 + 130 = 220.
-    const g7 = computePayrollCommission(d, "Guy", "2026-10-07");
-    eq([g7.total, g7.materials, g7.grandTotal, g7.cash, g7.expected], [90, { total: 130, gst: 11.82, count: 2 }, 220, 0, 0], "Guy, week of 7 Oct (hand-computed)");
-    // Guy, week Mon 12–Sun 18: j5 (250 × 30% = 75) is on hold; j4 unpaid (150 × 30% = 45 expected); j5 was cash (275); bonus 50.
-    const g12 = computePayrollCommission(d, "Guy", "2026-10-12");
-    eq([g12.total, g12.onHoldTotal, g12.expected, g12.cash, g12.bonus.total, g12.grandTotal, g12.percent], [0, 75, 45, 275, 50, 50, 30], "Guy, week of 12 Oct (hand-computed)");
-    // Guy, week of 4 Oct (marked paid): j1 = 54, cash 220, and only what was paid back in it (the Hose, 30).
-    const g4 = computePayrollCommission(d, "Guy", "2026-10-04");
-    eq([g4.total, g4.cash, g4.materials.total, g4.grandTotal], [54, 220, 30, 84], "Guy, week of 4 Oct (hand-computed)");
-    // Ron, Wed 7–Sun 11: 7 Oct 4 h × $10, 4 bookings (no bonus under 5) = 40; 8 Oct (new pay) 6 h × $12 + 6 bookings → $20 = 92;
+    const g7 = computePayrollCommission(d, "Gabe", "2026-10-07");
+    eq([g7.total, g7.materials, g7.grandTotal, g7.cash, g7.expected], [90, { total: 130, gst: 11.82, count: 2 }, 220, 0, 0], "Gabe, week of 7 Oct (hand-computed)");
+    // Gabe, week Mon 12–Sun 18: j5 (250 × 30% = 75) is on hold; j4 unpaid (150 × 30% = 45 expected); j5 was cash (275); bonus 50.
+    const g12 = computePayrollCommission(d, "Gabe", "2026-10-12");
+    eq([g12.total, g12.onHoldTotal, g12.expected, g12.cash, g12.bonus.total, g12.grandTotal, g12.percent], [0, 75, 45, 275, 50, 50, 30], "Gabe, week of 12 Oct (hand-computed)");
+    // Gabe, week of 4 Oct (marked paid): j1 = 54, cash 220, and only what was paid back in it (the Hose, 30).
+    const g4 = computePayrollCommission(d, "Gabe", "2026-10-04");
+    eq([g4.total, g4.cash, g4.materials.total, g4.grandTotal], [54, 220, 30, 84], "Gabe, week of 4 Oct (hand-computed)");
+    // Riley, Wed 7–Sun 11: 7 Oct 4 h × $10, 4 bookings (no bonus under 5) = 40; 8 Oct (new pay) 6 h × $12 + 6 bookings → $20 = 92;
     // plus the owners' $20 bonus = 152. Mon 12–Sun 18: 13 Oct 5 h × $12 + 12 bookings → $20 = 80.
-    const r7 = computePayrollHourly(d, "Ron", "2026-10-07"), r12 = computePayrollHourly(d, "Ron", "2026-10-12");
-    eq([r7.hours, r7.bookings, r7.bonuses, r7.total, r12.total], [10, 10, 20, 152, 80], "Ron's hourly pay with a pay change mid-week (hand-computed)");
+    const r7 = computePayrollHourly(d, "Riley", "2026-10-07"), r12 = computePayrollHourly(d, "Riley", "2026-10-12");
+    eq([r7.hours, r7.bookings, r7.bonuses, r7.total, r12.total], [10, 10, 20, 152, 80], "Riley's hourly pay with a pay change mid-week (hand-computed)");
     eq([payrollCommissionPeople(d), payrollHourlyPeople(d)], [APP.payrollCommissionPeople(data), APP.payrollHourlyPeople(data)], "payroll people parity");
     // The money of one business week = the app's computeWeek (all but paidToTechTotal).
     for (const k of ["2026-10-04", "2026-10-07", "2026-10-12"]) {
@@ -479,7 +507,14 @@ function fakeRemote(o: any = {}) {
   // ── keys: create_token, stored only as a hash ──
   const sb = world();
   const K = await keysFor(sb);
-  eq(Object.keys(K), ["u-owner", "u-mgr", "u-ron", "u-dana", "u-guy", "u-ale", "u-tal", "u-mkt", "u-mkt2"], "create_token: a key for everyone allowed to use MCP");
+  eq([Object.keys(K).filter((id) => !LEGACY.has(K[id])), sb.T.mcp_tokens.filter((x: any) => x.name === "Laptop").map((x: any) => x.user_id)], [["u-owner", "u-mgr"], ["u-owner", "u-mgr"]], "create_token: keys for owners and managers");
+  {
+    // keys are for owners and managers only (Ofek 15 Oct): anyone else is refused, an old per-person switch or not
+    const n0 = sb.T.mcp_tokens.length;
+    const refused = await Promise.all(["u-riley", "u-pia", "u-gabe", "u-mkt"].map((id) => manage(sb, "create_token", id, { name: "Mine" })));
+    eq([refused.map((r) => r.status), refused.map((r) => r.body.reason), sb.T.mcp_tokens.length - n0], [[403, 403, 403, 403], Array(4).fill("Only owners and managers can make keys."), 0], "create_token: only owners and managers (permissions.mcp switched on means nothing)");
+    eq([canUseMcp(prof("u-owner")), canUseMcp(prof("u-mgr")), canUseMcp(prof("u-riley")), canUseMcp(prof("u-pia")), canUseMcp(prof("u-gabe")), canUseMcp(prof("u-mkt"))], [true, true, false, false, false, false], "canUseMcp: owners and managers only");
+  }
   {
     const r = await manage(sb, "create_token", "u-owner", { name: "  Claude   desktop  " });
     eq([r.status, r.body.ok, r.body.name, TOKEN_RE.test(r.body.token), r.body.prefix, r.body.url, r.body.pathUrl], [200, true, "Claude desktop", true, r.body.token.slice(0, 12), "https://example.supabase.co/functions/v1/mcp", "https://example.supabase.co/functions/v1/mcp/t/" + r.body.token], "create_token: returns the key, its prefix and both URLs once");
@@ -493,7 +528,7 @@ function fakeRemote(o: any = {}) {
   {
     const init = await rpc(sb, O, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } });
     eq([init.status, init.body.result.protocolVersion, init.body.result.serverInfo.name, init.body.result.serverInfo.title, init.body.result.capabilities], [200, "2025-03-26", "ops-mcp", "Demo Home Services (OPS)", { tools: { listChanged: false } }], "initialize: echoes a supported protocol version");
-    eq(init.body.result.instructions, "Read-only access to Demo Home Services as Ofek (owner). Only what this person can see in the OPS app. Dates are in Australia/Sydney.", "initialize: instructions");
+    eq(init.body.result.instructions, "Read-only access to Demo Home Services as Odette (owner). Only what this person can see in the OPS app. Dates are in Australia/Sydney.", "initialize: instructions");
     eq((await rpc(sb, O, "initialize", { protocolVersion: "1999-01-01" })).body.result.protocolVersion, "2025-06-18", "initialize: an unknown version is answered with the latest");
     const note = await http(sb, { token: O, body: { jsonrpc: "2.0", method: "notifications/initialized" } });
     eq([note.status, note.text], [202, ""], "notifications/initialized → 202, empty body");
@@ -535,13 +570,22 @@ function fakeRemote(o: any = {}) {
     eq((await manage(w, "revoke_token", "u-mgr", { id })).status, 200, "revoke own key");
     eq((await rpc(w, k, "ping")).status, 401, "a revoked key → 401");
     w.T.profiles = w.T.profiles.filter((p: any) => p.id !== "u-mkt");
+    // the gate: a key of anyone but an owner or manager (made before 15 Oct, when a switch existed) stops working
+    const old = ["u-riley", "u-dana", "u-gabe", "u-alex", "u-tal", "u-mkt2"].map((id) => http(w, { token: keys[id], body: { jsonrpc: "2.0", id: 1, method: "tools/list" } }));
+    eq((await Promise.all(old)).map((r) => r.status), [401, 401, 401, 401, 401, 401], "a key of a VA, technician or marketing person (permissions.mcp still on) → 401");
+    eq((await http(w, { path: "/functions/v1/mcp/t/" + keys["u-riley"], body: { jsonrpc: "2.0", id: 1, method: "ping" } })).status, 401, "… in the path too");
+    const mk = (await manage(w, "create_token", "u-mgr", { name: "Phone" })).body.token;
+    eq((await rpc(w, mk, "ping")).status, 200, "a manager's new key works");
+    const mgr = w.T.profiles.find((p: any) => p.id === "u-mgr");
+    mgr.role = "va";
+    eq((await rpc(w, mk, "ping")).status, 401, "a manager made a VA: their key stops working");
+    mgr.role = "manager";
+    w.T.profiles = w.T.profiles.filter((p: any) => p.id !== "u-mkt");
     eq((await rpc(w, keys["u-mkt"], "ping")).status, 401, "a key whose person's profile is gone → 401");
-    eq((await rpc(w, keys["u-dana"], "ping")).status, 200, "a VA with MCP switched on → 200");
-    w.T.profiles.find((p: any) => p.id === "u-dana").permissions.mcp = false;
-    eq((await rpc(w, keys["u-dana"], "ping")).status, 401, "switching off a person's MCP permission stops their keys");
+    eq((await manage(w, "revoke_token", "u-owner", { id: w.T.mcp_tokens.find((x: any) => x.user_id === "u-mkt").id })).status, 200, "an owner can still revoke someone else's old key");
     banCache.clear();
-    const banned = fakeDb(JSON.parse(JSON.stringify(w.T)), { users: { ...USERS(), "u-ron": { id: "u-ron", banned_until: "2027-01-01T00:00:00Z" } }, jwts: JWTS });
-    eq([(await rpc(banned, keys["u-ron"], "ping")).status, (await rpc(banned, keys["u-guy"], "ping")).status], [401, 200], "a person whose sign-in is switched off → 401");
+    const banned = fakeDb(JSON.parse(JSON.stringify(w.T)), { users: { ...USERS(), "u-mgr": { id: "u-mgr", banned_until: "2027-01-01T00:00:00Z" } }, jwts: JWTS });
+    eq([(await rpc(banned, mk, "ping")).status, (await rpc(banned, keys["u-owner"], "ping")).status], [401, 200], "a person whose sign-in is switched off → 401");
     banCache.clear();
     const other = newToken();
     w.T.mcp_tokens.push({ id: crypto.randomUUID(), business_id: "other", user_id: "u-owner", name: "x", token_prefix: tokenPrefix(other), token_hash: await sha256Hex(other), scopes: ["read"], revoked_at: null, last_used_at: null });
@@ -581,17 +625,17 @@ function fakeRemote(o: any = {}) {
     const list = (await rpc(sb, O, "tools/list")).body.result.tools;
     eq([list.map((t: any) => t.name), list.every((t: any) => JSON.stringify(t.annotations) === JSON.stringify({ readOnlyHint: true, destructiveHint: false, openWorldHint: false }) && t.inputSchema.additionalProperties === false && t.title && t.description)], [ALL_TOOLS, true], "owner: all 11 tools, each read-only with a closed schema");
     eq(await names(K["u-mgr"]), ALL_TOOLS, "manager: all 11 tools");
-    eq(await names(K["u-ron"]), ["whoami", "search_contacts", "get_contact", "list_jobs", "list_closings", "list_outstanding", "payroll_summary", "list_tasks", "list_calls"], "VA (default pages): no money or marketing summary");
+    eq(await names(K["u-riley"]), ["whoami", "search_contacts", "get_contact", "list_jobs", "list_closings", "list_outstanding", "payroll_summary", "list_tasks", "list_calls"], "VA (default pages): no money or marketing summary");
     eq(await names(K["u-dana"]), ["whoami", "search_contacts", "get_contact", "list_jobs", "list_closings", "list_outstanding", "payroll_summary", "list_calls"], "VA without Tasks: no list_tasks");
-    eq(await names(K["u-guy"]), ["whoami", "list_jobs", "payroll_summary", "list_tasks"], "technician (default pages): own jobs, own pay, tasks");
-    eq(await names(K["u-ale"]), ["whoami", "search_contacts", "get_contact", "list_jobs", "list_closings", "payroll_summary", "list_tasks", "list_calls"], "technician with Jobs, CRM, Closings, Outstanding, Leads and Ads pages: still no money, marketing or outstanding");
+    eq(await names(K["u-gabe"]), ["whoami", "list_jobs", "payroll_summary", "list_tasks"], "technician (default pages): own jobs, own pay, tasks");
+    eq(await names(K["u-alex"]), ["whoami", "search_contacts", "get_contact", "list_jobs", "list_closings", "payroll_summary", "list_tasks", "list_calls"], "technician with Jobs, CRM, Closings, Outstanding, Leads and Ads pages: still no money, marketing or outstanding");
     eq(await names(K["u-mkt"]), ["whoami", "marketing_summary"], "marketing: whoami and marketing_summary");
     eq(await names(K["u-mkt2"]), ["whoami", "search_contacts", "get_contact", "marketing_summary"], "marketing with Leads & Marketing: contacts too");
     const before = sb.T.mcp_access_log.length;
-    const hidden = await call(sb, K["u-guy"], "money_summary", {});
+    const hidden = await call(sb, K["u-gabe"], "money_summary", {});
     eq([hidden.body.error, sb.T.mcp_access_log.length - before, sb.T.mcp_access_log[sb.T.mcp_access_log.length - 1].status], [{ code: -32602, message: "Unknown tool: money_summary" }, 1, "denied"], "a hidden tool looks unknown, and is logged denied");
     eq((await call(sb, O, "no_such_tool", {})).body.error.message, "Unknown tool: no_such_tool", "an unknown tool → -32602");
-    eq((await rpc(sb, K["u-guy"], "tools/call", {})).body.error.code, -32602, "tools/call without a name → -32602");
+    eq((await rpc(sb, K["u-gabe"], "tools/call", {})).body.error.code, -32602, "tools/call without a name → -32602");
   }
 
   // ── the access log ──
@@ -599,12 +643,12 @@ function fakeRemote(o: any = {}) {
     const L = sb.T.mcp_access_log, n0 = L.length;
     await rpc(sb, O, "tools/list"); await rpc(sb, O, "ping"); await rpc(sb, O, "initialize", {});
     eq(L.length, n0, "initialize, tools/list and ping write no row");
-    const r = await call(sb, K["u-ron"], "list_tasks", { mine: true });
+    const r = await call(sb, K["u-riley"], "list_tasks", { mine: true });
     const last = () => L[L.length - 1];
-    eq([L.length - n0, last().status, last().rows_returned, last().token_id, last().user_id, last().business_id, last().tool, last().args_summary], [1, "ok", sc(r).rows.length, sb.T.mcp_tokens.find((x: any) => x.user_id === "u-ron").id, "u-ron", "default", "list_tasks", '{"mine":true,"limit":50}'.replace(',"limit":50', "")], "ok: one row with the key, the person, the tool and rows_returned");
-    const e1 = await call(sb, K["u-ron"], "search_contacts", { query: "a", secret: "s3cr3t" });
+    eq([L.length - n0, last().status, last().rows_returned, last().token_id, last().user_id, last().business_id, last().tool, last().args_summary], [1, "ok", sc(r).rows.length, sb.T.mcp_tokens.find((x: any) => x.user_id === "u-riley").id, "u-riley", "default", "list_tasks", '{"mine":true,"limit":50}'.replace(',"limit":50', "")], "ok: one row with the key, the person, the tool and rows_returned");
+    const e1 = await call(sb, K["u-riley"], "search_contacts", { query: "a", secret: "s3cr3t" });
     eq([errText(e1), last().status, last().args_summary], ["Invalid arguments: secret is not a field of this tool.", "error", '{"query":"a"}'], "bad arguments: isError, logged error, and an extra 'secret' never reaches the log");
-    const e2 = await call(sb, K["u-ron"], "search_contacts", { query: "q".repeat(500) });
+    const e2 = await call(sb, K["u-riley"], "search_contacts", { query: "q".repeat(500) });
     eq([errText(e2), last().args_summary], ["Invalid arguments: query is too long (at most 60 characters).", JSON.stringify({ query: "q".repeat(60) })], "a 500-character query is clipped to 60 in the log");
     const e3 = await call(sb, O, "list_jobs", { from: "2026-10-10", to: "2026-10-01" });
     eq([errText(e3), last().status], ["'from' must be on or before 'to'.", "error"], "a ToolError: isError, logged error");
@@ -616,24 +660,24 @@ function fakeRemote(o: any = {}) {
 
   // ── each tool, per role ──
   {
-    const who = sc(await call(sb, K["u-guy"], "whoami"));
-    eq(who, { name: "Guy Galili", role: "technician", technicianName: "Guy", business: "Demo Home Services", timeZone: "Australia/Sydney", today: "2026-10-14", tools: ["whoami", "list_jobs", "payroll_summary", "list_tasks"] }, "whoami");
-    const r = await call(sb, K["u-guy"], "list_jobs");
+    const who = sc(await call(sb, K["u-gabe"], "whoami"));
+    eq(who, { name: "Gabe Green", role: "technician", technicianName: "Gabe", business: "Demo Home Services", timeZone: "Australia/Sydney", today: "2026-10-14", tools: ["whoami", "list_jobs", "payroll_summary", "list_tasks"] }, "whoami");
+    const r = await call(sb, K["u-gabe"], "list_jobs");
     eq([ids(sc(r).rows), sc(r).from, sc(r).to, r.body.result.content[0].type, JSON.parse(r.body.result.content[0].text).count], [["j5", "j4", "j2", "j1"], "2026-09-15", "2026-10-14", "text", 4], "technician list_jobs: only his jobs, newest first, as text and structured content");
-    eq(sc(r).rows[3], { id: "j1", date: "2026-10-05", customerName: "Customer j1", invoiceNumber: "INV-j1", technician: "Guy", jobType: "Aircon", amount: 200, gst: 20, total: 220, commission: 54, paymentStatus: "Paid", paymentMethod: "Cash", datePaid: "2026-10-05", partsCost: 20, contactId: C1 }, "a job row");
-    eq(errText(await call(sb, K["u-guy"], "list_jobs", { technician: "Ale" })), "You can only see your own jobs.", "technician list_jobs for someone else → isError");
-    eq(ids(sc(await call(sb, K["u-guy"], "list_jobs", { technician: "Guy" })).rows), ["j5", "j4", "j2", "j1"], "technician list_jobs naming himself is fine");
+    eq(sc(r).rows[3], { id: "j1", date: "2026-10-05", customerName: "Customer j1", invoiceNumber: "INV-j1", technician: "Gabe", jobType: "Aircon", amount: 200, gst: 20, total: 220, commission: 54, paymentStatus: "Paid", paymentMethod: "Cash", datePaid: "2026-10-05", partsCost: 20, contactId: C1 }, "a job row");
+    eq(errText(await call(sb, K["u-gabe"], "list_jobs", { technician: "Alex" })), "You can only see your own jobs.", "technician list_jobs for someone else → isError");
+    eq(ids(sc(await call(sb, K["u-gabe"], "list_jobs", { technician: "Gabe" })).rows), ["j5", "j4", "j2", "j1"], "technician list_jobs naming himself is fine");
     eq(sc(await call(sb, K["u-tal"], "list_jobs")).rows, [], "technician without a technician name: no jobs");
     const all = sc(await call(sb, O, "list_jobs", { limit: 2 }));
     eq([ids(all.rows), all.count, all.truncated], [["j5", "j6"], 7, true], "owner list_jobs: every job, limit 2 → truncated");
-    eq(ids(sc(await call(sb, K["u-ron"], "list_jobs", { unpaid_only: true })).rows), ["j6", "j4", "j7"], "unpaid_only includes a job with no payment status");
-    eq(ids(sc(await call(sb, O, "list_jobs", { technician: "Ale", from: "2026-10-10", to: "2026-10-10" })).rows), ["j7"], "list_jobs by technician and day");
+    eq(ids(sc(await call(sb, K["u-riley"], "list_jobs", { unpaid_only: true })).rows), ["j6", "j4", "j7"], "unpaid_only includes a job with no payment status");
+    eq(ids(sc(await call(sb, O, "list_jobs", { technician: "Alex", from: "2026-10-10", to: "2026-10-10" })).rows), ["j7"], "list_jobs by technician and day");
 
     // contacts
-    const ale = sc(await call(sb, K["u-ale"], "search_contacts", {}));
+    const ale = sc(await call(sb, K["u-alex"], "search_contacts", {}));
     eq([ids(ale.rows), ale.rows.some((x: any) => "estimatedValue" in x || "salesValue" in x)], [[C2, C1, C3], false], "technician with CRM: contacts without their money values");
-    const ron = sc(await call(sb, K["u-ron"], "search_contacts", { query: "ann" }));
-    eq(ron.rows, [{ id: C1, name: "Ann Lee", phone: "0412345678", email: "ann@example.com", postcode: "2000", division: "Aircon", source: "Google Ads", status: "New", createdOn: "2026-10-10", nextFollowUp: "2026-10-16", tags: ["vip"], estimatedValue: 500, salesValue: 0 }], "VA search_contacts by name, with the values");
+    const va = sc(await call(sb, K["u-riley"], "search_contacts", { query: "ann" }));
+    eq(va.rows, [{ id: C1, name: "Ann Lee", phone: "0412345678", email: "ann@example.com", postcode: "2000", division: "Aircon", source: "Google Ads", status: "New", createdOn: "2026-10-10", nextFollowUp: "2026-10-16", tags: ["vip"], estimatedValue: 500, salesValue: 0 }], "VA search_contacts by name, with the values");
     eq(sc(await call(sb, O, "search_contacts", { status: "Won" })).rows.map((x: any) => [x.name, x.createdOn]), [["Bob Stone", "2026-10-14"]], "status filter; created_at shown as the Sydney day");
     eq([ids(sc(await call(sb, O, "search_contacts", { query: "345678" })).rows), sb.ors[sb.ors.length - 1].length], [[C1], 4], "phone digits search (4 clauses)");
     await call(sb, O, "search_contacts", { query: "a,b),or(id.eq.1*%:'\"\\" });
@@ -641,25 +685,25 @@ function fakeRemote(o: any = {}) {
     const lim1 = sc(await call(sb, O, "search_contacts", { limit: 1 }));
     eq([lim1.rows.length, lim1.truncated], [1, true], "search_contacts: limit 1 of 3 → truncated");
 
-    const gc = sc(await call(sb, K["u-ron"], "get_contact", { id: C1 }));
+    const gc = sc(await call(sb, K["u-riley"], "get_contact", { id: C1 }));
     eq([gc.name, gc.notes, gc.messages.length, gc.messages[0].text, gc.messages[9].text.length, ids(gc.jobs), ids(gc.tasks), ids(gc.calls)], ["Ann Lee", "Two units", 10, "hello 2", 500, ["j1"], ["t1", "t5"], ["k1"]], "VA get_contact: details, the last 10 messages (clipped to 500), jobs, tasks and calls");
     const gm = sc(await call(sb, K["u-mkt2"], "get_contact", { id: C1 }));
     eq([gm.jobs, gm.tasks, "calls" in gm, gm.estimatedValue], [[], [], false, 500], "Leads & Marketing only: no jobs, tasks or calls");
-    const gt = sc(await call(sb, K["u-ale"], "get_contact", { id: C1 }));
+    const gt = sc(await call(sb, K["u-alex"], "get_contact", { id: C1 }));
     eq([ids(gt.jobs), ids(gt.tasks), "estimatedValue" in gt, "salesValue" in gt], [[], ["t5"], false, false], "technician get_contact: only his own jobs and tasks, no money values");
     eq(errText(await call(sb, O, "get_contact", { id: "44444444-4444-4444-8444-444444444444" })), "No contact with that id.", "get_contact: not found");
     eq(errText(await call(sb, O, "get_contact", { id: "nope" })), "Invalid arguments: id must be an id.", "get_contact: a non-uuid → isError");
 
     // closings
-    eq([ids(sc(await call(sb, K["u-ale"], "list_closings")).rows), ids(sc(await call(sb, K["u-ron"], "list_closings")).rows)], [["cl2"], ["cl2", "cl1"]], "list_closings: a technician only his own");
-    eq(sc(await call(sb, K["u-ron"], "list_closings", { from: "2026-10-08", to: "2026-10-08" })).rows[0], { id: "cl1", date: "2026-10-08", technician: "Guy", customerName: "Ann Lee", invoiceNumber: "INV-j2", jobType: "Aircon", totalInclGst: 300, includesGST: false, paymentStatus: "Paid", paymentMethod: "Bank Transfer", partsCost: 0, postedBy: "Ron", linkedJobId: "j2" }, "a closing row");
+    eq([ids(sc(await call(sb, K["u-alex"], "list_closings")).rows), ids(sc(await call(sb, K["u-riley"], "list_closings")).rows)], [["cl2"], ["cl2", "cl1"]], "list_closings: a technician only his own");
+    eq(sc(await call(sb, K["u-riley"], "list_closings", { from: "2026-10-08", to: "2026-10-08" })).rows[0], { id: "cl1", date: "2026-10-08", technician: "Gabe", customerName: "Ann Lee", invoiceNumber: "INV-j2", jobType: "Aircon", totalInclGst: 300, includesGST: false, paymentStatus: "Paid", paymentMethod: "Bank Transfer", partsCost: 0, postedBy: "Riley", linkedJobId: "j2" }, "a closing row");
 
     // outstanding (the same three lists as the Outstanding page)
-    const out = sc(await call(sb, K["u-ron"], "list_outstanding"));
+    const out = sc(await call(sb, K["u-riley"], "list_outstanding"));
     eq([out.rows.map((x: any) => [x.id, x.totalInclGst, x.daysWaiting]), out.unpaidTotal, ids(out.partsRefunds), ids(out.equipmentRefunds)], [[["j7", 400, 4], ["j4", 165, 2], ["j6", 100, 1]], 665, ["j1"], ["eq1"]], "list_outstanding: unpaid jobs oldest first (incl. GST), parts and equipment refunds (hand-computed)");
     {
       const data = appData(); APP.STATE.data = data;
-      const f = APP.filterForProfile(data, appProf("u-ron"));
+      const f = APP.filterForProfile(data, appProf("u-riley"));
       eq([ids(f.jobs.filter((j: any) => j.paymentStatus !== "Paid").sort((a: any, b: any) => a.date.localeCompare(b.date))), ids(f.jobs.filter((j: any) => j.partsRefundStatus === "Pending Refund")), ids(f.equipmentSpend.filter((e: any) => e.reimbursed === "Pending"))],
         [ids(out.rows), ids(out.partsRefunds), ids(out.equipmentRefunds)], "list_outstanding parity with renderOutstanding's three lists");
     }
@@ -676,23 +720,23 @@ function fakeRemote(o: any = {}) {
     eq(Object.keys(sc(await call(sb, K["u-mgr"], "money_summary"))), ["from", "to", "jobsCount", "overview", "remainingAfterTech", "adSpend", "remainingAfterTechAndAds", "truncated"], "manager: money_summary");
 
     // payroll
-    const pg = sc(await call(sb, K["u-guy"], "payroll_summary", { week: "2026-10-08" }));
-    eq([pg.week, pg.rows.map((x: any) => x.person), pg.rows[0].commission.grandTotal, pg.rows[0].commission.materials, "hourly" in pg.rows[0], pg.rows[0].status], [{ start: "2026-10-07", end: "2026-10-11" }, ["Guy"], 220, { total: 130, gst: 11.82, count: 2 }, false, { cashCollected: false, salaryPaid: false }], "technician payroll_summary: only himself (the 220 above)");
+    const pg = sc(await call(sb, K["u-gabe"], "payroll_summary", { week: "2026-10-08" }));
+    eq([pg.week, pg.rows.map((x: any) => x.person), pg.rows[0].commission.grandTotal, pg.rows[0].commission.materials, "hourly" in pg.rows[0], pg.rows[0].status], [{ start: "2026-10-07", end: "2026-10-11" }, ["Gabe"], 220, { total: 130, gst: 11.82, count: 2 }, false, { cashCollected: false, salaryPaid: false }], "technician payroll_summary: only himself (the 220 above)");
     {
       const data = appData(); APP.STATE.data = data;
-      const mine = APP.filterForProfile(data, appProf("u-guy"));
-      const a = APP.computePayrollCommission(mine, "Guy", "2026-10-12");
-      const s = sc(await call(sb, K["u-guy"], "payroll_summary", {})).rows[0].commission;
+      const mine = APP.filterForProfile(data, appProf("u-gabe"));
+      const a = APP.computePayrollCommission(mine, "Gabe", "2026-10-12");
+      const s = sc(await call(sb, K["u-gabe"], "payroll_summary", {})).rows[0].commission;
       eq([s.total, s.grandTotal, s.onHoldTotal, s.expected, s.cash, s.bonus.total], [a.total, a.grandTotal, a.onHoldTotal, a.expected, a.cash, a.bonus.total], "technician payroll_summary (this week) = the app's own pay page");
     }
-    const pr = sc(await call(sb, K["u-ron"], "payroll_summary", { week: "2026-10-09" }));
-    eq([pr.rows.map((x: any) => x.person), "commission" in pr.rows[0], pr.rows[0].hourly], [["Ron"], false, { person: "Ron", week: { start: "2026-10-07", end: "2026-10-11" }, hours: 10, bookings: 10, bonuses: 20, total: 152, extra: { total: 20 } }], "VA payroll_summary: only himself, the hourly block");
+    const pr = sc(await call(sb, K["u-riley"], "payroll_summary", { week: "2026-10-09" }));
+    eq([pr.rows.map((x: any) => x.person), "commission" in pr.rows[0], pr.rows[0].hourly], [["Riley"], false, { person: "Riley", week: { start: "2026-10-07", end: "2026-10-11" }, hours: 10, bookings: 10, bonuses: 20, total: 152, extra: { total: 20 } }], "VA payroll_summary: only himself, the hourly block");
     for (const k of ["u-owner", "u-mgr"]) {
       const po = sc(await call(sb, K[k], "payroll_summary", { week: "2026-10-12" }));
-      eq([po.rows.map((x: any) => x.person), po.rows.map((x: any) => [!!x.commission, !!x.hourly])], [["Ale", "Guy", "Ron"], [[true, false], [true, false], [false, true]]], `${k}: payroll_summary for every active commission and hourly person (as the Payroll board)`);
+      eq([po.rows.map((x: any) => x.person), po.rows.map((x: any) => [!!x.commission, !!x.hourly])], [["Alex", "Gabe", "Riley"], [[true, false], [true, false], [false, true]]], `${k}: payroll_summary for every active commission and hourly person (as the Payroll board)`);
     }
     const po = sc(await call(sb, O, "payroll_summary", { week: "2026-10-12" }));
-    eq([po.rows[0].commission.total, po.rows[0].commission.expected, po.rows[1].commission.grandTotal, po.rows[2].hourly.total], [200, 160, 50, 80], "owner payroll numbers (Ale 200 / 160 expected, Guy 50, Ron 80; hand-computed above)");
+    eq([po.rows[0].commission.total, po.rows[0].commission.expected, po.rows[1].commission.grandTotal, po.rows[2].hourly.total], [200, 160, 50, 80], "owner payroll numbers (Alex 200 / 160 expected, Gabe 50, Riley 80; hand-computed above)");
 
     // marketing
     const mk = sc(await call(sb, O, "marketing_summary", { from: "2026-10-01", to: "2026-10-14" }));
@@ -707,15 +751,15 @@ function fakeRemote(o: any = {}) {
     eq(["adCalls" in mm2, mm2.leads, mm2.costPerLead], [false, { count: 1, bySource: { Facebook: 1 }, byDivision: { Chimney: 1 } }, null], "marketing with Leads & Marketing: leads of that Sydney day (Bob, 07:00 on 14 Oct), no ad calls");
 
     // tasks
-    eq(ids(sc(await call(sb, K["u-ron"], "list_tasks", { mine: true })).rows), ["t3", "t1"], "VA list_tasks mine: only tasks assigned to Ron, earliest due first");
-    eq(ids(sc(await call(sb, K["u-guy"], "list_tasks")).rows), ["t3", "t2"], "technician list_tasks: assigned to him or on his board (no due date last)");
+    eq(ids(sc(await call(sb, K["u-riley"], "list_tasks", { mine: true })).rows), ["t3", "t1"], "VA list_tasks mine: only tasks assigned to Riley, earliest due first");
+    eq(ids(sc(await call(sb, K["u-gabe"], "list_tasks")).rows), ["t3", "t2"], "technician list_tasks: assigned to him or on his board (no due date last)");
     eq(ids(sc(await call(sb, O, "list_tasks", { status: "To do" })).rows), ["t3", "t1", "t4"], "status filter");
-    eq(ids(sc(await call(sb, K["u-ron"], "list_tasks", { limit: 1 })).rows), ["t5"], "list_tasks limit 1: the earliest due");
-    const t = sc(await call(sb, K["u-ron"], "list_tasks", {})).rows.find((x: any) => x.id === "t1");
-    eq([t.notes.length, t.subtasks, t.assignees, t.board, t.due], [300, 2, ["Ron"], "Ron", "2026-10-15"], "a task row (notes clipped to 300, subtasks counted)");
+    eq(ids(sc(await call(sb, K["u-riley"], "list_tasks", { limit: 1 })).rows), ["t5"], "list_tasks limit 1: the earliest due");
+    const t = sc(await call(sb, K["u-riley"], "list_tasks", {})).rows.find((x: any) => x.id === "t1");
+    eq([t.notes.length, t.subtasks, t.assignees, t.board, t.due], [300, 2, ["Riley"], "Riley", "2026-10-15"], "a task row (notes clipped to 300, subtasks counted)");
 
     // calls (dates in Sydney, across the daylight-saving change on 4 Oct)
-    const k4 = sc(await call(sb, K["u-ron"], "list_calls", { from: "2026-10-04", to: "2026-10-04" }));
+    const k4 = sc(await call(sb, K["u-riley"], "list_calls", { from: "2026-10-04", to: "2026-10-04" }));
     eq([ids(k4.rows), k4.rows[0].contactName, k4.total, k4.missed, k4.missedOpen], [["k1"], "Ann Lee", 1, 1, 1], "list_calls on 4 Oct (Sydney): 14:00Z on the 3rd to 13:00Z on the 4th");
     const ka = sc(await call(sb, O, "list_calls", { from: "2026-10-01", missed_only: true }));
     eq([ids(ka.rows), ka.missed, ka.missedOpen, ka.rows[1].calledBackAt], [["k1", "k2"], 2, 1, "2026-10-04T00:00:00.000Z"], "list_calls missed_only, newest first; missedOpen = not called back");
@@ -737,11 +781,11 @@ function fakeRemote(o: any = {}) {
     eq([lc.rows.length, lc.rows.every((r: any) => r.contactName === "Caller " + r.contactId.slice(2)), nameReads() - n0, NAME_CHUNK], [150, true, 2, 100], "list_calls: 150 contacts' names read in chunks of 100 (a short request address), every name found");
 
     // payroll_summary reads only what the week can use: years of old paid jobs change nothing and are never read
-    const old = Array.from({ length: 40 }, (_, i) => job("old" + i, { date: "2025-0" + (1 + (i % 9)) + "-10", technician: i % 2 ? "Guy" : "Ale", amount: 100, payment_status: "Paid", payment_method: "Cash", date_paid: "2025-0" + (1 + (i % 9)) + "-11" }));
+    const old = Array.from({ length: 40 }, (_, i) => job("old" + i, { date: "2025-0" + (1 + (i % 9)) + "-10", technician: i % 2 ? "Gabe" : "Alex", amount: 100, payment_status: "Paid", payment_method: "Cash", date_paid: "2025-0" + (1 + (i % 9)) + "-11" }));
     const wy = world({ jobs: [...JSON.parse(JSON.stringify(SEED.jobs)), ...old] }), ky = await keysFor(wy);
     let read = 0;
     const counting = { ...wy, from: (t: string) => { const b = wy.from(t); if (t !== "jobs") return b; const th = b.then; b.then = (res: any, rej: any) => th((out: any) => { read += (out.data || []).length; return res(out); }, rej); return b; } };
-    for (const [who, week] of [["u-owner", "2026-10-12"], ["u-owner", "2026-10-08"], ["u-guy", "2026-10-08"], ["u-ron", "2026-10-09"]]) {
+    for (const [who, week] of [["u-owner", "2026-10-12"], ["u-owner", "2026-10-08"], ["u-gabe", "2026-10-08"], ["u-riley", "2026-10-09"]]) {
       read = 0;
       const a = sc(await call(counting, ky[who], "payroll_summary", { week })), b = sc(await call(sb, K[who], "payroll_summary", { week }));
       eq([JSON.stringify(a) === JSON.stringify(b), a.truncated, read < 10], [true, false, true], `payroll_summary ${who} ${week}: the same answer with 40 old paid jobs in the table, which are never read`);
@@ -751,18 +795,18 @@ function fakeRemote(o: any = {}) {
     const wo = world(), ko = await keysFor(wo);
     banCache.clear();
     wo.ctl.authDown = true;
-    const down = await rpc(wo, ko["u-ron"], "ping");
+    const down = await rpc(wo, ko["u-mgr"], "ping");
     wo.ctl.authDown = false;
     eq([down.status, down.body.error.code, down.headers.get("www-authenticate")], [500, -32603, null], "Auth not answering → 500 internal error (no WWW-Authenticate), not 401");
     for (const t of ["mcp_tokens", "profiles"]) {
       const broken = fakeDb(JSON.parse(JSON.stringify(wo.T)), { users: USERS(), jwts: JWTS, fail: [t] });
-      const r = await rpc(broken, ko["u-ron"], "ping");
+      const r = await rpc(broken, ko["u-mgr"], "ping");
       eq([r.status, r.body.error.code], [500, -32603], `${t} not readable → 500, not 401`);
     }
-    eq([(await rpc(wo, ko["u-ron"], "ping")).status, logged.filter((l) => l.includes(ko["u-ron"])).length], [200, 0], "after the outage the key works; no log line ever holds a key");
+    eq([(await rpc(wo, ko["u-mgr"], "ping")).status, logged.filter((l) => l.includes(ko["u-mgr"])).length], [200, 0], "after the outage the key works; no log line ever holds a key");
     banCache.clear();
-    const gone = fakeDb(JSON.parse(JSON.stringify(wo.T)), { users: { ...USERS(), "u-ron": undefined }, jwts: JWTS });
-    eq((await rpc(gone, ko["u-ron"], "ping")).status, 401, "a person whose account is gone (Auth 404) → 401");
+    const gone = fakeDb(JSON.parse(JSON.stringify(wo.T)), { users: { ...USERS(), "u-mgr": undefined }, jwts: JWTS });
+    eq((await rpc(gone, ko["u-mgr"], "ping")).status, 401, "a person whose account is gone (Auth 404) → 401");
     banCache.clear();
 
     // calls sent at the same moment: each counts only the log rows written before its own
@@ -775,7 +819,7 @@ function fakeRemote(o: any = {}) {
 
   // ── paging and caps ──
   {
-    const many = Array.from({ length: 2500 }, (_, i) => ({ id: "t" + String(i).padStart(5, "0"), title: "Task " + i, board: "Ofek", status: "To do", due: null, assignees: [], contact_id: null }));
+    const many = Array.from({ length: 2500 }, (_, i) => ({ id: "t" + String(i).padStart(5, "0"), title: "Task " + i, board: "Odette", status: "To do", due: null, assignees: [], contact_id: null }));
     const w = world({ tasks: many }), keys = await keysFor(w);
     w.ranges.tasks = 0;
     const r = sc(await call(w, keys["u-owner"], "list_tasks", { limit: 500 }));
@@ -794,16 +838,18 @@ function fakeRemote(o: any = {}) {
     const w = world();
     eq((await manage(w, "create_token", null, { name: "x" })).status, 401, "create_token without a sign-in → 401");
     eq((await http(w, { path: "/mcp/manage", body: { step: "create_token", name: "x" }, headers: { authorization: "Bearer " + newToken() } })).status, 401, "an MCP key is not a sign-in");
-    eq([(await manage(w, "create_token", "u-pia", { name: "x" })).status, (await manage(w, "create_token", "u-pia", { name: "x" })).body.reason], [403, "Ask an owner to switch on the private connector for you."], "a VA without the MCP switch → 403");
-    eq([(await manage(w, "create_token", "u-ron", { name: "x" })).status, (await manage(w, "create_token", "u-mgr", { name: "x" })).status, (await manage(w, "create_token", "u-owner", { name: "x" })).status], [200, 200, 200], "a VA with the switch, a manager and an owner can make keys");
+    eq([(await manage(w, "create_token", "u-pia", { name: "x" })).status, (await manage(w, "create_token", "u-pia", { name: "x" })).body.reason], [403, "Only owners and managers can make keys."], "a VA → 403, owners and managers only");
+    eq([(await manage(w, "create_token", "u-riley", { name: "x" })).status, (await manage(w, "create_token", "u-mgr", { name: "x" })).status, (await manage(w, "create_token", "u-owner", { name: "x" })).status], [403, 200, 200], "a VA with the old switch still on can't; a manager and an owner can make keys");
     eq([(await manage(w, "create_token", "u-owner", { name: "   " })).status, (await manage(w, "create_token", "u-owner", {})).body.reason], [400, "Give the key a name."], "an empty name → 400");
     for (let i = 0; i < 19; i++) await manage(w, "create_token", "u-mgr", { name: "k" + i });
     const full = await manage(w, "create_token", "u-mgr", { name: "21st" });
     eq([full.status, w.T.mcp_tokens.filter((x: any) => x.user_id === "u-mgr").length], [409, 20], "the 21st active key → 409");
-    const mgrKey = w.T.mcp_tokens.find((x: any) => x.user_id === "u-mgr"), ronKey = w.T.mcp_tokens.find((x: any) => x.user_id === "u-ron");
+    // a key the VA made before 15 Oct (when the switch existed)
+    w.T.mcp_tokens.push({ id: crypto.randomUUID(), business_id: "default", user_id: "u-riley", name: "Old", token_prefix: "ops_mcp_abcd", token_hash: "0".repeat(64), scopes: ["read"], revoked_at: null, last_used_at: null });
+    const mgrKey = w.T.mcp_tokens.find((x: any) => x.user_id === "u-mgr"), ronKey = w.T.mcp_tokens.find((x: any) => x.user_id === "u-riley");
     eq((await manage(w, "revoke_token", "u-mgr", { id: mgrKey.id })).status, 200, "revoke your own key");
     eq((await manage(w, "create_token", "u-mgr", { name: "after a revoke" })).status, 200, "a revoked key frees a place");
-    const other = await manage(w, "revoke_token", "u-ron", { id: w.T.mcp_tokens.find((x: any) => x.user_id === "u-owner").id });
+    const other = await manage(w, "revoke_token", "u-riley", { id: w.T.mcp_tokens.find((x: any) => x.user_id === "u-owner").id });
     eq([other.status, other.body.reason], [403, "Only an owner can revoke someone else's key."], "a VA can't revoke someone else's key");
     const T1 = NOW + 10_000;
     const own = await manage(w, "revoke_token", "u-owner", { id: ronKey.id }, T1);
@@ -991,7 +1037,7 @@ function fakeRemote(o: any = {}) {
         const w = world();
         for (const step of CLIENT_ACTIONS) {
           const res = [];
-          for (const who of ["u-mgr", "u-ron", "u-guy", "u-mkt"]) res.push(await m(w, step, who, { id: C1, name: "x", url: "https://mcp.example.com/mcp", secret: SECRET, tool: "t" }));
+          for (const who of ["u-mgr", "u-riley", "u-gabe", "u-mkt"]) res.push(await m(w, step, who, { id: C1, name: "x", url: "https://mcp.example.com/mcp", secret: SECRET, tool: "t" }));
           eq(res.map((r) => [r.status, r.body.reason]), new Array(4).fill([403, "owners only"]), `${step}: manager / va / technician / marketing → 403 owners only`);
           eq((await m(w, step, null)).status, 401, `${step}: nobody signed in → 401`);
         }
@@ -1162,7 +1208,7 @@ function fakeRemote(o: any = {}) {
 
   // ── imports (M4): the pure helpers ──
   {
-    const tz = "Australia/Sydney", cx = { tz, people: ["Guy Tech", "Ron"] };
+    const tz = "Australia/Sydney", cx = { tz, people: ["Gabe Tech", "Riley"] };
     const F = IMPORT_FIELDS;
     const data = { a: { b: [{ c: 1 }, { c: 2 }] } };
     eq([getPath(data, "a.b[1].c"), getPath(data, "a.x.c") === undefined, getPath(data, "") === data, getPath(data, "a.b[5]") === undefined], [2, true, true, true], "getPath: a.b[1].c resolves; a missing step → undefined; '' → the root");
@@ -1193,7 +1239,7 @@ function fakeRemote(o: any = {}) {
       [{ ok: true, value: true }, { ok: true, value: false }, { ok: true, value: true }, { ok: true, value: true }, { ok: false, reason: "is not yes/no" }], "coerceField bool");
     eq([C_(F.jobs.payment_status, "paid"), C_(F.jobs.payment_status, "maybe"), C_(F.tasks.status, "in progress")], [{ ok: true, value: "Paid" }, { ok: false, reason: "is not one of: Paid, Unpaid" }, { ok: true, value: "In Progress" }], "coerceField enum: the canonical value, or the list");
     eq([C_(F.contacts.tags, "a, b,,a"), (C_(F.contacts.tags, Array.from({ length: 25 }, (_, k) => "t" + k)) as any).value.length, C_(F.contacts.tags, [{}])], [{ ok: true, value: ["a", "b"] }, 20, { ok: false, reason: "is not a list of tags" }], "coerceField tags: split, trimmed, empties dropped, de-duplicated, at most 20");
-    eq([C_(F.tasks.assigned_to, "guy tech"), C_(F.tasks.assigned_to, "Old Hand")], [{ ok: true, value: "Guy Tech" }, { ok: false, reason: "is not someone on the team" }], "coerceField person: an active employee's own name, or refused");
+    eq([C_(F.tasks.assigned_to, "gabe tech"), C_(F.tasks.assigned_to, "Old Hand")], [{ ok: true, value: "Gabe Tech" }, { ok: false, reason: "is not someone on the team" }], "coerceField person: an active employee's own name, or refused");
     const types = ["text", "phone", "email", "day", "money", "bool", "enum", "tags", "person"];
     eq(types.map((t) => (coerceField({ label: "x", type: t as any, values: ["A"] }, null, cx) as any).value), ["", "", "", null, 0, false, null, [], ""], "coerceField: empty values give each type's empty value");
     eq((coerceField(F.contacts.full_name, "   ", cx) as any).value, "", "coerceField: blanks are empty");
@@ -1242,22 +1288,46 @@ function fakeRemote(o: any = {}) {
       [true, "event", new Date(NOW).toISOString(), "Imported from Fake CRM (Leads), automatic messages off", new Date(NOW).toISOString(), null, "MCP import", "Other", "New", "2026-10-14", null, false, [], 0], "importRow: a quiet contact (quiet on its first entry, read, no stage time, the import source, today in the zone)");
     eq(["quiet" in lc.messages[0], lc.messages[0].text, lc.last_read_at, lc.source, lc.created_at], [false, "Imported from Fake CRM (Leads)", null, "Web", "2026-10-01"], "importRow: a contact with automations on has no quiet key and stays unread; mapped values win");
     eq((importRow("contacts", { full_name: "C" }, { ...IC, importSource: "From the CRM" }) as any).source, "From the CRM", "importRow: the source is catalog.mcp.importSource");
+    // "Date received" mapped: the card arrived that business day (created_at AND its first entry), never as today's new
+    // lead; Sydney keeps the bare date (midnight UTC is still that day there), Chicago gets noon that day in Chicago
+    const dr = (tz: string, quiet = true) => importRow("contacts", { full_name: "D", created_at: "2026-09-30" }, { ...IC, tz, quiet }) as any;
+    eq([dr(SYD).created_at, dr(SYD).messages[0].at, dr(CHI).created_at, dr(CHI).messages[0].at, dr(SYD, false).messages[0].at],
+      ["2026-09-30", "2026-09-30T00:00:00.000Z", "2026-09-30T17:00:00.000Z", "2026-09-30T17:00:00.000Z", "2026-09-30T00:00:00.000Z"], "importRow: Date received dates the card and its first entry in the business's zone (bizDayStamp)");
+    eq([(importRow("contacts", { full_name: "E" }, { ...IC, tz: CHI }) as any).created_at, qc.created_at], ["2026-10-13T17:00:00.000Z", "2026-10-14"], "importRow: nothing mapped = today in the business's zone, stamped like conversations / voice");
+    // the one marker the engine and push read: import_quiet on every kind
+    const mk3 = (quiet: boolean) => ["contacts", "jobs", "tasks"].map((k) => (importRow(k, { full_name: "A", customer_name: "A", title: "A" }, { ...IC, quiet }) as any).import_quiet);
+    eq([mk3(true), mk3(false)], [[true, true, true], [false, false, false]], "importRow: import_quiet is the run's quiet, on contacts, jobs and tasks");
     const qj: any = importRow("jobs", { customer_name: "A" }, IC), lj: any = importRow("jobs", { customer_name: "B", payment_status: "Paid", date: "2026-10-10", amount: 300, includes_gst: true }, { ...IC, quiet: false });
     eq([keysOf(qj) === keysOf(lj), qj.created_at, qj.review_do_not_ask, lj.created_at, lj.review_do_not_ask], [true, null, true, new Date(NOW).toISOString(), false], "importRow jobs: same keys; quiet = created_at null + review_do_not_ask; else now / false");
     eq([qj.date, qj.date_paid, qj.payment_status, qj.job_type, qj.amount, qj.parts_cost, qj.includes_gst, lj.date_paid, qj.entered_by, qj.paid_to_technician, qj.parts_refund_status, qj.cash_confirmed, qj.commission_percent],
       ["2026-10-14", null, "Unpaid", "Other", 0, 0, true, "2026-10-10", "MCP import: Leads", "Not Paid", "N/A", false, 0], "importRow jobs: defaults (GST applies unless mapped, as the app's job form; no rate = 0%); date_paid only when Paid");
-    const RATES = { Guy: { Aircon: 30, Chimney: null }, Ale: { "Pressure Washing": 40 } };
+    const RATES = { Gabe: { Aircon: 30, Chimney: null }, Alex: { "Pressure Washing": 40 } };
     const rj = (v: any) => importRow("jobs", { customer_name: "A", ...v }, { ...IC, rates: RATES }) as any;
-    eq([rj({ technician: "Guy", job_type: "Aircon" }).commission_percent, rj({ technician: "Guy", job_type: "Chimney" }).commission_percent, rj({ technician: "Ale", job_type: "Aircon" }).commission_percent, rj({ technician: "Guy", job_type: "Aircon", includes_gst: false }).includes_gst, keysOf(rj({ technician: "Guy" })) === keysOf(qj)],
+    eq([rj({ technician: "Gabe", job_type: "Aircon" }).commission_percent, rj({ technician: "Gabe", job_type: "Chimney" }).commission_percent, rj({ technician: "Alex", job_type: "Aircon" }).commission_percent, rj({ technician: "Gabe", job_type: "Aircon", includes_gst: false }).includes_gst, keysOf(rj({ technician: "Gabe" })) === keysOf(qj)],
       [30, 0, 0, false, true], "importRow jobs: commission % from the technician's rate for the job type (none → 0); a mapped 'no GST' stays; the same keys");
-    const pairs: [string, string][] = [["Guy", "Aircon"], ["Guy", "Chimney"], ["Ale", "Aircon"], ["Nobody", "Aircon"], ["Ale", "Pressure Washing"]];
+    const pairs: [string, string][] = [["Gabe", "Aircon"], ["Gabe", "Chimney"], ["Alex", "Aircon"], ["Nobody", "Aircon"], ["Alex", "Pressure Washing"]];
     eq(pairs.map(([t, j]) => commissionRateFor(RATES, t, j)), pairs.map(([t, j]) => APP.commissionRateFor(RATES, t, j)), "commissionRateFor: the same as the app's");
-    eq([mapItem("jobs", { customer_name: "c", technician: "t" }, { c: "Ann", t: "guy tech" }, cx), mapItem("jobs", { customer_name: "c", technician: "t" }, { c: "Ann", t: "Dan" }, cx).errors],
-      [{ values: { customer_name: "Ann", technician: "Guy Tech" }, errors: [] }, ["Technician is not someone on the team"]], "mapItem jobs: the technician must be an active employee (their own spelling), else the row is a problem");
-    const t1i: any = importRow("tasks", { title: "A", assigned_to: "Ron" }, IC), t2i: any = importRow("tasks", { title: "B", assigned_to: "Guy", due: "2026-10-20", status: "Done", priority: "High", category: "Financial" }, IC), t3i: any = importRow("tasks", { title: "C" }, IC);
+    eq([mapItem("jobs", { customer_name: "c", technician: "t" }, { c: "Ann", t: "gabe tech" }, cx), mapItem("jobs", { customer_name: "c", technician: "t" }, { c: "Ann", t: "Dan" }, cx).errors],
+      [{ values: { customer_name: "Ann", technician: "Gabe Tech" }, errors: [] }, ["Technician is not someone on the team"]], "mapItem jobs: the technician must be an active employee (their own spelling), else the row is a problem");
+    const t1i: any = importRow("tasks", { title: "A", assigned_to: "Riley" }, IC), t2i: any = importRow("tasks", { title: "B", assigned_to: "Gabe", due: "2026-10-20", status: "Done", priority: "High", category: "Financial" }, IC), t3i: any = importRow("tasks", { title: "C" }, IC);
     eq([keysOf(t1i) === keysOf(t2i), keysOf(t1i) === keysOf(t3i)], [true, true], "importRow tasks: same keys");
     eq([t1i.board, t1i.assignees, t2i.board, t2i.assignees, t3i.board, t3i.assignees, t3i.status, t3i.priority, t3i.category, t3i.created_by, t3i.subtasks, t3i.contact_id],
-      ["ron", ["Ron"], "Guy", ["Guy"], "ron", [], "Not Started", "Medium", "", "MCP import: Leads", [], null], "importRow tasks: the app's board rule (a VA or nobody → 'ron'), defaults");
+      ["ron", ["Riley"], "Gabe", ["Gabe"], "ron", [], "Not Started", "Medium", "", "MCP import: Leads", [], null], "importRow tasks: the app's board rule (a VA or nobody → 'ron'), defaults");
+    // the board rule = the app's boardForAssignees (stage 1: a VA by full name, technician name or first name, or an
+    // employee with the VA role; no name is special any more)
+    {
+      const profs = [...PROFILES, { id: "u-va2", full_name: "Kim Lane", role: "va", technician_name: "KL", permissions: {} }];
+      const emps = [...SEED.employees, { id: "e9", name: "Sam", roles: ["VA"], status: "Active", employment_type: "Hourly" }, { id: "e10", name: "Jo", roles: ["Technician"], status: "Active", employment_type: "" }];
+      APP.STATE.profiles = profs.map((p: any) => ({ id: p.id, fullName: p.full_name, role: p.role, technicianName: p.technician_name || "", permissions: p.permissions || {} }));
+      const prevData = APP.STATE.data;
+      APP.STATE.data = { employees: emps.map((e: any) => ({ name: e.name, roles: e.roles || [], status: e.status })) };
+      const cases = [[], ["Riley"], ["Kim Lane"], ["Kim"], ["KL"], ["Sam"], ["Jo"], ["Gabe", "Riley"], ["Riley", "Gabe"], ["Nobody"], ["Odette"]];
+      eq(cases.map((n) => boardFor(n, profs, emps)), cases.map((n) => APP.boardForAssignees(n)), "boardFor: the same board as the app's boardForAssignees for every case");
+      eq(cases.map((n) => boardFor(n, profs, emps)), ["ron", "ron", "ron", "ron", "ron", "ron", "Jo", "Gabe", "ron", "Nobody", "Odette"], "boardFor: the office's board for a VA (any of their names) or an employee with the VA role; else the first person's own");
+      APP.STATE.data = prevData; APP.STATE.profiles = [];
+      const t4 = importRow("tasks", { title: "D", assigned_to: "Sam" }, { ...IC, employees: emps }) as any, t5 = importRow("tasks", { title: "D", assigned_to: "Sam" }, IC) as any;
+      eq([t4.board, t5.board], ["ron", "Sam"], "importRow tasks: an employee with the VA role (no login) goes on the office's board when the run has the employees");
+    }
     eq([runStatus(3, 0), runStatus(0, 0), runStatus(2, 1), runStatus(0, 2)], ["done", "done", "partial", "failed"], "runStatus");
     eq(IMPORT_KINDS.map((k) => (DEFAULT_DEDUPE as any)[k].fields.every((f: string) => f in IMPORT_FIELDS[k])), [true, true, true], "DEFAULT_DEDUPE: only real fields of each kind");
   }
@@ -1285,7 +1355,7 @@ function fakeRemote(o: any = {}) {
     try {
       // save_rule
       let w = iw();
-      eq([(await save(w, RULE, "u-mgr")).status, (await save(w, RULE, "u-mgr")).body.reason, (await save(w, RULE, "u-guy")).status, (await save(w, RULE, null)).status], [403, "Owners only.", 403, 401], "save_rule: owners only (a manager and a technician get 403)");
+      eq([(await save(w, RULE, "u-mgr")).status, (await save(w, RULE, "u-mgr")).body.reason, (await save(w, RULE, "u-gabe")).status, (await save(w, RULE, null)).status], [403, "Owners only.", 403, 401], "save_rule: owners only (a manager and a technician get 403)");
       const s1 = await save(w, { ...RULE, business_id: "other", created_by: "hacker", last_run_at: "2020-01-01T00:00:00Z" }, "u-owner", NOW);
       const R1 = s1.body.rule;
       eq([s1.status, R1.business_id, R1.run_automations, R1.enabled, R1.created_by, R1.last_run_at, R1.items_path, R1.dedupe, w.T.mcp_import_rules.length], [200, "default", false, false, "u-owner", undefined, "items", { fields: ["phone", "email"], match: "any" }, 1], "save_rule: saved for this business, OFF and automations OFF unless === true; unknown columns ignored");
@@ -1420,17 +1490,39 @@ function fakeRemote(o: any = {}) {
         const cv = (await manage(wv, "commit_import", "u-owner", { rule_id: RV.id }, T1)).body.run;
         const id = (n: string) => wv.T.contacts.find((c: any) => c.full_name === n).id, cleo = id("Cleo New"), dan = id("Dan New"), eve = id("Eve New");
         wv.T.lead_messages = [{ id: "lm1", contact_id: cleo, channel: "sms", direction: "in", body: "Yes please" }];
-        wv.T.activity_log.push({ id: "al-ron", record_kind: "contact", record_id: dan, actor: "Ron", text: "Stage → Quoted", manual: true, at: new Date(T1 + 5e3).toISOString() });
+        wv.T.activity_log.push({ id: "al-riley", record_kind: "contact", record_id: dan, actor: "Riley", text: "Stage → Quoted", manual: true, at: new Date(T1 + 5e3).toISOString() });
         const uv = await manage(wv, "undo_import", "u-owner", { run_id: cv.id }, T1 + 60e3);
         eq([uv.body, wv.T.contacts.some((c: any) => c.id === cleo), wv.T.contacts.some((c: any) => c.id === dan), wv.T.contacts.some((c: any) => c.id === eve), wv.T.lead_messages.length],
           [{ ok: true, deleted: 1, kept: 2, paused: false }, true, true, false, 1], "undo_import: a lead with a text thread and a lead the team worked on are kept (their thread would cascade away); the untouched one goes");
-        eq(wv.T.activity_log.map((l: any) => [l.record_id === cleo ? "cleo" : l.record_id === dan ? "dan" : "eve", l.actor]).sort(), [["cleo", "MCP import"], ["dan", "MCP import"], ["dan", "Ron"]], "undo_import: only the import's own history entry of the deleted lead goes; Ron's entry and the kept leads' history stay");
+        eq(wv.T.activity_log.map((l: any) => [l.record_id === cleo ? "cleo" : l.record_id === dan ? "dan" : "eve", l.actor]).sort(), [["cleo", "MCP import"], ["dan", "MCP import"], ["dan", "Riley"]], "undo_import: only the import's own history entry of the deleted lead goes; Riley's entry and the kept leads' history stay");
         const wz = iw({ closings: [{ id: "cl9", linked_job_id: "J1" }], contacts: [{ id: "K1", messages: [{}, {}] }, { id: "K2", messages: [{}], stage_changed_at: "2026-10-14T00:00:00Z" }, { id: "K3", messages: [{}] }, { id: "K4", messages: [{}] }, { id: "K5", messages: [{}], linked_job_id: "J2" }],
           calls: [{ id: "c9", contact_id: "K3" }], tasks: [{ id: "T1", updates: [{ text: "done" }], subtasks: [] }, { id: "T2", updates: [], subtasks: [] }, { id: "T3", updates: [], subtasks: [{ t: 1 }] }] });
         eq([[...await usedSince(wz, "contacts", ["K1", "K2", "K3", "K4", "K5"])].sort(), [...await usedSince(wz, "jobs", ["J1", "J2", "J3"])].sort(), [...await usedSince(wz, "tasks", ["T1", "T2", "T3"])].sort()],
           [["K1", "K2", "K3", "K5"], ["J1", "J2"], ["T1", "T3"]], "usedSince: a grown thread, a stage move, a call, a linked job; a job a closing or lead points at; a task with updates or subtasks");
         const wf = fakeDb(JSON.parse(JSON.stringify(wz.T)), { users: USERS(), jwts: JWTS, fail: ["lead_messages"] });
         eq([...await usedSince(wf, "contacts", ["K4"])], ["K4"], "usedSince: a check that can't be read keeps the record (never deletes blind)");
+        // a lead with 1,500 texts and 1,200 history entries sits in front of the others: the server answers at most 1,000
+        // rows a request, so a single read would never see L2's text or L3's entry (and Undo would delete them)
+        const lots = (n: number, f: (i: number) => any) => Array.from({ length: n }, (_, i) => f(i));
+        const big = {
+          contacts: [{ id: "L1", messages: [{}] }, { id: "L2", messages: [{}] }, { id: "L3", messages: [{}] }, { id: "L4", messages: [{}] }, { id: "L5", messages: [{}], contacted_at: "2026-10-14T02:00:00Z" },
+            { id: "L6", messages: [{}], customer_notes: [{ id: "n1", text: "Gate code 1234", by: "Ann", at: "2026-10-14T02:00:00Z" }] }, { id: "L7", messages: [{}], contacted_at: null, customer_notes: [] }],
+          lead_messages: [...lots(1500, (i) => ({ id: "lm" + i, contact_id: "L1" })), { id: "lmx", contact_id: "L2" }],
+          activity_log: [...lots(1200, (i) => ({ id: "al" + i, record_kind: "contact", record_id: "L1", actor: "Ann", text: "Called" })), { id: "aly", record_kind: "contact", record_id: "L3", actor: "Ann", text: "Called" }],
+        };
+        const capped = fakeDb(JSON.parse(JSON.stringify(big)), { maxRows: 1000 });
+        const all7 = ["L1", "L2", "L3", "L4", "L5", "L6", "L7"];
+        eq([...await usedSince(capped, "contacts", all7)].sort(), ["L1", "L2", "L3", "L5", "L6"], "usedSince: every read is paged past the server's 1,000-row cap (L2's text, L3's history); a lead called (contacted_at) or noted (customer_notes) is used");
+        ok((capped.ranges.lead_messages || 0) >= 2 && (capped.ranges.activity_log || 0) >= 2, "usedSince: the big tables were read in more than one page");
+        // and Undo end to end: the lead the team texted, behind 1,500 other texts, is kept
+        const wb = iw(), RB = (await save(wb, RULE, "u-owner", NOW)).body.rule;
+        const cb = (await manage(wb, "commit_import", "u-owner", { rule_id: RB.id }, T1)).body.run;
+        const bid = (n: string) => wb.T.contacts.find((c: any) => c.full_name === n).id, b1 = bid("Cleo New"), b2 = bid("Dan New"), b3 = bid("Eve New");
+        wb.T.lead_messages = [...lots(1500, (i) => ({ id: "bm" + i, contact_id: b1 })), { id: "bmx", contact_id: b2 }];
+        wb.T.contacts.find((c: any) => c.id === b3).customer_notes = [{ id: "n2", text: "Back on Monday", by: "Ann", at: new Date(T1).toISOString() }];
+        const wbc = fakeDb(wb.T, { users: USERS(), jwts: JWTS, maxRows: 1000 });
+        const ub = await manage(wbc, "undo_import", "u-owner", { run_id: cb.id }, T1 + 60e3);
+        eq([ub.body, [b1, b2, b3].map((x) => wbc.T.contacts.some((c: any) => c.id === x)), wbc.T.lead_messages.length], [{ ok: true, deleted: 0, kept: 3, paused: false }, [true, true, true], 1501], "undo_import with the server's row cap: the leads with texts (one behind 1,500 others) and the noted lead are all kept");
       }
 
       // delete_rule, then undo its import
@@ -1457,19 +1549,19 @@ function fakeRemote(o: any = {}) {
       const cj = (await manage(wj, "commit_import", "u-owner", { rule_id: RJ.id }, T1)).body.run;
       const nj = wj.T.jobs.find((j: any) => j.invoice_number === "INV-2002");
       eq([cj.inserted, cj.duplicates, nj.amount, nj.created_at, nj.review_do_not_ask, nj.entered_by, wj.T.activity_log[0].record_kind], [1, 1, 120.5, null, true, "MCP import: Jobs", "job"], "jobs import: 'INV-2001' matches '2001'; a quiet job (no created_at, no review request)");
-      const wr = iw({ commission_rates: [{ technician_name: "Guy", rates: { Aircon: 30 } }] });
+      const wr = iw({ commission_rates: [{ technician_name: "Gabe", rates: { Aircon: 30 } }] });
       const RR = (await save(wr, { ...RULE, kind: "jobs", name: "Paid jobs", mapping: { customer_name: "c", invoice_number: "n", technician: "t", job_type: "j", amount: "a" }, dedupe: { fields: ["invoice_number"], match: "any" } }, "u-owner", NOW)).body.rule;
-      answerWith([{ c: "Ann", n: "3001", t: "guy", j: "Aircon", a: 200 }, { c: "Bob", n: "3002", t: "dan", j: "Aircon", a: 100 }]);
+      answerWith([{ c: "Ann", n: "3001", t: "gabe", j: "Aircon", a: 200 }, { c: "Bob", n: "3002", t: "dan", j: "Aircon", a: 100 }]);
       const cr = (await manage(wr, "commit_import", "u-owner", { rule_id: RR.id }, T1)).body.run;
       const ann = wr.T.jobs.find((j: any) => j.invoice_number === "3001");
       eq([cr.status, cr.inserted, cr.errors.map((e: any) => e.reason), ann.technician, ann.commission_percent, ann.includes_gst, wr.T.jobs.some((j: any) => j.invoice_number === "3002")],
-        ["partial", 1, ["Technician is not someone on the team"], "Guy", 30, true, false], "jobs import: Dan's rate 30% filled in, GST on as in the app; a technician who isn't on the team is a problem row, not an invisible job");
+        ["partial", 1, ["Technician is not someone on the team"], "Gabe", 30, true, false], "jobs import: Dan's rate 30% filled in, GST on as in the app; a technician who isn't on the team is a problem row, not an invisible job");
       const wt = iw();
       const RT = (await save(wt, { ...RULE, kind: "tasks", name: "Tasks", mapping: { title: "t", due: "d", assigned_to: "who" }, dedupe: { fields: ["title", "due"], match: "all" } }, "u-owner", NOW)).body.rule;
-      answerWith([{ t: "Call Ann", d: "2026-10-20", who: "guy" }, { t: "Call Bob", d: "2026-10-21", who: "Stranger" }, { t: "Call Cy", d: "2026-10-22" }]);
+      answerWith([{ t: "Call Ann", d: "2026-10-20", who: "gabe" }, { t: "Call Bob", d: "2026-10-21", who: "Stranger" }, { t: "Call Cy", d: "2026-10-22" }]);
       const ct = (await manage(wt, "commit_import", "u-owner", { rule_id: RT.id }, T1)).body.run;
       const nt = wt.T.tasks.filter((t: any) => ct.inserted_ids.includes(t.id));
-      eq([ct.status, ct.inserted, ct.errors.map((e: any) => e.reason), nt.map((t: any) => [t.title, t.board, t.assignees])], ["partial", 2, ["Assigned to is not someone on the team"], [["Call Ann", "Guy", ["Guy"]], ["Call Cy", "ron", []]]], "tasks import: only active employees can be assigned; boards by the app's rule");
+      eq([ct.status, ct.inserted, ct.errors.map((e: any) => e.reason), nt.map((t: any) => [t.title, t.board, t.assignees])], ["partial", 2, ["Assigned to is not someone on the team"], [["Call Ann", "Gabe", ["Gabe"]], ["Call Cy", "ron", []]]], "tasks import: only active employees can be assigned; boards by the app's rule");
 
       // the hourly timer
       const waits: Promise<unknown>[] = [];

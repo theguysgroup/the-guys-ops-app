@@ -6117,8 +6117,9 @@ function connLogRows(id, log, nowMs){
   return rows;
 }
 // Private connector (MCP), stage 5: pure helpers (tested in tests/business-logic.test.js). The mcp function keeps the same lists (parity tests).
-// Who may make keys: owners and managers always, anyone else once an owner switched "mcp" on for them (the function's canUseMcp).
-function canUseMcp(profile){ return !!profile && (profile.role==='owner' || profile.role==='manager' || (profile.permissions || {}).mcp===true); }
+// Who may make keys: owners and managers only (Ofek 15 Oct; the function's canUseMcp). There is no per-person switch, and
+// the key of anyone else stops working on the server.
+function canUseMcp(profile){ return !!profile && (profile.role==='owner' || profile.role==='manager'); }
 // settings.catalog.mcp when it is missing (the function's MCP_DEFAULTS).
 const MCP_SETTINGS_DEFAULTS = { rateLimitPerMin: 60, logKeepDays: 90, importSource: 'MCP import' };
 // settings.catalog.mcp as the function reads it: a value that isn't a whole number in range gives the default. A new object.
@@ -6298,16 +6299,10 @@ function mcpRunLine(run, nowMs){
 }
 // An import can be undone once: when it added something and has finished.
 function mcpCanUndo(run){ return !!run && Number(run.inserted) > 0 && !run.undone_at && run.status!=='running'; }
-// Who may make keys: owners, then managers (always on), then everyone else; by name in each.
-function mcpPeopleRows(profiles){
-  const rank = p => p.role==='owner' ? 0 : p.role==='manager' ? 1 : 2;
-  return (profiles || []).slice().sort((a, b) => rank(a) - rank(b) || String(a.fullName || '').localeCompare(String(b.fullName || '')))
-    .map(p => ({ id: p.id, name: p.fullName || '', role: p.role, always: rank(p) < 2, on: canUseMcp(p) }));
-}
 // The server's reason in plain words (most of the function's reasons are already plain and pass through).
 function mcpReasonText(reason){
   const s = String(reason == null ? '' : reason), l = s.toLowerCase(); if (!s.trim()) return 'Something went wrong. Try again.';
-  if (/switch on the private connector|not allowed|forbidden/.test(l)) return 'You can\'t make keys. An owner can switch on "Private connector (MCP)" for you in Settings > People.';
+  if (/owners and managers|not allowed|forbidden/.test(l)) return 'Only owners and managers can make keys.';
   if (/owners only|only an owner can change/.test(l)) return 'Only an owner can do this.';
   if (/blocked|private or local/.test(l)) return 'That address isn\'t allowed: it must be a public https address.';
   if (/timeout|took too long/.test(l)) return 'The server didn\'t answer within 15 seconds.';
@@ -18720,11 +18715,9 @@ function personAccessTab(x){
   const bar = `<div class="pp-diff"><span>${changed ? `Different from the ${role} defaults: ${[...diff.add.map(k => `<b>+ ${esc(label(k))}</b>`), ...diff.off.map(k => `<b>− ${esc(label(k))}</b>`)].join(', ')}` : `The same as the ${role} defaults`}</span>${changed && owner ? `<button type="button" class="btn small" onclick="resetPersonPages('${p.id}')">Back to the defaults</button>` : ''}</div>`;
   const locked = a && a.accessOff ? 'Access is off' : !owner ? 'Only owners change this' : false;
   const rows = setRows(PAGE_PICK.map(([k, l, desc]) => [esc(l), p.role==='technician' && k==='jobs' ? 'Only their own jobs, never anyone else\'s' : desc, setToggle(!!perms[k], `togglePermission('${p.id}','${k}',${!perms[k]})`, locked)]));
-  const mcpRow = setRows([['Private connector (MCP)', 'Can make keys that let an AI assistant such as Claude read what they can see here. Read-only, and every call is logged.', setToggle(perms.mcp===true, `setMcpPermission('${esc(jsStr(p.id))}',${perms.mcp!==true})`, locked, 'aria-label="Private connector (MCP)"')]]);
   const note = p.role==='technician' ? 'A technician always sees only their own jobs and pay. Settings is for owners only.' : p.role==='va' ? 'My Day comes with CRM. Settings is for owners only.' : 'Settings is for owners only.';
   return loginBox(x) + `<div class="grp">Pages they can open <span class="hint">reaches them the next time they open the app</span></div>
-    <div class="pp-box">${bar}${rows}<div class="pp-box-note">${note}</div></div>
-    <div class="grp">Private connector <span class="hint">their own keys for an AI assistant</span></div><div class="pp-box">${mcpRow}</div>`;
+    <div class="pp-box">${bar}${rows}<div class="pp-box-note">${note}</div></div>`;
 }
 // The office assistant's automatic log-out, per person (Ofek 13 Oct, item 3), first on their Details tab. Owners change it;
 // the SQL auto_end_va_shifts() reads it.
@@ -20256,20 +20249,10 @@ async function mcpSetSetting(key, raw){
   logSettingsActivity(mcpActor(), `Private connector (MCP): ${MCP_SETTING_LABEL[key]} changed from ${cur[key]} to ${v}`);
   showToast('Saved'); render();
 }
-// Owners: who may make keys (the same switch as People > Access).
+// Owners: who may make keys. Fixed (Ofek 15 Oct): owners and managers, nobody else, so there is nothing to switch.
 function mcpWhoBlock(){
-  return setBlock('Who may make keys', 'Owners and managers always can. Switch it on for anyone else.', setRows(mcpPeopleRows(STATE.profiles).map(r => [esc(r.name), esc(roleLabel(r.role)),
-    setToggle(r.on, `setMcpPermission('${esc(jsStr(r.id))}',${!r.on})`, r.always ? 'Owners and managers always can' : false, `aria-label="${esc(r.name)}: may make keys"`)])));
-}
-// The "mcp" switch on a person (People > Access and the list above). Every other permission key stays as it is.
-function setMcpPermission(profileId, on){
-  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
-  if (!mcpIsOwner()) { showToast('Only owners change this'); render(); return; }
-  const p = (STATE.profiles || []).find(x => x.id===profileId); if (!p || p.role==='owner' || p.role==='manager') return;
-  db.profiles.update(profileId, { permissions: { ...(p.permissions || {}), mcp: !!on } });
-  logSettingsActivity(mcpActor(), `Private connector (MCP): ${on ? 'switched on' : 'switched off'} for ${p.fullName}`);
-  showToast(`${String(p.fullName || '').split(' ')[0]}: Private connector (MCP) ${on ? 'on' : 'off'}`);
-  render();
+  return setBlock('Who may make keys', 'Owners and managers. Nobody else can make keys, and a key stops working when its person is no longer an owner or manager.',
+    `<div class="set-note mcp-note">${ico('lock', 16)}<span>Owners make keys here. Managers make theirs from "AI assistant keys" at the bottom of the menu.</span></div>`);
 }
 // Owners: the business's own MCP servers (the app as a client).
 function mcpServersBlock(){
@@ -20607,8 +20590,9 @@ async function mcpUndoNow(runId){
   logSettingsActivity(mcpActor(), `Private connector (MCP): import "${rule ? rule.name : run.rule_name || ''}" undone (${Number(out.deleted) || 0} removed)`);
   MCP_UI.at = 0; mcpLoad(true);
 }
-// The way in for managers and anyone switched on (Settings is for owners only): a button in the menu's footer and a window.
-function mcpFooterButton(profile){ return profile && profile.role!=='owner' && canUseMcp(profile) ? `<button class="btn ghost small" onclick="openMcpKeys()">${ico('key', 13)} AI assistant keys</button>` : ''; }
+// The way in for managers (Settings is for owners only, and owners use Settings > Connectors): a button in the menu's
+// footer and a window. Nobody else sees it (Ofek 15 Oct).
+function mcpFooterButton(profile){ return profile && profile.role==='manager' ? `<button class="btn ghost small" onclick="openMcpKeys()">${ico('key', 13)} AI assistant keys</button>` : ''; }
 function openMcpKeys(){
   openModal(`<div class="modal-back" onclick="if(event.target===this) closeModal()"><div class="modal cn-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-kh" style="max-width:600px">
     <h2 id="mcp-kh">Private connector (MCP)</h2><div class="modal-sub">A key lets an AI assistant such as Claude read what you can see in the app. It can't change anything.</div>

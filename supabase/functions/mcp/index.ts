@@ -16,12 +16,14 @@
 //   • READ-ONLY. Every tool only reads, and only what that person can see in the app: the app's canViewSection /
 //     filterForProfile are ported below (role scope) and tests compare them with the live app code on every run.
 //     A technician never sees the business's money (stricter than the app where it matters, see the role scope).
+//   • Keys are for owners and managers only (Ofek 15 Oct): create_token refuses anyone else, and a key whose person is
+//     no longer an owner or manager stops working (authToken). There is no per-person switch.
 //   • A key is stored only as its sha256; the key itself is shown once (create_token) and never logged. A key stops
-//     working when it is revoked, when its person loses the MCP permission, or when their sign-in is switched off.
+//     working when it is revoked, when its person is no longer an owner or manager, or when their sign-in is switched off.
 //   • Every tools/call writes one mcp_access_log row (ok / denied / error / rate_limited); at most
 //     catalog.mcp.rateLimitPerMin calls a minute per key. Unauthenticated requests are not logged (anyone could fill it).
 //   • Reads are paged (.range, 1,000 rows a page), at most MAX_SCAN rows read and MAX_ROWS rows returned a call; dates
-//     are in the business's time zone (automation_settings.timezone).
+//     are in the business's time zone (settings.catalog.region.timeZone, read with the region block's bizTzOf).
 //
 // Client direction (owner only, POST /mcp/manage with the owner's Supabase token): OPS calls a business's own MCP
 // server. save_server (name, https address, header name, write-only secret), delete_server, test_server (initialize +
@@ -49,13 +51,17 @@
 //                    answers 202 at once and runs the rules that are ON and hourly in the background.
 //   • Insert only: an import never changes or deletes a record that was already there; undo deletes only the ids its
 //     own run recorded. The tool gets exactly the arguments the owner saved: no OPS data is sent.
-//   • run_automations is OFF unless the owner switches it on per rule. Off = the imported rows are 'quiet': a quiet
-//     contact's first thread entry carries quiet:true, so its arrival is not a new lead for the automations engine or
-//     the phone notifications (push); a quiet job has created_at null (the engine's jobClosed never sees it) and
-//     review_do_not_ask true (the review-requests auto-asker skips it).
+//   • run_automations is OFF unless the owner switches it on per rule. Off = the imported rows are 'quiet': every
+//     imported contact, job and task carries the column import_quiet (true when quiet; the one marker the automations
+//     engine and push read), and a quiet contact's first thread entry also carries quiet:true (for the app), so its
+//     arrival is not a new lead for the automations engine or the phone notifications (push); a quiet job has
+//     created_at null (the engine's jobClosed never sees it) and review_do_not_ask true (the review-requests auto-asker
+//     skips it).
+//   • "Date received" (contacts) dates the card: created_at and its first thread entry are that business day
+//     (bizDayStamp), so imported history never shows as today's new leads.
 //
-// Owner steps: run the M1-server, M2-client and M4-import sections of .claude/sql/stage5-mcp.sql (then redeploy
-// automations and push, which read the quiet marker); in Vault add 'mcp_cron_secret' and
+// Owner steps: run the M1-server, M2-client, M4-import and M5-review sections of .claude/sql/stage5-mcp.sql (then
+// redeploy automations and push, which read the import_quiet column); in Vault add 'mcp_cron_secret' and
 // 'mcp_project_url'; add the Edge Function secret MCP_CRON_SECRET (the same long random value as the Vault one); deploy
 // with Verify JWT OFF (an MCP client carries an ops_mcp_ key, not a Supabase token; /manage checks the token itself).
 // Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, MCP_CRON_SECRET, optional BUSINESS_ID ('default').
@@ -178,44 +184,127 @@ export function summarizeArgs(args: any, schema: any): string {
   return JSON.stringify(out).slice(0, 300);
 }
 
-// ── time zone (the business's, from automation_settings.timezone) ──
-export const DEFAULT_TZ = "Australia/Sydney";
-export function validTz(tz: unknown): string {
-  try { if (typeof tz === "string" && tz) { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return tz; } } catch { /* not a zone */ }
-  return DEFAULT_TZ;
+// ── region (Settings → Business details → Region and format; the same rules as the app's bizTz/moneyText/holidayDaysOf). Copied into every function — keep the copies identical (tests/business-logic.test.js checks). ──
+// Nothing saved = this business's values until 14 Oct: Sydney time, "$" amounts, GST, New South Wales (T1.2/T1.3).
+export const REGION_DEFAULTS = { timeZone: "Australia/Sydney", currency: "AUD", country: "AU", state: "NSW" };
+export const TAX_NAMES: Record<string, string> = { AU: "GST", NZ: "GST", CA: "GST", SG: "GST", IN: "GST", GB: "VAT", IE: "VAT", ZA: "VAT", AE: "VAT", US: "Sales tax" };
+export const MONEY_FORMATS = [["1,234.56", ",", "."], ["1.234,56", ".", ","], ["1 234,56", " ", ","]];
+const REGION_TZ_OK = new Map<string, boolean>();
+const REGION_FMT = new Map<string, Intl.DateTimeFormat>();
+export function tzValid(tz: unknown): boolean {
+  if (typeof tz !== "string" || !tz.trim()) return false;
+  if (!REGION_TZ_OK.has(tz)) { let ok = true; try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); } catch { ok = false; } REGION_TZ_OK.set(tz, ok); }
+  return REGION_TZ_OK.get(tz) === true;
 }
-export const dayIn = (ms: number, tz: string) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
+// deno-lint-ignore no-explicit-any
+export function regionOf(cat: any): Record<string, any> { const r = cat && typeof cat === "object" ? cat.region : null; return r && typeof r === "object" ? r : {}; }
+// The business's time zone (settings.catalog.region.timeZone; a name the runtime doesn't know counts as not set).
+// deno-lint-ignore no-explicit-any
+export function bizTzOf(cat: any): string { const r = regionOf(cat); return tzValid(r.timeZone) ? r.timeZone : REGION_DEFAULTS.timeZone; }
+// deno-lint-ignore no-explicit-any
+export function bizTzSet(cat: any): boolean { return tzValid(regionOf(cat).timeZone); }
+// 'AU-NSW', 'US-TX', 'SG': the place the stored public holidays were worked out for (nothing chosen = AU-NSW).
+// deno-lint-ignore no-explicit-any
+export function regionKeyOf(r: any): string {
+  const x = r && typeof r === "object" ? r : {};
+  const country = /^[A-Z]{2}$/.test(String(x.country || "")) ? x.country : REGION_DEFAULTS.country;
+  const state = x.country ? String(x.state || "") : REGION_DEFAULTS.state;
+  return state ? `${country}-${state}` : country;
+}
+// The wall clock in tz at an instant: { day 'YYYY-MM-DD', dow 0 = Sunday, hour, minute, minutes after midnight }.
+export function bizParts(ms: number, tz: string) {
+  let f = REGION_FMT.get(tz);
+  if (!f) { f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false }); REGION_FMT.set(tz, f); }
+  const p = Object.fromEntries(f.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  const hour = Number(p.hour) % 24, minute = Number(p.minute);
+  return { day: `${p.year}-${p.month}-${p.day}`, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(String(p.weekday)), hour, minute, minutes: hour * 60 + minute };
+}
+// The UTC instant of a wall-clock time in tz (two passes handle daylight saving).
+export function bizToUtc(day: string, hh: number, mm: number, tz: string): number {
+  const [y, m, d] = day.split("-").map(Number);
+  let t = Date.UTC(y, m - 1, d, hh, mm);
+  const want = Date.UTC(y, m - 1, d, hh, mm);
+  const wall = (ms: number) => { const p = bizParts(ms, tz), [py, pm, pd] = p.day.split("-").map(Number); return Date.UTC(py, pm - 1, pd, p.hour, p.minute); };
+  for (let i = 0; i < 2; i++) t -= wall(t) - want;
+  // a wall time the clocks jump over (a daylight-saving gap, at midnight in some zones): the same time after the jump on
+  // the same day, never the evening before
+  const got = wall(t);
+  if (got < want) t += want - got;
+  return t;
+}
+// A business day for a timestamptz column that used to get the bare date ('2026-10-14' = midnight UTC): the same bare
+// date where midnight UTC is still that day in the zone (Sydney: exactly as before), else noon that day in the zone, so
+// zones west of UTC don't file the record under the day before.
+export function bizDayStamp(day: string, tz: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return bizParts(Date.UTC(y, m - 1, d), tz).day === day ? day : new Date(bizToUtc(day, 12, 0, tz)).toISOString();
+}
+// A word the owner typed, kept free of HTML and quote characters.
+export function regionWord(v: unknown, max: number): string { return String(v || "").replace(/[<>&"'`\\]/g, "").trim().slice(0, max); }
+// What the sales tax is called (GST / VAT / Sales tax / the business's own word).
+// deno-lint-ignore no-explicit-any
+export function taxNameOf(cat: any): string {
+  const r = regionOf(cat), country = /^[A-Z]{2}$/.test(String(r.country || "")) ? r.country : REGION_DEFAULTS.country;
+  return regionWord(r.taxName, 20) || TAX_NAMES[country] || "Tax";
+}
+export function currencySymbolOf(code: string): string {
+  try { const p = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" }).formatToParts(0).find((x) => x.type === "currency"); return p ? p.value : code; }
+  catch { return code; }
+}
+// The currency's cents: 2 for AUD/USD, 0 for JPY/KRW, 3 for KWD/BHD (2 when the runtime doesn't know the code).
+export function currencyDecimalsOf(code: string): number {
+  try { const n = new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions().maximumFractionDigits; return Number.isInteger(n) ? n : 2; }
+  catch { return 2; }
+}
+// An amount as the business writes it. digits: "auto" = no cents on whole amounts, 2 = always cents, "plain" = as the
+// number comes ("$1,234.5"), "raw" = no thousands separator ("$1234"). Nothing saved = exactly what the functions wrote
+// before 14 Oct.
+// deno-lint-ignore no-explicit-any
+export function moneyText(n: number, cat: any, digits: "auto" | 2 | "plain" | "raw" = "plain"): string {
+  const r = regionOf(cat), x = Number(n);
+  const code = /^[A-Z]{3}$/.test(String(r.currency || "")) ? r.currency : REGION_DEFAULTS.currency;
+  const sym = regionWord(r.currencySymbol, 4) || currencySymbolOf(code), dec = currencyDecimalsOf(code);
+  const fmt = MONEY_FORMATS.find((f) => f[0] === r.moneyFormat) || MONEY_FORMATS[0];
+  // "cents" = the currency's own: none for JPY, three for KWD
+  const opts = digits === "auto" ? { minimumFractionDigits: Math.abs(x - Math.round(x)) < 1e-9 ? 0 : dec, maximumFractionDigits: dec }
+    : digits === 2 ? { minimumFractionDigits: dec, maximumFractionDigits: dec } : undefined;
+  let s = digits === "raw" ? String(x) : x.toLocaleString("en-US", opts);
+  if (fmt !== MONEY_FORMATS[0]) s = s.replace(/[,.]/g, (ch) => ch === "," ? fmt[1] : fmt[2]);
+  return r.symbolAfter === true ? `${s} ${sym}` : sym + s;
+}
+// One key per public holiday, its moved ("additional"/"substitute") day included.
+export function holidayKey(name: unknown): string { return String(name || "").replace(/\s*\((?:additional|substitute) day\)\s*$/i, "").trim().toLowerCase(); }
+// The public holidays that are days off: none while the switch is off (hours.publicOn, or the old hours.nsw), none when the
+// stored list (catalog.holidays, worked out by the app) is for another region, minus the ones switched off (hours.holidayOff).
+// deno-lint-ignore no-explicit-any
+export function holidayDaysOf(cat: any): Record<string, string> {
+  const c = cat && typeof cat === "object" ? cat : {}, h = c.hours && typeof c.hours === "object" ? c.hours : {};
+  if (!(h.publicOn ?? h.nsw)) return {};
+  const ph = c.holidays;
+  if (!ph || !ph.days || typeof ph.days !== "object" || ph.region !== regionKeyOf(c.region || {})) return {};
+  const off = new Set(Array.isArray(h.holidayOff) ? h.holidayOff : []), out: Record<string, string> = {};
+  for (const [d, name] of Object.entries(ph.days)) if (/^\d{4}-\d{2}-\d{2}$/.test(d) && !off.has(holidayKey(name))) out[d] = String(name);
+  return out;
+}
+// ── end region ──
+// ── time zone: the business's (settings.catalog.region.timeZone, read with the region block's bizTzOf) ──
 export function shiftDay(day: string, n: number) { const [y, m, d] = day.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); }
 const dowOf = (day: string) => { const [y, m, d] = day.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); };
 const dayDiff = (a: string, b: string) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000);
-// How far tz's wall clock is ahead of UTC at that instant (ms).
-export function tzOffsetMs(ms: number, tz: string): number {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
-    .formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
-  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - Math.floor(ms / 1000) * 1000;
-}
-// The UTC instant a day starts in tz, as ISO (a second pass handles a daylight-saving change that night).
-export function dayStartUtcIso(day: string, tz: string): string {
-  const [y, m, d] = day.split("-").map(Number);
-  const guess = Date.UTC(y, m - 1, d);
-  let t = guess - tzOffsetMs(guess, tz);
-  t = guess - tzOffsetMs(t, tz);
-  return new Date(t).toISOString();
-}
 // A tool error: shown to the assistant as an isError result, never a JSON-RPC error.
 export class ToolError extends Error {}
 // A tool's from/to (days in tz) and the UTC instants around them: [fromIso, toIso). Default: the last `defaultDays`
 // days ending with `to` (today when not given).
 // deno-lint-ignore no-explicit-any
 export function rangeOf(args: any, tz: string, nowMs: number, defaultDays = 30) {
-  const today = dayIn(nowMs, tz);
+  const today = bizParts(nowMs, tz).day;
   const to = args && args.to !== undefined ? args.to : today;
   if (!isDay(to)) throw new ToolError("'to' must be a date (YYYY-MM-DD).");
   const from = args && args.from !== undefined ? args.from : shiftDay(to, -(defaultDays - 1));
   if (!isDay(from)) throw new ToolError("'from' must be a date (YYYY-MM-DD).");
   if (from > to) throw new ToolError("'from' must be on or before 'to'.");
   if (dayDiff(from, to) + 1 > MAX_RANGE_DAYS) throw new ToolError(`Pick a range of at most ${MAX_RANGE_DAYS} days.`);
-  return { from, to, fromIso: dayStartUtcIso(from, tz), toIso: dayStartUtcIso(shiftDay(to, 1), tz) };
+  return { from, to, fromIso: new Date(bizToUtc(from, 0, 0, tz)).toISOString(), toIso: new Date(bizToUtc(shiftDay(to, 1), 0, 0, tz)).toISOString() };
 }
 
 // ── role scope: the app's canViewSection / filterForProfile (index.html), parity-tested ──
@@ -251,7 +340,9 @@ export function assigneeNames(t: any): string[] {
 }
 // deno-lint-ignore no-explicit-any
 export function taskAssignedTo(t: any, p: Profile) { const names = assigneeNames(t); return names.includes(p.fullName) || (!!p.technicianName && names.includes(p.technicianName)); }
-export const canUseMcp = (p: Profile) => p.role === "owner" || p.role === "manager" || p.permissions.mcp === true;
+// Who may make and use keys: owners and managers only (Ofek 15 Oct). A permissions.mcp left on a profile from before
+// means nothing.
+export const canUseMcp = (p: Profile) => p.role === "owner" || p.role === "manager";
 export type Scope = ReturnType<typeof scopeOf>;
 // The conditions of filterForProfile (owners and managers see everything first, as the app).
 export function scopeOf(p: Profile) {
@@ -299,7 +390,7 @@ export const PAYROLL_HOURLY_RATE = 10;
 export const PAYROLL_BOOKING_BONUS = [{ min: 12, bonus: 25 }, { min: 8, bonus: 15 }, { min: 5, bonus: 10 }];
 export function round2(n: unknown) { return Math.round((Number(n) || 0) * 100) / 100; }
 // deno-lint-ignore no-explicit-any
-const localDay = (d: Calc, ts: any) => { if (!ts) return ""; const s = String(ts); return s.length <= 10 ? s : dayIn(Date.parse(s), d.tz); };
+const localDay = (d: Calc, ts: any) => { if (!ts) return ""; const s = String(ts); return s.length <= 10 ? s : bizParts(Date.parse(s), d.tz).day; };
 // deno-lint-ignore no-explicit-any
 export function weekRules(region: any) {
   const list = (region && Array.isArray(region.weeks) ? region.weeks : [])
@@ -544,17 +635,14 @@ export async function pageAll(build: (from: number, to: number) => any, max = MA
   }
   return { rows, truncated: true };
 }
-// The business's name, GST rate, catalog and time zone. Read per request (never cached across requests).
+// The business's name, GST rate, catalog and time zone (settings.catalog.region.timeZone). Read per request (never cached across requests).
 // deno-lint-ignore no-explicit-any
 export async function loadBusiness(sb: any) {
   const { data: st, error } = await sb.from("settings").select("company_name, gst_rate_percent, catalog").eq("id", 1).maybeSingle();
   if (error) throw new Error(error.message || "settings");
-  let tz = DEFAULT_TZ;
-  try {
-    const { data: a } = await sb.from("automation_settings").select("timezone").eq("business_id", BUSINESS_ID).maybeSingle();
-    tz = validTz(a && a.timezone);
-  } catch { /* no automation settings yet: the default zone */ }
   const catalog = st && st.catalog && typeof st.catalog === "object" && !Array.isArray(st.catalog) ? st.catalog : {};
+  // Settings → Region and format (stage 1): the one time zone of the business, as every other function reads it.
+  const tz = bizTzOf(catalog);
   const gst = st ? Number(st.gst_rate_percent ?? 10) : 10;
   return { companyName: (st && st.company_name) || "", gstRate: Number.isFinite(gst) ? gst : 10, catalog, tz, mcp: mcpSettings(catalog) };
 }
@@ -571,7 +659,7 @@ const NOT_PAID = "payment_status.is.null,payment_status.neq.Paid";
 async function calcCtx(c: Ctx, data: Record<string, any[]> = {}): Promise<Calc> {
   const { rows } = await pageAll((a, z) => c.sb.from("employees").select("name, roles, status, employment_type").order("name").range(a, z));
   return {
-    gstRate: c.biz.gstRate, catalog: c.biz.catalog, tz: c.biz.tz, today: dayIn(c.nowMs, c.biz.tz),
+    gstRate: c.biz.gstRate, catalog: c.biz.catalog, tz: c.biz.tz, today: bizParts(c.nowMs, c.biz.tz).day,
     employees: rows.map(employeeFromRow), rules: weekRules(c.biz.catalog.region), weekCache: new Map(),
     jobs: [], equipmentSpend: [], payrollWeeks: [], payrollBonuses: [], salesLogs: [], ...data,
   };
@@ -656,7 +744,7 @@ export const TOOLS: Tool[] = [
     inputSchema: obj({}), gate: () => true,
     run: async (c) => {
       const p = c.s.p;
-      return { payload: { name: p.fullName, role: p.role, technicianName: p.technicianName || null, business: c.biz.companyName, timeZone: c.biz.tz, today: dayIn(c.nowMs, c.biz.tz), tools: TOOLS.filter((t) => t.gate(c.s)).map((t) => t.name) }, rows: 1 };
+      return { payload: { name: p.fullName, role: p.role, technicianName: p.technicianName || null, business: c.biz.companyName, timeZone: c.biz.tz, today: bizParts(c.nowMs, c.biz.tz).day, tools: TOOLS.filter((t) => t.gate(c.s)).map((t) => t.name) }, rows: 1 };
     },
   },
   {
@@ -763,7 +851,7 @@ export const TOOLS: Tool[] = [
     inputSchema: obj({ limit: LIMIT }),
     gate: (s) => !s.isTech && canViewSection(s.p, "outstanding"),
     run: async (c, args) => {
-      const d = await calcCtx(c), today = dayIn(c.nowMs, c.biz.tz);
+      const d = await calcCtx(c), today = bizParts(c.nowMs, c.biz.tz).day;
       const unpaid = await pageAll((a, z) => c.sb.from("jobs").select(JOB_COLS).or(NOT_PAID).order("date").order("id").range(a, z));
       const parts = await pageAll((a, z) => c.sb.from("jobs").select(JOB_COLS).eq("parts_refund_status", "Pending Refund").order("date").order("id").range(a, z));
       const equip = await pageAll((a, z) => c.sb.from("equipment_spend").select(EQUIP_COLS).eq("reimbursed", "Pending").order("date").order("id").range(a, z));
@@ -805,7 +893,7 @@ export const TOOLS: Tool[] = [
     inputSchema: obj({ week: { type: "string", format: "date", description: "Any day in the week (default: today)." } }),
     gate: (s) => canViewSection(s.p, "payroll"),
     run: async (c, args) => {
-      const s = c.s, person = s.payName, wb = weekBounds(args.week || dayIn(c.nowMs, c.biz.tz), weekRules(c.biz.catalog.region));
+      const s = c.s, person = s.payName, wb = weekBounds(args.week || bizParts(c.nowMs, c.biz.tz).day, weekRules(c.biz.catalog.region));
       // Only the rows this week can use (the same answer as the app's computeWeek over the whole history): jobs paid in
       // the week, jobs not paid by its end (expected commission), refunds still pending or paid back this week, the
       // week's bonuses and daily logs, and the paid-week marks from the oldest pending refund on. Anyone but an owner
@@ -1136,7 +1224,7 @@ async function isBanned(sb: any, userId: string, nowMs: number): Promise<boolean
   return banned;
 }
 // The key's row and its person, or null when the key is missing, wrong, revoked, of another business, or its person
-// can't use MCP any more (permission switched off, profile gone, sign-in switched off). A database or Auth error
+// can't use MCP any more (no longer an owner or manager, profile gone, sign-in switched off). A database or Auth error
 // throws instead (the request answers 500), so an outage never looks like a revoked key.
 // deno-lint-ignore no-explicit-any
 export async function authToken(sb: any, raw: string, nowMs: number): Promise<{ token: any; profile: Profile } | null> {
@@ -1237,7 +1325,7 @@ export async function handleManage(sb: any, body: any, me: Profile | null, nowMs
   if (!me) return { status: 401, body: { ok: false, reason: "Sign in again." } };
   const step = MANAGE_STEPS[String(body?.step || "")];
   if (!step || !Object.prototype.hasOwnProperty.call(MANAGE_STEPS, String(body?.step))) return { status: 400, body: { ok: false, reason: "unknown step" } };
-  if (step.who === "mcp" && !canUseMcp(me)) return { status: 403, body: { ok: false, reason: "Ask an owner to switch on the private connector for you." } };
+  if (step.who === "mcp" && !canUseMcp(me)) return { status: 403, body: { ok: false, reason: "Only owners and managers can make keys." } };
   if (step.who === "owner" && me.role !== "owner") return { status: 403, body: { ok: false, reason: "Only an owner can change this." } };
   return await step.run(sb, body, me, nowMs);
 }
@@ -1896,8 +1984,9 @@ export const CRON_MAX_RULES = 20;
 export const RUN_ERRORS_MAX = 50;
 export const TOOL_ARGS_MAX = 4000;
 export const IMPORT_SCAN = { max: 50 * PAGE };   // existing rows the duplicate check reads (an object, so tests can shrink it)
-// The key on a contact's first thread entry that marks an import made with automations off. The automations engine
-// (quietArrival) and the phone notifications (push) read the same key: such a card is not a new lead.
+// The key on a contact's first thread entry that marks an import made with automations off (kept for the app). The
+// automations engine (quietArrival) and the phone notifications (push) read the import_quiet column, and this key too:
+// such a card is not a new lead.
 export const QUIET_KEY = "quiet";
 export type ImportField = { label: string; type: "text" | "email" | "phone" | "day" | "money" | "bool" | "enum" | "tags" | "person"; max?: number; required?: boolean; values?: string[] };
 // The fields an import can fill, per kind (keys = the database columns). One entry per line: the app's MCP_IMPORT_FIELDS
@@ -2016,7 +2105,7 @@ export function coerceField(f: ImportField, v: unknown, ctx: { tz: string; peopl
       const s = v.trim();
       if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return isDay(s) ? ok(s) : bad("is not a date");
       const ms = Date.parse(s);
-      return Number.isFinite(ms) ? ok(dayIn(ms, ctx.tz)) : bad("is not a date");
+      return Number.isFinite(ms) ? ok(bizParts(ms, ctx.tz).day) : bad("is not a date");
     }
     case "money": {
       if (typeof v !== "string" && typeof v !== "number") return bad("is not an amount");
@@ -2163,18 +2252,25 @@ export function validateRule(r: any): string[] {
   return out;
 }
 // deno-lint-ignore no-explicit-any
-export type ImportCtx = { quiet: boolean; nowMs: number; tz: string; ruleName: string; serverName: string; importSource: string; profiles: any[]; rates?: Record<string, any> };
+export type ImportCtx = { quiet: boolean; nowMs: number; tz: string; ruleName: string; serverName: string; importSource: string; profiles: any[]; employees?: any[]; rates?: Record<string, any> };
 // The row inserted for one new item. Always the same keys for a kind: a bulk insert sends the union of every row's
 // keys, so a key missing from one row would be written as NULL there.
 export function importRow(kind: string, values: Record<string, unknown>, ctx: ImportCtx): Record<string, unknown> {
   const fields = IMPORT_FIELDS[kind] || {}, row: Record<string, unknown> = {};
   for (const [k, f] of Object.entries(fields)) row[k] = hasOwn(values, k) && values[k] !== undefined ? values[k] : emptyOf(f);
   const or = (k: string, d: unknown) => { if (isBlank(row[k])) row[k] = d; };
-  const today = dayIn(ctx.nowMs, ctx.tz), at = iso(ctx.nowMs);
+  const today = bizParts(ctx.nowMs, ctx.tz).day, at = iso(ctx.nowMs);
+  // The one marker the automations engine and push read (SQL M5-review): an import made with automations off.
+  row.import_quiet = ctx.quiet;
   if (kind === "contacts") {
-    or("division", "Other"); or("source", ctx.importSource); or("status", "New"); or("created_at", today);
+    or("division", "Other"); or("source", ctx.importSource); or("status", "New");
+    // "Date received" mapped: the card arrived that business day (its created_at AND its first thread entry), so
+    // imported history never shows as today's new leads. Not mapped: today. The same stamp as conversations / voice.
+    const received = isDay(row.created_at) ? String(row.created_at) : null;
+    row.created_at = bizDayStamp(received || today, ctx.tz);
+    const firstAt = received ? new Date(Date.parse(String(row.created_at))).toISOString() : at;
     const text = `Imported from ${ctx.serverName} (${ctx.ruleName})` + (ctx.quiet ? ", automatic messages off" : "");
-    row.messages = [{ id: crypto.randomUUID(), kind: "event", at, text: clip(text, 300), ...(ctx.quiet ? { [QUIET_KEY]: true } : {}) }];
+    row.messages = [{ id: crypto.randomUUID(), kind: "event", at: firstAt, text: clip(text, 300), ...(ctx.quiet ? { [QUIET_KEY]: true } : {}) }];
     row.last_read_at = ctx.quiet ? at : null;   // quiet: no "new lead waiting" alert in the app and no leadWaiting push
     row.stage_changed_at = null;                // the engine's stage trigger needs a real move
     row.linked_job_id = null;
@@ -2197,7 +2293,7 @@ export function importRow(kind: string, values: Record<string, unknown>, ctx: Im
     or("status", "Not Started"); or("priority", "Medium"); or("category", "");
     const who = String(row.assigned_to || "");
     row.assignees = who ? [who] : [];
-    row.board = boardFor(row.assignees as string[], ctx.profiles);
+    row.board = boardFor(row.assignees as string[], ctx.profiles, ctx.employees || []);
     row.created_by = clip("MCP import: " + ctx.ruleName, 200);
     row.created_at = at;
     row.heads_up = "";
@@ -2214,28 +2310,31 @@ export function commissionRateFor(rates: Record<string, any>, tech: string, jobT
   const t = rates[tech]; if (!t) return null;
   const v = t[jobType]; return (v===null||v===undefined) ? null : v;
 }
-// The app's board rule (index.html boardForAssignees): a VA's or Ron's tasks — and tasks with no one — go on the 'ron' board.
-// (copied from automations)
+// The app's board rule (index.html boardForAssignees, parity-tested; the same as automations' boardFor): the office's
+// tasks — a VA login (full name, technician name or the first word of the full name) or an employee with the VA role —
+// and tasks with no one go on the office's board (its storage key stays 'ron'); anyone else's on their own board.
 // deno-lint-ignore no-explicit-any
-export function boardFor(names: string[], profiles: any[]): string {
+export function boardFor(names: string[], profiles: any[], employees: any[] = []): string {
   const first = names[0]; if (!first) return "ron";
-  const va = profiles.find((p) => p.role === "va" && (p.full_name === first || p.technician_name === first));
-  return va || first === "Ron" ? "ron" : first;
+  const va = profiles.find((p) => p.role === "va" && (p.full_name === first || p.technician_name === first || String(p.full_name || "").trim().split(/\s+/)[0] === first))
+    || employees.some((e) => e && e.name === first && Array.isArray(e.roles) && e.roles.includes("VA"));
+  return va ? "ron" : first;
 }
 export function runStatus(inserted: number, errorCount: number): "done" | "partial" | "failed" {
   return errorCount === 0 ? "done" : inserted > 0 ? "partial" : "failed";
 }
 
 // ── imports: database ──
-// What a run needs besides the rule: the business's time zone and import source, the profiles (task boards), the
-// active employees' names (tasks and jobs can only be given to someone on the team) and, for jobs, the commission rates.
+// What a run needs besides the rule: the business's time zone and import source, the profiles and the employees with
+// their roles (task boards), the active employees' names (tasks and jobs can only be given to someone on the team) and,
+// for jobs, the commission rates.
 // deno-lint-ignore no-explicit-any
 async function importContext(sb: any, rule: any, nowMs: number) {
   const biz = await loadBusiness(sb);
   const { rows: profiles } = await pageAll((a, z) => sb.from("profiles").select("id, full_name, role, technician_name").order("id").range(a, z));
-  const { rows: emps } = await pageAll((a, z) => sb.from("employees").select("name, status").eq("status", "Active").order("name").range(a, z));
+  const { rows: employees } = await pageAll((a, z) => sb.from("employees").select("name, status, roles").order("name").range(a, z));
   // deno-lint-ignore no-explicit-any
-  const people = emps.map((e: any) => String(e.name || "")).filter(Boolean);
+  const people = employees.filter((e: any) => e.status === "Active").map((e: any) => String(e.name || "")).filter(Boolean);
   // deno-lint-ignore no-explicit-any
   const rates: Record<string, any> = {};
   if (rule.kind === "jobs") {
@@ -2243,7 +2342,7 @@ async function importContext(sb: any, rule: any, nowMs: number) {
     // deno-lint-ignore no-explicit-any
     rows.forEach((r: any) => { rates[r.technician_name] = r.rates || {}; });
   }
-  return { tz: biz.tz, importSource: biz.mcp.importSource, profiles, people, rates, ruleName: String(rule.name || ""), nowMs };
+  return { tz: biz.tz, importSource: biz.mcp.importSource, profiles, employees, people, rates, ruleName: String(rule.name || ""), nowMs };
 }
 const SERVER_COLS = "id, business_id, name, url, auth_header, secret_id";   // never the secret (it is only in Vault)
 // A rule and its server, both of this business, or null.
@@ -2354,18 +2453,30 @@ export async function runImport(sb: any, rule: any, server: any, opts: { source:
 }
 // The imported records Undo keeps because the team has used them since: a history entry by anyone but the import,
 // something that points at them (a contact's texts / chat / opt-out / calls / jobs / tasks; a closing or lead linked to
-// a job), or work on the row itself (a contact's thread grown or stage moved or job linked; a task's updates or
-// subtasks). Deleting those would take the team's work with them (a contact's texts even go with it: on delete
-// cascade). A check that can't be read keeps the whole chunk.
+// a job), or work on the row itself (a contact called (contacted_at), noted (customer_notes), its thread grown, stage
+// moved or job linked; a task's updates or subtasks). Deleting those would take the team's work with them (a contact's
+// texts even go with it: on delete cascade). Every read is paged (.range, PAGE rows) until a short page, so a lead with
+// thousands of texts never hides the next one behind the server's 1,000-row cap: an id seen once is decided and left
+// out of the next page's filter, so each full page settles at least one more id. A check that can't be read keeps
+// the whole chunk.
 // deno-lint-ignore no-explicit-any
 export async function usedSince(sb: any, kind: string, ids: string[]): Promise<Set<string>> {
   const used = new Set<string>();
   // deno-lint-ignore no-explicit-any
   const read = async (table: string, cols: string, col: string, f: (q: any) => any, each: (r: any) => boolean) => {
-    const { data, error } = await f(sb.from(table).select(cols).in(col, ids));
-    if (error) { console.error("mcp undo check failed:", table, clip(error.message, 200)); ids.forEach((id) => used.add(id)); return; }
-    // deno-lint-ignore no-explicit-any
-    (data || []).forEach((r: any) => { if (each(r)) used.add(String(r[col])); });
+    let open = ids.slice();
+    while (open.length) {
+      const { data, error } = await f(sb.from(table).select(cols).in(col, open)).range(0, PAGE - 1);
+      if (error) { console.error("mcp undo check failed:", table, clip(error.message, 200)); ids.forEach((id) => used.add(id)); return; }
+      const rows = data || [], seen = new Set<string>();
+      // deno-lint-ignore no-explicit-any
+      rows.forEach((r: any) => { const id = String(r[col]); seen.add(id); if (each(r)) used.add(id); });
+      if (rows.length < PAGE) return;
+      const left = open.filter((id) => !seen.has(id));
+      // a full page that settled nothing new can't happen (every row's id is still open); never loop on it
+      if (left.length === open.length) { ids.forEach((id) => used.add(id)); return; }
+      open = left;
+    }
   };
   // deno-lint-ignore no-explicit-any
   const points = (table: string, col: string) => read(table, col, col, (q: any) => q, () => true);
@@ -2374,7 +2485,8 @@ export async function usedSince(sb: any, kind: string, ids: string[]): Promise<S
   if (kind === "contacts") {
     for (const t of ["lead_messages", "chat_sessions", "customer_opt_outs", "calls", "jobs", "tasks"]) await points(t, "contact_id");
     // deno-lint-ignore no-explicit-any
-    await read("contacts", "id, messages, stage_changed_at, linked_job_id", "id", (q: any) => q, (r: any) => (Array.isArray(r.messages) && r.messages.length > 1) || !!r.stage_changed_at || !!r.linked_job_id);
+    await read("contacts", "id, messages, stage_changed_at, linked_job_id, contacted_at, customer_notes", "id", (q: any) => q, (r: any) =>
+      (Array.isArray(r.messages) && r.messages.length > 1) || !!r.stage_changed_at || !!r.linked_job_id || !!r.contacted_at || (Array.isArray(r.customer_notes) && r.customer_notes.length > 0));
   } else if (kind === "jobs") {
     await points("closings", "linked_job_id");
     await points("contacts", "linked_job_id");

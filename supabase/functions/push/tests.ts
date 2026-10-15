@@ -105,6 +105,7 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
       { id: "c3", full_name: "Test Person", division: "Other", source: "Organic", status: "New", created_at: "2026-10-12", messages: [{ at: "2026-10-12T03:20:00Z" }], tags: ["Test"] },
       { id: "c4", full_name: "Called Already", division: "Chimney", source: "Organic", status: "Chasing", created_at: "2026-10-12", messages: [{ at: "2026-10-12T02:50:00Z" }], tags: [] },
       { id: "c5", full_name: "Quiet Import", division: "Other", source: "MCP import", status: "New", created_at: "2026-10-12", messages: [{ at: "2026-10-12T03:00:00Z", quiet: true }], tags: [] },   // an MCP import with automations off: no news
+      { id: "c6", full_name: "Quiet Column", division: "Other", source: "MCP import", status: "New", created_at: "2026-10-12", messages: [{ at: "2026-10-12T03:00:00Z" }], import_quiet: true, tags: [] },   // the import_quiet column alone: no news either
     ],
     calls: [{ id: "k1", from_number: "+61400000000", missed: true, started_at: "2026-10-12T03:10:00Z", division: "Aircon" }],
     jobs: [{ id: "j1", customer_name: "Jo", amount: 450, date: "2026-10-05", payment_status: "Unpaid" }, { id: "j2", customer_name: "Older", amount: 300, date: "2026-10-01", payment_status: "Unpaid" }],

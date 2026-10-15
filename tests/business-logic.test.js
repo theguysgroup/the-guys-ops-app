@@ -106,7 +106,7 @@ const DECLS = [
   'canUseMcp', 'MCP_SETTINGS_DEFAULTS', 'mcpSettingsOf', 'MCP_SETTING_LIMITS', 'mcpSettingProblem', 'mcpUrls', 'mcpTokenLooksRight', 'mcpWhen', 'mcpKeyLists', 'mcpKeyMeta', 'MCP_LOG_STATUS', 'mcpLogStatus',
   'MCP_TOOL_NAMES', 'mcpHostBlocked', 'MCP_RESERVED_HEADERS', 'mcpServerProblems', 'MCP_IMPORT_KINDS', 'MCP_IMPORT_FIELDS', 'MCP_IMPORT_REQUIRED', 'mcpFieldLabel', 'mcpMappingRows', 'mcpMappingFromRows', 'mcpDedupeDefault',
   'mcpPathOk', 'mcpRuleProblems', 'mcpParseArgs', 'mcpArgsTemplate', 'mcpResultData', 'mcpItemsAt', 'mcpSamplePaths', 'mcpPreviewCounts', 'mcpPreviewColumns', 'mcpPreviewText', 'mcpRunLine', 'mcpCanUndo',
-  'mcpPeopleRows', 'mcpReasonText', 'mcpLoadErrorText', 'mcpServerMeta', 'mcpRuleMeta',
+  'mcpReasonText', 'mcpLoadErrorText', 'mcpServerMeta', 'mcpRuleMeta',
   // Settings → Security: Face ID / fingerprint (passkeys), the 30-minute lock, Settings history (14 Oct)
   'CAT_NAMES', 'setBlock', 'SEC_LOCK_MINUTES', 'bytesToB64url', 'b64urlToBytes', 'pkCreationOptions', 'pkRequestOptions', 'pkAttestationJSON', 'pkAssertionJSON', 'pkDeviceInfo', 'bioIcoFor', 'secMethodWord',
   'secUnlockMethods', 'lockedBackupLinkOpen', 'SEC_INTENTS', 'secGoogleParse', 'PAY_SETTING_NAMES', 'secLeft', 'secWhen', 'settingsHistParts', 'settingsHistFilter', 'secHistChips', 'secRecentCount', 'secReasonText',
@@ -1628,7 +1628,7 @@ function testRegionStatic(){
   assertEqual([fnText('autoWindowFieldsHtml').includes('bizTzLabel()'), /autoSafetyNorm\(AUTO\.safety\)\.timezone/.test(script)], [true, false], 'automations: the "Only on" hours are labelled with the business\'s time zone, never the old column');
   assertEqual(/shortName/.test(fnText('autoSample')), false, 'automations preview: {brand} falls back to the business name like the engine, never the short name');
   // the edge functions carry the same region block, word for word
-  const fns = ['automations', 'backup', 'conversations', 'push', 'review-requests', 'voice', 'ingest-ads-stats', 'contractor-sign'];
+  const fns = ['automations', 'backup', 'conversations', 'push', 'review-requests', 'voice', 'ingest-ads-stats', 'contractor-sign', 'mcp'];
   const blocks = fns.map(f => { const t = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', f, 'index.ts'), 'utf8'); const a = t.indexOf('// ── region ('), b = t.indexOf('// ── end region ──'); return { f, t, block: a >= 0 && b > a ? t.slice(a, b) : '' }; });
   assertEqual(blocks.filter(x => !x.block || x.block!==blocks[0].block).map(x => x.f), [], 'every edge function has the same region block');
   assertEqual(blocks.filter(x => x.t.includes('NSW_HOLIDAYS')).map(x => x.f), [], 'no edge function keeps a list of NSW holidays');
@@ -2177,7 +2177,7 @@ function testMcpConnector(sb){
   // who may make keys
   const P = (role, permissions) => ({ role, permissions });
   assertEqual([sb.canUseMcp(P('owner')), sb.canUseMcp(P('manager')), sb.canUseMcp(P('va', {})), sb.canUseMcp(P('va', { mcp: true })), sb.canUseMcp(P('technician', { mcp: false })), sb.canUseMcp(P('marketing', { mcp: true })), sb.canUseMcp({ role: 'va' }), sb.canUseMcp(null), sb.canUseMcp(P('va', { mcp: 'yes' }))],
-    [true, true, false, true, false, true, false, false, false], 'canUseMcp: owners and managers always; anyone else only with permissions.mcp switched on (true, as the function checks)');
+    [true, true, false, false, false, false, false, false, false], 'canUseMcp: owners and managers only (Ofek 15 Oct); an old permissions.mcp switch means nothing');
   // settings
   const inS = { mcp: { rateLimitPerMin: 30, logKeepDays: 5000, importSource: '  Partner feed ' } }, inCopy = JSON.stringify(inS);
   assertEqual([sb.mcpSettingsOf(undefined), sb.mcpSettingsOf(inS), sb.mcpSettingsOf({ mcp: { rateLimitPerMin: 'abc', logKeepDays: 2, importSource: '' } }), sb.mcpSettingsOf({ mcp: 'x' }), sb.mcpSettingsOf({ mcp: { rateLimitPerMin: '30', logKeepDays: 365.5 } }), JSON.stringify(inS)===inCopy],
@@ -2255,10 +2255,8 @@ function testMcpConnector(sb){
   assertEqual([sb.mcpCanUndo({ inserted: 3, status: 'done' }), sb.mcpCanUndo({ inserted: 3, status: 'partial' }), sb.mcpCanUndo({ inserted: 0, status: 'done' }), sb.mcpCanUndo({ inserted: 3, status: 'done', undone_at: 'x' }), sb.mcpCanUndo({ inserted: 3, status: 'running' }), sb.mcpCanUndo(null)],
     [true, true, false, false, false, false], 'mcpCanUndo: once, when it added something and has finished');
   // people, reasons, lines
-  const pr = sb.mcpPeopleRows([{ id: 't', fullName: 'Ben', role: 'technician', permissions: {} }, { id: 'v', fullName: 'Kim', role: 'va', permissions: { mcp: true } }, { id: 'm', fullName: 'Max', role: 'manager' }, { id: 'o', fullName: 'Ann', role: 'owner', permissions: {} }]);
-  assertEqual([pr.map(r => r.id), pr.map(r => r.always), pr.map(r => r.on)], [['o', 'm', 't', 'v'], [true, true, false, false], [true, true, false, true]], 'mcpPeopleRows: owners, managers (always on), then everyone else by name');
-  assertEqual([sb.mcpReasonText('owners only'), sb.mcpReasonText('Ask an owner to switch on the private connector for you.').includes('Settings > People'), sb.mcpReasonText('not allowed').includes('Settings > People'), sb.mcpReasonText('host blocked'), sb.mcpReasonText('That address is private or local, so OPS won\'t call it.'), sb.mcpReasonText('The server took too long.'), sb.mcpReasonText(''), sb.mcpReasonText('Weird thing'), sb.mcpReasonText('server')],
-    ['Only an owner can do this.', true, true, 'That address isn\'t allowed: it must be a public https address.', 'That address isn\'t allowed: it must be a public https address.', 'The server didn\'t answer within 15 seconds.', 'Something went wrong. Try again.', 'Weird thing', 'Something went wrong on the server. Try again.'], 'mcpReasonText: the function\'s reasons in plain words');
+  assertEqual([sb.mcpReasonText('owners only'), sb.mcpReasonText('Only owners and managers can make keys.'), sb.mcpReasonText('not allowed'), sb.mcpReasonText('host blocked'), sb.mcpReasonText('That address is private or local, so OPS won\'t call it.'), sb.mcpReasonText('The server took too long.'), sb.mcpReasonText(''), sb.mcpReasonText('Weird thing'), sb.mcpReasonText('server')],
+    ['Only an owner can do this.', 'Only owners and managers can make keys.', 'Only owners and managers can make keys.', 'That address isn\'t allowed: it must be a public https address.', 'That address isn\'t allowed: it must be a public https address.', 'The server didn\'t answer within 15 seconds.', 'Something went wrong. Try again.', 'Weird thing', 'Something went wrong on the server. Try again.'], 'mcpReasonText: the function\'s reasons in plain words');
   assertEqual([sb.mcpLoadErrorText({ code: '42P01' }), sb.mcpLoadErrorText({ message: 'relation "mcp_tokens" does not exist' }), sb.mcpLoadErrorText({ message: 'x' })], ['The private connector isn\'t set up on the server yet.', 'The private connector isn\'t set up on the server yet.', 'Could not load: x'], 'mcpLoadErrorText: a missing table says the server is not set up yet');
   assertEqual([sb.mcpServerMeta({ url: 'https://crm.example.com/mcp', hasSecret: true, last_test_at: '2026-10-13T20:52:00Z', last_test_ok: true, last_tools: [{}, {}] }, NOW), sb.mcpServerMeta({ url: 'https://crm.example.com/mcp', hasSecret: false, last_test_at: '2026-10-13T20:52:00Z', last_test_ok: false, last_tools: [{}] }, NOW), sb.mcpServerMeta({ url: 'https://a.b/c' }, NOW)],
     ['crm.example.com · key saved · connected Today 7:52 am · 2 tools', 'crm.example.com · no key · failed Today 7:52 am · 1 tool', 'a.b · no key · not tested yet'], 'mcpServerMeta: host, key, last test and tools');
@@ -2276,7 +2274,7 @@ function testMcpConnector(sb){
   assertEqual([fnObj(/export const MCP_DEFAULTS = (\{[^}]*\});/), fnObj(/export const DEFAULT_DEDUPE = (\{[^\n]*\});/), fnObj(/const RESERVED_HEADERS = (\[[^\]]*\]);/)],
     [sb.MCP_SETTINGS_DEFAULTS, { contacts: sb.mcpDedupeDefault('contacts'), jobs: sb.mcpDedupeDefault('jobs'), tasks: sb.mcpDedupeDefault('tasks') }, sb.MCP_RESERVED_HEADERS], 'mcp function: the same settings defaults, starting duplicate checks and refused header names');
   const canFn = (fn.match(/export const canUseMcp = [^\n]*/) || [''])[0];
-  assertEqual([/role === "owner"/.test(canFn), /role === "manager"/.test(canFn), /permissions\.mcp === true/.test(canFn), fn.includes('export const TOKEN_RE = /^ops_mcp_[A-Za-z0-9_-]{43}$/;')], [true, true, true, true], 'mcp function: canUseMcp checks owner, manager and permissions.mcp; its keys look like mcpTokenLooksRight');
+  assertEqual([/role === "owner"/.test(canFn), /role === "manager"/.test(canFn), /permissions/.test(canFn), fn.includes('export const TOKEN_RE = /^ops_mcp_[A-Za-z0-9_-]{43}$/;')], [true, true, false, true], 'mcp function: canUseMcp is owners and managers only (no permissions switch), as the app; its keys look like mcpTokenLooksRight');
   assertEqual([/logKeepDays: intIn\(m\.logKeepDays, 7, 3650/.test(fn), /rateLimitPerMin: intIn\(m\.rateLimitPerMin, 1, 600/.test(fn), /trim\(\)\.slice\(0, 60\)/.test(fn)], [true, true, true], 'mcp function: the same setting limits as mcpSettingsOf');
   // static checks on the page code: no render loops, safe handlers, the key never kept
   const T2 = n => extractDecl(script, n);
@@ -2295,7 +2293,11 @@ function testMcpConnector(sb){
   assertEqual(['mcpShowNewKey', 'mcpCreateKey', 'mcpCopy'].filter(n => /localStorage|sessionStorage|console\.|MCP_UI\.\w+\s*=[^;\n]*token/.test(T2(n))), [], 'MCP key: never stored, logged or kept in MCP_UI');
   const reveal = T2('mcpShowNewKey');
   assertEqual([reveal.includes(`onclick="mcpCopy('\${id}')"`) && ['mcp-reveal-path', 'mcp-reveal-key', 'mcp-reveal-url'].every(id => reveal.includes(`row('${id}'`)) && !/on\w+="[^"]*\$\{(token|v|url|pathUrl)\}/.test(reveal), T2('mcpCall').indexOf('readOnlyReason()') < T2('mcpCall').indexOf('fetch(')], [true, true], 'MCP key: the copy buttons name a field, never the key; mcpCall checks read-only mode before it sends');
-  assertEqual([T2('renderShell').includes("${VIEW_AS_ID ? '' : mcpFooterButton(profile)}"), T2('personAccessTab').includes('setMcpPermission('), T2('personAccessTab').includes('setRows(PAGE_PICK.map(([k, l, desc]) => [esc(l)')], [true, true, true], 'the way in: the footer button (not while viewing as someone), and the People > Access switch next to the unchanged page switches');
+  assertEqual([T2('renderShell').includes("${VIEW_AS_ID ? '' : mcpFooterButton(profile)}"), /mcp/i.test(T2('personAccessTab')), T2('personAccessTab').includes('setRows(PAGE_PICK.map(([k, l, desc]) => [esc(l)'), /setMcpPermission|mcpPeopleRows/.test(script)],
+    [true, false, true, false], 'the way in: the footer button (not while viewing as someone); no per-person switch any more (People > Access shows only the unchanged page switches)');
+  const footer = vm.runInNewContext(T2('mcpFooterButton') + `; ['manager', 'owner', 'va', 'technician', 'marketing'].map(role => mcpFooterButton({ role, permissions: { mcp: true } })).concat([mcpFooterButton(null)])`, { ico: () => '' });
+  assertEqual(footer.map(h => /AI assistant keys/.test(h) && /onclick="openMcpKeys\(\)"/.test(h)), [true, false, false, false, false, false], 'footer "AI assistant keys": managers only (owners use Settings; nobody else, an old switch or not)');
+  assertEqual([T2('mcpWhoBlock').includes('setToggle('), /Owners and managers/.test(T2('mcpWhoBlock'))], [false, true], 'Settings: "Who may make keys" says owners and managers, with nothing to switch');
   assertEqual([sb.PAGE_PICK.some(p => p[0]==='mcp'), /\bmcp\b/.test(T2('canViewSection')), /\bmcp\b/.test(extractDecl(script, 'SECTION_LABEL')), /\bmcp\b/.test(extractDecl(script, 'ALL_SECTIONS'))], [false, false, false, false], 'the mcp permission is not a page: PAGE_PICK, SECTION_LABEL, ALL_SECTIONS and canViewSection are unchanged');
   assertEqual([sb.CAT_NAMES.mcp, sb.settingsHistParts('Private connector (MCP): key "x" made')], ['Private connector (MCP)', { where: 'Private connector (MCP)', what: 'key "x" made' }], 'Settings history: the private connector\'s lines are grouped under it');
 }

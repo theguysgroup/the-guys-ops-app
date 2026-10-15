@@ -22,6 +22,8 @@ const NAMES = ['canViewSection', 'defaultPermissionsFor', 'assigneeNames', 'task
   'payrollWeekOf', 'shiftPayrollWeek', 'jobPaidDate', 'materialsGst', 'payrollMaterialItems', 'computePayrollMaterials', 'payrollStatus',
   'payrollBonusesFor', 'computePayrollCommission', 'computePayrollHourly', 'payrollCommissionPeople', 'payrollHourlyPeople', 'computeWeek',
   'summarizeCalls', 'GOOGLE_ADS_AIRCON_ACCOUNT', 'callDivision', 'commissionRateFor',
+  // the task board rule (imports put a task on the board the app would)
+  'boardForAssignees',
   // the business's day (stage 1 region helpers; localDay and the pay week read it) — same list tests/business-logic.test.js uses
   'REGION_DEFAULTS', 'REGION_NONE', 'REGION_MEMO', 'BIZ_WALL', 'BIZ_DAY_MEMO', 'TZ_VALID', 'regionNow', 'tzValid', 'regionMemo', 'bizTz', 'bizWall',
   'bizDayOf', 'bizDayMemo', 'todayStr',
@@ -47,7 +49,7 @@ function extractDecl(source, name){
 }
 const m = fs.readFileSync(process.argv[2], 'utf8').match(/<script>([\s\S]*?)<\/script>/);
 if (!m) { console.error('run_tests.sh: no <script> in index.html'); process.exit(1); }
-console.log(`const APP: any = (() => { const STATE: any = { data: null };\n${NAMES.map(n => extractDecl(m[1], n)).join('\n')}\nreturn { STATE, ${NAMES.join(', ')} }; })();`);
+console.log(`const APP: any = (() => { const STATE: any = { data: null, profiles: [] };\n${NAMES.map(n => extractDecl(m[1], n)).join('\n')}\nreturn { STATE, ${NAMES.join(', ')} }; })();`);
 JS
   cat "$DIR/tests.ts"
 } > "$OUT"

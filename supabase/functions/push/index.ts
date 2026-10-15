@@ -217,9 +217,10 @@ export function shiftDay(day: string, n: number) { const [y, m, d] = day.split("
 const TEST_TAG = (tags: unknown) => Array.isArray(tags) && tags.some((t) => String(t).toLowerCase() === "test");
 // deno-lint-ignore no-explicit-any
 const arrivedAt = (c: any) => c.reopened_at || (Array.isArray(c.messages) && c.messages[0] && c.messages[0].at) || null;
-// A quiet MCP import (automations off; mcp/index.ts QUIET_KEY) is not "new lead" news, until the customer comes back.
+// A quiet MCP import (automations off: the column import_quiet; older imports: quiet on the first thread entry) is not
+// "new lead" news, until the customer comes back.
 // deno-lint-ignore no-explicit-any
-const quietArrival = (c: any) => !c.reopened_at && Array.isArray(c.messages) && !!c.messages[0] && c.messages[0].quiet === true;
+const quietArrival = (c: any) => !c.reopened_at && (c.import_quiet === true || (Array.isArray(c.messages) && !!c.messages[0] && c.messages[0].quiet === true));
 // The numbers behind the notifications, set in Settings → Notifications (catalog.notify.rules, Ofek 13 Oct); "unpaid"
 // follows the business's own "Flag a job as unpaid after" (settings.unpaid_reminder_days). Nothing set = the originals.
 // deno-lint-ignore no-explicit-any
@@ -299,7 +300,7 @@ export async function scan(sb: any, nowMs: number) {
   // deno-lint-ignore no-explicit-any
   const events: { key: string; kind: string; payload: any }[] = [];
   if (on("newLead") || on("leadWaiting")) {
-    const { data: leads } = await sb.from("contacts").select("id, full_name, division, source, status, created_at, contacted_at, last_read_at, tags, messages, reopened_at").gte("created_at", shiftDay(today, -1));
+    const { data: leads } = await sb.from("contacts").select("id, full_name, division, source, status, created_at, contacted_at, last_read_at, tags, messages, reopened_at, import_quiet").gte("created_at", shiftDay(today, -1));
     for (const c of leads || []) {
       const at = arrivedAt(c); if (!at || TEST_TAG(c.tags) || quietArrival(c)) continue;
       const atMs = Date.parse(at), age = nowMs - atMs;

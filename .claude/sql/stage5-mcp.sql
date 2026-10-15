@@ -17,7 +17,7 @@
 --   mcp_import_runs  each import, with the ids it inserted (so it can be undone)
 -- Every write goes through the mcp function (service role); the app only reads, under RLS. Settings need no column:
 -- settings.catalog.mcp = { rateLimitPerMin, logKeepDays, importSource } (defaults in the function); who may make keys
--- is permissions.mcp on profiles (owners and managers always).
+-- is the role: owners and managers only (Ofek 15 Oct; see M5-review).
 -- NO secret is written here. The owner adds, in Vault: 'mcp_cron_secret' (a long random value, also the Edge Function
 -- secret MCP_CRON_SECRET) and 'mcp_project_url' (this project's https://<ref>.supabase.co). Until both exist the hourly
 -- timer posts nothing / the function refuses it.
@@ -618,4 +618,60 @@ select 'M4-import ok';
 -- And remove the Edge Function secret MCP_CRON_SECRET of the 'mcp' function in the Dashboard.
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 -- END M4-import
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- Group M5-review: the main builder's review of 15 Oct (stage 5 §2.A3 and Ofek's answer 1).
+-- STAGING FIRST (wblsrpmjiqwuxmrmuklc). Run AFTER M1, M2 and M4, and BEFORE deploying the mcp, automations and push
+-- functions of this change (they select the new column: deployed first, their reads would fail until it exists).
+-- Safe to run again (idempotent).
+--   1. import_quiet on contacts, jobs and tasks: true on a row an MCP import made with automations off. The one marker
+--      the automations engine (v1 newLead; their stage-2 engine too) and push read. Every existing row is false
+--      (nothing imported quietly before this column existed is lost: the old marker, the first thread entry's
+--      quiet:true, is still read as well).
+--   2. Keys are for owners and managers only: any key of anyone else that is still live is revoked (the mcp function
+--      already refuses such a key; this makes the Keys list say so). permissions.mcp on profiles is left as it is and
+--      means nothing any more.
+-- Check before (read-only):
+--   select table_name, column_name from information_schema.columns
+--    where table_schema = 'public' and table_name in ('contacts', 'jobs', 'tasks') and column_name = 'import_quiet';  -- 0 rows the first time
+--   select t.id, t.name, p.full_name, p.role from public.mcp_tokens t left join public.profiles p on p.id = t.user_id
+--    where t.revoked_at is null and coalesce(p.role, '') not in ('owner', 'manager');                                -- the keys step 2 revokes
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+begin;
+
+-- 1. The quiet-import marker (a constant default: no table rewrite).
+alter table public.contacts add column if not exists import_quiet boolean not null default false;
+alter table public.jobs     add column if not exists import_quiet boolean not null default false;
+alter table public.tasks    add column if not exists import_quiet boolean not null default false;
+comment on column public.contacts.import_quiet is 'Stage 5: made by an MCP import with automations off (no new-lead automations or notifications).';
+comment on column public.jobs.import_quiet     is 'Stage 5: made by an MCP import with automations off.';
+comment on column public.tasks.import_quiet    is 'Stage 5: made by an MCP import with automations off.';
+
+-- 2. Live keys of anyone who is not an owner or manager (or whose profile is gone): revoked now, by nobody.
+update public.mcp_tokens t set revoked_at = now(), revoked_by = null
+ where t.revoked_at is null
+   and not exists (select 1 from public.profiles p where p.id = t.user_id and p.role in ('owner', 'manager'));
+
+commit;
+select 'M5-review ok';
+
+-- Check after (read-only):
+--   select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
+--    where table_schema = 'public' and table_name in ('contacts', 'jobs', 'tasks') and column_name = 'import_quiet';  -- 3 rows: boolean, NO, false
+--   select count(*) from public.mcp_tokens t
+--    where t.revoked_at is null and not exists (select 1 from public.profiles p where p.id = t.user_id and p.role in ('owner', 'manager'));   -- 0
+
+-- ── ROLLBACK (M5-review; run by hand only) ──────────────────────────────────────────────────────────────────────
+-- Redeploy the previous mcp, automations and push functions FIRST (this change's versions select import_quiet).
+-- begin;
+-- alter table public.contacts drop column if exists import_quiet;
+-- alter table public.jobs     drop column if exists import_quiet;
+-- alter table public.tasks    drop column if exists import_quiet;
+-- commit;
+-- Step 2 is not undone: a revoked key can't be brought back (its person makes a new one if they become a manager).
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- END M5-review
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
