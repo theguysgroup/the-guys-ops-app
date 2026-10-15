@@ -5848,7 +5848,7 @@ function navFirstUse(){ if (!navActivated()) return; document.removeEventListene
 document.addEventListener('pointerup', navFirstUse, true); document.addEventListener('keydown', navFirstUse, true);
 // The built-in restorer: through the same entry functions a click uses (their guards run; their renders are held and
 // their navPush calls do nothing while restoring). Only a value that differs is changed (several of them toggle).
-function navRestoreView(s){
+function navRestoreView(s, prev){
   const cur = navSnap(), same = (a, b) => (a || null)===(b || null);
   if (s.tab!==cur.tab) {
     goTab(s.tab);
@@ -5868,6 +5868,9 @@ function navRestoreView(s){
     return true;
   }
   if (s.tab==='settings') {
+    // ‹ Settings went back to the list (closeSettingsPage): the page only closes and stays selected, as on main (above 640 px
+    // the list shows it); the entry is then made to match the screen (navAfterRender). Back from a page shows the entry's page.
+    if (prev && prev.keepPage && !s.so) { if (cur.so) closeSettingsPage(); return true; }
     if (!same(s.sp, cur.sp) || (s.so && !cur.so)) { setSettingsPage(s.sp); if (navSnap().sp!==s.sp) return false; }
     if (!s.so && navSnap().so) closeSettingsPage();
     if (!same(s.conn, navSnap().conn)) { if (s.conn) openConnector(s.conn); else closeConnector(); }
@@ -22774,7 +22777,9 @@ function setSettingsPage(id){
   if (id!=='people') guardPeoplePay(go); else go();
 }
 function closeSettingsPage(){
-  if (navBackTo(k => { const p = k.split('|'); return p[0]==='settings' && p[2]==='0' && !p[3] && !p[4]; })) return;   // the list is the entry below
+  // The list is the entry below: back to it. The list keeps this page selected, as it did before the history (keepPage, see
+  // navRestoreView); the entry below may hold another page (the one Settings opened on, or one closed earlier).
+  if (navBackTo(k => { const p = k.split('|'); return p[0]==='settings' && p[2]==='0' && !p[3] && !p[4]; })) { NAV_HIST.cur = { ...NAV_HIST.cur, keepPage: 1 }; return; }
   dropBrandTry(); DATA_EXPORT.sens = false; UI.settings.open = false; navPush({ kind: 'settings' }); render(); window.scrollTo(0, 0);
 }
 // The text a settings page is found by in Search settings, and whether a search finds it (empty finds everything).

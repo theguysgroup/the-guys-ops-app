@@ -4436,6 +4436,20 @@ function testPageHistory(sb){
     T('navSwipeBack').includes('if (NAV_HIST.pops===pops) history.back();'), T('navSwipeBack').includes('history.back(); return;'), /html\.nav-swipe-on, html\.nav-swipe-on body \{ overscroll-behavior-x: none; \}/.test(fs.readFileSync(INDEX_HTML_PATH, 'utf8')),
     T('navSwipeStart').includes('navSidePanelOpen()'), T('navSwipeStart').indexOf('navSwipeReset()') < T('navSwipeStart').indexOf('NAV_SWIPE = null;')],
     [true, true, true, true, true, true, true, true, false, true, true, true], 'review fixes: a window closes as a click beside it does; small menus close first; no entry before the first tap; the swipe only in the installed app, once, never moving the page under a side panel');
+  // ‹ Settings (closeSettingsPage) keeps the page selected, as on main: Settings → Templates → ‹ Settings is Templates, closed
+  // (it was the Setup page of the list's entry). The real setSettingsPage and closeSettingsPage, the rest faked.
+  const H3 = navHistSandbox(script), n3 = H3.nav;
+  vm.runInContext('var DATA_EXPORT = { sens: true, counts: null, countsBusy: false }, AUTO = {}, TPL_EDIT = null, AUTO_TPL_EDIT = null;\n' + T('setSettingsPage') + '\n' + T('closeSettingsPage') + `
+    function dropBrandTry(){} function guardPeoplePay(go){ go(); }
+    this.__ss = { goTab, setSettingsPage, closeSettingsPage };`, H3.ctx);
+  const ss = H3.ctx.__ss;
+  n3.navInit(); ss.goTab('settings'); ss.setSettingsPage('templates');
+  const pushes3 = H3.log.push, backs3 = H3.log.back; H3.log.renders = 0;
+  ss.closeSettingsPage(); H3.pop(1);
+  assertEqual([H3.log.back - backs3, H3.ui.settings.page, H3.ui.settings.open, H3.log.renders, H3.log.push - pushes3, H3.hist.state.sp, H3.hist.state.so, H3.hist.entries[2].sp, H3.hist.entries[2].so],
+    [1, 'templates', false, 1, 0, 'templates', false, 'templates', true], '‹ Settings: back to the list, the page stays selected (as on main), one render, no push; the entry matches, forward still opens the page');
+  ss.setSettingsPage('phone'); H3.pop(1);
+  assertEqual([H3.ui.settings.page, H3.ui.settings.open, H3.hist.entries.length], ['templates', false, 3], 'Back from a page (no ‹ Settings): the list shows the page of its entry');
 }
 // A vm context with the history layer and fakes of the browser and of the entry functions it calls.
 function navHistSandbox(script){
@@ -4463,7 +4477,7 @@ function navHistSandbox(script){
     function selectJob(id){ UI.jobs.selectedId = id && UI.jobs.selectedId!==id ? id : null; }
     function closeConfirmModal(){} function closePopup(){} function navSwipeInAnim(){}
     this.__nav = { NAV_HIST, NAV_RESTORERS, NAV_LEAVERS, navInit, navPush, navReplace, navBackTo, navOverlaySync, navOnPop, navSnap, navKey };`, ctx);
-  return { nav: ctx.__nav, hist, log, ui: ctx.UI, auth: ctx.AUTH,
+  return { nav: ctx.__nav, hist, log, ui: ctx.UI, auth: ctx.AUTH, ctx,
     modal: open => { modal = open ? [{ classList: { contains: () => false } }] : []; },
     modalOpen: () => modal.length > 0,
     pop: i => { hist.idx = i; hist.state = hist.entries[i]; ctx.__nav.navOnPop({ state: hist.entries[i] }); } };
