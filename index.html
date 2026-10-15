@@ -3819,6 +3819,7 @@ const db = {
       const v = (STATE.data.vacations || []).find(x => x.id===id); if (v) v.note = text || '';
       return { ok: true };
     },
+    // the database stamps its own now() over these times (the guard trigger), so a wrong laptop clock can't move the day
     end(id){ return db.vacations.update(id, { ended_at: new Date().toISOString() }); },        // back today (early, or "Back?")
     cancel(id){ return db.vacations.update(id, { cancelled_at: new Date().toISOString() }); }, // a mistake: never counts
   },
@@ -19174,6 +19175,13 @@ function vacationJobFlag(j, data, today, tz){
   const v = vacationFor(data.vacations, vacationWho(j.technician, data), j.date, tz, 'flagOpen');
   return v ? { name: j.technician, vac: v, label: vacationUntilText(v, today, tz) || vacationUntilText(v, j.date, tz), standIn: vacationJobStandIn(vacationUsableStandIn(v, j.date, data, tz), data) } : null;
 }
+// The stand-in for one open item, checked on that item's own day (a job's date; a task's day, else the vacation's first day
+// still ahead): { day, standIn }, standIn '' when the stand-in is away (or can't take it) that day.
+function vacationItemStandIn(kind, item, v, data, tz, today){
+  const first = v && v.startsOn > today ? v.startsOn : today;
+  const d = (kind==='job' ? item && item.date : vacationTaskDay(item, today)) || first, day = d < first ? first : d;
+  return { day, standIn: vacationUsableStandIn(v, day, data, tz) };
+}
 // Their open items that can still move: a job before today is work already done, so it stays theirs.
 function vacationMovableItems(data, v, tz, today){
   const it = vacationOpenItems(data, v, tz, today);
@@ -19348,10 +19356,16 @@ function vacationBox(x, canEdit){
   if (vacationOpt(v, 'flagOpen')) {
     const it = vacationMovableItems(STATE.data, v, tz, today), s = vacationUsableStandIn(v, now ? today : v.startsOn, STATE.data, tz);
     const n = it.tasks.length + it.jobs.length, sJob = vacationJobStandIn(s, STATE.data);
-    const move = (kind, id) => !edit ? '' : kind==='job' && s && !sJob ? '<span class="hint">Pick a technician stand-in to move jobs</span>'
-      : s ? btn('Move to ' + s, `moveToStandIn('${esc(jsStr(kind))}','${esc(jsStr(id))}','${vid}')`) : '<span class="hint">Pick a stand-in to move it</span>';
-    const items = it.tasks.map(t => `<div class="vac-item"><span><b>${esc(t.title)}</b> · ${t.due ? 'due ' + fmtDateShort(t.due) : 'no due date'}</span>${move('task', t.id)}</div>`)
-      .concat(it.jobs.map(j => `<div class="vac-item"><span><b>${esc(j.customerName || '—')}</b> · job ${fmtDateShort(j.date)}</span>${move('job', j.id)}</div>`)).join('');
+    // each item is checked on its own day: the stand-in may be away on some of them
+    const move = (kind, x) => {
+      if (!edit) return '';
+      if (kind==='job' && s && !sJob) return '<span class="hint">Pick a technician stand-in to move jobs</span>';
+      if (!s) return '<span class="hint">Pick a stand-in to move it</span>';
+      const own = vacationItemStandIn(kind, x, v, STATE.data, tz, today);
+      return own.standIn ? btn('Move to ' + s, `moveToStandIn('${esc(jsStr(kind))}','${esc(jsStr(x.id))}','${vid}')`) : `<span class="hint">${esc(s)} is away ${esc(fmtDateShort(own.day))}</span>`;
+    };
+    const items = it.tasks.map(t => `<div class="vac-item"><span><b>${esc(t.title)}</b> · ${t.due ? 'due ' + fmtDateShort(t.due) : 'no due date'}</span>${move('task', t)}</div>`)
+      .concat(it.jobs.map(j => `<div class="vac-item"><span><b>${esc(j.customerName || '—')}</b> · job ${fmtDateShort(j.date)}</span>${move('job', j)}</div>`)).join('');
     open = `<div class="grp">In these dates${n >= 2 && edit && s ? ` <button type="button" class="btn ghost small" onclick="moveAllToStandIn('${vid}')">Move all to ${esc(s)}</button>` : ''}</div>`
       + (n ? `<div class="vac-items">${items}</div>` : '<div class="hint">Nothing open in these dates. ✓</div>');
   }
@@ -19582,6 +19596,10 @@ function moveToStandIn(kind, id, vacId){
   if (!canSetVacation()) return;
   const m = vacationMoveStandIn(vacId); if (!m) return;
   if (kind==='job' && !vacationJobStandIn(m.s, STATE.data)) { showToast(`${m.s} isn't a technician: pick a technician stand-in to move jobs`, { kind: 'warn' }); return; }
+  // the stand-in must be free on the item's own day, not only today
+  const item = (kind==='job' ? STATE.data.jobs : STATE.data.tasks).find(x => x.id===id);
+  const own = item ? vacationItemStandIn(kind, item, m.v, STATE.data, bizTz(), todayStr()) : null;
+  if (own && !own.standIn) { showToast(`Not moved: ${m.s} is away ${fmtDateShort(own.day)} too`, { kind: 'warn' }); render(); return; }
   if (vacationMoveItem(kind, id, m.v, m.s, getCurrentProfile()?.fullName || 'Unknown')) showToast('Moved to ' + m.s);
   render();
 }
@@ -19589,11 +19607,16 @@ function moveAllToStandIn(vacId){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   if (!canSetVacation()) return;
   const m = vacationMoveStandIn(vacId); if (!m) return;
-  const it = vacationMovableItems(STATE.data, m.v, bizTz(), todayStr()), actor = getCurrentProfile()?.fullName || 'Unknown';
-  const n = it.tasks.filter(t => vacationMoveItem('task', t.id, m.v, m.s, actor)).length + it.jobs.filter(j => vacationMoveItem('job', j.id, m.v, m.s, actor)).length;
+  const tz = bizTz(), today = todayStr(), it = vacationMovableItems(STATE.data, m.v, tz, today), actor = getCurrentProfile()?.fullName || 'Unknown';
+  // each item on its own day: the ones on a day the stand-in is away too stay where they are
+  const free = (kind, x) => !!vacationItemStandIn(kind, x, m.v, STATE.data, tz, today).standIn;
+  const tasks = it.tasks.filter(t => free('task', t)), jobs = it.jobs.filter(j => free('job', j));
+  const away = it.tasks.length - tasks.length + it.jobs.length - jobs.length;
+  const n = tasks.filter(t => vacationMoveItem('task', t.id, m.v, m.s, actor)).length + jobs.filter(j => vacationMoveItem('job', j.id, m.v, m.s, actor)).length;
   // jobs stay when the stand-in isn't a technician (vacationMoveItem)
-  const kept = vacationJobStandIn(m.s, STATE.data) ? 0 : it.jobs.length;
-  showToast(`Moved ${n} item${n===1 ? '' : 's'} to ${m.s}` + (kept ? ` · ${kept} job${kept===1 ? '' : 's'} stay: ${m.s} isn't a technician` : ''), kept ? { kind: 'warn' } : undefined);
+  const kept = vacationJobStandIn(m.s, STATE.data) ? 0 : jobs.length;
+  showToast(`Moved ${n} item${n===1 ? '' : 's'} to ${m.s}` + (kept ? ` · ${kept} job${kept===1 ? '' : 's'} stay: ${m.s} isn't a technician` : '')
+    + (away ? ` · ${away} item${away===1 ? '' : 's'} stay: ${m.s} is away that day too` : ''), kept || away ? { kind: 'warn' } : undefined);
   render();
 }
 
@@ -22623,6 +22646,7 @@ function setOfficeLabel(value){
 async function setMyShift(on){
   const me = getCurrentProfile(); if (!me) return;
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (on && vacationBlocksShift(me)) return;
   const { error } = await sb.rpc('set_phone_duty', { p_on: on });
   if (error) { showToast('Not saved: ' + error.message); return; }
   me.onDuty = on; me.onDutyDate = todayStr(); me.onDutyChangedAt = new Date().toISOString(); if (!on) { me.onBreak = false; me.onBreakSince = null; }
@@ -22646,9 +22670,17 @@ function myShiftButton(profile){
   const breakBtn = brk ? `<button class="btn primary" onclick="setMyBreak(false)">Finish Break</button>` : `<button class="btn" onclick="setMyBreak(true)">${ico('coffee')} Start Break</button>`;
   return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${status}${breakBtn}<button class="btn" onclick="vaLogOut()">Log Out</button></div>`;
 }
+// On vacation (stage 3): no shift starts, even from a My Day left open since before the vacation began (the button is only
+// hidden when the page draws). Returns true (and says so) when the shift may not start.
+function vacationBlocksShift(me){
+  if (!vacationForProfile(STATE.data.vacations || [], me, todayStr(), bizTz(), null, STATE.data.employees)) return false;
+  showToast('You are on vacation today: no shift clock', { kind: 'warn' }); render();
+  return true;
+}
 async function vaLogIn(){
   const me = getCurrentProfile(); if (!me) return;
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (vacationBlocksShift(me)) return;
   const { error } = await sb.rpc('set_phone_duty', { p_on: true });
   if (error) { showToast('Not saved: ' + error.message); return; }
   await sb.rpc('mark_session_start');

@@ -17,7 +17,7 @@ function fakeDb(opts: { ronOn?: boolean; ronDate?: string; ronBreak?: boolean; r
   const T: Record<string, any[]> = {
     contacts: [{ id: "c-known", full_name: "Kevin Love", phone: "+61466103709", division: "Chimney", created_at: "2026-09-23", messages: [], contacted_at: null }],
     calls: [],
-    profiles: [{ id: "ron1", role: "va", full_name: "Ron", permissions: { crm: true }, on_duty: opts.ronOn !== false, on_duty_date: opts.ronDate || "2026-10-02", on_break: !!opts.ronBreak }, { id: "tech1", role: "technician", permissions: { crm: false }, on_duty: true, on_duty_date: "2026-10-02" }, { id: "own1", role: "owner", permissions: {} }],
+    profiles: [{ id: "ron1", role: "va", full_name: "Vic", permissions: { crm: true }, on_duty: opts.ronOn !== false, on_duty_date: opts.ronDate || "2026-10-02", on_break: !!opts.ronBreak }, { id: "tech1", role: "technician", permissions: { crm: false }, on_duty: true, on_duty_date: "2026-10-02" }, { id: "own1", role: "owner", permissions: {} }],
     settings: [{ phone_routing: opts.routing || JSON.parse(JSON.stringify(ROUTING)), company_name: "The Guys Service Group" }],
     ...(opts.vac ? { employees: opts.vac.employees || [], employee_vacations: opts.vac.vacations || [] } : {}),
   };
@@ -342,25 +342,25 @@ const IN = { From: "+61412345678", To: "+61400000001" };
   // Their own routing with neutral demo names and made-up mobiles (the repo is public); the office login is the fixture's.
   const R19 = () => ({ ...JSON.parse(JSON.stringify(ROUTING)), people: { ava: { name: "Ava", mobile: "+61400000022", available: true }, ben: { name: "Ben", mobile: "0400 000 011", available: true } },
     divisions: { Aircon: ["ben"], Chimney: ["ben"], "Pressure Washing": ["ava"], Other: ["ava", "ben"] } });
-  const EMPS = [{ id: "e-noam", name: "Noam Gal", phone: "0400 000 011", status: "Active" }, { id: "e-ofek", name: "Ofek", phone: "0400 000 022", status: "Active" }, { id: "e-ron", name: "Ron", phone: "", status: "Active" }];
-  const VAC = (o: any = {}) => ({ id: "v1", employee_id: "e-noam", starts_on: "2026-10-01", ends_on: "2026-10-05", stand_in_id: null, options: { noCalls: true }, ended_at: null, cancelled_at: null, ...o });
+  const EMPS = [{ id: "e-ben", name: "Ben Gale", phone: "0400 000 011", status: "Active" }, { id: "e-ava", name: "Ava", phone: "0400 000 022", status: "Active" }, { id: "e-vic", name: "Vic", phone: "", status: "Active" }];
+  const VAC = (o: any = {}) => ({ id: "v1", employee_id: "e-ben", starts_on: "2026-10-01", ends_on: "2026-10-05", stand_in_id: null, options: { noCalls: true }, ended_at: null, cancelled_at: null, ...o });
   const C0 = (emps: any[], vacs: any[]): any => ({ day: "2026-10-02", tz: "Australia/Sydney", vacs, employees: emps, profiles: [] });
-  const P = { ofek: { name: "Ofek", mobile: "+61400000022", available: true }, noam: { name: "Noam", mobile: "0400 000 011", available: true } };
+  const P = { ava: { name: "Ava", mobile: "+61400000022", available: true }, ben: { name: "Ben", mobile: "0400 000 011", available: true } };
   const awayKeys = (people: any, emps: any[], vacs: any[]) => [...vacPhoneAway(people, C0(emps, vacs))].sort();
-  eq(awayKeys(P, [{ id: "e1", name: "N. G.", phone: "0400000011" }], [VAC({ employee_id: "e1" })]), ["noam"], "vacPhoneAway: by mobile");
-  eq(awayKeys(P, [{ id: "e1", name: "Ofek", phone: "" }], [VAC({ employee_id: "e1" })]), ["ofek"], "vacPhoneAway: by full name");
-  eq(awayKeys(P, [{ id: "e1", name: "Noam Gal", phone: "" }], [VAC({ employee_id: "e1" })]), ["noam"], "vacPhoneAway: by a first name nobody else has");
-  eq(awayKeys(P, [{ id: "e1", name: "Noam Gal", phone: "" }, { id: "e2", name: "Noam Levi", phone: "" }], [VAC({ employee_id: "e1" })]), [], "vacPhoneAway: a shared first name is no match");
-  eq(awayKeys({ nc: { name: "Noam Cohen", mobile: "" } }, [{ id: "e1", name: "Noam Gal", phone: "" }], [VAC({ employee_id: "e1" })]), [], "vacPhoneAway: a different full name is no match");
-  eq(awayKeys(P, [{ id: "e1", name: "Ofek", phone: "" }], [VAC({ employee_id: "e1", options: { noNotify: true } })]), [], "vacPhoneAway: only 'Calls not routed' counts");
-  // the owner Noam Gal (a login with no employee card) is the backup phone "Noam"; the technician Noam Levi is on vacation
-  const BENS = { noam: { name: "Noam", mobile: "", available: true } }, LEVI = [{ id: "e-levi", name: "Noam Levi", phone: "0400 000 001" }];
+  eq(awayKeys(P, [{ id: "e1", name: "B. G.", phone: "0400000011" }], [VAC({ employee_id: "e1" })]), ["ben"], "vacPhoneAway: by mobile");
+  eq(awayKeys(P, [{ id: "e1", name: "Ava", phone: "" }], [VAC({ employee_id: "e1" })]), ["ava"], "vacPhoneAway: by full name");
+  eq(awayKeys(P, [{ id: "e1", name: "Ben Gale", phone: "" }], [VAC({ employee_id: "e1" })]), ["ben"], "vacPhoneAway: by a first name nobody else has");
+  eq(awayKeys(P, [{ id: "e1", name: "Ben Gale", phone: "" }, { id: "e2", name: "Ben Lowe", phone: "" }], [VAC({ employee_id: "e1" })]), [], "vacPhoneAway: a shared first name is no match");
+  eq(awayKeys({ nc: { name: "Ben Cole", mobile: "" } }, [{ id: "e1", name: "Ben Gale", phone: "" }], [VAC({ employee_id: "e1" })]), [], "vacPhoneAway: a different full name is no match");
+  eq(awayKeys(P, [{ id: "e1", name: "Ava", phone: "" }], [VAC({ employee_id: "e1", options: { noNotify: true } })]), [], "vacPhoneAway: only 'Calls not routed' counts");
+  // the owner Ben Gale (a login with no employee card) is the backup phone "Ben"; the technician Ben Lowe is on vacation
+  const BENS = { ben: { name: "Ben", mobile: "", available: true } }, LOWE = [{ id: "e-lowe", name: "Ben Lowe", phone: "0400 000 001" }];
   const withProfiles = (people: any, emps: any[], vacs: any[], profiles: any[]) => [...vacPhoneAway(people, { ...C0(emps, vacs), profiles })].sort();
-  eq(withProfiles(BENS, LEVI, [VAC({ employee_id: "e-levi" })], [{ id: "p-gal", full_name: "Noam Gal", technician_name: null, role: "owner" }]), [],
-    "vacPhoneAway: a login of any role with that first name (the owner Noam Gal, no employee card) is a twin → the owner's phone isn't skipped");
-  eq(withProfiles(BENS, LEVI, [VAC({ employee_id: "e-levi" })], [{ id: "p-levi", full_name: "Noam Levi", technician_name: "Noam Levi", role: "technician" }]), ["noam"],
-    "vacPhoneAway: Noam Levi's own login is no twin");
-  eq(withProfiles(BENS, LEVI, [VAC({ employee_id: "e-levi" })], [{ id: "p-x", full_name: "Someone", technician_name: "Noam", role: "technician" }]), [], "vacPhoneAway: a Jobs & Commissions name counts as a twin too");
+  eq(withProfiles(BENS, LOWE, [VAC({ employee_id: "e-lowe" })], [{ id: "p-gale", full_name: "Ben Gale", technician_name: null, role: "owner" }]), [],
+    "vacPhoneAway: a login of any role with that first name (the owner Ben Gale, no employee card) is a twin → the owner's phone isn't skipped");
+  eq(withProfiles(BENS, LOWE, [VAC({ employee_id: "e-lowe" })], [{ id: "p-lowe", full_name: "Ben Lowe", technician_name: "Ben Lowe", role: "technician" }]), ["ben"],
+    "vacPhoneAway: Ben Lowe's own login is no twin");
+  eq(withProfiles(BENS, LOWE, [VAC({ employee_id: "e-lowe" })], [{ id: "p-x", full_name: "Someone", technician_name: "Ben", role: "technician" }]), [], "vacPhoneAway: a Jobs & Commissions name counts as a twin too");
   // the backup phone "Sam" has the mobile of Sam Lee (not away): Sam Park, away, is not that phone
   const SAMS = [{ id: "e-lee", name: "Sam Lee", phone: "0411 111 111" }, { id: "e-park", name: "Sam Park", phone: "" }];
   eq(awayKeys({ sam: { name: "Sam", mobile: "0411111111" } }, SAMS, [VAC({ employee_id: "e-park" })]), [], "vacPhoneAway: the same mobile decides first (Sam Lee), never the name of someone else away");
@@ -368,50 +368,50 @@ const IN = { From: "+61412345678", To: "+61400000001" };
   eq(awayKeys({ x: { name: "X", mobile: "0411111111" } }, [...SAMS, { id: "e-dup", name: "Dup", phone: "0411 111 111" }], [VAC({ employee_id: "e-lee" })]), [], "vacPhoneAway: a mobile two employees share is no match");
   eq([vacPhoneEmployee({ name: "Sam Park", mobile: "" } as any, "k", C0(SAMS, []))?.id, vacPhoneEmployee({ name: "", mobile: "" } as any, "Sam Lee", C0(SAMS, []))?.id, vacPhoneEmployee({ name: "Sam", mobile: "" } as any, "k", C0(SAMS, []))],
     ["e-park", "e-lee", null], "vacPhoneEmployee: the full name, the key when unnamed, a shared first name → none");
-  eq(ownersFor({ ...R19(), people: P } as any, "Aircon", new Set(["noam"])), ["+61400000022"], "ownersFor: someone away → the next in line");
-  // Noam away: an aircon caller (his service), Ron off shift, 10:00 → Ofek, never Noam.
+  eq(ownersFor({ ...R19(), people: P } as any, "Aircon", new Set(["ben"])), ["+61400000022"], "ownersFor: someone away → the next in line");
+  // Ben away: an aircon caller (his service), Vic off shift, 10:00 → Ava, never Ben.
   const aircon = (o: any) => { const d = fakeDb({ ronOn: false, routing: R19(), ...o }); d.T.contacts[0].division = "Aircon"; return d; };
   db = aircon({ vac: { employees: EMPS, vacations: [VAC()] } });
   x = await body(await step(db, "incoming", { CallSid: "CV1", From: "0466 103 709", To: IN.To }, {}, FRI_10));
-  has(x, "<Number>+61400000022</Number>", "vacation: Noam away → Ofek rings");
-  hasNot(x, "+61400000011", "vacation: …never Noam's number");
-  db = aircon({ vac: { employees: EMPS, vacations: [VAC(), VAC({ id: "v2", employee_id: "e-ofek" })] } }); sms.length = 0;
+  has(x, "<Number>+61400000022</Number>", "vacation: Ben away → Ava rings");
+  hasNot(x, "+61400000011", "vacation: …never Ben's number");
+  db = aircon({ vac: { employees: EMPS, vacations: [VAC(), VAC({ id: "v2", employee_id: "e-ava" })] } }); sms.length = 0;
   x = await body(await step(db, "incoming", { CallSid: "CV2", From: "0466 103 709", To: IN.To }, {}, FRI_10));
   has(x, "couldn't get to the phone", "vacation: both owners away → voicemail with the 'missed' words");
   hasNot(x, "Our office is closed", "vacation: …not the 'closed' words");
   db = aircon({ vac: { employees: EMPS, vacations: [VAC({ options: { noNotify: true } })] } });
   x = await body(await step(db, "incoming", { CallSid: "CV3", From: "0466 103 709", To: IN.To }, {}, FRI_10));
-  has(x, "<Number>+61400000011</Number>", "vacation: 'Calls not routed' unticked → Noam rings as before");
+  has(x, "<Number>+61400000011</Number>", "vacation: 'Calls not routed' unticked → Ben rings as before");
   db = aircon({ vac: { employees: EMPS, vacations: [VAC({ ended_at: "2026-10-01T03:00:00Z" })] } });
   x = await body(await step(db, "incoming", { CallSid: "CV4", From: "0466 103 709", To: IN.To }, {}, FRI_10));
-  has(x, "<Number>+61400000011</Number>", "vacation: ended → Noam rings as before");
-  // after_office (Ron didn't answer) skips Noam too
+  has(x, "<Number>+61400000011</Number>", "vacation: ended → Ben rings as before");
+  // after_office (Vic didn't answer) skips Ben too
   db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [VAC()] } });
   x = await body(await step(db, "after_office", { CallSid: "CV5", DialCallStatus: "no-answer", ...IN }, { div: "Aircon" }, FRI_10));
-  has(x, "<Number>+61400000022</Number>", "vacation: after the office, Noam away → Ofek");
-  hasNot(x, "+61400000011", "vacation: …not Noam");
-  // Ron on vacation while his shift is on today → his browser phone stays quiet
-  const RONV = VAC({ id: "v3", employee_id: "e-ron" });
-  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [RONV] } });
+  has(x, "<Number>+61400000022</Number>", "vacation: after the office, Ben away → Ava");
+  hasNot(x, "+61400000011", "vacation: …not Ben");
+  // Vic on vacation while his shift is on today → his browser phone stays quiet
+  const VICV = VAC({ id: "v3", employee_id: "e-vic" });
+  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [VICV] } });
   x = await body(await step(db, "incoming", { CallSid: "CV6", From: "0466 103 709", To: IN.To }, {}, FRI_10));
-  hasNot(x, "office-ron1", "vacation: Ron away → his browser phone doesn't ring");
-  has(x, "<Number>+61400000011</Number>", "vacation: …the call goes to the owners (Chimney → Noam)");
-  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [RONV] } });
+  hasNot(x, "office-ron1", "vacation: Vic away → his browser phone doesn't ring");
+  has(x, "<Number>+61400000011</Number>", "vacation: …the call goes to the owners (Chimney → Ben)");
+  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [VICV] } });
   x = await body(await step(db, "incoming", { CallSid: "CV7", ...IN }, {}, FRI_21));
-  has(x, "Our office is closed", "vacation: Ron away, outside the backup hours → the closed voicemail");
-  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [VAC({ id: "v3", employee_id: "e-ron", options: { noNotify: true } })] } });
+  has(x, "Our office is closed", "vacation: Vic away, outside the backup hours → the closed voicemail");
+  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [VAC({ id: "v3", employee_id: "e-vic", options: { noNotify: true } })] } });
   x = await body(await step(db, "incoming", { CallSid: "CV8", From: "0466 103 709", To: IN.To }, {}, FRI_10));
-  has(x, "office-ron1", "vacation: Ron away without 'Calls not routed' → rings as before");
+  has(x, "office-ron1", "vacation: Vic away without 'Calls not routed' → rings as before");
   // fail-open: no vacations table, or reading it throws → routing exactly as before
   db = fakeDb();
   x = await body(await step(db, "incoming", { CallSid: "CV9", From: "0466 103 709", To: IN.To }, {}, FRI_10));
   has(x, "office-ron1", "vacation: no table → as before");
   const quiet = console.error; let logged = "";
   console.error = (...a: any[]) => { logged += a.map(String).join(" "); };
-  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [RONV], throws: true } });
+  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [VICV], throws: true } });
   x = await body(await step(db, "incoming", { CallSid: "CV10", From: "0466 103 709", To: IN.To }, {}, FRI_10));
   console.error = quiet;
-  has(x, "office-ron1", "vacation: reading them throws → as before (Ron rings)");
+  has(x, "office-ron1", "vacation: reading them throws → as before (Vic rings)");
   eq(logged.includes("vacations not read"), true, "vacation: the failure is logged");
   // the day is the business's (settings.catalog.region.timeZone, review A2): Fri 2 Oct 10:00 Sydney is Thu 1 Oct 19:00 in Chicago
   const TILL1 = VAC({ starts_on: "2026-09-28", ends_on: "2026-10-01" });

@@ -155,6 +155,8 @@ const DECLS = [
   'vacationEmployeeOfProfile', 'vacationLoginIds', 'vacationJobStandIn', 'vacationPhoneAway',
   // stage 3 review minor fixes: the note on its own (owners and managers), Monday to Friday leave days
   'vacationNotesMap', 'vacationWithNote', 'VACATION_WORK_DAYS',
+  // stage 3 review after the rebase: a stand-in is checked on each item's own day
+  'vacationItemStandIn',
 ];
 
 function extractDecl(source, name){
@@ -2695,6 +2697,14 @@ function testVacationUi(sb){
   assertEqual([AI('Cal', '2026-10-21', eveStands).standIn, sb.vacationAssignInfo('Cal', '2026-10-21', eveStands, SYD, true).standIn, sb.vacationAssignInfo('Cal', '2026-10-21', data, SYD, true).standIn],
     ['Eve', '', 'Sam'], 'picker info: for a job the VA stand-in is not offered (tasks still are); a technician stand-in is');
   assertEqual(sb.vacationJobFlag({ id: 'j', technician: 'Cal', date: '2026-10-23' }, eveStands, '2026-10-21', SYD).standIn, '', 'job flag: no move to a stand-in who is not a technician');
+
+  // a stand-in, checked on each item's own day: Sam stands in for Cal (20–24 Oct) and is away 23–24 Oct himself
+  const samAway = withRows([V({ id: 'v9', employeeId: 'e2', employeeName: 'Sam', startsOn: '2026-10-23', endsOn: '2026-10-24', options: ALL({}) })]);
+  const IS = (kind, item, today) => sb.vacationItemStandIn(kind, item, v1, samAway, SYD, today || '2026-10-20');
+  assertEqual([IS('job', { date: '2026-10-21' }), IS('job', { date: '2026-10-23' }), IS('task', { due: '2026-10-24' }), IS('task', { due: '2026-10-19' }), IS('task', {})],
+    [{ day: '2026-10-21', standIn: 'Sam' }, { day: '2026-10-23', standIn: '' }, { day: '2026-10-24', standIn: '' }, { day: '2026-10-20', standIn: 'Sam' }, { day: '2026-10-20', standIn: 'Sam' }],
+    "item stand-in: on the job's date and the task's due day (late or none: today), away that day: none");
+  assertEqual(IS('task', {}, '2026-10-10'), { day: '2026-10-20', standIn: 'Sam' }, 'item stand-in: before the vacation, a task with no due date is checked on its first day');
 
   // flags on open items
   assertEqual([sb.vacationTaskDay({}, '2026-10-21'), sb.vacationTaskDay({ due: '2026-10-19' }, '2026-10-21'), sb.vacationTaskDay({ due: '2026-10-23' }, '2026-10-21')],

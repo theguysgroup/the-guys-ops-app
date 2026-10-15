@@ -120,14 +120,20 @@ declare
 begin
   new.employee_name := coalesce((select e.name from public.employees e where e.id = new.employee_id), '');
   new.stand_in_name := (select e.name from public.employees e where e.id = new.stand_in_id);
-  -- who made it, the business and the reminder stamp are the database's: a signed-in person can't set them (the push
-  -- scan writes reminded_at with the service role, which has no auth.uid())
+  -- who made it, the business, the reminder stamp and the end/cancel times are the database's: a signed-in person can't
+  -- set them (the push scan writes reminded_at with the service role, which has no auth.uid()). "End now" and "Cancel" take
+  -- the database's clock, never the browser's: the functions treat a row with ended_at as over, the app and this file read
+  -- ended_at as a business day, and a fast or slow laptop clock would make them disagree (ended means ended_at <= now()).
   if tg_op = 'INSERT' then
     new.created_by := auth.uid(); new.created_at := now(); new.updated_at := now();
-    if auth.uid() is not null then new.reminded_at := null; end if;
+    if auth.uid() is not null then new.reminded_at := null; new.ended_at := null; new.cancelled_at := null; end if;
   else
     new.updated_at := now(); new.created_at := old.created_at; new.created_by := old.created_by; new.business_id := old.business_id;
-    if auth.uid() is not null then new.reminded_at := old.reminded_at; end if;
+    if auth.uid() is not null then
+      new.reminded_at := old.reminded_at;
+      new.ended_at := case when new.ended_at is null then null when old.ended_at is null then now() else old.ended_at end;
+      new.cancelled_at := case when new.cancelled_at is null then null when old.cancelled_at is null then now() else old.cancelled_at end;
+    end if;
   end if;
   if new.cancelled_at is not null then return new; end if;
   -- two saves for the same person at the same moment wait for each other
@@ -226,6 +232,7 @@ commit;
 --   select count(*) from information_schema.columns where table_name = 'employee_vacations' and column_name = 'note';         -- 0 (moved to employee_vacation_notes)
 --   select position('business_tz' in prosrc) > 0 from pg_proc where proname = 'vacation_in_force';                             -- true
 --   select to_regprocedure('public.business_timezone()');                                                                     -- null (dropped)
+--   -- as a signed-in owner/manager: update ... set ended_at = '2000-01-01' → the saved ended_at is now(), not the browser's time
 --   select position('profile_on_vacation' in prosrc) > 0 from pg_proc where proname = 'auto_end_va_shifts';                   -- false (stage 1's own body)
 
 -- ROLLBACK (stage 3 vacations): run as one block, in this order. Removes everything added above (the vacation rows and

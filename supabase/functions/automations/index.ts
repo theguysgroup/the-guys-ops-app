@@ -1625,12 +1625,14 @@ async function previewStep(sb: any, body: any, me: any, nowMs: number) {
       continue;
     }
     const act = ACTIONS[st.type];
+    // vacations on the day the action would run (after the waits and windows above), not today (stage 3)
+    const vacAt = async (): Promise<VacCtx> => { const C = await vacOf(sb, T, nowMs); return { ...C, day: bizParts(at, C.tz).day }; };
     if (st.type === "push") {
-      const r = await pushRecipients(sb, st, await vacOf(sb, T, nowMs));
+      const r = await pushRecipients(sb, st, await vacAt());
       out.push({ id: st.id, kind: "action", type: "push", ...(!r.ids.length && r.chosen ? { would: "skip", reason: "on vacation" } : { would: "send" }), to: r.names, title: fillMerge(st.title, vars, known), body: fillMerge(st.body || "", vars, known) });
     } else if (st.type === "task") {
       const due = st.due_days == null ? null : shiftDay(zoneParts(at, tz).day, Number(st.due_days));
-      const { names, moved } = await taskPeople(sb, st, await vacOf(sb, T, nowMs), due || undefined);
+      const { names, moved } = await taskPeople(sb, st, await vacAt(), due || undefined);
       const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
       const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
       out.push({ id: st.id, kind: "action", type: "task", would: "add", board: boardFor(names, profiles, employees), assignees: names, title: fillMerge(st.title, vars, known), notes: [vacMovedNote(moved), fillMerge(st.notes || "", vars, known)].filter(Boolean).join("\n\n"),

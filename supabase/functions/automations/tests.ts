@@ -1006,6 +1006,13 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     const sdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac()], automations: [auto({ id: "a-skip", enabled: false, steps: [pushTo(["owner"])] })], contacts: [lead("c1")] });
     const ps = await handle(sdb, { step: "preview", automation_id: "a-skip", record: { kind: "contact", id: "c1" } }, OWNER, false);
     eq([ps.body.steps[0].would, ps.body.steps[0].reason], ["skip", "on vacation"], "preview: everyone picked is away → 'skip: on vacation'");
+    // the preview reads the vacations of the day the action would run (after its waits), not today's
+    const later = (vacs: any[]) => world({ profiles: PROFS, employees: EMPS, employee_vacations: vacs, contacts: [lead("c1")],
+      automations: [auto({ id: "a-later", enabled: false, steps: [{ id: "w", kind: "wait", unit: "days", n: 7 }, pushTo(["owner"])] })] });
+    const pl = await handle(later([vac()]), { step: "preview", automation_id: "a-later", record: { kind: "contact", id: "c1" } }, OWNER, false);
+    eq([pl.body.steps[1].would, pl.body.steps[1].to], ["send", ["Olivia Owner"]], "preview: the owner away today but back before the action (in 7 days) → sent to them");
+    const pf = await handle(later([vac({ starts_on: "2026-10-20", ends_on: "2026-10-23" })]), { step: "preview", automation_id: "a-later", record: { kind: "contact", id: "c1" } }, OWNER, false);
+    eq([pf.body.steps[1].would, pf.body.steps[1].reason], ["skip", "on vacation"], "preview: the owner away on the action's day (not today) → 'skip: on vacation'");
     // read once per tick
     const twice = auto({ steps: [pushTo(["owner"]), { ...pushTo(["manager"]), id: "p2" }] });
     const odb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac({ starts_on: "2026-10-01", ends_on: "2026-10-02" })], automations: [twice, auto({ steps: [pushTo(["manager"])] })], contacts: [lead("c1")] });
