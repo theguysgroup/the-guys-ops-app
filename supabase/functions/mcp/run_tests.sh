@@ -22,6 +22,9 @@ const NAMES = ['canViewSection', 'defaultPermissionsFor', 'assigneeNames', 'task
   'payrollWeekOf', 'shiftPayrollWeek', 'jobPaidDate', 'materialsGst', 'payrollMaterialItems', 'computePayrollMaterials', 'payrollStatus',
   'payrollBonusesFor', 'computePayrollCommission', 'computePayrollHourly', 'payrollCommissionPeople', 'payrollHourlyPeople', 'computeWeek',
   'summarizeCalls', 'GOOGLE_ADS_AIRCON_ACCOUNT', 'callDivision', 'commissionRateFor',
+  // the business's day (stage 1 region helpers; localDay and the pay week read it) — same list tests/business-logic.test.js uses
+  'REGION_DEFAULTS', 'REGION_NONE', 'REGION_MEMO', 'BIZ_WALL', 'BIZ_DAY_MEMO', 'TZ_VALID', 'regionNow', 'tzValid', 'regionMemo', 'bizTz', 'bizWall',
+  'bizDayOf', 'bizDayMemo', 'todayStr',
   // the app's own row mappers, so the parity fixture reaches the app exactly as the app loads it
   'mapJobRow', 'mapEquipSpendRow', 'mapTaskRow', 'mapClosingRow', 'mapPayrollRow', 'mapBonusRow', 'mapSalesLogRow'];
 function extractDecl(source, name){
