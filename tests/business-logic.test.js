@@ -165,6 +165,8 @@ const DECLS = [
   'navLayerOrder', 'navLeaveVerdict',
   // Stage 4 review, part 2: a template changed and not saved, entries of another person, where "Press back again" shows
   'tplDraftChanged', 'navEntryForeign', 'navLeaveGuardOn', 'NAV_LEAVE_MS',
+  // stage 3 follow-ups (Ofek 15 Oct): paid / unpaid leave is private (item 2)
+  'vacationPaysMap', 'vacationPrivateRow',
 ];
 
 function extractDecl(source, name){
@@ -2611,13 +2613,22 @@ function testVacations(sb){
 
   // the saved row
   assertEqual(sb.vacationRowFromDraft(draft({ options: { payroll: true, pay: 'paid' }, note: '  ' })),
-    { employee_id: 'e1', starts_on: '2026-11-02', ends_on: '2026-11-06', stand_in_id: null, options: { ...all(false), autoBack: true, payroll: true, pay: 'paid' } }, 'row: stand-in unticked → null, options normalized');
+    { employee_id: 'e1', starts_on: '2026-11-02', ends_on: '2026-11-06', stand_in_id: null, options: { ...all(false), autoBack: true, payroll: true } }, 'row: stand-in unticked → null, options normalized, no pay (its own table)');
   const row = sb.vacationRowFromDraft(draft({ note: ' Fiji ' }));
-  assertEqual([row.stand_in_id, 'note' in row, 'business_id' in row, 'employee_name' in row, 'created_by' in row, 'reminded_at' in row], ['e2', false, false, false, false, false], 'row: the stand-in kept; no note (its own table), business_id, names, created_by or reminded_at');
+  assertEqual([row.stand_in_id, 'note' in row, 'business_id' in row, 'employee_name' in row, 'created_by' in row, 'reminded_at' in row, 'pay' in row.options], ['e2', false, false, false, false, false, false], 'row: the stand-in kept; no note or pay (their own table), business_id, names, created_by or reminded_at');
   // the note: owners and managers only, from employee_vacation_notes (main builder review 1.C.1)
   const notes = sb.vacationNotesMap([{ vacation_id: 'v1', note: 'Surgery' }, { vacation_id: 'v2', note: null }, { vacation_id: null, note: 'x' }, null]);
   assertEqual([notes, sb.vacationNotesMap(undefined)], [{ v1: 'Surgery' }, {}], 'notes map: by vacation, empty ones left out');
   assertEqual([sb.vacationWithNote(V(), notes).note, sb.vacationWithNote(V({ id: 'v9' }), notes).note, sb.vacationWithNote(V(), null).note], ['Surgery', '', ''], 'with note: from the notes, else empty (someone who may not read them)');
+  // paid / unpaid leave: owners and managers only, from employee_vacation_notes.pay (stage 3 follow-up 2)
+  const pays = sb.vacationPaysMap([{ vacation_id: 'v1', pay: 'paid' }, { vacation_id: 'v2', pay: null }, { vacation_id: 'v3', pay: 'weird' }, { vacation_id: null, pay: 'paid' }, null]);
+  assertEqual([pays, sb.vacationPaysMap(undefined)], [{ v1: 'paid' }, {}], 'pays map: by vacation, empty and odd ones left out');
+  const unpaidV = V({ options: { payroll: true, pay: 'unpaid' } });
+  assertEqual([sb.vacationWithNote(unpaidV, notes, { v1: 'paid' }).options.pay, sb.vacationWithNote(unpaidV, notes, { v1: 'paid' }).options.payroll, sb.vacationWithNote(unpaidV, notes, null).options.pay, sb.vacationWithNote(unpaidV, notes, { v1: 'weird' }).options.pay, sb.vacationWithNote(unpaidV, notes, { v9: 'paid' }).options.pay],
+    ['paid', true, 'unpaid', 'unpaid', 'unpaid'], 'with note: the private pay wins; without one, the pay on the row (a row not moved yet, an old app)');
+  assertEqual([sb.vacationWithNote(unpaidV, notes, { v1: 'paid' }).note, unpaidV.options.pay, sb.vacationWithNote(unpaidV, notes).options === unpaidV.options], ['Surgery', 'unpaid', true], 'with note: the note as before; the vacation passed in is not changed');
+  assertEqual([sb.vacationPrivateRow(draft({ note: '  ' })), sb.vacationPrivateRow(draft({ note: ' Fiji ', options: { pay: 'odd' } })), sb.vacationPrivateRow(null)],
+    [{ note: null, pay: 'paid' }, { note: 'Fiji', pay: 'unpaid' }, { note: null, pay: 'unpaid' }], 'private row: the note trimmed (empty = null), pay paid or unpaid');
 
   // words on badges and pickers
   const ut = (v, d) => sb.vacationUntilText(v, d, SYD);
@@ -2671,6 +2682,43 @@ function testVacations(sb){
     { id: 'r1', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Bob', options: { ...all(false), noNotify: true, pay: 'paid' }, createdBy: 'p1', createdAt: '2026-10-14T00:00:00Z', endedAt: null, cancelledAt: null, remindedAt: null }, 'mapVacationRow: camelCase, options normalized');
   assertEqual([sb.vacationErrorText({ code: '23P01', message: 'Already on vacation from 20 Oct to 24 Oct' }), sb.vacationErrorText({ message: 'Already on vacation from 1 Nov to 3 Nov' }), sb.vacationErrorText({ code: '42501', message: 'permission denied' })],
     ['Already on vacation from 20 Oct to 24 Oct', 'Already on vacation from 1 Nov to 3 Nov', 'Not saved: permission denied'], 'error text: the overlap message as is, else "Not saved: …"');
+  // stage 3 follow-ups (Ofek 15 Oct, items 2, 3, 4): the SQL, statically (it runs by hand on staging, then live)
+  const s3 = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage3-vacation.sql'), 'utf8');
+  const fu = s3.slice(s3.indexOf('-- ═══ end stage 3 vacations ═══')), fuRun = fu.slice(0, fu.indexOf('-- ── ROLLBACK (stage 3 follow-ups'));
+  const fuRb = fu.slice(fu.indexOf('-- ── ROLLBACK (stage 3 follow-ups')), fuEnd = fu.indexOf('-- END stage 3 follow-ups');
+  assertEqual([s3.indexOf('-- ═══ end stage 3 vacations ═══') > 0, /Stage 3 follow-ups \(Ofek 15 Oct, stage4-review §3 items 2, 3, 4\)/.test(fu), /Run BEFORE deploying the app of this change/.test(fu), fuEnd > 0, /^begin;$/m.test(fuRun) && /^commit;\nselect 'stage3-followups ok';$/m.test(fuRun)],
+    [true, true, true, true, true], 'follow-up SQL: its own section after stage 3, run before the app, one begin … commit, an END banner');
+  const guard = (fuRun.match(/create or replace function public\.employee_vacations_guard\(\)[\s\S]*?end \$function\$;/) || [''])[0];
+  const gi = t => guard.indexOf(t);
+  assertEqual([gi('v_pay text;') > 0, gi("if new.options ? 'pay' then") > 0 && gi("if new.options ? 'pay' then") < gi('if new.cancelled_at is not null then return new; end if;'),
+    /excluded\.pay = 'unpaid' and n\.pay is not null then n\.pay else excluded\.pay/.test(guard), /new\.options := new\.options - 'pay';/.test(guard)],
+    [true, true, true, true], 'follow-up 2: the guard moves an old app\'s options.pay to the notes before anything returns; an echoed "unpaid" never overwrites a private pay');
+  const skip = gi("and (new.options - 'pay') = (old.options - 'pay') then");
+  assertEqual([skip > gi('if new.cancelled_at is not null then return new; end if;'), skip < gi('pg_advisory_xact_lock'), skip > gi('new.cancelled_at := case'),
+    ['new.employee_id = old.employee_id', 'new.starts_on = old.starts_on', 'new.ends_on = old.ends_on', 'new.ended_at is not distinct from old.ended_at', 'new.cancelled_at is not distinct from old.cancelled_at'].every(t => gi(t) > 0 && gi(t) < skip)],
+    [true, true, true, true], 'follow-up 4: no clash check when the dates, person, ended / cancelled and options (pay aside) are the same; after the stamping, before the lock');
+  // the rest of the guard is section 5's, line for line
+  const g5 = (s3.match(/create or replace function public\.employee_vacations_guard\(\)[\s\S]*?end \$function\$;/) || [''])[0];
+  const cut = (t, a, b) => { const i = t.indexOf(a), j = t.indexOf(b, i); return i > 0 && j > i ? t.slice(0, i) + t.slice(j) : t; };
+  const without = cut(cut(guard.replace('  v_pay text;\n', ''), '  -- Paid or unpaid leave is private', '  if new.cancelled_at is not null then return new; end if;'), '  -- A rename (employee_vacations_names)', '  -- two saves for the same person');
+  assertEqual([g5 !== guard, without === g5], [true, true], 'follow-up 2/4: apart from the two additions, the guard is section 5\'s');
+  assertEqual([/deferrable initially deferred/.test(fuRun) && /confrelid = 'public\.employee_vacations'::regclass and not condeferrable/.test(fuRun), /add column if not exists pay text;/.test(fuRun), /constraint employee_vacation_notes_pay check \(pay is null or pay in \('paid', 'unpaid'\)\)/.test(fuRun)],
+    [true, true, true], 'follow-up 2: notes.pay (paid / unpaid only); the notes FK checked at commit, so the guard can write it while the vacation is inserted');
+  const copy = fuRun.indexOf("on conflict (vacation_id) do update set pay = coalesce(n.pay, excluded.pay);"), stripRows = fuRun.indexOf("update public.employee_vacations set options = options - 'pay' where options ? 'pay';");
+  assertEqual([copy > 0, stripRows > copy, stripRows > fuRun.indexOf('create or replace function public.employee_vacations_guard()')], [true, true, true], 'follow-up 2: the pays copied first, then stripped from the rows everyone reads (after the new guard, which skips their clash check)');
+  const pols = fuRun.match(/create policy "[^"]+" on public\.employee_vacation(s|_notes) for (insert|update)[^\n]*/g) || [];
+  assertEqual([/revoke all on public\.employee_vacations, public\.employee_vacation_notes from anon;/.test(fuRun), /revoke delete, truncate, references, trigger on public\.employee_vacations, public\.employee_vacation_notes from authenticated;/.test(fuRun), pols.length, pols.every(p => / to authenticated$/.test(p)), /create policy[^\n]*for (select|delete)/.test(fuRun)],
+    [true, true, 4, true, false], 'follow-up 3: nothing for anon, no delete / truncate / references / trigger, the 4 add / update policies to authenticated only (the reads untouched)');
+  const rbLines = fuRb.slice(0, fuRb.indexOf('-- ════')).split('\n').filter(l => l.trim());
+  assertEqual([rbLines.length > 20, rbLines.every(l => l.startsWith('--')), /Redeploy the previous app FIRST/.test(fuRb), /disable trigger employee_vacations_guard[\s\S]*jsonb_build_object\('pay', n\.pay\)[\s\S]*enable trigger employee_vacations_guard/.test(fuRb), /not deferrable/.test(fuRb), /drop column if exists pay;/.test(fuRb), /grant all on public\.employee_vacations, public\.employee_vacation_notes to anon;/.test(fuRb)],
+    [true, true, true, true, true, true, true], 'follow-up SQL: a commented ROLLBACK (the app first; pay back on the rows with the guard off; the old guard, FK, grants and policies)');
+  const rbGuard = fuRb.split('\n').filter(l => l.startsWith('-- ')).map(l => l.slice(3)).join('\n');
+  assertEqual(rbGuard.includes(g5), true, 'follow-up SQL: the ROLLBACK restores section 5\'s guard verbatim');
+  // the app: pay goes into the private upsert, never on the vacation row
+  const appSrc = fs.readFileSync(INDEX_HTML_PATH, 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+  const svm = extractDecl(appSrc, 'saveVacationModal');
+  assertEqual([/upsert\(\{ vacation_id: id, note: text, pay, business_id: AUTO_BUSINESS_ID \}\)/.test(appSrc), appSrc.includes('setNote('), svm.indexOf('db.vacations.setPrivate(') > 0 && svm.indexOf('db.vacations.setPrivate(') < svm.indexOf('logEmployeeActivity('), /vacationWithNote\(mapVacationRow\(r\), vacNotes, vacPays\)/.test(appSrc)],
+    [true, false, true, true], 'follow-up 2: one private upsert of note and pay, before the History line; the load passes the pays');
 }
 
 // On vacation, the screens (stage 3, group V2): pickers, flags, badges, payroll leave, the window's draft and the banner.

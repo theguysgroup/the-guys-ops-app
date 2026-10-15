@@ -255,3 +255,259 @@ commit;
 -- drop table if exists public.employee_vacations;
 -- commit;
 -- ═══ end stage 3 vacations ═══
+
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- Stage 3 follow-ups (Ofek 15 Oct, stage4-review §3 items 2, 3, 4).
+-- STAGING FIRST (wblsrpmjiqwuxmrmuklc). Run BEFORE deploying the app of this change (the app writes
+-- employee_vacation_notes.pay). Safe to run again.
+--   2. Paid or unpaid leave is private: it moves from employee_vacations.options.pay (every signed-in person reads it) to
+--      employee_vacation_notes.pay (owners and managers only, like the note). The guard moves a pay an app from before this
+--      change still sends; the notes' foreign key is made deferrable so the guard can write that row while the vacation is
+--      being inserted.
+--   3. Defense in depth, as stage 5 did: nothing for anon, no delete / truncate / references / trigger for signed-in people,
+--      and the add / update policies are for signed-in people only.
+--   4. A rename (employee_vacations_names), the push scan's reminded_at or a pay moved out of options re-ran the clash check
+--      on every row of that person, and could fail with "Already on vacation" after a time-zone change. The guard now skips
+--      the check when nothing that decides a clash changed.
+-- Check before (read-only):
+--   select count(*) from public.employee_vacations where options ? 'pay';                                    -- the rows step 4 copies
+--   select column_name from information_schema.columns
+--    where table_schema = 'public' and table_name = 'employee_vacation_notes' and column_name = 'pay';      -- 0 rows the first time
+--   select conname, condeferrable from pg_constraint
+--    where conrelid = 'public.employee_vacation_notes'::regclass and contype = 'f';                          -- 1 row, false the first time
+--   select grantee, privilege_type from information_schema.role_table_grants
+--    where table_schema = 'public' and table_name in ('employee_vacations', 'employee_vacation_notes')
+--      and grantee in ('anon', 'authenticated') order by 1, 2;                                                -- Supabase's defaults: all of them
+--   select polname, polroles::regrole[] from pg_policy
+--    where polrelid in ('public.employee_vacations'::regclass, 'public.employee_vacation_notes'::regclass); -- add / update: {public}
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+begin;
+
+-- 1. The pay column (owners and managers only, with the note).
+alter table public.employee_vacation_notes add column if not exists pay text;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conrelid = 'public.employee_vacation_notes'::regclass and conname = 'employee_vacation_notes_pay') then
+    alter table public.employee_vacation_notes add constraint employee_vacation_notes_pay check (pay is null or pay in ('paid', 'unpaid'));
+  end if;
+end $$;
+
+-- 2. The notes' foreign key is checked at commit, so the guard (a BEFORE INSERT trigger of the vacation) can write the
+--    private row of a vacation that is not in the table yet.
+do $$
+declare c text;
+begin
+  select conname into c from pg_constraint
+   where conrelid = 'public.employee_vacation_notes'::regclass and contype = 'f'
+     and confrelid = 'public.employee_vacations'::regclass and not condeferrable
+   limit 1;
+  if c is not null then
+    execute format('alter table public.employee_vacation_notes alter constraint %I deferrable initially deferred', c);
+  end if;
+end $$;
+
+-- 3. The guard: section 5, plus the pay move (item 2) and no clash check when nothing that decides one changed (item 4).
+create or replace function public.employee_vacations_guard()
+ returns trigger
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $function$
+declare
+  tz text := public.business_tz();
+  last_new date; clash record;
+  v_pay text;
+begin
+  new.employee_name := coalesce((select e.name from public.employees e where e.id = new.employee_id), '');
+  new.stand_in_name := (select e.name from public.employees e where e.id = new.stand_in_id);
+  -- who made it, the business, the reminder stamp and the end/cancel times are the database's: a signed-in person can't
+  -- set them (the push scan writes reminded_at with the service role, which has no auth.uid()). "End now" and "Cancel" take
+  -- the database's clock, never the browser's: the functions treat a row with ended_at as over, the app and this file read
+  -- ended_at as a business day, and a fast or slow laptop clock would make them disagree (ended means ended_at <= now()).
+  if tg_op = 'INSERT' then
+    new.created_by := auth.uid(); new.created_at := now(); new.updated_at := now();
+    if auth.uid() is not null then new.reminded_at := null; new.ended_at := null; new.cancelled_at := null; end if;
+  else
+    new.updated_at := now(); new.created_at := old.created_at; new.created_by := old.created_by; new.business_id := old.business_id;
+    if auth.uid() is not null then
+      new.reminded_at := old.reminded_at;
+      new.ended_at := case when new.ended_at is null then null when old.ended_at is null then now() else old.ended_at end;
+      new.cancelled_at := case when new.cancelled_at is null then null when old.cancelled_at is null then now() else old.cancelled_at end;
+    end if;
+  end if;
+  -- Paid or unpaid leave is private (employee_vacation_notes.pay, owners and managers only). An app from before this change
+  -- still sends options.pay: it is moved there and never kept on the row everyone reads. 'unpaid' is that app's default, so
+  -- on an edit it never overwrites a private value (a deliberate paid → unpaid from that app is lost: reload the app).
+  if new.options ? 'pay' then
+    v_pay := new.options->>'pay';
+    new.options := new.options - 'pay';
+    if v_pay in ('paid', 'unpaid') then
+      insert into public.employee_vacation_notes as n (vacation_id, business_id, pay) values (new.id, new.business_id, v_pay)
+      on conflict (vacation_id) do update
+        set pay = case when tg_op = 'UPDATE' and excluded.pay = 'unpaid' and n.pay is not null then n.pay else excluded.pay end;
+    end if;
+  end if;
+  if new.cancelled_at is not null then return new; end if;
+  -- A rename (employee_vacations_names), the push scan's reminded_at or a pay moved out of options changes nothing that
+  -- decides a clash: no clash check (an old row touching another after a time-zone change can't block them). After the
+  -- ended_at / cancelled_at lines above, so these are the values the database keeps.
+  if tg_op = 'UPDATE' and new.employee_id = old.employee_id and new.starts_on = old.starts_on and new.ends_on = old.ends_on
+     and new.ended_at is not distinct from old.ended_at and new.cancelled_at is not distinct from old.cancelled_at
+     and (new.options - 'pay') = (old.options - 'pay') then
+    return new;
+  end if;
+  -- two saves for the same person at the same moment wait for each other
+  perform pg_advisory_xact_lock(hashtextextended('employee_vacations:' || new.employee_id::text, 0));
+  last_new := case when new.ended_at is null then new.ends_on else least(new.ends_on, (new.ended_at at time zone tz)::date - 1) end;
+  if last_new < new.starts_on then return new; end if;   -- ended before it began: blocks nothing
+  select v.starts_on, v.ends_on into clash
+    from public.employee_vacations v
+   where v.employee_id = new.employee_id and v.id <> new.id and v.cancelled_at is null
+     and v.starts_on <= last_new
+     and (case when v.ended_at is null then v.ends_on else least(v.ends_on, (v.ended_at at time zone tz)::date - 1) end) >= new.starts_on
+   limit 1;
+  if found then
+    raise exception 'Already on vacation from % to %', to_char(clash.starts_on, 'FMDD Mon'), to_char(clash.ends_on, 'FMDD Mon') using errcode = '23P01';
+  end if;
+  return new;
+end $function$;
+-- (the trigger itself is section 5's, unchanged)
+
+-- 4. Copy the pays there are now (a private value already there wins).
+insert into public.employee_vacation_notes as n (vacation_id, business_id, pay)
+  select id, business_id, options->>'pay' from public.employee_vacations where options->>'pay' in ('paid', 'unpaid')
+on conflict (vacation_id) do update set pay = coalesce(n.pay, excluded.pay);
+
+-- 5. Strip them from the rows everyone reads. The guard above skips the clash check for these rows (only pay differs), so an
+--    old row whose dates touch another after a time-zone change can't stop this.
+update public.employee_vacations set options = options - 'pay' where options ? 'pay';
+
+-- 6. Who may do what (item 3). Referential actions (an employee deleted → their vacations and notes) run as the table
+--    owner, so revoking delete here does not stop them.
+revoke all on public.employee_vacations, public.employee_vacation_notes from anon;
+revoke delete, truncate, references, trigger on public.employee_vacations, public.employee_vacation_notes from authenticated;
+drop policy if exists "employee_vacations: owners and managers add" on public.employee_vacations;
+create policy "employee_vacations: owners and managers add" on public.employee_vacations for insert to authenticated
+  with check (is_owner_or_manager() and business_id = 'default');
+drop policy if exists "employee_vacations: owners and managers update" on public.employee_vacations;
+create policy "employee_vacations: owners and managers update" on public.employee_vacations for update to authenticated
+  using (is_owner_or_manager()) with check (is_owner_or_manager());
+drop policy if exists "employee_vacation_notes: owners and managers add" on public.employee_vacation_notes;
+create policy "employee_vacation_notes: owners and managers add" on public.employee_vacation_notes for insert to authenticated
+  with check (is_owner_or_manager() and business_id = 'default');
+drop policy if exists "employee_vacation_notes: owners and managers update" on public.employee_vacation_notes;
+create policy "employee_vacation_notes: owners and managers update" on public.employee_vacation_notes for update to authenticated
+  using (is_owner_or_manager()) with check (is_owner_or_manager() and business_id = 'default');
+-- (the read policies are already "to authenticated")
+
+commit;
+select 'stage3-followups ok';
+
+-- Check after (read-only):
+--   select data_type, is_nullable from information_schema.columns
+--    where table_schema = 'public' and table_name = 'employee_vacation_notes' and column_name = 'pay';      -- text, YES
+--   select conname from pg_constraint
+--    where conrelid = 'public.employee_vacation_notes'::regclass and conname = 'employee_vacation_notes_pay';  -- 1 row
+--   select conname, condeferrable, condeferred from pg_constraint
+--    where conrelid = 'public.employee_vacation_notes'::regclass and contype = 'f';                          -- 1 row: true, true
+--   select count(*) from public.employee_vacations where options ? 'pay';                                    -- 0
+--   select count(*) from public.employee_vacation_notes where pay is not null;                               -- the count before, or more
+--   select grantee, privilege_type from information_schema.role_table_grants
+--    where table_schema = 'public' and table_name in ('employee_vacations', 'employee_vacation_notes')
+--      and grantee in ('anon', 'authenticated') order by 1, 2;            -- no anon rows; authenticated: SELECT, INSERT, UPDATE on both
+--   select polname, polroles::regrole[] from pg_policy
+--    where polrelid in ('public.employee_vacations'::regclass, 'public.employee_vacation_notes'::regclass);  -- every row {authenticated}
+--   select position('v_pay' in prosrc) > 0, position('is not distinct from old.ended_at' in prosrc) > 0
+--     from pg_proc where proname = 'employee_vacations_guard';                                               -- true, true
+--   -- signed in as an owner/manager, each in begin; … rollback;
+--   --   (a) update public.employee_vacations set options = options || '{"pay":"paid"}' where id = '<a vacation>';
+--   --       → that row's options has no pay; employee_vacation_notes.pay = 'paid' for it
+--   --   (b) update public.employees set name = name || ' x' where id = '<a person whose vacations touch each other>';
+--   --       → no "Already on vacation"
+
+-- ── ROLLBACK (stage 3 follow-ups; run by hand only) ─────────────────────────────────────────────────────────────
+-- Redeploy the previous app FIRST (this one reads and writes employee_vacation_notes.pay).
+-- begin;
+-- -- pay back on the rows, without the guard (it would move it out again)
+-- alter table public.employee_vacations disable trigger employee_vacations_guard;
+-- update public.employee_vacations v set options = v.options || jsonb_build_object('pay', n.pay)
+--   from public.employee_vacation_notes n where n.vacation_id = v.id and n.pay is not null;
+-- alter table public.employee_vacations enable trigger employee_vacations_guard;
+-- -- the guard of section 5, as it was
+-- create or replace function public.employee_vacations_guard()
+--  returns trigger
+--  language plpgsql
+--  security definer
+--  set search_path to 'public'
+-- as $function$
+-- declare
+--   tz text := public.business_tz();
+--   last_new date; clash record;
+-- begin
+--   new.employee_name := coalesce((select e.name from public.employees e where e.id = new.employee_id), '');
+--   new.stand_in_name := (select e.name from public.employees e where e.id = new.stand_in_id);
+--   -- who made it, the business, the reminder stamp and the end/cancel times are the database's: a signed-in person can't
+--   -- set them (the push scan writes reminded_at with the service role, which has no auth.uid()). "End now" and "Cancel" take
+--   -- the database's clock, never the browser's: the functions treat a row with ended_at as over, the app and this file read
+--   -- ended_at as a business day, and a fast or slow laptop clock would make them disagree (ended means ended_at <= now()).
+--   if tg_op = 'INSERT' then
+--     new.created_by := auth.uid(); new.created_at := now(); new.updated_at := now();
+--     if auth.uid() is not null then new.reminded_at := null; new.ended_at := null; new.cancelled_at := null; end if;
+--   else
+--     new.updated_at := now(); new.created_at := old.created_at; new.created_by := old.created_by; new.business_id := old.business_id;
+--     if auth.uid() is not null then
+--       new.reminded_at := old.reminded_at;
+--       new.ended_at := case when new.ended_at is null then null when old.ended_at is null then now() else old.ended_at end;
+--       new.cancelled_at := case when new.cancelled_at is null then null when old.cancelled_at is null then now() else old.cancelled_at end;
+--     end if;
+--   end if;
+--   if new.cancelled_at is not null then return new; end if;
+--   -- two saves for the same person at the same moment wait for each other
+--   perform pg_advisory_xact_lock(hashtextextended('employee_vacations:' || new.employee_id::text, 0));
+--   last_new := case when new.ended_at is null then new.ends_on else least(new.ends_on, (new.ended_at at time zone tz)::date - 1) end;
+--   if last_new < new.starts_on then return new; end if;   -- ended before it began: blocks nothing
+--   select v.starts_on, v.ends_on into clash
+--     from public.employee_vacations v
+--    where v.employee_id = new.employee_id and v.id <> new.id and v.cancelled_at is null
+--      and v.starts_on <= last_new
+--      and (case when v.ended_at is null then v.ends_on else least(v.ends_on, (v.ended_at at time zone tz)::date - 1) end) >= new.starts_on
+--    limit 1;
+--   if found then
+--     raise exception 'Already on vacation from % to %', to_char(clash.starts_on, 'FMDD Mon'), to_char(clash.ends_on, 'FMDD Mon') using errcode = '23P01';
+--   end if;
+--   return new;
+-- end $function$;
+-- alter table public.employee_vacation_notes drop constraint if exists employee_vacation_notes_pay;
+-- alter table public.employee_vacation_notes drop column if exists pay;
+-- do $$
+-- declare c text;
+-- begin
+--   select conname into c from pg_constraint
+--    where conrelid = 'public.employee_vacation_notes'::regclass and contype = 'f'
+--      and confrelid = 'public.employee_vacations'::regclass and condeferrable
+--    limit 1;
+--   if c is not null then
+--     execute format('alter table public.employee_vacation_notes alter constraint %I not deferrable', c);
+--   end if;
+-- end $$;
+-- -- Supabase's default grants
+-- grant all on public.employee_vacations, public.employee_vacation_notes to anon;
+-- grant delete, truncate, references, trigger on public.employee_vacations, public.employee_vacation_notes to authenticated;
+-- -- the add / update policies as section 7 made them (no "to authenticated")
+-- drop policy if exists "employee_vacations: owners and managers add" on public.employee_vacations;
+-- create policy "employee_vacations: owners and managers add" on public.employee_vacations for insert
+--   with check (is_owner_or_manager() and business_id = 'default');
+-- drop policy if exists "employee_vacations: owners and managers update" on public.employee_vacations;
+-- create policy "employee_vacations: owners and managers update" on public.employee_vacations for update
+--   using (is_owner_or_manager()) with check (is_owner_or_manager());
+-- drop policy if exists "employee_vacation_notes: owners and managers add" on public.employee_vacation_notes;
+-- create policy "employee_vacation_notes: owners and managers add" on public.employee_vacation_notes for insert
+--   with check (is_owner_or_manager() and business_id = 'default');
+-- drop policy if exists "employee_vacation_notes: owners and managers update" on public.employee_vacation_notes;
+-- create policy "employee_vacation_notes: owners and managers update" on public.employee_vacation_notes for update
+--   using (is_owner_or_manager()) with check (is_owner_or_manager() and business_id = 'default');
+-- commit;
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- END stage 3 follow-ups
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════

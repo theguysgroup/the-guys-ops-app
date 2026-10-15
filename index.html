@@ -2423,11 +2423,17 @@ function vacationProblems(draft, vacations, tz){
   return out;
 }
 // The insert / update row. The name copies, created_by and reminded_at come from the database (the guard trigger); the note
-// is saved on its own (employee_vacation_notes, owners and managers only: it may hold a medical reason).
+// and paid / unpaid leave are saved on their own (employee_vacation_notes, owners and managers only: the note may hold a
+// medical reason, and pay is nobody else's business; stage 3 follow-up 2), so options goes without pay.
 function vacationRowFromDraft(draft){
-  const o = vacationOptionsNorm(draft.options);
+  const { pay, ...o } = vacationOptionsNorm(draft.options);
   return { employee_id: draft.employeeId, starts_on: draft.startsOn, ends_on: draft.endsOn,
     stand_in_id: o.standIn ? (draft.standInId || null) : null, options: o };
+}
+// The private row (employee_vacation_notes): the note (trimmed; empty = null) and paid / unpaid leave.
+function vacationPrivateRow(draft){
+  const d = draft || {}, o = d.options || {};
+  return { note: String(d.note || '').trim() || null, pay: VACATION_PAY.includes(o.pay) ? o.pay : 'unpaid' };
 }
 // The notes (employee_vacation_notes rows; only owners and managers get any back) as { vacationId: note }.
 function vacationNotesMap(rows){
@@ -2435,7 +2441,18 @@ function vacationNotesMap(rows){
   (rows || []).forEach(r => { if (r && r.vacation_id && r.note) out[r.vacation_id] = String(r.note); });
   return out;
 }
-function vacationWithNote(v, notes){ return { ...v, note: (notes && notes[v.id]) || '' }; }
+// Paid / unpaid leave (employee_vacation_notes.pay; only owners and managers get any back) as { vacationId: 'paid'|'unpaid' }.
+function vacationPaysMap(rows){
+  const out = {};
+  (rows || []).forEach(r => { if (r && r.vacation_id && VACATION_PAY.includes(r.pay)) out[r.vacation_id] = r.pay; });
+  return out;
+}
+// The note, and the private pay when there is one (it wins). Without one, the row's own options.pay stays: a row not moved
+// yet, or an app from before stage 3 follow-up 2.
+function vacationWithNote(v, notes, pays){
+  const pay = pays && VACATION_PAY.includes(pays[v.id]) ? pays[v.id] : '';
+  return { ...v, note: (notes && notes[v.id]) || '', ...(pay ? { options: { ...v.options, pay } } : {}) };
+}
 function vacationUntilText(v, day, tz){
   if (!v || v.cancelledAt) return '';
   if (day < v.startsOn) return `Vacation from ${fmtDateShort(v.startsOn)}`;
@@ -3290,6 +3307,7 @@ async function loadFromSupabase(){
   // Vacations too (stage 3): before the table exists nobody is on vacation, as before.
   const OPTIONAL_LOADS = new Set(['lead email checks', 'vacations', 'vacation notes']);
   const vacNotes = vacationNotesMap(vacationNoteRows);   // owners and managers only (stage 3 review 1.C.1)
+  const vacPays = vacationPaysMap(vacationNoteRows);     // the same rows: paid / unpaid leave (stage 3 follow-up 2)
   STATE.loadErrors = loadResults.map((r, i) => (r && r.error && !OPTIONAL_LOADS.has(LOAD_NAMES[i])) ? LOAD_NAMES[i] : null).filter(Boolean);
   if (STATE.loadErrors.length) console.error('Load failed for:', loadResults.filter(r => r && r.error).map(r => r.error));
 
@@ -3356,7 +3374,8 @@ async function loadFromSupabase(){
       activityLog: logsFor('employee', e.id),
     })),
     vacationNotes: vacNotes,
-    vacations: (vacationRows||[]).map(r => vacationWithNote(mapVacationRow(r), vacNotes)),
+    vacationPays: vacPays,
+    vacations: (vacationRows||[]).map(r => vacationWithNote(mapVacationRow(r), vacNotes, vacPays)),
     // An optional load: when it fails, the vacation screens say so instead of looking like nobody is away.
     vacationsError: (loadResults[LOAD_NAMES.indexOf('vacations')] || {}).error ? 'the vacations list did not load' : '',
     commissionRates: {},
@@ -3466,7 +3485,7 @@ function mapVacationRow(r){
 }
 // The saved row into STATE.data.vacations (added, or replacing the old copy); returns the mapped vacation.
 function keepVacationRow(row){
-  const v = vacationWithNote(mapVacationRow(row), STATE.data.vacationNotes);
+  const v = vacationWithNote(mapVacationRow(row), STATE.data.vacationNotes, STATE.data.vacationPays);
   const list = STATE.data.vacations || (STATE.data.vacations = []);
   const idx = list.findIndex(x => x.id === v.id);
   if (idx === -1) list.push(v); else list[idx] = v;
@@ -3822,14 +3841,17 @@ const db = {
       const { data, error } = await sb.from('employee_vacations').update(patch).eq('id', id).select().single();
       return error ? { error } : { vacation: keepVacationRow(data) };
     },
-    // The note, on its own (owners and managers only). Returns { ok } or { error }.
-    async setNote(id, note){
+    // The note and paid / unpaid leave, on their own (owners and managers only; stage 3 follow-up 2): one upsert of
+    // vacationPrivateRow's { note, pay }. Returns { ok } or { error }.
+    async setPrivate(id, { note, pay }){
       const text = String(note || '').trim() || null;
-      const { error } = await sb.from('employee_vacation_notes').upsert({ vacation_id: id, note: text, business_id: AUTO_BUSINESS_ID });
+      const { error } = await sb.from('employee_vacation_notes').upsert({ vacation_id: id, note: text, pay, business_id: AUTO_BUSINESS_ID });
       if (error) return { error };
       const notes = STATE.data.vacationNotes || (STATE.data.vacationNotes = {});
       if (text) notes[id] = text; else delete notes[id];
-      const v = (STATE.data.vacations || []).find(x => x.id===id); if (v) v.note = text || '';
+      (STATE.data.vacationPays || (STATE.data.vacationPays = {}))[id] = pay;
+      const v = (STATE.data.vacations || []).find(x => x.id===id);
+      if (v) { v.note = text || ''; v.options = { ...v.options, pay }; }
       return { ok: true };
     },
     // the database stamps its own now() over these times (the guard trigger), so a wrong laptop clock can't move the day
@@ -4412,7 +4434,7 @@ function setupRealtimeSubscriptions(){
   // break the shared one. Only when the list loaded; otherwise the screens already say it can't be read.
   if (!VACATIONS_CHANNEL && STATE.data && !STATE.data.vacationsError) {
     VACATIONS_CHANNEL = sb.channel('vacations-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacations' }, handleListRealtimeChange('vacations', r => vacationWithNote(mapVacationRow(r), STATE.data && STATE.data.vacationNotes)))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacations' }, handleListRealtimeChange('vacations', r => vacationWithNote(mapVacationRow(r), STATE.data && STATE.data.vacationNotes, STATE.data && STATE.data.vacationPays)))
       .subscribe();
   }
 }
@@ -20164,7 +20186,8 @@ async function saveVacationModal(){
   const ui = VAC_UI;   // the window this save belongs to: closed (or another one opened) while saving = left alone
   ui.saving = true;
   const row = { ...vacationRowFromDraft(d), business_id: AUTO_BUSINESS_ID };
-  const noteBefore = d.id ? (data.vacationNotes || {})[d.id] || '' : '', note = String(d.note || '').trim();
+  const noteBefore = d.id ? (data.vacationNotes || {})[d.id] || '' : '', payBefore = d.id ? (data.vacationPays || {})[d.id] || '' : '';
+  const P = vacationPrivateRow(d);
   const res = d.id ? await db.vacations.update(d.id, row) : await db.vacations.add(row);
   ui.saving = false;
   if (res.error) {
@@ -20173,10 +20196,13 @@ async function saveVacationModal(){
     if (VAC_UI===ui && document.getElementById('modal-error')) modalError(msg); else showToast(msg, { kind: 'warn' });
     return;
   }
-  const v = res.vacation, actor = getCurrentProfile()?.fullName || 'Unknown';
-  if (note!==noteBefore) {
-    const nr = await db.vacations.setNote(v.id, note);
-    if (nr.error) showToast('The vacation is saved, but not its note: ' + nr.error.message, { kind: 'warn' });
+  let v = res.vacation;
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  // before the History line, so it reads the pay just saved (from the list's copy: a live update may have replaced it)
+  if (!d.id || (P.note || '')!==noteBefore || P.pay!==payBefore) {
+    const nr = await db.vacations.setPrivate(v.id, P);
+    if (nr.error) showToast('The vacation is saved, but not its note or paid / unpaid leave: ' + nr.error.message, { kind: 'warn' });
+    else v = (STATE.data.vacations || []).find(x => x.id===v.id) || v;
   }
   if (emp) logEmployeeActivity(emp, actor, vacationLogText(v, d.id ? 'Vacation changed' : 'Vacation set'));
   const it = vacationOpt(v, 'flagOpen') ? vacationMovableItems(data, v, tz, today) : { tasks: [], jobs: [] }, n = it.tasks.length + it.jobs.length;
