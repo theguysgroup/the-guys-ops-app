@@ -483,6 +483,8 @@ select 'G2-changes ok';
 
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════════
 -- Group G4-providers (stage 6 v2, Ofek 15 Oct): free AI by default, paid only by choice.
+-- The free model per task (model_per_task 'cloudflare:assistant' / 'cloudflare:heavy') is picked by .claude/eval/run_ai_eval.sh,
+-- which prints the update lines to run here; glm-4.7-flash is the default until it has run.
 -- Run AFTER G1-gateway and G2-changes and BEFORE deploying the v2 ai-gateway, STAGING first. Safe to run again.
 --   ai_settings       provider: 'auto' (new default: own key → paid → free → test), 'anthropic' (the owner's paid switch),
 --                     'mock' (test mode); monthly_cap_usd default 0 (paid off until an owner sets a cap); free_quota (the

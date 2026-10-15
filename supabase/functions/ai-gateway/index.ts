@@ -32,6 +32,10 @@
 // platform_key_ready, cap_usd, available}; month.spend_usd is the paid spend, month.blocked only at the paid cap with
 // nothing left to answer.
 //
+// Picking the free model: .claude/eval/run_ai_eval.sh (Hebrew + English, tool calls, JSON; the production request and
+// parser; needs CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_AI_TOKEN in the caller's shell, spends free quota, never run by the
+// tests; --dry needs nothing). It prints the ai_settings.model_per_task lines to run on staging.
+//
 // Own keys (G5, bring your own key; SQL section G5-keys). key_save { scope:'me'|'business', provider?:'anthropic'|'openai',
 // key } → checked with the provider (GET /v1/models) and saved ONLY if it answers 200; key_test { scope } checks the
 // saved key again (401/403 marks it invalid); key_delete { scope, user_id? } (owners may name another person's key).
