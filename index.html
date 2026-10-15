@@ -6295,7 +6295,7 @@ function mcpRunLine(run, nowMs){
   const r = run || {}, when = mcpWhen(r.started_at, nowMs), errs = Array.isArray(r.errors) ? r.errors : [], e = errs[0];
   if (r.status==='running') return when + ' · Running…';
   if (r.status==='failed' || r.status==='error') return when + ' · Failed' + (e ? ': ' + (typeof e==='string' ? e : e.reason || e.message || '') : '');
-  return `${when} · ${Number(r.fetched) || 0} fetched, ${Number(r.inserted) || 0} added, ${Number(r.duplicates) || 0} already in the app` + (errs.length ? `, ${errs.length} with problems` : '') + (r.undone_at ? ' · undone ' + mcpWhen(r.undone_at, nowMs) : '');
+  return `${when} · ${Number(r.fetched) || 0} fetched, ${Number(r.inserted) || 0} added, ${Number(r.duplicates) || 0} already in the app` + (errs.length ? `, ${errs.length} with problems` : '') + (r.undone_at ? ' · undone ' + mcpWhen(r.undone_at, nowMs) : r.undo_started_at ? ' · undo not finished: press Undo again to finish it' : '');
 }
 // An import can be undone once: when it added something and has finished.
 function mcpCanUndo(run){ return !!run && Number(run.inserted) > 0 && !run.undone_at && run.status!=='running'; }
@@ -20077,12 +20077,17 @@ function mcpLoad(force){
         // has_secret, never secret_id (the browser can't read it: the secret lives only in Vault)
         ...(owner ? [sb.from('mcp_servers').select('id,name,url,auth_header,has_secret,created_at,last_test_at,last_test_ok,last_tools').order('created_at'),
           sb.from('mcp_import_rules').select('*').order('created_at'),
-          sb.from('mcp_import_runs').select('id,rule_id,rule_name,kind,source,started_at,finished_at,status,fetched,inserted,duplicates,errors,undone_at,undone_by').order('started_at', { ascending: false }).limit(200)] : []),
+          // imports of deleted rules that can still be undone, however old
+          sb.from('mcp_import_runs').select(MCP_RUN_COLS).is('rule_id', null).is('undone_at', null).gt('inserted', 0).order('started_at', { ascending: false }).limit(200)] : []),
       ]);
       const bad = res.find(x => x && x.error); if (bad) throw bad.error;
+      // Each rule's own latest imports (mcpRunLimit, one more to know if there are older ones), so one busy hourly rule
+      // never pushes another rule's imports, and their Undo, off the page.
+      const per = owner ? await Promise.all((res[2].data || []).map(r => sb.from('mcp_import_runs').select(MCP_RUN_COLS).eq('rule_id', r.id).order('started_at', { ascending: false }).limit(mcpRunLimit(r.id) + 1))) : [];
+      const badRuns = per.find(x => x && x.error); if (badRuns) throw badRuns.error;
       if (MCP_UI.again) return;
       MCP_UI.tokens = res[0].data || [];
-      if (owner) { MCP_UI.servers = (res[1].data || []).map(s => ({ ...s, hasSecret: !!s.has_secret })); MCP_UI.rules = res[2].data || []; MCP_UI.runs = res[3].data || []; }
+      if (owner) { MCP_UI.servers = (res[1].data || []).map(s => ({ ...s, hasSecret: !!s.has_secret })); MCP_UI.rules = res[2].data || []; MCP_UI.runs = [...per.flatMap(x => x.data || []), ...(res[3].data || [])]; }
       MCP_UI.err = '';
     } catch (e) { if (!MCP_UI.again) MCP_UI.err = mcpLoadErrorText(e); }
     if (!MCP_UI.again) MCP_UI.at = Date.now();
@@ -20230,7 +20235,7 @@ function mcpSettingsBlock(){
   const s = mcpSettingsOf(STATE.data.settings.catalog);
   const num = (k, min, max, unit, label) => `<span class="set-num"><input type="number" min="${min}" max="${max}" step="1" value="${s[k]}" aria-label="${label}" onchange="mcpSetSetting('${k}', this.value)"><span>${unit}</span></span>`;
   return setBlock('Settings', 'For every key in the business.', setRows([
-    ['Calls per minute, per key', 'More than this in one minute is refused (and logged).', num('rateLimitPerMin', 1, 600, 'a minute', 'Calls per minute')],
+    ['Calls per minute', 'For the whole business, all keys together (connecting counts too). More than this in one minute is refused (and logged).', num('rateLimitPerMin', 1, 600, 'a minute', 'Calls per minute')],
     ['Keep the access log for', 'Older calls are deleted.', num('logKeepDays', 7, 3650, 'days', 'Days to keep the access log')],
     ['Source for imported leads', 'Imported leads get this source unless the import maps one.', `<input class="set-input" maxlength="60" value="${esc(s.importSource)}" aria-label="Source for imported leads" onchange="mcpSetSetting('importSource', this.value)">`],
   ]));
@@ -20364,7 +20369,12 @@ async function mcpRunTool(id){
   } catch (e) { if (err) err.textContent = e.message; }
   if (go) go.disabled = false;
 }
-// Owners: imports, per server. Each rule with its last 5 imports (Undo on the ones that added something).
+// Owners: imports, per server. Each rule with its latest imports, 5 and "Older imports" for more (Undo on the ones that
+// added something).
+// The columns of an import run the page shows; how many of a rule's imports are shown (5, then 20 more a press).
+const MCP_RUN_COLS = 'id,rule_id,rule_name,kind,source,started_at,finished_at,status,fetched,inserted,duplicates,errors,undone_at,undone_by,undo_started_at';
+function mcpRunLimit(ruleId){ return Math.max(5, Math.min(500, Number(MCP_UI.runLimit && MCP_UI.runLimit[ruleId]) || 5)); }
+function mcpMoreRuns(ruleId){ const r = (MCP_UI.rules || []).find(x => x.id===ruleId); if (!r) return; MCP_UI.runLimit = { ...(MCP_UI.runLimit || {}), [ruleId]: mcpRunLimit(ruleId) + 20 }; MCP_UI.at = 0; mcpLoad(true); }
 function mcpRunHtml(run){
   return `<div class="mcp-run"><span>${esc(mcpRunLine(run))}</span>${mcpCanUndo(run) ? `<button type="button" class="btn small" onclick="mcpUndo('${esc(jsStr(run.id))}')">${ico('history', 14)} Undo</button>` : ''}</div>`;
 }
@@ -20375,13 +20385,14 @@ function mcpImportsBlock(){
     const sid = esc(jsStr(s.id)), tools = mcpToolsOf(s), mine = rules.filter(r => r.server_id===s.id);
     const add = `<button type="button" class="btn small primary"${tools.length ? ` onclick="mcpEditRule('${sid}','')"` : ' disabled title="Test the connection first"'}>${ico('plus', 14)} Add an import</button>`;
     const body = !mine.length ? `<div class="empty"><b>No imports yet</b>No imports from ${esc(s.name)} yet.</div>` : mine.map(r => {
-      const rid = esc(jsStr(r.id)), busy = !!MCP_UI.busy['prev:' + r.id], rr = runs.filter(x => x.rule_id===r.id).slice(0, 5);
+      const rid = esc(jsStr(r.id)), busy = !!MCP_UI.busy['prev:' + r.id], all = runs.filter(x => x.rule_id===r.id), rr = all.slice(0, mcpRunLimit(r.id));
+      const older = all.length > rr.length ? `<div><button type="button" class="btn small ghost" onclick="mcpMoreRuns('${rid}')">${ico('history', 14)} Older imports</button></div>` : '';
       // on / off only matters for an hourly import (a manual one runs when you press Import)
       const ctl = (r.mode==='hourly' ? setToggle(r.enabled===true, `mcpToggleRule('${rid}',${r.enabled!==true})`, false, `aria-label="${esc(r.name)} on"`) : '')
         + `<button type="button" class="btn small"${busy ? ' disabled' : ` onclick="mcpPreview('${rid}')"`}>${ico('eye', 14)} ${busy ? 'Reading…' : 'Preview'}</button>`
         + `<button type="button" class="btn small" onclick="mcpEditRule('${sid}','${rid}')">${ico('pencil', 14)} Edit</button><button type="button" class="btn small danger" onclick="mcpDeleteRule('${rid}')">${ico('trash', 14)} Delete</button>`;
       return connRows([[esc(r.name), esc(mcpRuleMeta(r)), ctl, r.mode==='hourly' && r.enabled!==true ? 'off' : '']])
-        + `<div class="mcp-runs">${rr.length ? rr.map(mcpRunHtml).join('') : '<div>Not run yet.</div>'}</div>`;
+        + `<div class="mcp-runs">${rr.length ? rr.map(mcpRunHtml).join('') + older : '<div>Not run yet.</div>'}</div>`;
     }).join('');
     return setBlock(`Imports from ${s.name}`, 'Each import reads one tool and adds new records. Nothing already in the app is changed.', body, add);
   });
@@ -20399,7 +20410,7 @@ function mcpEditRule(serverId, ruleId){
   MCP_UI.rule = r ? { id: r.id, server_id: r.server_id, name: r.name || '', kind: r.kind, tool: r.tool || '', argsText: JSON.stringify(r.tool_args || {}, null, 2), items_path: r.items_path || '',
     rows: mcpMappingRows(r.kind, r.mapping), dedupe: r.dedupe && Array.isArray(r.dedupe.fields) ? { fields: r.dedupe.fields.slice(), match: r.dedupe.match==='all' ? 'all' : 'any' } : mcpDedupeDefault(r.kind),
     mode: r.mode==='hourly' ? 'hourly' : 'manual', enabled: r.enabled===true, run_automations: r.run_automations===true }
-    : { id: '', server_id: serverId, name: '', kind: 'contacts', tool: tools[0] ? tools[0].name : '', argsText: '{}', items_path: '', rows: mcpMappingRows('contacts', {}), dedupe: mcpDedupeDefault('contacts'), mode: 'manual', enabled: true, run_automations: false };
+    : { id: '', server_id: serverId, name: '', kind: 'contacts', tool: tools[0] ? tools[0].name : '', argsText: '{}', items_path: '', rows: mcpMappingRows('contacts', {}), dedupe: mcpDedupeDefault('contacts'), mode: 'manual', enabled: false, run_automations: false };   // starts off: an hourly import runs only once the owner switches it on
   MCP_UI.paths = [];
   mcpRuleModal(true);
 }
@@ -20432,7 +20443,7 @@ function mcpRuleModal(open){
     <div class="grp">Duplicate check</div>${checks}
     <div class="field" style="margin-top:8px"><select aria-label="How the duplicate check matches" onchange="mcpRuleDedupeMatch(this.value)">${opt('any', 'Already in the app when any of these match', r.dedupe.match)}${opt('all', 'Already in the app only when all of these match', r.dedupe.match)}</select><span class="hint">A row that is already in the app is skipped, never changed.</span></div>
     <div class="grp">When it runs</div><div class="mcp-checks">${radio('manual', 'Manual: preview, then import')}${radio('hourly', 'Every hour, by itself')}</div>
-    ${setRows([['On', 'Off: the hourly import pauses. A manual import runs only when you press Import.', setToggle(r.enabled, 'mcpRuleFlip(\'enabled\')', false, 'aria-label="Import on"')],
+    ${setRows([['On', 'Off: the hourly import pauses (a new one starts off: preview it, then switch it on). A manual import runs only when you press Import.', setToggle(r.enabled, 'mcpRuleFlip(\'enabled\')', false, 'aria-label="Import on"')],
       ['Start automations for imported records', 'Off: imported records arrive quietly.', setToggle(r.run_automations, 'mcpRuleFlip(\'run_automations\')', false, 'aria-label="Start automations for imported records"')]])}
     ${r.run_automations ? `<div class="set-note warn" style="margin:8px 0 0">${ico('alert', 16)}<span>On: imported leads can start your automations, including texts and emails to customers.</span></div>` : ''}
     <div class="mcp-err" id="mcp-r-err" role="alert"></div>
@@ -22241,7 +22252,7 @@ let FRESH = null, FRESH_LOADING = false, FRESH_AT = 0;
 // Settings → Connectors: the search, the filters, the recent-syncs log and the GoHighLevel archive count (read with the freshness).
 let CONN_UI = { q: '', filter: 'all', afilter: 'All', log: null, logAt: 0, logLoading: false, ghlCount: 0 };
 // Settings > Connectors > Private connector (MCP): what the page has read, and its filters. A key is never kept here: it shows once and lives only in that window.
-function mcpBlank(){ return { tab: 'keys', tokens: null, servers: null, rules: null, runs: null, at: 0, loading: null, again: false, err: '', log: null, logKey: null, logLoading: null, logErr: '', who: '', tool: '', busy: {}, openTools: {}, rule: null, paths: [], preview: null }; }
+function mcpBlank(){ return { tab: 'keys', tokens: null, servers: null, rules: null, runs: null, at: 0, loading: null, again: false, err: '', log: null, logKey: null, logLoading: null, logErr: '', who: '', tool: '', busy: {}, openTools: {}, rule: null, paths: [], preview: null, runLimit: {} }; }
 let MCP_UI = mcpBlank();
 async function loadFreshness(){
   if (FRESH_LOADING || (FRESH && Date.now() - FRESH_AT < 10 * 60 * 1000)) return;

@@ -193,7 +193,7 @@ const SEED: Record<string, any[]> = {
     { id: "t5", title: "Wash quote", board: "Nora", status: "Done", due: "2026-10-01", assignees: ["Alex"], assigned_to: null, contact_id: C1 },
   ],
   contacts: [
-    { id: C1, full_name: "Ann Lee", phone: "0412345678", email: "ann@example.com", postcode: "2000", division: "Aircon", source: "Google Ads", status: "New", created_at: "2026-10-10T01:00:00Z", next_follow_up: "2026-10-16", tags: ["vip"], estimated_value: 500, sales_value: 0, notes: "Two units", followup_note: "", job_description: "Clean two splits", lost_reason: "", sub_source: "", messages: msgs },
+    { id: C1, full_name: "Ann Lee", phone: "0412345678", email: "ann@example.com", postcode: "2000", division: "Aircon", source: "Google Ads", status: "New", created_at: "2026-10-10T01:00:00Z", next_follow_up: "2026-10-16", tags: ["vip"], estimated_value: 500, sales_value: 0, notes: "Two units", customer_notes: [{ id: "n1", text: "Gate code 4321", by: "Riley", at: "2026-10-12T01:00:00Z" }, { id: "n2", text: "Dog in the yard", by: "Odette", at: "2026-10-13T01:00:00Z" }, { id: "n3", text: "" }], followup_note: "", job_description: "Clean two splits", lost_reason: "", sub_source: "", messages: msgs },
     { id: C2, full_name: "Bob Stone", phone: "+61400111222", email: "bob@example.com", postcode: "2010", division: "Chimney", source: "Facebook", status: "Won", created_at: "2026-10-13T20:00:00Z", next_follow_up: null, tags: [], estimated_value: 0, sales_value: 900, notes: "", messages: [] },
     { id: C3, full_name: "Cara Old", phone: "", email: "", postcode: "2100", division: "Aircon", source: "Referral", status: "Lost", created_at: "2026-09-01T00:00:00Z", next_follow_up: null, tags: [], estimated_value: 0, sales_value: 0, notes: "", messages: [] },
   ],
@@ -420,6 +420,26 @@ function fakeRemote(o: any = {}) {
   const diffs: string[] = [];
   for (const p of PROFILES) for (const sec of SECTIONS) if (canViewSection(prof(p.id), sec) !== APP.canViewSection(appProf(p.id), sec)) diffs.push(p.id + "/" + sec);
   eq(diffs, [], "canViewSection: the server's answer equals the app's for every profile × section");
+  eq([BASE_LISTS.services, BASE_LISTS.stages, BASE_LISTS.sources, STAGE_CORE, BASE_LABELS.stages, BASE_LABELS.sources], [APP.LEAD_DIVISIONS, APP.LEAD_STATUSES, APP.LEAD_SOURCES, APP.STAGE_CORE, APP.LEAD_STAGE_LABEL, APP.LEAD_SOURCE_LABEL],
+    "imports: the built-in services, stages, sources and their labels are the app's (an import checks values against the same lists)");
+  // RLS-only rules (the app asks no section for these): pinned to the policies as written in the database —
+  // ad_spend: role in (owner, manager) or permissions ->> 'crmOverview' / 'adsGoogle' is true; ad_calls: owner, manager.
+  {
+    const policyAdSpend = (row: any) => ["owner", "manager"].includes(row.role) || row.permissions?.crmOverview === true || row.permissions?.adsGoogle === true;
+    const policyAdCalls = (row: any) => ["owner", "manager"].includes(row.role);
+    const extra = [
+      { id: "x-fin", role: "va", permissions: { finance: true } }, { id: "x-ads", role: "va", permissions: { adsGoogle: true } },
+      { id: "x-ov", role: "marketing", permissions: { crmOverview: true } }, { id: "x-none", role: "marketing", permissions: {} },
+      { id: "x-tech", role: "technician", permissions: { adsGoogle: true } },
+    ];
+    const rlsDiffs: string[] = [];
+    for (const row of [...PROFILES, ...extra] as any[]) {
+      const s = scopeOf(appProfile(row));
+      if (adSpendVisible(s) !== policyAdSpend(row)) rlsDiffs.push(row.id + "/ad_spend");
+      if (adCallsVisible(s) !== policyAdCalls(row)) rlsDiffs.push(row.id + "/ad_calls");
+    }
+    eq(rlsDiffs, [], "RLS-only rules: adSpendVisible / adCallsVisible equal the ad_spend and ad_calls policies for every profile");
+  }
 
   // ── role parity with the app: filterForProfile (non-technicians: the same rows; technicians: a subset) ──
   {
@@ -564,7 +584,7 @@ function fakeRemote(o: any = {}) {
     eq(bad.map((r) => r.status), [401, 401, 401, 401], "a Supabase key, a user token, a wrong key and a bad path key → 401");
     eq((await rpc(w, k, "initialize", {})).status, 200, "initialize needs a key, and works with one");
     eq([(await rpc(w, k, "ping")).status, (await http(w, { path: "/functions/v1/mcp/t/" + k, body: { jsonrpc: "2.0", id: 1, method: "ping" } })).status], [200, 200], "the same key works as a bearer header and in the path");
-    eq(w.T.mcp_access_log.length, logBefore, "unauthenticated requests (and initialize / ping) write no log row");
+    eq([w.T.mcp_access_log.length - logBefore, w.T.mcp_access_log[w.T.mcp_access_log.length - 1].tool], [1, "initialize"], "unauthenticated requests and ping write no log row; initialize writes one (it counts toward the rate limit)");
     ok(logged.length > 0 && !logged.some((l) => l.includes("ops_mcp_") || l.includes(wrong)), "a refused key is warned about, never written out");
     const id = w.T.mcp_tokens.find((x: any) => x.user_id === "u-mgr").id;
     eq((await manage(w, "revoke_token", "u-mgr", { id })).status, 200, "revoke own key");
@@ -615,7 +635,14 @@ function fakeRemote(o: any = {}) {
     eq([r[3].headers.get("retry-after"), r[3].body.error], ["60", { code: -32029, message: "Too many calls: at most 3 a minute. Try again in a minute." }], "429: Retry-After 60 and -32029");
     eq(w.T.mcp_access_log.map((x: any) => x.status), ["ok", "ok", "ok", "rate_limited"], "the refused call is logged rate_limited");
     eq((await call(w, k, "whoami", {}, { at: T0 + 3000 + 61_000 })).status, 200, "calls older than 60 s don't count");
-    eq((await call(w, keys["u-owner"], "whoami", {}, { at: T0 + 3500 })).status, 200, "the limit is per key");
+    await call(w, k, "whoami", {}, { at: T0 + 64_100 }); await call(w, k, "whoami", {}, { at: T0 + 64_200 });
+    eq((await call(w, keys["u-owner"], "whoami", {}, { at: T0 + 64_500 })).status, 429, "the limit is per business: the owner's key shares the manager's minute (3 calls by the manager → the owner's 4th is refused)");
+    eq((await call(w, keys["u-owner"], "whoami", {}, { at: T0 + 125_000 })).status, 200, "… and a quiet minute later it works again");
+    // initialize and tools/list count too (and are refused the same way)
+    const T1 = T0 + 600_000;
+    const seq = [await rpc(w, k, "initialize", {}, { at: T1 }), await rpc(w, k, "tools/list", undefined, { at: T1 + 1 }), await call(w, keys["u-owner"], "whoami", {}, { at: T1 + 2 }), await rpc(w, k, "tools/list", undefined, { at: T1 + 3 }), await rpc(w, k, "initialize", {}, { at: T1 + 4 }), await rpc(w, k, "ping", undefined, { at: T1 + 5 })];
+    eq(seq.map((x) => x.status), [200, 200, 200, 429, 429, 200], "initialize and tools/list count toward the business's limit (3 a minute); ping never does");
+    eq([seq[3].body.error.code, seq[3].headers.get("retry-after"), w.T.mcp_access_log.slice(-5).map((x: any) => x.tool + ":" + x.status)], [-32029, "60", ["initialize:ok", "tools/list:ok", "whoami:ok", "tools/list:rate_limited", "initialize:rate_limited"]], "… logged as their own rows");
     eq((await loadBusiness(world())).mcp.rateLimitPerMin, 60, "with nothing saved the limit is 60");
   }
 
@@ -625,6 +652,12 @@ function fakeRemote(o: any = {}) {
     const list = (await rpc(sb, O, "tools/list")).body.result.tools;
     eq([list.map((t: any) => t.name), list.every((t: any) => JSON.stringify(t.annotations) === JSON.stringify({ readOnlyHint: true, destructiveHint: false, openWorldHint: false }) && t.inputSchema.additionalProperties === false && t.title && t.description)], [ALL_TOOLS, true], "owner: all 11 tools, each read-only with a closed schema");
     eq(await names(K["u-mgr"]), ALL_TOOLS, "manager: all 11 tools");
+    {
+      const wv = world({ settings: [{ id: 1, company_name: "Demo Home Services", gst_rate_percent: 20, catalog: { ...CAT, region: { ...CAT.region, country: "GB" } } }] }), kv = await keysFor(wv);
+      const d = (list: any[], n: string) => list.find((t: any) => t.name === n).description;
+      const uk = (await rpc(wv, kv["u-owner"], "tools/list")).body.result.tools;
+      eq([d(list, "list_jobs").includes("before GST, GST,"), d(uk, "list_jobs").includes("before VAT, VAT,"), /\bGST\b/.test(d(uk, "money_summary"))], [true, true, false], "tools/list: the tax goes by the business's own name (GST here, VAT in the UK)");
+    }
     eq(await names(K["u-riley"]), ["whoami", "search_contacts", "get_contact", "list_jobs", "list_closings", "list_outstanding", "payroll_summary", "list_tasks", "list_calls"], "VA (default pages): no money or marketing summary");
     eq(await names(K["u-dana"]), ["whoami", "search_contacts", "get_contact", "list_jobs", "list_closings", "list_outstanding", "payroll_summary", "list_calls"], "VA without Tasks: no list_tasks");
     eq(await names(K["u-gabe"]), ["whoami", "list_jobs", "payroll_summary", "list_tasks"], "technician (default pages): own jobs, own pay, tasks");
@@ -641,8 +674,8 @@ function fakeRemote(o: any = {}) {
   // ── the access log ──
   {
     const L = sb.T.mcp_access_log, n0 = L.length;
-    await rpc(sb, O, "tools/list"); await rpc(sb, O, "ping"); await rpc(sb, O, "initialize", {});
-    eq(L.length, n0, "initialize, tools/list and ping write no row");
+    await rpc(sb, O, "ping");
+    eq(L.length, n0, "ping writes no row");
     const r = await call(sb, K["u-riley"], "list_tasks", { mine: true });
     const last = () => L[L.length - 1];
     eq([L.length - n0, last().status, last().rows_returned, last().token_id, last().user_id, last().business_id, last().tool, last().args_summary], [1, "ok", sc(r).rows.length, sb.T.mcp_tokens.find((x: any) => x.user_id === "u-riley").id, "u-riley", "default", "list_tasks", '{"mine":true,"limit":50}'.replace(',"limit":50', "")], "ok: one row with the key, the person, the tool and rows_returned");
@@ -686,7 +719,8 @@ function fakeRemote(o: any = {}) {
     eq([lim1.rows.length, lim1.truncated], [1, true], "search_contacts: limit 1 of 3 → truncated");
 
     const gc = sc(await call(sb, K["u-riley"], "get_contact", { id: C1 }));
-    eq([gc.name, gc.notes, gc.messages.length, gc.messages[0].text, gc.messages[9].text.length, ids(gc.jobs), ids(gc.tasks), ids(gc.calls)], ["Ann Lee", "Two units", 10, "hello 2", 500, ["j1"], ["t1", "t5"], ["k1"]], "VA get_contact: details, the last 10 messages (clipped to 500), jobs, tasks and calls");
+    eq([gc.customerNotes, "notes" in gc], [[{ text: "Dog in the yard", by: "Odette", at: "2026-10-13T01:00:00Z" }, { text: "Gate code 4321", by: "Riley", at: "2026-10-12T01:00:00Z" }, { text: "Two units", by: "", at: null }], false], "get_contact: the customer notes as the app shows them (newest first, the old single note last, empty ones left out), not the legacy notes column alone");
+    eq([gc.name, gc.customerNotes.length, gc.messages.length, gc.messages[0].text, gc.messages[9].text.length, ids(gc.jobs), ids(gc.tasks), ids(gc.calls)], ["Ann Lee", 3, 10, "hello 2", 500, ["j1"], ["t1", "t5"], ["k1"]], "VA get_contact: details, the last 10 messages (clipped to 500), jobs, tasks and calls");
     const gm = sc(await call(sb, K["u-mkt2"], "get_contact", { id: C1 }));
     eq([gm.jobs, gm.tasks, "calls" in gm, gm.estimatedValue], [[], [], false, 500], "Leads & Marketing only: no jobs, tasks or calls");
     const gt = sc(await call(sb, K["u-alex"], "get_contact", { id: C1 }));
@@ -718,6 +752,16 @@ function fakeRemote(o: any = {}) {
     }
     eq([mo.jobsCount, mo.adSpend, mo.remainingAfterTechAndAds, mo.truncated], [3, { total: 120.5, byChannel: { "Google Ads": 120.5 } }, 579.5, false], "money_summary: ad spend and what is left after ads (700 − 120.5)");
     eq(Object.keys(sc(await call(sb, K["u-mgr"], "money_summary"))), ["from", "to", "jobsCount", "overview", "remainingAfterTech", "adSpend", "remainingAfterTechAndAds", "truncated"], "manager: money_summary");
+    {
+      // Finance alone (no Leads & Marketing, no Google Ads page): the money, but no ad figures (the ad_spend RLS).
+      const fin = appProfile({ id: "u-fin", full_name: "Fin", role: "va", technician_name: null, permissions: { ...D("va"), finance: true, crmOverview: false, adsGoogle: false } });
+      const tool = TOOLS.find((t) => t.name === "money_summary")!, sFin = scopeOf(fin);
+      const out = (await tool.run({ sb, s: sFin, biz: await loadBusiness(sb), nowMs: NOW }, { from: "2026-10-07", to: "2026-10-11" })).payload;
+      eq([tool.gate(sFin), "adSpend" in out, "remainingAfterTechAndAds" in out, out.remainingAfterTech, out.truncated], [true, false, false, mo.remainingAfterTech, false], "money_summary with Finance only: the money, no ad spend (gated like the ad_spend RLS, not by Finance)");
+      const withAds = appProfile({ ...{ id: "u-fin2", full_name: "Fin Two", role: "va", technician_name: null }, permissions: { ...D("va"), finance: true, adsGoogle: true } });
+      const out2 = (await tool.run({ sb, s: scopeOf(withAds), biz: await loadBusiness(sb), nowMs: NOW }, { from: "2026-10-07", to: "2026-10-11" })).payload;
+      eq([out2.adSpend, out2.remainingAfterTechAndAds], [mo.adSpend, mo.remainingAfterTechAndAds], "money_summary with Finance and the Google Ads page: ad spend too");
+    }
 
     // payroll
     const pg = sc(await call(sb, K["u-gabe"], "payroll_summary", { week: "2026-10-08" }));
@@ -823,7 +867,14 @@ function fakeRemote(o: any = {}) {
     const w = world({ tasks: many }), keys = await keysFor(w);
     w.ranges.tasks = 0;
     const r = sc(await call(w, keys["u-owner"], "list_tasks", { limit: 500 }));
-    eq([w.ranges.tasks, r.rows.length, r.count, r.truncated], [3, 500, 2500, true], "2,500 rows are read in 3 pages; at most `limit` rows come back, flagged truncated");
+    eq([w.ranges.tasks, r.rows.length, r.count, r.truncated], [1, 500, 1000, true], "list_tasks: one page holds more than `limit` → it stops reading there; at most `limit` rows come back, flagged truncated");
+    w.T.tasks.push({ id: "t99999", title: "Gabe's", board: "Gabe", status: "Doing", due: null, assignees: [], contact_id: null });
+    w.ranges.tasks = 0;
+    const rg = sc(await call(w, keys["u-owner"], "list_tasks", { status: "Doing" }));
+    eq([w.ranges.tasks, ids(rg.rows), rg.truncated], [1, ["t99999"], false], "list_tasks: the status is filtered by the database (one short page)");
+    w.T.tasks.find((x: any) => x.id === "t01234").due = "2026-10-20";
+    w.ranges.tasks = 0;
+    eq([ids(sc(await call(w, keys["u-owner"], "list_tasks", { limit: 2 })).rows), w.ranges.tasks], [["t01234", "t00000"], 1], "list_tasks: the database orders it (due first, no due date last, then id)");
     const p = await pageAll((a, z) => w.from("tasks").select("id").order("id").range(a, z), 1500);
     eq([p.rows.length, p.truncated], [1500, true], "pageAll stops at its cap and says so");
     const big = { rows: Array.from({ length: 100 }, (_, i) => ({ i, pad: "p".repeat(100) })), count: 100, truncated: false };
@@ -970,6 +1021,26 @@ function fakeRemote(o: any = {}) {
       eq([seen.written.startsWith("POST /mcp?x=1 HTTP/1.1\r\nHost: mcp.example.com:8443\r\nConnection: close\r\nContent-Length: 17\r\n"), seen.written.includes("evil.example"), seen.written.includes("authorization: Bearer k\r\n"), seen.written.endsWith('\r\n\r\n{"jsonrpc":"2.0"}')], [true, false, true, true], "pinnedFetch: the request line, its own Host (a passed Host is dropped), the headers and the body, written in full");
       await pinnedFetch("https://[2606:4700::1111]/", { method: "POST", body: "" }, "[2606:4700::1111]");
       eq([seen.connect.hostname, seen.connect.port], ["2606:4700::1111", 443], "pinnedFetch: an IPv6 address without brackets, port 443 by default");
+      // A connect (or TLS handshake) that hangs: the abort answers at once, and the connection that opens late is closed.
+      let openLate: any = null, lateClosed = 0;
+      D.connect = (o: any) => { seen.connect = o; return new Promise((res) => { openLate = () => res({ close() { lateClosed++; } }); }); };
+      const ctl = new AbortController();
+      const hung = pinnedFetch("https://mcp.example.com/", { method: "POST", body: "", signal: ctl.signal }, "93.184.216.34").then(() => "answered", (e) => (e as Error).message);
+      ctl.abort();
+      eq(await hung, "aborted", "pinnedFetch: a connect that never answers is given up when the signal aborts (connect can't take a signal)");
+      openLate(); await new Promise((r) => setTimeout(r, 0));
+      eq(lateClosed, 1, "pinnedFetch: the connection that opens after the abort is closed, not left open");
+      D.connect = async (o: any) => { seen.connect = o; return { close() { lateClosed++; } }; };
+      let tlsLate: any = null;
+      D.startTls = () => new Promise((res) => { tlsLate = () => res({ close() { lateClosed++; } }); });
+      const ctl2 = new AbortController();
+      const hung2 = pinnedFetch("https://mcp.example.com/", { method: "POST", body: "", signal: ctl2.signal }, "93.184.216.34").then(() => "answered", (e) => (e as Error).message);
+      await new Promise((r) => setTimeout(r, 0));
+      ctl2.abort();
+      eq(await hung2, "aborted", "pinnedFetch: a TLS handshake that hangs is given up when the signal aborts");
+      tlsLate(); await new Promise((r) => setTimeout(r, 0));
+      eq(lateClosed, 3, "pinnedFetch: the TCP connection (on abort) and the late TLS connection are both closed");
+      eq(await raceAbort(Promise.resolve(7), undefined, () => {}), 7, "raceAbort: without a signal it is the step itself");
     } finally { delete D.connect; delete D.startTls; }
     let noApi = "";
     try { await pinnedFetch("https://mcp.example.com/", { method: "POST" }, "93.184.216.34"); } catch (e) { noApi = (e as Error).message; }
@@ -1239,13 +1310,43 @@ function fakeRemote(o: any = {}) {
       [{ ok: true, value: true }, { ok: true, value: false }, { ok: true, value: true }, { ok: true, value: true }, { ok: false, reason: "is not yes/no" }], "coerceField bool");
     eq([C_(F.jobs.payment_status, "paid"), C_(F.jobs.payment_status, "maybe"), C_(F.tasks.status, "in progress")], [{ ok: true, value: "Paid" }, { ok: false, reason: "is not one of: Paid, Unpaid" }, { ok: true, value: "In Progress" }], "coerceField enum: the canonical value, or the list");
     eq([C_(F.contacts.tags, "a, b,,a"), (C_(F.contacts.tags, Array.from({ length: 25 }, (_, k) => "t" + k)) as any).value.length, C_(F.contacts.tags, [{}])], [{ ok: true, value: ["a", "b"] }, 20, { ok: false, reason: "is not a list of tags" }], "coerceField tags: split, trimmed, empties dropped, de-duplicated, at most 20");
+    eq([C_(F.contacts.tags, [" VIP ", "vip", "Vip customer", "x".repeat(70)])], [{ ok: true, value: ["VIP", "Vip customer", "x".repeat(60)] }], "coerceField tags: as the lead card keeps them (trimmed, at most 60 characters, one of each whatever the case, the first spelling kept)");
+    const IC0 = { quiet: true, nowMs: NOW, tz: "Australia/Sydney", ruleName: "Leads", serverName: "Fake CRM", importSource: "MCP import", profiles: PROFILES };
+    // the business's own lists (Settings → Pipeline / Services / Lead sources); unknown → New / the catch-all service
+    {
+      const cat = { stages: [{ key: "New", label: "Fresh" }, { key: "s1", label: "Site visit" }, { key: "Chasing", active: false }, { key: "Quoted", deleted: true }], services: [{ key: "Solar", label: "Solar panels" }, { key: "Chimney", deleted: true }], sources: [{ key: "Expo", label: "Home show" }] };
+      const lc = { ...cx, lists: catalogLists(cat) };
+      const CL = (f: any, v: unknown) => coerceField(f, v, lc);
+      eq([CL(F.contacts.status, "site visit"), CL(F.contacts.status, "S1"), CL(F.contacts.status, "fresh"), CL(F.contacts.status, "Chasing"), CL(F.contacts.status, "Quoted"), CL(F.contacts.status, "Lost"), CL(F.contacts.status, "Hot!"), CL(F.contacts.status, { a: 1 })],
+        [{ ok: true, value: "s1" }, { ok: true, value: "s1" }, { ok: true, value: "New" }, { ok: true, value: "New" }, { ok: true, value: "New" }, { ok: true, value: "Lost" }, { ok: true, value: "New" }, { ok: false, reason: "is not text" }],
+        "coerceField stage: a stage of the business's pipeline by key or label (any case) → its key; switched off, deleted or unknown → New; Won and Lost are always on");
+      eq([CL(F.contacts.division, "solar panels"), CL(F.contacts.division, "aircon"), CL(F.contacts.division, "Chimney"), CL(F.contacts.division, "Plumbing")], [{ ok: true, value: "Solar" }, { ok: true, value: "Aircon" }, { ok: true, value: "Other" }, { ok: true, value: "Other" }],
+        "coerceField service: the business's services and the built-in ones it keeps; deleted or unknown → the catch-all service (Other)");
+      eq([CL(F.contacts.source, "home show"), CL(F.contacts.source, "Organic web"), CL(F.contacts.source, "Website")], [{ ok: true, value: "Expo" }, { ok: true, value: "Organic" }, { ok: true, value: ""}],
+        "coerceField source: by key or label; unknown → empty, so the row gets the import's own source");
+      const row: any = importRow("contacts", mapItem("contacts", { full_name: "n", source: "s", status: "st", division: "d" }, { n: "Zed", s: "Billboard", st: "Hot", d: "Roofing" }, lc).values, IC0);
+      eq([row.source, row.status, row.division], ["MCP import", "New", "Other"], "importRow: unknown source / stage / service → the import's source, New and the catch-all service");
+      eq(catalogLists(null), { services: BASE_LISTS.services.map((k) => ({ key: k, label: k })), stages: BASE_LISTS.stages.map((k) => ({ key: k, label: BASE_LABELS.stages[k] })), sources: BASE_LISTS.sources.map((k) => ({ key: k, label: BASE_LABELS.sources[k] || k })) }, "catalogLists: nothing saved = the app's built-in lists");
+    }
+    // Paid / Done / Won / Lost as the business calls them (catalog.keys; their stage 2), else the app's words
+    {
+      const keys = catalogKeys({ keys: { paid: " Settled ", done: "Finished", won: "", lost: 'Bad"word' } });
+      eq([keys, catalogKeys(null), catalogKeys({ keys: [1] }), renamedKey(keys, "Paid"), renamedKey(keys, "Unpaid"), renamedKey(undefined, "Paid")],
+        [{ paid: "Settled", done: "Finished", won: "Won", lost: "Lost" }, KEY_DEFAULTS, KEY_DEFAULTS, "Settled", "Unpaid", "Paid"], "catalogKeys: the saved words (trimmed), else the defaults (empty or unsafe ones too)");
+      const kc = { ...cx, keys };
+      eq([coerceField(F.jobs.payment_status, "settled", kc), coerceField(F.jobs.payment_status, "Paid", kc), coerceField(F.tasks.status, "finished", kc)], [{ ok: true, value: "Settled" }, { ok: false, reason: "is not one of: Settled, Unpaid" }, { ok: true, value: "Finished" }],
+        "coerceField enum: Paid and Done as the business renamed them");
+      eq([(importRow("jobs", { customer_name: "A", payment_status: "Settled", date: "2026-10-10" }, { ...IC0, keys }) as any).date_paid, (importRow("jobs", { customer_name: "A", payment_status: "Paid", date: "2026-10-10" }, IC0) as any).date_paid], ["2026-10-10", "2026-10-10"], "importRow: a job in the business's Paid gets its date paid");
+      eq(catalogLists({ stages: [{ key: "Won", label: "Won" }] }, keys).stages.map((x) => x.key).includes("Won"), true, "catalogLists: an unchanged Won key stays Won");
+      eq(catalogLists(null, { ...KEY_DEFAULTS, won: "Closed" }).stages.map((x) => x.key), ["New", "Chasing", "Quoted", "Follow-up", "Booked", "Closed", "Lost"], "catalogLists: a renamed Won is the stage's value");
+    }
     eq([C_(F.tasks.assigned_to, "gabe tech"), C_(F.tasks.assigned_to, "Old Hand")], [{ ok: true, value: "Gabe Tech" }, { ok: false, reason: "is not someone on the team" }], "coerceField person: an active employee's own name, or refused");
     const types = ["text", "phone", "email", "day", "money", "bool", "enum", "tags", "person"];
     eq(types.map((t) => (coerceField({ label: "x", type: t as any, values: ["A"] }, null, cx) as any).value), ["", "", "", null, 0, false, null, [], ""], "coerceField: empty values give each type's empty value");
     eq((coerceField(F.contacts.full_name, "   ", cx) as any).value, "", "coerceField: blanks are empty");
 
     const item = { name: "Ann", contact: { phone: "0400 000 001" }, mail: "bad" };
-    eq(mapItem("contacts", { full_name: "name", phone: { path: "contact.phone" }, source: { value: "Website" }, nope: "name" }, item, cx), { values: { full_name: "Ann", phone: "0400 000 001", source: "Website" }, errors: [] }, "mapItem: shorthand, {path} and {value}; an unknown target is ignored");
+    eq(mapItem("contacts", { full_name: "name", phone: { path: "contact.phone" }, source: { value: "meta ads" }, nope: "name" }, item, cx), { values: { full_name: "Ann", phone: "0400 000 001", source: "Meta Ads" }, errors: [] }, "mapItem: shorthand, {path} and {value}; an unknown target is ignored");
     eq(mapItem("contacts", { phone: "contact.phone" }, item, cx).errors, ["Name is missing"], "mapItem: a required field not filled → '<Label> is missing'");
     eq(mapItem("contacts", { full_name: "name", email: "mail" }, item, cx).errors, ["Email is not a valid email"], "mapItem: a coercion error carries the field's label");
     eq(mapItem("contacts", { full_name: "nothing.here" }, item, cx).errors, ["Name is missing"], "mapItem: a path that finds nothing → missing");
@@ -1484,6 +1585,27 @@ function fakeRemote(o: any = {}) {
       wu.T.mcp_import_runs.push({ id: "88888888-8888-4888-8888-888888888888", business_id: "default", rule_id: RU.id, kind: "contacts", status: "running", started_at: new Date(T1 + 100e3).toISOString(), inserted_ids: [], errors: [], undone_at: null });
       const ur = await manage(wu, "undo_import", "u-owner", { run_id: "88888888-8888-4888-8888-888888888888" }, T1 + 160e3);
       eq([ur.status, ur.body.reason], [409, "This import is still running."], "undo_import: a running import → 409");
+      // an undo stopped in the middle (the platform's time limit) is not marked undone, and resumes once stale
+      {
+        const wz = iw(), RZ = (await save(wz, RULE, "u-owner", NOW)).body.rule;
+        const cz = (await manage(wz, "commit_import", "u-owner", { rule_id: RZ.id }, T1)).body.run, zids: string[] = cz.inserted_ids.slice();
+        const zr = () => wz.T.mcp_import_runs.find((x: any) => x.id === cz.id);
+        const stop: any = new Proxy(wz, { get(t: any, k: any) {
+          if (k !== "from") return t[k];
+          return (tb: string) => { const q = t.from(tb); if (tb === "contacts") q.delete = () => { throw new Error("stopped by the time limit"); }; return q; };
+        } });
+        let stopped = "";
+        try { await undoImport(stop, cz.id, { id: "u-owner" }, T1 + 60e3); } catch (e) { stopped = (e as Error).message; }
+        eq([zids.length, stopped, zr().undone_at ?? null, zr().undo_started_at, wz.T.contacts.filter((c: any) => zids.includes(c.id)).length], [3, "stopped by the time limit", null, iso(T1 + 60e3), 3],
+          "undo_import: an undo stopped in the middle is only claimed (undo_started_at), never marked undone with its records still there");
+        const busy = await manage(wz, "undo_import", "u-owner", { run_id: cz.id }, T1 + 120e3);
+        eq([busy.status, busy.body.reason], [409, "This import is being undone right now."], "undo_import: a second undo while one is under way → 409");
+        // the stopped undo had deleted one record and saved its count
+        wz.T.contacts = wz.T.contacts.filter((c: any) => c.id !== zids[0]); zr().undo_deleted = 1;
+        const at = T1 + 60e3 + UNDO_STALE_MS + 1000, res = await manage(wz, "undo_import", "u-owner", { run_id: cz.id }, at);
+        eq([res.body, zr().undone_at, zr().undo_deleted, wz.T.contacts.filter((c: any) => zids.includes(c.id)).length], [{ ok: true, deleted: 3, kept: 0, paused: false }, iso(at), 3, 0],
+          "undo_import: pressed again once stale it resumes, deletes the rest, carries the count on (1 + 2) and only then marks the run undone");
+      }
       // records the team has used since are kept with their history; the import's own entries of deleted records go
       {
         const wv = iw(), RV = (await save(wv, RULE, "u-owner", NOW)).body.rule;

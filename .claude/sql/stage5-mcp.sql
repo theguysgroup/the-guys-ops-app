@@ -623,9 +623,10 @@ select 'M4-import ok';
 
 
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
--- Group M5-review: the main builder's review of 15 Oct (stage 5 §2.A3 and Ofek's answer 1).
+-- Group M5-review: the main builder's review of 15 Oct (stage 5 §2.A3, §2.C3, §2.C5 and Ofek's answer 1).
 -- STAGING FIRST (wblsrpmjiqwuxmrmuklc). Run AFTER M1, M2 and M4, and BEFORE deploying the mcp, automations and push
--- functions of this change (they select the new column: deployed first, their reads would fail until it exists).
+-- functions and the app of this change (they select the new columns: deployed first, their reads would fail until
+-- they exist).
 -- Safe to run again (idempotent).
 --   1. import_quiet on contacts, jobs and tasks: true on a row an MCP import made with automations off. The one marker
 --      the automations engine (v1 newLead; their stage-2 engine too) and push read. Every existing row is false
@@ -634,11 +635,16 @@ select 'M4-import ok';
 --   2. Keys are for owners and managers only: any key of anyone else that is still live is revoked (the mcp function
 --      already refuses such a key; this makes the Keys list say so). permissions.mcp on profiles is left as it is and
 --      means nothing any more.
+--   3. undo_started_at on mcp_import_runs: an Undo claims the run with it and sets undone_at only once every record is
+--      dealt with, so an Undo stopped in the middle is never shown as done, and can be pressed again (it resumes once
+--      it is 10 minutes old).
+--   4. An index for the rate limit, which now counts a whole business's requests of the last minute (not one key's).
 -- Check before (read-only):
 --   select table_name, column_name from information_schema.columns
 --    where table_schema = 'public' and table_name in ('contacts', 'jobs', 'tasks') and column_name = 'import_quiet';  -- 0 rows the first time
 --   select t.id, t.name, p.full_name, p.role from public.mcp_tokens t left join public.profiles p on p.id = t.user_id
 --    where t.revoked_at is null and coalesce(p.role, '') not in ('owner', 'manager');                                -- the keys step 2 revokes
+--   select column_name from information_schema.columns where table_schema = 'public' and table_name = 'mcp_import_runs' and column_name = 'undo_started_at';  -- 0 rows the first time
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 begin;
 
@@ -655,6 +661,13 @@ update public.mcp_tokens t set revoked_at = now(), revoked_by = null
  where t.revoked_at is null
    and not exists (select 1 from public.profiles p where p.id = t.user_id and p.role in ('owner', 'manager'));
 
+-- 3. Undo's claim (null on every run so far; an undone run keeps its undone_at).
+alter table public.mcp_import_runs add column if not exists undo_started_at timestamptz;
+comment on column public.mcp_import_runs.undo_started_at is 'Stage 5: when an Undo of this import started (undone_at is set only when it finished).';
+
+-- 4. The rate limit's count: this business's access-log rows of the last minute.
+create index if not exists mcp_access_log_business_at_idx on public.mcp_access_log (business_id, at desc);
+
 commit;
 select 'M5-review ok';
 
@@ -663,10 +676,15 @@ select 'M5-review ok';
 --    where table_schema = 'public' and table_name in ('contacts', 'jobs', 'tasks') and column_name = 'import_quiet';  -- 3 rows: boolean, NO, false
 --   select count(*) from public.mcp_tokens t
 --    where t.revoked_at is null and not exists (select 1 from public.profiles p where p.id = t.user_id and p.role in ('owner', 'manager'));   -- 0
+--   select data_type, is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'mcp_import_runs' and column_name = 'undo_started_at';  -- timestamp with time zone, YES
+--   select indexname from pg_indexes where tablename = 'mcp_access_log' and indexname = 'mcp_access_log_business_at_idx';   -- 1 row
 
 -- ── ROLLBACK (M5-review; run by hand only) ──────────────────────────────────────────────────────────────────────
--- Redeploy the previous mcp, automations and push functions FIRST (this change's versions select import_quiet).
+-- Redeploy the previous mcp, automations and push functions and the previous app FIRST (this change's versions select
+-- import_quiet and undo_started_at).
 -- begin;
+-- drop index if exists public.mcp_access_log_business_at_idx;
+-- alter table public.mcp_import_runs drop column if exists undo_started_at;
 -- alter table public.contacts drop column if exists import_quiet;
 -- alter table public.jobs     drop column if exists import_quiet;
 -- alter table public.tasks    drop column if exists import_quiet;

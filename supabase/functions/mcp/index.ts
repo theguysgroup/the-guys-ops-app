@@ -20,8 +20,9 @@
 //     no longer an owner or manager stops working (authToken). There is no per-person switch.
 //   • A key is stored only as its sha256; the key itself is shown once (create_token) and never logged. A key stops
 //     working when it is revoked, when its person is no longer an owner or manager, or when their sign-in is switched off.
-//   • Every tools/call writes one mcp_access_log row (ok / denied / error / rate_limited); at most
-//     catalog.mcp.rateLimitPerMin calls a minute per key. Unauthenticated requests are not logged (anyone could fill it).
+//   • Every tools/call, initialize and tools/list writes one mcp_access_log row (ok / denied / error / rate_limited); at
+//     most catalog.mcp.rateLimitPerMin of them a minute per BUSINESS (all its keys together). Unauthenticated requests
+//     are not logged (anyone could fill it).
 //   • Reads are paged (.range, 1,000 rows a page), at most MAX_SCAN rows read and MAX_ROWS rows returned a call; dates
 //     are in the business's time zone (settings.catalog.region.timeZone, read with the region block's bizTzOf).
 //
@@ -372,6 +373,12 @@ export const taskVisible = (s: Scope, row: any) => s.isOM || (s.tasks && (!s.isT
 export const contactVisible = (s: Scope) => s.contacts;
 // deno-lint-ignore no-explicit-any
 export const closingVisible = (s: Scope, row: any) => s.isOM || (s.closings && (!s.isTech || (!!s.techName && row.technician_name === s.techName)));
+// RLS-ONLY RULES: what the database itself lets the app read (the app asks no section for these, so the parity tests
+// pin them to the policies, not to canViewSection):
+//   ad_spend: owners, managers, and anyone with the Leads & Marketing (crmOverview) or Google Ads (adsGoogle) page;
+//   ad_calls: owners and managers.
+export const adSpendVisible = (s: Scope) => s.isOM || !!s.p.permissions.crmOverview || !!s.p.permissions.adsGoogle;
+export const adCallsVisible = (s: Scope) => s.isOM;
 // deno-lint-ignore no-explicit-any
 export function redactForTech(s: Scope, row: any) {
   if (!s.isTech) return row;
@@ -509,7 +516,7 @@ export function computePayrollCommission(d: Calc, person: string, weekKey: strin
   // deno-lint-ignore no-explicit-any
   const mine = (d.jobs || []).filter((j: any) => j.technician === person);
   // deno-lint-ignore no-explicit-any
-  const paid = mine.filter((j: any) => j.paymentStatus === "Paid" && jobPaidDate(j) >= wk.start && jobPaidDate(j) <= wk.end);
+  const paid = mine.filter((j: any) => j.paymentStatus === (d.paidKey || "Paid") && jobPaidDate(j) >= wk.start && jobPaidDate(j) <= wk.end);
   // deno-lint-ignore no-explicit-any
   const toLine = (j: any) => ({ job: j, commission: jobCommissionAmount(d, j) });
   // deno-lint-ignore no-explicit-any
@@ -517,7 +524,7 @@ export function computePayrollCommission(d: Calc, person: string, weekKey: strin
   // deno-lint-ignore no-explicit-any
   const onHold = paid.filter((j: any) => j.paidToTechnician === "Stuck").map(toLine);
   // deno-lint-ignore no-explicit-any
-  const unpaid = mine.filter((j: any) => j.paymentStatus !== "Paid" && j.date <= wk.end);
+  const unpaid = mine.filter((j: any) => j.paymentStatus !== (d.paidKey || "Paid") && j.date <= wk.end);
   // deno-lint-ignore no-explicit-any
   const cashJobs = paid.filter((j: any) => j.paymentMethod === "Cash");
   // deno-lint-ignore no-explicit-any
@@ -576,7 +583,7 @@ export function moneyOverview(d: Calc, jobs: any[], equip: any[]) {
   jobs.forEach((j) => {
     const total = jobTotalCollected(d, j); const gst = jobGst(d, j);
     // Money in and GST collected count PAID jobs only.
-    if (j.paymentStatus === "Paid") {
+    if (j.paymentStatus === (d.paidKey || "Paid")) {
       if (j.paymentMethod === "Cash") { overview.cash += total; overview.gstCash += gst; }
       else if (j.paymentMethod === "Bank Transfer") { overview.bankTransfer += total; overview.gstOther += gst; }
       else if (j.paymentMethod === "Credit Card") { overview.creditCard += total; overview.gstOther += gst; }
@@ -653,13 +660,14 @@ const CONTACT_COLS = "id, full_name, phone, email, postcode, division, source, s
 const TASK_COLS = "id, title, board, status, due, heads_up, priority, assignees, assigned_to, client, category, notes, subtasks, contact_id";
 const CALL_COLS = "id, direction, from_number, to_number, status, missed, answered_by, duration, voicemail, started_at, callback_done_at, contact_id";
 // A job's payment status is not 'Paid' (a missing status counts as unpaid, as in the app).
-const NOT_PAID = "payment_status.is.null,payment_status.neq.Paid";
+// Jobs not paid yet: no status, or any status but the business's word for Paid (catalog.keys.paid, default "Paid").
+const notPaid = (c: Ctx) => `payment_status.is.null,payment_status.neq."${catalogKeys(c.biz.catalog).paid}"`;
 // The calc context for a tool: the business's numbers plus the employees (names, roles and pay type only).
 // deno-lint-ignore no-explicit-any
 async function calcCtx(c: Ctx, data: Record<string, any[]> = {}): Promise<Calc> {
   const { rows } = await pageAll((a, z) => c.sb.from("employees").select("name, roles, status, employment_type").order("name").range(a, z));
   return {
-    gstRate: c.biz.gstRate, catalog: c.biz.catalog, tz: c.biz.tz, today: bizParts(c.nowMs, c.biz.tz).day,
+    gstRate: c.biz.gstRate, catalog: c.biz.catalog, tz: c.biz.tz, today: bizParts(c.nowMs, c.biz.tz).day, paidKey: catalogKeys(c.biz.catalog).paid,
     employees: rows.map(employeeFromRow), rules: weekRules(c.biz.catalog.region), weekCache: new Map(),
     jobs: [], equipmentSpend: [], payrollWeeks: [], payrollBonuses: [], salesLogs: [], ...data,
   };
@@ -693,6 +701,19 @@ function contactOut(c: Ctx, r: any) {
   if ("estimated_value" in r) out.estimatedValue = round2(r.estimated_value);
   if ("sales_value" in r) out.salesValue = round2(r.sales_value);
   return out;
+}
+// The notes on a customer as the app shows them (leadNotes): contacts.customer_notes [{ id, text, by, at }] newest first,
+// then a note written before those existed (the legacy contacts.notes) as the oldest. At most 20, each clipped.
+// deno-lint-ignore no-explicit-any
+export function customerNotesOut(r: any) {
+  // deno-lint-ignore no-explicit-any
+  const list = (Array.isArray(r.customer_notes) ? r.customer_notes : []).filter((n: any) => n && typeof n === "object" && n.text)
+    // deno-lint-ignore no-explicit-any
+    .sort((x: any, y: any) => String(y.at || "").localeCompare(String(x.at || "")))
+    // deno-lint-ignore no-explicit-any
+    .map((n: any) => ({ text: clip(n.text, 500), by: clip(n.by, 80), at: n.at || null }));
+  if (r.notes) list.push({ text: clip(r.notes, 2000), by: "", at: null });
+  return list.slice(0, 20);
 }
 // deno-lint-ignore no-explicit-any
 function jobOut(d: Calc, row: any) {
@@ -769,11 +790,11 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "get_contact", title: "Get a contact",
-    description: "One lead or customer in full: details, notes, the last 10 messages, their jobs, tasks and (with CRM access) the last 10 calls.",
+    description: "One lead or customer in full: details, the notes on the customer (newest first, with who wrote them and when), the last 10 messages, their jobs, tasks and (with CRM access) the last 10 calls.",
     inputSchema: { ...obj({ id: { type: "string", format: "uuid", description: "The contact's id (from search_contacts)." } }), required: ["id"] },
     gate: (s) => contactVisible(s),
     run: async (c, args) => {
-      const { data: row, error } = await c.sb.from("contacts").select(CONTACT_COLS + ", notes, followup_note, job_description, lost_reason, sub_source, messages").eq("id", args.id).maybeSingle();
+      const { data: row, error } = await c.sb.from("contacts").select(CONTACT_COLS + ", notes, customer_notes, followup_note, job_description, lost_reason, sub_source, messages").eq("id", args.id).maybeSingle();
       if (error) throw new Error(error.message);
       if (!row) throw new ToolError("No contact with that id.");
       const r = redactForTech(c.s, row);
@@ -795,7 +816,7 @@ export const TOOLS: Tool[] = [
         calls = (cl || []).map((k: any) => callOut(k, null));
       }
       const payload = {
-        ...contactOut(c, r), notes: clip(r.notes, 2000), followupNote: clip(r.followup_note, 500), jobDescription: clip(r.job_description, 1000),
+        ...contactOut(c, r), customerNotes: customerNotesOut(r), followupNote: clip(r.followup_note, 500), jobDescription: clip(r.job_description, 1000),
         lostReason: r.lost_reason || "", subSource: r.sub_source || "", messages, jobs, tasks, ...(calls ? { calls } : {}),
       };
       return { payload, rows: 1 };
@@ -814,7 +835,7 @@ export const TOOLS: Tool[] = [
       const { rows, truncated } = await pageAll((a, z) => {
         let b = c.sb.from("jobs").select(JOB_COLS).gte("date", r.from).lte("date", r.to);
         if (tech) b = b.eq("technician", tech);
-        if (args.unpaid_only) b = b.or(NOT_PAID);
+        if (args.unpaid_only) b = b.or(notPaid(c));
         return b.order("date", { ascending: false }).order("id").range(a, z);
       });
       const d = await calcCtx(c);
@@ -852,7 +873,7 @@ export const TOOLS: Tool[] = [
     gate: (s) => !s.isTech && canViewSection(s.p, "outstanding"),
     run: async (c, args) => {
       const d = await calcCtx(c), today = bizParts(c.nowMs, c.biz.tz).day;
-      const unpaid = await pageAll((a, z) => c.sb.from("jobs").select(JOB_COLS).or(NOT_PAID).order("date").order("id").range(a, z));
+      const unpaid = await pageAll((a, z) => c.sb.from("jobs").select(JOB_COLS).or(notPaid(c)).order("date").order("id").range(a, z));
       const parts = await pageAll((a, z) => c.sb.from("jobs").select(JOB_COLS).eq("parts_refund_status", "Pending Refund").order("date").order("id").range(a, z));
       const equip = await pageAll((a, z) => c.sb.from("equipment_spend").select(EQUIP_COLS).eq("reimbursed", "Pending").order("date").order("id").range(a, z));
       // deno-lint-ignore no-explicit-any
@@ -866,7 +887,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "money_summary", title: "Money summary",
-    description: "Money in a date range, as the dashboard: paid by cash / bank transfer / card (GST included), GST, paid and unpaid totals (before GST), parts, equipment, commission owed, what is left after technicians, ad spend and what is left after ads.",
+    description: "Money in a date range, as the dashboard: paid by cash / bank transfer / card (GST included), GST, paid and unpaid totals (before GST), parts, equipment, commission owed, what is left after technicians and (for those who can see ad spend) ad spend and what is left after ads.",
     inputSchema: obj({ from: FROM, to: TO }),
     gate: (s) => !s.isTech && (canViewSection(s.p, "dashboard") || !!s.p.permissions.finance),
     run: async (c, args) => {
@@ -875,13 +896,14 @@ export const TOOLS: Tool[] = [
       const equip = await pageAll((a, z) => c.sb.from("equipment_spend").select(EQUIP_COLS).gte("date", r.from).lte("date", r.to).order("date").order("id").range(a, z));
       // deno-lint-ignore no-explicit-any
       const d = await calcCtx(c), J = jobs.rows.filter((j: any) => jobVisible(c.s, j)).map(jobFromRow), E = equip.rows.filter((e: any) => equipVisible(c.s, e)).map(equipFromRow);
-      const m = moneyOverview(d, J, E), ads = await adSpendIn(c, r.from, r.to);
+      // Ad spend only for those the ad_spend RLS lets read it (Finance alone does not): anyone else gets no ad figures.
+      const m = moneyOverview(d, J, E), ads = adSpendVisible(c.s) ? await adSpendIn(c, r.from, r.to) : null;
       const overview = Object.fromEntries(Object.entries(m.overview).map(([k, v]) => [k, k.endsWith("Count") ? v : round2(v)]));
       return {
         payload: {
           from: r.from, to: r.to, jobsCount: J.length, overview, remainingAfterTech: round2(m.remainingAfterTech),
-          adSpend: { total: ads.total, byChannel: ads.byChannel }, remainingAfterTechAndAds: round2(m.remainingAfterTech - ads.total),
-          truncated: jobs.truncated || equip.truncated || ads.truncated,
+          ...(ads ? { adSpend: { total: ads.total, byChannel: ads.byChannel }, remainingAfterTechAndAds: round2(m.remainingAfterTech - ads.total) } : {}),
+          truncated: jobs.truncated || equip.truncated || !!(ads && ads.truncated),
         },
         rows: 1,
       };
@@ -894,6 +916,7 @@ export const TOOLS: Tool[] = [
     gate: (s) => canViewSection(s.p, "payroll"),
     run: async (c, args) => {
       const s = c.s, person = s.payName, wb = weekBounds(args.week || bizParts(c.nowMs, c.biz.tz).day, weekRules(c.biz.catalog.region));
+      const d0 = { paidKey: catalogKeys(c.biz.catalog).paid };   // the business's word for Paid (catalog.keys)
       // Only the rows this week can use (the same answer as the app's computeWeek over the whole history): jobs paid in
       // the week, jobs not paid by its end (expected commission), refunds still pending or paid back this week, the
       // week's bonuses and daily logs, and the paid-week marks from the oldest pending refund on. Anyone but an owner
@@ -908,11 +931,11 @@ export const TOOLS: Tool[] = [
       const PW = "id, week_start, person, cash_collected, salary_paid, salary_paid_amount", BN = "id, week_start, person, amount, reason, created_at", SL = "id, person, date, hours, bookings_aircon, bookings_chimney, bookings_pw";
       const [paidOn, paidSameDay, unpaid, partsPending, partsDone, eqPending, eqDone, bonuses, logs] = await Promise.all([
         // deno-lint-ignore no-explicit-any
-        sel("jobs", JOB_COLS, "technician", (q: any) => q.eq("payment_status", "Paid").gte("date_paid", wb.start).lte("date_paid", wb.end)),
+        sel("jobs", JOB_COLS, "technician", (q: any) => q.eq("payment_status", d0.paidKey).gte("date_paid", wb.start).lte("date_paid", wb.end)),
         // deno-lint-ignore no-explicit-any
-        sel("jobs", JOB_COLS, "technician", (q: any) => q.eq("payment_status", "Paid").is("date_paid", null).gte("date", wb.start).lte("date", wb.end)),
+        sel("jobs", JOB_COLS, "technician", (q: any) => q.eq("payment_status", d0.paidKey).is("date_paid", null).gte("date", wb.start).lte("date", wb.end)),
         // deno-lint-ignore no-explicit-any
-        sel("jobs", JOB_COLS, "technician", (q: any) => q.or(NOT_PAID).lte("date", wb.end)),
+        sel("jobs", JOB_COLS, "technician", (q: any) => q.or(notPaid(c)).lte("date", wb.end)),
         // deno-lint-ignore no-explicit-any
         sel("jobs", JOB_COLS, "parts_paid_by", (q: any) => q.eq("parts_refund_status", "Pending Refund")),
         // deno-lint-ignore no-explicit-any
@@ -963,14 +986,14 @@ export const TOOLS: Tool[] = [
     name: "marketing_summary", title: "Marketing summary",
     description: "Ad spend by channel in a date range, the ad phone calls (owners and managers) and the leads that came in by source and service, with the cost per lead.",
     inputSchema: obj({ from: FROM, to: TO }),
-    gate: (s) => !s.isTech && (canViewSection(s.p, "adsGoogle") || canViewSection(s.p, "crmOverview") || canViewSection(s.p, "dashboard")),
+    gate: (s) => !s.isTech && adSpendVisible(s),
     run: async (c, args) => {
       const r = rangeOf(args, c.biz.tz, c.nowMs), ads = await adSpendIn(c, r.from, r.to);
       // deno-lint-ignore no-explicit-any
       const payload: Record<string, any> = { from: r.from, to: r.to, adSpend: { total: ads.total, byChannel: ads.byChannel, leadsReported: ads.leadsReported }, truncated: ads.truncated };
       // The ad calls are owners' and managers' only (as the database lets the app read them). By campaign, not by the
       // app's per-account split (an account number is one business's).
-      if (c.s.isOM) {
+      if (adCallsVisible(c.s)) {
         const { rows, truncated } = await pageAll((a, z) => c.sb.from("ad_calls").select("id, date, status, duration_seconds, campaign").gte("date", r.from).lte("date", r.to).order("id").range(a, z));
         // deno-lint-ignore no-explicit-any
         const missed = rows.filter((x: any) => x.status === "MISSED").length;
@@ -990,17 +1013,28 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_tasks", title: "List tasks",
-    description: "Tasks this person can see, earliest due first (no due date last). mine = only tasks assigned to me; status = only that status.",
+    description: "Tasks this person can see, earliest due first (no due date last). mine = only tasks assigned to me; status = only that status. count is how many matched among the tasks read (a lower bound when truncated).",
     inputSchema: obj({ mine: { type: "boolean", description: "Only tasks assigned to me." }, status: { type: "string", maxLength: 40, description: "Only this status (exact)." }, limit: LIMIT }),
     gate: (s) => s.tasks,
     run: async (c, args) => {
-      const { rows, truncated } = await pageAll((a, z) => c.sb.from("tasks").select(TASK_COLS).order("id").range(a, z));
+      // Read in the answer's own order (earliest due first, no due date last), the status filtered by the database,
+      // page by page, and stopped as soon as one more task than asked is found: a business with thousands of tasks is
+      // never read whole for a short list. Who sees which task stays the app's rule (taskVisible), applied here.
       // deno-lint-ignore no-explicit-any
-      const all = rows.filter((t: any) => taskVisible(c.s, t) && (!args.mine || taskAssignedTo(t, c.s.p)) && (args.status === undefined || t.status === args.status))
+      const found: any[] = [];
+      let scanTruncated = false;
+      for (let a = 0; ; a += PAGE) {
+        if (a >= MAX_SCAN) { scanTruncated = true; break; }
+        let b = c.sb.from("tasks").select(TASK_COLS);
+        if (args.status !== undefined) b = b.eq("status", args.status);
+        const { data, error } = await b.order("due", { ascending: true, nullsFirst: false }).order("id").range(a, a + PAGE - 1);
+        if (error) throw new Error(error.message);
         // deno-lint-ignore no-explicit-any
-        .sort((a: any, b: any) => (a.due ? 0 : 1) - (b.due ? 0 : 1) || String(a.due || "").localeCompare(String(b.due || "")) || String(a.id).localeCompare(String(b.id)))
-        .map(taskOut);
-      return listOf(all, args.limit, truncated);
+        const rows: any[] = data || [];
+        rows.forEach((t) => { if (taskVisible(c.s, t) && (!args.mine || taskAssignedTo(t, c.s.p))) found.push(t); });
+        if (found.length > args.limit || rows.length < PAGE) break;
+      }
+      return listOf(found.map(taskOut), args.limit, scanTruncated);
     },
   },
   {
@@ -1094,6 +1128,17 @@ export async function handleRpc(msg: any, c: Ctx): Promise<RpcOut> {
   const ok = (result: unknown) => ({ status: 200, body: { jsonrpc: "2.0", id, result } });
   const params = msg.params && typeof msg.params === "object" && !Array.isArray(msg.params) ? msg.params : {};
   const p = c.s.p;
+  // initialize and tools/list count toward the rate limit too (a client looping on them is still load), logged as
+  // their own rows. ping does not.
+  if (msg.method === "initialize" || msg.method === "tools/list") {
+    const base = { token_id: c.token.id, user_id: c.token.user_id, tool: msg.method, at: new Date(c.nowMs).toISOString(), args_summary: "", rows_returned: 0 };
+    const logId = await openLog(c.sb, { ...base, status: "ok" });
+    const limit = await overLimit(c, logId);
+    if (limit !== null) {
+      await logCall(c.sb, logId, { ...base, status: "rate_limited" });
+      return { status: 429, headers: { "Retry-After": "60" }, body: rpcError(id, -32029, `Too many calls: at most ${limit} a minute. Try again in a minute.`) };
+    }
+  }
   switch (msg.method) {
     case "initialize":
       return ok({
@@ -1104,8 +1149,11 @@ export async function handleRpc(msg: any, c: Ctx): Promise<RpcOut> {
       });
     case "ping":
       return ok({});
-    case "tools/list":
-      return ok({ tools: TOOLS.filter((t) => t.gate(c.s)).map((t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema, annotations: ANNOTATIONS })) });
+    case "tools/list": {
+      // The tax by the business's own name (Settings → Region: GST, VAT, Sales tax…); the fields keep their names.
+      const tax = taxNameOf(c.biz.catalog);
+      return ok({ tools: TOOLS.filter((t) => t.gate(c.s)).map((t) => ({ name: t.name, title: t.title, description: t.description.replace(/\bGST\b/g, tax), inputSchema: t.inputSchema, annotations: ANNOTATIONS })) });
+    }
     case "tools/call": {
       const r = await callTool(c, params);
       return { status: r.status || 200, headers: r.headers, body: r.error ? { jsonrpc: "2.0", id, error: r.error } : { jsonrpc: "2.0", id, result: r.result } };
@@ -1133,6 +1181,18 @@ async function logCall(sb: any, logId: number | null, row: Record<string, unknow
     if (error) console.error("mcp log failed:", clip(error.message, 300));
   } catch (e) { console.error("mcp log failed:", clip((e as Error).message, 300)); }
 }
+// The rate limit, per BUSINESS (every key of every person together; one business's calls share one budget): the rows
+// of the last minute up to and including this request's own row (refused ones count too). Each request writes its row
+// first and counts only the rows up to it, so requests sent at the same moment can't all slip under the limit (each
+// sees the ones written before it). The limit when this request is over it, else null.
+async function overLimit(c: Ctx, logId: number | null): Promise<number | null> {
+  let q = c.sb.from("mcp_access_log").select("id", { count: "exact", head: true }).eq("business_id", BUSINESS_ID).gte("at", new Date(c.nowMs - 60_000).toISOString());
+  if (logId !== null) q = q.lte("id", logId);
+  const { count, error } = await q;
+  if (error) throw new Error(error.message);
+  const limit = c.biz.mcp.rateLimitPerMin;
+  return (count || 0) > (logId !== null ? limit : limit - 1) ? limit : null;
+}
 // The payload made small enough to send: rows halved until it fits (and flagged truncated).
 // deno-lint-ignore no-explicit-any
 export function fitPayload(payload: any, max = MAX_RESULT_CHARS) {
@@ -1152,16 +1212,10 @@ export async function callTool(c: Ctx, params: any): Promise<{ status?: number; 
   const rawArgs = params ? (params as any).arguments : undefined;
   const argsSummary = tool ? summarizeArgs(rawArgs, tool.inputSchema) : "";
   const allowed = !!tool && tool.gate(c.s);
-  // (a) the rate limit first: this key's calls in the last minute (refused ones count too). The call's own row is
-  // written first and only the rows up to it are counted, so calls sent at the same moment can't all slip under the
-  // limit (each sees the ones written before it).
+  // (a) the rate limit first (overLimit: the business's requests in the last minute, this one's row written first).
   const logId = await openLog(c.sb, { ...base, args_summary: allowed ? argsSummary : "", rows_returned: 0, status: "error" });
-  let q = c.sb.from("mcp_access_log").select("id", { count: "exact", head: true }).eq("token_id", c.token.id).gte("at", new Date(c.nowMs - 60_000).toISOString());
-  if (logId !== null) q = q.lte("id", logId);
-  const { count, error } = await q;
-  if (error) throw new Error(error.message);
-  const limit = c.biz.mcp.rateLimitPerMin;
-  if ((count || 0) > (logId !== null ? limit : limit - 1)) {
+  const limit = await overLimit(c, logId);
+  if (limit !== null) {
     await logCall(c.sb, logId, { ...base, args_summary: argsSummary, rows_returned: 0, status: "rate_limited" });
     return { status: 429, headers: { "Retry-After": "60" }, error: { code: -32029, message: `Too many calls: at most ${limit} a minute. Try again in a minute.` } };
   }
@@ -1458,6 +1512,22 @@ export async function checkResolved(host: string): Promise<string | null> {
 // + Deno.startTls, as Postgres drivers use them on the edge runtime). No redirects, no keep-alive (Connection: close).
 // Without those APIs it refuses (fails closed) rather than letting fetch look the name up again.
 const MAX_HEAD_BYTES = 64 * 1024;
+// A step that can't be cancelled (Deno.connect, Deno.startTls) raced against the signal: an abort answers at once
+// ("aborted"), and a connection that opens after it is handed to onLate (closed) instead of being left open.
+export function raceAbort<T>(p: Promise<T>, signal: AbortSignal | undefined, onLate: (v: T) => void): Promise<T> {
+  if (!signal) return p;
+  return new Promise<T>((resolve, reject) => {
+    let lost = false;
+    const stop = () => { lost = true; reject(new Error("aborted")); };
+    if (signal.aborted) stop(); else signal.addEventListener("abort", stop, { once: true });
+    p.then(
+      (v) => { signal.removeEventListener("abort", stop); if (!lost) resolve(v); else { try { onLate(v); } catch { /* already closed */ } } },
+      (e) => { signal.removeEventListener("abort", stop); if (!lost) reject(e); },
+    );
+  });
+}
+// deno-lint-ignore no-explicit-any
+const closeQuietly = (c: any) => { try { c && c.close(); } catch { /* already closed */ } };
 export async function pinnedFetch(u: string, init: RequestInit, ip: string): Promise<Response> {
   // deno-lint-ignore no-explicit-any
   const D = (globalThis as any).Deno;
@@ -1474,10 +1544,12 @@ export async function pinnedFetch(u: string, init: RequestInit, ip: string): Pro
   const onAbort = () => close();
   if (signal) signal.addEventListener("abort", onAbort, { once: true });
   try {
-    const tcp = await D.connect({ hostname: ip.replace(/^\[|\]$/g, ""), port: Number(url.port) || 443 });
+    // Neither step takes a signal: each is raced against it, so the client's time limit holds even while a server
+    // never answers the connect or the TLS handshake.
+    const tcp = await raceAbort(D.connect({ hostname: ip.replace(/^\[|\]$/g, ""), port: Number(url.port) || 443 }), signal, closeQuietly);
     conn = tcp;
     if (signal && signal.aborted) throw new Error("aborted");
-    conn = await D.startTls(tcp, { hostname: url.hostname });
+    conn = await raceAbort(D.startTls(tcp, { hostname: url.hostname }), signal, closeQuietly);
     const out = new Uint8Array([...enc.encode(head + "\r\n"), ...body]);
     for (let n = 0; n < out.length;) n += await conn.write(out.subarray(n));
     return await readHttpResponse(conn.readable, () => { if (signal) signal.removeEventListener("abort", onAbort); close(); });
@@ -1988,7 +2060,7 @@ export const IMPORT_SCAN = { max: 50 * PAGE };   // existing rows the duplicate 
 // automations engine (quietArrival) and the phone notifications (push) read the import_quiet column, and this key too:
 // such a card is not a new lead.
 export const QUIET_KEY = "quiet";
-export type ImportField = { label: string; type: "text" | "email" | "phone" | "day" | "money" | "bool" | "enum" | "tags" | "person"; max?: number; required?: boolean; values?: string[] };
+export type ImportField = { label: string; type: "text" | "email" | "phone" | "day" | "money" | "bool" | "enum" | "tags" | "person" | "catalog"; max?: number; required?: boolean; values?: string[]; list?: CatalogSection };
 // The fields an import can fill, per kind (keys = the database columns). One entry per line: the app's MCP_IMPORT_FIELDS
 // is parity-tested against these keys. The task lists are the app's TASK_STATUSES / TASK_PRIORITIES / TASK_CATEGORIES.
 export const IMPORT_FIELDS: Record<string, Record<string, ImportField>> = {
@@ -1997,10 +2069,10 @@ export const IMPORT_FIELDS: Record<string, Record<string, ImportField>> = {
     phone: { label: "Phone", type: "phone", max: 40 },
     email: { label: "Email", type: "email", max: 200 },
     postcode: { label: "Postcode", type: "text", max: 10 },
-    division: { label: "Service", type: "text", max: 60 },
-    source: { label: "Lead source", type: "text", max: 60 },
+    division: { label: "Service", type: "catalog", list: "services" },
+    source: { label: "Lead source", type: "catalog", list: "sources" },
     sub_source: { label: "Sub-source", type: "text", max: 60 },
-    status: { label: "Stage", type: "text", max: 40 },
+    status: { label: "Stage", type: "catalog", list: "stages" },
     job_description: { label: "Job description", type: "text", max: 1000 },
     estimated_value: { label: "Estimated value", type: "money" },
     notes: { label: "Notes", type: "text", max: 2000 },
@@ -2033,6 +2105,65 @@ export const IMPORT_FIELDS: Record<string, Record<string, ImportField>> = {
 };
 // The duplicate check a new rule starts with (the UI's starting values).
 export const DEFAULT_DEDUPE = { contacts: { fields: ["phone", "email"], match: "any" }, jobs: { fields: ["invoice_number"], match: "any" }, tasks: { fields: ["title", "due"], match: "all" } };
+
+// ── imports: the business's own lists (Settings → Pipeline / Services / Lead sources) and renamable words ──
+// The app's built-in lists (index.html LEAD_DIVISIONS / LEAD_STATUSES / LEAD_SOURCES and their labels, parity-tested),
+// used as the app's catalogList does: what the business saved, plus any built-in entry the saved list is missing.
+export type CatalogSection = "services" | "stages" | "sources";
+export const BASE_LISTS: Record<CatalogSection, string[]> = {
+  services: ["Aircon", "Chimney", "Pressure Washing", "Other"],
+  stages: ["New", "Chasing", "Quoted", "Follow-up", "Booked", "Won", "Lost"],
+  sources: ["Google Ads", "Meta Ads", "Google Maps", "Organic", "Unknown"],
+};
+export const BASE_LABELS: Record<CatalogSection, Record<string, string>> = {
+  services: {}, stages: { New: "New lead", Chasing: "Chasing", Quoted: "Quoted", "Follow-up": "Follow up", Booked: "Booked", Won: "Won", Lost: "Lost" }, sources: { Organic: "Organic web", "Phone Call": "Phone (old)" },   // "Phone Call": a legacy value on old rows only
+};
+export const STAGE_CORE = ["New", "Won", "Lost"];        // always on (index.html STAGE_CORE)
+export const CATCH_ALL_SERVICE = "Other";                 // an unknown service lands here (as conversations / voice)
+export const NEW_STAGE = "New";                           // an unknown stage lands here (every new lead starts in New)
+// The four built-in words a business can rename (their stage 2: settings.catalog.keys = { paid, done, won, lost }).
+// Until then, and for any that is missing or not a plain short word, the app's own.
+export const KEY_DEFAULTS = { paid: "Paid", done: "Done", won: "Won", lost: "Lost" };
+export type CatalogKeys = typeof KEY_DEFAULTS;
+// deno-lint-ignore no-explicit-any
+export function catalogKeys(cat: any): CatalogKeys {
+  const k = cat && typeof cat === "object" && cat.keys && typeof cat.keys === "object" && !Array.isArray(cat.keys) ? cat.keys : {};
+  const word = (v: unknown, d: string) => (typeof v === "string" && /^[^",()\\<>]{1,40}$/.test(v.trim()) ? v.trim() : d);
+  return { paid: word(k.paid, KEY_DEFAULTS.paid), done: word(k.done, KEY_DEFAULTS.done), won: word(k.won, KEY_DEFAULTS.won), lost: word(k.lost, KEY_DEFAULTS.lost) };
+}
+// A built-in word as the business calls it (a value that is not one of the four is itself).
+export function renamedKey(keys: CatalogKeys | undefined, v: string): string {
+  if (!keys) return v;
+  for (const n of Object.keys(KEY_DEFAULTS) as (keyof CatalogKeys)[]) if (v === KEY_DEFAULTS[n]) return keys[n];
+  return v;
+}
+export type CatalogLists = Record<CatalogSection, { key: string; label: string }[]>;
+// The lists an import checks against: deleted and switched-off entries left out (New, Won and Lost are always on).
+// deno-lint-ignore no-explicit-any
+export function catalogLists(cat: any, keys: CatalogKeys = KEY_DEFAULTS): CatalogLists {
+  // deno-lint-ignore no-explicit-any
+  const out: any = {};
+  for (const sec of Object.keys(BASE_LISTS) as CatalogSection[]) {
+    const saved = cat && typeof cat === "object" && Array.isArray(cat[sec]) ? cat[sec] : [];
+    // deno-lint-ignore no-explicit-any
+    const list: any[] = saved.filter((x: any) => x && typeof x === "object" && typeof x.key === "string" && x.key.trim());
+    BASE_LISTS[sec].forEach((k) => { if (!list.some((x) => x.key === k)) list.push({ key: k, label: BASE_LABELS[sec][k] || k }); });
+    out[sec] = list
+      .filter((x) => !x.deleted && (x.active !== false || (sec === "stages" && STAGE_CORE.includes(x.key))))
+      .map((x) => { const key = sec === "stages" ? renamedKey(keys, x.key) : x.key; return { key, label: typeof x.label === "string" && x.label.trim() ? x.label.trim() : key }; });
+  }
+  return out as CatalogLists;
+}
+// A value matched to a list entry by its key or its label, any case: the entry's key, or null.
+export function catalogMatch(list: { key: string; label: string }[], v: string): string | null {
+  const s = v.trim().toLowerCase();
+  const hit = list.find((x) => x.key.toLowerCase() === s) || list.find((x) => x.label.toLowerCase() === s);
+  return hit ? hit.key : null;
+}
+// Where an unknown value of a list lands: the New stage, the catch-all service; an unknown source is left empty, so the
+// row gets the import's own source (catalog.mcp.importSource).
+export const CATALOG_FALLBACK: Record<CatalogSection, string> = { stages: NEW_STAGE, services: CATCH_ALL_SERVICE, sources: "" };
+export type MapCtx = { tz: string; people: string[]; lists?: CatalogLists; keys?: CatalogKeys };
 
 // ── imports: pure helpers ──
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -2084,12 +2215,12 @@ export function itemsAt(data: unknown, itemsPath: string): { ok: true; items: un
   if (!Array.isArray(v)) return { ok: false, reason: itemsPath ? `"${itemsPath}" is not a list` : "The tool's answer is not a list" };
   return { ok: true, items: v.slice(0, IMPORT_MAX_ROWS), truncated: v.length > IMPORT_MAX_ROWS };
 }
-const EMPTY_VALUE: Record<string, unknown> = { text: "", phone: "", email: "", day: null, money: 0, bool: false, enum: null, tags: [], person: "" };
+const EMPTY_VALUE: Record<string, unknown> = { text: "", phone: "", email: "", day: null, money: 0, bool: false, enum: null, tags: [], person: "", catalog: "" };
 const emptyOf = (f: ImportField) => { const e = EMPTY_VALUE[f.type]; return Array.isArray(e) ? [] : e; };
 const isBlank = (v: unknown) => v == null || v === "" || (Array.isArray(v) && v.length === 0);
 const prim = (v: unknown) => typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 // One source value as the field's type (the app's own formats). Empty gives the type's empty value.
-export function coerceField(f: ImportField, v: unknown, ctx: { tz: string; people: string[] }): { ok: true; value: unknown } | { ok: false; reason: string } {
+export function coerceField(f: ImportField, v: unknown, ctx: MapCtx): { ok: true; value: unknown } | { ok: false; reason: string } {
   if (v == null || (typeof v === "string" && !v.trim())) return { ok: true, value: emptyOf(f) };
   const bad = (reason: string) => ({ ok: false as const, reason });
   const ok = (value: unknown) => ({ ok: true as const, value });
@@ -2120,15 +2251,24 @@ export function coerceField(f: ImportField, v: unknown, ctx: { tz: string; peopl
       return bad("is not yes/no");
     }
     case "enum": {
+      // Paid / Done as the business calls them (catalog.keys)
+      const values = (f.values || []).map((x) => renamedKey(ctx.keys, x));
       const s = prim(v) ? String(v).trim().toLowerCase() : "";
-      const hit = (f.values || []).find((x) => x.toLowerCase() === s);
-      return hit ? ok(hit) : bad("is not one of: " + (f.values || []).join(", "));
+      const hit = values.find((x) => x.toLowerCase() === s);
+      return hit ? ok(hit) : bad("is not one of: " + values.join(", "));
+    }
+    case "catalog": {
+      // The business's own list (key or label, any case); anything else lands where conversations / voice put it.
+      if (!prim(v) || typeof v === "boolean") return bad("is not text");
+      const sec = f.list as CatalogSection, lists = ctx.lists || catalogLists(null, ctx.keys);
+      return ok(catalogMatch(lists[sec] || [], String(v)) ?? CATALOG_FALLBACK[sec]);
     }
     case "tags": {
+      // As the lead card keeps them: trimmed, at most 60 characters, one of each whatever the case (the first spelling).
       const list = Array.isArray(v) ? v : prim(v) ? String(v).split(",") : null;
       if (!list || list.some((x) => x != null && !prim(x))) return bad("is not a list of tags");
-      const out: string[] = [];
-      for (const x of list) { const t = clip(x, 40); if (t && !out.includes(t)) out.push(t); }
+      const out: string[] = [], seen = new Set<string>();
+      for (const x of list) { const t = clip(x, 60); if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); out.push(t); } }
       return ok(out.slice(0, 20));
     }
     case "person": {
@@ -2141,7 +2281,7 @@ export function coerceField(f: ImportField, v: unknown, ctx: { tz: string; peopl
 }
 // One item through a rule's mapping: { target: "path" | { path } | { value } }. Unknown targets are ignored.
 // deno-lint-ignore no-explicit-any
-export function mapItem(kind: string, mapping: any, item: unknown, ctx: { tz: string; people: string[] }): { values: Record<string, unknown>; errors: string[] } {
+export function mapItem(kind: string, mapping: any, item: unknown, ctx: MapCtx): { values: Record<string, unknown>; errors: string[] } {
   const fields = IMPORT_FIELDS[kind] || {}, values: Record<string, unknown> = {}, errors: string[] = [], failed = new Set<string>();
   for (const target of Object.keys(plainObj(mapping) ? mapping : {})) {
     if (!hasOwn(fields, target)) continue;
@@ -2252,7 +2392,7 @@ export function validateRule(r: any): string[] {
   return out;
 }
 // deno-lint-ignore no-explicit-any
-export type ImportCtx = { quiet: boolean; nowMs: number; tz: string; ruleName: string; serverName: string; importSource: string; profiles: any[]; employees?: any[]; rates?: Record<string, any> };
+export type ImportCtx = { quiet: boolean; nowMs: number; tz: string; ruleName: string; serverName: string; importSource: string; profiles: any[]; employees?: any[]; rates?: Record<string, any>; keys?: CatalogKeys };
 // The row inserted for one new item. Always the same keys for a kind: a bulk insert sends the union of every row's
 // keys, so a key missing from one row would be written as NULL there.
 export function importRow(kind: string, values: Record<string, unknown>, ctx: ImportCtx): Record<string, unknown> {
@@ -2263,7 +2403,7 @@ export function importRow(kind: string, values: Record<string, unknown>, ctx: Im
   // The one marker the automations engine and push read (SQL M5-review): an import made with automations off.
   row.import_quiet = ctx.quiet;
   if (kind === "contacts") {
-    or("division", "Other"); or("source", ctx.importSource); or("status", "New");
+    or("division", CATCH_ALL_SERVICE); or("source", ctx.importSource); or("status", NEW_STAGE);
     // "Date received" mapped: the card arrived that business day (its created_at AND its first thread entry), so
     // imported history never shows as today's new leads. Not mapped: today. The same stamp as conversations / voice.
     const received = isDay(row.created_at) ? String(row.created_at) : null;
@@ -2281,7 +2421,7 @@ export function importRow(kind: string, values: Record<string, unknown>, ctx: Im
     // for that job type (Settings → People → commission rates), 0 when there is none.
     if (!hasOwn(values, "includes_gst")) row.includes_gst = true;
     row.commission_percent = commissionRateFor(ctx.rates || {}, String(row.technician || ""), String(row.job_type || "")) ?? 0;
-    row.date_paid = row.payment_status === "Paid" ? row.date : null;
+    row.date_paid = row.payment_status === (ctx.keys || KEY_DEFAULTS).paid ? row.date : null;
     row.paid_to_technician = "Not Paid";
     row.parts_refund_status = "N/A";
     row.cash_confirmed = false;
@@ -2342,7 +2482,8 @@ async function importContext(sb: any, rule: any, nowMs: number) {
     // deno-lint-ignore no-explicit-any
     rows.forEach((r: any) => { rates[r.technician_name] = r.rates || {}; });
   }
-  return { tz: biz.tz, importSource: biz.mcp.importSource, profiles, employees, people, rates, ruleName: String(rule.name || ""), nowMs };
+  const keys = catalogKeys(biz.catalog);
+  return { tz: biz.tz, importSource: biz.mcp.importSource, profiles, employees, people, rates, ruleName: String(rule.name || ""), nowMs, keys, lists: catalogLists(biz.catalog, keys) };
 }
 const SERVER_COLS = "id, business_id, name, url, auth_header, secret_id";   // never the secret (it is only in Vault)
 // A rule and its server, both of this business, or null.
@@ -2498,7 +2639,12 @@ export async function usedSince(sb: any, kind: string, ids: string[]): Promise<S
 }
 // Undo: deletes exactly the ids its own run recorded, and only those still there and not used since (usedSince). A row
 // that is used, or can't go, is kept and counted. Only the import's own history entries of the deleted rows go. An
-// hourly rule is switched off, or the next hour would import it all again.
+// hourly rule is switched off first, or the next hour would import it all again.
+// The undo is claimed with undo_started_at (one undo at a time) and marked done (undone_at) only at the END, after
+// every chunk: an undo stopped in the middle (the platform's time limit) is not "Undone" with records still there.
+// Pressing Undo again once it is stale (UNDO_STALE_MS) resumes it: the rows already deleted are simply not there any
+// more, and its deleted count carries on from what the stopped undo saved after each chunk.
+export const UNDO_STALE_MS = RUN_STALE_MS;
 // deno-lint-ignore no-explicit-any
 export async function undoImport(sb: any, runId: unknown, me: any, nowMs: number): Promise<{ status: number; body: any }> {
   if (!isUuid(runId)) return { status: 404, body: { ok: false, reason: "No such import." } };
@@ -2510,11 +2656,27 @@ export async function undoImport(sb: any, runId: unknown, me: any, nowMs: number
     // Stopped by a crash long ago: closed now, then undone like any other.
     await sb.from("mcp_import_runs").update({ status: "failed", finished_at: iso(nowMs), errors: [...(Array.isArray(run.errors) ? run.errors : []), { reason: "Stopped before it finished" }].slice(0, RUN_ERRORS_MAX) }).eq("id", run.id).eq("status", "running");
   }
-  const { data: claimed, error: ce } = await sb.from("mcp_import_runs").update({ undone_at: iso(nowMs), undone_by: me.id }).eq("id", run.id).is("undone_at", null).select("id");
+  if (run.undone_at) return { status: 409, body: { ok: false, reason: "Already undone." } };
+  const { data: claimed, error: ce } = await sb.from("mcp_import_runs").update({ undo_started_at: iso(nowMs), undone_by: me.id }).eq("id", run.id).is("undone_at", null)
+    .or(`undo_started_at.is.null,undo_started_at.lt."${iso(nowMs - UNDO_STALE_MS)}"`).select("id");
   if (ce) throw new Error(ce.message);
-  if (!claimed || !claimed.length) return { status: 409, body: { ok: false, reason: "Already undone." } };
+  if (!claimed || !claimed.length) {
+    const { data: now } = await sb.from("mcp_import_runs").select("undone_at").eq("id", run.id).maybeSingle();
+    return { status: 409, body: { ok: false, reason: now && now.undone_at ? "Already undone." : "This import is being undone right now." } };
+  }
+  // The hourly rule off before anything is deleted, so its next run can't bring rows back while this one works.
+  let paused = false;
+  if (run.rule_id) {
+    const { data: rule } = await sb.from("mcp_import_rules").select("id, mode, enabled").eq("id", run.rule_id).eq("business_id", BUSINESS_ID).maybeSingle();
+    if (rule && rule.mode === "hourly") {
+      if (rule.enabled) await sb.from("mcp_import_rules").update({ enabled: false, updated_at: iso(nowMs) }).eq("id", rule.id).eq("business_id", BUSINESS_ID);
+      paused = true;
+    }
+  }
   const table = IMPORT_TABLE[run.kind], ids: string[] = (Array.isArray(run.inserted_ids) ? run.inserted_ids : []).map(String);
-  let deleted = 0, kept = 0;
+  // A resumed undo goes on from the deleted count the stopped one saved (kept is counted again: those rows are all
+  // still there).
+  let deleted = run.undo_started_at ? Number(run.undo_deleted) || 0 : 0, kept = 0;
   for (let k = 0; k < ids.length; k += IMPORT_CHUNK) {
     const all = ids.slice(k, k + IMPORT_CHUNK), gone: string[] = [];
     const used = await usedSince(sb, run.kind, all);
@@ -2538,17 +2700,13 @@ export async function undoImport(sb: any, runId: unknown, me: any, nowMs: number
     if (gone.length) {
       const { error: le } = await sb.from("activity_log").delete().eq("record_kind", IMPORT_RECORD_KIND[run.kind]).eq("actor", IMPORT_ACTOR).in("record_id", gone);
       if (le) console.error("mcp undo history failed:", clip(le.message, 200));
+      // Progress after each chunk (a resumed undo carries the count on), still not marked undone.
+      await sb.from("mcp_import_runs").update({ undo_deleted: deleted }).eq("id", run.id);
     }
   }
-  await sb.from("mcp_import_runs").update({ undo_deleted: deleted, undo_kept: kept }).eq("id", run.id);
-  let paused = false;
-  if (run.rule_id) {
-    const { data: rule } = await sb.from("mcp_import_rules").select("id, mode").eq("id", run.rule_id).eq("business_id", BUSINESS_ID).maybeSingle();
-    if (rule && rule.mode === "hourly") {
-      await sb.from("mcp_import_rules").update({ enabled: false, updated_at: iso(nowMs) }).eq("id", rule.id).eq("business_id", BUSINESS_ID);
-      paused = true;
-    }
-  }
+  // Done: only now is the run marked undone.
+  const { error: fe } = await sb.from("mcp_import_runs").update({ undone_at: iso(nowMs), undone_by: me.id, undo_deleted: deleted, undo_kept: kept }).eq("id", run.id);
+  if (fe) throw new Error(fe.message);
   return { status: 200, body: { ok: true, deleted, kept, paused } };
 }
 // The hourly timer: the rules that are ON and hourly, least recently run first, each claimed (so two timers never run

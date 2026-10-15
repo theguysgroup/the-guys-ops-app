@@ -24,6 +24,8 @@ const NAMES = ['canViewSection', 'defaultPermissionsFor', 'assigneeNames', 'task
   'summarizeCalls', 'GOOGLE_ADS_AIRCON_ACCOUNT', 'callDivision', 'commissionRateFor',
   // the task board rule (imports put a task on the board the app would)
   'boardForAssignees',
+  // the built-in lists an import checks values against (Settings → Pipeline / Services / Lead sources start from these)
+  'LEAD_DIVISIONS', 'LEAD_STATUSES', 'LEAD_SOURCES', 'STAGE_CORE', 'LEAD_STAGE_LABEL', 'LEAD_SOURCE_LABEL',
   // the business's day (stage 1 region helpers; localDay and the pay week read it) — same list tests/business-logic.test.js uses
   'REGION_DEFAULTS', 'REGION_NONE', 'REGION_MEMO', 'BIZ_WALL', 'BIZ_DAY_MEMO', 'TZ_VALID', 'regionNow', 'tzValid', 'regionMemo', 'bizTz', 'bizWall',
   'bizDayOf', 'bizDayMemo', 'todayStr',
