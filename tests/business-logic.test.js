@@ -185,6 +185,9 @@ const DECLS = [
   'cobraClientContext', 'cobraEndTools', 'cobraConvWanted',
   // Stage 6 rebase on a8c6d2d: the vacation line the assign question and the assistant's new-task card share
   'vacationAssignLine',
+  // Stage 6 v2 G6: provider status, the free quota, own keys, the own-Claude card, the ChatGPT row (coming later)
+  'COBRA_PROVIDER_MODELS', 'COBRA_SOURCE_LABEL', 'COBRA_KEY_RE', 'COBRA_KEY_PROVIDERS', 'cobraSourcePill', 'cobraFreeMeter', 'cobraFreeResetText', 'cobraKeyProblem', 'cobraKeyCardHtml',
+  'cobraOwnClaudeCardHtml', 'cobraChatGptRowHtml', 'cobraPaidKeyReady',
 ];
 
 function extractDecl(source, name){
@@ -5250,16 +5253,17 @@ function testCobraHelpers(sb){
   assertEqual([sb.cobraLeftText(st), sb.cobraLeftText({ today: { used: 45, limit: 50 } }), sb.cobraLeftText({ today: { used: 49, limit: 50 } }), sb.cobraLeftText({ today: { used: 50, limit: 50 } })], ['', '5 questions left today', '1 question left today', ''], 'cobraLeftText: the count when fewer than 10 are left');
   // settings
   const set = sb.cobraSettingsOf(null);
-  assertEqual([set.enabled, set.monthly_cap_usd, set.daily_user_limit, set.model_per_task, set.provider, Object.keys(set.prices)], [true, 0, 50, { assistant: 'claude-haiku-5-5', heavy: 'claude-sonnet-5-5' }, 'mock', ['claude-haiku-5-5', 'claude-sonnet-5-5']], 'cobraSettingsOf: the defaults when nothing is saved');
-  assertEqual(sb.cobraPricesOf({ 'claude-haiku-5-5': { in: 0.2 }, 'my-model': { in: 1, out: 2 }, bad: { in: -1, out: 1 } }), { 'claude-haiku-5-5': { label: 'Claude Haiku 5.5', in: 0.2, out: 0.5 }, 'claude-sonnet-5-5': { label: 'Claude Sonnet 5.5', in: 2, out: 10 }, 'my-model': { label: 'my-model', in: 1, out: 2 } }, 'cobraPricesOf: an owner\'s prices on top, broken ones left out');
+  assertEqual([set.enabled, set.monthly_cap_usd, set.daily_user_limit, set.model_per_task, set.provider, Object.keys(set.prices)], [true, 0, 50, { assistant: 'claude-haiku-5-5', heavy: 'claude-sonnet-5-5' }, 'auto', Object.keys(sb.COBRA_MODELS)], 'cobraSettingsOf: the defaults when nothing is saved');
+  const po = sb.cobraPricesOf({ 'claude-haiku-5-5': { in: 0.2 }, 'my-model': { in: 1, out: 2 }, bad: { in: -1, out: 1 } });
+  assertEqual([po['claude-haiku-5-5'], po['claude-sonnet-5-5'], po['my-model'], po.bad, Object.keys(po).length], [{ label: 'Claude Haiku 5.5', in: 0.2, out: 0.5, provider: 'anthropic' }, { label: 'Claude Sonnet 5.5', in: 2, out: 10, provider: 'anthropic' }, { label: 'my-model', provider: 'anthropic', in: 1, out: 2 }, undefined, Object.keys(sb.COBRA_MODELS).length + 1], 'cobraPricesOf: an owner\'s prices on top, broken ones left out');
   const P = sb.cobraSettingProblem, prices = set.prices;
   assertEqual([P('monthly_cap_usd', '-1'), P('monthly_cap_usd', '10001'), P('monthly_cap_usd', '2.555')].every(Boolean) && [P('monthly_cap_usd', '0'), P('monthly_cap_usd', '25.5'), P('monthly_cap_usd', '0.29')].every(x => x===''), true, 'cobraSettingProblem: the cap is 0 to 10,000 with cents');
   assertEqual([P('daily_user_limit', '0'), P('daily_user_limit', '1.5'), P('daily_user_limit', '1001')].every(Boolean) && P('daily_user_limit', '50')==='', true, 'cobraSettingProblem: the daily limit is a whole number from 1 to 1,000');
-  assertEqual([!!P('assistant_name', 'x'.repeat(41)), P('assistant_name', 'Max'), !!P('model_per_task.heavy', 'gpt', prices), P('model_per_task.heavy', 'claude-haiku-5-5', prices), !!P('provider', 'anthropic', prices, false), P('provider', 'anthropic', prices, true), P('enabled', false)],
-    [true, '', true, '', true, '', ''], 'cobraSettingProblem: a 40-character name, a listed model, the real provider only with a key');
+  assertEqual([!!P('assistant_name', 'x'.repeat(41)), P('assistant_name', 'Max'), !!P('model_per_task.heavy', 'gpt', prices), P('model_per_task.heavy', 'claude-haiku-5-5', prices), !!P('provider', 'anthropic', prices, { cap: 20, keyReady: false }), P('provider', 'anthropic', prices, { cap: 20, keyReady: true }), P('enabled', false)],
+    [true, '', true, '', true, '', ''], 'cobraSettingProblem: a 40-character name, a listed model, the paid AI only with a key');
   const s0 = { model_per_task: { assistant: 'a', heavy: 'h' }, roles_enabled: { va: false } }, s0json = JSON.stringify(s0);
   assertEqual([sb.cobraPatchOf('model_per_task.heavy', 'm2', s0), sb.cobraPatchOf('roles.technician', false, s0), sb.cobraPatchOf('assistant_name', '  ', s0), sb.cobraPatchOf('monthly_cap_usd', ' 25.5 ', s0), sb.cobraPatchOf('provider', 'x', s0), JSON.stringify(s0)===s0json],
-    [{ model_per_task: { assistant: 'a', heavy: 'm2' } }, { roles_enabled: { owner: true, manager: true, va: false, technician: false, marketing: true } }, { assistant_name: null }, { monthly_cap_usd: 25.5 }, { provider: 'mock' }, true],
+    [{ model_per_task: { assistant: 'a', heavy: 'm2' } }, { roles_enabled: { owner: true, manager: true, va: false, technician: false, marketing: true } }, { assistant_name: null }, { monthly_cap_usd: 25.5 }, { provider: 'auto' }, true],
     'cobraPatchOf: one field, merged with the rest; the current settings untouched');
   assertEqual([sb.cobraPatchText('enabled', true), sb.cobraPatchText('monthly_cap_usd', '25'), sb.cobraPatchText('daily_user_limit', '60'), sb.cobraPatchText('roles.technician', false), sb.cobraPatchText('model_per_task.assistant', 'claude-haiku-5-5'), sb.cobraPatchText('assistant_name', ' ')],
     ['switched on', 'monthly cap US$25.00', 'daily limit 60 questions', 'Technician: off', 'everyday model claude-haiku-5-5', 'name back to the app name'], 'cobraPatchText: the settings history in words');
@@ -5318,7 +5322,11 @@ async function testCobraLoadersNoLoop(){
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   const log = { fetches: 0, renders: 0, fab: 0, draws: 0, from: [] }, release = [];
   const flags = { failFetch: false, failRow: false };
-  const statusBody = { ok: true, enabled: true, reason: null, assistant_name: null, provider: 'mock', provider_ready: false, today: { used: 1, limit: 50 }, month: { key: '2026-10', spend_usd: 1, cap_usd: 20, pct: 5, blocked: false, by_user: [] } };
+  const statusBody = { ok: true, enabled: true, reason: null, assistant_name: null, provider: 'mock', provider_ready: false, today: { used: 1, limit: 50 }, month: { key: '2026-10', spend_usd: 1, cap_usd: 20, pct: 5, blocked: false, by_user: [] },
+    // v2: who answers, a limit hit, the free quota, own keys, the paid switch
+    source: { provider: 'cloudflare', key_source: 'free', model: '@cf/zai-org/glm-4.7-flash', label: 'Free AI' }, blocked: null, blocked_text: null, test_mode: null,
+    free: { configured: true, left_pct: 80, resets_at: '2026-10-17T00:00:00.000Z', exhausted: false, daily_neurons: 10000, used_neurons: 2000, business_neurons: 2000, share_pct: 100 },
+    keys: { allow_own: true, me: null, business: null, people: [] }, paid: { switched_on: false, platform_key_ready: false, cap_usd: 0, available: false } };
   const builder = (t) => {
     const q = { select(){ return q; }, eq(){ return q; }, in(){ return q; }, order(){ return q; },
       limit(){ log.from.push(t); return Promise.resolve({ data: [], error: null }); },
@@ -5482,10 +5490,100 @@ function testCobraReviewStatic(){
   assertEqual([/cobraConvWanted\(c, id\)/.test(extractDecl(script, 'cobraConvLoad')), /convWant = id/.test(extractDecl(script, 'cobraOpenConv')), /convWant = null/.test(extractDecl(script, 'cobraNewChat')), /cobraClientContext\(mode, a\.data\.context\)/.test(extractDecl(script, 'cobraConvLoad'))],
     [true, true, true, true], 'a slow chat load never replaces New chat or a chat picked later; a loaded chat keeps the app-side context');
 }
+// Stage 6 v2 G6: who answers, the free quota, own keys, the own-Claude card and the ChatGPT row (coming later).
+function testCobraV2Helpers(sb){
+  console.log('\nStage 6 v2: provider status, free quota, own keys (pure helpers)');
+  const refused = "Your own AI key didn't work, so the business's AI answers for now. Check it in Your AI key.";
+  const base = { enabled: true, provider: 'cloudflare', today: { used: 1, limit: 50 }, month: { blocked: false, pct: 90, cap_usd: 20 }, paid: { switched_on: true }, keys: { me: { provider: 'openai', last4: 'WXYZ', status: 'invalid' } }, test_mode: 'forced' };
+  const B = (st, owner) => (sb.cobraBannerOf(st, '', { isOwner: owner }) || {}).text || null;
+  const calm = { ...base, keys: {}, paid: { switched_on: false } };
+  assertEqual([B({ ...base, blocked: 'free_quota', blocked_text: 'The gateway says which limit.' }, true), B({ ...base, blocked: 'free_share', blocked_text: null }, true), B(base, true), /^This month's paid AI spend is at 90%/.test(B({ ...base, keys: {} }, true)),
+    B(calm, true), B({ ...calm, test_mode: 'not_configured' }, false), B({ ...calm, test_mode: null }, true)],
+  ['The gateway says which limit.', sb.COBRA_ERRORS.free_share, refused, true, 'Test mode is on in Settings.', "Test mode: the free AI isn't set up yet.", null],
+  'cobraBannerOf: a limit hit (in the gateway\'s words) > own key refused > 80% (paid on only) > test mode');
+  assertEqual([sb.cobraSendBlock({ ...base, blocked: 'free_quota' }), sb.cobraSendBlock({ ...base, blocked: null }), sb.cobraSendBlock({ ...base, blocked: 'cap_reached', enabled: false, reason: 'off' })], ['free_quota', '', 'off'], 'cobraSendBlock: a limit hit stops sending (after off)');
+  const free = (pct, ks, used) => ({ today: { used: used || 1, limit: 50 }, free: { left_pct: pct }, source: { key_source: ks } });
+  assertEqual([sb.cobraLeftText(free(10, 'free')), sb.cobraLeftText(free(20, 'free')), sb.cobraLeftText(free(10, 'own_user')), sb.cobraLeftText(free(0, 'free')), sb.cobraLeftText(free(null, 'free')), sb.cobraLeftText(free(10, 'free', 45))],
+    ['Free AI is low today', '', '', '', '', '5 questions left today · Free AI is low today'], 'cobraLeftText: "Free AI is low today" under 15% left, only while the free AI answers');
+  // the reset at 00:00 UTC, in the business's time zone
+  const R = sb.cobraFreeResetText, at = (iso) => Date.parse(iso);
+  assertEqual([R('2026-10-17T00:00:00.000Z', 'Australia/Sydney', at('2026-10-16T22:00:00Z')), R('2026-10-17T00:00:00.000Z', 'Australia/Sydney', at('2026-10-16T03:00:00Z')),
+    R('2026-10-17T00:00:00.000Z', 'America/New_York', at('2026-10-16T15:00:00Z')), R('2026-10-18T00:00:00.000Z', 'America/New_York', at('2026-10-17T01:00:00Z')), R('', 'UTC', 0), R('2026-10-17T00:00:00.000Z', 'Not/AZone', 0)],
+  ['at 11:00', 'tomorrow', 'at 20:00', 'tomorrow', 'tomorrow', 'tomorrow'], 'cobraFreeResetText: Sydney 11:00 / New York 20:00 later today, else tomorrow');
+  const M = (f) => sb.cobraFreeMeter(f, 'Australia/Sydney', at('2026-10-16T22:00:00Z')), r = '2026-10-17T00:00:00.000Z';
+  assertEqual([M(null), M({ configured: false, left_pct: 50 }), M({ configured: true, daily_neurons: 10000, used_neurons: 3800, left_pct: 20, resets_at: r }), M({ configured: true, left_pct: 10, resets_at: r }).tone,
+    M({ configured: true, left_pct: 40, exhausted: true, resets_at: r }).bar, M({ configured: true, left_pct: null })],
+  [null, null, { bar: 62, tone: 'good', text: '62% left today · back at 11:00' }, 'warn', 0, null], 'cobraFreeMeter: used / daily neurons (owners), else left_pct; used up = 0');
+  // keys: the gateway's KEY_RE and keyProviderOf, fakes only
+  const K = sb.cobraKeyProblem, oa = 'sk-test-FAKE-0000000000000000', an = 'sk-ant-test-FAKE-000000000000';
+  assertEqual([K('', ' '), K('openai', oa), K('', ` ${an} `), K('anthropic', oa), K('openai', 'pk-test-FAKE-0000000000000000'), K('openai', 'sk-test FAKE 0000000000000000'), K('openai', 'sk-test-FAKE'), K('openai', 'sk-' + 'x'.repeat(298))],
+    ['Paste the key first.', '', '', sb.COBRA_ERRORS.key_provider_mismatch, sb.COBRA_ERRORS.key_format, sb.COBRA_ERRORS.key_format, sb.COBRA_ERRORS.key_format, sb.COBRA_ERRORS.key_format], 'cobraKeyProblem: the shape and provider checks the gateway makes');
+  const none = sb.cobraKeyCardHtml({ scope: 'me', key: null }, false), bad = sb.cobraKeyCardHtml({ scope: 'me', key: { provider: 'openai', last4: 'W<YZ', status: 'invalid' } }, false);
+  const off = sb.cobraKeyCardHtml({ scope: 'me', key: null, off: true }), biz = sb.cobraKeyCardHtml({ scope: 'business', key: { provider: 'anthropic', last4: 'ABCD', status: 'ok' } }, true);
+  assertEqual([none.includes('No key saved'), none.includes('Remove'), (none.match(/<input /g) || []).length, bad.includes('OpenAI ••••W&lt;YZ'), bad.includes('Refused'), bad.includes('Check again') && bad.includes('Remove'), bad.includes("don't count against the business's limits")],
+    [true, false, 1, true, true, true, true], 'cobraKeyCardHtml: no key / provider and the last 4 / Refused; the data note');
+  assertEqual([off.includes(sb.COBRA_ERRORS.keys_off), off.includes('<input'), biz.includes('id="cobra-key-input-business"'), biz.includes('monthly cap'), biz.includes('Working'), (biz.match(/ disabled/g) || []).length >= 4],
+    [true, false, true, true, true, true], 'cobraKeyCardHtml: switched off by an owner; the business key counts against the cap; busy disables it');
+  const card = (role) => sb.cobraOwnClaudeCardHtml({ id: 'u', role }, 'Acme <Air>');
+  assertEqual([card('va'), card('technician'), card('marketing'), sb.cobraOwnClaudeCardHtml(null, 'x'), card('owner').includes('Get your connector key'), card('manager').includes('read Acme &lt;Air&gt; through your private connector')],
+    ['', '', '', '', true, true], 'cobraOwnClaudeCardHtml: owners and managers only; the name from branding, escaped');
+  const gpt = sb.cobraChatGptRowHtml();
+  assertEqual([gpt.includes('onclick'), / disabled>/.test(gpt), gpt.includes('aria-disabled="true"'), gpt.includes('Coming later')], [false, true, true, true], 'cobraChatGptRowHtml: greyed, disabled, no handler');
+  const S = sb.cobraSourcePill;
+  assertEqual([S(null).html.includes('Unknown'), S({ blocked: 'free_quota', blocked_text: 'Used up.' }).text, S({ source: { key_source: 'free', model: '@cf/zai-org/glm-4.7-flash' } }).html.includes('Free AI'), S({ source: { key_source: 'free', model: '@cf/zai-org/glm-4.7-flash' } }).text.startsWith('GLM 4.7 Flash (free).'),
+    S({ source: { key_source: 'mock' }, test_mode: 'forced' }).html.includes('Test mode'), S({ source: { key_source: 'own_business', model: 'gpt-4.1-mini' } }).text.includes('monthly cap'), S({ source: null }).html.includes('Nothing yet')],
+  [true, 'Used up.', true, true, true, true, true], 'cobraSourcePill: who answers now, in words');
+  assertEqual([sb.cobraPaidKeyReady(null), sb.cobraPaidKeyReady({ provider_ready: true }), sb.cobraPaidKeyReady({ keys: { business: { provider: 'openai', status: 'invalid' } } }), sb.cobraPaidKeyReady({ keys: { business: { provider: 'anthropic', status: 'ok' } } })],
+    [false, true, false, true], "cobraPaidKeyReady: the server's key, or a business key that wasn't refused");
+  // settings: provider 3-state, own keys, the provider's models
+  const P = sb.cobraSettingProblem, prices = sb.cobraPricesOf({});
+  assertEqual([P('provider', 'anthropic', prices, { cap: 0, keyReady: true }), P('provider', 'anthropic', prices, { cap: 5, keyReady: false }), P('provider', 'auto', prices, { cap: 0 }), P('provider', 'mock', prices, null),
+    P('model_per_task.cloudflare:heavy', '@cf/zai-org/glm-4.7-flash', prices), !!P('model_per_task.openai:assistant', 'gpt-9', prices)],
+  ['Set a monthly cap above 0 first, so paid use has a limit.', "The server's Anthropic key isn't added yet, and there's no business key.", '', '', '', true], 'cobraSettingProblem: the paid switch needs a cap above 0 and a key; any listed model');
+  const s2 = sb.cobraSettingsOf({ provider: 'anthropic', allow_own_keys: false, free_quota: { share_pct: 50 }, model_per_task: { 'cloudflare:assistant': '@cf/qwen/qwen3.8-27b' } });
+  assertEqual([s2.provider, s2.allow_own_keys, s2.free_quota, s2.model_per_task['cloudflare:assistant'], sb.cobraSettingsOf({ provider: 'mock' }).provider, sb.cobraSettingsOf({ provider: 'x' }).provider, sb.cobraSettingsOf({}).allow_own_keys],
+    ['anthropic', false, { share_pct: 50 }, '@cf/qwen/qwen3.8-27b', 'mock', 'auto', true], 'cobraSettingsOf: provider auto / anthropic / mock, own keys, the free quota read-only');
+  assertEqual([sb.cobraPatchOf('provider', 'anthropic', s2), sb.cobraPatchOf('provider', 'mock', s2), sb.cobraPatchOf('provider', 'auto', s2), sb.cobraPatchOf('allow_own_keys', 1, s2), sb.cobraPatchOf('model_per_task.openai:heavy', 'gpt-4o-mini', { model_per_task: { assistant: 'a' } })],
+    [{ provider: 'anthropic' }, { provider: 'mock' }, { provider: 'auto' }, { allow_own_keys: true }, { model_per_task: { assistant: 'a', 'openai:heavy': 'gpt-4o-mini' } }], 'cobraPatchOf: the paid switch, test mode, own keys, a provider\'s model');
+  assertEqual([sb.cobraPatchText('provider', 'anthropic'), sb.cobraPatchText('provider', 'auto'), sb.cobraPatchText('provider', 'mock'), sb.cobraPatchText('allow_own_keys', false), sb.cobraPatchText('model_per_task.cloudflare:assistant', 'm'), sb.cobraPatchText('model_per_task.heavy', 'm')],
+    ['paid AI (Anthropic) on', 'paid AI and test mode off', 'test mode on', 'own AI keys switched off', 'free AI everyday model m', 'heavy-task model m'], 'cobraPatchText: the settings history in words');
+}
+function testCobraV2Static(){
+  console.log('\nStage 6 v2: own keys and the AI provider block (static rules)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const block = html.slice(html.indexOf('// ══ AI assistant (stage 6): own block, start ══'), html.indexOf('// ══ AI assistant (stage 6): own block, end ══'));
+  const card = extractDecl(script, 'cobraKeyCardHtml'), save = extractDecl(script, 'cobraKeySave');
+  const inputs = card.match(/<input [^>]*>/g) || [];
+  assertEqual([inputs.length, inputs.every(i => i.includes('type="password"') && i.includes('autocomplete="off"') && i.includes('spellcheck="false"'))], [1, true], 'the key input is a password field, no autocomplete, no spellcheck');
+  const cleared = save.indexOf("input.value = ''"), firstAwait = save.indexOf('await ');
+  assertEqual([cleared > 0, firstAwait > cleared], [true, true], 'cobraKeySave clears the input before the first await');
+  assertEqual(block.split('\n').filter(l => /localStorage|sessionStorage/.test(l) && /key/i.test(l)), [], 'no browser storage in the block mentions a key');
+  const flows = ['cobraKeySave', 'cobraKeyTest', 'cobraKeyDelete', 'cobraPatchKey', 'cobraKeyPut', 'cobraKeyAfter', 'cobraKeyState', 'cobraOpenMcpKeys', 'cobraPatchSource'];
+  assertEqual(flows.filter(n => /\brender\(/.test(extractDecl(script, n))), [], 'the key flows never draw the app (render)');
+  assertEqual([/showToast/.test(save), /COBRA\.\w+\s*=\s*(key|req)\b/.test(save), /cobraKeyLog\([^;]*\$\{(key|req)\b/.test(save), /console\./.test(save)], [false, false, false, false], 'the pasted key never reaches a toast, COBRA, the settings history or the console');
+  assertEqual(['cobraKeySave', 'cobraKeyTest', 'cobraKeyDelete'].map(n => (extractDecl(script, n).match(/step: '(key_[a-z]+)'/) || [])[1]), ['key_save', 'key_test', 'key_delete'], 'the key flows call key_save / key_test / key_delete');
+  const page = extractDecl(script, 'renderCobraSettingsPage');
+  assertEqual([page.includes('cobraChatGptRowHtml()'), page.includes("cobraKeyCardHtml(cobraKeyState('business')"), page.includes("cobraSaveSetting('allow_own_keys'"), page.includes("? 'auto' : 'mock')"), page.includes("setBlock('AI provider'"), page.includes("setBlock('Provider'")],
+    [true, true, true, true, true, false], 'Settings → AI: the AI provider block (business key, own keys, ChatGPT coming later, test mode) replaces Provider');
+  const panel = extractDecl(script, 'cobraPanelHtml'), view = extractDecl(script, 'cobraView'), body = extractDecl(script, 'cobraBodyHtml');
+  assertEqual([panel.includes("btn('key', 'key', 'Your AI key', \"cobraView('key')\")"), view.includes("'key'"), body.includes('cobraOwnClaudeCardHtml(getRealProfile()'), panel.includes('id="cobra-src"')], [true, true, true, true], "the panel: the Your AI key view with the own-Claude card, and who answers under the name");
+  if (!fs.existsSync(COBRA_GATEWAY)) { console.log('  (skipped: supabase/functions/ai-gateway/index.ts is not in this tree)'); return; }
+  const gw = fs.readFileSync(COBRA_GATEWAY, 'utf8'), sb = loadSandbox();
+  const keyRe = (/export const KEY_RE = \/(.+)\/;/.exec(gw) || [])[1];
+  assertEqual([keyRe, gw.includes('key.startsWith("sk-ant-") ? "anthropic" : key.startsWith("sk-") ? "openai" : null')], [sb.COBRA_KEY_RE.source, true], 'cobraKeyProblem: the gateway\'s KEY_RE and keyProviderOf');
+  assertEqual(['key_save', 'key_test', 'key_delete'].filter(st => !new RegExp(`\\b${st}: \\{ run:`).test(gw)), [], 'the gateway has the key steps the app calls (MANAGE_STEPS)');
+  const labels = /export const SOURCE_LABEL[^=]*= \{([^}]*)\}/.exec(gw), pdm = /export const PROVIDER_MODEL_DEFAULTS[^=]*= \{([^}]*)\}/.exec(gw);
+  assertEqual([labels ? [...labels[1].matchAll(/(\w+):/g)].map(m => m[1]).sort() : null, pdm ? Object.fromEntries([...pdm[1].matchAll(/"([^"]+)": "([^"]+)"/g)].map(m => [m[1], m[2]])) : null],
+    [Object.keys(sb.COBRA_SOURCE_LABEL).sort(), { ...sb.COBRA_PROVIDER_MODELS }], 'who answers and each provider\'s default models are the gateway\'s');
+  const cf = Object.keys(sb.COBRA_MODELS).filter(k => k.startsWith('@cf/')), oa = Object.keys(sb.COBRA_MODELS).filter(k => sb.COBRA_MODELS[k].provider==='openai');
+  assertEqual([cf.length, oa.length, sb.COBRA_DEFAULTS.monthly_cap_usd, [...cf, ...oa].filter(k => !gw.includes(`"${k}": { in: `))], [4, 3, 0, []], 'Settings lists the 4 free and 3 OpenAI models the gateway prices; the cap defaults to 0');
+}
 testCobraHelpers(loadSandbox());
 testCobraStatic();
 testCobraReviewFixes(loadSandbox());
 testCobraReviewStatic();
+testCobraV2Helpers(loadSandbox());
+testCobraV2Static();
 
 (async () => {
   await testVacationFollowUps();
