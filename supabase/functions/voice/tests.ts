@@ -12,14 +12,17 @@ const ROUTING = {
   officeRingSeconds: 20, backupRingSeconds: 20, callerId: "1300 380 090",
 };
 // A tiny in-memory stand-in for the Supabase client.
-function fakeDb(opts: { ronOn?: boolean; ronDate?: string; ronBreak?: boolean; routing?: any } = {}) {
+// opts.vac (stage 3): the employees and their vacations; throws = reading the vacations fails.
+function fakeDb(opts: { ronOn?: boolean; ronDate?: string; ronBreak?: boolean; routing?: any; vac?: { employees?: any[]; vacations?: any[]; throws?: boolean } } = {}) {
   const T: Record<string, any[]> = {
     contacts: [{ id: "c-known", full_name: "Kevin Love", phone: "+61466103709", division: "Chimney", created_at: "2026-09-23", messages: [], contacted_at: null }],
     calls: [],
-    profiles: [{ id: "ron1", role: "va", permissions: { crm: true }, on_duty: opts.ronOn !== false, on_duty_date: opts.ronDate || "2026-10-02", on_break: !!opts.ronBreak }, { id: "tech1", role: "technician", permissions: { crm: false }, on_duty: true, on_duty_date: "2026-10-02" }, { id: "own1", role: "owner", permissions: {} }],
+    profiles: [{ id: "ron1", role: "va", full_name: "Vic", permissions: { crm: true }, on_duty: opts.ronOn !== false, on_duty_date: opts.ronDate || "2026-10-02", on_break: !!opts.ronBreak }, { id: "tech1", role: "technician", permissions: { crm: false }, on_duty: true, on_duty_date: "2026-10-02" }, { id: "own1", role: "owner", permissions: {} }],
     settings: [{ phone_routing: opts.routing || JSON.parse(JSON.stringify(ROUTING)), company_name: "The Guys Service Group" }],
+    ...(opts.vac ? { employees: opts.vac.employees || [], employee_vacations: opts.vac.vacations || [] } : {}),
   };
   const from = (t: string) => {
+    if (t === "employee_vacations" && opts.vac && opts.vac.throws) throw new Error("vacations unreadable");
     const st: any = { f: [] as any[], upd: null as any, range: null as any };
     const rows = () => { let r = T[t] || []; for (const f of st.f) r = r.filter(f); if (st.range) r = r.slice(st.range[0], st.range[1] + 1); return r; };
     const api: any = {
@@ -27,6 +30,16 @@ function fakeDb(opts: { ronOn?: boolean; ronDate?: string; ronBreak?: boolean; r
       range: (a: number, b: number) => { st.range = [a, b]; return api; },
       eq: (k: string, v: any) => { st.f.push((r: any) => r[k] === v); return api; },
       is: (k: string, v: any) => { st.f.push((r: any) => (r[k] ?? null) === v); return api; },
+      lte: (k: string, v: any) => { st.f.push((r: any) => r[k] != null && r[k] <= v); return api; },
+      // or("ends_on.gte.x,options->>autoBack.eq.false"): a column or a jsonb key as text
+      or: (expr: string) => {
+        const ps = expr.split(",").map((p) => {
+          const m = /^(\w+)(?:->>(\w+))?\.(eq|gte)\.(.*)$/.exec(p); if (!m) throw new Error("fake or(): " + p);
+          const val = (r: any) => m[2] ? (r[m[1]] && r[m[1]][m[2]] != null ? String(r[m[1]][m[2]]) : null) : r[m[1]];
+          return (r: any) => { const x = val(r); return x != null && (m[3] === "eq" ? String(x) === m[4] : x >= m[4]); };
+        });
+        st.f.push((r: any) => ps.some((f) => f(r))); return api;
+      },
       single: () => Promise.resolve({ data: rows()[0] || null, error: null }),
       insert: (o: any) => { const row = { id: o.id || `${t}-${(T[t] = T[t] || []).length + 1}`, ...o }; T[t].push(row); return { select: () => ({ single: () => Promise.resolve({ data: row, error: null }) }), then: (ok: any) => ok({ error: null }) }; },
       update: (o: any) => { st.upd = o; return api; },
@@ -325,6 +338,92 @@ const IN = { From: "+61412345678", To: "+61400000001" };
   const tok = await voiceToken("office-ron1", 1790000000);
   const [h, pl] = tok.split(".").slice(0, 2).map((s) => JSON.parse(atob(s.replace(/-/g, "+").replace(/_/g, "/"))));
   eq([h.alg, h.cty, pl.iss, pl.sub, pl.exp - pl.iat, pl.grants.identity, pl.grants.voice.incoming.allow, pl.grants.voice.outgoing.application_sid], ["HS256", "twilio-fpa;v=1", "SKtest", "ACtest", 3600, "office-ron1", true, "APtest"], "token payload");
+  // 19. Vacations (stage 3): "Calls not routed to them" skips the person; everything else as before.
+  // Their own routing with neutral demo names and made-up mobiles (the repo is public); the office login is the fixture's.
+  const R19 = () => ({ ...JSON.parse(JSON.stringify(ROUTING)), people: { ava: { name: "Ava", mobile: "+61400000022", available: true }, ben: { name: "Ben", mobile: "0400 000 011", available: true } },
+    divisions: { Aircon: ["ben"], Chimney: ["ben"], "Pressure Washing": ["ava"], Other: ["ava", "ben"] } });
+  const EMPS = [{ id: "e-ben", name: "Ben Gale", phone: "0400 000 011", status: "Active" }, { id: "e-ava", name: "Ava", phone: "0400 000 022", status: "Active" }, { id: "e-vic", name: "Vic", phone: "", status: "Active" }];
+  const VAC = (o: any = {}) => ({ id: "v1", employee_id: "e-ben", starts_on: "2026-10-01", ends_on: "2026-10-05", stand_in_id: null, options: { noCalls: true }, ended_at: null, cancelled_at: null, ...o });
+  const C0 = (emps: any[], vacs: any[]): any => ({ day: "2026-10-02", tz: "Australia/Sydney", vacs, employees: emps, profiles: [] });
+  const P = { ava: { name: "Ava", mobile: "+61400000022", available: true }, ben: { name: "Ben", mobile: "0400 000 011", available: true } };
+  const awayKeys = (people: any, emps: any[], vacs: any[]) => [...vacPhoneAway(people, C0(emps, vacs))].sort();
+  eq(awayKeys(P, [{ id: "e1", name: "B. G.", phone: "0400000011" }], [VAC({ employee_id: "e1" })]), ["ben"], "vacPhoneAway: by mobile");
+  eq(awayKeys(P, [{ id: "e1", name: "Ava", phone: "" }], [VAC({ employee_id: "e1" })]), ["ava"], "vacPhoneAway: by full name");
+  eq(awayKeys(P, [{ id: "e1", name: "Ben Gale", phone: "" }], [VAC({ employee_id: "e1" })]), ["ben"], "vacPhoneAway: by a first name nobody else has");
+  eq(awayKeys(P, [{ id: "e1", name: "Ben Gale", phone: "" }, { id: "e2", name: "Ben Lowe", phone: "" }], [VAC({ employee_id: "e1" })]), [], "vacPhoneAway: a shared first name is no match");
+  eq(awayKeys({ nc: { name: "Ben Cole", mobile: "" } }, [{ id: "e1", name: "Ben Gale", phone: "" }], [VAC({ employee_id: "e1" })]), [], "vacPhoneAway: a different full name is no match");
+  eq(awayKeys(P, [{ id: "e1", name: "Ava", phone: "" }], [VAC({ employee_id: "e1", options: { noNotify: true } })]), [], "vacPhoneAway: only 'Calls not routed' counts");
+  // the owner Ben Gale (a login with no employee card) is the backup phone "Ben"; the technician Ben Lowe is on vacation
+  const BENS = { ben: { name: "Ben", mobile: "", available: true } }, LOWE = [{ id: "e-lowe", name: "Ben Lowe", phone: "0400 000 001" }];
+  const withProfiles = (people: any, emps: any[], vacs: any[], profiles: any[]) => [...vacPhoneAway(people, { ...C0(emps, vacs), profiles })].sort();
+  eq(withProfiles(BENS, LOWE, [VAC({ employee_id: "e-lowe" })], [{ id: "p-gale", full_name: "Ben Gale", technician_name: null, role: "owner" }]), [],
+    "vacPhoneAway: a login of any role with that first name (the owner Ben Gale, no employee card) is a twin → the owner's phone isn't skipped");
+  eq(withProfiles(BENS, LOWE, [VAC({ employee_id: "e-lowe" })], [{ id: "p-lowe", full_name: "Ben Lowe", technician_name: "Ben Lowe", role: "technician" }]), ["ben"],
+    "vacPhoneAway: Ben Lowe's own login is no twin");
+  eq(withProfiles(BENS, LOWE, [VAC({ employee_id: "e-lowe" })], [{ id: "p-x", full_name: "Someone", technician_name: "Ben", role: "technician" }]), [], "vacPhoneAway: a Jobs & Commissions name counts as a twin too");
+  // the backup phone "Sam" has the mobile of Sam Lee (not away): Sam Park, away, is not that phone
+  const SAMS = [{ id: "e-lee", name: "Sam Lee", phone: "0411 111 111" }, { id: "e-park", name: "Sam Park", phone: "" }];
+  eq(awayKeys({ sam: { name: "Sam", mobile: "0411111111" } }, SAMS, [VAC({ employee_id: "e-park" })]), [], "vacPhoneAway: the same mobile decides first (Sam Lee), never the name of someone else away");
+  eq(awayKeys({ sam: { name: "Sam", mobile: "0411111111" } }, SAMS, [VAC({ employee_id: "e-lee" })]), ["sam"], "vacPhoneAway: …and when that person is away, skipped");
+  eq(awayKeys({ x: { name: "X", mobile: "0411111111" } }, [...SAMS, { id: "e-dup", name: "Dup", phone: "0411 111 111" }], [VAC({ employee_id: "e-lee" })]), [], "vacPhoneAway: a mobile two employees share is no match");
+  eq([vacPhoneEmployee({ name: "Sam Park", mobile: "" } as any, "k", C0(SAMS, []))?.id, vacPhoneEmployee({ name: "", mobile: "" } as any, "Sam Lee", C0(SAMS, []))?.id, vacPhoneEmployee({ name: "Sam", mobile: "" } as any, "k", C0(SAMS, []))],
+    ["e-park", "e-lee", null], "vacPhoneEmployee: the full name, the key when unnamed, a shared first name → none");
+  eq(ownersFor({ ...R19(), people: P } as any, "Aircon", new Set(["ben"])), ["+61400000022"], "ownersFor: someone away → the next in line");
+  // Ben away: an aircon caller (his service), Vic off shift, 10:00 → Ava, never Ben.
+  const aircon = (o: any) => { const d = fakeDb({ ronOn: false, routing: R19(), ...o }); d.T.contacts[0].division = "Aircon"; return d; };
+  db = aircon({ vac: { employees: EMPS, vacations: [VAC()] } });
+  x = await body(await step(db, "incoming", { CallSid: "CV1", From: "0466 103 709", To: IN.To }, {}, FRI_10));
+  has(x, "<Number>+61400000022</Number>", "vacation: Ben away → Ava rings");
+  hasNot(x, "+61400000011", "vacation: …never Ben's number");
+  db = aircon({ vac: { employees: EMPS, vacations: [VAC(), VAC({ id: "v2", employee_id: "e-ava" })] } }); sms.length = 0;
+  x = await body(await step(db, "incoming", { CallSid: "CV2", From: "0466 103 709", To: IN.To }, {}, FRI_10));
+  has(x, "couldn't get to the phone", "vacation: both owners away → voicemail with the 'missed' words");
+  hasNot(x, "Our office is closed", "vacation: …not the 'closed' words");
+  db = aircon({ vac: { employees: EMPS, vacations: [VAC({ options: { noNotify: true } })] } });
+  x = await body(await step(db, "incoming", { CallSid: "CV3", From: "0466 103 709", To: IN.To }, {}, FRI_10));
+  has(x, "<Number>+61400000011</Number>", "vacation: 'Calls not routed' unticked → Ben rings as before");
+  db = aircon({ vac: { employees: EMPS, vacations: [VAC({ ended_at: "2026-10-01T03:00:00Z" })] } });
+  x = await body(await step(db, "incoming", { CallSid: "CV4", From: "0466 103 709", To: IN.To }, {}, FRI_10));
+  has(x, "<Number>+61400000011</Number>", "vacation: ended → Ben rings as before");
+  // after_office (Vic didn't answer) skips Ben too
+  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [VAC()] } });
+  x = await body(await step(db, "after_office", { CallSid: "CV5", DialCallStatus: "no-answer", ...IN }, { div: "Aircon" }, FRI_10));
+  has(x, "<Number>+61400000022</Number>", "vacation: after the office, Ben away → Ava");
+  hasNot(x, "+61400000011", "vacation: …not Ben");
+  // Vic on vacation while his shift is on today → his browser phone stays quiet
+  const VICV = VAC({ id: "v3", employee_id: "e-vic" });
+  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [VICV] } });
+  x = await body(await step(db, "incoming", { CallSid: "CV6", From: "0466 103 709", To: IN.To }, {}, FRI_10));
+  hasNot(x, "office-ron1", "vacation: Vic away → his browser phone doesn't ring");
+  has(x, "<Number>+61400000011</Number>", "vacation: …the call goes to the owners (Chimney → Ben)");
+  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [VICV] } });
+  x = await body(await step(db, "incoming", { CallSid: "CV7", ...IN }, {}, FRI_21));
+  has(x, "Our office is closed", "vacation: Vic away, outside the backup hours → the closed voicemail");
+  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [VAC({ id: "v3", employee_id: "e-vic", options: { noNotify: true } })] } });
+  x = await body(await step(db, "incoming", { CallSid: "CV8", From: "0466 103 709", To: IN.To }, {}, FRI_10));
+  has(x, "office-ron1", "vacation: Vic away without 'Calls not routed' → rings as before");
+  // fail-open: no vacations table, or reading it throws → routing exactly as before
+  db = fakeDb();
+  x = await body(await step(db, "incoming", { CallSid: "CV9", From: "0466 103 709", To: IN.To }, {}, FRI_10));
+  has(x, "office-ron1", "vacation: no table → as before");
+  const quiet = console.error; let logged = "";
+  console.error = (...a: any[]) => { logged += a.map(String).join(" "); };
+  db = fakeDb({ routing: R19(), vac: { employees: EMPS, vacations: [VICV], throws: true } });
+  x = await body(await step(db, "incoming", { CallSid: "CV10", From: "0466 103 709", To: IN.To }, {}, FRI_10));
+  console.error = quiet;
+  has(x, "office-ron1", "vacation: reading them throws → as before (Vic rings)");
+  eq(logged.includes("vacations not read"), true, "vacation: the failure is logged");
+  // the day is the business's (settings.catalog.region.timeZone, review A2): Fri 2 Oct 10:00 Sydney is Thu 1 Oct 19:00 in Chicago
+  const TILL1 = VAC({ starts_on: "2026-09-28", ends_on: "2026-10-01" });
+  db = aircon({ vac: { employees: EMPS, vacations: [TILL1] } });
+  x = await body(await step(db, "incoming", { CallSid: "CV11", From: "0466 103 709", To: IN.To }, {}, FRI_10));
+  has(x, "<Number>+61400000011</Number>", "vacation zone: a Sydney business, away until 1 Oct → back on the 2nd, Ben rings");
+  db = aircon({ vac: { employees: EMPS, vacations: [TILL1] } }); db.T.settings[0].catalog = { region: { timeZone: "America/Chicago" } };
+  x = await body(await step(db, "incoming", { CallSid: "CV12", From: "0466 103 709", To: IN.To }, {}, FRI_10));
+  has(x, "<Number>+61400000022</Number>", "vacation zone: a Chicago business, still 1 Oct there → Ben is away, Ava rings");
+  hasNot(x, "+61400000011", "vacation zone: …never Ben");
+
   console.log(`${pass} passed, ${fail} failed`);
+  if (fail) (globalThis as any).process?.exit(1);
   console.log("TOKEN " + tok);
 })();

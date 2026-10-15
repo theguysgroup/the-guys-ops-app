@@ -83,7 +83,7 @@ function enclosingFunction(idx){
   return { name, text: name ? fnText(name) : '' , at };
 }
 function testStaticScan(){
-  const re = /fetch\(\s*(CONV_URL|VOICE_URL|PASSKEY_URL|BACKUP_URL|AUTOMATIONS_URL|`\$\{VOICE_URL\}|SUPABASE_URL \+ '\/functions\/v1\/)/g; let m; const seen = [];
+  const re = /fetch\(\s*(CONV_URL|VOICE_URL|PASSKEY_URL|BACKUP_URL|AUTOMATIONS_URL|MCP_URL|`\$\{VOICE_URL\}|SUPABASE_URL \+ '\/functions\/v1\/)/g; let m; const seen = [];
   while ((m = re.exec(SRC))) {
     const f = enclosingFunction(m.index);
     seen.push(f.name);
@@ -93,6 +93,7 @@ function testStaticScan(){
   ok(seen.length >= 7 && seen.includes('passkeyCall'), 'static scan found the server calls (setMyBreak, convSend, mdCloseOldDays, mdEndOfDay, askForReview, voiceFetch, passkeyCall)', seen);
   ok(seen.includes('backupFetch') && seen.includes('downloadFullBackup'), 'static scan found the backup function calls (backupFetch, downloadFullBackup)', seen);
   ok(seen.includes('automationEvent'), 'static scan found the automation engine\'s "look now" (automationEvent)', seen);
+  ok(seen.includes('mcpCall'), 'static scan found the private connector\'s server calls (mcpCall)', seen);
   // Business details (14 Oct): the insurance certificate upload and the week-start change stop in a read-only mode.
   ok(['pickBusinessCertificate', 'setWeekStart'].every(n => /readOnlyReason\(\)/.test(fnText(n))), 'business certificate upload and week start check read-only mode');
   // Drag & drop (round 3, T1.1): a dropped file goes through the same upload functions as a picked one; each checks the mode.
@@ -162,7 +163,10 @@ function actionSandbox(){
     // Deleting services, People details in place, Pipeline columns (round 3, D-settings)
     'openServiceDelete', 'confirmServiceDelete', 'moveServiceRecords', 'restoreService', 'setEmployeeName', 'renameEmployee', 'setEmployeeRole', 'addEmployeeCard', 'moveStage',
     // Settings → Connectors (14 Oct): every switch, Disconnect / Remove, the add-ons and a new connected source
-    'connToggleItem', 'connItemOff', 'connToggleAccount', 'connAccountOff', 'connToggleAuto', 'openConnDisconnect', 'openConnRemove', 'connOpenStopWindow', 'connDisconnect', 'connReconnect', 'connRemove', 'connAddonConnect', 'connGbpSent', 'connAddConnectedSource'];
+    'connToggleItem', 'connItemOff', 'connToggleAccount', 'connAccountOff', 'connToggleAuto', 'openConnDisconnect', 'openConnRemove', 'connOpenStopWindow', 'connDisconnect', 'connReconnect', 'connRemove', 'connAddonConnect', 'connGbpSent', 'connAddConnectedSource',
+    // Settings > Connectors > Private connector (MCP), stage 5: every change, and the server call itself
+    'mcpCall', 'mcpCreateKey', 'mcpRevokeKey', 'mcpRevokeNow', 'mcpSetSetting', 'mcpEditServer', 'mcpSaveServer', 'mcpDeleteServer', 'mcpDeleteServerNow', 'mcpTestServer', 'mcpOpenRunTool', 'mcpRunTool',
+    'mcpEditRule', 'mcpRuleSample', 'mcpSaveRule', 'mcpToggleRule', 'mcpDeleteRule', 'mcpDeleteRuleNow', 'mcpPreview', 'mcpCommit', 'mcpUndo', 'mcpUndoNow'];
   vm.runInContext(names.map(fnText).join('\n'), ctx);
   return ctx;
 }
@@ -254,6 +258,15 @@ async function testActions(){
     await run(`connAddConnectedSource('ChatGPT')`);
     ok(vm.runInContext('connEv.prevented', ctx) === 2, `${mode}: an account tickbox clicked in a read-only mode stays as it was`);
     ok(ctx.log.toasts.length - beforeConn === 14 && ctx.log.toasts.slice(beforeConn).every(t => /not saved/.test(t)), `${mode}: each Connectors change says it is not saved`, ctx.log.toasts.slice(beforeConn));
+    // Settings > Connectors > Private connector (MCP): no key, setting, permission, server, import or undo reaches the server.
+    const beforeMcp = ctx.log.toasts.length;
+    for (const c of [`mcpCreateKey()`, `mcpRevokeKey('k1')`, `mcpRevokeNow('k1')`, `mcpSetSetting('rateLimitPerMin', '30')`, `mcpEditServer('s1')`, `mcpSaveServer()`, `mcpDeleteServer('s1')`,
+      `mcpDeleteServerNow('s1')`, `mcpTestServer('s1')`, `mcpOpenRunTool('s1')`, `mcpRunTool('s1')`, `mcpEditRule('s1', 'r1')`, `mcpRuleSample()`, `mcpSaveRule()`, `mcpToggleRule('r1', false)`, `mcpDeleteRule('r1')`,
+      `mcpDeleteRuleNow('r1')`, `mcpPreview('r1')`, `mcpCommit('r1')`, `mcpUndo('u1')`, `mcpUndoNow('u1')`]) await run(c);
+    let mcpRefused = '';
+    try { await vm.runInContext(`mcpCall('create_token', { name: 'x' })`, ctx); } catch (e) { mcpRefused = String(e.message || e); }
+    ok(/not saved/.test(mcpRefused), `${mode}: mcpCall itself refuses to send`, mcpRefused);
+    ok(ctx.log.toasts.length - beforeMcp === 21 && ctx.log.toasts.slice(beforeMcp).every(t => /not saved/.test(t)), `${mode}: each private connector change says it is not saved`, ctx.log.toasts.slice(beforeMcp));
     // A receipt or invoice picked in a form is not uploaded to file storage (the sandbox has no storage: a call would throw).
     let stored = 'x';
     try { stored = await vm.runInContext(`storeFile('job1', 'parts-receipt', 'data:image/png;base64,AAAA')`, ctx); } catch (e) { stored = 'threw: ' + e.message; }

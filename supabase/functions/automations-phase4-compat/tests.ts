@@ -21,12 +21,14 @@ function cmp(a: any, b: any): number {
 }
 function splitOr(s: string): string[] { const out: string[] = []; let cur = "", q = false; for (const ch of s) { if (ch === '"') { q = !q; cur += ch; continue; } if (ch === "," && !q) { out.push(cur); cur = ""; continue; } cur += ch; } if (cur) out.push(cur); return out; }
 function parseCond(p: string) {
-  const m = /^([a-z_]+)\.(eq|gte|lte|lt|is)\.(.*)$/.exec(p);
+  const m = /^([a-z_]+(?:->>[A-Za-z_]+)?)\.(eq|gte|lte|lt|is)\.(.*)$/.exec(p);
   if (!m) throw new Error("fake or(): " + p);
   let v = m[3]; if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
-  const k = m[1], op = m[2];
-  return (r: any) => op === "eq" ? r[k] != null && String(r[k]) === v : op === "is" ? (v === "null" && r[k] == null)
-    : r[k] != null && (op === "gte" ? cmp(r[k], v) >= 0 : op === "lte" ? cmp(r[k], v) <= 0 : cmp(r[k], v) < 0);
+  const op = m[2], [k, key] = m[1].split("->>");
+  // options->>key: a jsonb key as text (null when missing)
+  const val = (r: any) => key === undefined ? r[k] : r[k] && typeof r[k] === "object" && r[k][key] != null ? String(r[k][key]) : null;
+  return (r: any) => { const x = val(r); return op === "eq" ? x != null && String(x) === v : op === "is" ? (v === "null" && x == null)
+    : x != null && (op === "gte" ? cmp(x, v) >= 0 : op === "lte" ? cmp(x, v) <= 0 : cmp(x, v) < 0); };
 }
 const UNIQUE: Record<string, string[]> = { automation_runs: ["automation_id", "event_key"], automation_log: ["run_id", "step_id"], app_keys: ["name"] };
 // ROLLBACK BUILD: false = the phase-4 schema (the suite below, unchanged); true = stage-2 SQL Part 1 kept (the rollback
@@ -185,7 +187,7 @@ function world(over: Record<string, any[]> = {}) {
     employees: [{ id: "e-va", name: "Vicky Va", status: "Active" }, { id: "e-guy", name: "Guy Tech", status: "Active" }, { id: "e-old", name: "Old Hand", status: "Inactive" }],
     app_keys: [{ name: "vapid", value: { publicKey: "PUB", privateKey: "PRIV" } }],
     contacts: [], jobs: [], calls: [], chat_sessions: [], lead_messages: [], tasks: [], automations: [], automation_runs: [], automation_log: [],
-    customer_opt_outs: [], sms_opt_outs: [], review_requests: [],
+    customer_opt_outs: [], sms_opt_outs: [], review_requests: [], employee_vacations: [],
     ...over,
   });
 }
@@ -214,6 +216,10 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     const keyA = fnSource(mine, "export async function vapidKeys("), keyB = fnSource(push, "export async function vapidKeys(");
     ok(sendA.length > 200 && sendA === sendB, "sendTo is byte-identical to push/index.ts");
     ok(keyA.length > 200 && keyA === keyB, "vapidKeys is byte-identical to push/index.ts");
+    // the vacations block (stage 3): one copy in automations, push and voice
+    const vacBlock = (text: string) => { const a = text.indexOf("// ── vacations (stage 3)"), z = text.indexOf("// ── end vacations ──"); return a < 0 || z < a ? "" : text.slice(a, z); };
+    const vacA = vacBlock(mine), vacB = vacBlock(push), vacC = vacBlock(src("../voice/index.ts"));
+    ok(vacA.length > 1500 && vacA === vacB && vacA === vacC, "the vacations block is byte-identical in automations, push and voice", [vacA.length, vacB.length, vacC.length]);
     ok(fnSource(mine, "export function sameSecret(") === fnSource(backup, "export function sameSecret(") && fnSource(mine, "export function sameSecret(").length > 50, "sameSecret is the backup function's");
     const conv = src("../conversations/index.ts");
     const sigA = fnSource(mine, "export function signatureOf("), sigB = fnSource(conv, "export function signatureOf(");
@@ -916,6 +922,124 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     eq(["Ron", "The Guys", "1300 380"].filter((w) => new RegExp("\\b" + w + "\\b").test(code)), [], "no 'Ron', 'The Guys' or '1300 380' in the engine's code");
   }
 
+  // ── 28. an MCP import made with automations off (quiet) is not a new lead; a quiet imported job never "closes" ──
+  {
+    const quietLead = (id: string, o: any = {}) => lead(id, { messages: [{ id: "m1", kind: "event", at: isoMs(NOW - 2 * MIN), text: "Imported from Fake CRM (Leads), automatic messages off", quiet: true }], last_read_at: isoMs(NOW - 2 * MIN), ...o });
+    const emailAuto = () => auto({ steps: [emailStep()] });
+    let db = world({ contacts: [quietLead("q1")], automations: [emailAuto()] });
+    await tickAt(db, NOW); await tickAt(db, NOW + MIN);
+    eq([db.T.automation_runs.length, db.T.lead_messages.length], [0, 0], "quiet import: no newLead run, no email queued");
+    eq((await handle(db, { step: "event", type: "newLead", id: "q1" }, OWNER, false)).body, { ok: true, runs: 0, reason: "no event" }, "quiet import: the app's 'look now' → no event");
+    db = world({ contacts: [quietLead("q2", { reopened_at: isoMs(NOW - MIN) })], automations: [emailAuto()] });
+    await tickAt(db, NOW);
+    eq([db.T.automation_runs.length, db.T.lead_messages.length], [1, 1], "quiet import reopened by the customer: a real new arrival, it fires");
+    db = world({ contacts: [lead("q3", { messages: [{ at: isoMs(NOW - 2 * MIN), quiet: false }] })], automations: [emailAuto()] });
+    await tickAt(db, NOW);
+    eq([db.T.automation_runs.length, db.T.lead_messages.length], [1, 1], "quiet:false fires as before");
+    eq([quietArrival({ first_quiet: "true" }), quietArrival({ first_quiet: null, messages: [{ quiet: true }] }), quietArrival({ first_quiet: "false" }), quietArrival({ first_quiet: null }), quietArrival({ messages: [] }), quietArrival({ messages: [{ quiet: "yes" }] })],
+      [true, true, false, false, false, false], "quietArrival: the scan column (first_quiet) or the full thread");
+    // the marker column (SQL M5-review): set by the import on every row it makes, read before the thread
+    db = world({ contacts: [lead("q4", { import_quiet: true, messages: [{ at: isoMs(NOW - 2 * MIN) }] }), lead("q5", { import_quiet: false, messages: [{ at: isoMs(NOW - 2 * MIN) }] })], automations: [emailAuto()] });
+    await tickAt(db, NOW); await tickAt(db, NOW + MIN);
+    eq(db.T.automation_runs.map((r: any) => r.record_id || r.contact_id), ["q5"], "import_quiet: a quiet import (column only) is not a new lead; import_quiet false fires as before");
+    eq([quietArrival({ import_quiet: true }), quietArrival({ import_quiet: false, first_quiet: null }), quietArrival({ import_quiet: true, first_quiet: "false" })], [true, false, true], "quietArrival: the import_quiet column first");
+    const jobAuto = () => auto({ trigger: { type: "jobClosed", params: {} }, steps: [emailStep()] });
+    db = world({ automations: [jobAuto()], contacts: [lead("c1")], jobs: [{ id: "jq", contact_id: "c1", date: "2026-10-14", created_at: null, review_do_not_ask: true }] });
+    await tickAt(db, NOW);
+    eq(db.T.automation_runs.length, 0, "a quiet imported job (created_at null, done today) starts no jobClosed run");
+    db = world({ automations: [jobAuto()], contacts: [lead("c1")], jobs: [{ id: "jn", contact_id: "c1", date: "2026-10-14", created_at: isoMs(NOW - MIN) }] });
+    await tickAt(db, NOW);
+    eq(db.T.automation_runs.map((r: any) => r.event_type), ["jobClosed"], "the same job with created_at = now does");
+  }
+
+  // ── 29. people on vacation (stage 3) ──
+  {
+    const day = "2026-10-14";   // NOW is 14 Oct, Sydney
+    // neutral demo names (the repo is public): the technician login is "Cal Tech" here
+    const PROFS = [OWNER, MANAGER, VA, VA_NOCRM, { ...TECH, full_name: "Cal Tech", technician_name: "Cal Tech" }];
+    const EMPS = [{ id: "e-own", name: "Olivia Owner", status: "Active" }, { id: "e-mgr", name: "Max Manager", status: "Active" }, { id: "e-va", name: "Vicky Va", status: "Active" }, { id: "e-cal", name: "Cal Tech", status: "Active" }, { id: "e-old", name: "Old Hand", status: "Inactive" }];
+    const vac = (o: any = {}) => ({ id: "v1", business_id: "default", employee_id: "e-own", starts_on: "2026-10-13", ends_on: "2026-10-17", stand_in_id: null, options: { noNotify: true }, ended_at: null, cancelled_at: null, reminded_at: null, ...o });
+    const pushTo = (roles: string[]) => ({ id: "p1", kind: "action", type: "push", to: { roles }, title: "New lead: {name}" });
+    const run = async (vacs: any[], steps: any[]) => { const db = world({ profiles: PROFS, employees: EMPS, employee_vacations: vacs, automations: [auto({ steps })], contacts: [lead("c1")] }); sent.length = 0; await tickAt(db, NOW); return db; };
+    let db = await run([vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } })], [pushTo(["owner", "manager"])]);
+    eq([sent.map((s) => s.to), db.T.automation_log[0].recipient], [["https://push/mgr"], "Max Manager"], "push: the owner away (stand-in the manager) → the manager once; logged as Max Manager");
+    db = await run([vac()], [pushTo(["owner", "manager"])]);
+    eq([sent.map((s) => s.to), db.T.automation_log[0].recipient], [["https://push/mgr"], "Max Manager"], "push: the owner away without a stand-in → the manager only (as a role recipient)");
+    db = await run([vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } })], [pushTo(["owner"])]);
+    eq([sent.map((s) => s.to), db.T.automation_log[0].status, db.T.automation_log[0].reason], [[], "skipped", "on vacation"], "push: owners only, the owner away → a manager stand-in never gets an owners-only message; logged 'skipped: on vacation', not 'failed: no device'");
+    db = await run([vac({ stand_in_id: "e-cal", options: { noNotify: true, standIn: true } })], [pushTo(["owner", "manager"])]);
+    eq([sent.map((s) => s.to), db.T.automation_log[0].recipient], [["https://push/mgr"], "Max Manager"], "push: an owner's technician stand-in isn't a recipient of an owner + manager message");
+    db = await run([vac({ stand_in_id: "e-cal", options: { noNotify: true, standIn: true } })], [{ ...pushTo([]), to: { roles: [], people: ["u-owner"] } }]);
+    eq([db.T.automation_log[0].recipient || "", db.T.automation_log[0].status], ["", "skipped"], "push: the owner picked by name, away → their technician stand-in isn't added either (skipped: on vacation)");
+    db = await run([vac({ stand_in_id: "e-cal", options: { noNotify: true, standIn: true } })], [pushTo(["owner", "technician"])]);
+    eq(db.T.automation_log[0].recipient, "Cal Tech", "push: technicians picked too → the technician stand-in gets it (once)");
+    db = await run([], [pushTo(["owner", "manager"])]);
+    eq(sent.map((s) => s.to).sort(), ["https://push/mgr", "https://push/owner"], "push: no vacations → as before");
+    db = await run([vac({ starts_on: "2026-10-10", ends_on: "2026-10-13" })], [pushTo(["owner"])]);
+    eq(sent.map((s) => s.to), ["https://push/owner"], "push: a vacation that ended yesterday → the owner gets it");
+    // tasks
+    const task = (assignees: string[]) => ({ id: "t1", kind: "action", type: "task", title: "Call {first_name}", assignees, due_days: 1 });
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [task(["e-cal"])]);
+    eq([db.T.tasks[0].assignees, db.T.tasks[0].assigned_to, db.T.tasks[0].board, db.T.automation_log[0].recipient], [["Vicky Va"], "Vicky Va", "ron", "Vicky Va"], "task: someone not assignable → their stand-in (and the board follows)");
+    eq(db.T.tasks[0].notes, "For Cal Tech (on vacation): given to Vicky Va, the stand-in.", "task: a redirected task says who it was for");
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [{ ...task(["e-cal"]), notes: "Ring before 5" }]);
+    eq(db.T.tasks[0].notes, "For Cal Tech (on vacation): given to Vicky Va, the stand-in.\n\nRing before 5", "task: the line comes before the automation's own notes");
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [task(["e-cal", "e-va"])]);
+    eq(db.T.tasks[0].assignees, ["Vicky Va"], "task: the stand-in already chosen → once");
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true } })], [task(["e-cal"])]);
+    eq([db.T.tasks[0].assignees, db.T.tasks[0].notes], [["Cal Tech"], ""], "task: no stand-in ticked → the person stays (a warning in the app, never a block), no line in the notes");
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } }), vac({ id: "v2", employee_id: "e-va", options: { notAssignable: true } })], [task(["e-cal"])]);
+    eq(db.T.tasks[0].assignees, ["Cal Tech"], "task: the stand-in is away too → the person stays");
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-old", options: { notAssignable: true, standIn: true } })], [task(["e-cal"])]);
+    eq(db.T.tasks[0].assignees, ["Cal Tech"], "task: an inactive stand-in → the person stays");
+    // the due day decides, as in the app (saveTaskModal checks tm-due): away today but back before it → stays; away on it → stand-in
+    const taskIn = (d: number) => ({ ...task(["e-cal"]), due_days: d });
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [taskIn(7)]);
+    eq([db.T.tasks[0].due, db.T.tasks[0].assignees], ["2026-10-21", ["Cal Tech"]], "task: due after the return day (away 13–17 Oct, due 21 Oct) → the person stays");
+    db = await run([vac({ employee_id: "e-cal", starts_on: "2026-10-17", ends_on: "2026-10-23", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [taskIn(7)]);
+    eq(db.T.tasks[0].assignees, ["Vicky Va"], "task: a vacation from 17 Oct covers the due day (21 Oct) → the stand-in, though they aren't away today");
+    db = await run([vac({ employee_id: "e-cal", starts_on: "2026-10-17", ends_on: "2026-10-23", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [{ ...task(["e-cal"]), due_days: null }]);
+    eq(db.T.tasks[0].assignees, ["Cal Tech"], "task: no due day → today counts (not away yet)");
+    // pure: names once, in order
+    const C = { day, tz: "Australia/Sydney", vacs: [vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], employees: EMPS, profiles: [] };
+    eq(vacTaskPeople([EMPS[3], EMPS[1], EMPS[2]], C), ["Vicky Va", "Max Manager"], "vacTaskPeople: replaced, deduped, order kept");
+    eq(vacTaskPeople([EMPS[3]], { ...C, vacs: [] }), ["Cal Tech"], "vacTaskPeople: nobody away → unchanged");
+    const moved: VacMove[] = [];
+    eq([vacTaskPeople([EMPS[3], EMPS[1]], C, undefined, moved), moved], [["Vicky Va", "Max Manager"], [{ from: "Cal Tech", to: "Vicky Va" }]], "vacTaskPeople: who was swapped for whom");
+    eq([vacMovedNote([]), vacMovedNote([{ from: "A", to: "B" }, { from: "C", to: "B" }])], ["", "For A (on vacation): given to B, the stand-in.\nFor C (on vacation): given to B, the stand-in."], "vacMovedNote: one line each, none when nobody moved");
+    eq([vacTaskPeople([EMPS[3]], C, "2026-10-18"), vacTaskPeople([EMPS[3]], C, "2026-10-17"), vacTaskPeople([EMPS[3]], C, day)], [["Cal Tech"], ["Vicky Va"], ["Vicky Va"]], "vacTaskPeople: on the day given (the due day)");
+    // preview shows the same
+    const a = auto({ id: "a-vac", enabled: false, steps: [pushTo(["owner", "manager"]), { ...task(["e-cal"]), id: "t1" }] });
+    const pdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } }), vac({ id: "v2", employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], automations: [a], contacts: [lead("c1")] });
+    const p = await handle(pdb, { step: "preview", automation_id: "a-vac", record: { kind: "contact", id: "c1" } }, OWNER, false);
+    eq([p.body.steps[0].to, p.body.steps[1].assignees, p.body.steps[1].board, p.body.steps[1].notes], [["Max Manager"], ["Vicky Va"], "ron", "For Cal Tech (on vacation): given to Vicky Va, the stand-in."], "preview: the redirected push names, task assignees and the line in its notes");
+    const sdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac()], automations: [auto({ id: "a-skip", enabled: false, steps: [pushTo(["owner"])] })], contacts: [lead("c1")] });
+    const ps = await handle(sdb, { step: "preview", automation_id: "a-skip", record: { kind: "contact", id: "c1" } }, OWNER, false);
+    eq([ps.body.steps[0].would, ps.body.steps[0].reason], ["skip", "on vacation"], "preview: everyone picked is away → 'skip: on vacation'");
+    // the preview reads the vacations of the day the action would run (after its waits), not today's
+    const later = (vacs: any[]) => world({ profiles: PROFS, employees: EMPS, employee_vacations: vacs, contacts: [lead("c1")],
+      automations: [auto({ id: "a-later", enabled: false, steps: [{ id: "w", kind: "wait", unit: "days", n: 7 }, pushTo(["owner"])] })] });
+    const pl = await handle(later([vac()]), { step: "preview", automation_id: "a-later", record: { kind: "contact", id: "c1" } }, OWNER, false);
+    eq([pl.body.steps[1].would, pl.body.steps[1].to], ["send", ["Olivia Owner"]], "preview: the owner away today but back before the action (in 7 days) → sent to them");
+    const pf = await handle(later([vac({ starts_on: "2026-10-20", ends_on: "2026-10-23" })]), { step: "preview", automation_id: "a-later", record: { kind: "contact", id: "c1" } }, OWNER, false);
+    eq([pf.body.steps[1].would, pf.body.steps[1].reason], ["skip", "on vacation"], "preview: the owner away on the action's day (not today) → 'skip: on vacation'");
+    // read once per tick
+    const twice = auto({ steps: [pushTo(["owner"]), { ...pushTo(["manager"]), id: "p2" }] });
+    const odb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac({ starts_on: "2026-10-01", ends_on: "2026-10-02" })], automations: [twice, auto({ steps: [pushTo(["manager"])] })], contacts: [lead("c1")] });
+    sent.length = 0;
+    await tickAt(odb, NOW);
+    eq([odb.calls.filter((c: string) => c === "employee_vacations.select").length, sent.length], [1, 3], "vacations are read once per tick (three push actions, two automations)");
+    // the day is the business's (settings.catalog.region.timeZone, review A2): 14 Oct 14:00 Sydney is 13 Oct 22:00 in Chicago
+    const only13 = [vac({ starts_on: "2026-10-13", ends_on: "2026-10-13" })];
+    db = await run(only13, [pushTo(["owner", "manager"])]);
+    eq(sent.map((s) => s.to).sort(), ["https://push/mgr", "https://push/owner"], "zone: Sydney business, away only on 13 Oct → back today, the owner gets it");
+    const cdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: only13, automations: [auto({ steps: [pushTo(["owner", "manager"])] })], contacts: [lead("c1")],
+      settings: [{ id: 1, company_name: "Acme Home Services", catalog: { ...CATALOG, region: { timeZone: "America/Chicago" } } }] });
+    sent.length = 0;
+    await tickAt(cdb, NOW);
+    eq(sent.map((s) => s.to), ["https://push/mgr"], "zone: a Chicago business, still 13 Oct there → the owner is away, the manager only");
+  }
+
   // ── ROLLBACK BUILD: the rollback cases (stage-2 SQL Part 1 kept; design §3.16, RUNBOOK "Rollback") ──
   {
     PART1 = true;
@@ -945,7 +1069,7 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     await tickAt(db, w2At + MIN);
     eq([runOf(db), db.T.lead_messages.length], [["cancelled:automation deleted"], 0], "rollback build: a soft-deleted automation stops its waiting runs");
     // the build itself: the phase-4 engine + the three documented edits, nothing else (the RUNBOOK's fingerprint check
-    // compares it with the committed file; the differential harness compares it line by line with commit 7ae5b19)
+    // compares it with the committed file; the differential harness compares it line by line with commit a8c6d2d)
     const code = src("index.ts");
     eq([(code.match(/ROLLBACK BUILD edit 1/g) || []).length, (code.match(/ROLLBACK BUILD edit 2/g) || []).length, /never deploy this folder by name/i.test(code), /\.select\("\*"\)\.eq\("run_id", run\.id\)\.eq\("step_id", st\.id\)\.limit\(50\)/.test(code)],
       [1, 1, true, true], "rollback build: its two code edits and the do-not-deploy-by-name header are there");

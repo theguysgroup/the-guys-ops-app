@@ -1,5 +1,5 @@
 {
-  "note": "Today's autoReadyRows (before stage 2 G3.3) on three stored settings: key/base/on/gate/toggle/locked per row, for all=false and all=true. wfSystemRows must give the same.",
+  "note": "Today's autoReadyRows (before stage 2 G3.3) on three stored settings: key/base/on/gate/toggle/locked per row, for all=false and all=true, + the Notifications page's \"back from a vacation tomorrow\" card (stage 3, merged from main 15 Oct: on unless switched off; main has no ready-made row for it, its Notifications card is its only switch, so its System row is added here). wfSystemRows must give the same.",
   "cases": [
     {
       "name": "nothing",
@@ -15,6 +15,7 @@
         {"key":"ready:team:invoice","base":"team:invoice","on":true,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
         {"key":"ready:team:docExpiry","base":"team:docExpiry","on":false,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
         {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":false,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:vacationBack","base":"team:vacationBack","on":true,"gate":"","toggle":["toggleNotifyCard","vacationBack"],"locked":false},
         {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
       ],
       "all": [
@@ -28,6 +29,7 @@
         {"key":"ready:team:invoice","base":"team:invoice","on":true,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
         {"key":"ready:team:docExpiry","base":"team:docExpiry","on":false,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
         {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":false,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:vacationBack","base":"team:vacationBack","on":true,"gate":"","toggle":["toggleNotifyCard","vacationBack"],"locked":false},
         {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
       ]
     },
@@ -45,6 +47,7 @@
         {"key":"ready:team:invoice","base":"team:invoice","on":true,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
         {"key":"ready:team:docExpiry","base":"team:docExpiry","on":true,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
         {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":false,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:vacationBack","base":"team:vacationBack","on":true,"gate":"","toggle":["toggleNotifyCard","vacationBack"],"locked":false},
         {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
       ],
       "all": [
@@ -58,6 +61,7 @@
         {"key":"ready:team:invoice","base":"team:invoice","on":true,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
         {"key":"ready:team:docExpiry","base":"team:docExpiry","on":true,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
         {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":false,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:vacationBack","base":"team:vacationBack","on":true,"gate":"","toggle":["toggleNotifyCard","vacationBack"],"locked":false},
         {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
       ]
     },
@@ -73,6 +77,7 @@
         {"key":"ready:team:invoice","base":"team:invoice","on":false,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
         {"key":"ready:team:docExpiry","base":"team:docExpiry","on":true,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
         {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":true,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:vacationBack","base":"team:vacationBack","on":true,"gate":"","toggle":["toggleNotifyCard","vacationBack"],"locked":false},
         {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
       ],
       "all": [
@@ -86,6 +91,7 @@
         {"key":"ready:team:invoice","base":"team:invoice","on":false,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
         {"key":"ready:team:docExpiry","base":"team:docExpiry","on":true,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
         {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":true,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:vacationBack","base":"team:vacationBack","on":true,"gate":"","toggle":["toggleNotifyCard","vacationBack"],"locked":false},
         {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
       ]
     }

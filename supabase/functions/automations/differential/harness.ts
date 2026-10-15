@@ -83,7 +83,8 @@ const OWNER = PROFILES[0];
 
 type Mut = { off: number; what: string; fn?: (db: any) => void; app?: { type: string; id: string } };
 type Scn = { name: string; t0: number; signer?: string | null; maker?: string; settings?: any; seed?: (r: any) => void; muts?: Mut[]; outage?: [number, number];
-  tables?: any; only?: string };   // tables = a live shadow world (the exported records); only = run just this automation id
+  tables?: any; only?: string;   // tables = a live shadow world (the exported records); only = run just this automation id
+  expect?: (base: any) => string };   // what phase 4 must have done with the whole corpus ("" = ok): the scenario has teeth
 
 function records(t0: number) {
   const day = sydDay(t0), old = t0 - 3 * DAY, older = t0 - 30 * DAY;
@@ -106,6 +107,10 @@ function records(t0: number) {
   };
 }
 const WED = syd("2026-10-14", 14, 7);
+const dayShift = (day: string, n: number) => new Date(Date.parse(day + "T00:00:00Z") + n * DAY).toISOString().slice(0, 10);
+// a card the MCP import made with automations off (as mcp/index.ts importRow writes it)
+const quietLead = (c: any, t0: number) => Object.assign(c, { import_quiet: true, last_read_at: iso(t0),
+  messages: [{ id: "m-imp", kind: "event", at: iso(t0), text: "Imported from Fake CRM (Leads), automatic messages off", quiet: true }] });
 const SCENARIOS: Scn[] = [
   { name: "in hours (Wed 14:07)", t0: WED },
   { name: "outside hours (Wed 21:33)", t0: syd("2026-10-14", 21, 33) },
@@ -134,6 +139,43 @@ const SCENARIOS: Scn[] = [
   { name: "the app's 'look now' for every record", t0: WED,
     muts: [{ off: 20e3, what: "app event", app: { type: "newLead", id: "c1" } }, { off: 40e3, what: "app event", app: { type: "stage", id: "c2" } },
       { off: 45e3, what: "app event", app: { type: "jobClosed", id: "j1" } }, { off: 50e3, what: "app event", app: { type: "missedCall", id: "k1" } }, { off: 55e3, what: "app event", app: { type: "chat", id: "s1" } }] },
+  // stage 5 (main a8c6d2d): an MCP import with automations off is quiet (mcp/index.ts importRow: import_quiet, quiet:true on
+  // the first thread entry, read; a job without created_at and "don't ask"); a later reopen is a real arrival
+  { name: "quiet imported lead (MCP import, automations off) + the app's 'look now'", t0: WED, seed: (r) => { quietLead(r.contacts[0], WED); },
+    muts: [{ off: 20e3, what: "app event", app: { type: "newLead", id: "c1" } }],
+    expect: (b) => b.runs.some((r: any) => /\|c1:/.test(r.key)) ? "a run for the quiet lead" : !b.lines.includes('app newLead/c1: {"ok":true,"runs":0,"reason":"no event"}') ? "look now did not say 'no event'"
+      : !b.runs.some((r: any) => /\|c2:/.test(r.key)) ? "nothing else ran" : "" },
+  { name: "quiet imported lead reopened 5 minutes later", t0: WED, seed: (r) => { quietLead(r.contacts[0], WED); },
+    muts: [{ off: 5 * MIN, what: "reopened", fn: (db) => { Object.assign(db.T.contacts[0], { reopened_at: iso(WED + 5 * MIN), last_read_at: null }); } }],
+    expect: (b) => b.runs.some((r: any) => r.key.endsWith("|c1:new")) ? "a run for the quiet arrival" : !b.runs.some((r: any) => r.key.endsWith(`|c1:${iso(WED + 5 * MIN)}`)) ? "no run for the reopen" : "" },
+  { name: "quiet imported job", t0: WED, seed: (r) => { Object.assign(r.jobs[0], { import_quiet: true, created_at: null, review_do_not_ask: true }); },
+    muts: [{ off: 20e3, what: "app event", app: { type: "jobClosed", id: "j1" } }],
+    expect: (b) => b.runs.some((r: any) => r.key.endsWith("|j1")) ? "a jobClosed run for the quiet job" : !b.runs.some((r: any) => r.key.endsWith("|c1:new")) ? "nothing else ran" : "" },
+  // stage 3 (main a8c6d2d): Una (an owner) away with "No notifications" + "Not assignable", stand-in Olivia; Vicky (the VA)
+  // the same, stand-in Vera (a second VA). Pushes to the owners / VAs, a push to Una by name (upgrade.json "job closed,
+  // default age": people u-1) and the tasks for e-va / e-1 go to the stand-ins
+  { name: "on vacation with stand-ins (push + task)", t0: WED, seed: (r) => {
+    r.profiles = [...PROFILES.map((p) => ({ ...p })), { id: "u-1", full_name: "Una Owner", role: "owner", permissions: {}, technician_name: null }, { id: "u-va2", full_name: "Vera Va", role: "va", permissions: { crm: true }, technician_name: null }];
+    r.employees = [{ id: "e-own", name: "Olivia Owner", status: "Active", roles: ["Owner"] }, { id: "e-1", name: "Una Owner", status: "Active", roles: ["Owner"] }, { id: "e-mgr", name: "Max Manager", status: "Active", roles: ["Manager"] },
+      { id: "e-va", name: "Vicky Va", status: "Active", roles: ["VA"] }, { id: "e-va2", name: "Vera Va", status: "Active", roles: ["VA"] }, { id: "e-guy", name: "Guy Tech", status: "Active", roles: ["Technician"] }];
+    const day = sydDay(WED), away = (id: string, emp: string, standIn: string, from: number, to: number) => ({ id, business_id: "default", employee_id: emp, starts_on: dayShift(day, from), ends_on: dayShift(day, to),
+      stand_in_id: standIn, options: { noNotify: true, notAssignable: true, standIn: true }, ended_at: null, cancelled_at: null, reminded_at: null });
+    r.employee_vacations = [away("v1", "e-1", "e-own", -1, 6), away("v2", "e-va", "e-va2", 0, 6)];
+  }, expect: (b) => {
+    const to = new Set(b.pushes.map((p: any) => p[0])), notes = b.tasks.map((t: any) => `${(t[4] || []).join("+")}: ${String(t[2] || "").split("\n")[0]}`);
+    if (to.has("https://push/u-1") || to.has("https://push/u-va")) return "a push reached someone on vacation";
+    const una = CORPUS.find((a) => a.name === "upgrade.json: job closed, default age");   // its push goes to u-1 by name
+    if (!una || !b.actions.some((a: any) => a[0] === `${una.id}|j1` && a[2] === "push" && a[4] === "sent" && a[6] === "Olivia Owner")) return "the push to Una by name did not go to her stand-in";
+    if (!notes.includes("Vera Va: For Vicky Va (on vacation): given to Vera Va, the stand-in.")) return "no task for Vicky's stand-in: " + JSON.stringify(notes);
+    if (!notes.includes("Olivia Owner: For Una Owner (on vacation): given to Olivia Owner, the stand-in.")) return "no task for Una's stand-in: " + JSON.stringify(notes);
+    return "";
+  } },
+  { name: "on vacation: every owner away, no stand-in (skipped: on vacation)", t0: WED, seed: (r) => {
+    r.profiles = [...PROFILES.map((p) => ({ ...p })), { id: "u-1", full_name: "Una Owner", role: "owner", permissions: {}, technician_name: null }];
+    r.employees = [{ id: "e-own", name: "Olivia Owner", status: "Active", roles: ["Owner"] }, { id: "e-1", name: "Una Owner", status: "Active", roles: ["Owner"] }, { id: "e-va", name: "Vicky Va", status: "Active", roles: ["VA"] }];
+    const day = sydDay(WED), off = (id: string, emp: string) => ({ id, business_id: "default", employee_id: emp, starts_on: day, ends_on: dayShift(day, 6), stand_in_id: null, options: { noNotify: true }, ended_at: null, cancelled_at: null, reminded_at: null });
+    r.employee_vacations = [off("v1", "e-own"), off("v2", "e-1")];
+  }, expect: (b) => b.pushes.some((p: any) => /u-owner|u-1/.test(p[0])) ? "an owner on vacation got a push" : !b.actions.some((a: any) => a[4] === "skipped" && a[5] === "on vacation") ? "no 'skipped: on vacation'" : "" },
 ];
 
 // ── the corpus ──
@@ -154,7 +196,7 @@ function world(scn: Scn, autos: any[]) {
     push_subscriptions: profiles.map((p: any, i: number) => ({ id: "d" + i, user_id: p.id, endpoint: "https://push/" + p.id, p256dh: "k", auth: "a" })),
     employees: [{ id: "e-va", name: "Vicky Va", status: "Active", roles: ["VA"] }, { id: "e-guy", name: "Guy Tech", status: "Active", roles: ["Technician"] }],
     app_keys: [{ name: "vapid", value: { publicKey: "PUB", privateKey: "PRIV" } }],
-    tasks: [], automation_runs: [], automation_log: [], sms_opt_outs: [],
+    tasks: [], automation_runs: [], automation_log: [], sms_opt_outs: [], employee_vacations: [],
     ...r, profiles,
     automations: autos.map((a) => ({ business_id: "default", enabled: true, armed_at: iso(scn.t0 - 7 * DAY), version: 1, created_by_name: scn.maker === undefined ? "Olivia Owner" : scn.maker,
       id: a.id, name: a.name, trigger: JSON.parse(JSON.stringify(a.trigger ?? {})), steps: JSON.parse(JSON.stringify(a.steps ?? [])) })),
@@ -277,7 +319,7 @@ function firstDiff(a: any, b: any, path = ""): string | null {
       '    const { data: prior } = await sb.from("automation_log").select("id").eq("run_id", run.id).eq("step_id", st.id).limit(1);\n    if (prior && prior.length) { i++; continue; }');
   const rbOk = rb.startsWith(bar) && undone === p4;
   const fp = (s: string) => { let x = 0; for (let i = 0; i < s.length; i++) x = (x + s.charCodeAt(i) * (i % 97 + 1)) % 1000000007; return x; };
-  say(`rollback build = phase-4 (${process.env.PHASE4_COMMIT || "7ae5b19"}) + header + 2 documented edits: ${rbOk ? "OK" : "DIFFERENT"}`);
+  say(`rollback build = phase-4 (${process.env.PHASE4_COMMIT || "a8c6d2d"}) + header + 2 documented edits: ${rbOk ? "OK" : "DIFFERENT"}`);
   say(`fingerprints (sum(charCode*(i%97+1)) % 1000000007 / length): phase-4 ${fp(p4)}/${p4.length} · rollback build ${fp(rb)}/${rb.length}`);
 
   // 1. the corpus as the phase-4 validator sees it
@@ -314,6 +356,8 @@ function firstDiff(a: any, b: any, path = ""): string | null {
     for (const g of groups) {
       cases++;
       const base = await play(scn, g.autos, () => ENG.old); worlds++;
+      const why = scn.expect && g.label === "ALL together" ? scn.expect(base) : "";
+      if (why) findings.push({ scenario: scn.name, automations: g.label, engine: "old (phase 4): what the scenario is for", diff: why });
       const mid = Math.max(1, Math.floor(base.ticks / 2));
       if (base.actions.length) acted++;
       totals.actions += base.actions.length; totals.pushes += base.pushes.length; totals.tasks += base.tasks.length; totals.emails += base.emails.length; totals.runs += base.runs.length;

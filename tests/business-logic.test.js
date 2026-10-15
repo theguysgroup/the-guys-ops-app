@@ -102,6 +102,11 @@ const DECLS = [
   'freshTone', 'CONN_HOW', 'CONN_HOW_ORDER', 'CONN_LATE_HOURS', 'CONN_ACCOUNTS', 'CONNECTORS', 'CONN_ADDONS', 'CONN_GUIDE_LINKS', 'connCfgOf', 'connItemOn', 'connAccountOn', 'connPatched',
   'connSourceDef', 'connDefs', 'connState', 'connIsLive', 'SOURCE_HOW', 'sourceRowInfo', 'connFreshItems', 'connOldest', 'connTone', 'connGhlArchiveText', 'connStepsFor', 'connNextStep', 'connHows', 'connMatches',
   'connStopsAll', 'connPendingReaders', 'fmtAdsAccount', 'connDayName', 'connWhen', 'connAddonsShown', 'CONN_LOG_SRC', 'connLogRows',
+  // Settings > Connectors > Private connector (MCP), stage 5
+  'canUseMcp', 'MCP_SETTINGS_DEFAULTS', 'mcpSettingsOf', 'MCP_SETTING_LIMITS', 'mcpSettingProblem', 'mcpUrls', 'mcpTokenLooksRight', 'mcpWhen', 'mcpKeyLists', 'mcpKeyMeta', 'MCP_LOG_STATUS', 'mcpLogStatus',
+  'MCP_TOOL_NAMES', 'mcpHostBlocked', 'MCP_RESERVED_HEADERS', 'mcpServerProblems', 'MCP_IMPORT_KINDS', 'MCP_IMPORT_FIELDS', 'MCP_IMPORT_REQUIRED', 'mcpFieldLabel', 'mcpMappingRows', 'mcpMappingFromRows', 'mcpDedupeDefault',
+  'mcpPathOk', 'mcpRuleProblems', 'mcpParseArgs', 'mcpArgsTemplate', 'mcpResultData', 'mcpItemsAt', 'mcpSamplePaths', 'mcpPreviewCounts', 'mcpPreviewColumns', 'mcpPreviewText', 'mcpRunLine', 'mcpCanUndo',
+  'mcpReasonText', 'mcpLoadErrorText', 'mcpServerMeta', 'mcpRuleMeta',
   // Settings → Security: Face ID / fingerprint (passkeys), the 30-minute lock, Settings history (14 Oct)
   'CAT_NAMES', 'setBlock', 'SEC_LOCK_MINUTES', 'bytesToB64url', 'b64urlToBytes', 'pkCreationOptions', 'pkRequestOptions', 'pkAttestationJSON', 'pkAssertionJSON', 'pkDeviceInfo', 'bioIcoFor', 'secMethodWord',
   'secUnlockMethods', 'lockedBackupLinkOpen', 'SEC_INTENTS', 'secGoogleParse', 'PAY_SETTING_NAMES', 'secLeft', 'secWhen', 'settingsHistParts', 'settingsHistFilter', 'secHistChips', 'secRecentCount', 'secReasonText',
@@ -149,6 +154,23 @@ const DECLS = [
   'notifyNumInput', 'notifyHourSel', 'wfPublishAsk', 'wfSystemHidePlan', 'wfSystemCardHtml', 'wfPhoneBarWanted', 'WF_TPL_CHIPS', 'WF_TPL_LIMITS', 'WF_TPL_WHY', 'wfTemplateItem', 'wfTemplateRows', 'wfTemplateCardHtml',
   // the lead's "Assigned to" (stage 2, G3.5, Ofek's answer Q6)
   'contactPatchToRow', 'mapContactRow', 'leadAssigneeCanSet', 'leadAssigneeChoices', 'leadAssigneeName', 'leadAssigneeLine', 'leadAssigneeMatch',
+  // Stage 5 review fixes after the rebase: the tax field's label, an undo still running
+  'mcpShownLabel', 'MCP_UNDO_STALE_MS', 'mcpUndoPending',
+  // People: vacations (stage 3)
+  'VACATION_OPTIONS', 'VACATION_PAY', 'vacationOptionsNorm', 'vacationOpt', 'vacationDefaults', 'vacationOptionsFor', 'vacationMatches', 'vacationOnDay',
+  'vacationPlannedLast', 'vacationLastDay', 'vacationFor', 'onVacationOn', 'vacationForProfile', 'vacationUpcoming', 'vacationsOverlap', 'vacationProblems', 'vacationRowFromDraft', 'vacationUntilText',
+  'vacationOverdue', 'vacationPickerInfo', 'vacationAssignText', 'vacationPayrollLines', 'vacationOpenItems', 'vacationMoveTaskPatch', 'vacationErrorText', 'mapVacationRow',
+  // On vacation, the UI (stage 3)
+  'vacationRangeText', 'vacationUsableStandIn', 'vacationWho', 'vacationAssignInfo', 'vacationPickerLabel', 'vacationAssignConflicts', 'vacationTaskDay', 'vacationTaskFlag', 'vacationJobFlag',
+  'vacationMovableItems', 'vacationPayLines', 'vacationAwayOn', 'vacationTeamRows', 'vacationAllTicked', 'vacationBannerText', 'vacationDraft', 'vacationFormProblems', 'vacationStandInWarning','vacationPhoneEmployee',
+  // stage 3 review fixes: the login ↔ employee rule, job stand-ins, the phone rule shared with voice
+  'vacationEmployeeOfProfile', 'vacationLoginIds', 'vacationJobStandIn', 'vacationPhoneAway',
+  // stage 3 review minor fixes: the note on its own (owners and managers), Monday to Friday leave days
+  'vacationNotesMap', 'vacationWithNote', 'VACATION_WORK_DAYS',
+  // stage 3 review after the rebase: a stand-in is checked on each item's own day
+  'vacationItemStandIn',
+  // stage 5 follow-ups (Ofek 15 Oct): "Start automations" said plainly, the import confirm with its count
+  'MCP_RUN_AUTOMATIONS_ON', 'mcpImportConfirm',
 ];
 
 function extractDecl(source, name){
@@ -1635,7 +1657,7 @@ function testRegionStatic(){
   assertEqual([fnText('autoWindowFieldsHtml').includes('bizTzLabel()'), /autoSafetyNorm\(AUTO\.safety\)\.timezone/.test(script)], [true, false], 'automations: the "Only on" hours are labelled with the business\'s time zone, never the old column');
   assertEqual(/shortName/.test(fnText('autoSample')), false, 'automations preview: {brand} falls back to the business name like the engine, never the short name');
   // the edge functions carry the same region block, word for word
-  const fns = ['automations', 'backup', 'conversations', 'push', 'review-requests', 'voice', 'ingest-ads-stats', 'contractor-sign'];
+  const fns = ['automations', 'backup', 'conversations', 'push', 'review-requests', 'voice', 'ingest-ads-stats', 'contractor-sign', 'mcp'];
   const blocks = fns.map(f => { const t = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', f, 'index.ts'), 'utf8'); const a = t.indexOf('// ── region ('), b = t.indexOf('// ── end region ──'); return { f, t, block: a >= 0 && b > a ? t.slice(a, b) : '' }; });
   assertEqual(blocks.filter(x => !x.block || x.block!==blocks[0].block).map(x => x.f), [], 'every edge function has the same region block');
   assertEqual(blocks.filter(x => x.t.includes('NSW_HOLIDAYS')).map(x => x.f), [], 'no edge function keeps a list of NSW holidays');
@@ -1992,10 +2014,10 @@ function testNotificationCards(sb){
   // The cards.
   const R = { waitMinutes: 15, from: 8, until: 20, docDays: 30, unpaidDays: 7 };
   const cards = sb.notifyCards({}, R, { phoneEnabled: false });
-  assertEqual(cards.map(c => c.id), ['newLead', 'leadWaiting', 'missedCall', 'unpaid', 'invoice', 'docExpiry', 'bizInsurance', 'googleReview'], 'notifyCards: 8 cards in the mockup\'s order');
-  // hand count: nothing saved = only the invoice one on (1 of 8); documents on = invoice, documents and insurance (3 of 8)
+  assertEqual(cards.map(c => c.id), ['newLead', 'leadWaiting', 'missedCall', 'unpaid', 'invoice', 'docExpiry', 'bizInsurance', 'vacationBack', 'googleReview'], 'notifyCards: 8 cards in the mockup\'s order (+ "back tomorrow", stage 3)');
+  // hand count: nothing saved = only the invoice one on (1 of 8); documents on = invoice, documents and insurance (3 of 8); "back tomorrow" (stage 3) is on unless switched off
   assertEqual([cards.filter(c => c.on).map(c => c.id), sb.notifyCards({ docExpiry: { on: true } }, R, {}).filter(c => c.on).map(c => c.id)],
-    [['invoice'], ['invoice', 'docExpiry', 'bizInsurance']], 'notifyCards: how many are on');
+    [['invoice', 'vacationBack'], ['invoice', 'docExpiry', 'bizInsurance', 'vacationBack']], 'notifyCards: how many are on');
   const R2 = { waitMinutes: 45, from: 8, until: 20, docDays: 60, unpaidDays: 10 }, named = sb.notifyCards({}, R2, {});
   const nm = id => named.find(c => c.id===id).name;
   assertEqual([nm('leadWaiting'), nm('unpaid'), nm('docExpiry'), nm('bizInsurance')],
@@ -2003,7 +2025,7 @@ function testNotificationCards(sb){
   const N = { newLead: { on: true, office: true }, missedCall: { on: false, office: true }, unpaid: { on: true, office: true }, docExpiry: { on: true, office: true }, googleReview: { on: true, office: true } };
   const off = sb.notifyCards(N, R, {});
   assertEqual(off.filter(c => c.office).map(c => c.id), ['newLead', 'missedCall'], 'notifyCards: office only on cards that allow it (an unpaid job saved with office stays owners only), never on the locked one');
-  assertEqual(off.filter(c => !c.officeOk).map(c => [c.id, c.only]), [['unpaid', 'money'], ['invoice', 'pay'], ['docExpiry', 'private details'], ['bizInsurance', 'business insurance']], 'notifyCards: owners-only cards say why');
+  assertEqual(off.filter(c => !c.officeOk && !c.alsoTo).map(c => [c.id, c.only]), [['unpaid', 'money'], ['invoice', 'pay'], ['docExpiry', 'private details'], ['bizInsurance', 'business insurance']], 'notifyCards: owners-only cards say why');
   const g = off.find(c => c.id==='googleReview');
   assertEqual([g.locked, g.on, g.office, g.lockedLine, g.flags], [true, false, false, 'Turns on once Google Business Profile is connected.', [{ tone:'neutral', text:'Comes with the Google Business Profile connector' }]], 'notifyCards: the Google review card waits for its connector');
   const flags = (o, id) => sb.notifyCards({}, R, o).find(c => c.id===id).flags;
@@ -2160,7 +2182,7 @@ function testConnectors(sb){
   assertEqual([rem.length, rem[0].id, rem[0].cat, rem[0].act, ad({ gads: { removed: true } }, 'Money', '').length], [13, 'gads', 'Removed connectors', 'connect', 4], 'connAddonsShown: a removed connector comes first, to connect again');
   // the list itself
   const ids = sb.CONNECTORS.map(d => d.id);
-  assertEqual([ids, new Set(ids).size], [['gads', 'meta', 'organic', 'nightly', 'email', 'web', 'sheet', 'twilio', 'ghl', 'gbp', 'xero', 'wp'], 12], 'CONNECTORS: the 12 connectors in the mockup order, each once');
+  assertEqual([ids, new Set(ids).size], [['gads', 'meta', 'organic', 'nightly', 'email', 'web', 'sheet', 'twilio', 'ghl', 'gbp', 'xero', 'wp', 'mcp'], 13], 'CONNECTORS: the 13 connectors: the 12 of the mockup, then the private connector, each once');
   const bad = sb.CONNECTORS.flatMap(d => d.items.filter(i => !i.k || !i.n || !i.freq || !i.feeds || !(i.how===null || sb.CONN_HOW[i.how]) || typeof i.reader!=='string').map(i => d.id + '.' + i.k));
   assertEqual(bad, [], 'CONNECTORS: every item has a key, name, how (a known tag or none), how often, what it feeds and who reads its switch');
   assertEqual(sb.CONNECTORS.flatMap(d => d.items.filter(i => i.reader==='fn').map(i => d.id + '.' + i.k)).sort(), ['email.check', 'gads.conv', 'gads.kw', 'gads.stats', 'meta.ads', 'nightly.assess', 'organic.ai', 'organic.ga4', 'organic.gsc'], "CONNECTORS: the switches ingest-ads-stats honours are exactly the server's list");
@@ -2171,6 +2193,190 @@ function testConnectors(sb){
   assertEqual(sb.connLogRows('gads', log, NOW), [['Today 7:52 am', 'good', 'OK', 'Assessment written'], ['Tue 13 Oct', 'bad', "Didn't run", 'Nothing came in.'], ['Mon 12 Oct', 'bad', "Didn't run", 'Nothing came in.'], ['Sun 11 Oct', 'bad', "Didn't run", 'Nothing came in.']], 'connLogRows: the last 4 Sydney days, today first');
   assertEqual([sb.connLogRows('meta', log, NOW)[0], sb.connLogRows('meta', log, NOW).length, sb.connLogRows('meta', log, Date.parse('2026-10-14T00:30:00Z'))[0]], [['Yesterday 7:45 am', 'good', 'OK', 'Assessment written'], 3, ['Wed 14 Oct', 'bad', "Didn't run", 'Nothing came in.']], "connLogRows: today shows \"Didn't run\" only after 10 am");
   assertEqual([sb.connLogRows('email', log, NOW)[0], sb.connLogRows('nightly', log, NOW)[0][3], sb.connLogRows('web', log, NOW), sb.connLogRows('gads', null, NOW)], [['Today 7:53 am', 'good', 'OK', '5 emails checked, 4 in the CRM'], 'Assessment written (google)', [], []], 'connLogRows: the lead check names its numbers; connectors with no daily trace have no log');
+}
+
+function testMcpConnector(sb){
+  console.log('\nSettings → Connectors → Private connector (MCP), stage 5');
+  sb.URL = URL;   // mcpServerProblems parses addresses (a vm context has no URL of its own)
+  const script = fs.readFileSync(INDEX_HTML_PATH, 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+  const D = id => sb.CONNECTORS.find(d => d.id===id), cfg = (e, id) => sb.connCfgOf({ connectors: e }, id);
+  // the tile: a registry entry with no switches, so every connector helper keeps working
+  assertEqual([sb.connState(D('mcp'), cfg({}, 'mcp'), {}), sb.connTone(D('mcp'), cfg({}, 'mcp'), {}), sb.connHows(D('mcp')), sb.connStopsAll(D('mcp'), cfg({}, 'mcp')), sb.connMatches(D('mcp'), 'mcp'), sb.connMatches(D('mcp'), 'import leads'), D('mcp').kind],
+    ['ok', null, [], [], true, true, 'mcp'], 'MCP tile: connected (Ready), nothing to measure, no tags, nothing stops, found by name and description');
+  // who may make keys
+  const P = (role, permissions) => ({ role, permissions });
+  assertEqual([sb.canUseMcp(P('owner')), sb.canUseMcp(P('manager')), sb.canUseMcp(P('va', {})), sb.canUseMcp(P('va', { mcp: true })), sb.canUseMcp(P('technician', { mcp: false })), sb.canUseMcp(P('marketing', { mcp: true })), sb.canUseMcp({ role: 'va' }), sb.canUseMcp(null), sb.canUseMcp(P('va', { mcp: 'yes' }))],
+    [true, true, false, false, false, false, false, false, false], 'canUseMcp: owners and managers only (Ofek 15 Oct); an old permissions.mcp switch means nothing');
+  // settings
+  const inS = { mcp: { rateLimitPerMin: 30, logKeepDays: 5000, importSource: '  Partner feed ' } }, inCopy = JSON.stringify(inS);
+  assertEqual([sb.mcpSettingsOf(undefined), sb.mcpSettingsOf(inS), sb.mcpSettingsOf({ mcp: { rateLimitPerMin: 'abc', logKeepDays: 2, importSource: '' } }), sb.mcpSettingsOf({ mcp: 'x' }), sb.mcpSettingsOf({ mcp: { rateLimitPerMin: '30', logKeepDays: 365.5 } }), JSON.stringify(inS)===inCopy],
+    [{ rateLimitPerMin: 60, logKeepDays: 90, importSource: 'MCP import' }, { rateLimitPerMin: 30, logKeepDays: 90, importSource: 'Partner feed' }, { rateLimitPerMin: 60, logKeepDays: 90, importSource: 'MCP import' }, { rateLimitPerMin: 60, logKeepDays: 90, importSource: 'MCP import' }, { rateLimitPerMin: 60, logKeepDays: 90, importSource: 'MCP import' }, true],
+    'mcpSettingsOf: as the function reads it (a value out of range or not a whole number = the default), trimmed; the input is not changed');
+  assertEqual(sb.mcpSettingsOf({ mcp: { importSource: 'x'.repeat(70) } }).importSource.length, 60, 'mcpSettingsOf: the import source is cut to 60 characters, as the function does');
+  assertEqual([sb.mcpSettingProblem('rateLimitPerMin', '0'), sb.mcpSettingProblem('rateLimitPerMin', '2.5'), sb.mcpSettingProblem('rateLimitPerMin', '61'), sb.mcpSettingProblem('rateLimitPerMin', '601'), sb.mcpSettingProblem('logKeepDays', '3'), sb.mcpSettingProblem('logKeepDays', '3650'), sb.mcpSettingProblem('importSource', '  '), sb.mcpSettingProblem('importSource', 'x'.repeat(61)), sb.mcpSettingProblem('importSource', ' Feed ')],
+    ['Enter a whole number from 1 to 600.', 'Enter a whole number from 1 to 600.', '', 'Enter a whole number from 1 to 600.', 'Enter a whole number of days from 7 to 3650.', '', 'Give imported leads a source name.', 'Keep the source name to 60 characters.', ''], 'mcpSettingProblem: the same limits as set_mcp_settings');
+  // addresses and keys
+  const U = { url: 'https://x.supabase.co/functions/v1/mcp', pathUrl: 'https://x.supabase.co/functions/v1/mcp/t/ops_mcp_abc' };
+  assertEqual([sb.mcpUrls('https://x.supabase.co/', 'ops_mcp_abc'), sb.mcpUrls('https://x.supabase.co', 'ops_mcp_abc')], [U, U], 'mcpUrls: the plain address and the one with the key, with or without a trailing slash');
+  const T = 'ops_mcp_';
+  assertEqual([sb.mcpTokenLooksRight(T + 'A'.repeat(43)), sb.mcpTokenLooksRight(T + 'a'.repeat(41) + '-_'), sb.mcpTokenLooksRight(T + 'A'.repeat(42)), sb.mcpTokenLooksRight(T + 'A'.repeat(42) + '='), sb.mcpTokenLooksRight('ops_mcq_' + 'A'.repeat(43)), sb.mcpTokenLooksRight(undefined)],
+    [true, true, false, false, false, false], 'mcpTokenLooksRight: ops_mcp_ and exactly 43 url-safe characters');
+  const tk = [{ id: 'a', user_id: 'u1', created_at: '2026-10-01T00:00:00Z' }, { id: 'b', user_id: 'u1', created_at: '2026-10-05T00:00:00Z', revoked_at: '2026-10-06T00:00:00Z' }, { id: 'c', user_id: 'u2', created_at: '2026-10-03T00:00:00Z' }, { id: 'd', user_id: 'u1', created_at: '2026-10-04T00:00:00Z' }];
+  const kl = sb.mcpKeyLists(tk, 'u1');
+  assertEqual([kl.mine.map(t => t.id), kl.all.map(t => t.id), tk.map(t => t.id), sb.mcpKeyLists(null, 'u1').all], [['d', 'a', 'b'], ['d', 'c', 'a', 'b'], ['a', 'b', 'c', 'd'], []], 'mcpKeyLists: working keys first (newest first), then revoked; mine = my keys; the input order is kept');
+  const NOW = Date.parse('2026-10-13T21:30:00Z');   // Wed 14 Oct, 8:30 am in Sydney
+  const k0 = { token_prefix: 'ops_mcp_AbCd', created_at: '2026-10-13T20:52:00Z' };
+  assertEqual([sb.mcpKeyMeta(k0, NOW), sb.mcpKeyMeta({ ...k0, last_used_at: '2026-10-12T20:51:00Z' }, NOW), sb.mcpKeyMeta({ ...k0, revoked_at: '2026-10-13T21:00:00Z' }, NOW).endsWith(' · revoked Today 8:00 am'), sb.mcpWhen('', NOW), sb.mcpWhen(null, NOW)],
+    ['ops_mcp_AbCd… · made Today 7:52 am · never used', 'ops_mcp_AbCd… · made Today 7:52 am · last used Yesterday 7:51 am', true, 'Never', 'Never'], 'mcpKeyMeta / mcpWhen: prefix, made, last used and revoked, in Sydney time');
+  assertEqual(['ok', 'denied', 'error', 'rate_limited', 'odd', undefined].map(sb.mcpLogStatus), [['good', 'OK'], ['warn', 'Not allowed'], ['bad', 'Error'], ['warn', 'Too many calls'], ['neutral', 'odd'], ['neutral', '']], 'mcpLogStatus: the access log\'s result pills');
+  // the address guard (a convenience copy of the function's)
+  const blocked = ['localhost', 'api.localhost', 'printer.local', 'metadata.google.internal', '127.0.0.1', '10.2.3.4', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '[::1]', '[fd00::1]', '[fe80::1]', '[::ffff:127.0.0.1]', '[::ffff:7f00:1]', 'LOCALHOST.'];
+  const open = ['172.32.0.1', '8.8.8.8', 'example.com', 'mcp.example.com.au', 'fcbarcelona.com', 'fe80.example.com', '[2001:4860::8888]', '[::ffff:8.8.8.8]'];
+  assertEqual([blocked.filter(h => !sb.mcpHostBlocked(h)), open.filter(h => sb.mcpHostBlocked(h))], [[], []], 'mcpHostBlocked: local names, private / loopback / link-local / CGNAT IPv4, and IPv6 loopback, ULA, link-local and mapped forms');
+  const sp = s => sb.mcpServerProblems(s);
+  assertEqual([sp({ name: '', url: 'http://x.com' }), sp({ name: 'CRM', url: 'https://10.0.0.1/mcp' }), sp({ name: 'CRM', url: 'https://crm.example.com/mcp', auth_header: 'X Key' }), sp({ name: 'CRM', url: 'https://crm.example.com/mcp', auth_header: 'Cookie' }), sp({ name: 'CRM', url: 'not a url' }), sp({ name: 'CRM', url: 'https://crm.example.com/mcp', auth_header: 'Authorization' }), sp({ name: 'x'.repeat(81), url: 'https://[::1]/' })],
+    [['Give it a name.', 'The address must start with https://.'], ['That address is on a private network. Use the server\'s public https address.'], ['The header name can only have letters, numbers and dashes.'], ['That header can\'t be used.'], ['That address doesn\'t look right.'], [], ['Keep the name to 80 characters.', 'That address is on a private network. Use the server\'s public https address.']],
+    'mcpServerProblems: name, https only, no private address, and a usable header name');
+  // the import fields: the app's own columns, each once
+  const fieldsOf = n => [...extractDecl(script, n).matchAll(/:\s*'([a-z_]+)'/g)].map(m => m[1]);
+  const cols = { contacts: fieldsOf('contactPatchToRow'), jobs: fieldsOf('jobPatchToRow'), tasks: fieldsOf('taskPatchToRow') };
+  assertEqual([Object.keys(sb.MCP_IMPORT_FIELDS), Object.keys(sb.MCP_IMPORT_KINDS)], [['contacts', 'jobs', 'tasks'], ['contacts', 'jobs', 'tasks']], 'MCP_IMPORT_FIELDS: leads, jobs and tasks, as MCP_IMPORT_KINDS');
+  assertEqual(Object.entries(sb.MCP_IMPORT_FIELDS).flatMap(([k, list]) => list.filter(([t]) => !cols[k].includes(t)).map(([t]) => k + '.' + t)), [], 'MCP_IMPORT_FIELDS: every target is a column the app itself writes (contactPatchToRow / jobPatchToRow / taskPatchToRow)');
+  assertEqual(Object.values(sb.MCP_IMPORT_FIELDS).map(list => new Set(list.map(f => f[0])).size===list.length), [true, true, true], 'MCP_IMPORT_FIELDS: no field twice');
+  // the mapping editor's rows, both ways
+  const mr = sb.mcpMappingRows('contacts', { full_name: { path: 'name' }, source: { value: 'Partner' }, bogus: { path: 'x' }, phone: 'tel' });
+  assertEqual([mr.length, mr[0], mr.find(r => r.target==='source'), mr.find(r => r.target==='phone'), mr.filter(r => !r.mode).length, sb.mcpMappingRows('x', {}), sb.mcpMappingRows('tasks', null).length],
+    [13, { target: 'full_name', label: 'Name', mode: 'path', text: 'name' }, { target: 'source', label: 'Lead source', mode: 'value', text: 'Partner' }, { target: 'phone', label: 'Phone', mode: 'path', text: 'tel' }, 10, [], 8], 'mcpMappingRows: one row per field in order ({ path }, a plain path string or { value }); unknown targets are ignored');
+  assertEqual([sb.mcpMappingFromRows('contacts', mr), sb.mcpMappingFromRows('contacts', [{ target: 'email', mode: 'path', text: '   ' }, { target: 'notes', mode: 'value', text: ' hi ' }, { target: 'bogus', mode: 'path', text: 'x' }, { target: 'phone', mode: '', text: 'p' }])],
+    [{ full_name: { path: 'name' }, phone: { path: 'tel' }, source: { value: 'Partner' } }, { notes: { value: 'hi' } }], 'mcpMappingFromRows: back to { path } / { value }; blank text, no mode or an unknown target is dropped; text trimmed');
+  assertEqual(['contacts', 'jobs', 'tasks', 'x'].map(sb.mcpDedupeDefault), [{ fields: ['phone', 'email'], match: 'any' }, { fields: ['invoice_number'], match: 'any' }, { fields: ['title', 'due'], match: 'all' }, { fields: [], match: 'any' }], 'mcpDedupeDefault: the function\'s starting duplicate check');
+  assertEqual(['', 'items', 'data.items', 'data.items[0].x', 'a-b.$c', 'data/items', '__proto__', 'a..b', 'a.' + 'b.'.repeat(12) + 'c'].map(sb.mcpPathOk), [true, true, true, true, true, false, false, false, false], 'mcpPathOk: the function\'s path rules');
+  // what is wrong with a rule
+  const good = { name: 'Leads', kind: 'contacts', tool: 'list', mode: 'manual', mapping: { full_name: { path: 'n' }, phone: { path: 'p' }, email: { path: 'e' } }, dedupe: { fields: ['phone', 'email'], match: 'any' }, items_path: 'items' };
+  const rp = (patch, tools) => sb.mcpRuleProblems({ ...good, ...patch }, tools || ['list']);
+  assertEqual(sb.mcpRuleProblems({ name: '', kind: 'contacts', tool: '', mode: 'manual', mapping: {}, dedupe: { fields: [], match: 'any' } }, []), ['Give the import a name.', 'Pick the tool to call.', 'Map the name.', 'Pick at least one field for the duplicate check.'], 'mcpRuleProblems: an empty rule');
+  assertEqual([rp({}), rp({ kind: 'jobs', mapping: {}, dedupe: { fields: [], match: 'any' } }).includes('Map the customer.'), rp({ kind: 'tasks', mapping: {}, dedupe: { fields: [], match: 'any' } }).includes('Map the title.'), rp({ kind: 'x' }).includes('Pick what to import.')],
+    [[], true, true, true], 'mcpRuleProblems: a good rule has none; jobs need the customer, tasks the title');
+  assertEqual([rp({ mapping: { full_name: { path: 'n' }, phone: { path: 'p' } } }), rp({ mapping: { ...good.mapping, email: { value: 'x@y.z' } } }), rp({ dedupe: { fields: ['phone', 'email', 'notes', 'postcode', 'source'], match: 'any' } }).includes('Pick at most 4 fields for the duplicate check.')],
+    [['The duplicate check uses Email, but Email isn\'t mapped.'], ['The duplicate check uses Email, so map it from the data, not as a fixed value.'], true], 'mcpRuleProblems: every duplicate-check field must be mapped from the data');
+  assertEqual([rp({ tool: 'b' }, ['a']), rp({ tool: 'b' }, []), rp({ mode: 'daily' }), rp({ items_path: 'data/items' }), rp({ mapping: { ...good.mapping, notes: { path: 'a b' } } })],
+    [['Pick one of the server\'s tools (test the connection again if it changed).'], [], ['Pick manual or every hour.'], ['The list\'s place can only have letters, numbers, dots and _ (like data.items).'], ['Notes: the place in the data should look like customer.phone.']], 'mcpRuleProblems: the tool, the mode and the places');
+  // tool arguments and answers
+  assertEqual([sb.mcpParseArgs(''), sb.mcpParseArgs('{"limit": 5}'), ...['[1]', 'null', '5', '{bad'].map(t => sb.mcpParseArgs(t).error), sb.mcpParseArgs('x'.repeat(10001)).error],
+    [{ ok: true, value: {} }, { ok: true, value: { limit: 5 } }, ...Array(4).fill('The arguments must be a JSON object, like {"limit": 10}.'), 'Keep the arguments under 10,000 characters.'], 'mcpParseArgs: blank = {}; only a JSON object');
+  assertEqual([sb.mcpArgsTemplate({ type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', default: 20 }, active: { type: 'boolean' }, tags: { type: 'array' }, since: { type: 'string', examples: ['2026-10-01'] }, odd: {} } }), sb.mcpArgsTemplate(null), sb.mcpArgsTemplate({ type: 'string' })],
+    [JSON.stringify({ query: '', limit: 20, active: false, tags: [], since: '2026-10-01', odd: '' }, null, 2), '{}', '{}'], 'mcpArgsTemplate: defaults, examples or empty values from the tool\'s schema');
+  assertEqual([sb.mcpResultData({ structuredContent: { items: [1] } }), sb.mcpResultData({ content: [{ type: 'text', text: '{"a":1}' }] }), sb.mcpResultData({ content: [{ type: 'text', text: 'hello' }] }), sb.mcpResultData(undefined), sb.mcpResultData({ ok: true, preview: '[{"a":1}]' })],
+    [{ items: [1] }, { a: 1 }, null, null, [{ a: 1 }]], 'mcpResultData: structured content, else the first text item (or the function\'s preview) as JSON; never throws');
+  assertEqual([sb.mcpItemsAt({ data: { items: [{ a: 1 }] } }, 'data.items'), sb.mcpItemsAt([{ a: 1 }], ''), sb.mcpItemsAt({ x: 1 }, 'items'), sb.mcpItemsAt({ items: 'no' }, 'items'), sb.mcpItemsAt({ pages: [{ rows: [2] }] }, 'pages[0].rows'), sb.mcpItemsAt({}, '__proto__')],
+    [[{ a: 1 }], [{ a: 1 }], null, null, [2], null], 'mcpItemsAt: the list at a place in the answer, or null');
+  const sample = [{ name: 'A', phone: '1', address: { suburb: 'X', geo: { lat: 1, deep: { z: 1 } } }, tags: ['a'] }, { email: 'e', name: 'B', 'bad key': 1 }];
+  assertEqual([sb.mcpSamplePaths(sample), sb.mcpSamplePaths(sample, 2), sb.mcpSamplePaths([]), sb.mcpSamplePaths(null)], [['name', 'phone', 'address.suburb', 'address.geo.lat', 'tags', 'email'], ['name', 'phone'], [], []], 'mcpSamplePaths: places of the values, 3 levels deep, lists as one value, each once');
+  assertEqual([sb.mcpPreviewCounts([{ status: 'new' }, { status: 'duplicate' }, { status: 'new' }, { status: 'error' }, null]), sb.mcpPreviewColumns('contacts', { phone: { path: 'p' }, full_name: { path: 'n' }, notes: { value: 'x' } }),
+    sb.mcpPreviewColumns('contacts', { full_name: { path: 'a' }, phone: { path: 'b' }, email: { path: 'c' }, postcode: { path: 'd' }, division: { path: 'e' }, source: { path: 'f' } })],
+    [{ new: 2, duplicate: 1, error: 1 }, ['full_name', 'phone', 'notes'], ['full_name', 'phone', 'email', 'postcode', 'division']], 'mcpPreviewCounts / mcpPreviewColumns: the counts, and the first 5 mapped fields in field order');
+  assertEqual([sb.mcpPreviewText('abc'), sb.mcpPreviewText({ a: 1 }), sb.mcpPreviewText('x'.repeat(20), 12), sb.mcpPreviewText(undefined), sb.mcpPreviewText('y'.repeat(5000)).endsWith('… (cut at 4,000 characters)')],
+    ['abc', '{\n  "a": 1\n}', 'x'.repeat(12) + '\n… (cut at 12 characters)', '', true], 'mcpPreviewText: a tool\'s answer as text, cut with a note');
+  // import history
+  const run = { started_at: '2026-10-13T20:52:00Z', status: 'done', fetched: 14, inserted: 12, duplicates: 2, errors: [] };
+  assertEqual([sb.mcpRunLine(run, NOW), sb.mcpRunLine({ ...run, status: 'partial', errors: [{ i: 3, reason: 'x' }] }, NOW), sb.mcpRunLine({ ...run, undone_at: '2026-10-13T21:00:00Z' }, NOW), sb.mcpRunLine({ started_at: run.started_at, status: 'failed', errors: [{ reason: 'Timed out' }] }, NOW), sb.mcpRunLine({ started_at: run.started_at, status: 'running' }, NOW)],
+    ['Today 7:52 am · 14 fetched, 12 added, 2 already in the app', 'Today 7:52 am · 14 fetched, 12 added, 2 already in the app, 1 with problems', 'Today 7:52 am · 14 fetched, 12 added, 2 already in the app · undone Today 8:00 am', 'Today 7:52 am · Failed: Timed out', 'Today 7:52 am · Running…'], 'mcpRunLine: what each import did');
+  assertEqual([sb.mcpCanUndo({ inserted: 3, status: 'done' }), sb.mcpCanUndo({ inserted: 3, status: 'partial' }), sb.mcpCanUndo({ inserted: 0, status: 'done' }), sb.mcpCanUndo({ inserted: 3, status: 'done', undone_at: 'x' }), sb.mcpCanUndo({ inserted: 3, status: 'running' }), sb.mcpCanUndo(null)],
+    [true, true, false, false, false, false], 'mcpCanUndo: once, when it added something and has finished');
+  assertEqual([sb.mcpRunLine({ ...run, undo_started_at: '2026-10-13T21:00:00Z' }, NOW), sb.mcpCanUndo({ inserted: 3, status: 'done', undo_started_at: 'x' })],
+    ['Today 7:52 am · 14 fetched, 12 added, 2 already in the app · undo not finished: press Undo again to finish it', true], 'mcpRunLine / mcpCanUndo: an undo that stopped in the middle says so, and Undo stays (pressing it again resumes)');
+  // an undo that started less than 10 minutes ago may still be running (the server refuses a second Undo until then)
+  assertEqual([sb.mcpRunLine({ ...run, undo_started_at: '2026-10-13T21:25:00Z' }, NOW), sb.mcpRunLine({ ...run, undo_started_at: '2026-10-13T21:20:00Z' }, NOW), sb.mcpRunLine({ ...run, undo_started_at: 'x' }, NOW)],
+    ['Today 7:52 am · 14 fetched, 12 added, 2 already in the app · being undone… (if it stopped, Undo can finish it after Today 8:35 am)',
+      'Today 7:52 am · 14 fetched, 12 added, 2 already in the app · undo not finished: press Undo again to finish it',
+      'Today 7:52 am · 14 fetched, 12 added, 2 already in the app · undo not finished: press Undo again to finish it'], 'mcpRunLine: an undo under 10 minutes old says it is being undone (pressing Undo would be refused); from 10 minutes it can be finished');
+  // people, reasons, lines
+  assertEqual([sb.mcpReasonText('owners only'), sb.mcpReasonText('Only owners and managers can make keys.'), sb.mcpReasonText('not allowed'), sb.mcpReasonText('host blocked'), sb.mcpReasonText('That address is private or local, so OPS won\'t call it.'), sb.mcpReasonText('The server took too long.'), sb.mcpReasonText(''), sb.mcpReasonText('Weird thing'), sb.mcpReasonText('server')],
+    ['Only an owner can do this.', 'Only owners and managers can make keys.', 'Only owners and managers can make keys.', 'That address isn\'t allowed: it must be a public https address.', 'That address isn\'t allowed: it must be a public https address.', 'The server didn\'t answer within 15 seconds.', 'Something went wrong. Try again.', 'Weird thing', 'Something went wrong on the server. Try again.'], 'mcpReasonText: the function\'s reasons in plain words');
+  assertEqual([sb.mcpLoadErrorText({ code: '42P01' }), sb.mcpLoadErrorText({ message: 'relation "mcp_tokens" does not exist' }), sb.mcpLoadErrorText({ message: 'x' })], ['The private connector isn\'t set up on the server yet.', 'The private connector isn\'t set up on the server yet.', 'Could not load: x'], 'mcpLoadErrorText: a missing table says the server is not set up yet');
+  assertEqual([sb.mcpServerMeta({ url: 'https://crm.example.com/mcp', hasSecret: true, last_test_at: '2026-10-13T20:52:00Z', last_test_ok: true, last_tools: [{}, {}] }, NOW), sb.mcpServerMeta({ url: 'https://crm.example.com/mcp', hasSecret: false, last_test_at: '2026-10-13T20:52:00Z', last_test_ok: false, last_tools: [{}] }, NOW), sb.mcpServerMeta({ url: 'https://a.b/c' }, NOW)],
+    ['crm.example.com · key saved · connected Today 7:52 am · 2 tools', 'crm.example.com · no key · failed Today 7:52 am · 1 tool', 'a.b · no key · not tested yet'], 'mcpServerMeta: host, key, last test and tools');
+  assertEqual([sb.mcpRuleMeta({ kind: 'contacts', tool: 'list', mode: 'hourly', run_automations: true, last_run_at: '2026-10-13T20:52:00Z' }, NOW), sb.mcpRuleMeta({ kind: 'tasks', tool: 't', mode: 'manual' }, NOW)], ['Leads · list · every hour · starts automations · last run Today 7:52 am', 'Tasks · t · manual'], 'mcpRuleMeta: what, which tool, how often');
+  // stage 5 follow-ups (Ofek 15 Oct): "Start automations" said plainly; the import confirm carries the count
+  const ON = sb.MCP_RUN_AUTOMATIONS_ON, c3 = sb.mcpImportConfirm('contacts', 3), c1 = sb.mcpImportConfirm('jobs', 1);
+  assertEqual([/real new/.test(ON), /text and email those customers/.test(ON), /review requests can go out for Paid jobs/.test(ON), /push for each new lead/.test(ON)], [true, true, true, true], 'MCP_RUN_AUTOMATIONS_ON: On means real new records: customer texts and emails, review requests for Paid jobs, a push per lead');
+  assertEqual([c3.title, c3.label, c3.message.startsWith('Start automations is on for this import, so the 3 leads it adds count as real new leads.'), c1.title, c1.message.includes('the 1 job it adds counts as a real new job.'), c1.message.includes("Undo can't take back a message that went out.")],
+    ['Import 3 leads with automations on?', 'Import 3', true, 'Import 1 job with automations on?', true, true], 'mcpImportConfirm: the row count in the title, the button and the message');
+  assertEqual([sb.mcpImportConfirm('tasks', 'x').title, sb.mcpImportConfirm('odd', -2).label], ['Import 0 tasks with automations on?', 'Import 0'], 'mcpImportConfirm: a bad count is 0; an unknown kind is records');
+  const mcpHow = sb.CONNECTORS.find(d => d.id==='mcp').howText;
+  assertEqual([mcpHow.includes('Each person makes their own key'), mcpHow.startsWith('Owners and managers make their own key.')], [false, true], 'CONNECTORS mcp howText: keys are for owners and managers only (Ofek 15 Oct)');
+  // parity with the mcp function (supabase/functions/mcp/index.ts)
+  const fn = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'mcp', 'index.ts'), 'utf8');
+  const toolsSrc = fn.slice(fn.indexOf('export const TOOLS'), fn.indexOf('\n];', fn.indexOf('export const TOOLS')));
+  assertEqual([...toolsSrc.matchAll(/\n {4}name: "(\w+)", title:/g)].map(m => m[1]).sort(), sb.MCP_TOOL_NAMES.slice().sort(), 'mcp function: the same read-only tools as the access log filter');
+  const fieldsSrc = fn.slice(fn.indexOf('export const IMPORT_FIELDS'), fn.indexOf('\n};', fn.indexOf('export const IMPORT_FIELDS')));
+  const fnFields = {}; let kindNow = null;
+  fieldsSrc.split('\n').forEach(l => { const k = /^ {2}(\w+): \{$/.exec(l), f = /^ {4}(\w+): \{ label: "([^"]+)"(.*)$/.exec(l); if (k) { kindNow = k[1]; fnFields[kindNow] = []; } else if (f && kindNow) fnFields[kindNow].push([f[1], f[2], /required: true/.test(f[3])]); });
+  assertEqual([Object.keys(fnFields), Object.entries(fnFields).map(([k, list]) => JSON.stringify(list.map(f => [f[0], f[1]]))===JSON.stringify(sb.MCP_IMPORT_FIELDS[k]))], [['contacts', 'jobs', 'tasks'], [true, true, true]], 'mcp function: the same import fields and labels, in the same order');
+  assertEqual(Object.fromEntries(Object.entries(fnFields).map(([k, list]) => [k, list.filter(f => f[2]).map(f => f[0]).join()])), sb.MCP_IMPORT_REQUIRED, 'mcp function: the same required field per kind');
+  const fnObj = re => Function('return ' + fn.match(re)[1])();
+  assertEqual([fnObj(/export const MCP_DEFAULTS = (\{[^}]*\});/), fnObj(/export const DEFAULT_DEDUPE = (\{[^\n]*\});/), fnObj(/const RESERVED_HEADERS = (\[[^\]]*\]);/)],
+    [sb.MCP_SETTINGS_DEFAULTS, { contacts: sb.mcpDedupeDefault('contacts'), jobs: sb.mcpDedupeDefault('jobs'), tasks: sb.mcpDedupeDefault('tasks') }, sb.MCP_RESERVED_HEADERS], 'mcp function: the same settings defaults, starting duplicate checks and refused header names');
+  const canFn = (fn.match(/export const canUseMcp = [^\n]*/) || [''])[0];
+  assertEqual([/role === "owner"/.test(canFn), /role === "manager"/.test(canFn), /permissions/.test(canFn), fn.includes('export const TOKEN_RE = /^ops_mcp_[A-Za-z0-9_-]{43}$/;')], [true, true, false, true], 'mcp function: canUseMcp is owners and managers only (no permissions switch), as the app; its keys look like mcpTokenLooksRight');
+  assertEqual([/logKeepDays: intIn\(m\.logKeepDays, 7, 3650/.test(fn), /rateLimitPerMin: intIn\(m\.rateLimitPerMin, 1, 600/.test(fn), /trim\(\)\.slice\(0, 60\)/.test(fn)], [true, true, true], 'mcp function: the same setting limits as mcpSettingsOf');
+  // static checks on the page code: no render loops, safe handlers, the key never kept
+  const T2 = n => extractDecl(script, n);
+  assertEqual([T2('mcpLoad').includes('if (MCP_UI.loading) { if (force) MCP_UI.again = true; return MCP_UI.loading; }'), /\brender\(\)/.test(T2('mcpLoad')), T2('mcpLoadLog').includes('if (MCP_UI.logLoading) return MCP_UI.logLoading'), /\brender\(\)/.test(T2('mcpLoadLog'))], [true, false, true, false], 'MCP loaders: memoized, and never render() themselves (only mcpRedraw, after the read)');
+  const loadSrc = T2('mcpLoad');
+  assertEqual([(loadSrc.match(/mcp_import_runs[^\n]*/g) || []).map(l => /\.is\('rule_id', null\)\.is\('undone_at', null\)/.test(l) ? 'deleted rules, not undone' : 'other'), loadSrc.includes('mcpRunsOf(r.id, mcpRunLimit(r.id) + 1)'), /\.eq\('rule_id', ruleId\)/.test(T2('mcpRunsOf')), T2('mcpImportsBlock').includes("onclick=\"mcpMoreRuns('${rid}')\"")],
+    [['deleted rules, not undone'], true, true, true], 'import history: read per rule (one more than shown, so "Older imports" can page back), never one capped list for all rules; deleted rules\' imports that can still be undone are read apart');
+  assertEqual([/if \(MCP_UI\.again\) return;/.test(T2('mcpLoad')), T2('mcpLoad').includes('if (MCP_UI.again) { MCP_UI.again = false; mcpLoad(true); } else mcpRedraw();')], [true, true],
+    'mcpLoad: a forced read asked for during a running one drops that answer (it may be from before the change) and reads once more');
+  assertEqual([T2('mcpRedraw').includes("getElementById('mcp-keys-list')"), T2('mcpRedraw').includes('mcpKeepTyping(render)'), T2('mcpRuleModal').includes("if (!open && !document.querySelector('#modal-root .mcp-rule'))"), (script.match(/mcpRuleModal\(true\)/g) || []).length],
+    [true, true, true, 1], 'MCP redraws: only the key list (a name being typed stays) and the page keeps typed text; the rule editor opens from one place and a late redraw never reopens it');
+  assertEqual([T2('mcpSaveServer').includes('if (go && go.isConnected) closeModal()'), T2('mcpCommit').includes('if (go && go.isConnected) mcpPreviewClose()'), T2('mcpPreview').includes("document.getElementById('modal-root').innerHTML.trim()")],
+    [true, true, true], 'MCP async steps close or open only their own window (not one opened while they waited)');
+  const unsafe = ['renderMcpPage', 'mcpKeysHtml', 'mcpAllKeysBlock', 'mcpServersBlock', 'mcpImportsBlock', 'mcpRunHtml', 'mcpWhoBlock', 'mcpEditServer', 'mcpOpenRunTool', 'mcpRuleModal', 'mcpPreviewModal'].flatMap(n => {
+    const t = T2(n);
+    return [...t.matchAll(/on(?:click|change)="[a-zA-Z]+\('\$\{([^}]*)\}/g)].map(m => m[1]).filter(x => !x.startsWith('esc(jsStr(') && !new RegExp(`\\b${x}\\s*=\\s*esc\\(jsStr\\(`).test(t)).map(x => n + ': ' + x);
+  });
+  assertEqual(unsafe, [], 'MCP page: every id in an inline handler goes through esc(jsStr())');
+  assertEqual(['mcpShowNewKey', 'mcpCreateKey', 'mcpCopy'].filter(n => /localStorage|sessionStorage|console\.|MCP_UI\.\w+\s*=[^;\n]*token/.test(T2(n))), [], 'MCP key: never stored, logged or kept in MCP_UI');
+  const reveal = T2('mcpShowNewKey');
+  assertEqual([reveal.includes(`onclick="mcpCopy('\${id}')"`) && ['mcp-reveal-path', 'mcp-reveal-key', 'mcp-reveal-url'].every(id => reveal.includes(`row('${id}'`)) && !/on\w+="[^"]*\$\{(token|v|url|pathUrl)\}/.test(reveal), T2('mcpCall').indexOf('readOnlyReason()') < T2('mcpCall').indexOf('fetch(')], [true, true], 'MCP key: the copy buttons name a field, never the key; mcpCall checks read-only mode before it sends');
+  assertEqual([T2('renderShell').includes("${VIEW_AS_ID ? '' : mcpFooterButton(profile)}"), /mcp/i.test(T2('personAccessTab')), T2('personAccessTab').includes('setRows(PAGE_PICK.map(([k, l, desc]) => [esc(l)'), /setMcpPermission|mcpPeopleRows/.test(script)],
+    [true, false, true, false], 'the way in: the footer button (not while viewing as someone); no per-person switch any more (People > Access shows only the unchanged page switches)');
+  const footer = vm.runInNewContext(T2('mcpFooterButton') + `; ['manager', 'owner', 'va', 'technician', 'marketing'].map(role => mcpFooterButton({ role, permissions: { mcp: true } })).concat([mcpFooterButton(null)])`, { ico: () => '' });
+  assertEqual(footer.map(h => /AI assistant keys/.test(h) && /onclick="openMcpKeys\(\)"/.test(h)), [true, false, false, false, false, false], 'footer "AI assistant keys": managers only (owners use Settings; nobody else, an old switch or not)');
+  assertEqual([T2('mcpWhoBlock').includes('setToggle('), /Owners and managers/.test(T2('mcpWhoBlock'))], [false, true], 'Settings: "Who may make keys" says owners and managers, with nothing to switch');
+  assertEqual([sb.PAGE_PICK.some(p => p[0]==='mcp'), /\bmcp\b/.test(T2('canViewSection')), /\bmcp\b/.test(extractDecl(script, 'SECTION_LABEL')), /\bmcp\b/.test(extractDecl(script, 'ALL_SECTIONS'))], [false, false, false, false], 'the mcp permission is not a page: PAGE_PICK, SECTION_LABEL, ALL_SECTIONS and canViewSection are unchanged');
+  assertEqual([sb.CAT_NAMES.mcp, sb.settingsHistParts('Private connector (MCP): key "x" made')], ['Private connector (MCP)', { where: 'Private connector (MCP)', what: 'key "x" made' }], 'Settings history: the private connector\'s lines are grouped under it');
+  // Stage 5 review fixes after the rebase
+  // the jobs mapping's tax field says the business's own tax name (Settings → Region), as every other screen
+  {
+    const keep = sb.STATE.data.settings, setRegion = region => { sb.STATE.data.settings = { gstRatePercent: 10, catalog: region ? { region } : {} }; };
+    const shown = () => [sb.mcpFieldLabel('jobs', 'includes_gst'), sb.mcpMappingRows('jobs', {}).find(r => r.target==='includes_gst').label, sb.mcpFieldLabel('jobs', 'amount')];
+    setRegion(null); const au = shown();
+    setRegion({ country: 'GB' }); const gb = shown();
+    setRegion({ country: 'US', state: 'TX' }); const us = shown();
+    setRegion({ taxName: 'IVA' }); const own = shown();
+    sb.STATE.data.settings = keep;
+    assertEqual([au, gb, us, own], [['Includes GST', 'Includes GST', 'Amount'], ['Includes VAT', 'Includes VAT', 'Amount'], ['Includes Sales tax', 'Includes Sales tax', 'Amount'], ['Includes IVA', 'Includes IVA', 'Amount']],
+      'MCP import mapping: "Includes GST" follows the region\'s tax name (GB = VAT, US = Sales tax, the business\'s own word)');
+  }
+  // an undo's "being undone" window is the function's UNDO_STALE_MS
+  assertEqual([fnObj(/export const RUN_STALE_MS = ([^;]+);/), fn.includes('export const UNDO_STALE_MS = RUN_STALE_MS;')], [sb.MCP_UNDO_STALE_MS, true], 'mcp function: Undo can resume after the same 10 minutes the page waits before saying "press Undo again"');
+  // "Older imports" pages back for real: no cap on how many a rule shows, read 1,000 a request
+  {
+    const ctx = { MCP_UI: { runLimit: { r1: 1205, r2: 'x' } }, calls: [] };
+    const runs = Array.from({ length: 2300 }, (_, i) => ({ id: 'run' + String(i).padStart(5, '0'), rule_id: 'r1', started_at: new Date(Date.parse('2026-10-14T00:00:00Z') - i * 3600e3).toISOString() }));
+    ctx.sb = { from: t => { const q = { f: [], select(){ return q; }, eq(k, v){ q.f.push([k, v]); return q; }, order(){ return q; },
+      range(a, z){ ctx.calls.push([t, a, z]); const rows = runs.filter(r => q.f.every(([k, v]) => r[k]===v)); return Promise.resolve({ data: rows.slice(a, Math.min(z + 1, a + 1000)), error: null }); } }; return q; } };
+    vm.createContext(ctx);
+    vm.runInContext([extractDecl(script, 'MCP_RUN_COLS'), extractDecl(script, 'mcpRunLimit'), extractDecl(script, 'mcpRunsOf')].join('\n') + '\nthis.T = { mcpRunLimit, mcpRunsOf };', ctx);
+    assertEqual([ctx.T.mcpRunLimit('r1'), ctx.T.mcpRunLimit('r2'), ctx.T.mcpRunLimit('r3')], [1205, 5, 5], 'mcpRunLimit: as many as "Older imports" asked for (no 500 cap); 5 to start');
+    (async () => {
+      const got = await ctx.T.mcpRunsOf('r1', 1206), few = await ctx.T.mcpRunsOf('r1', 6), none = await ctx.T.mcpRunsOf('r9', 6);
+      assertEqual([got.data.length, got.data[1205].id, ctx.calls.slice(0, 2), few.data.length, none.data.length, ctx.calls.length], [1206, 'run01205', [['mcp_import_runs', 0, 999], ['mcp_import_runs', 1000, 1205]], 6, 0, 4],
+        'mcpRunsOf: a rule\'s imports past 1,000 are read in pages (the 1,206th, from the hourly rule\'s 51st day, keeps its Undo); a short page stops');
+    })().catch(e => assertEqual(String(e), '', 'mcpRunsOf threw'));
+  }
 }
 
 testJobAttributionTags(loadSandbox());
@@ -2303,6 +2509,376 @@ function testPeopleTabs(sb){
 }
 
 // The app tells the automation engine "look now" only for what it saves itself: a stage move, a lead made by hand, a new job.
+function testVacations(sb){
+  console.log('\nPeople: vacations (stage 3)');
+  const SYD = 'Australia/Sydney';
+  const KEYS = ['noNotify','notAssignable','standIn','flagOpen','autoBack','badge','noCalls','payroll','remind'];
+  const all = val => { const o = {}; KEYS.forEach(k => { o[k] = val; }); return o; };
+  assertEqual(sb.VACATION_OPTIONS.map(o => o.key), KEYS, 'options: the registry keys in checklist order');
+  assertEqual(sb.VACATION_OPTIONS.every(o => o.label && typeof o.help==='string'), true, 'options: every item has a label and help');
+
+  // options: autoBack is on unless the boolean false; everything else only when the boolean true
+  assertEqual(sb.vacationOptionsNorm({}), { ...all(false), autoBack: true, pay: 'unpaid' }, 'norm: {} → all off but autoBack, unpaid');
+  assertEqual(sb.vacationOptionsNorm({ autoBack: 'false', noNotify: 'true' }).autoBack, true, 'norm: autoBack "false" (a string) stays on');
+  assertEqual(sb.vacationOptionsNorm({ autoBack: 'false', noNotify: 'true' }).noNotify, false, 'norm: noNotify "true" (a string) is off');
+  assertEqual(sb.vacationOptionsNorm({ autoBack: false, payroll: true, pay: 'paid' }), { ...all(false), payroll: true, pay: 'paid' }, 'norm: autoBack false, payroll + paid');
+  assertEqual(sb.vacationOptionsNorm({ pay: 'weird' }).pay, 'unpaid', 'norm: an odd pay → unpaid');
+  assertEqual(sb.vacationOptionsNorm(null), { ...all(false), autoBack: true, pay: 'unpaid' }, 'norm: null is safe');
+  assertEqual([sb.vacationOpt({ options: {} }, 'autoBack'), sb.vacationOpt({ options: { remind: true } }, 'remind'), sb.vacationOpt({}, 'remind')], [true, true, false], 'vacationOpt: the same rule on v.options');
+
+  // defaults: everything ticked, unpaid (no per-business defaults: nothing could edit them); previous vacation wins
+  assertEqual(sb.vacationDefaults(), { ...all(true), pay: 'unpaid' }, 'defaults: everything ticked, unpaid');
+  assertEqual(sb.vacationDefaults.length, 0, 'defaults: no hidden setting is read (catalog.vacation.defaults dropped)');
+  const ann = { id: 'e1', name: 'Ann' };
+  const prevRows = [
+    { id: 'a', employeeId: 'e1', employeeName: 'Ann', createdAt: '2026-01-01T00:00:00Z', options: { remind: true, autoBack: false } },
+    { id: 'b', employeeId: 'e1', employeeName: 'Ann', createdAt: '2026-05-01T00:00:00Z', options: { noNotify: true, pay: 'paid', payroll: true } },
+    { id: 'c', employeeId: 'e1', employeeName: 'Ann', createdAt: '2026-09-01T00:00:00Z', cancelledAt: '2026-09-02T00:00:00Z', options: { noCalls: true } },
+    { id: 'd', employeeId: 'e2', employeeName: 'Bob', createdAt: '2026-10-01T00:00:00Z', options: { badge: true } },
+  ];
+  assertEqual(sb.vacationOptionsFor(prevRows, ann), { ...all(false), autoBack: true, noNotify: true, payroll: true, pay: 'paid' }, 'options for: the latest non-cancelled vacation of that person');
+  assertEqual(sb.vacationOptionsFor(prevRows, { id: 'e3', name: 'Cat' }), { ...all(true), pay: 'unpaid' }, 'options for: the first time → the defaults');
+
+  // days in the business time zone: stage 1's bizTz / bizDayOf / todayStr (Settings → Region and format; DST starts 4 Oct 2026 in Sydney)
+  delete sb.STATE.data.settings.catalog;
+  assertEqual([sb.bizTz(), sb.bizDayOf('2026-10-03T14:30:00Z'), sb.bizDayOf('2026-10-04T13:30:00Z')], [SYD, '2026-10-04', '2026-10-05'], 'days: nothing saved = Sydney; 00:30 AEST on the 4th, 00:30 AEDT on the 5th');
+  const endLate = { id: 'z', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', options: {}, endedAt: '2026-10-21T15:30:00Z', cancelledAt: null };
+  assertEqual(sb.vacationOnDay(endLate, '2026-10-21', sb.bizTz()), true, 'tz: ended 22 Oct 02:30 Sydney → still away on the 21st');
+  sb.STATE.data.settings.catalog = { region: { timeZone: 'Australia/Perth' } };
+  assertEqual([sb.bizTz(), sb.todayStr(Date.parse('2026-10-04T17:00:00Z')), sb.vacationOnDay(endLate, '2026-10-21', sb.bizTz())], ['Australia/Perth', '2026-10-05', false],
+    'tz: region.timeZone Perth → today is Perth time (01:00 on the 5th), and the same end (21 Oct 23:30 Perth) is back on the 21st');
+  sb.STATE.data.settings.catalog = { region: { timeZone: 'Mars/Base' } };
+  assertEqual(sb.bizTz(), SYD, 'tz: not a real zone → Sydney');
+  delete sb.STATE.data.settings.catalog;
+
+  // in force on a day
+  const V = (extra) => ({ id: 'v1', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: null, standInName: '', options: {}, endedAt: null, cancelledAt: null, ...extra });
+  const on = (v, d) => sb.vacationOnDay(v, d, SYD);
+  assertEqual([on(V(), '2026-10-19'), on(V(), '2026-10-20'), on(V(), '2026-10-24'), on(V(), '2026-10-25')], [false, true, true, false], 'onDay: 20–24 with autoBack');
+  assertEqual([on(V({ options: { autoBack: false } }), '2026-10-30'), on(V({ options: { autoBack: false } }), '2026-10-19')], [true, false], 'onDay: autoBack off stays in force after the end');
+  assertEqual(on(V({ cancelledAt: '2026-10-01T00:00:00Z' }), '2026-10-21'), false, 'onDay: cancelled never counts');
+  assertEqual([on(V({ endedAt: '2026-10-21T13:30:00Z' }), '2026-10-21'), on(V({ endedAt: '2026-10-21T13:30:00Z' }), '2026-10-22')], [true, false], 'onDay: ended 22 Oct 00:30 Sydney → back on the 22nd');
+  assertEqual(on(V({ endedAt: '2026-10-21T12:30:00Z' }), '2026-10-21'), false, 'onDay: ended 21 Oct 23:30 Sydney → back on the 21st');
+  assertEqual([sb.vacationPlannedLast(V(), SYD), sb.vacationPlannedLast(V({ endedAt: '2026-10-21T13:30:00Z' }), SYD), sb.vacationPlannedLast(V({ endedAt: '2026-10-19T13:30:00Z' }), SYD), sb.vacationPlannedLast(V({ cancelledAt: 'x' }), SYD)],
+    ['2026-10-24', '2026-10-21', '', ''], 'planned last: endsOn, shortened by an early end, empty when ended before it began or cancelled');
+  assertEqual([sb.vacationLastDay(V(), SYD, '2026-10-30'), sb.vacationLastDay(V({ options: { autoBack: false } }), SYD, '2026-10-30'), sb.vacationLastDay(V({ options: { autoBack: false } }), SYD, '2026-10-21'), sb.vacationLastDay(V({ endedAt: '2026-10-21T13:30:00Z' }), SYD, '2026-10-30')],
+    ['2026-10-24', '2026-10-30', '2026-10-24', '2026-10-21'], 'last day: autoBack → endsOn, open → through today, ended → the day before');
+
+  // which vacation, for whom
+  const two = [V({ id: 'old', startsOn: '2026-10-10', endsOn: '2026-10-12', options: { autoBack: false, noNotify: true } }), V({ id: 'new', options: { noCalls: true } })];
+  assertEqual(sb.vacationFor(two, { id: 'e1' }, '2026-10-21', SYD).id, 'new', 'vacationFor: by id; two in force → the latest startsOn');
+  assertEqual(sb.vacationFor(two, 'Ann', '2026-10-21', SYD, 'noNotify').id, 'old', 'vacationFor: by name; with a key → the one that has it');
+  assertEqual(sb.vacationFor([V({ options: { noCalls: true } })], 'Ann', '2026-10-21', SYD, 'noNotify'), null, 'vacationFor: with a key the row lacks → null');
+  assertEqual([sb.vacationFor(two, 'Bob', '2026-10-21', SYD), sb.vacationFor(two, { id: 'e2', name: 'Bob' }, '2026-10-21', SYD)], [null, null], 'vacationFor: someone else → null');
+  const today = sb.todayStr();
+  sb.STATE.data.vacations = [V({ startsOn: today, endsOn: sb.shiftDays(today, 2), options: { noCalls: true } })];
+  assertEqual([sb.onVacationOn('Ann'), sb.onVacationOn({ id: 'e1' }, null, 'noCalls'), sb.onVacationOn('Ann', null, 'noNotify'), sb.onVacationOn('Ann', sb.shiftDays(today, -1)), sb.onVacationOn('Bob')],
+    [true, true, false, false, false], 'onVacationOn: reads STATE.data.vacations, the day defaults to today');
+  sb.STATE.data.vacations = [];
+  const techRow = [V({ employeeName: 'Ann T' })];
+  assertEqual(sb.vacationForProfile(techRow, { technicianName: 'Ann T', fullName: 'Ann Smith' }, '2026-10-21', SYD).id, 'v1', 'forProfile: the Jobs & Commissions name first');
+  assertEqual(sb.vacationForProfile([V({ employeeName: 'Ann Smith' })], { technicianName: null, fullName: 'Ann Smith' }, '2026-10-21', SYD).id, 'v1', 'forProfile: else the full name');
+  // the functions' and SQL's rule (vacEmployeeOf / profile_on_vacation): the employee named technicianName, else the one named fullName
+  const chrisRows = [V({ employeeId: 'e-cn', employeeName: 'Chris Novak' })], chris = { technicianName: 'Chris', fullName: 'Chris Novak' };
+  assertEqual([sb.vacationForProfile(chrisRows, chris, '2026-10-21', SYD, null, [{ id: 'e-cn', name: 'Chris Novak' }]).id, sb.vacationForProfile(chrisRows, chris, '2026-10-21', SYD).id],
+    ['v1', 'v1'], 'forProfile: no employee named the technicianName → the full name\'s card (as the server), with or without the employees');
+  assertEqual(sb.vacationForProfile(chrisRows, chris, '2026-10-21', SYD, null, [{ id: 'e-c', name: 'Chris' }, { id: 'e-cn', name: 'Chris Novak' }]), null, 'forProfile: an employee named the technicianName is theirs, never the full name\'s');
+  assertEqual(sb.vacationForProfile(chrisRows, chris, '2026-10-21', SYD, 'noNotify', [{ id: 'e-cn', name: 'Chris Novak' }]), null, 'forProfile: with a key the row lacks → null');
+  const emps2 = [{ id: 'a', name: 'Ann' }, { id: 'b', name: 'Bob Day' }, { id: 'c', name: 'Cat' }];
+  assertEqual([sb.vacationEmployeeOfProfile({ technicianName: 'Ann', fullName: 'Bob Day' }, emps2).id, sb.vacationEmployeeOfProfile({ technicianName: 'Annie', fullName: 'Bob Day' }, emps2).id, sb.vacationEmployeeOfProfile({ fullName: 'Nobody' }, emps2), sb.vacationEmployeeOfProfile(null, emps2)],
+    ['a', 'b', null, null], 'employee of a login: technicianName first, else fullName, else none');
+  assertEqual([[...sb.vacationLoginIds([{ technicianName: 'Ann' }, { fullName: 'Bob Day' }, { fullName: 'Zed' }], emps2)].sort(), sb.vacationLoginIds([], emps2), sb.vacationLoginIds(null, emps2)],
+    [['a', 'b'], null, null], 'login ids: the cards a login maps to; null when the logins can\'t be read');
+  assertEqual(sb.vacationUpcoming([V({ id: 'later', startsOn: '2026-11-03', endsOn: '2026-11-05' }), V(), V({ id: 'x', startsOn: '2026-10-28', endsOn: '2026-10-29', cancelledAt: 'y' })], 'Ann', '2026-10-21').id, 'later', 'upcoming: the next not cancelled one');
+
+  // one at a time per person
+  const ov = (a, b) => sb.vacationsOverlap(a, b, SYD);
+  assertEqual(ov(V({ id: 'a' }), V({ id: 'b', startsOn: '2026-10-24', endsOn: '2026-10-28' })), true, 'overlap: touching on the 24th');
+  assertEqual(ov(V({ id: 'a' }), V({ id: 'b', startsOn: '2026-10-25', endsOn: '2026-10-28' })), false, 'overlap: 20–24 and 25–28 are fine');
+  assertEqual(ov(V({ id: 'a', cancelledAt: 'x' }), V({ id: 'b', startsOn: '2026-10-22', endsOn: '2026-10-28' })), false, 'overlap: a cancelled one never');
+  assertEqual(ov(V({ id: 'a', endedAt: '2026-10-21T13:30:00Z' }), V({ id: 'b', startsOn: '2026-10-22', endsOn: '2026-10-25' })), false, 'overlap: ended early on the 22nd → 22–25 is free');
+  assertEqual(ov(V({ id: 'a' }), V({ id: 'b', employeeId: 'e2', employeeName: 'Bob' })), false, 'overlap: other people never');
+  assertEqual(ov(V({ id: 'a', options: { autoBack: false } }), V({ id: 'b', startsOn: '2026-10-26', endsOn: '2026-10-28' })), false, 'overlap: one left open past its end blocks nothing later');
+
+  // what stops a save
+  const draft = (extra) => ({ employeeId: 'e1', startsOn: '2026-11-02', endsOn: '2026-11-06', standInId: 'e2', options: { standIn: true, payroll: true, pay: 'paid' }, note: '', ...extra });
+  const P = (d, rows) => sb.vacationProblems(d, rows || [], SYD);
+  assertEqual(P(draft()), [], 'problems: a valid draft');
+  assertEqual(P(draft({ startsOn: '' })), ['Pick the first and the last day'], 'problems: missing dates');
+  assertEqual(P(draft({ endsOn: '2026-11-01' })), ['The last day is before the first'], 'problems: end before start');
+  assertEqual(P(draft({ endsOn: '2027-11-04' })), ['A vacation can be at most a year'], 'problems: over 366 days');
+  assertEqual(P(draft({ endsOn: '2027-11-03' })), [], 'problems: exactly 366 days is fine');
+  assertEqual(P(draft({ standInId: null })), ['Pick the stand-in'], 'problems: stand-in ticked without one');
+  assertEqual(P(draft({ standInId: 'e1' })), ['The stand-in must be someone else'], 'problems: the stand-in is the person');
+  assertEqual(P(draft({ standInId: null, options: { payroll: true } })), ['Paid or unpaid leave?'], 'problems: payroll ticked with no pay (stand-in unticked is fine)');
+  assertEqual(P(draft({ startsOn: '2026-10-22', endsOn: '2026-10-28' }), [V()]), ['Already on vacation 20 Oct–24 Oct'], 'problems: an overlap');
+  assertEqual(P(draft({ id: 'v1', startsOn: '2026-10-22', endsOn: '2026-10-28' }), [V()]), [], 'problems: the same vacation edited does not clash with itself');
+  assertEqual(P(draft({ note: 'x'.repeat(501) })), ['The note can be at most 500 characters'], 'problems: a long note');
+
+  // the saved row
+  assertEqual(sb.vacationRowFromDraft(draft({ options: { payroll: true, pay: 'paid' }, note: '  ' })),
+    { employee_id: 'e1', starts_on: '2026-11-02', ends_on: '2026-11-06', stand_in_id: null, options: { ...all(false), autoBack: true, payroll: true, pay: 'paid' } }, 'row: stand-in unticked → null, options normalized');
+  const row = sb.vacationRowFromDraft(draft({ note: ' Fiji ' }));
+  assertEqual([row.stand_in_id, 'note' in row, 'business_id' in row, 'employee_name' in row, 'created_by' in row, 'reminded_at' in row], ['e2', false, false, false, false, false], 'row: the stand-in kept; no note (its own table), business_id, names, created_by or reminded_at');
+  // the note: owners and managers only, from employee_vacation_notes (main builder review 1.C.1)
+  const notes = sb.vacationNotesMap([{ vacation_id: 'v1', note: 'Surgery' }, { vacation_id: 'v2', note: null }, { vacation_id: null, note: 'x' }, null]);
+  assertEqual([notes, sb.vacationNotesMap(undefined)], [{ v1: 'Surgery' }, {}], 'notes map: by vacation, empty ones left out');
+  assertEqual([sb.vacationWithNote(V(), notes).note, sb.vacationWithNote(V({ id: 'v9' }), notes).note, sb.vacationWithNote(V(), null).note], ['Surgery', '', ''], 'with note: from the notes, else empty (someone who may not read them)');
+
+  // words on badges and pickers
+  const ut = (v, d) => sb.vacationUntilText(v, d, SYD);
+  assertEqual([ut(V(), '2026-10-21'), ut(V({ options: { autoBack: false } }), '2026-10-27'), ut(V({ startsOn: '2026-11-03', endsOn: '2026-11-05' }), '2026-10-21'), ut(V(), '2026-10-26')],
+    ['On vacation until 24 Oct', 'On vacation (due back 25 Oct)', 'Vacation from 3 Nov', ''], 'until text: in force, past the end with autoBack off, upcoming, over');
+  assertEqual([sb.vacationOverdue(V({ options: { autoBack: false } }), '2026-10-27', SYD), sb.vacationOverdue(V({ options: { autoBack: false } }), '2026-10-24', SYD), sb.vacationOverdue(V(), '2026-10-27', SYD), sb.vacationOverdue(V({ options: { autoBack: false }, endedAt: '2026-10-26T01:00:00Z' }), '2026-10-27', SYD)],
+    [true, false, false, false], 'overdue: only autoBack off, past the end and still in force');
+  assertEqual(sb.vacationPickerInfo([V({ options: { noNotify: true } })], 'Ann', '2026-10-21', SYD), null, 'picker: null without notAssignable');
+  assertEqual(sb.vacationPickerInfo([V({ options: { notAssignable: true } })], 'Ann', '2026-10-26', SYD), null, 'picker: null outside the dates');
+  const info = sb.vacationPickerInfo([V({ standInId: 'e2', standInName: 'Bob', options: { notAssignable: true, standIn: true } })], { id: 'e1' }, '2026-10-21', SYD);
+  assertEqual([info.vacation.id, info.label, info.standIn], ['v1', 'On vacation until 24 Oct', { id: 'e2', name: 'Bob' }], 'picker: label + the stand-in');
+  assertEqual(sb.vacationAssignText('Ann', info), { confirm: 'Ann is on vacation until 24 Oct. Assign anyway?', standInLabel: 'Assign Bob instead' }, 'assign text: confirm + stand-in button');
+  const noStand = sb.vacationPickerInfo([V({ standInId: 'e2', standInName: 'Bob', options: { notAssignable: true } })], 'Ann', '2026-10-21', SYD);
+  assertEqual([noStand.standIn, sb.vacationAssignText('Ann', noStand).standInLabel], [null, ''], 'picker: stand-in unticked → no stand-in button');
+
+  // payroll leave lines (19 Oct 2026 is a Monday)
+  const MF = [1, 2, 3, 4, 5];
+  const PL = (rows, from, to, wd, today) => sb.vacationPayrollLines(rows, 'Ann', from, to, SYD, wd, today || '2026-10-15');
+  assertEqual(PL([V({ options: { payroll: true, pay: 'paid' } })], '2026-10-18', '2026-10-24', []), [{ id: 'v1', pay: 'paid', from: '2026-10-20', to: '2026-10-24', days: 4, text: 'Paid leave 20–24 Oct · 4 days' }], 'payroll: a paid line (Tue–Sat, no working days set → Tue–Fri)');
+  assertEqual(PL([V()], '2026-10-18', '2026-10-24', []), [], 'payroll: only with payroll ticked');
+  assertEqual(PL([V({ startsOn: '2026-10-19', endsOn: '2026-10-25', options: { payroll: true, pay: 'paid' } })], '2026-10-19', '2026-10-25', MF).map(l => [l.days, l.text]), [[5, 'Paid leave 19–25 Oct · 5 days']], 'payroll: Mon–Fri working days → 5 of 7');
+  assertEqual(PL([V({ startsOn: '2026-10-19', endsOn: '2026-10-25', options: { payroll: true } })], '2026-10-19', '2026-10-25', []).map(l => l.days), [5], 'payroll: no working days set → Monday to Friday');
+  assertEqual(PL([V({ startsOn: '2026-10-19', endsOn: '2026-10-25', options: { payroll: true } })], '2026-10-19', '2026-10-25', [0, 6]).map(l => l.days), [2], 'payroll: their own working days when set (weekends)');
+  assertEqual(PL([V({ startsOn: '2026-10-20', endsOn: '2026-10-20', options: { payroll: true } })], '2026-10-19', '2026-10-25', MF).map(l => l.text), ['Unpaid leave 20 Oct · 1 day'], 'payroll: one unpaid day');
+  assertEqual(PL([V({ startsOn: '2026-10-24', endsOn: '2026-10-25', options: { payroll: true } })], '2026-10-19', '2026-10-25', MF), [], 'payroll: a weekend only → no line');
+  assertEqual(PL([V({ startsOn: '2026-10-10', endsOn: '2026-11-02', options: { payroll: true } })], '2026-10-19', '2026-10-25', MF).map(l => [l.from, l.to, l.days]), [['2026-10-19', '2026-10-25', 5]], 'payroll: clipped to the week');
+  assertEqual(PL([V({ startsOn: '2026-10-28', endsOn: '2026-11-03', options: { payroll: true } })], '2026-10-25', '2026-11-07', []).map(l => l.text), ['Unpaid leave 28 Oct–3 Nov · 5 days'], 'payroll: across two months');
+  assertEqual(PL([V({ endsOn: '2026-10-21', options: { payroll: true, autoBack: false } })], '2026-10-19', '2026-10-25', [], '2026-10-23').map(l => [l.to, l.days]), [['2026-10-23', 4]], 'payroll: left open (autoBack off) runs through today');
+  assertEqual(PL([V({ options: { payroll: true }, cancelledAt: 'x' })], '2026-10-19', '2026-10-25', []), [], 'payroll: cancelled → no line');
+
+  // open work in the dates + moving a task to the stand-in
+  const data = {
+    tasks: [
+      { id: 't1', status: 'To do', assignees: ['Ann'], due: '2026-10-22' },
+      { id: 't2', status: 'To do', assignees: ['Ann', 'Bob'], due: null },
+      { id: 't3', status: 'Done', assignees: ['Ann'], due: '2026-10-22' },
+      { id: 't4', status: 'To do', assignees: ['Bob'], due: '2026-10-22' },
+      { id: 't5', status: 'To do', assignees: ['Ann'], due: '2026-10-30' },
+      { id: 't6', status: 'To do', assignedTo: 'Ann', due: '2026-10-30', headsUp: '2026-10-21' },
+    ],
+    jobs: [{ id: 'j1', technician: 'Ann', date: '2026-10-23' }, { id: 'j2', technician: 'Ann', date: '2026-10-26' }, { id: 'j3', technician: 'Bob', date: '2026-10-22' }],
+  };
+  const items = sb.vacationOpenItems(data, V(), SYD, '2026-10-15');
+  assertEqual([items.tasks.map(t => t.id), items.jobs.map(j => j.id)], [['t1', 't2', 't6'], ['j1']], 'open items: open tasks in the dates or with no due date, their jobs in the dates');
+  assertEqual(sb.vacationMoveTaskPatch({ assignees: ['Ann', 'Bob'] }, 'Ann', 'Bob'), { assignees: ['Bob'], assignedTo: 'Bob' }, 'move: replaced and deduped');
+  assertEqual(sb.vacationMoveTaskPatch({ assignees: ['Cat', 'Ann'] }, 'Ann', 'Bob'), { assignees: ['Cat', 'Bob'], assignedTo: 'Cat' }, 'move: the order kept');
+  assertEqual(sb.vacationMoveTaskPatch({ assignedTo: 'Ann' }, 'Ann', 'Bob'), { assignees: ['Bob'], assignedTo: 'Bob' }, 'move: an old single-assignee task');
+
+  // the row and the errors
+  assertEqual(sb.mapVacationRow({ id: 'r1', employee_id: 'e1', employee_name: 'Ann', starts_on: '2026-10-20', ends_on: '2026-10-24', stand_in_id: 'e2', stand_in_name: 'Bob', options: { noNotify: true, autoBack: false, pay: 'paid' }, note: null, created_by: 'p1', created_at: '2026-10-14T00:00:00Z', ended_at: null, cancelled_at: null, reminded_at: null }),
+    { id: 'r1', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Bob', options: { ...all(false), noNotify: true, pay: 'paid' }, createdBy: 'p1', createdAt: '2026-10-14T00:00:00Z', endedAt: null, cancelledAt: null, remindedAt: null }, 'mapVacationRow: camelCase, options normalized');
+  assertEqual([sb.vacationErrorText({ code: '23P01', message: 'Already on vacation from 20 Oct to 24 Oct' }), sb.vacationErrorText({ message: 'Already on vacation from 1 Nov to 3 Nov' }), sb.vacationErrorText({ code: '42501', message: 'permission denied' })],
+    ['Already on vacation from 20 Oct to 24 Oct', 'Already on vacation from 1 Nov to 3 Nov', 'Not saved: permission denied'], 'error text: the overlap message as is, else "Not saved: …"');
+}
+
+// On vacation, the screens (stage 3, group V2): pickers, flags, badges, payroll leave, the window's draft and the banner.
+function testVacationUi(sb){
+  console.log('\nPeople: on vacation, the screens (stage 3)');
+  const SYD = 'Australia/Sydney';
+  const KEYS = sb.VACATION_OPTIONS.map(o => o.key);
+  const ALL = (extra) => { const o = {}; KEYS.forEach(k => { o[k] = true; }); return { ...o, ...extra }; };
+  const employees = [
+    { id: 'e1', name: 'Cal', roles: ['Technician'], status: 'Active' }, { id: 'e2', name: 'Sam', roles: ['Technician'], status: 'Active' },
+    { id: 'e3', name: 'Eve', roles: ['VA'], status: 'Active' }, { id: 'e4', name: 'Old', roles: ['Technician'], status: 'Inactive' },
+  ];
+  const V = (extra) => ({ standInId: null, standInName: '', note: '', endedAt: null, cancelledAt: null, createdAt: '2026-10-01T00:00:00Z', ...extra });
+  const v1 = V({ id: 'v1', employeeId: 'e1', employeeName: 'Cal', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Sam', options: ALL({ pay: 'paid' }) });
+  const v2 = V({ id: 'v2', employeeId: 'e3', employeeName: 'Eve', startsOn: '2026-10-22', endsOn: '2026-10-23', options: ALL({ autoBack: false, notAssignable: false, standIn: false, pay: 'unpaid' }) });
+  const v3 = V({ id: 'v3', employeeId: 'e2', employeeName: 'Sam', startsOn: '2026-11-02', endsOn: '2026-11-04', cancelledAt: '2026-10-10T00:00:00Z', options: ALL({ pay: 'paid' }) });
+  const rows = [v1, v2, v3];
+  const data = { employees, vacations: rows, tasks: [], jobs: [] };
+  const withRows = (more, emps) => ({ ...data, employees: emps || employees, vacations: [...rows, ...more] });
+
+  // words
+  assertEqual([sb.vacationRangeText('2026-10-20', '2026-10-24'), sb.vacationRangeText('2026-10-20', '2026-10-20'), sb.vacationRangeText('2026-10-20', null), sb.vacationRangeText('', '')],
+    ['20 Oct – 24 Oct', '20 Oct', 'from 20 Oct', ''], 'range text: two days, one day, open, none');
+
+  // the assign pickers
+  const AI = (name, day, d) => sb.vacationAssignInfo(name, day, d || data, SYD);
+  const gi = AI('Cal', '2026-10-21');
+  assertEqual([gi.name, gi.vac.id, gi.label, gi.standIn], ['Cal', 'v1', 'On vacation until 24 Oct', 'Sam'], 'picker info: away with "Not assignable", the stand-in offered');
+  assertEqual([AI('Cal', '2026-10-25'), AI('Eve', '2026-10-22'), AI('Nobody', '2026-10-21'), AI('Cal', '')], [null, null, null, null], 'picker info: after the dates, "Not assignable" off, someone unknown, no day → null');
+  assertEqual(AI('Cal', '2026-10-21', withRows([V({ id: 'vs', employeeId: 'e2', employeeName: 'Sam', startsOn: '2026-10-21', endsOn: '2026-10-21', options: ALL() })])).standIn, '', 'picker info: a stand-in away that day too is not offered');
+  assertEqual(AI('Cal', '2026-10-21', withRows([], employees.map(e => e.id==='e2' ? { ...e, status: 'Inactive' } : e))).standIn, '', 'picker info: a stand-in who left is not offered');
+  assertEqual(AI('Cal', '2026-10-21', { ...data, employees: [] }).standIn, 'Sam', 'picker info: the employees not readable → the row\'s copy of the names');
+  assertEqual([sb.vacationPickerLabel('Cal', gi), sb.vacationPickerLabel('Sam', null)], ['Cal · On vacation until 24 Oct', 'Sam'], 'picker label: the name with the badge words, or the name alone');
+  assertEqual(sb.vacationAssignConflicts(['Cal', 'Sam'], ['Cal'], '2026-10-21', data, SYD), [], 'conflicts: someone already on it is not asked about again');
+  assertEqual(sb.vacationAssignConflicts(['Cal', 'Sam'], [], '2026-10-21', data, SYD).map(i => [i.name, i.standIn]), [['Cal', 'Sam']], 'conflicts: the newly picked person who is away');
+  // jobs: only a technician can stand in (Eve is the VA)
+  const eveStands = withRows([], employees);
+  eveStands.vacations = [{ ...v1, standInId: 'e3', standInName: 'Eve' }];
+  assertEqual([sb.vacationJobStandIn('Sam', data), sb.vacationJobStandIn('Eve', data), sb.vacationJobStandIn('', data), sb.vacationJobStandIn('Sam', { ...data, employees: [] })], ['Sam', '', '', ''], 'job stand-in: a technician, else none');
+  assertEqual([AI('Cal', '2026-10-21', eveStands).standIn, sb.vacationAssignInfo('Cal', '2026-10-21', eveStands, SYD, true).standIn, sb.vacationAssignInfo('Cal', '2026-10-21', data, SYD, true).standIn],
+    ['Eve', '', 'Sam'], 'picker info: for a job the VA stand-in is not offered (tasks still are); a technician stand-in is');
+  assertEqual(sb.vacationJobFlag({ id: 'j', technician: 'Cal', date: '2026-10-23' }, eveStands, '2026-10-21', SYD).standIn, '', 'job flag: no move to a stand-in who is not a technician');
+
+  // a stand-in, checked on each item's own day: Sam stands in for Cal (20–24 Oct) and is away 23–24 Oct himself
+  const samAway = withRows([V({ id: 'v9', employeeId: 'e2', employeeName: 'Sam', startsOn: '2026-10-23', endsOn: '2026-10-24', options: ALL({}) })]);
+  const IS = (kind, item, today) => sb.vacationItemStandIn(kind, item, v1, samAway, SYD, today || '2026-10-20');
+  assertEqual([IS('job', { date: '2026-10-21' }), IS('job', { date: '2026-10-23' }), IS('task', { due: '2026-10-24' }), IS('task', { due: '2026-10-19' }), IS('task', {})],
+    [{ day: '2026-10-21', standIn: 'Sam' }, { day: '2026-10-23', standIn: '' }, { day: '2026-10-24', standIn: '' }, { day: '2026-10-20', standIn: 'Sam' }, { day: '2026-10-20', standIn: 'Sam' }],
+    "item stand-in: on the job's date and the task's due day (late or none: today), away that day: none");
+  assertEqual(IS('task', {}, '2026-10-10'), { day: '2026-10-20', standIn: 'Sam' }, 'item stand-in: before the vacation, a task with no due date is checked on its first day');
+
+  // flags on open items
+  assertEqual([sb.vacationTaskDay({}, '2026-10-21'), sb.vacationTaskDay({ due: '2026-10-19' }, '2026-10-21'), sb.vacationTaskDay({ due: '2026-10-23' }, '2026-10-21')],
+    [null, '2026-10-21', '2026-10-23'], 'task day: none without a due date, today when late, else the due date');
+  const TF = (t, d) => sb.vacationTaskFlag({ id: 't', status: 'To do', assignees: ['Cal'], due: '2026-10-22', ...t }, d || data, '2026-10-21', SYD);
+  const f = TF({});
+  assertEqual([f.name, f.vac.id, f.label, f.standIn, f.canMove], ['Cal', 'v1', 'On vacation until 24 Oct', 'Sam', true], 'task flag: due in the dates → flagged, can move to the stand-in');
+  assertEqual([TF({ status: 'Done' }), TF({ due: '2026-10-25' }), TF({ due: null })], [null, null, null], 'task flag: done, after the dates, no due date → none');
+  assertEqual(TF({ assignees: ['Cal', 'Sam'] }).canMove, false, 'task flag: the stand-in is already on it → no move');
+  assertEqual(TF({}, { ...data, vacations: [{ ...v1, options: ALL({ flagOpen: false }) }] }), null, 'task flag: "Flag their open tasks and jobs" off → none');
+  assertEqual(TF({ due: '2026-10-15' }).name, 'Cal', 'task flag: a late task counts on today, inside the dates');
+  const JF = (j) => sb.vacationJobFlag({ id: 'j', technician: 'Cal', date: '2026-10-23', ...j }, data, '2026-10-21', SYD);
+  assertEqual([JF({}).label, JF({}).standIn, JF({ date: '2026-10-19' }), JF({ technician: 'Sam' })], ['On vacation until 24 Oct', 'Sam', null, null], 'job flag: booked in the dates; a job before today or someone else → none');
+  const work = {
+    ...data,
+    tasks: [{ id: 't22', status: 'To do', assignees: ['Cal'], due: '2026-10-22' }, { id: 't23', status: 'Done', assignees: ['Cal'], due: '2026-10-23' },
+      { id: 't26', status: 'To do', assignees: ['Cal'], due: '2026-10-26' }, { id: 'tnone', status: 'To do', assignees: ['Cal'], due: null }],
+    jobs: [{ id: 'j20', technician: 'Cal', date: '2026-10-20' }, { id: 'j23', technician: 'Cal', date: '2026-10-23' }, { id: 'j30', technician: 'Cal', date: '2026-10-30' }],
+  };
+  const mi = sb.vacationMovableItems(work, v1, SYD, '2026-10-21');
+  assertEqual([mi.tasks.map(t => t.id), mi.jobs.map(j => j.id)], [['t22', 'tnone'], ['j23']], 'movable items: open tasks in the dates (and with no due date), jobs from today on (a past job is work done)');
+
+  // the payroll leave card
+  const week = { start: '2026-10-18', end: '2026-10-24' };
+  const PL = (wk, today, emps) => sb.vacationPayLines({ ...data, employees: emps || employees }, wk, SYD, today).map(x => [x.emp.name, x.line.days, x.line.pay, x.v.id]);
+  assertEqual(PL(week, '2026-10-15'), [['Cal', 4, 'paid', 'v1'], ['Eve', 2, 'unpaid', 'v2']], 'pay lines: one per person in the week, by name (Monday to Friday when no working days are set)');
+  assertEqual(PL({ start: '2026-10-25', end: '2026-10-31' }, '2026-10-15'), [], 'pay lines: a week after the dates → none');
+  assertEqual(PL({ start: '2026-10-25', end: '2026-10-31' }, '2026-10-27'), [['Eve', 2, 'unpaid', 'v2']], 'pay lines: left open past its end runs through today (Mon, Tue)');
+  assertEqual(PL(week, '2026-10-15', employees.map(e => e.id==='e1' ? { ...e, workingDays: [2, 6] } : e))[0], ['Cal', 2, 'paid', 'v1'], 'pay lines: only their working days (Tue and Sat of 20–24 Oct)');
+  assertEqual(sb.vacationPayLines({ employees, vacations: [] }, week, SYD, '2026-10-15'), [], 'pay lines: no vacations → none');
+
+  // the shared badges and the Away card
+  const away = (d, day) => sb.vacationAwayOn(d, day, SYD).map(a => [a.name, a.label]);
+  assertEqual(away(data, '2026-10-22'), [['Cal', 'On vacation until 24 Oct'], ['Eve', 'On vacation until 23 Oct']], 'away on a day: everyone with the badge ticked, by name');
+  assertEqual(away({ ...data, vacations: [v1, { ...v2, options: { ...v2.options, badge: false } }] }, '2026-10-22'), [['Cal', 'On vacation until 24 Oct']], 'away on a day: the badge off → not shown');
+  assertEqual(away(withRows([V({ id: 'vo', employeeId: 'e4', employeeName: 'Old', startsOn: '2026-10-22', endsOn: '2026-10-22', options: ALL() })]), '2026-10-22').map(a => a[0]), ['Cal', 'Eve'], 'away on a day: someone not active is never shown');
+  assertEqual(away(data, '2026-11-03').map(a => a[0]), ['Eve'], 'away on a day: a cancelled vacation (Sam) never shows; one left open past its end (Eve) still does');
+  const team = (d, day, all) => sb.vacationTeamRows(d, day, SYD, all).map(r => [r.name, r.now, r.label, r.standIn, r.overdue]);
+  assertEqual(team(data, '2026-10-15', true), [['Cal', false, 'Vacation from 20 Oct', 'Sam', false], ['Eve', false, 'Vacation from 22 Oct', '', false]], 'Away card: starting in the next 30 days, with the stand-in');
+  assertEqual(team({ ...data, vacations: [v1, { ...v2, options: { ...v2.options, badge: false } }] }, '2026-10-15', false).map(r => r[0]), ['Cal'], 'Away card: without the badge only owners and managers see it');
+  assertEqual(team(data, '2026-10-25', true), [['Eve', true, 'On vacation (due back 24 Oct)', '', true]], 'Away card: left open past its end → "Back?"');
+  assertEqual(team(data, '2026-09-01', true), [], 'Away card: more than 30 days ahead → not yet');
+
+  // the window
+  assertEqual([sb.vacationAllTicked(ALL()), sb.vacationAllTicked(ALL({ remind: false })), sb.vacationAllTicked({}), sb.vacationAllTicked(null)], [true, false, false, false], 'all ticked: every registry key');
+  const D = (emp, vac, emps) => sb.vacationDraft(emp, vac, rows, emps || employees, '2026-10-15');
+  const dg = D('e1', null);
+  assertEqual([dg.id, dg.employeeId, dg.startsOn, dg.endsOn, dg.standInId, dg.fromPrev, dg.options], [null, 'e1', '2026-10-15', '', 'e2', true, sb.vacationOptionsNorm(v1.options)], 'draft: a new one has the ticks and stand-in of their last vacation');
+  const ds = D('e2', null);
+  assertEqual([ds.fromPrev, ds.standInId, ds.options], [false, null, sb.vacationDefaults()], 'draft: the first time (a cancelled one does not count) → the defaults');
+  assertEqual(D('e1', null, employees.map(e => e.id==='e2' ? { ...e, status: 'Inactive' } : e)).standInId, null, 'draft: a stand-in who left is not kept');
+  const de = D('e1', 'v1');
+  assertEqual([de.id, de.startsOn, de.endsOn, de.standInId, de.fromPrev, de.options.pay], ['v1', '2026-10-20', '2026-10-24', 'e2', false, 'paid'], 'draft: changing one copies it');
+  assertEqual([D('', null).employeeId, D('', null).options], ['', sb.vacationDefaults()], 'draft: no person yet → the defaults');
+  const P = (d, more) => sb.vacationFormProblems(d, [...rows, ...(more || [])], employees, SYD);
+  const ok = { id: null, employeeId: 'e1', startsOn: '2026-11-10', endsOn: '2026-11-12', standInId: 'e2', options: { standIn: true, payroll: true, pay: 'paid' }, note: '' };
+  assertEqual(P(ok), [], 'problems: a valid draft');
+  assertEqual(P({})[0], 'Pick who is going on vacation', 'problems: who first');
+  assertEqual(P({ ...ok, endsOn: '2026-11-09' }), ['The last day is before the first'], 'problems: the last day before the first');
+  assertEqual(P({ ...ok, standInId: null }), ['Pick the stand-in'], 'problems: the stand-in ticked, none picked');
+  assertEqual(P({ ...ok, standInId: 'e1' }), ['The stand-in must be someone else'], 'problems: the stand-in is the person');
+  assertEqual(P(ok, [V({ id: 'vs', employeeId: 'e2', employeeName: 'Sam', startsOn: '2026-11-12', endsOn: '2026-11-14', options: ALL() })]), ['Sam is on vacation then too: pick another stand-in'], 'problems: the stand-in is away in those dates');
+  assertEqual(P({ ...ok, startsOn: '2026-10-23', endsOn: '2026-10-30' }), ['Already on vacation 20 Oct–24 Oct'], 'problems: overlaps their other vacation');
+  assertEqual(P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30' }), [], 'problems: a vacation changed does not overlap itself');
+  assertEqual(P({ ...ok, note: 'x'.repeat(501) }), ['The note can be at most 500 characters'], 'problems: a long note');
+  assertEqual(P({ ...ok, options: { payroll: true, pay: 'later' } }), ['Paid or unpaid leave?'], 'problems: payroll ticked, paid or unpaid missing');
+  const SW = (d, ids) => sb.vacationStandInWarning(d, employees, ids);
+  assertEqual(P(ok), [], 'problems: a stand-in with no app login never blocks the save');
+  assertEqual([SW(ok, new Set(['e1', 'e2'])), SW(ok, new Set(['e1'])), SW(ok, null), SW({ ...ok, options: { standIn: false } }, new Set())],
+    ['', 'Sam has no app login, so their copy of the notifications goes to nobody. Open items can still move to them.', '', ''], 'stand-in warning: only when the logins are known, the stand-in is ticked and has no login');
+
+  // the person's own banner
+  assertEqual(sb.vacationBannerText(v1, 'Sam', '2026-10-21', SYD, true), "You're on vacation until 24 Oct. No app notifications come to you, Sam gets them. No shift clock while you're away. The app works as usual.", 'banner: every tick, office staff');
+  assertEqual(sb.vacationBannerText({ ...v1, options: ALL({ noNotify: false }) }, 'Sam', '2026-10-21', SYD, false), "You're on vacation until 24 Oct. The app works as usual.", 'banner: no promise about notifications when that is off');
+  assertEqual(sb.vacationBannerText(v2, '', '2026-10-25', SYD, false), "You're on vacation (due back 24 Oct). No app notifications come to you. The app works as usual.", 'banner: no stand-in named; left open past the end (WhatsApp and status messages still go: only the app ones stop)');
+  assertEqual(sb.vacationBannerText(v1, 'Sam', '2026-10-26', SYD, false), '', 'banner: none after the dates');
+
+  // People: the On vacation filter
+  sb.STATE.data.vacations = rows;
+  const px = e => ({ emp: e, prof: null });
+  assertEqual([sb.personInGroup(px(employees[0]), 'away', '2026-10-21'), sb.personInGroup(px(employees[1]), 'away', '2026-10-21'), sb.personInGroup(px(employees[0]), 'away', '2026-10-25'), sb.personInGroup({ emp: null, prof: { role: 'va' } }, 'away', '2026-10-21')],
+    [true, false, false, false], 'people: On vacation = away that day (a login with no card never)');
+  sb.STATE.data.vacations = [V({ id: 'vo', employeeId: 'e4', employeeName: 'Old', startsOn: '2026-10-21', endsOn: '2026-10-21', options: ALL() })];
+  assertEqual(sb.personInGroup(px(employees[3]), 'away', '2026-10-21'), false, 'people: someone not active is never under On vacation');
+  sb.STATE.data.vacations = [];
+
+  // the phone settings: which backup phone is whose (the voice function's rule)
+  const emps = [{ id: 'a', name: 'Cal Carter', phone: '0412 345 678' }, { id: 'b', name: 'Sam Lee', phone: '' }, { id: 'c', name: 'Dan One' }, { id: 'd', name: 'Dan Two' }];
+  const PE = (pp, k) => (sb.vacationPhoneEmployee(pp, k || 'x', emps) || { id: null }).id;
+  assertEqual([PE({ name: 'Mobile 1', mobile: '+61412345678' }), PE({ name: 'sam lee' }), PE({ name: 'Sam' }), PE({ name: 'Dan' }), PE({ name: 'Nobody' }), PE({}, 'Cal Carter')],
+    ['a', 'b', 'b', null, null, 'a'], 'phone person: the same mobile, full name, or a first name only one has (else none)');
+  // the voice function's tests use the same cases (vacPhoneEmployee)
+  const levi = [{ id: 'l', name: 'Ben Levi', phone: '0400 000 001' }];
+  const PE2 = (pp, emps3, profs) => (sb.vacationPhoneEmployee(pp, 'x', emps3, profs) || { id: null }).id;
+  assertEqual([PE2({ name: 'Ben' }, levi, [{ id: 'p1', fullName: 'Ben Gal', role: 'owner' }]), PE2({ name: 'Ben' }, levi, [{ id: 'p2', fullName: 'Ben Levi', technicianName: 'Ben Levi' }]), PE2({ name: 'Ben' }, levi, [{ id: 'p3', fullName: 'X', technicianName: 'Ben' }])],
+    [null, 'l', null], 'phone person: a login of any role with that first name (owner Ben Gal, no card) is a twin; their own login is not');
+  const sams = [{ id: 'lee', name: 'Sam Lee', phone: '0411 111 111' }, { id: 'park', name: 'Sam Park', phone: '' }];
+  assertEqual([PE2({ name: 'Sam', mobile: '0411111111' }, sams, []), PE2({ name: 'X', mobile: '0411111111' }, [...sams, { id: 'dup', name: 'Dup', phone: '0411111111' }], [])], ['lee', null], 'phone person: the mobile decides first; a shared mobile is no match');
+  const pv = Vx => sb.vacationPhoneAway({ sam: { name: 'Sam', mobile: '0411111111' }, ben: { name: 'Ben' } }, Vx, [...sams, ...levi], [{ id: 'p1', fullName: 'Ben Gal', role: 'owner' }], '2026-10-21', SYD);
+  const VP = (id, name, o) => V({ id: 'vp-' + id, employeeId: id, employeeName: name, startsOn: '2026-10-20', endsOn: '2026-10-24', options: ALL(o) });
+  assertEqual([[...pv([VP('park', 'Sam Park')]).keys()], [...pv([VP('lee', 'Sam Lee')]).keys()], [...pv([VP('l', 'Ben Levi')]).keys()], [...pv([VP('lee', 'Sam Lee', { noCalls: false })]).keys()], [...pv([]).keys()]],
+    [[], ['sam'], [], [], []], 'phone away: Sam Park away is not the phone with Sam Lee\'s mobile; the owner Ben Gal is never skipped for Ben Levi; only "No calls routed"');
+
+  // static: where the screens call these
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const fx = n => extractDecl(script, n);
+  assertEqual(fx('renderShell').includes('vacationBannerHtml(profile, data)'), true, 'static: the shell shows the person\'s banner');
+  const ms = fx('myShiftButton');
+  assertEqual(ms.indexOf('vacationForProfile(') > 0 && ms.indexOf('vacationForProfile(') < ms.indexOf('onclick="vaLogIn()"'), true, 'static: no shift clock while away (before Log In)');
+  const os = fx('onStatusChange');
+  assertEqual([os.indexOf('vacationAssignInfo(') > 0 && os.indexOf('vacationAssignInfo(') < os.indexOf('setJobTechnician('), fx('setJobTechnician').includes('j.technician = value')], [true, true], 'static: the job technician question comes before the change');
+  const st = fx('saveTaskModal');
+  assertEqual([/^async function saveTaskModal\(taskId, createdBy, createdAt, vacOk\)/.test(st), st.indexOf('vacationAssignConflicts(') > 0 && st.indexOf('vacationAssignConflicts(') < st.indexOf('db.tasks.create')], [true, true], 'static: the task question comes before the save');
+  const sj = fx('saveJobModal');
+  assertEqual([/^async function saveJobModal\(jobId, vacOk\)/.test(sj), sj.indexOf('vacationAssignInfo(') > 0 && sj.indexOf('vacationAssignInfo(') < sj.indexOf('const values')], [true, true], 'static: the job window\'s question comes before the save');
+  assertEqual([fx('renderCalendarDayCell').includes('vacationAwayOn('), fx('renderPayrollBoard').includes('payrollLeaveCard(data, wk)'), fx('vaSessionStart').includes('vacationForProfile('), fx('personDetailsTab').includes('vacationBox(x, canEdit)')],
+    [true, true, true, true], 'static: the calendar, the payroll board, the forgot-logout popup and the Details tab are wired');
+  // No redraw loops: what builds a screen or the window never redraws, reads or fetches; only the writes write.
+  const quiet = ['openVacationModal', 'vacToggleOpt', 'vacSelectAll', 'vacSet', 'vacRefresh', 'vacPickPerson', 'vacOptsHtml', 'vacExtraHtml', 'vacationBox', 'vacationTeamHtml', 'payrollLeaveCard', 'vacationBannerHtml', 'vacationTaskFlagHtml', 'jobVacationFlagHtml', 'vacationCardFlags',
+    'vacationAwayLineHtml', 'onClosingDateChange', 'updateSubtaskField'];
+  assertEqual(quiet.filter(n => { const t = fx(n); return !t || /(^|[^\w.])render\(\)|sb\.from\(|fetch\(|db\.vacations/.test(t); }), [], 'static: the vacation views never redraw, read or write');
+  const writes = ['saveVacationModal', 'endVacationNow', 'cancelVacation', 'moveToStandIn', 'moveAllToStandIn'];
+  assertEqual(writes.filter(n => !/^[^{]*\{\s*if \(readOnlyReason\(\)\)/.test(fx(n))), [], 'static: every vacation write starts with the read-only check');
+  // Inline handlers carry ids and names only through esc(jsStr()).
+  const safe = ['vacationBox', 'vacationTeamHtml', 'openVacationModal', 'vacationTaskFlagHtml', 'jobVacationFlagHtml', 'vacationBannerHtml', 'vacOptsHtml'];
+  // Every ${…} inside an on…="…" handler is esc(jsStr(…)), or eid / vid / js, which are built with it.
+  const rawInHandler = t => (t.match(/on(click|change|input)="[^"]*"/g) || []).some(a => (a.match(/\$\{[^}]*\}/g) || []).some(x => !/^\$\{(esc\(jsStr\(|eid\}|vid\}|js\})/.test(x)));
+  assertEqual(safe.filter(n => { const t = fx(n); return !t || rawInHandler(t) || /\$\{\s*(x|v|e|t|j|r|f)\.(id|key|name|standIn)\b/.test(t); }), [], 'static: no raw id or name inside an inline handler');
+  assertEqual([rawInHandler(`onclick="go('\${x.id}')"`), rawInHandler(`onclick="go('\${esc(jsStr(x.id))}')"`)], [true, false], 'static: the handler check itself');
+  // Main builder's review 1.C (minor): the note in its own table, the forgot-logout acknowledgement can't stop the render.
+  const vss = fx('vaSessionStart');
+  assertEqual([/try \{ await sb\.rpc\('ack_forgot_logout'\); \} catch/.test(vss), vss.trim().endsWith('render();\n}') || /render\(\);\s*\}$/.test(vss.trim())], [true, true], 'static: vaSessionStart catches a failed ack_forgot_logout and still renders');
+  assertEqual([script.includes("fetchAllRows('employee_vacation_notes', 'vacation_id')"), /fetchAllRows\('employee_vacations', 'id', q => q\.is\('cancelled_at', null\)/.test(script)], [true, true], 'static: notes load from their own table; vacations load without the cancelled and old ones');
+  // Main builder's review, 15 Oct.
+  // A2: one time zone helper per layer (stage 1's), no zone code of the vacations' own.
+  assertEqual([/function vacation(Tz|Today|DayOf)\(/.test(script), /region\.timezone|region \? c\.region\.timezone/.test(script)], [false, false], 'review A2: no vacationTz / vacationToday / vacationDayOf, nothing reads the lowercase region.timezone');
+  // A3: employee_vacations on its own realtime channel, only when the list loaded, removed with the rest.
+  const rt = fx('setupRealtimeSubscriptions'), shared = rt.slice(0, rt.indexOf('.subscribe()'));
+  assertEqual([shared.includes('employee_vacations'), rt.includes("sb.channel('vacations-realtime')"), /if \(!VACATIONS_CHANNEL && STATE\.data && !STATE\.data\.vacationsError\)/.test(rt), fx('teardownRealtimeSubscriptions').includes('sb.removeChannel(VACATIONS_CHANNEL)')],
+    [false, true, true, true], 'review A3: vacations never join the shared channel; their own channel only when the list loaded; torn down on logout');
+  // A4: "back tomorrow" is a card in Settings → Notifications, on unless switched off, to the person and the owners.
+  const Rn = { waitMinutes: 15, from: 7, until: 19, docDays: 30, unpaidDays: 7 }, vb = sb.notifyCards({}, Rn, {}).find(c => c.id==='vacationBack');
+  assertEqual([vb.on, vb.officeOk, vb.alsoTo, vb.sub.includes('Sent between 7 am and 7 pm'), sb.notifyCards({ vacationBack: { on: false } }, Rn, {}).find(c => c.id==='vacationBack').on, sb.notifyOn(undefined, 'vacationBack')],
+    [true, false, 'The person coming back', true, false, true], 'review A4: the back-tomorrow card: on by default, the notifications\' hours, the person and the owners');
+  // A1 + Ofek 15 Oct: the payroll option promises no automatic log-out change; paid leave is a mark only.
+  const pOpt = sb.VACATION_OPTIONS.find(o => o.key==='payroll');
+  assertEqual([/log-out|logout/i.test(pOpt.help), /not changed/.test(pOpt.help), fx('payrollLeaveCard').includes('add it by hand')], [false, true, true], 'review A1 / paid leave: the payroll option is a mark only, the Leave card says to add paid leave by hand');
+  // A5: the functions log a vacations read that failed (they are fail-open).
+  const vacLog = ['push', 'automations', 'voice'].map(f => { const t = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', f, 'index.ts'), 'utf8'); return (t.match(/console\.error\("vacations not read:/g) || []).length; });
+  assertEqual(vacLog, [3, 3, 3], 'review A5: every failed vacations read is logged as "vacations not read: ..." (the table, the people, a throw)');
+}
+
 function testAutomationEventBody(sb){
   console.log('\nAutomation engine: the app\'s "look now" (phase 4)');
   const B = sb.automationEventBody;
@@ -2852,10 +3428,13 @@ testRegionAndWeeks(loadSandbox());
 testBusinessDetails(loadSandbox());
 testVaAutoLogout(loadSandbox());
 testPeopleTabs(loadSandbox());
+testVacations(loadSandbox());
+testVacationUi(loadSandbox());
 testBranding(loadSandbox());
 testNotificationCards(loadSandbox());
 testConnectors(loadSandbox());
 testUxRound3(loadSandbox());
+testMcpConnector(loadSandbox());
 testSecurityFaceId(loadSandbox());
 testAutomationEventBody(loadSandbox());
 testFlowView(loadSandbox());
@@ -3297,6 +3876,8 @@ function testAutomationsBuilder(sb){
   assertEqual([ch.on, ch.gate, ch.def.steps[0].n, ch.def.steps[1].conds[1].n, ch.notes[0].includes('one automatic text a day')], [true, 'phone', 7, 3, false], 'ready-made chat text: its switch, wait, oldest chat and one-a-day are the Website chat settings');
   assertEqual([by('ready:missedText').locked, by('ready:missedText').on], ['On whenever the business phone is on. Its own switch comes when it moves here.', false], 'ready-made missed-call text: its switch is locked (no switch of its own today)');
   const cards = sb.notifyCardsNow(), teams = R.filter(r => r.key.startsWith('ready:team:'));
+  // "back tomorrow" (stage 3) has a System row too since the merge (stage 2: the Notifications page lives in the Workflows
+  // list, so its card is its only switch); its code stays the push function's (a start the engine has no trigger for)
   assertEqual(teams.map(r => [r.card.id, r.on, r.card.office]), cards.map(c => [c.id, c.on, c.office]), 'ready-made team rows: one per Notifications card, on and office as there');
   const lw = by('ready:team:leadWaiting').def.steps;
   assertEqual([lw[0].n, lw[1].from, lw[1].until, lw[1].outside, by('ready:team:unpaid').def.steps[0].n, by('ready:team:docExpiry').def.trigger.params.days, by('ready:team:newLead').def.steps[0].to.roles],
@@ -4128,12 +4709,12 @@ function testWfSystemRows(sb){
   sb.STATE.data.settings = JSON.parse(JSON.stringify(FX.cases[1].settings));
   const S = sb.wfSystemRows(true, { meta: { 'team:newLead': 'f9' }, moved: { review: 'a-77' } }), by = k => S.find(r => r.key===k);
   assertEqual([S.length, S.every(r => r.system===true && r.virtual===true && r.movable===false), by('ready:team:newLead').folderId, by('ready:review').movedTo, by('ready:chatText').folderId, by('ready:chatText').movedTo],
-    [11, true, 'f9', 'a-77', null, null], 'wfSystemRows: System and virtual; none can move yet; its folder (automation_system_meta) and the engine row it moved into');
+    [12, true, 'f9', 'a-77', null, null], 'wfSystemRows: System and virtual; none can move yet; its folder (automation_system_meta) and the engine row it moved into');
   const rd = by('ready:review').doc, gate = Object.values(rd.nodes).find(n => n.kind==='if_else');
   assertEqual([rd.schema, rd.triggers[0].type, gate.config.branches[0].when.segments[0].rules[0], by('ready:team:leadWaiting').doc.triggers[0].type, by('ready:team:missedCall').doc.triggers[0].filters.segments[0].rules],
     [2, 'jobClosed', { field: 'dont_ask', op: 'true', lock: true }, 'newLead', [{ field: 'call.status', op: 'is', v: 'missed' }]], 'wfSystemRows: each one also as a stage-2 doc (wfFromFlat = the engine\'s upgradeV1); its guard condition stays locked');
   assertEqual([by('ready:team:newLead').page, by('ready:team:newLead').pageLabel, by('ready:review').page, sb.wfSystemRows(false, null).length, sb.wfSystemRows(true, { meta: 'x', moved: null }).every(r => r.folderId===null)],
-    ['', '', 'reviews', 11, true], 'wfSystemRows: the team rows have no old page any more (their card is in the Workflows list); a missing or odd context is fine');
+    ['', '', 'reviews', 12, true], 'wfSystemRows: the team rows have no old page any more (their card is in the Workflows list); a missing or odd context is fine');
   // taking System rows off the list: one catalog write; their own switches first; locked ones skipped with the reason
   const H = sb.wfSystemHidePlan([
     { key: 'ready:team:newLead', base: 'team:newLead', on: true, toggle: ['toggleNotifyCard', 'newLead'] }, { key: 'ready:review', base: 'review', on: true, toggle: ['setReviewAuto', false] },
@@ -4171,6 +4752,11 @@ function testWfSystemRows(sb){
     [true, true, true, true, true], 'wfSystemCardHtml: a locked notification says why (the test, and the switch — still tappable, aria-disabled, the tap says why) and links to Connectors');
   const hu = sb.wfSystemCardHtml(sb.wfItem(by('ready:team:unpaid'), null, {}, ctx), false, R, P);
   assertEqual([hu.includes('Owners only'), hu.includes('toggleNotifyOffice'), /data-fid="n-unpaidDays"[^>]*/.test(hu) && hu.includes('value="9"')], [true, false, true], 'wfSystemCardHtml: money goes to the owners only (no Office chip); the unpaid days are Tax and payments\' number');
+  // "back from a vacation tomorrow" (stage 3, merged from main): its card in the list, to the owners and the person coming back
+  const vbRow = by('ready:team:vacationBack'), hv = sb.wfSystemCardHtml(sb.wfItem(vbRow, null, {}, ctx), false, R, P);
+  assertEqual([vbRow.on, vbRow.toggle, vbRow.def.trigger.type, vbRow.def.steps[0].to.roles, hv.includes('The person coming back'), hv.includes('toggleNotifyOffice'), hv.includes('Owners only'), hv.includes("sendNotifyTest('vacationBack')"), sb.wfLabels(null).trig('vacationBack')],
+    [true, ['toggleNotifyCard', 'vacationBack'], 'vacationBack', ['owner'], true, false, false, true, 'Back from a vacation'],
+    'wfSystemRows: "back from a vacation tomorrow" (stage 3) is a System row with its own switch and test; it goes to the owners and the person coming back (no Office chip)');
   // the phone bar on top of Workflows
   const Lp = sb.wfLabels({ triggers: [], actions: [{ key: 'internal_notification', label: 'Send internal notification', channel: 'push', aliases: ['push'] }, { key: 'send_email', label: 'Send email', channel: 'email' }] });
   const pw = o => ({ kind: 'workflow', on: true, deleted: false, virtual: false, actions: [], ...o });

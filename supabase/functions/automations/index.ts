@@ -42,6 +42,8 @@
 //     guard moves it), never fires it, and a waiting run from before that stops; a run more than max_late_hours late
 //     acts no more; a run whose automation was switched off, changed or deleted stops. A stage move younger than the
 //     app's Undo (STAGE_SETTLE_MS) is not acted on, and a stage run stops when the move was undone.
+//   • People on vacation (stage 3): a notification skips them and goes to their stand-in when chosen; a task for them goes
+//     to the stand-in when they are not assignable (stage 2 docs too, and "Assign to user": the stand-in's login, or skipped).
 // Emails go the existing way (P3: nothing live changes): a queued lead_messages row, sent by the info@ Apps Script
 // through conversations' alerts step, which adds its own signature from the author's first word (signatureOf below
 // shows it in the preview). The author is the business's signer or the automation maker's first name, never a phrase;
@@ -246,6 +248,102 @@ export async function sendTo(sb: any, userIds: string[], payload: Record<string,
   }
   return out;
 }
+
+// ── vacations (stage 3): ONE block, byte-identical in push, automations and voice (automations' tests check) ──
+// A vacation is a row of employee_vacations (.claude/sql/stage3-vacation.sql). Who is away is worked out here the same way
+// as the app (vacationOnDay) and SQL (vacation_in_force): options.autoBack is ON unless it is the boolean false, every other
+// key only when it is the boolean true; starts_on = the first day away, ends_on = the last; in force on a day when not
+// cancelled, from starts_on, before the business day it was ended on, and up to ends_on unless autoBack is off. The day is
+// in the business time zone the caller passes (bizTzOf(catalog), the region block). A login is the employee whose name is
+// its technician_name, else its full_name (the app's peopleList). FAIL-OPEN: no table, an error or a throw = nobody is
+// away, and the log says "vacations not read: ..." (so a broken read is visible, never silent).
+export const VAC_COLS = "id, employee_id, starts_on, ends_on, stand_in_id, options, ended_at, cancelled_at, reminded_at";
+// deno-lint-ignore no-explicit-any
+export type VacCtx = { day: string; tz: string; vacs: any[]; employees: any[]; profiles: any[] };
+const vacIsDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+// deno-lint-ignore no-explicit-any
+export function vacOpt(v: any, key: string): boolean {
+  const o = v && v.options && typeof v.options === "object" ? v.options : {};
+  return key === "autoBack" ? o.autoBack !== false : o[key] === true;
+}
+// deno-lint-ignore no-explicit-any
+export function vacOnDay(v: any, day: string, tz: string): boolean {
+  if (!v || v.cancelled_at || !vacIsDay(v.starts_on) || !vacIsDay(day) || v.starts_on > day) return false;
+  if (v.ended_at) { const t = Date.parse(v.ended_at); if (isNaN(t) || !(day < bizParts(t, tz).day)) return false; }
+  return !vacOpt(v, "autoBack") || (vacIsDay(v.ends_on) && day <= v.ends_on);
+}
+// deno-lint-ignore no-explicit-any
+export function vacEmployeeOf(p: any, employees: any[]): any {
+  if (!p) return null;
+  return (p.technician_name && employees.find((e) => e.name === p.technician_name)) || (p.full_name && employees.find((e) => e.name === p.full_name)) || null;
+}
+// deno-lint-ignore no-explicit-any
+export function vacProfilesOf(e: any, C: VacCtx): any[] {
+  if (!e) return [];
+  return C.profiles.filter((p) => { const x = vacEmployeeOf(p, C.employees); return !!x && x.id === e.id; });
+}
+// The vacation in force today for this employee with that option ticked (the latest start when two are), or null.
+// deno-lint-ignore no-explicit-any
+export function vacAway(C: VacCtx, employeeId: string, key: string): any {
+  // deno-lint-ignore no-explicit-any
+  let best: any = null;
+  for (const v of C.vacs) if (v.employee_id === employeeId && vacOnDay(v, C.day, C.tz) && vacOpt(v, key) && (!best || v.starts_on > best.starts_on)) best = v;
+  return best;
+}
+// deno-lint-ignore no-explicit-any
+export function vacAwayProfile(C: VacCtx, profileId: string, key: string): any {
+  const e = vacEmployeeOf(C.profiles.find((p) => p.id === profileId), C.employees);
+  return e ? vacAway(C, e.id, key) : null;
+}
+// Who gets a notification: in order, once each. Away with "No notifications" → left out; away with "A stand-in gets their
+// notifications" → the stand-in's logins too (an Active stand-in; one who is away too passes it on, at most 5 steps, never
+// in a loop). A login with no employee card is always kept. roles: the roles that kind may go to (money and private
+// details: ["owner"]); a stand-in's login with another role never gets it. Left out = any role.
+export function vacRecipients(ids: string[], C: VacCtx, roles?: string[]): string[] {
+  if (!C.vacs.length) return [...new Set(ids)];
+  const out: string[] = [], seen = new Set<string>();
+  const visit = (id: string, steps: number) => {
+    if (!id || seen.has(id)) return;
+    // deno-lint-ignore no-explicit-any
+    if (steps && roles && !roles.includes(String((C.profiles.find((p: any) => p.id === id) || {}).role))) return;
+    seen.add(id);
+    const e = vacEmployeeOf(C.profiles.find((p) => p.id === id), C.employees);
+    if (!e) { out.push(id); return; }
+    if (!vacAway(C, e.id, "noNotify")) out.push(id);
+    const v = vacAway(C, e.id, "standIn");
+    if (!v || !v.stand_in_id || steps >= 5) return;
+    const s = C.employees.find((x) => x.id === v.stand_in_id);
+    if (!s || (s.status && s.status !== "Active")) return;
+    for (const p of vacProfilesOf(s, C)) visit(p.id, steps + 1);
+  };
+  for (const id of ids) visit(id, 0);
+  return out;
+}
+// The day n days after a 'YYYY-MM-DD' day.
+export const vacShiftDay = (day: string, n: number): string => new Date(Date.parse(day + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+// The vacations that can be in force from today to aheadDays on (started by then, and not over before today: ends_on from
+// today on, or left open with autoBack off), and the people they need, read once. Nobody away = no more reads. A vacation
+// that is over is never read again, so the table can grow without slowing a call down.
+// tz: the business time zone (the caller's bizTzOf(catalog)).
+// deno-lint-ignore no-explicit-any
+export async function vacContext(sb: any, nowMs: number, tz: string, aheadDays = 0): Promise<VacCtx> {
+  const empty: VacCtx = { day: bizParts(nowMs, tz).day, tz, vacs: [], employees: [], profiles: [] };
+  // deno-lint-ignore no-explicit-any
+  const why = (e: any) => (e && (e.message || e.code)) || String(e);
+  try {
+    const { data: vacs, error } = await sb.from("employee_vacations").select(VAC_COLS).is("cancelled_at", null).is("ended_at", null)
+      .lte("starts_on", vacShiftDay(empty.day, aheadDays)).or(`ends_on.gte.${empty.day},options->>autoBack.eq.false`);
+    if (error) { console.error("vacations not read: employee_vacations:", why(error)); return empty; }
+    if (!Array.isArray(vacs) || !vacs.length) return empty;
+    const [emps, profs] = await Promise.all([sb.from("employees").select("id, name, phone, status"), sb.from("profiles").select("id, full_name, technician_name, role")]);
+    if (emps.error || profs.error) { console.error("vacations not read:", emps.error ? "employees: " + why(emps.error) : "profiles: " + why(profs.error)); return empty; }
+    return { ...empty, vacs, employees: emps.data || [], profiles: profs.data || [] };
+  } catch (e) {
+    console.error("vacations not read:", why(e));
+    return empty;
+  }
+}
+// ── end vacations ──
 
 // The timer's secret, compared without an early exit. Both must be set. (Copied from backup/index.ts.)
 const enc = new TextEncoder();
@@ -520,7 +618,7 @@ export type Ev = { key: string; type: string; recordKind: string; recordId: stri
 const CONTACT_COLS = "id, full_name, phone, email, postcode, division, source, status, tags, created_at, contacted_at, last_read_at, reopened_at, messages, stage_changed_at, linked_job_id";
 // What the minute scans read of a card: no thread (messages can be large and the scans run 1,440 times a day on the free
 // plan's egress), only the time of its first entry.
-const SCAN_CONTACT_COLS = "id, status, tags, created_at, reopened_at, stage_changed_at, linked_job_id, first_at:messages->0->>at";
+const SCAN_CONTACT_COLS = "id, status, tags, created_at, reopened_at, stage_changed_at, linked_job_id, first_at:messages->0->>at, first_quiet:messages->0->>quiet, import_quiet";
 const JOB_COLS = "id, customer_name, invoice_number, date, job_type, technician, amount, payment_status, review_do_not_ask, contact_id, created_at";
 const CALL_COLS = "id, from_number, to_number, direction, missed, started_at, created_at, division, contact_id, status";
 const CHAT_COLS = "id, contact_id, phone, first_name, full_name, service_key, brand, service_text, test, created_at";
@@ -533,6 +631,10 @@ export const arrivedAt = (c: any): string | null => {
   const a = c.reopened_at || c.first_at || (Array.isArray(c.messages) && c.messages[0] && c.messages[0].at) || (typeof c.created_at === "string" && c.created_at.includes("T") ? c.created_at : null);
   return okTime(a) ? a : null;
 };
+// A card the MCP import made with automations off (the column import_quiet; older imports: quiet on its first thread
+// entry): its arrival is not a new lead. A later reopen is a real new arrival and counts as usual. (mcp/index.ts importRow.)
+// deno-lint-ignore no-explicit-any
+export const quietArrival = (c: any): boolean => c.import_quiet === true || String(c.first_quiet ?? (Array.isArray(c.messages) && c.messages[0] ? c.messages[0].quiet : "") ?? "") === "true";
 // A stage set when the card was made (or reopened) is its arrival, not a move: the lead never moved.
 const ARRIVAL_SLACK_MS = 30e3;   // the app sets the stage just before it saves the new card, and its first entry just after
 // The app's Undo after a stage move runs 6.5 s; a move younger than this is not acted on yet (an undone misclick never fires).
@@ -621,6 +723,7 @@ export const TRIGGERS: Record<string, Trigger> = {
     fromRecord: (c, S) => {
       if (!c || isTestRecord(c.tags, S)) return null;
       if (c.linked_job_id && !c.reopened_at) return null;
+      if (!c.reopened_at && quietArrival(c)) return null;
       const at = arrivedAt(c); if (!at) return null;
       return ev("newLead", "contact", c, `${c.id}:${c.reopened_at || "new"}`, at, c.id);
     },
@@ -2607,13 +2710,14 @@ export function jsonSchema(ctx: AvailCtx, biz: BizLists = {}, opts: { mode?: "ge
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // The engine
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
-// deno-lint-ignore no-explicit-any
 // avail = what this business has (availCtx, §2.5) for the v2 executor; unset = worked out from the catalog.
 // pauses = the business's "Pause workflow" ranges (automation_pauses), read once per tick by the first action that needs them.
-// deno-lint-ignore no-explicit-any
 // custom = the business's custom values ({custom.<key>}), read once per tick by the first stage-2 step that fills words.
 // people = the team's names by profile id, read once per tick by the first lead with an assigned person ({lead.assigned_to}).
-export type TickCtx = { S: Settings; cat: any; company: string; agent?: string; autos: Map<string, any>; counts: Record<string, number>; avail?: AvailCtx; pauses?: any[]; custom?: Record<string, string>; people?: Record<string, string> };
+// vac = who is on vacation (stage 3), read once per tick by the first action that sends to or assigns people (vacOf);
+// vacBox = that read, shared by every copy of this tick's context (a run's TS, a dry run's T2: their spreads keep the box).
+// deno-lint-ignore no-explicit-any
+export type TickCtx = { S: Settings; cat: any; company: string; agent?: string; autos: Map<string, any>; counts: Record<string, number>; avail?: AvailCtx; pauses?: any[]; custom?: Record<string, string>; people?: Record<string, string>; vac?: VacCtx; vacBox?: { c?: VacCtx } };
 const newCounts = () => ({ events: 0, enqueued: 0, processed: 0, sent: 0, queued: 0, skipped: 0, deferred: 0 });
 // deno-lint-ignore no-explicit-any
 export async function loadContext(sb: any, nowMs = Date.now()): Promise<TickCtx> {
@@ -2628,8 +2732,21 @@ export async function loadContext(sb: any, nowMs = Date.now()): Promise<TickCtx>
   // {agent} (T1.7): the office people, read once a run; if they can't be read, the office's name.
   let agent = officeOf(cat);
   try { agent = agentOf(await rows(sb.from("profiles").select("full_name, role, on_duty, on_duty_date").eq("role", "va")), zoneParts(nowMs, S.timezone).day, cat); } catch { /* the office's name */ }
-  return { S, cat, company: String(set.company_name || "").trim(), agent, autos: new Map(), counts: newCounts() };
+  return { S, cat, company: String(set.company_name || "").trim(), agent, autos: new Map(), counts: newCounts(), vacBox: {} };
 }
+// Who is on vacation, read once per tick (the vacations block; fail-open). A year ahead too: a task is checked against its
+// due day, at most 365 days on. The copies of this tick's context (TS, T2) share the one read through vacBox.
+// deno-lint-ignore no-explicit-any
+async function vacOf(sb: any, T: TickCtx, nowMs: number): Promise<VacCtx> {
+  if (T.vac) return T.vac;
+  if (T.vacBox && T.vacBox.c) return (T.vac = T.vacBox.c);
+  const c = await vacContext(sb, nowMs, bizTzOf(T.cat), 366);
+  if (T.vacBox) T.vacBox.c = c;
+  return (T.vac = c);
+}
+// The vacations as on the business day of ms (the day an action runs: a dry run's clock moves on; a preview's action
+// comes after its waits), from the one read of this tick.
+export function vacOnDayOf(C: VacCtx, ms: number): VacCtx { const day = bizParts(ms, C.tz).day; return day === C.day ? C : { ...C, day }; }
 // deno-lint-ignore no-explicit-any
 async function enabledAutomations(sb: any): Promise<any[]> {
   // an upgraded row that is still a phase-4 workflow runs as one (wfRunRow); a stage-2 doc never passes phase 4's checks
@@ -2750,24 +2867,65 @@ export function boardFor(names: string[], profiles: any[], employees: any[] = []
     || employees.some((e) => e && e.name === first && Array.isArray(e.roles) && e.roles.includes("VA"));
   return va ? "ron" : first;
 }
+// chosen: how many logins were picked before the vacations (all of them away = "skipped: on vacation", not "no device").
+// only (stage 2 docs): the roles a stand-in may have instead of the rule below (a message with money or private details:
+// ["owner"], the same test as the validator's W_MONEY_TO_NON_OWNER).
 // deno-lint-ignore no-explicit-any
-async function pushRecipients(sb: any, st: any): Promise<{ ids: string[]; names: string[] }> {
+async function pushRecipients(sb: any, st: any, C: VacCtx, only?: string[]): Promise<{ ids: string[]; names: string[]; chosen: number }> {
   const to = obj(st.to), people = (Array.isArray(to.people) ? to.people : []).map(String), roles = (Array.isArray(to.roles) ? to.roles : []).map(String);
   const list = await rows(sb.from("profiles").select("id, full_name, role"));
   // deno-lint-ignore no-explicit-any
   const chosen = list.filter((p: any) => people.includes(String(p.id)) || roles.includes(String(p.role)));
+  // someone on vacation: skipped, or their stand-in instead (stage 3). A stand-in only gets it when their role could have
+  // been picked: the roles chosen, or those of the people chosen (an owners-only message never reaches a technician).
   // deno-lint-ignore no-explicit-any
-  const ids = [...new Set(chosen.map((p: any) => String(p.id)))] as string[];
+  const allowed = only || [...new Set([...roles, ...list.filter((p: any) => people.includes(String(p.id))).map((p: any) => String(p.role))])];
   // deno-lint-ignore no-explicit-any
-  return { ids, names: ids.map((id) => (list.find((p: any) => String(p.id) === id) || {}).full_name || "").filter(Boolean) };
+  const ids = vacRecipients([...new Set(chosen.map((p: any) => String(p.id)))] as string[], C, allowed);
+  // deno-lint-ignore no-explicit-any
+  return { ids, names: ids.map((id) => (list.find((p: any) => String(p.id) === id) || {}).full_name || "").filter(Boolean), chosen: chosen.length };
 }
+// day: the task's due day ('YYYY-MM-DD'; today when it has none), as the app checks it (saveTaskModal, tm-due). moved: who
+// was swapped for their stand-in (the task's note says so).
 // deno-lint-ignore no-explicit-any
-async function taskPeople(sb: any, st: any): Promise<string[]> {
-  const ids = (Array.isArray(st.assignees) ? st.assignees : []).map(String);
-  if (!ids.length) return [];
+async function taskPeople(sb: any, st: any, C: VacCtx, day?: string): Promise<{ names: string[]; moved: VacMove[] }> {
+  const ids = (Array.isArray(st.assignees) ? st.assignees : []).map(String), moved: VacMove[] = [];
+  if (!ids.length) return { names: [], moved };
   const list = await rows(sb.from("employees").select("id, name, status").in("id", ids));
   // deno-lint-ignore no-explicit-any
-  return ids.map((id: string) => list.find((e: any) => String(e.id) === id && e.status === "Active")).filter(Boolean).map((e: any) => String(e.name));
+  return { names: vacTaskPeople(ids.map((id: string) => list.find((e: any) => String(e.id) === id && e.status === "Active")).filter(Boolean), C, day, moved), moved };
+}
+export type VacMove = { from: string; to: string };
+// A task for someone on vacation with "Not assignable" on its due day (today without one) goes to their stand-in (when
+// chosen, Active and not away that day too); everyone else stays (in the app it is a warning, never a block). Names, once
+// each, in order. moved (optional): filled with who was swapped for whom.
+// deno-lint-ignore no-explicit-any
+export function vacTaskPeople(emps: any[], C: VacCtx, day?: string, moved?: VacMove[]): string[] {
+  const out: string[] = [], D: VacCtx = day && day !== C.day ? { ...C, day } : C;
+  for (const e of emps) {
+    const v = vacAway(D, e.id, "notAssignable");
+    const s = v && vacOpt(v, "standIn") && v.stand_in_id ? D.employees.find((x) => x.id === v.stand_in_id) : null;
+    const name = String(s && (!s.status || s.status === "Active") && !vacAway(D, s.id, "notAssignable") ? s.name : e.name);
+    if (moved && name !== String(e.name)) moved.push({ from: String(e.name), to: name });
+    if (!out.includes(name)) out.push(name);
+  }
+  return out;
+}
+// The line a redirected task starts its notes with: who it was for.
+export function vacMovedNote(moved: VacMove[]): string {
+  return moved.map((m) => `For ${m.from} (on vacation): given to ${m.to}, the stand-in.`).join("\n");
+}
+// "Assign to user" (stage 2 G3.5, Q6) for a login whose person is on vacation with "Not assignable" on the day C is for:
+// their stand-in's login (when "A stand-in" is ticked, the stand-in is Active, not away that day too and has a login);
+// else skipped with the reason. A login with no employee card, or nobody away, is assigned as picked.
+export function vacAssignUser(userId: string, C: VacCtx): { user: string; moved?: VacMove } | { skip: string } {
+  if (!C.vacs.length) return { user: userId };
+  const e = vacEmployeeOf(C.profiles.find((p) => String(p.id).toLowerCase() === userId), C.employees);
+  const v = e ? vacAway(C, e.id, "notAssignable") : null;
+  if (!v) return { user: userId };
+  const s = vacOpt(v, "standIn") && v.stand_in_id ? C.employees.find((x) => x.id === v.stand_in_id) : null;
+  const login = s && (!s.status || s.status === "Active") && !vacAway(C, s.id, "notAssignable") ? vacProfilesOf(s, C)[0] : null;
+  return login ? { user: String(login.id).toLowerCase(), moved: { from: String(e.name), to: String(s.name) } } : { skip: "on vacation" };
 }
 type Exec = { status: string; reason?: string; recipient?: string; ref?: string; detail?: Record<string, unknown> };
 // The actions themselves. A customer action only runs after customerGuard said ok.
@@ -2776,20 +2934,23 @@ export async function execute(sb: any, st: any, a: any, f: Facts, T: TickCtx, no
   const known = fieldsFor(f.type), vars = mergeVars(f, a), fill = (x: unknown) => fillMerge(String(x ?? ""), vars, known);
   const recordId = String((f.contact && f.kind === "contact" ? f.contact.id : (f.job || f.call || f.chat || {}).id) || "");
   if (st.type === "push") {
-    const r = await pushRecipients(sb, st);
+    const r = await pushRecipients(sb, st, await vacOf(sb, T, nowMs));
     const payload = { title: fill(st.title), body: fill(st.body || ""), url: APP_URL + (DEEP_LINK[f.kind] || ""), tag: `auto-${String(a.id).slice(0, 8)}-${recordId}` };
+    // everyone picked is away with "No notifications" (and no stand-in took it): nothing to send, and that's not a fault
+    if (!r.ids.length && r.chosen) return { status: "skipped", reason: "on vacation" };
     const sent = await sendTo(sb, r.ids, payload, await vapidKeys(sb));
     return sent.sent > 0 ? { status: "sent", recipient: clip(r.names.join(", "), 200) } : { status: "failed", reason: "no device", recipient: clip(r.names.join(", "), 200) };
   }
   if (st.type === "task") {
-    const names = await taskPeople(sb, st);
+    const due = st.due_days == null ? null : shiftDay(zoneParts(nowMs, T.S.timezone).day, Number(st.due_days));
+    const { names, moved } = await taskPeople(sb, st, await vacOf(sb, T, nowMs), due || undefined);
     const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
     const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
     const c = f.contact;
     const row = {
       board: boardFor(names, profiles, employees), title: clip(fill(st.title), LIMITS.title), status: "Not Started",
-      due: st.due_days == null ? null : shiftDay(zoneParts(nowMs, T.S.timezone).day, Number(st.due_days)),
-      notes: clip(fill(st.notes || ""), LIMITS.notes), client: (c && c.full_name) || "", contact_id: c ? c.id : null,
+      due,
+      notes: clip([vacMovedNote(moved), fill(st.notes || "")].filter(Boolean).join("\n\n"), LIMITS.notes), client: (c && c.full_name) || "", contact_id: c ? c.id : null,
       priority: TASK_PRIORITIES.includes(st.priority) ? st.priority : "Medium", assignees: names, assigned_to: names[0] || "", heads_up: "",
       created_by: clip("Automation: " + String(a.name || ""), 200), created_at: iso(nowMs), technician: "", category: c ? "Client-related" : "", subtasks: [], updates: [],
     };
@@ -3609,16 +3770,19 @@ export async function executeV2(sb: any, n: Row, st: Row, a: Row, f: any, T: Tic
 export async function previewAction(sb: any, n: Row, st: Row, a: Row, f: any, T: TickCtx, nowMs: number, to: string): Promise<Exec> {
   if (st && st._doc === true) return await executeDoc(sb, n, st, a, f, T, nowMs, to, true);
   const known = fieldsFor(f.type), vars = mergeVars(f, a), fill = (x: unknown) => fillMerge(String(x ?? ""), vars, known);
+  // people on vacation (stage 3): as execute, on the day of this (dry run) moment
   if (st.type === "push") {
-    const r = await pushRecipients(sb, st);
+    const r = await pushRecipients(sb, st, vacOnDayOf(await vacOf(sb, T, nowMs), nowMs));
+    if (!r.ids.length && r.chosen) return { status: "skipped", reason: "on vacation" };
     return { status: "would", recipient: clip(r.names.join(", "), 200), detail: { title: clip(fill(st.title), 500), body: clip(fill(st.body || ""), 500) } };
   }
   if (st.type === "task") {
-    const names = await taskPeople(sb, st);
+    const due = st.due_days == null ? null : shiftDay(zoneParts(nowMs, T.S.timezone).day, Number(st.due_days));
+    const { names, moved } = await taskPeople(sb, st, vacOnDayOf(await vacOf(sb, T, nowMs), nowMs), due || undefined);
     const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
     const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
     return { status: "would", recipient: clip(names.join(", ") || "office board", 200), detail: { board: boardFor(names, profiles, employees), title: clip(fill(st.title), LIMITS.title),
-      notes: clip(fill(st.notes || ""), 500), due: st.due_days == null ? null : shiftDay(zoneParts(nowMs, T.S.timezone).day, Number(st.due_days)) } };
+      notes: clip([vacMovedNote(moved), fill(st.notes || "")].filter(Boolean).join("\n\n"), 500), due } };
   }
   if (st.type === "email") {
     const author = emailAuthor(T.S, a);
@@ -4150,6 +4314,7 @@ export async function advanceV2(sb: any, run: any, T: TickCtx, nowMs: number, fx
       if (plan && "skip" in plan) r = { status: "skipped", reason: clip(plan.skip, 200) };
       else if (plan) {
         r = applyExec(await fx.apply({ p_business: BUSINESS_ID, p_cause: causeOf(), p_kind: plan.kind, p_id: plan.id, p_ops: plan.ops }), plan.ops);
+        if (plan.detail) r = { ...r, detail: { ...obj(r.detail), ...plan.detail } };
         if (plan.custom && r.status === "executed") T.custom = { ...(T.custom || {}), [plan.custom[0]]: plan.custom[1] };
         // the record changed: the goals (and every later step) look at it as it is now, not as it was read at the start
         if (r.status === "executed") { goalMemo.clear(); const nf = await loadFactsV2(sb, run, T, nowMs, trigId); if (nf) f = nf; }
@@ -4998,7 +5163,8 @@ export async function reviewReach(sb: any, c: any): Promise<{ phone: string; ema
 }
 // ── record actions → automation_apply ops (design §3.8 "Action effects"). → { kind, id, ops } | { skip } ──
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export type RecordPlan = { kind: string; id: string; ops: Row[]; custom?: [string, string] } | { skip: string };
+// detail: added to the log row's detail (a lead assigned to a stand-in says who it was for).
+export type RecordPlan = { kind: string; id: string; ops: Row[]; custom?: [string, string]; detail?: Row } | { skip: string };
 // deno-lint-ignore no-explicit-any
 export async function recordPlan(sb: any, n: Row, run: Row, a: Row, f: any, T: TickCtx, nowMs: number, vars: Record<string, string>): Promise<RecordPlan | null> {
   const c = obj(n.config), cid = f && f.contact && f.contact.id ? String(f.contact.id) : "", fill = (x: unknown) => wfFill(x, vars, "*");
@@ -5014,8 +5180,15 @@ export async function recordPlan(sb: any, n: Row, run: Row, a: Row, f: any, T: T
     case "move_stage": return norm(c.stage) === norm(wfCatalogKey(T.cat, "stageWon", "Won")) ? { skip: "A lead is won when its job is entered" } : lead([{ op: "stage", to: String(c.stage ?? "") }]);
     case "mark_lost": return lead([{ op: "stage", to: wfCatalogKey(T.cat, "stageLost", "Lost"), ...(hasText(c.reason) ? { lost_reason: clip(c.reason, 100) } : {}) }]);
     // the lead's "Assigned to" (G3.5, Q6): a fixed person of the team; automation_apply checks the person exists and says
-    // so on the lead's history ("Assigned to …" / "Assigned user removed")
-    case "assign_user": return UUID_RE.test(String(c.user ?? "")) ? lead([{ op: "assign", user: String(c.user).toLowerCase() }]) : { skip: "missing details: user" };
+    // so on the lead's history ("Assigned to …" / "Assigned user removed"). Someone on vacation who is not assignable
+    // that day (stage 3): their stand-in, else skipped "on vacation" (vacAssignUser).
+    case "assign_user": {
+      if (!UUID_RE.test(String(c.user ?? ""))) return { skip: "missing details: user" };
+      if (!cid) return { skip: WF_REASONS.no_contact };
+      const who = vacAssignUser(String(c.user).toLowerCase(), vacOnDayOf(await vacOf(sb, T, nowMs), nowMs));
+      if ("skip" in who) return who;
+      return { kind: "contact", id: cid, ops: [{ op: "assign", user: who.user }], ...(who.moved ? { detail: { vacation: vacMovedNote([who.moved]) } } : {}) };
+    }
     case "remove_assigned_user": return lead([{ op: "assign", user: null }]);
     case "internal_comment": {
       const t = clip(fill(c.text).trim(), 2000); if (!t) return { skip: "empty comment" };
@@ -5028,12 +5201,14 @@ export async function recordPlan(sb: any, n: Row, run: Row, a: Row, f: any, T: T
       return { kind: cid ? "contact" : "none", id: cid || String(run.id), ops: [{ op: "custom", key, value }], custom: [key, value] };
     }
     case "add_task": case "manual_call": case "manual_sms": {
-      const names = n.type === "add_task" ? await taskPeople(sb, c) : [];
+      // the due day first: someone on vacation with "Not assignable" on it is swapped for their stand-in (stage 3, as the
+      // app checks it), and the task's notes start with who it was for; the board follows the person it went to
+      const today = zoneParts(nowMs, T.S.timezone).day, due = n.type === "add_task" ? (c.due_days == null ? null : shiftDay(today, Number(c.due_days))) : today;
+      const { names, moved } = n.type === "add_task" ? await taskPeople(sb, c, vacOnDayOf(await vacOf(sb, T, nowMs), nowMs), due || undefined) : { names: [] as string[], moved: [] as VacMove[] };
       const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
       const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
-      const today = zoneParts(nowMs, T.S.timezone).day, due = n.type === "add_task" ? (c.due_days == null ? null : shiftDay(today, Number(c.due_days))) : today;
       const title = clip(fill(c.title).trim(), LIMITS.title); if (!title) return { skip: "missing details: title" };
-      return { kind: cid ? "contact" : "none", id: cid || String(run.id), ops: [{ op: "task", board: boardFor(names, profiles, employees), title, due, notes: clip(fill(c.notes || ""), LIMITS.notes),
+      return { kind: cid ? "contact" : "none", id: cid || String(run.id), ops: [{ op: "task", board: boardFor(names, profiles, employees), title, due, notes: clip([vacMovedNote(moved), fill(c.notes || "")].filter(Boolean).join("\n\n"), LIMITS.notes),
         assignees: names, assigned_to: names[0] || "", category: cid ? wfCatalogKey(T.cat, "taskClientCategory", "Client-related") : "",
         priority: TASK_PRIORITIES.includes(String(c.priority)) ? String(c.priority) : n.type === "add_task" ? "Medium" : "High" }] };
     }
@@ -5179,7 +5354,13 @@ export async function executeDoc(sb: any, n: Row, st: Row, a: Row, f: any, T: Ti
   const vars = wfMergeVars(f, a, await customValues(sb, T)), c = obj(n.config), fillT = (x: unknown) => wfFill(x, vars, "*");
   if (n.type === "internal_notification") {
     if ((c.channel ?? "push") !== "push") return { status: "skipped", reason: "unavailable: " + (c.channel === "sms" ? AVAIL_REASONS.phone : AVAIL_REASONS.teamEmail) };
-    const r = await pushRecipients(sb, c), title = clip(fillT(c.title), LIMITS.title), body = clip(fillT(c.body || ""), LIMITS.pushBody);
+    // people on vacation (stage 3): skipped, or their stand-in; money or private details (W_MONEY_TO_NON_OWNER's test)
+    // reach a stand-in only when they are an owner
+    const money = [...blanksIn(c)].some((k) => WF_MERGE[k] && WF_MERGE[k].sensitivity);
+    const r = await pushRecipients(sb, c, vacOnDayOf(await vacOf(sb, T, nowMs), nowMs), money ? ["owner"] : undefined);
+    const title = clip(fillT(c.title), LIMITS.title), body = clip(fillT(c.body || ""), LIMITS.pushBody);
+    // everyone picked is away with "No notifications" (and no stand-in took it): nothing to send, and that's not a fault
+    if (!r.ids.length && r.chosen) return { status: "skipped", reason: "on vacation" };
     if (preview) return { status: "would", recipient: clip(r.names.join(", "), 200), detail: { title, body } };
     const recordId = String((f.contact && f.contact.id) || (f.job || f.call || f.chat || f.task || {}).id || "");
     const sent = await sendTo(sb, r.ids, { title, body, url: APP_URL + (DEEP_LINK[f.kind] || ""), tag: `auto-${String(a.id).slice(0, 8)}-${recordId}` }, await vapidKeys(sb));
@@ -5701,6 +5882,7 @@ export const V1_EDITOR: Row = {
   mirrorTriggers: {
     invoice: { label: "A technician sends his commission invoice", customer: false }, docExpiry: { label: "An employee document is about to expire", customer: false },
     bizInsurance: { label: "The business insurance is about to expire", customer: false }, googleReview: { label: "A new Google review comes in", customer: false },
+    vacationBack: { label: "Someone is back from a vacation tomorrow", customer: false },
   },
   conds: {
     service: { label: "Service", ops: ["is", "is_not"], values: true, appliesTo: null },
@@ -6241,15 +6423,18 @@ async function previewStep(sb: any, body: any, me: any, nowMs: number) {
       continue;
     }
     const act = ACTIONS[st.type];
+    // vacations on the day the action would run (after the waits and windows above), not today (stage 3)
+    const vacAt = async (): Promise<VacCtx> => { const C = await vacOf(sb, T, nowMs); return { ...C, day: bizParts(at, C.tz).day }; };
     if (st.type === "push") {
-      const r = await pushRecipients(sb, st);
-      out.push({ id: st.id, kind: "action", type: "push", would: "send", to: r.names, title: fillMerge(st.title, vars, known), body: fillMerge(st.body || "", vars, known) });
+      const r = await pushRecipients(sb, st, await vacAt());
+      out.push({ id: st.id, kind: "action", type: "push", ...(!r.ids.length && r.chosen ? { would: "skip", reason: "on vacation" } : { would: "send" }), to: r.names, title: fillMerge(st.title, vars, known), body: fillMerge(st.body || "", vars, known) });
     } else if (st.type === "task") {
-      const names = await taskPeople(sb, st);
+      const due = st.due_days == null ? null : shiftDay(zoneParts(at, tz).day, Number(st.due_days));
+      const { names, moved } = await taskPeople(sb, st, await vacAt(), due || undefined);
       const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
       const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
-      out.push({ id: st.id, kind: "action", type: "task", would: "add", board: boardFor(names, profiles, employees), assignees: names, title: fillMerge(st.title, vars, known), notes: fillMerge(st.notes || "", vars, known),
-        due: st.due_days == null ? null : shiftDay(zoneParts(at, tz).day, Number(st.due_days)) });
+      out.push({ id: st.id, kind: "action", type: "task", would: "add", board: boardFor(names, profiles, employees), assignees: names, title: fillMerge(st.title, vars, known), notes: [vacMovedNote(moved), fillMerge(st.notes || "", vars, known)].filter(Boolean).join("\n\n"),
+        due });
     } else {
       const msg = messageOf(st, T.cat);
       const texts = st.type === "email" ? [fillMerge(st.subject, vars, known), fillMerge(msg ?? "{template}", vars, known)] : [fillMerge(msg ?? "{template}", vars, known)];
