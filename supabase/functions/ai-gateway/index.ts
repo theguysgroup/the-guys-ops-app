@@ -95,11 +95,11 @@
 //   proposal {change:{id, kind, label, summary, target, before, after, status:'proposed', created_at, expires_at}}
 //            (render a 'what will change' card with Confirm/Cancel → manage confirm_change/cancel_change)
 //   card     {kind, data} (custom result card: client COBRA_CARDS[kind](data), stage 7 hook)
-//   discard  {step} (remove the streamed text of that step: a refusal arrived, or the stream couldn't be read and the
-//            same call is made again without streaming)
+//   discard  {step, tools?} (remove the streamed text of that step: a refusal arrived, or the stream couldn't be read and
+//            the same call is made again without streaming; tools: the ids of that step's tool chips, which go too)
 //   notice   {code:'refusal'|'step_limit'|'max_tokens'|'cap_reached'|'cap_80'|'cap_fallback'|'free_quota'|'free_share',
 //            text, category?} (inline note; the stream continues to `done`; cap_fallback comes right after `start`)
-//   error    {code:'provider_auth'|'own_key_refused'|'model_not_found'|'model_needs_paid'|'provider_bad_request'|'provider_busy'|
+//   error    {code:'provider_auth'|'own_key_refused'|'business_key_refused'|'model_not_found'|'model_needs_paid'|'provider_bad_request'|'provider_busy'|
 //            'provider_unreachable'|'provider_error'|'server', text, retryable} (terminal, followed by nothing)
 //   done     {conversation_id, stop:'ok'|'refusal'|'step_limit'|'max_tokens'|'cap_reached'|'free_quota'|'free_share',
 //            steps, title, usage:{input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
@@ -163,7 +163,7 @@ export const ERROR_CODES = ["unauthorized", "off", "role_off", "bad_request", "u
   "model_not_priced", "conversation_not_found", "busy", "cap_reached", "daily_limit", "provider_auth", "model_not_found", "provider_bad_request",
   "provider_busy", "provider_unreachable", "provider_error", "server", "not_found", "not_yours", "not_proposed", "not_confirmed", "expired",
   "not_allowed", "changed_since", "unknown_step", "denied", "gone", "invalid", "failed", "free_quota", "free_share", "model_needs_paid",
-  "own_key_refused", "key_format", "key_provider_mismatch", "key_invalid", "key_unchecked", "keys_off", "key_in_chat", "too_many_tries", "no_key"];
+  "own_key_refused", "business_key_refused", "key_format", "key_provider_mismatch", "key_invalid", "key_unchecked", "keys_off", "key_in_chat", "too_many_tries", "no_key"];
 
 export const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -350,10 +350,12 @@ export const PRICE_DEFAULTS: Record<string, any> = {
   "@cf/google/gemma-4-26b-a4b-it": { in: 0, out: 0 },
   "@cf/qwen/qwen3.8-27b": { in: 0, out: 0 },
   "@cf/openai/gpt-oss-120b": { in: 0, out: 0 },
-  // OpenAI (own keys only, G5): informational for a person's key, real for the business's key under the cap.
-  "gpt-4.1-mini": { in: 0.40, out: 1.60 },
-  "gpt-4.1-nano": { in: 0.10, out: 0.40 },
-  "gpt-4o-mini": { in: 0.15, out: 0.60 },
+  "@cf/openai/gpt-oss-20b": { in: 0, out: 0 },
+  // OpenAI (own keys only, G5): informational for a person's key, real for the business's key under the cap. Cached
+  // input is OpenAI's own rate (not the 0.1× default); there is no cache write charge.
+  "gpt-4.1-mini": { in: 0.40, out: 1.60, cache_read: 0.10, cache_write: 0.40 },
+  "gpt-4.1-nano": { in: 0.10, out: 0.40, cache_read: 0.025, cache_write: 0.10 },
+  "gpt-4o-mini": { in: 0.15, out: 0.60, cache_read: 0.075, cache_write: 0.15 },
 };
 // The server-side fallback model each model may answer with (its thinking blocks are the conversation's own).
 const SERVER_FALLBACK: Record<string, string> = { "claude-sonnet-5-5": "claude-sonnet-5" };
@@ -2003,7 +2005,7 @@ export async function readOpenAiSse(res: Response, onFrame: (frame: any) => void
 // One call to an OpenAI-style provider (req: toOpenAiRequest's body). Busy / unreachable answers are retried
 // FETCH_RETRIES times before anything is streamed (after 0.5 s and 1.5 s); nothing is retried once bytes arrived. A
 // stream that can't be read (ParseFallback) emits { type: 'reset' } (the loop drops what that step showed) and the same
-// call is made again without streaming. Returns the internal result, plus neurons when prices (the free quota's) are
+// call is made again without streaming (a non-streamed answer that can't be read is a provider_error). Returns the internal result, plus neurons when prices (the free quota's) are
 // given. A failure throws ProviderFailure with what the call cost so far (estimated); never the body, the URL or the
 // account id.
 export async function openAiCompatTurn(o: { url: string; headers: Record<string, string>; req: any; flavor: string; model: string; prices?: Record<string, { in: number; out: number }>; onEvent: (ev: any) => void; signal?: AbortSignal | null }) {
@@ -2054,28 +2056,34 @@ export async function openAiCompatTurn(o: { url: string; headers: Record<string,
   } catch (e) {
     if (e instanceof ProviderFailure) throw e;
     if (!(e instanceof ParseFallback) || aborted()) throw new ProviderFailure(aborted() ? "aborted" : "provider_unreachable", !aborted(), partial());
+    // the same request again would get the same answer: only a broken stream is retried
+    if (!stream) throw new ProviderFailure("provider_error", false, partial());
   } finally {
     first.w.end();
   }
-  // The stream couldn't be read: the same call, not streamed. What the first attempt read is still counted.
-  if (o.prices) lost = neuronsOf(o.prices, o.model, partial());
+  // The stream couldn't be read: the same call, not streamed. What the first attempt read is still counted, also when
+  // the second one fails.
+  const firstPart = partial();
+  if (o.prices) lost = neuronsOf(o.prices, o.model, firstPart);
   o.onEvent({ type: "reset" });
   outBytes = 0;
+  const both = () => addUsage(firstPart, partial());
   const body2: any = { ...o.req, stream: false };
   delete body2.stream_options;
-  const second = await post(JSON.stringify(body2), false);
+  let second: any;
+  try { second = await post(JSON.stringify(body2), false); } catch (e) { if (e instanceof ProviderFailure) throw new ProviderFailure(e.code, e.retryable, firstPart); throw e; }
   try {
     let json: any;
-    try { json = await second.res.json(); } catch { throw new ProviderFailure("provider_error", false, partial()); }
+    try { json = await second.res.json(); } catch { throw new ProviderFailure("provider_error", false, both()); }
     const { state, events } = fromOpenAiCompletion(json, k, o.flavor, seen);
-    if (state.error) throw new ProviderFailure(state.error.code, false, partial());
+    if (state.error) throw new ProviderFailure(state.error.code, false, both());
     let out: any;
-    try { out = finishOpenAi(state, { model: o.model, requestBytes: reqBytes }); } catch (e) { if (e instanceof ParseFallback) throw new ProviderFailure("provider_error", false, partial()); throw e; }
+    try { out = finishOpenAi(state, { model: o.model, requestBytes: reqBytes }); } catch (e) { if (e instanceof ParseFallback) throw new ProviderFailure("provider_error", false, both()); throw e; }
     for (const ev of events) o.onEvent(ev);
     return done(out);
   } catch (e) {
     if (e instanceof ProviderFailure) throw e;
-    throw new ProviderFailure(aborted() ? "aborted" : "provider_unreachable", !aborted(), partial());
+    throw new ProviderFailure(aborted() ? "aborted" : "provider_unreachable", !aborted(), both());
   } finally {
     second.w.end();
   }
@@ -2394,8 +2402,9 @@ async function freeState(sb: any, dayStart: string): Promise<FreeState | null> {
     return null;
   }
 }
+// Today's questions as ai_turn_begin counts them: a person's own-key turns are outside the daily limit.
 async function todayUsed(sb: any, userId: string, dayStart: string): Promise<number> {
-  const { count, error } = await sb.from("ai_usage").select("id", { count: "exact", head: true }).eq("business_id", BUSINESS_ID).eq("user_id", userId).gte("at", dayStart);
+  const { count, error } = await sb.from("ai_usage").select("id", { count: "exact", head: true }).eq("business_id", BUSINESS_ID).eq("user_id", userId).gte("at", dayStart).neq("key_source", "own_user");
   if (error) throw new Error("ai_usage: " + clip(error.message, 200));
   return count || 0;
 }
@@ -2420,6 +2429,7 @@ const ERROR_TEXT: Record<string, string> = {
   provider_error: "The AI service had a problem. Try again.",
   server: "Something went wrong on the server. Try again.",
   own_key_refused: "Your own key didn't work, so it's switched off for now. Check it in Your AI key, or ask again to use the business's AI.",
+  business_key_refused: "The business's AI key didn't work, so it's switched off for now. An owner needs to check it in Settings → AI. Ask again to carry on.",
 };
 // The same errors on an own key: it is that key's service, not the business's.
 const OWN_KEY_TEXT: Record<string, string> = {
@@ -2518,7 +2528,8 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
     if (prompt > CONVERSATION_MAX_PROMPT_TOKENS) return refuse(400, "conversation_full");
     if (source.keySource === "free" && prompt > s.free.max_prompt_tokens) return refuse(400, "conversation_full", REFUSE.free_full);
   }
-  if (!priceFor(s.prices, source.model, 0)) return refuse(400, "model_not_priced");
+  // the free AI costs nothing (its quota is counted in neurons), so any free model may answer
+  if (source.keySource !== "free" && !priceFor(s.prices, source.model, 0)) return refuse(400, "model_not_priced");
   // (f) the lock: an existing conversation's, or a new conversation (made with the source's provider and model)
   if (conv) {
     const { data: got, error: le } = await sb.from("ai_conversations").update({ busy_until: iso(nowMs + BUSY_MS) })
@@ -2607,6 +2618,23 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
     const fs = await freeState(sb, utcDayBounds(io.now()).dayStart);
     return freeLeft(s.free, fs, need);
   };
+  // Before a free call: this turn's row takes the call's estimate and the quota is read back under one lock
+  // (ai_free_reserve), so turns running at the same time can't all pass the same check; the check leaves this call's
+  // own reservation out. Blocked → the reservation goes again. Unreadable → freeNow.
+  const freeReserve = async (need: number) => {
+    let fl;
+    try {
+      const { data, error } = await sb.rpc("ai_free_reserve", { p_usage: t.usageId, p_business: BUSINESS_ID, p_day_start: utcDayBounds(io.now()).dayStart, p_neurons: round2(neurons + need) });
+      if (error || !isObj(data)) throw new Error(error ? error.message : "no answer");
+      const mine = round2(neurons + need) - round2(neurons);
+      fl = freeLeft(s.free, { platform_neurons: (Number(data.platform_neurons) || 0) - mine, business_neurons: (Number(data.business_neurons) || 0) - mine, exhausted: data.exhausted === true }, need);
+    } catch (e) {
+      console.error("ai-gateway: free quota not reserved:", clip((e as Error)?.message, 200));
+      return freeNow(need);
+    }
+    if (fl.blocked) await saveUsage();
+    return fl;
+  };
   // A refused turn leaves the replay (its rows stay visible): the next request would otherwise send the refused text
   // again. Only rows at the end of the history go, so the earlier prefix (cache, thinking blocks) stays as it was.
   const dropTurn = async () => {
@@ -2641,7 +2669,7 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
       if (free) {
         // before every free call: the quota left must cover this call (its prompt and up to 1,000 output tokens)
         const need = estimateNeurons(s.free.neurons, t.model, utf8Len(JSON.stringify(req.params)), Math.min(s.max_tokens, 1000));
-        const fl = await freeNow(need);
+        const fl = await freeReserve(need);
         if (fl.blocked) { await notice(fl.blocked); status = "free_quota"; errorCode = fl.blocked === "free_share" ? "free_share" : "free_quota_estimate"; stop = fl.blocked; break; }
       }
       emit("phase", { step, phase: "thinking" });
@@ -2654,9 +2682,10 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
         try {
           result = await provider.turn(req, (ev: any) => {
             if (ev.type === "reset") {
-              // the stream couldn't be read: the provider asks again without streaming, so what this step showed goes
-              emit("discard", { step });
-              closeOpen();
+              // the stream couldn't be read: the provider asks again without streaming, so what this step showed goes,
+              // its tool chips too (the retry may name its calls differently; none of them ran)
+              emit("discard", { step, tools: [...open.keys()] });
+              open.clear();
               wrote = false;
             } else if (ev.type === "text" && ev.text) {
               if (!wrote) { wrote = true; emit("phase", { step, phase: "writing" }); }
@@ -2690,14 +2719,16 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
             break;
           }
           if (e instanceof ProviderFailure) console.error("ai-gateway: provider error:", code);   // the code only, never the provider's text
-          if (code === "provider_auth" && t.source.keySource === "own_user" && t.source.keyId) {
-            // the person's own key was refused: it is skipped from the next turn on (the business's AI answers then)
+          if (code === "provider_auth" && (t.source.keySource === "own_user" || t.source.keySource === "own_business") && t.source.keyId) {
+            // an own key was refused: it is skipped from the next turn on (the person's → the business's AI answers then;
+            // the business's → the platform key or the free AI, until an owner checks it again)
+            const refused = t.source.keySource === "own_user" ? "own_key_refused" : "business_key_refused";
             const { error: me2 } = await sb.rpc("ai_key_mark", { p_id: t.source.keyId, p_status: "invalid", p_error: "refused", p_used: false });
-            if (me2) console.error("ai-gateway: key not marked:", "own_key_refused");
-            code = "own_key_refused"; retryable = true;
+            if (me2) console.error("ai-gateway: key not marked:", refused);
+            code = refused; retryable = true;
           }
           errorCode = code;
-          const errText = (t.source.keyId && OWN_KEY_TEXT[code]) || ERROR_TEXT[code] || ERROR_TEXT.server;
+          const errText = (t.source.keySource === "own_user" && OWN_KEY_TEXT[code]) || ERROR_TEXT[code] || ERROR_TEXT.server;
           await addMsg({ role: "assistant", content: [], text: errText, visible: true, replay: false, meta: { notice: "error", code } });
           emit("error", { code, text: errText, retryable });
           status = "error"; terminal = "error";
@@ -2779,7 +2810,7 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
     };
     try { await finish(); } catch (e) { console.error("ai-gateway: bookkeeping failed:", clip((e as Error)?.message, 200)); await releaseLock(sb, conv.id); }
     // an own key that answered: its last use (once per turn)
-    if (t.source.keyId && steps > 0 && errorCode !== "own_key_refused") {
+    if (t.source.keyId && steps > 0 && errorCode !== "own_key_refused" && errorCode !== "business_key_refused") {
       try { await sb.rpc("ai_key_mark", { p_id: t.source.keyId, p_status: "ok", p_error: null, p_used: true }); } catch { /* only the date */ }
     }
     // The cap and its 80% alert only while there is a cap (0 = the paid AI is off).
@@ -3044,10 +3075,11 @@ export async function statusOf(sb: any, me: Profile, nowMs: number) {
   } else body.month = { blocked: capBlocked, pct_band: capBlocked ? "blocked" : paidOn && cs.warn ? "near" : "ok" };
   return { status: 200, body };
 }
-// The ai_keys rows status may show (owners: the business's and everyone's; others: their own). Never the secret.
+// The ai_keys rows status reads (owners: the business's and everyone's; others: their own and the business's, which only
+// decides who answers and is never shown to them). Never the secret.
 async function keyRowsOf(sb: any, me: Profile): Promise<any[]> {
   let q = sb.from("ai_keys").select("id, scope, user_id, provider, has_key, last4, status, created_at").eq("business_id", BUSINESS_ID);
-  if (me.role !== "owner") q = q.eq("scope", "user").eq("user_id", me.id);
+  if (me.role !== "owner") q = q.or(`scope.eq.business,user_id.eq.${me.id}`);
   const { data, error } = await q;
   if (error) { console.error("ai-gateway: keys not read:", "status"); return []; }
   return data || [];

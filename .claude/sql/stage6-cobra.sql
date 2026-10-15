@@ -14,7 +14,8 @@
 --   ai_conversations  a person's chats (only that person reads them; owners too only their own)
 --   ai_messages       the chat's turns exactly as sent to the model (only that person reads them; content_raw = the JSON text)
 -- Already ran G1 before the review fixes of 15 Oct? Run it again (idempotent): it adds ai_conversations.prefix_hash and
--- ai_messages.content_raw, which the gateway writes from then on.
+-- ai_messages.content_raw, which the gateway writes from then on. Run again after G4-providers, it keeps G4's
+-- allow_own_keys column grant (next to the column grants); if in doubt, run G4-providers again too (also idempotent).
 --   ai_changes        proposed / confirmed / undone changes (owners read all, others their own)
 -- Writes: ai_settings by owners from the app (RLS, listed columns only); everything else only by the gateway
 -- (service role). A person may delete (and rename) their own conversations; messages go with them.
@@ -245,6 +246,12 @@ revoke all on public.ai_settings, public.ai_usage, public.ai_conversations, publ
 grant select on public.ai_settings, public.ai_usage, public.ai_conversations, public.ai_messages, public.ai_changes to authenticated;
 grant update (enabled, kill_switch, roles_enabled, model_per_task, prices, monthly_cap_usd, daily_user_limit, max_tokens, provider, assistant_name)
   on public.ai_settings to authenticated;
+-- G4-providers' owner switch: the revoke above drops its column grant when G1 runs again after G4, so it is given back here.
+do $$ begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'ai_settings' and column_name = 'allow_own_keys') then
+    grant update (allow_own_keys) on public.ai_settings to authenticated;
+  end if;
+end $$;
 grant update (title) on public.ai_conversations to authenticated;
 grant delete on public.ai_conversations to authenticated;
 grant all on public.ai_settings, public.ai_usage, public.ai_conversations, public.ai_messages, public.ai_changes to service_role;
@@ -266,7 +273,7 @@ select 'G1-gateway ok';
 --   select tablename, policyname, cmd from pg_policies where tablename like 'ai\_%' order by 1, 2;                           -- 9 policies
 --   select business_id, enabled, provider, monthly_cap_usd, daily_user_limit from public.ai_settings;                       -- default | t | mock | 20.00 | 50
 --   select column_name from information_schema.column_privileges where table_name = 'ai_settings' and grantee = 'authenticated'
---    and privilege_type = 'UPDATE' order by 1;                                                                             -- 10 columns, no alert_80_sent_month
+--    and privilege_type = 'UPDATE' order by 1;                                                                             -- 10 columns (11 with allow_own_keys once G4 ran), no alert_80_sent_month
 --   select has_function_privilege('authenticated', 'public.ai_month_spend(text, timestamptz)', 'execute');                 -- false
 --   select jobname, schedule from cron.job where jobname = 'ai-prune-90d';                                                   -- 23 3 * * *
 --   select public.ai_prune_conversations();                                                                                 -- 0 on new tables
@@ -485,7 +492,8 @@ select 'G2-changes ok';
 -- Group G4-providers (stage 6 v2, Ofek 15 Oct): free AI by default, paid only by choice.
 -- The free model per task (model_per_task 'cloudflare:assistant' / 'cloudflare:heavy') is picked by .claude/eval/run_ai_eval.sh,
 -- which prints the update lines to run here; glm-4.7-flash is the default until it has run.
--- Run AFTER G1-gateway and G2-changes and BEFORE deploying the v2 ai-gateway, STAGING first. Safe to run again.
+-- Run AFTER G1-gateway and G2-changes and BEFORE deploying the v2 ai-gateway, STAGING first. Safe to run again, and
+-- again after any re-run of G1 (G1 revokes and re-grants ai_settings' columns; the check below lists allow_own_keys).
 --   ai_settings       provider: 'auto' (new default: own key → paid → free → test), 'anthropic' (the owner's paid switch),
 --                     'mock' (test mode); monthly_cap_usd default 0 (paid off until an owner sets a cap); free_quota (the
 --                     platform's free-AI numbers, NOT writable by owners); allow_own_keys (owner switch); model_per_task
@@ -493,7 +501,7 @@ select 'G2-changes ok';
 --   ai_conversations  provider (the provider of the chat's last turn)
 --   ai_usage          key_source (own_user | own_business | platform_paid | free | mock), neurons (free-quota estimate),
 --                     error_code; provider adds 'cloudflare' and 'openai'; status adds 'free_quota'
---   helpers (service role only): ai_turn_begin, ai_month_cap_spend, ai_free_state
+--   helpers (service role only): ai_turn_begin, ai_month_cap_spend, ai_free_state, ai_free_reserve
 -- The v1 helpers ai_usage_begin and ai_month_spend stay (unused by v2) so a rollback to v1 needs no SQL.
 -- No secret is written here. CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_AI_TOKEN are Edge Function secrets Ofek adds.
 -- Check before (read-only):
@@ -597,12 +605,30 @@ as $$
   where u.key_source = 'free' and u.at >= p_day_start
 $$;
 
+-- Before each free call (review fixes, 16 Oct): the turn's usage row takes its neurons so far plus the call's estimate
+-- (p_neurons) and the free quota is read back, as one step under one lock, so turns running at the same time (other
+-- chats, other people, other businesses) each see the others' reservations and can't all pass the same check. The
+-- gateway then checks the quota without its own reservation and writes the call's real neurons after it.
+-- [SECURITY] writes one ai_usage row's neurons and reads every business's free-AI totals; service role only.
+create or replace function public.ai_free_reserve(p_usage uuid, p_business text, p_day_start timestamptz, p_neurons numeric)
+returns jsonb language plpgsql security definer set search_path = ''
+as $$
+begin
+  perform pg_advisory_xact_lock(hashtext('ai_free_reserve'));
+  update public.ai_usage set neurons = greatest(coalesce(p_neurons, 0), 0)
+    where id = p_usage and business_id = p_business and key_source = 'free' and status = 'running';
+  return public.ai_free_state(p_business, p_day_start);
+end
+$$;
+
 revoke all on function public.ai_turn_begin(text, uuid, uuid, text, text, text, text, text, timestamptz, integer) from public, anon, authenticated;   -- [SECURITY]
 revoke all on function public.ai_month_cap_spend(text, timestamptz) from public, anon, authenticated;   -- [SECURITY]
 revoke all on function public.ai_free_state(text, timestamptz) from public, anon, authenticated;        -- [SECURITY]
+revoke all on function public.ai_free_reserve(uuid, text, timestamptz, numeric) from public, anon, authenticated;   -- [SECURITY]
 grant execute on function public.ai_turn_begin(text, uuid, uuid, text, text, text, text, text, timestamptz, integer) to service_role;
 grant execute on function public.ai_month_cap_spend(text, timestamptz) to service_role;
 grant execute on function public.ai_free_state(text, timestamptz) to service_role;
+grant execute on function public.ai_free_reserve(uuid, text, timestamptz, numeric) to service_role;
 
 commit;
 select 'G4-providers ok';
@@ -613,6 +639,7 @@ select 'G4-providers ok';
 --   select column_name from information_schema.column_privileges where table_name = 'ai_settings' and grantee = 'authenticated'
 --     and privilege_type = 'UPDATE' order by 1;                      -- 11 columns incl. allow_own_keys; NOT free_quota, NOT alert_80_sent_month
 --   select has_function_privilege('authenticated', 'public.ai_free_state(text, timestamptz)', 'execute');                  -- false
+--   select has_function_privilege('authenticated', 'public.ai_free_reserve(uuid, text, timestamptz, numeric)', 'execute'); -- false
 --   select has_function_privilege('authenticated', 'public.ai_month_cap_spend(text, timestamptz)', 'execute');             -- false
 --   select public.ai_free_state('default', date_trunc('day', now() at time zone 'utc') at time zone 'utc');               -- {"exhausted": false, ...}
 --   Platform values (the platform owner only; owners can't): update public.ai_settings set free_quota = free_quota || '{"share_pct": 50}';
@@ -620,6 +647,7 @@ select 'G4-providers ok';
 -- ── ROLLBACK (G4-providers; run by hand only) ─────────────────────────────────────────────────────────────
 -- Free / OpenAI usage rows stay (the old checks come back NOT VALID, so old rows are kept and new ones are checked).
 -- begin;
+-- drop function if exists public.ai_free_reserve(uuid, text, timestamptz, numeric);
 -- drop function if exists public.ai_free_state(text, timestamptz);
 -- drop function if exists public.ai_month_cap_spend(text, timestamptz);
 -- drop function if exists public.ai_turn_begin(text, uuid, uuid, text, text, text, text, text, timestamptz, integer);

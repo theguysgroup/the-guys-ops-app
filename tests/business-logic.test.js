@@ -5524,6 +5524,8 @@ function testCobraV2Helpers(sb){
     [true, false, 1, true, true, true, true], 'cobraKeyCardHtml: no key / provider and the last 4 / Refused; the data note');
   assertEqual([off.includes(sb.COBRA_ERRORS.keys_off), off.includes('<input'), biz.includes('id="cobra-key-input-business"'), biz.includes('monthly cap'), biz.includes('Working'), (biz.match(/ disabled/g) || []).length >= 4],
     [true, false, true, true, true, true], 'cobraKeyCardHtml: switched off by an owner; the business key counts against the cap; busy disables it');
+  assertEqual([none, biz].map(h => [/type="password"/.test(h), /<input class="set-input cobra-key-secret" type="text" autocomplete="off"[^>]* data-lpignore="true" data-1p-ignore/.test(h)]),
+    [[false, true], [false, true]], 'cobraKeyCardHtml: the key field is masked text, not a password field (no password manager saves the key)');
   const card = (role) => sb.cobraOwnClaudeCardHtml({ id: 'u', role }, 'Acme <Air>');
   assertEqual([card('va'), card('technician'), card('marketing'), sb.cobraOwnClaudeCardHtml(null, 'x'), card('owner').includes('Get your connector key'), card('manager').includes('read Acme &lt;Air&gt; through your private connector')],
     ['', '', '', '', true, true], 'cobraOwnClaudeCardHtml: owners and managers only; the name from branding, escaped');
@@ -5554,7 +5556,7 @@ function testCobraV2Static(){
   const block = html.slice(html.indexOf('// ══ AI assistant (stage 6): own block, start ══'), html.indexOf('// ══ AI assistant (stage 6): own block, end ══'));
   const card = extractDecl(script, 'cobraKeyCardHtml'), save = extractDecl(script, 'cobraKeySave');
   const inputs = card.match(/<input [^>]*>/g) || [];
-  assertEqual([inputs.length, inputs.every(i => i.includes('type="password"') && i.includes('autocomplete="off"') && i.includes('spellcheck="false"'))], [1, true], 'the key input is a password field, no autocomplete, no spellcheck');
+  assertEqual([inputs.length, inputs.every(i => i.includes('type="text"') && i.includes('cobra-key-secret') && i.includes('autocomplete="off"') && i.includes('spellcheck="false"'))], [1, true], 'the key input is a masked text field (no password manager), no autocomplete, no spellcheck');
   const cleared = save.indexOf("input.value = ''"), firstAwait = save.indexOf('await ');
   assertEqual([cleared > 0, firstAwait > cleared], [true, true], 'cobraKeySave clears the input before the first await');
   assertEqual(block.split('\n').filter(l => /localStorage|sessionStorage/.test(l) && /key/i.test(l)), [], 'no browser storage in the block mentions a key');
@@ -5576,7 +5578,7 @@ function testCobraV2Static(){
   assertEqual([labels ? [...labels[1].matchAll(/(\w+):/g)].map(m => m[1]).sort() : null, pdm ? Object.fromEntries([...pdm[1].matchAll(/"([^"]+)": "([^"]+)"/g)].map(m => [m[1], m[2]])) : null],
     [Object.keys(sb.COBRA_SOURCE_LABEL).sort(), { ...sb.COBRA_PROVIDER_MODELS }], 'who answers and each provider\'s default models are the gateway\'s');
   const cf = Object.keys(sb.COBRA_MODELS).filter(k => k.startsWith('@cf/')), oa = Object.keys(sb.COBRA_MODELS).filter(k => sb.COBRA_MODELS[k].provider==='openai');
-  assertEqual([cf.length, oa.length, sb.COBRA_DEFAULTS.monthly_cap_usd, [...cf, ...oa].filter(k => !gw.includes(`"${k}": { in: `))], [4, 3, 0, []], 'Settings lists the 4 free and 3 OpenAI models the gateway prices; the cap defaults to 0');
+  assertEqual([cf.length, oa.length, sb.COBRA_DEFAULTS.monthly_cap_usd, [...cf, ...oa].filter(k => !gw.includes(`"${k}": { in: `))], [5, 3, 0, []], 'Settings lists the 5 free and 3 OpenAI models the gateway prices; the cap defaults to 0');
 }
 testCobraHelpers(loadSandbox());
 testCobraStatic();

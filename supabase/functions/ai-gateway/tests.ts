@@ -116,7 +116,12 @@ function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, strin
     if (name === "ai_month_cap_spend") {
       return { data: (T.ai_usage || []).filter((u) => u.business_id === a.p_business && u.at >= a.p_from && ["platform_paid", "own_business"].includes(keySourceOf(u))).reduce((s, u) => s + Number(u.cost_usd || 0), 0), error: null };
     }
-    if (name === "ai_free_state") {
+    if (name === "ai_free_state" || name === "ai_free_reserve") {
+      // ai_free_reserve: the turn's running free row takes p_neurons first (under the lock in SQL), then the same answer
+      if (name === "ai_free_reserve") {
+        const row = (T.ai_usage || []).find((u) => u.id === a.p_usage && u.business_id === a.p_business && u.key_source === "free" && u.status === "running");
+        if (row) row.neurons = Math.max(Number(a.p_neurons) || 0, 0);
+      }
       const rows = (T.ai_usage || []).filter((u) => u.key_source === "free" && u.at >= a.p_day_start);
       const sum = (l: any[]) => l.reduce((s, u) => s + Number(u.neurons || 0), 0);
       return { data: { platform_neurons: sum(rows), business_neurons: sum(rows.filter((u) => u.business_id === a.p_business)), exhausted: rows.some((u) => u.status === "free_quota" && u.error_code === "free_quota") }, error: null };

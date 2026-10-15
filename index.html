@@ -2084,6 +2084,8 @@ body.cobra-open #chase-bubbles { right: 418px !important; }
 .cobra-key-form { display: flex; gap: 8px; flex-wrap: wrap; }
 .cobra-key-form select { flex: 0 0 auto; width: auto; }
 .cobra-key-form input { flex: 1 1 180px; min-width: 0; }
+/* the API key field is a masked text field, not a password one, so no password manager offers to save (and sync) it */
+.cobra-key-form input.cobra-key-secret { -webkit-text-security: disc; text-security: disc; }
 .cobra-key-btns { display: flex; gap: 8px; flex-wrap: wrap; }
 .cobra-key-note { font-size: 12.5px; color: var(--ink-soft); }
 .cobra-key-note.bad { color: var(--bad); }
@@ -24288,6 +24290,7 @@ const COBRA_MODELS = {
   '@cf/google/gemma-4-26b-a4b-it': { label: 'Gemma 4 26B (free)', in: 0, out: 0, provider: 'cloudflare' },
   '@cf/qwen/qwen3.8-27b': { label: 'Qwen 3.8 27B (free)', in: 0, out: 0, provider: 'cloudflare' },
   '@cf/openai/gpt-oss-120b': { label: 'GPT-OSS 120B (free)', in: 0, out: 0, provider: 'cloudflare' },
+  '@cf/openai/gpt-oss-20b': { label: 'GPT-OSS 20B (free)', in: 0, out: 0, provider: 'cloudflare' },
   'gpt-4.1-mini': { label: 'GPT-4.1 mini', in: 0.4, out: 1.6, provider: 'openai' },
   'gpt-4.1-nano': { label: 'GPT-4.1 nano', in: 0.1, out: 0.4, provider: 'openai' },
   'gpt-4o-mini': { label: 'GPT-4o mini', in: 0.15, out: 0.6, provider: 'openai' },
@@ -24350,6 +24353,7 @@ const COBRA_ERRORS = {
   aborted: 'Stopped.',
   // own keys (stage 6 v2 G5)
   own_key_refused: "Your own key didn't work, so it's switched off for now. Check it in Your AI key, or ask again to use the business's AI.",
+  business_key_refused: "The business's AI key didn't work, so it's switched off for now. An owner needs to check it in Settings → AI. Ask again to carry on.",
   key_format: "That doesn't look like an OpenAI or Anthropic API key.",
   key_provider_mismatch: 'That key belongs to the other AI service. Pick the matching one.',
   key_invalid: "The AI service didn't accept that key. It wasn't saved.",
@@ -24761,7 +24765,7 @@ function cobraKeyCardHtml(keyState, busy){
   const data = scope==='business' ? "Paid AI then answers on this key instead of the server's. It counts against the monthly cap."
     : "Your questions and the business data they need then go to your own OpenAI / Anthropic account, paid by you. They don't count against the business's limits.";
   return head + `<div class="cobra-key-form"><select class="set-input" id="${id}-provider" aria-label="AI service"${dis}>${Object.keys(COBRA_KEY_PROVIDERS).map(p => `<option value="${p}"${k && k.provider===p ? ' selected' : ''}>${COBRA_KEY_PROVIDERS[p]}</option>`).join('')}</select>`
-    + `<input class="set-input" type="password" autocomplete="off" spellcheck="false" id="${id}" aria-label="API key" placeholder="${k ? 'Paste a new key to replace it' : 'Paste the API key'}"${dis}></div>`
+    + `<input class="set-input cobra-key-secret" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" id="${id}" aria-label="API key" placeholder="${k ? 'Paste a new key to replace it' : 'Paste the API key'}"${dis}></div>`
     + `<div class="cobra-key-btns"><button type="button" class="btn small primary" onclick="cobraKeySave('${esc(jsStr(scope))}')"${dis}>Save and check</button>`
     + (k ? `<button type="button" class="btn small" onclick="cobraKeyTest('${esc(jsStr(scope))}')"${dis}>Check again</button>` : '') + remove + '</div>'
     + note + `<p class="cobra-key-data">${esc(data)}</p></div>`;
@@ -25332,6 +25336,7 @@ function cobraOnEvent(ev){
     }
     case 'discard':
       msg.parts[Number(d.step) || 0] = '';
+      if (Array.isArray(d.tools) && d.tools.length) { const gone = d.tools.map(String); msg.tools = msg.tools.filter(t => !gone.includes(t.id)); cobraPatchMsg(msg); }
       cobraFlush();
       return;
     case 'tool': {
@@ -25375,7 +25380,7 @@ function cobraOnEvent(ev){
         const opts = { name: cobraName(), limit: COBRA.status && COBRA.status.today && COBRA.status.today.limit, isOwner: cobraIsOwner() };
         msg.error = { code, reason: named ? cobraErrorText(code, opts) : String(d.reason || d.text || cobraErrorText(code, opts)) };
       }
-      if (['off', 'role_off', 'kill_switch', 'cap_reached', 'daily_limit', 'not_installed', 'free_quota', 'free_share', 'own_key_refused'].includes(code)) cobraStatusLoad(true);
+      if (['off', 'role_off', 'kill_switch', 'cap_reached', 'daily_limit', 'not_installed', 'free_quota', 'free_share', 'own_key_refused', 'business_key_refused'].includes(code)) cobraStatusLoad(true);
       cobraPatchMsg(msg);
       return;
     }

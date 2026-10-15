@@ -153,6 +153,12 @@ SUITES.push(async () => {
     x = await run("cf-garbage", 7, [nonstream]);
     eq([x.evts.filter((e) => e.type === "reset").length, x.out.content, x.out.usage, fetches.length, fetches[1].body.stream, "stream_options" in fetches[1].body], [1, [{ type: "text", text: "Hallo again" }], u(110, 4), 2, false, false], "cf-garbage: reset, then the same call not streamed");
     ok(x.out.neurons > neuronsOf(NEURON_PRICES, GLM, x.out.usage), "… what the broken stream read is counted too");
+    x = await run("cf-garbage", 7, [() => jsonRes(429, { success: false, errors: [{ code: 3040, message: "busy" }] })]);
+    eq([x.err && x.err.code, fetches.length, !!(x.err && x.err.partialUsage && x.err.partialUsage.input_tokens > 0)], ["provider_busy", 4, true], "cf-garbage, then the retry fails: the broken call's tokens are still in the failure");
+    serve([() => new Response("<html>oops</html>", { status: 200, headers: { "content-type": "application/json" } })]);
+    let nsErr: any = null;
+    try { await openAiCompatTurn({ url: "https://cf.test/v1", headers: {}, flavor: "cloudflare", model: GLM, prices: NEURON_PRICES, onEvent: () => {}, req: { model: GLM, messages: [{ role: "user", content: "hi" }], stream: false } }); } catch (e) { nsErr = e; }
+    eq([nsErr && nsErr.code, fetches.length], ["provider_error", 1], "a non-streamed answer that can't be read → provider_error, not the same request again");
     x = await run("cf-no-usage");
     eq([x.out.usage_estimated, x.out.usage.output_tokens, x.out.usage.input_tokens > 0], [true, Math.ceil("No usage here".length / 3), true], "cf-no-usage: estimated and flagged");
     x = await run("cf-bad-args");
@@ -202,6 +208,26 @@ SUITES.push(async () => {
     const toolMsg = fetches[1].body.messages.find((m: any) => m.role === "tool");
     eq([done(r2).stop, toolMsg.tool_call_id, toolMsg.content.startsWith("Error: ")], ["ok", "call_bad", true], "bad arguments → an is_error result in the next request");
     keep(db, r, r2, s, sm);
+  }
+
+  // ── P10b. a broken stream after a tool chip; the free quota reserved before each call; any free model ──
+  {
+    const db = world({ provider: "auto" });
+    const toolThenGarbage = 'data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_one","type":"function","function":{"name":"whoami","arguments":"{}"}}]}}]}\n\ndata: <html>Bad gateway</html>\n\n';
+    let during = -1;
+    serve([() => { during = Number((db.T.ai_usage.find((u: any) => u.status === "running") || {}).neurons); return streamRes(toolThenGarbage); }, nonstream]);
+    const r = await chat(db, { text: "hi" });
+    const disc = evs(r, "discard")[0], toolEvs = evs(r, "tool");
+    eq([disc && disc.step, disc && disc.tools.length, toolEvs.filter((e: any) => e.status === "error").length, done(r).stop], [0, 1, 0, "ok"], "a stream that breaks after a tool chip: discard names the chip (no 'error' chip left)");
+    ok(during > 0 && db.ctl.rpcs.includes("ai_free_reserve"), "… the call's estimate was on the turn's row while it ran (ai_free_reserve)");
+    ok(db.T.ai_usage[0].neurons > 0 && db.T.ai_usage[0].neurons !== during, "… then replaced by what the calls used");
+    for (const m of ["@cf/openai/gpt-oss-20b", "@cf/acme/new-model"]) {
+      const w = world({ provider: "auto", model_per_task: { "cloudflare:assistant": m } });
+      serve([sse("cf-text")]);
+      const rr = await chat(w, { text: "hi" });
+      eq([rr.status, evs(rr, "start")[0] && evs(rr, "start")[0].model, done(rr) && done(rr).stop], [200, m, "ok"], `a free model without a price (${m}) still answers (no model_not_priced)`);
+    }
+    keep(db, r);
   }
 
   // ── P11. the free quota refused before the stream ──

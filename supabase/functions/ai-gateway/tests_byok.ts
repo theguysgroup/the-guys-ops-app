@@ -44,6 +44,7 @@ SUITES.push(async () => {
     eq([KEY_OA, KEY_AN, "sk-short", "pk-test-FAKE-000000000000000000", "sk-test FAKE 0000000000000000000", "sk-" + "x".repeat(298)].map(keyProviderOf), ["openai", "anthropic", null, null, null, null], "keyProviderOf: sk-ant- → anthropic, other sk- → openai, else null (length, spaces)");
     eq([KEY_RE.test("a".repeat(20)), KEY_RE.test("a".repeat(19)), KEY_RE.test("a".repeat(300)), KEY_RE.test("a".repeat(301)), KEY_RE.test("é".repeat(20))], [true, false, true, false, false], "KEY_RE: 20–300 printable ASCII");
     eq(last4Of(KEY_OA), "WXYZ", "last4Of");
+    eq([callCost(mergePrices({}), "gpt-4.1-mini", { input_tokens: 200000, cache_read_input_tokens: 800000, output_tokens: 0 }), callCost(mergePrices({}), "gpt-4o-mini", { input_tokens: 0, cache_read_input_tokens: 1e6, output_tokens: 0 })], [0.16, 0.075], "OpenAI cached input at OpenAI's rate (gpt-4.1-mini 0.10, gpt-4o-mini 0.075 per M), not 0.1×");
   }
 
   // ── K2. key_save: format, provider, the models check, what is saved and answered ──
@@ -165,6 +166,7 @@ SUITES.push(async () => {
     keep(db, r);
     r = await manage(db, { step: "status" }, "jwt-manager");
     eq(["business" in r.body.keys, "people" in r.body.keys, r.body.keys.me], [false, false, null], "status (manager): no business key, no people");
+    eq([r.body.source.key_source, r.body.source.provider, r.body.blocked, JSON.stringify(r.body).includes("ABCD")], ["own_business", "anthropic", null, false], "… yet who answers counts the business's key (never shown)");
     keep(db, r);
   }
 
@@ -184,6 +186,8 @@ SUITES.push(async () => {
     ok(!!db.T.ai_keys[0].last_used_at, "… the key's last use is recorded");
     const r2 = await chat(db, { text: "And again" }, "jwt-manager");
     eq([r2.status, evs(r2, "start")[0]?.key_source, db.T.ai_usage.length], [200, "own_user", 2], "… a daily limit of 1 still allows a 2nd own-key turn (not counted)");
+    const sm = await manage(db, { step: "status" }, "jwt-manager");
+    eq([evs(r2, "done")[0].limits.today_used, sm.body.today.used], [0, 0], "… done and status count today's questions as the limit does (own-key turns left out)");
     const st = await manage(db, { step: "status" }, "jwt-owner");
     eq(st.body.month.spend_usd, 0, "… the paid spend (the cap) is unchanged");
     keep(db, r1, r2, st);
@@ -221,6 +225,25 @@ SUITES.push(async () => {
     const st = await manage(db, { step: "status" }, "jwt-tech");
     eq([st.body.keys.me.status, st.body.source.key_source], ["invalid", "mock"], "… status: the key's status 'invalid' (the app's banner)");
     keep(db, r1, r2, st);
+  }
+
+  // ── K10b. the business's own key refused mid-chat ──
+  {
+    const db = fresh({ provider: "anthropic", monthly_cap_usd: 5 });
+    serve([status(200)]);
+    await save(db, KEY_OA, "jwt-owner", "business");
+    serve([status(401)]);
+    const r1 = await chat(db, { text: "Hello" }, "jwt-tech");
+    const err = evs(r1, "error")[0];
+    eq([err.code, err.retryable, /business's AI key/.test(err.text)], ["business_key_refused", true, true], "business key 401 mid-chat → business_key_refused (not the server's key, not 'your key')");
+    eq([db.T.ai_keys[0].status, db.T.ai_keys[0].last_error], ["invalid", "refused"], "… the key is marked invalid");
+    const r2 = await chat(db, { text: "Hello again" }, "jwt-tech");
+    eq([evs(r2, "start")[0].key_source, evs(r2, "done").length], ["mock", 1], "… the next turn skips it (nothing else set up here: the test provider)");
+    serve([status(503)]);
+    db.T.ai_keys[0].status = "ok";
+    const r3 = await chat(db, { text: "Busy?" }, "jwt-tech");
+    eq(evs(r3, "error")[0].text.startsWith("Your key"), false, "… a busy business key never says 'Your key' to staff");
+    keep(db, r1, r2, r3);
   }
 
   // ── K11. the business's own key: the paid switch and a cap above 0, counted against the cap ──
