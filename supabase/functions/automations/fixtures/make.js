@@ -273,6 +273,8 @@ winCase("window: office hours, at", { mode: "office", outside: "at", at: "08:30"
 winCase("window: office hours, skip → end", { mode: "office", outside: "skip" }, { use: "office", outside: "end" });
 winCase("window: outside office hours, next", { mode: "outsideOffice", outside: "next" }, { use: "outsideOffice", outside: "next" });
 winCase("window: outside office hours, skip → end", { mode: "outsideOffice", outside: "skip" }, { use: "outsideOffice", outside: "end" });
+// an office step keeps the custom days and hours it had (the old editor brings them back when switched to custom again)
+winCase("window: office hours keeping its custom days", { mode: "office", days: [0, 6], from: "10:00", until: "14:00", outside: "next" }, { use: "office", days: [0, 6], from: "10:00", until: "14:00", outside: "next" });
 // 12 ifs in a row, then an email
 {
   const steps = [], nodes = {};

@@ -1,4 +1,4 @@
-# Stage 2 phase 1 — live deploy runbook (SQL Part 1 + the v2 function in compat mode)
+# Stage 2 phase 1 — live deploy runbook (SQL Part 1 + the v2 function in compat mode; phase 2 from section 9)
 
 For the MAIN BUILDER. Design: `.claude/plans/stage2-design.md` §3.16, §7 Phase 1 (G1.4), §8.2, §8.3. Nothing in this file has
 been run: every step below is done by the main builder (with Ofek's OK where the rules or the safety classifier ask for it).
@@ -86,8 +86,8 @@ pushes, tasks and emails (exact text). It also proves the rollback build = 7ae5b
 
 1. Built-in corpus (23 recorded-style rows mirroring the ready-made and builder shapes, incl. two long runs of 21–22 steps
    above an email + the 24 `upgrade.json` v1 shapes ×
-   17 scenarios: in hours, outside hours, the night before DST, public holiday, weekend, opted out, test records, capped,
-   stage undone within 30 s, stage moved on, no customer card, card linked later, 30-hour outage (late), no signer, picked
+   18 scenarios: in hours, outside hours, the night before DST, public holiday, weekend, opted out, test records, capped,
+   stage undone within 30 s, stage moved on, stage moved on within 30 s, no customer card, card linked later, 30-hour outage (late), no signer, picked
    up + chat answered, don't ask + asked lately + paid, the app's "look now"):
    `run.sh` → must end `DIFFERENTIAL: IDENTICAL` (at the time of writing: 816 cases, 10,608 worlds, 17 s).
 2. Live definitions (read-only export, save as `live-automations.json` in the scratchpad):
@@ -222,6 +222,10 @@ new record's `missing details: x`) is noted, not a rollback.
 ## 7. Rollback
 
 **R-A — function only (the default; Part 1 stays, it is additive and silent).**
+⚠ Once PART 2 · G2.4 is live and the migration ran, R-A alone is UNSAFE as soon as any row was saved after
+`v2_migrated_at` (the G2.4 ROLLBACK's read-only list is not empty): the adapter's saves write only the doc, so that row's
+`trigger` / `steps` still hold the old words and R-A would run them. Then follow section 12.2 (switch those rows off
+FIRST, with the stage-2 build still deployed), never R-A on its own.
 1. Dashboard → `automations` → editor: paste `supabase/functions/automations-phase4-compat/index.ts` from the committed
    stage-2 commit (GitHub raw). Verify JWT **OFF**. Deploy. Fingerprint the deployed code = the commit file
    (`802813866/114905` at the time of writing). Never `supabase functions deploy automations-phase4-compat`, never "deploy all".
@@ -247,6 +251,338 @@ Before deploying v2 again: fix, `check_all.sh` ALL GREEN, the differential IDENT
 - **Phase-4 step ids that are not v2 ids** (step 2 query): compat mode maps node ids back to the phase-4 id for log rows,
   claims and the window pass (`advanceV2`, `sid`), so phase 1 is exact. `step:"migrate"` (G2.4) must not silently re-id them:
   either keep the old id in the doc, or store the id map and translate claims — otherwise an action claimed before the
-  migration could be claimed again under its new id.
+  migration could be claimed again under its new id. **Done in G2.4**: while the row keeps its phase-4 steps (until phase
+  7), an unedited upgraded row runs those very steps (`wfRunRow`), and a doc row maps an old id to its node again
+  (`runDocOf` idMap), so every claim and log row of before the migration still matches.
 - The rollback build's correctness after phase 2 also depends on the Part-2 ROLLBACK disabling every row created or edited
   in v2 (design §3.16) — phase 4 cannot run a doc-only workflow.
+
+## 9. Phase 2 · G2.1 — the event store (SQL Part 2 step E)
+
+What changes: `automation_state.phase4_compat = false` (PART 2 · STEP E in `.claude/sql/stage2-automations.sql`). From the
+next tick the function starts runs through the event store instead of phase 4's `enqueue`: it writes `automation_wanted`
+(the capture triggers start writing those types), scans the scan and time sources from their watermarks
+(`automation_state.scan_marks`; a scanner looks back 30 minutes before its mark, never more than `lookback_hours`; at least one
+producer runs every tick and they take turns when 8 seconds are not enough, `scan_marks._next` = the one to start with next), claims the
+due events (at least one a tick), wakes held runs that watch them, stops the runs a reply ends (Stop on response), checks every trigger
+(a stage move undone within its 30-second settle time is dropped here as `move_undone`, never enrolled; for an upgraded
+workflow a move the lead had already left again is dropped as `moved_on`, as phase 4 never saw it — native v2 docs fire on
+every move) and enrols
+through `automation_enroll`, and writes `automation_trigger_log` (matched rows always, unmatched ones the first 200 a trigger
+a day) and `automation_trigger_daily`. The phase-4 scanners and their five event keys are reused byte for byte: an event the
+compat producer already started gives `duplicate_event`, never a second run. The function log line becomes
+`automations engine: v2 executor with the event store (producers, captured events, matcher)`.
+
+Upgraded rows (re-entry `legacy_always`) start exactly as phase 4 did (no lock, the executor's test-record guard). The
+offline differential proves it: the `ev` engine (step E on), `new → ev` after tick 1 and mid-way, `ev → new` / `ev → rb`
+(rolled back) and alternating every tick are all IDENTICAL to phase 4 on the built-in corpus and on the live shadow
+(`bash supabase/functions/automations/differential/run.sh` — and with `--corpus` / `--records` on the live exports of
+section 3 before the live step).
+
+### 9.1 Order (one step at a time)
+
+1. Preconditions: Part 1 live; the phase-2 function (with the EVENTS section) deployed and ticking in compat mode for at least
+   15 minutes (W1–W8 clean); `check_all.sh` ALL GREEN and the differential IDENTICAL on the deployed commit (with the live
+   exports of section 3, fresh).
+2. Staging: `.claude/sql/stage2-part1-staging-checks.sql` again (PASS 1 … 15), then the concurrent-enrolment check (9.2).
+3. Live: run the STEP E check-before queries, then the STEP E block (one short transaction). Note the time = `:stepE`.
+4. First tick (≤ 1 minute): the log line above (once); STEP E check-after queries. The first tick re-checks the last
+   `lookback_hours` of scan events: expect `duplicate_event` rows in the trigger log for everything phase 4 already started,
+   and **no** new runs for them (E1 below).
+5. Watch two hours with section 6 (`:deploy` = `:stepE`) plus E1–E4 below; same roll-back triggers as section 6.
+6. Log it in MASTER §13 and tell Ofek in Hebrew.
+
+### 9.2 Staging: two enrolments at the same moment through PostgREST (design §8.1 #12)
+
+The fake database runs one call at a time; this proves the advisory lock + partial unique index under real concurrency.
+On the STAGING project only, from a terminal (the staging URL and service key from the staging project's settings, typed
+into the shell, never saved in a file):
+
+```bash
+export SB_URL="https://<staging-ref>.supabase.co" SB_KEY="<staging service_role key>"   # staging ONLY
+node --input-type=module -e '
+const h = { apikey: process.env.SB_KEY, Authorization: "Bearer " + process.env.SB_KEY, "Content-Type": "application/json", Prefer: "return=representation" };
+const R = (p, b) => fetch(process.env.SB_URL + p, { method: "POST", headers: h, body: JSON.stringify(b) }).then(r => r.json());
+const [a] = await R("/rest/v1/automations", { name: "stage2 concurrency check", enabled: false, trigger: { type: "newLead", params: {} }, steps: [] });
+const now = new Date().toISOString();
+const p = (key) => ({ p_business: "default", p_automation: a.id, p_version: 1, p_revision: 1, p_trigger: "t1", p_event_key: key, p_event_type: "contact_changed",
+  p_event_at: now, p_record_kind: "contact", p_record_id: "conc-1", p_contact: null, p_enroll_key: "conc-1", p_lock_key: "conc-1", p_reentry: "off", p_start: "n1",
+  p_context: {}, p_source: "trigger", p_chain: 0, p_cause: null, p_parent: null, p_stop_on_reply: false, p_now: now });
+const got = await Promise.all(Array.from({ length: 8 }, (_, i) => R("/rest/v1/rpc/automation_enroll", p("k" + (i % 3)))));
+const runs = await fetch(process.env.SB_URL + "/rest/v1/automation_runs?select=id&automation_id=eq." + a.id, { headers: h }).then(r => r.json());
+console.log(got, "runs:", runs.length);   // expect exactly one "enrolled:<id>", the rest "already_enrolled" / "duplicate_event"; runs: 1
+await fetch(process.env.SB_URL + "/rest/v1/automations?id=eq." + a.id, { method: "DELETE", headers: h });   // its runs and ledger go with it (cascade)
+'
+unset SB_URL SB_KEY
+```
+
+### 9.3 Extra watch queries after step E (read-only; `:stepE` = the step-E time)
+
+```sql
+-- E1 nothing started twice: every run since step E came through automation_enroll, one per (workflow, event key)
+select count(*) filter (where not exists (select 1 from public.automation_log l where l.run_id = r.id and l.row_kind = 'enroll')) as without_enroll_row,
+       count(*) as runs
+  from public.automation_runs r where r.created_at >= :stepE and r.source = 'trigger';             -- without_enroll_row = 0
+select automation_id, record_kind, record_id, count(*) from public.automation_runs
+ where created_at >= :stepE - interval '6 hours' group by 1, 2, 3 having count(*) > 1 and max(created_at) >= :stepE;   -- inspect each (W5)
+
+-- E2 the event store keeps up: nothing due waits, nothing gives up
+select status, count(*), min(available_at) filter (where status = 'new') as oldest_new, max(attempts) from public.automation_events group by 1;
+-- 'new' older than 2 minutes = a backlog; any 'error' row → read its error (5 attempts failed)
+
+-- E3 what the triggers decided (matched vs reasons per workflow and trigger, today)
+select a.name, d.trigger_id, d.attempted, d.matched, d.enrolled, d.reasons from public.automation_trigger_daily d
+  join public.automations a on a.id = d.automation_id where d.day = (now() at time zone 'Australia/Sydney')::date order by 1, 2;
+
+-- E4 the capture triggers are on and never fail a save
+select (select string_agg(event_type, ',' order by event_type) from public.automation_wanted) as wanted,
+       capture_errors, capture_error_last, capture_error_at, scan_marks from public.automation_state where business_id = 'default';
+```
+
+W9 of section 6 no longer applies after step E (events and wanted are expected now); `capture_errors` must stay 0.
+
+### 9.4 Roll back step E
+
+The commented ROLLBACK of PART 2 · STEP E (one transaction): `phase4_compat = true`, the capture list emptied, the events
+nobody will claim closed. The next tick logs `v2 executor in compat mode …` and the compat producer starts the runs again with
+the same keys (differential `ev → new` / `ev → rb`: identical). Roll back on the section-6 triggers, on E1 > 0, on an E2 backlog
+that does not drain within 10 minutes, or on any `capture_errors` growth. A function rollback (section 7, R-A) also works with
+step E still on: the rollback build ignores `phase4_compat` and the event store — but then also run the step-E rollback, so the
+capture triggers stop writing events nobody reads.
+
+## 10. Phase 2 · G2.2 — logic steps and per-workflow settings (no SQL)
+
+What changes: only the function. `advanceV2` now runs every step kind of a stage-2 workflow: If / else (first true branch,
+None), Split (bucket = hash of workflow + step + enrolment key; the path kept in `automation_enrollment_keys.splits` and taken
+again on re-entry while it still has > 0%), Goal (met → on; not met → end / continue / wait; a goal met ahead is jumped to as
+soon as its event wakes the held run), Go to (a new pass: actions claim again; 10 visits of the target without a hold = failed
+"loop guard: Go to ran 10 times without waiting"), Add to workflow (a run of a published target through `automation_enroll`,
+source `workflow`, parent + chain + 1, event key `wf:<run>:<step>:<pass>`, stops at chain depth 3), Remove from workflow (the
+lead's other runs by contact: waiting → `removed` + exit row, running → `remove_requested`, ended at its next write; `current` /
+`all` end this run `removed`), the reply / user-reply / conditions waits (hourly recheck, woken by their events, the
+"Timed out" branch), Stop on response before every customer message, the workflow's time window for every action (customer
+messages: window ∩ customer hours), Global "Pause workflow" ranges (actions held until the end, waits go on; the pause list
+wakes only its workflows' held runs) and "Conversations: Mark as read" (`automation_apply` op `read` after a sent message).
+
+Phase-4 rows (compat and migrated) are untouched: no stage-2 step kinds, migrated settings (no time window, no Stop on
+response, no Mark as read), and a pause only when the owner adds one. The offline differential stays IDENTICAL.
+
+### 10.1 Order
+
+1. `check_all.sh` ALL GREEN on the commit (the automations suite has section 32 for G2.2; the differential IDENTICAL).
+2. Staging: `.claude/sql/stage2-part1-staging-checks.sql` again → PASS 1 … 16 and `stage2 phase 2 · G2.2 staging checks done`.
+3. Deploy the function (dashboard editor, fingerprint); nothing to run in SQL.
+4. Watch (read-only) for an hour after the deploy, together with section 6 and 9.3:
+
+```sql
+-- L1 the new end states and reasons (stage-2 workflows only; phase-4 rows show none of these)
+select status, exit_reason, count(*) from public.automation_runs where updated_at >= :deploy and exit_reason in
+  ('removed_by_action', 'removed_by_external_action', 'replied', 'goal_not_met', 'loop_guard') group by 1, 2;
+-- L2 runs asked to stop while moving that never ended (want 0 after 5 minutes)
+select count(*) from public.automation_runs where remove_requested and status in ('waiting', 'running') and updated_at < now() - interval '5 minutes';
+-- L3 held runs by what they wait for (rechecks are claimed last; 'pause' = held by a pause range)
+select unnest(watch) as watches, recheck, count(*) from public.automation_runs where status = 'waiting' group by 1, 2 order by 3 desc;
+-- L4 Add to workflow chains (depth ≤ 3) and their parents
+select chain_depth, source, count(*) from public.automation_runs where created_at >= :deploy group by 1, 2 order by 1, 2;
+```
+
+### 10.2 Roll back
+
+Redeploy the previous function build (the G2.1 one). Nothing in the database needs undoing: runs a G2.2 step put on hold keep
+their `cursor_step` and context and go on when a build that knows the step runs again; a run at a stage-2 step under the
+older build fails "not supported yet" (only stage-2 workflows have such steps, and none exist until G2.4's save / migrate).
+
+
+## 11. Phase 2 · G2.3 — record actions, the inbound and outgoing webhooks, custom values (SQL Part 2 · G2.3 + app)
+
+What changes:
+- **Function**: a stage-2 workflow's record actions (Update lead field, Add / Remove lead tag, Add to notes, Stop automatic
+  messages, Edit conversation, Move to stage, Mark lost, Add internal comment, Update custom value, Add task, Manual action
+  to call) are ONE `automation_apply` call each with the run's cause (`<run>:<depth>:<workflow>`), so every event the
+  write makes carries it: a workflow never starts itself again (`own_change`) and a chain stops at depth 3 (`loop_guard`).
+  New customer actions: Send live chat message (into the lead's open chat of the last 24 hours) and Send review request
+  (one row in the Google reviews queue; the review-requests function sends it; claim `system_claims review:<job>`), both
+  with the full customer guard and the daily cap. The outgoing Webhook (https only; never an IP, localhost, `*.local`,
+  `*.internal`, Supabase, or a name that resolves to a private / link-local / CGNAT address; no redirects; 10 s; one more
+  try on a 5xx; the log keeps the host, the status and the time only). Stage-2 words: `{quote_amount}`, `{custom.<key>}`,
+  `{trigger.<key>}` (HTML-escaped in emails), an unknown blank stops a customer message. The inbound webhook: POST to
+  `…/functions/v1/automations/hook/<token>` (or header `x-hook-token`); `hook_create` / `hook_revoke` / `hook_sample`
+  steps for owners and managers. Phase-4 rows are untouched (their actions keep phase 4's execute): the differential stays
+  IDENTICAL.
+- **SQL** (PART 2 · G2.3, one transaction): `contact_tags_merge`, `contact_notes_append`, `contact_tags_edit`,
+  `contact_note_add`, `contact_note_remove` (security invoker, signed-in), `automation_hook_hit` (service role),
+  `automation_apply` and `automation_capture_contacts` replaced (notes on the card as `{id, text, by, at}`, the card's tag
+  rule, a team task with no lead, "Note added" captured). A note id is any non-empty one up to 128 characters without
+  control characters, so the Undo of a deleted imported note (e.g. `ghl:123/x`) puts it back as it was (a time it had,
+  even none, is kept).
+- **App**: the lead card's tag click, bulk tags (+ Undo), note add and note delete (+ Undo) call the three atomic functions;
+  while they are missing (SQL not in yet, or rolled back) the app falls back to its old whole-list save by itself.
+
+### 11.1 Order (one step at a time)
+
+1. `check_all.sh` ALL GREEN on the commit (automations section 33; app `testLeadAtomicEdits`; differential IDENTICAL).
+2. Staging: PART 2 · G2.3 (check-before → block → check-after), then `.claude/sql/stage2-part1-staging-checks.sql` → PASS 1 … 18
+   and `stage2 phase 2 · G2.3 staging checks done`.
+3. Live: PART 2 · G2.3 check-before, the block, check-after. Note the time = `:g23`.
+4. Deploy the function (dashboard editor, fingerprint).
+5. App: branch → live-origin check (tag click, bulk tag + Undo, note add / delete + Undo on a test lead; network tab shows
+   `rpc/contact_tags_edit` etc. with 200) → fast-forward main.
+6. Watch (read-only) for an hour, with section 6 and 9.3:
+
+```sql
+-- G1 the lead card's saves never fail on the new functions (the app shows "Could not save" otherwise) and capture stays clean
+select capture_errors, capture_error_last from public.automation_state;                       -- unchanged since :g23
+-- G2 note and tag events have the expected keys; a workflow's carry its cause
+select type, (cause_automation_id is not null) as by_workflow, max(chain_depth), count(*) from public.automation_events
+ where at >= :g23 and type in ('contact_tag', 'note_added') group by 1, 2 order by 1, 2;
+-- G3 the record actions' rows (stage-2 workflows only; nothing until G2.4 lets one be saved)
+select step_type, status, reason, count(*) from public.automation_log where at >= :g23 and row_kind = 'action'
+   and step_type in ('update_field', 'add_tag', 'remove_tag', 'add_note', 'dnd', 'edit_conversation', 'move_stage', 'mark_lost', 'internal_comment',
+                     'update_custom_value', 'add_task', 'manual_call', 'webhook', 'send_live_chat', 'send_review_request') group by 1, 2, 3 order by 1, 2;
+-- G4 inbound links in use (calls this minute, last call), never the token
+select h.automation_id, h.trigger_id, h.token_hint, h.window_count, h.last_used_at, h.revoked_at from public.automation_hooks h order by h.last_used_at desc nulls last limit 20;
+```
+
+### 11.2 Roll back
+
+- Function: redeploy the G2.2 build (nothing in the database needs undoing for that).
+- SQL: the commented ROLLBACK of PART 2 · G2.3 (one transaction) puts Part 1's `automation_apply` and
+  `automation_capture_contacts` back byte for byte and drops the new functions. The app needs no change: it falls back to
+  its whole-list save when the functions are missing (`PGRST202`). Roll back on any `capture_errors` growth, any "Could not
+  save" report on tags or notes, or a G2 row with a cause on a card edit nobody's workflow made.
+
+
+## 12. Phase 2 · G2.4 — the API, the guards on the doc, migration, the app adapter (SQL Part 2 · G2.4 + function + app)
+
+What changes:
+- **Function** (sections API and HOUSEKEEPING): the steps `save`, `publish`, `duplicate`, `validate`, `schema`, `registry`
+  (now the stage-2 DTO: `v: 2`, GHL words, availability), `migrate` (owners only), `restore` (Draft only), `copy_version`;
+  version snapshots (one per save whose name / doc / settings changed; always on publish / unpublish; never for a layout-only
+  save); the 5 ready-made templates seeded by `migrate`; housekeeping instead of phase 4's prune once Part 1 is in (once a
+  business day, `automation_prune` 1,000 rows a round, the cursor in `automation_state.housekeeping`: runs and log 180 days,
+  events done 7 / error 30 days, versions ≤ 10 or ≤ 30 days and never more than 50) and the Needs-review sweep (each
+  Published workflow checked again; problem codes in `list_summary.review`). An upgraded row whose doc is still a phase-4
+  workflow with the upgraded settings runs **exactly as phase 4** (`wfRunRow`: its own phase-4 steps while the doc is
+  unchanged, else the doc's steps via `wfToFlat`): the differential's `ev+mg` worlds (every row migrated, from the start
+  / mid-way / then rolled back) and `doc only` worlds are IDENTICAL to phase 4.
+- **SQL** (PART 2 · G2.4, one transaction): the guard v2 on `public.automations` (an insert is always a Draft; more
+  customer / external steps while Published → Draft, also a paused or unconnected one; a new shape → version + 1 + re-arm;
+  a filter / re-entry / time window change while Published → re-arm only (what waits goes on; on an UPGRADED row, still
+  run as phase 4, any trigger change is a new version as in phase 4: what waits stops, "automation changed"); words → neither; a write of trigger / steps on an
+  upgraded row is refused: "This workflow was upgraded: reload the app"), `automations_after` (a new version, a switch-off
+  or a delete stops what waits at once: cancelled + exit row + its re-entry key), `automation_save` / `automation_publish`
+  / `automation_migrate_row` (service role), the SQL shape / arm keys, Needs review with the sweep's codes. Phase 4's
+  customer switch-off trigger is dropped (the guard v2 does it for both kinds of row).
+- **App** (the old builder's adapter): it opens a workflow's doc as its phase-4 steps (`wfToFlat`; one with stage-2 steps
+  is listed and switched but not opened), saves through `step: "save"` (`wfFromFlat`; a 409 says someone else saved), the
+  switch is `step: "publish"`, and the "look now" check reads `automation_wanted` (once a minute) — `autoSyncEvents`
+  (the settings copy) is gone. An EMPTY `automation_wanted` counts as "not known", never "nothing": in compat mode (step E
+  not applied, or rolled back per 9.4, which empties it) the app still tells the phase-4 starts (new lead, stage, job
+  closed) at once, as before. A switch-on asks the function first and shows its own words (what it sends to customers,
+  where lead details go) before the yes; the editor publishes only when its switch was moved there, switches off BEFORE
+  saving new content, and sends the revision it showed. Template words are still written by the app first (one
+  settings write), as before.
+- An inbound webhook call to a Published workflow while the event store is off (compat mode) is refused with 503 (the
+  caller tries again) instead of piling up to act late when step E comes back.
+- New workflows made in the old builder get GHL's settings (re-entry off: a lead goes through a workflow once); upgraded
+  ones keep phase 4's (`legacy_always`).
+
+### 12.1 Order (one step at a time; design §7 G2.4: backup definitions → deploy → Part 2 → migrate → app adapter push → verify)
+
+1. `check_all.sh` ALL GREEN on the commit (automations section 34; app `testWorkflowAdapter`, `testAutomationEventsGate`;
+   the differential IDENTICAL with the `ev+mg` / `doc only` worlds), and with the live export of section 3 (fresh):
+   `run.sh --corpus <scratchpad>/live-automations.json --records <scratchpad>/live-records.json` → IDENTICAL.
+   Phase-4 step ids that are not v2 ids (section 2 query): none expected (the app makes `s<n>`); any → they keep working
+   while the phase-4 steps are stored (claims map back), but list them in MASTER §13. A `NOTE <name>: phase 4 runs it, but
+   a save / switch-on needs this fixed first` line names a live row whose doc has an error (e.g. a deleted template): it
+   keeps running as phase 4 did, but the old builder's save and the switch-on are refused until it is fixed — tell Ofek.
+2. Staging: PART 2 · G2.4 (check-before → block → check-after), then `.claude/sql/stage2-part1-staging-checks.sql` →
+   PASS 1 … 21 and `stage2 phase 2 · G2.4 staging checks done` (PASS 21 runs every `fixtures/shape.json` pair through the SQL
+   keys). If the staging function exists: deploy this build there, call `migrate` once as the staging owner and save /
+   publish one workflow from the localhost copy (stage 0) — network: `POST …/functions/v1/automations` `save` 200.
+3. **Backup the definitions** (live, read-only; save the output as `.claude/backups/automations.before_stage2_<YYYY-MM-DD>.sql`):
+   ```sql
+   select string_agg(format('update public.automations set name = %L, enabled = %L, armed_at = %L, version = %s, audience = %L, trigger = %L::jsonb, steps = %L::jsonb, definition = %L::jsonb, settings = %L::jsonb where id = %L;',
+            name, enabled, armed_at, version, audience, trigger, steps, definition, settings, id), E'\n' order by created_at)
+     from public.automations where business_id = 'default';
+   select status, count(*) from public.automation_runs where status in ('waiting', 'running') group by 1;   -- note
+   ```
+   Restoring these lines: either after the G2.4 ROLLBACK (under phase 4's guard, which takes `enabled` from the lines
+   and recomputes `version` / `armed_at` / `audience`), or — while the guard v2 is on — with the guard bypassed
+   explicitly, in ONE transaction (the guard v2 would otherwise keep the CURRENT enabled / armed_at / version /
+   audience under the migration settings and silently ignore the backup's):
+   ```sql
+   begin;
+   set local lock_timeout = '5s';
+   alter table public.automations disable trigger automations_guard;
+   -- the backup's update lines here
+   alter table public.automations enable trigger automations_guard;
+   commit;
+   ```
+   `automations_after` still fires: a line that switches a row off or changes its version stops what waits (as any
+   switch-off). Compare `enabled` / `version` / `armed_at` with the backup afterwards.
+4. **Deploy the function** (dashboard editor, Verify JWT OFF, fingerprint = the commit file). Safe before the SQL: nobody
+   calls the new steps yet (the old app doesn't), and `wfRunRow` changes nothing while no row has a doc. Check: the next
+   tick runs (W1); a call of `migrate` by a manager → 403 (owners only), `registry` by an owner → `"v":2`.
+5. **SQL Part 2 · G2.4** (live): check-before, the block, check-after. Note the time = `:g24`. From now until step 7 the
+   old app still writes directly: a new automation it makes is saved off (a Draft) — tell Ofek not to edit automations
+   between steps 5 and 7 (≈ 15 minutes).
+6. **Migrate** (Ofek, signed in as the owner, in the live app's browser console — the session is his, nothing is typed into
+   a file):
+   ```js
+   const { data } = await sb.auth.getSession();
+   await (await fetch(SUPABASE_URL + '/functions/v1/automations', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY,
+     Authorization: 'Bearer ' + data.session.access_token }, body: JSON.stringify({ step: 'migrate' }) })).json();
+   // → { ok: true, migrated: <rows>, left: 0, templates: 5, failed: [] }   (again → migrated 0, templates 0: idempotent)
+   ```
+   Then the migration check (design §8.3 #4), read-only:
+   ```sql
+   select count(*) filter (where definition is null) as left, count(*) as rows from public.automations;          -- left = 0
+   select reason, count(*) from public.automation_versions group by 1;                                           -- migration = rows
+   select status, count(*) from public.automation_runs where status in ('waiting', 'running') group by 1;        -- = step 3
+   -- version / armed_at / enabled / audience unchanged: compare with the step-3 backup
+   select id, name, version, armed_at, enabled, audience, revision from public.automations order by created_at;
+   select v2_migrated_at, housekeeping from public.automation_state;
+   ```
+   and offline: export again WITH the doc (`select json_agg(a) from (select id, name, enabled, armed_at, version,
+   created_by_name, trigger, steps, definition, settings from public.automations where business_id = 'default' order by
+   created_at) a;` → `<scratchpad>/live-automations-after-migrate.json`), then
+   `run.sh --corpus <scratchpad>/live-automations-after-migrate.json` → `migration check: N live rows with a doc; … : 0` and
+   IDENTICAL; delete the export afterwards. The first tick after the migration starts no run for an old event (W5 / E1).
+7. **App adapter push**: branch → live-origin check (MASTER §4): Settings → Automations: open a workflow (its steps show),
+   change only words → Save (network: `POST …/functions/v1/automations` `{"step":"save"…}` 200, no new version in W3's
+   sense, no waiting run stops); switch a team workflow off and on (`"step":"publish"`); a new automation is saved off;
+   a stage move on a test lead calls `step: "event"` only when `automation_wanted` lists `stage`; no request to
+   `settings` for `automationEvents`. Then fast-forward main.
+8. Watch (read-only) for an hour, with section 6 (`:deploy` = `:g24`) and 9.3:
+
+```sql
+-- M1 the content writes since :g24 (save / publish / migration / restore …) and who
+select reason, status, created_by_name, count(*) from public.automation_versions where created_at >= :g24 group by 1, 2, 3 order by 1;
+-- M2 what the after trigger stopped (a new version, a switch-off, a delete) — each one a person's change
+select r.exit_reason, a.name, count(*) from public.automation_runs r join public.automations a on a.id = r.automation_id
+ where r.finished_at >= :g24 and r.exit_reason in ('automation_changed', 'switched_off', 'deleted') group by 1, 2 order by 3 desc;
+-- M3 no phase-4 write was refused for a reason other than an old open tab ("reload the app" in the function / app logs)
+-- M4 housekeeping ran today and finished; Needs review
+select housekeeping from public.automation_state;                       -- {"day": today, "stage": "done", "pruned": {...}}
+select * from public.automation_needs_review();                         -- as the owner (SQL editor: set role authenticated + claims) or via the app later
+-- M5 rows with a doc that no longer run as phase 4 (edited with stage-2 settings / steps): expected none until the new builder
+select id, name, settings ->> 'reentry' as reentry from public.automations where definition is not null and settings ->> 'reentry' <> 'legacy_always';
+```
+
+### 12.2 Roll back
+
+In THIS order (an adapter save writes only the doc: an edited row's `trigger` / `steps` are stale, and an older build
+that reads them — R-A always — would run the old words until those rows are off):
+
+1. **SQL step 1, with the stage-2 build still deployed**: the commented ROLLBACK of PART 2 · G2.4 — first its read-only
+   list (rows made in stage 2: no trigger; edited after the migration: a later revision than the 'migration' version, or
+   changed after `v2_migrated_at`); keep the output; then its step-1 transaction: those rows switched off (this build
+   stops their waiting runs at once). Check: the list with `and a.enabled` → no rows. Tell Ofek not to switch anything on.
+2. **Function**: the G2.3 build (or the rollback build, section 7 R-A). **App**: back to the commit before the adapter
+   (its old editor writes `trigger` / `steps` itself again).
+3. **SQL step 3** (one transaction): phase 4's guard and its customer switch-off trigger back byte for byte, Part 1's
+   Needs review back, the G2.4 functions dropped. The docs stay in `definition` (phase 4 never reads it).
+4. Switch the listed rows on again only after checking each one's phase-4 steps (or re-make them in the old builder).
+- Roll back on: any customer message the watch (W3 / W6) can't explain, a waiting run stopped that nobody changed (M2), a
+  migration check difference, "reload the app" refusals after the app push, or a save / switch error in the app.

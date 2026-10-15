@@ -3087,6 +3087,25 @@ async function loadFromSupabase(){
   STATE.data = data;
 }
 
+// The lead card's tag rule, the same as the database's contact_tags_merge (SQL Part 2 · G2.3): the removed tags go in
+// any case, then each added tag that is not there yet (in any case) comes last; the order is kept.
+function leadTagsMerge(tags, add, remove){
+  const rem = new Set((Array.isArray(remove) ? remove : []).map(t => String(t).trim().toLowerCase()));
+  const out = (Array.isArray(tags) ? tags : []).filter(t => t && !rem.has(String(t).toLowerCase()));
+  (Array.isArray(add) ? add : []).forEach(raw => { const t = String(raw ?? '').trim().slice(0, 60); if (t && !out.some(x => String(x).toLowerCase()===t.toLowerCase())) out.push(t); });
+  return out;
+}
+// One note more on the card, the same as the database's contact_notes_append: nothing when that note is there already.
+function leadNotesAppend(list, note){
+  const l = Array.isArray(list) ? list : [];
+  if (!note || !note.id || !String(note.text||'').trim() || l.some(x => x && x.id===note.id)) return l;
+  return [...l, note];
+}
+// PostgREST's answer when a database function is not there (yet): the caller falls back to the old way.
+function rpcMissing(error){
+  const code = String((error && error.code) || '');
+  return code==='PGRST202' || code==='42883' || /could not find the function/i.test(String((error && error.message) || ''));
+}
 /* ── db: the write layer (Stage 3, part 2) ───────────────────────────────
    First slice: CRM/contacts + the shared activity_log + the tag catalog +
    dismissed-reminders tables — the rest (jobs, tasks, quotes, closings,
@@ -3331,6 +3350,40 @@ const db = {
       const { error } = await sb.from('contacts').update(contactPatchToRow(patch)).eq('id', id);
       if (error) { LOCAL_WRITES.delete('contacts:' + id); await restoreAfterFailedSave('contacts', 'contacts', id, mapContactRow, 'lead', error); return false; }
       return true;   // saved (the automation engine's "look now" waits for this)
+    },
+    // Tags and notes change in ONE database statement each (contact_tags_edit / contact_note_add / contact_note_remove,
+    // SQL Part 2 · G2.3), so a card that was open for a while never erases a tag or a note that a workflow (or someone
+    // else) added meanwhile, and never makes a false "tag removed" for the automations. The card changes at once; the
+    // database's answer then becomes its list. Until that SQL is in (the function is not found) the old whole-list save.
+    async editTags(id, add, remove){
+      const c = STATE.data.contacts.find(x=>x.id===id); if (!c) return false;
+      c.tags = leadTagsMerge(c.tags, add, remove);
+      noteLocalWrite('contacts', id, { tags: c.tags });
+      const { data, error } = await sb.rpc('contact_tags_edit', { p_id: id, p_add: add, p_remove: remove });
+      if (error && rpcMissing(error)) return db.contacts.update(id, { tags: c.tags });
+      if (error) { LOCAL_WRITES.delete('contacts:' + id); await restoreAfterFailedSave('contacts', 'contacts', id, mapContactRow, 'lead', error); return false; }
+      if (Array.isArray(data)) { c.tags = data; noteLocalWrite('contacts', id, { tags: data }); }
+      return true;
+    },
+    async addNote(id, note){
+      const c = STATE.data.contacts.find(x=>x.id===id); if (!c) return false;
+      c.customerNotes = leadNotesAppend(c.customerNotes, note);
+      noteLocalWrite('contacts', id, { customerNotes: c.customerNotes });
+      const { data, error } = await sb.rpc('contact_note_add', { p_id: id, p_note: note });
+      if (error && rpcMissing(error)) return db.contacts.update(id, { customerNotes: c.customerNotes });
+      if (error) { LOCAL_WRITES.delete('contacts:' + id); await restoreAfterFailedSave('contacts', 'contacts', id, mapContactRow, 'lead', error); return false; }
+      if (Array.isArray(data)) { c.customerNotes = data; noteLocalWrite('contacts', id, { customerNotes: data }); }
+      return true;
+    },
+    async removeNote(id, noteId){
+      const c = STATE.data.contacts.find(x=>x.id===id); if (!c) return false;
+      c.customerNotes = (Array.isArray(c.customerNotes) ? c.customerNotes : []).filter(x => x && x.id!==noteId);
+      noteLocalWrite('contacts', id, { customerNotes: c.customerNotes });
+      const { data, error } = await sb.rpc('contact_note_remove', { p_id: id, p_note_id: noteId });
+      if (error && rpcMissing(error)) return db.contacts.update(id, { customerNotes: c.customerNotes });
+      if (error) { LOCAL_WRITES.delete('contacts:' + id); await restoreAfterFailedSave('contacts', 'contacts', id, mapContactRow, 'lead', error); return false; }
+      if (Array.isArray(data)) { c.customerNotes = data; noteLocalWrite('contacts', id, { customerNotes: data }); }
+      return true;
     },
     async remove(id){
       const gone = STATE.data.contacts.find(x=>x.id===id);
@@ -6349,9 +6402,9 @@ const LEAD_TAGS = [
 function jsStr(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 function toggleLeadTag(contactId, tag){
   const c = contactById(contactId); if (!c || !LEAD_TAGS.some(t => t.tag===tag)) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   const on = leadTagOn(c, tag);
-  c.tags = on ? c.tags.filter(t => String(t).toLowerCase()!==tag.toLowerCase()) : [...(c.tags||[]), tag];
-  db.contacts.update(c.id, { tags: c.tags });
+  db.contacts.editTags(c.id, on ? [] : [tag], on ? [tag] : []);   // the card changes at once (one statement in the database)
   logContactActivity(c, getCurrentProfile()?.fullName||'Unknown', `Tag ${on ? 'removed' : 'added'}: "${tag}"`);
   refreshLeadTagsUI(contactId);
   render(); // the CRM table's tags column and the tag filter only rebuild on a full render
@@ -6485,16 +6538,16 @@ function bulkTag(tag, on){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   const list = bulkContacts().filter(c => leadTagOn(c, tag)!==on);
   if (!list.length) { showToast(on ? `They all have "${tag}" already` : `None of them has "${tag}"`); return; }
-  const before = list.map(c => [c.id, [...(c.tags || [])]]);
+  const before = list.map(c => c.id);
   list.forEach(c => {
-    c.tags = on ? [...(c.tags || []), tag] : (c.tags || []).filter(t => String(t).toLowerCase()!==tag.toLowerCase());
-    db.contacts.update(c.id, { tags: c.tags });
+    db.contacts.editTags(c.id, on ? [tag] : [], on ? [] : [tag]);
     logContactActivity(c, actor, `Tag ${on ? 'added' : 'removed'}: "${tag}"`);
   });
   render();
   const who = `${list.length} lead${list.length===1 ? '' : 's'}`;
   showToast(`"${tag}" ${on ? 'added to' : 'removed from'} ${who}`, { undo: () => {
-    before.forEach(([id, tags]) => { const c = contactById(id); if (!c) return; c.tags = tags; db.contacts.update(id, { tags }); logContactActivity(c, actor, `Tag change undone: "${tag}"`); });
+    // undone the same way (only that tag, on those leads): a tag someone else changed meanwhile stays as it is
+    before.forEach(id => { const c = contactById(id); if (!c) return; db.contacts.editTags(id, on ? [] : [tag], on ? [tag] : []); logContactActivity(c, actor, `Tag change undone: "${tag}"`); });
     render(); showToast('Tags put back');
   } });
 }
@@ -8268,18 +8321,18 @@ function noteByline(n){
   return esc([n.by, when].filter(Boolean).join(' · ') || 'Earlier note');
 }
 let NOTE_JUST_ADDED = null;
-function addLeadNote(id, scope){
+async function addLeadNote(id, scope){
   const c = contactById(id); if (!c) return;
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   const input = document.getElementById(`${scope}-note-input-${id}`);
   const text = String(input ? input.value : '').trim(); if (!text) return;
   const note = { id: uid(), text, by: getCurrentProfile()?.fullName || 'Unknown', at: new Date().toISOString() };
-  c.customerNotes = [...(Array.isArray(c.customerNotes) ? c.customerNotes : []), note];
   NOTE_JUST_ADDED = note.id; setTimeout(() => { if (NOTE_JUST_ADDED===note.id) NOTE_JUST_ADDED = null; }, 1200);
-  db.contacts.update(c.id, { customerNotes: c.customerNotes });
-  logContactActivity(c, note.by, `Note added: "${text.length > 90 ? text.slice(0, 90) + '…' : text}"`);
-  showToast('Note added');
+  const saving = db.contacts.addNote(c.id, note);   // the card shows it at once (one statement in the database), whole at any length
   refreshLeadNotesUI(c);
+  // the activity line and "Note added" only once the database has it; when it could not be saved, the words go back in the box
+  if (await saving) { logContactActivity(c, note.by, `Note added: "${text.length > 90 ? text.slice(0, 90) + '…' : text}"`); showToast('Note added'); return; }
+  const again = document.getElementById(`${scope}-note-input-${id}`); if (again && !again.value) again.value = text;
 }
 function deleteLeadNote(id, noteId){
   const c = contactById(id); if (!c) return;
@@ -8289,12 +8342,12 @@ function deleteLeadNote(id, noteId){
   const short = n.text.length > 90 ? n.text.slice(0, 90) + '…' : n.text;
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   if (noteId==='legacy') { c.notes = ''; db.contacts.update(c.id, { notes: '' }); }
-  else { c.customerNotes = (c.customerNotes||[]).filter(x => x.id!==noteId); db.contacts.update(c.id, { customerNotes: c.customerNotes }); }
+  else db.contacts.removeNote(c.id, noteId);
   logContactActivity(c, actor, `Note deleted: "${short}"`);
   refreshLeadNotesUI(c);
   showToast('Note deleted', { undo: () => {
     if (noteId==='legacy') { c.notes = n.text; db.contacts.update(c.id, { notes: n.text }); }
-    else { c.customerNotes = [...(c.customerNotes||[]), n]; db.contacts.update(c.id, { customerNotes: c.customerNotes }); }
+    else db.contacts.addNote(c.id, n);
     logContactActivity(c, actor, `Note restored: "${short}"`);
     NOTE_JUST_ADDED = n.id; setTimeout(() => { if (NOTE_JUST_ADDED===n.id) NOTE_JUST_ADDED = null; }, 1200);
     refreshLeadNotesUI(c);
@@ -12118,7 +12171,7 @@ const AUTOMATION_EVENTS_SENT = new Set();
 async function automationEvent(type, id){
   try {
     if (readOnlyReason()) return;
-    if (!autoEventWanted(type)) return;   // no automation of your own is on for this start (the builder keeps the list)
+    if (!(await autoEventWanted(type))) return;   // no workflow that is on starts this way (the engine's automation_wanted)
     const me = getRealProfile();
     if (!me || !['owner','manager','va'].includes(me.role)) return;
     const body = automationEventBody(type, id); if (!body) return;
@@ -16484,12 +16537,18 @@ function autoIsCustomerStep(s){ return !!(s && s.kind==='action' && AUTO_ACTIONS
 function autoHasCustomer(def){ return ((def && Array.isArray(def.steps)) ? def.steps : []).some(autoIsCustomerStep); }
 // The customer channels it uses ('email', 'text'), sorted (the database's automation_customer_channels).
 function autoCustomerChannels(def){ return [...new Set(((def && Array.isArray(def.steps)) ? def.steps : []).filter(autoIsCustomerStep).map(s => s.type))].sort(); }
-// A new version (the database's guard: what starts it, or the shape of its steps: each step's id, kind and type in
-// order). Waiting runs of the old version stop, and it only acts on what happens after the save.
-function autoNewVersion(before, after){
+// A new version (stage 2, the database's guard on the doc: the shape of its steps — each step's id, kind and type in
+// order). Waiting runs of the old version stop, and it only acts on what happens after the save. Another start (or
+// stage) is a re-arm, not a new version (design §2.8): what waits goes on; only what happens after the save starts it —
+// except on an upgraded automation (legacy: it still runs as phase 4), where another start is a new version as in phase 4.
+function autoNewVersion(before, after, legacy){
   const shape = d => JSON.stringify(((d && Array.isArray(d.steps)) ? d.steps : []).map(x => [x && x.id, x && x.kind, x && x.type]));
+  return !!before && (shape(before)!==shape(after) || (!!legacy && autoNewStart(before, after)));
+}
+// Another start (type or its stage / job age) than it had: the save re-arms it (said in the toast, nothing is asked).
+function autoNewStart(before, after){
   const trig = d => { const t = d && d.trigger; return t ? JSON.stringify([t.type, Object.keys(t.params || {}).sort().map(k => [k, t.params[k]])]) : 'null'; };
-  return !!before && (trig(before)!==trig(after) || shape(before)!==shape(after));
+  return !!before && trig(before)!==trig(after);
 }
 function autoAudience(def){ return autoHasCustomer(def) ? 'customer' : 'team'; }
 // One step made safe to show and edit: numbers inside their limits, days 0–6 once each, an end after the start.
@@ -16504,14 +16563,156 @@ function autoCleanStep(s){
   } else if (x.kind==='if' && !Array.isArray(x.conds)) x.conds = [];
   return x;
 }
-// A row of public.automations as the builder uses it.
+// ── The old builder's adapter to the stage-2 workflow doc (stage 2 G2.4): the engine stores and runs `definition` (a doc
+// of schema 2); this builder keeps editing the phase-4 shape { trigger, steps }. wfToFlat opens a doc that is still a
+// straight phase-4 chain (else null: it needs the new builder), wfFromFlat makes the doc a save sends (step "save"). Both
+// pure and the same as the engine's wfToFlat / upgradeV1 (the tests run the engine's fixtures/upgrade.json through them).
+const WF_ID_RE = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+// A doc as canonical JSON (keys sorted at every level): the same doc whatever order the database gave its keys back in.
+function wfCanon(x){ return JSON.stringify(x, (k, v) => v && typeof v==='object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(key => [key, v[key]])) : v); }
+const WF_V1_ACTIONS = { push: 'internal_notification', task: 'add_task', email: 'send_email', text: 'send_sms' };
+// The stored name of each phase-4 start (the engine registry's GHL label; "Job closed" is ours).
+const WF_V1_TRIGGER_NAMES = { newLead: 'Contact created', stage: 'Pipeline stage changed', jobClosed: 'Job closed', call_details: 'Call details', chat: 'Conversations SLA' };
+// The custom days and hours an office / outside-office window step still keeps (switching back to "These days and hours"
+// brings them again): only valid ones (= the engine's winDormant).
+function wfWinDormant(s){
+  const x = s && typeof s==='object' ? s : {}, out = {}, hmOk = v => typeof v==='string' && /^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$/.test(v);
+  if (Array.isArray(x.days) && x.days.length >= 1 && x.days.length <= 7 && x.days.every(d => Number.isInteger(d) && d >= 0 && d <= 6) && new Set(x.days).size===x.days.length) out.days = JSON.parse(JSON.stringify(x.days));
+  ['from', 'until'].forEach(k => { if (hmOk(x[k])) out[k] = x[k]; });
+  return out;
+}
+function wfToFlat(doc){
+  const o = x => x && typeof x==='object' && !Array.isArray(x) ? x : {}, own = (x, k) => Object.prototype.hasOwnProperty.call(x, k);
+  const exact = (x, keys) => { const k = Object.keys(o(x)); return k.length===keys.length && keys.every(y => k.includes(y)); };
+  const clone = x => JSON.parse(JSON.stringify(x));
+  const d = o(doc), nodes = o(d.nodes), trigs = Array.isArray(d.triggers) ? d.triggers.map(o) : [];
+  if (d.schema!==2 || trigs.length!==1) return null;
+  const t = trigs[0], f = o(t.filters), segs = Array.isArray(f.segments) ? f.segments.map(o) : [];
+  if (t.disabled===true || t.goto!=null || f.match!=='all' || segs.length!==1 || segs[0].match!=='all' || !Array.isArray(segs[0].rules)) return null;
+  const rules = segs[0].rules.map(o), cfg = o(t.config), params = {};
+  let type = String(t.type ?? '');
+  if (type==='call_details') {
+    if (rules.length!==1 || !exact(rules[0], ['field', 'op', 'v']) || rules[0].field!=='call.status' || rules[0].op!=='is' || rules[0].v!=='missed') return null;
+    type = 'missedCall';
+  } else if (type==='stage') {
+    if (rules.length > 1 || (rules.length && (!exact(rules[0], ['field', 'op', 'v']) || rules[0].field!=='trigger.stage' || rules[0].op!=='is' || typeof rules[0].v!=='string' || !rules[0].v))) return null;
+    if (rules.length) params.stage = rules[0].v;
+  } else if (rules.length || !['newLead', 'stage', 'jobClosed', 'missedCall', 'chat'].includes(type)) return null;
+  if (type==='jobClosed' && cfg.maxJobAgeDays!=null) params.maxJobAgeDays = cfg.maxJobAgeDays;
+  if (Object.keys(cfg).some(k => !(type==='jobClosed' && k==='maxJobAgeDays'))) return null;
+  const back = { internal_notification: 'push', add_task: 'task', send_email: 'email', send_sms: 'text' }, kinds = ['action', 'if_else', 'wait', 'goal', 'split', 'goto', 'workflow'];
+  const steps = [], seen = new Set();
+  let cur = d.entry ?? null;
+  while (cur!==null) {
+    if (typeof cur!=='string' || !own(nodes, cur) || seen.has(cur)) return null;
+    seen.add(cur);
+    const n = o(nodes[cur]), c = o(n.config), out = o(n.out), s = { id: cur };
+    let next;
+    if (n.name!=null || n.note!=null || n.disabled!=null || (n.locked!=null && n.locked!==true)) return null;
+    if (n.kind==='wait' && n.type==='period') {
+      if (own(c, 'resume') || !exact(out, ['next'])) return null;
+      Object.assign(s, { kind: 'wait' }, clone(c)); next = out.next;
+    } else if (n.kind==='wait' && n.type==='recurring') {
+      const w = o(c.window);
+      if (!exact(c, ['mode', 'window']) || c.mode!=='window' || !exact(out, ['next']) || !['office', 'outsideOffice', 'custom'].includes(w.use) || !['next', 'at', 'end'].includes(w.outside)) return null;
+      if (Object.keys(w).some(k => !['use', 'days', 'from', 'until', 'outside', 'at'].includes(k))) return null;
+      if (w.use!=='custom' && ['days', 'from', 'until'].some(k => own(w, k) && JSON.stringify(wfWinDormant(w)[k])!==JSON.stringify(w[k]))) return null;
+      s.kind = 'window';
+      if (w.use!=='custom') { s.mode = w.use; Object.assign(s, wfWinDormant(w)); } else { s.days = clone(w.days); s.from = w.from; s.until = w.until; }
+      s.outside = w.outside==='end' ? 'skip' : w.outside; if (own(w, 'at')) s.at = w.at;
+      next = out.next;
+    } else if (n.kind==='if_else' && n.type==='if_else') {
+      const br = Array.isArray(c.branches) ? c.branches.map(o) : [], seg = br[0] && Array.isArray(o(br[0].when).segments) ? o(br[0].when).segments.map(o) : [];
+      if (c.gate!==true || br.length!==1 || o(br[0].when).match!=='any' || seg.length!==1 || !['all', 'any'].includes(seg[0].match) || !Array.isArray(seg[0].rules)) return null;
+      if (Object.keys(c).some(k => !['gate', 'noneName', 'branches'].includes(k)) || !exact(out, [String(br[0].id), 'none']) || out.none!==null) return null;
+      Object.assign(s, { kind: 'if', match: seg[0].match, conds: clone(seg[0].rules) }); next = out[String(br[0].id)];
+    } else if (n.kind==='action' && own(back, n.type)) {
+      if (!exact(out, ['next']) || (n.type==='internal_notification' && c.channel!=null && c.channel!=='push')) return null;
+      const rest = clone(c); if (n.type==='internal_notification') delete rest.channel;
+      Object.assign(s, { kind: 'action', type: back[n.type] }, rest); next = out.next;
+    } else if (!kinds.includes(String(n.kind ?? '')) && n.type===n.kind && exact(out, ['next'])) {
+      Object.assign(s, { kind: n.kind }, clone(c)); next = out.next;
+    } else return null;
+    if (n.locked===true) s.lock = true;
+    steps.push(s);
+    cur = next ?? null;
+  }
+  if (seen.size!==Object.keys(nodes).length) return null;
+  return { trigger: { type, params }, steps };
+}
+// flat = { trigger, steps } of this builder; prev = the saved doc (null for a new one): its trigger's id and name and each
+// If's branch id are kept, so a save of unchanged steps is the same doc (no new version, nothing waiting stops).
+function wfFromFlat(flat, prev){
+  const o = x => x && typeof x==='object' && !Array.isArray(x) ? x : {}, clone = x => x===undefined ? x : JSON.parse(JSON.stringify(x));
+  const t = o(flat && flat.trigger), list = (Array.isArray(flat && flat.steps) ? flat.steps : []).map(o), used = new Set(), keep = [];
+  list.forEach(s => { const id = String(s.id ?? ''); if (WF_ID_RE.test(id) && !used.has(id)) { used.add(id); keep.push(id); } else keep.push(''); });
+  const suffix = id => { const m = /(\d+)$/.exec(id); return m ? Number(m[1]) : 0; };
+  let seq = Math.max(list.length, ...keep.map(suffix), 0);
+  const fresh = p => { let id = ''; do { seq++; id = `${p}${seq}`; } while (used.has(id)); used.add(id); return id; };
+  const ids = keep.map(id => id || fresh('s'));
+  const tid = used.has('t1') ? fresh('t') : (used.add('t1'), 't1');
+  const type = t.type==='missedCall' ? 'call_details' : String(t.type ?? ''), params = o(t.params), rules = [], tcfg = {};
+  if (t.type==='stage' && typeof params.stage==='string' && params.stage!=='') rules.push({ field: 'trigger.stage', op: 'is', v: params.stage });
+  if (t.type==='missedCall') rules.push({ field: 'call.status', op: 'is', v: 'missed' });
+  if (t.type==='jobClosed' && params.maxJobAgeDays!=null) tcfg.maxJobAgeDays = params.maxJobAgeDays;
+  const trig = { id: tid, type, name: WF_V1_TRIGGER_NAMES[type] || String(t.type ?? ''), filters: { match: 'all', segments: [{ match: 'all', rules }] } };
+  if (Object.keys(tcfg).length) trig.config = tcfg;
+  const nodes = {};
+  list.forEach((s, i) => {
+    const id = ids[i], next = i + 1 < ids.length ? ids[i + 1] : null, rest = clone(s), locked = rest.lock===true;
+    delete rest.id; delete rest.kind; delete rest.type; delete rest.lock;
+    let n;
+    if (s.kind==='wait') n = { kind: 'wait', type: 'period', config: rest, out: { next } };
+    else if (s.kind==='window') {
+      const w = { use: s.mode==='office' || s.mode==='outsideOffice' ? s.mode : 'custom' };
+      if (w.use==='custom') { w.days = clone(s.days); w.from = s.from; w.until = s.until; }
+      else Object.assign(w, wfWinDormant(s));
+      w.outside = s.outside==='skip' ? 'end' : s.outside; if (s.at!==undefined) w.at = s.at;
+      n = { kind: 'wait', type: 'recurring', config: { mode: 'window', window: w }, out: { next } };
+    } else if (s.kind==='if') {
+      let bid = `${id}_yes`; if (!WF_ID_RE.test(bid) || used.has(bid)) bid = fresh('b'); else used.add(bid);
+      n = { kind: 'if_else', type: 'if_else', config: { gate: true, noneName: 'None',
+        branches: [{ id: bid, name: 'Yes', when: { match: 'any', segments: [{ match: s.match==='any' ? 'any' : 'all', rules: clone(Array.isArray(s.conds) ? s.conds : []) }] } }] },
+        out: { [bid]: next, none: null } };
+    } else if (s.kind==='action') {
+      const at = WF_V1_ACTIONS[String(s.type)] || String(s.type ?? '');
+      n = { kind: 'action', type: at, config: at==='internal_notification' ? { channel: 'push', ...rest } : rest, out: { next } };
+    } else n = { kind: String(s.kind ?? ''), type: String(s.type ?? s.kind ?? ''), config: rest, out: { next } };
+    if (locked) n.locked = true;
+    nodes[id] = n;
+  });
+  const doc = { schema: 2, seq, entry: ids.length ? ids[0] : null, triggers: [trig], nodes };
+  const p = o(prev), pt = Array.isArray(p.triggers) && p.triggers.length===1 ? o(p.triggers[0]) : null;
+  const taken = () => { const s = new Set(Object.keys(nodes)); Object.values(nodes).forEach(n => (o(n.config).branches || []).forEach(b => s.add(String(b.id)))); return s; };
+  if (pt && pt.type===type && WF_ID_RE.test(String(pt.id || '')) && !taken().has(pt.id)) { trig.id = pt.id; if (typeof pt.name==='string' && pt.name) trig.name = pt.name; }
+  Object.entries(nodes).forEach(([id, n]) => {
+    const pn = o(o(p.nodes)[id]), pb = pn.kind==='if_else' && Array.isArray(o(pn.config).branches) && pn.config.branches.length===1 ? String(o(pn.config.branches[0]).id || '') : '';
+    const bid = n.kind==='if_else' ? n.config.branches[0].id : '';
+    if (!bid || !pb || pb===bid || !WF_ID_RE.test(pb) || taken().has(pb) || pb===trig.id) return;
+    n.config.branches[0].id = pb; n.out = { [pb]: n.out[bid], none: null };
+  });
+  if (Number.isInteger(p.seq) && p.seq > seq) doc.seq = p.seq;
+  return doc;
+}
+// A row of public.automations as the builder uses it. An upgraded row (stage 2: a doc in `definition`) opens as its
+// phase-4 steps (wfToFlat); one that needs the new builder (newBuilder) is listed and switched, never opened here.
 function autoNormalize(row){
   const r = row && typeof row==='object' ? row : {}, obj = x => x && typeof x==='object' && !Array.isArray(x) ? x : {};
-  const t = obj(r.trigger), trigger = t.type ? { type: String(t.type), params: { ...obj(t.params) } } : null;
-  const steps = (Array.isArray(r.steps) ? r.steps : []).filter(s => s && typeof s==='object' && !Array.isArray(s)).map(autoCleanStep);
+  const doc = obj(r.definition).schema===2 ? r.definition : null, legacy = !!doc && obj(r.settings).reentry==='legacy_always';
+  // An upgraded row whose doc is still exactly its upgrade runs its phase-4 trigger and steps in the engine (wfRunRow).
+  // When phase 4 refuses those steps' ids (one used twice, or not an id) it is shown as those steps, as before stage 2,
+  // so the switch and Save refuse it with the same words until a step is removed and added again: never "on" while
+  // nothing can run. (Running the upgraded doc instead would send what was never sent: phase 4 never ran such a row and
+  // the builder never let it be switched on.) Once its doc changed, the doc is what runs and what opens.
+  const raw = legacy && autoIdsBad((Array.isArray(r.steps) ? r.steps : []).filter(s => s && typeof s==='object' && !Array.isArray(s)))
+    && wfCanon(wfFromFlat({ trigger: r.trigger, steps: r.steps }, null))===wfCanon(doc);
+  const fromDoc = !!doc && !raw, flat = fromDoc ? wfToFlat(doc) : null;
+  const t = obj(fromDoc ? flat && flat.trigger : r.trigger), trigger = t.type ? { type: String(t.type), params: { ...obj(t.params) } } : null;
+  const steps = (Array.isArray(fromDoc ? flat && flat.steps : r.steps) ? (fromDoc ? flat.steps : r.steps) : []).filter(s => s && typeof s==='object' && !Array.isArray(s)).map(autoCleanStep);
   return { id: r.id ? String(r.id) : null, name: String(r.name || ''), enabled: r.enabled===true, def: { trigger, steps },
     baseKey: r.template_key ? String(r.template_key) : null, createdByName: String(r.created_by_name || ''), updatedAt: r.updated_at || r.created_at || null,
-    audience: autoAudience({ steps }), deleted: !!r.deleted_at };
+    audience: fromDoc && !flat ? (obj(r.list_summary).audience==='customer' ? 'customer' : 'team') : autoAudience({ steps }), deleted: !!r.deleted_at,
+    doc, revision: Number(r.revision) || 1, newBuilder: fromDoc && !flat, legacy };
 }
 // "the owners", "the office", or first names (from the people who have a login).
 function autoPeopleText(to, ctx){
@@ -16654,6 +16855,11 @@ function autoStepProblems(s, def, ctx){
   if (ctx && ctx.registry && ctx.registry.actions!==AUTO_ACTIONS) return [];
   return autoStepIssues(s, def, ctx).filter(p => p.block).map(p => p.text.replace(/ \(step \d\)\.$/, '.'));
 }
+// Phase 4's rule for step ids: each one an id (letters, digits, - and _, at most 40) and used once. true = broken.
+function autoIdsBad(steps){
+  const ids = (Array.isArray(steps) ? steps : []).map(s => String(s && s.id || ''));
+  return ids.some((x, i) => !/^[A-Za-z0-9_-]{1,40}$/.test(x) || ids.indexOf(x)!==i);
+}
 // Everything that needs a look, in step order: [{ step, text, block }]. o = { name, mirrors (the ready-made rows) }.
 function autoProblems(def, ctx, o){
   const d = def || {}, steps = Array.isArray(d.steps) ? d.steps : [], type = d.trigger && d.trigger.type, opt = o || {}, out = [];
@@ -16670,8 +16876,7 @@ function autoProblems(def, ctx, o){
   if (steps.length > max) out.push({ step: 5, text: `At most ${max} steps.`, block: true });
   const last = steps[steps.length - 1];
   if (last && FLOW_STEP_KINDS[last.kind] && last.kind!=='action') out.push({ step: 5, text: 'The last step does nothing. End with a Do step, or remove it.', block: true });
-  const ids = steps.map(s => String(s && s.id || ''));
-  if (ids.some((x, i) => !/^[A-Za-z0-9_-]{1,40}$/.test(x) || ids.indexOf(x)!==i)) out.push({ step: 5, text: 'Two steps share the same inside name: remove one and add it again.', block: true });
+  if (autoIdsBad(steps)) out.push({ step: 5, text: 'Two steps share the same inside name: remove one and add it again.', block: true });
   const acts = steps.filter(s => s && s.kind==='action').map(s => s.type);
   if (steps.some(s => s && s.kind==='if' && (s.conds || []).some(c => c && c.field==='asked_within_months')) && steps.some(autoIsCustomerStep))
     out.push({ step: 4, text: 'The review asks this automation sends are not on the job, and the office\'s "Ask for review" button doesn\'t see them: check the customer\'s messages before asking by hand.', block: false });
@@ -16681,12 +16886,6 @@ function autoProblems(def, ctx, o){
   });
   const seen = new Set();
   return out.filter(p => !seen.has(p.text) && seen.add(p.text)).sort((a, b) => a.step - b.step);
-}
-// { newLead: true, stage: true, jobClosed: true }: the starts the app tells the engine about (an automation of your own is on).
-function autoTriggersOn(list){
-  const out = {};
-  (list || []).forEach(a => { const t = a && !a.deleted && a.enabled && a.def && a.def.trigger && a.def.trigger.type; if (t && AUTO_TRIGGERS[t] && AUTO_TRIGGERS[t].app) out[t] = true; });
-  return out;
 }
 // The list's chips (All / To customers / To the team / Ready-made / Made by you) and the search box.
 function autoMatches(r, filter, q, ctx){
@@ -17145,9 +17344,10 @@ function openAutoEditor(key, opts){
     AUTO_ED = { ...base, key, mirror: true, isNew: false, id: null, name: row.name, enabled: row.on, def: JSON.parse(JSON.stringify(row.def)) };
   } else if (key) {
     const a = AUTO.list.find(x => x.id===key); if (!a) { showToast('That automation is no longer there', { kind: 'warn' }); return; }
-    AUTO_ED = { ...base, key, mirror: false, isNew: false, id: a.id, name: a.name, enabled: a.enabled, baseKey: a.baseKey, createdByName: a.createdByName, def: JSON.parse(JSON.stringify(a.def)), origDef: JSON.parse(JSON.stringify(a.def)) };
+    if (a.newBuilder) { showToast('This workflow has steps that only the new builder shows. It opens there once the new builder is live.', { kind: 'info' }); return; }
+    AUTO_ED = { ...base, key, mirror: false, isNew: false, id: a.id, name: a.name, enabled: a.enabled, openEnabled: a.enabled, baseKey: a.baseKey, createdByName: a.createdByName, def: JSON.parse(JSON.stringify(a.def)), origDef: JSON.parse(JSON.stringify(a.def)) };
   } else {
-    AUTO_ED = { ...base, key: null, mirror: false, isNew: true, id: null, name: '', enabled: false, baseKey: o.baseKey || null, def: o.def ? JSON.parse(JSON.stringify(o.def)) : { trigger: null, steps: [] }, origDef: null };
+    AUTO_ED = { ...base, key: null, mirror: false, isNew: true, id: null, name: '', enabled: false, openEnabled: false, baseKey: o.baseKey || null, def: o.def ? JSON.parse(JSON.stringify(o.def)) : { trigger: null, steps: [] }, origDef: null };
     if (o.name) AUTO_ED.name = o.name;
     if (o.drafts) AUTO_ED.drafts = o.drafts;
     if (o.preset==='team') { AUTO_ED.def.trigger = { type: 'newLead', params: {} }; AUTO_ED.def.steps = flowFormSetAction([], 'push', true, ctx, AUTO_ED.def.trigger); }
@@ -17672,7 +17872,8 @@ function autoEdToggle(){
   if (ed.mirror) { const row = autoReadyRow(ed.key); if (row && row.toggle && !row.locked) autoReadyAct(row.toggle[0], row.toggle[1]); return; }
   if (!ed.enabled && autoHasCustomer(ed.def)) {
     if (ed.isNew) { showToast('A new automation that messages customers is saved off. Switch it on from the list once it is saved.', { kind: 'info' }); return; }
-    confirmAction(`${flowSentence(ed.def, autoCtx())} This sends to real customers. Turn it on when you save?`, () => { if (AUTO_ED===ed) { ed.enabled = true; ed.dirty = true; autoEdRender(); } }, { danger: false, title: 'Turn on this automation?', confirmLabel: 'Turn on' });
+    // yes = the switch-on the save publishes goes with that yes (customerYes), as the list switch's does: asked once
+    confirmAction(`${flowSentence(ed.def, autoCtx())} This sends to real customers. Turn it on when you save?`, () => { if (AUTO_ED===ed) { ed.enabled = true; ed.customerYes = true; ed.dirty = true; autoEdRender(); } }, { danger: false, title: 'Turn on this automation?', confirmLabel: 'Turn on' });
     return;
   }
   ed.enabled = !ed.enabled; ed.dirty = true; autoEdRender();
@@ -17751,15 +17952,19 @@ async function autoSaveEditor(){
   else if (!ed.isNew && enabled && added.length) { enabled = false; offNote = 'Saved. It is off: switch it on from the list when you\'re ready.'; }
   // On, and what starts it or its steps changed: waiting runs stop and it starts afresh. Say so first (once per save).
   const saved = !ed.isNew ? AUTO.list.find(x => x.id===ed.id) : null;
-  if (saved && saved.enabled && enabled && autoNewVersion(ed.origDef, def) && !ed.versionOk) {
+  const legacy = !!(saved && saved.legacy);
+  if (saved && saved.enabled && enabled && autoNewVersion(ed.origDef, def, legacy) && !ed.versionOk) {
     if (ed.asking) return;   // a second click while the count is read
     ed.asking = true;
     const n = await autoWaitingRuns(ed.id);
     ed.asking = false;
-    confirmAction(`${n ? `${n} run${n===1 ? ' is' : 's are'} waiting to act (a wait or a time window). ` : ''}This change starts "${name}" afresh: anything waiting now stops, and it only acts on what happens after you save. Changing only words, numbers, hours, conditions or who gets it keeps what is waiting. Save?`,
+    confirmAction(`${n ? `${n} run${n===1 ? ' is' : 's are'} waiting to act (a wait or a time window). ` : ''}This change starts "${name}" afresh: anything waiting now stops, and it only acts on what happens after you save. Changing only words, numbers, hours, conditions${legacy ? ' or who gets it' : ', who gets it or what starts it'} keeps what is waiting. Save?`,
       () => { if (AUTO_ED===ed) { ed.versionOk = true; autoSaveEditor(); } }, { danger: false, title: 'Start it afresh?', confirmLabel: 'Save' });
     return;
   }
+  // The switch is published only when the person moved it in this editor: someone who switched it off from the list
+  // meanwhile is never overruled by a save of other changes.
+  const moved = enabled!==!!ed.openEnabled, rearm = !!saved && !!saved.enabled && enabled && !legacy && autoNewStart(ed.origDef, def);
   ed.saving = true;
   try {
     // The words first: only the drafts a message of this automation really uses.
@@ -17772,19 +17977,50 @@ async function autoSaveEditor(){
           cat.msgTemplates[k] = { ...old, name: String(d.name || name).trim().slice(0, 80) || name, channel: d.channel, createdAt: old.createdAt || now, createdBy: old.createdBy || actor, updatedAt: now }; });
       }, `${used.length} template${used.length===1 ? '' : 's'} saved with "${name}"`);
     }
-    const row = { name, trigger: def.trigger, steps: def.steps, enabled };
-    const res = ed.isNew
-      ? await sb.from(AUTO_TABLE).insert({ ...row, business_id: AUTO_BUSINESS_ID, created_by_name: actor, template_key: ed.baseKey || null }).select().single()
-      : await sb.from(AUTO_TABLE).update(row).eq('id', ed.id).select().single();
-    if (res.error || !res.data) { showToast('Not saved: ' + ((res.error && res.error.message) || 'no access'), { kind: 'warn' }); return; }
-    const a = autoNormalize(res.data);   // the database is the truth (it keeps a new customer automation off)
+    // Stage 2 (G2.4): the automations function saves (step "save": the doc, wfFromFlat), never the app itself. A new one
+    // is always saved off; the switch is a Publish (step "publish"), here only when the editor's switch says so (its own
+    // rules above; a customer one was asked about when its switch was turned on).
+    // Off first: one that is on and is to be off is switched off BEFORE its new content is saved, so it is never live
+    // with the new content (phase 4 did both in one write); when that fails, nothing is saved and it says it is still on.
+    let wentOff = false;
+    if (saved && saved.enabled && !enabled) {
+      const off = await autoFnCall({ step: 'publish', automation_id: ed.id, on: false });
+      if (!off.ok) { showToast(`Not saved: it could not be switched off (${autoFnReason(off.body)}). It is still ON with its old steps.`, { kind: 'warn' }); return; }
+      wentOff = true;
+    }
+    const res = await autoFnCall({ step: 'save', automation_id: ed.isNew ? null : ed.id, ...(ed.isNew ? {} : { expected_revision: saved ? saved.revision : 1 }),
+      name, definition: wfFromFlat(def, saved ? saved.doc : null) });
+    const offNow = wentOff ? ' It is off now: switch it on from the list to go back to the old steps.' : '';
+    if (res.status===409) { showToast('Someone else saved this automation meanwhile. Close it and open it again to see their change.' + offNow, { kind: 'warn' }); return; }
+    if (!res.ok) { showToast('Not saved: ' + autoFnReason(res.body) + '.' + offNow, { kind: 'warn' }); return; }
+    const id = String(res.body.id);
+    if (ed.isNew && ed.baseKey) await sb.from(AUTO_TABLE).update({ template_key: ed.baseKey }).eq('id', id);
+    // On: only when the person switched it on here; the function's own words (what it sends, where) are asked about
+    // first, unless the person already said yes to "This sends to real customers" when turning the switch on here (the
+    // publish goes with that yes, as toggleAutomation's does); one that went off meanwhile (from the list, or a Draft by
+    // the function's rules) stays off, and it says so.
+    let ask = null;
+    if (enabled && res.body.enabled!==true) {
+      if (moved) {
+        const pub = await autoFnCall({ step: 'publish', automation_id: id, on: true, expected_revision: Number(res.body.revision) || 1, ...(customer && ed.customerYes ? { confirm: true } : {}) });
+        if (pub.status===409 && pub.body && Array.isArray(pub.body.confirm) && pub.body.confirm.length) { ask = pub.body.confirm; offNote = `Saved: ${name}. It goes on once you say yes to what it sends.`; }
+        else if (!pub.ok) offNote = `Saved, but it is off: ${autoFnReason(pub.body)}`;
+      } else offNote = `Saved: ${name}. It is off: it was switched off meanwhile${res.body.drafted ? ' (a Draft now)' : ''}. Switch it on from the list when you're ready.`;
+    }
+    const { data: fresh } = await sb.from(AUTO_TABLE).select('*').eq('id', id).single();
+    const a = autoNormalize(fresh || { id, name, enabled: false, definition: wfFromFlat(def, null) });   // the database is the truth (it keeps a new customer automation off)
     const i = AUTO.list.findIndex(x => x.id===a.id); if (i >= 0) AUTO.list[i] = a; else AUTO.list.push(a);
     logSettingsActivity(actor, `${CAT_NAMES.automations}: "${a.name}" ${ed.isNew ? 'made' : 'changed'}${a.enabled ? '' : ' (off)'}`);
-    autoSyncEvents();
     AUTO_ED = null; closeModal();
-    showToast(offNote || (customer && ed.isNew ? `Saved: ${a.name}. It is off until you switch it on.` : `Saved: ${a.name}${a.enabled ? '' : ' (off)'}`));
+    showToast(offNote || (customer && ed.isNew ? `Saved: ${a.name}. It is off until you switch it on.` : rearm && a.enabled ? `Saved: ${a.name}. What was already waiting goes on; the new start counts from now.` : `Saved: ${a.name}${a.enabled ? '' : ' (off)'}`));
     render();
+    if (ask) autoAskPublish(a, ask);
   } finally { ed.saving = false; }
+}
+// The function's own words before it goes on (design §3.12: what it sends to customers, where lead details go, a step
+// this version doesn't know); yes = switched on with that yes.
+function autoAskPublish(a, lines){
+  confirmAction(`"${a.name}": ${lines.join('. ')}. Turn it on?`, () => autoWriteEnabled(a, true, { confirmed: true }), { danger: false, title: 'Turn on this automation?', confirmLabel: 'Turn on' });
 }
 // How many runs of this automation wait to act now (null when that can't be read).
 async function autoWaitingRuns(id){
@@ -17798,24 +18034,37 @@ function toggleAutomation(id){
   if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
   const a = AUTO.list.find(x => x.id===id); if (!a) return;
   if (a.enabled) { autoWriteEnabled(a, false); return; }
+  // the function checks it and, when it sends to customers or elsewhere, asks with its own words (where, what) first
+  if (a.newBuilder) { autoWriteEnabled(a, true); return; }
   const ctx = autoCtx(), probs = autoProblems(a.def, ctx, { name: a.name, mirrors: autoReadyRows() });
   const block = probs.filter(p => p.block);
   if (block.length) { showToast('Fix it first: ' + block[0].text, { kind: 'warn' }); return; }
   const customer = autoHasCustomer(a.def), overlap = probs.filter(p => !p.block && /^The ready-made/.test(p.text)).map(p => p.text);
   if (customer || overlap.length) {
-    confirmAction(`${flowSentence(a.def, ctx)} ${customer ? 'This sends to real customers. ' : ''}${overlap.join(' ')} Turn it on?`.replace(/\s+/g, ' ').trim(), () => autoWriteEnabled(a, true), { danger: false, title: 'Turn on this automation?', confirmLabel: 'Turn on' });
+    confirmAction(`${flowSentence(a.def, ctx)} ${customer ? 'This sends to real customers. ' : ''}${overlap.join(' ')} Turn it on?`.replace(/\s+/g, ' ').trim(), () => autoWriteEnabled(a, true, { confirmed: customer }), { danger: false, title: 'Turn on this automation?', confirmLabel: 'Turn on' });
     return;
   }
   autoWriteEnabled(a, true);
 }
-async function autoWriteEnabled(a, on){
+// opts.confirmed = the person already said yes to what it sends (the builder's own customer question, or the function's
+// words): the publish goes with that yes; without it the function asks first (409 "confirm": its words are shown).
+async function autoWriteEnabled(a, on, opts){
   if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
-  const was = a.enabled; a.enabled = on; render();
-  const { data, error } = await sb.from(AUTO_TABLE).update({ enabled: on }).eq('id', a.id).select().single();
-  if (error || !data) { a.enabled = was; showToast('Not saved: ' + ((error && error.message) || 'no access'), { kind: 'warn' }); render(); return; }
-  Object.assign(a, autoNormalize(data));
+  const o = opts || {}, was = a.enabled; a.enabled = on; render();
+  // Stage 2 (G2.4): the switch is the function's Publish / Draft (it checks again and keeps the version history); a
+  // switch-on goes with the revision this list shows (someone saved since → look again first)
+  const res = await autoFnCall({ step: 'publish', automation_id: a.id, on, ...(on ? { expected_revision: Number(a.revision) || 1 } : {}), ...(on && o.confirmed ? { confirm: true } : {}) });
+  if (on && res.status===409 && res.body && Array.isArray(res.body.confirm) && res.body.confirm.length) { a.enabled = was; render(); autoAskPublish(a, res.body.confirm); return; }
+  if (on && res.status===409 && res.body && res.body.reason==='conflict') {
+    a.enabled = was;
+    const { data } = await sb.from(AUTO_TABLE).select('*').eq('id', a.id).single();
+    if (data) Object.assign(a, autoNormalize(data));
+    showToast('Someone changed this automation meanwhile. Look at it again, then switch it on.', { kind: 'warn' }); render(); return;
+  }
+  if (!res.ok) { a.enabled = was; showToast((on ? 'Not switched on: ' : 'Not switched off: ') + autoFnReason(res.body), { kind: 'warn' }); render(); return; }
+  const { data } = await sb.from(AUTO_TABLE).select('*').eq('id', a.id).single();
+  Object.assign(a, data ? autoNormalize(data) : { enabled: res.body.enabled===true });
   logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `${CAT_NAMES.automations}: "${a.name}" switched ${a.enabled ? 'on' : 'off'}`);
-  autoSyncEvents();
   showToast(`${a.name}: ${a.enabled ? 'on' : 'off'}`);
   render();
 }
@@ -17829,7 +18078,6 @@ function deleteAutomation(id){
     if (error) { showToast('Not deleted: ' + error.message, { kind: 'warn' }); return; }
     AUTO.list = AUTO.list.filter(x => x.id!==a.id);
     logSettingsActivity(getCurrentProfile()?.fullName || 'Unknown', `${CAT_NAMES.automations}: "${a.name}" deleted`);
-    autoSyncEvents();
     if (AUTO_ED && AUTO_ED.id===a.id) { AUTO_ED = null; closeModal(); }
     showToast(`"${a.name}" deleted`); render();
   }, { title: 'Delete this automation?', confirmLabel: 'Delete' });
@@ -17855,23 +18103,60 @@ function duplicateAutomation(key){
   if (AUTO_ED) AUTO_ED.dirty = true;
   showToast('A copy, not saved yet. It is off until you switch it on.', { kind: 'info' });
 }
-// The starts the app tells the engine about at once, kept in settings so every browser (the office's too) knows.
-// A silent write: no toast, no history line, no redraw; only when it changed.
-function autoSyncEvents(){
-  if (readOnlyReason() || !STATE.data || !STATE.data.settings) return;
-  const next = autoTriggersOn(AUTO.list), cur = catalogObject('automationEvents');
-  if (JSON.stringify(next)===JSON.stringify(cur)) return;
-  const cat = JSON.parse(JSON.stringify(STATE.data.settings.catalog || {}));
-  cat.automationEvents = next;
-  db.settings.update({ catalog: cat });
-  applyCatalog();
+// The starts the engine wants now (stage 2 G2.4): public.automation_wanted, which the engine writes every minute from the
+// workflows that are on (readable by anyone signed in). Read at most once a minute, one read at a time; while it can't be
+// read (before SQL Part 1) the list the phase-4 builder kept in settings. Never redraws, never rejects.
+const AUTO_WANTED = { set: null, at: 0, p: null };
+function autoWantedLoad(){
+  if (AUTO_WANTED.p) return AUTO_WANTED.p;
+  if (AUTO_WANTED.set && Date.now() - AUTO_WANTED.at < 60000) return Promise.resolve(AUTO_WANTED.set);
+  // p exists before the read and the read starts only once p is stored: a read that throws at once (the client not
+  // ready) can neither reach p before it is set (a TDZ error) nor leave a finished read stored for good
+  let p = null;
+  p = (async () => {
+    await null;
+    try {
+      const { data, error } = await sb.from('automation_wanted').select('event_type').eq('business_id', AUTO_BUSINESS_ID);
+      AUTO_WANTED.set = error ? null : new Set((data || []).map(r => String(r.event_type)));
+    } catch (e) { AUTO_WANTED.set = null; }
+    AUTO_WANTED.at = Date.now();
+    if (AUTO_WANTED.p===p) AUTO_WANTED.p = null;
+    return AUTO_WANTED.set;
+  })();
+  AUTO_WANTED.p = p;
+  return p;
 }
-// Is any automation of your own waiting for this kind of event? (the app tells the engine only then)
-function autoEventWanted(type){ return !!(catalogObject('automationEvents') || {})[type]; }
+// Is any workflow that is on waiting for this kind of event? (the app tells the engine only then). An EMPTY list is "not
+// known", never "nothing": the engine keeps none in compat mode (step E not applied, or rolled back), and phase 4's
+// timer still counts on the app's "look now" for its starts then, so they are told as phase 4 told them.
+const AUTO_PHASE4_EVENTS = ['newLead', 'stage', 'jobClosed'];
+async function autoEventWanted(type){
+  let set = null;
+  try { set = await autoWantedLoad(); } catch (e) { set = null; }   // unreadable = not known
+  if (set && set.size) return set.has(type);
+  return AUTO_PHASE4_EVENTS.includes(type) || !!(catalogObject('automationEvents') || {})[type];
+}
 // A stage move is told once its Undo has run out (6 seconds), and only if the lead is still in that stage.
-function autoEmitStage(contactId, stage){
-  if (readOnlyReason() || !autoEventWanted('stage')) return;
+async function autoEmitStage(contactId, stage){
+  if (readOnlyReason() || !(await autoEventWanted('stage'))) return;
   setTimeout(() => { const c = contactById(contactId); if (c && leadStage(c)===stage) automationEvent('stage', contactId); }, 6500);
+}
+// One call to the automations function as the signed-in person (stage 2: save / publish). → { ok, status, body }; never throws.
+async function autoFnCall(body){
+  if (readOnlyReason()) return { ok: false, status: 0, body: { reason: readOnlyReason() } };
+  try {
+    const { data } = await sb.auth.getSession();
+    const res = await fetch(AUTOMATIONS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + (data && data.session && data.session.access_token) }, body: JSON.stringify(body) });
+    const j = await res.json().catch(() => ({}));
+    return { ok: res.ok && !!j && j.ok!==false, status: res.status, body: j || {} };
+  } catch (e) { return { ok: false, status: 0, body: { reason: 'no connection' } }; }
+}
+// The words of a refusal: the first problem, else the function's reason.
+function autoFnReason(b){
+  const x = b && typeof b==='object' ? b : {};
+  if (Array.isArray(x.errors) && x.errors.length && x.errors[0] && x.errors[0].text) return String(x.errors[0].text);
+  if (Array.isArray(x.confirm) && x.confirm.length) return x.confirm.join('; ');
+  return String(x.text || x.reason || 'no access');
 }
 
 // ── Message templates tab: your own templates (the library) ──

@@ -11,7 +11,12 @@
 #   rb  = the rollback build (supabase/functions/automations-phase4-compat/index.ts)
 # plus "nf" = the new build deployed BEFORE Part 1 (its phase-4 fallback; must write no v2 rows), and the cutovers:
 # old → new after tick k (the deploy), new → rb / new → old (a rollback), new → rb → new (a redeploy), new/rb alternating
-# every tick, nf → new (Part 1 applied after the function). Compared: action log rows (step id, channel, audience, status,
+# every tick, nf → new (Part 1 applied after the function); and (G2.1) "ev" = the same build with the event store on
+# (Part 2 step E: phase4_compat = false; design §8.3 #1 (b): upgradeV1 + matcher + advanceV2) alone, switched on after
+# tick 1 / mid, switched back (ev → new, ev → rb) and alternating with compat every tick; and (G2.4) "ev+mg" = the event
+# store after step "migrate" (every row runs its doc: design §8.3 #4) from the start, migrated mid-way, then rolled back to
+# the rollback build, plus "doc only" (the phase-4 steps emptied after the migration: an old-editor edit or phase 7's drop;
+# only rows whose phase-4 ids are v2 ids). Compared: action log rows (step id, channel, audience, status,
 # reason, recipient, time), run end status / reason / step_index, every due_at a run had, pushes, tasks and emails (exact
 # text). step / exit / enroll rows are ignored (phase 4 writes none). Any difference is printed and the script exits 1.
 #
@@ -27,6 +32,9 @@
 #          profiles, employees), each record alone at the moment of its event
 #   … run.sh --corpus selftest/fake-live-automations.json --records selftest/fake-live-records.json
 #        the two options above on made-up data (proves those paths work before real exports exist)
+#   … run.sh --corpus live-automations-after-migrate.json
+#        (G2.4) an export taken AFTER step "migrate" (+ definition, settings): the migration check — every doc exactly
+#        upgradeV1 of its steps and run as phase 4 (selftest/fake-live-automations-migrated.json = the made-up one)
 #   … run.sh --quick     first 3 scenarios only
 # Live exports hold customer data: keep them OUT of the repo (the session scratchpad), never commit them.
 # Output: a summary on screen; report.json in the temporary build folder (its path is printed).

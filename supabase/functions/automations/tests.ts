@@ -94,7 +94,56 @@ function sqlArgsProblem(name: string, a: any): string | null {
   const extra = got.filter((k) => !sig.params.includes(k)), missing = sig.required.filter((k) => !got.includes(k));
   return extra.length || missing.length ? `fake: ${name} called with ${extra.length ? "unknown " + extra.join(",") : ""}${missing.length ? " missing " + missing.join(",") : ""}` : null;
 }
+// contact_tags_merge (SQL, Part 2 · G2.3): removed in any case, then the added ones not there yet (any case), order kept.
+function fakeTagsMerge(tags: any, add: string[], remove: string[]): string[] {
+  const rem = new Set(remove.map((x) => String(x).trim().toLowerCase()));
+  const kept = (Array.isArray(tags) ? tags : []).filter((x: any) => x && !rem.has(String(x).toLowerCase()));
+  for (const raw of add) { const x = String(raw).trim().slice(0, 60); if (x && !kept.some((k: string) => k.toLowerCase() === x.toLowerCase())) kept.push(x); }
+  return kept;
+}
 const uniqKey = (u: Uniq, r: any): string | null => u.key ? u.key(r) : u.keys.some((k) => r[k] == null) ? null : JSON.stringify(u.keys.map((k) => r[k]));
+// ── the Part-2 guard of public.automations as the function's writes meet it (automation.via = 'fn'; the same rules as
+// automations_guard v2 in .claude/sql/stage2-automations.sql PART 2 · G2.4) and its AFTER trigger ──
+// v1 steps → the guarded types they stand for (= SQL automation_guarded_channels_v1)
+const fakeGuardedV1 = (steps: any) => [...new Set((Array.isArray(steps) ? steps : []).filter((s: any) => s && s.kind === "action" && ["email", "text"].includes(s.type)).map((s: any) => s.type === "email" ? "send_email" : "send_sms"))].sort();
+function fakeGuarded(def: any, steps: any): string[] { return def ? wfGuardedChannels(def) : fakeGuardedV1(steps); }
+function fakeAutoGuard(old: any, n: any, now: string, migrating: boolean) {
+  const content = ["name", "definition", "settings", "layout", "builder"].some((k) => JSON.stringify(old[k] ?? null) !== JSON.stringify(n[k] ?? null));
+  n.revision = (Number(old.revision) || 1) + (content ? 1 : 0);
+  if (migrating) { n.version = old.version; n.armed_at = old.armed_at; n.enabled = old.enabled; n.audience = old.audience; n.updated_at = old.updated_at; n.switched_on_at = old.switched_on_at ?? null; return n; }
+  const gOld = fakeGuarded(old.definition, old.steps), gNew = fakeGuarded(n.definition, n.steps);
+  if (n.enabled && gNew.some((x) => !gOld.includes(x))) n.enabled = false;
+  if (n.deleted_at && !old.deleted_at) n.enabled = false;
+  const shape = (x: any) => x.definition ? defShape(x.definition) : JSON.stringify([x.trigger ?? null, (Array.isArray(x.steps) ? x.steps : []).map((s: any) => [s.id, s.kind, s.type])]);
+  const arm = (x: any) => x.definition ? armKey(x.definition, x.settings) : "";
+  // (an upgraded workflow, re-entry legacy_always: a trigger change is a new version too, as phase 4's guard made it)
+  const changed = old.definition && n.definition ? versionChanged(old.definition, old.settings, n.definition) : shape(n) !== shape(old);
+  n.version = (Number(old.version) || 1) + (changed ? 1 : 0);
+  // armed_at: the enrolment gate (switch-on, new version, re-arm); switched_on_at: switch-on or new version only
+  if (!n.enabled) { n.armed_at = null; n.switched_on_at = null; }
+  else if (!old.enabled || n.version !== old.version) { n.armed_at = now; n.switched_on_at = now; }
+  else if (arm(n) !== arm(old)) { n.armed_at = now; n.switched_on_at = old.switched_on_at ?? old.armed_at ?? null; }
+  else { n.armed_at = old.armed_at; n.switched_on_at = old.switched_on_at ?? old.armed_at ?? null; }
+  n.audience = gNew.length ? "customer" : "team";
+  if (content || n.enabled !== old.enabled || n.deleted_at !== old.deleted_at) n.updated_at = now;
+  return n;
+}
+// automations_after: a new version, a switch-off or a delete stops what waits (exit rows; the ledger keys only those runs used)
+let fakeAfterN = 0;
+function fakeAutoAfterIn(T: any, old: any, r: any, now: string) {
+  const why = r.version !== old.version ? ["automation_changed", "automation changed"] : !old.deleted_at && r.deleted_at ? ["deleted", "automation deleted"] : old.enabled && !r.enabled ? ["switched_off", "switched off"] : null;
+  if (!why) return;
+  const runs = (T.automation_runs || []).filter((x: any) => x.automation_id === r.id && x.status === "waiting");
+  for (const x of runs) {
+    Object.assign(x, { status: "cancelled", exit_reason: why[0], reason: why[1], active_lock: null, lease_until: null, finished_at: now, updated_at: now });
+    (T.automation_log = T.automation_log || []).push({ id: `automation_log-after-${++fakeAfterN}`, business_id: x.business_id, run_id: x.id, step_id: x.cursor_step ?? "end", row_kind: "exit", status: "removed", reason: why[1],
+      automation_id: r.id, automation_name: r.name, record_kind: x.record_kind, record_id: x.record_id, contact_id: x.contact_id ?? null, trigger_id: x.trigger_id ?? null,
+      version: x.automation_version, revision: x.revision ?? null, seq: x.steps_done ?? 0, loop: x.loop ?? 0, detail: { exit_reason: why[0] }, at: now });
+  }
+  const gone = new Set(runs.map((x: any) => x.enrollment_key).filter((k: any) => k != null));
+  const others = new Set((T.automation_runs || []).filter((x: any) => x.automation_id === r.id && !runs.includes(x)).map((x: any) => x.enrollment_key));
+  T.automation_enrollment_keys = (T.automation_enrollment_keys || []).filter((k: any) => !(k.automation_id === r.id && gone.has(k.enrollment_key) && !others.has(k.enrollment_key)));
+}
 function fakeDb(seed: Record<string, any[]> = {}) {
   const T: Record<string, any[]> = {};
   for (const [k, v] of Object.entries(seed)) T[k] = v.map((r) => withDefaults(k, r));
@@ -111,6 +160,45 @@ function fakeDb(seed: Record<string, any[]> = {}) {
   };
   const dup = (table: string, r: any) => dupOf(table, r) !== null;
   const dupErr = (name: string) => ({ data: null, error: { code: "23505", message: `duplicate key value violates unique constraint "${name}"` } });
+  const fakeAutoAfter = (old: any, r: any, now: string) => fakeAutoAfterIn(T, old, r, now);
+  // ── the capture triggers of .claude/sql/stage2-automations.sql (contacts: Lead changed, Lead tag, Note added, Lead
+  // status; customer_opt_outs: Lead DND), only for the wanted types, with the cause automation_apply sets (G2.3) ──
+  let cause: string | null = null, tx = 0;
+  const wantedT = () => new Set((T.automation_wanted || []).map((w: any) => w.event_type));
+  const capPut = (type: string, key: string, id: string, contact: string | null, ctx: any) => {
+    T.automation_events = T.automation_events || [];
+    if (T.automation_events.some((e: any) => e.type === type && e.event_key === key)) return;
+    const m = cause ? /^([^:]+):(\d{1,3}):([^:]+)$/.exec(cause) : null;
+    T.automation_events.push(withDefaults("automation_events", { id: `automation_events-${++n}`, business_id: "default", type, event_key: key.slice(0, 200), record_kind: "contact", record_id: id,
+      contact_id: contact, at: isoMs(clock), available_at: isoMs(clock), ctx, source: "capture", cause_run_id: m ? m[1] : null, cause_automation_id: m ? m[3] : null,
+      chain_depth: m ? Math.min(Number(m[2]) + 1, 100) : 0 }));
+  };
+  const lowerSet = (l: any) => new Set((Array.isArray(l) ? l : []).map((x: any) => String(x)));
+  const captureContact = (op: string, o: any, c: any) => {
+    const w = wantedT(); if (!w.size) return;
+    const t = String(++tx), id = String(c.id);
+    if (op === "update" && w.has("contact_changed")) {
+      for (const f of CONTACT_CHANGED_FIELDS) { const col = f === "quote_amount" ? "estimated_value" : f; if (JSON.stringify(o[col] ?? null) !== JSON.stringify(c[col] ?? null)) capPut("contact_changed", `${id}:chg:${f}:${t}`, id, id, { field: f, old: o[col] ?? null, new: c[col] ?? null }); }
+    }
+    if (w.has("contact_tag")) {
+      const was = lowerSet(op === "update" ? o.tags : []), now = lowerSet(c.tags);
+      for (const g of now) if (g && !was.has(g)) capPut("contact_tag", `${id}:tag:+:${g}:${t}`, id, id, { tag: g, action: "added" });
+      if (op === "update") for (const g of was) if (g && !now.has(g)) capPut("contact_tag", `${id}:tag:-:${g}:${t}`, id, id, { tag: g, action: "removed" });
+    }
+    if (w.has("note_added")) {
+      const had = new Set((op === "update" && Array.isArray(o.customer_notes) ? o.customer_notes : []).map((x: any) => x && x.id));
+      for (const x of Array.isArray(c.customer_notes) ? c.customer_notes : []) if (x && x.id && !had.has(x.id)) capPut("note_added", `${id}:note:${x.id}`, id, id, { note_id: x.id, text: String(x.text || "").slice(0, 200), by: x.by || "" });
+    }
+    if (op === "update" && w.has("lead_status") && o.status !== c.status) {
+      const st = c.status === "Won" ? "won" : c.status === "Lost" ? "lost" : "open";
+      capPut("lead_status", `${id}:st:${c.status}:${t}`, id, id, { stage: c.status, from: o.status, status: st });
+    }
+  };
+  const captureOptOut = (op: string, r: any) => {
+    if (!wantedT().has("contact_dnd") || !r.contact_id) return;
+    capPut("contact_dnd", `${r.id}:${op === "delete" ? "off" : "on"}`, String(r.contact_id), String(r.contact_id), { action: op === "delete" ? "off" : "on", channel: r.channel });
+  };
+  const after = (table: string, op: string, o: any, r: any) => { if (table === "contacts") captureContact(op, o || {}, r); if (table === "customer_opt_outs") captureOptOut(op, r); };
   function q(table: string) {
     const rows = () => (T[table] = T[table] || []);
     const filters: ((r: any) => boolean)[] = [];
@@ -121,11 +209,17 @@ function fakeDb(seed: Record<string, any[]> = {}) {
       insert(p: any) { op = "insert"; payload = p; return b; }, update(p: any) { op = "update"; payload = p; return b; },
       upsert(p: any, o?: any) { op = "upsert"; payload = p; opts = o || {}; return b; }, delete() { op = "delete"; return b; },
       eq(k: string, v: any) { filters.push((r) => r[k] === v); return b; },
+      neq(k: string, v: any) { filters.push((r) => r[k] != null && r[k] !== v); return b; },   // SQL: a null is never "not equal"
       gte(k: string, v: any) { filters.push((r) => r[k] != null && cmp(r[k], v) >= 0); return b; },
       lte(k: string, v: any) { filters.push((r) => r[k] != null && cmp(r[k], v) <= 0); return b; },
       lt(k: string, v: any) { filters.push((r) => r[k] != null && cmp(r[k], v) < 0); return b; },
+      gt(k: string, v: any) { filters.push((r) => r[k] != null && cmp(r[k], v) > 0); return b; },
       in(k: string, l: any[]) { filters.push((r) => l.includes(r[k])); return b; },
       is(k: string, v: any) { filters.push((r) => (r[k] ?? null) === v); return b; },
+      ilike(k: string, pat: string) {
+        const re = new RegExp("^" + String(pat).replace(/\\(.)|([%_])|([.*+?^${}()|[\]\\])/g, (_m, esc, w, sp) => esc !== undefined ? esc.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : w ? (w === "%" ? ".*" : ".") : "\\" + sp) + "$", "i");
+        filters.push((r) => r[k] != null && re.test(String(r[k]))); return b;
+      },
       or(expr: string) { const parts = splitOr(expr).map(parseCond); filters.push((r) => parts.some((p) => p(r))); return b; },
       order(k: string, o?: any) { orders.push([k, !(o && o.ascending === false)]); return b; },
       limit(x: number) { lim = x; return b; }, range(a: number, z: number) { rng = [a, z]; return b; },
@@ -135,15 +229,20 @@ function fakeDb(seed: Record<string, any[]> = {}) {
     const out = (list: any[]) => single ? (list[0] ? { data: list[0], error: null } : { data: null, error: { message: "no rows" } }) : maybe ? { data: list[0] || null, error: null } : { data: list, error: null };
     function run() {
       calls.push(`${table}.${op}`);
-      const match = () => rows().filter((r) => filters.every((f) => f(r)));
+      const match = () => (T[table] || []).filter((r) => filters.every((f) => f(r)));   // a read never creates the table
       if (op === "insert") {
         const list = (Array.isArray(payload) ? payload : [payload]).map((r: any) => before(table, withDefaults(table, r)));
         for (let i = 0; i < list.length; i++) { const d = dupOf(table, list[i], [...rows(), ...list.slice(0, i)]); if (d) return dupErr(d); }   // one statement: all or nothing
         const added = list.map((r) => ({ id: r.id ?? `${table}-${++n}`, ...r }));
         rows().push(...added);
+        added.forEach((r) => after(table, "insert", null, r));
         return wantRows || single || maybe ? out(added.map((x) => ({ ...x }))) : { data: null, error: null };
       }
       if (op === "upsert") {
+        // PostgREST sends ON CONFLICT (cols) without a predicate: Postgres can't use a PARTIAL unique index for it (42P10)
+        const cols = String(opts.onConflict || "").split(",").map((x) => x.trim()).filter(Boolean).sort().join(",");
+        const named = (UNIQUE[table] || []).filter((u) => !u.key && [...u.keys].sort().join(",") === cols);
+        if (cols && named.length && named.every((u) => u.where)) return { data: null, error: { code: "42P10", message: "there is no unique or exclusion constraint matching the ON CONFLICT specification" } };
         const list = (Array.isArray(payload) ? payload : [payload]).map((r: any) => before(table, withDefaults(table, r))), added: any[] = [];
         for (const r of list) { if (dup(table, r)) { if (!opts.ignoreDuplicates) throw new Error("fake upsert: only ignoreDuplicates"); continue; } const x = { id: r.id ?? `${table}-${++n}`, ...r }; rows().push(x); added.push(x); }
         return wantRows ? out(added.map((x) => ({ ...x }))) : { data: null, error: null };
@@ -152,10 +251,12 @@ function fakeDb(seed: Record<string, any[]> = {}) {
         // all matched rows change or none (a unique key broken by the new values fails the statement, as in SQL)
         const m = match(), next = m.map((r) => before(table, { ...r, ...payload }));
         for (let i = 0; i < m.length; i++) { const d = dupOf(table, next[i], rows().map((x) => (m.includes(x) ? next[m.indexOf(x)] : x))); if (d) return dupErr(d); }
+        const olds = m.map((r) => ({ ...r }));
         m.forEach((r, i) => Object.assign(r, next[i]));
+        m.forEach((r, i) => after(table, "update", olds[i], r));
         return wantRows ? out(m.map((x) => ({ ...x }))) : { data: null, error: null };
       }
-      if (op === "delete") { const gone = match(); T[table] = rows().filter((r) => !gone.includes(r)); return { data: gone, error: null }; }
+      if (op === "delete") { const gone = match(); T[table] = rows().filter((r) => !gone.includes(r)); gone.forEach((r) => after(table, "delete", r, r)); return { data: gone, error: null }; }
       let list = match();
       for (const [k, asc] of [...orders].reverse()) list = [...list].sort((x, y) => (asc ? 1 : -1) * cmp(x[k], y[k]));
       if (rng) list = list.slice(rng[0], rng[1] + 1);
@@ -182,7 +283,9 @@ function fakeDb(seed: Record<string, any[]> = {}) {
     }
     if (name === "automation_claim_due") {
       const due = (T.automation_runs || []).filter((x) => x.business_id === a.p_business && ((x.status === "waiting" && cmp(x.due_at, a.p_now) <= 0) || (x.status === "running" && x.lease_until && cmp(x.lease_until, a.p_now) < 0)))
-        .sort((x, y) => cmp(x.due_at, y.due_at)).slice(0, Math.min(Math.max(a.p_limit, 1), 50));
+        // ties: Postgres leaves their order open; the fake takes (workflow, event key), so producers that start the same
+        // runs in another order (enqueue: workflow by workflow; the event store: event by event) are compared fairly
+        .sort((x, y) => cmp(x.due_at, y.due_at) || cmp(x.automation_id, y.automation_id) || cmp(x.event_key, y.event_key)).slice(0, Math.min(Math.max(a.p_limit, 1), 50));
       due.forEach((x) => { x.status = "running"; x.lease_until = isoMs(Date.parse(a.p_now) + Math.max(a.p_lease_seconds, 30) * 1000); x.attempts = (x.attempts || 0) + 1; x.updated_at = a.p_now; });
       return { data: due.map((x) => ({ ...x })), error: null };
     }
@@ -258,6 +361,156 @@ function fakeDb(seed: Record<string, any[]> = {}) {
           version: r.automation_version, revision: r.revision ?? null, seq: r.steps_done ?? 0, loop: r.loop ?? 0, detail: { exit_reason: "replied", reply_at: a.p_reply_at }, at: a.p_now });
       }
       return { data: hit.length, error: null };
+    }
+    if (name === "automation_apply") {
+      // the SQL function (Part 2 · G2.3 version): ops in order, each on its own; the cause set for the whole call, so the
+      // capture layer above stamps it on every event; the stage op writes the scanner's 'stage' event itself. Every call
+      // is kept in T.automation_apply_calls. → { ok, applied: [{i, op}], skipped: [{i, op, reason}] }
+      T.automation_apply_calls = T.automation_apply_calls || [];
+      T.automation_apply_calls.push({ ...a });
+      const m = /^([^:]+):(\d{1,3}):([^:]+)$/.exec(String(a.p_cause || ""));
+      if (!m) return { data: null, error: { message: "automation_apply needs p_cause = <run>:<depth>:<automation>" } };
+      if (!Array.isArray(a.p_ops) || a.p_ops.length > 20) return { data: { ok: false, reason: "ops must be a list of at most 20" }, error: null };
+      const auto = (T.automations || []).find((x) => x.id === m[3] && (x.business_id ?? "default") === a.p_business);
+      if (!auto) return { data: { ok: false, reason: "automation not found" }, error: null };
+      const actor = `Automation: ${auto.name}`.slice(0, 120);
+      const c = a.p_kind === "contact" ? (T.contacts || []).find((x) => x.id === a.p_id) : null;
+      if (a.p_kind === "contact" && !c) return { data: { ok: false, reason: "record deleted" }, error: null };
+      const applied: any[] = [], skipped: any[] = [], line = (text: string) => { if (["contact", "job"].includes(a.p_kind)) (T.activity_log = T.activity_log || []).push({ record_kind: a.p_kind, record_id: a.p_id, actor, text, manual: false }); };
+      const upd = async (patch: any) => { await q("contacts").update(patch).eq("id", c.id); };
+      cause = a.p_cause;
+      try {
+        for (let i = 0; i < a.p_ops.length; i++) {
+          const op = a.p_ops[i], o = String(op.op || ""), skip = (reason: string) => skipped.push({ i: i + 1, op: o, reason });
+          if (["set", "tags", "note", "optout", "read", "stage"].includes(o) && !c) { skip("wrong_kind"); continue; }
+          if (o === "set") {
+            if (!UPDATE_FIELD_COLUMNS.includes(op.field)) { skip("field not allowed"); continue; }
+            await upd({ [op.field === "quote_amount" ? "estimated_value" : op.field]: op.value === "" || op.value == null ? null : String(op.value).slice(0, 500) }); line(`Changed ${op.field}`);
+          } else if (o === "tags") {
+            const next = fakeTagsMerge(c.tags, op.add || [], op.remove || []);
+            await upd({ tags: next }); line("Tags");
+          } else if (o === "note") {
+            const v = String(op.text || "").trim().slice(0, 2000); if (!v) { skip("empty note"); continue; }
+            if (c.customer_notes != null && !Array.isArray(c.customer_notes)) { skip("the notes on this card are not a list"); continue; }
+            await upd({ customer_notes: [...(Array.isArray(c.customer_notes) ? c.customer_notes : []), { id: `wf${++n}`, text: v, by: actor, at: isoMs(clock) }] }); line("Note added: " + v.slice(0, 200));
+          } else if (o === "optout") {
+            const ch = op.channel || "all";
+            if (!(T.customer_opt_outs || []).some((x) => x.contact_id === c.id && x.channel === ch)) await q("customer_opt_outs").insert({ business_id: a.p_business, contact_id: c.id, channel: ch, reason: actor });
+            line(`Automatic messages stopped (${ch})`);
+          } else if (o === "read") { c.last_read_at = isoMs(clock); line("Conversation marked as read"); }
+          else if (o === "stage") {
+            const to = String(op.to || "").trim(); if (!to) { skip("no stage"); continue; }
+            if (to === "Won") { skip("A lead is won when its job is entered"); continue; }
+            if (c.status === to) { skip("already in that stage"); continue; }
+            const at = isoMs(clock);
+            await upd({ status: to, stage_changed_at: at, ...(to === "Lost" && op.lost_reason ? { lost_reason: op.lost_reason } : {}) });
+            if (wantedT().has("stage")) {
+              T.automation_events = T.automation_events || [];
+              const key = `${c.id}:${to}:${at}`;
+              if (!T.automation_events.some((e: any) => e.type === "stage" && e.event_key === key)) T.automation_events.push(withDefaults("automation_events", { id: `automation_events-${++n}`, business_id: a.p_business, type: "stage",
+                event_key: key, record_kind: "contact", record_id: c.id, contact_id: c.id, at, available_at: isoMs(clock + 30e3), ctx: { stage: to }, source: "engine",
+                cause_run_id: m[1], cause_automation_id: m[3], chain_depth: Math.min(Number(m[2]) + 1, 100) }));
+            }
+            line("Moved to " + to);
+          } else if (o === "task") {
+            if (!String(op.title || "").trim() || !op.board) { skip("missing details"); continue; }
+            await q("tasks").insert({ board: op.board, title: String(op.title).slice(0, 200), status: op.status || "Not Started", due: op.due || null, notes: op.notes || null, client: c ? c.full_name : null,
+              contact_id: c ? c.id : null, assignees: op.assignees || [], assigned_to: op.assigned_to || null, category: op.category || null, priority: op.priority || null, created_by: actor });
+            line("Task added: " + String(op.title).slice(0, 120));
+          } else if (o === "comment") {
+            if (!["contact", "job"].includes(a.p_kind)) { skip("wrong_kind"); continue; }
+            const v = String(op.text || "").trim(); if (!v) { skip("empty comment"); continue; }
+            line(v.slice(0, 1000));
+          } else if (o === "custom") {
+            if (!/^[a-z][a-z0-9_]{0,39}$/.test(String(op.key))) { skip("bad key"); continue; }
+            T.automation_custom_values = T.automation_custom_values || [];
+            const cv = T.automation_custom_values.find((x) => x.business_id === a.p_business && x.key === op.key);
+            if (cv) cv.value = String(op.value ?? ""); else T.automation_custom_values.push({ business_id: a.p_business, key: op.key, value: String(op.value ?? "") });
+          } else { skip("unknown op"); continue; }
+          applied.push({ i: i + 1, op: o });
+        }
+      } finally { cause = null; }
+      return { data: { ok: true, applied, skipped }, error: null };
+    }
+    // ── stage-2 Part 2 · G2.3: the lead card's atomic tag / note edits and the inbound link's rate ──
+    if (name === "contact_tags_edit" || name === "contact_note_add" || name === "contact_note_remove") {
+      const c = (T.contacts || []).find((x) => x.id === a.p_id);
+      if (!c) return { data: null, error: { message: "lead not found" } };
+      if (name === "contact_tags_edit") { await q("contacts").update({ tags: fakeTagsMerge(c.tags, a.p_add || [], a.p_remove || []) }).eq("id", c.id); return { data: [...c.tags], error: null }; }
+      const list = Array.isArray(c.customer_notes) ? c.customer_notes : [];
+      const note = a.p_note || {};
+      // any non-empty id up to 128 characters without control characters (Postgres [[:cntrl:]]), as contact_note_add
+      const nid = note.id == null ? "" : String(note.id);
+      if (name === "contact_note_add" && (!nid || [...nid].length > 128 || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(nid) || !String(note.text || "").trim())) return { data: null, error: { message: "a note needs an id and some text" } };
+      // notes that are not a list (an old string or object) are never touched
+      if (c.customer_notes != null && !Array.isArray(c.customer_notes)) return { data: null, error: { message: "this lead's notes are not a list: they were left as they are" } };
+      if (name === "contact_note_remove") { await q("contacts").update({ customer_notes: list.filter((x: any) => x.id !== a.p_note_id) }).eq("id", c.id); return { data: c.customer_notes, error: null }; }
+      if (!list.some((x: any) => x.id === note.id)) await q("contacts").update({ customer_notes: [...list, { id: note.id, text: String(note.text).trim(), by: String(note.by || "").slice(0, 120), at: typeof note.at === "string" ? note.at : isoMs(clock) }] }).eq("id", c.id);
+      return { data: c.customer_notes, error: null };
+    }
+    if (name === "automation_hook_hit") {
+      const h = (T.automation_hooks || []).find((x) => x.id === a.p_hook && (x.business_id ?? "default") === a.p_business && !x.revoked_at);
+      if (!h) return { data: -1, error: null };
+      const fresh = !h.window_start || Date.parse(h.window_start) <= Date.parse(a.p_now) - 60e3;
+      h.window_count = fresh ? 1 : (Number(h.window_count) || 0) + 1; if (fresh) h.window_start = a.p_now; h.last_used_at = a.p_now;
+      return { data: h.window_count, error: null };
+    }
+    // ── stage-2 Part 2 · G2.4: the content write paths (automation_save / automation_publish / automation_migrate_row)
+    // with the guard v2 (automations_guard) and its AFTER trigger (automations_after) as the SQL runs them for the
+    // function (automation.via = 'fn'); automation_prune (Part 1) for the housekeeping ──
+    if (name === "automation_save" || name === "automation_publish" || name === "automation_migrate_row") {
+      T.automations = T.automations || [];
+      // the tests' clock (the differential's fake module has none: then the real time, never compared)
+      const now = isoMs(typeof clock !== "undefined" ? clock : Date.now()), list = T.automations;
+      if (name === "automation_save" && a.p_id == null) {
+        const row = { id: `a${String(++n).padStart(3, "0")}-0000-4000-8000-${String(n).padStart(12, "0")}`, business_id: a.p_business, name: a.p_name, description: null, template_key: null, enabled: false, armed_at: null, switched_on_at: null,
+          trigger: {}, steps: [], audience: fakeGuarded(a.p_definition, null).length ? "customer" : "team", version: 1, revision: 1, definition: a.p_definition, settings: a.p_settings ?? {},
+          layout: a.p_layout ?? { v: 1 }, builder: a.p_builder ?? "standard", origin: ["user", "copy", "template", "ai"].includes(a.p_origin) ? a.p_origin : "user", list_summary: a.p_summary ?? {},
+          created_by: a.p_actor ?? null, created_by_name: a.p_actor_name ?? null, created_at: now, updated_at: now, updated_by: a.p_actor ?? null, updated_by_name: a.p_actor_name ?? null,
+          enrolled_total: 0, deleted_at: null, published_at: null, published_by: null, system_key: null };
+        list.push(row);
+        return { data: { ok: true, id: row.id, revision: 1, version: 1, enabled: false, armed_at: null, created: true, shape_changed: false, arm_changed: false }, error: null };
+      }
+      const r = list.find((x) => x.id === a.p_id && (x.business_id ?? "default") === a.p_business && !x.deleted_at);
+      if (!r) return { data: name === "automation_migrate_row" ? { migrated: false } : { ok: false, reason: "not_found" }, error: null };
+      const old = { ...r };
+      if (name === "automation_migrate_row") {
+        // compare-and-set: the trigger / steps the doc was made from must still be there
+        if (r.definition != null || JSON.stringify(r.trigger ?? null) !== JSON.stringify(a.p_trigger ?? null) || JSON.stringify(r.steps ?? null) !== JSON.stringify(a.p_steps ?? null)) return { data: { migrated: false, revision: Number(r.revision ?? 1) }, error: null };
+        Object.assign(r, fakeAutoGuard(old, { ...r, definition: a.p_definition, settings: a.p_settings ?? {}, list_summary: a.p_summary ?? {} }, now, true));
+        return { data: { migrated: true, revision: r.revision, version: r.version, enabled: r.enabled }, error: null };
+      }
+      if (name === "automation_publish" && a.p_expected != null && Number(r.revision ?? 1) !== a.p_expected) return { data: { ok: false, reason: "conflict", revision: Number(r.revision ?? 1), updated_by_name: r.updated_by_name ?? null, updated_at: r.updated_at ?? null }, error: null };
+      if (name === "automation_save" && Number(r.revision ?? 1) !== a.p_expected) return { data: { ok: false, reason: "conflict", revision: Number(r.revision ?? 1), updated_by_name: r.updated_by_name ?? null, updated_at: r.updated_at ?? null }, error: null };
+      const next = name === "automation_save"
+        ? { ...r, name: a.p_name, definition: a.p_definition, settings: a.p_settings ?? {}, layout: a.p_layout ?? { v: 1 }, builder: a.p_builder ?? "standard", list_summary: a.p_summary ?? {},
+          updated_by: a.p_actor ?? null, updated_by_name: a.p_actor_name ?? null, enabled: a.p_draft ? false : r.enabled }
+        : { ...r, enabled: !!a.p_on, ...(a.p_on ? { published_at: now, published_by: a.p_actor ?? null } : {}) };
+      Object.assign(r, fakeAutoGuard(old, next, now, false));
+      fakeAutoAfter(old, r, now);
+      const armed = (x: any) => x.definition ? armKey(x.definition, x.settings) : JSON.stringify(x.trigger ?? null);
+      return { data: { ok: true, id: r.id, revision: r.revision, version: r.version, enabled: r.enabled, armed_at: r.armed_at, published_at: r.published_at ?? null, created: false,
+        shape_changed: r.version !== old.version, arm_changed: armed(r) !== armed(old) }, error: null };
+    }
+    if (name === "automation_prune") {
+      const b = Math.min(Math.max(Number(a.p_budget) || 1000, 1), 1000), now = Date.parse(a.p_now), D = 86400e3, res: Record<string, number> = {};
+      const cut = (table: string, key: string, pred: (r: any) => boolean, lim = b) => {
+        const rowsT = T[table] || [], gone = new Set(rowsT.filter((r) => (r.business_id ?? "default") === a.p_business && pred(r)).slice(0, lim));
+        T[table] = rowsT.filter((r) => !gone.has(r)); res[key] = gone.size;
+      };
+      const older = (v: any, days: number) => v != null && Date.parse(v) < now - days * D;
+      cut("automation_events", "events", (e) => (e.status === "done" && older(e.processed_at ?? e.created_at ?? e.at, 7)) || (e.status === "error" && older(e.created_at ?? e.at, 30)));
+      cut("automation_trigger_log", "trigger_log", (x) => older(x.at, 30));
+      cut("automation_trigger_daily", "trigger_daily", (x) => older(x.day + "T00:00:00Z", 35));
+      cut("automation_runs", "runs", (x) => !["waiting", "running"].includes(x.status) && older(x.finished_at, 180));
+      cut("automation_log", "log", (x) => older(x.at, 180));
+      const vs = (T.automation_versions || []).filter((v) => (v.business_id ?? "default") === a.p_business), drop = new Set<any>();
+      const byA: Record<string, any[]> = {}; for (const v of vs) (byA[v.automation_id] = byA[v.automation_id] || []).push(v);
+      for (const l of Object.values(byA)) l.sort((x, y) => y.version_no - x.version_no).forEach((v, i) => { if (i >= 50 || (i >= 10 && older(v.created_at, 30))) drop.add(v); });
+      const dl = [...drop].slice(0, b); T.automation_versions = (T.automation_versions || []).filter((v) => !dl.includes(v)); res.versions = dl.length;
+      cut("automation_hooks", "hooks", (h) => older(h.revoked_at, 30));
+      cut("automations", "automations", (x) => older(x.deleted_at, 30) && x.system_key == null, Math.min(b, 50));
+      return { data: res, error: null };
     }
     if (name === "automation_trigger_daily_add") {
       T.automation_trigger_daily = T.automation_trigger_daily || [];
@@ -631,13 +884,16 @@ async function phase4Suite() {
         { id: "old", business_id: "default", status: "done", finished_at: isoMs(NOW - 100 * DAYMS), due_at: isoMs(NOW - 100 * DAYMS) },
         { id: "keep", business_id: "default", status: "done", finished_at: isoMs(NOW - 80 * DAYMS), due_at: isoMs(NOW - 80 * DAYMS) },
         { id: "other", business_id: "other", status: "done", finished_at: isoMs(NOW - 100 * DAYMS), due_at: isoMs(NOW - 100 * DAYMS) },
+        { id: "older", business_id: "default", status: "done", finished_at: isoMs(NOW - 200 * DAYMS), due_at: isoMs(NOW - 200 * DAYMS) },
       ],
     });
     await tickAt(db, NOW);
     const st = (id: string) => (db.T.automation_log.find((l: any) => l.id === id) || {}).status;
     eq([st("l1"), st("l2"), st("l3")], ["sent", "failed", "queued"], "reconcile: sent by the mailbox → sent; still queued after a day → failed; recent ones wait");
     eq(db.T.automation_log.find((l: any) => l.id === "l2").reason, "not picked up by the mailbox", "reconcile: the reason says why");
-    eq([db.T.automation_runs.map((r: any) => r.id), db.T.automation_log.some((l: any) => l.id === "l4"), db.T.automation_log.some((l: any) => l.id === "l5"), db.T.automation_state[0].pruned_on], [["keep", "other"], false, true, "2026-10-14"], "prune: finished runs over 90 days and log rows over 180 days go (this business only)");
+    // since G2.4 (SQL Part 1 in) the stage-2 housekeeping: finished runs and log rows over 180 days (design §2.9), cursor per day
+    eq([db.T.automation_runs.map((r: any) => r.id), db.T.automation_log.some((l: any) => l.id === "l4"), db.T.automation_log.some((l: any) => l.id === "l5"), db.T.automation_state[0].housekeeping.day, db.T.automation_state[0].housekeeping.stage],
+      [["old", "keep", "other"], false, true, "2026-10-14", "done"], "housekeeping: finished runs and log rows over 180 days go (this business only), once a day");
     db.T.automation_runs.push({ id: "old2", business_id: "default", status: "done", finished_at: isoMs(NOW - 100 * DAYMS), due_at: isoMs(NOW - 100 * DAYMS) });
     await tickAt(db, NOW + HR);
     eq(db.T.automation_runs.some((r: any) => r.id === "old2"), true, "prune: once a day");
@@ -664,7 +920,8 @@ async function phase4Suite() {
     eq([pn.body.steps[2].would, pn.body.steps[2].until], ["wait", isoMs(syd("2026-10-15", 8))], "preview: an email that would land at night waits for the morning");
     clock = NOW;
     eq((await handle(db, { step: "preview", automation_id: "a-prev", record: { kind: "contact", id: "c1" } }, VA, false)).status, 403, "preview: owners and managers only");
-    const reg = await handle(db, { step: "registry" }, MANAGER, false);
+    // the phase-4 lists (since G2.4 the step "registry" answers with the stage-2 DTO: section 34)
+    const reg = { status: 200, body: registry() as any };
     const text = JSON.stringify(reg.body);
     eq([reg.status, reg.body.triggers.map((t: any) => t.type), reg.body.actions.find((x: any) => x.type === "text").available], [200, ["newLead", "stage", "jobClosed", "missedCall", "chat"], false], "registry: the lists for the builder (texts not available yet)");
     ok(!/=>|function|PRIV|secret/i.test(text) && JSON.stringify(JSON.parse(text)) === text, "registry: metadata only, no code, no secrets");
@@ -1198,7 +1455,7 @@ async function phase4Suite() {
     eq(Object.keys(CONDITIONS).filter((k) => !WF_FIELDS[k] || !CONDITIONS[k].ops.every((o) => WF_FIELDS[k].ops.includes(o))), [], "every phase-4 condition is a field with (at least) its phase-4 ops");
     eq(Object.keys(MERGE_FIELDS).filter((k) => !WF_MERGE[k]), [], "every phase-4 blank is a merge field");
     eq(availCtxOf({ phone_enabled: true, review_requests_auto: true }, { connectors: { xero: { connected: true } }, features: { leadAssignee: true } }),
-      { phone: true, xero: true, gbp: false, reviews: true, ai: false, teamEmail: false, assignee: true, atomicTags: false }, "availCtxOf reads the settings row and the catalog");
+      { phone: true, xero: true, gbp: false, reviews: true, ai: false, teamEmail: false, assignee: true, atomicTags: true }, "availCtxOf reads the settings row and the catalog (atomic tag / note edits: on since G2.3)");
 
     // narration templates only name config fields their entry has
     eq(entries.flatMap((e) => [...e.narration.matchAll(/\{([a-zA-Z_]+)\}/g)].map((m) => m[1]).filter((k) => !(k in obj(e.fields.properties)) && !(e.fields.oneOf || []).some((b: any) => k in obj(b.properties))).map((k) => `${e.key}.${k}`)), [],
@@ -1335,7 +1592,8 @@ async function phase4Suite() {
     const flow = (o: any = {}) => ({ id: "w-v2-0001", business_id: "default", name: "Flow", enabled: true, armed_at: "2026-10-01T00:00:00.000Z", version: 3, revision: 7, created_by_name: "Olivia Owner",
       trigger: {}, steps: [], settings: {}, ...o });
     const runRow = (o: any = {}) => ({ id: "r-v2", business_id: "default", automation_id: "w-v2-0001", automation_version: 3, event_key: "c1:new", event_type: "newLead", event_at: isoMs(NOW),
-      record_kind: "contact", record_id: "c1", contact_id: "c1", status: "running", step_index: 0, anchor_at: isoMs(NOW), due_at: isoMs(NOW), attempts: 1, context: {}, trigger_id: "t1", cursor_step: null, ...o });
+      record_kind: "contact", record_id: "c1", contact_id: "c1", status: "running", step_index: 0, anchor_at: isoMs(NOW), due_at: isoMs(NOW), attempts: 1, context: {}, trigger_id: "t1", cursor_step: null,
+      remove_requested: false, ...o });
     const push = (title: string, next: string | null = null, o: any = {}) => ({ kind: "action", type: "internal_notification", config: { channel: "push", to: { roles: ["owner"] }, title }, out: { next }, ...o });
     const mail = (next: string | null = null, o: any = {}) => ({ kind: "action", type: "send_email", config: { subject: "Your {service} enquiry", body: "{hi}, thanks." }, out: { next }, ...o });
     const period = (n: number, unit: string, next: string | null, o: any = {}) => ({ kind: "wait", type: "period", config: { n, unit, ...o }, out: { next } });
@@ -1463,6 +1721,16 @@ async function phase4Suite() {
       db = mk("continue", "");
       p = await step(db, NOW);
       eq(p.status, "done", "no date at all = passed");
+      // the date removed while the run waits (a booking cancelled, booked_for cleared): the run ends, never "passed"
+      for (const how of ["continue", "skip_comms", "end"]) {
+        sent.length = 0;
+        db = mk(how, "2026-10-20");
+        p = await step(db, NOW);
+        db.T.contacts[0].booked_for = null;
+        p = await step(db, NOW + 5 * MIN);
+        eq([p.status, p.reason, p.exit_reason, sent.length, rowsOf(db).filter((l: any) => l.status === "wait_finished").map((l: any) => l.detail.outcome)],
+          ["skipped", "the date was removed", "date_removed", 0, ["date_removed"]], `a date removed while waiting ends the run (no reminder of a cancelled booking), if passed: ${how}`);
+      }
       clock = NOW;
     }
 
@@ -1541,9 +1809,9 @@ async function phase4Suite() {
       db = world({ contacts: [lead("c1")], automations: [flow({ definition: doc({ n1: push("a") }) })], automation_runs: [runRow({ cursor_step: "gone" })] });
       eq((await step(db, NOW) as any).reason, "invalid: the step gone is gone", "a cursor at a step that no longer exists fails (never restarts the workflow)");
       // an unavailable step only skips (the run goes on); a migrated text keeps its phase-4 path
-      db = world({ contacts: [lead("c1")], automations: [flow({ definition: doc({ n1: { kind: "action", type: "add_tag", config: { tags: ["VIP"] }, out: { next: "n2" } }, n2: { kind: "action", type: "send_sms", config: { body: "{hi}" }, out: { next: null } } }) })], automation_runs: [runRow()] });
+      db = world({ contacts: [lead("c1")], automations: [flow({ definition: doc({ n1: { kind: "action", type: "assign_user", config: { user: "u-owner" }, out: { next: "n2" } }, n2: { kind: "action", type: "send_sms", config: { body: "{hi}" }, out: { next: null } } }) })], automation_runs: [runRow()] });
       const u1: any = await step(db, NOW);
-      eq([u1.status, logOf(db)], ["done", ["n1:skipped:unavailable: Coming with the new lead card", "n2:waiting_phone:waiting for the business phone"]], "unavailable steps skip with the reason; a text logs waiting_phone");
+      eq([u1.status, logOf(db)], ["done", ["n1:skipped:unavailable: Needs 'Assigned to' on the lead card", "n2:waiting_phone:waiting for the business phone"]], "unavailable steps skip with the reason; a text logs waiting_phone");
     }
 
     // ── watch: goals ahead and Stop on response; a goal met ahead is jumped to ──
@@ -1552,12 +1820,10 @@ async function phase4Suite() {
       const db = world({ contacts: [lead("c1")], automations: [flow({ definition: gdoc, settings: { stopOnResponse: true } })], automation_runs: [runRow()] });
       const w1: any = await step(db, NOW);
       eq(w1.watch, ["stage", "lead_status", "customer_replied"], "a hold watches the goals ahead and the reply when Stop on response is on");
-      WF_GOAL_MET.stage_reached = (n: any, f: any) => (n.config.stages as string[]).includes(String(f.contact && f.contact.status));
       db.T.contacts[0].status = "Booked";
       const w2: any = await step(db, NOW + HR);
-      delete WF_GOAL_MET.stage_reached;
-      eq([rowsOf(db).filter((l: any) => l.status === "jumped").map((l: any) => [l.step_id, l.detail.to, l.detail.goal]), w2.loop, w2.reason], [[["n1", "n2", true]], 0, "not supported yet: goal stage_reached"],
-        "a goal met ahead: the wait is left at once (jumped; the goal step itself comes with G2.2)");
+      eq([rowsOf(db).filter((l: any) => l.status === "jumped").map((l: any) => [l.step_id, l.detail.to, l.detail.goal]), w2.loop, w2.status, rowsOf(db).filter((l: any) => l.step_id === "n2").map((l: any) => l.status)],
+        [[["n1", "n2", true]], 0, "done", ["executed"]], "a goal met ahead: the wait is left at once (jumped), the goal step runs (executed) and the run goes on");
     }
 
     // ── an "Only on" window woken early (automation_wake) looks at the window again: the pass mark waits for its hold ──
@@ -1609,12 +1875,12 @@ async function phase4Suite() {
       const simDb = seed(), before = JSON.stringify(simDb.T), f0 = fetchCalls;
       sent.length = 0;
       const d: any = await dryRunV2(simDb, simDb.T.automations[0], { record_kind: "contact", record_id: "c1", contact_id: "c1", event_type: "newLead", event_at: isoMs(ev), trigger_id: "t1", context: {} }, ctxOf(simDb), ev);
-      const norm = (path: any[]) => path.map((x: any) => ({ ...x, status: ["sent", "queued", "would"].includes(x.status) ? "acted" : x.status, preview: undefined }));
+      const norm = (path: any[]) => path.map((x: any) => ({ ...x, status: ["sent", "queued", "executed", "would"].includes(x.status) ? "acted" : x.status, preview: undefined }));
       const realPath = wfPathOfRows(realDb.T.automation_log.filter((l: any) => l.run_id === "r-par"));
       eq([pr.status, d.ok, d.ended], ["done", true, "done"], "the fixture runs to the end, really and dry");
       eq(JSON.stringify(norm(d.path)), JSON.stringify(norm(realPath)), "simFx path = realFx path (every step, status, reason, time and branch)");
       eq(realPath.map((x: any) => `${x.stepId}:${x.rowKind}:${x.status}${x.reason && x.rowKind !== "exit" ? ":" + x.reason : ""}`), ["n1:step:waiting", "n1:step:wait_finished", "n2:step:wait_finished", "n3:step:branch", "n2:step:wait_finished", "n3:step:branch",
-        "n4:action:queued", "n5:action:sent", "n8:action:skipped:already contacted today", "n6:step:waiting", "n6:step:wait_finished", "n7:action:sent", "n7:exit:finished"], "the fixture's path: deferred to the morning (back over the If / else to the window), capped second email, date wait");
+        "n4:action:queued", "n5:action:sent", "n8:action:skipped:already contacted today", "n6:step:waiting", "n6:step:wait_finished", "n7:action:executed", "n7:exit:finished"], "the fixture's path: deferred to the morning (back over the If / else to the window), capped second email, date wait (the task: one automation_apply, G2.3)");
       eq([d.path.find((x: any) => x.stepId === "n4").preview.subject, d.path.find((x: any) => x.stepId === "n7").preview.board, d.path.find((x: any) => x.stepId === "n4").at], ["Your Aircon cleaning enquiry", "ron", isoMs(syd("2026-10-16", 8))], "the dry run previews the filled message and the board, at the time it would go");
       eq([JSON.stringify(simDb.T) === before, sent.length, fetchCalls - f0, simDb.calls.filter((c: string) => /\.(insert|update|upsert|delete)$|^rpc:/.test(c))], [true, 0, 0, []], "the dry run: the database byte-identical, nothing sent, no network, no write call");
       ok(realSent === 1 && d.writes.some((w: any) => w.op === "run"), "the real run sent its push; the dry run only recorded its run writes", { realSent });
@@ -1624,10 +1890,11 @@ async function phase4Suite() {
       try { ro.from("contacts").insert({ id: "x" }); } catch (e) { e1 = (e as Error).name; }
       try { ro.rpc("automation_claim_customer_v2", {}); } catch (e) { e2 = (e as Error).name; }
       eq([e1, e2, (await ro.from("contacts").select("id").eq("id", "c1").maybeSingle()).data], ["SimulationWriteError", "SimulationWriteError", { ...simDb.T.contacts[0] }], "readOnlySb: reads pass, writes and RPCs throw");
+      const realGoal = WF_GOAL_MET.stage_reached;
       WF_GOAL_MET.stage_reached = async (_n: any, _f: any, sb: any) => { await sb.from("contacts").update({ status: "x" }).eq("id", "c1"); return false; };
       const gw = await dryRunV2(simDb, flow({ definition: doc({ n1: period(1, "days", "n2"), n2: { kind: "goal", type: "stage_reached", config: { stages: ["Booked"], ifNotMet: "continue" }, out: { next: null } } }) }),
         { record_kind: "contact", record_id: "c1", contact_id: "c1", event_type: "newLead", event_at: isoMs(NOW), context: {} }, ctxOf(simDb), NOW);
-      delete WF_GOAL_MET.stage_reached;
+      WF_GOAL_MET.stage_reached = realGoal;
       eq([gw, JSON.stringify(simDb.T) === before], [{ ok: false, reason: "internal: write attempted" }, true], "a write attempted in a dry run → ok:false 'internal: write attempted', nothing written");
       const sf = simFx(ro, { id: "a1" });
       eq([await sf.apply({ p_kind: "contact" }), await sf.enroll({ p_automation: "a2" }), await sf.removeRuns({ contactId: "c1" }), sf.writes.map((w: any) => w.op), JSON.stringify(simDb.T) === before], ["would", "would", 0, ["apply", "enroll", "removeRuns"], true], "simFx records apply / enroll / remove instead of writing");
@@ -1766,8 +2033,16 @@ async function phase4Suite() {
     // the staging check script is there and covers the four checks the plan names
     const chk = src(SQL_DIR + "stage2-part1-staging-checks.sql");
     ok(["automation_claim_customer(", "automation.capture_test_error", "set local role authenticated", "has_column_privilege", "__undo__"].every((x) => chk.includes(x))
-      && (chk.match(/raise notice 'PASS \d+/g) || []).length === 13 && chk.includes("automations_a_v2_pin") && chk.includes("for update skip locked"),
-      "the staging checks: phase-4 claim, forced capture failure, RLS as VA/technician, column privileges, the v2 column pin, the non-blocking counter (13 checks, all undone)");
+      && (chk.match(/raise notice 'PASS \d+/g) || []).length === 21 && chk.includes("automations_a_v2_pin") && chk.includes("for update skip locked")
+      && chk.includes("PASS 19 — the guard v2") && chk.includes("PASS 20 — the ROLLBACK list") && chk.includes("PASS 21 — the SQL shape and arm keys")
+      && chk.includes("PASS 14 — event-store rows fit") && chk.includes("PASS 15 — a captured Lead changed event") && chk.includes("PASS 16 — Add to workflow run")
+      && chk.includes("PASS 17 — the card''s atomic tag / note edits") && chk.includes("PASS 18 — the inbound link counter") && chk.includes("contact_tags_edit(c, array['VIP', 'vip']"),
+      "the staging checks: phase-4 claim, forced capture failure, RLS as VA/technician, column privileges, the v2 column pin, the non-blocking counter (13 Part-1 checks) + the event store (G2.1: 2) + the logic steps' writes (G2.2: 1) + record writes / atomic edits / the link counter (G2.3: 2) + the guard v2, the ROLLBACK list, the SQL keys (G2.4: 3), all undone");
+    // G2.2's staging check 16 calls the Part-1 functions with the engine's own argument lists (Add to workflow's enrolment, mark as read)
+    const c16 = chk.slice(chk.indexOf("-- 16. (G2.2)"));
+    ok(/automation_enroll\('default', b, 1, 1, null, 'wf:' \|\| r1::text \|\| ':n1:0', 'newLead', now\(\), 'contact', c::text, c, c::text, c::text, 'off', 'n1',\s+'\{"form":"website"\}'::jsonb, 'workflow', 1, r1, r1, false, now\(\), now\(\)\)/.test(c16)
+      && c16.includes("status = 'running' and remove_requested = false") && c16.includes(`'[{"op":"read"}]'::jsonb`) && /raise exception '__undo__'/.test(c16),
+      "staging check 16 (G2.2): the engine's Add-to-workflow enrolment, the guarded run write and mark as read, all undone");
   }
 
   // ── 29. the fake database's Part-1 keys and RPCs (the same rules as the SQL functions; staging check 5–7 do the same) ──
@@ -1882,10 +2157,10 @@ async function phase4Suite() {
       await modeOf("42501", "permission denied for column phase4_compat"), await modeOf("PGRST301", "JWT expired")], ["phase4", "phase4", "stop", "stop"],
       "engineMode: only 'the column is not there' means phase 4; any other error stops (never a guess)");
 
-    // phase4_compat off in this build: still the phase-4 scanners (no event store yet), still advanceV2
+    // phase4_compat off (Part 2 step E): the event store starts the run (G2.1, section 31), still advanceV2
     const raw5 = world({ contacts: [lead("c1")], automations: [auto({ id: "a-cmp-0006" })], automation_state: [{ business_id: "default", tick_lease_until: null, pruned_on: null, phase4_compat: false }] });
     r = await tickAt(raw5, NOW);
-    eq([r.engine, r.enqueued, logOf(raw5), spy], ["v2-compat", 1, ["p1:sent"], 2], "compat switch: phase4_compat = false waits for the event store (G2.1): phase-4 scanners kept");
+    eq([r.engine, r.enqueued, logOf(raw5), spy, raw5.T.automation_events.map((e: any) => e.event_key)], ["v2-events", 1, ["p1:sent"], 2, ["c1:new"]], "compat switch: phase4_compat = false = the event store (same key), runs by advanceV2");
 
     // the function's log says which engine runs, once per change
     const said: string[] = [], log0 = console.log;
@@ -1914,6 +2189,1746 @@ async function phase4Suite() {
       [["waiting", "waiting", "done"], ["p1:sent", "t1:sent", "e1:queued"], 1, 1, 1], "cutover: the phase-4 reference run waits twice, pushes, adds a task, queues an email and ends");
     eq([there, back, v2only], [p4only, p4only, p4only], "cutover: phase 4 → v2 (deploy), v2 → phase 4 (rollback) and v2 alone give phase 4's runs, due times, log rows, pushes, tasks and emails");
     io.advance = PROD_ADVANCE;
+  }
+
+  // ── 31. the event store (G2.1, design §3.2–§3.3, §3.10, §8.1 #11): producers with watermarks and narrow time windows,
+  //        the scheduler's catch-up, the capture list (automation_wanted), settle, the matcher (reasons, one trigger-log
+  //        row per workflow × trigger × event, the 200 cap, the daily totals), enrolment through automation_enroll, the
+  //        app's "look now", wake, Stop on response, the time guard ──
+  {
+    io.advance = PROD_ADVANCE;
+    const ARMED = "2026-10-01T00:00:00.000Z";
+    const NONE = { match: "all", segments: [{ match: "all", rules: [] }] };
+    const F1 = (rules: any[]) => ({ match: "all", segments: [{ match: "all", rules }] });
+    const pushN = (next: string | null = null, title = "Hi {name}") => ({ kind: "action", type: "internal_notification", config: { channel: "push", to: { roles: ["owner"] }, title }, out: { next } });
+    let wfN = 0;
+    const wf = (triggers: any[], nodes: any = { n1: pushN() }, settings: any = {}, o: any = {}) => {
+      wfN++;
+      return { id: `w${String(wfN).padStart(3, "0")}-0000-0000`, business_id: "default", name: `Workflow ${wfN}`, enabled: true, armed_at: ARMED, version: 1, revision: 1,
+        created_by_name: "Olivia Owner", trigger: {}, steps: [], definition: { schema: 2, seq: 50, entry: Object.keys(nodes)[0] ?? null, triggers, nodes },
+        settings: { reentry: "off", perRecord: true, ...settings }, deleted_at: null, ...o };
+    };
+    const evState = (o: any = {}) => [{ business_id: "default", tick_lease_until: null, pruned_on: null, phase4_compat: false, ...o }];
+    const evWorld = (over: Record<string, any[]> = {}) => world({ automation_state: evState(), automation_events: [], automation_trigger_log: [], automation_trigger_daily: [],
+      automation_enrollment_keys: [], automation_wanted: [], ...over });
+    const capEv = (type: string, key: string, o: any = {}) => ({ id: `ev-${key}`, business_id: "default", type, event_key: key, record_kind: "contact", record_id: o.contact_id ?? "c1",
+      contact_id: "c1", at: isoMs(NOW - MIN), available_at: isoMs(NOW - MIN), ctx: {}, source: "capture", chain_depth: 0, status: "new", attempts: 0, ...o });
+    const tlog = (db: any) => db.T.automation_trigger_log.map((r: any) => `${r.event_key}:${r.matched ? "match" : "miss"}${r.reason ? ":" + r.reason : ""}`).sort();
+    const daily = (db: any) => db.T.automation_trigger_daily.map((d: any) => ({ a: d.attempted, m: d.matched, e: d.enrolled, r: Object.fromEntries(Object.entries(d.reasons).sort()) }));
+    const evStatus = (db: any) => db.T.automation_events.map((e: any) => `${e.event_key}:${e.status}`).sort();
+
+    // pure helpers
+    eq([evTriggerType("missedCall"), evTriggerType("stage"), evTriggerType("googleReview"), evSettleMs("stage"), evSettleMs("contact_changed")], ["call_details", "stage", "review_received", 30e3, 0],
+      "event types: a phase-4 type fires its v2 trigger (missedCall → Call details); stage settles 30 s");
+    {
+      const AW = (t: any, ctx: any, id = "A") => triggerAddressedAway({ id: "t1", filters: NONE, ...t }, { ctx }, { id });
+      const cd = { field: "lead.booked_for", when: "before", offset: { n: 1, unit: "days" }, at: "09:00" };
+      eq([AW({ type: "scheduler" }, { wf_id: "A", trigger_id: "t1" }), AW({ type: "scheduler" }, { wf_id: "B", trigger_id: "t1" }), AW({ type: "scheduler", id: "t2" }, { wf_id: "A", trigger_id: "t1" }),
+        AW({ type: "inbound_webhook" }, { _wf: "B", _trigger: "t1" }), AW({ type: "stale", config: { days: 7 } }, { days: 7 }), AW({ type: "stale", config: { days: 7 } }, { days: 3 }),
+        AW({ type: "custom_date", config: cd }, { field: "lead.booked_for", offset_key: customDateKey(cd) }), AW({ type: "custom_date", config: cd }, { field: "lead.booked_for", offset_key: "x" }),
+        AW({ type: "task_reminder", config: { before: { n: 30, unit: "minutes" } } }, { before: offPart({ n: 30, unit: "minutes" }) }), AW({ type: "task_reminder", config: { before: { n: 30, unit: "minutes" } } }, { before: "1h" }),
+        AW({ type: "newLead" }, {})],
+        [false, true, true, true, false, true, false, true, false, true, false],
+        "an event made for one trigger (a slot, a webhook link) or one setting (stale days, date and offset, reminder offset) is never looked at by the others (no unmatched row, no daily count)");
+    }
+    const S0 = normWfSettings({ reentry: "off", perRecord: true });
+    eq([enrollKeyOf(S0, { type: "jobClosed", record_kind: "job", record_id: "j1", contact_id: "c1", event_key: "j1" }), enrollKeyOf({ ...S0, perRecord: false }, { type: "jobClosed", record_kind: "job", record_id: "j1", contact_id: "c1", event_key: "j1" }),
+      enrollKeyOf(S0, { type: "contact_changed", record_kind: "contact", record_id: "c1", contact_id: "c1", event_key: "k" }), enrollKeyOf(S0, { type: "scheduler", record_kind: "none", record_id: null, contact_id: null, event_key: "sched:w:t1:2026-10-14T09:00" }),
+      enrollKeyOf(normWfSettings({ reentry: "legacy_always" }, { reentry: "legacy_always" }), { type: "newLead", record_kind: "contact", record_id: "c1", contact_id: "c1", event_key: "c1:new" })],
+      [{ key: "job:j1", lock: "job:j1" }, { key: "c1", lock: "c1" }, { key: "c1", lock: "c1" }, { key: "sched:w:t1:2026-10-14T09:00", lock: "sched:w:t1:2026-10-14T09:00" }, { key: "c1", lock: null }],
+      "enrolment key: per job / call / chat (Allow multiple jobs), else per lead, contactless = the event key; upgraded rows hold no lock");
+    eq([reentryFor(S0, "stale"), reentryFor(S0, "newLead"), reentryFor({ ...S0, reentry: "after_exit" }, "newLead"), reentryFor({ ...S0, reentry: "legacy_always" }, "stale")],
+      ["after_exit", "off", "after_exit", "legacy_always"], "re-entry: an alwaysReenter trigger enters again even with re-entry off");
+    eq([customDateKey({ when: "before", offset: { n: 1, unit: "days" }, at: "08:30" }), customDateKey({ when: "on" }), customDateKey({ when: "after", offset: { n: 0, unit: "days" } })],
+      ["before:1days@08:30", "on:0@09:00", "after:0@09:00"], "custom date key: when, offset, time (09:00 when not set)");
+    eq([schedulerSlots({ freq: "daily", at: "09:00" }, syd("2026-10-13", 8), syd("2026-10-14", 9), "Australia/Sydney"),
+      schedulerSlots({ freq: "weekly", days: [1, 3], at: "07:15" }, syd("2026-10-11", 0), syd("2026-10-18", 0), "Australia/Sydney"),
+      schedulerSlots({ freq: "monthly", monthDays: [-1, 15], at: "10:00" }, syd("2026-10-14", 12), syd("2026-11-16", 0), "Australia/Sydney"),
+      schedulerSlots({ freq: "daily", at: "09:00" }, syd("2026-10-14", 9), syd("2026-10-14", 9, 30), "Australia/Sydney")],
+      [["2026-10-13T09:00", "2026-10-14T09:00"], ["2026-10-12T07:15", "2026-10-14T07:15"], ["2026-10-15T10:00", "2026-10-31T10:00", "2026-11-15T10:00"], []],
+      "scheduler slots in (since, now]: daily, weekly days, monthly days (−1 = the last), a slot at since already went");
+    eq(evRow({ key: "c1:new", type: "stage", recordKind: "contact", recordId: "c1", at: isoMs(NOW), contactId: "c1", ctx: { stage: "Quoted" } }, "scan"),
+      { business_id: "default", type: "stage", event_key: "c1:new", record_kind: "contact", record_id: "c1", contact_id: "c1", at: isoMs(NOW), available_at: isoMs(NOW + 30e3), ctx: { stage: "Quoted" }, source: "scan" },
+      "an event row: available_at = at + the type's settle time");
+    eq([canEmitV2(OWNER, "payment_received"), canEmitV2(VA, "contact_changed"), canEmitV2(VA_NOCRM, "contact_changed"), canEmitV2(VA, "payment_received"), canEmitV2(TECH, "task_added"),
+      canEmitV2(OWNER, "inbound_webhook"), canEmitV2(VA, "newLead"), canEmitV2(VA_NOCRM, "newLead"), canEmitV2(OWNER, "doc_expiring")],
+      [true, true, false, false, false, false, true, false, false], "'look now' with the event store: owners and managers; the office by the record's kind; never a hook or a built-in-only type");
+    eq(wfCatalogKey({ keys: { taskDone: "Finished" } }, "taskDone", "Done") + "|" + wfCatalogKey({}, "taskDone", "Done"), "Finished|Done", "renamed record values come from catalog.keys (= SQL automation_catalog_key)");
+
+    // what is wanted: triggers, the events held runs listen for, a reply when Stop on response is on
+    {
+      const pubs = [wf([{ id: "t1", type: "contact_changed", filters: NONE }], { n1: { kind: "wait", type: "period", config: { n: 1, unit: "days" }, out: { next: "n2" } },
+        n2: { kind: "goal", type: "tag_added", config: { tags: ["VIP"], ifNotMet: "continue" }, out: { next: "n3" } }, n3: pushN() }),
+        wf([{ id: "t1", type: "newLead", filters: NONE }, { id: "t2", type: "stage", filters: NONE, disabled: true }], { n1: { kind: "wait", type: "conditions", config: { when: F1([{ field: "lead.email", op: "is_not_empty" }]) }, out: { next: "n2" } }, n2: pushN() }, { stopOnResponse: true }),
+        auto({ id: "a-ev-legacy", trigger: { type: "missedCall", params: {} } })].map((a) => ({ a, R: runDocOf(a) }));
+      eq([wfWatchTypes(pubs), wfWantedTypes(pubs)], [["contact_changed", "contact_tag", "customer_replied"], ["call_details", "contact_changed", "contact_tag", "customer_replied", "newLead"]],
+        "wanted = enabled trigger types (a disabled trigger not) ∪ goal / condition-field wake events ∪ a reply when Stop on response is on");
+      eq([callsBeyondMissed(pubs.slice(2)), callsBeyondMissed([...pubs, { a: null as any, R: runDocOf(wf([{ id: "t1", type: "call_details", filters: F1([{ field: "trigger.call_status", op: "is", v: "answered" }]) }])) }])],
+        [false, true], "answered / outgoing calls are scanned only when a Call details trigger takes them (an upgraded missed-call trigger pins Missed)");
+    }
+
+    // a reused phase-4 scanner looks back the whole lookback every minute (as phase 4): a stage move whose time is 40
+    // minutes old when it reaches the database (a retried save) is still caught though the watermark says a minute ago;
+    // a time source goes on from its watermark
+    {
+      const A = wf([{ id: "t1", type: "stage", filters: NONE }]);
+      const db = evWorld({ contacts: [lead("c1", { status: "Quoted", stage_changed_at: isoMs(NOW - 40 * MIN), created_at: "2026-10-01", messages: [{ at: "2026-10-01T00:00:00.000Z" }] })], automations: [A],
+        automation_state: evState({ scan_marks: { stage: isoMs(NOW - MIN) } }) });
+      await tickAt(db, NOW);
+      eq(db.T.automation_events.filter((e: any) => e.type === "stage").map((e: any) => e.event_key), [`c1:Quoted:${isoMs(NOW - 40 * MIN)}`], "scan sources: the whole lookback each minute (a late stage move is not lost)");
+    }
+
+    // the switch: phase4_compat = false → the event store starts the run (same key), executed by advanceV2 in the same tick
+    {
+      const db = evWorld({ contacts: [lead("c1")], automations: [auto({ id: "a-ev-0001" })] });
+      sent.length = 0;
+      const r: any = await tickAt(db, NOW);
+      eq([r.engine, r.events, r.inserted, r.matched, r.enqueued, logOf(db), db.T.automation_runs.map((x: any) => [x.status, x.event_key, x.trigger_id, x.cursor_step === null ? "end" : x.cursor_step])],
+        ["v2-events", 1, 1, 1, 1, ["p1:sent"], [["done", "c1:new", "t1", "end"]]], "event store: a phase-4 row is started by the matcher (same event key) and runs in the same tick");
+      eq([evStatus(db), db.T.automation_events[0].source, tlog(db), daily(db), db.T.automation_wanted.map((w: any) => w.event_type), db.T.automation_state[0].wanted_hash, Object.keys(db.T.automation_state[0].scan_marks)],
+        [["c1:new:done"], "scan", ["c1:new:match"], [{ a: 1, m: 1, e: 1, r: {} }], ["newLead"], "newLead", ["arrivals"]], "…the event is done, logged once, counted; the capture list and the watermark are written");
+      const calls0 = db.calls.length;
+      const r2: any = await tickAt(db, NOW + 20e3);
+      eq([r2.inserted, r2.claimed, db.T.automation_runs.length, db.calls.slice(calls0).filter((c: string) => c.startsWith("automation_wanted")).length], [0, 0, 1, 0],
+        "second scan of the same minute inserts 0, claims 0; an unchanged capture list is not written again");
+    }
+
+    // matcher reasons (design §3.3): before_published (counted only), test_record, loop_guard, own_change, filter (GHL words),
+    // enrolled, already_enrolled, reentry_off, duplicate_event — one trigger-log row each, the daily totals
+    {
+      const A = wf([{ id: "t1", type: "contact_changed", filters: F1([{ field: "service", op: "is", v: "Aircon" }]) }], { n1: { kind: "wait", type: "period", config: { n: 1, unit: "days" }, out: { next: "n2" } }, n2: pushN() });
+      const B = auto({ id: "a-ev-0002", trigger: { type: "jobClosed", params: {} } });
+      const db = evWorld({
+        contacts: [lead("c1"), lead("c2", { tags: ["test"] }), lead("c3", { division: "s9q" })], automations: [A, B],
+        automation_runs: [{ id: "r-old", business_id: "default", automation_id: B.id, automation_version: 1, event_key: "j9", event_type: "jobClosed", event_at: isoMs(NOW - 5 * MIN),
+          record_kind: "job", record_id: "j9", contact_id: null, status: "done", step_index: 1, anchor_at: isoMs(NOW - 5 * MIN), due_at: isoMs(NOW - 5 * MIN), attempts: 1, context: {} }],
+        automation_events: [
+          capEv("contact_changed", "c1:chg:email:1", { at: isoMs(NOW - 3 * MIN), available_at: isoMs(NOW - 3 * MIN) }), capEv("contact_changed", "c1:chg:phone:2", { at: isoMs(NOW - 2 * MIN), available_at: isoMs(NOW - 2 * MIN) }),
+          capEv("contact_changed", "c2:chg:email:3", { contact_id: "c2", record_id: "c2" }), capEv("contact_changed", "c1:chg:email:4", { chain_depth: 4 }),
+          capEv("contact_changed", "c1:chg:email:5", { cause_automation_id: A.id, cause_run_id: "r-x", chain_depth: 1 }), capEv("contact_changed", "c1:chg:email:6", { at: "2026-09-30T23:00:00.000Z" }),
+          capEv("contact_changed", "c3:chg:email:7", { contact_id: "c3", record_id: "c3" }),
+          capEv("jobClosed", "j9", { contact_id: null, record_kind: "job", record_id: "j9", source: "scan", ctx: { jobDate: "2026-10-14" } }),
+        ] });
+      await tickAt(db, NOW);
+      eq(tlog(db), ["c1:chg:email:1:match", "c1:chg:email:4:miss:loop_guard", "c1:chg:email:5:miss:own_change", "c1:chg:phone:2:match:already_enrolled", "c2:chg:email:3:miss:test_record",
+        "c3:chg:email:7:miss:filter:service", "j9:match:duplicate_event"], "matcher: every reason, one row each; an event before publishing has no row");
+      const f7 = db.T.automation_trigger_log.find((r: any) => r.event_key === "c3:chg:email:7");
+      eq([f7.detail.text, f7.detail.received, f7.detail.expected], ["Filter not matched - Service - Received value: s9q, Expected value: Aircon", "s9q", "Aircon"], "filter reason in GHL's words, with the received and expected values");
+      eq(daily(db).sort((x: any, y: any) => y.a - x.a), [{ a: 7, m: 2, e: 1, r: { already_enrolled: 1, before_published: 1, "filter:service": 1, loop_guard: 1, own_change: 1, test_record: 1 } },
+        { a: 1, m: 1, e: 0, r: { duplicate_event: 1 } }], "daily totals: attempted 7, matched 2, enrolled 1, every reason counted (before_published only here)");
+      eq([db.T.automation_runs.length, db.T.automation_enrollment_keys.map((k: any) => k.enrollment_key), evStatus(db).every((s: string) => s.endsWith(":done"))], [2, ["c1"], true], "one run enrolled (lead c1, ledger key c1); every event done");
+      // the run ends; the same lead changes again: re-entry off → reentry_off (the ledger), never a second run
+      db.T.automation_runs.find((r: any) => r.automation_id === A.id).status = "done"; db.T.automation_runs.find((r: any) => r.automation_id === A.id).active_lock = null;
+      db.T.automation_events.push(capEv("contact_changed", "c1:chg:email:8"));
+      await tickAt(db, NOW + MIN);
+      eq([tlog(db).filter((x: string) => x.startsWith("c1:chg:email:8")), db.T.automation_runs.length], [["c1:chg:email:8:match:reentry_off"], 2], "re-entry off: a lead that went through never enters again");
+      // a retried event (its lease ran out) never writes a second trigger-log row
+      const e1 = db.T.automation_events.find((e: any) => e.event_key === "c1:chg:email:1"); e1.status = "new";
+      await tickAt(db, NOW + 2 * MIN);
+      eq([db.T.automation_trigger_log.filter((r: any) => r.event_key === "c1:chg:email:1").length, db.T.automation_runs.length], [1, 2], "one trigger-log row per (workflow, trigger, event), also after a retry");
+    }
+
+    // the unmatched cap: 250 unmatched events → 200 rows, all 250 counted
+    {
+      const A = wf([{ id: "t1", type: "contact_changed", filters: F1([{ field: "service", op: "is", v: "Nope" }]) }]);
+      const cs = Array.from({ length: 250 }, (_, i) => lead(`u${i}`));
+      const db = evWorld({ contacts: cs, automations: [A], automation_events: cs.map((c, i) => capEv("contact_changed", `${c.id}:chg:email:${i}`, { contact_id: c.id, record_id: c.id })) });
+      await tickAt(db, NOW);
+      eq([db.T.automation_trigger_log.length, daily(db)[0].a, daily(db)[0].r["filter:service"], db.T.automation_runs.length], [200, 250, 250, 0], "unmatched cap: 200 detail rows a trigger a day, every one counted");
+      db.T.automation_events.push(capEv("contact_changed", "u0:chg:email:x", { contact_id: "u0", record_id: "u0" }));
+      await tickAt(db, NOW + MIN);
+      eq([db.T.automation_trigger_log.length, daily(db)[0].a], [200, 251], "…the cap holds across ticks (read from the daily totals)");
+    }
+
+    // settle: a stage move at t is not matched at t+10 s, matched at t+31 s (the app's Undo)
+    {
+      const T0 = NOW;
+      const A = wf([{ id: "t1", type: "stage", filters: F1([{ field: "trigger.stage", op: "is", v: "Quoted" }]) }]);
+      const db = evWorld({ contacts: [lead("c1", { status: "Quoted", stage_changed_at: isoMs(T0) })], automations: [A] });
+      sent.length = 0;
+      await tickAt(db, T0 + 10e3);
+      eq([db.T.automation_events.length, db.T.automation_events[0].status, db.T.automation_runs.length], [1, "new", 0], "settle: produced at t+10 s, not matched yet");
+      await tickAt(db, T0 + 31e3);
+      eq([db.T.automation_runs.length, db.T.automation_runs[0].status, sent.length > 0, db.T.automation_runs[0].context], [1, "done", true, { stage: "Quoted" }], "settle: matched and run at t+31 s");
+    }
+
+    // settle + Undo: a stage move undone within its settle time ("the move stands" checked at match time) is dropped by
+    // the matcher with its reason, never enrolled and then skipped; phase 4 never saw it either. A later real move does
+    // not bring it back (a run enrolled anyway would have pushed after its 2-hour wait). The same world in compat mode
+    // (phase 4's scanners): the same nothing.
+    {
+      const T0 = NOW, key = `c1:Quoted:${isoMs(T0)}`;
+      const P4 = () => auto({ id: "a-undo-0001", trigger: { type: "stage", params: { stage: "Quoted" } },
+        steps: [{ id: "w1", kind: "wait", unit: "hours", n: 2 }, { id: "p1", kind: "action", type: "push", to: { roles: ["owner"] }, title: "Quoted: {name}" }] });
+      const play = async (ev: boolean) => {
+        const cs = [lead("c1", { status: "Quoted", stage_changed_at: isoMs(T0) })];
+        const db = ev ? evWorld({ contacts: cs, automations: [P4()] }) : world({ contacts: cs, automations: [P4()] });
+        sent.length = 0;
+        await tickAt(db, T0 + 10e3);
+        Object.assign(db.T.contacts[0], { status: "New", stage_changed_at: isoMs(T0 - 3 * DAYMS) });   // the app's Undo: the old stage and its time
+        await tickAt(db, T0 + 31e3);
+        const mid = [db.T.automation_runs.length, ev ? evStatus(db) : null, ev ? tlog(db) : null, ev ? daily(db) : null];
+        Object.assign(db.T.contacts[0], { status: "Booked", stage_changed_at: isoMs(T0 + HR) });   // a real move later: its time is past the undone move
+        for (const t of [T0 + HR + 31e3, T0 + 2 * HR + MIN, T0 + 3 * HR]) await tickAt(db, t);
+        return { mid, runs: db.T.automation_runs.length, sent: sent.length };
+      };
+      const ev = await play(true), p4 = await play(false);
+      eq(ev.mid, [0, [`${key}:done`], [`${key}:miss:move_undone`], [{ a: 1, m: 0, e: 0, r: { move_undone: 1 } }]],
+        "a stage move undone within its settle time: no run (the matcher drops it with its reason), the event done, counted");
+      eq([ev.runs, ev.sent, p4.runs, p4.sent], [0, 0, 0, 0], "…a later real move never brings it back; phase 4 (compat) made no run and sent nothing either");
+      eq(WF_REASONS.move_undone, "The stage move was undone", "the reason in words");
+    }
+
+    // two real moves within the settle time (Quoted, then Booked 5 s later; the first one seen by a tick while fresh): an
+    // UPGRADED workflow keeps phase 4's view — only the lead's current move starts it, the first is dropped ("moved_on"),
+    // as phase 4 (compat) never saw it; a native v2 doc fires on every move (GHL). Quoted → Booked → Quoted again within
+    // the settle time: one run, for the last move (phase 4's own key).
+    {
+      const T0 = NOW, at = (ms: number) => isoMs(T0 + ms);
+      const P4 = () => auto({ id: "a-mv-0001", trigger: { type: "stage", params: { stage: "Quoted" } }, steps: [{ id: "p1", kind: "action", type: "push", to: { roles: ["owner"] }, title: "Quoted: {name}" }] });
+      const V2 = () => wf([{ id: "t1", type: "stage", filters: F1([{ field: "trigger.stage", op: "is", v: "Quoted" }]) }]);
+      const play = async (ev: boolean, A: any, back: boolean) => {
+        const cs = [lead("c1", { status: "Quoted", stage_changed_at: at(0) })];
+        const db = ev ? evWorld({ contacts: cs, automations: [A] }) : world({ contacts: cs, automations: [A] });
+        const move = (status: string, ms: number) => Object.assign(db.T.contacts[0], { status, stage_changed_at: at(ms) });
+        sent.length = 0;
+        await tickAt(db, T0 + 3e3);   // the first move, seen while fresh (the event store keeps it as an event)
+        move("Booked", 5e3);
+        await tickAt(db, T0 + 8e3);
+        if (back) move("Quoted", 10e3);
+        for (const t of [T0 + 31e3, T0 + 41e3, T0 + 2 * MIN, T0 + 3 * MIN]) await tickAt(db, t);
+        LAST = db;
+        return [db.T.automation_runs.map((r: any) => `${r.event_key}:${r.status}`), sent.length];
+      };
+      let LAST: any = null;
+      const evUp = await play(true, P4(), false), upLog = tlog(LAST);
+      eq([evUp, await play(false, P4(), false)], [[[], 0], [[], 0]], "upgraded: two moves within 30 s → no run in the event store, none in phase 4 (compat)");
+      eq(upLog, [`c1:Booked:${at(5e3)}:miss:filter:trigger.stage`, `c1:Quoted:${at(0)}:miss:moved_on`], "…the first move dropped as 'moved_on' (the lead had already left it), the second does not match the trigger");
+      eq(await play(true, V2(), false), [[`c1:Quoted:${at(0)}:done`], 1], "a native v2 doc: the same two moves → one run (every move fires, as GHL)");
+      eq([await play(true, P4(), true), await play(false, P4(), true)], [[[`c1:Quoted:${at(10e3)}:done`], 1], [[`c1:Quoted:${at(10e3)}:done`], 1]],
+        "upgraded: Quoted → Booked → Quoted within 30 s → one run, for the last move, in both engines");
+      eq([WF_REASONS.moved_on, stageMoveCurrent({ status: "Quoted", stage_changed_at: at(0) }, { at: at(0), ctx: { stage: "Quoted" } }), stageMoveCurrent({ status: "Quoted", stage_changed_at: at(10e3) }, { at: at(0), ctx: { stage: "Quoted" } }),
+        stageMoveCurrent({ status: "Booked", stage_changed_at: at(0) }, { at: at(0), ctx: { stage: "Quoted" } }), stageMoveCurrent(null, { at: at(0), ctx: { stage: "Quoted" } })],
+        ["The lead had already moved to another stage", true, false, false, false], "the current move: the lead's stage now, moved there at the event's time");
+    }
+
+    // a slow minute (design §3.2): the 8-second produce budget counts from the start of produce (not of the tick); at least
+    // one producer runs every tick and their order turns (scan_marks._next), so no source starves; the matcher looks at
+    // at least one event a tick. A very slow database: every look at the clock costs 9 seconds.
+    {
+      const A = wf([{ id: "t1", type: "newLead", filters: NONE }, { id: "t2", type: "stage", filters: NONE }, { id: "t3", type: "jobClosed", filters: NONE }, { id: "t4", type: "chat", filters: NONE }]);
+      const db = evWorld({ contacts: [lead("c1", { status: "Quoted", stage_changed_at: isoMs(NOW - 5 * MIN) })], automations: [A] });
+      const T0: any = ctxOf(db), pubs = await publishedWorkflows(db, T0), wanted = new Set(wfWantedTypes(pubs));
+      let n = 0;
+      const ran = async (slow: boolean, at: number) => {
+        const before = { ...db.T.automation_state[0].scan_marks };
+        clock = at; n = 0;
+        if (slow) io.now = () => clock + (++n) * 9e3;
+        try { await produceEvents(db, T0, pubs, wanted, at, before); } finally { io.now = () => clock; }
+        const marks = db.T.automation_state[0].scan_marks;
+        return [Object.keys(marks).filter((k) => k !== "_next" && marks[k] !== before[k]).join(","), marks._next ?? null];
+      };
+      const slow: any[] = [];
+      for (let k = 0; k < 5; k++) slow.push(await ran(true, NOW + k * MIN));
+      eq(slow, [["arrivals", "stage"], ["stage", "jobClosed"], ["jobClosed", "chat"], ["chat", "arrivals"], ["arrivals", "stage"]],
+        "slow minutes: one producer a tick at least, the next tick starting with the first one that did not run (round robin: none starves)");
+      eq(db.T.automation_events.map((e: any) => e.type).sort(), ["newLead", "stage"], "…and their events are produced");
+      const fast: any[] = [];
+      for (let k = 0; k < 3; k++) fast.push(await ran(false, NOW + (10 + k) * MIN));
+      eq(fast, [["arrivals,stage,jobClosed,chat", "jobClosed"], ["arrivals,stage,jobClosed,chat", "chat"], ["arrivals,stage,jobClosed,chat", "arrivals"]],
+        "in time: every producer runs, and the first one turns by one each tick");
+      // the whole tick: the load phase alone is over 8 s; the event is still produced, matched and run
+      const db2 = evWorld({ contacts: [lead("c1")], automations: [auto({ id: "a-slow-0001" })] });
+      sent.length = 0; clock = NOW; n = 0;
+      io.now = () => clock + (++n) * 9e3;
+      let r: any;
+      try { r = await tick(db2, NOW); } finally { io.now = () => clock; }
+      eq([r.events, r.matched, r.enqueued, logOf(db2), Object.keys(db2.T.automation_state[0].scan_marks || {})], [1, 1, 1, ["p1:sent"], ["arrivals"]],
+        "a slow tick still produces its event, matches it and runs it (one producer wanted: no turn kept)");
+    }
+
+    // the app's "look now": a capture type claims that record's pending events; then the timer finds nothing more (one run)
+    {
+      const A = wf([{ id: "t1", type: "contact_changed", filters: NONE }]);
+      const db = evWorld({ contacts: [lead("c1")], automations: [A], automation_events: [capEv("contact_changed", "c1:chg:email:1")] });
+      sent.length = 0;
+      const r: any = await handle(db, { step: "event", type: "contact_changed", id: "c1" }, VA, false);
+      eq([r.status, r.body.runs, r.body.statuses], [200, 1, ["done"]], "look now (capture type): the record's pending event matched and its run moved at once");
+      await tickAt(db, NOW);
+      eq([db.T.automation_runs.length, sent.length, evStatus(db)], [1, 1, ["c1:chg:email:1:done"]], "…the timer then starts nothing more: app poke + capture = one run");
+      const r403: any = await handle(db, { step: "event", type: "contact_changed", id: "c1" }, VA_NOCRM, false);
+      eq(r403.status, 403, "look now: the office without CRM access may not");
+      db.T.automation_events.push(capEv("contact_changed", "c1:chg:email:9", { available_at: isoMs(NOW + 20e3) }));
+      const rs: any = await handle(db, { step: "event", type: "contact_changed", id: "c1" }, OWNER, false);
+      eq([rs.body.reason, db.T.automation_runs.length], ["settling", 1], "look now: an event not due yet is 'settling' (the timer takes it)");
+      // a scan type: built from the record, stored (source app), the scanner's later insert of the same key is nothing
+      const B = auto({ id: "a-ev-0003", trigger: { type: "newLead", params: {} } });
+      const db2 = evWorld({ contacts: [lead("c1")], automations: [B] });
+      sent.length = 0;
+      const r2: any = await handle(db2, { step: "event", type: "newLead", id: "c1" }, OWNER, false);
+      await tickAt(db2, NOW + 30e3);
+      eq([r2.body.runs, r2.body.statuses, db2.T.automation_events.map((e: any) => [e.event_key, e.source, e.status]), db2.T.automation_runs.length, sent.length], [1, ["done"], [["c1:new", "app", "done"]], 1, 1],
+        "look now (scan type): stored as an app event, matched at once; the timer's scan of the same key adds nothing");
+      const rc: any = await handle(world({ contacts: [lead("c1")], automations: [] }), { step: "event", type: "contact_changed", id: "c1" }, OWNER, false);
+      eq([rc.status, rc.body.reason], [400, "unknown event"], "look now: a stage-2 type before the event store is unknown (compat mode keeps phase 4's five)");
+    }
+
+    // concurrent enrolment (design §8.1 #12): two enrolments at the same moment give one run; tick + look now give one run
+    {
+      const A = wf([{ id: "t1", type: "contact_changed", filters: NONE }], { n1: { kind: "wait", type: "period", config: { n: 1, unit: "days" }, out: { next: "n2" } }, n2: pushN() });
+      const db = evWorld({ contacts: [lead("c1")], automations: [A] });
+      const p = (key: string) => ({ p_business: "default", p_automation: A.id, p_version: 1, p_revision: 1, p_trigger: "t1", p_event_key: key, p_event_type: "contact_changed", p_event_at: isoMs(NOW),
+        p_record_kind: "contact", p_record_id: "c1", p_contact: "c1", p_enroll_key: "c1", p_lock_key: "c1", p_reentry: "off", p_start: "n1", p_context: {}, p_source: "trigger", p_chain: 0,
+        p_cause: null, p_parent: null, p_stop_on_reply: false, p_now: isoMs(NOW) });
+      const got = await Promise.all([db.rpc("automation_enroll", p("k1")), db.rpc("automation_enroll", p("k2")), db.rpc("automation_enroll", p("k1"))]);
+      eq([got.map((x: any) => String(x.data).replace(/:.*/, "")), db.T.automation_runs.length], [["enrolled", "already_enrolled", "already_enrolled"], 1], "concurrent enrolment: one run, the others already enrolled");
+      const db2 = evWorld({ contacts: [lead("c1")], automations: [wf([{ id: "t1", type: "contact_changed", filters: NONE }])], automation_events: [capEv("contact_changed", "c1:chg:email:1")] });
+      await Promise.all([tickAt(db2, NOW), handle(db2, { step: "event", type: "contact_changed", id: "c1" }, OWNER, false)]);
+      eq([db2.T.automation_runs.length, db2.T.automation_trigger_log.length], [1, 1], "the timer and 'look now' at the same moment: one claim, one run, one log row");
+    }
+
+    // wake (a held run that listens for this kind of event looks again now) and Stop on response
+    {
+      const G = wf([{ id: "t1", type: "newLead", filters: NONE }], { n1: { kind: "wait", type: "period", config: { n: 2, unit: "days" }, out: { next: "n2" } },
+        n2: { kind: "goal", type: "tag_added", config: { tags: ["VIP"], ifNotMet: "continue" }, out: { next: "n3" } }, n3: pushN() }, { stopOnResponse: true });
+      const run = (id: string, o: any) => ({ id, business_id: "default", automation_id: G.id, automation_version: 1, revision: 1, trigger_id: "t1", event_key: id, event_type: "newLead",
+        event_at: isoMs(NOW - DAYMS), record_kind: "contact", record_id: "c1", contact_id: "c1", status: "waiting", step_index: 0, anchor_at: isoMs(NOW - DAYMS), due_at: isoMs(NOW + DAYMS),
+        attempts: 0, context: {}, cursor_step: "n1", steps_done: 1, ...o });
+      const db = evWorld({ contacts: [lead("c1"), lead("c2")], automations: [G], automation_runs: [run("r-watch", { watch: ["contact_tag"] }), run("r-other", { watch: ["stage"] }),
+        run("r-c2", { contact_id: "c2", record_id: "c2", watch: ["contact_tag"] }), run("r-sent", { watch: ["customer_replied"], stop_on_reply: true, first_sent_at: isoMs(NOW - HR) }),
+        run("r-late", { watch: ["customer_replied"], stop_on_reply: true, first_sent_at: isoMs(NOW + MIN) })],
+        automation_events: [capEv("contact_tag", "c1:tag:+:VIP:1", { ctx: { tag: "VIP", action: "added" } }), capEv("customer_replied", "msg:m1", { ctx: { channel: "email", at: isoMs(NOW - MIN) } })] });
+      clock = NOW;
+      const pubs = await publishedWorkflows(db, ctxOf(db) as any);
+      const m = await matchEvents(db, ctxOf(db) as any, pubs, NOW, { started: NOW });
+      const st = (id: string) => { const r = db.T.automation_runs.find((x: any) => x.id === id); return `${r.status}@${r.due_at === isoMs(NOW) ? "now" : "later"}`; };
+      eq([m.done, st("r-watch"), st("r-other"), st("r-c2"), st("r-sent"), st("r-late")], [2, "waiting@now", "waiting@later", "waiting@later", "stopped@now", "waiting@now"],
+        "wake: only this lead's held runs that watch the event; Stop on response: only a run that sent before the reply");
+      eq(db.T.automation_log.filter((l: any) => l.row_kind === "exit").map((l: any) => [l.run_id, l.status, l.reason]), [["r-sent", "stopped", "Stopped: the lead replied"]], "…one exit row for the stopped run");
+    }
+
+    // the time guard: out of time, the claimed events go back as they were (this claim not counted) — all but the first:
+    // the matcher looks at at least one event a tick, so a slow tick never starves it
+    {
+      const db = evWorld({ contacts: [lead("c1")], automations: [wf([{ id: "t1", type: "contact_changed", filters: NONE }])],
+        automation_events: [capEv("contact_changed", "c1:chg:email:1", { attempts: 2 }), capEv("contact_changed", "c1:chg:email:2"), capEv("contact_changed", "c1:chg:email:3", { attempts: 1 })] });
+      const T0: any = ctxOf(db), pubs = await publishedWorkflows(db, T0);
+      clock = NOW;
+      const m = await matchEvents(db, T0, pubs, NOW, { started: NOW - 21e3 });
+      eq([m.claimed, m.done, m.returned, db.T.automation_events.map((e: any) => [e.event_key.slice(-1), e.status, e.attempts, e.lease_until ?? null]), db.T.automation_runs.length],
+        [3, 1, 2, [["1", "done", 3, null], ["2", "new", 0, null], ["3", "new", 1, null]], 1],
+        "time guard (20 s): already out of time, the first event is still matched (one a tick at least); the rest are handed back unchanged");
+      // a failing event is retried, then given up after 5 attempts
+      const db2 = evWorld({ contacts: [lead("c1")], automations: [wf([{ id: "t1", type: "contact_changed", filters: NONE }])],
+        automation_events: [capEv("contact_changed", "c1:chg:email:1", { attempts: 4 }), capEv("contact_changed", "c1:chg:email:2")] });
+      const bad = { ...db2, rpc: async (n: string, a: any) => (n === "automation_enroll" ? { data: null, error: { message: "boom" } } : await db2.rpc(n, a)) };
+      const log0 = console.error; console.error = () => {};
+      try { await matchEvents(bad, T0, await publishedWorkflows(db2, T0), NOW, { started: NOW }); } finally { console.error = log0; }
+      eq(db2.T.automation_events.map((e: any) => [e.status, e.attempts, e.error]), [["error", 5, "boom"], ["new", 1, "boom"]], "a failing event: tried again next time, an error after 5 attempts");
+    }
+
+    // producers: watermarks narrow the window; 2,500 stale leads give each event once (paged); a second scan inserts 0
+    {
+      const N = 7;
+      const cs = Array.from({ length: 2500 }, (_, i) => lead(`s${i}`, { status: "Quoted", stage_changed_at: isoMs(NOW - N * DAYMS - (i % 300) * MIN) }));
+      const A = wf([{ id: "t1", type: "stale", config: { days: N }, filters: NONE }]);
+      const db = evWorld({ contacts: [...cs, lead("s-new", { status: "Quoted", stage_changed_at: isoMs(NOW - 2 * DAYMS) }), lead("s-test", { tags: ["test"], status: "Quoted", stage_changed_at: isoMs(NOW - N * DAYMS) })], automations: [A] });
+      const T0: any = ctxOf(db), pubs = await publishedWorkflows(db, T0), c0 = db.calls.length;
+      clock = NOW;
+      const p1 = await produceEvents(db, T0, pubs, new Set(["stale"]), NOW, {});
+      const keys = db.T.automation_events.map((e: any) => e.event_key);
+      eq([p1.produced, p1.inserted, new Set(keys).size, db.calls.slice(c0).filter((c: string) => c === "contacts.select").length, keys.includes(`s0:stale:${cs[0].stage_changed_at}:7`), db.T.automation_events.find((e: any) => e.record_id === "s0").at],
+        [2500, 2500, 2500, 3, true, isoMs(Date.parse(cs[0].stage_changed_at) + 7 * DAYMS)], "stale: 2,500 leads in their stage for 7 days → 2,500 events, once each (3 pages; a test lead and a fresh move not)");
+      const p2 = await produceEvents(db, T0, pubs, new Set(["stale"]), NOW, db.T.automation_state[0].scan_marks);
+      eq([p2.inserted, db.T.automation_events.length, db.T.automation_state[0].scan_marks.stale], [0, 2500, isoMs(NOW)], "a second scan of the same minute inserts 0 (the watermark: now)");
+      const c1 = db.calls.length;
+      await produceEvents(db, T0, pubs, new Set(["stale"]), NOW, db.T.automation_state[0].scan_marks);
+      eq(db.calls.slice(c1).filter((c: string) => c === "automation_state.update").length, 0, "watermarks that did not move are not written again");
+      // the watermark narrows the next scan to (mark − overlap, now]
+      const seen: string[] = [];
+      const spy = { ...db, from: (t: string) => { const q = db.from(t); const g = q.gte; q.gte = (k: string, v: any) => { if (t === "contacts") seen.push(`${k}>=${v}`); return g(k, v); }; return q; } };
+      await produceEvents(spy, T0, pubs, new Set(["stale"]), NOW + 5 * MIN, { stale: isoMs(NOW) });
+      eq(seen, [`stage_changed_at>=${isoMs(NOW - 30 * MIN - N * DAYMS)}`], "watermark: the next minute reads only (mark − 30 min overlap − 7 days, …]");
+    }
+
+    // the time producers: custom date, task reminder, scheduler (+ catch-up and the outage rule), website form, answered calls
+    {
+      const CD = wf([{ id: "t1", type: "custom_date", config: { field: "lead.booked_for", when: "before", offset: { n: 1, unit: "days" }, at: "09:00" }, filters: NONE }]);
+      const TR = wf([{ id: "t1", type: "task_reminder", config: { before: { n: 30, unit: "minutes" } }, filters: NONE }]);
+      const SC = wf([{ id: "t1", type: "scheduler", config: { freq: "daily", at: "09:00" }, filters: NONE }]);
+      const FM = wf([{ id: "t1", type: "form_submitted", filters: NONE }]);
+      const CL = wf([{ id: "t1", type: "call_details", filters: F1([{ field: "trigger.call_status", op: "is", v: "answered" }]) }]);
+      const db = evWorld({
+        contacts: [lead("c1", { booked_for: "2026-10-15" }), lead("c2", { booked_for: "2026-10-16" }), lead("c3", { messages: [{ at: isoMs(NOW - 2 * MIN), text: "Lead created automatically from the website form (Google Ads) — 2 units" }] })],
+        tasks: [{ id: "k1", title: "Call back", status: "Open", due: "2026-10-14", contact_id: "c1" }, { id: "k2", title: "Done one", status: "Done", due: "2026-10-14", contact_id: "c1" }],
+        calls: [{ id: "q1", from_number: "+61412345678", direction: "inbound", missed: false, status: "completed", started_at: isoMs(NOW - 3 * MIN), created_at: isoMs(NOW - 3 * MIN), contact_id: "c1" },
+          { id: "q2", from_number: "+61412345678", direction: "inbound", missed: false, status: "ringing", started_at: isoMs(NOW - MIN), created_at: isoMs(NOW - MIN), contact_id: "c1" }],
+        automations: [CD, TR, SC, FM, CL] });
+      sent.length = 0;
+      await tickAt(db, NOW);
+      const byType = (t: string) => db.T.automation_events.filter((e: any) => e.type === t).map((e: any) => [e.event_key, e.at, e.source]);
+      eq(byType("custom_date"), [["lead.booked_for:c1:2026-10-15:before:1days@09:00", isoMs(syd("2026-10-14", 9)), "time"]], "custom date: booked for tomorrow, 1 day before at 09:00 = today 09:00 (in the window); the day after not yet");
+      eq(byType("task_reminder"), [["k1:due:2026-10-14:30minutes", isoMs(syd("2026-10-14", 8, 30)), "time"]], "task reminder: due today (09:00) − 30 minutes; a done task never");
+      eq(byType("scheduler"), [[`sched:${SC.id}:t1:2026-10-14T09:00`, isoMs(syd("2026-10-14", 9)), "time"]], "scheduler: today's 09:00 slot (the first scan looks back lookback_hours)");
+      eq(byType("form_submitted"), [["c3:form:new", isoMs(NOW - 2 * MIN), "scan"]], "website form: a new lead whose first entry is the website form's");
+      eq(byType("call_details"), [["q1:answered", isoMs(NOW - 3 * MIN), "scan"]], "Call details: an answered call (a ringing one is not over yet)");
+      eq(db.T.automation_runs.map((r: any) => `${r.event_type}:${r.record_kind}:${r.status}`).sort(), ["call_details:call:done", "custom_date:contact:done", "form_submitted:contact:done", "scheduler:none:done", "task_reminder:task:done"],
+        "each produced event started its workflow's run (the scheduler's has no record)");
+      // the scheduler catches up the slots it missed while the timer was down for a while, never beyond lookback_hours
+      const said: string[] = [], log0 = console.log;
+      console.log = (...x: any[]) => { said.push(x.join(" ")); };
+      try {
+        const db2 = evWorld({ automations: [SC], automation_state: evState({ scan_marks: { scheduler: isoMs(syd("2026-10-14", 8, 50)) } }) });
+        await tickAt(db2, syd("2026-10-14", 11));
+        const db3 = evWorld({ automations: [SC], automation_state: evState({ scan_marks: { scheduler: isoMs(syd("2026-10-12", 8)) } }) });
+        await tickAt(db3, syd("2026-10-14", 18));
+        eq([db2.T.automation_events.map((e: any) => e.ctx.slot), db3.T.automation_events.map((e: any) => e.ctx.slot)], [["2026-10-14T09:00"], []], "scheduler catch-up: a slot within lookback_hours is caught up; older ones (an outage) are not");
+      } finally { console.log = log0; }
+      eq(said.filter((x) => /scheduler: slots between/.test(x)).length, 1, "…and that is said once in the function's log");
+    }
+
+    // SQL pins: Part 2 step E is exactly the switch engineMode reads; every on-conflict target of the event store is a
+    // unique key of Part 1; the step-E rollback closes what nobody will claim
+    {
+      const sqlAll = src(SQL_DIR + "stage2-automations.sql"), stepE = sqlAll.slice(sqlAll.indexOf("-- PART 2 · STEP E"), sqlAll.indexOf("-- END PART 2 · STEP E"));
+      const live = stepE.split("\n").filter((l: string) => !/^\s*--/.test(l)).join("\n");
+      eq([/^begin;$/m.test(live), /^update public\.automation_state set phase4_compat = false where business_id = public\.current_business_id\(\);$/m.test(live), /^commit;$/m.test(live),
+        (live.match(/^(update|insert|delete|create|alter|drop|grant|revoke)\b/gm) || []).length],
+        [true, true, true, 1], "Part 2 step E: one transaction, one statement (phase4_compat = false), nothing else changes");
+      ok(/-- update public\.automation_state set phase4_compat = true, wanted_hash = null/.test(stepE) && /-- delete from public\.automation_wanted/.test(stepE)
+        && /-- update public\.automation_events set status = 'done'[^\n]*\n-- +where business_id = public\.current_business_id\(\) and status in \('new', 'processing'\);/.test(stepE), "step E has its exact ROLLBACK (compat on, capture list emptied, open events closed)");
+      const ev = src("index.ts"), sec = ev.slice(ev.indexOf("// ==== EVENTS"), ev.indexOf("// ==== COMPAT"));
+      const targets = [...new Set([...sec.matchAll(/from\("(\w+)"\)\.upsert\([^;]*?onConflict: "([\w,]+)"/g)].map((m) => `${m[1]}(${m[2]})`))].sort();
+      const sqlKey = (table: string, cols: string) => new RegExp(`create table if not exists public\\.${table} \\([\\s\\S]*?(unique|primary key) \\(${cols.split(",").join(", ")}\\)`).test(sqlAll);
+      eq([targets, targets.filter((x) => { const m = /^(\w+)\(([\w,]+)\)$/.exec(x) as RegExpExecArray; return !sqlKey(m[1], m[2]); })],
+        [["automation_events(business_id,type,event_key)", "automation_trigger_log(automation_id,trigger_id,event_key)", "automation_wanted(business_id,event_type)"], []],
+        "every on-conflict target of the event store is a unique key / primary key of Part 1");
+    }
+
+    // the capture list follows what is published; compat mode (step E rolled back) empties it; a cached row is read again only when it changed
+    {
+      const A = wf([{ id: "t1", type: "contact_tag", filters: NONE }], undefined, {}, { updated_at: "2026-10-10T00:00:00.000Z" });
+      const db = evWorld({ automations: [A] });
+      await tickAt(db, NOW);
+      const full0 = db.calls.filter((c: string) => c === "automations.select").length;
+      await tickAt(db, NOW + MIN);
+      const full1 = db.calls.filter((c: string) => c === "automations.select").length;
+      eq([db.T.automation_wanted.map((w: any) => w.event_type), full1 - full0], [["contact_tag"], 1], "capture list = the published trigger types; an unchanged row is not read again (only the cheap list)");
+      Object.assign(db.T.automations[0], { definition: { ...A.definition, triggers: [{ id: "t1", type: "note_added", filters: NONE }] }, updated_at: "2026-10-14T03:00:30.000Z" });
+      await tickAt(db, NOW + 2 * MIN);
+      eq([db.T.automation_wanted.map((w: any) => w.event_type), db.T.automation_state[0].wanted_hash], [["note_added"], "note_added"], "a changed row is read again: the capture list follows it (added and removed)");
+      db.T.automations[0].enabled = false; db.T.automations[0].updated_at = "2026-10-14T03:01:30.000Z";
+      await tickAt(db, NOW + 3 * MIN);
+      eq([db.T.automation_wanted.length, db.T.automation_state[0].wanted_hash], [0, ""], "nothing published: nothing captured");
+      db.T.automations[0].enabled = true; db.T.automations[0].updated_at = "2026-10-14T03:02:30.000Z";
+      await tickAt(db, NOW + 4 * MIN);
+      db.T.automation_state[0].phase4_compat = true;
+      await tickAt(db, NOW + 5 * MIN);
+      eq([db.T.automation_wanted.length, db.T.automation_state[0].wanted_hash], [0, null], "back in compat mode: the capture list is emptied (nobody claims captured events then)");
+    }
+  }
+
+  // ── 32. logic nodes + settings (G2.2, design §3.5–§3.8, §3.10, §8.1 #5, #7, #12, #14–17, #19): If / else, Split (the
+  //        sticky ledger), Goal (+ wake), Go to (visit caps), Add to / Remove from workflow, the reply / user-reply /
+  //        conditions waits with their timeout branch, Stop on response, the time window, pauses, the re-entry ledger +
+  //        per-record lock, Mark as read ──
+  {
+    io.advance = PROD_ADVANCE;
+    const tz = "Australia/Sydney";
+    const NONE = { match: "all", segments: [{ match: "all", rules: [] }] };
+    const F1 = (rules: any[], match = "all") => ({ match: "all", segments: [{ match, rules }] });
+    const tr1 = [{ id: "t1", type: "newLead", filters: NONE }];
+    const quiet = [{ id: "t1", type: "task_added", filters: NONE }];   // a trigger nothing in these tests fires
+    let wfK = 0;
+    const flow = (nodes: any, settings: any = {}, o: any = {}) => {
+      wfK++;
+      return { id: `wf32-${String(wfK).padStart(4, "0")}`, business_id: "default", name: `Flow ${wfK}`, enabled: true, armed_at: "2026-10-01T00:00:00.000Z", version: 1, revision: 1,
+        created_by_name: "Olivia Owner", trigger: {}, steps: [], definition: { schema: 2, seq: 60, entry: o.entry ?? Object.keys(nodes)[0], triggers: o.triggers ?? tr1, nodes },
+        settings: { reentry: "off", perRecord: true, ...settings }, deleted_at: null, ...(o.row || {}) };
+    };
+    const runRow = (a: any, o: any = {}) => ({ id: "r32", business_id: "default", automation_id: a.id, automation_version: a.version, event_key: "c1:new", event_type: "newLead", event_at: isoMs(NOW),
+      record_kind: "contact", record_id: "c1", contact_id: "c1", status: "waiting", step_index: 0, anchor_at: isoMs(NOW), due_at: isoMs(NOW), attempts: 0, context: {}, trigger_id: "t1",
+      cursor_step: null, remove_requested: false, ...o });
+    const push = (title: string, next: string | null = null) => ({ kind: "action", type: "internal_notification", config: { channel: "push", to: { roles: ["owner"] }, title }, out: { next } });
+    const mail = (next: string | null = null) => ({ kind: "action", type: "send_email", config: { subject: "Hello {first_name}", body: "{hi}, thanks." }, out: { next } });
+    const period = (n: number, unit: string, next: string | null) => ({ kind: "wait", type: "period", config: { n, unit }, out: { next } });
+    const goal = (type: string, config: any, next: string | null) => ({ kind: "goal", type, config, out: { next } });
+    const gotoN = (target: string) => ({ kind: "goto", type: "goto", config: { target }, out: {} });
+    const br = (id: string, name: string, rules: any[]) => ({ id, name, when: F1(rules) });
+    const ifn = (branches: any[], out: any, o: any = {}) => ({ kind: "if_else", type: "if_else", config: { branches, noneName: "Other", ...o }, out });
+    const thisRun = (db: any, id = "r32") => db.T.automation_runs.find((r: any) => r.id === id);
+    const rowsOf = (db: any, id = "r32") => db.T.automation_log.filter((l: any) => l.run_id === id);
+    const trail = (db: any, id = "r32") => rowsOf(db, id).map((l: any) => `${l.step_id}:${l.row_kind}:${l.status}`);
+    const titles = () => sent.map((x) => x.msg.title);
+    const mails = (db: any) => db.T.lead_messages.filter((m: any) => m.direction === "out" && m.auto === true);
+    // one advance, as the timer would (claimed: running, one more try); sb = a spy over db when given
+    const step = async (db: any, ms: number, id = "r32", sb: any = db) => {
+      const r = thisRun(db, id); Object.assign(r, { status: "running", attempts: (Number(r.attempts) || 0) + 1 });
+      clock = ms; const p: any = await advanceV2(sb, { ...r }, ctxOf(db), ms); clock = NOW; return p;
+    };
+    const drive = async (db: any, ms: number, id = "r32", max = 400) => { let t = ms, p: any = null; for (let k = 0; k < max; k++) { p = await step(db, t, id); if (p.status !== "waiting") break; t = Date.parse(p.due_at); } return p; };
+    const evWorld = (over: Record<string, any[]> = {}) => world({ automation_state: [{ business_id: "default", tick_lease_until: null, pruned_on: null, phase4_compat: false }], automation_events: [],
+      automation_trigger_log: [], automation_trigger_daily: [], automation_enrollment_keys: [], automation_wanted: [], ...over });
+
+    // ── If / else: the first true branch wins; None; an empty None ends the run (done), a migrated gate's ends it skipped ──
+    {
+      const A = flow({ n1: ifn([br("b1", "Gutters", [{ field: "service", op: "is", v: "s9q" }]), br("b2", "Aircon", [{ field: "service", op: "is", v: "Aircon" }]), br("b3", "Any email", [{ field: "has_email", op: "true" }])],
+        { b1: "n2", b2: "n3", b3: "n4", none: "n5" }), n2: push("gutters"), n3: push("aircon"), n4: push("email"), n5: push("none") });
+      let db = world({ contacts: [lead("c1")], automations: [A], automation_runs: [runRow(A)] });
+      sent.length = 0;
+      let p: any = await step(db, NOW);
+      const b = () => rowsOf(db).find((l: any) => l.status === "branch").detail;
+      eq([p.status, titles(), b().branch_id, b().branch_name, b().conds.map((x: any) => x.ok)], ["done", ["aircon"], "b2", "Aircon", [true]], "If / else: the first true branch wins (b2, before b3 which is true too)");
+      db = world({ contacts: [lead("c1", { division: "Plumbing", email: null })], automations: [A], automation_runs: [runRow(A)] });
+      sent.length = 0; p = await step(db, NOW);
+      eq([p.status, titles(), b().branch_id, b().branch_name], ["done", ["none"], "none", "Other"], "If / else: no branch true → None (its own name)");
+      const E = flow({ n1: ifn([br("b1", "Has email", [{ field: "has_email", op: "true" }])], { b1: "n2", none: null }), n2: push("x") });
+      db = world({ contacts: [lead("c1", { email: null })], automations: [E], automation_runs: [runRow(E)] });
+      p = await step(db, NOW);
+      eq([p.status, p.exit_reason, trail(db)], ["done", "end_of_workflow", ["n1:step:branch", "n1:exit:finished"]], "an empty None on a normal If / else = the end (done)");
+      const Gt = flow({ n1: ifn([br("b1", "Yes", [{ field: "has_email", op: "true" }])], { b1: "n2", none: null }, { gate: true }), n2: push("x") });
+      db = world({ contacts: [lead("c1", { email: null })], automations: [Gt], automation_runs: [runRow(Gt)] });
+      p = await step(db, NOW);
+      eq([p.status, p.reason, p.exit_reason], ["skipped", "condition: has_email", "condition"], "a migrated gate If (gate: true) with an empty None ends the run skipped (phase-4 words)");
+    }
+
+    // ── Split: 50/50 within ±2% over 10,000 leads; two Splits in a row independent; 0% never; the sticky ledger ──
+    {
+      const P50 = [{ id: "p1", percent: 50 }, { id: "p2", percent: 50 }];
+      let a1 = 0; const leaf: Record<string, number> = {};
+      for (let k = 0; k < 10000; k++) {
+        const x = splitPath(P50, wfHash32(`w1:n1:c${k}`) % 100), y = splitPath(P50, wfHash32(`w1:n2:c${k}`) % 100);
+        if (x === "p1") a1++;
+        leaf[`${x}${y}`] = (leaf[`${x}${y}`] || 0) + 1;
+      }
+      ok(Math.abs(a1 - 5000) <= 200, "Split: 10,000 leads land within ±2% of 50/50", a1);
+      ok(Object.keys(leaf).length === 4 && Object.values(leaf).every((n) => Math.abs(n - 2500) <= 250), "two Splits in a row are independent (≈25% per leaf)", leaf);
+      let zero = 0; for (let k = 0; k < 1000; k++) if (splitPath([{ id: "p1", percent: 0 }, { id: "p2", percent: 100 }], wfHash32(`w1:n1:z${k}`) % 100) === "p1") zero++;
+      eq([zero, splitPath([{ id: "p1", percent: 0 }, { id: "p2", percent: 0 }], 5), splitPath([{ id: "p1", percent: 30 }, { id: "p2", percent: 30 }], 99), wfHash32("abc") === wfHash32("abc")],
+        [0, null, "p2", true], "a 0% path never takes anyone; no live path = null; percents short of 100 = the last live path; the hash is stable");
+      const S = flow({ n1: { kind: "split", type: "split", config: { paths: [{ id: "p1", name: "A", percent: 50 }, { id: "p2", name: "B", percent: 50 }] }, out: { p1: "n2", p2: "n3" } }, n2: push("A"), n3: push("B") });
+      let key = "";
+      for (let k = 0; k < 500 && !key; k++) { const bk = wfHash32(`${S.id}:n1:k${k}`) % 100; if (bk >= 10 && bk < 50) key = `k${k}`; }   // path A at 50/50, path B at 10/90
+      const db = world({ contacts: [lead("c1")], automations: [S], automation_runs: [runRow(S, { enrollment_key: key })],
+        automation_enrollment_keys: [{ business_id: "default", automation_id: S.id, enrollment_key: key, first_at: isoMs(NOW), last_at: isoMs(NOW), runs: 1, splits: {} }] });
+      sent.length = 0;
+      await step(db, NOW);
+      const det = (id: string) => rowsOf(db, id).find((l: any) => l.status === "branch").detail;
+      eq([titles(), db.T.automation_enrollment_keys[0].splits, det("r32")], [["A"], { n1: "p1" }, { path_id: "p1", path_name: "A", percent: 50, kept: false }], "Split: the bucket's path; kept in the re-entry ledger; logged with its percent");
+      // the owner changes the percents to 10 / 90; the same lead enters again: it keeps path A (GHL "keeps its path")
+      const setPaths = (paths: any[]) => { const a = db.T.automations[0]; a.definition = { ...a.definition, nodes: { ...a.definition.nodes, n1: { ...a.definition.nodes.n1, config: { paths } } } }; };
+      setPaths([{ id: "p1", name: "A", percent: 10 }, { id: "p2", name: "B", percent: 90 }]);
+      db.T.automation_runs.push(runRow(S, { id: "r32b", event_key: "c1:again", enrollment_key: key }));
+      sent.length = 0;
+      await step(db, NOW, "r32b");
+      eq([titles(), det("r32b").kept, det("r32b").percent], [["A"], true, 10], "after a % edit the lead keeps its path on re-entry");
+      // the kept path now 0%: the bucket decides again (B) and the ledger follows
+      setPaths([{ id: "p1", name: "A", percent: 0 }, { id: "p2", name: "B", percent: 100 }]);
+      db.T.automation_runs.push(runRow(S, { id: "r32c", event_key: "c1:third", enrollment_key: key }));
+      sent.length = 0;
+      await step(db, NOW, "r32c");
+      eq([titles(), db.T.automation_enrollment_keys[0].splits, det("r32c").kept], [["B"], { n1: "p2" }, false], "a kept path set to 0% is left: the bucket decides again, the ledger follows");
+      // a run without a ledger key (phase-4 compat, a dry run) still splits by the same bucket, writing nothing
+      const db2 = world({ contacts: [lead("c1")], automations: [flow(S.definition.nodes)], automation_runs: [] });
+      db2.T.automation_runs.push(runRow(db2.T.automations[0]));
+      sent.length = 0;
+      await step(db2, NOW);
+      eq([sent.length, (db2.T.automation_enrollment_keys || []).length], [1, 0], "no enrolment key: the bucket alone, nothing kept");
+    }
+
+    // ── Goal: met ahead during a period wait → jumped in the same tick (the wait's watch woke it); end / continue / wait;
+    //    a goal inside a later branch; the event goals ──
+    {
+      const G = flow({ n1: period(1, "days", "n2"), n2: goal("stage_reached", { stages: ["Booked"], ifNotMet: "end" }, "n3"), n3: push("Booked!") }, {}, { triggers: quiet });
+      const db = evWorld({ contacts: [lead("c1", { status: "Booked", stage_changed_at: isoMs(NOW - 2 * MIN), messages: [{ at: isoMs(NOW - DAYMS) }] })], automations: [G],
+        automation_runs: [runRow(G, { cursor_step: "n1", steps_done: 1, anchor_at: isoMs(NOW - HR), due_at: isoMs(NOW + DAYMS - HR), watch: ["stage", "lead_status"], recheck: false,
+          active_lock: "c1", enrollment_key: "c1", context: { _w: { id: "n1", loop: 0, startedAt: isoMs(NOW - HR), until: isoMs(NOW + DAYMS - HR) } } })] });
+      sent.length = 0;
+      const r: any = await tickAt(db, NOW);
+      eq([r.engine, thisRun(db).status, titles(), trail(db), rowsOf(db).find((l: any) => l.status === "jumped").detail],
+        ["v2-events", "done", ["Booked!"], ["n1:step:jumped", "n2:step:executed", "n3:action:sent", "n3:exit:finished"], { to: "n2", goal: true, skipped: [] }],
+        "a goal met during a period wait: the stage event wakes the run and it jumps to the goal in the same tick");
+      ok(db.T.automation_wanted.some((w: any) => w.event_type === "stage") && db.T.automation_events.some((e: any) => e.type === "stage"), "…the goal's events are wanted, so the stage move was produced");
+      clock = NOW;
+      // If the goal is not met: end / continue / wait
+      const mk = (ifNotMet: string) => { const A = flow({ n1: goal("stage_reached", { stages: ["Booked"], ifNotMet }, "n2"), n2: push("after") }); return { A, db: world({ contacts: [lead("c1")], automations: [A], automation_runs: [runRow(A)] }) }; };
+      let w = mk("end"); sent.length = 0;
+      let p: any = await step(w.db, NOW);
+      eq([p.status, p.reason, p.exit_reason, titles(), rowsOf(w.db)[0].detail], ["done", "goal not met", "goal_not_met", [], { met: false, then: "end" }], "goal not met, 'end the workflow': done, nothing after it runs");
+      w = mk("continue"); sent.length = 0; p = await step(w.db, NOW);
+      eq([p.status, titles(), rowsOf(w.db)[0].detail], ["done", ["after"], { met: false, then: "continue" }], "goal not met, 'continue': the next step runs");
+      w = mk("wait"); sent.length = 0; p = await step(w.db, NOW);
+      eq([p.status, p.due_at, p.recheck, p.watch, p.cursor_step, titles()], ["waiting", isoMs(NOW + HR), true, ["stage", "lead_status"], "n1", []], "goal not met, 'wait': held (its events wake it, an hourly recheck)");
+      p = await step(w.db, NOW + HR);
+      w.db.T.contacts[0].status = "Booked";
+      p = await step(w.db, NOW + HR + 5 * MIN);
+      eq([p.status, titles(), trail(w.db)], ["done", ["after"], ["n1:step:waiting", "n1:step:executed", "n2:action:sent", "n2:exit:finished"]], "…and goes on once it is met (one waiting row for the whole wait)");
+      // a goal inside a later branch is ahead too
+      const B = flow({ n1: period(1, "hours", "n2"), n2: ifn([br("b1", "Has email", [{ field: "has_email", op: "true" }])], { b1: "n3", none: null }), n3: goal("stage_reached", { stages: ["Booked"], ifNotMet: "end" }, "n4"), n4: push("in a branch") });
+      const db3 = world({ contacts: [lead("c1")], automations: [B], automation_runs: [runRow(B)] });
+      sent.length = 0;
+      const h: any = await step(db3, NOW);
+      db3.T.contacts[0].status = "Booked";
+      p = await step(db3, NOW + 10 * MIN);
+      eq([h.watch, p.status, titles(), rowsOf(db3).find((l: any) => l.status === "jumped").detail], [["stage", "lead_status"], "done", ["in a branch"], { to: "n3", goal: true, skipped: ["n2"] }],
+        "a goal inside a later branch: watched, and jumped to (the If / else between is passed over)");
+      // the event goals read what happened since the run started (f.since); state goals the card as it is
+      const gdb = world({ contacts: [lead("c1"), lead("c2")], tasks: [{ id: "k1", title: "Call", status: "Open", contact_id: "c1", created_at: isoMs(NOW - MIN) }],
+        automation_events: [
+          { id: "e1", business_id: "default", type: "form_submitted", contact_id: "c1", record_id: "c1", at: isoMs(NOW - MIN), ctx: {} },
+          { id: "e2", business_id: "default", type: "contact_tag", contact_id: "c1", record_id: "c1", at: isoMs(NOW - MIN), ctx: { tag: "VIP", action: "removed" } },
+          { id: "e3", business_id: "default", type: "booking_status", contact_id: "c1", record_id: "c1", at: isoMs(NOW - MIN), ctx: { status: "rescheduled" } },
+          { id: "e4", business_id: "default", type: "form_submitted", contact_id: "c2", record_id: "c2", at: isoMs(NOW - 2 * DAYMS), ctx: {} },
+          { id: "e5", business_id: "default", type: "payment_received", contact_id: "c1", record_id: "j1", at: isoMs(NOW - MIN), ctx: {} },
+          { id: "e6", business_id: "default", type: "task_completed", contact_id: "c1", record_id: "k1", at: isoMs(NOW - MIN), ctx: {} },
+          { id: "e7", business_id: "default", type: "documents_contracts", contact_id: null, record_id: "sup1", at: isoMs(NOW - MIN), ctx: {} }],
+        lead_messages: [{ id: "m1", contact_id: "c1", direction: "out", auto: false, channel: "email", at: isoMs(NOW - MIN), author_id: "u-va" },
+          { id: "m2", contact_id: "c2", direction: "out", auto: true, channel: "email", at: isoMs(NOW - MIN) }] });
+      const fc = (cid: string | null, o: any = {}) => ({ contact: cid ? { id: cid, status: "Won", tags: ["vip"] } : null, cat: CATALOG, since: isoMs(NOW - HR), recordId: cid, ...o });
+      const met = async (type: string, config: any, f: any) => !!(await WF_GOAL_MET[type]({ kind: "goal", type, config }, f, gdb));
+      eq([await met("tag_added", { tags: ["VIP"] }, fc("c1")), await met("tag_added", { tags: ["Hot"] }, fc("c1")), await met("tag_removed", { tags: ["vip"] }, fc("c1")), await met("tag_removed", { tags: ["VIP"] }, fc("c2")),
+        await met("stage_reached", { stages: ["Won"] }, fc("c1")), await met("lead_status", { statuses: ["won"] }, fc("c1")), await met("lead_status", { statuses: ["open"] }, fc("c1")),
+        await met("lead_status", { statuses: ["lost"] }, fc("c1", { contact: { id: "c1", status: "Gone" }, cat: { ...CATALOG, keys: { stageLost: "Gone" } } })),
+        await met("appointment", { statuses: ["rescheduled"] }, fc("c1")), await met("appointment", { statuses: ["cancelled"] }, fc("c1")),
+        await met("payment", {}, fc("c1")), await met("payment", {}, fc("c2", { job: { payment_status: "Paid" } })), await met("payment", {}, fc("c2", { job: { payment_status: "Unpaid" } })),
+        await met("form", {}, fc("c1")), await met("form", {}, fc("c2")), await met("user_replied", { channels: ["email"] }, fc("c1")), await met("user_replied", {}, fc("c2")),
+        await met("task", { status: "created" }, fc("c1")), await met("task", { status: "completed" }, fc("c1")), await met("task", { status: "created" }, fc("c2")),
+        await met("document", {}, fc(null, { recordId: "sup1" })), has(WF_GOAL_MET, "email_event")],
+        [true, false, true, false, true, true, false, true, true, false, true, true, false, true, false, true, false, true, true, false, true, false],
+        "goals: tags, stage, status (catalog keys), booking status, paid, form, office reply, task, agreement — events only since the run started; tracking goals never met");
+    }
+
+    // ── Go to: a tight loop fails at 10 visits; a weekly loop runs on (20 times); each pass claims its actions again ──
+    {
+      const T1 = flow({ n1: push("tick", "n2"), n2: gotoN("n1") });
+      let db = world({ contacts: [lead("c1")], automations: [T1], automation_runs: [runRow(T1)] });
+      sent.length = 0;
+      let p: any = await step(db, NOW);
+      eq([p.status, p.reason, p.exit_reason, sent.length, rowsOf(db).filter((l: any) => l.row_kind === "action").map((l: any) => l.loop), rowsOf(db).filter((l: any) => l.status === "jumped").length],
+        ["failed", "loop guard: Go to ran 10 times without waiting", "loop_guard", 10, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 9], "a Go to loop with no wait fails at 10 visits (one claim per pass)");
+      const W7 = flow({ n1: period(7, "days", "n2"), n2: push("weekly", "n3"), n3: gotoN("n1") });
+      db = world({ contacts: [lead("c1")], automations: [W7], automation_runs: [runRow(W7)] });
+      sent.length = 0;
+      let t = NOW;
+      for (let k = 0; k < 80 && sent.length < 20; k++) { p = await step(db, t); if (p.status !== "waiting") break; t = Date.parse(p.due_at); }
+      eq([p.status, sent.length, p.loop, new Set(rowsOf(db).filter((l: any) => l.row_kind === "action").map((l: any) => l.loop)).size, p.cursor_step], ["waiting", 20, 20, 20, "n1"],
+        "a weekly loop runs 20 times (the wait resets the visits; each week claims its message again)");
+    }
+
+    // ── Add to workflow: the target's run (parent, chain, trigger data only when asked); Draft / chain limit / itself ──
+    {
+      const Tg = flow({ n1: push("child {first_name}") });
+      const add = (id: string, o: any = {}) => ({ kind: "workflow", type: "add_to_workflow", config: { workflowId: id, ...o }, out: { next: "n2" } });
+      const Src = flow({ n1: add(Tg.id, { passTriggerData: true }), n2: push("after") });
+      let db = world({ contacts: [lead("c1")], automations: [Src, Tg], automation_runs: [runRow(Src, { context: { form: "website", _pass: "x" }, chain_depth: 0 })], automation_enrollment_keys: [] });
+      sent.length = 0;
+      let p: any = await step(db, NOW);
+      const kid = db.T.automation_runs.find((r: any) => r.automation_id === Tg.id);
+      eq([p.status, titles(), kid && [kid.status, kid.source, kid.parent_run_id, kid.cause_run_id, kid.chain_depth, kid.cursor_step, kid.event_key, kid.context, kid.trigger_id, kid.due_at, kid.event_at],
+        rowsOf(db).find((l: any) => l.step_id === "n1").detail],
+        ["done", ["after"], ["waiting", "workflow", "r32", "r32", 1, "n1", "wf:r32:n1:0", { form: "website" }, null, isoMs(NOW), isoMs(NOW)], { workflow_id: Tg.id, run_id: kid && kid.id }],
+        "Add to workflow: a run of the target at its first step, now; parent + chain + 1; the trigger data (not the engine's own marks)");
+      sent.length = 0;
+      const k1: any = await step(db, NOW, kid.id);
+      eq([k1.status, titles(), rowsOf(db, kid.id).map((l: any) => l.trigger_id)], ["done", ["child Sam"], [null, null, null]], "…the added run goes (no trigger: no trigger id)");
+      const Src0 = flow({ n1: add(Tg.id), n2: push("after") });
+      db = world({ contacts: [lead("c1")], automations: [Src0, Tg], automation_runs: [runRow(Src0, { context: { form: "website" } })], automation_enrollment_keys: [] });
+      await step(db, NOW);
+      eq(db.T.automation_runs.find((r: any) => r.automation_id === Tg.id).context, {}, "without 'Pass trigger data' the added run gets none");
+      const Dr = flow({ n1: push("draft") }, {}, { row: { enabled: false } });
+      const SrcD = flow({ n1: add(Dr.id), n2: push("after") });
+      db = world({ contacts: [lead("c1")], automations: [SrcD, Dr], automation_runs: [runRow(SrcD)] });
+      sent.length = 0; p = await step(db, NOW);
+      eq([p.status, titles(), rowsOf(db)[0].status, rowsOf(db)[0].reason, db.T.automation_runs.length], ["done", ["after"], "skipped", "target is a Draft", 1], "a Draft target: skipped 'target is a Draft', the workflow goes on");
+      db = world({ contacts: [lead("c1")], automations: [Src, Tg], automation_runs: [runRow(Src, { chain_depth: 3 })] });
+      p = await step(db, NOW);
+      eq([rowsOf(db)[0].reason, db.T.automation_runs.length], ["Stopped a loop between workflows", 1], "the chain limit: a run at depth 3 adds nobody (loop guard)");
+      // itself, re-entry off: this run holds the lock → already in it
+      const Self = flow({ n1: add("wf32-self"), n2: push("after") }, {}, { row: { id: "wf32-self" } });
+      db = world({ contacts: [lead("c1")], automations: [Self], automation_runs: [runRow(Self, { active_lock: "c1", enrollment_key: "c1" })], automation_enrollment_keys: [] });
+      p = await step(db, NOW);
+      eq([rowsOf(db)[0].reason, db.T.automation_runs.length], ["Already in this workflow", 1], "adding a lead to the workflow it is in (re-entry off): already enrolled");
+      // itself with no lock (an upgraded workflow): the chain stops at depth 3
+      const Self2 = flow({ n1: add("wf32-self2"), n2: push("after") }, { reentry: "legacy_always" }, { row: { id: "wf32-self2" } });
+      db = world({ contacts: [lead("c1")], automations: [Self2], automation_runs: [runRow(Self2)], automation_enrollment_keys: [] });
+      for (let k = 0; k < 10; k++) { const w = db.T.automation_runs.find((r: any) => r.status === "waiting"); if (!w) break; await step(db, NOW, w.id); }
+      const depth3 = db.T.automation_runs.find((r: any) => r.chain_depth === 3);
+      eq([db.T.automation_runs.map((r: any) => [r.chain_depth, r.status]), depth3 && rowsOf(db, depth3.id).find((l: any) => l.row_kind === "step" && l.step_id === "n1").reason], [[[0, "done"], [1, "done"], [2, "done"], [3, "done"]], "Stopped a loop between workflows"],
+        "a workflow that adds itself stops at chain depth 3");
+    }
+
+    // ── Remove from workflow: every scope, by lead (not enrolment key); a running run ends removed at its next write ──
+    {
+      const rm = (scope: string, wid?: string) => ({ kind: "workflow", type: "remove_from_workflow", config: { scope, ...(wid ? { workflowId: wid } : {}) }, out: ["current", "all"].includes(scope) ? {} : { next: "n2" } });
+      const B = flow({ n1: period(1, "days", null) }), Cw = flow({ n1: push("C ran", "n2"), n2: period(1, "days", null) });
+      const setup = (scope: string) => {
+        const A = flow({ n1: rm(scope, scope === "another" ? B.id : undefined), ...(["current", "all"].includes(scope) ? {} : { n2: push("after") }) });
+        const db = world({ contacts: [lead("c1"), lead("c2")], automations: [A, B, Cw], automation_runs: [runRow(A),
+          runRow(B, { id: "rB", event_key: "b1", due_at: isoMs(NOW + DAYMS), cursor_step: "n1", steps_done: 1, active_lock: "c1" }),
+          runRow(Cw, { id: "rC", event_key: "c1x", status: "running", lease_until: isoMs(NOW + 2 * MIN) }),
+          runRow(A, { id: "rA2", event_key: "a2", record_kind: "job", record_id: "j1", due_at: isoMs(NOW + DAYMS) }),
+          runRow(B, { id: "rX", event_key: "x1", contact_id: "c2", record_id: "c2", due_at: isoMs(NOW + DAYMS) })] });
+        return { A, db };
+      };
+      const states = (db: any) => db.T.automation_runs.map((r: any) => `${r.id}:${r.status}${r.remove_requested ? "*" : ""}`);
+      let s = setup("another");
+      sent.length = 0;
+      let p: any = await step(s.db, NOW);
+      eq([p.status, titles(), states(s.db), rowsOf(s.db, "rB").map((l: any) => `${l.row_kind}:${l.status}:${l.reason}`), rowsOf(s.db, "rB")[0].detail, rowsOf(s.db)[0].detail],
+        ["done", ["after"], ["r32:done", "rB:removed", "rC:running", "rA2:waiting", "rX:waiting"], ["exit:removed:Removed by External Workflow Action"], { exit_reason: "removed_by_external_action", by_run: "r32" },
+          { scope: "another", workflow_id: B.id, removed: 1 }], "Remove from 'another' workflow: that workflow's waiting run of this lead (exit row); this run goes on");
+      ok(thisRun(s.db, "rB").exit_reason === "removed_by_external_action" && thisRun(s.db, "rB").active_lock === null, "…removed_by_external_action, its lock given back");
+      s = setup("all_except_current");
+      p = await step(s.db, NOW);
+      eq([p.status, states(s.db)], ["done", ["r32:done", "rB:removed", "rC:running*", "rA2:waiting", "rX:waiting"]], "'all except current': the other workflows' runs (a running one flagged), never this workflow's");
+      // the flagged running run: its own advance (claimed before the flag) ends removed at its next write
+      sent.length = 0;
+      const rc: any = await advanceV2(s.db, { ...thisRun(s.db, "rC"), remove_requested: false }, ctxOf(s.db), NOW);
+      eq([rc.status, rc.exit_reason, thisRun(s.db, "rC").status, rowsOf(s.db, "rC").map((l: any) => `${l.row_kind}:${l.status}`)], ["removed", "removed_by_external_action", "removed", ["action:sent", "step:waiting", "exit:removed"]],
+        "a run being moved when it was removed ends removed at its next write (one exit row)");
+      s = setup("all");
+      p = await step(s.db, NOW);
+      eq([p.status, p.exit_reason, states(s.db), rowsOf(s.db).map((l: any) => `${l.row_kind}:${l.status}:${l.reason}`)],
+        ["removed", "removed_by_action", ["r32:removed", "rB:removed", "rC:running*", "rA2:removed", "rX:waiting"], ["step:executed:null", "exit:removed:Removed by Workflow Action"]],
+        "'all': every run of this lead (this workflow's other runs too) and this run (Removed by Workflow Action)");
+      s = setup("current");
+      p = await step(s.db, NOW);
+      eq([p.status, p.exit_reason, states(s.db)], ["removed", "removed_by_action", ["r32:removed", "rB:waiting", "rC:running", "rA2:waiting", "rX:waiting"]], "'current': only this run ends");
+      // a run flagged before its claim ends removed at once (nothing sent)
+      const s2 = setup("current");
+      Object.assign(thisRun(s2.db, "rC"), { status: "waiting", remove_requested: true, due_at: isoMs(NOW) });
+      sent.length = 0;
+      const rc2: any = await step(s2.db, NOW, "rC");
+      eq([rc2.status, rc2.exit_reason, sent.length], ["removed", "removed_by_external_action", 0], "a run flagged before it was claimed ends removed at once");
+    }
+
+    // ── reply wait: met vs timeout, woken by the reply within one tick; the reply that lands while the run is leased ──
+    {
+      const W = flow({ n1: { kind: "wait", type: "reply", config: { channels: ["email", "chat"], timeout: { n: 3, unit: "days" } }, out: { next: "n2", timeout: "n3" } }, n2: push("replied"), n3: push("timed out") }, {}, { triggers: quiet });
+      let db = evWorld({ contacts: [lead("c1")], automations: [W], automation_runs: [runRow(W, { active_lock: "c1", enrollment_key: "c1" })] });
+      sent.length = 0;
+      await tickAt(db, NOW);
+      const r0 = { ...thisRun(db) };
+      eq([r0.status, r0.due_at, r0.recheck, r0.watch, rowsOf(db).map((l: any) => [l.status, l.next_at]), db.T.automation_wanted.map((x: any) => x.event_type)],
+        ["waiting", isoMs(NOW + HR), true, ["customer_replied"], [["waiting", isoMs(NOW + 3 * DAYMS)]], ["customer_replied", "task_added"]],
+        "reply wait: held with an hourly recheck, watching replies (wanted), its timeout in the waiting row");
+      db.T.lead_messages.push({ id: "m0", contact_id: "c1", direction: "in", channel: "text", at: isoMs(NOW + 5 * MIN) },   // not one of its channels
+        { id: "m1", contact_id: "c1", direction: "in", channel: "email", at: isoMs(NOW + 10 * MIN) });
+      db.T.automation_events.push({ id: "ev-m1", business_id: "default", type: "customer_replied", event_key: "msg:m1", record_kind: "contact", record_id: "c1", contact_id: "c1",
+        at: isoMs(NOW + 10 * MIN), available_at: isoMs(NOW + 10 * MIN), ctx: { channel: "email", at: isoMs(NOW + 10 * MIN) }, source: "capture", chain_depth: 0, status: "new", attempts: 0 });
+      await tickAt(db, NOW + 11 * MIN);
+      eq([thisRun(db).status, titles(), rowsOf(db).find((l: any) => l.status === "wait_finished").detail], ["done", ["replied"], { outcome: "met", resumed_by: "event" }], "…the reply wakes it and it goes down 'Replied' in the same tick");
+      clock = NOW;
+      db = world({ contacts: [lead("c1")], automations: [W], automation_runs: [runRow(W)] });
+      sent.length = 0;
+      await step(db, NOW);
+      const pt: any = await step(db, NOW + 3 * DAYMS);
+      eq([pt.status, titles(), rowsOf(db).find((l: any) => l.status === "wait_finished").detail.outcome], ["done", ["timed out"], "timeout"], "no reply by its timeout → 'Timed out'");
+      // the race: the reply lands after the check and before the hold is written (the wake found the run running)
+      db = world({ contacts: [lead("c1")], automations: [W], automation_runs: [runRow(W)] });
+      let sel = 0;
+      const spy = { ...db, from: (t: string) => {
+        const q = db.from(t);
+        if (t !== "lead_messages") return q;
+        const th = q.then;
+        q.then = (res: any, rej: any) => th((x: any) => { if (++sel === 1) db.T.lead_messages.push({ id: "m9", contact_id: "c1", direction: "in", channel: "chat", at: isoMs(NOW + 1000) }); return res(x); }, rej);
+        return q;
+      } };
+      sent.length = 0;
+      const pr: any = await step(db, NOW, "r32", spy);
+      eq([pr.status, pr.due_at, thisRun(db).due_at], ["waiting", isoMs(NOW + HR), isoMs(NOW)], "a reply that landed while the run was leased: looked at once more after the hold, the run is due at once");
+      const pr2: any = await step(db, NOW);
+      eq([pr2.status, titles()], ["done", ["replied"]], "…and goes down 'Replied' on its next claim");
+    }
+
+    // ── user reply: written by a chosen person, never an automatic message ──
+    {
+      const U = flow({ n1: { kind: "wait", type: "user_reply", config: { channels: ["email"], users: ["u-va"], timeout: { n: 1, unit: "days" } }, out: { next: "n2", timeout: "n3" } }, n2: push("office replied"), n3: push("nobody") });
+      const db = world({ contacts: [lead("c1")], automations: [U], automation_runs: [runRow(U)] });
+      sent.length = 0;
+      await step(db, NOW);
+      db.T.lead_messages.push({ id: "m1", contact_id: "c1", direction: "out", auto: true, channel: "email", at: isoMs(NOW + MIN) }, { id: "m2", contact_id: "c1", direction: "out", auto: false, channel: "email", at: isoMs(NOW + MIN), author_id: "u-mgr" });
+      const p1: any = await step(db, NOW + 5 * MIN);
+      db.T.lead_messages.push({ id: "m3", contact_id: "c1", direction: "out", auto: false, channel: "email", at: isoMs(NOW + 6 * MIN), author_id: "u-va" });
+      const p2: any = await step(db, NOW + 10 * MIN);
+      eq([p1.status, p2.status, titles()], ["waiting", "done", ["office replied"]], "user reply: an automatic message or another person's does not count; the chosen person's does");
+    }
+
+    // ── conditions wait: an event re-check; the moment a time-relative rule changes; a 7-day wait with < 20 steps ──
+    {
+      const Cn = flow({ n1: { kind: "wait", type: "conditions", config: { when: F1([{ field: "lead.email", op: "is_not_empty" }]) }, out: { next: "n2" } }, n2: push("has email") });
+      let db = world({ contacts: [lead("c1", { email: null })], automations: [Cn], automation_runs: [runRow(Cn)] });
+      sent.length = 0;
+      const h: any = await step(db, NOW);
+      db.T.contacts[0].email = "sam@example.com";
+      const p: any = await step(db, NOW + 20 * MIN);
+      eq([h.status, h.due_at, h.recheck, h.watch, p.status, titles(), rowsOf(db).filter((l: any) => l.status === "waiting").length], ["waiting", isoMs(NOW + HR), true, ["contact_changed"], "done", ["has email"], 1],
+        "conditions wait: held (watching the fields' events, hourly recheck) until the conditions are met");
+      const Ct = flow({ n1: { kind: "wait", type: "conditions", config: { when: F1([{ field: "lead.booked_for", op: "within_next", n: 2, unit: "hours" }]) }, out: { next: "n2" } }, n2: push("soon") });
+      db = world({ contacts: [lead("c1", { booked_for: isoMs(NOW + 150 * MIN) })], automations: [Ct], automation_runs: [runRow(Ct)] });
+      sent.length = 0;
+      const h2: any = await step(db, NOW);
+      const p2: any = await step(db, Date.parse(h2.due_at));
+      eq([h2.due_at, p2.status, titles()], [isoMs(NOW + 30 * MIN + 1000), "done", ["soon"]], "a time-relative condition: held only until the moment it can turn true (not the hour)");
+      const C7 = flow({ n1: { kind: "wait", type: "conditions", config: { when: F1([{ field: "lead.email", op: "is_not_empty" }]), timeout: { n: 7, unit: "days" } }, out: { next: "n2", timeout: "n3" } },
+        n2: push("met"), n3: push("a week went by") });
+      db = world({ contacts: [lead("c1", { email: null })], automations: [C7], automation_runs: [runRow(C7)] });
+      sent.length = 0;
+      const p7: any = await drive(db, NOW);
+      eq([p7.status, titles(), p7.steps_done < 20, p7.steps_done, rowsOf(db).filter((l: any) => l.status === "waiting").length], ["done", ["a week went by"], true, 2, 1],
+        "a 7-day conditions wait (hourly rechecks) times out with steps_done < 20 and one waiting row");
+    }
+
+    // ── the dry run: assumed outcomes, the timeout, else the path stops ("Would wait for a reply") ──
+    {
+      const W = flow({ n1: { kind: "wait", type: "reply", config: { channels: ["email"], timeout: { n: 2, unit: "days" } }, out: { next: "n2", timeout: "n3" } }, n2: push("replied"), n3: push("timed out") });
+      const Wn = flow({ n1: { kind: "wait", type: "reply", config: { channels: ["email"] } }, n2: push("x") });
+      Wn.definition.nodes.n1.out = { next: "n2" };
+      const Gw = flow({ n1: goal("stage_reached", { stages: ["Booked"], ifNotMet: "wait" }, "n2"), n2: push("booked") });
+      const sdb = world({ contacts: [lead("c1")], automations: [W, Wn, Gw] });
+      const before = JSON.stringify(sdb.T);
+      const rin = { record_kind: "contact", record_id: "c1", contact_id: "c1", event_type: "newLead", event_at: isoMs(NOW), trigger_id: "t1", context: {} };
+      const path = (d: any) => d.path.filter((x: any) => x.rowKind !== "exit").map((x: any) => `${x.stepId}:${x.status}${x.outcome ? ":" + x.outcome : ""}`);
+      const d1: any = await dryRunV2(sdb, W, rin, ctxOf(sdb), NOW), d2: any = await dryRunV2(sdb, W, rin, ctxOf(sdb), NOW, 200, { n1: "met" });
+      const d3: any = await dryRunV2(sdb, Wn, rin, ctxOf(sdb), NOW), d4: any = await dryRunV2(sdb, Gw, rin, ctxOf(sdb), NOW), d5: any = await dryRunV2(sdb, Gw, rin, ctxOf(sdb), NOW, 200, { n1: "met" });
+      eq([path(d1), d1.ended, path(d2), [d3.ended, d3.reason], [d4.ended, d4.reason], path(d5), JSON.stringify(sdb.T) === before],
+        [["n1:waiting", "n1:wait_finished:timeout", "n3:would"], "done", ["n1:wait_finished:met", "n2:would"], ["would_wait", "Would wait for a reply"], ["would_wait", "Would wait for the goal"],
+          ["n1:executed", "n2:would"], true], "dry run: no reply → the timeout; assumed met → Replied; no timeout → stops 'Would wait for a reply'; goals the same; nothing written");
+      const rdb = world({ contacts: [lead("c1")], automations: [W], lead_messages: [{ id: "m1", contact_id: "c1", direction: "in", channel: "email", at: isoMs(NOW - MIN) }] });
+      const d6: any = await dryRunV2(rdb, W, { ...rin, event_at: isoMs(NOW - HR) }, ctxOf(rdb), NOW);
+      eq(path(d6), ["n1:wait_finished:met", "n2:would"], "dry run: a reply already there since the test record's event counts");
+    }
+
+    // ── Stop on response: a reply after the first message stops the run before the next one; one before it does not ──
+    {
+      const St = flow({ n1: mail("n2"), n2: period(2, "days", "n3"), n3: mail(null) }, { stopOnResponse: true });
+      const mk = (replyAt: number, stop = true) => world({ contacts: [lead("c1")], automations: [St], automation_runs: [runRow(St, { stop_on_reply: stop })],
+        lead_messages: [{ id: "in1", contact_id: "c1", direction: "in", channel: "email", at: isoMs(replyAt) }] });
+      let db = mk(NOW + HR);
+      const p1: any = await step(db, NOW);
+      const p2: any = await step(db, NOW + 2 * DAYMS);
+      eq([p1.first_sent_at, p1.watch, p2.status, p2.reason, p2.exit_reason, mails(db).length, rowsOf(db).at(-1).status], [isoMs(NOW), ["customer_replied"], "stopped", "Stopped: the lead replied", "replied", 1, "stopped"],
+        "Stop on response: the lead replied after the first message → stopped before the second (one exit row 'stopped')");
+      db = mk(NOW - HR);
+      await step(db, NOW);
+      const q2: any = await step(db, NOW + 2 * DAYMS);
+      eq([q2.status, mails(db).length], ["done", 2], "a reply from before the first message does not stop it");
+      db = mk(NOW + HR, false);
+      await step(db, NOW);
+      eq([(await step(db, NOW + 2 * DAYMS) as any).status, mails(db).length], ["done", 2], "a run enrolled with Stop on response off is not stopped");
+    }
+
+    // ── the time window: every action keeps to it (team: deferred to its opening; customer: window ∩ customer hours);
+    //    waits and logic steps never wait for it ──
+    {
+      const WIN = (days: number[], from: string, until: string) => ({ window: { on: true, days, from, until } });
+      const wed20 = syd("2026-10-14", 20), wed21 = syd("2026-10-14", 21);
+      let A = flow({ n1: ifn([br("b1", "Yes", [{ field: "has_email", op: "true" }])], { b1: "n2", none: null }), n2: push("in hours") }, WIN([1, 2, 3, 4, 5], "09:00", "17:00"));
+      let db = world({ contacts: [lead("c1")], automations: [A], automation_runs: [runRow(A, { event_at: isoMs(wed20), anchor_at: isoMs(wed20), due_at: isoMs(wed20) })] });
+      sent.length = 0;
+      let p: any = await step(db, wed20);
+      const p2: any = await step(db, syd("2026-10-15", 9));
+      eq([p.status, p.due_at, p.cursor_step, p2.status, titles()], ["waiting", isoMs(syd("2026-10-15", 9)), "n1", "done", ["in hours"]], "a team action outside the time window waits for it to open (back over the If / else, checked again then)");
+      const cust = (win: any, at: number) => { const B = flow({ n1: mail() }, win); return world({ contacts: [lead("c1")], automations: [B], automation_runs: [runRow(B, { event_at: isoMs(at), anchor_at: isoMs(at), due_at: isoMs(at) })] }); };
+      db = cust(WIN([0, 1, 2, 3, 4, 5, 6], "06:00", "09:00"), wed21);
+      p = await step(db, wed21);
+      const p3: any = await step(db, syd("2026-10-15", 8));
+      eq([p.due_at, p3.status, mails(db).length], [isoMs(syd("2026-10-15", 8)), "done", 1], "a customer message waits for the time window AND the customer hours (Thursday 08:00, not 06:00)");
+      db = cust(WIN([0, 1, 2, 3, 4, 5, 6], "06:00", "23:00"), wed21);
+      p = await step(db, wed21);
+      eq(p.due_at, isoMs(syd("2026-10-15", 8)), "inside the window but outside the customer hours: the customer hours' morning");
+      db = cust(WIN([0, 1, 2, 3, 4, 5, 6], "21:00", "23:00"), wed21);
+      p = await step(db, wed21);
+      eq([p.status, rowsOf(db)[0].status, rowsOf(db)[0].reason], ["done", "skipped", "the time window and the customer hours never meet"], "a time window that never meets the customer hours: the message is skipped");
+      A = flow({ n1: period(10, "minutes", "n2"), n2: push("x") }, WIN([1, 2, 3, 4, 5], "09:00", "17:00"));
+      db = world({ contacts: [lead("c1")], automations: [A], automation_runs: [runRow(A, { event_at: isoMs(wed20), anchor_at: isoMs(wed20), due_at: isoMs(wed20) })] });
+      p = await step(db, wed20);
+      const q: any = await step(db, wed20 + 10 * MIN);
+      eq([p.due_at, q.due_at, q.cursor_step, trail(db)], [isoMs(wed20 + 10 * MIN), isoMs(syd("2026-10-15", 9)), "n2", ["n1:step:waiting", "n1:step:wait_finished"]], "a wait runs outside the window; only the action after it waits for the window");
+    }
+
+    // ── pauses (Global settings → Pause workflow): annual across New Year, 29 February; actions held, waits not ──
+    {
+      const pz = [{ start_wall: "2030-12-24T17:00", end_wall: "2031-01-02T08:00", annually: true, automation_ids: ["wA"] },
+        { start_wall: "2032-02-29T09:00", end_wall: "2032-03-01T09:00", annually: true, automation_ids: ["wB"] },
+        { start_wall: "2026-10-14T10:00", end_wall: "2026-10-16T10:00", annually: false, automation_ids: ["wC", "wA"] }];
+      eq([pauseUntil(pz, "wA", syd("2026-12-31", 12), tz), pauseUntil(pz, "wA", syd("2027-01-01", 0), tz), pauseUntil(pz, "wA", syd("2026-12-24", 16, 59), tz), pauseUntil(pz, "wB", syd("2027-02-28", 10), tz),
+        pauseUntil(pz, "wB", syd("2028-02-29", 10), tz), pauseUntil(pz, "wC", NOW, tz), pauseUntil(pz, "wA", NOW, tz), pauseUntil(pz, "wZ", NOW, tz), pauseUntil(pz, "wC", syd("2026-10-16", 10), tz)],
+        [syd("2027-01-02", 8), syd("2027-01-02", 8), null, syd("2027-03-01", 9), syd("2028-03-01", 9), syd("2026-10-16", 10), syd("2026-10-16", 10), null, null],
+        "pauseUntil: annual across New Year, 29 Feb (28 Feb in other years), several workflows, the end itself is not paused");
+      const P = flow({ n1: period(1, "hours", "n2"), n2: push("after the pause") });
+      const db = world({ contacts: [lead("c1")], automations: [P], automation_runs: [runRow(P)],
+        automation_pauses: [{ id: "pz1", business_id: "default", start_wall: "2026-10-14T14:30", end_wall: "2026-10-16T10:00", annually: false, automation_ids: [P.id] }] });
+      sent.length = 0;
+      await step(db, NOW);
+      const h: any = await step(db, NOW + HR);
+      const h2: any = await step(db, NOW + 2 * HR);   // woken early: held again, no second row
+      const end: any = await step(db, syd("2026-10-16", 10));
+      eq([h.status, h.due_at, h.reason, h.watch, h2.due_at, trail(db).slice(0, 3), end.status, titles()],
+        ["waiting", isoMs(syd("2026-10-16", 10)), `paused until ${isoMs(syd("2026-10-16", 10))}`, ["pause"], isoMs(syd("2026-10-16", 10)), ["n1:step:waiting", "n1:step:wait_finished", "n2:step:waiting"], "done", ["after the pause"]],
+        "a pause holds the action (not the wait) until it ends, watching 'pause'; then it runs (max_late_hours counts from the end)");
+    }
+
+    // ── the re-entry ledger + per-record lock through a whole run: the lock goes with the run; off = once; per lead ──
+    {
+      const E = flow({ n1: push("x") }, { reentry: "after_exit" }), O = flow({ n1: push("y") }, { reentry: "off" });
+      const db = world({ contacts: [lead("c1")], automations: [E, O], automation_enrollment_keys: [] });
+      const en = (a: any, key: string, o: any = {}) => db.rpc("automation_enroll", { p_business: "default", p_automation: a.id, p_version: 1, p_revision: 1, p_trigger: "t1", p_event_key: key, p_event_type: "newLead",
+        p_event_at: isoMs(NOW), p_record_kind: "contact", p_record_id: "c1", p_contact: "c1", p_enroll_key: "c1", p_lock_key: "c1", p_reentry: normWfSettings(a.settings).reentry, p_start: "n1", p_context: {},
+        p_source: "trigger", p_chain: 0, p_cause: null, p_parent: null, p_stop_on_reply: false, p_now: isoMs(NOW), ...o }).then((r: any) => String(r.data));
+      const e1 = await en(E, "k1"), e2 = await en(E, "k2");
+      await step(db, NOW, e1.slice(9));
+      const e3 = await en(E, "k3"), o1 = await en(O, "k1");
+      await step(db, NOW, o1.slice(9));
+      const o2 = await en(O, "k2");
+      eq([e1.startsWith("enrolled:"), e2, e3.startsWith("enrolled:"), o1.startsWith("enrolled:"), o2, thisRun(db, e1.slice(9)).active_lock], [true, "already_enrolled", true, true, "reentry_off", null],
+        "re-entry: one active run per key (the lock leaves with the finished run); after exit = again; off = once (the ledger)");
+      const job = (j: string, s: any) => enrollKeyOf(normWfSettings(s), { record_kind: "job", record_id: j, contact_id: "c1", event_key: j });
+      eq([job("j1", { perRecord: true }), job("j1", { perRecord: false }).key === job("j2", { perRecord: false }).key], [{ key: "job:j1", lock: "job:j1" }, true], "Allow multiple jobs off: two jobs of one lead share the lock");
+    }
+
+    // ── Mark as read after a message; a failed mark never stops the run ──
+    {
+      const M = flow({ n1: mail("n2"), n2: push("next") }, { markRead: true });
+      let db = world({ contacts: [lead("c1")], automations: [M], automation_runs: [runRow(M)] });
+      await step(db, NOW);
+      eq([(db.T.automation_apply_calls || []).map((x: any) => [x.p_kind, x.p_id, x.p_ops, x.p_cause]), !!db.T.contacts[0].last_read_at],
+        [[["contact", "c1", [{ op: "read" }], `r32:0:${M.id}`]], true], "'Conversations: Mark as read': the conversation is marked read after the message (cause = run:depth:workflow)");
+      db = world({ contacts: [lead("c1")], automations: [flow({ n1: mail() })], automation_runs: [] });
+      db.T.automation_runs.push(runRow(db.T.automations[0]));
+      await step(db, NOW);
+      eq(db.T.automation_apply_calls, undefined, "off: nothing marked");
+      db = world({ contacts: [lead("c1")], automations: [M], automation_runs: [runRow(M)] });
+      const bad = { ...db, rpc: (n: string, x: any) => n === "automation_apply" ? Promise.resolve({ data: null, error: { message: "boom" } }) : db.rpc(n, x) };
+      const err0 = console.error; console.error = () => {};
+      let pb: any;
+      try { pb = await step(db, NOW, "r32", bad); } finally { console.error = err0; }
+      eq([pb.status, mails(db).length], ["done", 1], "a failed mark-as-read never stops the run");
+      // Sender: the workflow's "From name" signs its emails before the business's signer
+      const K = flow({ n1: mail() }, { sender: { fromName: "Kim" } });
+      db = world({ automation_settings: [{ business_id: "default", email_signer: "Ron" }], contacts: [lead("c1")], automations: [K], automation_runs: [runRow(K)] });
+      await step(db, NOW);
+      const db0 = world({ automation_settings: [{ business_id: "default", email_signer: "Ron" }], contacts: [lead("c1")], automations: [M], automation_runs: [runRow(M)] });
+      await step(db0, NOW);
+      eq([mails(db)[0].author, mails(db0)[0].author], ["Kim", "Ron"], "Sender: the workflow's From name before the business's email signer (unset = the business's)");
+    }
+
+    // ── a delinked cluster runs only from the trigger that goes to it (Advanced); trigger gates skipped for added runs ──
+    {
+      const A = flow({ n1: push("main"), n5: push("side") }, {}, { entry: "n1", triggers: [{ id: "t1", type: "newLead", filters: NONE }, { id: "t2", type: "contact_changed", filters: NONE, goto: "n5" }] });
+      let db = world({ contacts: [lead("c1")], automations: [A], automation_runs: [runRow(A, { trigger_id: "t2" })] });
+      sent.length = 0; await step(db, NOW);
+      const side = titles();
+      db = world({ contacts: [lead("c1")], automations: [A], automation_runs: [runRow(A, { trigger_id: "t1" })] });
+      sent.length = 0; await step(db, NOW);
+      eq([side, titles()], [["side"], ["main"]], "a delinked cluster is reached only through its trigger's Go to");
+      const B = flow({ n1: push("stage") });
+      const st = (source: string) => world({ contacts: [lead("c1", { status: "Quoted", stage_changed_at: isoMs(NOW - HR) })], automations: [B], automation_runs: [runRow(B, { event_type: "stage", source, context: {} })] });
+      db = st("trigger"); const pT: any = await step(db, NOW);
+      db = st("workflow"); const pW: any = await step(db, NOW);
+      eq([pT.status, pW.status], ["skipped", "done"], "a stage trigger's own gate applies to its runs, never to a run added by another workflow");
+    }
+
+    // ── section markers; no business words in the new executor code ──
+    const s4 = src("index.ts"), w0 = s4.indexOf("// ==== WAITS"), w1 = s4.indexOf("// Once a day: finished runs");
+    eq(["Aircon", "Gutter", "Sydney", "Ron", "The Guys"].filter((w) => s4.slice(w0, w1).split("\n").filter((l: string) => !/^\s*\/\//.test(l)).join("\n").includes(w)), [], "no business words in the waits and executor code (G2.2)");
+  }
+
+  // ── 33. record actions, the inbound webhook, the outgoing webhook, custom values (G2.3, design §3.8–§3.12, §8.1 #9,
+  //        #18, #21, #22): every apply op = the app's equivalent write's events, with the cause; a workflow never starts
+  //        itself again; a chain of workflows stops at depth 3; SSRF refusals; payload 50 × 500 stored truncated; 404 / 429 ──
+  {
+    io.advance = PROD_ADVANCE;
+    const NONE = { match: "all", segments: [{ match: "all", rules: [] }] };
+    const F1 = (rules: any[]) => ({ match: "all", segments: [{ match: "all", rules }] });
+    let k33 = 0;
+    const flow = (nodes: any, o: any = {}) => {
+      k33++;
+      return { id: `w33-${String(k33).padStart(4, "0")}`, business_id: "default", name: `G23 ${k33}`, enabled: true, armed_at: "2026-10-01T00:00:00.000Z", version: 1, revision: 1,
+        created_by_name: "Olivia Owner", trigger: {}, steps: [], definition: { schema: 2, seq: 60, entry: Object.keys(nodes)[0], triggers: o.triggers ?? [{ id: "t1", type: "newLead", filters: NONE }], nodes },
+        settings: { reentry: "off", perRecord: true, ...(o.settings || {}) }, deleted_at: null, ...(o.row || {}) };
+    };
+    const act = (type: string, config: any, next: string | null = null) => ({ kind: "action", type, config, out: { next } });
+    const runRow = (a: any, o: any = {}) => ({ id: "r33", business_id: "default", automation_id: a.id, automation_version: a.version, event_key: "c1:new", event_type: "newLead", event_at: isoMs(NOW),
+      record_kind: "contact", record_id: "c1", contact_id: "c1", status: "waiting", step_index: 0, anchor_at: isoMs(NOW), due_at: isoMs(NOW), attempts: 0, context: {}, trigger_id: "t1",
+      cursor_step: null, remove_requested: false, chain_depth: 0, ...o });
+    const step = async (db: any, ms = NOW, id = "r33") => {
+      const r = db.T.automation_runs.find((x: any) => x.id === id); Object.assign(r, { status: "running", attempts: (Number(r.attempts) || 0) + 1 });
+      clock = ms; const p: any = await advanceV2(db, { ...r }, ctxOf(db), ms); Object.assign(r, p); clock = NOW; return p;
+    };
+    const acts33 = (db: any, id = "r33") => db.T.automation_log.filter((l: any) => l.run_id === id && l.row_kind === "action").map((l: any) => `${l.step_id}:${l.status}${l.reason ? ":" + l.reason : ""}`);
+    const one = async (nodes: any, seed: any = {}, o: any = {}) => {
+      const A = flow(nodes, o);
+      const db = world({ contacts: [lead("c1")], automations: [A], automation_runs: [runRow(A, o.run || {})], ...seed });
+      const p = await step(db, o.at ?? NOW);
+      return { db, A, p };
+    };
+
+    // ── each record action → its automation_apply ops, the run's cause, and the write itself ──
+    {
+      sent.length = 0;
+      const { db, A } = await one({
+        n1: act("update_field", { field: "postcode", value: "2{suburb}9" }, "n2"), n2: act("add_tag", { tags: ["VIP", "vip", " Hot "] }, "n3"), n3: act("remove_tag", { tags: ["vip"] }, "n4"),
+        n4: act("add_note", { text: "Called {first_name}" }, "n5"), n5: act("edit_conversation", {}, "n6"), n6: act("move_stage", { stage: "Quoted" }, "n7"),
+        n7: act("internal_comment", { text: "Moved by {automation}" }, "n8"), n8: act("update_custom_value", { key: "promo", value: "SPRING{service}" }, "n9"),
+        n9: act("internal_notification", { channel: "push", to: { roles: ["owner"] }, title: "Code {custom.promo}" }, "n10"), n10: act("add_task", { title: "Call {first_name}", due_days: 2 }, "n11"),
+        n11: act("manual_call", { title: "Ring {name}" }, "n12"), n12: act("dnd", { mode: "enable", channel: "email" }, "n13"), n13: act("mark_lost", { reason: "Too far" }) });
+      const calls = db.T.automation_apply_calls;
+      eq(calls.map((x: any) => [x.p_kind, x.p_id, x.p_cause, x.p_ops.map((o: any) => o.op).join("+")]), [
+        ["contact", "c1", `r33:0:${A.id}`, "set"], ["contact", "c1", `r33:0:${A.id}`, "tags"], ["contact", "c1", `r33:0:${A.id}`, "tags"], ["contact", "c1", `r33:0:${A.id}`, "note"],
+        ["contact", "c1", `r33:0:${A.id}`, "read"], ["contact", "c1", `r33:0:${A.id}`, "stage"], ["contact", "c1", `r33:0:${A.id}`, "comment"], ["contact", "c1", `r33:0:${A.id}`, "custom"],
+        ["contact", "c1", `r33:0:${A.id}`, "task"], ["contact", "c1", `r33:0:${A.id}`, "task"], ["contact", "c1", `r33:0:${A.id}`, "optout"], ["contact", "c1", `r33:0:${A.id}`, "stage"]],
+        "every record action is ONE automation_apply call on the lead with the run's cause (run:depth:workflow)");
+      const c = db.T.contacts[0];
+      eq([calls[0].p_ops[0], calls[1].p_ops[0], calls[3].p_ops[0].text, c.postcode, c.tags, c.customer_notes.map((x: any) => [x.text, x.by]), c.status, c.lost_reason, !!c.last_read_at],
+        [{ op: "set", field: "postcode", value: "220009" }, { op: "tags", add: ["VIP", "vip", "Hot"] }, "Called Sam", "220009", ["Hot"], [["Called Sam", `Automation: ${A.name}`]], "Lost", "Too far", true],
+        "the writes: the field (merge filled), tags (one tag in any case; removed in any case), a note on the card ({id, text, by, at}), read, stage, lost with its reason");
+      const tasks = db.T.tasks.map((t: any) => [t.title, t.board, t.due, t.contact_id, t.category, t.priority, t.created_by]);
+      eq(tasks, [["Call Sam", "ron", "2026-10-16", "c1", "Client-related", "Medium", `Automation: ${A.name}`], ["Ring Sam Smith", "ron", "2026-10-14", "c1", "Client-related", "High", `Automation: ${A.name}`]],
+        "Add task / Manual action to call: the office board, due in n days / today, the lead's task");
+      eq([sent.map((x) => x.msg.title), db.T.automation_custom_values, db.T.customer_opt_outs.map((x: any) => x.channel)], [["Code SPRINGAircon cleaning"], [{ business_id: "default", key: "promo", value: "SPRINGAircon cleaning" }], ["email"]],
+        "Update custom value: stored, and {custom.promo} has the new value in the very next step; Stop automatic messages: the opt-out");
+      eq(acts33(db), ["n1:executed", "n2:executed", "n3:executed", "n4:executed", "n5:executed", "n6:executed", "n7:executed", "n8:executed", "n9:sent", "n10:executed", "n11:executed", "n12:executed", "n13:executed"],
+        "the action rows: executed (record writes), sent (the push)");
+      eq(db.T.activity_log.filter((l: any) => l.actor === `Automation: ${A.name}`).length, 11, "one activity line on the lead per write (Automation: <name>; a custom value has none)");
+    }
+    // a record action that meets a goal further down: the goal looks at the record as it is now (not the start's read)
+    {
+      sent.length = 0;
+      const goal = (ifNotMet: string, next: string | null) => ({ kind: "goal", type: "tag_added", config: { tags: ["VIP"], ifNotMet }, out: { next } });
+      let r = await one({ n1: act("add_tag", { tags: ["VIP"] }, "n2"), n2: goal("end", "n3"), n3: act("internal_notification", { channel: "push", to: { roles: ["owner"] }, title: "VIP {name}" }) });
+      eq([r.p.status, r.p.exit_reason, sent.map((x) => x.msg.title), r.db.T.automation_log.filter((l: any) => l.step_id === "n2").map((l: any) => l.detail && l.detail.met)],
+        ["done", "end_of_workflow", ["VIP Sam Smith"], [true]], "Add tag then a Goal for that tag: met (fresh facts after the write), the run goes on");
+      sent.length = 0;
+      r = await one({ n1: act("add_tag", { tags: ["VIP"] }, "n2"), n2: act("internal_notification", { channel: "push", to: { roles: ["owner"] }, title: "skipped over" }, "n3"), n3: goal("continue", "n4"),
+        n4: act("internal_notification", { channel: "push", to: { roles: ["owner"] }, title: "after the goal" }) });
+      eq([r.p.status, sent.map((x) => x.msg.title)], ["done", ["after the goal"]], "…and a goal further down that the write met is jumped to (the step between is passed over)");
+    }
+    {
+      const { db } = await one({ n1: act("move_stage", { stage: "New" }, "n2"), n2: act("dnd", { mode: "disable", channel: "all" }) });
+      eq(acts33(db), ["n1:skipped:already in that stage", "n2:skipped:unavailable: Only a person can turn automatic messages back on"], "refused writes are skipped with the reason: the same stage, turning messages back on");
+      // a doc the validator lets through never reaches these, but the plan refuses them too (Won, a field off the whitelist)
+      const fx0: any = { contact: { id: "c1" }, cat: CATALOG };
+      eq([await recordPlan(db, act("move_stage", { stage: "won" }), { id: "r" }, {}, fx0, ctxOf(db), NOW, {}), await recordPlan(db, act("update_field", { field: "phone", value: "1" }), { id: "r" }, {}, fx0, ctxOf(db), NOW, {}),
+        await recordPlan(db, act("add_tag", { tags: ["x"] }), { id: "r" }, {}, { contact: null }, ctxOf(db), NOW, {}), await recordPlan(db, act("send_email", {}), { id: "r" }, {}, fx0, ctxOf(db), NOW, {})],
+        [{ skip: "A lead is won when its job is entered" }, { skip: "field not allowed" }, { skip: "No lead card" }, null], "the plan: Won refused, the field whitelist, a lead write needs a lead, a message is not a record write");
+      // contactless (a Scheduler run): the team's task through apply (kind none); a lead-only write is 'No lead card'
+      const S = flow({ n1: act("add_task", { title: "Weekly check" }, "n2"), n2: act("add_tag", { tags: ["x"] }) }, { triggers: [{ id: "t1", type: "scheduler", config: { freq: "daily", at: "09:00" }, filters: NONE }] });
+      const db2 = world({ automations: [S], automation_runs: [runRow(S, { record_kind: "none", record_id: "sched:x", contact_id: null, event_type: "scheduler", event_key: "sched:x" })] });
+      await step(db2);
+      eq([db2.T.automation_apply_calls.map((x: any) => [x.p_kind, x.p_id, x.p_ops[0].op]), db2.T.tasks.map((t: any) => [t.title, t.contact_id, t.category]), acts33(db2)],
+        [[["none", "r33", "task"]], [["Weekly check", null, null]], ["n1:executed", "n2:skipped:No lead card"]], "no lead: the task is the team's (apply kind 'none', the run's cause), a lead write is skipped");
+      // the dry run: the ops it would apply, no write at all
+      const D = flow({ n1: act("add_tag", { tags: ["VIP"] }, "n2"), n2: act("add_task", { title: "Call {first_name}" }) });
+      const db3 = world({ contacts: [lead("c1")], automations: [D] });
+      const before = JSON.stringify(db3.T);
+      const d: any = await dryRunV2(db3, D, { record_kind: "contact", record_id: "c1", contact_id: "c1", event_type: "newLead", event_at: isoMs(NOW), trigger_id: "t1", context: {} }, ctxOf(db3), NOW);
+      eq([d.ok, d.path.filter((x: any) => x.rowKind === "action").map((x: any) => [x.stepId, x.status, x.preview.title ?? null, x.preview.board ?? null, (x.preview.ops || []).map((o: any) => o.op)]), JSON.stringify(db3.T) === before],
+        [true, [["n1", "would", null, null, ["tags"]], ["n2", "would", "Call Sam", "ron", ["task"]]], true], "the dry run shows the ops each record action would apply and writes nothing");
+    }
+
+    // ── apply ops emit the same events as the app's equivalent writes, each with the cause (design §8.1 #18) ──
+    {
+      const W = ["contact_changed", "contact_tag", "note_added", "lead_status", "contact_dnd", "stage"].map((t) => ({ business_id: "default", event_type: t }));
+      const shape = (db: any) => db.T.automation_events.map((e: any) => [e.type, e.event_key.replace(/:\d+$/, ":<tx>").replace(/:note:[A-Za-z0-9_-]+$/, ":note:<id>").replace(/^[^:]+:(on|off)$/, "<optout>:$1")
+        .replace(/:\d{4}-\d\d-\d\dT[\d:.]+Z$/, ":<at>"), { ...e.ctx, ...(e.ctx.note_id ? { note_id: "<id>" } : {}), ...(e.ctx.old !== undefined ? { old: "<old>" } : {}) }]).sort((x: any, y: any) => JSON.stringify(x) < JSON.stringify(y) ? -1 : 1);
+      // the app: the lead card's writes (a field, the atomic tag / note edits, a stage move, an opt-out)
+      const app = world({ contacts: [lead("c1")], automation_wanted: W.map((x) => ({ ...x })) });
+      await app.from("contacts").update({ postcode: "2999" }).eq("id", "c1");
+      await app.rpc("contact_tags_edit", { p_id: "c1", p_add: ["VIP"], p_remove: [] });
+      await app.rpc("contact_tags_edit", { p_id: "c1", p_add: [], p_remove: ["vip"] });
+      await app.rpc("contact_note_add", { p_id: "c1", p_note: { id: "n-app", text: "Gate 12", by: "Olivia Owner", at: isoMs(NOW) } });
+      await app.from("contacts").update({ status: "Quoted", stage_changed_at: isoMs(NOW) }).eq("id", "c1");
+      await app.from("customer_opt_outs").insert({ business_id: "default", contact_id: "c1", channel: "email", reason: "Olivia Owner" });
+      // the engine: the same writes through automation_apply
+      const E = flow({ n1: act("update_field", { field: "postcode", value: "2999" }, "n2"), n2: act("add_tag", { tags: ["VIP"] }, "n3"), n3: act("remove_tag", { tags: ["vip"] }, "n4"),
+        n4: act("add_note", { text: "Gate 12" }, "n5"), n5: act("move_stage", { stage: "Quoted" }, "n6"), n6: act("dnd", { mode: "enable", channel: "email" }) });
+      const eng = world({ contacts: [lead("c1")], automations: [E], automation_runs: [runRow(E, { chain_depth: 1 })], automation_wanted: W.map((x) => ({ ...x })) });
+      await step(eng);
+      const appEv = shape(app).filter((x: any) => x[0] !== "stage"), engEv = shape(eng).filter((x: any) => x[0] !== "stage");
+      eq(engEv.map((x: any) => x.slice(0, 2)), appEv.map((x: any) => x.slice(0, 2)), "the same event types and keys (the transaction id aside) as the lead card's own writes");
+      eq(engEv.map((x: any) => [x[0], x[2].action ?? x[2].field ?? x[2].status ?? x[2].tag ?? null]), appEv.map((x: any) => [x[0], x[2].action ?? x[2].field ?? x[2].status ?? x[2].tag ?? null]), "…with the same details");
+      eq([app.T.automation_events.every((e: any) => e.cause_automation_id == null && e.chain_depth === 0),
+        eng.T.automation_events.every((e: any) => e.cause_automation_id === E.id && e.cause_run_id === "r33" && e.chain_depth === 2)], [true, true],
+        "the app's events have no cause; every event the workflow's writes make carries the run, the workflow and depth + 1");
+      eq(eng.T.automation_events.filter((e: any) => e.type === "stage").map((e: any) => [e.event_key, e.source]), [[`c1:Quoted:${isoMs(NOW)}`, "engine"]], "a stage move writes the scanner's 'stage' event itself (its exact key), so the scanner adds nothing");
+    }
+
+    // the lead card's note keeps its whole text (an older note over 2000 characters comes back whole on Undo: delete,
+    // then add again); notes that are not a list are never replaced, by the card (an error) or by a workflow (skipped)
+    {
+      const long = "x".repeat(2500), old = { id: "old1", text: long, by: "Olivia Owner", at: isoMs(NOW - DAYMS) };
+      const db = world({ contacts: [lead("c1", { customer_notes: [old] }), lead("c2", { customer_notes: "a note from the old app" })] });
+      await db.rpc("contact_note_remove", { p_id: "c1", p_note_id: "old1" });
+      const gone = db.T.contacts[0].customer_notes.length;
+      const back = await db.rpc("contact_note_add", { p_id: "c1", p_note: { ...old } });
+      const bad = [await db.rpc("contact_note_add", { p_id: "c2", p_note: { id: "n1", text: "x" } }), await db.rpc("contact_note_remove", { p_id: "c2", p_note_id: "n1" })];
+      eq([gone, back.error, db.T.contacts[0].customer_notes.map((x: any) => [x.id, x.text.length]), bad.map((x: any) => !!x.error), db.T.contacts[1].customer_notes],
+        [0, null, [["old1", 2500]], [true, true], "a note from the old app"], "a 2,500-character note: delete then Undo brings it back whole; notes that are not a list: the card's add / delete refused, untouched");
+      // any note id the card can show comes back on Undo (an imported "ghl:123/x"): any non-empty id up to 128
+      // characters without control characters; the app's own new notes keep their uid() ids
+      const odd = { id: "ghl:123/x", text: "Imported", by: "", at: "" }, n128 = "n".repeat(128);
+      const db3 = world({ contacts: [lead("c1", { customer_notes: [odd] })] });
+      await db3.rpc("contact_note_remove", { p_id: "c1", p_note_id: odd.id });
+      const undo = await db3.rpc("contact_note_add", { p_id: "c1", p_note: { ...odd } });
+      const restored = JSON.parse(JSON.stringify(db3.T.contacts[0].customer_notes));
+      const ok128 = await db3.rpc("contact_note_add", { p_id: "c1", p_note: { id: n128, text: "Long id" } });
+      const refused = await Promise.all(["", "n".repeat(129), "a\nb", "a\u0000b", null].map((id) => db3.rpc("contact_note_add", { p_id: "c1", p_note: { id, text: "x" } })));
+      eq([undo.error, ok128.error, db3.T.contacts[0].customer_notes.map((x: any) => x.id.length > 20 ? x.id.length : x.id), refused.map((x: any) => x.error && x.error.message)],
+        [null, null, ["ghl:123/x", 128], Array(5).fill("a note needs an id and some text")], "a deleted note with a foreign id comes back on Undo; ids up to 128 characters, none empty or with a control character");
+      eq([restored, db3.T.contacts[0].customer_notes[1].at === isoMs(clock)], [[odd], true], "…exactly as it was (its empty time kept; a note given no time gets now)");
+      const sqlTx = src(SQL_DIR + "stage2-automations.sql"), fnSql = (n0: string) => sqlTx.slice(sqlTx.indexOf(`create or replace function public.${n0}(`), sqlTx.indexOf("$$;", sqlTx.indexOf(`create or replace function public.${n0}(`)));
+      eq(["contact_note_add", "contact_notes_append"].map((n0) => [fnSql(n0).includes("A-Za-z0-9_-]{1,64}"), fnSql(n0).includes("pg_catalog.char_length(p_note ->> 'id') > 128"), fnSql(n0).includes("[[:cntrl:]]")]),
+        [[false, true, true], [false, true, true]], "SQL: contact_note_add and contact_notes_append take the same id rule (any id up to 128, no control characters)");
+      const W2 = flow({ n1: act("add_note", { text: "From the workflow" }) });
+      const eng = world({ contacts: [lead("c1", { customer_notes: "a note from the old app" })], automations: [W2], automation_runs: [runRow(W2)] });
+      await step(eng);
+      eq([acts33(eng), eng.T.contacts[0].customer_notes], [["n1:skipped:the notes on this card are not a list"], "a note from the old app"], "a workflow's Add note never replaces notes that are not a list (skipped, with the reason)");
+    }
+
+    // ── a workflow never starts itself again; a chain of workflows stops at depth 3 (event store, real ticks) ──
+    {
+      const tagTrig = (tag: string) => [{ id: "t1", type: "contact_tag", filters: F1([{ field: "trigger.tag", op: "is", v: tag }, { field: "trigger.action", op: "is", v: "added" }]) }];
+      const anyTag = [{ id: "t1", type: "contact_tag", filters: F1([{ field: "trigger.action", op: "is", v: "added" }]) }];
+      const Self = flow({ n1: act("add_tag", { tags: ["B"] }) }, { triggers: anyTag, settings: { reentry: "after_exit" } });
+      const W = [1, 2, 3, 4, 5].map((i) => flow({ n1: act("add_tag", { tags: [`t${i}`] }) }, { triggers: tagTrig(`t${i - 1}`), settings: { reentry: "after_exit" } }));
+      const st = () => [{ business_id: "default", tick_lease_until: null, pruned_on: null, phase4_compat: false }];
+      const base = { automation_state: st(), automation_events: [], automation_trigger_log: [], automation_trigger_daily: [], automation_enrollment_keys: [], automation_wanted: [] };
+      let db = world({ contacts: [lead("c1")], automations: [Self], ...base });
+      await tickAt(db, NOW);   // publishes the capture list
+      await db.rpc("contact_tags_edit", { p_id: "c1", p_add: ["A"], p_remove: [] });
+      for (let i = 1; i <= 4; i++) await tickAt(db, NOW + i * MIN);
+      eq([db.T.automation_runs.length, db.T.contacts[0].tags, db.T.automation_trigger_log.map((r: any) => `${r.event_key.split(":").slice(1, 4).join(":")}:${r.matched ? "match" : r.reason}`).sort()],
+        [1, ["A", "B"], ["tag:+:A:match", "tag:+:B:own_change"]], "a workflow's own write never starts it again (own_change), even with re-entry on");
+      db = world({ contacts: [lead("c1")], automations: W, ...base, automation_state: st() });
+      await tickAt(db, NOW);
+      await db.rpc("contact_tags_edit", { p_id: "c1", p_add: ["t0"], p_remove: [] });
+      for (let i = 1; i <= 7; i++) await tickAt(db, NOW + i * MIN);
+      eq([db.T.contacts[0].tags, db.T.automation_runs.map((r: any) => r.chain_depth).sort(),
+        db.T.automation_trigger_log.filter((r: any) => r.automation_id === W[4].id && r.event_key.includes(":t4:")).map((r: any) => r.reason)],
+        [["t0", "t1", "t2", "t3", "t4"], [0, 1, 2, 3], ["loop_guard"]], "a chain of workflows stops at depth 3: the 5th never starts (loop_guard)");
+    }
+
+    // ── {custom.x}, {trigger.x} (HTML-escaped in emails), unknown blanks stop a customer message ──
+    {
+      const vars = wfMergeVars({ contact: { full_name: "Sam Smith", estimated_value: 450, booked_for: "2026-10-20T00:00:00Z", lost_reason: null }, job: null, call: null, chat: null, task: { title: "Ring", due: "2026-10-21" },
+        ctx: { form: "<b>x</b>", _wf: "w1", "Bad-Key": "no" }, cat: CATALOG, company: "Acme", S: normSettings({}), kind: "contact" }, { name: "A", steps: [] }, { promo: "SPRING", "Bad": "x" });
+      eq([vars.quote_amount, vars.booked_date, vars.task_title, vars.due_date, vars["custom.promo"], vars["trigger.form"], has(vars, "trigger._wf"), has(vars, "custom.Bad")],
+        ["$450", "2026-10-20", "Ring", "2026-10-21", "SPRING", "<b>x</b>", false, false], "stage-2 merge values: quote amount, dates, task, custom values, trigger data (never the engine's own _ keys)");
+      const kn = wfKnown(vars);
+      eq([wfFill("Hi {first_name}, code {custom.promo}{custom.none}", vars, kn), wfFill("Form: {trigger.form}", vars, kn, (v, k) => k.startsWith("trigger.") ? htmlEsc(v) : v),
+        wfUnfilled(["a {custom.none} b {trigger.missing}"]), wfFill("{custom.none}", vars, "*")],
+        ["Hi Sam, code SPRING{custom.none}", "Form: &lt;b&gt;x&lt;/b&gt;", ["custom.none", "trigger.missing"], ""], "fill: known blanks filled, {trigger.*} escaped in emails, unknown ones stay (and stop the message); team words: unknown = empty");
+      const { db } = await one({ n1: act("send_email", { subject: "Hi {first_name}", body: "Your code {custom.nope}" }, "n2"), n2: act("send_email", { subject: "Re {trigger.form}", body: "{hi}, {quote_amount}" }) },
+        {}, { run: { context: { form: "<i>web</i>" } } });
+      eq([acts33(db), db.T.lead_messages.map((m: any) => m.subject)], [["n1:skipped:missing details: custom.nope", "n2:queued"], ["Re &lt;i&gt;web&lt;/i&gt;"]], "an unknown {custom.x} stops the email; a trigger value is escaped");
+    }
+
+    // ── send live chat message / send review request (customer actions with the full guard) ──
+    {
+      const chat = (o: any = {}) => ({ id: "s1", contact_id: "c1", created_at: isoMs(NOW - HR), full_name: "Sam Smith", ...o });
+      let r = await one({ n1: act("send_live_chat", { body: "{hi}, we saw your chat" }) }, { chat_sessions: [chat()] });
+      eq([acts33(r.db), r.db.T.lead_messages.map((m: any) => [m.session_id, m.channel, m.direction, m.auto, m.body])], [["n1:sent"], [["s1", "chat", "out", true, "Hi Sam, we saw your chat"]]],
+        "Send live chat message: into the lead's open chat (an automatic row the widget shows)");
+      r = await one({ n1: act("send_live_chat", { body: "x" }) }, { chat_sessions: [chat({ created_at: isoMs(NOW - 30 * HR) })] });
+      eq(acts33(r.db), ["n1:skipped:no open chat"], "…no chat in the last 24 hours: skipped");
+      r = await one({ n1: act("send_live_chat", { body: "x" }) }, { chat_sessions: [chat()], customer_opt_outs: [{ id: "o1", business_id: "default", contact_id: "c1", channel: "chat" }] });
+      eq(acts33(r.db), ["n1:skipped:opted out"], "…opted out of chat: skipped");
+      const cat2 = { ...CATALOG, reviews: { links: { Aircon: { link: "https://g.page/r/abc/review" } } } };
+      const job = { id: "j1", contact_id: "c1", invoice_number: "INV-2400", date: "2026-10-13", job_type: "Aircon", technician: "Guy Tech", customer_name: "Sam Smith", amount: 300, payment_status: "Paid" };
+      const rv = async (seed: any) => {
+        const A = flow({ n1: act("send_review_request", {}) });
+        const db = world({ contacts: [lead("c1")], automations: [A], automation_runs: [runRow(A)], jobs: [job], settings: [{ id: 1, company_name: "Acme Home Services", catalog: cat2, review_requests_enabled: true }], system_claims: [], ...seed });
+        const T: any = { ...ctxOf(db), cat: cat2 };
+        const run = db.T.automation_runs[0]; run.status = "running"; run.attempts = 1;
+        Object.assign(run, await advanceV2(db, { ...run }, T, NOW));
+        return db;
+      };
+      let db = await rv({});
+      eq([acts33(db), db.T.review_requests.map((x: any) => [x.invoice_number, x.job_id, x.phone, x.email, x.review_link, x.status, x.source, x.first_name]), db.T.system_claims.map((x: any) => x.key)],
+        [["n1:queued"], [["2400", "j1", "+61412345678", "sam@example.com", "https://g.page/r/abc/review", "waiting", "auto", "Sam"]], ["review:j1"]],
+        "Send review request: one request in the Google reviews queue (the review-requests function sends it), the job's claim taken");
+      db = await rv({ settings: [{ id: 1, company_name: "Acme Home Services", catalog: cat2, review_requests_enabled: false }] });
+      eq(acts33(db), ["n1:skipped:unavailable: Turn on Google reviews first"], "…Google reviews off: skipped (unavailable)");
+      db = await rv({ review_requests: [{ id: "rr0", phone: "+61412345678", status: "sent", created_at: isoMs(NOW - 20 * DAYMS) }] });
+      eq(acts33(db), ["n1:skipped:asked for a review in the last 6 months"], "…asked recently: skipped");
+      db = await rv({ system_claims: [{ business_id: "default", key: "review:j1", at: isoMs(NOW - HR) }] });
+      eq([acts33(db), db.T.review_requests.length], [["n1:skipped:already asked for this job"], 0], "…the job's claim already taken (the legacy queue asked first): skipped, never twice");
+    }
+
+    // ── the outgoing webhook: SSRF refusals, no redirects, timeout + one retry, only host / status / time logged ──
+    {
+      eq(["http://x.com/h", "https://10.0.0.1/h", "https://[::1]/h", "https://localhost/h", "https://db.internal/h", "https://printer.local/h", "https://abc.supabase.co/h", "https://user:pw@x.com/h", "https://0x7f000001/h", "https://hooks.zapier.com/x"].map(webhookUrlProblem),
+        ["Only https:// addresses", "An IP address is not allowed", "An IP address is not allowed", "An internal address is not allowed", "An internal address is not allowed", "An internal address is not allowed",
+          "This address is not allowed", "No passwords in the address", "An IP address is not allowed", ""], "the address: https only; no IP literal, localhost, *.local / *.internal, Supabase, passwords");
+      eq(["10.1.2.3", "172.20.0.1", "192.168.1.1", "127.0.0.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "224.0.0.1", "::1", "fd00::1", "fe80::1", "::ffff:10.0.0.1", "64:ff9b::a00:1", "8.8.8.8", "2606:4700::1111", "100.128.0.1"].map(ipBlocked),
+        [true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false], "private, loopback, link-local (cloud metadata), CGNAT, multicast, mapped and NAT64 addresses are refused");
+      const calls: any[] = [];
+      let answers: any[] = [];
+      io.fetch = async (url: string, init: any) => { calls.push({ url, init }); const a0 = answers.shift(); if (a0 instanceof Error) throw a0; return { status: a0, body: { cancel: async () => {} } }; };
+      const dns0 = io.resolveDns;
+      let dns: Record<string, string[]> = {};
+      io.resolveDns = async (host: string, type: string) => { const l = (dns[host] || []).filter((x) => (type === "A") === !x.includes(":")); if (!l.length) throw Object.assign(new Error("no record"), { name: "NotFound" }); return l; };
+      const hook = (cfg: any) => one({ n1: act("webhook", { url: "https://hooks.example.com/in", ...cfg }) });
+      dns = { "hooks.example.com": ["93.184.216.34"] };
+      answers = [200];
+      let r = await hook({ headers: [{ name: "X-Source", value: "ops" }], fields: ["first_name", "custom.none"] });
+      const row = r.db.T.automation_log.find((l: any) => l.row_kind === "action");
+      eq([acts33(r.db), calls.length, calls[0].init.redirect, calls[0].init.method, JSON.parse(calls[0].init.body), calls[0].init.headers["X-Source"], row.channel, row.audience, row.detail, row.recipient],
+        [["n1:sent"], 1, "manual", "POST", { first_name: "Sam", "custom.none": "" }, "ops", "webhook", "team", { host: "hooks.example.com", status: 200, ms: 0, tries: 1 }, "hooks.example.com"],
+        "sent: the chosen fields as JSON, redirects not followed; the log row has only the host, the status, the time and the tries");
+      ok(!JSON.stringify(r.db.T.automation_log).includes("X-Source") && !JSON.stringify(r.db.T.automation_log).includes("first_name"), "nothing of the headers or the body is logged");
+      calls.length = 0; answers = [503, 200];
+      r = await hook({ template: '{"who":"{name}","q":"{trigger.none}"}' });
+      eq([acts33(r.db), calls.length, JSON.parse(calls[1].init.body)], [["n1:sent"], 2, { who: "Sam Smith", q: "" }], "a 5xx is tried once more; a JSON template's blanks are JSON-escaped");
+      calls.length = 0; answers = [302];
+      r = await hook({});
+      eq([acts33(r.db), calls.length], [["n1:failed:the other system answered with a redirect (not followed)"], 1], "a redirect is never followed (no second call)");
+      calls.length = 0; const ab = () => Object.assign(new Error("aborted"), { name: "AbortError" }); answers = [ab(), ab()];
+      r = await hook({});
+      eq([acts33(r.db), calls.length], [["n1:failed:no answer within 10 seconds"], 2], "no answer within 10 s: one more try, then failed");
+      calls.length = 0; answers = [404];
+      r = await hook({});
+      eq([acts33(r.db), calls.length], [["n1:failed:the other system answered 404"], 1], "a 4xx is not tried again");
+      calls.length = 0; dns = { "hooks.example.com": ["93.184.216.34", "10.0.0.7"] }; answers = [200];
+      r = await hook({});
+      eq([acts33(r.db), calls.length], [["n1:failed:refused: the address is a private one"], 0], "a name that resolves to a private address is refused before any call (DNS check)");
+      dns = { "hooks.example.com": ["fd00::7"] };
+      r = await hook({});
+      eq([acts33(r.db), calls.length], [["n1:failed:refused: the address is a private one"], 0], "…also an IPv6 private address");
+      dns = {};
+      r = await hook({});
+      eq([acts33(r.db), calls.length], [["n1:failed:the address was not found"], 0], "a name with no address: failed, no call");
+      const dns1 = io.resolveDns; io.resolveDns = async () => { throw Object.assign(new Error("no permission"), { name: "PermissionDenied" }); }; answers = [302];
+      r = await hook({});
+      io.resolveDns = dns1;
+      eq([acts33(r.db), calls.length], [["n1:failed:the other system answered with a redirect (not followed)"], 1], "a runtime that refuses name lookups: only the address is checked");
+      calls.length = 0;
+      dns = { "hooks.example.com": ["93.184.216.34"] }; answers = [{ opaque: true }];
+      const f0 = io.fetch; io.fetch = async (url: string, init: any) => { calls.push({ url, init }); answers.shift(); return { type: "opaqueredirect", status: 0 }; };
+      r = await hook({});
+      io.fetch = f0;
+      eq([acts33(r.db), calls.length], [["n1:failed:the other system answered with a redirect (not followed)"], 1], "an opaque redirect (status 0) is a redirect too: one call, never retried");
+      calls.length = 0;
+      r = await hook({ headers: [{ name: "Authorization", value: "Bearer x" }] });
+      eq([acts33(r.db), calls.length], [["n1:failed:refused: a secret or bad header"], 0], "a secret header is refused at run time too");
+      r = await hook({ template: '{"x": {name}}' });
+      eq(acts33(r.db), ["n1:failed:the template is not valid JSON"], "a template that is not JSON once filled: failed, nothing sent");
+      r = await one({ n1: act("webhook", { url: "https://hooks.example.com/in" }) }, { customer_opt_outs: [{ id: "o1", business_id: "default", contact_id: "c1", channel: "all" }] });
+      const r2 = await one({ n1: act("webhook", { url: "https://hooks.example.com/in" }) }, { contacts: [lead("c1", { tags: ["test"] })] });
+      eq([acts33(r.db), acts33(r2.db), calls.length], [["n1:skipped:opted out"], ["n1:skipped:test record"], 0], "a lead who opted out of everything, or a test record, is never sent out");
+      io.resolveDns = null; answers = [200]; calls.length = 0;
+      r = await hook({});
+      eq([acts33(r.db), calls.length], [["n1:sent"], 1], "without a name lookup in the runtime only the address itself is checked");
+      io.resolveDns = dns0; io.fetch = async () => { throw new Error("network is not allowed in the automations tests"); };
+    }
+
+    // ── the inbound webhook: token, 404, 429, 413 / 400, normalisation, lead match, contactless, the draft sample ──
+    {
+      eq([hookKey("Contact.Email"), hookKey("  First Name "), hookKey("__x__"), hookKey("ÄÖ"), hookKey("a".repeat(60)).length, hookTokenOf("/automations/hook/abc", null), hookTokenOf("/automations", "tok"), hookTokenOf("/automations", null)],
+        ["contact_email", "first_name", "x", "", 40, "abc", "tok", ""], "keys: lowercase, dots and spaces → _, at most 40; the token from the path or the header");
+      const big: any = {}; for (let i = 0; i < 60; i++) big[`Field.${i}`] = "x".repeat(500);
+      const ctx = hookNormalize(big);
+      eq([Object.keys(ctx).length <= 50, Object.values(ctx).every((v) => v.length === 150), new TextEncoder().encode(JSON.stringify(ctx)).length <= 7168, Object.keys(ctx)[0]],
+        [true, true, true, "field_0"], "payload 50 × 500: at most 50 keys, values cut to 150, keys dropped until it is ≤ 7 KB");
+      eq(hookNormalize({ a: { b: 1, c: [1, 2] }, "A.B": "dup", list: [{ n: "x" }], nil: null, t: true }), { a_b: "1", a_c: "1, 2", a_b_2: "dup", list_0_n: "x", nil: "", t: "true" },
+        "nested objects joined with _, lists of values as text, a second a_b becomes a_b_2, null = empty");
+      const token = "A".repeat(43), other = "B".repeat(43);
+      const D = flow({ n1: act("internal_notification", { channel: "push", to: { roles: ["owner"] }, title: "Hook {trigger.first_name}" }) },
+        { triggers: [{ id: "t1", type: "inbound_webhook", config: { match: { email: "email", phone: "mobile" } }, filters: NONE }] });
+      const O = flow({ n1: act("internal_notification", { channel: "push", to: { roles: ["owner"] }, title: "other" }) }, { triggers: [{ id: "t1", type: "inbound_webhook", filters: NONE }] });
+      const mk = async (o: any = {}) => {
+        const db = world({ contacts: [lead("c1"), lead("c2", { email: "jo@x.com", phone: "0499 111 222", created_at: "2026-10-01" })], automations: [{ ...D, ...(o.row || {}) }, O],
+          automation_hooks: [{ id: "h1", business_id: "default", automation_id: D.id, trigger_id: "t1", sample: [], revoked_at: o.revoked ? isoMs(NOW) : null, window_start: null, window_count: 0 },
+            { id: "h2", business_id: "default", automation_id: O.id, trigger_id: "t1", sample: [], revoked_at: null, window_start: null, window_count: 0 }],
+          automation_hook_secrets: [{ hook_id: "h1", token_hash: await sha256Hex(token) }, { hook_id: "h2", token_hash: await sha256Hex(other) }],
+          automation_state: [{ business_id: "default", tick_lease_until: null, pruned_on: null, phase4_compat: false }], automation_events: [], automation_trigger_log: [], automation_trigger_daily: [],
+          automation_enrollment_keys: [], automation_wanted: [] });
+        return db;
+      };
+      let ipN = 0; const ip = () => `198.51.100.${++ipN}`;
+      let db = await mk();
+      eq([(await hookStep(db, "C".repeat(43), "{}", ip(), NOW)).status, (await hookStep(db, "short", "{}", ip(), NOW)).status, (await hookStep(db, token, "{bad", ip(), NOW)).status,
+        (await hookStep(db, token, JSON.stringify({ x: "y".repeat(40000) }), ip(), NOW)).status], [404, 404, 400, 413], "unknown or malformed token: 404 (as no link); not JSON: 400; over 32 KB: 413");
+      const okr = await hookStep(db, token, JSON.stringify({ Email: "JO@x.com", First_Name: "Jo", Mobile: "" }), ip(), NOW);
+      const ev = db.T.automation_events[0];
+      eq([okr, ev.type, ev.source, ev.record_kind, ev.record_id, ev.contact_id, ev.event_key.startsWith("hook:h1:"), ev.ctx, db.T.automation_hooks[0].window_count],
+        [{ status: 200, body: { ok: true } }, "inbound_webhook", "hook", "contact", "c2", "c2", true, { email: "JO@x.com", first_name: "Jo", mobile: "", _hook: "h1", _wf: D.id, _trigger: "t1" }, 1],
+        "published: one event, the lead matched by the trigger's email key (any case), the link's call counted");
+      await hookStep(db, token, JSON.stringify({ mobile: "+61 499 111 222" }), ip(), NOW);
+      await hookStep(db, token, JSON.stringify({ name: "nobody" }), ip(), NOW);
+      eq(db.T.automation_events.slice(1).map((e: any) => [e.record_kind, e.contact_id]), [["contact", "c2"], ["hook", null]], "matched by the phone key; no match = a run with no lead");
+      // the tick matches each call to ITS workflow only, the trigger data reaches the step
+      sent.length = 0;
+      await tickAt(db, NOW + MIN);
+      eq([db.T.automation_runs.filter((r: any) => r.automation_id === D.id).map((r: any) => [r.record_kind, r.contact_id]).sort(), db.T.automation_runs.filter((r: any) => r.automation_id === O.id).length,
+        sent.map((x) => x.msg.title).sort(), db.T.automation_trigger_log.filter((r: any) => r.automation_id === D.id).map((r: any) => r.reason).sort()],
+        [[["contact", "c2"], ["hook", null]], 0, ["Hook", "Hook Jo"], ["already_enrolled", null, null]],
+        "the tick: a call starts the link's own workflow with its data (one active run per lead; a call with no lead = its own run), never another inbound workflow");
+      eq([db.T.automation_trigger_log.filter((r: any) => r.automation_id === O.id).length, db.T.automation_trigger_daily.filter((d: any) => d.automation_id === O.id).length], [0, 0],
+        "…the other inbound workflow never looks at a call to another link (no unmatched row, no daily count: its 200-a-day cap and stats stay its own)");
+      // the event store off (compat mode, step E rolled back): the call is refused (503) and nothing piles up to act late
+      {
+        const dbc = await mk();
+        dbc.T.automation_state[0].phase4_compat = true;
+        const r503 = await hookStep(dbc, token, JSON.stringify({ email: "jo@x.com" }), ip(), NOW);
+        eq([r503.status, dbc.T.automation_events.length, dbc.T.automation_hooks[0].sample.length], [503, 0, 1], "compat mode: an inbound call is refused with 503 (only the sample kept), no event to start a run hours later");
+      }
+      // 429: 61 calls a minute on one link; 31 a minute from one address (before any database call)
+      db = await mk();
+      const codes: number[] = [];
+      for (let i = 0; i < 61; i++) codes.push((await hookStep(db, token, "{}", `203.0.113.${i % 30}`, NOW + 10)).status);
+      eq([codes.filter((c) => c === 200).length, codes[60]], [60, 429], "a link takes 60 calls a minute, then 429");
+      eq((await hookStep(db, token, "{}", "203.0.113.200", NOW + 61e3)).status, 200, "…and again the next minute");
+      db = await mk();
+      const from1: number[] = []; const calls0 = db.calls.length;
+      for (let i = 0; i < 31; i++) from1.push((await hookStep(db, "Z".repeat(43), "{}", "192.0.2.77", NOW + 3e6)).status);
+      const before31 = db.calls.length;
+      await hookStep(db, "Z".repeat(43), "{}", "192.0.2.77", NOW + 3e6);
+      eq([from1.slice(0, 30).every((c) => c === 404), from1[30], db.calls.length === before31, calls0 < before31], [true, 429, true, true], "31 calls a minute from one address: 429, before any database call");
+      // a revoked link is 404; a Draft keeps only the sample (keys and types of the last 3 payloads), no event
+      db = await mk({ revoked: true });
+      eq((await hookStep(db, token, "{}", ip(), NOW)).status, 404, "a revoked link: 404");
+      db = await mk({ row: { enabled: false } });
+      for (let i = 1; i <= 4; i++) await hookStep(db, token, JSON.stringify({ n: i, Who: "x".repeat(300), ok: true, z: null }), ip(), NOW + i);
+      const smp = db.T.automation_hooks[0].sample;
+      eq([db.T.automation_events.length, smp.length, smp[2].keys.map((x: any) => [x.key, x.type, x.value.length]), smp[0].keys[0].value],
+        [0, 3, [["n", "number", 1], ["who", "text", 200], ["ok", "boolean", 4], ["z", "null", 0]], "2"], "a Draft: no event, only the sample — the last 3 payloads' keys and types (values ≤ 200)");
+      // the builder's link steps: a new token shown once (only its sha-256 kept), the old one revoked; sample; revoke
+      db = await mk({ row: { enabled: false } });
+      const c1 = await handle(db, { step: "hook_create", automation_id: D.id, trigger_id: "t1" }, OWNER, false);
+      const t1 = c1.body.token;
+      const h1 = await sha256Hex(t1);
+      eq([c1.status, HOOK_TOKEN_RE.test(t1), db.T.automation_hooks.find((h: any) => h.id === "h1").revoked_at != null, db.T.automation_hook_secrets.some((x: any) => x.token_hash === t1),
+        db.T.automation_hook_secrets.some((x: any) => x.token_hash === h1 && x.hook_id === c1.body.hook_id), JSON.stringify(db.T.automation_hooks).includes(t1), c1.body.path.endsWith(t1)], [200, true, true, false, true, false, true],
+        "hook_create: a 32-byte token shown once, only its sha-256 stored, the trigger's older link revoked");
+      eq([(await handle(db, { step: "hook_create", automation_id: D.id, trigger_id: "t1" }, VA, false)).status, (await handle(db, { step: "hook_create", automation_id: D.id, trigger_id: "nope" }, OWNER, false)).status],
+        [403, 404], "only owners and managers; only an inbound webhook trigger of a saved workflow");
+      await hookStep(db, t1, JSON.stringify({ a: 1 }), ip(), NOW);
+      const sm = await handle(db, { step: "hook_sample", automation_id: D.id, trigger_id: "t1" }, MANAGER, false);
+      const rv = await handle(db, { step: "hook_revoke", hook_id: c1.body.hook_id }, OWNER, false);
+      eq([sm.body.sample.length, sm.body.sample[0].keys[0].key, rv.body.revoked, (await hookStep(db, t1, "{}", ip(), NOW)).status], [1, "a", 1, 404], "hook_sample gives the Draft's sample; hook_revoke ends the link (404 after)");
+    }
+
+    // ── SQL Part 2 · G2.3: the replaced functions keep Part 1's contract; the ROLLBACK restores Part 1 exactly ──
+    {
+      const sql = src(SQL_DIR + "stage2-automations.sql"), p1 = sql.slice(sql.indexOf("-- PART 1"), sql.indexOf("-- END PART 1"));
+      const g = sql.slice(sql.indexOf("-- PART 2 · G2.3"), sql.indexOf("-- END PART 2 · G2.3"));
+      const tx = g.slice(g.indexOf("\nbegin;\n"), g.indexOf("\ncommit;\n"));
+      const rbx = g.slice(g.indexOf("-- ROLLBACK (G2.3 only")).split("\n").filter((l: string) => l.startsWith("-- ") || l === "--").map((l: string) => l === "--" ? "" : l.slice(3)).join("\n");
+      const fnOf = (text: string, name: string) => { const a0 = text.indexOf(`create or replace function public.${name}(`); return a0 < 0 ? "" : text.slice(a0, text.indexOf("end $$;", a0) + 7); };
+      const allowed = /allowed constant text\[\] := array\[([^\]]*)\]/.exec(fnOf(tx, "automation_apply"));
+      eq(allowed ? allowed[1].split(",").map((x: string) => x.trim().replace(/'/g, "")) : null, UPDATE_FIELD_COLUMNS, "G2.3's automation_apply: the 'set' whitelist is still UPDATE_FIELD_COLUMNS");
+      ok(fnOf(rbx, "automation_apply") === fnOf(p1, "automation_apply") && fnOf(rbx, "automation_capture_contacts") === fnOf(p1, "automation_capture_contacts") && fnOf(p1, "automation_apply").length > 5000,
+        "the G2.3 ROLLBACK restores Part 1's automation_apply and automation_capture_contacts byte for byte");
+      const head = (name: string) => { const f0 = tx.indexOf(`function public.${name}(`); return tx.slice(f0, tx.indexOf("as $$", f0)); };
+      ok(["contact_tags_edit", "contact_note_add", "contact_note_remove"].every((n0) => /security invoker/.test(head(n0)) && tx.includes(`grant execute on function public.${n0}(`) && new RegExp(`revoke all on function public\\.${n0}\\([^)]*\\) from public, anon;`).test(tx))
+        && /security definer/.test(head("automation_hook_hit")) && /revoke all on function public\.automation_hook_hit\([^)]*\) from public, anon, authenticated;/.test(tx)
+        && ["contact_tags_edit", "contact_note_add", "contact_note_remove", "automation_hook_hit", "contact_tags_merge", "contact_notes_append"].every((n0) => rbx.includes(`drop function if exists public.${n0}(`)),
+        "the lead card's functions run with the signed-in person's rights (RLS), the link counter for the service role only; the ROLLBACK drops them all");
+      ok(fnOf(tx, "automation_capture_contacts").includes("'note_added' = any(w)") && fnOf(tx, "automation_capture_contacts").replace(/\n    -- Note added[\s\S]*?\n    end if;\n/, "\n") === fnOf(p1, "automation_capture_contacts"),
+        "the capture of contacts = Part 1's + Note added, nothing else changed");
+      eq([...new Set([...src("index.ts").matchAll(/rpc\("(contact_[a-z_]+)"/g)].map((m: any) => m[1]))].filter((n0) => !SQL_SIGS[n0]), [], "every lead-card RPC exists");
+      eq([SQL_SIGS.contact_tags_edit.params, SQL_SIGS.contact_note_add.params, SQL_SIGS.contact_note_remove.params, SQL_SIGS.automation_hook_hit.params],
+        [["p_id", "p_add", "p_remove"], ["p_id", "p_note"], ["p_id", "p_note_id"], ["p_business", "p_hook", "p_now", "p_limit"]], "the RPC signatures the app and the engine call");
+      const app = src("../../../index.html");
+      eq(["contact_tags_edit", "contact_note_add", "contact_note_remove"].filter((n0) => !app.includes(`'${n0}'`)), [], "the lead card calls the three atomic functions");
+    }
+  }
+
+  // ── 34. the API, the guards' twin, migration and housekeeping (G2.4, design §3.1, §3.13, §3.15, §3.16, §6, §8.1 #23,
+  //        §8.2 #24, §8.3 #4): save / publish / duplicate / validate / schema / registry / migrate / restore /
+  //        copy_version, snapshots, templates seeding, the Needs-review sweep, housekeeping with its cursor; wfToFlat
+  //        (the old editor's adapter) round trip; migrate idempotent; the Part-2 SQL in step with the engine ──
+  {
+    io.advance = PROD_ADVANCE;
+    const C34 = (x: any) => canonJson(x);
+    const UP = JSON.parse(src("fixtures/upgrade.json")).cases;
+    const NONE = { match: "all", segments: [{ match: "all", rules: [] }] };
+    const api = (db: any, step: string, body: any = {}, me: any = OWNER) => handle(db, { step, ...body }, me, false);
+    const v1row = (o: any = {}) => auto({ enabled: true, armed_at: "2026-10-01T00:00:00.000Z", version: 3, audience: "team", updated_at: "2026-10-02T00:00:00.000Z", revision: 1, settings: {}, layout: { v: 1 }, builder: "standard", origin: "user", list_summary: {}, deleted_at: null, ...o });
+
+    // wfToFlat: the inverse of upgradeV1 on every phase-4 shape (the old editor opens it; design §7 G2.4)
+    {
+      const reIds = new Set(["ids that are not v2 ids get fresh ones", "the same id twice"]);
+      for (const k of UP) {
+        const f = wfToFlat(k.expect.doc);
+        ok(!!f, `wfToFlat: ${k.name} is a straight phase-4 chain`);
+        if (!f) continue;
+        eq(C34(upgradeV1(f.trigger, f.steps).doc), C34(k.expect.doc), `wfToFlat → upgradeV1 gives the same doc back: ${k.name}`);
+        const want = { trigger: { type: k.v1.trigger.type, params: Object.fromEntries(Object.entries(k.v1.trigger.params || {}).filter(([p, v]) => !(p === "stage" && v === ""))) }, steps: k.v1.steps };
+        if (!reIds.has(k.name)) eq(C34(f), C34(want), `wfToFlat gives the phase-4 steps back: ${k.name}`);
+      }
+      const base = UP[0].expect.doc, mod = (fn: (d: any) => void) => { const d = JSON.parse(JSON.stringify(base)); fn(d); return wfToFlat(d); };
+      eq([mod((d) => { d.nodes.s1.name = "Wait"; }), mod((d) => { d.nodes.s1.config.resume = { days: [1], from: "09:00", until: "17:00" }; }),
+        mod((d) => { d.triggers.push({ id: "t9", type: "newLead", filters: NONE }); }), mod((d) => { d.triggers[0].disabled = true; }),
+        mod((d) => { d.nodes.s2.config.branches.push({ id: "b9", name: "Other", when: { match: "any", segments: [{ match: "all", rules: [] }] } }); d.nodes.s2.out.b9 = null; }),
+        mod((d) => { d.nodes.s2.out.none = "s4"; d.nodes.s2.out.s2_yes = "s3"; d.nodes.s3.out.next = null; }), mod((d) => { d.nodes.x9 = { kind: "action", type: "send_email", config: { subject: "a", body: "b" }, out: { next: null } }; }),
+        mod((d) => { d.nodes.s4.type = "send_live_chat"; }), mod((d) => { d.triggers[0].type = "contact_tag"; }), mod((d) => { d.nodes.s4.disabled = true; }), mod((d) => { d.triggers[0].goto = "s3"; })],
+        [null, null, null, null, null, null, null, null, null, null, null], "wfToFlat: anything only the new builder makes (names, resume, two triggers, a second branch, a step on None, an unconnected step, a stage-2 action or trigger, a paused step, a trigger Go to) → null");
+      // the run view: an upgraded row that is still a phase-4 workflow runs as one; anything else runs its doc
+      const leg = { ...WF_MIGRATED_SETTINGS }, d0 = JSON.parse(JSON.stringify(base));
+      const r0 = wfRunRow({ id: "r0", definition: d0, settings: leg, trigger: UP[0].v1.trigger, steps: UP[0].v1.steps });
+      eq([r0.definition, C34(r0.steps), C34(r0.trigger)], [null, C34(UP[0].v1.steps), C34(UP[0].v1.trigger)], "wfRunRow: an unedited upgraded row runs its own phase-4 steps (every claim id before the migration matches)");
+      const d1 = JSON.parse(JSON.stringify(base)); d1.nodes.s4.config.subject = "New words";
+      const r1 = wfRunRow({ id: "r1", definition: d1, settings: leg, trigger: UP[0].v1.trigger, steps: UP[0].v1.steps });
+      eq([r1.definition, r1.steps[3].subject], [null, "New words"], "wfRunRow: edited in the old editor: the doc's steps (wfToFlat), still the phase-4 rules");
+      const r2 = { id: "r2", definition: d1, settings: { ...leg, stopOnResponse: true }, trigger: {}, steps: [] }, r3 = { id: "r3", definition: d1, settings: {}, trigger: {}, steps: [] };
+      eq([wfRunRow(r2) === r2, wfRunRow(r3) === r3, wfRunRow({ id: "r4", trigger: {}, steps: [] }).id, wfRunRow(null)], [true, true, "r4", null], "wfRunRow: a stage-2 setting or the GHL re-entry → the doc itself; a phase-4 row as it is");
+      // an invalid phase-4 id upgradeV1 had to change still maps back (claims and log rows of before the migration)
+      const odd = { id: "r5", definition: upgradeV1({ type: "newLead", params: {} }, [{ id: "a-1", kind: "action", type: "push", to: { roles: ["owner"] }, title: "X" }]).doc,
+        settings: { reentry: "off" }, trigger: { type: "newLead", params: {} }, steps: [{ id: "a-1", kind: "action", type: "push", to: { roles: ["owner"] }, title: "X" }] };
+      eq(C34(runDocOf(odd).idMap), C34({ "a-1": Object.keys(odd.definition.nodes)[0] }), "runDocOf: a doc row with old phase-4 steps maps an old id to its node (RUNBOOK §8)");
+    }
+
+    // wfGuardedChannels = SQL automation_guarded_channels; the audience map = the registry, line by line
+    {
+      eq(wfGuardedChannels({ nodes: { a: { kind: "action", type: "send_email" }, b: { kind: "action", type: "webhook", disabled: true }, c: { kind: "action", type: "internal_notification" },
+        d: { kind: "teleport" }, e: { kind: "wait", type: "period" }, f: { kind: "action", type: "beam_me_up" } } }), ["beam_me_up", "send_email", "teleport", "webhook"],
+        "guarded types: customer and external actions, paused ones too, unknown types and kinds count; team / waits never");
+      const sql = src(SQL_DIR + "stage2-automations.sql"), g = sql.slice(sql.indexOf("-- PART 2 · G2.4"), sql.indexOf("-- END PART 2 · G2.4"));
+      const tx = g.slice(g.indexOf("\nbegin;\n"), g.indexOf("\ncommit;\n"));
+      const aud = Object.fromEntries([...tx.matchAll(/^    when '([a-z_]+)' then '([a-z]+)'$/gm)].map((m: any) => [m[1], m[2]]));
+      eq(aud, Object.fromEntries(Object.values(WF_ACTIONS).map((a: any) => [a.key, a.audience])), "SQL automation_action_audience = the registry's audiences (every action, nothing else)");
+      eq(Object.entries(aud).filter(([, a]) => a === "customer" || a === "external").map(([k]) => k).sort(), [...WF_GUARDED_TYPES].sort(), "the SQL guarded types = WF_GUARDED_TYPES");
+      const fnOf = (text: string, name: string) => { const a0 = text.indexOf(`create or replace function public.${name}(`); return a0 < 0 ? "" : text.slice(a0, text.indexOf("end $$;", a0) + 7); };
+      const rbx = g.slice(g.indexOf("-- ROLLBACK (G2.4 only")).split("\n").filter((l: string) => l.startsWith("-- ") || l === "--").map((l: string) => l === "--" ? "" : l.slice(3)).join("\n");
+      const p4 = src(SQL_DIR + "settings-round2-phase4.sql"), p1 = sql.slice(sql.indexOf("-- PART 1"), sql.indexOf("-- END PART 1"));
+      ok(fnOf(rbx, "automations_guard") === fnOf(p4, "automations_guard") && fnOf(p4, "automations_guard").length > 1000 && rbx.includes("create trigger automations_customer_off_guard before update on public.automations"),
+        "the G2.4 ROLLBACK puts phase 4's guard and its customer switch-off trigger back byte for byte");
+      const nr = (t: string) => { const a0 = t.indexOf("create or replace function public.automation_needs_review()"); return t.slice(a0, t.indexOf("$$;", t.indexOf("as $$", a0) + 5) + 3); };
+      ok(nr(rbx) === nr(p1) && nr(p1).length > 200, "the ROLLBACK puts Part 1's automation_needs_review back");
+      ok(["automations_after", "automation_save", "automation_publish", "automation_migrate_row", "automation_arm_key", "automation_def_shape", "automation_node_ports", "automation_guarded_channels_v1", "automation_guarded_channels", "automation_action_audience"].every((n0) => rbx.includes(`drop function if exists public.${n0}(`)),
+        "the ROLLBACK drops every G2.4 function");
+      ok(/a\.trigger = '\{\}'::jsonb/.test(rbx) && /a\.revision > coalesce\(\(select max\(v\.revision\) from public\.automation_versions v where v\.automation_id = a\.id and v\.reason = 'migration'\)/.test(rbx) && /a\.updated_at > s\.v2_migrated_at/.test(rbx),
+        "the ROLLBACK switches off every row made or edited in stage 2 (made: no trigger; edited: a later revision than its migration snapshot, or changed after v2_migrated_at)");
+      const head = (name: string) => { const f0 = tx.indexOf(`function public.${name}(`); return tx.slice(f0, tx.indexOf("as $$", f0)); };
+      ok(["automation_save", "automation_publish", "automation_migrate_row", "automations_after"].every((n0) => /security definer/.test(head(n0)) && new RegExp(`revoke all on function public\\.${n0}\\([^)]*\\) from public, anon, authenticated;`).test(tx))
+        && ["automation_save", "automation_publish", "automation_migrate_row"].every((n0) => new RegExp(`grant execute on function public\\.${n0}\\([^)]*\\) to service_role;`).test(tx)) && /security invoker/.test(head("automations_guard")),
+        "the content writes run for the service role only (security definer); the guard with the caller's rights");
+      ok(/set_config\('automation\.via', 'fn', true\)/.test(fnOf(tx, "automation_save")) && /set_config\('automation\.migrating', 'on', true\)/.test(fnOf(tx, "automation_migrate_row")) && /and a\.definition is null/.test(fnOf(tx, "automation_migrate_row")),
+        "save / publish / migrate say who writes (automation.via); migrate only touches rows without a doc (idempotent)");
+      ok(/raise exception 'This workflow was upgraded: reload the app'/.test(fnOf(tx, "automations_guard")) && /new\.enabled := false;\s+-- always a Draft/.test(fnOf(tx, "automations_guard")) && /drop trigger if exists automations_customer_off_guard/.test(tx),
+        "the guard: a write of the phase-4 columns on an upgraded row is refused; an insert is always a Draft; the phase-4 switch-off trigger goes");
+      eq(SQL_SIGS.automation_save.params, ["p_business", "p_id", "p_expected", "p_name", "p_definition", "p_settings", "p_layout", "p_builder", "p_origin", "p_reason", "p_draft", "p_summary", "p_actor", "p_actor_name"], "automation_save's parameters (the engine calls it by name)");
+      // the staging check runs every shape.json pair through the SQL keys: its literal = the fixture (settings as stored)
+      const chk = src(SQL_DIR + "stage2-part1-staging-checks.sql"), lm = /-- shape\.json \(generated\): (\[.*\])$/m.exec(chk);
+      const lit = JSON.parse(src("fixtures/shape.json")).cases.map((k: any) => ({ name: k.name, a: k.a.doc, b: k.b.doc, sa: normWfSettings(k.a.settings, k.a.settings), sb: normWfSettings(k.b.settings, k.b.settings), shape: k.sameShape, arm: k.sameArm }));
+      ok(!!lm && lm[1] === JSON.stringify(lit) && chk.includes("cases jsonb := '" + JSON.stringify(lit).replace(/'/g, "''") + "'"), "the staging check's shape cases = fixtures/shape.json (regenerate both together)");
+    }
+
+    // migrate (design §3.16, §8.3 #4): every row once, version / armed_at / enabled / audience kept, revision + 1, one
+    // "migration" version each, the templates seeded once, v2_migrated_at; again = nothing
+    {
+      const a1 = v1row({ id: "m34-0001", name: "Team push" }), a2 = v1row({ id: "m34-0002", name: "Mail", audience: "customer", steps: [emailStep()] }),
+        a3 = v1row({ id: "m34-0003", name: "Off", enabled: false, armed_at: null, version: 1 });
+      const db = world({ automations: [a1, a2, a3], automation_versions: [], automation_templates: [] });
+      eq((await api(db, "migrate", {}, MANAGER)).status, 403, "migrate: owners only");
+      const before = db.T.automations.map((a: any) => [a.id, a.version, a.armed_at, a.enabled, a.audience, a.updated_at]);
+      const m1 = await api(db, "migrate");
+      eq([m1.status, m1.body.migrated, m1.body.left, m1.body.templates], [200, 3, 0, WF_TEMPLATE_SEEDS.length], "migrate: every phase-4 row gets its doc; the ready-made templates are seeded");
+      eq(db.T.automations.map((a: any) => [a.id, a.version, a.armed_at, a.enabled, a.audience, a.updated_at]), before, "migrate keeps version, armed_at, enabled, audience (and the edit time): nothing re-arms, nothing waiting stops");
+      eq(db.T.automations.map((a: any) => [a.revision, C34(a.definition) === C34(upgradeV1(a.trigger, a.steps).doc), a.settings.reentry, a.list_summary.audience]),
+        [[2, true, "legacy_always", "team"], [2, true, "legacy_always", "customer"], [2, true, "legacy_always", "team"]], "migrate: the doc = upgradeV1 (shape equal), the phase-4 settings, revision + 1, the list summary");
+      eq(db.T.automation_versions.map((v: any) => [v.automation_id, v.version_no, v.reason, v.revision, v.status]),
+        [["m34-0001", 1, "migration", 2, "published"], ["m34-0002", 1, "migration", 2, "published"], ["m34-0003", 1, "migration", 2, "draft"]], "migrate: one migration snapshot each");
+      ok(!!db.T.automation_state[0].v2_migrated_at && db.T.automation_templates.every((t: any) => t.origin === "system") && WF_TEMPLATE_SEEDS.every((t) => !validateStructure(t.definition).length && !validateDoc(t.definition, { catalog: CATALOG }).errors.length),
+        "migrate: v2_migrated_at set; the templates are System ones and every seed is a valid workflow");
+      const snap = JSON.stringify(db.T);
+      const m2 = await api(db, "migrate");
+      eq([m2.body.migrated, m2.body.templates, JSON.stringify(db.T) === snap], [0, 0, true], "migrate again: nothing (idempotent)");
+      // a row the old app made after the migration is upgraded by the next run, alone
+      db.T.automations.push(v1row({ id: "m34-0004", name: "Late" }));
+      const m3 = await api(db, "migrate");
+      eq([m3.body.migrated, db.T.automation_versions.length], [1, 4], "migrate: a row added later is upgraded by the next run");
+      // a run started by phase 4 (step_index, no cursor) goes on after the migration on the same step
+      const db2 = world({ contacts: [lead("c1")], automations: [v1row({ id: "m34-0005", steps: [{ id: "w1", kind: "wait", n: 10, unit: "minutes" }, { id: "p1", kind: "action", type: "push", to: { roles: ["owner"] }, title: "Hi {name}" }] })] });
+      sent.length = 0;
+      await tickAt(db2, NOW); await api(db2, "migrate");
+      await tickAt(db2, NOW + 11 * MIN);
+      eq([db2.T.automation_runs.map((r: any) => r.status), logOf(db2), sent.length], [["done"], ["p1:sent"], 1], "a run waiting across the migration finishes on the same step, once");
+    }
+
+    // save / publish / validate / duplicate / restore / copy_version (design §3.13, §4.7): snapshots, 409, Published
+    // refuses errors, Draft saves with them, AI → Draft, only an owner adds a Webhook, the guard's twin (fake)
+    {
+      const db = world({ contacts: [lead("c1")], automations: [], automation_versions: [], automation_templates: [] });
+      const doc = (nodes: any, triggers: any[] = [{ id: "t1", type: "newLead", filters: NONE }], entry = Object.keys(nodes)[0]) => ({ schema: 2, seq: 20, entry, triggers, nodes });
+      const push = (title = "New lead: {name}", next: any = null) => ({ kind: "action", type: "internal_notification", config: { channel: "push", to: { roles: ["owner"] }, title }, out: { next } });
+      const d1 = doc({ n1: push() });
+      const s1 = await api(db, "save", { automation_id: null, name: "Team alert", definition: d1, settings: {} });
+      const id = s1.body.id, row = () => db.T.automations.find((a: any) => a.id === id);
+      eq([s1.status, s1.body.enabled, s1.body.revision, s1.body.version_no, row().origin, row().settings.reentry, db.T.automation_versions[0].reason], [200, false, 1, 1, "user", "off", "create"],
+        "save: a new workflow is a Draft (GHL settings: re-entry off), one 'create' version");
+      eq((await api(db, "save", { automation_id: id, expected_revision: 7, name: "X", definition: d1 })).status, 409, "save: someone saved in between → 409");
+      const s2 = await api(db, "save", { automation_id: id, expected_revision: 1, name: "Team alert", definition: d1, settings: {}, layout: { v: 1, adv: { n1: [10, 20] } } });
+      eq([s2.status, s2.body.revision, s2.body.version_no, db.T.automation_versions.length], [200, 2, null, 1], "save: a layout-only change → a new revision, no version row");
+      const s3 = await api(db, "save", { automation_id: id, expected_revision: 2, name: "Team alert", definition: doc({ n1: push("Lead: {name}") }), reason: "save_version" });
+      eq([s3.body.version_no, db.T.automation_versions[1].reason], [2, "save_version"], "save: new words → a version row (Save Version)");
+      const s4 = await api(db, "save", { automation_id: id, expected_revision: 3, name: "Team alert", definition: doc({ n1: push("Lead: {name}") }) });
+      eq([s4.body.revision, s4.body.version_no], [3, null], "save: the same content again → no version row (hash), no new revision");
+      const bad = doc({ n1: { kind: "action", type: "internal_notification", config: { channel: "push", to: { roles: [] }, title: "x" }, out: { next: null } } });
+      const s5 = await api(db, "save", { automation_id: id, expected_revision: 3, name: "Team alert", definition: bad });
+      eq([s5.status, s5.body.errors.length > 0, row().revision], [200, true, 4], "save: a Draft is saved with its errors (listed)");
+      const s6 = await api(db, "publish", { automation_id: id, on: true });
+      eq([s6.status, s6.body.reason, row().enabled], [422, "errors", false], "publish: refused while there are errors");
+      await api(db, "save", { automation_id: id, expected_revision: 4, name: "Team alert", definition: d1 });
+      const p1 = await api(db, "publish", { automation_id: id, on: true });
+      eq([p1.status, p1.body.enabled, !!p1.body.armed_at, p1.body.revision, row().published_by, db.T.automation_versions.slice(-1)[0].reason], [200, true, true, 5, "u-owner", "publish"],
+        "publish: a team workflow goes on at once (no confirm), armed now, revision unchanged, a 'publish' version");
+      eq((await api(db, "save", { automation_id: id, expected_revision: 5, name: "Team alert", definition: bad })).status, 422, "save: a Published workflow refuses errors (422)");
+      // a run waits; a new shape cancels it at once (automations_after), a filter edit only re-arms, words neither
+      const waitDoc = doc({ w1: { kind: "wait", type: "period", config: { n: 1, unit: "hours" }, out: { next: "n1" } }, n1: push() });
+      let r = await api(db, "save", { automation_id: id, expected_revision: 5, name: "Team alert", definition: waitDoc });
+      eq([r.body.shapeChanged, r.body.enabled, row().version], [true, true, 2], "save while Published: a new shape → version + 1");
+      const armed0 = row().armed_at;
+      db.T.automation_runs.push({ id: "run34", business_id: "default", automation_id: id, automation_version: 2, revision: 6, status: "waiting", due_at: isoMs(NOW + HR), event_key: "c1:new", event_type: "newLead",
+        event_at: isoMs(NOW), record_kind: "contact", record_id: "c1", contact_id: "c1", cursor_step: "w1", enrollment_key: "c1", active_lock: "c1", context: {}, step_index: 0 });
+      db.T.automation_enrollment_keys = [{ business_id: "default", automation_id: id, enrollment_key: "c1", first_at: isoMs(NOW), last_at: isoMs(NOW), runs: 1 }];
+      clock = NOW + MIN;
+      r = await api(db, "save", { automation_id: id, expected_revision: 6, name: "Team alert", definition: doc({ w1: waitDoc.nodes.w1, n1: push() }, [{ id: "t1", type: "newLead", filters: { match: "all", segments: [{ match: "all", rules: [{ field: "source", op: "is", v: "Referral" }] }] } }]) });
+      eq([r.body.shapeChanged, r.body.armChanged, row().version, row().armed_at !== armed0, db.T.automation_runs[0].status], [false, true, 2, true, "waiting"], "save while Published: a filter edit re-arms (armed_at now), same version, nothing waiting stops");
+      clock = NOW;
+      r = await api(db, "save", { automation_id: id, expected_revision: 7, name: "Team alert", definition: doc({ w1: { ...waitDoc.nodes.w1, config: { n: 2, unit: "hours" } }, n1: push("Other words") }, row().definition.triggers) });
+      eq([r.body.shapeChanged, r.body.armChanged, db.T.automation_runs[0].status], [false, false, "waiting"], "save while Published: words and numbers → neither (waiting runs go on with them)");
+      r = await api(db, "save", { automation_id: id, expected_revision: 8, name: "Team alert", definition: doc({ n1: push() }) });
+      const run = db.T.automation_runs[0], exit = db.T.automation_log.find((l: any) => l.run_id === "run34" && l.row_kind === "exit");
+      eq([r.body.shapeChanged, run.status, run.exit_reason, run.reason, run.active_lock, !!exit && exit.status, db.T.automation_enrollment_keys.length],
+        [true, "cancelled", "automation_changed", "automation changed", null, "removed", 0], "a new shape while a run waits: cancelled at once, an exit row, its re-entry key deleted (the lead can enter again)");
+      // a customer email added while Published → Draft; then publish needs the confirm
+      r = await api(db, "save", { automation_id: id, expected_revision: 9, name: "Team alert", definition: doc({ n1: push("x", "e1"), e1: { kind: "action", type: "send_email", config: { subject: "Hi", body: "{hi}, thanks." }, out: { next: null } } }) });
+      eq([r.body.drafted, r.body.enabled, row().audience], [true, false, "customer"], "save: a customer email added to a Published workflow → Draft (the guard)");
+      r = await api(db, "publish", { automation_id: id, on: true });
+      eq([r.status, r.body.reason, r.body.confirm], [409, "confirm", ["Sends to customers: Send email"]], "publish: a workflow that writes to customers asks first (what it sends)");
+      r = await api(db, "publish", { automation_id: id, on: true, confirm: true });
+      eq([r.status, row().enabled], [200, true], "publish with the yes: on");
+      // an AI edit of a Published workflow is saved as a Draft
+      r = await api(db, "save", { automation_id: id, expected_revision: 10, name: "Team alert", definition: doc({ n1: push("AI words", "e1"), e1: row().definition.nodes.e1 }), ai_edited: true });
+      eq([r.body.enabled, row().origin, db.T.automation_versions.slice(-1)[0].reason], [false, "user", "ai"], "save: an AI edit is always a Draft (reason ai)");
+      // only an owner adds a Webhook step; the publish confirm names the host
+      const hook = { kind: "action", type: "webhook", config: { url: "https://hooks.example.com/x", method: "POST" }, out: { next: null } };
+      r = await api(db, "save", { automation_id: id, expected_revision: 11, name: "Team alert", definition: doc({ n1: push("x", "h1"), h1: hook }) }, MANAGER);
+      eq([r.status, r.body.reason], [403, "Only an owner can add a Webhook step or change where it sends"], "save: a manager can't add a Webhook step");
+      r = await api(db, "save", { automation_id: id, expected_revision: 11, name: "Team alert", definition: doc({ n1: push("x", "h1"), h1: hook }) });
+      eq(r.status, 200, "save: the owner can");
+      eq((await api(db, "publish", { automation_id: id, on: true })).body.confirm, ["Sends lead details to hooks.example.com"], "publish: the confirm says where lead details go");
+      // validate: what a save would change
+      db.T.automation_runs.push({ ...run, id: "run34b", status: "waiting", event_key: "c1:b", active_lock: null });
+      const v = await api(db, "validate", { automation_id: id, definition: doc({ n1: push() }), settings: {}, base_revision: 3 });
+      eq([v.status, v.body.shapeChanged, v.body.idsRemoved, v.body.waitingRunsAffected, v.body.revisionChanged, v.body.errors], [200, true, ["h1"], 1, true, []], "validate: shape change, the ids it removes, the runs it would stop, a newer revision");
+      eq((await api(db, "validate", { definition: { schema: 2, seq: -1, entry: null, triggers: [], nodes: {} } })).body.errors.map((x: any) => x.code).includes("E_SCHEMA"), true, "validate: codes for a broken doc");
+      // switch off: waiting runs stop at once, an 'unpublish' version
+      await api(db, "publish", { automation_id: id, on: true, confirm: true });
+      r = await api(db, "publish", { automation_id: id, on: false });
+      eq([r.body.enabled, db.T.automation_runs.find((x: any) => x.id === "run34b").exit_reason, db.T.automation_versions.slice(-1)[0].reason, r.body.revision], [false, "switched_off", "unpublish", 12],
+        "unpublish: off, what waits stops ('switched off'), an 'unpublish' version, the revision unchanged");
+      // restore (Draft only) and copy_version
+      eq((await api(db, "restore", { automation_id: id, version_no: 1 })).status, 200, "restore: a Draft takes an old version back");
+      eq([row().definition.nodes.n1.config.title, row().name, db.T.automation_versions.slice(-1)[0].reason], ["New lead: {name}", "Team alert", "restore"], "restore: the snapshot's doc, as a 'restore' version");
+      await api(db, "publish", { automation_id: id, on: true, confirm: true });
+      eq((await api(db, "restore", { automation_id: id, version_no: 2 })).body.text, "Switch to Draft first, or create a new workflow from this version", "restore: refused while Published (GHL)");
+      const cv = await api(db, "copy_version", { automation_id: id, version_no: 2 });
+      const copy = db.T.automations.find((a: any) => a.id === cv.body.id);
+      eq([cv.status, copy.enabled, copy.origin, copy.name, copy.definition.nodes.n1.config.title, copy.system_key], [200, false, "copy", "Copy of Team alert", "Lead: {name}", null], "copy_version: a new Draft from that version");
+      // duplicate: library words copied to new keys (the copy never changes the original's messages); system_key never copied
+      db.T.settings[0].catalog = { ...CATALOG, templates: { ...CATALOG.templates, my_abc12345: "{hi}, our words." }, msgTemplates: { my_abc12345: { name: "Ours", channel: "email" } } };
+      db.T.automations.find((a: any) => a.id === id).system_key = "team:newLead";
+      const withTpl = doc({ e1: { kind: "action", type: "send_email", config: { subject: "Hi", templateKey: "my_abc12345" }, out: { next: null } } });
+      const base2 = await api(db, "save", { automation_id: null, name: "With words", definition: withTpl });
+      const dup = await api(db, "duplicate", { automation_id: base2.body.id });
+      const drow = db.T.automations.find((a: any) => a.id === dup.body.id), k2 = drow.definition.nodes.e1.config.templateKey, cat2 = db.T.settings[0].catalog;
+      eq([dup.status, drow.enabled, drow.origin, k2 !== "my_abc12345" && WF_LIB_KEY_RE.test(k2), cat2.templates[k2], cat2.msgTemplates[k2].name, cat2.templates.my_abc12345], [200, false, "copy", true, "{hi}, our words.", "Copy of Ours", "{hi}, our words."],
+        "duplicate: a Draft copy; its library words copied to a new key (the original's stay)");
+      const dsys = await api(db, "duplicate", { automation_id: id });
+      eq(db.T.automations.find((a: any) => a.id === dsys.body.id).system_key, null, "duplicate: a System row's system_key is never copied");
+      const tpl = db.T.automation_templates[0] || null;
+      if (!tpl) { await api(db, "migrate"); }
+      const t0 = db.T.automation_templates.find((t: any) => t.key === "team_new_lead");
+      const dt = await api(db, "duplicate", { template_id: t0.id });
+      const trow = db.T.automations.find((a: any) => a.id === dt.body.id);
+      eq([dt.status, trow.origin, trow.template_key, trow.enabled], [200, "template", "tpl:team_new_lead", false], "duplicate a template: origin template, template_key tpl:<key>, a Draft");
+      // template drafts come with a save (one catalog write; keys like the app's autoLibKey)
+      const td = await api(db, "save", { automation_id: null, name: "New words", definition: doc({ e1: { kind: "action", type: "send_email", config: { subject: "Hi", templateKey: "my_zz99xx11" }, out: { next: null } } }),
+        template_drafts: { my_zz99xx11: { name: "Welcome", channel: "email", body: "{hi}, welcome." } } });
+      eq([td.status, td.body.templates, db.T.settings[0].catalog.templates.my_zz99xx11, db.T.settings[0].catalog.msgTemplates.my_zz99xx11.createdBy], [200, ["my_zz99xx11"], "{hi}, welcome.", "Olivia Owner"], "save: the template words come first (catalog), then the workflow");
+      eq((await api(db, "save", { automation_id: null, name: "Bad", definition: d1, template_drafts: { "../x": { channel: "email", body: "x" } } })).status, 422, "save: a template key that isn't one of ours is refused");
+      // overlap with a ready-made System row that is on
+      const sysRow = db.T.automations.find((a: any) => a.id === id);
+      Object.assign(sysRow, { enabled: true, list_summary: { triggers: ["newLead"] } });
+      const other = await api(db, "save", { automation_id: null, name: "Same start", definition: d1 });
+      const ov = await api(db, "publish", { automation_id: other.body.id, on: true });
+      eq([ov.status, ov.body.text], [409, "Turn off the ready-made Team alert first, or it sends twice"], "publish: an active System row with the same start blocks (it would send twice)");
+      // no trigger on: allowed, with the warning
+      const nt = await api(db, "save", { automation_id: null, name: "Manual only", definition: doc({ n1: push() }, []) });
+      const pn = await api(db, "publish", { automation_id: nt.body.id, on: true });
+      eq([pn.status, pn.body.warnings.some((w: any) => w.text === "Only manual add or Add to workflow can start it")], [200, true], "publish with no trigger on: allowed, with the warning");
+      // registry (the v2 DTO) and schema; office only
+      const reg = await api(db, "registry", {}, MANAGER), sch = await api(db, "schema", { mode: "accept" });
+      eq([reg.status, reg.body.v, reg.body.triggers.find((t: any) => t.key === "newLead").ghl, reg.body.actions.find((a: any) => a.key === "send_sms").availability.ok, typeof sch.body.schema.$defs], [200, 2, "Contact created", false, "object"],
+        "registry: the stage-2 DTO (GHL words, availability); schema: the JSON Schema");
+      eq([(await api(db, "registry", {}, VA)).status, (await api(db, "save", { name: "x", definition: d1 }, VA)).status, (await api(db, "publish", { automation_id: id, on: false }, TECH)).status], [403, 403, 403], "the API: owners and managers only");
+      eq((await api(db, "save", { automation_id: id, name: "x", definition: d1 })).status, 400, "save of an existing workflow needs expected_revision");
+      // the old editor saves a phase-4 row it opened before the migration: upgraded first, then saved at the revision it had
+      const v1 = v1row({ id: "m34-0099", revision: 4 });
+      db.T.automations.push(v1);
+      const up = await api(db, "save", { automation_id: v1.id, expected_revision: 4, name: v1.name, definition: upgradeV1(v1.trigger, [{ ...v1.steps[0], title: "Changed" }]).doc });
+      eq([up.status, db.T.automations.find((a: any) => a.id === v1.id).revision, db.T.automation_versions.filter((x: any) => x.automation_id === v1.id).map((x: any) => x.reason), up.body.shapeChanged],
+        [200, 6, ["migration", "save"], false], "save of a phase-4 row (opened before the migration): upgraded first (revision + 1), then saved (+ 1); not a conflict, same shape");
+      eq((await api(db, "save", { automation_id: v1.id, expected_revision: 4, name: v1.name, definition: up.body && db.T.automations.find((a: any) => a.id === v1.id).definition })).status, 409, "…and an old revision after that is a conflict");
+    }
+
+    // the phase-2 review: webhook edits are an owner's and a new host → Draft; publish checks the revision it validated
+    // and blocks an unavailable step that was never live; a filter / re-entry edit re-arms and never stops what waits;
+    // migrate is a compare-and-set; the ready-made templates never use an upsert on a partial index
+    {
+      const db = world({ contacts: [lead("c1")], automations: [], automation_versions: [], automation_templates: [] });
+      const doc = (nodes: any, triggers: any[] = [{ id: "t1", type: "newLead", filters: NONE }]) => ({ schema: 2, seq: 20, entry: Object.keys(nodes)[0], triggers, nodes });
+      const push = (title = "New lead: {name}", next: any = null) => ({ kind: "action", type: "internal_notification", config: { channel: "push", to: { roles: ["owner"] }, title }, out: { next } });
+      const hook = (url: string, x: any = {}) => ({ kind: "action", type: "webhook", config: { url, method: "POST", ...x }, out: { next: null } });
+      const row = (id: string) => db.T.automations.find((a: any) => a.id === id);
+      clock = NOW;
+      let r = await api(db, "save", { automation_id: null, name: "To the CRM", definition: doc({ n1: push("x", "h1"), h1: hook("https://crm.example.com/in") }) });
+      const id = r.body.id, rev = () => Number(row(id).revision);
+      r = await api(db, "publish", { automation_id: id, on: true, confirm: true });
+      eq([r.status, row(id).enabled], [200, true], "an owner publishes a workflow whose webhook sends to crm.example.com");
+      for (const [what, h] of [["url", hook("https://attacker.example/x")], ["fields", hook("https://crm.example.com/in", { fields: ["phone"] })], ["method", hook("https://crm.example.com/in", { method: "PUT" })]] as [string, any][]) {
+        r = await api(db, "save", { automation_id: id, expected_revision: rev(), name: "To the CRM", definition: doc({ n1: push("x", "h1"), h1: h }) }, MANAGER);
+        eq([r.status, r.body.reason, row(id).definition.nodes.h1.config], [403, "Only an owner can add a Webhook step or change where it sends", { url: "https://crm.example.com/in", method: "POST" }],
+          `a manager can't change an existing webhook step's ${what} (same node id): 403, nothing saved`);
+      }
+      r = await api(db, "save", { automation_id: id, expected_revision: rev(), name: "To the CRM", definition: doc({ n1: push("new words", "h1"), h1: hook("https://crm.example.com/in") }) }, MANAGER);
+      eq([r.status, r.body.enabled], [200, true], "a manager may edit the other steps (the webhook kept exactly as it was)");
+      r = await api(db, "save", { automation_id: id, expected_revision: rev(), name: "To the CRM", definition: doc({ n1: push("new words", "h1"), h1: hook("https://crm.example.com/v2") }) });
+      eq([r.status, r.body.enabled, r.body.drafted], [200, true, false], "the owner changes the path on the same host: it stays on");
+      r = await api(db, "save", { automation_id: id, expected_revision: rev(), name: "To the CRM", definition: doc({ n1: push("new words", "h1"), h1: hook("https://other.example.net/in") }) });
+      eq([r.status, r.body.enabled, r.body.drafted, row(id).enabled], [200, false, true, false], "the owner points the webhook at a new host: Draft at once");
+      r = await api(db, "publish", { automation_id: id, on: true });
+      eq([r.status, r.body.confirm], [409, ["Sends lead details to other.example.net"]], "…and its publish asks again, naming the new host");
+      // the revision the person saw: a save in between → 409, nothing switched on; a switch-off never waits for one
+      const shown = rev();
+      await api(db, "save", { automation_id: id, expected_revision: shown, name: "To the CRM", definition: doc({ n1: push("newer", "h1"), h1: hook("https://other.example.net/in") }) });
+      r = await api(db, "publish", { automation_id: id, on: true, confirm: true, expected_revision: shown });
+      eq([r.status, r.body.reason, r.body.revision, row(id).enabled], [409, "conflict", shown + 1, false], "publish of the revision someone was shown, after another save: 409, still off");
+      r = await api(db, "publish", { automation_id: id, on: true, confirm: true, expected_revision: rev() });
+      eq([r.status, row(id).enabled], [200, true], "…with the revision now shown: on");
+      eq((await db.rpc("automation_publish", { p_business: "default", p_id: id, p_on: true, p_expected: rev() - 1, p_actor: null, p_actor_name: null })).data.reason, "conflict",
+        "automation_publish itself refuses another revision (p_expected: a save between the function's check and its publish)");
+      r = await api(db, "publish", { automation_id: id, on: false, expected_revision: 1 });
+      eq([r.status, row(id).enabled], [200, false], "a switch-off goes through whatever the revision");
+      // availability blocks a publish (design §6.2) unless the step was already live: a Draft saved twice is not
+      const sms = doc({ n1: { kind: "action", type: "send_sms", config: { body: "Hi" }, out: { next: null } } });
+      const t1 = await api(db, "save", { automation_id: null, name: "Texts", definition: sms });
+      await api(db, "save", { automation_id: t1.body.id, expected_revision: 1, name: "Texts", definition: sms, layout: { v: 1, adv: { n1: [1, 2] } } });
+      r = await api(db, "publish", { automation_id: t1.body.id, on: true, confirm: true });
+      eq([r.status, r.body.reason, (r.body.errors || []).map((x: any) => x.code).includes("E_UNAVAILABLE"), row(t1.body.id).enabled], [422, "errors", true, false],
+        "publish: a text step without the phone line blocks, even after a second save of the Draft (only what was live stays a warning)");
+      const old = v1row({ id: "m34-0777", enabled: false, armed_at: null, steps: [{ id: "x1", kind: "action", type: "text", body: "Hi" }] });
+      db.T.automations.push(old);
+      await api(db, "migrate");
+      r = await api(db, "publish", { automation_id: old.id, on: true, confirm: true });
+      eq([r.status, (r.body.warnings || []).map((x: any) => x.code).includes("E_UNAVAILABLE")], [200, true], "…a migrated phase-4 row keeps its step as a warning (its migration snapshot is what was live)");
+      // where the ready-made templates come from: plain inserts (Postgres can't take a partial index as ON CONFLICT)
+      const up0 = await db.from("automation_templates").upsert([{ business_id: "default", key: "k1" }], { onConflict: "business_id,key", ignoreDuplicates: true });
+      eq(up0.error && up0.error.code, "42P10", "the fake, as Postgres: an upsert naming the partial unique index of automation_templates fails (42P10)");
+      const all = src("index.ts");
+      const targets = [...new Set([...all.matchAll(/from\("(\w+)"\)\.upsert\([^;]*?onConflict: "([\w,]+)"/g)].map((m) => [m[1], m[2]].join("|")))];
+      eq(targets.filter((x) => { const [t, c] = x.split("|"); const named = (UNIQUE[t] || []).filter((u) => !u.key && [...u.keys].sort().join(",") === c.split(",").sort().join(",")); return named.length > 0 && named.every((u) => u.where); }), [],
+        "no upsert in the function names a partial unique index");
+      const tpl = db.T.automation_templates.find((t: any) => t.key === "team_new_lead");
+      tpl.deleted_at = isoMs(NOW);
+      const m = await api(db, "migrate");
+      eq([m.status, m.body.templates, db.T.automation_templates.filter((t: any) => t.key === "team_new_lead").length, db.T.automation_templates.length], [200, 0, 1, WF_TEMPLATE_SEEDS.length],
+        "migrate again: a ready-made template the owner deleted never comes back");
+      // a filter or re-entry edit while a run waits: re-armed for new events only; the waiting run carries on (design §2.8)
+      const w = await api(db, "save", { automation_id: null, name: "Waits", definition: doc({ w1: { kind: "wait", type: "period", config: { n: 1, unit: "hours" }, out: { next: "n1" } }, n1: push("After the wait") }) });
+      const wid = w.body.id;
+      await api(db, "publish", { automation_id: wid, on: true });
+      const wr = { ...row(wid) }, rev2 = () => Number(row(wid).revision);
+      db.T.automation_runs.push({ id: "run-rearm", business_id: "default", automation_id: wid, automation_version: wr.version, revision: wr.revision, status: "waiting", due_at: isoMs(NOW + HR), anchor_at: isoMs(NOW),
+        event_key: "c1:rearm", event_type: "newLead", event_at: isoMs(NOW), record_kind: "contact", record_id: "c1", contact_id: "c1", cursor_step: "w1", enrollment_key: "c1", active_lock: "c1", context: {}, step_index: 0, trigger_id: "t1" });
+      clock = NOW + MIN;
+      r = await api(db, "save", { automation_id: wid, expected_revision: rev2(), name: "Waits", definition: doc(row(wid).definition.nodes, [{ id: "t1", type: "newLead", filters: { match: "all", segments: [{ match: "all", rules: [{ field: "source", op: "is", v: "Google Ads" }] }] } }]) });
+      clock = NOW + 2 * MIN;
+      const r2 = await api(db, "save", { automation_id: wid, expected_revision: rev2(), name: "Waits", definition: row(wid).definition, settings: { reentry: "after_exit" } });
+      eq([r.body.armChanged, r2.body.armChanged, row(wid).version, row(wid).switched_on_at, row(wid).armed_at], [true, true, wr.version, wr.armed_at, isoMs(NOW + 2 * MIN)],
+        "a filter edit and a re-entry edit: re-armed (armed_at now), same version, switched_on_at kept (the moment it was switched on)");
+      sent.length = 0;
+      const run = db.T.automation_runs.find((x: any) => x.id === "run-rearm");
+      clock = NOW + HR + 3 * MIN;
+      const T = await loadContext(db, NOW + HR + 3 * MIN);
+      Object.assign(run, { status: "running" });
+      const pr: any = await advanceV2(db, { ...run }, T, NOW + HR + 3 * MIN);
+      eq([pr.status, pr.exit_reason, sent.map((x) => x.msg.title)], ["done", "end_of_workflow", ["After the wait"]], "…and the waiting run goes on after the edits (never 'switched off and on again since then')");
+      // switching off and on again still stops what waited from before the switch-on
+      await api(db, "publish", { automation_id: wid, on: false }); clock = NOW + 2 * HR; await api(db, "publish", { automation_id: wid, on: true });
+      eq([staleV2(row(wid), { automation_version: row(wid).version, event_at: isoMs(NOW) }), staleV2(row(wid), { automation_version: row(wid).version, event_at: isoMs(NOW + 3 * HR) })],
+        [{ text: "switched off and on again since then", code: "switched_off" }, null], "switched off and on again: an event from before the switch-on is stale, one after is not");
+      eq([staleV2({ enabled: true, version: 1, armed_at: isoMs(NOW) }, { automation_version: 1, event_at: isoMs(NOW - MIN) }), staleV2({ enabled: true, version: 1, armed_at: isoMs(NOW), switched_on_at: isoMs(NOW - HR) }, { automation_version: 1, event_at: isoMs(NOW - MIN) })],
+        [{ text: "switched off and on again since then", code: "switched_off" }, null], "staleV2: armed_at is the marker only without switched_on_at (before G2.4 / after its rollback)");
+      clock = NOW;
+      // migrate = compare-and-set on the trigger / steps it read: an old tab's write in between is never replaced
+      const dbm = world({ automations: [v1row({ id: "m34-0888", steps: [{ id: "p1", kind: "action", type: "push", to: { roles: ["owner"] }, title: "old words" }] })], automation_versions: [], automation_templates: [] });
+      let raced = false;
+      const racing = { ...dbm, rpc: async (n0: string, a: any) => { if (n0 === "automation_migrate_row" && !raced) { raced = true; dbm.T.automations[0].steps = [{ ...dbm.T.automations[0].steps[0], title: "new words" }]; } return await dbm.rpc(n0, a); } };
+      const mm = await api(racing, "migrate");
+      eq([mm.body.migrated, dbm.T.automations[0].definition.nodes.p1.config.title, dbm.calls.filter((c: string) => c === "rpc:automation_migrate_row").length], [1, "new words", 2],
+        "migrate: steps written by an old tab between the read and the write → refused, read again, the doc made of the new steps");
+      // a window step in office mode keeps only valid custom days and hours (the doc's schema)
+      eq([winDormant({ days: [9], from: "7am", until: "14:00" }), winDormant({ days: [0, 6], from: "10:00", until: "24:00" }), winDormant({ days: [1, 1] }),
+        upgradeV1({ type: "newLead", params: {} }, [{ id: "w1", kind: "window", mode: "office", days: [9], from: "7am", until: "14:00", outside: "next" }]).doc.nodes.w1.config.window],
+        [{ until: "14:00" }, { days: [0, 6], from: "10:00", until: "24:00" }, {}, { use: "office", until: "14:00", outside: "next" }], "window: the custom days and hours an office step kept go along, invalid ones never");
+      // an upgraded row (re-entry legacy_always: still run as phase 4) whose start the old editor changes while a run
+      // waits: a new version and the run stops "automation changed", as phase 4 did (never "switched off and on again");
+      // the same edit on a stage-2 workflow is a re-arm (above: what waits goes on)
+      {
+        const v1steps = [{ id: "w1", kind: "wait", n: 2, unit: "days" }, { id: "p1", kind: "action", type: "push", to: { roles: ["owner"] }, title: "Quote follow-up" }];
+        const dbl = world({ contacts: [lead("c1")], automations: [v1row({ id: "m34-0555", trigger: { type: "stage", params: { stage: "Quoted" } }, steps: v1steps })], automation_versions: [], automation_templates: [] });
+        await api(dbl, "migrate");
+        const lr = dbl.T.automations[0], v0 = lr.version, r0 = lr.revision;
+        dbl.T.automation_runs.push({ id: "run-legacy", business_id: "default", automation_id: lr.id, automation_version: v0, revision: r0, status: "waiting", due_at: isoMs(NOW + DAYMS), anchor_at: isoMs(NOW),
+          event_key: "c1:Quoted:x", event_type: "stage", event_at: isoMs(NOW), record_kind: "contact", record_id: "c1", contact_id: "c1", cursor_step: "w1", enrollment_key: "c1", active_lock: null, context: {}, step_index: 0, trigger_id: "t1" });
+        const val = await api(dbl, "validate", { automation_id: lr.id, definition: upgradeV1({ type: "stage", params: { stage: "Won" } }, v1steps).doc, settings: lr.settings });
+        const sv = await api(dbl, "save", { automation_id: lr.id, expected_revision: r0, name: lr.name, definition: upgradeV1({ type: "stage", params: { stage: "Won" } }, v1steps).doc });
+        const rl = dbl.T.automation_runs.find((x: any) => x.id === "run-legacy");
+        eq([val.body.shapeChanged, val.body.waitingRunsAffected, sv.status, sv.body.shapeChanged, lr.version, rl.status, rl.exit_reason, rl.reason],
+          [true, 1, 200, true, v0 + 1, "cancelled", "automation_changed", "automation changed"],
+          "an upgraded row's start changed in the old editor while a run waits: a new version, the run stops 'automation changed' (phase 4's rule; validate says so first)");
+        eq([versionChanged(lr.definition, { reentry: "off" }, upgradeV1({ type: "stage", params: { stage: "Lost" } }, v1steps).doc), versionChanged(lr.definition, lr.settings, upgradeV1({ type: "stage", params: { stage: "Won" } }, [v1steps[0], { ...v1steps[1], title: "New words" }]).doc)],
+          [false, false], "versionChanged: a start change on a stage-2 workflow is a re-arm only; words on an upgraded one are neither");
+      }
+    }
+
+    // housekeeping (design §3.15, §8.1 #23): a 20k backlog drains over ticks under the 1,000-row cap, the cursor carries
+    // on; once a day; then the Needs-review sweep keeps the codes; before Part 1 phase 4's prune runs instead
+    {
+      const old = isoMs(NOW - 9 * DAYMS);
+      const evs = Array.from({ length: 20000 }, (_, i) => ({ id: `hk${i}`, business_id: "default", type: "newLead", event_key: `hk:${i}`, status: "done", processed_at: old, created_at: old, at: old }));
+      const sms = { schema: 2, seq: 2, entry: "n1", triggers: [{ id: "t1", type: "newLead", filters: NONE }], nodes: { n1: { kind: "action", type: "send_sms", config: { body: "Hi" }, out: { next: null } } } };
+      const db = world({ automation_events: evs, automations: [{ id: "hk-0001", business_id: "default", name: "Texts", enabled: true, armed_at: "2026-10-01T00:00:00.000Z", version: 1, revision: 1, trigger: {}, steps: [],
+        definition: sms, settings: { reentry: "off" }, list_summary: { triggers: ["newLead"] }, deleted_at: null, updated_at: "2026-10-02T00:00:00.000Z" }] });
+      const calls: number[] = [];
+      const timed = { ...db, rpc: async (n0: string, a: any) => { if (n0 === "automation_prune") { calls.push(a.p_budget); clock += 15e3; } return await db.rpc(n0, a); } };
+      let ticks = 0;
+      while ((db.T.automation_state[0].housekeeping || {}).stage !== "done" && ticks < 20) { await tickAt(timed, NOW + ticks * MIN); ticks++; }
+      eq([db.T.automation_events.length, ticks > 3, calls.every((b) => b === 1000), calls.length, db.T.automation_state[0].housekeeping.pruned.events], [0, true, true, 21, 20000],
+        "housekeeping: 20,000 old events go over several ticks, 1,000 at a time (the cursor carries on)");
+      eq([db.T.automations[0].list_summary.review.codes, db.T.automations[0].updated_at, db.T.automations[0].list_summary.triggers], [["E_UNAVAILABLE"], "2026-10-02T00:00:00.000Z", ["newLead"]],
+        "the Needs-review sweep keeps the problem codes (a text step without the phone line), the rest of the summary and the edit time untouched");
+      const n0 = calls.length;
+      await tickAt(timed, NOW + 30 * MIN);
+      eq(calls.length, n0, "housekeeping: once a business day");
+      db.T.settings[0].phone_enabled = true;
+      await tickAt(timed, NOW + DAYMS);
+      eq(db.T.automations[0].list_summary.review, undefined, "next day: the problem gone → the codes go");
+      // the review askers include stage-2 docs with the condition (askedWithin)
+      const engine = src("index.ts");
+      ok(/JSON\.stringify\(x\.definition\)\.includes\('"field":"asked_within_months"'\)/.test(engine), "a doc that checks 'asked for a review' counts as an asker (askedWithin)");
+      // before Part 1 (no phase4_compat column): phase 4's prune, not the housekeeping
+      const pre = world({ automation_runs: [{ id: "p-old", business_id: "default", status: "done", finished_at: isoMs(NOW - 100 * DAYMS), due_at: isoMs(NOW - 100 * DAYMS) }] });
+      const noPart1 = { ...pre, from: (t: string) => { const q0 = pre.from(t); if (t !== "automation_state") return q0; const sel = q0.select; q0.select = (c?: string) => (c && /phase4_compat/.test(c) ? { eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: "42703", message: "column automation_state.phase4_compat does not exist" } }) }) } : sel(c)); return q0; } };
+      await tickAt(noPart1, NOW);
+      eq([pre.T.automation_runs.length, pre.T.automation_state[0].pruned_on, pre.calls.includes("rpc:automation_prune")], [0, "2026-10-14", false], "before Part 1: phase 4's prune (90 days), no housekeeping");
+    }
   }
 
   console.log(`automations: ${pass} passed, ${fail} failed`);

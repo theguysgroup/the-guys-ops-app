@@ -23,7 +23,10 @@ const say = console.log.bind(console);
 }
 
 // ── the outside world, shared by the three engines ──
-type Engine = { name: string; M: any; wrap?: (db: any) => any };
+// flag = automation_state.phase4_compat while this engine ticks (false = the event store, G2.1; default true)
+// migrate = the owner runs step "migrate" (G2.4: every row gets its doc) right before this engine's first tick
+// dropV1 = then the phase-4 trigger / steps are emptied (an edit in the old editor, or phase 7's drop): the doc alone runs
+type Engine = { name: string; M: any; wrap?: (db: any) => any; flag?: boolean; migrate?: boolean; dropV1?: boolean };
 // the database before SQL Part 1 as the v2 build sees it: automation_state has no phase4_compat column (Postgres 42703)
 const noPart1 = (db: any) => ({ ...db, from: (t: string) => {
   const q = db.from(t);
@@ -33,7 +36,10 @@ const noPart1 = (db: any) => ({ ...db, from: (t: string) => {
   return q;
 } });
 const ENG: Record<string, Engine> = { old: { name: "old", M: OLD }, new: { name: "new", M: NEW }, rb: { name: "rb", M: RB },
-  nf: { name: "nf", M: NEW, wrap: noPart1 } };   // nf = the v2 build deployed before Part 1 (its phase-4 fallback)
+  nf: { name: "nf", M: NEW, wrap: noPart1 },      // nf = the v2 build deployed before Part 1 (its phase-4 fallback)
+  ev: { name: "ev", M: NEW, flag: false },        // ev = the v2 build after Part 2 step E: the event store starts the runs (G2.1)
+  mg: { name: "mg", M: NEW, flag: false, migrate: true },
+  mf: { name: "mf", M: NEW, flag: false, migrate: true, dropV1: true } };   // mf = the same with only the doc kept (wfToFlat runs it)   // mg = the same after Part 2 · G2.4 + step "migrate": every row runs its doc
 let clock = 0;
 let PUSHES: any[] = [];
 for (const { M } of Object.values(ENG)) {
@@ -112,6 +118,9 @@ const SCENARIOS: Scn[] = [
     seed: (r) => { r.lead_messages = ["c1", "c2", "c3", "c4"].map((c, i) => ({ id: "lm" + i, contact_id: c, channel: "text", direction: "out", auto: true, status: "sent", body: "hi", at: iso(WED - HR) })); } },
   { name: "stage undone within 30 s", t0: WED, muts: [{ off: 10e3, what: "undo", fn: (db) => { for (const id of ["c2", "c4"]) Object.assign(db.T.contacts.find((c: any) => c.id === id), { status: "New", stage_changed_at: iso(WED - 3 * DAY + HR) }); } }] },
   { name: "stage moved on after the run started", t0: WED, muts: [{ off: 5 * MIN, what: "moved on", fn: (db) => { for (const id of ["c2", "c4"]) Object.assign(db.T.contacts.find((c: any) => c.id === id), { status: "Won", stage_changed_at: iso(WED + 5 * MIN) }); } }] },
+  // a second real move within the 30-second settle time, the first one seen by the tick at 15 s while fresh (the event
+  // store keeps it as an event): phase 4 only ever saw the second; an upgraded row drops the first ("moved_on")
+  { name: "stage moved on within 30 s", t0: WED, muts: [{ off: 20e3, what: "moved on", fn: (db) => { for (const id of ["c2", "c4"]) Object.assign(db.T.contacts.find((c: any) => c.id === id), { status: "Lost", stage_changed_at: iso(WED + 20e3) }); } }] },
   { name: "no customer card (job, call and chat not linked)", t0: WED, seed: (r) => { r.jobs[0].contact_id = null; r.calls[0].contact_id = null; r.chat_sessions[0].contact_id = null; } },
   { name: "card linked 4 minutes later", t0: WED, seed: (r) => { r.jobs[0].contact_id = null; r.calls[0].contact_id = null; },
     muts: [{ off: 4 * MIN, what: "linked", fn: (db) => { db.T.jobs[0].contact_id = "c3"; db.T.calls[0].contact_id = "c1"; } }] },
@@ -128,6 +137,7 @@ const SCENARIOS: Scn[] = [
 ];
 
 // ── the corpus ──
+const idsOk = (a: any) => { const ids = (Array.isArray(a.steps) ? a.steps : []).map((s: any) => String(s && s.id)); return ids.every((id: string) => /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(id)) && new Set(ids).size === ids.length; };
 const builtin = JSON.parse(fs.readFileSync(DIFF_DIR + "/corpus/builtin.json", "utf8")).automations as any[];
 const upgrade = JSON.parse(fs.readFileSync(WT + "/supabase/functions/automations/fixtures/upgrade.json", "utf8")).cases.map((c: any) => ({ name: "upgrade.json: " + c.name, trigger: c.v1.trigger, steps: c.v1.steps }));
 const live: any[] = corpusArg ? (JSON.parse(fs.readFileSync(corpusArg, "utf8")) as any[]).map((a) => ({ ...a, name: "live: " + String(a.name || a.id) })) : [];
@@ -191,12 +201,19 @@ async function play(scn: Scn, autos: any[], plan: Plan) {
   const keyOf = (r: any) => `${r.automation_id}|${r.event_key}`;
   const done = new Set<number>();
   const first: number[] = [15e3]; for (let m = 1; m <= 20; m++) first.push(m * MIN);
-  let t = scn.t0 + first[0], k = 0, fi = 0;
+  let t = scn.t0 + first[0], k = 0, fi = 0, migrated = false;
   const inOutage = (x: number) => !!scn.outage && x >= scn.t0 + scn.outage[0] && x < scn.t0 + scn.outage[1];
   while (k < 400 && t <= scn.t0 + 40 * DAY) {
     if (inOutage(t)) t = scn.t0 + (scn.outage as [number, number])[1];
     const E = plan(k);
     clock = t;
+    for (const s of db.T.automation_state || []) s.phase4_compat = E.flag !== false;
+    if (E.migrate && !migrated) {
+      migrated = true;
+      const res = await E.M.handle(db, { step: "migrate" }, OWNER, false);
+      if (res.status !== 200 || res.body.left) LINES.push(`migrate: ${JSON.stringify(res.body)}`);
+      if (E.dropV1) for (const a of db.T.automations) if (a.definition) { a.trigger = {}; a.steps = []; }
+    }
     for (let i = 0; i < (scn.muts || []).length; i++) {
       const m = (scn.muts as Mut[])[i];
       if (done.has(i) || scn.t0 + m.off > t) continue;
@@ -229,6 +246,8 @@ async function play(scn: Scn, autos: any[], plan: Plan) {
     actions: db.T.automation_log.filter((l: any) => (l.row_kind ?? "action") === "action")
       .map((l: any) => [runKey[l.run_id] || l.run_id, l.step_id, l.channel, l.audience, l.status, l.reason ?? null, l.recipient ?? null, l.at, l.loop ?? 0]),
     v2rows: db.T.automation_log.filter((l: any) => (l.row_kind ?? "action") !== "action").length,
+    docs: db.T.automations.filter((a: any) => a.definition && a.definition.schema === 2).length,   // rows running their doc (G2.4 migrate)
+    evrows: (db.T.automation_events || []).length + db.T.automation_log.filter((l: any) => l.row_kind === "enroll").length,   // the event store really ran (G2.1)
     pushes: PUSHES.map((p) => [p.to, p.title, p.body, p.url, p.tag]),
     tasks: db.T.tasks.map((x: any) => [x.board, x.title, x.notes, x.due, x.assignees, x.priority, x.client, x.contact_id, x.created_by, x.created_at]),
     emails: db.T.lead_messages.filter((m: any) => m.auto === true && !String(m.id).startsWith("lm")).map((m: any) => [m.contact_id, m.channel, m.subject, m.body, m.author, m.email, m.status, m.at]),
@@ -265,15 +284,33 @@ function firstDiff(a: any, b: any, path = ""): string | null {
   const invalid = CORPUS.filter((a) => OLD.validateAutomation(a, CATALOG).length).map((a) => a.name);
   say(`corpus: ${CORPUS.length} automations (${builtin.length} built-in, ${upgrade.length} upgrade.json shapes, ${live.length} live); refused by phase 4 (never start, in either engine): ${invalid.length}`);
 
+  // G2.4 migration check (design §8.3 #4): a live export taken AFTER step "migrate" carries each row's doc; every doc
+  // must be exactly upgradeV1 of its phase-4 steps (same shape) and run as phase 4 (wfRunRow); the runs below use the steps
+  const migrated = live.filter((a) => a.definition && a.definition.schema === 2);
+  const migFindings = migrated.filter((a) => NEW.canonJson(a.definition) !== NEW.canonJson(NEW.upgradeV1(a.trigger, a.steps).doc)
+    || NEW.defShape(a.definition) !== NEW.defShape(NEW.upgradeV1(a.trigger, a.steps).doc) || NEW.wfRunRow({ ...a, settings: a.settings || {} }).definition !== null);
+  if (migrated.length) say(`migration check: ${migrated.length} live rows with a doc; not exactly upgradeV1 of their steps / not run as phase 4: ${migFindings.length}`);
+  // rows phase 4 accepts whose upgraded doc has an error: they keep running as phase 4, but a save in the old builder or a
+  // switch-on (the function checks) is refused until the problem is fixed — list them for the owner (not a difference)
+  if (live.length) {
+    const cat = recordsArg ? ((JSON.parse(fs.readFileSync(recordsArg, "utf8")).settings || [])[0] || {}).catalog || {} : CATALOG;
+    for (const a of live) {
+      if (OLD.validateAutomation(a, cat).length) continue;
+      const u = NEW.upgradeV1(a.trigger, a.steps), errs = NEW.validateDoc(u.doc, { catalog: cat, stored: u.doc }).errors;
+      if (errs.length) say(`NOTE ${a.name}: phase 4 runs it, but a save / switch-on needs this fixed first: ${errs.map((e: any) => `${e.code} ${e.path}`).join("; ")}`);
+    }
+  }
   const shadow = shadowScenarios();
   const scns = [...(QUICK ? SCENARIOS.slice(0, 3) : SCENARIOS), ...shadow];
   if (recordsArg) say(`live shadow: ${shadow.length} (automation × record) worlds from ${recordsArg}`);
-  const findings: any[] = [];
-  let worlds = 0, cases = 0, acted = 0, v2seen = 0;
+  const findings: any[] = migFindings.map((a: any) => ({ scenario: "migration check", automations: a.name, engine: "step migrate", diff: "the doc is not upgradeV1 of its phase-4 steps (or does not run as phase 4)" }));
+  let worlds = 0, cases = 0, acted = 0, v2seen = 0, evseen = 0, mgseen = 0;
   const totals = { actions: 0, pushes: 0, tasks: 0, emails: 0, runs: 0 };
   for (const scn of scns) {
-    const groups: { label: string; autos: any[] }[] = scn.only ? [{ label: String(scn.only), autos: CORPUS.filter((a) => a.id === scn.only) }]
-      : [{ label: "ALL together", autos: CORPUS }, ...CORPUS.map((a) => ({ label: a.name, autos: [a] }))];
+    // "doc only" needs phase-4 ids that are v2 ids, once each (upgradeV1 gives others fresh ids, and phase 4 refuses a
+    // repeated one: with the phase-4 steps gone neither can be compared step by step) — the live ids always are (RUNBOOK §8)
+    const groups: { label: string; autos: any[]; docOnly?: boolean }[] = scn.only ? [{ label: String(scn.only), autos: CORPUS.filter((a) => a.id === scn.only) }]
+      : [{ label: "ALL together", autos: CORPUS }, { label: "ALL with v2 ids", autos: CORPUS.filter(idsOk), docOnly: true }, ...CORPUS.map((a) => ({ label: a.name, autos: [a] }))];
     for (const g of groups) {
       cases++;
       const base = await play(scn, g.autos, () => ENG.old); worlds++;
@@ -290,28 +327,46 @@ function firstDiff(a: any, b: any, path = ""): string | null {
         // a rollback, then the v2 build again (a fixed redeploy): runs phase 4 moved on in between
         [`new → rb → new (ticks 1 / ${mid + 1})`, (k) => (k < 1 ? ENG.new : k < mid + 1 ? ENG.rb : ENG.new)],
         ["alternating every tick (new / rb)", (k) => (k % 2 ? ENG.rb : ENG.new)],
+        // G2.1: the event store (design §8.3 #1 (b): upgradeV1 + matcher + advanceV2) and its switch both ways
+        ["ev (event store)", () => ENG.ev], ["new → ev after tick 1 (step E)", (k) => (k < 1 ? ENG.new : ENG.ev)],
+        [`new → ev after tick ${mid} (step E)`, (k) => (k < mid ? ENG.new : ENG.ev)], [`ev → new after tick ${mid} (step E rolled back)`, (k) => (k < mid ? ENG.ev : ENG.new)],
+        [`ev → rb after tick ${mid} (rollback build)`, (k) => (k < mid ? ENG.ev : ENG.rb)], ["alternating every tick (ev / new)", (k) => (k % 2 ? ENG.new : ENG.ev)],
+        // G2.4: every row migrated to its doc (step "migrate", design §8.3 #4) before the first tick, mid-way, and then
+        // rolled back to the rollback build (the Part-2 ROLLBACK keeps rows nobody edited: their phase-4 steps run again)
+        ["ev+mg (rows migrated)", () => ENG.mg], [`ev → ev+mg after tick ${mid} (migrate)`, (k) => (k < mid ? ENG.ev : ENG.mg)],
+        [`ev+mg → rb after tick ${mid} (rollback build)`, (k) => (k < mid ? ENG.mg : ENG.rb)],
+        ["ev+mg, doc only (rows migrated, phase-4 steps gone)", () => ENG.mf], [`ev → ev+mg, doc only after tick ${mid}`, (k) => (k < mid ? ENG.ev : ENG.mf)],
       ];
       for (const [label, plan] of others) {
+        const docOnly = /doc only/.test(label);
+        if (g.docOnly ? !docOnly : docOnly && !g.autos.every(idsOk)) continue;
         const got = await play(scn, g.autos, plan); worlds++;
         if (label.startsWith("new (")) v2seen += got.v2rows;
+        if (label.startsWith("ev (")) evseen += got.evrows;
+        if (label.startsWith("ev+mg (")) { mgseen += got.docs; if (got.docs !== g.autos.length) findings.push({ scenario: scn.name, automations: g.label, engine: label, diff: `migrated ${got.docs} of ${g.autos.length} rows` }); }
+        else if (!/ev\+mg/.test(label) && got.docs) findings.push({ scenario: scn.name, automations: g.label, engine: label, diff: `docs without migrate: ${got.docs}` });
+        // the compat producer never writes the event store (its rows would be events nobody claims)
+        if (!/\bev\b/.test(label) && got.evrows) findings.push({ scenario: scn.name, automations: g.label, engine: label, diff: `event-store rows without the event store: ${got.evrows}` });
         // the pre-Part-1 fallback must really be phase 4 (no v2 rows at all)
         if (label.startsWith("new before Part 1 (") && got.v2rows) findings.push({ scenario: scn.name, automations: g.label, engine: label, diff: `v2 rows written before Part 1: ${got.v2rows}` });
-        const { v2rows: _a, ...gotCmp } = got, { v2rows: _b, ...baseCmp } = base;
-        const d = firstDiff(baseCmp, gotCmp);
+        const { v2rows: _a, evrows: _c, docs: _e, ...gotCmp } = got, { v2rows: _b, evrows: _d, docs: _f, ...baseCmp } = base;
+        let d = firstDiff(baseCmp, gotCmp);
+        const ri = d ? /^\/runs\/(\d+)\//.exec(d) : null;   // which run (by workflow and event key)
+        if (d && ri && base.runs[Number(ri[1])]) d += ` (run ${base.runs[Number(ri[1])].key})`;
         if (d) findings.push({ scenario: scn.name, automations: g.label, engine: label, diff: d });
       }
     }
   }
   const secs = ((Date.now() - started) / 1000).toFixed(1);
-  say(`scenarios ${scns.length} · cases ${cases} · worlds ${worlds} · cases where phase 4 acted ${acted} · phase-4 totals: runs ${totals.runs}, action rows ${totals.actions}, pushes ${totals.pushes}, tasks ${totals.tasks}, emails ${totals.emails} · v2 step/exit rows seen ${v2seen} · ${secs} s`);
+  say(`scenarios ${scns.length} · cases ${cases} · worlds ${worlds} · cases where phase 4 acted ${acted} · phase-4 totals: runs ${totals.runs}, action rows ${totals.actions}, pushes ${totals.pushes}, tasks ${totals.tasks}, emails ${totals.emails} · v2 step/exit rows seen ${v2seen} · event-store rows seen ${evseen} · migrated rows seen ${mgseen} · ${secs} s`);
   const reportPath = process.env.REPORT || DIFF_DIR + "/report.json";
-  fs.writeFileSync(reportPath, JSON.stringify({ at: new Date().toISOString(), rollbackBuildOk: rbOk, corpus: CORPUS.length, invalid, scenarios: scns.map((s) => s.name), cases, worlds, acted, totals, v2seen, findings }, null, 1));
+  fs.writeFileSync(reportPath, JSON.stringify({ at: new Date().toISOString(), rollbackBuildOk: rbOk, corpus: CORPUS.length, invalid, scenarios: scns.map((s) => s.name), cases, worlds, acted, totals, v2seen, evseen, mgseen, findings }, null, 1));
   if (findings.length) {
     say(`DIFFERENCES: ${findings.length}`);
     for (const f of findings.slice(0, 40)) say(`- [${f.scenario}] ${f.automations} — ${f.engine}\n    ${f.diff}`);
   }
   say(`report: ${reportPath}`);
-  const okAll = rbOk && !findings.length && v2seen > 0 && acted > 0;
-  say(okAll ? "DIFFERENTIAL: IDENTICAL (old = new = rollback build, and every cutover)" : "DIFFERENTIAL: FAILED");
+  const okAll = rbOk && !findings.length && v2seen > 0 && evseen > 0 && mgseen > 0 && acted > 0;
+  say(okAll ? "DIFFERENTIAL: IDENTICAL (old = new = rollback build = event store = migrated rows, and every cutover)" : "DIFFERENTIAL: FAILED");
   process.exit(okAll ? 0 : 1);
 })().catch((e) => { say("differential crashed:", e && e.stack || e); process.exit(1); });

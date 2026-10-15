@@ -1803,8 +1803,1270 @@ select 'stage2 Part 1 ok';
 
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 -- PART 2 — switch the guards to the doc (automation_guarded_channels, automations_guard v2, automations_after,
--- automation_save, automation_migrate_row). Written in phase 2 (group G2.4). Nothing to run yet.
+-- automation_save / _publish / _migrate_row; PART 2 · G2.4 below), switch the event store on (STEP E, group G2.1) and the lead card's
+-- atomic tag / note edits + the stage-2 record writes + the inbound link counter (G2.3). Each step is
+-- its own section with its own begin/commit, checks before/after and ROLLBACK; the live order is in the phase-2 RUNBOOK
+-- (.claude/sql/stage2-part1-RUNBOOK.md, section 9).
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- PART 2 · STEP E (group G2.1) — the event store starts the runs: automation_state.phase4_compat = false.
+-- Needs: Part 1 applied, and the phase-2 function (the one with the EVENTS section) deployed and ticking in compat mode
+-- (function log "automations engine: v2 executor in compat mode …"). Nothing else in Part 2 depends on it, and it
+-- depends on nothing else in Part 2. No new table, column, function or privilege: Part 1 made them all.
+-- From the next tick the function: lists the ON workflows (a cheap list; a full row only when it changed), writes
+-- public.automation_wanted (= the trigger types of the ON workflows + the events their held runs listen for — from then
+-- on the capture triggers write those types into automation_events), scans the scan and time sources from their
+-- watermarks (automation_state.scan_marks), claims the due events (automation_claim_events), wakes and stops held runs
+-- (automation_wake / automation_stop_on_reply), checks every trigger and enrols through automation_enroll, and writes
+-- automation_trigger_log + automation_trigger_daily. The phase-4 scanners and their five event-key formats are reused byte
+-- for byte, so an event the compat producer (phase 4's enqueue) already started gives 'duplicate_event' — never a second
+-- run. The offline differential replays every scenario with this switch on, switched on mid-way and switched back:
+-- identical to phase 4 (supabase/functions/automations/differential, the "ev" engine).
+--
+-- Check before (read-only):
+--   select business_id, phase4_compat, wanted_hash, scan_marks, capture_errors from public.automation_state;
+--     -- one row 'default': phase4_compat = true, wanted_hash null, scan_marks {}
+--   select count(*) from public.automation_wanted;                               -- 0: the capture triggers are silent
+--   select status, count(*) from public.automation_events group by 1;            -- nothing (or only rows of the staging checks: none left)
+--   select to_regprocedure('public.automation_claim_events(text, timestamptz, integer, integer, uuid, text, text)') is not null,
+--          to_regprocedure('public.automation_wake(text, uuid, text[], timestamptz)') is not null,
+--          to_regprocedure('public.automation_stop_on_reply(text, uuid, timestamptz, timestamptz)') is not null,
+--          to_regprocedure('public.automation_trigger_daily_add(text, jsonb)') is not null;      -- all true (Part 1)
+--   select count(*) filter (where status in ('waiting', 'running')) as active, count(*) as runs from public.automation_runs;   -- note both
+--   The function log shows the compat line for the last ticks (Dashboard → Edge Functions → automations → Logs).
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+begin;
+set local lock_timeout = '5s';
+do $$
+begin
+  if to_regprocedure('public.automation_claim_events(text, timestamptz, integer, integer, uuid, text, text)') is null
+     or to_regprocedure('public.automation_enroll(text, uuid, integer, integer, text, text, text, timestamptz, text, text, uuid, text, text, text, text, jsonb, text, integer, uuid, uuid, boolean, timestamptz, timestamptz)') is null
+     or to_regprocedure('public.automation_wake(text, uuid, text[], timestamptz)') is null
+     or to_regprocedure('public.automation_stop_on_reply(text, uuid, timestamptz, timestamptz)') is null
+     or to_regprocedure('public.automation_trigger_daily_add(text, jsonb)') is null
+     or to_regclass('public.automation_wanted') is null or to_regclass('public.automation_trigger_log') is null then
+    raise exception 'Part 2 step E needs Part 1 (the event-store tables and RPCs): run Part 1 first';
+  end if;
+  if not exists (select 1 from public.automation_state where business_id = public.current_business_id()) then
+    raise exception 'Part 2 step E: no automation_state row for this business (the timer has never run here)';
+  end if;
+end $$;
+update public.automation_state set phase4_compat = false where business_id = public.current_business_id();
+commit;
+-- Check after (read-only):
+--   right away:  select phase4_compat from public.automation_state;                  -- false
+--   after the next minute's tick:
+--     function log: "automations engine: v2 executor with the event store (producers, captured events, matcher)" (once)
+--     select event_type from public.automation_wanted order by 1;                    -- the trigger types of the ON workflows (+ watched types)
+--     select wanted_hash, scan_marks from public.automation_state;                    -- = that list joined by ','; one mark per producer that ran, ≈ the tick
+--                                                                                     --   (+ "_next": the producer the next tick starts with, when 2+ are wanted)
+--     select type, source, status, count(*) from public.automation_events group by 1, 2, 3 order by 1, 2, 3;   -- scan rows of the last hours, 'done'
+--     select count(*) from public.automation_events where status = 'error';         -- 0
+--     select a.name, l.trigger_id, l.matched, l.reason, count(*) from public.automation_trigger_log l join public.automations a on a.id = l.automation_id
+--      where l.at > now() - interval '15 minutes' group by 1, 2, 3, 4 order by 1, 2, 3, 4;
+--       -- the first tick re-checks the last lookback_hours: the events phase 4 already started show 'duplicate_event' (no run)
+--     select count(*) from public.automation_runs where created_at > now() - interval '15 minutes' and source = 'trigger'
+--        and not exists (select 1 from public.automation_log l where l.run_id = automation_runs.id and l.row_kind = 'enroll');   -- 0: every new run came through automation_enroll
+--   then the 2-hour watch of the RUNBOOK (W3–W8: per workflow the same actions, reasons and cap use as the compat hours).
+--
+-- ROLLBACK (step E only; run by hand). The compat producer (phase 4's scanners + enqueue) starts the runs again from the
+-- next tick, with the same event keys: nothing fires twice. The capture list is emptied at once (the compat tick would
+-- also do it), and the events nobody will claim are closed, so switching the event store on again later never acts on
+-- an old capture. The rows themselves are pruned by housekeeping (done: 7 days).
+-- begin;
+-- update public.automation_state set phase4_compat = true, wanted_hash = null where business_id = public.current_business_id();
+-- delete from public.automation_wanted where business_id = public.current_business_id();
+-- update public.automation_events set status = 'done', processed_at = now(), lease_until = null, error = 'event store switched off (step E rolled back)'
+--  where business_id = public.current_business_id() and status in ('new', 'processing');
+-- commit;
+-- Check after the rollback: select phase4_compat, wanted_hash from public.automation_state;  -- true, null
+--   select count(*) from public.automation_wanted;  -- 0;  the function log says "v2 executor in compat mode …" at the next tick.
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- END PART 2 · STEP E
+
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- PART 2 · G2.2 (logic steps + per-workflow settings) — NOTHING TO RUN. The engine's If / else, Split, Goal, Go to, Add to /
+-- Remove from workflow, the reply / user-reply / conditions waits, Stop on response, the time window, pauses, the
+-- re-entry ledger and "Mark as read" use only what Part 1 made: automation_enroll (p_trigger null, p_source 'workflow',
+-- p_parent / p_cause, p_due), automation_enrollment_keys.splits (the Split path, written by the service role),
+-- automation_runs.remove_requested / exit_reason / stop_on_reply / first_sent_at / watch ('pause' for a pause hold),
+-- automation_pauses (+ its AFTER trigger's wake), automation_apply op 'read', lead_messages (direction, channel, auto,
+-- author_id, at) and automation_events (the event goals). Proof on staging: .claude/sql/stage2-part1-staging-checks.sql
+-- check 16 (PASS 16). No ROLLBACK: nothing changes in the database; rolling G2.2 back = redeploying the previous function.
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- PART 2 · G2.3 (record actions, inbound webhook) — atomic tag and note edits for the lead card, the stage-2 record
+-- writes of automation_apply, "Note added" capture and the inbound webhook's per-link rate limit.
+-- Needs: Part 1 applied. Independent of step E and of G2.4's guards. Run it BEFORE the app that calls
+-- contact_tags_edit / contact_note_add / contact_note_remove goes live (that app falls back to its old whole-list save while
+-- these functions are missing, so the order is safe either way; with them, an open lead card can no longer erase a tag or
+-- a note a workflow added, nor make a false "tag removed" event — design §3.9, Appendix A E53).
+-- What it does (one transaction):
+--   contact_tags_merge(tags, add, remove)   pure: remove (any case), then add the ones not there (any case), order kept
+--   contact_notes_append(list, note, max)    pure: one {id, text, by, at} more (text cut to max; null = whole; a given
+--                                            time kept as it is, none = now), nothing when that id is there already
+--                                            (any id up to 128 characters, no control characters); a value that is not
+--                                            a list is returned as it is
+--   contact_tags_edit(p_id, p_add, p_remove) the lead card's tag click / bulk tags / Undo: ONE update of that lead's tags
+--   contact_note_add(p_id, p_note)           the lead card's "Add note" / Undo of a delete: one note more
+--   contact_note_remove(p_id, p_note_id)     the lead card's note delete: that note out, the others kept
+--     (security invoker: the signed-in person's own rights on contacts (RLS) decide, exactly as the app's direct update)
+--   automation_apply (replaced; same signature): 'tags' = contact_tags_merge (any case, as the card); 'note' = a
+--     customer_notes note {id, text ≤ 2000, by 'Automation: <name>', at} (Part 1 appended to the old notes text); 'task'
+--     also without a lead (a Scheduler / unmatched webhook workflow: the team's task); activity lines only on a lead or a
+--     job (and 'comment' only there); everything else as Part 1
+--   automation_capture_contacts (replaced): + "Note added" (a new note id in customer_notes, also on a new lead)
+--   automation_hook_hit(p_business, p_hook, p_now, p_limit)   the inbound link's calls this minute (atomic), -1 = no link
+--
+-- Check before (read-only):
+--   select format_type(atttypid, atttypmod) from pg_attribute where attrelid = 'public.contacts'::regclass and attname in ('tags', 'customer_notes') order by attname;
+--     -- customer_notes: jsonb; tags: text[]  (the block below stops if not)
+--   select to_regprocedure('public.automation_apply(text, text, text, text, jsonb)') is not null,
+--          to_regclass('public.automation_hooks') is not null;                      -- true, true (Part 1)
+--   select count(*) from public.contacts where customer_notes is not null and jsonb_typeof(customer_notes) <> 'array';   -- 0 (else: those cards' notes
+--     are left alone by the new functions — the card's add / delete answers with an error, a workflow's "Add note" is
+--     skipped with the reason — read them first and turn them into a list by hand if they matter)
+--   select pg_get_functiondef('public.automation_apply(text, text, text, text, jsonb)'::regprocedure) ~ 'set notes = case';   -- true (Part 1's version)
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+begin;
+set local lock_timeout = '5s';
+do $$
+begin
+  if to_regprocedure('public.automation_apply(text, text, text, text, jsonb)') is null or to_regclass('public.automation_hooks') is null
+     or to_regprocedure('public.automation_capture_put(text, text, text, text, text, uuid, jsonb)') is null then
+    raise exception 'Part 2 G2.3 needs Part 1 (automation_apply, automation_hooks, the capture functions): run Part 1 first';
+  end if;
+  if (select format_type(a.atttypid, a.atttypmod) from pg_attribute a
+       where a.attrelid = 'public.contacts'::regclass and a.attname = 'customer_notes' and not a.attisdropped) is distinct from 'jsonb' then
+    raise exception 'contacts.customer_notes is not jsonb: the note functions must be rewritten before this part runs';
+  end if;
+  if (select format_type(a.atttypid, a.atttypmod) from pg_attribute a
+       where a.attrelid = 'public.contacts'::regclass and a.attname = 'tags' and not a.attisdropped) is distinct from 'text[]' then
+    raise exception 'contacts.tags is not text[]: contact_tags_edit must be rewritten before this part runs';
+  end if;
+end $$;
+
+-- The lead card's tag rule (toggleLeadTag / bulkTag): a tag is the same tag in any case. Removed first (every case),
+-- then each added tag that is not there yet (trimmed, ≤ 60 characters, empty ones ignored); the order is kept.
+create or replace function public.contact_tags_merge(p_tags text[], p_add text[], p_remove text[]) returns text[]
+language sql immutable set search_path = ''
+as $$
+  with rem as (select pg_catalog.lower(pg_catalog.btrim(r.r)) as r from pg_catalog.unnest(coalesce(p_remove, '{}'::text[])) as r(r) where r.r is not null),
+  kept as (select u.x, u.n from pg_catalog.unnest(coalesce(p_tags, '{}'::text[])) with ordinality as u(x, n)
+            where u.x is not null and u.x <> '' and not exists (select 1 from rem where rem.r = pg_catalog.lower(u.x))),
+  adds as (select pg_catalog.left(pg_catalog.btrim(v.y), 60) as x, v.k as n from pg_catalog.unnest(coalesce(p_add, '{}'::text[])) with ordinality as v(y, k)
+            where v.y is not null and pg_catalog.btrim(v.y) <> ''),
+  added as (select a.x, a.n from adds a
+             where not exists (select 1 from kept where pg_catalog.lower(kept.x) = pg_catalog.lower(a.x))
+               and not exists (select 1 from adds a2 where a2.n < a.n and pg_catalog.lower(a2.x) = pg_catalog.lower(a.x)))
+  select array(select z.x from (select kept.x, 0 as part, kept.n from kept union all select added.x, 1, added.n from added) as z order by z.part, z.n)
+$$;
+
+-- One note more ({id, text, by, at}; the id a short word of letters, digits, _ or -), nothing when that id is there.
+-- The text is cut to p_max characters (a workflow's note: 2000; the lead card's own note: null = kept whole, as its old
+-- whole-list save kept it). A value that is not a list (a string, an object) is left exactly as it is.
+-- (stable, not immutable: a note without its time gets now())
+drop function if exists public.contact_notes_append(jsonb, jsonb);
+create or replace function public.contact_notes_append(p_list jsonb, p_note jsonb, p_max integer default 2000) returns jsonb
+language sql stable set search_path = ''
+as $$
+  select case
+    when p_list is not null and pg_catalog.jsonb_typeof(p_list) <> 'array' then p_list
+    when pg_catalog.jsonb_typeof(p_note) is distinct from 'object' or coalesce(p_note ->> 'id', '') = ''
+         or pg_catalog.char_length(p_note ->> 'id') > 128 or (p_note ->> 'id') ~ '[[:cntrl:]]'
+         or pg_catalog.btrim(coalesce(p_note ->> 'text', '')) = '' then coalesce(p_list, '[]'::jsonb)
+    when exists (select 1 from pg_catalog.jsonb_array_elements(coalesce(p_list, '[]'::jsonb)) as e where e.value ->> 'id' = p_note ->> 'id') then p_list
+    else coalesce(p_list, '[]'::jsonb)
+         || pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('id', p_note ->> 'id',
+              'text', case when p_max is null then pg_catalog.btrim(p_note ->> 'text') else pg_catalog.left(pg_catalog.btrim(p_note ->> 'text'), p_max) end,
+              'by', pg_catalog.left(coalesce(p_note ->> 'by', ''), 120),
+              -- a given time is kept as it is (the Undo of a note that had none, ''); no time at all = now
+              'at', case when pg_catalog.jsonb_typeof(p_note -> 'at') = 'string' then p_note ->> 'at' else pg_catalog.to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') end))
+  end
+$$;
+
+-- The lead card's tag edit: one statement, so a tag added meanwhile (by a workflow, another tab) is never lost and no
+-- false "tag removed" comes out of a whole-list save. → the lead's tags now (an error when the lead is not there for you).
+create or replace function public.contact_tags_edit(p_id uuid, p_add text[], p_remove text[]) returns text[]
+language plpgsql volatile security invoker set search_path = ''
+as $$
+declare res text[];
+begin
+  if pg_catalog.cardinality(coalesce(p_add, '{}'::text[])) > 10 or pg_catalog.cardinality(coalesce(p_remove, '{}'::text[])) > 10 then
+    raise exception 'at most 10 tags at a time';
+  end if;
+  update public.contacts t set tags = public.contact_tags_merge(t.tags, p_add, p_remove) where t.id = p_id returning t.tags into res;
+  if not found then raise exception 'lead not found'; end if;
+  return coalesce(res, '{}'::text[]);
+end $$;
+
+-- The lead card's note: one more, kept even when someone (or a workflow) added another meanwhile; its text whole (the
+-- card's old whole-list save kept any length, so a long note and the Undo of a deleted long note stay whole). Its id: any
+-- non-empty one up to 128 characters without control characters (the card's own are uid()s; the Undo of a deleted
+-- imported note, e.g. 'ghl:123/x', puts it back as it was). Notes that are not a list are never touched (an error).
+-- → the notes now.
+create or replace function public.contact_note_add(p_id uuid, p_note jsonb) returns jsonb
+language plpgsql volatile security invoker set search_path = ''
+as $$
+declare res jsonb;
+begin
+  if pg_catalog.jsonb_typeof(p_note) is distinct from 'object' or coalesce(p_note ->> 'id', '') = ''
+     or pg_catalog.char_length(p_note ->> 'id') > 128 or (p_note ->> 'id') ~ '[[:cntrl:]]'
+     or pg_catalog.btrim(coalesce(p_note ->> 'text', '')) = '' then
+    raise exception 'a note needs an id and some text';
+  end if;
+  update public.contacts t set customer_notes = public.contact_notes_append(t.customer_notes, p_note, null)
+   where t.id = p_id and (t.customer_notes is null or pg_catalog.jsonb_typeof(t.customer_notes) = 'array') returning t.customer_notes into res;
+  if not found then
+    if exists (select 1 from public.contacts t where t.id = p_id) then raise exception 'this lead''s notes are not a list: they were left as they are'; end if;
+    raise exception 'lead not found';
+  end if;
+  return coalesce(res, '[]'::jsonb);
+end $$;
+
+-- The lead card's note delete: that note out, every other kept (notes that are not a list: never touched, an error).
+-- → the notes now.
+create or replace function public.contact_note_remove(p_id uuid, p_note_id text) returns jsonb
+language plpgsql volatile security invoker set search_path = ''
+as $$
+declare res jsonb;
+begin
+  update public.contacts t set customer_notes = coalesce((select pg_catalog.jsonb_agg(e.value order by e.n) from pg_catalog.jsonb_array_elements(
+           coalesce(t.customer_notes, '[]'::jsonb)) with ordinality as e(value, n)
+         where e.value ->> 'id' is distinct from p_note_id), '[]'::jsonb)
+   where t.id = p_id and (t.customer_notes is null or pg_catalog.jsonb_typeof(t.customer_notes) = 'array') returning t.customer_notes into res;
+  if not found then
+    if exists (select 1 from public.contacts t where t.id = p_id) then raise exception 'this lead''s notes are not a list: they were left as they are'; end if;
+    raise exception 'lead not found';
+  end if;
+  return coalesce(res, '[]'::jsonb);
+end $$;
+
+-- An inbound webhook link's calls this minute, counted in one statement (design §3.11: 60 a minute per link; the
+-- function answers 429 above p_limit). -1 = no such link (revoked, another business).
+create or replace function public.automation_hook_hit(p_business text, p_hook uuid, p_now timestamptz, p_limit integer)
+returns integer language plpgsql volatile security definer set search_path = ''
+as $$
+declare n integer;
+begin
+  update public.automation_hooks h
+     set window_count = case when h.window_start is null or h.window_start <= p_now - interval '1 minute' then 1 else h.window_count + 1 end,
+         window_start = case when h.window_start is null or h.window_start <= p_now - interval '1 minute' then p_now else h.window_start end,
+         last_used_at = p_now
+   where h.id = p_hook and h.business_id = p_business and h.revoked_at is null
+  returning h.window_count into n;
+  if n is null then return -1; end if;
+  return n;
+end $$;
+
+create or replace function public.automation_apply(p_business text, p_cause text, p_kind text, p_id text, p_ops jsonb)
+returns jsonb language plpgsql volatile security definer set search_path = ''
+as $$
+declare
+  m text[]; run uuid; aut uuid; depth integer; nm text; actor text; op jsonb; o text; i integer := 0; line text;
+  applied jsonb := '[]'::jsonb; skipped jsonb := '[]'::jsonb; cid uuid; cur record; col text; typ text; v text; addt text[]; remt text[];
+  tgt text; sct text; tid text; ch text; stamp text;
+  allowed constant text[] := array['full_name', 'postcode', 'division', 'source', 'next_follow_up', 'booked_for', 'quote_amount', 'lost_reason'];
+begin
+  m := pg_catalog.regexp_match(coalesce(p_cause, ''),
+         '^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):([0-9]{1,3}):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$');
+  if m is null then raise exception 'automation_apply needs p_cause = <run>:<depth>:<automation>'; end if;
+  run := m[1]::uuid; depth := m[2]::integer; aut := m[3]::uuid;
+  if pg_catalog.jsonb_typeof(p_ops) is distinct from 'array' or pg_catalog.jsonb_array_length(p_ops) > 20 then
+    return pg_catalog.jsonb_build_object('ok', false, 'reason', 'ops must be a list of at most 20');
+  end if;
+  select a.name into nm from public.automations a where a.id = aut and a.business_id = p_business;
+  if nm is null then return pg_catalog.jsonb_build_object('ok', false, 'reason', 'automation not found'); end if;
+  actor := pg_catalog.left('Automation: ' || nm, 120);
+  perform pg_catalog.set_config('automation.cause', p_cause, true);
+  if p_kind = 'contact' then
+    cid := p_id::uuid;
+    select c.id, c.status into cur from public.contacts c where c.id = cid for update;
+    if not found then return pg_catalog.jsonb_build_object('ok', false, 'reason', 'record deleted'); end if;
+  end if;
+  for op in select e.value from pg_catalog.jsonb_array_elements(p_ops) as e loop
+    i := i + 1; o := coalesce(op ->> 'op', ''); line := null;
+    begin
+      if o in ('set', 'tags', 'note', 'optout', 'read', 'stage') and cid is null then
+        skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'wrong_kind'); continue;
+      end if;
+      if o = 'set' then
+        col := op ->> 'field';
+        if col is null or not (col = any(allowed)) then
+          skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'field not allowed'); continue;
+        end if;
+        if col = 'quote_amount' then col := 'estimated_value'; end if;
+        select pg_catalog.format_type(a.atttypid, a.atttypmod) into typ from pg_catalog.pg_attribute a
+         where a.attrelid = 'public.contacts'::regclass and a.attname = col and not a.attisdropped;
+        v := nullif(pg_catalog.left(op ->> 'value', 500), '');
+        execute pg_catalog.format('update public.contacts set %I = cast($1 as %s) where id = $2', col, typ) using v, cid;
+        line := 'Changed ' || (op ->> 'field') || ' to "' || coalesce(pg_catalog.left(v, 80), '') || '"';
+      elsif o = 'tags' then
+        addt := array(select pg_catalog.left(pg_catalog.btrim(x), 60) from pg_catalog.jsonb_array_elements_text(coalesce(op -> 'add', '[]'::jsonb)) as x where pg_catalog.btrim(x) <> '');
+        remt := array(select pg_catalog.btrim(x) from pg_catalog.jsonb_array_elements_text(coalesce(op -> 'remove', '[]'::jsonb)) as x);
+        -- the lead card's own rule (contact_tags_merge = contact_tags_edit): a tag is the same tag in any case
+        update public.contacts t set tags = public.contact_tags_merge(t.tags, addt, remt) where t.id = cid;
+        line := 'Tags' || case when pg_catalog.cardinality(addt) > 0 then ' added: ' || pg_catalog.array_to_string(addt, ', ') else '' end
+                       || case when pg_catalog.cardinality(remt) > 0 then ' removed: ' || pg_catalog.array_to_string(remt, ', ') else '' end;
+      elsif o = 'note' then
+        v := pg_catalog.left(pg_catalog.btrim(coalesce(op ->> 'text', '')), 2000);
+        if v = '' then skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'empty note'); continue; end if;
+        -- one more note on the card ({id, text, by, at}: the lead card's own shape, contact_note_add's rule)
+        update public.contacts t set customer_notes = public.contact_notes_append(t.customer_notes, pg_catalog.jsonb_build_object(
+            'id', 'wf' || pg_catalog.replace(gen_random_uuid()::text, '-', ''), 'text', v, 'by', actor,
+            'at', pg_catalog.to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')))
+         where t.id = cid and (t.customer_notes is null or pg_catalog.jsonb_typeof(t.customer_notes) = 'array');
+        -- notes that are not a list (an old string or object) are never replaced
+        if not found then skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'the notes on this card are not a list'); continue; end if;
+        line := 'Note added: ' || pg_catalog.left(v, 200);
+      elsif o = 'optout' then
+        ch := coalesce(nullif(op ->> 'channel', ''), 'all');
+        if not exists (select 1 from public.customer_opt_outs x where x.contact_id = cid and x.channel = ch) then
+          insert into public.customer_opt_outs (business_id, contact_id, channel, reason) values (p_business, cid, ch, actor);
+        end if;
+        line := 'Automatic messages stopped (' || ch || ')';
+      elsif o = 'read' then
+        select pg_catalog.format_type(a.atttypid, a.atttypmod) into typ from pg_catalog.pg_attribute a
+         where a.attrelid = 'public.contacts'::regclass and a.attname = 'last_read_at' and not a.attisdropped;
+        stamp := case when typ in ('text', 'character varying') then 'to_char(now() at time zone ''UTC'', ''YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'')' else 'now()' end;
+        execute pg_catalog.format('update public.contacts set last_read_at = %s where id = $1', stamp) using cid;
+        line := 'Conversation marked as read';
+      elsif o = 'stage' then
+        tgt := nullif(pg_catalog.btrim(coalesce(op ->> 'to', '')), '');
+        if tgt is null then skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'no stage'); continue; end if;
+        if tgt = public.automation_catalog_key('stageWon', 'Won') then
+          skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'A lead is won when its job is entered'); continue;
+        end if;
+        if cur.status::text is not distinct from tgt then
+          skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'already in that stage'); continue;
+        end if;
+        select pg_catalog.format_type(a.atttypid, a.atttypmod) into typ from pg_catalog.pg_attribute a
+         where a.attrelid = 'public.contacts'::regclass and a.attname = 'stage_changed_at' and not a.attisdropped;
+        stamp := case when typ in ('text', 'character varying') then 'to_char(now() at time zone ''UTC'', ''YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'')' else 'now()' end;
+        execute pg_catalog.format('update public.contacts set status = $1, stage_changed_at = %s, lost_reason = case when $1 = $3 and $4 is not null then $4 else lost_reason end'
+                                  || ' where id = $2 returning to_jsonb(stage_changed_at) #>> ''{}''', stamp)
+          into sct using tgt, cid, public.automation_catalog_key('stageLost', 'Lost'), nullif(pg_catalog.left(op ->> 'lost_reason', 200), '');
+        if exists (select 1 from public.automation_wanted wt where wt.business_id = p_business and wt.event_type = 'stage') then
+          insert into public.automation_events (business_id, type, event_key, record_kind, record_id, contact_id, at, available_at, ctx, source,
+                                                cause_run_id, cause_automation_id, chain_depth)
+          values (p_business, 'stage', pg_catalog.left(cid::text || ':' || tgt || ':' || sct, 200), 'contact', cid::text, cid, now(),
+                  now() + pg_catalog.make_interval(secs => public.automation_settle_seconds('stage')), pg_catalog.jsonb_build_object('stage', tgt),
+                  'engine', run, aut, least(depth + 1, 100))
+          on conflict (business_id, type, event_key) do nothing;
+        end if;
+        cur.status := tgt;
+        line := 'Moved to ' || tgt;
+      elsif o = 'task' then
+        if nullif(pg_catalog.btrim(coalesce(op ->> 'title', '')), '') is null or nullif(op ->> 'board', '') is null then
+          skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'missing details'); continue;
+        end if;
+        -- a task of a lead, or (a workflow with no lead: a Scheduler, an inbound webhook nobody matched) the team's own
+        insert into public.tasks (board, title, status, due, notes, client, contact_id, assignees, assigned_to, category, priority, created_by)
+        values (op ->> 'board', pg_catalog.left(op ->> 'title', 200), coalesce(nullif(op ->> 'status', ''), 'Not Started'), nullif(op ->> 'due', '')::date,
+                nullif(pg_catalog.left(op ->> 'notes', 2000), ''), (select c.full_name from public.contacts c where c.id = cid), cid,
+                array(select pg_catalog.jsonb_array_elements_text(coalesce(op -> 'assignees', '[]'::jsonb))), nullif(op ->> 'assigned_to', ''),
+                nullif(op ->> 'category', ''), nullif(op ->> 'priority', ''), actor)
+        returning id::text into tid;
+        line := 'Task added: ' || pg_catalog.left(op ->> 'title', 120);
+      elsif o = 'comment' then
+        v := pg_catalog.left(pg_catalog.btrim(coalesce(op ->> 'text', '')), 1000);
+        if v = '' then skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'empty comment'); continue; end if;
+        if p_kind not in ('contact', 'job') then
+          skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'wrong_kind'); continue;
+        end if;
+        insert into public.activity_log (record_kind, record_id, actor, text, manual) values (p_kind, p_id, actor, v, false);
+      elsif o = 'custom' then
+        insert into public.automation_custom_values as cv (business_id, key, value, updated_at)
+        values (p_business, op ->> 'key', coalesce(pg_catalog.left(op ->> 'value', 500), ''), now())
+        on conflict (business_id, key) do update set value = excluded.value, updated_at = excluded.updated_at;
+      else
+        skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'unknown op'); continue;
+      end if;
+      if line is not null and p_kind in ('contact', 'job') then
+        insert into public.activity_log (record_kind, record_id, actor, text, manual) values (p_kind, p_id, actor, pg_catalog.left(line, 300), false);
+      end if;
+      applied := applied || pg_catalog.jsonb_build_object('i', i, 'op', o);
+    exception when others then
+      skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', pg_catalog.left(sqlerrm, 200));
+    end;
+  end loop;
+  return pg_catalog.jsonb_build_object('ok', true, 'applied', applied, 'skipped', skipped);
+end $$;
+
+create or replace function public.automation_capture_contacts() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare b text; w text[]; tx text; id text; chg jsonb := '[]'::jsonb; x jsonb; t text; bk text; st text;
+begin
+  begin
+    if pg_catalog.current_setting('automation.capture_test_error', true) = 'on' then raise exception 'forced capture error (staging check)'; end if;
+    b := public.current_business_id();
+    select pg_catalog.array_agg(wt.event_type) into w from public.automation_wanted wt where wt.business_id = b;
+    if w is null then return null; end if;
+    tx := pg_catalog.txid_current()::text; id := new.id::text;
+    if tg_op = 'UPDATE' and 'contact_changed' = any(w) then
+      if new.full_name is distinct from old.full_name then chg := chg || pg_catalog.jsonb_build_object('field', 'full_name', 'old', pg_catalog.left(old.full_name::text, 200), 'new', pg_catalog.left(new.full_name::text, 200)); end if;
+      if new.phone is distinct from old.phone then chg := chg || pg_catalog.jsonb_build_object('field', 'phone', 'old', pg_catalog.left(old.phone::text, 200), 'new', pg_catalog.left(new.phone::text, 200)); end if;
+      if new.email is distinct from old.email then chg := chg || pg_catalog.jsonb_build_object('field', 'email', 'old', pg_catalog.left(old.email::text, 200), 'new', pg_catalog.left(new.email::text, 200)); end if;
+      if new.postcode is distinct from old.postcode then chg := chg || pg_catalog.jsonb_build_object('field', 'postcode', 'old', pg_catalog.left(old.postcode::text, 200), 'new', pg_catalog.left(new.postcode::text, 200)); end if;
+      if new.division is distinct from old.division then chg := chg || pg_catalog.jsonb_build_object('field', 'division', 'old', pg_catalog.left(old.division::text, 200), 'new', pg_catalog.left(new.division::text, 200)); end if;
+      if new.source is distinct from old.source then chg := chg || pg_catalog.jsonb_build_object('field', 'source', 'old', pg_catalog.left(old.source::text, 200), 'new', pg_catalog.left(new.source::text, 200)); end if;
+      if new.next_follow_up is distinct from old.next_follow_up then chg := chg || pg_catalog.jsonb_build_object('field', 'next_follow_up', 'old', pg_catalog.left(old.next_follow_up::text, 200), 'new', pg_catalog.left(new.next_follow_up::text, 200)); end if;
+      if new.booked_for is distinct from old.booked_for then chg := chg || pg_catalog.jsonb_build_object('field', 'booked_for', 'old', pg_catalog.left(old.booked_for::text, 200), 'new', pg_catalog.left(new.booked_for::text, 200)); end if;
+      if new.estimated_value is distinct from old.estimated_value then chg := chg || pg_catalog.jsonb_build_object('field', 'quote_amount', 'old', pg_catalog.left(old.estimated_value::text, 200), 'new', pg_catalog.left(new.estimated_value::text, 200)); end if;
+      if new.lost_reason is distinct from old.lost_reason then chg := chg || pg_catalog.jsonb_build_object('field', 'lost_reason', 'old', pg_catalog.left(old.lost_reason::text, 200), 'new', pg_catalog.left(new.lost_reason::text, 200)); end if;
+      for x in select e.value from pg_catalog.jsonb_array_elements(chg) as e loop
+        perform public.automation_capture_put(b, 'contact_changed', id || ':chg:' || (x ->> 'field') || ':' || tx, 'contact', id, new.id, x);
+      end loop;
+    end if;
+    if 'contact_tag' = any(w) then
+      for t in select a.x from pg_catalog.unnest(coalesce(new.tags, '{}'::text[])) as a(x) where a.x is not null and a.x <> ''
+               except select o.x from pg_catalog.unnest(case when tg_op = 'UPDATE' then coalesce(old.tags, '{}'::text[]) else '{}'::text[] end) as o(x) loop
+        perform public.automation_capture_put(b, 'contact_tag', id || ':tag:+:' || pg_catalog.left(t, 100) || ':' || tx, 'contact', id, new.id,
+                                              pg_catalog.jsonb_build_object('tag', pg_catalog.left(t, 100), 'action', 'added'));
+      end loop;
+      if tg_op = 'UPDATE' then
+        for t in select o.x from pg_catalog.unnest(coalesce(old.tags, '{}'::text[])) as o(x) where o.x is not null and o.x <> ''
+                 except select a.x from pg_catalog.unnest(coalesce(new.tags, '{}'::text[])) as a(x) loop
+          perform public.automation_capture_put(b, 'contact_tag', id || ':tag:-:' || pg_catalog.left(t, 100) || ':' || tx, 'contact', id, new.id,
+                                                pg_catalog.jsonb_build_object('tag', pg_catalog.left(t, 100), 'action', 'removed'));
+        end loop;
+      end if;
+    end if;
+    if tg_op = 'INSERT' then bk := case when new.booked_for is not null then 'booked' end;
+    elsif new.booked_for is distinct from old.booked_for then
+      bk := case when old.booked_for is null then 'booked' when new.booked_for is null then 'cancelled' else 'rescheduled' end;
+    end if;
+    if bk = 'booked' and 'job_booked' = any(w) then
+      perform public.automation_capture_put(b, 'job_booked', id || ':booked:' || (pg_catalog.to_jsonb(new.booked_for) #>> '{}'), 'contact', id, new.id,
+                                            pg_catalog.jsonb_build_object('booked_for', pg_catalog.to_jsonb(new.booked_for) #>> '{}'));
+    end if;
+    if bk is not null and 'booking_status' = any(w) then
+      perform public.automation_capture_put(b, 'booking_status', id || ':bk:' || bk || ':' || tx, 'contact', id, new.id,
+        pg_catalog.jsonb_build_object('status', bk, 'booked_for', pg_catalog.to_jsonb(new.booked_for) #>> '{}',
+                                      'old_booked_for', case when tg_op = 'UPDATE' then pg_catalog.to_jsonb(old.booked_for) #>> '{}' end));
+    end if;
+    if tg_op = 'UPDATE' and new.status is distinct from old.status and 'lead_status' = any(w) then
+      st := case when new.status::text = public.automation_catalog_key('stageWon', 'Won') then 'won'
+                 when new.status::text = public.automation_catalog_key('stageLost', 'Lost') then 'lost' else 'open' end;
+      perform public.automation_capture_put(b, 'lead_status', id || ':st:' || pg_catalog.left(coalesce(new.status::text, ''), 60) || ':' || tx, 'contact', id, new.id,
+        pg_catalog.jsonb_build_object('stage', pg_catalog.left(new.status::text, 200), 'from', pg_catalog.left(old.status::text, 200), 'status', st));
+    end if;
+    -- Note added (G2.3): a note id on the card that was not there before (the lead card and automation_apply both add
+    -- {id, text, by, at} to customer_notes through contact_notes_append; a new lead's first note counts too)
+    if 'note_added' = any(w) then
+      for x in select e.value from pg_catalog.jsonb_array_elements(case when pg_catalog.jsonb_typeof(new.customer_notes) = 'array' then new.customer_notes else '[]'::jsonb end) as e
+                where pg_catalog.jsonb_typeof(e.value) = 'object' and coalesce(e.value ->> 'id', '') <> ''
+                  and not exists (select 1 from pg_catalog.jsonb_array_elements(case when tg_op = 'UPDATE' and pg_catalog.jsonb_typeof(old.customer_notes) = 'array'
+                                                                                     then old.customer_notes else '[]'::jsonb end) as o2
+                                   where o2.value ->> 'id' = e.value ->> 'id') loop
+        perform public.automation_capture_put(b, 'note_added', id || ':note:' || pg_catalog.left(x ->> 'id', 128), 'contact', id, new.id,
+          pg_catalog.jsonb_build_object('note_id', pg_catalog.left(x ->> 'id', 128), 'text', pg_catalog.left(x ->> 'text', 200), 'by', pg_catalog.left(x ->> 'by', 120)));
+      end loop;
+    end if;
+    if 'estimates' = any(w) and coalesce(new.estimated_value, 0) > 0
+       and (tg_op = 'INSERT' or coalesce(old.estimated_value, 0) <= 0) then
+      perform public.automation_capture_put(b, 'estimates', id || ':quote:' || tx, 'contact', id, new.id, pg_catalog.jsonb_build_object('status', 'sent'));
+    end if;
+  exception when others then
+    begin
+      update public.automation_state set capture_errors = capture_errors + 1, capture_error_last = pg_catalog.left(tg_table_name || ': ' || sqlerrm, 200),
+             capture_error_at = now()
+       where business_id = (select z.business_id from public.automation_state z where z.business_id = coalesce(b, public.current_business_id())
+                              for update skip locked);
+    exception when others then null;
+    end;
+  end;
+  return null;
+end $$;
+
+revoke all on function public.contact_tags_merge(text[], text[], text[]) from public, anon;
+revoke all on function public.contact_notes_append(jsonb, jsonb, integer) from public, anon;
+revoke all on function public.contact_tags_edit(uuid, text[], text[]) from public, anon;
+revoke all on function public.contact_note_add(uuid, jsonb) from public, anon;
+revoke all on function public.contact_note_remove(uuid, text) from public, anon;
+grant execute on function public.contact_tags_merge(text[], text[], text[]) to authenticated, service_role;
+grant execute on function public.contact_notes_append(jsonb, jsonb, integer) to authenticated, service_role;
+grant execute on function public.contact_tags_edit(uuid, text[], text[]) to authenticated, service_role;
+grant execute on function public.contact_note_add(uuid, jsonb) to authenticated, service_role;
+grant execute on function public.contact_note_remove(uuid, text) to authenticated, service_role;
+revoke all on function public.automation_hook_hit(text, uuid, timestamptz, integer) from public, anon, authenticated;
+grant execute on function public.automation_hook_hit(text, uuid, timestamptz, integer) to service_role;
+revoke all on function public.automation_apply(text, text, text, text, jsonb) from public, anon, authenticated;
+grant execute on function public.automation_apply(text, text, text, text, jsonb) to service_role;
+revoke all on function public.automation_capture_contacts() from public, anon, authenticated;
+commit;
+-- Check after (read-only; the staging checks 17–18 do the writes, all undone):
+--   select public.contact_tags_merge(array['VIP', 'Callback'], array['vip', 'Complaint'], array['callback']);   -- {VIP,Complaint}
+--   select p.proname, p.prosecdef from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'
+--    and p.proname in ('contact_tags_edit', 'contact_note_add', 'contact_note_remove', 'automation_hook_hit') order by 1;
+--     -- three contact_* false (security invoker), automation_hook_hit true
+--   select has_function_privilege('authenticated', 'public.contact_tags_edit(uuid, text[], text[])', 'EXECUTE'),
+--          has_function_privilege('anon', 'public.contact_tags_edit(uuid, text[], text[])', 'EXECUTE'),
+--          has_function_privilege('authenticated', 'public.automation_hook_hit(text, uuid, timestamptz, integer)', 'EXECUTE');   -- true, false, false
+--   select pg_get_functiondef('public.automation_apply(text, text, text, text, jsonb)'::regprocedure) ~ 'contact_notes_append';   -- true
+--   select pg_get_functiondef('public.automation_capture_contacts()'::regprocedure) ~ 'note_added';                        -- true
+--   select capture_errors from public.automation_state;   -- unchanged (no new capture failures after an app save)
+--
+-- ROLLBACK (G2.3 only; run by hand). Part 1's automation_apply and automation_capture_contacts come back exactly as Part 1
+-- wrote them (copied below from PART 1 of this file), the new functions go. The app that calls contact_tags_edit /
+-- contact_note_add / contact_note_remove falls back to its whole-list save by itself when they are missing.
+-- begin;
+-- create or replace function public.automation_apply(p_business text, p_cause text, p_kind text, p_id text, p_ops jsonb)
+-- returns jsonb language plpgsql volatile security definer set search_path = ''
+-- as $$
+-- declare
+--   m text[]; run uuid; aut uuid; depth integer; nm text; actor text; op jsonb; o text; i integer := 0; line text;
+--   applied jsonb := '[]'::jsonb; skipped jsonb := '[]'::jsonb; cid uuid; cur record; col text; typ text; v text; addt text[]; remt text[];
+--   tgt text; sct text; tid text; ch text; stamp text;
+--   allowed constant text[] := array['full_name', 'postcode', 'division', 'source', 'next_follow_up', 'booked_for', 'quote_amount', 'lost_reason'];
+-- begin
+--   m := pg_catalog.regexp_match(coalesce(p_cause, ''),
+--          '^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):([0-9]{1,3}):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$');
+--   if m is null then raise exception 'automation_apply needs p_cause = <run>:<depth>:<automation>'; end if;
+--   run := m[1]::uuid; depth := m[2]::integer; aut := m[3]::uuid;
+--   if pg_catalog.jsonb_typeof(p_ops) is distinct from 'array' or pg_catalog.jsonb_array_length(p_ops) > 20 then
+--     return pg_catalog.jsonb_build_object('ok', false, 'reason', 'ops must be a list of at most 20');
+--   end if;
+--   select a.name into nm from public.automations a where a.id = aut and a.business_id = p_business;
+--   if nm is null then return pg_catalog.jsonb_build_object('ok', false, 'reason', 'automation not found'); end if;
+--   actor := pg_catalog.left('Automation: ' || nm, 120);
+--   perform pg_catalog.set_config('automation.cause', p_cause, true);
+--   if p_kind = 'contact' then
+--     cid := p_id::uuid;
+--     select c.id, c.status into cur from public.contacts c where c.id = cid for update;
+--     if not found then return pg_catalog.jsonb_build_object('ok', false, 'reason', 'record deleted'); end if;
+--   end if;
+--   for op in select e.value from pg_catalog.jsonb_array_elements(p_ops) as e loop
+--     i := i + 1; o := coalesce(op ->> 'op', ''); line := null;
+--     begin
+--       if o in ('set', 'tags', 'note', 'optout', 'read', 'stage', 'task') and cid is null then
+--         skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'wrong_kind'); continue;
+--       end if;
+--       if o = 'set' then
+--         col := op ->> 'field';
+--         if col is null or not (col = any(allowed)) then
+--           skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'field not allowed'); continue;
+--         end if;
+--         if col = 'quote_amount' then col := 'estimated_value'; end if;
+--         select pg_catalog.format_type(a.atttypid, a.atttypmod) into typ from pg_catalog.pg_attribute a
+--          where a.attrelid = 'public.contacts'::regclass and a.attname = col and not a.attisdropped;
+--         v := nullif(pg_catalog.left(op ->> 'value', 500), '');
+--         execute pg_catalog.format('update public.contacts set %I = cast($1 as %s) where id = $2', col, typ) using v, cid;
+--         line := 'Changed ' || (op ->> 'field') || ' to "' || coalesce(pg_catalog.left(v, 80), '') || '"';
+--       elsif o = 'tags' then
+--         addt := array(select pg_catalog.left(pg_catalog.btrim(x), 60) from pg_catalog.jsonb_array_elements_text(coalesce(op -> 'add', '[]'::jsonb)) as x where pg_catalog.btrim(x) <> '');
+--         remt := array(select pg_catalog.btrim(x) from pg_catalog.jsonb_array_elements_text(coalesce(op -> 'remove', '[]'::jsonb)) as x);
+--         update public.contacts t set tags = array(
+--             select u.x from pg_catalog.unnest(coalesce(t.tags, '{}'::text[]) || addt) with ordinality as u(x, n)
+--              where u.x is not null and not (u.x = any(remt)) group by u.x order by min(u.n))
+--          where t.id = cid;
+--         line := 'Tags' || case when pg_catalog.cardinality(addt) > 0 then ' added: ' || pg_catalog.array_to_string(addt, ', ') else '' end
+--                        || case when pg_catalog.cardinality(remt) > 0 then ' removed: ' || pg_catalog.array_to_string(remt, ', ') else '' end;
+--       elsif o = 'note' then
+--         v := pg_catalog.left(pg_catalog.btrim(coalesce(op ->> 'text', '')), 1000);
+--         if v = '' then skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'empty note'); continue; end if;
+--         update public.contacts t set notes = case when coalesce(t.notes, '') = '' then v else t.notes || E'\n' || v end where t.id = cid;
+--         line := 'Note added: ' || pg_catalog.left(v, 200);
+--       elsif o = 'optout' then
+--         ch := coalesce(nullif(op ->> 'channel', ''), 'all');
+--         if not exists (select 1 from public.customer_opt_outs x where x.contact_id = cid and x.channel = ch) then
+--           insert into public.customer_opt_outs (business_id, contact_id, channel, reason) values (p_business, cid, ch, actor);
+--         end if;
+--         line := 'Automatic messages stopped (' || ch || ')';
+--       elsif o = 'read' then
+--         select pg_catalog.format_type(a.atttypid, a.atttypmod) into typ from pg_catalog.pg_attribute a
+--          where a.attrelid = 'public.contacts'::regclass and a.attname = 'last_read_at' and not a.attisdropped;
+--         stamp := case when typ in ('text', 'character varying') then 'to_char(now() at time zone ''UTC'', ''YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'')' else 'now()' end;
+--         execute pg_catalog.format('update public.contacts set last_read_at = %s where id = $1', stamp) using cid;
+--         line := 'Conversation marked as read';
+--       elsif o = 'stage' then
+--         tgt := nullif(pg_catalog.btrim(coalesce(op ->> 'to', '')), '');
+--         if tgt is null then skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'no stage'); continue; end if;
+--         if tgt = public.automation_catalog_key('stageWon', 'Won') then
+--           skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'A lead is won when its job is entered'); continue;
+--         end if;
+--         if cur.status::text is not distinct from tgt then
+--           skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'already in that stage'); continue;
+--         end if;
+--         select pg_catalog.format_type(a.atttypid, a.atttypmod) into typ from pg_catalog.pg_attribute a
+--          where a.attrelid = 'public.contacts'::regclass and a.attname = 'stage_changed_at' and not a.attisdropped;
+--         stamp := case when typ in ('text', 'character varying') then 'to_char(now() at time zone ''UTC'', ''YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'')' else 'now()' end;
+--         execute pg_catalog.format('update public.contacts set status = $1, stage_changed_at = %s, lost_reason = case when $1 = $3 and $4 is not null then $4 else lost_reason end'
+--                                   || ' where id = $2 returning to_jsonb(stage_changed_at) #>> ''{}''', stamp)
+--           into sct using tgt, cid, public.automation_catalog_key('stageLost', 'Lost'), nullif(pg_catalog.left(op ->> 'lost_reason', 200), '');
+--         if exists (select 1 from public.automation_wanted wt where wt.business_id = p_business and wt.event_type = 'stage') then
+--           insert into public.automation_events (business_id, type, event_key, record_kind, record_id, contact_id, at, available_at, ctx, source,
+--                                                 cause_run_id, cause_automation_id, chain_depth)
+--           values (p_business, 'stage', pg_catalog.left(cid::text || ':' || tgt || ':' || sct, 200), 'contact', cid::text, cid, now(),
+--                   now() + pg_catalog.make_interval(secs => public.automation_settle_seconds('stage')), pg_catalog.jsonb_build_object('stage', tgt),
+--                   'engine', run, aut, least(depth + 1, 100))
+--           on conflict (business_id, type, event_key) do nothing;
+--         end if;
+--         cur.status := tgt;
+--         line := 'Moved to ' || tgt;
+--       elsif o = 'task' then
+--         if nullif(pg_catalog.btrim(coalesce(op ->> 'title', '')), '') is null or nullif(op ->> 'board', '') is null then
+--           skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'missing details'); continue;
+--         end if;
+--         insert into public.tasks (board, title, status, due, notes, client, contact_id, assignees, assigned_to, category, priority, created_by)
+--         select op ->> 'board', pg_catalog.left(op ->> 'title', 200), coalesce(nullif(op ->> 'status', ''), 'Not Started'), nullif(op ->> 'due', '')::date,
+--                nullif(pg_catalog.left(op ->> 'notes', 2000), ''), c.full_name, cid,
+--                array(select pg_catalog.jsonb_array_elements_text(coalesce(op -> 'assignees', '[]'::jsonb))), nullif(op ->> 'assigned_to', ''),
+--                nullif(op ->> 'category', ''), nullif(op ->> 'priority', ''), actor
+--           from public.contacts c where c.id = cid
+--         returning id::text into tid;
+--         line := 'Task added: ' || pg_catalog.left(op ->> 'title', 120);
+--       elsif o = 'comment' then
+--         v := pg_catalog.left(pg_catalog.btrim(coalesce(op ->> 'text', '')), 1000);
+--         if v = '' then skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'empty comment'); continue; end if;
+--         insert into public.activity_log (record_kind, record_id, actor, text, manual) values (p_kind, p_id, actor, v, false);
+--       elsif o = 'custom' then
+--         insert into public.automation_custom_values as cv (business_id, key, value, updated_at)
+--         values (p_business, op ->> 'key', coalesce(pg_catalog.left(op ->> 'value', 500), ''), now())
+--         on conflict (business_id, key) do update set value = excluded.value, updated_at = excluded.updated_at;
+--       else
+--         skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', 'unknown op'); continue;
+--       end if;
+--       if line is not null then
+--         insert into public.activity_log (record_kind, record_id, actor, text, manual) values (p_kind, p_id, actor, pg_catalog.left(line, 300), false);
+--       end if;
+--       applied := applied || pg_catalog.jsonb_build_object('i', i, 'op', o);
+--     exception when others then
+--       skipped := skipped || pg_catalog.jsonb_build_object('i', i, 'op', o, 'reason', pg_catalog.left(sqlerrm, 200));
+--     end;
+--   end loop;
+--   return pg_catalog.jsonb_build_object('ok', true, 'applied', applied, 'skipped', skipped);
+-- end $$;
+-- create or replace function public.automation_capture_contacts() returns trigger
+-- language plpgsql security definer set search_path = ''
+-- as $$
+-- declare b text; w text[]; tx text; id text; chg jsonb := '[]'::jsonb; x jsonb; t text; bk text; st text;
+-- begin
+--   begin
+--     if pg_catalog.current_setting('automation.capture_test_error', true) = 'on' then raise exception 'forced capture error (staging check)'; end if;
+--     b := public.current_business_id();
+--     select pg_catalog.array_agg(wt.event_type) into w from public.automation_wanted wt where wt.business_id = b;
+--     if w is null then return null; end if;
+--     tx := pg_catalog.txid_current()::text; id := new.id::text;
+--     if tg_op = 'UPDATE' and 'contact_changed' = any(w) then
+--       if new.full_name is distinct from old.full_name then chg := chg || pg_catalog.jsonb_build_object('field', 'full_name', 'old', pg_catalog.left(old.full_name::text, 200), 'new', pg_catalog.left(new.full_name::text, 200)); end if;
+--       if new.phone is distinct from old.phone then chg := chg || pg_catalog.jsonb_build_object('field', 'phone', 'old', pg_catalog.left(old.phone::text, 200), 'new', pg_catalog.left(new.phone::text, 200)); end if;
+--       if new.email is distinct from old.email then chg := chg || pg_catalog.jsonb_build_object('field', 'email', 'old', pg_catalog.left(old.email::text, 200), 'new', pg_catalog.left(new.email::text, 200)); end if;
+--       if new.postcode is distinct from old.postcode then chg := chg || pg_catalog.jsonb_build_object('field', 'postcode', 'old', pg_catalog.left(old.postcode::text, 200), 'new', pg_catalog.left(new.postcode::text, 200)); end if;
+--       if new.division is distinct from old.division then chg := chg || pg_catalog.jsonb_build_object('field', 'division', 'old', pg_catalog.left(old.division::text, 200), 'new', pg_catalog.left(new.division::text, 200)); end if;
+--       if new.source is distinct from old.source then chg := chg || pg_catalog.jsonb_build_object('field', 'source', 'old', pg_catalog.left(old.source::text, 200), 'new', pg_catalog.left(new.source::text, 200)); end if;
+--       if new.next_follow_up is distinct from old.next_follow_up then chg := chg || pg_catalog.jsonb_build_object('field', 'next_follow_up', 'old', pg_catalog.left(old.next_follow_up::text, 200), 'new', pg_catalog.left(new.next_follow_up::text, 200)); end if;
+--       if new.booked_for is distinct from old.booked_for then chg := chg || pg_catalog.jsonb_build_object('field', 'booked_for', 'old', pg_catalog.left(old.booked_for::text, 200), 'new', pg_catalog.left(new.booked_for::text, 200)); end if;
+--       if new.estimated_value is distinct from old.estimated_value then chg := chg || pg_catalog.jsonb_build_object('field', 'quote_amount', 'old', pg_catalog.left(old.estimated_value::text, 200), 'new', pg_catalog.left(new.estimated_value::text, 200)); end if;
+--       if new.lost_reason is distinct from old.lost_reason then chg := chg || pg_catalog.jsonb_build_object('field', 'lost_reason', 'old', pg_catalog.left(old.lost_reason::text, 200), 'new', pg_catalog.left(new.lost_reason::text, 200)); end if;
+--       for x in select e.value from pg_catalog.jsonb_array_elements(chg) as e loop
+--         perform public.automation_capture_put(b, 'contact_changed', id || ':chg:' || (x ->> 'field') || ':' || tx, 'contact', id, new.id, x);
+--       end loop;
+--     end if;
+--     if 'contact_tag' = any(w) then
+--       for t in select a.x from pg_catalog.unnest(coalesce(new.tags, '{}'::text[])) as a(x) where a.x is not null and a.x <> ''
+--                except select o.x from pg_catalog.unnest(case when tg_op = 'UPDATE' then coalesce(old.tags, '{}'::text[]) else '{}'::text[] end) as o(x) loop
+--         perform public.automation_capture_put(b, 'contact_tag', id || ':tag:+:' || pg_catalog.left(t, 100) || ':' || tx, 'contact', id, new.id,
+--                                               pg_catalog.jsonb_build_object('tag', pg_catalog.left(t, 100), 'action', 'added'));
+--       end loop;
+--       if tg_op = 'UPDATE' then
+--         for t in select o.x from pg_catalog.unnest(coalesce(old.tags, '{}'::text[])) as o(x) where o.x is not null and o.x <> ''
+--                  except select a.x from pg_catalog.unnest(coalesce(new.tags, '{}'::text[])) as a(x) loop
+--           perform public.automation_capture_put(b, 'contact_tag', id || ':tag:-:' || pg_catalog.left(t, 100) || ':' || tx, 'contact', id, new.id,
+--                                                 pg_catalog.jsonb_build_object('tag', pg_catalog.left(t, 100), 'action', 'removed'));
+--         end loop;
+--       end if;
+--     end if;
+--     if tg_op = 'INSERT' then bk := case when new.booked_for is not null then 'booked' end;
+--     elsif new.booked_for is distinct from old.booked_for then
+--       bk := case when old.booked_for is null then 'booked' when new.booked_for is null then 'cancelled' else 'rescheduled' end;
+--     end if;
+--     if bk = 'booked' and 'job_booked' = any(w) then
+--       perform public.automation_capture_put(b, 'job_booked', id || ':booked:' || (pg_catalog.to_jsonb(new.booked_for) #>> '{}'), 'contact', id, new.id,
+--                                             pg_catalog.jsonb_build_object('booked_for', pg_catalog.to_jsonb(new.booked_for) #>> '{}'));
+--     end if;
+--     if bk is not null and 'booking_status' = any(w) then
+--       perform public.automation_capture_put(b, 'booking_status', id || ':bk:' || bk || ':' || tx, 'contact', id, new.id,
+--         pg_catalog.jsonb_build_object('status', bk, 'booked_for', pg_catalog.to_jsonb(new.booked_for) #>> '{}',
+--                                       'old_booked_for', case when tg_op = 'UPDATE' then pg_catalog.to_jsonb(old.booked_for) #>> '{}' end));
+--     end if;
+--     if tg_op = 'UPDATE' and new.status is distinct from old.status and 'lead_status' = any(w) then
+--       st := case when new.status::text = public.automation_catalog_key('stageWon', 'Won') then 'won'
+--                  when new.status::text = public.automation_catalog_key('stageLost', 'Lost') then 'lost' else 'open' end;
+--       perform public.automation_capture_put(b, 'lead_status', id || ':st:' || pg_catalog.left(coalesce(new.status::text, ''), 60) || ':' || tx, 'contact', id, new.id,
+--         pg_catalog.jsonb_build_object('stage', pg_catalog.left(new.status::text, 200), 'from', pg_catalog.left(old.status::text, 200), 'status', st));
+--     end if;
+--     if 'estimates' = any(w) and coalesce(new.estimated_value, 0) > 0
+--        and (tg_op = 'INSERT' or coalesce(old.estimated_value, 0) <= 0) then
+--       perform public.automation_capture_put(b, 'estimates', id || ':quote:' || tx, 'contact', id, new.id, pg_catalog.jsonb_build_object('status', 'sent'));
+--     end if;
+--   exception when others then
+--     begin
+--       update public.automation_state set capture_errors = capture_errors + 1, capture_error_last = pg_catalog.left(tg_table_name || ': ' || sqlerrm, 200),
+--              capture_error_at = now()
+--        where business_id = (select z.business_id from public.automation_state z where z.business_id = coalesce(b, public.current_business_id())
+--                               for update skip locked);
+--     exception when others then null;
+--     end;
+--   end;
+--   return null;
+-- end $$;
+-- revoke all on function public.automation_apply(text, text, text, text, jsonb) from public, anon, authenticated;
+-- grant execute on function public.automation_apply(text, text, text, text, jsonb) to service_role;
+-- revoke all on function public.automation_capture_contacts() from public, anon, authenticated;
+-- drop function if exists public.automation_hook_hit(text, uuid, timestamptz, integer);
+-- drop function if exists public.contact_note_remove(uuid, text);
+-- drop function if exists public.contact_note_add(uuid, jsonb);
+-- drop function if exists public.contact_tags_edit(uuid, text[], text[]);
+-- drop function if exists public.contact_notes_append(jsonb, jsonb, integer);
+-- drop function if exists public.contact_tags_merge(text[], text[], text[]);
+-- commit;
+-- Check after the rollback: select to_regprocedure('public.contact_tags_edit(uuid, text[], text[])') is null;   -- true
+--   select pg_get_functiondef('public.automation_apply(text, text, text, text, jsonb)'::regprocedure) ~ 'set notes = case';   -- true
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- END PART 2 · G2.3
+
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- PART 2 · G2.4 (the guards on the doc; save, publish and migrate through the function) — design §2.9 Part 2, §3.13,
+-- §3.16, §8.2 item 24. Needs: Part 1 applied, and the phase-2 function WITH THE API SECTION deployed first (it is the
+-- only writer of definition / settings / publish from now on; the old editor saves through it once the app adapter is
+-- pushed). Independent of step E and of G2.3 (any order among them; the RUNBOOK §12 order is the safe one).
+-- What it does (one transaction):
+--   automation_action_audience(type)      the audience of every action type (= the engine's WF_ACTIONS; a test compares)
+--   automation_guarded_channels(def)      the guarded types a doc uses: customer + external actions, and every type or
+--                                         kind this database does not know (counted as customer) — on EVERY node, also a
+--                                         paused or unconnected one
+--   automation_guarded_channels_v1(steps) the same for a phase-4 row (email → send_email, text → send_sms)
+--   automation_node_ports / automation_def_shape / automation_arm_key   the shape key and the arm key (design §2.8; the
+--                                         engine's defShape / armKey, compared as jsonb; the staging check runs every
+--                                         fixtures/shape.json pair through them)
+--   automations_guard (replaced)          v2 rules (below); the phase-4 rules are kept for rows without a doc
+--   automations_customer_off_guard        its TRIGGER dropped (the v2 guard does the same for both kinds of row)
+--   automations_after (new AFTER UPDATE)  a new version, a switch-off or a delete stops what waits at once: status
+--                                         cancelled + exit_reason, one 'exit' log row each, their re-entry keys deleted
+--                                         when no other run of the workflow used them (design E6/E55)
+--   automation_save / automation_publish / automation_migrate_row   the function's only content writes (security
+--                                         definer, service role only; they set automation.via = 'fn')
+--   automation_needs_review (replaced)    + the problem codes the daily sweep keeps in list_summary.review
+-- The v2 guard (BEFORE INSERT / UPDATE, the caller's rights):
+--   INSERT: always a Draft (enabled false, armed_at null); version 1, revision 1, enrolled_total 0; origin only user / copy
+--     unless the function writes (automation.via = 'fn'); audience from the guarded types.
+--   UPDATE: business_id never changes; created_by / created_at kept; a write of trigger / steps on an UPGRADED row (a doc
+--     is there) is refused ("This workflow was upgraded: reload the app"); origin, published_at / _by, enrolled_total,
+--     system_key, system_handover_at kept unless the function or the SQL editor writes (current_user is not the app's
+--     role: automation_enroll's counter keeps counting); revision + 1 when the name or the content (definition,
+--     settings, layout, builder) changed — never on a switch, a folder or a re-arm; the migration GUC
+--     (automation.migrating = 'on', set by automation_migrate_row only) keeps version, armed_at, enabled, audience and
+--     updated_at; otherwise: deleted → Draft (+ deleted_by); more guarded types while Published → Draft; a new shape →
+--     version + 1 (on an upgraded row, re-entry legacy_always, also any trigger change: phase 4's rule); armed_at =
+--     now() when switched on, on a new version or a new arm key while Published (null when off); switched_on_at = now()
+--     only when switched on or on a new version (a re-arm keeps it: what waits goes on);
+--     updated_at moves only when something a person changes changed (never on the engine's counters).
+--
+-- Check before (read-only):
+--   select to_regprocedure('public.automations_guard()') is not null, to_regclass('public.automation_versions') is not null,
+--          to_regprocedure('public.automation_save(text, uuid, integer, text, jsonb, jsonb, jsonb, text, text, text, boolean, jsonb, uuid, text)') is null;   -- true, true, true
+--   select tgname from pg_trigger where tgrelid = 'public.automations'::regclass and not tgisinternal order by 1;
+--     -- automations_a_v2_pin, automations_customer_off_guard, automations_guard
+--   select count(*) as rows, count(*) filter (where definition is not null) as with_doc, count(*) filter (where enabled) as published,
+--          count(*) filter (where deleted_at is not null) as deleted from public.automations;               -- with_doc = 0 before migrate
+--   select pg_get_functiondef('public.automations_guard()'::regprocedure) ~ 'automation_steps_shape';    -- true (phase 4's guard)
+--   select status, count(*) from public.automation_runs where status in ('waiting', 'running') group by 1;   -- note (unchanged after)
+--   The live function answers step "migrate" with 403 for a manager (the API section is deployed): RUNBOOK §12.
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+begin;
+set local lock_timeout = '5s';
+do $$
+begin
+  if to_regclass('public.automation_versions') is null or to_regclass('public.automation_enrollment_keys') is null
+     or not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'automations' and column_name = 'definition')
+     or not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'automation_state' and column_name = 'v2_migrated_at') then
+    raise exception 'Part 2 · G2.4 needs Part 1 (definition, automation_versions, v2_migrated_at): run Part 1 first';
+  end if;
+  if to_regprocedure('public.automations_guard()') is null or to_regprocedure('public.automation_steps_shape(jsonb)') is null then
+    raise exception 'Part 2 · G2.4 replaces phase 4''s automations_guard: it is not there (run settings-round2-phase4.sql first)';
+  end if;
+end $$;
+
+-- 0. switched_on_at: the last switch-on or new version (the guard keeps it; null while off). The engine's "switched off
+--    and on again since then" reads it instead of armed_at, which also moves on a re-arm (design §2.8: no cancel). A row
+--    on before this has null until its next write (the guard then takes its armed_at, the moment it was switched on).
+alter table public.automations add column if not exists switched_on_at timestamptz;
+
+-- 1. The audience of each action type: the engine's registry (WF_ACTIONS), one line each. Unknown → null (= guarded).
+create or replace function public.automation_action_audience(p_type text) returns text
+language sql immutable set search_path = ''
+as $$
+  select case p_type
+    when 'update_field' then 'internal'
+    when 'add_tag' then 'internal'
+    when 'remove_tag' then 'internal'
+    when 'assign_user' then 'internal'
+    when 'remove_assigned_user' then 'internal'
+    when 'dnd' then 'internal'
+    when 'add_note' then 'internal'
+    when 'add_task' then 'team'
+    when 'edit_conversation' then 'internal'
+    when 'send_email' then 'customer'
+    when 'send_sms' then 'customer'
+    when 'internal_notification' then 'team'
+    when 'send_review_request' then 'customer'
+    when 'send_live_chat' then 'customer'
+    when 'manual_call' then 'team'
+    when 'manual_sms' then 'team'
+    when 'internal_comment' then 'internal'
+    when 'move_stage' then 'internal'
+    when 'mark_lost' then 'internal'
+    when 'send_invoice' then 'customer'
+    when 'send_estimate' then 'customer'
+    when 'webhook' then 'external'
+    when 'update_custom_value' then 'internal'
+    when 'math' then 'none'
+    when 'ai_agent' then 'none'
+    when 'ai_decision' then 'none'
+    when 'ai_summarize' then 'none'
+    else null end
+$$;
+
+-- 2. The guarded types of a doc (every node, also paused / unconnected; an unknown type or kind counts) and of a phase-4 row.
+create or replace function public.automation_guarded_channels(def jsonb) returns text[]
+language sql immutable set search_path = ''
+as $$
+  select coalesce(pg_catalog.array_agg(x.g order by x.g), '{}'::text[]) from (
+    select distinct case
+             when n.value ->> 'kind' = 'action' then
+               case when coalesce(public.automation_action_audience(n.value ->> 'type'), 'customer') in ('customer', 'external') then coalesce(n.value ->> 'type', '') end
+             when coalesce(n.value ->> 'kind', '') in ('if_else', 'wait', 'goal', 'split', 'goto', 'workflow') then null
+             else coalesce(pg_catalog.nullif(n.value ->> 'type', ''), n.value ->> 'kind', '') end as g
+      from pg_catalog.jsonb_each(case when pg_catalog.jsonb_typeof(def -> 'nodes') = 'object' then def -> 'nodes' else '{}'::jsonb end) as n) x
+   where x.g is not null
+$$;
+create or replace function public.automation_guarded_channels_v1(steps jsonb) returns text[]
+language sql immutable set search_path = ''
+as $$
+  select coalesce(pg_catalog.array_agg(x.g order by x.g), '{}'::text[]) from (
+    select distinct case s ->> 'type' when 'email' then 'send_email' else 'send_sms' end as g
+      from pg_catalog.jsonb_array_elements(case when pg_catalog.jsonb_typeof(steps) = 'array' then steps else '[]'::jsonb end) as s
+     where s ->> 'kind' = 'action' and s ->> 'type' in ('email', 'text')) x
+$$;
+
+-- 3. The shape key and the arm key (design §2.8; the engine's wfPorts / defShape / armKey).
+create or replace function public.automation_node_ports(n jsonb) returns text[]
+language sql immutable set search_path = ''
+as $$
+  select case n ->> 'kind'
+    when 'if_else' then coalesce((select pg_catalog.array_agg(b.v ->> 'id' order by b.o) from pg_catalog.jsonb_array_elements(
+                          case when pg_catalog.jsonb_typeof(n -> 'config' -> 'branches') = 'array' then n -> 'config' -> 'branches' else '[]'::jsonb end) with ordinality as b(v, o)), '{}'::text[]) || array['none']
+    when 'split' then coalesce((select pg_catalog.array_agg(p.v ->> 'id' order by p.o) from pg_catalog.jsonb_array_elements(
+                          case when pg_catalog.jsonb_typeof(n -> 'config' -> 'paths') = 'array' then n -> 'config' -> 'paths' else '[]'::jsonb end) with ordinality as p(v, o)), '{}'::text[])
+    when 'goto' then '{}'::text[]
+    when 'wait' then case when coalesce(n -> 'config' -> 'timeout', 'null'::jsonb) <> 'null'::jsonb and n ->> 'type' in ('reply', 'user_reply', 'conditions')
+                          then array['next', 'timeout'] else array['next'] end
+    when 'workflow' then case when n ->> 'type' = 'remove_from_workflow' and n -> 'config' ->> 'scope' in ('current', 'all') then '{}'::text[] else array['next'] end
+    else array['next'] end
+$$;
+create or replace function public.automation_def_shape(def jsonb) returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object('entry', coalesce(def -> 'entry', 'null'::jsonb), 'nodes', coalesce((
+    select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_array(e.key, coalesce(e.value -> 'kind', 'null'::jsonb), coalesce(e.value -> 'type', 'null'::jsonb),
+             coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_array(p.port, coalesce(e.value -> 'out' -> p.port, 'null'::jsonb)) order by p.o)
+                         from pg_catalog.unnest(public.automation_node_ports(e.value)) with ordinality as p(port, o)), '[]'::jsonb),
+             case when e.value ->> 'kind' = 'if_else' and pg_catalog.jsonb_typeof(e.value -> 'config' -> 'branches') = 'array'
+                  then coalesce((select pg_catalog.jsonb_agg(coalesce(b.v -> 'id', 'null'::jsonb) order by b.o) from pg_catalog.jsonb_array_elements(e.value -> 'config' -> 'branches') with ordinality as b(v, o)), '[]'::jsonb)
+                  else 'null'::jsonb end,
+             case when e.value ->> 'kind' = 'split' and pg_catalog.jsonb_typeof(e.value -> 'config' -> 'paths') = 'array'
+                  then coalesce((select pg_catalog.jsonb_agg(coalesce(p.v -> 'id', 'null'::jsonb) order by p.o) from pg_catalog.jsonb_array_elements(e.value -> 'config' -> 'paths') with ordinality as p(v, o)), '[]'::jsonb)
+                  else 'null'::jsonb end,
+             case when e.value ->> 'kind' = 'wait' then pg_catalog.to_jsonb(coalesce(e.value -> 'config' -> 'timeout', 'null'::jsonb) <> 'null'::jsonb) else 'null'::jsonb end,
+             case when e.value ->> 'kind' = 'goto' then coalesce(e.value -> 'config' -> 'target', 'null'::jsonb) else 'null'::jsonb end,
+             case when e.value ->> 'kind' = 'wait' and e.value ->> 'type' in ('date', 'scheduled') then coalesce(e.value -> 'config' -> 'gotoStep', 'null'::jsonb) else 'null'::jsonb end)
+           order by e.key collate "C")
+      from pg_catalog.jsonb_each(case when pg_catalog.jsonb_typeof(def -> 'nodes') = 'object' then def -> 'nodes' else '{}'::jsonb end) as e), '[]'::jsonb))
+$$;
+-- settings as the function stores them (normWfSettings: the app's roles can't write settings, Part 1's pin)
+create or replace function public.automation_arm_key(def jsonb, settings jsonb) returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'triggers', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', coalesce(t.v -> 'id', 'null'::jsonb), 'type', coalesce(t.v -> 'type', 'null'::jsonb),
+                   'filters', coalesce(t.v -> 'filters', 'null'::jsonb),
+                   'config', case when coalesce(t.v -> 'config', 'null'::jsonb) = 'null'::jsonb then '{}'::jsonb else t.v -> 'config' end,
+                   'goto', coalesce(t.v -> 'goto', 'null'::jsonb), 'disabled', pg_catalog.to_jsonb(coalesce(t.v -> 'disabled', 'false'::jsonb) = 'true'::jsonb)) order by t.o)
+                 from pg_catalog.jsonb_array_elements(case when pg_catalog.jsonb_typeof(def -> 'triggers') = 'array' then def -> 'triggers' else '[]'::jsonb end) with ordinality as t(v, o)), '[]'::jsonb),
+    'entry', coalesce(def -> 'entry', 'null'::jsonb),
+    'reentry', pg_catalog.to_jsonb(case when settings ->> 'reentry' in ('off', 'after_exit', 'legacy_always') then settings ->> 'reentry' else 'off' end),
+    'timezone', pg_catalog.to_jsonb(case when settings ->> 'timezone' = 'contact' then 'contact' else 'business' end),
+    'window', case when settings -> 'window' -> 'on' = 'true'::jsonb then settings -> 'window' else '{"on":false}'::jsonb end)
+$$;
+
+-- 4. The guard v2 (replaces phase 4's automations_guard; the same trigger, before insert or update). The phase-4 rules
+--    stay for a row without a doc (version on another trigger or step shape; the customer-channel switch-off).
+create or replace function public.automations_guard() returns trigger
+language plpgsql security invoker set search_path = ''
+as $$
+declare
+  via_fn boolean := coalesce(pg_catalog.current_setting('automation.via', true), '') = 'fn';
+  trusted boolean := via_fn or current_user::text not in ('authenticated', 'anon');
+  migrating boolean := via_fn and coalesce(pg_catalog.current_setting('automation.migrating', true), '') = 'on';
+  g_new text[]; g_old text[]; content boolean; shape_changed boolean; arm_changed boolean;
+begin
+  g_new := case when new.definition is not null then public.automation_guarded_channels(new.definition) else public.automation_guarded_channels_v1(new.steps) end;
+  if auth.uid() is not null then new.updated_by := auth.uid(); end if;
+  if tg_op = 'INSERT' then
+    if auth.uid() is not null then new.created_by := auth.uid(); end if;
+    new.created_at := now();
+    new.updated_at := now();
+    new.version := 1;
+    new.revision := 1;
+    new.enrolled_total := 0;
+    new.enabled := false;                -- always a Draft: switching on is a Publish (the function, with its checks)
+    new.armed_at := null;
+    new.switched_on_at := null;
+    new.published_at := null;
+    new.published_by := null;
+    if not via_fn and new.origin not in ('user', 'copy') then new.origin := 'user'; end if;
+    new.audience := case when pg_catalog.cardinality(g_new) > 0 then 'customer' else 'team' end;
+    return new;
+  end if;
+  if new.business_id is distinct from old.business_id then raise exception 'business_id cannot change'; end if;
+  if old.definition is not null and (new.trigger is distinct from old.trigger or new.steps is distinct from old.steps) then
+    raise exception 'This workflow was upgraded: reload the app';
+  end if;
+  new.created_by := old.created_by;
+  new.created_at := old.created_at;
+  if not trusted then
+    new.origin := old.origin; new.published_at := old.published_at; new.published_by := old.published_by;
+    new.enrolled_total := old.enrolled_total; new.system_key := old.system_key; new.system_handover_at := old.system_handover_at;
+  end if;
+  content := (new.name, new.definition, new.settings, new.layout, new.builder) is distinct from (old.name, old.definition, old.settings, old.layout, old.builder);
+  new.revision := old.revision + case when content then 1 else 0 end;
+  if migrating then
+    new.version := old.version; new.armed_at := old.armed_at; new.enabled := old.enabled; new.audience := old.audience; new.updated_at := old.updated_at;
+    new.switched_on_at := old.switched_on_at;
+    return new;
+  end if;
+  if old.deleted_at is null and new.deleted_at is not null then new.enabled := false; new.deleted_by := auth.uid(); end if;
+  g_old := case when old.definition is not null then public.automation_guarded_channels(old.definition) else public.automation_guarded_channels_v1(old.steps) end;
+  if new.enabled and not (g_new <@ g_old) then new.enabled := false; end if;
+  if new.definition is not null or old.definition is not null then
+    -- a new shape; on an upgraded workflow (re-entry legacy_always: it runs as phase 4) also any trigger change, as
+    -- phase 4's guard made a new version then (what waited stops, "automation changed"; the engine's versionChanged)
+    shape_changed := public.automation_def_shape(new.definition) is distinct from public.automation_def_shape(old.definition)
+                     or (old.definition is not null and new.definition is not null and old.settings ->> 'reentry' = 'legacy_always'
+                         and (public.automation_arm_key(new.definition, new.settings) -> 'triggers')
+                             is distinct from (public.automation_arm_key(old.definition, old.settings) -> 'triggers'));
+    arm_changed := public.automation_arm_key(new.definition, new.settings) is distinct from public.automation_arm_key(old.definition, old.settings);
+  else
+    shape_changed := new.trigger is distinct from old.trigger
+                     or public.automation_steps_shape(new.steps) is distinct from public.automation_steps_shape(old.steps);
+    arm_changed := false;
+  end if;
+  new.version := old.version + case when shape_changed then 1 else 0 end;
+  -- armed_at = the enrolment gate (moves on a switch-on, a new version and a re-arm); switched_on_at = the last
+  -- switch-on or new version only (the engine's "switched off and on again since then": a re-arm never stops a run)
+  if not new.enabled then new.armed_at := null; new.switched_on_at := null;
+  elsif not old.enabled or shape_changed then new.armed_at := now(); new.switched_on_at := now();
+  elsif arm_changed then new.armed_at := now(); new.switched_on_at := coalesce(old.switched_on_at, old.armed_at);
+  else new.armed_at := old.armed_at; new.switched_on_at := coalesce(old.switched_on_at, old.armed_at); end if;
+  new.audience := case when pg_catalog.cardinality(g_new) > 0 then 'customer' else 'team' end;
+  new.updated_at := case when content or (new.enabled, new.deleted_at, new.trigger, new.steps, new.description, new.folder_id, new.template_key)
+                                         is distinct from (old.enabled, old.deleted_at, old.trigger, old.steps, old.description, old.folder_id, old.template_key)
+                         then now() else old.updated_at end;
+  return new;
+end $$;
+revoke all on function public.automations_guard() from public, anon, authenticated;
+-- the v2 guard switches a workflow off when it gets a new customer channel, for both kinds of row
+drop trigger if exists automations_customer_off_guard on public.automations;
+
+-- 5. What waits stops at once on a new version, a switch-off or a delete (design §2.9 Part 2.3). Running runs are caught
+--    by the executor's own check (staleV2). The words are phase 4's, the codes the design's.
+create or replace function public.automations_after() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare why text; words text;
+begin
+  if new.version is distinct from old.version then why := 'automation_changed'; words := 'automation changed';
+  elsif old.deleted_at is null and new.deleted_at is not null then why := 'deleted'; words := 'automation deleted';   -- (a delete also switches it off)
+  elsif old.enabled and not new.enabled then why := 'switched_off'; words := 'switched off';
+  else return null; end if;
+  with c as (
+    update public.automation_runs r set status = 'cancelled', exit_reason = why, reason = words, active_lock = null, lease_until = null,
+           finished_at = now(), updated_at = now()
+     where r.automation_id = new.id and r.status = 'waiting'
+    returning r.id, r.business_id, r.cursor_step, r.record_kind, r.record_id, r.contact_id, r.trigger_id, r.automation_version, r.revision,
+              r.steps_done, r."loop", r.enrollment_key
+  ), l as (
+    insert into public.automation_log (business_id, run_id, step_id, row_kind, status, reason, automation_id, automation_name, record_kind, record_id,
+                                       contact_id, trigger_id, version, revision, seq, "loop", detail, at)
+    select c.business_id, c.id, coalesce(c.cursor_step, 'end'), 'exit', 'removed', words, new.id, new.name, c.record_kind, c.record_id,
+           c.contact_id, c.trigger_id, c.automation_version, c.revision, coalesce(c.steps_done, 0), coalesce(c."loop", 0),
+           pg_catalog.jsonb_build_object('exit_reason', why), now()
+      from c
+    returning 1
+  )
+  delete from public.automation_enrollment_keys k
+   where k.automation_id = new.id and k.enrollment_key in (select c.enrollment_key from c where c.enrollment_key is not null)
+     and not exists (select 1 from public.automation_runs r where r.automation_id = new.id and r.enrollment_key = k.enrollment_key
+                       and r.id not in (select c.id from c));
+  return null;
+end $$;
+revoke all on function public.automations_after() from public, anon, authenticated;
+drop trigger if exists automations_after on public.automations;
+create trigger automations_after after update on public.automations for each row execute function public.automations_after();
+
+-- 6. The function's content writes (service role only). Each sets automation.via = 'fn' for its own transaction.
+-- save: a new Draft (p_id null) or the row at p_expected revision (else 'conflict' with who saved); p_draft = switch to
+-- Draft (an AI edit). → {ok, id, revision, version, enabled, armed_at, created, shape_changed, arm_changed}
+create or replace function public.automation_save(p_business text, p_id uuid, p_expected integer, p_name text, p_definition jsonb, p_settings jsonb,
+  p_layout jsonb, p_builder text, p_origin text, p_reason text, p_draft boolean, p_summary jsonb, p_actor uuid, p_actor_name text)
+returns jsonb language plpgsql volatile security definer set search_path = ''
+as $$
+declare r public.automations%rowtype; o public.automations%rowtype;
+begin
+  perform pg_catalog.set_config('automation.via', 'fn', true);
+  perform pg_catalog.set_config('automation.reason', coalesce(p_reason, 'save'), true);
+  if p_definition is null or pg_catalog.jsonb_typeof(p_definition) <> 'object' or p_definition ->> 'schema' is distinct from '2' then
+    return pg_catalog.jsonb_build_object('ok', false, 'reason', 'definition must be a workflow (schema 2)');
+  end if;
+  if p_id is null then
+    insert into public.automations (business_id, name, enabled, trigger, steps, definition, settings, layout, builder, origin, list_summary,
+                                    created_by, created_by_name, updated_by, updated_by_name)
+    values (p_business, p_name, false, '{}'::jsonb, '[]'::jsonb, p_definition, coalesce(p_settings, '{}'::jsonb), coalesce(p_layout, '{"v":1}'::jsonb),
+            coalesce(p_builder, 'standard'), case when p_origin in ('user', 'copy', 'template', 'ai') then p_origin else 'user' end,
+            coalesce(p_summary, '{}'::jsonb), p_actor, p_actor_name, p_actor, p_actor_name)
+    returning * into r;
+    return pg_catalog.jsonb_build_object('ok', true, 'id', r.id, 'revision', r.revision, 'version', r.version, 'enabled', r.enabled, 'armed_at', r.armed_at,
+                                         'created', true, 'shape_changed', false, 'arm_changed', false);
+  end if;
+  select * into o from public.automations a where a.id = p_id and a.business_id = p_business and a.deleted_at is null for update;
+  if not found then return pg_catalog.jsonb_build_object('ok', false, 'reason', 'not_found'); end if;
+  if o.revision is distinct from p_expected then
+    return pg_catalog.jsonb_build_object('ok', false, 'reason', 'conflict', 'revision', o.revision, 'updated_by_name', o.updated_by_name, 'updated_at', o.updated_at);
+  end if;
+  update public.automations a set name = p_name, definition = p_definition, settings = coalesce(p_settings, '{}'::jsonb), layout = coalesce(p_layout, a.layout),
+         builder = coalesce(p_builder, a.builder), list_summary = coalesce(p_summary, a.list_summary), updated_by = p_actor, updated_by_name = p_actor_name,
+         enabled = case when coalesce(p_draft, false) then false else a.enabled end
+   where a.id = p_id
+  returning * into r;
+  return pg_catalog.jsonb_build_object('ok', true, 'id', r.id, 'revision', r.revision, 'version', r.version, 'enabled', r.enabled, 'armed_at', r.armed_at,
+    'created', false, 'shape_changed', r.version <> o.version,
+    'arm_changed', public.automation_arm_key(r.definition, r.settings) is distinct from public.automation_arm_key(o.definition, o.settings));
+end $$;
+-- publish: on (published_at / _by) or off. Never touches the content (revision unchanged). p_expected = the revision the
+-- function checked (a save in between → 'conflict', nothing changes); null = any (a switch-off).
+drop function if exists public.automation_publish(text, uuid, boolean, uuid, text);
+create or replace function public.automation_publish(p_business text, p_id uuid, p_on boolean, p_expected integer, p_actor uuid, p_actor_name text)
+returns jsonb language plpgsql volatile security definer set search_path = ''
+as $$
+declare r public.automations%rowtype; o public.automations%rowtype;
+begin
+  perform pg_catalog.set_config('automation.via', 'fn', true);
+  perform pg_catalog.set_config('automation.reason', case when p_on then 'publish' else 'unpublish' end, true);
+  select * into o from public.automations a where a.id = p_id and a.business_id = p_business and a.deleted_at is null for update;
+  if not found then return pg_catalog.jsonb_build_object('ok', false, 'reason', 'not_found'); end if;
+  if p_expected is not null and o.revision is distinct from p_expected then
+    return pg_catalog.jsonb_build_object('ok', false, 'reason', 'conflict', 'revision', o.revision, 'updated_by_name', o.updated_by_name, 'updated_at', o.updated_at);
+  end if;
+  update public.automations a set enabled = coalesce(p_on, false),
+         published_at = case when p_on then now() else a.published_at end, published_by = case when p_on then p_actor else a.published_by end,
+         updated_by = p_actor, updated_by_name = p_actor_name
+   where a.id = p_id
+  returning * into r;
+  return pg_catalog.jsonb_build_object('ok', true, 'enabled', r.enabled, 'armed_at', r.armed_at, 'revision', r.revision, 'version', r.version,
+                                       'published_at', r.published_at);
+end $$;
+-- migrate one row (design §3.16): only a row without a doc whose trigger / steps are still the ones the doc was made
+-- from (p_trigger / p_steps: compare-and-set, an old app tab's write in between is never replaced); version, armed_at,
+-- enabled, audience and updated_at kept (the migration GUC), revision + 1. → {migrated, revision, version, enabled}
+drop function if exists public.automation_migrate_row(text, uuid, jsonb, jsonb, jsonb);
+create or replace function public.automation_migrate_row(p_business text, p_id uuid, p_trigger jsonb, p_steps jsonb, p_definition jsonb, p_settings jsonb, p_summary jsonb)
+returns jsonb language plpgsql volatile security definer set search_path = ''
+as $$
+declare r record; got boolean;
+begin
+  if p_definition is null or pg_catalog.jsonb_typeof(p_definition) <> 'object' or p_definition ->> 'schema' is distinct from '2' then
+    return pg_catalog.jsonb_build_object('migrated', false, 'reason', 'definition must be a workflow (schema 2)');
+  end if;
+  perform pg_catalog.set_config('automation.via', 'fn', true);
+  perform pg_catalog.set_config('automation.reason', 'migration', true);
+  perform pg_catalog.set_config('automation.migrating', 'on', true);
+  update public.automations a set definition = p_definition, settings = coalesce(p_settings, '{}'::jsonb), list_summary = coalesce(p_summary, a.list_summary)
+   where a.id = p_id and a.business_id = p_business and a.definition is null
+     and a.trigger is not distinct from p_trigger and a.steps is not distinct from p_steps
+  returning a.revision, a.version, a.enabled into r;
+  got := found;
+  perform pg_catalog.set_config('automation.migrating', 'off', true);
+  if not got then return pg_catalog.jsonb_build_object('migrated', false); end if;
+  return pg_catalog.jsonb_build_object('migrated', true, 'revision', r.revision, 'version', r.version, 'enabled', r.enabled);
+end $$;
+revoke all on function public.automation_save(text, uuid, integer, text, jsonb, jsonb, jsonb, text, text, text, boolean, jsonb, uuid, text) from public, anon, authenticated;
+revoke all on function public.automation_publish(text, uuid, boolean, integer, uuid, text) from public, anon, authenticated;
+revoke all on function public.automation_migrate_row(text, uuid, jsonb, jsonb, jsonb, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.automation_save(text, uuid, integer, text, jsonb, jsonb, jsonb, text, text, text, boolean, jsonb, uuid, text) to service_role;
+grant execute on function public.automation_publish(text, uuid, boolean, integer, uuid, text) to service_role;
+grant execute on function public.automation_migrate_row(text, uuid, jsonb, jsonb, jsonb, jsonb, jsonb) to service_role;
+
+-- 7. Needs review = failed runs since the acknowledgement OR the problem codes the daily sweep keeps (list_summary.review:
+--    an action that became unavailable, a list value or template that is gone). One more column: the codes.
+drop function if exists public.automation_needs_review();
+create function public.automation_needs_review()
+returns table (automation_id uuid, failed_runs bigint, last_failed_at timestamptz, problems jsonb) language sql stable security invoker set search_path = ''
+as $$
+  with f as (
+    select l.automation_id, count(distinct l.run_id)::bigint as n, max(l.at) as last_at
+      from public.automation_log l left join public.automation_reviews v on v.automation_id = l.automation_id
+     where l.business_id = public.current_business_id() and l.automation_id is not null and l.status = 'failed'
+       and l.at >= now() - interval '30 days' and (v.acked_until is null or l.at > v.acked_until)
+     group by l.automation_id
+  ), p as (
+    select a.id as automation_id, a.list_summary -> 'review' -> 'codes' as codes
+      from public.automations a left join public.automation_reviews v on v.automation_id = a.id
+     where a.business_id = public.current_business_id() and a.deleted_at is null
+       and pg_catalog.jsonb_typeof(a.list_summary -> 'review' -> 'codes') = 'array' and pg_catalog.jsonb_array_length(a.list_summary -> 'review' -> 'codes') > 0
+       and (v.acked_until is null or (a.list_summary -> 'review' ->> 'at')::timestamptz > v.acked_until)
+  )
+  select coalesce(f.automation_id, p.automation_id), coalesce(f.n, 0), f.last_at, coalesce(p.codes, '[]'::jsonb)
+    from f full join p on p.automation_id = f.automation_id
+$$;
+revoke all on function public.automation_needs_review() from public, anon;
+grant execute on function public.automation_needs_review() to authenticated, service_role;
+
+revoke all on function public.automation_action_audience(text) from public, anon;
+revoke all on function public.automation_guarded_channels(jsonb) from public, anon;
+revoke all on function public.automation_guarded_channels_v1(jsonb) from public, anon;
+revoke all on function public.automation_node_ports(jsonb) from public, anon;
+revoke all on function public.automation_def_shape(jsonb) from public, anon;
+revoke all on function public.automation_arm_key(jsonb, jsonb) from public, anon;
+grant execute on function public.automation_action_audience(text) to authenticated, service_role;
+grant execute on function public.automation_guarded_channels(jsonb) to authenticated, service_role;
+grant execute on function public.automation_guarded_channels_v1(jsonb) to authenticated, service_role;
+grant execute on function public.automation_node_ports(jsonb) to authenticated, service_role;
+grant execute on function public.automation_def_shape(jsonb) to authenticated, service_role;
+grant execute on function public.automation_arm_key(jsonb, jsonb) to authenticated, service_role;
+commit;
+-- Check after (read-only):
+--   select tgname from pg_trigger where tgrelid = 'public.automations'::regclass and not tgisinternal order by 1;
+--     -- automations_a_v2_pin, automations_after, automations_guard   (automations_customer_off_guard gone)
+--   select public.automation_guarded_channels('{"nodes":{"a":{"kind":"action","type":"send_email"},"b":{"kind":"action","type":"webhook","disabled":true},
+--          "c":{"kind":"action","type":"internal_notification"},"d":{"kind":"teleport"},"e":{"kind":"wait","type":"period"}}}'::jsonb);
+--     -- {send_email,teleport,webhook}
+--   select public.automation_guarded_channels_v1('[{"kind":"action","type":"text"},{"kind":"action","type":"push"}]'::jsonb);   -- {send_sms}
+--   select count(*) as rows, count(*) filter (where definition is not null) as with_doc, count(*) filter (where enabled) as published from public.automations;
+--     -- the same counts as before (nothing migrated yet: the function's step "migrate" does it, RUNBOOK §12)
+--   select status, count(*) from public.automation_runs where status in ('waiting', 'running') group by 1;   -- unchanged
+--   then the staging checks PASS 19–21 (.claude/sql/stage2-part1-staging-checks.sql), on staging, before this goes live.
+--
+-- After step "migrate" (RUNBOOK §12, design §8.3 #4), read-only:
+--   select count(*) filter (where definition is null) as left, count(*) as rows from public.automations;      -- left = 0
+--   select a.name, a.version, a.enabled, a.armed_at, a.audience, a.revision from public.automations a order by a.name;   -- = the backup, revision + 1
+--   select reason, count(*) from public.automation_versions group by 1;                                       -- migration = rows
+--   select key, origin from public.automation_templates order by key;                                         -- the 5 ready-made templates, system
+--   select v2_migrated_at from public.automation_state;                                                        -- set
+--
+-- ROLLBACK (G2.4 only; run by hand, staging first). The ORDER matters (a save through the adapter writes only the
+-- doc: the row's trigger / steps still hold the words from before the migration, and an older build that reads
+-- trigger / steps — the rollback build R-A always — would run those stale steps):
+--   1. With THIS build still deployed, part (a) alone: the rows created or edited in stage 2 are switched off (this build
+--      stops their waiting runs at once, "switched off"), so no older build ever runs the old words of a workflow
+--      someone changed since the migration (design §3.16, Appendix A E17/E39). The list is printed first: keep it (they
+--      are switched on again by hand after checking each one's phase-4 steps). Nobody switches anything on until step 3.
+--   2. The function back to the G2.3 build (or the rollback build, RUNBOOK §7 R-A) and the app back to the commit
+--      before the adapter (its old editor writes trigger / steps directly again).
+--   3. Then, in ONE transaction, (b) phase 4's guard and its customer switch-off trigger come back exactly as
+--      settings-round2-phase4.sql wrote them; (c) Part 1's automation_needs_review; (d) the G2.4 functions go.
+-- The docs stay in `definition` and switched_on_at stays (Part 1's rollback drops definition, if ever needed); the
+-- phase-4 engine reads trigger / steps only. A plain function rollback (R-A) WITHOUT step 1 is unsafe once any row was
+-- saved after v2_migrated_at (the list below is not empty).
+--
+-- The rows step 1 switches off (read-only; run it first and keep the output):
+-- select a.id, a.name, a.enabled, a.revision, m.rev as migrated_revision, a.updated_at, s.v2_migrated_at,
+--        (a.trigger = '{}'::jsonb) as made_in_stage2
+--   from public.automations a
+--   cross join (select z.v2_migrated_at from public.automation_state z where z.business_id = public.current_business_id()) s
+--   left join lateral (select max(v.revision) as rev from public.automation_versions v where v.automation_id = a.id and v.reason = 'migration') m on true
+--  where a.business_id = public.current_business_id() and a.definition is not null and a.deleted_at is null
+--    and (a.trigger = '{}'::jsonb or m.rev is null or a.revision > m.rev or s.v2_migrated_at is null or a.updated_at > s.v2_migrated_at)
+--  order by a.name;
+-- Step 1 (this build still deployed):
+-- begin;
+-- set local lock_timeout = '5s';
+-- update public.automations a set enabled = false
+--   from (select z.v2_migrated_at from public.automation_state z where z.business_id = public.current_business_id()) s
+--  where a.business_id = public.current_business_id() and a.definition is not null and a.deleted_at is null and a.enabled
+--    and (a.trigger = '{}'::jsonb or s.v2_migrated_at is null or a.updated_at > s.v2_migrated_at
+--         or a.revision > coalesce((select max(v.revision) from public.automation_versions v where v.automation_id = a.id and v.reason = 'migration'), -1));
+-- commit;
+-- Check: the list query again with "and a.enabled" → no rows; their waiting runs ended (exit_reason 'switched_off').
+-- Step 2: the function and the app (above). Step 3:
+-- begin;
+-- set local lock_timeout = '5s';
+-- create or replace function public.automations_guard() returns trigger
+-- language plpgsql security invoker set search_path = ''
+-- as $$
+-- declare customer boolean;
+-- begin
+--   customer := exists (select 1 from pg_catalog.jsonb_array_elements(new.steps) s
+--                        where s->>'kind' = 'action' and s->>'type' in ('email', 'text'));
+--   new.audience := case when customer then 'customer' else 'team' end;
+--   new.updated_at := now();
+--   if auth.uid() is not null then new.updated_by := auth.uid(); end if;
+--   if tg_op = 'INSERT' then
+--     if auth.uid() is not null then new.created_by := auth.uid(); end if;
+--     new.created_at := now();
+--     new.version := 1;
+--     if customer then new.enabled := false; end if;
+--     new.armed_at := case when new.enabled then now() else null end;
+--   else
+--     if new.business_id is distinct from old.business_id then raise exception 'business_id cannot change'; end if;
+--     new.created_by := old.created_by;
+--     new.created_at := old.created_at;
+--     new.version := case when new.trigger is distinct from old.trigger
+--                           or public.automation_steps_shape(new.steps) is distinct from public.automation_steps_shape(old.steps)
+--                         then old.version + 1 else old.version end;
+--     if new.enabled and (not old.enabled or new.version <> old.version) then new.armed_at := now();
+--     elsif not new.enabled then new.armed_at := null;
+--     else new.armed_at := old.armed_at; end if;
+--   end if;
+--   return new;
+-- end $$;
+-- revoke all on function public.automations_guard() from public, anon, authenticated;
+-- drop trigger if exists automations_customer_off_guard on public.automations;
+-- create trigger automations_customer_off_guard before update on public.automations
+--   for each row execute function public.automations_customer_off_guard();
+-- drop trigger if exists automations_after on public.automations;
+-- drop function if exists public.automations_after();
+-- drop function if exists public.automation_needs_review();
+-- create or replace function public.automation_needs_review()
+-- returns table (automation_id uuid, failed_runs bigint, last_failed_at timestamptz) language sql stable security invoker set search_path = ''
+-- as $$
+--   select l.automation_id, count(distinct l.run_id)::bigint, max(l.at)
+--     from public.automation_log l left join public.automation_reviews v on v.automation_id = l.automation_id
+--    where l.business_id = public.current_business_id() and l.automation_id is not null and l.status = 'failed'
+--      and l.at >= now() - interval '30 days' and (v.acked_until is null or l.at > v.acked_until)
+--    group by l.automation_id
+-- $$;
+-- revoke all on function public.automation_needs_review() from public, anon;
+-- grant execute on function public.automation_needs_review() to authenticated, service_role;
+-- drop function if exists public.automation_save(text, uuid, integer, text, jsonb, jsonb, jsonb, text, text, text, boolean, jsonb, uuid, text);
+-- drop function if exists public.automation_publish(text, uuid, boolean, integer, uuid, text);
+-- drop function if exists public.automation_migrate_row(text, uuid, jsonb, jsonb, jsonb, jsonb, jsonb);
+-- drop function if exists public.automation_arm_key(jsonb, jsonb);
+-- drop function if exists public.automation_def_shape(jsonb);
+-- drop function if exists public.automation_node_ports(jsonb);
+-- drop function if exists public.automation_guarded_channels_v1(jsonb);
+-- drop function if exists public.automation_guarded_channels(jsonb);
+-- drop function if exists public.automation_action_audience(text);
+-- commit;
+-- Check after the rollback: select pg_get_functiondef('public.automations_guard()'::regprocedure) ~ 'automation_steps_shape'
+--   and to_regprocedure('public.automation_save(text, uuid, integer, text, jsonb, jsonb, jsonb, text, text, text, boolean, jsonb, uuid, text)') is null;   -- true
+--   select tgname from pg_trigger where tgrelid = 'public.automations'::regclass and not tgisinternal order by 1;
+--     -- automations_a_v2_pin, automations_customer_off_guard, automations_guard
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- END PART 2 · G2.4
 
 
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════

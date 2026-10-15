@@ -519,7 +519,7 @@ async function testAutomationsReadOnly(){
       getRealProfile: () => ({ id: 'p', role: 'owner' }), SUPABASE_URL: 'https://x', SUPABASE_ANON_KEY: 'k', contactById: () => ({ id: 'c1' }), leadStage: () => 'Quoted',
     };
     vm.createContext(ctx);
-    vm.runInContext([constText('AUTOMATIONS_URL'), constText('AUTOMATION_EVENTS_SENT'), ...['readOnlyReason', 'catalogObject', 'automationEventBody', 'automationEvent', 'autoEventWanted', 'autoEmitStage', 'autoSyncEvents',
+    vm.runInContext([constText('AUTOMATIONS_URL'), constText('AUTOMATION_EVENTS_SENT'), constText('AUTO_WANTED'), constText('AUTO_PHASE4_EVENTS'), ...['readOnlyReason', 'catalogObject', 'automationEventBody', 'automationEvent', 'autoWantedLoad', 'autoEventWanted', 'autoEmitStage', 'autoFnCall', 'autoFnReason',
       'saveMsgTemplate', 'deleteMsgTemplate', 'newMsgTemplate', 'editMsgTemplate', 'autoSaveEditor', 'toggleAutomation', 'autoWriteEnabled', 'deleteAutomation', 'duplicateAutomation',
       'autoBackToDefault', 'autoReadyBackToDefault', 'autoReadyAct'].map(fnText)].join('\n'), ctx);
     const msg = vm.runInContext('readOnlyReason()', ctx);
@@ -529,14 +529,14 @@ async function testAutomationsReadOnly(){
     ok(log.touched.length === 0 && log.fetch.length === 0, `${mode}: no automation, template, switch or ready-made setting is saved, and no window opens`, log);
     ok(log.toasts.length === 13 && log.toasts.every(t => t === msg), `${mode}: each one says changes are not saved`, log.toasts);
     const before = log.toasts.length;
-    await run(`automationEvent('newLead', 'c1')`); await run(`autoEmitStage('c1', 'Quoted')`); await run(`autoSyncEvents()`);
+    await run(`automationEvent('newLead', 'c1')`); await run(`autoEmitStage('c1', 'Quoted')`); await run(`autoFnCall({ step: 'save' })`);
     await new Promise(r => setImmediate(r));
     ok(log.fetch.length === 0 && log.timers === 0 && log.touched.length === 0 && log.toasts.length === before, `${mode}: no event reaches the engine, nothing waits to send one, and nobody is told (nobody clicked)`, log);
     ok(JSON.stringify(ctx.AUTO.list[0].enabled) === 'false' && ctx.AUTO_TPL_EDIT.key === 'my_a', `${mode}: nothing changes on screen either`);
   }
-  for (const n of ['autoSaveEditor', 'toggleAutomation', 'autoWriteEnabled', 'deleteAutomation', 'duplicateAutomation', 'saveMsgTemplate', 'deleteMsgTemplate', 'newMsgTemplate', 'autoBackToDefault', 'autoReadyBackToDefault', 'autoReadyAct', 'autoCatalogWrite', 'autoSyncEvents', 'autoEmitStage'])
+  for (const n of ['autoSaveEditor', 'toggleAutomation', 'autoWriteEnabled', 'deleteAutomation', 'duplicateAutomation', 'saveMsgTemplate', 'deleteMsgTemplate', 'newMsgTemplate', 'autoBackToDefault', 'autoReadyBackToDefault', 'autoReadyAct', 'autoCatalogWrite', 'autoEmitStage', 'autoFnCall'])
     ok(/readOnlyReason\(\)/.test(fnText(n)), `${n}() checks readOnlyReason()`);
-  ok(/if \(!autoEventWanted\(type\)\) return;/.test(fnText('automationEvent')), 'automationEvent only tells the engine when an automation of your own waits for that event');
+  ok(/if \(!\(await autoEventWanted\(type\)\)\) return;/.test(fnText('automationEvent')), 'automationEvent only tells the engine when a workflow that is on waits for that event (automation_wanted)');
 }
 
 (async () => {

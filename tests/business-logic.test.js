@@ -33,7 +33,7 @@ const DECLS = [
   'weekOf', 'monthOf', 'currentWeekKey',
   'jobGst', 'jobTotalCollected', 'amountExGst', 'employeeByName', 'commissionDeductsParts', 'jobCommissionBase', 'jobCommissionAmount', 'commissionRateFor',
   // constants the functions below key off of
-  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'SUB_DIVISIONS', 'SUB_SOURCES', 'LEAD_TAGS', 'leadTagOn', 'DIVISION_COLOR', 'divColor', 'leadSubDivisions', 'leadSubSource', 'visibleTags', 'subSourceOptions', 'LEAD_SOURCE_LABEL', 'sourceLabel', 'splitLeadRequestEvent', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'chaseAlertDue',
+  'JOB_TYPES', 'LEAD_DIVISIONS', 'LEAD_SOURCES', 'LEAD_SOURCE_COLOR', 'AIRCON_TYPE_TAGS', 'META_PLATFORM_TAGS', 'LOST_REASONS', 'lostReasonOf', 'SUB_DIVISIONS', 'SUB_SOURCES', 'LEAD_TAGS', 'leadTagOn', 'leadTagsMerge', 'leadNotesAppend', 'rpcMissing', 'DIVISION_COLOR', 'divColor', 'leadSubDivisions', 'leadSubSource', 'visibleTags', 'subSourceOptions', 'LEAD_SOURCE_LABEL', 'sourceLabel', 'splitLeadRequestEvent', 'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'stageLabel', 'STAGES_NEED_DATE', 'PIPELINE_RULES_FROM', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'followupDue', 'leadRulesApply', 'leadNeedsFutureDate', 'isWorkday', 'chaseCounter', 'chaseAlertDue',
   // CRM / attribution
   'findContactByName', 'contactForJob', 'jobAttributionTags', 'computeCrmStats',
   // financial rollups
@@ -121,12 +121,12 @@ const DECLS = [
   // Automations builder (14 Oct, phase 4)
   'chatRulesApp', 'notifyRulesApp', 'notifyCardsNow', 'setRows', 'setToggle',
   'AUTO_TABLE', 'AUTO_BUSINESS_ID', 'AUTO_TRIGGERS', 'AUTO_MIRROR_TRIGGERS', 'AUTO_CONDS', 'AUTO_OP_WORDS', 'AUTO_ACTIONS', 'AUTO_FIELDS', 'AUTO_WAIT_UNITS', 'AUTO_DUE', 'AUTO_LIMITS', 'AUTO_PUSH_DEFAULT', 'AUTO_TPL_MIRROR',
-  'autoTrig', 'autoValueLabel', 'autoCondValues', 'autoCondFits', 'autoFieldsFor', 'autoDefaultPush', 'autoHm', 'autoHhmm', 'autoAndList', 'autoIsCustomerStep', 'autoHasCustomer', 'autoAudience', 'autoCleanStep', 'autoNormalize',
-  'autoPeopleText', 'autoTaskWho', 'autoDueText', 'autoHoursShort', 'autoDoShort', 'autoFlowChips', 'autoWhenShort', 'autoSentence', 'autoBadBlanks', 'autoStepIssues', 'autoStepProblems', 'autoProblems', 'autoTriggersOn', 'autoMatches', 'autoTplUsers', 'autoPreviewHtml',
+  'autoTrig', 'autoValueLabel', 'autoCondValues', 'autoCondFits', 'autoFieldsFor', 'autoDefaultPush', 'autoHm', 'autoHhmm', 'autoAndList', 'autoIsCustomerStep', 'autoHasCustomer', 'autoAudience', 'autoCleanStep', 'WF_ID_RE', 'wfCanon', 'WF_V1_ACTIONS', 'WF_V1_TRIGGER_NAMES', 'wfWinDormant', 'wfToFlat', 'wfFromFlat', 'autoIdsBad', 'autoNormalize',
+  'autoPeopleText', 'autoTaskWho', 'autoDueText', 'autoHoursShort', 'autoDoShort', 'autoFlowChips', 'autoWhenShort', 'autoSentence', 'autoBadBlanks', 'autoStepIssues', 'autoStepProblems', 'autoProblems', 'autoMatches', 'autoTplUsers', 'autoPreviewHtml',
   'autoReadyRows', 'autoGatePill', 'autoStatusPill', 'autoRowHtml', 'autoListsHtml',
   // the 14 Oct review: safety settings, opt-outs, "Try it", versions, ready-mades off the list
   'AUTO_SAFETY_DEFAULTS', 'AUTO_EMAIL_FOOTER_DEFAULT', 'autoSafetyNorm', 'autoSafetyProblems', 'autoSafetyPatch', 'autoTzLabel', 'autoSafetyLine', 'autoEmailSigner',
-  'autoCustomerChannels', 'autoNewVersion', 'autoTryRecords', 'autoTryWhen', 'autoTryResultHtml', 'autoRemovedHtml', 'optOutKeys', 'optOutRowsFor', 'optOutInserts', 'optOutControlHtml',
+  'autoCustomerChannels', 'autoNewVersion', 'autoNewStart', 'autoTryRecords', 'autoTryWhen', 'autoTryResultHtml', 'autoRemovedHtml', 'optOutKeys', 'optOutRowsFor', 'optOutInserts', 'optOutControlHtml',
   // Names and labels (round 3, C-names)
   'officeLabel', 'officePossessive', 'bizShortName', 'ownerNamesText', 'officeAgentName', 'officeAssignee', 'taskBoardLabel', 'PERSON_COLORS', 'techColor', 'personReportName', 'payCashTo',
   'brandCacheRead', 'brandSource', 'tplExample', 'brandOf', 'contractorServices', 'CONTRACTOR_TRADES', 'REVIEW_FAMILIES', 'AU_STATE_NAMES', 'COUNTRY_ADJ', 'agreementPlace', 'bizLegalName', 'connWordsIn', 'connWordsNow', 'contractorServiceColor', 'CONTRACTOR_SERVICE_COLOR',
@@ -2851,6 +2851,81 @@ testAutomationsBuilder(loadSandbox());
 testNamesAndLabels(loadSandbox());
 testAutomationsEditor();
 testAutomationsEditorKeys();
+testLeadAtomicEdits(loadSandbox());
+testWorkflowAdapter(loadSandbox());
+
+// ── The old builder's adapter to the stage-2 doc (stage 2 G2.4): wfToFlat opens a doc that is still a phase-4 chain,
+// wfFromFlat makes the doc a save sends — the same as the engine's wfToFlat / upgradeV1 on every shape of the engine's
+// fixtures/upgrade.json; a save of unchanged steps gives the same doc back (trigger id / name and branch ids kept). ──
+function testWorkflowAdapter(sb){
+  const { wfToFlat, wfFromFlat, autoNormalize } = sb;
+  const canon = x => JSON.stringify(x, (k, v) => v && typeof v==='object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(key => [key, v[key]])) : v);
+  const UP = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'automations', 'fixtures', 'upgrade.json'), 'utf8')).cases;
+  const reIds = new Set(['ids that are not v2 ids get fresh ones', 'the same id twice']);
+  const bad = [];
+  for (const k of UP) {
+    const doc = wfFromFlat(k.v1, null), flat = wfToFlat(k.expect.doc);
+    if (canon(doc)!==canon(k.expect.doc)) bad.push('wfFromFlat ≠ upgradeV1: ' + k.name);
+    if (!flat) { bad.push('wfToFlat null: ' + k.name); continue; }
+    const want = { trigger: { type: k.v1.trigger.type, params: Object.fromEntries(Object.entries(k.v1.trigger.params || {}).filter(([p, v]) => !(p==='stage' && v==='')) ) }, steps: k.v1.steps };
+    if (!reIds.has(k.name) && canon(flat)!==canon(want)) bad.push('wfToFlat ≠ the phase-4 steps: ' + k.name);
+    if (canon(wfFromFlat(flat, k.expect.doc))!==canon(k.expect.doc)) bad.push('save of unchanged steps changed the doc: ' + k.name);
+    if (canon(wfToFlat(wfFromFlat(flat, k.expect.doc)))!==canon(flat)) bad.push('round trip: ' + k.name);
+  }
+  assertEqual([bad, UP.length >= 20], [[], true], 'adapter: wfFromFlat = the engine\'s upgradeV1, wfToFlat its inverse, and a round trip through both changes nothing (every upgrade.json shape)');
+  // a saved doc's trigger id and name and an If's branch id stay (no new shape for an unchanged workflow); seq never goes back
+  const prev = { schema: 2, seq: 40, entry: 's1', triggers: [{ id: 't7', type: 'stage', name: 'Moved to Lost', filters: { match: 'all', segments: [{ match: 'all', rules: [{ field: 'trigger.stage', op: 'is', v: 'Lost' }] }] } }],
+    nodes: { s1: { kind: 'if_else', type: 'if_else', config: { gate: true, noneName: 'None', branches: [{ id: 'b9', name: 'Yes', when: { match: 'any', segments: [{ match: 'all', rules: [{ field: 'has_email', op: 'true' }] }] } }] }, out: { b9: 's2', none: null } },
+      s2: { kind: 'action', type: 'send_email', config: { subject: 'Sorry', body: 'Hi' }, out: { next: null } } } };
+  const flat = wfToFlat(prev);
+  assertEqual([flat.trigger, flat.steps.map(s => s.kind + ':' + s.id)], [{ type: 'stage', params: { stage: 'Lost' } }, ['if:s1', 'action:s2']], 'adapter: the old builder opens the doc as its start and steps');
+  const again = wfFromFlat(flat, prev);
+  assertEqual([canon(again)===canon(prev), again.triggers[0].id, again.triggers[0].name, Object.keys(again.nodes.s1.out), again.seq], [true, 't7', 'Moved to Lost', ['b9', 'none'], 40], 'adapter: saved unchanged = the same doc (trigger t7 "Moved to Lost", branch b9, seq kept)');
+  flat.steps.push({ id: 's3', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'Lost: {name}' });
+  const more = wfFromFlat(flat, prev);
+  assertEqual([more.nodes.s2.out.next, more.nodes.s3.type, more.nodes.s3.config.channel, more.triggers[0].id], ['s3', 'internal_notification', 'push', 't7'], 'adapter: a step added at the end');
+  flat.trigger = { type: 'newLead', params: {} };
+  assertEqual([wfFromFlat(flat, prev).triggers[0].id, wfFromFlat(flat, prev).triggers[0].name], ['t1', 'Contact created'], 'adapter: another start is a new trigger (its own id and name)');
+  // what only the new builder makes never opens here
+  const nb = x => { const d = JSON.parse(JSON.stringify(prev)); x(d); return wfToFlat(d); };
+  assertEqual([nb(d => { d.nodes.s2.name = 'Email'; }), nb(d => { d.nodes.s2.type = 'add_tag'; }), nb(d => { d.triggers.push({ id: 't8', type: 'newLead', filters: d.triggers[0].filters }); }), nb(d => { d.nodes.s1.config.gate = false; }), nb(d => { d.nodes.x1 = { kind: 'goto', type: 'goto', config: { target: 's1' }, out: {} }; })],
+    [null, null, null, null, null], 'adapter: names, stage-2 steps, two starts, a real If / else, an unconnected step → the new builder');
+  // the list: a doc row opens as its steps; a stage-2 doc is marked for the new builder
+  const a = autoNormalize({ id: 'x1', name: 'Doc', enabled: true, definition: prev, revision: 5, trigger: {}, steps: [] });
+  const b = autoNormalize({ id: 'x2', name: 'New', enabled: false, definition: { ...prev, triggers: [] }, revision: 2, list_summary: { audience: 'customer' } });
+  assertEqual([a.def.trigger, a.def.steps.length, a.revision, a.newBuilder, a.audience, b.newBuilder, b.def.trigger, b.audience], [{ type: 'stage', params: { stage: 'Lost' } }, 2, 5, false, 'customer', true, null, 'customer'],
+    'adapter: the list reads the doc (its steps, revision, audience); one that needs the new builder keeps its audience from the summary');
+  assertEqual([autoNormalize({ id: 'x3', definition: prev, settings: { reentry: 'legacy_always' } }).legacy, a.legacy, autoNormalize({ id: 'x4', trigger: { type: 'newLead' }, steps: [], settings: { reentry: 'legacy_always' } }).legacy],
+    [true, false, false], 'adapter: an upgraded doc row (re-entry legacy_always) is marked legacy (another start = a new version, as phase 4)');
+}
+
+// ── The lead card's tags and notes through one database statement each (stage 2 G2.3: contact_tags_edit /
+// contact_note_add / contact_note_remove), so an open card never erases what a workflow added, nor makes a false
+// "tag removed". leadTagsMerge = the database's contact_tags_merge (the SQL check-after shows the same case). ──
+function testLeadAtomicEdits(sb){
+  const { leadTagsMerge, leadNotesAppend, rpcMissing } = sb;
+  assertEqual(leadTagsMerge(['VIP', 'Callback'], ['vip', 'Complaint'], ['callback']), ['VIP', 'Complaint'], 'tags: a tag in another case is the same tag (not added twice); removed in any case; order kept');
+  assertEqual(leadTagsMerge(null, [' Hot ', 'hot', '', null], []), ['Hot'], 'tags: trimmed, empty ones ignored, the same tag once');
+  assertEqual(leadTagsMerge(['A', '', 'B'], [], ['b']), ['A'], 'tags: an empty tag on the card goes too');
+  assertEqual(leadTagsMerge(['A'], ['x'.repeat(80)], [])[1].length, 60, 'tags: at most 60 characters (as the database)');
+  const n1 = { id: 'n1', text: 'Gate 12', by: 'Ofek', at: '2026-10-15T01:00:00.000Z' };
+  assertEqual(leadNotesAppend([n1], { id: 'n1', text: 'other' }), [n1], 'notes: the same note id twice is one note (an Undo after a slow save)');
+  assertEqual(leadNotesAppend(null, n1), [n1], 'notes: the first note');
+  assertEqual(leadNotesAppend([n1], { id: 'n2', text: '  ' }), [n1], 'notes: an empty note is not added');
+  assertEqual([rpcMissing({ code: 'PGRST202' }), rpcMissing({ code: '42883' }), rpcMissing({ message: 'Could not find the function public.contact_tags_edit' }), rpcMissing({ code: '42501', message: 'permission denied' }), rpcMissing(null)],
+    [true, true, true, false, false], 'only "the function is not there" falls back to the old whole-list save; a refusal never does');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  const fn = (name) => { const a = html.indexOf(`function ${name}(`); let i = html.indexOf('{', a), d = 1; i++; while (d > 0) { if (html[i] === '{') d++; else if (html[i] === '}') d--; i++; } return html.slice(a, i); };
+  const writers = ['toggleLeadTag', 'bulkTag', 'addLeadNote', 'deleteLeadNote'].map(fn).join('\n');
+  assertEqual([/db\.contacts\.update\([^)]*\{\s*tags/.test(writers), /db\.contacts\.update\([^)]*customerNotes/.test(writers), (writers.match(/db\.contacts\.editTags\(/g) || []).length, (writers.match(/db\.contacts\.(addNote|removeNote)\(/g) || []).length],
+    [false, false, 3, 3], 'the lead card writes tags and notes only through the atomic edits (tag click, bulk + its Undo, note add / delete + its Undo)');
+  const dbSrc = html.slice(html.indexOf('    async editTags(id, add, remove){'), html.indexOf('  // Appends ONE update to a task or quote'));
+  assertEqual(["sb.rpc('contact_tags_edit'", "sb.rpc('contact_note_add'", "sb.rpc('contact_note_remove'"].map(x => dbSrc.includes(x)).concat([(dbSrc.match(/rpcMissing\(error\)\) return db\.contacts\.update\(/g) || []).length]),
+    [true, true, true, 3], 'each atomic edit falls back to the old save only while its database function is missing');
+  const add = fn('addLeadNote');
+  assertEqual([/if \(await saving\) \{ logContactActivity\(/.test(add), add.indexOf('logContactActivity') > add.indexOf('await saving'), /\.slice\(0, 2000\)|maxlength/.test(add + fn('leadNotesField'))],
+    [true, true, false], 'a note: the activity line and "Note added" only once the database has it (a refused save puts the words back in the box); never cut to 2,000 (the database keeps it whole)');
+}
 
 // ── Saving keeps the place, the settings menu as a panel, drag & drop on every upload (round 3, A-ux) ──
 // No promise-memo test here on purpose: this group adds no loader (nothing it adds fetches or redraws on its own).
@@ -3164,10 +3239,6 @@ function testAutomationsBuilder(sb){
   assertEqual(sb.autoFlowChips(quote, ctx), ['Moves to a stage: Quote sent', 'After 3 days', 'Mon–Fri, 9 am–5 pm', '2 conditions', 'Email + Task for Kim'], 'chips: start › wait › hours › conditions › what it does');
   assertEqual(sb.autoFlowChips({ trigger: { type: 'newLead' }, steps: [push, { id: 's2', kind: 'wait', n: 2, unit: 'hours' }, { ...push, id: 's3' }] }, ctx), ['New lead', 'Right away', 'Any day, any time', 'Push to the owners', '+2 more steps'], 'chips: a longer automation says how many more steps it has');
   assertEqual(sb.autoWhenShort(quote, ctx), '3 days after a lead moves to Quote sent, Mon–Fri, 9 am–5 pm', 'when, in short: the wait, the start and the hours');
-  // autoTriggersOn: only automations of your own that are on, not deleted, with a start the app saves itself
-  const L = [{ enabled: true, def: { trigger: { type: 'newLead' } } }, { enabled: false, def: { trigger: { type: 'stage' } } }, { enabled: true, deleted: true, def: { trigger: { type: 'jobClosed' } } },
-    { enabled: true, def: { trigger: { type: 'missedCall' } } }, { enabled: true, def: { trigger: { type: 'chat' } } }, { enabled: true, ready: true, def: { trigger: { type: 'invoice' } } }];
-  assertEqual(sb.autoTriggersOn(L), { newLead: true }, 'events from the app: only for an automation of your own that is on (never missed calls, chats or ready-made ones)');
   // the ready-made rows, from today's settings
   sb.STATE.data.settings = { reviewRequestsAuto: false, chatAutoSms: true, phoneEnabled: false, unpaidReminderDays: 9,
     catalog: { reviews: { sendFrom: 9, askAgainMonths: 4 }, chat: { waitMinutes: 7, windowHours: 3, oneADay: false }, notify: { newLead: { on: true, office: true }, leadWaiting: { on: false }, rules: { waitMinutes: 20, from: 7, until: 19, docDays: 45 } } } };
@@ -3225,7 +3296,7 @@ function testAutomationsBuilder(sb){
   const als = extractDecl(script, 'applyLeadStage');
   assertEqual([als.includes('const patch = { status: stage, stageChangedAt: nowIso, ...extra };'), /db\.contacts\.update\(c\.id, patch\)\.then\(saved => \{ if \(saved\) autoEmitStage\(c\.id, stage\); \}\)/.test(als)], [true, true], 'a stage move saves the same patch; the engine is told only after the save (and the Undo)');
   // the pure helpers never redraw or touch the database
-  const pure = ['autoNormalize', 'autoProblems', 'autoStepIssues', 'autoSentence', 'autoFlowChips', 'autoTriggersOn', 'autoMatches', 'autoReadyRows', 'autoRowHtml', 'autoListsHtml', 'autoPreviewHtml'];
+  const pure = ['autoNormalize', 'wfToFlat', 'wfFromFlat', 'autoProblems', 'autoStepIssues', 'autoSentence', 'autoFlowChips', 'autoMatches', 'autoReadyRows', 'autoRowHtml', 'autoListsHtml', 'autoPreviewHtml'];
   assertEqual(pure.filter(n => /\brender\(|\bdb\.|\bsb\.|fetch\(/.test(extractDecl(script, n))), [], 'the builder\'s pure helpers never redraw, read the database or call a server');
 }
 // A sandbox with the whole builder (every auto* function and AUTO* constant) for its windows and saves.
@@ -3393,80 +3464,158 @@ async function testAutomationsLoaderNoLoop(){
   ctx.__page(); ctx.__page();
   assertEqual([A.loaded, A.list, /does not exist/.test(A.error), queries], [true, [], true, 3], 'automations: a failed load shows its message and is not tried again by itself');
 }
-// The app tells the engine only for automations of your own that are on; a stage move only after its Undo ran out.
+// The app tells the engine only when a workflow that is on starts that way (stage 2 G2.4: the engine's automation_wanted,
+// read at most once a minute, one read at a time); a stage move only after its Undo ran out. Before SQL Part 1 (the
+// table can't be read) the list the phase-4 builder kept in settings.
 async function testAutomationEventsGate(){
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   const all = [], posts = [], timers = { get length(){ return all.filter(x => x.ms===6500).length; } };
   const stageTimer = i => all.filter(x => x.ms===6500)[i];
   const lead = { id: 'c-1', stage: 'Quoted' };
-  const ctx = { console, PRESENT: false, VIEW_AS_ID: null, SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'k',
+  let wanted = [], reads = 0, readErr = null, now = 1e12;
+  const ctx = { console, PRESENT: false, VIEW_AS_ID: null, SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'k', AUTO_BUSINESS_ID: 'default',
     STATE: { data: { settings: { catalog: {} } }, profiles: [] }, getRealProfile: () => ({ id: 'p', role: 'va' }),
-    sb: { auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) } },
+    Date: { now: () => now },
+    sb: { auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) },
+      from: (t) => ({ select: () => ({ eq: async (k, v) => { reads++; if (t!=='automation_wanted' || k!=='business_id' || v!=='default') throw new Error('wrong read ' + t); return readErr ? { data: null, error: readErr } : { data: wanted.map(e => ({ event_type: e })), error: null }; } }) }) },
     fetch: (u, o) => { posts.push({ u, body: JSON.parse(o.body) }); return Promise.reject(new Error('offline')); },
     setTimeout: (fn, ms) => { all.push({ fn, ms }); return all.length; },
     contactById: id => id===lead.id ? lead : null, leadStage: c => c.stage };
   vm.createContext(ctx);
-  vm.runInContext(['readOnlyReason', 'catalogObject', 'automationEventBody', 'AUTOMATIONS_URL', 'AUTOMATION_EVENTS_SENT', 'automationEvent', 'autoEventWanted', 'autoEmitStage'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__ev = automationEvent; this.__st = autoEmitStage;', ctx);
-  const flush = () => new Promise(r => setImmediate(r));
-  await ctx.__ev('newLead', 'c-9'); await flush();
-  assertEqual(posts.length, 0, 'events: nothing is sent while no automation of your own waits for it');
-  ctx.STATE.data.settings.catalog.automationEvents = { newLead: true, stage: true };
-  ctx.PRESENT = true; await ctx.__ev('newLead', 'c-9'); ctx.__st('c-1', 'Quoted'); await flush();
-  assertEqual([posts.length, timers.length], [0, 0], 'events: in presentation mode nothing is sent or waited for');
+  vm.runInContext(['readOnlyReason', 'catalogObject', 'automationEventBody', 'AUTOMATIONS_URL', 'AUTOMATION_EVENTS_SENT', 'automationEvent', 'AUTO_WANTED', 'autoWantedLoad', 'AUTO_PHASE4_EVENTS', 'autoEventWanted', 'autoEmitStage'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__ev = automationEvent; this.__st = autoEmitStage; this.__w = AUTO_WANTED; this.__sent = AUTOMATION_EVENTS_SENT;', ctx);
+  const flush = async () => { for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r)); };
+  const later = () => { now += 61e3; };
+  // an EMPTY list = not known (the engine keeps none in compat mode: step E not in, or rolled back): the phase-4 starts
+  // are told as phase 4 told them; anything else not
+  await ctx.__ev('newLead', 'c-9'); await ctx.__ev('contact_changed', 'c-9'); await flush();
+  assertEqual([posts.map(p => p.body.type), reads], [['newLead'], 1], 'events: an empty automation_wanted (compat mode) → the phase-4 starts are still told at once (new lead, stage, job closed)');
+  ctx.__sent.clear(); posts.length = 0;
+  wanted = ['newLead', 'stage']; later();
+  ctx.PRESENT = true; await ctx.__ev('newLead', 'c-9'); await ctx.__st('c-1', 'Quoted'); await flush();
+  assertEqual([posts.length, timers.length, reads], [0, 0, 1], 'events: in presentation mode nothing is sent, waited for or read');
   ctx.PRESENT = false;
   let threw = false; try { await ctx.__ev('newLead', 'c-9'); await flush(); } catch (e) { threw = true; }
-  assertEqual([threw, posts.length, posts[0] && posts[0].body, posts[0] && posts[0].u], [false, 1, { step: 'event', type: 'newLead', id: 'c-9' }, 'https://x.supabase.co/functions/v1/automations'], 'events: only the kind and the id are sent; a failed call never breaks the action');
-  ctx.__st('c-1', 'Quoted');
-  assertEqual([timers.length, posts.length], [1, 1], 'events: a stage move waits for its Undo (6.5 seconds) first');
+  assertEqual([threw, posts.length, posts[0] && posts[0].body, posts[0] && posts[0].u, reads], [false, 1, { step: 'event', type: 'newLead', id: 'c-9' }, 'https://x.supabase.co/functions/v1/automations', 2], 'events: only the kind and the id are sent; a failed call never breaks the action');
+  await ctx.__st('c-1', 'Quoted');
+  assertEqual([timers.length, posts.length, reads], [1, 1, 2], 'events: a stage move waits for its Undo (6.5 seconds) first; the list is read at most once a minute');
   stageTimer(0).fn(); await flush();
   assertEqual(posts.slice(-1)[0].body, { step: 'event', type: 'stage', id: 'c-1' }, 'events: then it is told, the lead still being in that stage');
-  ctx.__st('c-1', 'Quoted'); lead.stage = 'New'; stageTimer(1).fn(); await flush();
+  await ctx.__st('c-1', 'Quoted'); lead.stage = 'New'; stageTimer(1).fn(); await flush();
   assertEqual(posts.length, 2, 'events: a stage move undone in time is never told');
-  ctx.STATE.data.settings.catalog.automationEvents = {};
-  ctx.__st('c-1', 'New');
-  assertEqual(timers.length, 2, 'events: no stage automation on, no wait either');
+  wanted = ['newLead']; later();
+  await ctx.__st('c-1', 'New');
+  assertEqual([timers.length, reads], [2, 3], 'events: no stage workflow on (a minute later), no wait either');
+  // two at the same moment share one read
+  later(); const p1 = ctx.__st('c-1', 'New'), p2 = ctx.__st('c-1', 'New'); await Promise.all([p1, p2]);
+  assertEqual(reads, 4, 'events: two checks at the same moment make one read');
+  // before SQL Part 1 (the table is not there): the phase-4 list in settings
+  readErr = { code: '42P01', message: 'relation "public.automation_wanted" does not exist' }; later();
+  ctx.STATE.data.settings.catalog.automationEvents = { stage: true };
+  await ctx.__st('c-1', 'New');
+  assertEqual(timers.length, 3, 'events: while automation_wanted can\'t be read, the list the phase-4 builder kept');
+  // a read that throws at once (the client not ready): the check never throws (a stage start is told, as when the list
+  // can't be read) and leaves no read behind, so the next check reads again
+  readErr = null; later();
+  const from0 = ctx.sb.from; ctx.sb.from = () => { throw new Error('not ready'); };
+  let threw2 = false; try { await ctx.__st('c-1', 'New'); } catch (e) { threw2 = true; }
+  ctx.sb.from = from0;
+  assertEqual([threw2, timers.length, ctx.__w.p, reads], [false, 4, null, 5], 'events: a read that throws at once never breaks the stage move (told as phase 4 told it) and leaves no read behind');
+  later(); let threw3 = false; try { await ctx.__st('c-1', 'New'); } catch (e) { threw3 = true; }
+  assertEqual([threw3, reads, timers.length], [false, 6, 4], 'events: …the next check reads the list again (no stage workflow on: no wait)');
+  const src = extractDecl(script, 'autoWantedLoad');
+  assertEqual([/render\(/.test(src), /db\./.test(src), /\.select\('event_type'\)/.test(src), /autoSyncEvents/.test(html)], [false, false, true, false], 'events: the check only reads (never redraws or writes); the settings copy of the list is no longer written');
+}
+// The automations function as the old builder meets it since stage 2 (G2.4: step "save" with the doc, step "publish"),
+// with the database guard's rules for what this builder sends: a new workflow is a Draft; a new customer channel switches
+// a Published one off; an unmigrated row is upgraded first (its revision + 1). Plus the table the app reads back.
+function autoFnFake(seed){
+  const rows = {}, calls = [], ctl = { failPublish: null };
+  (seed || []).forEach(r => { rows[r.id] = { revision: 1, ...JSON.parse(JSON.stringify(r)) }; });
+  const v1g = steps => [...new Set((steps || []).filter(x => x && x.kind==='action' && ['email', 'text'].includes(x.type)).map(x => x.type==='email' ? 'send_email' : 'send_sms'))].sort();
+  const g = d => [...new Set(Object.values((d && d.nodes) || {}).filter(x => x.kind==='action' && ['send_email', 'send_sms'].includes(x.type)).map(x => x.type))].sort();
+  let n = 0;
+  const fetch = async (u, o) => {
+    const b = JSON.parse(o.body); calls.push(b);
+    let status = 200, body;
+    const r = b.automation_id!=null ? rows[b.automation_id] : null;
+    if (b.step==='save' && b.automation_id==null) { const id = 'n' + (++n); rows[id] = { id, name: b.name, enabled: false, definition: b.definition, revision: 1 }; body = { ok: true, id, enabled: false, revision: 1 }; }
+    else if (!r) { status = 404; body = { ok: false, reason: 'workflow not found' }; }
+    else if (b.step==='save') {
+      const before = r.definition ? g(r.definition) : v1g(r.steps);
+      if (b.expected_revision!==r.revision) { status = 409; body = { ok: false, reason: 'conflict' }; }
+      else {
+        r.revision += r.definition ? 1 : 2; r.definition = b.definition; r.name = b.name;
+        if (r.enabled && g(b.definition).some(x => !before.includes(x))) r.enabled = false;
+        body = { ok: true, id: r.id, enabled: r.enabled, revision: r.revision };
+      }
+    } else if (b.step==='publish') {
+      // as the function: a switch-on checks the revision it was shown and asks first (its words) when it sends to customers
+      const gs = r.definition ? g(r.definition) : v1g(r.steps);
+      if (ctl.failPublish && b.on===ctl.failPublish.on) { status = 0; body = { reason: ctl.failPublish.reason }; }
+      else if (b.on && !r.enabled && b.expected_revision!=null && b.expected_revision!==r.revision) { status = 409; body = { ok: false, reason: 'conflict', revision: r.revision }; }
+      else if (b.on && !r.enabled && gs.length && b.confirm!==true) { status = 409; body = { ok: false, reason: 'confirm', confirm: ['Sends to customers: ' + gs.map(x => x==='send_email' ? 'Send email' : 'Send SMS').join(', ')] }; }
+      else { r.enabled = !!b.on; body = { ok: true, enabled: r.enabled, revision: r.revision }; }
+    }
+    else { status = 400; body = { ok: false, reason: 'unknown step' }; }
+    if (status===0) throw new Error('offline');
+    return { ok: status===200, status, json: async () => body };
+  };
+  const table = { _id: null, _p: null, select(){ return this; }, update(p){ this._p = p; return this; },
+    eq(k, v){ this._id = v; if (this._p && rows[v]) { Object.assign(rows[v], this._p); this._p = null; } return this; },
+    in(){ return Promise.resolve({ count: 3, error: null }); }, single(){ const r = rows[this._id]; return Promise.resolve({ data: r ? JSON.parse(JSON.stringify(r)) : null, error: null }); } };
+  return { rows, calls, ctl, fetch, sb: { from: () => table, auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) } },
+    extra(){ return { sb: this.sb, fetch: this.fetch, AUTOMATIONS_URL: 'https://x.supabase.co/functions/v1/automations', SUPABASE_ANON_KEY: 'k' }; } };
 }
 // Saving and switching on: a customer automation is never switched on by the builder without the owner's own yes.
+// Since stage 2 (G2.4) every save is the function's step "save" (the doc) and every switch its step "publish".
 async function testAutomationsCustomerSafety(){
-  const writes = [];
-  const table = { insert(row){ writes.push(['insert', row]); this.row = { id: 'n1', ...row }; return this; }, update(row){ writes.push(['update', row]); this.row = { id: 'c1', name: 'Team alert', trigger: { type: 'newLead' }, steps: [], ...row }; return this; },
-    eq(){ return this; }, select(){ return this; }, single(){ return Promise.resolve({ data: this.row, error: null }); } };
-  const sb = autoSandbox({ sb: { from: () => table } }), A = sb.__get('AUTO'), log = sb.log;
+  const F = autoFnFake([]);
+  const sb = autoSandbox(F.extra()), A = sb.__get('AUTO'), log = sb.log;
   sb.openAutoEditor(null);
   const ed = sb.__get('AUTO_ED');
   ed.name = 'Thanks'; ed.enabled = true;
   ed.def = { trigger: { type: 'jobClosed', params: {} }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'Thanks {first_name}', templateKey: 'my_t' }] };
   ed.drafts = { my_t: { name: 'Thanks', channel: 'email', body: '{hi}, thanks!' } };
   await sb.autoSaveEditor();
-  assertEqual([writes[0][0], writes[0][1].enabled, writes[0][1].business_id, sb.STATE.data.settings.catalog.templates.my_t, sb.STATE.data.settings.catalog.msgTemplates.my_t.channel, sb.__get('AUTO_ED')],
-    ['insert', false, 'default', '{hi}, thanks!', 'email', null], 'save: a NEW automation that emails customers is written OFF, even with its switch on; its words go to the library');
-  // an ON team automation gets an email: it is saved off, and says so
-  A.list = [sb.autoNormalize({ id: 'c1', name: 'Team alert', enabled: true, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'New' }] })];
+  assertEqual([F.calls.map(c => c.step), F.calls[0].automation_id, F.calls[0].definition.nodes.s1.type, F.rows.n1.enabled, sb.STATE.data.settings.catalog.templates.my_t, sb.STATE.data.settings.catalog.msgTemplates.my_t.channel, sb.__get('AUTO_ED')],
+    [['save'], null, 'send_email', false, '{hi}, thanks!', 'email', null], 'save: a NEW automation that emails customers is saved OFF through the function (no publish), even with its switch on; its words go to the library');
+  // an ON team automation gets an email: the guard puts it off, and the builder says so (no publish to put it back on)
+  F.rows.c1 = { id: 'c1', name: 'Team alert', enabled: true, revision: 1, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'New' }] };
+  A.list = [sb.autoNormalize(F.rows.c1)];
   sb.openAutoEditor('c1');
   const e2 = sb.__get('AUTO_ED');
   e2.def.steps.push({ id: 's2', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' });
-  writes.length = 0;
+  F.calls.length = 0;
   await sb.autoSaveEditor();
-  assertEqual([writes[0][0], writes[0][1].enabled, /It is off: switch it on from the list/.test(log.toasts.slice(-1)[0])], ['update', false, true], 'save: adding a customer email to an automation that is on saves it OFF, and says so');
+  assertEqual([F.calls.map(c => c.step + (c.step==='publish' ? ':' + c.on : '')), F.calls[1].expected_revision, F.rows.c1.enabled, /It is off: switch it on from the list/.test(log.toasts.slice(-1)[0]), A.list[0].doc!=null],
+    [['publish:false', 'save'], 1, false, true, true], 'save: adding a customer email to an automation that is on switches it OFF first, then saves (never live with the email), and says so; the list has its doc now');
   // switching on from the list
-  A.list = [sb.autoNormalize({ id: 'c1', name: 'Mail', enabled: false, trigger: { type: 'jobClosed' }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' }] }),
-    sb.autoNormalize({ id: 'c2', name: 'Team', enabled: false, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'New' }] })];
-  writes.length = 0; const c0 = log.confirms.length;
+  F.rows.c1 = { id: 'c1', name: 'Mail', enabled: false, revision: 1, trigger: { type: 'jobClosed' }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' }] };
+  F.rows.c2 = { id: 'c2', name: 'Team', enabled: false, revision: 1, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'New' }] };
+  A.list = [sb.autoNormalize(F.rows.c1), sb.autoNormalize(F.rows.c2)];
+  F.calls.length = 0; const c0 = log.confirms.length;
   sb.toggleAutomation('c1');
-  assertEqual([log.confirms.length - c0, writes.length, /This sends to real customers/.test(log.confirms.slice(-1)[0].m)], [1, 0, true], 'switching on a customer automation asks first and writes nothing until yes');
+  assertEqual([log.confirms.length - c0, F.calls.length, /This sends to real customers/.test(log.confirms.slice(-1)[0].m)], [1, 0, true], 'switching on a customer automation asks first and calls nothing until yes');
   await log.confirms.slice(-1)[0].fn(); await new Promise(r => setImmediate(r));
-  assertEqual(writes.map(w => [w[0], w[1]]), [['update', { enabled: true }]], 'after yes: only "enabled" is written');
-  writes.length = 0;
-  sb.toggleAutomation('c2'); await new Promise(r => setImmediate(r));
-  assertEqual([log.confirms.length - c0, writes.map(w => w[1])], [1, [{ enabled: true }]], 'a team automation switches on without asking');
+  assertEqual([F.calls, A.list[0].enabled], [[{ step: 'publish', automation_id: 'c1', on: true, expected_revision: 1, confirm: true }], true], 'after yes: the function publishes it (with that yes and the revision the list showed)');
+  F.calls.length = 0;
+  sb.toggleAutomation('c2'); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
+  assertEqual([log.confirms.length - c0, F.calls.map(c => [c.step, c.on])], [1, [['publish', true]]], 'a team automation switches on without asking');
   // a broken automation can't be switched on
   A.list = [sb.autoNormalize({ id: 'c3', name: 'Broken', enabled: false, trigger: { type: 'newLead' }, steps: [] })];
-  writes.length = 0; sb.toggleAutomation('c3');
-  assertEqual([writes.length, /^Fix it first/.test(log.toasts.slice(-1)[0])], [0, true], 'an automation with a problem can\'t be switched on');
-  // the events the app sends follow the automations that are on
-  A.list = [sb.autoNormalize({ id: 'c4', name: 'On', enabled: true, trigger: { type: 'stage', params: {} }, steps: [] })];
-  sb.autoSyncEvents();
-  assertEqual(sb.STATE.data.settings.catalog.automationEvents, { stage: true }, 'the starts the app reports are kept in settings (a silent write)');
+  F.calls.length = 0; sb.toggleAutomation('c3');
+  assertEqual([F.calls.length, /^Fix it first/.test(log.toasts.slice(-1)[0])], [0, true], 'an automation with a problem can\'t be switched on');
+  // the function refuses (its own checks): the switch goes back and says why
+  F.rows.c4 = { id: 'c4', name: 'Gone', enabled: false, revision: 1, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'x' }] };
+  A.list = [sb.autoNormalize(F.rows.c4)]; delete F.rows.c4;
+  sb.toggleAutomation('c4'); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
+  assertEqual([A.list[0].enabled, /^Not switched on: workflow not found/.test(log.toasts.slice(-1)[0])], [false, true], 'a refusal by the function: the switch stays off and says why');
+  // a workflow that needs the new builder: listed and switched, never opened here
+  const doc2 = { schema: 2, seq: 3, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: { match: 'all', segments: [{ match: 'all', rules: [] }] } }],
+    nodes: { n1: { kind: 'action', type: 'add_tag', name: 'Tag it', config: { tags: ['VIP'] }, out: { next: null } } } };
+  const nb = sb.autoNormalize({ id: 'c5', name: 'New kind', enabled: false, definition: doc2, revision: 4, list_summary: { audience: 'team' } });
+  A.list = [nb]; sb.openAutoEditor('c5');
+  assertEqual([nb.newBuilder, nb.revision, sb.__get('AUTO_ED'), /only the new builder shows/.test(log.toasts.slice(-1)[0])], [true, 4, null, true], 'a workflow with stage-2 steps is listed, never opened in the old builder');
 }
 // The Security page froze the browser on 14 Oct: while the sign-in options were loading, every redraw started another
 // load that returned at once and asked for another redraw, an endless loop. Now a second call gets the SAME promise,
@@ -3538,32 +3687,121 @@ async function testAutomationsReview14Oct(){
   const V = (o) => m.autoNewVersion(base, { ...base, ...o });
   assertEqual([V({}), V({ steps: [base.steps[0], { ...base.steps[1], title: 'b', to: { roles: ['va'] } }] }), V({ steps: [{ ...base.steps[0], n: 3 }, base.steps[1]] }), V({ trigger: { type: 'stage', params: { x: 1, stage: 'Lost' } } }),
     V({ trigger: { type: 'stage', params: { stage: 'Quoted', x: 1 } } }), V({ steps: [base.steps[1], base.steps[0]] }), V({ steps: [base.steps[0]] }), m.autoNewVersion(null, base)],
-    [false, false, false, false, true, true, true, false], 'versions: words, numbers and recipients keep what is waiting; another start, or steps added, moved or removed, start it afresh');
-  // saving an automation that is on: another channel → off; another start → asked first
-  const writes = [];
-  const table = { _q: null, insert(row){ writes.push(['insert', row]); this.row = { id: 'n1', ...row }; return this; }, update(row){ writes.push(['update', row]); this.row = { id: 'c1', name: 'X', trigger: { type: 'newLead' }, steps: [], ...row }; return this; },
-    eq(){ return this; }, in(){ return Promise.resolve({ count: 3, error: null }); }, select(){ return this; }, single(){ return Promise.resolve({ data: this.row, error: null }); } };
-  const s2 = autoSandbox({ sb: { from: () => table } }), A2 = s2.__get('AUTO'), log2 = s2.log;
+    [false, false, false, false, false, true, true, false], 'versions: words, numbers, recipients and another start keep what is waiting (a start is a re-arm, stage 2); steps added, moved or removed start it afresh');
+  assertEqual([m.autoNewStart(base, { ...base, trigger: { type: 'stage', params: { stage: 'Quoted', x: 1 } } }), m.autoNewStart(base, { ...base, trigger: { type: 'stage', params: { x: 1, stage: 'Lost' } } }), m.autoNewStart(null, base)],
+    [true, false, false], 'versions: another start is told apart (the save says what waits goes on)');
+  assertEqual([m.autoNewVersion(base, { ...base, trigger: { type: 'stage', params: { stage: 'Quoted', x: 1 } } }, true), m.autoNewVersion(base, { ...base, steps: [base.steps[0], { ...base.steps[1], title: 'b' }] }, true),
+    m.autoNewVersion(base, { ...base, trigger: { type: 'stage', params: { x: 1, stage: 'Lost' } } }, true)],
+    [true, false, false], 'versions: on an upgraded automation (legacy, still run as phase 4) another start is a new version, as phase 4 made it (what waits stops); words still are not');
+  // saving an automation that is on: another channel → off; another start → asked first (stage 2: through the function)
+  const F2 = autoFnFake([]);
+  const s2 = autoSandbox(F2.extra()), A2 = s2.__get('AUTO'), log2 = s2.log, saves = () => F2.calls.filter(c => c.step==='save');
   s2.STATE.data.settings = { catalog: { templates: { my_t: '{hi}, thanks for asking.' }, msgTemplates: { my_t: { name: 'Thanks', channel: 'email' } } } };
-  A2.list = [s2.autoNormalize({ id: 'c1', name: 'Texts', enabled: true, created_by_name: 'Alex Owner', trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'text', templateKey: 'my_t' }] })];
+  F2.rows.c1 = { id: 'c1', name: 'Texts', enabled: true, revision: 1, created_by_name: 'Alex Owner', trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'text', templateKey: 'my_t' }] };
+  A2.list = [s2.autoNormalize(F2.rows.c1)];
   s2.openAutoEditor('c1');
   let e2 = s2.__get('AUTO_ED');
   e2.def.steps = [{ id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' }];
   await s2.autoSaveEditor();
-  assertEqual([writes.length, writes[0] && writes[0][1].enabled, /It is off/.test(log2.toasts.slice(-1)[0])], [1, false, true], 'save: an automation that is on and swaps its text for an email is saved OFF (a new channel needs its own switch-on)');
-  A2.list = [s2.autoNormalize({ id: 'c1', name: 'Team', enabled: true, created_by_name: 'Alex Owner', trigger: { type: 'stage', params: { stage: 'Lost' } }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'Moved' }] })];
-  writes.length = 0; const c0 = log2.confirms.length;
+  assertEqual([saves().length, F2.rows.c1.enabled, /It is off/.test(log2.toasts.slice(-1)[0]), F2.calls.map(c => c.step + (c.step==='publish' ? ':' + c.on : ''))], [1, false, true, ['publish:false', 'save']], 'save: an automation that is on and swaps its text for an email is switched OFF first, then saved (a new channel needs its own switch-on)');
+  F2.rows.c1 = { id: 'c1', name: 'Team', enabled: true, revision: 1, created_by_name: 'Alex Owner', trigger: { type: 'stage', params: { stage: 'Lost' } }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'Moved' }] };
+  A2.list = [s2.autoNormalize(F2.rows.c1)];
+  F2.calls.length = 0; const c0 = log2.confirms.length;
   s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
   e2.def.trigger = { type: 'stage', params: { stage: 'Quoted' } };
   await s2.autoSaveEditor();
-  assertEqual([writes.length, log2.confirms.length - c0, /3 runs are waiting to act/.test(log2.confirms.slice(-1)[0].m), /only acts on what happens after you save/.test(log2.confirms.slice(-1)[0].m)], [0, 1, true, true], 'save: an automation that is on and gets another start asks first, with the runs waiting, and writes nothing yet');
-  await log2.confirms.slice(-1)[0].fn(); await new Promise(r => setImmediate(r));
-  assertEqual([writes.length, writes[0] && writes[0][1].trigger.params.stage, writes[0] && writes[0][1].enabled], [1, 'Quoted', true], 'save: after yes it is saved (still on; the database re-arms it)');
-  writes.length = 0; const c1 = log2.confirms.length;
+  const sv = saves()[0];
+  assertEqual([log2.confirms.length - c0, saves().length, sv && sv.definition.triggers[0].filters.segments[0].rules[0].v, F2.rows.c1.enabled, F2.calls.some(c => c.step==='publish'), /What was already waiting goes on; the new start counts from now/.test(log2.toasts.slice(-1)[0])],
+    [0, 1, 'Quoted', true, false, true], 'save: another start on an automation that is on: saved at once, still on (the database re-arms it, what waits goes on), and the toast says so');
+  const flush = async () => { for (let i = 0; i < 6; i++) await new Promise(r => setImmediate(r)); };
+  F2.calls.length = 0; const c0b = log2.confirms.length;
+  A2.list = [s2.autoNormalize(F2.rows.c1)];
+  s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
+  e2.def.steps.push({ id: 's2', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'Also' });
+  await s2.autoSaveEditor();
+  assertEqual([F2.calls.length, log2.confirms.length - c0b, /3 runs are waiting to act/.test(log2.confirms.slice(-1)[0].m), /only acts on what happens after you save/.test(log2.confirms.slice(-1)[0].m)], [0, 1, true, true], 'save: an automation that is on and gets a step more asks first, with the runs waiting, and saves nothing yet');
+  await log2.confirms.slice(-1)[0].fn(); await flush();
+  assertEqual([saves().length, F2.rows.c1.enabled, F2.calls.some(c => c.step==='publish')], [1, true, false], 'save: after yes it is saved (still on; a new version: what waited stops)');
+  F2.calls.length = 0; const c1 = log2.confirms.length;
+  A2.list = [s2.autoNormalize(F2.rows.c1)];
   s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
   e2.def.steps[0].title = 'New words';
   await s2.autoSaveEditor();
-  assertEqual([writes.length, log2.confirms.length - c1], [1, 0], 'save: new words only: saved at once, nothing waiting stops');
+  assertEqual([saves().length, log2.confirms.length - c1, saves()[0].expected_revision, saves()[0].definition.triggers[0].name], [1, 0, 4, 'Pipeline stage changed'], 'save: new words only: saved at once, nothing waiting stops (the revision it was opened at)');
+  // switched off from the list while the editor was open: a save of other changes never switches it back on
+  A2.list = [s2.autoNormalize(F2.rows.c1)];
+  s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
+  F2.rows.c1.enabled = false;
+  e2.def.steps[0].title = 'Typo fixed'; F2.calls.length = 0;
+  await s2.autoSaveEditor();
+  assertEqual([F2.calls.map(c => c.step), F2.rows.c1.enabled, /switched off meanwhile/.test(log2.toasts.slice(-1)[0])], [['save'], false, true], 'save: switched off meanwhile (another tab): saved, kept OFF (only a switch moved in this editor publishes), and it says so');
+  // switching off in the editor: the switch-off goes first; when it fails nothing is saved and it says it is still ON
+  F2.rows.c1.enabled = true; A2.list = [s2.autoNormalize(F2.rows.c1)];
+  s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
+  e2.enabled = false; e2.def.steps[0].title = 'Other words'; F2.calls.length = 0;
+  F2.ctl.failPublish = { on: false, reason: 'no connection' };
+  await s2.autoSaveEditor();
+  assertEqual([F2.calls.map(c => c.step), F2.rows.c1.enabled, F2.rows.c1.definition.nodes.s1.config.title, /still ON/.test(log2.toasts.slice(-1)[0])], [['publish'], true, 'Typo fixed', true],
+    'save with the switch turned off: the switch-off fails → nothing saved, it says it is still ON (never "saved, but it is off")');
+  F2.ctl.failPublish = null; F2.calls.length = 0;
+  await s2.autoSaveEditor();
+  assertEqual([F2.calls.map(c => c.step + (c.step==='publish' ? ':' + c.on : '')), F2.rows.c1.enabled, F2.rows.c1.definition.nodes.s1.config.title], [['publish:false', 'save'], false, 'Other words'],
+    '…again: switched off first, then saved (never live with the new words)');
+  // switched on in the editor: the function's own words are asked about before it goes on
+  F2.rows.c7 = { id: 'c7', name: 'Mail later', enabled: false, revision: 1, trigger: { type: 'jobClosed' }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' }] };
+  A2.list = [s2.autoNormalize(F2.rows.c7)];
+  s2.openAutoEditor('c7'); e2 = s2.__get('AUTO_ED');
+  e2.enabled = true; F2.calls.length = 0; const c2 = log2.confirms.length;
+  await s2.autoSaveEditor();
+  assertEqual([F2.calls.map(c => c.step + (c.step==='publish' ? ':' + c.on + ':' + (c.confirm===true) : '')), F2.rows.c7.enabled, log2.confirms.length - c2, /Sends to customers: Send email/.test(log2.confirms.slice(-1)[0].m), /once you say yes/.test(log2.toasts.slice(-1)[0])],
+    [['save', 'publish:true:false'], false, 1, true, true], 'save with the switch turned on: saved, then the function\'s words are asked about (what it sends) before it goes on');
+  await log2.confirms.slice(-1)[0].fn(); await flush();
+  assertEqual([F2.calls.slice(-1)[0].confirm, F2.calls.slice(-1)[0].expected_revision, F2.rows.c7.enabled], [true, 3, true], '…yes → published with that yes (at the revision just saved)');
+  // the editor's own switch, turned on with its "This sends to real customers" yes: the save publishes with that yes
+  // (asked once, as the list switch), never a second question about the same sends
+  F2.rows.c8 = { id: 'c8', name: 'Mail soon', enabled: false, revision: 1, trigger: { type: 'jobClosed' }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' }] };
+  A2.list = [s2.autoNormalize(F2.rows.c8)];
+  s2.openAutoEditor('c8'); e2 = s2.__get('AUTO_ED');
+  F2.calls.length = 0; const c4 = log2.confirms.length;
+  s2.autoEdToggle();
+  assertEqual([log2.confirms.length - c4, /This sends to real customers/.test(log2.confirms.slice(-1)[0].m), e2.enabled, F2.calls.length], [1, true, false, 0], 'the editor\'s switch on a customer automation asks first (nothing called)');
+  log2.confirms.slice(-1)[0].fn();
+  await s2.autoSaveEditor(); await flush();
+  assertEqual([F2.calls.map(c => c.step + (c.step==='publish' ? ':' + c.on + ':' + (c.confirm===true) : '')), F2.rows.c8.enabled, log2.confirms.length - c4, s2.__get('AUTO_ED')],
+    [['save', 'publish:true:true'], true, 1, null], '…yes, then Save: saved and published with that yes, asked once');
+  // an upgraded row whose doc is still its upgrade (the engine runs its phase-4 steps) and whose phase-4 steps share an
+  // id (phase 4 refuses them): it opens as those steps, as before stage 2, so the switch and Save refuse with the same
+  // words (never "on" while nothing can run); removing one and adding it again saves. Once its doc changed, the doc rules.
+  const twice = { trigger: { type: 'newLead', params: {} }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'One' }, { id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'Two' }] };
+  F2.rows.c10 = { id: 'c10', name: 'Twice', enabled: false, revision: 2, ...JSON.parse(JSON.stringify(twice)), definition: s2.wfFromFlat(twice, null), settings: { reentry: 'legacy_always' } };
+  A2.list = [s2.autoNormalize(F2.rows.c10)]; F2.calls.length = 0;
+  s2.toggleAutomation('c10'); await flush();
+  assertEqual([A2.list[0].def.steps.map(s => s.id), Object.keys(F2.rows.c10.definition.nodes), F2.calls.length, log2.toasts.slice(-1)[0], F2.rows.c10.enabled],
+    [['s1', 's1'], ['s1', 's3'], 0, 'Fix it first: Two steps share the same inside name: remove one and add it again.', false], 'a row that still runs its phase-4 steps with an id twice: listed as those steps; the switch refuses with the same words, nothing called');
+  s2.openAutoEditor('c10'); e2 = s2.__get('AUTO_ED');
+  await s2.autoSaveEditor();
+  assertEqual([F2.calls.length, log2.toasts.slice(-1)[0], s2.__get('AUTO_ED')===e2], [0, 'Two steps share the same inside name: remove one and add it again.', true], '…Save refuses with the same words (the editor stays open)');
+  e2.def.steps.splice(1, 1); e2.def.steps.push({ id: s2.flowStepId(e2.def.steps), kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'Two' });
+  await s2.autoSaveEditor();
+  assertEqual([F2.calls.map(c => c.step), Object.keys(F2.calls[0].definition.nodes), A2.list[0].def.steps.map(s => s.id)], [['save'], ['s1', 's2'], ['s1', 's2']], '…one removed and added again: saved (what runs now is the doc, its ids each once)');
+  const moved = { ...JSON.parse(JSON.stringify(twice)), steps: [twice.steps[0], { ...twice.steps[1], title: 'Two, changed' }] };
+  F2.rows.c11 = { id: 'c11', name: 'Twice, edited', enabled: false, revision: 3, ...JSON.parse(JSON.stringify(twice)), definition: s2.wfFromFlat(moved, null), settings: { reentry: 'legacy_always' } };
+  A2.list = [s2.autoNormalize(F2.rows.c11)]; F2.calls.length = 0;
+  s2.toggleAutomation('c11'); await flush();
+  assertEqual([A2.list[0].def.steps.map(s => s.id), F2.calls.map(c => c.step + ':' + c.on), F2.rows.c11.enabled], [['s1', 's3'], ['publish:true'], true], 'an upgraded row whose doc changed since (the engine runs the doc): opens and switches on as its doc');
+  // the list switch of a workflow only the new builder shows: the function asks first, with its own words
+  const docN = { schema: 2, seq: 3, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: { match: 'all', segments: [{ match: 'all', rules: [] }] } }], nodes: { n1: { kind: 'action', type: 'send_email', name: 'Mail', config: { subject: 'Hi', body: 'x' }, out: { next: null } } } };
+  F2.rows.c9 = { id: 'c9', name: 'New kind', enabled: false, revision: 2, definition: docN, list_summary: { audience: 'customer' } };
+  A2.list = [s2.autoNormalize(F2.rows.c9)]; F2.calls.length = 0; const c3 = log2.confirms.length;
+  s2.toggleAutomation('c9'); await flush();
+  assertEqual([A2.list[0].newBuilder, F2.calls.map(c => [c.step, c.on, c.confirm===true, c.expected_revision]), F2.rows.c9.enabled, log2.confirms.length - c3, /Sends to customers: Send email/.test(log2.confirms.slice(-1)[0].m)],
+    [true, [['publish', true, false, 2]], false, 1, true], 'the list switch of a new-builder workflow: the function asks first and its words (what it sends, where) are shown');
+  await log2.confirms.slice(-1)[0].fn(); await flush();
+  assertEqual([F2.calls.slice(-1)[0].confirm, F2.rows.c9.enabled, A2.list[0].enabled], [true, true, true], '…yes → published with that yes');
+  // someone saved since the list was shown: not switched on, the row read again
+  F2.rows.c9.enabled = false; F2.rows.c9.revision = 5; A2.list[0].enabled = false; A2.list[0].revision = 2;
+  s2.toggleAutomation('c9'); await flush();
+  assertEqual([F2.rows.c9.enabled, A2.list[0].revision, /changed this automation meanwhile/.test(log2.toasts.slice(-1)[0])], [false, 5, true], 'the list switch after someone else saved: 409 → not on, the row read again, and it says so');
   // ready-made automations taken off the list
   const s3 = autoSandbox(), log3 = s3.log;
   s3.STATE.data.settings = { catalog: { notify: { newLead: { on: true } } } };
