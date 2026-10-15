@@ -2469,16 +2469,22 @@ function vacationApplyPrivate(data, id, row){
   if (pay) pays[id] = pay; else delete pays[id];
   const v = (data.vacations || []).find(x => x && x.id === id);
   if (v && (v.note || '') !== note) { v.note = note; changed = true; }
-  if (v && pay && (v.options || {}).pay !== pay) { v.options = { ...v.options, pay }; changed = true; }
+  if (v && pay && ((v.options || {}).pay !== pay || v.payKnown === false)) { v.options = { ...v.options, pay }; v.payKnown = true; changed = true; }
   return changed;
 }
 // Reading the vacations list again after it failed (retryVacationsLoad): 1, 5 and 15 minutes, then no timer (0).
 function vacationRetryDelay(tries){ return [60000, 300000, 900000][tries] || 0; }
 // The note, and the private pay when there is one (it wins). Without one, the row's own options.pay stays: a row not moved
-// yet, or an app from before stage 3 follow-up 2.
+// yet, or an app from before stage 3 follow-up 2. payKnown: the pay is a real value, not options' 'unpaid' default (a login
+// that can't read the private pay, or a row moved out with none there): the screens then name no pay (vacationPayText).
 function vacationWithNote(v, notes, pays){
   const pay = pays && VACATION_PAY.includes(pays[v.id]) ? pays[v.id] : '';
-  return { ...v, note: (notes && notes[v.id]) || '', ...(pay ? { options: { ...v.options, pay } } : {}) };
+  return { ...v, note: (notes && notes[v.id]) || '', ...(pay ? { options: { ...v.options, pay }, payKnown: true } : {}) };
+}
+// A vacation's paid / unpaid leave in words; a pay this login doesn't know (payKnown false) is named neutrally, never "Unpaid".
+function vacationPayText(v){
+  if (!v || v.payKnown === false) return 'Leave on the payroll board';
+  return (v.options || {}).pay==='paid' ? 'Paid leave' : 'Unpaid leave';
 }
 // workingDays (optional; employee.workingDays): "due back" on their next working day (vacationBackDay). Without it, the
 // person's own from the people list, so every screen (badges, banner, assign warnings, Settings) says the same day.
@@ -2530,8 +2536,9 @@ function vacationPayrollLines(vacations, who, from, to, tz, workingDays, today){
     if (!days) return;
     const a = parseLocalDate(s), b = parseLocalDate(e);
     const range = s===e ? fmtDateShort(s) : a.getMonth()===b.getMonth() ? `${a.getDate()}–${fmtDateShort(e)}` : `${fmtDateShort(s)}–${fmtDateShort(e)}`;
-    const pay = (v.options && v.options.pay)==='paid' ? 'paid' : 'unpaid';
-    out.push({ id: v.id, pay, from: s, to: e, days, text: `${pay==='paid' ? 'Paid' : 'Unpaid'} leave ${range} · ${days} ${days===1 ? 'day' : 'days'}` });
+    // '' = a pay this login doesn't know (vacationPayText): named neutrally, never "Unpaid"
+    const pay = v.payKnown === false ? '' : (v.options && v.options.pay)==='paid' ? 'paid' : 'unpaid';
+    out.push({ id: v.id, pay, from: s, to: e, days, text: `${pay==='paid' ? 'Paid' : pay ? 'Unpaid' : 'On'} leave ${range} · ${days} ${days===1 ? 'day' : 'days'}` });
   });
   return out;
 }
@@ -3531,7 +3538,8 @@ function mapVacationRow(r){
   return { id:r.id, employeeId:r.employee_id, employeeName:r.employee_name||'', startsOn:r.starts_on, endsOn:r.ends_on,
     standInId:r.stand_in_id||null, standInName:r.stand_in_name||'', options:vacationOptionsNorm(r.options),
     createdBy:r.created_by||null, createdAt:r.created_at||null, endedAt:r.ended_at||null, cancelledAt:r.cancelled_at||null,
-    remindedAt:r.reminded_at||null, endShift: !!(r.options && r.options.endShift === true) };
+    remindedAt:r.reminded_at||null, endShift: !!(r.options && r.options.endShift === true),
+    payKnown: !!(r.options && VACATION_PAY.includes(r.options.pay)) };
 }
 // The saved row into STATE.data.vacations (added, or replacing the old copy); returns the mapped vacation.
 function keepVacationRow(row){
@@ -4499,10 +4507,13 @@ function setupVacationsChannel(){
 }
 // Another owner's or manager's change to a note or paid / unpaid leave (stage 3 follow-up 2, review): into the maps the
 // vacations' own live updates read, and onto the vacation. The echo of this app's own save changes nothing: no redraw.
+// One redraw per frame: part B's copy sends one event per vacation, so a burst draws once, not once per row.
+let VAC_NOTE_RENDER = 0;
 function handleVacationNoteRealtimeChange(payload){
   if (PRESENT || !STATE.data) return;
   const del = payload.eventType === 'DELETE', id = del ? payload.old && payload.old.vacation_id : payload.new && payload.new.vacation_id;
-  if (vacationApplyPrivate(STATE.data, id, del ? null : payload.new)) renderKeepingInput();
+  if (!vacationApplyPrivate(STATE.data, id, del ? null : payload.new) || VAC_NOTE_RENDER) return;
+  VAC_NOTE_RENDER = requestAnimationFrame(() => { VAC_NOTE_RENDER = 0; renderKeepingInput(); });
 }
 // The vacations list did not load (stage 3 follow-up 7, review): it is read again on its own, and the channel subscribes
 // once it works, for every role. Tried when the browser is back online, when the tab is shown again, and 1, 5 and 15
@@ -4517,10 +4528,11 @@ function vacationsRetryLater(fresh){
 async function retryVacationsLoad(){
   if (VAC_RETRY.busy || !STATE.dataLoaded || !STATE.data || !STATE.data.vacationsError) return;
   VAC_RETRY.busy = true;
+  const start = STATE.data;   // a read made under one login never lands in the next one's data (a shared office device)
   try {
     const [vr, nr] = await Promise.all([fetchAllRows('employee_vacations', 'id', vacationsLoadQuery), fetchAllRows('employee_vacation_notes', 'vacation_id')]);
     const data = STATE.data;
-    if (!data || !data.vacationsError) return;   // signed out, or a full load brought the list meanwhile
+    if (!data || data !== start || !data.vacationsError) return;   // signed out or in again, or a full load brought the list meanwhile
     if (vr.error) { vacationsRetryLater(); return; }
     if (!nr.error) { data.vacationNotes = vacationNotesMap(nr.data); data.vacationPays = vacationPaysMap(nr.data); }
     data.vacations = (vr.data || []).map(r => vacationWithNote(mapVacationRow(r), data.vacationNotes, data.vacationPays));
@@ -20121,7 +20133,7 @@ function vacationBox(x, canEdit){
   const vid = esc(jsStr(v.id)), now = v.startsOn <= today, overdue = vacationOverdue(v, today, tz);
   const standIn = vacationOpt(v, 'standIn') ? v.standInName || '' : '';
   const desc = 'From ' + vacationRangeText(v.startsOn, v.endsOn) + (vacationOpt(v, 'autoBack') ? '' : ', then until someone ends it')
-    + (standIn ? ' · Stand-in: ' + standIn : '') + (vacationOpt(v, 'payroll') ? ` · ${v.options.pay==='paid' ? 'Paid' : 'Unpaid'} leave` : '') + (v.note ? ' · ' + v.note : '');
+    + (standIn ? ' · Stand-in: ' + standIn : '') + (vacationOpt(v, 'payroll') ? ' · ' + vacationPayText(v) : '') + (v.note ? ' · ' + v.note : '');
   const acts = edit ? btn('Edit', `openVacationModal('${eid}','${vid}')`, '', 'pencil')
     + (now ? btn(overdue ? 'They\'re back' : 'End now', `endVacationNow('${vid}')`, overdue ? 'primary' : '') : btn('Cancel it', `cancelVacation('${vid}')`)) : '';
   const ticks = VACATION_OPTIONS.filter(o => vacationOpt(v, o.key)).map(o => pill('neutral', o.label)).join('');
@@ -20169,7 +20181,7 @@ function payrollLeaveCard(data, wk){
   if (data.vacationsError) return `<div class="hint" style="margin-top:14px">Leave can't be shown right now: ${esc(data.vacationsError)}</div>`;
   const lines = vacationPayLines(data, wk, bizTz(), todayStr());
   if (!lines.length) return '';
-  const rows = lines.map(({ emp, line, v }) => `<tr><td>${techTag(emp.name)}</td><td>${pill(line.pay==='paid' ? 'good' : 'neutral', line.pay==='paid' ? 'Paid leave' : 'Unpaid leave')} ${esc(vacationRangeText(line.from, line.to))} (${line.days} day${line.days===1 ? '' : 's'})${line.pay==='paid' ? `<div class="hint">Paid leave: ${line.days} day${line.days===1 ? '' : 's'}, add it by hand</div>` : ''}</td><td>${esc((v && vacationOpt(v, 'standIn') && v.standInName) || '—')}</td></tr>`).join('');
+  const rows = lines.map(({ emp, line, v }) => `<tr><td>${techTag(emp.name)}</td><td>${pill(line.pay==='paid' ? 'good' : 'neutral', line.pay==='paid' ? 'Paid leave' : line.pay ? 'Unpaid leave' : 'On leave')} ${esc(vacationRangeText(line.from, line.to))} (${line.days} day${line.days===1 ? '' : 's'})${line.pay==='paid' ? `<div class="hint">Paid leave: ${line.days} day${line.days===1 ? '' : 's'}, add it by hand</div>` : ''}</td><td>${esc((v && vacationOpt(v, 'standIn') && v.standInName) || '—')}</td></tr>`).join('');
   return `<div class="section-title">Leave <span class="tag">${payrollWeekLabel(wk)}</span></div>
     <div class="table-wrap"><table><thead><tr><th>Name</th><th>Leave</th><th>Stand-in</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="hint" style="margin-top:6px">Set on each person's card (Settings → People). The days are their working days (Monday to Friday when none are set). A mark only: pay is not changed automatically, so add paid leave to their pay by hand.</div>`;

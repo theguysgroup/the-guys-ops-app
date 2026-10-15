@@ -171,6 +171,8 @@ const DECLS = [
   'vacationStandInAlertHint', 'vacationShiftLogins', 'vacationOnShift', 'vacationEndShiftFor', 'vacationBackDay',
   // stage 3 follow-ups review: one return day everywhere, pay changes live, no pay in History, the vacations list read again
   'vacationWorkingDaysOf', 'vacationApplyPrivate', 'vacationRetryDelay', 'vacationLogText',
+  // stage 3 follow-ups SQL re-check: a pay this login doesn't know is named neutrally
+  'vacationPayText',
 ];
 
 function extractDecl(source, name){
@@ -2659,6 +2661,21 @@ function testVacations(sb){
     [true, false, false, false, true], 'apply private: a delete empties the maps; no id or no data → nothing; missing maps are made');
   // review (item 7): the vacations list read again after 1, 5 and 15 minutes, then no timer
   assertEqual([0, 1, 2, 3, 9].map(sb.vacationRetryDelay), [60000, 300000, 900000, 0, 0], 'retry delay: three timed tries, then none (only back online / tab shown)');
+  // SQL re-check: a pay this login can't read (options.pay moved out, the private row hidden by RLS) is never shown as "Unpaid"
+  const noPay = sb.mapVacationRow({ id: 'v1', options: { payroll: true } }), hasPay = sb.mapVacationRow({ id: 'v1', options: { payroll: true, pay: 'paid' } });
+  assertEqual([noPay.payKnown, noPay.options.pay, hasPay.payKnown, sb.vacationWithNote(noPay, {}, { v1: 'paid' }).payKnown, sb.vacationWithNote(noPay, {}, {}).payKnown],
+    [false, 'unpaid', true, true, false], 'pay known: from the row only when it carries one; a private pay makes it known');
+  assertEqual([sb.vacationPayText(noPay), sb.vacationPayText(hasPay), sb.vacationPayText(sb.vacationWithNote(noPay, {}, { v1: 'unpaid' })), sb.vacationPayText(V({ options: { pay: 'paid' } })), sb.vacationPayText(null)],
+    ['Leave on the payroll board', 'Paid leave', 'Unpaid leave', 'Paid leave', 'Leave on the payroll board'], 'pay text: paid / unpaid only when known (a vacation without the marker counts as known)');
+  const pk = { vacations: [{ ...noPay }], vacationNotes: {}, vacationPays: {} };
+  assertEqual([sb.vacationApplyPrivate(pk, 'v1', { vacation_id: 'v1', note: null, pay: 'unpaid' }), pk.vacations[0].payKnown, sb.vacationApplyPrivate(pk, 'v1', { vacation_id: 'v1', note: null, pay: 'unpaid' })],
+    [true, true, false], 'apply private: a pay arriving live makes an unknown one known (a redraw, even when it equals the default)');
+  const pkLines = sb.vacationPayrollLines([{ ...V({ options: { payroll: true } }), payKnown: false }], 'Ann', '2026-10-18', '2026-10-24', SYD, [], '2026-10-15');
+  assertEqual(pkLines.map(l => [l.pay, l.text]), [['', 'On leave 20–24 Oct · 4 days']], 'payroll lines: an unknown pay is neither paid nor unpaid');
+  const rsrc = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  const retryFn = rsrc.slice(rsrc.indexOf('async function retryVacationsLoad('), rsrc.indexOf("window.addEventListener('online', () => retryVacationsLoad());"));
+  assertEqual([/const start = STATE\.data;[\s\S]*await Promise\.all[\s\S]*data !== start/.test(retryFn), /VAC_NOTE_RENDER = requestAnimationFrame\(/.test(rsrc), /' · ' \+ vacationPayText\(v\)/.test(rsrc)],
+    [true, true, true], 'retry: a read from another login never lands in this one; live note bursts draw once per frame; the person card names the pay by vacationPayText');
   // review (item 1): the History line never says paid or unpaid (every signed-in person reads activity_log)
   const lt = sb.vacationLogText(V({ standInName: 'Sam', options: { payroll: true, pay: 'paid', standIn: true, autoBack: true } }), 'Vacation set');
   assertEqual([lt, /paid|unpaid|leave/i.test(sb.vacationLogText(V({ options: { payroll: true, pay: 'unpaid' } }), 'Vacation changed'))], ['Vacation set: 20 Oct – 24 Oct · stand-in Sam', false], 'log text: dates and stand-in, never paid / unpaid leave');
@@ -2723,7 +2740,7 @@ function testVacations(sb){
 
   // the row and the errors
   assertEqual(sb.mapVacationRow({ id: 'r1', employee_id: 'e1', employee_name: 'Ann', starts_on: '2026-10-20', ends_on: '2026-10-24', stand_in_id: 'e2', stand_in_name: 'Bob', options: { noNotify: true, autoBack: false, pay: 'paid' }, note: null, created_by: 'p1', created_at: '2026-10-14T00:00:00Z', ended_at: null, cancelled_at: null, reminded_at: null }),
-    { id: 'r1', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Bob', options: { ...all(false), noNotify: true, pay: 'paid' }, createdBy: 'p1', createdAt: '2026-10-14T00:00:00Z', endedAt: null, cancelledAt: null, remindedAt: null, endShift: false }, 'mapVacationRow: camelCase, options normalized');
+    { id: 'r1', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Bob', options: { ...all(false), noNotify: true, pay: 'paid' }, createdBy: 'p1', createdAt: '2026-10-14T00:00:00Z', endedAt: null, cancelledAt: null, remindedAt: null, endShift: false, payKnown: true }, 'mapVacationRow: camelCase, options normalized');
   // "end their shift now" (stage 3 follow-up 5): a top-level marker, never a tick, never copied to the next vacation
   const esRow = sb.mapVacationRow({ id: 'r2', employee_id: 'e1', employee_name: 'Ann', starts_on: '2026-10-20', ends_on: '2026-10-24', options: { badge: true, endShift: true }, created_at: '2026-10-14T00:00:00Z' });
   assertEqual([esRow.endShift, 'endShift' in esRow.options, sb.mapVacationRow({ id: 'r3', options: { endShift: 'true' } }).endShift, 'endShift' in sb.vacationOptionsFor([esRow], ann), sb.vacationOptionsFor([esRow], ann).badge],
@@ -2752,8 +2769,10 @@ function testVacations(sb){
   assertEqual([g5 !== guard, without === g5], [true, true], 'follow-up 2/4: apart from the two additions, the guard is section 5\'s');
   assertEqual([/deferrable initially deferred/.test(fuRun) && /confrelid = 'public\.employee_vacations'::regclass and not condeferrable/.test(fuRun), /add column if not exists pay text;/.test(fuRun), /constraint employee_vacation_notes_pay check \(pay is null or pay in \('paid', 'unpaid'\)\)/.test(fuRun)],
     [true, true, true], 'follow-up 2: notes.pay (paid / unpaid only); the notes FK checked at commit, so the guard can write it while the vacation is inserted');
-  const copy = fuRun.indexOf("on conflict (vacation_id) do update set pay = coalesce(n.pay, excluded.pay);"), stripRows = fuRun.indexOf("update public.employee_vacations set options = options - 'pay' where options ? 'pay';");
+  const copy = fuRun.indexOf("on conflict (vacation_id) do update set pay = excluded.pay\n  where n.pay is null or (excluded.pay = 'paid' and n.pay <> 'paid');"), stripRows = fuRun.indexOf("update public.employee_vacations set options = options - 'pay' where options ? 'pay';");
   assertEqual([copy > 0, stripRows > copy, stripRows > fuRun.indexOf('create or replace function public.employee_vacations_guard()')], [true, true, true], 'follow-up 2: the pays copied first, then stripped from the rows everyone reads (after the new guard, which skips their clash check)');
+  assertEqual([/coalesce\(n\.pay, excluded\.pay\)/.test(fuRun), /set pay = case when tg_op = 'UPDATE' and excluded\.pay = 'unpaid' and n\.pay is not null then n\.pay else excluded\.pay end;/.test(guard)], [false, true],
+    'follow-up 2 (SQL re-check): the copy follows the rule of the guard ("paid" from a stale tab wins over the private value, its default "unpaid" never does), and leaves a pay that would not change alone');
   const pols = fuRun.match(/create policy "[^"]+" on public\.employee_vacation(s|_notes) for (insert|update)[^\n]*/g) || [];
   assertEqual([/revoke all on public\.employee_vacations, public\.employee_vacation_notes from anon;/.test(fuRun), /revoke delete, truncate, references, trigger on public\.employee_vacations, public\.employee_vacation_notes from authenticated;/.test(fuRun), pols.length, pols.every(p => / to authenticated$/.test(p)), /create policy[^\n]*for (select|delete)/.test(fuRun)],
     [true, true, 4, true, false], 'follow-up 3: nothing for anon, no delete / truncate / references / trigger, the 4 add / update policies to authenticated only (the reads untouched)');

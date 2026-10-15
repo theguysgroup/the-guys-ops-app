@@ -418,10 +418,15 @@ begin
 end $function$;
 -- (the trigger itself is section 5's, unchanged)
 
--- 6. Copy the pays there are now (a private value already there wins).
+-- 6. Copy the pays there are now, by the guard's rule: a private value already there wins, except over 'paid' (between the
+--    app's deploy and part B, an options.pay next to a private one was written later, by a tab of the old app; 'unpaid' is
+--    that app's default, 'paid' was chosen). A row whose private pay would not change is left alone. Each row added or
+--    changed is one realtime event to every open owner's and manager's tab (the notes are in the publication since part A),
+--    on top of step 7's one per vacation.
 insert into public.employee_vacation_notes as n (vacation_id, business_id, pay)
   select id, business_id, options->>'pay' from public.employee_vacations where options->>'pay' in ('paid', 'unpaid')
-on conflict (vacation_id) do update set pay = coalesce(n.pay, excluded.pay);
+on conflict (vacation_id) do update set pay = excluded.pay
+  where n.pay is null or (excluded.pay = 'paid' and n.pay <> 'paid');
 
 -- 7. Strip them from the rows everyone reads. The guard above skips the clash check for these rows (only pay differs), so an
 --    old row whose dates touch another after a time-zone change can't stop this.
