@@ -122,11 +122,11 @@ const DECLS = [
   'chatRulesApp', 'notifyRulesApp', 'notifyCardsNow', 'setRows', 'setToggle',
   'AUTO_TABLE', 'AUTO_BUSINESS_ID', 'AUTO_TRIGGERS', 'AUTO_MIRROR_TRIGGERS', 'AUTO_CONDS', 'AUTO_OP_WORDS', 'AUTO_ACTIONS', 'AUTO_FIELDS', 'AUTO_WAIT_UNITS', 'AUTO_DUE', 'AUTO_LIMITS', 'AUTO_PUSH_DEFAULT', 'AUTO_TPL_MIRROR',
   'autoTrig', 'autoValueLabel', 'autoCondValues', 'autoCondFits', 'autoFieldsFor', 'autoDefaultPush', 'autoHm', 'autoHhmm', 'autoAndList', 'autoIsCustomerStep', 'autoHasCustomer', 'autoAudience', 'autoCleanStep', 'WF_ID_RE', 'wfCanon', 'WF_V1_ACTIONS', 'WF_V1_TRIGGER_NAMES', 'wfWinDormant', 'wfToFlat', 'wfFromFlat', 'autoIdsBad', 'autoNormalize',
-  'autoPeopleText', 'autoTaskWho', 'autoDueText', 'autoHoursShort', 'autoDoShort', 'autoFlowChips', 'autoWhenShort', 'autoSentence', 'autoBadBlanks', 'autoStepIssues', 'autoStepProblems', 'autoProblems', 'autoMatches', 'autoTplUsers', 'autoPreviewHtml',
-  'autoReadyRows', 'autoGatePill', 'autoStatusPill', 'autoRowHtml', 'autoListsHtml',
+  'autoPeopleText', 'autoTaskWho', 'autoDueText', 'autoHoursShort', 'autoDoShort', 'autoFlowChips', 'autoWhenShort', 'autoSentence', 'autoBadBlanks', 'autoStepIssues', 'autoStepProblems', 'autoProblems', 'autoTplUsers', 'autoPreviewHtml',
+  'wfSystemRows', 'autoReadyRows', 'autoGatePill', 'autoStatusPill',
   // the 14 Oct review: safety settings, opt-outs, "Try it", versions, ready-mades off the list
   'AUTO_SAFETY_DEFAULTS', 'AUTO_EMAIL_FOOTER_DEFAULT', 'autoSafetyNorm', 'autoSafetyProblems', 'autoSafetyPatch', 'autoTzLabel', 'autoSafetyLine', 'autoEmailSigner',
-  'autoCustomerChannels', 'autoNewVersion', 'autoNewStart', 'autoTryRecords', 'autoTryWhen', 'autoTryResultHtml', 'autoRemovedHtml', 'optOutKeys', 'optOutRowsFor', 'optOutInserts', 'optOutControlHtml',
+  'autoCustomerChannels', 'autoNewVersion', 'autoNewStart', 'autoTryRecords', 'autoTryWhen', 'autoTryResultHtml', 'optOutKeys', 'optOutRowsFor', 'optOutInserts', 'optOutControlHtml',
   // Names and labels (round 3, C-names)
   'officeLabel', 'officePossessive', 'bizShortName', 'ownerNamesText', 'officeAgentName', 'officeAssignee', 'taskBoardLabel', 'PERSON_COLORS', 'techColor', 'personReportName', 'payCashTo',
   'brandCacheRead', 'brandSource', 'tplExample', 'brandOf', 'contractorServices', 'CONTRACTOR_TRADES', 'REVIEW_FAMILIES', 'AU_STATE_NAMES', 'COUNTRY_ADJ', 'agreementPlace', 'bizLegalName', 'connWordsIn', 'connWordsNow', 'contractorServiceColor', 'CONTRACTOR_SERVICE_COLOR',
@@ -137,6 +137,18 @@ const DECLS = [
   // Saving keeps the place, the settings search, drag & drop on every upload (round 3, A-ux: T1.8, T1.10, T1.1)
   'motionPageKey', 'renderViewKey', 'renderScrollPlan', 'settingsNavText', 'settingsNavMatch',
   'RECEIPT_TYPES', 'MAX_FILE_MB', 'DROP_RULES', 'dropFileType', 'dropAccepts', 'dropCheck', 'dropRoutePlan', 'dropZoneAttrs',
+  // Settings → Automation: the Workflows list (stage 2, G3.1)
+  'WF_LINK_RULES', 'wfLink', 'wfStartLink', 'WF_PAGE_SIZES', 'WF_LIST_LIMITS', 'wfDayShift', 'wfWallShort', 'wfPausedUntil', 'wfLabels', 'wfItem', 'wfStatusOf', 'wfSearchText', 'wfListRows',
+  'wfSortPage', 'wfPagerNums', 'wfFolderPath', 'wfFolderCanMove', 'wfBulkPlan', 'wfMenuItems', 'wfWhenText', 'wfIconOf', 'wfGoesTo', 'wfDateText', 'wfDayText', 'wfProblemText',
+  'wfFolderReparent', 'wfPublishBlock', 'wfSelBox', 'wfMenuBtn', 'wfPubLockWhy', 'wfPubSwitch', 'wfFolderCardHtml', 'wfCardHtml', 'wfStatsHtml', 'wfTableHtml', 'wfPagerHtml', 'wfDeletedHtml', 'wfReviewHtml', 'wfBreadcrumbHtml', 'wfMenuListHtml',
+  // Settings → Automation → Global Workflow Settings + Message templates links (stage 2, G3.2)
+  'WF_GLOBAL', 'WF_GLOBAL_WHY', 'WF_PAUSE_TEXT', 'BIZ_TZ_FMT', 'bizPartsIn', 'bizToUtc', 'cleanEmail', 'signatureOf', 'WF_WALL_RE', 'wfWallMs', 'wfPauseOccurrences', 'wfPauseUntil', 'wfPausedInfo',
+  'wfPauseStatus', 'wfWallTs', 'wfPauseOverlap', 'wfPauseProblems', 'wfPauseDraft', 'wfPausePlan', 'wfErrorNotifyNorm', 'wfNotifyEmailOk', 'wfErrorNotifyProblems', 'wfErrorNotifyPatch',
+  'wfTplUsers', 'wfWallText', 'wfStatusPillHtml', 'wfNotifyCardHtml', 'wfPauseCardHtml', 'wfBuilderCardHtml', 'wfAiCardHtml', 'wfAutoSaveCardHtml',
+  // Settings → Automation: System rows, the template library, the Notifications page merged in (stage 2, G3.3)
+  'notifyNumInput', 'notifyHourSel', 'wfPublishAsk', 'wfSystemHidePlan', 'wfSystemCardHtml', 'wfPhoneBarWanted', 'WF_TPL_CHIPS', 'WF_TPL_LIMITS', 'WF_TPL_WHY', 'wfTemplateItem', 'wfTemplateRows', 'wfTemplateCardHtml',
+  // the lead's "Assigned to" (stage 2, G3.5, Ofek's answer Q6)
+  'contactPatchToRow', 'mapContactRow', 'leadAssigneeCanSet', 'leadAssigneeChoices', 'leadAssigneeName', 'leadAssigneeLine', 'leadAssigneeMatch',
 ];
 
 function extractDecl(source, name){
@@ -2853,6 +2865,40 @@ testAutomationsEditor();
 testAutomationsEditorKeys();
 testLeadAtomicEdits(loadSandbox());
 testWorkflowAdapter(loadSandbox());
+testWfList(loadSandbox());
+testWfGlobalSettings(loadSandbox());
+testWfSystemRows(loadSandbox());
+testLeadAssignee(loadSandbox());
+
+// ── The lead's "Assigned to" (stage 2 G3.5, Ofek's answer Q6): who may set it (owners and managers anyone, everyone else
+// themselves or nobody — the same rule as the database's contacts_assignee_guard), the picker's people, the names a VA
+// sees, the CRM / pipeline filter, the history line, and the row mapping both ways. ──
+function testLeadAssignee(sb){
+  console.log('\nThe lead\'s "Assigned to" (stage 2, G3.5)');
+  const owner = { id: 'u-o', role: 'owner' }, mgr = { id: 'u-m', role: 'manager' }, va = { id: 'u-v', role: 'va' }, tech = { id: 'u-t', role: 'technician' };
+  const team = [{ id: 'u-v', fullName: 'Vicky Va' }, { id: 'u-o', fullName: 'Olivia Owner' }, { id: 'u-m', fullName: 'Max Manager' }, { id: 'u-t', fullName: 'Guy Tech' }];
+  assertEqual([owner, mgr, va, tech].map(me => ['u-v', 'u-o', '', null].map(to => sb.leadAssigneeCanSet(me, to))),
+    [[true, true, true, true], [true, true, true, true], [true, false, true, true], [false, false, true, true]],
+    'leadAssigneeCanSet: owners and managers assign anyone; others only themselves or nobody');
+  assertEqual(sb.leadAssigneeCanSet(null, 'u-v'), false, 'leadAssigneeCanSet: nobody signed in can\'t assign');
+  assertEqual(sb.leadAssigneeChoices(owner, team, '').map(p => p.id), ['u-t', 'u-m', 'u-o', 'u-v'], 'leadAssigneeChoices: an owner gets the whole team, A–Z');
+  assertEqual(sb.leadAssigneeChoices(va, team, '').map(p => p.id), ['u-v'], 'leadAssigneeChoices: a VA gets only themselves');
+  assertEqual(sb.leadAssigneeChoices(va, team, 'u-o').map(p => p.fullName), ['Olivia Owner', 'Vicky Va'], 'leadAssigneeChoices: the lead\'s current person is always shown (greyed when not one\'s own pick)');
+  assertEqual(sb.leadAssigneeChoices(va, [{ id: 'u-v', fullName: 'Vicky Va' }], 'u-x').map(p => p.fullName), ['Someone else', 'Vicky Va'], 'leadAssigneeChoices: a person this one can\'t see is "Someone else"');
+  assertEqual([sb.leadAssigneeName('u-m', team), sb.leadAssigneeName('', team), sb.leadAssigneeName('u-x', team), sb.leadAssigneeName('u-z', [{ id: 'u-z', fullName: ' ' }])],
+    ['Max Manager', '', 'Someone else', 'A team member'], 'leadAssigneeName');
+  assertEqual([sb.leadAssigneeLine('u-m', team), sb.leadAssigneeLine(null, team)], ['Assigned to Max Manager', 'Assigned user removed'], 'the history line of a change (the same words as the engine\'s automation_apply)');
+  const leads = [{ id: 'a', assignedUserId: 'u-v' }, { id: 'b', assignedUserId: null }, { id: 'c', assignedUserId: 'u-m' }, { id: 'd' }];
+  const ids = f => leads.filter(c => sb.leadAssigneeMatch(c, f, 'u-v')).map(c => c.id).join('');
+  assertEqual(['all', undefined, 'any', 'me', 'none', 'u-m', 'u-x'].map(ids), ['abcd', 'abcd', 'ac', 'a', 'bd', 'c', ''], 'leadAssigneeMatch: all leads / assigned to someone / me / nobody / a person (CRM table, pipeline, inbox)');
+  assertEqual(sb.leadAssigneeMatch({ assignedUserId: 'u-v' }, 'me', null), false, 'leadAssigneeMatch: "me" with nobody signed in matches nothing');
+  assertEqual([sb.contactPatchToRow({ assignedUserId: 'u-m' }), sb.contactPatchToRow({ assignedUserId: '' }), sb.contactPatchToRow({ assignedUserId: null })],
+    [{ assigned_user_id: 'u-m' }, { assigned_user_id: null }, { assigned_user_id: null }], 'contactPatchToRow: the assigned user (nobody = null, never "")');
+  assertEqual([sb.mapContactRow({ id: 'c1', assigned_user_id: 'u-m' }).assignedUserId, sb.mapContactRow({ id: 'c1' }).assignedUserId], ['u-m', null], 'mapContactRow: the assigned user (live updates)');
+  // the first load maps a lead the same way as a live update (else every echo of a change would redraw the page)
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  assertEqual((html.match(/assignedUserId:c\.assigned_user_id\|\|null,/g) || []).length, 2, 'the first load and live updates both read the assigned user');
+}
 
 // ── The old builder's adapter to the stage-2 doc (stage 2 G2.4): wfToFlat opens a doc that is still a phase-4 chain,
 // wfFromFlat makes the doc a save sends — the same as the engine's wfToFlat / upgradeV1 on every shape of the engine's
@@ -3256,22 +3302,9 @@ function testAutomationsBuilder(sb){
   assertEqual([lw[0].n, lw[1].from, lw[1].until, lw[1].outside, by('ready:team:unpaid').def.steps[0].n, by('ready:team:docExpiry').def.trigger.params.days, by('ready:team:newLead').def.steps[0].to.roles],
     [20, '07:00', '19:00', 'skip', 9, 45, ['owner', 'va', 'manager']], 'ready-made team rows: their numbers are the Notifications numbers (unpaid = Tax and payments)');
   assertEqual(R.every(r => !/Aircon|Chimney|The Guys|1300|Ofek|Noam/.test(r.name)), true, 'ready-made rows name no business');
-  // chips and search over the list
+  // (the old list's chips, search and rows are gone since stage 2 G3.3: testWfSystemRows covers the System rows in the
+  // Workflows list)
   const custom = sb.autoNormalize({ id: 'c1', name: 'Quote follow-up', enabled: true, created_by_name: 'Kim', trigger: quote.trigger, steps: quote.steps });
-  const rows = [...R, { key: 'c1', ready: false, name: custom.name, on: true, audience: custom.audience, def: custom.def, createdByName: 'Kim' }];
-  const count = f => rows.filter(r => sb.autoMatches(r, f, '', ctx)).length;
-  assertEqual([count('all'), count('customer'), count('team'), count('ready'), count('mine')], [rows.length, 4, teams.length, R.length, 1], 'chips: All / To customers / To the team / Ready-made / Made by you');
-  assertEqual([rows.filter(r => sb.autoMatches(r, 'all', 'quote', ctx)).map(r => r.key), rows.filter(r => sb.autoMatches(r, 'all', 'window cleaning', ctx)).map(r => r.key)], [['c1'], ['c1']], 'search: by name and by the sentence (a service name)');
-  // the list's HTML: mirrors, gate pills, escaped names and handlers
-  const evilRow = { key: "c'2", ready: false, name: '<img src=x onerror=alert(1)>', on: false, audience: 'team', def: { trigger: { type: 'newLead' }, steps: [push] }, createdByName: '<b>x</b>' };
-  const lists = sb.autoListsHtml([...rows, evilRow], ctx, { filter: 'all', q: '', loaded: true, error: '' });
-  assertEqual([lists.includes('Review request after a closed job'), lists.includes('Off until go-live'), lists.includes('Waits for the business phone'), lists.includes('Ready-made'), lists.includes('Made by you'),
-    lists.includes('<img'), lists.includes('&lt;img'), lists.includes("openAutoEditor('c\\'2')"), lists.includes('&lt;b&gt;x')], [true, true, true, true, true, false, true, true, true], 'list: the ready-made rows with their pills; a typed name and its id are escaped');
-  assertEqual(/To customers[\s\S]*To the team/.test(lists), true, 'list: two blocks, To customers then To the team');
-  const lerr = sb.autoListsHtml(R, ctx, { filter: 'all', q: '', loaded: true, error: 'relation "automations" does not exist' });
-  assertEqual([lerr.includes('Automations could not be loaded. The ready-made ones below still work as before.'), lerr.includes('Review request after a closed job'), lerr.includes('does not exist')], [true, true, false], 'list: before the SQL is run, the ready-made rows still show, with a plain message');
-  assertEqual(sb.autoListsHtml(R, ctx, { filter: 'all', q: '', loaded: false, error: '' }).includes('Loading your automations…'), true, 'list: says it is loading');
-  assertEqual(sb.autoListsHtml(R, ctx, { filter: 'mine', q: '', loaded: true, error: '' }).includes('Nothing matches.'), true, 'list: nothing of your own yet');
   // previews: words escaped first, then filled; texts counted like phones do
   const pv = sb.autoPreviewHtml('text', '', '{hi}, it’s <b>us</b>', ctx.sample);
   assertEqual([pv.includes('Hi Sarah, it’s &lt;b&gt;us&lt;/b&gt;'), /\d+ characters · 1 text · a curly quote/.test(pv)], [true, true], 'preview: a text bubble, escaped, with its count (a curly quote warns)');
@@ -3296,7 +3329,7 @@ function testAutomationsBuilder(sb){
   const als = extractDecl(script, 'applyLeadStage');
   assertEqual([als.includes('const patch = { status: stage, stageChangedAt: nowIso, ...extra };'), /db\.contacts\.update\(c\.id, patch\)\.then\(saved => \{ if \(saved\) autoEmitStage\(c\.id, stage\); \}\)/.test(als)], [true, true], 'a stage move saves the same patch; the engine is told only after the save (and the Undo)');
   // the pure helpers never redraw or touch the database
-  const pure = ['autoNormalize', 'wfToFlat', 'wfFromFlat', 'autoProblems', 'autoStepIssues', 'autoSentence', 'autoFlowChips', 'autoMatches', 'autoReadyRows', 'autoRowHtml', 'autoListsHtml', 'autoPreviewHtml'];
+  const pure = ['autoNormalize', 'wfToFlat', 'wfFromFlat', 'autoProblems', 'autoStepIssues', 'autoSentence', 'autoFlowChips', 'wfSystemRows', 'autoReadyRows', 'autoPreviewHtml'];
   assertEqual(pure.filter(n => /\brender\(|\bdb\.|\bsb\.|fetch\(/.test(extractDecl(script, n))), [], 'the builder\'s pure helpers never redraw, read the database or call a server');
 }
 // A sandbox with the whole builder (every auto* function and AUTO* constant) for its windows and saves.
@@ -3304,7 +3337,8 @@ function autoSandbox(extra){
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   const autoNames = [...new Set([...script.matchAll(/\n(?:async )?function (auto\w*)\(/g)].map(m => m[1]).concat([...script.matchAll(/\nconst (AUTO\w*)\s*=/g)].map(m => m[1])))].filter(n => !DECLS.includes(n) && !/^automation/i.test(n));
   const more = ['readOnlyReason', 'flowEd', 'flowCtx', 'flowRenderBlocked', 'flowMainHtml', 'flowSideHtml', 'flowPanelHtml', 'flowIsInline', 'tplHighlight', 'renderTemplatesPage', 'TPL_EXAMPLE', 'tplPreviewHtml', 'tplActionsHtml', 'tplProblemsHtml',
-    'toggleAutomation', 'deleteAutomation', 'duplicateAutomation', 'openAutoEditor', 'openAutoPage', 'loadAutomations', 'loadAutoRunCounts', 'renderAutomationsPage', 'renderNotificationsPage', 'newMsgTemplate', 'editMsgTemplate', 'saveMsgTemplate', 'deleteMsgTemplate', 'cancelMsgTemplate', 'brandOf'];
+    'toggleAutomation', 'deleteAutomation', 'duplicateAutomation', 'openAutoEditor', 'openAutoPage', 'loadAutomations', 'loadAutoRunCounts', 'wfSystemHide', 'newMsgTemplate', 'editMsgTemplate', 'saveMsgTemplate', 'deleteMsgTemplate', 'cancelMsgTemplate', 'brandOf', 'WF_DATA', 'wfInvalidate',
+    'wfTplPill', 'wfEnsure', 'WF_PAUSE_COLS', 'wfFetchPauses', 'wfFetchRows', 'wfPageShowing', 'settingsPageKey', 'OLD_SETTINGS_PAGES', 'WF_UI', 'wfGlobalSettingsHtml', 'WF_GS', 'wfFetchList', 'WF_LIST_COLS', 'wfFetchRegistry'];
   const src = DECLS.map(n => extractDecl(script, n)).concat(autoNames.map(n => extractDecl(script, n)), more.filter(n => !autoNames.includes(n) && !DECLS.includes(n)).map(n => extractDecl(script, n))).join('\n\n');
   const log = { toasts: [], confirms: [], db: [], renders: 0, opened: [], modal: '' };
   const sandbox = {
@@ -3357,7 +3391,7 @@ function testAutomationsEditor(){
   sb.STATE.data.settings = { reviewRequestsAuto: false, phoneEnabled: false, catalog: { reviews: { sendFrom: 9 } } };
   sb.openAutoEditor('ready:review');
   h = log.modal;
-  assertEqual([h.includes('Ready-made automation'), h.includes('This sends to real customers. It stays off until you turn it on at go-live.'), h.includes('Through GoHighLevel for now'), h.includes("autoReadyAct('setReviewCfg', 'sendFrom', this.value)"),
+  assertEqual([h.includes('System workflow'), h.includes('This sends to real customers. It stays off until you turn it on at go-live.'), h.includes('Through GoHighLevel for now'), h.includes("autoReadyAct('setReviewCfg', 'sendFrom', this.value)"),
     h.includes('<option value="9" selected>9 am</option>'), h.includes('Back to the default'), h.includes('Duplicate'), h.includes('>Delete<'), h.includes('readonly')],
     [true, true, true, true, true, true, true, false, true], 'ready-made review: its live hours with the Google reviews setter, go-live banner, Back to the default and Duplicate, no Delete');
   sb.openAutoEditor('ready:missedText');
@@ -3381,8 +3415,8 @@ function testAutomationsEditor(){
   // the Message templates tab: who sends each built-in message, and when (live numbers)
   sb.STATE.data.settings = { reviewRequestsAuto: false, chatAutoSms: false, phoneEnabled: false, catalog: { reviews: { sendFrom: 9 }, msgTemplates: { my_a: { name: 'Quote', channel: 'email' } }, templates: { my_a: 'Hi {first_name}' } } };
   const tp = sb.renderTemplatesPage();
-  assertEqual([tp.includes("openAutoPage('auto', 'ready:review')\">"), /Review request after a closed job<\/button><span class="pill warn">Off until go-live<\/span><span>· right after a job is closed, every day, 9 am–8 pm<\/span>/.test(tp), tp.includes("openAutoPage('auto', 'ready:chatText')"), tp.includes('Also used when the office presses "Ask for review" on a job or in My Day.')],
-    [true, true, true, true], 'templates tab: the review messages say "Sent by Review request after a closed job" and its live hours (9 am)');
+  assertEqual([tp.includes("openAutomation({ key: 'ready:review' })\">"), /Review request after a closed job<\/button><span class="pill neutral">Draft<\/span><span class="pill warn">Off until go-live<\/span><span>· right after a job is closed, every day, 9 am–8 pm<\/span>/.test(tp), tp.includes("openAutomation({ key: 'ready:chatText' })"), tp.includes('Also used when the office presses "Ask for review" on a job or in My Day.')],
+    [true, true, true, true], 'templates tab: the review messages say "Sent by Review request after a closed job" (a link into the Automation page), the list\'s status pills and its live hours (9 am)');
   const hand = tp.slice(tp.indexOf('<h3>Used by hand or by the phone</h3>'), tp.indexOf('<h3>Your templates</h3>'));
   assertEqual([['Phone greeting', 'Voicemail (office closed)', 'Moving a website chat to text'].every(n => hand.includes(n)), hand.includes('Review request')], [true, false], 'templates tab: the phone messages and the chat-to-text words are under "Used by hand or by the phone"');
   const mine = tp.slice(tp.indexOf('<h3>Your templates</h3>'));
@@ -3434,11 +3468,12 @@ async function testAutomationsLoaderNoLoop(){
   const ctx = { console, sb: { from: () => q }, UI: { tab: 'settings', settings: { page: 'templates' } }, AUTO_TABLE: 'automations', AUTO_BUSINESS_ID: 'default', STATE: { profiles: [], data: {} },
     render(){ renders++; throw new Error('render() must not be called from the page'); }, renderKeepingInput(){ keeps++; },
     autoNormalize: r => ({ id: r.id, name: r.name, enabled: r.enabled, def: { trigger: r.trigger, steps: r.steps }, audience: 'team', deleted: false }),
-    autoCtx: () => ({}), autoAllRows: () => [], autoListsHtml: () => '', autoMatches: () => true, renderTemplatesPage: () => '', ico: () => '', esc: s => String(s),
-    phoneNotificationsBar: () => '', notifyRulesApp: () => ({}), notifyPeopleText: () => ({}), notifyCardsNow: () => [], notifyCardHtml: () => '', flowSentence: () => '', setToggle: () => '', pill: () => '', jsStr: s => s,
-    autoSafetyHtml: () => '', autoRemovedHtml: () => '', autoHiddenReady: () => [], autoReadyRows: () => [] };
+    renderTemplatesPage: () => '', wfGlobalSettingsHtml: () => '', wfWorkflowsHtml: () => '', setTimeout: () => 0 };
   vm.createContext(ctx);
-  vm.runInContext('var AUTO_ED = null;\n' + ['AUTO', 'loadAutomations', 'loadAutoRunCounts', 'loadAutoSafety', 'autoPageOpen', 'renderAutomationsPage', 'renderNotificationsPage'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__A = AUTO; this.__load = loadAutomations; this.__safety = loadAutoSafety; this.__page = renderAutomationsPage; this.__np = renderNotificationsPage;', ctx);
+  // the Automation page (stage 2 G3.3: the old "Message templates & Automations" and "Notifications" pages are gone) on
+  // its Message templates tab (it loads the phase-4 list and the safety numbers) and on Workflows (it loads neither)
+  vm.runInContext('var AUTO_ED = null, TPL_EDIT = null, AUTO_TPL_EDIT = null;\n' + ['AUTO', 'OLD_SETTINGS_PAGES', 'settingsPageKey', 'loadAutomations', 'loadAutoRunCounts', 'loadAutoSafety', 'autoPageOpen', 'WF_PAGE_TABS', 'WF_UI', 'renderAutomationPage'].map(n => extractDecl(script, n)).join('\n')
+    + '\nthis.__A = AUTO; this.__load = loadAutomations; this.__safety = loadAutoSafety; this.__page = () => { WF_UI.tab = "templates"; return renderAutomationPage(); }; this.__np = () => { WF_UI.tab = "workflows"; return renderAutomationPage(); };', ctx);
   const A = ctx.__A;
   const p1 = ctx.__load(), p2 = ctx.__load();
   ctx.__page(); ctx.__page(); ctx.__np(); ctx.__np();
@@ -3813,7 +3848,6 @@ async function testAutomationsReview14Oct(){
   const cat3 = s3.STATE.data.settings.catalog;
   assertEqual([log3.db.filter(x => x==='settings.update').length, cat3.notify.newLead.on, cat3.automations.hiddenReady, s3.autoReadyRows().some(r => r.base==='team:newLead'), s3.autoReadyRows(true).some(r => r.base==='team:newLead')],
     [1, false, ['team:newLead'], false, true], 'ready-made: removed = switched off and off the list in ONE settings write; it still exists for "Put back"');
-  assertEqual(/Put back/.test(s3.autoRemovedHtml(['team:newLead'], s3.autoReadyRows(true))) && s3.autoRemovedHtml([], s3.autoReadyRows(true))==='', true, 'ready-made: the removed ones are listed under the list, with "Put back"');
   s3.autoRestoreReady('team:newLead');
   assertEqual([s3.STATE.data.settings.catalog.automations.hiddenReady, s3.STATE.data.settings.catalog.notify.newLead.on], [[], false], 'ready-made: put back on the list, still off');
   // Try it
@@ -3888,6 +3922,669 @@ async function testAutomationsReview14Oct(){
   assertEqual([sj.indexOf("automationEvent('jobClosed'") > sj.indexOf('await ensureContactForJob(job, contactId)'), fc.indexOf("automationEvent('jobClosed'") > fc.indexOf('await ensureContactForJob(job, g.contactId)'), (sj.match(/automationEvent\('jobClosed'/g) || []).length, (fc.match(/automationEvent\('jobClosed'/g) || []).length],
     [true, true, 1, 1], 'events: a new job is reported once, after its customer card is linked');
 }
+// ── Settings → Automation, the Workflows list (stage 2, G3.1; design §4.1–§4.3): the rows (wfItem), the status pill,
+// sorting and paging, the tabs and search, folders (path, what may move where), the bulk plan, the ⋮ menu in GHL's
+// order, the links (shared with the engine: fixtures/links.json) and the escaping of everything drawn. ──
+function testWfList(sb){
+  console.log('\nSettings → Automation: the Workflows list (stage 2, G3.1)');
+  sb.URLSearchParams = URLSearchParams;   // the browser has it (the sandbox doesn't by default)
+  const NOW = Date.parse('2026-10-15T00:00:00Z'), DAY = 864e5;
+  const ctx = { nowWall: '2026-10-15T11:00', nowMs: NOW, meta: { 'team:newLead': 'f1' }, hidden: ['chatText'],
+    review: { a2: { automation_id: 'a2', failed_runs: 3, last_failed_at: '2026-10-14T01:00:00Z', problems: ['E_UNAVAILABLE'] } } };
+  const settings = { pauses: [{ automation_ids: ['a1'], start_wall: '2026-10-14T09:00', end_wall: '2027-01-02T09:00', annually: false }] };
+  const row = o => ({ id: 'a1', name: 'Welcome', description: '', enabled: true, audience: 'team', trigger: {}, folder_id: null, deleted_at: null, deleted_by: null, revision: 4, system_key: null,
+    enrolled_total: 14, list_summary: { triggers: ['newLead', 'stage'], actions: ['send_email', 'internal_notification'], audience: 'customer', guarded: ['send_email'], steps: 3 },
+    created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-12T08:36:00Z', ...o });
+  // wfItem: an engine row
+  const a1 = sb.wfItem(row(), { active: 2, enrolled: 9 }, settings, ctx);
+  assertEqual([a1.key, a1.kind, a1.on, a1.paused, a1.audience, a1.external, a1.triggers, a1.actions, a1.steps, a1.enrolled, a1.active, a1.revision, a1.system, a1.virtual, a1.errors],
+    ['a1', 'workflow', true, { until: '2027-01-02T09:00' }, 'customer', false, ['newLead', 'stage'], ['send_email', 'internal_notification'], 3, 14, 2, 4, false, false, 0],
+    'wfItem: a Published workflow inside a pause range is paused until its end; Total enrolled = enrolled_total, Active from the counts; the audience from list_summary');
+  assertEqual([sb.wfItem(row(), null, settings, ctx).active, sb.wfItem(row({ enabled: false }), {}, settings, ctx).paused, sb.wfItem(row({ list_summary: { guarded: ['webhook'] } }), {}, {}, ctx).external],
+    [null, null, true], 'wfItem: no counts yet → Active "—"; a Draft is never "paused"; a webhook step = sends lead details to another system');
+  const a2 = sb.wfItem(row({ id: 'a2', enabled: false }), {}, settings, ctx);
+  assertEqual([a2.errors, a2.problems, a2.lastErrorAt], [3, ['E_UNAVAILABLE'], '2026-10-14T01:00:00Z'], 'wfItem: Needs review gives its failed runs and problem codes');
+  const del = sb.wfItem(row({ id: 'a3', deleted_at: new Date(NOW - 10 * DAY - 3600e3).toISOString(), deleted_by: 'p1' }), {}, settings, ctx);
+  assertEqual([del.deleted, del.on, del.paused, del.daysLeft, del.deletedBy], [true, false, null, 20, 'p1'], 'wfItem: a deleted workflow is off, with 30 − 10 = 20 days left in Deleted');
+  assertEqual([sb.wfItem(row({ deleted_at: new Date(NOW - 40 * DAY).toISOString() }), {}, {}, ctx).daysLeft, sb.wfItem(row({ system_key: 'review' }), {}, {}, ctx).moved], [0, true], 'wfItem: never fewer than 0 days left; a row with a system_key is a moved System row');
+  const f = sb.wfItem({ kind: 'folder', id: 'f2', parent_id: 'f1', name: 'Leads', created_at: '2026-10-01T00:00:00Z' }, null, {}, ctx);
+  assertEqual([f.key, f.kind, f.id, f.folderId, f.name, f.updatedAt], ['folder:f2', 'folder', 'f2', 'f1', 'Leads', '2026-10-01T00:00:00Z'], 'wfItem: a folder row (its updated time falls back to created)');
+  const ready = (o) => ({ key: 'ready:team:newLead', base: 'team:newLead', ready: true, name: 'New lead', audience: 'team', on: true, gate: '', toggle: ['toggleNotifyCard', 'newLead'], locked: false, page: '',
+    def: { trigger: { type: 'newLead', params: {} }, steps: [{ id: 't9', kind: 'action', type: 'push' }] }, ...o });
+  const v1 = sb.wfItem(ready(), null, {}, ctx);
+  assertEqual([v1.key, v1.system, v1.virtual, v1.on, v1.folderId, v1.actions, v1.triggers, v1.enrolled, v1.active, v1.toggle], ['ready:team:newLead', true, true, true, 'f1', ['internal_notification'], ['newLead'], null, null, ['toggleNotifyCard', 'newLead']],
+    'wfItem: a built-in System row (virtual): its folder from automation_system_meta, its steps in the engine\'s words, no counts');
+  const vh = sb.wfItem(ready({ key: 'ready:chatText', base: 'chatText', audience: 'customer', def: { trigger: { type: 'missedCall' }, steps: [{ kind: 'action', type: 'text' }] } }), null, {}, ctx);
+  assertEqual([vh.deleted, vh.on, vh.folderId, vh.triggers, vh.actions, vh.audience], [true, true, null, ['call_details'], ['send_sms'], 'customer'], 'wfItem: a System row taken off the list is in Deleted, with its REAL switch (its own page can switch it on again); "missed call" is the engine\'s Call details');
+  assertEqual(sb.wfItem(ready({ key: 'ready:chatText', base: 'chatText', on: false }), null, {}, ctx).on, false, 'wfItem: a System row in Deleted that is off shows off');
+  assertEqual([sb.wfItem(null).kind, sb.wfItem(null).key, sb.wfItem(undefined, 'x', 5, null).name], ['workflow', '', ''], 'wfItem: anything else gives an empty row, never an error');
+  // wfStatusOf
+  const st = x => { const s = sb.wfStatusOf(x); return [s.key, s.label, s.tone, s.gate && s.gate.label]; };
+  assertEqual([st(f), st(del), st(a2), st(sb.wfItem(row({ id: 'a9' }), {}, {}, ctx)), st(a1), st({ kind: 'workflow', on: true, paused: { until: 'soon' } })],
+    [['folder', '', '', null], ['deleted', 'Deleted', 'neutral', null], ['draft', 'Draft', 'neutral', null], ['published', 'Published', 'good', null], ['paused', 'Paused until 2 Jan', 'warn', null], ['paused', 'Paused until later', 'warn', null]],
+    'wfStatusOf: GHL\'s pills — Published (green), Draft (grey), Paused until <day> (amber); Deleted; folders have none');
+  assertEqual([st({ kind: 'workflow', on: false, gate: 'golive' }), st({ kind: 'workflow', on: true, gate: 'golive' }), st({ kind: 'workflow', on: true, gate: 'phone' })],
+    [['draft', 'Draft', 'neutral', 'Off until go-live'], ['published', 'Published', 'good', null], ['published', 'Published', 'good', 'Waits for the business phone']], 'wfStatusOf: a System row\'s gate pill');
+  // wfPausedUntil: annual ranges (over New Year; 29 Feb in a year without one); not listed / bad clock → null
+  const ann = [{ automation_ids: ['w'], start_wall: '2025-12-24T00:00', end_wall: '2026-01-02T00:00', annually: true }, { automation_ids: ['w'], start_wall: '2024-02-29T00:00', end_wall: '2024-03-01T00:00', annually: true }];
+  assertEqual([sb.wfPausedUntil(ann, 'w', '2026-12-30T10:00'), sb.wfPausedUntil(ann, 'w', '2027-01-01T23:59'), sb.wfPausedUntil(ann, 'w', '2027-02-28T12:00'), sb.wfPausedUntil(ann, 'w', '2026-06-01T00:00'),
+    sb.wfPausedUntil(ann, 'x', '2026-12-30T10:00'), sb.wfPausedUntil(ann, 'w', 'later'), sb.wfPausedUntil([{ automation_ids: ['w'], start_wall: '2026-01-02T00:00', end_wall: '2026-01-01T00:00' }], 'w', '2026-01-01T12:00')],
+    [{ until: '2027-01-02T00:00' }, { until: '2027-01-02T00:00' }, { until: '2027-03-01T00:00' }, null, null, null, null], 'wfPausedUntil: every year over New Year, 29 Feb → 28 Feb, outside / other workflow / bad clock / backwards range → not paused');
+  // wfSortPage + pager
+  const it = (k, name, upd, enrolled, kind) => ({ key: k, name, kind: kind || 'workflow', updatedAt: upd, createdAt: upd, enrolled, on: false });
+  const rows = [it('w1', 'beta', '2026-10-03', 5), it('folder:fb', 'B folder', '2026-10-09', null, 'folder'), it('w2', 'Alpha', '2026-10-05', null), it('folder:fa', 'a folder', '2026-10-01', null, 'folder'), it('w3', 'alpha', '2026-10-01', 2)];
+  assertEqual(sb.wfSortPage(rows, null, 1, 10).rows.map(x => x.key), ['folder:fa', 'folder:fb', 'w2', 'w1', 'w3'], 'wfSortPage: folders first (A–Z), then Last updated, newest first (the default)');
+  assertEqual([sb.wfSortPage(rows, { by: 'name', dir: 'asc' }, 1, 10).rows.map(x => x.key), sb.wfSortPage(rows, { by: 'enrolled', dir: 'desc' }, 1, 10).rows.map(x => x.key), sb.wfSortPage(rows, { by: 'nope', dir: 'up' }, 1, 10).rows.map(x => x.key)],
+    [['folder:fa', 'folder:fb', 'w2', 'w3', 'w1'], ['folder:fa', 'folder:fb', 'w1', 'w3', 'w2'], ['folder:fa', 'folder:fb', 'w2', 'w1', 'w3']], 'wfSortPage: by name (case-blind, ties by key), by Total enrolled ("—" last), an unknown column = Last updated');
+  const many = Array.from({ length: 23 }, (_, i) => it('k' + String(i).padStart(2, '0'), 'n' + i, '2026-10-' + String(1 + i).padStart(2, '0'), i));
+  const pg = (p, s) => { const r = sb.wfSortPage(many, { by: 'name', dir: 'asc' }, p, s); return [r.rows.length, r.page, r.pages, r.total, r.size]; };
+  assertEqual([pg(3, 10), pg(9, 10), pg('x', 7), pg(1, 25), pg(2, 50)], [[3, 3, 3, 23, 10], [3, 3, 3, 23, 10], [10, 1, 3, 23, 10], [23, 1, 1, 23, 25], [23, 1, 1, 23, 50]], 'wfSortPage: pages of 10 / 25 / 50 (GHL\'s 10 by default); a page past the end shows the last one');
+  assertEqual([sb.wfPagerNums(5, 10), sb.wfPagerNums(1, 3), sb.wfPagerNums(1, 1), sb.wfPagerNums(10, 10)], [[1, '…', 4, 5, 6, '…', 10], [1, 2, 3], [1], [1, '…', 9, 10]], 'wfPagerNums: "Previous 1 … 4 5 6 … 10 Next"');
+  // wfListRows: the tabs, the open folder, Search (in the registry's words, in every folder)
+  const L = sb.wfLabels({ triggers: [{ key: 'newLead', label: 'Lead created' }], actions: [{ key: 'send_email', label: 'Send email', channel: 'email', audience: 'customer' }] });
+  const items = [a1, a2, del, v1, vh, f, sb.wfItem({ kind: 'folder', id: 'f1', name: 'Team' }, null, {}, ctx)];
+  const keys = ui => sb.wfListRows(items, ui, L).map(x => x.key);
+  assertEqual([keys({ listTab: 'all' }), keys({ listTab: 'all', folder: 'f1' }), keys({ listTab: 'review' }), keys({ listTab: 'deleted' }), keys({ listTab: 'all', q: '  LEAD CREATED ' }), keys({ listTab: 'deleted', q: 'welcome' }), keys({ listTab: 'bogus' })],
+    [['a1', 'a2', 'folder:f1'], ['ready:team:newLead', 'folder:f2'], ['a2'], ['a3', 'ready:chatText'], ['a1', 'a2', 'ready:team:newLead'], ['a3'], ['a1', 'a2', 'folder:f1']],
+    'wfListRows: All = the open folder; Needs review = errors or problems; Deleted = deleted workflows and hidden System rows; Search finds by the trigger\'s words in every folder');
+  // folders: the path, what may move where (the same rule as the database's folder guard)
+  const F = [['f1', null], ['f2', 'f1'], ['f3', 'f2'], ['f4', 'f3'], ['f5', 'f4'], ['g1', null], ['g2', 'g1'], ['x1', 'x2'], ['x2', 'x1']].map(([id, p]) => ({ id, name: id.toUpperCase(), folderId: p }));
+  assertEqual([sb.wfFolderPath(F, 'f3').map(x => x.id), sb.wfFolderPath(F, null), sb.wfFolderPath(F, 'nope'), sb.wfFolderPath(F, 'x1').length <= 6], [['f1', 'f2', 'f3'], [], [], true], 'wfFolderPath: Home / F1 / F2 / F3; a cycle in old data stops');
+  const mv = (ids, t) => sb.wfFolderCanMove(F, ids, t);
+  assertEqual([mv(['f1'], 'f3'), mv(['f2'], 'f2'), mv(['g1'], 'f3'), mv(['g1'], 'f4'), mv(['g2'], 'f4'), mv([], 'nope'), mv(['a1', 'w9'], 'f5'), mv(['f3'], null), mv(['x1'], 'g1').ok !== undefined],
+    [{ ok: false, why: 'A folder cannot go inside itself' }, { ok: false, why: 'A folder cannot go inside itself' }, { ok: true, why: '' }, { ok: false, why: 'Folders go at most 5 levels deep' }, { ok: true, why: '' },
+      { ok: false, why: 'That folder is no longer there' }, { ok: true, why: '' }, { ok: true, why: '' }, true],
+    'wfFolderCanMove: not into itself or below; at most 5 levels (target depth + the folder\'s own height); workflows go anywhere; a cycle in old data never hangs');
+  {
+    const P0 = new Map([['P', 'G'], ['C', 'P'], ['D', 'C'], ['G', null], ['X', null]]);
+    const once = sb.wfFolderReparent(P0, 'P'), twice = sb.wfFolderReparent(once, 'C');
+    assertEqual([[...once], [...twice], [...P0].length, [...sb.wfFolderReparent(null, 'x')]], [[['C', 'G'], ['D', 'C'], ['G', null], ['X', null]], [['D', 'G'], ['G', null], ['X', null]], 5, []],
+      'wfFolderReparent: bulk Delete of a folder and one inside it — after the parent goes, the child sits in the grandparent, so its own contents go there (never into a folder that is gone)');
+  }
+  {
+    const W = [{ id: 'A', folderId: null }, { id: 'T', folderId: null }, ...Array.from({ length: 55 }, (_, i) => ({ id: 's' + i, folderId: 'A' })), { id: 'deep', folderId: 's3' }];
+    assertEqual([sb.wfFolderCanMove(W, ['A'], null), sb.wfFolderCanMove(W, ['A'], 'T'), sb.wfFolderCanMove([...W, { id: 'c1', folderId: 'c2' }, { id: 'c2', folderId: 'c1' }], ['c1'], null).ok],
+      [{ ok: true, why: '' }, { ok: true, why: '' }, false], 'wfFolderCanMove: a folder with 55 subfolders (height 3) moves to Home or into another folder; a real cycle still stops it');
+  }
+  // wfBulkPlan
+  const w = (key, o) => ({ key, kind: 'workflow', name: key, on: false, audience: 'team', external: false, errors: 0, problems: [], triggers: ['jobClosed'], ...o });
+  const pick = [w('team'), w('cust', { audience: 'customer' }), w('ext', { external: true }), w('pub', { on: true }), w('err', { errors: 1 }), w('prob', { problems: ['E_UNAVAILABLE'] }), { key: 'folder:f1', kind: 'folder', name: 'F' },
+    w('ready:review', { virtual: true, system: true }), w('ready:missedText', { virtual: true, locked: 'On whenever the business phone is on.' }), w('gone', { deleted: true }), w('moved', { moved: true, system: true }),
+    w('lap', { triggers: ['newLead'] }), null];
+  const sysOn = [{ name: 'New lead', triggers: ['newLead'] }];
+  const P = sb.wfBulkPlan(pick, 'publish', { systemOn: sysOn });
+  assertEqual([P.go, P.ask.map(a => a.key), P.ask.find(a => a.key==='lap').why, P.skip.map(s => s.key + ': ' + s.why), P.more],
+    [['team', 'moved'], ['cust', 'ext', 'lap'], 'The ready-made "New lead" is on and starts the same way: both would send',
+      ['pub: Already published', 'err: Has errors', 'prob: Has errors', 'folder:f1: A folder is not published: its workflows are', 'ready:review: Runs on the built-in system: use its switch',
+        'ready:missedText: Runs on the built-in system: use its switch', 'gone: It is in Deleted'], 0],
+    'wfBulkPlan publish: team Drafts go; customer / another system / overlap with an active System row ask first; the rest are skipped with the reason');
+  assertEqual(P.ask.find(a => a.key==='cust').why, 'It sends to customers', 'wfBulkPlan: the customer question says why');
+  assertEqual(sb.wfBulkPlan([w('lap', { triggers: ['newLead'], audience: 'customer' })], 'publish', { systemOn: [{ name: 'New lead', triggers: ['newLead'] }, { name: 'Lead waiting', triggers: ['newLead'] }, { name: 'Unpaid', triggers: ['jobClosed'] }] }).ask,
+    [{ key: 'lap', why: 'It sends to customers. The ready-made "New lead" is on and starts the same way: both would send. The ready-made "Lead waiting" is on and starts the same way: both would send' }],
+    'wfBulkPlan: every System workflow that is on and starts the same way is named in the question, not only the first');
+  const Dr = sb.wfBulkPlan(pick, 'draft', {}), De = sb.wfBulkPlan(pick, 'delete', {}), Mv = sb.wfBulkPlan(pick, 'move', {});
+  assertEqual([Dr.go, De.go, De.skip.map(s => s.key + ': ' + s.why), Mv.go.length, Mv.skip.map(s => s.key)],
+    [['pub'], ['team', 'cust', 'ext', 'pub', 'err', 'prob', 'folder:f1', 'ready:review', 'lap'], ['ready:missedText: On whenever the business phone is on.', 'gone: It is in Deleted', 'moved: Move it back to the built-in system first'], 11, ['gone']],
+    'wfBulkPlan: Draft only what is published; Delete skips locked System rows (their line), deleted and moved rows; Move takes everything not deleted');
+  assertEqual(sb.wfBulkPlan(Array.from({ length: 205 }, (_, i) => w('t' + i)), 'publish', {}).more, 5, 'wfBulkPlan: more than 200 → "The first 200 were done; run it again for the rest"');
+  // the ⋮ menu: GHL's order; greyed items say why
+  const menu = (x, o) => sb.wfMenuItems(x, o || { owner: true }).map(m => m.label + (m.why ? ' [' + m.why + ']' : ''));
+  assertEqual(menu(a2), ['Upload to Template Library', 'Edit workflow', 'Rename workflow', 'Open in new tab', 'Publish', 'Move to folder', 'Duplicate workflow',
+    'Test workflow [Comes with the new builder]', 'Delete workflow', 'Copy To Sub-Account [Comes with multi-business accounts]'], 'wfMenuItems: a Draft workflow, in GHL\'s order');
+  assertEqual([menu(a1)[4], menu(sb.wfItem(row({ system_key: 'review' }), {}, {}, ctx)).slice(-3), menu(del), menu(f)],
+    ['Draft workflow', ['Move back to the built-in system [Comes when System workflows move into the engine]', 'Delete workflow [Move it back to the built-in system first]', 'Copy To Sub-Account [Comes with multi-business accounts]'],
+      ['Restore'], ['Rename folder', 'Move to folder', 'Delete folder', 'Manage permissions [Only owners and managers can edit workflows]']],
+    'wfMenuItems: Published → "Draft workflow"; a moved System row; a deleted one only restores; a folder\'s menu');
+  const lockedReady = ready({ key: 'ready:missedText', base: 'missedText', toggle: undefined, locked: 'On whenever the business phone is on.', page: 'phone' });
+  assertEqual([menu(v1), menu(sb.wfItem(lockedReady, null, {}, ctx), { owner: false })],
+    [['Upload to Template Library [Duplicate it first: a System workflow runs on the built-in system]', 'Edit workflow', 'Draft workflow', 'Move to folder', 'Duplicate workflow', 'Test workflow [Comes with the new builder]',
+      'Move into the engine [It moves into the engine in a later release]', 'Delete workflow', 'Copy To Sub-Account [Comes with multi-business accounts]'],
+     ['Upload to Template Library [Duplicate it first: a System workflow runs on the built-in system]', 'Edit workflow', 'Open its old settings', 'Draft workflow [On whenever the business phone is on.]', 'Move to folder', 'Duplicate workflow',
+      'Test workflow [Comes with the new builder]', 'Move into the engine [Only owners move System workflows]', 'Delete workflow [On whenever the business phone is on.]', 'Copy To Sub-Account [Comes with multi-business accounts]']],
+    'wfMenuItems: System rows — no rename / new tab, no upload (duplicate first); the team ones have no old page (their card is in the list); a locked one says why on its switch and on Delete');
+  {
+    const lk = sb.wfItem(lockedReady, null, {}, ctx), sw = sb.wfPubSwitch(lk), card = sb.wfCardHtml(lk, null, false);
+    assertEqual([/aria-disabled="true"/.test(sw), /\sdisabled[\s>]/.test(sw), /onclick="event\.stopPropagation\(\);wfSetPublished\('ready:missedText', (true|false)\)"/.test(sw), card.includes('nc-locked') && card.includes('On whenever the business phone is on.'),
+      /aria-disabled/.test(sb.wfPubSwitch(sb.wfItem(ready(), null, {}, ctx)))],
+      [true, false, true, true, false], 'wfPubSwitch: a locked System switch stays tappable on a phone (the tap says why), aria-disabled; its card says why under the words; an unlocked one is a plain switch');
+  }
+  assertEqual(sb.wfMenuItems(a2, {}).concat(sb.wfMenuItems(v1, {}), sb.wfMenuItems(f, {})).every(m => !/quote/i.test(m.label)), true, 'wfMenuItems: nothing about a quote status (Ofek\'s Q5)');
+  // the words on a card
+  assertEqual([sb.wfWhenText(a1, L), sb.wfWhenText({ triggers: [] }, L), sb.wfGoesTo(a1, L), sb.wfGoesTo(v1, L), sb.wfGoesTo({ actions: [], external: true }, L), sb.wfIconOf(a1, L).ico, sb.wfIconOf({ actions: [] }, L).ico],
+    ['When Lead created, or 1 more', 'Starts only when added by hand', ['Customers'], ['The team'], ['Another system'], 'mail', 'clock'], 'card words: "When …, or N more", "Goes to" chips, the icon by what it does first');
+  assertEqual([sb.wfDateText('2026-10-12T08:36:00Z'), sb.wfDayText('2026-10-12T08:36:00Z'), sb.wfDateText(null), sb.wfDateText('nonsense'), sb.wfProblemText('E_TEMPLATE_MISSING'), sb.wfProblemText('???')],
+    ['12 Oct 2026, 7:36pm', '12 Oct', '—', '—', 'A message template it uses is gone', 'A step needs a look'], 'dates in the business\'s time zone (Sydney); problem codes in words');
+  // links: the app's wfLink = the engine's (fixtures/links.json); wfStartLink reads each one back; only what passes a rule
+  const LK = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'automations', 'fixtures', 'links.json'), 'utf8')).cases;
+  LK.forEach(c => {
+    const link = sb.wfLink(c.id, c.wfTab, c.extra);
+    assertEqual(link, c.link, `wfLink = the engine's: ${c.name}`);
+    assertEqual(sb.wfStartLink(link.slice(link.indexOf('?'))), c.parsed, `wfStartLink reads it back: ${c.name}`);
+  });
+  assertEqual([sb.wfStartLink(''), sb.wfStartLink(null), sb.wfStartLink('?wf=ready:team:x&wfTab=builder'), sb.wfStartLink('?wf=ready:review&wf=junk&listTab=review&run=00000000-0000-0000-0000-00000000000g')],
+    [{ wf: null, wfTab: null, run: null, listTab: null }, { wf: null, wfTab: null, run: null, listTab: null }, { wf: null, wfTab: 'builder', run: null, listTab: null }, { wf: 'ready:review', wfTab: null, run: null, listTab: 'review' }],
+    'wfStartLink: nothing / a too-short team key / a run that is not an id are ignored (the first wf= counts)');
+  // START_LINK (the boot link): its own wfUsed flag, the parts checked; a broken location never throws
+  {
+    const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const boot = search => { const c = { location: search===null ? null : { search }, URLSearchParams }; vm.createContext(c); vm.runInContext(['WF_LINK_RULES', 'wfStartLink', 'START_LINK'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__L = START_LINK;', c); return c.__L; };
+    const b1 = boot('?tab=settings&page=automation&wf=ready:review&wfTab=logs&listTab=deleted&week=2026-10-12'), b2 = boot(null);
+    assertEqual([b1.tab, b1.page, b1.week, b1.used, b1.wf, b1.wfTab, b1.run, b1.listTab, b1.wfUsed, b2.used, b2.wfUsed], ['settings', 'automation', '2026-10-12', false, 'ready:review', 'logs', null, 'deleted', false, true, true],
+      'START_LINK: the Automation parts with their own wfUsed flag (the boot spends `used`); no location → nothing to open');
+  }
+  // escaping: every name, reason and detail drawn is escaped; every handler argument goes through jsStr then esc
+  const evil = '<img src=x onerror=alert(1)>"\'&';
+  const ek = "k'),alert(1);('";
+  const E = { key: ek, kind: 'workflow', id: ek, name: evil, description: evil, on: false, audience: 'customer', external: true, triggers: ['newLead', 'stage'], actions: ['send_email', '<b>x</b>'], steps: 2,
+    enrolled: 1, active: 0, errors: 2, problems: ['E_UNAVAILABLE', evil], lastErrorAt: '2026-10-12T08:36:00Z', updatedAt: '2026-10-12T08:36:00Z', createdAt: evil, system: true, gate: 'golive', deleted: false };
+  const EF = { key: 'folder:' + ek, kind: 'folder', id: ek, name: evil, folderId: null, updatedAt: null, createdAt: null };
+  const ED = { ...E, deleted: true, deletedAt: '2026-10-12T08:36:00Z', deletedBy: 'p', daysLeft: 5 };
+  const Lx = sb.wfLabels({ triggers: [{ key: 'newLead', label: evil }], actions: [{ key: 'send_email', label: evil, channel: '<x>', audience: 'customer' }] });
+  const parts = {
+    card: sb.wfCardHtml(E, Lx, true), folderCard: sb.wfFolderCardHtml(EF, 3, false),
+    table: sb.wfTableHtml([EF, E, { ...E, virtual: true, key: 'ready:' + ek }], { sel: [ek], statsOpen: [ek], sort: { by: 'name', dir: 'asc' } }, Lx, { [ek]: { ch: { 'email:sent': evil } } }, { [ek]: 1 }),
+    deleted: sb.wfDeletedHtml([ED], () => evil), review: sb.wfReviewHtml([E]), crumbs: sb.wfBreadcrumbHtml([EF, { ...EF, id: 'x' }]),
+    menu: sb.wfMenuListHtml([{ id: ek, label: evil, why: '' }, { id: 'x', label: evil, why: evil }], ek), stats: sb.wfStatsHtml({ 'push:sent': evil }),
+    pager: sb.wfPagerHtml({ total: 40, page: 2, pages: 4, size: 10 }),
+  };
+  // (a key inside data-key="…" is plain text in a quoted attribute: only the handlers must not carry it raw)
+  const bad = Object.entries(parts).filter(([, h]) => /<img|<b>x|<x>/.test(h) || h.replace(/data-key="[^"]*"/g, '').includes(ek) || /onerror=alert\(1\)>"/.test(h)).map(([k]) => k);
+  assertEqual(bad, [], 'escaping: no name, description, label, reason, date or count is drawn raw; no handler argument breaks out of its quotes');
+  assertEqual([parts.card.includes("wfEdit('k\\'),alert(1);(\\'')"), parts.menu.includes("wfMenuPick('k\\'),alert(1);(\\'', 'k\\'),alert(1);(\\'')"), parts.table.includes('&lt;img src=x onerror=alert(1)&gt;&quot;\'&amp;')],
+    [true, true, true], 'escaping: a key with a quote stays one JS string (jsStr), a name is shown as text (esc)');
+  assertEqual([/aria-pressed|aria-sort="ascending"/.test(parts.table), /aria-current="page"/.test(parts.pager), /aria-disabled="true"/.test(parts.menu), (parts.table.match(/<tr/g) || []).length],
+    [true, true, true, 5], 'the table says its sort, the pager its page, a greyed menu item is aria-disabled; the opened Stats row is under its workflow (header, folder, workflow, its stats, System row)');
+  assertEqual([/<button[^>]*class="wf-link"[^>]*>(?:(?!<\/button>)[\s\S])*<a /.test(parts.table), /<\/button><a class="wf-ext"/.test(parts.table)], [false, true],
+    'the table\'s Name: the new-tab link sits beside the name button, never inside it (no interactive content in a button)');
+  assertEqual([/Email opens and clicks are not tracked/.test(parts.stats), /Needs the phone line \(Twilio\)/.test(parts.stats), /Counts per channel come/.test(sb.wfStatsHtml(null)), /Runs on the built-in system; its history starts/.test(parts.table)],
+    [true, true, true, true], 'Stats ›: greyed with the reason (opens / clicks, SMS); before SQL Part 3 · G3.1 it says the counts come; System rows "—" with the tooltip');
+  // the pure helpers never redraw, read the database or call a server
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const pure = ['wfLink', 'wfStartLink', 'wfPausedUntil', 'wfLabels', 'wfItem', 'wfStatusOf', 'wfSearchText', 'wfListRows', 'wfSortPage', 'wfPagerNums', 'wfFolderPath', 'wfFolderCanMove', 'wfBulkPlan', 'wfMenuItems',
+    'wfWhenText', 'wfIconOf', 'wfGoesTo', 'wfCardHtml', 'wfFolderCardHtml', 'wfTableHtml', 'wfStatsHtml', 'wfPagerHtml', 'wfDeletedHtml', 'wfReviewHtml', 'wfBreadcrumbHtml', 'wfMenuListHtml'];
+  assertEqual(pure.filter(n => /\brender\(|renderKeepingInput\(|\bdb\.|\bsb\.|fetch\(|Date\.now\(|new Date\(\)/.test(extractDecl(script, n))), [], 'the list\'s pure helpers never redraw, read the database, call a server or read the clock');
+  {
+    const guard = script.indexOf('if (!UI.tab || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);'), link = script.indexOf('wfFromLink(START_LINK)');
+    assertEqual([guard > 0, link > guard, script.includes("if (UI.tab==='settings' && canViewSection(profile, 'settings') && settingsPageKey((UI.settings || {}).page)==='automation') wfFromLink(START_LINK);\n    else START_LINK.wfUsed = true;")],
+      [true, true, true], 'a ?wf= link opens the editor only after the route guard, and only for someone who may open Settings; anyone else\'s link is spent');
+  }
+  assertEqual(['renderAutomationPage', 'wfWorkflowsHtml', 'wfListHtml', 'wfData', 'wfItemsNow'].filter(n => /\brender\(\)|renderKeepingInput\(\)/.test(extractDecl(script, n))), [], 'the page\'s drawing never asks for another drawing (no render loop)');
+}
+// ── Settings → Automation: System rows, the template library, the Notifications page merged in (stage 2, G3.3; design
+// §4.3, §4.10, §7 G3.3): wfSystemRows = today's autoReadyRows (fixtures/system-rows.json, taken from the phase-4 code
+// before the change) plus the System fields; the System team cards keep their legacy controls; taking System rows off the
+// list is ONE catalog write; the phone bar shows only while something sends a phone notification; templates say why they
+// are greyed (a branching one: "Opens in the new builder (phase 4)"); everything drawn is escaped. ──
+function testWfSystemRows(sb){
+  console.log('\nSettings → Automation: System rows, templates, the Notifications page merged in (stage 2, G3.3)');
+  const FX = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'automations', 'fixtures', 'system-rows.json'), 'utf8'));
+  const pick = r => ({ key: r.key, base: r.base, on: r.on, gate: r.gate, toggle: r.toggle || null, locked: r.locked || false });
+  sb.STATE.profiles = [];
+  for (const c of FX.cases) {
+    sb.STATE.data.settings = JSON.parse(JSON.stringify(c.settings));
+    assertEqual([sb.wfSystemRows().map(pick), sb.wfSystemRows(true).map(pick), sb.autoReadyRows().map(pick)], [c.rows, c.all, c.rows],
+      `wfSystemRows = today's autoReadyRows on "${c.name}" (key, base, on, gate, switch, lock; taken off the list or not); the old name gives the same`);
+  }
+  sb.STATE.data.settings = JSON.parse(JSON.stringify(FX.cases[1].settings));
+  const S = sb.wfSystemRows(true, { meta: { 'team:newLead': 'f9' }, moved: { review: 'a-77' } }), by = k => S.find(r => r.key===k);
+  assertEqual([S.length, S.every(r => r.system===true && r.virtual===true && r.movable===false), by('ready:team:newLead').folderId, by('ready:review').movedTo, by('ready:chatText').folderId, by('ready:chatText').movedTo],
+    [11, true, 'f9', 'a-77', null, null], 'wfSystemRows: System and virtual; none can move yet; its folder (automation_system_meta) and the engine row it moved into');
+  const rd = by('ready:review').doc, gate = Object.values(rd.nodes).find(n => n.kind==='if_else');
+  assertEqual([rd.schema, rd.triggers[0].type, gate.config.branches[0].when.segments[0].rules[0], by('ready:team:leadWaiting').doc.triggers[0].type, by('ready:team:missedCall').doc.triggers[0].filters.segments[0].rules],
+    [2, 'jobClosed', { field: 'dont_ask', op: 'true', lock: true }, 'newLead', [{ field: 'call.status', op: 'is', v: 'missed' }]], 'wfSystemRows: each one also as a stage-2 doc (wfFromFlat = the engine\'s upgradeV1); its guard condition stays locked');
+  assertEqual([by('ready:team:newLead').page, by('ready:team:newLead').pageLabel, by('ready:review').page, sb.wfSystemRows(false, null).length, sb.wfSystemRows(true, { meta: 'x', moved: null }).every(r => r.folderId===null)],
+    ['', '', 'reviews', 11, true], 'wfSystemRows: the team rows have no old page any more (their card is in the Workflows list); a missing or odd context is fine');
+  // taking System rows off the list: one catalog write; their own switches first; locked ones skipped with the reason
+  const H = sb.wfSystemHidePlan([
+    { key: 'ready:team:newLead', base: 'team:newLead', on: true, toggle: ['toggleNotifyCard', 'newLead'] }, { key: 'ready:review', base: 'review', on: true, toggle: ['setReviewAuto', false] },
+    { key: 'ready:chatText', base: 'chatText', on: false, toggle: ['setChatAutoSms', true] }, { key: 'ready:missedText', base: 'missedText', on: true, locked: 'On whenever the business phone is on.' },
+    { key: 'ready:team:newLead', base: 'team:newLead', on: true }, null, { base: '' }, { key: 'ready:team:unpaid', base: 'team:unpaid', on: true, locked: true }], ['team:unpaid', 'review']);
+  assertEqual(H, { go: ['team:newLead', 'review', 'chatText'], skip: [{ key: 'ready:missedText', why: 'On whenever the business phone is on.' }, { key: 'ready:team:unpaid', why: 'It can\'t be taken off the list yet' }],
+    ownSwitch: [['setReviewAuto', false]], notifyOff: ['newLead'], hidden: ['team:unpaid', 'review', 'team:newLead', 'chatText'] },
+    'wfSystemHidePlan: a team notification is switched off in the same catalog write; the review / chat text by their own setter (only when on); locked ones skipped with why; each base once');
+  assertEqual(sb.wfSystemHidePlan(null, null), { go: [], skip: [], ownSwitch: [], notifyOff: [], hidden: [] }, 'wfSystemHidePlan: nothing picked → nothing to write');
+  // Publish asks first when it sends to customers / another system, or doubles a System workflow that is on
+  const sysOn = [{ key: 'ready:team:newLead', virtual: true, on: true, name: 'A new lead comes in', triggers: ['newLead'] }, { key: 'ready:review', virtual: true, on: false, name: 'Review', triggers: ['jobClosed'] }];
+  assertEqual([sb.wfPublishAsk({ name: 'Copy', audience: 'team', triggers: ['newLead'] }, sysOn), sb.wfPublishAsk({ name: 'Thanks', audience: 'customer', external: true, triggers: ['jobClosed'] }, sysOn), sb.wfPublishAsk({ name: 'Mine', audience: 'team', triggers: ['stage'] }, sysOn), sb.wfPublishAsk(null, null)],
+    [['The System workflow "A new lead comes in" is on and starts the same way: both would send.'], ['"Thanks" sends to customers and it sends lead details to another system. This sends to real customers.'], [], []],
+    'wfPublishAsk: doubling a System workflow that is on asks first (a Draft from a System-like template); customers / another system ask as before; an off System row doesn\'t count');
+  assertEqual(sb.wfPublishAsk({ name: 'Mine', audience: 'customer', triggers: ['jobClosed'] }, [{ key: 'ready:review', virtual: true, on: true, deleted: true, name: 'Review request after a closed job', triggers: ['jobClosed'] }]).slice(-1),
+    ['The System workflow "Review request after a closed job" is on and starts the same way: both would send.'], 'wfPublishAsk: a System row listed under Deleted that its own page switched on again still counts');
+  const sysTwo = [...sysOn, { key: 'ready:team:leadWaiting', virtual: true, on: true, name: 'A new lead nobody picked up for 15 minutes', triggers: ['newLead'] }, { key: 'ready:team:x', virtual: true, on: false, name: 'Off', triggers: ['newLead'] },
+    { key: 'w9', virtual: false, on: true, name: 'An engine workflow', triggers: ['newLead'] }];
+  assertEqual(sb.wfPublishAsk({ name: 'Copy', audience: 'customer', triggers: ['stage', 'newLead'] }, sysTwo),
+    ['"Copy" sends to customers. This sends to real customers.', 'The System workflow "A new lead comes in" is on and starts the same way: both would send.', 'The System workflow "A new lead nobody picked up for 15 minutes" is on and starts the same way: both would send.'],
+    'wfPublishAsk: EVERY System workflow that is on and starts the same way is named (the old switch named every ready-made it doubled), not only the first; an off one or an engine workflow never');
+  // the System team card: the old Notifications card with its controls, inside the list
+  const ctx = { meta: {}, hidden: [] }, lwRow = by('ready:team:leadWaiting');
+  const lw = sb.wfItem({ ...lwRow, sentence: 'When a new lead comes in: wait 20 minutes, then <notify>' }, null, {}, ctx);
+  assertEqual([lw.card && lw.card.id, lw.description, lw.virtual, lw.movable, lw.movedTo, sb.wfItem(lwRow, null, {}, ctx).description], ['leadWaiting', 'When a new lead comes in: wait 20 minutes, then <notify>', true, false, null, ''],
+    'wfItem: a System row carries its notification card and its steps in one sentence (its summary on the card and in Search)');
+  const R = { waitMinutes: 20, from: 7, until: 21, docDays: 45, unpaidDays: 9 }, P = { owners: 'Ofek <b>', office: 'Ron & any manager' };
+  const h = sb.wfSystemCardHtml(lw, true, R, P);
+  assertEqual([/data-fid="n-waitMinutes" onchange="setNotifyNumber\('waitMinutes', this\.value\)"/.test(h) && h.includes('value="20"'), /data-fid="h-from"/.test(h) && /<option value="21" selected>9 pm<\/option>/.test(h), h.includes("toggleNotifyOffice('leadWaiting')"),
+    h.includes("sendNotifyTest('leadWaiting')"), /role="switch" aria-checked="true" onclick="event\.stopPropagation\(\);wfSetPublished\('ready:team:leadWaiting', false\)" aria-label="[^"]*: Draft or Publish" data-fid="t-leadWaiting"/.test(h),
+    h.includes('<span class="pill au-rm">System</span>'), /class="wf-sel" checked/.test(h), h.includes("wfMenuOpen(this, 'ready:team:leadWaiting')"), h.includes('Ofek <b>'), h.includes('Ofek &lt;b&gt;'), h.includes('Ron &amp; any manager')],
+    [true, true, true, true, true, true, true, true, false, true, true], 'wfSystemCardHtml: the numbers in its sentence, Office and Send a test keep their old setters; the list\'s tick, ⋮ and Draft ⬤ Publish (focus kept by data-fid); names escaped');
+  const gr = sb.wfItem(by('ready:team:googleReview'), null, {}, ctx), hg = sb.wfSystemCardHtml(gr, false, R, P);
+  assertEqual([hg.includes('Turns on once Google Business Profile is connected.'), /data-fid="s-googleReview" aria-disabled="true" onclick="notifyLocked\('googleReview'\)"/.test(hg), /aria-disabled="true" title="Turns on once Google Business Profile is connected\." onclick="event\.stopPropagation\(\);wfSetPublished\('ready:team:googleReview', (true|false)\)"/.test(hg), hg.includes("setSettingsPage('connectors')"), hg.includes('off"')],
+    [true, true, true, true, true], 'wfSystemCardHtml: a locked notification says why (the test, and the switch — still tappable, aria-disabled, the tap says why) and links to Connectors');
+  const hu = sb.wfSystemCardHtml(sb.wfItem(by('ready:team:unpaid'), null, {}, ctx), false, R, P);
+  assertEqual([hu.includes('Owners only'), hu.includes('toggleNotifyOffice'), /data-fid="n-unpaidDays"[^>]*/.test(hu) && hu.includes('value="9"')], [true, false, true], 'wfSystemCardHtml: money goes to the owners only (no Office chip); the unpaid days are Tax and payments\' number');
+  // the phone bar on top of Workflows
+  const Lp = sb.wfLabels({ triggers: [], actions: [{ key: 'internal_notification', label: 'Send internal notification', channel: 'push', aliases: ['push'] }, { key: 'send_email', label: 'Send email', channel: 'email' }] });
+  const pw = o => ({ kind: 'workflow', on: true, deleted: false, virtual: false, actions: [], ...o });
+  assertEqual([sb.wfPhoneBarWanted([pw({ virtual: true, base: 'team:newLead' })], Lp), sb.wfPhoneBarWanted([pw({ virtual: true, base: 'team:newLead', on: false }), pw({ virtual: true, base: 'review' })], Lp),
+    sb.wfPhoneBarWanted([pw({ actions: ['send_email', 'internal_notification'] })], Lp), sb.wfPhoneBarWanted([pw({ actions: ['internal_notification'], on: false }), pw({ actions: ['push'], deleted: true })], Lp),
+    sb.wfPhoneBarWanted([pw({ actions: ['internal_notification'] })], null), sb.wfPhoneBarWanted([pw({ actions: ['send_email'] }), { kind: 'folder', on: true }], Lp), sb.wfPhoneBarWanted(null)],
+    [true, false, true, false, true, false, false], 'wfPhoneBarWanted: a System team notification that is on, or a Published workflow with a phone notification (registry channel push); not Drafts, Deleted, customer ones or folders');
+  // the template library
+  const NONE = { match: 'all', segments: [{ match: 'all', rules: [] }] };
+  const Lt = sb.wfLabels({ triggers: [{ key: 'newLead', label: 'Contact created', availability: { ok: true } }, { key: 'stage', label: 'Pipeline stage changed', availability: { ok: true } }],
+    actions: [{ key: 'internal_notification', label: 'Send internal notification', channel: 'push', audience: 'team', availability: { ok: true } }, { key: 'send_email', label: 'Send email', channel: 'email', audience: 'customer', availability: { ok: true } },
+      { key: 'send_sms', label: 'Send SMS', channel: 'sms', audience: 'customer', availability: { ok: false, reason: 'Needs the phone line (Twilio)' } }] });
+  const docPush = { schema: 2, seq: 1, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: NONE }], nodes: { n1: { kind: 'action', type: 'internal_notification', config: { channel: 'push', to: { roles: ['owner'] }, title: 'New lead: {name}' }, out: { next: null } } } };
+  const docBranch = { schema: 2, seq: 3, entry: 'n1', triggers: [{ id: 't1', type: 'stage', filters: NONE }], nodes: {
+    n1: { kind: 'if_else', type: 'if_else', config: { noneName: 'None', branches: [{ id: 'b2', name: 'Still quoted', when: { match: 'any', segments: [{ match: 'all', rules: [{ field: 'stage', op: 'is', v: 'Quoted' }] }] } }] }, out: { b2: 'n3', none: null } },
+    n3: { kind: 'action', type: 'send_email', config: { subject: 'Your quote', body: '{hi}' }, out: { next: null } } } };
+  const docSms = { schema: 2, seq: 1, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: NONE }], nodes: { n1: { kind: 'action', type: 'send_sms', config: { body: 'Hi' }, out: { next: null } } } };
+  const T1 = sb.wfTemplateItem({ id: 't-1', key: 'team_new_lead', name: 'Tell the team about a new lead', description: 'A phone notification.', category: 'Team notifications', origin: 'system', definition: docPush }, Lt);
+  const T2 = sb.wfTemplateItem({ id: 't-2', key: 'lead_quote_follow_up', name: 'Quote follow-up', category: 'Leads', origin: 'system', definition: docBranch }, Lt);
+  const T3 = sb.wfTemplateItem({ id: 't-3', key: 'mine_abcdefghij', name: 'Our text', category: null, origin: 'user', created_by_name: 'Kim', definition: docSms }, Lt);
+  assertEqual([T1.uses, T1.why, !!T1.flat, T1.flat && T1.flat.steps[0].type, T1.mine, T1.icon.ico], [['Contact created', 'Send internal notification'], '', true, 'push', false, 'bell'],
+    'wfTemplateItem: what it uses in the registry\'s words; a straight one previews in one sentence (its phase-4 shape); a team alert\'s icon');
+  assertEqual([T2.flat, T2.preview, T2.why, T2.uses], [null, null, 'Opens in the new builder (phase 4)', ['Pipeline stage changed', 'Send email']], 'wfTemplateItem: a branching template is greyed "Opens in the new builder (phase 4)" (no canvas yet), no preview');
+  const docNamed = { schema: 2, seq: 2, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: NONE }], nodes: { n1: { kind: 'wait', type: 'period', name: 'Wait 2 hours', config: { n: 2, unit: 'hours' }, out: { next: 'n2' } },
+    n2: { kind: 'action', type: 'send_email', name: 'Thank you', config: { subject: 'Thanks', body: '{hi}' }, out: { next: null } } } };
+  const T4 = sb.wfTemplateItem({ id: 't-4', key: 'job_thanks', name: 'Thanks', origin: 'system', definition: docNamed }, Lt);
+  assertEqual([T4.flat, T4.preview && T4.preview.steps.map(x => x.kind), T4.why, docNamed.nodes.n1.name], [null, ['wait', 'action'], 'Opens in the new builder (phase 4)', 'Wait 2 hours'],
+    'wfTemplateItem: a straight template with named steps previews in one sentence, but only the new builder keeps its names (Choose greyed); the template itself is untouched');
+  assertEqual([T3.why, T3.mine, T3.by, T3.category, T3.icon.ico], ['Needs the phone line (Twilio)', true, 'Kim', '', 'message'], 'wfTemplateItem: a step the business doesn\'t have yet greys it with the registry\'s reason; one of Mine');
+  assertEqual([sb.wfTemplateItem(null, null).uses, sb.wfTemplateItem(null, null).why], [[], 'Opens in the new builder (phase 4)'], 'wfTemplateItem: anything else is an empty template, never an error');
+  const tids = (c, q) => sb.wfTemplateRows([T2, T3, T1], c, q).map(t => t.id);
+  assertEqual([tids('all', ''), tids('Leads'), tids('Team notifications'), tids('mine'), tids('Reviews'), tids('all', '  send SMS '), tids('nope', 'quote')], [['t-3', 't-2', 't-1'], ['t-2'], ['t-1'], ['t-3'], [], ['t-3'], ['t-2']],
+    'wfTemplateRows: All / a category / Mine, A–Z; Search by name, description and what it uses; an unknown chip = All');
+  const ENG = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'automations', 'index.ts'), 'utf8'), engCats = JSON.parse((/export const WF_TPL_CATEGORIES = (\[[^\]]*\]);/.exec(ENG) || [])[1] || 'null');
+  const engLim = /export const WF_TPL_LIMITS = \{ name: (\d+), description: (\d+), perBusiness: (\d+) \};/.exec(ENG) || [];
+  assertEqual([engCats, [Number(engLim[1]), Number(engLim[2]), Number(engLim[3])]], [sb.WF_TPL_CHIPS.map(c => c[0]).filter(k => k!=='all' && k!=='mine'), [sb.WF_TPL_LIMITS.name, sb.WF_TPL_LIMITS.description, sb.WF_TPL_LIMITS.rows]],
+    'the library\'s chips = the engine\'s template categories; its name / description / row limits = the engine\'s');
+  const evil = '<img src=x onerror=alert(1)>"\'&';
+  const TE = sb.wfTemplateItem({ id: "t'1", key: 'mine_x', name: evil, description: evil, category: evil, origin: 'user', definition: docPush }, Lt);
+  const c1 = sb.wfTemplateCardHtml(TE, { open: "t'1" }, evil), c2 = sb.wfTemplateCardHtml(TE, { renaming: "t'1" }, ''), c3 = sb.wfTemplateCardHtml(TE, { deleting: "t'1" }, ''), c4 = sb.wfTemplateCardHtml(T2, { open: 't-2' }, '');
+  assertEqual([[c1, c2, c3].some(x => /<img|onerror=alert\(1\)>"/.test(x)), c1.includes("wfTplChoose('t\\'1')"), c1.includes('<b>What it does:</b> &lt;img'), c1.includes('Hide preview') && c1.includes('aria-expanded="true"'),
+    c1.includes("wfTplRename('t\\'1')") && c1.includes("wfTplDelete('t\\'1')"), c2.includes('id="wf-tpl-name"') && c2.includes("wfTplRenameSave('t\\'1')"), c3.includes('Delete template') && c3.includes('Workflows made from it stay as they are.'),
+    /aria-disabled="true" title="Opens in the new builder \(phase 4\)" onclick="wfTplChoose\('t-2'\)"/.test(c4), c4.includes('<b>What it does:</b> Opens in the new builder (phase 4)'), c4.includes('<span class="pill au-rm">System</span>') && !c4.includes('wfTplRename')],
+    [false, true, true, true, true, true, true, true, true, true], 'wfTemplateCardHtml: every word escaped, handler ids one JS string; Preview / Rename / Delete in place; a greyed one says why on Choose and in its preview; System ones can\'t be renamed');
+  // the page: the Notifications page and the old list are gone; the bar, the template entry and one hide path
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  assertEqual([/function (renderNotificationsPage|renderAutomationsPage|autoListsHtml|autoRowHtml|autoMatches|notifyCardHtml|autoRemovedHtml)\(/.test(script), extractDecl(script, 'checkPhoneNotifications').includes("UI.tab==='payroll' || wfShowing()"),
+    /const bar = wfPhoneBarWanted\(V\.items, /.test(extractDecl(script, 'wfWorkflowsHtml')), extractDecl(script, 'wfCreateMenu').includes("{ id: 'template', label: 'Select from template' }") && extractDecl(script, 'wfCreateMenu').includes('wfTplOpen()'),
+    /wfSystemHide\(hide, /.test(extractDecl(script, 'wfBulkExec')), /wfSystemHide\(\[row\], /.test(extractDecl(script, 'autoRemoveReady')), extractDecl(script, 'wfItemsNow').includes('flowSentence(r.def, actx)'),
+    /if \(AUTO_ED && AUTO_ED\.pendingSync\) \{ AUTO_ED\.pendingSync = false;/.test(extractDecl(script, 'renderAutomationPage')), /x\.virtual && x\.card \? wfSystemCardHtml\(/.test(extractDecl(script, 'wfListHtml')), extractDecl(script, 'wfMenuDo').includes("id==='upload') wfTplUpload(key)")],
+    [false, true, true, true, true, true, true, true, true, true], 'the Notifications page and the old list are gone; the phone bar follows the Workflows tab; Select from template and Upload are on; one way to hide System rows; a confirm asked by a System setter redraws the open editor');
+  const pure = ['wfSystemRows', 'wfPublishAsk', 'wfSystemHidePlan', 'wfSystemCardHtml', 'wfPhoneBarWanted', 'wfTemplateItem', 'wfTemplateRows', 'wfTemplateCardHtml'];
+  assertEqual(pure.filter(n => /\brender\(|renderKeepingInput\(|\bdb\.|\bsb\.|fetch\(|Date\.now\(|new Date\(\)/.test(extractDecl(script, n))), [], 'G3.3\'s pure helpers never redraw, read the database, call a server or read the clock');
+  assertEqual(['wfTplOpen', 'wfTplPaint', 'wfTplListHtml', 'wfTplListPaint', 'wfTplChip', 'wfTplSearch', 'wfTplPreview', 'wfTplCancel', 'wfTplEntry', 'wfTplItems', 'wfTplRename', 'wfTplDelete'].filter(n => /\brender\(\)|renderKeepingInput\(\)/.test(extractDecl(script, n))), [],
+    'the template window redraws only itself (its read paints the window, never the page)');
+}
+// The template window's reads and writes (G3.3): one read per opening (a finished read paints only the window), typing
+// redraws only its list, Choose / Rename / Delete go through the automations function (the table is read-only for the
+// app), a greyed or read-only one sends nothing.
+async function testWfTemplatesWindow(){
+  console.log('\nSettings → Automation: the template library window (stage 2, G3.3)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const NONE = { match: 'all', segments: [{ match: 'all', rules: [] }] };
+  const rowsDb = [{ id: 't-1', key: 'team_new_lead', name: 'Tell the team about a new lead', category: 'Team notifications', origin: 'system', definition: { schema: 2, seq: 1, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: NONE }], nodes: { n1: { kind: 'action', type: 'internal_notification', config: { channel: 'push', to: { roles: ['owner'] }, title: 'New lead' }, out: { next: null } } } } },
+    { id: 't-2', key: 'lead_q', name: 'Quote follow-up', category: 'Leads', origin: 'system', definition: { schema: 2, seq: 2, entry: 'n1', triggers: [{ id: 't1', type: 'stage', filters: NONE }], nodes: { n1: { kind: 'split', type: 'split', config: {}, out: {} } } } },
+    { id: 't-3', key: 'mine_abcdefghij', name: 'Ours', category: null, origin: 'user', definition: { schema: 2, seq: 1, entry: null, triggers: [{ id: 't1', type: 'newLead', filters: NONE }], nodes: {} } }];
+  const n = { reads: 0, renders: 0, keeps: 0, paints: 0, fn: [], toasts: [], edits: [], opened: [], closed: 0, readOnly: '' }, tick = () => new Promise(r => setImmediate(r));
+  const el = id => (n.dom[id] = n.dom[id] || { id, innerHTML: '', value: '', focus(){}, select(){} });
+  n.dom = {};
+  const q = () => { const b = { select: () => b, eq: () => b, is: () => b, order: () => b, range: () => { n.reads++; return Promise.resolve({ data: rowsDb, error: null }); }, update: () => b }; return b; };
+  const ctx = { console, Map, Set, Promise, String, Number, Math, Object, Array, JSON,
+    AUTO_TABLE: 'automations', AUTO_BUSINESS_ID: 'default', CAT_NAMES: { automations: 'Automations' }, WF_UI: { folder: null }, MONTHS: [],
+    sb: { from: q }, document: { getElementById: id => (id==='wf-tpl' || id==='wf-tpl-list' || id==='wf-tpl-q' || id==='wf-tpl-name') && n.open ? el(id) : null, querySelector: () => null },
+    wfPopup: () => { n.open = true; }, closePopup: () => { n.open = false; n.closed++; }, wfMenuClose: () => {}, render: () => { n.renders++; }, renderKeepingInput: () => { n.keeps++; },
+    readOnlyReason: () => n.readOnly, showToast: (m) => n.toasts.push(m), logSettingsActivity: () => {}, wfActor: () => 'Alex', wfChanged: () => {}, wfEdit: id => n.edits.push(id), wfDbWrite: async () => true,
+    autoFnCall: async b => { n.fn.push(b); return b.step==='duplicate' ? { ok: true, body: { id: 'new-1' } } : { ok: true, body: { ok: true } }; }, autoFnReason: () => 'x',
+    openAutoEditor: (k, o) => n.opened.push([k, o]),
+    autoCtx: () => ({}), flowSentence: () => 'When a lead comes in, tell the owners.', ico: () => '', pill: (t, x) => `<span class="pill ${t}">${x}</span>`,
+    WF_LIST_LIMITS: { name: 120, cacheKeys: 30 }, AUTO_TRIGGERS: {}, AUTO_MIRROR_TRIGGERS: {}, WF_V1_TRIGGER_NAMES: {} };
+  vm.createContext(ctx);
+  vm.runInContext(['esc', 'jsStr', 'WF_ID_RE', 'wfWinDormant', 'wfToFlat', 'wfLabels', 'wfIconOf', 'WF_DATA', 'wfEnsure', 'wfInvalidate', 'WF_TPL_CHIPS', 'WF_TPL_COLS', 'WF_TPL_LIMITS', 'WF_TPL_WHY', 'wfTemplateItem', 'wfTemplateRows', 'wfTemplateCardHtml',
+    'wfFetchTemplates', 'wfTplShowing', 'wfTplEntry', 'wfTplItems', 'wfTplOpen', 'wfTplListHtml', 'wfTplPaint', 'wfTplListPaint', 'wfTplChip', 'wfTplSearch', 'wfTplRetry', 'wfTplPreview', 'wfTplCancel', 'wfTplFind', 'wfTplChoose',
+    'wfTplRename', 'wfTplRenameSave', 'wfTplDelete', 'wfTplDeleteSave'].map(x => extractDecl(script, x)).join('\n').replace(/^let WF_TPL = null;/m, '') + '\nvar WF_TPL = null; this.__get = () => WF_TPL;', ctx);
+  ctx.wfTplOpen();
+  const first = n.dom['wf-tpl'].innerHTML;
+  await tick(); await tick();
+  assertEqual([first.includes('Loading templates…'), n.reads, n.renders, n.keeps, n.dom['wf-tpl'].innerHTML.includes('Tell the team about a new lead'), (n.dom['wf-tpl'].innerHTML.match(/class="ncard wf-tpl-card"/g) || []).length],
+    [true, 1, 0, 0, true, 3], 'template window: one read; while it loads it says so; when it lands it paints only the window (never the page)');
+  ctx.wfTplSearch('quote'); ctx.wfTplChip('mine'); ctx.wfTplPreview('t-1'); ctx.wfTplSearch(''); ctx.wfTplChip('all'); ctx.wfTplPreview('t-1');
+  await tick();
+  assertEqual([n.reads, n.renders, n.keeps, n.dom['wf-tpl-list'].innerHTML.includes('When a lead comes in, tell the owners.'), n.dom['wf-tpl'].innerHTML.includes(`aria-pressed="true" onclick="wfTplChip('all')">All`)],
+    [1, 0, 0, true, true], 'template window: chips, search and Preview redraw only the window; nothing is read again');
+  await ctx.wfTplChoose('t-2');
+  assertEqual([n.fn.length, n.toasts.slice(-1)[0]], [0, 'Opens in the new builder (phase 4)'], 'Choose on a branching template: nothing is sent; it says why');
+  n.readOnly = 'Presentation mode: nothing is saved'; await ctx.wfTplChoose('t-1'); await ctx.wfTplDeleteSave('t-3'); n.readOnly = '';
+  assertEqual([n.fn.length, n.toasts.slice(-1)[0]], [0, 'Presentation mode: nothing is saved'], 'Choose / Delete in a read-only mode: nothing is sent');
+  ctx.wfTplRename('t-3'); el('wf-tpl-name').value = '  Our alert '; await ctx.wfTplRenameSave('t-3'); await tick(); await tick();
+  assertEqual([n.fn[0], n.reads, ctx.__get().renaming, n.renders], [{ step: 'template_rename', template_id: 't-3', name: 'Our alert' }, 2, null, 0], 'Rename: through the function; the library is read again; still only the window redraws');
+  ctx.wfTplDelete('t-3'); await ctx.wfTplDeleteSave('t-3');
+  assertEqual(n.fn[1], { step: 'template_delete', template_id: 't-3' }, 'Delete (after the in-place question): through the function');
+  await tick(); await tick();
+  const fn0 = n.fn.length;
+  await ctx.wfTplChoose('t-1');
+  const op = n.opened[0] || [];
+  assertEqual([n.fn.length - fn0, n.closed, n.renders, n.edits, ctx.__get(), op[0], op[1] && op[1].baseKey, op[1] && op[1].name, op[1] && op[1].folderId, !!(op[1] && op[1].def && op[1].def.trigger)],
+    [0, 1, 0, [], null, null, 'tpl:team_new_lead', 'Tell the team about a new lead', null, true],
+    'Choose template (design §4.3): the builder opens UNSAVED from the template (template_key tpl:<key>); nothing is stored (no function call) until its first Save; the window closes');
+}
+// Settings → Automation → Global Workflow Settings (stage 2, G3.2; design §4.4, §4.5, Ofek's Q7): the app's copies of the
+// engine's bizToUtc / cleanEmail / signatureOf / pause rules give the engine's results on fixtures/global-settings.json;
+// wfPauseProblems = automation_pauses_guard's rules and words; error_notify fits automation_error_notify_ok; the cards
+// escape every name and say why each greyed control is greyed; nothing here redraws, reads or writes by itself.
+function testWfGlobalSettings(sb){
+  console.log('\nSettings → Automation: Global Workflow Settings and Message templates links (stage 2, G3.2)');
+  const G = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'automations', 'fixtures', 'global-settings.json'), 'utf8'));
+  const iso = ms => ms===null ? null : new Date(ms).toISOString();
+  // parity with the engine (the engine's tests.ts block 36 runs the same file)
+  G.bizToUtc.forEach(c => assertEqual(iso(sb.bizToUtc(c.day, c.hh, c.mm, c.tz)), c.utc, `bizToUtc = the engine's: ${c.name}`));
+  assertEqual(G.cleanEmail.map(c => sb.cleanEmail(c.in)), G.cleanEmail.map(c => c.out), 'cleanEmail = the engine\'s on every fixture');
+  assertEqual(G.signatureOf.map(c => sb.signatureOf(c.author, c.biz)), G.signatureOf.map(c => c.out), 'signatureOf = the engine\'s on every fixture');
+  G.pauseUntil.forEach(c => assertEqual(iso(sb.wfPauseUntil(G.pauses, c.id, Date.parse(c.now), c.tz)), c.until, `wfPauseUntil = the engine's pauseUntil: ${c.name}`));
+  G.pauseOccurrences.forEach(c => assertEqual(sb.wfPauseOccurrences(G.pauses.find(p => p.id===c.pause), Date.parse(c.now), c.tz).map(o => [iso(o.start), iso(o.end)]), c.out, `wfPauseOccurrences = the engine's: ${c.name}`));
+  const eng = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'automations', 'index.ts'), 'utf8');
+  const wallEng = eng.slice(eng.indexOf('export function wallMs('), eng.indexOf('\n}\n', eng.indexOf('export function wallMs('))).split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+  assertEqual([/return bizToUtc\(/.test(wallEng), /zoneToUtc/.test(wallEng)], [true, false], 'the engine\'s pause dates use bizToUtc too (a start inside a daylight-saving jump is the time after it, in both)');
+  // the list's "Paused until": wfPausedInfo (the engine's rule) where the zone is known; the wall-clock wfPausedUntil agrees away from a clock jump
+  const wallOf = (ms, tz) => { const p = sb.bizPartsIn(ms, tz); return `${p.day}T${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`; };
+  G.pauseUntil.forEach(c => assertEqual(sb.wfPausedInfo(G.pauses, c.id, Date.parse(c.now), c.tz), c.until ? { until: wallOf(Date.parse(c.until), c.tz) } : null, `wfPausedInfo: ${c.name}`));
+  G.pauseUntil.filter(c => c.tz==='Australia/Sydney').forEach(c => { const r = sb.wfPausedUntil(G.pauses, c.id, wallOf(Date.parse(c.now), c.tz));
+    assertEqual(r ? iso(sb.bizToUtc(r.until.slice(0, 10), +r.until.slice(11, 13), +r.until.slice(14, 16), c.tz)) : null, c.until, `wfPausedUntil (G3.1, wall clock) agrees: ${c.name}`); });
+  const chi = { nowWall: '2026-03-08T03:00', nowMs: Date.parse('2026-03-08T08:00:00Z'), tz: 'America/Chicago' }, rowD = { id: 'wD', name: 'D', enabled: true, list_summary: {} };
+  assertEqual([sb.wfItem(rowD, null, { pauses: G.pauses }, chi).paused, sb.wfItem(rowD, null, { pauses: G.pauses }, { ...chi, tz: undefined }).paused],
+    [null, { until: '2026-03-08T05:00' }], 'wfItem: with the zone it follows the engine (02:30 inside the jump starts at 03:30, so 03:00 is not paused yet); without it, the wall clock');
+  // wfPauseStatus
+  const p1 = G.pauses[0], p3 = G.pauses[2], now = Date.parse('2026-10-15T01:00:00Z');
+  assertEqual([sb.wfPauseStatus(p3, now, 'Australia/Sydney'), sb.wfPauseStatus(p1, now, 'Australia/Sydney'), sb.wfPauseStatus(p3, Date.parse('2030-01-01T00:00:00Z'), 'Australia/Sydney')],
+    [{ key: 'now', until: Date.parse('2026-10-15T23:00:00Z') }, { key: 'next', at: Date.parse('2026-12-24T06:00:00Z') }, { key: 'over' }], 'wfPauseStatus: pausing now (until its end), the next time of an annual one, a one-off that is over');
+  assertEqual([sb.wfWallText('2026-12-24T17:00'), sb.wfWallText('2026-13-01T00:00'), sb.wfWallText(null)], ['24 Dec 2026, 5:00pm', '—', '—'], 'wfWallText: a pause date as typed');
+  // wfWallTs = automation_wall_ts
+  assertEqual([sb.wfWallTs('2026-02-30T09:00', 0), sb.wfWallTs('2026-10-14 09:00', 0), sb.wfWallTs('2026-10-14T24:00', 0), sb.wfWallTs('2028-02-29T09:00', -1), sb.wfWallTs('2026-10-14T09:00', 0)],
+    [null, null, null, Date.UTC(2027, 1, 28, 9, 0), Date.UTC(2026, 9, 14, 9, 0)], 'wfWallTs: 30 February, a space, 24:00 refused (the database raises there); 29 February a year back = 28 February');
+  // wfPauseProblems: the trigger's rules, one by one (hand-worked; the staging check PASS 23 runs the same cases in the database)
+  const W = { a: { name: 'A', deleted: false }, b: { name: 'B', deleted: false }, c: { name: 'C', deleted: false }, d: { name: 'D', deleted: true } };
+  const R = (s, e, o) => ({ key: 'k' + s + e, id: null, start_wall: s, end_wall: e, annually: false, automation_ids: ['a'], dirty: true, ...o });
+  const codes = (rows, wfs) => sb.wfPauseProblems(rows, wfs===undefined ? W : wfs).map(p => p.row + ':' + p.code + (p.other!==undefined ? '>' + p.other : ''));
+  assertEqual(codes([R('2026-12-24T17:00', '2027-01-02T08:00')]), [], 'pause: a range across New Year, 8 days, one workflow — fine');
+  assertEqual([codes([R('2026-11-01T00:00', '2026-11-16T00:00')]), codes([R('2026-11-01T00:00', '2026-11-16T00:01')]), codes([R('2026-11-01T00:00', '2026-11-01T00:00')]), codes([R('2026-11-02T00:00', '2026-11-01T00:00')])],
+    [[], ['0:too_long'], ['0:end_before_start'], ['0:end_before_start']], 'pause: exactly 15 days is allowed, one minute more is not (GHL\'s words); the end must be after the start');
+  assertEqual([codes([R('2026-02-30T09:00', '2026-03-02T09:00')]), codes([R('', '')]), codes([R('2026-11-01T00:00', '2026-11-02T00:00', { automation_ids: [] })])],
+    [['0:bad_date'], ['0:bad_date'], ['0:no_workflow']], 'pause: 30 February or an empty date; no workflow chosen');
+  assertEqual([codes([R('2026-11-01T00:00', '2026-11-02T00:00', { automation_ids: ['d'] })]), codes([R('2026-11-01T00:00', '2026-11-02T00:00', { automation_ids: ['zz', 'a'] })]), codes([R('2026-11-01T00:00', '2026-11-02T00:00', { automation_ids: ['zz'] })], null)],
+    [['0:missing_workflow'], ['0:missing_workflow'], []], 'pause: a deleted workflow or one that is not there (the trigger\'s check); before the list is read the trigger alone decides');
+  const dec = R('2026-12-01T00:00', '2026-12-05T00:00');
+  assertEqual([codes([dec, R('2026-12-04T00:00', '2026-12-08T00:00')]), codes([dec, R('2026-12-04T00:00', '2026-12-08T00:00', { automation_ids: ['b'] })]), codes([dec, R('2026-12-05T00:00', '2026-12-06T00:00')]),
+    codes([dec, R('2026-12-04T00:00', '2026-12-08T00:00', { automation_ids: ['b', 'a'] })])],
+    [['1:overlap>0'], [], [], ['1:overlap>0']], 'pause: one workflow in two overlapping ranges is refused; another workflow, or a range that starts at the other\'s end, is fine');
+  const ny = R('2026-12-24T17:00', '2027-01-02T08:00', { annually: true });
+  assertEqual([codes([ny, R('2031-12-31T10:00', '2032-01-01T10:00')]), codes([ny, R('2031-01-01T00:00', '2031-01-02T00:00')]), codes([ny, R('2031-01-03T00:00', '2031-01-05T00:00')]), codes([R('2031-12-31T10:00', '2032-01-01T10:00', { dirty: false }), { ...ny }])],
+    [['1:overlap>0'], ['1:overlap>0'], [], ['1:overlap>0']], 'pause: an annual range over New Year meets a one-off five years on (both sides of New Year), not the days after it; compared from either side');
+  const feb = R('2028-02-29T09:00', '2028-03-01T09:00', { annually: true, automation_ids: ['c'] });
+  assertEqual([codes([feb, R('2027-02-28T10:00', '2027-02-28T12:00', { automation_ids: ['c'] })]), codes([feb, R('2027-03-01T09:00', '2027-03-01T10:00', { automation_ids: ['c'] })]),
+    codes([R('2027-02-28T10:00', '2027-02-28T12:00', { automation_ids: ['c'], dirty: false }), feb])],
+    [['1:overlap>0'], [], ['1:overlap>0']], 'pause: an annual 29 February is 28 February in 2027 (overlaps 28 Feb 10:00, ends before 1 March 09:00), from either side');
+  const many = Array.from({ length: 16 }, (_, i) => R(`${2040 + i}-01-01T00:00`, `${2040 + i}-01-02T00:00`, { key: 'm' + i }));
+  assertEqual([codes(many.slice(0, 15)), codes(many)], [[], ['-1:max_rows']], 'pause: 15 dates are fine, a 16th is refused (the whole table)');
+  assertEqual([codes([R('2026-11-01T00:00', '2026-11-02T00:00', { automation_ids: ['d'], dirty: false })]), codes([R('2026-12-01T00:00', '2026-12-05T00:00', { dirty: false }), R('2026-12-04T00:00', '2026-12-08T00:00', { dirty: false })])],
+    [[], []], 'pause: rows that are not written are not checked (as the trigger: only the rows a Save writes)');
+  const SQL = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage2-automations.sql'), 'utf8');
+  const guard = SQL.slice(SQL.indexOf('create or replace function public.automation_pauses_guard()'), SQL.indexOf('drop trigger if exists automation_pauses_guard'));
+  assertEqual(['max_rows', 'no_workflow', 'end_before_start', 'too_long', 'missing_workflow', 'overlap'].filter(k => !guard.includes(`'${sb.WF_PAUSE_TEXT[k]}'`)), [], 'pause: the problems use the trigger\'s own words');
+  assertEqual([/if n >= 15 then/.test(guard), guard.includes(`interval '${sb.WF_GLOBAL.pauseDays} days'`), SQL.includes(`cardinality(automation_ids) between 1 and ${sb.WF_GLOBAL.pauseIds}`), sb.WF_GLOBAL.pauseRows],
+    [true, true, true, 15], 'pause: the same limits as the database (15 dates, 15 days, 500 workflows)');
+  const chk = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage2-part1-staging-checks.sql'), 'utf8'), c23 = chk.slice(chk.indexOf('-- 23. (G3.2)'));
+  assertEqual(["'2031-12-31T10:00', '2032-01-01T10:00'", "'2027-02-28T10:00', '2027-02-28T12:00'", "'2026-11-01T00:00', '2026-11-16T00:00'", "'2027-11-01T00:00', '2027-11-16T00:01'", 'array[d]', "'At most 15 pause dates'", "'pause'", 'PASS 23'].filter(x => !c23.includes(x)), [],
+    'pause: the staging check PASS 23 runs the same cases in the database (New Year, 29 February, 15 days, deleted ids, 15 dates, the wake)');
+  // wfPauseDraft / wfPausePlan: removed first, then changed, then new; the same workflows in another order are not a change
+  const stored = [{ id: 'p1', start_wall: '2026-12-01T00:00', end_wall: '2026-12-05T00:00', annually: false, automation_ids: ['b', 'a'], created_at: 'x' },
+    { id: 'p2', start_wall: '2027-01-01T00:00', end_wall: '2027-01-02T00:00', annually: true, automation_ids: ['a'] }, { id: 'p3', start_wall: '2027-05-01T00:00', end_wall: '2027-05-02T00:00', annually: false, automation_ids: ['c'] }];
+  const dr = sb.wfPauseDraft(stored);
+  assertEqual([dr.length, dr[0], sb.wfPausePlan(stored, dr).changed], [3, { key: 'p1', id: 'p1', start_wall: '2026-12-01T00:00', end_wall: '2026-12-05T00:00', annually: false, automation_ids: ['a', 'b'] }, false], 'wfPauseDraft: the stored rows (ids sorted, only the editable parts); unchanged = nothing to write');
+  const dr2 = [{ ...dr[0], automation_ids: ['b', 'a'] }, { ...dr[2], end_wall: '2027-05-03T00:00' }, { key: 'n1', id: null, start_wall: '2027-07-01T00:00', end_wall: '2027-07-02T00:00', annually: false, automation_ids: ['c', 'a', 'a'] }];
+  const pl = sb.wfPausePlan(stored, dr2);
+  assertEqual([pl.del, pl.upd, pl.ins, [...pl.dirty], pl.changed],
+    [['p2'], [{ key: 'p3', id: 'p3', patch: { start_wall: '2027-05-01T00:00', end_wall: '2027-05-03T00:00', annually: false, automation_ids: ['c'] } }], [{ key: 'n1', row: { start_wall: '2027-07-01T00:00', end_wall: '2027-07-02T00:00', annually: false, automation_ids: ['a', 'c'] } }], ['p3', 'n1'], true],
+    'wfPausePlan: p2 removed, p3 changed, n1 new (workflows once each, sorted); p1 in another order is unchanged');
+  // error_notify: the defaults (Ofek's Q7), the problems, the value written = what automation_error_notify_ok accepts
+  const U1 = '11111111-1111-4111-8111-111111111111', U2 = '22222222-2222-4222-8222-222222222222', U3 = '33333333-3333-4333-8333-333333333333';
+  const people = [{ id: U1, fullName: 'Olivia', role: 'owner' }, { id: U2, fullName: 'Max', role: 'manager' }, { id: U3, fullName: 'Oscar', role: 'owner' }];
+  assertEqual([sb.wfErrorNotifyNorm(null, people), sb.wfErrorNotifyNorm({ push: false, users: [U2, U2], emails: ['x@y.com'] }, people), sb.wfErrorNotifyNorm([], [])],
+    [{ on: false, push: true, users: [U1, U3], emails: [], usersSaved: false }, { on: false, push: false, users: [U2], emails: ['x@y.com'], usersSaved: true }, { on: false, push: true, users: [], emails: [], usersSaved: false }],
+    'wfErrorNotifyNorm: nothing saved = the phone alert to every owner, no email (Q7); what is saved is shown');
+  const NP = (d, on) => sb.wfErrorNotifyProblems({ on: false, push: true, users: [U1], emails: [], ...d }, on);
+  assertEqual([NP({}).length, NP({ users: [] })[0], NP({ push: false, users: [] }).length, NP({ emails: Array.from({ length: 11 }, (_, i) => `p${i}@x.com`) }, true)[0], NP({ emails: ['a<b@x.com', 'nope', 'ok@x.com'] }, true)[0], NP({ on: true }, false)[0], NP({ on: true }, true).length],
+    [0, 'Select at least one user for the phone alert, or switch it off.', 0, 'At most 10 other email addresses.', 'Check the emails: a<b@x.com, nope (it should look like name@example.com).', 'Needs a team email sender: email notifications stay off for now.', 0],
+    'wfErrorNotifyProblems: a phone alert needs someone; at most 10 addresses, each checked; email waits for a team email sender');
+  const patch = sb.wfErrorNotifyPatch({ on: true, push: true, users: [U1, 'bad', U1, 'p-own'], emails: [' Sam@Example.com ', 'nope', 'sam@example.com', 'a<b@x.com'], extra: 1 });
+  assertEqual(patch, { on: true, push: true, users: [U1], emails: ['sam@example.com'] }, 'wfErrorNotifyPatch: only the four keys, ids that are ids, each address once, cleaned');
+  const okFn = SQL.slice(SQL.indexOf('create or replace function public.automation_error_notify_ok('), SQL.indexOf('create or replace function public.automation_smart_lists_ok('));
+  const sqlEmail = new RegExp(okFn.match(/\(x #>> '\{\}'\) !~ '(\^\[\^@\\s<>"\]\+@[^']+)'/)[1]);
+  assertEqual([okFn.includes("if k not in ('on', 'push', 'users', 'emails')"), okFn.includes(`jsonb_array_length(v -> 'users') > ${sb.WF_GLOBAL.notifyUsers}`), okFn.includes(`jsonb_array_length(v -> 'emails') > ${sb.WF_GLOBAL.notifyEmails}`), okFn.includes(`> ${sb.WF_GLOBAL.emailMax}`)],
+    [true, true, true, true], 'error_notify: the same keys and limits as automation_error_notify_ok');
+  const cands = ['sam@example.com', ' A.B+c@sub.example.co ', 'a<b@x.com', 'a"b@x.com', 'a,b@x.com', 'x@y', 'x'.repeat(250) + '@x.com', 'ok@x.com'];
+  assertEqual(cands.filter(sb.wfNotifyEmailOk).map(sb.cleanEmail).filter(e => !(sqlEmail.test(e) && e.length <= 254)), [], 'error_notify: every address the card accepts passes the database\'s check (as written: cleaned)');
+  assertEqual(cands.filter(sb.wfNotifyEmailOk), ['sam@example.com', ' A.B+c@sub.example.co ', 'ok@x.com'], 'error_notify: angle brackets, quotes, commas, no dot, longer than 254 are refused');
+  // wfTplUsers: a phase-4 step or a new doc's node; never a deleted workflow
+  assertEqual(sb.wfTplUsers('my_a', [{ id: 'x', def: { steps: [{ kind: 'action', templateKey: 'my_a' }] } }, { id: 'y', def: { steps: [] }, doc: { nodes: { n1: { kind: 'action', type: 'send_email', config: { templateKey: 'my_a' } } } } },
+    { id: 'z', deleted: true, def: { steps: [{ kind: 'action', templateKey: 'my_a' }] } }, { id: 'w', def: { steps: [{ kind: 'wait', templateKey: 'my_a' }] } }]).map(a => a.id).concat(sb.wfTplUsers('', [{ id: 'q' }])), ['x', 'y'],
+    'wfTplUsers: the workflows that send a template, also from the new builder\'s doc (a deleted one does not count)');
+  assertEqual([sb.wfStatusPillHtml({ kind: 'workflow', on: true }), sb.wfStatusPillHtml({ kind: 'workflow', on: false, gate: 'golive' })],
+    ['<span class="pill good">Published</span>', '<span class="pill neutral">Draft</span><span class="pill warn">Off until go-live</span>'], 'wfStatusPillHtml: the list\'s pills');
+  // the cards
+  const evil = '<img src=x onerror=alert(1)>"\'&', ek = "k'),alert(1);('";
+  const A = { safetyLoaded: true, safetyError: '', safety: { error_notify: {}, default_builder: 'standard' } };
+  const ctx = { people: [{ id: U1, fullName: evil, role: 'owner' }, { id: ek, fullName: 'Max', role: 'manager' }], avail: { teamEmail: false }, features: { errorDigest: false }, regLoaded: true, tz: 'Australia/Sydney', nowMs: now,
+    wfs: { a: { name: evil, deleted: false, on: true }, d: { name: 'Old', deleted: true, on: false }, [ek]: { name: 'Quote', deleted: false, on: true } }, wfsLoaded: true, pickable: [{ id: 'a', name: evil }, { id: ek, name: 'Quote' }], blocked: [{ name: evil }],
+    pauses: { status: 'ok', data: [{ id: 'p1', start_wall: '2026-10-14T10:00', end_wall: '2026-10-16T10:00', annually: false, automation_ids: ['a', 'd'] }] }, ro: '' };
+  const why = t => `<span class="hint wf-why">${t}</span>`;
+  let n = sb.wfNotifyCardHtml(A, null, ctx);
+  assertEqual([n.includes('Phone notification'), n.includes('Email notification'), n.includes('Select users'), n.includes('Other email addresses'), n.includes(why('Needs a team email sender')), n.includes(why('Phone alerts start with the next engine update')),
+    /<input type="checkbox" checked\s+onchange="wfNotifyUser\('11111111/.test(n), n.includes('Nothing saved yet: every owner.'), /class="btn small primary" disabled onclick="wfNotifySave\(\)"/.test(n), /id="wf-gs-emails" data-keep-focus="wf-gs-emails" rows="2" disabled/.test(n)],
+    [true, true, true, true, true, true, true, true, true, true], 'Notifications: GHL\'s card with the phone alert (Q7); email greyed with its reason in words; every owner ticked when nothing is saved; Save waits for a change');
+  assertEqual([sb.wfNotifyCardHtml(A, null, { ...ctx, features: { errorDigest: true } }).includes('next engine update'), sb.wfNotifyCardHtml({ ...A, safety: { default_builder: 'standard' } }, null, ctx).includes('Comes with the next database update'),
+    /Try again/.test(sb.wfNotifyCardHtml({ ...A, safetyError: 'x' }, null, ctx)), /Loading/.test(sb.wfNotifyCardHtml({ safetyLoaded: false }, null, ctx)),
+    /disabled onchange="wfNotifyUser/.test(sb.wfNotifyCardHtml(A, null, { ...ctx, ro: 'Presentation mode is on, changes are not saved' })), sb.wfNotifyCardHtml(A, { on: false, push: true, users: [], emails: [] }, ctx).includes('Select at least one user')],
+    [false, true, true, true, true, true], 'Notifications: once the engine sends the alert the note goes; before the database update it says so; a failed read offers Try again; Presentation mode locks it; problems show under the draft');
+  const pz = sb.wfPauseCardHtml(null, ctx);
+  assertEqual([pz.includes('When to pause workflow?'), pz.includes('Pause dates: 1 / 15'), pz.includes('Start date and time'), pz.includes('End date and time'), pz.includes('Select workflows'), pz.includes('Annually'), pz.includes('Add date'),
+    pz.includes('Old (deleted: remove it)'), pz.includes('Pausing now, until 16 Oct 2026, 10:00am'), pz.includes(`<option disabled>&lt;img src=x onerror=alert(1)&gt;&quot;'&amp; — ${sb.WF_GLOBAL_WHY.system}</option>`),
+    pz.includes(sb.WF_PAUSE_TEXT.too_long) && pz.includes(sb.WF_PAUSE_TEXT.overlap), /class="btn small primary" disabled onclick="wfPauseSave\(\)"/.test(pz), pz.includes('Records still enter; they wait at their next step until the pause ends.')],
+    [true, true, true, true, true, true, true, true, true, true, true, true, true], 'Pause workflow: GHL\'s rows and notes; a deleted workflow says so; built-in System rows are greyed with the reason; its state now; Save waits for a change');
+  const d15 = Array.from({ length: 15 }, (_, i) => ({ key: 'm' + i, id: null, start_wall: `${2040 + i}-01-01T00:00`, end_wall: `${2040 + i}-01-02T00:00`, annually: false, automation_ids: ['a'] }));
+  const pzFull = sb.wfPauseCardHtml(d15, ctx), pzBad = sb.wfPauseCardHtml([...sb.wfPauseDraft(ctx.pauses.data), { key: 'n1', id: null, start_wall: '2026-10-15T00:00', end_wall: '2026-10-17T00:00', annually: false, automation_ids: ['a'] }], ctx);
+  assertEqual([/disabled title="At most 15 pause dates" onclick="wfPauseAdd\(\)"/.test(pzFull), pzBad.includes(`${sb.WF_PAUSE_TEXT.overlap} (with pause date 1)`), /class="btn small primary" disabled onclick="wfPauseSave\(\)"/.test(pzBad),
+    (sb.wfPauseCardHtml(null, { ...ctx, ro: 'x' }).match(/<input type="datetime-local" disabled/g) || []).length, /Try again/.test(sb.wfPauseCardHtml(null, { ...ctx, pauses: { status: 'error', error: 'relation "public.automation_pauses" does not exist' } }))],
+    [true, true, true, 2, true], 'Pause workflow: 15 dates → no more; an overlap is shown on its row and blocks Save; Presentation mode locks the inputs; a missing table offers Try again');
+  const bl = sb.wfBuilderCardHtml(A, null);
+  assertEqual([bl.includes('Default builder for new workflows'), /value="standard" checked/.test(bl), /value="advanced"\s+disabled/.test(bl), bl.includes(why('Coming with the Advanced builder')), bl.includes('Who can switch between builders'), bl.includes(why('Only owners and managers can edit workflows')),
+    sb.wfBuilderCardHtml({ ...A, safety: {} }, null).includes('Comes with the next database update')],
+    [true, true, true, true, true, true, true], 'Default builder: Standard chosen, Advanced greyed with its reason (phase 5); who can switch greyed with its reason');
+  assertEqual([sb.wfAiCardHtml().includes('AI Builder') && sb.wfAiCardHtml().includes(why('Coming with Workflow AI')), sb.wfAutoSaveCardHtml().includes('Auto save') && sb.wfAutoSaveCardHtml().includes(why('We keep Save with undo')), /set-toggle" role="switch" aria-checked="false" disabled/.test(sb.wfAiCardHtml())],
+    [true, true, true], 'Workflow AI and Auto save: greyed, with the reason in words');
+  const all = [n, pz, pzBad, bl].join('');
+  // (an id inside data-key="…" / value="…" is plain text in a quoted attribute: only the handlers must not carry it raw)
+  assertEqual([/<img/.test(all), all.replace(/(data-key|value)="[^"]*"/g, '').includes(ek), all.includes("wfNotifyUser('k\\'),alert(1);(\\'', this.checked)")], [false, false, true], 'the cards escape every name; an id with a quote stays one JS string');
+  // the pure helpers never redraw, read the database, call a server or read the clock; the tab's drawing never asks for another
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const pure = ['bizPartsIn', 'bizToUtc', 'cleanEmail', 'signatureOf', 'wfWallMs', 'wfPauseOccurrences', 'wfPauseUntil', 'wfPausedInfo', 'wfPauseStatus', 'wfWallTs', 'wfPauseOverlap', 'wfPauseProblems', 'wfPauseDraft', 'wfPausePlan',
+    'wfErrorNotifyNorm', 'wfNotifyEmailOk', 'wfErrorNotifyProblems', 'wfErrorNotifyPatch', 'wfTplUsers', 'wfWallText', 'wfStatusPillHtml', 'wfNotifyCardHtml', 'wfPauseCardHtml', 'wfBuilderCardHtml', 'wfAiCardHtml', 'wfAutoSaveCardHtml'];
+  assertEqual(pure.filter(x => /\brender\(|renderKeepingInput\(|\bdb\.|\bsb\.|fetch\(|Date\.now\(|new Date\(\)|wfEnsure\(/.test(extractDecl(script, x))), [], 'Global settings: the pure helpers never redraw, read the database, call a server or read the clock');
+  assertEqual(['wfGlobalSettingsHtml', 'wfTplPill', 'renderTemplatesPage'].filter(x => /\brender\(\)|renderKeepingInput\(\)/.test(extractDecl(script, x))), [], 'Global settings and the templates tab never ask for another drawing while drawing (no render loop)');
+  assertEqual(['wfNotifySave', 'wfBuilderSave', 'wfPauseSave'].filter(x => !/^[^{]*\{\s*if \(readOnlyReason\(\)\)/.test(extractDecl(script, x))), [], 'every Save of the tab checks Presentation mode / View as first');
+  assertEqual(/quote/i.test(['wfNotifyCardHtml', 'wfPauseCardHtml', 'wfBuilderCardHtml', 'wfAiCardHtml', 'wfAutoSaveCardHtml', 'wfGlobalSettingsHtml'].map(x => extractDecl(script, x)).join('')), false, 'nothing about a quote status (Ofek\'s Q5)');
+}
+// The Global Workflow Settings tab as drawn (G3.2): the six cards in GHL's order; two drawings start each read once; while
+// the reads are out every card says so instead of failing.
+async function testWfGlobalSettingsPage(){
+  console.log('\nSettings → Automation: the Global Workflow Settings tab as drawn (G3.2)');
+  let reads = 0;
+  const sb = autoSandbox({ sb: { auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) }, from: () => { reads++; const q = { select: () => q, eq: () => q, order: () => q, range: () => Promise.resolve({ data: [], error: null }) }; return q; } },
+    fetch: async () => ({ status: 200, ok: true, json: async () => ({ ok: true, availCtx: { teamEmail: false }, features: { errorDigest: false } }) }), AUTOMATIONS_URL: 'https://x/functions/v1/automations', SUPABASE_ANON_KEY: 'k' });
+  sb.UI.settings.page = 'automation';
+  sb.STATE.profiles = [{ id: '11111111-1111-4111-8111-111111111111', fullName: 'Alex Owner', role: 'owner' }];
+  const A = sb.__get('AUTO'); Object.assign(A, { safetyLoaded: true, safetyError: '', safety: { error_notify: {}, default_builder: 'standard' }, safetyDraft: null });
+  const h1 = sb.wfGlobalSettingsHtml(), r1 = reads, h2 = sb.wfGlobalSettingsHtml();
+  const order = ['<h3>Notifications</h3>', '<h3>Pause workflow</h3>', '<h3>Default builder</h3>', '<h3>Workflow AI</h3>', '<h3>Safety for customer messages</h3>', '<h3>Auto save</h3>'].map(t => h1.indexOf(t));
+  await new Promise(r => setImmediate(r));
+  assertEqual([order.every((x, i) => x >= 0 && (i===0 || x > order[i - 1])), r1, reads, h1===h2, /Loading/.test(h1)], [true, 0, 2, true, true],
+    'the tab: Notifications, Pause workflow, Default builder, Workflow AI, Customer message safety, Auto save; two drawings → the same page and each read started once (workflows, pause dates)');
+  await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
+  const h3 = sb.wfGlobalSettingsHtml();
+  assertEqual([reads, /No pause dates\./.test(h3), h3.includes('Phone alerts start with the next engine update'), h3.includes('Needs a team email sender')], [2, true, true, true], 'once read: no pause dates yet; the notes from the registry; nothing read again');
+}
+// The list's reads (wfEnsure / wfData): one read per bucket and key, keys from stored values only (two drawings with no
+// action → the same keys, no new read, even when the day changes), a finished read redraws once and only while the page
+// shows, an error waits for "Try again", leaving the page drops the reads.
+async function testWfListLoads(){
+  console.log('\nSettings → Automation: the list\'s reads (render-loop safe)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const n = { from: 0, rpc: 0, fn: 0, renders: 0 }, tick = () => new Promise(r => setImmediate(r));
+  let failStats = false;
+  const q = () => { const b = { select: () => b, eq: () => b, order: () => b, range: () => { n.from++; return Promise.resolve({ data: [], error: null }); } }; return b; };
+  const ctx = { console, Map, Set, Promise, String, Number, Math, Object, Array, Date,
+    UI: { tab: 'settings', settings: { page: 'automation' } }, AUTO_TABLE: 'automations', AUTO_BUSINESS_ID: 'default', day: '2026-10-15',
+    sb: { from: q, rpc: (name) => { n.rpc++; return Promise.resolve(failStats && name==='automation_list_stats' ? { data: null, error: { message: 'boom' } } : { data: name==='automation_list_stats' ? {} : [], error: null }); } },
+    autoFnCall: async () => { n.fn++; return { ok: true, body: { triggers: [], actions: [] } }; }, autoFnReason: () => 'x', renderKeepingInput: () => { n.renders++; } };
+  ctx.bizDayOf = () => ctx.day;
+  vm.createContext(ctx);
+  vm.runInContext(['OLD_SETTINGS_PAGES', 'settingsPageKey', 'WF_LIST_LIMITS', 'WF_LIST_COLS', 'WF_UI', 'WF_DATA', 'wfDayShift', 'wfShowing', 'wfPageShowing', 'wfEnsure', 'wfInvalidate', 'wfFetchList', 'wfFetchRows', 'WF_PAUSE_COLS', 'wfFetchPauses', 'wfFetchRpc', 'wfFetchRegistry', 'wfData']
+    .map(x => extractDecl(script, x)).join('\n') + '\nthis.__x = { WF_UI, WF_DATA, wfData, wfInvalidate };', ctx);
+  const X = ctx.__x, keysOf = () => Object.entries(X.WF_DATA).map(([b, m]) => b + ':' + [...m.keys()].join(','));
+  X.wfData(); const k1 = keysOf(); X.wfData(); const k2 = keysOf();
+  await tick();
+  assertEqual([k1, k2, n.from, n.rpc, n.fn], [k1, k1, 4, 2, 1], 'wfData: two drawings with no action → the same keys; each read started once (list, folders, System folders, pauses; Needs review, counts; the registry)');
+  assertEqual(k1.find(k => k.startsWith('stats:')), 'stats:2026-04-18', 'the counts\' key is the day 180 days back, worked out once (a stored day, never the clock)');
+  await tick();
+  const r1 = n.renders;
+  ctx.day = '2026-10-16'; X.wfData(); X.wfData(); await tick(); await tick();
+  assertEqual([r1, n.renders, n.from, n.rpc, n.fn, keysOf()], [7, 7, 4, 2, 1, k1], 'each finished read redraws once (renderKeepingInput gathers them); later drawings read nothing, even on a new day');
+  X.wfInvalidate(); X.WF_UI.sinceDay = null; failStats = true;
+  X.wfData(); await tick(); await tick();
+  const e = X.WF_DATA.stats.get([...X.WF_DATA.stats.keys()][0]);
+  const before = [n.rpc, n.renders];
+  X.wfData(); X.wfData(); await tick(); await tick();
+  assertEqual([e.status, e.error, [n.rpc, n.renders]], ['error', 'boom', before], 'a failed read stays failed (its message kept) until "Try again": a redraw never starts it again');
+  X.wfInvalidate(); ctx.UI.settings.page = 'people';
+  const r2 = n.renders; X.wfData(); await tick(); await tick();
+  assertEqual(n.renders, r2, 'a read that finishes after leaving the page draws nothing');
+  ctx.UI.settings.page = 'notifications';
+  assertEqual(vm.runInContext('wfShowing()', ctx), true, 'an old Notifications link counts as the Automation page');
+}
+// Publishing from Settings → Automation (stage 2 phase 3 fix, 15 Oct; customer safety): the list's switch, its ⋮ Publish
+// and the bulk Publish refuse what the old list switch refused (toggleAutomation): the old editor's own checks on the
+// steps it shows — "Fix it first: …", before any question and before the function is called. The words = the engine's
+// v1EditorProblems on fixtures/editor-blocks.json (tests.ts block 38 runs the same file, and the function's step
+// "publish" refuses the same), and the engine's V1_EDITOR (the registries those words need) = this app's own.
+async function testWfPublishGuards(){
+  console.log('\nSettings → Automation: Publish refuses what the old switch refused (the old editor\'s checks = the function\'s)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const AD = path.join(__dirname, '..', 'supabase', 'functions', 'automations'), json = (...p) => JSON.parse(fs.readFileSync(path.join(AD, ...p), 'utf8'));
+  const FX = json('fixtures', 'editor-blocks.json');
+  // 1. the engine's copy of the old editor's registries = the app's
+  const eng = fs.readFileSync(path.join(AD, 'index.ts'), 'utf8'), i0 = eng.indexOf('export const V1_EDITOR');
+  const V = i0 < 0 ? null : vm.runInNewContext('(' + eng.slice(eng.indexOf('{', i0), eng.indexOf('\n};\n', i0) + 2) + ')');
+  const sb0 = loadSandbox(), pickT = o => Object.fromEntries(Object.entries(o).map(([k, t]) => [k, { label: t.label, customer: !!t.customer }]));
+  assertEqual(JSON.parse(JSON.stringify(V && [V.triggers, V.mirrorTriggers, V.conds, V.actions, V.fields, V.waitMax, V.maxSteps, V.stepKinds])), [pickT(sb0.AUTO_TRIGGERS), pickT(sb0.AUTO_MIRROR_TRIGGERS),
+    Object.fromEntries(Object.entries(sb0.AUTO_CONDS).map(([k, c]) => [k, { label: c.label, ops: c.ops, values: !!c.values, appliesTo: Array.isArray(c.appliesTo) ? c.appliesTo : null, ...(c.n ? { n: { min: c.n.min, max: c.n.max } } : {}) }])),
+    Object.fromEntries(Object.entries(sb0.AUTO_ACTIONS).map(([k, a]) => [k, { label: a.label, audience: a.audience }])), Object.fromEntries(Object.entries(sb0.AUTO_FIELDS).map(([k, f]) => [k, f.triggers])),
+    Object.fromEntries(Object.entries(sb0.AUTO_WAIT_UNITS).map(([k, u]) => [k, u.max])), { default: sb0.FLOW_MAX_STEPS_DEFAULT, ceiling: sb0.FLOW_MAX_STEPS_CEILING }, Object.keys(sb0.FLOW_STEP_KINDS)],
+    'the engine\'s V1_EDITOR = the old editor\'s own registries (starts, conditions with their comparisons, actions, which start fills which blank, wait units, step limits, step kinds)');
+  // 2. the old editor's blocking checks = the shared fixture, word for word
+  const sb = autoSandbox(), ctxOf = cat => { sb.STATE.data.settings = { catalog: { ...JSON.parse(JSON.stringify(FX.catalog)), ...(cat || {}) } }; return sb.autoCtx(); };
+  assertEqual(FX.cases.length >= 60, true, 'editor blocks: the shared fixture has its cases');
+  for (const c of FX.cases) assertEqual(sb.autoProblems(c.def, ctxOf(c.catalog), { name: c.wfName ?? 'Workflow' }).filter(p => p.block).map(p => p.text), c.blocks, `the old editor's blocks = the fixture (= the function's): ${c.name}`);
+  // 3. wfPublishBlock (the list's check) on every phase-4 shape: as stored, and after the migration (the doc the function made)
+  const SHAPES = [...json('fixtures', 'upgrade.json').cases.map(k => ({ name: k.name, trigger: k.v1.trigger, steps: k.v1.steps })),
+    ...json('differential', 'corpus', 'builtin.json').automations.map(a => ({ name: a.name, trigger: a.trigger, steps: a.steps }))];
+  const ctx = ctxOf(), want = S => FX.corpus[S.name] ? 'Fix it first: ' + FX.corpus[S.name] : '';
+  const row = (S, id) => ({ id: id || 'r1', name: S.name, enabled: false, trigger: S.trigger, steps: S.steps, revision: 1, audience: S.steps.some(s => s && s.kind==='action' && ['email', 'text'].includes(s.type)) ? 'customer' : 'team' });
+  const migrated = S => ({ ...row(S), definition: sb.wfFromFlat({ trigger: S.trigger, steps: S.steps }, null), settings: { reentry: 'legacy_always' } });
+  assertEqual([SHAPES.length, SHAPES.filter(S => FX.corpus[S.name]).length, SHAPES.map(S => [S.name, sb.wfPublishBlock(row(S), ctx, []), sb.wfPublishBlock(migrated(S), ctx, [])]).filter(([n, a, b]) => a!==want({ name: n }) || b!==want({ name: n }))],
+    [48, 14, []], 'wfPublishBlock on all 48 phase-4 shapes (as stored and after the migration): "Fix it first: …" with the old switch\'s words for the 14 it refused, nothing for the other 34');
+  const named = { schema: 2, seq: 2, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: { match: 'all', segments: [{ match: 'all', rules: [] }] } }],
+    nodes: { n1: { kind: 'action', type: 'add_task', name: 'Call them', config: { title: 'Call {name}' }, out: { next: null } } } };
+  const lead = SHAPES.find(S => S.name==='new lead → push');
+  assertEqual([sb.wfPublishBlock({ id: 'n', name: 'New builder', definition: named, settings: {} }, ctx, []),
+    sb.wfPublishBlock(row(lead), ctx, [{ on: true, name: 'A new lead comes in', def: { trigger: { type: 'newLead' }, steps: [{ kind: 'action', type: 'push' }] } }])], ['', ''],
+    'wfPublishBlock: a workflow only the new builder shows is left to the function (as the old switch did); doubling a System workflow is a question, not a block');
+  // 4. the list's paths: the switch / ⋮ Publish (wfSetPublished), the publish call (wfPublishCall) and bulk (wfBulkExec)
+  const L = autoSandbox();
+  vm.runInContext(['WF_VIEW', 'wfFind', 'wfActor', 'wfChanged', 'wfDbWrite', 'wfFolderRemove', 'wfPublishFix', 'wfPublishCall', 'wfSetPublished', 'wfBulkExec'].map(n => extractDecl(script, n)).join('\n')
+    + '\nvar WF_BULK = null;\nthis.__wf = { WF_VIEW, bulk: b => { WF_BULK = b; } };', L);
+  const X = L.__wf, DBR = {}, calls = [], log = L.log;
+  let reads = 0;
+  L.STATE.data.settings = { catalog: JSON.parse(JSON.stringify(FX.catalog)) };
+  L.sb = { from: () => { const q = { id: null, select: () => q, eq: (k, v) => { q.id = v; return q; },
+    single: () => { reads++; return Promise.resolve(DBR[q.id] ? { data: JSON.parse(JSON.stringify(DBR[q.id])), error: null } : { data: null, error: { message: 'JSON object requested, multiple (or no) rows returned' } }); } }; return q; } };
+  L.autoFnCall = async b => {
+    calls.push(b); const r = DBR[b.automation_id];
+    if (b.step==='publish' && b.on && r && r.audience==='customer' && !b.confirm) return { ok: false, status: 409, body: { ok: false, reason: 'confirm', confirm: ['Sends to customers: Send email'] } };
+    if (r) r.enabled = !!b.on;
+    return { ok: true, status: 200, body: { ok: true, enabled: !!b.on } };
+  };
+  L.closePopup = () => {}; L.document.querySelectorAll = () => [];
+  const put = (id, S, o) => { DBR[id] = { ...row(S, id), ...(o || {}) }; X.WF_VIEW.byKey.set(id, { key: id, kind: 'workflow', id, name: S.name, on: false, audience: DBR[id].audience, external: false, triggers: [S.trigger.type],
+    revision: 1, virtual: false, deleted: false, moved: false, system: false, active: 0 }); };
+  const fresh = () => { log.toasts.length = 0; log.confirms.length = 0; calls.length = 0; reads = 0; };
+  const res = [];
+  for (const [i, S] of SHAPES.filter(S => FX.corpus[S.name]).entries()) {
+    put('w' + i, S); fresh();
+    await L.wfSetPublished('w' + i, true);
+    if (JSON.stringify([log.toasts, log.confirms.length, calls.length, DBR['w' + i].enabled]) !== JSON.stringify([[want(S)], 0, 0, false])) res.push([S.name, log.toasts.slice(), log.confirms.map(c => c.m), calls.length]);
+  }
+  assertEqual(res, [], 'the list switch / ⋮ Publish on each of the 14 shapes the old switch refused — among them the 10 phase 3 let through: a task for nobody (stage with any stage, all four actions, Any stage move, Long nurture), "Service is one of" (12 ifs, Aircon Google Ads leads), the same id twice, {technician} on a new lead, more than 20 steps ×2 — says "Fix it first: …" in the old words, asks nothing, never calls the function, stays a Draft');
+  // a clean customer workflow: the question first, then the publish with its yes; changed meanwhile → refused after the yes
+  const ice = SHAPES.find(S => S.name==='Instant customer email');
+  put('ok1', ice); fresh();
+  await L.wfSetPublished('ok1', true);
+  const asked = log.confirms.map(c => c.o && c.o.title), n0 = calls.length;
+  await log.confirms[0].fn();
+  assertEqual([asked, n0, calls.map(c => [c.step, c.on, !!c.confirm]), log.toasts, DBR.ok1.enabled], [['Publish workflow?'], 0, [['publish', true, true]], ['Instant customer email: published'], true],
+    'a clean customer workflow: checked, then the customer question, then the publish with its yes');
+  put('ok2', ice); fresh();
+  await L.wfSetPublished('ok2', true);
+  DBR.ok2.steps = [{ id: 'x1', kind: 'action', type: 'email', subject: 'About {technician}', body: '{hi}.' }];
+  await log.confirms[0].fn();
+  assertEqual([calls.length, log.toasts, DBR.ok2.enabled], [0, ['Fix it first: {technician} can\'t be filled in for "A new lead comes in" (step 6).'], false],
+    'changed between the question and the yes: checked again at the yes, and refused in the same words');
+  // a workflow only the new builder shows goes to the function (it checks it); Draft is never checked; a row that can't be read is not published
+  DBR.nb = { id: 'nb', name: 'New builder', enabled: false, definition: named, settings: {}, revision: 1, audience: 'team' };
+  X.WF_VIEW.byKey.set('nb', { key: 'nb', kind: 'workflow', id: 'nb', name: 'New builder', on: false, audience: 'team', triggers: ['newLead'], revision: 1 }); fresh();
+  await L.wfSetPublished('nb', true);
+  const nb = [calls.map(c => c.step + ':' + c.on), log.toasts.slice()];
+  put('on1', ice, { enabled: true }); X.WF_VIEW.byKey.get('on1').on = true; fresh();
+  await L.wfSetPublished('on1', false);
+  const draft = [reads, calls.map(c => c.step + ':' + c.on), log.toasts.slice()];
+  put('gone', ice); delete DBR.gone; fresh();
+  await L.wfSetPublished('gone', true);
+  assertEqual([nb, draft, [calls.length, log.confirms.length, log.toasts]], [[['publish:true'], ['New builder: published']], [0, ['publish:false'], ['Instant customer email: Draft']],
+    [0, 0, ['Not published: JSON object requested, multiple (or no) rows returned']]],
+    'a workflow only the new builder shows is published by the function\'s own checks; switching to Draft reads and checks nothing; a row that can\'t be read again is not published (nothing asked)');
+  // the publish call itself refuses (every entry point goes through it), and bulk reports the refused one with the words
+  const task = SHAPES.find(S => S.name==='Any stage move: a task'), team = SHAPES.find(S => S.name==='New lead (team card)');
+  put('b1', task); put('b2', team); fresh();
+  const direct = await L.wfPublishCall(X.WF_VIEW.byKey.get('b1'), true, false), off = await L.wfPublishCall(X.WF_VIEW.byKey.get('b1'), false);
+  assertEqual([direct, off.ok, calls.map(c => c.on)], [{ ok: false, ask: null, why: 'Fix it first: Pick who the task is for (step 5).', fix: true }, true, [false]], 'wfPublishCall: a switch-on is checked first (refused: the old words, the function never called); a switch-off is not');
+  DBR.b1.enabled = false; fresh();
+  X.bulk({ action: 'publish', plan: { go: ['b1', 'b2'], ask: [], skip: [] } });
+  await L.wfBulkExec();
+  assertEqual([calls.map(c => c.automation_id + ':' + c.on), DBR.b1.enabled, DBR.b2.enabled, log.toasts], [['b2:true'], false, true, ['1 published; not done: Any stage move: a task (Fix it first: Pick who the task is for (step 5).)']],
+    'bulk Publish: the refused one is not published and the toast says why in the old words; the rest go');
+  const src = ['wfSetPublished', 'wfBulkExec'].map(n => extractDecl(script, n)).join('\n');
+  assertEqual([/wfPublishFix\(x\)/.test(extractDecl(script, 'wfSetPublished')), /await wfPublishFix\(x\)/.test(extractDecl(script, 'wfPublishCall')), /wfPublishCall\(/.test(src), (script.match(/step: 'publish', automation_id: x\.id/g) || []).length],
+    [true, true, true, 1], 'every list publish goes through wfPublishCall, which checks first; wfSetPublished checks before its question');
+}
 // A small context for the lead card's opt-out control: a fake table that holds its read until released.
 function loadOptOutSandbox(script){
   const q = { reads: 0, writes: [], release: null };
@@ -3918,6 +4615,10 @@ function loadOptOutSandbox(script){
   await testAutomationEventsGate();
   await testAutomationsCustomerSafety();
   await testAutomationsReview14Oct();
+  await testWfListLoads();
+  await testWfGlobalSettingsPage();
+  await testWfTemplatesWindow();
+  await testWfPublishGuards();
   await testHolidayLoaders();
   await testFullBackup(loadSandbox());
   await testDataExport(loadSandbox());

@@ -586,3 +586,290 @@ that reads them — R-A always — would run the old words until those rows are 
 4. Switch the listed rows on again only after checking each one's phase-4 steps (or re-make them in the old builder).
 - Roll back on: any customer message the watch (W3 / W6) can't explain, a waiting run stopped that nobody changed (M2), a
   migration check difference, "reload the app" refusals after the app push, or a save / switch error in the app.
+
+## 13. Phase 3 · G3.1 — the Automation page (list) and the list's counts per channel (SQL Part 3 · G3.1 + app)
+
+What changes:
+- **App**: Settings → **Automation** (Ofek's Q1: inside Settings) replaces "Message templates & Automations" and
+  "Notifications": tabs Workflows | Global Workflow Settings | Message templates. Old links and saved pages
+  (`?page=notifications`, `?page=templates`) open it (a `templates` link on its Message templates tab). The Workflows list:
+  cards (default) or the GHL table (remembered per device), folders with a breadcrumb, All workflows / Needs review (N) /
+  Deleted, Search, paging (10 / 25 / 50), the ⋮ menu in GHL's order (greyed items say why), Draft ⬤ Publish through the
+  function's `publish` (customer / outside-system workflows ask first), Duplicate (`duplicate`: a Draft copy), Delete =
+  Deleted for 30 days as a Draft (type the name), Restore (a Draft), Move to folder (cycles and a 6th level refused),
+  bulk Publish / Draft / Move / Delete with a plan (what goes, what asks with an unticked "I checked its words and
+  timing", what is skipped and why; ≤ 200 at a time). The built-in System rows show as cards with their own switches.
+  New deep links: `?tab=settings&page=automation&wf=<id>&wfTab=…&listTab=…` (`wfLink`; the engine has the same, tested
+  against `supabase/functions/automations/fixtures/links.json`). In Presentation mode / View as only the reads in
+  `READ_ONLY_CALLS` reach the database or the function (the list counts and the registry); every write says why not.
+- **SQL** (PART 3 · G3.1, one transaction, additive): `automation_list_stats` gains `ch` per workflow ("channel:status" →
+  count over the action rows since `p_since`); the rest of its object is unchanged. The table's "Stats ›" reads it; until
+  it is applied the accordion says "Counts per channel come with the next database update".
+- Customer guard rails unchanged: nothing here switches a customer workflow on by itself (the function's `publish` and the
+  guard decide, the app only asks first); a duplicate is always a Draft; a deleted workflow is a Draft at once (guard v2).
+
+### 13.1 Order (one step at a time)
+
+1. `check_all.sh` ALL GREEN on the commit (app: `testWfList`; read-only: the READ_ONLY_CALLS checks; automations: the
+   `wfLink` parity block).
+2. Staging: PART 3 · G3.1 (check-before → block → check-after), then `.claude/sql/stage2-part1-staging-checks.sql` →
+   PASS 1 … 22 and `stage2 phase 3 · G3.1 staging checks done`.
+3. Live: PART 3 · G3.1 (check-before → block → check-after: the same ids and numbers as before, each with `ch`).
+4. App: branch → the live-origin browser check (MASTER §4): Settings → Automation, all three tabs, cards and table, a
+   folder, Needs review, Deleted, the ⋮ menu, the bulk window, Search keeps its caret, idle `__rc = 0`; phone 375×812 (no
+   page-wide scroll: the table scrolls in its own box, the ⋮ menu is a sheet from the bottom) and 768 px; dark and light;
+   old `?page=notifications` / `?page=templates` links land on Automation; Presentation mode: the list and its counts
+   load, every switch / menu write says "Presentation mode …". Then fast-forward main.
+
+### 13.2 Roll back
+
+- **App**: back to the commit before G3.1 (the two old pages return; nothing in the data changed shape: folders, deleted
+  rows and the System folders stay where they are; the old list hides deleted rows as before).
+- **SQL**: the commented ROLLBACK of PART 3 · G3.1 (the Part 1 definition back, byte for byte). The app without `ch`
+  shows "—" and the note.
+- Roll back on: the list not loading for an owner or manager, a switch / bulk action changing a row it did not list, or
+  any idle redraw on the page.
+
+## 14. Phase 3 · G3.2 — Global Workflow Settings and the Message templates tab's links (app only; SQL Part 3 · G3.2 = checks)
+
+What changes:
+- **App**: Settings → Automation → **Global Workflow Settings** gets GHL's cards in GHL's order, each with its own Save
+  (saving one card never touches another's draft):
+  - **Notifications** — "Phone notification" (Ofek's Q7: at most once a day, a phone alert to the selected users when
+    workflows have errors; nothing saved = on, to every owner), "Email notification" + "Other email addresses" (≤ 10)
+    greyed "Needs a team email sender" until the registry says the business has one, "Select users" (owners and managers).
+    Stored in `automation_settings.error_notify` (Part 1's CHECK). The engine sends the alert from G6.1: until its registry
+    says `features.errorDigest = true` the card says "Phone alerts start with the next engine update".
+  - **Pause workflow** — rows Start date and time → End date and time (business wall clock), Select workflows (Published
+    engine workflows; built-in System rows greyed "Runs on the built-in system until it moves into the engine"), Annually,
+    copy, delete, "+ Add date", "Pause dates: n / 15", GHL's two notes. Problems show on the row before Save in the
+    trigger's own words (`wfPauseProblems`); `automation_pauses_guard` stays the authority. Save writes removed rows,
+    then changed ones, then new ones (a write refused only because another one of the same Save had not happened yet is
+    tried once more); whatever is still refused is said and the pause dates are read again.
+  - **Default builder** (Standard; Advanced greyed until phase 5; "Who can switch between builders" greyed), **Workflow
+    AI** (greyed "Coming with Workflow AI"; stores nothing), **Customer message safety** (moved unchanged) and **Auto
+    save** (greyed "We keep Save with undo").
+  - The Workflows list's "Paused until …" now follows the engine's own rule in the business's zone (`wfPausedInfo` =
+    `pauseUntil`), also for a pause starting inside a daylight-saving jump.
+  - **Message templates** tab: "Sent by <workflow>" opens it on the Automation page (`openAutomation`), with the list's
+    status pills (Published / Draft / Paused until … / a System row's gate); "used by" also counts workflows of the new
+    builder (`wfTplUsers`: a doc node's `config.templateKey`), so a template such a workflow uses can't be deleted.
+- **Engine** (with the next automations deploy; nothing in it changes what runs today): `wallMs` (pause dates) uses
+  `bizToUtc` like the app (a start inside a daylight-saving jump = the time after it); the registry gains
+  `features: { errorDigest: false }`. The offline differential stays IDENTICAL.
+- **SQL**: PART 3 · G3.2 is read-only checks (no schema change). Staging check "PASS 23" proves the pause rules
+  (overlap, 15 dates, 15 days, end after start, real dates, deleted / unknown workflows, annual across New Year,
+  29 February) and the targeted wake.
+- Customer guard rails unchanged: no card switches a workflow on; a pause only holds actions (customer messages held by
+  it still keep the customer hours and the daily cap after it ends).
+
+### 14.1 Order (one step at a time)
+
+1. `check_all.sh` ALL GREEN (app: `testWfGlobalSettings`; read-only: the three Saves and `wfGsDraft` check the mode;
+   automations: block 36 = `fixtures/global-settings.json`, the staging file has PASS 23).
+2. Staging: PART 3 · G3.2 "check before" lines all true, then `.claude/sql/stage2-part1-staging-checks.sql` → PASS 1 … 23
+   and `stage2 phase 3 · G3.2 staging checks done`.
+3. Live: the same "check before" lines (read-only).
+4. App: branch → the live-origin browser check (MASTER §4): Settings → Automation → Global Workflow Settings: every card
+   loads; Notifications: tick / untick a user, Save, reload → kept (then put back); Pause workflow: + Add date, an
+   overlapping second row shows the overlap note and Save stays greyed, Cancel; a valid date on a Draft test workflow →
+   Save → the list shows "Paused until …" only for Published ones → delete it → Save; Default builder / Workflow AI /
+   Auto save greyed with their words; Message templates: a "Sent by" link opens the Automation page; idle `__rc = 0`;
+   phone 375×812 (the two dates stack, chips wrap, no page-wide scroll) and 768 px; dark and light; Presentation mode:
+   every input locked, every Save says "Presentation mode …". Then fast-forward main.
+5. Automations function (with the next engine deploy, dashboard editor + fingerprint): `wallMs` + `features`.
+
+### 14.2 Roll back
+
+- **App**: back to the commit before G3.2 (the tab shows only Customer message safety again; saved `error_notify`,
+  `default_builder` and pause dates stay in the database and keep working in the engine).
+- **SQL**: nothing to undo (PART 3 · G3.2 changed nothing). Saved settings can be put back with the two commented lines
+  under its ROLLBACK, only if asked.
+- **Engine**: the previous function build (pause dates inside a daylight-saving jump then start up to an hour earlier,
+  as before).
+- Roll back on: a card not loading for an owner or manager, a Save writing to another card, a pause that holds a
+  workflow it doesn't list, or any idle redraw.
+
+## 15. Phase 3 · G3.3 — System rows, the template library, the Notifications page merged in (app + engine steps; SQL Part 3 · G3.3 = checks)
+
+What changes:
+- **App**: Settings → Automation → Workflows becomes the one place for the notifications too (Ofek's Q1):
+  - **System rows** (`wfSystemRows`, the old `autoReadyRows` kept as an alias until phase 7): the same 11 ready-made rows
+    with the same switch, gate and lock (pinned by `fixtures/system-rows.json`, taken from the phase-4 code), plus
+    System / virtual, a stage-2 doc (`wfFromFlat`), their folder (`automation_system_meta`), `movable` (false: nothing
+    moves before phase 7) and `movedTo`. Each card's summary is its steps in one sentence (`flowSentence`; no canvas yet).
+  - The 8 **team notification cards** are System cards in the list with their old controls kept (the numbers in the
+    sentence, Office, Send a test — each through its old setter) plus the list's tick, ⋮ and Draft ⬤ Publish.
+  - **Notifications page and the old "Message templates & Automations" list are removed** (old `?page=notifications` /
+    `templates` links already land on Automation since G3.1). "New team alert" = "+ Create workflow → Select from
+    template → Team notifications".
+  - **Phone bar** on top of Workflows only while a System team notification is on or a Published workflow sends a phone
+    notification; the device check redraws only while Workflows shows.
+  - **Template library** ("+ Create workflow → Select from template"): chips All, Leads, Jobs, Customers, Team
+    notifications, Reviews, Mine; search; cards with "Uses", Preview (one sentence) and "Choose template" (→ a **Draft**
+    copy through the function's `duplicate`, opened in the editor). Greyed with the reason when a start or step isn't
+    available yet, and "Opens in the new builder (phase 4)" when its steps branch. Mine: Rename / Delete in place.
+    ⋮ → "Upload to Template Library" on a workflow (name, description, category).
+  - Taking System rows off the list (a row's Delete, bulk Delete, the old editor's "Remove from my list") is one plan
+    (`wfSystemHidePlan`) and ONE catalog write.
+  - A System setter that asks first (the review request's go-live switch) redraws the open editor again (restored on the
+    new page).
+- **Engine** (next automations deploy): steps `template_upload`, `template_rename`, `template_delete` (owners and managers;
+  only templates of origin user are renamed or deleted; a workflow with problems can't be uploaded). Nothing that runs
+  changes; the offline differential stays IDENTICAL.
+- **SQL**: PART 3 · G3.3 is read-only checks (no schema change). Staging "PASS 24" proves the template table's rules.
+- Customer guard rails unchanged: nothing here switches a workflow on; a template always becomes a Draft.
+
+### 15.1 Order (one step at a time)
+
+1. `check_all.sh` ALL GREEN (app: `testWfSystemRows`, `testWfTemplatesWindow`; read-only: the library's writes check the
+   mode, the app never writes `automation_templates`; automations: the template steps' tests).
+2. Staging: PART 3 · G3.3 "check before" lines all true, then `.claude/sql/stage2-part1-staging-checks.sql` → PASS 1 … 24
+   and `stage2 phase 3 · G3.3 staging checks done`.
+3. Automations function first (dashboard editor + fingerprint): the template steps (the app's Upload / Rename / Delete
+   say "unknown step" until then; Choose works with the function already live).
+4. Live: the same "check before" lines (read-only).
+5. App: branch → the live-origin browser check (MASTER §4): Workflows shows the 8 team cards with their numbers, Office
+   and Send a test (change a number → saved, no jump; Office on / off; a test arrives); the phone bar shows while one is on;
+   Select from template opens, chips and search work, Preview shows the sentence, the quote follow-up is greyed "Opens in
+   the new builder (phase 4)", Choose on "Tell the team about a new lead" makes a Draft and opens it (then delete it);
+   Upload a Draft test workflow → it is under Mine → Rename → Delete; a team card's ⋮ → Delete → it is in Deleted →
+   Restore; idle `__rc = 0`; phone 375×812 (cards and the template window wrap, no page-wide scroll) and 768 px; dark and
+   light; Presentation mode: every write says "Presentation mode …". Then fast-forward main.
+
+### 15.2 Roll back
+
+- **App**: back to the commit before G3.3 (the list shows the plain System rows again; nothing in the data changed
+  shape: catalog.notify, hiddenReady and automation_system_meta are read the same way).
+- **Engine**: the previous function build (the template steps answer "unknown step"; templates already uploaded stay).
+- **SQL**: nothing to undo (PART 3 · G3.3 changed nothing). The business's own templates can be taken out with the
+  commented line under its ROLLBACK, only if asked.
+- Roll back on: a team card's number or switch saving to the wrong notification, a template making anything but a Draft,
+  the phone bar redrawing in a loop, or any idle redraw.
+
+## 16. Phase 3 · G3.5 — Ofek's answers Q5 + Q6 and quiet imports (SQL Part 3 · G3.5 + engine + app)
+
+What changes:
+- **Q5 — no "Quote status" trigger.** "Quote sent" = the lead moves to the Quoted stage, so a workflow uses **Pipeline
+  stage changed** (to Quoted); the ready-made "Quote follow-up" template already does. The trigger is **removed** (not
+  greyed): not in the registry, the picker, the filters or the capture; a doc that still names `estimates` is refused as
+  an unknown type (none was ever published). The quote amount stays a lead field ("Quote amount", Lead changed sees it)
+  and the `{quote_amount}` blank.
+- **Q6 — the lead's "Assigned to".** `contacts.assigned_user_id` (→ profiles, on delete set null, indexed):
+  - **App**: an "Assigned to" picker on the lead (CRM inbox details and the Full profile, under Stage), a column in the
+    CRM table, and an "Assigned to" filter in the CRM filter bar (All leads (any assignee) / Assigned to someone / Assigned to me / Nobody assigned /
+    each person) that the table, the pipeline board and the inbox all follow. Owners and managers pick anyone; everyone
+    else only themselves or Nobody (the database says the same: `contacts_assignee_guard`). Each change writes one line
+    on the lead's history ("Assigned to Max Manager" / "Assigned user removed"); it does not count as contacting the lead.
+    The team's names come from `team_people()` (names only; a VA's own profile rules show only them). Until the SQL ran,
+    the picker says "Comes with the next database update" and the column / filter are not shown.
+  - **Engine**: Assign to user / Remove assigned user (a fixed person; automation_apply op `assign`, with the history
+    line), the "Assigned to" filter, `{lead.assigned_to}` / `{lead.assigned_to_first_name}`, "Until a user replies: the
+    assigned user" and "Lead changed: field assigned_user" are available (nothing greyed any more).
+- **Quiet imports.** `import_quiet boolean not null default false` on contacts, jobs and tasks — **stage 5's columns**
+  (`.claude/sql/stage5-mcp.sql` M5, live since 15 Oct 14:20: its MCP import writes them, its push function reads them).
+  On live they already exist and G3.5's `add column if not exists` does nothing; G3.5 never drops them. A row written with `import_quiet = true` never starts an automation by arriving:
+  - capture triggers: no event for its INSERT (tags, notes, booking, Task added) nor for the import's own updates — the
+    update that turns `import_quiet` on, or any write of a transaction that says it is the import
+    (`set_config('automation.import', 'on', true)` in an RPC, or the PostgREST request header `x-ops-import: 1`);
+  - engine scans / timers: no new lead, website form, arrival stage (nor a stale lead in it), job closed or reminder of
+    the job's imported date for it (G3.5 keeps that date in `jobs.import_quiet_date`, stage 2's own column, set by the
+    trigger `jobs_import_quiet_date` on the import's writes; a person rescheduling the job starts its reminders);
+  - a later change by a person (a tag, a field, a stage move, a reopen, marking paid) counts as usual.
+  **Tell the import's builder:** write every imported row with `import_quiet = true`; a re-sync that updates rows already
+  imported must send the `x-ops-import: 1` header (or run in an RPC that sets `automation.import`), else its changes
+  count as a person's.
+- Customer guard rails unchanged: nothing here switches a workflow on.
+
+### 16.1 Order (one step at a time)
+
+1. `check_all.sh` ALL GREEN (app: `testLeadAssignee`; read-only: the picker checks the mode; automations: section 37 —
+   assign / remove through automation_apply, the blanks, quiet scans / timers / look now / capture, the SQL text and its
+   exact ROLLBACK; the offline differential IDENTICAL).
+2. Staging: PART 3 · G3.5 "check before" lines, then the block, then its "check after" lines; then
+   `.claude/sql/stage2-part1-staging-checks.sql` → PASS 1 … 25 and `stage2 phase 3 · G3.5 staging checks done`.
+3. Live: the same "check before" lines (read-only), then **SQL PART 3 · G3.5 first** (additive: the live app and function
+   never read the new columns), then its "check after" lines.
+4. Automations function (dashboard editor + fingerprint). It also works before step 3 (it reads again without the new
+   columns), but run the SQL first.
+5. App: branch → the live-origin browser check (MASTER §4): open a lead (inbox and Full profile) → Assigned to → pick a
+   person → the CRM table column shows them, a history line is there, the filter "Assigned to me" / a person / "Nobody
+   assigned" narrows the table, the pipeline and the inbox; as a VA (View as is read-only, so a real VA login on staging)
+   only "Nobody" and themselves can be picked; Presentation mode: the picker says "Presentation mode …"; idle `__rc = 0`;
+   phone 375×812 (the filter folds under Filters, the table scrolls inside its box, no page-wide scroll) and 768 px; dark
+   and light. Then fast-forward main.
+
+### 16.2 Roll back
+
+- **App**: back to the commit before G3.5 (no picker, column or filter; the column is simply not read).
+- **Engine**: the previous function build (Assign to user greyed again; nothing else reads the new columns).
+- **SQL**: the ROLLBACK under PART 3 · G3.5 (G2.3's automation_apply / contacts capture and Part 1's tasks / jobs
+  captures back byte for byte; the guard, `team_people`, `automation_import_write`, `jobs_import_quiet_date`, the index, `assigned_user_id` and
+  `jobs.import_quiet_date` go;
+  **`import_quiet` stays** — it is stage 5's, and stage 5's import and push function and the engine's quiet-import
+  drops keep reading it). Save who each lead was assigned to first (the commented line there).
+- Roll back on: a lead's save refused for anyone who is not changing Assigned to, an imported row starting an
+  automation, the capture error counter (`automation_state.capture_errors`) rising after the SQL, or any idle redraw.
+
+## 17. Phase 3 · G3.4 — the lock on direct writes (SQL PART 3 · G3.4) and the whole Part-3 live order
+
+What changes:
+- **SQL** (PART 3 · G3.4, one transaction, idempotent, the LAST block of Part 3):
+  - the app's roles (`anon`, `authenticated`) lose INSERT / UPDATE / DELETE / TRUNCATE / REFERENCES / TRIGGER on
+    `public.automations`; `authenticated` gets UPDATE on exactly four columns: `name, description, folder_id,
+    deleted_at` (rename, Move to folder, Delete to Deleted, Restore). Switching on / off (Publish / Draft), the doc,
+    settings, a new workflow and a copy go only through the automations function (service role) and its checks. A
+    column revoke would do nothing under a table grant, hence the table revoke + column grants (design E4/E34).
+  - the policy "automations: owners and managers delete" is dropped (a hard delete is housekeeping's only, 30 days after
+    the soft delete; never a System row) — design E54/P5.
+  - the read / change policies are scoped to this business (`business_id = current_business_id()`; today every row is
+    'default', so nobody sees anything different).
+  - Part 1's pin (`automations_v2_pin`, the app's roles only) also stamps a soft delete with now() (a hand-made back-dated
+    `deleted_at` can't skip the 30 days; a deleted row's date never moves) and refuses a folder of another business.
+  - checks before stop the block (Part 2 · G2.4 missing, unexpected column grants, policies that are not phase 4's); a
+    proof inside the transaction rolls everything back if the lock did not take; the previous table grants are saved in
+    `backup.automations_grants_before_part3` for the exact ROLLBACK.
+- **App / engine**: nothing new to deploy for G3.4 itself. The G3.1+ app writes the automations table only through those
+  four columns (tests/read-only.test.js `testAutomationsLock` scans every write); the one write that was outside them —
+  the old editor's `template_key` on a copy of a ready-made — now goes with the function's `save` (`template_key`, kept
+  on a new workflow only; automations tests "save: template_key kept on a new one"). So the function with that change
+  must be live before G3.4.
+- **Old cached tabs** (opened before the G3.1 app went live): Postgres checks privileges before any trigger, so they no
+  longer reach the guard's "This workflow was upgraded: reload the app". Their switch / save / delete shows "Not saved:
+  permission denied for table automations" (a phase-2 tab: "Not deleted: …") and nothing changes; a reload fixes it.
+  That is why G3.4 runs last and only after the new app has been live for a while.
+- Customer guard rails unchanged: nothing here switches anything on; the function's publish and the guard still decide.
+
+### 17.1 Order — the whole of Part 3, live (one step at a time; staging first for each SQL block)
+
+1. `check_all.sh` ALL GREEN on the commit (read-only: `testAutomationsLock`; automations: the template_key save test, the
+   staging-check count 26; the offline differential IDENTICAL).
+2. Staging, in this order: PART 3 · G3.5 → PART 3 · G3.1 → the G3.2 / G3.3 "check before" lines → PART 3 · G3.4 (check
+   before → block → check after), then `.claude/sql/stage2-part1-staging-checks.sql` → PASS 1 … 26 (checks 12 and 19
+   print "NOTE 12: PART 3 · G3.4 is applied …" and "NOTE 19: PART 3 · G3.4 is applied …") and `stage2 phase 3 · G3.4 staging checks done`. On staging also: sign in as
+   the owner in the staging app (G3.1+ build) → rename, move, Delete, Restore, Publish / Draft a test workflow → all work.
+3. Live: **PART 3 · G3.5 first** (additive; §16.1 step 3).
+4. Live: **PART 3 · G3.1** (additive; §13.1 step 3).
+5. Live: the G3.2 and G3.3 "check before" lines (read-only; §14.1, §15.1).
+6. **Automations function** (dashboard editor + fingerprint) with G3.1–G3.5 (incl. `template_key` on save).
+7. **App** (G3.1 … G3.5): branch → the live-origin browser check of §13.1 / §14.1 / §15.1 / §16.1 → fast-forward main.
+8. Wait **≥ 24 h** with the new app live. Ask Ofek and Noam to reload every open tab of the app (phone and computer).
+   Read-only check that nothing odd is writing the table directly meanwhile:
+   `select id, name, updated_at, updated_by_name from public.automations where updated_at > now() - interval '24 hours' order by updated_at desc;`
+   (each change should be one somebody made in the new app or through the function).
+9. Live: **PART 3 · G3.4** — its "check before" lines (read-only, note the output: the grants and the three phase-4
+   policies), then the block, then its "check after" lines (every line as written there; the RLS-proof query of every
+   stage-2 table shows the expected pattern).
+10. Right after: in the live app as an owner, rename a test Draft, move it into a folder and back, Delete it (it shows in
+    Deleted), Restore it, switch a team workflow Publish → Draft → back (through the function) — all work; idle `__rc = 0`.
+
+### 17.2 Roll back
+
+- **SQL**: the commented ROLLBACK under PART 3 · G3.4 (one transaction): the four column grants go, the saved table
+  grants come back from `backup.automations_grants_before_part3` (checked equal before the backup is dropped), phase 4's
+  delete / read / change policies and Part 1's pin come back word for word. Then its "check after the rollback" lines.
+- **App / engine**: nothing to roll back for G3.4 (the G3.1+ app and the function work the same with or without the lock).
+  Roll the SQL back only to let an older app write again (e.g. the app itself is rolled back past G3.1).
+- Roll back on: an owner or manager unable to rename / move / delete / restore in the new app, the function's save or
+  publish failing with a permission error (it would mean the service role lost a grant — the block's proof checks it),
+  or the lead card / any other page failing after the block.

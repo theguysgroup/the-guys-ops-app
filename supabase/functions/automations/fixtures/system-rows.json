@@ -1,0 +1,93 @@
+{
+  "note": "Today's autoReadyRows (before stage 2 G3.3) on three stored settings: key/base/on/gate/toggle/locked per row, for all=false and all=true. wfSystemRows must give the same.",
+  "cases": [
+    {
+      "name": "nothing",
+      "settings": {"catalog":{}},
+      "rows": [
+        {"key":"ready:review","base":"review","on":false,"gate":"golive","toggle":["setReviewAuto",true],"locked":false},
+        {"key":"ready:chatText","base":"chatText","on":false,"gate":"phone","toggle":["setChatAutoSms",true],"locked":false},
+        {"key":"ready:missedText","base":"missedText","on":false,"gate":"phone","toggle":null,"locked":"On whenever the business phone is on. Its own switch comes when it moves here."},
+        {"key":"ready:team:newLead","base":"team:newLead","on":false,"gate":"","toggle":["toggleNotifyCard","newLead"],"locked":false},
+        {"key":"ready:team:leadWaiting","base":"team:leadWaiting","on":false,"gate":"","toggle":["toggleNotifyCard","leadWaiting"],"locked":false},
+        {"key":"ready:team:missedCall","base":"team:missedCall","on":false,"gate":"phone","toggle":["toggleNotifyCard","missedCall"],"locked":false},
+        {"key":"ready:team:unpaid","base":"team:unpaid","on":false,"gate":"","toggle":["toggleNotifyCard","unpaid"],"locked":false},
+        {"key":"ready:team:invoice","base":"team:invoice","on":true,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
+        {"key":"ready:team:docExpiry","base":"team:docExpiry","on":false,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
+        {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":false,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
+      ],
+      "all": [
+        {"key":"ready:review","base":"review","on":false,"gate":"golive","toggle":["setReviewAuto",true],"locked":false},
+        {"key":"ready:chatText","base":"chatText","on":false,"gate":"phone","toggle":["setChatAutoSms",true],"locked":false},
+        {"key":"ready:missedText","base":"missedText","on":false,"gate":"phone","toggle":null,"locked":"On whenever the business phone is on. Its own switch comes when it moves here."},
+        {"key":"ready:team:newLead","base":"team:newLead","on":false,"gate":"","toggle":["toggleNotifyCard","newLead"],"locked":false},
+        {"key":"ready:team:leadWaiting","base":"team:leadWaiting","on":false,"gate":"","toggle":["toggleNotifyCard","leadWaiting"],"locked":false},
+        {"key":"ready:team:missedCall","base":"team:missedCall","on":false,"gate":"phone","toggle":["toggleNotifyCard","missedCall"],"locked":false},
+        {"key":"ready:team:unpaid","base":"team:unpaid","on":false,"gate":"","toggle":["toggleNotifyCard","unpaid"],"locked":false},
+        {"key":"ready:team:invoice","base":"team:invoice","on":true,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
+        {"key":"ready:team:docExpiry","base":"team:docExpiry","on":false,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
+        {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":false,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
+      ]
+    },
+    {
+      "name": "allOn",
+      "settings": {"reviewRequestsAuto":true,"chatAutoSms":true,"phoneEnabled":true,"unpaidReminderDays":9,"catalog":{"notify":{"newLead":{"on":true,"office":true},"leadWaiting":{"on":true,"office":false},"missedCall":{"on":true,"office":true},"unpaid":{"on":true},"invoice":{"on":true},"docExpiry":{"on":true},"bizInsurance":{"on":false},"googleReview":{"on":true},"rules":{"waitMinutes":20,"from":7,"until":21,"docDays":45}}}},
+      "rows": [
+        {"key":"ready:review","base":"review","on":true,"gate":"","toggle":["setReviewAuto",false],"locked":false},
+        {"key":"ready:chatText","base":"chatText","on":true,"gate":"","toggle":["setChatAutoSms",false],"locked":false},
+        {"key":"ready:missedText","base":"missedText","on":true,"gate":"","toggle":null,"locked":"On whenever the business phone is on. Its own switch comes when it moves here."},
+        {"key":"ready:team:newLead","base":"team:newLead","on":true,"gate":"","toggle":["toggleNotifyCard","newLead"],"locked":false},
+        {"key":"ready:team:leadWaiting","base":"team:leadWaiting","on":true,"gate":"","toggle":["toggleNotifyCard","leadWaiting"],"locked":false},
+        {"key":"ready:team:missedCall","base":"team:missedCall","on":true,"gate":"","toggle":["toggleNotifyCard","missedCall"],"locked":false},
+        {"key":"ready:team:unpaid","base":"team:unpaid","on":true,"gate":"","toggle":["toggleNotifyCard","unpaid"],"locked":false},
+        {"key":"ready:team:invoice","base":"team:invoice","on":true,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
+        {"key":"ready:team:docExpiry","base":"team:docExpiry","on":true,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
+        {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":false,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
+      ],
+      "all": [
+        {"key":"ready:review","base":"review","on":true,"gate":"","toggle":["setReviewAuto",false],"locked":false},
+        {"key":"ready:chatText","base":"chatText","on":true,"gate":"","toggle":["setChatAutoSms",false],"locked":false},
+        {"key":"ready:missedText","base":"missedText","on":true,"gate":"","toggle":null,"locked":"On whenever the business phone is on. Its own switch comes when it moves here."},
+        {"key":"ready:team:newLead","base":"team:newLead","on":true,"gate":"","toggle":["toggleNotifyCard","newLead"],"locked":false},
+        {"key":"ready:team:leadWaiting","base":"team:leadWaiting","on":true,"gate":"","toggle":["toggleNotifyCard","leadWaiting"],"locked":false},
+        {"key":"ready:team:missedCall","base":"team:missedCall","on":true,"gate":"","toggle":["toggleNotifyCard","missedCall"],"locked":false},
+        {"key":"ready:team:unpaid","base":"team:unpaid","on":true,"gate":"","toggle":["toggleNotifyCard","unpaid"],"locked":false},
+        {"key":"ready:team:invoice","base":"team:invoice","on":true,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
+        {"key":"ready:team:docExpiry","base":"team:docExpiry","on":true,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
+        {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":false,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
+      ]
+    },
+    {
+      "name": "mixedHidden",
+      "settings": {"reviewRequestsAuto":false,"chatAutoSms":true,"phoneEnabled":false,"catalog":{"notify":{"newLead":{"on":false},"invoice":{"on":false},"docExpiry":{"on":true},"missedCall":{"on":true}},"automations":{"hiddenReady":["team:unpaid","chatText"]}}},
+      "rows": [
+        {"key":"ready:review","base":"review","on":false,"gate":"golive","toggle":["setReviewAuto",true],"locked":false},
+        {"key":"ready:missedText","base":"missedText","on":false,"gate":"phone","toggle":null,"locked":"On whenever the business phone is on. Its own switch comes when it moves here."},
+        {"key":"ready:team:newLead","base":"team:newLead","on":false,"gate":"","toggle":["toggleNotifyCard","newLead"],"locked":false},
+        {"key":"ready:team:leadWaiting","base":"team:leadWaiting","on":false,"gate":"","toggle":["toggleNotifyCard","leadWaiting"],"locked":false},
+        {"key":"ready:team:missedCall","base":"team:missedCall","on":true,"gate":"phone","toggle":["toggleNotifyCard","missedCall"],"locked":false},
+        {"key":"ready:team:invoice","base":"team:invoice","on":false,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
+        {"key":"ready:team:docExpiry","base":"team:docExpiry","on":true,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
+        {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":true,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
+      ],
+      "all": [
+        {"key":"ready:review","base":"review","on":false,"gate":"golive","toggle":["setReviewAuto",true],"locked":false},
+        {"key":"ready:chatText","base":"chatText","on":true,"gate":"phone","toggle":["setChatAutoSms",false],"locked":false},
+        {"key":"ready:missedText","base":"missedText","on":false,"gate":"phone","toggle":null,"locked":"On whenever the business phone is on. Its own switch comes when it moves here."},
+        {"key":"ready:team:newLead","base":"team:newLead","on":false,"gate":"","toggle":["toggleNotifyCard","newLead"],"locked":false},
+        {"key":"ready:team:leadWaiting","base":"team:leadWaiting","on":false,"gate":"","toggle":["toggleNotifyCard","leadWaiting"],"locked":false},
+        {"key":"ready:team:missedCall","base":"team:missedCall","on":true,"gate":"phone","toggle":["toggleNotifyCard","missedCall"],"locked":false},
+        {"key":"ready:team:unpaid","base":"team:unpaid","on":false,"gate":"","toggle":["toggleNotifyCard","unpaid"],"locked":false},
+        {"key":"ready:team:invoice","base":"team:invoice","on":false,"gate":"","toggle":["toggleNotifyCard","invoice"],"locked":false},
+        {"key":"ready:team:docExpiry","base":"team:docExpiry","on":true,"gate":"","toggle":["toggleNotifyCard","docExpiry"],"locked":false},
+        {"key":"ready:team:bizInsurance","base":"team:bizInsurance","on":true,"gate":"","toggle":["toggleNotifyCard","bizInsurance"],"locked":false},
+        {"key":"ready:team:googleReview","base":"team:googleReview","on":false,"gate":"","toggle":["toggleNotifyCard","googleReview"],"locked":"Turns on once Google Business Profile is connected."}
+      ]
+    }
+  ]
+}

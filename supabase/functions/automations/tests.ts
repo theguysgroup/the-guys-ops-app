@@ -165,20 +165,24 @@ function fakeDb(seed: Record<string, any[]> = {}) {
   // status; customer_opt_outs: Lead DND), only for the wanted types, with the cause automation_apply sets (G2.3) ──
   let cause: string | null = null, tx = 0;
   const wantedT = () => new Set((T.automation_wanted || []).map((w: any) => w.event_type));
-  const capPut = (type: string, key: string, id: string, contact: string | null, ctx: any) => {
+  const capPut = (type: string, key: string, id: string, contact: string | null, ctx: any, kind = "contact") => {
     T.automation_events = T.automation_events || [];
     if (T.automation_events.some((e: any) => e.type === type && e.event_key === key)) return;
     const m = cause ? /^([^:]+):(\d{1,3}):([^:]+)$/.exec(cause) : null;
-    T.automation_events.push(withDefaults("automation_events", { id: `automation_events-${++n}`, business_id: "default", type, event_key: key.slice(0, 200), record_kind: "contact", record_id: id,
+    T.automation_events.push(withDefaults("automation_events", { id: `automation_events-${++n}`, business_id: "default", type, event_key: key.slice(0, 200), record_kind: kind, record_id: id,
       contact_id: contact, at: isoMs(clock), available_at: isoMs(clock), ctx, source: "capture", cause_run_id: m ? m[1] : null, cause_automation_id: m ? m[3] : null,
       chain_depth: m ? Math.min(Number(m[2]) + 1, 100) : 0 }));
   };
   const lowerSet = (l: any) => new Set((Array.isArray(l) ? l : []).map((x: any) => String(x)));
+  // import_quiet (G3.5): a quiet row's INSERT and the import's own update (the one that marks it quiet; the fake has no
+  // "this transaction is the import" switch) write nothing; a later change of a quiet row counts
+  const quietWrite = (op: string, o: any, c: any) => c.import_quiet === true && (op === "insert" || o.import_quiet !== true);
   const captureContact = (op: string, o: any, c: any) => {
     const w = wantedT(); if (!w.size) return;
+    if (quietWrite(op, o, c)) return;
     const t = String(++tx), id = String(c.id);
     if (op === "update" && w.has("contact_changed")) {
-      for (const f of CONTACT_CHANGED_FIELDS) { const col = f === "quote_amount" ? "estimated_value" : f; if (JSON.stringify(o[col] ?? null) !== JSON.stringify(c[col] ?? null)) capPut("contact_changed", `${id}:chg:${f}:${t}`, id, id, { field: f, old: o[col] ?? null, new: c[col] ?? null }); }
+      for (const f of CONTACT_CHANGED_FIELDS) { const col = CONTACT_FIELD_COLUMN[f] || f; if (JSON.stringify(o[col] ?? null) !== JSON.stringify(c[col] ?? null)) capPut("contact_changed", `${id}:chg:${f}:${t}`, id, id, { field: f, old: o[col] ?? null, new: c[col] ?? null }); }
     }
     if (w.has("contact_tag")) {
       const was = lowerSet(op === "update" ? o.tags : []), now = lowerSet(c.tags);
@@ -198,14 +202,19 @@ function fakeDb(seed: Record<string, any[]> = {}) {
     if (!wantedT().has("contact_dnd") || !r.contact_id) return;
     capPut("contact_dnd", `${r.id}:${op === "delete" ? "off" : "on"}`, String(r.contact_id), String(r.contact_id), { action: op === "delete" ? "off" : "on", channel: r.channel });
   };
-  const after = (table: string, op: string, o: any, r: any) => { if (table === "contacts") captureContact(op, o || {}, r); if (table === "customer_opt_outs") captureOptOut(op, r); };
+  // tasks: Task added (G3.5: not for a quiet import)
+  const captureTask = (op: string, o: any, r: any) => {
+    if (op !== "insert" || !wantedT().has("task_added") || quietWrite(op, o, r)) return;
+    capPut("task_added", `${r.id}:added`, String(r.id), r.contact_id ? String(r.contact_id) : null, { title: String(r.title || "").slice(0, 200), due: r.due ?? null }, "task");
+  };
+  const after = (table: string, op: string, o: any, r: any) => { if (table === "contacts") captureContact(op, o || {}, r); if (table === "customer_opt_outs") captureOptOut(op, r); if (table === "tasks") captureTask(op, o || {}, r); };
   function q(table: string) {
     const rows = () => (T[table] = T[table] || []);
     const filters: ((r: any) => boolean)[] = [];
-    let op = "select", payload: any = null, opts: any = {}, single = false, maybe = false, lim = Infinity, rng: [number, number] | null = null, wantRows = false;
+    let op = "select", payload: any = null, opts: any = {}, single = false, maybe = false, lim = Infinity, rng: [number, number] | null = null, wantRows = false, counted = false, headOnly = false;
     const orders: [string, boolean][] = [];
     const b: any = {
-      select() { if (op !== "select") wantRows = true; return b; },
+      select(_c?: string, o?: any) { if (op !== "select") wantRows = true; if (o && o.count) { counted = true; headOnly = !!o.head; } return b; },
       insert(p: any) { op = "insert"; payload = p; return b; }, update(p: any) { op = "update"; payload = p; return b; },
       upsert(p: any, o?: any) { op = "upsert"; payload = p; opts = o || {}; return b; }, delete() { op = "delete"; return b; },
       eq(k: string, v: any) { filters.push((r) => r[k] === v); return b; },
@@ -258,8 +267,10 @@ function fakeDb(seed: Record<string, any[]> = {}) {
       }
       if (op === "delete") { const gone = match(); T[table] = rows().filter((r) => !gone.includes(r)); gone.forEach((r) => after(table, "delete", r, r)); return { data: gone, error: null }; }
       let list = match();
+      const total = list.length;   // { count: "exact" }: every matching row, before range / limit (PostgREST)
       for (const [k, asc] of [...orders].reverse()) list = [...list].sort((x, y) => (asc ? 1 : -1) * cmp(x[k], y[k]));
       if (rng) list = list.slice(rng[0], rng[1] + 1);
+      if (counted) return { data: headOnly ? null : list.slice(0, lim).map((x) => ({ ...x })), error: null, count: total };
       return out(list.slice(0, lim).map((x) => ({ ...x })));
     }
     return b;
@@ -382,7 +393,7 @@ function fakeDb(seed: Record<string, any[]> = {}) {
       try {
         for (let i = 0; i < a.p_ops.length; i++) {
           const op = a.p_ops[i], o = String(op.op || ""), skip = (reason: string) => skipped.push({ i: i + 1, op: o, reason });
-          if (["set", "tags", "note", "optout", "read", "stage"].includes(o) && !c) { skip("wrong_kind"); continue; }
+          if (["set", "tags", "note", "optout", "read", "stage", "assign"].includes(o) && !c) { skip("wrong_kind"); continue; }
           if (o === "set") {
             if (!UPDATE_FIELD_COLUMNS.includes(op.field)) { skip("field not allowed"); continue; }
             await upd({ [op.field === "quote_amount" ? "estimated_value" : op.field]: op.value === "" || op.value == null ? null : String(op.value).slice(0, 500) }); line(`Changed ${op.field}`);
@@ -412,6 +423,12 @@ function fakeDb(seed: Record<string, any[]> = {}) {
                 cause_run_id: m[1], cause_automation_id: m[3], chain_depth: Math.min(Number(m[2]) + 1, 100) }));
             }
             line("Moved to " + to);
+          } else if (o === "assign") {
+            // G3.5: the lead's "Assigned to" (a person of the team, or nobody)
+            const to = op.user == null || op.user === "" ? null : String(op.user), who = to ? (T.profiles || []).find((x) => x.id === to) : null;
+            if (to && !who) { skip("that person is not in the team"); continue; }
+            if ((c.assigned_user_id ?? null) === to) { skip(to ? "already assigned to that person" : "nobody is assigned"); continue; }
+            await upd({ assigned_user_id: to }); line(to ? "Assigned to " + (String(who.full_name || "").trim() || "a team member") : "Assigned user removed");
           } else if (o === "task") {
             if (!String(op.title || "").trim() || !op.board) { skip("missing details"); continue; }
             await q("tasks").insert({ board: op.board, title: String(op.title).slice(0, 200), status: op.status || "Not Started", due: op.due || null, notes: op.notes || null, client: c ? c.full_name : null,
@@ -1339,8 +1356,8 @@ async function phase4Suite() {
   // ══ stage 2 (G1.1): doc schema 2, registries, validator, upgradeV1, shape / arm keys, compile, conditions, patches ══
   {
     const fx = (name: string) => JSON.parse(src(`fixtures/${name}`));
-    const AV_ALL: any = { phone: true, xero: true, gbp: true, reviews: true, ai: true, teamEmail: true, assignee: true, atomicTags: true };
-    const AV_OFF: any = { phone: false, xero: false, gbp: false, reviews: false, ai: false, teamEmail: false, assignee: false, atomicTags: false };
+    const AV_ALL: any = { phone: true, xero: true, gbp: true, reviews: true, ai: true, teamEmail: true, atomicTags: true };
+    const AV_OFF: any = { phone: false, xero: false, gbp: false, reviews: false, ai: false, teamEmail: false, atomicTags: false };
     const C = (x: any) => canonJson(x);
 
     // ── workflows.json: every case gives exactly its codes; the JSON Schema accepts / rejects as stated ──
@@ -1445,7 +1462,16 @@ async function phase4Suite() {
     if (new Set(aliasList).size !== aliasList.length || aliasList.some((a) => WF_TRIGGERS[a] || WF_ACTIONS[a])) bad.push("aliases collide");
     eq(bad, [], "registry entries are complete, greyed ones say why, aliases never collide");
     eq(Object.values(WF_ACTIONS).filter((a) => !a.available(AV_OFF).ok).map((a) => [a.key, a.available(AV_OFF).reason]).filter(([k]) => ["send_sms", "assign_user", "send_invoice", "math", "ai_agent", "add_tag"].includes(k as string)),
-      [["add_tag", "Coming with the new lead card"], ["assign_user", "Needs 'Assigned to' on the lead card"], ["send_sms", "Needs the phone line (Twilio)"], ["send_invoice", "Needs Xero"], ["math", "Coming later"], ["ai_agent", "Coming with Workflow AI"]], "greyed reasons are the design's words");
+      [["add_tag", "Coming with the new lead card"], ["send_sms", "Needs the phone line (Twilio)"], ["send_invoice", "Needs Xero"], ["math", "Coming later"], ["ai_agent", "Coming with Workflow AI"]], "greyed reasons are the design's words");
+    // Q6 (G3.5): the lead's "Assigned to" exists, so nothing about it is greyed, whatever the business has
+    eq([WF_ACTIONS.assign_user.available(AV_OFF).ok, WF_ACTIONS.remove_assigned_user.available(AV_OFF).ok, !WF_FIELDS["lead.assigned_user"].available,
+      !!WF_MERGE["lead.assigned_to"] && !WF_MERGE["lead.assigned_to"].available && !WF_MERGE["lead.assigned_to_first_name"].available, !!WF_MERGE.assigned_user,
+      /"x-greyed":\{[^}]*"assigned"/.test(JSON.stringify(WF_WAITS.user_reply.fields)), Object.keys(AVAIL_REASONS).includes("assignee")],
+      [true, true, true, true, false, false, false], "Q6: Assign to user, Remove assigned user, the Assigned to filter, {lead.assigned_to} and 'the assigned user' reply wait are never greyed");
+    // Q5 (G3.5): no Quote status trigger at all (removed, not greyed); "quote sent" = Pipeline stage changed to Quoted
+    eq([!!WF_TRIGGERS.estimates, Object.values(WF_FIELDS).some((f) => (f.triggers || []).includes("estimates") || f.wakeOn.includes("estimates")), WF_FIELDS["lead.quote_amount"].wakeOn, !!WF_MERGE.quote_amount,
+      WF_TEMPLATE_SEEDS.some((t) => t.key === "lead_quote_follow_up" && JSON.stringify(t.definition.triggers).includes('"type":"stage"') && JSON.stringify(t.definition.triggers).includes('"Quoted"'))],
+      [false, false, ["contact_changed"], true, true], "Q5: the Quote status trigger is gone; the quote amount stays a field and a blank; the Quote follow-up template starts on the move to Quoted");
     eq([wfAliasOf("trigger", "missedCall"), wfAliasOf("trigger", "googleReview"), wfAliasOf("trigger", "docExpiry"), wfAliasOf("trigger", "bizInsurance"), wfAliasOf("trigger", "newLead"), wfAliasOf("trigger", "invoice"),
       wfAliasOf("action", "push"), wfAliasOf("action", "task"), wfAliasOf("action", "email"), wfAliasOf("action", "text"), wfAliasOf("action", "assign_owner")],
       ["call_details", "review_received", "doc_expiring", "insurance_expiring", "newLead", "invoice", "internal_notification", "add_task", "send_email", "send_sms", "assign_user"], "v1 and mirror keys map to the stored keys");
@@ -1455,7 +1481,7 @@ async function phase4Suite() {
     eq(Object.keys(CONDITIONS).filter((k) => !WF_FIELDS[k] || !CONDITIONS[k].ops.every((o) => WF_FIELDS[k].ops.includes(o))), [], "every phase-4 condition is a field with (at least) its phase-4 ops");
     eq(Object.keys(MERGE_FIELDS).filter((k) => !WF_MERGE[k]), [], "every phase-4 blank is a merge field");
     eq(availCtxOf({ phone_enabled: true, review_requests_auto: true }, { connectors: { xero: { connected: true } }, features: { leadAssignee: true } }),
-      { phone: true, xero: true, gbp: false, reviews: true, ai: false, teamEmail: false, assignee: true, atomicTags: true }, "availCtxOf reads the settings row and the catalog (atomic tag / note edits: on since G2.3)");
+      { phone: true, xero: true, gbp: false, reviews: true, ai: false, teamEmail: false, atomicTags: true }, "availCtxOf reads the settings row and the catalog (atomic tag / note edits: on since G2.3; no assignee switch since G3.5)");
 
     // narration templates only name config fields their entry has
     eq(entries.flatMap((e) => [...e.narration.matchAll(/\{([a-zA-Z_]+)\}/g)].map((m) => m[1]).filter((k) => !(k in obj(e.fields.properties)) && !(e.fields.oneOf || []).some((b: any) => k in obj(b.properties))).map((k) => `${e.key}.${k}`)), [],
@@ -1809,9 +1835,9 @@ async function phase4Suite() {
       db = world({ contacts: [lead("c1")], automations: [flow({ definition: doc({ n1: push("a") }) })], automation_runs: [runRow({ cursor_step: "gone" })] });
       eq((await step(db, NOW) as any).reason, "invalid: the step gone is gone", "a cursor at a step that no longer exists fails (never restarts the workflow)");
       // an unavailable step only skips (the run goes on); a migrated text keeps its phase-4 path
-      db = world({ contacts: [lead("c1")], automations: [flow({ definition: doc({ n1: { kind: "action", type: "assign_user", config: { user: "u-owner" }, out: { next: "n2" } }, n2: { kind: "action", type: "send_sms", config: { body: "{hi}" }, out: { next: null } } }) })], automation_runs: [runRow()] });
+      db = world({ contacts: [lead("c1")], automations: [flow({ definition: doc({ n1: { kind: "action", type: "send_invoice", config: {}, out: { next: "n2" } }, n2: { kind: "action", type: "send_sms", config: { body: "{hi}" }, out: { next: null } } }) })], automation_runs: [runRow()] });
       const u1: any = await step(db, NOW);
-      eq([u1.status, logOf(db)], ["done", ["n1:skipped:unavailable: Needs 'Assigned to' on the lead card", "n2:waiting_phone:waiting for the business phone"]], "unavailable steps skip with the reason; a text logs waiting_phone");
+      eq([u1.status, logOf(db)], ["done", ["n1:skipped:unavailable: Needs Xero", "n2:waiting_phone:waiting for the business phone"]], "unavailable steps skip with the reason; a text logs waiting_phone");
     }
 
     // ── watch: goals ahead and Stop on response; a goal met ahead is jumped to ──
@@ -1966,7 +1992,7 @@ async function phase4Suite() {
     eq(defProblems, [], "every default of the fake database is the SQL default");
     // capture whitelist = the engine's "Lead changed" fields; "Update lead field" = the apply whitelist; settle times
     const chg = [...tx.matchAll(/if new\.(\w+) is distinct from old\.\1 then chg := chg \|\| pg_catalog\.jsonb_build_object\('field', '(\w+)'/g)];
-    eq(chg.map((m) => m[2]), CONTACT_CHANGED_FIELDS, "the contacts capture compares exactly CONTACT_CHANGED_FIELDS (statically, column by column)");
+    eq(chg.map((m) => m[2]), CONTACT_CHANGED_FIELDS.filter((f) => f !== "assigned_user"), "the contacts capture compares exactly CONTACT_CHANGED_FIELDS (statically, column by column; the assigned user comes with Part 3 · G3.5)");
     eq(chg.filter((m) => m[1] !== m[2]).map((m) => `${m[1]}=${m[2]}`), ["estimated_value=quote_amount"], "…a column is its field, except the quote amount");
     const allowed = /allowed constant text\[\] := array\[([^\]]*)\]/.exec(tx);
     eq(allowed ? allowed[1].split(",").map((x) => x.trim().replace(/'/g, "")) : null, UPDATE_FIELD_COLUMNS, "automation_apply 'set' whitelist = UPDATE_FIELD_COLUMNS");
@@ -2033,11 +2059,17 @@ async function phase4Suite() {
     // the staging check script is there and covers the four checks the plan names
     const chk = src(SQL_DIR + "stage2-part1-staging-checks.sql");
     ok(["automation_claim_customer(", "automation.capture_test_error", "set local role authenticated", "has_column_privilege", "__undo__"].every((x) => chk.includes(x))
-      && (chk.match(/raise notice 'PASS \d+/g) || []).length === 21 && chk.includes("automations_a_v2_pin") && chk.includes("for update skip locked")
-      && chk.includes("PASS 19 — the guard v2") && chk.includes("PASS 20 — the ROLLBACK list") && chk.includes("PASS 21 — the SQL shape and arm keys")
+      && (chk.match(/raise notice 'PASS \d+/g) || []).length === 26 && chk.includes("automations_a_v2_pin") && chk.includes("for update skip locked")
+      && chk.includes("PASS 19 — the guard v2") && chk.includes("PASS 20 — the ROLLBACK list") && chk.includes("PASS 21 — the SQL shape and arm keys") && chk.includes("PASS 22 — the list counts") && chk.includes("PASS 23 — Pause workflow") && chk.includes("PASS 24 — the template library") && chk.includes("PASS 25 — quiet imports") && chk.includes("PASS 26 — the lock: four columns for the app")
       && chk.includes("PASS 14 — event-store rows fit") && chk.includes("PASS 15 — a captured Lead changed event") && chk.includes("PASS 16 — Add to workflow run")
       && chk.includes("PASS 17 — the card''s atomic tag / note edits") && chk.includes("PASS 18 — the inbound link counter") && chk.includes("contact_tags_edit(c, array['VIP', 'vip']"),
-      "the staging checks: phase-4 claim, forced capture failure, RLS as VA/technician, column privileges, the v2 column pin, the non-blocking counter (13 Part-1 checks) + the event store (G2.1: 2) + the logic steps' writes (G2.2: 1) + record writes / atomic edits / the link counter (G2.3: 2) + the guard v2, the ROLLBACK list, the SQL keys (G2.4: 3), all undone");
+      "the staging checks: phase-4 claim, forced capture failure, RLS as VA/technician, column privileges, the v2 column pin, the non-blocking counter (13 Part-1 checks) + the event store (G2.1: 2) + the logic steps' writes (G2.2: 1) + record writes / atomic edits / the link counter (G2.3: 2) + the guard v2, the ROLLBACK list, the SQL keys (G2.4: 3) + the list counts per channel (G3.1: 1) + the pause guard and its wake (G3.2: 1) + the template library (G3.3: 1) + quiet imports, Assigned to, no Quote status (G3.5: 1) + the lock on direct writes (G3.4: 1), all undone");
+    {
+      const block = (n0: number) => { const a0 = chk.indexOf(`\n-- ${n0}. `); return chk.slice(a0, chk.indexOf("\nend $$;", a0)); };
+      ok([12, 19].every((n0) => { const b0 = block(n0); const g0 = b0.indexOf("elsif not has_table_privilege('authenticated', 'public.automations', 'INSERT') then"), r0 = b0.indexOf("execute 'set local role authenticated'");
+        return g0 > 0 && r0 > g0 && b0.includes(`raise notice 'NOTE ${n0}: PART 3 · G3.4 is applied`); }),
+        "staging checks 12 and 19 skip their signed-in insert once PART 3 · G3.4 took the app's INSERT away (else the run stops before PASS 26)");
+    }
     // G2.2's staging check 16 calls the Part-1 functions with the engine's own argument lists (Add to workflow's enrolment, mark as read)
     const c16 = chk.slice(chk.indexOf("-- 16. (G2.2)"));
     ok(/automation_enroll\('default', b, 1, 1, null, 'wf:' \|\| r1::text \|\| ':n1:0', 'newLead', now\(\), 'contact', c::text, c, c::text, c::text, 'off', 'n1',\s+'\{"form":"website"\}'::jsonb, 'workflow', 1, r1, r1, false, now\(\), now\(\)\)/.test(c16)
@@ -2527,6 +2559,27 @@ async function phase4Suite() {
       eq(db2.T.automation_events.map((e: any) => [e.status, e.attempts, e.error]), [["error", 5, "boom"], ["new", 1, "boom"]], "a failing event: tried again next time, an error after 5 attempts");
     }
 
+    // before SQL G3.5 (no contacts.assigned_user_id, or its ROLLBACK ran): the matcher's lead reads go again without it
+    // and still enrol (never a batch that fails as a whole)
+    {
+      const db = evWorld({ contacts: [lead("c1")], automations: [wf([{ id: "t1", type: "contact_changed", filters: NONE }])], automation_events: [capEv("contact_changed", "c1:chg:email:1")] });
+      const T0: any = ctxOf(db), pubs = await publishedWorkflows(db, T0);
+      let refused = 0;
+      const old = { ...db, from: (t: string) => { const q0: any = db.from(t); if (t !== "contacts") return q0; const sel = q0.select;
+        q0.select = (c?: string, o?: any) => {
+          if (!c || !c.includes("assigned_user_id")) return sel(c, o);
+          refused++;
+          const e: any = { in: () => e, eq: () => e, maybeSingle: () => e, then: (res: any, rej: any) => Promise.resolve({ data: null, error: { code: "42703", message: "column contacts.assigned_user_id does not exist" } }).then(res, rej) };
+          return e;
+        }; return q0; } };
+      clock = NOW;
+      const m = await matchEvents(old, T0, pubs, NOW, { started: NOW });
+      eq([m.done, db.T.automation_runs.length, refused > 0, db.T.automation_events[0].status], [1, 1, true, "done"],
+        "before SQL G3.5 the matcher reads the lead cards again without assigned_user_id and still enrols");
+      const r1 = await readContactsV2(old, (q: any) => q.eq("id", "c1").maybeSingle());
+      eq([r1.error, r1.data && r1.data.id], [null, "c1"], "readContactsV2: one card, read again without the G3.5 column");
+    }
+
     // producers: watermarks narrow the window; 2,500 stale leads give each event once (paged); a second scan inserts 0
     {
       const N = 7;
@@ -2538,7 +2591,7 @@ async function phase4Suite() {
       const p1 = await produceEvents(db, T0, pubs, new Set(["stale"]), NOW, {});
       const keys = db.T.automation_events.map((e: any) => e.event_key);
       eq([p1.produced, p1.inserted, new Set(keys).size, db.calls.slice(c0).filter((c: string) => c === "contacts.select").length, keys.includes(`s0:stale:${cs[0].stage_changed_at}:7`), db.T.automation_events.find((e: any) => e.record_id === "s0").at],
-        [2500, 2500, 2500, 3, true, isoMs(Date.parse(cs[0].stage_changed_at) + 7 * DAYMS)], "stale: 2,500 leads in their stage for 7 days → 2,500 events, once each (3 pages; a test lead and a fresh move not)");
+        [2500, 2500, 2500, 4, true, isoMs(Date.parse(cs[0].stage_changed_at) + 7 * DAYMS)], "stale: 2,500 leads in their stage for 7 days → 2,500 events, once each (3 pages + one look for imported leads, G3.5; a test lead and a fresh move not)");
       const p2 = await produceEvents(db, T0, pubs, new Set(["stale"]), NOW, db.T.automation_state[0].scan_marks);
       eq([p2.inserted, db.T.automation_events.length, db.T.automation_state[0].scan_marks.stale], [0, 2500, isoMs(NOW)], "a second scan of the same minute inserts 0 (the watermark: now)");
       const c1 = db.calls.length;
@@ -3747,11 +3800,55 @@ async function phase4Suite() {
       const dt = await api(db, "duplicate", { template_id: t0.id });
       const trow = db.T.automations.find((a: any) => a.id === dt.body.id);
       eq([dt.status, trow.origin, trow.template_key, trow.enabled], [200, "template", "tpl:team_new_lead", false], "duplicate a template: origin template, template_key tpl:<key>, a Draft");
+      // the template library's own templates (G3.3, design §4.3): Upload to Template Library, then Rename / Delete under Mine
+      const nT = db.T.automation_templates.length;
+      const tu = await api(db, "template_upload", { automation_id: id, name: "  Our team alert  ", description: "Tells the owners.", category: "Team notifications" });
+      const mine = db.T.automation_templates.find((t: any) => t.id === tu.body.id);
+      eq([tu.status, WF_TPL_KEY_RE.test(mine.key), mine.origin, mine.name, mine.description, mine.category, mine.source_automation_id, mine.created_by_name, mine.definition.schema, db.T.automation_templates.length - nT],
+        [200, true, "user", "Our team alert", "Tells the owners.", "Team notifications", id, "Olivia Owner", 2, 1], "template_upload: the workflow's doc becomes a template of the business's own (origin user, a mine_ key)");
+      eq(JSON.stringify(mine.definition) === JSON.stringify(row().definition) && mine.definition !== row().definition, true, "template_upload: a copy of the doc, never the same object");
+      const up2 = await api(db, "template_upload", { automation_id: id, category: "Anything" });
+      eq([up2.status, db.T.automation_templates.find((t: any) => t.id === up2.body.id).category, db.T.automation_templates.find((t: any) => t.id === up2.body.id).name], [200, null, "Team alert"], "template_upload: an unknown category is left empty; no name = the workflow's name");
+      eq([(await api(db, "template_upload", { automation_id: "nope" })).status, (await api(db, "template_upload", { automation_id: id }, VA)).status, (await api(db, "template_upload", { automation_id: id, name: "   " }, MANAGER)).status],
+        [404, 403, 200], "template_upload: an unknown workflow → 404; a VA → 403; a manager may (a blank name falls back to the workflow's)");
+      const dm = await api(db, "duplicate", { template_id: mine.id });
+      eq([dm.status, db.T.automations.find((a: any) => a.id === dm.body.id).template_key, db.T.automations.find((a: any) => a.id === dm.body.id).enabled], [200, "tpl:" + mine.key, false], "choosing one of Mine: a Draft with template_key tpl:<its key>");
+      const rn = await api(db, "template_rename", { template_id: mine.id, name: " Owners' alert " });
+      eq([rn.status, mine.name, (await api(db, "template_rename", { template_id: mine.id, name: "" })).status, mine.name], [200, "Owners' alert", 422, "Owners' alert"], "template_rename: one of Mine is renamed; an empty name is refused");
+      const rs = await api(db, "template_rename", { template_id: t0.id, name: "X" }), ds = await api(db, "template_delete", { template_id: t0.id });
+      eq([rs.status, rs.body.reason, ds.status, t0.name, t0.deleted_at ?? null], [409, "system", 409, "Tell the team about a new lead", null], "a System template is never renamed or deleted here");
+      const tdel = await api(db, "template_delete", { template_id: mine.id });
+      eq([tdel.status, !!mine.deleted_at, (await api(db, "template_delete", { template_id: mine.id })).status, (await api(db, "template_rename", { template_id: mine.id, name: "Y" })).status, (await api(db, "duplicate", { template_id: mine.id })).status],
+        [200, true, 404, 404, 404], "template_delete: one of Mine leaves the library (deleted_at); then it is not found for rename, delete or choose");
+      // the 200 limit counts the live templates in the database (head + count), never a read of the whole table: many
+      // deleted ones (kept for good) never hide live ones, and a key already used (a deleted one too) is never minted again
+      {
+        const keep = db.T.automation_templates;
+        const liveN = keep.filter((t: any) => !t.deleted_at && t.business_id === "default").length;
+        const fill = (n0: number, del: boolean) => Array.from({ length: n0 }, (_, i) => ({ id: `tf-${del ? "d" : "l"}-${i}`, business_id: "default", key: `mine_fill${del ? "d" : "l"}${i}`, name: "F", origin: "user", deleted_at: del ? "2026-10-01T00:00:00.000Z" : null }));
+        db.T.automation_templates = [...keep, ...fill(1200, true), ...fill(WF_TPL_LIMITS.perBusiness - liveN - 1, false)];
+        const c0 = db.calls.length, ok1 = await api(db, "template_upload", { automation_id: id, name: "One more" });
+        const reads = db.calls.slice(c0).filter((c: string) => c === "automation_templates.select").length;
+        const full = await api(db, "template_upload", { automation_id: id, name: "Too many" });
+        eq([ok1.status, full.status, full.body.reason, reads], [200, 409, "too_many", 2], "template_upload: 1,200 deleted templates never count; the 200th live one is the last (one count + one key probe)");
+        db.T.automation_templates = keep;
+      }
+      const badDoc = await api(db, "save", { automation_id: null, name: "Broken", definition: { schema: 2, seq: 1, entry: "zz", triggers: [], nodes: {} } });
+      const ub = await api(db, "template_upload", { automation_id: badDoc.body.id });
+      eq([ub.status, ub.body.reason, db.T.automation_templates.some((t: any) => t.source_automation_id === badDoc.body.id)], [422, "errors", false], "template_upload: a workflow with problems is refused (a template opens without errors)");
       // template drafts come with a save (one catalog write; keys like the app's autoLibKey)
       const td = await api(db, "save", { automation_id: null, name: "New words", definition: doc({ e1: { kind: "action", type: "send_email", config: { subject: "Hi", templateKey: "my_zz99xx11" }, out: { next: null } } }),
         template_drafts: { my_zz99xx11: { name: "Welcome", channel: "email", body: "{hi}, welcome." } } });
       eq([td.status, td.body.templates, db.T.settings[0].catalog.templates.my_zz99xx11, db.T.settings[0].catalog.msgTemplates.my_zz99xx11.createdBy], [200, ["my_zz99xx11"], "{hi}, welcome.", "Olivia Owner"], "save: the template words come first (catalog), then the workflow");
       eq((await api(db, "save", { automation_id: null, name: "Bad", definition: d1, template_drafts: { "../x": { channel: "email", body: "x" } } })).status, 422, "save: a template key that isn't one of ours is refused");
+      // where a copy of a ready-made came from (template_key): kept by the save on a new one only (since SQL Part 3 · G3.4
+      // the app can't write the column); a key that isn't one, or one sent with an existing workflow, is ignored
+      const tk = await api(db, "save", { automation_id: null, name: "Copy of review", definition: d1, template_key: "team:new-lead_1" });
+      const tkBad = await api(db, "save", { automation_id: null, name: "Odd key", definition: d1, template_key: "../x; drop" });
+      const tkRow = () => db.T.automations.find((a: any) => a.id === tk.body.id);
+      const tkOld = await api(db, "save", { automation_id: tk.body.id, expected_revision: tk.body.revision, name: "Copy of review", definition: d1, template_key: "review" });
+      eq([tk.status, tk.body.template_key, tkBad.status, tkBad.body.template_key, db.T.automations.find((a: any) => a.id === tkBad.body.id).template_key, tkOld.status, tkRow().template_key, tkRow().enabled],
+        [200, "team:new-lead_1", 200, null, null, 200, "team:new-lead_1", false], "save: template_key kept on a new one (a Draft); a bad key or a later save never sets it");
       // overlap with a ready-made System row that is on
       const sysRow = db.T.automations.find((a: any) => a.id === id);
       Object.assign(sysRow, { enabled: true, list_summary: { triggers: ["newLead"] } });
@@ -3928,6 +4025,349 @@ async function phase4Suite() {
       const noPart1 = { ...pre, from: (t: string) => { const q0 = pre.from(t); if (t !== "automation_state") return q0; const sel = q0.select; q0.select = (c?: string) => (c && /phase4_compat/.test(c) ? { eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: "42703", message: "column automation_state.phase4_compat does not exist" } }) }) } : sel(c)); return q0; } };
       await tickAt(noPart1, NOW);
       eq([pre.T.automation_runs.length, pre.T.automation_state[0].pruned_on, pre.calls.includes("rpc:automation_prune")], [0, "2026-10-14", false], "before Part 1: phase 4's prune (90 days), no housekeeping");
+    }
+  }
+
+  // ── 35. links into Settings → Automation (G3.1, design §4.1): the engine's wfLink = fixtures/links.json (the app's
+  // wfLink reads the same file in tests/business-logic.test.js), and nothing that fails a rule gets into a link. ──
+  {
+    const L = JSON.parse(src("fixtures/links.json")).cases;
+    ok(L.length >= 5, "links: the shared fixture has its cases");
+    for (const c of L) eq(wfLink(c.id, c.wfTab, c.extra), c.link, `links: ${c.name}`);
+    ok(!/["'<>\s]/.test(L.map((c: any) => wfLink(c.id, c.wfTab, c.extra)).join("")), "links: no quote, angle bracket or space ever gets into a link");
+    eq(wfLink(null, undefined), "?tab=settings&page=automation", "links: nothing given → the Automation page");
+  }
+
+  // ── 36. Global Workflow Settings (G3.2, design §4.4): the engine's bizToUtc / cleanEmail / signatureOf and its pause
+  // rules = fixtures/global-settings.json (the app's copies read the same file in tests/business-logic.test.js), and the
+  // registry says whether the daily error alert is sent yet. ──
+  {
+    const G = JSON.parse(src("fixtures/global-settings.json"));
+    for (const c of G.bizToUtc) eq(new Date(bizToUtc(c.day, c.hh, c.mm, c.tz)).toISOString(), c.utc, `global settings: bizToUtc — ${c.name}`);
+    eq(G.cleanEmail.map((c: any) => cleanEmail(c.in)), G.cleanEmail.map((c: any) => c.out), "global settings: cleanEmail on every fixture");
+    eq(G.signatureOf.map((c: any) => signatureOf(c.author, c.biz)), G.signatureOf.map((c: any) => c.out), "global settings: signatureOf on every fixture");
+    const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
+    for (const c of G.pauseUntil) eq(iso(pauseUntil(G.pauses, c.id, Date.parse(c.now), c.tz)), c.until, `global settings: pauseUntil — ${c.name}`);
+    for (const c of G.pauseOccurrences) {
+      const p = G.pauses.find((x: any) => x.id === c.pause);
+      eq(pauseOccurrences(p, Date.parse(c.now), c.tz).map((o) => [iso(o.start), iso(o.end)]), c.out, `global settings: pauseOccurrences — ${c.name}`);
+    }
+    eq([wallMs("2026-02-30T09:00", 0, "UTC"), wallMs("2026-10-14 09:00", 0, "UTC"), wallMs("2028-02-29T09:00", -1, "UTC")], [null, null, Date.parse("2027-02-28T09:00:00Z")],
+      "global settings: wallMs refuses 30 February and a malformed wall; 29 February moved to a year without it is the 28th");
+    eq([registryExport({ phone: false, xero: false, gbp: false, reviews: false, ai: false, teamEmail: false, atomicTags: true }, {}).features, WF_FEATURES.errorDigest], [{ errorDigest: false }, false], "global settings: the registry says the daily error alert is not sent yet (G6.1 switches it on)");
+  }
+
+  // ── 37. G3.5 (design §10 Q5 + Q6, quiet imports): the lead's "Assigned to" end to end (Assign to user / Remove assigned
+  //        user through automation_apply, {lead.assigned_to}, Lead changed sees it), no Quote status trigger, and rows
+  //        imported with import_quiet never start an automation by arriving (scans, timers, the app's look now, the
+  //        capture) while a later change by a person still does; SQL Part 3 · G3.5 = what the fake does, ROLLBACK exact ──
+  {
+    io.advance = PROD_ADVANCE;
+    const NONE = { match: "all", segments: [{ match: "all", rules: [] }] };
+    const MIN0 = 60e3;
+    // Assign to user → Remove assigned user: one automation_apply op each, the write, a history line each, the blank filled
+    {
+      const A = { id: "w37-0001", business_id: "default", name: "Assign", enabled: true, armed_at: "2026-10-01T00:00:00.000Z", version: 1, revision: 1, created_by_name: "Olivia Owner", trigger: {}, steps: [],
+        definition: { schema: 2, seq: 9, entry: "n1", triggers: [{ id: "t1", type: "newLead", filters: NONE }], nodes: {
+          n1: { kind: "action", type: "assign_user", config: { user: "u-mgr" }, out: { next: "n2" } },
+          n2: { kind: "action", type: "internal_notification", config: { channel: "push", to: { roles: ["owner"] }, title: "{name} is {lead.assigned_to_first_name}'s ({lead.assigned_to})" }, out: { next: "n3" } },
+          n3: { kind: "action", type: "assign_user", config: { user: "u-mgr" }, out: { next: "n4" } },
+          n4: { kind: "action", type: "remove_assigned_user", config: {}, out: { next: "n5" } },
+          n5: { kind: "action", type: "assign_user", config: { user: "not-a-person" }, out: { next: null } } } },
+        settings: { reentry: "off", perRecord: true }, deleted_at: null };
+      const db = world({ contacts: [lead("c1")], automations: [A], automation_runs: [{ id: "r37", business_id: "default", automation_id: A.id, automation_version: 1, event_key: "c1:new", event_type: "newLead",
+        event_at: isoMs(NOW), record_kind: "contact", record_id: "c1", contact_id: "c1", status: "running", step_index: 0, anchor_at: isoMs(NOW), due_at: isoMs(NOW), attempts: 1, context: {}, trigger_id: "t1",
+        cursor_step: null, remove_requested: false, chain_depth: 0 }], automation_wanted: [{ business_id: "default", event_type: "contact_changed" }] });
+      // the uuid check of the step: the fake's people have short ids, so their ids are given as uuids here
+      const U = "11111111-1111-4111-8111-111111111111";
+      db.T.profiles.push({ id: U, full_name: "Max Manager", role: "manager", permissions: {} });
+      A.definition.nodes.n1.config.user = U; A.definition.nodes.n3.config.user = U;
+      sent.length = 0; clock = NOW;
+      const p: any = await advanceV2(db, { ...db.T.automation_runs[0] }, ctxOf(db), NOW);
+      clock = NOW;
+      const calls = db.T.automation_apply_calls.map((x: any) => x.p_ops);
+      eq([p.status, calls, db.T.contacts[0].assigned_user_id, sent.map((x) => x.msg.title)],
+        ["done", [[{ op: "assign", user: U }], [{ op: "assign", user: U }], [{ op: "assign", user: null }]], null, ["Sam Smith is Max's (Max Manager)"]],
+        "Assign to user / Remove assigned user: one 'assign' op each; {lead.assigned_to} and its first name are the person's; a step without a real person is skipped");
+      eq(db.T.automation_log.filter((l: any) => l.run_id === "r37" && l.row_kind === "action").map((l: any) => `${l.step_id}:${l.status}${l.reason ? ":" + l.reason : ""}`),
+        ["n1:executed", "n2:sent", "n3:skipped:already assigned to that person", "n4:executed", "n5:skipped:missing details: user"], "the action rows: assigned, the same person again skipped, removed, no person skipped");
+      eq([db.T.activity_log.map((l: any) => l.text), db.T.automation_events.filter((e: any) => e.type === "contact_changed").map((e: any) => [e.ctx.field, e.ctx.old, e.ctx.new, !!e.cause_run_id])],
+        [["Assigned to Max Manager", "Assigned user removed"], [["assigned_user", null, U, true], ["assigned_user", U, null, true]]],
+        "a history line on the lead for each change; Lead changed sees field assigned_user (with the run's cause: never this workflow again)");
+    }
+    // the merge fields, the facts (the name read once a tick), and a function deployed before SQL G3.5 (no column: read again without)
+    {
+      const db = world({ contacts: [lead("c1", { assigned_user_id: "u-va" })] });
+      const T0: any = ctxOf(db), run = { record_kind: "contact", record_id: "c1", event_type: "newLead", event_at: isoMs(NOW), context: {} };
+      const f: any = await loadFactsV2(db, run, T0, NOW);
+      const v = wfMergeVars(f, { name: "X", steps: [] });
+      eq([f.assignedName, v["lead.assigned_to"], v["lead.assigned_to_first_name"], wfMergeVars({ contact: { id: "c2" }, cat: CATALOG }, { name: "X" })["lead.assigned_to"], !!T0.people],
+        ["Vicky Va", "Vicky Va", "Vicky", "", true], "{lead.assigned_to} / {lead.assigned_to_first_name}: the assigned person's name (nobody: empty)");
+      // the name is read by id (never the whole profiles table: it has no business column and the 1,000-row cap would cut
+      // it), once a tick
+      {
+        const seen: string[] = [];
+        const spy = { ...db, from: (t: string) => { const q0: any = db.from(t); if (t !== "profiles") return q0; const e0 = q0.eq; q0.eq = (k: string, x: any) => { seen.push(`${k}=${x}`); return e0(k, x); }; return q0; } };
+        const T1: any = ctxOf(db), f1: any = await loadFactsV2(spy, run, T1, NOW), f2b: any = await loadFactsV2(spy, run, T1, NOW);
+        eq([f1.assignedName, f2b.assignedName, seen], ["Vicky Va", "Vicky Va", ["id=u-va"]], "the assigned person's name: one read by id, kept for the tick");
+      }
+      let first = true;
+      const old = { ...db, from: (t: string) => { const q0: any = db.from(t); if (t !== "contacts") return q0; const sel = q0.select; q0.select = (c?: string) => {
+        if (first && c && c.includes("assigned_user_id")) { first = false; return { eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: "42703", message: "column contacts.assigned_user_id does not exist" } }) }) }; }
+        return sel(c); }; return q0; } };
+      const f2: any = await loadFactsV2(old, run, ctxOf(db) as any, NOW);
+      eq([!!f2 && f2.contact.id, first], ["c1", false], "before SQL G3.5 the lead is read again without the new columns (the run goes on)");
+      eq([withoutCols(CONTACT_COLS_V2).includes("assigned_user_id"), withoutCols("id, import_quiet, status"), noColumn({ code: "42703", message: "column jobs.import_quiet does not exist" }),
+        noColumn({ code: "42703", message: "column contacts.shoe does not exist" }), noColumn({ code: "57014", message: "timeout" })], [false, "id, status", true, false, false],
+        "noColumn: only a missing G3.5 column; withoutCols drops them");
+    }
+    // Q5: a doc with the old trigger key is refused as unknown (it was never published: no rows to move)
+    eq(issueCodes(validateDoc({ schema: 2, seq: 2, entry: "n1", triggers: [{ id: "t1", type: "estimates", filters: NONE }], nodes: { n1: { kind: "action", type: "internal_notification", config: { channel: "push", to: { roles: ["owner"] }, title: "x" }, out: { next: null } } } }, { catalog: CATALOG }).errors),
+      ["E_UNKNOWN_TYPE"], "Q5: Quote status is not a trigger any more (removed, not greyed)");
+
+    // ── import_quiet: the engine's side ──
+    {
+      const at = (m: number) => isoMs(NOW - m * MIN0);
+      const formMsg = [{ at: at(3), text: "Lead created automatically from the website form (Aircon)" }];
+      const db = world({
+        contacts: [lead("c-new", { messages: formMsg }), lead("c-imp", { import_quiet: true, messages: formMsg }), lead("c-imp-re", { import_quiet: true, reopened_at: at(2) }),
+          lead("c-st-imp", { import_quiet: true, status: "Quoted", created_at: at(20), stage_changed_at: isoMs(NOW - 20 * MIN0 + 10e3), messages: [{ at: at(60) }] }),
+          lead("c-st-moved", { import_quiet: true, status: "Booked", created_at: at(120), stage_changed_at: at(5), messages: [{ at: at(180) }] }),
+          lead("c-st-new", { status: "Quoted", created_at: at(120), stage_changed_at: at(5), messages: [{ at: at(180) }] })],
+        jobs: [{ id: "j-new", customer_name: "A", date: "2026-10-14", contact_id: null, created_at: at(5) }, { id: "j-imp", customer_name: "B", date: "2026-10-14", contact_id: null, created_at: at(5), import_quiet: true }],
+      });
+      const T0: any = ctxOf(db), w = { sinceMs: NOW - 3 * HR, nowMs: NOW, markMs: null };
+      const keys = (l: any[]) => l.map((e: any) => `${e.type}:${e.key}`).sort();
+      const arr = await EV_PRODUCERS.arrivals.run(db, w, T0, [], new Set(["newLead", "form_submitted"]));
+      eq(keys(arr.events), [`form_submitted:c-new:form:new`, `newLead:c-imp-re:${at(2)}`, `newLead:c-new:new`, "newLead:c-st-new:new"].sort(),
+        "new lead / website form: an imported lead (import_quiet) starts nothing; reopened later by a person, it does");
+      eq(keys(await TRIGGERS.newLead.scan(db, w.sinceMs, NOW, T0.S)), [`newLead:c-imp-re:${at(2)}`, "newLead:c-new:new", "newLead:c-st-new:new"].sort(), "…the same in the phase-4 scanner (compat)");
+      eq(keys(await TRIGGERS.stage.scan(db, w.sinceMs, NOW, T0.S)).filter((k: string) => k.includes("c-st")), [`stage:c-st-moved:Booked:${at(5)}`, `stage:c-st-new:Quoted:${at(5)}`].sort(),
+        "stage: the stage an imported lead arrived in starts nothing; a later move by a person does");
+      eq(keys(await TRIGGERS.jobClosed.scan(db, w.sinceMs, NOW, T0.S)), ["jobClosed:j-new"], "job closed: an imported job starts nothing");
+      const jd = [mkEv("custom_date", "job", "j-imp", "job.date:j-imp:2026-10-14:on:0@09:00", NOW, null, {}), mkEv("custom_date", "job", "j-new", "job.date:j-new:2026-10-14:on:0@09:00", NOW, null, {}),
+        mkEv("custom_date", "contact", "c-imp", "lead.next_follow_up:c-imp:2026-10-14:on:0@09:00", NOW, "c-imp", {})];
+      eq((await dropQuiet(db, jd)).map((e) => e.recordId), ["j-new", "c-imp"], "job date reminders: an imported job's date starts nothing (a lead's own follow-up date still does)");
+      // a quiet job rescheduled later by a person: only the imported date (jobs.import_quiet_date) stays quiet
+      {
+        const rdb = world({ jobs: [{ id: "j-re", customer_name: "R", date: "2026-11-03", contact_id: null, created_at: at(5), import_quiet: true, import_quiet_date: "2026-10-20" },
+          { id: "j-old", customer_name: "O", date: "2026-10-20", contact_id: null, created_at: at(5), import_quiet: true }] });
+        const evs2 = [mkEv("custom_date", "job", "j-re", "job.date:j-re:2026-11-03:before:1days@09:00", NOW, null, { field: "job.date", date: "2026-11-03" }),
+          mkEv("custom_date", "job", "j-re", "job.date:j-re:2026-10-20:before:1days@09:00", NOW, null, { field: "job.date", date: "2026-10-20" }),
+          mkEv("custom_date", "job", "j-old", "job.date:j-old:2026-10-20:before:1days@09:00", NOW, null, { field: "job.date", date: "2026-10-20" })];
+        eq((await dropQuiet(rdb, evs2)).map((e) => e.key), ["job.date:j-re:2026-11-03:before:1days@09:00"],
+          "a quiet job rescheduled by a person: the new date's reminder starts; the imported date's (and a job without import_quiet_date) stays quiet");
+        // the fake returns whole rows: the world before SQL G3.5 has no import_quiet_date at all
+        const ndb = world({ jobs: rdb.T.jobs.map((j: any) => { const { import_quiet_date: _d, ...rest } = j; return rest; }) });
+        const noDateCol = { ...ndb, from: (t: string) => { const q0: any = ndb.from(t); const sel = q0.select;
+          q0.select = (c?: string, o?: any) => (c && c.includes("import_quiet_date") ? (() => { const e: any = { in: () => e, eq: () => e, then: (res: any, rej: any) => Promise.resolve({ data: null, error: { code: "42703", message: "column jobs.import_quiet_date does not exist" } }).then(res, rej) }; return e; })() : sel(c, o));
+          return q0; } };
+        eq((await dropQuiet(noDateCol, evs2)).map((e) => e.key), [], "…before SQL G3.5 (no import_quiet_date) every date of a quiet job stays quiet, as before");
+      }
+      // a card made with a day only (a business day): a move the next local morning, still the day before in UTC, is a person's
+      const syd = { type: "stage", at: "2026-10-15T21:00:00.000Z" } as any, made15 = { created_at: "2026-10-15" };
+      eq([quietDrops(syd, made15, "Australia/Sydney"), quietDrops(syd, made15, "UTC"), quietDrops({ type: "stage", at: "2026-10-15T12:00:00.000Z" } as any, made15, "Australia/Sydney"),
+        quietDrops({ type: "stage", at: "2026-10-15T13:30:00.000Z" } as any, made15, "Australia/Sydney"),
+        quietDrops({ type: "stage", at: "2026-10-16T03:00:00.000Z" } as any, made15, "America/Los_Angeles")], [false, true, true, false, true],
+        "quietDrops: a day-only card compares the move's BUSINESS day (Sydney: 15 Oct 23:00 is its arrival day, 16 Oct 00:30 and 08:00 count; Los Angeles: 15 Oct 20:00 is still its arrival day)");
+      eq([quietDrops({ type: "stage", at: "2026-10-14T03:00:00.000Z" } as any, { created_at: "2026-10-14" }), quietDrops({ type: "stage", at: "2026-10-15T03:00:00.000Z" } as any, { created_at: "2026-10-14" }),
+        quietDrops({ type: "stage", at: "2026-10-15T03:00:00.000Z" } as any, { created_at: "2026-10-14", reopened_at: "2026-10-15T02:00:00.000Z" }), quietDrops({ type: "newLead", key: "c:2026-10-15T02:00:00.000Z" } as any, null),
+        quietDrops({ type: "task_reminder", key: "t:due" } as any, null)], [true, false, false, false, false],
+        "quietDrops: a card made with a day only arrives that day; a reopened card and a reopen are a person's; task reminders are not touched");
+      // stale: the stage an imported lead arrived in never goes stale; a later move by a person does
+      const sdb = world({ contacts: [lead("s-imp", { import_quiet: true, status: "Quoted", created_at: isoMs(NOW - 7 * DAYMS - 10 * MIN0), stage_changed_at: isoMs(NOW - 7 * DAYMS - 10 * MIN0 + 5e3) }),
+        lead("s-moved", { import_quiet: true, status: "Quoted", created_at: isoMs(NOW - 30 * DAYMS), stage_changed_at: isoMs(NOW - 7 * DAYMS - 10 * MIN0) }),
+        lead("s-norm", { status: "Quoted", created_at: isoMs(NOW - 30 * DAYMS), stage_changed_at: isoMs(NOW - 7 * DAYMS - 10 * MIN0) })] });
+      const stalePubs: any = [{ a: { id: "w-stale" }, R: { doc: { triggers: [{ id: "t1", type: "stale", config: { days: 7 }, filters: NONE }] } } }];
+      const st = await EV_PRODUCERS.stale.run(sdb, { sinceMs: NOW - HR, nowMs: NOW, markMs: null }, ctxOf(sdb) as any, stalePubs, new Set(["stale"]));
+      eq(st.events.map((e: any) => e.recordId).sort(), ["s-moved", "s-norm"], "stale: an imported lead's own (arrival) stage never goes stale; a stage a person set later does");
+      const c0 = db.calls.length;
+      eq([(await dropQuiet(db, [])).length, (await dropQuiet(db, [mkEv("chat", "chat", "s1", "s1", NOW, null, {})])).length, db.calls.length - c0], [0, 1, 0], "no event that could be quiet: nothing is read");
+      const failing = (error: any) => { const q: any = { select: () => q, in: () => q, eq: () => q, limit: () => q, then: (res: any) => Promise.resolve({ data: null, error }).then(res) }; return { from: () => q }; };
+      const noCol = failing({ code: "42703", message: "column contacts.import_quiet does not exist" }), broken = failing({ code: "57014", message: "timeout" });
+      let threw = false; try { await quietIds(broken, "contacts", ["c1"]); } catch { threw = true; }
+      eq([(await quietIds(noCol, "contacts", ["c1"])).size, threw, (await quietIds(db, "contacts", ["c-imp", "c-new", "c-imp", ""])).size], [0, true, 1],
+        "before SQL G3.5 nothing is quiet; another read failure fails the scan (tried again next minute)");
+      // the app's look now
+      const lw = world({ contacts: [lead("c-new"), lead("c-imp", { import_quiet: true })], automations: [auto()] });
+      const e1 = await handle(lw, { step: "event", type: "newLead", id: "c-imp" }, OWNER, false), e2 = await handle(lw, { step: "event", type: "newLead", id: "c-new" }, OWNER, false);
+      eq([e1.body.runs, e1.body.reason, e2.body.runs], [0, "no event", 1], "the app's look now: an imported lead starts nothing, a new one does");
+    }
+    // ── import_quiet: the capture (the fake = SQL Part 3 · G3.5) ──
+    {
+      const db = world({ contacts: [lead("c1")], automation_wanted: ["contact_tag", "contact_changed", "task_added", "note_added"].map((t) => ({ business_id: "default", event_type: t })) });
+      const evs = () => db.T.automation_events.map((e: any) => `${e.type}:${e.record_id}:${e.ctx.tag || e.ctx.field || ""}`);
+      db.T.automation_events = [];
+      await db.from("contacts").insert({ ...lead("c-imp", { import_quiet: true, tags: ["VIP"], customer_notes: [{ id: "n1", text: "old" }] }) });
+      await db.from("tasks").insert({ id: "t-imp", title: "Imported", contact_id: "c-imp", import_quiet: true });
+      await db.from("contacts").update({ import_quiet: true, tags: ["Old"], full_name: "Imported Name" }).eq("id", "c1");   // the import marks an existing lead
+      eq(evs(), [], "an imported lead (tags, notes), an imported task and the import marking an existing lead: no event at all");
+      await db.from("contacts").update({ tags: ["Old", "Hot"], assigned_user_id: "u-va" }).eq("id", "c1");   // a person, later
+      await db.from("tasks").insert({ id: "t-new", title: "Call", contact_id: "c1" });
+      await db.from("contacts").insert({ ...lead("c-new", { tags: ["VIP"] }) });
+      eq(evs(), ["contact_changed:c1:assigned_user", "contact_tag:c1:Hot", "task_added:t-new:", "contact_tag:c-new:VIP"],
+        "a person's later change of an imported lead counts (and Lead changed sees Assigned to); a new task and a new lead count");
+    }
+
+    // ── SQL Part 3 · G3.5: the replaced functions keep their contract; the ROLLBACK restores them exactly ──
+    {
+      const sql = src(SQL_DIR + "stage2-automations.sql"), p1 = sql.slice(sql.indexOf("-- PART 1"), sql.indexOf("-- END PART 1"));
+      const g23 = sql.slice(sql.indexOf("-- PART 2 · G2.3"), sql.indexOf("-- END PART 2 · G2.3")), tx23 = g23.slice(g23.indexOf("\nbegin;\n"), g23.indexOf("\ncommit;\n"));
+      const g = sql.slice(sql.indexOf("-- PART 3 · G3.5"), sql.indexOf("-- END PART 3 · G3.5"));
+      const tx = g.slice(g.indexOf("\nbegin;\n"), g.indexOf("\ncommit;\n"));
+      const rbx = g.slice(g.indexOf("-- ROLLBACK (G3.5 only")).split("\n").filter((l: string) => l.startsWith("-- ") || l === "--").map((l: string) => l === "--" ? "" : l.slice(3)).join("\n");
+      const fnOf = (text: string, name: string) => { const a0 = text.indexOf(`create or replace function public.${name}(`); return a0 < 0 ? "" : text.slice(a0, text.indexOf("end $$;", a0) + 7); };
+      const code = (t: string) => t.split("\n").filter((l: string) => !/^\s*--/.test(l)).join("\n");
+      eq([(g.match(/^begin;$/gm) || []).length, (g.match(/^commit;$/gm) || []).length], [1, 1], "G3.5 is ONE transaction");
+      ok(tx.includes("alter table public.contacts add column if not exists assigned_user_id uuid null references public.profiles (id) on delete set null;")
+        && tx.includes("create index if not exists contacts_assigned_user_idx on public.contacts (assigned_user_id)")
+        && ["contacts", "jobs", "tasks"].every((t) => tx.includes(`alter table public.${t} add column if not exists import_quiet boolean not null default false;`)),
+        "the columns: contacts.assigned_user_id (→ profiles, on delete set null, indexed) and import_quiet on contacts / jobs / tasks, all idempotent");
+      // capture: G2.3's contacts capture + the quiet rule + the assigned user − Quote status; Part 1's tasks / jobs + the quiet rule
+      const QUIET = /\n    -- import_quiet \(G3\.5\)[\s\S]*?\n    end if;\n/, QUIET_JOBS = /\n    -- import_quiet \(G3\.5\): the import's own writes[\s\S]*?then return null; end if;\n/;
+      const cap = fnOf(tx, "automation_capture_contacts"), est = /\n    if 'estimates' = any\(w\)[\s\S]*?\n    end if;\n/;
+      const assignedLine = /\n      if new\.assigned_user_id is distinct from old\.assigned_user_id then chg[^\n]*/;
+      ok(QUIET.test(cap) && assignedLine.test(cap) && est.test(fnOf(tx23, "automation_capture_contacts")) && cap.replace(QUIET, "\n").replace(assignedLine, "") === fnOf(tx23, "automation_capture_contacts").replace(est, "\n"),
+        "the contacts capture = G2.3's + the quiet rule + the assigned user, without Quote status; nothing else changed");
+      ok(!/estimates/.test(code(tx)) && !/'estimates'/.test(code(fnOf(tx, "automation_apply"))), "Q5: nothing in G3.5 writes or reads an 'estimates' event");
+      const chg = [...cap.matchAll(/if new\.(\w+) is distinct from old\.\1 then chg := chg \|\| pg_catalog\.jsonb_build_object\('field', '(\w+)'/g)];
+      eq([chg.map((m) => m[2]), chg.filter((m) => m[1] !== m[2]).map((m) => `${m[1]}=${m[2]}`)], [CONTACT_CHANGED_FIELDS, Object.entries(CONTACT_FIELD_COLUMN).map(([f, c]) => `${c}=${f}`)],
+        "G3.5's capture compares exactly CONTACT_CHANGED_FIELDS (the assigned user included); a column is its field except the quote amount and the assigned user");
+      ok(fnOf(tx, "automation_capture_tasks").replace(QUIET, "\n") === fnOf(p1, "automation_capture_tasks") && fnOf(tx, "automation_capture_jobs").replace(QUIET_JOBS, "\n") === fnOf(p1, "automation_capture_jobs"),
+        "the tasks and jobs captures = Part 1's + the quiet rule");
+      ok(["automation_capture_contacts", "automation_capture_tasks"].every((n0) => fnOf(tx, n0).includes("    if new.import_quiet then\n      if tg_op = 'INSERT' then return null; end if;\n      if not old.import_quiet or public.automation_import_write() then return null; end if;\n    end if;"))
+        && fnOf(tx, "automation_capture_jobs").includes("if new.import_quiet and (not old.import_quiet or public.automation_import_write()) then return null; end if;"),
+        "the quiet rule: no event for an INSERT of a quiet row nor for the import's own update (marking it, or the import's write); a later change counts");
+      // apply: G2.3's + the 'assign' op
+      const ap = fnOf(tx, "automation_apply"), assignBranch = /\n      elsif o = 'assign' then[\s\S]*?(?=\n      elsif o = 'task' then)/;
+      const allowed = /allowed constant text\[\] := array\[([^\]]*)\]/.exec(ap);
+      eq(allowed ? allowed[1].split(",").map((x: string) => x.trim().replace(/'/g, "")) : null, UPDATE_FIELD_COLUMNS, "G3.5's automation_apply: the 'set' whitelist is still UPDATE_FIELD_COLUMNS (the assigned user is not a 'set' field)");
+      ok(assignBranch.test(ap) && ap.replace(assignBranch, "").replace("'stage', 'assign') and cid is null", "'stage') and cid is null") === fnOf(tx23, "automation_apply")
+        && /select p\.full_name::text into v from public\.profiles p where p\.id = tgt::uuid;/.test(ap) && ap.includes("'Assigned user removed'") && ap.includes("'Assigned to ' ||"),
+        "automation_apply = G2.3's + 'assign' (a person of the team or nobody; a history line); nothing else changed");
+      // who may assign; the names; the import switch
+      const head = (name: string) => { const f0 = tx.indexOf(`function public.${name}(`); return tx.slice(f0, tx.indexOf("as $$", f0)); };
+      const guard = fnOf(tx, "contacts_assignee_guard");
+      ok(/security invoker/.test(head("contacts_assignee_guard")) && guard.includes("if current_user::text not in ('authenticated', 'anon') then return new; end if;")
+        && guard.includes("if new.assigned_user_id = auth.uid() or public.is_owner_or_manager() then return new; end if;")
+        && tx.includes("create trigger contacts_assignee_guard before insert or update of assigned_user_id on public.contacts"),
+        "Assigned to: owners and managers pick anyone; others only themselves or nobody (the app's roles; the engine and server code not limited)");
+      ok(/stable security definer/.test(head("team_people")) && tx.includes("where auth.uid() is not null") && tx.includes("revoke all on function public.team_people() from public, anon;")
+        && tx.includes("grant execute on function public.team_people() to authenticated, service_role;") && /stable/.test(head("automation_import_write"))
+        && tx.includes("revoke all on function public.automation_import_write() from public, anon, authenticated;"),
+        "team_people: names for signed-in people only; automation_import_write: the capture's, not the app's");
+      // the rollback
+      ok(fnOf(rbx, "automation_apply") === fnOf(tx23, "automation_apply") && fnOf(rbx, "automation_capture_contacts") === fnOf(tx23, "automation_capture_contacts")
+        && fnOf(rbx, "automation_capture_tasks") === fnOf(p1, "automation_capture_tasks") && fnOf(rbx, "automation_capture_jobs") === fnOf(p1, "automation_capture_jobs") && fnOf(tx23, "automation_apply").length > 5000,
+        "the G3.5 ROLLBACK restores G2.3's automation_apply / contacts capture and Part 1's tasks / jobs captures byte for byte");
+      ok(["drop trigger if exists contacts_assignee_guard on public.contacts;", "drop function if exists public.contacts_assignee_guard();", "drop function if exists public.team_people();",
+        "drop function if exists public.automation_import_write();", "drop index if exists public.contacts_assigned_user_idx;",
+        "alter table public.contacts drop column if exists assigned_user_id;", "drop trigger if exists jobs_import_quiet_date on public.jobs;", "drop function if exists public.jobs_import_quiet_date();",
+        "alter table public.jobs drop column if exists import_quiet_date;"].every((x) => rbx.includes(x)) && rbx.indexOf("drop trigger if exists contacts_assignee_guard") < rbx.indexOf("drop column if exists assigned_user_id")
+        && !/drop column if exists import_quiet\b/.test(code(rbx)) && !/backup\.import_quiet/.test(rbx),
+        "…and drops what G3.5 added — but never stage 5's import_quiet columns (stage5-mcp.sql owns them; its import and push read them)");
+      const jq = fnOf(tx, "jobs_import_quiet_date");
+      ok(tx.includes("alter table public.jobs add column if not exists import_quiet_date text;") && /security definer/.test(head("jobs_import_quiet_date"))
+        && jq.includes("if new.import_quiet and (tg_op = 'INSERT' or not old.import_quiet or public.automation_import_write()) then\n    new.import_quiet_date := new.date::text;")
+        && tx.includes("create trigger jobs_import_quiet_date before insert or update of date, import_quiet on public.jobs") && tx.includes("revoke all on function public.jobs_import_quiet_date() from public, anon, authenticated;")
+        && !/import_quiet\s*:=/.test(code(tx)) && tx.indexOf("update public.jobs set import_quiet_date = date::text where import_quiet and import_quiet_date is null;") < tx.indexOf("create trigger jobs_import_quiet_date"),
+        "a quiet job's imported date: set on the import's writes only (a person's reschedule keeps it; security definer: the app can't call automation_import_write); old imports get their date; import_quiet itself is never written");
+      ok(/OWNED BY STAGE 5/.test(g) && /3 rows \(boolean, NO, false\) where stage5-mcp\.sql M5 is applied/.test(g) && !/nothing imported yet/.test(g),
+        "G3.5's checks accept stage 5's import_quiet columns already there (live) and quiet rows already imported");
+      const app = src("../../../index.html");
+      ok(app.includes("'team_people'") && app.includes("assigned_user_id"), "the app reads the team's names and the lead's assigned user");
+    }
+  }
+
+  // ── 38. Publish refuses what the old list switch refused (stage 2 phase 3, 15 Oct; defence in depth): the old editor's
+  //        blocking checks = fixtures/editor-blocks.json word for word (the app's autoProblems reads the same file in
+  //        tests/business-logic.test.js); step "publish" refuses them for a workflow the old editor shows, before it asks
+  //        about customers; of the phase-4 corpus exactly the shapes the old switch refused are refused, with its words;
+  //        a doc only the new builder shows keeps the v2 checks only. Duplicate / copy_version: the copy is fully editable
+  //        (no locked step or condition, as the old Duplicate); a workflow chosen from a template keeps the template's
+  //        locks (design §2.2: a template's guard node can't be removed). ──
+  {
+    io.advance = PROD_ADVANCE;
+    const api = (db: any, step: string, body: any = {}, me: any = OWNER) => handle(db, { step, ...body }, me, false);
+    const C34v = (x: any) => canonJson(x);
+    const FX = JSON.parse(src("fixtures/editor-blocks.json"));
+    ok(FX.cases.length >= 60, "editor blocks: the shared fixture has its cases");
+    for (const c of FX.cases) eq(v1EditorProblems(c.def, { ...FX.catalog, ...(c.catalog || {}) }, c.wfName ?? "Workflow"), c.blocks, `editor blocks: ${c.name}`);
+    eq([v1EditorProblems(null, null, null), v1EditorProblems({ trigger: { type: "newLead" }, steps: "nope" }, {}, "")], [["Pick what starts it (step 1).", "Pick at least one thing to do (step 5)."], ["Pick at least one thing to do (step 5)."]],
+      "editor blocks: nothing given → its first two blocks; steps that are not a list = no steps");
+    // the corpus, end to end: the phase-4 row is migrated, then published (with the yes to what it sends)
+    const SHAPES = [...JSON.parse(src("fixtures/upgrade.json")).cases.map((k: any) => ({ name: k.name, trigger: k.v1.trigger, steps: k.v1.steps })),
+      ...JSON.parse(src("differential/corpus/builtin.json")).automations.map((a: any) => ({ name: a.name, trigger: a.trigger, steps: a.steps }))];
+    eq(Object.keys(FX.corpus).filter((n: string) => !SHAPES.some((s: any) => s.name === n)), [], "editor blocks: every name in the corpus list is a shape of the corpus");
+    const ID38 = "a38-0000-0000";
+    const world38 = (S: any) => {
+      const db = world({ automations: [auto({ id: ID38, name: "Shape", enabled: false, armed_at: null, trigger: S.trigger, steps: S.steps, revision: 1, settings: {}, layout: { v: 1 }, builder: "standard",
+        origin: "user", list_summary: {}, deleted_at: null, audience: "team" })], automation_versions: [], automation_templates: [] });
+      db.T.settings[0].catalog = { ...CATALOG, templates: FX.catalog.templates };
+      return db;
+    };
+    const got: Record<string, string> = {}, other: string[] = [];
+    for (const S of SHAPES) {
+      const db = world38(S);
+      eq((await api(db, "migrate")).status, 200, `editor blocks: migrated — ${S.name}`);
+      const p = await api(db, "publish", { automation_id: ID38, on: true, confirm: true }), row = db.T.automations[0];
+      if (p.status === 422) { got[S.name] = (p.body.errors || [{}])[0].text; ok(row.enabled === false && p.body.errors.every((x: any) => x.severity === "error"), `editor blocks: refused and still a Draft — ${S.name}`); }
+      else if (!(p.status === 200 && row.enabled === true)) other.push(`${S.name}: ${p.status} ${JSON.stringify(p.body).slice(0, 120)}`);
+    }
+    eq([got, other], [FX.corpus, []], "publish refuses exactly the corpus shapes the old switch refused (10 it let through in phase 3 before this fix: a task for nobody ×4, \"Service is one of\" ×2, the same id twice, {technician} on a new lead, more than 20 steps ×2), with the old editor's first words; every other shape goes on");
+    // before the question about customers: a blocked customer shape is refused without its yes (422, not 409 "confirm")
+    {
+      const db = world38(SHAPES.find((s: any) => s.name === "A blank that cannot be filled"));
+      await api(db, "migrate");
+      const p = await api(db, "publish", { automation_id: ID38, on: true });
+      eq([p.status, p.body.reason, (p.body.errors || [{}])[0].text, (p.body.errors || [{}])[0].code, db.T.automations[0].enabled], [422, "errors", "{technician} can't be filled in for \"A new lead comes in\" (step 6).", "E_EDITOR_BLOCK", false],
+        "publish: a workflow the old editor would refuse is refused before the customer question");
+      const off = await api(db, "publish", { automation_id: ID38, on: false });
+      eq([off.status, off.body.enabled], [200, false], "publish: switching to Draft is never checked");
+    }
+    // the steps the old editor shows: an upgraded row whose ids phase 4 refuses → its stored steps (so "the same id twice"
+    // is said); otherwise its doc as phase-4 steps; a row with no doc yet → its own steps; a doc only the new builder shows → none
+    {
+      const dup = SHAPES.find((s: any) => s.name === "the same id twice"), lw = SHAPES.find((s: any) => s.name === "Lead waiting (team card)");
+      const up = (S: any) => ({ id: "v", trigger: S.trigger, steps: S.steps, definition: upgradeV1(S.trigger, S.steps).doc, settings: { ...WF_MIGRATED_SETTINGS } });
+      eq([v1EditorView(up(dup)).steps.map((s: any) => s.id), v1EditorView({ ...up(dup), settings: {} }).steps.map((s: any) => s.id), C34v(v1EditorView(up(lw))), C34v(v1EditorView({ id: "w", trigger: lw.trigger, steps: lw.steps, definition: null }))],
+        [["s1", "s1"], ["s1", "s3"], C34v(wfToFlat(upgradeV1(lw.trigger, lw.steps).doc)), C34v({ trigger: lw.trigger, steps: lw.steps })],
+        "v1EditorView: the same id twice → the stored steps (an upgraded row as it was); with stage-2 settings → the doc's; a row with no doc → its own trigger and steps");
+      const named = { schema: 2, seq: 2, entry: "n1", triggers: [{ id: "t1", type: "newLead", filters: { match: "all", segments: [{ match: "all", rules: [] }] } }],
+        nodes: { n1: { kind: "action", type: "add_task", name: "Call them", config: { title: "Call {name}" }, out: { next: null } } } };
+      eq(v1EditorView({ id: "n", definition: named, settings: {} }), null, "v1EditorView: a doc only the new builder shows (a named step) → none");
+      const db = world({ automations: [], automation_versions: [], automation_templates: [] });
+      const s = await api(db, "save", { automation_id: null, name: "New builder task", definition: named, settings: {} });
+      const p = await api(db, "publish", { automation_id: s.body.id, on: true });
+      eq([s.status, p.status, db.T.automations.find((a: any) => a.id === s.body.id).enabled], [200, 200, true], "publish: a doc only the new builder shows keeps the v2 checks only (its task for nobody is fine there)");
+    }
+    // Duplicate / copy_version: no locked step or condition in the copy; the original keeps its locks; a template keeps them
+    {
+      const LOCKED = { trigger: { type: "newLead", params: {} }, steps: [{ id: "w1", kind: "wait", n: 15, unit: "minutes", lock: true },
+        { id: "c1", kind: "if", match: "all", conds: [{ field: "not_picked", op: "true", lock: true }, { field: "has_email", op: "true" }] },
+        { id: "p1", kind: "action", type: "push", to: { roles: ["owner"] }, title: "Waiting: {name}" }] };
+      const locks = (d: any) => JSON.stringify(d).match(/"lock(ed)?":true/g)?.length ?? 0;
+      const db = world38(LOCKED);
+      await api(db, "migrate");
+      const orig = db.T.automations[0], before = JSON.stringify(orig.definition);
+      eq(locks(orig.definition), 2, "the migrated row keeps its lock (a locked step and a locked condition)");
+      const d1 = await api(db, "duplicate", { automation_id: ID38 });
+      const c1 = db.T.automations.find((a: any) => a.id === d1.body.id);
+      eq([d1.status, locks(c1.definition), c1.definition.nodes.w1.locked, c1.definition.nodes.c1.config.branches[0].when.segments[0].rules, JSON.stringify(orig.definition) === before, locks(orig.definition)],
+        [200, 0, undefined, [{ field: "not_picked", op: "true" }, { field: "has_email", op: "true" }], true, 2], "duplicate: the copy has no locked step or condition (the old Duplicate removed them); the original keeps both");
+      const edit = (d: any) => { const x = JSON.parse(JSON.stringify(d)); x.nodes.c1.config.branches[0].when.segments[0].rules = [{ field: "has_email", op: "true" }]; delete x.nodes.w1; x.entry = "c1"; return x; };
+      const vc = await api(db, "validate", { automation_id: c1.id, definition: edit(c1.definition) }), vo = await api(db, "validate", { automation_id: ID38, definition: edit(orig.definition) });
+      eq([vc.status, vc.body.errors.map((x: any) => x.code), vo.body.errors.map((x: any) => x.code)], [200, [], ["E_LOCKED", "E_LOCKED"]],
+        "the copy is fully editable (its wait and its condition can go: no error); the original still refuses both (E_LOCKED)");
+      const vno = db.T.automation_versions.find((v: any) => v.automation_id === ID38 && v.reason === "migration").version_no;
+      const cv = await api(db, "copy_version", { automation_id: ID38, version_no: vno });
+      eq([cv.status, locks(db.T.automations.find((a: any) => a.id === cv.body.id).definition)], [200, 0], "copy_version: the new workflow from a version has no lock either");
+      db.T.automation_templates.push({ id: "tpl38", business_id: "default", key: "mine_lock000000", name: "Guarded", description: null, category: null, definition: JSON.parse(before), settings: {}, origin: "user", deleted_at: null });
+      const dt = await api(db, "duplicate", { template_id: "tpl38" });
+      eq([dt.status, locks(db.T.automations.find((a: any) => a.id === dt.body.id).definition)], [200, 2], "a workflow chosen from a template keeps the template's locks (design §2.2: a System / template guard node)");
+      const given = JSON.parse(before);
+      eq([locks(wfUnlocked(given)), JSON.stringify(given) === before, wfUnlocked(null), wfUnlocked({ schema: 2, nodes: { x: null }, triggers: [null, { filters: { segments: [null, { rules: [null, 7] }] } }] }).nodes],
+        [0, true, {}, { x: null }], "wfUnlocked: a copy without any lock; the doc given is never changed; odd docs never throw");
     }
   }
 

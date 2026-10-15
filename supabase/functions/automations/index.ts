@@ -549,6 +549,69 @@ const inScan = (e: Ev | null, sinceMs: number, nowMs: number) => !!e && Date.par
 // deno-lint-ignore no-explicit-any
 async function rows(q: any): Promise<any[]> { const { data, error } = await q; if (error) throw new Error(String(error.message || error)); return data || []; }
 
+// ── import_quiet (SQL Part 3 · G3.5): rows another system imported (contacts, jobs, tasks with import_quiet = true) never
+// start an automation just by arriving. Their "new" events are dropped: a new lead or website form never reopened, the
+// stage they arrived in (a stage time not after the row was made, in the business's own days; also as a stale lead), a
+// job (closed, the reminders of its imported date: jobs.import_quiet_date). A later real change by a person still
+// counts: a reopen, a later stage move, a reschedule of the job (and every captured change: the SQL capture decides those).
+// Without the import_quiet column (neither stage 5's SQL nor G3.5 ran) nothing is quiet; with it but before G3.5 adds
+// jobs.import_quiet_date, every date of a quiet job stays quiet. ──
+// info (jobs only): the quiet rows' import_quiet_date by id, for quietDrops.
+// deno-lint-ignore no-explicit-any
+export async function quietIds(sb: any, table: string, ids: unknown[], info?: Map<string, Row>): Promise<Set<string>> {
+  const out = new Set<string>(), list = [...new Set(ids.map((x) => String(x ?? "")).filter(Boolean))];
+  if (!list.length) return out;
+  // one cheap look first: no imported row at all (every business until an import ran) = nothing more to read
+  const probe = await sb.from(table).select("id").eq("import_quiet", true).limit(1);
+  if (probe.error) { if (noColumn(probe.error, ["import_quiet"])) return out; throw new Error(String(probe.error.message || probe.error)); }
+  if (!(probe.data || []).length) return out;
+  let cols = info && table === "jobs" ? "id, import_quiet_date" : "id";
+  for (let i = 0; i < list.length; i += 100) {
+    const read = () => sb.from(table).select(cols).in("id", list.slice(i, i + 100)).eq("import_quiet", true);
+    let { data, error } = await read();
+    if (error && cols !== "id" && noColumn(error, ["import_quiet_date"])) { cols = "id"; ({ data, error } = await read()); }   // before SQL G3.5
+    if (error) { if (noColumn(error, ["import_quiet"])) return out; throw new Error(String(error.message || error)); }
+    for (const r of data || []) { out.add(String(r.id)); if (info) info.set(String(r.id), r); }
+  }
+  return out;
+}
+// One event of a quiet (imported) record: dropped? row = the record as the scan read it (created_at, reopened_at; a job:
+// import_quiet_date); tz = the business's time zone (a card made with a day only has a business day).
+export function quietDrops(e: Ev, row: Row | null | undefined, tz = "UTC"): boolean {
+  if (e.type === "newLead" || e.type === "form_submitted") return /:new$/.test(e.key);
+  if (e.type === "stage" || e.type === "stale") {
+    const r = obj(row); if (r.reopened_at) return false;
+    const made = typeof r.created_at === "string" ? r.created_at : "", moved = e.type === "stale" ? String(r.stage_changed_at || "") : e.at;
+    if (!made || !moved) return true;
+    // a card made with a day only: a stage set that business day is its arrival (the move is an instant: its local day)
+    if (!made.includes("T")) { const ms = Date.parse(moved); return (Number.isFinite(ms) && validTz(tz) ? zoneParts(ms, tz).day : moved.slice(0, 10)) <= made.slice(0, 10); }
+    return !(Date.parse(moved) > Date.parse(made) + ARRIVAL_SLACK_MS);
+  }
+  if (e.type === "custom_date" && e.recordKind === "job") {
+    // only the date the import wrote stays quiet; a person's reschedule (another date) starts its reminders
+    const d = String(obj(row).import_quiet_date ?? "");
+    return !d || String(obj(e.ctx).date ?? "").slice(0, 10) === d.slice(0, 10);
+  }
+  return e.type === "jobClosed";
+}
+const QUIET_TABLE: Record<string, string> = { contact: "contacts", job: "jobs" };
+// The events left once the quiet records' "new" ones are out (one read per table, only when there are events).
+// deno-lint-ignore no-explicit-any
+export async function dropQuiet(sb: any, events: Ev[], rowsOf: (e: Ev) => Row | null | undefined = () => null, tz = "UTC"): Promise<Ev[]> {
+  // the events a quiet record could lose (a stage move only when its record is quiet AND it is its arrival: rowsOf decides)
+  const cand = events.filter((e) => !!QUIET_TABLE[e.recordKind] && (e.type === "stage" || e.type === "stale" || quietDrops(e, null)));
+  if (!cand.length) return events;
+  const quiet = new Set<string>(), info = new Map<string, Row>();
+  for (const kind of [...new Set(cand.map((e) => e.recordKind))]) {
+    if (!QUIET_TABLE[kind]) continue;
+    const got = new Map<string, Row>();
+    for (const id of await quietIds(sb, QUIET_TABLE[kind], cand.filter((e) => e.recordKind === kind).map((e) => e.recordId), got)) quiet.add(`${kind}:${id}`);
+    for (const [id, r] of got) info.set(`${kind}:${id}`, r);
+  }
+  const rowOf = (e: Ev) => ({ ...obj(info.get(`${e.recordKind}:${e.recordId}`)), ...obj(rowsOf(e)) });
+  return quiet.size ? events.filter((e) => !(quiet.has(`${e.recordKind}:${e.recordId}`) && quietDrops(e, rowOf(e), tz))) : events;
+}
+
 export const TRIGGERS: Record<string, Trigger> = {
   newLead: {
     label: "A new lead comes in", recordKind: "contact", table: "contacts", cols: SCAN_CONTACT_COLS, permission: "crm", params: {}, implicit: [],
@@ -564,7 +627,7 @@ export const TRIGGERS: Record<string, Trigger> = {
     scan: async (sb, sinceMs, nowMs, S) => {
       const sinceDay = shiftDay(zoneParts(sinceMs, S.timezone).day, -1);
       const list = await rows(sb.from("contacts").select(SCAN_CONTACT_COLS).or(`created_at.gte.${sinceDay},reopened_at.gte."${iso(sinceMs)}"`).order("created_at", { ascending: false }).limit(SCAN_MAX));
-      return list.map((c) => TRIGGERS.newLead.fromRecord(c, S)).filter((e) => inScan(e, sinceMs, nowMs)) as Ev[];
+      return await dropQuiet(sb, list.map((c) => TRIGGERS.newLead.fromRecord(c, S)).filter((e) => inScan(e, sinceMs, nowMs)) as Ev[], undefined, S.timezone);
     },
   },
   stage: {
@@ -582,7 +645,8 @@ export const TRIGGERS: Record<string, Trigger> = {
     },
     scan: async (sb, sinceMs, nowMs, S) => {
       const list = await rows(sb.from("contacts").select(SCAN_CONTACT_COLS).gte("stage_changed_at", iso(sinceMs)).order("stage_changed_at", { ascending: false }).limit(SCAN_MAX));
-      return list.map((c) => TRIGGERS.stage.fromRecord(c, S)).filter((e) => inScan(e, sinceMs, nowMs)) as Ev[];
+      const byId = new Map(list.map((c) => [String(c.id), c]));
+      return await dropQuiet(sb, list.map((c) => TRIGGERS.stage.fromRecord(c, S)).filter((e) => inScan(e, sinceMs, nowMs)) as Ev[], (e) => byId.get(e.recordId), S.timezone);
     },
   },
   jobClosed: {
@@ -597,7 +661,7 @@ export const TRIGGERS: Record<string, Trigger> = {
     fromRecord: (j) => (j && okTime(j.created_at)) ? ev("jobClosed", "job", j, String(j.id), j.created_at, j.contact_id, { jobDate: String(j.date || "").slice(0, 10) }) : null,
     scan: async (sb, sinceMs, nowMs, S) => {
       const list = await rows(sb.from("jobs").select(JOB_COLS).gte("created_at", iso(sinceMs)).order("created_at", { ascending: false }).limit(SCAN_MAX));
-      return list.map((j) => TRIGGERS.jobClosed.fromRecord(j, S)).filter((e) => inScan(e, sinceMs, nowMs)) as Ev[];
+      return await dropQuiet(sb, list.map((j) => TRIGGERS.jobClosed.fromRecord(j, S)).filter((e) => inScan(e, sinceMs, nowMs)) as Ev[], undefined, S.timezone);
     },
   },
   missedCall: {
@@ -1003,12 +1067,12 @@ export function audienceOf(a: any): "team" | "customer" {
 const nul = <T>(o: Record<string, T>): Record<string, T> => Object.assign(Object.create(null), o);
 const has = (o: unknown, k: unknown) => !!o && typeof k === "string" && Object.prototype.hasOwnProperty.call(o, k);
 export type Avail = { ok: boolean; reason?: string };
-export type AvailCtx = { phone: boolean; xero: boolean; gbp: boolean; reviews: boolean; ai: boolean; teamEmail: boolean; assignee: boolean; atomicTags: boolean };
+export type AvailCtx = { phone: boolean; xero: boolean; gbp: boolean; reviews: boolean; ai: boolean; teamEmail: boolean; atomicTags: boolean };
 // The words next to a greyed item, per missing piece (design §2.4, exact).
 export const AVAIL_REASONS: Record<string, string> = {
   phone: "Needs the phone line (Twilio)", xero: "Needs Xero", gbp: "Needs the Google Business Profile connector",
   reviews: "Turn on Google reviews first", ai: "Coming with Workflow AI", teamEmail: "Needs a team email sender",
-  assignee: "Needs 'Assigned to' on the lead card", atomicTags: "Coming with the new lead card",
+  atomicTags: "Coming with the new lead card",
 };
 export const WF_NOT_YET = {
   later: "Coming later", tracking: "Needs tracking (not in OPS)", builtIn: "Built-in only for now",
@@ -1018,14 +1082,16 @@ export const WF_NOT_YET = {
 // What this business has today (design §2.5 availCtx). settingsRow = the settings row (phone_enabled,
 // review_requests_*), cat = settings.catalog. ai stays false until stage 6; teamEmail until Q7. atomicTags: on since G2.3
 // (the lead card edits tags and notes through contact_tags_edit / contact_note_add, so a card left open can no longer
-// erase a tag or note a workflow added, nor make a false "tag removed").
+// erase a tag or note a workflow added, nor make a false "tag removed"). The lead's "Assigned to" (Q6, G3.5) is a lead card
+// field like any other, so Assign to user / Remove assigned user, the "Assigned to" filter, {lead.assigned_to} and "Until a
+// user replies: the assigned user" are never greyed.
 // deno-lint-ignore no-explicit-any
 export function availCtxOf(settingsRow: any, cat: any, extra: Partial<AvailCtx> = {}): AvailCtx {
   const s = obj(settingsRow), c = obj(cat), con = obj(c.connectors);
   return {
     phone: s.phone_enabled === true, xero: obj(con.xero).connected === true, gbp: obj(con.gbp).connected === true,
     reviews: s.review_requests_enabled === true || s.review_requests_auto === true, ai: false, teamEmail: false,
-    assignee: obj(c.features).leadAssignee === true, atomicTags: true, ...extra,
+    atomicTags: true, ...extra,
   };
 }
 const AV_OK: Avail = { ok: true };
@@ -1093,9 +1159,12 @@ const ANY_REC = ["contact", "job", "call", "chat"];
 const fd = (key: string, label: string, group: string, valueType: string, recordKinds: string[], value: WfField["value"], x: Partial<WfField> = {}): WfField =>
   ({ key, label, group, valueType, ops: WF_OPS_BY_TYPE[valueType], recordKinds, wakeOn: [], value, ...x });
 const opt = (keys: string[], labels?: string[]) => keys.map((k, i) => ({ key: k, label: labels ? labels[i] : k }));
-// The lead card columns a "Lead changed" trigger watches (capture whitelist) and "Update lead field" may write (minus phone/email).
-export const CONTACT_CHANGED_FIELDS = ["full_name", "phone", "email", "postcode", "division", "source", "next_follow_up", "booked_for", "quote_amount", "lost_reason"];
-export const UPDATE_FIELD_COLUMNS = CONTACT_CHANGED_FIELDS.filter((c) => c !== "phone" && c !== "email");
+// The lead card columns a "Lead changed" trigger watches (capture whitelist) and "Update lead field" may write (minus phone,
+// email and the assigned user: Assign to user / Remove assigned user set that one). quote_amount = estimated_value and
+// assigned_user = assigned_user_id (G3.5, Q6) are the only fields not named as their column.
+export const CONTACT_CHANGED_FIELDS = ["full_name", "phone", "email", "postcode", "division", "source", "next_follow_up", "booked_for", "quote_amount", "lost_reason", "assigned_user"];
+export const CONTACT_FIELD_COLUMN: Record<string, string> = { quote_amount: "estimated_value", assigned_user: "assigned_user_id" };
+export const UPDATE_FIELD_COLUMNS = CONTACT_CHANGED_FIELDS.filter((c) => c !== "phone" && c !== "email" && c !== "assigned_user");
 export const WF_FIELDS: Record<string, WfField> = nul(Object.fromEntries([
   // phase 4 (same keys, same values)
   fd("service", "Service", "Lead", "enum", ANY_REC, p4("service"), { source: "catalog.services", wakeOn: ["contact_changed"] }),
@@ -1121,9 +1190,9 @@ export const WF_FIELDS: Record<string, WfField> = nul(Object.fromEntries([
   fd("lead.stage_changed", "Moved stage at", "Lead", "date", ["contact"], fv("contact", "stage_changed_at"), { timeRelative: true, wakeOn: ["stage"] }),
   fd("lead.booked_for", "Booked for", "Lead", "date", ["contact"], fv("contact", "booked_for"), { timeRelative: true, wakeOn: ["job_booked", "booking_status"] }),
   fd("lead.next_follow_up", "Next follow-up", "Lead", "date", ["contact"], fv("contact", "next_follow_up"), { timeRelative: true, wakeOn: ["contact_changed"] }),
-  fd("lead.quote_amount", "Quote amount", "Lead", "money", ["contact"], fv("contact", "estimated_value"), { sensitivity: "money", wakeOn: ["estimates"] }),
+  fd("lead.quote_amount", "Quote amount", "Lead", "money", ["contact"], fv("contact", "estimated_value"), { sensitivity: "money", wakeOn: ["contact_changed"] }),
   fd("lead.lost_reason", "Lost reason", "Lead", "text", ["contact"], fv("contact", "lost_reason"), { wakeOn: ["lead_status"] }),
-  fd("lead.assigned_user", "Assigned to", "Lead", "people", ["contact"], fv("contact", "assigned_user_id"), { source: "catalog.people", available: avNeeds("assignee"), wakeOn: ["contact_changed"] }),
+  fd("lead.assigned_user", "Assigned to", "Lead", "people", ["contact"], fv("contact", "assigned_user_id"), { source: "catalog.people", wakeOn: ["contact_changed"] }),
   // job
   fd("job.amount", "Job amount", "Job", "money", ["job"], fv("job", "amount"), { sensitivity: "money", wakeOn: ["payment_received"] }),
   fd("job.date", "Job date", "Job", "date", ["job"], fv("job", "date"), { timeRelative: true }),
@@ -1145,7 +1214,7 @@ export const WF_FIELDS: Record<string, WfField> = nul(Object.fromEntries([
   ...([["stage", "Moved to stage", "enum", ["stage", "lead_status"], "catalog.stages"], ["tag", "Tag", "text", ["contact_tag"]],
     ["action", "Added or removed", "enum", ["contact_tag", "contact_dnd"]], ["channel", "Channel", "enum", ["customer_replied", "user_replied", "contact_dnd"]],
     ["field", "Changed field", "enum", ["contact_changed"]], ["call_status", "Call status", "enum", ["call_details"]], ["job_date", "Job date", "date", ["jobClosed"]],
-    ["status", "Status", "text", ["booking_status", "lead_status", "estimates", "documents_contracts"]], ["form", "Form", "text", ["form_submitted"]]] as [string, string, string, string[], string?][])
+    ["status", "Status", "text", ["booking_status", "lead_status", "documents_contracts"]], ["form", "Form", "text", ["form_submitted"]]] as [string, string, string, string[], string?][])
     // deno-lint-ignore no-explicit-any
     .map(([k, label, vt, triggers, source]) => fd(`trigger.${k}`, label, "Trigger", vt, [], (f: any) => { const v = obj(f && f.ctx)[k === "job_date" ? "jobDate" : k]; return v === undefined ? null : v; },
       { triggers, ...(source ? { source } : {}), ...(k === "action" ? { values: opt(["added", "removed", "on", "off"], ["Added", "Removed", "Turned on", "Turned off"]) } : {}),
@@ -1206,7 +1275,7 @@ export const WF_MERGE: Record<string, WfMerge> = nul(Object.fromEntries([
   mf("minutes", "The first wait, in minutes", "*"), mf("automation", "This automation's name", "*"),
   mf("task_title", "Task title", ["task"]), mf("due_date", "Task due date", ["task"]), mf("quote_amount", "Quote amount", ["contact"], { sensitivity: "money" }),
   mf("booked_date", "Booked date", ["contact"]), mf("follow_up_date", "Next follow-up date", ["contact"]), mf("lost_reason", "Lost reason", ["contact"]),
-  mf("assigned_user", "Assigned user", ["contact"], { available: avNeeds("assignee") }),
+  mf("lead.assigned_to", "Assigned to (full name)", ["contact"]), mf("lead.assigned_to_first_name", "Assigned to (first name)", ["contact"]),
 ].map((x) => [x.key, x])));
 
 // ── REASONS (code → words; GHL wording where GHL has one) ──
@@ -1248,6 +1317,8 @@ const ent = (key: string, ghl: string | null, label: string, category: string, i
 const tr = (key: string, ghl: string | null, label: string, category: string, recordKind: string, source: string, eventKey: string, filters: string[], description: string,
   x: Partial<WfTriggerEntry> = {}): WfTriggerEntry =>
   ({ ...ent(key, ghl, label, category, "zap", description), recordKind, provides: PROVIDES[recordKind] || [], source, eventKey, filters, ...x } as WfTriggerEntry);
+// No "Quote status" (GHL "Estimates") trigger (Ofek 15 Oct, Q5): a quote is sent when the lead moves to the Quoted stage, so
+// "quote sent" is "Pipeline stage changed" to Quoted (the template "Quote follow-up" does exactly that).
 export const WF_ALWAYS_REENTER = ["job_booked", "booking_status", "jobClosed", "payment_received", "custom_date", "task_reminder", "scheduler", "stale"];
 export const WF_TRIGGERS: Record<string, WfTriggerEntry> = nul(Object.fromEntries([
   tr("newLead", "Contact created", "Lead created", "Contact", "contact", "scan", '${id}:${reopened_at||"new"}', [...LEAD_F, "not_picked"], "Runs when a new lead comes in (or a closed one is reopened).", { icon: "user-plus" }),
@@ -1282,7 +1353,6 @@ export const WF_TRIGGERS: Record<string, WfTriggerEntry> = nul(Object.fromEntrie
   tr("commission_invoice", null, "Commission invoice received", "Ours", "none", "capture", "inv:${week}:${person}", NOW_F, "Runs when a contractor's weekly invoice comes in.", {
     available: avNever(WF_NOT_YET.builtIn), engine: false, hidden: true, mirror: "invoice", contactless: true, icon: "receipt" }),
   tr("payment_received", "Payment received", "Payment received (job paid)", "Payments", "job", "capture", "${id}:paid:${txid}", JOB_F, "Runs when a job is marked paid.", { icon: "dollar" }),
-  tr("estimates", "Estimates", "Quote status", "Payments", "contact", "capture", "${id}:quote:${txid}", ["trigger.status", ...LEAD_F], "Runs when a quote is sent to a lead.", { icon: "file" }),
   tr("documents_contracts", "Documents & contracts", "Contractor agreement signed", "Payments", "supplier", "capture", "sup:${id}:signed:${agreement_signed_at}", ["trigger.status", ...NOW_F], "Runs when a contractor signs the agreement.", { contactless: true, icon: "file" }),
   tr("review_received", "New review received", "New Google review", "Events", "none", "capture", "rev:${reviewId}", NOW_F, "Runs when a new Google review comes in.", {
     available: avNeeds("gbp"), aliases: ["googleReview"], contactless: true, icon: "star" }),
@@ -1302,8 +1372,8 @@ export const WF_ACTIONS: Record<string, WfNodeEntry> = nul(Object.fromEntries([
   act("update_field", "Update contact field", "Update lead field", "Contact", "internal", "Changes a field on the lead card.", sc.obj({ field: sc.en(UPDATE_FIELD_COLUMNS), value: sc.str(500) }, ["field", "value"])),
   act("add_tag", "Add contact tag", "Add lead tag", "Contact", "internal", "Adds tags to the lead.", sc.obj({ tags: sc.arr(sc.src("catalog.tags"), 1, 10) }, ["tags"]), { available: avNeeds("atomicTags") }),
   act("remove_tag", "Remove contact tag", "Remove lead tag", "Contact", "internal", "Removes tags from the lead.", sc.obj({ tags: sc.arr(sc.src("catalog.tags"), 1, 10) }, ["tags"]), { available: avNeeds("atomicTags") }),
-  act("assign_user", "Assign to user", "Assign to user", "Contact", "internal", "Sets who the lead is assigned to.", sc.obj({ user: sc.src("catalog.people") }, ["user"]), { available: avNeeds("assignee"), aliases: ["assign_owner"] }),
-  act("remove_assigned_user", "Remove assigned user", "Remove assigned user", "Contact", "internal", "Clears who the lead is assigned to.", sc.obj({}), { available: avNeeds("assignee") }),
+  act("assign_user", "Assign to user", "Assign to user", "Contact", "internal", "Sets who the lead is assigned to.", sc.obj({ user: sc.src("catalog.people") }, ["user"]), { aliases: ["assign_owner"] }),
+  act("remove_assigned_user", "Remove assigned user", "Remove assigned user", "Contact", "internal", "Clears who the lead is assigned to.", sc.obj({})),
   act("dnd", "Enable/disable DND", "Stop automatic messages", "Contact", "internal", "Stops automatic messages to the lead.",
     sc.obj({ mode: sc.en(["enable", "disable"], { "x-greyed": { disable: WF_NOT_YET.dndOff } }), channel: sc.en(["all", "email", "sms", "chat"]) }, ["mode", "channel"])),
   act("add_note", "Add to notes", "Add to notes", "Contact", "internal", "Adds a note to the lead card.", sc.obj({ text: sc.req(2000) }, ["text"]), { available: avNeeds("atomicTags") }),
@@ -1382,7 +1452,7 @@ export const WF_WAITS: Record<string, WfNodeEntry> = nul(Object.fromEntries([
     { portLabels: { next: "Replied", timeout: "Timed out" }, wakeOn: ["customer_replied"] }),
   wt("user_reply", "Until a user replies", "Until a user replies", "Wait for a user to send a message to the contact",
     sc.obj({ channels: sc.arr(sc.en(["chat", "email", "sms"], { "x-greyed": { sms: "phone" } }), 1, 3, { uniqueItems: true }),
-      users: { oneOf: [sc.en(["any", "assigned"], { "x-greyed": { assigned: "assignee" } }), sc.arr(sc.src("catalog.people"), 1, 20)] }, timeout: S_TIMEOUT }, ["channels", "users"]),
+      users: { oneOf: [sc.en(["any", "assigned"]), sc.arr(sc.src("catalog.people"), 1, 20)] }, timeout: S_TIMEOUT }, ["channels", "users"]),
     { portLabels: { next: "Replied", timeout: "Timed out" }, wakeOn: ["user_replied"] }),
   wt("action", "Until the contact takes a specific action", "Until the lead takes a specific action", "Ex: Clicks a link, Opens an email", sc.obj({}), { available: avNever(WF_NOT_YET.action) }),
   wt("conditions", "Until specific conditions are met", "Until specific conditions are met", "Build a custom segment with any of your fields",
@@ -2436,6 +2506,8 @@ function resolveSchema(s: JSchema, mode: { inline?: BizLists; ctx?: AvailCtx; dr
   }
   return out;
 }
+// What this build does that the settings pages describe (registry `features`). G6.1 switches errorDigest on with the digest.
+export const WF_FEATURES = { errorDigest: false };
 // The export DTO the builder and the AI read (step "registry").
 // deno-lint-ignore no-explicit-any
 export function registryExport(ctx: AvailCtx, biz: BizLists = {}) {
@@ -2455,6 +2527,10 @@ export function registryExport(ctx: AvailCtx, biz: BizLists = {}) {
     merge: Object.values(WF_MERGE).map((m) => ({ key: m.key, label: m.label, recordKinds: m.recordKinds, triggers: m.triggers || null, sensitivity: m.sensitivity || null, availability: m.available ? m.available(ctx) : AV_OK })),
     reasons: WF_REASONS,
     settings: { defaults: WF_SETTINGS_DEFAULTS },
+    // what this build of the engine already does that a settings page states (Global Workflow Settings reads it):
+    // errorDigest = the daily phone alert about workflow errors to the people chosen in "Notifications" (design §3.15;
+    // false until G6.1 sends it, so the page says when it starts instead of promising it)
+    features: WF_FEATURES,
   };
 }
 // The JSON Schema (draft 2020-12) of { definition, settings } for this business (design §6.1). mode "generate" = what
@@ -2536,7 +2612,8 @@ export function jsonSchema(ctx: AvailCtx, biz: BizLists = {}, opts: { mode?: "ge
 // pauses = the business's "Pause workflow" ranges (automation_pauses), read once per tick by the first action that needs them.
 // deno-lint-ignore no-explicit-any
 // custom = the business's custom values ({custom.<key>}), read once per tick by the first stage-2 step that fills words.
-export type TickCtx = { S: Settings; cat: any; company: string; agent?: string; autos: Map<string, any>; counts: Record<string, number>; avail?: AvailCtx; pauses?: any[]; custom?: Record<string, string> };
+// people = the team's names by profile id, read once per tick by the first lead with an assigned person ({lead.assigned_to}).
+export type TickCtx = { S: Settings; cat: any; company: string; agent?: string; autos: Map<string, any>; counts: Record<string, number>; avail?: AvailCtx; pauses?: any[]; custom?: Record<string, string>; people?: Record<string, string> };
 const newCounts = () => ({ events: 0, enqueued: 0, processed: 0, sent: 0, queued: 0, skipped: 0, deferred: 0 });
 // deno-lint-ignore no-explicit-any
 export async function loadContext(sb: any, nowMs = Date.now()): Promise<TickCtx> {
@@ -3090,7 +3167,8 @@ export function wallMs(wall: unknown, shiftYears: number, tz: string): number | 
   let d = Number(m[3]);
   if (mo === 2 && d === 29 && !leapYear(y)) d = 28;
   if (mo < 1 || mo > 12 || d < 1 || d > lastDayOf(`${y}-${m[2]}-01`) || h > 23 || mi > 59) return null;
-  return zoneToUtc(`${String(y).padStart(4, "0")}-${m[2]}-${String(d).padStart(2, "0")}`, h, mi, tz);
+  // bizToUtc (not zoneToUtc): a start or end inside a daylight-saving jump is the same time after the jump, as in the app
+  return bizToUtc(`${String(y).padStart(4, "0")}-${m[2]}-${String(d).padStart(2, "0")}`, h, mi, tz);
 }
 // The moments one pause row covers near ms: its own range, or for an annual row the range in last, this and next year.
 // deno-lint-ignore no-explicit-any
@@ -3252,13 +3330,43 @@ export function staleV2(x: any, run: any): { text: string; code: string } | null
 // The record and its lead card, read fresh (phase-4 loadFacts + the lead card's dates, tasks, contactless kinds).
 // null = the record is gone. A run with no record of its own (inbound webhook, scheduler; suppliers and employees until
 // their triggers come) gets the lead card when the run has one, else no card.
-const CONTACT_COLS_V2 = CONTACT_COLS + ", booked_for, next_follow_up, lost_reason, estimated_value";
+const CONTACT_COLS_V2 = CONTACT_COLS + ", booked_for, next_follow_up, lost_reason, estimated_value, assigned_user_id";
+// Columns added by SQL Part 3 · G3.5 (the lead's "Assigned to", import_quiet). A read that names one before that SQL ran
+// is answered "column does not exist": it is read again without them (as if empty), so a function deployed first keeps
+// every workflow running (the RUNBOOK still runs the SQL first).
+export const G35_COLS = ["assigned_user_id", "import_quiet"];
+// deno-lint-ignore no-explicit-any
+export const noColumn = (error: any, cols: string[] = G35_COLS) => !!error && (NO_COLUMN.has(String(error.code)) || /does not exist|could not find/i.test(String(error.message || "")))
+  && cols.some((c) => String(error.message || "").includes(c));
+export const withoutCols = (cols: string, drop: string[] = G35_COLS) => cols.split(",").map((x) => x.trim()).filter((x) => x && !drop.includes(x)).join(", ");
+// Lead cards with CONTACT_COLS_V2 (build adds the filter: .in / .eq().maybeSingle()); before SQL G3.5 (no
+// assigned_user_id) read again without the new columns, like loadFactsV2 — the matcher never stops for a missing column.
+// deno-lint-ignore no-explicit-any
+export async function readContactsV2(sb: any, build: (q: any) => any): Promise<{ data: any; error: any }> {
+  let r = await build(sb.from("contacts").select(CONTACT_COLS_V2));
+  if (noColumn(r.error)) r = await build(sb.from("contacts").select(withoutCols(CONTACT_COLS_V2)));
+  return r;
+}
+// A team member's name by profile id (the lead's "Assigned to" in messages: {lead.assigned_to}): only the ids a tick
+// needs are read, one each, and kept for the tick (profiles has no business column: never the whole table, which the
+// 1,000-row select cap would cut short).
+// deno-lint-ignore no-explicit-any
+async function personName(sb: any, T: TickCtx, id: unknown): Promise<string> {
+  if (!id) return "";
+  const people = (T.people = T.people || {}) as Record<string, string>, k = String(id);
+  if (!has(people, k)) {
+    try { const { data, error } = await sb.from("profiles").select("id, full_name").eq("id", k).maybeSingle(); people[k] = error ? "" : String((data && data.full_name) ?? ""); }
+    catch { people[k] = ""; }
+  }
+  return people[k] || "";
+}
 const TASK_COLS = "id, title, status, due, contact_id, assignees, priority, created_at";
 // deno-lint-ignore no-explicit-any
 export async function loadFactsV2(sb: any, run: any, T: TickCtx, nowMs: number, triggerId: string | null = null): Promise<any | null> {
   // deno-lint-ignore no-explicit-any
   const one = async (table: string, cols: string, id: unknown): Promise<any> => {
-    const { data, error } = await sb.from(table).select(cols).eq("id", id).maybeSingle();
+    let { data, error } = await sb.from(table).select(cols).eq("id", id).maybeSingle();
+    if (noColumn(error)) ({ data, error } = await sb.from(table).select(withoutCols(cols)).eq("id", id).maybeSingle());   // before SQL G3.5
     if (error) throw new Error(String(error.message || error));
     return data || null;
   };
@@ -3267,14 +3375,16 @@ export async function loadFactsV2(sb: any, run: any, T: TickCtx, nowMs: number, 
   const f: any = { kind: run.record_kind, type: run.event_type, contact: null, job: null, call: null, chat: null, task: null, ctx: obj(run.context), eventAt: run.event_at,
     S: T.S, cat: T.cat, company: T.company, nowMs, agent: T.agent, triggerId, since: okTime(run.created_at) ? run.created_at : run.event_at, recordId: run.record_id ?? null };
   const kind = String(run.record_kind || ""), id = run.record_id;
-  if (kind === "contact") { f.contact = await one("contacts", CONTACT_COLS_V2, id); return f.contact ? f : null; }
+  // the lead's assigned person's name ({lead.assigned_to}); only read when the lead has one
+  const named = async () => { if (f.contact && f.contact.assigned_user_id) f.assignedName = await personName(sb, T, f.contact.assigned_user_id); return f; };
+  if (kind === "contact") { f.contact = await one("contacts", CONTACT_COLS_V2, id); return f.contact ? await named() : null; }
   const table = ({ job: "jobs", call: "calls", chat: "chat_sessions", task: "tasks" } as Record<string, string>)[kind];
-  if (!table) { if (run.contact_id) f.contact = await one("contacts", CONTACT_COLS_V2, run.contact_id); return f; }
+  if (!table) { if (run.contact_id) f.contact = await one("contacts", CONTACT_COLS_V2, run.contact_id); return await named(); }
   const row = await one(table, kind === "job" ? JOB_COLS : kind === "call" ? CALL_COLS : kind === "chat" ? CHAT_COLS : TASK_COLS, id);
   if (!row) return null;
   f[kind] = row;
   if (row.contact_id) f.contact = await one("contacts", CONTACT_COLS_V2, row.contact_id);
-  return f;
+  return await named();
 }
 
 // Goals (design §3.6): a goal type → is it met for these facts? State goals read the record as it is now (tags, stage,
@@ -4353,7 +4463,7 @@ export const EV_PRODUCERS: Record<string, Producer> = nul({
       if (wanted.has("newLead")) { const e = TRIGGERS.newLead.fromRecord(c, T.S); if (inScan(e, w.sinceMs, w.nowMs)) events.push(e as Ev); }
       if (wanted.has("form_submitted")) { const e = formArrival(c, T.S); if (inScan(e, w.sinceMs, w.nowMs)) events.push(e as Ev); }
     }
-    return { events };
+    return { events: await dropQuiet(sb, events, undefined, T.S.timezone) };
   } },
   stage: { types: ["stage"], source: "scan", run: async (sb, w, T) => ({ events: await TRIGGERS.stage.scan(sb, w.sinceMs, w.nowMs, T.S) }) },
   jobClosed: { types: ["jobClosed"], source: "scan", run: async (sb, w, T) => ({ events: await TRIGGERS.jobClosed.scan(sb, w.sinceMs, w.nowMs, T.S) }) },
@@ -4374,7 +4484,7 @@ export const EV_PRODUCERS: Record<string, Producer> = nul({
   // "Stale leads": in its stage for N days = stage_changed_at in (since − N d, now − N d]; one event per (move, N)
   stale: { types: ["stale"], source: "time", run: async (sb, w, T, pubs) => {
     const days = [...new Set(enabledTriggers(pubs, "stale").map(({ t }) => Number(obj(t.config).days)).filter((n) => Number.isInteger(n) && n >= 1 && n <= 365))].sort((x, y) => x - y);
-    const events: Ev[] = [];
+    const events: Ev[] = [], byId = new Map<string, Row>();
     let markMs = w.nowMs;
     for (const n of days) {
       const r = await pagedRows((a, z) => sb.from("contacts").select(SCAN_CONTACT_COLS).gte("stage_changed_at", iso(w.sinceMs - n * DAY)).lte("stage_changed_at", iso(w.nowMs - n * DAY))
@@ -4382,11 +4492,12 @@ export const EV_PRODUCERS: Record<string, Producer> = nul({
       for (const c of r.list) {
         if (isTestRecord(c.tags, T.S) || !okTime(c.stage_changed_at) || !c.status) continue;
         events.push(mkEv("stale", "contact", String(c.id), `${c.id}:stale:${c.stage_changed_at}:${n}`, Date.parse(c.stage_changed_at) + n * DAY, c.id, { days: n, stage: String(c.status) }));
+        byId.set(String(c.id), c);
       }
       // more than the pages hold: go on from the last one next minute (keys keep it once)
       if (r.truncated && r.list.length) markMs = Math.min(markMs, Date.parse(r.list[r.list.length - 1].stage_changed_at) + n * DAY);
     }
-    return { events, markMs };
+    return { events: await dropQuiet(sb, events, (e) => byId.get(e.recordId), T.S.timezone), markMs };   // an imported lead's own stage never goes stale
   } },
   // "Custom date reminder": the dates whose moment (date at its time, ± the offset) falls in (since, now]
   custom_date: { types: ["custom_date"], source: "time", run: async (sb, w, T, pubs) => {
@@ -4409,7 +4520,7 @@ export const EV_PRODUCERS: Record<string, Producer> = nul({
       }
       if (r.truncated && r.list.length) { const v = dateValueMs(r.list[r.list.length - 1][column], c.at, tz); if (v !== null) markMs = Math.min(markMs, sign ? shiftBy(v, c.offset, sign, tz) : v); }
     }
-    return { events, markMs };
+    return { events: await dropQuiet(sb, events, undefined, tz), markMs };   // an imported job's own date starts no reminder; a reschedule does
   } },
   // "Task reminder": a task not done whose due moment (date-only = 09:00) minus "before" falls in (since, now]
   task_reminder: { types: ["task_reminder"], source: "time", run: async (sb, w, T, pubs) => {
@@ -4560,7 +4671,7 @@ export async function matchEvents(sb: any, T: TickCtx, pubs: PubWf[], nowMs: num
   const watched = new Set(wfWatchTypes(pubs));
   // the lead cards of the batch, in one read per 100
   const contacts = new Map<string, Row>(), cids = [...new Set(evs.map((e) => e.contact_id).filter(Boolean).map(String))];
-  for (let i = 0; i < cids.length; i += 100) for (const c of await rows(sb.from("contacts").select(CONTACT_COLS_V2).in("id", cids.slice(i, i + 100)))) contacts.set(String(c.id), c);
+  for (let i = 0; i < cids.length; i += 100) for (const c of await rows(readContactsV2(sb, (q) => q.in("id", cids.slice(i, i + 100))))) contacts.set(String(c.id), c);
   // the unmatched rows already written today (the 200 cap), read only when needed
   let capRead = false;
   const unmatchedToday = new Map<string, number>();
@@ -4601,7 +4712,7 @@ export async function matchEvents(sb: any, T: TickCtx, pubs: PubWf[], nowMs: num
           rec = null;
           if (table && ev.record_id) { const { data } = await sb.from(table).select(kind === "job" ? JOB_COLS : kind === "call" ? CALL_COLS : kind === "chat" ? CHAT_COLS : TASK_COLS).eq("id", ev.record_id).maybeSingle(); rec = data || null; }
           // the record's lead card when the event had none yet (linked since), as loadFacts reads it
-          if (!contact && rec && rec.contact_id) { const { data } = await sb.from("contacts").select(CONTACT_COLS_V2).eq("id", rec.contact_id).maybeSingle(); contact = data || null; }
+          if (!contact && rec && rec.contact_id) { const { data } = await readContactsV2(sb, (q) => q.eq("id", rec.contact_id).maybeSingle()); contact = data || null; }
         }
         const kind = String(ev.record_kind || "");
         return { kind, type: ev.type, contact, job: kind === "job" ? rec : null, call: kind === "call" ? rec : null, chat: kind === "chat" ? rec : null, task: kind === "task" ? rec : null,
@@ -4826,7 +4937,8 @@ export function wfMergeVars(f: any, a: any, custom: Record<string, unknown> = {}
     quote_amount: c.estimated_value != null && c.estimated_value !== "" && Number(c.estimated_value) > 0 ? moneyText(Number(c.estimated_value), cat, "plain") : "",
     task_title: t ? String(t.title || "") : "", due_date: t ? dayOf(t.due) : "",
     booked_date: dayOf(c.booked_for), follow_up_date: dayOf(c.next_follow_up), lost_reason: c.lost_reason ? catLabel(cat, "lostReasons", c.lost_reason) : "",
-    assigned_user: "",
+    // the lead's "Assigned to" (G3.5): the person's name as the team list has it (loadFactsV2 looks it up; nobody = empty)
+    "lead.assigned_to": String((f && f.assignedName) || "").trim(), "lead.assigned_to_first_name": cleanFirstName(String((f && f.assignedName) || "")),
   };
   for (const [k, v] of Object.entries(obj(custom))) if (/^[a-z][a-z0-9_]{0,39}$/.test(k)) out[`custom.${k}`] = String(v ?? "");
   for (const [k, v] of Object.entries(obj(f && f.ctx))) {
@@ -4885,6 +4997,7 @@ export async function reviewReach(sb: any, c: any): Promise<{ phone: string; ema
   return { phone, email: mail, why: phone || mail ? "" : "opted out" };
 }
 // ── record actions → automation_apply ops (design §3.8 "Action effects"). → { kind, id, ops } | { skip } ──
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export type RecordPlan = { kind: string; id: string; ops: Row[]; custom?: [string, string] } | { skip: string };
 // deno-lint-ignore no-explicit-any
 export async function recordPlan(sb: any, n: Row, run: Row, a: Row, f: any, T: TickCtx, nowMs: number, vars: Record<string, string>): Promise<RecordPlan | null> {
@@ -4900,7 +5013,10 @@ export async function recordPlan(sb: any, n: Row, run: Row, a: Row, f: any, T: T
     case "edit_conversation": return lead([{ op: "read" }]);
     case "move_stage": return norm(c.stage) === norm(wfCatalogKey(T.cat, "stageWon", "Won")) ? { skip: "A lead is won when its job is entered" } : lead([{ op: "stage", to: String(c.stage ?? "") }]);
     case "mark_lost": return lead([{ op: "stage", to: wfCatalogKey(T.cat, "stageLost", "Lost"), ...(hasText(c.reason) ? { lost_reason: clip(c.reason, 100) } : {}) }]);
-    case "assign_user": case "remove_assigned_user": return { skip: "unavailable: " + AVAIL_REASONS.assignee };
+    // the lead's "Assigned to" (G3.5, Q6): a fixed person of the team; automation_apply checks the person exists and says
+    // so on the lead's history ("Assigned to …" / "Assigned user removed")
+    case "assign_user": return UUID_RE.test(String(c.user ?? "")) ? lead([{ op: "assign", user: String(c.user).toLowerCase() }]) : { skip: "missing details: user" };
+    case "remove_assigned_user": return lead([{ op: "assign", user: null }]);
     case "internal_comment": {
       const t = clip(fill(c.text).trim(), 2000); if (!t) return { skip: "empty comment" };
       if (cid) return { kind: "contact", id: cid, ops: [{ op: "comment", text: t }] };
@@ -5267,19 +5383,22 @@ export async function hookAdmin(sb: any, step: string, body: any, me: any, nowMs
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // ==== API (stage 2, design §3.1, §3.13, §3.16, §4.7, §6; group G2.4): save, publish, duplicate, validate, schema,
-// registry (the v2 DTO), migrate, restore, copy_version. Every write of a workflow's content goes through the SQL
+// registry (the v2 DTO), migrate, restore, copy_version (and, G3.3, the template library: template_upload / _rename /
+// _delete). Every write of a workflow's content goes through the SQL
 // functions of PART 2 · G2.4 — automation_save / automation_publish / automation_migrate_row (security definer; they set
 // automation.via = 'fn', so the guard lets the function's own columns through and still bumps version / armed_at /
 // revision and switches a Published workflow to Draft by its own rules). Version snapshots are written here (service
 // role), never by a trigger: one per save whose content (definition, settings, name) changed, always on publish /
 // unpublish; a layout-only save never makes one.
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
-export const WF_API_STEPS = ["validate", "schema", "registry", "save", "publish", "duplicate", "restore", "copy_version", "migrate"];
+export const WF_API_STEPS = ["validate", "schema", "registry", "save", "publish", "duplicate", "restore", "copy_version", "migrate", "template_upload", "template_rename", "template_delete"];
 // Reasons a version row may carry (= the SQL check). The client may only ask for save / save_version; the rest are set here.
 export const WF_VERSION_REASONS = ["create", "save", "save_version", "publish", "unpublish", "restore", "ai", "migration", "duplicate", "system_move"];
 const WF_SNAP_ON_CHANGE = ["save", "save_version", "ai", "restore", "create", "duplicate", "migration"];
 export const WF_API_LIMITS = { layoutBytes: 128 * 1024, migratePage: 200, templateDrafts: 20, versionsPage: 50 };
 export const WF_LIB_KEY_RE = /^my_[a-z0-9]{8}$/;
+// where a workflow came from (automations.template_key: a ready-made base such as "review" / "team:<id>", or "tpl:<key>")
+export const WF_TEMPLATE_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,79}$/;
 // The guarded types a doc uses (= SQL automation_guarded_channels): every node, also a paused or unconnected one, whose
 // action reaches customers or another system — and every type the registry does not know (counted as a customer one).
 // deno-lint-ignore no-explicit-any
@@ -5291,6 +5410,20 @@ export function wfGuardedChannels(doc: any): string[] {
     else if (!WF_KINDS.includes(kind)) out.add(type || kind);
   }
   return [...out].sort();
+}
+// A link into the app's Settings → Automation (design §4.1; group G3.1): the same as the app's wfLink, byte for byte (both
+// suites check fixtures/links.json). x.base = the business's app address (a per-business setting, read by the caller:
+// never a constant here); only an id, a builder tab, a run id and a list tab that pass these rules go into the link.
+export const WF_LINK_RULES = { uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, ready: /^ready:(review|chatText|missedText|team:[A-Za-z]{2,30})$/,
+  wfTabs: ["builder", "settings", "enroll", "logs"], listTabs: ["all", "review", "deleted"] };
+// deno-lint-ignore no-explicit-any
+export function wfLink(id: unknown, wfTab: unknown, extra?: any): string {
+  const R = WF_LINK_RULES, x = extra && typeof extra === "object" ? extra : {}, q = ["tab=settings", "page=automation"], k = String(id || "");
+  if (R.uuid.test(k) || R.ready.test(k)) q.push("wf=" + encodeURIComponent(k));
+  if (typeof wfTab === "string" && R.wfTabs.includes(wfTab)) q.push("wfTab=" + wfTab);
+  if (R.uuid.test(String(x.run || ""))) q.push("run=" + String(x.run));
+  if (typeof x.listTab === "string" && R.listTabs.includes(x.listTab)) q.push("listTab=" + x.listTab);
+  return String(x.base || "").replace(/[?#].*$/, "") + "?" + q.join("&");
 }
 // What the list shows without downloading definitions (automations.list_summary, ≤ 8 KB).
 // deno-lint-ignore no-explicit-any
@@ -5509,12 +5642,18 @@ async function apiSave(sb: any, b: Row, me: any, nowMs: number, opts: { reason?:
     p_draft: b.ai_edited === true || !!(a && a.origin === "ai") || newHost, p_summary: wfListSummary(doc, settings), p_actor: me.id ?? null, p_actor_name: clip(String(me.full_name || ""), 120) || null });
   if (r.reason === "conflict") return apiErr(409, "conflict", { revision: r.revision, updated_by_name: r.updated_by_name ?? null, updated_at: r.updated_at ?? null });
   if (r.ok !== true) return apiErr(r.reason === "not_found" ? 404 : 422, String(r.reason || "not saved"));
+  // a new one copied from a ready-made keeps where it came from (template_key: "back to the default", the overlap
+  // warning). Only here: since SQL Part 3 · G3.4 the app may write just name, description, folder_id and deleted_at.
+  if (!a && typeof b.template_key === "string" && WF_TEMPLATE_KEY_RE.test(b.template_key)) {
+    const { error } = await sb.from("automations").update({ template_key: b.template_key }).eq("id", String(r.id));
+    if (error) console.error("automations: template_key not kept:", clip(String(error.message || error), 200));
+  }
   const saved = await readAutomation(sb, String(r.id));
   if (!saved) throw new Error("saved workflow not read back");
   const versionNo = await wfSnapshot(sb, saved, reason, me, nowMs);
   return { status: 200, body: { ok: true, id: saved.id, revision: Number(saved.revision), version: Number(saved.version), enabled: saved.enabled === true, armed_at: saved.armed_at ?? null,
     shapeChanged: r.shape_changed === true, armChanged: r.arm_changed === true, drafted: !!(a && a.enabled === true && saved.enabled !== true), version_no: versionNo,
-    templates: tpl, errors: chk.errors, warnings: chk.warnings } };
+    template_key: saved.template_key ?? null, templates: tpl, errors: chk.errors, warnings: chk.warnings } };
 }
 // The words a Publish confirm lists for the guarded steps (design §3.12–§3.13).
 // deno-lint-ignore no-explicit-any
@@ -5542,6 +5681,171 @@ async function lastLiveDoc(sb: any, id: string): Promise<Row | null> {
   const v = (await rows(sb.from("automation_versions").select("definition").eq("automation_id", id).in("reason", ["publish", "migration"]).order("version_no", { ascending: false }).limit(1)))[0];
   return v && v.definition && typeof v.definition === "object" ? v.definition : null;
 }
+// ── The old editor's own checks at Publish (stage 2 phase 3, 15 Oct; defence in depth). Until the new builder (phase 4)
+// a workflow the old editor shows (a straight phase-4 chain: v1EditorView) goes on only when that editor's switch would
+// have let it: the blocking problems of the app's autoProblems, word for word, in its order (the app checks first:
+// wfPublishBlock / toggleAutomation; this is the same check for any other caller — an old tab, a direct call). Phase 4's
+// own validator is looser (a task for nobody, "Service is one of", a {technician} a new lead can't fill, up to 30 steps).
+// A doc only the new builder shows keeps the v2 checks only (wfCheck), as before. Not here: the editor's notes (they
+// never block), and "Nobody signs this email yet" (asked only while its editor is open; the engine never sends an
+// unsigned email). Words of a saved template: the catalog's (what the engine sends; the app may fall back to a built-in
+// text the engine doesn't have — stricter here, never looser). V1_EDITOR = the app's registries these words need
+// (tests/business-logic.test.js compares it with index.html's AUTO_TRIGGERS / AUTO_MIRROR_TRIGGERS / AUTO_CONDS /
+// AUTO_ACTIONS / AUTO_FIELDS / AUTO_WAIT_UNITS / FLOW_MAX_STEPS_* / FLOW_STEP_KINDS); fixtures/editor-blocks.json holds
+// the cases both run. ──
+export const V1_EDITOR: Row = {
+  triggers: {
+    newLead: { label: "A new lead comes in", customer: true }, stage: { label: "A lead moves to a stage", customer: true }, chat: { label: "A website chat isn't answered", customer: true },
+    missedCall: { label: "A call is missed", customer: true }, jobClosed: { label: "A job is closed", customer: true },
+  },
+  mirrorTriggers: {
+    invoice: { label: "A technician sends his commission invoice", customer: false }, docExpiry: { label: "An employee document is about to expire", customer: false },
+    bizInsurance: { label: "The business insurance is about to expire", customer: false }, googleReview: { label: "A new Google review comes in", customer: false },
+  },
+  conds: {
+    service: { label: "Service", ops: ["is", "is_not"], values: true, appliesTo: null },
+    source: { label: "Lead source", ops: ["is", "is_not"], values: true, appliesTo: null },
+    tag: { label: "Tag", ops: ["has", "has_not"], values: true, appliesTo: null },
+    stage: { label: "Stage right now", ops: ["is", "is_not"], values: true, appliesTo: null },
+    stage_unchanged: { label: "Still in the stage that started it", ops: ["true"], values: false, appliesTo: ["stage"] },
+    stage_move_stands: { label: "The stage move was not undone", ops: ["true"], values: false, appliesTo: ["stage"] },
+    has_mobile: { label: "A mobile number", ops: ["true", "false"], values: false, appliesTo: null },
+    has_email: { label: "An email address", ops: ["true", "false"], values: false, appliesTo: null },
+    dont_ask: { label: "Not marked \"Don't ask for a review\"", ops: ["true"], values: false, appliesTo: null },
+    asked_within_months: { label: "Not asked for a review in the last … months", ops: ["true"], values: false, appliesTo: null, n: { min: 1, max: 36 } },
+    not_picked: { label: "Nobody has picked the lead up yet", ops: ["true"], values: false, appliesTo: ["newLead"] },
+    unpaid: { label: "The job is still unpaid", ops: ["true"], values: false, appliesTo: ["jobClosed"] },
+    chat_age_hours: { label: "The chat is … hours old", ops: ["lte", "gte"], values: false, appliesTo: ["chat"], n: { min: 0, max: 720 } },
+    chat_unanswered: { label: "Nobody answered the chat", ops: ["true"], values: false, appliesTo: ["chat"] },
+  },
+  actions: {
+    text: { label: "Text to the customer", audience: "customer" }, email: { label: "Email to the customer", audience: "customer" },
+    push: { label: "Notification to the team", audience: "team" }, task: { label: "A task in the app", audience: "team" },
+  },
+  fields: {
+    hi: "*", first_name: "*", name: "*", service: "*", brand: "*", business_name: "*", agent: "*", suburb: "*", source: "*", stage: "*", number: "*",
+    technician: ["jobClosed"], amount: ["jobClosed"], job_date: ["jobClosed"], minutes: "*", automation: "*",
+  },
+  waitMax: { minutes: 1440, hours: 168, days: 365 },
+  maxSteps: { default: 20, ceiling: 30 },
+  stepKinds: ["wait", "window", "if", "action"],
+};
+// Phase 4's rule for step ids (= the app's autoIdsBad): each one an id (letters, digits, - and _, at most 40), used once.
+// deno-lint-ignore no-explicit-any
+const v1IdsBad = (steps: any[]) => { const ids = steps.map((s) => String((s && s.id) || "")); return ids.some((x, i) => !/^[A-Za-z0-9_-]{1,40}$/.test(x) || ids.indexOf(x) !== i); };
+// deno-lint-ignore no-explicit-any
+const v1Trig = (type: unknown): any => (has(V1_EDITOR.triggers, type) ? V1_EDITOR.triggers[type as string] : has(V1_EDITOR.mirrorTriggers, type) ? V1_EDITOR.mirrorTriggers[type as string] : null);
+// The steps the old editor shows for a row (the app's autoNormalize): an upgraded row that is still exactly the upgrade of
+// its stored steps whose ids phase 4 refuses → those stored steps (so "the same id twice" is said, as before stage 2);
+// otherwise its doc as phase-4 steps (wfToFlat); a row with no doc yet → its own trigger and steps. null = only the new
+// builder shows it.
+// deno-lint-ignore no-explicit-any
+export function v1EditorView(a: any): { trigger: any; steps: any[] } | null {
+  const r = obj(a), doc = obj(r.definition).schema === 2 ? r.definition : null;
+  const stored = (Array.isArray(r.steps) ? r.steps : []).filter((s: unknown) => !!s && typeof s === "object" && !Array.isArray(s));
+  const raw = !!doc && obj(r.settings).reentry === "legacy_always" && v1IdsBad(stored) && canonJson(upgradeV1(r.trigger, r.steps).doc) === canonJson(doc);
+  if (doc && !raw) { const f = wfToFlat(doc); return f ? { trigger: f.trigger, steps: f.steps.filter((s) => !!s && typeof s === "object" && !Array.isArray(s)) } : null; }
+  return { trigger: r.trigger, steps: stored };
+}
+// One step's blocking problems in the editor's words (the app's autoStepIssues; step = the form's step 1–6).
+// deno-lint-ignore no-explicit-any
+function v1StepIssues(s: any, type: any, cat: any): { step: number; text: string }[] {
+  const out: { step: number; text: string }[] = [], E = V1_EDITOR, T = v1Trig(type), add = (step: number, text: string) => { out.push({ step, text }); };
+  const long = (v: unknown, max: number, what: string, step: number) => { if (String(v || "").length > max) add(step, `${what} is longer than ${max} characters (step ${step}).`); };
+  if (s.kind === "wait") {
+    const u = has(E.waitMax, s.unit) ? E.waitMax[s.unit] : null;
+    if (u == null) add(2, "Pick minutes, hours or days for the wait (step 2).");
+    else if (!(Number.isInteger(s.n) && s.n >= 1 && s.n <= u)) add(2, `The wait has to be a whole number from 1 to ${u} (step 2).`);
+  } else if (s.kind === "window") {
+    const at = hm(s.at), f = hm(s.from), u = hm(s.until);
+    if (s.mode == null) {
+      if (!Array.isArray(s.days) || !s.days.length) add(3, "Pick at least one day (step 3).");
+      if (f == null || u == null || f >= 1440 || u <= f) add(3, "The end time has to be after the start (step 3).");
+    } else if (!["office", "outsideOffice"].includes(s.mode)) add(3, "Pick which days and hours (step 3).");
+    if (!["next", "skip", "at"].includes(s.outside)) add(3, "Say what happens outside those hours (step 3).");
+    else if (s.outside === "at" && !(at != null && at < 1440)) add(3, "Pick the time it goes at (step 3).");
+    else if (s.outside === "at" && s.mode == null && f != null && u != null && !((at as number) >= f && (at as number) < u)) add(3, "The time it goes at has to be inside those hours (step 3).");
+  } else if (s.kind === "if") {
+    const conds = Array.isArray(s.conds) ? s.conds : [];
+    if (conds.length > 10) add(4, "At most 10 conditions in one step (step 4).");
+    for (const c0 of conds) {
+      const c = obj(c0), C = has(E.conds, c.field) ? E.conds[c.field] : null;
+      if (!C) { add(4, "A condition this version of the app doesn't know (step 4)."); continue; }
+      if (type && Array.isArray(C.appliesTo) && !C.appliesTo.includes(type)) add(4, `"${C.label}" can't be used with "${T ? T.label : type}" (step 4).`);
+      if (!C.ops.includes(c.op)) add(4, `Pick how to compare "${C.label}" (step 4).`);
+      if (C.values && ["is", "is_not", "has", "has_not"].includes(c.op) && !(typeof c.v === "string" && c.v.trim())) add(4, `Pick a value for "${C.label}" (step 4).`);
+      if (C.n && !(typeof c.n === "number" && Number.isInteger(c.n) && c.n >= C.n.min && c.n <= C.n.max)) add(4, `A condition needs a whole number from ${C.n.min} to ${C.n.max} (step 4).`);
+    }
+  } else if (s.kind === "action") {
+    const A = has(E.actions, s.type) ? E.actions[s.type] : null;
+    if (!A) { add(5, "An action this version of the app doesn't know (step 5)."); return out; }
+    if (A.audience === "customer" && T && !T.customer) add(5, `"${A.label}" needs a customer, and "${T.label}" has none (step 5).`);
+    const allowed = new Set(Object.keys(E.fields).filter((k) => !type || E.fields[k] === "*" || (Array.isArray(E.fields[k]) && E.fields[k].includes(type)))), start = T ? T.label : "this start";
+    const blanks = (text: unknown) => {
+      const bad = [...new Set((String(text || "").match(/\{[^{}\s]*\}/g) || []).map((x) => x.slice(1, -1)).filter((k) => !allowed.has(k)))];
+      if (bad.length) add(6, `${bad.map((k) => "{" + k + "}").join(", ")} can't be filled in for "${start}" (step 6).`);
+    };
+    if (s.type === "text" || s.type === "email") {
+      const tpl = obj(obj(cat).templates), t = has(tpl, s.templateKey) ? tpl[s.templateKey] : "";
+      const words = s.templateKey ? (typeof t === "string" && t.trim() ? t : "") : String(s.body || "");
+      if (s.type === "email") {
+        if (!String(s.subject || "").trim()) add(6, "The email needs a subject (step 6).");
+        blanks(s.subject); long(s.subject, LIMITS.subject, "The subject", 6);
+      }
+      if (!words.trim()) add(6, `The ${s.type === "email" ? "email" : "text"} has no words yet (step 6).`);
+      blanks(words); long(words, s.type === "email" ? LIMITS.emailBody : LIMITS.textBody, s.type === "email" ? "The email" : "The text", 6);
+    } else {
+      const words = s.type === "push" ? [s.title, s.body] : [s.title, s.notes];
+      if (s.type === "push") {
+        const to = obj(s.to), roles = Array.isArray(to.roles) ? to.roles : [], people = Array.isArray(to.people) ? to.people : [];
+        if (!roles.length && !people.length) add(5, "Pick who gets the notification (step 5).");
+        if (!String(s.title || "").trim()) add(6, "Write the notification (step 6).");
+        long(s.title, LIMITS.title, "The title", 6); long(s.body, LIMITS.pushBody, "The notification", 6);
+      } else {
+        if (!(Array.isArray(s.assignees) && s.assignees.length)) add(5, "Pick who the task is for (step 5).");
+        if (!String(s.title || "").trim()) add(6, "Write the task (step 6).");
+        long(s.title, LIMITS.title, "The task", 6); long(s.notes, LIMITS.notes, "The task notes", 6);
+        if (!(s.due_days == null || (Number.isInteger(s.due_days) && s.due_days >= 0 && s.due_days <= 365))) add(5, "The task is due 0 to 365 days later (step 5).");
+      }
+      words.forEach(blanks);
+    }
+  }
+  return out;
+}
+// Every blocking problem of a phase-4 { trigger, steps } in the old editor's words and order (the app's autoProblems,
+// blocks only): by the form's step, first found first, each once. cat = settings.catalog (templates, automations.maxSteps).
+// deno-lint-ignore no-explicit-any
+export function v1EditorProblems(def: any, cat: any, name: unknown): string[] {
+  const d = obj(def), t = obj(d.trigger), type = t.type, E = V1_EDITOR, out: { step: number; text: string }[] = [];
+  const steps = (Array.isArray(d.steps) ? d.steps : []).filter((s: unknown) => !!s && typeof s === "object" && !Array.isArray(s));
+  if (!type) out.push({ step: 1, text: "Pick what starts it (step 1)." });
+  else if (!has(E.triggers, type)) out.push({ step: 1, text: "This start can't be used in an automation of your own yet (step 1)." });
+  else if (type === "jobClosed") {
+    const m = obj(t.params).maxJobAgeDays;
+    if (m != null && m !== "" && !(Number.isInteger(m) && m >= 1 && m <= 30)) out.push({ step: 1, text: "Only jobs done in the last 1 to 30 days (step 1)." });
+  }
+  if (String(name || "").length > LIMITS.name) out.push({ step: 1, text: `The name is longer than ${LIMITS.name} characters.` });
+  for (const s of steps) out.push(...v1StepIssues(s, type, cat));
+  if (!steps.some((s: Row) => s.kind === "action")) out.push({ step: 5, text: "Pick at least one thing to do (step 5)." });
+  const v = obj(obj(cat).automations).maxSteps;
+  const max = v == null || v === "" || !Number.isFinite(Number(v)) ? E.maxSteps.default : Math.max(1, Math.min(E.maxSteps.ceiling, Math.trunc(Number(v))));
+  if (steps.length > max) out.push({ step: 5, text: `At most ${max} steps.` });
+  const last = steps[steps.length - 1];
+  if (last && E.stepKinds.includes(last.kind) && last.kind !== "action") out.push({ step: 5, text: "The last step does nothing. End with a Do step, or remove it." });
+  if (v1IdsBad(steps)) out.push({ step: 5, text: "Two steps share the same inside name: remove one and add it again." });
+  const seen = new Set<string>();
+  return out.filter((p) => !seen.has(p.text) && !!seen.add(p.text)).sort((a, b) => a.step - b.step).map((p) => p.text);
+}
+// A copy that is the person's own (Duplicate, Create new workflow from version; design §4.3 / §4.7, §4.10 "Duplicate to
+// edit"): no locked step or condition, as the old Duplicate (duplicateAutomation) made it. A new doc; the given one is
+// never changed. A workflow chosen from a template keeps the template's locks (design §2.2: a template's guard node).
+// deno-lint-ignore no-explicit-any
+export function wfUnlocked(doc: any): any {
+  const d = jclone(obj(doc));
+  for (const n of Object.values(obj(d.nodes))) if (n && typeof n === "object") delete (n as Row).locked;
+  for (const c of conditionsOf(d)) for (const s of Array.isArray(obj(c.cond).segments) ? obj(c.cond).segments : []) for (const r of segRules(s)) delete r.lock;
+  return d;
+}
 // step "publish" {automation_id, on, confirm?, expected_revision?} (design §3.13). Never bumps revision; returns it.
 // deno-lint-ignore no-explicit-any
 async function apiPublish(sb: any, b: Row, me: any, nowMs: number): Promise<ApiRes> {
@@ -5562,7 +5866,10 @@ async function apiPublish(sb: any, b: Row, me: any, nowMs: number): Promise<ApiR
     // availability blocks (design §6.2) except for what was already live: the content last published (or migrated) is
     // the "stored" doc, never the Draft being published itself
     const C = await apiCtx(sb), chk = wfCheck(a.definition, a.settings, a.settings, C, await lastLiveDoc(sb, String(a.id)), builderOf(a.builder));
-    if (chk.errors.length) return apiErr(422, "errors", { errors: chk.errors, warnings: chk.warnings });
+    // the old editor's own blocks first (a workflow it shows; its words are what the app said), then the v2 errors —
+    // both before any question about customers
+    const view = v1EditorView(a), fix = view ? v1EditorProblems(view, C.cat, a.name).map((text) => issue("E_EDITOR_BLOCK", "", text)) : [];
+    if (fix.length || chk.errors.length) return apiErr(422, "errors", { errors: [...fix, ...chk.errors], warnings: chk.warnings });
     warnings.push(...chk.warnings);
     // a ready-made System row that is on and starts the same way would send twice
     const mine = wfListSummary(a.definition, a.settings).triggers;
@@ -5601,12 +5908,13 @@ async function apiSource(sb: any, b: Row, me: any, nowMs: number): Promise<Row |
 }
 // step "duplicate" {automation_id | version_id | template_id} / "copy_version" {automation_id, version_no | version_id}:
 // a new Draft (origin copy / template; system_key never copied); its library words copied to new keys, so the copy never
-// changes the original's messages.
+// changes the original's messages. A copy of a workflow or of a version is fully editable (wfUnlocked: no locked step or
+// condition, as the old Duplicate); one chosen from a template keeps the template's locks (design §2.2).
 // deno-lint-ignore no-explicit-any
 async function apiDuplicate(sb: any, b: Row, me: any, nowMs: number): Promise<ApiRes> {
   const src = await apiSource(sb, b, me, nowMs);
   if (!src) return apiErr(404, "nothing to copy");
-  const doc = jclone(obj(src.definition));
+  const doc = src.origin === "template" ? jclone(obj(src.definition)) : wfUnlocked(src.definition);
   const { data: st } = await sb.from("settings").select("catalog").limit(1);
   const lib = obj(obj(st && st[0] && st[0].catalog).templates), msg = obj(obj(st && st[0] && st[0].catalog).msgTemplates), drafts: Record<string, Row> = {}, map: Record<string, string> = {};
   const mint = () => { let k = ""; do { k = "my_" + [...crypto.getRandomValues(new Uint8Array(8))].map((x) => "abcdefghijklmnopqrstuvwxyz0123456789"[x % 36]).join(""); } while (has(lib, k) || has(drafts, k)); return k; };
@@ -5656,6 +5964,53 @@ async function apiMigrate(sb: any, me: any, nowMs: number): Promise<ApiRes> {
   const total = (await rows(sb.from("automations").select("id").eq("business_id", BUSINESS_ID).is("definition", null))).length;
   return { status: failed.length ? 207 : 200, body: { ok: !failed.length, migrated, left: total, templates, failed } };
 }
+// ── The template library's own templates (stage 2 G3.3, design §4.3): "Upload to Template Library" on a workflow, and
+// Rename / Delete under "Mine". automation_templates is read-only for the app (insert / update revoked), so these steps
+// (and migrate's seeds) are its only writers. A System template (origin system) is never renamed or deleted here; a
+// deleted one is gone from the library (deleted_at), its key never reused.
+export const WF_TPL_CATEGORIES = ["Leads", "Jobs", "Customers", "Team notifications", "Reviews"];
+export const WF_TPL_LIMITS = { name: 120, description: 500, perBusiness: 200 };
+export const WF_TPL_KEY_RE = /^mine_[a-z0-9]{10}$/;
+// deno-lint-ignore no-explicit-any
+async function apiTemplateUpload(sb: any, b: Row, me: any, nowMs: number): Promise<ApiRes> {
+  const a = await apiRow(sb, b.automation_id, me, nowMs);
+  if (!a) return apiErr(404, "workflow not found");
+  const doc = jclone(obj(a.definition)), errors = validateStructure(doc).filter((x) => x.severity === "error");
+  if (errors.length) return apiErr(422, "errors", { errors, text: "Fix its problems first: a template has to open without errors" });
+  const name = clip(String(b.name ?? "").trim() || String(a.name ?? "").trim(), WF_TPL_LIMITS.name);
+  if (!name) return apiErr(422, "name", { text: "Give the template a name" });
+  const description = clip(String(b.description ?? a.description ?? "").trim(), WF_TPL_LIMITS.description) || null;
+  const category = WF_TPL_CATEGORIES.includes(String(b.category)) ? String(b.category) : null;
+  // the live templates counted by the database (deleted rows stay for good — a key is never reused — so the table is never
+  // read whole: the 1,000-row select cap would cut it short)
+  const live = await sb.from("automation_templates").select("id", { count: "exact", head: true }).eq("business_id", BUSINESS_ID).is("deleted_at", null);
+  if (live.error) throw new Error("templates not counted: " + clip(String(live.error.message || live.error), 200));
+  if (Number(live.count ?? 0) >= WF_TPL_LIMITS.perBusiness) return apiErr(409, "too_many", { text: `At most ${WF_TPL_LIMITS.perBusiness} templates: delete one of yours first` });
+  // a new key, never one used before (deleted ones included): one probe per try
+  let key = "";
+  for (let tries = 0; ; tries++) {
+    key = "mine_" + [...crypto.getRandomValues(new Uint8Array(10))].map((x) => "abcdefghijklmnopqrstuvwxyz0123456789"[x % 36]).join("");
+    if (!(await rows(sb.from("automation_templates").select("id").eq("business_id", BUSINESS_ID).eq("key", key).limit(1))).length) break;
+    if (tries >= 4) throw new Error("template not saved: no free key");
+  }
+  const at = iso(nowMs);
+  const { data, error } = await sb.from("automation_templates").insert({ business_id: BUSINESS_ID, key, name, description, category, definition: doc, settings: normWfSettings(a.settings, {}),
+    origin: "user", source_automation_id: a.id, created_by: me.id ?? null, created_by_name: clip(String(me.full_name || ""), 120) || null, created_at: at, updated_at: at }).select("id, key, name").single();
+  if (error || !data) throw new Error("template not saved: " + clip(String((error && error.message) || error || "no row"), 200));
+  return { status: 200, body: { ok: true, id: data.id, key: data.key, name: data.name } };
+}
+// step "template_rename" {template_id, name} / "template_delete" {template_id}: only the business's own (origin user).
+// deno-lint-ignore no-explicit-any
+async function apiTemplateEdit(sb: any, step: string, b: Row, nowMs: number): Promise<ApiRes> {
+  const t = (await rows(sb.from("automation_templates").select("id, origin, deleted_at").eq("business_id", BUSINESS_ID).eq("id", String(b.template_id ?? "")).limit(1)))[0];
+  if (!t || t.deleted_at) return apiErr(404, "template not found");
+  if (t.origin !== "user") return apiErr(409, "system", { text: "A System template can't be renamed or deleted: choose it and save your own copy" });
+  const patch: Row = step === "template_delete" ? { deleted_at: iso(nowMs), updated_at: iso(nowMs) } : { name: clip(String(b.name ?? "").trim(), WF_TPL_LIMITS.name), updated_at: iso(nowMs) };
+  if (step === "template_rename" && !patch.name) return apiErr(422, "name", { text: "Give the template a name" });
+  const { error } = await sb.from("automation_templates").update(patch).eq("id", t.id).eq("business_id", BUSINESS_ID);
+  if (error) throw new Error("template not changed: " + clip(String(error.message || error), 200));
+  return { status: 200, body: { ok: true, id: t.id, ...(patch.name ? { name: patch.name } : { deleted: true }) } };
+}
 // One API step (design §3.1): owners and managers (migrate: owners).
 // deno-lint-ignore no-explicit-any
 export async function apiStep(sb: any, step: string, body: any, me: any, nowMs: number): Promise<ApiRes> {
@@ -5672,6 +6027,8 @@ export async function apiStep(sb: any, step: string, body: any, me: any, nowMs: 
   if (step === "publish") return await apiPublish(sb, b, me, nowMs);
   if (step === "duplicate" || step === "copy_version") return await apiDuplicate(sb, step === "copy_version" ? { automation_id: b.automation_id, version_no: b.version_no, version_id: b.version_id, name: b.name } : b, me, nowMs);
   if (step === "restore") return await apiRestore(sb, b, me, nowMs);
+  if (step === "template_upload") return await apiTemplateUpload(sb, b, me, nowMs);
+  if (step === "template_rename" || step === "template_delete") return await apiTemplateEdit(sb, step, b, nowMs);
   return apiErr(400, "unknown step");
 }
 
@@ -5772,7 +6129,8 @@ async function eventStepV2(sb: any, type: string, id: string, me: any, nowMs: nu
     const cols = type === "form_submitted" ? ARRIVAL_COLS : trig.cols;
     const { data: row, error } = await sb.from(trig.table).select(cols).eq("id", id).maybeSingle();
     if (error || !row) return { status: 404, body: { ok: false, reason: "not found" } };
-    const e = type === "form_submitted" ? formArrival(row, T.S) : trig.fromRecord(row, T.S);
+    const e0 = type === "form_submitted" ? formArrival(row, T.S) : trig.fromRecord(row, T.S);
+    const e = e0 && (await dropQuiet(sb, [e0], () => row, T.S.timezone))[0];   // an imported record's arrival (import_quiet) starts nothing
     if (!e) return { status: 200, body: { ok: true, runs: 0, reason: "no event" } };
     if (Date.parse(e.at) < nowMs - T.S.lookback_hours * HOUR) return { status: 200, body: { ok: true, runs: 0, reason: "old" } };
     const r = evRow(e, "app");
@@ -5819,7 +6177,7 @@ async function eventStep(sb: any, body: any, me: any, nowMs: number) {
   const { data: row, error } = await sb.from(trig.table).select(trig.cols).eq("id", id).maybeSingle();
   if (error || !row) return { status: 404, body: { ok: false, reason: "not found" } };
   const T = await loadContext(sb, nowMs);
-  const e = trig.fromRecord(row, T.S);
+  const e0 = trig.fromRecord(row, T.S), e = e0 && (await dropQuiet(sb, [e0], () => row, T.S.timezone))[0];   // import_quiet: an imported arrival starts nothing
   if (!e) return { status: 200, body: { ok: true, runs: 0, reason: "no event" } };
   if (Date.parse(e.at) < nowMs - T.S.lookback_hours * HOUR) return { status: 200, body: { ok: true, runs: 0, reason: "old" } };
   if (trig.settleMs && nowMs - Date.parse(e.at) < trig.settleMs) return { status: 200, body: { ok: true, runs: 0, reason: "settling" } };   // the timer takes it once it settled

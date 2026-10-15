@@ -14,7 +14,7 @@ const write = (name, data) => {
 };
 
 // ── shared pieces ──
-const G23 = { phone: false, xero: false, gbp: false, reviews: false, ai: false, teamEmail: false, assignee: false, atomicTags: true };   // today + G2.3
+const G23 = { phone: false, xero: false, gbp: false, reviews: false, ai: false, teamEmail: false, atomicTags: true };   // today + G2.3 (the lead's "Assigned to" is never greyed since G3.5)
 const NOW = { ...G23, atomicTags: false };                                                                                              // today
 const EMPTY_F = () => ({ match: "all", segments: [{ match: "all", rules: [] }] });
 const T = (id, type, x = {}) => ({ id, type, filters: EMPTY_F(), ...x });
@@ -124,7 +124,7 @@ add("a text already in the saved workflow (existingOnly)", SMS, [], ["E_UNAVAILA
 add("a text with the phone line", SMS, [], [], { avail: { ...G23, phone: true }, schema: true });
 add("a notification by team email (greyed)", mut(BASE, (d) => { d.nodes.n2.config.channel = "email"; }), ["E_UNAVAILABLE"], [], { schema: false });
 add("a reply wait on SMS (greyed)", { schema: 2, seq: 3, entry: "n1", triggers: [T("t1", "newLead")], nodes: { n1: email("n2"), n2: { kind: "wait", type: "reply", config: { channels: ["sms"] }, out: { next: "n3" } }, n3: push() } }, ["E_UNAVAILABLE"], [], { schema: false });
-add("a user-reply wait for the assigned user (greyed)", { schema: 2, seq: 2, entry: "n1", triggers: [T("t1", "newLead")], nodes: { n1: { kind: "wait", type: "user_reply", config: { channels: ["chat"], users: "assigned", timeout: { n: 1, unit: "hours" } }, out: { next: "n2", timeout: null } }, n2: push() } }, ["E_UNAVAILABLE"], [], { schema: false });
+add("a user-reply wait for the assigned user (Q6: the lead has Assigned to)", { schema: 2, seq: 2, entry: "n1", triggers: [T("t1", "newLead")], nodes: { n1: { kind: "wait", type: "user_reply", config: { channels: ["chat"], users: "assigned", timeout: { n: 1, unit: "hours" } }, out: { next: "n2", timeout: null } }, n2: push() } }, [], [], { schema: true });
 add("turn automatic messages back on (greyed)", mut(BASE, (d) => { d.nodes.n2.out.next = "n3"; d.nodes.n3 = { kind: "action", type: "dnd", config: { mode: "disable", channel: "all" }, out: { next: null } }; }), ["E_UNAVAILABLE"], [], { schema: false });
 add("a wait in seconds (greyed)", mut(BASE, (d) => { d.nodes.n1.config = { n: 30, unit: "seconds" }; }), ["E_UNAVAILABLE"], [], { schema: false });
 add("a lead tag trigger before G2.3", mut(BASE, (d) => { d.triggers[0] = T("t1", "contact_tag"); }), ["E_UNAVAILABLE"], [], { avail: NOW, schema: false });
@@ -169,7 +169,10 @@ add("a dynamic value on money", { schema: 2, seq: 2, entry: "n1", triggers: [T("
 add("a dynamic value on text", { schema: 2, seq: 2, entry: "n1", triggers: [T("t1", "newLead")], nodes: { n1: ifel("b1", W(R("lead.name", "is", { ref: "lead.email" })), "n2"), n2: pushPlain() } }, ["rule_value_type"], [], { schema: true });
 add("a value not in the choices", { schema: 2, seq: 2, entry: "n1", triggers: [T("t1", "call_details")], nodes: { n1: ifel("b1", W(R("call.status", "is", { v: "ringing" })), "n2"), n2: pushPlain() } }, ["rule_value_type"], [], { schema: true });
 add("a system-only field", { schema: 2, seq: 2, entry: "n1", triggers: [T("t1", "stage")], nodes: { n1: ifel("b1", W(R("stage_move_stands", "true")), "n2"), n2: pushPlain() } }, [], ["W_HIDDEN_TYPE"], { schema: false });
-add("an assigned-user rule (greyed)", mut(BASE, (d) => { d.triggers[0].filters = F(R("lead.assigned_user", "is_empty")); }), ["E_UNAVAILABLE"], [], { schema: false });
+add("an assigned-user rule (Q6: the lead has Assigned to)", mut(BASE, (d) => { d.triggers[0].filters = F(R("lead.assigned_user", "is_empty")); }), [], [], { schema: true });
+add("assign to a user, then remove the assigned user (Q6)", mut(BASE, (d) => { d.nodes.n2.out.next = "n3"; d.nodes.n3 = { kind: "action", type: "assign_user", config: { user: "11111111-1111-4111-8111-111111111111" }, out: { next: "n4" } };
+  d.nodes.n4 = { kind: "action", type: "remove_assigned_user", config: {}, out: { next: null } }; d.seq = 5; }), [], [], { schema: true });
+add("a Quote status trigger (Q5: removed, use Pipeline stage changed to Quoted)", mut(BASE, (d) => { d.triggers[0] = T("t1", "estimates"); }), ["E_UNKNOWN_TYPE"], [], { schema: false });
 add("a wait over 1,440 minutes", mut(BASE, (d) => { d.nodes.n1.config.n = 2000; }), ["E_SCHEMA"], [], { schema: false });
 add("a wait over 168 hours", mut(BASE, (d) => { d.nodes.n1.config = { n: 200, unit: "hours" }; }), ["E_SCHEMA"], [], { schema: true });
 add("a period wait with a resume window", mut(BASE, (d) => { d.nodes.n1.config = { n: 1, unit: "days", resume: { days: [1, 2, 3, 4, 5], from: "09:00", until: "17:00" } }; }), [], [], { schema: true });
@@ -368,7 +371,7 @@ write("ghl-labels.json", {
     task_added: "Task added", task_completed: "Task completed", task_reminder: "Task reminder", contact_dnd: "Contact DND", inbound_webhook: "Inbound webhook", scheduler: "Scheduler",
     call_details: "Call details", customer_replied: "Customer replied", user_replied: "User replied", form_submitted: "Form submitted", chat: "Conversations SLA",
     job_booked: "Customer booked appointment", booking_status: "Appointment status", stage: "Pipeline stage changed", lead_status: "Opportunity status changed",
-    stale: "Stale opportunities", invoice: "Invoice", payment_received: "Payment received", estimates: "Estimates", documents_contracts: "Documents & contracts", review_received: "New review received" },
+    stale: "Stale opportunities", invoice: "Invoice", payment_received: "Payment received", documents_contracts: "Documents & contracts", review_received: "New review received" },
   actions: { update_field: "Update contact field", add_tag: "Add contact tag", remove_tag: "Remove contact tag", assign_user: "Assign to user", remove_assigned_user: "Remove assigned user",
     dnd: "Enable/disable DND", add_note: "Add to notes", add_task: "Add task", edit_conversation: "Edit conversation", send_email: "Send email", send_sms: "Send SMS",
     internal_notification: "Send internal notification", send_review_request: "Send review request", send_live_chat: "Send live chat message", manual_call: "Manual action to call",
@@ -378,4 +381,110 @@ write("ghl-labels.json", {
   waits: { period: "For a set period of time", date: "Until a specific date/time", recurring: "Until a recurring window opens", scheduled: "Until a scheduled date/time",
     reply: "Until the contact replies", user_reply: "Until a user replies", action: "Until the contact takes a specific action", conditions: "Until specific conditions are met" },
 });
-console.log("workflows", cases.length, "shape", shapes.length, "upgrade", ups.length, "patch", patches.length);
+// ── editor-blocks.json: the old editor's "Fix it first" checks (index.html autoProblems, the blocking ones) = the
+// engine's v1EditorProblems (stage 2 phase 3: the list's Publish and the function's step "publish" refuse the same).
+// blocks = every blocking text in the editor's order (by its form step, first found first); corpus = the first one for
+// each phase-4 shape of upgrade.json + differential/corpus/builtin.json that the old editor refused (the others: none),
+// copied from what HEAD's list switch said (phase-3 differential, 15 Oct). ──
+const blk = [];
+const bk = (name, def, blocks, x = {}) => blk.push({ name, def, blocks, ...x });
+const v1t = (type, params = {}) => ({ type, params });
+const pushS = (id, x = {}) => ({ id, kind: "action", type: "push", to: { roles: ["owner"] }, title: "New lead: {name}", ...x });
+const taskS = (id, x = {}) => ({ id, kind: "action", type: "task", title: "Call {name}", due_days: 0, assignees: ["p-owner"], ...x });
+const emailS = (id, x = {}) => ({ id, kind: "action", type: "email", subject: "Thanks", body: "{hi}, thanks.", ...x });
+const textS = (id, x = {}) => ({ id, kind: "action", type: "text", body: "{hi}, sorry we missed you.", ...x });
+const waitS = (id, n = 10, unit = "minutes") => ({ id, kind: "wait", n, unit });
+const winS = (id, x = {}) => ({ id, kind: "window", days: [1, 2, 3, 4, 5], from: "09:00", until: "17:00", outside: "next", ...x });
+const ifS = (id, conds, match = "all") => ({ id, kind: "if", match, conds });
+const many = (n) => Array.from({ length: n }, (_, i) => pushS(`p${i + 1}`));
+const LEAD = v1t("newLead");
+bk("a new lead → a notification", { trigger: LEAD, steps: [pushS("s1")] }, []);
+bk("no start", { trigger: null, steps: [pushS("s1")] }, ["Pick what starts it (step 1)."]);
+bk("a start of the built-in system only, with a customer email", { trigger: v1t("invoice"), steps: [emailS("s1")] },
+  ["This start can't be used in an automation of your own yet (step 1).", "\"Email to the customer\" needs a customer, and \"A technician sends his commission invoice\" has none (step 5)."]);
+bk("a start this version doesn't know", { trigger: v1t("teleport"), steps: [pushS("s1")] }, ["This start can't be used in an automation of your own yet (step 1)."]);
+bk("job closed, jobs of the last 31 days", { trigger: v1t("jobClosed", { maxJobAgeDays: 31 }), steps: [pushS("s1")] }, ["Only jobs done in the last 1 to 30 days (step 1)."]);
+bk("job closed, an empty job age", { trigger: v1t("jobClosed", { maxJobAgeDays: "" }), steps: [pushS("s1")] }, []);
+bk("a name of 121 characters", { trigger: LEAD, steps: [pushS("s1")] }, ["The name is longer than 120 characters."], { wfName: "x".repeat(121) });
+bk("a wait in weeks", { trigger: LEAD, steps: [waitS("s1", 2, "weeks"), pushS("s2")] }, ["Pick minutes, hours or days for the wait (step 2)."]);
+bk("a wait of 200 hours", { trigger: LEAD, steps: [waitS("s1", 200, "hours"), pushS("s2")] }, ["The wait has to be a whole number from 1 to 168 (step 2)."]);
+bk("a wait of 1.5 minutes", { trigger: LEAD, steps: [waitS("s1", 1.5), pushS("s2")] }, ["The wait has to be a whole number from 1 to 1440 (step 2)."]);
+bk("a window with no day", { trigger: LEAD, steps: [winS("s1", { days: [] }), pushS("s2")] }, ["Pick at least one day (step 3)."]);
+bk("a window that ends before it starts", { trigger: LEAD, steps: [winS("s1", { from: "17:00", until: "09:00" }), pushS("s2")] }, ["The end time has to be after the start (step 3)."]);
+bk("a window of an unknown kind", { trigger: LEAD, steps: [winS("s1", { mode: "weekends" }), pushS("s2")] }, ["Pick which days and hours (step 3)."]);
+bk("a window that doesn't say what happens outside", { trigger: LEAD, steps: [winS("s1", { outside: "later" }), pushS("s2")] }, ["Say what happens outside those hours (step 3)."]);
+bk("a window going at 25:00", { trigger: LEAD, steps: [winS("s1", { outside: "at", at: "25:00" }), pushS("s2")] }, ["Pick the time it goes at (step 3)."]);
+bk("a 9–5 window going at 8 am", { trigger: LEAD, steps: [winS("s1", { outside: "at", at: "08:00" }), pushS("s2")] }, ["The time it goes at has to be inside those hours (step 3)."]);
+bk("office hours going at 7:30", { trigger: LEAD, steps: [{ id: "s1", kind: "window", mode: "office", outside: "at", at: "07:30" }, pushS("s2")] }, []);
+bk("11 conditions in one If", { trigger: LEAD, steps: [ifS("s1", Array.from({ length: 11 }, () => ({ field: "has_email", op: "true" }))), pushS("s2")] }, ["At most 10 conditions in one step (step 4)."]);
+bk("a condition this version doesn't know", { trigger: LEAD, steps: [ifS("s1", [{ field: "weather", op: "is", v: "sunny" }]), pushS("s2")] }, ["A condition this version of the app doesn't know (step 4)."]);
+bk("nobody picked it up, on a stage move", { trigger: v1t("stage"), steps: [ifS("s1", [{ field: "not_picked", op: "true" }]), pushS("s2")] },
+  ["\"Nobody has picked the lead up yet\" can't be used with \"A lead moves to a stage\" (step 4)."]);
+bk("still in that stage (false), on a new lead", { trigger: LEAD, steps: [ifS("s1", [{ field: "stage_unchanged", op: "false" }]), pushS("s2")] },
+  ["\"Still in the stage that started it\" can't be used with \"A new lead comes in\" (step 4).", "Pick how to compare \"Still in the stage that started it\" (step 4)."]);
+bk("service is one of (phase 4's engine takes it, its editor doesn't)", { trigger: LEAD, steps: [ifS("s1", [{ field: "service", op: "in", v: ["Aircon"] }]), pushS("s2")] }, ["Pick how to compare \"Service\" (step 4)."]);
+bk("a tag compared with is", { trigger: LEAD, steps: [ifS("s1", [{ field: "tag", op: "is", v: "VIP" }]), pushS("s2")] }, ["Pick how to compare \"Tag\" (step 4)."]);
+bk("a service with no value", { trigger: LEAD, steps: [ifS("s1", [{ field: "service", op: "is", v: " " }]), pushS("s2")] }, ["Pick a value for \"Service\" (step 4)."]);
+bk("a service no longer in Settings (a note, not a block)", { trigger: LEAD, steps: [ifS("s1", [{ field: "service", op: "is", v: "Plumbing" }]), pushS("s2")] }, []);
+bk("not asked for a review in 40 months", { trigger: LEAD, steps: [ifS("s1", [{ field: "asked_within_months", op: "true", n: 40 }]), pushS("s2")] }, ["A condition needs a whole number from 1 to 36 (step 4)."]);
+bk("a chat 2.5 hours old", { trigger: v1t("chat"), steps: [ifS("s1", [{ field: "chat_age_hours", op: "lte", n: 2.5 }]), pushS("s2")] }, ["A condition needs a whole number from 0 to 720 (step 4)."]);
+bk("an action this version doesn't know", { trigger: LEAD, steps: [{ id: "s1", kind: "action", type: "fax", to: "x" }] }, ["An action this version of the app doesn't know (step 5)."]);
+bk("{technician} in a new lead's email", { trigger: LEAD, steps: [emailS("s1", { body: "{hi}, {technician} will call." })] }, ["{technician} can't be filled in for \"A new lead comes in\" (step 6)."]);
+bk("{technician} in a closed job's email", { trigger: v1t("jobClosed"), steps: [emailS("s1", { body: "{hi}, {technician} says thanks." })] }, []);
+bk("two unknown blanks and an empty one", { trigger: LEAD, steps: [pushS("s1", { title: "{foo} and {bar}", body: "Hi {}" })] }, ["{foo}, {bar} can't be filled in for \"A new lead comes in\" (step 6).", "{} can't be filled in for \"A new lead comes in\" (step 6)."]);
+bk("an email with no subject", { trigger: LEAD, steps: [emailS("s1", { subject: "  " })] }, ["The email needs a subject (step 6)."]);
+bk("a subject of 201 characters", { trigger: LEAD, steps: [emailS("s1", { subject: "s".repeat(201) })] }, ["The subject is longer than 200 characters (step 6)."]);
+bk("a blank in the subject and no words", { trigger: LEAD, steps: [emailS("s1", { subject: "About {foo}", body: "" })] }, ["{foo} can't be filled in for \"A new lead comes in\" (step 6).", "The email has no words yet (step 6)."]);
+bk("an email from a saved template", { trigger: LEAD, steps: [emailS("s1", { body: undefined, templateKey: "welcomeEmail" })] }, []);
+bk("an email from a template that is gone", { trigger: LEAD, steps: [emailS("s1", { body: undefined, templateKey: "my_gone0000" })] }, ["The email has no words yet (step 6)."]);
+bk("a template whose words have a blank this start can't fill", { trigger: LEAD, steps: [emailS("s1", { body: undefined, templateKey: "jobWords" })] }, ["{technician} can't be filled in for \"A new lead comes in\" (step 6)."]);
+bk("an email of 5,001 characters", { trigger: LEAD, steps: [emailS("s1", { body: "w".repeat(5001) })] }, ["The email is longer than 5000 characters (step 6)."]);
+bk("a text with no words", { trigger: v1t("missedCall"), steps: [textS("s1", { body: "" })] }, ["The text has no words yet (step 6)."]);
+bk("a text (waits for the phone: a note, not a block)", { trigger: v1t("missedCall"), steps: [textS("s1")] }, []);
+bk("a text of 641 characters", { trigger: v1t("missedCall"), steps: [textS("s1", { body: "t".repeat(641) })] }, ["The text is longer than 640 characters (step 6)."]);
+bk("a notification to nobody", { trigger: LEAD, steps: [pushS("s1", { to: { roles: [], people: [] } })] }, ["Pick who gets the notification (step 5)."]);
+bk("a notification with no title", { trigger: LEAD, steps: [pushS("s1", { title: "" })] }, ["Write the notification (step 6)."]);
+bk("a notification title of 121 characters", { trigger: LEAD, steps: [pushS("s1", { title: "t".repeat(121) })] }, ["The title is longer than 120 characters (step 6)."]);
+bk("a notification of 241 characters", { trigger: LEAD, steps: [pushS("s1", { body: "b".repeat(241) })] }, ["The notification is longer than 240 characters (step 6)."]);
+bk("money to the office (a note, not a block)", { trigger: v1t("jobClosed"), steps: [pushS("s1", { to: { roles: ["va"] }, title: "{amount} paid" })] }, []);
+bk("a task for nobody", { trigger: LEAD, steps: [taskS("s1", { assignees: [] })] }, ["Pick who the task is for (step 5)."]);
+bk("a task with nothing filled in", { trigger: LEAD, steps: [{ id: "s1", kind: "action", type: "task" }] }, ["Pick who the task is for (step 5).", "Write the task (step 6)."]);
+bk("a task title of 121 characters", { trigger: LEAD, steps: [taskS("s1", { title: "t".repeat(121) })] }, ["The task is longer than 120 characters (step 6)."]);
+bk("task notes of 2,001 characters", { trigger: LEAD, steps: [taskS("s1", { notes: "n".repeat(2001) })] }, ["The task notes is longer than 2000 characters (step 6)."]);
+bk("a task due in 400 days", { trigger: LEAD, steps: [taskS("s1", { due_days: 400 })] }, ["The task is due 0 to 365 days later (step 5)."]);
+bk("two tasks for nobody (said once)", { trigger: LEAD, steps: [taskS("s1", { assignees: [] }), taskS("s2", { assignees: [] })] }, ["Pick who the task is for (step 5)."]);
+bk("no steps", { trigger: LEAD, steps: [] }, ["Pick at least one thing to do (step 5)."]);
+bk("only a wait", { trigger: LEAD, steps: [waitS("s1")] }, ["Pick at least one thing to do (step 5).", "The last step does nothing. End with a Do step, or remove it."]);
+bk("a wait at the end", { trigger: LEAD, steps: [pushS("s1"), waitS("s2")] }, ["The last step does nothing. End with a Do step, or remove it."]);
+bk("a step kind this version doesn't know at the end", { trigger: LEAD, steps: [pushS("s1"), { id: "s2", kind: "teleport" }] }, []);
+bk("21 steps", { trigger: LEAD, steps: many(21) }, ["At most 20 steps."]);
+bk("21 steps where the business allows 25", { trigger: LEAD, steps: many(21) }, [], { catalog: { automations: { maxSteps: 25 } } });
+bk("4 steps where the business allows 3", { trigger: LEAD, steps: many(4) }, ["At most 3 steps."], { catalog: { automations: { maxSteps: 3 } } });
+bk("31 steps where the business asks for 99 (30 at most)", { trigger: LEAD, steps: many(31) }, ["At most 30 steps."], { catalog: { automations: { maxSteps: 99 } } });
+bk("21 steps where the limit is not a number (20)", { trigger: LEAD, steps: many(21) }, ["At most 20 steps."], { catalog: { automations: { maxSteps: "many" } } });
+bk("the same id twice", { trigger: LEAD, steps: [waitS("s1"), pushS("s1")] }, ["Two steps share the same inside name: remove one and add it again."]);
+bk("an id with a space", { trigger: LEAD, steps: [pushS("s 1")] }, ["Two steps share the same inside name: remove one and add it again."]);
+bk("in the editor's order: the form's step, then first found", { trigger: LEAD, steps: [taskS("s1", { assignees: [] }), ifS("s2", [{ field: "service", op: "in", v: ["Aircon"] }]), waitS("s3", 1, "weeks")] },
+  ["Pick minutes, hours or days for the wait (step 2).", "Pick how to compare \"Service\" (step 4).", "Pick who the task is for (step 5).", "The last step does nothing. End with a Do step, or remove it."]);
+write("editor-blocks.json", {
+  about: "The old editor's blocking checks (index.html autoProblems; not its notes, and not \"Nobody signs this email yet\", which it asks only while the editor is open) = the engine's v1EditorProblems. catalog = the business's settings.catalog for every case (a case's own catalog is merged over it); wfName = the workflow's name. corpus = the first block of each phase-4 shape the old editor refused (upgrade.json + differential/corpus/builtin.json; the others have none).",
+  catalog: { templates: { welcomeEmail: "{hi}, thanks.", chatOpen: "Hi {first_name}, saw your chat.", missedCall: "Sorry we missed you.", reviewSms: "How did we go?", reviewEmailBody: "{hi}, how did we go?", jobWords: "{hi}, {technician} says thanks." } },
+  corpus: {
+    "upgrade-3 (design example)": "The email has no words yet (step 6).",
+    "stage with any stage": "Pick who the task is for (step 5).",
+    "chat with a locked condition (ready-made)": "The text has no words yet (step 6).",
+    "12 ifs in a row": "Pick how to compare \"Service\" (step 4).",
+    "all four actions and all wait units": "Pick who the task is for (step 5).",
+    "the same id twice": "Two steps share the same inside name: remove one and add it again.",
+    "no steps": "Pick at least one thing to do (step 5).",
+    "an unknown step kind is kept for the validator": "Pick at least one thing to do (step 5).",
+    "Any stage move: a task": "Pick who the task is for (step 5).",
+    "Aircon Google Ads leads, not VIP": "Pick how to compare \"Service\" (step 4).",
+    "Long nurture": "Pick who the task is for (step 5).",
+    "A blank that cannot be filled": "{technician} can't be filled in for \"A new lead comes in\" (step 6).",
+    "Long run: weekday window, 21 team notifications, then the email (planDefer walks back 22 steps)": "At most 20 steps.",
+    "Long run: not picked up, 20 team notifications, then the email (the If is checked again)": "At most 20 steps.",
+  },
+  cases: blk,
+});
+console.log("workflows", cases.length, "shape", shapes.length, "upgrade", ups.length, "patch", patches.length, "editor-blocks", blk.length);

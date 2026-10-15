@@ -41,7 +41,7 @@ function guardSandbox(){
   const ctx = vm.createContext({ sb, calls, PRESENT: false, VIEW_AS_ID: null, Proxy, Promise });
   // `let` in the app; plain vars here so the test can switch modes.
   const block = SRC.slice(SRC.indexOf('{\n  const realFrom = sb.from.bind(sb);'), SRC.indexOf('// Dollar figures written inside text'));
-  vm.runInContext(`${fnText('readOnlyReason')}\n${fnText('presentBlocked')}\n${block}`, ctx);
+  vm.runInContext(`${fnText('readOnlyReason')}\n${fnText('presentBlocked')}\n${constText('READ_ONLY_CALLS')}\n${block}`, ctx);
   return ctx;
 }
 async function testGuard(){
@@ -519,7 +519,7 @@ async function testAutomationsReadOnly(){
       getRealProfile: () => ({ id: 'p', role: 'owner' }), SUPABASE_URL: 'https://x', SUPABASE_ANON_KEY: 'k', contactById: () => ({ id: 'c1' }), leadStage: () => 'Quoted',
     };
     vm.createContext(ctx);
-    vm.runInContext([constText('AUTOMATIONS_URL'), constText('AUTOMATION_EVENTS_SENT'), constText('AUTO_WANTED'), constText('AUTO_PHASE4_EVENTS'), ...['readOnlyReason', 'catalogObject', 'automationEventBody', 'automationEvent', 'autoWantedLoad', 'autoEventWanted', 'autoEmitStage', 'autoFnCall', 'autoFnReason',
+    vm.runInContext([constText('READ_ONLY_CALLS'), constText('AUTOMATIONS_URL'), constText('AUTOMATION_EVENTS_SENT'), constText('AUTO_WANTED'), constText('AUTO_PHASE4_EVENTS'), ...['readOnlyReason', 'catalogObject', 'automationEventBody', 'automationEvent', 'autoWantedLoad', 'autoEventWanted', 'autoEmitStage', 'autoFnCall', 'autoFnReason',
       'saveMsgTemplate', 'deleteMsgTemplate', 'newMsgTemplate', 'editMsgTemplate', 'autoSaveEditor', 'toggleAutomation', 'autoWriteEnabled', 'deleteAutomation', 'duplicateAutomation',
       'autoBackToDefault', 'autoReadyBackToDefault', 'autoReadyAct'].map(fnText)].join('\n'), ctx);
     const msg = vm.runInContext('readOnlyReason()', ctx);
@@ -539,6 +539,144 @@ async function testAutomationsReadOnly(){
   ok(/if \(!\(await autoEventWanted\(type\)\)\) return;/.test(fnText('automationEvent')), 'automationEvent only tells the engine when a workflow that is on waits for that event (automation_wanted)');
 }
 
+// ── 4. Settings → Automation (stage 2, G3.1; design §4.2): READ_ONLY_CALLS are the only RPCs and function steps that go
+// through in Presentation mode and View as. Each listed SQL function is stable + security invoker (the caller's RLS, no
+// writes); each listed step of the automations function reaches no write (static scan of everything it calls). The list's
+// writes each check readOnlyReason() first. ──
+async function testAutomationPageReadOnly(){
+  const R = vm.runInContext(`${constText('READ_ONLY_CALLS')}; READ_ONLY_CALLS`, vm.createContext({}));
+  const SQL = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage2-automations.sql'), 'utf8').split('\n').filter(l => !/^\s*--/.test(l)).join('\n');
+  for (const name of R.rpc) {
+    const defs = [...SQL.matchAll(new RegExp(`create (?:or replace )?function public\\.${name}\\(([\\s\\S]*?)\\bas \\$\\$`, 'g'))].map(m => m[1]);
+    ok(defs.length > 0 && defs.every(h => /\bstable\b/.test(h) && /security invoker/.test(h) && !/security definer|volatile/.test(h)), `READ_ONLY_CALLS: ${name} is stable and security invoker in every definition (${defs.length})`);
+  }
+  const ENG = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'automations', 'index.ts'), 'utf8');
+  const body = name => {
+    const m = new RegExp(`\\n(?:export )?(?:async )?function ${name}\\b[^(]*\\(`).exec(ENG); if (!m) return null;
+    let j = m.index + m[0].length, d = 1; while (d > 0) { if (ENG[j] === '(') d++; else if (ENG[j] === ')') d--; j++; }
+    let k = ENG.indexOf('{', j) + 1; d = 1; while (d > 0) { const c = ENG[k]; if (c === '{') d++; else if (c === '}') d--; k++; }
+    return ENG.slice(m.index, k);
+  };
+  const writesOf = step => {
+    // the step's branch in apiStep: from its `if (step === "…")` to the next branch
+    const at = ENG.indexOf(`if (step === "${step}")`), line = at < 0 ? '' : ENG.slice(at, ENG.slice(at + 1).search(/\n  (if \(step|return apiErr)/) + at + 1);
+    const seen = new Set(), q = [...line.matchAll(/\b([A-Za-z_]\w*)\(/g)].map(m => m[1]), hits = [];
+    while (q.length) { const n = q.shift(); if (seen.has(n)) continue; seen.add(n); const b = body(n); if (!b) continue;
+      if (/\.(insert|update|upsert|delete)\(|\.rpc\(|fetch\(/.test(b)) hits.push(n);
+      for (const m of b.matchAll(/\b([A-Za-z_]\w*)\(/g)) if (!seen.has(m[1])) q.push(m[1]); }
+    return { found: !!line, hits };
+  };
+  for (const step of R.fn) { const w = writesOf(step); ok(w.found && w.hits.length === 0, `READ_ONLY_CALLS: the function's step "${step}" reaches no write`, w); }
+  // the scan finds writes where there are some: "schema" given a workflow id can upgrade a row (so it is not listed yet)
+  ok(writesOf('schema').hits.length > 0 && writesOf('save').hits.length > 0 && !R.fn.includes('schema'), 'the scan sees the writes behind "schema" and "save" (neither is listed)');
+  // the guard: in a read-only mode a listed RPC reaches the database, any other is refused
+  const ctx = guardSandbox(); vm.runInContext('PRESENT = true;', ctx);
+  const r1 = await vm.runInContext(`sb.rpc('automation_list_stats', { p_since: '2026-04-18T00:00:00Z' })`, ctx), r2 = await vm.runInContext(`sb.rpc('automation_mark_reviewed', { p_automation: 'x' })`, ctx);
+  ok(ctx.calls.join() === 'rpc:automation_list_stats' && r1.error === null && r2.error && /Presentation mode/.test(r2.error.message), 'presentation mode: the list counts load; "Mark as reviewed" is refused', ctx.calls);
+  // the list's writes each check first
+  for (const n of ['wfSetPublished', 'wfRenameSave', 'wfFolderNew', 'wfFolderCreate', 'wfDelete', 'wfDeleteSave', 'wfRestore', 'wfFolderDelete', 'wfDuplicate', 'wfMarkReviewed', 'wfMoveOpen', 'wfMoveHere', 'wfBulk', 'wfBulkExec',
+    'wfNotifySave', 'wfBuilderSave', 'wfPauseSave', 'wfTplChoose', 'wfTplRename', 'wfTplRenameSave', 'wfTplDelete', 'wfTplDeleteSave', 'wfTplUpload', 'wfTplUploadSave'])
+    ok(/^[^{]*\{\s*(?:\/\/[^\n]*\n\s*)?if \(readOnlyReason\(\)\)/.test(fnText(n)), `${n}() checks readOnlyReason() first`);
+  // G3.5: the lead's "Assigned to" picker saves nothing in a read-only mode; the team's names (team_people, a security
+  // definer read) are not listed, so there the picker falls back to the profiles the owner already has
+  ok(/^[^{]*\{\s*if \(readOnlyReason\(\)\)/.test(fnText('setLeadAssignee')) && !R.rpc.includes('team_people') && /TEAM_PEOPLE = error \|\| !Array\.isArray\(data\) \? null/.test(fnText('loadTeamPeople')),
+    'setLeadAssignee() checks readOnlyReason() first; team_people is not a read-only call (refused there → the profiles are used)');
+  ok(/if \(readOnlyReason\(\)\)/.test(fnText('wfFolderDelete').split('confirmAction(')[1] || ''), 'wfFolderDelete checks again after the yes');
+  // G3.3: hiding System rows writes only through autoCatalogWrite (which checks first); the template library's writes go
+  // through the function (template_* / duplicate), never straight to automation_templates (insert / update revoked)
+  ok(/autoCatalogWrite\(/.test(fnText('wfSystemHide')) && !/\bdb\.|sb\.from/.test(fnText('wfSystemHide')) && /^[^{]*\{\s*if \(readOnlyReason\(\)\)/.test(fnText('autoCatalogWrite')), 'wfSystemHide writes only through autoCatalogWrite, which checks readOnlyReason() first');
+  ok(!/from\('automation_templates'\)\.(insert|update|upsert|delete)/.test(SRC) && /from\('automation_templates'\)\.select\(/.test(fnText('wfFetchTemplates')), 'automation_templates: the app only reads it (writes go through the automations function)');
+  // Global Workflow Settings (G3.2): a card's draft is never started in a read-only mode (it says why instead)
+  ok(/^[^{]*\{\s*if \(readOnlyReason\(\)\) \{ showToast\(readOnlyReason\(\)\); return null; \}/.test(fnText('wfGsDraft')), 'wfGsDraft() refuses to start editing in Presentation mode / View as');
+  // the function call itself: only the listed steps leave in a read-only mode
+  const log = { fetch: [] };
+  const fctx = { PRESENT: true, VIEW_AS_ID: null, JSON, AUTOMATIONS_URL: 'https://x/functions/v1/automations', SUPABASE_ANON_KEY: 'k', String,
+    sb: { auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) } }, fetch: async (u, o) => { log.fetch.push(JSON.parse(o.body).step); return { status: 200, ok: true, json: async () => ({ ok: true }) }; } };
+  vm.createContext(fctx);
+  vm.runInContext([constText('READ_ONLY_CALLS'), fnText('readOnlyReason'), fnText('autoFnCall')].join('\n'), fctx);
+  const a = await vm.runInContext(`autoFnCall({ step: 'registry' })`, fctx), b = await vm.runInContext(`autoFnCall({ step: 'schema', automation_id: 'x' })`, fctx), c = await vm.runInContext(`autoFnCall({ step: 'publish' })`, fctx);
+  ok(log.fetch.join() === 'registry' && a.ok && !b.ok && !c.ok && /Presentation mode/.test(String(c.body.reason)), 'presentation mode: the registry is read; schema and publish never leave the app', log.fetch);
+}
+
+// ── 5. SQL Part 3 · G3.4 — the lock on direct writes to public.automations (design §2.9 Part 3, §7 G3.4, §8.2 #24/#26).
+// The block is read straight out of .claude/sql/stage2-automations.sql: table revoke + exactly the four column grants,
+// the delete policy dropped, read / change scoped to the business, idempotent, a proof inside the transaction, and an exact
+// ROLLBACK (phase 4's policies and Part 1's pin byte for byte). Then the app: every direct write it still makes to the
+// automations table touches only those four columns (no insert, upsert or hard delete), so the app keeps working after it. ──
+function testAutomationsLock(){
+  const SQLF = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage2-automations.sql'), 'utf8');
+  const P4 = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'settings-round2-phase4.sql'), 'utf8');
+  const at = SQLF.indexOf('-- PART 3 · G3.4 — lock direct writes'), end = SQLF.indexOf('-- END PART 3 · G3.4');
+  ok(at > 0 && end > at && at > SQLF.indexOf('-- END PART 3 · G3.5'), 'PART 3 · G3.4 is in the SQL file, after G3.5 (it runs last)');
+  const g = SQLF.slice(at, end), tx = g.slice(g.indexOf('\nbegin;\n'), g.indexOf('\ncommit;\n') + 9);
+  const rb = g.slice(g.indexOf('-- ROLLBACK (G3.4')).split('\n').filter(l => l.startsWith('-- ')).map(l => l.slice(3)).join('\n');
+  const p1 = SQLF.slice(SQLF.indexOf('-- PART 1'), SQLF.indexOf('-- END PART 1'));
+  const fnOf = (text, name) => { const a0 = text.indexOf(`create or replace function public.${name}(`); return a0 < 0 ? '' : text.slice(a0, text.indexOf('end $$;', a0) + 7); };
+  const code = tx.split('\n').filter(l => !/^\s*--/.test(l)).join('\n');
+  const GRANTED = ['name', 'description', 'folder_id', 'deleted_at'];
+  const gm = /grant update \(([^)]*)\) on public\.automations to authenticated;/.exec(code);
+  ok(gm && JSON.stringify(gm[1].split(',').map(x => x.trim())) === JSON.stringify(GRANTED) && (code.match(/grant /g) || []).length === 1,
+    'G3.4: the only grant is UPDATE on name, description, folder_id, deleted_at to authenticated (rename, move, Deleted, Restore)', gm && gm[1]);
+  ok(/revoke insert, update, delete, truncate, references, trigger on public\.automations from public, anon, authenticated;/.test(code)
+    && code.indexOf('revoke insert, update, delete') < code.indexOf('grant update ('), 'G3.4: the TABLE revoke (insert / update / delete / truncate …) comes first: a column revoke would do nothing under a table grant');
+  ok(code.includes('drop policy if exists "automations: owners and managers delete" on public.automations;') && !/create policy "automations: owners and managers delete"/.test(code),
+    'G3.4: the hard-delete policy is dropped (housekeeping only)');
+  ok(['read', 'change'].every(k => code.includes(`drop policy if exists "automations: owners and managers ${k}" on public.automations;`))
+    && /create policy "automations: owners and managers read" on public\.automations for select\s+using \(public\.is_owner_or_manager\(\) and business_id = public\.current_business_id\(\)\);/.test(code)
+    && /create policy "automations: owners and managers change" on public\.automations for update\s+using \(public\.is_owner_or_manager\(\) and business_id = public\.current_business_id\(\)\)\s+with check \(public\.is_owner_or_manager\(\) and business_id = public\.current_business_id\(\)\);/.test(code),
+    'G3.4: read / change scoped to this business (SaaS: business_id + RLS)');
+  // idempotent: every create has its if-not-exists / or-replace / drop-first, the backup keeps the first copy
+  const creates = [...code.matchAll(/\bcreate (?!or replace|policy|schema if not exists|table if not exists)(\w+)/g)].map(m => m[0]);
+  const pols = [...code.matchAll(/create policy "([^"]+)"/g)].map(m => m[1]);
+  ok(creates.length === 0 && pols.every(n => code.indexOf(`drop policy if exists "${n}"`) >= 0 && code.indexOf(`drop policy if exists "${n}"`) < code.indexOf(`create policy "${n}"`))
+    && code.includes('on conflict (id) do nothing;') && /create table if not exists backup\.automations_grants_before_part3/.test(code) && /alter table backup\.automations_grants_before_part3 enable row level security;/.test(code),
+    'G3.4: idempotent (or replace / if not exists / drop policy first; the backup row is kept from the first run) and the backup table has RLS on', creates);
+  // checks before (stops) and the proof inside the transaction
+  ok(/raise exception 'Part 2 · G2\.4 is not applied/.test(code) && /other column grants: stop/.test(code) && /is not phase 4''s: stop/.test(code)
+    && /raise exception 'Part 3 · G3\.4: the lock did not take/.test(code) && code.includes("if has_column_privilege('authenticated', 'public.automations', 'enabled', 'UPDATE')")
+    && !/has_table_privilege\('[a-z_]+', 'public\.automations', '[A-Z]+, /.test(code), 'G3.4: checks before stop the block; the proof (enabled not updatable, four columns, no DELETE policy…) runs inside the transaction, one privilege per call');
+  ok(g.includes("--   select has_column_privilege('authenticated', 'public.automations', 'enabled', 'UPDATE');   -- false") && /Check before \(read-only\)/.test(g) && /Check after \(read-only/.test(g),
+    "G3.4: the design's check-after is there (has_column_privilege(…'enabled','UPDATE') = false), with the other read-only checks");
+  // the pin keeps Part 1's rules word for word and adds the two new ones; the ROLLBACK restores Part 1's pin exactly
+  const pin1 = fnOf(p1, 'automations_v2_pin'), pin3 = fnOf(code, 'automations_v2_pin'), pinRb = fnOf(rb, 'automations_v2_pin');
+  const pin1Lines = pin1.split('\n').filter(l => l.trim() && !/^\s*(end if;|return new;|end \$\$;)$/.test(l));
+  ok(pin1.length > 500 && pin1Lines.every(l => pin3.includes(l)) && /new\.deleted_at := case when old\.deleted_at is null then now\(\) else old\.deleted_at end;/.test(pin3)
+    && /f\.business_id = old\.business_id/.test(pin3) && /using errcode = '42501'/.test(pin3) && pin3.indexOf("if current_user::text not in ('authenticated', 'anon') then return new; end if;") > 0,
+    "G3.4: the pin keeps Part 1's rules and adds: a soft delete stamped now (never back-dated / moved), a folder of the business only (the app's roles only)");
+  ok(pinRb === pin1, "G3.4 ROLLBACK: Part 1's pin back byte for byte");
+  const p4pol = n => { const m = new RegExp(`create policy "automations: owners and managers ${n}" on public\\.automations for [^;]*;`).exec(P4); return m ? m[0].replace(/\s+/g, ' ') : null; };
+  const rbPol = n => { const m = new RegExp(`create policy "automations: owners and managers ${n}" on public\\.automations for [^;]*;`).exec(rb); return m ? m[0].replace(/\s+/g, ' ') : null; };
+  ok(['read', 'change', 'delete'].every(n => p4pol(n) && rbPol(n) === p4pol(n)), "G3.4 ROLLBACK: phase 4's read / change / delete policies back word for word", ['read', 'change', 'delete'].map(rbPol));
+  ok(rb.includes('revoke update (name, description, folder_id, deleted_at) on public.automations from authenticated;') && /aclexplode\(b\.relacl::aclitem\[\]\)/.test(rb)
+    && /if now_acl is distinct from was_acl then raise exception/.test(rb) && rb.indexOf('if now_acl is distinct') < rb.indexOf('drop table backup.automations_grants_before_part3;')
+    && /^begin;$/m.test(rb) && /^commit;$/m.test(rb), 'G3.4 ROLLBACK: the four column grants go, the saved table grants come back, checked equal before the backup is dropped, one transaction');
+  // the app: its direct writes to automations touch only the four granted columns
+  const aliases = [...SRC.matchAll(/const (\w+) = 'automations';/g)].map(m => m[1]);
+  ok(aliases.length === 1 && aliases[0] === 'AUTO_TABLE' && !/from\(\s*['"`]automations['"`]\s*\)/.test(SRC), "the app names the automations table only through AUTO_TABLE");
+  const writes = [...SRC.matchAll(/from\(AUTO_TABLE\)\.(insert|upsert|delete|update)\(/g)];
+  const cols = [], bad = [];
+  for (const m of writes) {
+    if (m[1] !== 'update') { bad.push(m[1]); continue; }
+    let i = m.index + m[0].length, d = 1; const st = i;
+    while (d > 0) { const c = SRC[i]; if ('([{'.includes(c)) d++; else if (')]}'.includes(c)) d--; i++; }
+    const arg = SRC.slice(st, i - 1).trim();
+    if (!/^\{[\s\S]*\}$/.test(arg)) { bad.push('update(' + arg.slice(0, 40) + ')'); continue; }
+    let depth = 0, cur = '', parts = [];
+    for (const c of arg.slice(1, -1)) { if ('([{'.includes(c)) depth++; else if (')]}'.includes(c)) depth--; if (c === ',' && depth === 0) { parts.push(cur); cur = ''; } else cur += c; }
+    parts.push(cur);
+    for (const p0 of parts.map(x => x.trim()).filter(Boolean)) { const k = /^(\w+)\s*(?::|$)/.exec(p0); if (!k) bad.push('?' + p0.slice(0, 30)); else cols.push(k[1]); }
+  }
+  ok(writes.length >= 8 && bad.length === 0 && cols.length > 0 && cols.every(c => GRANTED.includes(c)),
+    'the app writes the automations table only by updating name / description / folder_id / deleted_at (no insert, upsert, hard delete or other column): it keeps working after G3.4', { bad, cols: [...new Set(cols)] });
+  ok(/\.\.\.\(ed\.isNew && ed\.baseKey \? \{ template_key: ed\.baseKey \} : \{\}\)/.test(fnText('autoSaveEditor')), "autoSaveEditor: where a copy came from (template_key) goes with the function's save, not as a direct write");
+  // the RUNBOOK has the Part-3 live order with G3.4 last
+  const RB = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage2-part1-RUNBOOK.md'), 'utf8');
+  const r17 = RB.slice(RB.indexOf('## 17.')), o17 = r17.slice(r17.indexOf('### 17.1'), r17.indexOf('### 17.2'));
+  const step = k => o17.indexOf(`**PART 3 · ${k}`);
+  ok(o17.length > 500 && step('G3.5') > 0 && step('G3.5') < step('G3.1') && step('G3.1') < o17.indexOf('**Automations function**') && o17.indexOf('**Automations function**') < o17.indexOf('**App**')
+    && o17.indexOf('**App**') < step('G3.4') && /PASS 1 … 26/.test(o17) && /### 17\.2 Roll back/.test(r17), 'RUNBOOK §17: the Part-3 live order (G3.5, G3.1, function, app, then G3.4 last), PASS 26, the roll back');
+}
+
 (async () => {
   await testGuard();
   testStaticScan();
@@ -550,6 +688,8 @@ async function testAutomationsReadOnly(){
   await testExportReadOnly();
   testFlowViewReadOnly();
   await testAutomationsReadOnly();
+  await testAutomationPageReadOnly();
+  testAutomationsLock();
   console.log(`read-only: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

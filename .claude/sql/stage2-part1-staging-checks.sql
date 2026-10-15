@@ -12,6 +12,18 @@
 -- atomic tag / note edits, automation_apply's record writes and their events, the inbound link counter);
 -- since G2.4 also "PASS 19", "PASS 20", "PASS 21" and 'stage2 phase 2 · G2.4 staging checks done' (after PART 2 · G2.4: the
 -- guard v2, save / publish / migrate, Needs review, the ROLLBACK list, the SQL shape / arm keys on every fixture pair).
+-- since G3.1 also "PASS 22" and 'stage2 phase 3 · G3.1 staging checks done' (after PART 3 · G3.1: the list's counts per
+-- channel);
+-- since G3.2 also "PASS 23" and 'stage2 phase 3 · G3.2 staging checks done' (Global Workflow Settings: the Pause workflow
+-- rules of Part 1's automation_pauses_guard and its targeted wake; needs no new SQL).
+-- since G3.3 also "PASS 24" and 'stage2 phase 3 · G3.3 staging checks done' (the template library: a template of the
+-- business's own as the automations function writes it; needs no new SQL).
+-- since G3.5 also "PASS 25" and 'stage2 phase 3 · G3.5 staging checks done' (after PART 3 · G3.5: quiet imports, the
+-- lead's Assigned to, no Quote status).
+-- since G3.4 also "PASS 26" and 'stage2 phase 3 · G3.4 staging checks done' (after PART 3 · G3.4, the LAST block of Part 3:
+-- the lock on direct writes as owner / manager / VA / technician / anon; before that block ran it prints "NOTE 26 …"). After
+-- G3.4, the signed-in parts of checks 12 and 19 print "NOTE 12: PART 3 · G3.4 is applied …" and "NOTE 19: PART 3 · G3.4
+-- is applied …" (the app can't insert any more; the SQL-editor control 12a still runs).
 -- It needs the staging demo data (staging-seed-demo.sql): at least one contact. Nothing here sends anything (no function
 -- is called; the capture triggers only write automation_events rows, which are undone).
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -619,6 +631,9 @@ begin
     end;
     if owner_id is null then
       raise notice 'NOTE 12: no owner profile on staging; the signed-in part was skipped';
+    elsif not has_table_privilege('authenticated', 'public.automations', 'INSERT') then
+      -- after PART 3 · G3.4 an app insert / a write of the v2-only columns is refused before the pin runs
+      raise notice 'NOTE 12: PART 3 · G3.4 is applied (the app can''t insert or write the v2-only columns any more); PASS 26 checks the app''s writes';
     else
       begin
         perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
@@ -1165,6 +1180,9 @@ begin
     end;
     if owner_id is null then
       raise notice 'NOTE 19: no owner profile on staging; the signed-in part was skipped';
+    elsif not has_table_privilege('authenticated', 'public.automations', 'INSERT') then
+      -- after PART 3 · G3.4 an app insert / a write of enabled or origin & co. is refused before the guard runs
+      raise notice 'NOTE 19: PART 3 · G3.4 is applied (the app''s roles can''t insert or write enabled / origin & co. any more); PASS 26 checks the app''s writes';
     else
       begin
         perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
@@ -1289,3 +1307,456 @@ begin
 end $$;
 
 select 'stage2 phase 2 · G2.4 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 3 · G3.1 — the Automation list's counts (design §4.3). STAGING ONLY, after PART 3 · G3.1 of
+-- .claude/sql/stage2-automations.sql ran there. Same rules: the block undoes what it wrote, then prints "PASS 22".
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 22. (G3.1) automation_list_stats: per workflow enrolled since p_since, active (waiting + running), failed runs and
+--     'ch' = the action rows per "channel:status" since p_since (step rows and older rows are not counted); a workflow
+--     whose runs were pruned still shows its 'ch'; the function stays stable + security invoker (Presentation mode and
+--     View as may call it: READ_ONLY_CALLS in index.html).
+do $$
+declare a uuid; b uuid; r1 uuid; r2 uuid; res jsonb; want jsonb;
+begin
+  begin
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 22a', false, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]') returning id into a;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 22b', false, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]') returning id into b;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status)
+    values (a, 1, 'stage2-check-22-1', 'newLead', now(), 'contact', 'stage2-check', now(), now(), 'waiting') returning id into r1;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status, created_at)
+    values (a, 1, 'stage2-check-22-2', 'newLead', now(), 'contact', 'stage2-check', now(), now(), 'done', now() - interval '200 days') returning id into r2;
+    insert into public.automation_log (run_id, step_id, status, channel, audience, automation_id, automation_name, at) values
+      (r1, 'e1', 'sent', 'email', 'customer', a, 'stage2 check 22a', now()),
+      (r1, 'e2', 'failed', 'email', 'customer', a, 'stage2 check 22a', now()),
+      (r1, 'p1', 'sent', 'push', 'team', a, 'stage2 check 22a', now()),
+      (r2, 'e1', 'sent', 'email', 'customer', a, 'stage2 check 22a', now() - interval '200 days');   -- older than p_since: not counted
+    insert into public.automation_log (run_id, step_id, row_kind, status, automation_id, automation_name, at) values (r1, 'w1', 'step', 'waiting', a, 'stage2 check 22a', now());
+    -- b: its runs are gone (pruned), one task row is left
+    insert into public.automation_log (run_id, step_id, status, channel, audience, automation_id, automation_name, at) values (null, 't1', 'sent', 'task', 'team', b, 'stage2 check 22b', now());
+    res := public.automation_list_stats(now() - interval '180 days');
+    want := '{"enrolled":1,"active":1,"failed":1,"ch":{"email:sent":1,"email:failed":1,"push:sent":1}}';
+    if (res -> a::text) - 'last_at' is distinct from want then raise exception 'FAIL 22a: workflow a reads % (want %)', res -> a::text, want; end if;
+    if (res -> b::text) - 'last_at' is distinct from '{"enrolled":0,"active":0,"failed":0,"ch":{"task:sent":1}}'::jsonb then raise exception 'FAIL 22b: a workflow with no runs left reads %', res -> b::text; end if;
+    if not exists (select 1 from pg_proc p where p.oid = 'public.automation_list_stats(timestamptz)'::regprocedure and p.provolatile = 's' and not p.prosecdef) then
+      raise exception 'FAIL 22c: automation_list_stats is not stable + security invoker (READ_ONLY_CALLS relies on it)';
+    end if;
+    if has_function_privilege('anon', 'public.automation_list_stats(timestamptz)', 'execute') then raise exception 'FAIL 22d: anon may call automation_list_stats'; end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 22 — the list counts: enrolled since, active, failed runs, per channel (action rows only, since p_since), also with no runs left';
+end $$;
+
+select 'stage2 phase 3 · G3.1 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 3 · G3.2 — Global Workflow Settings → Pause workflow (design §4.4, §2.9). STAGING ONLY. Part 1 already has the
+-- table, its guard and its wake; this proves them with the cases the app's wfPauseProblems tests use
+-- (tests/business-logic.test.js testWfGlobalSettings). Same rules: the block undoes what it wrote, then prints "PASS 23".
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 23. (G3.2) automation_pauses_guard: one workflow in two overlapping ranges refused (another workflow / a range starting at
+--     the other's end fine); at most 15 dates; at most 15 days (exactly 15 fine); end after start; a real date; at least one
+--     workflow (duplicates stored once); deleted or unknown workflows refused; an annual range across New Year meets a one-off
+--     years later on both sides of New Year; an annual 29 February = 28 February in 2027; GHL's / the guard's words.
+--     automation_pauses_after: removing a range or changing only its workflows wakes only the held runs of the workflows
+--     that left or joined (watch 'pause'), never the others.
+do $$
+declare a uuid; b uuid; c uuid; d uuid; e uuid; x uuid; pa uuid; px uuid; r1 uuid; r2 uuid; n integer; i integer; got text;
+  ov constant text := 'A workflow should not be part of two or more date ranges that are overlapping.';
+begin
+  begin
+    delete from public.automation_pauses where business_id = 'default';   -- a clean slate (undone with the rest)
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23a', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23b', false, '{"type":"newLead","params":{}}', '[]') returning id into b;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23c', false, '{"type":"newLead","params":{}}', '[]') returning id into c;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23d', false, '{"type":"newLead","params":{}}', '[]') returning id into d;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23e', false, '{"type":"newLead","params":{}}', '[]') returning id into e;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23x', false, '{"type":"newLead","params":{}}', '[]') returning id into x;
+    update public.automations set deleted_at = now() where id = d;
+    -- 23a. overlap
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-12-01T00:00', '2026-12-05T00:00', array[a]) returning id into pa;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-12-04T00:00', '2026-12-08T00:00', array[a]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23a: an overlapping range of the same workflow gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-12-04T00:00', '2026-12-08T00:00', array[b, a]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23a: an overlap through one of two workflows gave %', got; end if;
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-12-04T00:00', '2026-12-08T00:00', array[b]);         -- another workflow: fine
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-12-05T00:00', '2026-12-06T00:00', array[a]);         -- starts at the other's end: fine
+    -- 23b. 15 days, end after start, a real date
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-11-01T00:00', '2026-11-16T00:00', array[c]);         -- exactly 15 days: fine
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2027-11-01T00:00', '2027-11-16T00:01', array[c]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'Maximum allowed difference between the start and end date is 15 days.' then raise exception 'FAIL 23b: 15 days and a minute gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2027-11-02T00:00', '2027-11-01T00:00', array[c]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'The end must be after the start' then raise exception 'FAIL 23b: an end before the start gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2027-02-30T09:00', '2027-03-02T09:00', array[c]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got = 'saved' then raise exception 'FAIL 23b: 30 February was saved'; end if;
+    -- 23c. workflows: at least one, once each, existing and not deleted
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2045-01-01T00:00', '2045-01-02T00:00', array[]::uuid[]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'Choose at least one workflow to pause' then raise exception 'FAIL 23c: no workflow gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2045-01-01T00:00', '2045-01-02T00:00', array[d]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'A chosen workflow does not exist (or was deleted)' then raise exception 'FAIL 23c: a deleted workflow gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2045-01-01T00:00', '2045-01-02T00:00', array[gen_random_uuid(), a]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'A chosen workflow does not exist (or was deleted)' then raise exception 'FAIL 23c: an unknown workflow gave %', got; end if;
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2045-01-01T00:00', '2045-01-02T00:00', array[e, e]);
+    if (select cardinality(automation_ids) from public.automation_pauses where start_wall = '2045-01-01T00:00') <> 1 then raise exception 'FAIL 23c: a workflow chosen twice is stored twice'; end if;
+    -- 23d. an annual range across New Year
+    insert into public.automation_pauses (start_wall, end_wall, annually, automation_ids) values ('2026-12-24T17:00', '2027-01-02T08:00', true, array[b]);
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2031-12-31T10:00', '2032-01-01T10:00', array[b]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23d: New Year''s Eve five years on gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2031-01-01T00:00', '2031-01-02T00:00', array[b]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23d: 1 January (the year before''s range) gave %', got; end if;
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2031-01-03T00:00', '2031-01-05T00:00', array[b]);         -- after it: fine
+    -- 23e. 29 February, annually (28 February in 2027), compared from both sides
+    insert into public.automation_pauses (start_wall, end_wall, annually, automation_ids) values ('2028-02-29T09:00', '2028-03-01T09:00', true, array[c]);
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2027-02-28T10:00', '2027-02-28T12:00', array[c]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23e: 28 February 2027 gave %', got; end if;
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2027-03-01T09:00', '2027-03-01T10:00', array[c]);         -- at its end: fine
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2029-02-28T10:00', '2029-02-28T12:00', array[e]);
+    begin insert into public.automation_pauses (start_wall, end_wall, annually, automation_ids) values ('2028-02-29T09:00', '2028-03-01T09:00', true, array[e]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23e: an annual 29 February against a one-off 28 February 2029 gave %', got; end if;
+    -- 23f. the wake: removing a range / changing only its workflows wakes the held runs of the workflows that left or joined
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2040-01-01T00:00', '2040-01-02T00:00', array[x]) returning id into px;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status, watch)
+    values (x, 1, 'stage2-check-23-1', 'newLead', now(), 'contact', 'stage2-check', now(), now() + interval '1 day', 'waiting', array['pause']) returning id into r1;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status, watch)
+    values (a, 1, 'stage2-check-23-2', 'newLead', now(), 'contact', 'stage2-check', now(), now() + interval '1 day', 'waiting', array['pause']) returning id into r2;
+    delete from public.automation_pauses where id = px;
+    if (select due_at from public.automation_runs where id = r1) <> now() or (select due_at from public.automation_runs where id = r2) <> now() + interval '1 day' then
+      raise exception 'FAIL 23f: removing x''s range did not wake only x''s held run';
+    end if;
+    update public.automation_runs set due_at = now() + interval '1 day' where id = r1;
+    update public.automation_pauses set automation_ids = array[a, x] where id = pa;   -- x joins, a stays
+    if (select due_at from public.automation_runs where id = r1) <> now() or (select due_at from public.automation_runs where id = r2) <> now() + interval '1 day' then
+      raise exception 'FAIL 23f: x joining a range did not wake only x''s held run';
+    end if;
+    -- 23g. at most 15 dates (counted per business; the rows above are kept until the undo)
+    select count(*) into n from public.automation_pauses where business_id = 'default';
+    for i in 1..(15 - n) loop
+      insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ((2050 + i)::text || '-01-01T00:00', (2050 + i)::text || '-01-02T00:00', array[e]);
+    end loop;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2049-01-01T00:00', '2049-01-02T00:00', array[e]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'At most 15 pause dates' then raise exception 'FAIL 23g: a 16th date gave % (there were %)', got, n; end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 23 — Pause workflow: overlap, 15 dates, 15 days, end after start, real dates, deleted / unknown workflows, annual across New Year, 29 February, the targeted wake';
+end $$;
+
+select 'stage2 phase 3 · G3.2 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 3 · G3.3 — the template library (design §4.3, §2.9). STAGING ONLY. Part 1 already has automation_templates; this
+-- proves what the automations function's template_upload / _rename / _delete rely on. Same rules: the block undoes what it
+-- wrote, then prints "PASS 24".
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 24. (G3.3) a template of the business's own (origin user, key mine_ + 10, the workflow it came from) saves; a second live
+--     row with the same key is refused (automation_templates_key_once); after a soft delete (deleted_at) the key is free
+--     again in the index (the function never reuses one: it reads every key, deleted or not); a doc that is not schema 2,
+--     an empty name or an origin other than system / user is refused; deleting the source workflow keeps the template
+--     (source_automation_id set null); the app's role reads it but can't write it.
+do $$
+declare a uuid; t uuid; got text;
+  doc constant jsonb := '{"schema":2,"seq":1,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead"},"out":{"next":null}}}}';
+begin
+  begin
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 24', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automation_templates (key, name, description, category, definition, origin, source_automation_id, created_by_name)
+      values ('mine_check24abc', 'Check 24', 'From a workflow', 'Team notifications', doc, 'user', a, 'Staging') returning id into t;
+    begin insert into public.automation_templates (key, name, definition, origin) values ('mine_check24abc', 'Again', doc, 'user'); got := 'saved'; exception when unique_violation then got := 'unique'; end;
+    if got <> 'unique' then raise exception 'FAIL 24a: a second live template with the same key gave %', got; end if;
+    update public.automation_templates set deleted_at = now() where id = t;
+    insert into public.automation_templates (key, name, definition, origin) values ('mine_check24abc', 'After delete', doc, 'user');
+    begin insert into public.automation_templates (key, name, definition, origin) values ('mine_check24x', 'Old doc', '{"trigger":{},"steps":[]}', 'user'); got := 'saved'; exception when check_violation then got := 'check'; end;
+    if got <> 'check' then raise exception 'FAIL 24b: a doc that is not schema 2 gave %', got; end if;
+    begin insert into public.automation_templates (key, name, definition, origin) values ('mine_check24y', '', doc, 'user'); got := 'saved'; exception when check_violation then got := 'check'; end;
+    if got <> 'check' then raise exception 'FAIL 24b: an empty name gave %', got; end if;
+    begin insert into public.automation_templates (key, name, definition, origin) values ('mine_check24z', 'X', doc, 'ai'); got := 'saved'; exception when check_violation then got := 'check'; end;
+    if got <> 'check' then raise exception 'FAIL 24b: origin ai gave %', got; end if;
+    delete from public.automations where id = a;
+    if (select source_automation_id from public.automation_templates where id = t) is not null then raise exception 'FAIL 24c: deleting the source workflow did not clear source_automation_id'; end if;
+    if not has_table_privilege('authenticated', 'public.automation_templates', 'select') or has_table_privilege('authenticated', 'public.automation_templates', 'insert')
+       or has_table_privilege('authenticated', 'public.automation_templates', 'update') or has_table_privilege('authenticated', 'public.automation_templates', 'delete') then
+      raise exception 'FAIL 24d: the app''s role can write automation_templates (or can''t read it)';
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 24 — the template library: a template of the business''s own, one live key, the doc check, the source kept optional, the app reads but can''t write';
+end $$;
+
+select 'stage2 phase 3 · G3.3 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 3 · G3.5 — Ofek's Q5 / Q6 and quiet imports (design §10). STAGING ONLY, after PART 3 · G3.5 of
+-- .claude/sql/stage2-automations.sql ran there. Same rules: the block undoes what it wrote, then prints "PASS 25".
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 25. (G3.5) a) an imported lead (import_quiet, a copy of the demo card with a tag and a note) and an imported task make
+--     no event; the import marking an existing lead quiet (with a tag) makes none; the import's own later write (the
+--     transaction says automation.import = on) makes none; a person's later change of the quiet lead does ("tag added",
+--     "Lead changed"); a normal new task does ("Task added"); b) automation_apply 'assign' sets the lead's Assigned to with a
+--     history line and a "Lead changed" event for field assigned_user with the run's cause, then 'assign' null clears it,
+--     a person not in the team is skipped; c) as a signed-in VA (RLS + contacts_assignee_guard): assigning someone else is
+--     refused (42501), themselves and nobody pass; as an owner anyone passes; d) team_people() answers a signed-in person
+--     and nobody else; e) no 'estimates' in the contacts capture any more; f) a quiet job's imported date
+--     (jobs.import_quiet_date): the import marking a job keeps its date, a person's reschedule leaves it, the import's own
+--     later date change moves it.
+do $$
+declare a uuid; c uuid; q uuid; t1 uuid; t2 uuid; r uuid := gen_random_uuid(); owner_id uuid; va_id uuid; res jsonb; n integer; got text; nrows integer; j text;
+begin
+  begin
+    select id into c from public.contacts order by created_at desc nulls last limit 1;
+    if c is null then raise exception 'FAIL 25: staging has no contacts (run staging-seed-demo.sql first)'; end if;
+    select id into owner_id from public.profiles where role = 'owner' order by id limit 1;
+    select id into va_id from public.profiles where role = 'va' order by id limit 1;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 25', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automation_wanted (business_id, event_type) values ('default', 'contact_tag'), ('default', 'note_added'), ('default', 'contact_changed'), ('default', 'task_added'), ('default', 'job_booked')
+      on conflict do nothing;
+    -- a) the import: a quiet copy of the demo card (a tag, a note, a booking), a quiet task
+    insert into public.contacts
+    select (jsonb_populate_record(null::public.contacts, to_jsonb(x) || jsonb_build_object('id', gen_random_uuid(), 'tags', array['s2c25-imp'], 'import_quiet', true,
+            'customer_notes', '[{"id":"s2c25n","text":"imported note"}]'::jsonb, 'booked_for', (current_date + 3)::text,
+            'email', 'stage2-check-25@example.invalid', 'phone', '0491570025'))).*
+      from public.contacts x where x.id = c
+    returning id into q;
+    insert into public.tasks (board, title, status, contact_id, import_quiet) values ('ron', 'Imported task (s2c25)', 'Not Started', q, true) returning id into t1;
+    select count(*) into n from public.automation_events where (contact_id = q or record_id = t1::text) and at = now();
+    if n <> 0 then raise exception 'FAIL 25a: an imported lead / task made % events (want 0)', n; end if;
+    update public.contacts set import_quiet = true, tags = coalesce(tags, '{}'::text[]) || array['s2c25-mark'] where id = c;
+    perform set_config('automation.import', 'on', true);
+    update public.contacts set tags = coalesce(tags, '{}'::text[]) || array['s2c25-sync'] where id = q;
+    perform set_config('automation.import', '', true);
+    select count(*) into n from public.automation_events where contact_id in (c, q) and at = now();
+    if n <> 0 then raise exception 'FAIL 25a: the import marking a lead / its own later write made % events (want 0)', n; end if;
+    update public.contacts set tags = coalesce(tags, '{}'::text[]) || array['s2c25-person'], postcode = 'S2C25' where id = q;   -- a person, later
+    insert into public.tasks (board, title, status, contact_id) values ('ron', 'A person''s task (s2c25)', 'Not Started', c) returning id into t2;
+    select count(*) into n from public.automation_events where at = now() and (
+      (contact_id = q and type = 'contact_tag' and event_key like q::text || ':tag:+:s2c25-person:%') or (contact_id = q and type = 'contact_changed' and event_key like q::text || ':chg:postcode:%')
+      or (type = 'task_added' and event_key = t2::text || ':added'));
+    if n <> 3 then raise exception 'FAIL 25a: a person''s later change / a new task made % of the 3 events', n; end if;
+    -- b) Assign to user / Remove assigned user through the workflow writes
+    if owner_id is not null then
+      res := public.automation_apply('default', r::text || ':0:' || a::text, 'contact', q::text, jsonb_build_array(jsonb_build_object('op', 'assign', 'user', owner_id),
+        jsonb_build_object('op', 'assign', 'user', owner_id), jsonb_build_object('op', 'assign', 'user', gen_random_uuid())));
+      if jsonb_array_length(res -> 'applied') <> 1 or res -> 'skipped' -> 0 ->> 'reason' <> 'already assigned to that person' or res -> 'skipped' -> 1 ->> 'reason' <> 'that person is not in the team'
+         or (select assigned_user_id from public.contacts where id = q) is distinct from owner_id then
+        raise exception 'FAIL 25b: assign gave % (the lead has %)', res, (select assigned_user_id from public.contacts where id = q);
+      end if;
+      if not exists (select 1 from public.activity_log where record_kind = 'contact' and record_id = q::text and text like 'Assigned to %' and actor = 'Automation: stage2 check 25')
+         or not exists (select 1 from public.automation_events where contact_id = q and type = 'contact_changed' and event_key like q::text || ':chg:assigned_user:%' and cause_run_id = r and ctx ->> 'new' = owner_id::text) then
+        raise exception 'FAIL 25b: no history line or no Lead changed event (assigned_user, with the cause) for the assignment';
+      end if;
+      res := public.automation_apply('default', r::text || ':0:' || a::text, 'contact', q::text, '[{"op":"assign","user":null}]'::jsonb);
+      if jsonb_array_length(res -> 'applied') <> 1 or (select assigned_user_id from public.contacts where id = q) is not null
+         or not exists (select 1 from public.activity_log where record_kind = 'contact' and record_id = q::text and text = 'Assigned user removed') then
+        raise exception 'FAIL 25b: removing the assigned user gave %', res;
+      end if;
+    else
+      raise notice 'NOTE 25b: no owner profile on staging; Assign to user not exercised';
+    end if;
+    -- c) who may assign (as the app: RLS + the guard)
+    if va_id is not null and owner_id is not null then
+      perform set_config('request.jwt.claims', json_build_object('sub', va_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', va_id::text, true);
+      execute 'set local role authenticated';
+      update public.contacts set assigned_user_id = va_id where id = q;
+      get diagnostics nrows = row_count;
+      if nrows = 0 then
+        execute 'reset role';
+        raise notice 'NOTE 25c: this staging VA can''t edit leads (RLS); the VA rule is not exercised';
+      else
+        begin update public.contacts set assigned_user_id = owner_id where id = q; got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+        if got <> 'refused' then execute 'reset role'; raise exception 'FAIL 25c: a VA assigned a lead to someone else (%)', got; end if;
+        update public.contacts set assigned_user_id = null where id = q;   -- nobody: allowed
+        execute 'reset role';
+      end if;
+      perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', owner_id::text, true);
+      execute 'set local role authenticated';
+      update public.contacts set assigned_user_id = va_id where id = q;
+      select count(*) into n from public.team_people();
+      execute 'reset role';
+      if (select assigned_user_id from public.contacts where id = q) is distinct from va_id then raise exception 'FAIL 25c: an owner could not assign the VA'; end if;
+      if n < 2 then raise exception 'FAIL 25d: team_people() gave % people to a signed-in owner', n; end if;
+    else
+      raise notice 'NOTE 25c: no VA or no owner profile on staging; the assign rule is not exercised';
+    end if;
+    -- d) nobody signed in: no names
+    perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    if has_function_privilege('anon', 'public.team_people()', 'execute') then raise exception 'FAIL 25d: anon may call team_people()'; end if;
+    -- f) a quiet job's imported date
+    select id::text into j from public.jobs where date is not null and not import_quiet order by created_at desc nulls last limit 1;
+    if j is null then
+      raise notice 'NOTE 25f: staging has no job with a date; the imported job date is not exercised';
+    else
+      update public.jobs set import_quiet = true where id::text = j;   -- the import marks it
+      select import_quiet_date into got from public.jobs where id::text = j;
+      if got is distinct from (select date::text from public.jobs where id::text = j) then raise exception 'FAIL 25f: the import marking a job kept % as its date', got; end if;
+      execute format('update public.jobs set date = %L where id::text = $1', (got::date + 9)::text) using j;   -- a person reschedules
+      if (select import_quiet_date from public.jobs where id::text = j) is distinct from got then raise exception 'FAIL 25f: a person''s reschedule moved the imported date'; end if;
+      perform set_config('automation.import', 'on', true);
+      execute format('update public.jobs set date = %L where id::text = $1', (got::date + 11)::text) using j;   -- the import's own re-sync
+      perform set_config('automation.import', '', true);
+      if (select import_quiet_date from public.jobs where id::text = j) is distinct from (got::date + 11)::text then raise exception 'FAIL 25f: the import''s own date change did not move the imported date'; end if;
+    end if;
+    -- e) Q5
+    if pg_get_functiondef('public.automation_capture_contacts()'::regprocedure) ~ 'estimates' then raise exception 'FAIL 25e: the contacts capture still writes Quote status'; end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 25 — quiet imports (no event; a person''s later change counts), Assign to user / Remove assigned user (history, Lead changed), who may assign, the team''s names, no Quote status, a quiet job''s imported date';
+end $$;
+
+select 'stage2 phase 3 · G3.5 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 3 · G3.4 — the lock on direct writes (design §2.9 Part 3, §8.2 #24/#26). STAGING ONLY, after PART 3 · G3.4 of
+-- .claude/sql/stage2-automations.sql ran there (the LAST block of Part 3). Same rules: the block undoes what it wrote,
+-- then prints "PASS 26" (before G3.4 ran it prints "NOTE 26 …" and checks nothing).
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 26. (G3.4) a) the privileges and policies are the lock's (enabled not updatable, four columns, no DELETE policy, read /
+--     change scoped to the business, the backup row); b) a signed-in owner renames (revision + 1), moves into a folder of
+--     the business, deletes (to Deleted: stamped now even when back-dated, a Draft, deleted_by; the date never moves
+--     again) and restores; every other column, a new row, a hard delete and a folder of another business are refused
+--     (42501) and change nothing; c) a manager renames, cannot switch on; d) a VA / a technician changes 0 rows (RLS) and
+--     cannot switch on; e) anon cannot even rename; f) another business's workflow: an owner sees 0 rows of it and changes 0 rows;
+--     g) the SQL editor (= the function's side) still writes every column.
+do $$
+declare a uuid; o uuid; f uuid; fx uuid; owner_id uuid; mgr_id uuid; va_id uuid; got text; n integer; rv integer; t text;
+  r public.automations%rowtype;
+begin
+  if has_table_privilege('authenticated', 'public.automations', 'INSERT') then
+    raise notice 'NOTE 26: PART 3 · G3.4 has not run here yet: check 26 skipped (run it again after that block)';
+    return;
+  end if;
+  begin
+    select id into owner_id from public.profiles where role = 'owner' order by id limit 1;
+    select id into mgr_id from public.profiles where role = 'manager' order by id limit 1;
+    if owner_id is null then raise exception 'FAIL 26: staging has no owner profile (run staging-seed-demo.sql first)'; end if;
+    -- as the SQL editor (the owner of the table: not locked): a Draft of this business, one of another, two folders
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 26', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automations (business_id, name, enabled, trigger, steps) values ('stage2-check-26-other', 'stage2 check 26 other', false, '{"type":"newLead","params":{}}', '[]') returning id into o;
+    insert into public.automation_folders (name) values ('s2c26 folder') returning id into f;
+    insert into public.automation_folders (business_id, name) values ('stage2-check-26-other', 's2c26 other') returning id into fx;
+    select revision into rv from public.automations where id = a;
+    -- a) privileges and policies
+    if has_column_privilege('authenticated', 'public.automations', 'enabled', 'UPDATE') or has_column_privilege('authenticated', 'public.automations', 'definition', 'UPDATE')
+       or has_table_privilege('authenticated', 'public.automations', 'DELETE') or has_any_column_privilege('anon', 'public.automations', 'UPDATE')
+       or not has_column_privilege('authenticated', 'public.automations', 'deleted_at', 'UPDATE') or not has_column_privilege('authenticated', 'public.automations', 'name', 'UPDATE')
+       or exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'automations' and cmd = 'DELETE')
+       or (select count(*) from pg_policies where schemaname = 'public' and tablename = 'automations' and cmd in ('SELECT', 'UPDATE') and qual ~ 'current_business_id') <> 2
+       or not exists (select 1 from backup.automations_grants_before_part3 where id = 1 and relacl is not null) then
+      raise exception 'FAIL 26a: the privileges / policies / backup are not the lock''s';
+    end if;
+    -- b) a signed-in owner (as the app: RLS + column grants + the pin + the guard)
+    perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+    perform set_config('request.jwt.claim.sub', owner_id::text, true);
+    execute 'set local role authenticated';
+    update public.automations set name = 'stage2 check 26 renamed' where id = a;
+    get diagnostics n = row_count;
+    update public.automations set folder_id = f where id = a;
+    select * into r from public.automations where id = a;
+    if n <> 1 or r.name <> 'stage2 check 26 renamed' or r.revision <> rv + 1 or r.folder_id is distinct from f then
+      raise exception 'FAIL 26b: an owner''s rename / move gave % rows, revision % (want %), folder %', n, r.revision, rv + 1, r.folder_id;
+    end if;
+    foreach t in array array['enabled = true', 'definition = ''{"schema":2,"seq":0,"entry":null,"triggers":[],"nodes":{}}''::jsonb', 'settings = ''{}''::jsonb',
+      'layout = ''{"v":1}''::jsonb', 'builder = ''advanced''', 'origin = ''system''', 'revision = 99', 'version = 99', 'system_key = ''s2c26''', 'template_key = ''s2c26''',
+      'trigger = ''{"type":"newLead","params":{"x":1}}''::jsonb', 'steps = ''[]''::jsonb', 'business_id = ''stage2-check-26-other''', 'published_at = now()', 'enrolled_total = 9'] loop
+      begin
+        execute format('update public.automations set %s where id = $1', t) using a;
+        got := 'saved';
+      exception when insufficient_privilege then got := 'refused';
+      end;
+      if got <> 'refused' then raise exception 'FAIL 26b: a signed-in owner could set %', t; end if;
+    end loop;
+    begin
+      insert into public.automations (name, trigger, steps) values ('stage2 check 26 app', '{"type":"newLead","params":{}}', '[]');
+      got := 'saved';
+    exception when insufficient_privilege then got := 'refused';
+    end;
+    if got <> 'refused' then raise exception 'FAIL 26b: a signed-in owner added a workflow straight to the table'; end if;
+    begin
+      delete from public.automations where id = a;
+      got := 'deleted';
+    exception when insufficient_privilege then got := 'refused';
+    end;
+    if got <> 'refused' then raise exception 'FAIL 26b: a signed-in owner hard-deleted a workflow (%)', got; end if;
+    begin
+      update public.automations set folder_id = fx where id = a;
+      got := 'saved';
+    exception when insufficient_privilege then got := 'refused';
+    end;
+    if got <> 'refused' then raise exception 'FAIL 26b: a workflow moved into another business''s folder'; end if;
+    update public.automations set deleted_at = now() - interval '40 days' where id = a;   -- back-dated by hand: stamped now
+    select * into r from public.automations where id = a;
+    if r.deleted_at is distinct from now() or r.enabled or r.deleted_by is distinct from owner_id then
+      raise exception 'FAIL 26b: a soft delete gave deleted_at % (want now), enabled %, deleted_by %', r.deleted_at, r.enabled, r.deleted_by;
+    end if;
+    update public.automations set deleted_at = '2000-01-01T00:00:00Z' where id = a;
+    if (select deleted_at from public.automations where id = a) is distinct from now() then raise exception 'FAIL 26b: a deleted workflow''s date moved'; end if;
+    update public.automations set deleted_at = null, folder_id = null where id = a;   -- Restore
+    select * into r from public.automations where id = a;
+    if r.deleted_at is not null or r.folder_id is not null or r.enabled then raise exception 'FAIL 26b: Restore did not bring it back as a Draft in Home'; end if;
+    -- f) another business's workflow: not seen, not changed
+    select count(*) into n from public.automations where id = o;
+    if n <> 0 then raise exception 'FAIL 26f: an owner sees another business''s workflow'; end if;
+    update public.automations set name = 'stage2 check 26 other renamed' where id = o;
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAIL 26f: an owner renamed another business''s workflow'; end if;
+    execute 'reset role';
+    -- c) a manager: rename yes, switch on no
+    if mgr_id is not null then
+      perform set_config('request.jwt.claims', json_build_object('sub', mgr_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', mgr_id::text, true);
+      execute 'set local role authenticated';
+      update public.automations set name = 'stage2 check 26 by manager' where id = a;
+      get diagnostics n = row_count;
+      begin update public.automations set enabled = true where id = a; got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+      execute 'reset role';
+      if n <> 1 or got <> 'refused' then raise exception 'FAIL 26c: a manager renamed % rows / switched on: %', n, got; end if;
+    else
+      raise notice 'NOTE 26c: no manager profile on staging; the manager case is not exercised';
+    end if;
+    -- d) a VA and a technician: RLS keeps every row out of reach; the switch is refused before RLS
+    foreach t in array array['va', 'technician'] loop
+      va_id := null;
+      select id into va_id from public.profiles where role::text = t order by id limit 1;
+      if va_id is null then raise notice 'NOTE 26d: no % profile on staging; that case is not exercised', t; continue; end if;
+      perform set_config('request.jwt.claims', json_build_object('sub', va_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', va_id::text, true);
+      execute 'set local role authenticated';
+      update public.automations set name = 'stage2 check 26 by ' || t, deleted_at = now() where id = a;
+      get diagnostics n = row_count;
+      begin update public.automations set enabled = true where id = a; got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+      execute 'reset role';
+      if n <> 0 or got <> 'refused' then raise exception 'FAIL 26d: a % changed % rows / switched on: %', t, n, got; end if;
+    end loop;
+    -- e) anon: no column to write at all
+    perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    execute 'set local role anon';
+    begin update public.automations set name = 'stage2 check 26 by anon' where id = a; got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+    execute 'reset role';
+    if got <> 'refused' then raise exception 'FAIL 26e: anon could rename a workflow'; end if;
+    -- g) the SQL editor (the function's side) is not locked
+    update public.automations set enabled = false, template_key = 's2c26', deleted_at = now() - interval '40 days' where id = a;
+    if (select (template_key, deleted_at) from public.automations where id = a) is distinct from ('s2c26'::text, now() - interval '40 days') then
+      raise exception 'FAIL 26g: the SQL editor''s write was changed (the pin must touch the app''s roles only)';
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 26 — the lock: four columns for the app (rename, move, Deleted stamped now, Restore), everything else refused, no hard delete, this business only, VA / technician / anon nothing, the function''s side untouched';
+end $$;
+
+select 'stage2 phase 3 · G3.4 staging checks done';
