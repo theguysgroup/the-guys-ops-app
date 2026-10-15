@@ -1,8 +1,8 @@
 #!/bin/bash
 # Runs the ai-gateway function tests locally: the function with its three imports stubbed (the Anthropic SDK by a stub
 # with the SDK's error classes; tests hand in a fake client through io.anthropicClient) and a pretend Deno.env, the
-# app's own office-hours, role-label and product-name code extracted from index.html (APP, for the parity tests), then
-# tests.ts.
+# app's own office-hours, role-label, product-name, task-board, stage and vacation code extracted from index.html (APP, for
+# the parity tests), then tests.ts.
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/../../.." && pwd)"
@@ -37,7 +37,12 @@ const fs = require('fs');
 const NAMES = ['catalogHours', 'ROLE_LABEL', 'productName', 'OFFICE', 'hhmmToMins', 'minsToHhmm', 'officeHoursText',
   // G2 (tests_changes.ts): the role pages, dates, ids, task boards and the pipeline's stage rules
   'canViewSection', 'SECTION_LABEL', 'MONTHS', 'parseLocalDate', 'fmtDateShort', 'uid', 'boardForAssignees', 'catalogObject', 'officeLabel', 'taskBoardLabel',
-  'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'STAGE_CORE', 'STAGES_NEED_DATE', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'stageMovePlan'];
+  'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'STAGE_CORE', 'STAGES_NEED_DATE', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'stageMovePlan',
+  // stage 3 (rebase on a8c6d2d): the vacation warning on a new task, with the business's day it reads (stage 1 region helpers)
+  'VACATION_OPTIONS', 'VACATION_PAY', 'vacationOptionsNorm', 'mapVacationRow', 'vacationOpt', 'vacationMatches', 'vacationOnDay', 'vacationFor', 'vacationUntilText',
+  'vacationPickerInfo', 'vacationUsableStandIn', 'vacationJobStandIn', 'vacationWho', 'vacationAssignInfo', 'vacationAssignConflicts', 'listJoin', 'vacationAssignLine',
+  'pad2', 'fmtLocal', 'shiftDays', 'REGION_DEFAULTS', 'REGION_NONE', 'REGION_MEMO', 'BIZ_WALL', 'BIZ_DAY_MEMO', 'TZ_VALID', 'regionNow', 'tzValid', 'regionMemo', 'bizTz',
+  'bizWall', 'bizDayOf', 'bizDayMemo'];
 function extractDecl(source, name){
   const fnIdx = source.indexOf(`function ${name}(`);
   const constIdx = source.search(new RegExp(`\\bconst ${name}\\s*=`));

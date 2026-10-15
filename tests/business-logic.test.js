@@ -183,6 +183,8 @@ const DECLS = [
   'cobraSettingProblem', 'cobraPatchOf', 'cobraPatchText', 'cobraSpeechLang', 'cobraWhen', 'cobraEnterSends', 'cobraStick', 'cobraPageMode',
   // Stage 6 review fixes: a saved chat's context, tool chips left spinning, the chat a load is for
   'cobraClientContext', 'cobraEndTools', 'cobraConvWanted',
+  // Stage 6 rebase on a8c6d2d: the vacation line the assign question and the assistant's new-task card share
+  'vacationAssignLine',
 ];
 
 function extractDecl(source, name){
@@ -5201,6 +5203,12 @@ function testCobraHelpers(sb){
   assertEqual([sb.cobraCardHtml({ kind: 'test', data: { n: 1 } }), sb.cobraCardHtml({ kind: 'boom', data: { title: '<t>' } }).includes('&lt;t&gt;'), sb.cobraCardHtml({ kind: 'nope', data: { title: 'T', text: 'x' } })],
     ['<div class="t">1</div>', true, '<div class="cobra-card"><b dir="auto">T</b><div dir="auto">x</div></div>'], 'cobraCardHtml: a registered card, the generic card when it throws or is unknown');
   delete sb.COBRA_CARDS.test; delete sb.COBRA_CARDS.boom;
+  // a warning from the gateway (someone on vacation then): shown, escaped, only while it is asked
+  const warned = { ...prop, display: { ...prop.display, warnings: ['<Cal> is on vacation then (On vacation until 24 Oct).'] } };
+  assertEqual([sb.cobraProposalHtml(warned).includes('cobra-card-warn'), sb.cobraProposalHtml(warned).includes('&lt;Cal&gt; is on vacation'), sb.cobraProposalHtml({ ...warned, status: 'confirmed' }).includes('cobra-card-warn'), sb.cobraProposalHtml(prop).includes('cobra-card-warn')],
+    [true, true, false, false], "cobraProposalHtml: the gateway's warnings above Confirm, escaped, gone once it is answered");
+  assertEqual([sb.vacationAssignLine([]), sb.vacationAssignLine([{ name: 'Cal', label: 'On vacation until 24 Oct' }]), sb.vacationAssignLine([{ name: 'Cal', label: 'On vacation until 24 Oct' }, { name: 'Eve', label: 'On vacation until 1 Nov' }])],
+    ['', 'Cal is on vacation then (On vacation until 24 Oct).', 'Cal (On vacation until 24 Oct) and Eve (On vacation until 1 Nov) are on vacation then.'], 'vacationAssignLine: one person, several, none');
   assertEqual([sb.cobraMsgHtml({ role: 'user', text: 'hi' }).includes('class="cobra-text" dir="auto"'), sb.cobraMsgHtml({ role: 'assistant', text: '', streaming: true }).includes('cobra-dots'),
     sb.cobraMsgHtml({ role: 'assistant', text: 'x', error: { code: 'server', reason: '<e>' } }).includes('&lt;e&gt;'), sb.cobraMsgHtml({ role: 'assistant', text: 'x', tools: [{ id: 't', label: 'Checking office hours', state: 'running' }] }).includes('cobra-spin'),
     sb.cobraMsgHtml({ role: 'assistant', text: 'x', proposals: [prop] }, { "x'y": true }).includes(' disabled')],

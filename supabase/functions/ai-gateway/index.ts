@@ -15,7 +15,8 @@
 // list_changes { scope?: 'mine'|'all' (owners only), before?: <created_at of the last row shown>, limit?: ≤ 50 } →
 // { ok, changes: change[], next: <created_at to pass as before> | null }. A change (changeOut):
 //   { id, kind, label, summary, status:'proposed'|'confirmed'|'undone'|'cancelled'|'failed', target:{table, id, label},
-//     display:{title, rows:[{label, before, after}]} (display strings, '—' = empty; escape them), before, after,
+//     display:{title, rows:[{label, before, after}], warnings?:[string]} (display strings, '—' = empty; escape them;
+//     warnings = lines to weigh before confirming, e.g. someone on vacation then), before, after,
 //     user_id, by:{id, name}, created_at, expires_at, confirmed_at, undone_at, undone_by:{id, name}|null, error,
 //     can_confirm, can_undo, conversation_id (only to the person who asked; owners never get links into other chats) }
 // After a confirm or an undo the app refreshes itself through its realtime subscriptions (contacts, tasks, settings).
@@ -972,6 +973,109 @@ registerTool({
   },
 });
 
+// ── on vacation (stage 3): the app's warning when a task goes to someone who is away then ──
+// The app asks "<name> is on vacation then (…). Assign anyway?" when a newly picked person is away on the task's due date
+// (today without one) with "Not assignable" ticked; the new-task card shows the same line, and Confirm is the "anyway".
+// The rows (employee_vacations, .claude/sql/stage3-vacation.sql) and the employees are read with the person's OWN client,
+// as the app reads them: every signed-in person reads the vacations (the note is in another table, never read here); a
+// person who can't read the employees matches by the rows' name copies, as in the app. The helpers are the app's, on
+// mapVacationRow's shape, with the business's time zone passed in (tests_changes.ts checks them against index.html).
+export const VAC_COLS = "id, employee_id, employee_name, starts_on, ends_on, stand_in_id, stand_in_name, options, ended_at, cancelled_at";
+// The app's mapVacationRow (the fields the warning reads; vacationOpt reads the options the same with or without the norm).
+export function mapVacRow(r: any) {
+  return { id: r.id, employeeId: r.employee_id, employeeName: r.employee_name || "", startsOn: r.starts_on, endsOn: r.ends_on,
+    standInId: r.stand_in_id || null, standInName: r.stand_in_name || "", options: isObj(r.options) ? r.options : {},
+    endedAt: r.ended_at || null, cancelledAt: r.cancelled_at || null };
+}
+// Verbatim from index.html.
+export function vacationOpt(v: any, key: string): boolean { const o = (v && v.options) || {}; return key === "autoBack" ? o.autoBack !== false : o[key] === true; }
+// Verbatim from index.html.
+export function vacationMatches(v: any, who: any): boolean {
+  if (!v || !who) return false;
+  const id = typeof who === "object" ? who.id : null, name = typeof who === "string" ? who : who.name;
+  return !!((id && v.employeeId === id) || (name && v.employeeName === name));
+}
+// The app's vacationOnDay (its bizDayOf is the business's day of a time: localDayOf with the zone).
+export function vacationOnDay(v: any, day: string, tz: string): boolean {
+  if (!v || v.cancelledAt || !v.startsOn || !day || v.startsOn > day) return false;
+  if (v.endedAt && !(day < localDayOf(v.endedAt, tz))) return false;
+  return !vacationOpt(v, "autoBack") || day <= v.endsOn;
+}
+// Verbatim from index.html.
+export function vacationFor(vacations: any[], who: any, day: string, tz: string, key?: string): any {
+  let best: any = null;
+  (vacations || []).forEach((v) => {
+    if (!vacationMatches(v, who) || !vacationOnDay(v, day, tz) || (key && !vacationOpt(v, key))) return;
+    if (!best || v.startsOn > best.startsOn) best = v;
+  });
+  return best;
+}
+// The app's vacationUntilText (shiftDays → shiftDay).
+export function vacationUntilText(v: any, day: string, tz: string): string {
+  if (!v || v.cancelledAt) return "";
+  if (day < v.startsOn) return `Vacation from ${fmtDateShort(v.startsOn)}`;
+  if (!vacationOnDay(v, day, tz)) return "";
+  return day <= v.endsOn ? `On vacation until ${fmtDateShort(v.endsOn)}` : `On vacation (due back ${fmtDateShort(shiftDay(v.endsOn, 1))})`;
+}
+// Verbatim from index.html.
+export function vacationPickerInfo(vacations: any[], who: any, day: string, tz: string): any {
+  const v = vacationFor(vacations, who, day, tz, "notAssignable");
+  if (!v) return null;
+  return { vacation: v, label: vacationUntilText(v, day, tz),
+    standIn: vacationOpt(v, "standIn") && v.standInId ? { id: v.standInId, name: v.standInName } : null };
+}
+// Verbatim from index.html.
+export function vacationUsableStandIn(v: any, day: string, data: any, tz: string): string {
+  if (!v || !vacationOpt(v, "standIn") || !v.standInId) return "";
+  const emps = (data && data.employees) || [];
+  const s = emps.find((e: any) => e.id === v.standInId) || (emps.length ? null : { id: v.standInId, name: v.standInName, status: "Active" });
+  return s && s.name && (s.status || "Active") === "Active" && !vacationFor((data && data.vacations) || [], { id: s.id, name: s.name }, day, tz) ? s.name : "";
+}
+// Verbatim from index.html.
+export function vacationWho(name: string, data: any): any { const e = ((data && data.employees) || []).find((x: any) => x.name === name); return e ? { id: e.id, name } : name; }
+// The app's vacationAssignInfo for a task (the job pickers' forJob rule is not needed here).
+export function vacationAssignInfo(name: string, day: string, data: any, tz: string): any {
+  if (!name || !day || !data || !(data.vacations || []).length) return null;
+  const info = vacationPickerInfo(data.vacations, vacationWho(name, data), day, tz);
+  if (!info) return null;
+  return { name, vac: info.vacation, label: info.label, standIn: vacationUsableStandIn(info.vacation, day, data, tz) };
+}
+// Verbatim from index.html.
+export function vacationAssignConflicts(names: string[], before: string[], day: string, data: any, tz: string): any[] {
+  const had = new Set(before || []);
+  return (names || []).filter((n) => !had.has(n)).map((n) => vacationAssignInfo(n, day, data, tz)).filter(Boolean);
+}
+// Verbatim from index.html.
+export function listJoin(a: any[], word?: string): string { const x = (a || []).filter((v) => v != null && v !== ""); return x.length < 2 ? x.join("") : x.slice(0, -1).join(", ") + " " + (word || "and") + " " + x[x.length - 1]; }
+// Verbatim from index.html (the line of the app's "Assign anyway?" question).
+export function vacationAssignLine(infos: any[]): string {
+  const x = infos || [];
+  return !x.length ? "" : x.length === 1 ? `${x[0].name} is on vacation then (${x[0].label}).` : `${listJoin(x.map((i) => `${i.name} (${i.label})`))} are on vacation then.`;
+}
+// The card's lines: the app's line, then its other answer ("Assign <stand-in> instead") as a suggestion. [] when nobody
+// is away.
+export function vacationWarnings(infos: any[]): string[] {
+  if (!infos || !infos.length) return [];
+  const stand = [...new Set(infos.filter((i) => i.standIn).map((i) => i.standIn))];
+  return [vacationAssignLine(infos), ...(stand.length ? [`Or assign ${listJoin(stand)} instead.`] : [])];
+}
+// The people away on the task's day, read as the person (see above). A read that fails is logged and warns about nobody:
+// the warning is a question, never a block (as in the app).
+export async function taskVacationInfos(userSb: any, names: string[], day: string, tz: string): Promise<any[]> {
+  try {
+    const { data: rows, error } = await userSb.from("employee_vacations").select(VAC_COLS).is("cancelled_at", null).lte("starts_on", day)
+      .or(`ends_on.gte.${day},options->>autoBack.eq.false`);
+    if (error) throw new Error("employee_vacations: " + clip(error.message, 200));
+    if (!Array.isArray(rows) || !rows.length) return [];
+    const emp = await userSb.from("employees").select("id, name, status, roles");
+    if (emp.error) console.error("ai-gateway: employees not read for the vacation check:", clip(emp.error.code || emp.error.message, 80));
+    return vacationAssignConflicts(names, [], day, { vacations: rows.map(mapVacRow), employees: (!emp.error && emp.data) || [] }, tz);
+  } catch (e) {
+    console.error("ai-gateway: vacations not read:", clip((e as Error)?.message, 120));
+    return [];
+  }
+}
+
 // ── kind 2: a new task (the Tasks page) ──
 export const TASK_PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 // The columns an undo compares (the task must still be exactly as it was added).
@@ -1042,7 +1146,7 @@ export function taskFieldText(field: string, now: any): string {
 }
 registerTool({
   name: "add_task", kind: "change", modes: ["assistant"], allow: mayAddTask, status: "Preparing a new task",
-  description: "Proposes a new task for one or more team members (by name), optionally with a due date, a priority, notes and the lead it is about. The task goes on the board of the first person named, as in the app. Nothing changes until the person presses Confirm on the card; tell them what will change and that they must confirm; never say it is done.",
+  description: "Proposes a new task for one or more team members (by name), optionally with a due date, a priority, notes and the lead it is about. The task goes on the board of the first person named, as in the app. Nothing changes until the person presses Confirm on the card; tell them what will change and that they must confirm; never say it is done. If the result has warnings (someone is on vacation then), tell the person; when one names someone to assign instead, offer to suggest the task for them.",
   input_schema: {
     type: "object", additionalProperties: false, required: ["title", "assignees"],
     properties: {
@@ -1080,6 +1184,9 @@ registerTool({
       created_by: ctx.me.fullName, subtasks: [], updates: [],
     };
     const cat = ctx.biz.catalog, names = assignees.join(", ");
+    // Someone on vacation that day (the due date, else today): the app's question, as lines on the card (stage 3).
+    const vac = await taskVacationInfos(ctx.userSb, assignees, input.due || bizParts(ctx.nowMs, ctx.biz.tz).day, ctx.biz.tz);
+    const warnings = vacationWarnings(vac);
     const summary = clip(`Add a task "${title}" for ${names}${input.due ? `, due ${fmtDateShort(input.due)}` : ""}`, 300);
     const rows = [
       { label: "Title", before: "—", after: title }, { label: "Assigned to", before: "—", after: names },
@@ -1091,7 +1198,7 @@ registerTool({
     ];
     return await ctx.propose({
       kind: "task_add", target: { table: "tasks", id: null, label: title, contactId: lead ? lead.id : null },
-      before: null, after: { row }, summary, display: { title: summary, rows },
+      before: null, after: { row }, summary, display: { title: summary, rows, ...(warnings.length ? { warnings } : {}) },
     });
   },
 });
@@ -2086,6 +2193,7 @@ export async function proposeChange(ctx: ToolCtx, p: any) {
   return {
     proposed: true, change_id: data.id, status: "waiting_for_confirmation", summary,
     ...(isObj(p.display) && Array.isArray(p.display.rows) ? { changes: p.display.rows } : {}),
+    ...(isObj(p.display) && Array.isArray(p.display.warnings) && p.display.warnings.length ? { warnings: p.display.warnings } : {}),
     note: "Shown to the person as a card. Nothing has changed yet; it changes only if they press Confirm. Do not say it is done.",
   };
 }

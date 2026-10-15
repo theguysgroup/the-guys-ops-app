@@ -14,8 +14,12 @@ function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, strin
   const cmp = (a: any, b: any) => (a == null && b == null ? 0 : a == null ? 1 : b == null ? -1 : typeof a === "number" && typeof b === "number" ? a - b : String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0);
   const order = (a: any, b: any) => (typeof a === "number" && typeof b === "number" ? a - b : String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0);
   function clause(s: string) {
-    const a = s.indexOf("."), b = s.indexOf(".", a + 1), col = s.slice(0, a), op = s.slice(a + 1, b), val = s.slice(b + 1).replace(/^"(.*)"$/, "$1");
+    const a = s.indexOf("."), b = s.indexOf(".", a + 1), path = s.slice(0, a), op = s.slice(a + 1, b), val = s.slice(b + 1).replace(/^"(.*)"$/, "$1");
+    // a JSON path (options->>autoBack) reads the key of that column; plain columns as before
+    const [pc, pk] = path.split("->>"), col = path, get = (r: any) => (pk === undefined ? r[pc] : r[pc] && typeof r[pc] === "object" ? r[pc][pk] : undefined);
+    if (pk !== undefined) { if (op === "eq") return (r: any) => get(r) != null && String(get(r)) === val; throw new Error("fake or: " + s); }
     if (op === "eq") return (r: any) => r[col] != null && String(r[col]) === val;
+    if (op === "gte") return (r: any) => r[col] != null && String(r[col]) >= val;
     if (op === "is" && val === "null") return (r: any) => r[col] == null;
     if (op === "lt") return (r: any) => r[col] != null && String(r[col]) < val;
     // G2 (the lead resolver): ilike with * wildcards, and match (a regex)
@@ -38,6 +42,7 @@ function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, strin
       gt(k: string, v: any) { filters.push((r) => r[k] != null && order(r[k], v) > 0); return b; },
       gte(k: string, v: any) { filters.push((r) => r[k] != null && order(r[k], v) >= 0); return b; },
       lt(k: string, v: any) { filters.push((r) => r[k] != null && order(r[k], v) < 0); return b; },
+      lte(k: string, v: any) { filters.push((r) => r[k] != null && order(r[k], v) <= 0); return b; },
       is(k: string, v: any) { filters.push((r) => (r[k] ?? null) === v); return b; },
       in(k: string, list: any[]) { filters.push((r) => list.includes(r[k])); return b; },
       // G2: ilike with % wildcards (backslash escapes), and where(fn) for the tests' row-level security stand-in

@@ -393,6 +393,83 @@ SUITES.push(async () => {
     eq([c.status, c.body.code, c.body.reason], [409, "gone", "That record no longer exists."], "task already deleted → 409 gone");
   }
 
+  // ── 7b. a new task for someone on vacation (stage 3): the app's warning line on the card ──
+  {
+    const EMPS = () => EMPLOYEES().map((e: any, i: number) => ({ id: "e" + i, ...e }));   // e0 Gabe Tech, e1 Kim Lane, e2 Sam Lee, e6 Tia
+    const vac = (n: number, over: any) => ({ id: "v" + n, business_id: "default", employee_id: "e0", employee_name: "Gabe Tech", starts_on: "2026-10-14", ends_on: "2026-10-24",
+      stand_in_id: "e2", stand_in_name: "Sam Lee", options: { notAssignable: true, standIn: true }, ended_at: null, cancelled_at: null, ...over });
+    const world = (vacs: any[]) => world2({ seed: { employees: EMPS(), employee_vacations: vacs } });
+    const propose = async (db: any, input: any, jwt = "jwt-owner") => { const { r, row } = await proposeOk(db, jwt, "add_task", { title: "Check the unit", ...input }); return { r, row, res: JSON.parse(String(resultOf(db, r).content)) }; };
+    // away on the due date, "Not assignable" ticked, a stand-in who is in
+    let db = world([vac(1, {})]);
+    let { row, res } = await propose(db, { assignees: ["Gabe"], due: "2026-10-16" });
+    eq(row.display.warnings, ["Gabe Tech is on vacation then (On vacation until 24 Oct).", "Or assign Sam Lee instead."], "away on the due date: the app's line, then its other answer (the stand-in)");
+    eq([res.warnings, res.changes.map((x: any) => x.label)], [row.display.warnings, ["Title", "Assigned to", "Board", "Due"]], "… told to the model too; the rows are unchanged");
+    ok(UJ.length > 0 && UJ.every((j) => j === "jwt-owner"), "the vacations are read with the person's own client");
+    eq([db.T.ai_changes.length, db.T.tasks.length], [1, 0], "a warning, not a block: the proposal is made, nothing written");
+    // no due date: today (Thursday 15 Oct in the business's zone)
+    db = world([vac(1, {})]);
+    ({ row } = await propose(db, { assignees: ["Gabe"] }));
+    eq(row.display.warnings, ["Gabe Tech is on vacation then (On vacation until 24 Oct).", "Or assign Sam Lee instead."], "no due date → today");
+    // nobody away that day / the option off / cancelled / ended / someone else
+    const none = async (vacs: any[], input: any, what: string) => { db = world(vacs); ({ row } = await propose(db, input)); eq([row.display.warnings, "warnings" in row.display], [undefined, false], what); };
+    await none([vac(1, {})], { assignees: ["Gabe"], due: "2026-10-25" }, "back by the due date → no warning");
+    await none([vac(1, { options: { standIn: true } })], { assignees: ["Gabe"], due: "2026-10-16" }, "'Not assignable' not ticked → no warning");
+    await none([vac(1, { cancelled_at: "2026-10-10T00:00:00Z" })], { assignees: ["Gabe"], due: "2026-10-16" }, "a cancelled vacation → no warning");
+    await none([vac(1, { ended_at: "2026-10-15T14:00:00Z" })], { assignees: ["Gabe"], due: "2026-10-16" }, "ended early (back on the 15th) → no warning");
+    await none([vac(1, {})], { assignees: ["Sam Lee"], due: "2026-10-16" }, "someone else → no warning");
+    await none([], { assignees: ["Gabe"], due: "2026-10-16" }, "no vacations → no warning");
+    // left open (autoBack off): still away after the last day, "due back"
+    db = world([vac(1, { options: { notAssignable: true, autoBack: false }, stand_in_id: null, stand_in_name: "" })]);
+    ({ row } = await propose(db, { assignees: ["Gabe"], due: "2026-10-28" }));
+    eq(row.display.warnings, ["Gabe Tech is on vacation then (On vacation (due back 25 Oct))."], "autoBack off: still away past the end date; no stand-in → one line");
+    // two people away; the stand-in away too is not offered
+    db = world([vac(1, {}), vac(2, { employee_id: "e1", employee_name: "Kim Lane", stand_in_id: "e0", stand_in_name: "Gabe Tech", ends_on: "2026-10-31" })]);
+    ({ row } = await propose(db, { assignees: ["Gabe", "Kim Lane"], due: "2026-10-16" }));
+    eq(row.display.warnings, ["Gabe Tech (On vacation until 24 Oct) and Kim Lane (On vacation until 31 Oct) are on vacation then.", "Or assign Sam Lee instead."], "two away: one line for both; a stand-in who is away himself is not offered");
+    // a person who can't read the employees (RLS): matched by the rows' name copies, the stand-in from the row
+    db = world([vac(1, {})]);
+    DENY.add("employees.select");
+    ({ row } = await propose(db, { assignees: ["Gabe"], due: "2026-10-16" }, "jwt-va"));
+    eq(row.display.warnings, ["Gabe Tech is on vacation then (On vacation until 24 Oct).", "Or assign Sam Lee instead."], "no employees for the person: by name, the stand-in from the row (as in the app)");
+    // the person can't read the vacations: no warning (it is read as them, never with the service role)
+    db = world([vac(1, {})]);
+    DENY.add("employee_vacations.select");
+    ({ row } = await propose(db, { assignees: ["Gabe"], due: "2026-10-16" }));
+    eq("warnings" in row.display, false, "vacations hidden from the person → no warning");
+    // a failed read: logged, no warning, the proposal still made
+    db = world([vac(1, {})]);
+    io.userClient = (jwt: string) => {
+      const cl: any = fakeUserClient(jwt), from = cl.from;
+      const eb: any = { select: () => eb, is: () => eb, lte: () => eb, or: () => eb, then: (a: any, z: any) => Promise.resolve({ data: null, error: { message: "statement timeout" } }).then(a, z) };
+      cl.from = (t: string) => (t === "employee_vacations" ? eb : from(t));
+      return cl;
+    };
+    ({ row } = await propose(db, { assignees: ["Gabe"], due: "2026-10-16" }));
+    io.userClient = (jwt: string) => fakeUserClient(jwt);
+    eq([row && row.status, "warnings" in row.display], ["proposed", false], "vacations not read: the task is still proposed, without a warning");
+    // parity: the helpers = the app's (vacationAssignInfo / vacationAssignConflicts / vacationAssignLine), in the business's zone
+    {
+      APP.STATE.data.settings.catalog = { region: { timeZone: TZ } };
+      const emps = EMPS();
+      const rows = [vac(1, {}), vac(2, { employee_id: "e1", employee_name: "Kim Lane", stand_in_id: "e0", stand_in_name: "Gabe Tech", ends_on: "2026-10-31" }),
+        vac(3, { employee_id: "e6", employee_name: "Tia", starts_on: "2026-10-01", ends_on: "2026-10-05", options: { notAssignable: true, autoBack: false }, ended_at: "2026-10-18T03:30:00Z" }),
+        vac(4, { employee_id: "e2", employee_name: "Sam Lee", options: { notAssignable: true, standIn: true }, stand_in_id: "e8", stand_in_name: "Desk Helper", starts_on: "2026-10-20", cancelled_at: null }),
+        vac(5, { employee_id: "e8", employee_name: "Desk Helper", cancelled_at: "2026-10-01T00:00:00Z" })];
+      const appData = (withEmps: boolean) => ({ vacations: rows.map((r) => APP.mapVacationRow(r)), employees: withEmps ? emps.map((e: any) => ({ id: e.id, name: e.name, status: e.status, roles: e.roles })) : [] });
+      const ours = (withEmps: boolean) => ({ vacations: rows.map(mapVacRow), employees: withEmps ? emps : [] });
+      const people = ["Gabe Tech", "Kim Lane", "Tia", "Sam Lee", "Desk Helper", "Nobody"];
+      const strip = (x: any) => (x ? { name: x.name, id: x.vac.id, label: x.label, standIn: x.standIn } : null);
+      for (const withEmps of [true, false]) for (const day of ["2026-10-13", "2026-10-14", "2026-10-17", "2026-10-18", "2026-10-21", "2026-10-24", "2026-10-25", "2026-11-01"]) {
+        eq(people.map((n) => strip(vacationAssignInfo(n, day, ours(withEmps), TZ))), people.map((n) => strip(APP.vacationAssignInfo(n, day, appData(withEmps), TZ))), `vacationAssignInfo = the app's (${day}, ${withEmps ? "with" : "without"} employees)`);
+        const c1 = vacationAssignConflicts(people, ["Kim Lane"], day, ours(withEmps), TZ), c2 = APP.vacationAssignConflicts(people, ["Kim Lane"], day, appData(withEmps), TZ);
+        eq([c1.map(strip), vacationAssignLine(c1)], [c2.map(strip), APP.vacationAssignLine(c2)], `vacationAssignConflicts + the line = the app's (${day})`);
+      }
+      eq([listJoin([]), listJoin(["A"]), listJoin(["A", "", "B", "C"]), listJoin(["A", "B"], "or")], [APP.listJoin([]), APP.listJoin(["A"]), APP.listJoin(["A", "", "B", "C"]), APP.listJoin(["A", "B"], "or")], "listJoin = the app's");
+      APP.STATE.data.settings.catalog = {};
+    }
+  }
+
   // ── 8. a lead's stage ──
   {
     const today = "2026-10-15";

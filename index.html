@@ -2040,6 +2040,8 @@ body.cobra-open #chase-bubbles { right: 418px !important; }
 .cobra-card-acts { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .cobra-card-acts .btn { min-height: 34px; }
 .cobra-card-err { margin-top: 6px; font-size: 12px; color: var(--bad); }
+.cobra-card-warn { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--warn); font-size: 12px; }
+.cobra-card-warn svg { flex-shrink: 0; margin-top: 1px; }
 .cobra-diff-row { display: flex; flex-wrap: wrap; gap: 2px 10px; padding: 5px 0; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
 .cobra-card-head + .cobra-diff-row { margin-top: 6px; }
 .cobra-diff-label { flex-basis: 100%; font-weight: 600; font-size: 12px; }
@@ -20242,11 +20244,16 @@ function vacationPhoneAway(people, vacations, employees, profiles, day, tz){
 // Owners and managers set vacations (Ofek 14 Oct); the database allows the same (is_owner_or_manager).
 function canSetVacation(){ const me = getCurrentProfile(); return !!me && (me.role==='owner' || me.role==='manager'); }
 function vacationFirst(v){ return String((v && v.employeeName) || '').split(' ')[0] || 'They'; }
+// Who of them is away then, one line (vacationAssignConflicts' infos; '' for none). The assistant's new-task card shows the
+// same line (ai-gateway, vacationAssignLine).
+function vacationAssignLine(infos){
+  const x = infos || [];
+  return !x.length ? '' : x.length===1 ? `${x[0].name} is on vacation then (${x[0].label}).` : `${listJoin(x.map(i => `${i.name} (${i.label})`))} are on vacation then.`;
+}
 // The question when someone picks a person who is away: asked, not blocked, with the stand-in as the other answer.
 function vacationAssignConfirm(infos, onYes, onStand){
   const stand = [...new Set(infos.filter(i => i.standIn).map(i => i.standIn))];
-  const msg = infos.length===1 ? `${infos[0].name} is on vacation then (${infos[0].label}). Assign anyway?`
-    : `${listJoin(infos.map(i => `${i.name} (${i.label})`))} are on vacation then. Assign anyway?`;
+  const msg = `${vacationAssignLine(infos)} Assign anyway?`;
   confirmAction(msg, onYes, { danger: false, title: infos.length===1 ? infos[0].label : 'On vacation then', confirmLabel: 'Assign anyway',
     alt: stand.length ? { label: `Assign ${listJoin(stand)} instead`, fn: onStand } : null });
 }
@@ -24462,6 +24469,8 @@ function cobraProposalHtml(p, busy){
   return `<div class="cobra-card" data-change="${esc(x.id || '')}">`
     + `<div class="cobra-card-head">${ico(COBRA_KIND_ICON[x.kind] || 'pencil', 15)}<b dir="auto">${esc(d.title || x.summary || x.label || '')}</b>${cobraStatusPill(x.status)}</div>`
     + cobraRowsOf(x).map(cobraDiffRowHtml).join('')
+    // The gateway's warnings for the person to weigh before confirming (e.g. someone on vacation then); while it is asked only.
+    + (ask && Array.isArray(d.warnings) ? d.warnings.slice(0, 4).map(w => `<div class="cobra-card-warn">${ico('alert', 13)}<span dir="auto">${esc(w)}</span></div>`).join('') : '')
     + (ask ? `<div class="cobra-card-acts"><button type="button" class="btn primary small" onclick="cobraChange('${esc(jsStr(x.id || ''))}','confirm')"${busy ? ' disabled' : ''}>Confirm</button><button type="button" class="btn small" onclick="cobraChange('${esc(jsStr(x.id || ''))}','cancel')"${busy ? ' disabled' : ''}>Cancel</button></div>` : '')
     + (err ? `<div class="cobra-card-err" dir="auto">${esc(err)}</div>` : '')
     + '</div>';
