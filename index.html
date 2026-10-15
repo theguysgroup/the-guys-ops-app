@@ -2458,18 +2458,42 @@ function vacationPaysMap(rows){
   (rows || []).forEach(r => { if (r && r.vacation_id && VACATION_PAY.includes(r.pay)) out[r.vacation_id] = r.pay; });
   return out;
 }
+// One employee_vacation_notes row as it changed live (row null = deleted; id = its vacation_id) into data's notes and pays
+// maps and onto the vacation. Returns true when something shown changed: the echo of this app's own save returns false.
+function vacationApplyPrivate(data, id, row){
+  if (!data || !id) return false;
+  const notes = data.vacationNotes || (data.vacationNotes = {}), pays = data.vacationPays || (data.vacationPays = {});
+  const note = row && row.note ? String(row.note) : '', pay = row && VACATION_PAY.includes(row.pay) ? row.pay : '';
+  let changed = (notes[id] || '') !== note || (pays[id] || '') !== pay;
+  if (note) notes[id] = note; else delete notes[id];
+  if (pay) pays[id] = pay; else delete pays[id];
+  const v = (data.vacations || []).find(x => x && x.id === id);
+  if (v && (v.note || '') !== note) { v.note = note; changed = true; }
+  if (v && pay && (v.options || {}).pay !== pay) { v.options = { ...v.options, pay }; changed = true; }
+  return changed;
+}
+// Reading the vacations list again after it failed (retryVacationsLoad): 1, 5 and 15 minutes, then no timer (0).
+function vacationRetryDelay(tries){ return [60000, 300000, 900000][tries] || 0; }
 // The note, and the private pay when there is one (it wins). Without one, the row's own options.pay stays: a row not moved
 // yet, or an app from before stage 3 follow-up 2.
 function vacationWithNote(v, notes, pays){
   const pay = pays && VACATION_PAY.includes(pays[v.id]) ? pays[v.id] : '';
   return { ...v, note: (notes && notes[v.id]) || '', ...(pay ? { options: { ...v.options, pay } } : {}) };
 }
-// workingDays (optional; employee.workingDays): "due back" on their next working day (vacationBackDay).
+// workingDays (optional; employee.workingDays): "due back" on their next working day (vacationBackDay). Without it, the
+// person's own from the people list, so every screen (badges, banner, assign warnings, Settings) says the same day.
 function vacationUntilText(v, day, tz, workingDays){
   if (!v || v.cancelledAt) return '';
   if (day < v.startsOn) return `Vacation from ${fmtDateShort(v.startsOn)}`;
   if (!vacationOnDay(v, day, tz)) return '';
-  return day <= v.endsOn ? `On vacation until ${fmtDateShort(v.endsOn)}` : `On vacation (due back ${fmtDateShort(vacationBackDay(v.endsOn, workingDays))})`;
+  return day <= v.endsOn ? `On vacation until ${fmtDateShort(v.endsOn)}` : `On vacation (due back ${fmtDateShort(vacationBackDay(v.endsOn, workingDays===undefined ? vacationWorkingDaysOf(v) : workingDays))})`;
+}
+// The working days of the person away (employees: STATE.data.employees when not given); undefined when not known (someone
+// who can't read the people list), and vacationBackDay then takes the next day.
+function vacationWorkingDaysOf(v, employees){
+  const list = employees || (STATE.data && STATE.data.employees) || [];
+  const e = v && v.employeeId ? list.find(x => x && x.id===v.employeeId) : null;
+  return e ? e.workingDays : undefined;
 }
 // Past the last day, autoBack off and nobody ended it: the owners get a "Back?" prompt.
 function vacationOverdue(v, day, tz){ return vacationOnDay(v, day, tz) && !vacationOpt(v, 'autoBack') && day > v.endsOn; }
@@ -3307,7 +3331,7 @@ async function loadFromSupabase(){
     // Who is on vacation (stage 3): every signed-in person reads them (badges), owners and managers write (RLS). Only the
     // ones that can still matter (main builder review 1.C.2): not cancelled, and ending in about the last year (the payroll
     // Leave card, the ticks of someone's last vacation) or left open (autoBack off, not ended yet).
-    fetchAllRows('employee_vacations', 'id', q => q.is('cancelled_at', null).or(`ends_on.gte.${shiftDays(todayStr(), -400)},and(ended_at.is.null,options->>autoBack.eq.false)`)),
+    fetchAllRows('employee_vacations', 'id', vacationsLoadQuery),
     // Their notes: owners and managers only (RLS; everyone else gets none back).
     fetchAllRows('employee_vacation_notes', 'vacation_id'),
   ]);
@@ -3409,6 +3433,11 @@ async function loadFromSupabase(){
   if (PRESENT) presentScaleData(data);
   STATE.data = data;
   if (STATE.dataLoaded) setupVacationsChannel();   // the first load failed and this one worked: subscribe now (stage 3 follow-up 7)
+  if (data.vacationsError) vacationsRetryLater(true);   // and when this one failed, the list is read again on its own
+}
+// Which vacations the app reads (loadFromSupabase, retryVacationsLoad): see the comment at the load.
+function vacationsLoadQuery(q){
+  return q.is('cancelled_at', null).or(`ends_on.gte.${shiftDays(todayStr(), -400)},and(ended_at.is.null,options->>autoBack.eq.false)`);
 }
 
 /* ── db: the write layer (Stage 3, part 2) ───────────────────────────────
@@ -4207,6 +4236,7 @@ const STATE = { profiles: [], currentProfileId: null, data: null, dataLoaded: fa
    subscription never fires after STATE.data is cleared. */
 let REALTIME_CHANNEL = null;
 let VACATIONS_CHANNEL = null;   // employee_vacations' own realtime channel (stage 3, setupRealtimeSubscriptions)
+let VAC_RETRY = { busy: false, tries: 0, timer: null };   // reading the vacations list again after it failed (retryVacationsLoad)
 // Shared by the initial load and the realtime handlers below, so both build the exact same shape.
 function mapJobRow(j){
   return {
@@ -4454,19 +4484,57 @@ function setupRealtimeSubscriptions(){
   setupVacationsChannel();
 }
 // Vacations (stage 3) on a channel of their own: a table missing from the publication (SQL not applied yet) can never
-// break the shared one. Only when the list loaded; otherwise the screens already say it can't be read, and a later load
-// that works subscribes then (loadFromSupabase; stage 3 follow-up 7). Each change may ask this login's app to end its
-// shift (vacationEndOwnShift).
+// break the shared one. Only when the list loaded; otherwise the screens already say it can't be read, and the list is
+// read again until it works (retryVacationsLoad), which subscribes then (stage 3 follow-up 7). Each change may ask this
+// login's app to end its shift (vacationEndOwnShift). The private rows (note, paid / unpaid leave) come on the same
+// channel: realtime sends a change only to who may read that row (its RLS read policy: owners and managers), and a
+// delete carries only the vacation_id.
 function setupVacationsChannel(){
   if (VACATIONS_CHANNEL || !STATE.data || STATE.data.vacationsError) return;
   const onVac = handleListRealtimeChange('vacations', r => vacationWithNote(mapVacationRow(r), STATE.data && STATE.data.vacationNotes, STATE.data && STATE.data.vacationPays));
   VACATIONS_CHANNEL = sb.channel('vacations-realtime')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacations' }, payload => { onVac(payload); vacationEndOwnShift(); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacation_notes' }, handleVacationNoteRealtimeChange)
     .subscribe();
 }
+// Another owner's or manager's change to a note or paid / unpaid leave (stage 3 follow-up 2, review): into the maps the
+// vacations' own live updates read, and onto the vacation. The echo of this app's own save changes nothing: no redraw.
+function handleVacationNoteRealtimeChange(payload){
+  if (PRESENT || !STATE.data) return;
+  const del = payload.eventType === 'DELETE', id = del ? payload.old && payload.old.vacation_id : payload.new && payload.new.vacation_id;
+  if (vacationApplyPrivate(STATE.data, id, del ? null : payload.new)) renderKeepingInput();
+}
+// The vacations list did not load (stage 3 follow-up 7, review): it is read again on its own, and the channel subscribes
+// once it works, for every role. Tried when the browser is back online, when the tab is shown again, and 1, 5 and 15
+// minutes after the failed load (vacationRetryDelay; then only on those two events). Nothing is read or drawn while the
+// list is there; one redraw when it comes back.
+function vacationsRetryLater(fresh){
+  if (fresh) VAC_RETRY.tries = 0;
+  clearTimeout(VAC_RETRY.timer);
+  const ms = vacationRetryDelay(VAC_RETRY.tries++);
+  VAC_RETRY.timer = ms ? setTimeout(retryVacationsLoad, ms) : null;
+}
+async function retryVacationsLoad(){
+  if (VAC_RETRY.busy || !STATE.dataLoaded || !STATE.data || !STATE.data.vacationsError) return;
+  VAC_RETRY.busy = true;
+  try {
+    const [vr, nr] = await Promise.all([fetchAllRows('employee_vacations', 'id', vacationsLoadQuery), fetchAllRows('employee_vacation_notes', 'vacation_id')]);
+    const data = STATE.data;
+    if (!data || !data.vacationsError) return;   // signed out, or a full load brought the list meanwhile
+    if (vr.error) { vacationsRetryLater(); return; }
+    if (!nr.error) { data.vacationNotes = vacationNotesMap(nr.data); data.vacationPays = vacationPaysMap(nr.data); }
+    data.vacations = (vr.data || []).map(r => vacationWithNote(mapVacationRow(r), data.vacationNotes, data.vacationPays));
+    data.vacationsError = '';
+    setupVacationsChannel();
+    renderKeepingInput();
+  } finally { VAC_RETRY.busy = false; }
+}
+window.addEventListener('online', () => retryVacationsLoad());
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') retryVacationsLoad(); });
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
   if (VACATIONS_CHANNEL) { sb.removeChannel(VACATIONS_CHANNEL); VACATIONS_CHANNEL = null; }
+  clearTimeout(VAC_RETRY.timer); VAC_RETRY.timer = null;
 }
 let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25,q:'',noReview:false,selectedId:null}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'contractors'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
@@ -20209,9 +20277,10 @@ function vacRefresh(){
   [['vac-opts', vacOptsHtml], ['vac-extra', vacExtraHtml]].forEach(([id, fn]) => { const n = document.getElementById(id); if (n) n.innerHTML = fn(); });
   const s = document.getElementById('vac-sub'); if (s) s.textContent = vacSubText();
 }
-// "Vacation set: 20 Oct – 24 Oct · stand-in Sam · paid leave" (the person's History).
+// "Vacation set: 20 Oct – 24 Oct · stand-in Sam" (the person's History). Never paid / unpaid leave: every signed-in person
+// reads activity_log, and that is owners and managers only (stage 3 follow-up 2).
 function vacationLogText(v, verb){
-  return `${verb}: ${vacationRangeText(v.startsOn, v.endsOn)}${vacationOpt(v, 'autoBack') ? '' : ' (until someone ends it)'}${vacationOpt(v, 'standIn') && v.standInName ? ' · stand-in ' + v.standInName : ''}${vacationOpt(v, 'payroll') ? ` · ${v.options.pay==='paid' ? 'paid' : 'unpaid'} leave` : ''}`;
+  return `${verb}: ${vacationRangeText(v.startsOn, v.endsOn)}${vacationOpt(v, 'autoBack') ? '' : ' (until someone ends it)'}${vacationOpt(v, 'standIn') && v.standInName ? ' · stand-in ' + v.standInName : ''}`;
 }
 async function saveVacationModal(){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
@@ -20259,7 +20328,7 @@ async function vacationSaveNow(ui, endShift){
   }
   let v = res.vacation;
   const actor = getCurrentProfile()?.fullName || 'Unknown';
-  // before the History line, so it reads the pay just saved (from the list's copy: a live update may have replaced it)
+  // the private row, then the list's copy for the History line (a live update may have replaced the one the save returned)
   if (!d.id || (P.note || '')!==noteBefore || P.pay!==payBefore) {
     const nr = await db.vacations.setPrivate(v.id, P);
     if (nr.error) showToast('The vacation is saved, but not its note or paid / unpaid leave: ' + nr.error.message, { kind: 'warn' });

@@ -169,6 +169,8 @@ const DECLS = [
   'vacationPaysMap', 'vacationPrivateRow',
   // stage 3 follow-ups (Ofek 15 Oct): the stand-in's alerts hint, "end their shift now", back on a working day (items 1, 5, 6)
   'vacationStandInAlertHint', 'vacationShiftLogins', 'vacationOnShift', 'vacationEndShiftFor', 'vacationBackDay',
+  // stage 3 follow-ups review: one return day everywhere, pay changes live, no pay in History, the vacations list read again
+  'vacationWorkingDaysOf', 'vacationApplyPrivate', 'vacationRetryDelay', 'vacationLogText',
 ];
 
 function extractDecl(source, name){
@@ -2638,6 +2640,39 @@ function testVacations(sb){
   const fri = V({ endsOn: '2026-10-23', options: { autoBack: false } });
   assertEqual([sb.vacationUntilText(fri, '2026-10-27', SYD, [1, 2, 3, 4, 5]), sb.vacationUntilText(fri, '2026-10-27', SYD), sb.vacationUntilText(fri, '2026-10-27', SYD, []), sb.vacationUntilText(fri, '2026-10-22', SYD, [1, 2, 3, 4, 5])],
     ['On vacation (due back 26 Oct)', 'On vacation (due back 24 Oct)', 'On vacation (due back 24 Oct)', 'On vacation until 23 Oct'], 'until text: "due back" on their next working day when known');
+  // review (item 6): without working days passed, the person's own from the people list, so every screen says the same day
+  const empsBefore = sb.STATE.data.employees;
+  sb.STATE.data.employees = [{ id: 'e1', workingDays: [1, 2, 3, 4, 5] }, { id: 'e2', workingDays: [3] }];
+  assertEqual([sb.vacationUntilText(fri, '2026-10-27', SYD), sb.vacationUntilText(V({ employeeId: 'e2', endsOn: '2026-10-23', options: { autoBack: false } }), '2026-10-27', SYD), sb.vacationUntilText(V({ employeeId: 'e9', endsOn: '2026-10-23', options: { autoBack: false } }), '2026-10-27', SYD), sb.vacationUntilText(fri, '2026-10-27', SYD, [])],
+    ['On vacation (due back 26 Oct)', 'On vacation (due back 28 Oct)', 'On vacation (due back 24 Oct)', 'On vacation (due back 24 Oct)'], 'until text: the working days of the person from the people list; someone not in it (or none set) → the next day');
+  assertEqual([sb.vacationWorkingDaysOf(fri), sb.vacationWorkingDaysOf(fri, [{ id: 'e1', workingDays: [6] }]), sb.vacationWorkingDaysOf(V({ employeeId: 'e9' })), sb.vacationWorkingDaysOf(null)],
+    [[1, 2, 3, 4, 5], [6], undefined, undefined], 'working days of: from the list given, else the people list; unknown → undefined');
+  sb.STATE.data.employees = empsBefore;
+  // review (item 2): another owner's pay or note change arrives live; the echo of this app's own save draws nothing
+  const pd = { vacationNotes: { v1: 'Fiji' }, vacationPays: { v1: 'unpaid' }, vacations: [V({ note: 'Fiji', options: { payroll: true, pay: 'unpaid' } })] };
+  const ap1 = sb.vacationApplyPrivate(pd, 'v1', { vacation_id: 'v1', note: 'Fiji', pay: 'paid' });
+  assertEqual([ap1, pd.vacationPays.v1, pd.vacations[0].options.pay, pd.vacations[0].options.payroll, pd.vacations[0].note], [true, 'paid', 'paid', true, 'Fiji'], 'apply private: a pay change reaches the maps and the vacation');
+  assertEqual(sb.vacationApplyPrivate(pd, 'v1', { vacation_id: 'v1', note: 'Fiji', pay: 'paid' }), false, 'apply private: the same row again (the echo of a save made here) → nothing changed, no redraw');
+  assertEqual([sb.vacationApplyPrivate(pd, 'v1', { vacation_id: 'v1', note: null, pay: 'paid' }), pd.vacationNotes.v1, pd.vacations[0].note], [true, undefined, ''], 'apply private: a note cleared');
+  assertEqual([sb.vacationApplyPrivate(pd, 'v7', { vacation_id: 'v7', note: 'x', pay: 'odd' }), pd.vacationNotes.v7, pd.vacationPays.v7], [true, 'x', undefined], 'apply private: a vacation not in the list yet (its row comes next) still fills the maps; an odd pay is left out');
+  assertEqual([sb.vacationApplyPrivate(pd, 'v7', null), 'v7' in pd.vacationNotes, sb.vacationApplyPrivate(pd, null, {}), sb.vacationApplyPrivate(null, 'v1', {}), sb.vacationApplyPrivate({}, 'v3', { pay: 'paid' })],
+    [true, false, false, false, true], 'apply private: a delete empties the maps; no id or no data → nothing; missing maps are made');
+  // review (item 7): the vacations list read again after 1, 5 and 15 minutes, then no timer
+  assertEqual([0, 1, 2, 3, 9].map(sb.vacationRetryDelay), [60000, 300000, 900000, 0, 0], 'retry delay: three timed tries, then none (only back online / tab shown)');
+  // review (item 1): the History line never says paid or unpaid (every signed-in person reads activity_log)
+  const lt = sb.vacationLogText(V({ standInName: 'Sam', options: { payroll: true, pay: 'paid', standIn: true, autoBack: true } }), 'Vacation set');
+  assertEqual([lt, /paid|unpaid|leave/i.test(sb.vacationLogText(V({ options: { payroll: true, pay: 'unpaid' } }), 'Vacation changed'))], ['Vacation set: 20 Oct – 24 Oct · stand-in Sam', false], 'log text: dates and stand-in, never paid / unpaid leave');
+  // review (items 2, 4): the private rows come on the vacations channel; the list is read again when back online or shown
+  const vhtml = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  assertEqual([/table: 'employee_vacation_notes' \}, handleVacationNoteRealtimeChange/.test(vhtml), /addEventListener\('online', \(\) => retryVacationsLoad\(\)\)/.test(vhtml), /visibilityState === 'visible'\) retryVacationsLoad\(\)/.test(vhtml), /if \(data\.vacationsError\) vacationsRetryLater\(true\)/.test(vhtml)],
+    [true, true, true, true], 'wiring: notes live on the vacations channel; retry on online, tab shown and after a failed load');
+  // review (items 1, 5, 6): the follow-ups SQL strips options.pay and the History words only in part B (after the app)
+  const vsql = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage3-vacation.sql'), 'utf8');
+  const fs3 = vsql.slice(vsql.indexOf('-- Stage 3 follow-ups')), pa = fs3.indexOf('-- ── PART A'), pb = fs3.indexOf('-- ── PART B'), rb = fs3.indexOf('-- ── ROLLBACK');
+  const partA = fs3.slice(pa, pb), partB = fs3.slice(pb, rb);
+  assertEqual([pa > 0 && pb > pa && rb > pb, partA.includes("options - 'pay'"), partB.includes("set options = options - 'pay'"), /update public\.activity_log set text = regexp_replace\(text, ' · \(paid\|unpaid\) leave\$', ''\)/.test(partB),
+    partA.includes('alter publication supabase_realtime add table public.employee_vacation_notes'), fs3.slice(0, pa).includes('add / update: {-} (= PUBLIC)'), fs3.slice(0, pa).includes('{public}')],
+    [true, false, true, true, true, true, false], 'follow-ups SQL: part A before the app (publication), part B after it (strip pay, clean History); the check before expects {-}');
 
   // words on badges and pickers
   const ut = (v, d) => sb.vacationUntilText(v, d, SYD);
@@ -2699,8 +2734,8 @@ function testVacations(sb){
   const s3 = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage3-vacation.sql'), 'utf8');
   const fu = s3.slice(s3.indexOf('-- ═══ end stage 3 vacations ═══')), fuRun = fu.slice(0, fu.indexOf('-- ── ROLLBACK (stage 3 follow-ups'));
   const fuRb = fu.slice(fu.indexOf('-- ── ROLLBACK (stage 3 follow-ups')), fuEnd = fu.indexOf('-- END stage 3 follow-ups');
-  assertEqual([s3.indexOf('-- ═══ end stage 3 vacations ═══') > 0, /Stage 3 follow-ups \(Ofek 15 Oct, stage4-review §3 items 2, 3, 4\)/.test(fu), /Run BEFORE deploying the app of this change/.test(fu), fuEnd > 0, /^begin;$/m.test(fuRun) && /^commit;\nselect 'stage3-followups ok';$/m.test(fuRun)],
-    [true, true, true, true, true], 'follow-up SQL: its own section after stage 3, run before the app, one begin … commit, an END banner');
+  assertEqual([s3.indexOf('-- ═══ end stage 3 vacations ═══') > 0, /Stage 3 follow-ups \(Ofek 15 Oct, stage4-review §3 items 2, 3, 4\)/.test(fu), /PART A: run BEFORE deploying the app of this change/.test(fu) && /PART B: run AFTER the app of this change is live/.test(fu), fuEnd > 0, (fuRun.match(/^begin;$/mg) || []).length === 2 && /^commit;\nselect 'stage3-followups part A ok';$/m.test(fuRun) && /^commit;\nselect 'stage3-followups part B ok';$/m.test(fuRun)],
+    [true, true, true, true, true], 'follow-up SQL: its own section after stage 3, part A before the app and part B after it, each one begin … commit, an END banner');
   const guard = (fuRun.match(/create or replace function public\.employee_vacations_guard\(\)[\s\S]*?end \$function\$;/) || [''])[0];
   const gi = t => guard.indexOf(t);
   assertEqual([gi('v_pay text;') > 0, gi("if new.options ? 'pay' then") > 0 && gi("if new.options ? 'pay' then") < gi('if new.cancelled_at is not null then return new; end if;'),
@@ -2933,7 +2968,7 @@ function testVacationUi(sb){
   // Main builder's review 1.C (minor): the note in its own table, the forgot-logout acknowledgement can't stop the render.
   const vss = fx('vaSessionStart');
   assertEqual([/try \{ await sb\.rpc\('ack_forgot_logout'\); \} catch/.test(vss), vss.trim().endsWith('render();\n}') || /render\(\);\s*\}$/.test(vss.trim())], [true, true], 'static: vaSessionStart catches a failed ack_forgot_logout and still renders');
-  assertEqual([script.includes("fetchAllRows('employee_vacation_notes', 'vacation_id')"), /fetchAllRows\('employee_vacations', 'id', q => q\.is\('cancelled_at', null\)/.test(script)], [true, true], 'static: notes load from their own table; vacations load without the cancelled and old ones');
+  assertEqual([script.includes("fetchAllRows('employee_vacation_notes', 'vacation_id')"), /fetchAllRows\('employee_vacations', 'id', vacationsLoadQuery\)/.test(script), /function vacationsLoadQuery\(q\)\{\n  return q\.is\('cancelled_at', null\)/.test(script), (script.match(/fetchAllRows\('employee_vacations', 'id', vacationsLoadQuery\)/g) || []).length], [true, true, true, 2], 'static: notes load from their own table; vacations load without the cancelled and old ones (one query: the load and its retry)');
   // Main builder's review, 15 Oct.
   // A2: one time zone helper per layer (stage 1's), no zone code of the vacations' own.
   assertEqual([/function vacation(Tz|Today|DayOf)\(/.test(script), /region\.timezone|region \? c\.region\.timezone/.test(script)], [false, false], 'review A2: no vacationTz / vacationToday / vacationDayOf, nothing reads the lowercase region.timezone');
@@ -4972,7 +5007,7 @@ async function testVacationFollowUps(){
   const chans = [], fired = [];
   const ctx = { console, STATE: { data: { vacationsError: 'the vacations list did not load' } },
     sb: { channel(name){ const c = { name, ons: [], on(ev, f, cb){ c.ons.push(cb); return c; }, subscribe(){ chans.push(c); return c; } }; return c; } },
-    handleListRealtimeChange: (k, map) => p => fired.push(['list', k, typeof map]), vacationWithNote: v => v, mapVacationRow: r => r, vacationEndOwnShift: () => fired.push(['endShift']) };
+    handleListRealtimeChange: (k, map) => p => fired.push(['list', k, typeof map]), vacationWithNote: v => v, mapVacationRow: r => r, vacationEndOwnShift: () => fired.push(['endShift']), handleVacationNoteRealtimeChange: p => fired.push(['notes', p.eventType]) };
   vm.createContext(ctx);
   vm.runInContext('var VACATIONS_CHANNEL = null;\n' + extractDecl(script, 'setupVacationsChannel') + '\nthis.__s = setupVacationsChannel; this.__ch = () => VACATIONS_CHANNEL;', ctx);
   ctx.__s();
@@ -4982,6 +5017,8 @@ async function testVacationFollowUps(){
   assertEqual([afterFail, chans.length, chans[0] && chans[0].name, !!ctx.__ch()], [0, 1, 'vacations-realtime', true], 'channel: not while the list failed to load; a later load that worked subscribes, once');
   chans[0].ons[0]({ eventType: 'UPDATE', new: { id: 'v1' } });
   assertEqual(fired, [['list', 'vacations', 'function'], ['endShift']], 'channel: each change updates the list, then may end this login\'s shift');
+  chans[0].ons[1]({ eventType: 'DELETE', old: { vacation_id: 'v1' } });
+  assertEqual([chans[0].ons.length, fired[2]], [2, ['notes', 'DELETE']], 'channel: the private rows (note, paid / unpaid leave) on the same channel (stage 3 follow-ups review, item 2)');
 
   // the save's question (saveVacationModal): a VA card, in force today, on shift (read fresh) → asked; else saved straight away
   const run = async ({ startsOn = '2026-10-22', onDuty = true, profiles, readError = false } = {}) => {

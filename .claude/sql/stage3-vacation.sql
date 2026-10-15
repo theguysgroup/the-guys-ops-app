@@ -260,19 +260,25 @@ commit;
 
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 -- Stage 3 follow-ups (Ofek 15 Oct, stage4-review §3 items 2, 3, 4).
--- STAGING FIRST (wblsrpmjiqwuxmrmuklc). Run BEFORE deploying the app of this change (the app writes
--- employee_vacation_notes.pay). Safe to run again.
+-- STAGING FIRST (wblsrpmjiqwuxmrmuklc). Two parts, each safe to run again:
+--   PART A: run BEFORE deploying the app of this change (the app writes employee_vacation_notes.pay and listens to it live).
+--   PART B: run AFTER the app of this change is live. Until then the app that is live now reads paid / unpaid leave only from
+--           employee_vacations.options.pay: moving it out first would show every vacation as "Unpaid leave" on its payroll
+--           board. The new app reads the private pay when there is one and falls back to options.pay, so it is right on
+--           both sides of part B. Ask the owners to reload any open tab before payroll is reviewed.
 --   2. Paid or unpaid leave is private: it moves from employee_vacations.options.pay (every signed-in person reads it) to
 --      employee_vacation_notes.pay (owners and managers only, like the note). The guard moves a pay an app from before this
 --      change still sends; the notes' foreign key is made deferrable so the guard can write that row while the vacation is
---      being inserted.
+--      being inserted. The notes join the realtime publication, so another owner's change shows at once (realtime applies
+--      the read policy: owners and managers only). The person's History lines ("Vacation set: …") no longer say paid or
+--      unpaid; part B takes it out of the lines written since stage 3 (activity_log is read by every signed-in person).
 --   3. Defense in depth, as stage 5 did: nothing for anon, no delete / truncate / references / trigger for signed-in people,
 --      and the add / update policies are for signed-in people only.
 --   4. A rename (employee_vacations_names), the push scan's reminded_at or a pay moved out of options re-ran the clash check
 --      on every row of that person, and could fail with "Already on vacation" after a time-zone change. The guard now skips
 --      the check when nothing that decides a clash changed.
 -- Check before (read-only):
---   select count(*) from public.employee_vacations where options ? 'pay';                                    -- the rows step 4 copies
+--   select count(*) from public.employee_vacations where options ? 'pay';                                    -- the rows step 6 copies
 --   select column_name from information_schema.columns
 --    where table_schema = 'public' and table_name = 'employee_vacation_notes' and column_name = 'pay';      -- 0 rows the first time
 --   select conname, condeferrable from pg_constraint
@@ -281,8 +287,14 @@ commit;
 --    where table_schema = 'public' and table_name in ('employee_vacations', 'employee_vacation_notes')
 --      and grantee in ('anon', 'authenticated') order by 1, 2;                                                -- Supabase's defaults: all of them
 --   select polname, polroles::regrole[] from pg_policy
---    where polrelid in ('public.employee_vacations'::regclass, 'public.employee_vacation_notes'::regclass); -- add / update: {public}
+--    where polrelid in ('public.employee_vacations'::regclass, 'public.employee_vacation_notes'::regclass); -- add / update: {-} (= PUBLIC)
+--   select tablename from pg_publication_tables
+--    where pubname = 'supabase_realtime' and tablename in ('employee_vacations', 'employee_vacation_notes'); -- employee_vacations only
+--   select count(*) from public.activity_log
+--    where record_kind = 'employee' and text ~ '^Vacation (set|changed): ' and text ~ ' · (paid|unpaid) leave$';  -- the lines step 8 cleans
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+-- ── PART A: before the app ──────────────────────────────────────────────────────────────────────────────────────
 begin;
 
 -- 1. The pay column (owners and managers only, with the note).
@@ -307,7 +319,39 @@ begin
   end if;
 end $$;
 
--- 3. The guard: section 5, plus the pay move (item 2) and no clash check when nothing that decides one changed (item 4).
+-- 3. Who may do what (item 3). Referential actions (an employee deleted → their vacations and notes) run as the table
+--    owner, so revoking delete here does not stop them.
+revoke all on public.employee_vacations, public.employee_vacation_notes from anon;
+revoke delete, truncate, references, trigger on public.employee_vacations, public.employee_vacation_notes from authenticated;
+drop policy if exists "employee_vacations: owners and managers add" on public.employee_vacations;
+create policy "employee_vacations: owners and managers add" on public.employee_vacations for insert to authenticated
+  with check (is_owner_or_manager() and business_id = 'default');
+drop policy if exists "employee_vacations: owners and managers update" on public.employee_vacations;
+create policy "employee_vacations: owners and managers update" on public.employee_vacations for update to authenticated
+  using (is_owner_or_manager()) with check (is_owner_or_manager());
+drop policy if exists "employee_vacation_notes: owners and managers add" on public.employee_vacation_notes;
+create policy "employee_vacation_notes: owners and managers add" on public.employee_vacation_notes for insert to authenticated
+  with check (is_owner_or_manager() and business_id = 'default');
+drop policy if exists "employee_vacation_notes: owners and managers update" on public.employee_vacation_notes;
+create policy "employee_vacation_notes: owners and managers update" on public.employee_vacation_notes for update to authenticated
+  using (is_owner_or_manager()) with check (is_owner_or_manager() and business_id = 'default');
+-- (the read policies are already "to authenticated")
+
+-- 4. The notes (note and paid / unpaid leave) live: realtime sends each change only to who may read the row (owners and
+--    managers), so another owner's open payroll board shows a pay change at once.
+do $$ begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'employee_vacation_notes') then
+    alter publication supabase_realtime add table public.employee_vacation_notes;
+  end if;
+end $$;
+
+commit;
+select 'stage3-followups part A ok';
+
+-- ── PART B: after the app of this change is live ────────────────────────────────────────────────────────────────
+begin;
+
+-- 5. The guard: section 5, plus the pay move (item 2) and no clash check when nothing that decides one changed (item 4).
 create or replace function public.employee_vacations_guard()
  returns trigger
  language plpgsql
@@ -374,44 +418,37 @@ begin
 end $function$;
 -- (the trigger itself is section 5's, unchanged)
 
--- 4. Copy the pays there are now (a private value already there wins).
+-- 6. Copy the pays there are now (a private value already there wins).
 insert into public.employee_vacation_notes as n (vacation_id, business_id, pay)
   select id, business_id, options->>'pay' from public.employee_vacations where options->>'pay' in ('paid', 'unpaid')
 on conflict (vacation_id) do update set pay = coalesce(n.pay, excluded.pay);
 
--- 5. Strip them from the rows everyone reads. The guard above skips the clash check for these rows (only pay differs), so an
+-- 7. Strip them from the rows everyone reads. The guard above skips the clash check for these rows (only pay differs), so an
 --    old row whose dates touch another after a time-zone change can't stop this.
 update public.employee_vacations set options = options - 'pay' where options ? 'pay';
 
--- 6. Who may do what (item 3). Referential actions (an employee deleted → their vacations and notes) run as the table
---    owner, so revoking delete here does not stop them.
-revoke all on public.employee_vacations, public.employee_vacation_notes from anon;
-revoke delete, truncate, references, trigger on public.employee_vacations, public.employee_vacation_notes from authenticated;
-drop policy if exists "employee_vacations: owners and managers add" on public.employee_vacations;
-create policy "employee_vacations: owners and managers add" on public.employee_vacations for insert to authenticated
-  with check (is_owner_or_manager() and business_id = 'default');
-drop policy if exists "employee_vacations: owners and managers update" on public.employee_vacations;
-create policy "employee_vacations: owners and managers update" on public.employee_vacations for update to authenticated
-  using (is_owner_or_manager()) with check (is_owner_or_manager());
-drop policy if exists "employee_vacation_notes: owners and managers add" on public.employee_vacation_notes;
-create policy "employee_vacation_notes: owners and managers add" on public.employee_vacation_notes for insert to authenticated
-  with check (is_owner_or_manager() and business_id = 'default');
-drop policy if exists "employee_vacation_notes: owners and managers update" on public.employee_vacation_notes;
-create policy "employee_vacation_notes: owners and managers update" on public.employee_vacation_notes for update to authenticated
-  using (is_owner_or_manager()) with check (is_owner_or_manager() and business_id = 'default');
--- (the read policies are already "to authenticated")
+-- 8. The History lines written since stage 3 ("Vacation set: 20 Oct – 24 Oct · paid leave") lose the pay (always their
+--    last words). ONE-WAY: the pay itself is kept in employee_vacation_notes, only these words go. A tab of the old app
+--    still open can write one more: running part B again later (say the next day) takes it out too.
+update public.activity_log set text = regexp_replace(text, ' · (paid|unpaid) leave$', '')
+ where record_kind = 'employee' and text ~ '^Vacation (set|changed): ' and text ~ ' · (paid|unpaid) leave$';
 
 commit;
-select 'stage3-followups ok';
+select 'stage3-followups part B ok';
 
--- Check after (read-only):
+-- Check after (read-only; part A's lines hold after part A, the rest after part B):
 --   select data_type, is_nullable from information_schema.columns
 --    where table_schema = 'public' and table_name = 'employee_vacation_notes' and column_name = 'pay';      -- text, YES
 --   select conname from pg_constraint
 --    where conrelid = 'public.employee_vacation_notes'::regclass and conname = 'employee_vacation_notes_pay';  -- 1 row
 --   select conname, condeferrable, condeferred from pg_constraint
 --    where conrelid = 'public.employee_vacation_notes'::regclass and contype = 'f';                          -- 1 row: true, true
+--   select tablename from pg_publication_tables
+--    where pubname = 'supabase_realtime' and tablename in ('employee_vacations', 'employee_vacation_notes'); -- both
+--   -- part B:
 --   select count(*) from public.employee_vacations where options ? 'pay';                                    -- 0
+--   select count(*) from public.activity_log
+--    where record_kind = 'employee' and text ~ '^Vacation (set|changed): ' and text ~ ' · (paid|unpaid) leave$';  -- 0
 --   select count(*) from public.employee_vacation_notes where pay is not null;                               -- the count before, or more
 --   select grantee, privilege_type from information_schema.role_table_grants
 --    where table_schema = 'public' and table_name in ('employee_vacations', 'employee_vacation_notes')
@@ -427,8 +464,15 @@ select 'stage3-followups ok';
 --   --       → no "Already on vacation"
 
 -- ── ROLLBACK (stage 3 follow-ups; run by hand only) ─────────────────────────────────────────────────────────────
--- Redeploy the previous app FIRST (this one reads and writes employee_vacation_notes.pay).
+-- Redeploy the previous app FIRST (this one reads and writes employee_vacation_notes.pay). Part B's step 8 (the pay taken
+-- out of the History lines) is ONE-WAY: those words are not put back.
 -- begin;
+-- -- the notes off the realtime publication (part A, step 4)
+-- do $$ begin
+--   if exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'employee_vacation_notes') then
+--     alter publication supabase_realtime drop table public.employee_vacation_notes;
+--   end if;
+-- end $$;
 -- -- pay back on the rows, without the guard (it would move it out again)
 -- alter table public.employee_vacations disable trigger employee_vacations_guard;
 -- update public.employee_vacations v set options = v.options || jsonb_build_object('pay', n.pay)
