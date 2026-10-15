@@ -20,6 +20,7 @@ function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, strin
     if (pk !== undefined) { if (op === "eq") return (r: any) => get(r) != null && String(get(r)) === val; throw new Error("fake or: " + s); }
     if (op === "eq") return (r: any) => r[col] != null && String(r[col]) === val;
     if (op === "gte") return (r: any) => r[col] != null && String(r[col]) >= val;
+    if (op === "neq") return (r: any) => r[col] != null && String(r[col]) !== val;   // stage 8: unpaid jobs
     if (op === "is" && val === "null") return (r: any) => r[col] == null;
     if (op === "lt") return (r: any) => r[col] != null && String(r[col]) < val;
     // G2 (the lead resolver): ilike with * wildcards, and match (a regex)
@@ -654,7 +655,7 @@ const whoamiScripts = () => [toolScript("toolu_w1", "whoami", {}), textScript("Y
     for (const t of Object.values(TOOLS)) eq(strictSchemaProblems(t.input_schema), [], `registered tool ${t.name} has a strict-compatible schema`);
     for (const m of Object.values(MODES)) eq(strictSchemaProblems(m.contextSchema), [], `mode ${m.id} has a strict-compatible context schema`);
     const me = appProfile(OWNER);
-    eq(toolsFor("assistant", me).map((t) => t.name), ["add_lead_note", "add_task", "change_office_hours", "move_lead_stage", "read_office_hours", "whoami"], "assistant tools, sorted, without the test mode's (G2's change tools included)");
+    eq(toolsFor("assistant", me).map((t) => t.name), ["add_lead_note", "add_task", "change_office_hours", "count_calls", "count_leads", "find_leads", "list_jobs", "list_reminders", "list_tasks", "money_summary", "move_lead_stage", "payroll_summary", "read_office_hours", "read_settings", "upcoming_work", "whoami"], "assistant tools, sorted, without the test mode's (G2's change tools and stage 8's read tools included)");
     flips = 0;
     eq(toolsFor("test_mode", me).map((t) => t.name), ["boom", "echo_test", "flaky_allow", "huge", "refuses"], "a test mode's tools appear in its own mode (no change to the loop)");
     registerTool({ ...good, name: "owner_only", modes: ["test_mode"], allow: (p: any) => p.role === "owner" });
@@ -672,7 +673,7 @@ const whoamiScripts = () => [toolScript("toolu_w1", "whoami", {}), textScript("Y
     const h = buildRequest({ model: "claude-haiku-5-5", maxTokens: 4096, effort: "low", system: ASSISTANT_SYSTEM, tools, messages: [{ role: "user", content: "hi" }] });
     eq(h.params.system, [{ type: "text", text: ASSISTANT_SYSTEM, cache_control: { type: "ephemeral" } }], "system: one text block with cache_control");
     eq([h.params.cache_control, h.params.tool_choice, h.params.output_config, h.params.max_tokens], [{ type: "ephemeral" }, { type: "auto" }, { effort: "low" }, 4096], "top-level cache_control, tool_choice auto, effort");
-    eq(h.params.tools.map((t: any) => [t.name, t.strict, "eager_input_streaming" in t]), ["add_lead_note", "add_task", "change_office_hours", "move_lead_stage", "read_office_hours", "whoami"].map((n) => [n, true, false]), "tools sorted, strict, no eager streaming");
+    eq(h.params.tools.map((t: any) => [t.name, t.strict, "eager_input_streaming" in t]), ["add_lead_note", "add_task", "change_office_hours", "count_calls", "count_leads", "find_leads", "list_jobs", "list_reminders", "list_tasks", "money_summary", "move_lead_stage", "payroll_summary", "read_office_hours", "read_settings", "upcoming_work", "whoami"].map((n) => [n, true, false]), "tools sorted, strict, no eager streaming");
     ok(["temperature", "top_p", "top_k", "thinking", "budget_tokens", "betas", "fallbacks"].every((k) => !(k in h.params)) && !h.useBeta, "Haiku: no sampling, thinking, betas or fallbacks");
     const s5 = buildRequest({ model: "claude-sonnet-5-5", maxTokens: 4096, effort: "low", system: "S", tools, messages: [] });
     eq([s5.useBeta, s5.params.betas, s5.params.fallbacks, s5.params.output_config], [true, ["server-side-fallback-2026-07-01"], "default", { effort: "low" }], "claude-sonnet-5-5: beta fallbacks 'default' and effort");

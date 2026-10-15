@@ -174,8 +174,10 @@ SUITES.push(async () => {
 
   // ── 2. which tools each role gets ──
   {
-    const names = (p: any) => toolsFor("assistant", P(p)).map((t) => t.name);
-    eq(names(OWNER), ["add_lead_note", "add_task", "change_office_hours", "move_lead_stage", "read_office_hours", "whoami"], "owner: all six");
+    // (stage 8's read tools are pinned role by role in tests_read.ts; here only the change tools and the two first reads)
+    const G2 = ["add_lead_note", "add_task", "change_office_hours", "move_lead_stage", "read_office_hours", "whoami"];
+    const names = (p: any) => toolsFor("assistant", P(p)).map((t) => t.name).filter((n) => G2.includes(n));
+    eq(names(OWNER), G2, "owner: all six");
     eq(names(MANAGER), ["add_lead_note", "add_task", "move_lead_stage", "read_office_hours", "whoami"], "manager: everything but office hours");
     eq(names(VA), names(MANAGER), "a VA with CRM + Tasks: the same as a manager");
     eq(names(TECH), ["add_task", "read_office_hours", "whoami"], "a technician with Tasks (no CRM): add_task and the reads");
@@ -188,7 +190,7 @@ SUITES.push(async () => {
   {
     const db = world2();
     const r = await toolCall(db, "jwt-tech", "move_lead_stage", { lead: "Demo Lead", stage: "Quoted", follow_up: "2026-10-20" });
-    eq([errText(db, r), db.T.ai_changes.length], ["Unknown tool move_lead_stage. Available: add_task, read_office_hours, whoami", 0], "a technician's move_lead_stage: not even offered → is_error, no row");
+    eq([errText(db, r), db.T.ai_changes.length], ["Unknown tool move_lead_stage. Available: add_task, list_tasks, read_office_hours, read_settings, upcoming_work, whoami", 0], "a technician's move_lead_stage: not even offered → is_error, no row");
     const r2 = await toolCall(db, "jwt-mkt", "add_lead_note", { lead: "Demo Lead", text: "x" });
     ok(/^Unknown tool add_lead_note/.test(errText(db, r2)) && db.T.ai_changes.length === 0, "marketing's add_lead_note: refused, no row");
   }
@@ -331,7 +333,7 @@ SUITES.push(async () => {
     }
     // a technician without his own board: refused even when called directly
     db = world2();
-    eq(errText(db, await toolCall(db, "jwt-techx", "add_task", { title: "B", assignees: ["Gabe"] })), "Unknown tool add_task. Available: read_office_hours, whoami", "a technician without technician_name can't add tasks");
+    eq(errText(db, await toolCall(db, "jwt-techx", "add_task", { title: "B", assignees: ["Gabe"] })), "Unknown tool add_task. Available: list_tasks, read_office_hours, read_settings, upcoming_work, whoami", "a technician without technician_name can't add tasks");
     // apply, with a lead (not contacted since it came in)
     db = world2();
     let { row } = await proposeOk(db, "jwt-va", "add_task", { title: "Call back about the quote", assignees: ["Gabe", "Sam Lee"], due: "2026-10-16", priority: "High", notes: "Ask about Friday", lead: "Demo" });
@@ -718,7 +720,7 @@ SUITES.push(async () => {
     const db = world2();
     const r = await chat(db, { text: "who am i" }, "jwt-va");
     const w = JSON.parse(resultOf(db, r).content);
-    eq(w, { name: "Vera Vance", role: "va", roleLabel: "Virtual Assistant", pages: Object.keys(SECTION_LABEL).filter((k) => APP.canViewSection(P(VA), k)).map((k) => APP.SECTION_LABEL[k]), canPropose: Object.values(CHANGE_KINDS).filter((k) => k.allow(P(VA))).map((k) => k.label), assistantName: "Acme Ops", businessName: "Acme Home Services", timeZone: TZ, today: "2026-10-15" }, "whoami: own facts only, the pages the app would show");
+    eq(w, { name: "Vera Vance", role: "va", roleLabel: "Virtual Assistant", pages: Object.keys(SECTION_LABEL).filter((k) => APP.canViewSection(P(VA), k)).map((k) => APP.SECTION_LABEL[k]), canPropose: Object.values(CHANGE_KINDS).filter((k) => k.allow(P(VA))).map((k) => k.label), assistantName: "Acme Ops", businessName: "Acme Home Services", timeZone: TZ, today: "2026-10-15", tools: toolsFor("assistant", P(VA)).map((t) => t.name) }, "whoami: own facts only, the pages the app would show");
     for (const p of [OWNER, MANAGER, VA, TECH, MKT, { ...VA, permissions: {} }]) for (const s of Object.keys(APP.SECTION_LABEL)) if (canViewSection(P(p), s) !== APP.canViewSection(P(p), s)) eq([p.role, s, canViewSection(P(p), s)], [p.role, s, APP.canViewSection(P(p), s)], "canViewSection parity");
     eq(SECTION_LABEL, APP.SECTION_LABEL, "SECTION_LABEL = the app's");
     for (const d of ["2026-10-16", "2026-01-01", "2026-12-31"]) eq(fmtDateShort(d), APP.fmtDateShort(d), `fmtDateShort = the app's (${d})`);

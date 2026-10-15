@@ -44,7 +44,9 @@ const NAMES = ['catalogHours', 'ROLE_LABEL', 'productName', 'OFFICE', 'hhmmToMin
   // stage 3 follow-ups (rebase on f9c64b6): the app's "due back" day reads the person's working days
   'vacationWorkingDaysOf', 'vacationBackDay',
   'pad2', 'fmtLocal', 'shiftDays', 'REGION_DEFAULTS', 'REGION_NONE', 'REGION_MEMO', 'BIZ_WALL', 'BIZ_DAY_MEMO', 'TZ_VALID', 'regionNow', 'tzValid', 'regionMemo', 'bizTz',
-  'bizWall', 'bizDayOf', 'bizDayMemo'];
+  'bizWall', 'bizDayOf', 'bizDayMemo',
+  // stage 8 (tests_read.ts): the role fixtures' pages and the task statuses
+  'defaultPermissionsFor', 'TASK_STATUSES'];
 function extractDecl(source, name){
   const fnIdx = source.indexOf(`function ${name}(`);
   const constIdx = source.search(new RegExp(`\\bconst ${name}\\s*=`));

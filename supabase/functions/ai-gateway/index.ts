@@ -1176,6 +1176,7 @@ export type ToolCtx = {
   emit: (event: string, data: unknown) => void; card: (kind: string, data: unknown) => void; propose: (p: any) => Promise<any>;
   stepMeta: { proposals: string[]; cards: { kind: string; data: unknown }[] };
   turn?: { proposals?: number };   // the whole turn (every tool round): how many changes it proposed
+  resultChars?: number;            // the most one tool result may hold for this turn's source (stage 8: reads fit under it)
 };
 export type ToolDef = {
   name: string; description: string; input_schema: any; kind: "read" | "change"; modes: string[]; allow: (me: Profile) => boolean;
@@ -1190,7 +1191,7 @@ export type ModeDef = {
   id: string; taskKey: string; effort: "low" | "medium" | "high"; systemPrompt: string; contextSchema: any;
   context: (ctx: any) => string; allow?: (me: Profile) => boolean;
 };
-export type Biz = { companyName: string; catalog: any; tz: string };
+export type Biz = { companyName: string; catalog: any; tz: string; gstRate: number };   // gstRate: settings.gst_rate_percent (default 10, as mcp)
 export const TOOLS: Record<string, ToolDef> = {};
 export const CHANGE_KINDS: Record<string, ChangeKind> = {};
 export const MODES: Record<string, ModeDef> = {};
@@ -1298,13 +1299,15 @@ registerTool({
   description: "Returns the name and role of the person you are talking to. Call it when the person asks who they are, what their role is, or when an answer depends on their role.",
   input_schema: EMPTY_INPUT,
   // The person's own facts only (nothing about anyone else): the pages they can open (the app's canViewSection), the
-  // changes they can propose, and the business's name, time zone and today.
+  // changes they can propose, the business's name, time zone and today, and the tools this person has (stage 8: "what
+  // can you do for me" is answered from facts).
   run: async (_input, ctx) => ({
     name: ctx.me.fullName, role: ctx.me.role, roleLabel: ROLE_LABEL[ctx.me.role] || ctx.me.role,
     pages: Object.keys(SECTION_LABEL).filter((k) => canViewSection(ctx.me, k)).map((k) => SECTION_LABEL[k]),
     canPropose: Object.values(CHANGE_KINDS).filter((k) => k.allow(ctx.me)).map((k) => k.label),
     assistantName: assistantNameOf(ctx.settings, ctx.biz.catalog), businessName: ctx.biz.companyName || productNameOf(ctx.biz.catalog),
     timeZone: ctx.biz.tz, today: bizParts(ctx.nowMs, ctx.biz.tz).day,
+    tools: toolsFor("assistant", ctx.me).map((t) => t.name),
   }),
 });
 registerTool({
@@ -1324,6 +1327,421 @@ registerTool({
       publicHolidaysNext: Object.entries(holidayDaysOf(cat)).filter(([d]) => d >= today).sort(([a], [b]) => (a < b ? -1 : 1)).slice(0, 5).map(([date, name]) => ({ date, name })),
       timeZone: ctx.biz.tz,
     };
+  },
+});
+
+// ── stage 8: read tools (role-filtered by the shared block) ──
+// Every read runs with the person's own client (ctx.userSb: their token, so row-level security applies) AND the shared
+// block's row filters (jobVisible, taskVisible, …): RLS is the database's rule, the block the app's rule plus the
+// server-only stricter technician rules. No tool gives a technician an amount, GST, commission, parts cost, pay or ad
+// spend (Ofek); the money tools are owners' and managers' only. Periods are worked out here, in the business's time
+// zone and weeks (small free models get date math wrong). Results are lean: only the fields listed, rows cut to fit.
+export const PERIODS = ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "last_7_days", "last_30_days", "this_year", "next_7_days", "next_30_days"];
+export const READ = { limitDefault: 10, limitMax: 25, groupsMax: 20, timeGroupsMax: 62, upcomingDaysMax: 31, idsChunk: 100, queryMax: 80 };
+export const PERIOD_DAYS_MAX = 366;
+// Verbatim from index.html.
+export const TASK_STATUSES = ["Not Started", "In Progress", "Waiting on Response", "Stuck", "Done"];
+const monthEndOf = (day: string) => { const [y, m] = day.split("-").map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
+// A tool's period ({ period } or { from, to }, never both) → its days in the business's zone and the instants around
+// them: [fromIso, toIso). today = the business's day; weeks are the business's weeks (Settings → Region).
+export function periodRange(input: any, cat: any, tz: string, nowMs: number, defaultPeriod: string) {
+  const x = input || {}, today = bizParts(nowMs, tz).day, custom = x.from !== undefined || x.to !== undefined;
+  if (x.period !== undefined && custom) throw invalid("Give either period or from / to, not both.");
+  let from = "", to = "";
+  if (custom) { to = x.to ?? (x.from > today ? x.from : today); from = x.from ?? to; }
+  else {
+    const period = x.period ?? defaultPeriod, rules = weekRules(regionOf(cat)), month = today.slice(0, 7) + "-01";
+    if (period === "today") from = to = today;
+    else if (period === "yesterday") from = to = shiftDay(today, -1);
+    else if (period === "this_week" || period === "last_week") {
+      const wb = weekBounds(today, rules), w = period === "this_week" ? wb : weekBounds(shiftDay(wb.start, -1), rules);
+      from = w.start; to = w.end;
+    }
+    else if (period === "this_month") { from = month; to = monthEndOf(month); }
+    else if (period === "last_month") { to = shiftDay(month, -1); from = to.slice(0, 7) + "-01"; }
+    else if (period === "last_7_days") { from = shiftDay(today, -6); to = today; }
+    else if (period === "last_30_days") { from = shiftDay(today, -29); to = today; }
+    else if (period === "this_year") { from = today.slice(0, 4) + "-01-01"; to = today.slice(0, 4) + "-12-31"; }
+    else if (period === "next_7_days") { from = today; to = shiftDay(today, 6); }
+    else if (period === "next_30_days") { from = today; to = shiftDay(today, 29); }
+    else throw invalid(`period must be one of: ${PERIODS.join(", ")}`);
+  }
+  if (from > to) throw invalid("'from' must be on or before 'to'.");
+  if (dayDiff(from, to) + 1 > PERIOD_DAYS_MAX) throw invalid(`Pick a range of at most ${PERIOD_DAYS_MAX} days.`);
+  return { from, to, fromIso: iso(bizToUtc(from, 0, 0, tz)), toIso: iso(bizToUtc(shiftDay(to, 1), 0, 0, tz)), label: custom ? `${from} to ${to}` : String(x.period ?? defaultPeriod) };
+}
+// Drops list rows from the end until the answer fits in 90% of what one tool result may hold (so a read never comes
+// back "Result too large"), and says so (truncated). A count of the rows shown follows the rows.
+export function fitRows(payload: any, key: string, ctx: { resultChars?: number }) {
+  const cap = Math.floor((ctx.resultChars || MAX_TOOL_RESULT_CHARS) * 0.9), list = payload[key];
+  const shownCount = Array.isArray(list) && payload.count === list.length;
+  while (Array.isArray(list) && list.length && JSON.stringify(payload).length > cap) { list.pop(); payload.truncated = true; if (shownCount) payload.count = list.length; }
+  return payload;
+}
+// The calc context (mcp's calcCtx) with the person's own client: the employees only for owners and managers (as RLS).
+export async function calcFor(ctx: ToolCtx, data: Record<string, any[]> = {}): Promise<Calc> {
+  const cat = ctx.biz.catalog || {};
+  const emp = scopeOf(ctx.me).isOM ? await pageAll((a, z) => ctx.userSb.from("employees").select("name, roles, status, employment_type").order("name").range(a, z)) : { rows: [] };
+  return {
+    gstRate: ctx.biz.gstRate ?? 10, catalog: cat, tz: ctx.biz.tz, today: bizParts(ctx.nowMs, ctx.biz.tz).day, paidKey: catalogKeys(cat).paid,
+    employees: emp.rows.map(employeeFromRow), rules: weekRules(cat.region), weekCache: new Map(),
+    jobs: [], equipmentSpend: [], payrollWeeks: [], payrollBonuses: [], salesLogs: [], ...data,
+  };
+}
+// The checks the strict schemas can't hold (no min / max there): limits, lengths, one kind of period.
+function readCheck(x: any): string | null {
+  if (x.period !== undefined && (x.from !== undefined || x.to !== undefined)) return "Give either period or from / to, not both.";
+  if (x.from !== undefined && x.to !== undefined && (x.from > x.to || dayDiff(x.from, x.to) + 1 > PERIOD_DAYS_MAX)) return `'from' must be on or before 'to', at most ${PERIOD_DAYS_MAX} days apart.`;
+  if (x.limit !== undefined && (x.limit < 1 || x.limit > READ.limitMax)) return `limit must be 1 to ${READ.limitMax}.`;
+  if (x.days !== undefined && (x.days < 1 || x.days > READ.upcomingDaysMax)) return `days must be 1 to ${READ.upcomingDaysMax}.`;
+  for (const k of ["query", "source", "stage", "technician", "person"]) if (typeof x[k] === "string" && x[k].length > READ.queryMax) return `${k} must be at most ${READ.queryMax} characters.`;
+  return null;
+}
+async function readAll(q: any, what: string): Promise<any[]> {
+  const { data, error } = await q;
+  if (error) throw new Error(what + ": " + clip(error.message, 200));
+  return data || [];
+}
+const likeExact = (v: string) => String(v).trim().replace(/[\\%_]/g, (ch) => "\\" + ch);
+const sortByCount = (a: any, b: any) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+// The lead sources a word matches (keys and labels, any case, contained): their keys. None → invalid.
+function sourceKeysOf(cat: any, v: string): string[] {
+  const w = v.trim().toLowerCase(), keys = catalogLists(cat).sources.filter((x) => x.key.toLowerCase().includes(w) || x.label.toLowerCase().includes(w)).map((x) => x.key);
+  if (!w || !keys.length) throw invalid("No lead source matches that. Sources: " + catalogLists(cat).sources.map((x) => x.label).join(", "));
+  return keys;
+}
+function stageKeyOf(cat: any, v: string): string {
+  const lists = catalogLists(cat, catalogKeys(cat)), key = catalogMatch(lists.stages, v);
+  if (!key) throw invalid("No stage matches that. Stages: " + lists.stages.map((x) => x.label).join(", "));
+  return key;
+}
+const PERIOD_PROPS = {
+  period: { type: "string", enum: PERIODS, description: "A period in the business's time zone." },
+  from: { type: "string", format: "date", description: "First day (instead of period)." },
+  to: { type: "string", format: "date", description: "Last day (instead of period)." },
+};
+const LIMIT_PROP = { type: "integer", description: `Rows at most (1-${READ.limitMax}, default ${READ.limitDefault}).` };
+const readSchema = (properties: Record<string, any>, required?: string[]) => ({ type: "object", additionalProperties: false, properties, ...(required ? { required } : {}) });
+const limitOf = (x: any) => x.limit ?? READ.limitDefault;
+
+registerTool({
+  name: "find_leads", kind: "read", modes: ["assistant"], allow: (me) => scopeOf(me).contacts, status: "Looking up leads", check: readCheck,
+  description: "Finds leads by name, phone or postcode, stage, source and when they came in, newest first: name, phone, stage, source, service and dates. Call it before talking about a particular lead.",
+  input_schema: readSchema({ query: { type: "string", description: "Name, phone or postcode." }, stage: { type: "string" }, source: { type: "string" }, ...PERIOD_PROPS, limit: LIMIT_PROP }),
+  run: async (input, ctx) => {
+    const s = scopeOf(ctx.me), cat = ctx.biz.catalog, limit = limitOf(input);
+    let q = ctx.userSb.from("contacts").select("id, full_name, phone, status, source, division, created_at, next_follow_up, booked_for");
+    if (input.query !== undefined) {
+      const t = leadQueryOf(input.query);
+      if (!t) throw invalid("Say a name, phone number or postcode to look for.");
+      q = q.or(`full_name.ilike.*${t}*,postcode.ilike.*${t}*` + leadPhoneClause(t));
+    }
+    if (input.stage !== undefined) q = q.eq("status", stageKeyOf(cat, input.stage));
+    if (input.source !== undefined) q = q.in("source", sourceKeysOf(cat, input.source));
+    if (input.period !== undefined || input.from !== undefined || input.to !== undefined) {
+      const r = periodRange(input, cat, ctx.biz.tz, ctx.nowMs, "this_month");
+      q = q.gte("created_at", r.fromIso).lt("created_at", r.toIso);
+    }
+    const rows = contactVisible(s) ? (await readAll(q.order("created_at", { ascending: false }).order("id").range(0, limit), "contacts")).map((r) => redactForTech(s, r)) : [];
+    const shown = rows.slice(0, limit).map((r: any) => ({
+      id: r.id, name: r.full_name || "", phone: r.phone || "", stage: stageLabelOf(cat, r.status || "New"), source: r.source || "", service: r.division || "",
+      createdOn: localDayOf(r.created_at, ctx.biz.tz), nextFollowUp: r.next_follow_up || null, bookedFor: r.booked_for || null,
+    }));
+    return fitRows({ count: shown.length, rows: shown, truncated: rows.length > limit }, "rows", ctx);
+  },
+});
+registerTool({
+  name: "count_leads", kind: "read", modes: ["assistant"], allow: (me) => scopeOf(me).contacts, status: "Counting leads", check: readCheck,
+  description: "Counts the leads that came in during a period (default this month), grouped by source, stage, service, day, week or month (default source). Use it for 'how many leads' questions.",
+  input_schema: readSchema({ ...PERIOD_PROPS, group_by: { type: "string", enum: ["source", "stage", "service", "day", "week", "month"] }, source: { type: "string" }, stage: { type: "string" } }),
+  run: async (input, ctx) => {
+    const cat = ctx.biz.catalog, tz = ctx.biz.tz, r = periodRange(input, cat, tz, ctx.nowMs, "this_month"), by = input.group_by ?? "source";
+    const stage = input.stage !== undefined ? stageKeyOf(cat, input.stage) : null, sources = input.source !== undefined ? sourceKeysOf(cat, input.source) : null;
+    const read = await pageAll((a, z) => {
+      let q = ctx.userSb.from("contacts").select("id, status, source, division, created_at").gte("created_at", r.fromIso).lt("created_at", r.toIso);
+      if (stage) q = q.eq("status", stage);
+      if (sources) q = q.in("source", sources);
+      return q.order("created_at").order("id").range(a, z);
+    });
+    const rows = contactVisible(scopeOf(ctx.me)) ? read.rows : [], lists = catalogLists(cat), rules = weekRules(regionOf(cat)), wc = new Map();
+    const labelIn = (list: { key: string; label: string }[], k: string) => (list.find((x) => x.key === k) || { label: k }).label;
+    const keyOf = (c: any): string => {
+      const day = localDayOf(c.created_at, tz);
+      if (by === "day") return day;
+      if (by === "week") return weekBounds(day, rules, wc).start;
+      if (by === "month") return day.slice(0, 7);
+      return String((by === "stage" ? c.status : by === "service" ? c.division : c.source) || "(none)");
+    };
+    const counts = new Map<string, number>();
+    rows.forEach((c: any) => { const k = keyOf(c); counts.set(k, (counts.get(k) || 0) + 1); });
+    const time = by === "day" || by === "week" || by === "month";
+    let groups = [...counts.entries()].map(([key, count]) => ({
+      key, label: time || key === "(none)" ? key : by === "stage" ? stageLabelOf(cat, key) : labelIn(by === "service" ? lists.services : lists.sources, key), count,
+    }));
+    let truncated = read.truncated;
+    if (time) { groups.sort((a, b) => (a.key < b.key ? -1 : 1)); if (groups.length > READ.timeGroupsMax) { groups = groups.slice(0, READ.timeGroupsMax); truncated = true; } }
+    else {
+      groups.sort(sortByCount);
+      if (groups.length > READ.groupsMax) { const rest = groups.slice(READ.groupsMax - 1); groups = [...groups.slice(0, READ.groupsMax - 1), { key: "other", label: "Other", count: rest.reduce((n, g) => n + g.count, 0) }]; }
+    }
+    return fitRows({ total: rows.length, from: r.from, to: r.to, groups, truncated }, "groups", ctx);
+  },
+});
+registerTool({
+  name: "count_calls", kind: "read", modes: ["assistant"], allow: (me) => canViewSection(me, "crm") || adCallsVisible(scopeOf(me)), status: "Counting calls", check: readCheck,
+  description: "Counts phone calls in a period (default last 30 days): answered, missed, missed and not called back, by the lead's source; owners also get the Google Ads calls. 'Calls from Google' = both, said separately.",
+  input_schema: readSchema({ ...PERIOD_PROPS, source: { type: "string", description: "Only calls whose lead came from this source." } }),
+  run: async (input, ctx) => {
+    const s = scopeOf(ctx.me), cat = ctx.biz.catalog, r = periodRange(input, cat, ctx.biz.tz, ctx.nowMs, "last_30_days");
+    const keys = input.source !== undefined ? sourceKeysOf(cat, input.source) : null;
+    let truncated = false, calls: any[] = [];
+    const sourceOf: Record<string, string> = {};
+    if (canViewSection(s.p, "crm")) {
+      const read = await pageAll((a, z) => ctx.userSb.from("calls").select("id, missed, callback_done_at, started_at, contact_id").gte("started_at", r.fromIso).lt("started_at", r.toIso).order("started_at").order("id").range(a, z));
+      truncated = read.truncated;
+      const ids = [...new Set(read.rows.map((k: any) => k.contact_id).filter(Boolean))] as string[];
+      // the leads' sources in chunks of idsChunk ids, so the request address stays short
+      for (let i = 0; s.contacts && i < ids.length; i += READ.idsChunk) {
+        (await readAll(ctx.userSb.from("contacts").select("id, source").in("id", ids.slice(i, i + READ.idsChunk)), "contacts")).forEach((c: any) => { sourceOf[c.id] = c.source || "(none)"; });
+      }
+      calls = read.rows.map((k: any) => ({ ...k, source: k.contact_id ? sourceOf[k.contact_id] || "(none)" : "(no lead)" })).filter((k: any) => !keys || keys.includes(k.source));
+    }
+    const missed = calls.filter((k) => !!k.missed), by = new Map<string, number>();
+    calls.forEach((k) => by.set(k.source, (by.get(k.source) || 0) + 1));
+    const out: Record<string, any> = {
+      total: calls.length, answered: calls.length - missed.length, missed: missed.length, missedNotCalledBack: missed.filter((k) => !k.callback_done_at).length,
+      bySource: [...by.entries()].map(([source, count]) => ({ key: source, source, count })).sort(sortByCount).slice(0, READ.groupsMax).map(({ source, count }) => ({ source, count })),
+      from: r.from, to: r.to,
+    };
+    // The Google Ads calls (ad_calls: owners and managers, as RLS), only when no source is asked or it is Google's.
+    if (adCallsVisible(s) && (!keys || keys.some((k) => k.toLowerCase().includes("google")))) {
+      const ad = await pageAll((a, z) => ctx.userSb.from("ad_calls").select("id, status, duration_seconds").gte("date", r.from).lte("date", r.to).order("id").range(a, z));
+      const adMissed = ad.rows.filter((x: any) => x.status === "MISSED").length;
+      out.adCalls = { total: ad.rows.length, answered: ad.rows.length - adMissed, missed: adMissed, over30s: ad.rows.filter((x: any) => (Number(x.duration_seconds) || 0) >= 30).length };
+      truncated = truncated || ad.truncated;
+    }
+    out.truncated = truncated;
+    return out;
+  },
+});
+const LIST_JOB_COLS = "id, date, customer_name, job_type, technician, amount, includes_gst, payment_status, commission_percent, parts_cost";
+registerTool({
+  name: "list_jobs", kind: "read", modes: ["assistant"], allow: (me) => scopeOf(me).canSeeJobs, status: "Checking jobs",
+  description: "Lists jobs in a period (default last 7 days), newest first. A technician sees only his own jobs. Owners and managers also get amount, total, payment status and commission, and can ask for unpaid jobs only.",
+  input_schema: readSchema({ ...PERIOD_PROPS, technician: { type: "string", description: "Only this technician's jobs." }, unpaid_only: { type: "boolean" }, limit: LIMIT_PROP }),
+  check: (input, ctx) => (input.unpaid_only && !scopeOf(ctx.me).isOM ? "unpaid_only is for owners and managers."
+    : input.technician !== undefined && scopeOf(ctx.me).isTech ? "A technician sees only his own jobs: leave technician out." : readCheck(input)),
+  run: async (input, ctx) => {
+    const s = scopeOf(ctx.me), cat = ctx.biz.catalog, r = periodRange(input, cat, ctx.biz.tz, ctx.nowMs, "last_7_days"), limit = limitOf(input);
+    // a technician: his own jobs only, whatever he asks (no technician name = no jobs, the block's rule b)
+    if (s.isTech && !s.techName) return { count: 0, rows: [], truncated: false };
+    let q = ctx.userSb.from("jobs").select(LIST_JOB_COLS).gte("date", r.from).lte("date", r.to);
+    if (s.isTech) q = q.eq("technician", s.techName);
+    else if (input.technician !== undefined && input.technician.trim()) q = q.ilike("technician", likeExact(input.technician));
+    if (input.unpaid_only && s.isOM) q = q.or(`payment_status.is.null,payment_status.neq."${catalogKeys(cat).paid}"`);
+    const rows = (await readAll(q.order("date", { ascending: false }).order("id").range(0, limit), "jobs")).filter((j: any) => jobVisible(s, j));
+    const d = s.isOM ? await calcFor(ctx) : null;
+    const shown = rows.slice(0, limit).map((row: any) => {
+      const j = jobFromRow(row), base = { id: j.id, date: j.date, customerName: j.customerName || "", jobType: j.jobType || "", technician: j.technician || "" };
+      if (d) return { ...base, amount: round2(j.amount), total: jobTotalCollected(d, j), paymentStatus: j.paymentStatus || "", commission: jobCommissionAmount(d, j) };
+      return s.isTech ? base : { ...base, paymentStatus: j.paymentStatus || "" };
+    });
+    return fitRows({ count: shown.length, rows: shown, truncated: rows.length > limit }, "rows", ctx);
+  },
+});
+const KIND_ORDER: Record<string, number> = { job: 0, booking: 1, task: 2 };
+registerTool({
+  name: "upcoming_work", kind: "read", modes: ["assistant"], allow: (me) => { const s = scopeOf(me); return s.canSeeJobs || s.tasks; }, status: "Checking the schedule",
+  description: "What is coming up from today for the next days (default 7): jobs, booked leads and the person's own open tasks, by day. next = the first one; null means nothing is recorded (say so, never guess).",
+  input_schema: readSchema({ days: { type: "integer", description: `Days ahead (1-${READ.upcomingDaysMax}, default 7).` }, technician: { type: "string", description: "Only this technician's jobs." } }),
+  check: (input, ctx) => (input.technician !== undefined && scopeOf(ctx.me).isTech ? "A technician sees only his own jobs: leave technician out." : readCheck(input)),
+  run: async (input, ctx) => {
+    const s = scopeOf(ctx.me), tz = ctx.biz.tz, cat = ctx.biz.catalog, days = input.days ?? 7, today = bizParts(ctx.nowMs, tz).day, end = shiftDay(today, days - 1);
+    const items: any[] = [];
+    if (s.canSeeJobs && (!s.isTech || s.techName)) {
+      let q = ctx.userSb.from("jobs").select("id, date, customer_name, job_type, technician").gte("date", today).lte("date", end);
+      if (s.isTech) q = q.eq("technician", s.techName);
+      else if (input.technician !== undefined && input.technician.trim()) q = q.ilike("technician", likeExact(input.technician));
+      (await readAll(q.order("date").order("id").limit(READ.limitMax + 1), "jobs")).filter((j: any) => jobVisible(s, j))
+        .forEach((j: any) => items.push({ day: String(j.date).slice(0, 10), kind: "job", title: [j.job_type || "Job", j.customer_name].filter(Boolean).join(" – "), technician: j.technician || "" }));
+    }
+    // booked leads: the CRM page's (operational), not the read-only Leads & Marketing view
+    if (canViewSection(s.p, "crm")) {
+      (await readAll(ctx.userSb.from("contacts").select("id, full_name, division, booked_for").eq("status", "Booked").gte("booked_for", today).lt("booked_for", shiftDay(end, 1)).order("booked_for").order("id").limit(READ.limitMax + 1), "contacts"))
+        .forEach((c: any) => items.push({ day: localDayOf(c.booked_for, tz), kind: "booking", title: [c.full_name || "Booked lead", c.division].filter(Boolean).join(" – ") }));
+    }
+    // the person's own open tasks (assigned to them, or on their own board)
+    if (s.tasks) {
+      const done = catalogKeys(cat).done;
+      (await readAll(ctx.userSb.from("tasks").select("id, title, board, status, due, assignees, assigned_to").gte("due", today).lte("due", end).order("due").order("id").limit(PAGE), "tasks"))
+        .filter((t: any) => t.status !== done && taskVisible(s, t) && (taskAssignedTo(t, s.p) || (!!s.techName && t.board === s.techName)))
+        .forEach((t: any) => items.push({ day: String(t.due).slice(0, 10), kind: "task", title: t.title || "" }));
+    }
+    items.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.title < b.title ? -1 : a.title > b.title ? 1 : 0)));
+    const shown = items.slice(0, READ.limitMax);
+    return fitRows({ next: shown.length ? { day: shown[0].day, kind: shown[0].kind, title: shown[0].title } : null, items: shown, days, truncated: items.length > shown.length }, "items", ctx);
+  },
+});
+const MONEY_JOB_COLS = "id, customer_name, invoice_number, date, technician, job_type, commission_percent, amount, includes_gst, payment_status, payment_method, parts_cost, parts_paid_by, parts_refund_status, date_paid, paid_to_technician, parts_pending_at, parts_refund_week, contact_id";
+const MONEY_EQUIP_COLS = "id, date, item, technician, paid_by, cost, reimbursed, created_at, reimbursed_week";
+const currencyOf = (cat: any) => (/^[A-Z]{3}$/.test(String(regionOf(cat).currency || "")) ? regionOf(cat).currency : REGION_DEFAULTS.currency);
+registerTool({
+  name: "money_summary", kind: "read", modes: ["assistant"], allow: (me) => scopeOf(me).isOM, status: "Adding up the money", check: readCheck,
+  description: "Money in a period (default this month), as the dashboard: what is left after technicians (and after ads), paid and unpaid totals before GST, cash / bank transfer / card, GST, parts, equipment, commission owed, ad spend.",
+  input_schema: readSchema({ ...PERIOD_PROPS }),
+  // mcp's money_summary (the same reads and the shared calc), with the person's own client
+  run: async (input, ctx) => {
+    const s = scopeOf(ctx.me), cat = ctx.biz.catalog, r = periodRange(input, cat, ctx.biz.tz, ctx.nowMs, "this_month");
+    const jobs = await pageAll((a, z) => ctx.userSb.from("jobs").select(MONEY_JOB_COLS).gte("date", r.from).lte("date", r.to).order("date").order("id").range(a, z));
+    const equip = await pageAll((a, z) => ctx.userSb.from("equipment_spend").select(MONEY_EQUIP_COLS).gte("date", r.from).lte("date", r.to).order("date").order("id").range(a, z));
+    const d = await calcFor(ctx), J = jobs.rows.filter((j: any) => jobVisible(s, j)).map(jobFromRow), E = equip.rows.filter((e: any) => equipVisible(s, e)).map(equipFromRow);
+    const m = moneyOverview(d, J, E), o = m.overview;
+    const ads = adSpendVisible(s) ? await pageAll((a, z) => ctx.userSb.from("ad_spend").select("id, date, spend").gte("date", r.from).lte("date", r.to).order("date").order("id").range(a, z)) : null;
+    const adSpend = ads ? round2(ads.rows.reduce((n: number, x: any) => n + (Number(x.spend) || 0), 0)) : 0;
+    return {
+      remainingAfterTech: round2(m.remainingAfterTech), paidTotal: round2(o.paidTotal), unpaidTotal: round2(o.unpaidTotal), jobsCount: J.length,
+      cash: round2(o.cash), bankTransfer: round2(o.bankTransfer), creditCard: round2(o.creditCard), gst: round2(o.gstCash + o.gstOther),
+      partsTotal: round2(o.partsTotal), equipmentTotal: round2(o.equipmentTotal), commissionOwedTotal: round2(o.commissionOwedTotal),
+      ...(ads ? { adSpend, remainingAfterTechAndAds: round2(m.remainingAfterTech - adSpend) } : {}),
+      currency: currencyOf(cat), from: r.from, to: r.to, truncated: jobs.truncated || equip.truncated || !!(ads && ads.truncated),
+    };
+  },
+});
+registerTool({
+  name: "payroll_summary", kind: "read", modes: ["assistant"], allow: (me) => scopeOf(me).isOM, status: "Checking payroll",
+  description: "A business week's pay per person (default last week): commission people (commission, materials, bonuses) and hourly people (hours and bonuses), whether marked paid, and the total.",
+  input_schema: readSchema({ week: { type: "string", enum: ["this_week", "last_week"] }, person: { type: "string", description: "Only people whose name has this." } }),
+  check: readCheck,
+  // mcp's payroll_summary reads for an owner or manager (everyone's rows), with the person's own client
+  run: async (input, ctx) => {
+    const s = scopeOf(ctx.me), cat = ctx.biz.catalog, rules = weekRules(cat.region), today = bizParts(ctx.nowMs, ctx.biz.tz).day;
+    const wb0 = weekBounds(today, rules), wb = input.week === "this_week" ? wb0 : weekBounds(shiftDay(wb0.start, -1), rules), paid = catalogKeys(cat).paid;
+    let truncated = false;
+    const sel = async (t: string, cols: string, f: (b: any) => any) => {
+      const r = await pageAll((a, z) => f(ctx.userSb.from(t).select(cols)).order("id").range(a, z));
+      truncated = truncated || r.truncated;
+      return r.rows;
+    };
+    const notPaid = `payment_status.is.null,payment_status.neq."${paid}"`;
+    const PW = "id, week_start, person, cash_collected, salary_paid, salary_paid_amount", BN = "id, week_start, person, amount, reason, created_at", SL = "id, person, date, hours, bookings_aircon, bookings_chimney, bookings_pw";
+    const [paidOn, paidSameDay, unpaid, partsPending, partsDone, eqPending, eqDone, bonuses, logs] = await Promise.all([
+      sel("jobs", MONEY_JOB_COLS, (q: any) => q.eq("payment_status", paid).gte("date_paid", wb.start).lte("date_paid", wb.end)),
+      sel("jobs", MONEY_JOB_COLS, (q: any) => q.eq("payment_status", paid).is("date_paid", null).gte("date", wb.start).lte("date", wb.end)),
+      sel("jobs", MONEY_JOB_COLS, (q: any) => q.or(notPaid).lte("date", wb.end)),
+      sel("jobs", MONEY_JOB_COLS, (q: any) => q.eq("parts_refund_status", "Pending Refund")),
+      sel("jobs", MONEY_JOB_COLS, (q: any) => q.eq("parts_refund_status", "Refunded").eq("parts_refund_week", wb.start)),
+      sel("equipment_spend", MONEY_EQUIP_COLS, (q: any) => q.eq("reimbursed", "Pending")),
+      sel("equipment_spend", MONEY_EQUIP_COLS, (q: any) => q.eq("reimbursed", "Reimbursed").eq("reimbursed_week", wb.start)),
+      sel("payroll_bonuses", BN, (q: any) => q.eq("week_start", wb.start)),
+      sel("sales_daily_log", SL, (q: any) => q.gte("date", wb.start).lte("date", wb.end)),
+    ]);
+    // a pending refund lands in the first week not marked paid from the week it was entered: the marks from there on
+    const tzc = { tz: ctx.biz.tz };
+    const entered = [...partsPending.map((j: any) => localDay(tzc, j.parts_pending_at) || j.date), ...eqPending.map((e: any) => localDay(tzc, e.created_at) || e.date)].filter(isDay).sort();
+    const weeks = await sel("payroll_weeks", PW, (q: any) => q.gte("week_start", shiftDay(entered[0] && entered[0] < wb.start ? entered[0] : wb.start, -13)).lte("week_start", wb.end));
+    const byId = (lists: any[][]) => { const m = new Map<string, any>(); lists.flat().forEach((r) => m.set(String(r.id), r)); return [...m.values()]; };
+    const d = await calcFor(ctx, {
+      jobs: byId([paidOn, paidSameDay, unpaid, partsPending, partsDone]).filter((j: any) => jobVisible(s, j)).map(jobFromRow),
+      equipmentSpend: byId([eqPending, eqDone]).filter((e: any) => equipVisible(s, e)).map(equipFromRow),
+      payrollWeeks: weeks.map(payrollFromRow), payrollBonuses: bonuses.map(bonusFromRow), salesLogs: logs.map(salesLogFromRow),
+    });
+    const wk = payrollWeekOf(d, wb.start), commissionPeople = payrollCommissionPeople(d), hourlyPeople = payrollHourlyPeople(d);
+    const want = String(input.person || "").trim().toLowerCase();
+    const people = [...commissionPeople, ...hourlyPeople.filter((n) => !commissionPeople.includes(n))].filter((n) => !want || n.toLowerCase().includes(want)).map((name) => {
+      const emp = d.employees.find((e: any) => e.name === name), hourly = (emp && emp.employmentType === "Hourly") || d.salesLogs.some((l: any) => l.person === name);
+      const commission = commissionPeople.includes(name) || d.jobs.some((j: any) => j.technician === name);
+      const total = round2((commission ? computePayrollCommission(d, name, wk.key).grandTotal : 0) + (hourly ? computePayrollHourly(d, name, wk.key).total : 0));
+      return { person: name, type: commission ? "commission" : "hourly", total, paid: !!payrollStatus(d, wk.key, name).salaryPaid };
+    });
+    return { weekStart: wk.start, weekEnd: wk.end, total: round2(people.reduce((n, p) => n + p.total, 0)), people, currency: currencyOf(cat), truncated };
+  },
+});
+registerTool({
+  name: "list_tasks", kind: "read", modes: ["assistant"], allow: (me) => scopeOf(me).tasks, status: "Checking tasks",
+  description: "Tasks the person can see, earliest due first (no due date last). mine = only tasks assigned to them (default for technicians); status (or open = not done); due = overdue, today, this_week, next_7_days or none.",
+  input_schema: readSchema({
+    mine: { type: "boolean" }, status: { type: "string", enum: [...TASK_STATUSES, "open"] },
+    due: { type: "string", enum: ["overdue", "today", "this_week", "next_7_days", "none"] }, limit: LIMIT_PROP,
+  }),
+  check: readCheck,
+  // mcp's list_tasks loop: read in the answer's own order, page by page, stopped once one more task than asked is found
+  run: async (input, ctx) => {
+    const s = scopeOf(ctx.me), cat = ctx.biz.catalog, limit = limitOf(input), mine = input.mine ?? s.isTech, done = catalogKeys(cat).done;
+    const today = bizParts(ctx.nowMs, ctx.biz.tz).day, open = input.status === "open" || input.due === "overdue";
+    const found: any[] = [];
+    let scanTruncated = false;
+    for (let a = 0; ; a += PAGE) {
+      if (a >= MAX_SCAN) { scanTruncated = true; break; }
+      let q = ctx.userSb.from("tasks").select("id, title, board, status, due, priority, assignees, assigned_to");
+      if (input.status !== undefined && input.status !== "open") q = q.eq("status", renamedKey(catalogKeys(cat), input.status));
+      if (input.due === "overdue") q = q.lt("due", today);
+      else if (input.due === "today") q = q.eq("due", today);
+      else if (input.due === "this_week") { const wb = weekBounds(today, weekRules(regionOf(cat))); q = q.gte("due", wb.start).lte("due", wb.end); }
+      else if (input.due === "next_7_days") q = q.gte("due", today).lte("due", shiftDay(today, 6));
+      else if (input.due === "none") q = q.is("due", null);
+      const rows = await readAll(q.order("due", { ascending: true, nullsFirst: false }).order("id").range(a, a + PAGE - 1), "tasks");
+      rows.forEach((t: any) => { if (taskVisible(s, t) && (!mine || taskAssignedTo(t, s.p)) && (!open || t.status !== done)) found.push(t); });
+      if (found.length > limit || rows.length < PAGE) break;
+    }
+    const office = officeLabelOf(cat), shown = found.slice(0, limit).map((t: any) => ({
+      id: t.id, title: t.title || "", board: boardLabel(t.board || "ron", office), status: t.status || "", due: t.due || null, priority: t.priority || "", assignees: assigneeNames(t),
+    }));
+    return fitRows({ count: shown.length, rows: shown, truncated: scanTruncated || found.length > limit }, "rows", ctx);
+  },
+});
+// The app's reminders the assistant can rebuild without money (computeReminders' refund, equipment and follow-up
+// types; a technician never gets follow-ups, as the app's TECH_REMINDER_TYPES). Pay, documents and insurance are not
+// included (they need pay figures or employees' documents).
+registerTool({
+  name: "list_reminders", kind: "read", modes: ["assistant"], allow: (me) => canViewSection(me, "reminders"), status: "Checking reminders", check: readCheck,
+  description: "The Reminders page's open items: parts refunds and equipment reimbursements pending, and follow-up reminders that are due, oldest first. Pay, documents and insurance reminders are not included.",
+  input_schema: readSchema({ limit: LIMIT_PROP }),
+  run: async (input, ctx) => {
+    const s = scopeOf(ctx.me), today = bizParts(ctx.nowMs, ctx.biz.tz).day, limit = limitOf(input);
+    const dismissed = new Set((await pageAll((a, z) => ctx.userSb.from("dismissed_reminders").select("key").order("key").range(a, z))).rows.map((r: any) => r.key));
+    const items: any[] = [];
+    const refunds = await pageAll((a, z) => ctx.userSb.from("jobs").select("id, date, technician, parts_paid_by, parts_cost").eq("parts_refund_status", "Pending Refund").gt("parts_cost", 0).order("date").order("id").range(a, z));
+    refunds.rows.filter((j: any) => jobVisible(s, j) && !dismissed.has(`refund:${j.id}`)).forEach((j: any) => items.push({ type: "refund", date: j.date, title: `Parts refund pending for ${j.parts_paid_by || j.technician}` }));
+    const equip = await pageAll((a, z) => ctx.userSb.from("equipment_spend").select("id, date, technician").eq("reimbursed", "Pending").order("date").order("id").range(a, z));
+    equip.rows.filter((e: any) => equipVisible(s, e) && !dismissed.has(`equipment:${e.id}`)).forEach((e: any) => items.push({ type: "equipment", date: e.date, title: `Equipment reimbursement pending for ${e.technician}` }));
+    let truncated = refunds.truncated || equip.truncated;
+    if (!s.isTech) {
+      const manual = await pageAll((a, z) => ctx.userSb.from("manual_reminders").select("id, title, date, done").lte("date", today).order("date").order("id").range(a, z));
+      manual.rows.filter((r: any) => !r.done).forEach((r: any) => items.push({ type: "followup", date: r.date, title: r.title || "" }));
+      truncated = truncated || manual.truncated;
+    }
+    items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const rows = items.slice(0, limit).map((x) => ({ ...x, overdueDays: Math.max(0, dayDiff(String(x.date).slice(0, 10), today)) }));
+    return fitRows({ count: items.length, rows, truncated: truncated || items.length > limit, notIncluded: ["pay", "documents", "insurance"] }, "rows", ctx);
+  },
+});
+registerTool({
+  name: "read_settings", kind: "read", modes: ["assistant"], allow: () => true, status: "Reading settings",
+  description: "Reads one part of Settings: pipeline (stages, lost reasons, which stages need a date), lead_sources, services, region (time zone, currency, tax, week start) or business (name, short name, website).",
+  input_schema: readSchema({ section: { type: "string", enum: ["pipeline", "lead_sources", "services", "region", "business"] } }, ["section"]),
+  run: async (input, ctx) => {
+    const s = scopeOf(ctx.me), sec = input.section;
+    if ((sec === "pipeline" || sec === "lead_sources" || sec === "services") && !(s.contacts || s.isOM)) throw invalid("Not allowed for your role.");
+    const { data, error } = await ctx.userSb.from("settings").select("company_name, catalog").eq("id", 1).maybeSingle();
+    if (error) throw new Error("settings: " + clip(error.message, 200));
+    const cat = (data && isObj(data.catalog) && data.catalog) || {};
+    if (sec === "pipeline") {
+      return {
+        stages: stagesOf(cat).filter((x: any) => !x.deleted).map((x: any) => ({ key: String(x.key), label: String(x.label || x.key), on: stageOn(cat, x.key) })),
+        lostReasons: lostReasonsActive(cat), needDate: needDateOf(cat),
+      };
+    }
+    if (sec === "lead_sources") return { sources: catalogLists(cat).sources };
+    if (sec === "services") return { services: catalogLists(cat).services };
+    if (sec === "region") {
+      const r = regionOf(cat), today = bizParts(ctx.nowMs, bizTzOf(cat)).day;
+      return {
+        timeZone: bizTzOf(cat), currency: currencyOf(cat), country: r.country || REGION_DEFAULTS.country, state: r.country ? r.state || "" : REGION_DEFAULTS.state,
+        taxName: taxNameOf(cat), weekStartsOn: DAY_KEYS[dowOf(weekBounds(today, weekRules(r)).start)],
+      };
+    }
+    const b = isObj(cat.business) ? cat.business : {}, name = String((data && data.company_name) || "").trim() || productNameOf(cat);
+    return { name, shortName: String(b.shortName || "").trim() || name, website: String(b.website || "").trim() };
   },
 });
 
@@ -2736,12 +3154,12 @@ export function pageIdOf(v: unknown): string { return typeof v === "string" && P
 export async function loadState(sb: any): Promise<{ s: AiSettings; biz: Biz }> {
   const [a, b] = await Promise.all([
     sb.from("ai_settings").select("*").eq("business_id", BUSINESS_ID).maybeSingle(),
-    sb.from("settings").select("company_name, catalog").eq("id", 1).maybeSingle(),
+    sb.from("settings").select("company_name, gst_rate_percent, catalog").eq("id", 1).maybeSingle(),
   ]);
   if (a.error) throw new Error("ai_settings: " + clip(a.error.message, 200));
   if (b.error) throw new Error("settings: " + clip(b.error.message, 200));
-  const catalog = (b.data && b.data.catalog) || {};
-  return { s: normSettings(a.data), biz: { companyName: String((b.data && b.data.company_name) || "").trim(), catalog, tz: bizTzOf(catalog) } };
+  const catalog = (b.data && b.data.catalog) || {}, gst = b.data ? Number(b.data.gst_rate_percent ?? 10) : 10;
+  return { s: normSettings(a.data), biz: { companyName: String((b.data && b.data.company_name) || "").trim(), catalog, tz: bizTzOf(catalog), gstRate: Number.isFinite(gst) ? gst : 10 } };
 }
 export function gate(s: AiSettings, me: Profile): null | { status: number; code: "off" | "role_off" } {
   if (s.kill_switch || !s.enabled) return { status: 403, code: "off" };
@@ -3259,7 +3677,7 @@ async function runTools(t: Turn, uses: any[], rawInputs: Map<string, string> | u
   let userSb: any = null;
   const ctx: ToolCtx = {
     me: t.me, biz: t.biz, settings: t.s, get userSb() { return userSb || (userSb = io.userClient(t.jwt)); }, sb: t.sb, conversationId: t.conv.id,
-    mode: t.mode, step, nowMs: io.now(), emit, stepMeta: meta, turn: t,
+    mode: t.mode, step, nowMs: io.now(), emit, stepMeta: meta, turn: t, resultChars: t.source.keySource === "free" ? FREE_TOOL_RESULT_CHARS : MAX_TOOL_RESULT_CHARS,
     card: (kind: string, data: unknown) => { meta.cards.push({ kind, data }); emit("card", { kind, data }); },
     propose: (p: any) => proposeChange(ctx, p),
   } as ToolCtx;
@@ -3279,7 +3697,7 @@ async function runTools(t: Turn, uses: any[], rawInputs: Map<string, string> | u
         else {
           try {
             const out = JSON.stringify((await tool.run(parsed.value, ctx)) ?? null);
-            if (out.length > (t.source.keySource === "free" ? FREE_TOOL_RESULT_CHARS : MAX_TOOL_RESULT_CHARS)) content = "Result too large";
+            if (out.length > (ctx.resultChars as number)) content = "Result too large";
             else { content = out; isError = false; }
           } catch (e) {
             content = "The tool failed: " + (e instanceof ChangeRefused ? e.message : "something went wrong on the server.");
