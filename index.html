@@ -1257,6 +1257,12 @@ a.btn { text-decoration: none; }
   .app-grid > div:last-child { padding-bottom: calc(var(--bottom-bar-h) + 28px) !important; }
   #chase-bubbles, #phone-widget { bottom: calc(var(--bottom-bar-h) + 12px) !important; }
 }
+/* The edge swipe back (stage 4): the page follows the finger and slides out. It moves with left, never a transform (a
+   transform on #content would carry its fixed panels and the settings menu with it); the column clips it meanwhile. */
+body.nav-swiping .main-col { overflow-x: clip; }
+body.nav-swiping #content, #content.nav-swipe-in { position: relative; }
+#content.nav-swipe-out { position: relative; left: 28%; opacity: .4; transition: left .14s ease-in, opacity .14s ease-in; }
+@media (prefers-reduced-motion: reduce) { #content.nav-swipe-out { left: 0; opacity: 1; transition: none; } }
 .toast-stack { position: fixed; left: 50%; bottom: calc(24px + var(--bottom-bar-h, 0px)); transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; align-items: center; gap: 8px; width: max-content; max-width: calc(100vw - 32px); pointer-events: none; }
 .toast { position: relative; pointer-events: auto; cursor: default; max-width: 100%; background: var(--ink); color: var(--paper); padding: 10px 20px 10px 11px; border-radius: 99px; font-size: 13px; font-weight: 600; line-height: 1.35; box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 10px; animation: toastIn .38s cubic-bezier(.2,.9,.25,1.3) both; transition: opacity .18s ease, transform .18s ease; }
 .toast.leaving { opacity: 0; transform: translateY(8px) scale(.96); }
@@ -5577,10 +5583,343 @@ const NAV = [
   { group:'Finance', items:[ {id:'closings', label:'Closings', icon:'receipt'}, {id:'outstanding', label:'Outstanding', icon:'hourglass'}, {id:'jobs', label:'Jobs & Commissions', icon:'briefcase'} ] },
   { group:'Management', items:[ {id:'reference', label:'Resources', icon:'folder', go:'goResources()'}, {id:'settings', label:'Settings', icon:'sliders'} ] },
 ];
-function goTab(id){ const go = () => { dropBrandTry(); UI.tab = id; UI.mobileNavOpen = false; if (UI.jobs) UI.jobs.selectedId = null; if (UI.reference) UI.reference.contractorId = null; PEOPLE_UI.sel = null; PEOPLE_UI.draft = null; PANEL_OPEN_FOR = {}; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
-function goTasks(board){ UI.tab = 'tasks'; if (board) UI.tasks.board = board; UI.mobileNavOpen = false; render(); }
-function goResources(tab){ UI.tab = 'reference'; if (tab) UI.reference.tab = tab; UI.mobileNavOpen = false; render(); }
+function goTab(id){ const go = () => { dropBrandTry(); UI.tab = id; UI.mobileNavOpen = false; if (UI.jobs) UI.jobs.selectedId = null; if (UI.reference) UI.reference.contractorId = null; PEOPLE_UI.sel = null; PEOPLE_UI.draft = null; PANEL_OPEN_FOR = {}; navPush({ kind: 'tab' }); render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
+function goTasks(board){ UI.tab = 'tasks'; if (board) UI.tasks.board = board; UI.mobileNavOpen = false; navPush({ kind: 'tab' }); render(); }
+function goResources(tab){ UI.tab = 'reference'; if (tab) UI.reference.tab = tab; UI.mobileNavOpen = false; navPush({ kind: 'tab' }); render(); }
 function toggleMobileNav(){ UI.mobileNavOpen = !UI.mobileNavOpen; render(); }
+/* ── Page history, deep links and the back swipe (stage 4) ─────────────────────────────────────────────────────────
+   Every page, Settings page, connector page and side panel the person opens is an entry in the browser's history, so the
+   phone's back (Android, the app added to an iPhone's home screen), the browser's Back and a swipe from the left edge go
+   to the previous screen instead of leaving the app; an open window (or the phone menu) closes first. Back on the first
+   screen does what the platform does. A link to a page the person may not open lands on their home page.
+   An entry is a small plain object { nav: 1, kind, ...where the screen is (navSnapOf) }. It is a registry, not a switch:
+   NAV_RESTORERS[kind](state, prev) puts an entry back on screen (return false when a guard kept the screen as it is), and
+   NAV_LEAVERS[kind](prev, next) tidies up a screen drawn outside UI. Another part of the app adds its own kind with its
+   own payload in state.x: NAV_RESTORERS.myKind = fn; navPush({ kind: 'myKind', x: { ... } }).
+   Rules: restoring never adds an entry (no loops) and redraws once at most; filters and searches never add entries. */
+const NAV_PAGES = [...SECTION_ORDER, 'settings'];   // exactly the pages render() draws
+const NAV_TAB_ALIASES = { finance: 'payroll' };     // Financial Summary was removed (6 Oct): its technician part is in Payroll
+// Where a link (?tab=&page=&week=, a phone notification) lands: the page when this person may open it, else their home page.
+// 'mcp' is not a page: owners get Settings → Connectors → Private connector, managers their keys window over the home page.
+function landingTab(profile, req){
+  if (!profile) return { tab: null };
+  req = req || {};
+  const home = homeTabFor(profile), tab = NAV_TAB_ALIASES[req.tab] || req.tab;
+  if (tab==='mcp') {
+    if (profile.role==='owner') return { tab: 'settings', page: 'connectors', conn: 'mcp' };
+    if (profile.role==='manager') return { tab: home, open: 'mcpKeys' };
+    return { tab: home };
+  }
+  if (!tab || !NAV_PAGES.includes(tab) || !canViewSection(profile, tab)) return { tab: home };
+  if (tab==='settings') return { tab, page: req.page ? settingsPageKey(req.page) : null };
+  if (tab==='payroll') return { tab, week: req.week || null };
+  return { tab };
+}
+// Where the screen is, from UI and PEOPLE_UI. Each panel only counts on the page that draws it. pt (the person's tab) and
+// cv (the CRM view) are put back on restore but don't make a new entry.
+function navSnapOf(ui, pp){
+  ui = ui || {}; pp = pp || {};
+  const tab = ui.tab || null, st = ui.settings || {};
+  const sp = tab==='settings' ? settingsPageKey(st.page || 'setup') : null;
+  const per = sp==='people' && pp.sel || null;
+  return {
+    tab, sp, so: tab==='settings' && !!st.open,
+    conn: sp==='connectors' && st.conn || null,
+    per, pt: per ? pp.tab || 'details' : null,
+    job: tab==='jobs' && ui.jobs && ui.jobs.selectedId || null,
+    con: tab==='reference' && ui.reference && ui.reference.contractorId || null,
+    lead: tab==='crm' && ui.crm && ui.crm.view==='inbox' && ui.crm.selectedContactId || null,
+    cv: tab==='crm' && ui.crm && ui.crm.view || null,
+    board: tab==='tasks' && ui.tasks && ui.tasks.board || null,
+    rtab: tab==='reference' && ui.reference && ui.reference.tab || null,
+  };
+}
+// The entries' identity: two entries with the same key are the same screen. A kind of its own (not a base kind) adds its payload.
+function navKey(s){
+  s = s || {};
+  const k = [s.tab, s.sp, s.so ? 1 : 0, s.conn, s.per, s.job, s.con, s.lead, s.board, s.rtab].join('|');
+  return s.kind && !NAV_BASE_KINDS.includes(s.kind) ? k + '|' + s.kind + ':' + JSON.stringify(s.x ?? null) : k;
+}
+// What a move does to the history: nothing (same screen), replace (a move made from inside a window, or one open panel
+// swapped for another on the same page) or push.
+function navMode(cur, next){
+  if (!cur) return 'push';
+  if (navKey(cur)===navKey(next)) return 'skip';
+  if (cur.ov) return 'replace';
+  const panel = s => !!(s.per || s.job || s.con || s.lead || s.conn);
+  const base = s => [s.tab, s.sp, s.so ? 1 : 0, s.board, s.rtab].join('|');
+  return panel(cur) && panel(next) && base(cur)===base(next) ? 'replace' : 'push';
+}
+// The address for an entry: the page (and the Settings page) only, never an id or a name; everything else (env=, open=) is kept.
+function navUrl(snap, search){
+  const q = new URLSearchParams(search || '');
+  ['tab', 'page', 'week'].forEach(k => q.delete(k));
+  if (snap && snap.tab) q.set('tab', snap.tab);
+  if (snap && snap.tab==='settings' && snap.so && snap.sp) q.set('page', snap.sp);
+  return '?' + q.toString();
+}
+// The edge swipe: starts within 20 px of the left edge, moves right at least 60 px, mostly sideways, within a second.
+const NAV_SWIPE_RULES = { edge: 20, minDx: 60, ratio: 2, maxMs: 1000 };
+function isBackSwipe(start, end, ctx){
+  const r = { ...NAV_SWIPE_RULES, ...(ctx || {}) };
+  if (!start || !end || r.blocked || !r.canBack || r.popped) return false;
+  const dx = end.x - start.x, dy = end.y - start.y;
+  return start.x <= r.edge && dx >= r.minDx && Math.abs(dx) > r.ratio * Math.abs(dy) && (end.t - start.t) <= r.maxMs;
+}
+// d: how many entries of ours are below this one. hold/held: a restore's redraws become one. skip: popstates of our own
+// history.go() still to come. syncBack: our own history.back() for a window closed in the app. pops: popstates seen.
+const NAV_HIST = { ready: false, pid: null, d: 0, cur: null, restoring: false, hold: false, held: false, skip: 0, pops: 0, syncBack: false, swipeIn: false, mo: null };
+const NAV_RESTORERS = {};
+const NAV_LEAVERS = {};
+const NAV_BASE_KINDS = ['tab', 'settings', 'connector', 'panel'];
+NAV_BASE_KINDS.forEach(k => { NAV_RESTORERS[k] = navRestoreView; });
+function navSnap(){ return navSnapOf(UI, PEOPLE_UI); }
+function navPid(){ return STATE.currentProfileId + '|' + (VIEW_AS_ID || ''); }
+function navOurs(st){ return !!st && st.nav===1; }
+// The screen shows this entry, as far as UI tells (a kind of its own keeps its payload); navKeep: what an entry keeps when replaced.
+function navSame(st){ return navKey(st)===navKey({ ...navSnap(), kind: st.kind, x: st.x }); }
+function navKeep(st){ return { kind: st.kind, ...(st.x!==undefined ? { x: st.x } : {}) }; }
+function navCustom(kind){ return !!kind && !NAV_BASE_KINDS.includes(kind); }
+// A new screen: one entry (after the change to UI, before its render, so the entry left keeps its scroll).
+function navPush(state){
+  if (!NAV_HIST.ready || NAV_HIST.restoring) return;
+  const next = { nav: 1, ...navSnap(), ...(state || {}) }, cur = navOurs(history.state) ? history.state : null;
+  const mode = cur ? navMode(cur, next) : 'replace';
+  if (mode==='skip') return;
+  const url = navUrl(next, location.search);
+  if (mode==='replace') {
+    NAV_HIST.cur = { ...next, d: cur ? cur.d|0 : NAV_HIST.d, pk: cur ? cur.pk ?? null : null };
+    history.replaceState(NAV_HIST.cur, '', url);
+  } else {
+    history.replaceState({ ...cur, y: window.scrollY }, '');
+    NAV_HIST.cur = { ...next, d: (cur.d|0) + 1, pk: navKey(cur) };
+    history.pushState(NAV_HIST.cur, '', url);
+  }
+  NAV_HIST.d = NAV_HIST.cur.d;
+}
+// The same screen, changed in place (allowed while restoring: it never adds an entry).
+function navReplace(state){
+  if (!NAV_HIST.ready) return;
+  const cur = navOurs(history.state) ? history.state : {};
+  NAV_HIST.cur = { nav: 1, ...navSnap(), ...(state || {}), d: NAV_HIST.d, pk: cur.pk ?? null };
+  history.replaceState(NAV_HIST.cur, '', navUrl(NAV_HIST.cur, location.search));
+}
+// Closing something the entry below already shows goes back to that entry instead of adding one (its restorer does the
+// change, guards included). next: the screen wanted, or a test on the key below.
+function navBackTo(next){
+  const st = history.state;
+  if (!NAV_HIST.ready || NAV_HIST.restoring || NAV_HIST.skip || NAV_HIST.syncBack || !navOurs(st) || st.ov || NAV_HIST.d <= 0 || !st.pk) return false;
+  if (!(typeof next==='function' ? next(st.pk) : st.pk===navKey(next))) return false;
+  history.back();
+  return true;
+}
+// Puts the history back where the screen is (a guard kept the screen): our own go(), whose popstate is skipped.
+function navStay(delta){
+  if (!delta) return;
+  NAV_HIST.skip++; NAV_HIST.d -= delta;
+  history.go(-delta);
+}
+// After every full render: the first one (or a new login / View as) starts the history; later ones keep the entry right
+// for the paths that change the page without an entry function. Never redraws.
+function navAfterRender(profile){
+  if (!profile) return;
+  if (!NAV_HIST.ready || NAV_HIST.pid!==navPid() || !navOurs(history.state)) { navInit(); return; }
+  const s = navSnap(), st = history.state, open = navOverlayOpen();
+  if (NAV_HIST.restoring) { if (!navSame(st)) navReplace({ kind: 'tab' }); return; }   // the page guard sent the restore elsewhere
+  if (st.tab!==s.tab) navPush({ kind: 'tab' });
+  else if ((!navSame(st) || s.pt!==st.pt || s.cv!==st.cv) && !(st.ov && !open)) navReplace({ ...navKeep(st), ...(st.ov ? { ov: 1 } : {}) });
+  navOverlaySync();
+}
+function navInit(){
+  const first = !NAV_HIST.mo, old = navOurs(history.state) ? history.state : null, snap = navSnap();
+  NAV_HIST.d = old ? old.d|0 : NAV_HIST.ready ? NAV_HIST.d : 0;   // an entry made outside this layer keeps the depth
+  NAV_HIST.ready = true; NAV_HIST.pid = navPid(); NAV_HIST.skip = 0; NAV_HIST.syncBack = false;
+  try { history.scrollRestoration = 'manual'; } catch (e) {}
+  // The page landed on; after a reload the entries below still work.
+  NAV_HIST.cur = { nav: 1, kind: 'tab', ...snap, d: NAV_HIST.d, pk: old ? old.pk ?? null : null };
+  history.replaceState(NAV_HIST.cur, '', navUrl(snap, location.search));
+  if (first && typeof MutationObserver!=='undefined') {
+    NAV_HIST.mo = new MutationObserver(() => navOverlaySync());
+    const root = document.getElementById('modal-root');
+    if (root) NAV_HIST.mo.observe(root, { childList: true });
+    NAV_HIST.mo.observe(document.body, { childList: true });   // the small popup (#app-popup) sits on the body
+  }
+  navOverlaySync();   // a window opened before the first render (e.g. ?open=backup)
+}
+// A window, the confirm, the small popup or the phone menu is open (one closing is not).
+function navOverlayOpen(){
+  const r = document.getElementById('modal-root');
+  return !!(r && [...r.children].some(el => !el.classList.contains('closing'))) || !!document.getElementById('app-popup') || !!UI.mobileNavOpen;
+}
+// An open window gets an entry of its own, so back closes it and stays; a window closed in the app takes its entry away.
+function navOverlaySync(){
+  if (!NAV_HIST.ready || NAV_HIST.restoring || NAV_HIST.skip || NAV_HIST.syncBack || AUTH.status!=='ready' || !STATE.dataLoaded) return;
+  const st = history.state; if (!navOurs(st)) return;
+  const open = navOverlayOpen();
+  if (open && !st.ov) {
+    NAV_HIST.cur = { ...st, ov: 1, pk: navKey(st), d: (st.d|0) + 1 };
+    history.pushState(NAV_HIST.cur, '', location.href);
+    NAV_HIST.d = NAV_HIST.cur.d;
+  } else if (!open && st.ov) { NAV_HIST.syncBack = true; history.back(); }
+}
+// Back with something open closes one layer: the confirm, the popup, the window (through its own Escape, so its own
+// checks run), the phone menu. True when something was open.
+function navOverlayClose(){
+  if (document.querySelector('.confirm-back:not(.closing)')) { closeConfirmModal(); return true; }
+  if (document.getElementById('app-popup')) { closePopup(); return true; }
+  const r = document.getElementById('modal-root');
+  if (r && [...r.children].some(el => !el.classList.contains('closing'))) { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true; }
+  if (UI.mobileNavOpen) { UI.mobileNavOpen = false; render(); return true; }
+  return false;
+}
+// Back / forward. Never adds an entry; one render at most.
+function navOnPop(e){
+  const s = e.state;
+  if (!NAV_HIST.ready || AUTH.status!=='ready' || !STATE.dataLoaded || !navOurs(s)) return;
+  if (NAV_HIST.skip) { NAV_HIST.skip--; NAV_HIST.d = s.d|0; NAV_HIST.cur = s; setTimeout(navOverlaySync, 0); return; }
+  const delta = (s.d|0) - NAV_HIST.d, prev = NAV_HIST.cur;
+  NAV_HIST.d = s.d|0; NAV_HIST.cur = s; NAV_HIST.pops++;
+  // Our own back for a window closed in the app: the screen is already right (it may have moved on under the window).
+  if (NAV_HIST.syncBack) { NAV_HIST.syncBack = false; if (!navSame(s)) navReplace(navKeep(s)); setTimeout(navOverlaySync, 0); return; }
+  // Back with something open closes it and stays; the page under the window may have changed while it was open.
+  if (navOverlayClose()) {
+    if (!navSame(s)) { if (prev && prev.ov && delta===-1) navReplace(navKeep(s)); else navStay(delta); }
+    return;
+  }
+  // Nothing to do when the screen already shows it (a forward step onto a window's entry), unless a kind of its own is involved.
+  if (!navCustom(s.kind) && !(prev && navCustom(prev.kind)) && navSame(s)) return;
+  const leave = prev && NAV_LEAVERS[prev.kind], fn = NAV_RESTORERS[s.kind] || navRestoreView;
+  NAV_HIST.restoring = true; NAV_HIST.hold = true; NAV_HIST.held = false;
+  let ok = true;
+  try {
+    if (leave) leave(prev, s);
+    ok = fn(s, prev)!==false;
+    NAV_HIST.hold = false;
+    if (NAV_HIST.held) render();
+  } finally { NAV_HIST.hold = false; NAV_HIST.restoring = false; }
+  if (!ok) { navStay(delta); return; }
+  if (typeof s.y==='number') window.scrollTo(0, s.y);
+  if (NAV_HIST.swipeIn) navSwipeInAnim();
+}
+window.addEventListener('popstate', navOnPop);
+// The built-in restorer: through the same entry functions a click uses (their guards run; their renders are held and
+// their navPush calls do nothing while restoring). Only a value that differs is changed (several of them toggle).
+function navRestoreView(s){
+  const cur = navSnap(), same = (a, b) => (a || null)===(b || null);
+  if (s.tab!==cur.tab) {
+    goTab(s.tab);
+    if (UI.tab!==s.tab) return false;   // the lead's follow-up date was asked for first
+    if (s.tab==='tasks' && s.board) UI.tasks.board = s.board;
+    if (s.tab==='reference' && s.rtab) UI.reference.tab = s.rtab;
+    if (s.tab==='settings') {
+      if (s.so) setSettingsPage(s.sp);
+      else UI.settings = { ...(UI.settings || {}), page: s.sp || 'setup', open: false, conn: null };
+      UI.settings.conn = s.conn || null;
+      PEOPLE_UI.sel = s.per || null; if (s.per) PEOPLE_UI.tab = s.pt || 'details';
+    }
+    if (s.tab==='jobs') UI.jobs.selectedId = s.job || null;
+    if (s.tab==='reference') UI.reference.contractorId = s.con || null;
+    if (s.tab==='crm') { if (s.cv) UI.crm.view = s.cv; if (s.lead) { UI.crm.view = 'inbox'; UI.crm.selectedContactId = s.lead; } }
+    render();
+    return true;
+  }
+  if (s.tab==='settings') {
+    if (!same(s.sp, cur.sp) || (s.so && !cur.so)) { setSettingsPage(s.sp); if (navSnap().sp!==s.sp) return false; }
+    if (!s.so && navSnap().so) closeSettingsPage();
+    if (!same(s.conn, navSnap().conn)) { if (s.conn) openConnector(s.conn); else closeConnector(); }
+    if (!same(s.per, navSnap().per)) { openPersonCard(s.per || null, s.per ? s.pt || 'details' : undefined); if (!same(navSnap().per, s.per)) return false; }
+    return true;
+  }
+  if (s.tab==='jobs') { if (!same(s.job, cur.job)) selectJob(s.job || null); return true; }
+  if (s.tab==='reference') {
+    if (s.rtab && s.rtab!==cur.rtab) { UI.reference.tab = s.rtab; render(); }
+    if (!same(s.con, cur.con)) openContractor(s.con || null);
+    return true;
+  }
+  if (s.tab==='crm') {
+    if (!same(s.lead, cur.lead)) {
+      if (s.lead) { UI.crm.view = 'inbox'; selectCrmContact(s.lead); } else clearCrmSelection();
+      if (!same(navSnap().lead, s.lead)) return false;
+    }
+    if (s.cv && s.cv!==UI.crm.view) { UI.crm.view = s.cv; render(); }
+    return true;
+  }
+  if (s.tab==='tasks' && s.board && s.board!==cur.board) { UI.tasks.board = s.board; render(); }
+  return true;
+}
+// ── The edge swipe (touch screens). Every listener is passive: it never blocks a scroll or the pipeline's long-press drag.
+// Off in Safari's own tabs on an iPhone/iPad, which already go back on this swipe (it would go back twice).
+let NAV_SWIPE = null;
+function navSwipeOn(){
+  try {
+    const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = navigator.standalone===true || window.matchMedia('(display-mode: standalone)').matches;
+    return touch && !(ios && !standalone);
+  } catch (e) { return false; }
+}
+// Not a back swipe: a card being dragged, the pipeline and the boards that move sideways, drag handles, fields, and any
+// box under the finger that can still scroll left. A new sideways board scrolls (overflow-x auto) or carries data-no-back-swipe.
+function navSwipeBlocked(target){
+  if (PIPE_DRAG || document.body.classList.contains('pipe-dragging')) return true;
+  if (!target || !target.closest) return false;
+  return !!target.closest('.pipeline, .pipe-jump, .lead-card, .stage-board, .drag-ghost, .cat-grip, .flow-grip, canvas, input, textarea, select, [contenteditable="true"], [draggable="true"], [data-no-back-swipe]') || navScrollsLeft(target);
+}
+function navScrollsLeft(el){
+  for (let n = el; n && n.nodeType===1 && n!==document.body; n = n.parentElement) {
+    const ox = getComputedStyle(n).overflowX;
+    if ((ox==='auto' || ox==='scroll') && n.scrollWidth > n.clientWidth + 1 && n.scrollLeft > 0) return true;
+  }
+  return false;
+}
+function navSwipeReset(){
+  document.body.classList.remove('nav-swiping');
+  const c = document.getElementById('content'); if (c) c.style.left = '';
+}
+function navSwipeStart(e){
+  NAV_SWIPE = null;
+  if (e.touches.length!==1 || !NAV_HIST.ready || !navSwipeOn()) return;
+  const t = e.touches[0]; if (t.clientX > NAV_SWIPE_RULES.edge) return;
+  NAV_SWIPE = { x: t.clientX, y: t.clientY, t: Date.now(), pops: NAV_HIST.pops, blocked: navSwipeBlocked(e.target), show: NAV_HIST.d > 0 && !navOverlayOpen() };
+}
+function navSwipeMove(e){
+  const s = NAV_SWIPE; if (!s) return;
+  const t = e.touches[0]; if (!t || e.touches.length!==1) { NAV_SWIPE = null; navSwipeReset(); return; }
+  const dx = t.clientX - s.x, dy = t.clientY - s.y;
+  if (Math.abs(dy) > 12 && Math.abs(dy) >= Math.abs(dx)) { NAV_SWIPE = null; navSwipeReset(); return; }   // a scroll up or down wins
+  // The page follows the finger. It moves with left: a transform would carry the fixed panels inside the page with it.
+  if (!s.blocked && s.show && dx > 10 && !motionReduced()) { const c = document.getElementById('content'); if (c) { document.body.classList.add('nav-swiping'); c.style.left = Math.round(Math.min(dx, 140) * 0.5) + 'px'; } }
+}
+function navSwipeEnd(e){
+  const s = NAV_SWIPE; NAV_SWIPE = null; if (!s) return;
+  const t = e.changedTouches && e.changedTouches[0];
+  const ok = !!t && isBackSwipe(s, { x: t.clientX, y: t.clientY, t: Date.now() }, { ...NAV_SWIPE_RULES, blocked: s.blocked, canBack: NAV_HIST.d > 0 || navOverlayOpen(), popped: NAV_HIST.pops!==s.pops });
+  if (ok) navSwipeBack(); else navSwipeReset();
+}
+function navSwipeCancel(){ NAV_SWIPE = null; navSwipeReset(); }   // the system took the touch (Android's own back gesture)
+// The page slides out, then back; with reduced motion (or a window open) it is a plain back.
+function navSwipeBack(){
+  const c = document.getElementById('content');
+  if (!c || navOverlayOpen() || motionReduced() || !document.body.classList.contains('nav-swiping')) { navSwipeReset(); history.back(); return; }
+  c.style.left = ''; c.classList.add('nav-swipe-out'); NAV_HIST.swipeIn = true;
+  setTimeout(() => history.back(), 120);
+  setTimeout(() => { NAV_HIST.swipeIn = false; document.body.classList.remove('nav-swiping'); const n = document.getElementById('content'); if (n) n.classList.remove('nav-swipe-out'); }, 500);
+}
+function navSwipeInAnim(){
+  NAV_HIST.swipeIn = false;
+  document.body.classList.remove('nav-swiping');
+  const c = document.getElementById('content'); if (!c) return;
+  c.classList.remove('nav-swipe-out');
+  if (motionReduced() || !c.animate) return;
+  c.classList.add('nav-swipe-in');
+  const a = c.animate([{ left: '-10%', opacity: 0.6 }, { left: '0px', opacity: 1 }], { duration: 160, easing: 'ease-out' });
+  const done = () => c.classList.remove('nav-swipe-in');
+  a.onfinish = done; a.oncancel = done; setTimeout(done, 400);   // also when the animation never runs (a hidden tab)
+}
+document.addEventListener('touchstart', navSwipeStart, { passive: true });
+document.addEventListener('touchmove', navSwipeMove, { passive: true });
+document.addEventListener('touchend', navSwipeEnd, { passive: true });
+document.addEventListener('touchcancel', navSwipeCancel, { passive: true });
 // board model: 'ron' is the office's board (the key is only a storage key; the label is the office's name, Settings →
 // Phone); any other string is that person's own board (their name). A task's board follows its first assignee
 // (boardForAssignees). This function is the single source of truth for labels.
@@ -8791,7 +9130,7 @@ function pipelinePatchMove(c, from){
    unified-inbox layout Ofek uses day to day (screenshots he sent), since this screen is where
    Ron spends most of his time and needs to live entirely in conversations, not a modal per lead. */
 function setCrmInboxFilter(f){ UI.crm.inboxFilter = f; UI.crm.inboxShow = 0; render(); }
-function selectCrmContact(id){ const go = () => { UI.crm.selectedContactId = id; if (!inboxPatchSelect(id)) render(); }; if (UI.crm.selectedContactId && UI.crm.selectedContactId!==id && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
+function selectCrmContact(id){ const go = () => { UI.crm.selectedContactId = id; navPush({ kind: 'panel' }); if (!inboxPatchSelect(id)) render(); }; if (UI.crm.selectedContactId && UI.crm.selectedContactId!==id && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 // Opening a lead in the inbox swaps the conversation and the details beside the list, without redrawing the page and
 // its ~100 rows (Ofek 12 Oct). Returns false (the page is redrawn) when the inbox isn't on screen or the row isn't drawn.
 function inboxPatchSelect(id){
@@ -8806,7 +9145,7 @@ function inboxPatchSelect(id){
   if (!motionReduced()) box.querySelectorAll('.crm-inbox-thread-col, .crm-inbox-details').forEach(el => el.animate && el.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' }));
   return true;
 }
-function clearCrmSelection(){ const go = () => { UI.crm.selectedContactId = null; render(); }; if (!leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
+function clearCrmSelection(){ if (navBackTo({ ...navSnap(), lead: null })) return; const go = () => { UI.crm.selectedContactId = null; navPush({ kind: 'panel' }); render(); }; if (!leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 // Clicking a lead's name anywhere (Pipeline card, Table row, the Reminders follow-up banner) jumps
 // straight into the live conversation, instead of opening the full edit modal. Explicit action buttons
 // ("Follow-up / edit", "Full profile", "Open") still open the modal — only the plain name-click changes.
@@ -8822,6 +9161,7 @@ function goToLeadConversation(contactId){
     UI.tab = 'crm';
     UI.crm.view = 'inbox';
     UI.crm.selectedContactId = contactId;
+    navPush({ kind: 'panel' });
     render();
   });
 }
@@ -10455,7 +10795,10 @@ function renderJobsStats(data, jobs){
 let PANEL_OPEN_FOR = {};
 function panelAnimClass(key, id){ const was = PANEL_OPEN_FOR[key]; PANEL_OPEN_FOR[key] = id || null; return id && !was ? ' anim' : ''; }
 function selectJob(id){
-  UI.jobs.selectedId = id && UI.jobs.selectedId!==id ? id : null;
+  const next = id && UI.jobs.selectedId!==id ? id : null;
+  if (!next && UI.jobs.selectedId && navBackTo({ ...navSnap(), job: null })) return;
+  UI.jobs.selectedId = next;
+  navPush({ kind: 'panel' });
   refreshJobsTable();
 }
 // Esc closes the open job (unless a window is open on top of it).
@@ -15387,7 +15730,9 @@ function renderContractorsTab(data){
     <aside class="job-panel emp-panel${panelAnimClass('con', sel && sel.id)}" id="con-panel"${sel ? '' : ' hidden'}>${renderContractorPanel(sel)}</aside>`;
 }
 function openContractor(id){
-  UI.reference.contractorId = id && UI.reference.contractorId!==id ? id : null; CON_UI.showBank = null; render();
+  const next = id && UI.reference.contractorId!==id ? id : null;
+  if (!next && UI.reference.contractorId && navBackTo({ ...navSnap(), con: null })) return;
+  UI.reference.contractorId = next; CON_UI.showBank = null; navPush({ kind: 'panel' }); render();
   if (UI.reference.contractorId) refreshContractor(UI.reference.contractorId);
 }
 function refreshContractorCards(){ const g = document.querySelector('.con-grid'); if (g) g.innerHTML = renderContractorCards(STATE.data) || '<div class="hint">No contractor matches.</div>'; }
@@ -19017,10 +19362,12 @@ function renderPeopleCards(data){
 function refreshPeopleGrid(){ const g = document.querySelector('.people-grid'); if (g) g.innerHTML = renderPeopleCards(STATE.data); }
 // Opens a person's card (on a tab), or closes it (the same card again, or none). An hourly pay change not saved yet is asked about first.
 function openPersonCard(key, tab){
+  if (PEOPLE_UI.sel && (!key || (key===PEOPLE_UI.sel && !tab)) && !peoplePayDirty() && navBackTo({ ...navSnap(), per: null })) return;
   guardPeoplePay(() => {
     if (!key || (key===PEOPLE_UI.sel && !tab)) PEOPLE_UI.sel = null;
     else { PEOPLE_UI.sel = key; PEOPLE_UI.tab = tab || 'details'; }
     PEOPLE_UI.draft = null; PEOPLE_UI.from = ''; UI.reference.showBank = null;
+    navPush({ kind: 'panel' });
     render();
     const n = document.getElementById('emp-panel'); if (n) n.scrollTop = 0;
   });
@@ -20778,9 +21125,13 @@ async function loadConnLog(){
 }
 function openConnector(id){
   UI.settings = { ...(UI.settings || {}), page: 'connectors', open: true, conn: id };
+  navPush({ kind: 'connector' });
   render(); window.scrollTo(0, 0);
 }
-function closeConnector(){ if (UI.settings) UI.settings.conn = null; render(); window.scrollTo(0, 0); }
+function closeConnector(){
+  if (navBackTo({ ...navSnap(), conn: null })) return;
+  if (UI.settings) UI.settings.conn = null; navPush({ kind: 'connector' }); render(); window.scrollTo(0, 0);
+}
 // Saves one connector's switches (a fresh copy: catalogObject is a shallow copy, so the saved maps are never changed in place).
 function connSave(id, fn, what, opts){ return catalogSave('connectors', connPatched(catalogObject('connectors'), id, fn), what, opts); }
 function connCfgNow(id){ return connCfgOf(STATE.data.settings.catalog, id); }
@@ -22366,12 +22717,16 @@ function setSettingsPage(id){
     // redraw: the page itself only starts a load when none is running, see loadAutomations).
     if (id==='templates' || id==='notifications') { AUTO.loaded = false; AUTO.runsLoaded = false; }
     TPL_EDIT = null; AUTO_TPL_EDIT = null;
+    navPush({ kind: 'settings' });
     render();
     window.scrollTo(0, 0);   // a different settings page opens at its top on every width (the menu panel stays where it is, T1.10)
   };
   if (id!=='people') guardPeoplePay(go); else go();
 }
-function closeSettingsPage(){ dropBrandTry(); DATA_EXPORT.sens = false; UI.settings.open = false; render(); window.scrollTo(0, 0); }
+function closeSettingsPage(){
+  if (navBackTo(k => { const p = k.split('|'); return p[0]==='settings' && p[2]==='0' && !p[3] && !p[4]; })) return;   // the list is the entry below
+  dropBrandTry(); DATA_EXPORT.sens = false; UI.settings.open = false; navPush({ kind: 'settings' }); render(); window.scrollTo(0, 0);
+}
 // The text a settings page is found by in Search settings, and whether a search finds it (empty finds everything).
 function settingsNavText(pg){ return (pg.title + ' ' + pg.desc + ' ' + pg.group + ' ' + (pg.keywords || '')).toLowerCase(); }
 function settingsNavMatch(text, q){ const t = String(q || '').toLowerCase().trim(); return !t || String(text || '').includes(t); }
@@ -23236,7 +23591,8 @@ function renderFreshness(){
   </div>`;
 }
 
-function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderChaseBubbles, 0); setTimeout(mdTick, 0); } catch(e) {}
+function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; }   // a back/forward restore draws once, at its end (stage 4)
+  JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderChaseBubbles, 0); setTimeout(mdTick, 0); } catch(e) {}
   const app = document.getElementById('app');
   if (AUTH.status === 'loading') { app.innerHTML = hasSavedSession() ? renderSkeleton() : renderAuthLoading(); return; }
   if (AUTH.status === 'signedOut') { app.innerHTML = renderLogin(); return; }
@@ -23261,11 +23617,12 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   // route guard — mirrors src/lib/permissions.ts + the (app)/layout.tsx guard:
   // never render a section the current profile isn't permitted to view.
   if (UI.tab==='finance') UI.tab = 'payroll';   // Financial Summary was removed (6 Oct): its technician part lives in Payroll
-  // Opened from a phone notification (?tab=payroll&week=…, ?tab=settings&page=…): go there once.
-  if (!START_LINK.used && START_LINK.tab) { START_LINK.used = true; UI.tab = START_LINK.tab; if (START_LINK.week) { UI.payroll.mode = 'week'; UI.payroll.week = START_LINK.week; } if (START_LINK.page && START_LINK.tab==='settings') UI.settings = { ...(UI.settings || {}), page: START_LINK.page, open: true }; }
+  // Opened from a link or a phone notification (?tab=payroll&week=…, ?tab=settings&page=…): go there once. A page this person
+  // may not open lands on their home page (stage 4, every gated page); ?tab=mcp opens the private connector where they have it.
+  if (!START_LINK.used && START_LINK.tab) { START_LINK.used = true; const L = landingTab(profile, START_LINK); UI.tab = L.tab; if (L.week) { UI.payroll.mode = 'week'; UI.payroll.week = L.week; } if (L.tab==='settings' && (L.page || L.conn)) UI.settings = { ...(UI.settings || {}), page: L.page || 'setup', open: true, conn: L.conn || null }; if (L.open==='mcpKeys') setTimeout(openMcpKeys, 0); }
   // Back from "Continue with Google" on Security's lock: open Security and unlock it (once).
   secGoogleFinish(profile);
-  if (!UI.tab || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);
+  if (!UI.tab || !NAV_PAGES.includes(UI.tab) || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);   // a page that doesn't exist too (no empty page)
   // The sensitive tick never outlives the Data page, whichever way it was left (the menu, a link, a notification).
   if (DATA_EXPORT.sens && !dataPageOpen()) DATA_EXPORT.sens = false;
   // board guard — a technician only ever looks at his own tasks, whatever UI.tasks.board was last set to (e.g. left over
@@ -23310,6 +23667,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   RENDER_LAST = { key: view, tab: UI.tab };
   motionAfterRender(motionBefore, flipBefore);
   trackCelebrations();
+  navAfterRender(profile);
 }
 // A redraw keeps the field being typed in (marked data-keep-focus="<key>"; the keys are code constants, never user text)
 // focused, with its caret where it was. Returns a function that puts it back, or null.

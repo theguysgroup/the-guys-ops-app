@@ -159,6 +159,8 @@ const DECLS = [
   'vacationItemStandIn',
   // stage 5 follow-ups (Ofek 15 Oct): "Start automations" said plainly, the import confirm with its count
   'MCP_RUN_AUTOMATIONS_ON', 'mcpImportConfirm',
+  // Stage 4: page history, the edge swipe and deep links (landing page, where the screen is, the swipe decision)
+  'canViewSection', 'firstAccessibleTab', 'homeTabFor', 'NAV_PAGES', 'NAV_TAB_ALIASES', 'landingTab', 'navSnapOf', 'NAV_BASE_KINDS', 'navKey', 'navMode', 'navUrl', 'NAV_SWIPE_RULES', 'isBackSwipe',
 ];
 
 function extractDecl(source, name){
@@ -3423,6 +3425,7 @@ testNotificationCards(loadSandbox());
 testConnectors(loadSandbox());
 testUxRound3(loadSandbox());
 testMcpConnector(loadSandbox());
+testPageHistory(loadSandbox());
 testSecurityFaceId(loadSandbox());
 testAutomationEventBody(loadSandbox());
 testFlowView(loadSandbox());
@@ -4252,6 +4255,179 @@ function loadOptOutSandbox(script){
   vm.runInContext(['esc', 'jsStr', 'pill', 'readOnlyReason', 'contactById', 'OPTOUTS', 'optOutKeys', 'optOutRowsFor', 'optOutInserts', 'optOutControlHtml', 'loadCustomerOptOuts', 'optOutRefresh', 'stopAutoMessages', 'allowAutoMessages'].map(n => extractDecl(script, n)).join('\n')
     + '\nthis.__x = { OPTOUTS, optOutKeys, optOutRowsFor, optOutInserts, optOutControlHtml, loadCustomerOptOuts, stopAutoMessages, allowAutoMessages };', ctx);
   return { ...ctx.__x, __q: q, __ctx: ctx, __renders: () => renders, __confirms: confirms, __acts: acts };
+}
+
+// ── Stage 4: page history, back closes windows first, the edge swipe, deep-link fallback ──
+function testPageHistory(sb){
+  console.log('\nPage history, the back swipe and deep links (stage 4)');
+  sb.URLSearchParams = URLSearchParams;   // navUrl builds the address (a vm context has none of its own)
+  const script = fs.readFileSync(INDEX_HTML_PATH, 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+  const P = (role, extra) => ({ id: role, role, permissions: { ...sb.defaultPermissionsFor(role), ...(extra || {}) } });
+  const owner = P('owner'), manager = P('manager'), tech = P('technician'), va = P('va'), mkt = P('marketing'), vaNoJobs = P('va', { jobs: false });
+  const nobody = { id: 'x', role: 'technician', permissions: {} };
+  const L = (p, req) => sb.landingTab(p, req);
+  // deep links: 'mcp' is not a page
+  assertEqual([L(owner, { tab: 'mcp' }), L(manager, { tab: 'mcp' }), L(va, { tab: 'mcp' }), L(mkt, { tab: 'mcp' })],
+    [{ tab: 'settings', page: 'connectors', conn: 'mcp' }, { tab: 'dashboard', open: 'mcpKeys' }, { tab: 'myDay' }, { tab: 'adsGoogle' }],
+    'landingTab ?tab=mcp: owners open the private connector, managers their keys window over the dashboard, anyone else lands home');
+  // a page that doesn't exist or isn't theirs lands home (the old empty content area)
+  assertEqual([L(manager, { tab: 'overview' }).tab, L(owner, { tab: 'overview' }).tab, L(owner, { tab: 'junk' }).tab, L(manager, { tab: 'junk' }).tab, L(tech, { tab: 'dashboard' }).tab,
+    L(tech, { tab: 'finance' }).tab, L(va, { tab: 'settings' }).tab, L(manager, { tab: 'crm' }), L(vaNoJobs, { tab: 'jobs' }).tab, L(va, { tab: 'jobs' }).tab, L(owner, { tab: null }).tab, L(owner, {}).tab, L(nobody, { tab: 'crm' }), L(null, { tab: 'crm' })],
+    ['dashboard', 'dashboard', 'dashboard', 'dashboard', 'payroll', 'payroll', 'myDay', { tab: 'crm' }, 'myDay', 'jobs', 'dashboard', 'dashboard', { tab: null }, { tab: null }],
+    'landingTab: an unknown page or one the person may not open lands on their home page; finance → payroll; a profile with no pages → none');
+  assertEqual([L(owner, { tab: 'settings', page: 'pay' }), L(owner, { tab: 'settings', page: 'connections' }), L(owner, { tab: 'settings', page: 'phone' }), L(owner, { tab: 'settings' }),
+    L(owner, { tab: 'payroll', week: '2026-10-12' }), L(tech, { tab: 'payroll', week: '2026-10-12' }), L(owner, { tab: 'crm', week: '2026-10-12' })],
+    [{ tab: 'settings', page: 'people' }, { tab: 'settings', page: 'connectors' }, { tab: 'settings', page: 'phone' }, { tab: 'settings', page: null },
+      { tab: 'payroll', week: '2026-10-12' }, { tab: 'payroll', week: '2026-10-12' }, { tab: 'crm' }],
+    'landingTab: old settings pages map to their new place; the week only goes with Payroll');
+  assertEqual([[...sb.NAV_PAGES].sort(), sb.NAV_PAGES.length], [[...sb.SECTION_ORDER, 'settings'].sort(), sb.SECTION_ORDER.length + 1], 'NAV_PAGES: every page render() draws, and nothing else');
+  const r = extractDecl(script, 'render');
+  assertEqual([r.includes('if (!UI.tab || !NAV_PAGES.includes(UI.tab) || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);'), r.includes('const L = landingTab(profile, START_LINK);'),
+    r.includes('START_LINK.used = true;'), /UI\.tab = START_LINK\.tab/.test(r), r.includes("if (UI.tab==='finance') UI.tab = 'payroll';")],
+    [true, true, true, false, true], 'render: the page guard knows the pages; START_LINK goes through landingTab once');
+  // where the screen is: each panel counts only on its own page
+  const ui = (o) => ({ tab: 'crm', settings: { page: 'phone', open: true, conn: 'mcp' }, jobs: { selectedId: 'j1' }, reference: { tab: 'equipment', contractorId: 'k1' }, crm: { view: 'inbox', selectedContactId: 'c1' }, tasks: { board: 'all' }, ...o });
+  const pp = { sel: 'e:1', tab: 'pay' };
+  const S = (o, p) => sb.navSnapOf(ui(o), p || pp);
+  assertEqual([S({}), S({ crm: { view: 'pipeline', selectedContactId: 'c1' } }).lead, S({ tab: 'jobs' }).job, S({ tab: 'reference' }).con, S({ tab: 'reference' }).rtab, S({ tab: 'tasks' }).board],
+    [{ tab: 'crm', sp: null, so: false, conn: null, per: null, pt: null, job: null, con: null, lead: 'c1', cv: 'inbox', board: null, rtab: null }, null, 'j1', 'k1', 'equipment', 'all'],
+    'navSnapOf: the job only on Jobs, the contractor only on Resources, the lead only in the CRM inbox (not the pipeline)');
+  assertEqual([S({ tab: 'settings' }), S({ tab: 'settings', settings: { page: 'connectors', open: true, conn: 'mcp' } }).conn, S({ tab: 'settings', settings: { page: 'access', open: false } }),
+    S({ tab: 'settings', settings: {} }).sp],
+    [{ tab: 'settings', sp: 'phone', so: true, conn: null, per: null, pt: null, job: null, con: null, lead: null, cv: null, board: null, rtab: null }, 'mcp',
+      { tab: 'settings', sp: 'people', so: false, conn: null, per: 'e:1', pt: 'pay', job: null, con: null, lead: null, cv: null, board: null, rtab: null }, 'setup'],
+    'navSnapOf: the connector only on Connectors, the person only on People (old page ids mapped)');
+  const base = S({ tab: 'jobs' }), K = sb.navKey;
+  assertEqual([K(base)===K({ ...base, pt: 'x', y: 300, d: 4, pk: 'a', ov: 1, cv: 'pipeline' }), K({ ...base, kind: 'tab' })===K({ ...base, kind: 'panel' }), K({ ...base, kind: 'wf', x: { id: 1 } }), K({ ...base, kind: 'wf' }),
+    K(base)===K({ ...base, job: 'j2' })],
+    [true, true, 'jobs||0|||j1||||' + '|wf:{"id":1}', 'jobs||0|||j1||||' + '|wf:null', false], 'navKey: pt, cv, y, d, pk and ov never change it; a kind of its own adds its payload; the base kinds add nothing');
+  const M = sb.navMode, jobs0 = { ...base, job: null };
+  assertEqual([M(base, { ...base }), M({ ...base, ov: 1 }, S({ tab: 'tasks' })), M(base, { ...base, job: 'j2' }), M(jobs0, base), M(base, S({})), M(S({ tab: 'settings', settings: { page: 'phone', open: true } }), S({ tab: 'settings', settings: { page: 'hours', open: true } })),
+    M(S({}), S({ crm: { view: 'inbox', selectedContactId: 'c2' } })), M(null, base)],
+    ['skip', 'replace', 'replace', 'push', 'push', 'push', 'replace', 'push'], 'navMode: same screen skips; from inside a window replaces; one panel for another replaces; a new page or panel pushes');
+  const U = sb.navUrl;
+  assertEqual([U({ tab: 'payroll' }, '?env=staging&tab=crm&week=2026-10-12'), U({ tab: 'settings', sp: 'people', so: true, per: 'e:9' }, ''), U({ tab: 'settings', sp: 'people', so: false }, '?tab=settings&page=people'),
+    U({ tab: 'jobs', job: 'j77', lead: 'c55', per: 'e:1', con: 'k3' }, '?open=backup'), U({ tab: null }, '?env=live&tab=x')],
+    ['?env=staging&tab=payroll', '?tab=settings&page=people', '?tab=settings', '?open=backup&tab=jobs', '?env=live'], 'navUrl: only the page (and the Settings page) in the address, never an id; env= and open= kept');
+  const B = (a, b, c) => sb.isBackSwipe(a, b, c), go = { canBack: true };
+  assertEqual([B({ x: 10, y: 300, t: 0 }, { x: 90, y: 310, t: 300 }, go), B({ x: 20, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, go), B({ x: 21, y: 0, t: 0 }, { x: 95, y: 0, t: 10 }, go),
+    B({ x: 0, y: 0, t: 0 }, { x: 60, y: 0, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 59, y: 0, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 80, y: 40, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 81, y: 40, t: 10 }, go),
+    B({ x: 15, y: 0, t: 0 }, { x: -80, y: 0, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, { canBack: true, blocked: true }), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, { canBack: false }),
+    B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, { canBack: true, popped: true }), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 1001 }, go), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 1000 }, go), B(null, { x: 90, y: 0, t: 1 }, go), B({ x: 0, y: 0, t: 0 }, null, go)],
+    [true, true, false, true, false, false, true, false, false, false, false, false, true, false, false], 'isBackSwipe: from the 20 px edge, 60 px right, mostly sideways, within a second, only when back goes somewhere and nothing else took it');
+  // no loops: restoring never adds an entry; render draws once per restore
+  const T = n => extractDecl(script, n);
+  assertEqual([['pushState', 'navPush('].filter(w => T('navOnPop').includes(w)), ['pushState', 'replaceState', 'navPush(', 'navReplace('].filter(w => T('navRestoreView').includes(w)),
+    /[^A-Za-z]render\(/.test(T('navAfterRender')), /\{\n  if \(!NAV_HIST\.ready \|\| NAV_HIST\.restoring\) return;/.test(T('navPush')), T('navStay').includes('pushState'),
+    r.startsWith('function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; }'), r.trim().endsWith('navAfterRender(profile);\n}'),
+    script.includes('NAV_BASE_KINDS.forEach(k => { NAV_RESTORERS[k] = navRestoreView; });'), /NAV_RESTORERS(\.|\[')(wf|auto)/i.test(script), sb.NAV_BASE_KINDS],
+    [[], [], false, true, false, true, true, true, false, ['tab', 'settings', 'connector', 'panel']], 'no loops: popstate and the restorer never push; a restore draws once; no automation kinds registered here');
+  // the entry functions: one entry each, after the change and before the redraw; pinned texts unchanged
+  const goTabT = T('goTab'), ssp = T('setSettingsPage');
+  assertEqual([goTabT.indexOf("navPush({ kind: 'tab' })") > goTabT.indexOf('PANEL_OPEN_FOR = {}') && goTabT.indexOf("navPush({ kind: 'tab' })") < goTabT.indexOf('render()'),
+    ['goTasks', 'goResources'].every(n => /navPush\(\{ kind: 'tab' \}\); render\(\);/.test(T(n))), ssp.indexOf("navPush({ kind: 'settings' })") < ssp.indexOf('render();') && ssp.includes("if (id!=='data') DATA_EXPORT.sens = false;"),
+    ['closeSettingsPage', 'openConnector', 'closeConnector'].every(n => T(n).includes('window.scrollTo(0, 0)')), ['closeSettingsPage', 'closeConnector', 'selectJob', 'openContractor', 'openPersonCard', 'clearCrmSelection'].every(n => T(n).includes('navBackTo(')),
+    ['selectJob', 'openContractor', 'openPersonCard', 'selectCrmContact', 'clearCrmSelection', 'goToLeadConversation'].every(n => T(n).includes("navPush({ kind: 'panel' })")), /render\(\)/.test(T('selectJob'))],
+    [true, true, true, true, true, true, false], 'entry functions: goTab/goTasks/goResources/settings/connector/panels push one entry before the redraw; closing goes back to the entry below; the open job stays a DOM patch');
+  // the swipe never blocks a scroll or the pipeline's drag
+  const swipeFns = ['navSwipeOn', 'navSwipeBlocked', 'navScrollsLeft', 'navSwipeReset', 'navSwipeStart', 'navSwipeMove', 'navSwipeEnd', 'navSwipeCancel', 'navSwipeBack', 'navSwipeInAnim'];
+  const blk = T('navSwipeBlocked');
+  assertEqual([['touchstart', 'touchmove', 'touchend', 'touchcancel'].every(ev => script.includes(`document.addEventListener('${ev}', navSwipe${{ touchstart: 'Start', touchmove: 'Move', touchend: 'End', touchcancel: 'Cancel' }[ev]}, { passive: true });`)),
+    swipeFns.filter(n => T(n).includes('preventDefault')), ['PIPE_DRAG', '.pipeline', '.lead-card', '.stage-board', 'navScrollsLeft('].every(w => blk.includes(w)),
+    script.includes("document.addEventListener('touchmove', e => { if (PIPE_DRAG && PIPE_DRAG.dragging) e.preventDefault(); }, { passive: false });"), swipeFns.some(n => /\.style\.transform|transform:/.test(T(n)))],
+    [true, [], true, true, false], 'edge swipe: passive listeners, no preventDefault, never on the pipeline/boards/sideways scrollers; the pipeline drag listener unchanged; no transform on #content');
+  assertEqual([/#content\.nav-swipe-out \{[^}]*left: 28%/.test(fs.readFileSync(INDEX_HTML_PATH, 'utf8')), /@media \(prefers-reduced-motion: reduce\) \{ #content\.nav-swipe-out \{ left: 0; opacity: 1; transition: none; \} \}/.test(fs.readFileSync(INDEX_HTML_PATH, 'utf8')), T('navSwipeBack').includes('motionReduced()')],
+    [true, true, true], 'edge swipe: a short slide, none with reduced motion');
+  // behaviour, with a fake history, window and document
+  const H = navHistSandbox(script);
+  const n = H.nav;
+  H.ui.tab = 'crm'; H.ui.crm.view = 'pipeline';
+  n.navInit();
+  const first = H.hist.state;
+  assertEqual([first.nav, first.kind, first.tab, first.d, first.pk, H.log.urls.pop(), n.NAV_HIST.ready, H.log.push], [1, 'tab', 'crm', 0, null, '?env=staging&tab=crm', true, 0], 'navInit: the landed page becomes the first entry (replaced, not pushed)');
+  H.ui.tab = 'jobs'; n.navPush({ kind: 'tab' });
+  assertEqual([H.log.push, H.hist.state.d, H.hist.state.pk, n.NAV_HIST.d, H.hist.entries[0].y, H.log.urls.pop()], [1, 1, n.navKey(first), 1, 0, '?env=staging&tab=jobs'], 'navPush: a new page is one entry; the one left keeps its scroll');
+  H.ui.jobs.selectedId = 'j1'; n.navPush({ kind: 'panel' });
+  H.ui.jobs.selectedId = 'j2'; n.navPush({ kind: 'panel' });
+  n.navPush({ kind: 'panel' });
+  assertEqual([H.log.push, H.hist.entries.length, H.hist.state.job, H.hist.state.d], [2, 3, 'j2', 2], 'navPush: opening a job pushes, another job replaces, the same screen adds nothing');
+  // back to the CRM (two entries down): one render, no push
+  const pushes = H.log.push; H.log.renders = 0;
+  H.pop(0);
+  assertEqual([H.ui.tab, H.log.renders, H.log.push, n.NAV_HIST.d, n.NAV_HIST.restoring, n.NAV_HIST.hold, H.log.restored], ['crm', 1, pushes, 0, false, false, 1], 'popstate to another page: restored through goTab, one render, nothing pushed');
+  // forward to the open job: the job is put back
+  H.log.renders = 0; H.pop(2);
+  assertEqual([H.ui.tab, H.ui.jobs.selectedId, H.log.renders, H.log.push], ['jobs', 'j2', 1, pushes], 'forward: the page and its open job come back, one render');
+  // a window open: back closes it and stays where it was
+  H.modal(true); n.navOverlaySync();
+  assertEqual([H.log.push, H.hist.state.ov, H.hist.state.d], [pushes + 1, 1, 3], 'an open window gets an entry of its own');
+  H.log.renders = 0; H.pop(2);
+  assertEqual([H.log.esc, H.modalOpen(), H.log.renders, H.log.go, n.NAV_HIST.skip, H.ui.tab], [1, false, 0, [], 0, 'jobs'], 'back with a window open: the window closes (its own Escape), the page stays, nothing redrawn');
+  // a window opened without its entry (back would leave the page): close it and go back where the screen is
+  H.modal(true); H.log.renders = 0;
+  H.pop(1);
+  assertEqual([H.log.esc, H.modalOpen(), H.log.go, n.NAV_HIST.skip, H.log.renders, H.ui.jobs.selectedId], [2, false, [1], 1, 0, 'j2'], 'back over a window that had no entry: it closes, the history goes forward again (no push), nothing redrawn');
+  H.pop(2);
+  assertEqual([n.NAV_HIST.skip, n.NAV_HIST.d, H.log.renders, H.log.push], [0, 2, 0, pushes + 1], 'our own history.go() popstate is skipped once');
+  // a window closed in the app takes its entry away (history.back), and the landing changes nothing
+  H.modal(true); n.navOverlaySync(); const backs = H.log.back;
+  H.modal(false); n.navOverlaySync();
+  assertEqual([H.log.back - backs, n.NAV_HIST.syncBack], [1, true], 'a window closed in the app: its entry goes (history.back)');
+  H.log.renders = 0; H.pop(2);
+  assertEqual([n.NAV_HIST.syncBack, H.log.renders, H.ui.tab, H.ui.jobs.selectedId], [false, 0, 'jobs', 'j2'], 'its popstate changes nothing on screen');
+  // closing the job goes back to the entry below instead of adding one
+  const b2 = H.log.back;
+  assertEqual([n.navBackTo({ ...n.navSnap(), job: null }), H.log.back - b2, n.navBackTo({ ...n.navSnap(), job: 'zz' })], [true, 1, false], 'navBackTo: back when the entry below is the screen wanted');
+  // a guard keeps the screen: the restorer says no, the history goes back where the screen is, nothing pushed
+  H.hist.entries.splice(3); H.hist.entries[3] = { ...H.hist.state, nav: 1, kind: 'guarded', x: { id: 1 }, d: 3, pk: 'p' };
+  n.NAV_RESTORERS.guarded = () => false; H.log.go = [];
+  H.pop(3);
+  assertEqual([H.log.go, H.log.push, n.NAV_HIST.skip], [[-1], pushes + 2, 1], 'a restorer that returns false: history.go back to where the screen is, no push');
+  H.pop(2);
+  // a leaver runs once before the restorer of the entry arrived at
+  const seen = []; n.NAV_LEAVERS.guarded = (prev, next) => seen.push([prev.kind, next.kind]);
+  n.NAV_RESTORERS.guarded = () => true; H.pop(3); H.pop(2);
+  assertEqual(seen, [['guarded', 'panel']], 'NAV_LEAVERS[kind] runs when leaving that kind');
+  // ignored: not ours, not ready, signed out
+  const before = JSON.stringify([H.log, H.ui]);
+  n.navOnPop({ state: null }); n.navOnPop({ state: { tab: 'crm', d: 0 } }); H.auth.status = 'signedOut'; n.navOnPop({ state: H.hist.entries[0] }); H.auth.status = 'ready';
+  n.NAV_HIST.ready = false; n.navOnPop({ state: H.hist.entries[0] }); n.NAV_HIST.ready = true;
+  assertEqual(JSON.stringify([H.log, H.ui])===before, true, 'popstate: a state that is not ours, before the start or signed out is ignored');
+  // the phone menu closes on back too
+  H.ui.mobileNavOpen = true; H.log.renders = 0; H.hist.idx = 2; H.hist.state = H.hist.entries[2];
+  n.navOnPop({ state: { ...H.hist.entries[2] } });
+  assertEqual([H.ui.mobileNavOpen, H.log.renders], [false, 1], 'back with the phone menu open: the menu closes');
+}
+// A vm context with the history layer and fakes of the browser and of the entry functions it calls.
+function navHistSandbox(script){
+  const log = { push: 0, replace: 0, back: 0, go: [], renders: 0, esc: 0, restored: 0, urls: [] };
+  const hist = { entries: [], idx: -1, state: null,
+    pushState(s, t, url){ log.push++; this.entries.splice(this.idx + 1); this.entries.push(s); this.idx++; this.state = s; if (url) log.urls.push(url); },
+    replaceState(s, t, url){ log.replace++; this.entries[Math.max(this.idx, 0)] = s; if (this.idx < 0) this.idx = 0; this.state = s; if (url) log.urls.push(url); },
+    back(){ log.back++; }, go(d){ log.go.push(d); } };
+  let modal = [];
+  const ctx = { console, URLSearchParams, history: hist, location: { search: '?env=staging', href: 'https://x/?env=staging' }, __log: log,
+    window: { scrollY: 0, scrollTo(){} }, setTimeout: () => 0,
+    document: { getElementById: id => id==='modal-root' ? { children: modal } : null, querySelector: () => null, body: {},
+      dispatchEvent: ev => { if (ev.key==='Escape') { log.esc++; modal = []; } } },
+    KeyboardEvent: class { constructor(type, o){ this.type = type; Object.assign(this, o); } },
+    AUTH: { status: 'ready' }, STATE: { dataLoaded: true, currentProfileId: 'p1' }, VIEW_AS_ID: null,
+    UI: { tab: 'crm', settings: { page: 'setup', open: false }, jobs: { selectedId: null }, reference: { tab: 'equipment', contractorId: null }, crm: { view: 'pipeline', selectedContactId: null }, tasks: { board: 'all' }, mobileNavOpen: false },
+    PEOPLE_UI: { sel: null, tab: 'details' } };
+  vm.createContext(ctx);
+  const names = ['OLD_SETTINGS_PAGES', 'settingsPageKey', 'navSnapOf', 'navKey', 'navMode', 'navUrl', 'NAV_HIST', 'NAV_RESTORERS', 'NAV_LEAVERS', 'NAV_BASE_KINDS', 'navSnap', 'navPid', 'navOurs', 'navSame', 'navKeep', 'navCustom', 'navPush', 'navReplace',
+    'navBackTo', 'navStay', 'navAfterRender', 'navInit', 'navOverlayOpen', 'navOverlaySync', 'navOverlayClose', 'navOnPop', 'navRestoreView'];
+  vm.runInContext(names.map(nm => extractDecl(script, nm)).join('\n') + `
+    NAV_BASE_KINDS.forEach(k => { NAV_RESTORERS[k] = (s, prev) => { __log.restored++; return navRestoreView(s, prev); }; });
+    function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; } __log.renders++; navAfterRender({}); }
+    function goTab(id){ UI.tab = id; UI.jobs.selectedId = null; UI.reference.contractorId = null; PEOPLE_UI.sel = null; render(); }
+    function selectJob(id){ UI.jobs.selectedId = id && UI.jobs.selectedId!==id ? id : null; }
+    function closeConfirmModal(){} function closePopup(){} function navSwipeInAnim(){}
+    this.__nav = { NAV_HIST, NAV_RESTORERS, NAV_LEAVERS, navInit, navPush, navReplace, navBackTo, navOverlaySync, navOnPop, navSnap, navKey };`, ctx);
+  return { nav: ctx.__nav, hist, log, ui: ctx.UI, auth: ctx.AUTH,
+    modal: open => { modal = open ? [{ classList: { contains: () => false } }] : []; },
+    modalOpen: () => modal.length > 0,
+    pop: i => { hist.idx = i; hist.state = hist.entries[i]; ctx.__nav.navOnPop({ state: hist.entries[i] }); } };
 }
 
 (async () => {
