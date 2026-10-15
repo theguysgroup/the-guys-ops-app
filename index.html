@@ -1260,6 +1260,7 @@ a.btn { text-decoration: none; }
 /* The edge swipe back (stage 4): the page follows the finger and slides out. It moves with left, never a transform (a
    transform on #content would carry its fixed panels and the settings menu with it); the column clips it meanwhile. */
 body.nav-swiping .main-col { overflow-x: clip; }
+html.nav-swipe-on, html.nav-swipe-on body { overscroll-behavior-x: none; }   /* the browser's own swipe back stays off: one swipe, one back */
 body.nav-swiping #content, #content.nav-swipe-in { position: relative; }
 #content.nav-swipe-out { position: relative; left: 28%; opacity: .4; transition: left .14s ease-in, opacity .14s ease-in; }
 @media (prefers-reduced-motion: reduce) { #content.nav-swipe-out { left: 0; opacity: 1; transition: none; } }
@@ -5616,7 +5617,7 @@ function landingTab(profile, req){
   return { tab };
 }
 // Where the screen is, from UI and PEOPLE_UI. Each panel only counts on the page that draws it. pt (the person's tab) and
-// cv (the CRM view) are put back on restore but don't make a new entry.
+// cv (the CRM view) are put back on restore but don't make a new entry; wk (the Payroll week picked) only goes in the address.
 function navSnapOf(ui, pp){
   ui = ui || {}; pp = pp || {};
   const tab = ui.tab || null, st = ui.settings || {};
@@ -5632,6 +5633,7 @@ function navSnapOf(ui, pp){
     cv: tab==='crm' && ui.crm && ui.crm.view || null,
     board: tab==='tasks' && ui.tasks && ui.tasks.board || null,
     rtab: tab==='reference' && ui.reference && ui.reference.tab || null,
+    wk: tab==='payroll' && ui.payroll && ui.payroll.mode==='week' && ui.payroll.week || null,
   };
 }
 // The entries' identity: two entries with the same key are the same screen. A kind of its own (not a base kind) adds its payload.
@@ -5650,24 +5652,28 @@ function navMode(cur, next){
   const base = s => [s.tab, s.sp, s.so ? 1 : 0, s.board, s.rtab].join('|');
   return panel(cur) && panel(next) && base(cur)===base(next) ? 'replace' : 'push';
 }
-// The address for an entry: the page (and the Settings page) only, never an id or a name; everything else (env=, open=) is kept.
+// The address for an entry: the page (the Settings page, the Payroll week) only, never an id or a name; everything else
+// (env=, open=) is kept. The week stays so a reload (or the phone reopening the app) lands on it again.
 function navUrl(snap, search){
   const q = new URLSearchParams(search || '');
   ['tab', 'page', 'week'].forEach(k => q.delete(k));
   if (snap && snap.tab) q.set('tab', snap.tab);
   if (snap && snap.tab==='settings' && snap.so && snap.sp) q.set('page', snap.sp);
+  if (snap && snap.tab==='payroll' && snap.wk) q.set('week', snap.wk);
   return '?' + q.toString();
 }
-// The edge swipe: starts within 20 px of the left edge, moves right at least 60 px, mostly sideways, within a second.
-const NAV_SWIPE_RULES = { edge: 20, minDx: 60, ratio: 2, maxMs: 1000 };
+// The edge swipe: starts within 20 px of the left edge, moves right at least 60 px, mostly sideways. No time limit: the
+// page follows the finger, so a slow drag counts (as the iPhone's own swipe does).
+const NAV_SWIPE_RULES = { edge: 20, minDx: 60, ratio: 2 };
 function isBackSwipe(start, end, ctx){
   const r = { ...NAV_SWIPE_RULES, ...(ctx || {}) };
   if (!start || !end || r.blocked || !r.canBack || r.popped) return false;
   const dx = end.x - start.x, dy = end.y - start.y;
-  return start.x <= r.edge && dx >= r.minDx && Math.abs(dx) > r.ratio * Math.abs(dy) && (end.t - start.t) <= r.maxMs;
+  return start.x <= r.edge && dx >= r.minDx && Math.abs(dx) > r.ratio * Math.abs(dy);
 }
 // d: how many entries of ours are below this one. hold/held: a restore's redraws become one. skip: popstates of our own
-// history.go() still to come. syncBack: our own history.back() for a window closed in the app. pops: popstates seen.
+// history.go() still to come. syncBack: our own back whose screen is already right (a window closed in the app, a panel its
+// answer closed, a reload). pops: popstates seen.
 const NAV_HIST = { ready: false, pid: null, d: 0, cur: null, restoring: false, hold: false, held: false, skip: 0, pops: 0, syncBack: false, swipeIn: false, mo: null };
 const NAV_RESTORERS = {};
 const NAV_LEAVERS = {};
@@ -5686,6 +5692,9 @@ function navPush(state){
   const next = { nav: 1, ...navSnap(), ...(state || {}) }, cur = navOurs(history.state) ? history.state : null;
   const mode = cur ? navMode(cur, next) : 'replace';
   if (mode==='skip') return;
+  // A window's answer closed the panel it was opened over (a guard's Save / Don't save): back over both entries to the one
+  // below the panel, which is the screen now. Replacing would leave the panel's entry for the next back to reopen.
+  if (mode==='replace' && cur.ov && cur.ppk && cur.ppk===navKey(next) && (cur.d|0) >= 2) { NAV_HIST.syncBack = true; history.go(-2); return; }
   const url = navUrl(next, location.search);
   if (mode==='replace') {
     NAV_HIST.cur = { ...next, d: cur ? cur.d|0 : NAV_HIST.d, pk: cur ? cur.pk ?? null : null };
@@ -5701,7 +5710,7 @@ function navPush(state){
 function navReplace(state){
   if (!NAV_HIST.ready) return;
   const cur = navOurs(history.state) ? history.state : {};
-  NAV_HIST.cur = { nav: 1, ...navSnap(), ...(state || {}), d: NAV_HIST.d, pk: cur.pk ?? null };
+  NAV_HIST.cur = { nav: 1, ...navSnap(), ...(state || {}), d: NAV_HIST.d, pk: cur.pk ?? null, ...((state || {}).ov && cur.ppk ? { ppk: cur.ppk } : {}) };
   history.replaceState(NAV_HIST.cur, '', navUrl(NAV_HIST.cur, location.search));
 }
 // Closing something the entry below already shows goes back to that entry instead of adding one (its restorer does the
@@ -5727,7 +5736,7 @@ function navAfterRender(profile){
   const s = navSnap(), st = history.state, open = navOverlayOpen();
   if (NAV_HIST.restoring) { if (!navSame(st)) navReplace({ kind: 'tab' }); return; }   // the page guard sent the restore elsewhere
   if (st.tab!==s.tab) navPush({ kind: 'tab' });
-  else if ((!navSame(st) || s.pt!==st.pt || s.cv!==st.cv) && !(st.ov && !open)) navReplace({ ...navKeep(st), ...(st.ov ? { ov: 1 } : {}) });
+  else if ((!navSame(st) || s.pt!==st.pt || s.cv!==st.cv || s.wk!==(st.wk || null)) && !(st.ov && !open)) navReplace({ ...navKeep(st), ...(st.ov ? { ov: 1 } : {}) });
   navOverlaySync();
 }
 function navInit(){
@@ -5735,9 +5744,15 @@ function navInit(){
   NAV_HIST.d = old ? old.d|0 : NAV_HIST.ready ? NAV_HIST.d : 0;   // an entry made outside this layer keeps the depth
   NAV_HIST.ready = true; NAV_HIST.pid = navPid(); NAV_HIST.skip = 0; NAV_HIST.syncBack = false;
   try { history.scrollRestoration = 'manual'; } catch (e) {}
-  // The page landed on; after a reload the entries below still work.
-  NAV_HIST.cur = { nav: 1, kind: 'tab', ...snap, d: NAV_HIST.d, pk: old ? old.pk ?? null : null };
-  history.replaceState(NAV_HIST.cur, '', navUrl(snap, location.search));
+  if (first && old && (old.d|0) > 0 && old.pk && !navCustom(old.kind) && old.pk===navKey(snap) && AUTH.status==='ready' && STATE.dataLoaded) {
+    // A reload on an entry that showed a panel or a window: it is gone, so the screen is the entry below. Go back to that
+    // one (this entry stays, forward opens it again) instead of making this one a copy of it that a back would seem to ignore.
+    NAV_HIST.cur = old; NAV_HIST.syncBack = true; history.back();
+  } else {
+    // The page landed on; after a reload the entries below still work.
+    NAV_HIST.cur = { nav: 1, kind: 'tab', ...snap, d: NAV_HIST.d, pk: old ? old.pk ?? null : null };
+    history.replaceState(NAV_HIST.cur, '', navUrl(snap, location.search));
+  }
   if (first && typeof MutationObserver!=='undefined') {
     NAV_HIST.mo = new MutationObserver(() => navOverlaySync());
     const root = document.getElementById('modal-root');
@@ -5746,29 +5761,43 @@ function navInit(){
   }
   navOverlaySync();   // a window opened before the first render (e.g. ?open=backup)
 }
-// A window, the confirm, the small popup or the phone menu is open (one closing is not).
-function navOverlayOpen(){
+// The small menus on the body: a person's ⋯ menu, the light / dark menu, a category's colour.
+const NAV_MENUS = '.person-menu, .theme-menu, .pal-pop';
+// A window, the confirm, the small popup or a small menu is open (one closing is not); navOverlayOpen: or the phone menu.
+function navLayerOpen(){
   const r = document.getElementById('modal-root');
-  return !!(r && [...r.children].some(el => !el.classList.contains('closing'))) || !!document.getElementById('app-popup') || !!UI.mobileNavOpen;
+  return !!(r && [...r.children].some(el => !el.classList.contains('closing'))) || !!document.getElementById('app-popup') || !!document.querySelector(NAV_MENUS);
 }
+function navOverlayOpen(){ return navLayerOpen() || !!UI.mobileNavOpen; }
+// The person has tapped or typed on the page. Chrome may skip an entry pushed before that (a window a link opened), and
+// back would then leave the app; such a window gets its entry at the first tap or key instead.
+function navActivated(){ try { const u = typeof navigator!=='undefined' && navigator.userActivation; return !u || !!u.hasBeenActive; } catch (e) { return true; } }
 // An open window gets an entry of its own, so back closes it and stays; a window closed in the app takes its entry away.
 function navOverlaySync(){
   if (!NAV_HIST.ready || NAV_HIST.restoring || NAV_HIST.skip || NAV_HIST.syncBack || AUTH.status!=='ready' || !STATE.dataLoaded) return;
   const st = history.state; if (!navOurs(st)) return;
   const open = navOverlayOpen();
   if (open && !st.ov) {
-    NAV_HIST.cur = { ...st, ov: 1, pk: navKey(st), d: (st.d|0) + 1 };
+    if (!navActivated()) return;
+    NAV_HIST.cur = { ...st, ov: 1, pk: navKey(st), ppk: st.pk ?? null, d: (st.d|0) + 1 };   // ppk: the entry below the screen under it
     history.pushState(NAV_HIST.cur, '', location.href);
     NAV_HIST.d = NAV_HIST.cur.d;
   } else if (!open && st.ov) { NAV_HIST.syncBack = true; history.back(); }
 }
-// Back with something open closes one layer: the confirm, the popup, the window (through its own Escape, so its own
-// checks run), the phone menu. True when something was open.
+// Back with something open closes one layer: a small menu, the confirm, the popup, the window, the phone menu. True when
+// something was open. The window closes as a click beside it does, through its own close function (closeLeadModal's
+// follow-up date check, the commission popup's reset); one without that (or the automation editor) through Escape.
 function navOverlayClose(){
+  if (document.querySelector(NAV_MENUS)) { closeThemeMenu(); closeCatalogColor(); document.querySelectorAll('.person-menu').forEach(x => x.remove()); return true; }
   if (document.querySelector('.confirm-back:not(.closing)')) { closeConfirmModal(); return true; }
   if (document.getElementById('app-popup')) { closePopup(); return true; }
-  const r = document.getElementById('modal-root');
-  if (r && [...r.children].some(el => !el.classList.contains('closing'))) { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true; }
+  const r = document.getElementById('modal-root'), top = r && [...r.children].filter(el => !el.classList.contains('closing')).pop();
+  if (top) {
+    const back = top.matches && top.matches('.modal-back') ? top : top.querySelector ? top.querySelector('.modal-back') : null;
+    if (back && back.getAttribute('onclick') && !back.classList.contains('au-edb')) back.click();
+    else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return true;
+  }
   if (UI.mobileNavOpen) { UI.mobileNavOpen = false; render(); return true; }
   return false;
 }
@@ -5780,16 +5809,28 @@ function navOnPop(e){
   const delta = (s.d|0) - NAV_HIST.d, prev = NAV_HIST.cur;
   NAV_HIST.d = s.d|0; NAV_HIST.cur = s; NAV_HIST.pops++;
   // Our own back for a window closed in the app: the screen is already right (it may have moved on under the window).
-  if (NAV_HIST.syncBack) { NAV_HIST.syncBack = false; if (!navSame(s)) navReplace(navKeep(s)); setTimeout(navOverlaySync, 0); return; }
+  // When the window's answer also closed the panel under it, the screen is the entry below: back once more, no copy of it.
+  if (NAV_HIST.syncBack) {
+    NAV_HIST.syncBack = false;
+    if (!navSame(s)) {
+      if (!navCustom(s.kind) && s.pk && (s.d|0) > 0 && s.pk===navKey(navSnap())) { NAV_HIST.syncBack = true; history.back(); return; }
+      navReplace(navKeep(s));
+    }
+    setTimeout(navOverlaySync, 0); return;
+  }
+  // A jump of more than one step (the browser's history list) with only the phone menu open: the menu shuts and the jump
+  // goes ahead (closing it on its own would redraw, push, and cut off the entries the jump goes to).
+  const menuShut = !!UI.mobileNavOpen && delta!==-1 && !navLayerOpen();
+  if (menuShut) UI.mobileNavOpen = false;
   // Back with something open closes it and stays; the page under the window may have changed while it was open.
-  if (navOverlayClose()) {
+  else if (navOverlayClose()) {
     if (!navSame(s)) { if (prev && prev.ov && delta===-1) navReplace(navKeep(s)); else navStay(delta); }
     return;
   }
   // Nothing to do when the screen already shows it (a forward step onto a window's entry), unless a kind of its own is involved.
-  if (!navCustom(s.kind) && !(prev && navCustom(prev.kind)) && navSame(s)) return;
+  if (!navCustom(s.kind) && !(prev && navCustom(prev.kind)) && navSame(s)) { if (menuShut) render(); return; }
   const leave = prev && NAV_LEAVERS[prev.kind], fn = NAV_RESTORERS[s.kind] || navRestoreView;
-  NAV_HIST.restoring = true; NAV_HIST.hold = true; NAV_HIST.held = false;
+  NAV_HIST.restoring = true; NAV_HIST.hold = true; NAV_HIST.held = menuShut;   // the shut menu is redrawn away once
   let ok = true;
   try {
     if (leave) leave(prev, s);
@@ -5802,6 +5843,9 @@ function navOnPop(e){
   if (NAV_HIST.swipeIn) navSwipeInAnim();
 }
 window.addEventListener('popstate', navOnPop);
+// A window opened before the first tap or key gets its entry then.
+function navFirstUse(){ if (!navActivated()) return; document.removeEventListener('pointerup', navFirstUse, true); document.removeEventListener('keydown', navFirstUse, true); setTimeout(navOverlaySync, 0); }
+document.addEventListener('pointerup', navFirstUse, true); document.addEventListener('keydown', navFirstUse, true);
 // The built-in restorer: through the same entry functions a click uses (their guards run; their renders are held and
 // their navPush calls do nothing while restoring). Only a value that differs is changed (several of them toggle).
 function navRestoreView(s){
@@ -5848,16 +5892,19 @@ function navRestoreView(s){
   return true;
 }
 // ── The edge swipe (touch screens). Every listener is passive: it never blocks a scroll or the pipeline's long-press drag.
-// Off in Safari's own tabs on an iPhone/iPad, which already go back on this swipe (it would go back twice).
+// Only in the app installed on the home screen: a browser tab has a swipe back of its own (Safari's, Chrome's and Edge's
+// overscroll arrow, Samsung Internet's) that the same swipe sets off too, so it would go back twice.
 let NAV_SWIPE = null;
 function navSwipeOn(){
   try {
     const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints > 1);
     const standalone = navigator.standalone===true || window.matchMedia('(display-mode: standalone)').matches;
-    return touch && !(ios && !standalone);
+    return touch && standalone;
   } catch (e) { return false; }
 }
+// A job, contractor or person panel is open: it is fixed over the page (the whole screen on a phone), so moving the page
+// under it shows nothing and fading it flickers. The swipe is then a plain back.
+function navSidePanelOpen(){ return !!document.querySelector('#content .job-panel:not([hidden])'); }
 // Not a back swipe: a card being dragged, the pipeline and the boards that move sideways, drag handles, fields, and any
 // box under the finger that can still scroll left. A new sideways board scrolls (overflow-x auto) or carries data-no-back-swipe.
 function navSwipeBlocked(target){
@@ -5877,10 +5924,11 @@ function navSwipeReset(){
   const c = document.getElementById('content'); if (c) c.style.left = '';
 }
 function navSwipeStart(e){
+  if ((NAV_SWIPE || e.touches.length!==1) && !NAV_HIST.swipeIn) navSwipeReset();   // a second finger, or a swipe a redraw cut off
   NAV_SWIPE = null;
   if (e.touches.length!==1 || !NAV_HIST.ready || !navSwipeOn()) return;
   const t = e.touches[0]; if (t.clientX > NAV_SWIPE_RULES.edge) return;
-  NAV_SWIPE = { x: t.clientX, y: t.clientY, t: Date.now(), pops: NAV_HIST.pops, blocked: navSwipeBlocked(e.target), show: NAV_HIST.d > 0 && !navOverlayOpen() };
+  NAV_SWIPE = { x: t.clientX, y: t.clientY, t: Date.now(), pops: NAV_HIST.pops, blocked: navSwipeBlocked(e.target), show: NAV_HIST.d > 0 && !navOverlayOpen() && !navSidePanelOpen() };
 }
 function navSwipeMove(e){
   const s = NAV_SWIPE; if (!s) return;
@@ -5897,12 +5945,13 @@ function navSwipeEnd(e){
   if (ok) navSwipeBack(); else navSwipeReset();
 }
 function navSwipeCancel(){ NAV_SWIPE = null; navSwipeReset(); }   // the system took the touch (Android's own back gesture)
-// The page slides out, then back; with reduced motion (or a window open) it is a plain back.
+// The page slides out, then back; with reduced motion (or a window or a side panel open) it is a plain back. The back comes
+// a moment later and only when nothing went back meanwhile (a swipe back of the browser's own lands after the touch ends).
 function navSwipeBack(){
-  const c = document.getElementById('content');
-  if (!c || navOverlayOpen() || motionReduced() || !document.body.classList.contains('nav-swiping')) { navSwipeReset(); history.back(); return; }
+  const c = document.getElementById('content'), pops = NAV_HIST.pops, back = () => { if (NAV_HIST.pops===pops) history.back(); };
+  if (!c || navOverlayOpen() || motionReduced() || !document.body.classList.contains('nav-swiping')) { navSwipeReset(); setTimeout(back, 120); return; }
   c.style.left = ''; c.classList.add('nav-swipe-out'); NAV_HIST.swipeIn = true;
-  setTimeout(() => history.back(), 120);
+  setTimeout(back, 120);
   setTimeout(() => { NAV_HIST.swipeIn = false; document.body.classList.remove('nav-swiping'); const n = document.getElementById('content'); if (n) n.classList.remove('nav-swipe-out'); }, 500);
 }
 function navSwipeInAnim(){
@@ -5920,6 +5969,7 @@ document.addEventListener('touchstart', navSwipeStart, { passive: true });
 document.addEventListener('touchmove', navSwipeMove, { passive: true });
 document.addEventListener('touchend', navSwipeEnd, { passive: true });
 document.addEventListener('touchcancel', navSwipeCancel, { passive: true });
+try { if (navSwipeOn()) document.documentElement.classList.add('nav-swipe-on'); } catch (e) {}
 // board model: 'ron' is the office's board (the key is only a storage key; the label is the office's name, Settings →
 // Phone); any other string is that person's own board (their name). A task's board follows its first assignee
 // (boardForAssignees). This function is the single source of truth for labels.

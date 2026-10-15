@@ -4290,13 +4290,16 @@ function testPageHistory(sb){
   const pp = { sel: 'e:1', tab: 'pay' };
   const S = (o, p) => sb.navSnapOf(ui(o), p || pp);
   assertEqual([S({}), S({ crm: { view: 'pipeline', selectedContactId: 'c1' } }).lead, S({ tab: 'jobs' }).job, S({ tab: 'reference' }).con, S({ tab: 'reference' }).rtab, S({ tab: 'tasks' }).board],
-    [{ tab: 'crm', sp: null, so: false, conn: null, per: null, pt: null, job: null, con: null, lead: 'c1', cv: 'inbox', board: null, rtab: null }, null, 'j1', 'k1', 'equipment', 'all'],
+    [{ tab: 'crm', sp: null, so: false, conn: null, per: null, pt: null, job: null, con: null, lead: 'c1', cv: 'inbox', board: null, rtab: null, wk: null }, null, 'j1', 'k1', 'equipment', 'all'],
     'navSnapOf: the job only on Jobs, the contractor only on Resources, the lead only in the CRM inbox (not the pipeline)');
   assertEqual([S({ tab: 'settings' }), S({ tab: 'settings', settings: { page: 'connectors', open: true, conn: 'mcp' } }).conn, S({ tab: 'settings', settings: { page: 'access', open: false } }),
     S({ tab: 'settings', settings: {} }).sp],
-    [{ tab: 'settings', sp: 'phone', so: true, conn: null, per: null, pt: null, job: null, con: null, lead: null, cv: null, board: null, rtab: null }, 'mcp',
-      { tab: 'settings', sp: 'people', so: false, conn: null, per: 'e:1', pt: 'pay', job: null, con: null, lead: null, cv: null, board: null, rtab: null }, 'setup'],
+    [{ tab: 'settings', sp: 'phone', so: true, conn: null, per: null, pt: null, job: null, con: null, lead: null, cv: null, board: null, rtab: null, wk: null }, 'mcp',
+      { tab: 'settings', sp: 'people', so: false, conn: null, per: 'e:1', pt: 'pay', job: null, con: null, lead: null, cv: null, board: null, rtab: null, wk: null }, 'setup'],
     'navSnapOf: the connector only on Connectors, the person only on People (old page ids mapped)');
+  assertEqual([S({ tab: 'payroll', payroll: { mode: 'week', week: '2026-10-05' } }).wk, S({ tab: 'payroll', payroll: { mode: 'month', week: '2026-10-05' } }).wk, S({ tab: 'payroll', payroll: { mode: 'week', week: null } }).wk,
+    S({ tab: 'crm', payroll: { mode: 'week', week: '2026-10-05' } }).wk, sb.navKey(S({ tab: 'payroll', payroll: { mode: 'week', week: '2026-10-05' } }))===sb.navKey(S({ tab: 'payroll' }))],
+    ['2026-10-05', null, null, null, true], 'navSnapOf: the Payroll week picked (week view only) goes along for the address; it never makes a new entry');
   const base = S({ tab: 'jobs' }), K = sb.navKey;
   assertEqual([K(base)===K({ ...base, pt: 'x', y: 300, d: 4, pk: 'a', ov: 1, cv: 'pipeline' }), K({ ...base, kind: 'tab' })===K({ ...base, kind: 'panel' }), K({ ...base, kind: 'wf', x: { id: 1 } }), K({ ...base, kind: 'wf' }),
     K(base)===K({ ...base, job: 'j2' })],
@@ -4307,14 +4310,14 @@ function testPageHistory(sb){
     ['skip', 'replace', 'replace', 'push', 'push', 'push', 'replace', 'push'], 'navMode: same screen skips; from inside a window replaces; one panel for another replaces; a new page or panel pushes');
   const U = sb.navUrl;
   assertEqual([U({ tab: 'payroll' }, '?env=staging&tab=crm&week=2026-10-12'), U({ tab: 'settings', sp: 'people', so: true, per: 'e:9' }, ''), U({ tab: 'settings', sp: 'people', so: false }, '?tab=settings&page=people'),
-    U({ tab: 'jobs', job: 'j77', lead: 'c55', per: 'e:1', con: 'k3' }, '?open=backup'), U({ tab: null }, '?env=live&tab=x')],
-    ['?env=staging&tab=payroll', '?tab=settings&page=people', '?tab=settings', '?open=backup&tab=jobs', '?env=live'], 'navUrl: only the page (and the Settings page) in the address, never an id; env= and open= kept');
+    U({ tab: 'jobs', job: 'j77', lead: 'c55', per: 'e:1', con: 'k3' }, '?open=backup'), U({ tab: null }, '?env=live&tab=x'), U({ tab: 'payroll', wk: '2026-10-05' }, '?tab=payroll&week=2026-10-05'), U({ tab: 'crm', wk: '2026-10-05' }, '?tab=payroll&week=2026-10-05')],
+    ['?env=staging&tab=payroll', '?tab=settings&page=people', '?tab=settings', '?open=backup&tab=jobs', '?env=live', '?tab=payroll&week=2026-10-05', '?tab=crm'], 'navUrl: only the page (the Settings page, the Payroll week) in the address, never an id; env= and open= kept');
   const B = (a, b, c) => sb.isBackSwipe(a, b, c), go = { canBack: true };
   assertEqual([B({ x: 10, y: 300, t: 0 }, { x: 90, y: 310, t: 300 }, go), B({ x: 20, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, go), B({ x: 21, y: 0, t: 0 }, { x: 95, y: 0, t: 10 }, go),
     B({ x: 0, y: 0, t: 0 }, { x: 60, y: 0, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 59, y: 0, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 80, y: 40, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 81, y: 40, t: 10 }, go),
     B({ x: 15, y: 0, t: 0 }, { x: -80, y: 0, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, { canBack: true, blocked: true }), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, { canBack: false }),
-    B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, { canBack: true, popped: true }), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 1001 }, go), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 1000 }, go), B(null, { x: 90, y: 0, t: 1 }, go), B({ x: 0, y: 0, t: 0 }, null, go)],
-    [true, true, false, true, false, false, true, false, false, false, false, false, true, false, false], 'isBackSwipe: from the 20 px edge, 60 px right, mostly sideways, within a second, only when back goes somewhere and nothing else took it');
+    B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, { canBack: true, popped: true }), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 5000 }, go), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 1000 }, go), B(null, { x: 90, y: 0, t: 1 }, go), B({ x: 0, y: 0, t: 0 }, null, go)],
+    [true, true, false, true, false, false, true, false, false, false, false, true, true, false, false], 'isBackSwipe: from the 20 px edge, 60 px right, mostly sideways, slow or fast, only when back goes somewhere and nothing else took it');
   // no loops: restoring never adds an entry; render draws once per restore
   const T = n => extractDecl(script, n);
   assertEqual([['pushState', 'navPush('].filter(w => T('navOnPop').includes(w)), ['pushState', 'replaceState', 'navPush(', 'navReplace('].filter(w => T('navRestoreView').includes(w)),
@@ -4397,6 +4400,42 @@ function testPageHistory(sb){
   H.ui.mobileNavOpen = true; H.log.renders = 0; H.hist.idx = 2; H.hist.state = H.hist.entries[2];
   n.navOnPop({ state: { ...H.hist.entries[2] } });
   assertEqual([H.ui.mobileNavOpen, H.log.renders], [false, 1], 'back with the phone menu open: the menu closes');
+  // a window's answer closes the panel it was opened over (a guard's Save / Don't save): back over both entries
+  H.modal(true); n.navOverlaySync();
+  const ovSt = H.hist.state;
+  assertEqual([ovSt.ov, ovSt.d, ovSt.pk, ovSt.ppk], [1, 3, n.navKey(H.hist.entries[2]), H.hist.entries[2].pk], 'a window over a panel keeps the key of the entry below the panel');
+  H.modal(false); H.log.go = []; const reps = H.log.replace;
+  H.ui.jobs.selectedId = null; n.navPush({ kind: 'panel' });
+  assertEqual([H.log.go, n.NAV_HIST.syncBack, H.log.replace - reps], [[-2], true, 0], 'navPush from a window whose answer closed the panel under it: back two entries, nothing replaced');
+  H.log.renders = 0; H.pop(1);
+  assertEqual([n.NAV_HIST.syncBack, n.NAV_HIST.d, H.log.renders, H.ui.tab, H.ui.jobs.selectedId], [false, 1, 0, 'jobs', null], 'its popstate lands on the page below the panel and changes nothing');
+  // a panel closed by the app while a window is open: the entry it leaves is not kept as a copy of the one below
+  H.ui.jobs.selectedId = 'j3'; n.navPush({ kind: 'panel' }); H.modal(true); n.navOverlaySync();
+  H.ui.jobs.selectedId = null; H.modal(false); const backs2 = H.log.back; n.navOverlaySync();
+  H.pop(2);
+  assertEqual([H.log.back - backs2, n.NAV_HIST.syncBack], [2, true], 'the window closed with its panel: back once more, past the panel\'s entry');
+  H.pop(1);
+  assertEqual([n.NAV_HIST.syncBack, n.NAV_HIST.d, H.hist.entries[2].job], [false, 1, 'j3'], 'and the page below stays as it is (forward still opens the panel)');
+  // a jump of two entries with the phone menu open: the menu shuts and the jump goes ahead, nothing pushed
+  H.ui.mobileNavOpen = true; n.navOverlaySync(); const pushes2 = H.log.push; H.log.renders = 0; H.log.go = [];
+  H.pop(0);
+  assertEqual([H.ui.mobileNavOpen, H.ui.tab, H.log.push - pushes2, H.log.go, n.NAV_HIST.skip, n.NAV_HIST.d, H.log.renders], [false, 'crm', 0, [], 0, 0, 1], 'a jump back with the phone menu open: the menu shuts, the page jumped to comes back, one render, no push');
+  // a reload on an entry that showed a panel: back to the entry below instead of a copy of it
+  const H2 = navHistSandbox(script);
+  H2.ui.tab = 'jobs';
+  const below = { nav: 1, kind: 'tab', ...H2.nav.navSnap(), d: 0, pk: null };
+  H2.hist.entries = [below, { nav: 1, kind: 'panel', ...H2.nav.navSnap(), job: 'j9', d: 1, pk: H2.nav.navKey(below) }]; H2.hist.idx = 1; H2.hist.state = H2.hist.entries[1];
+  H2.nav.navInit();
+  assertEqual([H2.log.back, H2.log.replace, H2.nav.NAV_HIST.syncBack, H2.hist.entries[1].job], [1, 0, true, 'j9'], 'navInit after a reload on a panel\'s entry: back to the page below, the entry kept for forward');
+  H2.pop(0);
+  assertEqual([H2.nav.NAV_HIST.syncBack, H2.nav.NAV_HIST.d, H2.log.renders], [false, 0, 0], 'its popstate changes nothing');
+  // windows close through their own close function; menus count as layers; a window before the first tap has no entry yet
+  const oc = T('navOverlayClose'), os = T('navOverlaySync');
+  assertEqual([oc.includes('back.click()'), oc.includes("!back.classList.contains('au-edb')"), oc.indexOf('NAV_MENUS') < oc.indexOf('.confirm-back'), T('navLayerOpen').includes('NAV_MENUS'),
+    script.includes("const NAV_MENUS = '.person-menu, .theme-menu, .pal-pop';"), os.indexOf('if (!navActivated()) return;') > 0 && os.indexOf('if (!navActivated()) return;') < os.indexOf('pushState'), T('navSwipeOn').includes('return touch && standalone;'),
+    T('navSwipeBack').includes('if (NAV_HIST.pops===pops) history.back();'), T('navSwipeBack').includes('history.back(); return;'), /html\.nav-swipe-on, html\.nav-swipe-on body \{ overscroll-behavior-x: none; \}/.test(fs.readFileSync(INDEX_HTML_PATH, 'utf8')),
+    T('navSwipeStart').includes('navSidePanelOpen()'), T('navSwipeStart').indexOf('navSwipeReset()') < T('navSwipeStart').indexOf('NAV_SWIPE = null;')],
+    [true, true, true, true, true, true, true, true, false, true, true, true], 'review fixes: a window closes as a click beside it does; small menus close first; no entry before the first tap; the swipe only in the installed app, once, never moving the page under a side panel');
 }
 // A vm context with the history layer and fakes of the browser and of the entry functions it calls.
 function navHistSandbox(script){
@@ -4416,7 +4455,7 @@ function navHistSandbox(script){
     PEOPLE_UI: { sel: null, tab: 'details' } };
   vm.createContext(ctx);
   const names = ['OLD_SETTINGS_PAGES', 'settingsPageKey', 'navSnapOf', 'navKey', 'navMode', 'navUrl', 'NAV_HIST', 'NAV_RESTORERS', 'NAV_LEAVERS', 'NAV_BASE_KINDS', 'navSnap', 'navPid', 'navOurs', 'navSame', 'navKeep', 'navCustom', 'navPush', 'navReplace',
-    'navBackTo', 'navStay', 'navAfterRender', 'navInit', 'navOverlayOpen', 'navOverlaySync', 'navOverlayClose', 'navOnPop', 'navRestoreView'];
+    'navBackTo', 'navStay', 'navAfterRender', 'navInit', 'NAV_MENUS', 'navLayerOpen', 'navOverlayOpen', 'navActivated', 'navOverlaySync', 'navOverlayClose', 'navOnPop', 'navRestoreView'];
   vm.runInContext(names.map(nm => extractDecl(script, nm)).join('\n') + `
     NAV_BASE_KINDS.forEach(k => { NAV_RESTORERS[k] = (s, prev) => { __log.restored++; return navRestoreView(s, prev); }; });
     function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; } __log.renders++; navAfterRender({}); }
