@@ -2,7 +2,7 @@
 # Runs the ai-gateway function tests locally: the function with its three imports stubbed (the Anthropic SDK by a stub
 # with the SDK's error classes; tests hand in a fake client through io.anthropicClient) and a pretend Deno.env, the
 # app's own office-hours, role-label, product-name, task-board, stage and vacation code extracted from index.html (APP, for
-# the parity tests), then tests.ts.
+# the parity tests), the provider fixtures (CF_FIXTURES, fixtures/), then tests.ts.
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/../../.." && pwd)"
@@ -65,6 +65,11 @@ const m = fs.readFileSync(process.argv[2], 'utf8').match(/<script>([\s\S]*?)<\/s
 if (!m) { console.error('run_tests.sh: no <script> in index.html'); process.exit(1); }
 console.log(`const APP: any = (() => { const STATE: any = { data: { settings: { catalog: {} }, jobs: [], employees: [] }, profiles: [] };\n${NAMES.map(n => extractDecl(m[1], n)).join('\n')}\nreturn { STATE, ${NAMES.join(', ')} }; })();`);
 JS
+  # The provider fixtures as CF_FIXTURES (tests_providers.ts): fixtures/*.txt streams (hand-built from the documented
+  # shapes, cf-rec-* recorded live by G7's --record) and *.json non-streamed answers, named without the extension.
+  node -e 'const fs = require("fs"), d = process.argv[1];
+const files = fs.existsSync(d) ? fs.readdirSync(d).filter((f) => /\.(txt|json)$/.test(f)).sort() : [];
+console.log("const CF_FIXTURES: { name: string; body: string }[] = " + JSON.stringify(files.map((f) => ({ name: f.replace(/\.[a-z]+$/, ""), body: fs.readFileSync(d + "/" + f, "utf8") }))) + ";");' "$DIR/fixtures"
   cat "$DIR/tests.ts"
   # later groups' tests (they push suites that tests.ts runs before its summary)
   for f in "$DIR"/tests_*.ts; do [ -f "$f" ] && cat "$f"; done

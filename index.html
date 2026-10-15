@@ -24273,7 +24273,7 @@ const COBRA_MODELS = {
   'claude-sonnet-5-5': { label: 'Claude Sonnet 5.5', in: 2, out: 10 },
 };
 // What the settings row holds when a value is missing (the gateway's AI_DEFAULTS).
-const COBRA_DEFAULTS = { monthly_cap_usd: 20, daily_user_limit: 50, model_per_task: { assistant: 'claude-haiku-5-5', heavy: 'claude-sonnet-5-5' } };
+const COBRA_DEFAULTS = { monthly_cap_usd: 0, daily_user_limit: 50, model_per_task: { assistant: 'claude-haiku-5-5', heavy: 'claude-sonnet-5-5' } };
 const COBRA_SETTING_COLS = 'enabled, kill_switch, roles_enabled, model_per_task, prices, monthly_cap_usd, daily_user_limit, max_tokens, provider, assistant_name';
 const COBRA_CHANGE_STEPS = { confirm: 'confirm_change', cancel: 'cancel_change', undo: 'undo_change' };
 // Plain English for every code the gateway sends (its ERROR_CODES; a test keeps them in step) and the app's own.
@@ -24283,6 +24283,8 @@ const COBRA_ERRORS = {
   kill_switch: 'is paused right now. Try again later.',
   cap_reached: "This month's AI budget is used up. It starts again on the 1st, or an owner can raise the cap in Settings.",
   daily_limit: "You've reached today's limit of questions. It resets tomorrow.",
+  free_quota: "Today's free AI quota is used up. It's back tomorrow, or an owner can switch on a paid AI in Settings → AI.",
+  free_share: "This business's share of today's free AI is used up. It's back tomorrow, or an owner can switch on a paid AI in Settings → AI.",
   unauthorized: 'Please sign in again.',
   bad_request: "Something in the request wasn't right.",
   unknown_mode: "That kind of chat isn't available.",
@@ -24294,6 +24296,7 @@ const COBRA_ERRORS = {
   busy: 'This chat is still answering. Wait for it to finish.',
   provider_auth: "The AI service didn't accept the server's key. An owner needs to check it.",
   model_not_found: "The AI model chosen in Settings isn't available.",
+  model_needs_paid: 'The free AI model chosen in Settings needs a paid Cloudflare plan. An owner can pick another model.',
   provider_bad_request: "The AI service couldn't read this request.",
   provider_busy: 'The AI service is busy. Try again in a minute.',
   provider_unreachable: "The AI service couldn't be reached. Try again.",

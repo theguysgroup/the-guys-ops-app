@@ -609,9 +609,9 @@ SUITES.push(async () => {
     eq(db.T.tasks.length, 1, "a double click adds one task");
     db = world2();
     ({ row } = await proposeOk(db, "jwt-va", "add_lead_note", { lead: "Demo Lead", text: "Old" }));
-    NOW = T0 + 25 * 3600e3;
+    NOW = T0 + 8 * 24 * 3600e3;
     c = await confirm(db, row.id, "jwt-va");
-    eq([c.status, c.body.code, lastChange(db).status], [409, "expired", "cancelled"], "older than a day → expired, cancelled");
+    eq([c.status, c.body.code, lastChange(db).status], [409, "expired", "cancelled"], "older than 7 days → expired, cancelled");
     for (const [over, code] of [[{ kill_switch: true }, "off"], [{ roles_enabled: { va: false } }, "role_off"]] as [any, string][]) {
       db = world2();
       ({ row } = await proposeOk(db, "jwt-va", "add_lead_note", { lead: "Demo Lead", text: "Off" }));
@@ -697,7 +697,7 @@ SUITES.push(async () => {
     ok(toolResults.every((m: any) => !JSON.stringify(m.content).includes("confirmed and saved")), "never inside a tool_result");
     const hist = buildHistory(rows, { systemMessages: true });
     eq(hist.slice(-2).map((m: any) => m.role), ["system", "assistant"], "replayed as a system message right before the reply");
-    eq(changesContextLines([{ id: "c1", kind: "lead_note", status: "proposed", created_at: new Date(T0 - 25 * 3600e3).toISOString() }, { id: "c2", kind: "task_add", status: "failed", created_at: new Date(T0).toISOString() }], T0),
+    eq(changesContextLines([{ id: "c1", kind: "lead_note", status: "proposed", created_at: new Date(T0 - 8 * 24 * 3600e3).toISOString() }, { id: "c2", kind: "task_add", status: "failed", created_at: new Date(T0).toISOString() }], T0),
       ["- Changes suggested in this chat (newest first):", "  - c1 (Lead note): expired, never confirmed", "  - c2 (New task): not made (it could not be saved)"], "status words, expiry");
   }
 

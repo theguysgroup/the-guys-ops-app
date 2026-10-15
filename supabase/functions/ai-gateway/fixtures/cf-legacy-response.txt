@@ -1,0 +1,8 @@
+data: {"response":"Let me check"}
+
+data: {"response":"","tool_calls":[{"name":"whoami","arguments":{}}]}
+
+data: {"response":"","usage":{"prompt_tokens":80,"completion_tokens":6,"total_tokens":86}}
+
+data: [DONE]
+

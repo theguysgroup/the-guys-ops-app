@@ -479,3 +479,172 @@ select 'G2-changes ok';
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════════
 -- END G2-changes
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+-- Group G4-providers (stage 6 v2, Ofek 15 Oct): free AI by default, paid only by choice.
+-- Run AFTER G1-gateway and G2-changes and BEFORE deploying the v2 ai-gateway, STAGING first. Safe to run again.
+--   ai_settings       provider: 'auto' (new default: own key → paid → free → test), 'anthropic' (the owner's paid switch),
+--                     'mock' (test mode); monthly_cap_usd default 0 (paid off until an owner sets a cap); free_quota (the
+--                     platform's free-AI numbers, NOT writable by owners); allow_own_keys (owner switch); model_per_task
+--                     gains the free (Cloudflare) and OpenAI models
+--   ai_conversations  provider (the provider of the chat's last turn)
+--   ai_usage          key_source (own_user | own_business | platform_paid | free | mock), neurons (free-quota estimate),
+--                     error_code; provider adds 'cloudflare' and 'openai'; status adds 'free_quota'
+--   helpers (service role only): ai_turn_begin, ai_month_cap_spend, ai_free_state
+-- The v1 helpers ai_usage_begin and ai_month_spend stay (unused by v2) so a rollback to v1 needs no SQL.
+-- No secret is written here. CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_AI_TOKEN are Edge Function secrets Ofek adds.
+-- Check before (read-only):
+--   select business_id, provider, monthly_cap_usd, updated_by is null as untouched from public.ai_settings;
+--   select conname from pg_constraint where conrelid in ('public.ai_settings'::regclass, 'public.ai_usage'::regclass)
+--      and contype = 'c' order by 1;   -- includes ai_settings_provider_check, ai_usage_provider_check, ai_usage_status_check
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+begin;
+
+-- 1. ai_settings
+alter table public.ai_settings drop constraint if exists ai_settings_provider_check;
+alter table public.ai_settings add constraint ai_settings_provider_check check (provider in ('auto', 'anthropic', 'mock'));
+alter table public.ai_settings alter column provider set default 'auto';
+alter table public.ai_settings alter column monthly_cap_usd set default 0;
+alter table public.ai_settings alter column model_per_task set default
+  '{"assistant":"claude-haiku-5-5","heavy":"claude-sonnet-5-5","cloudflare:assistant":"@cf/zai-org/glm-4.7-flash","cloudflare:heavy":"@cf/zai-org/glm-4.7-flash","openai:assistant":"gpt-4.1-mini","openai:heavy":"gpt-4.1-mini"}'::jsonb;
+alter table public.ai_settings add column if not exists free_quota jsonb not null default '{}'::jsonb;
+alter table public.ai_settings drop constraint if exists ai_settings_free_quota_check;
+alter table public.ai_settings add constraint ai_settings_free_quota_check check (jsonb_typeof(free_quota) = 'object');
+alter table public.ai_settings add column if not exists allow_own_keys boolean not null default true;
+-- A row nobody has saved from the app (updated_by is null) moves to the new defaults once. An owner's own choices stay.
+update public.ai_settings set provider = 'auto' where provider = 'mock' and updated_by is null;
+update public.ai_settings set monthly_cap_usd = 0 where monthly_cap_usd = 20 and provider <> 'anthropic' and updated_by is null;
+update public.ai_settings
+   set model_per_task = '{"cloudflare:assistant":"@cf/zai-org/glm-4.7-flash","cloudflare:heavy":"@cf/zai-org/glm-4.7-flash","openai:assistant":"gpt-4.1-mini","openai:heavy":"gpt-4.1-mini"}'::jsonb || model_per_task
+ where not (model_per_task ? 'cloudflare:assistant');
+grant update (allow_own_keys) on public.ai_settings to authenticated;   -- owners only, through the existing "owners update" policy
+-- [SECURITY] free_quota is deliberately NOT granted to authenticated: the shared Cloudflare quota and each business's share
+-- [SECURITY] are platform numbers (set here by the platform owner), never by a business owner.
+
+-- 2. ai_conversations: the provider of the chat's last turn (null = a v1 chat)
+alter table public.ai_conversations add column if not exists provider text;
+alter table public.ai_conversations drop constraint if exists ai_conversations_provider_check;
+alter table public.ai_conversations add constraint ai_conversations_provider_check
+  check (provider is null or provider in ('anthropic', 'openai', 'cloudflare', 'mock'));
+
+-- 3. ai_usage: who paid, the free quota's neurons, why a turn stopped. Still no message text.
+alter table public.ai_usage drop constraint if exists ai_usage_provider_check;
+alter table public.ai_usage add constraint ai_usage_provider_check check (provider in ('anthropic', 'openai', 'cloudflare', 'mock'));
+alter table public.ai_usage drop constraint if exists ai_usage_status_check;
+alter table public.ai_usage add constraint ai_usage_status_check
+  check (status in ('running', 'ok', 'refusal', 'max_tokens', 'step_limit', 'cap', 'error', 'aborted', 'free_quota'));
+alter table public.ai_usage add column if not exists key_source text;
+update public.ai_usage set key_source = case when provider = 'mock' then 'mock' else 'platform_paid' end where key_source is null;
+alter table public.ai_usage alter column key_source set default 'platform_paid';   -- conservative: an unlabelled row counts toward the cap
+alter table public.ai_usage alter column key_source set not null;
+alter table public.ai_usage drop constraint if exists ai_usage_key_source_check;
+alter table public.ai_usage add constraint ai_usage_key_source_check
+  check (key_source in ('own_user', 'own_business', 'platform_paid', 'free', 'mock'));
+alter table public.ai_usage add column if not exists neurons numeric(12,2) not null default 0;
+alter table public.ai_usage drop constraint if exists ai_usage_neurons_check;
+alter table public.ai_usage add constraint ai_usage_neurons_check check (neurons >= 0);
+alter table public.ai_usage add column if not exists error_code text;
+alter table public.ai_usage drop constraint if exists ai_usage_error_code_check;
+alter table public.ai_usage add constraint ai_usage_error_code_check check (error_code is null or error_code ~ '^[a-z0-9_]{1,40}$');
+create index if not exists ai_usage_free_at_idx on public.ai_usage (at) where key_source = 'free';
+
+-- 4. Gateway helpers (service role only).
+-- Starts a turn (v2 of ai_usage_begin, the same per-person lock): the daily limit counts every turn except the person's
+-- own-key turns (they cost the business nothing), and an own-key turn is never refused by it (null = limit reached).
+create or replace function public.ai_turn_begin(p_business text, p_user uuid, p_conversation uuid, p_task text, p_mode text,
+  p_model text, p_provider text, p_key_source text, p_day_start timestamptz, p_limit integer) returns uuid
+language plpgsql volatile security definer set search_path = ''
+as $$
+declare n integer; new_id uuid;
+begin
+  perform pg_advisory_xact_lock(hashtextextended('ai_usage_begin:' || p_user::text, 0));
+  if p_key_source is distinct from 'own_user' then
+    select count(*) into n from public.ai_usage u
+     where u.business_id = p_business and u.user_id = p_user and u.at >= p_day_start and u.key_source <> 'own_user';
+    if n >= greatest(coalesce(p_limit, 0), 0) then return null; end if;
+  end if;
+  insert into public.ai_usage (business_id, user_id, conversation_id, task, mode, model, provider, key_source, status)
+  values (p_business, p_user, p_conversation, p_task, p_mode, p_model, p_provider, p_key_source, 'running')
+  returning id into new_id;
+  return new_id;
+end $$;
+
+-- What the monthly cap counts: the platform's paid key and the business's own key. Never a person's own key, the free AI
+-- or the test provider.
+create or replace function public.ai_month_cap_spend(p_business text, p_from timestamptz) returns numeric
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(sum(u.cost_usd), 0) from public.ai_usage u
+   where u.business_id = p_business and u.at >= p_from and u.key_source in ('platform_paid', 'own_business')
+$$;
+
+-- The free AI quota since p_day_start (00:00 UTC, when Cloudflare resets it). platform_neurons = every business in this
+-- database (the quota belongs to the whole Cloudflare account); business_neurons = this business (its share);
+-- exhausted = Cloudflare answered "used up" (3036) since then (status 'free_quota' with error_code 'free_quota'; a turn the
+-- gateway stopped on its own estimate, or on this business's share, has another error_code and never stops other businesses).
+-- [SECURITY] reads every business's free-AI totals (numbers only); service role only.
+create or replace function public.ai_free_state(p_business text, p_day_start timestamptz) returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select jsonb_build_object(
+    'platform_neurons', coalesce(sum(u.neurons), 0),
+    'business_neurons', coalesce(sum(u.neurons) filter (where u.business_id = p_business), 0),
+    'exhausted', coalesce(bool_or(u.status = 'free_quota' and u.error_code = 'free_quota'), false))
+  from public.ai_usage u
+  where u.key_source = 'free' and u.at >= p_day_start
+$$;
+
+revoke all on function public.ai_turn_begin(text, uuid, uuid, text, text, text, text, text, timestamptz, integer) from public, anon, authenticated;   -- [SECURITY]
+revoke all on function public.ai_month_cap_spend(text, timestamptz) from public, anon, authenticated;   -- [SECURITY]
+revoke all on function public.ai_free_state(text, timestamptz) from public, anon, authenticated;        -- [SECURITY]
+grant execute on function public.ai_turn_begin(text, uuid, uuid, text, text, text, text, text, timestamptz, integer) to service_role;
+grant execute on function public.ai_month_cap_spend(text, timestamptz) to service_role;
+grant execute on function public.ai_free_state(text, timestamptz) to service_role;
+
+commit;
+select 'G4-providers ok';
+-- Check after (read-only):
+--   select business_id, provider, monthly_cap_usd, allow_own_keys, free_quota, model_per_task ? 'cloudflare:assistant'
+--     from public.ai_settings;                                       -- default | auto | 0.00 | t | {} | t  (a row nobody saved)
+--   select key_source, count(*) from public.ai_usage group by 1;     -- only mock / platform_paid for v1 rows
+--   select column_name from information_schema.column_privileges where table_name = 'ai_settings' and grantee = 'authenticated'
+--     and privilege_type = 'UPDATE' order by 1;                      -- 11 columns incl. allow_own_keys; NOT free_quota, NOT alert_80_sent_month
+--   select has_function_privilege('authenticated', 'public.ai_free_state(text, timestamptz)', 'execute');                  -- false
+--   select has_function_privilege('authenticated', 'public.ai_month_cap_spend(text, timestamptz)', 'execute');             -- false
+--   select public.ai_free_state('default', date_trunc('day', now() at time zone 'utc') at time zone 'utc');               -- {"exhausted": false, ...}
+--   Platform values (the platform owner only; owners can't): update public.ai_settings set free_quota = free_quota || '{"share_pct": 50}';
+--
+-- ── ROLLBACK (G4-providers; run by hand only) ─────────────────────────────────────────────────────────────
+-- Free / OpenAI usage rows stay (the old checks come back NOT VALID, so old rows are kept and new ones are checked).
+-- begin;
+-- drop function if exists public.ai_free_state(text, timestamptz);
+-- drop function if exists public.ai_month_cap_spend(text, timestamptz);
+-- drop function if exists public.ai_turn_begin(text, uuid, uuid, text, text, text, text, text, timestamptz, integer);
+-- drop index if exists public.ai_usage_free_at_idx;
+-- alter table public.ai_usage drop constraint if exists ai_usage_key_source_check;
+-- alter table public.ai_usage drop constraint if exists ai_usage_neurons_check;
+-- alter table public.ai_usage drop constraint if exists ai_usage_error_code_check;
+-- alter table public.ai_usage drop column if exists key_source, drop column if exists neurons, drop column if exists error_code;
+-- alter table public.ai_usage drop constraint if exists ai_usage_provider_check;
+-- alter table public.ai_usage add constraint ai_usage_provider_check check (provider in ('anthropic', 'mock')) not valid;
+-- alter table public.ai_usage drop constraint if exists ai_usage_status_check;
+-- alter table public.ai_usage add constraint ai_usage_status_check
+--   check (status in ('running', 'ok', 'refusal', 'max_tokens', 'step_limit', 'cap', 'error', 'aborted')) not valid;
+-- alter table public.ai_conversations drop constraint if exists ai_conversations_provider_check;
+-- alter table public.ai_conversations drop column if exists provider;
+-- alter table public.ai_settings drop column if exists allow_own_keys;   -- its column grant goes with it
+-- alter table public.ai_settings drop constraint if exists ai_settings_free_quota_check;
+-- alter table public.ai_settings drop column if exists free_quota;
+-- update public.ai_settings set provider = 'mock' where provider = 'auto';
+-- alter table public.ai_settings drop constraint if exists ai_settings_provider_check;
+-- alter table public.ai_settings add constraint ai_settings_provider_check check (provider in ('anthropic', 'mock'));
+-- alter table public.ai_settings alter column provider set default 'mock';
+-- alter table public.ai_settings alter column monthly_cap_usd set default 20;
+-- alter table public.ai_settings alter column model_per_task set default '{"assistant":"claude-haiku-5-5","heavy":"claude-sonnet-5-5"}'::jsonb;
+-- commit;
+-- Then redeploy the v1 ai-gateway (2acbf73). v1 blocks every turn while monthly_cap_usd = 0: set a cap if v1 runs again.
+-- Chats whose model is a free/OpenAI model answer "model not priced" in v1 (start a new chat).
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+-- END G4-providers
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════

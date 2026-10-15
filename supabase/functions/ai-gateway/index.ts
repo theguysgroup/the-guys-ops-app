@@ -21,22 +21,43 @@
 //     can_confirm, can_undo, conversation_id (only to the person who asked; owners never get links into other chats) }
 // After a confirm or an undo the app refreshes itself through its realtime subscriptions (contacts, tasks, settings).
 //
+// Who answers (stage 6 v2, Ofek 15 Oct; resolveSource, per turn): forced test mode (ai_settings.provider 'mock') → the
+// person's own key (G5) → the business's paid AI (provider 'anthropic' = the owner's paid switch, a monthly cap above 0
+// and a key: the business's own (G5), else ANTHROPIC_API_KEY) → the free AI (Cloudflare Workers AI, while today's quota
+// lasts) → the test provider, only while nothing real is set up. Free set up but used up = refused, never the test
+// provider. Each ai_usage row says who paid (key_source: own_user | own_business | platform_paid | free | mock).
+// manage status adds: source {provider, key_source, model, label} | null, blocked ('free_quota'|'free_share'|
+// 'cap_reached'|null) + blocked_text, test_mode ('forced'|'not_configured'|null), free {configured, left_pct, resets_at,
+// exhausted; owners also daily_neurons, used_neurons, business_neurons, share_pct}, owners paid {switched_on,
+// platform_key_ready, cap_usd, available}; month.spend_usd is the paid spend, month.blocked only at the paid cap with
+// nothing left to answer.
+//
 // Guard rails (all checked here, on the server):
 //   • Who: everyone signed in with a profile, unless an owner switched the assistant off (ai_settings.enabled), pulled
 //     the kill switch, or switched their role off (roles_enabled). 'sb_…' and 'ops_mcp_…' keys are never accepted.
-//   • Money: a monthly cap per business (ai_settings.monthly_cap_usd). At 80% the owners get ONE phone notification a
-//     month (ai_claim_alert_80 marks the month; existing push devices, copies of push's sendTo/vapidKeys); at 100% new
-//     turns are refused until next month (business time zone) or until an owner raises the cap. Each model call's
-//     tokens and cost are written to the turn's ai_usage row as soon as the call ends (an aborted or failed call with
-//     what the stream had reported), and before every further call inside a turn the month's spend is read again, so
-//     turns running at the same time see each other's spend.
+//   • Money: a monthly cap per business (ai_settings.monthly_cap_usd, default 0 = paid off) on PAID spend only
+//     (platform_paid + own_business rows; ai_month_cap_spend). At 80% the owners get ONE phone notification a month
+//     (ai_claim_alert_80 marks the month; existing push devices, copies of push's sendTo/vapidKeys); at 100% the paid AI
+//     drops out until next month (business time zone) or until an owner raises the cap, and the free AI answers with
+//     the notice cap_fallback (if its quota is used up too: cap_reached). Each model call's tokens and cost are written
+//     to the turn's ai_usage row as soon as the call ends (an aborted or failed call with what the stream had reported),
+//     and before every further paid call inside a turn the month's spend is read again, so turns running at the same
+//     time see each other's spend.
+//   • The free quota: daily_neurons (10,000) for the whole Cloudflare account, every business together, counted in UTC
+//     days (Cloudflare resets it at 00:00 UTC; ai_free_state), estimated per call from the usage tokens × NEURON_PRICES
+//     (ai_settings.free_quota.neurons overrides), with an optional per-business share (free_quota.share_pct, set by the
+//     platform only). Before every free call the quota left must cover max(reserve_neurons, the call's estimate).
+//     Cloudflare's 429 / 3036 is the backstop (it marks the quota used up for the rest of the UTC day).
 //   • The context the app sends (where the person is) is at most MAX_CONTEXT_CHARS as JSON.
-//   • A daily limit of turns per person (daily_user_limit, business day), counted atomically (ai_usage_begin).
+//   • A daily limit of turns per person (daily_user_limit, business day), counted atomically (ai_turn_begin); a
+//     person's own-key turns don't count.
 //   • max_tokens from the settings; at most MAX_TOOL_STEPS (5) tool rounds per turn, so at most 6 model calls.
 //   • Change tools only PROPOSE (ai_changes, status 'proposed'); nothing changes until the person presses Confirm.
 //     Confirm and undo are applied WITH THE PERSON'S OWN TOKEN (io.userClient), so the database's access rules apply.
 //   • No message text in logs or in ai_usage: usage rows hold tokens and cost only; errors log a clipped reason.
-//   • The model is pinned per conversation (settings changes apply to new conversations); history is append-only and
+//   • The model is pinned per conversation while the same provider answers (settings changes apply to new
+//     conversations); when another provider takes over (the free quota ran out, a paid AI was switched on) the chat
+//     moves to that provider's model and keeps going (thinking blocks of another model are left out); history is append-only and
 //     replayed unchanged from the exact JSON text sent (thinking blocks included), so prompt caching and thinking-block
 //     binding stay valid. A turn that ends in a refusal is taken out of the replay (its rows stay visible), so the next
 //     question isn't refused for the old text. A conversation whose tools or system prompt changed since it started
@@ -49,7 +70,8 @@
 // headers). If the response Content-Type is application/json it is a pre-stream refusal {ok:false, code, reason} with
 // HTTP 400/401/403/404/409/429. Otherwise frames 'event: <type>\ndata: <one-line JSON>\n\n'; lines starting ':' are
 // heartbeats (ignore). Events, in order of appearance:
-//   start    {conversation_id, user_message_id, mode, model, provider:'anthropic'|'mock', assistant_name} (once, first)
+//   start    {conversation_id, user_message_id, mode, model, provider:'anthropic'|'openai'|'cloudflare'|'mock',
+//            key_source, assistant_name} (once, first)
 //   phase    {step, phase:'thinking'|'writing'} (typing indicator)
 //   text     {step, delta} (append to the current assistant bubble — patch the DOM, never render() per token)
 //   tool     {step, id, name, label, status:'running'|'done'|'error'} (status chip; label is a short generic English
@@ -57,24 +79,28 @@
 //   proposal {change:{id, kind, label, summary, target, before, after, status:'proposed', created_at, expires_at}}
 //            (render a 'what will change' card with Confirm/Cancel → manage confirm_change/cancel_change)
 //   card     {kind, data} (custom result card: client COBRA_CARDS[kind](data), stage 7 hook)
-//   discard  {step} (remove the streamed text of that step: a refusal arrived)
-//   notice   {code:'refusal'|'step_limit'|'max_tokens'|'cap_reached'|'cap_80', text, category?} (inline note; the
-//            stream continues to `done`)
-//   error    {code:'provider_auth'|'model_not_found'|'provider_bad_request'|'provider_busy'|'provider_unreachable'|
-//            'provider_error'|'server', text, retryable} (terminal, followed by nothing)
-//   done     {conversation_id, stop:'ok'|'refusal'|'step_limit'|'max_tokens'|'cap_reached', steps, title,
-//            usage:{input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, cost_usd},
-//            limits:{today_used, today_limit, month_pct}} (terminal; cost_usd and month_pct only for owners: 0 / null
-//            for others)
+//   discard  {step} (remove the streamed text of that step: a refusal arrived, or the stream couldn't be read and the
+//            same call is made again without streaming)
+//   notice   {code:'refusal'|'step_limit'|'max_tokens'|'cap_reached'|'cap_80'|'cap_fallback'|'free_quota'|'free_share',
+//            text, category?} (inline note; the stream continues to `done`; cap_fallback comes right after `start`)
+//   error    {code:'provider_auth'|'model_not_found'|'model_needs_paid'|'provider_bad_request'|'provider_busy'|
+//            'provider_unreachable'|'provider_error'|'server', text, retryable} (terminal, followed by nothing)
+//   done     {conversation_id, stop:'ok'|'refusal'|'step_limit'|'max_tokens'|'cap_reached'|'free_quota'|'free_share',
+//            steps, title, usage:{input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
+//            cost_usd}, limits:{today_used, today_limit, month_pct, key_source, free:{left_pct, resets_at}|null}}
+//            (terminal; cost_usd and month_pct only for owners: 0 / null for others; free only after a free turn)
 // Pre-stream codes: unauthorized(401), off/role_off(403), bad_request/unknown_mode/bad_context/mode_mismatch/
-// conversation_full/model_not_priced(400), conversation_not_found(404), busy(409), cap_reached/daily_limit(429).
+// conversation_full/model_not_priced(400), conversation_not_found(404), busy(409), cap_reached/daily_limit/free_quota/
+// free_share(429; the free ones with resets_at, the next 00:00 UTC). Show `reason` as it is: it names the limit hit.
 // A client that leaves (abort) stops the turn: nothing more is sent and no partial answer is stored.
 //
-// Owner steps: run the G1-gateway section of .claude/sql/stage6-cobra.sql (staging first); deploy this function with
-// Verify JWT ON. Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY (all three automatic), optional
-// ANTHROPIC_API_KEY (Ofek adds it; until then, and while ai_settings.provider = 'mock', the built-in test provider
-// answers), optional BUSINESS_ID ('default'), optional PUSH_CONTACT (the phone notifications' VAPID subject, an https:
-// or mailto: address; default: this project's address).
+// Owner steps: run the G1-gateway, G2-changes and G4-providers sections of .claude/sql/stage6-cobra.sql (staging
+// first); deploy this function with Verify JWT ON. Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY
+// (all three automatic); CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_AI_TOKEN (the free AI; Ofek adds them, the token with
+// Workers AI Read + Edit; until both exist and the account id is 32 hex characters the free AI counts as not set up);
+// optional ANTHROPIC_API_KEY (the platform's paid key, used only with the owner's paid switch and a cap above 0);
+// optional BUSINESS_ID ('default'), optional PUSH_CONTACT (the phone notifications' VAPID subject, an https: or mailto:
+// address; default: this project's address).
 // deno-lint-ignore-file no-explicit-any
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -91,18 +117,26 @@ const BUSINESS_ID = env("BUSINESS_ID") || "default";
 const CONTACT = env("PUSH_CONTACT") || SUPABASE_URL.replace(/\/+$/, "");
 // Read per request, so the real provider works the moment the secret is added (and tests can switch it).
 const anthropicKey = () => env("ANTHROPIC_API_KEY");
+const cfAccount = () => env("CLOUDFLARE_ACCOUNT_ID");
+const cfToken = () => env("CLOUDFLARE_AI_TOKEN");
+// The free AI is set up: both Cloudflare secrets, the account id as Cloudflare writes it (32 hex characters).
+export function cloudflareReady(): boolean { return !!cfToken() && /^[0-9a-f]{32}$/i.test(cfAccount()); }
 
 export const MAX_TOOL_STEPS = 5;                  // tool rounds per turn (⇒ at most 6 model calls)
 export const MAX_TEXT_CHARS = 4000;               // one message from the person
 export const MAX_CONTEXT_CHARS = 4096;            // a turn's context from the app, as JSON (the app's COBRA_LIMITS.context)
 export const MAX_TOOL_RESULT_CHARS = 20000;       // one tool result, as JSON
 export const MAX_CHANGE_JSON_CHARS = 50000;       // a proposal's before / after, as JSON
-export const PROPOSAL_TTL_MS = 24 * 3600e3;       // a proposal can be confirmed for a day
+export const PROPOSAL_TTL_MS = 7 * 24 * 3600e3;   // a proposal can be confirmed for 7 days (Ofek, a fixed rule)
 export const CONVERSATION_MAX_PROMPT_TOKENS = 90000;   // keeps Haiku under its 100K tier; history is never truncated
 export const BUSY_MS = 180000;                    // one turn at a time per conversation (the lock's lease)
 export const HEARTBEAT_MS = 15000;
 export const SDK_TIMEOUT_MS = 60000;
 export const SDK_MAX_RETRIES = 2;
+export const CF_BASE = "https://api.cloudflare.com/client/v4/accounts/";   // + account id + /ai/v1/chat/completions
+export const FETCH_TIMEOUT_MS = 60000;            // the OpenAI-style providers: no answer (or no new bytes) for this long
+export const FETCH_RETRIES = 2;                   // … busy / unreachable: tried again before anything was streamed
+export const FREE_TOOL_RESULT_CHARS = 8000;       // one tool result for the free AI, as JSON (its quota is small)
 export const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 // Thinking-block binding controls: a conversation whose tools or system prompt changed since it started asks the API to
 // drop the thinking blocks that no longer match (instead of a 400). See prefixHash.
@@ -112,7 +146,7 @@ export const SSE_EVENTS = ["start", "phase", "text", "tool", "proposal", "card",
 export const ERROR_CODES = ["unauthorized", "off", "role_off", "bad_request", "unknown_mode", "bad_context", "mode_mismatch", "conversation_full",
   "model_not_priced", "conversation_not_found", "busy", "cap_reached", "daily_limit", "provider_auth", "model_not_found", "provider_bad_request",
   "provider_busy", "provider_unreachable", "provider_error", "server", "not_found", "not_yours", "not_proposed", "not_confirmed", "expired",
-  "not_allowed", "changed_since", "unknown_step", "denied", "gone", "invalid", "failed"];
+  "not_allowed", "changed_since", "unknown_step", "denied", "gone", "invalid", "failed", "free_quota", "free_share", "model_needs_paid"];
 
 export const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -133,6 +167,9 @@ export const io = {
   now: () => Date.now(),
   uuid: () => crypto.randomUUID(),
   anthropicClient: (apiKey: string): any => new Anthropic({ apiKey, maxRetries: SDK_MAX_RETRIES, timeout: SDK_TIMEOUT_MS }),
+  // The OpenAI-style providers (Cloudflare Workers AI; OpenAI in G5): plain fetch, no SDK.
+  fetch: (url: string, init: RequestInit): Promise<Response> => fetch(url, init),
+  sleep: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)),
   // A client that acts AS the signed-in person (their token): every business read and write of a change goes through
   // it, so the database's row-level security applies exactly as in the app.
   userClient: (jwt: string): any => createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: "Bearer " + jwt } }, auth: { persistSession: false, autoRefreshToken: false } }),
@@ -286,11 +323,19 @@ export async function sendTo(sb: any, userIds: string[], payload: Record<string,
 // ── settings (ai_settings, one row per business) ──
 // USD per million tokens. Haiku 5.5 has a second rate card for prompts over 100K tokens; claude-sonnet-5 is the
 // server-side fallback model of claude-sonnet-5-5 (same prices). Owners can override any of it (ai_settings.prices).
+// The free AI's models cost the business nothing (their quota is in neurons, NEURON_PRICES); they are listed so the
+// model_not_priced check lets them through.
 export const PRICE_DEFAULTS: Record<string, any> = {
   "claude-haiku-5-5": { in: 0.10, out: 0.50, cache_write: 0.125, cache_read: 0.01, long: { above: 100000, in: 0.50, out: 2.50, cache_write: 0.625, cache_read: 0.05 } },
   "claude-sonnet-5-5": { in: 2, out: 10, cache_write: 2.50, cache_read: 0.20 },
   "claude-sonnet-5": { in: 2, out: 10, cache_write: 2.50, cache_read: 0.20 },
+  "@cf/zai-org/glm-4.7-flash": { in: 0, out: 0 },
+  "@cf/google/gemma-4-26b-a4b-it": { in: 0, out: 0 },
+  "@cf/qwen/qwen3.8-27b": { in: 0, out: 0 },
+  "@cf/openai/gpt-oss-120b": { in: 0, out: 0 },
 };
+// The server-side fallback model each model may answer with (its thinking blocks are the conversation's own).
+const SERVER_FALLBACK: Record<string, string> = { "claude-sonnet-5-5": "claude-sonnet-5" };
 // What each model accepts: mid-conversation role 'system' messages, output_config.effort, server-side fallbacks
 // (Claude API, beta FALLBACK_BETA), and thinking.block_binding (adaptive thinking, beta THINKING_BINDING_BETA). An
 // unknown model gets none of them. claude-sonnet-5-5 is sent with fallbacks, and its fallback model (claude-sonnet-5)
@@ -300,12 +345,44 @@ export const MODEL_CAPS: Record<string, { systemMessages: boolean; effort: boole
   "claude-sonnet-5-5": { systemMessages: false, effort: true, fallbacks: true, thinkingBinding: true },
 };
 export function capsOf(model: string) { return MODEL_CAPS[model] || { systemMessages: false, effort: false, fallbacks: false, thinkingBinding: false }; }
+// The free AI's quota price per million tokens, in Cloudflare neurons (their pricing page, 15 Oct; the platform can
+// override them in ai_settings.free_quota.neurons). A model missing here is counted at the dearest rate.
+export const NEURON_PRICES: Record<string, { in: number; out: number }> = {
+  "@cf/zai-org/glm-4.7-flash": { in: 5500, out: 36400 },
+  "@cf/google/gemma-4-26b-a4b-it": { in: 9091, out: 27273 },
+  "@cf/qwen/qwen3.8-27b": { in: 40909, out: 290909 },
+  "@cf/openai/gpt-oss-120b": { in: 31818, out: 68182 },
+  "@cf/openai/gpt-oss-20b": { in: 18182, out: 27273 },
+};
+// Each provider's model per task when ai_settings.model_per_task has no "<provider>:<task>" entry (Anthropic and the
+// test provider use the plain task keys).
+export const PROVIDER_MODEL_DEFAULTS: Record<string, string> = {
+  "cloudflare:assistant": "@cf/zai-org/glm-4.7-flash", "cloudflare:heavy": "@cf/zai-org/glm-4.7-flash",
+  "openai:assistant": "gpt-4.1-mini", "openai:heavy": "gpt-4.1-mini",
+};
+// What the OpenAI-style models need in the request body. Thinking is off on the free models (it spends output neurons;
+// free_quota.thinking turns it back on); gpt-oss requires a reasoning effort.
+export const OPENAI_COMPAT_MODELS: Record<string, { extra: Record<string, any> }> = {
+  "@cf/zai-org/glm-4.7-flash": { extra: { chat_template_kwargs: { enable_thinking: false } } },
+  "@cf/google/gemma-4-26b-a4b-it": { extra: { chat_template_kwargs: { enable_thinking: false } } },
+  "@cf/qwen/qwen3.8-27b": { extra: { chat_template_kwargs: { enable_thinking: false } } },
+  "@cf/openai/gpt-oss-120b": { extra: { reasoning_effort: "low" } },
+  "@cf/openai/gpt-oss-20b": { extra: { reasoning_effort: "low" } },
+  "gpt-4.1-mini": { extra: {} },
+};
+export function compatExtras(model: string, thinking: boolean): Record<string, any> {
+  const x = JSON.parse(JSON.stringify((own(OPENAI_COMPAT_MODELS, model) && OPENAI_COMPAT_MODELS[model].extra) || {}));
+  if (thinking && isObj(x.chat_template_kwargs)) x.chat_template_kwargs.enable_thinking = true;
+  return x;
+}
+// The free AI's numbers (ai_settings.free_quota overrides them; the platform sets that column, owners can't).
+export const FREE_DEFAULTS = { daily_neurons: 10000, share_pct: 100, reserve_neurons: 150, max_prompt_tokens: 16000, thinking: false, stream: true };
 export const AI_DEFAULTS = {
   enabled: true, kill_switch: false,
   roles_enabled: { owner: true, manager: true, va: true, technician: true, marketing: true } as Record<string, boolean>,
   model_per_task: { assistant: "claude-haiku-5-5", heavy: "claude-sonnet-5-5" } as Record<string, string>,
-  prices: {}, monthly_cap_usd: 20, daily_user_limit: 50, max_tokens: 4096, provider: "mock", assistant_name: null as string | null,
-  alert_80_sent_month: null as string | null,
+  prices: {}, monthly_cap_usd: 0, daily_user_limit: 50, max_tokens: 4096, provider: "auto", assistant_name: null as string | null,
+  alert_80_sent_month: null as string | null, allow_own_keys: true, free_quota: {},
 };
 const PRICE_FIELDS = ["in", "out", "cache_write", "cache_read"];
 const priceNum = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
@@ -330,6 +407,31 @@ const clampNum = (v: unknown, d: number, lo: number, hi: number) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : typeof v === "number" ? v : NaN;
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d;
 };
+// ai_settings.free_quota as the gateway uses it: FREE_DEFAULTS for anything missing, numbers clamped, neuron prices =
+// NEURON_PRICES with the valid (finite, non-negative) overrides on top.
+export function freeQuotaOf(v: any) {
+  const q = isObj(v) ? v : {};
+  const neurons: Record<string, { in: number; out: number }> = JSON.parse(JSON.stringify(NEURON_PRICES));
+  if (isObj(q.neurons)) {
+    for (const [model, p] of Object.entries(q.neurons)) {
+      if (!/^[@a-z0-9][a-z0-9@/._-]{0,79}$/i.test(model) || !isObj(p)) continue;
+      const cur: any = neurons[model] ? { ...neurons[model] } : {};
+      if (priceNum(p.in)) cur.in = p.in;
+      if (priceNum(p.out)) cur.out = p.out;
+      if (priceNum(cur.in) && priceNum(cur.out)) neurons[model] = cur;
+    }
+  }
+  return {
+    daily_neurons: clampNum(q.daily_neurons, FREE_DEFAULTS.daily_neurons, 100, 10000000),
+    share_pct: clampNum(q.share_pct, FREE_DEFAULTS.share_pct, 1, 100),
+    reserve_neurons: clampNum(q.reserve_neurons, FREE_DEFAULTS.reserve_neurons, 0, 5000),
+    max_prompt_tokens: Math.floor(clampNum(q.max_prompt_tokens, FREE_DEFAULTS.max_prompt_tokens, 2000, 90000)),
+    thinking: q.thinking === true,
+    stream: q.stream !== false,
+    neurons,
+  };
+}
+export type FreeQuota = ReturnType<typeof freeQuotaOf>;
 // The row as the gateway uses it: defaults for anything missing, numbers clamped to the database's own limits.
 export function normSettings(row: any) {
   const r = isObj(row) ? row : {};
@@ -347,9 +449,12 @@ export function normSettings(row: any) {
     monthly_cap_usd: clampNum(r.monthly_cap_usd, AI_DEFAULTS.monthly_cap_usd, 0, 10000),
     daily_user_limit: Math.floor(clampNum(r.daily_user_limit, AI_DEFAULTS.daily_user_limit, 0, 10000)),
     max_tokens: Math.floor(clampNum(r.max_tokens, AI_DEFAULTS.max_tokens, 256, 32000)),
-    provider: r.provider === "anthropic" ? "anthropic" : "mock",
+    // 'auto' (paid off), 'anthropic' (the owner's paid switch), 'mock' (test mode forced); anything else is 'auto'
+    provider: (r.provider === "anthropic" || r.provider === "mock" ? r.provider : "auto") as "auto" | "anthropic" | "mock",
     assistant_name: name || null,
     alert_80_sent_month: typeof r.alert_80_sent_month === "string" && /^\d{4}-\d{2}$/.test(r.alert_80_sent_month) ? r.alert_80_sent_month : null,
+    allow_own_keys: r.allow_own_keys !== false,
+    free: freeQuotaOf(r.free_quota),
   };
 }
 export type AiSettings = ReturnType<typeof normSettings>;
@@ -359,10 +464,14 @@ export function assistantNameOf(s: { assistant_name: string | null }, cat: any):
   return String(s.assistant_name || "").trim().slice(0, 40) || productNameOf(cat);
 }
 export function roleEnabled(s: AiSettings, role: string): boolean { return s.roles_enabled[role] !== false; }
-export function modelFor(s: AiSettings, task: string): string {
-  return s.model_per_task[task] || AI_DEFAULTS.model_per_task[task] || s.model_per_task.assistant;
+// A task's model for a provider. Anthropic and the test provider read the plain task keys; the others
+// "<provider>:<task>", then "<provider>:assistant", then PROVIDER_MODEL_DEFAULTS (a stage 7 mode's own taskKey falls back
+// to the assistant model).
+export function modelFor(s: AiSettings, task: string, provider = "anthropic"): string {
+  if (provider === "anthropic" || provider === "mock") return s.model_per_task[task] || AI_DEFAULTS.model_per_task[task] || s.model_per_task.assistant;
+  const t = s.model_per_task, d = PROVIDER_MODEL_DEFAULTS;
+  return t[`${provider}:${task}`] || t[`${provider}:assistant`] || d[`${provider}:${task}`] || d[`${provider}:assistant`] || "";
 }
-export function providerName(s: AiSettings, hasKey: boolean): "anthropic" | "mock" { return s.provider === "anthropic" && hasKey ? "anthropic" : "mock"; }
 
 // ── cost (pure) ──
 // The rate card for one call: the long-prompt card when the model has one and the prompt is over its threshold.
@@ -426,6 +535,90 @@ export function mergeStreamUsage(prev: any, u: any) {
   if (isObj(u)) for (const k of Object.keys(ZERO_USAGE)) if (typeof u[k] === "number" && Number.isFinite(u[k]) && u[k] >= 0) out[k] = u[k];
   return out as typeof ZERO_USAGE;
 }
+
+// ── sources (pure): who answers a turn (stage 6 v2) ──
+export type KeySource = "own_user" | "own_business" | "platform_paid" | "free" | "mock";
+// apiKey: a saved own key, for this turn only ("" for the platform's and the test provider: the adapters read the
+// platform's keys from the env themselves). keyId: the ai_keys row (G5).
+export type Source = { provider: "anthropic" | "openai" | "cloudflare" | "mock"; keySource: KeySource; model: string; apiKey: string; keyId: string | null; label: string };
+// A saved own key, read for the turn (G5 loads them; always null in G4).
+export type KeyRow = { id: string; provider: "anthropic" | "openai"; apiKey: string };
+// The free quota since 00:00 UTC (ai_free_state): every business's neurons in this database, this business's, and
+// whether Cloudflare said it is used up (3036). null = unknown (the read failed; Cloudflare's 3036 is the backstop).
+export type FreeState = { platform_neurons: number; business_neurons: number; exhausted: boolean };
+export const SOURCE_LABEL: Record<KeySource, string> = { own_user: "Your own key", own_business: "The business's key", platform_paid: "Paid AI", free: "Free AI", mock: "Test mode" };
+// Today in UTC: the free quota's day (Cloudflare resets it at 00:00 UTC for the whole account).
+export function utcDayBounds(nowMs: number) {
+  const d = new Date(nowMs), start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return { dayStart: iso(start), resetsAt: iso(start + 86400e3) };
+}
+const neuronRate = (prices: Record<string, { in: number; out: number }>, model: string) =>
+  (prices && prices[model]) || Object.values(prices || {}).reduce((a, p) => ({ in: Math.max(a.in, p.in), out: Math.max(a.out, p.out) }), { in: 0, out: 0 });
+// One call's neurons: every prompt token (cached ones at the input rate too: conservative) and every output token.
+export function neuronsOf(prices: Record<string, { in: number; out: number }>, model: string, usage: any): number {
+  const p = neuronRate(prices, model);
+  const input = tok(usage?.input_tokens) + tok(usage?.cache_creation_input_tokens) + tok(usage?.cache_read_input_tokens);
+  return round6((input * p.in + tok(usage?.output_tokens) * p.out) / 1e6);
+}
+// A call's neurons before it is made: the prompt's UTF-8 bytes / 3 as tokens, plus maxOut output tokens.
+export function estimateNeurons(prices: Record<string, { in: number; out: number }>, model: string, promptBytes: number, maxOut: number): number {
+  return neuronsOf(prices, model, { input_tokens: Math.ceil(Math.max(0, promptBytes) / 3), output_tokens: Math.max(0, maxOut) });
+}
+// What is left of the free quota today. A call is made only while the quota left covers max(reserve_neurons, need)
+// (need: the call's estimate). blocked: 'free_quota' (the account's, every business's) before 'free_share' (this
+// business's share of it). left_pct: of what this business may still use today.
+export function freeLeft(free: FreeQuota, fs: FreeState | null, need = 0) {
+  const daily = free.daily_neurons, share = (daily * free.share_pct) / 100;
+  const used = fs ? tok(fs.platform_neurons) : 0, mine = fs ? tok(fs.business_neurons) : 0;
+  const platformLeft = Math.max(0, daily - used), businessLeft = Math.max(0, Math.min(platformLeft, share - mine));
+  const want = Math.max(free.reserve_neurons, need), exhausted = !!(fs && fs.exhausted);
+  const blocked: null | "free_quota" | "free_share" = exhausted || platformLeft < want ? "free_quota" : share - mine < want ? "free_share" : null;
+  return { platform_left: Math.round(platformLeft), business_left: Math.round(businessLeft), left_pct: exhausted ? 0 : Math.floor((100 * businessLeft) / share), blocked };
+}
+// When the free quota is back, in the business's words: "tomorrow" when the 00:00 UTC reset falls on the next business
+// day, else its time that day ("at 11:00": Sydney, in the morning).
+export function freeBackText(resetsAt: string, tz: string, nowMs: number): string {
+  const at = bizParts(Date.parse(resetsAt), tz);
+  return at.day === bizParts(nowMs, tz).day ? `at ${String(at.hour).padStart(2, "0")}:${String(at.minute).padStart(2, "0")}` : "tomorrow";
+}
+// The limit sentences (free_quota is Ofek's, word for word apart from the "tomorrow" swap above).
+export function freeQuotaText(code: string, resetsAt: string, tz: string, nowMs = io.now()): string {
+  const back = freeBackText(resetsAt, tz, nowMs);
+  if (code === "free_share") return `This business's share of today's free AI is used up. It's back ${back}, or an owner can switch on a paid AI in Settings → AI.`;
+  if (code === "cap_reached") return `This month's paid AI budget is used up, and so is today's free AI. The free AI is back ${back}; the paid AI starts again next month, or when an owner raises the cap in Settings → AI.`;
+  return `Today's free AI quota is used up. It's back ${back}, or an owner can switch on a paid AI in Settings → AI.`;
+}
+// Who answers this turn: forced test mode → the person's own key → the business's paid AI (the owner's switch, a cap
+// above 0 and a key: the business's own before the platform's) → the free AI while its quota lasts → the test provider,
+// only while nothing real is set up. At the paid cap the free AI takes over (notice cap_fallback); with the free AI used
+// up too: cap_reached. The free AI set up but used up is refused, never handed to the test provider. The conversation's
+// model stays while the same provider answers (Anthropic and the test provider share the Claude model names; a chat
+// from before v2 has no provider); another provider answers with its own model.
+export function resolveSource(x: {
+  s: AiSettings; env: { anthropic: boolean; cloudflare: boolean }; userKey: KeyRow | null; bizKey: KeyRow | null; capSpend: number;
+  free: FreeState | null; taskKey: string; convProvider?: string | null; convModel?: string | null; tz?: string; nowMs?: number;
+}): { source: Source; notice?: "cap_fallback" } | { blocked: "free_quota" | "free_share" | "cap_reached"; reason: string; resets_at: string | null } {
+  const s = x.s, tz = x.tz || REGION_DEFAULTS.timeZone, nowMs = x.nowMs ?? io.now();
+  const group = (p: string | null | undefined) => (!p || p === "mock" ? "anthropic" : p);
+  const pick = (provider: Source["provider"], keySource: KeySource, key: KeyRow | null = null): Source => ({
+    provider, keySource, model: x.convModel && group(x.convProvider) === group(provider) ? x.convModel : modelFor(s, x.taskKey, provider),
+    apiKey: key ? key.apiKey : "", keyId: key ? key.id : null, label: SOURCE_LABEL[keySource],
+  });
+  if (s.provider === "mock") return { source: pick("mock", "mock") };
+  if (x.userKey && s.allow_own_keys) return { source: pick(x.userKey.provider, "own_user", x.userKey) };
+  const paidSet = s.provider === "anthropic" && s.monthly_cap_usd > 0 && (!!x.bizKey || x.env.anthropic);
+  const capHit = paidSet && x.capSpend >= s.monthly_cap_usd;
+  if (paidSet && !capHit) return { source: x.bizKey ? pick(x.bizKey.provider, "own_business", x.bizKey) : pick("anthropic", "platform_paid") };
+  if (x.env.cloudflare) {
+    const fl = freeLeft(s.free, x.free), resets = utcDayBounds(nowMs).resetsAt;
+    if (!fl.blocked) return capHit ? { source: pick("cloudflare", "free"), notice: "cap_fallback" } : { source: pick("cloudflare", "free") };
+    const code = capHit ? "cap_reached" : fl.blocked;
+    return { blocked: code, reason: freeQuotaText(code, resets, tz, nowMs), resets_at: resets };
+  }
+  if (capHit) return { blocked: "cap_reached", reason: REFUSE.cap_reached, resets_at: null };
+  return { source: pick("mock", "mock") };
+}
+export const isPaid = (src: Source) => src.keySource === "platform_paid" || src.keySource === "own_business";
 
 // ── schemas (pure): what a strict tool schema may hold, and checking a tool's input against it ──
 const STRICT_FORBIDDEN = ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minLength", "maxLength", "pattern", "minItems", "maxItems", "$ref"];
@@ -1458,7 +1651,9 @@ const blockText = (content: any) => (Array.isArray(content) ? content.filter((b:
 // the preceding user message. Assistant content is passed back exactly as received (thinking blocks included): from
 // content_raw, the JSON text as sent (the jsonb column re-sorts object keys, so a tool_use input read from it would
 // differ from what the model wrote). A tool call left without its result (the worker stopped between the two rows) gets
-// an is_error result at the start of the next user message, the same way every time.
+// an is_error result at the start of the next user message, the same way every time. With targetModel (the model this
+// turn is sent to), an assistant row written by another model (meta.model; the chat changed provider) is replayed
+// without its thinking blocks: they are bound to the model that wrote them.
 export function rowContent(r: any): any {
   if (r && typeof r.content_raw === "string" && r.content_raw) {
     try { const v = JSON.parse(r.content_raw); if (Array.isArray(v)) return v; } catch { /* the jsonb copy below */ }
@@ -1466,9 +1661,15 @@ export function rowContent(r: any): any {
   return r ? r.content : [];
 }
 export const TOOL_NOT_RUN = "The tool was not run.";
-export function buildHistory(rows: any[], caps: { systemMessages: boolean }): any[] {
+export function buildHistory(rows: any[], caps: { systemMessages: boolean }, targetModel?: string): any[] {
   const kept = (rows || []).filter((r) => r && r.replay !== false).slice().sort((a, b) => a.seq - b.seq);
   const out: any[] = [];
+  // the same model: its own name, a dated version of it, or its server-side fallback
+  const same = (m: string, x: string | undefined) => !!x && (m === x || m.startsWith(x + "-2"));
+  const otherModel = (r: any) => {
+    const m = r.meta && typeof r.meta.model === "string" ? r.meta.model : "";
+    return !!targetModel && !!m && !same(m, targetModel) && !same(m, SERVER_FALLBACK[targetModel]);
+  };
   kept.forEach((r, i) => {
     if (r.role === "system") {
       const next = kept[i + 1];
@@ -1485,7 +1686,12 @@ export function buildHistory(rows: any[], caps: { systemMessages: boolean }): an
       }
       return;
     }
-    out.push({ role: r.role, content: rowContent(r) });
+    const content = rowContent(r);
+    if (r.role === "assistant" && Array.isArray(content) && otherModel(r)) {
+      out.push({ role: r.role, content: content.filter((b: any) => !(b && (b.type === "thinking" || b.type === "redacted_thinking"))) });
+      return;
+    }
+    out.push({ role: r.role, content });
   });
   for (let i = 0; i < out.length; i++) {
     const m = out[i];
@@ -1512,6 +1718,296 @@ export function sanitizeFallbackContent(content: any[]): any[] {
   list.forEach((b, i) => { if (b && b.type === "fallback") last = i; });
   if (last < 0) return list;
   return list.filter((b, i) => b.type !== "fallback" && !(i < last && ["thinking", "redacted_thinking", "tool_use"].includes(b.type)));
+}
+
+// ── openai-compatible: the free AI (Cloudflare Workers AI) and own OpenAI keys (G5) share this translator and parser ──
+// The history stays Anthropic-shaped. These turn it into Chat Completions messages, and the answer back into the
+// result every adapter returns ({ content: Anthropic blocks, stop_reason, stop_details, usage, model, rawInputs }), so
+// the loop, the change pipeline and the registries never see the difference.
+const utf8Len = (s: string) => new TextEncoder().encode(s).length;
+const toolResultText = (c: any) => (typeof c === "string" ? c : Array.isArray(c) ? c.map((b: any) => (b && typeof b.text === "string" ? b.text : "")).join("") : JSON.stringify(c ?? ""));
+// System first; a user message's tool_results become 'tool' messages (is_error → "Error: …"), then its text (the
+// <app_context> block included) one user message; an assistant message's text + tool_use become content (null when
+// empty) + tool_calls; thinking and fallback blocks are left out.
+export function toOpenAiMessages(system: string, messages: any[]): any[] {
+  const out: any[] = [];
+  if (system) out.push({ role: "system", content: system });
+  for (const m of messages || []) {
+    if (!m) continue;
+    if (m.role === "system") { const t = typeof m.content === "string" ? m.content : blockText(m.content); if (t) out.push({ role: "system", content: t }); continue; }
+    const blocks = Array.isArray(m.content) ? m.content : [{ type: "text", text: String(m.content ?? "") }];
+    const texts = blocks.filter((b: any) => b && b.type === "text" && typeof b.text === "string" && b.text).map((b: any) => b.text);
+    if (m.role === "user") {
+      for (const b of blocks) if (b && b.type === "tool_result") out.push({ role: "tool", tool_call_id: String(b.tool_use_id), content: (b.is_error ? "Error: " : "") + toolResultText(b.content) });
+      if (texts.length) out.push({ role: "user", content: texts.join("\n\n") });
+    } else if (m.role === "assistant") {
+      const calls = blocks.filter((b: any) => b && b.type === "tool_use").map((b: any) => ({ id: String(b.id), type: "function", function: { name: String(b.name), arguments: JSON.stringify(b.input ?? {}) } }));
+      if (texts.length || calls.length) out.push({ role: "assistant", content: texts.join("") || null, ...(calls.length ? { tool_calls: calls } : {}) });
+    }
+  }
+  return out;
+}
+// The registry's tools as functions. strict: false (OpenAI's strict mode needs every property required; the gateway
+// validates every input itself, validateInput).
+export function toOpenAiTools(apiToolList: any[]) {
+  return (apiToolList || []).map((t: any) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.input_schema, strict: false } }));
+}
+// buildRequest's params → a Chat Completions body: no cache_control, betas, fallbacks, output_config or thinking;
+// max_completion_tokens; tool_choice 'auto' only with tools; the usage chunk when streaming; the model's extras
+// (OPENAI_COMPAT_MODELS). flavor: 'cloudflare' | 'openai' (the same body today).
+export function toOpenAiRequest(params: any, o: { flavor: string; stream: boolean; extras?: Record<string, any> }) {
+  const system = Array.isArray(params.system) ? params.system.map((b: any) => (b && typeof b.text === "string" ? b.text : "")).join("\n\n") : String(params.system || "");
+  const tools = Array.isArray(params.tools) ? params.tools : [];
+  return {
+    model: params.model, messages: toOpenAiMessages(system, params.messages || []), max_completion_tokens: params.max_tokens,
+    ...(tools.length ? { tools: toOpenAiTools(tools), tool_choice: "auto" } : {}),
+    ...(o.extras || {}),
+    stream: !!o.stream, ...(o.stream ? { stream_options: { include_usage: true } } : {}),
+  };
+}
+// A stream the parser can't trust: the same call is made again without streaming.
+export class ParseFallback extends Error { constructor(why: string) { super(why); this.name = "ParseFallback"; } }
+type CompatCall = { index: number; rawId: string; id: string; name: string; args: string };
+// The stream so far. k: the assistant messages before this one (made-up ids: call_<k>_<i>); seen: the tool call ids
+// already in the conversation (a provider that numbers its calls the same way every turn gets new ones).
+export function newChunkState(k = 0, flavor = "cloudflare", seen: Set<string> = new Set()) {
+  return { k, flavor, seen, text: "", calls: [] as CompatCall[], finish: null as string | null, usage: null as any, reasoningBytes: 0, thinking: false, error: null as null | { code: string; retryable: boolean } };
+}
+export type ChunkState = ReturnType<typeof newChunkState>;
+function toolFragment(st: ChunkState, tc: any, ev: any[]) {
+  if (!isObj(tc)) throw new ParseFallback("a tool fragment that isn't an object");
+  const fn = isObj(tc.function) ? tc.function : tc;   // the legacy shape: { name, arguments }
+  const id = typeof tc.id === "string" ? tc.id : "", hasIndex = typeof tc.index === "number";
+  let call = hasIndex ? st.calls.find((c) => c.index === tc.index) : id ? st.calls.find((c) => c.rawId === id) : undefined;
+  if (!call && !hasIndex && !id && !(typeof fn.name === "string" && fn.name)) {
+    // no index, no id, no name: a piece of the one open call, else it can't be matched
+    if (st.calls.length !== 1) throw new ParseFallback("a tool fragment that matches no call");
+    call = st.calls[0];
+  }
+  if (!call) { call = { index: hasIndex ? tc.index : -1 - st.calls.length, rawId: id, id: "", name: "", args: "" }; st.calls.push(call); }
+  if (id && !call.rawId) call.rawId = id;
+  if (typeof fn.name === "string" && fn.name && !call.name) call.name = fn.name;
+  const a = fn.arguments;
+  if (typeof a === "string") call.args += a;
+  else if (a && typeof a === "object") call.args = JSON.stringify(a);   // some models send the arguments as an object
+  if (call.name && !call.id) {
+    const c = call, taken = (x: string) => st.seen.has(x) || st.calls.some((o) => o !== c && o.id === x);
+    c.id = /^[A-Za-z0-9_-]{1,64}$/.test(c.rawId) && !taken(c.rawId) ? c.rawId : `call_${st.k}_${st.calls.indexOf(c)}`;
+    ev.push({ type: "tool_start", id: c.id, name: c.name });
+  }
+}
+// One frame (a parsed data: line, or a whole non-streamed answer) into the state; returns the events to show: text
+// deltas, tool_start (once a call has its name), thinking (reasoning is counted, never shown). Accepts the OpenAI chunk
+// (delta or message), frames wrapped in { result }, the legacy { response, tool_calls }, finish_reason on the usage chunk,
+// and error frames (st.error).
+export function accumulateOpenAiChunk(st: ChunkState, frame: any): any[] {
+  const ev: any[] = [];
+  if (!isObj(frame)) throw new ParseFallback("a frame that isn't an object");
+  if ((Array.isArray(frame.errors) && frame.errors.length && frame.success === false) || isObj(frame.error)) { st.error = classifyHttpError(0, frame, st.flavor); return ev; }
+  const f = isObj(frame.result) && !Array.isArray(frame.choices) ? frame.result : frame;
+  if (isObj(f.usage)) st.usage = f.usage;
+  if (typeof f.finish_reason === "string" && f.finish_reason) st.finish = f.finish_reason;
+  if ("response" in f && !Array.isArray(f.choices)) {
+    if (typeof f.response === "string" && f.response) { st.text += f.response; ev.push({ type: "text", text: f.response }); }
+    if (Array.isArray(f.tool_calls)) for (const tc of f.tool_calls) toolFragment(st, tc, ev);
+    return ev;
+  }
+  for (const c of Array.isArray(f.choices) ? f.choices : []) {
+    if (!isObj(c) || (typeof c.index === "number" && c.index !== 0)) continue;
+    if (typeof c.finish_reason === "string" && c.finish_reason) st.finish = c.finish_reason;
+    const d = isObj(c.delta) ? c.delta : isObj(c.message) ? c.message : null;
+    if (!d) continue;
+    const r = typeof d.reasoning_content === "string" ? d.reasoning_content : typeof d.reasoning === "string" ? d.reasoning : "";
+    if (r) { st.reasoningBytes += utf8Len(r); if (!st.thinking) { st.thinking = true; ev.push({ type: "thinking" }); } }
+    if (typeof d.content === "string" && d.content) { st.text += d.content; ev.push({ type: "text", text: d.content }); }
+    if (Array.isArray(d.tool_calls)) for (const tc of d.tool_calls) toolFragment(st, tc, ev);
+  }
+  return ev;
+}
+// The internal result. A call without a name, or an empty stream with no finish_reason, can't be trusted
+// (ParseFallback). Arguments that aren't JSON are kept raw (the loop answers them with an is_error result the model
+// can fix). No usage chunk → estimated (UTF-8 bytes / 3) and flagged usage_estimated.
+export function finishOpenAi(st: ChunkState, o: { model: string; requestBytes?: number }) {
+  if (st.calls.some((c) => !c.name)) throw new ParseFallback("a tool call without a name");
+  if (!st.finish && !st.text && !st.calls.length) throw new ParseFallback("an empty stream");
+  const content: any[] = [], rawInputs = new Map<string, string>();
+  if (st.text) content.push({ type: "text", text: st.text });
+  for (const c of st.calls) {
+    let input: any = {};
+    if (c.args.trim()) { try { const v = JSON.parse(c.args); if (isObj(v)) input = v; } catch { /* kept raw below */ } }
+    content.push({ type: "tool_use", id: c.id, name: c.name, input });
+    rawInputs.set(c.id, c.args);
+  }
+  const f = st.finish;
+  const stop = f === "length" ? "max_tokens" : f === "content_filter" ? "refusal" : st.calls.length ? "tool_use" : "end_turn";
+  const u = st.usage;
+  if (isObj(u) && (typeof u.prompt_tokens === "number" || typeof u.completion_tokens === "number")) {
+    const cached = Math.min(tok(u.prompt_tokens), tok(isObj(u.prompt_tokens_details) ? u.prompt_tokens_details.cached_tokens : 0));
+    const usage = { input_tokens: tok(u.prompt_tokens) - cached, output_tokens: tok(u.completion_tokens), cache_creation_input_tokens: 0, cache_read_input_tokens: cached };
+    return { content, stop_reason: stop, stop_details: null, usage, model: o.model, rawInputs };
+  }
+  const outBytes = utf8Len(st.text) + st.calls.reduce((n, c) => n + utf8Len(c.args), 0) + st.reasoningBytes;
+  const usage = { input_tokens: Math.ceil((o.requestBytes || 0) / 3), output_tokens: Math.ceil(outBytes / 3), cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+  return { content, stop_reason: stop, stop_details: null, usage, model: o.model, rawInputs, usage_estimated: true };
+}
+// A non-streamed answer ({ choices:[{ message }] }, maybe wrapped in { result }) into a fresh state.
+export function fromOpenAiCompletion(json: any, k = 0, flavor = "cloudflare", seen: Set<string> = new Set()) {
+  const state = newChunkState(k, flavor, seen);
+  const events = accumulateOpenAiChunk(state, json);
+  return { state, events };
+}
+// An HTTP error (or an error frame) → our code. Cloudflare's own codes first (errors[0].code or error.code): 3036 the
+// free quota used up (no retry), 3040 out of capacity / 3007 timeout (busy, retried), 5035 a model that needs a paid
+// plan, 5007 / 3042 no such model, 3006 too large; then the status. Never keeps the body's text.
+export function classifyHttpError(status: number, body: unknown, flavor: string): { code: string; retryable: boolean } {
+  let j: any = body;
+  if (typeof body === "string") { try { j = JSON.parse(body); } catch { j = null; } }
+  const e0 = isObj(j) ? (Array.isArray(j.errors) && j.errors[0]) || j.error || (isObj(j.result) && Array.isArray(j.result.errors) && j.result.errors[0]) : null;
+  const n = Number(isObj(e0) ? e0.code : NaN);
+  if (flavor === "cloudflare" && Number.isFinite(n)) {
+    if (n === 3036) return { code: "free_quota", retryable: false };
+    if (n === 3040 || n === 3007) return { code: "provider_busy", retryable: true };
+    if (n === 5035) return { code: "model_needs_paid", retryable: false };
+    if (n === 5007 || n === 3042) return { code: "model_not_found", retryable: false };
+    if (n === 3006) return { code: "provider_bad_request", retryable: false };
+  }
+  if (status === 401 || status === 403) return { code: "provider_auth", retryable: false };
+  if (status === 404) return { code: "model_not_found", retryable: false };
+  if (status === 408 || status === 429) return { code: "provider_busy", retryable: true };
+  if (status === 400 || status === 413 || status === 422) return { code: "provider_bad_request", retryable: false };
+  if (status >= 500) return { code: "provider_busy", retryable: true };
+  return { code: "provider_error", retryable: false };
+}
+// Server-Sent Events → frames: lines split across reads, '\n' / '\r\n' / '\r' endings, multi-line data: (one JSON
+// value, or one per line), ':' comments, data: [DONE]. A frame that isn't JSON → ParseFallback. onBytes: each read.
+export async function readOpenAiSse(res: Response, onFrame: (frame: any) => void, signal?: AbortSignal | null, onBytes?: () => void) {
+  if (!res.body) throw new ParseFallback("no body");
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "", data: string[] = [], done = false;
+  const flush = () => {
+    const lines = data.filter((l) => l.trim() !== "");
+    data = [];
+    if (!lines.length) return;
+    if (lines.some((l) => l.trim() === "[DONE]")) { done = true; if (lines.length === 1) return; }
+    const body = lines.filter((l) => l.trim() !== "[DONE]");
+    let frames: any[];
+    try { frames = [JSON.parse(body.join("\n"))]; } catch {
+      try { frames = body.map((l) => JSON.parse(l)); } catch { throw new ParseFallback("a frame that isn't JSON"); }
+    }
+    for (const f of frames) onFrame(f);
+  };
+  const line = (l: string) => {
+    if (l === "") flush();
+    else if (l.startsWith("data:")) data.push(l.slice(5).replace(/^ /, ""));
+    // ':' comments, event:, id:, retry: aren't needed
+  };
+  // Whole lines only; a '\r' at the end of what was read may be the first half of '\r\n'.
+  const drain = (final: boolean) => {
+    while (!done) {
+      let at = -1, len = 1;
+      for (let j = 0; j < buf.length; j++) {
+        if (buf[j] === "\n") { at = j; break; }
+        if (buf[j] === "\r") { if (j + 1 < buf.length) { at = j; len = buf[j + 1] === "\n" ? 2 : 1; } else if (final) at = j; break; }
+      }
+      if (at < 0) return;
+      const l = buf.slice(0, at);
+      buf = buf.slice(at + len);
+      line(l);
+    }
+  };
+  try {
+    while (!done) {
+      if (signal?.aborted) throw abortError();
+      const { value, done: end } = await reader.read();
+      if (end) break;
+      if (onBytes) onBytes();
+      buf += dec.decode(value, { stream: true });
+      drain(false);
+    }
+    if (!done) { buf += dec.decode(); drain(true); if (buf) line(buf); buf = ""; flush(); }
+  } finally {
+    try { await reader.cancel(); } catch { /* already closed */ }
+  }
+}
+// One call to an OpenAI-style provider (req: toOpenAiRequest's body). Busy / unreachable answers are retried
+// FETCH_RETRIES times before anything is streamed (after 0.5 s and 1.5 s); nothing is retried once bytes arrived. A
+// stream that can't be read (ParseFallback) emits { type: 'reset' } (the loop drops what that step showed) and the same
+// call is made again without streaming. Returns the internal result, plus neurons when prices (the free quota's) are
+// given. A failure throws ProviderFailure with what the call cost so far (estimated); never the body, the URL or the
+// account id.
+export async function openAiCompatTurn(o: { url: string; headers: Record<string, string>; req: any; flavor: string; model: string; prices?: Record<string, { in: number; out: number }>; onEvent: (ev: any) => void; signal?: AbortSignal | null }) {
+  const msgs: any[] = Array.isArray(o.req.messages) ? o.req.messages : [];
+  const seen = new Set<string>();
+  for (const m of msgs) for (const c of Array.isArray(m && m.tool_calls) ? m.tool_calls : []) seen.add(String(c && c.id));
+  const k = msgs.filter((m) => m && m.role === "assistant").length;
+  const reqText = JSON.stringify(o.req), reqBytes = utf8Len(reqText);
+  let outBytes = 0, lost = 0;
+  const partial = () => ({ input_tokens: Math.ceil(reqBytes / 3), output_tokens: Math.ceil(outBytes / 3), cache_creation_input_tokens: 0, cache_read_input_tokens: 0 });
+  const aborted = () => !!(o.signal && o.signal.aborted);
+  // One request, with its own timer (re-armed on every read) tied to the turn's signal.
+  const watch = () => {
+    const ac = new AbortController();
+    let timer: any = null, timedOut = false;
+    const stopIt = () => ac.abort();
+    if (o.signal) { if (o.signal.aborted) ac.abort(); else o.signal.addEventListener("abort", stopIt); }
+    const arm = () => { clearTimeout(timer); timer = setTimeout(() => { timedOut = true; ac.abort(); }, FETCH_TIMEOUT_MS); };
+    arm();
+    return { signal: ac.signal, arm, timedOut: () => timedOut, end: () => { clearTimeout(timer); if (o.signal) o.signal.removeEventListener("abort", stopIt); } };
+  };
+  const post = async (body: string, stream: boolean) => {
+    for (let attempt = 0; ; attempt++) {
+      const w = watch();
+      let c = { code: "provider_unreachable", retryable: true };
+      try {
+        const res = await io.fetch(o.url, { method: "POST", headers: { ...o.headers, "Content-Type": "application/json", Accept: stream ? "text/event-stream" : "application/json" }, body, signal: w.signal });
+        if (res.ok) return { res, w };
+        c = classifyHttpError(res.status, await res.text().catch(() => ""), o.flavor);
+      } catch { /* a network error or the timer: unreachable */ }
+      w.end();
+      if (aborted()) throw new ProviderFailure("aborted", false);
+      if (!c.retryable || attempt >= FETCH_RETRIES) throw new ProviderFailure(c.code, c.retryable);
+      await io.sleep(attempt ? 1500 : 500);
+      if (aborted()) throw new ProviderFailure("aborted", false);
+    }
+  };
+  const done = (out: any) => (o.prices ? { ...out, neurons: round6(neuronsOf(o.prices, o.model, out.usage) + lost) } : out);
+  const stream = o.req.stream !== false;
+  const first = await post(reqText, stream);
+  try {
+    const st = newChunkState(k, o.flavor, seen);
+    const take = (frame: any) => { for (const ev of accumulateOpenAiChunk(st, frame)) { if (ev.type === "text") outBytes += utf8Len(ev.text); o.onEvent(ev); } };
+    if (stream && !/json/i.test(first.res.headers.get("content-type") || "")) await readOpenAiSse(first.res, take, first.w.signal, first.w.arm);
+    else { let json: any; try { json = await first.res.json(); } catch { throw new ParseFallback("an answer that isn't JSON"); } take(json); }
+    if (st.error) throw new ProviderFailure(st.error.code, false, partial());
+    return done(finishOpenAi(st, { model: o.model, requestBytes: reqBytes }));
+  } catch (e) {
+    if (e instanceof ProviderFailure) throw e;
+    if (!(e instanceof ParseFallback) || aborted()) throw new ProviderFailure(aborted() ? "aborted" : "provider_unreachable", !aborted(), partial());
+  } finally {
+    first.w.end();
+  }
+  // The stream couldn't be read: the same call, not streamed. What the first attempt read is still counted.
+  if (o.prices) lost = neuronsOf(o.prices, o.model, partial());
+  o.onEvent({ type: "reset" });
+  outBytes = 0;
+  const body2: any = { ...o.req, stream: false };
+  delete body2.stream_options;
+  const second = await post(JSON.stringify(body2), false);
+  try {
+    let json: any;
+    try { json = await second.res.json(); } catch { throw new ProviderFailure("provider_error", false, partial()); }
+    const { state, events } = fromOpenAiCompletion(json, k, o.flavor, seen);
+    if (state.error) throw new ProviderFailure(state.error.code, false, partial());
+    let out: any;
+    try { out = finishOpenAi(state, { model: o.model, requestBytes: reqBytes }); } catch (e) { if (e instanceof ParseFallback) throw new ProviderFailure("provider_error", false, partial()); throw e; }
+    for (const ev of events) o.onEvent(ev);
+    return done(out);
+  } catch (e) {
+    if (e instanceof ProviderFailure) throw e;
+    throw new ProviderFailure(aborted() ? "aborted" : "provider_unreachable", !aborted(), partial());
+  } finally {
+    second.w.end();
+  }
 }
 
 // ── providers ──
@@ -1661,17 +2157,32 @@ export async function mockTurn(req: { params: any }, onEvent: (ev: any) => void,
   };
 }
 let clientMemo: { key: string; client: any } | null = null;
-export function providerFor(name: "anthropic" | "mock") {
+// The adapter for a turn's source (resolveSource). Every adapter takes buildRequest's request and returns the same
+// result. The platform's Anthropic client is kept per key; an own key's client never is (G5). free: the free AI's
+// settings (streaming, thinking, the neuron prices).
+export function providerFor(source: Source, free: FreeQuota = freeQuotaOf({})) {
+  const name = source.provider;
   if (name === "anthropic") {
     return {
       name,
       turn: (req: any, onEvent: (ev: any) => void, signal?: AbortSignal | null) => {
+        if (source.apiKey) return anthropicTurn(io.anthropicClient(source.apiKey), req, onEvent, signal);
         const key = anthropicKey();
         if (!clientMemo || clientMemo.key !== key) clientMemo = { key, client: io.anthropicClient(key) };
         return anthropicTurn(clientMemo.client, req, onEvent, signal);
       },
     };
   }
+  if (name === "cloudflare") {
+    return {
+      name,
+      turn: (req: any, onEvent: (ev: any) => void, signal?: AbortSignal | null) => openAiCompatTurn({
+        url: CF_BASE + cfAccount() + "/ai/v1/chat/completions", headers: { Authorization: "Bearer " + cfToken() }, flavor: "cloudflare", model: source.model,
+        req: toOpenAiRequest(req.params, { flavor: "cloudflare", stream: free.stream, extras: compatExtras(source.model, free.thinking) }), prices: free.neurons, onEvent, signal,
+      }),
+    };
+  }
+  if (name === "openai") return { name, turn: (): Promise<any> => Promise.reject(new ProviderFailure("provider_error", false)) };   // own OpenAI keys: G5
   return {
     name,
     turn: async (req: any, onEvent: (ev: any) => void, signal?: AbortSignal | null) => {
@@ -1746,8 +2257,9 @@ const round2 = (x: number) => Math.round(x * 100) / 100;
 // The 80% alert: once a month per business (ai_claim_alert_80 marks the month; true only for the call that marked it),
 // to the owners' saved devices. A failure is logged and never fails the chat. A failure before anything was sent (the
 // owners or the push keys couldn't be read) gives the month back, so the next turn tries again. Returns whether this
-// call sent it.
+// call sent it. spend = the paid spend (capSpend). A cap of 0 = the paid AI is off: no alert.
 export async function maybeAlert80(sb: any, s: AiSettings, biz: Biz, monthKey: string, spend: number): Promise<boolean> {
+  if (!(s.monthly_cap_usd > 0)) return false;
   const cap = s.monthly_cap_usd;
   if (!capState(spend, cap).warn || s.alert_80_sent_month === monthKey) return false;
   let claimed = false, sending = false;
@@ -1781,10 +2293,24 @@ export async function maybeAlert80(sb: any, s: AiSettings, biz: Biz, monthKey: s
   }
   return claimed;
 }
-async function monthSpend(sb: any, monthStart: string): Promise<number> {
-  const { data, error } = await sb.rpc("ai_month_spend", { p_business: BUSINESS_ID, p_from: monthStart });
-  if (error) throw new Error("ai_month_spend: " + clip(error.message, 200));
+// This month's spend that the cap counts: the platform's paid key and the business's own key (never a person's own key,
+// the free AI or the test provider).
+async function capSpend(sb: any, monthStart: string): Promise<number> {
+  const { data, error } = await sb.rpc("ai_month_cap_spend", { p_business: BUSINESS_ID, p_from: monthStart });
+  if (error) throw new Error("ai_month_cap_spend: " + clip(error.message, 200));
   return Number(data) || 0;
+}
+// The free quota since 00:00 UTC (every business in this database). null when it can't be read: the turn goes ahead
+// and Cloudflare's 3036 is the backstop.
+async function freeState(sb: any, dayStart: string): Promise<FreeState | null> {
+  try {
+    const { data, error } = await sb.rpc("ai_free_state", { p_business: BUSINESS_ID, p_day_start: dayStart });
+    if (error || !isObj(data)) throw new Error(error ? error.message : "no answer");
+    return { platform_neurons: Number(data.platform_neurons) || 0, business_neurons: Number(data.business_neurons) || 0, exhausted: data.exhausted === true };
+  } catch (e) {
+    console.error("ai-gateway: free quota not read:", clip((e as Error)?.message, 200));
+    return null;
+  }
 }
 async function todayUsed(sb: any, userId: string, dayStart: string): Promise<number> {
   const { count, error } = await sb.from("ai_usage").select("id", { count: "exact", head: true }).eq("business_id", BUSINESS_ID).eq("user_id", userId).gte("at", dayStart);
@@ -1799,10 +2325,13 @@ const NOTICE_TEXT: Record<string, string> = {
   max_tokens: "The answer was cut short. Ask me to continue.",
   cap_reached: "This month's AI budget is used up, so I stopped here.",
   cap_80: "This month's AI spend has passed 80% of the cap.",
+  cap_fallback: "This month's paid AI budget is used up, so the free AI answered.",
+  // free_quota / free_share: freeQuotaText (it says when the quota is back)
 };
 const ERROR_TEXT: Record<string, string> = {
   provider_auth: "The AI service didn't accept the server's key. An owner needs to check it.",
   model_not_found: "The AI model chosen in Settings isn't available.",
+  model_needs_paid: "The free AI model chosen in Settings needs a paid Cloudflare plan. An owner can pick another model.",
   provider_bad_request: "The AI service couldn't read this request.",
   provider_busy: "The AI service is busy. Try again in a minute.",
   provider_unreachable: "The AI service couldn't be reached. Try again.",
@@ -1823,14 +2352,17 @@ const REFUSE: Record<string, string> = {
   busy: "This chat is still answering. Wait for it to finish.",
   cap_reached: "This month's AI budget is used up. It starts again next month, or an owner can raise the cap in Settings.",
   daily_limit: "You've reached today's limit of questions. It resets tomorrow.",
+  free_full: "This chat is long for the free AI. Start a new chat to carry on.",
 };
-const refuse = (status: number, code: string) => ({ status, body: { ok: false, code, reason: REFUSE[code] || code } });
+const refuse = (status: number, code: string, reason?: string, extra: Record<string, unknown> = {}) => ({ status, body: { ok: false, code, reason: reason || REFUSE[code] || code, ...extra } });
 export function titleOf(text: string): string { return String(text || "").replace(/\s+/g, " ").trim().slice(0, 60); }
 
 export type Turn = {
   sb: any; me: Profile; jwt: string; s: AiSettings; biz: Biz; mode: ModeDef; conv: any; isNew: boolean; text: string; context: any;
-  lang: string | null; usageId: string; spend: number; bounds: ReturnType<typeof periodBounds>; providerName: "anthropic" | "mock"; assistantName: string;
+  lang: string | null; usageId: string; spend: number; bounds: ReturnType<typeof periodBounds>; assistantName: string;
   tools: ToolDef[]; proposals?: number;
+  // who answers (resolveSource), the model it is sent to, the free quota when the turn began, and a notice to show first
+  source: Source; model: string; free: FreeState | null; notice?: string;
 };
 async function releaseLock(sb: any, convId: string) {
   try { await sb.from("ai_conversations").update({ busy_until: null }).eq("id", convId); } catch { /* the lease runs out on its own */ }
@@ -1859,7 +2391,7 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
   if (g) return refuse(g.status, g.code);
   // The tools this turn offers (worked out once: the conversation's prefix fingerprint and the loop use the same list).
   const tools = toolsFor(mode.id, me);
-  // (c) the conversation (only the person's own) and its lock
+  // (c) the conversation (only the person's own)
   const nowMs = io.now();
   let conv: any = null, isNew = false;
   if (b.conversation_id) {
@@ -1867,18 +2399,35 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
     if (error) throw new Error("ai_conversations: " + clip(error.message, 200));
     if (!data) return refuse(404, "conversation_not_found");
     if (data.mode !== mode.id) return refuse(400, "mode_mismatch");
-    if ((Number(data.last_prompt_tokens) || 0) > CONVERSATION_MAX_PROMPT_TOKENS) return refuse(400, "conversation_full");
-    if (!priceFor(s.prices, data.model, 0)) return refuse(400, "model_not_priced");
+    conv = data;
+  }
+  // (d) who answers: the paid spend (only while the paid AI is switched on with a cap) and the free quota (only while it
+  // is set up) decide; a limit hit is refused here, naming the limit
+  const bounds = periodBounds(nowMs, biz.tz), utc = utcDayBounds(nowMs), cfOn = cloudflareReady();
+  const [spend, free] = await Promise.all([
+    s.provider === "anthropic" && s.monthly_cap_usd > 0 ? capSpend(sb, bounds.monthStart) : Promise.resolve(0),
+    cfOn ? freeState(sb, utc.dayStart) : Promise.resolve(null),
+  ]);
+  const picked = resolveSource({ s, env: { anthropic: !!anthropicKey(), cloudflare: cfOn }, userKey: null, bizKey: null, capSpend: spend, free, taskKey: mode.taskKey,
+    convProvider: conv ? conv.provider : null, convModel: conv ? conv.model : null, tz: biz.tz, nowMs });
+  if ("blocked" in picked) return refuse(429, picked.blocked, picked.reason, picked.resets_at ? { resets_at: picked.resets_at } : {});
+  const source = picked.source;
+  // (e) the conversation's size (the free AI's limit is smaller) and the model's price
+  if (conv) {
+    const prompt = Number(conv.last_prompt_tokens) || 0;
+    if (prompt > CONVERSATION_MAX_PROMPT_TOKENS) return refuse(400, "conversation_full");
+    if (source.keySource === "free" && prompt > s.free.max_prompt_tokens) return refuse(400, "conversation_full", REFUSE.free_full);
+  }
+  if (!priceFor(s.prices, source.model, 0)) return refuse(400, "model_not_priced");
+  // (f) the lock: an existing conversation's, or a new conversation (made with the source's provider and model)
+  if (conv) {
     const { data: got, error: le } = await sb.from("ai_conversations").update({ busy_until: iso(nowMs + BUSY_MS) })
-      .eq("id", data.id).or(`busy_until.is.null,busy_until.lt."${iso(nowMs)}"`).select("id");
+      .eq("id", conv.id).or(`busy_until.is.null,busy_until.lt."${iso(nowMs)}"`).select("id");
     if (le) throw new Error("ai_conversations: " + clip(le.message, 200));
     if (!got || !got.length) return refuse(409, "busy");
-    conv = data;
   } else {
-    const model = modelFor(s, mode.taskKey);
-    if (!priceFor(s.prices, model, 0)) return refuse(400, "model_not_priced");
     const row = {
-      business_id: BUSINESS_ID, user_id: me.id, mode: mode.id, model, title: titleOf(text), context: isObj(b.context) ? b.context : {},
+      business_id: BUSINESS_ID, user_id: me.id, mode: mode.id, model: source.model, provider: source.provider, title: titleOf(text), context: isObj(b.context) ? b.context : {},
       created_at: iso(nowMs), last_message_at: iso(nowMs), message_count: 0, last_prompt_tokens: 0, busy_until: iso(nowMs + BUSY_MS),
       prefix_hash: prefixHash(mode.systemPrompt, apiTools(tools)),
     };
@@ -1889,22 +2438,18 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
   // From here a refusal gives the lock back (and removes a conversation made for this request).
   let handedOver = false;
   try {
-    // (d) the monthly cap
-    const bounds = periodBounds(nowMs, biz.tz);
-    const spend = await monthSpend(sb, bounds.monthStart);
-    if (capState(spend, s.monthly_cap_usd).blocked) return refuse(429, "cap_reached");
-    // (e) the daily limit (counted and started in one locked step)
-    const pName = providerName(s, !!anthropicKey());
-    const { data: usageId, error: ue } = await sb.rpc("ai_usage_begin", {
-      p_business: BUSINESS_ID, p_user: me.id, p_conversation: conv.id, p_task: mode.taskKey, p_mode: mode.id, p_model: conv.model,
-      p_provider: pName, p_day_start: bounds.dayStart, p_limit: s.daily_user_limit,
+    // (g) the daily limit (counted and started in one locked step; a person's own-key turns don't count)
+    const { data: usageId, error: ue } = await sb.rpc("ai_turn_begin", {
+      p_business: BUSINESS_ID, p_user: me.id, p_conversation: conv.id, p_task: mode.taskKey, p_mode: mode.id, p_model: source.model,
+      p_provider: source.provider, p_key_source: source.keySource, p_day_start: bounds.dayStart, p_limit: s.daily_user_limit,
     });
-    if (ue) throw new Error("ai_usage_begin: " + clip(ue.message, 200));
+    if (ue) throw new Error("ai_turn_begin: " + clip(ue.message, 200));
     if (!usageId) return refuse(429, "daily_limit");
     handedOver = true;
     return { turn: {
       sb, me, jwt, s, biz, mode, conv, isNew, text, context: isObj(b.context) ? b.context : (isObj(conv.context) ? conv.context : {}),
-      lang: b.lang || null, usageId, spend, bounds, providerName: pName, assistantName: assistantNameOf(s, biz.catalog), tools,
+      lang: b.lang || null, usageId, spend, bounds, assistantName: assistantNameOf(s, biz.catalog), tools,
+      source, model: source.model, free, ...(picked.notice ? { notice: picked.notice } : {}),
     } };
   } finally {
     if (!handedOver) {
@@ -1917,12 +2462,16 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
 // The loop: the person's text and this turn's context are stored, then up to MAX_TOOL_STEPS tool rounds, branching on
 // stop_reason before reading content. emit(event, data) writes one SSE frame. After every model call the usage row gets
 // the turn's tokens and cost so far; always (finally): the usage row's status, the conversation (lock released) and the
-// 80% alert. Every tool chip that opened (tool 'running') ends with a 'done' or 'error' tool event.
+// 80% alert. Every tool chip that opened (tool 'running') ends with a 'done' or 'error' tool event. The free AI's calls
+// cost the business nothing: they count neurons (the free quota) instead, checked before every call.
 export async function runChat(t: Turn, emit: (event: string, data: unknown) => void, signal: AbortSignal) {
   const { sb, me, s, conv, mode } = t;
-  const caps = capsOf(conv.model), provider = providerFor(t.providerName);
-  let seq = 0, visibleAdded = 0, steps = 0, cost = 0, lastPrompt = Number(conv.last_prompt_tokens) || 0, turnFrom = 0, drifted = false;
-  let usage = { ...ZERO_USAGE }, status = "ok", stop = "ok", terminal: "done" | "error" | "none" = "done";
+  const caps = capsOf(t.model), provider = providerFor(t.source, s.free);
+  const free = t.source.keySource === "free", paid = isPaid(t.source);
+  let seq = 0, visibleAdded = 0, steps = 0, cost = 0, neurons = 0, lastPrompt = Number(conv.last_prompt_tokens) || 0, turnFrom = 0, drifted = false;
+  let usage = { ...ZERO_USAGE }, status = "ok", stop = "ok", terminal: "done" | "error" | "none" = "done", errorCode: string | null = null;
+  const callCostOf = (u: any) => (free ? 0 : callCost(s.prices, t.model, u));
+  const callNeurons = (u: any) => (free ? neuronsOf(s.free.neurons, t.model, u) : 0);
   const addMsg = async (row: any) => {
     const r = { business_id: BUSINESS_ID, conversation_id: conv.id, user_id: me.id, seq: ++seq, replay: true, meta: {}, created_at: iso(io.now()), ...row };
     r.content_raw = JSON.stringify(r.content ?? []);   // the exact JSON replayed to the model (jsonb re-sorts keys)
@@ -1932,23 +2481,31 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
     return data.id as string;
   };
   const notice = async (code: string, extra: Record<string, unknown> = {}) => {
-    const text = NOTICE_TEXT[code] || code;
+    const text = code === "free_quota" || code === "free_share" ? freeQuotaText(code, utcDayBounds(io.now()).resetsAt, t.biz.tz) : NOTICE_TEXT[code] || code;
     await addMsg({ role: "assistant", content: [], text, visible: true, replay: false, meta: { notice: code, ...extra } });
     emit("notice", { code, text, ...extra });
   };
-  // The turn's tokens and cost so far (status stays 'running' until the end): other turns' cap checks see it, and it
-  // is kept if the worker stops mid-turn.
+  // The turn's tokens, cost and neurons so far (status stays 'running' until the end): other turns' cap and quota
+  // checks see them, and they are kept if the worker stops mid-turn.
+  const usageRow = () => ({ ...usage, cost_usd: round6(cost), neurons: round2(neurons), steps });
   const saveUsage = async () => {
     try {
-      const { error } = await sb.from("ai_usage").update({ ...usage, cost_usd: round6(cost), steps }).eq("id", t.usageId);
+      const { error } = await sb.from("ai_usage").update(usageRow()).eq("id", t.usageId);
       if (error) throw new Error(error.message);
     } catch (e) { console.error("ai-gateway: usage not saved:", clip((e as Error)?.message, 200)); }
   };
-  // This month's spend now: every turn's calls so far (this one's included), never less than what this turn knows.
+  // This month's paid spend now: every turn's paid calls so far (this one's included), never less than what this turn
+  // knows.
   const spendNow = async () => {
-    let x = t.spend + cost;
-    try { x = Math.max(x, await monthSpend(sb, t.bounds.monthStart)); } catch (e) { console.error("ai-gateway: spend not read:", clip((e as Error)?.message, 200)); }
+    let x = t.spend + (paid ? cost : 0);
+    try { x = Math.max(x, await capSpend(sb, t.bounds.monthStart)); } catch (e) { console.error("ai-gateway: spend not read:", clip((e as Error)?.message, 200)); }
     return x;
+  };
+  // The free quota now (every turn's calls so far, this one's included, are in ai_usage): what is left before a call
+  // that needs `need` neurons. Unreadable = the call goes ahead (Cloudflare's 3036 is the backstop).
+  const freeNow = async (need = 0) => {
+    const fs = await freeState(sb, utcDayBounds(io.now()).dayStart);
+    return freeLeft(s.free, fs, need);
   };
   // A refused turn leaves the replay (its rows stay visible): the next request would otherwise send the refused text
   // again. Only rows at the end of the history go, so the earlier prefix (cache, thinking blocks) stays as it was.
@@ -1968,27 +2525,40 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
     const { data: changes } = t.isNew ? { data: [] } : await sb.from("ai_changes").select("id, kind, status, created_at").eq("conversation_id", conv.id).order("created_at", { ascending: false }).limit(10);
     const ctxText = mode.context({ nowMs: io.now(), biz: t.biz, assistantName: t.assistantName, me, context: t.context, lang: t.lang, changes: changes || [] });
     await addMsg({ role: "system", content: [{ type: "text", text: ctxText }], text: null, visible: false });
-    emit("start", { conversation_id: conv.id, user_message_id: userMessageId, mode: mode.id, model: conv.model, provider: t.providerName, assistant_name: t.assistantName });
-    const { data: rows, error: re } = await sb.from("ai_messages").select("seq, role, content, content_raw, replay").eq("conversation_id", conv.id).order("seq", { ascending: true });
+    emit("start", { conversation_id: conv.id, user_message_id: userMessageId, mode: mode.id, model: t.model, provider: t.source.provider, key_source: t.source.keySource, assistant_name: t.assistantName });
+    if (t.notice === "cap_fallback") await notice("cap_fallback");
+    const { data: rows, error: re } = await sb.from("ai_messages").select("seq, role, content, content_raw, replay, meta").eq("conversation_id", conv.id).order("seq", { ascending: true });
     if (re) throw new Error("ai_messages: " + clip(re.message, 200));
-    const messages = buildHistory(rows || [], caps);
+    const messages = buildHistory(rows || [], caps, t.model);
     const tools = t.tools, sent = apiTools(tools);
-    drifted = conv.prefix_hash !== prefixHash(mode.systemPrompt, sent);   // tools or system changed since the chat began
+    // tools or system changed since the chat began, or another model answers now (the chat changed provider)
+    drifted = conv.prefix_hash !== prefixHash(mode.systemPrompt, sent) || t.model !== conv.model;
     let paused = false;
     for (let step = 0; step <= MAX_TOOL_STEPS; step++) {
       if (signal.aborted) { status = "aborted"; terminal = "none"; break; }
-      if (step > 0 && (await spendNow()) >= s.monthly_cap_usd) { await notice("cap_reached"); status = "cap"; stop = "cap_reached"; break; }
+      if (step > 0 && paid && (await spendNow()) >= s.monthly_cap_usd) { await notice("cap_reached"); status = "cap"; stop = "cap_reached"; break; }
+      const req = buildRequest({ model: t.model, maxTokens: s.max_tokens, effort: mode.effort, system: mode.systemPrompt, tools: sent, messages, dropMismatchedThinking: drifted });
+      if (free) {
+        // before every free call: the quota left must cover this call (its prompt and up to 1,000 output tokens)
+        const need = estimateNeurons(s.free.neurons, t.model, utf8Len(JSON.stringify(req.params)), Math.min(s.max_tokens, 1000));
+        const fl = await freeNow(need);
+        if (fl.blocked) { await notice(fl.blocked); status = "free_quota"; errorCode = fl.blocked === "free_share" ? "free_share" : "free_quota_estimate"; stop = fl.blocked; break; }
+      }
       emit("phase", { step, phase: "thinking" });
       let wrote = false;
       // The tool chips opened in this step; whatever isn't run is closed as 'error' when the step ends.
       const open = new Map<string, { name: string; label: string }>();
       const closeOpen = () => { for (const [id, x] of open) emit("tool", { step, id, name: x.name, label: x.label, status: "error" }); open.clear(); };
       try {
-        const req = buildRequest({ model: conv.model, maxTokens: s.max_tokens, effort: mode.effort, system: mode.systemPrompt, tools: sent, messages, dropMismatchedThinking: drifted });
         let result: any;
         try {
           result = await provider.turn(req, (ev: any) => {
-            if (ev.type === "text" && ev.text) {
+            if (ev.type === "reset") {
+              // the stream couldn't be read: the provider asks again without streaming, so what this step showed goes
+              emit("discard", { step });
+              closeOpen();
+              wrote = false;
+            } else if (ev.type === "text" && ev.text) {
               if (!wrote) { wrote = true; emit("phase", { step, phase: "writing" }); }
               emit("text", { step, delta: ev.text });
             } else if (ev.type === "tool_start") {
@@ -2005,12 +2575,22 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
           // An aborted or failed call is still billed for what it read and wrote: count what the stream reported.
           if (e instanceof ProviderFailure && e.partialUsage) {
             usage = addUsage(usage, e.partialUsage);
-            cost = round6(cost + callCost(s.prices, conv.model, e.partialUsage));
+            cost = round6(cost + callCostOf(e.partialUsage));
+            neurons += callNeurons(e.partialUsage);
             await saveUsage();
           }
           if (code === "aborted") { status = "aborted"; terminal = "none"; break; }
-          if (e instanceof ProviderFailure) console.error("ai-gateway: provider error:", code);   // the code only, never the provider's text
           closeOpen();
+          if (code === "free_quota") {
+            // Cloudflare says the free quota is used up (3036): not an error. The usage row's status marks it used up for
+            // the rest of the UTC day, so the next turns are refused before any call.
+            if (wrote) emit("discard", { step });
+            await notice("free_quota");
+            status = "free_quota"; errorCode = "free_quota"; stop = "free_quota";
+            break;
+          }
+          if (e instanceof ProviderFailure) console.error("ai-gateway: provider error:", code);   // the code only, never the provider's text
+          errorCode = code;
           await addMsg({ role: "assistant", content: [], text: ERROR_TEXT[code] || ERROR_TEXT.server, visible: true, replay: false, meta: { notice: "error", code } });
           emit("error", { code, text: ERROR_TEXT[code] || ERROR_TEXT.server, retryable });
           status = "error"; terminal = "error";
@@ -2018,7 +2598,8 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
         }
         steps++;
         usage = addUsage(usage, resultUsage(result));
-        cost = round6(cost + usageCost(s.prices, conv.model, result));
+        cost = round6(cost + (free ? 0 : usageCost(s.prices, t.model, result)));
+        if (free) neurons += typeof result.neurons === "number" ? result.neurons : callNeurons(resultUsage(result));
         lastPrompt = promptTokensOf(result);
         await saveUsage();
         if (signal.aborted) { status = "aborted"; terminal = "none"; break; }   // the person left: this answer isn't kept
@@ -2032,7 +2613,7 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
         }
         const content = sanitizeFallbackContent(result.content || []);
         const uses = content.filter((x: any) => x && x.type === "tool_use");
-        const meta: any = { step, stop_reason: result.stop_reason, model: result.model || conv.model, tools: [], proposals: [], cards: [] };
+        const meta: any = { step, stop_reason: result.stop_reason, model: result.model || t.model, tools: [], proposals: [], cards: [], ...(result.usage_estimated ? { usage_estimated: true } : {}) };
         const text = blockText(content);
         if (!content.length) {
           // Nothing to keep: the API takes an empty assistant message only as the last one, so it is never replayed.
@@ -2082,24 +2663,30 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
   } finally {
     const nowIso = iso(io.now());
     const finish = async () => {
-      await sb.from("ai_usage").update({ ...usage, cost_usd: round6(cost), steps, status }).eq("id", t.usageId);
+      await sb.from("ai_usage").update({ ...usageRow(), status, error_code: errorCode }).eq("id", t.usageId);
       await sb.from("ai_conversations").update({
         last_message_at: nowIso, message_count: (Number(conv.message_count) || 0) + visibleAdded, last_prompt_tokens: lastPrompt, busy_until: null,
+        model: t.model, provider: t.source.provider,   // the provider of the chat's last turn (its model stays while it answers)
         ...(drifted && conv.prefix_hash !== PREFIX_MIXED ? { prefix_hash: PREFIX_MIXED } : {}),   // drop_block from now on
       }).eq("id", conv.id);
     };
     try { await finish(); } catch (e) { console.error("ai-gateway: bookkeeping failed:", clip((e as Error)?.message, 200)); await releaseLock(sb, conv.id); }
-    const newSpend = await spendNow();
+    // The cap and its 80% alert only while there is a cap (0 = the paid AI is off).
+    const newSpend = s.monthly_cap_usd > 0 ? await spendNow() : 0;
     const sentAlert = await maybeAlert80(sb, s, t.biz, t.bounds.monthKey, newSpend);
     if (terminal === "done") {
       if (sentAlert && me.role === "owner") emit("notice", { code: "cap_80", text: NOTICE_TEXT.cap_80 });
       let used = 0;
       try { used = await todayUsed(sb, me.id, t.bounds.dayStart); } catch { /* shown as 0 */ }
       const owner = me.role === "owner";
+      const fl = free ? await freeNow() : null;
       emit("done", {
         conversation_id: conv.id, stop, steps, title: conv.title || "",
         usage: { ...usage, cost_usd: owner ? round6(cost) : 0 },
-        limits: { today_used: used, today_limit: s.daily_user_limit, month_pct: owner ? capState(newSpend, s.monthly_cap_usd).pct : null },
+        limits: {
+          today_used: used, today_limit: s.daily_user_limit, month_pct: owner && s.monthly_cap_usd > 0 ? capState(newSpend, s.monthly_cap_usd).pct : null,
+          key_source: t.source.keySource, free: fl ? { left_pct: fl.left_pct, resets_at: utcDayBounds(io.now()).resetsAt } : null,
+        },
       });
     }
   }
@@ -2131,7 +2718,7 @@ async function runTools(t: Turn, uses: any[], rawInputs: Map<string, string> | u
         else {
           try {
             const out = JSON.stringify((await tool.run(parsed.value, ctx)) ?? null);
-            if (out.length > MAX_TOOL_RESULT_CHARS) content = "Result too large";
+            if (out.length > (t.source.keySource === "free" ? FREE_TOOL_RESULT_CHARS : MAX_TOOL_RESULT_CHARS)) content = "Result too large";
             else { content = out; isError = false; }
           } catch (e) {
             content = "The tool failed: " + (e instanceof ChangeRefused ? e.message : "something went wrong on the server.");
@@ -2293,19 +2880,32 @@ export async function undoChange(sb: any, body: any, me: Profile, jwt: string, n
 }
 
 // ── manage (POST /ai-gateway/manage { step, ... }) ──
-// Status: is the assistant on for this person, which provider answers, today's use, and this month's spend (owners:
-// the amounts and who used it; others only a band).
+// Status: is the assistant on for this person, who answers a new question now (and which limit stops it), today's use,
+// the free quota (UTC day), and this month's paid spend (owners: the amounts and who used it; others only a band).
 export async function statusOf(sb: any, me: Profile, nowMs: number) {
   const { s, biz } = await loadState(sb);
-  const g = gate(s, me), key = !!anthropicKey();
-  const bounds = periodBounds(nowMs, biz.tz);
-  const [spend, used] = await Promise.all([monthSpend(sb, bounds.monthStart), todayUsed(sb, me.id, bounds.dayStart)]);
-  const cs = capState(spend, s.monthly_cap_usd);
+  const g = gate(s, me), key = !!anthropicKey(), cfOn = cloudflareReady();
+  const bounds = periodBounds(nowMs, biz.tz), utc = utcDayBounds(nowMs);
+  const [spend, used, fs] = await Promise.all([capSpend(sb, bounds.monthStart), todayUsed(sb, me.id, bounds.dayStart), cfOn ? freeState(sb, utc.dayStart) : Promise.resolve(null)]);
+  const picked = resolveSource({ s, env: { anthropic: key, cloudflare: cfOn }, userKey: null, bizKey: null, capSpend: spend, free: fs, taskKey: "assistant", tz: biz.tz, nowMs });
+  const src = "source" in picked ? picked.source : null, blocked = "blocked" in picked ? picked.blocked : null;
+  const paidOn = s.provider === "anthropic" && s.monthly_cap_usd > 0;
+  const cs = capState(spend, s.monthly_cap_usd), capBlocked = blocked === "cap_reached";
+  const fl = cfOn ? freeLeft(s.free, fs) : null;
   const body: any = {
     ok: true, enabled: !g, reason: g ? g.code : null, assistant_name: assistantNameOf(s, biz.catalog),
-    provider: providerName(s, key), provider_ready: key, waiting_for_key: (s.provider === "anthropic" && !key) || s.provider === "mock",
+    provider: src ? src.provider : cfOn ? "cloudflare" : "anthropic", provider_ready: key,
+    waiting_for_key: (s.provider === "anthropic" && !key) || (!!src && src.provider === "mock"),
+    source: src ? { provider: src.provider, key_source: src.keySource, model: src.model, label: src.label } : null,
+    blocked, blocked_text: "blocked" in picked ? picked.reason : null,
+    test_mode: s.provider === "mock" ? "forced" : src && src.provider === "mock" ? "not_configured" : null,
+    free: {
+      configured: cfOn, left_pct: fl ? fl.left_pct : null, resets_at: utc.resetsAt, exhausted: !!(fs && fs.exhausted),
+      ...(me.role === "owner" ? { daily_neurons: s.free.daily_neurons, used_neurons: fs ? round2(fs.platform_neurons) : null, business_neurons: fs ? round2(fs.business_neurons) : null, share_pct: s.free.share_pct } : {}),
+    },
     today: { used, limit: s.daily_user_limit },
   };
+  if (me.role === "owner") body.paid = { switched_on: s.provider === "anthropic", platform_key_ready: key, cap_usd: s.monthly_cap_usd, available: !!src && isPaid(src) };
   if (me.role === "owner") {
     const byUser = new Map<string, { user_id: string; requests: number; cost_usd: number }>();
     for (let page = 0; page < 50; page++) {
@@ -2318,10 +2918,10 @@ export async function statusOf(sb: any, me: Profile, nowMs: number) {
       if (!data || data.length < 1000) break;
     }
     body.month = {
-      key: bounds.monthKey, spend_usd: round6(spend), cap_usd: s.monthly_cap_usd, pct: cs.pct, alert_80_sent: s.alert_80_sent_month === bounds.monthKey,
-      blocked: cs.blocked, by_user: [...byUser.values()].sort((a, b) => b.cost_usd - a.cost_usd),
+      key: bounds.monthKey, spend_usd: round6(spend), cap_usd: s.monthly_cap_usd, pct: s.monthly_cap_usd > 0 ? cs.pct : 0, alert_80_sent: s.alert_80_sent_month === bounds.monthKey,
+      blocked: capBlocked, by_user: [...byUser.values()].sort((a, b) => b.cost_usd - a.cost_usd),
     };
-  } else body.month = { blocked: cs.blocked, pct_band: cs.blocked ? "blocked" : cs.warn ? "near" : "ok" };
+  } else body.month = { blocked: capBlocked, pct_band: capBlocked ? "blocked" : paidOn && cs.warn ? "near" : "ok" };
   return { status: 200, body };
 }
 type ManageStep = { run: (sb: any, body: any, me: Profile, jwt: string, nowMs: number) => Promise<{ status: number; body: any }> };

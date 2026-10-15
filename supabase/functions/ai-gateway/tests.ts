@@ -97,6 +97,29 @@ function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, strin
       return { data: row.id, error: null };
     }
     if (name === "ai_month_spend") return { data: (T.ai_usage || []).filter((u) => u.business_id === a.p_business && u.at >= a.p_from).reduce((s, u) => s + Number(u.cost_usd || 0), 0), error: null };
+    // G4-providers: the daily limit skips a person's own-key turns; the cap counts only paid rows (a row without
+    // key_source counts as platform_paid, like the SQL backfill); the free quota is every business's free rows since
+    // 00:00 UTC, used up once Cloudflare said so (status + error_code 'free_quota').
+    const keySourceOf = (u: any) => u.key_source || (u.provider === "mock" ? "mock" : "platform_paid");
+    if (name === "ai_turn_begin") {
+      if (a.p_key_source !== "own_user") {
+        const n = (T.ai_usage || []).filter((u) => u.business_id === a.p_business && u.user_id === a.p_user && u.at >= a.p_day_start && keySourceOf(u) !== "own_user").length;
+        if (n >= Math.max(a.p_limit ?? 0, 0)) return { data: null, error: null };
+      }
+      const row = { id: newId(), business_id: a.p_business, user_id: a.p_user, conversation_id: a.p_conversation, task: a.p_task, mode: a.p_mode, model: a.p_model, provider: a.p_provider,
+        key_source: a.p_key_source, input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, cost_usd: 0, neurons: 0, steps: 0, status: "running",
+        error_code: null, at: new Date(io.now()).toISOString() };
+      (T.ai_usage = T.ai_usage || []).push(row);
+      return { data: row.id, error: null };
+    }
+    if (name === "ai_month_cap_spend") {
+      return { data: (T.ai_usage || []).filter((u) => u.business_id === a.p_business && u.at >= a.p_from && ["platform_paid", "own_business"].includes(keySourceOf(u))).reduce((s, u) => s + Number(u.cost_usd || 0), 0), error: null };
+    }
+    if (name === "ai_free_state") {
+      const rows = (T.ai_usage || []).filter((u) => u.key_source === "free" && u.at >= a.p_day_start);
+      const sum = (l: any[]) => l.reduce((s, u) => s + Number(u.neurons || 0), 0);
+      return { data: { platform_neurons: sum(rows), business_neurons: sum(rows.filter((u) => u.business_id === a.p_business)), exhausted: rows.some((u) => u.status === "free_quota" && u.error_code === "free_quota") }, error: null };
+    }
     if (name === "ai_claim_alert_80") {
       const st = (T.ai_settings || []).find((r) => r.business_id === a.p_business && r.alert_80_sent_month !== a.p_month);
       if (st) st.alert_80_sent_month = a.p_month;
@@ -206,6 +229,19 @@ const refusalScript = (category: string) => ({
   events: [{ type: "message_start" }],
   final: { content: [], stop_reason: "refusal", stop_details: { category, explanation: null }, model: "claude-haiku-5-5", usage: { input_tokens: 1000, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
 });
+// A paid world (stage 6 v2: the cap counts paid turns only): the owner's paid switch, the platform key (a new one each
+// time, since the gateway keeps one client per key) and a fake client (db.fc). unpaid() removes the key again.
+let paidN = 0;
+function paidWorld(over: Record<string, any> = {}, seed: Record<string, any[]> = {}, scripts: any[] = [textScript("Paid answer")]) {
+  const db: any = world({ provider: "anthropic", ...over }, seed);
+  (globalThis as any).__AI_ENV__.ANTHROPIC_API_KEY = "test-key-paid-" + ++paidN;
+  const fc = fakeClient(scripts);
+  io.anthropicClient = () => fc;
+  db.fc = fc;
+  return db;
+}
+const unpaid = () => { delete (globalThis as any).__AI_ENV__.ANTHROPIC_API_KEY; };
+const whoamiScripts = () => [toolScript("toolu_w1", "whoami", {}), textScript("You are Olivia")];
 
 (async () => {
   const fs: any = await import("node:fs");
@@ -683,7 +719,8 @@ const refusalScript = (category: string) => ({
     eq([merged["claude-haiku-5-5"].in, merged["claude-haiku-5-5"].out, merged["claude-haiku-5-5"].cache_read, merged["claude-haiku-5-5"].long.above], [0.2, 0.5, 0.01, 100000], "owner overrides merged over the defaults; negative / NaN ignored");
     eq([!!merged["my-model"], !!merged["half-model"], !!merged["bad name!"]], [true, false, false], "a new model needs both in and out prices");
     const s = normSettings({ monthly_cap_usd: "25.50", daily_user_limit: -3, max_tokens: 99999, provider: "openai", assistant_name: "  Max  ", alert_80_sent_month: "2026-1" });
-    eq([s.monthly_cap_usd, s.daily_user_limit, s.max_tokens, s.provider, s.assistant_name, s.alert_80_sent_month], [25.5, 0, 32000, "mock", "Max", null], "normSettings clamps and cleans");
+    eq([s.monthly_cap_usd, s.daily_user_limit, s.max_tokens, s.provider, s.assistant_name, s.alert_80_sent_month], [25.5, 0, 32000, "auto", "Max", null], "normSettings clamps and cleans (an unknown provider is 'auto')");
+    eq([normSettings({}).monthly_cap_usd, normSettings({}).provider, normSettings({ provider: "mock" }).provider], [0, "auto", "mock"], "normSettings: cap 0 (paid off) and provider 'auto' by default");
     eq(assistantNameOf(s, {}), "Max", "assistant_name wins");
     eq(assistantNameOf(normSettings({}), { branding: { appName: "Acme Ops" } }), "Acme Ops", "… else the branding product name");
     eq(assistantNameOf(normSettings({}), {}), "OPS Service", "… else the app's default product name");
@@ -694,7 +731,7 @@ const refusalScript = (category: string) => ({
     const c1 = callCost(P, "claude-haiku-5-5", { input_tokens: 140, output_tokens: 5 + 1 }), reply = msgs(db, convOf(r))[4].text;
     const c2 = callCost(P, "claude-haiku-5-5", { input_tokens: 160, output_tokens: 5 + Math.ceil(reply.length / 4) });
     eq([u.input_tokens, u.output_tokens, u.steps, u.status, u.provider, u.cost_usd], [300, 6 + 5 + Math.ceil(reply.length / 4), 2, "ok", "mock", round6(c1 + c2)], "ai_usage: tokens summed across steps, steps, status, provider, cost");
-    eq(Object.keys(u).sort(), ["at", "business_id", "cache_creation_input_tokens", "cache_read_input_tokens", "conversation_id", "cost_usd", "id", "input_tokens", "mode", "model", "output_tokens", "provider", "status", "steps", "task", "user_id"], "ai_usage has no text column");
+    eq(Object.keys(u).sort(), ["at", "business_id", "cache_creation_input_tokens", "cache_read_input_tokens", "conversation_id", "cost_usd", "error_code", "id", "input_tokens", "key_source", "mode", "model", "neurons", "output_tokens", "provider", "status", "steps", "task", "user_id"], "ai_usage has no text column");
     eq(done(r).usage, { input_tokens: 300, output_tokens: u.output_tokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, cost_usd: u.cost_usd }, "done.usage for an owner includes the cost");
   }
 
@@ -720,7 +757,7 @@ const refusalScript = (category: string) => ({
   // ── 18. monthly cap ──
   {
     const lastMonth = new Date(Date.parse("2026-10-01T03:59:00Z")).toISOString();   // 23:59 on 30 Sep in New York
-    const db = world({ monthly_cap_usd: 20 }, { ai_usage: [{ id: "u1", business_id: "default", user_id: "u-manager", cost_usd: 25, at: lastMonth, status: "ok" }] });
+    const db = paidWorld({ monthly_cap_usd: 20 }, { ai_usage: [{ id: "u1", business_id: "default", user_id: "u-manager", cost_usd: 25, at: lastMonth, status: "ok" }] });
     eq((await chat(db, { text: "hi" })).status, 200, "last month's spend (23:59 local on the last day) doesn't count");
     db.T.ai_usage.push({ id: "u2", business_id: "default", user_id: "u-manager", cost_usd: 20, at: new Date(T0 - 3600e3).toISOString(), status: "ok" });
     const before = db.T.ai_messages.length;
@@ -736,13 +773,20 @@ const refusalScript = (category: string) => ({
     db.T.ai_settings[0].monthly_cap_usd = 1;
     const r2 = await chat(db, { text: "hi", conversation_id: existing.id });
     eq([r2.body.code, db.T.ai_conversations.find((c: any) => c.id === existing.id).busy_until], ["cap_reached", null], "a cap refusal releases the conversation's lock");
-    const db0 = world({ monthly_cap_usd: 0 });
-    eq((await chat(db0, { text: "hi" })).body.code, "cap_reached", "a cap of 0 stops everything");
+    unpaid();
+    // cap 0 = the paid AI is off: the test provider still answers; with the paid switch on and cap 0 it is never used
+    let db0: any = world({ monthly_cap_usd: 0, provider: "auto" });
+    let r0 = await chat(db0, { text: "hi" });
+    eq([r0.status, evs(r0, "start")[0].provider, evs(r0, "start")[0].key_source, done(r0).stop], [200, "mock", "mock", "ok"], "cap 0 = paid off: the test provider still answers");
+    db0 = paidWorld({ monthly_cap_usd: 0 });
+    r0 = await chat(db0, { text: "hi" });
+    eq([r0.status, evs(r0, "start")[0].provider, db0.fc.calls.length, done(r0).limits.month_pct], [200, "mock", 0, null], "… with the paid switch on and cap 0 the paid provider is never used");
+    unpaid();
   }
 
   // ── 19. the 80% alert ──
   {
-    const db = world({ monthly_cap_usd: 1 }, { ai_usage: [{ id: "x", business_id: "default", user_id: "u-manager", cost_usd: 0.79999, at: new Date(T0 - 3600e3).toISOString(), status: "ok" }] });
+    const db = paidWorld({ monthly_cap_usd: 1 }, { ai_usage: [{ id: "x", business_id: "default", user_id: "u-manager", cost_usd: 0.79999, at: new Date(T0 - 3600e3).toISOString(), status: "ok" }] });
     pushes.length = 0;
     const r = await chat(db, { text: "hello" }, "jwt-manager");
     eq(pushes.map((p) => p.endpoint).sort(), ["https://push.example/owner", "https://push.example/owner2"], "crossing 80% → ONE push to each owner's device, not the manager's");
@@ -761,24 +805,26 @@ const refusalScript = (category: string) => ({
     const r3 = await chat(db, { text: "november" });
     eq([pushes.length - n, pushes[pushes.length - 1].payload.tag, db.T.ai_settings[0].alert_80_sent_month], [2, "ai-cap-80-2026-11", "2026-11"], "the next month alerts again");
     eq(evs(r3, "notice").map((x: any) => x.code), ["cap_80"], "an owner who crossed it sees a cap_80 notice");
-    const db2 = world({ monthly_cap_usd: 1 }, { ai_usage: [{ id: "x", business_id: "default", user_id: "u-manager", cost_usd: 0.79999, at: new Date(T0 - 3600e3).toISOString(), status: "ok" }] });
+    const db2 = paidWorld({ monthly_cap_usd: 1 }, { ai_usage: [{ id: "x", business_id: "default", user_id: "u-manager", cost_usd: 0.79999, at: new Date(T0 - 3600e3).toISOString(), status: "ok" }] });
     pushFails = true;
     const r4 = await chat(db2, { text: "hello" });
     pushFails = false;
     eq([done(r4).stop, db2.T.ai_settings[0].alert_80_sent_month], ["ok", "2026-10"], "a push failure doesn't fail the chat");
-    const db3 = world({ monthly_cap_usd: 1 }, { ai_usage: [{ id: "x", business_id: "default", user_id: "u-manager", cost_usd: 0.5, at: new Date(T0 - 3600e3).toISOString(), status: "ok" }] });
+    const db3 = paidWorld({ monthly_cap_usd: 1 }, { ai_usage: [{ id: "x", business_id: "default", user_id: "u-manager", cost_usd: 0.5, at: new Date(T0 - 3600e3).toISOString(), status: "ok" }] });
     await chat(db3, { text: "hello" });
     eq(db3.ctl.rpcs.includes("ai_claim_alert_80"), false, "below 80% → no claim");
+    unpaid();
   }
 
   // ── 20. the cap inside a turn ──
   {
-    const db = world({ monthly_cap_usd: 1 }, { ai_usage: [{ id: "x", business_id: "default", user_id: "u-manager", cost_usd: 0.99999, at: new Date(T0 - 3600e3).toISOString(), status: "ok" }] });
+    const db = paidWorld({ monthly_cap_usd: 1 }, { ai_usage: [{ id: "x", business_id: "default", user_id: "u-manager", cost_usd: 0.99999, at: new Date(T0 - 3600e3).toISOString(), status: "ok" }] }, whoamiScripts());
     const r = await chat(db, { text: "whoami" });
     eq([evs(r, "phase").filter((p: any) => p.phase === "thinking").length, evs(r, "notice").map((x: any) => x.code), done(r).stop], [1, ["cap_reached", "cap_80"], "cap_reached"], "the cap reached between tool steps stops the loop (the owner also sees the 80% notice)");
     const rows = msgs(db, convOf(r)), replay = rows.filter((m: any) => m.replay !== false);
     eq(replay[replay.length - 1].content[0].type, "tool_result", "the history ends with the tool_result row");
     eq(db.T.ai_usage.find((u: any) => u.conversation_id === convOf(r)).status, "cap", "usage status 'cap'");
+    unpaid();
   }
 
   // ── 21. history ──
@@ -851,7 +897,7 @@ const refusalScript = (category: string) => ({
     const r = await chat(db, { text: '[mock:tool propose_note {"text":"Call back"}]', mode: "test_mode" }, "jwt-manager");
     const prop = evs(r, "proposal")[0];
     eq([prop.change.kind, prop.change.label, prop.change.status, prop.change.summary, prop.change.after, prop.change.before], ["test_note", "Note", "proposed", 'Add a note: "Call back"', { text: "Call back" }, null], "proposal event: the change card");
-    eq(prop.change.expires_at, new Date(T0 + 24 * 3600e3).toISOString(), "… with its expiry");
+    eq(prop.change.expires_at, new Date(T0 + 7 * 24 * 3600e3).toISOString(), "… with its expiry (7 days)");
     const row = db.T.ai_changes[0];
     eq([row.status, row.user_id, row.conversation_id, row.business_id, row.after], ["proposed", "u-manager", convOf(r), "default", { text: "Call back" }], "ai_changes row 'proposed'");
     const rows = msgs(db, convOf(r));
@@ -875,9 +921,9 @@ const refusalScript = (category: string) => ({
     eq([c.status, c.body.code], [403, "not_yours"], "confirm by another person → 403 not_yours");
     c = await manage(db, { step: "confirm_change", id: "00000000-0000-4000-8000-00000000dead" }, "jwt-manager");
     eq([c.status, c.body.code], [404, "not_found"], "an unknown change → 404");
-    const old = add({ created_at: new Date(T0 - 25 * 3600e3).toISOString() });
+    const old = add({ created_at: new Date(T0 - 8 * 24 * 3600e3).toISOString() });
     c = await manage(db, { step: "confirm_change", id: old.id }, "jwt-manager");
-    eq([c.status, c.body.code, old.status, old.error], [409, "expired", "cancelled", "expired"], "older than 24 h → 409 expired, cancelled");
+    eq([c.status, c.body.code, old.status, old.error], [409, "expired", "cancelled", "expired"], "older than 7 days → 409 expired, cancelled");
     const stale = add({});
     applyFails = new ChangeRefused("changed_since", "The note was changed after this was suggested.");
     c = await manage(db, { step: "confirm_change", id: stale.id }, "jwt-manager");
@@ -1005,7 +1051,7 @@ const refusalScript = (category: string) => ({
     eq(mergeStreamUsage(mergeStreamUsage(null, { input_tokens: 10, cache_read_input_tokens: 5, output_tokens: 1 }), { output_tokens: 40, input_tokens: null }), { input_tokens: 10, output_tokens: 40, cache_creation_input_tokens: 0, cache_read_input_tokens: 5 }, "mergeStreamUsage: message_delta's counts on top of message_start's");
     delete (globalThis as any).__AI_ENV__.ANTHROPIC_API_KEY;
     // each call's cost is written at once, and the next call's cap check reads the month again (other turns included)
-    db = world({ monthly_cap_usd: 1 });
+    db = paidWorld({ monthly_cap_usd: 1 }, {}, whoamiScripts());
     const prep: any = await prepareChat({ sb: db }, appProfile(OWNER), "jwt-owner", { text: "whoami" });
     const seen: any[] = [];
     await runChat(prep.turn, (event, data: any) => {
@@ -1017,7 +1063,7 @@ const refusalScript = (category: string) => ({
     eq([seen[0].status, seen[0].steps, seen[0].cost_usd > 0], ["running", 1, true], "the first call's tokens and cost are on the usage row before the next call");
     eq([db.T.ai_usage[0].status, db.T.ai_usage[0].steps], ["cap", 1], "another turn's spend meanwhile stops this one at the cap (the month is read again)");
     // the 80% alert: a failure before anything was sent gives the month back
-    db = world({ monthly_cap_usd: 1 }, { app_keys: [], ai_usage: [{ id: "x", business_id: "default", user_id: "u-manager", cost_usd: 0.85, at: new Date(T0 - 3600e3).toISOString(), status: "ok" }] });
+    db = paidWorld({ monthly_cap_usd: 1 }, { app_keys: [], ai_usage: [{ id: "x", business_id: "default", user_id: "u-manager", cost_usd: 0.85, at: new Date(T0 - 3600e3).toISOString(), status: "ok" }] });
     const gen = io.generate;
     io.generate = () => { throw new Error("keys unavailable"); };
     pushes.length = 0;
@@ -1026,6 +1072,7 @@ const refusalScript = (category: string) => ({
     io.generate = gen;
     await chat(db, { text: "again" });
     eq([pushes.length, db.T.ai_settings[0].alert_80_sent_month], [2, "2026-10"], "… the next turn sends it (once)");
+    unpaid();
     // an empty answer is never replayed
     db = world({ provider: "anthropic" });
     let fc = useKey("test-key-empty", [{ events: [{ type: "message_start" }], final: { content: [], stop_reason: "end_turn", stop_details: null, model: "claude-haiku-5-5", usage: { input_tokens: 100, output_tokens: 0 } } }, textScript("Here")]);

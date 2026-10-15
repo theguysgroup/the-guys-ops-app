@@ -1,0 +1,10 @@
+data: {"result":{"id":"chatcmpl-1","object":"chat.completion.chunk","created":1792000000,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{"content":"Wrapped"},"finish_reason":null}]}}
+
+data: {"result":{"id":"chatcmpl-1","object":"chat.completion.chunk","created":1792000000,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{"content":" answer"},"finish_reason":null}]}}
+
+data: {"result":{"id":"chatcmpl-1","object":"chat.completion.chunk","created":1792000000,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}}
+
+data: {"result":{"id":"chatcmpl-1","object":"chat.completion.chunk","created":1792000000,"model":"@cf/zai-org/glm-4.7-flash","choices":[],"usage":{"prompt_tokens":90,"completion_tokens":3,"total_tokens":93}}}
+
+data: [DONE]
+
