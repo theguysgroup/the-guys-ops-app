@@ -1565,6 +1565,29 @@ async function phase4Suite() {
         eq(validateStructure(r.doc).filter((i: any) => i.code !== "E_GOTO_TARGET").map((i: any) => i.code), [], `wfApplyPatch result keeps a valid structure: ${k.name}`);
       }
     }
+    // ── the registry snapshot the app's tests read (design §5.3, B27): tests/fixtures/wf-registry.json = the export (step
+    // "registry") for every business context workflows.json uses, so the app's wfValidate runs the same cases on the
+    // engine's own registry. A stale file is written again and this run fails once (run the checks again). ──
+    {
+      const ctxs: any[] = [AV_ALL, AV_OFF, ...W.map((k: any) => k.avail)].filter((x, i, a) => a.findIndex((y) => C(y) === C(x)) === i);
+      const availOf = (e: any) => e.availability;
+      const byAvail: Record<string, any> = {};
+      for (const ctx of ctxs) {
+        const ex = registryExport(ctx), av: Record<string, any> = {};
+        for (const t of ex.triggers) av[`t:${t.key}`] = availOf(t);
+        for (const list of ["actions", "waits", "goals", "logic"]) for (const n of (ex as any)[list]) av[`n:${n.kind}/${n.key}`] = availOf(n);
+        for (const f of ex.fields) av[`f:${f.key}`] = availOf(f);
+        for (const m of ex.merge) av[`m:${m.key}`] = availOf(m);
+        byAvail[C(ctx)] = { availCtx: ctx, availability: av };
+      }
+      const snap = JSON.stringify({ about: "Written by supabase/functions/automations/tests.ts (do not edit): the engine's registry export (step \"registry\") for AV_ALL, and per business context the availability of every entry. The app's tests rebuild the export of a context from these.",
+        availReasons: AVAIL_REASONS, provides: Object.fromEntries(Object.values(WF_TRIGGERS).map((t) => [t.key, t.provides])), waitMax: WF_WAIT_MAX, holdingWaits: WF_HOLDING_WAITS, limits: WF_LIMITS, settingsDefaults: WF_SETTINGS_DEFAULTS, migratedSettings: WF_MIGRATED_SETTINGS,
+        base: registryExport(AV_ALL), byAvail }, null, 1) + "\n";
+      const SNAP = "../../../tests/fixtures/wf-registry.json";
+      let old = ""; try { old = src(SNAP); } catch { /* not written yet */ }
+      if (old !== snap) { fs.mkdirSync("../../../tests/fixtures", { recursive: true }); fs.writeFileSync(SNAP, snap); }
+      ok(old === snap, "tests/fixtures/wf-registry.json is the engine's registry (it was stale: written again, run the checks again)");
+    }
     // ── registries: GHL words from the account scan; every entry complete; greyed = with a reason ──
     const GH = fx("ghl-labels.json");
     for (const [k, v] of Object.entries(GH.triggers)) eq(triggerEntry(k)?.ghl, v, `GHL label (trigger) ${k}`);
@@ -2182,11 +2205,11 @@ async function phase4Suite() {
     // the staging check script is there and covers the four checks the plan names
     const chk = src(SQL_DIR + "stage2-part1-staging-checks.sql");
     ok(["automation_claim_customer(", "automation.capture_test_error", "set local role authenticated", "has_column_privilege", "__undo__"].every((x) => chk.includes(x))
-      && (chk.match(/raise notice 'PASS \d+/g) || []).length === 26 && chk.includes("automations_a_v2_pin") && chk.includes("for update skip locked")
-      && chk.includes("PASS 19 — the guard v2") && chk.includes("PASS 20 — the ROLLBACK list") && chk.includes("PASS 21 — the SQL shape and arm keys") && chk.includes("PASS 22 — the list counts") && chk.includes("PASS 23 — Pause workflow") && chk.includes("PASS 24 — the template library") && chk.includes("PASS 25 — quiet imports") && chk.includes("PASS 26 — the lock: four columns for the app")
+      && (chk.match(/raise notice 'PASS \d+/g) || []).length === 27 && chk.includes("automations_a_v2_pin") && chk.includes("for update skip locked")
+      && chk.includes("PASS 19 — the guard v2") && chk.includes("PASS 20 — the ROLLBACK list") && chk.includes("PASS 21 — the SQL shape and arm keys") && chk.includes("PASS 22 — the list counts") && chk.includes("PASS 23 — Pause workflow") && chk.includes("PASS 24 — the template library") && chk.includes("PASS 25 — quiet imports") && chk.includes("PASS 26 — the lock: four columns for the app") && chk.includes("PASS 27 — the builder''s notes")
       && chk.includes("PASS 14 — event-store rows fit") && chk.includes("PASS 15 — a captured Lead changed event") && chk.includes("PASS 16 — Add to workflow run")
       && chk.includes("PASS 17 — the card''s atomic tag / note edits") && chk.includes("PASS 18 — the inbound link counter") && chk.includes("contact_tags_edit(c, array['VIP', 'vip']"),
-      "the staging checks: phase-4 claim, forced capture failure, RLS as VA/technician, column privileges, the v2 column pin, the non-blocking counter (13 Part-1 checks) + the event store (G2.1: 2) + the logic steps' writes (G2.2: 1) + record writes / atomic edits / the link counter (G2.3: 2) + the guard v2, the ROLLBACK list, the SQL keys (G2.4: 3) + the list counts per channel (G3.1: 1) + the pause guard and its wake (G3.2: 1) + the template library (G3.3: 1) + quiet imports, Assigned to, no Quote status (G3.5: 1) + the lock on direct writes (G3.4: 1), all undone");
+      "the staging checks: phase-4 claim, forced capture failure, RLS as VA/technician, column privileges, the v2 column pin, the non-blocking counter (13 Part-1 checks) + the event store (G2.1: 2) + the logic steps' writes (G2.2: 1) + record writes / atomic edits / the link counter (G2.3: 2) + the guard v2, the ROLLBACK list, the SQL keys (G2.4: 3) + the list counts per channel (G3.1: 1) + the pause guard and its wake (G3.2: 1) + the template library (G3.3: 1) + quiet imports, Assigned to, no Quote status (G3.5: 1) + the lock on direct writes (G3.4: 1) + the builder's notes as owner / manager / VA (G4.4: 1), all undone");
     {
       const block = (n0: number) => { const a0 = chk.indexOf(`\n-- ${n0}. `); return chk.slice(a0, chk.indexOf("\nend $$;", a0)); };
       ok([12, 19].every((n0) => { const b0 = block(n0); const g0 = b0.indexOf("elsif not has_table_privilege('authenticated', 'public.automations', 'INSERT') then"), r0 = b0.indexOf("execute 'set local role authenticated'");
@@ -4463,6 +4486,68 @@ async function phase4Suite() {
       const s = await api(db, "save", { automation_id: null, name: "New builder task", definition: named, settings: {} });
       const p = await api(db, "publish", { automation_id: s.body.id, on: true });
       eq([s.status, p.status, db.T.automations.find((a: any) => a.id === s.body.id).enabled], [200, 200, true], "publish: a doc only the new builder shows keeps the v2 checks only (its task for nobody is fine there)");
+    }
+    // a straight (flat) doc that the NEW builder saved last is judged by the v2 checks (layout.editor "builder"): 25 team
+    // notifications are fine there (the old editor's "At most 20 steps." does not apply); the old editor saving the same
+    // row takes the mark off, so its own block is back; a duplicate keeps the source's mark; a phase-4 row never saved by
+    // the builder keeps the old block
+    {
+      const N = 25, nodes: any = {};
+      for (let i = 1; i <= N; i++) nodes[`n${i}`] = { kind: "action", type: "internal_notification", config: { channel: "push", to: { roles: ["owner"] }, title: `Note ${i}` }, out: { next: i < N ? `n${i + 1}` : null } };
+      const flat = { schema: 2, seq: N, entry: "n1", triggers: [{ id: "t1", type: "newLead", filters: { match: "all", segments: [{ match: "all", rules: [] }] } }], nodes };
+      ok(!!wfToFlat(flat) && wfToFlat(flat).steps.length === N, "editor mark: the 25-step doc is straight (the old editor could show it)");
+      const db = world({ automations: [], automation_versions: [], automation_templates: [] });
+      const s1 = await api(db, "save", { automation_id: null, name: "Big alert", definition: flat, settings: {}, layout: { v: 1, stickies: [] }, builder: "standard", editor: "builder" });
+      const row = () => db.T.automations.find((a: any) => a.id === s1.body.id);
+      eq([s1.status, row().layout, v1EditorView(row())], [200, { v: 1, stickies: [], editor: "builder" }, null], "editor mark: a save from the new builder marks the row (its layout keeps the stickies)");
+      const p1 = await api(db, "publish", { automation_id: s1.body.id, on: true, expected_revision: s1.body.revision });
+      eq([p1.status, row().enabled], [200, true], "editor mark: published by the v2 rules (never refused in the old editor's words)");
+      await api(db, "publish", { automation_id: s1.body.id, on: false });
+      const d1 = await api(db, "duplicate", { automation_id: s1.body.id });
+      eq([d1.status, (db.T.automations.find((a: any) => a.id === d1.body.id) || {}).layout?.editor], [200, "builder"], "editor mark: a duplicate keeps the source's layout and its mark");
+      const s2 = await api(db, "save", { automation_id: s1.body.id, expected_revision: row().revision, name: "Big alert", definition: flat });
+      eq([s2.status, has(row().layout, "editor"), row().layout.stickies], [200, false, []], "editor mark: a save from the old editor (no layout, no editor) takes the mark off and keeps the rest of the layout");
+      const p2 = await api(db, "publish", { automation_id: s1.body.id, on: true, expected_revision: row().revision });
+      eq([p2.status, (p2.body.errors || [{}])[0].code, (p2.body.errors || [{}])[0].text, row().enabled], [422, "E_EDITOR_BLOCK", "At most 20 steps.", false], "editor mark: the old editor saved it last → the old block is back, in its words");
+      const s3 = await api(db, "save", { automation_id: s1.body.id, expected_revision: row().revision, name: "Big alert", definition: flat, editor: "builder" });
+      const p3 = await api(db, "publish", { automation_id: s1.body.id, on: true, expected_revision: row().revision });
+      eq([s3.status, row().layout, p3.status], [200, { v: 1, stickies: [], editor: "builder" }, 200], "editor mark: saved from the new builder again (no layout sent: the stored one is kept) → the v2 rules again");
+      const forged = await api(db, "save", { automation_id: null, name: "Forged", definition: flat, layout: { v: 1, editor: "old" } });
+      eq((db.T.automations.find((a: any) => a.id === forged.body.id) || {}).layout, { v: 1, editor: "old" }, "editor mark: another word in a layout is stored as given (only \"builder\" means the v2 rules)");
+      eq(v1EditorView(db.T.automations.find((a: any) => a.id === forged.body.id)).steps.length, N, "editor mark: … so the old editor's view (and its blocks) apply to that one");
+    }
+    // a migrated row (re-entry legacy_always) the new builder saves while it is still a straight chain runs by the phase-4
+    // rules (wfRunRow) → what those refuse is an error of validate / save / publish too (E_RUNS_OLD_WAY), never a Published
+    // workflow that quietly stops starting and ends its waiting runs (wfEligible)
+    {
+      const ID = "a38-runs-old", T0 = { type: "newLead", params: {} };
+      const S0 = [{ id: "c1", kind: "if", match: "all", conds: [{ field: "has_mobile", op: "true" }] }, { id: "p1", kind: "action", type: "push", to: { roles: ["owner"] }, title: "New lead" }];
+      const db = world({ automations: [auto({ id: ID, name: "Gate", enabled: false, armed_at: null, trigger: T0, steps: S0, revision: 1, settings: {}, layout: { v: 1 }, builder: "standard",
+        origin: "user", list_summary: {}, deleted_at: null, audience: "team" })], automation_versions: [], automation_templates: [] });
+      eq((await api(db, "migrate")).status, 200, "runs the old way: migrated");
+      const row = () => db.T.automations.find((a: any) => a.id === ID);
+      // (fresh row objects: wfRunRow and wfEligible are memoised per row object, the fake database changes rows in place)
+      ok(wfRunRow({ ...row() }).definition === null && wfEligible({ ...wfRunRow({ ...row() }), enabled: true, armed_at: "2026-10-01T00:00:00Z" }, CATALOG), "runs the old way: the migrated row runs as phase 4 and is eligible");
+      const doc = JSON.parse(JSON.stringify(row().definition)), ifId = Object.keys(doc.nodes).find((k) => doc.nodes[k].kind === "if_else");
+      doc.nodes[ifId].config.branches[0].when.segments[0].rules = [{ field: "lead.postcode", op: "is", v: "2000" }];
+      ok(!!wfToFlat(doc) && validateDoc(doc, { builder: "standard", catalog: CATALOG }).errors.length === 0, "runs the old way: the edit is still straight and fine by the v2 checks");
+      const v = await api(db, "validate", { automation_id: ID, definition: doc, editor: "builder" }), vOld = await api(db, "validate", { automation_id: ID, definition: doc });
+      eq([v.status, (v.body.errors || []).map((x: any) => x.code), (vOld.body.errors || []).length], [200, ["E_RUNS_OLD_WAY"], 0], "runs the old way: validate from the builder says so (the old editor's own call is unchanged)");
+      ok(/^It still runs the old way, which refuses this: .*lead\.postcode/.test(v.body.errors[0].text), "runs the old way: in words, with the phase-4 rule's reason");
+      const s1 = await api(db, "save", { automation_id: ID, expected_revision: row().revision, name: "Gate", definition: doc, editor: "builder" });
+      eq([s1.status, (s1.body.errors || []).map((x: any) => x.code), row().layout.editor], [200, ["E_RUNS_OLD_WAY"], "builder"], "runs the old way: a Draft is saved with the error (as every Draft error)");
+      const p1 = await api(db, "publish", { automation_id: ID, on: true, confirm: true, expected_revision: row().revision });
+      eq([p1.status, (p1.body.errors || [{}])[0].code, row().enabled], [422, "E_RUNS_OLD_WAY", false], "runs the old way: publish refuses it (never a Published row the engine would not enroll)");
+      // published before the edit: the save itself is refused, the live row is unchanged and still eligible
+      await api(db, "save", { automation_id: ID, expected_revision: row().revision, name: "Gate", definition: upgradeV1(T0, S0).doc, editor: "builder" });
+      const p2 = await api(db, "publish", { automation_id: ID, on: true, confirm: true, expected_revision: row().revision });
+      const before = JSON.stringify(row().definition), s2 = await api(db, "save", { automation_id: ID, expected_revision: row().revision, name: "Gate", definition: doc, editor: "builder" });
+      eq([p2.status, s2.status, (s2.body.errors || [{}])[0].code, JSON.stringify(row().definition) === before, wfEligible(wfRunRow({ ...row() }), CATALOG)], [200, 422, "E_RUNS_OLD_WAY", true, true],
+        "runs the old way: a Published row refuses the save (422), keeps what runs, and stays eligible");
+      // a doc that runs as a doc (not straight any more) is not touched by this check
+      const branchy = JSON.parse(JSON.stringify(doc)); branchy.nodes.x9 = { kind: "action", type: "add_task", config: { title: "Call" }, out: { next: null } };
+      eq([wfToFlat(branchy), wfRunsOldProblems({ ...row(), definition: branchy }, CATALOG)], [null, []], "runs the old way: a doc that is not a straight chain runs as a doc: nothing to say");
+      eq(wfRunsOldProblems({ ...row(), definition: doc, settings: {} }, CATALOG), [], "runs the old way: with stage-2 settings the row runs its doc: nothing to say");
     }
     // Duplicate / copy_version: no locked step or condition in the copy; the original keeps its locks; a template keeps them
     {

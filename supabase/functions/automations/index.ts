@@ -1958,6 +1958,18 @@ export function wfRunRow(a: any): any {
   return out;
 }
 
+// A row the new builder saved (layout.editor "builder") is checked by the v2 rules, but while it still runs as phase 4
+// (wfRunRow: the upgraded settings and a straight chain) the phase-4 rules decide whether it is enrolled (wfEligible →
+// validateAutomation). What those refuse is an error of the save / validate / publish too, never a workflow that quietly
+// stops starting (and ends its waiting runs). [] when the row runs as a doc.
+// deno-lint-ignore no-explicit-any
+export function wfRunsOldProblems(a: any, cat: any): WfIssue[] {
+  if (!a || typeof a !== "object" || obj(a.definition).schema !== 2) return [];
+  const v = wfRunRow(a);
+  if (!v || v === a || v.definition != null) return [];
+  return validateAutomation(v, cat).map((t) => issue("E_RUNS_OLD_WAY", "", `It still runs the old way, which refuses this: ${t}`));
+}
+
 // ── node references hidden in config (x-ref "node" in the registry schema: goto.target, date.gotoStep) ──
 // deno-lint-ignore no-explicit-any
 export function nodeRefs(node: any): { key: string; to: string | null }[] {
@@ -5577,6 +5589,8 @@ export const WF_API_STEPS = ["validate", "schema", "registry", "save", "publish"
 export const WF_VERSION_REASONS = ["create", "save", "save_version", "publish", "unpublish", "restore", "ai", "migration", "duplicate", "system_move"];
 const WF_SNAP_ON_CHANGE = ["save", "save_version", "ai", "restore", "create", "duplicate", "migration"];
 export const WF_API_LIMITS = { layoutBytes: 128 * 1024, migratePage: 200, templateDrafts: 20, versionsPage: 50 };
+// layout.editor of a workflow the new builder saved last (step "save" with editor "builder"; v1EditorView).
+export const WF_EDITOR_MARK = "builder";
 export const WF_LIB_KEY_RE = /^my_[a-z0-9]{8}$/;
 // where a workflow came from (automations.template_key: a ready-made base such as "review" / "team:<id>", or "tpl:<key>")
 export const WF_TEMPLATE_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,79}$/;
@@ -5775,6 +5789,7 @@ async function apiValidate(sb: any, b: Row, me: any, nowMs: number): Promise<Api
   if (b.automation_id && !a) return apiErr(404, "workflow not found");
   const C = await apiCtx(sb), prev = a ? obj(a.settings) : {}, raw = b.settings ?? prev, settings = normWfSettings(raw, prev);
   const chk = wfCheck(doc, raw, prev, C, a ? a.definition : null, builderOf(b.builder, a && a.builder));
+  if (b.editor === WF_EDITOR_MARK) chk.errors.push(...wfRunsOldProblems({ ...(a || {}), definition: doc, settings }, C.cat));
   const stored = a ? obj(a.definition) : null;
   const shapeChanged = !!stored && versionChanged(stored, a && a.settings, doc), armChanged = !!stored && armKey(stored, a && a.settings) !== armKey(doc, settings);
   const idsRemoved = stored ? Object.keys(obj(stored.nodes)).filter((id) => !has(obj(doc.nodes), id)).sort() : [];
@@ -5801,10 +5816,15 @@ async function apiSave(sb: any, b: Row, me: any, nowMs: number, opts: { reason?:
     expected = info.upgraded !== undefined && b.expected_revision === info.upgraded ? Number(a.revision) : b.expected_revision;
     if (Number(a.revision) !== expected) return apiErr(409, "conflict", { revision: Number(a.revision), updated_by_name: a.updated_by_name || null, updated_at: a.updated_at || null });
   }
-  const layout = b.layout == null ? (a && a.layout) || { v: 1 } : b.layout;
+  let layout = b.layout == null ? (a && a.layout) || { v: 1 } : b.layout;
   if (!layout || typeof layout !== "object" || Array.isArray(layout) || utf8Len(JSON.stringify(layout)) > WF_API_LIMITS.layoutBytes) return apiErr(422, "the layout is not valid (128 KB at most)");
+  // Which editor saved it last (v1EditorView): the new builder says so (editor "builder") → the mark; the old editor sends
+  // no layout → the mark comes off (its own blocks again); a duplicate / restore passes the source's layout as it is.
+  if (b.editor === WF_EDITOR_MARK) layout = { ...layout, editor: WF_EDITOR_MARK };
+  else if (b.layout == null && has(layout, "editor")) { layout = { ...layout }; delete layout.editor; }
   const builder = builderOf(b.builder, a && a.builder), prev = a ? obj(a.settings) : {}, raw = b.settings ?? prev, settings = normWfSettings(raw, prev);
   const C = await apiCtx(sb), chk = wfCheck(doc, raw, prev, C, a ? a.definition : null, builder);
+  if (obj(layout).editor === WF_EDITOR_MARK) chk.errors.push(...wfRunsOldProblems({ ...(a || {}), definition: doc, settings, layout }, C.cat));
   if (a && a.enabled === true && chk.errors.length) return apiErr(422, "errors", { errors: chk.errors, warnings: chk.warnings });
   // Only an owner adds a Webhook step or changes where and what one sends (its whole config: url, method, headers,
   // fields, template); a manager may keep, move, pause or remove one as it is.
@@ -5920,10 +5940,13 @@ const v1Trig = (type: unknown): any => (has(V1_EDITOR.triggers, type) ? V1_EDITO
 // The steps the old editor shows for a row (the app's autoNormalize): an upgraded row that is still exactly the upgrade of
 // its stored steps whose ids phase 4 refuses → those stored steps (so "the same id twice" is said, as before stage 2);
 // otherwise its doc as phase-4 steps (wfToFlat); a row with no doc yet → its own trigger and steps. null = only the new
-// builder shows it.
+// builder shows it, or the new builder saved it last (layout.editor "builder", set by step "save" when the builder says so:
+// its rules are the v2 checks, e.g. a 25-step workflow made there is not refused in the old editor's words; a save from
+// the old editor takes the mark off again, so what it saved keeps its own blocks).
 // deno-lint-ignore no-explicit-any
 export function v1EditorView(a: any): { trigger: any; steps: any[] } | null {
   const r = obj(a), doc = obj(r.definition).schema === 2 ? r.definition : null;
+  if (doc && obj(r.layout).editor === WF_EDITOR_MARK) return null;
   const stored = (Array.isArray(r.steps) ? r.steps : []).filter((s: unknown) => !!s && typeof s === "object" && !Array.isArray(s));
   const raw = !!doc && obj(r.settings).reentry === "legacy_always" && v1IdsBad(stored) && canonJson(upgradeV1(r.trigger, r.steps).doc) === canonJson(doc);
   if (doc && !raw) { const f = wfToFlat(doc); return f ? { trigger: f.trigger, steps: f.steps.filter((s) => !!s && typeof s === "object" && !Array.isArray(s)) } : null; }
@@ -6050,7 +6073,7 @@ async function apiPublish(sb: any, b: Row, me: any, nowMs: number): Promise<ApiR
     const C = await apiCtx(sb), chk = wfCheck(a.definition, a.settings, a.settings, C, await lastLiveDoc(sb, String(a.id)), builderOf(a.builder));
     // the old editor's own blocks first (a workflow it shows; its words are what the app said), then the v2 errors —
     // both before any question about customers
-    const view = v1EditorView(a), fix = view ? v1EditorProblems(view, C.cat, a.name).map((text) => issue("E_EDITOR_BLOCK", "", text)) : [];
+    const view = v1EditorView(a), fix = view ? v1EditorProblems(view, C.cat, a.name).map((text) => issue("E_EDITOR_BLOCK", "", text)) : wfRunsOldProblems(a, C.cat);
     if (fix.length || chk.errors.length) return apiErr(422, "errors", { errors: [...fix, ...chk.errors], warnings: chk.warnings });
     warnings.push(...chk.warnings);
     // a ready-made System row that is on and starts the same way would send twice

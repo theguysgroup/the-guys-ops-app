@@ -877,3 +877,165 @@ What changes:
 - Roll back on: an owner or manager unable to rename / move / delete / restore in the new app, the function's save or
   publish failing with a permission error (it would mean the service role lost a grant — the block's proof checks it),
   or the lead card / any other page failing after the block.
+
+## 18. Phase 4 · G4.2 — the builder's shell, paint, canvas and gestures (app only; no SQL)
+
+What changes:
+- **App**: a new root `#wf-root` (between `#app` and `#modal-root`) holds the Standard builder's frame: the top bar
+  ("← Workflows list", panel toggle, the name ✎, Recent changes, ↶ ↷, Save / Saved), the second bar (Standard builder ▾,
+  "Builder · Settings · Enrollment history · Execution logs", Test workflow, Draft ⬤ Publish), the left rail (Notes,
+  Errors with its count, Stats view, Sticky notes, Workflow switcher, Find and replace, Version history, Workflow AI),
+  the canvas (trigger cards, "Add New Trigger", step cards, branch headers, END, Go to jump pills, a "+" and Quick paste
+  per place), the zoom stack (hand · + · % · − · fit), the K overlay, "+ Add ▾", the minimap (≥ 900 px) and the mode pill.
+  Its own paint (`wfDirty` → one frame → `wfPaint`; `window.__wfp` counts paints, `__wfPaintReentry` stays 0), its own
+  keys (capture listener while open), gestures (pan, pinch, drag a step onto a "+", minimap, drawer width), the step's
+  "Actions" menu (Notes, Copy, Paste below, Move, Disable, Delete; Q4 "Keep which path?"), move mode (arrows + Enter, or a
+  tap: the phone's way, Q3), undo (100 steps, Undo on every delete toast), the tree for screen readers, the phone shell
+  (375 px: back / name / ⋯ / Save, tabs + Publish, Tools sheet, no drag handles, no minimap). New `--wf-*` tokens in the
+  three token blocks (contrast tested). The app's own Esc and ⌘K step aside while it is open; `render()` asks it first
+  (`wfAppDataChanged`: signed out / another profile → it closes).
+- Nothing opens it yet: G4.4 wires "Edit workflow" on the list. Pickers / the step drawer (G4.3), the rail panels, Save,
+  Publish and the leave guard (G4.4) and the other tabs (phase 6) plug into `WF_HOOKS`; until then their buttons are
+  greyed "Comes with the next part of the builder". Stage 4's page history plugs into `wfNavHooks` (no-ops now).
+- **SQL / engine**: none.
+
+### 18.1 Order (with phase 4's live push, after G4.3 and G4.4)
+
+1. `check_all.sh` ALL GREEN (app: `testWfShellPure`, `testWfShellWords`, `testWfShellTokens`, `testWfShellStatic`,
+   `testWfShellRuntime` — the fake-DOM run: one paint on open, no frame while idle, a selection / pan patches only what
+   changed, an edit rewrites one card, 200 steps open < 150 ms and pan < 4 ms, closing removes every listener).
+2. App: branch → the live-origin browser check (MASTER §4) with the builder opened on the empty, a migrated, a System and
+   the 50 / 200-step fixtures (document.write, presentation mode): `window.__wfp = 0`, wait 3 s → still 0 and `__rc = 0`;
+   hover across 50 cards → `__wfp` unchanged; `__wfPaintReentry = 0`; Performance panel: open 200 steps < 150 ms, a
+   scripted pan / zoom / drag with no long task > 50 ms and < 4 ms a frame; keyboard only (Tab reaches the canvas once,
+   arrows walk it, Enter / Shift+F10 / M / Delete / ⌘Z, K shows the keys, Esc closes each layer); phone 375×812 (no
+   sideways scroll, one finger pans, two pinch, long-press opens the menu, Move action → "Move here" works) and 768 px;
+   dark and light; reduced motion (fit / zoom jump); the phone widget sits above the minimap. Then fast-forward main.
+
+### 18.2 Roll back
+
+- **App**: back to the commit before phase 4 (the list's "Edit workflow" opens the phase-4 editor again; nothing was
+  saved by the shell itself — saving is G4.4's).
+- Roll back on: any idle repaint (`__wfp` rising with nothing happening), the app behind staying inert after closing, the
+  list's ⋯ menu or any other page losing a key or Esc, or a page-wide sideways scroll on a phone.
+
+## 19. Phase 4 · G4.3 — the pickers, the step drawer and its forms (app only; no SQL)
+
+What changes:
+- **App**: the "+", "+ Add ▾", "Add New Trigger", A / T open the right panel's picker — "Actions" / "Add trigger", "Search
+  actions" / "Search triggers", tabs "Actions | Apps" / "Triggers | Apps", Recent, Pinned, then GHL's categories. A greyed row
+  says why on a second line and on click, including the "+"'s own reasons ("Go to must be the last step of its path", "Not
+  available for the Scheduler trigger", "Only owners can add a webhook"). Q5: there is no quote trigger anywhere (a search for
+  "estimates" / "quote sent" finds Pipeline stage changed; the stage trigger's drawer says "a quote is sent when the lead
+  moves to the Quoted stage"). Q6: Assign to user / Remove assigned user are offered.
+- Picking opens the **step drawer** on a NEW step: nothing is added until "Save action" / "Save trigger" (GHL). A step or a
+  trigger clicked opens the same drawer: ^ / v (reading order), "Learn more", expand, ×; "Action name" / "CHOOSE A WORKFLOW
+  TRIGGER" + "WORKFLOW TRIGGER NAME" + "FILTERS" (⊕ Add filters); the step's own problems on top; footer "Delete" | "Cancel" |
+  "Save action". The drawer edits a draft: typing never repaints (Save, counters, the Split total and the message preview
+  are patched in place), Save = ONE undo entry, Cancel / × / Esc with changes asks "Discard changes?", undo is refused while
+  the drawer has typing in it, a step deleted under it closes it. Per kind: If / else (SCENARIO RECIPE "Build Your Own",
+  BRANCHES with name + counter, Duplicate / Delete, "+ Add Branch" ≤ 10, "Reorder Branches", AND / OR rows, "+ Add Segment",
+  the None Branch "When no condition is met"); Wait ("Selected wait type" + "Change type" → "How do you want to wait?", "✦ Set
+  up with AI" greyed, the eight cards with "Ex:" lines, "Until the lead replies" first after a message; "Time period" with
+  its ⋮ greyed "Dynamic values come later", "Advance window", Timeout switches); Split ("Distribution Type: Random Split",
+  2–5 paths, % steppers, "Total 100%"); Goal ("Select type of goal", "End this workflow / Continue anyway / Wait until the
+  goal is met"); Go to ("Go to step" in reading order + "Pick on canvas"); messages (written here or a saved template, "+
+  Write a new one", "Copy a built-in message…", "What the lead gets"); notifications (who chips + "On their phone"); tasks.
+  Q4: the drawer's Delete on a step with branches asks "Keep which path?"; removing a branch, a timeout or a wait type
+  whose path still has steps asks "Delete the N steps on the … path?" before the same Save.
+- **People on vacation** (stage 3 + Q6): the lead card's "Assigned to" greys whoever is away today with "Not assignable"
+  ticked ("Name · On vacation until …"); picking them asks "Assign anyway?" with "Assign <stand-in> instead" (only when the
+  stand-in has a login and you may assign to them). The builder's Assign to user, notification chips and "Until a user
+  replies" people say the same.
+- The old editor's widgets (message template list / words / name / new key, who chips, task fields, wait and window fields,
+  the preview) now take the template drafts and their bindings as parameters; without them they behave as before.
+- **SQL / engine**: none.
+
+### 19.1 Order (with phase 4's live push, after G4.4)
+
+1. `check_all.sh` ALL GREEN (app: `testWfPickDrawerPure`, `testWfPickDrawerWords`, `testWfPickDrawerRuntime` — pick → drawer →
+   typing with no paint → Save as one undo entry → undo; a branch added; a branch with steps asked then dropped in one edit;
+   a dirty drawer refusing undo and asking before closing; a trigger with a filter; read-only drawers; idle = no paint).
+2. App: branch → the live-origin browser check (MASTER §4): every action / trigger picked once (greyed ones say why), each
+   drawer kind saved and undone, typing in a long message (focus stays, no paint while typing: `__wfp` unchanged), Esc / Cancel
+   with changes, Pick on canvas, Delete on an If / else (Keep which path?), a lead's Assigned to with someone on vacation
+   (warn + stand-in); phone 375×812 (picker and drawer as bottom sheets, no sideways scroll) and 768 px; dark and light.
+
+### 19.2 Roll back
+
+- **App**: back to the commit before G4.3 (the "+" and the cards say "Comes with the next part of the builder" again; nothing
+  is written by the drawer itself — Save to the server is G4.4's).
+- Roll back on: typing in the drawer losing focus or repainting, a Save that is more than one undo entry, a picker row that
+  adds something greyed, or the lead card's Assigned to failing to save.
+
+## 20. Phase 4 · G4.4 — the rail, Save, undo, leaving, Publish and opening from the list (app + function; no new SQL)
+
+What changes:
+- **App — opening**: the list's "Edit" / the card's name / "Edit workflow", a link's `?wf=…`, Duplicate, "Start from scratch"
+  and "Select from template" (branching templates too) now open the **new builder** (`wfEdit` reads the row's doc and
+  revision). A System row opens **read-only** with the yellow "System workflow · view only" pill and the banner "System
+  workflow · runs on the built-in system" + "Duplicate to edit" (an unsaved copy; built-in words copied into templates of
+  the business's own) + "Open its old settings" (rows with a page) + "Move into the engine" (greyed with the reason). The
+  old editor stays only for a rollback: `localStorage.setItem('ops.wfOldEditor', '1')` in that browser (and `removeItem`
+  to go back).
+- **App — Save** (button / ⌘S): through the function only. A Published workflow is checked first (step `validate`):
+  "Start it afresh?" (N leads waiting will be stopped), "It only acts on what happens after you save", a new customer
+  step or Workflow AI's change → "Save as a Draft?"; a Published one with errors is refused ("Fix the errors first: this
+  workflow is published", Errors opens). 409 → "This workflow was changed by <name> at <time>." with Load their version /
+  Save mine as a copy / Cancel. A new one is inserted on its first Save only (template_key, its folder, its template words
+  → the catalog). Every save says `editor: "builder"` (see Function below). Toast: "Workflow has been saved."
+- **App — Publish** (Draft ⬤ Publish): read-only views and Presentation mode refuse with the reason; errors → "Workflow
+  can't be published yet" + Review issues (opens Errors); a pause → greyed "Paused until … (Global Workflow Settings)";
+  unsaved → "Save and publish?"; then **the phase-3 check (`wfPublishFix`: the old editor's blocks for a row the new
+  builder never saved — customer safety, unchanged)**, the customer / System questions (`wfPublishAsk`), then the function's
+  publish (which checks everything again, 409 "confirm" asked again). Draft is immediate.
+- **App — the rail**: Notes (⇧C; workflow and step notes in `automation_notes`: Created by / on, Edited by / on, search,
+  Edit / Delete for the author or an owner; "Save the workflow first", "Save first to add notes to a new step"; the cards
+  show their count), Errors (⌘⇧E; this device's check + the server's `validate`, grouped by step with "Open step", "How
+  to fix" greyed "Coming with Workflow AI", "No errors found. All good.", the red count), Sticky notes (⇧S; beside a step,
+  markdown-lite, GHL's colours, Show / Hide; a deleted step's notes move to the step above it in the same undo entry),
+  Workflow switcher (⇧W; search, Recent, "+", Open in new tab, ⋮ Duplicate / Delete; asks first when unsaved), Find and
+  replace (⌥F; Text / Tags / Custom values, Previous / Next pans to each, Replace / Replace All for Tags and Custom values
+  only, shared templates "not changed"). Stats view and Version history stay greyed (phase 6); Workflow AI greyed (hook
+  `wfAiApply`: its changes are one undo entry and save a Published workflow as a Draft).
+- **App — undo / leaving**: "Recent changes" (this session's changes with times; pick one to go back to just after it).
+  Unsaved work is written to this device 1.5 s after each change (`wf.draft.<business>.<id|new>.<tab>`, skipped above
+  1 MB) and offered back on opening ("Unsaved changes found": Restore / Discard, or "Restore as a copy" when the workflow
+  was saved since); Save and Discard clear it. Leaving (← Workflows list, the switcher) with unsaved changes asks Save /
+  Discard / Cancel; closing the tab writes the draft and shows the browser's own prompt; signing out keeps it.
+- **Function (automations)**: step `save` with `editor: "builder"` stores `layout.editor = "builder"`; a save without a
+  layout (the old editor's) takes it off; `v1EditorView` returns null for a row with the mark, so **publish judges a
+  workflow the new builder saved last by the v2 checks only** (a 25-step workflow made in the builder is no longer refused
+  "At most 20 steps."); a phase-4 row saved by the old editor keeps its old blocks (`E_EDITOR_BLOCK`). The app's
+  `wfPublishBlock` / `toggleAutomation` follow the same mark (`autoNormalize(...).builderMade`).
+- **SQL**: none (PART 3 · G4.4 in `stage2-automations.sql` is read-only checks; staging check 27 = the notes as owner /
+  manager / VA).
+
+### 20.1 Order (phase 4's live push: G4.1–G4.4 together)
+
+1. `check_all.sh` ALL GREEN (engine: "editor mark" cases in test 38; app: `testWfRailPure`, `testWfRailWords`,
+   `testWfSaveRuntime` — the fake-DOM write path against a fake function with revision 409 semantics and a fake notes
+   table; the template window's Choose → builder).
+2. Staging: the PART 3 · G4.4 "check before" lines; `stage2-part1-staging-checks.sql` → "PASS 27".
+3. Function: deploy `automations` (dashboard editor + fingerprint, as before) BEFORE the app — the old app never sends
+   `editor`, so nothing changes for it.
+4. App: build the harness (`node .claude/builder-harness/build.js`), serve the repo root (`python3 -m http.server 8743`),
+   open `/.claude/builder-harness/`, run `await __wfClickThrough()` in the console → "N passed, 0 failed" (Edit opens the
+   new builder, Save + revision, 409 + Save mine as a copy, the publish gate + Review issues, customer publish with the
+   yes, Workflow AI → Draft, 25 steps publish, a note, template words into the catalog, the local draft offered back,
+   leave → Discard, System → Duplicate to edit, idle 3 s). Then the live-origin browser check (MASTER §4) as in §18.1 and
+   §19.1 plus: Notes / Errors / Sticky notes / Switcher / Find on 375×812 (bottom sheets, no sideways scroll) and 768 px,
+   dark and light; Presentation mode (Save / Publish / notes greyed with the reason, editing still local). Then
+   fast-forward main.
+
+### 20.2 Roll back
+
+- **App**: back to the commit before phase 4 (the list's Edit opens the old editor again). Or, per browser, without a
+  deploy: `localStorage.setItem('ops.wfOldEditor', '1')` → Edit / Create / templates / System Duplicate use the old editor.
+  Rows the builder saved keep `layout.editor = "builder"` (judged by the v2 checks, as made); the old editor's save takes
+  the mark off. To take every mark off at once: PART 3 · G4.4's ROLLBACK lines.
+- **Function**: redeploy the previous build (the mark is then ignored: the old editor's blocks apply to every straight
+  workflow again, as in phase 3).
+- Roll back on: a Save that loses changes or saves over someone else's (no 409), a Publish that skips the customer
+  question or the phase-3 check, a builder that repaints while idle, a draft offered for the wrong workflow, or notes
+  visible to a VA / technician.

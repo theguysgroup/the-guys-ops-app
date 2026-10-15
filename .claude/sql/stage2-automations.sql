@@ -4244,3 +4244,42 @@ commit;
 -- The app's rollback: none needed (RUNBOOK §17.2).
 -- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 -- END PART 3 · G3.4
+
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- PART 3 · G4.4 (phase 4: the builder's rail, Save, Publish, notes; design §5.5, §3.13, §2.7). NO SCHEMA CHANGE. What the
+-- new builder writes goes only to what Parts 1–3 already have and check server-side:
+--   • Save / Publish / Duplicate: the automations function (step "save" with editor "builder" stores layout.editor =
+--     'builder' inside automations.layout — a jsonb Part 1 already has, ≤ 128 KB, written only by the function since
+--     G3.4; the function's publish then judges that row by the v2 checks only, never the old editor's blocks).
+--   • Notes: public.automation_notes (Part 1: the table, automation_notes_guard (who / when / where never change),
+--     RLS: owners and managers read and add (created_by = the signed-in person, this business), the author or an owner
+--     changes or deletes; a delete from the builder is a soft delete (deleted_at)).
+--   • Sticky notes: inside automations.layout (saved with the workflow by the function; no table).
+--   • Moving a new workflow into the open folder after its first Save: automations.folder_id (a G3.4 column grant).
+-- Check before the G4.4 app push (read-only; every line true):
+--   select count(*) = 1 from information_schema.columns where table_schema = 'public' and table_name = 'automations' and column_name = 'layout' and data_type = 'jsonb';
+--   select relrowsecurity from pg_class where oid = 'public.automation_notes'::regclass;
+--   select count(*) = 4 from pg_policies where schemaname = 'public' and tablename = 'automation_notes'
+--      and policyname in ('automation_notes: owners and managers read', 'automation_notes: owners and managers add', 'automation_notes: author or owner change', 'automation_notes: author or owner delete');
+--   select count(*) = 1 from pg_trigger where tgrelid = 'public.automation_notes'::regclass and tgname = 'automation_notes_guard' and not tgisinternal;
+--   select has_table_privilege('authenticated', 'public.automation_notes', 'select') and has_table_privilege('authenticated', 'public.automation_notes', 'insert')
+--      and has_table_privilege('authenticated', 'public.automation_notes', 'update') and not has_table_privilege('anon', 'public.automation_notes', 'insert');
+--   select has_column_privilege('authenticated', 'public.automations', 'folder_id', 'UPDATE')
+--      and not has_column_privilege('authenticated', 'public.automations', 'layout', 'UPDATE');   -- (after G3.4; before it, the pin keeps layout)
+-- Staging: "PASS 27" of .claude/sql/stage2-part1-staging-checks.sql (a note added, edited and deleted as the builder does,
+-- as owner / manager / VA; all undone).
+-- Check after (read-only, once the builder has been used):
+--   select count(*) filter (where layout->>'editor' = 'builder') as saved_by_builder, count(*) as workflows from public.automations where deleted_at is null;
+--   select automation_id, node_id, left(body, 40), created_by_name, created_at, edited_at, deleted_at is not null as deleted from public.automation_notes order by created_at desc limit 20;
+-- ROLLBACK (exact): nothing to undo in the schema (this block changes nothing). Rolling the app back to before G4.4 (RUNBOOK
+-- §20.2) leaves layout.editor on the rows the builder saved: the function then keeps judging them by the v2 checks (as
+-- the builder made them); the old editor's save takes the mark off again. To take every mark off at once (only if asked;
+-- the function's role, e.g. the SQL editor):
+--   begin;
+--   update public.automations set layout = layout - 'editor' where layout ? 'editor';   -- (the guard adds 1 to their revision: an open builder gets "changed meanwhile")
+--   select count(*) = 0 from public.automations where layout ? 'editor';   -- true
+--   commit;
+-- Notes added from the builder stay (they are the team's notes); to remove them (only if asked):
+--   update public.automation_notes set deleted_at = now() where deleted_at is null and created_at >= '<the G4.4 push time>';
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- END PART 3 · G4.4

@@ -20,6 +20,8 @@
 -- business's own as the automations function writes it; needs no new SQL).
 -- since G3.5 also "PASS 25" and 'stage2 phase 3 · G3.5 staging checks done' (after PART 3 · G3.5: quiet imports, the
 -- lead's Assigned to, no Quote status).
+-- since G4.4 also "PASS 27" and 'stage2 phase 4 · G4.4 staging checks done' (the builder's notes as owner / manager / VA;
+-- needs no new SQL).
 -- since G3.4 also "PASS 26" and 'stage2 phase 3 · G3.4 staging checks done' (after PART 3 · G3.4, the LAST block of Part 3:
 -- the lock on direct writes as owner / manager / VA / technician / anon; before that block ran it prints "NOTE 26 …"). After
 -- G3.4, the signed-in parts of checks 12 and 19 print "NOTE 12: PART 3 · G3.4 is applied …" and "NOTE 19: PART 3 · G3.4
@@ -1760,3 +1762,97 @@ begin
 end $$;
 
 select 'stage2 phase 3 · G3.4 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 4 · G4.4 — the builder's Notes panel (design §5.5 "Notes", §2.9 automation_notes). STAGING ONLY. NO SCHEMA CHANGE:
+-- Part 1 has the table, its guard and its policies; this proves what the builder writes there. Same rules: the block
+-- undoes what it wrote, then prints "PASS 27".
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 27. (G4.4) a) a signed-in owner adds a workflow note and a step note exactly as the builder writes them (business_id,
+--     automation_id, node_id, body, created_by_name; created_by = the signed-in person) and reads both back; b) edits one
+--     (edited_by_name / edited_at) while the guard keeps who / when / where; soft-deletes the other (deleted_at); an empty
+--     note or a bad step id is refused; c) a manager adds a note but changes 0 rows of the owner's; the owner may change
+--     the manager's; d) a VA / technician reads 0 notes and can't add one; e) a note on another business's workflow is
+--     refused.
+do $$
+declare a uuid; o uuid; owner_id uuid; mgr_id uuid; va_id uuid; n1 uuid; n2 uuid; m1 uuid; got text; n integer; r public.automation_notes%rowtype;
+  claims constant text := 'request.jwt.claims';
+begin
+  begin
+    select id into owner_id from public.profiles where role = 'owner' order by id limit 1;
+    select id into mgr_id from public.profiles where role = 'manager' order by id limit 1;
+    select id into va_id from public.profiles where role in ('va', 'technician') order by id limit 1;
+    if owner_id is null then raise exception 'FAIL 27: staging has no owner profile (run staging-seed-demo.sql first)'; end if;
+    -- as the SQL editor: a workflow of this business and one of another
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 27', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automations (business_id, name, enabled, trigger, steps) values ('stage2-check-27-other', 'stage2 check 27 other', false, '{"type":"newLead","params":{}}', '[]') returning id into o;
+    -- a) the owner, as the app
+    perform set_config(claims, json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+    perform set_config('request.jwt.claim.sub', owner_id::text, true);
+    execute 'set local role authenticated';
+    insert into public.automation_notes (business_id, automation_id, node_id, body, created_by_name) values ('default', a, null, 'Checked with Noam', 'Staging Owner') returning id into n1;
+    insert into public.automation_notes (business_id, automation_id, node_id, body, created_by_name) values ('default', a, 'n1', 'Words checked', 'Staging Owner') returning id into n2;
+    select count(*) into n from public.automation_notes where automation_id = a and deleted_at is null;
+    select * into r from public.automation_notes where id = n2;
+    if n <> 2 or r.created_by is distinct from owner_id or r.node_id is distinct from 'n1' or r.created_by_name <> 'Staging Owner' then
+      raise exception 'FAIL 27a: the owner''s notes read back as % rows, created_by %, node %', n, r.created_by, r.node_id;
+    end if;
+    -- b) edit (the guard keeps who / when / where), soft delete, refused shapes
+    update public.automation_notes set body = 'Words checked twice', edited_by_name = 'Staging Owner', edited_at = now(), node_id = 'n9', created_by_name = 'Someone else', created_at = now() - interval '9 days' where id = n2;
+    select * into r from public.automation_notes where id = n2;
+    if r.body <> 'Words checked twice' or r.edited_at is null or r.node_id is distinct from 'n1' or r.created_by_name <> 'Staging Owner' or r.created_at < now() - interval '1 day' then
+      raise exception 'FAIL 27b: an edit gave body %, node %, author %', r.body, r.node_id, r.created_by_name;
+    end if;
+    update public.automation_notes set deleted_at = now() where id = n1;
+    get diagnostics n = row_count;
+    if n <> 1 or (select count(*) from public.automation_notes where automation_id = a and deleted_at is null) <> 1 then raise exception 'FAIL 27b: the soft delete changed % rows', n; end if;
+    begin insert into public.automation_notes (business_id, automation_id, body, created_by_name) values ('default', a, '   ', 'Staging Owner'); got := 'saved'; exception when check_violation then got := 'check'; end;
+    if got <> 'check' then raise exception 'FAIL 27b: an empty note gave %', got; end if;
+    begin insert into public.automation_notes (business_id, automation_id, node_id, body, created_by_name) values ('default', a, '1bad id', 'x', 'Staging Owner'); got := 'saved'; exception when check_violation then got := 'check'; end;
+    if got <> 'check' then raise exception 'FAIL 27b: a bad step id gave %', got; end if;
+    -- e) another business's workflow
+    begin insert into public.automation_notes (business_id, automation_id, body, created_by_name) values ('stage2-check-27-other', o, 'x', 'Staging Owner'); got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+    if got <> 'refused' then raise exception 'FAIL 27e: a note for another business gave %', got; end if;
+    execute 'reset role';
+    -- c) a manager: adds own, can't change the owner's; the owner can change the manager's
+    if mgr_id is not null then
+      perform set_config(claims, json_build_object('sub', mgr_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', mgr_id::text, true);
+      execute 'set local role authenticated';
+      insert into public.automation_notes (business_id, automation_id, body, created_by_name) values ('default', a, 'From the manager', 'Staging Manager') returning id into m1;
+      update public.automation_notes set body = 'Changed by the manager' where id = n2;
+      get diagnostics n = row_count;
+      if n <> 0 then raise exception 'FAIL 27c: a manager changed the owner''s note'; end if;
+      execute 'reset role';
+      perform set_config(claims, json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', owner_id::text, true);
+      execute 'set local role authenticated';
+      update public.automation_notes set body = 'Owner tidied it', edited_by_name = 'Staging Owner', edited_at = now() where id = m1;
+      get diagnostics n = row_count;
+      if n <> 1 then raise exception 'FAIL 27c: the owner could not change the manager''s note'; end if;
+      execute 'reset role';
+    else
+      raise notice 'NOTE 27: no manager profile on staging; the manager part was skipped';
+    end if;
+    -- d) a VA / technician: nothing to read, nothing to add
+    if va_id is not null then
+      perform set_config(claims, json_build_object('sub', va_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', va_id::text, true);
+      execute 'set local role authenticated';
+      select count(*) into n from public.automation_notes where automation_id = a;
+      if n <> 0 then raise exception 'FAIL 27d: a VA / technician read % notes', n; end if;
+      begin insert into public.automation_notes (business_id, automation_id, body, created_by_name) values ('default', a, 'x', 'Staging VA'); got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+      if got <> 'refused' then raise exception 'FAIL 27d: a VA / technician added a note'; end if;
+      execute 'reset role';
+    else
+      raise notice 'NOTE 27: no VA / technician profile on staging; that part was skipped';
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 27 — the builder''s notes: added (workflow / step) and read back as the signed-in owner, edited with who / when / where kept, soft-deleted; empty or bad ones refused; a manager adds but can''t change others''; a VA reads and adds nothing; another business refused';
+end $$;
+
+select 'stage2 phase 4 · G4.4 staging checks done';
