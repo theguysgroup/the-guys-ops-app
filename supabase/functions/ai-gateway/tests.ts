@@ -6,6 +6,7 @@
 // ── a small in-memory stand-in for the Supabase client (mcp/tests.ts, plus the ai_* helper functions) ──
 function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, string>; fail?: string[] } = {}) {
   const T: Record<string, any[]> = { ...seed };
+  const reEsc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   let idn = 0;
   // ids are deterministic per database, so two runs of the same chat produce the same transcript
   const newId = () => `00000000-0000-4000-8000-${String(++idn).padStart(12, "0")}`;
@@ -17,6 +18,9 @@ function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, strin
     if (op === "eq") return (r: any) => r[col] != null && String(r[col]) === val;
     if (op === "is" && val === "null") return (r: any) => r[col] == null;
     if (op === "lt") return (r: any) => r[col] != null && String(r[col]) < val;
+    // G2 (the lead resolver): ilike with * wildcards, and match (a regex)
+    if (op === "ilike") { const re = new RegExp("^" + val.split("*").map(reEsc).join("[\\s\\S]*") + "$", "i"); return (r: any) => r[col] != null && re.test(String(r[col])); }
+    if (op === "match") { const re = new RegExp(val); return (r: any) => r[col] != null && re.test(String(r[col])); }
     throw new Error("fake or: " + s);
   }
   function from(table: string) {
@@ -36,6 +40,9 @@ function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, strin
       lt(k: string, v: any) { filters.push((r) => r[k] != null && order(r[k], v) < 0); return b; },
       is(k: string, v: any) { filters.push((r) => (r[k] ?? null) === v); return b; },
       in(k: string, list: any[]) { filters.push((r) => list.includes(r[k])); return b; },
+      // G2: ilike with % wildcards (backslash escapes), and where(fn) for the tests' row-level security stand-in
+      ilike(k: string, pat: string) { let src = ""; const p = String(pat); for (let i = 0; i < p.length; i++) { const ch = p[i]; if (ch === "\\" && i + 1 < p.length) src += reEsc(p[++i]); else if (ch === "%") src += "[\\s\\S]*"; else if (ch === "_") src += "[\\s\\S]"; else src += reEsc(ch); } const re = new RegExp("^" + src + "$", "i"); filters.push((r) => r[k] != null && re.test(String(r[k]))); return b; },
+      where(fn: (r: any) => boolean) { filters.push(fn); return b; },
       or(s: string) { const cl = s.split(",").map(clause); filters.push((r) => cl.some((f) => f(r))); return b; },
       order(k: string, o?: any) { orders.push([k, !(o && o.ascending === false)]); return b; },
       limit(n: number) { lim = n; return b; },
@@ -96,6 +103,8 @@ function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, strin
 }
 
 let pass = 0, fail = 0;
+// Later groups' test files (tests_*.ts, appended by run_tests.sh) push their suites here; they run at the end.
+const SUITES: (() => Promise<void>)[] = [];
 function eq(got: any, want: any, name: string) {
   const g = JSON.stringify(got), w = JSON.stringify(want);
   if (g === w) pass++; else { fail++; console.log(`FAIL ${name}\n  got  ${g}\n  want ${w}`); }
@@ -336,7 +345,7 @@ const textScript = (text: string, extra: any = {}) => ({
     eq(rows[2].meta.tools, [{ id: rows[2].content[0].id, name: "whoami", status: "done" }], "assistant meta.tools");
     eq([rows[2].meta.step, rows[2].meta.stop_reason, rows[2].meta.model], [0, "tool_use", "claude-haiku-5-5"], "assistant meta: step, stop_reason, model");
     eq(rows[3].content.map((b: any) => [b.type, b.tool_use_id, b.is_error]), [["tool_result", rows[2].content[0].id, undefined]], "one tool_result for the call");
-    eq(JSON.parse(rows[3].content[0].content), { name: "Olivia Owner", role: "owner", roleLabel: "Owner" }, "whoami's result");
+    eq(Object.entries(JSON.parse(rows[3].content[0].content)).slice(0, 3), [["name", "Olivia Owner"], ["role", "owner"], ["roleLabel", "Owner"]], "whoami's result (G2 adds the rest; tests_changes.ts)");
     ok(rows[4].text.startsWith("Mock: done (whoami) — {\"name\":\"Olivia Owner\""), "the final text refers to the tool's result");
     eq(conv.title, "Who am I? please tell me", "title = first 60 characters, spaces collapsed");
     eq([conv.message_count, conv.busy_until, conv.last_message_at], [2, null, new Date(T0).toISOString()], "conversation: visible message count, lock released, last message time");
@@ -507,7 +516,7 @@ const textScript = (text: string, extra: any = {}) => ({
     for (const t of Object.values(TOOLS)) eq(strictSchemaProblems(t.input_schema), [], `registered tool ${t.name} has a strict-compatible schema`);
     for (const m of Object.values(MODES)) eq(strictSchemaProblems(m.contextSchema), [], `mode ${m.id} has a strict-compatible context schema`);
     const me = appProfile(OWNER);
-    eq(toolsFor("assistant", me).map((t) => t.name), ["read_office_hours", "whoami"], "assistant tools, sorted, without the test mode's");
+    eq(toolsFor("assistant", me).map((t) => t.name), ["add_lead_note", "add_task", "change_office_hours", "move_lead_stage", "read_office_hours", "whoami"], "assistant tools, sorted, without the test mode's (G2's change tools included)");
     flips = 0;
     eq(toolsFor("test_mode", me).map((t) => t.name), ["boom", "echo_test", "flaky_allow", "huge", "refuses"], "a test mode's tools appear in its own mode (no change to the loop)");
     registerTool({ ...good, name: "owner_only", modes: ["test_mode"], allow: (p: any) => p.role === "owner" });
@@ -516,7 +525,7 @@ const textScript = (text: string, extra: any = {}) => ({
     ok((() => { try { registerChangeKind({ kind: "Bad Kind", label: "x", allow: () => true, apply: async () => ({ after: 1 }), undo: async () => {} }); return false; } catch { return true; } })(), "registerChangeKind rejects a bad kind");
     eq(matchTool("READ_office_hours", toolsFor("assistant", me))?.name, "read_office_hours", "matchTool: case-insensitive");
     eq(matchTool("readofficehours", toolsFor("assistant", me)), null, "matchTool: no fuzzy guesses");
-    eq(apiTools(toolsFor("assistant", me)).map((t: any) => Object.keys(t)), [["name", "description", "input_schema", "strict"], ["name", "description", "input_schema", "strict"]], "apiTools: strict, no eager_input_streaming");
+    eq(apiTools(toolsFor("assistant", me)).map((t: any) => Object.keys(t).join()), toolsFor("assistant", me).map(() => "name,description,input_schema,strict"), "apiTools: strict, no eager_input_streaming");
   }
 
   // ── 13. buildRequest ──
@@ -525,7 +534,7 @@ const textScript = (text: string, extra: any = {}) => ({
     const h = buildRequest({ model: "claude-haiku-5-5", maxTokens: 4096, effort: "low", system: ASSISTANT_SYSTEM, tools, messages: [{ role: "user", content: "hi" }] });
     eq(h.params.system, [{ type: "text", text: ASSISTANT_SYSTEM, cache_control: { type: "ephemeral" } }], "system: one text block with cache_control");
     eq([h.params.cache_control, h.params.tool_choice, h.params.output_config, h.params.max_tokens], [{ type: "ephemeral" }, { type: "auto" }, { effort: "low" }, 4096], "top-level cache_control, tool_choice auto, effort");
-    eq(h.params.tools.map((t: any) => [t.name, t.strict, "eager_input_streaming" in t]), [["read_office_hours", true, false], ["whoami", true, false]], "tools sorted, strict, no eager streaming");
+    eq(h.params.tools.map((t: any) => [t.name, t.strict, "eager_input_streaming" in t]), ["add_lead_note", "add_task", "change_office_hours", "move_lead_stage", "read_office_hours", "whoami"].map((n) => [n, true, false]), "tools sorted, strict, no eager streaming");
     ok(["temperature", "top_p", "top_k", "thinking", "budget_tokens", "betas", "fallbacks"].every((k) => !(k in h.params)) && !h.useBeta, "Haiku: no sampling, thinking, betas or fallbacks");
     const s5 = buildRequest({ model: "claude-sonnet-5-5", maxTokens: 4096, effort: "low", system: "S", tools, messages: [] });
     eq([s5.useBeta, s5.params.betas, s5.params.fallbacks, s5.params.output_config], [true, ["server-side-fallback-2026-07-01"], "default", { effort: "low" }], "claude-sonnet-5-5: beta fallbacks 'default' and effort");
@@ -936,6 +945,7 @@ const textScript = (text: string, extra: any = {}) => ({
     eq(usdText(1234.5, { region: { moneyFormat: "1.234,56", currency: "EUR" } }), "US$1.234,50", "usdText: US dollars in the business's number format");
   }
 
+  for (const s of SUITES) await s();
   console.log(`ai-gateway: ${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
 })().catch((e) => { console.log("ai-gateway: test run crashed: " + (e && e.stack || e)); console.log(`ai-gateway: ${pass} passed, ${fail + 1} failed`); process.exit(1); });

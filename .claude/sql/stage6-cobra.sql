@@ -285,3 +285,186 @@ select 'G1-gateway ok';
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════════
 -- END G1-gateway
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+-- Group G2-changes: the assistant's compare-and-set writers (stage 6 spec §3) and the change card's display column.
+-- The ai-gateway function calls these with the SIGNED-IN PERSON'S token (a Supabase client carrying their Authorization
+-- header), and they are SECURITY INVOKER, so every RLS rule on settings / contacts / tasks applies exactly as when the
+-- person edits in the app. Each one locks the row, compares the fields the change touches with what the person was
+-- shown (the optimistic lock: these tables have no updated_at), then writes atomically (a lead's messages / notes are
+-- appended or filtered in place, so a customer message or another note arriving meanwhile is never lost). Only fixed
+-- sections / columns can be written: catalog 'hours'; a lead's stage fields and contacted_at; deleting a task.
+-- Run AFTER the G1-gateway section, STAGING first (wblsrpmjiqwuxmrmuklc). Safe to run again (create or replace).
+-- Check before (read-only):
+--   select table_name, column_name, data_type from information_schema.columns where table_schema = 'public'
+--     and ((table_name = 'contacts' and column_name in ('id','status','stage_changed_at','next_follow_up','chasing_since',
+--            'chase_alert_done','chase_round','lost_reason','booked_for','contacted_at','messages','customer_notes'))
+--       or (table_name = 'tasks' and column_name in ('id','title','status','due','board','assignees','priority','notes',
+--            'subtasks','updates','contact_id','heads_up'))
+--       or (table_name = 'settings' and column_name in ('id','catalog')))
+--    order by 1, 2;   -- expect: contacts.id / tasks.id uuid, messages / customer_notes / subtasks / updates jsonb,
+--                     -- settings.catalog jsonb (if an id is not uuid, change p_id's type below to match before running)
+--   select tablename, policyname, cmd, roles, qual, with_check from pg_policies
+--    where schemaname = 'public' and tablename in ('settings','contacts','tasks','activity_log') order by 1, 3;
+--                     -- the rules the assistant's writes run under (copy them into the PR)
+--   select to_regclass('public.ai_changes');   -- not null (G1 ran)
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+begin;
+
+-- 0. What the change card shows ({ title, rows: [{ label, before, after }] }, display strings), written with the proposal.
+alter table public.ai_changes add column if not exists display jsonb;
+alter table public.ai_changes drop constraint if exists ai_changes_display_check;
+alter table public.ai_changes add constraint ai_changes_display_check check (display is null or jsonb_typeof(display) = 'object');
+
+-- 1. One catalog section (only 'hours' in stage 6), replaced only if it is still what the person was shown.
+--    p_value null = remove the key (back to the app's defaults).
+--    Returns {ok, value} | {ok:false, code:'changed', now} | {ok:false, code:'denied'}.
+create or replace function public.ai_catalog_cas(p_section text, p_expected jsonb, p_value jsonb) returns jsonb
+language plpgsql volatile security invoker set search_path = ''
+as $$
+declare cur jsonb; n integer;
+begin
+  if p_section is distinct from 'hours' then
+    raise exception 'ai_catalog_cas: % is not a section the assistant changes', p_section;
+  end if;
+  if p_expected = 'null'::jsonb then p_expected := null; end if;
+  if p_value = 'null'::jsonb then p_value := null; end if;
+  select s.catalog -> p_section into cur from public.settings s where s.id = 1 for update;
+  if not found then return jsonb_build_object('ok', false, 'code', 'denied'); end if;
+  if cur = 'null'::jsonb then cur := null; end if;
+  if cur is distinct from p_expected then
+    return jsonb_build_object('ok', false, 'code', 'changed', 'now', cur);
+  end if;
+  update public.settings s
+     set catalog = case when p_value is null then coalesce(s.catalog, '{}'::jsonb) - p_section
+                        else pg_catalog.jsonb_set(coalesce(s.catalog, '{}'::jsonb), array[p_section], p_value, true) end
+   where s.id = 1;
+  get diagnostics n = row_count;
+  if n = 0 then return jsonb_build_object('ok', false, 'code', 'denied'); end if;
+  return jsonb_build_object('ok', true, 'value', p_value);
+end $$;
+
+-- 2. A lead: the stage fields (and contacted_at) only, plus an appended thread event and an added / removed note.
+--    p_expected: the columns as the person was shown them (compared after casting to the column types; a key left out
+--    is not compared). Returns {ok, row: the allowlisted columns + id} | {ok:false, code:'gone'|'changed'|'denied',
+--    field?, now?}.
+create or replace function public.ai_contact_cas(p_id uuid, p_expected jsonb, p_patch jsonb,
+  p_event jsonb default null, p_note_add jsonb default null, p_note_remove jsonb default null) returns jsonb
+language plpgsql volatile security invoker set search_path = ''
+as $$
+declare
+  allowed constant text[] := array['status','stage_changed_at','next_follow_up','chasing_since','chase_alert_done',
+                                   'chase_round','lost_reason','booked_for','contacted_at'];
+  cur jsonb; base jsonb; exp jsonb; k text; n integer; out_row jsonb;
+begin
+  if p_patch = 'null'::jsonb then p_patch := null; end if;
+  if p_expected = 'null'::jsonb then p_expected := null; end if;
+  if p_event = 'null'::jsonb then p_event := null; end if;
+  if p_note_add = 'null'::jsonb then p_note_add := null; end if;
+  if p_note_remove = 'null'::jsonb then p_note_remove := null; end if;
+  if jsonb_typeof(coalesce(p_patch, '{}'::jsonb)) <> 'object' or jsonb_typeof(coalesce(p_expected, '{}'::jsonb)) <> 'object' then
+    raise exception 'ai_contact_cas: patch and expected must be objects';
+  end if;
+  for k in select pg_catalog.jsonb_object_keys(coalesce(p_patch, '{}'::jsonb) || coalesce(p_expected, '{}'::jsonb)) loop
+    if not (k = any(allowed)) then raise exception 'ai_contact_cas: % is not a field the assistant changes', k; end if;
+  end loop;
+  select to_jsonb(c) into cur from public.contacts c where c.id = p_id for update;
+  if not found then return jsonb_build_object('ok', false, 'code', 'gone'); end if;
+  exp := to_jsonb(pg_catalog.jsonb_populate_record(null::public.contacts, coalesce(p_expected, '{}'::jsonb)));
+  for k in select pg_catalog.jsonb_object_keys(coalesce(p_expected, '{}'::jsonb)) loop
+    if (cur -> k) is distinct from (exp -> k) then
+      return jsonb_build_object('ok', false, 'code', 'changed', 'field', k, 'now', cur -> k);
+    end if;
+  end loop;
+  if p_note_remove is not null and not exists (
+       select 1 from pg_catalog.jsonb_array_elements(case when jsonb_typeof(cur -> 'customer_notes') = 'array'
+                                                          then cur -> 'customer_notes' else '[]'::jsonb end) e
+        where e = p_note_remove) then
+    return jsonb_build_object('ok', false, 'code', 'changed', 'field', 'customer_notes');
+  end if;
+  -- only the allowlisted columns go through jsonb_populate_record (the others are never parsed or written)
+  select coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb) into base from pg_catalog.jsonb_each(cur) e where e.key = any(allowed);
+  base := base || coalesce(p_patch, '{}'::jsonb);
+  update public.contacts c set
+    (status, stage_changed_at, next_follow_up, chasing_since, chase_alert_done, chase_round, lost_reason, booked_for, contacted_at) =
+      (select r.status, r.stage_changed_at, r.next_follow_up, r.chasing_since, r.chase_alert_done, r.chase_round,
+              r.lost_reason, r.booked_for, r.contacted_at
+         from pg_catalog.jsonb_populate_record(null::public.contacts, base) r),
+    messages = case when p_event is null then c.messages
+                    else (case when jsonb_typeof(c.messages) = 'array' then c.messages else '[]'::jsonb end) || jsonb_build_array(p_event) end,
+    customer_notes = case
+      when p_note_add is not null then
+        (case when jsonb_typeof(c.customer_notes) = 'array' then c.customer_notes else '[]'::jsonb end) || jsonb_build_array(p_note_add)
+      when p_note_remove is not null then
+        (select coalesce(jsonb_agg(x.e order by x.i), '[]'::jsonb)
+           from pg_catalog.jsonb_array_elements(c.customer_notes) with ordinality x(e, i) where x.e <> p_note_remove)
+      else c.customer_notes end
+  where c.id = p_id
+  returning to_jsonb(c.*) into out_row;
+  get diagnostics n = row_count;
+  if n = 0 then return jsonb_build_object('ok', false, 'code', 'denied'); end if;
+  return jsonb_build_object('ok', true, 'row',
+    (select jsonb_object_agg(e.key, e.value) from pg_catalog.jsonb_each(out_row) e where e.key = any(allowed || array['id'])));
+end $$;
+
+-- 3. Undo of a task the assistant added: deleted only if it is still exactly as it was added.
+--    Returns {ok} | {ok:false, code:'gone'|'changed'|'denied', field?, now?}.
+create or replace function public.ai_task_delete_cas(p_id uuid, p_expected jsonb) returns jsonb
+language plpgsql volatile security invoker set search_path = ''
+as $$
+declare
+  allowed constant text[] := array['title','status','due','board','assignees','priority','notes','subtasks','updates',
+                                   'contact_id','heads_up'];
+  cur jsonb; exp jsonb; k text; n integer;
+begin
+  if p_expected = 'null'::jsonb then p_expected := null; end if;
+  if jsonb_typeof(coalesce(p_expected, '{}'::jsonb)) <> 'object' then raise exception 'ai_task_delete_cas: expected must be an object'; end if;
+  for k in select pg_catalog.jsonb_object_keys(coalesce(p_expected, '{}'::jsonb)) loop
+    if not (k = any(allowed)) then raise exception 'ai_task_delete_cas: % is not a compared field', k; end if;
+  end loop;
+  select to_jsonb(t) into cur from public.tasks t where t.id = p_id for update;
+  if not found then return jsonb_build_object('ok', false, 'code', 'gone'); end if;
+  exp := to_jsonb(pg_catalog.jsonb_populate_record(null::public.tasks, coalesce(p_expected, '{}'::jsonb)));
+  for k in select pg_catalog.jsonb_object_keys(coalesce(p_expected, '{}'::jsonb)) loop
+    if (cur -> k) is distinct from (exp -> k) then
+      return jsonb_build_object('ok', false, 'code', 'changed', 'field', k, 'now', cur -> k);
+    end if;
+  end loop;
+  delete from public.tasks t where t.id = p_id;
+  get diagnostics n = row_count;
+  if n = 0 then return jsonb_build_object('ok', false, 'code', 'denied'); end if;
+  return jsonb_build_object('ok', true);
+end $$;
+
+revoke all on function public.ai_catalog_cas(text, jsonb, jsonb) from public, anon;
+revoke all on function public.ai_contact_cas(uuid, jsonb, jsonb, jsonb, jsonb, jsonb) from public, anon;
+revoke all on function public.ai_task_delete_cas(uuid, jsonb) from public, anon;
+-- Invoker functions: a signed-in person can only do through them what their RLS already lets them do through the API.
+grant execute on function public.ai_catalog_cas(text, jsonb, jsonb) to authenticated;
+grant execute on function public.ai_contact_cas(uuid, jsonb, jsonb, jsonb, jsonb, jsonb) to authenticated;
+grant execute on function public.ai_task_delete_cas(uuid, jsonb) to authenticated;
+
+commit;
+select 'G2-changes ok';
+
+-- Check after (read-only):
+--   select proname, prosecdef from pg_proc where proname in ('ai_catalog_cas','ai_contact_cas','ai_task_delete_cas');
+--     -- 3 rows, prosecdef = false (SECURITY INVOKER)
+--   select column_name, data_type from information_schema.columns where table_name = 'ai_changes' and column_name = 'display';   -- jsonb
+--   The RLS proof runs from the app / the gateway (the SQL editor runs as postgres and bypasses RLS): an owner's
+--   ai_catalog_cas('hours', <current hours>, <current hours>) → {"ok": true, ...} and nothing changes; a non-owner's →
+--   {"ok": false, "code": "denied"} (when settings UPDATE is owners-only; see the pg_policies check above).
+
+-- ── ROLLBACK (G2-changes; run by hand only) ──────────────────────────────────────────────────────────────────
+-- Data the assistant already changed stays as it is (ordinary rows); the change log keeps its rows.
+-- begin;
+-- drop function if exists public.ai_task_delete_cas(uuid, jsonb);
+-- drop function if exists public.ai_contact_cas(uuid, jsonb, jsonb, jsonb, jsonb, jsonb);
+-- drop function if exists public.ai_catalog_cas(text, jsonb, jsonb);
+-- alter table public.ai_changes drop constraint if exists ai_changes_display_check;
+-- alter table public.ai_changes drop column if exists display;
+-- commit;
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+-- END G2-changes
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════

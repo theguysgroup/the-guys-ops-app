@@ -34,7 +34,10 @@ TS
   # tests/business-logic.test.js). A renamed or missing function fails the run here.
   node - "$ROOT/index.html" <<'JS'
 const fs = require('fs');
-const NAMES = ['catalogHours', 'ROLE_LABEL', 'productName', 'OFFICE', 'hhmmToMins', 'minsToHhmm', 'officeHoursText'];
+const NAMES = ['catalogHours', 'ROLE_LABEL', 'productName', 'OFFICE', 'hhmmToMins', 'minsToHhmm', 'officeHoursText',
+  // G2 (tests_changes.ts): the role pages, dates, ids, task boards and the pipeline's stage rules
+  'canViewSection', 'SECTION_LABEL', 'MONTHS', 'parseLocalDate', 'fmtDateShort', 'uid', 'boardForAssignees', 'catalogObject', 'officeLabel', 'taskBoardLabel',
+  'LEAD_STATUSES', 'LEAD_STAGE_LABEL', 'STAGE_CORE', 'STAGES_NEED_DATE', 'JOB_CACHE', 'jobIndex', 'leadLatestJobDate', 'leadWonByJob', 'leadStage', 'stageMovePlan'];
 function extractDecl(source, name){
   const fnIdx = source.indexOf(`function ${name}(`);
   const constIdx = source.search(new RegExp(`\\bconst ${name}\\s*=`));
@@ -55,9 +58,11 @@ function extractDecl(source, name){
 }
 const m = fs.readFileSync(process.argv[2], 'utf8').match(/<script>([\s\S]*?)<\/script>/);
 if (!m) { console.error('run_tests.sh: no <script> in index.html'); process.exit(1); }
-console.log(`const APP: any = (() => { const STATE: any = { data: { settings: { catalog: {} } } };\n${NAMES.map(n => extractDecl(m[1], n)).join('\n')}\nreturn { STATE, ${NAMES.join(', ')} }; })();`);
+console.log(`const APP: any = (() => { const STATE: any = { data: { settings: { catalog: {} }, jobs: [], employees: [] }, profiles: [] };\n${NAMES.map(n => extractDecl(m[1], n)).join('\n')}\nreturn { STATE, ${NAMES.join(', ')} }; })();`);
 JS
   cat "$DIR/tests.ts"
+  # later groups' tests (they push suites that tests.ts runs before its summary)
+  for f in "$DIR"/tests_*.ts; do [ -f "$f" ] && cat "$f"; done
 } > "$OUT"
 cd "$DIR" && npx --yes tsx "$OUT"
 rm -f "$OUT"
