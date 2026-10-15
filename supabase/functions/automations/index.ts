@@ -1157,8 +1157,9 @@ export function boardFor(names: string[], profiles: any[], employees: any[] = []
     || employees.some((e) => e && e.name === first && Array.isArray(e.roles) && e.roles.includes("VA"));
   return va ? "ron" : first;
 }
+// chosen: how many logins were picked before the vacations (all of them away = "skipped: on vacation", not "no device").
 // deno-lint-ignore no-explicit-any
-async function pushRecipients(sb: any, st: any, C: VacCtx): Promise<{ ids: string[]; names: string[] }> {
+async function pushRecipients(sb: any, st: any, C: VacCtx): Promise<{ ids: string[]; names: string[]; chosen: number }> {
   const to = obj(st.to), people = (Array.isArray(to.people) ? to.people : []).map(String), roles = (Array.isArray(to.roles) ? to.roles : []).map(String);
   const list = await rows(sb.from("profiles").select("id, full_name, role"));
   // deno-lint-ignore no-explicit-any
@@ -1170,30 +1171,37 @@ async function pushRecipients(sb: any, st: any, C: VacCtx): Promise<{ ids: strin
   // deno-lint-ignore no-explicit-any
   const ids = vacRecipients([...new Set(chosen.map((p: any) => String(p.id)))] as string[], C, allowed);
   // deno-lint-ignore no-explicit-any
-  return { ids, names: ids.map((id) => (list.find((p: any) => String(p.id) === id) || {}).full_name || "").filter(Boolean) };
+  return { ids, names: ids.map((id) => (list.find((p: any) => String(p.id) === id) || {}).full_name || "").filter(Boolean), chosen: chosen.length };
 }
-// day: the task's due day ('YYYY-MM-DD'; today when it has none), as the app checks it (saveTaskModal, tm-due).
+// day: the task's due day ('YYYY-MM-DD'; today when it has none), as the app checks it (saveTaskModal, tm-due). moved: who
+// was swapped for their stand-in (the task's note says so).
 // deno-lint-ignore no-explicit-any
-async function taskPeople(sb: any, st: any, C: VacCtx, day?: string): Promise<string[]> {
-  const ids = (Array.isArray(st.assignees) ? st.assignees : []).map(String);
-  if (!ids.length) return [];
+async function taskPeople(sb: any, st: any, C: VacCtx, day?: string): Promise<{ names: string[]; moved: VacMove[] }> {
+  const ids = (Array.isArray(st.assignees) ? st.assignees : []).map(String), moved: VacMove[] = [];
+  if (!ids.length) return { names: [], moved };
   const list = await rows(sb.from("employees").select("id, name, status").in("id", ids));
   // deno-lint-ignore no-explicit-any
-  return vacTaskPeople(ids.map((id: string) => list.find((e: any) => String(e.id) === id && e.status === "Active")).filter(Boolean), C, day);
+  return { names: vacTaskPeople(ids.map((id: string) => list.find((e: any) => String(e.id) === id && e.status === "Active")).filter(Boolean), C, day, moved), moved };
 }
+export type VacMove = { from: string; to: string };
 // A task for someone on vacation with "Not assignable" on its due day (today without one) goes to their stand-in (when
 // chosen, Active and not away that day too); everyone else stays (in the app it is a warning, never a block). Names, once
-// each, in order.
+// each, in order. moved (optional): filled with who was swapped for whom.
 // deno-lint-ignore no-explicit-any
-export function vacTaskPeople(emps: any[], C: VacCtx, day?: string): string[] {
+export function vacTaskPeople(emps: any[], C: VacCtx, day?: string, moved?: VacMove[]): string[] {
   const out: string[] = [], D: VacCtx = day && day !== C.day ? { ...C, day } : C;
   for (const e of emps) {
     const v = vacAway(D, e.id, "notAssignable");
     const s = v && vacOpt(v, "standIn") && v.stand_in_id ? D.employees.find((x) => x.id === v.stand_in_id) : null;
     const name = String(s && (!s.status || s.status === "Active") && !vacAway(D, s.id, "notAssignable") ? s.name : e.name);
+    if (moved && name !== String(e.name)) moved.push({ from: String(e.name), to: name });
     if (!out.includes(name)) out.push(name);
   }
   return out;
+}
+// The line a redirected task starts its notes with: who it was for.
+export function vacMovedNote(moved: VacMove[]): string {
+  return moved.map((m) => `For ${m.from} (on vacation): given to ${m.to}, the stand-in.`).join("\n");
 }
 type Exec = { status: string; reason?: string; recipient?: string; ref?: string };
 // The actions themselves. A customer action only runs after customerGuard said ok.
@@ -1204,19 +1212,21 @@ export async function execute(sb: any, st: any, a: any, f: Facts, T: TickCtx, no
   if (st.type === "push") {
     const r = await pushRecipients(sb, st, await vacOf(sb, T, nowMs));
     const payload = { title: fill(st.title), body: fill(st.body || ""), url: APP_URL + (DEEP_LINK[f.kind] || ""), tag: `auto-${String(a.id).slice(0, 8)}-${recordId}` };
+    // everyone picked is away with "No notifications" (and no stand-in took it): nothing to send, and that's not a fault
+    if (!r.ids.length && r.chosen) return { status: "skipped", reason: "on vacation" };
     const sent = await sendTo(sb, r.ids, payload, await vapidKeys(sb));
     return sent.sent > 0 ? { status: "sent", recipient: clip(r.names.join(", "), 200) } : { status: "failed", reason: "no device", recipient: clip(r.names.join(", "), 200) };
   }
   if (st.type === "task") {
     const due = st.due_days == null ? null : shiftDay(zoneParts(nowMs, T.S.timezone).day, Number(st.due_days));
-    const names = await taskPeople(sb, st, await vacOf(sb, T, nowMs), due || undefined);
+    const { names, moved } = await taskPeople(sb, st, await vacOf(sb, T, nowMs), due || undefined);
     const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
     const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
     const c = f.contact;
     const row = {
       board: boardFor(names, profiles, employees), title: clip(fill(st.title), LIMITS.title), status: "Not Started",
       due,
-      notes: clip(fill(st.notes || ""), LIMITS.notes), client: (c && c.full_name) || "", contact_id: c ? c.id : null,
+      notes: clip([vacMovedNote(moved), fill(st.notes || "")].filter(Boolean).join("\n\n"), LIMITS.notes), client: (c && c.full_name) || "", contact_id: c ? c.id : null,
       priority: TASK_PRIORITIES.includes(st.priority) ? st.priority : "Medium", assignees: names, assigned_to: names[0] || "", heads_up: "",
       created_by: clip("Automation: " + String(a.name || ""), 200), created_at: iso(nowMs), technician: "", category: c ? "Client-related" : "", subtasks: [], updates: [],
     };
@@ -1617,13 +1627,13 @@ async function previewStep(sb: any, body: any, me: any, nowMs: number) {
     const act = ACTIONS[st.type];
     if (st.type === "push") {
       const r = await pushRecipients(sb, st, await vacOf(sb, T, nowMs));
-      out.push({ id: st.id, kind: "action", type: "push", would: "send", to: r.names, title: fillMerge(st.title, vars, known), body: fillMerge(st.body || "", vars, known) });
+      out.push({ id: st.id, kind: "action", type: "push", ...(!r.ids.length && r.chosen ? { would: "skip", reason: "on vacation" } : { would: "send" }), to: r.names, title: fillMerge(st.title, vars, known), body: fillMerge(st.body || "", vars, known) });
     } else if (st.type === "task") {
       const due = st.due_days == null ? null : shiftDay(zoneParts(at, tz).day, Number(st.due_days));
-      const names = await taskPeople(sb, st, await vacOf(sb, T, nowMs), due || undefined);
+      const { names, moved } = await taskPeople(sb, st, await vacOf(sb, T, nowMs), due || undefined);
       const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
       const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
-      out.push({ id: st.id, kind: "action", type: "task", would: "add", board: boardFor(names, profiles, employees), assignees: names, title: fillMerge(st.title, vars, known), notes: fillMerge(st.notes || "", vars, known),
+      out.push({ id: st.id, kind: "action", type: "task", would: "add", board: boardFor(names, profiles, employees), assignees: names, title: fillMerge(st.title, vars, known), notes: [vacMovedNote(moved), fillMerge(st.notes || "", vars, known)].filter(Boolean).join("\n\n"),
         due });
     } else {
       const msg = messageOf(st, T.cat);

@@ -2290,7 +2290,7 @@ function activeEmployeeNames(data){ return data.employees.filter(e=>e.status==='
 // non-cancelled rows of one person may not touch; a vacation left open past endsOn blocks nothing later. When two rows are
 // in force, readers take the latest startsOn that has the option asked for.
 const VACATION_OPTIONS = [
-  { key:'noNotify', label:'No notifications', help:'No push notifications to them while they are away.' },
+  { key:'noNotify', label:'No app notifications', help:'No app (push) notifications to them while they are away. WhatsApp and status messages still go.' },
   { key:'notAssignable', label:'Not assignable', help:'Greyed out in the assign pickers, with a warning if someone picks them anyway.' },
   { key:'standIn', label:'A stand-in gets their notifications', help:'Pick the stand-in below.' },
   { key:'flagOpen', label:'Flag their open tasks and jobs', help:'Open items in the dates are flagged, with a move to the stand-in.' },
@@ -2310,18 +2310,19 @@ function vacationOptionsNorm(o){
   return out;
 }
 function vacationOpt(v, key){ const o = (v && v.options) || {}; return key==='autoBack' ? o.autoBack!==false : o[key]===true; }
-// The ticks a new vacation starts with: everything, unless the business changed its defaults (catalog.vacation.defaults).
-function vacationDefaults(catalog){
-  const d = (catalog && catalog.vacation && catalog.vacation.defaults) || {}, out = {};
-  VACATION_OPTIONS.forEach(({ key }) => { out[key] = typeof d[key]==='boolean' ? d[key] : true; });
-  out.pay = VACATION_PAY.includes(d.pay) ? d.pay : 'unpaid';
+// The ticks a new vacation starts with: everything, unpaid leave. No per-business defaults (main builder review 1.C.7: a
+// setting nobody can edit is dropped); after the first time a person's own last vacation is the default (vacationOptionsFor).
+function vacationDefaults(){
+  const out = {};
+  VACATION_OPTIONS.forEach(({ key }) => { out[key] = true; });
+  out.pay = 'unpaid';
   return out;
 }
 // Ofek: the same ticks as that person's previous vacation; the first time, the defaults.
-function vacationOptionsFor(vacations, who, catalog){
+function vacationOptionsFor(vacations, who){
   let prev = null;
   (vacations || []).forEach(v => { if (!v.cancelledAt && vacationMatches(v, who) && (!prev || String(v.createdAt||'') > String(prev.createdAt||''))) prev = v; });
-  return prev ? { ...vacationDefaults(catalog), ...vacationOptionsNorm(prev.options) } : vacationDefaults(catalog);
+  return prev ? { ...vacationDefaults(), ...vacationOptionsNorm(prev.options) } : vacationDefaults();
 }
 // who = { id?, name? } or a name. Non-owners can't read employees, so a name (the row's copy) is enough.
 function vacationMatches(v, who){
@@ -2408,12 +2409,20 @@ function vacationProblems(draft, vacations, tz){
   if (String(d.note || '').length > 500) out.push('The note can be at most 500 characters');
   return out;
 }
-// The insert / update row. business_id, the name copies and created_by come from the database.
+// The insert / update row. The name copies, created_by and reminded_at come from the database (the guard trigger); the note
+// is saved on its own (employee_vacation_notes, owners and managers only: it may hold a medical reason).
 function vacationRowFromDraft(draft){
   const o = vacationOptionsNorm(draft.options);
   return { employee_id: draft.employeeId, starts_on: draft.startsOn, ends_on: draft.endsOn,
-    stand_in_id: o.standIn ? (draft.standInId || null) : null, options: o, note: String(draft.note || '').trim() || null };
+    stand_in_id: o.standIn ? (draft.standInId || null) : null, options: o };
 }
+// The notes (employee_vacation_notes rows; only owners and managers get any back) as { vacationId: note }.
+function vacationNotesMap(rows){
+  const out = {};
+  (rows || []).forEach(r => { if (r && r.vacation_id && r.note) out[r.vacation_id] = String(r.note); });
+  return out;
+}
+function vacationWithNote(v, notes){ return { ...v, note: (notes && notes[v.id]) || '' }; }
 function vacationUntilText(v, day, tz){
   if (!v || v.cancelledAt) return '';
   if (day < v.startsOn) return `Vacation from ${fmtDateShort(v.startsOn)}`;
@@ -2434,16 +2443,17 @@ function vacationAssignText(name, info){
     standInLabel: info.standIn ? `Assign ${info.standIn.name} instead` : '' };
 }
 // Leave lines for one person on a payroll week [from, to]: only vacations with "Leave on the payroll board" ticked; the days
-// are their working days (0 = Sunday; every day when none are set).
+// are their working days (0 = Sunday; Monday to Friday when none are set).
+const VACATION_WORK_DAYS = [1, 2, 3, 4, 5];
 function vacationPayrollLines(vacations, who, from, to, tz, workingDays, today){
-  const out = [], wd = Array.isArray(workingDays) ? workingDays.map(Number) : [];
+  const out = [], set = Array.isArray(workingDays) ? workingDays.map(Number) : [], wd = set.length ? set : VACATION_WORK_DAYS;
   (vacations || []).forEach(v => {
     if (v.cancelledAt || !vacationMatches(v, who) || !vacationOpt(v, 'payroll')) return;
     const last = vacationLastDay(v, tz, today);
     const s = v.startsOn > from ? v.startsOn : from, e = last && last < to ? last : to;
     if (!last || s > e) return;
     let days = 0;
-    for (let d = s; d <= e; d = shiftDays(d, 1)) if (!wd.length || wd.includes(parseLocalDate(d).getDay())) days++;
+    for (let d = s; d <= e; d = shiftDays(d, 1)) if (wd.includes(parseLocalDate(d).getDay())) days++;
     if (!days) return;
     const a = parseLocalDate(s), b = parseLocalDate(e);
     const range = s===e ? fmtDateShort(s) : a.getMonth()===b.getMonth() ? `${a.getDate()}–${fmtDateShort(e)}` : `${fmtDateShort(s)}–${fmtDateShort(e)}`;
@@ -3214,7 +3224,7 @@ async function loadFromSupabase(){
   // anything past that used to disappear without a trace. Single-row tables stay as one request.
   const LOAD_NAMES = ['leads','jobs','equipment purchases','equipment catalogue','contractors','tasks','closings',
     'reminders','tags','deleted reminders','cash status','settings','employees','commission rates',
-    'activity history','ad spend','payroll','daily sales log','Google Ads calls','read reminders','payroll bonuses','owner salaries','lead email checks','vacations'];
+    'activity history','ad spend','payroll','daily sales log','Google Ads calls','read reminders','payroll bonuses','owner salaries','lead email checks','vacations','vacation notes'];
   const loadResults = await Promise.all([
     fetchAllRows('contacts', 'id'),
     fetchAllRows('jobs', 'id'),
@@ -3245,8 +3255,12 @@ async function loadFromSupabase(){
     sb.from('owner_settings').select('owner_salaries').eq('id', 1).maybeSingle(),
     // Last night's check of the lead emails in info@ against the CRM (Ofek 9 Oct); CRM staff only (RLS).
     sb.from('lead_email_checks').select('*').gte('day', shiftDays(todayStr(), -14)),
-    // Who is on vacation (stage 3): every signed-in person reads them (badges), owners and managers write (RLS).
-    fetchAllRows('employee_vacations', 'id'),
+    // Who is on vacation (stage 3): every signed-in person reads them (badges), owners and managers write (RLS). Only the
+    // ones that can still matter (main builder review 1.C.2): not cancelled, and ending in about the last year (the payroll
+    // Leave card, the ticks of someone's last vacation) or left open (autoBack off, not ended yet).
+    fetchAllRows('employee_vacations', 'id', q => q.is('cancelled_at', null).or(`ends_on.gte.${shiftDays(todayStr(), -400)},and(ended_at.is.null,options->>autoBack.eq.false)`)),
+    // Their notes: owners and managers only (RLS; everyone else gets none back).
+    fetchAllRows('employee_vacation_notes', 'vacation_id'),
   ]);
   const [
     { data: contacts }, { data: jobs }, { data: equipmentSpend }, { data: equipmentCatalog },
@@ -3255,13 +3269,14 @@ async function loadFromSupabase(){
     { data: cashStatusRow }, { data: settingsRow }, { data: employees }, { data: commissionRateRows },
     { data: activityRows }, { data: adSpendRows }, { data: payrollRows }, { data: salesLogRows }, { data: adCallRows },
     { data: readReminderRows }, { data: bonusRows }, { data: ownerSettingsRow }, { data: leadCheckRows },
-    { data: vacationRows },
+    { data: vacationRows }, { data: vacationNoteRows },
   ] = loadResults;
   // A table that failed to load used to look exactly like an empty one. Remember which ones failed so
   // every screen shows a red warning instead of quietly showing partial data.
   // The lead check is extra: if it can't be read (or isn't set up yet), only the lead check line is missing, the data isn't partial.
   // Vacations too (stage 3): before the table exists nobody is on vacation, as before.
-  const OPTIONAL_LOADS = new Set(['lead email checks', 'vacations']);
+  const OPTIONAL_LOADS = new Set(['lead email checks', 'vacations', 'vacation notes']);
+  const vacNotes = vacationNotesMap(vacationNoteRows);   // owners and managers only (stage 3 review 1.C.1)
   STATE.loadErrors = loadResults.map((r, i) => (r && r.error && !OPTIONAL_LOADS.has(LOAD_NAMES[i])) ? LOAD_NAMES[i] : null).filter(Boolean);
   if (STATE.loadErrors.length) console.error('Load failed for:', loadResults.filter(r => r && r.error).map(r => r.error));
 
@@ -3327,7 +3342,8 @@ async function loadFromSupabase(){
       workingDays: Array.isArray(e.working_days) ? e.working_days.map(Number) : [],
       activityLog: logsFor('employee', e.id),
     })),
-    vacations: (vacationRows||[]).map(mapVacationRow),
+    vacationNotes: vacNotes,
+    vacations: (vacationRows||[]).map(r => vacationWithNote(mapVacationRow(r), vacNotes)),
     // An optional load: when it fails, the vacation screens say so instead of looking like nobody is away.
     vacationsError: (loadResults[LOAD_NAMES.indexOf('vacations')] || {}).error ? 'the vacations list did not load' : '',
     commissionRates: {},
@@ -3431,13 +3447,13 @@ function closingPatchToRow(patch){
 // who can't read the employees table still see whose vacation it is.
 function mapVacationRow(r){
   return { id:r.id, employeeId:r.employee_id, employeeName:r.employee_name||'', startsOn:r.starts_on, endsOn:r.ends_on,
-    standInId:r.stand_in_id||null, standInName:r.stand_in_name||'', options:vacationOptionsNorm(r.options), note:r.note||'',
+    standInId:r.stand_in_id||null, standInName:r.stand_in_name||'', options:vacationOptionsNorm(r.options),
     createdBy:r.created_by||null, createdAt:r.created_at||null, endedAt:r.ended_at||null, cancelledAt:r.cancelled_at||null,
     remindedAt:r.reminded_at||null };
 }
 // The saved row into STATE.data.vacations (added, or replacing the old copy); returns the mapped vacation.
 function keepVacationRow(row){
-  const v = mapVacationRow(row);
+  const v = vacationWithNote(mapVacationRow(row), STATE.data.vacationNotes);
   const list = STATE.data.vacations || (STATE.data.vacations = []);
   const idx = list.findIndex(x => x.id === v.id);
   if (idx === -1) list.push(v); else list[idx] = v;
@@ -3493,10 +3509,12 @@ function equipmentSpendPatchToRow(patch){
 }
 // One request returns at most 1,000 rows, so read list tables page by page (ordered by the primary key so
 // pages never overlap or skip). A failure returns the error instead of a short list that looks complete.
-async function fetchAllRows(table, orderCol){
+// refine (optional): narrows the query (filters), e.g. q => q.is('cancelled_at', null).
+async function fetchAllRows(table, orderCol, refine){
   const out = []; const size = 1000;
   for (let from = 0; ; from += size) {
-    const { data, error } = await sb.from(table).select('*').order(orderCol, { ascending:true }).range(from, from + size - 1);
+    const base = sb.from(table).select('*');
+    const { data, error } = await (refine ? refine(base) : base).order(orderCol, { ascending:true }).range(from, from + size - 1);
     if (error) return { data: out, error };
     out.push(...(data||[]));
     if (!data || data.length < size) return { data: out, error: null };
@@ -3790,6 +3808,16 @@ const db = {
     async update(id, patch){
       const { data, error } = await sb.from('employee_vacations').update(patch).eq('id', id).select().single();
       return error ? { error } : { vacation: keepVacationRow(data) };
+    },
+    // The note, on its own (owners and managers only). Returns { ok } or { error }.
+    async setNote(id, note){
+      const text = String(note || '').trim() || null;
+      const { error } = await sb.from('employee_vacation_notes').upsert({ vacation_id: id, note: text, business_id: AUTO_BUSINESS_ID });
+      if (error) return { error };
+      const notes = STATE.data.vacationNotes || (STATE.data.vacationNotes = {});
+      if (text) notes[id] = text; else delete notes[id];
+      const v = (STATE.data.vacations || []).find(x => x.id===id); if (v) v.note = text || '';
+      return { ok: true };
     },
     end(id){ return db.vacations.update(id, { ended_at: new Date().toISOString() }); },        // back today (early, or "Back?")
     cancel(id){ return db.vacations.update(id, { cancelled_at: new Date().toISOString() }); }, // a mistake: never counts
@@ -4370,7 +4398,7 @@ function setupRealtimeSubscriptions(){
   // break the shared one. Only when the list loaded; otherwise the screens already say it can't be read.
   if (!VACATIONS_CHANNEL && STATE.data && !STATE.data.vacationsError) {
     VACATIONS_CHANNEL = sb.channel('vacations-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacations' }, handleListRealtimeChange('vacations', mapVacationRow))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacations' }, handleListRealtimeChange('vacations', r => vacationWithNote(mapVacationRow(r), STATE.data && STATE.data.vacationNotes)))
       .subscribe();
   }
 }
@@ -8511,7 +8539,12 @@ async function vaSessionStart(){
   // On vacation (stage 3): a day away with "Leave on the payroll board" ticked never asks "you forgot to log out"; while
   // they are away, the question waits until they're back.
   const vacRows = STATE.data.vacations || [], vacTz = bizTz();
-  if (p.forgotLogoutOn && vacationForProfile(vacRows, p, p.forgotLogoutOn, vacTz, 'payroll', STATE.data.employees)) { await sb.rpc('ack_forgot_logout'); p.forgotLogoutOn = null; }
+  // A failed acknowledgement only means the question isn't cleared on the server yet (asked again next time it isn't away):
+  // it never stops the page from drawing.
+  if (p.forgotLogoutOn && vacationForProfile(vacRows, p, p.forgotLogoutOn, vacTz, 'payroll', STATE.data.employees)) {
+    try { await sb.rpc('ack_forgot_logout'); } catch (e) { console.error('ack_forgot_logout failed:', e); }
+    p.forgotLogoutOn = null;
+  }
   if (p.forgotLogoutOn && !vacationForProfile(vacRows, p, todayStr(), vacTz, null, STATE.data.employees)) {
     const end = vaEndTimeText(p.forgotLogoutOn, p.lastLogoutAt);
     openPopup(`<h3 style="margin:0 0 6px">You forgot to log out</h3>
@@ -19157,15 +19190,20 @@ function vacationPayLines(data, wk, tz, today){
 }
 // Who is away on a day, for the shared badges (calendar, Tasks, the Away card): the badge ticked, people still Active.
 // [{ name, vac, label }] by name, one per person.
+// One pass over the rows (it runs for every calendar cell): per person the vacation in force that day with the badge ticked,
+// the latest start when two are (as vacationFor).
 function vacationAwayOn(data, day, tz){
-  const rows = (data && data.vacations) || [], emps = (data && data.employees) || [], seen = new Set(), out = [];
+  const rows = (data && data.vacations) || [], emps = (data && data.employees) || [], best = new Map(), out = [];
   rows.forEach(r => {
-    if (seen.has(r.employeeId)) return;
-    seen.add(r.employeeId);
-    const e = emps.find(x => x.id===r.employeeId);
+    if (!r || !r.employeeId || !vacationOpt(r, 'badge') || !vacationOnDay(r, day, tz)) return;
+    const b = best.get(r.employeeId);
+    if (!b || r.startsOn > b.startsOn) best.set(r.employeeId, r);
+  });
+  best.forEach((v, id) => {
+    const e = emps.find(x => x.id===id);
     if (e && (e.status || 'Active')!=='Active') return;
-    const name = (e && e.name) || r.employeeName, v = name ? vacationFor(rows, { id: r.employeeId, name }, day, tz, 'badge') : null;
-    if (v) out.push({ name, vac: v, label: vacationUntilText(v, day, tz) });
+    const name = (e && e.name) || v.employeeName;
+    if (name) out.push({ name, vac: v, label: vacationUntilText(v, day, tz) });
   });
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -19186,20 +19224,20 @@ function vacationAllTicked(opts){ return VACATION_OPTIONS.every(o => !!opts && o
 function vacationBannerText(v, standInName, today, tz, shift){
   const until = vacationUntilText(v, today, tz); if (!until) return '';
   let s = `You're ${until.charAt(0).toLowerCase()}${until.slice(1)}.`;
-  if (vacationOpt(v, 'noNotify')) s += ' No notifications come to you' + (vacationOpt(v, 'standIn') && standInName ? `, ${standInName} gets them` : '') + '.';
+  if (vacationOpt(v, 'noNotify')) s += ' No app notifications come to you' + (vacationOpt(v, 'standIn') && standInName ? `, ${standInName} gets them` : '') + '.';
   if (shift) s += ' No shift clock while you\'re away.';
   return s + ' The app works as usual.';
 }
 // The window's draft: a copy of the vacation being changed, or a new one from today with the ticks of their previous
-// vacation (the first time: the business defaults) and the same stand-in while they are still Active.
-function vacationDraft(empId, vacId, rows, employees, catalog, today){
+// vacation (the first time: everything ticked) and the same stand-in while they are still Active.
+function vacationDraft(empId, vacId, rows, employees, today){
   const list = rows || [], emps = employees || [], v = vacId ? list.find(r => r.id===vacId) : null;
   if (v) return { id: v.id, employeeId: v.employeeId, startsOn: v.startsOn, endsOn: v.endsOn, standInId: v.standInId, options: { ...v.options }, note: v.note || '', fromPrev: false };
   const emp = emps.find(e => e.id===empId), who = emp ? { id: emp.id, name: emp.name } : { id: empId };
   const prev = empId ? list.filter(r => !r.cancelledAt && vacationMatches(r, who)).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null : null;
   const s = prev && prev.standInId ? emps.find(e => e.id===prev.standInId) : null;
   return { id: null, employeeId: empId || '', startsOn: today, endsOn: '', standInId: s && (s.status || 'Active')==='Active' ? s.id : null,
-    options: empId ? vacationOptionsFor(list, who, catalog) : vacationDefaults(catalog), note: '', fromPrev: !!prev };
+    options: empId ? vacationOptionsFor(list, who) : vacationDefaults(), note: '', fromPrev: !!prev };
 }
 // What stops the window from saving: who, the vacations block's checks (the database makes the same) and a stand-in who is on
 // vacation in those dates too. A stand-in with no app login is only a warning (vacationStandInWarning): open items can still
@@ -19347,7 +19385,7 @@ function payrollLeaveCard(data, wk){
   const rows = lines.map(({ emp, line, v }) => `<tr><td>${techTag(emp.name)}</td><td>${pill(line.pay==='paid' ? 'good' : 'neutral', line.pay==='paid' ? 'Paid leave' : 'Unpaid leave')} ${esc(vacationRangeText(line.from, line.to))} (${line.days} day${line.days===1 ? '' : 's'})${line.pay==='paid' ? `<div class="hint">Paid leave: ${line.days} day${line.days===1 ? '' : 's'}, add it by hand</div>` : ''}</td><td>${esc((v && vacationOpt(v, 'standIn') && v.standInName) || '—')}</td></tr>`).join('');
   return `<div class="section-title">Leave <span class="tag">${payrollWeekLabel(wk)}</span></div>
     <div class="table-wrap"><table><thead><tr><th>Name</th><th>Leave</th><th>Stand-in</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="hint" style="margin-top:6px">Set on each person's card (Settings → People). The days are their working days when those are set. A mark only: pay is not changed automatically, so add paid leave to their pay by hand.</div>`;
+    <div class="hint" style="margin-top:6px">Set on each person's card (Settings → People). The days are their working days (Monday to Friday when none are set). A mark only: pay is not changed automatically, so add paid leave to their pay by hand.</div>`;
 }
 // The person's own top banner (also under View as). It reads only what is loaded.
 function vacationBannerHtml(profile, data){
@@ -19361,12 +19399,11 @@ function vacationBannerHtml(profile, data){
 
 // The vacation window. The draft lives here while it is open; its parts redraw themselves, never the page.
 let VAC_UI = null;   // { draft, saving } while the window is open
-function vacCatalog(){ return (STATE.data && STATE.data.settings && STATE.data.settings.catalog) || {}; }
 function openVacationModal(empId, vacId){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   if (!canSetVacation()) return;
   const data = STATE.data, rows = data.vacations || [], today = todayStr(), tz = bizTz();
-  VAC_UI = { draft: vacationDraft(empId || '', vacId || null, rows, data.employees || [], vacCatalog(), today), saving: false };
+  VAC_UI = { draft: vacationDraft(empId || '', vacId || null, rows, data.employees || [], today), saving: false };
   const d = VAC_UI.draft, emp = (data.employees || []).find(e => e.id===d.employeeId);
   const people = (data.employees || []).filter(e => (e.status || 'Active')==='Active').sort((a, b) => String(a.name).localeCompare(String(b.name)));
   const pick = empId ? '' : `<div class="field"><label>Who</label><select id="vac-who" onchange="vacPickPerson(this.value)"><option value="">Pick a person</option>${people.map(e => `<option value="${esc(e.id)}">${esc(e.name)}${vacationFor(rows, { id: e.id, name: e.name }, today, tz) ? ' · on vacation' : ''}</option>`).join('')}</select></div>`;
@@ -19382,7 +19419,7 @@ function openVacationModal(empId, vacId){
         </div>
         <div id="vac-opts" style="margin-top:14px">${vacOptsHtml()}</div>
         <div id="vac-extra">${vacExtraHtml()}</div>
-        <div class="field" style="margin-top:11px"><label>Note <span class="hint">(optional)</span></label><textarea rows="2" maxlength="500" oninput="vacSet('note', this.value)">${esc(d.note)}</textarea></div>
+        <div class="field" style="margin-top:11px"><label>Note <span class="hint">(optional, only owners and managers see it)</span></label><textarea rows="2" maxlength="500" oninput="vacSet('note', this.value)">${esc(d.note)}</textarea></div>
         <div id="modal-error"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;flex-wrap:wrap">
           <button type="button" class="btn" onclick="closeVacationModal()">Cancel</button>
@@ -19397,7 +19434,7 @@ function vacSubText(){
   if (d.id) return 'What changes while they\'re away, and who stands in';
   if (!d.employeeId) return 'Pick the person first: the ticks follow their last vacation';
   const e = (STATE.data.employees || []).find(x => x.id===d.employeeId), first = String((e && e.name) || '').split(' ')[0] || 'their';
-  return d.fromPrev ? `Ticked the same as ${first}'s last vacation` : vacationAllTicked(d.options) ? 'First vacation: everything is ticked' : 'First vacation: ticked as the business defaults';
+  return d.fromPrev ? `Ticked the same as ${first}'s last vacation` : vacationAllTicked(d.options) ? 'First vacation: everything is ticked' : 'First vacation: pick what changes';
 }
 function vacOptsHtml(){
   const d = VAC_UI && VAC_UI.draft; if (!d) return '';
@@ -19445,7 +19482,7 @@ function vacSelectAll(){
 function vacPickPerson(id){
   if (!VAC_UI) return;
   const old = VAC_UI.draft, data = STATE.data;
-  const d = vacationDraft(id, null, data.vacations || [], data.employees || [], vacCatalog(), todayStr());
+  const d = vacationDraft(id, null, data.vacations || [], data.employees || [], todayStr());
   VAC_UI.draft = { ...d, startsOn: old.startsOn || d.startsOn, endsOn: old.endsOn, note: old.note };
   vacRefresh();
 }
@@ -19467,6 +19504,7 @@ async function saveVacationModal(){
   const ui = VAC_UI;   // the window this save belongs to: closed (or another one opened) while saving = left alone
   ui.saving = true;
   const row = { ...vacationRowFromDraft(d), business_id: AUTO_BUSINESS_ID };
+  const noteBefore = d.id ? (data.vacationNotes || {})[d.id] || '' : '', note = String(d.note || '').trim();
   const res = d.id ? await db.vacations.update(d.id, row) : await db.vacations.add(row);
   ui.saving = false;
   if (res.error) {
@@ -19476,6 +19514,10 @@ async function saveVacationModal(){
     return;
   }
   const v = res.vacation, actor = getCurrentProfile()?.fullName || 'Unknown';
+  if (note!==noteBefore) {
+    const nr = await db.vacations.setNote(v.id, note);
+    if (nr.error) showToast('The vacation is saved, but not its note: ' + nr.error.message, { kind: 'warn' });
+  }
   if (emp) logEmployeeActivity(emp, actor, vacationLogText(v, d.id ? 'Vacation changed' : 'Vacation set'));
   const it = vacationOpt(v, 'flagOpen') ? vacationMovableItems(data, v, tz, today) : { tasks: [], jobs: [] }, n = it.tasks.length + it.jobs.length;
   if (VAC_UI===ui) closeVacationModal();

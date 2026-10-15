@@ -376,9 +376,14 @@ export function invoicePayload(person: string, week: string, end?: unknown) {
 // ── the day before someone is back from a vacation (stage 3) ──
 // Vacations whose last day is today with the reminder ticked, from the morning hour on (the notifications' "from"). Only
 // with "Back to Active on the end date": with it off they are not back tomorrow, the vacation goes on until someone ends it.
+// Not when another vacation of theirs is in force tomorrow (it starts the next day): they aren't back then either. C must
+// hold tomorrow's vacations too (vacContext with aheadDays 1).
 // deno-lint-ignore no-explicit-any
 export function vacReturning(C: VacCtx, hour: number, fromHour: number): any[] {
-  return hour >= fromHour ? C.vacs.filter((v) => vacOpt(v, "remind") && vacOpt(v, "autoBack") && vacOnDay(v, C.day, C.tz) && v.ends_on === C.day) : [];
+  if (hour < fromHour) return [];
+  const tomorrow = vacShiftDay(C.day, 1);
+  return C.vacs.filter((v) => vacOpt(v, "remind") && vacOpt(v, "autoBack") && vacOnDay(v, C.day, C.tz) && v.ends_on === C.day
+    && !C.vacs.some((x) => x.id !== v.id && x.employee_id === v.employee_id && vacOnDay(x, tomorrow, C.tz)));
 }
 // Every open task, for the reminders' summary: paged, since PostgREST gives at most 1000 rows a request.
 // deno-lint-ignore no-explicit-any
@@ -443,7 +448,7 @@ export async function scan(sb: any, nowMs: number) {
   const anyOn = NOTIFY_KINDS.some((k) => k !== "vacationBack" && on(k)), backOn = on("vacationBack") && now.hour >= R.from && now.hour < R.until;
   // everything switched off, and no reminder can go now either: the vacations aren't read
   if (!anyOn && !backOn) return { ok: true, off: true, sent: 0 };
-  const C = await vacContext(sb, nowMs, tz);
+  const C = await vacContext(sb, nowMs, tz, backOn ? 1 : 0);   // with the reminder: tomorrow's vacations too (vacReturning)
   const back = backOn ? vacReturning(C, now.hour, R.from) : [];
   if (!anyOn && !back.length) return { ok: true, off: true, sent: 0 };
   // one scan at a time: the first call in each 8-minute window claims it
@@ -514,13 +519,14 @@ export async function scan(sb: any, nowMs: number) {
   // deno-lint-ignore no-explicit-any
   let tasks: any[] | null = null;
   for (const v of back.slice(0, 10)) {
+    // deno-lint-ignore no-explicit-any
+    const e = C.employees.find((x: any) => x.id === v.employee_id); if (!e) continue;   // before claiming: never a claim for nobody
     const { error: dup } = await sb.from("push_sent").insert({ key: `vacback:${v.id}:${v.ends_on}` });   // once per vacation
     if (dup) { skipped++; continue; }
-    // deno-lint-ignore no-explicit-any
-    const e = C.employees.find((x: any) => x.id === v.employee_id); if (!e) continue;
     const ret = shiftDay(v.ends_on, 1);
     if (!tasks) tasks = await vacOpenTasks(sb);
-    const { data: jobs } = await sb.from("jobs").select("id, date, technician").eq("technician", e.name).gte("date", ret);
+    // only the first week back (what the message counts)
+    const { data: jobs } = await sb.from("jobs").select("id, date, technician").eq("technician", e.name).gte("date", ret).lte("date", shiftDay(ret, 6));
     const P = vacBackPayloads(v, e.name, vacWaiting(e.name, ret, tasks || [], jobs || []));
     // deno-lint-ignore no-explicit-any
     const mine = vacProfilesOf(e, C).map((p: any) => p.id);

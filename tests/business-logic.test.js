@@ -153,6 +153,8 @@ const DECLS = [
   'vacationMovableItems', 'vacationPayLines', 'vacationAwayOn', 'vacationTeamRows', 'vacationAllTicked', 'vacationBannerText', 'vacationDraft', 'vacationFormProblems', 'vacationStandInWarning','vacationPhoneEmployee',
   // stage 3 review fixes: the login ↔ employee rule, job stand-ins, the phone rule shared with voice
   'vacationEmployeeOfProfile', 'vacationLoginIds', 'vacationJobStandIn', 'vacationPhoneAway',
+  // stage 3 review minor fixes: the note on its own (owners and managers), Monday to Friday leave days
+  'vacationNotesMap', 'vacationWithNote', 'VACATION_WORK_DAYS',
 ];
 
 function extractDecl(source, name){
@@ -2500,9 +2502,9 @@ function testVacations(sb){
   assertEqual(sb.vacationOptionsNorm(null), { ...all(false), autoBack: true, pay: 'unpaid' }, 'norm: null is safe');
   assertEqual([sb.vacationOpt({ options: {} }, 'autoBack'), sb.vacationOpt({ options: { remind: true } }, 'remind'), sb.vacationOpt({}, 'remind')], [true, true, false], 'vacationOpt: the same rule on v.options');
 
-  // defaults: everything ticked; the business's defaults (catalog.vacation.defaults) apply; previous vacation wins
-  assertEqual(sb.vacationDefaults(undefined), { ...all(true), pay: 'unpaid' }, 'defaults: everything ticked, unpaid');
-  assertEqual(sb.vacationDefaults({ vacation: { defaults: { noCalls: false, pay: 'paid', badge: 'no' } } }), { ...all(true), noCalls: false, pay: 'paid' }, 'defaults: catalog booleans + pay apply, a string is ignored');
+  // defaults: everything ticked, unpaid (no per-business defaults: nothing could edit them); previous vacation wins
+  assertEqual(sb.vacationDefaults(), { ...all(true), pay: 'unpaid' }, 'defaults: everything ticked, unpaid');
+  assertEqual(sb.vacationDefaults.length, 0, 'defaults: no hidden setting is read (catalog.vacation.defaults dropped)');
   const ann = { id: 'e1', name: 'Ann' };
   const prevRows = [
     { id: 'a', employeeId: 'e1', employeeName: 'Ann', createdAt: '2026-01-01T00:00:00Z', options: { remind: true, autoBack: false } },
@@ -2510,9 +2512,8 @@ function testVacations(sb){
     { id: 'c', employeeId: 'e1', employeeName: 'Ann', createdAt: '2026-09-01T00:00:00Z', cancelledAt: '2026-09-02T00:00:00Z', options: { noCalls: true } },
     { id: 'd', employeeId: 'e2', employeeName: 'Bob', createdAt: '2026-10-01T00:00:00Z', options: { badge: true } },
   ];
-  assertEqual(sb.vacationOptionsFor(prevRows, ann, undefined), { ...all(false), autoBack: true, noNotify: true, payroll: true, pay: 'paid' }, 'options for: the latest non-cancelled vacation of that person');
-  assertEqual(sb.vacationOptionsFor(prevRows, { id: 'e3', name: 'Cat' }, undefined), { ...all(true), pay: 'unpaid' }, 'options for: the first time → the defaults');
-  assertEqual(sb.vacationOptionsFor([], 'Cat', { vacation: { defaults: { remind: false } } }).remind, false, 'options for: the first time uses the business defaults');
+  assertEqual(sb.vacationOptionsFor(prevRows, ann), { ...all(false), autoBack: true, noNotify: true, payroll: true, pay: 'paid' }, 'options for: the latest non-cancelled vacation of that person');
+  assertEqual(sb.vacationOptionsFor(prevRows, { id: 'e3', name: 'Cat' }), { ...all(true), pay: 'unpaid' }, 'options for: the first time → the defaults');
 
   // days in the business time zone: stage 1's bizTz / bizDayOf / todayStr (Settings → Region and format; DST starts 4 Oct 2026 in Sydney)
   delete sb.STATE.data.settings.catalog;
@@ -2592,9 +2593,13 @@ function testVacations(sb){
 
   // the saved row
   assertEqual(sb.vacationRowFromDraft(draft({ options: { payroll: true, pay: 'paid' }, note: '  ' })),
-    { employee_id: 'e1', starts_on: '2026-11-02', ends_on: '2026-11-06', stand_in_id: null, options: { ...all(false), autoBack: true, payroll: true, pay: 'paid' }, note: null }, 'row: stand-in unticked → null, options normalized, empty note → null');
+    { employee_id: 'e1', starts_on: '2026-11-02', ends_on: '2026-11-06', stand_in_id: null, options: { ...all(false), autoBack: true, payroll: true, pay: 'paid' } }, 'row: stand-in unticked → null, options normalized');
   const row = sb.vacationRowFromDraft(draft({ note: ' Fiji ' }));
-  assertEqual([row.stand_in_id, row.note, 'business_id' in row, 'employee_name' in row, 'created_by' in row], ['e2', 'Fiji', false, false, false], 'row: the stand-in kept, no business_id / names / created_by');
+  assertEqual([row.stand_in_id, 'note' in row, 'business_id' in row, 'employee_name' in row, 'created_by' in row, 'reminded_at' in row], ['e2', false, false, false, false, false], 'row: the stand-in kept; no note (its own table), business_id, names, created_by or reminded_at');
+  // the note: owners and managers only, from employee_vacation_notes (main builder review 1.C.1)
+  const notes = sb.vacationNotesMap([{ vacation_id: 'v1', note: 'Surgery' }, { vacation_id: 'v2', note: null }, { vacation_id: null, note: 'x' }, null]);
+  assertEqual([notes, sb.vacationNotesMap(undefined)], [{ v1: 'Surgery' }, {}], 'notes map: by vacation, empty ones left out');
+  assertEqual([sb.vacationWithNote(V(), notes).note, sb.vacationWithNote(V({ id: 'v9' }), notes).note, sb.vacationWithNote(V(), null).note], ['Surgery', '', ''], 'with note: from the notes, else empty (someone who may not read them)');
 
   // words on badges and pickers
   const ut = (v, d) => sb.vacationUntilText(v, d, SYD);
@@ -2613,14 +2618,15 @@ function testVacations(sb){
   // payroll leave lines (19 Oct 2026 is a Monday)
   const MF = [1, 2, 3, 4, 5];
   const PL = (rows, from, to, wd, today) => sb.vacationPayrollLines(rows, 'Ann', from, to, SYD, wd, today || '2026-10-15');
-  assertEqual(PL([V({ options: { payroll: true, pay: 'paid' } })], '2026-10-18', '2026-10-24', []), [{ id: 'v1', pay: 'paid', from: '2026-10-20', to: '2026-10-24', days: 5, text: 'Paid leave 20–24 Oct · 5 days' }], 'payroll: a paid line');
+  assertEqual(PL([V({ options: { payroll: true, pay: 'paid' } })], '2026-10-18', '2026-10-24', []), [{ id: 'v1', pay: 'paid', from: '2026-10-20', to: '2026-10-24', days: 4, text: 'Paid leave 20–24 Oct · 4 days' }], 'payroll: a paid line (Tue–Sat, no working days set → Tue–Fri)');
   assertEqual(PL([V()], '2026-10-18', '2026-10-24', []), [], 'payroll: only with payroll ticked');
   assertEqual(PL([V({ startsOn: '2026-10-19', endsOn: '2026-10-25', options: { payroll: true, pay: 'paid' } })], '2026-10-19', '2026-10-25', MF).map(l => [l.days, l.text]), [[5, 'Paid leave 19–25 Oct · 5 days']], 'payroll: Mon–Fri working days → 5 of 7');
-  assertEqual(PL([V({ startsOn: '2026-10-19', endsOn: '2026-10-25', options: { payroll: true } })], '2026-10-19', '2026-10-25', []).map(l => l.days), [7], 'payroll: no working days set → every day');
+  assertEqual(PL([V({ startsOn: '2026-10-19', endsOn: '2026-10-25', options: { payroll: true } })], '2026-10-19', '2026-10-25', []).map(l => l.days), [5], 'payroll: no working days set → Monday to Friday');
+  assertEqual(PL([V({ startsOn: '2026-10-19', endsOn: '2026-10-25', options: { payroll: true } })], '2026-10-19', '2026-10-25', [0, 6]).map(l => l.days), [2], 'payroll: their own working days when set (weekends)');
   assertEqual(PL([V({ startsOn: '2026-10-20', endsOn: '2026-10-20', options: { payroll: true } })], '2026-10-19', '2026-10-25', MF).map(l => l.text), ['Unpaid leave 20 Oct · 1 day'], 'payroll: one unpaid day');
   assertEqual(PL([V({ startsOn: '2026-10-24', endsOn: '2026-10-25', options: { payroll: true } })], '2026-10-19', '2026-10-25', MF), [], 'payroll: a weekend only → no line');
   assertEqual(PL([V({ startsOn: '2026-10-10', endsOn: '2026-11-02', options: { payroll: true } })], '2026-10-19', '2026-10-25', MF).map(l => [l.from, l.to, l.days]), [['2026-10-19', '2026-10-25', 5]], 'payroll: clipped to the week');
-  assertEqual(PL([V({ startsOn: '2026-10-28', endsOn: '2026-11-03', options: { payroll: true } })], '2026-10-25', '2026-11-07', []).map(l => l.text), ['Unpaid leave 28 Oct–3 Nov · 7 days'], 'payroll: across two months');
+  assertEqual(PL([V({ startsOn: '2026-10-28', endsOn: '2026-11-03', options: { payroll: true } })], '2026-10-25', '2026-11-07', []).map(l => l.text), ['Unpaid leave 28 Oct–3 Nov · 5 days'], 'payroll: across two months');
   assertEqual(PL([V({ endsOn: '2026-10-21', options: { payroll: true, autoBack: false } })], '2026-10-19', '2026-10-25', [], '2026-10-23').map(l => [l.to, l.days]), [['2026-10-23', 4]], 'payroll: left open (autoBack off) runs through today');
   assertEqual(PL([V({ options: { payroll: true }, cancelledAt: 'x' })], '2026-10-19', '2026-10-25', []), [], 'payroll: cancelled → no line');
 
@@ -2644,7 +2650,7 @@ function testVacations(sb){
 
   // the row and the errors
   assertEqual(sb.mapVacationRow({ id: 'r1', employee_id: 'e1', employee_name: 'Ann', starts_on: '2026-10-20', ends_on: '2026-10-24', stand_in_id: 'e2', stand_in_name: 'Bob', options: { noNotify: true, autoBack: false, pay: 'paid' }, note: null, created_by: 'p1', created_at: '2026-10-14T00:00:00Z', ended_at: null, cancelled_at: null, reminded_at: null }),
-    { id: 'r1', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Bob', options: { ...all(false), noNotify: true, pay: 'paid' }, note: '', createdBy: 'p1', createdAt: '2026-10-14T00:00:00Z', endedAt: null, cancelledAt: null, remindedAt: null }, 'mapVacationRow: camelCase, options normalized');
+    { id: 'r1', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Bob', options: { ...all(false), noNotify: true, pay: 'paid' }, createdBy: 'p1', createdAt: '2026-10-14T00:00:00Z', endedAt: null, cancelledAt: null, remindedAt: null }, 'mapVacationRow: camelCase, options normalized');
   assertEqual([sb.vacationErrorText({ code: '23P01', message: 'Already on vacation from 20 Oct to 24 Oct' }), sb.vacationErrorText({ message: 'Already on vacation from 1 Nov to 3 Nov' }), sb.vacationErrorText({ code: '42501', message: 'permission denied' })],
     ['Already on vacation from 20 Oct to 24 Oct', 'Already on vacation from 1 Nov to 3 Nov', 'Not saved: permission denied'], 'error text: the overlap message as is, else "Not saved: …"');
 }
@@ -2714,10 +2720,10 @@ function testVacationUi(sb){
   // the payroll leave card
   const week = { start: '2026-10-18', end: '2026-10-24' };
   const PL = (wk, today, emps) => sb.vacationPayLines({ ...data, employees: emps || employees }, wk, SYD, today).map(x => [x.emp.name, x.line.days, x.line.pay, x.v.id]);
-  assertEqual(PL(week, '2026-10-15'), [['Cal', 5, 'paid', 'v1'], ['Eve', 2, 'unpaid', 'v2']], 'pay lines: one per person in the week, by name');
+  assertEqual(PL(week, '2026-10-15'), [['Cal', 4, 'paid', 'v1'], ['Eve', 2, 'unpaid', 'v2']], 'pay lines: one per person in the week, by name (Monday to Friday when no working days are set)');
   assertEqual(PL({ start: '2026-10-25', end: '2026-10-31' }, '2026-10-15'), [], 'pay lines: a week after the dates → none');
-  assertEqual(PL({ start: '2026-10-25', end: '2026-10-31' }, '2026-10-27'), [['Eve', 3, 'unpaid', 'v2']], 'pay lines: left open past its end runs through today');
-  assertEqual(PL(week, '2026-10-15', employees.map(e => e.id==='e1' ? { ...e, workingDays: [1, 2, 3, 4, 5] } : e))[0], ['Cal', 4, 'paid', 'v1'], 'pay lines: only their working days (Tue–Fri of 20–24 Oct)');
+  assertEqual(PL({ start: '2026-10-25', end: '2026-10-31' }, '2026-10-27'), [['Eve', 2, 'unpaid', 'v2']], 'pay lines: left open past its end runs through today (Mon, Tue)');
+  assertEqual(PL(week, '2026-10-15', employees.map(e => e.id==='e1' ? { ...e, workingDays: [2, 6] } : e))[0], ['Cal', 2, 'paid', 'v1'], 'pay lines: only their working days (Tue and Sat of 20–24 Oct)');
   assertEqual(sb.vacationPayLines({ employees, vacations: [] }, week, SYD, '2026-10-15'), [], 'pay lines: no vacations → none');
 
   // the shared badges and the Away card
@@ -2734,16 +2740,15 @@ function testVacationUi(sb){
 
   // the window
   assertEqual([sb.vacationAllTicked(ALL()), sb.vacationAllTicked(ALL({ remind: false })), sb.vacationAllTicked({}), sb.vacationAllTicked(null)], [true, false, false, false], 'all ticked: every registry key');
-  const D = (emp, vac, emps, cat) => sb.vacationDraft(emp, vac, rows, emps || employees, cat || {}, '2026-10-15');
+  const D = (emp, vac, emps) => sb.vacationDraft(emp, vac, rows, emps || employees, '2026-10-15');
   const dg = D('e1', null);
   assertEqual([dg.id, dg.employeeId, dg.startsOn, dg.endsOn, dg.standInId, dg.fromPrev, dg.options], [null, 'e1', '2026-10-15', '', 'e2', true, sb.vacationOptionsNorm(v1.options)], 'draft: a new one has the ticks and stand-in of their last vacation');
   const ds = D('e2', null);
-  assertEqual([ds.fromPrev, ds.standInId, ds.options], [false, null, sb.vacationDefaults({})], 'draft: the first time (a cancelled one does not count) → the defaults');
-  assertEqual(D('e2', null, null, { vacation: { defaults: { badge: false } } }).options.badge, false, 'draft: the business defaults apply the first time');
+  assertEqual([ds.fromPrev, ds.standInId, ds.options], [false, null, sb.vacationDefaults()], 'draft: the first time (a cancelled one does not count) → the defaults');
   assertEqual(D('e1', null, employees.map(e => e.id==='e2' ? { ...e, status: 'Inactive' } : e)).standInId, null, 'draft: a stand-in who left is not kept');
   const de = D('e1', 'v1');
   assertEqual([de.id, de.startsOn, de.endsOn, de.standInId, de.fromPrev, de.options.pay], ['v1', '2026-10-20', '2026-10-24', 'e2', false, 'paid'], 'draft: changing one copies it');
-  assertEqual([D('', null).employeeId, D('', null).options], ['', sb.vacationDefaults({})], 'draft: no person yet → the defaults');
+  assertEqual([D('', null).employeeId, D('', null).options], ['', sb.vacationDefaults()], 'draft: no person yet → the defaults');
   const P = (d, more) => sb.vacationFormProblems(d, [...rows, ...(more || [])], employees, SYD);
   const ok = { id: null, employeeId: 'e1', startsOn: '2026-11-10', endsOn: '2026-11-12', standInId: 'e2', options: { standIn: true, payroll: true, pay: 'paid' }, note: '' };
   assertEqual(P(ok), [], 'problems: a valid draft');
@@ -2762,9 +2767,9 @@ function testVacationUi(sb){
     ['', 'Sam has no app login, so their copy of the notifications goes to nobody. Open items can still move to them.', '', ''], 'stand-in warning: only when the logins are known, the stand-in is ticked and has no login');
 
   // the person's own banner
-  assertEqual(sb.vacationBannerText(v1, 'Sam', '2026-10-21', SYD, true), "You're on vacation until 24 Oct. No notifications come to you, Sam gets them. No shift clock while you're away. The app works as usual.", 'banner: every tick, office staff');
+  assertEqual(sb.vacationBannerText(v1, 'Sam', '2026-10-21', SYD, true), "You're on vacation until 24 Oct. No app notifications come to you, Sam gets them. No shift clock while you're away. The app works as usual.", 'banner: every tick, office staff');
   assertEqual(sb.vacationBannerText({ ...v1, options: ALL({ noNotify: false }) }, 'Sam', '2026-10-21', SYD, false), "You're on vacation until 24 Oct. The app works as usual.", 'banner: no promise about notifications when that is off');
-  assertEqual(sb.vacationBannerText(v2, '', '2026-10-25', SYD, false), "You're on vacation (due back 24 Oct). No notifications come to you. The app works as usual.", 'banner: no stand-in named; left open past the end');
+  assertEqual(sb.vacationBannerText(v2, '', '2026-10-25', SYD, false), "You're on vacation (due back 24 Oct). No app notifications come to you. The app works as usual.", 'banner: no stand-in named; left open past the end (WhatsApp and status messages still go: only the app ones stop)');
   assertEqual(sb.vacationBannerText(v1, 'Sam', '2026-10-26', SYD, false), '', 'banner: none after the dates');
 
   // People: the On vacation filter
@@ -2819,6 +2824,10 @@ function testVacationUi(sb){
   const rawInHandler = t => (t.match(/on(click|change|input)="[^"]*"/g) || []).some(a => (a.match(/\$\{[^}]*\}/g) || []).some(x => !/^\$\{(esc\(jsStr\(|eid\}|vid\}|js\})/.test(x)));
   assertEqual(safe.filter(n => { const t = fx(n); return !t || rawInHandler(t) || /\$\{\s*(x|v|e|t|j|r|f)\.(id|key|name|standIn)\b/.test(t); }), [], 'static: no raw id or name inside an inline handler');
   assertEqual([rawInHandler(`onclick="go('\${x.id}')"`), rawInHandler(`onclick="go('\${esc(jsStr(x.id))}')"`)], [true, false], 'static: the handler check itself');
+  // Main builder's review 1.C (minor): the note in its own table, the forgot-logout acknowledgement can't stop the render.
+  const vss = fx('vaSessionStart');
+  assertEqual([/try \{ await sb\.rpc\('ack_forgot_logout'\); \} catch/.test(vss), vss.trim().endsWith('render();\n}') || /render\(\);\s*\}$/.test(vss.trim())], [true, true], 'static: vaSessionStart catches a failed ack_forgot_logout and still renders');
+  assertEqual([script.includes("fetchAllRows('employee_vacation_notes', 'vacation_id')"), /fetchAllRows\('employee_vacations', 'id', q => q\.is\('cancelled_at', null\)/.test(script)], [true, true], 'static: notes load from their own table; vacations load without the cancelled and old ones');
   // Main builder's review, 15 Oct.
   // A2: one time zone helper per layer (stage 1's), no zone code of the vacations' own.
   assertEqual([/function vacation(Tz|Today|DayOf)\(/.test(script), /region\.timezone|region \? c\.region\.timezone/.test(script)], [false, false], 'review A2: no vacationTz / vacationToday / vacationDayOf, nothing reads the lowercase region.timezone');

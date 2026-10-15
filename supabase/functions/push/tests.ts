@@ -442,6 +442,32 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
     await scan(backDb([CALV(o)]), BACK_9);
     eq(sent.length, 0, `back tomorrow: ${name} → nothing`);
   }
+  // another vacation of theirs starts tomorrow: not back then either (main builder review 1.C.3)
+  sent.length = 0;
+  const nextDb = backDb([CALV(), CALV({ id: "v-cal2", starts_on: "2026-10-25", ends_on: "2026-10-28" })]);
+  await scan(nextDb, BACK_9);
+  eq([sent.length, nextDb.T.push_sent.some((r: any) => String(r.key).startsWith("vacback:"))], [0, false], "back tomorrow: another vacation starts tomorrow → nothing, nothing claimed");
+  sent.length = 0;
+  await scan(backDb([CALV(), CALV({ id: "v-cal2", starts_on: "2026-10-27", ends_on: "2026-10-28" })]), BACK_9);
+  eq(sent.length, 3, "back tomorrow: the next vacation starts later → the reminder goes");
+  sent.length = 0;
+  await scan(backDb([CALV(), CALV({ id: "v-cal2", starts_on: "2026-10-25", ends_on: "2026-10-28", cancelled_at: "2026-10-20T00:00:00Z" })]), BACK_9);
+  eq(sent.length, 3, "back tomorrow: a cancelled next vacation doesn't count");
+  // an employee card that can't be found: nothing claimed, so it can still go once the card is there
+  const noCard = backDb([CALV()]);
+  noCard.T.employees = noCard.T.employees.filter((e: any) => e.id !== "e-cal");
+  sent.length = 0;
+  await scan(noCard, BACK_9);
+  eq([sent.length, noCard.T.push_sent.some((r: any) => String(r.key).startsWith("vacback:"))], [0, false], "back tomorrow: no employee card → nothing sent and nothing claimed");
+  // the jobs are read for the first week back only
+  const weekDb = backDb([CALV()]);
+  weekDb.T.jobs.push(...Array.from({ length: 30 }, (_, i) => ({ id: "late" + i, technician: "Cal", date: shiftDay("2026-11-01", i) })));
+  const reads: string[] = [];
+  const realFrom = weekDb.from.bind(weekDb);
+  weekDb.from = (t: string) => { const q = realFrom(t); if (t !== "jobs") return q; const lte = q.lte.bind(q); q.lte = (k: string, v: any) => { reads.push(`${k}<=${v}`); return lte(k, v); }; return q; };
+  sent.length = 0;
+  await scan(weekDb, BACK_9);
+  eq([reads, sent.find((x) => x.to.endsWith("/cal"))?.msg.body], [["date<=2026-10-31"], "Waiting for you: 2 open tasks, 1 job in the first week back and 1 lead."], "back tomorrow: the jobs query stops at the first week back");
   sent.length = 0;
   await scan(backDb([CALV(), { id: "v-ava", employee_id: "e-ava", starts_on: "2026-10-23", ends_on: "2026-10-30", stand_in_id: "e-dee", options: { noNotify: true, standIn: true }, ended_at: null, cancelled_at: null }]), BACK_9);
   eq(sent.map((x) => x.to.replace("https://push/", "")).sort(), ["ben", "cal"], "back tomorrow: an owner away is skipped; their technician stand-in never gets the owners' copy");

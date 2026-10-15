@@ -956,11 +956,11 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     db = await run([vac()], [pushTo(["owner", "manager"])]);
     eq([sent.map((s) => s.to), db.T.automation_log[0].recipient], [["https://push/mgr"], "Max Manager"], "push: the owner away without a stand-in → the manager only (as a role recipient)");
     db = await run([vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } })], [pushTo(["owner"])]);
-    eq([sent.map((s) => s.to), db.T.automation_log[0].status], [[], "failed"], "push: owners only, the owner away → a manager stand-in never gets an owners-only message");
+    eq([sent.map((s) => s.to), db.T.automation_log[0].status, db.T.automation_log[0].reason], [[], "skipped", "on vacation"], "push: owners only, the owner away → a manager stand-in never gets an owners-only message; logged 'skipped: on vacation', not 'failed: no device'");
     db = await run([vac({ stand_in_id: "e-cal", options: { noNotify: true, standIn: true } })], [pushTo(["owner", "manager"])]);
     eq([sent.map((s) => s.to), db.T.automation_log[0].recipient], [["https://push/mgr"], "Max Manager"], "push: an owner's technician stand-in isn't a recipient of an owner + manager message");
     db = await run([vac({ stand_in_id: "e-cal", options: { noNotify: true, standIn: true } })], [{ ...pushTo([]), to: { roles: [], people: ["u-owner"] } }]);
-    eq([db.T.automation_log[0].recipient || "", db.T.automation_log[0].status], ["", "failed"], "push: the owner picked by name, away → their technician stand-in isn't added either");
+    eq([db.T.automation_log[0].recipient || "", db.T.automation_log[0].status], ["", "skipped"], "push: the owner picked by name, away → their technician stand-in isn't added either (skipped: on vacation)");
     db = await run([vac({ stand_in_id: "e-cal", options: { noNotify: true, standIn: true } })], [pushTo(["owner", "technician"])]);
     eq(db.T.automation_log[0].recipient, "Cal Tech", "push: technicians picked too → the technician stand-in gets it (once)");
     db = await run([], [pushTo(["owner", "manager"])]);
@@ -971,10 +971,13 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     const task = (assignees: string[]) => ({ id: "t1", kind: "action", type: "task", title: "Call {first_name}", assignees, due_days: 1 });
     db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [task(["e-cal"])]);
     eq([db.T.tasks[0].assignees, db.T.tasks[0].assigned_to, db.T.tasks[0].board, db.T.automation_log[0].recipient], [["Vicky Va"], "Vicky Va", "ron", "Vicky Va"], "task: someone not assignable → their stand-in (and the board follows)");
+    eq(db.T.tasks[0].notes, "For Cal Tech (on vacation): given to Vicky Va, the stand-in.", "task: a redirected task says who it was for");
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [{ ...task(["e-cal"]), notes: "Ring before 5" }]);
+    eq(db.T.tasks[0].notes, "For Cal Tech (on vacation): given to Vicky Va, the stand-in.\n\nRing before 5", "task: the line comes before the automation's own notes");
     db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [task(["e-cal", "e-va"])]);
     eq(db.T.tasks[0].assignees, ["Vicky Va"], "task: the stand-in already chosen → once");
     db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true } })], [task(["e-cal"])]);
-    eq(db.T.tasks[0].assignees, ["Cal Tech"], "task: no stand-in ticked → the person stays (a warning in the app, never a block)");
+    eq([db.T.tasks[0].assignees, db.T.tasks[0].notes], [["Cal Tech"], ""], "task: no stand-in ticked → the person stays (a warning in the app, never a block), no line in the notes");
     db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } }), vac({ id: "v2", employee_id: "e-va", options: { notAssignable: true } })], [task(["e-cal"])]);
     eq(db.T.tasks[0].assignees, ["Cal Tech"], "task: the stand-in is away too → the person stays");
     db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-old", options: { notAssignable: true, standIn: true } })], [task(["e-cal"])]);
@@ -991,12 +994,18 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     const C = { day, tz: "Australia/Sydney", vacs: [vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], employees: EMPS, profiles: [] };
     eq(vacTaskPeople([EMPS[3], EMPS[1], EMPS[2]], C), ["Vicky Va", "Max Manager"], "vacTaskPeople: replaced, deduped, order kept");
     eq(vacTaskPeople([EMPS[3]], { ...C, vacs: [] }), ["Cal Tech"], "vacTaskPeople: nobody away → unchanged");
+    const moved: VacMove[] = [];
+    eq([vacTaskPeople([EMPS[3], EMPS[1]], C, undefined, moved), moved], [["Vicky Va", "Max Manager"], [{ from: "Cal Tech", to: "Vicky Va" }]], "vacTaskPeople: who was swapped for whom");
+    eq([vacMovedNote([]), vacMovedNote([{ from: "A", to: "B" }, { from: "C", to: "B" }])], ["", "For A (on vacation): given to B, the stand-in.\nFor C (on vacation): given to B, the stand-in."], "vacMovedNote: one line each, none when nobody moved");
     eq([vacTaskPeople([EMPS[3]], C, "2026-10-18"), vacTaskPeople([EMPS[3]], C, "2026-10-17"), vacTaskPeople([EMPS[3]], C, day)], [["Cal Tech"], ["Vicky Va"], ["Vicky Va"]], "vacTaskPeople: on the day given (the due day)");
     // preview shows the same
     const a = auto({ id: "a-vac", enabled: false, steps: [pushTo(["owner", "manager"]), { ...task(["e-cal"]), id: "t1" }] });
     const pdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } }), vac({ id: "v2", employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], automations: [a], contacts: [lead("c1")] });
     const p = await handle(pdb, { step: "preview", automation_id: "a-vac", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([p.body.steps[0].to, p.body.steps[1].assignees, p.body.steps[1].board], [["Max Manager"], ["Vicky Va"], "ron"], "preview: the redirected push names and task assignees");
+    eq([p.body.steps[0].to, p.body.steps[1].assignees, p.body.steps[1].board, p.body.steps[1].notes], [["Max Manager"], ["Vicky Va"], "ron", "For Cal Tech (on vacation): given to Vicky Va, the stand-in."], "preview: the redirected push names, task assignees and the line in its notes");
+    const sdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac()], automations: [auto({ id: "a-skip", enabled: false, steps: [pushTo(["owner"])] })], contacts: [lead("c1")] });
+    const ps = await handle(sdb, { step: "preview", automation_id: "a-skip", record: { kind: "contact", id: "c1" } }, OWNER, false);
+    eq([ps.body.steps[0].would, ps.body.steps[0].reason], ["skip", "on vacation"], "preview: everyone picked is away → 'skip: on vacation'");
     // read once per tick
     const twice = auto({ steps: [pushTo(["owner"]), { ...pushTo(["manager"]), id: "p2" }] });
     const odb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac({ starts_on: "2026-10-01", ends_on: "2026-10-02" })], automations: [twice, auto({ steps: [pushTo(["manager"])] })], contacts: [lead("c1")] });
