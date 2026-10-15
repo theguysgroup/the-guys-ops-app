@@ -22,7 +22,9 @@
 //              set it follows the employee-document switch. To the owners, and to the office (VA and managers) when
 //              chosen, for a new lead, a waiting lead and a missed call only (money and private details: owners only).
 //              Also the day before someone is back from a vacation (stage 3), when "Reminder a day before they are back"
-//              is ticked: to them and the owners, from the morning hour on, with what is waiting (once per vacation).
+//              is ticked on the vacation and the "back tomorrow" card is on (catalog.notify.vacationBack, on unless
+//              switched off): to them and the owners, only between the notifications' hours (rules.from–until), with
+//              what is waiting (once per vacation).
 //              Anyone may call it: it only ever sends what push_sent hasn't recorded yet, and does nothing while
 //              everything is switched off.
 // Recipients skip people on vacation with "No notifications" and go to their stand-in when one is chosen (stage 3; the
@@ -109,22 +111,13 @@ export async function sendTo(sb: any, userIds: string[], payload: Record<string,
 // as the app (vacationOnDay) and SQL (vacation_in_force): options.autoBack is ON unless it is the boolean false, every other
 // key only when it is the boolean true; starts_on = the first day away, ends_on = the last; in force on a day when not
 // cancelled, from starts_on, before the business day it was ended on, and up to ends_on unless autoBack is off. The day is
-// in the business time zone (settings.catalog.region.timezone, else Sydney). A login is the employee whose name is its
-// technician_name, else its full_name (the app's peopleList). FAIL-OPEN: no table, an error or a throw = nobody is away.
+// in the business time zone the caller passes (bizTzOf(catalog), the region block). A login is the employee whose name is
+// its technician_name, else its full_name (the app's peopleList). FAIL-OPEN: no table, an error or a throw = nobody is
+// away, and the log says "vacations not read: ..." (so a broken read is visible, never silent).
 export const VAC_COLS = "id, employee_id, starts_on, ends_on, stand_in_id, options, ended_at, cancelled_at, reminded_at";
 // deno-lint-ignore no-explicit-any
 export type VacCtx = { day: string; tz: string; vacs: any[]; employees: any[]; profiles: any[] };
 const vacIsDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
-// deno-lint-ignore no-explicit-any
-export function vacTz(catalog: any): string {
-  const tz = catalog && catalog.region && catalog.region.timezone;
-  if (typeof tz === "string" && tz) { try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); return tz; } catch { /* not a zone */ } }
-  return "Australia/Sydney";
-}
-export function vacDay(ms: number, tz: string): string {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
-  return `${p.year}-${p.month}-${p.day}`;
-}
 // deno-lint-ignore no-explicit-any
 export function vacOpt(v: any, key: string): boolean {
   const o = v && v.options && typeof v.options === "object" ? v.options : {};
@@ -133,7 +126,7 @@ export function vacOpt(v: any, key: string): boolean {
 // deno-lint-ignore no-explicit-any
 export function vacOnDay(v: any, day: string, tz: string): boolean {
   if (!v || v.cancelled_at || !vacIsDay(v.starts_on) || !vacIsDay(day) || v.starts_on > day) return false;
-  if (v.ended_at) { const t = Date.parse(v.ended_at); if (isNaN(t) || !(day < vacDay(t, tz))) return false; }
+  if (v.ended_at) { const t = Date.parse(v.ended_at); if (isNaN(t) || !(day < bizParts(t, tz).day)) return false; }
   return !vacOpt(v, "autoBack") || (vacIsDay(v.ends_on) && day <= v.ends_on);
 }
 // deno-lint-ignore no-explicit-any
@@ -188,18 +181,22 @@ export const vacShiftDay = (day: string, n: number): string => new Date(Date.par
 // The vacations that can be in force from today to aheadDays on (started by then, and not over before today: ends_on from
 // today on, or left open with autoBack off), and the people they need, read once. Nobody away = no more reads. A vacation
 // that is over is never read again, so the table can grow without slowing a call down.
+// tz: the business time zone (the caller's bizTzOf(catalog)).
 // deno-lint-ignore no-explicit-any
-export async function vacContext(sb: any, nowMs: number, catalog: any, aheadDays = 0): Promise<VacCtx> {
-  const tz = vacTz(catalog), empty: VacCtx = { day: vacDay(nowMs, tz), tz, vacs: [], employees: [], profiles: [] };
+export async function vacContext(sb: any, nowMs: number, tz: string, aheadDays = 0): Promise<VacCtx> {
+  const empty: VacCtx = { day: bizParts(nowMs, tz).day, tz, vacs: [], employees: [], profiles: [] };
+  // deno-lint-ignore no-explicit-any
+  const why = (e: any) => (e && (e.message || e.code)) || String(e);
   try {
     const { data: vacs, error } = await sb.from("employee_vacations").select(VAC_COLS).is("cancelled_at", null).is("ended_at", null)
       .lte("starts_on", vacShiftDay(empty.day, aheadDays)).or(`ends_on.gte.${empty.day},options->>autoBack.eq.false`);
-    if (error || !Array.isArray(vacs) || !vacs.length) return empty;
+    if (error) { console.error("vacations not read: employee_vacations:", why(error)); return empty; }
+    if (!Array.isArray(vacs) || !vacs.length) return empty;
     const [emps, profs] = await Promise.all([sb.from("employees").select("id, name, phone, status"), sb.from("profiles").select("id, full_name, technician_name, role")]);
-    if (emps.error || profs.error) return empty;
+    if (emps.error || profs.error) { console.error("vacations not read:", emps.error ? "employees: " + why(emps.error) : "profiles: " + why(profs.error)); return empty; }
     return { ...empty, vacs, employees: emps.data || [], profiles: profs.data || [] };
   } catch (e) {
-    console.error("vacations not read:", e);
+    console.error("vacations not read:", why(e));
     return empty;
   }
 }
@@ -312,7 +309,7 @@ export function holidayDaysOf(cat: any): Record<string, string> {
 // ── end region ──
 
 // ── scan: news for the phones (Settings → Notifications) ──
-export const NOTIFY_KINDS = ["newLead", "leadWaiting", "missedCall", "unpaid", "docExpiry", "bizInsurance"];
+export const NOTIFY_KINDS = ["newLead", "leadWaiting", "missedCall", "unpaid", "docExpiry", "bizInsurance", "vacationBack"];
 // Only these may also go to the office (VA and managers); the rest are money and private details, for the owners only.
 export const OFFICE_KINDS = ["newLead", "leadWaiting", "missedCall"];
 export const BIZ_INSURANCE_DAYS = 30;   // the business insurance is always flagged 30 days before (Ofek 14 Oct)
@@ -336,12 +333,12 @@ export function notifyRules(N: any, unpaidDays: unknown) {
   if (until <= from) { from = 8; until = 20; }
   return { waitMinutes: int(r.waitMinutes, 5, 240, 15), from, until, docDays: int(r.docDays, 1, 180, 30), unpaidDays: int(unpaidDays, 1, 365, 7) };
 }
-// Is a notification switched on? The same rule as the app's notifyOn: the invoice one is on unless turned off; the business
-// insurance follows the document switch until it has its own (a true / false saved on it).
+// Is a notification switched on? The same rule as the app's notifyOn: the invoice one and "back tomorrow" (stage 3) are on
+// unless turned off; the business insurance follows the document switch until it has its own (a true / false saved on it).
 // deno-lint-ignore no-explicit-any
 export function notifyOn(N: any, k: string): boolean {
   const x = N && N[k];
-  if (k === "invoice") return !(x && x.on === false);
+  if (k === "invoice" || k === "vacationBack") return !(x && x.on === false);
   if (k === "bizInsurance" && !(x && typeof x.on === "boolean")) return notifyOn(N, "docExpiry");
   return !!(x && x.on);
 }
@@ -377,10 +374,6 @@ export function invoicePayload(person: string, week: string, end?: unknown) {
   return { title: `Invoice in: ${person}`, body: `${person} sent his commission invoice for ${weekText(week, end)}. You can pay him.`, url: `${APP_URL}?tab=payroll&week=${week}`, tag: `invoice-${week}-${person}` };
 }
 // ── the day before someone is back from a vacation (stage 3) ──
-export function zoneHour(ms: number, tz: string): number {
-  const h = new Intl.DateTimeFormat("en-CA", { timeZone: tz, hour: "2-digit", hour12: false }).formatToParts(new Date(ms)).find((x) => x.type === "hour");
-  return Number(h && h.value) % 24;
-}
 // Vacations whose last day is today with the reminder ticked, from the morning hour on (the notifications' "from"). Only
 // with "Back to Active on the end date": with it off they are not back tomorrow, the vacation goes on until someone ends it.
 // deno-lint-ignore no-explicit-any
@@ -434,6 +427,7 @@ export function testPayload(kind: string, R: { waitMinutes: number; unpaidDays: 
     : kind === "invoice" ? invoicePayload("Sample Technician", shiftDay(today, -7))
     : kind === "docExpiry" ? docPayload({ id: "test", name: "Sample Employee" }, "arc", shiftDay(today, R.docDays))
     : kind === "bizInsurance" ? bizInsurancePayload("liability", shiftDay(today, BIZ_INSURANCE_DAYS))
+    : kind === "vacationBack" ? vacBackPayloads({ id: "test" }, "Sample Employee", { tasks: [{}, {}], jobs: [{}], leads: 1 }).owners
     : null;
   return p ? { ...p, title: `Test · ${p.title}`, tag: `test-${kind}` } : null;
 }
@@ -444,16 +438,17 @@ export async function scan(sb: any, nowMs: number) {
   const N = (st && st.catalog && st.catalog.notify) || {};
   const R = notifyRules(N, st && st.unpaid_reminder_days);
   const on = (k: string) => notifyOn(N, k);
-  const anyOn = NOTIFY_KINDS.some(on), hour = zoneHour(nowMs, vacTz(st && st.catalog));
-  // everything switched off and before the morning hour: no reminder can go either, so the vacations aren't read
-  if (!anyOn && hour < R.from) return { ok: true, off: true, sent: 0 };
-  const C = await vacContext(sb, nowMs, st && st.catalog);
-  const back = vacReturning(C, hour, R.from);
+  const tz = bizTzOf(st && st.catalog), now = bizParts(nowMs, tz), today = now.day;   // the business's day and hour (Region and format)
+  // "back tomorrow" (stage 3) has its own switch and keeps to the notifications' hours, like a waiting lead
+  const anyOn = NOTIFY_KINDS.some((k) => k !== "vacationBack" && on(k)), backOn = on("vacationBack") && now.hour >= R.from && now.hour < R.until;
+  // everything switched off, and no reminder can go now either: the vacations aren't read
+  if (!anyOn && !backOn) return { ok: true, off: true, sent: 0 };
+  const C = await vacContext(sb, nowMs, tz);
+  const back = backOn ? vacReturning(C, now.hour, R.from) : [];
   if (!anyOn && !back.length) return { ok: true, off: true, sent: 0 };
   // one scan at a time: the first call in each 8-minute window claims it
   const { error: busy } = await sb.from("push_sent").insert({ key: `scan:${Math.floor(nowMs / (8 * 60000))}` });
   if (busy) return { ok: true, busy: true, sent: 0 };
-  const now = bizParts(nowMs, bizTzOf(st && st.catalog)), today = now.day;   // the business's day and hour (Region and format)
   // deno-lint-ignore no-explicit-any
   const events: { key: string; kind: string; payload: any }[] = [];
   if (on("newLead") || on("leadWaiting")) {
@@ -584,7 +579,7 @@ export async function handle(sb: any, body: any, me: any) {
     const { data: owners } = await sb.from("profiles").select("id").eq("role", "owner");
     // an owner on vacation: skipped, or their stand-in instead (stage 3)
     // deno-lint-ignore no-explicit-any
-    const to = vacRecipients((owners || []).map((o: any) => o.id), await vacContext(sb, Date.now(), st && st.catalog), ["owner"]);
+    const to = vacRecipients((owners || []).map((o: any) => o.id), await vacContext(sb, Date.now(), bizTzOf(st && st.catalog)), ["owner"]);
     const r = await sendTo(sb, to, invoicePayload(person, week, body?.end), await vapidKeys(sb));
     return { status: 200, body: { ok: true, ...r } };
   }

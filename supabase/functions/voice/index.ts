@@ -213,22 +213,13 @@ const hm = (s: string) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")
 // as the app (vacationOnDay) and SQL (vacation_in_force): options.autoBack is ON unless it is the boolean false, every other
 // key only when it is the boolean true; starts_on = the first day away, ends_on = the last; in force on a day when not
 // cancelled, from starts_on, before the business day it was ended on, and up to ends_on unless autoBack is off. The day is
-// in the business time zone (settings.catalog.region.timezone, else Sydney). A login is the employee whose name is its
-// technician_name, else its full_name (the app's peopleList). FAIL-OPEN: no table, an error or a throw = nobody is away.
+// in the business time zone the caller passes (bizTzOf(catalog), the region block). A login is the employee whose name is
+// its technician_name, else its full_name (the app's peopleList). FAIL-OPEN: no table, an error or a throw = nobody is
+// away, and the log says "vacations not read: ..." (so a broken read is visible, never silent).
 export const VAC_COLS = "id, employee_id, starts_on, ends_on, stand_in_id, options, ended_at, cancelled_at, reminded_at";
 // deno-lint-ignore no-explicit-any
 export type VacCtx = { day: string; tz: string; vacs: any[]; employees: any[]; profiles: any[] };
 const vacIsDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
-// deno-lint-ignore no-explicit-any
-export function vacTz(catalog: any): string {
-  const tz = catalog && catalog.region && catalog.region.timezone;
-  if (typeof tz === "string" && tz) { try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); return tz; } catch { /* not a zone */ } }
-  return "Australia/Sydney";
-}
-export function vacDay(ms: number, tz: string): string {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
-  return `${p.year}-${p.month}-${p.day}`;
-}
 // deno-lint-ignore no-explicit-any
 export function vacOpt(v: any, key: string): boolean {
   const o = v && v.options && typeof v.options === "object" ? v.options : {};
@@ -237,7 +228,7 @@ export function vacOpt(v: any, key: string): boolean {
 // deno-lint-ignore no-explicit-any
 export function vacOnDay(v: any, day: string, tz: string): boolean {
   if (!v || v.cancelled_at || !vacIsDay(v.starts_on) || !vacIsDay(day) || v.starts_on > day) return false;
-  if (v.ended_at) { const t = Date.parse(v.ended_at); if (isNaN(t) || !(day < vacDay(t, tz))) return false; }
+  if (v.ended_at) { const t = Date.parse(v.ended_at); if (isNaN(t) || !(day < bizParts(t, tz).day)) return false; }
   return !vacOpt(v, "autoBack") || (vacIsDay(v.ends_on) && day <= v.ends_on);
 }
 // deno-lint-ignore no-explicit-any
@@ -292,18 +283,22 @@ export const vacShiftDay = (day: string, n: number): string => new Date(Date.par
 // The vacations that can be in force from today to aheadDays on (started by then, and not over before today: ends_on from
 // today on, or left open with autoBack off), and the people they need, read once. Nobody away = no more reads. A vacation
 // that is over is never read again, so the table can grow without slowing a call down.
+// tz: the business time zone (the caller's bizTzOf(catalog)).
 // deno-lint-ignore no-explicit-any
-export async function vacContext(sb: any, nowMs: number, catalog: any, aheadDays = 0): Promise<VacCtx> {
-  const tz = vacTz(catalog), empty: VacCtx = { day: vacDay(nowMs, tz), tz, vacs: [], employees: [], profiles: [] };
+export async function vacContext(sb: any, nowMs: number, tz: string, aheadDays = 0): Promise<VacCtx> {
+  const empty: VacCtx = { day: bizParts(nowMs, tz).day, tz, vacs: [], employees: [], profiles: [] };
+  // deno-lint-ignore no-explicit-any
+  const why = (e: any) => (e && (e.message || e.code)) || String(e);
   try {
     const { data: vacs, error } = await sb.from("employee_vacations").select(VAC_COLS).is("cancelled_at", null).is("ended_at", null)
       .lte("starts_on", vacShiftDay(empty.day, aheadDays)).or(`ends_on.gte.${empty.day},options->>autoBack.eq.false`);
-    if (error || !Array.isArray(vacs) || !vacs.length) return empty;
+    if (error) { console.error("vacations not read: employee_vacations:", why(error)); return empty; }
+    if (!Array.isArray(vacs) || !vacs.length) return empty;
     const [emps, profs] = await Promise.all([sb.from("employees").select("id, name, phone, status"), sb.from("profiles").select("id, full_name, technician_name, role")]);
-    if (emps.error || profs.error) return empty;
+    if (emps.error || profs.error) { console.error("vacations not read:", emps.error ? "employees: " + why(emps.error) : "profiles: " + why(profs.error)); return empty; }
     return { ...empty, vacs, employees: emps.data || [], profiles: profs.data || [] };
   } catch (e) {
-    console.error("vacations not read:", e);
+    console.error("vacations not read:", why(e));
     return empty;
   }
 }
@@ -315,8 +310,7 @@ type BackupDay = { on?: boolean; from?: string; to?: string };
 // Backup hours: per weekday since 13 Oct ({ days: { 0..6: { on, from, to } } }, Sunday = 0); before that one range for the
 // ticked days ({ from, to, days: [0..6] }).
 type BackupHours = { from?: string; to?: string; days?: number[] | Record<string, BackupDay> };
-// deno-lint-ignore no-explicit-any
-type Routing = { people: Record<string, Person>; divisions: Record<string, string[]>; backupHours: BackupHours; officeRingSeconds: number; backupRingSeconds: number; callerId: string; menu: { key: string; say: string }[]; cat: any };
+type Routing = { people: Record<string, Person>; divisions: Record<string, string[]>; backupHours: BackupHours; officeRingSeconds: number; backupRingSeconds: number; callerId: string; menu: { key: string; say: string }[] };
 const ringSeconds = (v: unknown) => { const n = Math.round(Number(v)); return n >= 5 && n <= 60 ? n : 20; };
 // The routing and, in the same read, the words (Settings → Message templates), so a call never waits on a second query.
 // deno-lint-ignore no-explicit-any
@@ -330,7 +324,6 @@ async function routing(sb: any): Promise<Routing> {
     backupHours: r.backupHours || { from: "08:00", to: "20:00", days: [0, 1, 2, 3, 4, 5, 6] },
     officeRingSeconds: ringSeconds(r.officeRingSeconds), backupRingSeconds: ringSeconds(r.backupRingSeconds),
     callerId: toE164(r.callerId) || BUSINESS_NUMBER, menu: menuOf(r),
-    cat: (data && data[0] && data[0].catalog) || {},
   };
 }
 const BACKUP_DAY_DEFAULT = { on: true, from: "08:00", to: "20:00" };
@@ -362,8 +355,8 @@ function ownersFor(R: Routing, division: string, away: Set<string> = new Set()):
 }
 // The employee a backup phone (a phone_routing.people entry) belongs to: one clear match, never a guess, in the app's order
 // (vacationPhoneEmployee): the same mobile; else the same full name; else their first name when nobody else has it (no
-// other employee, and no login of any role that isn't theirs: the owner "Noam Gal" with no employee card is a twin of the
-// technician "Noam Levi", as in phonePersonKeyFor). More than one match at a step, or none at all = null.
+// other employee, and no login of any role that isn't theirs: the owner "Sam Gal" with no employee card is a twin of the
+// technician "Sam Levi", as in phonePersonKeyFor). More than one match at a step, or none at all = null.
 // deno-lint-ignore no-explicit-any
 export function vacPhoneEmployee(pp: Person, key: string, C: VacCtx): any {
   const norm = (s: unknown) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -520,7 +513,7 @@ export async function step(sb: any, name: string, p: Record<string, string>, q: 
   const R = await routing(sb);
   // who is on vacation (stage 3): read at most once per request, only when a call is routed; fail-open (nobody away)
   let C: VacCtx | null = null;
-  const vac = async () => C || (C = await vacContext(sb, nowMs, R.cat));
+  const vac = async () => C || (C = await vacContext(sb, nowMs, TZ));   // TZ: the business's zone, set by routing()
   if (name === "incoming") {
     const from = toE164(p.From);
     const caller = await contactForCaller(sb, from, nowMs);

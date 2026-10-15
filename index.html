@@ -2283,7 +2283,7 @@ function activeEmployeeNames(data){ return data.employees.filter(e=>e.status==='
    functions (vacOnDay) and in SQL (vacation_in_force). These helpers are pure; the screens only call them. ── */
 // OPTION SEMANTICS (shared with the functions and SQL). options is an object: autoBack counts as ON unless it is the boolean
 // false; every other key counts as ON only when it is the boolean true (missing or a string = off). pay is 'paid' | 'unpaid',
-// used only when payroll is ON. Days are 'YYYY-MM-DD' in the business time zone (vacationTz). startsOn = the first day away,
+// used only when payroll is ON. Days are 'YYYY-MM-DD' in the business time zone (bizTz). startsOn = the first day away,
 // endsOn = the LAST day away (back on endsOn + 1). In force on day d when: not cancelled, startsOn <= d, d is before the business
 // day of endedAt (an early end = back the same day), and d <= endsOn unless autoBack is off (then until someone ends it).
 // "End" before the start means cancel. One vacation at a time: the PLANNED ranges (endsOn shortened by an early end) of two
@@ -2297,35 +2297,12 @@ const VACATION_OPTIONS = [
   { key:'autoBack', label:'Back to Active on the end date', help:'Off: they stay on vacation until someone ends it.' },
   { key:'badge', label:'"On vacation until" badge', help:'On their People card, the calendar and the team home.' },
   { key:'noCalls', label:'No calls routed to them', help:'Calls go to the next person in line.' },
-  { key:'payroll', label:'Leave on the payroll board', help:'Paid or unpaid; office staff get no automatic log-out.' },
+  { key:'payroll', label:'Leave on the payroll board', help:'Marked paid or unpaid on the weeks it touches. A mark only: pay is not changed.' },
   { key:'remind', label:'Reminder a day before they are back', help:'To them and the owners, with what is waiting.' },
 ];
 const VACATION_PAY = ['paid', 'unpaid'];
-// The business time zone: settings.catalog.region.timezone when it is a real zone, else the automations default (Sydney).
-// Checked once per saved value: the per-row flags ask on every render, and checking a zone builds an Intl formatter.
-function vacationTz(){
-  const c = STATE.data && STATE.data.settings && STATE.data.settings.catalog, raw = c && c.region ? c.region.timezone : undefined;
-  const m = vacationTz.memo;
-  if (m && m.raw===raw) return m.tz;
-  let tz = AUTO_SAFETY_DEFAULTS.timezone;
-  if (typeof raw === 'string' && raw) { try { new Intl.DateTimeFormat('en-CA', { timeZone: raw }); tz = raw; } catch (e) { /* not a zone */ } }
-  vacationTz.memo = { raw, tz };
-  return tz;
-}
-function vacationDayOf(at, tz){
-  const f = (vacationDayOf.fmt || (vacationDayOf.fmt = {}));
-  const fmt = f[tz] || (f[tz] = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year:'numeric', month:'2-digit', day:'2-digit' }));
-  const p = {}; fmt.formatToParts(new Date(at)).forEach(x => { p[x.type] = x.value; });
-  return `${p.year}-${p.month}-${p.day}`;
-}
-// Today in the business zone. Without now, kept for a second: a render asks once per row.
-function vacationToday(now){
-  if (now) return vacationDayOf(now, vacationTz());
-  const tz = vacationTz(), t = Date.now(), m = vacationToday.memo;
-  if (m && m.tz===tz && t >= m.at && t - m.at < 1000) return m.day;
-  vacationToday.memo = { tz, at: t, day: vacationDayOf(t, tz) };
-  return vacationToday.memo.day;
-}
+// Days are the business's (stage 1's bizTz / todayStr / bizDayOf, Settings → Region and format). The pure helpers below keep
+// a tz parameter (callers pass bizTz()); a timestamp's day is bizDayOf's, in that same zone.
 function vacationOptionsNorm(o){
   const src = (o && typeof o === 'object') ? o : {}, out = {};
   VACATION_OPTIONS.forEach(({ key }) => { out[key] = key==='autoBack' ? src.autoBack!==false : src[key]===true; });
@@ -2354,21 +2331,21 @@ function vacationMatches(v, who){
 }
 function vacationOnDay(v, day, tz){
   if (!v || v.cancelledAt || !v.startsOn || !day || v.startsOn > day) return false;
-  if (v.endedAt && !(day < vacationDayOf(v.endedAt, tz))) return false;
+  if (v.endedAt && !(day < bizDayOf(v.endedAt))) return false;
   return !vacationOpt(v, 'autoBack') || day <= v.endsOn;
 }
 // The last day it was planned for (endsOn, shortened by an early end); '' when cancelled or ended before it began.
 function vacationPlannedLast(v, tz){
   if (!v || v.cancelledAt || !v.startsOn || !v.endsOn) return '';
   let last = v.endsOn;
-  if (v.endedAt) { const e = shiftDays(vacationDayOf(v.endedAt, tz), -1); if (e < last) last = e; }
+  if (v.endedAt) { const e = shiftDays(bizDayOf(v.endedAt), -1); if (e < last) last = e; }
   return last < v.startsOn ? '' : last;
 }
 // The last day it is (or was) in force: ended → the day before it was ended; autoBack → endsOn; left open → through today.
 function vacationLastDay(v, tz, today){
   if (!v || v.cancelledAt || !v.startsOn || !v.endsOn) return '';
   const auto = vacationOpt(v, 'autoBack');
-  if (v.endedAt) { const e = shiftDays(vacationDayOf(v.endedAt, tz), -1); return auto && e > v.endsOn ? v.endsOn : e; }
+  if (v.endedAt) { const e = shiftDays(bizDayOf(v.endedAt), -1); return auto && e > v.endsOn ? v.endsOn : e; }
   return auto || !today || today < v.endsOn ? v.endsOn : today;
 }
 function vacationFor(vacations, who, day, tz, key){
@@ -2379,7 +2356,7 @@ function vacationFor(vacations, who, day, tz, key){
   });
   return best;
 }
-function onVacationOn(who, day, key){ return !!vacationFor((STATE.data && STATE.data.vacations) || [], who, day || vacationToday(), vacationTz(), key); }
+function onVacationOn(who, day, key){ return !!vacationFor((STATE.data && STATE.data.vacations) || [], who, day || todayStr(), bizTz(), key); }
 // A login's employee card, the rule the functions (vacEmployeeOf) and SQL (profile_on_vacation) use: the employee named its
 // Jobs & Commissions name, else the one named its full name.
 function vacationEmployeeOfProfile(profile, employees){
@@ -4144,6 +4121,7 @@ const STATE = { profiles: [], currentProfileId: null, data: null, dataLoaded: fa
    One shared channel per signed-in session; torn down on logout so a stale
    subscription never fires after STATE.data is cleared. */
 let REALTIME_CHANNEL = null;
+let VACATIONS_CHANNEL = null;   // employee_vacations' own realtime channel (stage 3, setupRealtimeSubscriptions)
 // Shared by the initial load and the realtime handlers below, so both build the exact same shape.
 function mapJobRow(j){
   return {
@@ -4383,15 +4361,22 @@ function setupRealtimeSubscriptions(){
     .on('postgres_changes', { event: '*', schema: 'public', table: 'commission_rates' }, handleCommissionRatesRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'payroll_weeks' }, handlePayrollRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_daily_log' }, handleSalesLogRealtimeChange)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacations' }, handleListRealtimeChange('vacations', mapVacationRow))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'calls' }, handleCallRealtimeChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'lead_messages' }, handleLeadMessageRealtime)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_sessions' }, handleChatSessionRealtime)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'myday_days' }, handleMyDayRealtime)
     .subscribe();
+  // Vacations (stage 3) on a channel of their own: a table missing from the publication (SQL not applied yet) can never
+  // break the shared one. Only when the list loaded; otherwise the screens already say it can't be read.
+  if (!VACATIONS_CHANNEL && STATE.data && !STATE.data.vacationsError) {
+    VACATIONS_CHANNEL = sb.channel('vacations-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacations' }, handleListRealtimeChange('vacations', mapVacationRow))
+      .subscribe();
+  }
 }
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
+  if (VACATIONS_CHANNEL) { sb.removeChannel(VACATIONS_CHANNEL); VACATIONS_CHANNEL = null; }
 }
 let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25,q:'',noReview:false,selectedId:null}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'contractors'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
@@ -5178,7 +5163,7 @@ function onStatusChange(kind, id, value, vacOk){
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   if (kind==='jobTechnician' && !vacOk) {
     const j = STATE.data.jobs.find(x=>x.id===id);
-    const info = j && value!==j.technician && vacationAssignInfo(value, j.date || todayStr(), STATE.data, vacationTz(), true);
+    const info = j && value!==j.technician && vacationAssignInfo(value, j.date || todayStr(), STATE.data, bizTz(), true);
     // The select goes back to the saved technician while the question is open.
     if (info) { render(); vacationAssignConfirm([info], () => onStatusChange(kind, id, value, true), () => onStatusChange(kind, id, info.standIn, true)); return; }
   }
@@ -8525,9 +8510,9 @@ async function vaSessionStart(){
   if (data) { p.lastLogoutAt = data.last_logout_at; p.sessionStartedAt = data.session_started_at; p.forgotLogoutOn = data.forgot_logout_on; }
   // On vacation (stage 3): a day away with "Leave on the payroll board" ticked never asks "you forgot to log out"; while
   // they are away, the question waits until they're back.
-  const vacRows = STATE.data.vacations || [], vacTz = vacationTz();
+  const vacRows = STATE.data.vacations || [], vacTz = bizTz();
   if (p.forgotLogoutOn && vacationForProfile(vacRows, p, p.forgotLogoutOn, vacTz, 'payroll', STATE.data.employees)) { await sb.rpc('ack_forgot_logout'); p.forgotLogoutOn = null; }
-  if (p.forgotLogoutOn && !vacationForProfile(vacRows, p, vacationToday(), vacTz, null, STATE.data.employees)) {
+  if (p.forgotLogoutOn && !vacationForProfile(vacRows, p, todayStr(), vacTz, null, STATE.data.employees)) {
     const end = vaEndTimeText(p.forgotLogoutOn, p.lastLogoutAt);
     openPopup(`<h3 style="margin:0 0 6px">You forgot to log out</h3>
       <div style="font-size:14px;margin-bottom:12px">On ${esc(parseLocalDate(p.forgotLogoutOn).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' }))} you didn't press Log Out, so the system finished your day by itself${end ? `, with the end time ${esc(end)}` : ''}. Please press Log Out on My Day at the end of every day.</div>
@@ -10378,7 +10363,7 @@ function renderJobPanel(j, canEdit){
       <button type="button" class="btn ghost small" onclick="selectJob(null)" aria-label="Close" title="Close">✕</button>
     </div>
     <div class="f">
-      ${field('Technician', statusSelect('jobTechnician', j.id, j.technician, technicianNames(STATE.data), ()=>'neutral', v=>vacationPickerLabel(v, vacationAssignInfo(v, j.date || todayStr(), STATE.data, vacationTz(), true)), !canEdit) + jobVacationFlagHtml(j, canEdit))}
+      ${field('Technician', statusSelect('jobTechnician', j.id, j.technician, technicianNames(STATE.data), ()=>'neutral', v=>vacationPickerLabel(v, vacationAssignInfo(v, j.date || todayStr(), STATE.data, bizTz(), true)), !canEdit) + jobVacationFlagHtml(j, canEdit))}
       ${field('Division', statusSelect('jobType', j.id, j.jobType, jobTypesForTech(j.technician), ()=>'neutral', v=>v, !canEdit))}
       ${field('Date', canEdit ? `<input type="date" value="${esc(j.date||'')}" onchange="if(this.value) commitJobCellEdit('${j.id}','date',this.value,'date')">` : `<div class="job-ro">${fmtDateShort(j.date)}</div>`)}
       ${field('Amount', num('amount', j.amount))}
@@ -10756,7 +10741,7 @@ function openJobModal(jobId){
 
         <div class="modal-section">Job details</div>
         <div class="grid-3">
-          <div class="field"><label>Technician</label><select id="jm-tech" onchange="onJobTechChange()">${allTechs.map(t=>{ const vi = vacationAssignInfo(t, job?.date || todayStr(), data, vacationTz(), true); return `<option value="${esc(t)}" ${t===tech?'selected':''}${vi ? ' class="vac-off"' : ''}>${esc(vacationPickerLabel(t, vi))}</option>`; }).join('')}</select></div>
+          <div class="field"><label>Technician</label><select id="jm-tech" onchange="onJobTechChange()">${allTechs.map(t=>{ const vi = vacationAssignInfo(t, job?.date || todayStr(), data, bizTz(), true); return `<option value="${esc(t)}" ${t===tech?'selected':''}${vi ? ' class="vac-off"' : ''}>${esc(vacationPickerLabel(t, vi))}</option>`; }).join('')}</select></div>
           <div class="field"><label>Job Type</label><select id="jm-type" onchange="updateJobCommissionField()">${jobTypeOpts.map(t=>`<option value="${t}" ${t===jobType?'selected':''}>${t}</option>`).join('')}</select></div>
           <div class="field"><label id="jm-comm-label">${auto!==null?'Commission % (auto-filled — editable)':'Commission % (manual — no automatic rate)'}</label><input type="number" id="jm-comm" value="${job ? (job.commissionPercent ?? auto ?? 0) : (auto ?? 0)}"></div>
         </div>
@@ -10844,7 +10829,7 @@ async function saveJobModal(jobId, vacOk){
   const prevJob = jobId ? STATE.data.jobs.find(j=>j.id===jobId) : null;
   // A technician on vacation that day (with "Not assignable" ticked): asked, not blocked (Ofek 14 Oct).
   if (!vacOk && (!prevJob || prevJob.technician!==tech)) {
-    const info = vacationAssignInfo(tech, document.getElementById('jm-date').value || todayStr(), STATE.data, vacationTz(), true);
+    const info = vacationAssignInfo(tech, document.getElementById('jm-date').value || todayStr(), STATE.data, bizTz(), true);
     if (info) {
       vacationAssignConfirm([info], () => saveJobModal(jobId, true), () => { const s = document.getElementById('jm-tech'); if (s) { s.value = info.standIn; onJobTechChange(); } saveJobModal(jobId, true); });
       return;
@@ -13992,7 +13977,7 @@ function onClosingTechChange(){
 // The technician picker's vacation words follow the closing's date (it starts on today).
 function onClosingDateChange(){
   const sel = document.getElementById('cf-tech'), d = document.getElementById('cf-date'); if (!sel || !d) return;
-  const day = d.value || todayStr(), tz = vacationTz();
+  const day = d.value || todayStr(), tz = bizTz();
   Array.from(sel.options).forEach(o => { const vi = vacationAssignInfo(o.value, day, STATE.data, tz, true); o.textContent = vacationPickerLabel(o.value, vi); o.className = vi ? 'vac-off' : ''; });
 }
 function renderClosings(profile, data){
@@ -14003,7 +13988,7 @@ function renderClosings(profile, data){
     <div class="card" style="margin-bottom:20px">
       <div class="modal-section" style="margin-top:0">Post a closing</div>
       <div class="grid-3">
-        <div class="field"><label>Technician</label><select id="cf-tech" onchange="onClosingTechChange()">${allTechs.map(t=>{ const vi = vacationAssignInfo(t, todayStr(), STATE.data, vacationTz(), true); return `<option value="${esc(t)}" ${t===defaultTech?'selected':''}${vi ? ' class="vac-off"' : ''}>${esc(vacationPickerLabel(t, vi))}</option>`; }).join('')}</select></div>
+        <div class="field"><label>Technician</label><select id="cf-tech" onchange="onClosingTechChange()">${allTechs.map(t=>{ const vi = vacationAssignInfo(t, todayStr(), STATE.data, bizTz(), true); return `<option value="${esc(t)}" ${t===defaultTech?'selected':''}${vi ? ' class="vac-off"' : ''}>${esc(vacationPickerLabel(t, vi))}</option>`; }).join('')}</select></div>
         <div class="field"><label>Date</label><input type="date" id="cf-date" value="${todayStr()}" onchange="onClosingDateChange()"></div>
         <div class="field"><label>Customer Name</label>${customerPickerInput('cf-customer', '', 'Start typing — pick the customer from the CRM')}</div>
         <div class="field"><label>Invoice #</label><input id="cf-invoice" placeholder="e.g. 1008"></div>
@@ -14307,7 +14292,7 @@ function renderCalendarDayCell(day, tasksByDate, isToday){
   const dayTasks = tasksByDate[day.dateStr] || [];
   const d = parseLocalDate(day.dateStr);
   // Who is away that day (stage 3): only vacations with the badge ticked.
-  const away = (STATE.data.vacations || []).length ? vacationAwayOn(STATE.data, day.dateStr, vacationTz()) : [];
+  const away = (STATE.data.vacations || []).length ? vacationAwayOn(STATE.data, day.dateStr, bizTz()) : [];
   return `<div style="min-height:104px;padding:6px;background:${isToday?'var(--primary-soft)':'var(--surface)'};opacity:${day.inMonth?1:.4}">
     <div style="font-size:11px;font-weight:700;color:${isToday?'var(--primary-strong)':'var(--ink-soft)'};margin-bottom:4px">${d.getDate()} ${MONTHS[d.getMonth()]}</div>
     ${away.length ? `<div class="cal-away" title="${esc(away.map(a => a.name + ': ' + a.label).join(' · '))}">${ico('sun', 11)} Away: ${esc(away.map(a => a.name).join(', '))}</div>` : ''}
@@ -14397,7 +14382,7 @@ function renderTaskSwitcher(profile, data){
   if (profile.role==='technician') return '';
   // the office's board shows the office's name (Settings → Phone, T1.7), not the person on it
   const view = taskView(), office = officeAssignee(data), openCount = v => tasksInView(data.tasks, v, profile).filter(t => t.status!=='Done').length;
-  const away = new Map(vacationAwayOn(data, vacationToday(), vacationTz()).map(a => [a.name, a.label]));
+  const away = new Map(vacationAwayOn(data, todayStr(), bizTz()).map(a => [a.name, a.label]));
   const sun = v => away.has(v) ? ` <span title="${esc(away.get(v))}" aria-label="${esc(away.get(v))}">${ico('sun', 13)}</span>` : '';
   const btn = (v, label) => { const n = openCount(v); return `<button class="btn small ${view===v?'primary':''}" onclick="goTasks('${jsStr(v)}')">${esc(label)}${sun(v)}${n ? ` <span class="tag">${n}</span>` : ''}</button>`; };
   return `<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
@@ -14483,7 +14468,7 @@ function openTaskModal(taskId, ctx){
   const boardDefaultAssignee = TASK_CTX ? (officeAssignee(STATE.data) || '') : tv==='all' ? '' : tv==='me' ? (currentProfile?.technicianName || currentProfile?.fullName || '') : tv;
   // Someone on vacation today (not yourself) stays ticked: the save asks against the due date, with their stand-in as the
   // other answer (Ofek: a warning with confirm, never a silent swap).
-  const vacDay = vacationToday(), vacTz = vacationTz();
+  const vacDay = todayStr(), vacTz = bizTz();
   const di = !task && tv!=='me' && boardDefaultAssignee ? vacationAssignInfo(boardDefaultAssignee, vacDay, STATE.data, vacTz) : null;
   const currentAssignees = task ? assigneeNames(task) : (boardDefaultAssignee ? [boardDefaultAssignee] : []);
   const allPeople = activeEmployeeNames(STATE.data);
@@ -14571,7 +14556,7 @@ function postTaskUpdate(){
 // Rich subtasks (owner + status + date + their own updates thread), matching the Monday.com layout.
 function renderSubtasksList(){
   if (!MODAL_SUBTASKS.length) return `<div class="file-hint">No checklist items yet.</div>`;
-  const allPeople = activeEmployeeNames(STATE.data), vacTz = vacationTz(), vacDay = vacationToday();
+  const allPeople = activeEmployeeNames(STATE.data), vacTz = bizTz(), vacDay = todayStr();
   return `<div class="table-wrap"><table><thead><tr><th class="wrap">Subitem</th><th>Owner</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>
     ${MODAL_SUBTASKS.map((s,i)=>`
       <tr>
@@ -14592,7 +14577,7 @@ function updateSubtaskField(i, field, value){
   const s = MODAL_SUBTASKS[i]; if (!s) return;
   // A subitem owner on vacation on its date (today without one): asked, as for Assigned To, with the stand-in as the other answer.
   if (field==='ownerName' && value && value!==s.ownerName) {
-    const info = vacationAssignInfo(value, s.date || vacationToday(), STATE.data, vacationTz());
+    const info = vacationAssignInfo(value, s.date || todayStr(), STATE.data, bizTz());
     if (info) {
       const set = name => { if (MODAL_SUBTASKS[i]===s) s.ownerName = name; const n = document.getElementById('tm-subtasks-list'); if (n) n.innerHTML = renderSubtasksList(); };
       set(s.ownerName);   // the select shows the owner as saved while the question is open
@@ -14644,7 +14629,7 @@ async function saveTaskModal(taskId, createdBy, createdAt, vacOk){
   const assignees = Array.from(document.querySelectorAll('.tm-assignee-cb:checked')).map(cb=>cb.value);
   // Someone newly assigned who is on vacation on the due date (or today): asked, not blocked (Ofek 14 Oct).
   if (!vacOk) {
-    const c = vacationAssignConflicts(assignees, oldSnapshot ? oldSnapshot.assignees : [], document.getElementById('tm-due').value || vacationToday(), STATE.data, vacationTz());
+    const c = vacationAssignConflicts(assignees, oldSnapshot ? oldSnapshot.assignees : [], document.getElementById('tm-due').value || todayStr(), STATE.data, bizTz());
     if (c.length) {
       vacationAssignConfirm(c, () => saveTaskModal(taskId, createdBy, createdAt, true), () => {
         c.filter(i => i.standIn).forEach(i => document.querySelectorAll('.tm-assignee-cb').forEach(cb => { if (cb.value===i.name) cb.checked = false; if (cb.value===i.standIn) cb.checked = true; }));
@@ -18914,7 +18899,7 @@ function personActive(x){ return x.emp ? (x.emp.status || 'Active')==='Active' :
 function personRoles(x){ return x.emp ? (x.emp.roles || []) : [x.prof ? roleLabel(x.prof.role) : '']; }
 // today: the business day for 'away' (on vacation that day); it defaults to today.
 function personInGroup(x, f, today){
-  if (f==='away') return personActive(x) && !!x.emp && !!vacationFor((STATE.data && STATE.data.vacations) || [], x.emp, today || vacationToday(), vacationTz());
+  if (f==='away') return personActive(x) && !!x.emp && !!vacationFor((STATE.data && STATE.data.vacations) || [], x.emp, today || todayStr(), bizTz());
   const roles = personRoles(x).join(' '), r = x.prof ? x.prof.role : '';
   if (f==='inactive') return !personActive(x);
   if (!personActive(x)) return false;
@@ -18928,7 +18913,7 @@ function personStatusPill(x){
   const a = personAccount(x), p = x.prof;
   if (!personActive(x)) return pill('neutral', 'Not active');
   // On vacation (stage 3): always shown here, the owners' own view; the badge option is for the shared places.
-  const vDay = vacationToday(), vTz = vacationTz(), v = x.emp && vacationFor(STATE.data.vacations || [], x.emp, vDay, vTz);
+  const vDay = todayStr(), vTz = bizTz(), v = x.emp && vacationFor(STATE.data.vacations || [], x.emp, vDay, vTz);
   if (v) return pill('vac', vacationUntilText(v, vDay, vTz));
   if (a && a.accessOff) return pill('bad', 'Access off');
   if (a && !a.joined) return pill('warn', 'Invited');
@@ -19281,20 +19266,20 @@ function vacationAssignConfirm(infos, onYes, onStand){
 // The flag on an open task (Tasks, Open Tasks, My Day's team list); the move button is for owners and managers.
 function vacationTaskFlagHtml(t, data){
   if (!((data || STATE.data).vacations || []).length) return '';   // nobody away: no time zone work per row
-  const f = vacationTaskFlag(t, data || STATE.data, vacationToday(), vacationTz());
+  const f = vacationTaskFlag(t, data || STATE.data, todayStr(), bizTz());
   if (!f) return '';
   return ` ${pill('vac', f.name + ': ' + f.label)}${f.canMove && canSetVacation() ? ` <button type="button" class="btn ghost small" onclick="event.stopPropagation();moveToStandIn('task','${esc(jsStr(t.id))}','${esc(jsStr(f.vac.id))}')">Move to ${esc(f.standIn)}</button>` : ''}`;
 }
 // The same on the job panel, under the Technician field.
 function jobVacationFlagHtml(j, canEdit){
-  const f = vacationJobFlag(j, STATE.data, vacationToday(), vacationTz());
+  const f = vacationJobFlag(j, STATE.data, todayStr(), bizTz());
   if (!f) return '';
   return `<span class="job-sub">${pill('vac', f.label)}${canEdit && f.standIn && canSetVacation() ? ` <button type="button" class="btn ghost small" onclick="moveToStandIn('job','${esc(jsStr(j.id))}','${esc(jsStr(f.vac.id))}')">Move to ${esc(f.standIn)}</button>` : ''}</span>`;
 }
 // The People card: an upcoming vacation, and the "Back?" prompt when one was left open past its last day.
 function vacationCardFlags(e, data){
   const rows = (data && data.vacations) || []; if (!rows.length) return '';
-  const today = vacationToday(), tz = vacationTz(), who = { id: e.id, name: e.name }, cur = vacationFor(rows, who, today, tz);
+  const today = todayStr(), tz = bizTz(), who = { id: e.id, name: e.name }, cur = vacationFor(rows, who, today, tz);
   if (cur) return vacationOverdue(cur, today, tz) ? pill('warn', 'Back? End the vacation') : '';
   const next = vacationUpcoming(rows, who, today);
   return next ? pill('neutral', vacationUntilText(next, today, tz)) : '';
@@ -19305,7 +19290,7 @@ function vacationBox(x, canEdit){
   if (!e || !personActive(x)) return '';
   const head = '<div class="grp">Vacation <span class="hint">owners and managers set it</span></div>';
   if (STATE.data.vacationsError) return head + `<div class="set-note warn">${ico('alert', 16)}<span>Vacations can't be read right now: ${esc(STATE.data.vacationsError)}. Try again in a minute.</span></div>`;
-  const rows = STATE.data.vacations || [], today = vacationToday(), tz = vacationTz(), who = { id: e.id, name: e.name };
+  const rows = STATE.data.vacations || [], today = todayStr(), tz = bizTz(), who = { id: e.id, name: e.name };
   const edit = !!canEdit && canSetVacation(), eid = esc(jsStr(e.id));
   const btn = (label, js, cls, icon) => `<button type="button" class="btn small${cls ? ' ' + cls : ''}" onclick="${js}">${icon ? ico(icon, 13) + ' ' : ''}${esc(label)}</button>`;
   const v = vacationFor(rows, who, today, tz) || vacationUpcoming(rows, who, today);
@@ -19338,7 +19323,7 @@ function vacationBox(x, canEdit){
 // The Dashboard's Away card (the team home of owners and managers). Managers can't open Settings → People, so it is
 // also where they set a vacation.
 function vacationTeamHtml(profile, data){
-  const admin = canSetVacation(), today = vacationToday(), tz = vacationTz();
+  const admin = canSetVacation(), today = todayStr(), tz = bizTz();
   const head = `<div class="section-title">Away${admin ? ` <button type="button" class="btn ghost small" onclick="openVacationModal('')" style="margin-inline-start:8px">${ico('sun', 13)} Set a vacation</button>` : ''}</div>`;
   if (data.vacationsError) return admin ? head + '<div class="hint" style="margin-bottom:14px">Vacations can\'t be read right now.</div>' : '';
   const list = vacationTeamRows(data, today, tz, admin);
@@ -19350,23 +19335,24 @@ function vacationTeamHtml(profile, data){
 // The other team homes (My Day, a technician's My pay): who is away today, for everyone (the badge ticked).
 function vacationAwayLineHtml(data){
   if (!data || !(data.vacations || []).length) return '';
-  const away = vacationAwayOn(data, vacationToday(), vacationTz());
+  const away = vacationAwayOn(data, todayStr(), bizTz());
   return away.length ? `<div class="emp-flags" style="margin:0 0 14px;align-items:center"><span class="hint">${ico('sun', 13)} Away:</span>${away.map(a => pill('vac', `${a.name} · ${a.label}`)).join('')}</div>` : '';
 }
-// The payroll board's leave card: a record for the week, it changes no amounts (Ofek, item 8).
+// The payroll board's leave card: a record for the week, it changes no amounts (Ofek, item 8). Paid leave is a MARK ONLY
+// (Ofek 15 Oct): the card says how many days to add by hand; pay is never changed automatically.
 function payrollLeaveCard(data, wk){
   if (data.vacationsError) return `<div class="hint" style="margin-top:14px">Leave can't be shown right now: ${esc(data.vacationsError)}</div>`;
-  const lines = vacationPayLines(data, wk, vacationTz(), vacationToday());
+  const lines = vacationPayLines(data, wk, bizTz(), todayStr());
   if (!lines.length) return '';
-  const rows = lines.map(({ emp, line, v }) => `<tr><td>${techTag(emp.name)}</td><td>${pill(line.pay==='paid' ? 'good' : 'neutral', line.pay==='paid' ? 'Paid leave' : 'Unpaid leave')} ${esc(vacationRangeText(line.from, line.to))} (${line.days} day${line.days===1 ? '' : 's'})</td><td>${esc((v && vacationOpt(v, 'standIn') && v.standInName) || '—')}</td></tr>`).join('');
+  const rows = lines.map(({ emp, line, v }) => `<tr><td>${techTag(emp.name)}</td><td>${pill(line.pay==='paid' ? 'good' : 'neutral', line.pay==='paid' ? 'Paid leave' : 'Unpaid leave')} ${esc(vacationRangeText(line.from, line.to))} (${line.days} day${line.days===1 ? '' : 's'})${line.pay==='paid' ? `<div class="hint">Paid leave: ${line.days} day${line.days===1 ? '' : 's'}, add it by hand</div>` : ''}</td><td>${esc((v && vacationOpt(v, 'standIn') && v.standInName) || '—')}</td></tr>`).join('');
   return `<div class="section-title">Leave <span class="tag">${payrollWeekLabel(wk)}</span></div>
     <div class="table-wrap"><table><thead><tr><th>Name</th><th>Leave</th><th>Stand-in</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="hint" style="margin-top:6px">Set on each person's card (Settings → People). The days are their working days when those are set. A record for the week: the amounts above don't change by themselves.</div>`;
+    <div class="hint" style="margin-top:6px">Set on each person's card (Settings → People). The days are their working days when those are set. A mark only: pay is not changed automatically, so add paid leave to their pay by hand.</div>`;
 }
 // The person's own top banner (also under View as). It reads only what is loaded.
 function vacationBannerHtml(profile, data){
   if (!profile || !data) return '';
-  const today = vacationToday(), tz = vacationTz(), v = vacationForProfile(data.vacations || [], profile, today, tz, null, data.employees);
+  const today = todayStr(), tz = bizTz(), v = vacationForProfile(data.vacations || [], profile, today, tz, null, data.employees);
   if (!v) return '';
   const text = vacationBannerText(v, vacationOpt(v, 'standIn') ? v.standInName : '', today, tz, profile.role==='va');
   const end = canSetVacation() ? `<button type="button" class="btn small" onclick="endVacationNow('${esc(jsStr(v.id))}')">${vacationOverdue(v, today, tz) ? 'Back? End it' : 'Back early? End it'}</button>` : '';
@@ -19379,7 +19365,7 @@ function vacCatalog(){ return (STATE.data && STATE.data.settings && STATE.data.s
 function openVacationModal(empId, vacId){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   if (!canSetVacation()) return;
-  const data = STATE.data, rows = data.vacations || [], today = vacationToday(), tz = vacationTz();
+  const data = STATE.data, rows = data.vacations || [], today = todayStr(), tz = bizTz();
   VAC_UI = { draft: vacationDraft(empId || '', vacId || null, rows, data.employees || [], vacCatalog(), today), saving: false };
   const d = VAC_UI.draft, emp = (data.employees || []).find(e => e.id===d.employeeId);
   const people = (data.employees || []).filter(e => (e.status || 'Active')==='Active').sort((a, b) => String(a.name).localeCompare(String(b.name)));
@@ -19420,7 +19406,7 @@ function vacOptsHtml(){
 }
 function vacExtraHtml(){
   const d = VAC_UI && VAC_UI.draft; if (!d) return '';
-  const o = d.options || {}, data = STATE.data, tz = vacationTz(), rows = data.vacations || [];
+  const o = d.options || {}, data = STATE.data, tz = bizTz(), rows = data.vacations || [];
   const dates = !!(d.startsOn && d.endsOn && d.endsOn >= d.startsOn);
   const awayThen = e => dates && rows.some(r => vacationsOverlap({ id: null, employeeId: e.id, startsOn: d.startsOn, endsOn: d.endsOn, options: {}, endedAt: null, cancelledAt: null }, r, tz));
   const people = (data.employees || []).filter(e => e.id!==d.employeeId && (e.status || 'Active')==='Active').sort((a, b) => String(a.name).localeCompare(String(b.name)));
@@ -19459,7 +19445,7 @@ function vacSelectAll(){
 function vacPickPerson(id){
   if (!VAC_UI) return;
   const old = VAC_UI.draft, data = STATE.data;
-  const d = vacationDraft(id, null, data.vacations || [], data.employees || [], vacCatalog(), vacationToday());
+  const d = vacationDraft(id, null, data.vacations || [], data.employees || [], vacCatalog(), todayStr());
   VAC_UI.draft = { ...d, startsOn: old.startsOn || d.startsOn, endsOn: old.endsOn, note: old.note };
   vacRefresh();
 }
@@ -19474,7 +19460,7 @@ function vacationLogText(v, verb){
 async function saveVacationModal(){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   if (!VAC_UI || VAC_UI.saving || !canSetVacation()) return;
-  const d = VAC_UI.draft, data = STATE.data, tz = vacationTz(), today = vacationToday();
+  const d = VAC_UI.draft, data = STATE.data, tz = bizTz(), today = todayStr();
   const problems = vacationFormProblems(d, data.vacations || [], data.employees || [], tz);
   if (problems.length) { modalError(problems[0]); return; }
   const emp = (data.employees || []).find(e => e.id===d.employeeId), first = String((emp && emp.name) || '').split(' ')[0] || 'them';
@@ -19504,7 +19490,7 @@ function endVacationNow(vacId){
   const first = vacationFirst(v);
   confirmAction(`${first} is back: badges, the pickers and the notifications go back to normal now.`, async () => {
     if (readOnlyReason()) { showToast(readOnlyReason()); return; }
-    const today = vacationToday(), early = !vacationOverdue(v, today, vacationTz());
+    const today = todayStr(), early = !vacationOverdue(v, today, bizTz());
     const res = today < v.startsOn ? await db.vacations.cancel(v.id) : await db.vacations.end(v.id);
     if (res.error) { showToast(vacationErrorText(res.error), { kind: 'warn' }); return; }
     const emp = (STATE.data.employees || []).find(e => e.id===v.employeeId);
@@ -19544,8 +19530,8 @@ function vacationMoveItem(kind, id, v, standIn, actor){
   return standIn;
 }
 function vacationMoveStandIn(vacId){
-  const v = (STATE.data.vacations || []).find(r => r.id===vacId), today = vacationToday();
-  const s = v && vacationUsableStandIn(v, v.startsOn > today ? v.startsOn : today, STATE.data, vacationTz());
+  const v = (STATE.data.vacations || []).find(r => r.id===vacId), today = todayStr();
+  const s = v && vacationUsableStandIn(v, v.startsOn > today ? v.startsOn : today, STATE.data, bizTz());
   if (!s) showToast('Pick a stand-in first');
   return s ? { v, s } : null;
 }
@@ -19561,7 +19547,7 @@ function moveAllToStandIn(vacId){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   if (!canSetVacation()) return;
   const m = vacationMoveStandIn(vacId); if (!m) return;
-  const it = vacationMovableItems(STATE.data, m.v, vacationTz(), vacationToday()), actor = getCurrentProfile()?.fullName || 'Unknown';
+  const it = vacationMovableItems(STATE.data, m.v, bizTz(), todayStr()), actor = getCurrentProfile()?.fullName || 'Unknown';
   const n = it.tasks.filter(t => vacationMoveItem('task', t.id, m.v, m.s, actor)).length + it.jobs.filter(j => vacationMoveItem('job', j.id, m.v, m.s, actor)).length;
   // jobs stay when the stand-in isn't a technician (vacationMoveItem)
   const kept = vacationJobStandIn(m.s, STATE.data) ? 0 : it.jobs.length;
@@ -20350,11 +20336,11 @@ function notifyRulesApp(){
 function hourLabel(h){ return h===0 ? '12 am' : h < 12 ? h + ' am' : h===12 ? '12 pm' : h===24 ? 'midnight' : (h - 12) + ' pm'; }
 // Only these can go to the office too (the push function's OFFICE_KINDS); money and private details go to the owners only.
 const NOTIFY_OFFICE_KINDS = ['newLead', 'leadWaiting', 'missedCall'];
-// Is a notification switched on? The invoice one is on unless someone turned it off (as before 13 Oct); the business
-// insurance follows the document switch until it has its own; a Google review can't be on before its connector exists.
+// Is a notification switched on? The invoice one and "back tomorrow" (stage 3) are on unless someone turned them off; the
+// business insurance follows the document switch until it has its own; a Google review can't be on before its connector exists.
 function notifyOn(N, k){
   const x = (N || {})[k];
-  if (k==='invoice') return !(x && x.on===false);
+  if (k==='invoice' || k==='vacationBack') return !(x && x.on===false);
   if (k==='bizInsurance' && !(x && typeof x.on==='boolean')) return notifyOn(N, 'docExpiry');
   if (k==='googleReview') return false;
   return !!(x && x.on);
@@ -20387,13 +20373,15 @@ function notifyCards(N, R, opts){
     { id: 'bizInsurance', ico: 'shield', c: 'var(--div-pw)', officeOk: false, only: 'business insurance', name: `Business insurance expires within ${BIZ_INSURANCE_WARN_DAYS} days`,
       sub: 'The business\'s own workers compensation and public liability, from Business details. Always 30 days before.',
       flags: [{ tone: 'neutral', text: 'New' }] },
+    { id: 'vacationBack', ico: 'sun', c: 'var(--primary)', officeOk: false, alsoTo: 'The person coming back', name: 'Someone is back from a vacation tomorrow',
+      sub: `When "Reminder a day before they are back" is ticked on their vacation: to them and the owners, with what is waiting. Sent between ${hourLabel(R.from)} and ${hourLabel(R.until)} (${bizTzLabel()}), the hours on the waiting-lead card.` },
     { id: 'googleReview', ico: 'star', c: 'var(--stage-chasing)', officeOk: true, locked: true, name: 'A new Google review',
       sub: 'For your Google profiles.', flags: [{ tone: 'neutral', text: 'Comes with the Google Business Profile connector' }],
       lockedLine: 'Turns on once Google Business Profile is connected.' },
   ];
   return list.map(x => {
     const saved = (N || {})[x.id];
-    return { only: '', hasWhen: '', locked: false, flags: [], lockedLine: '', ...x,
+    return { only: '', hasWhen: '', locked: false, flags: [], lockedLine: '', alsoTo: '', ...x,
       on: x.locked ? false : notifyOn(N, x.id), office: !!(x.officeOk && !x.locked && saved && saved.office) };
   });
 }
@@ -20416,7 +20404,8 @@ function notifyCardHtml(x, R, P){
     : esc(x.name);
   const toggle = setToggle(x.on, x.locked ? `notifyLocked('${x.id}')` : `toggleNotifyCard('${x.id}')`, false, `aria-label="Notification: ${esc(x.name)}" data-fid="t-${x.id}"${x.locked ? ' aria-disabled="true"' : ''}`);
   const owners = `<span class="who-fixed" title="${esc(P.owners)} always get it">${ico('check', 12)}Owners</span>`;
-  const chips = !x.officeOk ? owners + `<span class="who-only">${ico('lock', 12)}<span>Owners only<span class="why"> · ${esc(x.only)}</span></span></span>`
+  const chips = x.alsoTo ? owners + `<span class="who-fixed">${ico('check', 12)}${esc(x.alsoTo)}</span>`
+    : !x.officeOk ? owners + `<span class="who-only">${ico('lock', 12)}<span>Owners only<span class="why"> · ${esc(x.only)}</span></span></span>`
     : owners + `<button type="button" class="who-chip${x.locked ? ' locked' : ''}${x.office ? ' on' : ''}" aria-pressed="${x.office}" ${x.locked || !x.on ? 'aria-disabled="true"' : ''} title="Office: ${esc(P.office)}" aria-label="Office too: ${esc(P.office)}" data-fid="o-${x.id}" onclick="toggleNotifyOffice('${x.id}')">${ico(x.office ? 'check' : 'plus', 12)}Office</button>`;
   // The Google review card waits for its connector (Settings → Connectors).
   const extra = x.id==='googleReview' ? `<button type="button" class="btn small ghost" onclick="setSettingsPage('connectors')">${ico('link', 14)} Connectors</button>` : '';
@@ -22534,7 +22523,7 @@ function renderPhoneSettings(s){
   const time = iso => new Date(iso).toLocaleTimeString('en-AU', { timeZone: bizTz(), hour:'numeric', minute:'2-digit' });
   const vas = STATE.profiles.filter(p => p.role==='va');
   // On vacation (stage 3): shown only; the voice function does the routing.
-  const vacRows = (STATE.data && STATE.data.vacations) || [], vacTz = vacationTz(), vacDay = vacationToday();
+  const vacRows = (STATE.data && STATE.data.vacations) || [], vacTz = bizTz(), vacDay = todayStr();
   const vacOf = p => vacationForProfile(vacRows, p, vacDay, vacTz, null, STATE.data.employees);
   // The Office block (Ofek 14 Oct, T1.7): the office's name (editable, e.g. Reception), then the people assigned to it.
   const officeRows = [['Name of the office', 'Shown across the app and in texts instead of a person\'s name, e.g. Reception or Dispatch.', `<input class="set-input" value="${esc(officeLabel())}" maxlength="30" aria-label="Name of the office" onchange="setOfficeLabel(this.value)">`]]
@@ -22606,7 +22595,7 @@ function myShiftButton(profile){
   if (profile.role!=='va') return '';
   const on = onShiftToday(profile), brk = on && profile.onBreak;
   // On vacation (stage 3): no shift clock. Someone already on shift still gets Log Out.
-  if (!on && vacationForProfile(STATE.data.vacations || [], profile, vacationToday(), vacationTz(), null, STATE.data.employees)) return pill('vac', 'On vacation: no shift clock');
+  if (!on && vacationForProfile(STATE.data.vacations || [], profile, todayStr(), bizTz(), null, STATE.data.employees)) return pill('vac', 'On vacation: no shift clock');
   const t = iso => iso ? new Date(iso).toLocaleTimeString('en-AU', { timeZone: bizTz(), hour:'numeric', minute:'2-digit' }) : '';
   const outToday = !on && profile.onDutyDate===todayStr() && profile.onDutyChangedAt;
   const status = brk ? pill('warn', `On a break since ${t(profile.onBreakSince)}`) : on ? pill('good', `Logged in since ${t(profile.onDutyChangedAt)}`) : outToday ? pill('neutral', `Logged out at ${t(profile.onDutyChangedAt)}`) : pill('neutral', 'Not logged in');

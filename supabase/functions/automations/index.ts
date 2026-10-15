@@ -242,22 +242,13 @@ export async function sendTo(sb: any, userIds: string[], payload: Record<string,
 // as the app (vacationOnDay) and SQL (vacation_in_force): options.autoBack is ON unless it is the boolean false, every other
 // key only when it is the boolean true; starts_on = the first day away, ends_on = the last; in force on a day when not
 // cancelled, from starts_on, before the business day it was ended on, and up to ends_on unless autoBack is off. The day is
-// in the business time zone (settings.catalog.region.timezone, else Sydney). A login is the employee whose name is its
-// technician_name, else its full_name (the app's peopleList). FAIL-OPEN: no table, an error or a throw = nobody is away.
+// in the business time zone the caller passes (bizTzOf(catalog), the region block). A login is the employee whose name is
+// its technician_name, else its full_name (the app's peopleList). FAIL-OPEN: no table, an error or a throw = nobody is
+// away, and the log says "vacations not read: ..." (so a broken read is visible, never silent).
 export const VAC_COLS = "id, employee_id, starts_on, ends_on, stand_in_id, options, ended_at, cancelled_at, reminded_at";
 // deno-lint-ignore no-explicit-any
 export type VacCtx = { day: string; tz: string; vacs: any[]; employees: any[]; profiles: any[] };
 const vacIsDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
-// deno-lint-ignore no-explicit-any
-export function vacTz(catalog: any): string {
-  const tz = catalog && catalog.region && catalog.region.timezone;
-  if (typeof tz === "string" && tz) { try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); return tz; } catch { /* not a zone */ } }
-  return "Australia/Sydney";
-}
-export function vacDay(ms: number, tz: string): string {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
-  return `${p.year}-${p.month}-${p.day}`;
-}
 // deno-lint-ignore no-explicit-any
 export function vacOpt(v: any, key: string): boolean {
   const o = v && v.options && typeof v.options === "object" ? v.options : {};
@@ -266,7 +257,7 @@ export function vacOpt(v: any, key: string): boolean {
 // deno-lint-ignore no-explicit-any
 export function vacOnDay(v: any, day: string, tz: string): boolean {
   if (!v || v.cancelled_at || !vacIsDay(v.starts_on) || !vacIsDay(day) || v.starts_on > day) return false;
-  if (v.ended_at) { const t = Date.parse(v.ended_at); if (isNaN(t) || !(day < vacDay(t, tz))) return false; }
+  if (v.ended_at) { const t = Date.parse(v.ended_at); if (isNaN(t) || !(day < bizParts(t, tz).day)) return false; }
   return !vacOpt(v, "autoBack") || (vacIsDay(v.ends_on) && day <= v.ends_on);
 }
 // deno-lint-ignore no-explicit-any
@@ -321,18 +312,22 @@ export const vacShiftDay = (day: string, n: number): string => new Date(Date.par
 // The vacations that can be in force from today to aheadDays on (started by then, and not over before today: ends_on from
 // today on, or left open with autoBack off), and the people they need, read once. Nobody away = no more reads. A vacation
 // that is over is never read again, so the table can grow without slowing a call down.
+// tz: the business time zone (the caller's bizTzOf(catalog)).
 // deno-lint-ignore no-explicit-any
-export async function vacContext(sb: any, nowMs: number, catalog: any, aheadDays = 0): Promise<VacCtx> {
-  const tz = vacTz(catalog), empty: VacCtx = { day: vacDay(nowMs, tz), tz, vacs: [], employees: [], profiles: [] };
+export async function vacContext(sb: any, nowMs: number, tz: string, aheadDays = 0): Promise<VacCtx> {
+  const empty: VacCtx = { day: bizParts(nowMs, tz).day, tz, vacs: [], employees: [], profiles: [] };
+  // deno-lint-ignore no-explicit-any
+  const why = (e: any) => (e && (e.message || e.code)) || String(e);
   try {
     const { data: vacs, error } = await sb.from("employee_vacations").select(VAC_COLS).is("cancelled_at", null).is("ended_at", null)
       .lte("starts_on", vacShiftDay(empty.day, aheadDays)).or(`ends_on.gte.${empty.day},options->>autoBack.eq.false`);
-    if (error || !Array.isArray(vacs) || !vacs.length) return empty;
+    if (error) { console.error("vacations not read: employee_vacations:", why(error)); return empty; }
+    if (!Array.isArray(vacs) || !vacs.length) return empty;
     const [emps, profs] = await Promise.all([sb.from("employees").select("id, name, phone, status"), sb.from("profiles").select("id, full_name, technician_name, role")]);
-    if (emps.error || profs.error) return empty;
+    if (emps.error || profs.error) { console.error("vacations not read:", emps.error ? "employees: " + why(emps.error) : "profiles: " + why(profs.error)); return empty; }
     return { ...empty, vacs, employees: emps.data || [], profiles: profs.data || [] };
   } catch (e) {
-    console.error("vacations not read:", e);
+    console.error("vacations not read:", why(e));
     return empty;
   }
 }
@@ -1052,7 +1047,7 @@ export async function loadContext(sb: any, nowMs = Date.now()): Promise<TickCtx>
 // Who is on vacation, read once per tick (the vacations block; fail-open). A year ahead too: a task is checked against its
 // due day, at most 365 days on.
 // deno-lint-ignore no-explicit-any
-async function vacOf(sb: any, T: TickCtx, nowMs: number): Promise<VacCtx> { return T.vac || (T.vac = await vacContext(sb, nowMs, T.cat, 366)); }
+async function vacOf(sb: any, T: TickCtx, nowMs: number): Promise<VacCtx> { return T.vac || (T.vac = await vacContext(sb, nowMs, bizTzOf(T.cat), 366)); }
 // deno-lint-ignore no-explicit-any
 async function enabledAutomations(sb: any): Promise<any[]> {
   return await rows(sb.from("automations").select("*").eq("business_id", BUSINESS_ID).eq("enabled", true));

@@ -1,7 +1,8 @@
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 -- Stage 3 · People status "On vacation" (Ofek 14 Oct; spec .claude/plans/stage3-spec.md §2/§4). STAGING FIRST
 -- (wblsrpmjiqwuxmrmuklc); never run here on LIVE without the owner. Safe to run again (idempotent). Additive: one new table,
--- helper functions, two triggers, and auto_end_va_shifts() with ONE added line (people on vacation keep their clock alone).
+-- helper functions and two triggers. It does NOT touch auto_end_va_shifts() (stage 1 B3 owns it): people on vacation can't
+-- start a shift, and the app acknowledges a "forgot to log out" for someone away by itself (vaSessionStart).
 --
 -- A vacation is data, never a change of employees.status (it stays 'Active' | 'Inactive'). "On vacation today" is worked
 -- out from the rows, the same way in the app (vacationOnDay), the functions (vacOnDay) and here (vacation_in_force):
@@ -9,7 +10,8 @@
 --   standIn, flagOpen, badge, noCalls, payroll, remind) is ON only when it is the boolean true; pay = 'paid' | 'unpaid'.
 --   starts_on = the first day away, ends_on = the LAST day away (back on ends_on + 1). In force on a day when not cancelled,
 --   from starts_on, before the business day it was ended on (ended_at), and up to ends_on unless autoBack is off (then until
---   someone ends it). The business day is in the business's time zone: settings.catalog.region.timezone, else Australia/Sydney.
+--   someone ends it). The business day is in the business's time zone: stage 1's public.business_tz() (Settings → Region
+--   and format, settings.catalog.region.timeZone; an unknown zone = Australia/Sydney).
 -- One vacation at a time per person: the planned days (shortened by an early end) of two vacations may not touch.
 -- Everyone signed in reads the rows (the badge is for everyone); only owners and managers add or change them; nobody deletes
 -- (a mistake is cancelled: cancelled_at). employee_name / stand_in_name are copies kept by the triggers, so people who can't
@@ -18,9 +20,9 @@
 -- Read-only checks BEFORE applying (they change nothing):
 --   select data_type from information_schema.columns where table_schema = 'public' and table_name = 'employees' and column_name = 'id';  -- expect uuid
 --   select proname from pg_proc where proname = 'is_owner_or_manager';                                -- expect 1 row
---   select position('logoutAt' in prosrc) > 0 from pg_proc where proname = 'auto_end_va_shifts';     -- expect true (the G7 version)
+--   select to_regprocedure('public.business_tz()') is not null;                                       -- expect true (stage 1, round3-stage1.sql B1)
 --   select to_regclass('public.employee_vacations');                                                  -- null before the first run
---   select catalog->'region'->>'timezone' from public.settings where id = 1;                          -- null = Australia/Sydney
+--   select public.business_tz();                                                                      -- the business's zone
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 begin;
 
@@ -49,19 +51,6 @@ create table if not exists public.employee_vacations (
 );
 create index if not exists employee_vacations_employee on public.employee_vacations (employee_id, starts_on);
 
--- 2. The business's time zone (settings.catalog.region.timezone when it is a real zone, else Australia/Sydney: today's behaviour).
-create or replace function public.business_timezone()
- returns text
- language sql
- stable
- security definer
- set search_path to 'public'
-as $function$
-  select coalesce((select z.name from public.settings s
-                    join pg_catalog.pg_timezone_names z on z.name = s.catalog->'region'->>'timezone'
-                   where s.id = 1 limit 1), 'Australia/Sydney')
-$function$;
-
 -- 3. Is a vacation in force on a day? (the app's vacationOnDay, the functions' vacOnDay)
 create or replace function public.vacation_in_force(p_starts date, p_ends date, p_options jsonb, p_ended timestamptz, p_cancelled timestamptz, p_day date)
  returns boolean
@@ -70,7 +59,7 @@ create or replace function public.vacation_in_force(p_starts date, p_ends date, 
  set search_path to 'public'
 as $function$
   select p_cancelled is null and p_starts <= p_day
-    and (p_ended is null or p_day < (p_ended at time zone public.business_timezone())::date)
+    and (p_ended is null or p_day < (p_ended at time zone public.business_tz())::date)
     and (coalesce(p_options->'autoBack', 'true'::jsonb) = 'false'::jsonb or p_day <= p_ends)
 $function$;
 
@@ -106,7 +95,7 @@ create or replace function public.employee_vacations_guard()
  set search_path to 'public'
 as $function$
 declare
-  tz text := public.business_timezone();
+  tz text := public.business_tz();
   last_new date; clash record;
 begin
   new.employee_name := coalesce((select e.name from public.employees e where e.id = new.employee_id), '');
@@ -171,72 +160,9 @@ do $$ begin
   end if;
 end $$;
 
--- 9. auto_end_va_shifts(): the G7 version (.claude/sql/settings-round2-phase1.sql) with ONE added line: an office person on
---    vacation with "Leave on the payroll board" ticked gets no automatic log-out and no "forgot to log out".
-create or replace function public.auto_end_va_shifts()
- returns integer
- language plpgsql
- security definer
- set search_path to 'public'
-as $function$
-declare
-  r record; n integer := 0;
-  today date := (now() at time zone 'Australia/Sydney')::date;
-  now_wall time := (now() at time zone 'Australia/Sydney')::time;
-  day_start timestamptz := (today + time '00:00') at time zone 'Australia/Sydney';
-  hhmm constant text := '^([01][0-9]|2[0-3]):[0-5][0-9]$';
-  myday jsonb := coalesce((select s.catalog->'myday' from public.settings s where s.id = 1), '{}'::jsonb);
-  office_logout time; person jsonb; logout_at time; end_at time;
-  last_at timestamptz; t timestamptz; cut timestamptz;
-begin
-  -- the old office-wide time (Settings → Security until 13 Oct) for anyone without their own, else 22:00
-  office_logout := case when myday->>'autoLogout' ~ hhmm then (myday->>'autoLogout')::time else time '22:00' end;
-  for r in select * from public.profiles where role = 'va' and on_duty and on_duty_date = today loop
-    -- on vacation with "Leave on the payroll board" ticked (stage 3): no automatic log-out, no "forgot to log out"
-    continue when public.profile_on_vacation(r.id, today, 'payroll');
-    person := case when jsonb_typeof(myday->'people'->(r.id::text)) = 'object' then myday->'people'->(r.id::text) else '{}'::jsonb end;
-    logout_at := least(case when person->>'logoutAt' ~ hhmm then (person->>'logoutAt')::time else office_logout end, time '23:30');
-    end_at := least(case when person->>'endAt' ~ hhmm then (person->>'endAt')::time else time '17:30' end, logout_at);
-    continue when now_wall < logout_at;
-
-    -- the VA's OWN last action today (never someone else's)
-    select max(e.at) into last_at from public.shift_events e where e.profile_id = r.id and e.day = today;
-    begin
-      -- by name (P10); skipped when another profile has the same name, so nobody else's action can count
-      if coalesce(btrim(r.full_name), '') <> ''
-         and not exists (select 1 from public.profiles o where o.id <> r.id and o.full_name = r.full_name) then
-        select max(a.at) into t from public.activity_log a
-          where a.actor = r.full_name and a.at >= day_start and a.at <= now();
-        last_at := greatest(last_at, t);
-      end if;
-    exception when others then raise warning 'auto_end_va_shifts: activity_log skipped for %: %', r.id, sqlerrm;
-    end;
-    begin
-      select max(m.at) into t from public.lead_messages m
-        where m.author_id::text = r.id::text and m.direction = 'out' and m.auto is not true and m.at >= day_start and m.at <= now();
-      last_at := greatest(last_at, t);
-    exception when others then raise warning 'auto_end_va_shifts: lead_messages skipped for %: %', r.id, sqlerrm;
-    end;
-    begin
-      -- calls has started_at (no created_at column: checked against the live schema 13 Oct)
-      select max(c.started_at) into t from public.calls c
-        where c.direction = 'outbound' and c.created_by = 'office-' || r.id::text and c.started_at >= day_start and c.started_at <= now();
-      last_at := greatest(last_at, t);
-    exception when others then raise warning 'auto_end_va_shifts: calls skipped for %: %', r.id, sqlerrm;
-    end;
-
-    -- greatest() ignores nulls: with no action today the end is their set time
-    cut := least(greatest((today + end_at) at time zone 'Australia/Sydney', last_at), now());
-    update public.profiles set on_duty = false, on_break = false, on_break_since = null, on_duty_changed_at = now(),
-      last_logout_at = cut, forgot_logout_on = today
-      where id = r.id and on_duty and on_duty_date = today;
-    continue when not found;  -- they logged out themselves in the meantime
-    if r.on_break then insert into public.shift_events(profile_id, kind, at, day) values (r.id, 'break_end', cut, today); end if;
-    insert into public.shift_events(profile_id, kind, at, day) values (r.id, 'shift_end', cut, today);
-    n := n + 1;
-  end loop;
-  return n;
-end $function$;
+-- 9. An earlier version of this file added business_timezone() (it read region.timezone, lowercase: always Sydney). Stage 1's
+--    business_tz() replaces it everywhere; nothing calls it any more.
+drop function if exists public.business_timezone();
 
 commit;
 
@@ -246,73 +172,19 @@ commit;
 --   select public.vacation_in_force('2026-10-20', '2026-10-24', '{"autoBack":false}'::jsonb, null, null, '2026-10-30');       -- true
 --   select public.vacation_in_force('2026-10-20', '2026-10-24', '{}'::jsonb, '2026-10-21 13:30+00', null, '2026-10-22');      -- false (ended 22 Oct 00:30 Sydney)
 --   select polname from pg_policy where polrelid = 'public.employee_vacations'::regclass;                                     -- read, add, update
---   select position('profile_on_vacation' in prosrc) > 0 from pg_proc where proname = 'auto_end_va_shifts';                   -- true
+--   select position('business_tz' in prosrc) > 0 from pg_proc where proname = 'vacation_in_force';                             -- true
+--   select to_regprocedure('public.business_timezone()');                                                                     -- null (dropped)
+--   select position('profile_on_vacation' in prosrc) > 0 from pg_proc where proname = 'auto_end_va_shifts';                   -- false (stage 1's own body)
 
--- ROLLBACK (stage 3 vacations): run as one block, in this order. Restores auto_end_va_shifts() to the G7 version exactly,
--- then removes everything added above (the vacation rows are lost: export them first if they matter).
+-- ROLLBACK (stage 3 vacations): run as one block, in this order. Removes everything added above (the vacation rows are
+-- lost: export them first if they matter). auto_end_va_shifts() and business_tz() are stage 1's and stay as they are.
 -- begin;
--- create or replace function public.auto_end_va_shifts()
---  returns integer
---  language plpgsql
---  security definer
---  set search_path to 'public'
--- as $function$
--- declare
---   r record; n integer := 0;
---   today date := (now() at time zone 'Australia/Sydney')::date;
---   now_wall time := (now() at time zone 'Australia/Sydney')::time;
---   day_start timestamptz := (today + time '00:00') at time zone 'Australia/Sydney';
---   hhmm constant text := '^([01][0-9]|2[0-3]):[0-5][0-9]$';
---   myday jsonb := coalesce((select s.catalog->'myday' from public.settings s where s.id = 1), '{}'::jsonb);
---   office_logout time; person jsonb; logout_at time; end_at time;
---   last_at timestamptz; t timestamptz; cut timestamptz;
--- begin
---   office_logout := case when myday->>'autoLogout' ~ hhmm then (myday->>'autoLogout')::time else time '22:00' end;
---   for r in select * from public.profiles where role = 'va' and on_duty and on_duty_date = today loop
---     person := case when jsonb_typeof(myday->'people'->(r.id::text)) = 'object' then myday->'people'->(r.id::text) else '{}'::jsonb end;
---     logout_at := least(case when person->>'logoutAt' ~ hhmm then (person->>'logoutAt')::time else office_logout end, time '23:30');
---     end_at := least(case when person->>'endAt' ~ hhmm then (person->>'endAt')::time else time '17:30' end, logout_at);
---     continue when now_wall < logout_at;
---     select max(e.at) into last_at from public.shift_events e where e.profile_id = r.id and e.day = today;
---     begin
---       if coalesce(btrim(r.full_name), '') <> ''
---          and not exists (select 1 from public.profiles o where o.id <> r.id and o.full_name = r.full_name) then
---         select max(a.at) into t from public.activity_log a
---           where a.actor = r.full_name and a.at >= day_start and a.at <= now();
---         last_at := greatest(last_at, t);
---       end if;
---     exception when others then raise warning 'auto_end_va_shifts: activity_log skipped for %: %', r.id, sqlerrm;
---     end;
---     begin
---       select max(m.at) into t from public.lead_messages m
---         where m.author_id::text = r.id::text and m.direction = 'out' and m.auto is not true and m.at >= day_start and m.at <= now();
---       last_at := greatest(last_at, t);
---     exception when others then raise warning 'auto_end_va_shifts: lead_messages skipped for %: %', r.id, sqlerrm;
---     end;
---     begin
---       select max(c.started_at) into t from public.calls c
---         where c.direction = 'outbound' and c.created_by = 'office-' || r.id::text and c.started_at >= day_start and c.started_at <= now();
---       last_at := greatest(last_at, t);
---     exception when others then raise warning 'auto_end_va_shifts: calls skipped for %: %', r.id, sqlerrm;
---     end;
---     cut := least(greatest((today + end_at) at time zone 'Australia/Sydney', last_at), now());
---     update public.profiles set on_duty = false, on_break = false, on_break_since = null, on_duty_changed_at = now(),
---       last_logout_at = cut, forgot_logout_on = today
---       where id = r.id and on_duty and on_duty_date = today;
---     continue when not found;
---     if r.on_break then insert into public.shift_events(profile_id, kind, at, day) values (r.id, 'break_end', cut, today); end if;
---     insert into public.shift_events(profile_id, kind, at, day) values (r.id, 'shift_end', cut, today);
---     n := n + 1;
---   end loop;
---   return n;
--- end $function$;
 -- drop trigger if exists employees_vacation_names on public.employees;
 -- drop function if exists public.employee_vacations_names();
 -- drop trigger if exists employee_vacations_guard on public.employee_vacations;
 -- drop function if exists public.employee_vacations_guard();
 -- drop function if exists public.profile_on_vacation(uuid, date, text);
 -- drop function if exists public.vacation_in_force(date, date, jsonb, timestamptz, timestamptz, date);
--- drop function if exists public.business_timezone();
 -- do $$ begin
 --   if exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'employee_vacations') then
 --     alter publication supabase_realtime drop table public.employee_vacations;

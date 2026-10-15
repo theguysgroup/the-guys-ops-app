@@ -945,62 +945,73 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
   // ── 29. people on vacation (stage 3) ──
   {
     const day = "2026-10-14";   // NOW is 14 Oct, Sydney
-    const EMPS = [{ id: "e-own", name: "Olivia Owner", status: "Active" }, { id: "e-mgr", name: "Max Manager", status: "Active" }, { id: "e-va", name: "Vicky Va", status: "Active" }, { id: "e-guy", name: "Guy Tech", status: "Active" }, { id: "e-old", name: "Old Hand", status: "Inactive" }];
+    // neutral demo names (the repo is public): the technician login is "Cal Tech" here
+    const PROFS = [OWNER, MANAGER, VA, VA_NOCRM, { ...TECH, full_name: "Cal Tech", technician_name: "Cal Tech" }];
+    const EMPS = [{ id: "e-own", name: "Olivia Owner", status: "Active" }, { id: "e-mgr", name: "Max Manager", status: "Active" }, { id: "e-va", name: "Vicky Va", status: "Active" }, { id: "e-cal", name: "Cal Tech", status: "Active" }, { id: "e-old", name: "Old Hand", status: "Inactive" }];
     const vac = (o: any = {}) => ({ id: "v1", business_id: "default", employee_id: "e-own", starts_on: "2026-10-13", ends_on: "2026-10-17", stand_in_id: null, options: { noNotify: true }, ended_at: null, cancelled_at: null, reminded_at: null, ...o });
     const pushTo = (roles: string[]) => ({ id: "p1", kind: "action", type: "push", to: { roles }, title: "New lead: {name}" });
-    const run = async (vacs: any[], steps: any[]) => { const db = world({ employees: EMPS, employee_vacations: vacs, automations: [auto({ steps })], contacts: [lead("c1")] }); sent.length = 0; await tickAt(db, NOW); return db; };
+    const run = async (vacs: any[], steps: any[]) => { const db = world({ profiles: PROFS, employees: EMPS, employee_vacations: vacs, automations: [auto({ steps })], contacts: [lead("c1")] }); sent.length = 0; await tickAt(db, NOW); return db; };
     let db = await run([vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } })], [pushTo(["owner", "manager"])]);
     eq([sent.map((s) => s.to), db.T.automation_log[0].recipient], [["https://push/mgr"], "Max Manager"], "push: the owner away (stand-in the manager) → the manager once; logged as Max Manager");
     db = await run([vac()], [pushTo(["owner", "manager"])]);
     eq([sent.map((s) => s.to), db.T.automation_log[0].recipient], [["https://push/mgr"], "Max Manager"], "push: the owner away without a stand-in → the manager only (as a role recipient)");
     db = await run([vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } })], [pushTo(["owner"])]);
     eq([sent.map((s) => s.to), db.T.automation_log[0].status], [[], "failed"], "push: owners only, the owner away → a manager stand-in never gets an owners-only message");
-    db = await run([vac({ stand_in_id: "e-guy", options: { noNotify: true, standIn: true } })], [pushTo(["owner", "manager"])]);
+    db = await run([vac({ stand_in_id: "e-cal", options: { noNotify: true, standIn: true } })], [pushTo(["owner", "manager"])]);
     eq([sent.map((s) => s.to), db.T.automation_log[0].recipient], [["https://push/mgr"], "Max Manager"], "push: an owner's technician stand-in isn't a recipient of an owner + manager message");
-    db = await run([vac({ stand_in_id: "e-guy", options: { noNotify: true, standIn: true } })], [{ ...pushTo([]), to: { roles: [], people: ["u-owner"] } }]);
+    db = await run([vac({ stand_in_id: "e-cal", options: { noNotify: true, standIn: true } })], [{ ...pushTo([]), to: { roles: [], people: ["u-owner"] } }]);
     eq([db.T.automation_log[0].recipient || "", db.T.automation_log[0].status], ["", "failed"], "push: the owner picked by name, away → their technician stand-in isn't added either");
-    db = await run([vac({ stand_in_id: "e-guy", options: { noNotify: true, standIn: true } })], [pushTo(["owner", "technician"])]);
-    eq(db.T.automation_log[0].recipient, "Guy Tech", "push: technicians picked too → the technician stand-in gets it (once)");
+    db = await run([vac({ stand_in_id: "e-cal", options: { noNotify: true, standIn: true } })], [pushTo(["owner", "technician"])]);
+    eq(db.T.automation_log[0].recipient, "Cal Tech", "push: technicians picked too → the technician stand-in gets it (once)");
     db = await run([], [pushTo(["owner", "manager"])]);
     eq(sent.map((s) => s.to).sort(), ["https://push/mgr", "https://push/owner"], "push: no vacations → as before");
     db = await run([vac({ starts_on: "2026-10-10", ends_on: "2026-10-13" })], [pushTo(["owner"])]);
     eq(sent.map((s) => s.to), ["https://push/owner"], "push: a vacation that ended yesterday → the owner gets it");
     // tasks
     const task = (assignees: string[]) => ({ id: "t1", kind: "action", type: "task", title: "Call {first_name}", assignees, due_days: 1 });
-    db = await run([vac({ employee_id: "e-guy", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [task(["e-guy"])]);
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [task(["e-cal"])]);
     eq([db.T.tasks[0].assignees, db.T.tasks[0].assigned_to, db.T.tasks[0].board, db.T.automation_log[0].recipient], [["Vicky Va"], "Vicky Va", "ron", "Vicky Va"], "task: someone not assignable → their stand-in (and the board follows)");
-    db = await run([vac({ employee_id: "e-guy", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [task(["e-guy", "e-va"])]);
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [task(["e-cal", "e-va"])]);
     eq(db.T.tasks[0].assignees, ["Vicky Va"], "task: the stand-in already chosen → once");
-    db = await run([vac({ employee_id: "e-guy", stand_in_id: "e-va", options: { notAssignable: true } })], [task(["e-guy"])]);
-    eq(db.T.tasks[0].assignees, ["Guy Tech"], "task: no stand-in ticked → the person stays (a warning in the app, never a block)");
-    db = await run([vac({ employee_id: "e-guy", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } }), vac({ id: "v2", employee_id: "e-va", options: { notAssignable: true } })], [task(["e-guy"])]);
-    eq(db.T.tasks[0].assignees, ["Guy Tech"], "task: the stand-in is away too → the person stays");
-    db = await run([vac({ employee_id: "e-guy", stand_in_id: "e-old", options: { notAssignable: true, standIn: true } })], [task(["e-guy"])]);
-    eq(db.T.tasks[0].assignees, ["Guy Tech"], "task: an inactive stand-in → the person stays");
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true } })], [task(["e-cal"])]);
+    eq(db.T.tasks[0].assignees, ["Cal Tech"], "task: no stand-in ticked → the person stays (a warning in the app, never a block)");
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } }), vac({ id: "v2", employee_id: "e-va", options: { notAssignable: true } })], [task(["e-cal"])]);
+    eq(db.T.tasks[0].assignees, ["Cal Tech"], "task: the stand-in is away too → the person stays");
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-old", options: { notAssignable: true, standIn: true } })], [task(["e-cal"])]);
+    eq(db.T.tasks[0].assignees, ["Cal Tech"], "task: an inactive stand-in → the person stays");
     // the due day decides, as in the app (saveTaskModal checks tm-due): away today but back before it → stays; away on it → stand-in
-    const taskIn = (d: number) => ({ ...task(["e-guy"]), due_days: d });
-    db = await run([vac({ employee_id: "e-guy", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [taskIn(7)]);
-    eq([db.T.tasks[0].due, db.T.tasks[0].assignees], ["2026-10-21", ["Guy Tech"]], "task: due after the return day (away 13–17 Oct, due 21 Oct) → the person stays");
-    db = await run([vac({ employee_id: "e-guy", starts_on: "2026-10-17", ends_on: "2026-10-23", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [taskIn(7)]);
+    const taskIn = (d: number) => ({ ...task(["e-cal"]), due_days: d });
+    db = await run([vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [taskIn(7)]);
+    eq([db.T.tasks[0].due, db.T.tasks[0].assignees], ["2026-10-21", ["Cal Tech"]], "task: due after the return day (away 13–17 Oct, due 21 Oct) → the person stays");
+    db = await run([vac({ employee_id: "e-cal", starts_on: "2026-10-17", ends_on: "2026-10-23", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [taskIn(7)]);
     eq(db.T.tasks[0].assignees, ["Vicky Va"], "task: a vacation from 17 Oct covers the due day (21 Oct) → the stand-in, though they aren't away today");
-    db = await run([vac({ employee_id: "e-guy", starts_on: "2026-10-17", ends_on: "2026-10-23", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [{ ...task(["e-guy"]), due_days: null }]);
-    eq(db.T.tasks[0].assignees, ["Guy Tech"], "task: no due day → today counts (not away yet)");
+    db = await run([vac({ employee_id: "e-cal", starts_on: "2026-10-17", ends_on: "2026-10-23", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], [{ ...task(["e-cal"]), due_days: null }]);
+    eq(db.T.tasks[0].assignees, ["Cal Tech"], "task: no due day → today counts (not away yet)");
     // pure: names once, in order
-    const C = { day, tz: "Australia/Sydney", vacs: [vac({ employee_id: "e-guy", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], employees: EMPS, profiles: [] };
+    const C = { day, tz: "Australia/Sydney", vacs: [vac({ employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], employees: EMPS, profiles: [] };
     eq(vacTaskPeople([EMPS[3], EMPS[1], EMPS[2]], C), ["Vicky Va", "Max Manager"], "vacTaskPeople: replaced, deduped, order kept");
-    eq(vacTaskPeople([EMPS[3]], { ...C, vacs: [] }), ["Guy Tech"], "vacTaskPeople: nobody away → unchanged");
-    eq([vacTaskPeople([EMPS[3]], C, "2026-10-18"), vacTaskPeople([EMPS[3]], C, "2026-10-17"), vacTaskPeople([EMPS[3]], C, day)], [["Guy Tech"], ["Vicky Va"], ["Vicky Va"]], "vacTaskPeople: on the day given (the due day)");
+    eq(vacTaskPeople([EMPS[3]], { ...C, vacs: [] }), ["Cal Tech"], "vacTaskPeople: nobody away → unchanged");
+    eq([vacTaskPeople([EMPS[3]], C, "2026-10-18"), vacTaskPeople([EMPS[3]], C, "2026-10-17"), vacTaskPeople([EMPS[3]], C, day)], [["Cal Tech"], ["Vicky Va"], ["Vicky Va"]], "vacTaskPeople: on the day given (the due day)");
     // preview shows the same
-    const a = auto({ id: "a-vac", enabled: false, steps: [pushTo(["owner", "manager"]), { ...task(["e-guy"]), id: "t1" }] });
-    const pdb = world({ employees: EMPS, employee_vacations: [vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } }), vac({ id: "v2", employee_id: "e-guy", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], automations: [a], contacts: [lead("c1")] });
+    const a = auto({ id: "a-vac", enabled: false, steps: [pushTo(["owner", "manager"]), { ...task(["e-cal"]), id: "t1" }] });
+    const pdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } }), vac({ id: "v2", employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], automations: [a], contacts: [lead("c1")] });
     const p = await handle(pdb, { step: "preview", automation_id: "a-vac", record: { kind: "contact", id: "c1" } }, OWNER, false);
     eq([p.body.steps[0].to, p.body.steps[1].assignees, p.body.steps[1].board], [["Max Manager"], ["Vicky Va"], "ron"], "preview: the redirected push names and task assignees");
     // read once per tick
     const twice = auto({ steps: [pushTo(["owner"]), { ...pushTo(["manager"]), id: "p2" }] });
-    const odb = world({ employees: EMPS, employee_vacations: [vac({ starts_on: "2026-10-01", ends_on: "2026-10-02" })], automations: [twice, auto({ steps: [pushTo(["manager"])] })], contacts: [lead("c1")] });
+    const odb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac({ starts_on: "2026-10-01", ends_on: "2026-10-02" })], automations: [twice, auto({ steps: [pushTo(["manager"])] })], contacts: [lead("c1")] });
     sent.length = 0;
     await tickAt(odb, NOW);
     eq([odb.calls.filter((c: string) => c === "employee_vacations.select").length, sent.length], [1, 3], "vacations are read once per tick (three push actions, two automations)");
+    // the day is the business's (settings.catalog.region.timeZone, review A2): 14 Oct 14:00 Sydney is 13 Oct 22:00 in Chicago
+    const only13 = [vac({ starts_on: "2026-10-13", ends_on: "2026-10-13" })];
+    db = await run(only13, [pushTo(["owner", "manager"])]);
+    eq(sent.map((s) => s.to).sort(), ["https://push/mgr", "https://push/owner"], "zone: Sydney business, away only on 13 Oct → back today, the owner gets it");
+    const cdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: only13, automations: [auto({ steps: [pushTo(["owner", "manager"])] })], contacts: [lead("c1")],
+      settings: [{ id: 1, company_name: "Acme Home Services", catalog: { ...CATALOG, region: { timeZone: "America/Chicago" } } }] });
+    sent.length = 0;
+    await tickAt(cdb, NOW);
+    eq(sent.map((s) => s.to), ["https://push/mgr"], "zone: a Chicago business, still 13 Oct there → the owner is away, the manager only");
   }
 
   console.log(`automations: ${pass} passed, ${fail} failed`);

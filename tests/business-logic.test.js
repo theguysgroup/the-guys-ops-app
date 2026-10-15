@@ -145,7 +145,7 @@ const DECLS = [
   // Stage 5 review fixes after the rebase: the tax field's label, an undo still running
   'mcpShownLabel', 'MCP_UNDO_STALE_MS', 'mcpUndoPending',
   // People: vacations (stage 3)
-  'VACATION_OPTIONS', 'VACATION_PAY', 'vacationTz', 'vacationDayOf', 'vacationToday', 'vacationOptionsNorm', 'vacationOpt', 'vacationDefaults', 'vacationOptionsFor', 'vacationMatches', 'vacationOnDay',
+  'VACATION_OPTIONS', 'VACATION_PAY', 'vacationOptionsNorm', 'vacationOpt', 'vacationDefaults', 'vacationOptionsFor', 'vacationMatches', 'vacationOnDay',
   'vacationPlannedLast', 'vacationLastDay', 'vacationFor', 'onVacationOn', 'vacationForProfile', 'vacationUpcoming', 'vacationsOverlap', 'vacationProblems', 'vacationRowFromDraft', 'vacationUntilText',
   'vacationOverdue', 'vacationPickerInfo', 'vacationAssignText', 'vacationPayrollLines', 'vacationOpenItems', 'vacationMoveTaskPatch', 'vacationErrorText', 'mapVacationRow',
   // On vacation, the UI (stage 3)
@@ -1996,10 +1996,10 @@ function testNotificationCards(sb){
   // The cards.
   const R = { waitMinutes: 15, from: 8, until: 20, docDays: 30, unpaidDays: 7 };
   const cards = sb.notifyCards({}, R, { phoneEnabled: false });
-  assertEqual(cards.map(c => c.id), ['newLead', 'leadWaiting', 'missedCall', 'unpaid', 'invoice', 'docExpiry', 'bizInsurance', 'googleReview'], 'notifyCards: 8 cards in the mockup\'s order');
-  // hand count: nothing saved = only the invoice one on (1 of 8); documents on = invoice, documents and insurance (3 of 8)
+  assertEqual(cards.map(c => c.id), ['newLead', 'leadWaiting', 'missedCall', 'unpaid', 'invoice', 'docExpiry', 'bizInsurance', 'vacationBack', 'googleReview'], 'notifyCards: 8 cards in the mockup\'s order (+ "back tomorrow", stage 3)');
+  // hand count: nothing saved = only the invoice one on (1 of 8); documents on = invoice, documents and insurance (3 of 8); "back tomorrow" (stage 3) is on unless switched off
   assertEqual([cards.filter(c => c.on).map(c => c.id), sb.notifyCards({ docExpiry: { on: true } }, R, {}).filter(c => c.on).map(c => c.id)],
-    [['invoice'], ['invoice', 'docExpiry', 'bizInsurance']], 'notifyCards: how many are on');
+    [['invoice', 'vacationBack'], ['invoice', 'docExpiry', 'bizInsurance', 'vacationBack']], 'notifyCards: how many are on');
   const R2 = { waitMinutes: 45, from: 8, until: 20, docDays: 60, unpaidDays: 10 }, named = sb.notifyCards({}, R2, {});
   const nm = id => named.find(c => c.id===id).name;
   assertEqual([nm('leadWaiting'), nm('unpaid'), nm('docExpiry'), nm('bizInsurance')],
@@ -2007,7 +2007,7 @@ function testNotificationCards(sb){
   const N = { newLead: { on: true, office: true }, missedCall: { on: false, office: true }, unpaid: { on: true, office: true }, docExpiry: { on: true, office: true }, googleReview: { on: true, office: true } };
   const off = sb.notifyCards(N, R, {});
   assertEqual(off.filter(c => c.office).map(c => c.id), ['newLead', 'missedCall'], 'notifyCards: office only on cards that allow it (an unpaid job saved with office stays owners only), never on the locked one');
-  assertEqual(off.filter(c => !c.officeOk).map(c => [c.id, c.only]), [['unpaid', 'money'], ['invoice', 'pay'], ['docExpiry', 'private details'], ['bizInsurance', 'business insurance']], 'notifyCards: owners-only cards say why');
+  assertEqual(off.filter(c => !c.officeOk && !c.alsoTo).map(c => [c.id, c.only]), [['unpaid', 'money'], ['invoice', 'pay'], ['docExpiry', 'private details'], ['bizInsurance', 'business insurance']], 'notifyCards: owners-only cards say why');
   const g = off.find(c => c.id==='googleReview');
   assertEqual([g.locked, g.on, g.office, g.lockedLine, g.flags], [true, false, false, 'Turns on once Google Business Profile is connected.', [{ tone:'neutral', text:'Comes with the Google Business Profile connector' }]], 'notifyCards: the Google review card waits for its connector');
   const flags = (o, id) => sb.notifyCards({}, R, o).find(c => c.id===id).flags;
@@ -2514,16 +2514,16 @@ function testVacations(sb){
   assertEqual(sb.vacationOptionsFor(prevRows, { id: 'e3', name: 'Cat' }, undefined), { ...all(true), pay: 'unpaid' }, 'options for: the first time → the defaults');
   assertEqual(sb.vacationOptionsFor([], 'Cat', { vacation: { defaults: { remind: false } } }).remind, false, 'options for: the first time uses the business defaults');
 
-  // days in the business time zone (DST starts 4 Oct 2026 in Sydney)
-  assertEqual(sb.vacationDayOf('2026-10-03T14:30:00Z', SYD), '2026-10-04', 'day: 00:30 AEST on the 4th');
-  assertEqual(sb.vacationDayOf('2026-10-04T13:30:00Z', SYD), '2026-10-05', 'day: 00:30 AEDT on the 5th (after DST)');
-  assertEqual(sb.vacationDayOf(Date.parse('2026-10-04T13:30:00Z'), 'Australia/Perth'), '2026-10-04', 'day: a number, another zone');
-  assertEqual(sb.vacationTz(), sb.AUTO_SAFETY_DEFAULTS.timezone, 'tz: no catalog → the default');
-  sb.STATE.data.settings.catalog = { region: { timezone: 'Mars/Base' } };
-  assertEqual(sb.vacationTz(), sb.AUTO_SAFETY_DEFAULTS.timezone, 'tz: not a real zone → the default');
-  sb.STATE.data.settings.catalog = { region: { timezone: 'Australia/Perth' } };
-  assertEqual(sb.vacationTz(), 'Australia/Perth', 'tz: catalog.region.timezone when it is real');
-  assertEqual(sb.vacationToday(Date.parse('2026-10-04T17:00:00Z')), '2026-10-05', 'today: in the business zone (Perth 01:00 on the 5th)');
+  // days in the business time zone: stage 1's bizTz / bizDayOf / todayStr (Settings → Region and format; DST starts 4 Oct 2026 in Sydney)
+  delete sb.STATE.data.settings.catalog;
+  assertEqual([sb.bizTz(), sb.bizDayOf('2026-10-03T14:30:00Z'), sb.bizDayOf('2026-10-04T13:30:00Z')], [SYD, '2026-10-04', '2026-10-05'], 'days: nothing saved = Sydney; 00:30 AEST on the 4th, 00:30 AEDT on the 5th');
+  const endLate = { id: 'z', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', options: {}, endedAt: '2026-10-21T15:30:00Z', cancelledAt: null };
+  assertEqual(sb.vacationOnDay(endLate, '2026-10-21', sb.bizTz()), true, 'tz: ended 22 Oct 02:30 Sydney → still away on the 21st');
+  sb.STATE.data.settings.catalog = { region: { timeZone: 'Australia/Perth' } };
+  assertEqual([sb.bizTz(), sb.todayStr(Date.parse('2026-10-04T17:00:00Z')), sb.vacationOnDay(endLate, '2026-10-21', sb.bizTz())], ['Australia/Perth', '2026-10-05', false],
+    'tz: region.timeZone Perth → today is Perth time (01:00 on the 5th), and the same end (21 Oct 23:30 Perth) is back on the 21st');
+  sb.STATE.data.settings.catalog = { region: { timeZone: 'Mars/Base' } };
+  assertEqual(sb.bizTz(), SYD, 'tz: not a real zone → Sydney');
   delete sb.STATE.data.settings.catalog;
 
   // in force on a day
@@ -2545,7 +2545,7 @@ function testVacations(sb){
   assertEqual(sb.vacationFor(two, 'Ann', '2026-10-21', SYD, 'noNotify').id, 'old', 'vacationFor: by name; with a key → the one that has it');
   assertEqual(sb.vacationFor([V({ options: { noCalls: true } })], 'Ann', '2026-10-21', SYD, 'noNotify'), null, 'vacationFor: with a key the row lacks → null');
   assertEqual([sb.vacationFor(two, 'Bob', '2026-10-21', SYD), sb.vacationFor(two, { id: 'e2', name: 'Bob' }, '2026-10-21', SYD)], [null, null], 'vacationFor: someone else → null');
-  const today = sb.vacationToday();
+  const today = sb.todayStr();
   sb.STATE.data.vacations = [V({ startsOn: today, endsOn: sb.shiftDays(today, 2), options: { noCalls: true } })];
   assertEqual([sb.onVacationOn('Ann'), sb.onVacationOn({ id: 'e1' }, null, 'noCalls'), sb.onVacationOn('Ann', null, 'noNotify'), sb.onVacationOn('Ann', sb.shiftDays(today, -1)), sb.onVacationOn('Bob')],
     [true, true, false, false, false], 'onVacationOn: reads STATE.data.vacations, the day defaults to today');
@@ -2656,12 +2656,12 @@ function testVacationUi(sb){
   const KEYS = sb.VACATION_OPTIONS.map(o => o.key);
   const ALL = (extra) => { const o = {}; KEYS.forEach(k => { o[k] = true; }); return { ...o, ...extra }; };
   const employees = [
-    { id: 'e1', name: 'Guy', roles: ['Technician'], status: 'Active' }, { id: 'e2', name: 'Sam', roles: ['Technician'], status: 'Active' },
-    { id: 'e3', name: 'Ron', roles: ['VA'], status: 'Active' }, { id: 'e4', name: 'Old', roles: ['Technician'], status: 'Inactive' },
+    { id: 'e1', name: 'Cal', roles: ['Technician'], status: 'Active' }, { id: 'e2', name: 'Sam', roles: ['Technician'], status: 'Active' },
+    { id: 'e3', name: 'Eve', roles: ['VA'], status: 'Active' }, { id: 'e4', name: 'Old', roles: ['Technician'], status: 'Inactive' },
   ];
   const V = (extra) => ({ standInId: null, standInName: '', note: '', endedAt: null, cancelledAt: null, createdAt: '2026-10-01T00:00:00Z', ...extra });
-  const v1 = V({ id: 'v1', employeeId: 'e1', employeeName: 'Guy', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Sam', options: ALL({ pay: 'paid' }) });
-  const v2 = V({ id: 'v2', employeeId: 'e3', employeeName: 'Ron', startsOn: '2026-10-22', endsOn: '2026-10-23', options: ALL({ autoBack: false, notAssignable: false, standIn: false, pay: 'unpaid' }) });
+  const v1 = V({ id: 'v1', employeeId: 'e1', employeeName: 'Cal', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Sam', options: ALL({ pay: 'paid' }) });
+  const v2 = V({ id: 'v2', employeeId: 'e3', employeeName: 'Eve', startsOn: '2026-10-22', endsOn: '2026-10-23', options: ALL({ autoBack: false, notAssignable: false, standIn: false, pay: 'unpaid' }) });
   const v3 = V({ id: 'v3', employeeId: 'e2', employeeName: 'Sam', startsOn: '2026-11-02', endsOn: '2026-11-04', cancelledAt: '2026-10-10T00:00:00Z', options: ALL({ pay: 'paid' }) });
   const rows = [v1, v2, v3];
   const data = { employees, vacations: rows, tasks: [], jobs: [] };
@@ -2673,40 +2673,40 @@ function testVacationUi(sb){
 
   // the assign pickers
   const AI = (name, day, d) => sb.vacationAssignInfo(name, day, d || data, SYD);
-  const gi = AI('Guy', '2026-10-21');
-  assertEqual([gi.name, gi.vac.id, gi.label, gi.standIn], ['Guy', 'v1', 'On vacation until 24 Oct', 'Sam'], 'picker info: away with "Not assignable", the stand-in offered');
-  assertEqual([AI('Guy', '2026-10-25'), AI('Ron', '2026-10-22'), AI('Nobody', '2026-10-21'), AI('Guy', '')], [null, null, null, null], 'picker info: after the dates, "Not assignable" off, someone unknown, no day → null');
-  assertEqual(AI('Guy', '2026-10-21', withRows([V({ id: 'vs', employeeId: 'e2', employeeName: 'Sam', startsOn: '2026-10-21', endsOn: '2026-10-21', options: ALL() })])).standIn, '', 'picker info: a stand-in away that day too is not offered');
-  assertEqual(AI('Guy', '2026-10-21', withRows([], employees.map(e => e.id==='e2' ? { ...e, status: 'Inactive' } : e))).standIn, '', 'picker info: a stand-in who left is not offered');
-  assertEqual(AI('Guy', '2026-10-21', { ...data, employees: [] }).standIn, 'Sam', 'picker info: the employees not readable → the row\'s copy of the names');
-  assertEqual([sb.vacationPickerLabel('Guy', gi), sb.vacationPickerLabel('Sam', null)], ['Guy · On vacation until 24 Oct', 'Sam'], 'picker label: the name with the badge words, or the name alone');
-  assertEqual(sb.vacationAssignConflicts(['Guy', 'Sam'], ['Guy'], '2026-10-21', data, SYD), [], 'conflicts: someone already on it is not asked about again');
-  assertEqual(sb.vacationAssignConflicts(['Guy', 'Sam'], [], '2026-10-21', data, SYD).map(i => [i.name, i.standIn]), [['Guy', 'Sam']], 'conflicts: the newly picked person who is away');
-  // jobs: only a technician can stand in (Ron is the VA)
-  const ronStands = withRows([], employees);
-  ronStands.vacations = [{ ...v1, standInId: 'e3', standInName: 'Ron' }];
-  assertEqual([sb.vacationJobStandIn('Sam', data), sb.vacationJobStandIn('Ron', data), sb.vacationJobStandIn('', data), sb.vacationJobStandIn('Sam', { ...data, employees: [] })], ['Sam', '', '', ''], 'job stand-in: a technician, else none');
-  assertEqual([AI('Guy', '2026-10-21', ronStands).standIn, sb.vacationAssignInfo('Guy', '2026-10-21', ronStands, SYD, true).standIn, sb.vacationAssignInfo('Guy', '2026-10-21', data, SYD, true).standIn],
-    ['Ron', '', 'Sam'], 'picker info: for a job the VA stand-in is not offered (tasks still are); a technician stand-in is');
-  assertEqual(sb.vacationJobFlag({ id: 'j', technician: 'Guy', date: '2026-10-23' }, ronStands, '2026-10-21', SYD).standIn, '', 'job flag: no move to a stand-in who is not a technician');
+  const gi = AI('Cal', '2026-10-21');
+  assertEqual([gi.name, gi.vac.id, gi.label, gi.standIn], ['Cal', 'v1', 'On vacation until 24 Oct', 'Sam'], 'picker info: away with "Not assignable", the stand-in offered');
+  assertEqual([AI('Cal', '2026-10-25'), AI('Eve', '2026-10-22'), AI('Nobody', '2026-10-21'), AI('Cal', '')], [null, null, null, null], 'picker info: after the dates, "Not assignable" off, someone unknown, no day → null');
+  assertEqual(AI('Cal', '2026-10-21', withRows([V({ id: 'vs', employeeId: 'e2', employeeName: 'Sam', startsOn: '2026-10-21', endsOn: '2026-10-21', options: ALL() })])).standIn, '', 'picker info: a stand-in away that day too is not offered');
+  assertEqual(AI('Cal', '2026-10-21', withRows([], employees.map(e => e.id==='e2' ? { ...e, status: 'Inactive' } : e))).standIn, '', 'picker info: a stand-in who left is not offered');
+  assertEqual(AI('Cal', '2026-10-21', { ...data, employees: [] }).standIn, 'Sam', 'picker info: the employees not readable → the row\'s copy of the names');
+  assertEqual([sb.vacationPickerLabel('Cal', gi), sb.vacationPickerLabel('Sam', null)], ['Cal · On vacation until 24 Oct', 'Sam'], 'picker label: the name with the badge words, or the name alone');
+  assertEqual(sb.vacationAssignConflicts(['Cal', 'Sam'], ['Cal'], '2026-10-21', data, SYD), [], 'conflicts: someone already on it is not asked about again');
+  assertEqual(sb.vacationAssignConflicts(['Cal', 'Sam'], [], '2026-10-21', data, SYD).map(i => [i.name, i.standIn]), [['Cal', 'Sam']], 'conflicts: the newly picked person who is away');
+  // jobs: only a technician can stand in (Eve is the VA)
+  const eveStands = withRows([], employees);
+  eveStands.vacations = [{ ...v1, standInId: 'e3', standInName: 'Eve' }];
+  assertEqual([sb.vacationJobStandIn('Sam', data), sb.vacationJobStandIn('Eve', data), sb.vacationJobStandIn('', data), sb.vacationJobStandIn('Sam', { ...data, employees: [] })], ['Sam', '', '', ''], 'job stand-in: a technician, else none');
+  assertEqual([AI('Cal', '2026-10-21', eveStands).standIn, sb.vacationAssignInfo('Cal', '2026-10-21', eveStands, SYD, true).standIn, sb.vacationAssignInfo('Cal', '2026-10-21', data, SYD, true).standIn],
+    ['Eve', '', 'Sam'], 'picker info: for a job the VA stand-in is not offered (tasks still are); a technician stand-in is');
+  assertEqual(sb.vacationJobFlag({ id: 'j', technician: 'Cal', date: '2026-10-23' }, eveStands, '2026-10-21', SYD).standIn, '', 'job flag: no move to a stand-in who is not a technician');
 
   // flags on open items
   assertEqual([sb.vacationTaskDay({}, '2026-10-21'), sb.vacationTaskDay({ due: '2026-10-19' }, '2026-10-21'), sb.vacationTaskDay({ due: '2026-10-23' }, '2026-10-21')],
     [null, '2026-10-21', '2026-10-23'], 'task day: none without a due date, today when late, else the due date');
-  const TF = (t, d) => sb.vacationTaskFlag({ id: 't', status: 'To do', assignees: ['Guy'], due: '2026-10-22', ...t }, d || data, '2026-10-21', SYD);
+  const TF = (t, d) => sb.vacationTaskFlag({ id: 't', status: 'To do', assignees: ['Cal'], due: '2026-10-22', ...t }, d || data, '2026-10-21', SYD);
   const f = TF({});
-  assertEqual([f.name, f.vac.id, f.label, f.standIn, f.canMove], ['Guy', 'v1', 'On vacation until 24 Oct', 'Sam', true], 'task flag: due in the dates → flagged, can move to the stand-in');
+  assertEqual([f.name, f.vac.id, f.label, f.standIn, f.canMove], ['Cal', 'v1', 'On vacation until 24 Oct', 'Sam', true], 'task flag: due in the dates → flagged, can move to the stand-in');
   assertEqual([TF({ status: 'Done' }), TF({ due: '2026-10-25' }), TF({ due: null })], [null, null, null], 'task flag: done, after the dates, no due date → none');
-  assertEqual(TF({ assignees: ['Guy', 'Sam'] }).canMove, false, 'task flag: the stand-in is already on it → no move');
+  assertEqual(TF({ assignees: ['Cal', 'Sam'] }).canMove, false, 'task flag: the stand-in is already on it → no move');
   assertEqual(TF({}, { ...data, vacations: [{ ...v1, options: ALL({ flagOpen: false }) }] }), null, 'task flag: "Flag their open tasks and jobs" off → none');
-  assertEqual(TF({ due: '2026-10-15' }).name, 'Guy', 'task flag: a late task counts on today, inside the dates');
-  const JF = (j) => sb.vacationJobFlag({ id: 'j', technician: 'Guy', date: '2026-10-23', ...j }, data, '2026-10-21', SYD);
+  assertEqual(TF({ due: '2026-10-15' }).name, 'Cal', 'task flag: a late task counts on today, inside the dates');
+  const JF = (j) => sb.vacationJobFlag({ id: 'j', technician: 'Cal', date: '2026-10-23', ...j }, data, '2026-10-21', SYD);
   assertEqual([JF({}).label, JF({}).standIn, JF({ date: '2026-10-19' }), JF({ technician: 'Sam' })], ['On vacation until 24 Oct', 'Sam', null, null], 'job flag: booked in the dates; a job before today or someone else → none');
   const work = {
     ...data,
-    tasks: [{ id: 't22', status: 'To do', assignees: ['Guy'], due: '2026-10-22' }, { id: 't23', status: 'Done', assignees: ['Guy'], due: '2026-10-23' },
-      { id: 't26', status: 'To do', assignees: ['Guy'], due: '2026-10-26' }, { id: 'tnone', status: 'To do', assignees: ['Guy'], due: null }],
-    jobs: [{ id: 'j20', technician: 'Guy', date: '2026-10-20' }, { id: 'j23', technician: 'Guy', date: '2026-10-23' }, { id: 'j30', technician: 'Guy', date: '2026-10-30' }],
+    tasks: [{ id: 't22', status: 'To do', assignees: ['Cal'], due: '2026-10-22' }, { id: 't23', status: 'Done', assignees: ['Cal'], due: '2026-10-23' },
+      { id: 't26', status: 'To do', assignees: ['Cal'], due: '2026-10-26' }, { id: 'tnone', status: 'To do', assignees: ['Cal'], due: null }],
+    jobs: [{ id: 'j20', technician: 'Cal', date: '2026-10-20' }, { id: 'j23', technician: 'Cal', date: '2026-10-23' }, { id: 'j30', technician: 'Cal', date: '2026-10-30' }],
   };
   const mi = sb.vacationMovableItems(work, v1, SYD, '2026-10-21');
   assertEqual([mi.tasks.map(t => t.id), mi.jobs.map(j => j.id)], [['t22', 'tnone'], ['j23']], 'movable items: open tasks in the dates (and with no due date), jobs from today on (a past job is work done)');
@@ -2714,22 +2714,22 @@ function testVacationUi(sb){
   // the payroll leave card
   const week = { start: '2026-10-18', end: '2026-10-24' };
   const PL = (wk, today, emps) => sb.vacationPayLines({ ...data, employees: emps || employees }, wk, SYD, today).map(x => [x.emp.name, x.line.days, x.line.pay, x.v.id]);
-  assertEqual(PL(week, '2026-10-15'), [['Guy', 5, 'paid', 'v1'], ['Ron', 2, 'unpaid', 'v2']], 'pay lines: one per person in the week, by name');
+  assertEqual(PL(week, '2026-10-15'), [['Cal', 5, 'paid', 'v1'], ['Eve', 2, 'unpaid', 'v2']], 'pay lines: one per person in the week, by name');
   assertEqual(PL({ start: '2026-10-25', end: '2026-10-31' }, '2026-10-15'), [], 'pay lines: a week after the dates → none');
-  assertEqual(PL({ start: '2026-10-25', end: '2026-10-31' }, '2026-10-27'), [['Ron', 3, 'unpaid', 'v2']], 'pay lines: left open past its end runs through today');
-  assertEqual(PL(week, '2026-10-15', employees.map(e => e.id==='e1' ? { ...e, workingDays: [1, 2, 3, 4, 5] } : e))[0], ['Guy', 4, 'paid', 'v1'], 'pay lines: only their working days (Tue–Fri of 20–24 Oct)');
+  assertEqual(PL({ start: '2026-10-25', end: '2026-10-31' }, '2026-10-27'), [['Eve', 3, 'unpaid', 'v2']], 'pay lines: left open past its end runs through today');
+  assertEqual(PL(week, '2026-10-15', employees.map(e => e.id==='e1' ? { ...e, workingDays: [1, 2, 3, 4, 5] } : e))[0], ['Cal', 4, 'paid', 'v1'], 'pay lines: only their working days (Tue–Fri of 20–24 Oct)');
   assertEqual(sb.vacationPayLines({ employees, vacations: [] }, week, SYD, '2026-10-15'), [], 'pay lines: no vacations → none');
 
   // the shared badges and the Away card
   const away = (d, day) => sb.vacationAwayOn(d, day, SYD).map(a => [a.name, a.label]);
-  assertEqual(away(data, '2026-10-22'), [['Guy', 'On vacation until 24 Oct'], ['Ron', 'On vacation until 23 Oct']], 'away on a day: everyone with the badge ticked, by name');
-  assertEqual(away({ ...data, vacations: [v1, { ...v2, options: { ...v2.options, badge: false } }] }, '2026-10-22'), [['Guy', 'On vacation until 24 Oct']], 'away on a day: the badge off → not shown');
-  assertEqual(away(withRows([V({ id: 'vo', employeeId: 'e4', employeeName: 'Old', startsOn: '2026-10-22', endsOn: '2026-10-22', options: ALL() })]), '2026-10-22').map(a => a[0]), ['Guy', 'Ron'], 'away on a day: someone not active is never shown');
-  assertEqual(away(data, '2026-11-03').map(a => a[0]), ['Ron'], 'away on a day: a cancelled vacation (Sam) never shows; one left open past its end (Ron) still does');
+  assertEqual(away(data, '2026-10-22'), [['Cal', 'On vacation until 24 Oct'], ['Eve', 'On vacation until 23 Oct']], 'away on a day: everyone with the badge ticked, by name');
+  assertEqual(away({ ...data, vacations: [v1, { ...v2, options: { ...v2.options, badge: false } }] }, '2026-10-22'), [['Cal', 'On vacation until 24 Oct']], 'away on a day: the badge off → not shown');
+  assertEqual(away(withRows([V({ id: 'vo', employeeId: 'e4', employeeName: 'Old', startsOn: '2026-10-22', endsOn: '2026-10-22', options: ALL() })]), '2026-10-22').map(a => a[0]), ['Cal', 'Eve'], 'away on a day: someone not active is never shown');
+  assertEqual(away(data, '2026-11-03').map(a => a[0]), ['Eve'], 'away on a day: a cancelled vacation (Sam) never shows; one left open past its end (Eve) still does');
   const team = (d, day, all) => sb.vacationTeamRows(d, day, SYD, all).map(r => [r.name, r.now, r.label, r.standIn, r.overdue]);
-  assertEqual(team(data, '2026-10-15', true), [['Guy', false, 'Vacation from 20 Oct', 'Sam', false], ['Ron', false, 'Vacation from 22 Oct', '', false]], 'Away card: starting in the next 30 days, with the stand-in');
-  assertEqual(team({ ...data, vacations: [v1, { ...v2, options: { ...v2.options, badge: false } }] }, '2026-10-15', false).map(r => r[0]), ['Guy'], 'Away card: without the badge only owners and managers see it');
-  assertEqual(team(data, '2026-10-25', true), [['Ron', true, 'On vacation (due back 24 Oct)', '', true]], 'Away card: left open past its end → "Back?"');
+  assertEqual(team(data, '2026-10-15', true), [['Cal', false, 'Vacation from 20 Oct', 'Sam', false], ['Eve', false, 'Vacation from 22 Oct', '', false]], 'Away card: starting in the next 30 days, with the stand-in');
+  assertEqual(team({ ...data, vacations: [v1, { ...v2, options: { ...v2.options, badge: false } }] }, '2026-10-15', false).map(r => r[0]), ['Cal'], 'Away card: without the badge only owners and managers see it');
+  assertEqual(team(data, '2026-10-25', true), [['Eve', true, 'On vacation (due back 24 Oct)', '', true]], 'Away card: left open past its end → "Back?"');
   assertEqual(team(data, '2026-09-01', true), [], 'Away card: more than 30 days ahead → not yet');
 
   // the window
@@ -2777,21 +2777,21 @@ function testVacationUi(sb){
   sb.STATE.data.vacations = [];
 
   // the phone settings: which backup phone is whose (the voice function's rule)
-  const emps = [{ id: 'a', name: 'Guy Galili', phone: '0412 345 678' }, { id: 'b', name: 'Sam Lee', phone: '' }, { id: 'c', name: 'Dan One' }, { id: 'd', name: 'Dan Two' }];
+  const emps = [{ id: 'a', name: 'Cal Carter', phone: '0412 345 678' }, { id: 'b', name: 'Sam Lee', phone: '' }, { id: 'c', name: 'Dan One' }, { id: 'd', name: 'Dan Two' }];
   const PE = (pp, k) => (sb.vacationPhoneEmployee(pp, k || 'x', emps) || { id: null }).id;
-  assertEqual([PE({ name: 'Mobile 1', mobile: '+61412345678' }), PE({ name: 'sam lee' }), PE({ name: 'Sam' }), PE({ name: 'Dan' }), PE({ name: 'Nobody' }), PE({}, 'Guy Galili')],
+  assertEqual([PE({ name: 'Mobile 1', mobile: '+61412345678' }), PE({ name: 'sam lee' }), PE({ name: 'Sam' }), PE({ name: 'Dan' }), PE({ name: 'Nobody' }), PE({}, 'Cal Carter')],
     ['a', 'b', 'b', null, null, 'a'], 'phone person: the same mobile, full name, or a first name only one has (else none)');
   // the voice function's tests use the same cases (vacPhoneEmployee)
-  const levi = [{ id: 'l', name: 'Noam Levi', phone: '0400 000 001' }];
+  const levi = [{ id: 'l', name: 'Ben Levi', phone: '0400 000 001' }];
   const PE2 = (pp, emps3, profs) => (sb.vacationPhoneEmployee(pp, 'x', emps3, profs) || { id: null }).id;
-  assertEqual([PE2({ name: 'Noam' }, levi, [{ id: 'p1', fullName: 'Noam Gal', role: 'owner' }]), PE2({ name: 'Noam' }, levi, [{ id: 'p2', fullName: 'Noam Levi', technicianName: 'Noam Levi' }]), PE2({ name: 'Noam' }, levi, [{ id: 'p3', fullName: 'X', technicianName: 'Noam' }])],
-    [null, 'l', null], 'phone person: a login of any role with that first name (owner Noam Gal, no card) is a twin; their own login is not');
+  assertEqual([PE2({ name: 'Ben' }, levi, [{ id: 'p1', fullName: 'Ben Gal', role: 'owner' }]), PE2({ name: 'Ben' }, levi, [{ id: 'p2', fullName: 'Ben Levi', technicianName: 'Ben Levi' }]), PE2({ name: 'Ben' }, levi, [{ id: 'p3', fullName: 'X', technicianName: 'Ben' }])],
+    [null, 'l', null], 'phone person: a login of any role with that first name (owner Ben Gal, no card) is a twin; their own login is not');
   const sams = [{ id: 'lee', name: 'Sam Lee', phone: '0411 111 111' }, { id: 'park', name: 'Sam Park', phone: '' }];
   assertEqual([PE2({ name: 'Sam', mobile: '0411111111' }, sams, []), PE2({ name: 'X', mobile: '0411111111' }, [...sams, { id: 'dup', name: 'Dup', phone: '0411111111' }], [])], ['lee', null], 'phone person: the mobile decides first; a shared mobile is no match');
-  const pv = Vx => sb.vacationPhoneAway({ sam: { name: 'Sam', mobile: '0411111111' }, noam: { name: 'Noam' } }, Vx, [...sams, ...levi], [{ id: 'p1', fullName: 'Noam Gal', role: 'owner' }], '2026-10-21', SYD);
+  const pv = Vx => sb.vacationPhoneAway({ sam: { name: 'Sam', mobile: '0411111111' }, ben: { name: 'Ben' } }, Vx, [...sams, ...levi], [{ id: 'p1', fullName: 'Ben Gal', role: 'owner' }], '2026-10-21', SYD);
   const VP = (id, name, o) => V({ id: 'vp-' + id, employeeId: id, employeeName: name, startsOn: '2026-10-20', endsOn: '2026-10-24', options: ALL(o) });
-  assertEqual([[...pv([VP('park', 'Sam Park')]).keys()], [...pv([VP('lee', 'Sam Lee')]).keys()], [...pv([VP('l', 'Noam Levi')]).keys()], [...pv([VP('lee', 'Sam Lee', { noCalls: false })]).keys()], [...pv([]).keys()]],
-    [[], ['sam'], [], [], []], 'phone away: Sam Park away is not the phone with Sam Lee\'s mobile; the owner Noam Gal is never skipped for Noam Levi; only "No calls routed"');
+  assertEqual([[...pv([VP('park', 'Sam Park')]).keys()], [...pv([VP('lee', 'Sam Lee')]).keys()], [...pv([VP('l', 'Ben Levi')]).keys()], [...pv([VP('lee', 'Sam Lee', { noCalls: false })]).keys()], [...pv([]).keys()]],
+    [[], ['sam'], [], [], []], 'phone away: Sam Park away is not the phone with Sam Lee\'s mobile; the owner Ben Gal is never skipped for Ben Levi; only "No calls routed"');
 
   // static: where the screens call these
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -2819,6 +2819,23 @@ function testVacationUi(sb){
   const rawInHandler = t => (t.match(/on(click|change|input)="[^"]*"/g) || []).some(a => (a.match(/\$\{[^}]*\}/g) || []).some(x => !/^\$\{(esc\(jsStr\(|eid\}|vid\}|js\})/.test(x)));
   assertEqual(safe.filter(n => { const t = fx(n); return !t || rawInHandler(t) || /\$\{\s*(x|v|e|t|j|r|f)\.(id|key|name|standIn)\b/.test(t); }), [], 'static: no raw id or name inside an inline handler');
   assertEqual([rawInHandler(`onclick="go('\${x.id}')"`), rawInHandler(`onclick="go('\${esc(jsStr(x.id))}')"`)], [true, false], 'static: the handler check itself');
+  // Main builder's review, 15 Oct.
+  // A2: one time zone helper per layer (stage 1's), no zone code of the vacations' own.
+  assertEqual([/function vacation(Tz|Today|DayOf)\(/.test(script), /region\.timezone|region \? c\.region\.timezone/.test(script)], [false, false], 'review A2: no vacationTz / vacationToday / vacationDayOf, nothing reads the lowercase region.timezone');
+  // A3: employee_vacations on its own realtime channel, only when the list loaded, removed with the rest.
+  const rt = fx('setupRealtimeSubscriptions'), shared = rt.slice(0, rt.indexOf('.subscribe()'));
+  assertEqual([shared.includes('employee_vacations'), rt.includes("sb.channel('vacations-realtime')"), /if \(!VACATIONS_CHANNEL && STATE\.data && !STATE\.data\.vacationsError\)/.test(rt), fx('teardownRealtimeSubscriptions').includes('sb.removeChannel(VACATIONS_CHANNEL)')],
+    [false, true, true, true], 'review A3: vacations never join the shared channel; their own channel only when the list loaded; torn down on logout');
+  // A4: "back tomorrow" is a card in Settings → Notifications, on unless switched off, to the person and the owners.
+  const Rn = { waitMinutes: 15, from: 7, until: 19, docDays: 30, unpaidDays: 7 }, vb = sb.notifyCards({}, Rn, {}).find(c => c.id==='vacationBack');
+  assertEqual([vb.on, vb.officeOk, vb.alsoTo, vb.sub.includes('Sent between 7 am and 7 pm'), sb.notifyCards({ vacationBack: { on: false } }, Rn, {}).find(c => c.id==='vacationBack').on, sb.notifyOn(undefined, 'vacationBack')],
+    [true, false, 'The person coming back', true, false, true], 'review A4: the back-tomorrow card: on by default, the notifications\' hours, the person and the owners');
+  // A1 + Ofek 15 Oct: the payroll option promises no automatic log-out change; paid leave is a mark only.
+  const pOpt = sb.VACATION_OPTIONS.find(o => o.key==='payroll');
+  assertEqual([/log-out|logout/i.test(pOpt.help), /not changed/.test(pOpt.help), fx('payrollLeaveCard').includes('add it by hand')], [false, true, true], 'review A1 / paid leave: the payroll option is a mark only, the Leave card says to add paid leave by hand');
+  // A5: the functions log a vacations read that failed (they are fail-open).
+  const vacLog = ['push', 'automations', 'voice'].map(f => { const t = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', f, 'index.ts'), 'utf8'); return (t.match(/console\.error\("vacations not read:/g) || []).length; });
+  assertEqual(vacLog, [3, 3, 3], 'review A5: every failed vacations read is logged as "vacations not read: ..." (the table, the people, a throw)');
 }
 
 function testAutomationEventBody(sb){
@@ -3713,7 +3730,8 @@ function testAutomationsBuilder(sb){
   assertEqual([ch.on, ch.gate, ch.def.steps[0].n, ch.def.steps[1].conds[1].n, ch.notes[0].includes('one automatic text a day')], [true, 'phone', 7, 3, false], 'ready-made chat text: its switch, wait, oldest chat and one-a-day are the Website chat settings');
   assertEqual([by('ready:missedText').locked, by('ready:missedText').on], ['On whenever the business phone is on. Its own switch comes when it moves here.', false], 'ready-made missed-call text: its switch is locked (no switch of its own today)');
   const cards = sb.notifyCardsNow(), teams = R.filter(r => r.key.startsWith('ready:team:'));
-  assertEqual(teams.map(r => [r.card.id, r.on, r.card.office]), cards.map(c => [c.id, c.on, c.office]), 'ready-made team rows: one per Notifications card, on and office as there');
+  // "back tomorrow" (stage 3) has no ready-made automation: the engine has no trigger for it (their stage 2 v2 can add one)
+  assertEqual(teams.map(r => [r.card.id, r.on, r.card.office]), cards.filter(c => c.id!=='vacationBack').map(c => [c.id, c.on, c.office]), 'ready-made team rows: one per Notifications card, on and office as there');
   const lw = by('ready:team:leadWaiting').def.steps;
   assertEqual([lw[0].n, lw[1].from, lw[1].until, lw[1].outside, by('ready:team:unpaid').def.steps[0].n, by('ready:team:docExpiry').def.trigger.params.days, by('ready:team:newLead').def.steps[0].to.roles],
     [20, '07:00', '19:00', 'skip', 9, 45, ['owner', 'va', 'manager']], 'ready-made team rows: their numbers are the Notifications numbers (unpaid = Tax and payments)');

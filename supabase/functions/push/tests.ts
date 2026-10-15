@@ -285,10 +285,16 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   eq([none.body.ok, none.body.devices], [false, 0], "test: no devices = not ok, 0 devices");
 
   // ── vacations (stage 3) ──
+  // their own made-up people (neutral demo names: the repo is public)
+  const AVA = { id: "u-ava", role: "owner", full_name: "Ava", technician_name: "Ava" };
+  const BEN = { id: "u-ben", role: "owner", full_name: "Ben", technician_name: "Ben" };
+  const CAL = { id: "u-cal", role: "technician", full_name: "Cal Tech", technician_name: "Cal" };
+  const DEE = { id: "u-dee", role: "technician", full_name: "Dee", technician_name: "Dee" };
   // SYD (REGION_DEFAULTS.timeZone, Australia/Sydney) is declared with the scan tests above
   // the same days and DST edges as the app's tests (business-logic testVacations), so server and app agree
-  eq([vacDay(Date.parse("2026-10-03T14:30:00Z"), SYD), vacDay(Date.parse("2026-10-04T13:30:00Z"), SYD)], ["2026-10-04", "2026-10-05"], "vacDay: 00:30 AEST on the 4th, 00:30 AEDT on the 5th");
-  eq([vacTz(undefined), vacTz({ region: { timezone: "Mars/Base" } }), vacTz({ region: { timezone: "Australia/Perth" } })], [SYD, SYD, "Australia/Perth"], "vacTz: a real catalog zone, else Sydney");
+  // the day is the region block's (bizParts / bizTzOf on settings.catalog.region.timeZone), no zone code of its own
+  eq([bizParts(Date.parse("2026-10-03T14:30:00Z"), SYD).day, bizParts(Date.parse("2026-10-04T13:30:00Z"), SYD).day], ["2026-10-04", "2026-10-05"], "vacation days: 00:30 AEST on the 4th, 00:30 AEDT on the 5th");
+  eq([bizTzOf({ region: { timeZone: "Australia/Perth" } }), bizTzOf({ region: { timezone: "Australia/Perth" } }), bizTzOf({ region: { timeZone: "Mars/Base" } })], ["Australia/Perth", SYD, SYD], "vacation zone: region.timeZone (the old lowercase key is not read), else Sydney");
   eq([vacOpt({ options: {} }, "autoBack"), vacOpt({ options: { autoBack: "false" } }, "autoBack"), vacOpt({ options: { autoBack: false } }, "autoBack"), vacOpt({ options: { noNotify: "true" } }, "noNotify"), vacOpt({}, "noNotify")],
     [true, true, false, false, false], "vacOpt: autoBack on unless false; the rest only when true");
   const VR = (o: any = {}) => ({ id: "v1", employee_id: "e-a", starts_on: "2026-10-20", ends_on: "2026-10-24", stand_in_id: null, options: {}, ended_at: null, cancelled_at: null, reminded_at: null, ...o });
@@ -317,8 +323,8 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   eq([RC(["pa"], [VR({ employee_id: "e-as", options: { noNotify: true } })]), RC(["pm"], [VR({ employee_id: "e-m", options: { noNotify: true } })])], [["pa"], []], "recipients: matched by technician_name first, then full_name");
   eq(RC(["pa", "pa", "pm"], []), ["pa", "pm"], "recipients: nobody away → the list as it was");
   // an owner on vacation whose stand-in is a technician: money and private details never reach the technician
-  const ROLES = [{ id: "po", full_name: "Ofek", role: "owner" }, { id: "pt", full_name: "Noam Levi", role: "technician" }, { id: "pv", full_name: "Vera", role: "va" }, { id: "po2", full_name: "Dana", role: "owner" }];
-  const RE = [{ id: "e-o", name: "Ofek", status: "Active" }, { id: "e-t", name: "Noam Levi", status: "Active" }, { id: "e-v", name: "Vera", status: "Active" }, { id: "e-o2", name: "Dana", status: "Active" }];
+  const ROLES = [{ id: "po", full_name: "Ava", role: "owner" }, { id: "pt", full_name: "Ben Lee", role: "technician" }, { id: "pv", full_name: "Vera", role: "va" }, { id: "po2", full_name: "Dana", role: "owner" }];
+  const RE = [{ id: "e-o", name: "Ava", status: "Active" }, { id: "e-t", name: "Ben Lee", status: "Active" }, { id: "e-v", name: "Vera", status: "Active" }, { id: "e-o2", name: "Dana", status: "Active" }];
   const rctx = (stand: string, more: any[] = []): any => ({ day: "2026-10-21", tz: SYD, vacs: [VR({ employee_id: "e-o", options: { noNotify: true, standIn: true }, stand_in_id: stand }), ...more], employees: RE, profiles: ROLES });
   eq([vacRecipients(["po"], rctx("e-t"), ["owner"]), vacRecipients(["po"], rctx("e-t"), ["owner", "va", "manager"]), vacRecipients(["po"], rctx("e-t"))], [[], [], ["pt"]],
     "recipients: an owner's technician stand-in gets no owners-only kind (unpaid, documents, invoices), nor an office kind; any role when roles aren't given");
@@ -332,125 +338,149 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   console.error = (...a: any[]) => { logged += a.map(String).join(" "); };
   const errQ: any = { select: () => errQ, is: () => errQ, lte: () => errQ, or: () => errQ, then: (ok: any) => ok({ data: null, error: { message: "relation \"employee_vacations\" does not exist" } }) };
   const errDb = { from: () => errQ };
-  const c1 = await vacContext(fakeDb({}), NOW, {}), c2 = await vacContext(errDb, NOW, {}), c3 = await vacContext({ from: () => { throw new Error("boom"); } }, NOW, {});
+  const c1 = await vacContext(fakeDb({}), NOW, SYD), c2 = await vacContext(errDb, NOW, SYD), c3 = await vacContext({ from: () => { throw new Error("boom"); } }, NOW, SYD);
   console.error = quiet;
   eq([c1.vacs.length, c2.vacs.length, c3.vacs.length, c1.day, c3.tz], [0, 0, 0, "2026-10-12", SYD], "vacContext: no table, an error, a throw → nobody away");
-  eq([logged.includes("vacations not read"), vacRecipients(["u-ofek", "u-noam"], c3)], [true, ["u-ofek", "u-noam"]], "vacContext: a throw is logged and every recipient stays");
+  eq([logged.includes("vacations not read: employee_vacations: relation \"employee_vacations\" does not exist"), logged.includes("vacations not read: boom"), vacRecipients(["u-ava", "u-ben"], c3)], [true, true, ["u-ava", "u-ben"]], "vacContext: an error and a throw are logged (\"vacations not read: ...\") and every recipient stays");
+  logged = ""; console.error = (...a: any[]) => { logged += a.map(String).join(" "); };
+  const empErr = fakeDb({ employee_vacations: [VR({ starts_on: "2026-10-10", ends_on: "2026-10-14" })] });
+  const empQ: any = { select: () => empQ, then: (ok: any) => ok({ data: null, error: { message: "permission denied for table employees" } }) };
+  const c6 = await vacContext({ from: (t: string) => t === "employees" ? empQ : empErr.from(t) }, NOW, SYD);
+  console.error = quiet;
+  eq([c6.vacs.length, logged.includes("vacations not read: employees: permission denied")], [0, true], "vacContext: the people can't be read → nobody away, and the log says which table");
   // NOW is 12 Oct: only what can be in force today is read (an old vacation that ended on its own never again)
   const vcdb = fakeDb({ employee_vacations: [VR({ id: "v1", starts_on: "2026-10-10", ended_at: "2026-10-11T00:00:00Z" }), VR({ id: "v2", starts_on: "2026-10-10", ends_on: "2026-10-12" }),
     VR({ id: "old", starts_on: "2026-09-01", ends_on: "2026-09-05" }), VR({ id: "open", starts_on: "2026-09-01", ends_on: "2026-09-05", options: { autoBack: false } }), VR({ id: "later", starts_on: "2026-10-13", ends_on: "2026-10-14" })], employees: EMPS, profiles: PROFS });
-  const c4 = await vacContext(vcdb, NOW, {});
+  const c4 = await vacContext(vcdb, NOW, SYD);
   eq([c4.vacs.map((v: any) => v.id), c4.employees.length, c4.profiles.length], [["v2", "open"], 5, 5], "vacContext: in force today (ended, over, not started yet → not read), then the people");
-  eq((await vacContext(vcdb, NOW, {}, 3)).vacs.map((v: any) => v.id), ["v2", "open", "later"], "vacContext: aheadDays also reads the ones starting by then");
-  const c5 = await vacContext(fakeDb({ employee_vacations: [VR({ id: "old", starts_on: "2026-09-01", ends_on: "2026-09-05" })], employees: EMPS, profiles: PROFS }), NOW, {});
+  eq((await vacContext(vcdb, NOW, SYD, 3)).vacs.map((v: any) => v.id), ["v2", "open", "later"], "vacContext: aheadDays also reads the ones starting by then");
+  const c5 = await vacContext(fakeDb({ employee_vacations: [VR({ id: "old", starts_on: "2026-09-01", ends_on: "2026-09-05" })], employees: EMPS, profiles: PROFS }), NOW, SYD);
   eq([c5.vacs.length, c5.employees.length], [0, 0], "vacContext: only past vacations → nobody away, the people aren't read");
 
-  // scan + invoice with an owner on vacation (No notifications + stand-in Noam)
-  const away = (from: string, to: string) => ({ id: "v-ofek", employee_id: "e-ofek", starts_on: from, ends_on: to, stand_in_id: "e-noam", options: { noNotify: true, standIn: true }, ended_at: null, cancelled_at: null });
-  const today = vacDay(Date.now(), SYD);
+  // scan + invoice with an owner on vacation (No notifications + stand-in Ben)
+  const away = (from: string, to: string) => ({ id: "v-ava", employee_id: "e-ava", starts_on: from, ends_on: to, stand_in_id: "e-ben", options: { noNotify: true, standIn: true }, ended_at: null, cancelled_at: null });
+  const today = bizParts(Date.now(), SYD).day;
   const vdb = fakeDb({
-    profiles: [OFEK, NOAM, { id: "u-ron", role: "va", full_name: "Ron" }],
+    profiles: [AVA, BEN, { id: "u-eve", role: "va", full_name: "Eve" }],
     push_subscriptions: [
-      { id: "p1", user_id: "u-ofek", endpoint: "https://push/ofek", p256dh: "k", auth: "a" }, { id: "p2", user_id: "u-noam", endpoint: "https://push/noam", p256dh: "k", auth: "a" },
-      { id: "p3", user_id: "u-ron", endpoint: "https://push/ron", p256dh: "k", auth: "a" },
+      { id: "p1", user_id: "u-ava", endpoint: "https://push/ava", p256dh: "k", auth: "a" }, { id: "p2", user_id: "u-ben", endpoint: "https://push/ben", p256dh: "k", auth: "a" },
+      { id: "p3", user_id: "u-eve", endpoint: "https://push/eve", p256dh: "k", auth: "a" },
     ],
     settings: [{ id: 1, catalog: { notify: { newLead: { on: true, office: true } } } }],
     contacts: [{ id: "c1", full_name: "Sam New", division: "Aircon", source: "Google Ads", status: "New", created_at: "2026-10-12", messages: [{ at: "2026-10-12T03:00:00Z" }], tags: [] }],
-    employees: [{ id: "e-ofek", name: "Ofek", status: "Active" }, { id: "e-noam", name: "Noam", status: "Active" }],
+    employees: [{ id: "e-ava", name: "Ava", status: "Active" }, { id: "e-ben", name: "Ben", status: "Active" }],
     employee_vacations: [away("2026-10-11", "2026-10-14")], push_sent: [],
-    payroll_weeks: [{ week_start: "2026-10-04", person: "Guy", salary_invoice_file: "sb:payroll/x.pdf" }],
+    payroll_weeks: [{ week_start: "2026-10-04", person: "Cal", salary_invoice_file: "sb:payroll/x.pdf" }],
   });
   sent.length = 0;
   await scan(vdb, NOW);
-  eq(sent.map((x) => `${x.to.replace("https://push/", "")}:${x.msg.title}`).sort(), ["noam:New lead: Sam New", "ron:New lead: Sam New"], "scan: Ofek away → his stand-in Noam once (not twice), the office still gets it");
+  eq(sent.map((x) => `${x.to.replace("https://push/", "")}:${x.msg.title}`).sort(), ["ben:New lead: Sam New", "eve:New lead: Sam New"], "scan: Ava away → his stand-in Ben once (not twice), the office still gets it");
   vdb.T.employee_vacations = [away(shiftDay(today, -1), shiftDay(today, 2))];
   sent.length = 0;
-  await handle(vdb, { step: "invoice", week: "2026-10-04", person: "Guy" }, OFEK);
-  eq(sent.map((x) => x.to), ["https://push/noam"], "invoice: to Noam, not Ofek who is away");
+  await handle(vdb, { step: "invoice", week: "2026-10-04", person: "Cal" }, AVA);
+  eq(sent.map((x) => x.to), ["https://push/ben"], "invoice: to Ben, not Ava who is away");
   // the stand-in is a technician: no invoice, no unpaid job, no new lead (the office still gets that one)
   const tdb2 = fakeDb({
-    profiles: [OFEK, GUY, { id: "u-ron", role: "va", full_name: "Ron" }],
-    push_subscriptions: ["ofek", "guy", "ron"].map((n, i) => ({ id: "t" + i, user_id: "u-" + n, endpoint: "https://push/" + n, p256dh: "k", auth: "a" })),
+    profiles: [AVA, CAL, { id: "u-eve", role: "va", full_name: "Eve" }],
+    push_subscriptions: ["ava", "cal", "eve"].map((n, i) => ({ id: "t" + i, user_id: "u-" + n, endpoint: "https://push/" + n, p256dh: "k", auth: "a" })),
     settings: [{ id: 1, catalog: { notify: { newLead: { on: true, office: true }, unpaid: { on: true } } } }],
     contacts: [{ id: "c1", full_name: "Sam New", division: "Aircon", source: "Google Ads", status: "New", created_at: "2026-10-12", messages: [{ at: "2026-10-12T03:00:00Z" }], tags: [] }],
     jobs: [{ id: "j1", customer_name: "Rich Client", amount: 1250, date: shiftDay("2026-10-12", -7), payment_status: "Unpaid" }],
-    employees: [{ id: "e-ofek", name: "Ofek", status: "Active" }, { id: "e-guy", name: "Guy", status: "Active" }],
-    employee_vacations: [{ ...away("2026-10-11", "2026-10-14"), stand_in_id: "e-guy" }], push_sent: [],
-    payroll_weeks: [{ week_start: "2026-10-04", person: "Dolev", salary_invoice_file: "sb:payroll/x.pdf" }],
+    employees: [{ id: "e-ava", name: "Ava", status: "Active" }, { id: "e-cal", name: "Cal", status: "Active" }],
+    employee_vacations: [{ ...away("2026-10-11", "2026-10-14"), stand_in_id: "e-cal" }], push_sent: [],
+    payroll_weeks: [{ week_start: "2026-10-04", person: "Dee", salary_invoice_file: "sb:payroll/x.pdf" }],
   });
   sent.length = 0;
   await scan(tdb2, NOW);
-  eq(sent.map((x) => `${x.to.replace("https://push/", "")}:${x.msg.title.split(":")[0]}`).sort(), ["ron:New lead"], "scan: an owner's technician stand-in gets neither the unpaid job nor the new lead; the office gets the lead");
-  tdb2.T.employee_vacations = [{ ...away(shiftDay(today, -1), shiftDay(today, 2)), stand_in_id: "e-guy" }];
+  eq(sent.map((x) => `${x.to.replace("https://push/", "")}:${x.msg.title.split(":")[0]}`).sort(), ["eve:New lead"], "scan: an owner's technician stand-in gets neither the unpaid job nor the new lead; the office gets the lead");
+  tdb2.T.employee_vacations = [{ ...away(shiftDay(today, -1), shiftDay(today, 2)), stand_in_id: "e-cal" }];
   sent.length = 0;
-  await handle(tdb2, { step: "invoice", week: "2026-10-04", person: "Dolev" }, OFEK);
+  await handle(tdb2, { step: "invoice", week: "2026-10-04", person: "Dee" }, AVA);
   eq(sent.length, 0, "invoice: never to an owner's technician stand-in");
   sent.length = 0;
-  await handle(vdb, { step: "test" }, OFEK);
-  eq(sent.map((x) => x.to), ["https://push/ofek"], "test: still the caller's own device while on vacation");
+  await handle(vdb, { step: "test" }, AVA);
+  eq(sent.map((x) => x.to), ["https://push/ava"], "test: still the caller's own device while on vacation");
   vdb.T.employee_vacations = [];
   sent.length = 0;
-  await handle(vdb, { step: "invoice", week: "2026-10-04", person: "Guy" }, OFEK);
-  eq(sent.map((x) => x.to), ["https://push/ofek", "https://push/noam"], "invoice: no vacations → both owners, as before");
+  await handle(vdb, { step: "invoice", week: "2026-10-04", person: "Cal" }, AVA);
+  eq(sent.map((x) => x.to), ["https://push/ava", "https://push/ben"], "invoice: no vacations → both owners, as before");
 
   // the day before someone is back
   const BACK_9 = Date.parse("2026-10-23T22:00:00Z"), BACK_0730 = Date.parse("2026-10-23T20:30:00Z");   // Saturday 24 Oct 09:00 / 07:30 Sydney
-  const GUYV = (o: any = {}) => ({ id: "v-guy", employee_id: "e-guy", starts_on: "2026-10-20", ends_on: "2026-10-24", stand_in_id: null, options: { remind: true, noNotify: true }, ended_at: null, cancelled_at: null, reminded_at: null, ...o });
+  const CALV = (o: any = {}) => ({ id: "v-cal", employee_id: "e-cal", starts_on: "2026-10-20", ends_on: "2026-10-24", stand_in_id: null, options: { remind: true, noNotify: true }, ended_at: null, cancelled_at: null, reminded_at: null, ...o });
   const backDb = (vacs: any[], catalog: any = {}) => fakeDb({
-    profiles: [OFEK, NOAM, GUY, DOLEV],
-    push_subscriptions: ["ofek", "noam", "guy", "dolev"].map((n, i) => ({ id: "b" + i, user_id: "u-" + n, endpoint: "https://push/" + n, p256dh: "k", auth: "a" })),
+    profiles: [AVA, BEN, CAL, DEE],
+    push_subscriptions: ["ava", "ben", "cal", "dee"].map((n, i) => ({ id: "b" + i, user_id: "u-" + n, endpoint: "https://push/" + n, p256dh: "k", auth: "a" })),
     settings: [{ id: 1, catalog }],
-    employees: [{ id: "e-guy", name: "Guy", status: "Active" }, { id: "e-ofek", name: "Ofek", status: "Active" }, { id: "e-noam", name: "Noam", status: "Active" }, { id: "e-dolev", name: "Dolev", status: "Active" }],
+    employees: [{ id: "e-cal", name: "Cal", status: "Active" }, { id: "e-ava", name: "Ava", status: "Active" }, { id: "e-ben", name: "Ben", status: "Active" }, { id: "e-dee", name: "Dee", status: "Active" }],
     employee_vacations: vacs, push_sent: [],
     tasks: [
-      { id: "t1", status: "Not Started", assignees: ["Guy"], assigned_to: "Guy", contact_id: "c1" }, { id: "t2", status: "In Progress", assignees: ["Guy", "Noam"], assigned_to: "Guy", contact_id: "c1" },
-      { id: "t3", status: "Done", assignees: ["Guy"], assigned_to: "Guy", contact_id: "c2" }, { id: "t4", status: "Not Started", assignees: ["Noam"], assigned_to: "Noam", contact_id: "c3" },
+      { id: "t1", status: "Not Started", assignees: ["Cal"], assigned_to: "Cal", contact_id: "c1" }, { id: "t2", status: "In Progress", assignees: ["Cal", "Ben"], assigned_to: "Cal", contact_id: "c1" },
+      { id: "t3", status: "Done", assignees: ["Cal"], assigned_to: "Cal", contact_id: "c2" }, { id: "t4", status: "Not Started", assignees: ["Ben"], assigned_to: "Ben", contact_id: "c3" },
     ],
-    jobs: [{ id: "j1", technician: "Guy", date: "2026-10-26" }, { id: "j2", technician: "Guy", date: "2026-11-05" }, { id: "j3", technician: "Noam", date: "2026-10-26" }, { id: "j4", technician: "Guy", date: "2026-10-22" }],
+    jobs: [{ id: "j1", technician: "Cal", date: "2026-10-26" }, { id: "j2", technician: "Cal", date: "2026-11-05" }, { id: "j3", technician: "Ben", date: "2026-10-26" }, { id: "j4", technician: "Cal", date: "2026-10-22" }],
   });
   const msgs = () => sent.map((x) => `${x.to.replace("https://push/", "")}:${x.msg.title}|${x.msg.body}`).sort();
-  const bdb2 = backDb([GUYV()]);
+  const bdb2 = backDb([CALV()]);
   sent.length = 0;
   eq((await scan(bdb2, BACK_0730)).off, true, "back tomorrow: 07:30 is before the morning hour → nothing (and off, nothing else is on)");
   eq(sent.length, 0, "back tomorrow: nothing at 07:30");
   const rb = await scan(bdb2, BACK_9);
   eq(msgs(), [
-    "guy:You're back tomorrow|Waiting for you: 2 open tasks, 1 job in the first week back and 1 lead.",
-    "noam:Guy is back tomorrow|Waiting for them: 2 open tasks, 1 job in the first week back and 1 lead.",
-    "ofek:Guy is back tomorrow|Waiting for them: 2 open tasks, 1 job in the first week back and 1 lead.",
-  ], "back tomorrow: to Guy (even with No notifications) and the owners, with what is waiting");
-  eq([rb.off, sent.find((x) => x.to.endsWith("/guy"))?.msg.url, sent.find((x) => x.to.endsWith("/ofek"))?.msg.url, sent[0].msg.tag], [undefined, APP_URL + "?tab=tasks", APP_URL + "?tab=settings&page=people", "vacback-v-guy"], "back tomorrow: runs with every notification off; where it opens");
-  eq([bdb2.T.push_sent.some((r: any) => r.key === "vacback:v-guy:2026-10-24"), typeof bdb2.T.employee_vacations[0].reminded_at], [true, "string"], "back tomorrow: recorded once (push_sent) and reminded_at set");
+    "ava:Cal is back tomorrow|Waiting for them: 2 open tasks, 1 job in the first week back and 1 lead.",
+    "ben:Cal is back tomorrow|Waiting for them: 2 open tasks, 1 job in the first week back and 1 lead.",
+    "cal:You're back tomorrow|Waiting for you: 2 open tasks, 1 job in the first week back and 1 lead.",
+  ], "back tomorrow: to Cal (even with No notifications) and the owners, with what is waiting");
+  eq([rb.off, sent.find((x) => x.to.endsWith("/cal"))?.msg.url, sent.find((x) => x.to.endsWith("/ava"))?.msg.url, sent[0].msg.tag], [undefined, APP_URL + "?tab=tasks", APP_URL + "?tab=settings&page=people", "vacback-v-cal"], "back tomorrow: runs with every notification off; where it opens");
+  eq([bdb2.T.push_sent.some((r: any) => r.key === "vacback:v-cal:2026-10-24"), typeof bdb2.T.employee_vacations[0].reminded_at], [true, "string"], "back tomorrow: recorded once (push_sent) and reminded_at set");
   sent.length = 0;
   await scan(bdb2, BACK_9 + 9 * 60000);
   eq(sent.length, 0, "back tomorrow: the next scan sends nothing again");
   for (const [o, name] of [[{ options: { noNotify: true } }, "remind unticked"], [{ cancelled_at: "2026-10-19T00:00:00Z" }, "cancelled"], [{ ended_at: "2026-10-22T01:00:00Z" }, "ended"], [{ ends_on: "2026-10-25" }, "not the last day yet"],
     [{ options: { remind: true, noNotify: true, autoBack: false } }, "autoBack off (not back tomorrow: it goes on until someone ends it)"]] as [any, string][]) {
     sent.length = 0;
-    await scan(backDb([GUYV(o)]), BACK_9);
+    await scan(backDb([CALV(o)]), BACK_9);
     eq(sent.length, 0, `back tomorrow: ${name} → nothing`);
   }
   sent.length = 0;
-  await scan(backDb([GUYV(), { id: "v-ofek", employee_id: "e-ofek", starts_on: "2026-10-23", ends_on: "2026-10-30", stand_in_id: "e-dolev", options: { noNotify: true, standIn: true }, ended_at: null, cancelled_at: null }]), BACK_9);
-  eq(sent.map((x) => x.to.replace("https://push/", "")).sort(), ["guy", "noam"], "back tomorrow: an owner away is skipped; their technician stand-in never gets the owners' copy");
+  await scan(backDb([CALV(), { id: "v-ava", employee_id: "e-ava", starts_on: "2026-10-23", ends_on: "2026-10-30", stand_in_id: "e-dee", options: { noNotify: true, standIn: true }, ended_at: null, cancelled_at: null }]), BACK_9);
+  eq(sent.map((x) => x.to.replace("https://push/", "")).sort(), ["ben", "cal"], "back tomorrow: an owner away is skipped; their technician stand-in never gets the owners' copy");
   sent.length = 0;
   eq((await scan(backDb([]), BACK_9)).off, true, "back tomorrow: everything off and nobody away → still off");
   // more than 1000 tasks (PostgREST's cap): the open ones are read page by page, the Done ones not at all
-  const many = backDb([GUYV()]);
-  many.T.tasks = [...Array.from({ length: 1500 }, (_, i) => ({ id: "d" + i, status: "Done", assignees: ["Guy"], assigned_to: "Guy" })), ...Array.from({ length: 1100 }, (_, i) => ({ id: "n" + i, status: "Not Started", assignees: ["Noam"], assigned_to: "Noam" })),
-    { id: "g1", status: "Not Started", assignees: ["Guy"], assigned_to: "Guy", contact_id: null }, { id: "g2", status: null, assignees: ["Guy"], assigned_to: "Guy", contact_id: null }];
+  const many = backDb([CALV()]);
+  many.T.tasks = [...Array.from({ length: 1500 }, (_, i) => ({ id: "d" + i, status: "Done", assignees: ["Cal"], assigned_to: "Cal" })), ...Array.from({ length: 1100 }, (_, i) => ({ id: "n" + i, status: "Not Started", assignees: ["Ben"], assigned_to: "Ben" })),
+    { id: "g1", status: "Not Started", assignees: ["Cal"], assigned_to: "Cal", contact_id: null }, { id: "g2", status: null, assignees: ["Cal"], assigned_to: "Cal", contact_id: null }];
   sent.length = 0;
   await scan(many, BACK_9);
-  eq(sent.find((x) => x.to.endsWith("/guy"))?.msg.body, "Waiting for you: 2 open tasks and 1 job in the first week back.", "back tomorrow: open tasks past the first 1000 rows still count");
+  eq(sent.find((x) => x.to.endsWith("/cal"))?.msg.body, "Waiting for you: 2 open tasks and 1 job in the first week back.", "back tomorrow: open tasks past the first 1000 rows still count");
   eq((await vacOpenTasks(many)).length, 1102, "vacOpenTasks: every open task (no status counts as open), over two pages");
   // the summary itself
-  const W = (t: any[], j: any[]) => vacWaiting("Guy", "2026-10-25", t, j);
-  const w1 = W([{ status: "Done", assignees: ["Guy"] }, { status: "Not Started", assigned_to: "Guy", contact_id: "c1" }, { status: "Not Started", assignees: [], assigned_to: "Guy" }, { status: "Not Started", assignees: ["Guy"], contact_id: null }],
-    [{ technician: "Guy", date: "2026-10-25" }, { technician: "Guy", date: "2026-10-31" }, { technician: "Guy", date: "2026-11-01" }, { technician: "Noam", date: "2026-10-26" }, { technician: "Guy", date: "2026-10-24" }]);
+  const W = (t: any[], j: any[]) => vacWaiting("Cal", "2026-10-25", t, j);
+  const w1 = W([{ status: "Done", assignees: ["Cal"] }, { status: "Not Started", assigned_to: "Cal", contact_id: "c1" }, { status: "Not Started", assignees: [], assigned_to: "Cal" }, { status: "Not Started", assignees: ["Cal"], contact_id: null }],
+    [{ technician: "Cal", date: "2026-10-25" }, { technician: "Cal", date: "2026-10-31" }, { technician: "Cal", date: "2026-11-01" }, { technician: "Ben", date: "2026-10-26" }, { technician: "Cal", date: "2026-10-24" }]);
   eq([w1.tasks.length, w1.jobs.length, w1.leads], [2, 2, 1], "vacWaiting: Done not counted, assigned_to only without an array, jobs from the return day to 6 days after, leads = distinct cards");
   eq([vacWaitingText({ tasks: [1], jobs: [], leads: 0 } as any), vacWaitingText({ tasks: [], jobs: [1, 2], leads: 3 } as any), vacWaitingText({ tasks: [1, 2, 3], jobs: [1, 2], leads: 1 } as any), vacWaitingText({ tasks: [], jobs: [], leads: 0 })],
     ["1 open task", "2 jobs in the first week back and 3 leads", "3 open tasks, 2 jobs in the first week back and 1 lead", "nothing yet"], "vacWaitingText: singular / plural, empty parts dropped");
-  eq([zoneHour(BACK_9, SYD), zoneHour(BACK_0730, SYD), zoneHour(BACK_9, "Australia/Perth")], [9, 7, 6], "zoneHour: the hour in the business zone");
+  eq([bizParts(BACK_9, SYD).hour, bizParts(BACK_0730, SYD).hour, bizParts(BACK_9, "Australia/Perth").hour], [9, 7, 6], "back tomorrow: the hour in the business zone");
+  // its own switch (Settings → Notifications, on unless switched off) and the notifications' hours (review A4)
+  eq([notifyOn({}, "vacationBack"), notifyOn({ vacationBack: { on: false } }, "vacationBack"), notifyOn({ vacationBack: { on: true } }, "vacationBack"), NOTIFY_KINDS.includes("vacationBack")], [true, false, true, true], "notifyOn: back tomorrow is on unless switched off");
+  sent.length = 0;
+  eq([(await scan(backDb([CALV()], { notify: { vacationBack: { on: false } } }), BACK_9)).off, sent.length], [true, 0], "back tomorrow: switched off → nothing, and nothing is read");
+  sent.length = 0;
+  await scan(backDb([CALV()], { notify: { rules: { from: 6, until: 9 } } }), BACK_9);
+  eq(sent.length, 0, "back tomorrow: 09:00 is past the hours (6 am to 9 am) → nothing (quiet hours)");
+  sent.length = 0;
+  await scan(backDb([CALV()], { notify: { rules: { from: 6, until: 10 } } }), BACK_9);
+  eq(sent.length, 3, "back tomorrow: inside the hours → sent");
+  // the business's zone (region.timeZone): 09:00 Sydney is 06:00 in Perth, before the morning hour; 09:00 Perth is the time
+  sent.length = 0;
+  await scan(backDb([CALV()], { region: { timeZone: "Australia/Perth" } }), BACK_9);
+  eq(sent.length, 0, "back tomorrow: Perth business, 06:00 there → nothing yet");
+  await scan(backDb([CALV()], { region: { timeZone: "Australia/Perth" } }), BACK_9 + 3 * 3600e3);
+  eq(sent.length, 3, "back tomorrow: Perth business, 09:00 there → sent");
+  const tvb = testPayload("vacationBack", notifyRules({}, 7), "2026-10-23");
+  eq([tvb && tvb.title, tvb && tvb.tag], ["Test · Sample Employee is back tomorrow", "test-vacationBack"], "test: the back-tomorrow card has a test with made-up data");
 
   console.log(`push: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);
