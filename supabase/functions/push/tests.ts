@@ -285,7 +285,7 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   eq([none.body.ok, none.body.devices], [false, 0], "test: no devices = not ok, 0 devices");
 
   // ── vacations (stage 3) ──
-  const SYD = "Australia/Sydney";
+  // SYD (REGION_DEFAULTS.timeZone, Australia/Sydney) is declared with the scan tests above
   // the same days and DST edges as the app's tests (business-logic testVacations), so server and app agree
   eq([vacDay(Date.parse("2026-10-03T14:30:00Z"), SYD), vacDay(Date.parse("2026-10-04T13:30:00Z"), SYD)], ["2026-10-04", "2026-10-05"], "vacDay: 00:30 AEST on the 4th, 00:30 AEDT on the 5th");
   eq([vacTz(undefined), vacTz({ region: { timezone: "Mars/Base" } }), vacTz({ region: { timezone: "Australia/Perth" } })], [SYD, SYD, "Australia/Perth"], "vacTz: a real catalog zone, else Sydney");
@@ -337,11 +337,11 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   eq([c1.vacs.length, c2.vacs.length, c3.vacs.length, c1.day, c3.tz], [0, 0, 0, "2026-10-12", SYD], "vacContext: no table, an error, a throw → nobody away");
   eq([logged.includes("vacations not read"), vacRecipients(["u-ofek", "u-noam"], c3)], [true, ["u-ofek", "u-noam"]], "vacContext: a throw is logged and every recipient stays");
   // NOW is 12 Oct: only what can be in force today is read (an old vacation that ended on its own never again)
-  const cdb = fakeDb({ employee_vacations: [VR({ id: "v1", starts_on: "2026-10-10", ended_at: "2026-10-11T00:00:00Z" }), VR({ id: "v2", starts_on: "2026-10-10", ends_on: "2026-10-12" }),
+  const vcdb = fakeDb({ employee_vacations: [VR({ id: "v1", starts_on: "2026-10-10", ended_at: "2026-10-11T00:00:00Z" }), VR({ id: "v2", starts_on: "2026-10-10", ends_on: "2026-10-12" }),
     VR({ id: "old", starts_on: "2026-09-01", ends_on: "2026-09-05" }), VR({ id: "open", starts_on: "2026-09-01", ends_on: "2026-09-05", options: { autoBack: false } }), VR({ id: "later", starts_on: "2026-10-13", ends_on: "2026-10-14" })], employees: EMPS, profiles: PROFS });
-  const c4 = await vacContext(cdb, NOW, {});
+  const c4 = await vacContext(vcdb, NOW, {});
   eq([c4.vacs.map((v: any) => v.id), c4.employees.length, c4.profiles.length], [["v2", "open"], 5, 5], "vacContext: in force today (ended, over, not started yet → not read), then the people");
-  eq((await vacContext(cdb, NOW, {}, 3)).vacs.map((v: any) => v.id), ["v2", "open", "later"], "vacContext: aheadDays also reads the ones starting by then");
+  eq((await vacContext(vcdb, NOW, {}, 3)).vacs.map((v: any) => v.id), ["v2", "open", "later"], "vacContext: aheadDays also reads the ones starting by then");
   const c5 = await vacContext(fakeDb({ employee_vacations: [VR({ id: "old", starts_on: "2026-09-01", ends_on: "2026-09-05" })], employees: EMPS, profiles: PROFS }), NOW, {});
   eq([c5.vacs.length, c5.employees.length], [0, 0], "vacContext: only past vacations → nobody away, the people aren't read");
 
