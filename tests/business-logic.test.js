@@ -4768,6 +4768,42 @@ function testNavStep3(sb){
   H6.pop(2);
   assertEqual([H6.ui.tab, H6.ui.jobs.selectedId, H6.log.restored - r6, H6.log.renders, H6.hist.entries[2].u, H6.hist.entries[2].d, H6.hist.entries[2].job, n6.NAV_HIST.d],
     ['dashboard', null, 0, 1, 'p2', 0, null, 0], 'back onto the other person\'s job entry: this person\'s home page, no restorer, no job id, the entry made theirs');
+  // Ofek review round: on a touch screen, sign out and in as someone else; back, back leaves past their entries (never home
+  // again, no redraw); a jump onto one of theirs lands home with the guard under it again, the field being typed in saved first
+  const HL1 = navHistSandbox(script), nl1 = HL1.nav;
+  HL1.flags.env = { coarse: true }; HL1.ui.tab = 'crm'; nl1.navInit(); HL1.ui.tab = 'jobs'; nl1.navPush({ kind: 'tab' }); HL1.ui.jobs.selectedId = 'j1'; nl1.navPush({ kind: 'panel' });
+  nl1.navForget(); HL1.ctx.STATE.currentProfileId = 'p2'; HL1.flags.profile = { id: 'p2', role: 'manager' }; HL1.ui.tab = 'dashboard'; HL1.ui.jobs.selectedId = null;
+  nl1.navAfterRender({});
+  assertEqual([HL1.hist.entries.map(e => [e.u, e.d, e.g || 0]), HL1.hist.idx], [[['p1', -1, 1], ['p1', 0, 0], ['p1', 1, 0], ['p2', -1, 1], ['p2', 0, 0]], 4], 'the next login on a touch screen: its guard sits on the entries of the one before');
+  HL1.log.renders = 0; HL1.pop(3); const bl1 = HL1.log.back;
+  HL1.pop(2); const step1 = HL1.log.back - bl1; HL1.pop(1); HL1.pop(0);
+  assertEqual([HL1.log.toasts, step1, HL1.log.back - bl1, HL1.log.renders, HL1.ui.tab, HL1.log.replace > 0 && HL1.hist.entries[2].u], [['Press back again to leave'], 1, 3, 0, 'dashboard', 'p1'],
+    'back, back: the second back goes on out past their entries one at a time, never their home page again, no redraw');
+  const HL2 = navHistSandbox(script), nl2 = HL2.nav;
+  HL2.flags.env = { coarse: true }; HL2.ui.tab = 'crm'; nl2.navInit(); HL2.ui.tab = 'jobs'; nl2.navPush({ kind: 'tab' });
+  nl2.navForget(); HL2.ctx.STATE.currentProfileId = 'p2'; HL2.flags.profile = { id: 'p2', role: 'manager' }; HL2.ui.tab = 'dashboard';
+  nl2.navAfterRender({}); HL2.ui.tab = 'tasks';
+  let blurL2 = []; HL2.ctx.document.activeElement = { matches: () => true, blur(){ blurL2.push(nl2.NAV_HIST.hold); HL2.ctx.document.activeElement = null; nl2.render(); } };
+  HL2.log.renders = 0; HL2.pop(1);
+  assertEqual([blurL2, HL2.log.renders, HL2.ui.tab, HL2.hist.entries.map(e => [e.u, e.d, e.g || 0, e.gd || 0]), HL2.hist.idx], [[true], 1, 'dashboard', [['p1', -1, 1, 0], ['p2', -1, 1, 0], ['p2', 0, 0, 1]], 2],
+    'a jump onto their entry: the field saves first (held), one render, home, and the leave guard under it again');
+  HL2.pop(1); const bl2 = HL2.log.back; HL2.pop(0);
+  assertEqual([HL2.log.toasts, HL2.log.back - bl2], [['Press back again to leave'], 1], 'so back says "Press back again", and the next one leaves');
+
+  // a forward step onto a window's entry with nothing open goes back off it: the next back is never a dead one
+  const HL3 = navHistSandbox(script), nl3 = HL3.nav;
+  HL3.ui.tab = 'jobs'; nl3.navInit(); HL3.modal(true); nl3.navOverlaySync(); HL3.modal(false);
+  HL3.pop(0); HL3.runTimers(); const bl3 = HL3.log.back;
+  HL3.pop(1); HL3.runTimers();
+  assertEqual([HL3.hist.entries[1].ov, HL3.log.back - bl3, nl3.NAV_HIST.syncBack], [1, 1, true], 'forward onto a window\'s entry, nothing open: back off it at once');
+  HL3.pop(0);
+  assertEqual([nl3.NAV_HIST.syncBack, nl3.NAV_HIST.d, HL3.log.renders], [false, 0, 0], 'its popstate is ours: the screen stays');
+  // a leaver that draws its question through render(): drawn once, though the back waits for the answer
+  const HL4 = navHistSandbox(script), nl4 = HL4.nav;
+  HL4.ui.tab = 'jobs'; nl4.navInit(); nl4.navPush({ kind: 'k', x: { id: 1 } });
+  nl4.NAV_LEAVERS.k = () => { nl4.render(); nl4.render(); return new Promise(() => {}); };
+  HL4.log.renders = 0; HL4.log.go = []; HL4.pop(0);
+  assertEqual([HL4.log.renders, HL4.log.go], [1, [1]], 'a leaver that asks through render(): its question is drawn (once), the history stays');
 
   // the swipe, with a fake touch sequence (the installed app)
   const H7 = navHistSandbox(script), n7 = H7.nav, tg = { nodeType: 1, parentElement: null, closest: () => null };

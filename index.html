@@ -5612,6 +5612,7 @@ function toggleMobileNav(){ UI.mobileNavOpen = !UI.mobileNavOpen; render(); }
      tidy up a screen drawn outside UI and go on, or say no and change nothing: false stays; a Promise (Unsaved changes →
      Save / Discard / Cancel) stays for now and resolves true to go on (the same back is made again, the leaver is not asked
      twice) or false to stay. Resolve it once, and don't navigate from Save yourself. Any other return value goes on.
+     render() is held while it runs and drawn once after it (also when it says no or asks), so its question may use it.
    - Layers (anything back closes before it moves): navLayer({ id, z, isOpen(), close(), sticky?, entry?, el?, stay? }).
      Back closes the top open layer (highest z) first; close() returning false means it asked first and stays until
      answered. A sticky layer (sticky: true or a function; data-nav-sticky on the element; openPopup(html, { sticky: true,
@@ -5700,8 +5701,8 @@ function isBackSwipe(start, end, ctx){
 // history.go() still to come. syncBack: our own back whose screen is already right (a window closed in the app, a panel its
 // answer closed, a reload). pops: popstates seen. redo: the last back a guard may make again (navRedo); leaveOk: the
 // entry whose leaver already said yes to it. backPending: a close control's back is on its way (bpT clears it if no
-// popstate comes). leaveT: the leave guard's timer. swipeTf: the swipe moved the page with a transform.
-const NAV_HIST = { ready: false, pid: null, d: 0, cur: null, restoring: false, hold: false, held: false, skip: 0, pops: 0, syncBack: false, swipeIn: false, swipeTf: false, mo: null, redo: null, leaveOk: null, backPending: false, leaveT: 0, bpT: 0 };
+// popstate comes). leaveT: the leave guard's timer. outT: leaving past someone else's entries until then. swipeTf: the swipe moved the page with a transform.
+const NAV_HIST = { ready: false, pid: null, d: 0, cur: null, restoring: false, hold: false, held: false, skip: 0, pops: 0, syncBack: false, swipeIn: false, swipeTf: false, mo: null, redo: null, leaveOk: null, backPending: false, leaveT: 0, bpT: 0, outT: 0 };
 const NAV_RESTORERS = {};
 const NAV_LEAVERS = {};
 const NAV_BASE_KINDS = ['tab', 'settings', 'connector', 'panel'];
@@ -5849,12 +5850,13 @@ function navLandHome(){
   NAV_HIST.d = 0;
   NAV_HIST.cur = { nav: 1, kind: 'tab', ...navSnap(), d: 0, pk: null, u: navUid() };
   history.replaceState(NAV_HIST.cur, '', navUrl(NAV_HIST.cur, location.search));
+  navArm();   // the leave guard under it again, so the next back says "Press back again" (and then leaves)
   render();
 }
 // Sign-out (doLogout): the history starts again at the next login, and the entry showing keeps no ids of this person. The
 // entries below keep their u, so a back onto one lands on the next person's home page.
 function navForget(){
-  NAV_HIST.ready = false; NAV_HIST.cur = null; NAV_HIST.d = 0; NAV_HIST.skip = 0; NAV_HIST.syncBack = false; NAV_HIST.backPending = false; NAV_HIST.redo = null;
+  NAV_HIST.ready = false; NAV_HIST.cur = null; NAV_HIST.d = 0; NAV_HIST.skip = 0; NAV_HIST.syncBack = false; NAV_HIST.backPending = false; NAV_HIST.redo = null; NAV_HIST.outT = 0;
   clearTimeout(NAV_HIST.leaveT);
   try { if (navOurs(history.state)) history.replaceState({ nav: 1, kind: 'tab', tab: null, d: 0, pk: null, u: null }, '', navUrl(null, location.search)); } catch (e) {}
 }
@@ -5970,7 +5972,7 @@ function navBlurField(){
   NAV_HIST.hold = was; NAV_HIST.held = held;
   return drew;
 }
-// Back / forward. Never adds an entry; one render at most.
+// Back / forward. Never adds an entry (but the leave guard under the home page someone else's entry lands on); one render at most.
 function navOnPop(e){
   const s = e.state;
   NAV_HIST.backPending = false;   // the back a close control made has landed (or another one came first)
@@ -5978,8 +5980,15 @@ function navOnPop(e){
   if (NAV_HIST.skip) { NAV_HIST.skip--; NAV_HIST.d = s.d|0; NAV_HIST.cur = s; setTimeout(navOverlaySync, 0); return; }
   const delta = (s.d|0) - NAV_HIST.d, prev = NAV_HIST.cur;
   NAV_HIST.d = s.d|0; NAV_HIST.cur = s; NAV_HIST.pops++;
-  // An entry of someone who signed in before on this tab: never their screen or ids, this person's home page instead.
-  if (navForeign(s)) { NAV_HIST.syncBack = false; navLandHome(); return; }
+  // An entry of someone who signed in before on this tab: never their screen or ids, this person's home page instead (the
+  // field being typed in saves first; its redraw joins navLandHome's). The second back from the leave guard leaves: on past
+  // their entries one at a time (their depths are theirs, and a step past the first entry would do nothing), never home again.
+  if (navForeign(s)) {
+    NAV_HIST.syncBack = false;
+    navBlurField();
+    if ((prev && prev.g && !navForeign(prev)) || NAV_HIST.outT > Date.now()) { clearTimeout(NAV_HIST.leaveT); NAV_HIST.outT = Date.now() + NAV_LEAVE_MS; history.back(); return; }
+    navLandHome(); return;
+  }
   // Our own back for a window closed in the app: the screen is already right (it may have moved on under the window).
   // When the window's answer also closed the panel under it, the screen is the entry below: back once more, no copy of it.
   if (NAV_HIST.syncBack) {
@@ -6015,16 +6024,19 @@ function navOnPop(e){
     navLeaveWarn(); if (menuShut || drew) render(); return;
   }
   // Nothing to do when the screen already shows it (a forward step onto a window's entry), unless a kind of its own is involved.
-  if (!navCustom(s.kind) && !(prev && navCustom(prev.kind)) && navSame(s)) { if (menuShut || drew) render(); return; }
+  // A window's entry with nothing open (forward onto it) goes back off it, so the next back is never a dead one.
+  if (!navCustom(s.kind) && !(prev && navCustom(prev.kind)) && navSame(s)) { if (menuShut || drew) render(); if (s.ov && !navOverlayOpen()) setTimeout(navOverlaySync, 0); return; }
   // The leaver first, before anything changes: it may say no (false) or ask (a Promise). Then, for a kind of its own, the
   // page under it (navRestoreView), then its restorer. A restore a guard refused applies nothing: no held redraw, the
   // phone menu as it was, the history back where the screen is.
   const leave = prev && NAV_LEAVERS[prev.kind], fn = NAV_RESTORERS[s.kind] || navRestoreView, pk = prev ? navKey(prev) : null;
   NAV_HIST.redo = { key: pk, delta };
   NAV_HIST.restoring = true; NAV_HIST.hold = true; NAV_HIST.held = menuShut || drew;   // the shut menu and the saved field: one redraw
-  let ok = true, wait = null;
+  let ok = true, wait = null, asked = false;
   try {
+    const h = NAV_HIST.held; NAV_HIST.held = false;
     const v = leave && pass!==pk ? leave(prev, s) : true, how = navLeaveVerdict(v);
+    asked = NAV_HIST.held; NAV_HIST.held = h || asked;   // the leaver drew (its question) through render()
     if (how!=='go') { ok = false; if (how==='wait') wait = v; }
     if (ok && navCustom(s.kind) && fn!==navRestoreView) ok = navRestoreView(s, prev)!==false;
     if (ok) ok = fn(s, prev)!==false;
@@ -6034,7 +6046,7 @@ function navOnPop(e){
   if (!ok) {
     if (menuShut) UI.mobileNavOpen = true;
     navStay(delta);
-    if (drew) render();   // the saved field's redraw (navAfterRender waits for the history to come back)
+    if (drew || asked) render();   // the saved field's redraw and the leaver's question (navAfterRender waits for the history to come back)
     if (wait) navLeaveWait(wait);
     if (NAV_HIST.swipeIn) navSwipeInAnim();
     return;
