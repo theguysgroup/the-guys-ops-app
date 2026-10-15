@@ -1670,12 +1670,14 @@ function fakeRemote(o: any = {}) {
         eq([...await usedSince(wrx, "jobs", ["J4"])], ["J4"], "usedSince: review requests that can't be read keep the job");
         const wf = fakeDb(JSON.parse(JSON.stringify(wz.T)), { users: USERS(), jwts: JWTS, fail: ["lead_messages"] });
         eq([...await usedSince(wf, "contacts", ["K4"])], ["K4"], "usedSince: a check that can't be read keeps the record (never deletes blind)");
-        // an automation already texted / emailed the lead (or has it queued): Undo keeps it; a skipped step or a team push does not count
-        const wa = iw({ contacts: [{ id: "A1", messages: [{}] }, { id: "A2", messages: [{}] }, { id: "A3", messages: [{}] }, { id: "A4", messages: [{}] }, { id: "A5", messages: [{}] }],
+        // an automation already texted / emailed the lead (sent, queued, or sending right now): Undo keeps it. A skipped,
+        // failed or waiting_phone step sent nothing (waiting_phone is final: no texts without Twilio), and a team push is not the customer
+        const wa = iw({ contacts: ["A1", "A2", "A3", "A4", "A5", "A6", "A7"].map((id) => ({ id, messages: [{}] })),
           automation_log: [{ id: "x1", contact_id: "A1", audience: "customer", channel: "text", status: "sent" }, { id: "x2", contact_id: "A2", audience: "customer", channel: "email", status: "queued" },
             { id: "x3", contact_id: "A3", audience: "customer", channel: "text", status: "skipped" }, { id: "x4", contact_id: "A4", audience: "team", channel: "push", status: "sent" },
-            { id: "x5", contact_id: "A5", audience: "customer", channel: "text", status: "failed" }] });
-        eq([...await usedSince(wa, "contacts", ["A1", "A2", "A3", "A4", "A5"])].sort(), ["A1", "A2", "A5"], "usedSince: a lead an automation texted or emailed (sent, queued, even failed) is used; a skipped step or a push to the team is not");
+            { id: "x5", contact_id: "A5", audience: "customer", channel: "text", status: "failed" }, { id: "x6", contact_id: "A6", audience: "customer", channel: "email", status: "sending" },
+            { id: "x7", contact_id: "A7", audience: "customer", channel: "text", status: "waiting_phone" }] });
+        eq([...await usedSince(wa, "contacts", ["A1", "A2", "A3", "A4", "A5", "A6", "A7"])].sort(), ["A1", "A2", "A6"], "usedSince: a lead an automation texted or emailed (sent, queued, sending) is used; a skipped, failed or waiting_phone step or a push to the team is not");
         const wax = fakeDb(JSON.parse(JSON.stringify(wa.T)), { users: USERS(), jwts: JWTS, fail: ["automation_log"] });
         eq([...await usedSince(wax, "contacts", ["A4"])], ["A4"], "usedSince: an automation log that can't be read keeps the lead");
         {
@@ -1727,6 +1729,21 @@ function fakeRemote(o: any = {}) {
       const ch = (await manage(wu, "commit_import", "u-owner", { rule_id: RH.id }, T1 + 50 * 60e3)).body.run;
       const uh = await manage(wu, "undo_import", "u-owner", { run_id: ch.id }, T1 + 51 * 60e3);
       eq([uh.body.paused, wu.T.mcp_import_rules.find((r: any) => r.id === RH.id).enabled], [true, false], "undo_import: an hourly rule is switched off (or the next hour would bring it all back)");
+      // an import of the same rule still running (claimed before the pause) would add the deleted rows again: Undo deletes
+      // nothing until it finishes, hands its claim back, and works once it has
+      {
+        const RB2 = (await save(wu, { ...RULE, name: "Busy hour", mode: "hourly", enabled: true }, "u-owner", NOW)).body.rule;
+        answerWith([{ name: "Ivy New", phone: "0400 000 008", email: "" }]);
+        const ca = (await manage(wu, "commit_import", "u-owner", { rule_id: RB2.id }, T1 + 52 * 60e3)).body.run;
+        wu.T.mcp_import_runs.push({ id: "b2222222-2222-4222-8222-222222222222", business_id: "default", rule_id: RB2.id, rule_name: "Busy hour", kind: "contacts", source: "hourly", status: "running", started_at: new Date(T1 + 53 * 60e3).toISOString() });
+        const ub2 = await manage(wu, "undo_import", "u-owner", { run_id: ca.id }, T1 + 54 * 60e3);
+        const runA = () => wu.T.mcp_import_runs.find((x: any) => x.id === ca.id);
+        eq([ub2.status, ub2.body.reason, wu.T.contacts.some((c: any) => c.full_name === "Ivy New"), wu.T.mcp_import_rules.find((r: any) => r.id === RB2.id).enabled, runA().undo_started_at ?? null, runA().undone_at ?? null],
+          [409, "An import of this rule is running; undo it when it finishes.", true, false, null, null], "undo_import: another run of the rule still running → 409, nothing deleted, the rule off, the undo claim handed back");
+        wu.T.mcp_import_runs.find((x: any) => x.id === "b2222222-2222-4222-8222-222222222222").status = "done";
+        const ub3 = await manage(wu, "undo_import", "u-owner", { run_id: ca.id }, T1 + 55 * 60e3);
+        eq([ub3.body, wu.T.contacts.some((c: any) => c.full_name === "Ivy New")], [{ ok: true, deleted: 1, kept: 0, paused: true }, false], "undo_import: once that run has finished, Undo goes ahead");
+      }
 
       // jobs and tasks end to end
       const wj = iw({ jobs: [{ id: "j-old", customer_name: "Old", invoice_number: "INV-2001", date: "2026-10-01" }] });
@@ -1800,6 +1817,15 @@ function fakeRemote(o: any = {}) {
         } });
         const n2 = toolCalls.length, o2 = await cronImports(raced, tNow);
         eq([o2.ran, o2.skipped, toolCalls.length - n2, wrc.T.mcp_import_runs.length, wrc.T.mcp_import_rules[0].last_run_at], [0, 1, 0, 0, null], "cron: a rule switched off (by Undo) after the list was read is not claimed and does not run");
+      }
+      // Undo switches the rule off after the claim, while the hourly run fetches: the run reads the rule again before it
+      // inserts, and adds nothing
+      {
+        const LATE = "a8888888-8888-4888-8888-888888888888", wl = iw({ mcp_import_rules: [mk(LATE, { name: "Late" })] }), before = wl.T.contacts.length;
+        answer = () => { wl.T.mcp_import_rules[0].enabled = false; return { ok: true, result: { content: [{ type: "text", text: JSON.stringify({ items: ITEMS }) }] } }; };
+        const o3 = await cronImports(wl, tNow), r3 = wl.T.mcp_import_runs[0];
+        eq([o3.ran, wl.T.mcp_import_runs.length, r3.status, r3.inserted, (r3.errors || []).map((e: any) => e.reason), wl.T.contacts.length - before],
+          [1, 1, "failed", 0, ["The rule was switched off, so the rest was not imported"], 0], "cron: a rule switched off (by Undo) between the claim and the insert adds nothing");
       }
     } finally {
       io.callTool = origCall; io.waitUntil = origWait; io.now = origNow; io.fetch = origFetch4;

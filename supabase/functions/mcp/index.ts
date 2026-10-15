@@ -2581,7 +2581,14 @@ export async function runImport(sb: any, rule: any, server: any, opts: { source:
   const fresh = plan.rows.filter((r) => r.status === "new");
   const ctx: ImportCtx = { ...plan.ctx, quiet: rule.run_automations !== true, nowMs };
   const ids: string[] = [], rowErrors: { i: number; reason: string }[] = plan.rows.filter((r) => r.status === "error").map((r) => ({ i: r.i, reason: clip(r.reason, 200) }));
+  //    An hourly run reads its rule again before each chunk and stops once it is off (Undo switches it off while this
+  //    run fetched; the rows that undo removes must not come straight back). Can't read it: stops too.
+  let stopped = false;
   for (let k = 0; k < fresh.length; k += IMPORT_CHUNK) {
+    if (opts.source === "hourly") {
+      const { data: on, error: oe } = await sb.from("mcp_import_rules").select("enabled").eq("id", rule.id).eq("business_id", BUSINESS_ID).maybeSingle();
+      if (oe || !on || on.enabled !== true) { stopped = true; break; }
+    }
     const part = fresh.slice(k, k + IMPORT_CHUNK), built = part.map((r) => ({ id: crypto.randomUUID(), ...importRow(kind, r.values, ctx) }));
     const ahead = [...ids, ...built.map((r) => r.id)];
     await must(sb.from("mcp_import_runs").update({ inserted_ids: ahead, inserted: ahead.length }).eq("id", run.id));
@@ -2609,9 +2616,10 @@ export async function runImport(sb: any, rule: any, server: any, opts: { source:
   }
   // 6. The result.
   const errors: { i?: number; reason: string }[] = [...rowErrors];
+  if (stopped) errors.push({ reason: "The rule was switched off, so the rest was not imported" });
   if (plan.truncated) errors.push({ reason: `Only the first ${IMPORT_MAX_ROWS} items were read` });
   return await finish({
-    status: runStatus(ids.length, rowErrors.length), fetched: plan.fetched, inserted: ids.length, inserted_ids: ids,
+    status: runStatus(ids.length, rowErrors.length + (stopped ? 1 : 0)), fetched: plan.fetched, inserted: ids.length, inserted_ids: ids,
     duplicates: plan.rows.filter((r) => r.status === "duplicate").length, errors: errors.slice(0, RUN_ERRORS_MAX),
   });
 }
@@ -2648,10 +2656,12 @@ export async function usedSince(sb: any, kind: string, ids: string[]): Promise<S
   await read("activity_log", "record_id", "record_id", (q: any) => q.eq("record_kind", IMPORT_RECORD_KIND[kind]).neq("actor", IMPORT_ACTOR), () => true);
   if (kind === "contacts") {
     for (const t of ["lead_messages", "chat_sessions", "customer_opt_outs", "calls", "jobs", "tasks"]) await points(t, "contact_id");
-    // an automation already texted / emailed the customer (or has it waiting to go): a message out can't be taken back,
-    // so the lead stays (a skipped step sent nothing; a push or task to the team is not the customer)
+    // an automation already texted / emailed the customer (or is sending it now): a message out can't be taken back, so
+    // the lead stays. The engine's own "a message to the customer" (automation_claim_customer, automations' claim):
+    // sending / sent / queued. A skipped, failed or waiting_phone step sent nothing (waiting_phone is final: no texts
+    // without Twilio), and a push or task to the team is not the customer.
     // deno-lint-ignore no-explicit-any
-    await read("automation_log", "contact_id", "contact_id", (q: any) => q.eq("audience", "customer").neq("status", "skipped"), () => true);
+    await read("automation_log", "contact_id", "contact_id", (q: any) => q.eq("audience", "customer").in("status", ["sending", "sent", "queued"]), () => true);
     // deno-lint-ignore no-explicit-any
     await read("contacts", "id, messages, stage_changed_at, linked_job_id, contacted_at, customer_notes", "id", (q: any) => q, (r: any) =>
       (Array.isArray(r.messages) && r.messages.length > 1) || !!r.stage_changed_at || !!r.linked_job_id || !!r.contacted_at || (Array.isArray(r.customer_notes) && r.customer_notes.length > 0));
@@ -2700,6 +2710,15 @@ export async function undoImport(sb: any, runId: unknown, me: any, nowMs: number
     if (rule && rule.mode === "hourly") {
       if (rule.enabled) await sb.from("mcp_import_rules").update({ enabled: false, updated_at: iso(nowMs) }).eq("id", rule.id).eq("business_id", BUSINESS_ID);
       paused = true;
+    }
+    // Another import of the same rule still running (claimed before the pause) would find the rows this undo deletes
+    // missing and add them again: nothing is deleted until it finishes. The undo claim is handed back as it was, so
+    // pressing Undo again later works (and a resumed undo still carries its count on).
+    const { data: busy, error: be } = await sb.from("mcp_import_runs").select("id").eq("rule_id", run.rule_id).eq("status", "running").neq("id", run.id)
+      .gte("started_at", iso(nowMs - RUN_STALE_MS)).limit(1);
+    if (be || (busy && busy.length)) {
+      await sb.from("mcp_import_runs").update({ undo_started_at: run.undo_started_at ?? null, undone_by: run.undone_by ?? null }).eq("id", run.id).is("undone_at", null);
+      return { status: 409, body: { ok: false, reason: "An import of this rule is running; undo it when it finishes." } };
     }
   }
   const table = IMPORT_TABLE[run.kind], ids: string[] = (Array.isArray(run.inserted_ids) ? run.inserted_ids : []).map(String);

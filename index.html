@@ -20918,7 +20918,7 @@ function connAddConnectedSource(name){
   if (added) showToast(`"${item.label || item.key}" added to Lead sources. Finish connecting it here.`);
 }
 // ── Settings > Connectors > Private connector (MCP), stage 5 (spec section 4) ──
-// Each person makes their own read-only keys, shown once and never kept by the app. Owners also see every key, the access
+// Owners and managers make their own read-only keys, shown once and never kept by the app. Owners also see every key, the access
 // log and the settings, and connect the business's own MCP server to import leads, jobs and tasks from it. Every change goes
 // through the mcp function (supabase/functions/mcp, /manage); the page reads its own rows (RLS: own keys, owners all).
 const MCP_URL = SUPABASE_URL + '/functions/v1/mcp';
