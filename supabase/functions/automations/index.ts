@@ -323,13 +323,21 @@ export async function vacContext(sb: any, nowMs: number, tz: string, aheadDays =
       .lte("starts_on", vacShiftDay(empty.day, aheadDays)).or(`ends_on.gte.${empty.day},options->>autoBack.eq.false`);
     if (error) { console.error("vacations not read: employee_vacations:", why(error)); return empty; }
     if (!Array.isArray(vacs) || !vacs.length) return empty;
-    const [emps, profs] = await Promise.all([sb.from("employees").select("id, name, phone, status"), sb.from("profiles").select("id, full_name, technician_name, role")]);
+    const [emps, profs] = await Promise.all([sb.from("employees").select("id, name, phone, status, working_days"), sb.from("profiles").select("id, full_name, technician_name, role")]);
     if (emps.error || profs.error) { console.error("vacations not read:", emps.error ? "employees: " + why(emps.error) : "profiles: " + why(profs.error)); return empty; }
     return { ...empty, vacs, employees: emps.data || [], profiles: profs.data || [] };
   } catch (e) {
     console.error("vacations not read:", why(e));
     return empty;
   }
+}
+// The day they are back after a vacation's last day (stage 3 follow-up 6): the first of their working days after it
+// (employees.working_days, 0 = Sunday; the app's vacationBackDay), else the next day (none set, or none usable: not known).
+export function vacBackDay(endsOn: string, workingDays: unknown): string {
+  const set = Array.isArray(workingDays) ? workingDays.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  if (!set.length) return vacShiftDay(endsOn, 1);
+  for (let i = 1; i <= 7; i++) { const d = vacShiftDay(endsOn, i); if (set.includes(new Date(d + "T00:00:00Z").getUTCDay())) return d; }
+  return vacShiftDay(endsOn, 1);
 }
 // ── end vacations ──
 

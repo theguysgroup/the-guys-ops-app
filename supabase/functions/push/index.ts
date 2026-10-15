@@ -21,10 +21,11 @@
 //              added 14 Oct): always 30 days before, with its own switch (catalog.notify.bizInsurance); until that is
 //              set it follows the employee-document switch. To the owners, and to the office (VA and managers) when
 //              chosen, for a new lead, a waiting lead and a missed call only (money and private details: owners only).
-//              Also the day before someone is back from a vacation (stage 3), when "Reminder a day before they are back"
-//              is ticked on the vacation and the "back tomorrow" card is on (catalog.notify.vacationBack, on unless
-//              switched off): to them and the owners, only between the notifications' hours (rules.from–until), with
-//              what is waiting (once per vacation).
+//              Also on the last day of a vacation (stage 3), when "Reminder a day before they are back" is ticked on
+//              the vacation and the "back tomorrow" card is on (catalog.notify.vacationBack, on unless switched off):
+//              to them and the owners, only between the notifications' hours (rules.from–until), with what is waiting
+//              (once per vacation). "Back tomorrow", or "back on Monday" when their working days (employees.working_days)
+//              put the return later (stage 3 follow-up 6).
 //              Anyone may call it: it only ever sends what push_sent hasn't recorded yet, and does nothing while
 //              everything is switched off.
 // Recipients skip people on vacation with "No notifications" and go to their stand-in when one is chosen (stage 3; the
@@ -192,13 +193,21 @@ export async function vacContext(sb: any, nowMs: number, tz: string, aheadDays =
       .lte("starts_on", vacShiftDay(empty.day, aheadDays)).or(`ends_on.gte.${empty.day},options->>autoBack.eq.false`);
     if (error) { console.error("vacations not read: employee_vacations:", why(error)); return empty; }
     if (!Array.isArray(vacs) || !vacs.length) return empty;
-    const [emps, profs] = await Promise.all([sb.from("employees").select("id, name, phone, status"), sb.from("profiles").select("id, full_name, technician_name, role")]);
+    const [emps, profs] = await Promise.all([sb.from("employees").select("id, name, phone, status, working_days"), sb.from("profiles").select("id, full_name, technician_name, role")]);
     if (emps.error || profs.error) { console.error("vacations not read:", emps.error ? "employees: " + why(emps.error) : "profiles: " + why(profs.error)); return empty; }
     return { ...empty, vacs, employees: emps.data || [], profiles: profs.data || [] };
   } catch (e) {
     console.error("vacations not read:", why(e));
     return empty;
   }
+}
+// The day they are back after a vacation's last day (stage 3 follow-up 6): the first of their working days after it
+// (employees.working_days, 0 = Sunday; the app's vacationBackDay), else the next day (none set, or none usable: not known).
+export function vacBackDay(endsOn: string, workingDays: unknown): string {
+  const set = Array.isArray(workingDays) ? workingDays.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  if (!set.length) return vacShiftDay(endsOn, 1);
+  for (let i = 1; i <= 7; i++) { const d = vacShiftDay(endsOn, i); if (set.includes(new Date(d + "T00:00:00Z").getUTCDay())) return d; }
+  return vacShiftDay(endsOn, 1);
 }
 // ── end vacations ──
 
@@ -376,14 +385,21 @@ export function invoicePayload(person: string, week: string, end?: unknown) {
 // ── the day before someone is back from a vacation (stage 3) ──
 // Vacations whose last day is today with the reminder ticked, from the morning hour on (the notifications' "from"). Only
 // with "Back to Active on the end date": with it off they are not back tomorrow, the vacation goes on until someone ends it.
-// Not when another vacation of theirs is in force tomorrow (it starts the next day): they aren't back then either. C must
-// hold tomorrow's vacations too (vacContext with aheadDays 1).
+// They are back on a working day: their working days when set, else the next day (vacBackDay; stage 3 follow-up 6). The
+// reminder still goes on the last day away. Not when another vacation of theirs is in force on any day from tomorrow
+// through that day: they aren't back then either. C must hold the next week's vacations too (vacContext with aheadDays 7).
 // deno-lint-ignore no-explicit-any
 export function vacReturning(C: VacCtx, hour: number, fromHour: number): any[] {
   if (hour < fromHour) return [];
-  const tomorrow = vacShiftDay(C.day, 1);
-  return C.vacs.filter((v) => vacOpt(v, "remind") && vacOpt(v, "autoBack") && vacOnDay(v, C.day, C.tz) && v.ends_on === C.day
-    && !C.vacs.some((x) => x.id !== v.id && x.employee_id === v.employee_id && vacOnDay(x, tomorrow, C.tz)));
+  return C.vacs.filter((v) => {
+    if (!(vacOpt(v, "remind") && vacOpt(v, "autoBack") && vacOnDay(v, C.day, C.tz) && v.ends_on === C.day)) return false;
+    // deno-lint-ignore no-explicit-any
+    const ret = vacBackDay(v.ends_on, (C.employees.find((e: any) => e.id === v.employee_id) || {}).working_days);
+    for (let d = vacShiftDay(C.day, 1); d <= ret; d = vacShiftDay(d, 1)) {
+      if (C.vacs.some((x) => x.id !== v.id && x.employee_id === v.employee_id && vacOnDay(x, d, C.tz))) return false;
+    }
+    return true;
+  });
 }
 // Every open task, for the reminders' summary: paged, since PostgREST gives at most 1000 rows a request.
 // deno-lint-ignore no-explicit-any
@@ -414,11 +430,11 @@ export function vacWaitingText(w: { tasks: any[]; jobs: any[]; leads: number }):
   return !parts.length ? "nothing yet" : parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 // deno-lint-ignore no-explicit-any
-export function vacBackPayloads(v: any, name: string, w: { tasks: any[]; jobs: any[]; leads: number }) {
+export function vacBackPayloads(v: any, name: string, w: { tasks: any[]; jobs: any[]; leads: number }, when = "tomorrow") {
   const text = vacWaitingText(w);
   return {
-    person: { title: "You're back tomorrow", body: `Waiting for you: ${text}.`, url: APP_URL + "?tab=tasks", tag: `vacback-${v.id}` },
-    owners: { title: `${name} is back tomorrow`, body: `Waiting for them: ${text}.`, url: APP_URL + "?tab=settings&page=people", tag: `vacback-${v.id}` },
+    person: { title: `You're back ${when}`, body: `Waiting for you: ${text}.`, url: APP_URL + "?tab=tasks", tag: `vacback-${v.id}` },
+    owners: { title: `${name} is back ${when}`, body: `Waiting for them: ${text}.`, url: APP_URL + "?tab=settings&page=people", tag: `vacback-${v.id}` },
   };
 }
 // "Send a test" on one card in Settings → Notifications: the real wording on made-up data, titled "Test · …" so nobody
@@ -448,7 +464,7 @@ export async function scan(sb: any, nowMs: number) {
   const anyOn = NOTIFY_KINDS.some((k) => k !== "vacationBack" && on(k)), backOn = on("vacationBack") && now.hour >= R.from && now.hour < R.until;
   // everything switched off, and no reminder can go now either: the vacations aren't read
   if (!anyOn && !backOn) return { ok: true, off: true, sent: 0 };
-  const C = await vacContext(sb, nowMs, tz, backOn ? 1 : 0);   // with the reminder: tomorrow's vacations too (vacReturning)
+  const C = await vacContext(sb, nowMs, tz, backOn ? 7 : 0);   // with the reminder: the next week's vacations too (vacReturning)
   const back = backOn ? vacReturning(C, now.hour, R.from) : [];
   if (!anyOn && !back.length) return { ok: true, off: true, sent: 0 };
   // one scan at a time: the first call in each 8-minute window claims it
@@ -523,11 +539,12 @@ export async function scan(sb: any, nowMs: number) {
     const e = C.employees.find((x: any) => x.id === v.employee_id); if (!e) continue;   // before claiming: never a claim for nobody
     const { error: dup } = await sb.from("push_sent").insert({ key: `vacback:${v.id}:${v.ends_on}` });   // once per vacation
     if (dup) { skipped++; continue; }
-    const ret = shiftDay(v.ends_on, 1);
+    const ret = vacBackDay(v.ends_on, e.working_days);   // their next working day (stage 3 follow-up 6)
+    const when = ret === vacShiftDay(C.day, 1) ? "tomorrow" : "on " + new Date(ret + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
     if (!tasks) tasks = await vacOpenTasks(sb);
     // only the first week back (what the message counts)
     const { data: jobs } = await sb.from("jobs").select("id, date, technician").eq("technician", e.name).gte("date", ret).lte("date", shiftDay(ret, 6));
-    const P = vacBackPayloads(v, e.name, vacWaiting(e.name, ret, tasks || [], jobs || []));
+    const P = vacBackPayloads(v, e.name, vacWaiting(e.name, ret, tasks || [], jobs || []), when);
     // deno-lint-ignore no-explicit-any
     const mine = vacProfilesOf(e, C).map((p: any) => p.id);
     sent += (await sendTo(sb, mine, P.person, keys)).sent;

@@ -2394,6 +2394,17 @@ function vacationForProfile(vacations, profile, day, tz, key, employees){
   const rows = vacations || [], tn = profile.technicianName, name = tn && rows.some(v => v.employeeName===tn) ? tn : profile.fullName || tn;
   return name ? vacationFor(rows, name, day, tz, key) : null;
 }
+// "End their shift now" (stage 3 follow-up 5). Only an office login ('va') has a shift: the logins of that employee card.
+function vacationShiftLogins(profiles, employees, empId){
+  return (profiles || []).filter(p => p && p.role==='va' && empId && (vacationEmployeeOfProfile(p, employees) || {}).id===empId);
+}
+function vacationOnShift(p, today){ return !!(p && p.onDuty && p.onDutyDate===today); }
+// The vacation that asks this login's own app to end its shift: in force today, with the marker, while they are on shift.
+function vacationEndShiftFor(vacations, profile, today, tz, employees){
+  if (!profile || profile.role!=='va' || !vacationOnShift(profile, today)) return null;
+  const v = vacationForProfile(vacations, profile, today, tz, null, employees);
+  return v && v.endShift===true ? v : null;
+}
 function vacationUpcoming(vacations, who, day){
   let next = null;
   (vacations || []).forEach(v => { if (!v.cancelledAt && vacationMatches(v, who) && v.startsOn > day && (!next || v.startsOn < next.startsOn)) next = v; });
@@ -2453,11 +2464,12 @@ function vacationWithNote(v, notes, pays){
   const pay = pays && VACATION_PAY.includes(pays[v.id]) ? pays[v.id] : '';
   return { ...v, note: (notes && notes[v.id]) || '', ...(pay ? { options: { ...v.options, pay } } : {}) };
 }
-function vacationUntilText(v, day, tz){
+// workingDays (optional; employee.workingDays): "due back" on their next working day (vacationBackDay).
+function vacationUntilText(v, day, tz, workingDays){
   if (!v || v.cancelledAt) return '';
   if (day < v.startsOn) return `Vacation from ${fmtDateShort(v.startsOn)}`;
   if (!vacationOnDay(v, day, tz)) return '';
-  return day <= v.endsOn ? `On vacation until ${fmtDateShort(v.endsOn)}` : `On vacation (due back ${fmtDateShort(shiftDays(v.endsOn, 1))})`;
+  return day <= v.endsOn ? `On vacation until ${fmtDateShort(v.endsOn)}` : `On vacation (due back ${fmtDateShort(vacationBackDay(v.endsOn, workingDays))})`;
 }
 // Past the last day, autoBack off and nobody ended it: the owners get a "Back?" prompt.
 function vacationOverdue(v, day, tz){ return vacationOnDay(v, day, tz) && !vacationOpt(v, 'autoBack') && day > v.endsOn; }
@@ -2475,6 +2487,13 @@ function vacationAssignText(name, info){
 // Leave lines for one person on a payroll week [from, to]: only vacations with "Leave on the payroll board" ticked; the days
 // are their working days (0 = Sunday; Monday to Friday when none are set).
 const VACATION_WORK_DAYS = [1, 2, 3, 4, 5];
+// The day they are back after the last day away (stage 3 follow-up 6; the functions' vacBackDay): the first of their working
+// days after it, else the next day. Unlike the payroll lines, no working days set means not known, not Monday to Friday.
+function vacationBackDay(endsOn, workingDays){
+  const set = Array.isArray(workingDays) ? workingDays.filter(d => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  if (set.length) for (let i = 1; i <= 7; i++) { const d = shiftDays(endsOn, i); if (set.includes(parseLocalDate(d).getDay())) return d; }
+  return shiftDays(endsOn, 1);
+}
 function vacationPayrollLines(vacations, who, from, to, tz, workingDays, today){
   const out = [], set = Array.isArray(workingDays) ? workingDays.map(Number) : [], wd = set.length ? set : VACATION_WORK_DAYS;
   (vacations || []).forEach(v => {
@@ -3389,6 +3408,7 @@ async function loadFromSupabase(){
 
   if (PRESENT) presentScaleData(data);
   STATE.data = data;
+  if (STATE.dataLoaded) setupVacationsChannel();   // the first load failed and this one worked: subscribe now (stage 3 follow-up 7)
 }
 
 /* ── db: the write layer (Stage 3, part 2) ───────────────────────────────
@@ -3476,12 +3496,13 @@ function closingPatchToRow(patch){
   return row;
 }
 // A vacation row (stage 3; .claude/sql/stage3-vacation.sql). employeeName / standInName are the database's copies, so people
-// who can't read the employees table still see whose vacation it is.
+// who can't read the employees table still see whose vacation it is. endShift (stage 3 follow-up 5): options.endShift, "end
+// their shift now" asked by whoever set it; kept out of options, so it is never a tick nor copied to their next vacation.
 function mapVacationRow(r){
   return { id:r.id, employeeId:r.employee_id, employeeName:r.employee_name||'', startsOn:r.starts_on, endsOn:r.ends_on,
     standInId:r.stand_in_id||null, standInName:r.stand_in_name||'', options:vacationOptionsNorm(r.options),
     createdBy:r.created_by||null, createdAt:r.created_at||null, endedAt:r.ended_at||null, cancelledAt:r.cancelled_at||null,
-    remindedAt:r.reminded_at||null };
+    remindedAt:r.reminded_at||null, endShift: !!(r.options && r.options.endShift === true) };
 }
 // The saved row into STATE.data.vacations (added, or replacing the old copy); returns the mapped vacation.
 function keepVacationRow(row){
@@ -4430,13 +4451,18 @@ function setupRealtimeSubscriptions(){
     .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_sessions' }, handleChatSessionRealtime)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'myday_days' }, handleMyDayRealtime)
     .subscribe();
-  // Vacations (stage 3) on a channel of their own: a table missing from the publication (SQL not applied yet) can never
-  // break the shared one. Only when the list loaded; otherwise the screens already say it can't be read.
-  if (!VACATIONS_CHANNEL && STATE.data && !STATE.data.vacationsError) {
-    VACATIONS_CHANNEL = sb.channel('vacations-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacations' }, handleListRealtimeChange('vacations', r => vacationWithNote(mapVacationRow(r), STATE.data && STATE.data.vacationNotes, STATE.data && STATE.data.vacationPays)))
-      .subscribe();
-  }
+  setupVacationsChannel();
+}
+// Vacations (stage 3) on a channel of their own: a table missing from the publication (SQL not applied yet) can never
+// break the shared one. Only when the list loaded; otherwise the screens already say it can't be read, and a later load
+// that works subscribes then (loadFromSupabase; stage 3 follow-up 7). Each change may ask this login's app to end its
+// shift (vacationEndOwnShift).
+function setupVacationsChannel(){
+  if (VACATIONS_CHANNEL || !STATE.data || STATE.data.vacationsError) return;
+  const onVac = handleListRealtimeChange('vacations', r => vacationWithNote(mapVacationRow(r), STATE.data && STATE.data.vacationNotes, STATE.data && STATE.data.vacationPays));
+  VACATIONS_CHANNEL = sb.channel('vacations-realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacations' }, payload => { onVac(payload); vacationEndOwnShift(); })
+    .subscribe();
 }
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
@@ -9212,6 +9238,7 @@ async function vaSessionStart(){
       <div style="font-size:14px;margin-bottom:12px">On ${esc(parseLocalDate(p.forgotLogoutOn).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' }))} you didn't press Log Out, so the system finished your day by itself${end ? `, with the end time ${esc(end)}` : ''}. Please press Log Out on My Day at the end of every day.</div>
       <div style="display:flex;justify-content:flex-end"><button class="btn primary" onclick="sb.rpc('ack_forgot_logout');closePopup()">OK</button></div>`);
   }
+  vacationEndOwnShift();   // a vacation set while their app was closed asked to end the shift (stage 3 follow-up 5)
   render();
 }
 function setMyDayView(v){ UI.myDayView = v; render(); }
@@ -19891,7 +19918,7 @@ function vacationTeamRows(data, today, tz, all){
       && (vacationOnDay(v, today, tz) || (v.startsOn > today && v.startsOn <= soon)))
     .map(v => { const e = emps.find(x => x.id===v.employeeId); return { v, e, name: (e && e.name) || v.employeeName }; })
     .filter(x => x.name && (!x.e || (x.e.status || 'Active')==='Active'))
-    .map(({ v, name }) => ({ v, name, now: v.startsOn <= today, label: vacationUntilText(v, today, tz), standIn: vacationOpt(v, 'standIn') ? v.standInName || '' : '', overdue: vacationOverdue(v, today, tz) }))
+    .map(({ v, e, name }) => ({ v, name, now: v.startsOn <= today, label: vacationUntilText(v, today, tz, e && e.workingDays), standIn: vacationOpt(v, 'standIn') ? v.standInName || '' : '', overdue: vacationOverdue(v, today, tz) }))
     .sort((a, b) => a.v.startsOn.localeCompare(b.v.startsOn) || a.name.localeCompare(b.name));
 }
 function vacationAllTicked(opts){ return VACATION_OPTIONS.every(o => !!opts && opts[o.key]===true); }
@@ -19937,6 +19964,16 @@ function vacationStandInWarning(d, employees, loginIds){
   if (!d || o.standIn!==true || !d.standInId || d.standInId===d.employeeId || !loginIds || loginIds.has(d.standInId)) return '';
   const s = (employees || []).find(e => e.id===d.standInId);
   return `${(s && s.name) || 'The stand-in'} has no app login, so their copy of the notifications goes to nobody. Open items can still move to them.`;
+}
+// Shown under the stand-in too (stage 3 follow-up 1): the person away gets the lead and call alerts (an owner, manager or
+// office login), and the stand-in's logins can't (a technician only). No login at all is vacationStandInWarning's.
+function vacationStandInAlertHint(d, employees, profiles){
+  const o = (d && d.options) || {}, office = ['owner', 'manager', 'va'];
+  if (!d || o.standIn!==true || !d.standInId || d.standInId===d.employeeId) return '';
+  const of = id => (profiles || []).filter(p => p && (vacationEmployeeOfProfile(p, employees) || {}).id===id);
+  const away = of(d.employeeId), stand = of(d.standInId);
+  if (!away.some(p => office.includes(p.role)) || !stand.length || stand.some(p => office.includes(p.role))) return '';
+  return 'Lead and call alerts only reach an owner, manager or office stand-in.';
 }
 // The phone_routing.people entry's employee, the voice function's rule (vacPhoneEmployee), one clear match, never a guess:
 // the same mobile; else the same full name; else their first name when nobody else has it (no other employee, and no login
@@ -20037,7 +20074,7 @@ function vacationBox(x, canEdit){
     open = `<div class="grp">In these dates${n >= 2 && edit && s ? ` <button type="button" class="btn ghost small" onclick="moveAllToStandIn('${vid}')">Move all to ${esc(s)}</button>` : ''}</div>`
       + (n ? `<div class="vac-items">${items}</div>` : '<div class="hint">Nothing open in these dates. ✓</div>');
   }
-  return head + `<div class="pp-box">${setRows([[pill('vac', vacationUntilText(v, today, tz)), desc, acts]])}</div>`
+  return head + `<div class="pp-box">${setRows([[pill('vac', vacationUntilText(v, today, tz, e.workingDays)), desc, acts]])}</div>`
     + (ticks ? `<div class="emp-flags" style="margin-top:8px">${ticks}</div>` : '') + open;
 }
 // The Dashboard's Away card (the team home of owners and managers). Managers can't open Settings → People, so it is
@@ -20134,7 +20171,7 @@ function vacExtraHtml(){
   const logins = vacationLoginIds(STATE.profiles, data.employees);
   const owner = (STATE.profiles || []).some(p => p.role==='owner' && (vacationEmployeeOfProfile(p, data.employees) || {}).id===d.employeeId);
   const stand = o.standIn===true
-    ? `<div class="field" style="margin-top:11px"><label>Stand-in</label><select onchange="vacSet('standInId', this.value)"><option value="">Pick the stand-in</option>${people.map(e => `<option value="${esc(e.id)}" ${e.id===d.standInId ? 'selected' : ''}>${esc(e.name)}${awayThen(e) ? ' · on vacation then' : ''}${logins && !logins.has(e.id) ? ' · no app login: gets no notifications' : ''}</option>`).join('')}</select><span class="job-sub">Gets their notifications${o.flagOpen===true ? ', and their open items move to them with one click (jobs only to a technician)' : ''}.${owner ? ' Money and private owner alerts only go to a stand-in who is an owner.' : ''}</span>${(w => w ? `<span class="job-sub" style="display:block;margin-top:3px;color:var(--warn)">${esc(w)}</span>` : '')(vacationStandInWarning(d, data.employees, logins))}</div>`
+    ? `<div class="field" style="margin-top:11px"><label>Stand-in</label><select onchange="vacSet('standInId', this.value)"><option value="">Pick the stand-in</option>${people.map(e => `<option value="${esc(e.id)}" ${e.id===d.standInId ? 'selected' : ''}>${esc(e.name)}${awayThen(e) ? ' · on vacation then' : ''}${logins && !logins.has(e.id) ? ' · no app login: gets no notifications' : ''}</option>`).join('')}</select><span class="job-sub">Gets their notifications${o.flagOpen===true ? ', and their open items move to them with one click (jobs only to a technician)' : ''}.${owner ? ' Money and private owner alerts only go to a stand-in who is an owner.' : ''}</span>${[vacationStandInWarning(d, data.employees, logins), vacationStandInAlertHint(d, data.employees, STATE.profiles)].map(w => w ? `<span class="job-sub" style="display:block;margin-top:3px;color:var(--warn)">${esc(w)}</span>` : '').join('')}</div>`
     : o.flagOpen===true ? `<div class="hint" style="margin-top:8px">Tick "${esc(standLabel)}" to move their open items to someone with one click.</div>` : '';
   const pay = o.payroll===true
     ? `<div class="field" style="margin-top:11px"><label>Leave on the payroll board</label><div class="vac-pay">${VACATION_PAY.map(p => `<label class="checkline"><input type="radio" name="vac-pay" value="${esc(p)}" ${o.pay===p ? 'checked' : ''} onchange="vacSet('pay', this.value)">${p==='paid' ? 'Paid leave' : 'Unpaid leave'}</label>`).join('')}</div></div>` : '';
@@ -20182,10 +20219,34 @@ async function saveVacationModal(){
   const d = VAC_UI.draft, data = STATE.data, tz = bizTz(), today = todayStr();
   const problems = vacationFormProblems(d, data.vacations || [], data.employees || [], tz);
   if (problems.length) { modalError(problems[0]); return; }
-  const emp = (data.employees || []).find(e => e.id===d.employeeId), first = String((emp && emp.name) || '').split(' ')[0] || 'them';
   const ui = VAC_UI;   // the window this save belongs to: closed (or another one opened) while saving = left alone
+  // In force from today on an office person who is on shift (stage 3 follow-up 5): offer to end it. Their own app ends it
+  // (vacationEndOwnShift): the shift functions only ever act on the caller. Read fresh: the logins have no live updates.
+  const logins = d.startsOn <= today && today <= d.endsOn ? vacationShiftLogins(STATE.profiles, data.employees, d.employeeId) : [];
+  if (logins.length) {
+    ui.saving = true;
+    const { data: fresh, error } = await sb.from('profiles').select('id, role, on_duty, on_duty_date').in('id', logins.map(p => p.id));
+    ui.saving = false;
+    if (VAC_UI!==ui) return;
+    const now = error || !fresh ? logins : fresh.map(r => ({ onDuty: r.on_duty, onDutyDate: r.on_duty_date }));
+    if (now.some(p => vacationOnShift(p, today))) {
+      const emp = (data.employees || []).find(e => e.id===d.employeeId), first = String((emp && emp.name) || '').split(' ')[0] || 'This person';
+      confirmAction(`${first} is on shift now. End their shift now?` + ' Their app ends it the moment it is open; otherwise it ends by itself tonight.', () => vacationSaveNow(ui, true),
+        { danger: false, title: 'On shift now', confirmLabel: 'End their shift now', cancelLabel: 'Back', alt: { label: 'Keep the shift', fn: () => vacationSaveNow(ui, false) } });
+      return;
+    }
+  }
+  return vacationSaveNow(ui, false);
+}
+// The save itself. endShift: options.endShift, the marker their own app acts on (vacationEndOwnShift).
+async function vacationSaveNow(ui, endShift){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (!ui || VAC_UI!==ui || ui.saving || !canSetVacation()) return;
+  const d = ui.draft, data = STATE.data, tz = bizTz(), today = todayStr();
+  const emp = (data.employees || []).find(e => e.id===d.employeeId), first = String((emp && emp.name) || '').split(' ')[0] || 'them';
   ui.saving = true;
   const row = { ...vacationRowFromDraft(d), business_id: AUTO_BUSINESS_ID };
+  if (endShift) row.options = { ...row.options, endShift: true };
   const noteBefore = d.id ? (data.vacationNotes || {})[d.id] || '' : '', payBefore = d.id ? (data.vacationPays || {})[d.id] || '' : '';
   const P = vacationPrivateRow(d);
   const res = d.id ? await db.vacations.update(d.id, row) : await db.vacations.add(row);
@@ -23368,6 +23429,17 @@ function vacationBlocksShift(me){
   if (!vacationForProfile(STATE.data.vacations || [], me, todayStr(), bizTz(), null, STATE.data.employees)) return false;
   showToast('You are on vacation today: no shift clock', { kind: 'warn' }); render();
   return true;
+}
+// "End their shift now" (stage 3 follow-up 5): the person who set the vacation can't end someone else's shift, so this
+// login's own app does it, the moment the marked vacation reaches it (live update, or opening the app). Once ended,
+// vacationBlocksShift keeps it from starting again while the vacation is in force, so this never loops.
+let VAC_SHIFT_ENDING = false;
+function vacationEndOwnShift(){
+  if (VAC_SHIFT_ENDING || !STATE.data || VIEW_AS_ID || PRESENT || readOnlyReason()) return;
+  const me = getRealProfile();
+  if (!vacationEndShiftFor(STATE.data.vacations || [], me, todayStr(), bizTz(), STATE.data.employees)) return;
+  VAC_SHIFT_ENDING = true;
+  setMyShift(false).finally(() => { VAC_SHIFT_ENDING = false; });
 }
 async function vaLogIn(){
   const me = getCurrentProfile(); if (!me) return;

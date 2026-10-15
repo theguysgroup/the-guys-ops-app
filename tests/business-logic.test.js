@@ -167,6 +167,8 @@ const DECLS = [
   'tplDraftChanged', 'navEntryForeign', 'navLeaveGuardOn', 'NAV_LEAVE_MS',
   // stage 3 follow-ups (Ofek 15 Oct): paid / unpaid leave is private (item 2)
   'vacationPaysMap', 'vacationPrivateRow',
+  // stage 3 follow-ups (Ofek 15 Oct): the stand-in's alerts hint, "end their shift now", back on a working day (items 1, 5, 6)
+  'vacationStandInAlertHint', 'vacationShiftLogins', 'vacationOnShift', 'vacationEndShiftFor', 'vacationBackDay',
 ];
 
 function extractDecl(source, name){
@@ -2010,7 +2012,7 @@ function testNotificationCards(sb){
   // The cards.
   const R = { waitMinutes: 15, from: 8, until: 20, docDays: 30, unpaidDays: 7 };
   const cards = sb.notifyCards({}, R, { phoneEnabled: false });
-  assertEqual(cards.map(c => c.id), ['newLead', 'leadWaiting', 'missedCall', 'unpaid', 'invoice', 'docExpiry', 'bizInsurance', 'vacationBack', 'googleReview'], 'notifyCards: 8 cards in the mockup\'s order (+ "back tomorrow", stage 3)');
+  assertEqual(cards.map(c => c.id), ['newLead', 'leadWaiting', 'missedCall', 'unpaid', 'invoice', 'docExpiry', 'bizInsurance', 'vacationBack', 'googleReview'], 'notifyCards: 9 cards in the mockup\'s order (+ "back tomorrow", stage 3)');
   // hand count: nothing saved = only the invoice one on (1 of 8); documents on = invoice, documents and insurance (3 of 8); "back tomorrow" (stage 3) is on unless switched off
   assertEqual([cards.filter(c => c.on).map(c => c.id), sb.notifyCards({ docExpiry: { on: true } }, R, {}).filter(c => c.on).map(c => c.id)],
     [['invoice', 'vacationBack'], ['invoice', 'docExpiry', 'bizInsurance', 'vacationBack']], 'notifyCards: how many are on');
@@ -2630,6 +2632,13 @@ function testVacations(sb){
   assertEqual([sb.vacationPrivateRow(draft({ note: '  ' })), sb.vacationPrivateRow(draft({ note: ' Fiji ', options: { pay: 'odd' } })), sb.vacationPrivateRow(null)],
     [{ note: null, pay: 'paid' }, { note: 'Fiji', pay: 'unpaid' }, { note: null, pay: 'unpaid' }], 'private row: the note trimmed (empty = null), pay paid or unpaid');
 
+  // back on their next working day (stage 3 follow-up 6; the functions' vacBackDay has the same cases). 23 Oct 2026 is a Friday.
+  assertEqual([sb.vacationBackDay('2026-10-23', [1, 2, 3, 4, 5]), sb.vacationBackDay('2026-10-24', []), sb.vacationBackDay('2026-10-24', null), sb.vacationBackDay('2026-10-21', [3]), sb.vacationBackDay('2026-10-21', ['x', 9, 1.5]), sb.vacationBackDay('2026-10-24', [6]), sb.vacationBackDay('2026-10-24', [0, 1])],
+    ['2026-10-26', '2026-10-25', '2026-10-25', '2026-10-28', '2026-10-22', '2026-10-31', '2026-10-25'], 'back day: Friday → Monday; none set → the next day (not Monday to Friday); one working day a week → a week on; odd values ignored');
+  const fri = V({ endsOn: '2026-10-23', options: { autoBack: false } });
+  assertEqual([sb.vacationUntilText(fri, '2026-10-27', SYD, [1, 2, 3, 4, 5]), sb.vacationUntilText(fri, '2026-10-27', SYD), sb.vacationUntilText(fri, '2026-10-27', SYD, []), sb.vacationUntilText(fri, '2026-10-22', SYD, [1, 2, 3, 4, 5])],
+    ['On vacation (due back 26 Oct)', 'On vacation (due back 24 Oct)', 'On vacation (due back 24 Oct)', 'On vacation until 23 Oct'], 'until text: "due back" on their next working day when known');
+
   // words on badges and pickers
   const ut = (v, d) => sb.vacationUntilText(v, d, SYD);
   assertEqual([ut(V(), '2026-10-21'), ut(V({ options: { autoBack: false } }), '2026-10-27'), ut(V({ startsOn: '2026-11-03', endsOn: '2026-11-05' }), '2026-10-21'), ut(V(), '2026-10-26')],
@@ -2679,7 +2688,11 @@ function testVacations(sb){
 
   // the row and the errors
   assertEqual(sb.mapVacationRow({ id: 'r1', employee_id: 'e1', employee_name: 'Ann', starts_on: '2026-10-20', ends_on: '2026-10-24', stand_in_id: 'e2', stand_in_name: 'Bob', options: { noNotify: true, autoBack: false, pay: 'paid' }, note: null, created_by: 'p1', created_at: '2026-10-14T00:00:00Z', ended_at: null, cancelled_at: null, reminded_at: null }),
-    { id: 'r1', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Bob', options: { ...all(false), noNotify: true, pay: 'paid' }, createdBy: 'p1', createdAt: '2026-10-14T00:00:00Z', endedAt: null, cancelledAt: null, remindedAt: null }, 'mapVacationRow: camelCase, options normalized');
+    { id: 'r1', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Bob', options: { ...all(false), noNotify: true, pay: 'paid' }, createdBy: 'p1', createdAt: '2026-10-14T00:00:00Z', endedAt: null, cancelledAt: null, remindedAt: null, endShift: false }, 'mapVacationRow: camelCase, options normalized');
+  // "end their shift now" (stage 3 follow-up 5): a top-level marker, never a tick, never copied to the next vacation
+  const esRow = sb.mapVacationRow({ id: 'r2', employee_id: 'e1', employee_name: 'Ann', starts_on: '2026-10-20', ends_on: '2026-10-24', options: { badge: true, endShift: true }, created_at: '2026-10-14T00:00:00Z' });
+  assertEqual([esRow.endShift, 'endShift' in esRow.options, sb.mapVacationRow({ id: 'r3', options: { endShift: 'true' } }).endShift, 'endShift' in sb.vacationOptionsFor([esRow], ann), sb.vacationOptionsFor([esRow], ann).badge],
+    [true, false, false, false, true], 'mapVacationRow: endShift on the vacation, not in its options; the next vacation copies the ticks without it');
   assertEqual([sb.vacationErrorText({ code: '23P01', message: 'Already on vacation from 20 Oct to 24 Oct' }), sb.vacationErrorText({ message: 'Already on vacation from 1 Nov to 3 Nov' }), sb.vacationErrorText({ code: '42501', message: 'permission denied' })],
     ['Already on vacation from 20 Oct to 24 Oct', 'Already on vacation from 1 Nov to 3 Nov', 'Not saved: permission denied'], 'error text: the overlap message as is, else "Not saved: …"');
   // stage 3 follow-ups (Ofek 15 Oct, items 2, 3, 4): the SQL, statically (it runs by hand on staging, then live)
@@ -2716,7 +2729,7 @@ function testVacations(sb){
   assertEqual(rbGuard.includes(g5), true, 'follow-up SQL: the ROLLBACK restores section 5\'s guard verbatim');
   // the app: pay goes into the private upsert, never on the vacation row
   const appSrc = fs.readFileSync(INDEX_HTML_PATH, 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
-  const svm = extractDecl(appSrc, 'saveVacationModal');
+  const svm = extractDecl(appSrc, 'vacationSaveNow');   // the save itself (follow-up 5 split saveVacationModal's question out)
   assertEqual([/upsert\(\{ vacation_id: id, note: text, pay, business_id: AUTO_BUSINESS_ID \}\)/.test(appSrc), appSrc.includes('setNote('), svm.indexOf('db.vacations.setPrivate(') > 0 && svm.indexOf('db.vacations.setPrivate(') < svm.indexOf('logEmployeeActivity('), /vacationWithNote\(mapVacationRow\(r\), vacNotes, vacPays\)/.test(appSrc)],
     [true, false, true, true], 'follow-up 2: one private upsert of note and pay, before the History line; the load passes the pays');
 }
@@ -2839,6 +2852,25 @@ function testVacationUi(sb){
   assertEqual(P(ok), [], 'problems: a stand-in with no app login never blocks the save');
   assertEqual([SW(ok, new Set(['e1', 'e2'])), SW(ok, new Set(['e1'])), SW(ok, null), SW({ ...ok, options: { standIn: false } }, new Set())],
     ['', 'Sam has no app login, so their copy of the notifications goes to nobody. Open items can still move to them.', '', ''], 'stand-in warning: only when the logins are known, the stand-in is ticked and has no login');
+  // stage 3 follow-up 1: a technician stand-in never gets the lead and call alerts of an office person (owner, manager, VA)
+  const AH = (d, profs) => sb.vacationStandInAlertHint({ employeeId: 'e3', standInId: 'e2', options: { standIn: true }, ...d }, employees, profs);
+  const eveL = { id: 'pe', fullName: 'Eve', role: 'va' }, samT = { id: 'ps', fullName: 'Sam', role: 'technician' };
+  assertEqual([AH({}, [eveL, samT]), AH({}, [eveL, { ...samT, role: 'manager' }]), AH({}, [eveL, { ...samT, role: 'va' }]), AH({}, [eveL, samT, { id: 'ps2', fullName: 'X', technicianName: 'Sam', role: 'owner' }]), AH({}, [eveL]),
+    AH({ employeeId: 'e1' }, [{ id: 'pc', fullName: 'Cal', role: 'technician' }, samT]), AH({ options: { standIn: false } }, [eveL, samT]), AH({ standInId: 'e3' }, [eveL]), AH({}, null)],
+    ['Lead and call alerts only reach an owner, manager or office stand-in.', '', '', '', '', '', '', '', ''],
+    'stand-in alerts hint: an office person away with a technician-only stand-in; not for an office stand-in, a stand-in with no login (the warning above covers it), a technician away, or no stand-in');
+  assertEqual(AH({ employeeId: 'e1' }, [{ id: 'po', fullName: 'Cal', role: 'owner' }, samT]), 'Lead and call alerts only reach an owner, manager or office stand-in.', 'stand-in alerts hint: an owner away too');
+  // stage 3 follow-up 5: the office logins of a card, on shift today, and the vacation that asks their app to end it
+  const SL = sb.vacationShiftLogins([eveL, { id: 'pt', fullName: 'Eve', role: 'technician' }, { id: 'pw', fullName: 'Eve', technicianName: 'Sam', role: 'va' }, { id: 'po', fullName: 'Eve', role: 'owner' }, null], employees, 'e3');
+  assertEqual([SL.map(p => p.id), sb.vacationShiftLogins([eveL], employees, '').length, sb.vacationShiftLogins(null, employees, 'e3').length], [['pe'], 0, 0], 'shift logins: only the VA logins of that card (the Jobs & Commissions name first: pw is Sam\'s)');
+  assertEqual([sb.vacationOnShift({ onDuty: true, onDutyDate: '2026-10-22' }, '2026-10-22'), sb.vacationOnShift({ onDuty: true, onDutyDate: '2026-10-21' }, '2026-10-22'), sb.vacationOnShift({ onDuty: false, onDutyDate: '2026-10-22' }, '2026-10-22'), sb.vacationOnShift(null, '2026-10-22')],
+    [true, false, false, false], 'on shift: on duty today only (yesterday\'s shift is over)');
+  const veS = V({ id: 've', employeeId: 'e3', employeeName: 'Eve', startsOn: '2026-10-22', endsOn: '2026-10-23', options: ALL(), endShift: true });
+  const eveOn = { ...eveL, onDuty: true, onDutyDate: '2026-10-22' };
+  const EF = (vacs, prof = eveOn) => (sb.vacationEndShiftFor(vacs, prof, '2026-10-22', SYD, employees) || { id: null }).id;
+  assertEqual([EF([veS]), EF([{ ...veS, endShift: false }]), EF([veS], { ...eveOn, onDuty: false }), EF([veS], { ...eveOn, onDutyDate: '2026-10-21' }), EF([{ ...veS, startsOn: '2026-10-23' }]), EF([veS], { ...eveOn, role: 'technician' }), EF([{ ...veS, endedAt: '2026-10-21T13:30:00Z' }]), EF([veS], null), EF([veS], { ...eveOn, fullName: 'Nobody' })],
+    ['ve', null, null, null, null, null, null, null, null], 'end shift for: a VA on shift today, a vacation in force today with the marker; else nothing (no marker, off shift, starting tomorrow, not a VA, ended early, someone else)');
+  assertEqual(EF([veS], eveOn), (sb.vacationEndShiftFor([veS], eveOn, '2026-10-22', SYD, []) || {}).id, 'end shift for: the same without the employees (a VA can\'t read them: the name on the row)');
 
   // the person's own banner
   assertEqual(sb.vacationBannerText(v1, 'Sam', '2026-10-21', SYD, true), "You're on vacation until 24 Oct. No app notifications come to you, Sam gets them. No shift clock while you're away. The app works as usual.", 'banner: every tick, office staff');
@@ -2906,9 +2938,18 @@ function testVacationUi(sb){
   // A2: one time zone helper per layer (stage 1's), no zone code of the vacations' own.
   assertEqual([/function vacation(Tz|Today|DayOf)\(/.test(script), /region\.timezone|region \? c\.region\.timezone/.test(script)], [false, false], 'review A2: no vacationTz / vacationToday / vacationDayOf, nothing reads the lowercase region.timezone');
   // A3: employee_vacations on its own realtime channel, only when the list loaded, removed with the rest.
-  const rt = fx('setupRealtimeSubscriptions'), shared = rt.slice(0, rt.indexOf('.subscribe()'));
-  assertEqual([shared.includes('employee_vacations'), rt.includes("sb.channel('vacations-realtime')"), /if \(!VACATIONS_CHANNEL && STATE\.data && !STATE\.data\.vacationsError\)/.test(rt), fx('teardownRealtimeSubscriptions').includes('sb.removeChannel(VACATIONS_CHANNEL)')],
+  const rt = fx('setupRealtimeSubscriptions'), shared = rt.slice(0, rt.indexOf('.subscribe()')), rv = fx('setupVacationsChannel');
+  assertEqual([shared.includes('employee_vacations'), rt.includes('setupVacationsChannel();') && rv.includes("sb.channel('vacations-realtime')"), /if \(VACATIONS_CHANNEL \|\| !STATE\.data \|\| STATE\.data\.vacationsError\) return;/.test(rv), fx('teardownRealtimeSubscriptions').includes('sb.removeChannel(VACATIONS_CHANNEL)')],
     [false, true, true, true], 'review A3: vacations never join the shared channel; their own channel only when the list loaded; torn down on logout');
+  // stage 3 follow-ups 5 and 7: a later load that works subscribes; the save offers to end a shift; the app of the person away ends it
+  const lfs = fx('loadFromSupabase');
+  assertEqual([lfs.indexOf('if (STATE.dataLoaded) setupVacationsChannel();') > lfs.indexOf('STATE.data = data;'), /STATE\.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions\(\)/.test(script)], [true, true], 'follow-up 7: loadFromSupabase subscribes after a later load that worked (the first boot is setupRealtimeSubscriptions\')');
+  const vsn = fx('vacationSaveNow');
+  assertEqual([/^[^{]*\{\s*if \(readOnlyReason\(\)\)/.test(vsn), /if \(endShift\) row\.options = \{ \.\.\.row\.options, endShift: true \};/.test(vsn), vsn.indexOf('db.vacations.setPrivate(') < vsn.indexOf('logEmployeeActivity(') && vsn.indexOf('db.vacations.setPrivate(') > 0],
+    [true, true, true], 'follow-up 5: the save itself checks read-only mode, sends the marker only when asked, the private row before the History line');
+  const vse = vaSessionStart => vaSessionStart.indexOf('vacationEndOwnShift();') > 0 && vaSessionStart.indexOf('vacationEndOwnShift();') < vaSessionStart.lastIndexOf('render();');
+  assertEqual([vse(fx('vaSessionStart')), /if \(VAC_SHIFT_ENDING \|\| !STATE\.data \|\| VIEW_AS_ID \|\| PRESENT \|\| readOnlyReason\(\)\) return;/.test(fx('vacationEndOwnShift')), /setMyShift\(false\)\.finally/.test(fx('vacationEndOwnShift')), /set_phone_duty|rpc\(/.test(fx('vacationEndOwnShift'))],
+    [true, true, true, false], 'follow-up 5: opening the app ends a marked shift; never in a read-only mode; only through the VA\'s own setMyShift (no shift RPC of its own)');
   // A4: "back tomorrow" is a card in Settings → Notifications, on unless switched off, to the person and the owners.
   const Rn = { waitMinutes: 15, from: 7, until: 19, docDays: 30, unpaidDays: 7 }, vb = sb.notifyCards({}, Rn, {}).find(c => c.id==='vacationBack');
   assertEqual([vb.on, vb.officeOk, vb.alsoTo, vb.sub.includes('Sent between 7 am and 7 pm'), sb.notifyCards({ vacationBack: { on: false } }, Rn, {}).find(c => c.id==='vacationBack').on, sb.notifyOn(undefined, 'vacationBack')],
@@ -4923,7 +4964,54 @@ function testNavStep3(sb){
     [true, true], 'the guard is armed at the first tap (pointerup, before the click\'s own entry) and at each start');
 }
 
+// Stage 3 follow-ups 5 and 7 (Ofek 15 Oct), run in a sandbox: the vacations channel subscribes once, only when the list
+// loaded, and each change may end the shift; the save asks "End their shift now?" only for a VA on shift today.
+async function testVacationFollowUps(){
+  console.log('\nPeople: vacations, follow-ups 5 and 7 (sandbox)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const chans = [], fired = [];
+  const ctx = { console, STATE: { data: { vacationsError: 'the vacations list did not load' } },
+    sb: { channel(name){ const c = { name, ons: [], on(ev, f, cb){ c.ons.push(cb); return c; }, subscribe(){ chans.push(c); return c; } }; return c; } },
+    handleListRealtimeChange: (k, map) => p => fired.push(['list', k, typeof map]), vacationWithNote: v => v, mapVacationRow: r => r, vacationEndOwnShift: () => fired.push(['endShift']) };
+  vm.createContext(ctx);
+  vm.runInContext('var VACATIONS_CHANNEL = null;\n' + extractDecl(script, 'setupVacationsChannel') + '\nthis.__s = setupVacationsChannel; this.__ch = () => VACATIONS_CHANNEL;', ctx);
+  ctx.__s();
+  const afterFail = chans.length;
+  ctx.STATE.data = { vacationsError: '' };
+  ctx.__s(); ctx.__s();
+  assertEqual([afterFail, chans.length, chans[0] && chans[0].name, !!ctx.__ch()], [0, 1, 'vacations-realtime', true], 'channel: not while the list failed to load; a later load that worked subscribes, once');
+  chans[0].ons[0]({ eventType: 'UPDATE', new: { id: 'v1' } });
+  assertEqual(fired, [['list', 'vacations', 'function'], ['endShift']], 'channel: each change updates the list, then may end this login\'s shift');
+
+  // the save's question (saveVacationModal): a VA card, in force today, on shift (read fresh) → asked; else saved straight away
+  const run = async ({ startsOn = '2026-10-22', onDuty = true, profiles, readError = false } = {}) => {
+    const log = { reads: [], saves: [], confirms: [] };
+    const sx = { console, VAC_UI: null, PRESENT: false, VIEW_AS_ID: null,
+      STATE: { data: { vacations: [], employees: [{ id: 'e3', name: 'Eve Ray' }, { id: 'e2', name: 'Sam' }] }, profiles: profiles || [{ id: 'pe', fullName: 'Eve Ray', role: 'va', onDuty: false, onDutyDate: '2026-10-22' }] },
+      sb: { from: t => ({ select: cols => ({ in: (k, ids) => { log.reads.push([t, cols, ids]); return Promise.resolve(readError ? { data: null, error: { message: 'x' } } : { data: ids.map(id => ({ id, role: 'va', on_duty: onDuty, on_duty_date: '2026-10-22' })), error: null }); } }) }) },
+      bizTz: () => 'Australia/Sydney', todayStr: () => '2026-10-22', canSetVacation: () => true, vacationFormProblems: () => [], modalError: () => {}, showToast: () => {},
+      vacationSaveNow: (ui, end) => log.saves.push(end), confirmAction: (m, fn, o) => log.confirms.push({ m, fn, o }) };
+    vm.createContext(sx);
+    vm.runInContext(['readOnlyReason', 'vacationEmployeeOfProfile', 'vacationShiftLogins', 'vacationOnShift', 'saveVacationModal'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__save = saveVacationModal;', sx);
+    sx.VAC_UI = { draft: { employeeId: 'e3', startsOn, endsOn: '2026-10-24', options: {}, standInId: null }, saving: false };
+    await sx.__save();
+    return { log, ui: sx.VAC_UI };
+  };
+  const a = await run();
+  assertEqual([a.log.reads, a.log.saves, a.log.confirms.length, a.ui.saving], [[['profiles', 'id, role, on_duty, on_duty_date', ['pe']]], [], 1, false], 'save: a VA on shift (read fresh, not the stale copy) → asked first, nothing saved yet');
+  const q = a.log.confirms[0];
+  assertEqual([q.m, q.o.title, q.o.confirmLabel, q.o.cancelLabel, q.o.alt.label, q.o.danger],
+    ['Eve is on shift now. End their shift now? Their app ends it the moment it is open; otherwise it ends by itself tonight.', 'On shift now', 'End their shift now', 'Back', 'Keep the shift', false], 'save: the question says what really happens');
+  q.fn(); q.o.alt.fn();
+  assertEqual(a.log.saves, [true, false], 'save: "End their shift now" saves with the marker, "Keep the shift" without');
+  const b = await run({ onDuty: false }), c = await run({ startsOn: '2026-10-23' }), d = await run({ profiles: [{ id: 'pt', fullName: 'Eve Ray', role: 'technician' }] });
+  assertEqual([b.log.saves, b.log.confirms.length, c.log.reads.length, c.log.saves, d.log.reads.length, d.log.saves], [[false], 0, 0, [false], 0, [false]], 'save: off shift, starting tomorrow or no office login → saved straight away (no read when there is nothing to ask)');
+  const e = await run({ readError: true, profiles: [{ id: 'pe', fullName: 'Eve Ray', role: 'va', onDuty: true, onDutyDate: '2026-10-22' }] });
+  assertEqual([e.log.confirms.length, e.log.saves], [1, []], 'save: the fresh read failed → the copy the app has decides');
+}
+
 (async () => {
+  await testVacationFollowUps();
   await testAuthProvidersNoLoop();
   await testAutomationsLoaderNoLoop();
   await testAutomationEventsGate();
