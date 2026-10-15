@@ -142,6 +142,8 @@ const DECLS = [
   // Saving keeps the place, the settings search, drag & drop on every upload (round 3, A-ux: T1.8, T1.10, T1.1)
   'motionPageKey', 'renderViewKey', 'renderScrollPlan', 'settingsNavText', 'settingsNavMatch',
   'RECEIPT_TYPES', 'MAX_FILE_MB', 'DROP_RULES', 'dropFileType', 'dropAccepts', 'dropCheck', 'dropRoutePlan', 'dropZoneAttrs',
+  // Stage 5 review fixes after the rebase: the tax field's label, an undo still running
+  'mcpShownLabel', 'MCP_UNDO_STALE_MS', 'mcpUndoPending',
 ];
 
 function extractDecl(source, name){
@@ -2256,6 +2258,11 @@ function testMcpConnector(sb){
     [true, true, false, false, false, false], 'mcpCanUndo: once, when it added something and has finished');
   assertEqual([sb.mcpRunLine({ ...run, undo_started_at: '2026-10-13T21:00:00Z' }, NOW), sb.mcpCanUndo({ inserted: 3, status: 'done', undo_started_at: 'x' })],
     ['Today 7:52 am · 14 fetched, 12 added, 2 already in the app · undo not finished: press Undo again to finish it', true], 'mcpRunLine / mcpCanUndo: an undo that stopped in the middle says so, and Undo stays (pressing it again resumes)');
+  // an undo that started less than 10 minutes ago may still be running (the server refuses a second Undo until then)
+  assertEqual([sb.mcpRunLine({ ...run, undo_started_at: '2026-10-13T21:25:00Z' }, NOW), sb.mcpRunLine({ ...run, undo_started_at: '2026-10-13T21:20:00Z' }, NOW), sb.mcpRunLine({ ...run, undo_started_at: 'x' }, NOW)],
+    ['Today 7:52 am · 14 fetched, 12 added, 2 already in the app · being undone… (if it stopped, Undo can finish it after Today 8:35 am)',
+      'Today 7:52 am · 14 fetched, 12 added, 2 already in the app · undo not finished: press Undo again to finish it',
+      'Today 7:52 am · 14 fetched, 12 added, 2 already in the app · undo not finished: press Undo again to finish it'], 'mcpRunLine: an undo under 10 minutes old says it is being undone (pressing Undo would be refused); from 10 minutes it can be finished');
   // people, reasons, lines
   assertEqual([sb.mcpReasonText('owners only'), sb.mcpReasonText('Only owners and managers can make keys.'), sb.mcpReasonText('not allowed'), sb.mcpReasonText('host blocked'), sb.mcpReasonText('That address is private or local, so OPS won\'t call it.'), sb.mcpReasonText('The server took too long.'), sb.mcpReasonText(''), sb.mcpReasonText('Weird thing'), sb.mcpReasonText('server')],
     ['Only an owner can do this.', 'Only owners and managers can make keys.', 'Only owners and managers can make keys.', 'That address isn\'t allowed: it must be a public https address.', 'That address isn\'t allowed: it must be a public https address.', 'The server didn\'t answer within 15 seconds.', 'Something went wrong. Try again.', 'Weird thing', 'Something went wrong on the server. Try again.'], 'mcpReasonText: the function\'s reasons in plain words');
@@ -2282,8 +2289,8 @@ function testMcpConnector(sb){
   const T2 = n => extractDecl(script, n);
   assertEqual([T2('mcpLoad').includes('if (MCP_UI.loading) { if (force) MCP_UI.again = true; return MCP_UI.loading; }'), /\brender\(\)/.test(T2('mcpLoad')), T2('mcpLoadLog').includes('if (MCP_UI.logLoading) return MCP_UI.logLoading'), /\brender\(\)/.test(T2('mcpLoadLog'))], [true, false, true, false], 'MCP loaders: memoized, and never render() themselves (only mcpRedraw, after the read)');
   const loadSrc = T2('mcpLoad');
-  assertEqual([(loadSrc.match(/mcp_import_runs[^\n]*/g) || []).map(l => /\.eq\('rule_id', r\.id\)/.test(l) ? 'per rule' : /\.is\('rule_id', null\)\.is\('undone_at', null\)/.test(l) ? 'deleted rules, not undone' : 'other'), loadSrc.includes('mcpRunLimit(r.id) + 1'), T2('mcpImportsBlock').includes("onclick=\"mcpMoreRuns('${rid}')\"")],
-    [['deleted rules, not undone', 'per rule'], true, true], 'import history: read per rule (one more than shown, so "Older imports" can page back), never one capped list for all rules; deleted rules\' imports that can still be undone are read apart');
+  assertEqual([(loadSrc.match(/mcp_import_runs[^\n]*/g) || []).map(l => /\.is\('rule_id', null\)\.is\('undone_at', null\)/.test(l) ? 'deleted rules, not undone' : 'other'), loadSrc.includes('mcpRunsOf(r.id, mcpRunLimit(r.id) + 1)'), /\.eq\('rule_id', ruleId\)/.test(T2('mcpRunsOf')), T2('mcpImportsBlock').includes("onclick=\"mcpMoreRuns('${rid}')\"")],
+    [['deleted rules, not undone'], true, true, true], 'import history: read per rule (one more than shown, so "Older imports" can page back), never one capped list for all rules; deleted rules\' imports that can still be undone are read apart');
   assertEqual([/if \(MCP_UI\.again\) return;/.test(T2('mcpLoad')), T2('mcpLoad').includes('if (MCP_UI.again) { MCP_UI.again = false; mcpLoad(true); } else mcpRedraw();')], [true, true],
     'mcpLoad: a forced read asked for during a running one drops that answer (it may be from before the change) and reads once more');
   assertEqual([T2('mcpRedraw').includes("getElementById('mcp-keys-list')"), T2('mcpRedraw').includes('mcpKeepTyping(render)'), T2('mcpRuleModal').includes("if (!open && !document.querySelector('#modal-root .mcp-rule'))"), (script.match(/mcpRuleModal\(true\)/g) || []).length],
@@ -2305,6 +2312,36 @@ function testMcpConnector(sb){
   assertEqual([T2('mcpWhoBlock').includes('setToggle('), /Owners and managers/.test(T2('mcpWhoBlock'))], [false, true], 'Settings: "Who may make keys" says owners and managers, with nothing to switch');
   assertEqual([sb.PAGE_PICK.some(p => p[0]==='mcp'), /\bmcp\b/.test(T2('canViewSection')), /\bmcp\b/.test(extractDecl(script, 'SECTION_LABEL')), /\bmcp\b/.test(extractDecl(script, 'ALL_SECTIONS'))], [false, false, false, false], 'the mcp permission is not a page: PAGE_PICK, SECTION_LABEL, ALL_SECTIONS and canViewSection are unchanged');
   assertEqual([sb.CAT_NAMES.mcp, sb.settingsHistParts('Private connector (MCP): key "x" made')], ['Private connector (MCP)', { where: 'Private connector (MCP)', what: 'key "x" made' }], 'Settings history: the private connector\'s lines are grouped under it');
+  // Stage 5 review fixes after the rebase
+  // the jobs mapping's tax field says the business's own tax name (Settings → Region), as every other screen
+  {
+    const keep = sb.STATE.data.settings, setRegion = region => { sb.STATE.data.settings = { gstRatePercent: 10, catalog: region ? { region } : {} }; };
+    const shown = () => [sb.mcpFieldLabel('jobs', 'includes_gst'), sb.mcpMappingRows('jobs', {}).find(r => r.target==='includes_gst').label, sb.mcpFieldLabel('jobs', 'amount')];
+    setRegion(null); const au = shown();
+    setRegion({ country: 'GB' }); const gb = shown();
+    setRegion({ country: 'US', state: 'TX' }); const us = shown();
+    setRegion({ taxName: 'IVA' }); const own = shown();
+    sb.STATE.data.settings = keep;
+    assertEqual([au, gb, us, own], [['Includes GST', 'Includes GST', 'Amount'], ['Includes VAT', 'Includes VAT', 'Amount'], ['Includes Sales tax', 'Includes Sales tax', 'Amount'], ['Includes IVA', 'Includes IVA', 'Amount']],
+      'MCP import mapping: "Includes GST" follows the region\'s tax name (GB = VAT, US = Sales tax, the business\'s own word)');
+  }
+  // an undo's "being undone" window is the function's UNDO_STALE_MS
+  assertEqual([fnObj(/export const RUN_STALE_MS = ([^;]+);/), fn.includes('export const UNDO_STALE_MS = RUN_STALE_MS;')], [sb.MCP_UNDO_STALE_MS, true], 'mcp function: Undo can resume after the same 10 minutes the page waits before saying "press Undo again"');
+  // "Older imports" pages back for real: no cap on how many a rule shows, read 1,000 a request
+  {
+    const ctx = { MCP_UI: { runLimit: { r1: 1205, r2: 'x' } }, calls: [] };
+    const runs = Array.from({ length: 2300 }, (_, i) => ({ id: 'run' + String(i).padStart(5, '0'), rule_id: 'r1', started_at: new Date(Date.parse('2026-10-14T00:00:00Z') - i * 3600e3).toISOString() }));
+    ctx.sb = { from: t => { const q = { f: [], select(){ return q; }, eq(k, v){ q.f.push([k, v]); return q; }, order(){ return q; },
+      range(a, z){ ctx.calls.push([t, a, z]); const rows = runs.filter(r => q.f.every(([k, v]) => r[k]===v)); return Promise.resolve({ data: rows.slice(a, Math.min(z + 1, a + 1000)), error: null }); } }; return q; } };
+    vm.createContext(ctx);
+    vm.runInContext([extractDecl(script, 'MCP_RUN_COLS'), extractDecl(script, 'mcpRunLimit'), extractDecl(script, 'mcpRunsOf')].join('\n') + '\nthis.T = { mcpRunLimit, mcpRunsOf };', ctx);
+    assertEqual([ctx.T.mcpRunLimit('r1'), ctx.T.mcpRunLimit('r2'), ctx.T.mcpRunLimit('r3')], [1205, 5, 5], 'mcpRunLimit: as many as "Older imports" asked for (no 500 cap); 5 to start');
+    (async () => {
+      const got = await ctx.T.mcpRunsOf('r1', 1206), few = await ctx.T.mcpRunsOf('r1', 6), none = await ctx.T.mcpRunsOf('r9', 6);
+      assertEqual([got.data.length, got.data[1205].id, ctx.calls.slice(0, 2), few.data.length, none.data.length, ctx.calls.length], [1206, 'run01205', [['mcp_import_runs', 0, 999], ['mcp_import_runs', 1000, 1205]], 6, 0, 4],
+        'mcpRunsOf: a rule\'s imports past 1,000 are read in pages (the 1,206th, from the hourly rule\'s 51st day, keeps its Undo); a short page stops');
+    })().catch(e => assertEqual(String(e), '', 'mcpRunsOf threw'));
+  }
 }
 
 testJobAttributionTags(loadSandbox());

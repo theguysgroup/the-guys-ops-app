@@ -400,7 +400,7 @@ function fakeRemote(o: any = {}) {
     // automation_settings.timezone is not read any more (stage 1: one zone for the whole business)
     const w = world({ automation_settings: [{ business_id: "default", timezone: "Europe/London" }] });
     eq([(await loadBusiness(w)).tz, w.selects.some(([t]: any) => t === "automation_settings")], [SYD, false], "loadBusiness: never reads automation_settings");
-    eq(await loadBusiness(world()), { companyName: "Demo Home Services", gstRate: 10, catalog: CAT, tz: SYD, mcp: { rateLimitPerMin: 60, logKeepDays: 90, importSource: "MCP import" } }, "loadBusiness");
+    eq(await loadBusiness(world()), { companyName: "Demo Home Services", gstRate: 10, catalog: CAT, tz: SYD, office: "Office", mcp: { rateLimitPerMin: 60, logKeepDays: 90, importSource: "MCP import" } }, "loadBusiness");
     // the whole function in Chicago: whoami's day, and a list's default range
     const wc = zoned(CHI), kc = await keysFor(wc);
     const who = sc(await call(wc, kc["u-owner"], "whoami"));
@@ -801,6 +801,18 @@ function fakeRemote(o: any = {}) {
     eq(ids(sc(await call(sb, K["u-riley"], "list_tasks", { limit: 1 })).rows), ["t5"], "list_tasks limit 1: the earliest due");
     const t = sc(await call(sb, K["u-riley"], "list_tasks", {})).rows.find((x: any) => x.id === "t1");
     eq([t.notes.length, t.subtasks, t.assignees, t.board, t.due], [300, 2, ["Riley"], "Riley", "2026-10-15"], "a task row (notes clipped to 300, subtasks counted)");
+    // the office board (storage key 'ron') is shown by the office's name (catalog.labels.office, default "Office"), never by the key
+    {
+      const wo = world(), ko = await keysFor(wo);
+      wo.T.tasks.push({ id: "t6", title: "Office task", board: "ron", status: "To do", due: null, assignees: [], assigned_to: null, contact_id: null });
+      const boardOf = async () => sc(await call(wo, ko["u-owner"], "list_tasks", {})).rows.find((x: any) => x.id === "t6").board;
+      const b1 = await boardOf();
+      wo.T.settings[0].catalog = { ...CAT, labels: { office: "  Front desk team of the whole company  " } };
+      const b2 = await boardOf();
+      wo.T.settings[0].catalog = { ...CAT, labels: { office: "   " } };
+      eq([b1, b2, await boardOf()], ["Office", "Front desk team of the whole c", "Office"], "list_tasks: the office board is \"Office\" or the business's own office name (trimmed, 30 characters), never 'ron'");
+      eq([officeOf(null), officeOf({ labels: "x" }), officeOf({ labels: { office: "Desk" } })], ["Office", "Office", "Desk"], "officeOf: the app's officeLabel() rule");
+    }
 
     // calls (dates in Sydney, across the daylight-saving change on 4 Oct)
     const k4 = sc(await call(sb, K["u-riley"], "list_calls", { from: "2026-10-04", to: "2026-10-04" }));
@@ -1304,10 +1316,24 @@ function fakeRemote(o: any = {}) {
     eq([C_(F.contacts.email, " ANN@Example.COM "), C_(F.contacts.email, "nope"), C_(F.contacts.email, "a,b@x.co")], [{ ok: true, value: "ann@example.com" }, { ok: false, reason: "is not a valid email" }, { ok: false, reason: "is not a valid email" }], "coerceField email");
     eq([C_(F.contacts.phone, " 0412 345 678 "), C_(F.contacts.phone, "9".repeat(50)).ok && (C_(F.contacts.phone, "9".repeat(50)) as any).value.length], [{ ok: true, value: "0412 345 678" }, 40], "coerceField phone: kept as written, clipped to 40");
     eq([C_(F.jobs.date, "2026-10-14"), C_(F.jobs.date, "2026-10-14T23:30:00Z"), C_(F.jobs.date, "soon"), C_(F.jobs.date, "2026-02-30")], [{ ok: true, value: "2026-10-14" }, { ok: true, value: "2026-10-15" }, { ok: false, reason: "is not a date" }, { ok: false, reason: "is not a date" }], "coerceField day: kept; a timestamp → its day in the business's zone; not a date");
+    // a date-time with no zone is the day as written (never moved through the business's zone); one with a zone is its day there
+    {
+      const Cz = (zone: string, v: string) => (coerceField(F.jobs.date, v, { ...cx, tz: zone }) as any).value ?? "bad";
+      eq([Cz(SYD, "2026-09-30T18:00:00"), Cz(SYD, "2026-09-30 15:30"), Cz(SYD, "2026-09-30T23:59:59.999"), Cz(SYD, "Sep 30 2026 22:00")],
+        ["2026-09-30", "2026-09-30", "2026-09-30", "2026-09-30"], "coerceField day: Sydney, an evening wall time with no zone stays that day");
+      eq([Cz(CHI, "09/30/2026"), Cz(CHI, "Sep 30 2026"), Cz(CHI, "2026-09-30T00:00:00"), Cz(CHI, "2026-09-30 00:00")],
+        ["2026-09-30", "2026-09-30", "2026-09-30", "2026-09-30"], "coerceField day: Chicago, a bare or midnight date with no zone is not the day before");
+      eq([Cz(SYD, "2026-09-30T18:00:00Z"), Cz(SYD, "2026-09-30T18:00:00+00:00"), Cz(SYD, "2026-09-30T18:00:00.000+1000"), Cz(CHI, "2026-09-30T02:00:00Z"), Cz(SYD, "Wed, 30 Sep 2026 18:00:00 GMT"), Cz(CHI, "2026-09-30T23:00:00-05:00")],
+        ["2026-10-01", "2026-10-01", "2026-09-30", "2026-09-29", "2026-10-01", "2026-09-30"], "coerceField day: a time with Z, an offset or GMT → its day in the business's zone");
+      eq([Cz(SYD, "2026-13-01T10:00"), Cz(SYD, "2026-02-30 10:00"), [ZONED_TIME.test("09-30-2026"), ZONED_TIME.test("2026-09-30"), ZONED_TIME.test("18:00Z"), ZONED_TIME.test("18:00 +10")]],
+        ["bad", "bad", [false, false, true, true]], "coerceField day: an impossible date with a time is not a date; a date's dashes are not an offset");
+    }
     eq([C_(F.jobs.amount, "$1,234.50"), C_(F.jobs.amount, 99.999), C_(F.jobs.amount, "abc"), C_(F.jobs.amount, -5), C_(F.jobs.amount, "$"), C_(F.jobs.amount, 2e7)],
       [{ ok: true, value: 1234.5 }, { ok: true, value: 100 }, { ok: false, reason: "is not an amount" }, { ok: false, reason: "is not an amount" }, { ok: false, reason: "is not an amount" }, { ok: false, reason: "is not an amount" }], "coerceField money: $ and commas dropped, cents; not a number, negative or over 10 million refused");
     eq([C_(F.jobs.includes_gst, "Yes"), C_(F.jobs.includes_gst, "0"), C_(F.jobs.includes_gst, true), C_(F.jobs.includes_gst, 1), C_(F.jobs.includes_gst, "maybe")],
       [{ ok: true, value: true }, { ok: true, value: false }, { ok: true, value: true }, { ok: true, value: true }, { ok: false, reason: "is not yes/no" }], "coerceField bool");
+    eq([mapItem("jobs", { customer_name: "c", includes_gst: "g" }, { c: "Ann", g: "maybe" }, { ...cx, tax: "VAT" }).errors, mapItem("jobs", { customer_name: "c", includes_gst: "g" }, { c: "Ann", g: "maybe" }, cx).errors],
+      [["Includes VAT is not yes/no"], ["Includes GST is not yes/no"]], "mapItem: the tax field's problem says the business's own tax name");
     eq([C_(F.jobs.payment_status, "paid"), C_(F.jobs.payment_status, "maybe"), C_(F.tasks.status, "in progress")], [{ ok: true, value: "Paid" }, { ok: false, reason: "is not one of: Paid, Unpaid" }, { ok: true, value: "In Progress" }], "coerceField enum: the canonical value, or the list");
     eq([C_(F.contacts.tags, "a, b,,a"), (C_(F.contacts.tags, Array.from({ length: 25 }, (_, k) => "t" + k)) as any).value.length, C_(F.contacts.tags, [{}])], [{ ok: true, value: ["a", "b"] }, 20, { ok: false, reason: "is not a list of tags" }], "coerceField tags: split, trimmed, empties dropped, de-duplicated, at most 20");
     eq([C_(F.contacts.tags, [" VIP ", "vip", "Vip customer", "x".repeat(70)])], [{ ok: true, value: ["VIP", "Vip customer", "x".repeat(60)] }], "coerceField tags: as the lead card keeps them (trimmed, at most 60 characters, one of each whatever the case, the first spelling kept)");
@@ -1621,6 +1647,11 @@ function fakeRemote(o: any = {}) {
           calls: [{ id: "c9", contact_id: "K3" }], tasks: [{ id: "T1", updates: [{ text: "done" }], subtasks: [] }, { id: "T2", updates: [], subtasks: [] }, { id: "T3", updates: [], subtasks: [{ t: 1 }] }] });
         eq([[...await usedSince(wz, "contacts", ["K1", "K2", "K3", "K4", "K5"])].sort(), [...await usedSince(wz, "jobs", ["J1", "J2", "J3"])].sort(), [...await usedSince(wz, "tasks", ["T1", "T2", "T3"])].sort()],
           [["K1", "K2", "K3", "K5"], ["J1", "J2"], ["T1", "T3"]], "usedSince: a grown thread, a stage move, a call, a linked job; a job a closing or lead points at; a task with updates or subtasks");
+        // a review request waiting to go out for an imported job keeps the job (else the text still goes, for a job that is gone)
+        const wr = iw({ review_requests: [{ id: "rr1", job_id: "J3", status: "waiting" }, { id: "rr2", job_id: null, status: "sent" }] });
+        eq([...await usedSince(wr, "jobs", ["J3", "J4"])], ["J3"], "usedSince: a job with a review request (waiting or sent) is used");
+        const wrx = fakeDb(JSON.parse(JSON.stringify(iw().T)), { users: USERS(), jwts: JWTS, fail: ["review_requests"] });
+        eq([...await usedSince(wrx, "jobs", ["J4"])], ["J4"], "usedSince: review requests that can't be read keep the job");
         const wf = fakeDb(JSON.parse(JSON.stringify(wz.T)), { users: USERS(), jwts: JWTS, fail: ["lead_messages"] });
         eq([...await usedSince(wf, "contacts", ["K4"])], ["K4"], "usedSince: a check that can't be read keeps the record (never deletes blind)");
         // a lead with 1,500 texts and 1,200 history entries sits in front of the others: the server answers at most 1,000
@@ -1678,6 +1709,10 @@ function fakeRemote(o: any = {}) {
       const ann = wr.T.jobs.find((j: any) => j.invoice_number === "3001");
       eq([cr.status, cr.inserted, cr.errors.map((e: any) => e.reason), ann.technician, ann.commission_percent, ann.includes_gst, wr.T.jobs.some((j: any) => j.invoice_number === "3002")],
         ["partial", 1, ["Technician is not someone on the team"], "Gabe", 30, true, false], "jobs import: Dan's rate 30% filled in, GST on as in the app; a technician who isn't on the team is a problem row, not an invisible job");
+      // automatic review asking queued a text for the imported job: Undo keeps that job (its text would still go out)
+      wr.T.review_requests = [{ id: "rr-ann", job_id: ann.id, invoice_number: "3001", status: "waiting" }];
+      const urr = await manage(wr, "undo_import", "u-owner", { run_id: cr.id }, T1 + 60e3);
+      eq([urr.body, wr.T.jobs.some((j: any) => j.id === ann.id)], [{ ok: true, deleted: 0, kept: 1, paused: false }, true], "undo_import: an imported job with a waiting review request is kept");
       const wt = iw();
       const RT = (await save(wt, { ...RULE, kind: "tasks", name: "Tasks", mapping: { title: "t", due: "d", assigned_to: "who" }, dedupe: { fields: ["title", "due"], match: "all" } }, "u-owner", NOW)).body.rule;
       answerWith([{ t: "Call Ann", d: "2026-10-20", who: "gabe" }, { t: "Call Bob", d: "2026-10-21", who: "Stranger" }, { t: "Call Cy", d: "2026-10-22" }]);

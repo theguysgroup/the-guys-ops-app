@@ -6193,15 +6193,17 @@ const MCP_IMPORT_FIELDS = {
 };
 // The one field each kind must have (the function's required fields).
 const MCP_IMPORT_REQUIRED = { contacts: 'full_name', jobs: 'customer_name', tasks: 'title' };
+// A field's label as shown: the tax field says the business's own tax name (Settings → Region: GST, VAT, Sales tax…).
+function mcpShownLabel(target, label){ return target==='includes_gst' ? `Includes ${taxName()}` : label; }
 // The label of a field ('' when the kind has no such field).
-function mcpFieldLabel(kind, target){ return ((MCP_IMPORT_FIELDS[kind] || []).find(f => f[0]===target) || [, ''])[1]; }
+function mcpFieldLabel(kind, target){ const f = (MCP_IMPORT_FIELDS[kind] || []).find(x => x[0]===target); return f ? mcpShownLabel(f[0], f[1]) : ''; }
 // The mapping as one row per field: mode 'path' (from the data), 'value' (always this value) or '' (not used).
 function mcpMappingRows(kind, mapping){
   const m = mapping && typeof mapping==='object' && !Array.isArray(mapping) ? mapping : {};
   return (MCP_IMPORT_FIELDS[kind] || []).map(([target, label]) => {
     const e = Object.prototype.hasOwnProperty.call(m, target) ? m[target] : null, path = typeof e==='string' ? e : e && typeof e==='object' && typeof e.path==='string' ? e.path : null;
     const mode = path !== null ? 'path' : e && typeof e==='object' && 'value' in e ? 'value' : '';
-    return { target, label, mode, text: mode==='path' ? path : mode==='value' ? String(e.value == null ? '' : e.value) : '' };
+    return { target, label: mcpShownLabel(target, label), mode, text: mode==='path' ? path : mode==='value' ? String(e.value == null ? '' : e.value) : '' };
   });
 }
 // The rows back to a mapping: known fields with a mode and some text, as { path } or { value }.
@@ -6290,12 +6292,21 @@ function mcpPreviewText(v, max){
   const lim = max == null ? 4000 : max, s = typeof v==='string' ? v : v===undefined ? '' : JSON.stringify(v, null, 2);
   return s.length > lim ? s.slice(0, lim) + '\n… (cut at ' + lim.toLocaleString('en-AU') + ' characters)' : s;
 }
+// How long an undo may run before Undo can resume it (the function's UNDO_STALE_MS; parity test).
+const MCP_UNDO_STALE_MS = 10 * 60e3;
+// An undo that started but has not finished: still running (or stopped less than MCP_UNDO_STALE_MS ago, when the server
+// still refuses a second Undo), or stopped long enough ago that pressing Undo again finishes it.
+function mcpUndoPending(run, nowMs){
+  const at = Date.parse(run.undo_started_at), now = nowMs == null ? Date.now() : nowMs;
+  if (!Number.isFinite(at) || now - at >= MCP_UNDO_STALE_MS) return ' · undo not finished: press Undo again to finish it';
+  return ' · being undone… (if it stopped, Undo can finish it after ' + mcpWhen(new Date(at + MCP_UNDO_STALE_MS).toISOString(), now) + ')';
+}
 // One import in a rule's history: "Today 7:52 am · 14 fetched, 12 added, 2 already in the app".
 function mcpRunLine(run, nowMs){
   const r = run || {}, when = mcpWhen(r.started_at, nowMs), errs = Array.isArray(r.errors) ? r.errors : [], e = errs[0];
   if (r.status==='running') return when + ' · Running…';
   if (r.status==='failed' || r.status==='error') return when + ' · Failed' + (e ? ': ' + (typeof e==='string' ? e : e.reason || e.message || '') : '');
-  return `${when} · ${Number(r.fetched) || 0} fetched, ${Number(r.inserted) || 0} added, ${Number(r.duplicates) || 0} already in the app` + (errs.length ? `, ${errs.length} with problems` : '') + (r.undone_at ? ' · undone ' + mcpWhen(r.undone_at, nowMs) : r.undo_started_at ? ' · undo not finished: press Undo again to finish it' : '');
+  return `${when} · ${Number(r.fetched) || 0} fetched, ${Number(r.inserted) || 0} added, ${Number(r.duplicates) || 0} already in the app` + (errs.length ? `, ${errs.length} with problems` : '') + (r.undone_at ? ' · undone ' + mcpWhen(r.undone_at, nowMs) : r.undo_started_at ? mcpUndoPending(r, nowMs) : '');
 }
 // An import can be undone once: when it added something and has finished.
 function mcpCanUndo(run){ return !!run && Number(run.inserted) > 0 && !run.undone_at && run.status!=='running'; }
@@ -20082,8 +20093,8 @@ function mcpLoad(force){
       ]);
       const bad = res.find(x => x && x.error); if (bad) throw bad.error;
       // Each rule's own latest imports (mcpRunLimit, one more to know if there are older ones), so one busy hourly rule
-      // never pushes another rule's imports, and their Undo, off the page.
-      const per = owner ? await Promise.all((res[2].data || []).map(r => sb.from('mcp_import_runs').select(MCP_RUN_COLS).eq('rule_id', r.id).order('started_at', { ascending: false }).limit(mcpRunLimit(r.id) + 1))) : [];
+      // never pushes another rule's imports, and their Undo, off the page. Read in pages, however far back it goes.
+      const per = owner ? await Promise.all((res[2].data || []).map(r => mcpRunsOf(r.id, mcpRunLimit(r.id) + 1))) : [];
       const badRuns = per.find(x => x && x.error); if (badRuns) throw badRuns.error;
       if (MCP_UI.again) return;
       MCP_UI.tokens = res[0].data || [];
@@ -20373,7 +20384,20 @@ async function mcpRunTool(id){
 // added something).
 // The columns of an import run the page shows; how many of a rule's imports are shown (5, then 20 more a press).
 const MCP_RUN_COLS = 'id,rule_id,rule_name,kind,source,started_at,finished_at,status,fetched,inserted,duplicates,errors,undone_at,undone_by,undo_started_at';
-function mcpRunLimit(ruleId){ return Math.max(5, Math.min(500, Number(MCP_UI.runLimit && MCP_UI.runLimit[ruleId]) || 5)); }
+function mcpRunLimit(ruleId){ return Math.max(5, Math.floor(Number(MCP_UI.runLimit && MCP_UI.runLimit[ruleId])) || 5); }
+// A rule's newest n imports, newest first, read 1,000 at a time (the server's cap per request) until n or a short page, so
+// "Older imports" keeps going back however many imports an hourly rule has made (each one's Undo with it).
+async function mcpRunsOf(ruleId, n){
+  const out = [], PAGE = 1000;
+  for (let a = 0; a < n; a += PAGE) {
+    const z = Math.min(n, a + PAGE) - 1;
+    const { data, error } = await sb.from('mcp_import_runs').select(MCP_RUN_COLS).eq('rule_id', ruleId).order('started_at', { ascending: false }).order('id').range(a, z);
+    if (error) return { data: out, error };
+    out.push(...(data || []));
+    if ((data || []).length < z - a + 1) break;
+  }
+  return { data: out, error: null };
+}
 function mcpMoreRuns(ruleId){ const r = (MCP_UI.rules || []).find(x => x.id===ruleId); if (!r) return; MCP_UI.runLimit = { ...(MCP_UI.runLimit || {}), [ruleId]: mcpRunLimit(ruleId) + 20 }; MCP_UI.at = 0; mcpLoad(true); }
 function mcpRunHtml(run){
   return `<div class="mcp-run"><span>${esc(mcpRunLine(run))}</span>${mcpCanUndo(run) ? `<button type="button" class="btn small" onclick="mcpUndo('${esc(jsStr(run.id))}')">${ico('history', 14)} Undo</button>` : ''}</div>`;

@@ -651,7 +651,14 @@ export async function loadBusiness(sb: any) {
   // Settings → Region and format (stage 1): the one time zone of the business, as every other function reads it.
   const tz = bizTzOf(catalog);
   const gst = st ? Number(st.gst_rate_percent ?? 10) : 10;
-  return { companyName: (st && st.company_name) || "", gstRate: Number.isFinite(gst) ? gst : 10, catalog, tz, mcp: mcpSettings(catalog) };
+  return { companyName: (st && st.company_name) || "", gstRate: Number.isFinite(gst) ? gst : 10, catalog, tz, office: officeOf(catalog), mcp: mcpSettings(catalog) };
+}
+// The office's name (Settings → Phone, catalog.labels.office; nothing saved = "Office"), as the app's officeLabel() and
+// automations' officeOf(). The office board's storage key stays 'ron'; nobody is ever shown that key.
+// deno-lint-ignore no-explicit-any
+export function officeOf(cat: any): string {
+  const labels = cat && typeof cat === "object" && cat.labels && typeof cat.labels === "object" ? cat.labels : {};
+  const v = String(labels.office || "").trim(); return v ? v.slice(0, 30) : "Office";
 }
 export type Biz = Awaited<ReturnType<typeof loadBusiness>>;
 const JOB_COLS = "id, customer_name, invoice_number, date, technician, job_type, commission_percent, amount, includes_gst, payment_status, payment_method, parts_cost, parts_paid_by, parts_refund_status, date_paid, paid_to_technician, parts_pending_at, parts_refund_week, contact_id";
@@ -725,9 +732,9 @@ function jobOut(d: Calc, row: any) {
   };
 }
 // deno-lint-ignore no-explicit-any
-function taskOut(t: any) {
+function taskOut(c: Ctx, t: any) {
   return {
-    id: t.id, title: t.title || "", board: t.board || "", status: t.status || "", due: t.due || null, headsUp: t.heads_up || null, priority: t.priority || "",
+    id: t.id, title: t.title || "", board: t.board === "ron" ? c.biz.office : (t.board || ""), status: t.status || "", due: t.due || null, headsUp: t.heads_up || null, priority: t.priority || "",
     assignees: assigneeNames(t), client: t.client || "", category: t.category || "", notes: clip(t.notes, 300), subtasks: Array.isArray(t.subtasks) ? t.subtasks.length : 0,
   };
 }
@@ -807,7 +814,7 @@ export const TOOLS: Tool[] = [
         .filter((j: any) => jobVisible(c.s, j)).map((j: any) => jobOut(d, j)) : [];
       const tasks = c.s.tasks ? (await pageAll((a, z) => c.sb.from("tasks").select(TASK_COLS).eq("contact_id", args.id).order("id").range(a, z), 2 * PAGE)).rows
         // deno-lint-ignore no-explicit-any
-        .filter((t: any) => taskVisible(c.s, t)).map(taskOut) : [];
+        .filter((t: any) => taskVisible(c.s, t)).map((t: any) => taskOut(c, t)) : [];
       let calls = null;
       if (canViewSection(c.s.p, "crm")) {
         const { data: cl, error: ce } = await c.sb.from("calls").select(CALL_COLS).eq("contact_id", args.id).order("started_at", { ascending: false }).range(0, 9);
@@ -1034,7 +1041,7 @@ export const TOOLS: Tool[] = [
         rows.forEach((t) => { if (taskVisible(c.s, t) && (!args.mine || taskAssignedTo(t, c.s.p))) found.push(t); });
         if (found.length > args.limit || rows.length < PAGE) break;
       }
-      return listOf(found.map(taskOut), args.limit, scanTruncated);
+      return listOf(found.map((t) => taskOut(c, t)), args.limit, scanTruncated);
     },
   },
   {
@@ -2163,7 +2170,7 @@ export function catalogMatch(list: { key: string; label: string }[], v: string):
 // Where an unknown value of a list lands: the New stage, the catch-all service; an unknown source is left empty, so the
 // row gets the import's own source (catalog.mcp.importSource).
 export const CATALOG_FALLBACK: Record<CatalogSection, string> = { stages: NEW_STAGE, services: CATCH_ALL_SERVICE, sources: "" };
-export type MapCtx = { tz: string; people: string[]; lists?: CatalogLists; keys?: CatalogKeys };
+export type MapCtx = { tz: string; people: string[]; lists?: CatalogLists; keys?: CatalogKeys; tax?: string };
 
 // ── imports: pure helpers ──
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -2219,6 +2226,8 @@ const EMPTY_VALUE: Record<string, unknown> = { text: "", phone: "", email: "", d
 const emptyOf = (f: ImportField) => { const e = EMPTY_VALUE[f.type]; return Array.isArray(e) ? [] : e; };
 const isBlank = (v: unknown) => v == null || v === "" || (Array.isArray(v) && v.length === 0);
 const prim = (v: unknown) => typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+// A date-time that says its own zone: a time followed by Z or an offset, or GMT/UTC (optionally with an offset and a name).
+export const ZONED_TIME = /(?:\d:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:Z|[+-]\d{2}(?::?\d{2})?)|\b(?:GMT|UTC)(?:\s*[+-]\d{2}:?\d{2})?(?:\s*\([^)]*\))?)$/i;
 // One source value as the field's type (the app's own formats). Empty gives the type's empty value.
 export function coerceField(f: ImportField, v: unknown, ctx: MapCtx): { ok: true; value: unknown } | { ok: false; reason: string } {
   if (v == null || (typeof v === "string" && !v.trim())) return { ok: true, value: emptyOf(f) };
@@ -2234,9 +2243,17 @@ export function coerceField(f: ImportField, v: unknown, ctx: MapCtx): { ok: true
     case "day": {
       if (typeof v !== "string") return bad("is not a date");
       const s = v.trim();
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return isDay(s) ? ok(s) : bad("is not a date");
+      // A date, or a date with a wall time and no zone ("2026-09-30T18:00:00", "2026-09-30 15:30"): that calendar day as written.
+      const wall = /^(\d{4}-\d{2}-\d{2})(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.exec(s);
+      if (wall) return isDay(wall[1]) ? ok(wall[1]) : bad("is not a date");
       const ms = Date.parse(s);
-      return Number.isFinite(ms) ? ok(bizParts(ms, ctx.tz).day) : bad("is not a date");
+      if (!Number.isFinite(ms)) return bad("is not a date");
+      // An instant with its own zone (Z, +10:00, GMT): the day it was in the business's zone.
+      if (ZONED_TIME.test(s)) return ok(bizParts(ms, ctx.tz).day);
+      // No zone ("09/30/2026", "Sep 30 2026"): the runtime read it as its own local wall time, so its local calendar day is
+      // the day written (never moved through the business's zone, which would shift it by a day east or west of UTC).
+      const d = new Date(ms);
+      return ok(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
     }
     case "money": {
       if (typeof v !== "string" && typeof v !== "number") return bad("is not an amount");
@@ -2292,7 +2309,8 @@ export function mapItem(kind: string, mapping: any, item: unknown, ctx: MapCtx):
     else if (plainObj(e) && hasOwn(e, "value")) raw = e.value;
     else continue;
     const r = coerceField(f, raw, ctx);
-    if (r.ok) values[target] = r.value; else { errors.push(`${f.label} ${r.reason}`); failed.add(target); }
+    // the tax field by the business's own tax name (GST, VAT, Sales tax…), as the app's mapping shows it
+    if (r.ok) values[target] = r.value; else { errors.push(`${target === "includes_gst" && ctx.tax ? `Includes ${ctx.tax}` : f.label} ${r.reason}`); failed.add(target); }
   }
   for (const [k, f] of Object.entries(fields)) if (f.required && !failed.has(k) && isBlank(values[k])) errors.push(`${f.label} is missing`);
   return { values, errors };
@@ -2483,7 +2501,7 @@ async function importContext(sb: any, rule: any, nowMs: number) {
     rows.forEach((r: any) => { rates[r.technician_name] = r.rates || {}; });
   }
   const keys = catalogKeys(biz.catalog);
-  return { tz: biz.tz, importSource: biz.mcp.importSource, profiles, employees, people, rates, ruleName: String(rule.name || ""), nowMs, keys, lists: catalogLists(biz.catalog, keys) };
+  return { tz: biz.tz, importSource: biz.mcp.importSource, profiles, employees, people, rates, ruleName: String(rule.name || ""), nowMs, keys, lists: catalogLists(biz.catalog, keys), tax: taxNameOf(biz.catalog) };
 }
 const SERVER_COLS = "id, business_id, name, url, auth_header, secret_id";   // never the secret (it is only in Vault)
 // A rule and its server, both of this business, or null.
@@ -2593,8 +2611,8 @@ export async function runImport(sb: any, rule: any, server: any, opts: { source:
   });
 }
 // The imported records Undo keeps because the team has used them since: a history entry by anyone but the import,
-// something that points at them (a contact's texts / chat / opt-out / calls / jobs / tasks; a closing or lead linked to
-// a job), or work on the row itself (a contact called (contacted_at), noted (customer_notes), its thread grown, stage
+// something that points at them (a contact's texts / chat / opt-out / calls / jobs / tasks; a closing, lead or review
+// request of a job), or work on the row itself (a contact called (contacted_at), noted (customer_notes), its thread grown, stage
 // moved or job linked; a task's updates or subtasks). Deleting those would take the team's work with them (a contact's
 // texts even go with it: on delete cascade). Every read is paged (.range, PAGE rows) until a short page, so a lead with
 // thousands of texts never hides the next one behind the server's 1,000-row cap: an id seen once is decided and left
@@ -2631,6 +2649,8 @@ export async function usedSince(sb: any, kind: string, ids: string[]): Promise<S
   } else if (kind === "jobs") {
     await points("closings", "linked_job_id");
     await points("contacts", "linked_job_id");
+    // a review request queued or sent for the job (review-requests): deleting the job would not stop a waiting text
+    await points("review_requests", "job_id");
   } else if (kind === "tasks") {
     // deno-lint-ignore no-explicit-any
     await read("tasks", "id, updates, subtasks", "id", (q: any) => q, (r: any) => (Array.isArray(r.updates) && r.updates.length > 0) || (Array.isArray(r.subtasks) && r.subtasks.length > 0));
