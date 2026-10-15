@@ -304,6 +304,397 @@ export function holidayDaysOf(cat: any): Record<string, string> {
 }
 // ── end region ──
 
+// ── shared: role scope + money (stage 8) BEGIN — ONE block, byte-identical in mcp and ai-gateway (ai-gateway's tests check); needs only the region block (bizParts) ──
+export function shiftDay(day: string, n: number) { const [y, m, d] = day.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); }
+const dowOf = (day: string) => { const [y, m, d] = day.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); };
+const dayDiff = (a: string, b: string) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000);
+export const PAGE = 1000;                 // rows per .range() page
+export const MAX_SCAN = 20000;            // rows read per call, all pages
+// deno-lint-ignore no-explicit-any
+export async function pageAll(build: (from: number, to: number) => any, max = MAX_SCAN): Promise<{ rows: any[]; truncated: boolean }> {
+  // deno-lint-ignore no-explicit-any
+  const rows: any[] = [];
+  for (let from = 0; from < max; from += PAGE) {
+    const to = Math.min(from + PAGE, max) - 1;
+    const { data, error } = await build(from, to);
+    if (error) throw new Error(error.message || "read failed");
+    const got = data || [];
+    rows.push(...got);
+    if (got.length < to - from + 1) return { rows, truncated: false };
+  }
+  return { rows, truncated: true };
+}
+// The app's built-in lists (index.html LEAD_DIVISIONS / LEAD_STATUSES / LEAD_SOURCES and their labels, parity-tested),
+// used as the app's catalogList does: what the business saved, plus any built-in entry the saved list is missing.
+export type CatalogSection = "services" | "stages" | "sources";
+export const BASE_LISTS: Record<CatalogSection, string[]> = {
+  services: ["Aircon", "Chimney", "Pressure Washing", "Other"],
+  stages: ["New", "Chasing", "Quoted", "Follow-up", "Booked", "Won", "Lost"],
+  sources: ["Google Ads", "Meta Ads", "Google Maps", "Organic", "Unknown"],
+};
+export const BASE_LABELS: Record<CatalogSection, Record<string, string>> = {
+  services: {}, stages: { New: "New lead", Chasing: "Chasing", Quoted: "Quoted", "Follow-up": "Follow up", Booked: "Booked", Won: "Won", Lost: "Lost" }, sources: { Organic: "Organic web", "Phone Call": "Phone (old)" },   // "Phone Call": a legacy value on old rows only
+};
+export const STAGE_CORE = ["New", "Won", "Lost"];        // always on (index.html STAGE_CORE)
+// The four built-in words a business can rename (their stage 2: settings.catalog.keys = { paid, done, won, lost }).
+// Until then, and for any that is missing or not a plain short word, the app's own.
+export const KEY_DEFAULTS = { paid: "Paid", done: "Done", won: "Won", lost: "Lost" };
+export type CatalogKeys = typeof KEY_DEFAULTS;
+// deno-lint-ignore no-explicit-any
+export function catalogKeys(cat: any): CatalogKeys {
+  const k = cat && typeof cat === "object" && cat.keys && typeof cat.keys === "object" && !Array.isArray(cat.keys) ? cat.keys : {};
+  const word = (v: unknown, d: string) => (typeof v === "string" && /^[^",()\\<>]{1,40}$/.test(v.trim()) ? v.trim() : d);
+  return { paid: word(k.paid, KEY_DEFAULTS.paid), done: word(k.done, KEY_DEFAULTS.done), won: word(k.won, KEY_DEFAULTS.won), lost: word(k.lost, KEY_DEFAULTS.lost) };
+}
+// A built-in word as the business calls it (a value that is not one of the four is itself).
+export function renamedKey(keys: CatalogKeys | undefined, v: string): string {
+  if (!keys) return v;
+  for (const n of Object.keys(KEY_DEFAULTS) as (keyof CatalogKeys)[]) if (v === KEY_DEFAULTS[n]) return keys[n];
+  return v;
+}
+export type CatalogLists = Record<CatalogSection, { key: string; label: string }[]>;
+// The lists an import checks against: deleted and switched-off entries left out (New, Won and Lost are always on).
+// deno-lint-ignore no-explicit-any
+export function catalogLists(cat: any, keys: CatalogKeys = KEY_DEFAULTS): CatalogLists {
+  // deno-lint-ignore no-explicit-any
+  const out: any = {};
+  for (const sec of Object.keys(BASE_LISTS) as CatalogSection[]) {
+    const saved = cat && typeof cat === "object" && Array.isArray(cat[sec]) ? cat[sec] : [];
+    // deno-lint-ignore no-explicit-any
+    const list: any[] = saved.filter((x: any) => x && typeof x === "object" && typeof x.key === "string" && x.key.trim());
+    BASE_LISTS[sec].forEach((k) => { if (!list.some((x) => x.key === k)) list.push({ key: k, label: BASE_LABELS[sec][k] || k }); });
+    out[sec] = list
+      .filter((x) => !x.deleted && (x.active !== false || (sec === "stages" && STAGE_CORE.includes(x.key))))
+      .map((x) => { const key = sec === "stages" ? renamedKey(keys, x.key) : x.key; return { key, label: typeof x.label === "string" && x.label.trim() ? x.label.trim() : key }; });
+  }
+  return out as CatalogLists;
+}
+// A value matched to a list entry by its key or its label, any case: the entry's key, or null.
+export function catalogMatch(list: { key: string; label: string }[], v: string): string | null {
+  const s = v.trim().toLowerCase();
+  const hit = list.find((x) => x.key.toLowerCase() === s) || list.find((x) => x.label.toLowerCase() === s);
+  return hit ? hit.key : null;
+}
+// ── role scope: the app's canViewSection / filterForProfile (index.html), parity-tested ──
+// Pure: a profile in the app's shape, rows in the database's shape. run_tests.sh extracts the live app functions and
+// tests.ts checks every profile × section and every row filter against them.
+// deno-lint-ignore no-explicit-any
+export type Profile = { id: string; fullName: string; role: string; technicianName: string; permissions: Record<string, any> };
+// deno-lint-ignore no-explicit-any
+export function appProfile(row: any): Profile {
+  return {
+    id: row.id, fullName: row.full_name || "", role: row.role, technicianName: row.technician_name || "",
+    permissions: row.permissions && typeof row.permissions === "object" && !Array.isArray(row.permissions) ? row.permissions : {},
+  };
+}
+// Verbatim from index.html.
+export function canViewSection(profile: Profile, section: string): boolean {
+  if (section === "settings") return profile.role === "owner";
+  // Dashboard: the whole-business summary (money, marketing, team) — owners/managers only, not grantable.
+  if (section === "dashboard") return profile.role === "owner" || profile.role === "manager";
+  // My Day: Ron's daily work list, built from the CRM — anyone who works the CRM gets it, nobody else.
+  if (section === "myDay") return profile.role === "owner" || profile.role === "manager" || (profile.role === "va" && !!profile.permissions.crm);
+  if (profile.role === "owner" || profile.role === "manager") return true;
+  return !!profile.permissions[section];
+}
+// A task row's people as the app sees them: the app maps the row first (mapTaskRow: assignees || [], assigned_to → the
+// legacy assignedTo), then reads either shape (assigneeNames).
+// deno-lint-ignore no-explicit-any
+export function assigneeNames(t: any): string[] {
+  const assignees = t.assignees || [], assignedTo = t.assigned_to || "";
+  if (Array.isArray(assignees)) return assignees;
+  if (assignedTo) return [assignedTo];
+  return [];
+}
+// deno-lint-ignore no-explicit-any
+export function taskAssignedTo(t: any, p: Profile) { const names = assigneeNames(t); return names.includes(p.fullName) || (!!p.technicianName && names.includes(p.technicianName)); }
+// Who may make and use keys: owners and managers only (Ofek 15 Oct). A permissions.mcp left on a profile from before
+// means nothing.
+export const canUseMcp = (p: Profile) => p.role === "owner" || p.role === "manager";
+export type Scope = ReturnType<typeof scopeOf>;
+// The conditions of filterForProfile (owners and managers see everything first, as the app).
+export function scopeOf(p: Profile) {
+  const P = p.permissions, isOM = p.role === "owner" || p.role === "manager", isTech = p.role === "technician";
+  const canSeeJobs = isOM || !!P.jobs || !!P.finance || (isTech && !!P.payroll);
+  return {
+    p, isOM, isTech, techName: p.technicianName,
+    canSeeJobs, canSeeEquip: canSeeJobs || !!P.closings,
+    contacts: isOM || !!P.crm || !!P.crmOverview,
+    tasks: isOM || !!P.tasks,
+    closings: isOM || !!P.closings,
+    payName: p.technicianName || p.fullName,
+  };
+}
+// Row filters. For everyone but a technician they give exactly the app's rows. SERVER-ONLY STRICTER RULES for a
+// technician (the "a technician never sees money" rule), so a technician gets a subset of the app's rows:
+//   (a) closings: only their own (the app shows all closings to anyone with the Closings page);
+//   (b) no technician name = no jobs or equipment (the app would match the unassigned rows);
+//   (c) a contact's estimated and sales value are removed (redactForTech);
+//   (d) money_summary, marketing_summary and list_outstanding are never offered, even when those pages are granted.
+// deno-lint-ignore no-explicit-any
+export const jobVisible = (s: Scope, row: any) => s.isOM || (s.canSeeJobs && (!s.isTech || (!!s.techName && row.technician === s.techName)));
+// deno-lint-ignore no-explicit-any
+export const equipVisible = (s: Scope, row: any) => s.isOM || (s.canSeeEquip && (!s.isTech || (!!s.techName && row.technician === s.techName)));
+// deno-lint-ignore no-explicit-any
+export const taskVisible = (s: Scope, row: any) => s.isOM || (s.tasks && (!s.isTech || taskAssignedTo(row, s.p) || (!!s.techName && row.board === s.techName)));
+export const contactVisible = (s: Scope) => s.contacts;
+// deno-lint-ignore no-explicit-any
+export const closingVisible = (s: Scope, row: any) => s.isOM || (s.closings && (!s.isTech || (!!s.techName && row.technician_name === s.techName)));
+// RLS-ONLY RULES: what the database itself lets the app read (the app asks no section for these, so the parity tests
+// pin them to the policies, not to canViewSection):
+//   ad_spend: owners, managers, and anyone with the Leads & Marketing (crmOverview) or Google Ads (adsGoogle) page;
+//   ad_calls: owners and managers.
+export const adSpendVisible = (s: Scope) => s.isOM || !!s.p.permissions.crmOverview || !!s.p.permissions.adsGoogle;
+export const adCallsVisible = (s: Scope) => s.isOM;
+// deno-lint-ignore no-explicit-any
+export function redactForTech(s: Scope, row: any) {
+  if (!s.isTech) return row;
+  const { estimated_value: _e, sales_value: _s, ...rest } = row;
+  return rest;
+}
+// ── end role scope ──
+
+// ── calc: ported from index.html (parity-tested) ──
+// The same names and formulas as the app, with an explicit context instead of STATE.data: d = { gstRate, catalog, tz,
+// today, employees, rules, weekCache, jobs, equipmentSpend, payrollWeeks, payrollBonuses, salesLogs } (app-shaped rows).
+// Dates are plain 'YYYY-MM-DD' strings with UTC math, so the answer never depends on the machine's time zone.
+// deno-lint-ignore no-explicit-any
+export type Calc = Record<string, any>;
+export const PAYROLL_HOURLY_RATE = 10;
+export const PAYROLL_BOOKING_BONUS = [{ min: 12, bonus: 25 }, { min: 8, bonus: 15 }, { min: 5, bonus: 10 }];
+export function round2(n: unknown) { return Math.round((Number(n) || 0) * 100) / 100; }
+// deno-lint-ignore no-explicit-any
+const localDay = (d: Calc, ts: any) => { if (!ts) return ""; const s = String(ts); return s.length <= 10 ? s : bizParts(Date.parse(s), d.tz).day; };
+// deno-lint-ignore no-explicit-any
+export function weekRules(region: any) {
+  const list = (region && Array.isArray(region.weeks) ? region.weeks : [])
+    // deno-lint-ignore no-explicit-any
+    .filter((x: any) => x && Number.isInteger(x.weekStart) && x.weekStart >= 0 && x.weekStart <= 6 && /^\d{4}-\d{2}-\d{2}$/.test(String(x.from || "")))
+    // deno-lint-ignore no-explicit-any
+    .map((x: any) => ({ weekStart: x.weekStart, from: x.from }))
+    // deno-lint-ignore no-explicit-any
+    .sort((a: any, b: any) => a.from < b.from ? -1 : a.from > b.from ? 1 : 0)
+    // deno-lint-ignore no-explicit-any
+    .filter((x: any, i: number, a: any[]) => i === a.length - 1 || a[i + 1].from !== x.from);
+  return [{ weekStart: 0, from: "" }, ...list];
+}
+// The business week a day falls in: { start, end, days } (the app's weekBounds, with UTC day math).
+// deno-lint-ignore no-explicit-any
+export function weekBounds(dateStr: string, rules: { weekStart: number; from: string }[], cache?: Map<string, any>) {
+  const d = String(dateStr).slice(0, 10);
+  if (cache && cache.has(d)) return cache.get(d);
+  let i = rules.length - 1; while (i > 0 && rules[i].from > d) i--;
+  const r = rules[i], next = rules[i + 1] ? rules[i + 1].from : null;
+  const back = (x: string, w: number) => shiftDay(x, -((dowOf(x) - w + 7) % 7));
+  let start = "", end = "";
+  if (r.from) {
+    const k = (r.weekStart - dowOf(r.from) + 7) % 7, first = shiftDay(r.from, k === 0 ? 7 : k >= 4 ? k : k + 7);
+    if (d < first) { start = r.from; end = shiftDay(first, -1); }
+  }
+  if (!start) { start = back(d, r.weekStart); end = shiftDay(start, 6); }
+  if (next && end >= next) end = shiftDay(next, -1);
+  const out = { start, end, days: dayDiff(start, end) + 1 };
+  if (cache) cache.set(d, out);
+  return out;
+}
+export function payrollWeekOf(d: Calc, dateStr: string) { const b = weekBounds(dateStr, d.rules, d.weekCache); return { key: b.start, start: b.start, end: b.end }; }
+// Walks real business weeks (not 7 days), so a short or long transition week is one step.
+export function shiftPayrollWeek(d: Calc, weekKey: string, deltaWeeks: number) {
+  let k = weekBounds(weekKey, d.rules, d.weekCache).start;
+  const n = Math.trunc(Number(deltaWeeks) || 0);
+  for (let i = 0; i < Math.abs(n); i++) k = n > 0 ? shiftDay(weekBounds(k, d.rules, d.weekCache).end, 1) : weekBounds(shiftDay(k, -1), d.rules, d.weekCache).start;
+  return k;
+}
+// deno-lint-ignore no-explicit-any
+export const jobPaidDate = (j: any) => j.datePaid || j.date;
+// deno-lint-ignore no-explicit-any
+export function jobGst(d: Calc, job: any) { return job.includesGST ? round2(job.amount * (d.gstRate / 100)) : 0; }
+// deno-lint-ignore no-explicit-any
+export function jobTotalCollected(d: Calc, job: any) { return round2(job.amount + jobGst(d, job)); }
+// deno-lint-ignore no-explicit-any
+const employeeByName = (d: Calc, name: string) => (d.employees || []).find((e: any) => e.name === name) || null;
+export function commissionDeductsParts(d: Calc, techName: string) { const e = employeeByName(d, techName); return !(e && e.employmentType === "Independent Contractor"); }
+// deno-lint-ignore no-explicit-any
+export function jobCommissionBase(d: Calc, job: any) {
+  const parts = commissionDeductsParts(d, job.technician) ? (Number(job.partsCost) || 0) : 0;
+  return Math.max(0, (Number(job.amount) || 0) - parts);
+}
+// deno-lint-ignore no-explicit-any
+export function jobCommissionAmount(d: Calc, job: any) { return round2(jobCommissionBase(d, job) * (Number(job.commissionPercent) || 0) / 100); }
+// deno-lint-ignore no-explicit-any
+export function payTiersOk(t: any) {
+  if (!Array.isArray(t)) return null;
+  return t.map((x) => ({ min: Math.round(Number(x && x.min)), bonus: Number(x && x.bonus) }))
+    .filter((x) => x.min >= 1 && x.min <= 500 && Number.isFinite(x.bonus) && x.bonus >= 0 && x.bonus <= 10000)
+    .sort((a, b) => b.min - a.min).filter((x, i, a) => !i || a[i - 1].min !== x.min);
+}
+export function payHourlyFor(d: Calc, day: string) {
+  const dd = day || d.today;
+  const pay = (d.catalog && d.catalog.pay) || {};
+  const all = Array.isArray(pay.hourly) ? pay.hourly : [];
+  // deno-lint-ignore no-explicit-any
+  const v = all.filter((x: any) => x && /^\d{4}-\d{2}-\d{2}$/.test(x.from) && x.from <= dd).sort((a: any, b: any) => a.from < b.from ? 1 : -1)[0];
+  const rate = v ? Number(v.rate) : NaN, tiers = v ? payTiersOk(v.tiers) : null;
+  return { rate: v && v.rate !== null && v.rate !== "" && Number.isFinite(rate) && rate >= 0 && rate <= 500 ? rate : PAYROLL_HOURLY_RATE, tiers: tiers || PAYROLL_BOOKING_BONUS, from: v ? v.from : null };
+}
+export function bookingBonus(d: Calc, bookings: number, day: string) { const t = payHourlyFor(d, day).tiers.find((t) => (Number(bookings) || 0) >= t.min); return t ? t.bonus : 0; }
+// deno-lint-ignore no-explicit-any
+export function salesLogBookings(l: any) { return (Number(l.bookingsAircon) || 0) + (Number(l.bookingsChimney) || 0) + (Number(l.bookingsPw) || 0); }
+// deno-lint-ignore no-explicit-any
+export function salesLogPay(d: Calc, l: any) { return round2((Number(l.hours) || 0) * payHourlyFor(d, l.date).rate + bookingBonus(d, salesLogBookings(l), l.date)); }
+export function payrollStatus(d: Calc, weekKey: string, person: string) {
+  // deno-lint-ignore no-explicit-any
+  return (d.payrollWeeks || []).find((r: any) => r.weekKey === weekKey && r.person === person) || { weekKey, person, cashCollected: false, salaryPaid: false };
+}
+export function payrollBonusesFor(d: Calc, person: string, weekKey: string) {
+  // deno-lint-ignore no-explicit-any
+  const lines = (d.payrollBonuses || []).filter((b: any) => b.person === person && b.weekKey === weekKey).sort((a: any, b: any) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+  // deno-lint-ignore no-explicit-any
+  return { lines, total: round2(lines.reduce((s: number, b: any) => s + (Number(b.amount) || 0), 0)) };
+}
+export function materialsGst(d: Calc, amount: number) { const r = Number(d.gstRate) || 0; return round2((Number(amount) || 0) * r / (100 + r)); }
+export function payrollMaterialItems(d: Calc, person: string) {
+  // deno-lint-ignore no-explicit-any
+  const out: any[] = [];
+  // deno-lint-ignore no-explicit-any
+  (d.equipmentSpend || []).forEach((e: any) => {
+    if (e.paidBy !== person || !((Number(e.cost) || 0) > 0) || (e.reimbursed !== "Pending" && e.reimbursed !== "Reimbursed")) return;
+    out.push({ kind: "equipment", id: e.id, bought: e.date, entered: e.createdAt ? localDay(d, e.createdAt) : e.date, amount: round2(e.cost), paid: e.reimbursed === "Reimbursed", paidWeek: e.reimbursedWeek || null });
+  });
+  // deno-lint-ignore no-explicit-any
+  (d.jobs || []).forEach((j: any) => {
+    if (j.partsPaidBy !== person || !((Number(j.partsCost) || 0) > 0) || (j.partsRefundStatus !== "Pending Refund" && j.partsRefundStatus !== "Refunded")) return;
+    out.push({ kind: "parts", id: j.id, bought: j.date, entered: j.partsPendingAt ? localDay(d, j.partsPendingAt) : j.date, amount: round2(j.partsCost), paid: j.partsRefundStatus === "Refunded", paidWeek: j.partsRefundWeek || null });
+  });
+  return out;
+}
+// Week = the week it was entered; a week already marked paid takes nothing new (it goes to the next week not paid yet).
+export function computePayrollMaterials(d: Calc, person: string, weekKey: string) {
+  const weekPaid = !!payrollStatus(d, weekKey, person).salaryPaid;
+  const weekFor = (entered: string) => { let wk = payrollWeekOf(d, entered).key; for (let i = 0; i < 104 && payrollStatus(d, wk, person).salaryPaid; i++) wk = shiftPayrollWeek(d, wk, 1); return wk; };
+  const lines = payrollMaterialItems(d, person).filter((it) => it.paid ? it.paidWeek === weekKey : (!weekPaid && weekFor(it.entered) === weekKey))
+    .sort((a, b) => a.entered.localeCompare(b.entered) || String(a.bought).localeCompare(String(b.bought)));
+  const total = round2(lines.reduce((s, l) => s + l.amount, 0));
+  return { lines, total, gst: materialsGst(d, total) };
+}
+// A commission person's week: commission lands in the week the job was PAID; a job on hold ("Stuck") stays out.
+export function computePayrollCommission(d: Calc, person: string, weekKey: string) {
+  const wk = payrollWeekOf(d, weekKey);
+  // deno-lint-ignore no-explicit-any
+  const mine = (d.jobs || []).filter((j: any) => j.technician === person);
+  // deno-lint-ignore no-explicit-any
+  const paid = mine.filter((j: any) => j.paymentStatus === (d.paidKey || "Paid") && jobPaidDate(j) >= wk.start && jobPaidDate(j) <= wk.end);
+  // deno-lint-ignore no-explicit-any
+  const toLine = (j: any) => ({ job: j, commission: jobCommissionAmount(d, j) });
+  // deno-lint-ignore no-explicit-any
+  const lines = paid.filter((j: any) => j.paidToTechnician !== "Stuck").map(toLine);
+  // deno-lint-ignore no-explicit-any
+  const onHold = paid.filter((j: any) => j.paidToTechnician === "Stuck").map(toLine);
+  // deno-lint-ignore no-explicit-any
+  const unpaid = mine.filter((j: any) => j.paymentStatus !== (d.paidKey || "Paid") && j.date <= wk.end);
+  // deno-lint-ignore no-explicit-any
+  const cashJobs = paid.filter((j: any) => j.paymentMethod === "Cash");
+  // deno-lint-ignore no-explicit-any
+  const pctSource = lines.length ? lines.map((l: any) => l.job) : unpaid;
+  // deno-lint-ignore no-explicit-any
+  const pcts = Array.from(new Set(pctSource.map((j: any) => Number(j.commissionPercent) || 0)));
+  // deno-lint-ignore no-explicit-any
+  const total = round2(lines.reduce((s: number, l: any) => s + l.commission, 0));
+  const materials = computePayrollMaterials(d, person, weekKey);
+  const bonus = payrollBonusesFor(d, person, wk.key);
+  return {
+    person, week: { start: wk.start, end: wk.end }, total,
+    materials: { total: materials.total, gst: materials.gst, count: materials.lines.length },
+    bonus: { total: bonus.total }, grandTotal: round2(total + materials.total + bonus.total),
+    // deno-lint-ignore no-explicit-any
+    onHoldTotal: round2(onHold.reduce((s: number, l: any) => s + l.commission, 0)),
+    // deno-lint-ignore no-explicit-any
+    expected: round2(unpaid.reduce((s: number, j: any) => s + jobCommissionAmount(d, j), 0)),
+    // deno-lint-ignore no-explicit-any
+    cash: round2(cashJobs.reduce((s: number, j: any) => s + jobTotalCollected(d, j), 0)),
+    paidJobs: lines.length, unpaidJobs: unpaid.length, percent: pcts.length === 1 ? pcts[0] : null,
+  };
+}
+// An hourly person's week: hours × that day's rate + the day's booking bonus, plus the owners' bonuses.
+export function computePayrollHourly(d: Calc, person: string, weekKey: string) {
+  const wk = payrollWeekOf(d, weekKey);
+  // deno-lint-ignore no-explicit-any
+  const logs = (d.salesLogs || []).filter((l: any) => l.person === person && l.date >= wk.start && l.date <= wk.end);
+  const days: { hours: number; bookings: number; bonus: number; pay: number }[] = [];
+  // At most 13 days (the longest transition week), and nothing for a key that isn't a real date.
+  for (let date = wk.start, i = 0; /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= wk.end && i < 13; date = shiftDay(date, 1), i++) {
+    // deno-lint-ignore no-explicit-any
+    const l = logs.find((x: any) => x.date === date) || null;
+    const bookings = l ? salesLogBookings(l) : 0;
+    days.push({ hours: l ? (Number(l.hours) || 0) : 0, bookings, bonus: l ? bookingBonus(d, bookings, date) : 0, pay: l ? salesLogPay(d, l) : 0 });
+  }
+  const extra = payrollBonusesFor(d, person, wk.key);
+  return {
+    person, week: { start: wk.start, end: wk.end },
+    hours: round2(days.reduce((s, x) => s + x.hours, 0)),
+    bookings: days.reduce((s, x) => s + x.bookings, 0),
+    bonuses: days.reduce((s, x) => s + x.bonus, 0),
+    total: round2(days.reduce((s, x) => s + x.pay, 0) + extra.total),
+    extra: { total: extra.total },
+  };
+}
+// deno-lint-ignore no-explicit-any
+export function payrollCommissionPeople(d: Calc): string[] { return (d.employees || []).filter((e: any) => e.status === "Active" && e.roles.includes("Technician") && !e.roles.includes("Owner")).map((e: any) => e.name); }
+// deno-lint-ignore no-explicit-any
+export function payrollHourlyPeople(d: Calc): string[] { return (d.employees || []).filter((e: any) => e.status === "Active" && e.employmentType === "Hourly").map((e: any) => e.name); }
+// The money part of the app's computeWeek (overview + remainingAfterTech) over any set of jobs and equipment. Not the
+// paid-to-technician total, which needs the per-person payroll.
+// deno-lint-ignore no-explicit-any
+export function moneyOverview(d: Calc, jobs: any[], equip: any[]) {
+  const overview = { cash: 0, bankTransfer: 0, creditCard: 0, gstCash: 0, gstOther: 0, paidCount: 0, unpaidCount: 0, paidTotal: 0, unpaidTotal: 0, partsTotal: 0, equipmentTotal: 0, commissionOwedTotal: 0 };
+  jobs.forEach((j) => {
+    const total = jobTotalCollected(d, j); const gst = jobGst(d, j);
+    // Money in and GST collected count PAID jobs only.
+    if (j.paymentStatus === (d.paidKey || "Paid")) {
+      if (j.paymentMethod === "Cash") { overview.cash += total; overview.gstCash += gst; }
+      else if (j.paymentMethod === "Bank Transfer") { overview.bankTransfer += total; overview.gstOther += gst; }
+      else if (j.paymentMethod === "Credit Card") { overview.creditCard += total; overview.gstOther += gst; }
+      overview.paidCount++; overview.paidTotal += j.amount;
+    } else { overview.unpaidCount++; overview.unpaidTotal += j.amount; }
+    overview.partsTotal += Number(j.partsCost) || 0;
+    overview.commissionOwedTotal += jobCommissionAmount(d, j);
+  });
+  equip.forEach((e) => { overview.equipmentTotal += Number(e.cost) || 0; });
+  const remainingAfterTech = jobs.reduce((s, j) => s + (Number(j.amount) || 0), 0) - overview.commissionOwedTotal - overview.partsTotal - overview.equipmentTotal;
+  return { overview, remainingAfterTech };
+}
+// Database rows → the app's shapes (the app's mapJobRow / mapEquipSpendRow / mapPayrollRow / mapBonusRow /
+// mapSalesLogRow, the fields the calc reads), with the same defaults so the numbers match.
+// deno-lint-ignore no-explicit-any
+export function jobFromRow(j: any) {
+  return {
+    id: j.id, customerName: j.customer_name, invoiceNumber: j.invoice_number || "", date: j.date,
+    technician: j.technician, jobType: j.job_type, commissionPercent: j.commission_percent || 0,
+    amount: j.amount || 0, includesGST: j.includes_gst, paymentStatus: j.payment_status,
+    paymentMethod: j.payment_method || "", partsCost: j.parts_cost || 0, partsPaidBy: j.parts_paid_by || "",
+    partsRefundStatus: j.parts_refund_status || "N/A", datePaid: j.date_paid, paidToTechnician: j.paid_to_technician,
+    partsPendingAt: j.parts_pending_at || null, partsRefundWeek: j.parts_refund_week || null, contactId: j.contact_id || null,
+  };
+}
+// deno-lint-ignore no-explicit-any
+export function equipFromRow(e: any) {
+  return { id: e.id, date: e.date, item: e.item, technician: e.technician, paidBy: e.paid_by || "", cost: e.cost || 0, reimbursed: e.reimbursed, createdAt: e.created_at || null, reimbursedWeek: e.reimbursed_week || null };
+}
+// deno-lint-ignore no-explicit-any
+export function payrollFromRow(r: any) {
+  return { id: r.id, weekKey: r.week_start, person: r.person, cashCollected: !!r.cash_collected, salaryPaid: !!r.salary_paid, salaryPaidAmount: r.salary_paid_amount === null || r.salary_paid_amount === undefined ? null : Number(r.salary_paid_amount) };
+}
+// deno-lint-ignore no-explicit-any
+export function bonusFromRow(b: any) { return { id: b.id, weekKey: b.week_start, person: b.person, amount: Number(b.amount) || 0, reason: b.reason || "", createdAt: b.created_at }; }
+// deno-lint-ignore no-explicit-any
+export function salesLogFromRow(l: any) {
+  return { id: l.id, person: l.person, date: l.date, hours: Number(l.hours) || 0, bookingsAircon: Number(l.bookings_aircon) || 0, bookingsChimney: Number(l.bookings_chimney) || 0, bookingsPw: Number(l.bookings_pw) || 0 };
+}
+// deno-lint-ignore no-explicit-any
+export const employeeFromRow = (e: any) => ({ name: e.name, roles: e.roles || [], status: e.status, employmentType: e.employment_type || "" });
+// ── end calc ──
+// ── shared: role scope + money END ──
+
 // ── phone notifications: copied byte for byte from push/index.ts (a test fails if the two copies ever differ) ──
 // deno-lint-ignore no-explicit-any
 export async function vapidKeys(sb: any): Promise<{ publicKey: string; privateKey: string }> {
@@ -775,13 +1166,6 @@ export function parseToolInput(raw: string | undefined | null, fallbackObj?: any
 }
 
 // ── registries: tools, change kinds and modes (later groups and stages ADD entries; the loop never changes) ──
-export type Profile = { id: string; fullName: string; role: string; technicianName: string; permissions: Record<string, any> };
-export function appProfile(row: any): Profile {
-  return {
-    id: row.id, fullName: row.full_name || "", role: row.role, technicianName: row.technician_name || "",
-    permissions: isObj(row.permissions) ? row.permissions : {},
-  };
-}
 // A refusal with a plain-English reason the person (or the model) can be shown. code: 'changed_since', 'not_allowed', …
 export class ChangeRefused extends Error {
   code: string;
@@ -974,16 +1358,6 @@ export function fmtDateShort(s: unknown): string {
 }
 // Verbatim from index.html.
 export const SECTION_LABEL: Record<string, string> = { myDay: "My Day", dashboard: "Dashboard", adsGoogle: "Google Ads board", crm: "CRM", crmOverview: "Leads & Marketing", jobs: "Jobs & Commissions", finance: "Financial Summary", payroll: "Payroll", outstanding: "Outstanding", reminders: "Reminders", openItems: "Open Tasks", tasks: "Tasks", reference: "Resources (equipment, employees, suppliers)", closings: "Closings", settings: "Settings" };
-// Verbatim from index.html (the same copy as mcp's).
-export function canViewSection(profile: Profile, section: string): boolean {
-  if (section === "settings") return profile.role === "owner";
-  // Dashboard: the whole-business summary (money, marketing, team) — owners/managers only, not grantable.
-  if (section === "dashboard") return profile.role === "owner" || profile.role === "manager";
-  // My Day: Ron's daily work list, built from the CRM — anyone who works the CRM gets it, nobody else.
-  if (section === "myDay") return profile.role === "owner" || profile.role === "manager" || (profile.role === "va" && !!profile.permissions.crm);
-  if (profile.role === "owner" || profile.role === "manager") return true;
-  return !!profile.permissions[section];
-}
 // Who may propose (and confirm) which change: the app's own rules for the page the change belongs to.
 //   office hours  Settings → owners only (canViewSection 'settings')
 //   a new task    the Tasks page (owners, managers, permissions.tasks); a technician only with his own board
@@ -1000,7 +1374,6 @@ export const mayWorkLeads = (me: Profile) => changeScope(me).crm;
 // Verbatim from index.html (the lists as the app ships them).
 export const LEAD_STATUSES = ["New", "Chasing", "Quoted", "Follow-up", "Booked", "Won", "Lost"];
 export const LEAD_STAGE_LABEL: Record<string, string> = { New: "New lead", Chasing: "Chasing", Quoted: "Quoted", "Follow-up": "Follow up", Booked: "Booked", Won: "Won", Lost: "Lost" };
-export const STAGE_CORE = ["New", "Won", "Lost"];
 export const STAGES_NEED_DATE = ["Quoted", "Follow-up"];
 export const LOST_REASON_BASE = [
   { key: "noAnswer", label: "No answer" }, { key: "outsideArea", label: "Outside service area" }, { key: "spam", label: "Spam" },
@@ -1065,7 +1438,6 @@ export function boardFor(names: string[], profiles: any[], employees: any[] = []
 }
 const DAY_TITLE = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const isDay = (s: unknown) => typeof s === "string" && isRealDate(s);
-const shiftDay = (day: string, n: number) => { const [y, m, d] = day.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
 // The app's localDay(ts): a bare date stays; a timestamp → its day in the business's time zone.
 const localDayOf = (ts: unknown, tz: string) => { if (!ts) return ""; const s = String(ts); return s.length <= 10 ? s : bizParts(Date.parse(s), tz).day; };
 const hoursText = (x: any) => (x && x.on ? `${minsToHhmm(hhmmToMins(x.from) ?? 0)}–${minsToHhmm(hhmmToMins(x.to) ?? 0)}` : "Closed");
@@ -2389,7 +2761,6 @@ export function capState(spend: number, cap: number) {
 export function usdText(n: number, cat: any): string {
   return moneyText(round2(n), { region: { ...regionOf(cat), currency: "USD", currencySymbol: "US$" } }, 2);
 }
-const round2 = (x: number) => Math.round(x * 100) / 100;
 // The 80% alert: once a month per business (ai_claim_alert_80 marks the month; true only for the call that marked it),
 // to the owners' saved devices. A failure is logged and never fails the chat. A failure before anything was sent (the
 // owners or the push keys couldn't be read) gives the month back, so the next turn tries again. Returns whether this

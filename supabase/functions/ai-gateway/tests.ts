@@ -296,6 +296,8 @@ const whoamiScripts = () => [toolScript("toolu_w1", "whoami", {}), textScript("Y
     const mine = src("index.ts"), push = src("../push/index.ts");
     const region = (t: string) => { const a = t.indexOf("// ── region ("), b = t.indexOf("// ── end region ──"); return a >= 0 && b > a ? t.slice(a, b) : ""; };
     ok(region(mine).length > 1000 && region(mine) === region(push), "the region block is byte-identical to push/index.ts");
+    const shared = (t: string) => { const a = t.indexOf("// ── shared: role scope + money (stage 8) BEGIN"), b = t.indexOf("// ── shared: role scope + money END ──"); return a >= 0 && b > a ? t.slice(a, b) : ""; };
+    ok(shared(mine).length > 15000 && shared(mine) === shared(src("../mcp/index.ts")), "the role scope + money block is byte-identical to mcp/index.ts");
     const sendA = fnSource(mine, "export async function sendTo("), keyA = fnSource(mine, "export async function vapidKeys(");
     ok(sendA.length > 200 && sendA === fnSource(push, "export async function sendTo("), "sendTo is byte-identical to push/index.ts");
     ok(keyA.length > 200 && keyA === fnSource(push, "export async function vapidKeys("), "vapidKeys is byte-identical to push/index.ts");
