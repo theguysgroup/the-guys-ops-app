@@ -161,6 +161,8 @@ const DECLS = [
   'MCP_RUN_AUTOMATIONS_ON', 'mcpImportConfirm',
   // Stage 4: page history, the edge swipe and deep links (landing page, where the screen is, the swipe decision)
   'canViewSection', 'firstAccessibleTab', 'homeTabFor', 'NAV_PAGES', 'NAV_TAB_ALIASES', 'landingTab', 'navSnapOf', 'NAV_BASE_KINDS', 'navKey', 'navMode', 'navUrl', 'NAV_SWIPE_RULES', 'isBackSwipe',
+  // Stage 4 review (Ofek 15 Oct): the layer registry's order, what a leaver said
+  'navLayerOrder', 'navLeaveVerdict',
 ];
 
 function extractDecl(source, name){
@@ -4323,8 +4325,9 @@ function testPageHistory(sb){
   assertEqual([['pushState', 'navPush('].filter(w => T('navOnPop').includes(w)), ['pushState', 'replaceState', 'navPush(', 'navReplace('].filter(w => T('navRestoreView').includes(w)),
     /[^A-Za-z]render\(/.test(T('navAfterRender')), /\{\n  if \(!NAV_HIST\.ready \|\| NAV_HIST\.restoring\) return;/.test(T('navPush')), T('navStay').includes('pushState'),
     r.startsWith('function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; }'), r.trim().endsWith('navAfterRender(profile);\n}'),
-    script.includes('NAV_BASE_KINDS.forEach(k => { NAV_RESTORERS[k] = navRestoreView; });'), /NAV_RESTORERS(\.|\[')(wf|auto)/i.test(script), sb.NAV_BASE_KINDS],
-    [[], [], false, true, false, true, true, true, false, ['tab', 'settings', 'connector', 'panel']], 'no loops: popstate and the restorer never push; a restore draws once; no automation kinds registered here');
+    script.includes('NAV_BASE_KINDS.forEach(k => { NAV_RESTORERS[k] = navRestoreView; });'), /NAV_RESTORERS(\.|\[')(wf|auto)/i.test(script), sb.NAV_BASE_KINDS,
+    /navLayer\(\{ id: '(wf|auto)/i.test(script), /id: '(wf|auto)/i.test(T('NAV_LAYERS'))],
+    [[], [], false, true, false, true, true, true, false, ['tab', 'settings', 'connector', 'panel'], false, false], 'no loops: popstate and the restorer never push; a restore draws once; no automation kinds or layers registered here');
   // the entry functions: one entry each, after the change and before the redraw; pinned texts unchanged
   const goTabT = T('goTab'), ssp = T('setSettingsPage');
   assertEqual([goTabT.indexOf("navPush({ kind: 'tab' })") > goTabT.indexOf('PANEL_OPEN_FOR = {}') && goTabT.indexOf("navPush({ kind: 'tab' })") < goTabT.indexOf('render()'),
@@ -4430,8 +4433,8 @@ function testPageHistory(sb){
   H2.pop(0);
   assertEqual([H2.nav.NAV_HIST.syncBack, H2.nav.NAV_HIST.d, H2.log.renders], [false, 0, 0], 'its popstate changes nothing');
   // windows close through their own close function; menus count as layers; a window before the first tap has no entry yet
-  const oc = T('navOverlayClose'), os = T('navOverlaySync');
-  assertEqual([oc.includes('back.click()'), oc.includes("!back.classList.contains('au-edb')"), oc.indexOf('NAV_MENUS') < oc.indexOf('.confirm-back'), T('navLayerOpen').includes('NAV_MENUS'),
+  const oc = T('navCloseWindow'), os = T('navOverlaySync'), zOf = id => (n.NAV_LAYERS.find(l => l.id===id) || {}).z;
+  assertEqual([oc.includes('back.click()'), oc.includes("!back.classList.contains('au-edb')"), zOf('menus') > zOf('confirm') && zOf('confirm') > zOf('popup') && zOf('popup') > zOf('window') && zOf('window') > zOf('phone-menu'), T('NAV_LAYERS').includes('isOpen: () => !!document.querySelector(NAV_MENUS)'),
     script.includes("const NAV_MENUS = '.person-menu, .theme-menu, .pal-pop';"), os.indexOf('if (!navActivated()) return;') > 0 && os.indexOf('if (!navActivated()) return;') < os.indexOf('pushState'), T('navSwipeOn').includes('return touch && standalone;'),
     T('navSwipeBack').includes('if (NAV_HIST.pops===pops) history.back();'), T('navSwipeBack').includes('history.back(); return;'), /html\.nav-swipe-on, html\.nav-swipe-on body \{ overscroll-behavior-x: none; \}/.test(fs.readFileSync(INDEX_HTML_PATH, 'utf8')),
     T('navSwipeStart').includes('navSidePanelOpen()'), T('navSwipeStart').indexOf('navSwipeReset()') < T('navSwipeStart').indexOf('NAV_SWIPE = null;')],
@@ -4453,15 +4456,20 @@ function testPageHistory(sb){
 }
 // A vm context with the history layer and fakes of the browser and of the entry functions it calls.
 function navHistSandbox(script){
-  const log = { push: 0, replace: 0, back: 0, go: [], renders: 0, esc: 0, restored: 0, urls: [] };
+  const log = { push: 0, replace: 0, back: 0, go: [], renders: 0, esc: 0, restored: 0, urls: [], closePopup: 0, closeConfirm: 0, closeMenus: 0, toasts: [], guard: 0 };
+  const timers = [], flags = { payDirty: false, guardNext: null };
   const hist = { entries: [], idx: -1, state: null,
     pushState(s, t, url){ log.push++; this.entries.splice(this.idx + 1); this.entries.push(s); this.idx++; this.state = s; if (url) log.urls.push(url); },
     replaceState(s, t, url){ log.replace++; this.entries[Math.max(this.idx, 0)] = s; if (this.idx < 0) this.idx = 0; this.state = s; if (url) log.urls.push(url); },
     back(){ log.back++; }, go(d){ log.go.push(d); } };
-  let modal = [];
-  const ctx = { console, URLSearchParams, history: hist, location: { search: '?env=staging', href: 'https://x/?env=staging' }, __log: log,
-    window: { scrollY: 0, scrollTo(){} }, setTimeout: () => 0,
-    document: { getElementById: id => id==='modal-root' ? { children: modal } : null, querySelector: () => null, body: {},
+  let modal = [], popup = null, confirm = null, menus = false;
+  const bodyCls = new Set();
+  // timers wait in a list (H.runTimers runs them), so a test decides when "later" is
+  const ctx = { console, URLSearchParams, history: hist, location: { search: '?env=staging', href: 'https://x/?env=staging' }, __log: log, __flags: flags,
+    window: { scrollY: 0, scrollTo(){} }, setTimeout: f => { timers.push(f); return 0; }, Promise,
+    document: { getElementById: id => id==='modal-root' ? { children: modal } : id==='app-popup' ? popup : null,
+      querySelector: q => q==='.confirm-back:not(.closing)' ? confirm : q==='.person-menu, .theme-menu, .pal-pop' && menus ? {} : null, querySelectorAll: () => [],
+      body: { classList: { add: c => bodyCls.add(c), remove: c => bodyCls.delete(c), contains: c => bodyCls.has(c) } },
       dispatchEvent: ev => { if (ev.key==='Escape') { log.esc++; modal = []; } } },
     KeyboardEvent: class { constructor(type, o){ this.type = type; Object.assign(this, o); } },
     AUTH: { status: 'ready' }, STATE: { dataLoaded: true, currentProfileId: 'p1' }, VIEW_AS_ID: null,
@@ -4469,18 +4477,144 @@ function navHistSandbox(script){
     PEOPLE_UI: { sel: null, tab: 'details' } };
   vm.createContext(ctx);
   const names = ['OLD_SETTINGS_PAGES', 'settingsPageKey', 'navSnapOf', 'navKey', 'navMode', 'navUrl', 'NAV_HIST', 'NAV_RESTORERS', 'NAV_LEAVERS', 'NAV_BASE_KINDS', 'navSnap', 'navPid', 'navOurs', 'navSame', 'navKeep', 'navCustom', 'navPush', 'navReplace',
-    'navBackTo', 'navStay', 'navAfterRender', 'navInit', 'NAV_MENUS', 'navLayerOpen', 'navOverlayOpen', 'navActivated', 'navOverlaySync', 'navOverlayClose', 'navOnPop', 'navRestoreView'];
+    'navBackTo', 'navStay', 'navAfterRender', 'navInit', 'NAV_MENUS', 'navLayerOrder', 'navTopWindow', 'navCloseWindow', 'NAV_LAYERS', 'navLayer', 'navLayersOpen', 'navTopLayer', 'navOverlayOpen',
+    'navIsSticky', 'navNudge', 'navActivated', 'navOverlaySync', 'navOverlayClose', 'navRedo', 'navLeaveVerdict', 'navLeaveWait', 'navOnPop', 'navRestoreView', 'navSwipeReset', 'navSwipeBack', 'motionReduced'];
   vm.runInContext(names.map(nm => extractDecl(script, nm)).join('\n') + `
     NAV_BASE_KINDS.forEach(k => { NAV_RESTORERS[k] = (s, prev) => { __log.restored++; return navRestoreView(s, prev); }; });
     function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; } __log.renders++; navAfterRender({}); }
     function goTab(id){ UI.tab = id; UI.jobs.selectedId = null; UI.reference.contractorId = null; PEOPLE_UI.sel = null; render(); }
     function selectJob(id){ UI.jobs.selectedId = id && UI.jobs.selectedId!==id ? id : null; }
-    function closeConfirmModal(){} function closePopup(){} function navSwipeInAnim(){}
-    this.__nav = { NAV_HIST, NAV_RESTORERS, NAV_LEAVERS, navInit, navPush, navReplace, navBackTo, navOverlaySync, navOnPop, navSnap, navKey };`, ctx);
-  return { nav: ctx.__nav, hist, log, ui: ctx.UI, auth: ctx.AUTH, ctx,
+    function closeConfirmModal(){ __log.closeConfirm++; __closeConfirm(); } function closePopup(){ __log.closePopup++; __closePopup(); } function navSwipeInAnim(){}
+    function closeThemeMenu(){ __log.closeMenus++; __closeMenus(); } function closeCatalogColor(){}
+    function showToast(msg){ __log.toasts.push(msg); }
+    function peoplePayDirty(){ return !!__flags.payDirty; }
+    function guardPeoplePay(next){ __log.guard++; if (__flags.payDirty) __flags.guardNext = next; else next(); }
+    this.__nav = { NAV_HIST, NAV_RESTORERS, NAV_LEAVERS, NAV_LAYERS, navInit, navPush, navReplace, navBackTo, navOverlaySync, navOnPop, navSnap, navKey, navLayer, navLayersOpen, navTopLayer,
+      navOverlayOpen, navOverlayClose, navSwipeBack };`, Object.assign(ctx, { __closePopup: () => { popup = null; }, __closeConfirm: () => { confirm = null; }, __closeMenus: () => { menus = false; } }));
+  // a fake #app-popup: its box records the nudge's classes
+  const fakePopup = o => { const box = new Set(); return { dataset: { ...(o.sticky ? { navSticky: '1' } : {}), ...(o.stay ? { navStay: o.stay } : {}) }, box,
+    querySelector: () => ({ classList: { add: c => box.add(c), remove: c => box.delete(c) }, offsetWidth: 1 }) }; };
+  return { nav: ctx.__nav, hist, log, ui: ctx.UI, pp: ctx.PEOPLE_UI, auth: ctx.AUTH, ctx, flags, timers, bodyCls,
     modal: open => { modal = open ? [{ classList: { contains: () => false } }] : []; },
     modalOpen: () => modal.length > 0,
+    popup: o => { popup = o ? fakePopup(o) : null; return popup; }, popupEl: () => popup,
+    confirm: open => { confirm = open ? { classList: { contains: () => false } } : null; }, menus: open => { menus = !!open; },
+    runTimers: () => { for (let k = 0; timers.length && k < 500; k++) timers.shift()(); },
     pop: i => { hist.idx = i; hist.state = hist.entries[i]; ctx.__nav.navOnPop({ state: hist.entries[i] }); } };
+}
+
+// ── Stage 4 review (Ofek 15 Oct): the layer registry, sticky one-time popups, leavers that say no, a refused restore ──
+async function testNavLayers(sb){
+  console.log('\nPage history: layers, sticky popups, leavers that say no (stage 4 review)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const T = nm => extractDecl(script, nm), tick = () => new Promise(r => setImmediate(r));
+  // pure: the open layers, topmost first; what a leaver said
+  const O = (ls, open) => sb.navLayerOrder(ls, open).map(l => l.id);
+  const Ls = [{ id: 'win', z: 200 }, { id: 'menu', z: 500 }, { id: 'drawer', z: 200 }, { id: 'pop', z: 300, shut: 1 }, { id: 'noz' }];
+  assertEqual([O(Ls, l => !l.shut), O(Ls, () => false), O(null, () => true), O([{ id: 'wf', z: 210 }, { id: 'picker', z: 230 }, { id: 'drawer', z: 220 }], () => true)],
+    [['menu', 'drawer', 'win', 'noz'], [], [], ['picker', 'drawer', 'wf']], 'navLayerOrder: topmost first by z; on the same z the one registered later; closed ones left out');
+  const V = sb.navLeaveVerdict;
+  assertEqual([V(false), V(Promise.resolve(true)), V({ then(){} }), V(undefined), V(true), V(0), V(5), V(null), V('no')],
+    ['stay', 'wait', 'wait', 'go', 'go', 'go', 'go', 'go', 'go'], 'navLeaveVerdict: false stays, a Promise waits for its answer, anything else goes on');
+  // the registry: the built-in layers in their order, one added by its z, entry: false, a throwing isOpen, the same id again
+  const H0 = navHistSandbox(script), n0 = H0.nav, ids = l => l.map(x => x.id);
+  H0.menus(true); H0.confirm(true); H0.popup({}); H0.modal(true); H0.ui.mobileNavOpen = true;
+  const all = ids(n0.navLayersOpen());
+  n0.navLayer({ id: 'x-inline', z: 250, entry: false, isOpen: () => true, close(){} });
+  n0.navLayer({ id: 'x-throw', z: 900, isOpen(){ throw new Error('gone'); }, close(){} });
+  const withX = [ids(n0.navLayersOpen()), ids(n0.navLayersOpen(true))];
+  n0.navLayer({ id: 'x-inline', z: 50, entry: false, isOpen: () => true, close(){} });
+  assertEqual([all, withX, n0.NAV_LAYERS.filter(l => l.id==='x-inline').length, ids(n0.navLayersOpen()).pop(), n0.navLayer({}), n0.navLayer(null), n0.navTopLayer().id],
+    [['menus', 'confirm', 'popup', 'window', 'phone-menu'], [['menus', 'confirm', 'popup', 'x-inline', 'window', 'phone-menu'], ['menus', 'confirm', 'popup', 'window', 'phone-menu']], 1, 'x-inline', null, null, 'menus'],
+    'navLayer: built-in layers menus > confirm > popup > window > phone menu; an added one by its z; entry: false has no entry; an isOpen that throws is closed; the same id replaces');
+  const c1 = n0.navOverlayClose(), top1 = n0.navTopLayer().id, c2 = n0.navOverlayClose(), top2 = n0.navTopLayer().id, c3 = n0.navOverlayClose();
+  n0.navLayer({ id: 'x-asks', z: 600, isOpen: () => true, close: () => false });
+  assertEqual([c1, H0.log.closeMenus, top1, c2, H0.log.closeConfirm, top2, c3, H0.log.closePopup, n0.navOverlayClose(), n0.navOverlayClose({ id: 'none', isOpen: () => false, close(){} })],
+    ['closed', 1, 'confirm', 'closed', 1, 'popup', 'closed', 1, 'asked', 'closed'], 'navOverlayClose: the top layer each time (small menus before the confirm); a close() that returns false asked first');
+  const H0b = navHistSandbox(script);
+  assertEqual([H0b.nav.navOverlayClose(), H0b.nav.navTopLayer(), H0b.nav.navOverlayOpen()], ['', null, false], 'navOverlayClose: nothing open, nothing to do');
+  // A1: back on a popup that shows a key once keeps it (the phone's back, the browser's Back, Alt+←, the mouse's back button)
+  const H1 = navHistSandbox(script), n1 = H1.nav;
+  H1.ui.tab = 'crm'; n1.navInit(); H1.ui.tab = 'jobs'; n1.navPush({ kind: 'tab' });
+  const key = H1.popup({ sticky: true, stay: 'Copy the key first' }); n1.navOverlaySync();
+  assertEqual([H1.hist.state.ov, H1.hist.state.d], [1, 2], 'a sticky popup gets an entry of its own, as any popup');
+  H1.log.renders = 0; H1.log.go = [];
+  H1.pop(1);
+  assertEqual([H1.log.closePopup, H1.log.go, n1.NAV_HIST.skip, H1.log.toasts, [...key.box], H1.log.renders, H1.popupEl()===key, H1.ui.tab],
+    [0, [1], 1, ['Copy the key first'], ['nav-nudge'], 0, true, 'jobs'], 'back on a sticky popup (a key shown once): it stays and shakes, says why, the history goes forward again, nothing redrawn');
+  H1.pop(2);
+  assertEqual([n1.NAV_HIST.skip, n1.NAV_HIST.d, H1.hist.state.ov, H1.popupEl()===key], [0, 2, 1, true], 'its own history.go() lands on the popup\'s entry again');
+  const backs1 = H1.log.back;
+  n1.navSwipeBack(); H1.runTimers();
+  assertEqual([H1.log.back - backs1, H1.log.go, H1.log.closePopup, H1.log.toasts.length, H1.popupEl()===key], [0, [1], 0, 2, true], 'the edge swipe on a sticky popup: no back at all, it shakes again');
+  H1.popup({}); H1.pop(1);
+  assertEqual([H1.log.closePopup, H1.log.go, H1.popupEl(), H1.log.renders, H1.log.toasts.length], [1, [1], null, 0, 2], 'back on a plain popup closes it, as before');
+  const backs1b = H1.log.back; n1.navSwipeBack(); H1.runTimers();
+  assertEqual(H1.log.back - backs1b, 1, 'the edge swipe with nothing sticky open: a plain back');
+  const nk = T('mcpShowNewKey'), jl = T('showJoinLink'), op = T('openPopup'), escKey = script.slice(script.lastIndexOf("if (e.key==='Escape') {"));
+  assertEqual([nk.includes("`, { sticky: true, stay: 'Copy the key first, then press \"I\\'ve saved it\".' });"), jl.includes("`, { sticky: true, stay: 'Send the link first, then press Done.' });"),
+    op.includes("if (o.sticky) { el.dataset.navSticky = '1'; if (o.stay) el.dataset.navStay = String(o.stay); }"), /onclick|addEventListener/.test(op),
+    escKey.includes('if (root && root.innerHTML.trim()) closeModal();'), /closePopup|app-popup/.test(escKey), T('navSwipeBack').indexOf('navIsSticky(top)') < T('navSwipeBack').indexOf('history.back()'),
+    html.includes('.nav-nudge { animation: navNudge .36s ease-in-out; }'), html.includes('@media (prefers-reduced-motion: reduce) { .nav-nudge { animation: none; box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-lg); } }')],
+    [true, true, true, false, true, false, true, true, true], 'A1: the new key and the sign-in link are sticky; a click beside a popup and Escape still never close one (as on main); the swipe checks first; the shake uses tokens');
+  // B2b: a leaver that says no changes nothing; one that asks (a Promise) makes the same back again on true, never asking twice
+  const H2 = navHistSandbox(script), n2 = H2.nav;
+  H2.ui.tab = 'jobs'; n2.navInit(); n2.navPush({ kind: 'k', x: { id: 7 } });
+  const kKey = n2.navKey(H2.hist.state), rest2 = () => H2.log.restored;
+  let asked = 0, resolve = null;
+  n2.NAV_LEAVERS.k = () => { asked++; return false; };
+  H2.log.renders = 0; H2.log.go = []; const r0 = rest2(), rep2 = H2.log.replace;
+  H2.pop(0);
+  assertEqual([asked, H2.log.go, rest2() - r0, H2.log.renders, n2.NAV_HIST.skip, H2.log.replace - rep2], [1, [1], 0, 0, 1, 0], 'a leaver that returns false: no restorer, no redraw, nothing replaced; the history goes back where the screen is');
+  H2.pop(1);
+  assertEqual([n2.navKey(n2.NAV_HIST.cur)===kKey, n2.NAV_HIST.d], [true, 1], 'after its skipped popstate the entry left is the current one again');
+  n2.NAV_LEAVERS.k = () => { asked++; return new Promise(r => { resolve = r; }); };
+  asked = 0; H2.log.go = [];
+  H2.pop(0);
+  assertEqual([asked, H2.log.go, rest2() - r0], [1, [1], 0], 'a leaver that asks (a Promise): the history stays at once');
+  H2.pop(1); resolve(true); await tick(); H2.runTimers();
+  assertEqual([H2.log.go, n2.NAV_HIST.leaveOk===kKey], [[1, -1], true], 'its answer true (Save / Discard): the same back is made again, the leaver marked as answered');
+  H2.pop(0);
+  assertEqual([asked, rest2() - r0, n2.NAV_HIST.leaveOk, H2.ui.tab], [1, 1, null, 'jobs'], 'that back goes through without asking twice');
+  H2.pop(1); asked = 0; H2.log.go = [];
+  H2.pop(0); H2.pop(1); resolve(false); await tick(); H2.runTimers();
+  assertEqual([asked, H2.log.go], [1, [1]], 'its answer false (Cancel): nothing moves');
+  H2.pop(0); H2.pop(1);
+  H2.ui.jobs.selectedId = 'j5'; n2.navPush({ kind: 'panel' });
+  resolve(true); await tick(); H2.runTimers();
+  assertEqual(H2.log.go, [1, 1], 'an answer after the screen moved on makes no back');
+  // B2c: a kind of its own gets the page under it first, then its restorer
+  const H3 = navHistSandbox(script), n3 = H3.nav, seen3 = [];
+  H3.ui.tab = 'jobs'; n3.navInit(); n3.navPush({ kind: 'wfx', x: { id: 1 } });
+  H3.ui.tab = 'crm'; n3.navPush({ kind: 'tab' });
+  n3.NAV_RESTORERS.wfx = (s, prev) => { seen3.push([H3.ui.tab, prev.tab, s.x.id]); };
+  H3.log.renders = 0; H3.pop(1);
+  assertEqual([seen3, H3.log.renders, H3.ui.tab, H3.log.go], [[['jobs', 'crm', 1]], 1, 'jobs', []], 'a kind of its own: navRestoreView puts the page back first, then its restorer runs; one render');
+  // C2: a restore the pay guard refuses applies nothing (no closeSettingsPage / openPersonCard first), no held redraw, no navReplace
+  const H4 = navHistSandbox(script), n4 = H4.nav;
+  H4.ui.tab = 'settings'; H4.ui.settings = { page: 'people', open: true }; n4.navInit();
+  H4.pp.sel = 'e:1'; n4.navPush({ kind: 'panel' });
+  H4.flags.payDirty = true; H4.log.renders = 0; H4.log.go = []; const rep4 = H4.log.replace;
+  H4.pop(0);
+  assertEqual([H4.log.guard, H4.ui.settings.open, H4.pp.sel, H4.log.renders, H4.log.go, H4.log.replace - rep4, n4.NAV_HIST.restoring, n4.NAV_HIST.hold],
+    [1, true, 'e:1', 0, [1], 0, false, false], 'a restore the pay guard refuses: the card and the page stay, nothing redrawn or replaced, the history back where the screen is');
+  H4.pop(1); H4.flags.payDirty = false; H4.flags.guardNext(); H4.runTimers();
+  assertEqual(H4.log.go, [1, -1], 'Save / Don\'t save: the same back is made again');
+  const H5 = navHistSandbox(script), n5 = H5.nav;
+  H5.ui.tab = 'settings'; H5.ui.settings = { page: 'phone', open: true }; n5.navInit();
+  H5.ui.settings.page = 'people'; n5.navPush({ kind: 'settings' });
+  H5.pp.sel = 'e:1'; n5.navPush({ kind: 'panel' });
+  H5.ui.mobileNavOpen = true; H5.flags.payDirty = true; H5.log.renders = 0; H5.log.go = [];
+  H5.pop(0);
+  assertEqual([H5.ui.mobileNavOpen, H5.log.go, H5.log.renders, H5.ui.settings.page, H5.pp.sel], [true, [2], 0, 'people', 'e:1'], 'a jump back with the phone menu open that the guard refuses: the menu stays open, nothing else changes');
+  assertEqual(T('navOnPop').includes('if (ok && NAV_HIST.held) render();'), true, 'navOnPop: the held redraw only after a restore that went through');
+  // C1: navPush over a history.state that is not ours (a stray # link) replaces it, never throws
+  const H6 = navHistSandbox(script), n6 = H6.nav;
+  H6.ui.tab = 'crm'; n6.navInit();
+  H6.hist.state = { foo: 1 }; H6.hist.entries[H6.hist.idx] = H6.hist.state;
+  H6.ui.tab = 'jobs'; const p6 = H6.log.push, r6 = H6.log.replace; let threw = null;
+  try { n6.navPush({ kind: 'tab' }); } catch (e) { threw = e.message; }
+  assertEqual([threw, H6.log.push - p6, H6.log.replace - r6, H6.hist.state.tab, H6.hist.state.nav], [null, 0, 1, 'jobs', 1], 'navPush over a foreign history.state: replaced, never throws');
 }
 
 (async () => {
@@ -4492,6 +4626,7 @@ function navHistSandbox(script){
   await testHolidayLoaders();
   await testFullBackup(loadSandbox());
   await testDataExport(loadSandbox());
+  await testNavLayers(loadSandbox());
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });

@@ -1264,6 +1264,10 @@ html.nav-swipe-on, html.nav-swipe-on body { overscroll-behavior-x: none; }   /* 
 body.nav-swiping #content, #content.nav-swipe-in { position: relative; }
 #content.nav-swipe-out { position: relative; left: 28%; opacity: .4; transition: left .14s ease-in, opacity .14s ease-in; }
 @media (prefers-reduced-motion: reduce) { #content.nav-swipe-out { left: 0; opacity: 1; transition: none; } }
+/* Back on a layer that stays (a key shown once): it shakes; with reduced motion a ring instead (stage 4). */
+@keyframes navNudge { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+.nav-nudge { animation: navNudge .36s ease-in-out; }
+@media (prefers-reduced-motion: reduce) { .nav-nudge { animation: none; box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-lg); } }
 .toast-stack { position: fixed; left: 50%; bottom: calc(24px + var(--bottom-bar-h, 0px)); transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; align-items: center; gap: 8px; width: max-content; max-width: calc(100vw - 32px); pointer-events: none; }
 .toast { position: relative; pointer-events: auto; cursor: default; max-width: 100%; background: var(--ink); color: var(--paper); padding: 10px 20px 10px 11px; border-radius: 99px; font-size: 13px; font-weight: 600; line-height: 1.35; box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 10px; animation: toastIn .38s cubic-bezier(.2,.9,.25,1.3) both; transition: opacity .18s ease, transform .18s ease; }
 .toast.leaving { opacity: 0; transform: translateY(8px) scale(.96); }
@@ -5593,10 +5597,22 @@ function toggleMobileNav(){ UI.mobileNavOpen = !UI.mobileNavOpen; render(); }
    phone's back (Android, the app added to an iPhone's home screen), the browser's Back and a swipe from the left edge go
    to the previous screen instead of leaving the app; an open window (or the phone menu) closes first. Back on the first
    screen does what the platform does. A link to a page the person may not open lands on their home page.
-   An entry is a small plain object { nav: 1, kind, ...where the screen is (navSnapOf) }. It is a registry, not a switch:
-   NAV_RESTORERS[kind](state, prev) puts an entry back on screen (return false when a guard kept the screen as it is), and
-   NAV_LEAVERS[kind](prev, next) tidies up a screen drawn outside UI. Another part of the app adds its own kind with its
-   own payload in state.x: NAV_RESTORERS.myKind = fn; navPush({ kind: 'myKind', x: { ... } }).
+   An entry is a small plain object { nav: 1, kind, ...where the screen is (navSnapOf) }. It is a registry, not a switch;
+   another part of the app (the automation builder) plugs in without editing this code:
+   - A kind of its own, with its payload in state.x: NAV_RESTORERS.myKind = fn; navPush({ kind: 'myKind', x: { ... } }).
+     navRestoreView puts the page under it back first, then NAV_RESTORERS[kind](state, prev) adds its own part (return
+     false when a guard kept the screen as it is).
+   - NAV_LEAVERS[kind](prev, next) runs when leaving that kind, before the restorer and before anything changes. It may
+     tidy up a screen drawn outside UI and go on, or say no and change nothing: false stays; a Promise (Unsaved changes →
+     Save / Discard / Cancel) stays for now and resolves true to go on (the same back is made again, the leaver is not asked
+     twice) or false to stay. Resolve it once, and don't navigate from Save yourself. Any other return value goes on.
+   - Layers (anything back closes before it moves): navLayer({ id, z, isOpen(), close(), sticky?, entry?, el?, stay? }).
+     Back closes the top open layer (highest z) first; close() returning false means it asked first and stays until
+     answered. A sticky layer (sticky: true or a function; data-nav-sticky on the element; openPopup(html, { sticky: true,
+     stay: 'what to do' })) is never closed by back: it shakes and says why. entry: false is an inline guard with no entry
+     of its own. A layer that is not a direct child of the body or #modal-root calls navOverlaySync() after it opens or
+     closes. Built in: small menus 500, the confirm 400, the popup 300, the window 200, the phone menu 100; a layer inside
+     a window sits between 200 and 300 (e.g. #wf-modal 210, its drawers 220, its pickers 230).
    Rules: restoring never adds an entry (no loops) and redraws once at most; filters and searches never add entries. */
 const NAV_PAGES = [...SECTION_ORDER, 'settings'];   // exactly the pages render() draws
 const NAV_TAB_ALIASES = { finance: 'payroll' };     // Financial Summary was removed (6 Oct): its technician part is in Payroll
@@ -5673,8 +5689,9 @@ function isBackSwipe(start, end, ctx){
 }
 // d: how many entries of ours are below this one. hold/held: a restore's redraws become one. skip: popstates of our own
 // history.go() still to come. syncBack: our own back whose screen is already right (a window closed in the app, a panel its
-// answer closed, a reload). pops: popstates seen.
-const NAV_HIST = { ready: false, pid: null, d: 0, cur: null, restoring: false, hold: false, held: false, skip: 0, pops: 0, syncBack: false, swipeIn: false, mo: null };
+// answer closed, a reload). pops: popstates seen. redo: the last back a guard may make again (navRedo); leaveOk: the
+// entry whose leaver already said yes to it.
+const NAV_HIST = { ready: false, pid: null, d: 0, cur: null, restoring: false, hold: false, held: false, skip: 0, pops: 0, syncBack: false, swipeIn: false, mo: null, redo: null, leaveOk: null };
 const NAV_RESTORERS = {};
 const NAV_LEAVERS = {};
 const NAV_BASE_KINDS = ['tab', 'settings', 'connector', 'panel'];
@@ -5694,7 +5711,7 @@ function navPush(state){
   if (mode==='skip') return;
   // A window's answer closed the panel it was opened over (a guard's Save / Don't save): back over both entries to the one
   // below the panel, which is the screen now. Replacing would leave the panel's entry for the next back to reopen.
-  if (mode==='replace' && cur.ov && cur.ppk && cur.ppk===navKey(next) && (cur.d|0) >= 2) { NAV_HIST.syncBack = true; history.go(-2); return; }
+  if (mode==='replace' && cur && cur.ov && cur.ppk && cur.ppk===navKey(next) && (cur.d|0) >= 2) { NAV_HIST.syncBack = true; history.go(-2); return; }
   const url = navUrl(next, location.search);
   if (mode==='replace') {
     NAV_HIST.cur = { ...next, d: cur ? cur.d|0 : NAV_HIST.d, pk: cur ? cur.pk ?? null : null };
@@ -5763,12 +5780,45 @@ function navInit(){
 }
 // The small menus on the body: a person's ⋯ menu, the light / dark menu, a category's colour.
 const NAV_MENUS = '.person-menu, .theme-menu, .pal-pop';
-// A window, the confirm, the small popup or a small menu is open (one closing is not); navOverlayOpen: or the phone menu.
-function navLayerOpen(){
-  const r = document.getElementById('modal-root');
-  return !!(r && [...r.children].some(el => !el.classList.contains('closing'))) || !!document.getElementById('app-popup') || !!document.querySelector(NAV_MENUS);
+// The open layers, topmost first: by z, and on the same z the one registered later.
+function navLayerOrder(layers, isOpen){ return (layers || []).map((l, i) => ({ l, i })).filter(x => isOpen(x.l)).sort((a, b) => ((b.l.z|0) - (a.l.z|0)) || (b.i - a.i)).map(x => x.l); }
+// The window on top in #modal-root (one closing is not; the confirm is a layer of its own).
+function navTopWindow(){ const r = document.getElementById('modal-root'); return r ? [...r.children].filter(el => !el.classList.contains('closing') && !el.classList.contains('confirm-back')).pop() || null : null; }
+// The window closes as a click beside it does, through its own close function (closeLeadModal's follow-up date check, the
+// commission popup's reset); one without that (or the automation editor) through Escape.
+function navCloseWindow(){
+  const top = navTopWindow(); if (!top) return;
+  const back = top.matches && top.matches('.modal-back') ? top : top.querySelector ? top.querySelector('.modal-back') : null;
+  if (back && back.getAttribute('onclick') && !back.classList.contains('au-edb')) back.click();
+  else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 }
-function navOverlayOpen(){ return navLayerOpen() || !!UI.mobileNavOpen; }
+// What back closes before it moves (see the comment block above): the built-in layers. Another part of the app adds its
+// own with navLayer(); this list never names one of theirs.
+const NAV_LAYERS = [
+  { id: 'menus', z: 500, isOpen: () => !!document.querySelector(NAV_MENUS), close: () => { closeThemeMenu(); closeCatalogColor(); document.querySelectorAll('.person-menu').forEach(x => x.remove()); } },
+  { id: 'confirm', z: 400, el: () => document.querySelector('.confirm-back:not(.closing)'), isOpen: () => !!document.querySelector('.confirm-back:not(.closing)'), close: () => { closeConfirmModal(); } },
+  { id: 'popup', z: 300, el: () => document.getElementById('app-popup'), isOpen: () => !!document.getElementById('app-popup'), close: () => { closePopup(); },
+    sticky: () => { const e = document.getElementById('app-popup'); return !!(e && e.dataset && e.dataset.navSticky); } },
+  { id: 'window', z: 200, el: navTopWindow, isOpen: () => !!navTopWindow(), close: navCloseWindow,
+    sticky: () => { const t = navTopWindow(); return !!(t && ((t.matches && t.matches('[data-nav-sticky]')) || (t.querySelector && t.querySelector('[data-nav-sticky]')))); } },
+  { id: 'phone-menu', z: 100, isOpen: () => !!UI.mobileNavOpen, close: () => { UI.mobileNavOpen = false; render(); } },
+];
+// Adds a layer (or replaces the one with the same id). Returns it.
+function navLayer(def){ if (!def || !def.id) return null; const i = NAV_LAYERS.findIndex(l => l.id===def.id); if (i >= 0) NAV_LAYERS[i] = def; else NAV_LAYERS.push(def); return def; }
+// The open layers, topmost first (entryOnly: only those with an entry of their own). An isOpen that throws counts as closed.
+function navLayersOpen(entryOnly){ return navLayerOrder(NAV_LAYERS, l => { if (entryOnly && l.entry===false) return false; try { return !!l.isOpen(); } catch (e) { return false; } }); }
+function navTopLayer(){ return navLayersOpen()[0] || null; }
+// Something with an entry of its own is open: a small menu, the confirm, the popup, a window, the phone menu, or one added.
+function navOverlayOpen(){ return navLayersOpen(true).length > 0; }
+function navIsSticky(l){ return !!l && (typeof l.sticky==='function' ? !!l.sticky() : !!l.sticky); }
+// A sticky layer shakes and says why it stays (its data-nav-stay, or the layer's stay).
+function navNudge(l){
+  const el = l && l.el ? l.el() : null, box = el && el.querySelector ? (el.querySelector('.modal, .confirm-card') || el) : null;
+  // The class stays on once it has run: taking it off would play the window's own opening animation again.
+  if (box && box.classList) { box.classList.remove('nav-nudge'); void box.offsetWidth; box.classList.add('nav-nudge'); }
+  const msg = (el && el.dataset && el.dataset.navStay) || (l && l.stay);
+  if (msg) showToast(msg, { kind: 'info' });
+}
 // The person has tapped or typed on the page. Chrome may skip an entry pushed before that (a window a link opened), and
 // back would then leave the app; such a window gets its entry at the first tap or key instead.
 function navActivated(){ try { const u = typeof navigator!=='undefined' && navigator.userActivation; return !u || !!u.hasBeenActive; } catch (e) { return true; } }
@@ -5784,23 +5834,30 @@ function navOverlaySync(){
     NAV_HIST.d = NAV_HIST.cur.d;
   } else if (!open && st.ov) { NAV_HIST.syncBack = true; history.back(); }
 }
-// Back with something open closes one layer: a small menu, the confirm, the popup, the window, the phone menu. True when
-// something was open. The window closes as a click beside it does, through its own close function (closeLeadModal's
-// follow-up date check, the commission popup's reset); one without that (or the automation editor) through Escape.
-function navOverlayClose(){
-  if (document.querySelector(NAV_MENUS)) { closeThemeMenu(); closeCatalogColor(); document.querySelectorAll('.person-menu').forEach(x => x.remove()); return true; }
-  if (document.querySelector('.confirm-back:not(.closing)')) { closeConfirmModal(); return true; }
-  if (document.getElementById('app-popup')) { closePopup(); return true; }
-  const r = document.getElementById('modal-root'), top = r && [...r.children].filter(el => !el.classList.contains('closing')).pop();
-  if (top) {
-    const back = top.matches && top.matches('.modal-back') ? top : top.querySelector ? top.querySelector('.modal-back') : null;
-    if (back && back.getAttribute('onclick') && !back.classList.contains('au-edb')) back.click();
-    else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    return true;
-  }
-  if (UI.mobileNavOpen) { UI.mobileNavOpen = false; render(); return true; }
-  return false;
+// Back with something open closes one layer, the top one: 'closed'; 'asked' when its close() asked first (it stays until
+// answered); 'stay' when it is sticky (it shakes instead); '' when nothing was open.
+function navOverlayClose(top){
+  top = top || navTopLayer(); if (!top) return '';
+  if (navIsSticky(top)) { navNudge(top); return 'stay'; }
+  return top.close()===false ? 'asked' : 'closed';
 }
+// A back a guard held up, made again once it is answered: only while the screen is still the one it was made from, after
+// the guard's window has gone (its own back first). pass: the leaver already said yes, so it is not asked twice.
+function navRedo(r, pass){
+  r = r || NAV_HIST.redo; if (!r) return;
+  let tries = 0;
+  const run = () => {
+    if (NAV_HIST.skip || NAV_HIST.syncBack || (NAV_HIST.cur && NAV_HIST.cur.ov)) { if (++tries < 40) setTimeout(run, 25); return; }
+    if (!NAV_HIST.cur || navKey(NAV_HIST.cur)!==r.key) return;
+    if (pass) NAV_HIST.leaveOk = r.key;
+    history.go(r.delta);
+  };
+  setTimeout(run, 0);
+}
+// What a leaver said: 'stay' (false), 'wait' (a Promise: Save / Discard / Cancel still open) or 'go' (anything else).
+function navLeaveVerdict(v){ return v===false ? 'stay' : v && typeof v.then==='function' ? 'wait' : 'go'; }
+// A leaver's Promise: true goes on with the same back, false (or a failure) stays.
+function navLeaveWait(p){ const r = NAV_HIST.redo; Promise.resolve(p).then(go => { if (go===true) navRedo(r, true); }, () => {}); }
 // Back / forward. Never adds an entry; one render at most.
 function navOnPop(e){
   const s = e.state;
@@ -5818,27 +5875,38 @@ function navOnPop(e){
     }
     setTimeout(navOverlaySync, 0); return;
   }
+  const pass = NAV_HIST.leaveOk; NAV_HIST.leaveOk = null;   // the back navRedo made again: its leaver already said yes
+  // Back with a layer open closes the top one and stays; the page under the window may have changed while it was open. A
+  // sticky layer (a key shown once) or one that asked first stays: the history goes back where the screen is.
   // A jump of more than one step (the browser's history list) with only the phone menu open: the menu shuts and the jump
   // goes ahead (closing it on its own would redraw, push, and cut off the entries the jump goes to).
-  const menuShut = !!UI.mobileNavOpen && delta!==-1 && !navLayerOpen();
+  const open = navLayersOpen(), top = open[0] || null;
+  const menuShut = !!top && top.id==='phone-menu' && open.length===1 && delta!==-1;
   if (menuShut) UI.mobileNavOpen = false;
-  // Back with something open closes it and stays; the page under the window may have changed while it was open.
-  else if (navOverlayClose()) {
-    if (!navSame(s)) { if (prev && prev.ov && delta===-1) navReplace(navKeep(s)); else navStay(delta); }
+  else if (top) {
+    const r = navOverlayClose(top);
+    if (r!=='closed') navStay(delta);
+    else if (!navSame(s)) { if (prev && prev.ov && delta===-1) navReplace(navKeep(s)); else navStay(delta); }
     return;
   }
   // Nothing to do when the screen already shows it (a forward step onto a window's entry), unless a kind of its own is involved.
   if (!navCustom(s.kind) && !(prev && navCustom(prev.kind)) && navSame(s)) { if (menuShut) render(); return; }
-  const leave = prev && NAV_LEAVERS[prev.kind], fn = NAV_RESTORERS[s.kind] || navRestoreView;
+  // The leaver first, before anything changes: it may say no (false) or ask (a Promise). Then, for a kind of its own, the
+  // page under it (navRestoreView), then its restorer. A restore a guard refused applies nothing: no held redraw, the
+  // phone menu as it was, the history back where the screen is.
+  const leave = prev && NAV_LEAVERS[prev.kind], fn = NAV_RESTORERS[s.kind] || navRestoreView, pk = prev ? navKey(prev) : null;
+  NAV_HIST.redo = { key: pk, delta };
   NAV_HIST.restoring = true; NAV_HIST.hold = true; NAV_HIST.held = menuShut;   // the shut menu is redrawn away once
-  let ok = true;
+  let ok = true, wait = null;
   try {
-    if (leave) leave(prev, s);
-    ok = fn(s, prev)!==false;
+    const v = leave && pass!==pk ? leave(prev, s) : true, how = navLeaveVerdict(v);
+    if (how!=='go') { ok = false; if (how==='wait') wait = v; }
+    if (ok && navCustom(s.kind) && fn!==navRestoreView) ok = navRestoreView(s, prev)!==false;
+    if (ok) ok = fn(s, prev)!==false;
     NAV_HIST.hold = false;
-    if (NAV_HIST.held) render();
+    if (ok && NAV_HIST.held) render();
   } finally { NAV_HIST.hold = false; NAV_HIST.restoring = false; }
-  if (!ok) { navStay(delta); return; }
+  if (!ok) { if (menuShut) UI.mobileNavOpen = true; navStay(delta); if (wait) navLeaveWait(wait); return; }
   if (typeof s.y==='number') window.scrollTo(0, s.y);
   if (NAV_HIST.swipeIn) navSwipeInAnim();
 }
@@ -5868,6 +5936,9 @@ function navRestoreView(s, prev){
     return true;
   }
   if (s.tab==='settings') {
+    // An hourly pay change is asked about before the page, the list or the card changes (nothing is applied first); Save /
+    // Don't save go on with this back.
+    if (peoplePayDirty() && (!same(s.per, cur.per) || !same(s.sp, cur.sp) || (!s.so && cur.so))) { const r = NAV_HIST.redo; guardPeoplePay(() => navRedo(r)); return false; }
     // ‹ Settings went back to the list (closeSettingsPage): the page only closes and stays selected, as on main (above 640 px
     // the list shows it); the entry is then made to match the screen (navAfterRender). Back from a page shows the entry's page.
     if (prev && prev.keepPage && !s.so) { if (cur.so) closeSettingsPage(); return true; }
@@ -5951,6 +6022,8 @@ function navSwipeCancel(){ NAV_SWIPE = null; navSwipeReset(); }   // the system 
 // The page slides out, then back; with reduced motion (or a window or a side panel open) it is a plain back. The back comes
 // a moment later and only when nothing went back meanwhile (a swipe back of the browser's own lands after the touch ends).
 function navSwipeBack(){
+  const top = navTopLayer();
+  if (top && navIsSticky(top)) { navSwipeReset(); navOverlayClose(top); return; }   // a key shown once stays: it shakes, no back
   const c = document.getElementById('content'), pops = NAV_HIST.pops, back = () => { if (NAV_HIST.pops===pops) history.back(); };
   if (!c || navOverlayOpen() || motionReduced() || !document.body.classList.contains('nav-swiping')) { navSwipeReset(); setTimeout(back, 120); return; }
   c.style.left = ''; c.classList.add('nav-swipe-out'); NAV_HIST.swipeIn = true;
@@ -7887,10 +7960,13 @@ function leadLeaveGuard(id, then){
 }
 // Small centred popup, separate from the main modal so it can sit on top of it.
 let POPUP_AFTER = null;
-function openPopup(html){
+// opts.sticky: a popup that shows something only once (a new key, a sign-in link). Back (the phone's, the browser's, Alt+←,
+// the mouse button, the swipe) never closes it, just as a click beside it never does: it shakes and shows opts.stay.
+function openPopup(html, opts){
   closePopup();
-  const el = document.createElement('div');
+  const o = opts || {}, el = document.createElement('div');
   el.id = 'app-popup'; el.className = 'modal-back'; el.style.zIndex = '2000';
+  if (o.sticky) { el.dataset.navSticky = '1'; if (o.stay) el.dataset.navStay = String(o.stay); }
   el.innerHTML = `<div class="modal" style="max-width:420px">${html}</div>`;
   document.body.appendChild(el);
 }
@@ -20476,7 +20552,7 @@ function showJoinLink(name, link, kind){
       <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('join-link-text').value).then(() => showToast('Copied'))">${ico('copy', 14)} Copy</button>
       <a class="btn" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a>
       <button class="btn primary" onclick="closePopup()">Done</button>
-    </div>`);
+    </div>`, { sticky: true, stay: 'Send the link first, then press Done.' });
 }
 async function teamLink(id){
   const p = STATE.profiles.find(x => x.id===id); if (!p) return;
@@ -21478,7 +21554,7 @@ function mcpShowNewKey(token, url, pathUrl){
     <div class="hint">This is the only time it is shown. Copy it now; if you lose it, revoke it and make a new one.</div>
     ${row('mcp-reveal-path', 'Address with the key (for Claude)', pathUrl)}${row('mcp-reveal-key', 'Key', token)}${row('mcp-reveal-url', 'Address (for tools that take a header)', url)}
     <ol class="mcp-howto">${MCP_HOWTO.slice(1).map(t => `<li>${esc(t)}</li>`).join('')}</ol>
-    <div class="modal-acts"><button type="button" class="btn primary" onclick="closePopup()">I've saved it</button></div>`);
+    <div class="modal-acts"><button type="button" class="btn primary" onclick="closePopup()">I've saved it</button></div>`, { sticky: true, stay: 'Copy the key first, then press "I\'ve saved it".' });
 }
 function mcpCopy(id){
   const el = document.getElementById(id); if (!el) return;
