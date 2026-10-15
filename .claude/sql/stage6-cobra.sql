@@ -648,3 +648,183 @@ select 'G4-providers ok';
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════════
 -- END G4-providers
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+-- Group G5-keys (stage 6 v2, Ofek 15 Oct): bring your own AI key (a person's, or the business's), Anthropic or OpenAI.
+-- The key itself lives ONLY in Vault (the stage 5 mcp_server_secret_* pattern). The app never reads ai_keys: ai-gateway
+-- (service role) answers has_key + the last 4 characters, and saves / checks / removes keys with the person's sign-in.
+-- Run AFTER G4-providers, BEFORE deploying the G5 ai-gateway, STAGING first. Safe to run again.
+-- Check before (read-only):
+--   select extname from pg_extension where extname in ('supabase_vault', 'pg_cron');   -- 2 rows
+--   select to_regclass('public.ai_keys');                                                -- null the first time
+--   select jobname from cron.job where jobname = 'ai-keys-prune';                        -- 0 rows the first time
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+begin;
+
+-- 1. One key per person and one per business (saving again replaces it). The secret is only in Vault.
+create table if not exists public.ai_keys (
+  id uuid primary key default gen_random_uuid(),
+  business_id text not null default 'default',
+  scope text not null check (scope in ('user', 'business')),
+  user_id uuid references auth.users(id) on delete cascade,      -- [SECURITY] a deleted account takes its key (the trigger removes the Vault secret)
+  provider text not null check (provider in ('anthropic', 'openai')),
+  secret_id uuid,                                                -- [SECURITY] the Vault id; no grant lets the app read it
+  has_key boolean generated always as (secret_id is not null) stored,
+  last4 text check (last4 is null or last4 ~ '^[\x21-\x7e]{4}$'),
+  status text not null default 'ok' check (status in ('ok', 'invalid')),
+  last_error text check (last_error is null or last_error ~ '^[a-z0-9_]{1,40}$'),
+  last_checked_at timestamptz,
+  last_used_at timestamptz,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint ai_keys_scope_user check ((scope = 'user') = (user_id is not null))
+);
+create unique index if not exists ai_keys_owner_idx
+  on public.ai_keys (business_id, scope, coalesce(user_id, '00000000-0000-0000-0000-000000000000'::uuid));
+create index if not exists ai_keys_user_idx on public.ai_keys (user_id) where user_id is not null;
+
+-- 2. Save (create or replace). The gateway calls this only after the provider accepted the key (GET /v1/models).
+create or replace function public.ai_key_set(p_business text, p_scope text, p_user uuid, p_provider text, p_secret text,
+  p_last4 text, p_by uuid) returns uuid
+language plpgsql volatile security definer set search_path = ''
+as $$
+declare kid uuid; sid uuid;
+begin
+  if p_scope not in ('user', 'business') or (p_scope = 'user') <> (p_user is not null) then raise exception 'ai_key_set: bad scope'; end if;
+  if p_provider not in ('anthropic', 'openai') then raise exception 'ai_key_set: bad provider'; end if;
+  if coalesce(char_length(p_secret), 0) not between 20 and 300 then raise exception 'ai_key_set: bad key length'; end if;   -- [SECURITY] messages never carry the key
+  select k.id, k.secret_id into kid, sid from public.ai_keys k
+   where k.business_id = p_business and k.scope = p_scope and k.user_id is not distinct from p_user
+   for update;
+  if kid is null then
+    insert into public.ai_keys (business_id, scope, user_id, provider, last4, created_by)
+    values (p_business, p_scope, p_user, p_provider, p_last4, p_by) returning id into kid;
+  end if;
+  if sid is not null and exists (select 1 from vault.secrets where id = sid) then
+    perform vault.update_secret(sid, p_secret);                                                    -- [SECURITY]
+  else
+    delete from vault.secrets where name = 'ai_key_' || kid::text;   -- a leftover from an interrupted save
+    sid := vault.create_secret(p_secret, 'ai_key_' || kid::text, 'AI assistant: a bring-your-own API key');   -- [SECURITY]
+  end if;
+  update public.ai_keys set provider = p_provider, secret_id = sid, last4 = p_last4, status = 'ok', last_error = null,
+         last_checked_at = now(), updated_at = now()
+   where id = kid;
+  return kid;
+end $$;
+
+-- [SECURITY] The ONLY way a key leaves Vault: to the gateway (service role), to call the provider. Never sent to the app.
+create or replace function public.ai_key_get(p_business text, p_scope text, p_user uuid)
+returns table (id uuid, provider text, status text, last4 text, secret text)
+language sql stable security definer set search_path = ''
+as $$
+  select k.id, k.provider, k.status, k.last4, d.decrypted_secret
+    from public.ai_keys k join vault.decrypted_secrets d on d.id = k.secret_id
+   where k.business_id = p_business and k.scope = p_scope and k.user_id is not distinct from p_user
+$$;
+
+-- After a check (p_used false) or a use (p_used true): ok / invalid and a short error code (never provider text).
+create or replace function public.ai_key_mark(p_id uuid, p_status text, p_error text, p_used boolean) returns void
+language sql volatile security definer set search_path = ''
+as $$
+  update public.ai_keys set
+    status = case when p_status in ('ok', 'invalid') then p_status else status end,
+    last_error = case when p_status = 'ok' then null else nullif(p_error, '') end,
+    last_checked_at = case when coalesce(p_used, false) then last_checked_at else now() end,
+    last_used_at = case when coalesce(p_used, false) then now() else last_used_at end,
+    updated_at = now()
+  where id = p_id
+$$;
+
+create or replace function public.ai_key_delete(p_business text, p_scope text, p_user uuid) returns boolean
+language plpgsql volatile security definer set search_path = ''
+as $$
+declare n integer;
+begin
+  delete from public.ai_keys k where k.business_id = p_business and k.scope = p_scope and k.user_id is not distinct from p_user;
+  get diagnostics n = row_count;
+  return n > 0;
+end $$;
+
+-- Removing a key row (the person, an owner, the prune, or a deleted account) removes its Vault secret too.
+create or replace function public.ai_keys_drop_secret() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if old.secret_id is not null then delete from vault.secrets where id = old.secret_id; end if;   -- [SECURITY]
+  return old;
+end $$;
+drop trigger if exists ai_keys_drop_secret on public.ai_keys;
+create trigger ai_keys_drop_secret after delete on public.ai_keys for each row execute function public.ai_keys_drop_secret();
+
+-- People who left: a person's key goes once their sign-in is switched off (Team → access off sets banned_until) or
+-- their profile is gone. A deleted account is handled at once (on delete cascade + the trigger).
+create or replace function public.ai_prune_keys() returns integer
+language plpgsql volatile security definer set search_path = ''
+as $$
+declare n integer;
+begin
+  delete from public.ai_keys k
+   where k.scope = 'user'
+     and (not exists (select 1 from public.profiles p where p.id = k.user_id)
+          or exists (select 1 from auth.users u where u.id = k.user_id and u.banned_until is not null and u.banned_until > now()));
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+-- 3. Access. [SECURITY] RLS on and NO policies, NO grants for anon / authenticated: the app never reads this table.
+alter table public.ai_keys enable row level security;                     -- [SECURITY]
+revoke all on public.ai_keys from anon, authenticated;                   -- [SECURITY]
+grant all on public.ai_keys to service_role;
+revoke all on function public.ai_key_set(text, text, uuid, text, text, text, uuid) from public, anon, authenticated;   -- [SECURITY]
+revoke all on function public.ai_key_get(text, text, uuid) from public, anon, authenticated;                           -- [SECURITY]
+revoke all on function public.ai_key_mark(uuid, text, text, boolean) from public, anon, authenticated;                 -- [SECURITY]
+revoke all on function public.ai_key_delete(text, text, uuid) from public, anon, authenticated;                        -- [SECURITY]
+revoke all on function public.ai_keys_drop_secret() from public, anon, authenticated;                                  -- [SECURITY]
+revoke all on function public.ai_prune_keys() from public, anon, authenticated;                                        -- [SECURITY]
+grant execute on function public.ai_key_set(text, text, uuid, text, text, text, uuid) to service_role;
+grant execute on function public.ai_key_get(text, text, uuid) to service_role;
+grant execute on function public.ai_key_mark(uuid, text, text, boolean) to service_role;
+grant execute on function public.ai_key_delete(text, text, uuid) to service_role;
+grant execute on function public.ai_prune_keys() to service_role;
+
+-- 4. Timer: the leavers' key prune, daily at 03:41 UTC.
+do $$ begin
+  if exists (select 1 from cron.job where jobname = 'ai-keys-prune') then perform cron.unschedule('ai-keys-prune'); end if;
+end $$;
+select cron.schedule('ai-keys-prune', '41 3 * * *', $job$ select public.ai_prune_keys() $job$);
+
+commit;
+select 'G5-keys ok';
+-- Check after (read-only, except the rolled-back Vault test):
+--   select relrowsecurity from pg_class where relname = 'ai_keys';                                              -- t
+--   select count(*) from pg_policies where tablename = 'ai_keys';                                               -- 0
+--   select privilege_type from information_schema.role_table_grants where table_name = 'ai_keys'
+--     and grantee in ('anon', 'authenticated');                                                                -- 0 rows
+--   select has_function_privilege('authenticated', 'public.ai_key_get(text, text, uuid)', 'execute');          -- false
+--   select jobname, schedule from cron.job where jobname = 'ai-keys-prune';                                    -- 41 3 * * *
+--   Vault test (a placeholder value, never a real key; rolled back):
+--   begin;
+--     select public.ai_key_set('default', 'business', null, 'openai', 'placeholder-value-not-a-key-0000', '0000', null);   -- a uuid
+--     select provider, status, last4, secret = 'placeholder-value-not-a-key-0000' from public.ai_key_get('default', 'business', null);   -- openai | ok | 0000 | t
+--     select public.ai_key_delete('default', 'business', null);                                                -- t
+--     select count(*) from vault.secrets where name like 'ai_key_%';                                           -- 0
+--   rollback;
+--
+-- ── ROLLBACK (G5-keys; run by hand only) ───────────────────────────────────────────────────────────────
+-- select cron.unschedule('ai-keys-prune');
+-- begin;
+-- delete from public.ai_keys;                         -- the trigger removes every key's Vault secret first
+-- drop trigger if exists ai_keys_drop_secret on public.ai_keys;
+-- drop function if exists public.ai_prune_keys();
+-- drop function if exists public.ai_keys_drop_secret();
+-- drop function if exists public.ai_key_delete(text, text, uuid);
+-- drop function if exists public.ai_key_mark(uuid, text, text, boolean);
+-- drop function if exists public.ai_key_get(text, text, uuid);
+-- drop function if exists public.ai_key_set(text, text, uuid, text, text, text, uuid);
+-- drop table if exists public.ai_keys;
+-- commit;
+-- select count(*) from vault.secrets where name like 'ai_key_%';   -- 0
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════
+-- END G5-keys
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════

@@ -84,6 +84,7 @@ function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, strin
   const jwts = opts.jwts || {};
   const auth = { getUser: async (jwt: string) => (jwts[jwt] ? { data: { user: { id: jwts[jwt] } }, error: null } : { data: { user: null }, error: { message: "invalid JWT" } }) };
   const ctl = { rpcs: [] as string[], writes: [] as string[], rpcFail: "" };
+  const vault = new Map<string, string>();   // G5: the fake Vault (tests inspect it)
   // The SQL helpers of .claude/sql/stage6-cobra.sql, as plain code.
   const rpc = async (name: string, a: any) => {
     ctl.rpcs.push(name);
@@ -120,6 +121,34 @@ function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, strin
       const sum = (l: any[]) => l.reduce((s, u) => s + Number(u.neurons || 0), 0);
       return { data: { platform_neurons: sum(rows), business_neurons: sum(rows.filter((u) => u.business_id === a.p_business)), exhausted: rows.some((u) => u.status === "free_quota" && u.error_code === "free_quota") }, error: null };
     }
+    // G5-keys: ai_keys rows hold the state, the secrets sit in `vault` (secret_id → key) only, as in Vault.
+    const keyRow = (b: string, scope: string, user: any) => (T.ai_keys || []).find((k) => k.business_id === b && k.scope === scope && (k.user_id ?? null) === (user ?? null));
+    if (name === "ai_key_set") {
+      let k = keyRow(a.p_business, a.p_scope, a.p_user);
+      if (!k) { k = { id: newId(), business_id: a.p_business, scope: a.p_scope, user_id: a.p_user ?? null, created_by: a.p_by, created_at: new Date(io.now()).toISOString(), secret_id: null }; (T.ai_keys = T.ai_keys || []).push(k); }
+      if (!k.secret_id) k.secret_id = newId();
+      vault.set(k.secret_id, a.p_secret);
+      Object.assign(k, { provider: a.p_provider, last4: a.p_last4, has_key: true, status: "ok", last_error: null, last_checked_at: new Date(io.now()).toISOString() });
+      return { data: k.id, error: null };
+    }
+    if (name === "ai_key_get") {
+      const k = keyRow(a.p_business, a.p_scope, a.p_user);
+      return { data: k && vault.has(k.secret_id) ? [{ id: k.id, provider: k.provider, status: k.status, last4: k.last4, secret: vault.get(k.secret_id) }] : [], error: null };
+    }
+    if (name === "ai_key_mark") {
+      const k = (T.ai_keys || []).find((x) => x.id === a.p_id);
+      if (k) {
+        if (a.p_status === "ok" || a.p_status === "invalid") k.status = a.p_status;
+        k.last_error = a.p_status === "ok" ? null : a.p_error || null;
+        if (a.p_used) k.last_used_at = new Date(io.now()).toISOString(); else k.last_checked_at = new Date(io.now()).toISOString();
+      }
+      return { data: null, error: null };
+    }
+    if (name === "ai_key_delete") {
+      const k = keyRow(a.p_business, a.p_scope, a.p_user);
+      if (k) { vault.delete(k.secret_id); T.ai_keys = T.ai_keys.filter((x) => x !== k); }
+      return { data: !!k, error: null };
+    }
     if (name === "ai_claim_alert_80") {
       const st = (T.ai_settings || []).find((r) => r.business_id === a.p_business && r.alert_80_sent_month !== a.p_month);
       if (st) st.alert_80_sent_month = a.p_month;
@@ -127,7 +156,7 @@ function fakeDb(seed: Record<string, any[]>, opts: { jwts?: Record<string, strin
     }
     return { data: null, error: { message: "no such function" } };
   };
-  return { T, from, rpc, auth, ctl };
+  return { T, from, rpc, auth, ctl, vault };
 }
 
 let pass = 0, fail = 0;
@@ -263,7 +292,7 @@ const whoamiScripts = () => [toolScript("toolu_w1", "whoami", {}), textScript("Y
     ok(keyA.length > 200 && keyA === fnSource(push, "export async function vapidKeys("), "vapidKeys is byte-identical to push/index.ts");
     ok(!mine.includes("Cobra"), "index.ts never names the product");
     ok(!mine.replace(region(mine), "").includes("Australia/Sydney"), "no hard-coded time zone outside the region block");
-    ok(!/sk-ant-|ANTHROPIC_API_KEY\s*=/.test(mine), "no API key in the code");
+    ok(!/sk-(?:ant-)?[A-Za-z0-9_-]{20,}|ANTHROPIC_API_KEY\s*=/.test(mine), "no API key in the code");
     ok(!/console\.(log|error|warn)\([^)]*\b(text|input|content)\b\s*\)/.test(mine), "no log line prints message text or tool input");
   }
 

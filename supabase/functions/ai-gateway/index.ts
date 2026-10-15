@@ -5,7 +5,7 @@
 //   POST /ai-gateway/chat    { text, conversation_id?, mode?, context?, lang? } → a Server-Sent Events stream (below),
 //                            or a JSON refusal before the stream starts.
 //   POST /ai-gateway/manage  { step, ... } → JSON. Steps: status, confirm_change, cancel_change, undo_change
-//                            (MANAGE_STEPS; later groups add theirs there), list_changes.
+//                            (MANAGE_STEPS; later groups add theirs there), list_changes, key_save, key_test, key_delete.
 //
 // Changes (the app's contract). confirm_change / cancel_change / undo_change take { id } and answer
 // 200 { ok:true, change } or { ok:false, code, reason, change? }: 400 bad_request, 401 unauthorized, 403 off |
@@ -31,6 +31,18 @@
 // exhausted; owners also daily_neurons, used_neurons, business_neurons, share_pct}, owners paid {switched_on,
 // platform_key_ready, cap_usd, available}; month.spend_usd is the paid spend, month.blocked only at the paid cap with
 // nothing left to answer.
+//
+// Own keys (G5, bring your own key; SQL section G5-keys). key_save { scope:'me'|'business', provider?:'anthropic'|'openai',
+// key } → checked with the provider (GET /v1/models) and saved ONLY if it answers 200; key_test { scope } checks the
+// saved key again (401/403 marks it invalid); key_delete { scope, user_id? } (owners may name another person's key).
+// 'business' is owners only; 'me' needs the assistant on for the person and ai_settings.allow_own_keys. All three answer
+// { ok:true, key:{scope, provider, last4, status:'ok'|'invalid'} } (delete: { ok:true, deleted }) or { ok:false, code,
+// reason }: 400 bad_request | key_format | key_provider_mismatch | key_invalid, 403 off | role_off | not_allowed |
+// keys_off, 404 no_key, 429 too_many_tries (5 saves / tests per person per 10 minutes), 502 key_unchecked (the provider
+// couldn't say; nothing saved). manage status adds keys {allow_own, me:{provider, last4, status, has_key:true}|null};
+// owners also business:{provider, last4, status, has_key:true}|null and people:[{user_id, provider, status,
+// created_at}] (no last4). A key never leaves Vault except to call its provider: it is never echoed, logged, written
+// to a table or kept in a module variable. A key pasted into the chat is refused (key_in_chat) before anything is stored.
 //
 // Guard rails (all checked here, on the server):
 //   • Who: everyone signed in with a profile, unless an owner switched the assistant off (ai_settings.enabled), pulled
@@ -83,18 +95,18 @@
 //            same call is made again without streaming)
 //   notice   {code:'refusal'|'step_limit'|'max_tokens'|'cap_reached'|'cap_80'|'cap_fallback'|'free_quota'|'free_share',
 //            text, category?} (inline note; the stream continues to `done`; cap_fallback comes right after `start`)
-//   error    {code:'provider_auth'|'model_not_found'|'model_needs_paid'|'provider_bad_request'|'provider_busy'|
+//   error    {code:'provider_auth'|'own_key_refused'|'model_not_found'|'model_needs_paid'|'provider_bad_request'|'provider_busy'|
 //            'provider_unreachable'|'provider_error'|'server', text, retryable} (terminal, followed by nothing)
 //   done     {conversation_id, stop:'ok'|'refusal'|'step_limit'|'max_tokens'|'cap_reached'|'free_quota'|'free_share',
 //            steps, title, usage:{input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
 //            cost_usd}, limits:{today_used, today_limit, month_pct, key_source, free:{left_pct, resets_at}|null}}
 //            (terminal; cost_usd and month_pct only for owners: 0 / null for others; free only after a free turn)
 // Pre-stream codes: unauthorized(401), off/role_off(403), bad_request/unknown_mode/bad_context/mode_mismatch/
-// conversation_full/model_not_priced(400), conversation_not_found(404), busy(409), cap_reached/daily_limit/free_quota/
+// conversation_full/model_not_priced/key_in_chat(400), conversation_not_found(404), busy(409), cap_reached/daily_limit/free_quota/
 // free_share(429; the free ones with resets_at, the next 00:00 UTC). Show `reason` as it is: it names the limit hit.
 // A client that leaves (abort) stops the turn: nothing more is sent and no partial answer is stored.
 //
-// Owner steps: run the G1-gateway, G2-changes and G4-providers sections of .claude/sql/stage6-cobra.sql (staging
+// Owner steps: run the G1-gateway, G2-changes, G4-providers and G5-keys sections of .claude/sql/stage6-cobra.sql (staging
 // first); deploy this function with Verify JWT ON. Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY
 // (all three automatic); CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_AI_TOKEN (the free AI; Ofek adds them, the token with
 // Workers AI Read + Edit; until both exist and the account id is 32 hex characters the free AI counts as not set up);
@@ -146,7 +158,8 @@ export const SSE_EVENTS = ["start", "phase", "text", "tool", "proposal", "card",
 export const ERROR_CODES = ["unauthorized", "off", "role_off", "bad_request", "unknown_mode", "bad_context", "mode_mismatch", "conversation_full",
   "model_not_priced", "conversation_not_found", "busy", "cap_reached", "daily_limit", "provider_auth", "model_not_found", "provider_bad_request",
   "provider_busy", "provider_unreachable", "provider_error", "server", "not_found", "not_yours", "not_proposed", "not_confirmed", "expired",
-  "not_allowed", "changed_since", "unknown_step", "denied", "gone", "invalid", "failed", "free_quota", "free_share", "model_needs_paid"];
+  "not_allowed", "changed_since", "unknown_step", "denied", "gone", "invalid", "failed", "free_quota", "free_share", "model_needs_paid",
+  "own_key_refused", "key_format", "key_provider_mismatch", "key_invalid", "key_unchecked", "keys_off", "key_in_chat", "too_many_tries", "no_key"];
 
 export const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -333,6 +346,10 @@ export const PRICE_DEFAULTS: Record<string, any> = {
   "@cf/google/gemma-4-26b-a4b-it": { in: 0, out: 0 },
   "@cf/qwen/qwen3.8-27b": { in: 0, out: 0 },
   "@cf/openai/gpt-oss-120b": { in: 0, out: 0 },
+  // OpenAI (own keys only, G5): informational for a person's key, real for the business's key under the cap.
+  "gpt-4.1-mini": { in: 0.40, out: 1.60 },
+  "gpt-4.1-nano": { in: 0.10, out: 0.40 },
+  "gpt-4o-mini": { in: 0.15, out: 0.60 },
 };
 // The server-side fallback model each model may answer with (its thinking blocks are the conversation's own).
 const SERVER_FALLBACK: Record<string, string> = { "claude-sonnet-5-5": "claude-sonnet-5" };
@@ -619,6 +636,56 @@ export function resolveSource(x: {
   return { source: pick("mock", "mock") };
 }
 export const isPaid = (src: Source) => src.keySource === "platform_paid" || src.keySource === "own_business";
+
+// ── own keys (G5): a person's or the business's own Anthropic / OpenAI key. The key lives only in Vault (ai_keys +
+// ai_key_* RPCs, service role only); here it is held in a local for one request or one turn, never logged or echoed. ──
+export const KEY_RE = /^[\x21-\x7e]{20,300}$/;
+export const KEY_IN_CHAT_RE = /\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}/;   // a key pasted into the chat (D27): refused before anything is stored
+export const KEY_TRIES = { max: 5, windowMs: 10 * 60e3 };          // saves + tests per person, counted per isolate
+export const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+export const KEY_CHECK_MS = 10000;
+// Which provider a key belongs to, by its prefix ('sk-ant-' = Anthropic, any other 'sk-' = OpenAI), or null.
+export function keyProviderOf(key: string): "anthropic" | "openai" | null {
+  if (typeof key !== "string" || !KEY_RE.test(key)) return null;
+  return key.startsWith("sk-ant-") ? "anthropic" : key.startsWith("sk-") ? "openai" : null;
+}
+export const last4Of = (k: string) => k.slice(-4);
+// Asks the provider whether it accepts the key (GET /v1/models): 200 → 'ok', 401 / 403 → 'invalid', anything else
+// (another status, a timeout, no network) → 'unchecked'. Never throws, never logs.
+export async function validateKey(provider: string, key: string): Promise<"ok" | "invalid" | "unchecked"> {
+  const anth = provider === "anthropic";
+  try {
+    const res = await io.fetch(anth ? "https://api.anthropic.com/v1/models?limit=1" : "https://api.openai.com/v1/models", {
+      method: "GET", headers: anth ? { "x-api-key": key, "anthropic-version": "2023-06-01" } : { Authorization: "Bearer " + key }, signal: AbortSignal.timeout(KEY_CHECK_MS),
+    });
+    try { await res.body?.cancel(); } catch { /* nothing to read */ }
+    return res.status === 200 ? "ok" : res.status === 401 || res.status === 403 ? "invalid" : "unchecked";
+  } catch { return "unchecked"; }
+}
+// The keys a turn may use: the person's (unless own keys are off or it was refused) and the business's (only with the
+// paid switch and a cap above 0). A read that fails counts as no key (logged as a code only).
+export async function loadKeys(sb: any, me: Profile, s: AiSettings): Promise<{ user: KeyRow | null; biz: KeyRow | null }> {
+  const one = async (scope: "user" | "business", userId: string | null): Promise<KeyRow | null> => {
+    const { data, error } = await sb.rpc("ai_key_get", { p_business: BUSINESS_ID, p_scope: scope, p_user: userId });
+    if (error) { console.error("ai-gateway: key not read:", scope); return null; }
+    const r = Array.isArray(data) ? data[0] : data;
+    return r && r.secret && r.status !== "invalid" && (r.provider === "anthropic" || r.provider === "openai") ? { id: r.id, provider: r.provider, apiKey: r.secret } : null;
+  };
+  const [user, biz] = await Promise.all([
+    s.allow_own_keys ? one("user", me.id) : Promise.resolve(null),
+    s.provider === "anthropic" && s.monthly_cap_usd > 0 ? one("business", null) : Promise.resolve(null),
+  ]);
+  return { user, biz };
+}
+const keyTries = new Map<string, number[]>();
+// true once a person has used up their key saves / tests for the last 10 minutes (this try is counted otherwise).
+export function tooManyTries(userId: string, nowMs: number): boolean {
+  const list = (keyTries.get(userId) || []).filter((t) => nowMs - t < KEY_TRIES.windowMs);
+  const over = list.length >= KEY_TRIES.max;
+  if (!over) list.push(nowMs);
+  keyTries.set(userId, list);
+  return over;
+}
 
 // ── schemas (pure): what a strict tool schema may hold, and checking a tool's input against it ──
 const STRICT_FORBIDDEN = ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minLength", "maxLength", "pattern", "minItems", "maxItems", "$ref"];
@@ -2158,15 +2225,17 @@ export async function mockTurn(req: { params: any }, onEvent: (ev: any) => void,
 }
 let clientMemo: { key: string; client: any } | null = null;
 // The adapter for a turn's source (resolveSource). Every adapter takes buildRequest's request and returns the same
-// result. The platform's Anthropic client is kept per key; an own key's client never is (G5). free: the free AI's
-// settings (streaming, thinking, the neuron prices).
+// result. The platform's Anthropic client is kept per key; an own key's client lives for this turn only (never in a
+// module variable, so one person's key never answers another's turn). free: the free AI's settings (streaming,
+// thinking, the neuron prices).
 export function providerFor(source: Source, free: FreeQuota = freeQuotaOf({})) {
   const name = source.provider;
   if (name === "anthropic") {
+    let own: any = null;
     return {
       name,
       turn: (req: any, onEvent: (ev: any) => void, signal?: AbortSignal | null) => {
-        if (source.apiKey) return anthropicTurn(io.anthropicClient(source.apiKey), req, onEvent, signal);
+        if (source.apiKey) return anthropicTurn(own || (own = io.anthropicClient(source.apiKey)), req, onEvent, signal);
         const key = anthropicKey();
         if (!clientMemo || clientMemo.key !== key) clientMemo = { key, client: io.anthropicClient(key) };
         return anthropicTurn(clientMemo.client, req, onEvent, signal);
@@ -2182,7 +2251,16 @@ export function providerFor(source: Source, free: FreeQuota = freeQuotaOf({})) {
       }),
     };
   }
-  if (name === "openai") return { name, turn: (): Promise<any> => Promise.reject(new ProviderFailure("provider_error", false)) };   // own OpenAI keys: G5
+  if (name === "openai") {
+    // own OpenAI keys only (a person's or the business's): Chat Completions, streamed with the usage chunk
+    return {
+      name,
+      turn: (req: any, onEvent: (ev: any) => void, signal?: AbortSignal | null) => openAiCompatTurn({
+        url: OPENAI_CHAT_URL, headers: { Authorization: "Bearer " + source.apiKey }, flavor: "openai", model: source.model,
+        req: toOpenAiRequest(req.params, { flavor: "openai", stream: true }), onEvent, signal,
+      }),
+    };
+  }
   return {
     name,
     turn: async (req: any, onEvent: (ev: any) => void, signal?: AbortSignal | null) => {
@@ -2337,6 +2415,13 @@ const ERROR_TEXT: Record<string, string> = {
   provider_unreachable: "The AI service couldn't be reached. Try again.",
   provider_error: "The AI service had a problem. Try again.",
   server: "Something went wrong on the server. Try again.",
+  own_key_refused: "Your own key didn't work, so it's switched off for now. Check it in Your AI key, or ask again to use the business's AI.",
+};
+// The same errors on an own key: it is that key's service, not the business's.
+const OWN_KEY_TEXT: Record<string, string> = {
+  provider_busy: "Your key's AI service is busy or over its limit. Try again in a minute.",
+  provider_unreachable: "Your key's AI service couldn't be reached. Try again.",
+  model_not_found: "Your key's AI service doesn't offer the model chosen in Settings.",
 };
 const REFUSE: Record<string, string> = {
   unauthorized: "Please sign in again.",
@@ -2353,6 +2438,15 @@ const REFUSE: Record<string, string> = {
   cap_reached: "This month's AI budget is used up. It starts again next month, or an owner can raise the cap in Settings.",
   daily_limit: "You've reached today's limit of questions. It resets tomorrow.",
   free_full: "This chat is long for the free AI. Start a new chat to carry on.",
+  key_in_chat: "That looks like an API key. It wasn't sent or saved: add your key in Your AI key instead.",
+  not_allowed: "Only an owner can do that.",
+  keys_off: "An owner has switched off personal AI keys.",
+  key_format: "That doesn't look like an OpenAI or Anthropic API key.",
+  key_provider_mismatch: "That key belongs to the other AI service. Pick the matching one.",
+  key_invalid: "The AI service didn't accept that key. It wasn't saved.",
+  key_unchecked: "The AI service couldn't check that key right now. It wasn't saved. Try again in a minute.",
+  too_many_tries: "Too many tries. Wait 10 minutes and try again.",
+  no_key: "There's no saved key.",
 };
 const refuse = (status: number, code: string, reason?: string, extra: Record<string, unknown> = {}) => ({ status, body: { ok: false, code, reason: reason || REFUSE[code] || code, ...extra } });
 export function titleOf(text: string): string { return String(text || "").replace(/\s+/g, " ").trim().slice(0, 60); }
@@ -2374,6 +2468,7 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
   // (a) the request
   const text = typeof b.text === "string" ? b.text.trim() : "";
   if (!text || text.length > MAX_TEXT_CHARS) return refuse(400, "bad_request");
+  if (KEY_IN_CHAT_RE.test(text)) return refuse(400, "key_in_chat");   // before anything is stored or sent (D27)
   if (b.conversation_id !== undefined && b.conversation_id !== null && !isUuid(b.conversation_id)) return refuse(400, "bad_request");
   if (b.lang !== undefined && b.lang !== null && b.lang !== "he" && b.lang !== "en") return refuse(400, "bad_request");
   if (b.mode !== undefined && typeof b.mode !== "string") return refuse(400, "bad_request");
@@ -2404,11 +2499,12 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
   // (d) who answers: the paid spend (only while the paid AI is switched on with a cap) and the free quota (only while it
   // is set up) decide; a limit hit is refused here, naming the limit
   const bounds = periodBounds(nowMs, biz.tz), utc = utcDayBounds(nowMs), cfOn = cloudflareReady();
-  const [spend, free] = await Promise.all([
+  const [spend, free, keys] = await Promise.all([
     s.provider === "anthropic" && s.monthly_cap_usd > 0 ? capSpend(sb, bounds.monthStart) : Promise.resolve(0),
     cfOn ? freeState(sb, utc.dayStart) : Promise.resolve(null),
+    loadKeys(sb, me, s),
   ]);
-  const picked = resolveSource({ s, env: { anthropic: !!anthropicKey(), cloudflare: cfOn }, userKey: null, bizKey: null, capSpend: spend, free, taskKey: mode.taskKey,
+  const picked = resolveSource({ s, env: { anthropic: !!anthropicKey(), cloudflare: cfOn }, userKey: keys.user, bizKey: keys.biz, capSpend: spend, free, taskKey: mode.taskKey,
     convProvider: conv ? conv.provider : null, convModel: conv ? conv.model : null, tz: biz.tz, nowMs });
   if ("blocked" in picked) return refuse(429, picked.blocked, picked.reason, picked.resets_at ? { resets_at: picked.resets_at } : {});
   const source = picked.source;
@@ -2590,9 +2686,16 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
             break;
           }
           if (e instanceof ProviderFailure) console.error("ai-gateway: provider error:", code);   // the code only, never the provider's text
+          if (code === "provider_auth" && t.source.keySource === "own_user" && t.source.keyId) {
+            // the person's own key was refused: it is skipped from the next turn on (the business's AI answers then)
+            const { error: me2 } = await sb.rpc("ai_key_mark", { p_id: t.source.keyId, p_status: "invalid", p_error: "refused", p_used: false });
+            if (me2) console.error("ai-gateway: key not marked:", "own_key_refused");
+            code = "own_key_refused"; retryable = true;
+          }
           errorCode = code;
-          await addMsg({ role: "assistant", content: [], text: ERROR_TEXT[code] || ERROR_TEXT.server, visible: true, replay: false, meta: { notice: "error", code } });
-          emit("error", { code, text: ERROR_TEXT[code] || ERROR_TEXT.server, retryable });
+          const errText = (t.source.keyId && OWN_KEY_TEXT[code]) || ERROR_TEXT[code] || ERROR_TEXT.server;
+          await addMsg({ role: "assistant", content: [], text: errText, visible: true, replay: false, meta: { notice: "error", code } });
+          emit("error", { code, text: errText, retryable });
           status = "error"; terminal = "error";
           break;
         }
@@ -2671,6 +2774,10 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
       }).eq("id", conv.id);
     };
     try { await finish(); } catch (e) { console.error("ai-gateway: bookkeeping failed:", clip((e as Error)?.message, 200)); await releaseLock(sb, conv.id); }
+    // an own key that answered: its last use (once per turn)
+    if (t.source.keyId && steps > 0 && errorCode !== "own_key_refused") {
+      try { await sb.rpc("ai_key_mark", { p_id: t.source.keyId, p_status: "ok", p_error: null, p_used: true }); } catch { /* only the date */ }
+    }
     // The cap and its 80% alert only while there is a cap (0 = the paid AI is off).
     const newSpend = s.monthly_cap_usd > 0 ? await spendNow() : 0;
     const sentAlert = await maybeAlert80(sb, s, t.biz, t.bounds.monthKey, newSpend);
@@ -2886,8 +2993,12 @@ export async function statusOf(sb: any, me: Profile, nowMs: number) {
   const { s, biz } = await loadState(sb);
   const g = gate(s, me), key = !!anthropicKey(), cfOn = cloudflareReady();
   const bounds = periodBounds(nowMs, biz.tz), utc = utcDayBounds(nowMs);
-  const [spend, used, fs] = await Promise.all([capSpend(sb, bounds.monthStart), todayUsed(sb, me.id, bounds.dayStart), cfOn ? freeState(sb, utc.dayStart) : Promise.resolve(null)]);
-  const picked = resolveSource({ s, env: { anthropic: key, cloudflare: cfOn }, userKey: null, bizKey: null, capSpend: spend, free: fs, taskKey: "assistant", tz: biz.tz, nowMs });
+  const [spend, used, fs, keyRows] = await Promise.all([capSpend(sb, bounds.monthStart), todayUsed(sb, me.id, bounds.dayStart), cfOn ? freeState(sb, utc.dayStart) : Promise.resolve(null), keyRowsOf(sb, me)]);
+  // the saved keys' state only (never the secret): who would answer, and the person's own key
+  const mine = keyRows.find((r) => r.scope === "user" && r.user_id === me.id) || null, bizRow = keyRows.find((r) => r.scope === "business") || null;
+  const asKey = (r: any): KeyRow | null => (r && r.has_key && r.status !== "invalid" ? { id: r.id, provider: r.provider, apiKey: "" } : null);
+  const picked = resolveSource({ s, env: { anthropic: key, cloudflare: cfOn }, userKey: asKey(mine), bizKey: s.provider === "anthropic" && s.monthly_cap_usd > 0 ? asKey(bizRow) : null,
+    capSpend: spend, free: fs, taskKey: "assistant", tz: biz.tz, nowMs });
   const src = "source" in picked ? picked.source : null, blocked = "blocked" in picked ? picked.blocked : null;
   const paidOn = s.provider === "anthropic" && s.monthly_cap_usd > 0;
   const cs = capState(spend, s.monthly_cap_usd), capBlocked = blocked === "cap_reached";
@@ -2904,7 +3015,12 @@ export async function statusOf(sb: any, me: Profile, nowMs: number) {
       ...(me.role === "owner" ? { daily_neurons: s.free.daily_neurons, used_neurons: fs ? round2(fs.platform_neurons) : null, business_neurons: fs ? round2(fs.business_neurons) : null, share_pct: s.free.share_pct } : {}),
     },
     today: { used, limit: s.daily_user_limit },
+    keys: { allow_own: s.allow_own_keys, me: keyOut(mine) },
   };
+  if (me.role === "owner") {
+    body.keys.business = keyOut(bizRow);
+    body.keys.people = keyRows.filter((r) => r.scope === "user" && r.has_key).map((r) => ({ user_id: r.user_id, provider: r.provider, status: r.status, created_at: r.created_at }));
+  }
   if (me.role === "owner") body.paid = { switched_on: s.provider === "anthropic", platform_key_ready: key, cap_usd: s.monthly_cap_usd, available: !!src && isPaid(src) };
   if (me.role === "owner") {
     const byUser = new Map<string, { user_id: string; requests: number; cost_usd: number }>();
@@ -2924,6 +3040,74 @@ export async function statusOf(sb: any, me: Profile, nowMs: number) {
   } else body.month = { blocked: capBlocked, pct_band: capBlocked ? "blocked" : paidOn && cs.warn ? "near" : "ok" };
   return { status: 200, body };
 }
+// The ai_keys rows status may show (owners: the business's and everyone's; others: their own). Never the secret.
+async function keyRowsOf(sb: any, me: Profile): Promise<any[]> {
+  let q = sb.from("ai_keys").select("id, scope, user_id, provider, has_key, last4, status, created_at").eq("business_id", BUSINESS_ID);
+  if (me.role !== "owner") q = q.eq("scope", "user").eq("user_id", me.id);
+  const { data, error } = await q;
+  if (error) { console.error("ai-gateway: keys not read:", "status"); return []; }
+  return data || [];
+}
+const keyOut = (r: any) => (r && r.has_key ? { provider: r.provider, last4: r.last4, status: r.status, has_key: true } : null);
+
+// ── own keys: save, test, remove (manage steps; the key itself only ever goes to its provider and to Vault) ──
+// Who may touch which key: 'business' → owners; 'me' → the person (the assistant on for them, own keys allowed).
+function keyScopeRefusal(scope: unknown, s: AiSettings, me: Profile): { status: number; body: any } | null {
+  if (scope === "business") return me.role === "owner" ? null : refuse(403, "not_allowed");
+  if (scope !== "me") return refuse(400, "bad_request");
+  const g = gate(s, me);
+  if (g) return refuse(g.status, g.code);
+  return s.allow_own_keys ? null : refuse(403, "keys_off");
+}
+const keyWhere = (scope: string, me: Profile) => (scope === "business" ? { p_scope: "business", p_user: null } : { p_scope: "user", p_user: me.id });
+export async function keySave(sb: any, body: any, me: Profile, _jwt: string, nowMs: number) {
+  const key = typeof body?.key === "string" ? body.key.trim() : "";
+  if (isObj(body)) body.key = undefined;   // the key stays in this local only
+  if (tooManyTries(me.id, nowMs)) return refuse(429, "too_many_tries");
+  const { s } = await loadState(sb);
+  const bad = keyScopeRefusal(body?.scope, s, me);
+  if (bad) return bad;
+  const provider = keyProviderOf(key);
+  if (!provider) return refuse(400, "key_format");
+  if (body.provider !== undefined && body.provider !== null && body.provider !== "") {
+    if (body.provider !== "anthropic" && body.provider !== "openai") return refuse(400, "bad_request");
+    if (body.provider !== provider) return refuse(400, "key_provider_mismatch");
+  }
+  const check = await validateKey(provider, key);
+  if (check === "invalid") return refuse(400, "key_invalid");
+  if (check !== "ok") return refuse(502, "key_unchecked");
+  const { error } = await sb.rpc("ai_key_set", { p_business: BUSINESS_ID, ...keyWhere(body.scope, me), p_provider: provider, p_secret: key, p_last4: last4Of(key), p_by: me.id });
+  if (error) { console.error("ai-gateway: key step failed:", "key_save"); return refuse(500, "failed"); }
+  return { status: 200, body: { ok: true, key: { scope: body.scope, provider, last4: last4Of(key), status: "ok" } } };
+}
+export async function keyTest(sb: any, body: any, me: Profile, _jwt: string, nowMs: number) {
+  if (tooManyTries(me.id, nowMs)) return refuse(429, "too_many_tries");
+  const { s } = await loadState(sb);
+  const bad = keyScopeRefusal(body?.scope, s, me);
+  if (bad) return bad;
+  const { data, error } = await sb.rpc("ai_key_get", { p_business: BUSINESS_ID, ...keyWhere(body.scope, me) });
+  if (error) { console.error("ai-gateway: key step failed:", "key_test"); return refuse(500, "failed"); }
+  const r = Array.isArray(data) ? data[0] : data;
+  if (!r || !r.secret) return refuse(404, "no_key");
+  const check = await validateKey(r.provider, r.secret);
+  if (check === "unchecked") return refuse(502, "key_unchecked");
+  const status = check === "ok" ? "ok" : "invalid";
+  const { error: me2 } = await sb.rpc("ai_key_mark", { p_id: r.id, p_status: status, p_error: status === "ok" ? null : "key_invalid", p_used: false });
+  if (me2) { console.error("ai-gateway: key step failed:", "key_test"); return refuse(500, "failed"); }
+  return { status: 200, body: { ok: true, key: { scope: body.scope, provider: r.provider, last4: r.last4, status } } };
+}
+// Removing works even with the assistant or own keys switched off (a person can always take their key back); an
+// owner may remove anyone's personal key (user_id) and the business's.
+export async function keyDelete(sb: any, body: any, me: Profile) {
+  const scope = body?.scope, other = body?.user_id !== undefined && body?.user_id !== null && body?.user_id !== me.id;
+  if (scope !== "me" && scope !== "business") return refuse(400, "bad_request");
+  if ((scope === "business" || other) && me.role !== "owner") return refuse(403, "not_allowed");
+  if (other && (scope !== "me" || typeof body.user_id !== "string" || !body.user_id)) return refuse(400, "bad_request");
+  const w = scope === "business" ? { p_scope: "business", p_user: null } : { p_scope: "user", p_user: other ? body.user_id : me.id };
+  const { data, error } = await sb.rpc("ai_key_delete", { p_business: BUSINESS_ID, ...w });
+  if (error) { console.error("ai-gateway: key step failed:", "key_delete"); return refuse(500, "failed"); }
+  return { status: 200, body: { ok: true, deleted: !!data } };
+}
 type ManageStep = { run: (sb: any, body: any, me: Profile, jwt: string, nowMs: number) => Promise<{ status: number; body: any }> };
 // Later groups add their steps here.
 export const MANAGE_STEPS: Record<string, ManageStep> = {
@@ -2932,6 +3116,9 @@ export const MANAGE_STEPS: Record<string, ManageStep> = {
   cancel_change: { run: (sb, body, me) => cancelChange(sb, body, me) },
   undo_change: { run: (sb, body, me, jwt, nowMs) => undoChange(sb, body, me, jwt, nowMs) },
   list_changes: { run: (sb, body, me) => listChanges(sb, body, me) },   // G2: the change log
+  key_save: { run: (sb, body, me, jwt, nowMs) => keySave(sb, body, me, jwt, nowMs) },   // G5: own keys
+  key_test: { run: (sb, body, me, jwt, nowMs) => keyTest(sb, body, me, jwt, nowMs) },
+  key_delete: { run: (sb, body, me) => keyDelete(sb, body, me) },
 };
 export async function handleManage(sb: any, body: any, who: { profile: Profile; jwt: string } | null, nowMs: number) {
   if (!who) return refuse(401, "unauthorized");
