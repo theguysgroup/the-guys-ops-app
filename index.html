@@ -2051,11 +2051,10 @@ const TAX_NAMES = { AU: 'GST', NZ: 'GST', CA: 'GST', SG: 'GST', IN: 'GST', GB: '
 const BIZ_NUMBER_LABELS = { AU: 'ABN', NZ: 'NZBN' };
 // How amounts are written: [example, thousands separator, decimal point]. The first is the default.
 const MONEY_FORMATS = [['1,234.56', ',', '.'], ['1.234,56', '.', ','], ['1 234,56', ' ', ',']];
-// The time zones an owner can switch to for now (null = any). The office's shift clock in the database (set_phone_duty,
-// set_phone_break, mark_logout, ack_forgot_logout) still writes Sydney dates, and those RPCs move to public.business_tz()
-// only in a later SQL group (their live definitions must be backed up first). Until then another zone would file a shift
-// under a different day than the app, voice and auto_end_va_shifts look for. Set to null when that group is applied.
-const TZ_ALLOWED = [REGION_DEFAULTS.timeZone];
+// The time zones an owner can switch to (null = any). Any zone since 15 Oct 2026: the office's shift clock in the database
+// (set_phone_duty, set_phone_break, mark_logout) files shifts under public.business_today() (.claude/sql/round3-t12-shift-rpcs.sql),
+// like the app, voice and auto_end_va_shifts. Put back [REGION_DEFAULTS.timeZone] only together with that file's ROLLBACK.
+const TZ_ALLOWED = null;
 // The time zones offered when the browser can't list them all.
 const TZ_FALLBACK = ['Australia/Sydney', 'Australia/Melbourne', 'Australia/Brisbane', 'Australia/Adelaide', 'Australia/Darwin', 'Australia/Perth', 'Australia/Hobart', 'Pacific/Auckland',
   'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London', 'UTC'];

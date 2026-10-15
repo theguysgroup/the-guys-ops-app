@@ -1612,10 +1612,10 @@ function testRegionStatic(){
   const sydLines = script.split('\n').filter(l => l.includes("'Australia/Sydney'") && !/^\s*\/\//.test(l)).map(l => (l.match(/const (\w+)/) || [])[1]);
   assertEqual(sydLines, ['REGION_DEFAULTS', 'TZ_FALLBACK', 'AUTO_SAFETY_DEFAULTS'], 'Australia/Sydney is written only in the defaults (and the automation_settings column default the engine pins)');
   const fnText = n => extractDecl(script, n);
-  // until the shift RPCs use the business's zone (a later SQL group), no other zone can be saved
+  // the shift RPCs use the business's day (round3-t12-shift-rpcs.sql), so any zone can be saved; the guard stays for a rollback
   const srf = fnText('setRegionField');
-  assertEqual([vm.runInNewContext(fnText('REGION_DEFAULTS') + fnText('TZ_ALLOWED') + 'TZ_ALLOWED'), srf.indexOf('TZ_ALLOWED.includes(v)') > 0 && srf.indexOf('TZ_ALLOWED.includes(v)') < srf.indexOf("catalogSave('region', { ...region, timeZone: v }")],
-    [['Australia/Sydney'], true], 'time zone: only Sydney can be saved while the office shift RPCs still write Sydney dates');
+  assertEqual([vm.runInNewContext(fnText('REGION_DEFAULTS') + fnText('TZ_ALLOWED') + 'TZ_ALLOWED'), srf.indexOf('TZ_ALLOWED && !TZ_ALLOWED.includes(v)') > 0 && srf.indexOf('TZ_ALLOWED && !TZ_ALLOWED.includes(v)') < srf.indexOf("catalogSave('region', { ...region, timeZone: v }")],
+    [null, true], 'time zone: any zone can be saved now that the office shift RPCs follow the business\'s day (the guard is kept for a rollback)');
   assertEqual([/NSW_HOLIDAYS|New South Wales/.test(fnText('renderOfficeHoursPage') + fnText('renderPublicHolidays')), ['fmtMoney', 'payMoney', 'invMoney'].some(n => fnText(n).includes("'$'")), script.includes('NSW_HOLIDAYS'), /function (sydneyWall|sydneyToday|payTodayStr|connSydDay)\(/.test(script)],
     [false, false, false, false], 'no NSW list, no "$" in the money writers, no Sydney helpers left');
   assertEqual([fnText('autoSafetyHtml').includes("autoSafetySet('timezone'"), fnText('autoSafetySave').includes('timezone: bizTz()'), fnText('holidaysAutoCheck').includes('render('), /setTimeout\(holidaysAutoCheck, 5000\)/.test(script)],
