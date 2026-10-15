@@ -1420,6 +1420,15 @@ function fakeRemote(o: any = {}) {
     const dr = (tz: string, quiet = true) => importRow("contacts", { full_name: "D", created_at: "2026-09-30" }, { ...IC, tz, quiet }) as any;
     eq([dr(SYD).created_at, dr(SYD).messages[0].at, dr(CHI).created_at, dr(CHI).messages[0].at, dr(SYD, false).messages[0].at],
       ["2026-09-30", "2026-09-30T00:00:00.000Z", "2026-09-30T17:00:00.000Z", "2026-09-30T17:00:00.000Z", "2026-09-30T00:00:00.000Z"], "importRow: Date received dates the card and its first entry in the business's zone (bizDayStamp)");
+    // "Date received" after the business's today is a problem row (never clamped); a job date or due date may be ahead
+    {
+      const tc = { ...cx, today: "2026-10-14" }, DR = F.contacts.created_at;
+      eq([coerceField(DR, "2026-10-14", tc), coerceField(DR, "2026-10-15", tc), coerceField(DR, "2026-10-14T23:30:00Z", tc), coerceField(DR, "2026-10-13T13:30:00Z", tc), coerceField(DR, "10/20/2026", tc), coerceField(DR, "2026-10-15", cx)],
+        [{ ok: true, value: "2026-10-14" }, { ok: false, reason: "is in the future" }, { ok: false, reason: "is in the future" }, { ok: true, value: "2026-10-14" }, { ok: false, reason: "is in the future" }, { ok: true, value: "2026-10-15" }],
+        "coerceField: a Date received after today (as written, or a zoned instant that is tomorrow in Sydney) is in the future; no today given = not checked");
+      eq([coerceField(F.jobs.date, "2026-11-01", tc), coerceField(F.tasks.due, "2026-11-01", tc)], [{ ok: true, value: "2026-11-01" }, { ok: true, value: "2026-11-01" }], "coerceField: a job date or a due date can be ahead");
+      eq(mapItem("contacts", { full_name: "n", created_at: "d" }, { n: "Zed", d: "2027-01-01" }, tc).errors, ["Date received is in the future"], "mapItem: a future Date received is a problem row with a clear reason");
+    }
     eq([(importRow("contacts", { full_name: "E" }, { ...IC, tz: CHI }) as any).created_at, qc.created_at], ["2026-10-13T17:00:00.000Z", "2026-10-14"], "importRow: nothing mapped = today in the business's zone, stamped like conversations / voice");
     // the one marker the engine and push read: import_quiet on every kind
     const mk3 = (quiet: boolean) => ["contacts", "jobs", "tasks"].map((k) => (importRow(k, { full_name: "A", customer_name: "A", title: "A" }, { ...IC, quiet }) as any).import_quiet);
@@ -1507,6 +1516,13 @@ function fakeRemote(o: any = {}) {
       answerWith(Array.from({ length: 250 }, (_, k) => ({ name: "P" + k, phone: "0499 000 " + String(k).padStart(3, "0") })));
       const pv2 = await manage(w, "preview_import", "u-owner", { rule_id: R1.id });
       eq([pv2.body.rows.length, pv2.body.counts.new], [200, 250], "preview_import: at most 200 rows shown (the counts cover all)");
+      // a "Date received" after the business's today (Sydney, 14 Oct) is a problem row with its reason; today and before are fine
+      {
+        const RD = (await save(w, { ...RULE, name: "Dated", mapping: { ...RULE.mapping, created_at: "got" } }, "u-owner", NOW)).body.rule;
+        answerWith([{ name: "Today", phone: "0411 000 001", got: "2026-10-14" }, { name: "Tomorrow", phone: "0411 000 002", got: "2026-10-15" }, { name: "Past", phone: "0411 000 003", got: "2026-09-01" }]);
+        const pd = await manage(w, "preview_import", "u-owner", { rule_id: RD.id }, NOW);
+        eq(pd.body.rows.map((r: any) => [r.status, r.reason || ""]), [["new", ""], ["error", "Date received is in the future"], ["new", ""]], "preview_import: a future Date received is a problem row (the business's today), never clamped");
+      }
       answer = { ok: true, result: { isError: true, content: [{ type: "text", text: "quota exceeded" }] } };
       eq([(await manage(w, "preview_import", "u-owner", { rule_id: R1.id })).status, (await manage(w, "preview_import", "u-owner", { rule_id: R1.id })).body.reason], [400, "The tool reported an error: quota exceeded"], "preview_import: a tool error → 400 with the reason");
       answer = { ok: false, reason: "The server took too long (15 s)." };
@@ -1654,6 +1670,23 @@ function fakeRemote(o: any = {}) {
         eq([...await usedSince(wrx, "jobs", ["J4"])], ["J4"], "usedSince: review requests that can't be read keep the job");
         const wf = fakeDb(JSON.parse(JSON.stringify(wz.T)), { users: USERS(), jwts: JWTS, fail: ["lead_messages"] });
         eq([...await usedSince(wf, "contacts", ["K4"])], ["K4"], "usedSince: a check that can't be read keeps the record (never deletes blind)");
+        // an automation already texted / emailed the lead (or has it queued): Undo keeps it; a skipped step or a team push does not count
+        const wa = iw({ contacts: [{ id: "A1", messages: [{}] }, { id: "A2", messages: [{}] }, { id: "A3", messages: [{}] }, { id: "A4", messages: [{}] }, { id: "A5", messages: [{}] }],
+          automation_log: [{ id: "x1", contact_id: "A1", audience: "customer", channel: "text", status: "sent" }, { id: "x2", contact_id: "A2", audience: "customer", channel: "email", status: "queued" },
+            { id: "x3", contact_id: "A3", audience: "customer", channel: "text", status: "skipped" }, { id: "x4", contact_id: "A4", audience: "team", channel: "push", status: "sent" },
+            { id: "x5", contact_id: "A5", audience: "customer", channel: "text", status: "failed" }] });
+        eq([...await usedSince(wa, "contacts", ["A1", "A2", "A3", "A4", "A5"])].sort(), ["A1", "A2", "A5"], "usedSince: a lead an automation texted or emailed (sent, queued, even failed) is used; a skipped step or a push to the team is not");
+        const wax = fakeDb(JSON.parse(JSON.stringify(wa.T)), { users: USERS(), jwts: JWTS, fail: ["automation_log"] });
+        eq([...await usedSince(wax, "contacts", ["A4"])], ["A4"], "usedSince: an automation log that can't be read keeps the lead");
+        {
+          const wq = iw(), RQ = (await save(wq, { ...RULE, run_automations: true }, "u-owner", NOW)).body.rule;
+          const cq = (await manage(wq, "commit_import", "u-owner", { rule_id: RQ.id }, T1)).body.run;
+          const texted = wq.T.contacts.find((c: any) => c.full_name === "Cleo New").id;
+          wq.T.automation_log = [{ id: "al-auto", contact_id: texted, audience: "customer", channel: "text", status: "sent", automation_name: "Welcome text" }];
+          const uq = await manage(wq, "undo_import", "u-owner", { run_id: cq.id }, T1 + 60e3);
+          eq([uq.body, wq.T.contacts.some((c: any) => c.id === texted), wq.T.contacts.filter((c: any) => cq.inserted_ids.includes(c.id)).length], [{ ok: true, deleted: 2, kept: 1, paused: false }, true, 1],
+            "undo_import: the lead an automation already texted is kept; the others go");
+        }
         // a lead with 1,500 texts and 1,200 history entries sits in front of the others: the server answers at most 1,000
         // rows a request, so a single read would never see L2's text or L3's entry (and Undo would delete them)
         const lots = (n: number, f: (i: number) => any) => Array.from({ length: n }, (_, i) => f(i));
@@ -1753,6 +1786,21 @@ function fakeRemote(o: any = {}) {
       const out = await cronImports(wc, tNow);
       eq([toolCalls.length - n1, out.ran, out.deferred], [1, 1, 3], "cron: past CRON_BUDGET_MS no further rule starts; they wait for the next hour");
       ok(CRON_BUDGET_MS + CLIENT.budgetMs <= 90e3, "cron: the last rule's start plus its server time stays well inside the platform's 150 s for background work");
+      // Undo switches the rule off after the timer read its list: the claim checks enabled, so it never runs and brings the rows back
+      {
+        answerWith(ITEMS);
+        const RACE = "a7777777-7777-4777-8777-777777777777", wrc = iw({ mcp_import_rules: [mk(RACE, { name: "Raced" })] });
+        let reads = 0;
+        const raced: any = new Proxy(wrc, { get(t: any, k: any) {
+          if (k !== "from") return t[k];
+          return (tb: string) => {
+            if (tb === "mcp_import_rules" && ++reads === 2) t.T.mcp_import_rules.find((r: any) => r.id === RACE).enabled = false;   // the undo, between the list and the claim
+            return t.from(tb);
+          };
+        } });
+        const n2 = toolCalls.length, o2 = await cronImports(raced, tNow);
+        eq([o2.ran, o2.skipped, toolCalls.length - n2, wrc.T.mcp_import_runs.length, wrc.T.mcp_import_rules[0].last_run_at], [0, 1, 0, 0, null], "cron: a rule switched off (by Undo) after the list was read is not claimed and does not run");
+      }
     } finally {
       io.callTool = origCall; io.waitUntil = origWait; io.now = origNow; io.fetch = origFetch4;
     }

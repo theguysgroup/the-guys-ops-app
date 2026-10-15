@@ -59,7 +59,8 @@
 //     created_at null (the engine's jobClosed never sees it) and review_do_not_ask true (the review-requests auto-asker
 //     skips it).
 //   • "Date received" (contacts) dates the card: created_at and its first thread entry are that business day
-//     (bizDayStamp), so imported history never shows as today's new leads.
+//     (bizDayStamp), so imported history never shows as today's new leads. A date after the business's today is a
+//     problem row ("Date received is in the future"), never clamped.
 //
 // Owner steps: run the M1-server, M2-client, M4-import and M5-review sections of .claude/sql/stage5-mcp.sql (then
 // redeploy automations and push, which read the import_quiet column); in Vault add 'mcp_cron_secret' and
@@ -2067,7 +2068,7 @@ export const IMPORT_SCAN = { max: 50 * PAGE };   // existing rows the duplicate 
 // automations engine (quietArrival) and the phone notifications (push) read the import_quiet column, and this key too:
 // such a card is not a new lead.
 export const QUIET_KEY = "quiet";
-export type ImportField = { label: string; type: "text" | "email" | "phone" | "day" | "money" | "bool" | "enum" | "tags" | "person" | "catalog"; max?: number; required?: boolean; values?: string[]; list?: CatalogSection };
+export type ImportField = { label: string; type: "text" | "email" | "phone" | "day" | "money" | "bool" | "enum" | "tags" | "person" | "catalog"; max?: number; required?: boolean; values?: string[]; list?: CatalogSection; past?: boolean };
 // The fields an import can fill, per kind (keys = the database columns). One entry per line: the app's MCP_IMPORT_FIELDS
 // is parity-tested against these keys. The task lists are the app's TASK_STATUSES / TASK_PRIORITIES / TASK_CATEGORIES.
 export const IMPORT_FIELDS: Record<string, Record<string, ImportField>> = {
@@ -2084,7 +2085,7 @@ export const IMPORT_FIELDS: Record<string, Record<string, ImportField>> = {
     estimated_value: { label: "Estimated value", type: "money" },
     notes: { label: "Notes", type: "text", max: 2000 },
     tags: { label: "Tags", type: "tags" },
-    created_at: { label: "Date received", type: "day" },
+    created_at: { label: "Date received", type: "day", past: true },   // a lead can't arrive after today (MapCtx.today)
   },
   jobs: {
     customer_name: { label: "Customer", type: "text", max: 120, required: true },
@@ -2170,7 +2171,8 @@ export function catalogMatch(list: { key: string; label: string }[], v: string):
 // Where an unknown value of a list lands: the New stage, the catch-all service; an unknown source is left empty, so the
 // row gets the import's own source (catalog.mcp.importSource).
 export const CATALOG_FALLBACK: Record<CatalogSection, string> = { stages: NEW_STAGE, services: CATCH_ALL_SERVICE, sources: "" };
-export type MapCtx = { tz: string; people: string[]; lists?: CatalogLists; keys?: CatalogKeys; tax?: string };
+// today: the business's day now; a past-only day field (Date received) after it is a problem row.
+export type MapCtx = { tz: string; people: string[]; lists?: CatalogLists; keys?: CatalogKeys; tax?: string; today?: string };
 
 // ── imports: pure helpers ──
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -2242,18 +2244,20 @@ export function coerceField(f: ImportField, v: unknown, ctx: MapCtx): { ok: true
     case "phone": return prim(v) && typeof v !== "boolean" ? ok(String(v).trim().slice(0, f.max ?? 40)) : bad("is not a phone number");
     case "day": {
       if (typeof v !== "string") return bad("is not a date");
+      // A past-only field (Date received) after the business's today is refused, never clamped: a wrong date is shown.
+      const day = (d: string) => f.past && ctx.today && d > ctx.today ? bad("is in the future") : ok(d);
       const s = v.trim();
       // A date, or a date with a wall time and no zone ("2026-09-30T18:00:00", "2026-09-30 15:30"): that calendar day as written.
       const wall = /^(\d{4}-\d{2}-\d{2})(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.exec(s);
-      if (wall) return isDay(wall[1]) ? ok(wall[1]) : bad("is not a date");
+      if (wall) return isDay(wall[1]) ? day(wall[1]) : bad("is not a date");
       const ms = Date.parse(s);
       if (!Number.isFinite(ms)) return bad("is not a date");
       // An instant with its own zone (Z, +10:00, GMT): the day it was in the business's zone.
-      if (ZONED_TIME.test(s)) return ok(bizParts(ms, ctx.tz).day);
+      if (ZONED_TIME.test(s)) return day(bizParts(ms, ctx.tz).day);
       // No zone ("09/30/2026", "Sep 30 2026"): the runtime read it as its own local wall time, so its local calendar day is
       // the day written (never moved through the business's zone, which would shift it by a day east or west of UTC).
       const d = new Date(ms);
-      return ok(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+      return day(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
     }
     case "money": {
       if (typeof v !== "string" && typeof v !== "number") return bad("is not an amount");
@@ -2501,7 +2505,8 @@ async function importContext(sb: any, rule: any, nowMs: number) {
     rows.forEach((r: any) => { rates[r.technician_name] = r.rates || {}; });
   }
   const keys = catalogKeys(biz.catalog);
-  return { tz: biz.tz, importSource: biz.mcp.importSource, profiles, employees, people, rates, ruleName: String(rule.name || ""), nowMs, keys, lists: catalogLists(biz.catalog, keys), tax: taxNameOf(biz.catalog) };
+  return { tz: biz.tz, importSource: biz.mcp.importSource, profiles, employees, people, rates, ruleName: String(rule.name || ""), nowMs, keys, lists: catalogLists(biz.catalog, keys), tax: taxNameOf(biz.catalog),
+    today: bizParts(nowMs, biz.tz).day };
 }
 const SERVER_COLS = "id, business_id, name, url, auth_header, secret_id";   // never the secret (it is only in Vault)
 // A rule and its server, both of this business, or null.
@@ -2611,8 +2616,8 @@ export async function runImport(sb: any, rule: any, server: any, opts: { source:
   });
 }
 // The imported records Undo keeps because the team has used them since: a history entry by anyone but the import,
-// something that points at them (a contact's texts / chat / opt-out / calls / jobs / tasks; a closing, lead or review
-// request of a job), or work on the row itself (a contact called (contacted_at), noted (customer_notes), its thread grown, stage
+// something that points at them (a contact's texts / chat / opt-out / calls / jobs / tasks, or an automation's message
+// to the customer (automation_log); a closing, lead or review request of a job), or work on the row itself (a contact called (contacted_at), noted (customer_notes), its thread grown, stage
 // moved or job linked; a task's updates or subtasks). Deleting those would take the team's work with them (a contact's
 // texts even go with it: on delete cascade). Every read is paged (.range, PAGE rows) until a short page, so a lead with
 // thousands of texts never hides the next one behind the server's 1,000-row cap: an id seen once is decided and left
@@ -2643,6 +2648,10 @@ export async function usedSince(sb: any, kind: string, ids: string[]): Promise<S
   await read("activity_log", "record_id", "record_id", (q: any) => q.eq("record_kind", IMPORT_RECORD_KIND[kind]).neq("actor", IMPORT_ACTOR), () => true);
   if (kind === "contacts") {
     for (const t of ["lead_messages", "chat_sessions", "customer_opt_outs", "calls", "jobs", "tasks"]) await points(t, "contact_id");
+    // an automation already texted / emailed the customer (or has it waiting to go): a message out can't be taken back,
+    // so the lead stays (a skipped step sent nothing; a push or task to the team is not the customer)
+    // deno-lint-ignore no-explicit-any
+    await read("automation_log", "contact_id", "contact_id", (q: any) => q.eq("audience", "customer").neq("status", "skipped"), () => true);
     // deno-lint-ignore no-explicit-any
     await read("contacts", "id, messages, stage_changed_at, linked_job_id, contacted_at, customer_notes", "id", (q: any) => q, (r: any) =>
       (Array.isArray(r.messages) && r.messages.length > 1) || !!r.stage_changed_at || !!r.linked_job_id || !!r.contacted_at || (Array.isArray(r.customer_notes) && r.customer_notes.length > 0));
@@ -2730,7 +2739,9 @@ export async function undoImport(sb: any, runId: unknown, me: any, nowMs: number
   return { status: 200, body: { ok: true, deleted, kept, paused } };
 }
 // The hourly timer: the rules that are ON and hourly, least recently run first, each claimed (so two timers never run
-// the same rule twice in an hour), within CRON_BUDGET_MS. (The access log is pruned by M1's 'mcp-log-prune'.)
+// the same rule twice in an hour), within CRON_BUDGET_MS. The claim itself checks the rule is still on: a rule Undo
+// switched off after the list was read never runs again and brings back the rows the undo just removed.
+// (The access log is pruned by M1's 'mcp-log-prune'.)
 // deno-lint-ignore no-explicit-any
 export async function cronImports(sb: any, nowMs: number) {
   const started = io.now();
@@ -2742,7 +2753,7 @@ export async function cronImports(sb: any, nowMs: number) {
   for (let k = 0; k < rules.length; k++) {
     const r = rules[k];
     if (io.now() - started > CRON_BUDGET_MS) { out.deferred = rules.length - k; break; }
-    const { data: claimed } = await sb.from("mcp_import_rules").update({ last_run_at: iso(nowMs) }).eq("id", r.id)
+    const { data: claimed } = await sb.from("mcp_import_rules").update({ last_run_at: iso(nowMs) }).eq("id", r.id).eq("enabled", true)
       .or(`last_run_at.is.null,last_run_at.lt."${iso(nowMs - HOURLY_GAP_MS)}"`).select("id");
     if (!claimed || !claimed.length) { out.skipped++; continue; }
     const { data: server } = await sb.from("mcp_servers").select(SERVER_COLS).eq("id", r.server_id).eq("business_id", BUSINESS_ID).maybeSingle();

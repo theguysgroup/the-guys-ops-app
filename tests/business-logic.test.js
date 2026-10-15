@@ -157,6 +157,8 @@ const DECLS = [
   'vacationNotesMap', 'vacationWithNote', 'VACATION_WORK_DAYS',
   // stage 3 review after the rebase: a stand-in is checked on each item's own day
   'vacationItemStandIn',
+  // stage 5 follow-ups (Ofek 15 Oct): "Start automations" said plainly, the import confirm with its count
+  'MCP_RUN_AUTOMATIONS_ON', 'mcpImportConfirm',
 ];
 
 function extractDecl(source, name){
@@ -2283,6 +2285,14 @@ function testMcpConnector(sb){
   assertEqual([sb.mcpServerMeta({ url: 'https://crm.example.com/mcp', hasSecret: true, last_test_at: '2026-10-13T20:52:00Z', last_test_ok: true, last_tools: [{}, {}] }, NOW), sb.mcpServerMeta({ url: 'https://crm.example.com/mcp', hasSecret: false, last_test_at: '2026-10-13T20:52:00Z', last_test_ok: false, last_tools: [{}] }, NOW), sb.mcpServerMeta({ url: 'https://a.b/c' }, NOW)],
     ['crm.example.com · key saved · connected Today 7:52 am · 2 tools', 'crm.example.com · no key · failed Today 7:52 am · 1 tool', 'a.b · no key · not tested yet'], 'mcpServerMeta: host, key, last test and tools');
   assertEqual([sb.mcpRuleMeta({ kind: 'contacts', tool: 'list', mode: 'hourly', run_automations: true, last_run_at: '2026-10-13T20:52:00Z' }, NOW), sb.mcpRuleMeta({ kind: 'tasks', tool: 't', mode: 'manual' }, NOW)], ['Leads · list · every hour · starts automations · last run Today 7:52 am', 'Tasks · t · manual'], 'mcpRuleMeta: what, which tool, how often');
+  // stage 5 follow-ups (Ofek 15 Oct): "Start automations" said plainly; the import confirm carries the count
+  const ON = sb.MCP_RUN_AUTOMATIONS_ON, c3 = sb.mcpImportConfirm('contacts', 3), c1 = sb.mcpImportConfirm('jobs', 1);
+  assertEqual([/real new/.test(ON), /text and email those customers/.test(ON), /review requests can go out for Paid jobs/.test(ON), /push for each new lead/.test(ON)], [true, true, true, true], 'MCP_RUN_AUTOMATIONS_ON: On means real new records: customer texts and emails, review requests for Paid jobs, a push per lead');
+  assertEqual([c3.title, c3.label, c3.message.startsWith('Start automations is on for this import, so the 3 leads it adds count as real new leads.'), c1.title, c1.message.includes('the 1 job it adds counts as a real new job.'), c1.message.includes("Undo can't take back a message that went out.")],
+    ['Import 3 leads with automations on?', 'Import 3', true, 'Import 1 job with automations on?', true, true], 'mcpImportConfirm: the row count in the title, the button and the message');
+  assertEqual([sb.mcpImportConfirm('tasks', 'x').title, sb.mcpImportConfirm('odd', -2).label], ['Import 0 tasks with automations on?', 'Import 0'], 'mcpImportConfirm: a bad count is 0; an unknown kind is records');
+  const mcpHow = sb.CONNECTORS.find(d => d.id==='mcp').howText;
+  assertEqual([mcpHow.includes('Each person makes their own key'), mcpHow.startsWith('Owners and managers make their own key.')], [false, true], 'CONNECTORS mcp howText: keys are for owners and managers only (Ofek 15 Oct)');
   // parity with the mcp function (supabase/functions/mcp/index.ts)
   const fn = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'mcp', 'index.ts'), 'utf8');
   const toolsSrc = fn.slice(fn.indexOf('export const TOOLS'), fn.indexOf('\n];', fn.indexOf('export const TOOLS')));
