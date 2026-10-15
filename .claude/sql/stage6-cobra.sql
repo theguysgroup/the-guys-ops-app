@@ -12,7 +12,9 @@
 --   ai_settings       one row per business: on/off, kill switch, roles, model per task, prices, cap, limits, provider
 --   ai_usage          one row per chat turn (tokens + cost; NEVER message text)
 --   ai_conversations  a person's chats (only that person reads them; owners too only their own)
---   ai_messages       the chat's turns exactly as sent to the model (only that person reads them)
+--   ai_messages       the chat's turns exactly as sent to the model (only that person reads them; content_raw = the JSON text)
+-- Already ran G1 before the review fixes of 15 Oct? Run it again (idempotent): it adds ai_conversations.prefix_hash and
+-- ai_messages.content_raw, which the gateway writes from then on.
 --   ai_changes        proposed / confirmed / undone changes (owners read all, others their own)
 -- Writes: ai_settings by owners from the app (RLS, listed columns only); everything else only by the gateway
 -- (service role). A person may delete (and rename) their own conversations; messages go with them.
@@ -73,8 +75,13 @@ create table if not exists public.ai_conversations (
   last_message_at timestamptz not null default now(),
   message_count integer not null default 0,
   last_prompt_tokens integer not null default 0,
-  busy_until timestamptz
+  busy_until timestamptz,
+  prefix_hash text check (prefix_hash is null or char_length(prefix_hash) <= 64)   -- system + tools fingerprint ('mixed' once it changed)
 );
+-- Review fixes (15 Oct): for a G1 that already ran, the columns added since (no-ops on a new table).
+alter table public.ai_conversations add column if not exists prefix_hash text;
+alter table public.ai_conversations drop constraint if exists ai_conversations_prefix_hash_check;
+alter table public.ai_conversations add constraint ai_conversations_prefix_hash_check check (prefix_hash is null or char_length(prefix_hash) <= 64);
 create index if not exists ai_conversations_user_idx on public.ai_conversations (user_id, last_message_at desc);
 create index if not exists ai_conversations_prune_idx on public.ai_conversations (last_message_at);
 
@@ -85,14 +92,16 @@ create table if not exists public.ai_messages (
   user_id uuid not null references auth.users(id) on delete cascade,
   seq integer not null,
   role text not null check (role in ('user', 'assistant', 'system')),
-  content jsonb not null default '[]'::jsonb check (jsonb_typeof(content) = 'array'),   -- API blocks, replayed unchanged
+  content jsonb not null default '[]'::jsonb check (jsonb_typeof(content) = 'array'),   -- API blocks (for queries; jsonb re-sorts keys)
+  content_raw text,                                                                   -- the same blocks as the exact JSON sent: what is replayed
   text text,                                                                          -- what the person sees (null = hidden turn)
   visible boolean not null default true,
-  replay boolean not null default true,                                               -- false = display-only notice, never sent to the model
+  replay boolean not null default true,                                               -- false = display-only (a notice, a refused turn), never sent to the model
   meta jsonb not null default '{}'::jsonb check (jsonb_typeof(meta) = 'object'),
   created_at timestamptz not null default now(),
   unique (conversation_id, seq)
 );
+alter table public.ai_messages add column if not exists content_raw text;   -- review fixes (15 Oct), for a G1 that already ran
 create index if not exists ai_messages_user_idx on public.ai_messages (user_id, created_at desc);
 
 -- 3. Usage: one row per chat turn. No message text, ever.
@@ -252,6 +261,8 @@ select 'G1-gateway ok';
 -- Check after (read-only):
 --   select table_name from information_schema.tables where table_schema = 'public' and table_name like 'ai\_%' order by 1;   -- 5 tables
 --   select relname, relrowsecurity from pg_class where relname like 'ai\_%' and relkind = 'r';                               -- all true
+--   select table_name, column_name from information_schema.columns where table_schema = 'public'
+--    and column_name in ('prefix_hash', 'content_raw') order by 1;                     -- ai_conversations.prefix_hash, ai_messages.content_raw
 --   select tablename, policyname, cmd from pg_policies where tablename like 'ai\_%' order by 1, 2;                           -- 9 policies
 --   select business_id, enabled, provider, monthly_cap_usd, daily_user_limit from public.ai_settings;                       -- default | t | mock | 20.00 | 50
 --   select column_name from information_schema.column_privileges where table_name = 'ai_settings' and grantee = 'authenticated'

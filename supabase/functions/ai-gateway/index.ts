@@ -25,16 +25,22 @@
 //     the kill switch, or switched their role off (roles_enabled). 'sb_…' and 'ops_mcp_…' keys are never accepted.
 //   • Money: a monthly cap per business (ai_settings.monthly_cap_usd). At 80% the owners get ONE phone notification a
 //     month (ai_claim_alert_80 marks the month; existing push devices, copies of push's sendTo/vapidKeys); at 100% new
-//     turns are refused until next month (business time zone) or until an owner raises the cap. The cap is also checked
-//     before every further model call inside a turn.
+//     turns are refused until next month (business time zone) or until an owner raises the cap. Each model call's
+//     tokens and cost are written to the turn's ai_usage row as soon as the call ends (an aborted or failed call with
+//     what the stream had reported), and before every further call inside a turn the month's spend is read again, so
+//     turns running at the same time see each other's spend.
+//   • The context the app sends (where the person is) is at most MAX_CONTEXT_CHARS as JSON.
 //   • A daily limit of turns per person (daily_user_limit, business day), counted atomically (ai_usage_begin).
 //   • max_tokens from the settings; at most MAX_TOOL_STEPS (5) tool rounds per turn, so at most 6 model calls.
 //   • Change tools only PROPOSE (ai_changes, status 'proposed'); nothing changes until the person presses Confirm.
 //     Confirm and undo are applied WITH THE PERSON'S OWN TOKEN (io.userClient), so the database's access rules apply.
 //   • No message text in logs or in ai_usage: usage rows hold tokens and cost only; errors log a clipped reason.
 //   • The model is pinned per conversation (settings changes apply to new conversations); history is append-only and
-//     replayed unchanged (thinking blocks included), so prompt caching and thinking-block binding stay valid. A
-//     conversation past CONVERSATION_MAX_PROMPT_TOKENS is refused (start a new chat) rather than trimmed.
+//     replayed unchanged from the exact JSON text sent (thinking blocks included), so prompt caching and thinking-block
+//     binding stay valid. A turn that ends in a refusal is taken out of the replay (its rows stay visible), so the next
+//     question isn't refused for the old text. A conversation whose tools or system prompt changed since it started
+//     (prefixHash) is sent with drop_block. A conversation past CONVERSATION_MAX_PROMPT_TOKENS is refused (start a new
+//     chat) rather than trimmed.
 //
 // SSE protocol (contract for the app). Transport: POST {SUPABASE_URL}/functions/v1/ai-gateway/chat with headers
 // apikey: SUPABASE_ANON_KEY, Authorization: Bearer <session access_token>, Content-Type: application/json,
@@ -46,7 +52,7 @@
 //   phase    {step, phase:'thinking'|'writing'} (typing indicator)
 //   text     {step, delta} (append to the current assistant bubble — patch the DOM, never render() per token)
 //   tool     {step, id, name, label, status:'running'|'done'|'error'} (status chip; label is a short generic English
-//            string from the registry)
+//            string from the registry; a 'running' chip always gets its 'done' or 'error', also when the tool isn't run)
 //   proposal {change:{id, kind, label, summary, target, before, after, status:'proposed', created_at, expires_at}}
 //            (render a 'what will change' card with Confirm/Cancel → manage confirm_change/cancel_change)
 //   card     {kind, data} (custom result card: client COBRA_CARDS[kind](data), stage 7 hook)
@@ -87,6 +93,7 @@ const anthropicKey = () => env("ANTHROPIC_API_KEY");
 
 export const MAX_TOOL_STEPS = 5;                  // tool rounds per turn (⇒ at most 6 model calls)
 export const MAX_TEXT_CHARS = 4000;               // one message from the person
+export const MAX_CONTEXT_CHARS = 4096;            // a turn's context from the app, as JSON (the app's COBRA_LIMITS.context)
 export const MAX_TOOL_RESULT_CHARS = 20000;       // one tool result, as JSON
 export const MAX_CHANGE_JSON_CHARS = 50000;       // a proposal's before / after, as JSON
 export const PROPOSAL_TTL_MS = 24 * 3600e3;       // a proposal can be confirmed for a day
@@ -96,6 +103,10 @@ export const HEARTBEAT_MS = 15000;
 export const SDK_TIMEOUT_MS = 60000;
 export const SDK_MAX_RETRIES = 2;
 export const FALLBACK_BETA = "server-side-fallback-2026-07-01";
+// Thinking-block binding controls: a conversation whose tools or system prompt changed since it started asks the API to
+// drop the thinking blocks that no longer match (instead of a 400). See prefixHash.
+export const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
+export const PREFIX_MIXED = "mixed";             // ai_conversations.prefix_hash once the prefix has changed: drop for good
 export const SSE_EVENTS = ["start", "phase", "text", "tool", "proposal", "card", "discard", "notice", "error", "done"];
 export const ERROR_CODES = ["unauthorized", "off", "role_off", "bad_request", "unknown_mode", "bad_context", "mode_mismatch", "conversation_full",
   "model_not_priced", "conversation_not_found", "busy", "cap_reached", "daily_limit", "provider_auth", "model_not_found", "provider_bad_request",
@@ -280,12 +291,14 @@ export const PRICE_DEFAULTS: Record<string, any> = {
   "claude-sonnet-5": { in: 2, out: 10, cache_write: 2.50, cache_read: 0.20 },
 };
 // What each model accepts: mid-conversation role 'system' messages, output_config.effort, server-side fallbacks
-// (Claude API, beta FALLBACK_BETA). An unknown model gets none of them.
-export const MODEL_CAPS: Record<string, { systemMessages: boolean; effort: boolean; fallbacks: boolean }> = {
-  "claude-haiku-5-5": { systemMessages: true, effort: true, fallbacks: false },
-  "claude-sonnet-5-5": { systemMessages: true, effort: true, fallbacks: true },
+// (Claude API, beta FALLBACK_BETA), and thinking.block_binding (adaptive thinking, beta THINKING_BINDING_BETA). An
+// unknown model gets none of them. claude-sonnet-5-5 is sent with fallbacks, and its fallback model (claude-sonnet-5)
+// doesn't accept role 'system' messages, so its turn context goes as an <app_context> block in the user message.
+export const MODEL_CAPS: Record<string, { systemMessages: boolean; effort: boolean; fallbacks: boolean; thinkingBinding: boolean }> = {
+  "claude-haiku-5-5": { systemMessages: true, effort: true, fallbacks: false, thinkingBinding: true },
+  "claude-sonnet-5-5": { systemMessages: false, effort: true, fallbacks: true, thinkingBinding: true },
 };
-export function capsOf(model: string) { return MODEL_CAPS[model] || { systemMessages: false, effort: false, fallbacks: false }; }
+export function capsOf(model: string) { return MODEL_CAPS[model] || { systemMessages: false, effort: false, fallbacks: false, thinkingBinding: false }; }
 export const AI_DEFAULTS = {
   enabled: true, kill_switch: false,
   roles_enabled: { owner: true, manager: true, va: true, technician: true, marketing: true } as Record<string, boolean>,
@@ -397,6 +410,20 @@ export function addUsage(a: any, b: any) {
 export function resultUsage(result: any) {
   const its = result?.usage?.iterations;
   return Array.isArray(its) && its.length ? its.reduce((a: any, it: any) => addUsage(a, it), { ...ZERO_USAGE }) : addUsage(ZERO_USAGE, result?.usage);
+}
+// The prompt size of the attempt that produced the answer (the conversation's real size): after a server-side fallback
+// the last usage.iterations entry, never their sum (each attempt read the same prompt).
+export function promptTokensOf(result: any): number {
+  const its = result?.usage?.iterations;
+  const u = Array.isArray(its) && its.length ? its[its.length - 1] : result?.usage;
+  return tok(u?.input_tokens) + tok(u?.cache_creation_input_tokens) + tok(u?.cache_read_input_tokens);
+}
+// A streamed call's usage so far: message_start's usage, then each message_delta's (cumulative) counts on top. Used to
+// price a call that was aborted or failed mid-stream (the API bills what it already read and wrote).
+export function mergeStreamUsage(prev: any, u: any) {
+  const out: Record<string, number> = { ...ZERO_USAGE, ...(isObj(prev) ? prev : {}) };
+  if (isObj(u)) for (const k of Object.keys(ZERO_USAGE)) if (typeof u[k] === "number" && Number.isFinite(u[k]) && u[k] >= 0) out[k] = u[k];
+  return out as typeof ZERO_USAGE;
 }
 
 // ── schemas (pure): what a strict tool schema may hold, and checking a tool's input against it ──
@@ -551,6 +578,20 @@ export function toolsFor(modeId: string, me: Profile): ToolDef[] {
 // buffering keeps its validation (the gateway still parses strictly and validates, so switching it on later is safe).
 export function apiTools(list: ToolDef[]) {
   return list.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema, strict: true }));
+}
+// A fingerprint of a request's fixed prefix (system prompt + tools as sent), stored on the conversation when it starts.
+// The tools follow the person's role and permissions and the registry, and the system prompt the code, so either can
+// change under an open conversation; its replayed thinking blocks are bound to the old prefix (a 400 on enforced
+// accounts). A conversation whose prefix changed is sent with drop_block from then on (buildRequest).
+export function prefixHash(system: string, tools: any[]): string {
+  const s = JSON.stringify({ system, tools });
+  let a = 0x811c9dc5, b = 0x9747b28c ^ s.length;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c, 0x5bd1e995) >>> 0; b = (b ^ (b >>> 15)) >>> 0;
+  }
+  return a.toString(16).padStart(8, "0") + b.toString(16).padStart(8, "0");
 }
 // The tool a tool_use block names: exact, else the one tool whose name differs only in letter case.
 export function matchTool(name: string, list: ToolDef[]): ToolDef | null {
@@ -964,18 +1005,25 @@ registerChangeKind({
     const { data, error } = await userSb.from("tasks").insert(row).select("id, " + TASK_CAS_COLS.join(", ")).single();
     if (error) { if (isRlsError(error)) throw new ChangeRefused("denied", REFUSAL_TEXT.denied); throw new Error("tasks: " + clip(error.message, 200)); }
     if (!data || !data.id) throw new Error("tasks: no row");
+    // The task exists from here: what follows is best-effort (logged, never thrown), so the change is recorded as
+    // confirmed with the task's id and can be undone.
+    const applied = { after: { ...ch.after, row: { id: data.id, ...pick(data, TASK_CAS_COLS) } }, target: { ...ch.target, id: data.id } };
     await logActivity(userSb, "task", data.id, actor, `Task created (via ${via})`);
     const contactId = ch.after.row.contact_id;
     if (contactId) {
       const due = ch.after.row.due;
       await logActivity(userSb, "contact", contactId, actor, `Task created: "${ch.after.row.title}" for ${ch.after.row.assignees.join(", ")}${due ? ` · due ${fmtDateShort(due)}` : ""} (via ${via})`);
-      const patch = await contactedPatch(userSb, contactId, nowIso);
-      if (patch && Object.keys(patch).length) {
-        const out = await cas(userSb, "ai_contact_cas", { p_id: contactId, p_expected: {}, p_patch: patch });
-        if (!out.ok) console.error("ai-gateway: contacted_at not set:", clip(out.code, 40));
+      try {
+        const patch = await contactedPatch(userSb, contactId, nowIso);
+        if (patch && Object.keys(patch).length) {
+          const out = await cas(userSb, "ai_contact_cas", { p_id: contactId, p_expected: {}, p_patch: patch });
+          if (!out.ok) console.error("ai-gateway: contacted_at not set:", clip(out.code, 40));
+        }
+      } catch (e) {
+        console.error("ai-gateway: contacted_at not set:", clip((e as Error)?.message, 120));
       }
     }
-    return { after: { ...ch.after, row: { id: data.id, ...pick(data, TASK_CAS_COLS) } }, target: { ...ch.target, id: data.id } };
+    return applied;
   },
   undo: async (userSb, ch, x) => {
     const id = ch.after && ch.after.row && ch.after.row.id;
@@ -1300,7 +1348,17 @@ const blockText = (content: any) => (Array.isArray(content) ? content.filter((b:
 // context) is kept only when it is last or followed by an assistant row (the API's placement rule; a turn that ended in
 // a refusal or error leaves one followed by the next user turn: dropped, the same way every time, so the history stays
 // append-only). A model without mid-conversation system messages gets it as an <app_context> text block at the end of
-// the preceding user message. Assistant content is passed back exactly as received (thinking blocks included).
+// the preceding user message. Assistant content is passed back exactly as received (thinking blocks included): from
+// content_raw, the JSON text as sent (the jsonb column re-sorts object keys, so a tool_use input read from it would
+// differ from what the model wrote). A tool call left without its result (the worker stopped between the two rows) gets
+// an is_error result at the start of the next user message, the same way every time.
+export function rowContent(r: any): any {
+  if (r && typeof r.content_raw === "string" && r.content_raw) {
+    try { const v = JSON.parse(r.content_raw); if (Array.isArray(v)) return v; } catch { /* the jsonb copy below */ }
+  }
+  return r ? r.content : [];
+}
+export const TOOL_NOT_RUN = "The tool was not run.";
 export function buildHistory(rows: any[], caps: { systemMessages: boolean }): any[] {
   const kept = (rows || []).filter((r) => r && r.replay !== false).slice().sort((a, b) => a.seq - b.seq);
   const out: any[] = [];
@@ -1308,7 +1366,7 @@ export function buildHistory(rows: any[], caps: { systemMessages: boolean }): an
     if (r.role === "system") {
       const next = kept[i + 1];
       if (next && next.role !== "assistant") return;
-      const text = blockText(r.content);
+      const text = blockText(rowContent(r));
       if (!text) return;
       if (caps.systemMessages) { out.push({ role: "system", content: text }); return; }
       for (let j = out.length - 1; j >= 0; j--) {
@@ -1320,8 +1378,23 @@ export function buildHistory(rows: any[], caps: { systemMessages: boolean }): an
       }
       return;
     }
-    out.push({ role: r.role, content: r.content });
+    out.push({ role: r.role, content: rowContent(r) });
   });
+  for (let i = 0; i < out.length; i++) {
+    const m = out[i];
+    if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+    const ids = m.content.filter((b: any) => b && b.type === "tool_use" && b.id).map((b: any) => String(b.id));
+    if (!ids.length) continue;
+    const next = out[i + 1];
+    const nc: any[] | null = next && next.role === "user" ? (Array.isArray(next.content) ? next.content : [{ type: "text", text: String(next.content) }]) : null;
+    const have = new Set((nc || []).filter((b: any) => b && b.type === "tool_result").map((b: any) => String(b.tool_use_id)));
+    const missing = ids.filter((id: string) => !have.has(id)).map((id: string) => ({ type: "tool_result", tool_use_id: id, content: TOOL_NOT_RUN, is_error: true }));
+    if (!missing.length) continue;
+    if (nc) {
+      const k = nc.findIndex((b: any) => !b || b.type !== "tool_result"), at = k < 0 ? nc.length : k;
+      out[i + 1] = { role: "user", content: [...nc.slice(0, at), ...missing, ...nc.slice(at)] };
+    } else out.splice(i + 1, 0, { role: "user", content: missing });
+  }
   return out;
 }
 // After a mid-output server-side fallback: drop the thinking / tool_use blocks before the last fallback block and the
@@ -1336,9 +1409,10 @@ export function sanitizeFallbackContent(content: any[]): any[] {
 
 // ── providers ──
 // One request. Two cache breakpoints, both 5-minute: the end of the (frozen) system prompt, which caches tools + system,
-// and automatic caching of the growing conversation tail. Never sent: temperature/top_p/top_k, thinking or budgets,
-// a prefill, a forced tool_choice. Server-side fallback only for claude-sonnet-5-5 on the Claude API.
-export function buildRequest(o: { model: string; maxTokens: number; effort?: string; system: string; tools: any[]; messages: any[] }) {
+// and automatic caching of the growing conversation tail. Never sent: temperature/top_p/top_k, budgets, a prefill, a
+// forced tool_choice; thinking only as { type: 'adaptive' } (both models' default) with drop_block, for a conversation
+// whose prefix changed (dropMismatchedThinking). Server-side fallback only for claude-sonnet-5-5 on the Claude API.
+export function buildRequest(o: { model: string; maxTokens: number; effort?: string; system: string; tools: any[]; messages: any[]; dropMismatchedThinking?: boolean }) {
   const caps = capsOf(o.model);
   const params: any = {
     model: o.model,
@@ -1349,14 +1423,20 @@ export function buildRequest(o: { model: string; maxTokens: number; effort?: str
     cache_control: { type: "ephemeral" },
     ...(caps.effort && o.effort ? { output_config: { effort: o.effort } } : {}),
   };
-  let useBeta = false;
-  if (caps.fallbacks && o.model === "claude-sonnet-5-5") { useBeta = true; params.betas = [FALLBACK_BETA]; params.fallbacks = "default"; }
-  return { useBeta, params };
+  const betas: string[] = [];
+  if (caps.fallbacks && o.model === "claude-sonnet-5-5") { betas.push(FALLBACK_BETA); params.fallbacks = "default"; }
+  if (o.dropMismatchedThinking && caps.thinkingBinding) {
+    betas.push(THINKING_BINDING_BETA);
+    params.thinking = { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } };
+  }
+  if (betas.length) params.betas = betas;
+  return { useBeta: betas.length > 0, params };
 }
 // A provider failure, already classified (classifyProviderError). Never carries the provider's message text.
+// partialUsage: what the stream reported before it stopped (billed by the API, so counted against the cap).
 export class ProviderFailure extends Error {
-  code: string; retryable: boolean;
-  constructor(code: string, retryable: boolean) { super(code); this.code = code; this.retryable = retryable; this.name = "ProviderFailure"; }
+  code: string; retryable: boolean; partialUsage: any = null;
+  constructor(code: string, retryable: boolean, partialUsage: any = null) { super(code); this.code = code; this.retryable = retryable; this.partialUsage = partialUsage; this.name = "ProviderFailure"; }
 }
 const sdkIs = (e: unknown, name: string) => { const C = (Anthropic as any)[name]; return typeof C === "function" && e instanceof C; };
 // The SDK's typed errors → our codes, most specific first (APIConnectionError is an APIError subclass in TypeScript).
@@ -1374,14 +1454,17 @@ export function classifyProviderError(e: any, signal?: AbortSignal | null): { co
 }
 // One streamed call to the Claude API (the SDK retries 429/5xx/connection errors itself, SDK_MAX_RETRIES times).
 // Events out: tool_start (a tool_use block opened), thinking, text deltas. The tool inputs' partial_json is kept per
-// block and parsed strictly by the loop. The final message's content is returned unchanged.
+// block and parsed strictly by the loop. The final message's content is returned unchanged. A failure (an abort
+// included) carries the usage streamed so far (message_start, then message_delta).
 export async function anthropicTurn(client: any, req: { useBeta: boolean; params: any }, onEvent: (ev: any) => void, signal?: AbortSignal | null) {
   const raw = new Map<number, string>(), ids = new Map<number, string>();
-  let msg: any;
+  let msg: any, partial: any = null;
   try {
     const stream = req.useBeta ? client.beta.messages.stream(req.params as any, { signal }) : client.messages.stream(req.params as any, { signal });
     for await (const ev of stream) {
-      if (ev.type === "content_block_start") {
+      if (ev.type === "message_start") partial = mergeStreamUsage(partial, ev.message && ev.message.usage);
+      else if (ev.type === "message_delta") partial = mergeStreamUsage(partial, ev.usage);
+      else if (ev.type === "content_block_start") {
         const b = ev.content_block || {};
         if (b.type === "tool_use") { ids.set(ev.index, b.id); raw.set(ev.index, ""); onEvent({ type: "tool_start", id: b.id, name: b.name }); }
         else if (b.type === "thinking") onEvent({ type: "thinking" });
@@ -1394,7 +1477,7 @@ export async function anthropicTurn(client: any, req: { useBeta: boolean; params
     msg = await stream.finalMessage();
   } catch (e) {
     const c = classifyProviderError(e, signal);
-    throw new ProviderFailure(c.code, c.retryable);
+    throw new ProviderFailure(c.code, c.retryable, partial);
   }
   const rawInputs = new Map<string, string>();
   for (const [i, id] of ids) rawInputs.set(id, raw.get(i) || "");
@@ -1554,11 +1637,13 @@ export function usdText(n: number, cat: any): string {
 }
 const round2 = (x: number) => Math.round(x * 100) / 100;
 // The 80% alert: once a month per business (ai_claim_alert_80 marks the month; true only for the call that marked it),
-// to the owners' saved devices. A failure is logged and never fails the chat. Returns whether this call sent it.
+// to the owners' saved devices. A failure is logged and never fails the chat. A failure before anything was sent (the
+// owners or the push keys couldn't be read) gives the month back, so the next turn tries again. Returns whether this
+// call sent it.
 export async function maybeAlert80(sb: any, s: AiSettings, biz: Biz, monthKey: string, spend: number): Promise<boolean> {
   const cap = s.monthly_cap_usd;
   if (!capState(spend, cap).warn || s.alert_80_sent_month === monthKey) return false;
-  let claimed = false;
+  let claimed = false, sending = false;
   try {
     const { data, error } = await sb.rpc("ai_claim_alert_80", { p_business: BUSINESS_ID, p_month: monthKey });
     if (error) throw new Error(error.message);
@@ -1566,15 +1651,26 @@ export async function maybeAlert80(sb: any, s: AiSettings, biz: Biz, monthKey: s
     claimed = true;
     const { data: owners, error: oe } = await sb.from("profiles").select("id").eq("role", "owner");
     if (oe) throw new Error(oe.message);
-    const name = assistantNameOf(s, biz.catalog);
+    const name = assistantNameOf(s, biz.catalog), keys = await vapidKeys(sb);
+    sending = true;
     await sendTo(sb, (owners || []).map((o: any) => o.id), {
       title: `${name}: 80% of this month's AI budget used`,
       body: `${usdText(spend, biz.catalog)} of ${usdText(cap, biz.catalog)} this month. It stops at 100% until next month or until the cap is raised in Settings.`,
       url: "./?tab=settings&page=ai",
       tag: `ai-cap-80-${monthKey}`,
-    }, await vapidKeys(sb));
+    }, keys);
   } catch (e) {
     console.error("ai-gateway: 80% alert failed:", clip((e as Error)?.message, 200));
+    if (claimed && !sending) {
+      try {
+        const { error } = await sb.from("ai_settings").update({ alert_80_sent_month: s.alert_80_sent_month })
+          .eq("business_id", BUSINESS_ID).eq("alert_80_sent_month", monthKey);
+        if (error) throw new Error(error.message);
+        claimed = false;
+      } catch (e2) {
+        console.error("ai-gateway: 80% alert not given back:", clip((e2 as Error)?.message, 200));
+      }
+    }
   }
   return claimed;
 }
@@ -1627,7 +1723,7 @@ export function titleOf(text: string): string { return String(text || "").replac
 export type Turn = {
   sb: any; me: Profile; jwt: string; s: AiSettings; biz: Biz; mode: ModeDef; conv: any; isNew: boolean; text: string; context: any;
   lang: string | null; usageId: string; spend: number; bounds: ReturnType<typeof periodBounds>; providerName: "anthropic" | "mock"; assistantName: string;
-  proposals?: number;
+  tools: ToolDef[]; proposals?: number;
 };
 async function releaseLock(sb: any, convId: string) {
   try { await sb.from("ai_conversations").update({ busy_until: null }).eq("id", convId); } catch { /* the lease runs out on its own */ }
@@ -1646,11 +1742,16 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
   const mode = own(MODES, modeId) ? MODES[modeId] : null;
   if (!mode || (mode.allow && !mode.allow(me))) return refuse(400, "unknown_mode");
   if (b.context !== undefined && b.context !== null && !isObj(b.context)) return refuse(400, "bad_context");
+  // The size first: the context is stored with the conversation and sent in every turn's context message, so an
+  // oversized one would get around the conversation-size and price-tier guards.
+  if (isObj(b.context) && JSON.stringify(b.context).length > MAX_CONTEXT_CHARS) return refuse(400, "bad_context");
   if (isObj(b.context) && validateInput(b.context, mode.contextSchema, "context").length) return refuse(400, "bad_context");
   // (b) switched on for this person?
   const { s, biz } = await loadState(sb);
   const g = gate(s, me);
   if (g) return refuse(g.status, g.code);
+  // The tools this turn offers (worked out once: the conversation's prefix fingerprint and the loop use the same list).
+  const tools = toolsFor(mode.id, me);
   // (c) the conversation (only the person's own) and its lock
   const nowMs = io.now();
   let conv: any = null, isNew = false;
@@ -1672,6 +1773,7 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
     const row = {
       business_id: BUSINESS_ID, user_id: me.id, mode: mode.id, model, title: titleOf(text), context: isObj(b.context) ? b.context : {},
       created_at: iso(nowMs), last_message_at: iso(nowMs), message_count: 0, last_prompt_tokens: 0, busy_until: iso(nowMs + BUSY_MS),
+      prefix_hash: prefixHash(mode.systemPrompt, apiTools(tools)),
     };
     const { data, error } = await sb.from("ai_conversations").insert(row).select("*").single();
     if (error || !data) throw new Error("ai_conversations: " + clip(error && error.message, 200));
@@ -1695,7 +1797,7 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
     handedOver = true;
     return { turn: {
       sb, me, jwt, s, biz, mode, conv, isNew, text, context: isObj(b.context) ? b.context : (isObj(conv.context) ? conv.context : {}),
-      lang: b.lang || null, usageId, spend, bounds, providerName: pName, assistantName: assistantNameOf(s, biz.catalog),
+      lang: b.lang || null, usageId, spend, bounds, providerName: pName, assistantName: assistantNameOf(s, biz.catalog), tools,
     } };
   } finally {
     if (!handedOver) {
@@ -1706,15 +1808,17 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
 }
 
 // The loop: the person's text and this turn's context are stored, then up to MAX_TOOL_STEPS tool rounds, branching on
-// stop_reason before reading content. emit(event, data) writes one SSE frame. Always (finally): the usage row, the
-// conversation (lock released) and the 80% alert.
+// stop_reason before reading content. emit(event, data) writes one SSE frame. After every model call the usage row gets
+// the turn's tokens and cost so far; always (finally): the usage row's status, the conversation (lock released) and the
+// 80% alert. Every tool chip that opened (tool 'running') ends with a 'done' or 'error' tool event.
 export async function runChat(t: Turn, emit: (event: string, data: unknown) => void, signal: AbortSignal) {
   const { sb, me, s, conv, mode } = t;
   const caps = capsOf(conv.model), provider = providerFor(t.providerName);
-  let seq = 0, visibleAdded = 0, steps = 0, cost = 0, lastPrompt = Number(conv.last_prompt_tokens) || 0;
+  let seq = 0, visibleAdded = 0, steps = 0, cost = 0, lastPrompt = Number(conv.last_prompt_tokens) || 0, turnFrom = 0, drifted = false;
   let usage = { ...ZERO_USAGE }, status = "ok", stop = "ok", terminal: "done" | "error" | "none" = "done";
   const addMsg = async (row: any) => {
     const r = { business_id: BUSINESS_ID, conversation_id: conv.id, user_id: me.id, seq: ++seq, replay: true, meta: {}, created_at: iso(io.now()), ...row };
+    r.content_raw = JSON.stringify(r.content ?? []);   // the exact JSON replayed to the model (jsonb re-sorts keys)
     const { data, error } = await sb.from("ai_messages").insert(r).select("id").single();
     if (error || !data) throw new Error("ai_messages: " + clip(error && error.message, 200));
     if (r.visible) visibleAdded++;
@@ -1725,96 +1829,145 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
     await addMsg({ role: "assistant", content: [], text, visible: true, replay: false, meta: { notice: code, ...extra } });
     emit("notice", { code, text, ...extra });
   };
+  // The turn's tokens and cost so far (status stays 'running' until the end): other turns' cap checks see it, and it
+  // is kept if the worker stops mid-turn.
+  const saveUsage = async () => {
+    try {
+      const { error } = await sb.from("ai_usage").update({ ...usage, cost_usd: round6(cost), steps }).eq("id", t.usageId);
+      if (error) throw new Error(error.message);
+    } catch (e) { console.error("ai-gateway: usage not saved:", clip((e as Error)?.message, 200)); }
+  };
+  // This month's spend now: every turn's calls so far (this one's included), never less than what this turn knows.
+  const spendNow = async () => {
+    let x = t.spend + cost;
+    try { x = Math.max(x, await monthSpend(sb, t.bounds.monthStart)); } catch (e) { console.error("ai-gateway: spend not read:", clip((e as Error)?.message, 200)); }
+    return x;
+  };
+  // A refused turn leaves the replay (its rows stay visible): the next request would otherwise send the refused text
+  // again. Only rows at the end of the history go, so the earlier prefix (cache, thinking blocks) stays as it was.
+  const dropTurn = async () => {
+    try {
+      const { error } = await sb.from("ai_messages").update({ replay: false }).eq("conversation_id", conv.id).gte("seq", turnFrom);
+      if (error) throw new Error(error.message);
+    } catch (e) { console.error("ai-gateway: refused turn not dropped:", clip((e as Error)?.message, 200)); }
+  };
   try {
     const { data: top, error: te } = await sb.from("ai_messages").select("seq").eq("conversation_id", conv.id).order("seq", { ascending: false }).limit(1);
     if (te) throw new Error("ai_messages: " + clip(te.message, 200));
     seq = top && top[0] ? Number(top[0].seq) || 0 : 0;
     const userMessageId = await addMsg({ role: "user", content: [{ type: "text", text: t.text }], text: t.text, visible: true });
+    turnFrom = seq;
     // What became of this chat's proposals (confirmed, cancelled, undone…), told in the turn's context message (G2).
     const { data: changes } = t.isNew ? { data: [] } : await sb.from("ai_changes").select("id, kind, status, created_at").eq("conversation_id", conv.id).order("created_at", { ascending: false }).limit(10);
     const ctxText = mode.context({ nowMs: io.now(), biz: t.biz, assistantName: t.assistantName, me, context: t.context, lang: t.lang, changes: changes || [] });
     await addMsg({ role: "system", content: [{ type: "text", text: ctxText }], text: null, visible: false });
     emit("start", { conversation_id: conv.id, user_message_id: userMessageId, mode: mode.id, model: conv.model, provider: t.providerName, assistant_name: t.assistantName });
-    const { data: rows, error: re } = await sb.from("ai_messages").select("seq, role, content, replay").eq("conversation_id", conv.id).order("seq", { ascending: true });
+    const { data: rows, error: re } = await sb.from("ai_messages").select("seq, role, content, content_raw, replay").eq("conversation_id", conv.id).order("seq", { ascending: true });
     if (re) throw new Error("ai_messages: " + clip(re.message, 200));
     const messages = buildHistory(rows || [], caps);
-    const tools = toolsFor(mode.id, me), sent = apiTools(tools);
+    const tools = t.tools, sent = apiTools(tools);
+    drifted = conv.prefix_hash !== prefixHash(mode.systemPrompt, sent);   // tools or system changed since the chat began
     let paused = false;
     for (let step = 0; step <= MAX_TOOL_STEPS; step++) {
       if (signal.aborted) { status = "aborted"; terminal = "none"; break; }
-      if (step > 0 && t.spend + cost >= s.monthly_cap_usd) { await notice("cap_reached"); status = "cap"; stop = "cap_reached"; break; }
+      if (step > 0 && (await spendNow()) >= s.monthly_cap_usd) { await notice("cap_reached"); status = "cap"; stop = "cap_reached"; break; }
       emit("phase", { step, phase: "thinking" });
       let wrote = false;
-      const req = buildRequest({ model: conv.model, maxTokens: s.max_tokens, effort: mode.effort, system: mode.systemPrompt, tools: sent, messages });
-      let result: any;
+      // The tool chips opened in this step; whatever isn't run is closed as 'error' when the step ends.
+      const open = new Map<string, { name: string; label: string }>();
+      const closeOpen = () => { for (const [id, x] of open) emit("tool", { step, id, name: x.name, label: x.label, status: "error" }); open.clear(); };
       try {
-        result = await provider.turn(req, (ev: any) => {
-          if (ev.type === "text" && ev.text) {
-            if (!wrote) { wrote = true; emit("phase", { step, phase: "writing" }); }
-            emit("text", { step, delta: ev.text });
-          } else if (ev.type === "tool_start") {
-            const tool = matchTool(ev.name, tools);
-            emit("tool", { step, id: ev.id, name: tool ? tool.name : ev.name, label: tool ? tool.status : "Working", status: "running" });
+        const req = buildRequest({ model: conv.model, maxTokens: s.max_tokens, effort: mode.effort, system: mode.systemPrompt, tools: sent, messages, dropMismatchedThinking: drifted });
+        let result: any;
+        try {
+          result = await provider.turn(req, (ev: any) => {
+            if (ev.type === "text" && ev.text) {
+              if (!wrote) { wrote = true; emit("phase", { step, phase: "writing" }); }
+              emit("text", { step, delta: ev.text });
+            } else if (ev.type === "tool_start") {
+              const tool = matchTool(ev.name, tools), name = tool ? tool.name : ev.name, label = tool ? tool.status : "Working";
+              open.set(ev.id, { name, label });
+              emit("tool", { step, id: ev.id, name, label, status: "running" });
+            }
+          }, signal);
+        } catch (e) {
+          let code = "server", retryable = false;
+          if (e instanceof ProviderFailure) { code = e.code; retryable = e.retryable; }
+          else if (signal.aborted) code = "aborted";
+          else console.error("ai-gateway: provider call failed:", clip((e as Error)?.name, 60));
+          // An aborted or failed call is still billed for what it read and wrote: count what the stream reported.
+          if (e instanceof ProviderFailure && e.partialUsage) {
+            usage = addUsage(usage, e.partialUsage);
+            cost = round6(cost + callCost(s.prices, conv.model, e.partialUsage));
+            await saveUsage();
           }
-        }, signal);
-      } catch (e) {
-        let code = "server", retryable = false;
-        if (e instanceof ProviderFailure) { code = e.code; retryable = e.retryable; }
-        else if (signal.aborted) code = "aborted";
-        else console.error("ai-gateway: provider call failed:", clip((e as Error)?.name, 60));
-        if (code === "aborted") { status = "aborted"; terminal = "none"; break; }
-        if (e instanceof ProviderFailure) console.error("ai-gateway: provider error:", code);   // the code only, never the provider's text
-        await addMsg({ role: "assistant", content: [], text: ERROR_TEXT[code] || ERROR_TEXT.server, visible: true, replay: false, meta: { notice: "error", code } });
-        emit("error", { code, text: ERROR_TEXT[code] || ERROR_TEXT.server, retryable });
-        status = "error"; terminal = "error";
-        break;
-      }
-      steps++;
-      const u = resultUsage(result);
-      usage = addUsage(usage, u);
-      cost = round6(cost + usageCost(s.prices, conv.model, result));
-      lastPrompt = u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens;
-      if (signal.aborted) { status = "aborted"; terminal = "none"; break; }   // the person left: this answer isn't kept
-      // stop_reason first, content after.
-      if (result.stop_reason === "refusal") {
-        emit("discard", { step });
-        await notice("refusal", { category: result.stop_details?.category ?? null });
-        status = "refusal"; stop = "refusal";
-        break;
-      }
-      const content = sanitizeFallbackContent(result.content || []);
-      const uses = content.filter((x: any) => x && x.type === "tool_use");
-      const meta: any = { step, stop_reason: result.stop_reason, model: result.model || conv.model, tools: [], proposals: [], cards: [] };
-      const text = blockText(content);
-      const rowId = await addMsg({ role: "assistant", content, text, visible: text !== "", meta });
-      messages.push({ role: "assistant", content });
-      const notRun = async (reason: string) => {
-        const res = uses.map((x: any) => ({ type: "tool_result", tool_use_id: x.id, content: reason, is_error: true }));
-        await addMsg({ role: "user", content: res, text: null, visible: false });
-        messages.push({ role: "user", content: res });
-      };
-      if (result.stop_reason === "tool_use" && uses.length) {
-        if (step === MAX_TOOL_STEPS) {
-          await notRun("Tool step limit reached; nothing was run. Answer with what you have.");
-          await notice("step_limit");
-          status = "step_limit"; stop = "step_limit";
+          if (code === "aborted") { status = "aborted"; terminal = "none"; break; }
+          if (e instanceof ProviderFailure) console.error("ai-gateway: provider error:", code);   // the code only, never the provider's text
+          closeOpen();
+          await addMsg({ role: "assistant", content: [], text: ERROR_TEXT[code] || ERROR_TEXT.server, visible: true, replay: false, meta: { notice: "error", code } });
+          emit("error", { code, text: ERROR_TEXT[code] || ERROR_TEXT.server, retryable });
+          status = "error"; terminal = "error";
           break;
         }
-        const results = await runTools(t, uses, result.rawInputs, tools, step, meta, emit);
-        await sb.from("ai_messages").update({ meta }).eq("id", rowId);
-        await addMsg({ role: "user", content: results, text: null, visible: false });
-        messages.push({ role: "user", content: results });
-        continue;
+        steps++;
+        usage = addUsage(usage, resultUsage(result));
+        cost = round6(cost + usageCost(s.prices, conv.model, result));
+        lastPrompt = promptTokensOf(result);
+        await saveUsage();
+        if (signal.aborted) { status = "aborted"; terminal = "none"; break; }   // the person left: this answer isn't kept
+        // stop_reason first, content after.
+        if (result.stop_reason === "refusal") {
+          emit("discard", { step });
+          await dropTurn();
+          await notice("refusal", { category: result.stop_details?.category ?? null });
+          status = "refusal"; stop = "refusal";
+          break;
+        }
+        const content = sanitizeFallbackContent(result.content || []);
+        const uses = content.filter((x: any) => x && x.type === "tool_use");
+        const meta: any = { step, stop_reason: result.stop_reason, model: result.model || conv.model, tools: [], proposals: [], cards: [] };
+        const text = blockText(content);
+        if (!content.length) {
+          // Nothing to keep: the API takes an empty assistant message only as the last one, so it is never replayed.
+          await addMsg({ role: "assistant", content: [], text: "", visible: false, replay: false, meta });
+          if (result.stop_reason === "max_tokens") { await notice("max_tokens"); status = "max_tokens"; stop = "max_tokens"; }
+          break;
+        }
+        const rowId = await addMsg({ role: "assistant", content, text, visible: text !== "", meta });
+        messages.push({ role: "assistant", content });
+        const notRun = async (reason: string) => {
+          const res = uses.map((x: any) => ({ type: "tool_result", tool_use_id: x.id, content: reason, is_error: true }));
+          await addMsg({ role: "user", content: res, text: null, visible: false });
+          messages.push({ role: "user", content: res });
+        };
+        if (result.stop_reason === "tool_use" && uses.length) {
+          if (step === MAX_TOOL_STEPS) {
+            await notRun("Tool step limit reached; nothing was run. Answer with what you have.");
+            await notice("step_limit");
+            status = "step_limit"; stop = "step_limit";
+            break;
+          }
+          const results = await runTools(t, uses, result.rawInputs, tools, step, meta, (event: string, data: any) => {
+            if (event === "tool" && data && data.status !== "running") open.delete(data.id);
+            emit(event, data);
+          });
+          await sb.from("ai_messages").update({ meta }).eq("id", rowId);
+          await addMsg({ role: "user", content: results, text: null, visible: false });
+          messages.push({ role: "user", content: results });
+          continue;
+        }
+        if (result.stop_reason === "max_tokens") {
+          if (uses.length) await notRun("Your reply was cut off (max_tokens); the tool was not run.");
+          await notice("max_tokens");
+          status = "max_tokens"; stop = "max_tokens";
+          break;
+        }
+        if (uses.length) await notRun(TOOL_NOT_RUN);   // tool calls with any other stop: never run, history stays valid
+        if (result.stop_reason === "pause_turn" && !paused) { paused = true; continue; }
+        break;   // end_turn, stop_sequence, a second pause_turn, anything else
+      } finally {
+        if (!signal.aborted) closeOpen();
       }
-      if (result.stop_reason === "max_tokens") {
-        if (uses.length) await notRun("Your reply was cut off (max_tokens); the tool was not run.");
-        await notice("max_tokens");
-        status = "max_tokens"; stop = "max_tokens";
-        break;
-      }
-      if (uses.length) await notRun("The tool was not run.");   // tool calls with any other stop: never run, history stays valid
-      if (result.stop_reason === "pause_turn" && !paused) { paused = true; continue; }
-      break;   // end_turn, stop_sequence, a second pause_turn, anything else
     }
   } catch (e) {
     console.error("ai-gateway: chat failed:", clip((e as Error)?.message, 200));
@@ -1825,10 +1978,11 @@ export async function runChat(t: Turn, emit: (event: string, data: unknown) => v
       await sb.from("ai_usage").update({ ...usage, cost_usd: round6(cost), steps, status }).eq("id", t.usageId);
       await sb.from("ai_conversations").update({
         last_message_at: nowIso, message_count: (Number(conv.message_count) || 0) + visibleAdded, last_prompt_tokens: lastPrompt, busy_until: null,
+        ...(drifted && conv.prefix_hash !== PREFIX_MIXED ? { prefix_hash: PREFIX_MIXED } : {}),   // drop_block from now on
       }).eq("id", conv.id);
     };
     try { await finish(); } catch (e) { console.error("ai-gateway: bookkeeping failed:", clip((e as Error)?.message, 200)); await releaseLock(sb, conv.id); }
-    const newSpend = t.spend + cost;
+    const newSpend = await spendNow();
     const sentAlert = await maybeAlert80(sb, s, t.biz, t.bounds.monthKey, newSpend);
     if (terminal === "done") {
       if (sentAlert && me.role === "owner") emit("notice", { code: "cap_80", text: NOTICE_TEXT.cap_80 });
@@ -1974,16 +2128,24 @@ export async function confirmChange(sb: any, body: any, me: Profile, jwt: string
   if (!kind || !kind.allow(me)) return changeError(403, "not_allowed", "You aren't allowed to make this change.");
   const claimed = await claimChange(sb, row.id, "proposed", { status: "confirmed", confirmed_at: iso(nowMs), error: null });
   if (!claimed) return changeError(409, "not_proposed", "This change isn't waiting for a confirmation any more.");
+  let out: { after: any; target?: any };
   try {
-    const out = await kind.apply(io.userClient(jwt), claimed, { me, biz, settings: s, nowMs, sb });
-    const done = await setChange(sb, row.id, { after: out && "after" in out ? out.after : claimed.after, target: (out && out.target) || claimed.target, confirmed_at: iso(nowMs) });
-    return { status: 200, body: { ok: true, change: changeOut(done || claimed, me) } };
+    out = await kind.apply(io.userClient(jwt), claimed, { me, biz, settings: s, nowMs, sb });
   } catch (e) {
     const r = refusalOf(e);
     if (!(e instanceof ChangeRefused)) console.error("ai-gateway: apply failed:", row.kind, clip((e as Error)?.message, 200));
     const failed = await setChange(sb, row.id, { status: "failed", error: r.reason });
     return changeError(refusalStatus(r.code), r.code, r.reason, changeOut(failed || row, me));
   }
+  // Applied: the change stays 'confirmed' whatever happens next. Recording what was written (the undo's snapshot, a new
+  // record's id) is tried twice; if it still fails it is logged and the answer still says it was saved.
+  const after = out && "after" in out ? out.after : claimed.after, target = (out && out.target) || claimed.target;
+  let done: any = null;
+  for (let i = 0; i < 2 && !done; i++) {
+    try { done = await setChange(sb, row.id, { after, target, confirmed_at: iso(nowMs) }); }
+    catch (e) { console.error("ai-gateway: applied change not recorded:", row.kind, clip((e as Error)?.message, 200)); }
+  }
+  return { status: 200, body: { ok: true, change: changeOut(done || { ...claimed, after, target }, me) } };
 }
 // Cancel: the person who asked, while it is still proposed (allowed when the assistant is off).
 export async function cancelChange(sb: any, body: any, me: Profile) {

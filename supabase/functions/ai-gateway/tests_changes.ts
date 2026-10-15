@@ -348,6 +348,15 @@ SUITES.push(async () => {
     eq(contact(db, 1).contacted_at, new Date(T0 + 60000).toISOString(), "the lead counts as contacted (markLeadContacted)");
     eq([lastChange(db).target.id, lastChange(db).after.row.id, lastChange(db).after.row.status], [task.id, task.id, "Not Started"], "after = the stored row (the undo snapshot)");
     ok(UJ.every((j) => j === "jwt-va") && onlyAiWrites(db), "all writes with the person's own client");
+    // the lead's contacted_at write fails after the task is in: still saved (with the task's id), and it can be undone
+    db = world2();
+    ({ row } = await proposeOk(db, "jwt-va", "add_task", { title: "Flaky follow-up", assignees: ["Gabe"], lead: "Demo" }));
+    io.userClient = (jwt: string) => { const cl: any = fakeUserClient(jwt), rpc = cl.rpc; cl.rpc = async (n: string, a: any) => (n === "ai_contact_cas" ? { data: null, error: { message: "statement timeout" } } : rpc(n, a)); return cl; };
+    c = await confirm(db, row.id, "jwt-va");
+    io.userClient = (jwt: string) => fakeUserClient(jwt);
+    eq([c.status, c.body.change.status, lastChange(db).status, lastChange(db).after.row.id, lastChange(db).target.id, db.T.tasks.length], [200, "confirmed", "confirmed", db.T.tasks[0].id, db.T.tasks[0].id, 1], "a failed follow-up after the insert: the change is saved with the task's id (not 'Not saved')");
+    c = await undo(db, row.id, "jwt-va");
+    eq([c.status, c.body.change.status, db.T.tasks.length], [200, "undone", 0], "… and the task can be undone from the log");
     // a lead contacted after it came in is not touched again
     db = world2();
     ({ row } = await proposeOk(db, "jwt-owner", "add_task", { title: "Send the quote", assignees: ["Gabe"], lead_id: UID(2) }));

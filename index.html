@@ -2083,9 +2083,10 @@ body.cobra-open #chase-bubbles { right: 418px !important; }
 @media (max-width: 640px) {
   .cobra-fab { bottom: calc(var(--bottom-bar-h) + 12px); inset-inline-end: 14px; }
   body:has(.cobra-fab:not([hidden])) #chase-bubbles { bottom: calc(var(--bottom-bar-h) + 76px) !important; }
-  .cobra-panel { width: 100vw; height: 100dvh; border: 0; animation-name: sheetUp; }
+  .cobra-panel { width: 100vw; height: 100dvh; border: 0; animation-name: sheetUp; padding-top: env(safe-area-inset-top, 0px); }
   body.cobra-open { overflow: hidden; }
   body.cobra-open #chase-bubbles { display: none; }
+  body.cobra-open #phone-widget { bottom: calc(76px + env(safe-area-inset-bottom, 0px)) !important; }
   .cobra-msg { max-width: 92%; }
   .cobra-set-pad { padding: 12px 16px 14px; }
 }
@@ -24236,8 +24237,9 @@ const COBRA_ROLES = ['owner', 'manager', 'va', 'technician', 'marketing'];
 const COBRA_LIMITS = { monthly_cap_usd: [0, 10000], daily_user_limit: [1, 1000], assistant_name: 40, text: 4000, context: 4096 };
 // The kinds of chat. serverMode is the gateway's mode (a function of the context when one client mode maps to several);
 // requestContext is what each turn tells the gateway about where the person is (it must fit the mode's schema there).
+// savedContext turns a saved chat's stored context (what its first turn sent) back into the mode's own context.
 // Stage 7: COBRA_MODES.workflow = { label, serverMode: ctx => ctx.workflowId ? 'workflow_edit' : 'workflow_build',
-// placeholder, intro, examples, requestContext }.
+// placeholder, intro, examples, requestContext, savedContext }.
 const COBRA_MODES = {
   assistant: {
     label: 'Assistant', serverMode: 'assistant', placeholder: 'Ask a question, or ask for a change',
@@ -24245,6 +24247,8 @@ const COBRA_MODES = {
     // The test provider answers these three the same way every time (one of them proposes an office-hours change).
     examples: ['What are our office hours?', 'Open Saturday 9 to 1', 'Add a task: call the supplier tomorrow'],
     requestContext: (ctx, ui) => ({ page: String((ui && ui.tab) || '') }),
+    // The page is sent fresh with every turn: a saved chat's page isn't part of the chat.
+    savedContext: () => ({}),
   },
 };
 // Stage 7: COBRA_CARDS[kind] = (data, ctx) => html. The card escapes all of its own text and uses esc(jsStr()) in its
@@ -24391,6 +24395,13 @@ function cobraRequestContext(mode, ctx, ui){
   const m = COBRA_MODES[mode] || COBRA_MODES.assistant;
   try { return cobraCleanContext(typeof m.requestContext==='function' ? m.requestContext(ctx || {}, ui || {}) : ctx); } catch (e) { return {}; }
 }
+// A saved chat's context (the gateway keeps what its first turn sent: cobraRequestContext) → the chat's context in the
+// app, the one cobraOpen compares, so a chat reopened from History survives closing and reopening the panel. The mode
+// says how (savedContext); without it the saved context is used as it is.
+function cobraClientContext(mode, saved){
+  const m = COBRA_MODES[mode] || COBRA_MODES.assistant;
+  try { return cobraCleanContext(typeof m.savedContext==='function' ? m.savedContext(saved || {}) : saved); } catch (e) { return {}; }
+}
 // Message text → safe HTML: escaped first; paragraphs, lists, **bold**, `code` and line breaks. No links, no raw HTML.
 function cobraFormat(text){
   const inline = s => s.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/`([^`\n]+)`/g, '<code>$1</code>');
@@ -24413,6 +24424,11 @@ function cobraFormat(text){
 }
 // The streamed text of an answer, step by step (a step's text can be taken back: a refusal).
 function cobraJoinParts(parts){ return (parts || []).map(p => String(p || '').trim()).filter(Boolean).join('\n\n'); }
+// When an answer ends, a tool chip still spinning (its end never arrived: stopped, cut off) shows as not run.
+function cobraEndTools(tools){ return (tools || []).map(t => (t && t.state==='running' ? { ...t, state: 'error' } : t)); }
+// Whether a chat that finished loading is still the one the person asked for last (not replaced by New chat, or by
+// another chat picked meanwhile).
+function cobraConvWanted(c, id){ return !!c && c.convWant===id; }
 function cobraDiffRows(before, after){
   const isObj = v => !!v && typeof v==='object' && !Array.isArray(v);
   const b = isObj(before) ? before : {}, a = isObj(after) ? after : {};
@@ -24432,7 +24448,8 @@ function cobraRowsOf(p){
 }
 function cobraDiffRowHtml(r){
   const x = r || {};
-  return `<div class="cobra-diff-row"><span class="cobra-diff-label" dir="auto">${esc(x.label ?? '')}</span><span class="cobra-diff-before" dir="auto"><i>Now</i>${esc(x.before ?? '—')}</span><span class="cobra-diff-after" dir="auto"><i>After</i>${esc(x.after ?? '—')}</span></div>`;
+  // The value has its own direction (a Hebrew note stays right to left); the English Now / After labels sit outside it.
+  return `<div class="cobra-diff-row"><span class="cobra-diff-label" dir="auto">${esc(x.label ?? '')}</span><span class="cobra-diff-before"><i>Now</i><bdi dir="auto">${esc(x.before ?? '—')}</bdi></span><span class="cobra-diff-after"><i>After</i><bdi dir="auto">${esc(x.after ?? '—')}</bdi></span></div>`;
 }
 function cobraStatusPill(status){ return ({ confirmed: pill('good', 'Saved'), undone: pill('neutral', 'Undone'), cancelled: pill('neutral', 'Cancelled'), failed: pill('bad', 'Not saved') })[status] || ''; }
 // A stored error is plain English, or one of the gateway's codes (e.g. an expired proposal).
@@ -24449,18 +24466,22 @@ function cobraProposalHtml(p, busy){
     + (err ? `<div class="cobra-card-err" dir="auto">${esc(err)}</div>` : '')
     + '</div>';
 }
-function cobraCardHtml(card){
+// ctx = the chat the card is in ({ mode, context, conversationId }; cobraCardCtx), handed to a registered card.
+function cobraCardHtml(card, ctx){
   const c = card || {}, data = c.data && typeof c.data==='object' ? c.data : {};
+  const x = ctx && typeof ctx==='object' ? ctx : {};
+  const chat = { mode: x.mode || 'assistant', context: x.context && typeof x.context==='object' ? x.context : {}, conversationId: x.conversationId || null };
   const fn = Object.prototype.hasOwnProperty.call(COBRA_CARDS, c.kind) ? COBRA_CARDS[c.kind] : null;
-  if (typeof fn==='function') { try { return String(fn(data, { mode: 'assistant' }) ?? ''); } catch (e) { /* the generic card below */ } }
+  if (typeof fn==='function') { try { return String(fn(data, chat) ?? ''); } catch (e) { /* the generic card below */ } }
   return `<div class="cobra-card"><b dir="auto">${esc(data.title || '')}</b><div dir="auto">${esc(data.text || '')}</div></div>`;
 }
 function cobraToolHtml(t){
   const x = t || {}, state = x.state==='running' ? 'running' : x.state==='error' ? 'error' : 'ok';
   return `<div class="cobra-tool" data-id="${esc(x.id || '')}" data-state="${state}">${state==='running' ? '<span class="cobra-spin" aria-hidden="true"></span>' : ico(state==='error' ? 'alert' : 'check', 13)}<span dir="auto">${esc(x.label || 'Working')}</span></div>`;
 }
-// One message: the person's, or the assistant's (tools, text, proposals, cards, notes, an error). busy = change id → true.
-function cobraMsgHtml(m, busy){
+// One message: the person's, or the assistant's (tools, text, proposals, cards, notes, an error). busy = change id → true;
+// ctx = the chat, for the cards (cobraCardHtml).
+function cobraMsgHtml(m, busy, ctx){
   const x = m || {}, mid = x.mid ? ` data-mid="${esc(x.mid)}"` : '';
   if (x.role==='user') return `<div class="cobra-msg user"${mid}><div class="cobra-text" dir="auto">${cobraFormat(x.text)}</div></div>`;
   const b = busy || {};
@@ -24468,7 +24489,7 @@ function cobraMsgHtml(m, busy){
     + (x.tools || []).map(cobraToolHtml).join('')
     + `<div class="cobra-text" dir="auto">${x.text ? cobraFormat(x.text) : (x.streaming ? COBRA_DOTS : '')}</div>`
     + (x.proposals || []).map(p => cobraProposalHtml(p, !!b[p && p.id])).join('')
-    + (x.cards || []).map(cobraCardHtml).join('')
+    + (x.cards || []).map(card => cobraCardHtml(card, ctx)).join('')
     + (x.notes || []).map(n => `<div class="cobra-note" dir="auto">${esc(n)}</div>`).join('')
     + (x.error ? `<div class="cobra-err" role="alert" dir="auto">${esc(x.error.reason || cobraErrorText(x.error.code))}</div>` : '')
     + '</div>';
@@ -24637,7 +24658,7 @@ function cobraBlank(){
   return { open: false, view: 'chat', mode: 'assistant', context: {}, conv: null /* {id, mode, context, title} */, msgs: [], seq: 0, draft: '',
     streaming: null /* {ctrl, msg, el, raf, stopped} */, status: null, statusAt: 0, statusP: null, statusErr: '',
     detail: null /* {settings, status, statusErr, missing} */, detailAt: 0, detailP: null, detailErr: '',
-    history: null, historyAt: 0, historyP: null, historyErr: '', convP: {}, log: null, logAt: 0, logP: null, logErr: '',
+    history: null, historyAt: 0, historyP: null, historyErr: '', convP: {}, convWant: null, log: null, logAt: 0, logP: null, logErr: '',
     busy: {}, saving: false, mic: null, micBase: '', hint: '', uid: null };
 }
 let COBRA = cobraBlank();
@@ -24734,15 +24755,17 @@ function cobraConvLoad(id){
   ]).then(([a, b, d]) => {
     if (a.error || b.error || d.error) throw new Error('read');
     if (!a.data) throw new Error('gone');
-    if (COBRA!==c || c.streaming) return;
+    if (COBRA!==c || c.streaming || !cobraConvWanted(c, id)) return;   // New chat or another chat was picked meanwhile
+    c.convWant = null;
     const mode = cobraClientMode(a.data.mode, a.data.context || {});
-    c.conv = { id: a.data.id, mode, context: cobraCleanContext(a.data.context), title: a.data.title || '' };
+    c.conv = { id: a.data.id, mode, context: cobraClientContext(mode, a.data.context), title: a.data.title || '' };
     c.mode = mode; c.context = c.conv.context;
     c.msgs = cobraMsgsFromRows(b.data || [], d.data || []).map(m => ({ ...m, mid: ++c.seq }));
     c.view = 'chat'; c.hint = '';
     cobraDraw();
   }).catch(e => {
-    if (COBRA!==c) return;
+    if (COBRA!==c || !cobraConvWanted(c, id)) return;
+    c.convWant = null;
     c.hint = e && e.message==='gone' ? 'That chat was deleted.' : "That chat couldn't be opened. Try again.";
     if (c.open) cobraDraw();
   }).then(() => { delete c.convP[id]; });
@@ -24794,7 +24817,7 @@ function cobraOpen(opts){
   let mode = o.mode || 'assistant';
   if (!Object.prototype.hasOwnProperty.call(COBRA_MODES, mode)) { console.warn('The assistant has no mode "' + mode + '"; opening the assistant.'); mode = 'assistant'; }
   const ctx = cobraCleanContext(o.context);
-  if (!COBRA.streaming && cobraNeedsNewConv(COBRA.conv || { mode: COBRA.mode, context: COBRA.context }, mode, ctx)) { COBRA.conv = null; COBRA.msgs = []; }
+  if (!COBRA.streaming && cobraNeedsNewConv(COBRA.conv || { mode: COBRA.mode, context: COBRA.context }, mode, ctx)) { COBRA.conv = null; COBRA.msgs = []; COBRA.convWant = null; }
   if (!COBRA.streaming) { COBRA.mode = mode; COBRA.context = ctx; }
   COBRA.view = ['chat', 'history', 'log'].includes(o.view) ? o.view : 'chat';
   if (typeof o.text==='string') COBRA.draft = o.text.slice(0, COBRA_LIMITS.text);
@@ -24871,7 +24894,8 @@ function cobraBodyHtml(){
     const off = cobraComposerOff();
     return `<p class="cobra-intro" dir="auto">${esc(m.intro(cobraName()))}</p><div class="cobra-examples">${(m.examples || []).map(x => `<button type="button" dir="auto" onclick="cobraSend('${esc(jsStr(x))}')"${off ? ' disabled' : ''}>${esc(x)}</button>`).join('')}</div>`;
   }
-  return `<div class="cobra-msgs" id="cobra-msgs" role="log" aria-live="polite" aria-busy="${!!c.streaming}">${c.msgs.slice(-200).map(x => cobraMsgHtml(x, c.busy)).join('')}</div>`;
+  const cardCtx = cobraCardCtx();
+  return `<div class="cobra-msgs" id="cobra-msgs" role="log" aria-live="polite" aria-busy="${!!c.streaming}">${c.msgs.slice(-200).map(x => cobraMsgHtml(x, c.busy, cardCtx)).join('')}</div>`;
 }
 function cobraPersonName(id){ const p = (STATE.profiles || []).find(x => x.id===id); return (p && p.fullName) || 'Someone who left'; }
 function cobraSendBtnHtml(){
@@ -24916,14 +24940,15 @@ function cobraComposeKey(e){
 function cobraView(v){ COBRA.view = ['chat', 'history', 'log'].includes(v) ? v : 'chat'; cobraDraw(); }
 function cobraNewChat(){
   if (COBRA.streaming) { cobraHint('Wait for the answer to finish, or press Stop.'); return; }
-  COBRA.conv = null; COBRA.msgs = []; COBRA.hint = ''; COBRA.view = 'chat';
+  COBRA.conv = null; COBRA.msgs = []; COBRA.hint = ''; COBRA.view = 'chat'; COBRA.convWant = null;
   if (COBRA.mode==='assistant') COBRA.context = {};
   cobraDraw();
   setTimeout(() => { const t = document.getElementById('cobra-input'); if (t && !t.disabled) t.focus(); }, 0);
 }
 function cobraOpenConv(id){
   if (COBRA.streaming) { cobraHint('Wait for the answer to finish, or press Stop.'); COBRA.view = 'chat'; cobraDraw(); return; }
-  if (COBRA.conv && COBRA.conv.id===id && COBRA.msgs.length) { cobraView('chat'); return; }
+  if (COBRA.conv && COBRA.conv.id===id && COBRA.msgs.length) { COBRA.convWant = null; cobraView('chat'); return; }
+  COBRA.convWant = id;   // only the chat picked last is shown when its load ends
   cobraConvLoad(id);
 }
 function cobraDeleteConv(id){
@@ -24948,8 +24973,9 @@ async function cobraSend(text){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   const block = cobraSendBlock(COBRA.status);
   if (block) { cobraHint(cobraErrorText(block, { name: cobraName(), limit: COBRA.status && COBRA.status.today && COBRA.status.today.limit, isOwner: cobraIsOwner() })); return; }
-  cobraMicStop();
+  cobraMicStop(true);   // sent: a late voice result must not put the text back in the box
   const c = COBRA, first = !c.msgs.length;
+  c.convWant = null;    // this chat is the person's latest choice (a History load still running is dropped)
   const user = { mid: ++c.seq, role: 'user', text: t };
   const msg = { mid: ++c.seq, role: 'assistant', text: '', parts: [], tools: [], proposals: [], cards: [], notes: [], error: null, streaming: true };
   c.msgs.push(user, msg);
@@ -24959,7 +24985,7 @@ async function cobraSend(text){
   if (text==null) c.draft = '';
   const list = document.getElementById('cobra-msgs');
   if (list && !first) {
-    list.insertAdjacentHTML('beforeend', cobraMsgHtml(user) + cobraMsgHtml(msg, c.busy));
+    list.insertAdjacentHTML('beforeend', cobraMsgHtml(user) + cobraMsgHtml(msg, c.busy, cobraCardCtx()));
     list.setAttribute('aria-busy', 'true');
     c.streaming.el = list.querySelector('.cobra-msg.streaming .cobra-text');
     if (input && text==null) { input.value = ''; cobraInput(input); }
@@ -24978,6 +25004,7 @@ async function cobraSend(text){
       msg.streaming = false;
       c.streaming = null;
       delete msg.parts;
+      msg.tools = cobraEndTools(msg.tools);
       cobraPatchMsg(msg);
       cobraPatchSend();
       const l = document.getElementById('cobra-msgs');
@@ -25025,6 +25052,8 @@ async function cobraStream(res, onEvent, ctrl){
   onEvent({ event: 'error', data: { code: ctrl.stopped ? 'aborted' : ctrl.signal.aborted ? 'timeout' : 'network' } });
 }
 function cobraStreamEl(){ return document.querySelector('#cobra-root .cobra-msg.streaming .cobra-text'); }
+// The chat a result card is in, handed to COBRA_CARDS[kind](data, ctx): its mode, context and conversation.
+function cobraCardCtx(){ return { mode: COBRA.mode, context: COBRA.context, conversationId: (COBRA.conv && COBRA.conv.id) || null }; }
 // One message's bubble, drawn again from its data (tools, a proposal, a card, a note, the end). The text in between is
 // patched by cobraFlush at most once a frame.
 function cobraPatchMsg(msg){
@@ -25033,7 +25062,7 @@ function cobraPatchMsg(msg){
   const el = document.querySelector(`#cobra-root [data-mid="${msg.mid}"]`);
   if (!el || !el.isConnected) return;
   const body = document.getElementById('cobra-body'), stick = body ? cobraStick(body.scrollTop, body.scrollHeight, body.clientHeight) : false;
-  el.outerHTML = cobraMsgHtml(msg, COBRA.busy);
+  el.outerHTML = cobraMsgHtml(msg, COBRA.busy, cobraCardCtx());
   if (COBRA.streaming && COBRA.streaming.msg===msg) COBRA.streaming.el = cobraStreamEl();
   if (stick && body) body.scrollTop = body.scrollHeight;
 }
@@ -25164,7 +25193,12 @@ async function cobraChange(id, action){
 }
 
 // ── voice typing (Web Speech API; never sent by itself: the person reads it and presses Send) ──
-function cobraMicStop(){ if (COBRA.mic) { try { COBRA.mic.stop(); } catch (e) { /* already stopped */ } } }
+// drop = the text was sent: results still on their way are thrown away (abort), never written back into the box.
+function cobraMicStop(drop){
+  const rec = COBRA.mic;
+  if (!rec) return;
+  try { if (drop) { rec.onresult = null; rec.abort(); } else rec.stop(); } catch (e) { /* already stopped */ }
+}
 function cobraMicToggle(){
   if (!cobraMicSupported()) { cobraHint(COBRA_NO_MIC); return; }
   if (COBRA.mic) { cobraMicStop(); return; }
@@ -25187,6 +25221,9 @@ function cobraMicToggle(){
     const code = e && e.error;
     if (code==='not-allowed' || code==='service-not-allowed') cobraHint('Allow the microphone for this site to use voice typing.');
     else if (code==='no-speech') cobraHint("Didn't catch that. Try again.");
+    else if (code==='audio-capture') cobraHint('No microphone was found. Type instead.');
+    else if (code==='network') cobraHint("Voice typing needs a connection to the browser's speech service. Type instead.");
+    else if (code && code!=='aborted') cobraHint('Voice typing stopped. Try again.');
   };
   rec.onend = () => {
     if (COBRA.mic!==rec) return;
@@ -25284,6 +25321,13 @@ async function cobraSaveSetting(key, value){
     if (error) throw cobraErr(error.code==='23514' ? 'validation' : error.code==='42501' ? 'owners_only' : 'server');
     if (!data) throw cobraErr('owners_only');
     d.settings = cobraSettingsOf(data);
+    // A new name shows at once (menu, title, button): the status that carries it is read again only afterwards.
+    if (key==='assistant_name') {
+      const name = cobraNameOf(d.settings.assistant_name, (brandSource() || {}).appName);
+      if (COBRA.status) COBRA.status.assistant_name = name;
+      if (d.status) d.status.assistant_name = name;
+      cobraFabPatch();
+    }
     logSettingsActivity((getRealProfile() || {}).fullName || 'Unknown', `${cobraSettingsTitle(cobraName())}: ${cobraPatchText(key, value)}`);
     showToast('Saved');
   } catch (e) {
@@ -25308,13 +25352,19 @@ function cobraSetIcon(kind){
 function cobraReset(){
   const s = COBRA.streaming;
   if (s) { s.stopped = true; s.ctrl.stopped = true; try { s.ctrl.abort(); } catch (e) { /* already stopped */ } }
-  cobraMicStop();
+  cobraMicStop(true);
   const root = document.getElementById('cobra-root');
   if (root) root.remove();
   document.body.classList.remove('cobra-open');
   COBRA = cobraBlank();
 }
-document.addEventListener('keydown', e => { if (e.key==='Escape' && COBRA.open && !document.querySelector('#modal-root > *') && !document.querySelector('.confirm-back')) cobraClose(); });
+// Escape closes the panel and only the panel: caught first (capture) and kept from the page's own Escape handlers, so
+// an open job, contractor or person card behind it stays open.
+document.addEventListener('keydown', e => {
+  if (e.key!=='Escape' || !COBRA.open || document.querySelector('#modal-root > *') || document.querySelector('.confirm-back')) return;
+  e.stopImmediatePropagation();
+  cobraClose();
+}, true);
 sb.auth.onAuthStateChange((ev, session) => {
   const uid = session && session.user ? session.user.id : null;
   if (ev==='SIGNED_OUT' || (uid && COBRA.uid && uid!==COBRA.uid)) cobraReset();

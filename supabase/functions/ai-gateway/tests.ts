@@ -191,6 +191,16 @@ const textScript = (text: string, extra: any = {}) => ({
   events: [{ type: "message_start" }, { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }],
   final: { content: [{ type: "text", text }], stop_reason: "end_turn", stop_details: null, model: "claude-haiku-5-5", usage: { input_tokens: 1000, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, ...extra },
 });
+// One tool call, streamed as the API does (input_json_delta with the raw JSON text, key order as the model wrote it).
+const toolScript = (id: string, name: string, input: any, raw = JSON.stringify(input)) => ({
+  events: [{ type: "message_start", message: { usage: { input_tokens: 1000, output_tokens: 1 } } }, { type: "content_block_start", index: 0, content_block: { type: "tool_use", id, name, input: {} } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: raw } }],
+  final: { content: [{ type: "tool_use", id, name, input }], stop_reason: "tool_use", stop_details: null, model: "claude-haiku-5-5", usage: { input_tokens: 1000, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
+});
+const refusalScript = (category: string) => ({
+  events: [{ type: "message_start" }],
+  final: { content: [], stop_reason: "refusal", stop_details: { category, explanation: null }, model: "claude-haiku-5-5", usage: { input_tokens: 1000, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
+});
 
 (async () => {
   const fs: any = await import("node:fs");
@@ -400,7 +410,7 @@ const textScript = (text: string, extra: any = {}) => ({
     let db = world();
     let r = await chat(db, { text: "[mock:max_tokens_tool]" });
     let rows = msgs(db, db.T.ai_conversations[0].id);
-    eq(evs(r, "tool").filter((t: any) => t.status !== "running").length, 0, "max_tokens with a tool call: the tool is NOT run");
+    eq(evs(r, "tool").map((t: any) => [t.name, t.status]), [["whoami", "running"], ["whoami", "error"]], "max_tokens with a tool call: the tool is NOT run (its chip is closed as error)");
     eq(rows[3].content.map((b: any) => [b.type, b.is_error, b.content]), [["tool_result", true, "Your reply was cut off (max_tokens); the tool was not run."]], "… an is_error result keeps the history valid");
     eq([evs(r, "notice").map((n: any) => n.code), done(r).stop, db.T.ai_usage[0].status], [["max_tokens"], "max_tokens", "max_tokens"], "notice max_tokens");
     db = world();
@@ -409,13 +419,28 @@ const textScript = (text: string, extra: any = {}) => ({
     db = world();
     r = await chat(db, { text: "[mock:refusal]" });
     rows = msgs(db, db.T.ai_conversations[0].id);
-    eq(rows.map((m: any) => [m.role, m.replay, m.meta && m.meta.notice]), [["user", true, undefined], ["system", true, undefined], ["assistant", false, "refusal"]], "refusal: the assistant content is NOT stored; a display-only notice is");
+    eq(rows.map((m: any) => [m.role, m.replay, m.visible, m.meta && m.meta.notice]), [["user", false, true, undefined], ["system", false, false, undefined], ["assistant", false, true, "refusal"]], "refusal: the assistant content is NOT stored; the refused turn leaves the replay (still shown); a display-only notice");
     eq([evs(r, "discard"), evs(r, "notice")[0].code, evs(r, "notice")[0].category], [[{ step: 0 }], "refusal", "general_harms"], "refusal: discard for that step, notice with the category");
     eq([done(r).stop, db.T.ai_usage[0].status], ["refusal", "refusal"], "refusal: usage status refusal");
-    eq(buildHistory(rows, { systemMessages: true }).map((m: any) => m.role), ["user", "system"], "after a refusal the history is the person's turn and its context");
+    eq(buildHistory(rows, { systemMessages: true }).map((m: any) => m.role), [], "after a refusal the refused text is not sent again");
     const r2 = await chat(db, { text: "ok, something else", conversation_id: db.T.ai_conversations[0].id });
-    eq(buildHistory(msgs(db, db.T.ai_conversations[0].id), { systemMessages: true }).map((m: any) => m.role), ["user", "user", "system", "assistant"], "… and the next turn drops the dangling context row");
+    const h2 = buildHistory(msgs(db, db.T.ai_conversations[0].id), { systemMessages: true });
+    eq([h2.map((m: any) => m.role), JSON.stringify(h2).includes("[mock:refusal]")], [["user", "system", "assistant"], false], "… the next turn is the new question alone");
     eq(done(r2).stop, "ok", "… and works");
+    // a refusal after a tool round: the whole turn leaves the replay, earlier turns stay exactly as they were
+    db = world({ provider: "anthropic" });
+    (globalThis as any).__AI_ENV__.ANTHROPIC_API_KEY = "test-key-refusal";
+    const fcr = fakeClient([textScript("Hello"), toolScript("toolu_r1", "whoami", {}), refusalScript("cyber"), textScript("Sure")]);
+    io.anthropicClient = () => fcr;
+    const first = await chat(db, { text: "hi" });
+    const before = JSON.stringify(buildHistory(msgs(db, convOf(first)), { systemMessages: true }));
+    const refused = await chat(db, { text: "something the classifier declines", conversation_id: convOf(first) });
+    eq([done(refused).stop, evs(refused, "tool").map((x: any) => x.status)], ["refusal", ["running", "done"]], "a refusal after a tool round");
+    eq(JSON.stringify(buildHistory(msgs(db, convOf(first)), { systemMessages: true })), before, "… its whole turn leaves the replay: the history is the earlier turn, byte for byte");
+    await chat(db, { text: "rephrased", conversation_id: convOf(first) });
+    const sentNext = JSON.stringify(fcr.calls[3].params.messages);
+    ok(!sentNext.includes("classifier declines") && !sentNext.includes("toolu_r1") && sentNext.startsWith(before.slice(0, -1)), "… and the next request doesn't send the refused text again (same prefix)");
+    delete (globalThis as any).__AI_ENV__.ANTHROPIC_API_KEY;
     db = world();
     r = await chat(db, { text: "[mock:stop:stop_sequence]" });
     eq(done(r).stop, "ok", "stop_sequence → ok");
@@ -943,6 +968,119 @@ const textScript = (text: string, extra: any = {}) => ({
     eq(periodBounds(T0, TZ), { day: "2026-10-15", dayStart: "2026-10-15T04:00:00.000Z", monthKey: "2026-10", monthStart: "2026-10-01T04:00:00.000Z" }, "periodBounds in the business time zone");
     eq([capState(16, 20), capState(0, 0).blocked, capState(15.99, 20).warn], [{ pct: 80, blocked: false, warn: true }, true, false], "capState");
     eq(usdText(1234.5, { region: { moneyFormat: "1.234,56", currency: "EUR" } }), "US$1.234,50", "usdText: US dollars in the business's number format");
+  }
+
+  // ── 28. review fixes (15 Oct) ──
+  {
+    const A: any = Anthropic;
+    const P0 = mergePrices({});
+    const useKey = (k: string, scripts: any[]) => { (globalThis as any).__AI_ENV__.ANTHROPIC_API_KEY = k; const fc = fakeClient(scripts); io.anthropicClient = () => fc; return fc; };
+    // the context is bounded on the server (it is stored and sent with every turn)
+    let db = world();
+    let r = await chat(db, { text: "who am i", context: { page: "x".repeat(MAX_CONTEXT_CHARS) } });
+    eq([r.status, r.body.code, db.T.ai_conversations.length, db.T.ai_usage.length], [400, "bad_context", 0, 0], "a context over 4,096 characters → 400 bad_context, nothing stored");
+    // an aborted call is counted with what the stream had reported (message_start, then message_delta)
+    db = world({ provider: "anthropic" });
+    useKey("test-key-abort", [{ events: [{ type: "message_start", message: { usage: { input_tokens: 50000, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Half an ans" } },
+      { type: "message_delta", usage: { output_tokens: 300 } }], iterError: new A.APIUserAbortError() }]);
+    await chat(db, { text: "a long question" });
+    let u = db.T.ai_usage[0];
+    eq([u.status, u.input_tokens, u.output_tokens, u.cost_usd], ["aborted", 50000, 300, callCost(P0, "claude-haiku-5-5", { input_tokens: 50000, output_tokens: 300 })], "Stop mid-answer: the call's input and the output so far are counted");
+    ok(u.cost_usd > 0, "… so the aborted call is not free against the cap");
+    db = world({ provider: "anthropic" });
+    useKey("test-key-overload", [{ events: [{ type: "message_start", message: { usage: { input_tokens: 2000, output_tokens: 1 } } }], iterError: new A.InternalServerError("overloaded") }]);
+    r = await chat(db, { text: "hi" });
+    u = db.T.ai_usage[0];
+    eq([evs(r, "error")[0].code, u.status, u.input_tokens, u.cost_usd], ["provider_busy", "error", 2000, callCost(P0, "claude-haiku-5-5", { input_tokens: 2000, output_tokens: 1 })], "a mid-stream error: the partial usage is counted too");
+    const failNoUsage = fakeClient([{ events: [], iterError: new A.RateLimitError() }]);
+    let caught: any = null;
+    try { await anthropicTurn(failNoUsage, buildRequest({ model: "claude-haiku-5-5", maxTokens: 300, system: "S", tools: [], messages: [] }), () => {}); } catch (e) { caught = e; }
+    eq(caught && caught.partialUsage, null, "a failure before anything streamed carries no usage");
+    eq(mergeStreamUsage(mergeStreamUsage(null, { input_tokens: 10, cache_read_input_tokens: 5, output_tokens: 1 }), { output_tokens: 40, input_tokens: null }), { input_tokens: 10, output_tokens: 40, cache_creation_input_tokens: 0, cache_read_input_tokens: 5 }, "mergeStreamUsage: message_delta's counts on top of message_start's");
+    delete (globalThis as any).__AI_ENV__.ANTHROPIC_API_KEY;
+    // each call's cost is written at once, and the next call's cap check reads the month again (other turns included)
+    db = world({ monthly_cap_usd: 1 });
+    const prep: any = await prepareChat({ sb: db }, appProfile(OWNER), "jwt-owner", { text: "whoami" });
+    const seen: any[] = [];
+    await runChat(prep.turn, (event, data: any) => {
+      if (event === "tool" && data.status === "done") {
+        seen.push({ ...db.T.ai_usage[0] });
+        db.T.ai_usage.push({ id: "other-turn", business_id: "default", user_id: "u-manager", cost_usd: 1, at: new Date(NOW).toISOString(), status: "running" });
+      }
+    }, new AbortController().signal);
+    eq([seen[0].status, seen[0].steps, seen[0].cost_usd > 0], ["running", 1, true], "the first call's tokens and cost are on the usage row before the next call");
+    eq([db.T.ai_usage[0].status, db.T.ai_usage[0].steps], ["cap", 1], "another turn's spend meanwhile stops this one at the cap (the month is read again)");
+    // the 80% alert: a failure before anything was sent gives the month back
+    db = world({ monthly_cap_usd: 1 }, { app_keys: [], ai_usage: [{ id: "x", business_id: "default", user_id: "u-manager", cost_usd: 0.85, at: new Date(T0 - 3600e3).toISOString(), status: "ok" }] });
+    const gen = io.generate;
+    io.generate = () => { throw new Error("keys unavailable"); };
+    pushes.length = 0;
+    await chat(db, { text: "hello" });
+    eq([pushes.length, db.T.ai_settings[0].alert_80_sent_month], [0, null], "80% alert: the push keys couldn't be read → nothing sent and the month given back");
+    io.generate = gen;
+    await chat(db, { text: "again" });
+    eq([pushes.length, db.T.ai_settings[0].alert_80_sent_month], [2, "2026-10"], "… the next turn sends it (once)");
+    // an empty answer is never replayed
+    db = world({ provider: "anthropic" });
+    let fc = useKey("test-key-empty", [{ events: [{ type: "message_start" }], final: { content: [], stop_reason: "end_turn", stop_details: null, model: "claude-haiku-5-5", usage: { input_tokens: 100, output_tokens: 0 } } }, textScript("Here")]);
+    r = await chat(db, { text: "hi" });
+    eq(msgs(db, convOf(r)).map((m: any) => [m.role, m.replay]), [["user", true], ["system", true], ["assistant", false]], "an empty assistant answer is stored display-only");
+    await chat(db, { text: "hello?", conversation_id: convOf(r) });
+    ok(fc.calls[1].params.messages.every((m: any) => !(m.role === "assistant" && Array.isArray(m.content) && !m.content.length)), "… and never sent back as an empty assistant message");
+    // a tool chip opened before a refusal is closed
+    db = world({ provider: "anthropic" });
+    useKey("test-key-chip", [{ events: [{ type: "message_start" }, { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_c", name: "whoami", input: {} } }], final: { content: [], stop_reason: "refusal", stop_details: { category: "cyber" }, model: "claude-haiku-5-5", usage: { input_tokens: 100, output_tokens: 3 } } }]);
+    r = await chat(db, { text: "x" });
+    eq(evs(r, "tool").map((x: any) => [x.id, x.status]), [["toolu_c", "running"], ["toolu_c", "error"]], "a refusal closes the tool chip it had opened");
+    // the history replays the exact JSON text (the jsonb column re-sorts object keys: shorter first)
+    const jsonbSort = (v: any): any => Array.isArray(v) ? v.map(jsonbSort) : v && typeof v === "object"
+      ? Object.fromEntries(Object.keys(v).sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0)).map((k) => [k, jsonbSort(v[k])])) : v;
+    db = world({ provider: "anthropic" });
+    fc = useKey("test-key-order", [toolScript("toolu_k1", "echo_test", { when: "2026-10-16", day: "friday" }), textScript("Echoed"), textScript("Again")]);
+    r = await chat(db, { text: "echo", mode: "test_mode" });
+    for (const m of db.T.ai_messages) m.content = jsonbSort(m.content);   // what reading the jsonb column gives
+    eq(Object.keys(db.T.ai_messages.find((m: any) => m.role === "assistant").content[0].input), ["day", "when"], "(the jsonb copy has the keys re-sorted)");
+    await chat(db, { text: "and again", conversation_id: convOf(r), mode: "test_mode" });
+    const replayed = fc.calls[2].params.messages;
+    eq(Object.keys(replayed[2].content[0].input), ["when", "day"], "the tool_use input is replayed with the model's key order");
+    eq(JSON.stringify(replayed.slice(0, 4)), JSON.stringify(fc.calls[1].params.messages), "… the earlier turn is byte-identical to what was sent within it");
+    eq([rowContent({ content: [{ type: "text", text: "old" }] }), rowContent({ content: [], content_raw: "not json" }), rowContent({ content: [], content_raw: '[{"type":"text","text":"raw"}]' })],
+      [[{ type: "text", text: "old" }], [], [{ type: "text", text: "raw" }]], "rowContent: content_raw when it parses, else the jsonb copy (rows from before the fix)");
+    // a tool call left without its result gets one at the start of the next user message, the same way every time
+    const orphan = [
+      { seq: 1, role: "user", content: [{ type: "text", text: "a" }] }, { seq: 2, role: "system", content: [{ type: "text", text: "ctx" }] },
+      { seq: 3, role: "assistant", content: [{ type: "tool_use", id: "t1", name: "whoami", input: {} }, { type: "tool_use", id: "t2", name: "x", input: {} }] },
+      { seq: 4, role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "{}" }, { type: "text", text: "b" }] }, { seq: 5, role: "system", content: [{ type: "text", text: "ctx2" }] },
+    ];
+    const ho = buildHistory(orphan, { systemMessages: true });
+    eq(ho[3].content.map((b: any) => [b.type, b.tool_use_id || b.text, !!b.is_error]), [["tool_result", "t1", false], ["tool_result", "t2", true], ["text", "b", false]], "an orphaned tool_use gets an is_error result next to the others, before the text");
+    eq(JSON.stringify(buildHistory(orphan, { systemMessages: true })), JSON.stringify(ho), "… deterministic");
+    eq(buildHistory(orphan.slice(0, 3), { systemMessages: true }).map((m: any) => m.role), ["user", "system", "assistant", "user"], "… or in a user message of its own at the end");
+    // a conversation whose tools changed since it began is sent with drop_block (for good)
+    db = world({ provider: "anthropic" });
+    fc = useKey("test-key-drift", [textScript("One"), textScript("Two"), textScript("Three")]);
+    r = await chat(db, { text: "first" }, "jwt-tech");
+    const conv = db.T.ai_conversations[0];
+    ok(/^[0-9a-f]{16}$/.test(conv.prefix_hash) && !("thinking" in fc.calls[0].params) && !("betas" in fc.calls[0].params) && fc.calls[0].kind === "messages", "a new conversation stores its prefix fingerprint; nothing extra is sent");
+    db.T.profiles.find((p: any) => p.id === "u-tech").permissions = {};   // Tasks taken away: add_task leaves the tools
+    await chat(db, { text: "second", conversation_id: conv.id }, "jwt-tech");
+    eq([fc.calls[1].kind, fc.calls[1].params.betas, fc.calls[1].params.thinking, conv.prefix_hash], ["beta", [THINKING_BINDING_BETA], { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } }, PREFIX_MIXED], "tools changed → drop_block under the binding beta; the conversation is marked");
+    db.T.profiles.find((p: any) => p.id === "u-tech").permissions = { tasks: true };   // back as it was: blocks from turn 2 still differ
+    await chat(db, { text: "third", conversation_id: conv.id }, "jwt-tech");
+    eq(fc.calls[2].params.thinking, { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } }, "… and keeps drop_block from then on");
+    eq(buildRequest({ model: "claude-other-1", maxTokens: 300, system: "S", tools: [], messages: [], dropMismatchedThinking: true }).params.thinking, undefined, "a model without the binding controls gets no thinking field");
+    // claude-sonnet-5-5 (sent with fallbacks): no role 'system' messages; the conversation's size is the answering attempt's
+    eq(capsOf("claude-sonnet-5-5").systemMessages, false, "claude-sonnet-5-5: the turn context goes in the user message (its fallback model has no system messages)");
+    db = world({ provider: "anthropic", model_per_task: { assistant: "claude-sonnet-5-5" } });
+    const fbUsage = { input_tokens: 0, output_tokens: 0, iterations: [{ type: "message", input_tokens: 50000, output_tokens: 0 }, { type: "fallback_message", input_tokens: 45000, cache_read_input_tokens: 5000, output_tokens: 100 }] };
+    fc = useKey("test-key-sonnet", [textScript("Fell back", { model: "claude-sonnet-5", usage: fbUsage }), textScript("Next", { model: "claude-sonnet-5-5" })]);
+    r = await chat(db, { text: "hi" });
+    eq([fc.calls[0].params.messages.map((m: any) => m.role), /<app_context>/.test(JSON.stringify(fc.calls[0].params.messages[0].content)), db.T.ai_conversations[0].last_prompt_tokens], [["user"], true, 50000], "Sonnet 5.5: the context as <app_context>; last_prompt_tokens from the answering attempt, not the sum");
+    eq(promptTokensOf({ usage: { input_tokens: 7, cache_creation_input_tokens: 2, cache_read_input_tokens: 1 } }), 10, "promptTokensOf without fallbacks: the top-level usage");
+    await chat(db, { text: "more", conversation_id: convOf(r) });
+    eq(fc.calls[1].params.messages.map((m: any) => m.role), ["user", "assistant", "user"], "… and on the next turn too");
+    delete (globalThis as any).__AI_ENV__.ANTHROPIC_API_KEY;
   }
 
   for (const s of SUITES) await s();

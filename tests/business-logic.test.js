@@ -181,6 +181,8 @@ const DECLS = [
   'cobraServerMode', 'cobraClientMode', 'cobraRequestContext', 'cobraFormat', 'cobraJoinParts', 'cobraDiffRows', 'cobraRowsOf', 'cobraDiffRowHtml', 'cobraStatusPill', 'cobraChangeError', 'cobraProposalHtml', 'cobraCardHtml',
   'cobraToolHtml', 'cobraMsgHtml', 'cobraMsgsFromRows', 'cobraCanUndo', 'cobraLogRowHtml', 'cobraUsd', 'cobraUsageMeter', 'cobraBannerOf', 'cobraSendBlock', 'cobraLeftText', 'cobraPricesOf', 'cobraSettingsOf',
   'cobraSettingProblem', 'cobraPatchOf', 'cobraPatchText', 'cobraSpeechLang', 'cobraWhen', 'cobraEnterSends', 'cobraStick', 'cobraPageMode',
+  // Stage 6 review fixes: a saved chat's context, tool chips left spinning, the chat a load is for
+  'cobraClientContext', 'cobraEndTools', 'cobraConvWanted',
 ];
 
 function extractDecl(source, name){
@@ -5431,8 +5433,51 @@ async function testCobraChangeFlow(){
   await ctx.cobraChange('z', 'confirm');
   assertEqual([log.calls.length, log.toasts[log.toasts.length - 1][0], log.renders], [3, ctx.RO, 0], 'changes: nothing is sent in a read-only mode (a toast says so); the app is never drawn');
 }
+// Stage 6 review fixes (15 Oct): reopened chats, cards in their chat, right-to-left values, chips, loads.
+function testCobraReviewFixes(sb){
+  console.log('\nStage 6: the AI assistant (review fixes)');
+  const loaded = { mode: 'assistant', context: sb.cobraClientContext('assistant', { page: 'crm' }) };
+  assertEqual([loaded.context, sb.cobraNeedsNewConv(loaded, 'assistant', {})], [{}, false], 'a chat loaded from History with {page:"crm"}, then cobraOpen({ mode: "assistant" }): the chat is kept');
+  sb.COBRA_MODES.testwf = { label: 'W', serverMode: 'workflow_edit', placeholder: '', intro: () => '', examples: [], savedContext: s => ({ workflowId: s.workflowId }) };
+  sb.COBRA_MODES.testplain = { label: 'P', serverMode: 'plain', placeholder: '', intro: () => '', examples: [] };
+  assertEqual([sb.cobraClientContext('testwf', { workflowId: 'w1', page: 'x' }), sb.cobraClientContext('testplain', { a: 1 }), sb.cobraClientContext('testwf', null), sb.cobraClientContext('nope', { page: 'crm' })],
+    [{ workflowId: 'w1' }, { a: 1 }, {}, {}], "cobraClientContext: the mode's savedContext, else the saved context as it is; the assistant keeps none");
+  let got = null;
+  sb.COBRA_CARDS.seen = (data, ctx) => { got = ctx; return 'x'; };
+  sb.cobraMsgHtml({ role: 'assistant', text: '', cards: [{ kind: 'seen', data: {} }] }, {}, { mode: 'testwf', context: { workflowId: 'w1' }, conversationId: 'c1' });
+  assertEqual(got, { mode: 'testwf', context: { workflowId: 'w1' }, conversationId: 'c1' }, 'COBRA_CARDS[kind](data, ctx): ctx is the chat the card is in (mode, context, conversation)');
+  sb.cobraCardHtml({ kind: 'seen', data: {} });
+  assertEqual(got, { mode: 'assistant', context: {}, conversationId: null }, 'cobraCardHtml without a chat: the assistant, no context');
+  delete sb.COBRA_CARDS.seen; delete sb.COBRA_MODES.testwf; delete sb.COBRA_MODES.testplain;
+  const row = sb.cobraDiffRowHtml({ label: 'Note', before: '—', after: 'להתקשר מחר.' });
+  assertEqual([row.includes('<i>After</i><bdi dir="auto">להתקשר מחר.</bdi>'), /class="cobra-diff-(before|after)" dir=/.test(row)], [true, false], "cobraDiffRowHtml: a Hebrew value in its own dir=auto run, outside the English label's");
+  assertEqual(sb.cobraEndTools([{ id: 'a', state: 'running' }, { id: 'b', state: 'ok' }, { id: 'c', state: 'error' }]).map(t => t.state), ['error', 'ok', 'error'], 'cobraEndTools: a chip still spinning when the answer ends shows as not run');
+  assertEqual([sb.cobraConvWanted({ convWant: 'a' }, 'a'), sb.cobraConvWanted({ convWant: 'b' }, 'a'), sb.cobraConvWanted({ convWant: null }, 'a')], [true, false, false], 'cobraConvWanted: only the chat picked last is shown when its load ends');
+}
+function testCobraReviewStatic(){
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const css = html.slice(html.indexOf('/* ══ AI assistant (stage 6): own block, start ══ */'), html.indexOf('/* ══ AI assistant (stage 6): own block, end ══ */'));
+  const phone = css.slice(css.indexOf('@media (max-width: 640px)'));
+  assertEqual([/\.cobra-panel \{[^}]*padding-top: env\(safe-area-inset-top, 0px\)/.test(phone), /body\.cobra-open #phone-widget \{[^}]*bottom:/.test(phone)], [true, true], 'phone sheet: clear of the status bar and notch; the phone widget moves above the composer');
+  const block = html.slice(html.indexOf('// ══ AI assistant (stage 6): own block, start ══'), html.indexOf('// ══ AI assistant (stage 6): own block, end ══'));
+  assertEqual(/document\.addEventListener\('keydown', e => \{[\s\S]{0,300}e\.stopImmediatePropagation\(\);\s*cobraClose\(\);\s*\}, true\);/.test(block), true, "Escape closes the panel only (capture phase; the page's own Escape handlers don't run)");
+  const ctx = { COBRA: { mic: null } }; vm.createContext(ctx); vm.runInContext(extractDecl(script, 'cobraMicStop'), ctx);
+  const calls = [], rec = { onresult: () => {}, stop(){ calls.push('stop'); }, abort(){ calls.push('abort'); } };
+  ctx.COBRA.mic = rec; ctx.cobraMicStop(true);
+  assertEqual([calls, rec.onresult], [['abort'], null], 'Send stops voice typing by dropping its pending result (abort, no onresult)');
+  calls.length = 0; rec.onresult = () => {}; ctx.cobraMicStop();
+  assertEqual([calls, typeof rec.onresult], [['stop'], 'function'], 'the mic button stops it normally (the last words still arrive)');
+  assertEqual(/cobraMicStop\(true\)/.test(extractDecl(script, 'cobraSend')), true, 'cobraSend drops the pending voice result');
+  const toggle = extractDecl(script, 'cobraMicToggle');
+  assertEqual(["'audio-capture'", "'network'", "!=='aborted'"].every(s => toggle.includes(s)), true, 'voice typing explains a missing microphone, an unreachable speech service and any other error');
+  assertEqual(/key==='assistant_name'[\s\S]{0,300}COBRA\.status\.assistant_name = name/.test(extractDecl(script, 'cobraSaveSetting')), true, 'a renamed assistant shows its new name at once');
+  assertEqual([/cobraConvWanted\(c, id\)/.test(extractDecl(script, 'cobraConvLoad')), /convWant = id/.test(extractDecl(script, 'cobraOpenConv')), /convWant = null/.test(extractDecl(script, 'cobraNewChat')), /cobraClientContext\(mode, a\.data\.context\)/.test(extractDecl(script, 'cobraConvLoad'))],
+    [true, true, true, true], 'a slow chat load never replaces New chat or a chat picked later; a loaded chat keeps the app-side context');
+}
 testCobraHelpers(loadSandbox());
 testCobraStatic();
+testCobraReviewFixes(loadSandbox());
+testCobraReviewStatic();
 
 (async () => {
   await testVacationFollowUps();
