@@ -7650,10 +7650,62 @@ async function testWfReviewBlock3(){
     '"Unsaved changes" → Save on a Published workflow: its question ("Start it afresh?") is asked, and once saved it leaves (one click)');
 }
 
+// Review blocks 4-5 of phase 4 (16 Oct): an unmigrated row opens with its own steps, Workflow AI's rename / settings and
+// its undo, the window wait's dormant custom hours. Fake DOM. (The rest of blocks 4-5 is covered in testWfModel,
+// testWfRandomEdits, testWfWords, testWfReviewBlock3, testWfSaveRuntime and the automations tests.)
+function testWfReviewBlocks45(){
+  console.log('\nWorkflow builder: review blocks 4-5 (an unmigrated row, Workflow AI\'s rename / settings / undo, window hours kept)');
+  const reg = wfRegFor(WF_AV_TODAY), S = wfShellSandbox(reg), { X, flush, ctx, F } = S;
+  // #27 / #33 a phase-4 row not migrated yet (definition null): its trigger and steps columns, as the engine's upgradeV1
+  const v1 = { trigger: { type: 'newLead', params: {} }, steps: [{ id: 's1', kind: 'wait', n: 10, unit: 'minutes' }, { id: 's2', kind: 'action', type: 'push', title: 'New lead' }] };
+  X.wfBuilderOpen({ id: 'w0', name: 'Old', enabled: false, definition: null, trigger: v1.trigger, steps: v1.steps, revision: 2 }, {}); flush();
+  let W = S.W();
+  const want = ctx.wfFromV1(v1.trigger, v1.steps).doc;
+  assertEqual([Object.keys(W.doc.nodes).length, W.doc.entry, wfCanonT(W.doc)===wfCanonT(want), W.doc.triggers.map(t => t.type)], [2, want.entry, true, ['newLead']],
+    'a row with definition null opens with its own steps column (wfFromV1(r.trigger, r.steps)), never as an empty flow');
+  X.wfBuilderClose();
+  // #28 Workflow AI: rename and setSettings are kept (merged into the settings), one undo entry; undo it all → not AI-edited
+  const DOC = { schema: 2, seq: 3, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }],
+    nodes: { n1: wfAct('n2'), n2: { kind: 'wait', type: 'recurring', config: { mode: 'window', window: { use: 'custom', days: [2, 4], from: '10:00', until: '14:00', outside: 'next' } }, out: { next: null } } } };
+  X.wfBuilderOpen({ id: 'w1', name: 'Nurture', enabled: true, definition: DOC, settings: { reentry: 'once' }, revision: 3 }, {}); flush();
+  W = S.W();
+  X.wfAiApply([{ op: 'rename', name: 'Follow up' }, { op: 'setSettings', patch: { stopOnReply: true } }], 'Workflow AI: rename'); flush();
+  const after = [W.name, W.settings, W.aiDirty, W.hist.past.length];
+  X.wfUndoRedo(-1); flush();
+  const undone = [W.name, W.settings, W.aiDirty];
+  X.wfUndoRedo(1); flush();
+  assertEqual([after, undone, [W.name, W.aiDirty, W.hist.past.slice(-1)[0].origin]], [['Follow up', { reentry: 'once', stopOnReply: true }, true, 1], ['Nurture', { reentry: 'once' }, false], ['Follow up', true, 'ai']],
+    'wfAiApply: rename and setSettings land (settings merged, never replaced); undo clears "AI-edited", redo brings it back (the entry keeps its origin)');
+  // a save carried it: no longer unsaved (undo / redo of that saved entry keep it so); an AI change undone before the save is not
+  ctx.wfAiSaved(W, ctx.wfAiMark(W));
+  X.wfUndoRedo(-1); flush(); const savedUndo = W.aiDirty;
+  X.wfUndoRedo(1); flush(); const savedRedo = W.aiDirty;
+  X.wfAiApply([{ op: 'rename', name: 'Again' }]); flush();
+  X.wfUndoRedo(-1); flush();
+  ctx.wfAiSaved(W, ctx.wfAiMark(W));
+  X.wfUndoRedo(1); flush();
+  assertEqual([savedUndo, savedRedo, W.name, W.aiDirty], [false, false, 'Again', true], 'after a save: its AI entry counts as saved both ways; an AI change it did not carry (redone later) is unsaved again');
+  // #34 the window wait: Office hours keep the custom days and hours (dormant); switching back brings them
+  const sel = (wfk, v) => ctx.wfDrawerChange({ target: Object.assign(new F.El('select'), { dataset: { wfk, wfp: '/config/window/use' }, value: v }) });
+  X.wfDrawerOpenStep('n2'); flush();
+  sel('winUse', 'office');
+  const office = W.drawer.draft.config.window;
+  sel('winUse', 'custom');
+  assertEqual([office, W.drawer.draft.config.window], [{ use: 'office', outside: 'next', days: [2, 4], from: '10:00', until: '14:00' }, { use: 'custom', outside: 'next', days: [2, 4], from: '10:00', until: '14:00' }],
+    'winUse: Office hours keep Tue / Thu 10:00–14:00 dormant; "These days and hours" again brings them back');
+  // none kept: the business's own office hours (Saturday 9:00–13:00 open here), not a fixed Monday to Friday 8–5
+  vm.runInContext('OFFICE.days[1] = null; OFFICE.days[6] = { from: 540, to: 780 };', ctx);
+  W.drawer.draft = { ...W.drawer.draft, config: { ...W.drawer.draft.config, window: { use: 'office', outside: 'next' } } };
+  sel('winUse', 'custom');
+  assertEqual(W.drawer.draft.config.window, { use: 'custom', outside: 'next', days: [2, 3, 4, 5, 6], from: '08:00', until: '17:00' }, 'winUse: with no custom hours kept, the days start as the business\'s office days (flowOfficeWindow)');
+  X.wfBuilderClose();
+}
+
 (async () => {
   await testVacationFollowUps();
   await testWfSaveRuntime();
   await testWfReviewBlock3();
+  testWfReviewBlocks45();
   await testAuthProvidersNoLoop();
   await testAutomationsLoaderNoLoop();
   await testAutomationEventsGate();

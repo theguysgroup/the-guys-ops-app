@@ -23348,8 +23348,19 @@ function wfHistStep(hist, dir, cur){
   const h = wfObj(hist), past = (Array.isArray(h.past) ? h.past : []).slice(), future = (Array.isArray(h.future) ? h.future : []).slice();
   const from = dir < 0 ? past : future, to = dir < 0 ? future : past, e = from.pop();
   if (!e) return null;
-  to.push({ snap: cur, label: e.label, at: e.at });
+  to.push({ ...e, snap: cur });   // its number, origin ('ai') and saved mark go with it
   return { hist: { past, future }, snap: e.snap, label: e.label };
+}
+// Workflow AI's changes no save has carried yet (a Published one is then saved as a Draft): an applied ('ai') entry of
+// the undo history not marked saved, or one that fell off the history unsaved (aiKept). Undoing it all clears it.
+function wfAiDirtyOf(W){ return !!W.aiKept || W.hist.past.some(e => e.origin==='ai' && !e.saved); }
+// What a save sets off with (the entries applied then) → wfAiSaved marks those saved once it went through.
+function wfAiMark(W){ return { nos: W.hist.past.map(e => e.no), kept: !!W.aiKept }; }
+function wfAiSaved(W, mark){
+  const m = wfObj(mark), nos = new Set(Array.isArray(m.nos) ? m.nos : []);
+  [...W.hist.past, ...W.hist.future].forEach(e => { if (nos.has(e.no)) e.saved = true; });
+  if (m.kept) W.aiKept = false;
+  W.aiDirty = wfAiDirtyOf(W);
 }
 function wfToneOf(entry){ return WF_TONES[wfObj(entry).category] || 'grey'; }
 // GHL's words for a None branch header.
@@ -24053,12 +24064,14 @@ function wfCommit(label, fn, opts){
   let r;
   try { r = fn(W); } catch (e) { console.error(e); showToast('That change could not be made', { kind: 'error' }); return 0; }
   if (!r || r.error) { if (r && r.error) showToast(r.error.text || 'That change could not be made', { kind: 'warn' }); return 0; }
-  const before = wfSnap(W);
+  const before = wfSnap(W), first = W.hist.past[0];
   W.hist = wfHistPush(W.hist, before, label, Date.now(), o.coalesce);
   W.commitNo = (W.commitNo || 0) + 1;
   W.hist.past[W.hist.past.length - 1].no = W.commitNo;
   if (o.origin) W.hist.past[W.hist.past.length - 1].origin = o.origin;
-  if (o.origin==='ai') W.aiDirty = true;
+  // an unsaved AI change that fell off the history stays in the workflow (no undo can take it out any more)
+  if (first && first.origin==='ai' && !first.saved && !W.hist.past.some(e => e.no===first.no)) W.aiKept = true;
+  W.aiDirty = wfAiDirtyOf(W);
   // a sticky note whose step goes moves to the step above it, in this same change (design §2.7)
   const lay = r.doc && r.doc!==W.doc ? wfStickyReanchor(r.layout || W.layout, W.doc, r.doc) : r.layout || W.layout;
   wfApplySnap(W, { doc: r.doc || W.doc, layout: lay, builder: r.builder || W.builder, settings: r.settings || W.settings, name: r.name!=null ? r.name : W.name,
@@ -24089,6 +24102,7 @@ function wfUndoRedo(dir){
   if (!r) return;
   W.hist = r.hist;
   wfApplySnap(W, r.snap);
+  W.aiDirty = wfAiDirtyOf(W);
   if (W.drawer && W.drawer.id && !wfHas(wfNodesOf(W.doc), W.drawer.id) && !(W.doc.triggers || []).some(t => t.id===W.drawer.id)) wfSetLayer('drawer', null);
   else wfDrawerReload(W);
   wfAnnounce(`${dir < 0 ? 'Undone' : 'Redone'}: ${r.label}`);
@@ -25608,10 +25622,15 @@ const WF_DRAWER_KEYS = {
   },
   usersMode: (W, dr, t, v) => { dr.draft = wfDraftSet(dr.draft, t.dataset.wfp, v==='people' ? [] : v); },
   objToggle: (W, dr, t) => { let def = {}; try { def = JSON.parse(t.dataset.wfdef || '{}'); } catch (e) { def = {}; } dr.draft = wfDraftSet(dr.draft, t.dataset.wfp, t.checked ? def : undefined); },
+  // Office hours keep the valid custom days and hours (dormant, as wfWinDormant): switching back brings them again; with
+  // none, "These days and hours" starts as the business's office hours (flowOfficeWindow, as the phase-4 editor did)
   winUse: (W, dr, t, v) => {
-    let w = { ...wfObj(wfObj(dr.draft.config).window), use: v };
-    if (v==='custom' && !(Array.isArray(w.days) && w.days.length)) w = { ...w, days: [1, 2, 3, 4, 5], from: '08:00', until: '17:00' };
-    if (v!=='custom') { delete w.days; delete w.from; delete w.until; }
+    const cur = wfObj(wfObj(dr.draft.config).window), kept = wfWinDormant(cur);
+    let w = { ...cur, use: v };
+    delete w.days; delete w.from; delete w.until;
+    if (v!=='custom') w = { ...w, ...kept };
+    else if (Array.isArray(cur.days) && cur.days.length) w = { ...w, days: cur.days, ...(cur.from!==undefined ? { from: cur.from } : {}), ...(cur.until!==undefined ? { until: cur.until } : {}) };
+    else { const o = flowOfficeWindow({ office: OFFICE }); w = { ...w, days: o.days, from: kept.from || o.from, until: kept.until || o.until }; }
     dr.draft = wfDraftSet(dr.draft, '/config/window', w);
   },
   winOutside: (W, dr, t, v) => { const o = v==='skip' ? 'end' : v; let w = { ...wfObj(wfObj(dr.draft.config).window), outside: o }; if (o==='at' && !w.at) w.at = '09:00'; if (o!=='at') delete w.at; dr.draft = wfDraftSet(dr.draft, '/config/window', w); },
@@ -26362,7 +26381,8 @@ function wfDraftDiscard(){
 }
 // Turns the open workflow into a new, unsaved one (Save mine as a copy, Restore as a copy): its first Save inserts it.
 function wfAsNew(W){
-  W.id = null; W.rev = null; W.status = 'draft'; W.isCopy = true; W.notesE = null; W.noteCounts = {}; W.remote = null; W.aiDirty = false; W.folderId = W.folderId || W.homeFolder || null;
+  W.id = null; W.rev = null; W.status = 'draft'; W.isCopy = true; W.notesE = null; W.noteCounts = {}; W.remote = null; W.folderId = W.folderId || W.homeFolder || null;
+  wfAiSaved(W, { nos: [...W.hist.past, ...W.hist.future].map(e => e.no), kept: true });   // a new Draft: nothing to say about AI
   W.base = { ...W.base, doc: wfNewDoc(), rev: null };
   // its messages become its own (wfCopyTpls): the first Save of the copy never changes what the original sends
   const c = wfCopyTpls(W.doc, W.tplDrafts, wfCopyTplsLib());
@@ -26391,7 +26411,7 @@ async function wfSave(opts){
   }
   const name = String(W.name || '').trim();
   if (!name) { showToast('Give the workflow a name first', { kind: 'warn' }); return false; }
-  const tok = W.token, snap = wfSnap(W);
+  const tok = W.token, snap = wfSnap(W), aiMark = wfAiMark(W);
   // template words changed here that other Published workflows send: asked first, as the Message templates tab asks
   if (!o.tplAsked) {
     const tq = wfTplShareAsk(snap.tplDrafts, wfSavedTpls(), typeof AUTO!=='undefined' && AUTO.loaded && !AUTO.error ? AUTO.list : null, W.id);
@@ -26420,12 +26440,12 @@ async function wfSave(opts){
       if (Array.isArray(b.errors) && b.errors.length) { W.remote = { doc: snap.doc, settings: snap.settings, builder: snap.builder, status: 'ok', errors: b.errors, warnings: Array.isArray(b.warnings) ? b.warnings : [] }; if (W.rail!=='errors') wfRailToggle('errors'); else wfPanelBump('errors'); }
       return false;
     }
-    wfSaveDone(W, snap, b, name);
+    wfSaveDone(W, snap, b, name, aiMark);
     return true;
   } finally { if (WF===W) { W.saving = false; wfDirty('chrome'); } }
 }
 // A save went through: what was saved is the new base (changes made while it was on the way stay unsaved).
-function wfSaveDone(W, snap, b, name){
+function wfSaveDone(W, snap, b, name, aiMark){
   const wasNew = !W.id, id = String(b.id || W.id || ''), keys = Array.isArray(b.templates) ? b.templates : [];
   W.id = id; W.rev = Number(b.revision) || W.rev; W.status = b.enabled===true ? 'published' : 'draft';
   // the template words it carried are the business's templates now (the function wrote them): the app's copy of the
@@ -26433,7 +26453,8 @@ function wfSaveDone(W, snap, b, name){
   if (keys.length) { try { const s = STATE.data.settings; s.catalog = wfCatalogWithDrafts(s.catalog, snap.tplDrafts, keys, wfActor(), new Date().toISOString()); } catch (e) { /* the next settings read has them */ } }
   const base = { ...snap, rev: W.rev };
   if (W.tplDrafts===snap.tplDrafts && keys.length) { const none = {}; W.tplDrafts = none; base.tplDrafts = none; }
-  W.base = base; W.aiDirty = false; W.isCopy = false; W.remote = null;
+  W.base = base; W.isCopy = false; W.remote = null;
+  wfAiSaved(W, aiMark);   // an AI change made while it was on the way is still unsaved
   if (wasNew) { W.templateKey = null; if (typeof WF_UI!=='undefined') WF_UI.open = id; W.recent = wfRecentPush(id); W.notesE = null; wfNotesLoad(W); wfPresenceStart(W); }
   wfDraftClear(W, wasNew ? [null, id] : [id]);
   if (wasNew && W.folderId) wfDbWrite('It stays in Home', sb.from(AUTO_TABLE).update({ folder_id: W.folderId }).eq('id', id));
@@ -26565,14 +26586,20 @@ function wfRecentGo(i){
   const n = W.hist.past.length - 1 - Math.max(-1, Math.trunc(Number(i)));
   let label = '';
   for (let k = 0; k < n; k++) { const r = wfHistStep(W.hist, -1, wfSnap(W)); if (!r) break; W.hist = r.hist; wfApplySnap(W, r.snap); label = r.label; }
+  W.aiDirty = wfAiDirtyOf(W);
   if (!label) return;
   if (W.drawer) wfDrawerReload(W);
   wfAnnounce(`Went back ${n} change${n===1 ? '' : 's'}`);
 }
 
 // ── Workflow AI's hook (stage 7): a patch applied as ONE undo entry from Workflow AI (a Published one is then saved as a Draft) ──
+// Its 'rename' and 'setSettings' ops change the name and merge into the current settings (never replace them).
 function wfAiApply(ops, label){
-  return wfCommit(String(label || 'Workflow AI'), w => { const r = wfApplyPatch(w.doc, ops, {}, w.reg); return r.errors.length ? { error: { text: String(wfObj(r.errors[0]).code || 'The change could not be made') } } : { doc: r.doc }; }, { origin: 'ai' });
+  return wfCommit(String(label || 'Workflow AI'), w => {
+    const r = wfApplyPatch(w.doc, ops, { settings: w.settings, name: w.name }, w.reg);
+    if (r.errors.length) return { error: { text: String(wfObj(r.errors[0]).code || 'The change could not be made') } };
+    return { doc: r.doc, settings: wfCanon(r.settings)===wfCanon(w.settings) ? w.settings : r.settings, name: r.name!=null ? r.name : w.name };
+  }, { origin: 'ai' });
 }
 
 // ── Notes (automation_notes) ──
