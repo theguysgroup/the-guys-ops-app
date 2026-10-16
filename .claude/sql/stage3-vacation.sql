@@ -271,7 +271,8 @@ commit;
 --      change still sends; the notes' foreign key is made deferrable so the guard can write that row while the vacation is
 --      being inserted. The notes join the realtime publication, so another owner's change shows at once (realtime applies
 --      the read policy: owners and managers only). The person's History lines ("Vacation set: …") no longer say paid or
---      unpaid; part B takes it out of the lines written since stage 3 (activity_log is read by every signed-in person).
+--      unpaid. The lines written since stage 3 are left as they are: employee History is owners and managers only
+--      (rls-tighten-2026-09-30.sql), so rewriting them would be a one-way audit edit with no privacy gain (Ofek 16 Oct).
 --   3. Defense in depth, as stage 5 did: nothing for anon, no delete / truncate / references / trigger for signed-in people,
 --      and the add / update policies are for signed-in people only.
 --   4. A rename (employee_vacations_names), the push scan's reminded_at or a pay moved out of options re-ran the clash check
@@ -290,12 +291,11 @@ commit;
 --    where polrelid in ('public.employee_vacations'::regclass, 'public.employee_vacation_notes'::regclass); -- add / update: {-} (= PUBLIC)
 --   select tablename from pg_publication_tables
 --    where pubname = 'supabase_realtime' and tablename in ('employee_vacations', 'employee_vacation_notes'); -- employee_vacations only
---   select count(*) from public.activity_log
---    where record_kind = 'employee' and text ~ '^Vacation (set|changed): ' and text ~ ' · (paid|unpaid) leave$';  -- the lines step 8 cleans
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 -- ── PART A: before the app ──────────────────────────────────────────────────────────────────────────────────────
 begin;
+set local lock_timeout = '5s'; set local statement_timeout = '60s';   -- never queue behind a long lock on LIVE tables
 
 -- 1. The pay column (owners and managers only, with the note).
 alter table public.employee_vacation_notes add column if not exists pay text;
@@ -350,6 +350,7 @@ select 'stage3-followups part A ok';
 
 -- ── PART B: after the app of this change is live ────────────────────────────────────────────────────────────────
 begin;
+set local lock_timeout = '5s'; set local statement_timeout = '60s';   -- never queue behind a long lock on LIVE tables
 
 -- 5. The guard: section 5, plus the pay move (item 2) and no clash check when nothing that decides one changed (item 4).
 create or replace function public.employee_vacations_guard()
@@ -432,12 +433,6 @@ on conflict (vacation_id) do update set pay = excluded.pay
 --    old row whose dates touch another after a time-zone change can't stop this.
 update public.employee_vacations set options = options - 'pay' where options ? 'pay';
 
--- 8. The History lines written since stage 3 ("Vacation set: 20 Oct – 24 Oct · paid leave") lose the pay (always their
---    last words). ONE-WAY: the pay itself is kept in employee_vacation_notes, only these words go. A tab of the old app
---    still open can write one more: running part B again later (say the next day) takes it out too.
-update public.activity_log set text = regexp_replace(text, ' · (paid|unpaid) leave$', '')
- where record_kind = 'employee' and text ~ '^Vacation (set|changed): ' and text ~ ' · (paid|unpaid) leave$';
-
 commit;
 select 'stage3-followups part B ok';
 
@@ -452,8 +447,6 @@ select 'stage3-followups part B ok';
 --    where pubname = 'supabase_realtime' and tablename in ('employee_vacations', 'employee_vacation_notes'); -- both
 --   -- part B:
 --   select count(*) from public.employee_vacations where options ? 'pay';                                    -- 0
---   select count(*) from public.activity_log
---    where record_kind = 'employee' and text ~ '^Vacation (set|changed): ' and text ~ ' · (paid|unpaid) leave$';  -- 0
 --   select count(*) from public.employee_vacation_notes where pay is not null;                               -- the count before, or more
 --   select grantee, privilege_type from information_schema.role_table_grants
 --    where table_schema = 'public' and table_name in ('employee_vacations', 'employee_vacation_notes')
@@ -469,9 +462,9 @@ select 'stage3-followups part B ok';
 --   --       → no "Already on vacation"
 
 -- ── ROLLBACK (stage 3 follow-ups; run by hand only) ─────────────────────────────────────────────────────────────
--- Redeploy the previous app FIRST (this one reads and writes employee_vacation_notes.pay). Part B's step 8 (the pay taken
--- out of the History lines) is ONE-WAY: those words are not put back.
+-- Redeploy the previous app FIRST (this one reads and writes employee_vacation_notes.pay).
 -- begin;
+-- set local lock_timeout = '5s'; set local statement_timeout = '60s';   -- never queue behind a long lock on LIVE tables
 -- -- the notes off the realtime publication (part A, step 4)
 -- do $$ begin
 --   if exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'employee_vacation_notes') then

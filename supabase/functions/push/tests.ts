@@ -511,6 +511,8 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   // back on their next working day (stage 3 follow-up 6): employees.working_days, 0 = Sunday; none set = the next day
   eq([vacBackDay("2026-10-23", [1, 2, 3, 4, 5]), vacBackDay("2026-10-24", []), vacBackDay("2026-10-24", null), vacBackDay("2026-10-21", [3]), vacBackDay("2026-10-21", ["x", 9, 1.5]), vacBackDay("2026-10-24", [6]), vacBackDay("2026-10-24", [0, 1])],
     ["2026-10-26", "2026-10-25", "2026-10-25", "2026-10-28", "2026-10-22", "2026-10-31", "2026-10-25"], "vacBackDay: Friday → Monday; none set → the next day; one working day a week → a week on; odd values ignored");
+  eq([vacBackDay("2026-10-23", ["1", "5"]), vacBackDay("2026-10-21", ["3"]), vacBackDay("2026-10-24", ["", null])], ["2026-10-26", "2026-10-28", "2026-10-25"],
+    "vacBackDay: working days as text are read as numbers, as the app reads them (Number(): \"\" and null are 0 = Sunday, as there)");
   const wdDb = (vacs: any[], days: any) => { const d = backDb(vacs); d.T.employees.find((e: any) => e.id === "e-cal").working_days = days; return d; };
   const wd1 = wdDb([CALV()], [1, 2, 3, 4, 5]), jobsFrom: string[] = [];
   const wdFrom = wd1.from.bind(wd1);

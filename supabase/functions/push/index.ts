@@ -202,9 +202,10 @@ export async function vacContext(sb: any, nowMs: number, tz: string, aheadDays =
   }
 }
 // The day they are back after a vacation's last day (stage 3 follow-up 6): the first of their working days after it
-// (employees.working_days, 0 = Sunday; the app's vacationBackDay), else the next day (none set, or none usable: not known).
+// (employees.working_days as numbers, as the app reads them; 0 = Sunday; the app's vacationBackDay), else the next day (none
+// set, or none usable: not known).
 export function vacBackDay(endsOn: string, workingDays: unknown): string {
-  const set = Array.isArray(workingDays) ? workingDays.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  const set = Array.isArray(workingDays) ? workingDays.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [];
   if (!set.length) return vacShiftDay(endsOn, 1);
   for (let i = 1; i <= 7; i++) { const d = vacShiftDay(endsOn, i); if (set.includes(new Date(d + "T00:00:00Z").getUTCDay())) return d; }
   return vacShiftDay(endsOn, 1);

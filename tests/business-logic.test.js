@@ -173,6 +173,8 @@ const DECLS = [
   'vacationWorkingDaysOf', 'vacationApplyPrivate', 'vacationRetryDelay', 'vacationLogText',
   // stage 3 follow-ups SQL re-check: a pay this login doesn't know is named neutrally
   'vacationPayText',
+  // stage 3 follow-ups, Ofek's review (16 Oct) A1: only what changed goes into the private row; no change while it didn't load
+  'vacationPrivatePatch', 'vacationNotesBlock',
 ];
 
 function extractDecl(source, name){
@@ -2683,13 +2685,17 @@ function testVacations(sb){
   const vhtml = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
   assertEqual([/table: 'employee_vacation_notes' \}, handleVacationNoteRealtimeChange/.test(vhtml), /addEventListener\('online', \(\) => retryVacationsLoad\(\)\)/.test(vhtml), /visibilityState === 'visible'\) retryVacationsLoad\(\)/.test(vhtml), /if \(data\.vacationsError\) vacationsRetryLater\(true\)/.test(vhtml)],
     [true, true, true, true], 'wiring: notes live on the vacations channel; retry on online, tab shown and after a failed load');
-  // review (items 1, 5, 6): the follow-ups SQL strips options.pay and the History words only in part B (after the app)
+  // review (items 1, 5, 6): the follow-ups SQL strips options.pay only in part B (after the app); Ofek's review (16 Oct): the
+  // History lines are never rewritten (owners and managers only already), and each part waits at most 5 s for a lock
   const vsql = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage3-vacation.sql'), 'utf8');
   const fs3 = vsql.slice(vsql.indexOf('-- Stage 3 follow-ups')), pa = fs3.indexOf('-- ── PART A'), pb = fs3.indexOf('-- ── PART B'), rb = fs3.indexOf('-- ── ROLLBACK');
   const partA = fs3.slice(pa, pb), partB = fs3.slice(pb, rb);
-  assertEqual([pa > 0 && pb > pa && rb > pb, partA.includes("options - 'pay'"), partB.includes("set options = options - 'pay'"), /update public\.activity_log set text = regexp_replace\(text, ' · \(paid\|unpaid\) leave\$', ''\)/.test(partB),
+  assertEqual([pa > 0 && pb > pa && rb > pb, partA.includes("options - 'pay'"), partB.includes("set options = options - 'pay'"), /activity_log/.test(fs3.slice(0, fs3.indexOf('-- ════'))),
     partA.includes('alter publication supabase_realtime add table public.employee_vacation_notes'), fs3.slice(0, pa).includes('add / update: {-} (= PUBLIC)'), fs3.slice(0, pa).includes('{public}')],
-    [true, false, true, true, true, true, false], 'follow-ups SQL: part A before the app (publication), part B after it (strip pay, clean History); the check before expects {-}');
+    [true, false, true, false, true, true, false], 'follow-ups SQL: part A before the app (publication), part B after it (strip pay; History left as it is); the check before expects {-}');
+  const LT = "begin;\nset local lock_timeout = '5s'; set local statement_timeout = '60s';";
+  assertEqual([partA.includes(LT), partB.includes(LT), fs3.slice(rb).includes("-- begin;\n-- set local lock_timeout = '5s'; set local statement_timeout = '60s';"), (partA + partB).split('\nbegin;').length - 1],
+    [true, true, true, 2], 'follow-ups SQL (Ofek 16 Oct): lock and statement timeouts right after each begin (parts A, B and the ROLLBACK)');
 
   // words on badges and pickers
   const ut = (v, d) => sb.vacationUntilText(v, d, SYD);
@@ -2784,8 +2790,8 @@ function testVacations(sb){
   // the app: pay goes into the private upsert, never on the vacation row
   const appSrc = fs.readFileSync(INDEX_HTML_PATH, 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
   const svm = extractDecl(appSrc, 'vacationSaveNow');   // the save itself (follow-up 5 split saveVacationModal's question out)
-  assertEqual([/upsert\(\{ vacation_id: id, note: text, pay, business_id: AUTO_BUSINESS_ID \}\)/.test(appSrc), appSrc.includes('setNote('), svm.indexOf('db.vacations.setPrivate(') > 0 && svm.indexOf('db.vacations.setPrivate(') < svm.indexOf('logEmployeeActivity('), /vacationWithNote\(mapVacationRow\(r\), vacNotes, vacPays\)/.test(appSrc)],
-    [true, false, true, true], 'follow-up 2: one private upsert of note and pay, before the History line; the load passes the pays');
+  assertEqual([/upsert\(\{ vacation_id: id, \.\.\.cols, business_id: AUTO_BUSINESS_ID \}\)/.test(appSrc), appSrc.includes('setNote('), svm.indexOf('db.vacations.setPrivate(') > 0 && svm.indexOf('db.vacations.setPrivate(') < svm.indexOf('logEmployeeActivity('), /vacationWithNote\(mapVacationRow\(r\), vacNotes, vacPays\)/.test(appSrc)],
+    [true, false, true, true], 'follow-up 2: one private upsert of the columns that changed, before the History line; the load passes the pays');
 }
 
 // On vacation, the screens (stage 3, group V2): pickers, flags, badges, payroll leave, the window's draft and the banner.
@@ -2890,6 +2896,18 @@ function testVacationUi(sb){
   const de = D('e1', 'v1');
   assertEqual([de.id, de.startsOn, de.endsOn, de.standInId, de.fromPrev, de.options.pay], ['v1', '2026-10-20', '2026-10-24', 'e2', false, 'paid'], 'draft: changing one copies it');
   assertEqual([D('', null).employeeId, D('', null).options], ['', sb.vacationDefaults()], 'draft: no person yet → the defaults');
+  // Ofek's review (16 Oct) A1: the private row as the window opened; only what changed since is saved
+  const pvRows = rows.map(r => r.id==='v1' ? { ...r, note: 'Surgery', privatePay: 'paid', payKnown: true } : r);
+  const dp = sb.vacationDraft('e1', 'v1', pvRows, employees, '2026-10-15'), du = sb.vacationDraft('e1', 'v1', rows.map(r => r.id==='v1' ? { ...r, payKnown: false } : r), employees, '2026-10-15');
+  assertEqual([dp.noteBefore, dp.payBefore, dp.payKnown, de.noteBefore, de.payBefore, du.payKnown, dg.noteBefore], ['Surgery', 'paid', true, '', '', false, undefined], 'draft: noteBefore / payBefore from the vacation (no private pay = \'\'); payKnown false kept');
+  const PP = sb.vacationPrivatePatch;
+  assertEqual([PP({ ...dp, startsOn: '2026-10-21' }), PP({ ...dp, options: { ...dp.options, pay: 'unpaid' } }), PP({ ...dp, note: 'Surgery, then rest' }), PP({ ...dp, note: '  ' }), PP({ ...dp, note: ' Surgery ' })],
+    [null, { pay: 'unpaid' }, { note: 'Surgery, then rest' }, { note: null }, null], 'private patch: a date edit → nothing; a pay change → only pay; a note change → only note (emptied = null); spaces only → nothing');
+  assertEqual([PP({ ...du, startsOn: '2026-10-21' }), PP({ ...du, payKnown: true, options: { ...du.options, pay: 'paid' } }), PP({ ...de, payBefore: '', payKnown: true }), PP({ ...dg, note: 'Fiji' }), PP(null)],
+    [null, { pay: 'paid' }, { pay: 'paid' }, { note: 'Fiji', pay: sb.vacationPrivateRow(dg).pay }, { note: null, pay: 'unpaid' }],
+    'private patch: a pay nobody knows is left alone until picked; a pay still on the row is written once; a new vacation → its whole row');
+  assertEqual([sb.vacationNotesBlock('v1', { vacationNotesError: 'x' }), sb.vacationNotesBlock(null, { vacationNotesError: 'x' }), sb.vacationNotesBlock('v1', { vacationNotesError: '' }), sb.vacationNotesBlock('v1', null)],
+    ['This vacation can\'t be changed right now: its note and paid / unpaid leave didn\'t load. Reload the app and try again.', '', '', ''], 'notes block: an existing vacation while the private rows did not load; a new one may still be set');
   const P = (d, more) => sb.vacationFormProblems(d, [...rows, ...(more || [])], employees, SYD);
   const ok = { id: null, employeeId: 'e1', startsOn: '2026-11-10', endsOn: '2026-11-12', standInId: 'e2', options: { standIn: true, payroll: true, pay: 'paid' }, note: '' };
   assertEqual(P(ok), [], 'problems: a valid draft');
@@ -2992,6 +3010,11 @@ function testVacationUi(sb){
   // A2: one time zone helper per layer (stage 1's), no zone code of the vacations' own.
   assertEqual([/function vacation(Tz|Today|DayOf)\(/.test(script), /region\.timezone|region \? c\.region\.timezone/.test(script)], [false, false], 'review A2: no vacationTz / vacationToday / vacationDayOf, nothing reads the lowercase region.timezone');
   // A3: employee_vacations on its own realtime channel, only when the list loaded, removed with the rest.
+  const vxh = fx('vacExtraHtml'), lfs0 = fx('loadFromSupabase'), rvl = fx('retryVacationsLoad');
+  assertEqual([vxh.includes("${d.payKnown!==false && o.pay===p ? 'checked' : ''}"), /if \(field==='pay'\) \{ d\.options = \{ \.\.\.d\.options, pay: value \}; d\.payKnown = true; \}/.test(fx('vacSet')),
+    /vacationNotesError: \(loadResults\[LOAD_NAMES\.indexOf\('vacation notes'\)\] \|\| \{\}\)\.error \?/.test(lfs0), /data\.vacationNotesError = ''; \}\n\s*else data\.vacationNotesError = 'the vacation notes did not load';/.test(rvl),
+    /const blocked = vacationNotesBlock\(vacId, data\);\s*if \(blocked\) \{ showToast\(blocked/.test(fx('openVacationModal')), /vacationNotesBlock\(d\.id, data\)/.test(fx('saveVacationModal'))],
+    [true, true, true, true, true, true], 'A1: the radio shows no choice for an unknown pay (a pick makes it known); the notes error set at load and by the retry; the window and the save refuse a change');
   const rt = fx('setupRealtimeSubscriptions'), shared = rt.slice(0, rt.indexOf('.subscribe()')), rv = fx('setupVacationsChannel');
   assertEqual([shared.includes('employee_vacations'), rt.includes('setupVacationsChannel();') && rv.includes("sb.channel('vacations-realtime')"), /if \(VACATIONS_CHANNEL \|\| !STATE\.data \|\| STATE\.data\.vacationsError\) return;/.test(rv), fx('teardownRealtimeSubscriptions').includes('sb.removeChannel(VACATIONS_CHANNEL)')],
     [false, true, true, true], 'review A3: vacations never join the shared channel; their own channel only when the list loaded; torn down on logout');
@@ -5048,7 +5071,7 @@ async function testVacationFollowUps(){
       bizTz: () => 'Australia/Sydney', todayStr: () => '2026-10-22', canSetVacation: () => true, vacationFormProblems: () => [], modalError: () => {}, showToast: () => {},
       vacationSaveNow: (ui, end) => log.saves.push(end), confirmAction: (m, fn, o) => log.confirms.push({ m, fn, o }) };
     vm.createContext(sx);
-    vm.runInContext(['readOnlyReason', 'vacationEmployeeOfProfile', 'vacationShiftLogins', 'vacationOnShift', 'saveVacationModal'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__save = saveVacationModal;', sx);
+    vm.runInContext(['readOnlyReason', 'vacationEmployeeOfProfile', 'vacationShiftLogins', 'vacationOnShift', 'vacationNotesBlock', 'saveVacationModal'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__save = saveVacationModal;', sx);
     sx.VAC_UI = { draft: { employeeId: 'e3', startsOn, endsOn: '2026-10-24', options: {}, standInId: null }, saving: false };
     await sx.__save();
     return { log, ui: sx.VAC_UI };
@@ -5064,6 +5087,31 @@ async function testVacationFollowUps(){
   assertEqual([b.log.saves, b.log.confirms.length, c.log.reads.length, c.log.saves, d.log.reads.length, d.log.saves], [[false], 0, 0, [false], 0, [false]], 'save: off shift, starting tomorrow or no office login → saved straight away (no read when there is nothing to ask)');
   const e = await run({ readError: true, profiles: [{ id: 'pe', fullName: 'Eve Ray', role: 'va', onDuty: true, onDutyDate: '2026-10-22' }] });
   assertEqual([e.log.confirms.length, e.log.saves], [1, []], 'save: the fresh read failed → the copy the app has decides');
+
+  // Ofek's review (16 Oct) A1, the save itself (vacationSaveNow): the notes didn't load → an existing vacation is not saved
+  // and its private row never written; else only the private columns that changed are upserted
+  const save = async (change, { notesError = '', id = 'v1' } = {}) => {
+    const log = { updates: [], adds: [], priv: [], errors: [], toasts: [] };
+    const v1 = { id: 'v1', employeeId: 'e3', startsOn: '2026-11-02', endsOn: '2026-11-06', standInId: null, options: { payroll: true, pay: 'paid' }, note: 'Surgery', privatePay: 'paid', payKnown: true };
+    const sx = { console, PRESENT: false, VIEW_AS_ID: null, VAC_UI: null,
+      STATE: { data: { vacations: [v1], employees: [{ id: 'e3', name: 'Eve Ray' }], vacationNotesError: notesError } },
+      db: { vacations: { update: (vid, row) => { log.updates.push(vid); return Promise.resolve({ vacation: { ...v1, ...change } }); }, add: row => { log.adds.push(row); return Promise.resolve({ vacation: { ...v1, id: 'vn' } }); },
+        setPrivate: (vid, patch) => { log.priv.push([vid, patch]); return Promise.resolve({ ok: true }); } } },
+      bizTz: () => 'Australia/Sydney', todayStr: () => '2026-10-22', canSetVacation: () => true, modalError: m => log.errors.push(m), showToast: m => log.toasts.push(m),
+      vacationRowFromDraft: () => ({ options: {} }), getCurrentProfile: () => ({ fullName: 'Owner' }), logEmployeeActivity: () => {}, vacationLogText: () => '', vacationOpt: () => false,
+      vacationMovableItems: () => ({ tasks: [], jobs: [] }), vacationRangeText: () => '', closeVacationModal: () => {}, render: () => {}, vacationErrorText: e => e.message, AUTO_BUSINESS_ID: 'default', document: { getElementById: () => null } };
+    vm.createContext(sx);
+    vm.runInContext(['readOnlyReason', 'VACATION_PAY', 'vacationPrivateRow', 'vacationPrivatePatch', 'vacationNotesBlock', 'vacationDraft', 'vacationSaveNow'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__now = vacationSaveNow; this.__draft = vacationDraft;', sx);
+    const d = id ? sx.__draft('e3', 'v1', sx.STATE.data.vacations, sx.STATE.data.employees, '2026-10-22') : { id: null, employeeId: 'e3', startsOn: '2026-11-20', endsOn: '2026-11-21', standInId: null, options: { payroll: true, pay: 'paid' }, note: '' };
+    sx.VAC_UI = { draft: { ...d, ...change }, saving: false };
+    await sx.__now(sx.VAC_UI, false);
+    return log;
+  };
+  const s1 = await save({ startsOn: '2026-11-03' }, { notesError: 'the vacation notes did not load' }), s2 = await save({ startsOn: '2026-11-03' });
+  assertEqual([s1.updates, s1.priv, s1.errors.length + s1.toasts.length, s2.updates, s2.priv], [[], [], 1, ['v1'], []], 'A1 save: notes load error + a date edit → refused, no private upsert; loaded + a date edit → the vacation only');
+  const s3 = await save({ options: { payroll: true, pay: 'unpaid' } }), s4 = await save({ note: 'Surgery, then rest' }), s5 = await save({}, { notesError: 'x', id: null });
+  assertEqual([s3.priv, s4.priv, s5.adds.length, s5.priv], [[['v1', { pay: 'unpaid' }]], [['v1', { note: 'Surgery, then rest' }]], 1, [['vn', { note: null, pay: 'paid' }]]],
+    'A1 save: a pay-only change upserts only pay, a note-only change only note; a new vacation may still be set (its private row is new)');
 }
 
 (async () => {

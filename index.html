@@ -2446,6 +2446,23 @@ function vacationPrivateRow(draft){
   const d = draft || {}, o = d.options || {};
   return { note: String(d.note || '').trim() || null, pay: VACATION_PAY.includes(o.pay) ? o.pay : 'unpaid' };
 }
+// What the save upserts into the private row (stage 3 follow-ups review A1): a new vacation's whole row; on a change, ONLY
+// the columns that changed since the window opened (the draft's noteBefore / payBefore), so a note nobody touched is never
+// blanked, and two owners changing one vacation never overwrite each other. A pay nobody knows (payKnown false) and nobody
+// picked is left alone. A pay still on the vacation row (not moved yet: no private pay, payBefore '') is written once.
+// null = nothing to upsert.
+function vacationPrivatePatch(draft){
+  const d = draft || {}, P = vacationPrivateRow(d), out = {};
+  if (!d.id) return P;
+  if ((P.note || '') !== (d.noteBefore || '')) out.note = P.note;
+  if (d.payKnown !== false && P.pay !== (d.payBefore || '')) out.pay = P.pay;
+  return Object.keys(out).length ? out : null;
+}
+// An existing vacation is never changed while the private rows didn't load (vacationNotesError): its note and paid / unpaid
+// leave would be saved from blanks (stage 3 follow-ups review A1). A new one may be: its private row is new too.
+function vacationNotesBlock(vacId, data){
+  return vacId && data && data.vacationNotesError ? 'This vacation can\'t be changed right now: its note and paid / unpaid leave didn\'t load. Reload the app and try again.' : '';
+}
 // The notes (employee_vacation_notes rows; only owners and managers get any back) as { vacationId: note }.
 function vacationNotesMap(rows){
   const out = {};
@@ -2470,6 +2487,7 @@ function vacationApplyPrivate(data, id, row){
   const v = (data.vacations || []).find(x => x && x.id === id);
   if (v && (v.note || '') !== note) { v.note = note; changed = true; }
   if (v && pay && ((v.options || {}).pay !== pay || v.payKnown === false)) { v.options = { ...v.options, pay }; v.payKnown = true; changed = true; }
+  if (v) { if (pay) v.privatePay = pay; else delete v.privatePay; }   // not shown: the window's payBefore
   return changed;
 }
 // Reading the vacations list again after it failed (retryVacationsLoad): 1, 5 and 15 minutes, then no timer (0).
@@ -2477,9 +2495,10 @@ function vacationRetryDelay(tries){ return [60000, 300000, 900000][tries] || 0; 
 // The note, and the private pay when there is one (it wins). Without one, the row's own options.pay stays: a row not moved
 // yet, or an app from before stage 3 follow-up 2. payKnown: the pay is a real value, not options' 'unpaid' default (a login
 // that can't read the private pay, or a row moved out with none there): the screens then name no pay (vacationPayText).
+// privatePay: the private row's own pay (the window's payBefore); not there = none.
 function vacationWithNote(v, notes, pays){
   const pay = pays && VACATION_PAY.includes(pays[v.id]) ? pays[v.id] : '';
-  return { ...v, note: (notes && notes[v.id]) || '', ...(pay ? { options: { ...v.options, pay }, payKnown: true } : {}) };
+  return { ...v, note: (notes && notes[v.id]) || '', ...(pay ? { options: { ...v.options, pay }, payKnown: true, privatePay: pay } : {}) };
 }
 // A vacation's paid / unpaid leave in words; a pay this login doesn't know (payKnown false) is named neutrally, never "Unpaid".
 function vacationPayText(v){
@@ -3425,6 +3444,8 @@ async function loadFromSupabase(){
     })),
     vacationNotes: vacNotes,
     vacationPays: vacPays,
+    // The private rows failed to load: an existing vacation can't be changed (vacationNotesBlock), its note and pay are unknown.
+    vacationNotesError: (loadResults[LOAD_NAMES.indexOf('vacation notes')] || {}).error ? 'the vacation notes did not load' : '',
     vacations: (vacationRows||[]).map(r => vacationWithNote(mapVacationRow(r), vacNotes, vacPays)),
     // An optional load: when it fails, the vacation screens say so instead of looking like nobody is away.
     vacationsError: (loadResults[LOAD_NAMES.indexOf('vacations')] || {}).error ? 'the vacations list did not load' : '',
@@ -3900,16 +3921,23 @@ const db = {
       return error ? { error } : { vacation: keepVacationRow(data) };
     },
     // The note and paid / unpaid leave, on their own (owners and managers only; stage 3 follow-up 2): one upsert of
-    // vacationPrivateRow's { note, pay }. Returns { ok } or { error }.
-    async setPrivate(id, { note, pay }){
-      const text = String(note || '').trim() || null;
-      const { error } = await sb.from('employee_vacation_notes').upsert({ vacation_id: id, note: text, pay, business_id: AUTO_BUSINESS_ID });
+    // vacationPrivatePatch's columns, ONLY those (a column left out keeps what the row has). Returns { ok } or { error }.
+    async setPrivate(id, patch){
+      const cols = {};
+      if ('note' in patch) cols.note = String(patch.note || '').trim() || null;
+      if ('pay' in patch) cols.pay = patch.pay;
+      const { error } = await sb.from('employee_vacation_notes').upsert({ vacation_id: id, ...cols, business_id: AUTO_BUSINESS_ID });
       if (error) return { error };
-      const notes = STATE.data.vacationNotes || (STATE.data.vacationNotes = {});
-      if (text) notes[id] = text; else delete notes[id];
-      (STATE.data.vacationPays || (STATE.data.vacationPays = {}))[id] = pay;
       const v = (STATE.data.vacations || []).find(x => x.id===id);
-      if (v) { v.note = text || ''; v.options = { ...v.options, pay }; }
+      if ('note' in cols) {
+        const notes = STATE.data.vacationNotes || (STATE.data.vacationNotes = {});
+        if (cols.note) notes[id] = cols.note; else delete notes[id];
+        if (v) v.note = cols.note || '';
+      }
+      if ('pay' in cols) {
+        (STATE.data.vacationPays || (STATE.data.vacationPays = {}))[id] = cols.pay;
+        if (v) { v.options = { ...v.options, pay: cols.pay }; v.payKnown = true; v.privatePay = cols.pay; }
+      }
       return { ok: true };
     },
     // the database stamps its own now() over these times (the guard trigger), so a wrong laptop clock can't move the day
@@ -4534,7 +4562,8 @@ async function retryVacationsLoad(){
     const data = STATE.data;
     if (!data || data !== start || !data.vacationsError) return;   // signed out or in again, or a full load brought the list meanwhile
     if (vr.error) { vacationsRetryLater(); return; }
-    if (!nr.error) { data.vacationNotes = vacationNotesMap(nr.data); data.vacationPays = vacationPaysMap(nr.data); }
+    if (!nr.error) { data.vacationNotes = vacationNotesMap(nr.data); data.vacationPays = vacationPaysMap(nr.data); data.vacationNotesError = ''; }
+    else data.vacationNotesError = 'the vacation notes did not load';
     data.vacations = (vr.data || []).map(r => vacationWithNote(mapVacationRow(r), data.vacationNotes, data.vacationPays));
     data.vacationsError = '';
     setupVacationsChannel();
@@ -20015,7 +20044,9 @@ function vacationBannerText(v, standInName, today, tz, shift){
 // vacation (the first time: everything ticked) and the same stand-in while they are still Active.
 function vacationDraft(empId, vacId, rows, employees, today){
   const list = rows || [], emps = employees || [], v = vacId ? list.find(r => r.id===vacId) : null;
-  if (v) return { id: v.id, employeeId: v.employeeId, startsOn: v.startsOn, endsOn: v.endsOn, standInId: v.standInId, options: { ...v.options }, note: v.note || '', fromPrev: false };
+  // noteBefore / payBefore: the private row as the window opened (only what changed since is saved: vacationPrivatePatch).
+  if (v) return { id: v.id, employeeId: v.employeeId, startsOn: v.startsOn, endsOn: v.endsOn, standInId: v.standInId, options: { ...v.options }, note: v.note || '', fromPrev: false,
+    noteBefore: v.note || '', payBefore: v.privatePay || '', payKnown: v.payKnown !== false };
   const emp = emps.find(e => e.id===empId), who = emp ? { id: emp.id, name: emp.name } : { id: empId };
   const prev = empId ? list.filter(r => !r.cancelledAt && vacationMatches(r, who)).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null : null;
   const s = prev && prev.standInId ? emps.find(e => e.id===prev.standInId) : null;
@@ -20202,6 +20233,8 @@ function openVacationModal(empId, vacId){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   if (!canSetVacation()) return;
   const data = STATE.data, rows = data.vacations || [], today = todayStr(), tz = bizTz();
+  const blocked = vacationNotesBlock(vacId, data);
+  if (blocked) { showToast(blocked, { kind: 'warn' }); return; }
   VAC_UI = { draft: vacationDraft(empId || '', vacId || null, rows, data.employees || [], today), saving: false };
   const d = VAC_UI.draft, emp = (data.employees || []).find(e => e.id===d.employeeId);
   const people = (data.employees || []).filter(e => (e.status || 'Active')==='Active').sort((a, b) => String(a.name).localeCompare(String(b.name)));
@@ -20254,14 +20287,14 @@ function vacExtraHtml(){
     ? `<div class="field" style="margin-top:11px"><label>Stand-in</label><select onchange="vacSet('standInId', this.value)"><option value="">Pick the stand-in</option>${people.map(e => `<option value="${esc(e.id)}" ${e.id===d.standInId ? 'selected' : ''}>${esc(e.name)}${awayThen(e) ? ' · on vacation then' : ''}${logins && !logins.has(e.id) ? ' · no app login: gets no notifications' : ''}</option>`).join('')}</select><span class="job-sub">Gets their notifications${o.flagOpen===true ? ', and their open items move to them with one click (jobs only to a technician)' : ''}.${owner ? ' Money and private owner alerts only go to a stand-in who is an owner.' : ''}</span>${[vacationStandInWarning(d, data.employees, logins), vacationStandInAlertHint(d, data.employees, STATE.profiles)].map(w => w ? `<span class="job-sub" style="display:block;margin-top:3px;color:var(--warn)">${esc(w)}</span>` : '').join('')}</div>`
     : o.flagOpen===true ? `<div class="hint" style="margin-top:8px">Tick "${esc(standLabel)}" to move their open items to someone with one click.</div>` : '';
   const pay = o.payroll===true
-    ? `<div class="field" style="margin-top:11px"><label>Leave on the payroll board</label><div class="vac-pay">${VACATION_PAY.map(p => `<label class="checkline"><input type="radio" name="vac-pay" value="${esc(p)}" ${o.pay===p ? 'checked' : ''} onchange="vacSet('pay', this.value)">${p==='paid' ? 'Paid leave' : 'Unpaid leave'}</label>`).join('')}</div></div>` : '';
+    ? `<div class="field" style="margin-top:11px"><label>Leave on the payroll board</label><div class="vac-pay">${VACATION_PAY.map(p => `<label class="checkline"><input type="radio" name="vac-pay" value="${esc(p)}" ${d.payKnown!==false && o.pay===p ? 'checked' : ''} onchange="vacSet('pay', this.value)">${p==='paid' ? 'Paid leave' : 'Unpaid leave'}</label>`).join('')}</div></div>` : '';
   return stand + pay;
 }
 // Only the draft changes; a date redraws the stand-in list (who is away then), never the field being typed in.
 function vacSet(field, value){
   if (!VAC_UI) return;
   const d = VAC_UI.draft;
-  if (field==='pay') d.options = { ...d.options, pay: value };
+  if (field==='pay') { d.options = { ...d.options, pay: value }; d.payKnown = true; }
   else if (field==='standInId') d.standInId = value || null;
   else if (field==='startsOn' || field==='endsOn' || field==='note') d[field] = value || '';
   if (field==='startsOn' || field==='endsOn' || field==='standInId') { const x = document.getElementById('vac-extra'); if (x) x.innerHTML = vacExtraHtml(); }
@@ -20298,6 +20331,8 @@ async function saveVacationModal(){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   if (!VAC_UI || VAC_UI.saving || !canSetVacation()) return;
   const d = VAC_UI.draft, data = STATE.data, tz = bizTz(), today = todayStr();
+  const blocked = vacationNotesBlock(d.id, data);
+  if (blocked) { modalError(blocked); return; }
   const problems = vacationFormProblems(d, data.vacations || [], data.employees || [], tz);
   if (problems.length) { modalError(problems[0]); return; }
   const ui = VAC_UI;   // the window this save belongs to: closed (or another one opened) while saving = left alone
@@ -20324,12 +20359,13 @@ async function vacationSaveNow(ui, endShift){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   if (!ui || VAC_UI!==ui || ui.saving || !canSetVacation()) return;
   const d = ui.draft, data = STATE.data, tz = bizTz(), today = todayStr();
+  const blocked = vacationNotesBlock(d.id, data);   // checked again: the shift question may have been open meanwhile
+  if (blocked) { if (VAC_UI===ui && document.getElementById('modal-error')) modalError(blocked); else showToast(blocked, { kind: 'warn' }); return; }
   const emp = (data.employees || []).find(e => e.id===d.employeeId), first = String((emp && emp.name) || '').split(' ')[0] || 'them';
   ui.saving = true;
   const row = { ...vacationRowFromDraft(d), business_id: AUTO_BUSINESS_ID };
   if (endShift) row.options = { ...row.options, endShift: true };
-  const noteBefore = d.id ? (data.vacationNotes || {})[d.id] || '' : '', payBefore = d.id ? (data.vacationPays || {})[d.id] || '' : '';
-  const P = vacationPrivateRow(d);
+  const P = vacationPrivatePatch(d);   // only what changed since the window opened (a new vacation: the whole row)
   const res = d.id ? await db.vacations.update(d.id, row) : await db.vacations.add(row);
   ui.saving = false;
   if (res.error) {
@@ -20341,7 +20377,7 @@ async function vacationSaveNow(ui, endShift){
   let v = res.vacation;
   const actor = getCurrentProfile()?.fullName || 'Unknown';
   // the private row, then the list's copy for the History line (a live update may have replaced the one the save returned)
-  if (!d.id || (P.note || '')!==noteBefore || P.pay!==payBefore) {
+  if (P) {
     const nr = await db.vacations.setPrivate(v.id, P);
     if (nr.error) showToast('The vacation is saved, but not its note or paid / unpaid leave: ' + nr.error.message, { kind: 'warn' });
     else v = (STATE.data.vacations || []).find(x => x.id===v.id) || v;
