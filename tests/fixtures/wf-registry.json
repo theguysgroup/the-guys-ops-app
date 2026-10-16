@@ -7013,7 +7013,7 @@
    }
   },
   "features": {
-   "errorDigest": false
+   "errorDigest": true
   }
  },
  "byAvail": {

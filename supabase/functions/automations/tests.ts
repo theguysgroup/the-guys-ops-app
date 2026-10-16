@@ -880,11 +880,14 @@ async function phase4Suite() {
     await tickAt(db2, NOW);
     const by = (id: string) => { const x = db2.T.automation_runs.find((q: any) => q.id === id); return `${x.status}${x.reason ? ":" + x.reason : ""}`; };
     eq([by("r-try"), by("r-ver"), by("r-del"), by("r-bad").slice(0, 22)], ["failed:kept failing", "waiting", "waiting", "failed:invalid: step 1"], "a 6th try fails without acting; an invalid automation never runs");
-    eq(sent.length, 1, "only the deleted one's first notification went before it was deleted");
+    // the automations' own pushes (the v2 tick also sends the daily error digest about the failed runs: G6.1, once)
+    const own = () => sent.filter((x) => x.msg.tag !== "automation-errors").length, digests = () => sent.filter((x) => x.msg.tag === "automation-errors").length;
+    eq(own(), 1, "only the deleted one's first notification went before it was deleted");
     db2.T.automations.find((a: any) => a.id === "a-ver").version = 2;
     db2.T.automations = db2.T.automations.filter((a: any) => a.id !== "a-del");
     await tickAt(db2, NOW + 11 * MIN);
-    eq([by("r-ver"), by("r-del"), sent.length], ["cancelled:automation changed", "cancelled:automation deleted", 1], "edited while waiting → cancelled; deleted → cancelled; nothing more sent");
+    eq([by("r-ver"), by("r-del"), own()], ["cancelled:automation changed", "cancelled:automation deleted", 1], "edited while waiting → cancelled; deleted → cancelled; nothing more sent");
+    ok(digests() <= 1, "the error digest at most once a day", digests());
     eq(acts(db2).filter((l: any) => l.automation_id === "a-del").map((l: any) => l.automation_name), ["Deleted one"], "the log keeps the deleted automation's name");
   }
 
@@ -4231,7 +4234,7 @@ async function phase4Suite() {
     }
     eq([wallMs("2026-02-30T09:00", 0, "UTC"), wallMs("2026-10-14 09:00", 0, "UTC"), wallMs("2028-02-29T09:00", -1, "UTC")], [null, null, Date.parse("2027-02-28T09:00:00Z")],
       "global settings: wallMs refuses 30 February and a malformed wall; 29 February moved to a year without it is the 28th");
-    eq([registryExport({ phone: false, xero: false, gbp: false, reviews: false, ai: false, teamEmail: false, atomicTags: true }, {}).features, WF_FEATURES.errorDigest], [{ errorDigest: false }, false], "global settings: the registry says the daily error alert is not sent yet (G6.1 switches it on)");
+    eq([registryExport({ phone: false, xero: false, gbp: false, reviews: false, ai: false, teamEmail: false, atomicTags: true }, {}).features, WF_FEATURES.errorDigest], [{ errorDigest: true }, true], "global settings: the registry says the daily error alert is sent (G6.1)");
   }
 
   // ── 37. G3.5 (design §10 Q5 + Q6, quiet imports): the lead's "Assigned to" end to end (Assign to user / Remove assigned
@@ -4747,6 +4750,175 @@ async function phase4Suite() {
     eq(dv1.acts, ["p1:skipped:on vacation", "t1:would>Cal Tech"], "dry run (a phase-4 row, previewAction): the push skipped 'on vacation'; the task stays with someone who is assignable");
     const dv2 = await dry([away()], auto({ id: "a39-v2", steps: [{ id: "t1", kind: "action", type: "task", title: "Call", assignees: ["e-cal"], due_days: 1, notes: "Ring" }] }));
     eq([dv2.acts, dv2.d.path[0].preview.notes], [["t1:would>Vicky Va"], "For Cal Tech (on vacation): given to Vicky Va, the stand-in.\n\nRing"], "dry run (a phase-4 row): the task's stand-in and its line");
+  }
+
+  // ── 40. G6.1 (design §3.14, §3.15, §4.9, §7 G6.1, §10 Q2 / Q7): step "test" (zero writes; every "would" kind; the
+  //        trigger's verdict and the guard verdicts; assume), Add to workflow (record_runs + the enrollable list, enroll,
+  //        unenroll; the role matrix per Q2; re-entry; a double click = one run; wrong_kind; busy) and the daily error
+  //        digest (one phone alert a day at most, Q7) ──
+  {
+    io.advance = PROD_ADVANCE;
+    const NONE = { match: "all", segments: [{ match: "all", rules: [] }] };
+    const F1 = (rules: any[]) => ({ match: "all", segments: [{ match: "all", rules }] });
+    const tr = [{ id: "t1", type: "newLead", filters: NONE }];
+    let wn = 0;
+    const flowOf = (nodes: any, o: any = {}) => ({ id: `w40-${String(++wn).padStart(4, "0")}`, business_id: "default", name: o.name || "Flow " + wn, enabled: true, armed_at: "2026-10-01T00:00:00.000Z",
+      version: 1, revision: 1, created_by_name: "Olivia Owner", trigger: {}, steps: [], definition: { schema: 2, seq: 30, entry: Object.keys(nodes)[0], triggers: o.triggers || tr, nodes },
+      settings: { reentry: "off", perRecord: true, ...(o.settings || {}) }, deleted_at: null, ...(o.row || {}) });
+    const push = (title: string, next: string | null = null) => ({ kind: "action", type: "internal_notification", config: { channel: "push", to: { roles: ["owner"] }, title }, out: { next } });
+    const mail = (next: string | null = null) => ({ kind: "action", type: "send_email", config: { subject: "Hello {first_name}", body: "{hi}, thanks." }, out: { next } });
+    const V2 = { business_id: "default", tick_lease_until: null, pruned_on: null, phase4_compat: false, error_notice_at: null };
+    const W = (over: Record<string, any[]> = {}) => world({ automation_state: [{ ...V2 }], contacts: [lead("c1"), lead("c2", { tags: ["test"], email: "tess@example.com", phone: "0412 000 111" })], ...over });
+    const writes = (db: any) => db.calls.filter((c: string) => /\.(insert|update|upsert|delete)$|^rpc:/.test(c));
+
+    // ── test: every would kind in one fixture, nothing written, nothing sent, no network ──
+    const ALL = flowOf({
+      n1: { kind: "if_else", type: "if_else", config: { branches: [{ id: "b1", name: "Has email", when: F1([{ field: "has_email", op: "true" }]) }], noneName: "Other" }, out: { b1: "n3", none: "n9" } },
+      n3: mail("n4"), n4: mail("n5"),
+      n5: { kind: "wait", type: "reply", config: { channels: ["email"], timeout: { n: 2, unit: "days" } }, out: { next: "n8", timeout: "n6" } },
+      n6: { kind: "goal", type: "stage_reached", config: { stages: ["Booked"], ifNotMet: "continue" }, out: { next: "n7" } },
+      n7: { kind: "goto", type: "goto", config: { target: "n8" }, out: {} },
+      n8: { kind: "workflow", type: "remove_from_workflow", config: { scope: "current" }, out: {} },
+      n9: push("never"),
+    }, { name: "Every kind" });
+    {
+      const db = W({ automations: [ALL] }), before = JSON.stringify(db.T), f0 = fetchCalls;
+      sent.length = 0;
+      const r: any = await handle(db, { step: "test", automation_id: ALL.id, definition: ALL.definition, settings: ALL.settings, record: { kind: "contact", id: "c1" }, assume: { n5: "timeout" } }, MANAGER, false);
+      const b = r.body, kinds = b.path.map((x: any) => `${x.stepId}:${x.would}${x.branchId ? ":" + x.branchId : ""}${x.outcome ? ":" + x.outcome : ""}${x.guard ? ":" + x.guard : ""}${x.target ? ">" + x.target : ""}`);
+      eq([r.status, b.ok, b.trigger.matched, b.ended], [200, true, true, "removed"], "test: the draft runs for the lead (manager); the trigger matches; the path ends where Remove from workflow ends it");
+      eq(kinds, ["n1:branch:b1", "n3:execute", "n4:skip:cap", "n5:wait:timeout:timeout", "n6:goal:not_met", "n7:goto>n8", "n8:execute", "n8:stop", "n9:not_reached"],
+        "test: branch, execute, skip (the daily cap guard: the path goes on), wait (assumed timeout), goal, go to, stop, not reached");
+      eq([...new Set(b.path.map((x: any) => x.would))].sort(), [...WF_TEST_WOULD].sort(), "test: every would kind of WF_TEST_WOULD comes out of the fixture");
+      eq([b.path[1].preview.subject, b.path[3].until > b.path[3].at, b.notes[0]], ["Hello Sam", true, "Test result: nothing was sent"], "test: the filled message; the wait's until after its start; the note");
+      eq([JSON.stringify(db.T) === before, writes(db), sent.length, fetchCalls - f0], [true, [], 0, 0], "test: ZERO writes (the database byte-identical, no write call, no RPC), nothing sent, no network");
+      // no assumption: a reply wait with a timeout takes its timeout; a reply already there counts; told "met" → Replied
+      const r2: any = await handle(db, { step: "test", definition: ALL.definition, settings: ALL.settings, record: { kind: "contact", id: "c1" }, assume: { n5: "met" } }, OWNER, false);
+      eq([r2.body.path.find((x: any) => x.stepId === "n5").branchId, r2.body.path.filter((x: any) => x.would === "not_reached").map((x: any) => x.stepId), r2.body.notes.includes("Tested as if published")],
+        ["next", ["n6", "n7", "n9"], true], "test: an unsaved draft (no automation_id) as if published; assumed met → the Replied branch, the timeout side not reached");
+      const db2 = W({ automations: [ALL], lead_messages: [{ id: "m1", contact_id: "c1", direction: "in", channel: "email", body: "yes", created_at: isoMs(NOW - MIN), at: isoMs(NOW - MIN) }] });
+      const r3: any = await handle(db2, { step: "test", definition: ALL.definition, settings: ALL.settings, record: { kind: "contact", id: "c1" }, assume: { n5: "timeout", n6: "met" } }, OWNER, false);
+      eq([r3.body.path.find((x: any) => x.stepId === "n5").branchId, r3.body.path.find((x: any) => x.stepId === "n6").outcome], ["timeout", "met"], "test: assume wins (timeout over a reply already there; a goal assumed met)");
+      // a test record: the trigger does not match (said, with the reason) and the path goes on as if it did; its emails show the guard
+      const r4: any = await handle(db, { step: "test", definition: ALL.definition, settings: ALL.settings, record: { kind: "contact", id: "c2" } }, OWNER, false);
+      eq([r4.body.ok, r4.body.trigger.matched, r4.body.trigger.reason, r4.body.path.find((x: any) => x.stepId === "n3").guard, r4.body.notes.some((n: string) => n.startsWith("The trigger would not start it"))], [true, false, "test_record", "test_record", true],
+        "test: a test record → trigger.matched false + reason, the path goes on, the email's guard says test_record");
+      // a filter the lead fails
+      const Fl = flowOf({ n1: push("x") }, { triggers: [{ id: "t1", type: "newLead", filters: F1([{ field: "has_tag", op: "includes", value: ["VIP"] }]) }] });
+      const r5: any = await handle(db, { step: "test", definition: Fl.definition, settings: Fl.settings, record: { kind: "contact", id: "c1" } }, OWNER, false);
+      eq([r5.body.trigger.matched, String(r5.body.trigger.reason).startsWith("filter:"), r5.body.path.map((x: any) => x.would)], [false, true, ["execute"]], "test: a filter not matched → said, the path still shown");
+      // outside the customer hours (06:00–07:00 Sydney; now 14:00): the email's guard says customer_hours and until when, the path goes on then
+      const Hm = flowOf({ n1: mail("n2"), n2: push("after") });
+      const hdb = W({ automations: [Hm], automation_settings: [{ business_id: "default", customer_from: "06:00", customer_until: "07:00" }] }), hb = JSON.stringify(hdb.T);
+      const r6: any = await handle(hdb, { step: "test", definition: Hm.definition, settings: Hm.settings, record: { kind: "contact", id: "c1" } }, OWNER, false);
+      eq([r6.body.ok, r6.body.path.map((x: any) => `${x.stepId}:${x.would}${x.guard ? ":" + x.guard : ""}`), r6.body.path[0].until, JSON.stringify(hdb.T) === hb, writes(hdb)],
+        [true, ["n1:execute:customer_hours", "n2:execute"], "2026-10-14T19:00:00.000Z", true, []], "test: the customer hours guard (held until 06:00 the next day), the path goes on; nothing written");
+      // who, and what is refused
+      const T = (me: any, o: any = {}) => handle(db, { step: "test", definition: ALL.definition, settings: ALL.settings, record: { kind: "contact", id: "c1" }, ...o }, me, false);
+      eq([(await T(VA)).status, (await T(TECH)).status, (await T(OWNER, { assume: { n5: "maybe" } })).status, (await T(OWNER, { record: { kind: "task", id: "x" } })).status, (await T(OWNER, { record: null })).status,
+        (await T(OWNER, { trigger_id: "t9" })).status], [403, 403, 422, 422, 422, 422], "test: owners and managers only; a bad assume / record kind / no record / unknown trigger refused");
+      const bad = await T(OWNER, { definition: { schema: 2, seq: 1, entry: "n1", triggers: tr, nodes: { n1: { kind: "action", type: "fax_it", config: {}, out: { next: null } } } } });
+      eq([bad.status, bad.body.ok, bad.body.problems.length > 0], [200, false, true], "test: a draft with errors → ok:false with its problems, nothing run");
+      eq([JSON.stringify(db.T) === before, writes(db), sent.length], [true, [], 0], "test: still nothing written or sent after every call above");
+    }
+
+    // ── Add to workflow ──
+    const OK = flowOf({ n1: { kind: "wait", type: "period", config: { n: 1, unit: "days" }, out: { next: "n2" } }, n2: push("Added {name}") }, { name: "Nurture" });
+    const AGAIN = flowOf({ n1: { kind: "wait", type: "period", config: { n: 1, unit: "days" }, out: { next: "n2" } }, n2: push("Again") }, { name: "Again", settings: { reentry: "after_exit" } });
+    const DRAFT = flowOf({ n1: push("x") }, { name: "Draft one", row: { enabled: false, armed_at: null } });
+    const JOB = flowOf({ n1: push("x") }, { name: "Job one", triggers: [{ id: "t1", type: "jobClosed", filters: NONE }] });
+    const MERGE = flowOf({ n1: push("Tech {technician}") }, { name: "Merge one", triggers: [{ id: "t1", type: "newLead", filters: NONE }, { id: "t2", type: "jobClosed", filters: NONE }] });
+    {
+      const db = W({ automations: [OK, AGAIN, DRAFT, JOB, MERGE] });
+      const E = (me: any, o: any = {}) => handle(db, { step: "enroll", automation_id: OK.id, record: { kind: "contact", id: "c1" }, request_id: "req-00000001", ...o }, me, false);
+      const runs = () => db.T.automation_runs.filter((r: any) => r.automation_id === OK.id);
+      eq([(await E(VA)).status, (await E(TECH)).status, (await E(VA_NOCRM)).status, runs().length], [403, 403, 403, 0], "enroll (Q2): a VA or a technician cannot add a lead");
+      const e1: any = await E(OWNER), e2: any = await E(OWNER);
+      eq([e1.status, e1.body.ok, e2.status, e2.body.again, e2.body.run_id === e1.body.run_id, runs().length], [200, true, 200, true, true, 1], "enroll: a double click (the same request id) = one run");
+      const r = runs()[0];
+      eq([r.status, r.source, r.trigger_id, r.event_key, r.cursor_step, r.due_at, r.context, r.event_type], ["waiting", "manual", null, "manual:req-00000001", "n1", isoMs(NOW), { manual: true, by: "u-owner", byName: "Olivia Owner" }, "manual"],
+        "enroll: source manual, no trigger, at the workflow's start, due now, who added it in the context");
+      ok(db.T.automation_log.some((l: any) => l.run_id === r.id && l.row_kind === "enroll" && l.detail.source === "manual"), "enroll: the enroll log row says manual");
+      const e3: any = await E(MANAGER, { request_id: "req-00000002" });
+      eq([e3.status, e3.body.reason, runs().length], [409, "already_enrolled", 1], "enroll (manager): already in the workflow → refused, no second run");
+      r.status = "done"; r.active_lock = null;
+      const e4: any = await E(OWNER, { request_id: "req-00000003" });
+      eq([e4.status, e4.body.reason], [409, "reentry_off"], "enroll: re-entry off → once only");
+      const A1: any = await handle(db, { step: "enroll", automation_id: AGAIN.id, record: { kind: "contact", id: "c1" }, request_id: "req-a0000001" }, OWNER, false);
+      db.T.automation_runs.find((x: any) => x.id === A1.body.run_id).status = "done";
+      db.T.automation_runs.find((x: any) => x.id === A1.body.run_id).active_lock = null;
+      const A2: any = await handle(db, { step: "enroll", automation_id: AGAIN.id, record: { kind: "contact", id: "c1" }, request_id: "req-a0000002" }, OWNER, false);
+      eq([A1.status, A2.status, A2.body.run_id !== A1.body.run_id], [200, 200, true], "enroll: re-entry after exit → in again once the first run ended");
+      const later: any = await E(OWNER, { automation_id: AGAIN.id, request_id: "req-a0000003", start_at: isoMs(NOW + 2 * DAYMS) });
+      eq([later.status, later.body.reason], [409, "already_enrolled"], "enroll: the active lock holds a second run while one waits");
+      db.T.automation_runs.filter((x: any) => x.automation_id === AGAIN.id).forEach((x: any) => { x.status = "done"; x.active_lock = null; });
+      const at: any = await E(OWNER, { automation_id: AGAIN.id, request_id: "req-a0000004", start_at: isoMs(NOW + 2 * DAYMS) });
+      eq([at.status, at.body.due_at, db.T.automation_runs.find((x: any) => x.id === at.body.run_id).due_at], [200, isoMs(NOW + 2 * DAYMS), isoMs(NOW + 2 * DAYMS)], "enroll: 'At a date and time' → due then");
+      const refused = async (o: any) => { const x: any = await E(OWNER, o); return `${x.status}:${x.body.reason}`; };
+      eq([await refused({ request_id: "req-b1", automation_id: OK.id }), await refused({ request_id: "req-b0000001", record: { kind: "job", id: "j1" } }), await refused({ request_id: "req-b0000002", automation_id: JOB.id }),
+        await refused({ request_id: "req-b0000003", automation_id: DRAFT.id }), await refused({ request_id: "req-b0000004", automation_id: MERGE.id }), await refused({ request_id: "req-b0000005", record: { kind: "contact", id: "c2" } }),
+        await refused({ request_id: "req-b0000006", record: { kind: "contact", id: "c404" } }), await refused({ request_id: "req-b0000007", start_at: isoMs(NOW + 31 * DAYMS) }), await refused({ request_id: "req-b0000008", automation_id: "w-none" })],
+        ["422:request_id", "409:wrong_kind", "409:wrong_kind", "409:draft", "409:merge", "409:test_record", "404:record", "422:start_at", "404:not_found"],
+        "enroll refuses: a bad request id, a job record, a job-only workflow (wrong_kind), a Draft, a lead-less blank, a test record, a gone lead, > 30 days, a gone workflow");
+      const cdb = world({ contacts: [lead("c1")], automations: [OK] });
+      eq((await handle(cdb, { step: "enroll", automation_id: OK.id, record: { kind: "contact", id: "c1" }, request_id: "req-c0000001" }, OWNER, false)).body.reason, "not_ready", "enroll: not before the event store (compat mode)");
+
+      // record_runs: the lead's runs for the office; the enrollable list (with the greyed reasons) for owners and managers
+      const rr: any = await handle(db, { step: "record_runs", record: { kind: "contact", id: "c1" } }, OWNER, false);
+      const why = Object.fromEntries(rr.body.enrollable.map((x: any) => [x.name, x.why]));
+      eq([rr.status, rr.body.canAdd, rr.body.runs.length, rr.body.runs.find((x: any) => x.id === r.id).by, rr.body.runs.find((x: any) => x.id === r.id).name],
+        [200, true, 4, "Olivia Owner", "Nurture"], "record_runs: the lead's runs, who added them, the workflow's name");
+      eq(why, { "Again": null, "Draft one": "Publish it first", "Job one": "Starts from a job, not a lead", "Merge one": "Uses details only its trigger has (e.g. {technician})", "Nurture": null },
+        "record_runs: the picker's greyed reasons (Draft, job-only, a blank only its trigger has)");
+      const rv: any = await handle(db, { step: "record_runs", record: { kind: "contact", id: "c1" } }, VA, false);
+      eq([rv.status, rv.body.canAdd, rv.body.enrollable, rv.body.runs.length], [200, false, [], 4], "record_runs: a VA with CRM access sees the lead's runs, cannot add (Q2)");
+      eq([(await handle(db, { step: "record_runs", record: { kind: "contact", id: "c1" } }, VA_NOCRM, false)).status, (await handle(db, { step: "record_runs", record: { kind: "contact", id: "c1" } }, TECH, false)).status,
+        (await handle(db, { step: "record_runs", record: { kind: "task", id: "c1" } }, OWNER, false)).status], [403, 403, 422], "record_runs: no CRM access or a technician → 403; a task record → 422");
+
+      // unenroll: a waiting run ends removed "Removed by <name>"; a moving one is busy; an ended one is not active; Q2
+      const wait1 = db.T.automation_runs.find((x: any) => x.id === at.body.run_id);
+      const U = (me: any, id: string) => handle(db, { step: "unenroll", run_id: id }, me, false);
+      eq([(await U(VA, wait1.id)).status, (await U(TECH, wait1.id)).status, wait1.status], [403, 403, "waiting"], "unenroll (Q2): a VA or a technician cannot remove");
+      wait1.status = "running";
+      const busy: any = await U(OWNER, wait1.id);
+      eq([busy.status, busy.body.reason, wait1.status], [409, "busy", "running"], "unenroll: a run moving right now → busy, untouched");
+      wait1.status = "waiting";
+      const u1: any = await U(MANAGER, wait1.id), u2: any = await U(MANAGER, wait1.id);
+      eq([u1.status, wait1.status, wait1.reason, wait1.exit_reason, wait1.active_lock, u2.status, u2.body.reason, (await U(OWNER, "r-none")).status], [200, "removed", "Removed by Max Manager", "removed_by_user", null, 409, "not_active", 404],
+        "unenroll: removed by the manager (its lock given back); again → not_active; unknown → 404");
+      ok(db.T.automation_log.some((l: any) => l.run_id === wait1.id && l.row_kind === "exit" && l.status === "removed" && l.reason === "Removed by Max Manager"), "unenroll: one exit row with who removed it");
+    }
+
+    // ── the error digest ──
+    {
+      eq([wfDigestPeople({ users: ["u-mgr", "u-va"] }, [OWNER, MANAGER, VA]), wfDigestPeople({ users: ["u-va"] }, [OWNER, MANAGER, VA]), wfDigestPeople({}, [OWNER, MANAGER]), wfDigestPeople({ users: [] }, [MANAGER])],
+        [["u-mgr"], ["u-owner"], ["u-owner"], []], "digest: the chosen people still owners / managers, else the owners");
+      eq(wfDigestText([{ name: "A", runs: 2 }, { name: "B", runs: 1 }, { name: "C", runs: 1 }, { name: "D", runs: 1 }]).body, "5 runs failed in 4 workflows: A, B, C and 1 more. Open Automation → Needs review.", "digest: the words");
+      const fail = (id: string, run: string, name: string, at: number) => ({ id, business_id: "default", run_id: run, step_id: "n1", row_kind: "action", status: "failed", automation_id: name === "A" ? "wa" : "wb", automation_name: name, at: isoMs(at) });
+      const db = W({ automation_log: [fail("l1", "r1", "A", NOW - HR), fail("l2", "r1", "A", NOW - HR), fail("l3", "r2", "B", NOW - 2 * HR), fail("l4", "r3", "A", NOW - 3 * HR), fail("l0", "r0", "Old", NOW - 8 * DAYMS)] });
+      sent.length = 0;
+      const d1: any = await errorDigest(db, NOW);
+      eq([d1.sent, d1.failed, sent.map((x) => [x.to, x.msg.title, x.msg.body, x.msg.tag]), db.T.automation_state[0].error_notice_at],
+        [true, [{ name: "A", runs: 2 }, { name: "B", runs: 1 }], [["https://push/owner", "Workflow errors", "3 runs failed in 2 workflows: A, B. Open Automation → Needs review.", "automation-errors"]], isoMs(NOW)],
+        "digest: distinct failed runs of the last 7 days, to the owners (nothing chosen), stamped");
+      ok(String(sent[0].msg.url).includes("listTab=review"), "digest: opens the Needs review list", sent[0].msg.url);
+      db.T.automation_log.push(fail("l5", "r4", "B", NOW + HR));
+      const d2: any = await errorDigest(db, NOW + 2 * HR), d3: any = await errorDigest(db, NOW + DAYMS + HR);
+      eq([d2.why, d3.sent, d3.failed, sent.length], ["today", true, [{ name: "B", runs: 1 }], 2], "digest: once a day at most; the next one counts only what failed since the last");
+      const d4: any = await errorDigest(db, NOW + 3 * DAYMS);
+      eq([d4.why, sent.length], ["none", 2], "digest: nothing failed since → nothing sent");
+      db.T.automation_settings[0].error_notify = { push: false, users: ["u-mgr"] };
+      db.T.automation_log.push(fail("l6", "r5", "A", NOW + 3 * DAYMS + HR));
+      eq([(await errorDigest(db, NOW + 4 * DAYMS)).why, sent.length], ["off", 2], "digest: the phone alert switched off → nothing sent");
+      db.T.automation_settings[0].error_notify = { push: true, users: ["u-mgr"] };
+      const d5: any = await errorDigest(db, NOW + 4 * DAYMS);
+      eq([d5.sent, sent.slice(2).map((x) => x.to)], [true, ["https://push/mgr"]], "digest: to the chosen manager");
+      // the tick sends it (event store on): one alert, then not again the same day
+      const tdb = W({ automation_log: [fail("l1", "r1", "A", NOW - HR)] });
+      sent.length = 0;
+      await tickAt(tdb, NOW); await tickAt(tdb, NOW + 5 * MIN);
+      eq([sent.filter((x) => x.msg.tag === "automation-errors").length, tdb.T.automation_state[0].error_notice_at], [1, isoMs(NOW)], "digest: the tick sends it once a day");
+    }
   }
 
   console.log(`automations: ${pass} passed, ${fail} failed`);

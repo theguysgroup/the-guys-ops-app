@@ -2641,8 +2641,8 @@ function resolveSchema(s: JSchema, mode: { inline?: BizLists; ctx?: AvailCtx; dr
   }
   return out;
 }
-// What this build does that the settings pages describe (registry `features`). G6.1 switches errorDigest on with the digest.
-export const WF_FEATURES = { errorDigest: false };
+// What this build does that the settings pages describe (registry `features`): errorDigest since G6.1 (the tick's digest).
+export const WF_FEATURES = { errorDigest: true };
 // The export DTO the builder and the AI read (step "registry").
 // deno-lint-ignore no-explicit-any
 export function registryExport(ctx: AvailCtx, biz: BizLists = {}) {
@@ -2665,7 +2665,7 @@ export function registryExport(ctx: AvailCtx, biz: BizLists = {}) {
     settings: { defaults: WF_SETTINGS_DEFAULTS },
     // what this build of the engine already does that a settings page states (Global Workflow Settings reads it):
     // errorDigest = the daily phone alert about workflow errors to the people chosen in "Notifications" (design §3.15;
-    // false until G6.1 sends it, so the page says when it starts instead of promising it)
+    // true since G6.1: the tick sends the daily digest)
     features: WF_FEATURES,
   };
 }
@@ -4102,7 +4102,8 @@ export async function advanceV2(sb: any, run: any, T: TickCtx, nowMs: number, fx
       const met = async (): Promise<boolean> => n.type === "conditions" ? (await evalC(c.when)).ok
         : !!(await messageSince(sb, contactId, { dir: n.type === "reply" ? "in" : "out", since, channels: c.channels,
           ...(n.type === "user_reply" ? { users: c.users, assigned: f.contact && f.contact.assigned_user_id } : {}) }));
-      if (await met()) { anchor = nowMs; return await release("met", "next", { resumed_by: first ? "now" : "event" }); }
+      // (a dry run told "timeout" for this step goes to its timeout even when a reply is already there, design §3.14)
+      if (!(fx.sim && fx.assume && fx.assume[id] === "timeout") && await met()) { anchor = nowMs; return await release("met", "next", { resumed_by: first ? "now" : "event" }); }
       if (timeoutAt !== null && nowMs >= timeoutAt) { anchor = timeoutAt; dueAt = timeoutAt; return await release("timeout", "timeout"); }
       const watch = watchFor(id, waitWatch(n));
       const firstRow = async () => {
@@ -4136,7 +4137,7 @@ export async function advanceV2(sb: any, run: any, T: TickCtx, nowMs: number, fx
   const goalNode = async (id: string, n: any): Promise<Res> => {
     const c = obj(n.config), w = obj(ctx._w), waited = w.id === id && Number(w.loop) === loop;
     let met = await goalMet(id, n, f, sb, goalMemo);
-    if (!met && fx.sim && fx.assume && fx.assume[id] === "met") met = true;
+    if (fx.sim && fx.assume && (fx.assume[id] === "met" || fx.assume[id] === "not_met")) met = fx.assume[id] === "met";   // the dry run's assumed outcome
     if (met) { if (waited) delete ctx._w; await stepRow(id, n, "executed", { detail: { met: true, ...(waited ? { waited: true } : {}) } }); return { go: portOf(n, "next") }; }
     if (c.ifNotMet === "end") { await stepRow(id, n, "executed", { detail: { met: false, then: "end" } }); return { done: await end("done", "goal not met", "goal_not_met") }; }
     if (c.ifNotMet === "wait") {
@@ -4402,7 +4403,7 @@ export function wfPathOfRows(list: Row[]): Row[] {
       ...(r.recipient ? { to: r.recipient } : {}), ...(r.row_kind === "action" && Object.keys(d).length ? { preview: d } : {}) };
   });
 }
-// The dry run core (design §3.14; step:"test" around it comes with G6.1): runs the workflow for one record with simFx
+// The dry run core (design §3.14; step "test" = apiTest, G6.1): runs the workflow for one record with simFx
 // on a read-only client, the clock jumping to each hold's moment. The workflow is treated as published (a Draft can be
 // tested). assume = { stepId: "met" | "timeout" | "not_met" } for reply / user-reply / conditions waits and goals (else:
 // a reply that is already there counts, then the timeout, else the path stops: ended "would_wait" with the reason).
@@ -4416,13 +4417,17 @@ export async function dryRunV2(sb: any, automation: Row, runIn: Row, T: TickCtx,
   const T2: TickCtx = { ...T, autos: new Map([[String(run.automation_id), a]]), counts: newCounts() };
   const fx = simFx(ro, a, assume);
   let clock = nowMs, ended = "";
+  // where the run was held on a step that is not a wait (a customer message held for the customer hours / the time
+  // window): seq = the rows written before it, so the test's path can say which step waited and until when
+  const holds: Row[] = [];
   try {
     for (let k = 0; k < 2000; k++) {
       Object.assign(run, await advanceV2(ro, run, T2, clock, fx));
       if (fx.rows.length > maxEntries) { ended = "step_limit"; break; }
       if (fx.halt) { ended = "would_wait"; run.reason = fx.halt; break; }
       if (run.status !== "waiting") { ended = run.exit_reason === "loop_guard" ? "loop_guard" : String(run.status); break; }
-      const w = obj(obj(run.context)._w), next = w.id === run.cursor_step && okTime(w.until) ? Date.parse(w.until) : Date.parse(run.due_at);
+      const w = obj(obj(run.context)._w), own = w.id === run.cursor_step && okTime(w.until), next = own ? Date.parse(w.until) : Date.parse(run.due_at);
+      if (!own && run.cursor_step && next > clock) holds.push({ step: String(run.cursor_step), until: iso(next), seq: fx.rows.length });
       clock = Math.max(clock, next);
       run.status = "running"; run.attempts = 1;
     }
@@ -4431,7 +4436,7 @@ export async function dryRunV2(sb: any, automation: Row, runIn: Row, T: TickCtx,
     if (e instanceof SimulationWriteError) return { ok: false, reason: "internal: write attempted" };
     throw e;
   }
-  return { ok: true, ended, reason: run.reason ?? null, path: wfPathOfRows(fx.rows), rows: fx.rows, writes: fx.writes, run };
+  return { ok: true, ended, reason: run.reason ?? null, path: wfPathOfRows(fx.rows), rows: fx.rows, writes: fx.writes, run, holds };
 }
 
 // Once a day: finished runs older than 90 days and log rows older than 180 days go.
@@ -5107,6 +5112,9 @@ export async function tick(sb: any, nowMs: number) {
     else {
       try { await housekeeping(sb, T, nowMs, started); }
       catch (e) { console.error("automations housekeeping failed:", clip(String((e as Error).message || e), 200)); }
+      // the daily error digest (G6.1, Q7): at most one phone alert a day; a failure here never stops the tick
+      try { await errorDigest(sb, nowMs); }
+      catch (e) { console.error("automations error digest failed:", clip(String((e as Error).message || e), 200)); }
     }
     return { ok: true, engine: !mode.v2 ? "phase4" : mode.compat ? "v2-compat" : "v2-events", ...T.counts };
   } finally {
@@ -5605,7 +5613,8 @@ export async function hookAdmin(sb: any, step: string, body: any, me: any, nowMs
 // role), never by a trigger: one per save whose content (definition, settings, name) changed, always on publish /
 // unpublish; a layout-only save never makes one.
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
-export const WF_API_STEPS = ["validate", "schema", "registry", "save", "publish", "duplicate", "restore", "copy_version", "migrate", "template_upload", "template_rename", "template_delete"];
+export const WF_API_STEPS = ["validate", "schema", "registry", "save", "publish", "duplicate", "restore", "copy_version", "migrate", "template_upload", "template_rename", "template_delete",
+  "test", "enroll", "unenroll", "record_runs"];
 // Reasons a version row may carry (= the SQL check). The client may only ask for save / save_version; the rest are set here.
 export const WF_VERSION_REASONS = ["create", "save", "save_version", "publish", "unpublish", "restore", "ai", "migration", "duplicate", "system_move"];
 const WF_SNAP_ON_CHANGE = ["save", "save_version", "ai", "restore", "create", "duplicate", "migration"];
@@ -6275,6 +6284,8 @@ async function apiTemplateEdit(sb: any, step: string, b: Row, nowMs: number): Pr
 // deno-lint-ignore no-explicit-any
 export async function apiStep(sb: any, step: string, body: any, me: any, nowMs: number): Promise<ApiRes> {
   if (step === "migrate") return await apiMigrate(sb, me, nowMs);
+  // G6.1: a VA with CRM access may read a lead's runs (record_runs checks who); the rest is owners and managers
+  if (step === "record_runs") return await apiRecordRuns(sb, obj(body), me);
   if (!isOffice(me)) return OFFICE_ONLY;
   const b = obj(body);
   if (step === "registry") { const C = await apiCtx(sb, true); return { status: 200, body: { ok: true, ...registryExport(C.avail, C.biz) } }; }
@@ -6289,7 +6300,358 @@ export async function apiStep(sb: any, step: string, body: any, me: any, nowMs: 
   if (step === "restore") return await apiRestore(sb, b, me, nowMs);
   if (step === "template_upload") return await apiTemplateUpload(sb, b, me, nowMs);
   if (step === "template_rename" || step === "template_delete") return await apiTemplateEdit(sb, step, b, nowMs);
+  if (step === "test") return await apiTest(sb, b, me, nowMs);
+  if (step === "enroll") return await apiEnroll(sb, b, me, nowMs);
+  if (step === "unenroll") return await apiUnenroll(sb, b, me, nowMs);
   return apiErr(400, "unknown step");
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ==== HISTORY (stage 2, design §3.1, §3.14, §3.15, §4.8, §4.9, §10 Q2 / Q7; group G6.1): step "test" (Test workflow:
+// the builder's current, unsaved draft run for one record with simFx on readOnlySb — the trigger's verdict, each step's
+// "would", the customer guards per step, ZERO writes), the lead card's "Add to workflow" (record_runs = the lead's runs +
+// the workflows it can be added to; enroll; unenroll) and the daily error digest (one phone alert a day at most to the
+// people chosen in Notifications). Who (Q2): owners and managers add and remove; a VA with CRM access may read the
+// lead's runs.
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// What a test step "would" do (design §4.8: the synthetic log rows the app maps each to).
+export const WF_TEST_WOULD = ["execute", "wait", "branch", "goal", "goto", "stop", "skip", "not_reached"];
+// assume[stepId]: a reply / office-reply / conditions wait "met" | "timeout"; a goal "met" | "not_met".
+export const WF_TEST_ASSUME = ["met", "timeout", "not_met"];
+export const WF_TEST_KINDS = ["contact", "job", "call", "chat"];
+export const WF_TEST_LIMITS = { assume: 200 };
+// The customer guards a test names on a step (the path goes on "as if it went"): a skip reason → its guard.
+export const WF_TEST_GUARDS: Record<string, string> = nul({ "opted out": "opt_out", "do not contact": "opt_out", "marked don't ask": "opt_out",
+  "already contacted today": "cap", "test record": "test_record" });
+export const wfTestGuard = (reason: unknown): string | null => {
+  const r = String(reason ?? "");
+  return has(WF_TEST_GUARDS, r) ? WF_TEST_GUARDS[r] : /customer hours/.test(r) ? "customer_hours" : null;
+};
+// What is wrong with a test request (null = fine): assume = { stepId: met | timeout | not_met } (≤ 200), record kind.
+// deno-lint-ignore no-explicit-any
+export function wfTestRequestProblem(b: any): string | null {
+  const x = obj(b), as = x.assume;
+  if (as != null && (typeof as !== "object" || Array.isArray(as))) return "assume";
+  const list = Object.entries(obj(as));
+  if (list.length > WF_TEST_LIMITS.assume || list.some(([k, v]) => !/^[A-Za-z0-9_-]{1,40}$/.test(k) || !WF_TEST_ASSUME.includes(String(v)))) return "assume";
+  const r = x.record;
+  if (r != null && (typeof r !== "object" || !WF_TEST_KINDS.includes(String(obj(r).kind)) || !String(obj(r).id ?? "").trim() || String(obj(r).id).length > 100)) return "record";
+  return null;
+}
+// The dry run's rows (simFx, in the order written) → the test's path (design §3.14): one entry per step it reached,
+// a wait's "waiting" and "wait_finished" rows folded into one entry, then every step the record would not reach.
+// C = compile(doc), start = the trigger's first step, halt = where the path stopped ("Would wait for a reply"), holds =
+// dryRunV2's holds on a message step ([{step, until, seq}]: that message waits for the customer hours; its entry says
+// guard "customer_hours" and until when, and the path goes on as if it went then).
+// deno-lint-ignore no-explicit-any
+export function wfTestPath(list: Row[], C: any, start: string | null, halt: string | null = null, holds: Row[] = []): Row[] {
+  const out: Row[] = [], seen = new Set<string>(), open = new Map<string, Row>(), held = new Map<string, string>();
+  let h = 0;
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i];
+    for (; h < holds.length && Number(holds[h].seq) <= i; h++) held.set(String(holds[h].step), String(holds[h].until));
+    const id = String(r.step_id ?? ""), n = obj(C.nodes[id]), d = obj(r.detail);
+    const e: Row = { stepId: id, kind: String(n.kind || r.step_type || ""), type: n.type ?? r.step_type ?? null, at: r.at };
+    if (r.row_kind === "exit") { if (r.status !== "finished") out.push({ ...e, would: "stop", ...(r.reason ? { why: r.reason } : {}) }); continue; }
+    seen.add(id);
+    if (r.row_kind === "action" || r.row_kind == null) {
+      const u = held.get(id) ?? null, g = r.status === "skipped" ? wfTestGuard(r.reason) : u ? "customer_hours" : null;
+      held.delete(id);
+      out.push({ ...e, would: r.status === "skipped" || r.status === "failed" ? "skip" : "execute", ...(r.reason ? { why: r.reason } : {}), ...(g ? { guard: g } : {}), ...(u ? { until: u } : {}),
+        ...(r.recipient ? { to: r.recipient } : {}), ...(Object.keys(d).length ? { preview: d } : {}) });
+      continue;
+    }
+    if (r.status === "waiting") {
+      const x: Row = { ...e, would: n.kind === "goal" ? "goal" : "wait", ...(r.next_at ? { until: r.next_at } : {}) };
+      out.push(x); open.set(id, x);
+      continue;
+    }
+    if (r.status === "wait_finished") {
+      const x = open.get(id) || (out.push({ ...e, would: "wait" }), out[out.length - 1]);
+      open.delete(id);
+      x.until = r.at; x.outcome = d.outcome ?? null;
+      if (wfPorts(n).includes("timeout")) x.branchId = d.outcome === "timeout" ? "timeout" : "next";
+      if (d.resumed_by) x.resumedBy = d.resumed_by;
+      continue;
+    }
+    if (r.status === "branch") {
+      out.push({ ...e, would: "branch", branchId: d.branch_id ?? d.path_id ?? null, ...(d.path_id ? { pathId: d.path_id } : {}), ...(d.branch_name || d.path_name ? { why: d.branch_name || d.path_name } : {}) });
+      continue;
+    }
+    if (r.status === "jumped") { out.push({ ...e, would: "goto", target: d.to ?? null }); continue; }
+    if (r.status === "skipped") { out.push({ ...e, would: "skip", ...(r.reason ? { why: r.reason } : {}) }); continue; }
+    if (n.kind === "goal") {
+      const x = open.get(id);
+      if (x) { open.delete(id); x.outcome = d.met === true ? "met" : "not_met"; x.until = r.at; } else out.push({ ...e, would: "goal", outcome: d.met === true ? "met" : "not_met" });
+      continue;
+    }
+    out.push({ ...e, would: "execute", ...(Object.keys(d).length ? { preview: d } : {}) });
+  }
+  // a hold the dry run stopped at (no assumed outcome, no timeout): the path ends there
+  for (const x of open.values()) { x.outcome = "waiting"; if (halt) x.why = halt; }
+  if (start) {
+    const reach = C.reach([start], true);
+    for (const id of C.ids) {
+      if (seen.has(id) || !reach.has(id)) continue;
+      const n = obj(C.nodes[id]);
+      out.push({ stepId: id, kind: String(n.kind ?? ""), type: n.type ?? null, would: "not_reached" });
+    }
+  }
+  return out;
+}
+// Did the trigger match this record now (design §3.14: reported, never stops the test)? The record's kind, a test
+// record, the trigger's gate and its filters — the matcher's checks that a record (no event) can answer.
+// deno-lint-ignore no-explicit-any
+async function wfTestTrigger(ro: any, t: Row | null, f: any, T: TickCtx, nowMs: number): Promise<Row> {
+  if (!t) return { id: null, type: null, matched: true, reason: null, text: "No trigger: as if added by hand" };
+  const te = triggerEntry(String(t.type)), base = { id: String(t.id ?? ""), type: String(t.type ?? "") };
+  const miss = (code: string, text?: string) => ({ ...base, matched: false, reason: code, text: text || (has(WF_REASONS, code) ? WF_REASONS[code] : code) });
+  if (!te) return miss("unavailable");
+  const rk = String(te.recordKind);
+  if (f && WF_TEST_KINDS.includes(rk) && rk !== String(f.kind)) return miss("wrong_kind");
+  const contact = f && f.contact;
+  if (T.S.ignore_test_records && isTestRecord(contact && contact.tags, T.S)) return miss("test_record");
+  const gate = EV_MATCH_GATES[evTriggerType(String(t.type))];
+  if (gate && f && (await factValue(f, ro, { field: gate.field, op: "true" })) !== true) return miss(contact ? gate.reason : "no_contact");
+  const filters = obj(t.filters);
+  if (f && (Array.isArray(filters.segments) ? filters.segments : []).some((s: unknown) => segRules(s).length)) {
+    const env: CondEnv = { nowMs, tz: T.S.timezone, list: (field) => { const s = has(WF_FIELDS, field) ? WF_FIELDS[field].source : undefined; return s && s.startsWith("catalog.") ? catList(T.cat, s.slice(8)) : []; } };
+    const r = await evalCondition(filters, (rule) => factValue(f, ro, rule), env);
+    if (!r.ok) {
+      const bad = r.conds.filter((x) => !x.ok), c = bad.find((x) => x.field === r.failed) || bad[bad.length - 1];
+      return miss(`filter:${c ? c.field : String(r.failed || "filter")}`, filterReasonText(c ? c.label : String(r.failed || "filter"), c ? c.received : null, c ? c.expected : null));
+    }
+  }
+  return { ...base, matched: true, reason: null, text: null };
+}
+// step "test" {automation_id?, definition, settings, trigger_id?, record:{kind,id}?, assume?} (owners, managers): the
+// current draft (a Draft as if published) for one record. Writes NOTHING: every read through readOnlySb, every write of
+// the run recorded by simFx; a write attempt answers { ok: false, reason: "internal: write attempted" }.
+// → { ok, problems, trigger, path, ended, notes }
+// deno-lint-ignore no-explicit-any
+export async function apiTest(sb: any, b: Row, me: any, nowMs: number): Promise<ApiRes> {
+  if (!isOffice(me)) return OFFICE_ONLY;
+  const bad = wfTestRequestProblem(b);
+  if (bad) return apiErr(422, bad, { text: bad === "assume" ? "Assume is met, timeout or not met, per step" : "A test runs for a lead, job, call or chat" });
+  const ro = readOnlySb(sb);
+  let stored: Row | null = null;
+  if (b.automation_id != null) {
+    stored = await readAutomation(ro, String(b.automation_id));
+    if (!stored || stored.deleted_at) return apiErr(404, "not found");
+  }
+  const definition = b.definition !== undefined ? b.definition : stored ? stored.definition : null;
+  if (!definition || typeof definition !== "object" || obj(definition).schema !== 2) return apiErr(422, "definition", { text: "Nothing to test yet" });
+  const T = await loadContext(ro, nowMs);
+  const doc = obj(definition), problems = validateStructure(doc, { maxSteps: wfMaxSteps(T.cat) }).filter((i) => i.severity === "error");
+  if (problems.length) return { status: 200, body: { ok: false, problems, trigger: null, path: [], ended: null, notes: [] } };
+  const trigs = (Array.isArray(doc.triggers) ? doc.triggers : []).map(obj);
+  const t = b.trigger_id != null ? trigs.find((x) => String(x.id) === String(b.trigger_id)) || null : trigs.find((x) => x.disabled !== true) || null;
+  if (b.trigger_id != null && !t) return apiErr(422, "trigger_id", { text: "That trigger is not in this workflow" });
+  const rec = obj(b.record), kind = rec.kind ? String(rec.kind) : "", rid = rec.id != null ? String(rec.id).trim() : "";
+  const te = t ? triggerEntry(String(t.type)) : null;
+  if (!rid && !(te && te.contactless)) return apiErr(422, "record", { text: "Select a record to test this workflow" });
+  const a: Row = { ...(stored || {}), id: stored ? stored.id : "test", business_id: BUSINESS_ID, name: String((stored && stored.name) || "Test"),
+    created_by_name: String((stored && stored.created_by_name) || me.full_name || ""), definition, settings: b.settings !== undefined ? b.settings : stored ? stored.settings : {},
+    version: stored ? Number(stored.version) || 1 : 1, revision: stored ? Number(stored.revision) || 1 : 1 };
+  // the record (a lead, or a job / call / chat with its lead card), read once; gone → said, nothing run
+  let contactId: string | null = null;
+  if (rid && kind !== "contact") {
+    const table = ({ job: "jobs", call: "calls", chat: "chat_sessions" } as Record<string, string>)[kind];
+    const { data: row } = await ro.from(table).select("id, contact_id").eq("id", rid).maybeSingle();
+    if (!row) return { status: 200, body: { ok: false, problems: [], reason: "record not found", trigger: null, path: [], ended: null, notes: [] } };
+    contactId = row.contact_id ? String(row.contact_id) : null;
+  } else if (rid) contactId = rid;
+  const runIn: Row = { record_kind: rid ? kind : "none", record_id: rid || null, contact_id: contactId, event_type: t ? String(t.type) : "manual", event_at: iso(nowMs),
+    trigger_id: t ? String(t.id) : null, source: t ? "trigger" : "manual", context: {} };
+  const f = await loadFactsV2(ro, { ...runIn, created_at: runIn.event_at }, T, nowMs, runIn.trigger_id);
+  if (rid && !f) return { status: 200, body: { ok: false, problems: [], reason: "record not found", trigger: null, path: [], ended: null, notes: [] } };
+  const trigger = await wfTestTrigger(ro, t, f, T, nowMs);
+  const d = await dryRunV2(sb, a, runIn, T, nowMs, WF_RUN_LIMITS.pathEntries, obj(b.assume) as Record<string, string>);
+  if (!d.ok) return { status: 200, body: { ok: false, problems: [], reason: d.reason, trigger, path: [], ended: null, notes: [] } };
+  const C = compile(doc), start = C.first(t ? String(t.id) : null);
+  const path = wfTestPath(d.rows || [], C, start, d.ended === "would_wait" ? d.reason : null, d.holds || []);
+  const notes = ["Test result: nothing was sent"];
+  if (trigger.matched === false) notes.push(`The trigger would not start it (${trigger.text}); the path shows what would happen if it did`);
+  if (!a.enabled || !a.armed_at) notes.push("Tested as if published");
+  return { status: 200, body: { ok: true, problems: [], trigger, path, ended: d.ended, notes } };
+}
+
+// ── Add to workflow (design §4.9; Q2: owners and managers) ──
+export const WF_MANUAL = { startDays: 30, runs: 50, enrollable: 200, requestId: /^[A-Za-z0-9_-]{8,64}$/ };
+// A lead's runs may be read by the office: owners, managers, and a VA with CRM access (the lead card's block).
+// deno-lint-ignore no-explicit-any
+export const wfMayReadRuns = (me: any) => isOffice(me) || (!!me && me.role === "va" && !!obj(me.permissions).crm);
+const LEAD_KINDS = ["contact", "hook", "none"];
+const KIND_WORD: Record<string, string> = nul({ job: "a job", call: "a call", chat: "a chat", task: "a task", supplier: "a supplier", employee: "an employee" });
+// Can a lead be added to this workflow by hand? null = yes, else { code, why } (the picker greys it with why; enroll
+// refuses with code). Published (not a Draft), valid, starts from a lead (not only from a job / call / chat), and its
+// steps use only blanks a lead has.
+// deno-lint-ignore no-explicit-any
+export function wfManualWhy(a: Row | null, cat: any): { code: string; why: string } | null {
+  if (!a || a.deleted_at || (a.business_id && a.business_id !== BUSINESS_ID)) return { code: "not_found", why: "The workflow is gone" };
+  if (a.enabled !== true || !a.armed_at) return { code: "draft", why: "Publish it first" };
+  if (!wfEligible(a, cat)) return { code: "invalid", why: "Fix its errors first" };
+  const doc = runDocOf(a).doc, kinds = (Array.isArray(doc.triggers) ? doc.triggers : []).map(obj).filter((t: Row) => t.disabled !== true)
+    .map((t: Row) => { const e = triggerEntry(String(t.type)); return e ? String(e.recordKind) : "none"; });
+  if (kinds.length && kinds.every((k: string) => !LEAD_KINDS.includes(k))) return { code: "wrong_kind", why: `Starts from ${KIND_WORD[kinds[0]] || "another record"}, not a lead` };
+  for (const n of Object.values(obj(doc.nodes)).map(obj)) {
+    if (n.kind !== "action") continue;
+    for (const k of blanksIn(n.config)) {
+      const m = has(WF_MERGE, k) ? WF_MERGE[k] : null;
+      if (k.startsWith("trigger.") || (m && (m.triggers || (m.recordKinds !== "*" && !m.recordKinds.includes("contact"))))) return { code: "merge", why: `Uses details only its trigger has (e.g. {${k}})` };
+    }
+  }
+  return null;
+}
+const RUN_COLS = "id, automation_id, status, cursor_step, due_at, created_at, finished_at, source, trigger_id, context, reason, exit_reason, record_kind, record_id";
+// step "record_runs" {record:{kind,id}} → { runs (newest first, ≤ 50), enrollable [{id, name, why}] (owners and
+// managers only: the workflows this lead can be added to, why = null or the greyed reason), canAdd }.
+// deno-lint-ignore no-explicit-any
+export async function apiRecordRuns(sb: any, b: Row, me: any): Promise<ApiRes> {
+  if (!wfMayReadRuns(me)) return apiErr(403, "not allowed");
+  const rec = obj(b.record), kind = String(rec.kind || ""), id = String(rec.id ?? "").trim();
+  if (!WF_TEST_KINDS.includes(kind) || !id || id.length > 100) return apiErr(422, "record");
+  let q = sb.from("automation_runs").select(RUN_COLS).eq("business_id", BUSINESS_ID);
+  q = kind === "contact" ? q.eq("contact_id", id) : q.eq("record_kind", kind).eq("record_id", id);
+  const list = await rows(q.order("created_at", { ascending: false }).limit(WF_MANUAL.runs));
+  const canAdd = isOffice(me);
+  const ids = [...new Set(list.map((r) => String(r.automation_id)))];
+  const autos = canAdd ? await rows(sb.from("automations").select("*").eq("business_id", BUSINESS_ID).is("deleted_at", null).order("name").limit(WF_MANUAL.enrollable))
+    : ids.length ? await rows(sb.from("automations").select("id, name, definition").eq("business_id", BUSINESS_ID).in("id", ids)) : [];
+  const byId = new Map(autos.map((x) => [String(x.id), x]));
+  const missing = ids.filter((x) => !byId.has(x));
+  if (missing.length) for (const x of await rows(sb.from("automations").select("id, name, definition").eq("business_id", BUSINESS_ID).in("id", missing))) byId.set(String(x.id), x);
+  const runs = list.map((r) => {
+    const a = byId.get(String(r.automation_id)), n = a && r.cursor_step ? obj(obj(obj(a.definition).nodes)[String(r.cursor_step)]) : {};
+    const c = obj(r.context);
+    return { id: r.id, automation_id: r.automation_id, name: String((a && a.name) || "Deleted workflow"), status: r.status, step: Object.keys(n).length ? wfStepName(n) : null,
+      due_at: r.status === "waiting" ? r.due_at : null, created_at: r.created_at, finished_at: r.finished_at ?? null, source: r.source || "trigger",
+      ...(r.source === "manual" && c.byName ? { by: clip(String(c.byName), 60) } : {}), reason: r.reason ?? null };
+  });
+  let enrollable: Row[] = [];
+  if (canAdd) {
+    const T = await loadContext(sb, io.now());
+    enrollable = autos.map((a) => { const w = wfManualWhy(wfRunRow(a), T.cat); return { id: a.id, name: String(a.name || ""), why: w ? w.why : null }; });
+  }
+  return { status: 200, body: { ok: true, runs, enrollable, canAdd } };
+}
+// step "enroll" {automation_id, record:{kind:"contact", id}, start_at?, request_id} (owners, managers): the lead into a
+// Published workflow at its start (no trigger: no trigger checks; the lead's details only). The event key is
+// manual:<request_id>, so a double click is one run; re-entry as the workflow's settings say.
+// deno-lint-ignore no-explicit-any
+export async function apiEnroll(sb: any, b: Row, me: any, nowMs: number): Promise<ApiRes> {
+  if (!isOffice(me)) return OFFICE_ONLY;
+  const reqId = String(b.request_id ?? "");
+  if (!WF_MANUAL.requestId.test(reqId)) return apiErr(422, "request_id");
+  const rec = obj(b.record), kind = String(rec.kind || "contact"), cid = String(rec.id ?? "").trim();
+  if (!cid || cid.length > 100) return apiErr(422, "record", { text: "Pick a lead" });
+  if (kind !== "contact") return apiErr(409, "wrong_kind", { text: WF_REASONS.wrong_kind });
+  let due = nowMs;
+  if (b.start_at != null && b.start_at !== "") {
+    const s = Date.parse(String(b.start_at));
+    if (!okTime(b.start_at) || s > nowMs + WF_MANUAL.startDays * DAY) return apiErr(422, "start_at", { text: `Pick a time in the next ${WF_MANUAL.startDays} days` });
+    due = Math.max(nowMs, s);
+  }
+  const mode = await engineMode(sb);
+  if (mode.compat) return apiErr(409, "not_ready", { text: "Adding a lead by hand starts with the next engine update" });
+  const a = wfRunRow(await readAutomation(sb, String(b.automation_id ?? "")));
+  const T = await loadContext(sb, nowMs), why = wfManualWhy(a, T.cat);
+  if (why) return apiErr(why.code === "not_found" ? 404 : 409, why.code, { text: why.why });
+  const { data: c } = await readContactsV2(sb, (q) => q.eq("id", cid).maybeSingle());
+  if (!c) return apiErr(404, "record", { text: "The lead is gone" });
+  if (isTestRecord(c.tags, T.S)) return apiErr(409, "test_record", { text: WF_REASONS.test_record });
+  const R = runDocOf(a), key = `manual:${reqId}`, nowIso = iso(nowMs);
+  const ek = enrollKeyOf(R.settings, { record_kind: "contact", record_id: cid, contact_id: cid, event_key: key });
+  const { data: res, error } = await sb.rpc("automation_enroll", {
+    p_business: BUSINESS_ID, p_automation: a.id, p_version: Number(a.version) || 1, p_revision: Number(a.revision) || 1, p_trigger: null, p_event_key: key,
+    p_event_type: "manual", p_event_at: nowIso, p_record_kind: "contact", p_record_id: cid, p_contact: cid, p_enroll_key: ek.key, p_lock_key: ek.lock,
+    p_reentry: R.settings.reentry, p_start: R.C.first(null), p_context: { manual: true, by: me.id ?? null, byName: clip(String(me.full_name || ""), 60) }, p_source: "manual",
+    p_chain: 0, p_cause: null, p_parent: null, p_stop_on_reply: R.settings.stopOnResponse === true, p_now: nowIso, p_due: iso(due) });
+  if (error) throw new Error(String(error.message || error));
+  const s = String(res || "");
+  if (s.startsWith("enrolled:")) return { status: 200, body: { ok: true, run_id: s.slice(9), due_at: iso(due) } };
+  // the same click again (a double click, a retry): the run it made (its own lock answers already_enrolled first)
+  if (s === "duplicate_event" || s === "already_enrolled") {
+    const { data: r } = await sb.from("automation_runs").select("id, due_at").eq("automation_id", a.id).eq("event_key", key).maybeSingle();
+    if (r) return { status: 200, body: { ok: true, run_id: r.id, due_at: r.due_at, again: true } };
+  }
+  return apiErr(409, s || "not_found", { text: has(WF_REASONS, s) ? WF_REASONS[s] : "Not added" });
+}
+// step "unenroll" {run_id} (owners, managers): a waiting run ends removed ("Removed by <name>"); a run moving right now
+// → busy (try again); an ended one → not_active.
+// deno-lint-ignore no-explicit-any
+export async function apiUnenroll(sb: any, b: Row, me: any, nowMs: number): Promise<ApiRes> {
+  if (!isOffice(me)) return OFFICE_ONLY;
+  const id = String(b.run_id ?? "").trim();
+  if (!id || id.length > 100) return apiErr(422, "run_id");
+  const cols = "id, automation_id, automation_version, revision, trigger_id, record_kind, record_id, contact_id, cursor_step, steps_done, loop, status";
+  const { data: run, error } = await sb.from("automation_runs").select(cols).eq("id", id).eq("business_id", BUSINESS_ID).maybeSingle();
+  if (error) throw new Error(String(error.message || error));
+  if (!run) return apiErr(404, "not found");
+  const busy = apiErr(409, "busy", { text: "It is moving to its next step right now: try again in a minute" });
+  if (run.status === "running") return busy;
+  if (run.status !== "waiting") return apiErr(409, "not_active", { text: "It is not in this workflow any more" });
+  const now = iso(nowMs), by = clip(String(me.full_name || "someone"), 60), reason = `Removed by ${by}`;
+  const { data: gone, error: ue } = await sb.from("automation_runs").update({ status: "removed", exit_reason: "removed_by_user", reason, active_lock: null, finished_at: now, updated_at: now,
+    watch: null, recheck: false }).eq("id", id).eq("status", "waiting").select("id");
+  if (ue) throw new Error(String(ue.message || ue));
+  if (!gone || !gone.length) return busy;   // a tick took it meanwhile
+  const a = await readAutomation(sb, String(run.automation_id));
+  const { error: le } = await sb.from("automation_log").insert({ business_id: BUSINESS_ID, run_id: run.id, step_id: run.cursor_step || "end", row_kind: "exit", status: "removed", reason,
+    channel: null, audience: null, automation_id: run.automation_id, automation_name: clip(String((a && a.name) || "automation"), LIMITS.name), record_kind: run.record_kind, record_id: run.record_id,
+    contact_id: run.contact_id, trigger_id: run.trigger_id ?? null, version: run.automation_version ?? null, revision: run.revision ?? null, seq: Number(run.steps_done) || 0, loop: Number(run.loop) || 0,
+    detail: { exit_reason: "removed_by_user", by: me.id ?? null, by_name: by }, at: now });
+  if (le) console.error("automation exit log failed:", clip(String(le.message || le), 200));
+  return { status: 200, body: { ok: true, removed: true } };
+}
+
+// ── the error digest (design §3.15, Q7): at most once in 24 h, the failed runs since the last digest (at most 7 days
+// back), one phone alert to the people chosen in Notifications who are still owners or managers (none left, or none
+// chosen: the owners). Phone alert switched off (push: false) or nothing failed: nothing sent. The claim on
+// automation_state.error_notice_at (compare and set) makes two ticks send it once. ──
+export const WF_DIGEST = { everyMs: DAY, backMs: 7 * DAY, names: 3, rows: 1000 };
+// Who gets it (pure): the chosen people still owners / managers, else the owners.
+export function wfDigestPeople(notify: unknown, profiles: Row[]): string[] {
+  const x = obj(notify), chosen = Array.isArray(x.users) ? x.users.map(String) : [];
+  let ids = profiles.filter((p) => (p.role === "owner" || p.role === "manager") && chosen.includes(String(p.id))).map((p) => String(p.id));
+  if (!ids.length) ids = profiles.filter((p) => p.role === "owner").map((p) => String(p.id));
+  return [...new Set(ids)];
+}
+// The words (pure): failed = [{ name, runs }] (most runs first).
+export function wfDigestText(failed: { name: string; runs: number }[]): { title: string; body: string } {
+  const runs = failed.reduce((s, x) => s + x.runs, 0), n = failed.length, more = n - WF_DIGEST.names;
+  const names = failed.slice(0, WF_DIGEST.names).map((x) => clip(x.name, 60)).join(", ") + (more > 0 ? ` and ${more} more` : "");
+  return { title: "Workflow errors", body: `${runs} run${runs === 1 ? "" : "s"} failed in ${n} workflow${n === 1 ? "" : "s"}: ${names}. Open Automation → Needs review.` };
+}
+// deno-lint-ignore no-explicit-any
+export async function errorDigest(sb: any, nowMs: number): Promise<Row> {
+  const { data: st, error } = await sb.from("automation_state").select("error_notice_at").eq("business_id", BUSINESS_ID).maybeSingle();
+  if (error) throw new Error("automation_state not read: " + clip(String(error.message || error), 200));
+  if (!st) return { sent: false, why: "no state" };
+  const last = okTime(st.error_notice_at) ? Date.parse(st.error_notice_at) : null;
+  if (last !== null && nowMs - last < WF_DIGEST.everyMs) return { sent: false, why: "today" };
+  const { data: s } = await sb.from("automation_settings").select("error_notify").eq("business_id", BUSINESS_ID).maybeSingle();
+  const notify = obj(s && s.error_notify);
+  if (notify.push === false) return { sent: false, why: "off" };
+  const since = iso(Math.max(last ?? 0, nowMs - WF_DIGEST.backMs));
+  const list = await rows(sb.from("automation_log").select("automation_id, automation_name, run_id").eq("business_id", BUSINESS_ID).eq("status", "failed").gt("at", since)
+    .order("at", { ascending: false }).limit(WF_DIGEST.rows));
+  if (!list.length) return { sent: false, why: "none" };
+  const by = new Map<string, { name: string; runs: Set<string> }>();
+  for (const r of list) {
+    const k = String(r.automation_id ?? ""), x = by.get(k) || { name: String(r.automation_name || "Workflow"), runs: new Set<string>() };
+    x.runs.add(String(r.run_id ?? "")); by.set(k, x);
+  }
+  const failed = [...by.values()].map((x) => ({ name: x.name, runs: x.runs.size })).sort((p, q) => q.runs - p.runs || (p.name < q.name ? -1 : 1));
+  let q = sb.from("automation_state").update({ error_notice_at: iso(nowMs) }).eq("business_id", BUSINESS_ID);
+  q = last === null ? q.is("error_notice_at", null) : q.eq("error_notice_at", st.error_notice_at);
+  const { data: got, error: ce } = await q.select("business_id");
+  if (ce) throw new Error(String(ce.message || ce));
+  if (!got || !got.length) return { sent: false, why: "taken" };
+  const people = wfDigestPeople(notify, await rows(sb.from("profiles").select("id, role").in("role", ["owner", "manager"])));
+  const w = wfDigestText(failed);
+  const out = people.length ? await sendTo(sb, people, { title: w.title, body: w.body, url: wfLink("", null, { base: APP_URL, listTab: "review" }), tag: "automation-errors" }, await vapidKeys(sb)) : null;
+  return { sent: true, people: people.length, failed, push: out };
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
