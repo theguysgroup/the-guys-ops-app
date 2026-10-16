@@ -3992,6 +3992,26 @@ async function phase4Suite() {
         template_drafts: { my_zz99xx11: { name: "Welcome", channel: "email", body: "{hi}, welcome." } } });
       eq([td.status, td.body.templates, db.T.settings[0].catalog.templates.my_zz99xx11, db.T.settings[0].catalog.msgTemplates.my_zz99xx11.createdBy], [200, ["my_zz99xx11"], "{hi}, welcome.", "Olivia Owner"], "save: the template words come first (catalog), then the workflow");
       eq((await api(db, "save", { automation_id: null, name: "Bad", definition: d1, template_drafts: { "../x": { channel: "email", body: "x" } } })).status, 422, "save: a template key that isn't one of ours is refused");
+      // review round 2: never on what the browser did not know. A draft sent as new on a key made meanwhile (other words)
+      // → 409 template_taken; a change of a saved key that another Published workflow sends → 409 template_shared with its
+      // name, until the person said yes (templates_confirmed)
+      {
+        const tdDoc = doc({ e1: { kind: "action", type: "send_email", config: { subject: "Hi", templateKey: "my_zz99xx11" }, out: { next: null } } });
+        const tk1 = await api(db, "save", { automation_id: null, name: "Stale tab", definition: tdDoc, template_drafts: { my_zz99xx11: { name: "Mine", channel: "email", body: "Other words", new: true } } });
+        const tk2 = await api(db, "save", { automation_id: null, name: "Retry", definition: tdDoc, template_drafts: { my_zz99xx11: { name: "Welcome", channel: "email", body: "{hi}, welcome.", new: true } } });
+        eq([tk1.status, tk1.body.reason, tk1.body.keys, tk2.status, db.T.settings[0].catalog.templates.my_zz99xx11], [409, "template_taken", ["my_zz99xx11"], 200, "{hi}, welcome."],
+          "save: a new template on a key someone made meanwhile with other words → 409, nothing written (the same words: a retry, fine)");
+        const tdRow = db.T.automations.find((a: any) => a.id === td.body.id);
+        tdRow.enabled = true;   // (as Published: the check reads the enabled rows)
+        const sh1 = await api(db, "save", { automation_id: null, name: "Edits words", definition: tdDoc, template_drafts: { my_zz99xx11: { name: "Welcome", channel: "email", body: "New words" } } });
+        const sh2 = await api(db, "save", { automation_id: td.body.id, expected_revision: Number(db.T.automations.find((a: any) => a.id === td.body.id).revision), name: "New words", definition: tdDoc,
+          template_drafts: { my_zz99xx11: { name: "Welcome", channel: "email", body: "Its own words" } } });
+        const before = db.T.settings[0].catalog.templates.my_zz99xx11;
+        const sh3 = await api(db, "save", { automation_id: null, name: "Edits words", definition: tdDoc, templates_confirmed: true, template_drafts: { my_zz99xx11: { name: "Welcome", channel: "email", body: "New words" } } });
+        eq([sh1.status, sh1.body.reason, sh1.body.names, sh2.status, before, sh3.status, db.T.settings[0].catalog.templates.my_zz99xx11], [409, "template_shared", ["New words"], 200, "Its own words", 200, "New words"],
+          "save: changing a template another Published workflow sends → 409 with its name; the workflow itself may change it; with the yes → written");
+        tdRow.enabled = false;
+      }
       // where a copy of a ready-made came from (template_key): kept by the save on a new one only (since SQL Part 3 · G3.4
       // the app can't write the column); a key that isn't one, or one sent with an existing workflow, is ignored
       const tk = await api(db, "save", { automation_id: null, name: "Copy of review", definition: d1, template_key: "team:new-lead_1" });
@@ -4048,6 +4068,12 @@ async function phase4Suite() {
       eq([r.status, r.body.enabled], [200, true], "a manager may edit the other steps (the webhook kept exactly as it was)");
       r = await api(db, "save", { automation_id: id, expected_revision: rev(), name: "To the CRM", definition: doc({ n1: push("new words", "h1"), h1: hook("https://crm.example.com/v2") }) });
       eq([r.status, r.body.enabled, r.body.drafted], [200, true, false], "the owner changes the path on the same host: it stays on");
+      // review round 2: validate says first that the save makes it a Draft (and stops what waits in it): the builder asks
+      const vNew = await api(db, "validate", { automation_id: id, definition: doc({ n1: push("new words", "h1"), h1: hook("https://other.example.net/in") }) });
+      const vSame = await api(db, "validate", { automation_id: id, definition: doc({ n1: push("other words", "h1"), h1: hook("https://crm.example.com/v2") }) });
+      const vAi = await api(db, "validate", { automation_id: id, definition: doc({ n1: push("other words", "h1"), h1: hook("https://crm.example.com/v2") }), ai_edited: true });
+      eq([vNew.status, vNew.body.willDraft, vNew.body.shapeChanged, typeof vNew.body.waitingRunsAffected, vSame.body.willDraft, vAi.body.willDraft], [200, true, false, "number", false, true],
+        "validate: a webhook to a new host (or Workflow AI's change) → willDraft, with what waits in it; the same host → not");
       r = await api(db, "save", { automation_id: id, expected_revision: rev(), name: "To the CRM", definition: doc({ n1: push("new words", "h1"), h1: hook("https://other.example.net/in") }) });
       eq([r.status, r.body.enabled, r.body.drafted, row(id).enabled], [200, false, true, false], "the owner points the webhook at a new host: Draft at once");
       r = await api(db, "publish", { automation_id: id, on: true });
@@ -4537,10 +4563,10 @@ async function phase4Suite() {
       doc.nodes[ifId].config.branches[0].when.segments[0].rules = [{ field: "lead.postcode", op: "is", v: "2000" }];
       ok(!!wfToFlat(doc) && validateDoc(doc, { builder: "standard", catalog: CATALOG }).errors.length === 0, "runs the old way: the edit is still straight and fine by the v2 checks");
       const v = await api(db, "validate", { automation_id: ID, definition: doc, editor: "builder" }), vOld = await api(db, "validate", { automation_id: ID, definition: doc });
-      eq([v.status, (v.body.errors || []).map((x: any) => x.code), (vOld.body.errors || []).length], [200, ["E_RUNS_OLD_WAY"], 0], "runs the old way: validate from the builder says so (the old editor's own call is unchanged)");
+      eq([v.status, (v.body.errors || []).map((x: any) => x.code), (vOld.body.errors || []).length], [200, ["E_RUNS_OLD_WAY", "E_EDITOR_BLOCK"], 0], "runs the old way: validate from the builder says so, with the old editor's own block too (its call is unchanged)");
       ok(/^It still runs the old way, which refuses this: .*lead\.postcode/.test(v.body.errors[0].text), "runs the old way: in words, with the phase-4 rule's reason");
       const s1 = await api(db, "save", { automation_id: ID, expected_revision: row().revision, name: "Gate", definition: doc, editor: "builder" });
-      eq([s1.status, (s1.body.errors || []).map((x: any) => x.code), row().layout.editor], [200, ["E_RUNS_OLD_WAY"], "builder"], "runs the old way: a Draft is saved with the error (as every Draft error)");
+      eq([s1.status, (s1.body.errors || []).map((x: any) => x.code), row().layout.editor], [200, ["E_RUNS_OLD_WAY", "E_EDITOR_BLOCK"], "builder"], "runs the old way: a Draft is saved with the errors (as every Draft error)");
       const p1 = await api(db, "publish", { automation_id: ID, on: true, confirm: true, expected_revision: row().revision });
       eq([p1.status, (p1.body.errors || [{}])[0].code, row().enabled], [422, "E_RUNS_OLD_WAY", false], "runs the old way: publish refuses it (never a Published row the engine would not enroll)");
       // published before the edit: the save itself is refused, the live row is unchanged and still eligible
@@ -4553,6 +4579,43 @@ async function phase4Suite() {
       const branchy = JSON.parse(JSON.stringify(doc)); branchy.nodes.x9 = { kind: "action", type: "add_task", config: { title: "Call" }, out: { next: null } };
       eq([wfToFlat(branchy), wfRunsOldProblems({ ...row(), definition: branchy }, CATALOG)], [null, []], "runs the old way: a doc that is not a straight chain runs as a doc: nothing to say");
       eq(wfRunsOldProblems({ ...row(), definition: doc, settings: {} }, CATALOG), [], "runs the old way: with stage-2 settings the row runs its doc: nothing to say");
+    }
+    // review round 2 (16 Oct): a migrated row the new builder saved (a sticky note: layout.editor "builder") still runs as
+    // phase 4 while it is a straight chain with the upgrade's settings → the old editor's blocks stay errors of validate /
+    // save / publish (wfRunsOldProblems → E_EDITOR_BLOCK): the 14 corpus shapes stay refused, the other 34 still go on
+    {
+      const got2: Record<string, string> = {}, other2: string[] = [];
+      for (const S of SHAPES) {
+        const db = world38(S);
+        await api(db, "migrate");
+        const r0 = db.T.automations[0];
+        const s = await api(db, "save", { automation_id: ID38, expected_revision: r0.revision, name: "Shape", definition: JSON.parse(JSON.stringify(r0.definition)), layout: { v: 1, stickies: [{ id: "k1", text: "Check" }] }, editor: "builder" });
+        if (s.status !== 200 || db.T.automations[0].layout.editor !== "builder") { other2.push(`${S.name}: save ${s.status}`); continue; }
+        const p = await api(db, "publish", { automation_id: ID38, on: true, confirm: true, expected_revision: db.T.automations[0].revision });
+        if (p.status === 422) { const blk = (p.body.errors || []).find((x: any) => x.code === "E_EDITOR_BLOCK"); got2[S.name] = blk ? blk.text : `(${(p.body.errors || [{}])[0].code})`; if (db.T.automations[0].enabled) other2.push(`${S.name}: switched on`); }
+        else if (!(p.status === 200 && db.T.automations[0].enabled === true)) other2.push(`${S.name}: ${p.status}`);
+      }
+      eq([Object.keys(got2).sort(), other2, Object.entries(got2).filter(([n, t]) => !t.startsWith("(") && t !== FX.corpus[n])], [Object.keys(FX.corpus).sort(), [], []],
+        "saved by the new builder (a sticky note) while it still runs as phase 4: exactly the 14 corpus shapes are still refused (the old editor's first words where it shows them), the other 34 still publish");
+      eq(got2["A blank that cannot be filled"], FX.corpus["A blank that cannot be filled"], "… e.g. a new lead's email about {technician}: never live with the blank empty");
+      const db = world38(SHAPES.find((s: any) => s.name === "A blank that cannot be filled"));
+      await api(db, "migrate");
+      const v = await api(db, "validate", { automation_id: ID38, definition: db.T.automations[0].definition, editor: "builder" });
+      eq([v.status, (v.body.errors || []).map((x: any) => x.code)], [200, ["E_EDITOR_BLOCK"]], "… and the builder's validate already says so (its Errors panel and the save)");
+    }
+    // review round 2: the builder says whether it thinks the workflow is Published (a publish never bumps the revision):
+    // one published or switched to Draft meanwhile → 409 "status" (the builder then saves the way that status saves)
+    {
+      const db = world38(SHAPES.find((s: any) => s.name === "new lead → push"));
+      await api(db, "migrate");
+      const r0 = db.T.automations[0], body = { automation_id: ID38, name: "Shape", definition: JSON.parse(JSON.stringify(r0.definition)), editor: "builder" };
+      const s1 = await api(db, "save", { ...body, expected_revision: r0.revision, expected_enabled: true });
+      eq([s1.status, s1.body.reason, s1.body.enabled, db.T.automations[0].revision], [409, "status", false, r0.revision], "save: the builder thinks it is Published, it is a Draft → 409 status, nothing written");
+      await api(db, "publish", { automation_id: ID38, on: true, confirm: true });
+      const s2 = await api(db, "save", { ...body, expected_revision: db.T.automations[0].revision, expected_enabled: false });
+      const s3 = await api(db, "save", { ...body, expected_revision: db.T.automations[0].revision, expected_enabled: true });
+      const s4 = await api(db, "save", { ...body, expected_revision: db.T.automations[0].revision });
+      eq([s2.status, s2.body.reason, s2.body.enabled, s3.status, s4.status], [409, "status", true, 200, 200], "save: published meanwhile while the builder shows Draft → 409 status; the status it shows → saved; a caller that says nothing (the old editor) → saved");
     }
     // Duplicate / copy_version: no locked step or condition in the copy; the original keeps its locks; a template keeps them
     {

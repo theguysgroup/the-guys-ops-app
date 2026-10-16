@@ -18771,6 +18771,12 @@ function autoNormalize(row){
     audience: fromDoc && !flat ? (obj(r.list_summary).audience==='customer' ? 'customer' : 'team') : autoAudience({ steps }), deleted: !!r.deleted_at,
     doc, revision: Number(r.revision) || 1, newBuilder: fromDoc && !flat, legacy, builderMade: !!doc && obj(r.layout).editor===WF_EDITOR_MARK };
 }
+// A row the engine still runs as phase 4 (its wfRunRow): an upgraded doc shown as phase-4 steps, with exactly the
+// upgrade's settings. a = autoNormalize(row) when already made.
+function autoRunsOld(row, a){
+  const r = row && typeof row==='object' ? row : {}, n = a || autoNormalize(r);
+  return !!n.doc && !n.newBuilder && wfCanon(wfNormSettings(r.settings, r.settings))===wfCanon(wfNormSettings(WF_MIGRATED_SETTINGS, WF_MIGRATED_SETTINGS));
+}
 // "the owners", "the office", or first names (from the people who have a login).
 function autoPeopleText(to, ctx){
   const t = to && typeof to==='object' ? to : {}, roles = Array.isArray(t.roles) ? t.roles : [], people = Array.isArray(t.people) ? t.people : [], out = [];
@@ -20395,11 +20401,12 @@ function wfPublishAsk(x, items){
 // What stops a switch-on before anything is asked or sent (the old list switch, toggleAutomation): the old editor's own
 // checks (autoProblems) on the steps it shows. row = the automations row as it is now (the list has no steps); a workflow
 // only the new builder shows, or one the new builder saved last (builderMade), is left to the function's v2 checks, as the
-// function's publish judges it (the engine's v1EditorView / v1EditorProblems). mirrors = the System rows (autoReadyRows).
-// → '' or "Fix it first: …".
+// function's publish judges it (the engine's v1EditorView / v1EditorProblems) — except while the engine still runs it as
+// phase 4 (autoRunsOld): then what it sends is what the old editor checked, so its blocks stay (the engine's
+// wfRunsOldProblems). mirrors = the System rows (autoReadyRows). → '' or "Fix it first: …".
 function wfPublishBlock(row, ctx, mirrors){
   const a = autoNormalize(row);
-  if (a.newBuilder || a.builderMade) return '';
+  if (a.newBuilder || (a.builderMade && !autoRunsOld(row, a))) return '';
   const b = autoProblems(a.def, ctx, { name: a.name, mirrors }).find(p => p.block);
   return b ? 'Fix it first: ' + b.text : '';
 }
@@ -23359,6 +23366,9 @@ function wfAiMark(W){ return { nos: W.hist.past.map(e => e.no), kept: !!W.aiKept
 function wfAiSaved(W, mark){
   const m = wfObj(mark), nos = new Set(Array.isArray(m.nos) ? m.nos : []);
   [...W.hist.past, ...W.hist.future].forEach(e => { if (nos.has(e.no)) e.saved = true; });
+  // an undone entry this save did not carry is not in what is stored any more, whatever an earlier save did: redoing it
+  // is an unsaved change again
+  W.hist.future.forEach(e => { if (!nos.has(e.no)) e.saved = false; });
   if (m.kept) W.aiKept = false;
   W.aiDirty = wfAiDirtyOf(W);
 }
@@ -23599,6 +23609,19 @@ function wfIsMac(){ try { return /Mac|iPhone|iPad/.test(navigator.platform || na
 function wfCoarse(){ try { return window.matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } }
 function wfMobileNow(){ try { return wfMobileMode(window.innerWidth, wfCoarse()); } catch (e) { return false; } }
 function wfSnap(W){ return { doc: W.doc, layout: W.layout, builder: W.builder, settings: W.settings, name: W.name, tplDrafts: W.tplDrafts, sel: [...W.sel] }; }
+// Two snapshots of the same content (every change makes new objects: the same references = nothing changed; sel aside).
+function wfSnapSame(a, b){ return !!a && !!b && ['doc', 'layout', 'builder', 'settings', 'name', 'tplDrafts'].every(k => a[k]===b[k]); }
+// Template drafts whose keys were taken meanwhile (the save's 409 "template_taken") → keys of their own, in the steps too.
+// mint(drafts) → a new my_ key not in drafts. → { doc, tplDrafts } or { error }.
+function wfTplRekey(doc, drafts, keys, mint){
+  const D = { ...wfObj(drafts) }, map = {};
+  (keys || []).filter(k => wfHas(D, k)).forEach(k => { map[k] = mint(D); D[map[k]] = D[k]; });
+  if (!Object.keys(map).length) return { error: { text: 'A template it makes was just made elsewhere: open the step and pick it again' } };
+  Object.keys(map).forEach(k => { delete D[k]; });
+  const d = wfClone(wfObj(doc));
+  Object.values(wfObj(d.nodes)).forEach(n => { const c = n && n.kind==='action' && n.config && typeof n.config==='object' ? n.config : null; if (c && typeof c.templateKey==='string' && map[c.templateKey]) c.templateKey = map[c.templateKey]; });
+  return { doc: d, tplDrafts: D };
+}
 function wfIsDirty(W){ const b = W.base; return W.doc!==b.doc || W.layout!==b.layout || W.builder!==b.builder || W.settings!==b.settings || W.name!==b.name || W.tplDrafts!==b.tplDrafts; }
 // Why an edit is refused now ('' = it isn't): the read-only modes, or the opener's reason (design §5.2 wfGuardEdit).
 // Presentation mode and viewing as someone else still edit locally (wfGuardWrite, G4.4, refuses the writes).
@@ -23922,24 +23945,30 @@ function wfPresenceHtml(list){
     + (more.length ? `<span class="wfb-av" title="${esc(more.map(p => p.name).join(', '))}" aria-label="${more.length} more">+${more.length}</span>` : '');
 }
 // Joins wf:<id> for a saved workflow being edited; a sync repaints the chrome only when the list changed (never render()).
-// Left when the builder closes (W.off).
+// A private channel: Realtime lets in only the owners and managers of the business whose workflow it is (the policies on
+// realtime.messages, SQL G4.4b); without them nobody joins and there are no avatars (the 409 dialog still guards a save).
+// The person is the one really signed in, never the one a View as shows. Left when the builder closes (W.off), or when
+// the open workflow becomes a new copy (wfAsNew: W.presenceOff).
 function wfPresenceStart(W){
   if (!W.id || W.mode!=='edit' || W.presenceOn || typeof sb==='undefined' || !sb || typeof sb.channel!=='function') return;
-  const p = typeof getCurrentProfile==='function' ? getCurrentProfile() : null, me = String(W.profileId || '');
-  let ch;
+  const p = typeof getRealProfile==='function' ? getRealProfile() : typeof getCurrentProfile==='function' ? getCurrentProfile() : null, me = String((p && p.id) || W.profileId || '');
+  if (!me) return;
+  let ch, left = false;
   try {
-    ch = sb.channel(`wf:${W.id}`, { config: { presence: { key: me } } });
+    ch = sb.channel(`wf:${W.id}`, { config: { private: true, presence: { key: me } } });
     ch.on('presence', { event: 'sync' }, () => {
-      if (WF!==W) return;
+      if (WF!==W || left) return;
       const list = wfPresenceOf(ch.presenceState(), me), sig = JSON.stringify(list);
       if (sig===W.presenceSig) return;
       W.presence = list; W.presenceSig = sig;
       // the rename box lives in the top bar: shown when the rename is done (wfRenameDone paints the chrome)
       if (!W.renaming) wfDirty('chrome');
-    }).subscribe(st => { if (st==='SUBSCRIBED' && WF===W) ch.track({ id: me, name: String((p && p.fullName) || '') }); });
+    }).subscribe(st => { if (st==='SUBSCRIBED' && WF===W && !left) ch.track({ id: me, name: String((p && p.fullName) || '') }); });
   } catch (e) { return; /* no avatars: the 409 dialog still guards the save */ }
   W.presenceOn = true;
-  W.off.push(() => { try { sb.removeChannel(ch); } catch (e) { /* already gone */ } });
+  const off = () => { if (left) return; left = true; try { sb.removeChannel(ch); } catch (e) { /* already gone */ } };
+  W.presenceOff = off;
+  W.off.push(off);
 }
 function wfBuilderOpen(row, opts){
   const o = opts || {}, r = wfObj(row), def = wfObj(r.definition);
@@ -23958,7 +23987,7 @@ function wfBuilderOpen(row, opts){
     // G4.4: the rail's panels, the notes and the server's check, the local draft, where a new one came from and goes
     panels: wfPanelsNew(), notesE: null, remote: null, remoteT: 0, draftT: 0, tabKey: wfTabSession(), restoredKey: null, railFocus: null, sys: o.sys || null, isCopy: !!o.isCopy && r.id==null,
     templateKey: r.id==null ? o.templateKey || null : null, folderId: r.id==null ? o.folderId || null : null, homeFolder: r.folder_id || null, aiDirty: false, publishing: false, tz: wfTz(), recent: [],
-    presence: [], presenceSig: '[]', presenceOn: false };
+    presence: [], presenceSig: '[]', presenceOn: false, presenceOff: null };
   W.base = { ...wfSnap(W), rev: W.rev };
   // a copy: nothing is saved yet, and its messages are its own (never the saved templates the original sends)
   if (W.isCopy) { W.base.doc = wfNewDoc(); const c = wfCopyTpls(W.doc, o.tplDrafts, wfCopyTplsLib()); W.doc = c.doc; W.tplDrafts = c.drafts; }
@@ -24244,6 +24273,14 @@ function wfSlotBelow(key, strict){
   return { src: '@entry', port: null };
 }
 
+// "Add action" (the A key, "+ Add ▾"): the picker for the "+" below the selected step; a step nothing can follow (a Go to)
+// says so instead (never the top of the flow).
+function wfAddActionBelow(){
+  const slot = wfSlotBelow(wfTargetKey(), true);
+  if (!slot) { showToast('Nothing can follow this step: add it at the end of a path', { kind: 'warn' }); return; }
+  wfPicker('action', slot);
+}
+
 // ── the step actions (the "⋯" menu, the keys, the hover buttons; design §5.5) ──
 function wfBiz(){ return AUTO_BUSINESS_ID; }
 function wfNodeIdOk(id){ return typeof id==='string' && WF_ID_RE.test(id); }
@@ -24308,7 +24345,10 @@ function wfDeleteSel(mode){
   const picked = new Set(ids), I = wfIndex(W.doc);
   const ask = ids.find(id => wfPorts(wfNodesOf(W.doc)[id]).length > 1 && wfSubtree(W.doc, id, I).some(x => !picked.has(x)));
   if (ask) { showToast(`"${wfNodeName(wfNodesOf(W.doc)[ask], W.reg)}" has paths: delete it on its own to choose which path to keep`, { kind: 'warn' }); return; }
-  confirmAction(`${ids.length + trigs.length} selected items go.`, () => {
+  // the Go to steps left that point at what goes are said in the same question (as a single delete warns first)
+  const gone = new Set(ids.flatMap(id => wfPorts(wfNodesOf(W.doc)[id]).length > 1 || mode==='fromHere' ? wfSubtree(W.doc, id, I) : [id]));
+  const refs = I.ids.filter(x => !gone.has(x)).filter(x => wfRefs(I.nodes[x], W.reg).some(r => r.to && gone.has(r.to))).length;
+  confirmAction(`${ids.length + trigs.length} selected items go.${refs ? ` ${refs} Go to step${refs===1 ? ' points' : 's point'} at what goes. ${refs===1 ? 'It' : 'They'} will need a new step to go to.` : ''}`, () => {
     const no = wfCommit('Delete selected', w => {
       let doc = w.doc;
       for (const id of ids) { if (!wfHas(wfNodesOf(doc), id)) continue; const r = wfDeleteStep(doc, id, wfPorts(wfNodesOf(doc)[id]).length > 1 ? 'fromHere' : mode, null, w.reg); if (r.error) return r; doc = r.doc; }
@@ -24384,7 +24424,7 @@ const WF_POP_ACTS = {
   ttoggle: W => { const id = W.menu.id; wfSetLayer('menu', null); wfToggleStep(id); },
   tdel: W => { const id = W.menu.id; wfSetLayer('menu', null); wfTriggerDelete(id); },
   addTrigger: () => { wfSetLayer('menu', null); wfPicker('trigger', null); },
-  addAction: () => { wfSetLayer('menu', null); wfPicker('action', wfSlotBelow(wfTargetKey())); },
+  addAction: () => { wfSetLayer('menu', null); wfAddActionBelow(); },
   builderStd: () => wfSetLayer('menu', null),
   undo: () => { wfSetLayer('menu', null); wfUndoRedo(-1); },
   redo: () => { wfSetLayer('menu', null); wfUndoRedo(1); },
@@ -24687,7 +24727,7 @@ const WF_KEY_ACTS = {
   moveMode: () => { const k = wfTargetKey(); if (!k || !k.startsWith('n:')) return false; wfMoveStart(k.slice(2), 'one'); return true; },
   hand: e => { if (!e.repeat) { WF.spaceHand = true; WF.el.vp.classList.add('is-hand'); } return true; },
   escape: () => { wfEscape(); return true; },
-  actionPanel: () => { wfPicker('action', wfSlotBelow(wfTargetKey())); return true; },
+  actionPanel: () => { wfAddActionBelow(); return true; },
   triggerPanel: () => { wfPicker('trigger', null); return true; },
   shortcuts: () => { wfSetLayer('dialog', { kind: 'keys' }); return true; },
 };
@@ -25845,8 +25885,11 @@ const WF_SAVED = 'Workflow has been saved.';
 // Published one as a Draft.
 function wfSaveBody(s){
   const x = wfObj(s), drafts = {};
-  Object.entries(wfObj(x.tplDrafts)).forEach(([k, d]) => { const t = wfObj(d); drafts[k] = { name: String(t.name || k).slice(0, 80), channel: t.channel==='email' ? 'email' : 'text', body: String(t.body ?? '') }; });
-  return { step: 'save', automation_id: x.id || null, ...(x.id ? { expected_revision: Number(x.rev) || 1 } : {}), name: String(x.name || '').trim().slice(0, WF_DOC_LIMITS.name), definition: x.doc,
+  // saved = the templates this tab knows are saved: a draft of any other key goes as new (the function refuses a "new" key
+  // someone made meanwhile, and a change of a saved key other live workflows send unless confirmed)
+  Object.entries(wfObj(x.tplDrafts)).forEach(([k, d]) => { const t = wfObj(d); drafts[k] = { name: String(t.name || k).slice(0, 80), channel: t.channel==='email' ? 'email' : 'text', body: String(t.body ?? ''), ...(x.saved ? { new: !wfHas(x.saved, k) } : {}) }; });
+  return { step: 'save', automation_id: x.id || null, ...(x.id ? { expected_revision: Number(x.rev) || 1 } : {}), ...(x.id && typeof x.enabled==='boolean' ? { expected_enabled: x.enabled } : {}),
+    ...(x.tplConfirmed ? { templates_confirmed: true } : {}), name: String(x.name || '').trim().slice(0, WF_DOC_LIMITS.name), definition: x.doc,
     settings: wfObj(x.settings), layout: { ...wfObj(x.layout), v: 1 }, builder: x.builder==='advanced' ? 'advanced' : 'standard', editor: WF_EDITOR_MARK,
     ...(Object.keys(drafts).length ? { template_drafts: drafts } : {}), ...(!x.id && x.templateKey ? { template_key: String(x.templateKey) } : {}), ...(x.ai ? { ai_edited: true } : {}) };
 }
@@ -25862,15 +25905,20 @@ function wfGuardedOf(doc, reg){
   return [...out].sort();
 }
 // The question before saving a Published workflow (design §5.5 "Save"), or null. x = { validate (step "validate"'s
-// answer), added (labels of guarded steps it gains), ai (Workflow AI changed it) }. → { title, text }.
+// answer: willDraft = the function stores it as a Draft, e.g. a webhook to a new host), added (labels of guarded steps it
+// gains), ai (Workflow AI changed it), nowLive (it was published meanwhile: this tab showed it as a Draft) }. A save that
+// makes it a Draft stops what waits in it, so that is said too. → { title, text }.
 function wfSaveAsk(x){
   const o = wfObj(x), v = wfObj(o.validate), add = Array.isArray(o.added) ? o.added.filter(Boolean) : [], lines = [];
+  const n = Number(v.waitingRunsAffected) || 0, stop = n ? `${n} lead${n===1 ? '' : 's'} waiting in it will be stopped.` : '', draft = !!(o.ai || add.length || v.willDraft);
+  if (o.nowLive) lines.push('It was published meanwhile: what you save goes live.');
   if (o.ai) lines.push('Workflow AI changes are saved as a Draft. Publish when you have checked them.');
   else if (add.length) lines.push(`It now uses ${add.join(', ')}, so it is saved as a Draft. Publish it again when you have checked it.`);
-  if (v.shapeChanged) { const n = Number(v.waitingRunsAffected) || 0; lines.push(`${n ? `${n} lead${n===1 ? '' : 's'} waiting in it will be stopped. ` : ''}It starts afresh: it only acts on what happens after you save.`); }
-  else if (v.armChanged) lines.push('It only acts on what happens after you save.');
+  else if (v.willDraft) lines.push('It now sends lead details somewhere new, so it is saved as a Draft. Publish it again when you have checked it.');
+  if (v.shapeChanged) lines.push(`${stop ? stop + ' ' : ''}It starts afresh: it only acts on what happens after you save.`);
+  else { if (draft && stop) lines.push(stop); if (v.armChanged) lines.push('It only acts on what happens after you save.'); }
   if (!lines.length) return null;
-  return { title: v.shapeChanged ? 'Start it afresh?' : o.ai || add.length ? 'Save as a Draft?' : 'Save changes?', text: lines.join(' ') };
+  return { title: v.shapeChanged ? 'Start it afresh?' : draft ? 'Save as a Draft?' : 'Save changes?', text: lines.join(' ') };
 }
 // "15 Oct, 10:42 am" in the business's time zone ('' when there is no time).
 function wfStamp(at, tz){
@@ -26361,7 +26409,7 @@ function wfDraftRestore(){
   // (an Undo could never put back which workflow this is)
   if (d0.copy) {
     if (wfIsDirty(W)) { showToast('Save or undo your changes first', { kind: 'warn' }); return; }
-    const C = wfBuilderOpen({ name: `Copy of ${d.name || W.name}`.slice(0, WF_DOC_LIMITS.name), definition: d.doc, layout: wfObj(d.layout), builder: d.builder==='advanced' ? 'advanced' : 'standard', settings: wfObj(d.settings) },
+    const C = wfBuilderOpen({ name: `Copy of ${d.name || W.name}`.slice(0, WF_DOC_LIMITS.name), definition: d.doc, layout: wfObj(d.layout), builder: d.builder==='advanced' ? 'advanced' : 'standard', settings: wfNormSettings(d.settings, {}) },
       { mode: 'edit', isCopy: true, tplDrafts: wfObj(d.tplDrafts), templateKey: d.templateKey || null, folderId: d.folderId || W.folderId || W.homeFolder || null });
     C.restoredKey = d0.key;
     showToast('Restored as a new copy: Save keeps it', { kind: 'info' });
@@ -26384,17 +26432,23 @@ function wfAsNew(W){
   W.id = null; W.rev = null; W.status = 'draft'; W.isCopy = true; W.notesE = null; W.noteCounts = {}; W.remote = null; W.folderId = W.folderId || W.homeFolder || null;
   wfAiSaved(W, { nos: [...W.hist.past, ...W.hist.future].map(e => e.no), kept: true });   // a new Draft: nothing to say about AI
   W.base = { ...W.base, doc: wfNewDoc(), rev: null };
-  // its messages become its own (wfCopyTpls): the first Save of the copy never changes what the original sends
+  // the original's presence channel is left: the copy joins its own after its first Save (wfSaveDone)
+  if (W.presenceOff) W.presenceOff();
+  W.presenceOff = null; W.presenceOn = false; W.presence = []; W.presenceSig = '[]';
+  // its messages become its own (wfCopyTpls): the first Save of the copy never changes what the original sends; its
+  // settings are a new workflow's, as the function's duplicate makes them (an upgraded original's "legacy_always" goes)
   const c = wfCopyTpls(W.doc, W.tplDrafts, wfCopyTplsLib());
-  wfApplySnap(W, { ...wfSnap(W), doc: c.doc, tplDrafts: c.drafts });
+  wfApplySnap(W, { ...wfSnap(W), doc: c.doc, tplDrafts: c.drafts, settings: wfNormSettings(W.settings, {}) });
   if (typeof WF_UI!=='undefined') WF_UI.open = 'new';
   wfPanelBump('notes');
   wfDirty('chrome', 'canvas');
 }
 
 // ── Save (design §5.5, §3.13) ──
-// opts: asked (the person said yes to its question), force, onSaved (run once a save that asked first went through: the
-// question answers later, so the caller's own "saved" step would never run).
+// opts: asked + askedSnap (the person said yes to the question about that content: anything changed since is checked and
+// asked again), force, onSaved (run once a save that asked first went through: the question answers later, so the
+// caller's own "saved" step would never run). statusSeen / nowLive: the function answered that it was published or
+// switched to Draft meanwhile (409 "status"); tplAsked / rekeyed: the template answers (409 "template_shared" / "_taken").
 async function wfSave(opts){
   const W = WF, o = opts || {};
   if (!W) return false;
@@ -26411,30 +26465,56 @@ async function wfSave(opts){
   }
   const name = String(W.name || '').trim();
   if (!name) { showToast('Give the workflow a name first', { kind: 'warn' }); return false; }
-  const tok = W.token, snap = wfSnap(W), aiMark = wfAiMark(W);
+  const tok = W.token, snap = wfSnap(W), aiMark = wfAiMark(W), then = x => async () => { if (WF===W && await wfSave(x) && WF===W && typeof o.onSaved==='function') o.onSaved(); };
   // template words changed here that other Published workflows send: asked first, as the Message templates tab asks
   if (!o.tplAsked) {
     const tq = wfTplShareAsk(snap.tplDrafts, wfSavedTpls(), typeof AUTO!=='undefined' && AUTO.loaded && !AUTO.error ? AUTO.list : null, W.id);
-    if (tq) { confirmAction(tq, async () => { if (WF===W && await wfSave({ ...o, tplAsked: true }) && WF===W && typeof o.onSaved==='function') o.onSaved(); }, { danger: false, title: 'Change the template for them too?', confirmLabel: 'Save' }); return false; }
+    if (tq) { confirmAction(tq, then({ ...o, tplAsked: true }), { danger: false, title: 'Change the template for them too?', confirmLabel: 'Save' }); return false; }
   }
+  // the yes was to what was validated: a step changed, deleted or undone while it was asked is checked and asked again
+  const asked = !!o.asked && wfSnapSame(o.askedSnap, snap);
   W.saving = true;
   wfDirty('chrome');
   try {
-    const body = wfSaveBody({ id: W.id, rev: W.rev, name, doc: snap.doc, settings: snap.settings, layout: snap.layout, builder: snap.builder, tplDrafts: snap.tplDrafts, templateKey: W.templateKey, ai: W.aiDirty });
+    const body = wfSaveBody({ id: W.id, rev: W.rev, enabled: pub, name, doc: snap.doc, settings: snap.settings, layout: snap.layout, builder: snap.builder, tplDrafts: snap.tplDrafts, saved: wfSavedTpls(),
+      tplConfirmed: !!o.tplAsked, templateKey: W.templateKey, ai: W.aiDirty });
     // a Published workflow: what the save will do to what is waiting in it is asked first (step "validate" says)
-    if (W.id && pub && !o.asked) {
-      const v = await autoFnCall({ step: 'validate', automation_id: W.id, base_revision: W.rev, definition: body.definition, settings: body.settings, builder: body.builder, editor: WF_EDITOR_MARK });
+    if (W.id && pub && !asked) {
+      const v = await autoFnCall({ step: 'validate', automation_id: W.id, base_revision: W.rev, name: body.name, definition: body.definition, settings: body.settings, builder: body.builder, editor: WF_EDITOR_MARK,
+        ...(body.ai_edited ? { ai_edited: true } : {}) });
       if (WF!==W || W.token!==tok) return false;
       // what the save does to the leads waiting in it is not known: never saved without that question
       if (!v || !v.ok) { showToast('Could not check what this save does to the leads waiting in it: try again', { kind: 'warn' }); return false; }
       const was = wfGuardedOf(W.base.doc, W.reg), added = wfGuardedOf(snap.doc, W.reg).filter(t => !was.includes(t)).map(t => { const e = wfNodeEntry(W.reg, 'action', t); return e ? e.label : t; });
-      const ask = wfSaveAsk({ validate: v.body, added, ai: W.aiDirty });
-      if (ask) { W.saving = false; confirmAction(ask.text, async () => { if (WF===W && await wfSave({ ...o, asked: true }) && WF===W && typeof o.onSaved==='function') o.onSaved(); }, { danger: false, title: ask.title, confirmLabel: 'Save' }); return false; }
+      const ask = wfSaveAsk({ validate: v.body, added, ai: W.aiDirty, nowLive: !!o.nowLive });
+      if (ask) { W.saving = false; confirmAction(ask.text, then({ ...o, asked: true, askedSnap: snap }), { danger: false, title: ask.title, confirmLabel: 'Save' }); return false; }
     }
     const res = await autoFnCall(body);
     if (WF!==W || W.token!==tok) return false;
     const b = wfObj(res && res.body);
     if (res.status===409 && b.reason==='conflict') { wfSetLayer('dialog', { kind: 'conflict', text: wfConflictText(b, W.tz) }); return false; }
+    // published (or switched to Draft) meanwhile — a publish never bumps the revision: this tab's status is the stored
+    // one now, and the save goes again the way that status saves (a Published one validates and asks first)
+    if (res.status===409 && b.reason==='status') {
+      W.status = b.enabled===true ? 'published' : 'draft';
+      wfListChanged(W);
+      if (o.statusSeen) { showToast('It was published or switched to Draft meanwhile: look at it, then save again', { kind: 'warn' }); return false; }
+      W.saving = false;
+      return await wfSave({ ...o, asked: false, askedSnap: null, statusSeen: true, nowLive: W.status==='published' });
+    }
+    // other live workflows send a template it changes (the function knows them all): asked, then saved with that yes
+    if (res.status===409 && b.reason==='template_shared') {
+      const names = (Array.isArray(b.names) ? b.names : []).map(x => `"${String(x)}"`);
+      confirmAction(`From now on customers get these words from ${names.length ? autoAndList(names) : 'other workflows'}. Save?`, then({ ...o, tplAsked: true }), { danger: false, title: 'Change the template for them too?', confirmLabel: 'Save' });
+      return false;
+    }
+    // a template it makes was made elsewhere meanwhile under the same key (a tab that did not know it): its own key
+    if (res.status===409 && b.reason==='template_taken' && !o.rekeyed) {
+      const keys = (Array.isArray(b.keys) ? b.keys : []).map(String);
+      if (!wfCommit('New template names', w => wfTplRekey(w.doc, w.tplDrafts, keys, d => autoLibKey(d)), { quiet: true })) return false;
+      W.saving = false;
+      return await wfSave({ ...o, asked: false, askedSnap: null, rekeyed: true });
+    }
     if (!res.ok) {
       showToast('Not saved: ' + autoFnReason(b), { kind: 'warn' });
       if (Array.isArray(b.errors) && b.errors.length) { W.remote = { doc: snap.doc, settings: snap.settings, builder: snap.builder, status: 'ok', errors: b.errors, warnings: Array.isArray(b.warnings) ? b.warnings : [] }; if (W.rail!=='errors') wfRailToggle('errors'); else wfPanelBump('errors'); }
@@ -26509,7 +26589,10 @@ async function wfPublishToggle(){
   if (g.kind==='ro' || g.kind==='paused') { showToast(g.text, { kind: 'warn' }); return; }
   if (g.kind==='errors') { wfSetLayer('dialog', { kind: 'gate', n: errs }); return; }
   if (g.kind==='save') {
-    confirmAction('Your changes are saved first, then the workflow is published.', async () => { if (WF===W && await wfSave()) wfPublishToggle(); }, { danger: false, title: 'Save and publish?', confirmLabel: 'Save and publish' });
+    // a save that asks its own question first (a shared template, published meanwhile) publishes once it went through;
+    // one that found it Published already never switches it off
+    const go = () => { if (WF===W && W.status!=='published') wfPublishToggle(); };
+    confirmAction('Your changes are saved first, then the workflow is published.', async () => { if (WF===W && await wfSave({ onSaved: go })) go(); }, { danger: false, title: 'Save and publish?', confirmLabel: 'Save and publish' });
     return;
   }
   W.publishing = true;

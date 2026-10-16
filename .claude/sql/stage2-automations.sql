@@ -4283,3 +4283,61 @@ commit;
 --   update public.automation_notes set deleted_at = now() where deleted_at is null and created_at >= '<the G4.4 push time>';
 -- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 -- END PART 3 · G4.4
+
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- PART 3 · G4.4b (phase 4 review, round 2) — the builder's presence channel wf:<automation id> becomes PRIVATE: Realtime
+-- lets a person join it (presence only: who has the workflow open) only when that person is an owner or a manager of the
+-- business that owns that workflow. Two policies on realtime.messages (receive = select, announce = insert), scoped by
+-- the topic's automation id and public.current_business_id(); nothing else on realtime.messages changes. Without them a
+-- public channel let anyone holding the app's public key and a workflow id read who edits it and show a fake avatar.
+-- ADDITIVE and safe in either order: the app (G4.4b) asks for a private channel; before this block runs it is refused
+-- and the builder shows no avatars (the 409 dialog still guards a save). Realtime Authorization must be on for the
+-- project (Realtime settings: private channels; staging first).
+-- Check before (read-only; every line true):
+--   select to_regclass('realtime.messages') is not null and to_regprocedure('realtime.topic()') is not null;
+--   select relrowsecurity from pg_class where oid = 'realtime.messages'::regclass;
+--   select count(*) = 0 from pg_policies where schemaname = 'realtime' and tablename = 'messages' and policyname like 'wf presence:%';   -- (a re-run: 2)
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+begin;
+set local lock_timeout = '5s';
+do $$
+begin
+  if to_regclass('realtime.messages') is null or to_regprocedure('realtime.topic()') is null then
+    raise exception 'realtime.messages / realtime.topic() are not there: stop (Realtime Authorization needs them)';
+  end if;
+  if not (select c.relrowsecurity from pg_catalog.pg_class c where c.oid = 'realtime.messages'::regclass) then
+    raise exception 'RLS is off on realtime.messages: stop (these policies would let nobody in, and other channels everyone)';
+  end if;
+end $$;
+drop policy if exists "wf presence: owners and managers of its business receive" on realtime.messages;
+create policy "wf presence: owners and managers of its business receive" on realtime.messages for select to authenticated
+  using (realtime.messages.extension = 'presence' and (select realtime.topic()) like 'wf:%' and public.is_owner_or_manager()
+    and exists (select 1 from public.automations a where a.id::text = substr((select realtime.topic()), 4)
+                  and a.business_id = public.current_business_id() and a.deleted_at is null));
+drop policy if exists "wf presence: owners and managers of its business announce" on realtime.messages;
+create policy "wf presence: owners and managers of its business announce" on realtime.messages for insert to authenticated
+  with check (realtime.messages.extension = 'presence' and (select realtime.topic()) like 'wf:%' and public.is_owner_or_manager()
+    and exists (select 1 from public.automations a where a.id::text = substr((select realtime.topic()), 4)
+                  and a.business_id = public.current_business_id() and a.deleted_at is null));
+do $$
+begin
+  if (select count(*) from pg_catalog.pg_policies where schemaname = 'realtime' and tablename = 'messages' and policyname like 'wf presence:%') <> 2 then
+    raise exception 'the two wf presence policies are not both there: rolled back';
+  end if;
+end $$;
+commit;
+-- Check after (read-only):
+--   select policyname, cmd, roles from pg_policies where schemaname = 'realtime' and tablename = 'messages' and policyname like 'wf presence:%' order by 1;
+--      -- 2 rows: "… announce" INSERT {authenticated}, "… receive" SELECT {authenticated}
+--   Staging, in the app: two office logins with the same workflow open see each other's avatar; a technician login and a
+--   browser console with only the public key (sb.channel('wf:<id>', { config: { private: true } }).subscribe(console.log))
+--   get CHANNEL_ERROR, never SUBSCRIBED; a workflow id of another business is refused the same way.
+-- ROLLBACK (exact; run by hand). The channel is refused again (no avatars); nothing else changes:
+--   begin;
+--   set local lock_timeout = '5s';
+--   drop policy if exists "wf presence: owners and managers of its business receive" on realtime.messages;
+--   drop policy if exists "wf presence: owners and managers of its business announce" on realtime.messages;
+--   select count(*) = 0 from pg_policies where schemaname = 'realtime' and tablename = 'messages' and policyname like 'wf presence:%';   -- true
+--   commit;
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- END PART 3 · G4.4b

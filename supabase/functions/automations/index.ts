@@ -1978,13 +1978,16 @@ export function wfRunRow(a: any): any {
 // A row the new builder saved (layout.editor "builder") is checked by the v2 rules, but while it still runs as phase 4
 // (wfRunRow: the upgraded settings and a straight chain) the phase-4 rules decide whether it is enrolled (wfEligible →
 // validateAutomation). What those refuse is an error of the save / validate / publish too, never a workflow that quietly
-// stops starting (and ends its waiting runs). [] when the row runs as a doc.
+// stops starting (and ends its waiting runs). While it runs that way, what it sends is what the old editor checked: its
+// blocks (v1EditorProblems on the steps that run) stay errors too, so a sticky note or a rename in the new builder never
+// lets through a shape the old switch refused (a {technician} a new lead can't fill). [] when the row runs as a doc.
 // deno-lint-ignore no-explicit-any
 export function wfRunsOldProblems(a: any, cat: any): WfIssue[] {
   if (!a || typeof a !== "object" || obj(a.definition).schema !== 2) return [];
   const v = wfRunRow(a);
   if (!v || v === a || v.definition != null) return [];
-  return validateAutomation(v, cat).map((t) => issue("E_RUNS_OLD_WAY", "", `It still runs the old way, which refuses this: ${t}`));
+  return [...validateAutomation(v, cat).map((t) => issue("E_RUNS_OLD_WAY", "", `It still runs the old way, which refuses this: ${t}`)),
+    ...v1EditorProblems({ trigger: v.trigger, steps: v.steps }, cat, a.name).map((t) => issue("E_EDITOR_BLOCK", "", t))];
 }
 
 // ── node references hidden in config (x-ref "node" in the registry schema: goto.target, date.gotoStep) ──
@@ -5705,9 +5708,12 @@ export async function wfSnapshot(sb: any, a: Row, reason: string, me: any, nowMs
   return null;
 }
 // The template words a save brings along (the builder's unsaved library templates, design §3.13): written into the
-// catalog first, under keys minted like the app's autoLibKey (my_ + 8), idempotent. ONE settings write.
+// catalog first, under keys minted like the app's autoLibKey (my_ + 8), idempotent. ONE settings write. Never on what the
+// browser did not know: a draft it sends as new ("new": true) on a key someone made meanwhile with other words → 409
+// "template_taken" (the app gives it a key of its own); a change of a saved key that another Published workflow sends →
+// 409 "template_shared" with their names unless the person said yes to that (ctx.confirmed).
 // deno-lint-ignore no-explicit-any
-async function writeTemplateDrafts(sb: any, drafts: any, me: any, nowMs: number): Promise<string[] | ApiRes> {
+async function writeTemplateDrafts(sb: any, drafts: any, me: any, nowMs: number, ctx: { selfId?: string | null; confirmed?: boolean } = {}): Promise<string[] | ApiRes> {
   const list = Object.entries(obj(drafts));
   if (!list.length) return [];
   if (list.length > WF_API_LIMITS.templateDrafts) return apiErr(422, "too many new templates in one save");
@@ -5719,6 +5725,17 @@ async function writeTemplateDrafts(sb: any, drafts: any, me: any, nowMs: number)
   if (error || !st || !st[0]) throw new Error("settings not read: " + clip(String((error && error.message) || "no row"), 200));
   const cat = jclone(obj(st[0].catalog)), now = iso(nowMs), actor = clip(String((me && me.full_name) || "Unknown"), 80);
   cat.templates = { ...obj(cat.templates) }; cat.msgTemplates = { ...obj(cat.msgTemplates) };
+  const words = (d: unknown) => String(obj(d).body).replace(/\r\n/g, "\n").trim(), saved = (k: string) => has(cat.templates, k) || has(cat.msgTemplates, k);
+  const taken = list.filter(([k, d]) => obj(d).new === true && saved(k) && cat.templates[k] !== words(d)).map(([k]) => k);
+  if (taken.length) return apiErr(409, "template_taken", { keys: taken });
+  const changed = list.filter(([k, d]) => obj(d).new !== true && saved(k) && cat.templates[k] !== words(d)).map(([k]) => k);
+  if (changed.length && ctx.confirmed !== true) {
+    const uses = (a: Row) => Object.values(obj(obj(a.definition).nodes)).some((n) => obj(n).kind === "action" && changed.includes(obj(obj(n).config).templateKey))
+      || (Array.isArray(a.steps) ? a.steps : []).some((s: unknown) => obj(s).kind === "action" && changed.includes(obj(s).templateKey));
+    const live = (await rows(sb.from("automations").select("id, name, definition, steps").eq("business_id", BUSINESS_ID).eq("enabled", true).is("deleted_at", null)))
+      .filter((a: Row) => String(a.id) !== String(ctx.selfId ?? "") && uses(a));
+    if (live.length) return apiErr(409, "template_shared", { keys: changed, names: live.map((a: Row) => clip(String(a.name || "Workflow"), WF_LIMITS.name)).slice(0, 10) });
+  }
   for (const [k, d] of list) {
     const x = obj(d), old = obj(cat.msgTemplates[k]);
     cat.templates[k] = String(x.body).replace(/\r\n/g, "\n").trim();
@@ -5799,6 +5816,22 @@ export async function seedTemplates(sb: any, nowMs: number): Promise<number> {
 const docOf = (b: Row): any => (b.definition && typeof b.definition === "object" && !Array.isArray(b.definition) ? b.definition : null);
 const builderOf = (v: unknown, fallback: unknown = "standard") => (v === "advanced" || v === "standard" ? v : fallback === "advanced" ? "advanced" : "standard");
 
+// A webhook of doc that sends to a host the stored doc never sent to (apiSave: → Draft; its Publish asks again).
+// deno-lint-ignore no-explicit-any
+export function wfNewWebhookHost(was: any, doc: any): boolean {
+  const hostsOf = (d: unknown) => new Set(wfPublishLines({ nodes: Object.fromEntries(Object.entries(obj(obj(d).nodes)).filter(([, n]) => obj(n).kind === "action" && obj(n).type === "webhook")) }));
+  const hostsWas = hostsOf(was);
+  return [...hostsOf(doc)].some((h) => !hostsWas.has(h));
+}
+// A save of a Published workflow that is stored as a Draft (design §3.13, §5.5): Workflow AI's change (or a workflow the AI
+// made), a webhook to a new host (apiSave's p_draft) or a guarded type it did not have (the database's guard). Switching
+// it off stops what waits in it.
+// deno-lint-ignore no-explicit-any
+export function wfSaveGoesDraft(a: Row | null, doc: any, aiEdited: boolean): boolean {
+  if (!a || a.enabled !== true) return false;
+  const was = wfGuardedChannels(a.definition);
+  return aiEdited || a.origin === "ai" || wfNewWebhookHost(a.definition, doc) || wfGuardedChannels(doc).some((t) => !was.includes(t));
+}
 // step "validate" {definition, settings, automation_id?, base_revision?} → the codes and what a save would change.
 // deno-lint-ignore no-explicit-any
 async function apiValidate(sb: any, b: Row, me: any, nowMs: number): Promise<ApiRes> {
@@ -5807,12 +5840,14 @@ async function apiValidate(sb: any, b: Row, me: any, nowMs: number): Promise<Api
   if (b.automation_id && !a) return apiErr(404, "workflow not found");
   const C = await apiCtx(sb), prev = a ? obj(a.settings) : {}, raw = b.settings ?? prev, settings = normWfSettings(raw, prev);
   const chk = wfCheck(doc, raw, prev, C, a ? a.definition : null, builderOf(b.builder, a && a.builder));
-  if (b.editor === WF_EDITOR_MARK) chk.errors.push(...wfRunsOldProblems({ ...(a || {}), definition: doc, settings }, C.cat));
+  if (b.editor === WF_EDITOR_MARK) chk.errors.push(...wfRunsOldProblems({ ...(a || {}), definition: doc, settings, ...(typeof b.name === "string" ? { name: b.name } : {}) }, C.cat));
   const stored = a ? obj(a.definition) : null;
   const shapeChanged = !!stored && versionChanged(stored, a && a.settings, doc), armChanged = !!stored && armKey(stored, a && a.settings) !== armKey(doc, settings);
   const idsRemoved = stored ? Object.keys(obj(stored.nodes)).filter((id) => !has(obj(doc.nodes), id)).sort() : [];
-  return { status: 200, body: { ok: true, errors: chk.errors, warnings: chk.warnings, shapeChanged, armChanged, idsRemoved,
-    waitingRunsAffected: shapeChanged && a ? await activeRuns(sb, String(a.id)) : 0,
+  // a save of a Published one stored as a Draft (apiSave's rule) stops what waits in it too: the builder asks first
+  const willDraft = wfSaveGoesDraft(a, doc, b.ai_edited === true);
+  return { status: 200, body: { ok: true, errors: chk.errors, warnings: chk.warnings, shapeChanged, armChanged, idsRemoved, willDraft,
+    waitingRunsAffected: (shapeChanged || willDraft) && a ? await activeRuns(sb, String(a.id)) : 0,
     ...(a && b.base_revision != null ? { revision: Number(a.revision), revisionChanged: Number(b.base_revision) !== Number(a.revision) } : {}) } };
 }
 // step "save" (design §3.13). A Published workflow refuses errors (422); a Draft is saved with them. 409 when someone
@@ -5833,6 +5868,9 @@ async function apiSave(sb: any, b: Row, me: any, nowMs: number, opts: { reason?:
     // the revision it was opened at; a row upgraded by this very call counts at the revision it had before
     expected = info.upgraded !== undefined && b.expected_revision === info.upgraded ? Number(a.revision) : b.expected_revision;
     if (Number(a.revision) !== expected) return apiErr(409, "conflict", { revision: Number(a.revision), updated_by_name: a.updated_by_name || null, updated_at: a.updated_at || null });
+    // the builder says whether it thinks the workflow is Published (a publish never bumps the revision): one published or
+    // switched to Draft meanwhile is answered first, so a save never puts words live under the "Draft" the person sees
+    if (typeof b.expected_enabled === "boolean" && (a.enabled === true) !== b.expected_enabled) return apiErr(409, "status", { enabled: a.enabled === true, revision: Number(a.revision) });
   }
   let layout = b.layout == null ? (a && a.layout) || { v: 1 } : b.layout;
   if (!layout || typeof layout !== "object" || Array.isArray(layout) || utf8Len(JSON.stringify(layout)) > WF_API_LIMITS.layoutBytes) return apiErr(422, "the layout is not valid (128 KB at most)");
@@ -5842,7 +5880,7 @@ async function apiSave(sb: any, b: Row, me: any, nowMs: number, opts: { reason?:
   else if (b.layout == null && has(layout, "editor")) { layout = { ...layout }; delete layout.editor; }
   const builder = builderOf(b.builder, a && a.builder), prev = a ? obj(a.settings) : {}, raw = b.settings ?? prev, settings = normWfSettings(raw, prev);
   const C = await apiCtx(sb), chk = wfCheck(doc, raw, prev, C, a ? a.definition : null, builder);
-  if (obj(layout).editor === WF_EDITOR_MARK) chk.errors.push(...wfRunsOldProblems({ ...(a || {}), definition: doc, settings, layout }, C.cat));
+  if (obj(layout).editor === WF_EDITOR_MARK) chk.errors.push(...wfRunsOldProblems({ ...(a || {}), definition: doc, settings, layout, name }, C.cat));
   if (a && a.enabled === true && chk.errors.length) return apiErr(422, "errors", { errors: chk.errors, warnings: chk.warnings });
   // Only an owner adds a Webhook step or changes where and what one sends (its whole config: url, method, headers,
   // fields, template); a manager may keep, move, pause or remove one as it is.
@@ -5851,9 +5889,8 @@ async function apiSave(sb: any, b: Row, me: any, nowMs: number, opts: { reason?:
   if (me.role !== "owner" && [...hooksNow].some(([id, c]) => hooksWas.get(id) !== c)) return apiErr(403, "Only an owner can add a Webhook step or change where it sends");
   // a Published workflow whose webhook now sends somewhere it did not before goes to Draft: its Publish asks again
   // ("Sends lead details to <host>")
-  const hostsOf = (d: unknown) => new Set(wfPublishLines({ nodes: Object.fromEntries(Object.entries(obj(obj(d).nodes)).filter(([, n]) => obj(n).kind === "action" && obj(n).type === "webhook")) }));
-  const hostsWas = hostsOf(a && a.definition), newHost = [...hostsOf(doc)].some((h) => !hostsWas.has(h));
-  const tpl = await writeTemplateDrafts(sb, b.template_drafts, me, nowMs);
+  const newHost = wfNewWebhookHost(a && a.definition, doc);
+  const tpl = await writeTemplateDrafts(sb, b.template_drafts, me, nowMs, { selfId: a ? String(a.id) : null, confirmed: b.templates_confirmed === true });
   if (!Array.isArray(tpl)) return tpl;
   const reason = opts.reason || (!a ? "create" : b.ai_edited === true ? "ai" : b.reason === "save_version" ? "save_version" : "save");
   const r = await rpcObj(sb, "automation_save", { p_business: BUSINESS_ID, p_id: a ? a.id : null, p_expected: a ? expected : null, p_name: name, p_definition: doc,

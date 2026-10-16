@@ -126,7 +126,7 @@ const DECLS = [
   // Automations builder (14 Oct, phase 4)
   'chatRulesApp', 'notifyRulesApp', 'notifyCardsNow', 'setRows', 'setToggle',
   'AUTO_TABLE', 'AUTO_BUSINESS_ID', 'AUTO_TRIGGERS', 'AUTO_MIRROR_TRIGGERS', 'AUTO_CONDS', 'AUTO_OP_WORDS', 'AUTO_ACTIONS', 'AUTO_FIELDS', 'AUTO_WAIT_UNITS', 'AUTO_DUE', 'AUTO_LIMITS', 'AUTO_PUSH_DEFAULT', 'AUTO_TPL_MIRROR',
-  'autoTrig', 'autoValueLabel', 'autoCondValues', 'autoCondFits', 'autoFieldsFor', 'autoDefaultPush', 'autoHm', 'autoHhmm', 'autoAndList', 'autoIsCustomerStep', 'autoHasCustomer', 'autoAudience', 'autoCleanStep', 'WF_ID_RE', 'WF_EDITOR_MARK', 'wfCanon', 'WF_V1_ACTIONS', 'WF_V1_TRIGGER_NAMES', 'wfWinDormant', 'wfToFlat', 'wfFromFlat', 'autoIdsBad', 'autoNormalize',
+  'autoTrig', 'autoValueLabel', 'autoCondValues', 'autoCondFits', 'autoFieldsFor', 'autoDefaultPush', 'autoHm', 'autoHhmm', 'autoAndList', 'autoIsCustomerStep', 'autoHasCustomer', 'autoAudience', 'autoCleanStep', 'WF_ID_RE', 'WF_EDITOR_MARK', 'wfCanon', 'WF_V1_ACTIONS', 'WF_V1_TRIGGER_NAMES', 'wfWinDormant', 'wfToFlat', 'wfFromFlat', 'autoIdsBad', 'autoNormalize', 'autoRunsOld',
   'autoPeopleText', 'autoTaskWho', 'autoDueText', 'autoHoursShort', 'autoDoShort', 'autoFlowChips', 'autoWhenShort', 'autoSentence', 'autoBadBlanks', 'autoStepIssues', 'autoStepProblems', 'autoProblems', 'autoTplUsers', 'autoPreviewHtml',
   'wfSystemRows', 'autoReadyRows', 'autoGatePill', 'autoStatusPill',
   // the 14 Oct review: safety settings, opt-outs, "Try it", versions, ready-mades off the list
@@ -5336,6 +5336,11 @@ async function testWfPublishGuards(){
   const migrated = S => ({ ...row(S), definition: sb.wfFromFlat({ trigger: S.trigger, steps: S.steps }, null), settings: { reentry: 'legacy_always' } });
   assertEqual([SHAPES.length, SHAPES.filter(S => FX.corpus[S.name]).length, SHAPES.map(S => [S.name, sb.wfPublishBlock(row(S), ctx, []), sb.wfPublishBlock(migrated(S), ctx, [])]).filter(([n, a, b]) => a!==want({ name: n }) || b!==want({ name: n }))],
     [48, 14, []], 'wfPublishBlock on all 48 phase-4 shapes (as stored and after the migration): "Fix it first: …" with the old switch\'s words for the 14 it refused, nothing for the other 34');
+  // review round 2: saved by the new builder (a sticky note marks it) while the engine still runs it as phase 4 (the
+  // upgrade's settings, a straight chain: autoRunsOld) → the same blocks; with a new workflow's settings it runs its doc → v2 only
+  const marked = (S, settings) => ({ ...migrated(S), settings, layout: { v: 1, stickies: [{ id: 'k1', text: 'Check' }], editor: 'builder' } });
+  assertEqual([SHAPES.filter(S => sb.wfPublishBlock(marked(S, { ...sb.__get('WF_MIGRATED_SETTINGS') }), ctx, [])!==want(S)).map(S => S.name), SHAPES.filter(S => sb.wfPublishBlock(marked(S, {}), ctx, [])!=='').map(S => S.name)], [[], []],
+    'wfPublishBlock: marked by the new builder but still running as phase 4 → the 14 are still refused in the old words; with stage-2 settings → left to the function\'s v2 checks');
   const named = { schema: 2, seq: 2, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: { match: 'all', segments: [{ match: 'all', rules: [] }] } }],
     nodes: { n1: { kind: 'action', type: 'add_task', name: 'Call them', config: { title: 'Call {name}' }, out: { next: null } } } };
   const lead = SHAPES.find(S => S.name==='new lead → push');
@@ -6667,15 +6672,17 @@ function testWfRailWords(sb){
 // A fake automations function (step validate / save / publish / duplicate with the revision rules: a save or a
 // switch-on with an old revision → 409) and a fake notes table, for the write path.
 function wfFakeServer(){
-  const S = { rows: {}, calls: [], notes: [], dbWrites: [], ids: [WF_UUID1, WF_UUID2, '33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444'], vErrors: [], shape: false };
+  const S = { rows: {}, calls: [], notes: [], dbWrites: [], ids: [WF_UUID1, WF_UUID2, '33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444'], vErrors: [], shape: false, vExtra: {}, tplShared: null };
   const clone = x => JSON.parse(JSON.stringify(x));
   S.fn = async b => {
     S.calls.push(clone(b));
     const a = b.automation_id ? S.rows[b.automation_id] : null, conflict = r => ({ ok: false, status: 409, body: { ok: false, reason: 'conflict', revision: r.revision, updated_by_name: 'Kim Office', updated_at: '2026-10-15T01:30:00Z' } });
-    if (b.step==='validate') return { ok: true, status: 200, body: { ok: true, errors: S.vErrors, warnings: [], shapeChanged: S.shape, armChanged: false, waitingRunsAffected: S.shape ? 2 : 0 } };
+    if (b.step==='validate') return { ok: true, status: 200, body: { ok: true, errors: S.vErrors, warnings: [], shapeChanged: S.shape, armChanged: false, waitingRunsAffected: S.shape ? 2 : 0, ...S.vExtra } };
     if (b.step==='save') {
       if (b.automation_id && !a) return { ok: false, status: 404, body: { ok: false, reason: 'workflow not found' } };
       if (a && b.expected_revision!==a.revision) return conflict(a);
+      if (a && typeof b.expected_enabled==='boolean' && (a.enabled===true)!==b.expected_enabled) return { ok: false, status: 409, body: { ok: false, reason: 'status', enabled: a.enabled===true, revision: a.revision } };
+      if (S.tplShared && wfHasKey(b.template_drafts || {}, S.tplShared) && b.templates_confirmed!==true) return { ok: false, status: 409, body: { ok: false, reason: 'template_shared', keys: [S.tplShared], names: ['Live one'] } };
       const id = a ? a.id : S.ids.shift(), was = a && a.enabled===true;
       const row = { ...(a || { enabled: false, revision: 0, template_key: b.template_key || null }), id, name: b.name, definition: clone(b.definition), settings: b.settings || {}, builder: b.builder || 'standard',
         layout: { ...(b.layout || (a && a.layout) || { v: 1 }), ...(b.editor==='builder' ? { editor: 'builder' } : {}) }, revision: (a ? a.revision : 0) + 1 };
@@ -7701,11 +7708,134 @@ function testWfReviewBlocks45(){
   X.wfBuilderClose();
 }
 
+// Review round 2 of phase 4 (16 Oct): published meanwhile (409 "status"), the content a question was about, a copy's
+// settings and presence, presence under View as, Go to steps on a selection delete, "Save and publish?" after the save's
+// own question, Add action below a Go to, AI marks after undo + save, the save's new words. Fake DOM, fake function.
+async function testWfReviewRound2(){
+  console.log('\nWorkflow builder: review round 2 (published meanwhile, the asked content, copies, presence, Go to on a selection, Save and publish, Add action, AI marks)');
+  const reg = wfRegFor(WF_AV_TODAY), tick = () => new Promise(r => setImmediate(r));
+  const mk = extra => {
+    const srv = wfFakeServer(), asks = [], chans = [], removed = [];
+    const sb = Object.assign(srv.sb, { channel(name, opt){ const c = { name, opt, tracked: [], on(){ return c; }, subscribe(cb){ chans.push(c); if (cb) cb('SUBSCRIBED'); return c; }, track(x){ c.tracked.push(x); }, presenceState(){ return {}; } }; return c; },
+      removeChannel(c){ removed.push(c.name); } });
+    const S = wfShellSandbox(reg, { ctx: { autoFnCall: srv.fn, sb, localStorage: wfMemStore(), sessionStorage: wfMemStore(), readOnlyReason: () => '', confirmAction: (m, fn, o) => { asks.push({ m, t: o && o.title, fn }); },
+      STATE: { data: { settings: { catalog: { templates: {}, msgTemplates: {} } } }, profiles: [{ id: 'p1', role: 'owner', fullName: 'Alex Owner' }] }, ...(extra || {}) } });
+    const settle = async () => { for (let i = 0; i < 8; i++) { await tick(); S.flush(); } };
+    const yes = async () => { const a = asks.shift(); await a.fn(); await settle(); return a; };
+    return { srv, S, X: S.X, ctx: S.ctx, asks, chans, removed, settle, yes };
+  };
+  const DOC = { schema: 2, seq: 3, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }], nodes: { n1: wfAct('n2'), n2: wfAct(null) } };
+  const put = (T, x) => { T.srv.ids.shift(); T.srv.rows[WF_UUID1] = { id: WF_UUID1, name: 'Nurture', enabled: false, revision: 2, definition: DOC, settings: {}, builder: 'standard', layout: { v: 1 }, ...x }; T.X.wfBuilderOpen(JSON.parse(JSON.stringify(T.srv.rows[WF_UUID1])), {}); T.S.flush(); return T.S.W(); };
+  // #1 published meanwhile (a publish never bumps the revision): the builder still shows Draft → the function answers 409
+  // "status", and the save goes the Published way (validate, then a question that says what is live)
+  {
+    const T = mk(), W = put(T);
+    T.srv.rows[WF_UUID1].enabled = true;
+    T.X.wfCommit('Rename workflow', () => ({ name: 'Nurture test' })); T.S.flush();
+    const r = await T.X.wfSave(); await T.settle();
+    const steps = T.srv.calls.map(c => c.step), asked = T.asks.map(a => [a.t, a.m]);
+    await T.yes();
+    const saves = T.srv.calls.filter(c => c.step==='save');
+    assertEqual([r, steps, asked, saves.map(c => c.expected_enabled), T.srv.rows[WF_UUID1].name, W.status], [false, ['save', 'validate'], [['Save changes?', 'It was published meanwhile: what you save goes live.']], [false, true], 'Nurture test', 'published'],
+      'published meanwhile: 409 "status" (nothing saved), then validate and "It was published meanwhile: what you save goes live." before the save');
+  }
+  // #3 the question was about what was validated: a step deleted (or undone) while it was asked is checked and asked again
+  {
+    const T = mk(), W = put(T, { enabled: true });
+    T.srv.shape = true;
+    T.X.wfCommit('Rename workflow', () => ({ name: 'Nurture 2' })); T.S.flush();
+    await T.X.wfSave(); await T.settle();
+    T.X.wfCommit('Delete action', w => ({ doc: { ...w.doc, nodes: { n1: { ...w.doc.nodes.n1, out: { next: null } } } } })); T.S.flush();
+    const a1 = await T.yes();
+    const mid = [T.srv.calls.map(c => c.step), T.asks.length];
+    await T.yes();
+    assertEqual([a1.t, mid, T.srv.calls.map(c => c.step), Object.keys(T.srv.rows[WF_UUID1].definition.nodes), W.status], ['Start it afresh?', [['validate', 'validate'], 1], ['validate', 'validate', 'save'], ['n1'], 'published'],
+      'a change made while "Start it afresh?" was open: the yes does not save it; it is validated and asked again, then saved');
+  }
+  // #7 / #8 "Save mine as a copy" of an upgraded workflow: a new workflow's settings ("legacy_always" goes, as the function's
+  // duplicate); the original's presence channel is left and the copy joins its own after its first save
+  {
+    const T = mk(), MIG = vm.runInContext('WF_MIGRATED_SETTINGS', T.ctx), W = put(T, { settings: JSON.parse(JSON.stringify(MIG)) });
+    const ch0 = T.chans[0];
+    T.X.wfCommit('Rename workflow', () => ({ name: 'Mine' })); T.S.flush();
+    T.srv.rows[WF_UUID1].revision = 7;
+    await T.X.wfSave(); T.S.flush();
+    T.X.WF_RAIL_ACTS.conflictCopy(W); await T.settle();
+    const sv = T.srv.calls.filter(c => c.step==='save').slice(-1)[0];
+    assertEqual([ch0.name, ch0.opt.config.private, sv.automation_id, sv.settings.reentry, W.settings.reentry, W.base.settings.reentry, T.removed, T.chans.map(c => c.name), W.id],
+      ['wf:' + WF_UUID1, true, null, 'off', 'off', 'off', ['wf:' + WF_UUID1], ['wf:' + WF_UUID1, 'wf:' + WF_UUID2], WF_UUID2],
+      'a copy: a new workflow\'s settings (no "legacy_always"), it leaves the original\'s private channel and joins its own once saved');
+  }
+  // #13 presence is the person really signed in, never the one View as shows
+  {
+    const T = mk({ getRealProfile: () => ({ id: 'p9', fullName: 'Real Owner' }), getCurrentProfile: () => ({ id: 'p2', fullName: 'Jane Tech' }) });
+    put(T);
+    assertEqual([T.chans[0].opt.config.presence.key, T.chans[0].tracked], ['p9', [{ id: 'p9', name: 'Real Owner' }]], 'presence under View as: the real person (never "Jane has it open")');
+  }
+  // #9 a selection delete says how many Go to steps point at what goes (in its one question)
+  {
+    const T = mk(), G = { schema: 2, seq: 6, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }], nodes: { n1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct('n4'), n4: { kind: 'goto', type: 'goto', config: { target: 'n2' }, out: {} } } };
+    const W = put(T, { definition: G });
+    W.sel = new Set(['n:n2', 'n:n3']);
+    T.ctx.wfDeleteSel('one'); T.S.flush();
+    const q = T.asks[0];
+    // #11 Add action below a Go to (no path below it): refused with words, never the top of the flow
+    T.asks.length = 0;
+    W.sel = new Set(['n:n4']); W.focus = null;
+    T.ctx.wfAddActionBelow(); T.S.flush();
+    assertEqual([q && q.t, q && q.m, W.picker, T.S.toasts.slice(-1)[0]], ['Delete the selection?', '2 selected items go. 1 Go to step points at what goes. It will need a new step to go to.', null, 'Nothing can follow this step: add it at the end of a path'],
+      'delete of a selection: the Go to steps pointing at it are said first; Add action below a Go to: refused (never above step 1)');
+  }
+  // #10 "Save and publish?" whose save asks its own question first (a template other live workflows send): published once saved
+  {
+    const T = mk(), E = { schema: 2, seq: 2, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }], nodes: { n1: { kind: 'action', type: 'send_email', config: { subject: 'Hi', templateKey: 'my_sharedab' }, out: { next: null } } } };
+    T.ctx.STATE.data.settings.catalog = { templates: { my_sharedab: 'Old words' }, msgTemplates: { my_sharedab: { name: 'Shared', channel: 'email' } } };
+    T.srv.tplShared = 'my_sharedab';
+    const W = put(T, { definition: E });
+    T.X.wfCommit('Edit template', () => ({ tplDrafts: { my_sharedab: { name: 'Shared', channel: 'email', body: 'New words' } } })); T.S.flush();
+    await T.X.wfPublishToggle(); await T.settle();
+    const titles = [];
+    while (T.asks.length) titles.push((await T.yes()).t);
+    const saves = T.srv.calls.filter(c => c.step==='save');
+    assertEqual([titles, saves.map(c => [c.templates_confirmed===true, c.template_drafts.my_sharedab.new]), T.srv.calls.slice(-1)[0].step, T.srv.rows[WF_UUID1].enabled, W.status],
+      [['Save and publish?', 'Change the template for them too?', 'Publish workflow?'], [[false, false], [true, false]], 'publish', true, 'published'],
+      '"Save and publish?" whose save asks first (the function names the other live workflows): once saved with the yes, it is published');
+  }
+  // #12 an AI change saved, undone and saved without it, then redone: unsaved again (a Published one → Draft)
+  {
+    const T = mk(), W = put(T, { enabled: true });
+    T.X.wfAiApply([{ op: 'setNode', id: 'n2', patch: { name: 'AI named it' } }], 'Workflow AI: name'); T.S.flush();
+    T.ctx.wfAiSaved(W, T.ctx.wfAiMark(W));
+    T.X.wfUndoRedo(-1); T.S.flush();
+    T.ctx.wfAiSaved(W, T.ctx.wfAiMark(W));
+    T.X.wfUndoRedo(1); T.S.flush();
+    assertEqual([W.hist.past.slice(-1)[0].origin, W.aiDirty], ['ai', true], 'an AI change undone and saved without, then redone: AI-edited again (the next save of a Published one goes as a Draft)');
+  }
+  // the pure parts: the save body, the question, new template keys
+  {
+    const { ctx } = mk();
+    const b = ctx.wfSaveBody({ id: WF_UUID1, rev: 3, enabled: true, name: 'X', doc: DOC, tplDrafts: { my_aaaaaaaa: { name: 'A', channel: 'email', body: 'Hi' }, my_bbbbbbbb: { name: 'B', channel: 'text', body: 'Yo' } }, saved: { my_aaaaaaaa: 'Hi' }, tplConfirmed: true });
+    const n = ctx.wfSaveBody({ id: null, enabled: false, name: 'X', doc: DOC });
+    assertEqual([b.expected_enabled, b.templates_confirmed, b.template_drafts.my_aaaaaaaa.new, b.template_drafts.my_bbbbbbbb.new, 'expected_enabled' in n, 'templates_confirmed' in n],
+      [true, true, false, true, false, false], 'wfSaveBody: the status the builder shows, the yes to a shared template, each draft new or a change of a saved key');
+    assertEqual([ctx.wfSaveAsk({ validate: { willDraft: true, waitingRunsAffected: 3 } }), ctx.wfSaveAsk({ nowLive: true }), ctx.wfSaveAsk({ ai: true, validate: { waitingRunsAffected: 1 } })],
+      [{ title: 'Save as a Draft?', text: 'It now sends lead details somewhere new, so it is saved as a Draft. Publish it again when you have checked it. 3 leads waiting in it will be stopped.' },
+        { title: 'Save changes?', text: 'It was published meanwhile: what you save goes live.' },
+        { title: 'Save as a Draft?', text: 'Workflow AI changes are saved as a Draft. Publish when you have checked them. 1 lead waiting in it will be stopped.' }],
+      'wfSaveAsk: a save the function stores as a Draft (a webhook to a new host) with what it stops; published meanwhile; AI with the leads it stops');
+    const D2 = { ...DOC, nodes: { ...DOC.nodes, n2: { kind: 'action', type: 'send_email', config: { subject: 'Hi', templateKey: 'my_takenaa' }, out: { next: null } } } };
+    const rk = ctx.wfTplRekey(D2, { my_takenaa: { name: 'T', channel: 'email', body: 'Mine' } }, ['my_takenaa'], d => { let k = 'my_newkey00'; while (k in d) k = k.slice(0, -1) + '1'; return k; });
+    assertEqual([rk.doc.nodes.n2.config.templateKey, Object.keys(rk.tplDrafts), rk.tplDrafts.my_newkey00.body, D2.nodes.n2.config.templateKey, ctx.wfTplRekey(D2, {}, ['my_takenaa'], () => 'x').error.text.length > 0],
+      ['my_newkey00', ['my_newkey00'], 'Mine', 'my_takenaa', true], 'wfTplRekey: a key taken meanwhile → a key of its own, in the step and its draft (the given doc unchanged)');
+  }
+}
+
 (async () => {
   await testVacationFollowUps();
   await testWfSaveRuntime();
   await testWfReviewBlock3();
   testWfReviewBlocks45();
+  await testWfReviewRound2();
   await testAuthProvidersNoLoop();
   await testAutomationsLoaderNoLoop();
   await testAutomationEventsGate();
