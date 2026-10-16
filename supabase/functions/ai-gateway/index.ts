@@ -50,7 +50,9 @@
 //
 // Guard rails (all checked here, on the server):
 //   • Who: everyone signed in with a profile, unless an owner switched the assistant off (ai_settings.enabled), pulled
-//     the kill switch, or switched their role off (roles_enabled). 'sb_…' and 'ops_mcp_…' keys are never accepted.
+//     the kill switch, or switched their role off (roles_enabled). Only the five known roles (AI_ROLES); any other
+//     role is refused. A person whose sign-in was switched off (People → access: banned_until in the future) is refused
+//     at once, not when their token runs out (isBanned, as the mcp function). 'sb_…' and 'ops_mcp_…' keys are never accepted.
 //   • Money: a monthly cap per business (ai_settings.monthly_cap_usd, default 0 = paid off) on PAID spend only
 //     (platform_paid + own_business rows; ai_month_cap_spend). At 80% the owners get ONE phone notification a month
 //     (ai_claim_alert_80 marks the month; existing push devices, copies of push's sendTo/vapidKeys); at 100% the paid AI
@@ -64,7 +66,8 @@
 //     (ai_settings.free_quota.neurons overrides), with an optional per-business share (free_quota.share_pct, set by the
 //     platform only). Before every free call the quota left must cover max(reserve_neurons, the call's estimate).
 //     Cloudflare's 429 / 3036 is the backstop (it marks the quota used up for the rest of the UTC day).
-//   • The context the app sends (where the person is) is at most MAX_CONTEXT_CHARS as JSON.
+//   • The context the app sends (where the person is) is at most MAX_CONTEXT_CHARS as JSON, and its page is a short
+//     identifier (PAGE_ID_RE, checked here; never free text in the context message).
 //   • A daily limit of turns per person (daily_user_limit, business day), counted atomically (ai_turn_begin); a
 //     person's own-key turns don't count.
 //   • max_tokens from the settings; at most MAX_TOOL_STEPS (5) tool rounds per turn, so at most 6 model calls.
@@ -141,6 +144,8 @@ export function cloudflareReady(): boolean { return !!cfToken() && /^[0-9a-f]{32
 export const MAX_TOOL_STEPS = 5;                  // tool rounds per turn (⇒ at most 6 model calls)
 export const MAX_TEXT_CHARS = 4000;               // one message from the person
 export const MAX_CONTEXT_CHARS = 4096;            // a turn's context from the app, as JSON (the app's COBRA_LIMITS.context)
+export const PAGE_ID_RE = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;   // context.page: the app's page id (UI.tab), never free text
+export const BAN_CACHE_MS = 60_000;               // a person's "sign-in switched off" is read again after a minute (mcp's)
 export const MAX_TOOL_RESULT_CHARS = 20000;       // one tool result, as JSON
 export const MAX_CHANGE_JSON_CHARS = 50000;       // a proposal's before / after, as JSON
 export const PROPOSAL_TTL_MS = 7 * 24 * 3600e3;   // a proposal can be confirmed for 7 days (Ofek, a fixed rule)
@@ -486,7 +491,9 @@ export function productNameOf(cat: any): string { return String(cat?.branding?.a
 export function assistantNameOf(s: { assistant_name: string | null }, cat: any): string {
   return String(s.assistant_name || "").trim().slice(0, 40) || productNameOf(cat);
 }
-export function roleEnabled(s: AiSettings, role: string): boolean { return s.roles_enabled[role] !== false; }
+// The five roles the app knows. Any other role (a typo, a role added later) is refused until it is added here.
+export const AI_ROLES = ["owner", "manager", "technician", "va", "marketing"];
+export function roleEnabled(s: AiSettings, role: string): boolean { return AI_ROLES.includes(role) && s.roles_enabled[role] !== false; }
 // A task's model for a provider. Anthropic and the test provider read the plain task keys; the others
 // "<provider>:<task>", then "<provider>:assistant", then PROVIDER_MODEL_DEFAULTS (a stage 7 mode's own taskKey falls back
 // to the assistant model).
@@ -1705,7 +1712,9 @@ export function contextText(ctx: { nowMs: number; biz: Biz; assistantName: strin
     `- Person: ${ctx.me.fullName || "(no name)"} (${ROLE_LABEL[ctx.me.role] || ctx.me.role})`,
   ];
   if (ctx.lang === "he" || ctx.lang === "en") lines.push(`- App language: ${ctx.lang === "he" ? "Hebrew" : "English"}`);
-  if (isObj(ctx.context) && Object.keys(ctx.context).length) lines.push(`- Where they are in the app: ${JSON.stringify(ctx.context)}`);
+  // Only the page id, checked again (a chat saved before the check may hold anything): never the app's text as it came.
+  const page = isObj(ctx.context) ? pageIdOf(ctx.context.page) : "";
+  if (page) lines.push(`- Where they are in the app: the ${page} page`);
   lines.push(...changesContextLines(ctx.changes || [], ctx.nowMs));   // what became of this chat's proposals (G2)
   return lines.join("\n");
 }
@@ -2306,14 +2315,34 @@ export const SSE_HEADERS = { ...CORS_HEADERS, "Content-Type": "text/event-stream
 
 // ── gate: who is asking, is the assistant on for them, and the money / daily limits ──
 // The signed-in person and their token, or null. (team/mcp's caller.)
-async function caller(sb: any, req: Request): Promise<{ profile: Profile; jwt: string } | null> {
+// A person whose sign-in was switched off (People → access) is refused at once, as in the mcp function.
+export async function caller(sb: any, req: Request, nowMs = io.now()): Promise<{ profile: Profile; jwt: string } | null> {
   const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
   if (!jwt || jwt.startsWith("sb_") || jwt.startsWith("ops_mcp_")) return null;
   const { data: u } = await sb.auth.getUser(jwt);
   if (!u || !u.user) return null;
+  if (bannedAt(u.user, nowMs) || await isBanned(sb, u.user.id, nowMs)) return null;
   const { data: p } = await sb.from("profiles").select("id, full_name, role, permissions, technician_name").eq("id", u.user.id).maybeSingle();
   return p ? { profile: appProfile(p), jwt } : null;
 }
+// Whether a user's sign-in is switched off now (banned_until in the future).
+export function bannedAt(user: any, nowMs: number): boolean { return !!(user && user.banned_until && Date.parse(user.banned_until) > nowMs); }
+// The same check from Auth's admin API (the mcp function's isBanned), remembered a minute per user. An account that is
+// gone is not let in; Auth failing to answer is an outage (a 500), never a way in.
+const banCache = new Map<string, { at: number; banned: boolean }>();
+export function banCacheClear(): void { banCache.clear(); }
+async function isBanned(sb: any, userId: string, nowMs: number): Promise<boolean> {
+  const hit = banCache.get(userId);
+  if (hit && nowMs - hit.at < BAN_CACHE_MS) return hit.banned;
+  const { data, error } = await sb.auth.admin.getUserById(userId);
+  if (error && Number(error.status) !== 404) throw new Error("auth: " + clip(error.message, 200));
+  if (error || !data || !data.user) return true;
+  const banned = bannedAt(data.user, nowMs);
+  banCache.set(userId, { at: nowMs, banned });
+  return banned;
+}
+// context.page → the page id, or "" when there is none or it isn't one (PAGE_ID_RE).
+export function pageIdOf(v: unknown): string { return typeof v === "string" && PAGE_ID_RE.test(v) ? v : ""; }
 // The business's assistant settings and the bits of its settings row the gateway needs.
 export async function loadState(sb: any): Promise<{ s: AiSettings; biz: Biz }> {
   const [a, b] = await Promise.all([
@@ -2494,6 +2523,8 @@ export async function prepareChat(deps: { sb: any }, me: Profile, jwt: string, b
   // oversized one would get around the conversation-size and price-tier guards.
   if (isObj(b.context) && JSON.stringify(b.context).length > MAX_CONTEXT_CHARS) return refuse(400, "bad_context");
   if (isObj(b.context) && validateInput(b.context, mode.contextSchema, "context").length) return refuse(400, "bad_context");
+  // The page is a short id (the app's UI.tab; "" = none), never free text: it goes into the turn's context message.
+  if (isObj(b.context) && b.context.page !== undefined && b.context.page !== "" && !pageIdOf(b.context.page)) return refuse(400, "bad_context");
   // (b) switched on for this person?
   const { s, biz } = await loadState(sb);
   const g = gate(s, me);
