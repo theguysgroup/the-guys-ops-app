@@ -2678,13 +2678,20 @@ function testVacations(sb){
   const retryFn = rsrc.slice(rsrc.indexOf('async function retryVacationsLoad('), rsrc.indexOf("window.addEventListener('online', () => retryVacationsLoad());"));
   assertEqual([/const start = STATE\.data;[\s\S]*await Promise\.all[\s\S]*data !== start/.test(retryFn), /VAC_NOTE_RENDER = requestAnimationFrame\(/.test(rsrc), /' · ' \+ vacationPayText\(v\)/.test(rsrc)],
     [true, true, true], 'retry: a read from another login never lands in this one; live note bursts draw once per frame; the person card names the pay by vacationPayText');
-  // review (item 1): the History line never says paid or unpaid (every signed-in person reads activity_log)
+  // review (item 1): the History line never says paid or unpaid (employee History is owners and managers only; new lines still leave it out)
   const lt = sb.vacationLogText(V({ standInName: 'Sam', options: { payroll: true, pay: 'paid', standIn: true, autoBack: true } }), 'Vacation set');
   assertEqual([lt, /paid|unpaid|leave/i.test(sb.vacationLogText(V({ options: { payroll: true, pay: 'unpaid' } }), 'Vacation changed'))], ['Vacation set: 20 Oct – 24 Oct · stand-in Sam', false], 'log text: dates and stand-in, never paid / unpaid leave');
   // review (items 2, 4): the private rows come on the vacations channel; the list is read again when back online or shown
   const vhtml = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
-  assertEqual([/table: 'employee_vacation_notes' \}, handleVacationNoteRealtimeChange/.test(vhtml), /addEventListener\('online', \(\) => retryVacationsLoad\(\)\)/.test(vhtml), /visibilityState === 'visible'\) retryVacationsLoad\(\)/.test(vhtml), /if \(data\.vacationsError\) vacationsRetryLater\(true\)/.test(vhtml)],
-    [true, true, true, true], 'wiring: notes live on the vacations channel; retry on online, tab shown and after a failed load');
+  assertEqual([/table: 'employee_vacation_notes' \}, handleVacationNoteRealtimeChange/.test(vhtml), /addEventListener\('online', \(\) => retryVacationsLoad\(\)\)/.test(vhtml), /visibilityState === 'visible'\) retryVacationsLoad\(\)/.test(vhtml), /if \(data\.vacationsError \|\| data\.vacationNotesError\) vacationsRetryLater\(true\)/.test(vhtml)],
+    [true, true, true, true], 'wiring: notes live on the vacations channel; retry on online, tab shown and after a failed load (the list, or only its notes)');
+  // review round 2: when only the private rows failed, they alone are read again and laid on the list there; the flag clears
+  const retryNotes = retryFn.slice(0, retryFn.indexOf('await Promise.all'));
+  assertEqual([/STATE\.data\.vacationsError \|\| STATE\.data\.vacationNotesError/.test(retryNotes), /if \(!start\.vacationsError\) \{[\s\S]*await fetchAllRows\('employee_vacation_notes', 'vacation_id'\)[\s\S]*data !== start[\s\S]*if \(nr\.error\) \{ vacationsRetryLater\(\); return; \}[\s\S]*data\.vacationNotesError = '';\s*data\.vacations = \(data\.vacations \|\| \[\]\)\.map\(v => vacationWithNote\(v, data\.vacationNotes, data\.vacationPays\)\);\s*renderKeepingInput\(\);\s*return;/.test(retryNotes),
+    /setupVacationsChannel\(\);\s*if \(data\.vacationNotesError\) vacationsRetryLater\(true\);/.test(retryFn)],
+    [true, true, true], 'retry (round 2): a notes-only failure is retried on its own (online, tab shown, timer), re-applied once, and the list retry that loses the notes schedules it');
+  const wn = sb.vacationWithNote(sb.vacationWithNote({ ...noPay }, {}, {}), { v1: 'Fiji' }, { v1: 'paid' });
+  assertEqual([wn.note, wn.options.pay, wn.payKnown, wn.privatePay], ['Fiji', 'paid', true, 'paid'], 'with note: laid again on a vacation already in the list (the notes-only retry) fills the note and the pay');
   // review (items 1, 5, 6): the follow-ups SQL strips options.pay only in part B (after the app); Ofek's review (16 Oct): the
   // History lines are never rewritten (owners and managers only already), and each part waits at most 5 s for a lock
   const vsql = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage3-vacation.sql'), 'utf8');
@@ -2920,6 +2927,13 @@ function testVacationUi(sb){
   assertEqual(P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30' }), [], 'problems: a vacation changed does not overlap itself');
   assertEqual(P({ ...ok, note: 'x'.repeat(501) }), ['The note can be at most 500 characters'], 'problems: a long note');
   assertEqual(P({ ...ok, options: { payroll: true, pay: 'later' } }), ['Paid or unpaid leave?'], 'problems: payroll ticked, paid or unpaid missing');
+  assertEqual([P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30', payKnown: false, options: { payroll: true, pay: 'unpaid' } }),
+    P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30', payKnown: true, options: { payroll: true, pay: 'unpaid' } }),
+    P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30', payKnown: false, options: { payroll: false, pay: 'unpaid' } }),
+    P({ ...ok, payKnown: false, options: { payroll: true, pay: 'unpaid' } }),
+    P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30', payKnown: false, options: { payroll: true, pay: 'later' } })],
+    [['Paid or unpaid leave?'], [], [], [], ['Paid or unpaid leave?']],
+    'problems: a vacation changed whose pay nobody knows, payroll ticked → pick one (once); not once picked, without payroll, or for a new one');
   const SW = (d, ids) => sb.vacationStandInWarning(d, employees, ids);
   assertEqual(P(ok), [], 'problems: a stand-in with no app login never blocks the save');
   assertEqual([SW(ok, new Set(['e1', 'e2'])), SW(ok, new Set(['e1'])), SW(ok, null), SW({ ...ok, options: { standIn: false } }, new Set())],

@@ -3461,7 +3461,7 @@ async function loadFromSupabase(){
   if (PRESENT) presentScaleData(data);
   STATE.data = data;
   if (STATE.dataLoaded) setupVacationsChannel();   // the first load failed and this one worked: subscribe now (stage 3 follow-up 7)
-  if (data.vacationsError) vacationsRetryLater(true);   // and when this one failed, the list is read again on its own
+  if (data.vacationsError || data.vacationNotesError) vacationsRetryLater(true);   // and when this one failed, the list (or only its notes) is read again on its own
 }
 // Which vacations the app reads (loadFromSupabase, retryVacationsLoad): see the comment at the load.
 function vacationsLoadQuery(q){
@@ -4545,8 +4545,10 @@ function handleVacationNoteRealtimeChange(payload){
 }
 // The vacations list did not load (stage 3 follow-up 7, review): it is read again on its own, and the channel subscribes
 // once it works, for every role. Tried when the browser is back online, when the tab is shown again, and 1, 5 and 15
-// minutes after the failed load (vacationRetryDelay; then only on those two events). Nothing is read or drawn while the
-// list is there; one redraw when it comes back.
+// minutes after the failed load (vacationRetryDelay; then only on those two events). When only the private rows failed
+// (vacationNotesError: existing vacations can't be changed), they alone are read again the same way, and laid on the list
+// that is there (stage 3 follow-ups review, round 2). Nothing is read or drawn while both are there; one redraw when they
+// come back.
 function vacationsRetryLater(fresh){
   if (fresh) VAC_RETRY.tries = 0;
   clearTimeout(VAC_RETRY.timer);
@@ -4554,10 +4556,20 @@ function vacationsRetryLater(fresh){
   VAC_RETRY.timer = ms ? setTimeout(retryVacationsLoad, ms) : null;
 }
 async function retryVacationsLoad(){
-  if (VAC_RETRY.busy || !STATE.dataLoaded || !STATE.data || !STATE.data.vacationsError) return;
+  if (VAC_RETRY.busy || !STATE.dataLoaded || !STATE.data || !(STATE.data.vacationsError || STATE.data.vacationNotesError)) return;
   VAC_RETRY.busy = true;
   const start = STATE.data;   // a read made under one login never lands in the next one's data (a shared office device)
   try {
+    if (!start.vacationsError) {   // the list is there, only its private rows are missing
+      const nr = await fetchAllRows('employee_vacation_notes', 'vacation_id');
+      const data = STATE.data;
+      if (!data || data !== start || data.vacationsError || !data.vacationNotesError) return;   // signed out or in again, or a full load came meanwhile
+      if (nr.error) { vacationsRetryLater(); return; }
+      data.vacationNotes = vacationNotesMap(nr.data); data.vacationPays = vacationPaysMap(nr.data); data.vacationNotesError = '';
+      data.vacations = (data.vacations || []).map(v => vacationWithNote(v, data.vacationNotes, data.vacationPays));
+      renderKeepingInput();
+      return;
+    }
     const [vr, nr] = await Promise.all([fetchAllRows('employee_vacations', 'id', vacationsLoadQuery), fetchAllRows('employee_vacation_notes', 'vacation_id')]);
     const data = STATE.data;
     if (!data || data !== start || !data.vacationsError) return;   // signed out or in again, or a full load brought the list meanwhile
@@ -4567,6 +4579,7 @@ async function retryVacationsLoad(){
     data.vacations = (vr.data || []).map(r => vacationWithNote(mapVacationRow(r), data.vacationNotes, data.vacationPays));
     data.vacationsError = '';
     setupVacationsChannel();
+    if (data.vacationNotesError) vacationsRetryLater(true);   // the private rows are then read again on their own
     renderKeepingInput();
   } finally { VAC_RETRY.busy = false; }
 }
@@ -20060,6 +20073,9 @@ function vacationFormProblems(d, rows, employees, tz){
   const out = [], o = (d && d.options) || {};
   if (!d || !d.employeeId) out.push('Pick who is going on vacation');
   out.push(...vacationProblems(d, rows, tz));
+  // A vacation whose paid / unpaid leave nobody knows (payKnown false: its private pay is missing) with payroll ticked: pick
+  // one, or it would be saved with none for good (options always holds 'unpaid', so vacationProblems can't tell).
+  if (d && d.id && o.payroll===true && d.payKnown===false && !out.includes('Paid or unpaid leave?')) out.push('Paid or unpaid leave?');
   if (d && o.standIn===true && d.standInId && d.standInId!==d.employeeId && d.startsOn && d.endsOn && d.endsOn >= d.startsOn) {
     const probe = { id: null, employeeId: d.standInId, startsOn: d.startsOn, endsOn: d.endsOn, options: {}, endedAt: null, cancelledAt: null };
     if ((rows || []).some(r => vacationsOverlap(probe, r, tz))) {
@@ -20322,8 +20338,9 @@ function vacRefresh(){
   [['vac-opts', vacOptsHtml], ['vac-extra', vacExtraHtml]].forEach(([id, fn]) => { const n = document.getElementById(id); if (n) n.innerHTML = fn(); });
   const s = document.getElementById('vac-sub'); if (s) s.textContent = vacSubText();
 }
-// "Vacation set: 20 Oct – 24 Oct · stand-in Sam" (the person's History). Never paid / unpaid leave: every signed-in person
-// reads activity_log, and that is owners and managers only (stage 3 follow-up 2).
+// "Vacation set: 20 Oct – 24 Oct · stand-in Sam" (the person's History). Employee History (activity_log) is owners and
+// managers only since rls-tighten-2026-09-30.sql; new lines still leave out paid / unpaid leave, and old lines are left as
+// they are (stage 3 follow-up 2).
 function vacationLogText(v, verb){
   return `${verb}: ${vacationRangeText(v.startsOn, v.endsOn)}${vacationOpt(v, 'autoBack') ? '' : ' (until someone ends it)'}${vacationOpt(v, 'standIn') && v.standInName ? ' · stand-in ' + v.standInName : ''}`;
 }
