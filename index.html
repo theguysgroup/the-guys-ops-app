@@ -2570,6 +2570,23 @@ body.cobra-open #chase-bubbles { right: 418px !important; }
   .cobra-set-pad { padding: 12px 16px 14px; }
 }
 /* ══ AI assistant (stage 6): own block, end ══ */
+/* ══ Workflow AI (stage 7): own block, start ══ */
+.wfai-sum { margin-top: 6px; font-size: 12.5px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.wfai-name { font-size: 12px; color: var(--ink-soft); min-width: 0; overflow-wrap: anywhere; }
+.wfai-steps { list-style: none; margin: 8px 0 0; padding: 0; }
+.wfai-steps li, .wfai-line { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
+.wfai-steps li > span:last-child, .wfai-line bdi { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.wfai-k { flex: 0 0 52px; color: var(--ink-faint); font-size: 11.5px; padding-top: 1px; }
+.wfai-del { text-decoration: line-through; color: var(--ink-soft); }
+.wfai-group { margin-top: 8px; font-size: 11.5px; font-weight: 600; color: var(--ink-soft); }
+.wfai-badge { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--ink-soft); }
+.wfai-badge svg { flex-shrink: 0; }
+.wfai-tick { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; font-size: 12.5px; }
+.wfai-tick input { margin-top: 2px; flex-shrink: 0; }
+.wfai-saved { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; padding: 7px 10px; border-radius: var(--radius-sm); background: var(--good-soft); font-size: 12.5px; }
+.wfai-saved b { flex: 1; min-width: 0; }
+.wfai-saved svg { color: var(--good); flex-shrink: 0; }
+/* ══ Workflow AI (stage 7): own block, end ══ */
 </style>
 <!-- The business's colours (Look and branding), kept from the last visit so the first paint is already branded. It must come
      after the main <style>, or the light-mode values lose to :root. applyBranding() rewrites it once the settings load. -->
@@ -20837,11 +20854,10 @@ function renderAutomationPage(){
 function wfWorkflowsHtml(){
   if (WF_UI.view!=='cards' && WF_UI.view!=='table') WF_UI.view = wfViewPref();
   const D = wfData(), V = wfItemsNow(D), reviewN = V.items.filter(x => !x.deleted && x.kind!=='folder' && (x.errors > 0 || x.problems.length)).length;
-  const aiWhy = 'Coming with Workflow AI';
   const bar = wfPhoneBarWanted(V.items, wfLabels(D.registry && D.registry.status==='ok' ? D.registry.data : null)) ? phoneNotificationsBar('settings') : '';
   const head = bar + `<div class="wf-head"><h3>Workflows list</h3><span class="au-sp"></span>
     <button type="button" class="btn small" onclick="wfFolderNew()">${ico('folder', 14)} Create folder</button>
-    <button type="button" class="btn small wf-ai" aria-disabled="true" title="${aiWhy}" onclick="showToast('${aiWhy}', { kind: 'info' })">${ico('zap', 14)} Build using AI</button>
+    ${wfAiButtonHtml()}
     <button type="button" class="btn small primary" aria-haspopup="menu" onclick="wfCreateMenu(this)">${ico('plus', 14)} Create workflow ${ico('chevronDown', 14)}</button></div>`;
   const tabs = `<div class="wf-subtabs" role="tablist" aria-label="Workflows">${WF_LIST_TABS.map(([k, l]) => `<button type="button" role="tab" class="wf-subtab${WF_UI.listTab===k ? ' on' : ''}" aria-selected="${WF_UI.listTab===k}" onclick="wfSetListTab('${k}')">${l}${k==='review' ? ` (${D.review && D.review.status==='ok' ? reviewN : '…'})` : ''}</button>`).join('')}</div>`;
   const view = (k, icon, l) => `<button type="button" class="wf-vbtn${WF_UI.view===k ? ' on' : ''}" aria-pressed="${WF_UI.view===k}" aria-label="${l}" title="${l}" onclick="wfSetView('${k}')">${ico(icon, 15)}</button>`;
@@ -20896,8 +20912,8 @@ function wfSelectMenu(btn){
   });
 }
 function wfCreateMenu(btn){
-  wfMenuShow(btn, [{ id: 'scratch', label: 'Start from scratch' }, { id: 'ai', label: 'Build using AI', why: 'Coming with Workflow AI' }, { id: 'template', label: 'Select from template' }],
-    id => { if (id==='scratch') { if (wfUseOldEditor()) openAutoEditor(null); else wfBuilderOpen(null, { folderId: WF_UI.folder || null }); } else if (id==='template') wfTplOpen(); });
+  wfMenuShow(btn, [{ id: 'scratch', label: 'Start from scratch' }, ...(wfAiShown() ? [{ id: 'ai', label: 'Build using AI', why: wfAiWhy() }] : []), { id: 'template', label: 'Select from template' }],
+    id => { if (id==='scratch') { if (wfUseOldEditor()) openAutoEditor(null); else wfBuilderOpen(null, { folderId: WF_UI.folder || null }); } else if (id==='ai') wfAiBuild(); else if (id==='template') wfTplOpen(); });
 }
 function wfBulkPubMenu(btn){ wfMenuShow(btn, [{ id: 'publish', label: 'Publish' }, { id: 'draft', label: 'Draft' }], id => wfBulk(id)); }
 
@@ -21245,8 +21261,11 @@ function wfBuilderCardHtml(A, draft){
     <div class="tpl-actions"><button type="button" class="btn small primary" ${draft && draft!==saved ? '' : 'disabled'} onclick="wfBuilderSave()">Save</button>${draft ? '<button type="button" class="btn small ghost" onclick="wfGsCancel(\'builder\')">Cancel</button>' : ''}</div>`;
   return setBlock('Default builder', 'Which builder a new workflow opens in.', body);
 }
+// The AI Builder card (stage 7): a read-only view of the assistant's switch (Settings → AI); it stores nothing.
 function wfAiCardHtml(){
-  return setBlock('Workflow AI', '', setRows([['AI Builder', `${esc('Build and edit workflows with AI - describe what you want to automate and AI generates the workflow for you.')} <span class="hint wf-why">${esc(WF_GLOBAL_WHY.ai)}</span>`, setToggle(false, '', WF_GLOBAL_WHY.ai), { html: true }]]));
+  const on = wfAiStatusText();
+  const link = cobraIsOwner() ? `<button type="button" class="btn small ghost" onclick="setSettingsPage('ai')">Open AI settings</button>` : '';
+  return setBlock('Workflow AI', '', setRows([['AI Builder', `${esc('Build and edit workflows with AI - describe what you want to automate and AI generates the workflow for you.')} <span class="hint wf-why">${esc(on.text)}</span>`, `${setToggle(on.on, '', on.text)} ${link}`, { html: true }]]));
 }
 function wfAutoSaveCardHtml(){
   return setBlock('Auto save', '', setRows([['Auto save', `${esc('Automatically save changes while editing your draft workflow.')} <span class="hint wf-why">${esc(WF_GLOBAL_WHY.autoSave)}</span>`, setToggle(false, '', WF_GLOBAL_WHY.autoSave), { html: true }]]));
@@ -32128,6 +32147,9 @@ const COBRA_PAGE_MODES = [];
 const COBRA_KIND_ICON = { office_hours: 'clock', task_add: 'tasks', lead_stage: 'kanban', lead_note: 'note', task_update: 'calendarCheck', lead_follow_up: 'calendar',
   // stage 7 (Workflow AI): a new workflow saved as a Draft, a change to one
   wf_create: 'zap', wf_edit: 'zap' };
+// Stage 7: a change kind's own look in the proposal card (COBRA_KIND_UI[kind] = { confirm: change => the button's words,
+// lean: true = the head and buttons only, a result card of that kind shows the details }, set by Workflow AI's block).
+const COBRA_KIND_UI = {};
 // The models Settings offers, with the gateway's default prices (US$ per million tokens; PRICE_DEFAULTS in ai-gateway,
 // a test keeps them equal). An owner's price overrides (ai_settings.prices) are shown on top.
 // provider: which group of Settings → AI → Models lists it (the free AI, the paid AI, own OpenAI keys).
@@ -32349,20 +32371,22 @@ function cobraDiffRowHtml(r){
   // The value has its own direction (a Hebrew note stays right to left); the English Now / After labels sit outside it.
   return `<div class="cobra-diff-row"><span class="cobra-diff-label" dir="auto">${esc(x.label ?? '')}</span><span class="cobra-diff-before"><i>Now</i><bdi dir="auto">${esc(x.before ?? '—')}</bdi></span><span class="cobra-diff-after"><i>After</i><bdi dir="auto">${esc(x.after ?? '—')}</bdi></span></div>`;
 }
+function cobraLeanKind(p){ const k = p && p.kind; return !!k && Object.prototype.hasOwnProperty.call(COBRA_KIND_UI, k) && !!COBRA_KIND_UI[k].lean; }
 function cobraStatusPill(status){ return ({ confirmed: pill('good', 'Saved'), undone: pill('neutral', 'Undone'), cancelled: pill('neutral', 'Cancelled'), failed: pill('bad', 'Not saved') })[status] || ''; }
 // A stored error is plain English, or one of the gateway's codes (e.g. an expired proposal).
 function cobraChangeError(err){ const e = String(err || ''); return /^[a-z_]+$/.test(e) && COBRA_ERRORS[e] ? COBRA_ERRORS[e] : e; }
 // A proposal ("what will change") card. p = the gateway's change (changeOut) or an ai_changes row.
 function cobraProposalHtml(p, busy){
   const x = p || {}, d = x.display && typeof x.display==='object' ? x.display : {};
+  const ku = Object.prototype.hasOwnProperty.call(COBRA_KIND_UI, x.kind) ? COBRA_KIND_UI[x.kind] : {}, lean = cobraLeanKind(x);
   const ask = x.status==='proposed' && x.can_confirm!==false;
   const err = cobraChangeError(x.error);
   return `<div class="cobra-card" data-change="${esc(x.id || '')}">`
     + `<div class="cobra-card-head">${ico(COBRA_KIND_ICON[x.kind] || 'pencil', 15)}<b dir="auto">${esc(d.title || x.summary || x.label || '')}</b>${cobraStatusPill(x.status)}</div>`
-    + cobraRowsOf(x).map(cobraDiffRowHtml).join('')
+    + (lean ? '' : cobraRowsOf(x).map(cobraDiffRowHtml).join(''))
     // The gateway's warnings for the person to weigh before confirming (e.g. someone on vacation then); while it is asked only.
-    + (ask && Array.isArray(d.warnings) ? d.warnings.slice(0, 4).map(w => `<div class="cobra-card-warn">${ico('alert', 13)}<span dir="auto">${esc(w)}</span></div>`).join('') : '')
-    + (ask ? `<div class="cobra-card-acts"><button type="button" class="btn primary small" onclick="cobraChange('${esc(jsStr(x.id || ''))}','confirm')"${busy ? ' disabled' : ''}>Confirm</button><button type="button" class="btn small" onclick="cobraChange('${esc(jsStr(x.id || ''))}','cancel')"${busy ? ' disabled' : ''}>Cancel</button></div>` : '')
+    + (ask && !lean && Array.isArray(d.warnings) ? d.warnings.slice(0, 4).map(w => `<div class="cobra-card-warn">${ico('alert', 13)}<span dir="auto">${esc(w)}</span></div>`).join('') : '')
+    + (ask ? `<div class="cobra-card-acts"><button type="button" class="btn primary small" onclick="cobraChange('${esc(jsStr(x.id || ''))}','confirm')"${busy ? ' disabled' : ''}>${esc(typeof ku.confirm==='function' ? ku.confirm(x) : 'Confirm')}</button><button type="button" class="btn small" onclick="cobraChange('${esc(jsStr(x.id || ''))}','cancel')"${busy ? ' disabled' : ''}>Cancel</button></div>` : '')
     + (err ? `<div class="cobra-card-err" dir="auto">${esc(err)}</div>` : '')
     + '</div>';
 }
@@ -32388,8 +32412,10 @@ function cobraMsgHtml(m, busy, ctx){
   return `<div class="cobra-msg bot${x.streaming ? ' streaming' : ''}"${mid}>`
     + (x.tools || []).map(cobraToolHtml).join('')
     + `<div class="cobra-text" dir="auto">${x.text ? cobraFormat(x.text) : (x.streaming ? COBRA_DOTS : '')}</div>`
-    + (x.proposals || []).map(p => cobraProposalHtml(p, !!b[p && p.id])).join('')
+    + (x.proposals || []).filter(p => !cobraLeanKind(p)).map(p => cobraProposalHtml(p, !!b[p && p.id])).join('')
     + (x.cards || []).map(card => cobraCardHtml(card, ctx)).join('')
+    // a kind whose card shows the details (COBRA_KIND_UI lean) has its buttons below that card
+    + (x.proposals || []).filter(p => cobraLeanKind(p)).map(p => cobraProposalHtml(p, !!b[p && p.id])).join('')
     + (x.notes || []).map(n => `<div class="cobra-note" dir="auto">${esc(n)}</div>`).join('')
     + (x.error ? `<div class="cobra-err" role="alert" dir="auto">${esc(x.error.reason || cobraErrorText(x.error.code))}</div>` : '')
     + '</div>';
@@ -32697,7 +32723,7 @@ async function cobraFetch(path, body, opts){
 }
 // The example questions: the mode's list, or its function of the REAL signed-in person's profile (the gateway answers as
 // them, never as the profile an owner is viewing as).
-function cobraExamples(m){ const e = m && m.examples; return (typeof e==='function' ? e(getRealProfile()) : e) || []; }
+function cobraExamples(m, ctx){ const e = m && m.examples; return (typeof e==='function' ? e(getRealProfile(), ctx || {}) : e) || []; }
 function cobraIsOwner(){ const me = getRealProfile(); return !!me && me.role==='owner'; }
 function cobraStatusLoad(force){
   const c = COBRA;
@@ -32912,7 +32938,7 @@ function cobraBodyHtml(){
   }
   if (!c.msgs.length) {
     const off = cobraComposerOff();
-    return `<p class="cobra-intro" dir="auto">${esc(m.intro(cobraName()))}</p><div class="cobra-examples">${cobraExamples(m).map(x => `<button type="button" dir="auto" onclick="cobraSend('${esc(jsStr(x))}')"${off ? ' disabled' : ''}>${esc(x)}</button>`).join('')}</div>`;
+    return `<p class="cobra-intro" dir="auto">${esc(m.intro(cobraName(), c.context))}</p><div class="cobra-examples">${cobraExamples(m, c.context).map(x => `<button type="button" dir="auto" onclick="cobraSend('${esc(jsStr(x))}')"${off ? ' disabled' : ''}>${esc(x)}</button>`).join('')}</div>`;
   }
   const cardCtx = cobraCardCtx();
   return `<div class="cobra-msgs" id="cobra-msgs" role="log" aria-live="polite" aria-busy="${!!c.streaming}">${c.msgs.slice(-200).map(x => cobraMsgHtml(x, c.busy, cardCtx)).join('')}</div>`;
@@ -32933,7 +32959,7 @@ function cobraMicBtnHtml(){
 function cobraHintText(){ return COBRA.hint || cobraLeftText(COBRA.status); }
 function cobraComposeHtml(){
   const m = COBRA_MODES[COBRA.mode] || COBRA_MODES.assistant, off = cobraComposerOff();
-  return `<div class="cobra-compose" id="cobra-compose"><textarea id="cobra-input" dir="auto" rows="1" maxlength="${COBRA_LIMITS.text}" placeholder="${esc(m.placeholder)}" aria-label="Message" oninput="cobraInput(this)" onkeydown="cobraComposeKey(event)"${off ? ' disabled' : ''}>${esc(COBRA.draft)}</textarea>`
+  return `<div class="cobra-compose" id="cobra-compose"><textarea id="cobra-input" dir="auto" rows="1" maxlength="${COBRA_LIMITS.text}" placeholder="${esc(typeof m.placeholder==='function' ? m.placeholder(COBRA.context) : m.placeholder)}" aria-label="Message" oninput="cobraInput(this)" onkeydown="cobraComposeKey(event)"${off ? ' disabled' : ''}>${esc(COBRA.draft)}</textarea>`
     + cobraMicBtnHtml() + cobraSendBtnHtml()
     + `<div class="cobra-hint" id="cobra-hint" aria-live="polite">${esc(cobraHintText())}</div></div>`;
 }
@@ -33284,6 +33310,7 @@ async function cobraChange(id, action){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   const step = COBRA_CHANGE_STEPS[action];
   if (!step) return;
+  if (!wfAiChangeGuard(id, action)) return;   // Workflow AI (stage 7): its own checks before a Confirm
   COBRA.busy[id] = true;
   cobraChangeEls(id).forEach(el => el.querySelectorAll('button').forEach(b => { b.disabled = true; }));
   let ch = null, ok = false;
@@ -33299,6 +33326,7 @@ async function cobraChange(id, action){
     COBRA.logAt = 0;
   }
   cobraPutChange(ch);
+  if (ok) wfAiChangeDone(ch, action);   // Workflow AI (stage 7): "Draft created → Open" and the list
   if (ok && action==='confirm') showToast(`Saved: ${ch.summary || 'the change'}`, { undo: () => cobraChange(id, 'undo') });
   else if (ok && action==='undo') showToast('Undone');
 }
@@ -33500,6 +33528,181 @@ sb.auth.onAuthStateChange((ev, session) => {
   if (uid) COBRA.uid = uid;
 });
 // ══ AI assistant (stage 6): own block, end ══
+// ══ Workflow AI (stage 7): own block, start ══
+// Workflow AI (stage 7): the assistant's `workflow` mode (the gateway's workflow_build / workflow_edit: owners and
+// managers only), its entry points and its cards. Everything the AI proposes is a DRAFT: Confirm saves it as a Draft
+// (a change to a Published workflow saves it as a Draft too, which stops it), and nothing here publishes, switches on,
+// sends or tests anything. The server part: supabase/functions/ai-gateway (modes, tools, change kinds wf_create / wf_edit).
+const WF_AI_OFF = 'Turn on the assistant in Settings → AI';
+const WF_AI_DRAFT_BADGE = 'Saved as a Draft: nothing runs until you publish it';
+const WF_AI_OWN_LINE = /^(It is live|Saved as a Draft|It removes more than)|waiting in it and will stop\.$/;
+// What the person ticked on a "removes many steps" card (change id → true); the guard reads it before a Confirm.
+const WF_AI = { ticked: {} };
+const WF_AI_EXAMPLES = {
+  build: ['When a lead moves to Quoted, wait 2 days, then email them a follow-up about their quote.', 'When someone submits the website form, add a task for the office to call them.', 'After a job is paid, wait a day and email the customer a thank-you.'],
+  edit: ['Describe this workflow', 'Change the first wait to 3 days', 'Add a tag after the email'],
+};
+// Owners and managers only (the automations function refuses everyone else): others never see an entry point.
+function wfAiShown(){ const me = getRealProfile(); return !!me && (me.role==='owner' || me.role==='manager'); }
+// '' = Workflow AI can open; else why not (greyed with it). A status still loading doesn't block: the panel says it itself.
+function wfAiWhy(){
+  if (!wfAiShown()) return 'Only owners and managers can use Workflow AI';
+  const st = COBRA.status;
+  if (COBRA.statusErr==='not_installed' || (st && st.enabled===false)) return WF_AI_OFF;
+  return readOnlyReason();
+}
+// The AI Builder card's read-only status (Global Workflow Settings): the assistant's own switch, never stored here.
+function wfAiStatusText(){
+  const st = COBRA.status;
+  if (!st) return { on: false, text: COBRA.statusErr==='not_installed' ? 'Off: Settings → AI' : 'Checking the assistant' };
+  return st.enabled===false ? { on: false, text: 'Off: Settings → AI' } : { on: true, text: 'On for owners and managers' };
+}
+function wfAiButtonHtml(){
+  if (!wfAiShown()) return '';
+  const why = wfAiWhy();
+  return why ? `<button type="button" class="btn small wf-ai" aria-disabled="true" title="${esc(why)}" onclick="showToast('${esc(jsStr(why))}', { kind: 'info' })">${ico('zap', 14)} Build using AI</button>`
+    : `<button type="button" class="btn small wf-ai" onclick="wfAiBuild()">${ico('zap', 14)} Build using AI</button>`;
+}
+// "Build using AI" (the list's button and the create menu): the panel in build mode.
+function wfAiBuild(){
+  const why = wfAiWhy();
+  if (why) { showToast(why, { kind: 'info' }); return; }
+  cobraOpen({ mode: 'workflow', context: {} });
+}
+// The floating button on the automations board opens Workflow AI: edit mode when a saved workflow is open in the builder
+// (its id and builder kind are all the AI is told), build mode on the list or an unsaved builder; elsewhere the assistant.
+function wfAiPageMode(ui){
+  const u = ui || {};
+  if (!wfAiShown() || u.tab!=='settings' || settingsPageKey((u.settings || {}).page)!=='automation') return null;
+  const W = typeof WF!=='undefined' ? WF : null;
+  if (!W || !W.id) return { mode: 'workflow', context: {} };
+  return { mode: 'workflow', context: { workflowId: String(W.id), ...(W.builder==='advanced' || W.builder==='standard' ? { builder: W.builder } : {}) } };
+}
+// The mode: ids and enums only go to the gateway (its schema allows page, lang, builder and, to edit, workflowId).
+const WF_AI_MODE = {
+  label: 'Workflow AI', serverMode: ctx => ctx && ctx.workflowId ? 'workflow_edit' : 'workflow_build',
+  placeholder: ctx => ctx && ctx.workflowId ? 'Ask for a change to this workflow' : 'Describe the workflow you want',
+  intro: (name, ctx) => ctx && ctx.workflowId
+    ? `Hi, I'm ${name}. Ask me about this workflow, or ask for a change. I show you what will change first, and a change is only ever saved as a Draft.`
+    : `Hi, I'm ${name}. Tell me what you want to automate and I'll build it. It is saved as a Draft: nothing runs until you publish it.`,
+  examples: (p, ctx) => ctx && ctx.workflowId ? WF_AI_EXAMPLES.edit : WF_AI_EXAMPLES.build,
+  requestContext: (ctx, ui) => {
+    const c = ctx || {}, o = { page: String((ui && ui.tab) || '') };
+    if (WF_UUID_RE.test(String(c.workflowId || ''))) o.workflowId = String(c.workflowId);
+    if (c.builder==='standard' || c.builder==='advanced') o.builder = c.builder;
+    try { if (regionCountry()==='IL') o.lang = 'he'; } catch (e) { /* the person's words give the language */ }
+    return o;
+  },
+  // A saved chat keeps the workflow it was about (the page and language go with every turn).
+  savedContext: s => {
+    const c = s || {}, o = {};
+    if (WF_UUID_RE.test(String(c.workflowId || ''))) o.workflowId = String(c.workflowId);
+    if (c.builder==='standard' || c.builder==='advanced') o.builder = c.builder;
+    return o;
+  },
+};
+// The proposal card's button: a new workflow, or a change (to a live one: it is then stopped).
+const WF_AI_KIND_UI = {
+  wf_create: { lean: true, confirm: () => 'Save as draft' },
+  wf_edit: { lean: true, confirm: ch => ch && ch.before && ch.before.enabled===true ? 'Save as draft (stops it)' : 'Save as draft' },
+};
+// The change a card is about (the chat's own copy: the gateway's change, or the row read from History).
+function wfAiChangeOf(id){ try { return id ? cobraFindChange(String(id)) : null; } catch (e) { return null; } }
+// The workflow a change is about: a new one's id once saved, a change's open workflow (the card keeps it: History's rows have no target).
+function wfAiTargetOf(ch){
+  const x = wfObj(ch), t = wfObj(x.target), a = wfObj(x.after);
+  if (x.kind==='wf_create') return String(a.id || t.id || '');
+  if (t.automation_id) return String(t.automation_id);
+  for (const m of COBRA.msgs || []) for (const c of (m && m.cards) || []) if (c && c.kind==='wf_diff' && wfObj(c.data).change_id===x.id && wfObj(c.data).id) return String(c.data.id);
+  return '';
+}
+// "Draft created → Open" / "Changes saved as a Draft → Open" (the wf_saved card, and the saved line of the two below).
+function wfAiSavedHtml(d){
+  const x = wfObj(d), id = String(x.id || ''), edit = x.kind==='wf_edit';
+  return `<div class="wfai-saved">${ico('check', 14)}<b dir="auto">${esc(edit ? 'Changes saved as a Draft' : 'Draft created')}</b>`
+    + (WF_UUID_RE.test(id) ? `<button type="button" class="btn small" onclick="wfAiOpenDraft('${esc(jsStr(id))}')">Open</button>` : '') + '</div>';
+}
+function wfAiSavedFor(changeId, kind){
+  const ch = wfAiChangeOf(changeId);
+  return ch && ch.status==='confirmed' ? wfAiSavedHtml({ kind, id: wfAiTargetOf(ch) }) : '';
+}
+function wfAiWarnHtml(w){ return `<div class="cobra-card-warn">${ico('alert', 13)}<span dir="auto">${esc(w)}</span></div>`; }
+// A new workflow proposal: its name, the steps in order, the warnings, and that it is only a Draft.
+function wfAiPreviewHtml(d){
+  const x = wfObj(d), rows = (Array.isArray(x.rows) ? x.rows : []).slice(0, 60), warns = (Array.isArray(x.warnings) ? x.warnings : []).filter(w => !WF_AI_OWN_LINE.test(String(w))).slice(0, 5);
+  return `<div class="cobra-card wfai-card" data-wfai="${esc(x.change_id || '')}">`
+    + `<div class="cobra-card-head">${ico('zap', 15)}<b dir="auto">${esc(x.name || 'New workflow')}</b>${pill('neutral', 'Draft')}</div>`
+    + (x.summary ? `<div class="wfai-sum" dir="auto">${esc(x.summary)}</div>` : '')
+    + `<ol class="wfai-steps">${rows.map(r => `<li><span class="wfai-k" dir="auto">${esc(wfObj(r).label ?? '')}</span><span dir="auto">${esc(wfObj(r).after ?? '')}</span></li>`).join('')}</ol>`
+    + warns.map(wfAiWarnHtml).join('')
+    + `<div class="wfai-badge">${ico('info', 13)}<span>${esc(WF_AI_DRAFT_BADGE)}</span></div>`
+    + wfAiSavedFor(x.change_id, 'wf_create') + '</div>';
+}
+// A change proposal: what is added, changed and removed, that a live workflow is stopped, and the extra tick.
+function wfAiDiffHtml(d){
+  const x = wfObj(d), rows = (Array.isArray(x.rows) ? x.rows : []).slice(0, 40).map(wfObj);
+  const gone = rows.filter(r => r.after==='Removed'), added = rows.filter(r => r.after!=='Removed' && r.before==='—' && r.label!=='Name'), changed = rows.filter(r => !gone.includes(r) && !added.includes(r));
+  const ch = wfAiChangeOf(x.change_id), asked = !!ch && ch.status==='proposed', waiting = Number(x.waitingRunsAffected) || 0;
+  const warns = [
+    ...(x.willDraft ? [`This workflow is live: saving stops it until you publish again${waiting > 0 ? ` (${waiting} waiting ${waiting===1 ? 'run stops' : 'runs stop'})` : ''}`] : []),
+    ...(Array.isArray(x.warnings) ? x.warnings : []).filter(w => !WF_AI_OWN_LINE.test(String(w))).slice(0, 4),
+  ];
+  const group = (title, list, row) => list.length ? `<div class="wfai-group" dir="auto">${esc(title)}</div>${list.map(row).join('')}` : '';
+  return `<div class="cobra-card wfai-card" data-wfai="${esc(x.change_id || '')}">`
+    + `<div class="cobra-card-head">${ico('zap', 15)}<b dir="auto">What will change</b>${x.name ? `<span class="wfai-name" dir="auto">${esc(x.name)}</span>` : ''}</div>`
+    + (x.summary ? `<div class="wfai-sum" dir="auto">${esc(x.summary)}</div>` : '')
+    + group('Added', added, r => `<div class="wfai-line"><span class="wfai-k" dir="auto">${esc(r.label ?? '')}</span><bdi dir="auto">${esc(String(r.after ?? '').replace(/ \(new\)$/, ''))}</bdi></div>`)
+    + group('Changed', changed, cobraDiffRowHtml)
+    + group('Removed', gone, r => `<div class="wfai-line"><span class="wfai-k" dir="auto">${esc(r.label ?? '')}</span><bdi dir="auto" class="wfai-del">${esc(r.before ?? '')}</bdi></div>`)
+    + (asked ? warns.map(wfAiWarnHtml).join('') : '')
+    + (asked && x.needs_extra_confirm ? `<label class="wfai-tick"><input type="checkbox"${WF_AI.ticked[x.change_id] ? ' checked' : ''} onchange="wfAiTick('${esc(jsStr(x.change_id || ''))}', this.checked)"><span>I checked it: this removes many of the steps while leads are waiting in it.</span></label>` : '')
+    + `<div class="wfai-badge">${ico('info', 13)}<span>${esc(WF_AI_DRAFT_BADGE)}</span></div>`
+    + wfAiSavedFor(x.change_id, 'wf_edit') + '</div>';
+}
+function wfAiTick(id, on){ WF_AI.ticked[String(id || '')] = !!on; }
+// Before a Confirm on a change: not while the same workflow is open with unsaved changes (the change is made on the saved
+// one), and not without the extra tick. → true = go on.
+function wfAiChangeGuard(id, action){
+  if (action!=='confirm') return true;
+  const ch = wfAiChangeOf(id);
+  if (!ch || ch.kind!=='wf_edit') return true;
+  const tid = wfAiTargetOf(ch), W = typeof WF!=='undefined' ? WF : null;
+  if (W && tid && W.id===tid && wfIsDirty(W)) { showToast('Save or discard your changes first', { kind: 'info' }); return false; }
+  if (wfObj(ch.display).needs_extra_confirm && !WF_AI.ticked[ch.id]) { showToast('Tick the box on the card to confirm', { kind: 'info' }); return false; }
+  return true;
+}
+// After a change was confirmed or undone: the list reads again, the card shows its saved line, and a builder open (and
+// clean) on that workflow is opened again on the new revision.
+function wfAiChangeDone(ch, action){
+  const x = wfObj(ch);
+  if ((x.kind!=='wf_create' && x.kind!=='wf_edit') || (action!=='confirm' && action!=='undo')) return;
+  try { wfChanged(); } catch (e) { /* the list reads again when it opens */ }
+  const msg = (COBRA.msgs || []).find(m => (m.proposals || []).some(p => p && p.id===x.id));
+  if (msg) cobraPatchMsg(msg);
+  const tid = x.kind==='wf_edit' ? wfAiTargetOf(x) : '';
+  if (tid && typeof WF!=='undefined' && WF && WF.id===tid && !wfIsDirty(WF)) wfAiReopen(tid);
+}
+async function wfAiReopen(id){
+  const row = await wfReadRow(id);
+  if (!row || row.deleted_at || typeof WF==='undefined' || !WF || WF.id!==id || wfIsDirty(WF)) return;
+  wfBuilderOpen(row, { mode: 'edit' });
+}
+// "Open" on a saved card: the builder on that workflow (on a phone the panel's sheet goes first).
+async function wfAiOpenDraft(id){
+  const k = String(id || '');
+  if (!WF_UUID_RE.test(k)) return;
+  if (WF && wfIsDirty(WF)) { showToast('Save or discard your changes first', { kind: 'info' }); return; }
+  if (COBRA.open && wfMobileNow()) cobraClose();
+  if (WF && WF.id===k) { await wfAiReopen(k); return; }
+  openAutomation({ key: k });
+}
+COBRA_MODES.workflow = WF_AI_MODE;
+COBRA_CARDS.wf_preview = wfAiPreviewHtml;
+COBRA_CARDS.wf_diff = wfAiDiffHtml;
+COBRA_CARDS.wf_saved = wfAiSavedHtml;
+Object.assign(COBRA_KIND_UI, WF_AI_KIND_UI);
+COBRA_PAGE_MODES.push(ui => wfAiPageMode(ui));
+// ══ Workflow AI (stage 7): own block, end ══
 function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; }   // a back/forward restore draws once, at its end (stage 4)
   JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderChaseBubbles, 0); setTimeout(mdTick, 0); } catch(e) {}
   // The workflow builder first, before any early return (design §5.1): signed out / another profile → it closes; new lists → its words again.

@@ -233,6 +233,10 @@ const DECLS = [
   // Stage 6 v2 G6: provider status, the free quota, own keys, the own-Claude card, the ChatGPT row (coming later)
   'COBRA_PROVIDER_MODELS', 'COBRA_SOURCE_LABEL', 'COBRA_KEY_RE', 'COBRA_KEY_PROVIDERS', 'cobraSourcePill', 'cobraFreeMeter', 'cobraFreeResetText', 'cobraKeyProblem', 'cobraKeyCardHtml',
   'cobraOwnClaudeCardHtml', 'cobraChatGptRowHtml', 'cobraPaidKeyReady',
+  // Stage 7 B: Workflow AI entry points and cards (the pure parts)
+  'COBRA_KIND_UI', 'cobraLeanKind', 'cobraFindChange', 'cobraIsOwner', 'wfIsDirty', 'WF_AI_OFF', 'WF_AI_DRAFT_BADGE', 'WF_AI_OWN_LINE', 'WF_AI', 'WF_AI_EXAMPLES', 'wfAiShown', 'wfAiWhy', 'wfAiStatusText',
+  'wfAiButtonHtml', 'wfAiBuild', 'wfAiPageMode', 'WF_AI_MODE', 'WF_AI_KIND_UI', 'wfAiChangeOf', 'wfAiTargetOf', 'wfAiSavedHtml', 'wfAiSavedFor', 'wfAiWarnHtml', 'wfAiPreviewHtml', 'wfAiDiffHtml',
+  'wfAiTick', 'wfAiChangeGuard', 'wfAiChangeDone', 'wfAiReopen', 'wfAiOpenDraft',
 ];
 
 function extractDecl(source, name){
@@ -4165,7 +4169,7 @@ function autoSandbox(extra){
     STATE: { data: { settings: { catalog: {} }, contacts: [], jobs: [], employees: [{ id: 'e1', name: 'Kim Office', status: 'Active', roles: ['VA'] }] }, profiles: [{ id: 'p-own', fullName: 'Alex Owner', role: 'owner' }] },
     console, log, PRESENT: false, VIEW_AS_ID: null, UI: { tab: 'settings', settings: { page: 'templates' } },
     showToast: (m, o) => log.toasts.push(m), confirmAction: (m, fn, o) => log.confirms.push({ m, fn, o }), render: () => { log.renders++; }, renderKeepingInput: () => { log.renders++; },
-    logSettingsActivity: (a, t) => log.db.push('activity: ' + t), getCurrentProfile: () => ({ fullName: 'Alex Owner', role: 'owner' }), getRealProfile: () => ({ id: 'p-own', role: 'owner' }),
+    logSettingsActivity: (a, t) => log.db.push('activity: ' + t), getCurrentProfile: () => ({ fullName: 'Alex Owner', role: 'owner' }), getRealProfile: () => ({ id: 'p-own', role: 'owner' }), COBRA: { status: { enabled: true }, statusErr: '', msgs: [] },
     applyCatalog: () => {}, closeModal: () => { log.modal = ''; }, reopenModal: (h) => { log.modal = h; }, openModal: (h) => { log.modal = h; }, setSettingsPage: (id) => log.opened.push('page:' + id),
     startTemplateEdit: () => {}, weekStartDay: () => 1, motionReduced: () => true, brandLogoHtml: () => '<svg></svg>',
     window: { matchMedia: () => ({ matches: false }) }, document: { getElementById: () => null, querySelector: () => null },
@@ -5249,8 +5253,13 @@ function testWfGlobalSettings(sb){
   assertEqual([bl.includes('Default builder for new workflows'), /value="standard" checked/.test(bl), /value="advanced"\s+disabled/.test(bl), bl.includes(why('Coming with the Advanced builder')), bl.includes('Who can switch between builders'), bl.includes(why('Only owners and managers can edit workflows')),
     sb.wfBuilderCardHtml({ ...A, safety: {} }, null).includes('Comes with the next database update')],
     [true, true, true, true, true, true, true], 'Default builder: Standard chosen, Advanced greyed with its reason (phase 5); who can switch greyed with its reason');
-  assertEqual([sb.wfAiCardHtml().includes('AI Builder') && sb.wfAiCardHtml().includes(why('Coming with Workflow AI')), sb.wfAutoSaveCardHtml().includes('Auto save') && sb.wfAutoSaveCardHtml().includes(why('We keep Save with undo')), /set-toggle" role="switch" aria-checked="false" disabled/.test(sb.wfAiCardHtml())],
-    [true, true, true], 'Workflow AI and Auto save: greyed, with the reason in words');
+  sb.COBRA = { status: { enabled: false }, statusErr: '', msgs: [], log: [] }; sb.getRealProfile = () => ({ role: 'owner' });
+  const aiOff = sb.wfAiCardHtml();
+  sb.COBRA.status = { enabled: true };
+  const aiOn = sb.wfAiCardHtml();
+  assertEqual([aiOff.includes('AI Builder') && aiOff.includes(why('Off: Settings → AI')), sb.wfAutoSaveCardHtml().includes('Auto save') && sb.wfAutoSaveCardHtml().includes(why('We keep Save with undo')), /set-toggle" role="switch" aria-checked="false" disabled/.test(aiOff),
+    aiOn.includes(why('On for owners and managers')) && /set-toggle on" role="switch" aria-checked="true" disabled/.test(aiOn), aiOn.includes('Coming with')],
+    [true, true, true, true, false], 'Workflow AI (stage 7: a read-only view of the switch of the assistant, stores nothing) and Auto save (greyed): with the reason in words');
   const all = [n, pz, pzBad, bl].join('');
   // (an id inside data-key="…" / value="…" is plain text in a quoted attribute: only the handlers must not carry it raw)
   assertEqual([/<img/.test(all), all.replace(/(data-key|value)="[^"]*"/g, '').includes(ek), all.includes("wfNotifyUser('k\\'),alert(1);(\\'', this.checked)")], [false, false, true], 'the cards escape every name; an id with a quote stays one JS string');
@@ -7886,8 +7895,9 @@ async function testCobraStream(){
 async function testCobraChangeFlow(){
   console.log('\nStage 6: the AI assistant (Confirm, Cancel, Undo)');
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const log = { calls: [], puts: [], toasts: [], renders: 0 }, pending = [];
-  const ctx = { console, RO: '', COBRA: { busy: {}, logAt: 5, msgs: [], log: null },
+  const log = { calls: [], puts: [], toasts: [], renders: 0, done: [] }, pending = [];
+  const ctx = { console, RO: '', GUARD: true, COBRA: { busy: {}, logAt: 5, msgs: [], log: null },
+    wfAiChangeGuard: (id, a) => ctx.GUARD, wfAiChangeDone: (ch, a) => log.done.push([ch.id, a]),
     readOnlyReason: () => ctx.RO, render: () => { log.renders++; }, productName: () => 'OPS Service',
     cobraFetch: (path, body) => { log.calls.push([path, body]); return new Promise((res, rej) => pending.push({ res, rej })); },
     cobraPutChange: ch => log.puts.push(ch), cobraFindChange: id => ({ id, status: 'proposed', summary: 'S' }), cobraChangeEls: () => [],
@@ -7907,6 +7917,9 @@ async function testCobraChangeFlow(){
   ctx.RO = 'You are viewing as someone else, changes are not saved';
   await ctx.cobraChange('z', 'confirm');
   assertEqual([log.calls.length, log.toasts[log.toasts.length - 1][0], log.renders], [3, ctx.RO, 0], 'changes: nothing is sent in a read-only mode (a toast says so); the app is never drawn');
+  ctx.RO = ''; ctx.GUARD = false;
+  await ctx.cobraChange('g', 'confirm');
+  assertEqual([log.calls.length, ctx.COBRA.busy.g, log.done.map(d => d.join(':'))], [3, undefined, ['x:confirm']], 'changes: the guard of Workflow AI can stop a Confirm before anything is sent; its after-hook sees a change that was answered');
 }
 // Stage 6 review fixes (15 Oct): reopened chats, cards in their chat, right-to-left values, chips, loads.
 function testCobraReviewFixes(sb){
@@ -8048,6 +8061,160 @@ testCobraReviewFixes(loadSandbox());
 testCobraReviewStatic();
 testCobraV2Helpers(loadSandbox());
 testCobraV2Static();
+
+// ── Stage 7 B: Workflow AI entry points and cards ──
+const WFAI_ID = '11111111-2222-4333-8444-555555555555', WFAI_OTHER = '66666666-7777-4888-8999-000000000000';
+const WFAI_HOSTILE = `<img src=x onerror=alert(1)> it's "q"`;
+async function testWorkflowAiB(sb){
+  console.log('\nStage 7 B: Workflow AI (entry points, mode, cards, guard)');
+  const toasts = [], opened = [], role = r => { sb.getRealProfile = () => r ? { id: 'u1', role: r } : null; };
+  sb.showToast = (m, o) => toasts.push([m, o && o.kind]);
+  sb.cobraOpen = o => opened.push(o);
+  sb.readOnlyReason = () => '';
+  sb.COBRA = { status: { enabled: true }, statusErr: '', msgs: [], log: [], open: false };
+  sb.WF = null;
+  // availability: owners and managers only; the assistant's switch; read-only mode
+  const w = r => { role(r); return [sb.wfAiShown(), sb.wfAiWhy()]; };
+  assertEqual([w('owner'), w('manager'), w('va')[0], w('technician')[0], w('marketing')[0], w(null)[0]], [[true, ''], [true, ''], false, false, false, false], 'wfAiWhy: owners and managers only; others never see an entry point');
+  role('owner');
+  sb.COBRA.status = null;
+  const loading = sb.wfAiWhy();
+  sb.COBRA.status = { enabled: false, reason: 'kill_switch' };
+  const off = sb.wfAiWhy();
+  sb.COBRA.status = { enabled: true }; sb.COBRA.statusErr = 'not_installed';
+  const notInst = sb.wfAiWhy();
+  sb.COBRA.statusErr = '';
+  sb.readOnlyReason = () => 'Presentation mode is on, changes are not saved';
+  const ro = sb.wfAiWhy();
+  sb.readOnlyReason = () => '';
+  assertEqual([loading, off, notInst, ro, sb.wfAiWhy()], ['', 'Turn on the assistant in Settings → AI', 'Turn on the assistant in Settings → AI', 'Presentation mode is on, changes are not saved', ''], 'wfAiWhy: a loading status does not block; off / paused / not installed say where to turn it on; read-only says why');
+  // the Workflows list button and the create menu's item
+  const btnOn = sb.wfAiButtonHtml();
+  sb.COBRA.status = { enabled: false };
+  const btnOff = sb.wfAiButtonHtml();
+  sb.COBRA.status = { enabled: true }; role('va');
+  assertEqual([btnOn.includes('onclick="wfAiBuild()"') && !btnOn.includes('aria-disabled'), btnOff.includes('aria-disabled="true"') && btnOff.includes('Turn on the assistant in Settings') && !btnOff.includes('wfAiBuild'), sb.wfAiButtonHtml()],
+    [true, true, ''], 'Build using AI: enabled for owners and managers, greyed with the reason when off, not there for other roles');
+  role('owner'); toasts.length = 0;
+  sb.wfAiBuild();
+  sb.COBRA.status = { enabled: false }; sb.wfAiBuild(); sb.COBRA.status = { enabled: true };
+  assertEqual([opened, toasts], [[{ mode: 'workflow', context: {} }], [['Turn on the assistant in Settings → AI', 'info']]], 'wfAiBuild: opens the panel in build mode; greyed → the reason as a toast and nothing opens');
+  // the floating button's page mode
+  const auto = { tab: 'settings', settings: { page: 'automation' } };
+  const pm = (ui, W) => { sb.WF = W; return sb.wfAiPageMode(ui); };
+  const mk = (id, builder) => ({ id, builder });
+  assertEqual([pm(auto, mk(WFAI_ID, 'standard')), pm(auto, mk(WFAI_ID, 'weird')), pm(auto, mk(null, 'standard')), pm(auto, null), pm({ tab: 'settings', settings: { page: 'templates' } }, null), pm({ tab: 'crm' }, mk(WFAI_ID, 'standard')), pm({ tab: 'settings', settings: { page: 'people' } }, null)],
+    [{ mode: 'workflow', context: { workflowId: WFAI_ID, builder: 'standard' } }, { mode: 'workflow', context: { workflowId: WFAI_ID } }, { mode: 'workflow', context: {} }, { mode: 'workflow', context: {} }, { mode: 'workflow', context: {} }, null, null],
+    'wfAiPageMode: a saved workflow open → edit with its id; list or unsaved → build; the old Templates URL is the Automation page; elsewhere the assistant');
+  role('va');
+  assertEqual(pm(auto, null), null, 'wfAiPageMode: other roles keep the assistant');
+  role('owner'); sb.WF = null;
+  // the mode
+  const M = sb.WF_AI_MODE, ed = { workflowId: WFAI_ID, builder: 'standard' };
+  assertEqual([M.serverMode({}), M.serverMode(ed), M.placeholder({}), M.placeholder(ed), M.label, M.examples(null, {}).length, M.examples(null, ed).length, M.examples(null, ed)[0], M.intro('Cobra', {}).includes('Draft'), M.intro('Cobra', ed).includes('only ever saved as a Draft')],
+    ['workflow_build', 'workflow_edit', 'Describe the workflow you want', 'Ask for a change to this workflow', 'Workflow AI', 3, 3, 'Describe this workflow', true, true], 'COBRA_MODES.workflow: build with nothing open, edit with a workflow; examples and words follow it');
+  const rc = M.requestContext(ed, { tab: 'settings' }), rcB = M.requestContext({}, { tab: 'settings' }), rcBad = M.requestContext({ workflowId: "x' or 1=1", builder: '<b>', extra: 'y'.repeat(9000) }, {});
+  const realCountry = sb.regionCountry;
+  sb.regionCountry = () => 'IL';
+  const rcHe = M.requestContext(ed, { tab: 'settings' });
+  sb.regionCountry = realCountry;
+  assertEqual([rc, rcB, rcBad, JSON.stringify(rc).length < 4096, rcHe, M.savedContext({ workflowId: WFAI_ID, builder: 'advanced', page: 'crm', lang: 'he' }), M.savedContext(null), M.savedContext({ workflowId: 'nope' })],
+    [{ page: 'settings', workflowId: WFAI_ID, builder: 'standard' }, { page: 'settings' }, { page: '' }, true, { page: 'settings', workflowId: WFAI_ID, builder: 'standard', lang: 'he' }, { workflowId: WFAI_ID, builder: 'advanced' }, {}, {}],
+    'requestContext: page, the workflow id (a uuid only), the builder enum and the language of an Israeli business, nothing else, far under 4 KB; savedContext keeps the id');
+  // the proposal card: Save as draft (stops it), no details of its own (the result card has them)
+  const prop = { id: 'c1', kind: 'wf_create', status: 'proposed', summary: 'S', can_confirm: true, display: { title: 'New workflow: A', rows: [{ label: 'Step 1', before: '—', after: 'Wait' }], warnings: ['W1'] }, before: null };
+  const propE = { id: 'c2', kind: 'wf_edit', status: 'proposed', summary: 'S', can_confirm: true, display: { title: 'Change workflow: A', rows: [{ label: 'Step', before: 'a', after: 'b' }] }, before: { enabled: true } };
+  sb.COBRA_KIND_UI.wf_create = sb.WF_AI_KIND_UI.wf_create; sb.COBRA_KIND_UI.wf_edit = sb.WF_AI_KIND_UI.wf_edit;
+  sb.COBRA_CARDS.wf_preview = sb.wfAiPreviewHtml;
+  const h1 = sb.cobraProposalHtml(prop, false), h2 = sb.cobraProposalHtml(propE, false), h3 = sb.cobraProposalHtml({ ...propE, before: { enabled: false } }, false), h4 = sb.cobraProposalHtml({ ...prop, kind: 'task_add' }, false);
+  assertEqual([h1.includes('>Save as draft</button>'), h1.includes('cobra-diff-row') || h1.includes('cobra-card-warn'), h2.includes('>Save as draft (stops it)</button>'), h3.includes('>Save as draft</button>'), h4.includes('>Confirm</button>') && h4.includes('cobra-diff-row') && h4.includes('cobra-card-warn'),
+    sb.cobraLeanKind(prop), sb.cobraLeanKind({ kind: 'task_add' }), sb.cobraLeanKind(null), sb.cobraLeanKind({ kind: 'constructor' })],
+    [true, false, true, true, true, true, false, false, false], 'proposal card: Save as draft / Save as draft (stops it) for the two kinds, no rows or warnings of its own; other kinds as before');
+  sb.COBRA.msgs = [{ proposals: [prop], cards: [] }];
+  const mh = sb.cobraMsgHtml({ role: 'assistant', text: '', proposals: [prop], cards: [{ kind: 'wf_preview', data: { change_id: 'c1', name: 'A', rows: [] } }] }, {}, {});
+  assertEqual([mh.indexOf('wfai-card') > -1, mh.indexOf('wfai-card') < mh.indexOf('data-change="c1"')], [true, true], 'a lean kind: its result card first, the buttons below it');
+  // wf_preview
+  const pvD = { change_id: 'c1', name: WFAI_HOSTILE, summary: WFAI_HOSTILE, rows: [{ label: 'When', before: '—', after: WFAI_HOSTILE }, { label: 'Step 1', before: '—', after: 'Wait 2 days' }, { label: 'Step 2', before: '—', after: 'שלח מייל' }],
+    warnings: [WFAI_HOSTILE, 'Saved as a Draft: nothing runs until a person publishes it.'] };
+  const ph = sb.wfAiPreviewHtml(pvD);
+  assertEqual([ph.includes('<img'), ph.includes('&lt;img src=x onerror=alert(1)&gt; it\'s &quot;q&quot;'), (ph.match(/<li>/g) || []).length, ph.includes('dir="auto">שלח מייל'), ph.includes('data-change='), (ph.match(/cobra-card-warn/g) || []).length, ph.includes('Saved as a Draft: nothing runs until you publish it'), ph.includes('wfai-saved'), ph.includes('>Draft<')],
+    [false, true, 3, true, false, 1, true, false, true], 'wf_preview: every text escaped (hostile name, summary, rows, warning), Hebrew in its own dir, steps in a list, no data-change (the proposal card owns it), the server\'s Draft line is the badge, not a warning');
+  // after Confirm: the saved line with Open
+  const done = { ...prop, status: 'confirmed', after: { id: WFAI_ID, revision: 1 } };
+  sb.COBRA.msgs = [{ proposals: [done], cards: [] }];
+  const phS = sb.wfAiPreviewHtml(pvD);
+  sb.COBRA.msgs = [{ proposals: [{ ...done, after: { id: "x'\"><b>" } }], cards: [] }];
+  const phBad = sb.wfAiPreviewHtml(pvD);
+  assertEqual([phS.includes('Draft created'), phS.includes(`onclick="wfAiOpenDraft('${WFAI_ID}')"`), phBad.includes('Draft created'), phBad.includes('wfAiOpenDraft'), phBad.includes('<b>'), sb.wfAiSavedHtml({ kind: 'wf_edit', id: WFAI_ID }).includes('Changes saved as a Draft'), sb.wfAiSavedHtml({ kind: 'wf_edit', id: WFAI_ID }).includes('Open</button>')],
+    [true, true, true, false, false, true, true], 'wf_saved: "Draft created → Open" once the change is confirmed (no Open without a uuid); a change says "Changes saved as a Draft"');
+  // wf_diff
+  const edP = { id: "c2'<x>", kind: 'wf_edit', status: 'proposed', display: { needs_extra_confirm: true }, before: { enabled: true } };
+  const dd = { change_id: "c2'<x>", id: WFAI_ID, name: WFAI_HOSTILE, summary: 'S', rows: [{ label: 'Name', before: 'Old', after: WFAI_HOSTILE }, { label: 'Step', before: 'Wait 2 days', after: 'Wait 3 days' }, { label: 'Step', before: '—', after: 'Add tag (new)' }, { label: 'Step', before: 'Call', after: 'Removed' }],
+    warnings: ['It is live: saving this change switches it to Draft, which stops it until a person publishes it again.', '3 leads are waiting in it and will stop.', 'It removes more than 30% of the steps while leads wait in it: tick the box to confirm.', 'A step needs a template.', 'Saved as a Draft: nothing runs until a person publishes it.'],
+    changedIds: ['n1', 'n9'], idsRemoved: ['n3'], willDraft: true, waitingRunsAffected: 3, needs_extra_confirm: true };
+  sb.COBRA.msgs = [{ proposals: [edP], cards: [] }];
+  const dh = sb.wfAiDiffHtml(dd);
+  assertEqual([dh.includes('<img'), dh.includes('>Added<') && dh.includes('>Changed<') && dh.includes('>Removed<'), dh.includes('Add tag</bdi>') && !dh.includes('(new)'), dh.includes('wfai-del'), dh.includes('This workflow is live: saving stops it until you publish again (3 waiting runs stop)'),
+    (dh.match(/cobra-card-warn/g) || []).length, dh.includes('A step needs a template.'), dh.includes('type="checkbox"') && dh.includes(`wfAiTick('c2\\'&lt;x&gt;', this.checked)`), dh.includes('Saved as a Draft: nothing runs until you publish it')],
+    [false, true, true, true, true, 2, true, true, true], 'wf_diff: added / changed / removed, the live-workflow line with the waiting count (the server\'s own copies of it dropped), the extra tick with an escaped id in its handler');
+  sb.WF_AI.ticked["c2'<x>"] = true;
+  const dhT = sb.wfAiDiffHtml(dd);
+  sb.COBRA.msgs = [{ proposals: [{ ...edP, status: 'confirmed', after: { revision: 4 } }], cards: [{ kind: 'wf_diff', data: dd }] }];
+  const dhDone = sb.wfAiDiffHtml(dd);
+  assertEqual([dhT.includes(' checked'), dhDone.includes('type="checkbox"'), dhDone.includes('cobra-card-warn'), dhDone.includes('Changes saved as a Draft'), dhDone.includes(`wfAiOpenDraft('${WFAI_ID}')`), sb.wfAiDiffHtml({}).includes('What will change')],
+    [true, false, false, true, true, true], 'wf_diff: the tick keeps its state; once saved no tick or warnings, "Changes saved as a Draft → Open" with the workflow\'s id from the card; empty data does not throw');
+  delete sb.WF_AI.ticked["c2'<x>"];
+  // the Confirm guard
+  const clean = { id: WFAI_ID, doc: 1, layout: 1, builder: 1, settings: 1, name: 1, tplDrafts: 1, base: { doc: 1, layout: 1, builder: 1, settings: 1, name: 1, tplDrafts: 1 } }, dirty = { ...clean, doc: 2 };
+  sb.COBRA.msgs = [{ proposals: [{ id: 'e1', kind: 'wf_edit', status: 'proposed', target: { automation_id: WFAI_ID }, display: {} }, { id: 'e2', kind: 'wf_edit', status: 'proposed', target: { automation_id: WFAI_ID }, display: { needs_extra_confirm: true } },
+    { id: 'n1', kind: 'wf_create', status: 'proposed', display: {} }, { id: 'h1', kind: 'wf_edit', status: 'proposed', display: {} }], cards: [{ kind: 'wf_diff', data: { change_id: 'h1', id: WFAI_ID } }] }];
+  toasts.length = 0;
+  const g = (id, a, W) => { sb.WF = W; return sb.wfAiChangeGuard(id, a); };
+  assertEqual([g('e1', 'confirm', dirty), g('e1', 'confirm', clean), g('e1', 'confirm', { ...dirty, id: WFAI_OTHER }), g('e1', 'confirm', null), g('e1', 'cancel', dirty), g('e1', 'undo', dirty), g('n1', 'confirm', dirty), g('nope', 'confirm', dirty), g('h1', 'confirm', dirty), g('h1', 'confirm', clean), toasts.map(t => t[0])],
+    [false, true, true, true, true, true, true, true, false, true, ['Save or discard your changes first', 'Save or discard your changes first']], 'Confirm guard: a change to the workflow open with unsaved changes is refused ("Save or discard your changes first"); a clean one, another one, a new one, Cancel and Undo go on; the id comes from the card when History has no target');
+  toasts.length = 0;
+  const g2 = [g('e2', 'confirm', null), (sb.wfAiTick('e2', true), g('e2', 'confirm', null)), (sb.wfAiTick('e2', false), g('e2', 'confirm', null))];
+  assertEqual([g2, toasts.map(t => t[0])], [[false, true, false], ['Tick the box on the card to confirm', 'Tick the box on the card to confirm']], 'Confirm guard: a change that removes many steps needs the tick first');
+  sb.WF = null;
+  // the global card
+  role('manager');
+  const cardMgr = sb.wfAiCardHtml();
+  role('owner');
+  assertEqual([cardMgr.includes('Open AI settings'), sb.wfAiCardHtml().includes("setSettingsPage('ai')"), sb.wfAiStatusText().on], [false, true, true], 'AI Builder card: the link to Settings → AI is for owners; the card only shows the assistant\'s switch');
+  // after a confirm: the list reads again, the card is drawn again, a clean open builder is reopened
+  const calls = [], tick = () => new Promise(r => setTimeout(r, 0));
+  sb.wfChanged = () => calls.push('list'); sb.cobraPatchMsg = m => calls.push('patch:' + (m.proposals[0] && m.proposals[0].id));
+  sb.wfReadRow = async id => { calls.push('read:' + id); return { id, name: 'N', revision: 5 }; };
+  sb.wfBuilderOpen = (row, o) => { calls.push('open:' + row.id + ':' + o.mode); };
+  sb.openAutomation = o => calls.push('openAuto:' + o.key);
+  sb.wfMobileNow = () => false; sb.cobraClose = () => calls.push('close');
+  const chg = { id: 'e1', kind: 'wf_edit', target: { automation_id: WFAI_ID } };
+  sb.COBRA.msgs = [{ proposals: [{ ...chg, status: 'confirmed' }], cards: [] }];
+  sb.WF = clean;
+  sb.wfAiChangeDone(chg, 'confirm'); await tick();
+  const afterClean = calls.splice(0);
+  sb.WF = dirty;
+  sb.wfAiChangeDone(chg, 'confirm'); await tick();
+  const afterDirty = calls.splice(0);
+  sb.WF = null;
+  sb.wfAiChangeDone(chg, 'cancel'); sb.wfAiChangeDone({ id: 'z', kind: 'task_add' }, 'confirm'); await tick();
+  assertEqual([afterClean, afterDirty, calls], [['list', 'patch:e1', 'read:' + WFAI_ID, 'open:' + WFAI_ID + ':edit'], ['list', 'patch:e1'], []], 'after a confirm: the list reads again, the card is drawn again, a clean builder open on it is reopened on the new revision, a dirty one is left alone; Cancel and other kinds do nothing');
+  // Open
+  toasts.length = 0; sb.COBRA.open = true;
+  sb.WF = dirty; await sb.wfAiOpenDraft(WFAI_ID);
+  sb.WF = null; await sb.wfAiOpenDraft('not-a-uuid'); await sb.wfAiOpenDraft(WFAI_ID);
+  sb.WF = clean; await sb.wfAiOpenDraft(WFAI_ID); await tick();
+  sb.WF = { ...clean, id: WFAI_OTHER }; sb.wfMobileNow = () => true; await sb.wfAiOpenDraft(WFAI_ID);
+  assertEqual([calls, toasts.map(t => t[0])], [['openAuto:' + WFAI_ID, 'read:' + WFAI_ID, 'open:' + WFAI_ID + ':edit', 'close', 'openAuto:' + WFAI_ID], ['Save or discard your changes first']],
+    'Open: not over unsaved changes; a bad id does nothing; the workflow opens in the builder, the same one clean is reopened; the panel\'s sheet closes first on a phone');
+  sb.WF = null; sb.COBRA.open = false;
+  // static: the block never publishes, sends, tests or touches the builder canvas
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), a = html.indexOf('// ══ Workflow AI (stage 7): own block, start ══'), b = html.indexOf('// ══ Workflow AI (stage 7): own block, end ══');
+  const blk = html.slice(a, b);
+  assertEqual([a > 0 && b > a, /['"`]publish['"`]|publish\(|\.publish|step\s*:\s*['"](test|enrol)/i.test(blk), /wfLayout|WF_HOOKS|wfNavHooks|wfRailToggle|wfRailWhy|wfPaint|fetch\(|sb\.from\(|\.rpc\(/.test(blk),
+    /COBRA_MODES\.workflow = WF_AI_MODE;/.test(blk), /COBRA_PAGE_MODES\.push\(/.test(blk), /COBRA_CARDS\.wf_preview = /.test(blk) && /COBRA_CARDS\.wf_diff = /.test(blk) && /COBRA_CARDS\.wf_saved = /.test(blk)],
+    [true, false, false, true, true, true], 'Workflow AI\'s block: no publish, no write, no builder-canvas code; the mode, page mode and three cards are registered');
+}
 
 // Review block 3 of phase 4 (16 Oct): paste keys, presence, multi-select delete, cut, Q4 counts, the drawer's Delete, Save
 // from "Unsaved changes" on a Published workflow (the Apps tab is in testWfDrawerForms). Fake DOM, fake function.
@@ -8336,6 +8503,7 @@ async function testWfReviewRound2(){
   await testCobraLoadersNoLoop();
   await testCobraStream();
   await testCobraChangeFlow();
+  await testWorkflowAiB(loadSandbox());
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });
