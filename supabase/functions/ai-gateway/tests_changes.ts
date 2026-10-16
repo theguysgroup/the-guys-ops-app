@@ -182,7 +182,7 @@ SUITES.push(async () => {
     eq(names(VA), names(MANAGER), "a VA with CRM + Tasks: the same as a manager");
     eq(names(TECH), ["add_task", "read_office_hours", "whoami"], "a technician with Tasks (no CRM): add_task and the reads");
     eq(names(TECHX), ["read_office_hours", "whoami"], "a technician without his own board: no add_task");
-    eq(names(MKT), ["read_office_hours", "whoami"], "marketing: only the two read tools");
+    eq(names(MKT), ["whoami"], "marketing: whoami only (the settings row is hidden from marketing by RLS: settingsReadable)");
     eq(names({ ...VA, permissions: { crmOverview: true } }), ["read_office_hours", "whoami"], "Leads & Marketing alone is read-only");
   }
 
@@ -728,11 +728,11 @@ SUITES.push(async () => {
     ok(/^id[0-9a-z]+$/.test(uid()) && /^id[0-9a-z]+$/.test(APP.uid()), "uid: the app's shape");
     const cat = { region: { timeZone: TZ, country: "US", state: "NY" }, holidays: { region: "US-NY", days: { "2026-10-12": "Columbus Day", "2026-11-11": "Veterans Day", "2026-11-26": "Thanksgiving Day", "2026-12-25": "Christmas Day" } }, hours: { publicOn: true, holidayOff: ["thanksgiving day"], extra: [{ date: "2026-12-24", name: "Party" }] } };
     const db2 = world2({ catalog: cat });
-    const r2 = await chat(db2, { text: "office hours" }, "jwt-mkt");
+    const r2 = await chat(db2, { text: "office hours" }, "jwt-va");
     const h = JSON.parse(resultOf(db2, r2).content);
     eq([h.publicHolidaysOff, h.publicHolidaysNext, h.extraDaysOff], [true, [{ date: "2026-11-11", name: "Veterans Day" }, { date: "2026-12-25", name: "Christmas Day" }], [{ date: "2026-12-24", name: "Party" }]], "read_office_hours: upcoming holidays off (switched-off ones left out), extra days");
     const db3 = world2({ catalog: { ...cat, region: { timeZone: TZ, country: "US", state: "TX" } } });
-    const h3 = JSON.parse(resultOf(db3, await chat(db3, { text: "office hours" }, "jwt-mkt")).content);
+    const h3 = JSON.parse(resultOf(db3, await chat(db3, { text: "office hours" }, "jwt-va")).content);
     eq(h3.publicHolidaysNext, [], "… none when the stored list is for another region");
   }
 

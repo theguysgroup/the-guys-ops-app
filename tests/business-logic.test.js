@@ -5182,11 +5182,16 @@ function testCobraHelpers(sb){
   assertEqual([sb.cobraClientMode('workflow_edit', { workflowId: 'w' }), sb.cobraClientMode('assistant', {}), sb.cobraClientMode('other', {})], ['testwf', 'assistant', 'assistant'], 'cobraClientMode: a saved chat opens in the mode that made it');
   delete sb.COBRA_MODES.testwf;
   assertEqual([sb.cobraRequestContext('assistant', { x: 1 }, { tab: 'crm' }), sb.cobraRequestContext('nope', {}, {})], [{ page: 'crm' }, { page: '' }], 'cobraRequestContext: the assistant tells the gateway the page (its schema allows only page)');
-  const exFor = role => { sb.getCurrentProfile = () => (role ? { role } : null); return sb.cobraExamples(sb.COBRA_MODES.assistant); };
-  assertEqual([exFor('technician'), exFor('marketing'), exFor('owner'), exFor('manager'), exFor('va'), exFor(null).length], [
-    ['When is my next job?', 'What are my tasks?', 'What are our office hours?'], ['What are our office hours?', "What's our time zone?"],
-    ['How many leads came in this month?', 'What are my tasks?', 'Add a task: call the supplier tomorrow'], ['How many leads came in this month?', 'What are my tasks?', 'Add a task: call the supplier tomorrow'],
-    ['How many leads came in this month?', 'What are my tasks?', 'Add a task: call the supplier tomorrow'], 3], 'cobraExamples: examples by role (technician: his jobs and tasks; marketing: office hours and region; others: leads, tasks, a new task)');
+  const exPr = (role, permissions = {}, technicianName = '') => ({ role, permissions, technicianName });
+  const exFor = p => { sb.getRealProfile = () => p; sb.getCurrentProfile = () => exPr('owner'); return sb.cobraExamples(sb.COBRA_MODES.assistant); };
+  const [EL, ET, EA, EO, EW, EN] = ['How many leads came in this month?', 'What are my tasks?', 'Add a task: call the supplier tomorrow', 'What are our office hours?', 'What can you do for me?', 'When is my next job?'];
+  assertEqual([exFor(exPr('owner')), exFor(exPr('manager')), exFor(exPr('va', { crm: true, tasks: true })), exFor(exPr('va', { tasks: true })), exFor(exPr('va')),
+    exFor(exPr('technician', { jobs: true, tasks: true }, 'Tia')), exFor(exPr('technician', { tasks: true }, 'Tia')), exFor(exPr('technician', { jobs: true })),
+    exFor(exPr('marketing')), exFor(exPr('marketing', { crmOverview: true })), exFor(null)], [
+    [EL, ET, EA], [EL, ET, EA], [EL, ET, EA], [ET, EA, EO], [EO, EW], [EN, ET, EO], [ET, EO, EW], [EO, EW], [EW], [EL, EW], []],
+    'cobraExamples: only what the person\'s tools answer (leads with the CRM or Leads & Marketing, tasks with Tasks, a technician\'s next job with jobs and his name, no settings for marketing)');
+  sb.getRealProfile = () => exPr('owner'); sb.getCurrentProfile = () => exPr('technician', { jobs: true, tasks: true }, 'Tia');
+  assertEqual(sb.cobraExamples(sb.COBRA_MODES.assistant), [EL, ET, EA], 'cobraExamples: the real signed-in person (as the gateway answers), not the profile an owner is viewing as');
   assertEqual([sb.cobraExamples({ examples: ['a'] }), sb.cobraExamples({}), sb.cobraExamples(null)], [['a'], [], []], 'cobraExamples: a plain array, or nothing, also works');
   // formatting: escaped, RTL-safe
   const x1 = sb.cobraFormat('<img src=x onerror=alert(1)>');
@@ -5323,7 +5328,8 @@ function testCobraStatic(){
   // every example, for every role, is a gateway test-provider script (the gateway tests pin what each one answers)
   const asScript = x => x.toLowerCase().replace(/[?.]$/, '').replace(/'s /, "'?s ");
   const gwl = gw.toLowerCase();
-  const exAll = [...new Set(['technician', 'marketing', 'owner'].flatMap(role => { sb.getCurrentProfile = () => ({ role }); return sb.cobraExamples(sb.COBRA_MODES.assistant); }))];
+  const exAll = [...new Set([{ role: 'technician', permissions: { jobs: true, tasks: true }, technicianName: 'Tia' }, { role: 'marketing', permissions: {} }, { role: 'va', permissions: {} }, { role: 'owner', permissions: {} }]
+    .flatMap(p => { sb.getRealProfile = () => p; return sb.cobraExamples(sb.COBRA_MODES.assistant); }))];
   assertEqual([exAll.filter(x => !/^(what are our office hours|add a task)/i.test(x) && !gwl.includes(asScript(x))), gw.includes('/office hours|'), gw.includes('/add a task')], [[], true, true],
     'the examples are the test provider scripts (one gateway MOCK_SCRIPTS entry each; office hours and add a task have the older ones)');
   // Stage 4's page history (rebase on f9c64b6): the panel is a layer, so back (the phone's back swipe) closes it first

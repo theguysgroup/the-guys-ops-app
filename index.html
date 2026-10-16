@@ -24265,11 +24265,23 @@ const COBRA_MODES = {
   assistant: {
     label: 'Assistant', serverMode: 'assistant', placeholder: 'Ask a question, or ask for a change',
     intro: name => `Hi, I'm ${name}. Ask me about the business, or ask me to change something. I show you exactly what will change before anything is saved.`,
-    // What to try, by role (an array, or a function of the profile; render through cobraExamples). The test provider
+    // What to try (an array, or a function of the signed-in person's profile; render through cobraExamples): only what
+    // this person's tools answer (the gateway's scopeOf: leads with the CRM or Leads & Marketing, tasks with Tasks, a
+    // technician's next job with jobs and his name; the settings row is hidden from marketing). The test provider
     // answers each one the same way every time (a gateway MOCK_SCRIPTS entry each).
-    examples: p => p && p.role==='technician' ? ['When is my next job?', 'What are my tasks?', 'What are our office hours?']
-      : p && p.role==='marketing' ? ['What are our office hours?', "What's our time zone?"]
-      : ['How many leads came in this month?', 'What are my tasks?', 'Add a task: call the supplier tomorrow'],
+    examples: p => {
+      if (!p) return [];
+      const P = p.permissions || {}, om = p.role==='owner' || p.role==='manager', tech = p.role==='technician';
+      const jobs = om || !!P.jobs || !!P.finance || (tech && !!P.payroll), tasks = om || !!P.tasks;
+      return [
+        tech && jobs && p.technicianName ? 'When is my next job?' : '',
+        om || P.crm || P.crmOverview ? 'How many leads came in this month?' : '',
+        tasks ? 'What are my tasks?' : '',
+        tasks && !tech ? 'Add a task: call the supplier tomorrow' : '',
+        p.role!=='marketing' ? 'What are our office hours?' : '',
+        'What can you do for me?',
+      ].filter(Boolean).slice(0, 3);
+    },
     requestContext: (ctx, ui) => ({ page: String((ui && ui.tab) || '') }),
     // The page is sent fresh with every turn: a saved chat's page isn't part of the chat.
     savedContext: () => ({}),
@@ -24850,8 +24862,9 @@ async function cobraFetch(path, body, opts){
   }
   return out;
 }
-// The example questions for this person's role: the mode's list, or its function of the profile you are viewing as.
-function cobraExamples(m){ const e = m && m.examples; return (typeof e==='function' ? e(getCurrentProfile()) : e) || []; }
+// The example questions: the mode's list, or its function of the REAL signed-in person's profile (the gateway answers as
+// them, never as the profile an owner is viewing as).
+function cobraExamples(m){ const e = m && m.examples; return (typeof e==='function' ? e(getRealProfile()) : e) || []; }
 function cobraIsOwner(){ const me = getRealProfile(); return !!me && me.role==='owner'; }
 function cobraStatusLoad(force){
   const c = COBRA;

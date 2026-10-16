@@ -21,6 +21,7 @@ SUITES.push(async () => {
     ["Any reminders?", "יש תזכורות?", "list_reminders", {}],
     ["What lead sources do we have?", "אילו מקורות לידים יש לנו?", "read_settings", { section: "lead_sources" }],
     ["What's our time zone?", "מה אזור הזמן שלנו?", "read_settings", { section: "region" }],
+    ["What can you do for me?", "מה אתה יכול לעשות בשבילי?", "whoami", {}],
     ["Mark the task call the supplier done", "תסמן את המשימה להתקשר לספק כבוצעה", "update_task", { task: "call the supplier", status: "Done" }],
     ["Move the supplier task to tomorrow", "תזיז את המשימה של הספק למחר", "update_task", { task: "supplier", due: day(1) }],
     ["Set Demo Lead's follow-up to 18 October 2026", "תקבע מעקב ל-Demo Lead בעוד 3 ימים", "set_lead_follow_up", { lead: "Demo Lead", follow_up: day(3) }],
@@ -44,7 +45,7 @@ SUITES.push(async () => {
   eq(answer("What are our office hours?"), null, "office hours stays with the generic office hours answer");
 
   // ── the roles' example lists are scripts too (the app's lists; business-logic.test.js pins that they match) ──
-  const EXAMPLES = ["When is my next job?", "What are my tasks?", "What are our office hours?", "What's our time zone?", "How many leads came in this month?", "Add a task: call the supplier tomorrow"];
+  const EXAMPLES = ["When is my next job?", "What are my tasks?", "What are our office hours?", "What's our time zone?", "How many leads came in this month?", "Add a task: call the supplier tomorrow", "What can you do for me?"];
   eq(EXAMPLES.filter((x) => !answer(x) && !/office hours/i.test(x)), [], "every example is a script (office hours: the generic answer)");
 
   // ── roles: a technician is not offered the money tool and a forced call is refused ──

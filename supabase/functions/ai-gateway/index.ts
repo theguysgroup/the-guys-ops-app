@@ -1320,13 +1320,14 @@ registerTool({
   }),
 });
 registerTool({
-  name: "read_office_hours", kind: "read", modes: ["assistant"], allow: () => true, status: "Checking office hours",
+  name: "read_office_hours", kind: "read", modes: ["assistant"], allow: (me) => settingsReadable(me), status: "Checking office hours",
   description: "Returns the business's office hours for each weekday, whether public holidays are days off, and the extra days off coming up. Call it whenever the person asks about office hours, opening times or days off, and before suggesting a change to office hours.",
   input_schema: EMPTY_INPUT,
   run: async (_input, ctx) => {
     const { data, error } = await ctx.userSb.from("settings").select("catalog").eq("id", 1).maybeSingle();
     if (error) throw new Error("settings: " + clip(error.message, 200));
-    const cat = (data && data.catalog) || {}, h = hoursOf(cat), today = bizParts(ctx.nowMs, ctx.biz.tz).day;
+    if (!data) throw invalid("Not allowed for your role.");   // the row hidden by RLS: never the built-in defaults as facts
+    const cat = data.catalog || {}, h = hoursOf(cat), today = bizParts(ctx.nowMs, ctx.biz.tz).day;
     return {
       days: [1, 2, 3, 4, 5, 6, 0].map((d) => ({ day: DAY_KEYS[d], open: !!h.days[d].on, from: h.days[d].from, to: h.days[d].to })),
       text: officeHoursText(officeDaysOf(h)),
@@ -1432,31 +1433,82 @@ const PERIOD_PROPS = {
 const LIMIT_PROP = { type: "integer", description: `Rows at most (1-${READ.limitMax}, default ${READ.limitDefault}).` };
 const readSchema = (properties: Record<string, any>, required?: string[]) => ({ type: "object", additionalProperties: false, properties, ...(required ? { required } : {}) });
 const limitOf = (x: any) => x.limit ?? READ.limitDefault;
+// RLS-ONLY RULE (like adSpendVisible; outside the shared block, which mcp also carries): the settings row is readable by
+// every signed-in role but marketing. Without it read_settings / read_office_hours would answer with the built-in defaults.
+export const settingsReadable = (me: Profile) => me.role !== "marketing";
+// The app's leadWonByJob for many leads (rows with id, full_name, reopened_at): the ids of the leads a job makes Won. The
+// jobs are the ones the person can see (their own token and jobVisible: the app's job index is built from
+// filterForProfile'd jobs), linked by contact id, else by the lead's name (looked up by the exact name, then compared
+// trimmed and in any case as the app; a job whose name differs only in case or spacing is not found here).
+export async function wonByJobIds(ctx: ToolCtx, leads: any[]): Promise<Set<string>> {
+  const s = scopeOf(ctx.me), won = new Set<string>(), byId = new Map<string, string>(), byName = new Map<string, string>();
+  if (!s.canSeeJobs || !leads.length) return won;
+  const keep = (m: Map<string, string>, k: string, d: string) => { if (k && (!m.has(k) || d > (m.get(k) as string))) m.set(k, d); };
+  const lower = (v: unknown) => String(v || "").trim().toLowerCase();
+  const ids = [...new Set(leads.map((c) => c.id).filter(Boolean))] as string[];
+  const names = [...new Set(leads.map((c) => String(c.full_name || "").trim()).filter((n) => n && !/["\\]/.test(n)))] as string[];
+  for (const [col, list] of [["contact_id", ids], ["customer_name", names]] as [string, string[]][]) {
+    for (let i = 0; i < list.length; i += READ.idsChunk) {
+      const read = await pageAll((a, z) => ctx.userSb.from("jobs").select("id, contact_id, customer_name, date, technician").in(col, list.slice(i, i + READ.idsChunk)).order("id").range(a, z));
+      read.rows.filter((j: any) => jobVisible(s, j)).forEach((j: any) => (col === "contact_id" ? keep(byId, j.contact_id, String(j.date || "")) : keep(byName, lower(j.customer_name), String(j.date || ""))));
+    }
+  }
+  for (const c of leads) {
+    const a = byId.get(c.id), b = byName.get(lower(c.full_name)), d = a === undefined ? b : b === undefined ? a : a > b ? a : b;
+    if (d !== undefined && (!c.reopened_at || d >= localDayOf(c.reopened_at, ctx.biz.tz))) won.add(c.id);
+  }
+  return won;
+}
+// The database statuses a lead in this stage can have (the app's leadStage): Won also comes from a job (any status), New
+// from any status the pipeline doesn't know, Lost also from 'Not Relevant'. null = any (the stage is checked afterwards).
+const statusesOf = (stage: string): string[] | null => (stage === "New" || stage === "Won" ? null : stage === "Lost" ? ["Lost", "Not Relevant"] : [stage]);
+// The one technician a name means, among the technicians of the jobs the person can see (any case, a part of the name:
+// "dan" → "Dan Cohen"). An exact name wins; several → invalid with the names (ask which); none → invalid.
+async function technicianOf(ctx: ToolCtx, v: string): Promise<string> {
+  const t = String(v).trim(), s = scopeOf(ctx.me);
+  const rows = await readAll(ctx.userSb.from("jobs").select("id, technician").ilike("technician", `%${likeExact(t)}%`).order("date", { ascending: false }).order("id").limit(PAGE), "jobs");
+  const names = [...new Set(rows.filter((j: any) => jobVisible(s, j)).map((j: any) => String(j.technician || "").trim()).filter(Boolean))].sort() as string[];
+  const exact = names.find((n) => n.toLowerCase() === t.toLowerCase());
+  if (exact) return exact;
+  if (names.length === 1) return names[0];
+  if (!names.length) throw invalid(`No technician whose name has "${t}" has any jobs.`);
+  throw invalid(`Several technicians match "${t}": ${names.slice(0, 10).join(", ")}. Ask the person which one.`);
+}
 
 registerTool({
   name: "find_leads", kind: "read", modes: ["assistant"], allow: (me) => scopeOf(me).contacts, status: "Looking up leads", check: readCheck,
   description: "Finds leads by name, phone or postcode, stage, source and when they came in, newest first: name, phone, stage, source, service and dates. Call it before talking about a particular lead.",
   input_schema: readSchema({ query: { type: "string", description: "Name, phone or postcode." }, stage: { type: "string" }, source: { type: "string" }, ...PERIOD_PROPS, limit: LIMIT_PROP }),
   run: async (input, ctx) => {
-    const s = scopeOf(ctx.me), cat = ctx.biz.catalog, limit = limitOf(input);
-    let q = ctx.userSb.from("contacts").select("id, full_name, phone, status, source, division, created_at, next_follow_up, booked_for");
-    if (input.query !== undefined) {
-      const t = leadQueryOf(input.query);
-      if (!t) throw invalid("Say a name, phone number or postcode to look for.");
-      q = q.or(`full_name.ilike.*${t}*,postcode.ilike.*${t}*` + leadPhoneClause(t));
+    const s = scopeOf(ctx.me), cat = ctx.biz.catalog, limit = limitOf(input), stage = input.stage !== undefined ? stageKeyOf(cat, input.stage) : null;
+    const t = input.query !== undefined ? leadQueryOf(input.query) : null;
+    if (t === "") throw invalid("Say a name, phone number or postcode to look for.");
+    const r = input.period !== undefined || input.from !== undefined || input.to !== undefined ? periodRange(input, cat, ctx.biz.tz, ctx.nowMs, "this_month") : null;
+    const statuses = stage ? statusesOf(stage) : null;
+    const build = () => {
+      let q = ctx.userSb.from("contacts").select("id, full_name, phone, status, source, division, created_at, next_follow_up, booked_for, reopened_at");
+      if (t) q = q.or(`full_name.ilike.*${t}*,postcode.ilike.*${t}*` + leadPhoneClause(t));
+      if (statuses) q = q.in("status", statuses);
+      if (input.source !== undefined) q = q.in("source", sourceKeysOf(cat, input.source));
+      if (r) q = q.gte("created_at", r.fromIso).lt("created_at", r.toIso);
+      return q.order("created_at", { ascending: false }).order("id");
+    };
+    // the app's stage (leadStage: a job makes a lead Won, 'Not Relevant' is Lost), so a stage filter is checked here,
+    // page by page in the answer's order until one more lead than asked is found
+    const found: any[] = [];
+    let scanTruncated = false;
+    for (let a = 0; contactVisible(s); a += READ.idsChunk) {
+      if (a >= MAX_SCAN) { scanTruncated = true; break; }
+      const size = stage ? READ.idsChunk : limit + 1, rows = await readAll(build().range(a, a + size - 1), "contacts");
+      const won = await wonByJobIds(ctx, rows.filter((c: any) => c.status !== "Won"));
+      rows.forEach((c: any) => { const st = leadStageOf(cat, c, won.has(c.id)); if (!stage || st === stage) found.push({ ...redactForTech(s, c), stage: st }); });
+      if (!stage || found.length > limit || rows.length < size) break;
     }
-    if (input.stage !== undefined) q = q.eq("status", stageKeyOf(cat, input.stage));
-    if (input.source !== undefined) q = q.in("source", sourceKeysOf(cat, input.source));
-    if (input.period !== undefined || input.from !== undefined || input.to !== undefined) {
-      const r = periodRange(input, cat, ctx.biz.tz, ctx.nowMs, "this_month");
-      q = q.gte("created_at", r.fromIso).lt("created_at", r.toIso);
-    }
-    const rows = contactVisible(s) ? (await readAll(q.order("created_at", { ascending: false }).order("id").range(0, limit), "contacts")).map((r) => redactForTech(s, r)) : [];
-    const shown = rows.slice(0, limit).map((r: any) => ({
-      id: r.id, name: r.full_name || "", phone: r.phone || "", stage: stageLabelOf(cat, r.status || "New"), source: r.source || "", service: r.division || "",
-      createdOn: localDayOf(r.created_at, ctx.biz.tz), nextFollowUp: r.next_follow_up || null, bookedFor: r.booked_for || null,
+    const shown = found.slice(0, limit).map((c: any) => ({
+      id: c.id, name: c.full_name || "", phone: c.phone || "", stage: stageLabelOf(cat, c.stage), source: c.source || "", service: c.division || "",
+      createdOn: localDayOf(c.created_at, ctx.biz.tz), nextFollowUp: c.next_follow_up || null, bookedFor: c.booked_for || null,
     }));
-    return fitRows({ count: shown.length, rows: shown, truncated: rows.length > limit }, "rows", ctx);
+    return fitRows({ count: shown.length, rows: shown, truncated: scanTruncated || found.length > limit }, "rows", ctx);
   },
 });
 registerTool({
@@ -1466,20 +1518,24 @@ registerTool({
   run: async (input, ctx) => {
     const cat = ctx.biz.catalog, tz = ctx.biz.tz, r = periodRange(input, cat, tz, ctx.nowMs, "this_month"), by = input.group_by ?? "source";
     const stage = input.stage !== undefined ? stageKeyOf(cat, input.stage) : null, sources = input.source !== undefined ? sourceKeysOf(cat, input.source) : null;
+    const statuses = stage ? statusesOf(stage) : null;
     const read = await pageAll((a, z) => {
-      let q = ctx.userSb.from("contacts").select("id, status, source, division, created_at").gte("created_at", r.fromIso).lt("created_at", r.toIso);
-      if (stage) q = q.eq("status", stage);
+      let q = ctx.userSb.from("contacts").select("id, full_name, status, reopened_at, source, division, created_at").gte("created_at", r.fromIso).lt("created_at", r.toIso);
+      if (statuses) q = q.in("status", statuses);
       if (sources) q = q.in("source", sources);
       return q.order("created_at").order("id").range(a, z);
     });
-    const rows = contactVisible(scopeOf(ctx.me)) ? read.rows : [], lists = catalogLists(cat), rules = weekRules(regionOf(cat)), wc = new Map();
+    // the app's stage (leadStage: a job makes a lead Won, 'Not Relevant' is Lost), worked out only when it is asked about
+    const won = stage || by === "stage" ? await wonByJobIds(ctx, read.rows.filter((c: any) => c.status !== "Won")) : new Set<string>();
+    const stageOf = (c: any) => leadStageOf(cat, c, won.has(c.id));
+    const rows = contactVisible(scopeOf(ctx.me)) ? read.rows.filter((c: any) => !stage || stageOf(c) === stage) : [], lists = catalogLists(cat), rules = weekRules(regionOf(cat)), wc = new Map();
     const labelIn = (list: { key: string; label: string }[], k: string) => (list.find((x) => x.key === k) || { label: k }).label;
     const keyOf = (c: any): string => {
       const day = localDayOf(c.created_at, tz);
       if (by === "day") return day;
       if (by === "week") return weekBounds(day, rules, wc).start;
       if (by === "month") return day.slice(0, 7);
-      return String((by === "stage" ? c.status : by === "service" ? c.division : c.source) || "(none)");
+      return String((by === "stage" ? stageOf(c) : by === "service" ? c.division : c.source) || "(none)");
     };
     const counts = new Map<string, number>();
     rows.forEach((c: any) => { const k = keyOf(c); counts.set(k, (counts.get(k) || 0) + 1); });
@@ -1536,47 +1592,62 @@ registerTool({
 const LIST_JOB_COLS = "id, date, customer_name, job_type, technician, amount, includes_gst, payment_status, commission_percent, parts_cost";
 registerTool({
   name: "list_jobs", kind: "read", modes: ["assistant"], allow: (me) => scopeOf(me).canSeeJobs, status: "Checking jobs",
-  description: "Lists jobs in a period (default last 7 days), newest first. A technician sees only his own jobs. Owners and managers also get amount, total, payment status and commission, and can ask for unpaid jobs only.",
-  input_schema: readSchema({ ...PERIOD_PROPS, technician: { type: "string", description: "Only this technician's jobs." }, unpaid_only: { type: "boolean" }, limit: LIMIT_PROP }),
+  description: "Lists jobs in a period (default last 7 days), newest first; jobsFound = how many jobs match (all, not just the rows shown). A technician sees only his own jobs. Owners and managers also get amount, total, payment status and commission, and can ask for unpaid jobs only.",
+  input_schema: readSchema({ ...PERIOD_PROPS, technician: { type: "string", description: "Only this technician's jobs (a part of the name is enough)." }, unpaid_only: { type: "boolean" }, limit: LIMIT_PROP }),
   check: (input, ctx) => (input.unpaid_only && !scopeOf(ctx.me).isOM ? "unpaid_only is for owners and managers."
     : input.technician !== undefined && scopeOf(ctx.me).isTech ? "A technician sees only his own jobs: leave technician out." : readCheck(input)),
   run: async (input, ctx) => {
     const s = scopeOf(ctx.me), cat = ctx.biz.catalog, r = periodRange(input, cat, ctx.biz.tz, ctx.nowMs, "last_7_days"), limit = limitOf(input);
     // a technician: his own jobs only, whatever he asks (no technician name = no jobs, the block's rule b)
-    if (s.isTech && !s.techName) return { count: 0, rows: [], truncated: false };
-    let q = ctx.userSb.from("jobs").select(LIST_JOB_COLS).gte("date", r.from).lte("date", r.to);
-    if (s.isTech) q = q.eq("technician", s.techName);
-    else if (input.technician !== undefined && input.technician.trim()) q = q.ilike("technician", likeExact(input.technician));
-    if (input.unpaid_only && s.isOM) q = q.or(`payment_status.is.null,payment_status.neq."${catalogKeys(cat).paid}"`);
-    const rows = (await readAll(q.order("date", { ascending: false }).order("id").range(0, limit), "jobs")).filter((j: any) => jobVisible(s, j));
+    if (s.isTech && !s.techName) return { jobsFound: 0, count: 0, rows: [], truncated: false };
+    const tech = !s.isTech && input.technician !== undefined && input.technician.trim() ? await technicianOf(ctx, input.technician) : null;
+    // the same filters for the rows and for the exact total (jobVisible is a database filter here: a technician's own
+    // name; everyone else who has jobs sees every row)
+    const filtered = (q: any) => {
+      q = q.gte("date", r.from).lte("date", r.to);
+      if (s.isTech) q = q.eq("technician", s.techName);
+      else if (tech) q = q.ilike("technician", likeExact(tech));
+      if (input.unpaid_only && s.isOM) q = q.or(`payment_status.is.null,payment_status.neq."${catalogKeys(cat).paid}"`);
+      return q;
+    };
+    const rows = (await readAll(filtered(ctx.userSb.from("jobs").select(LIST_JOB_COLS)).order("date", { ascending: false }).order("id").range(0, limit), "jobs")).filter((j: any) => jobVisible(s, j));
+    const counted = await filtered(ctx.userSb.from("jobs").select("id", { count: "exact", head: true }));
+    if (counted.error) throw new Error("jobs: " + clip(counted.error.message, 200));
     const d = s.isOM ? await calcFor(ctx) : null;
     const shown = rows.slice(0, limit).map((row: any) => {
       const j = jobFromRow(row), base = { id: j.id, date: j.date, customerName: j.customerName || "", jobType: j.jobType || "", technician: j.technician || "" };
       if (d) return { ...base, amount: round2(j.amount), total: jobTotalCollected(d, j), paymentStatus: j.paymentStatus || "", commission: jobCommissionAmount(d, j) };
       return s.isTech ? base : { ...base, paymentStatus: j.paymentStatus || "" };
     });
-    return fitRows({ count: shown.length, rows: shown, truncated: rows.length > limit }, "rows", ctx);
+    return fitRows({ jobsFound: counted.count ?? rows.length, ...(tech ? { technician: tech } : {}), count: shown.length, rows: shown, truncated: rows.length > limit }, "rows", ctx);
   },
 });
 const KIND_ORDER: Record<string, number> = { job: 0, booking: 1, task: 2 };
 registerTool({
   name: "upcoming_work", kind: "read", modes: ["assistant"], allow: (me) => { const s = scopeOf(me); return s.canSeeJobs || s.tasks; }, status: "Checking the schedule",
-  description: "What is coming up from today for the next days (default 7): jobs, booked leads and the person's own open tasks, by day. next = the first one; null means nothing is recorded (say so, never guess).",
-  input_schema: readSchema({ days: { type: "integer", description: `Days ahead (1-${READ.upcomingDaysMax}, default 7).` }, technician: { type: "string", description: "Only this technician's jobs." } }),
+  description: "What is coming up from today for the next days (default 7): jobs, booked leads and the person's own open tasks, by day. next = the first item of any kind in those days (null: nothing in them); nextJob = the next job however far ahead (null: none recorded). For 'next job' use nextJob.",
+  input_schema: readSchema({ days: { type: "integer", description: `Days ahead (1-${READ.upcomingDaysMax}, default 7).` }, technician: { type: "string", description: "Only this technician's jobs (a part of the name is enough)." } }),
   check: (input, ctx) => (input.technician !== undefined && scopeOf(ctx.me).isTech ? "A technician sees only his own jobs: leave technician out." : readCheck(input)),
   run: async (input, ctx) => {
     const s = scopeOf(ctx.me), tz = ctx.biz.tz, cat = ctx.biz.catalog, days = input.days ?? 7, today = bizParts(ctx.nowMs, tz).day, end = shiftDay(today, days - 1);
-    const items: any[] = [];
+    const items: any[] = [], jobTitle = (j: any) => [j.job_type || "Job", j.customer_name].filter(Boolean).join(" – ");
+    let nextJob: any = null;
     if (s.canSeeJobs && (!s.isTech || s.techName)) {
-      let q = ctx.userSb.from("jobs").select("id, date, customer_name, job_type, technician").gte("date", today).lte("date", end);
-      if (s.isTech) q = q.eq("technician", s.techName);
-      else if (input.technician !== undefined && input.technician.trim()) q = q.ilike("technician", likeExact(input.technician));
-      (await readAll(q.order("date").order("id").limit(READ.limitMax + 1), "jobs")).filter((j: any) => jobVisible(s, j))
-        .forEach((j: any) => items.push({ day: String(j.date).slice(0, 10), kind: "job", title: [j.job_type || "Job", j.customer_name].filter(Boolean).join(" – "), technician: j.technician || "" }));
+      const tech = !s.isTech && input.technician !== undefined && input.technician.trim() ? await technicianOf(ctx, input.technician) : null;
+      const whose = (q: any) => (s.isTech ? q.eq("technician", s.techName) : tech ? q.ilike("technician", likeExact(tech)) : q);
+      const jobsFrom = () => whose(ctx.userSb.from("jobs").select("id, date, customer_name, job_type, technician").gte("date", today));
+      (await readAll(jobsFrom().lte("date", end).order("date").order("id").limit(READ.limitMax + 1), "jobs")).filter((j: any) => jobVisible(s, j))
+        .forEach((j: any) => items.push({ day: String(j.date).slice(0, 10), kind: "job", title: jobTitle(j), technician: j.technician || "" }));
+      // the next job with no end day (one row), so "when is my next job" is right beyond the days asked
+      const first = (await readAll(jobsFrom().order("date").order("id").limit(1), "jobs")).filter((j: any) => jobVisible(s, j))[0];
+      if (first) nextJob = { day: String(first.date).slice(0, 10), title: jobTitle(first), technician: first.technician || "" };
     }
-    // booked leads: the CRM page's (operational), not the read-only Leads & Marketing view
+    // booked leads: the CRM page's (operational), not the read-only Leads & Marketing view. A booked lead with a job is
+    // Won in the app (leadStage), so it shows once, as the job.
     if (canViewSection(s.p, "crm")) {
-      (await readAll(ctx.userSb.from("contacts").select("id, full_name, division, booked_for").eq("status", "Booked").gte("booked_for", today).lt("booked_for", shiftDay(end, 1)).order("booked_for").order("id").limit(READ.limitMax + 1), "contacts"))
+      const booked = await readAll(ctx.userSb.from("contacts").select("id, full_name, division, booked_for, reopened_at").eq("status", "Booked").gte("booked_for", today).lt("booked_for", shiftDay(end, 1)).order("booked_for").order("id").limit(READ.limitMax + 1), "contacts");
+      const won = await wonByJobIds(ctx, booked);
+      booked.filter((c: any) => !won.has(c.id))
         .forEach((c: any) => items.push({ day: localDayOf(c.booked_for, tz), kind: "booking", title: [c.full_name || "Booked lead", c.division].filter(Boolean).join(" – ") }));
     }
     // the person's own open tasks (assigned to them, or on their own board)
@@ -1588,7 +1659,7 @@ registerTool({
     }
     items.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.title < b.title ? -1 : a.title > b.title ? 1 : 0)));
     const shown = items.slice(0, READ.limitMax);
-    return fitRows({ next: shown.length ? { day: shown[0].day, kind: shown[0].kind, title: shown[0].title } : null, items: shown, days, truncated: items.length > shown.length }, "items", ctx);
+    return fitRows({ next: shown.length ? { day: shown[0].day, kind: shown[0].kind, title: shown[0].title } : null, nextJob, items: shown, days, truncated: items.length > shown.length }, "items", ctx);
   },
 });
 const MONEY_JOB_COLS = "id, customer_name, invoice_number, date, technician, job_type, commission_percent, amount, includes_gst, payment_status, payment_method, parts_cost, parts_paid_by, parts_refund_status, date_paid, paid_to_technician, parts_pending_at, parts_refund_week, contact_id";
@@ -1725,7 +1796,7 @@ registerTool({
   },
 });
 registerTool({
-  name: "read_settings", kind: "read", modes: ["assistant"], allow: () => true, status: "Reading settings",
+  name: "read_settings", kind: "read", modes: ["assistant"], allow: (me) => settingsReadable(me), status: "Reading settings",
   description: "Reads one part of Settings: pipeline (stages, lost reasons, which stages need a date), lead_sources, services, region (time zone, currency, tax, week start) or business (name, short name, website).",
   input_schema: readSchema({ section: { type: "string", enum: ["pipeline", "lead_sources", "services", "region", "business"] } }, ["section"]),
   run: async (input, ctx) => {
@@ -1733,7 +1804,8 @@ registerTool({
     if ((sec === "pipeline" || sec === "lead_sources" || sec === "services") && !(s.contacts || s.isOM)) throw invalid("Not allowed for your role.");
     const { data, error } = await ctx.userSb.from("settings").select("company_name, catalog").eq("id", 1).maybeSingle();
     if (error) throw new Error("settings: " + clip(error.message, 200));
-    const cat = (data && isObj(data.catalog) && data.catalog) || {};
+    if (!data) throw invalid("Not allowed for your role.");   // the row hidden by RLS: never the built-in defaults as facts
+    const cat = (isObj(data.catalog) && data.catalog) || {};
     if (sec === "pipeline") {
       return {
         stages: stagesOf(cat).filter((x: any) => !x.deleted).map((x: any) => ({ key: String(x.key), label: String(x.label || x.key), on: stageOn(cat, x.key) })),
@@ -1749,7 +1821,7 @@ registerTool({
         taxName: taxNameOf(cat), weekStartsOn: DAY_KEYS[dowOf(weekBounds(today, weekRules(r)).start)],
       };
     }
-    const b = isObj(cat.business) ? cat.business : {}, name = String((data && data.company_name) || "").trim() || productNameOf(cat);
+    const b = isObj(cat.business) ? cat.business : {}, name = String(data.company_name || "").trim() || productNameOf(cat);
     return { name, shortName: String(b.shortName || "").trim() || name, website: String(b.website || "").trim() };
   },
 });
@@ -1944,19 +2016,21 @@ export async function resolveLead(ctx: ToolCtx, input: { lead_id?: string; lead?
   }
   return rows[0];
 }
-// The app's leadWonByJob: the customer has a job (linked by id, else the same name) dated on or after the day they
-// came back. Read with the service role and used as a yes / no only (nothing about the jobs reaches the model).
-export async function wonByJobOf(sb: any, c: any, tz: string): Promise<boolean> {
-  const name = String(c.full_name || "").trim().toLowerCase();
+// The app's leadWonByJob for one lead: the customer has a job (linked by id, else the same name) dated on or after the
+// day they came back. Only the jobs the person can see count (their own token and jobVisible: the app's job index is
+// built from filterForProfile'd jobs), so a proposal never gives away a job they can't see.
+export async function wonByJobOf(ctx: ToolCtx, c: any): Promise<boolean> {
+  const s = scopeOf(ctx.me), sb = ctx.userSb, tz = ctx.biz.tz, name = String(c.full_name || "").trim().toLowerCase();
   const dates: string[] = [];
-  const a = await sb.from("jobs").select("date").eq("contact_id", c.id).limit(500);
+  if (!s.canSeeJobs) return false;
+  const a = await sb.from("jobs").select("date, technician").eq("contact_id", c.id).limit(500);
   if (a.error) throw new Error("jobs: " + clip(a.error.message, 200));
-  (a.data || []).forEach((j: any) => dates.push(String(j.date || "")));
+  (a.data || []).filter((j: any) => jobVisible(s, j)).forEach((j: any) => dates.push(String(j.date || "")));
   if (name) {
     const pat = "%" + name.replace(/[\\%_]/g, (ch) => "\\" + ch) + "%";
-    const b = await sb.from("jobs").select("date, customer_name").ilike("customer_name", pat).limit(500);
+    const b = await sb.from("jobs").select("date, customer_name, technician").ilike("customer_name", pat).limit(500);
     if (b.error) throw new Error("jobs: " + clip(b.error.message, 200));
-    (b.data || []).forEach((j: any) => { if (String(j.customer_name || "").trim().toLowerCase() === name) dates.push(String(j.date || "")); });
+    (b.data || []).filter((j: any) => jobVisible(s, j)).forEach((j: any) => { if (String(j.customer_name || "").trim().toLowerCase() === name) dates.push(String(j.date || "")); });
   }
   if (!dates.length) return false;
   const latest = dates.reduce((m, d) => (d > m ? d : m), "");
@@ -2381,7 +2455,7 @@ registerTool({
   run: async (input, ctx) => {
     if (!input.lead_id && !input.lead) throw invalid("Say which lead: its name or phone number (or its lead_id).");
     const c = await resolveLead(ctx, input), cat = ctx.biz.catalog, today = bizParts(ctx.nowMs, ctx.biz.tz).day;
-    const won = c.status === "Won" ? true : await wonByJobOf(ctx.sb, c, ctx.biz.tz);
+    const won = c.status === "Won" ? true : await wonByJobOf(ctx, c);
     const p = leadStageProposal(cat, c, won, input, today);
     return await ctx.propose({
       kind: "lead_stage", target: { table: "contacts", id: c.id, label: String(c.full_name || "") },
@@ -2566,7 +2640,7 @@ registerTool({
   run: async (input, ctx) => {
     if (!input.lead_id && !input.lead) throw invalid("Say which lead: its name or phone number (or its lead_id).");
     const c = await resolveLead(ctx, input), cat = ctx.biz.catalog, tz = ctx.biz.tz, today = bizParts(ctx.nowMs, tz).day, day = String(input.follow_up);
-    const won = c.status === "Won" ? true : await wonByJobOf(ctx.sb, c, tz);
+    const won = c.status === "Won" ? true : await wonByJobOf(ctx, c);
     const stage = leadStageOf(cat, c, won), name = String(c.full_name || "This lead");
     if (["New", "Chasing"].includes(stage) && stageOn(cat, "Follow-up")) {
       if (!(day > today)) throw invalid("Pick a follow-up day after today.");
@@ -2627,6 +2701,7 @@ export const MOCK_SCRIPTS: { match: RegExp; tool: string; input: (x: { today: st
   { match: /any reminders|יש תזכורות/i, tool: "list_reminders", input: () => ({}) },
   { match: /what lead sources do we have|אילו מקורות לידים יש לנו/i, tool: "read_settings", input: () => ({ section: "lead_sources" }) },
   { match: /what'?s our time zone|מה אזור הזמן שלנו/i, tool: "read_settings", input: () => ({ section: "region" }) },
+  { match: /what can you do for me|מה אתה יכול לעשות בשבילי/i, tool: "whoami", input: () => ({}) },
   { match: /mark the task call the supplier done|תסמן את המשימה להתקשר לספק כבוצעה/i, tool: "update_task", input: () => ({ task: "call the supplier", status: "Done" }) },
   { match: /move the supplier task to tomorrow|תזיז את המשימה של הספק למחר/i, tool: "update_task", input: (x) => ({ task: "supplier", due: shiftDay(x.today, 1) }) },
   { match: /set demo lead'?s follow-up|תקבע מעקב ל-?demo lead/i, tool: "set_lead_follow_up", input: (x) => ({ lead: "Demo Lead", follow_up: shiftDay(x.today, 3) }) },
@@ -2690,7 +2765,7 @@ export const ASSISTANT_SYSTEM = [
   "Facts:",
   "- For any question about the business, call a read tool first and answer only from its result. If it returns nothing, say so. Never estimate or invent numbers, names or dates; say \"at least\" when a result is truncated.",
   "- Pass period instead of working out dates: \"last month\" / \"בחודש שעבר\" → last_month, \"this week\" / \"השבוע\" → this_week, \"today\" / \"היום\" → today.",
-  "- Leads: find_leads, count_leads (by source, stage, service or time). Calls: count_calls (\"from Google\" = calls from Google leads and, for owners, Google Ads calls; say both). Jobs: list_jobs; what's next / \"when is my next job\": upcoming_work. Money: money_summary, payroll_summary (quote amounts exactly, with the currency). Tasks: list_tasks. Reminders: list_reminders. Settings: read_settings, read_office_hours.",
+  "- Leads: find_leads, count_leads (by source, stage, service or time). Calls: count_calls (\"from Google\" = calls from Google leads and, for owners, Google Ads calls; say both). Jobs: list_jobs (\"how many jobs\" = its jobsFound, not the rows shown); what's coming up: upcoming_work (\"when is my next job\" = its nextJob). Money: money_summary, payroll_summary (quote amounts exactly, with the currency). Tasks: list_tasks. Reminders: list_reminders. Settings: read_settings, read_office_hours.",
   "- \"Remind me to …\": propose add_task for the person with that due day, or set_lead_follow_up when it is about a lead.",
   "- If a tool is missing or says not allowed, tell the person their role doesn't include it; don't use another tool to get around it.",
   "",

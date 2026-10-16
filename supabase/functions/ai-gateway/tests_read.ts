@@ -104,8 +104,8 @@ SUITES.push(async () => {
     const techReads = ["list_jobs", "list_reminders", "list_tasks", "read_office_hours", "read_settings", "upcoming_work", "whoami"];
     eq(reads(TE), techReads, "technician: own jobs, schedule, tasks, reminders, settings");
     eq(reads(TN), techReads, "technician without technician_name: the same tools (jobs come back empty)");
-    eq(reads(MK), ["read_office_hours", "read_settings", "whoami"], "marketing (Google Ads only): no leads, calls or jobs");
-    eq(reads(MKO), ["count_leads", "find_leads", "read_office_hours", "read_settings", "whoami"], "marketing + Leads & Marketing: + find_leads, count_leads");
+    eq(reads(MK), ["whoami"], "marketing (Google Ads only): whoami only (no leads, calls or jobs; the settings row is hidden from marketing by RLS)");
+    eq(reads(MKO), ["count_leads", "find_leads", "whoami"], "marketing + Leads & Marketing: + find_leads, count_leads");
     for (const p of [TE, TN]) ok(!reads(p).includes("money_summary") && !reads(p).includes("payroll_summary"), `${p.full_name}: never money_summary / payroll_summary, whatever pages (finance, payroll) are granted`);
   }
 
@@ -151,9 +151,10 @@ SUITES.push(async () => {
     let out = await run("find_leads", VA8, { query: "0491570006" }, db);
     eq(out.rows.map((r: any) => r.name), ["Demo Lead"], "find_leads by phone (any spacing)");
     eq(Object.keys(out.rows[0]), ["id", "name", "phone", "stage", "source", "service", "createdOn", "nextFollowUp", "bookedFor"], "… only the listed fields: no email, values or notes");
-    eq([out.rows[0].stage, out.rows[0].createdOn], ["New lead", "2026-10-15"], "… the stage's label and the business's day");
+    eq([out.rows[0].stage, out.rows[0].createdOn], ["Won", "2026-10-15"], "… the app's stage (job j1 is in Demo Lead's name: Won) and the business's day");
     eq((await run("find_leads", VA8, { query: "2150" }, db)).rows.map((r: any) => r.name), ["Quinn Quoted"], "find_leads by postcode");
-    eq((await run("find_leads", VA8, { stage: "quoted" }, db)).rows.map((r: any) => r.name), ["Quinn Quoted"], "find_leads by stage (label, any case)");
+    eq((await run("find_leads", VA8, { stage: "won" }, db)).rows.map((r: any) => r.name), ["Demo Lead", "Wanda Won", "Quinn Quoted"], "find_leads by stage (label, any case): the app's stage (a job makes a lead Won)");
+    eq((await run("find_leads", VA8, { stage: "quoted" }, db)).rows.map((r: any) => r.name), [], "… Quinn Quoted has a job (j2): Won, not Quoted");
     eq((await run("find_leads", VA8, { source: "google" }, db)).rows.map((r: any) => r.name), ["Demo Lead", "Wanda Won", "Bob Booked"], "find_leads by source: contains-match (Google Ads + Google Maps), newest first");
     eq((await run("find_leads", VA8, { period: "last_month" }, db)).rows.map((r: any) => r.name), ["Old Lead"], "find_leads in a period (the business's days)");
     eq((await run("find_leads", VA8, { stage: "nope" }, db)).error.startsWith("No stage matches that."), true, "an unknown stage → invalid, with the list");
@@ -163,7 +164,7 @@ SUITES.push(async () => {
     eq(out, { total: 4, from: "2026-10-01", to: "2026-10-31", groups: [{ key: "Google Ads", label: "Google Ads", count: 2 }, { key: "Google Maps", label: "Google Maps", count: 1 }, { key: "Meta Ads", label: "Meta Ads", count: 1 }], truncated: false },
       "count_leads: this month by source (00:30 on 1 Oct in Sydney counts; 23:30 on 30 Sep doesn't)");
     eq((await run("count_leads", VA8, { period: "last_month" }, db)).total, 1, "count_leads last month: the lead from 23:30 on 30 Sep");
-    eq((await run("count_leads", VA8, { group_by: "stage" }, db)).groups.map((g: any) => [g.label, g.count]), [["Booked", 1], ["New lead", 1], ["Quoted", 1], ["Won", 1]], "group_by stage: the stages' labels");
+    eq((await run("count_leads", VA8, { group_by: "stage" }, db)).groups.map((g: any) => [g.label, g.count]), [["Won", 3], ["Booked", 1]], "group_by stage: the app's stages' labels (Demo Lead and Quinn Quoted have jobs: Won)");
     eq((await run("count_leads", VA8, { group_by: "day", period: "this_year" }, db)).groups.map((g: any) => g.key), ["2026-09-30", "2026-10-01", "2026-10-10", "2026-10-15"], "group_by day: chronological, business days");
     eq((await run("count_leads", VA8, { group_by: "week", period: "this_year" }, db)).groups.map((g: any) => [g.key, g.count]), [["2026-09-27", 3], ["2026-10-04", 1], ["2026-10-11", 1]], "group_by week: the business week's first day");
     eq((await run("count_leads", VA8, { group_by: "service", source: "google" }, db)).groups.map((g: any) => [g.key, g.count]), [["Aircon", 2], ["Pressure Washing", 1]], "group_by service, only Google sources");
@@ -210,10 +211,10 @@ SUITES.push(async () => {
     eq(out.rows.map((r: any) => r.id), ["j3", "j1", "j6"], "technician: only his own jobs (the fake returns every row: the block's rule)");
     ok(!keysDeep(out).some((k) => MONEY_KEY.test(k)), "technician: no money keys anywhere (amount, total, gst, commission, cost, spend, pay)");
     eq((await run("list_jobs", TE, { technician: "Gabe" }, db)).error, "A technician sees only his own jobs: leave technician out.", "technician: can't ask for someone else's jobs");
-    eq(await run("list_jobs", TN, { period: "this_year" }, db), { count: 0, rows: [], truncated: false }, "technician without technician_name: no jobs (block rule b)");
+    eq(await run("list_jobs", TN, { period: "this_year" }, db), { jobsFound: 0, count: 0, rows: [], truncated: false }, "technician without technician_name: no jobs (block rule b)");
     out = await run("upcoming_work", TE, {}, db);
-    eq(out, { next: { day: "2026-10-15", kind: "task", title: "Call supplier" }, items: [{ day: "2026-10-15", kind: "task", title: "Call supplier" }, { day: "2026-10-16", kind: "job", title: "Chimney – Future Fran", technician: "Tia" }], days: 7, truncated: false },
-      "upcoming_work (technician): his own job and his own open task; no bookings, nobody else's");
+    eq(out, { next: { day: "2026-10-15", kind: "task", title: "Call supplier" }, nextJob: { day: "2026-10-16", title: "Chimney – Future Fran", technician: "Tia" }, items: [{ day: "2026-10-15", kind: "task", title: "Call supplier" }, { day: "2026-10-16", kind: "job", title: "Chimney – Future Fran", technician: "Tia" }], days: 7, truncated: false },
+      "upcoming_work (technician): his own job and his own open task; no bookings, nobody else's; next = the task, nextJob = the job");
     ok(!keysDeep(out).some((k) => MONEY_KEY.test(k)), "upcoming_work (technician): no money keys");
     out = await run("upcoming_work", OW, { days: 7 }, db);
     eq(out.items.map((x: any) => [x.day, x.kind, x.title]), [["2026-10-16", "job", "Chimney – Future Fran"], ["2026-10-17", "booking", "Bob Booked – Aircon"], ["2026-10-20", "job", "Aircon – Gary Later"]], "upcoming_work (owner): jobs and booked leads by day");
@@ -221,6 +222,40 @@ SUITES.push(async () => {
     eq((await run("upcoming_work", OW, {}, fakeDb({}))).next, null, "nothing recorded → next: null");
     eq((await run("upcoming_work", TN, {}, db)).items.map((x: any) => x.kind), [], "technician without technician_name: nothing (no jobs, no own tasks)");
     eq((await run("upcoming_work", VA8, { days: 3 }, db)).items.map((x: any) => [x.kind, x.title]), [["job", "Chimney – Future Fran"], ["booking", "Bob Booked – Aircon"]], "va: jobs and bookings in 3 days");
+  }
+
+  // ── 5b. the app's lead stage, exact job totals, technician names, the next job (review fixes) ──
+  {
+    const base = SEED();
+    const db = fakeDb({
+      ...base,
+      contacts: [...base.contacts,
+        { id: UID(6), full_name: "Nora Notrelevant", phone: "", postcode: "", status: "Not Relevant", source: "Organic", division: "Aircon", created_at: "2026-10-05T00:00:00Z", next_follow_up: null, booked_for: null },
+        { id: UID(7), full_name: "Jo Jobbed", phone: "", postcode: "", status: "Booked", source: "Organic", division: "Aircon", created_at: "2026-10-06T00:00:00Z", next_follow_up: null, booked_for: "2026-10-16" }],
+      jobs: [...base.jobs, { id: "j8", date: "2026-10-16", technician: "Gabe", customer_name: "Someone Else", contact_id: UID(7), job_type: "Aircon", amount: 100, includes_gst: true, payment_status: null, commission_percent: 25, parts_cost: 0 }],
+    });
+    eq((await run("count_leads", OW, { group_by: "stage" }, db)).groups.map((g: any) => [g.label, g.count]), [["Won", 4], ["Booked", 1], ["Lost", 1]], "count_leads by stage: a lead with a job (by id) is Won, 'Not Relevant' is Lost");
+    eq([(await run("count_leads", OW, { stage: "won" }, db)).total, (await run("count_leads", OW, { stage: "booked" }, db)).total, (await run("count_leads", OW, { stage: "lost" }, db)).total], [4, 1, 1], "count_leads stage filter: the app's stage");
+    eq((await run("find_leads", OW, { stage: "lost" }, db)).rows.map((r: any) => [r.name, r.stage]), [["Nora Notrelevant", "Lost"], ["Old Lead", "Lost"]], "find_leads stage lost: 'Not Relevant' too, shown as Lost");
+    const TC = prof("r-techc", "Tia Crm", "technician", { crm: true }, "Tia");
+    eq((await run("find_leads", TC, { query: "Jo Jobbed" }, db)).rows.map((r: any) => r.stage), ["Booked"], "a technician with the CRM: Gabe's job doesn't count for him (his app shows Booked)");
+    eq((await run("find_leads", OW, { query: "Jo Jobbed" }, db)).rows.map((r: any) => r.stage), ["Won"], "… the owner sees the job: Won");
+    let out = await run("upcoming_work", OW, {}, db);
+    eq(out.items.filter((x: any) => x.day === "2026-10-16").map((x: any) => [x.kind, x.title]), [["job", "Aircon – Someone Else"], ["job", "Chimney – Future Fran"]], "upcoming_work: a booked lead with a job shows once, as the job");
+    out = await run("list_jobs", OW, { period: "this_month", limit: 2 }, db);
+    eq([out.jobsFound, out.count, out.truncated], [7, 2, true], "list_jobs: jobsFound is every match (7 this month), not the 2 rows shown");
+    out = await run("list_jobs", TE, { period: "this_month", limit: 1 }, db);
+    eq([out.jobsFound, out.count], [3, 1], "… a technician: the total of his own jobs only");
+    out = await run("list_jobs", OW, { technician: "gab", period: "this_month" }, db);
+    eq([out.technician, out.jobsFound, out.rows.map((r: any) => r.id)], ["Gabe", 4, ["j4", "j8", "j2", "j7"]], "technician: a part of the name finds the one technician, said in the answer");
+    const two = fakeDb({ ...base, jobs: [...base.jobs, { id: "j9", date: "2026-09-15", technician: "Gabriella", customer_name: "X", job_type: "Aircon" }] });
+    eq((await run("list_jobs", OW, { technician: "gab" }, two)).error, 'Several technicians match "gab": Gabe, Gabriella. Ask the person which one.', "… several match → ask which one");
+    eq((await run("list_jobs", OW, { technician: "gabe", period: "this_month" }, two)).technician, "Gabe", "… an exact name wins");
+    eq((await run("upcoming_work", OW, { technician: "zed" }, two)).error, 'No technician whose name has "zed" has any jobs.', "… none → said, never 'no jobs'");
+    // the next job beyond the days asked, and a task that comes first
+    const far = fakeDb({ ...base, jobs: [{ id: "jf", date: "2026-10-25", technician: "Tia", customer_name: "Far Away", job_type: "Aircon" }], tasks: [] });
+    eq(await run("upcoming_work", TE, {}, far), { next: null, nextJob: { day: "2026-10-25", title: "Aircon – Far Away", technician: "Tia" }, items: [], days: 7, truncated: false }, "a job 10 days away: nothing in the 7 days, but nextJob has it");
+    eq((await run("upcoming_work", TE, {}, db)).next.kind, "task", "… and when a task comes first, next is the task while nextJob is the job");
   }
 
   // ── 6. money and payroll: owners and managers; the numbers are mcp's calc ──
@@ -273,7 +308,10 @@ SUITES.push(async () => {
   {
     const db = fakeDb({ ...SEED(), settings: [{ id: 1, company_name: "Acme Home Services", catalog: { region: { timeZone: SYD, weeks: [{ weekStart: 1, from: "2026-01-05" }] }, business: { shortName: "Acme", website: "https://acme.example" } } }] });
     eq(await run("read_settings", TE, { section: "region" }, db), { timeZone: SYD, currency: "AUD", country: "AU", state: "NSW", taxName: "GST", weekStartsOn: "monday" }, "region: zone, currency, tax, the business's week start");
-    eq(await run("read_settings", MK, { section: "business" }, db), { name: "Acme Home Services", shortName: "Acme", website: "https://acme.example" }, "business: name, short name, website");
+    eq(await run("read_settings", VA8, { section: "business" }, db), { name: "Acme Home Services", shortName: "Acme", website: "https://acme.example" }, "business: name, short name, website");
+    // the settings row hidden by RLS (as for marketing): refused, never the built-in defaults as facts
+    const hidden = fakeDb({ ...SEED(), settings: [] });
+    eq([(await run("read_settings", VA8, { section: "region" }, hidden)).error, (await run("read_office_hours", VA8, {}, hidden)).error], ["Not allowed for your role.", "Not allowed for your role."], "no settings row → refused (read_settings and read_office_hours)");
     eq((await run("read_settings", TE, { section: "pipeline" }, db)).error, "Not allowed for your role.", "technician: no pipeline");
     eq((await run("read_settings", MK, { section: "lead_sources" }, db)).error, "Not allowed for your role.", "marketing (Google Ads only): no lead sources");
     const pipe = await run("read_settings", VA8, { section: "pipeline" }, db);
@@ -293,7 +331,7 @@ SUITES.push(async () => {
       return res[0];
     };
     for (const n of ["money_summary", "payroll_summary"]) eq([(await forced(TE, n)).content, (await forced(TE, n)).is_error], ["Not allowed for your role", true], `technician forcing ${n}: "Not allowed for your role"`);
-    for (const n of ["find_leads", "count_calls", "list_jobs"]) eq((await forced(MK, n)).content, "Not allowed for your role", `marketing forcing ${n}: refused`);
+    for (const n of ["find_leads", "count_calls", "list_jobs", "read_settings", "read_office_hours"]) eq((await forced(MK, n, n === "read_settings" ? { section: "region" } : {})).content, "Not allowed for your role", `marketing forcing ${n}: refused`);
     eq((await forced(VA8, "money_summary")).content, "Not allowed for your role", "va forcing money_summary: refused");
     const res = await forced(OW, "count_leads", {});
     ok(!res.is_error && res.content.length <= FREE_TOOL_RESULT_CHARS && res.content.startsWith('{"total":4'), "an owner's count_leads through the loop (free AI): fits, headline first");

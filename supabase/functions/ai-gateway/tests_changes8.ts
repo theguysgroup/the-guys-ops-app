@@ -331,6 +331,17 @@ SUITES.push(async () => {
     ok(/^Unknown tool set_lead_follow_up/.test(errText(db, x.r)) && db.T.ai_changes.length === 0, "a technician: not offered");
     x = await propose(db, "j8-mkt", "set_lead_follow_up", { lead: "Quinn", follow_up: "2026-10-22" });
     ok(/^Unknown tool set_lead_follow_up/.test(errText(db, x.r)) && db.T.ai_changes.length === 0, "marketing: not offered");
+    // a technician with the CRM: only the jobs he can see make a lead Won (the app's leadWonByJob over his filtered
+    // jobs), so the kind of proposal never gives away another technician's job
+    const TC = prof("c8-techc", "Tia Crm", "technician", "Tia", { tasks: true, crm: true, jobs: true });
+    JWT8["j8-techc"] = TC.id;
+    const gabeJob = { id: "jx", date: "2026-10-15", technician: "Gabe", customer_name: "Demo Lead", contact_id: LID(1) };
+    db = world({ seed: { profiles: [OW, MG, VA8, TE, TN, MK, TC].map(clone), jobs: [gabeJob] } });
+    ({ e, row } = await propose(db, "j8-techc", "set_lead_follow_up", { lead: "Demo Lead", follow_up: "2026-10-19" }));
+    eq([e, row && row.kind, row && row.summary], ["", "lead_stage", "Move Demo Lead from New lead to Follow up"], "a technician with the CRM, the lead's only job is another technician's: New (as his app shows it) → the stage move");
+    db = world({ seed: { jobs: [gabeJob] } });
+    ({ e, row } = await propose(db, "j8-manager", "set_lead_follow_up", { lead: "Demo Lead", follow_up: "2026-10-19" }));
+    eq([e, row && row.kind], ["", "lead_follow_up"], "… a manager sees that job: Won, so only the date");
   }
 
   // ── 8. the ai_changes rows, and nothing but them written with the service role ──

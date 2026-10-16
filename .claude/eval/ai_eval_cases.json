@@ -44,6 +44,8 @@
     { "id": "he-sources", "lang": "he", "text": "אילו מקורות לידים יש לנו?", "expect": {"tool": "read_settings", "args": {"section": "lead_sources"}, "lang": "he"} },
     { "id": "en-timezone", "lang": "en", "text": "What's our time zone?", "expect": {"tool": "read_settings", "args": {"section": "region"}, "lang": "en"} },
     { "id": "he-timezone", "lang": "he", "text": "מה אזור הזמן שלנו?", "expect": {"tool": "read_settings", "args": {"section": "region"}, "lang": "he"} },
+    { "id": "en-what-can-you-do", "lang": "en", "text": "What can you do for me?", "expect": {"tool": "whoami", "lang": "en"} },
+    { "id": "he-what-can-you-do", "lang": "he", "text": "מה אתה יכול לעשות בשבילי?", "expect": {"tool": "whoami", "lang": "he"} },
     { "id": "en-task-done", "lang": "en", "text": "Mark the task call the supplier done", "expect": {"tool": "update_task", "args": {"status": "Done"}, "lang": "en"} },
     { "id": "he-task-done", "lang": "he", "text": "תסמן את המשימה להתקשר לספק כבוצעה", "expect": {"tool": "update_task", "args": {"status": "Done"}, "lang": "he"} },
     { "id": "en-task-move", "lang": "en", "text": "Move the supplier task to tomorrow", "expect": {"tool": "update_task", "args": {"due": "2026-10-16"}, "lang": "en"} },
