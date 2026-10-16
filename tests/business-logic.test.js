@@ -200,7 +200,7 @@ const DECLS = [
   // The workflow builder: the left rail, Save, undo, leaving and opening (stage 2, phase 4 · G4.4)
   'WF_DRAFT', 'WF_STICKY', 'WF_NOTE_COLS', 'WF_BUILDER_COLS', 'WF_UUID_RE', 'WF_LIB_KEY_RE', 'WF_SAVED', 'wfSaveBody', 'wfGuardedOf', 'wfSaveAsk', 'wfStamp', 'wfConflictText', 'wfAgo', 'wfRecentRows',
   'wfDraftKey', 'wfDraftPack', 'wfDraftPick', 'wfIssueRef', 'wfErrorGroups', 'wfNoteCounts', 'wfNoteRows', 'wfNoteWhy', 'wfNoteProblem', 'wfStickiesOf', 'wfStickyAdd', 'wfStickySet', 'wfStickyRemove',
-  'wfStickyReanchor', 'wfStickyBoxes', 'wfBoundsWith', 'wfSwitchRows', 'wfRecentList', 'wfPublishGate', 'wfPubItem', 'wfTplUsage', 'wfFindTemplates', 'wfFindSnippet', 'wfCatalogWithDrafts', 'wfSystemCopy',
+  'wfStickyReanchor', 'wfStickyBoxes', 'wfBoundsWith', 'wfSwitchRows', 'wfRecentList', 'wfPublishGate', 'wfPubItem', 'wfTplUsage', 'wfFindTemplates', 'wfFindSnippet', 'wfCatalogWithDrafts', 'wfSystemCopy', 'wfCopyTpls',
   'wfRailErrorsHtml', 'wfRailNotesHtml', 'wfRailNotesListHtml', 'wfRailFindHtml', 'wfRailFindResHtml', 'wfRailSwitcherHtml', 'wfRailSwitchListHtml', 'wfRailStickiesHtml', 'wfDlgHtml', 'WF_DIALOG_HTML', 'wfBannerHtml',
   // Stage 4: page history, the edge swipe and deep links (landing page, where the screen is, the swipe decision)
   'canViewSection', 'firstAccessibleTab', 'homeTabFor', 'NAV_PAGES', 'NAV_TAB_ALIASES', 'landingTab', 'navSnapOf', 'NAV_BASE_KINDS', 'navKey', 'navMode', 'navUrl', 'NAV_SWIPE_RULES', 'isBackSwipe',
@@ -5945,9 +5945,9 @@ function testWfShellWords(sb){
   const htmlAll = C.items.map(i => i.html()).join('');
   assertEqual([C.items.filter(i => i.group==='tree').map(i => i.key), C.items.filter(i => i.group==='trig').map(i => i.key), C.items.filter(i => i.key.startsWith('s:')).length, C.edges.length===L.edges.length,
     /<img|<b>leads/.test(htmlAll), htmlAll.includes('Call &lt;img src=x onerror=alert(1)&gt;'), by('t:t1').html().includes('Web &lt;b&gt;leads&lt;/b&gt;')],
-    [['n:n1', 'n:n2', 'h:n2:b1', 'n:n3', 'h:n2:none'], ['t:t1', 't:t2', 'addt'], L.slots.length, true, false, true, true], 'wfCanvasItems: steps and branch headers in reading order, triggers then "Add New Trigger", a "+" per place; every name escaped');
+    [['n:n1', 'n:n2', 'h:n2:b1', 'n:n3', 'h:n2:none'], ['t:t1', 't:t2', 'addt'], L.slots.length, true, false, true, true], 'wfCanvasItems: steps and branch headers in reading order, triggers then "Add new trigger", a "+" per place; every name escaped');
   assertEqual([by('n:n1').attrs, by('h:n2:b1').attrs['aria-expanded'], by('n:n3').cls.includes('iss-error'), by('n:n3').html().includes('>Error<'), /Has an error\.$/.test(by('n:n3').al), by('n:n1').al.startsWith('Step 1 of 3: Call'),
-    by('h:n2:none').html().includes(sb.WF_NONE_SUMMARY), by('h:n2:b1').html().includes('Has email'), by('addt').html().includes('Add New Trigger'), by('e:0').attrs['aria-hidden']],
+    by('h:n2:none').html().includes(sb.WF_NONE_SUMMARY), by('h:n2:b1').html().includes('Has email'), by('addt').html().includes('Add new trigger'), by('e:0').attrs['aria-hidden']],
     [{ role: 'treeitem', 'aria-level': 1, 'aria-setsize': 2, 'aria-posinset': 1 }, 'true', true, true, true, true, true, true, true, 'true'],
     'treeitems with level / set size / position; an issue is a word on the card and in its label (never colour only); None says "When none of the conditions are met"');
   const ro = sb.wfCanvasItems(WF_SHELL_DOC, L, reg, {}, { ro: true }), mob = sb.wfCanvasItems(WF_SHELL_DOC, L, reg, {}, { mobile: true, clip: true });
@@ -5955,7 +5955,16 @@ function testWfShellWords(sb){
   assertEqual([ro.items.some(i => i.key==='addt' || i.key.startsWith('s:')), /data-act="drag"/.test(ro.items.map(i => i.html()).join('')), /data-act="drag"/.test(mob.items.map(i => i.html()).join('')), /data-act="drag"/.test(htmlAll),
     mob.items.filter(i => i.key.startsWith('q:')).length, mv.items.filter(i => i.key.startsWith('s:')).map(i => i.key + ' ' + i.cls), mv.items.find(i => i.key==='s:@entry:').html()],
     [false, false, false, true, L.slots.length, ['s:@entry: wfb-slot is-target is-hot'], '<span>Move here</span>'],
-    'read-only: no "+", no "Add New Trigger", no drag handle; the phone (Q3): no drag handle; Quick paste beside every "+" while a copy exists; move mode shows only the places it can go');
+    'read-only: no "+", no "Add new trigger", no drag handle; the phone (Q3): no drag handle; Quick paste beside every "+" while a copy exists; move mode shows only the places it can go');
+  // review block 2 #12/#13: Stats (not built yet) and Notes (an unsaved workflow) greyed with their reason, a click toasts
+  // it; the add-trigger card is GHL's "+ Add new trigger", the "● New Trigger" placeholder while its picker is open
+  const gr = sb.wfCanvasItems(WF_SHELL_DOC, L, reg, {}, { statsWhy: sb.WF_SOON, notesWhy: 'Save the workflow first', pickingTrigger: true }), gby = k => gr.items.find(i => i.key===k);
+  const statsBtn = h => (h.match(/<button[^>]*data-act="tstats"[^>]*>/) || [''])[0], notesBtn = h => (h.match(/<button[^>]*data-act="notes"[^>]*>/) || [''])[0];
+  assertEqual([/aria-disabled="true"/.test(statsBtn(gby('t:t1').html())), statsBtn(gby('t:t1').html()).includes(`data-why="${sb.WF_SOON}"`), /aria-disabled/.test(statsBtn(by('t:t1').html())),
+    notesBtn(gby('n:n1').html()).includes('data-why="Save the workflow first"'), /aria-disabled/.test(notesBtn(by('n:n1').html())), gby('n:n1').ck!==by('n:n1').ck,
+    gby('addt').html(), gby('addt').cls, by('addt').al, gby('addt').ck!==by('addt').ck],
+    [true, true, false, true, false, true, '<span class="wfb-newpill"><i aria-hidden="true"></i>New Trigger</span>', 'wfb-card wfb-addt is-new', 'Add new trigger', true],
+    'unavailable card buttons greyed with the reason (and repainted once they work); "Add new trigger", and "● New Trigger" while picking one');
   // content keys: the same doc twice → the same keys; a position change keeps the content key
   const C2 = sb.wfCanvasItems(JSON.parse(JSON.stringify(WF_SHELL_DOC)), L, reg, {}, { at: T.at, seq: T.seq, issueOf: { 'n:n3': 'error' } });
   assertEqual(C.items.map(i => i.ck).join('\n')===C2.items.map(i => i.ck).join('\n'), true, 'content keys are stable (two paints of the same doc rewrite nothing)');
@@ -6597,6 +6606,17 @@ function testWfRailPure(sb){
   assertEqual([cp.name, cp.drafts, JSON.stringify(cp.doc).includes('"lock'), Object.values(cp.doc.nodes).filter(n => n.kind==='action').map(n => n.config.templateKey), sys.def.steps[0].conds[0].lock],
     ['Copy of Review request after a closed job', { my_00000001: { name: 'Copy of Name reviewSms', channel: 'text', body: 'words of reviewSms' } }, false, ['my_00000001', 'my_aaaaaaaa'], true],
     'wfSystemCopy: no locks; a built-in message copied into a new template of the business\'s own (a library one kept); the System row untouched');
+  // wfCopyTpls (review block 1 #2): a copy (template chosen, System copy, Save mine / Restore as a copy) never keeps a saved
+  // template's key, so its first Save never changes what the original sends; edited words go along; new drafts stay
+  let m2 = 0;
+  const lib2 = { saved: k => k==='my_aaaaaaaa' || k==='my_bbbbbbbb', words: k => `words of ${k}`, name: k => `Name ${k}`, channel: k => k==='my_bbbbbbbb' ? 'email' : 'text', mint: d => { const k = `my_1000000${++m2}`; return d[k] ? 'taken' : k; } };
+  const src2 = { schema: 2, entry: 'a1', triggers: [], nodes: { a1: { kind: 'action', type: 'send_sms', config: { templateKey: 'my_aaaaaaaa' }, next: 'a2' }, a2: { kind: 'action', type: 'send_email', config: { templateKey: 'my_bbbbbbbb' }, next: 'a3' },
+    a3: { kind: 'action', type: 'send_sms', config: { templateKey: 'my_aaaaaaaa' }, next: 'a4' }, a4: { kind: 'action', type: 'send_sms', config: { templateKey: 'my_new00001' }, next: 'a5' }, a5: { kind: 'action', type: 'send_sms', config: { templateKey: 'reviewSms' } } } };
+  const before2 = JSON.stringify(src2), cp2 = sb.wfCopyTpls(src2, { my_bbbbbbbb: { name: 'Edited', channel: 'email', body: 'new words' }, my_new00001: { name: 'Mine', channel: 'text', body: 'hi' } }, lib2);
+  assertEqual([['a1', 'a2', 'a3', 'a4', 'a5'].map(id => cp2.doc.nodes[id].config.templateKey), cp2.drafts, JSON.stringify(src2)===before2, sb.wfCopyTpls(src2, null, {}).doc.nodes.a1.config.templateKey],
+    [['my_10000001', 'my_10000002', 'my_10000001', 'my_new00001', 'reviewSms'], { my_new00001: { name: 'Mine', channel: 'text', body: 'hi' }, my_10000001: { name: 'Copy of Name my_aaaaaaaa', channel: 'text', body: 'words of my_aaaaaaaa' },
+      my_10000002: { name: 'Copy of Edited', channel: 'email', body: 'new words' } }, true, 'my_aaaaaaaa'],
+    'wfCopyTpls: each saved template gets one new key (its words, or the words edited here); a new draft and a built-in stay; the original doc untouched');
 }
 function testWfRailWords(sb){
   console.log('\nWorkflow builder: the rail\'s panels, the dialogs and the System banner as words (stage 2 G4.4)');

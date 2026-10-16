@@ -1310,6 +1310,13 @@ body.wf-open #phone-widget { left: auto !important; right: 16px; bottom: 164px !
 .wfb-dresize:hover, .wfb-dresize:focus-visible { background: var(--wf-sel-soft); outline: none; }
 .wfb-tabbody { flex: 1; min-width: 0; overflow: auto; background: var(--paper); }
 .wfb-ldrawer[hidden], .wfb-rdrawer[hidden], .wfb-tabbody[hidden], .wfb-vp[hidden], .wfb-pill[hidden], .wfb-tools[hidden], .wfb-kbtn[hidden] { display: none; }
+/* a narrow desktop window (the phone shell has its own): the tabs scroll instead of spilling over the bar's buttons, and
+   the rail panel and the step drawer together always fit (the drawer's Save never past the edge) */
+@media (max-width: 999px) {
+  .wfb-tabs { justify-content: flex-start; overflow-x: auto; scrollbar-width: none; }
+  .wfb-ldrawer { min-width: 0; max-width: 40vw; }
+  .wfb-rdrawer { min-width: min(380px, 50vw); }
+}
 /* the canvas: one transformed world; the grid follows the view as a background (fades below 40 %) */
 .wfb-vp { flex: 1 1 auto; min-width: 0; position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; outline: none;
   background-color: var(--wf-canvas); background-image: linear-gradient(var(--wf-grid) 1px, transparent 1px), linear-gradient(90deg, var(--wf-grid) 1px, transparent 1px);
@@ -1364,6 +1371,9 @@ body.wf-open #phone-widget { left: auto !important; right: 16px; bottom: 164px !
 .wfb-addt { justify-content: center; gap: 10px; border: 1px dashed var(--wf-add); background: var(--wf-add-soft); color: var(--wf-add); box-shadow: none; }
 .wfb-addt b { font-size: 14px; }
 .wfb-addic { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; background: var(--surface); }
+.wfb-addt.is-new { border-style: solid; }
+.wfb-newpill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: var(--surface); font-size: 13px; font-weight: 600; }
+.wfb-newpill i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .wfb-head { display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--surface); border: 1px solid var(--line); border-bottom: 3px solid var(--wf-purple); border-radius: 8px; outline: none; cursor: default; }
 .wfb-head:focus-visible, .wfb-head.is-sel { border-color: var(--wf-sel); border-bottom-color: var(--wf-purple); box-shadow: 0 0 0 3px var(--wf-sel-soft); }
 .wfb-head .wfb-txt b { color: var(--wf-purple); }
@@ -23341,19 +23351,21 @@ function wfToneOf(entry){ return WF_TONES[wfObj(entry).category] || 'grey'; }
 // GHL's words for a None branch header.
 const WF_NONE_SUMMARY = 'When none of the conditions are met';
 // The step card (Standard, 290 × 64). c = { id, name, sum, icon, tone, disabled, unknown, issue, notes, stats, verdict, ro,
-// mobile, canToggle, canMove }. Every word escaped; the buttons inside are not Tab stops (the tree has one, §5.8).
+// mobile, canToggle, canMove, notesWhy (Notes can't open yet: the reason, greyed) }. Every word escaped; the buttons
+// inside are not Tab stops (the tree has one, §5.8).
 function wfStepCardHtml(c){
-  const id = esc(c.id), b = (act, label, icon, cls) => `<button type="button" tabindex="-1" class="${cls || ''}" data-act="${act}" data-id="${id}" aria-label="${esc(label)}" title="${esc(label)}">${icon}</button>`;
+  const id = esc(c.id), b = (act, label, icon, cls, why) => `<button type="button" tabindex="-1" class="${cls || ''}" data-act="${act}" data-id="${id}" aria-label="${esc(label)}" title="${esc(why || label)}"${wfDisAttr(why)}>${icon}</button>`;
   return `<span class="wfb-tile" style="--tone:var(--wf-${esc(c.tone)})">${wfIcon(c.icon, 18)}</span>`
     + `<span class="wfb-txt"><b dir="auto" title="${esc(c.name)}">${esc(c.name)}</b>${c.sum && c.sum!==c.name ? `<small dir="auto" title="${esc(c.sum)}">${esc(c.sum)}</small>` : ''}</span>`
     + `<span class="wfb-tags">${c.disabled ? '<span class="wfb-tag">Disabled</span>' : ''}${c.unknown ? '<span class="wfb-tag">Unknown step</span>' : ''}`
     + `${c.issue ? `<span class="wfb-tag is-${c.issue==='error' ? 'err' : 'warn'}">${c.issue==='error' ? 'Error' : 'Warning'}</span>` : ''}${c.stats ? `<span class="wfb-tag is-stats">${esc(c.stats)}</span>` : ''}${c.verdict ? `<span class="wfb-tag is-verdict">${esc(c.verdict)}</span>` : ''}</span>`
     + b('menu', 'Step menu', ico('moreH', 18), 'wfb-more')
     + `<span class="wfb-hov">${!c.ro && c.canToggle ? b('toggle', c.disabled ? 'Enable' : 'Disable', ico(c.disabled ? 'play' : 'pause', 14)) : ''}`
-    + `${b('notes', c.notes ? `Notes (${c.notes})` : 'Notes', `${ico('message', 14)}${c.notes ? `<i>${Number(c.notes) || 0}</i>` : ''}`, c.notes ? 'has' : '')}</span>`
+    + `${b('notes', c.notes ? `Notes (${c.notes})` : 'Notes', `${ico('message', 14)}${c.notes ? `<i>${Number(c.notes) || 0}</i>` : ''}`, c.notes ? 'has' : '', c.notesWhy)}</span>`
     + (!c.ro && !c.mobile && c.canMove ? `<span class="wfb-grip" data-act="drag" data-id="${id}" title="Drag to move" aria-hidden="true">${ico('grip', 14)}</span>` : '');
 }
-// The trigger card (330 wide; header, narration, footer). c = { id, head, name, lines, more, icon, tone, disabled, issue, ro }.
+// The trigger card (330 wide; header, narration, footer). c = { id, head, name, lines, more, icon, tone, disabled, issue, ro,
+// statsWhy (Stats can't open yet: the reason, greyed) }.
 function wfTriggerCardHtml(c){
   const id = esc(c.id), b = (act, label, icon, cls) => `<button type="button" tabindex="-1" class="${cls || ''}" data-act="${act}" data-id="${id}" aria-label="${esc(label)}" title="${esc(label)}">${icon}</button>`;
   return `<div class="wfb-th"><span class="wfb-tile" style="--tone:var(--wf-${esc(c.tone)})">${wfIcon(c.icon, 18)}</span>`
@@ -23362,7 +23374,7 @@ function wfTriggerCardHtml(c){
     + `${b('tmenu', 'Trigger menu', ico('moreH', 18), 'wfb-more')}</div>`
     + `<div class="wfb-tn">${(c.lines || []).map(l => `<div dir="auto" title="${esc(l)}">${esc(l)}</div>`).join('')}${c.more ? `<div class="wfb-tm">+${Number(c.more) || 0} more</div>` : ''}</div>`
     + `<div class="wfb-tf">${c.ro ? '' : b('tcopy', 'Copy trigger', ico('copy', 15)) + b('tdel', 'Delete trigger', ico('trash', 15))}`
-    + `<button type="button" tabindex="-1" class="wfb-tstats" data-act="tstats" data-id="${id}">${ico('chart', 14)}Stats</button></div>`;
+    + `<button type="button" tabindex="-1" class="wfb-tstats" data-act="tstats" data-id="${id}"${c.statsWhy ? ` title="${esc(c.statsWhy)}"` : ''}${wfDisAttr(c.statsWhy)}>${ico('chart', 14)}Stats</button></div>`;
 }
 // A branch header card (220 × 56): fork icon, the branch's name, its conditions in one line.
 function wfHeadCardHtml(c){
@@ -23383,21 +23395,22 @@ function wfCanvasItems(doc, L, reg, ctx, x){
   const trigs = Array.isArray(d.triggers) ? d.triggers.map(wfObj) : [];
   (lay.triggers || []).forEach(b => {
     const t = trigs.find(z => String(z.id)===b.id) || {}, e = wfTrigEntry(reg, t.type), N = wfTriggerNarration(t, reg, ctx), key = `t:${b.id}`;
-    const c = { id: b.id, head: N.head, name: N.name, lines: N.lines, more: N.more, icon: e ? e.icon : 'zap', tone: e ? wfToneOf(e) : 'grey', disabled: t.disabled===true, issue: iss[key] || '', ro };
+    const c = { id: b.id, head: N.head, name: N.name, lines: N.lines, more: N.more, icon: e ? e.icon : 'zap', tone: e ? wfToneOf(e) : 'grey', disabled: t.disabled===true, issue: iss[key] || '', ro, statsWhy: String(o.statsWhy || '') };
     items.push({ key, group: 'trig', act: 'card', id: b.id, cls: `wfb-card wfb-trig${c.disabled ? ' is-off' : ''}${c.issue ? ` iss-${c.issue}` : ''}`, x: b.x, y: b.y, w: b.w, h: b.h, attrs: aria(key),
       al: `Trigger: ${N.head}${N.name ? `, ${N.name}` : ''}. ${N.lines.join('. ')}${N.more ? `. +${N.more} more` : ''}.${c.disabled ? ' Disabled.' : ''}${issueWords(key)}`, ck: JSON.stringify(c), html: () => wfTriggerCardHtml(c) });
   });
+  // GHL's "+ Add new trigger"; while its picker is open it is the "● New Trigger" placeholder (o.pickingTrigger)
   if (lay.addTrigger && !ro) {
-    const b = lay.addTrigger;
-    items.push({ key: 'addt', group: 'trig', act: 'addTrigger', cls: 'wfb-card wfb-addt', x: b.x, y: b.y, w: b.w, h: b.h, attrs: aria('addt'), al: 'Add New Trigger', ck: 'addt',
-      html: () => `<span class="wfb-addic">${ico('plus', 18)}</span><b>Add New Trigger</b>` });
+    const b = lay.addTrigger, pick = !!o.pickingTrigger;
+    items.push({ key: 'addt', group: 'trig', act: 'addTrigger', cls: `wfb-card wfb-addt${pick ? ' is-new' : ''}`, x: b.x, y: b.y, w: b.w, h: b.h, attrs: aria('addt'), al: pick ? 'New trigger: pick one in the panel' : 'Add new trigger', ck: `addt|${pick}`,
+      html: () => pick ? '<span class="wfb-newpill"><i aria-hidden="true"></i>New Trigger</span>' : `<span class="wfb-addic">${ico('plus', 18)}</span><b>Add new trigger</b>` });
   }
   const tree = [];
   Object.entries(wfObj(lay.nodes)).forEach(([id, b]) => {
     const n = wfObj(I.nodes[id]), e = wfNodeEntry(reg, n.kind, n.type), unknown = loaded && !e, ports = wfPorts(n), key = `n:${id}`;
     const c = { id, kind: String(n.kind || ''), type: String(n.type || ''), name: wfNodeName(n, reg), sum: wfSafe(() => wfNodeSummary(n, reg, ctx, d), ''), icon: e ? e.icon : n.kind==='wait' ? 'hourglass' : 'zap',
       tone: e ? wfToneOf(e) : 'grey', disabled: n.disabled===true, unknown, issue: iss[key] || '', notes: Number(wfObj(o.notes)[id]) || 0, stats: String(wfObj(o.stats)[id] || ''),
-      verdict: String(wfObj(o.verdicts)[id] || ''), ro, mobile: mob, canToggle: ports.length <= 1 && !unknown, canMove: !unknown && n.locked!==true };
+      verdict: String(wfObj(o.verdicts)[id] || ''), ro, mobile: mob, canToggle: ports.length <= 1 && !unknown, canMove: !unknown && n.locked!==true, notesWhy: String(o.notesWhy || '') };
     tree.push({ key, group: 'tree', act: 'card', id, cls: `wfb-card wfb-step${c.disabled ? ' is-off' : ''}${unknown ? ' is-unknown' : ''}${c.issue ? ` iss-${c.issue}` : ''}`, x: b.x, y: b.y, w: b.w, h: b.h, attrs: aria(key),
       al: `${wfNodeAria(d, id, reg, ctx, { notes: c.notes, verdict: c.verdict, stats: c.stats, I, order })}${issueWords(key)}`, ck: JSON.stringify(c), html: () => wfStepCardHtml(c) });
   });
@@ -23657,7 +23670,8 @@ function wfSyncCanvas(D){
   const W = WF, E = W.el, mv = W.moveMode;
   const { items, edges } = wfCanvasItems(W.doc, D.layout, W.reg, D.ctx, { at: D.tree.at, seq: D.tree.seq, issueOf: D.issueOf, ro: !!wfGuardEdit(), mobile: W.mobile, I: D.I, order: D.order,
     clip: !!wfClipLoad(AUTO_BUSINESS_ID, Date.now()), move: mv ? { keys: new Set(mv.slots.map(wfSlotKey)), hot: mv.slots[mv.i] ? wfSlotKey(mv.slots[mv.i]) : null } : null,
-    notes: W.noteCounts, stats: W.statsText, verdicts: W.verdicts, stickies: D.stickies });
+    notes: W.noteCounts, stats: W.statsText, verdicts: W.verdicts, stickies: D.stickies, pickingTrigger: !!(W.picker && W.picker.kind==='trigger'),
+    statsWhy: WF_HOOKS.stats ? '' : WF_SOON, notesWhy: W.id ? '' : 'Save the workflow first' });
   const seen = new Set(), order = { trig: [], tree: [], deco: [] };
   let made = false;
   for (const it of items) {
@@ -23892,7 +23906,8 @@ function wfBuilderOpen(row, opts){
     panels: wfPanelsNew(), notesE: null, remote: null, remoteT: 0, draftT: 0, tabKey: wfTabSession(), restoredKey: null, railFocus: null, sys: o.sys || null, isCopy: !!o.isCopy && r.id==null,
     templateKey: r.id==null ? o.templateKey || null : null, folderId: r.id==null ? o.folderId || null : null, homeFolder: r.folder_id || null, aiDirty: false, publishing: false, tz: wfTz(), recent: [] };
   W.base = { ...wfSnap(W), rev: W.rev };
-  if (W.isCopy) { W.base.doc = wfNewDoc(); if (o.tplDrafts && typeof o.tplDrafts==='object') W.tplDrafts = { ...o.tplDrafts }; }
+  // a copy: nothing is saved yet, and its messages are its own (never the saved templates the original sends)
+  if (W.isCopy) { W.base.doc = wfNewDoc(); const c = wfCopyTpls(W.doc, o.tplDrafts, wfCopyTplsLib()); W.doc = c.doc; W.tplDrafts = c.drafts; }
   const E = W.el = wfMount();
   const on = (t, ev, fn, opt) => { t.addEventListener(ev, fn, opt); W.off.push(() => t.removeEventListener(ev, fn, opt)); };
   on(E.root, 'click', wfOnClick);
@@ -24046,7 +24061,8 @@ function wfSetLayer(name, value){
   if (was!==!!value) wfNavHooks.layer(name, !!value);
   if ((name==='menu' || name==='dialog') && value) W.modalFocus = true;
   wfDirty('chrome');
-  if (name==='moveMode') wfDirty('canvas');
+  // move mode's places, and the add-trigger card that is the "● New Trigger" placeholder while its picker is open
+  if (name==='moveMode' || name==='picker') wfDirty('canvas');
 }
 // Closes the top layer: a running gesture, the rename box, a menu, a dialog, move mode, the step drawer (G4.3 may ask
 // first), a picker, the rail panel. → true when one closed (stage 4's back uses this before leaving).
@@ -25184,7 +25200,7 @@ function wfPickStore(which, kind){
 }
 function wfPickStorePut(which, kind, list){ try { localStorage.setItem(`${WF_PICK_KEYS[which]}.${wfBiz()}.${kind}`, JSON.stringify(list.slice(0, 20))); } catch (e) { /* a convenience only */ } }
 function wfMyRole(){ try { const p = getCurrentProfile(); return p ? p.role : null; } catch (e) { return null; } }
-// WF_HOOKS.picker: the "+" (slot), "+ Add ▾", "Add New Trigger", A / T. An open drawer with changes asks first.
+// WF_HOOKS.picker: the "+" (slot), "+ Add ▾", "Add new trigger", A / T. An open drawer with changes asks first.
 function wfPickerOpen(kind, slot){
   const W = WF;
   if (!W) return;
@@ -26024,6 +26040,28 @@ function wfSystemCopy(row, lib){
   });
   return { doc: wfFromFlat(def, null), drafts, name: `Copy of ${String(r.name || 'workflow')}`.slice(0, WF_DOC_LIMITS.name) };
 }
+// A new, unsaved copy (a template chosen, a System copy, Save mine / Restore as a copy) sends its own messages, as the
+// function's duplicate does: every saved template its steps send gets a new my_ key with the same words, so its first
+// Save never changes what the original (or any other workflow) sends. A draft on a saved key (its words changed here)
+// goes along as the copy's words; drafts of new templates stay as they are. lib = { saved(key), words(key), name(key),
+// channel(key), mint(drafts) → a new my_ key }. → { doc, drafts }.
+function wfCopyTpls(doc, drafts, lib){
+  const L = lib || {}, D = wfObj(drafts), d = wfClone(wfObj(doc)), out = {}, map = {}, saved = k => !!(L.saved && L.saved(k));
+  Object.entries(D).forEach(([k, t]) => { if (!saved(k)) out[k] = t; });
+  if (!L.mint) return { doc: d, drafts: out };
+  Object.values(wfObj(d.nodes)).forEach(n => {
+    const c = n && n.kind==='action' && n.config && typeof n.config==='object' ? n.config : null, k = c && c.templateKey;
+    if (typeof k!=='string' || !saved(k)) return;
+    if (!map[k]) {
+      const t = wfObj(D[k]), mine = wfHas(D, k);
+      map[k] = L.mint(out);
+      out[map[k]] = { name: `Copy of ${(mine && t.name) || (L.name ? L.name(k) : k)}`.slice(0, 80), channel: (mine && t.channel) || (L.channel && L.channel(k)) || (n.type==='send_sms' ? 'text' : 'email'),
+        body: mine ? String(t.body ?? '') : String((L.words && L.words(k)) ?? '') };
+    }
+    c.templateKey = map[k];
+  });
+  return { doc: d, drafts: out };
+}
 
 // ── the panels and dialogs as words (pure: state in, HTML out; every word escaped) ──
 function wfRailErrorsHtml(groups, st){
@@ -26278,6 +26316,9 @@ function wfDraftDiscard(){
 function wfAsNew(W){
   W.id = null; W.rev = null; W.status = 'draft'; W.isCopy = true; W.notesE = null; W.noteCounts = {}; W.remote = null; W.aiDirty = false; W.folderId = W.folderId || W.homeFolder || null;
   W.base = { ...W.base, doc: wfNewDoc(), rev: null };
+  // its messages become its own (wfCopyTpls): the first Save of the copy never changes what the original sends
+  const c = wfCopyTpls(W.doc, W.tplDrafts, wfCopyTplsLib());
+  wfApplySnap(W, { ...wfSnap(W), doc: c.doc, tplDrafts: c.drafts });
   if (typeof WF_UI!=='undefined') WF_UI.open = 'new';
   wfPanelBump('notes');
   wfDirty('chrome', 'canvas');
@@ -26703,6 +26744,12 @@ function wfStickySave(){
 function wfStickyCommit(label, fn){ const W = WF; if (!W) return 0; const no = wfCommit(label, w => ({ layout: fn(w.layout) })); if (no) wfPanelBump('stickies'); return no; }
 
 // ── System workflows (design §4.10): read-only, "Duplicate to edit" ──
+// The saved templates for wfCopyTpls (catalog.templates holds the words, as the function's duplicate reads them).
+function wfCopyTplsLib(){
+  let lib = {}, msg = {};
+  try { lib = catalogObject('templates'); msg = autoLib(); } catch (e) { /* no catalog: nothing saved to copy */ }
+  return { saved: k => wfHas(lib, k), words: k => lib[k], name: k => autoTplName(k), channel: k => (wfObj(msg[k]).channel==='email' ? 'email' : wfObj(msg[k]).channel==='text' ? 'text' : ''), mint: d => autoLibKey(d) };
+}
 function wfSystemCopyOpen(row){
   if (!row) return;
   const c = wfSystemCopy(row, { has: k => !!autoLib()[k], words: k => msgTemplateText(k), name: k => autoTplName(k), mint: d => autoLibKey(d) });
