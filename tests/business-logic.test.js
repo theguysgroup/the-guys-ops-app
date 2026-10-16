@@ -239,6 +239,15 @@ const DECLS = [
   'wfAiTick', 'wfAiChangeGuard', 'wfAiChangeDone', 'wfAiReopen', 'wfAiOpenDraft',
   // Stage 7 C: edit and describe
   'WF_DESCRIBE_MAX', 'WF_AI_EXPLAIN', 'wfDescribe', 'wfAiDocOf', 'wfAiCtx', 'wfAiIsDescribe', 'wfAiDescribeData', 'wfAiDescribeAsk', 'wfAiDescribeHtml', 'wfAiExplain',
+  // The workflow builder: the Advanced layout (stage 2, phase 5 · G5.1)
+  'WF_ADV', 'wfAdvFoot', 'wfAdvDotY', 'wfBezierSegs', 'wfBezierPath', 'wfBezierAt', 'wfArrowHead', 'wfTidy', 'wfLayoutAdvanced',
+  // The workflow builder: the Advanced canvas (stage 2, phase 5 · G5.2)
+  'wfAdvEdgeGeom', 'WF_STICKY_FMT', 'WF_ADV_UI', 'wfAdvStickyBoxes', 'wfAdvPlusKey', 'wfAdvInside', 'wfAdvMarquee', 'wfAdvTileAt', 'wfEdgeActs', 'wfAdvDrop', 'wfConnectDrop', 'wfEdgeDelink',
+  'wfConnectRows', 'wfAdvMovePos', 'wfAdvPlaced', 'wfAdvPasteAt', 'wfFormatSel', 'wfStickyAround', 'wfStickyFmt', 'wfBulkToggle', 'wfBulkItems', 'wfBulkHtml', 'wfConnectHtml', 'wfAdvTileHtml',
+  'wfAdvStickyHtml', 'wfAdvCanvasItems',
+  // The workflow builder: switching builders, the blockers list, Default builder (stage 2, phase 5 · G5.3); the lead's
+  // "Assigned to" picker through vacationPickerInfo
+  'wfDefaultBuilder', 'wfStickyNearest', 'wfSwitchPlan', 'wfBlockerRows', 'wfBlockersHtml', 'vacationProfileWho',
 ];
 
 function extractDecl(source, name){
@@ -5252,9 +5261,9 @@ function testWfGlobalSettings(sb){
     (sb.wfPauseCardHtml(null, { ...ctx, ro: 'x' }).match(/<input type="datetime-local" disabled/g) || []).length, /Try again/.test(sb.wfPauseCardHtml(null, { ...ctx, pauses: { status: 'error', error: 'relation "public.automation_pauses" does not exist' } }))],
     [true, true, true, 2, true], 'Pause workflow: 15 dates → no more; an overlap is shown on its row and blocks Save; Presentation mode locks the inputs; a missing table offers Try again');
   const bl = sb.wfBuilderCardHtml(A, null);
-  assertEqual([bl.includes('Default builder for new workflows'), /value="standard" checked/.test(bl), /value="advanced"\s+disabled/.test(bl), bl.includes(why('Coming with the Advanced builder')), bl.includes('Who can switch between builders'), bl.includes(why('Only owners and managers can edit workflows')),
+  assertEqual([bl.includes('Default builder for new workflows'), /value="standard" checked/.test(bl), !/value="advanced"[^>]*disabled/.test(bl), !bl.includes('Coming with the Advanced builder'), bl.includes('Who can switch between builders'), bl.includes(why('Only owners and managers can edit workflows')),
     sb.wfBuilderCardHtml({ ...A, safety: {} }, null).includes('Comes with the next database update')],
-    [true, true, true, true, true, true, true], 'Default builder: Standard chosen, Advanced greyed with its reason (phase 5); who can switch greyed with its reason');
+    [true, true, true, true, true, true, true], 'Default builder: Standard chosen, Advanced can be chosen (phase 5 · G5.3); who can switch greyed with its reason');
   sb.COBRA = { status: { enabled: false }, statusErr: '', msgs: [], log: [] }; sb.getRealProfile = () => ({ role: 'owner' });
   const aiOff = sb.wfAiCardHtml();
   sb.COBRA.status = { enabled: true };
@@ -5823,6 +5832,72 @@ function testWfLayout(sb){
     [{ x: 400, y: 120, k: 0.72 }, { x: 350, y: 250, k: 1 }, 0.2, 2, 0.2, { x: -100, y: -100, k: 2 }], 'wfFit (k in [0.2, 1], centred), wfClampZoom [0.2, 2], wfZoomAt keeps the point under the cursor');
 }
 
+function testWfAdvLayout(sb){
+  console.log('\nWorkflow builder: the Advanced layout (stage 2, phase 5 · G5.1)');
+  const reg = wfRegFor(WF_AV_TODAY), A = sb.WF_ADV;
+  const D = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }, { id: 't2', type: 'newLead', filters: WF_F0 }],
+    nodes: { n1: wfAct('n2'), n2: { kind: 'if_else', type: 'if_else', config: { branches: [{ id: 'b3', name: 'Yes', when: WF_F0 }], noneName: 'None' }, out: { b3: 'n4', none: null } },
+      n4: wfAct('n5'), n5: { kind: 'goto', type: 'goto', config: { target: 'n1' }, out: {} }, x7: wfAct('x8'), x8: wfAct() } };
+  const T = sb.wfTidy(D, reg);
+  assertEqual(T, { n5: [660, 0], n4: [440, 0], n2: [220, 55], n1: [0, 55], x8: [220, 358], x7: [0, 358], t1: [-240, -35], t2: [-240, 145] },
+    'wfTidy: x = depth × 220, leaves (and an empty port\'s "[+]") 110 apart, a parent in the middle of its children, the next group 140 under, triggers at −240 spread ±90 on a shared step');
+  assertEqual([sb.wfTidy(D, reg, ['n2', 't1', 'zz']), sb.wfTidy(sb.wfNewDoc(), reg), sb.wfTidy({ ...sb.wfNewDoc(), triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }, { id: 't2', type: 'newLead', filters: WF_F0 }] }, reg)],
+    [{ n2: [220, 55], t1: [-240, -35] }, {}, { t1: [-240, -90], t2: [-240, 90] }], 'wfTidy: only the ids asked for; an empty flow; triggers with no step to start');
+  const L = sb.wfLayoutAdvanced(D, { v: 1 }, reg);
+  assertEqual([L.builder, L.filled.length, L.nodes.n2, L.triggers.map(t => t.id + '@' + t.x + ',' + t.y), L.plus.map(p => `${p.src}:${p.port}@${p.x},${p.y}`), L.edges.map(e => e.key + (e.back ? '↺' : '') + (e.dashed ? '┄' : '') + (e.toPlus ? '+' : '')), L.unreached],
+    ['advanced', 8, { x: 220, y: 55, w: 72, h: 72 }, ['t1@-240,-35', 't2@-240,145'], ['n2:none@462,132', 'x8:next@462,380'],
+      ['n1:next', 'n2:b3', 'n2:none+', 'n4:next', 'n5:ref:target↺', 'x7:next', 'x8:next+', 'trigger:t1', 'trigger:t2'], ['x7']],
+    'wfLayoutAdvanced: no stored positions → tidied; a "[+]" on each empty port; the Go to\'s edge loops back; a group no run reaches');
+  const back = L.edges.find(e => e.key==='n5:ref:target'), n1 = L.edges.find(e => e.key==='n1:next');
+  assertEqual([back.d.split(' C').length - 1, back.mid[1] > Math.max(L.nodes.n5.y, L.nodes.n1.y) + A.tile + A.label, n1.d, n1.mid, n1.arrow, L.bounds.y + L.bounds.h >= back.mid[1]],
+    [2, true, 'M72 91 C146 91 146 91 220 91', [146, 91], 'M212 95.8 L220 91 L212 86.2 Z', true], 'Advanced edges: a backward one loops under both tiles (and the bounds cover it); forwards one bézier into the tile\'s left side with an arrowhead');
+  // stored positions are kept; a new step goes at its parent's x + 220 on its port's row, nudged off what it would cover
+  const adv = { ...T, n2: [300, 500], x7: [520, 445] }; delete adv.n4; delete adv.t2;
+  const P = sb.wfLayoutAdvanced(D, { v: 1, adv }, reg);
+  assertEqual([P.pos.n4, P.pos.t2, P.pos.n2, P.pos.n5, P.filled], [[520, 555], [-240, 165], [300, 500], [660, 0], ['n4', 't2']],
+    'wfLayoutAdvanced: stored positions kept, a new step at parent.x + 220 on its port row nudged down a row, a new trigger 240 left of its step nudged off the other');
+  const G = { ...D, nodes: { ...D.nodes, n5: { kind: 'goto', type: 'goto', config: { target: 'x7' }, out: {} } } };
+  assertEqual([sb.wfLayoutAdvanced(G, { adv: T }, reg).unreached, sb.wfStandardBlockers(G).map(b => b.code + ':' + (b.nodeId || '')), [...sb.wfReachable(G, {})].sort(), [...sb.wfReachable(G, { viaRefs: true, reg })].sort(),
+    sb.wfLayoutAdvanced({ ...D, triggers: [{ id: 't1', type: 'newLead', filters: WF_F0, goto: 'x7' }] }, { adv: T }, reg).edges.filter(e => e.trigger).map(e => e.to + (e.dashed ? '┄' : ''))],
+    [[], ['delinked:x7', 'delinked:x8'], ['n1', 'n2', 'n4', 'n5'], ['n1', 'n2', 'n4', 'n5', 'x7', 'x8'], ['x7┄']],
+    'reachability: a Go to reaches a group (viaRefs: not "Not connected"), yet it still keeps the flow out of the Standard builder; a trigger\'s own Go to is dashed');
+  const E = sb.wfLayoutAdvanced(sb.wfNewDoc(), {}, reg);
+  assertEqual([Object.keys(E.nodes).length, E.plus.map(p => `${p.src}@${p.x},${p.y}`), E.edges, E.bounds], [0, ['@entry@22,22'], [], { x: 22, y: 22, w: 28, h: 28 }], 'an empty flow: one "[+]" to start from');
+  // béziers
+  const S = sb.wfBezierSegs(0, 0, 200, 100, 0), B = sb.wfBezierSegs(100, 0, 0, 0, 200);
+  assertEqual([sb.wfBezierPath(S), sb.wfBezierAt(S, 0.5), sb.wfBezierAt(S, 0), sb.wfBezierAt(S, 1), sb.wfArrowHead(S), sb.wfBezierPath(B), sb.wfBezierAt(B, 0.5), sb.wfBezierSegs(0, 0, 30, 0, 0)[0][1], sb.wfBezierPath([]), sb.wfBezierAt([], 0.5)],
+    ['M0 0 C100 0 100 100 200 100', [100, 50], [0, 0], [200, 100], 'M192 104.8 L200 100 L192 95.2 Z', 'M100 0 C200 0 200 200 50 200 C-100 200 -100 0 0 0', [50, 200], [40, 0], '', [0, 0]],
+    'wfBezierSegs / wfBezierPath / wfBezierAt / wfArrowHead: an S curve forwards, a loop backwards, the midpoint, the arrowhead along the end');
+  // 200 steps in several groups, triggers sharing steps: after Tidy every parent is left of its children, nothing overlaps,
+  // the same doc lays out the same, < 15 ms
+  const rnd = wfRng(7), slotsOf = d => [{ src: '@entry' }, ...Object.keys(d.nodes).flatMap(id => sb.wfPorts(d.nodes[id]).filter(p => d.nodes[id].out[p]==null).map(p => ({ src: id, port: p })))];
+  let doc = { schema: 2, seq: 0, entry: null, triggers: [], nodes: {} };
+  while (Object.keys(doc.nodes).length < 200) {
+    const s = slotsOf(doc), slot = s[Math.floor(rnd() * s.length)], r = rnd();
+    const node = r < 0.12 ? { kind: 'if_else', type: 'if_else', config: { branches: [{ id: 'x', name: 'A', when: WF_F0 }] } }
+      : r < 0.16 ? { kind: 'split', type: 'split', config: { paths: [{ id: 'p', name: 'A', percent: 50 }, { id: 'q', name: 'B', percent: 50 }] } } : r < 0.18 ? { kind: 'goto', type: 'goto', config: { target: null } } : { kind: 'action', type: 'add_task', config: { title: 'x' } };
+    const x = sb.wfInsert(doc, slot, node, reg); if (!x.error) doc = x.doc;
+  }
+  doc = JSON.parse(JSON.stringify(doc));
+  const ids = Object.keys(doc.nodes);
+  ids.filter((id, i) => i % 23===5 && doc.nodes[id].out && typeof doc.nodes[id].out.next==='string').forEach(id => { doc.nodes[id].out.next = null; });
+  doc.triggers = [0, 1, 2, 3, 4, 5].map(i => ({ id: 't' + (900 + i), type: 'newLead', filters: WF_F0, ...(i > 1 ? { goto: ids[(i * 37) % ids.length] } : {}) }));
+  doc.triggers[5].goto = doc.triggers[4].goto;
+  const tid = sb.wfTidy(doc, reg), a = sb.wfLayoutAdvanced(doc, { adv: tid }, reg), b = sb.wfLayoutAdvanced(JSON.parse(JSON.stringify(doc)), { adv: sb.wfTidy(JSON.parse(JSON.stringify(doc)), reg) }, reg);
+  const I = sb.wfIndex(doc), bad = Object.keys(I.parent).filter(c => !(tid[I.parent[c].from][0] < tid[c][0]));
+  const boxes = [...Object.entries(a.nodes).map(([k, v]) => ['n:' + k, sb.wfAdvFoot(v.x, v.y)]), ...a.triggers.map(v => ['t:' + v.id, sb.wfAdvFoot(v.x, v.y)]), ...a.plus.map(v => ['+' + v.src + v.port, v])];
+  const over = [];
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const [p, u] = boxes[i], [q, v] = boxes[j];
+    if (u.x < v.x + v.w && v.x < u.x + u.w && u.y < v.y + v.h && v.y < u.y + u.h) over.push(p + '×' + q);
+  }
+  let best = Infinity;
+  for (let i = 0; i < 7; i++) { const t0 = process.hrtime.bigint(); sb.wfLayoutAdvanced(doc, { adv: sb.wfTidy(doc, reg) }, reg); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); }
+  assertEqual([sb.wfClusters(doc).length > 3, Object.keys(a.nodes).length, a.filled, bad, over.slice(0, 3), JSON.stringify(a)===JSON.stringify(b), JSON.stringify(sb.wfLayoutAdvanced(doc, {}, reg).pos)===JSON.stringify(a.pos), best < 15,
+    a.edges.every(e => /^M[-\d.]+ [-\d.]+( C[-\d.]+ [-\d.]+ [-\d.]+ [-\d.]+ [-\d.]+ [-\d.]+)+$/.test(e.d)), a.plus.length===slotsOf(doc).length - 1],
+    [true, 200, [], [], [], true, true, true, true, true], `200 steps in groups: after Tidy each parent left of its children, nothing overlaps, deterministic, ${best.toFixed(2)} ms (< 15 ms), every edge a valid path, a "[+]" on every empty port`);
+}
+
 function testWfWords(sb){
   console.log('\nWorkflow builder: the words on the canvas, Find and replace, the pickers, the keys');
   const reg = wfRegFor(WF_AV_TODAY), ctx = { lists: { stages: [{ key: 'quoted', label: 'Quoted' }], templates: [{ key: 'my_t1', label: 'Quote follow-up' }], workflows: [{ key: 'w1', label: 'Nurture' }], tags: [{ key: 'vip', label: 'VIP' }] } };
@@ -6022,8 +6097,8 @@ function testWfShellWords(sb){
       ['Delete action', 'Delete all actions from here'], ['Notes!>', 'Copy>', 'Move!>', 'Disable!', 'Delete!>'], 'A step with branches can\'t be paused'],
     'the step\'s "Actions" menu in GHL\'s words (Notes, Copy, Paste below while a copy exists, Move, Delete); the phone adds Open and Disable (Q3); read-only greys the edits, copying still works');
   assertEqual([lab(sb.wfPopItems({ kind: 'builder' }, X)), lab(sb.wfPopItems({ kind: 'more' }, X)), lab(sb.wfPopItems({ kind: 'tools' }, { ...X, hooks: { rail: ['errors'] } })), lab(sb.wfPopItems({ kind: 'trigger' }, { ...X, trigger: { disabled: true } }))],
-    [['Standard builder', 'Advanced builder!'], ['Undo!', 'Redo!', 'Recent changes!', 'Standard builder', 'Advanced builder!', 'Test workflow!'], ['Notes!', 'Errors', 'Stats view!', 'Sticky notes!', 'Workflow switcher!', 'Find and replace!', 'Version history!', 'Workflow AI!'], ['Copy', 'Enable', 'Delete']],
-    'the builder ▾ (Advanced greyed until phase 5), the phone\'s ⋯ and Tools sheet, the trigger\'s menu');
+    [['Standard builder', 'Advanced builder'], ['Undo!', 'Redo!', 'Recent changes!', 'Standard builder', 'Advanced builder', 'Test workflow!'], ['Notes!', 'Errors', 'Stats view!', 'Sticky notes!', 'Workflow switcher!', 'Find and replace!', 'Version history!', 'Workflow AI!'], ['Copy', 'Enable', 'Delete']],
+    'the builder ▾ (Advanced available since phase 5 · G5.3), the phone\'s ⋯ and Tools sheet, the trigger\'s menu');
   const mh = sb.wfPopHtml({ kind: 'node', x: 10.4, y: 20 }, sb.wfPopItems({ kind: 'node' }, X), false), mhm = sb.wfPopHtml({ kind: 'node' }, sb.wfPopItems({ kind: 'node' }, X), true);
   assertEqual([mh.includes('role="menu" aria-label="Actions" style="left:10px;top:20px"'), (mh.match(/role="menuitem"/g) || []).length, mh.includes('aria-disabled="true"'), mhm.includes('is-sheet'), mhm.includes('style=')],
     [true, 5, true, true, false], 'the menu: role menu / menuitem, greyed items say why, a bottom sheet on a phone');
@@ -6085,8 +6160,8 @@ function testWfShellStatic(){
   const drawers = paintPath.filter(n => /\brender(KeepingInput)?\(|\bwfDirty\(/.test(extractDecl(script, n).replace(/^function wfDirty[\s\S]*?\{/, '')) && n!=='wfAppDataChanged');
   const code = sec.replace(/^\s*\/\/.*$/gm, ''), renders = [...code.matchAll(/\brender\(\)/g)].map(m => code.slice(Math.max(0, m.index - 60), m.index).split('\n').pop().trim());
   assertEqual([drawers, renders, /openModal\(/.test(sec), /'(mouseover|mouseenter|pointerover|pointerenter|mousemove)'/.test(sec), (sec.match(/'pointermove'/g) || []).length, /render\(\)/.test(extractDecl(script, 'wfAppDataChanged'))],
-    [[], ["back: () => wfLeave(() => { wfBuilderClose();"], false, false, 2, false],
-    'the paint path never draws the app or asks for another paint; render() only after "← Workflows list"; no openModal; no hover listeners; pointermove only inside a gesture');
+    [[], ["back: () => wfLeave(() => { wfBuilderClose();", "st go = () => { if (WF===W) wfBuilderClose({ nav: false });"], false, false, 2, false],
+    'the paint path never draws the app or asks for another paint; render() only after "← Workflows list" or back leaving it (G5.3); no openModal; no hover listeners; pointermove only inside a gesture');
   const rIdx = script.indexOf('function render(){'), rBody = script.slice(rIdx, script.indexOf('\n  const app = document.getElementById(\'app\');', rIdx));
   assertEqual([/wfAppDataChanged\(\)/.test(rBody), html.includes('<div id="app"></div>\n<div id="wf-root" hidden></div>\n<div id="modal-root"></div>')], [true, true],
     'render() asks the builder first (before any early return); #wf-root sits between #app and #modal-root');
@@ -6097,8 +6172,10 @@ function testWfShellStatic(){
   const twice = [...new Set(declared.filter((n, i) => declared.indexOf(n)!==i))];
   assertEqual(twice, [], 'no function or top-level name is declared twice in the app');
   // stage 4 joins at ONE adapter
-  assertEqual([/const wfNavHooks = \{ opened\(id\)\{\}, closed\(\)\{\}, layer\(name, open\)\{\} \};/.test(sec), /NAV_LAYERS|NAV_LEAVERS|NAV_RESTORERS|navPush\(/.test(sec.replace(/^\s*\/\/.*$/gm, ''))], [true, false],
-    'the page history plugs in at wfNavHooks (no-ops now); nothing else depends on stage 4');
+  const navParts = ['wfNavHooks', 'wfNavReady', 'wfNavSync', 'wfNavWire', 'wfNavLeave', 'wfNavRestore', 'wfNavClose'].map(n => extractDecl(script, n));
+  const navFree = navParts.reduce((t, d) => t.replace(d, ''), sec).replace(/^\s*\/\/.*$/gm, '').replace(/^wfNavWire\(\);$/m, '');
+  assertEqual([/const wfNavHooks = \{/.test(sec), navParts.every(d => sec.includes(d)), /NAV_LAYERS|NAV_LEAVERS|NAV_RESTORERS|NAV_HIST|navPush\(|navReplace\(|navBackTo\(|navLayer\(|navOverlaySync|navOurs|navSnap|history\.(state|back|go|pushState|replaceState)/.test(navFree)], [true, true, false],
+    'the page history plugs in at wfNavHooks and the G5.3 block that registers the builder\'s layers, leaver and restorer; nothing else in the builder depends on stage 4');
 }
 
 // A small fake DOM: enough for the builder's paint (createElement, attributes, classes, children, innerHTML as text).
@@ -6902,6 +6979,207 @@ testWfShellTokens(); testWfShellStatic(); testWfShellRuntime();
 { const sb = wfSb(); [testWfPickDrawerPure, testWfPickDrawerWords].forEach(t => t(sb)); }
 testWfPickDrawerRuntime();
 { const sb = wfSb(); [testWfRailPure, testWfRailWords].forEach(t => t(sb)); }
+{ const sb = wfSb(); testWfAdvLayout(sb); }
+{ const sb = wfSb(); testWfAdvCanvasPure(sb); }
+testWfAdvCanvasRuntime();
+{ const sb = wfSb(); testWfSwitchPure(sb); }
+
+function testWfAdvCanvasPure(sb){
+  console.log('\nWorkflow builder: the Advanced canvas — drops, connect, delink, Connect mode, bulk, stickies (stage 2, phase 5 · G5.2)');
+  const reg = wfRegFor(WF_AV_TODAY), evil = '<img src=x onerror=alert(1)>';
+  const D = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }, { id: 't2', type: 'newLead', filters: WF_F0 }],
+    nodes: { n1: wfAct('n2'), n2: { kind: 'if_else', type: 'if_else', config: { branches: [{ id: 'b3', name: 'Yes', when: WF_F0 }], noneName: 'None' }, out: { b3: 'n4', none: null } },
+      n4: wfAct('n5'), n5: { kind: 'goto', type: 'goto', config: { target: 'n1' }, out: {} }, x7: wfAct('x8', { name: evil }), x8: wfAct() } };
+  const L = sb.wfLayoutAdvanced(D, { v: 1 }, reg), E = k => L.edges.find(e => e.key===k), mid = b => [b.x + b.w / 2, b.y + b.h / 2];
+  // the edge geometry the layout and a drag share
+  const g1 = sb.wfAdvEdgeGeom(L.nodes.n1, 0, 1, L.nodes.n2), gb = sb.wfAdvEdgeGeom(L.nodes.n5, 0, 1, L.nodes.n1);
+  assertEqual([g1.d===E('n1:next').d, g1.arrow===E('n1:next').arrow, g1.back, g1.low, E('n1:next').dot, E('n2:none').dot, gb.back, gb.d===E('n5:ref:target').d, gb.low > L.nodes.n1.y],
+    [true, true, false, null, [0, 1], [1, 2], true, true, true], 'wfAdvEdgeGeom: the layout\'s own lines (a dragged tile\'s lines are the same maths); each line knows its dot (port i of n)');
+  const acts = k => { const a = sb.wfEdgeActs(E(k)); return (a.add ? '+' : '') + (a.del ? 'x' : ''); };
+  const G = { ...D, triggers: [{ id: 't1', type: 'newLead', filters: WF_F0, goto: 'x7' }, D.triggers[1]] }, LG = sb.wfLayoutAdvanced(G, { v: 1 }, reg);
+  assertEqual([acts('n1:next'), acts('n2:b3'), acts('n2:none'), acts('n5:ref:target'), acts('trigger:t1'), sb.wfEdgeActs(LG.edges.find(e => e.key==='trigger:t1'))],
+    ['+x', '+x', '', '', '', { add: false, del: true }], 'a line\'s middle: "+" and trash on a step\'s line, only the trash on a trigger\'s own Go to, nothing on a "[+]" line, a Go to step\'s line or a trigger\'s Default Path');
+  // palette drops
+  const plus = L.plus.find(p => p.src==='n2'), m1 = E('n1:next').mid, drop = (x, y) => sb.wfAdvDrop(L, D, x, y);
+  const far = drop(5000, 5000);
+  assertEqual([drop(...mid(plus)), drop(m1[0] + 10, m1[1] - 10), drop(...mid(L.nodes.x8)), drop(...mid(L.nodes.n1)).kind, drop(...mid(L.nodes.n4)).why, drop(...mid(L.nodes.n5)).why, drop(...mid(L.triggers[0])).kind, far],
+    [{ kind: 'plus', slot: { src: 'n2', port: 'none' }, key: 'p:n2:none' }, { kind: 'edge', slot: { src: 'n1', port: 'next' }, key: 'm:n1:next' }, { kind: 'append', slot: { src: 'x8', port: 'next' }, key: 'n:x8' }, 'none',
+      'This step has a next step: drop on its line to put it in between', 'Nothing can follow this step', 'none', { kind: 'canvas', at: [5000, 5000] }],
+    'wfAdvDrop: a "[+]" → that place, a line\'s middle → in between, the last tile of a path → after it, another tile → why not, the empty canvas → a new group there');
+  const empty = sb.wfLayoutAdvanced(sb.wfNewDoc(), {}, reg);
+  assertEqual([sb.wfAdvDrop(empty, sb.wfNewDoc(), ...mid(empty.plus[0])).slot, sb.wfAdvPlusKey(empty.plus[0]), sb.wfAdvTileAt(L, ...mid(L.nodes.n4)), sb.wfAdvTileAt(L, L.triggers[1].x - 6, L.triggers[1].y), sb.wfAdvTileAt(L, 5000, 0)],
+    [{ src: '@entry', port: null }, 'p:@entry:', 'n:n4', 't:t2', null], 'an empty flow\'s "[+]" starts the flow; wfAdvTileAt (8 px of slack)');
+  // connect (drag or Connect mode) and delink, through the model's own edits
+  const c1 = sb.wfConnectDrop(D, { src: 'n4', port: 'next' }, 'x7', reg), c2 = sb.wfConnectDrop(D, { trigger: 't1' }, 'x8', reg), c3 = sb.wfConnectDrop(G, { trigger: 't1' }, 'n1', reg);
+  assertEqual([c1.doc.nodes.n4.out.next, sb.wfClusters(c1.doc).map(c => c.head), c2.doc.triggers[0].goto, 'goto' in c3.doc.triggers[0] ? c3.doc.triggers[0].goto : 'none', sb.wfConnectDrop(D, { src: 'n4', port: 'next' }, 'n1', reg).error.text,
+    sb.wfConnectDrop(D, { src: 'x8' }, 'n1', reg).error.text, sb.wfConnectDrop(D, { src: 'n2', port: 'none' }, 'x7', reg).doc.nodes.n2.out.none, D.nodes.n4.out.next],
+    ['x7', ['n1', 'n5'], 'x8', null, 'Loops are made with a Go to step', 'The first step can\'t have a step above it', 'x7', 'n5'],
+    'wfConnectDrop: a path to another step (1:1: what was there becomes a group of its own), a trigger\'s own Go to (to the first step = the Default Path), loops and the first step refused; the doc given is never changed');
+  const d1 = sb.wfEdgeDelink(D, E('n1:next'), reg), d2 = sb.wfEdgeDelink(G, LG.edges.find(e => e.key==='trigger:t1'), reg);
+  assertEqual([d1.doc.nodes.n1.out.next, sb.wfClusters(d1.doc).map(c => c.head), sb.wfLayoutAdvanced(d1.doc, { v: 1 }, reg).unreached, d2.doc.triggers[0].goto ?? null, sb.wfEdgeDelink(D, E('trigger:t1'), reg).error.text, sb.wfEdgeDelink(D, E('n5:ref:target'), reg).error.text],
+    [null, ['n1', 'n2', 'x7'], ['n2', 'x7'], null, 'A trigger always starts somewhere: drag its dot to another step', 'Change where a Go to goes in its step'],
+    'wfEdgeDelink: the trash on a step\'s line makes a group "Not connected"; on a trigger\'s Go to back to the Default Path; the other lines say why not');
+  // Connect mode's list
+  const rows = sb.wfConnectRows(D, reg, { src: 'n4', port: 'next' }), rt = sb.wfConnectRows(G, reg, { trigger: 't1' }), r2 = sb.wfConnectRows(D, reg, { trigger: 't2' });
+  assertEqual([rows.map(r => `${r.id}${r.now ? '*' : ''}${r.why ? `!${r.why}` : ''}`), rt.filter(r => r.now).map(r => r.id), r2.filter(r => r.now).map(r => r.id), rt.every(r => !r.why), rows.find(r => r.id==='x7').name],
+    [['n1!Loops are made with a Go to step', 'n2!Loops are made with a Go to step', 'n4!This step', 'n5*', 'x7', 'x8'], ['x7'], ['n1'], true, evil],
+    'wfConnectRows: every step in reading order with the model\'s own reason (loops, itself) and the one it goes to now; a trigger: its Go to, else the Default Path\'s first step');
+  const ch = sb.wfConnectHtml({ name: evil, ports: [{ port: 'b3', label: 'Yes' }, { port: 'none', label: evil }], port: 'b3', rows, canOff: true });
+  const th = sb.wfConnectHtml({ name: 'Contact created', trigger: true, rows: rt, canOff: true }), nh = sb.wfConnectHtml({ name: 'x', rows: [] });
+  assertEqual([/<img|onerror=alert\(1\)>/.test(ch), ch.includes('Connect &quot;&lt;img'), ch.includes('role="radiogroup" aria-label="From path"'), ch.includes('aria-checked="true"><span dir="auto">Yes</span>'), (ch.match(/aria-disabled="true"/g) || []).length,
+    ch.includes('data-why="Loops are made with a Go to step"'), ch.includes('<small>Now</small>'), ch.includes('data-act="cnOff">Disconnect'), th.includes('Start &quot;Contact created&quot; at…'), th.includes('Back to the Default Path'), th.includes('radiogroup'), nh.includes('No steps yet'), ch.includes('aria-modal="true"')],
+    [false, true, true, true, 4, true, true, true, true, true, false, true, true], 'Connect mode: "Connect … to…" / "Start … at…", the path to connect from, every step with its reason greyed, Now, Disconnect / Back to the Default Path; escaped');
+  // positions
+  const clip = { head: 'n1', layout: { adv: { n1: [100, 100], n2: [320, 160] } } }, idm = { n1: 'n10', n2: 'n11' };
+  assertEqual([sb.wfAdvMovePos({ a: [1.4, 2.6], b: [10, 10], c: 'x' }, ['b'], 5, -5), sb.wfAdvPlaced({ v: 1, stickies: [] }, { a: [1, 2] }, { z: [3.4, 4.6], q: 'bad' }), sb.wfAdvPasteAt(clip, idm, [0, 50]),
+    sb.wfAdvPasteAt({ head: 'n1', layout: {} }, idm, [7.6, 8]), sb.wfAdvPasteAt(clip, idm, null)],
+    [{ a: [1, 3], b: [15, 5] }, { v: 1, stickies: [], adv: { a: [1, 2], z: [3, 5] } }, { n10: [0, 50], n11: [220, 110] }, { n10: [8, 8] }, {}],
+    'positions: a move keeps every other tile where it is (all stored, rounded); a pasted group keeps its shape from where it is pasted');
+  const P = { ...sb.wfTidy(D, reg), n1: [500, 500], n2: [530, 900] };
+  assertEqual([sb.wfFormatSel(D, reg, P, ['n1', 'n2']), sb.wfFormatSel(D, reg, P, ['zz']), sb.wfFormatSel(D, reg, P, ['x7', 'x8'])],
+    [{ n1: [500, 500], n2: [720, 500] }, {}, { x7: [0, 358], x8: [220, 358] }], 'wfFormatSel: the selection tidied, its top-left corner kept');
+  // sticky notes: round tiles (a group), at a point, sizes kept in range, the group inside
+  const box = sb.wfAdvFoot(220, 55), s1 = sb.wfStickyAround({ v: 1 }, [box], null), s2 = sb.wfStickyAround(s1.layout, [], [10.4, 20]);
+  const k1 = sb.wfStickiesOf(s2.layout)[0], k2 = sb.wfStickiesOf(s2.layout)[1], B = sb.wfAdvStickyBoxes(s2.layout);
+  const tiles = { 'n:n2': L.nodes.n2, 'n:n1': L.nodes.n1, 't:t1': L.triggers[0] };
+  assertEqual([[k1.x, k1.y, k1.w, k1.h, k1.anchor], [k2.x, k2.y, k2.w, k2.h], B.map(b => b.id), sb.wfAdvInside(B[0], tiles), sb.wfStickyAround({ stickies: Array.from({ length: 50 }, (_, i) => ({ id: `k${i + 1}` })) }, [], null).error,
+    sb.wfStickiesOf(sb.wfStickySet(s2.layout, 'k1', { w: 10, h: 99999, x: 'a', y: null })).map(s => [s.x, s.y, s.w, s.h])[0], sb.wfAdvStickyBoxes({ stickies: [{ id: 'k1', w: 'x', hidden: false }, { id: 'k2', hidden: true }] })],
+    [[box.x - 28, box.y - 62, box.w + 56, box.h + 90, null], [10, 20, 240, 150], ['k1', 'k2'], ['n:n2'], 'At most 50 sticky notes', [box.x - 28, box.y - 62, 160, 4000],
+      [{ id: 'k1', x: 0, y: 0, w: 240, h: 150, color: 'yellow', title: '', body: '' }]],
+    'sticky notes (Advanced): one drawn round tiles holds them (its group), one at a point; sizes kept to 160–4000 × 90–4000; at most 50');
+  assertEqual([sb.wfStickyFmt('hello world', 0, 5, 'b'), sb.wfStickyFmt('', 0, 0, 'i'), sb.wfStickyFmt('a\nb', 0, 3, 'li'), sb.wfStickyFmt('x\n- y', 2, 5, 'li').text, sb.wfStickyFmt('go here', 3, 7, 'a'), sb.wfStickyFmt('ab', 1, 1, 'u').text, sb.wfStickyFmt('ab', 0, 2, 'zz')],
+    [{ text: '**hello** world', s: 2, e: 7 }, { text: '*text*', s: 1, e: 5 }, { text: '- a\n- b', s: 0, e: 7 }, 'x\n- y', { text: 'go [here](https://)', s: 10, e: 18 }, 'a__text__b', { text: 'ab', s: 0, e: 2 }],
+    'wfStickyFmt: bold / italic / underline wrap the selection (or "text"), list lines get "- " once, a link selects its address');
+  // the bulk bar
+  const b1 = sb.wfBulkToggle(D, ['n:n1', 'n:n2', 't:t1', 'n:zz'], reg), b2 = sb.wfBulkToggle(b1.doc, new Set(['n:n1', 't:t1']), reg);
+  assertEqual([[b1.enable, b1.n, b1.doc.nodes.n1.disabled, b1.doc.nodes.n2.disabled, b1.doc.triggers[0].disabled], [b2.enable, b2.n, 'disabled' in b2.doc.nodes.n1, b2.doc.triggers[0].disabled], sb.wfBulkToggle(D, ['n:n2'], reg).error.text, D.nodes.n1.disabled],
+    [[false, 2, true, undefined, true], [true, 2, false, false], 'A step with branches can\'t be paused', undefined], 'wfBulkToggle: pause the selection in one edit (a step with branches is left), resume when all are paused');
+  const items = sb.wfBulkItems({ n: 3, off: false, toggles: 2, steps: 2 }), bh = sb.wfBulkHtml(3, sb.wfBulkItems({ n: 3, ro: 'A System workflow: make a copy to change it', off: true, toggles: 1, steps: 0 }));
+  assertEqual([items.map(i => i.label + (i.why ? '!' : '')), sb.wfBulkItems({ off: true, toggles: 0, steps: 0 }).map(i => i.label + (i.why ? '!' : '')), bh.includes('3 selected'), (bh.match(/aria-disabled="true"/g) || []).length, bh.includes('Enable')],
+    [['Disable', 'Format selection', 'Add sticky note', 'Copy', 'Delete'], ['Enable!', 'Format selection', 'Add sticky note', 'Copy!', 'Delete'], true, 5, true],
+    'the bulk bar in GHL\'s words ("Enable/Disable", "Format selection", "Add sticky note") + Copy, Delete; greyed with the reason');
+  // Quick actions
+  const lab = m => m.items.map(i => i.label + (i.why ? '!' : ''));
+  const X = { ro: '', clip: true, hasId: true, hooks: { notes: true } };
+  assertEqual([lab(sb.wfPopItems({ kind: 'quick' }, { ...X, quick: { on: 'node', head: true, ports: 1 } })), lab(sb.wfPopItems({ kind: 'quick' }, { ...X, clip: false, quick: { on: 'node', entry: true, head: true, ports: 0 } })),
+    lab(sb.wfPopItems({ kind: 'quick' }, { ...X, quick: { on: 'node', multi: true, ports: 2 } })), sb.wfPopItems({ kind: 'quick' }, { ...X, quick: { on: 'node', ports: 1 } }).items.find(i => i.act==='qDefault').why,
+    lab(sb.wfPopItems({ kind: 'quick' }, { ...X, quick: { on: 'trigger', disabled: true } })), lab(sb.wfPopItems({ kind: 'quick' }, { ...X, clip: false, quick: { on: 'canvas' } })),
+    lab(sb.wfPopItems({ kind: 'quick' }, { ...X, ro: 'View only', quick: { on: 'canvas' } })), lab(sb.wfPopItems({ kind: 'stickyColor' }, { ...X, sticky: { color: 'blue' } })), sb.wfPopItems({ kind: 'stickyColor' }, { ...X, sticky: { color: 'blue' } }).items.filter(i => i.checked).map(i => i.act)],
+    [['Copy', 'Paste here', 'Duplicate', 'Disable', 'Set as Default Path', 'Add sticky note', 'Notes', 'Connect to…', 'Delete', 'Tidy up'], ['Copy', 'Paste here!', 'Duplicate', 'Disable', 'Set as Default Path!', 'Add sticky note', 'Notes', 'Connect to…!', 'Delete', 'Tidy up'],
+      ['Copy', 'Paste here', 'Duplicate', 'Disable!', 'Set as Default Path!', 'Add sticky note', 'Notes', 'Connect to…', 'Delete', 'Tidy up'], 'Only the first step of a group can be the Default Path',
+      ['Duplicate', 'Enable', 'Connect to…', 'Add sticky note', 'Delete', 'Tidy up'], ['Paste here!', 'Add sticky note', 'Tidy up'], ['Paste here!', 'Add sticky note!', 'Tidy up!'],
+      ['Yellow', 'Pink', 'Peach', 'Green', 'Blue', 'Purple', 'Edit note', 'Delete'], ['stc-blue']],
+    'Quick actions (right-click / long press): Copy, Paste here, Duplicate, Enable/Disable, Set as Default Path, Add sticky note, Notes, Connect to…, Delete, Tidy up — each greyed with its reason; the canvas\'s and a trigger\'s own; a sticky note\'s colours');
+  // the canvas items
+  const stick = sb.wfAdvStickyBoxes(sb.wfStickyAround({ v: 1 }, [sb.wfAdvFoot(0, 55)], null).layout), T = sb.wfA11yTree(D);
+  const C = sb.wfAdvCanvasItems(D, L, reg, {}, { at: T.at, seq: T.seq, issueOf: { 'n:n4': 'error' }, stickies: stick, notes: { n4: 2 } }), by = k => C.items.find(i => i.key===k), h = k => by(k).html();
+  const R = sb.wfAdvCanvasItems(D, L, reg, {}, { ro: true, stickies: stick });
+  assertEqual([C.items.map(i => i.key.split(':')[0]).filter((v, i, a) => a.indexOf(v)===i), C.items.filter(i => i.key.startsWith('p:')).map(i => i.key), C.items.filter(i => i.key.startsWith('m:')).map(i => i.key), C.edges.length===L.edges.length,
+    (h('n:n2').match(/data-act="dot"/g) || []).length, h('n:n2').includes('class="wfa-pl"') && h('n:n2').includes('>None</small>'), h('t:t1').includes('data-act="tdot"'), h('n:n1').includes('(Default Path)'), h('n:x7').includes('Not connected') && h('n:x7').includes('data-act="defPath"'),
+    h('n:n1').includes('data-act="defPath"'), /<img|onerror=alert\(1\)>/.test(h('n:x7')), by('n:x7').al.includes('Group 2 of 2.') && by('n:x7').al.includes('Not connected.'), by('n:n1').al.includes('Group 1 of 2 (Default Path).'), by('n:n4').cls.includes('iss-error') && h('n:n4').includes('Error'),
+    h('n:n4').includes('>2</span>'), by('n:n2').attrs.role, h('k:k1').includes('data-act="stSize"') && h('k:k1').includes('data-act="stColorMenu"'), C.items.findIndex(i => i.key==='k:k1') < C.items.findIndex(i => i.key==='n:n1')],
+    [['k', 't', 'n', 'p', 'm'], ['p:n2:none', 'p:x8:next'], ['m:n1:next', 'm:n2:b3', 'm:n4:next', 'm:x7:next'], true, 2, true, true, true, true, false, false, true, true, true, true, 'treeitem', true, true],
+    'wfAdvCanvasItems: sticky notes behind, then trigger and step tiles (a dot per path, tiny path labels, "(Default Path)", "Not connected" + the branch icon on another group\'s head), the "[+]"s and the line middles; escaped; groups said to screen readers');
+  assertEqual([R.items.some(i => /^[pm]:/.test(i.key)), R.items.find(i => i.key==='n:x7').html().includes('defPath'), R.items.find(i => i.key==='k:k1').html().includes('stSize'), R.items.find(i => i.key==='k:k1').html().includes('stColorMenu')],
+    [false, false, false, false], 'read-only: no "[+]", no line buttons, no Default Path icon, a sticky note can\'t be resized or recoloured');
+}
+
+function testWfAdvCanvasRuntime(){
+  console.log('\nWorkflow builder: the Advanced canvas painted, its gestures and Connect mode (stage 2 G5.2; fake DOM)');
+  const reg = wfRegFor(WF_AV_TODAY), S = wfShellSandbox(reg), { X, flush } = S, win = S.ctx.window, C = S.ctx, V = n => vm.runInContext(n, C);
+  const DOC = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }],
+    nodes: { n1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct(null), x7: wfAct('x8'), x8: wfAct(null) } };
+  X.wfBuilderOpen({ id: 'w9', name: 'Adv', enabled: false, definition: DOC, revision: 1, builder: 'advanced' }, {});
+  const W = S.W(), E = W.el;
+  const frames = flush();
+  assertEqual([frames, W.builder, [...E.map.keys()].filter(k => /^[tn]:/.test(k)).sort(), [...E.map.keys()].filter(k => /^[pm]:/.test(k)).sort(), E.paths.has('n1:next>'), E.paths.get('n1:next>').getAttribute('class'), E.selBtn.hidden, E.tidyBtn.hidden, E.ctl.classList.contains('is-adv'), E.bulk.hidden],
+    [1, 'advanced', ['n:n1', 'n:n2', 'n:n3', 'n:x7', 'n:x8', 't:t1'], ['m:n1:next', 'm:n2:next', 'm:x7:next', 'p:n3:next', 'p:x8:next'], true, 'is-arrow', false, false, true, true],
+    'open (Advanced): one paint draws the tiles, the "[+]"s, the line middles and the arrowheads; the Select tool and Tidy up show');
+  const p0 = win.__wfp;
+  for (let i = 0; i < 3; i++) flush();
+  assertEqual([win.__wfp - p0, S.raf.size], [0, 0], 'idle: no paint');
+  // a tile dragged: transforms and its lines only while moving, ONE commit at the end; a cancel puts it all back
+  const vp = { left: 0, top: 0, width: 1200, height: 800 }, v = W.view, at = (wx, wy) => [wx * v.k + v.x, wy * v.k + v.y];
+  const n2 = E.map.get('n:n2'), path = E.paths.get('n1:next'), d0 = path.getAttribute('d'), x0 = n2._x, st0 = { ...S.ctx.window };
+  const start = at(x0 + 36, n2._y + 36), g = { type: 'tiles', key: 'n:n2', sx: start[0], sy: start[1], rect: vp, v0: v, pid: 1 };
+  const p1 = win.__wfp, h0 = W.hist.past.length;
+  assertEqual(V('wfTilesBegin')(g), true, 'tiles: begin');
+  g.last = at(x0 + 136, n2._y + 36); V('wfTilesMove')(g);
+  const moving = [n2.style.transform, path.getAttribute('d')!==d0, E.map.get('m:n1:next').style.transform!==`translate(${E.map.get('m:n1:next')._x}px,${E.map.get('m:n1:next')._y}px)`, win.__wfp - p1, S.raf.size];
+  V('wfTilesEnd')(g, false);
+  const cancelled = [n2.style.transform, path.getAttribute('d')===d0, W.hist.past.length - h0];
+  V('wfTilesBegin')(g); g.last = at(x0 + 136, n2._y + 36); V('wfTilesMove')(g); V('wfTilesEnd')(g, true); flush();
+  assertEqual([moving, cancelled, W.hist.past.length - h0, W.layout.adv.n2, W.layout.adv.n1, n2._x, path.getAttribute('d')!==d0],
+    [[`translate(${x0 + 100}px,${n2._y}px)`, true, true, 0, 0], [`translate(${x0}px,${n2._y}px)`, true, 0], 1, [x0 + 100, n2._y], [E.map.get('n:n1')._x, E.map.get('n:n1')._y], x0 + 100, true],
+    'a tile dragged: only its transform, its lines and their middles change (no paint), Esc puts them back; letting go = one "Move step" with every position stored');
+  // drag-to-connect: on a tile → connected (1:1); on the empty canvas → the Actions picker for that path, the step placed there
+  const x8 = E.map.get('n:x8'), n3 = E.map.get('n:n3'), cs = at(x8._x + 72, x8._y + 36), c = { type: 'connect', from: { src: 'x8', port: 'next' }, sx: cs[0], sy: cs[1], rect: vp, v0: W.view, pid: 2 };
+  V('wfConnBegin')(c); c.last = at(n3._x + 30, n3._y + 30); V('wfConnMove')(c);
+  const hot = [n3.classList.contains('is-drop'), !!c.rubber.getAttribute('d')];
+  V('wfConnEnd')(c, true); flush();
+  assertEqual([hot, n3.classList.contains('is-drop'), W.doc.nodes.x8.out.next, W.doc.nodes.n2.out.next, W.hist.past[W.hist.past.length - 1].label], [[true, true], false, 'n3', null, 'Connect steps'],
+    'drag-to-connect: the tile under the pointer lights up; letting go connects (what was there before loses its line)');
+  const c2 = { type: 'connect', from: { src: 'n2', port: 'next' }, sx: cs[0], sy: cs[1], rect: vp, v0: W.view, pid: 3 };
+  V('wfConnBegin')(c2); c2.last = at(3000, 3000); V('wfConnMove')(c2); V('wfConnEnd')(c2, true); flush();
+  assertEqual([W.picker && W.picker.kind, W.picker && W.picker.slot, W.picker && W.picker.at], ['action', { src: 'n2', port: 'next' }, [3000 - 36, 3000 - 36]], 'dropped on the empty canvas: the Actions picker for that path, the new step to go there');
+  // a picker row dragged: onto a tile's empty path (append) → the drawer for that place; onto the canvas → a new group there
+  const rows = X.wfPickerFlat(X.wfPickerRowsNow(W, X.wfDerived())), i = rows.findIndex(r => r.type==='add_task' && !r.disabled);
+  const pg = { type: 'palette', i, sx: 0, sy: 0, rect: vp, v0: W.view, pid: 4 }, n2b = E.map.get('n:n2');
+  V('wfPalBegin')(pg); pg.last = at(n2b._x + 36, n2b._y + 36); pg.ev = { clientX: pg.last[0], clientY: pg.last[1] }; V('wfPalMove')(pg);
+  const lit = [pg.drop && pg.drop.kind, n2b.classList.contains('is-drop')];
+  V('wfPalEnd')(pg, true); flush();
+  const dr = W.drawer;
+  assertEqual([lit, dr && dr.isNew, dr && dr.slot, dr && dr.draft.type, dr && dr.detached, W.picker], [['append', true], true, { src: 'n2', port: 'next' }, 'add_task', false, null], 'a picker row dropped on the last tile of a path: the new step\'s drawer, after that tile');
+  X.wfDrawerAct('dCancel', { dataset: {} }); X.wfNavTop(); flush();
+  X.wfPicker('action', { src: 'n3', port: 'next' }); flush();
+  const pg2 = { type: 'palette', i, sx: 0, sy: 0, rect: vp, v0: W.view, pid: 5 };
+  const spot = [1190, 790], wspot = V('wfWorldAt')(...spot);
+  V('wfPalBegin')(pg2); pg2.last = spot; pg2.ev = { clientX: spot[0], clientY: spot[1] }; V('wfPalMove')(pg2);
+  const pd = pg2.drop && pg2.drop.kind;
+  V('wfPalEnd')(pg2, true); flush();
+  const dr2 = W.drawer;
+  assertEqual([pd, !!dr2], ['canvas', true], 'a picker row over the empty canvas');
+  dr2.draft.config = { ...dr2.draft.config, title: 'Follow up' }; dr2.dirty = true;
+  X.wfDrawerAct('dSave', { dataset: {} }); flush();
+  const made = Object.keys(W.doc.nodes).find(id => !DOC.nodes[id]);
+  assertEqual([dr2.detached, dr2.at, made && W.doc.nodes[made].config.title, made && Object.values(W.doc.nodes).some(n => Object.values(n.out || {}).includes(made)), made && W.layout.adv[made], W.doc.entry],
+    [true, [Math.round(wspot[0] - 36), Math.round(wspot[1] - 36)], 'Follow up', false, [Math.round(wspot[0] - 36), Math.round(wspot[1] - 36)], 'n1'], 'a picker row dropped on the empty canvas: saved as a group of its own, its tile where it was dropped');
+  // the marquee selects what it touches; two or more show the bulk bar; Enable/Disable as one edit
+  const mq = { type: 'marquee', sx: at(-100, -1000)[0], sy: at(-100, -1000)[1], rect: vp, v0: W.view, pid: 6 };
+  V('wfMarqBegin')(mq); mq.last = at(E.map.get('n:n2')._x + 10, 2000); V('wfMarqMove')(mq); V('wfMarqEnd')(mq, true); flush();
+  const sel = [...W.sel].sort();
+  assertEqual([sel.includes('n:n1') && sel.includes('n:n2') && !sel.includes('n:n3'), E.bulk.hidden, E.bulk.innerHTML.includes(`${sel.length} selected`), E.bulk.innerHTML.includes('Format selection')], [true, false, true, true], 'marquee → the selection; the bulk bar says how many');
+  V('WF_ADV_ACTS').bulkToggle(W); flush();
+  assertEqual([W.doc.nodes.n1.disabled, W.doc.nodes.n2.disabled, E.bulk.innerHTML.includes('Enable'), W.hist.past[W.hist.past.length - 1].label], [true, true, true, 'Disable selected'], 'bulk Enable/Disable: one edit, the bar then offers Enable');
+  // Tidy up (one undo entry), Set as Default Path, Quick actions on the canvas, Connect mode
+  const hT = W.hist.past.length;
+  V('wfTidyUp')(); flush();
+  assertEqual([W.hist.past.length - hT, Object.keys(X.wfDerived().layout.pos).every(id => JSON.stringify(W.layout.adv[id])===JSON.stringify(X.wfDerived().layout.pos[id])) && Object.keys(W.layout.adv).length===Object.keys(X.wfDerived().layout.pos).length, W.hist.past[W.hist.past.length - 1].label], [1, true, 'Tidy up'], 'Tidy up: every tile at its tidy place, one undo entry');
+  V('wfQuickOpen')('n:x7', 300, 300); flush();
+  assertEqual([W.menu && W.menu.kind, W.menu && W.menu.on, E.modal.innerHTML.includes('Set as Default Path') && E.modal.innerHTML.includes('Connect to…')], ['quick', 'node', true], 'Quick actions on a tile');
+  X.WF_ACTS.menuClose(W);
+  V('wfSetDefaultPath')('x7'); flush();
+  assertEqual([W.doc.entry, X.wfDerived().layout.edges.find(e => e.key==='trigger:t1').to], ['x7', 'x7'], 'Set as Default Path: the trigger without a Go to now starts there');
+  V('wfConnectOpen')({ trigger: 't1' }); flush();
+  const cm = E.modal.innerHTML;
+  V('WF_ADV_ACTS').cnTo(W, { dataset: { id: 'n3' } }); flush();
+  assertEqual([cm.includes('Start'), cm.includes('data-act="cnTo" data-id="n1"'), W.dialog, W.doc.triggers[0].goto], [true, true, null, 'n3'], 'Connect mode (a trigger): pick the step it starts at from a list');
+  V('wfConnectOpen')({ src: 'n1' }); flush();
+  V('WF_ADV_ACTS').cnOff(W); flush();
+  assertEqual([W.doc.nodes.n1.out.next, X.wfDerived().layout.unreached.includes('n2')], [null, true], 'Connect mode: Disconnect makes the rest a group "Not connected"');
+  // sticky notes: one round a tile (its group), its band dragged moves the tile too (Alt: alone)
+  W.sel = new Set(['n:n3']); V('wfAdvStickyNew')(['n3'], null); flush();
+  const sk = X.wfStickiesOf(W.layout)[0], skEl = E.map.get(`k:${sk.id}`), n3x = W.layout.adv.n3 || X.wfDerived().layout.pos.n3;
+  const sg = { type: 'sticky', sid: sk.id, alt: false, sx: 100, sy: 100, rect: vp, v0: W.view, pid: 7 };
+  V('wfStickyDragBegin')(sg); sg.last = [100 + 50 * W.view.k, 100]; V('wfStickyDragMove')(sg); V('wfStickyDragEnd')(sg, true); flush();
+  const sk2 = X.wfStickiesOf(W.layout)[0];
+  assertEqual([!!skEl, sk.anchor, sg.keys, sk2.x - sk.x, W.layout.adv.n3[0] - n3x[0], W.hist.past[W.hist.past.length - 1].label], [true, null, ['n:n3'], 50, 50, 'Move sticky note and its steps'],
+    'a sticky note round a tile: dragging its title band moves the tile with it (one commit)');
+  const sa = { type: 'sticky', sid: sk.id, alt: true, sx: 100, sy: 100, rect: vp, v0: W.view, pid: 8 };
+  V('wfStickyDragBegin')(sa); sa.last = [100, 100 + 30 * W.view.k]; V('wfStickyDragMove')(sa); V('wfStickyDragEnd')(sa, true); flush();
+  assertEqual([X.wfStickiesOf(W.layout)[0].y - sk2.y, sa.keys], [30, []], 'Alt-drag moves the note alone');
+  assertEqual([S.renders(), win.__wfPaintReentry || 0], [0, 0], 'the Advanced canvas never drew the app, never asked for a paint while painting');
+}
 
 // ── Stage 4: page history, back closes windows first, the edge swipe, deep-link fallback ──
 function testPageHistory(sb){
@@ -6970,8 +7248,8 @@ function testPageHistory(sb){
     /[^A-Za-z]render\(/.test(T('navAfterRender')), /\{\n  if \(!NAV_HIST\.ready \|\| NAV_HIST\.restoring\) return;/.test(T('navPush')), T('navStay').includes('pushState'),
     r.startsWith('function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; }'), r.trim().endsWith('navAfterRender(profile);\n}'),
     script.includes('NAV_BASE_KINDS.forEach(k => { NAV_RESTORERS[k] = navRestoreView; });'), /NAV_RESTORERS(\.|\[')(wf|auto)/i.test(script), sb.NAV_BASE_KINDS,
-    /navLayer\(\{ id: '(wf|auto)/i.test(script), /id: '(wf|auto)/i.test(T('NAV_LAYERS'))],
-    [[], [], false, true, false, true, true, true, false, ['tab', 'settings', 'connector', 'panel'], false, false], 'no loops: popstate and the restorer never push; a restore draws once; no automation kinds or layers registered here');
+    /navLayer\(\{ id: '(wf|auto)/i.test(script), /id: '(wf|auto)/i.test(T('NAV_LAYERS')), /NAV_RESTORERS(\.|\[')(wf|auto)|navLayer\(\{ id: '(wf|auto)/i.test(script.replace(T('wfNavWire'), ''))],
+    [[], [], false, true, false, true, true, true, true, ['tab', 'settings', 'connector', 'panel'], true, false, false], 'no loops: popstate and the restorer never push; a restore draws once; stage 4 names no automation kind or layer (the builder registers its own in wfNavWire, G5.3)');
   // the entry functions: one entry each, after the change and before the redraw; pinned texts unchanged
   const goTabT = T('goTab'), ssp = T('setSettingsPage');
   assertEqual([goTabT.indexOf("navPush({ kind: 'tab' })") > goTabT.indexOf('PANEL_OPEN_FOR = {}') && goTabT.indexOf("navPush({ kind: 'tab' })") < goTabT.indexOf('render()'),
@@ -8587,6 +8865,265 @@ async function testWfReviewRound2(){
   }
 }
 
+// ── Stage 2, phase 5 · G5.3: switching builders (Standard ↔ Advanced), the blockers list, sticky notes re-anchored, the
+// Global "Default builder", the page history (stage 4) and the lead's "Assigned to" greying (vacationPickerInfo) ──
+function testWfSwitchPure(sb){
+  console.log('\nWorkflow builder: switching builders, the blockers list, sticky notes re-anchored, Default builder (stage 2, phase 5 · G5.3)');
+  const reg = wfRegFor(WF_AV_TODAY), clone = o => JSON.parse(JSON.stringify(o));
+  const DS = { schema: 2, seq: 4, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }], nodes: { n1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct(null) } };
+  const st = (id, x) => ({ id, x: 24, y: 0, w: 240, h: 150, color: 'yellow', title: '', body: '', anchor: null, hidden: false, ...x });
+  // Standard → Advanced: every position stored (tidied when none is), a pinned note never placed goes in the lane at its step
+  const L0 = { v: 1, stickies: [st('k1', { anchor: 'n2' }), st('k2', { anchor: 'n3', x: 900, y: 40 }), st('k3')] }, L0c = clone(L0);
+  const P = sb.wfSwitchPlan(DS, L0, reg, 'advanced'), A0 = sb.wfLayoutAdvanced(DS, L0, reg), lane = sb.wfStickyBoxes(L0, A0).find(b => b.id==='k1');
+  const S1 = sb.wfStickiesOf(P.layout);
+  const byKey = o => Object.fromEntries(Object.keys(o).sort().map(k => [k, o[k]]));
+  assertEqual([P.builder, P.blockers, byKey(P.layout.adv), S1.map(s => [s.id, s.x, s.y, s.anchor]), lane.x === A0.bounds.x + A0.bounds.w + 48, JSON.stringify(L0)===JSON.stringify(L0c)],
+    ['advanced', [], byKey(sb.wfTidy(DS, reg)), [['k1', lane.x, lane.y, 'n2'], ['k2', 900, 40, 'n3'], ['k3', 24, 0, null]], true, true],
+    'to Advanced: no stored position → the whole flow tidied and stored; a note pinned to a step and never placed goes in the lane right of the flow; a placed note and a free one stay; the given layout unchanged');
+  const P2 = sb.wfSwitchPlan(DS, { v: 1, adv: { n2: [500, 300] } }, reg, 'advanced');
+  assertEqual([P2.layout.adv.n2, Object.keys(P2.layout.adv).sort(), P2.layout.stickies], [[500, 300], ['n1', 'n2', 'n3', 't1'], undefined],
+    'to Advanced: a stored position is kept, the missing ones are stored where the Advanced layout draws them; no notes → no notes list written');
+  // Advanced → Standard: refused while anything Advanced-only is left (nothing changed); else free notes pinned to the nearest step
+  const DB = { ...DS, seq: 9, triggers: [{ id: 't1', type: 'newLead', filters: WF_F0, goto: 'n2' }], nodes: { ...DS.nodes, x7: wfAct('x8'), x8: wfAct(null) } }, LB = { v: 1, adv: {} };
+  const R = sb.wfSwitchPlan(DB, LB, reg, 'standard');
+  assertEqual([R.builder, R.blockers.map(b => b.code + ':' + (b.triggerId || b.nodeId || '')), R.layout===LB], ['advanced', ['trigger_goto:t1', 'delinked:x7', 'delinked:x8'], true],
+    'to Standard with a trigger\'s own Go to and steps not connected: refused, the blockers listed, the layout untouched');
+  const T = sb.wfTidy(DS, reg), Lf = { v: 1, adv: T, stickies: [st('f1', { x: T.n3[0], y: T.n3[1] + 120 }), st('f2', { x: T.n1[0] - 60, y: T.n1[1], anchor: 'gone' }), st('f3', { anchor: 'n2', x: 4000, y: 4000 })] };
+  const Q = sb.wfSwitchPlan(DS, Lf, reg, 'standard');
+  assertEqual([Q.builder, Q.blockers, sb.wfStickiesOf(Q.layout).map(s => s.id + ':' + s.anchor + '@' + s.x + ',' + s.y), Q.layout.adv===T, sb.wfStickiesOf(Lf).map(s => s.anchor)],
+    ['standard', [], [`f1:n3@${T.n3[0]},${T.n3[1] + 120}`, `f2:n1@${T.n1[0] - 60},${T.n1[1]}`, 'f3:n2@4000,4000'], true, [null, 'gone', 'n2']],
+    'to Standard: a free note is pinned to the step nearest it, a note whose step went too; a pinned one keeps its step; positions kept for switching back; the given layout unchanged');
+  const Le = { v: 1, stickies: [st('k1')] };
+  assertEqual([sb.wfSwitchPlan(sb.wfNewDoc(), Le, reg, 'standard').layout===Le, sb.wfSwitchPlan(DS, { v: 1, adv: T }, reg, 'standard').layout.stickies],
+    [true, undefined], 'to Standard: no step at all → the note stays free (layout untouched); no notes → nothing written');
+  assertEqual([sb.wfStickyNearest({ x: 0, y: 0, w: 10, h: 10 }, { a: { x: 10, y: 0, w: 10, h: 10 }, b: { x: -10, y: 0, w: 10, h: 10 }, c: { x: 100, y: 0, w: 10, h: 10 } }), sb.wfStickyNearest({ x: 95, y: 0, w: 10, h: 10 }, { a: { x: 0, y: 0, w: 10, h: 10 }, c: { x: 100, y: 0, w: 10, h: 10 } }),
+    sb.wfStickyNearest({ x: 0, y: 0, w: 1, h: 1 }, {}), sb.wfStickyNearest(null, null)], ['a', 'c', null, null], 'wfStickyNearest: centre to centre, the first on a tie; none → null');
+  // the blockers list: one row per trigger, the Default Path, one per group not connected (its first step + how many more); escaped
+  const DX = { ...DB, entry: 'n2', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0, goto: 'x7', name: 'Web <b>form</b>' }], nodes: { ...DB.nodes, x7: { ...wfAct('x8'), name: '<img src=x onerror=alert(1)>' } } };
+  const rows = sb.wfBlockerRows(DX, sb.wfStandardBlockers(DX), reg), H = sb.wfBlockersHtml(rows);
+  assertEqual([rows.map(r => r.key), rows[0].text, rows[1].text, rows[2].text, rows.find(r => r.key==='n:n1') && rows.find(r => r.key==='n:n1').text],
+    [['t:t1', 'n:n2', 'n:n1', 'n:x7'], 'Trigger "Web <b>form</b>" goes to a step of its own', 'The Default Path starts in the middle of a path ("Add task")', '"Add task": not connected', '"Add task": not connected'],
+    'wfBlockerRows: a trigger\'s own Go to, a Default Path inside a path, each group not connected');
+  assertEqual(sb.wfBlockerRows(DB, sb.wfStandardBlockers(DB), reg).map(r => r.key + ' ' + r.text), [`t:t1 Trigger "${sb.wfTrigEntry(reg, 'newLead').label}" goes to a step of its own`, 'n:x7 "Add task" and 1 more step after it: not connected'],
+    'wfBlockerRows: a group of two not connected is one row ("and 1 more step after it"); the trigger by its type\'s label');
+  assertEqual(sb.wfBlockerRows({ ...DS, entry: null }, [{ code: 'entry_not_head' }], reg), [{ key: '', text: 'No step is the Default Path', fix: 'Set the first step of a group as the Default Path' }], 'wfBlockerRows: no Default Path → a row without "Show"');
+  assertEqual([H.includes('Remove these first to switch to the Standard builder'), (H.match(/data-act="blkShow"/g) || []).length, H.includes('data-key="t:t1"'), /<img|<b>form/.test(H), H.includes('&lt;img src=x onerror=alert(1)&gt;'), H.includes('role="dialog"'), H.includes('data-act="dlgClose"'), /onclick|onchange/.test(H)],
+    [true, 4, true, false, true, true, true, false], 'wfBlockersHtml: the GHL question, "Show" per row, everything escaped, a dialog with Close, no inline handlers');
+  // the builder ▾: the one in use ticked; the other one works (read-only modes say why)
+  const it = (x, k) => sb.wfPopItems({ kind: k || 'builder' }, x).items.filter(i => /^builder/.test(i.act)).map(i => `${i.act}:${!!i.checked}:${i.why}`);
+  assertEqual([it({ builder: 'standard', hooks: {} }), it({ builder: 'advanced', hooks: {} }), it({ builder: 'advanced', ro: 'View only', hooks: {} }), it({ builder: 'standard', hooks: {} }, 'more')],
+    [['builderStd:true:', 'builderAdv:false:'], ['builderStd:false:', 'builderAdv:true:'], ['builderStd:false:View only', 'builderAdv:true:'], ['builderStd:true:', 'builderAdv:false:']],
+    'Builder ▾ (and the phone\'s ⋯): the one in use ticked, the other one available (a read-only mode says why)');
+  assertEqual([sb.wfDefaultBuilder({ default_builder: 'advanced' }), sb.wfDefaultBuilder({ default_builder: 'standard' }), sb.wfDefaultBuilder(null), sb.wfDefaultBuilder({ default_builder: 'x' })], ['advanced', 'standard', 'standard', 'standard'],
+    'wfDefaultBuilder: Global Workflow Settings\' choice; Standard until it is read');
+  const A = { safetyLoaded: true, safetyError: '', safety: { error_notify: {}, default_builder: 'advanced' } }, bl = sb.wfBuilderCardHtml(A, null), bd = sb.wfBuilderCardHtml(A, 'standard');
+  assertEqual([/value="advanced" checked\s+onchange/.test(bl), /value="advanced"[^>]*disabled/.test(bl), bl.includes('Coming with the Advanced builder'), /class="btn small primary" disabled/.test(bl), /value="standard" checked/.test(bd), /class="btn small primary"\s+onclick="wfBuilderSave\(\)"/.test(bd)],
+    [true, false, false, true, true, true], 'Global "Default builder": Advanced can be chosen (no longer greyed) and saved; Save wakes when the choice changes');
+  // the lead's "Assigned to": who a login is on the vacations, the same rule as vacationForProfile
+  const SYD = 'Australia/Sydney', emps = [{ id: 'e1', name: 'Ann Smith', status: 'Active' }], vac = { id: 'v1', employeeId: 'e1', employeeName: 'Ann Smith', startsOn: '2026-10-20', endsOn: '2026-10-24', options: { notAssignable: true }, endedAt: null, cancelledAt: null };
+  assertEqual([sb.vacationProfileWho([vac], { id: 'p1', fullName: 'Ann Smith' }, emps), sb.vacationProfileWho([vac], { id: 'p9', fullName: 'Zed' }, emps), sb.vacationProfileWho([{ employeeName: 'Ann T' }], { technicianName: 'Ann T', fullName: 'Ann Smith' }, []),
+    sb.vacationProfileWho([], { technicianName: 'Ann T', fullName: 'Ann Smith' }, []), sb.vacationProfileWho([], null, emps), sb.vacationForProfile([vac], { fullName: 'Ann Smith' }, '2026-10-21', SYD, 'notAssignable', emps)===vac],
+    [{ id: 'e1', name: 'Ann Smith' }, null, 'Ann T', 'Ann Smith', null, true], 'vacationProfileWho: the employee card of a login (else its Jobs & Commissions name when a row carries it, else its full name); vacationForProfile unchanged');
+}
+
+// The fake-DOM run: Standard → Advanced (one paint, new tiles, one undo entry, fit), undo / redo, Advanced → Standard refused
+// with the blockers dialog and "Show", then allowed with a free note pinned; the page history through wfNavHooks (stubs of
+// stage 4's API): the entry, the layers (z 210 / 220 / 230; back closes the builder's own top one), the leaver (Save /
+// Discard / Cancel), the restorer, an in-app close going back to the entry under it, a new one's first Save.
+async function testWfSwitchRuntime(){
+  console.log('\nWorkflow builder: switching both ways, the blockers dialog, the page history (stage 2 G5.3; fake DOM)');
+  const N = { push: [], replace: [], back: [], timers: [], layers: [], backOk: true }, edits = [];
+  const nav = { NAV_HIST: { ready: true, restoring: false }, NAV_LEAVERS: {}, NAV_RESTORERS: {}, history: { state: null }, navOurs: s => !!s && s.nav===1, navSnap: () => ({ tab: 'settings', sp: 'automation' }),
+    navPush: s => { N.push.push(s); }, navReplace: s => { N.replace.push(s); }, navBackTo: n => { N.back.push(n); return N.backOk; }, navOverlaySync: () => {}, navLayer: d => { N.layers.push(d); return d; },
+    setTimeout: f => { N.timers.push(f); return 0; }, __edits: edits };
+  const reg = wfRegFor(WF_AV_TODAY), S = wfShellSandbox(reg, { ctx: nav }), { X, flush } = S, C = S.ctx, V = n => vm.runInContext(n, C);
+  vm.runInContext('wfEdit = k => { __edits.push(k); }', C);
+  const syncs = () => { const n = N.timers.filter(f => f===C.navOverlaySync).length; N.timers.length = 0; return n; };
+  V('wfNavWire')();
+  assertEqual([N.layers.map(l => `${l.id}:${l.z}`), C.NAV_LEAVERS.wf===V('wfNavLeave'), C.NAV_RESTORERS.wf===V('wfNavRestore'), N.layers.some(l => l.isOpen())],
+    [['wf-modal:210', 'wf-drawer:220', 'wf-picker:230'], true, true, false], 'wfNavWire: the builder\'s layers by stage 4\'s z (dialogs 210, drawers 220, pickers 230), its leaver and restorer; closed → none open');
+  const DS = { schema: 2, seq: 4, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }], nodes: { n1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct(null) } };
+  X.wfBuilderOpen({ id: 'w9', name: 'Switch', enabled: true, definition: DS, revision: 1, builder: 'standard' }, {});
+  const W = S.W(), E = W.el;
+  flush();
+  assertEqual([N.push, W.builder, E.drawnFor], [[{ kind: 'wf', x: { id: 'w9' } }], 'standard', 'standard'], 'open: an entry of its own ({ kind: "wf", x: { id } })');
+  // Standard → Advanced from the builder ▾
+  const card = E.map.get('n:n1'), p0 = C.window.__wfp;
+  V('WF_POP_ACTS').builderAdv(W);
+  const frames = flush(), last = W.hist.past[W.hist.past.length - 1];
+  assertEqual([W.builder, frames, C.window.__wfp - p0, W.hist.past.length, last.label, Object.keys(W.layout.adv).sort(), E.map.get('n:n1')!==card, E.map.get('n:n1').classList.contains('wfa-tile'), E.drawnFor, W.status, E.ctl.classList.contains('is-adv'), !!W.view],
+    ['advanced', 1, 1, 1, 'Switch to the Advanced builder', ['n1', 'n2', 'n3', 't1'], true, true, 'advanced', 'published', true, true],
+    'Standard → Advanced: one undo entry ("Switch to the Advanced builder") storing every position, ONE paint with new tiles (no Standard card reused), Published stays Published');
+  const pop = V('wfPopItems')({ kind: 'builder' }, V('wfPopCtx')(W, X.wfDerived())).items.map(i => `${i.act}:${!!i.checked}`);
+  X.wfUndoRedo(-1); flush();
+  const undone = [W.builder, E.drawnFor, W.layout.adv];
+  X.wfUndoRedo(1); flush();
+  assertEqual([pop, undone, W.builder, E.drawnFor], [['builderStd:false', 'builderAdv:true'], ['standard', 'standard', undefined], 'advanced', 'advanced'], 'the ▾ ticks Advanced; undo goes back to the Standard builder, redo to the Advanced');
+  // Advanced → Standard: refused while a trigger has its own Go to and a step is not connected
+  X.wfCommit('Advanced only', w => ({ doc: { ...w.doc, seq: 8, triggers: [{ ...w.doc.triggers[0], goto: 'x7' }], nodes: { ...w.doc.nodes, x7: wfAct(null) } } })); flush();
+  const h1 = W.hist.past.length; syncs();
+  V('WF_POP_ACTS').builderStd(W); flush();
+  const L = N.layers.find(l => l.id==='wf-modal');
+  assertEqual([W.builder, W.hist.past.length - h1, W.dialog && W.dialog.kind, W.dialog && W.dialog.rows.map(r => r.key), E.modal.innerHTML.includes('Remove these first to switch to the Standard builder'), (E.modal.innerHTML.match(/data-act="blkShow"/g) || []).length, L.isOpen(), syncs() > 0],
+    ['advanced', 0, 'blockers', ['t:t1', 'n:x7'], true, 2, true, true], 'Advanced → Standard with Advanced-only parts: nothing changes, the dialog lists them with "Show" (a layer: its entry follows)');
+  V('WF_ADV_ACTS').blkShow(W, { dataset: { key: 'n:x7' } }); flush();
+  assertEqual([W.dialog, [...W.sel], W.focus, L.isOpen()], [null, ['n:x7'], 'n:x7', false], '"Show": the dialog closes, that step is selected and brought into view');
+  V('WF_ADV_ACTS').blkShow(W, { dataset: { key: 'n:<x>' } });
+  X.wfUndoRedo(-1); flush();
+  // a free sticky note near n3 is pinned to it on the way to Standard (one undo entry)
+  const n3 = X.wfDerived().layout.nodes.n3;
+  X.wfCommit('Add sticky note', w => ({ layout: { ...w.layout, stickies: [{ id: 'k1', x: n3.x, y: n3.y + 120, w: 240, h: 150, color: 'yellow', title: '', body: 'Call first', anchor: null, hidden: false }] } })); flush();
+  const h2 = W.hist.past.length;
+  V('WF_POP_ACTS').builderStd(W); flush();
+  assertEqual([W.builder, W.hist.past.length - h2, W.hist.past[W.hist.past.length - 1].label, X.wfStickiesOf(W.layout)[0].anchor, E.drawnFor, W.dialog], ['standard', 1, 'Switch to the Standard builder', 'n3', 'standard', null],
+    'Advanced → Standard with nothing Advanced-only: one undo entry; the free sticky note is pinned to the step nearest it');
+  V('wfSwitchBuilder')('standard');
+  assertEqual(W.hist.past.length - h2, 1, 'switching to the builder in use does nothing');
+  // the layers: back closes the builder's own top one (a menu before the side panel), false while one is left that it asked about
+  const LD = N.layers.find(l => l.id==='wf-drawer'), LP = N.layers.find(l => l.id==='wf-picker');
+  V('wfSetLayer')('rail', 'stickies'); V('wfSetLayer')('menu', { kind: 'builder', x: 0, y: 0 });
+  const both = [L.isOpen(), LD.isOpen(), LP.isOpen()], r1 = LD.close();
+  const after1 = [W.menu, W.rail], r2 = LD.close();
+  assertEqual([both, r1, after1, r2, W.rail, LD.isOpen(), syncs() >= 3], [[true, true, false], undefined, [null, 'stickies'], undefined, null, false, true],
+    'back on the side panel\'s layer with a menu over it: the menu closes first, then the panel (one layer each back)');
+  // the leaver: unsaved → Save / Discard / Cancel; Cancel (or back on the question) stays, Discard leaves
+  const pr = C.NAV_LEAVERS.wf({ kind: 'wf' }, { kind: 'tab' });
+  const asked = [typeof (pr && pr.then), W.dialog && W.dialog.kind];
+  X.WF_ACTS.dlgClose(W);
+  const r3 = await pr;
+  const pr2 = C.NAV_LEAVERS.wf({ kind: 'wf' }, { kind: 'tab' }), r0 = S.renders();
+  X.WF_RAIL_ACTS.leaveDiscard(W);
+  const r4 = await pr2;
+  assertEqual([asked, r3, r4, S.W(), S.renders() - r0, N.back.length, N.replace.length], [['function', 'leave'], false, true, null, 1, 0, 0],
+    'leaving with unsaved changes asks (a Promise): Cancel → stays (false); Discard → closes and draws the page once, true (the history is stage 4\'s to move)');
+  X.wfBuilderOpen({ id: 'w9', name: 'Switch', enabled: false, definition: DS, revision: 1 }, {}); flush();
+  assertEqual([C.NAV_LEAVERS.wf({ kind: 'wf' }, { kind: 'tab' }), S.W()], [true, null], 'leaving with nothing unsaved: closes and goes on');
+  // the restorer: back / forward onto a builder entry opens that workflow again; a new one opens empty in the default builder
+  C.NAV_RESTORERS.wf({ kind: 'wf', x: { id: 'w9' } });
+  C.AUTO.safety = { default_builder: 'advanced' };
+  C.NAV_RESTORERS.wf({ kind: 'wf', x: { id: null } });
+  const fresh = S.W();
+  assertEqual([edits, fresh && fresh.id, fresh && fresh.builder, fresh && fresh.base.builder], [['w9'], null, 'advanced', 'advanced'], 'restore: a saved one opens again (wfEdit); a new one opens empty in Global Workflow Settings\' default builder (not counted as a change)');
+  X.wfBuilderOpen({ id: 'w9', name: 'Switch', enabled: false, definition: DS, revision: 1 }, {}); flush();
+  const same = S.W();
+  assertEqual([C.NAV_RESTORERS.wf({ kind: 'wf', x: { id: 'w9' } }), S.W()===same, edits.length, N.back.length], [true, true, 1, 0], 'restore onto the workflow already open: nothing reopens; another workflow opening never moves the history back');
+  // closing in the app (← Workflows list) goes back to the entry under it; a layer's entry on top: back over both; none under: in place
+  C.history.state = { nav: 1, kind: 'wf', x: { id: 'w9' }, pk: 'P' };
+  X.WF_ACTS.back(same);
+  const b1 = [S.W(), N.back.slice(-1)[0], N.replace.length];
+  X.wfBuilderOpen({ id: 'w9', name: 'Switch', enabled: false, definition: DS, revision: 1 }, {}); N.backOk = false; X.WF_ACTS.back(S.W());
+  const b2 = N.replace.slice(-1)[0];
+  X.wfBuilderOpen({ id: 'w9', name: 'Switch', enabled: false, definition: DS, revision: 1 }, {}); C.history.state = { nav: 1, kind: 'wf', x: { id: 'w9' }, ov: 1 }; const np = N.push.length; X.WF_ACTS.back(S.W());
+  assertEqual([b1, b2, N.push.slice(np)], [[null, { tab: 'settings', sp: 'automation', kind: 'tab' }, 0], { kind: 'tab' }, [{ kind: 'tab' }]],
+    'closed in the app: back to the page\'s entry under it (navBackTo); none under it → the entry becomes the page; over a layer\'s entry → navPush goes back over both');
+  // a new one's first Save: its entry gets the id in place
+  C.history.state = { nav: 1, kind: 'wf', x: { id: null } };
+  X.wfNavHooks.saved('w10');
+  C.history.state = { nav: 1, kind: 'wf', x: { id: 'w9' } };
+  X.wfNavHooks.saved('w11');
+  assertEqual(N.replace.slice(-1), [{ kind: 'wf', x: { id: 'w10' } }], 'a new workflow\'s first Save: its entry gets the id (replaced, no new entry); a saved one\'s entry is left alone');
+  C.NAV_HIST.ready = false; const np2 = N.push.length;
+  X.wfBuilderOpen({ id: 'w12', name: 'X', enabled: false, definition: DS, revision: 1 }, {});
+  assertEqual(N.push.length - np2, 0, 'before stage 4 has started the history: the builder does not touch it');
+  if (S.W()) X.wfBuilderClose({ nav: false });
+}
+
+// The lead's "Assigned to" picker greys people away with "Not assignable" exactly as the other assign pickers do
+// (vacationPickerInfo's label, the vac-off class), and its handler's id is escaped.
+function testLeadAssigneeGrey(){
+  console.log('\nThe lead\'s "Assigned to" picker greys people on vacation (stage 2 handoff §2 item 4)');
+  const sb = wfSb(), html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1], SYD = 'Australia/Sydney', day = '2026-10-21';
+  const employees = [{ id: 'e1', name: 'Ann Smith', status: 'Active' }, { id: 'e2', name: 'Bob Lee', status: 'Active' }], profiles = [{ id: 'p1', fullName: 'Ann Smith' }, { id: 'p2', fullName: 'Bob Lee', role: 'owner' }];
+  const vac = { id: 'v1', employeeId: 'e1', employeeName: 'Ann Smith', startsOn: '2026-10-20', endsOn: '2026-10-24', options: { notAssignable: true }, endedAt: null, cancelledAt: null };
+  vm.runInContext(extractDecl(script, 'leadAssigneeControl'), sb);
+  Object.assign(sb, { ASSIGNEE_READY: true, getCurrentProfile: () => profiles[1], teamPeople: () => profiles.map(p => ({ id: p.id, fullName: p.fullName })), todayStr: () => day, bizTz: () => SYD });
+  sb.STATE.data = { ...sb.STATE.data, vacations: [vac], employees }; sb.STATE.profiles = profiles;
+  const h = sb.leadAssigneeControl({ id: "l'1", assignedUserId: null }), lbl = sb.vacationPickerInfo([vac], { id: 'e1', name: 'Ann Smith' }, day, SYD).label;
+  sb.STATE.data = { ...sb.STATE.data, vacations: [{ ...vac, options: {} }] };
+  const h2 = sb.leadAssigneeControl({ id: 'l2', assignedUserId: 'p1' });
+  assertEqual([h.includes(`<option value="p1"   class="vac-off">Ann Smith · ${lbl}</option>`), h.includes('<option value="p2"  >Bob Lee (me)</option>'), h.includes(`setLeadAssignee('${sb.esc(sb.jsStr("l'1"))}', this.value)`), lbl, h2.includes('vac-off'), h2.includes('<option value="p1" selected >Ann Smith</option>')],
+    [true, true, true, sb.vacationUntilText(vac, day, SYD), false, true],
+    'the lead\'s "Assigned to": away with "Not assignable" → greyed "Name · On vacation until …" (vacationPickerInfo, as the other pickers); not ticked → as usual; the id in its handler escaped');
+}
+
+// Stage 2 phase 5 review fixes: the Advanced label held to its 36 px band (the hover buttons beside the tile, not in the
+// band of the row above); no "Set as Default Path" on the Default Path in a one-group flow; the line middle's buttons 24 px
+// with a finger's 40 px; the bulk bar under the mode pill; a refused palette drop leaves the picker where it was; the Select
+// tool off when an undo brings back the Standard builder; a connect that leaves the old next step on its own says so with
+// Undo; a new workflow's entry under a layer's still opens it once saved (its token).
+async function testWfPhase5ReviewFixes(){
+  console.log('\nWorkflow builder: phase 5 review fixes (stage 2 G5; fake DOM)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), rule = sel => { const at = html.indexOf(`\n${sel} {`); return at < 0 ? '' : html.slice(at, html.indexOf('}', at)); };
+  const N = { push: [], replace: [], back: [], layers: [] }, edits = [];
+  const nav = { NAV_HIST: { ready: true, restoring: false }, NAV_LEAVERS: {}, NAV_RESTORERS: {}, history: { state: null }, navOurs: s => !!s && s.nav===1, navSnap: () => ({ tab: 'settings', sp: 'automation' }),
+    navPush: s => { N.push.push(s); }, navReplace: s => { N.replace.push(s); }, navBackTo: n => { N.back.push(n); return true; }, navOverlaySync: () => {}, navLayer: d => { N.layers.push(d); return d; },
+    setTimeout: () => 0, __edits: edits };
+  const reg = wfRegFor(WF_AV_TODAY), S = wfShellSandbox(reg, { ctx: nav }), { X, flush } = S, C = S.ctx, V = n => vm.runInContext(n, C);
+  vm.runInContext('wfEdit = k => { __edits.push(k); }', C);
+  V('wfNavWire')();
+  const A = V('WF_ADV'), UI = V('WF_ADV_UI'), lab = rule('.wfa-lab'), hov = rule('.wfa-tile .wfb-hov'), btn = rule('.wfa-emid button');
+  assertEqual([A.label, /max-height: 36px/.test(lab) && /overflow: hidden/.test(lab), /white-space: nowrap/.test(rule('.wfa-lab b')), /top: -/.test(hov), /right: calc\(100% \+/.test(hov),
+    /width: 24px/.test(btn) && /height: 24px/.test(btn), UI.mid[0] >= 24 * 2 + 16, UI.mid[1] >= 24, html.includes('.wfb-mobile .wfa-emid button::before { content: ""; position: absolute; inset: -8px; }'), html.includes('.wfb-pill:not([hidden]) ~ .wfa-bulk { top: 48px; }')],
+    [36, true, true, false, true, true, true, true, true, true],
+    'the label held to WF_ADV.label (36 px, one-line name); the hover buttons left of the tile (not in the band above); the line middle\'s buttons 24 px, 40 px for a finger; the bulk bar under the mode pill');
+  const t = V('wfAdvTileHtml')({ id: 't1', trigger: true, name: 'Lead created', sub: 'Website form', icon: 'zap', tone: 'blue', disabled: true, issue: 'error' }), row2 = t.slice(t.indexOf('<span class="wfa-tags">'));
+  assertEqual([row2.startsWith('<span class="wfa-tags"><small dir="auto" title="Website form">'), /Disabled/.test(row2), /Error/.test(row2)], [true, true, true],
+    'a trigger\'s label: its name on the second row with the tags (two rows in the band)');
+  // one group: the first step is the Default Path already, no "Set as Default Path"; two groups: the other one's head has it
+  const DOC = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }], nodes: { n1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct(null), x7: wfAct(null) } };
+  const one = { ...DOC, nodes: { n1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct(null) } }, items = d => V('wfAdvCanvasItems')(d, V('wfLayoutAdvanced')(d, {}, reg), reg, {}, {}).items, tile = (its, k) => its.find(i => i.key===k).html();
+  const I1 = items(one), I2 = items(DOC);
+  assertEqual([/data-act="defPath"/.test(tile(I1, 'n:n1')), /data-act="defPath"/.test(tile(I2, 'n:n1')), /data-act="defPath"/.test(tile(I2, 'n:x7')), /\(Default Path\)/.test(tile(I2, 'n:n1'))], [false, false, true, true],
+    'the branch icon only on another group\'s first step (never on the Default Path, one group or more)');
+  // a palette drop refused at that place: a toast, the picker untouched
+  X.wfBuilderOpen({ id: 'w9', name: 'Adv', enabled: false, definition: DOC, revision: 1, builder: 'advanced' }, {});
+  const W = S.W(); flush();
+  X.wfPicker('action', { src: 'n3', port: 'next' }); flush();
+  const P = W.picker, D = X.wfDerived(), here = X.wfPickerFlat(X.wfPickerRowsNow(W, D)), there = X.wfPickerFlat(X.wfPickerRowsNow(W, D, V('wfSlotCtx')(W.doc, { src: 'n1', port: 'next' }, reg)));
+  const i = here.findIndex(r => !r.disabled && r.kind!=='app' && (there.find(z => z.key===r.key) || {}).disabled);
+  const before = JSON.stringify({ slot: P.slot, sc: P.sc, at: P.at, detached: P.detached, rev: P.rev }), t0 = S.toasts.length;
+  const pg = { type: 'palette', i, sx: 0, sy: 0, rect: { left: 0, top: 0, width: 1200, height: 800 }, v0: W.view, pid: 1 };
+  V('wfPalBegin')(pg); pg.drop = { kind: 'edge', slot: { src: 'n1', port: 'next' }, key: 'm:n1:next' };
+  V('wfPalEnd')(pg, true); flush();
+  assertEqual([i >= 0, W.picker===P, JSON.stringify({ slot: P.slot, sc: P.sc, at: P.at, detached: P.detached, rev: P.rev })===before, S.toasts.length - t0, W.drawer], [true, true, true, 1, null],
+    'a row dropped where it can\'t go (a Go to on a line\'s middle): its reason, and the picker still adds where it was opened');
+  X.wfNavTop(); flush();
+  // the Select tool goes off when an undo brings back the Standard builder
+  X.wfBuilderOpen({ id: 'w8', name: 'Std', enabled: false, definition: DOC, revision: 1, builder: 'standard' }, {});
+  const W2 = S.W(); flush();
+  V('WF_POP_ACTS').builderAdv(W2); flush();
+  V('WF_ADV_ACTS').selTool(W2); flush();
+  const on = [W2.tool, W2.el.vp.classList.contains('is-marquee')];
+  X.wfUndoRedo(-1); flush();
+  assertEqual([on, W2.builder, W2.tool, W2.el.vp.classList.contains('is-marquee')], [['marquee', true], 'standard', 'select', false], 'undo back to the Standard builder: the Select tool is off (no crosshair, no hidden control left on)');
+  X.wfUndoRedo(1); flush();
+  // connecting a path that had a next step: the old one and the steps after it become a group of their own → a toast with Undo
+  const t1 = S.toasts.length;
+  V('wfConnectCommit')({ src: 'x7', port: 'next' }, 'n3'); flush();
+  const quiet = S.toasts.length - t1;
+  X.wfUndoRedo(-1); flush();
+  V('wfConnectCommit')({ src: 'n1', port: 'next' }, 'x7'); flush();
+  assertEqual([quiet, W2.doc.nodes.n1.out.next, S.toasts.slice(t1)], [0, 'x7', [`Connected to ${V('wfNodeName')(W2.doc.nodes.x7, reg)}: "${V('wfNodeName')(W2.doc.nodes.n2, reg)}" and the steps after it are now a group of their own`]],
+    'connect: nothing cut → said only to screen readers; the old next step left on its own → a toast (with Undo, as the trash on a line)');
+  X.wfBuilderClose({ nav: false });
+  // a new workflow saved while a layer's entry is on top: the entry under it opens the saved workflow on back / forward
+  X.wfBuilderOpen(null, {}); flush();
+  const W3 = S.W(), pushed = N.push.slice(-1)[0], tmp = pushed.x.tmp;
+  C.history.state = { nav: 1, kind: 'wf', x: { id: null, tmp }, ov: 1 };
+  X.wfNavHooks.saved('w30', W3.navTmp);
+  X.wfBuilderClose({ nav: false });
+  C.NAV_RESTORERS.wf({ kind: 'wf', x: { id: null, tmp } });
+  C.NAV_RESTORERS.wf({ kind: 'wf', x: { id: null, tmp: 'other' } });
+  assertEqual([typeof tmp==='string' && tmp.length > 2, pushed.x.id, N.replace.slice(-1)[0], edits, !!S.W() && S.W().id], [true, null, { kind: 'wf', x: { id: 'w30' }, ov: 1 }, ['w30'], null],
+    'a new one\'s entry carries a token; its first Save maps it to the id, so the entry under the layer\'s opens the saved workflow (an unknown token: a new one)');
+  if (S.W()) X.wfBuilderClose({ nav: false });
+  // "Open its old settings" on a System workflow: the builder closes without its own back (a pending back would land after the
+  // settings page's entry and undo the move), the page's entry follows the builder's
+  const sysOld = extractDecl(html, 'WF_RAIL_ACTS').match(/sysOld: W => \{[^\n]*/);
+  assertEqual([!!sysOld, !!sysOld && /wfBuilderClose\(\{ nav: false \}\); if \(typeof setSettingsPage==='function'\) setSettingsPage\(page\)/.test(sysOld[0])], [true, true],
+    'a System workflow\'s "Open its old settings" closes the builder with nav false, then goes to the page');
+}
+
 (async () => {
   await testVacationFollowUps();
   await testWfSaveRuntime();
@@ -8612,6 +9149,9 @@ async function testWfReviewRound2(){
   await testCobraChangeFlow();
   await testWorkflowAiB(loadSandbox());
   await testWorkflowAiC(loadSandbox());
+  await testWfSwitchRuntime();
+  testLeadAssigneeGrey();
+  await testWfPhase5ReviewFixes();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });

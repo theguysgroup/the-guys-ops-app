@@ -1426,6 +1426,11 @@ body.wf-open #phone-widget { left: auto !important; right: 16px; bottom: 164px !
 .wfb-q4 { display: flex; flex-direction: column; gap: 8px; }
 .wfb-q4 .btn { justify-content: space-between; }
 .wfb-q4 small { color: var(--ink-faint); font-weight: 500; }
+.wfb-blk { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.wfb-blk li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.wfb-blk li > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; font-size: 13.5px; }
+.wfb-blk small { color: var(--ink-faint); font-size: 12px; }
+.wfb-blk .btn { flex: none; min-height: 32px; }
 .wfb-keys { width: min(760px, 100%); }
 .wfb-kgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 20px; }
 .wfb-kgrid h3 { margin: 6px 0; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-faint); }
@@ -1604,6 +1609,80 @@ body.wf-open #phone-widget { left: auto !important; right: 16px; bottom: 164px !
 .wfb-sticky a { color: var(--wf-sel); }
 .lod-far .wfb-sticky > div { visibility: hidden; }
 .wfb-mobile .wfr-swo, .wfb-mobile .wfr-hit { min-height: 40px; }
+/* the Advanced canvas (stage 2 G5.2, design §5.4 / §5.5): 72 px tiles with their names below, a dot per path, "[+]"s, the
+   lines' arrowheads and middle buttons, sticky groups, the marquee, the bulk bar, the palette ghost, Connect mode */
+.wfb-ctl.is-adv [data-act="selTool"] { order: 0; } .wfb-ctl.is-adv [data-act="hand"] { order: 1; } .wfb-ctl.is-adv [data-act="fit"] { order: 2; }
+.wfb-ctl.is-adv [data-act="zoomOut"] { order: 3; } .wfb-ctl.is-adv [data-act="zoom100"] { order: 4; } .wfb-ctl.is-adv [data-act="zoomIn"] { order: 5; } .wfb-ctl.is-adv [data-act="tidy"] { order: 6; }
+.wfb-cb[hidden], .wfa-bulk[hidden] { display: none; }
+.wfb-vp.is-marquee { cursor: crosshair; }
+.wfb-edges path.is-arrow { fill: var(--wf-edge); stroke: none; }
+.wfb-edges path.is-rubber { stroke: var(--wf-sel); stroke-width: 2; }
+.wfa-tile { display: block; padding: 0; border-radius: 14px; }
+.wfa-tile > .wfb-tile { position: absolute; inset: 7px; width: auto; height: auto; border-radius: 10px; }
+.wfa-lab { position: absolute; left: -54px; top: 76px; width: 180px; max-height: 36px; overflow: hidden; display: flex; flex-direction: column; align-items: center; text-align: center; line-height: 1.25; pointer-events: none; }
+/* held to WF_ADV.label (36 px: the band Tidy up and the nudges keep free): the name on one line, then one row (a trigger's
+   name, then the tags); the tile's aria-label has every word */
+.wfa-lab b { max-width: 100%; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wfa-lab small { min-width: 0; font-size: 11px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wfa-tags { display: flex; align-items: center; gap: 3px; max-width: 100%; margin-top: 2px; overflow: hidden; }
+.wfa-tags > :first-child { margin-left: auto; } .wfa-tags > :last-child { margin-right: auto; }
+.wfa-tags > span { flex: none; }
+.wfa-tags .wfb-tag { display: inline-flex; align-items: center; gap: 2px; }
+.wfa-def { font-size: 11px; font-weight: 700; color: var(--wf-sel); }
+.wfa-dot, .wfa-in { position: absolute; width: 12px; height: 12px; margin-top: -6px; border-radius: 50%; border: 2px solid var(--wf-edge); background: var(--surface); }
+.wfa-dot { right: -7px; cursor: crosshair; touch-action: none; }
+.wfa-dot::before { content: ""; position: absolute; inset: -8px; }
+.wfa-dot:hover, .wfb-card.is-sel .wfa-dot { border-color: var(--wf-sel); background: var(--wf-sel-soft); }
+.wfa-in { left: -7px; top: 50%; pointer-events: none; }
+.wfa-pl { position: absolute; left: 80px; margin-top: -8px; max-width: 110px; font-size: 10.5px; line-height: 16px; color: var(--wf-purple); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.wfa-tile .wfb-hov { top: 0; right: calc(100% + 2px); }   /* left of the tile, never in the label band of the row above */
+.wfa-tile .wfb-hov button { opacity: 0; pointer-events: none; }
+.wfb-card.wfa-tile:hover .wfb-hov button, .wfb-card.wfa-tile:focus-within .wfb-hov button, .wfb-card.wfa-tile.is-sel .wfb-hov button { opacity: 1; pointer-events: auto; }
+.wfa-tile.is-drop, .wfa-plus.is-drop, .wfa-emid.is-drop { box-shadow: 0 0 0 3px var(--wf-sel); border-color: var(--wf-sel); }
+.wfa-tile.is-moving { z-index: 5; box-shadow: var(--shadow-lg); }
+.wfa-sticky.is-moving { box-shadow: var(--shadow-lg); }
+.wfb.is-palette, .wfb.is-palette * { user-select: none; -webkit-user-select: none; }
+.wfa-plus { display: grid; place-items: center; padding: 0; border: 1px dashed var(--wf-add); border-radius: 6px; background: var(--wf-add-soft); color: var(--wf-add); cursor: pointer; touch-action: none; }
+.wfa-plus::before { content: ""; position: absolute; inset: -8px; }
+.wfa-plus:hover, .wfa-plus:focus-visible { border-style: solid; }
+.wfa-emid { display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 14px; }
+.wfa-emid button { position: relative; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--ink-soft); cursor: pointer; opacity: 0; pointer-events: none; }
+.wfa-emid:hover button, .wfa-emid:focus-within button, .wfa-emid.is-drop button { opacity: 1; pointer-events: auto; }
+.wfa-emid button:hover { border-color: var(--wf-sel); color: var(--wf-sel); }
+.wfa-emid button[data-act="edgeDel"]:hover { border-color: var(--bad); color: var(--bad); }
+/* a finger: 40 px each, side by side (WF_ADV_UI.mid is wide enough) */
+@media (pointer: coarse) { .wfa-emid { gap: 16px; } .wfa-emid button::before { content: ""; position: absolute; inset: -8px; } }
+.wfb-mobile .wfa-emid { gap: 16px; } .wfb-mobile .wfa-emid button::before { content: ""; position: absolute; inset: -8px; }
+/* behind the lines too (the world is its own stacking context) */
+.wfa-sticky { display: flex; flex-direction: column; padding: 0; cursor: default; z-index: -1; }
+.wfa-stb { flex: none; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line-soft); cursor: grab; touch-action: none; }
+.wfa-stb b { flex: 1; min-width: 0; margin: 0; }
+.wfa-stc { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--ink-soft); cursor: pointer; opacity: 0; }
+.wfa-sticky:hover .wfa-stc, .wfa-stc:focus-visible { opacity: 1; }
+.wfa-stbody { flex: 1; min-height: 0; padding: 8px 12px; overflow: hidden; }
+.wfa-sts { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; border-right: 2px solid var(--line); border-bottom: 2px solid var(--line); border-bottom-right-radius: 6px; }
+.wfa-marq { position: absolute; left: 0; top: 0; border: 1px dashed var(--wf-sel); background: var(--wf-sel-soft); opacity: .6; pointer-events: none; z-index: 3; }
+.wfa-bulk { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; max-width: calc(100% - 24px); padding: 4px; overflow-x: auto; scrollbar-width: thin; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); z-index: 3; }
+.wfb-pill:not([hidden]) ~ .wfa-bulk { top: 48px; }   /* under "Stats view" / "View only mode": the reason editing is off stays seen */
+.wfa-bulk .wfb-tb { white-space: nowrap; }
+.wfa-bulk .wfb-tb.is-danger { color: var(--bad); }
+.wfa-bn { padding: 0 8px; font-size: 12.5px; font-weight: 700; color: var(--wf-sel); white-space: nowrap; }
+.wfa-ghost { position: fixed; left: 0; top: 0; padding: 6px 12px; border: 1px solid var(--wf-sel); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 13px; font-weight: 600; box-shadow: var(--shadow-lg); pointer-events: none; z-index: 96; white-space: nowrap; }
+.wf-world.wfa-flip .wfa-tile, .wf-world.wfa-flip .wfa-plus, .wf-world.wfa-flip .wfa-emid { transition: transform .22s cubic-bezier(.22,1,.36,1); }
+.wfa-cn-ports { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.wfa-cn-list { display: flex; flex-direction: column; gap: 4px; max-height: min(360px, 50dvh); overflow: auto; }
+.wfa-cn-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); text-align: left; font-size: 13.5px; cursor: pointer; }
+.wfa-cn-row:hover, .wfa-cn-row:focus-visible { border-color: var(--wf-sel); background: var(--wf-sel-soft); outline: none; }
+.wfa-cn-row small { font-size: 11.5px; color: var(--ink-faint); }
+.wfa-cn-row[aria-disabled="true"] { color: var(--ink-faint); cursor: default; }
+.wfr-fmt { display: flex; gap: 2px; margin-bottom: 4px; }
+.wfr-fmt-b { font-weight: 800; } .wfr-fmt-i { font-style: italic; } .wfr-fmt-u { text-decoration: underline; }
+.lod-far .wfa-lab small, .lod-far .wfa-tags, .lod-far .wfa-pl, .lod-far .wfa-plus, .lod-far .wfa-emid, .lod-far .wfa-stbody { visibility: hidden; }
+.wfb.is-ro .wfa-dot { display: none; }
+.wfb-mobile .wfa-dot { display: none; }
+.wfb-mobile .wfa-emid button { opacity: 1; pointer-events: auto; }
+@media (pointer: coarse) { .wfa-emid button, .wfa-stc { opacity: 1; pointer-events: auto; } }
+@media (prefers-reduced-motion: reduce) { .wf-world.wfa-flip .wfa-tile, .wf-world.wfa-flip .wfa-plus, .wf-world.wfa-flip .wfa-emid { transition: none; } }
 /* Customer hover card (Ofek 12 Oct, suggestion 7). */
 .lead-hover { position: fixed; z-index: 450; width: 292px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 13px 14px 10px; font-size: 12.5px; line-height: 1.4; animation: lhIn .16s cubic-bezier(.2,.9,.3,1.15); }
 .lead-hover.leaving { opacity: 0; transform: translateY(3px); transition: opacity .12s ease, transform .12s ease; }
@@ -2994,11 +3073,17 @@ function vacationLoginIds(profiles, employees){
 // A login's own vacation, by that rule, so the app and the server agree. Without the employees (non-owners can't read them):
 // its Jobs & Commissions name when a vacation row carries it, else its full name.
 function vacationForProfile(vacations, profile, day, tz, key, employees){
+  const who = vacationProfileWho(vacations, profile, employees);
+  return who ? vacationFor(vacations || [], who, day, tz, key) : null;
+}
+// Who a login is on the vacation rows (vacationForProfile's rule): { id, name } of its employee card, else a name; null
+// when not known. The lead's "Assigned to" picker asks vacationPickerInfo with it, as every other assign picker does.
+function vacationProfileWho(vacations, profile, employees){
   if (!profile) return null;
   const emps = employees || [];
-  if (emps.length) { const e = vacationEmployeeOfProfile(profile, emps); return e ? vacationFor(vacations, { id: e.id, name: e.name }, day, tz, key) : null; }
+  if (emps.length) { const e = vacationEmployeeOfProfile(profile, emps); return e ? { id: e.id, name: e.name } : null; }
   const rows = vacations || [], tn = profile.technicianName, name = tn && rows.some(v => v.employeeName===tn) ? tn : profile.fullName || tn;
-  return name ? vacationFor(rows, name, day, tz, key) : null;
+  return name || null;
 }
 // "End their shift now" (stage 3 follow-up 5). Only an office login ('va') has a shift: the logins of that employee card.
 function vacationShiftLogins(profiles, employees, empId){
@@ -5574,6 +5659,8 @@ const ICONS = {
   slash: '<circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>',
   form: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
   columns: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18"/>',
+  cursor: '<path d="M5 3l14 7-6 2-2 6z"/>',
+  tidy: '<rect x="3" y="9" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M9 12h3M12 5.5v13M12 5.5h3M12 18.5h3"/>',
   corner: '<path d="M15 10l5 5-5 5"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/>',
 };
 function ico(name, size){
@@ -10679,7 +10766,7 @@ function leadAssigneeControl(c){
     const vi = vacs.length ? leadAssigneeVacation(p, day, STATE.data, tz, STATE.profiles || []) : null, name = `${p.fullName}${me && p.id===me.id ? ' (me)' : ''}`;
     return `<option value="${esc(p.id)}" ${p.id===cur ? 'selected' : ''} ${leadAssigneeCanSet(me, p.id) ? '' : 'disabled'}${vi ? ' class="vac-off"' : ''}>${esc(vacationPickerLabel(name, vi))}</option>`;
   }).join('');
-  return `<select class="lead-assignee" aria-label="Assigned to" onchange="setLeadAssignee('${c.id}', this.value)"><option value="">Nobody</option>${opts}</select>`;
+  return `<select class="lead-assignee" aria-label="Assigned to" onchange="setLeadAssignee('${esc(jsStr(c.id))}', this.value)"><option value="">Nobody</option>${opts}</select>`;
 }
 // vacOk: the vacation question was already asked (or it is the move to the stand-in), so it isn't asked again.
 function setLeadAssignee(id, value, vacOk){
@@ -20972,7 +21059,7 @@ function wfMenuDo(id, key){
 // registry (what is available, what the engine already does), each once per opening (wfEnsure).
 const WF_GLOBAL = { pauseRows: 15, pauseDays: 15, pauseIds: 500, notifyUsers: 50, notifyEmails: 10, emailMax: 254 };
 // Why a greyed control is greyed (shown next to it, never only as a tooltip: phones have no hover).
-const WF_GLOBAL_WHY = { email: 'Needs a team email sender', advanced: 'Coming with the Advanced builder', ai: 'Coming with Workflow AI', autoSave: 'We keep Save with undo',
+const WF_GLOBAL_WHY = { email: 'Needs a team email sender', ai: 'Coming with Workflow AI', autoSave: 'We keep Save with undo',
   switch: 'Only owners and managers can edit workflows', system: 'Runs on the built-in system until it moves into the engine', digest: 'Phone alerts start with the next engine update',
   noDb: 'Comes with the next database update' };
 // The database's own words for each pause problem (automation_pauses_guard raises exactly these; GHL's for the last two).
@@ -21258,7 +21345,7 @@ function wfPauseCardHtml(draft, ctx){
 function wfBuilderCardHtml(A, draft){
   const has = !!A.safety && Object.prototype.hasOwnProperty.call(A.safety, 'default_builder'), saved = has && A.safety.default_builder==='advanced' ? 'advanced' : 'standard', v = draft || saved;
   const radio = (k, l, why) => `<label class="au-check${why ? ' off' : ''}"><input type="radio" name="wf-gs-builder" value="${k}" ${v===k ? 'checked' : ''} ${why || !has ? 'disabled' : ''} onchange="wfBuilderSet('${k}')"><span>${esc(l)}${why ? ` <span class="hint wf-why">${esc(why)}</span>` : ''}</span></label>`;
-  const body = `<div class="field"><label>Default builder for new workflows</label><div role="radiogroup" aria-label="Default builder for new workflows">${radio('standard', 'Standard builder', '')}${radio('advanced', 'Advanced builder', saved==='advanced' ? '' : WF_GLOBAL_WHY.advanced)}</div>${has ? '' : `<span class="hint wf-why">${esc(WF_GLOBAL_WHY.noDb)}</span>`}</div>
+  const body = `<div class="field"><label>Default builder for new workflows</label><div role="radiogroup" aria-label="Default builder for new workflows">${radio('standard', 'Standard builder', '')}${radio('advanced', 'Advanced builder', '')}</div>${has ? '' : `<span class="hint wf-why">${esc(WF_GLOBAL_WHY.noDb)}</span>`}</div>
     ${setRows([['Who can switch between builders', `<span class="hint wf-why">${esc(WF_GLOBAL_WHY.switch)}</span>`, setToggle(false, '', WF_GLOBAL_WHY.switch), { html: true }]])}
     <div class="tpl-actions"><button type="button" class="btn small primary" ${draft && draft!==saved ? '' : 'disabled'} onclick="wfBuilderSave()">Save</button>${draft ? '<button type="button" class="btn small ghost" onclick="wfGsCancel(\'builder\')">Cancel</button>' : ''}</div>`;
   return setBlock('Default builder', 'Which builder a new workflow opens in.', body);
@@ -21333,7 +21420,6 @@ function wfBuilderSet(v){ const d = wfGsDraft('builder'); if (d===null) return; 
 async function wfBuilderSave(){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   const v = WF_GS.builder; if (!v || WF_GS.saving) return;
-  if (v==='advanced') { showToast(WF_GLOBAL_WHY.advanced, { kind: 'info' }); return; }
   const me = getRealProfile();
   WF_GS.saving = 'builder';
   try {
@@ -23222,6 +23308,159 @@ function wfZoomAt(view, k, px, py){
   return { x: px - (px - (Number(v.x) || 0)) * (k1 / k0), y: py - (py - (Number(v.y) || 0)) * (k1 / k0), k: k1 };
 }
 
+// ── the Advanced layout (design §5.4): tiles 72×72 with a 36 px label band under them, at free positions kept in
+// layout.adv ({ id: [x, y] }: a tile's top-left in world units; steps and triggers share the id space). wfTidy lays a
+// whole flow out: each group of steps (the entry's first) a tree from left to right, x = depth × 220, leaf rows 110 apart
+// and a parent in the middle of its children, the groups 140 apart one under the other; triggers at x −240 at the height
+// of the step they start (several on one step spread ±90). Every path without a next step ends in a "[+]" where that step
+// would go. Edges are cubic béziers into a tile's left side with an arrowhead; one that goes backwards loops round under
+// both tiles. Deterministic, no DOM measurement. ──
+const WF_ADV = { tile: 72, label: 36, labelW: 180, col: 220, row: 110, clusterGap: 140, trigX: -240, spread: 90, plus: 28, bend: 100, fwd: 24, loop: 18, arrow: 8 };
+// What a tile at (x, y) covers: the tile and its label band (the label is wider than the tile, centred under it).
+function wfAdvFoot(x, y){ const A = WF_ADV; return { x: x + (A.tile - A.labelW) / 2, y, w: A.labelW, h: A.tile + A.label }; }
+// The y of a tile's out dot for its port i of n (a multi-port tile stacks one dot per port, evenly).
+function wfAdvDotY(y, i, n){ return y + WF_ADV.tile * (i + 1) / (Math.max(1, n) + 1); }
+// An Advanced edge from an out dot (x1, y1) to a tile's left side (x2, y2) as cubic segments [[p0, p1, p2, p3], …]: one
+// S curve forwards; backwards (the target not right of the source) out to the right, along y = under (below both tiles),
+// and back in from the left.
+function wfBezierSegs(x1, y1, x2, y2, under){
+  const A = WF_ADV;
+  if (x2 - x1 >= A.fwd) { const dx = Math.max(40, (x2 - x1) / 2); return [[[x1, y1], [x1 + dx, y1], [x2 - dx, y2], [x2, y2]]]; }
+  const m = [(x1 + x2) / 2, under];
+  return [[[x1, y1], [x1 + A.bend, y1], [x1 + A.bend, under], m], [m, [x2 - A.bend, under], [x2 - A.bend, y2], [x2, y2]]];
+}
+function wfBezierPath(segs){
+  const f = v => Math.round(v * 10) / 10, S = Array.isArray(segs) ? segs : [];
+  if (!S.length) return '';
+  return `M${f(S[0][0][0])} ${f(S[0][0][1])}` + S.map(s => ` C${s.slice(1).map(p => `${f(p[0])} ${f(p[1])}`).join(' ')}`).join('');
+}
+// The point at t (0..1) along the segments, each segment an equal share of t (the "+" and trash buttons sit at 0.5).
+function wfBezierAt(segs, t){
+  const S = Array.isArray(segs) ? segs : [];
+  if (!S.length) return [0, 0];
+  const tt = Math.max(0, Math.min(1, Number(t) || 0)) * S.length, i = Math.min(S.length - 1, Math.floor(tt)), u = tt - i, v = 1 - u, [p0, p1, p2, p3] = S[i];
+  const at = k => v * v * v * p0[k] + 3 * v * v * u * p1[k] + 3 * v * u * u * p2[k] + u * u * u * p3[k];
+  return [Math.round(at(0) * 10) / 10, Math.round(at(1) * 10) / 10];
+}
+// A filled arrowhead at the end of the last segment, along its end tangent.
+function wfArrowHead(segs){
+  const S = Array.isArray(segs) ? segs : [];
+  if (!S.length) return '';
+  const f = v => Math.round(v * 10) / 10, [, , p2, p3] = S[S.length - 1], s = WF_ADV.arrow;
+  const dx = p3[0] - p2[0], dy = p3[1] - p2[1], l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l, bx = p3[0] - ux * s, by = p3[1] - uy * s;
+  return `M${f(bx - uy * s * 0.6)} ${f(by + ux * s * 0.6)} L${f(p3[0])} ${f(p3[1])} L${f(bx + uy * s * 0.6)} ${f(by - ux * s * 0.6)} Z`;
+}
+// One Advanced edge from the dot of port i of n on the tile at a ({ x, y }) into the box b ({ x, y, w, h }: a tile or a
+// "[+]") → { d, mid, arrow, back, low (how far down a backward loop reaches, else null) }. A dragged tile's lines are worked
+// out again with it (G5.2), the layout's the same way.
+function wfAdvEdgeGeom(a, i, n, b){
+  const A = WF_ADV, x1 = a.x + A.tile, y1 = wfAdvDotY(a.y, i, n), x2 = b.x, y2 = b.y + b.h / 2, under = Math.max(a.y + A.tile + A.label, b.y + b.h + A.label) + A.loop;
+  const segs = wfBezierSegs(x1, y1, x2, y2, under), back = segs.length > 1;
+  return { d: wfBezierPath(segs), mid: wfBezierAt(segs, 0.5), arrow: wfArrowHead(segs), back, low: back ? under + 1 : null };
+}
+// Tidy up: every step and trigger at its tidy position → { id: [x, y] } (only the ids in onlyIds when given).
+function wfTidy(doc, reg, onlyIds){
+  const d = wfObj(doc), I = wfIndex(d), A = WF_ADV, pos = Object.create(null), seen = new Set();
+  const childOf = (id, p) => { const t = wfObj(wfObj(I.nodes[id]).out)[p]; return typeof t==='string' && I.parent[t] && I.parent[t].from===id && I.parent[t].port===p ? t : null; };
+  let top = 0, row = 0;
+  // a step at depth and everything below it; leaves (and empty ports, where a "[+]" goes) take the next row → its row
+  const place = (id, depth) => {
+    seen.add(id);
+    const n = wfObj(I.nodes[id]), out = wfObj(n.out), ys = [];
+    wfPorts(n).forEach(p => {
+      const c = childOf(id, p);
+      if (c && !seen.has(c)) ys.push(place(c, depth + 1));
+      else if (!(typeof out[p]==='string' && wfHas(I.nodes, out[p]))) ys.push(row++);
+    });
+    const r = ys.length ? (ys[0] + ys[ys.length - 1]) / 2 : row++;
+    pos[id] = [depth * A.col, Math.round(top + r * A.row)];
+    return r;
+  };
+  wfClusters(d).forEach(c => {
+    if (seen.has(c.head)) return;
+    row = 0; place(c.head, 0);
+    top += (row - 1) * A.row + A.tile + A.label + A.clusterGap;
+  });
+  // the triggers: each at the height of the step it starts (its own Go to, else the entry), shared steps spread ±90, then
+  // pushed down so none overlaps the one above
+  const entry = typeof d.entry==='string' && wfHas(I.nodes, d.entry) ? d.entry : null;
+  const trigs = (Array.isArray(d.triggers) ? d.triggers : []).map(wfObj).map((t, i) => ({ id: String(t.id), i, to: typeof t.goto==='string' && wfHas(I.nodes, t.goto) ? t.goto : entry }));
+  const count = {}, nth = {};
+  trigs.forEach(t => { count[t.to] = (count[t.to] || 0) + 1; });
+  trigs.forEach(t => { const k = nth[t.to] = (nth[t.to] ?? -1) + 1; t.want = (t.to && pos[t.to] ? pos[t.to][1] : 0) + (k - (count[t.to] - 1) / 2) * 2 * A.spread; });
+  let free = -Infinity;
+  trigs.slice().sort((a, b) => a.want - b.want || a.i - b.i).forEach(t => { const y = Math.max(t.want, free); pos[t.id] = [A.trigX, Math.round(y)]; free = y + A.row; });
+  if (onlyIds==null) return pos;
+  const only = new Set(onlyIds instanceof Set ? onlyIds : Array.isArray(onlyIds) ? onlyIds : []), out = Object.create(null);
+  Object.keys(pos).forEach(id => { if (only.has(id)) out[id] = pos[id]; });
+  return out;
+}
+// → { builder: 'advanced', nodes: { id: tile box }, triggers: [tile box + id], plus: [box + src, port] (the "[+]"s; src
+// "@entry" on an empty flow), edges: [{ key, from, to, port?, dot: [i, n], d, mid, arrow, back, dashed?, trigger?, ref?, toPlus? }],
+// pos: { id: [x, y] } (every position used), filled: [ids without a stored position], unreached: [heads of groups no run
+// reaches, Go to steps counted], bounds }, plus the Standard layout's empty lists so the shared helpers take it. Stored
+// positions are kept as they are; a step without one goes at its parent's x + 220 at its port's row, a group's first step
+// under everything, a trigger 240 left of its step, each nudged down a row at a time off anything it would cover; with no
+// stored position at all the whole flow is tidied.
+function wfLayoutAdvanced(doc, layout, reg){
+  const d = wfObj(doc), I = wfIndex(d), A = WF_ADV, adv = wfObj(wfObj(layout).adv), order = wfOrder(d);
+  const L = { builder: 'advanced', nodes: {}, triggers: [], addTrigger: null, heads: [], ends: [], jumps: [], slots: [], plus: [], edges: [], pos: {}, filled: [], unreached: [], bounds: null };
+  const trigs = (Array.isArray(d.triggers) ? d.triggers : []).map(wfObj);
+  const entry = typeof d.entry==='string' && wfHas(I.nodes, d.entry) ? d.entry : null;
+  const targetOf = t => typeof t.goto==='string' && wfHas(I.nodes, t.goto) ? t.goto : entry;
+  const ok = v => Array.isArray(v) && v.length >= 2 && Number.isFinite(v[0]) && Number.isFinite(v[1]);
+  const ids = [...order, ...trigs.map(t => String(t.id))], pos = L.pos;
+  ids.forEach(id => { if (ok(adv[id])) pos[id] = [adv[id][0], adv[id][1]]; });
+  const foot = [], hit = b => foot.some(f => b.x < f.x + f.w && f.x < b.x + b.w && b.y < f.y + f.h && f.y < b.y + b.h);
+  // a box at (x, y), moved down a row at a time until it covers nothing (bounded), then taken
+  const nudge = (x, y, boxAt) => { const most = 2 * foot.length + 1; let n = 0; while (hit(boxAt(x, y)) && n++ < most) y += A.row; const b = boxAt(Math.round(x), Math.round(y)); foot.push(b); return b; };
+  if (ids.length && !ids.some(id => pos[id])) { const t = wfTidy(d, reg); ids.forEach(id => { pos[id] = t[id]; }); L.filled = ids.slice(); ids.forEach(id => foot.push(wfAdvFoot(pos[id][0], pos[id][1]))); }
+  else {
+    ids.forEach(id => { if (pos[id]) foot.push(wfAdvFoot(pos[id][0], pos[id][1])); });
+    const put = (id, x, y) => { const b = nudge(x, y, wfAdvFoot); pos[id] = [b.x - (A.tile - A.labelW) / 2, b.y]; L.filled.push(id); };
+    order.forEach(id => {
+      if (pos[id]) return;
+      const p = I.parent[id], at = p && pos[p.from];
+      if (at) { const ports = wfPorts(I.nodes[p.from]), i = Math.max(0, ports.indexOf(p.port)); put(id, at[0] + A.col, at[1] + (i - (ports.length - 1) / 2) * A.row); }
+      else put(id, 0, foot.length ? Math.max(...foot.map(f => f.y + f.h)) + A.clusterGap : 0);
+    });
+    trigs.forEach(t => { const id = String(t.id), to = targetOf(t); if (!pos[id]) put(id, to ? pos[to][0] + A.trigX : A.trigX, to ? pos[to][1] : 0); });
+  }
+  const tile = (x, y) => ({ x, y, w: A.tile, h: A.tile });
+  order.forEach(id => { L.nodes[id] = tile(pos[id][0], pos[id][1]); });
+  trigs.forEach(t => { const id = String(t.id); L.triggers.push({ ...tile(pos[id][0], pos[id][1]), id }); });
+  // the "[+]"s: where the next step of an empty port would go (centred in that tile's place), nudged off anything drawn
+  const plusAt = (x, y) => ({ x: x + (A.tile - A.plus) / 2, y: y + (A.tile - A.plus) / 2, w: A.plus, h: A.plus });
+  if (!order.length) L.plus.push({ ...nudge(0, 0, plusAt), src: '@entry', port: null });
+  // the edges: dot → tile (or "[+]"), a loop under both when it goes backwards
+  const lows = [], edge = (key, from, a, i, n, to, b, extra) => {
+    const g = wfAdvEdgeGeom(a, i, n, b);
+    if (g.back) lows.push(g.low);
+    L.edges.push({ key, from, to, ...extra, dot: [i, n], d: g.d, mid: g.mid, arrow: g.arrow, back: g.back });
+  };
+  order.forEach(id => {
+    const n = wfObj(I.nodes[id]), out = wfObj(n.out), ports = wfPorts(n), a = L.nodes[id];
+    ports.forEach((p, i) => {
+      const t = out[p];
+      if (typeof t==='string' && wfHas(I.nodes, t)) { if (t!==id) edge(`${id}:${p}`, id, a, i, ports.length, t, L.nodes[t], { port: p }); return; }
+      const pb = { ...nudge(a.x + A.col, a.y + (i - (ports.length - 1) / 2) * A.row, plusAt), src: id, port: p };
+      L.plus.push(pb);
+      edge(`${id}:${p}`, id, a, i, ports.length, null, pb, { port: p, toPlus: true });
+    });
+    wfRefs(n, reg).forEach(r => { if (r.to && wfHas(I.nodes, r.to) && r.to!==id) edge(`${id}:ref:${r.key}`, id, a, 0, 1, r.to, L.nodes[r.to], { ref: true }); });
+  });
+  L.triggers.forEach((b, k) => { const t = trigs[k], to = targetOf(t); if (to) edge(`trigger:${b.id}`, b.id, b, 0, 1, to, L.nodes[to], { trigger: true, ...(to===t.goto ? { dashed: true } : {}) }); });
+  // groups of steps no run reaches (W_DELINKED counts Go to steps: viaRefs)
+  const reach = wfReachable(d, { viaRefs: true, reg });
+  L.unreached = wfClusters(d).map(c => c.head).filter(h => !reach.has(h));
+  // the bounds of everything drawn: tiles with their labels, "[+]"s and the loops under them
+  const all = [...order.map(id => wfAdvFoot(pos[id][0], pos[id][1])), ...L.triggers.map(b => wfAdvFoot(b.x, b.y)), ...L.plus];
+  if (!all.length) all.push(wfAdvFoot(0, 0));
+  const x0 = Math.min(...all.map(b => b.x)), y0 = Math.min(...all.map(b => b.y)), x1 = Math.max(...all.map(b => b.x + b.w)), y1 = Math.max(...all.map(b => b.y + b.h), ...lows);
+  L.bounds = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  return L;
+}
+
 // ── the pickers (design §5.5): "Add trigger" / "Actions" with search, Recent, Pinned and the categories in GHL's order and
 // colours; unavailable rows greyed with the reason (never hidden), slot reasons ("Go to must be the last step of its
 // path", "Not available for the <trigger> trigger"), "Not in OPS" for GHL items this app doesn't have. ──
@@ -23626,7 +23865,7 @@ const WF_MODE_RO = { stats: 'Stats view is on: switch it off to edit', version: 
 const WF_MODE_PILL = { stats: ['yellow', 'Stats view'], version: ['yellow', 'View only mode'], path: ['green', 'Contact path'], test: ['green', 'Test workflow'], system: ['yellow', 'System workflow · view only'] };
 // The words on a part that the next build steps add (greyed with this reason until then).
 const WF_SOON = 'Comes with the next part of the builder';
-const WF_ADV_SOON = 'The Advanced builder comes next';
+const WF_ADV_SOON = 'The Advanced builder comes next';   // (phase 4's words; the Advanced builder is here since G5.3)
 function wfDisAttr(why){ return why ? ` aria-disabled="true" data-why="${esc(why)}"` : ''; }
 function wfKeyHint(id, mac){ const k = WF_KEYS.find(x => x.id===id); return k ? wfKeyText(k, mac) : ''; }
 // s = wfChromeState (name, mobile, dirty, canUndo, canRedo, renaming, renameDraft, railHidden, status, tab, builder, mode,
@@ -23671,7 +23910,8 @@ function wfRailHtml(s, mac){
 function wfPillHtml(mode){ const p = WF_MODE_PILL[mode]; return p ? `<span class="wfb-pill-${p[0]}">${esc(p[1])}</span>` : ''; }
 // The menus (design §5.5 "Actions" popover, the trigger's, "+ Add ▾", the builder's ▾, the phone's ⋯ and "Tools").
 // m = { kind, id, sub }; x = { ro, mobile, clip, node: { canToggle, disabled, unknown, multi }, trigger: { disabled },
-// hasId, canUndo, canRedo, hooks }. → { title, items: [{ act, label, why, sub, danger, checked }] }.
+// hasId, canUndo, canRedo, hooks, builder (G5.3); G5.2: quick = { on: 'node'|'trigger'|'canvas', disabled, multi, unknown, entry, head,
+// ports } (Quick actions), sticky = { color } }. → { title, items: [{ act, label, why, sub, danger, checked }] }.
 function wfPopItems(m, x){
   const M = wfObj(m), o = wfObj(x), h = wfObj(o.hooks), ro = String(o.ro || ''), it = (act, label, more) => ({ act, label, why: '', ...(more || {}) });
   if (M.kind==='node') {
@@ -23694,10 +23934,35 @@ function wfPopItems(m, x){
     return { title: 'Trigger', items: [...(o.mobile ? [it('open', 'Open trigger', { why: h.openStep ? '' : WF_SOON })] : []), it('tcopy', 'Copy', { why: ro }), it('ttoggle', t.disabled ? 'Enable' : 'Disable', { why: ro }),
       it('tdel', 'Delete', { why: ro, danger: true })] };
   }
+  // the Advanced builder's right-click "Quick actions" (G5.2) on a step, a trigger or the empty canvas (o.quick)
+  if (M.kind==='quick') {
+    const q = wfObj(o.quick), noClip = o.clip ? '' : 'Nothing copied yet: copy a step first';
+    if (q.on==='trigger') return { title: 'Quick actions', items: [it('tcopy', 'Duplicate', { why: ro }), it('ttoggle', q.disabled ? 'Enable' : 'Disable', { why: ro }), it('qConnect', 'Connect to…', { why: ro }),
+      it('qSticky', 'Add sticky note', { why: ro }), it('tdel', 'Delete', { why: ro, danger: true }), it('qTidy', 'Tidy up', { why: ro })] };
+    if (q.on!=='node') return { title: 'Quick actions', items: [it('qPaste', 'Paste here', { why: ro || noClip }), it('qSticky', 'Add sticky note', { why: ro }), it('qTidy', 'Tidy up', { why: ro })] };
+    const unknown = q.unknown ? 'This step is from a newer version of the app: it can\'t be changed here' : '', end = q.ports ? '' : 'Nothing can follow this step';
+    return { title: 'Quick actions', items: [
+      it('qCopy', 'Copy', { why: q.unknown ? 'An unknown step can\'t be copied' : '' }),
+      it('qPaste', 'Paste here', { why: ro || noClip || end }),
+      it('qDup', 'Duplicate', { why: ro || unknown }),
+      it('toggle', q.disabled ? 'Enable' : 'Disable', { why: ro || (q.multi ? 'A step with branches can\'t be paused' : unknown) }),
+      it('qDefault', 'Set as Default Path', { why: ro || (q.entry ? 'It is the Default Path already' : q.head ? '' : 'Only the first step of a group can be the Default Path') }),
+      it('qSticky', 'Add sticky note', { why: ro }),
+      it('notes', 'Notes', { why: !o.hasId ? 'Save the workflow first' : h.notes ? '' : WF_SOON }),
+      it('qConnect', 'Connect to…', { why: ro || end }),
+      it('qDelete', 'Delete', { why: ro, danger: true }),
+      it('qTidy', 'Tidy up', { why: ro }),
+    ] };
+  }
+  // a sticky note's colour button (Advanced): GHL's colours, Edit, Delete
+  if (M.kind==='stickyColor') return { title: 'Sticky note', items: [...WF_STICKY.colors.map(([c, label]) => it(`stc-${c}`, label, { why: ro, checked: wfObj(o.sticky).color===c })), it('stEditM', 'Edit note', { why: ro }),
+    it('stDelM', 'Delete', { why: ro, danger: true })] };
   if (M.kind==='add') return { title: 'Add', items: [it('addTrigger', 'Add trigger', { why: ro || (h.picker ? '' : WF_SOON) }), it('addAction', 'Add action', { why: ro || (h.picker ? '' : WF_SOON) })] };
-  if (M.kind==='builder') return { title: 'Builder', items: [it('builderStd', 'Standard builder', { checked: true }), it('builderAdv', 'Advanced builder', { why: WF_ADV_SOON })] };
+  // the builder ▾ (G5.3): the one in use ticked; switching is an edit (refused in the read-only modes)
+  const adv = o.builder==='advanced', builders = [it('builderStd', 'Standard builder', { checked: !adv, why: adv ? ro : '' }), it('builderAdv', 'Advanced builder', { checked: adv, why: adv ? '' : ro })];
+  if (M.kind==='builder') return { title: 'Builder', items: builders };
   if (M.kind==='more') return { title: 'More', items: [it('undo', 'Undo', { why: ro || (o.canUndo ? '' : 'Nothing to undo') }), it('redo', 'Redo', { why: ro || (o.canRedo ? '' : 'Nothing to redo') }),
-    it('recent', 'Recent changes', { why: h.recent ? '' : WF_SOON }), it('builderStd', 'Standard builder', { checked: true }), it('builderAdv', 'Advanced builder', { why: WF_ADV_SOON }),
+    it('recent', 'Recent changes', { why: h.recent ? '' : WF_SOON }), ...builders,
     it('test', 'Test workflow', { why: h.test ? '' : WF_SOON })] };
   if (M.kind==='switch') return { title: 'Workflow', items: [it('swDup', 'Duplicate workflow', { why: String(o.writeWhy || '') }), it('swDel', 'Delete workflow', { why: String(o.writeWhy || ''), danger: true })] };
   if (M.kind==='tools') {
@@ -23742,11 +24007,36 @@ function wfQ4Html(d){
 const WF_HOOKS = { picker: wfPickerOpen, pickerHtml: wfPickerHtmlHook, openStep: wfDrawerOpenStep, drawerHtml: wfDrawerHtmlHook, drawerClose: wfDrawerCloseAsk, save: wfSave, publish: wfPublishToggle,
   recent: wfRecentOpen, notes: wfNotesOpen, stats: null, leave: wfLeaveGuard, stash: wfStash, test: null,
   rail: { notes: wfRailNotes, errors: wfRailErrors, stickies: wfRailStickies, switcher: wfRailSwitcher, find: wfRailFind }, tabs: {} };
-// The ONE place the page history (stage 4: navPush / NAV_LAYERS / NAV_LEAVERS) connects to the builder. Until it lands
-// these are no-ops and the builder works on its own (Esc, "← Workflows list"). Stage 4 wires: opened → navPush({ wf: id });
-// layer(name, open) → its layer registry; back → wfNavTop() (closes the top layer first; false = none open) and then
-// wfLeave(then) (the leaver: then() runs only when leaving is fine).
-const wfNavHooks = { opened(id){}, closed(){}, layer(name, open){} };
+// The ONE place the page history (stage 4: navPush / NAV_LAYERS / NAV_LEAVERS / NAV_RESTORERS) connects to the builder
+// (G5.3; the layers, the leaver and the restorer are registered by wfNavWire). opened → an entry of its own ({ kind: 'wf',
+// x: { id } }); saved(id) → a new one's first Save gives its entry the id, in place; closed → closed in the app (← Workflows
+// list): back to the entry under it (opts.nav false: a back, forward or another workflow opening already moves the
+// history); layer → the builder's layers get an entry, so back closes the top one first. Without stage 4 (the tests'
+// sandbox) these do nothing and the builder works on its own (Esc, "← Workflows list"). A new one's entry also carries a
+// token (x.tmp; tmp = W.navTmp): its first Save maps the token to the id here, so an entry under a layer's (left with id
+// null: only the top one is replaced) still opens the saved workflow on back or forward (wfNavRestore).
+const WF_NAV_NEW = { at: Date.now().toString(36), seq: 0, ids: new Map() };
+function wfNavNewKey(){ return `${WF_NAV_NEW.at}.${++WF_NAV_NEW.seq}`; }
+const wfNavHooks = {
+  opened(id, tmp){ if (wfNavReady()) navPush({ kind: 'wf', x: id ? { id } : { id: null, ...(tmp ? { tmp } : {}) } }); },
+  saved(id, tmp){
+    if (!id) return;
+    if (typeof tmp==='string' && tmp) WF_NAV_NEW.ids.set(tmp, id);
+    if (!wfNavReady()) return;
+    const st = history.state;
+    if (navOurs(st) && st.kind==='wf' && st.x && st.x.id==null) navReplace({ kind: 'wf', x: { id }, ...(st.ov ? { ov: 1 } : {}) });
+  },
+  closed(opts){
+    wfNavSync();
+    if ((opts && opts.nav===false) || !wfNavReady() || NAV_HIST.restoring) return;
+    const st = history.state, next = { kind: 'tab' };
+    if (!navOurs(st) || st.kind!=='wf') return;
+    // over a layer's entry: navPush goes back over both when the page is the entry under them
+    if (st.ov) navPush(next);
+    else if (!navBackTo({ ...navSnap(), ...next })) navReplace(next);
+  },
+  layer(){ wfNavSync(); },
+};
 
 // ── state ──
 let WF = null, WF_TOKEN = 0, WF_TOKEN_COLORS = { key: null, v: null };
@@ -23807,9 +24097,10 @@ function wfBuilderCtx(){
 function wfDerived(){
   const W = WF, key = `${W.docRev}:${W.layoutRev}:${W.builder}:${W.mode}:${W.regRev}:${W.ctxRev}`;
   if (W.derived && W.derived.key===key) return W.derived;
-  const ctx = wfBuilderCtx(), reg = W.reg, layout = wfLayoutStandard(W.doc, reg, ctx);
-  // the sticky notes' lane is placed from the steps' bounds, then widens them so Fit and the minimap cover the notes too
-  const stickies = wfStickyBoxes(W.layout, layout);
+  const ctx = wfBuilderCtx(), reg = W.reg, adv = W.builder==='advanced', layout = adv ? wfLayoutAdvanced(W.doc, W.layout, reg) : wfLayoutStandard(W.doc, reg, ctx);
+  // the sticky notes' lane is placed from the steps' bounds (Advanced: where they were put), then widens them so Fit and
+  // the minimap cover the notes too
+  const stickies = adv ? wfAdvStickyBoxes(W.layout) : wfStickyBoxes(W.layout, layout);
   if (stickies.length && layout.bounds) layout.bounds = wfBoundsWith(layout.bounds, stickies);
   let issues = { errors: [], warnings: [] };
   try { issues = wfValidate(W.doc, reg, { builder: W.builder, catalog: ctx.catalog, stored: W.base.doc, profiles: ctx.profiles }); } catch (e) { console.error('workflow check', e); }
@@ -23852,13 +24143,16 @@ function wfPatch(el, html){ if (!el || el._h===html) return false; el._h = html;
 // The cards and lines, by key: a new key makes an element, a gone key removes it, a changed content key rewrites only that
 // element, a moved card only gets a new transform. Selection, issue level and focus are classes and attributes.
 function wfSyncCanvas(D){
-  const W = WF, E = W.el, mv = W.moveMode;
-  const { items, edges } = wfCanvasItems(W.doc, D.layout, W.reg, D.ctx, { at: D.tree.at, seq: D.tree.seq, issueOf: D.issueOf, ro: !!wfGuardEdit(), mobile: W.mobile, I: D.I, order: D.order,
+  const W = WF, E = W.el, mv = W.moveMode, canvasItems = D.layout.builder==='advanced' ? wfAdvCanvasItems : wfCanvasItems;
+  const { items, edges } = canvasItems(W.doc, D.layout, W.reg, D.ctx, { at: D.tree.at, seq: D.tree.seq, issueOf: D.issueOf, ro: !!wfGuardEdit(), mobile: W.mobile, I: D.I, order: D.order,
     clip: !!wfClipLoad(AUTO_BUSINESS_ID, Date.now()), move: mv ? { keys: new Set(mv.slots.map(wfSlotKey)), hot: mv.slots[mv.i] ? wfSlotKey(mv.slots[mv.i]) : null } : null,
     notes: W.noteCounts, stats: W.statsText, verdicts: W.verdicts, stickies: D.stickies, pickingTrigger: !!(W.picker && W.picker.kind==='trigger'),
     statsWhy: WF_HOOKS.stats ? '' : WF_SOON, notesWhy: W.id ? '' : 'Save the workflow first' });
   const seen = new Set(), order = { trig: [], tree: [], deco: [] };
   let made = false;
+  // the other builder (G5.3): its cards are not reused as tiles (nor the other way round)
+  const drawn = D.layout.builder==='advanced' ? 'advanced' : 'standard';
+  if (E.drawnFor!==drawn) { for (const el of E.map.values()) el.remove(); E.map.clear(); W.selShown.clear(); E.drawnFor = drawn; made = true; }
   for (const it of items) {
     let el = E.map.get(it.key);
     if (!el) {
@@ -23896,6 +24190,13 @@ function wfSyncCanvas(D){
     const c = ed.dashed ? 'is-dashed' : '';
     if (p._c!==c) { p.setAttribute('class', c); p._c = c; }
     eseen.add(ed.key);
+    // the Advanced lines' arrowheads: a filled path of their own (key + ">")
+    if (ed.arrow) {
+      let h = E.paths.get(`${ed.key}>`);
+      if (!h) { h = document.createElementNS(WF_SVGNS, 'path'); h.setAttribute('data-e', `${ed.key}>`); h.setAttribute('class', 'is-arrow'); E.edges.appendChild(h); E.paths.set(`${ed.key}>`, h); }
+      if (h._d!==ed.arrow) { h.setAttribute('d', ed.arrow); h._d = ed.arrow; }
+      eseen.add(`${ed.key}>`);
+    }
   }
   for (const [k, p] of E.paths) if (!eseen.has(k)) { p.remove(); E.paths.delete(k); }
 }
@@ -23905,6 +24206,7 @@ function wfPaintSel(D){
   for (const k of W.selShown) if (!want.has(k)) { const el = E.map.get(k); if (el) { el.classList.remove('is-sel'); el.setAttribute('aria-selected', 'false'); } }
   for (const k of want) if (!W.selShown.has(k)) { const el = E.map.get(k); el.classList.add('is-sel'); el.setAttribute('aria-selected', 'true'); }
   W.selShown = want;
+  wfPaintBulk(W);
   const tab = E.map.has(W.focus) ? W.focus : [...E.map.keys()].find(k => k==='addt' || /^[tnh]:/.test(k)) || null, el = tab ? E.map.get(tab) : null;
   if (W.tabEl!==el) { if (W.tabEl && W.tabEl.isConnected) W.tabEl.tabIndex = -1; if (el) el.tabIndex = 0; W.tabEl = el; }
   // W.focus is set first, so the focusin this fires sees no change and never asks for another paint from inside this one
@@ -23966,12 +24268,15 @@ function wfChromeState(W, D){
       tabs: Object.keys(h.tabs).filter(k => typeof h.tabs[k]==='function'), rail: Object.keys(h.rail).filter(k => typeof h.rail[k]==='function') } };
 }
 function wfPopCtx(W, D){
-  const M = W.menu || {}, n = M.kind==='node' ? wfNodesOf(W.doc)[M.id] : null, t = M.kind==='trigger' ? (W.doc.triggers || []).find(x => x.id===M.id) : null;
+  const M = W.menu || {}, Q = M.kind==='quick' ? M.on : null, n = M.kind==='node' || Q==='node' ? wfNodesOf(W.doc)[M.id] : null, t = M.kind==='trigger' || Q==='trigger' ? (W.doc.triggers || []).find(x => x.id===M.id) : null;
   const s = wfChromeState(W, D);
-  return { ro: s.ro, mobile: W.mobile, clip: !!wfClipLoad(AUTO_BUSINESS_ID, Date.now()), hasId: s.hasId, canUndo: s.canUndo, canRedo: s.canRedo, hooks: s.hooks, writeWhy: wfGuardWrite(),
+  return { ro: s.ro, mobile: W.mobile, builder: W.builder, clip: !!wfClipLoad(AUTO_BUSINESS_ID, Date.now()), hasId: s.hasId, canUndo: s.canUndo, canRedo: s.canRedo, hooks: s.hooks, writeWhy: wfGuardWrite(),
     node: n ? { disabled: n.disabled===true, multi: wfPorts(n).length > 1, canToggle: wfPorts(n).length <= 1 && !(wfRegIx(W.reg).loaded && !wfNodeEntry(W.reg, n.kind, n.type)),
       unknown: wfRegIx(W.reg).loaded && !wfNodeEntry(W.reg, n.kind, n.type) } : null,
-    trigger: t ? { disabled: t.disabled===true } : null };
+    trigger: t ? { disabled: t.disabled===true } : null,
+    quick: Q==='node' && n ? { on: 'node', disabled: n.disabled===true, multi: wfPorts(n).length > 1, unknown: wfRegIx(W.reg).loaded && !wfNodeEntry(W.reg, n.kind, n.type), entry: W.doc.entry===M.id,
+      head: !D.I.parent[M.id], ports: wfPorts(n).length } : Q==='trigger' && t ? { on: 'trigger', disabled: t.disabled===true } : Q ? { on: 'canvas' } : null,
+    sticky: M.kind==='stickyColor' ? wfObj(wfStickiesOf(W.layout).find(k => k.id===M.id)) : null };
 }
 function wfPaintChrome(D){
   const W = WF, E = W.el, s = wfChromeState(W, D), mac = wfIsMac();
@@ -23986,6 +24291,13 @@ function wfPaintChrome(D){
   wfPatch(E.pill, wfPillHtml(W.mode));
   E.pill.hidden = !WF_MODE_PILL[W.mode];
   E.hand.setAttribute('aria-pressed', String(W.tool==='hand'));
+  // the Advanced controls (G5.2): select · hand · fit · − · + · Tidy up
+  const adv = W.builder==='advanced';
+  E.shell.classList.toggle('wfb-adv', adv);
+  E.ctl.classList.toggle('is-adv', adv);
+  E.selBtn.hidden = !adv; E.tidyBtn.hidden = !adv;
+  E.selBtn.setAttribute('aria-pressed', String(W.tool==='marquee'));
+  E.vp.classList.toggle('is-marquee', W.tool==='marquee');
   E.tools.hidden = !W.mobile;
   E.kbtn.hidden = W.mobile;
   E.vp.hidden = W.tab!=='builder';
@@ -24047,15 +24359,18 @@ function wfMount(){
   E.trigs = wfMk('div', 'wfb-trigs', { role: 'group', 'aria-label': 'Triggers' }, E.tree);
   E.ctl = wfMk('div', 'wfb-ctl', { role: 'toolbar', 'aria-label': 'Zoom' }, E.vp);
   const cb = (act, label, icon) => { const b = wfMk('button', 'wfb-cb', { type: 'button', 'data-act': act, 'aria-label': label, title: label }, E.ctl); b.innerHTML = icon; return b; };
+  E.selBtn = cb('selTool', 'Select tool: drag to select steps', ico('cursor', 16));
   E.hand = cb('hand', 'Hand tool: drag to move around', ico('hand', 16));
   cb('zoomIn', 'Zoom in', ico('plus', 16));
   E.zoom = wfMk('button', 'wfb-cb wfb-zl', { type: 'button', 'data-act': 'zoom100', 'aria-label': 'Zoom to 100%', title: 'Zoom to 100%' }, E.ctl);
   cb('zoomOut', 'Zoom out', ico('minus', 16));
   cb('fit', 'Fit to screen', ico('maximize', 16));
+  E.tidyBtn = cb('tidy', 'Tidy up (2)', ico('tidy', 16));
   E.kbtn = wfMk('button', 'wfb-cb wfb-kbtn', { type: 'button', 'data-act': 'keys', 'aria-label': 'Keyboard shortcuts', title: 'Keyboard shortcuts (K)' }, E.vp);
   E.kbtn.innerHTML = ico('keyboard', 16);
   E.corner = wfMk('div', 'wfb-corner', {}, E.vp);
   E.pill = wfMk('div', 'wfb-pill', { role: 'status' }, E.vp);
+  E.bulk = wfMk('div', 'wfa-bulk', { role: 'toolbar', 'aria-label': 'Selected steps' }, E.vp);
   E.mini = wfMk('canvas', 'wfb-mini', { 'aria-hidden': 'true', title: 'Click to move there' }, E.vp);
   E.tools = wfMk('button', 'wfb-tb wfb-tools', { type: 'button', 'data-act': 'tools', 'aria-haspopup': 'menu' }, E.vp);
   E.tools.innerHTML = `${ico('sliders', 15)}Tools`;
@@ -24065,7 +24380,7 @@ function wfMount(){
   E.rbody = wfMk('div', 'wfb-rbody', {}, E.rdrawer);
   E.modal = wfMk('div', '', { id: 'wf-modal' }, root);
   E.live = wfMk('div', 'sr-only', { id: 'wf-live', 'aria-live': 'polite' }, root);
-  [E.ldrawer, E.rdrawer, E.tabBody, E.pill, E.banner].forEach(el => { el.hidden = true; });
+  [E.ldrawer, E.rdrawer, E.tabBody, E.pill, E.banner, E.bulk, E.selBtn, E.tidyBtn].forEach(el => { el.hidden = true; });
   try { const w = Number(localStorage.getItem('wf.drawerW')); if (w >= WF_UIX.drawer.min) root.style.setProperty('--wfb-rdw', `${Math.round(w)}px`); } catch (e) { /* the default width */ }
   return E;
 }
@@ -24118,14 +24433,16 @@ function wfPresenceStart(W){
 }
 function wfBuilderOpen(row, opts){
   const o = opts || {}, r = wfObj(row), def = wfObj(r.definition);
-  if (WF) wfBuilderClose();
+  if (WF) wfBuilderClose({ nav: false });   // the new one's entry replaces or follows it (wfNavHooks.opened)
   let doc = wfNewDoc();
   if (def.schema===2 && def.nodes && typeof def.nodes==='object') doc = def;
   // a phase-4 row not migrated yet: its own trigger and steps columns (as the engine's upgradeV1(a.trigger, a.steps))
   else if (r.trigger || def.trigger || Array.isArray(r.steps) || Array.isArray(def.steps)) { try { doc = wfFromV1(r.trigger || def.trigger, Array.isArray(r.steps) ? r.steps : def.steps).doc; } catch (e) { doc = wfNewDoc(); } }
   const p = typeof getCurrentProfile==='function' ? getCurrentProfile() : null;
   const W = WF = { token: ++WF_TOKEN, id: r.id!=null ? String(r.id) : null, rev: r.revision ?? null, systemKey: r.system_key || null, name: String(r.name || 'New workflow').slice(0, WF_DOC_LIMITS.name),
-    status: r.enabled ? 'published' : 'draft', audience: r.audience || null, doc, layout: wfObj(r.layout), builder: r.builder==='advanced' ? 'advanced' : 'standard', settings: wfObj(r.settings), tplDrafts: {},
+    status: r.enabled ? 'published' : 'draft', audience: r.audience || null, doc, layout: wfObj(r.layout), settings: wfObj(r.settings), tplDrafts: {},
+    // a new one (no builder given) opens in Global Workflow Settings' "Default builder for new workflows" (G5.3)
+    builder: r.builder==='advanced' || (r.id==null && !r.builder && !WF_MODE_RO[o.mode] && wfDefaultBuilder(typeof AUTO!=='undefined' ? AUTO.safety : null)==='advanced') ? 'advanced' : 'standard',
     docRev: 0, layoutRev: 0, ctxRev: 0, regRev: 0, mode: WF_MODE_RO[o.mode] ? o.mode : 'edit', ro: String(o.ro || ''), tab: 'builder', sel: new Set(), focus: null, drawer: null, picker: null, rail: null,
     view: null, vpSize: null, tool: 'select', hist: { past: [], future: [] }, raf: 0, painting: false, again: false, gesture: null, saving: false, derived: null, dirty: {}, menu: null, dialog: null,
     moveMode: null, renaming: false, renameDraft: '', railHidden: false, spaceHand: false, mobile: wfMobileNow(), profileId: p ? p.id : null, reg: wfBuilderReg(), selShown: new Set(), tabEl: null,
@@ -24140,6 +24457,7 @@ function wfBuilderOpen(row, opts){
   const E = W.el = wfMount();
   const on = (t, ev, fn, opt) => { t.addEventListener(ev, fn, opt); W.off.push(() => t.removeEventListener(ev, fn, opt)); };
   on(E.root, 'click', wfOnClick);
+  on(E.root, 'dblclick', wfOnDblClick);
   on(E.root, 'contextmenu', wfOnContext);
   on(E.root, 'pointerdown', wfOnPointerDown);
   on(E.root, 'focusin', wfOnFocusIn);
@@ -24167,7 +24485,8 @@ function wfBuilderOpen(row, opts){
   wfRegWatch(W);
   W.ctxSig = wfCtxSig();
   wfDirty('chrome', 'canvas', 'sel', 'view', 'mini');
-  wfNavHooks.opened(W.id);
+  if (!wfNavId(W)) W.navTmp = wfNavNewKey();
+  wfNavHooks.opened(wfNavId(W), W.navTmp);
   // a saved workflow: its notes (the cards' counts), the pause dates (the Publish switch), this device's unsaved draft
   if (W.id && W.mode==='edit') {
     wfPresenceStart(W);
@@ -24181,13 +24500,13 @@ function wfBuilderOpen(row, opts){
   return W;
 }
 // Closes it as it is (the leave guard, G4.4, asks before this when something is unsaved). Never draws the app: the
-// caller does when it is a person's action.
-function wfBuilderClose(){
+// caller does when it is a person's action. opts.nav false: the page history is moved by the caller (G5.3).
+function wfBuilderClose(opts){
   const W = WF;
   if (!W) return;
   if (W.gesture) wfGestureCancel();
   if (W.raf) cancelAnimationFrame(W.raf);
-  clearTimeout(W.viewT); clearTimeout(W.animT); clearTimeout(W.longT); clearTimeout(W.draftT); clearTimeout(W.remoteT);
+  clearTimeout(W.viewT); clearTimeout(W.animT); clearTimeout(W.longT); clearTimeout(W.draftT); clearTimeout(W.remoteT); clearTimeout(W.flipT);
   wfViewSaveNow(W);
   W.off.forEach(f => { try { f(); } catch (e) { /* already gone */ } });
   const E = W.el;
@@ -24197,7 +24516,7 @@ function wfBuilderClose(){
   document.body.classList.remove('wf-open');
   WF = null;
   if (typeof WF_UI!=='undefined') WF_UI.open = null;
-  wfNavHooks.closed();
+  wfNavHooks.closed(opts);
   try { if (W.prevFocus && W.prevFocus.isConnected && W.prevFocus.focus) W.prevFocus.focus({ preventScroll: true }); } catch (e) { /* focus stays where it is */ }
 }
 // Leaving (← Workflows list, the switcher, stage 4's back): G4.4's guard asks about unsaved changes; then() leaves.
@@ -24216,7 +24535,8 @@ function wfAppDataChanged(){
   const p = AUTH.status==='ready' ? getCurrentProfile() : null;
   if (!p || p.id!==W.profileId || !canViewSection(p, 'settings')) {
     const kept = !!(WF_HOOKS.stash && wfIsDirty(W) && WF_HOOKS.stash());
-    wfBuilderClose();
+    // signed out or someone else (View as): stage 4 starts that person's history afresh, so it isn't moved here
+    wfBuilderClose(p && p.id===W.profileId ? undefined : { nav: false });
     showToast(kept ? 'Signed out: your unsaved changes are kept on this device' : 'The workflow builder closed', { kind: 'info' });
     return;
   }
@@ -24259,6 +24579,7 @@ function wfApplySnap(W, s){
   if (s.doc!==W.doc) W.docRev++;
   if (s.layout!==W.layout || s.builder!==W.builder) W.layoutRev++;
   Object.assign(W, { doc: s.doc, layout: s.layout, builder: s.builder, settings: s.settings, name: s.name, tplDrafts: s.tplDrafts });
+  if (W.builder!=='advanced' && W.tool==='marquee') W.tool = 'select';   // the Select tool is the Advanced canvas's only
   W.sel = new Set(s.sel || []);
   if (W.focus && /^n:/.test(W.focus) && !wfHas(wfNodesOf(W.doc), W.focus.slice(2))) W.focus = null;
   if (W.drawer && W.drawer.id && !wfHas(wfNodesOf(W.doc), W.drawer.id) && !(W.doc.triggers || []).some(t => wfObj(t).id===W.drawer.id)) wfSetLayer('drawer', null);
@@ -24289,8 +24610,10 @@ function wfUndoCommit(no){ const W = WF, last = W && W.hist.past[W.hist.past.len
 function wfSetLayer(name, value){
   const W = WF;
   if (!W) return;
-  const was = !!W[name];
+  const was = !!W[name], old = W[name];
   W[name] = value;
+  // the leave question (back's, G5.3) closed without Save or Discard (Cancel, ×, Esc, another back): the history stays
+  if (name==='dialog' && old && old!==value && old.kind==='leave' && !old.done && typeof old.cancel==='function') old.cancel();
   if (was!==!!value) wfNavHooks.layer(name, !!value);
   if ((name==='menu' || name==='dialog') && value) W.modalFocus = true;
   wfDirty('chrome');
@@ -24448,12 +24771,20 @@ function wfDoCut(id, mode){
   wfDoDelete(id, m, clip);
   return true;
 }
-function wfDoPaste(slot){
-  const W = WF, clip = wfClipLoad(wfBiz(), Date.now());
+// slot null = a new group of its own (Advanced); o (G5.2) = { clip (else the clipboard), label, at (Advanced: where the first
+// pasted tile goes, the others as they were copied) }.
+function wfDoPaste(slot, o){
+  const W = WF, x = o || {}, clip = x.clip || wfClipLoad(wfBiz(), Date.now());
   if (!clip) { showToast('Nothing to paste: copy a step first (copies last 15 minutes)', { kind: 'warn' }); return; }
   let toast = '';
-  const no = wfCommit('Paste actions', w => { const minted = {}; const r = wfPaste(w.doc, clip, slot, { biz: wfBiz(), now: Date.now(), reg: w.reg, maxSteps: wfBuilderCtx().maxSteps, taken: w.tplDrafts, tplKey: () => { const k = autoLibKey({ ...wfObj(w.tplDrafts), ...minted }); minted[k] = { text: '' }; return k; } }); toast = r.toast; return r.error ? r : { doc: r.doc, tplDrafts: Object.keys(r.tplDrafts).length ? { ...w.tplDrafts, ...r.tplDrafts } : w.tplDrafts }; });
+  const no = wfCommit(x.label || 'Paste actions', w => {
+    const minted = {}; const r = wfPaste(w.doc, clip, slot, { biz: wfBiz(), now: Date.now(), reg: w.reg, maxSteps: wfBuilderCtx().maxSteps, taken: w.tplDrafts, tplKey: () => { const k = autoLibKey({ ...wfObj(w.tplDrafts), ...minted }); minted[k] = { text: '' }; return k; } }); toast = r.toast;
+    if (r.error) return r;
+    const lay = Array.isArray(x.at) && w.builder==='advanced' ? { layout: wfAdvPlaced(w.layout, wfDerived().layout.pos, wfAdvPasteAt(clip, r.idMap, x.at)) } : {};
+    return { doc: r.doc, tplDrafts: Object.keys(r.tplDrafts).length ? { ...w.tplDrafts, ...r.tplDrafts } : w.tplDrafts, ...lay };
+  });
   if (no && toast) showToast(toast, { kind: 'warn' });
+  return no;
 }
 // Delete (design §5.5): Go to steps pointing at what goes warn first; a step with branches asks which path to keep (Q4);
 // every delete has an Undo on its toast.
@@ -24535,9 +24866,10 @@ function wfMoveDrop(slot){
   wfSetLayer('moveMode', null);
   wfCommit(m.mode==='fromHere' ? 'Move all actions from here' : 'Move action', w => wfMove(w.doc, m.id, { src: slot.src, port: slot.port }, m.mode, w.reg), {});
 }
-function wfPicker(kind, slot){
+// o (Advanced, G5.2) = { at: [x, y] (where the new step's tile goes), detached (a new group of its own) }.
+function wfPicker(kind, slot, o){
   if (wfGuardEdit()) { showToast(wfGuardEdit(), { kind: 'warn' }); return; }
-  if (WF_HOOKS.picker) WF_HOOKS.picker(kind, slot); else showToast(WF_SOON, { kind: 'info' });
+  if (WF_HOOKS.picker) WF_HOOKS.picker(kind, slot, o); else showToast(WF_SOON, { kind: 'info' });
 }
 function wfOpenStep(id){ if (WF_HOOKS.openStep) WF_HOOKS.openStep(id); }
 // Opens a menu by its anchor element (or a point: right-click, long-press).
@@ -24571,11 +24903,23 @@ const WF_POP_ACTS = {
   tdel: W => { const id = W.menu.id; wfSetLayer('menu', null); wfTriggerDelete(id); },
   addTrigger: () => { wfSetLayer('menu', null); wfPicker('trigger', null); },
   addAction: () => { wfSetLayer('menu', null); wfAddActionBelow(); },
-  builderStd: () => wfSetLayer('menu', null),
+  builderStd: () => { wfSetLayer('menu', null); wfSwitchBuilder('standard'); },
+  builderAdv: () => { wfSetLayer('menu', null); wfSwitchBuilder('advanced'); },
   undo: () => { wfSetLayer('menu', null); wfUndoRedo(-1); },
   redo: () => { wfSetLayer('menu', null); wfUndoRedo(1); },
   recent: () => { wfSetLayer('menu', null); if (WF_HOOKS.recent) WF_HOOKS.recent(); },
   test: () => { wfSetLayer('menu', null); if (WF_HOOKS.test) WF_HOOKS.test(); },
+  // G5.2: Quick actions (Advanced) and a sticky note's colour menu
+  qCopy: W => { const id = W.menu.id; wfSetLayer('menu', null); wfDoCopy({ id, mode: 'one' }); },
+  qPaste: W => { const M = W.menu; wfSetLayer('menu', null); if (M.id && wfHas(wfNodesOf(W.doc), M.id)) wfDoPaste({ src: M.id, port: wfPorts(wfNodesOf(W.doc)[M.id])[0] ?? null }); else wfPasteAt(M.wat); },
+  qDup: W => { const id = W.menu.id; wfSetLayer('menu', null); wfDuplicateStep(id); },
+  qDefault: W => { const id = W.menu.id; wfSetLayer('menu', null); wfSetDefaultPath(id); },
+  qSticky: W => { const M = W.menu; wfSetLayer('menu', null); wfAdvStickyNew(M.id ? [M.id] : [], M.id ? null : M.wat); },
+  qConnect: W => { const M = W.menu; wfSetLayer('menu', null); wfConnectOpen(M.on==='trigger' ? { trigger: M.id } : { src: M.id }); },
+  qDelete: W => { const id = W.menu.id; wfSetLayer('menu', null); wfDoDelete(id, 'one'); },
+  qTidy: () => { wfSetLayer('menu', null); wfTidyUp(); },
+  stEditM: W => { const id = W.menu.id; wfSetLayer('menu', null); wfStickyEditOpen(id); },
+  stDelM: W => { const id = W.menu.id; wfSetLayer('menu', null); const no = wfStickyCommit('Delete sticky note', l => wfStickyRemove(l, id)); if (no) showToast('Sticky note deleted', { undo: () => wfUndoCommit(no), local: true }); },
   swDup: W => { const id = W.menu.id; wfSetLayer('menu', null); wfSwitchDuplicate(id); },
   swDel: W => { const id = W.menu.id; wfSetLayer('menu', null); wfSwitchDelete(id); },
 };
@@ -24625,8 +24969,8 @@ const WF_ACTS = {
   },
   head: (W, a) => { const k = a.dataset.key; if (k) wfSelectKey(k, false); },
   addTrigger: () => wfPicker('trigger', null),
-  menu: (W, a) => { const id = a.dataset.id; wfSelectKey(`n:${id}`, false); wfPopOpen('node', a, id); },
-  tmenu: (W, a) => { const id = a.dataset.id; wfSelectKey(`t:${id}`, false); wfPopOpen('trigger', a, id); },
+  menu: (W, a) => { const id = a.dataset.id; wfSelectKey(`n:${id}`, false); if (W.builder==='advanced') wfQuickOpen(`n:${id}`, 0, 0, a); else wfPopOpen('node', a, id); },
+  tmenu: (W, a) => { const id = a.dataset.id; wfSelectKey(`t:${id}`, false); if (W.builder==='advanced') wfQuickOpen(`t:${id}`, 0, 0, a); else wfPopOpen('trigger', a, id); },
   toggle: (W, a) => wfToggleStep(a.dataset.id),
   notes: (W, a) => { if (!W.id) { showToast('Save the workflow first', { kind: 'info' }); return; } if (WF_HOOKS.notes) WF_HOOKS.notes(a.dataset.id); else showToast(WF_SOON, { kind: 'info' }); },
   tcopy: (W, a) => { const id = a.dataset.id; wfCommit('Copy trigger', w => wfDuplicateTrigger(w.doc, id, w.reg)); },
@@ -24660,16 +25004,19 @@ function wfOnClick(e){
   if (act.startsWith('m:')) {
     const m = act.slice(2);
     if (m.startsWith('rail:')) { wfSetLayer('menu', null); wfRailToggle(m.slice(5)); return; }
+    if (m.startsWith('stc-')) { const id = W.menu.id, c = m.slice(4); wfSetLayer('menu', null); wfStickyColor(id, c); return; }
     if (WF_POP_ACTS[m]) WF_POP_ACTS[m](W, a, e);
     return;
   }
   if (WF_ACTS[act]) WF_ACTS[act](W, a, e);
   else if (WF_PICK_ACTS[act]) WF_PICK_ACTS[act](W, a, e);
+  else if (WF_ADV_ACTS[act]) WF_ADV_ACTS[act](W, a, e);
   else if (WF_RAIL_ACTS[act]) WF_RAIL_ACTS[act](W, a, e);
   else if (/^d[A-Z]/.test(act)) wfDrawerAct(act, a);
 }
 function wfOnContext(e){
   const W = WF, card = e.target && e.target.closest ? e.target.closest('.wfb-card[data-key]') : null;
+  if (W && W.builder==='advanced' && wfAdvContext(W, e, card)) return;
   if (!W || !card || W.moveMode) return;
   const k = card.dataset.key;
   if (!/^[nt]:/.test(k)) return;
@@ -24700,9 +25047,13 @@ function wfOnPointerDown(e){
   }
   if (t.closest('#wf-modal') || !W.view) return;
   if (t===E.dresize) { wfGestureStart({ type: 'resize', w0: E.rdrawer.getBoundingClientRect().width }, e); return; }
+  // a picker row dragged onto the Advanced canvas (G5.2; a tap stays a click)
+  if (W.builder==='advanced' && wfPaletteDown(W, t, e)) return;
   if (!E.vp.contains(t)) return;
   if (t===E.mini) { wfGestureStart({ type: 'mini' }, e); wfMiniMove(W.gesture, e); return; }
   const hand = W.tool==='hand' || W.spaceHand || e.button===1;
+  // the Advanced canvas (G5.2): a dot or a "[+]" (connect), a sticky's title band or corner, a tile, the marquee
+  if (W.builder==='advanced' && !hand && wfAdvPointerDown(W, t, e)) return;
   const grip = t.closest('[data-act="drag"]');
   if (grip && !hand && !W.mobile && W.builder==='standard' && !wfGuardEdit() && !W.moveMode && wfNodeIdOk(grip.dataset.id)) { wfGestureStart({ type: 'node', id: grip.dataset.id }, e); return; }
   if (!hand && t.closest('button, input, textarea, select, a, .wfb-ctl, .wfb-corner')) return;
@@ -24711,7 +25062,7 @@ function wfOnPointerDown(e){
   if (card && e.pointerType==='touch' && /^[nt]:/.test(card.dataset.key)) {
     const k = card.dataset.key, g = W.gesture;
     // a long press (touch) opens the step's menu; the gesture lasts until the finger lifts, so its click is swallowed
-    W.longT = setTimeout(() => { if (WF!==W || W.gesture!==g || g.moved) return; g.long = true; g.type = 'press'; wfSelectKey(k, false); wfPopOpen(k.startsWith('n:') ? 'node' : 'trigger', null, k.slice(2), { x: e.clientX, y: e.clientY }); }, WF_UIX.longPress);
+    W.longT = setTimeout(() => { if (WF!==W || W.gesture!==g || g.moved) return; g.long = true; g.type = 'press'; wfSelectKey(k, false); if (W.builder==='advanced') wfQuickOpen(k, e.clientX, e.clientY); else wfPopOpen(k.startsWith('n:') ? 'node' : 'trigger', null, k.slice(2), { x: e.clientX, y: e.clientY }); }, WF_UIX.longPress);
   }
 }
 function wfGestureStart(g, e){
@@ -24748,11 +25099,13 @@ function wfGestureMove(e){
     g.moved = true; clearTimeout(W.longT);
     wfCapture(W.el.vp, g.pid);
     if (g.type==='node' && !wfDragBegin(g)) { g.type = 'pan'; }
+    else if (WF_ADV_GESTURES[g.type] && !(g.began = WF_ADV_GESTURES[g.type].begin(g))) g.type = 'dead';
   }
   if (g.type==='pan') { W.view = { x: g.v0.x + dx, y: g.v0.y + dy, k: g.v0.k }; wfDirty('view', 'mini'); }
   else if (g.type==='node') { g.last = pt; wfDragMove(g); }
   else if (g.type==='mini') wfMiniMove(g, e);
   else if (g.type==='resize') wfResizeMove(g, e);
+  else if (WF_ADV_GESTURES[g.type]) { g.last = pt; g.ev = e; WF_ADV_GESTURES[g.type].move(g); }
 }
 function wfGestureEnd(e){
   const W = WF, g = W && W.gesture;
@@ -24760,6 +25113,7 @@ function wfGestureEnd(e){
   g.cleanup();
   W.gesture = null;
   if (g.type==='node' && g.el) wfDragEnd(g, true);
+  if (WF_ADV_GESTURES[g.type] && g.began) WF_ADV_GESTURES[g.type].end(g, true);
   if (g.type==='resize') { try { localStorage.setItem('wf.drawerW', String(Math.round(g.w || g.w0))); } catch (err) { /* a convenience */ } }
   if (g.type==='pan' || g.type==='pinch' || g.type==='mini') { if (g.moved || g.type==='mini') wfViewSaveSoon(); }
   if (g.moved || g.long) { W.suppressClick = true; setTimeout(() => { if (WF===W) W.suppressClick = false; }, 0); }
@@ -24770,6 +25124,7 @@ function wfGestureCancel(){
   g.cleanup();
   W.gesture = null;
   if (g.type==='node' && g.el) wfDragEnd(g, false);
+  if (WF_ADV_GESTURES[g.type] && g.began) WF_ADV_GESTURES[g.type].end(g, false);
   if ((g.type==='pan' || g.type==='pinch' || g.type==='mini') && g.v0) { W.view = g.v0; wfDirty('view', 'mini'); }
   if (g.type==='resize') W.el.root.style.setProperty('--wfb-rdw', `${Math.round(g.w0)}px`);
   W.suppressClick = !!g.moved;
@@ -24853,7 +25208,7 @@ const WF_KEY_ACTS = {
   zoomOut: () => { wfZoomBy(1 / WF_UIX.zoomStep); return true; },
   zoom100: () => { wfZoomTo(1); return true; },
   fit: () => { wfFitView(); return true; },
-  tidy: () => false,
+  tidy: () => { if (WF.builder!=='advanced') return false; wfTidyUp(); return true; },
   next: () => { wfNavKey('next'); return true; },
   prev: () => { wfNavKey('prev'); return true; },
   siblingNext: () => { wfNavKey(WF.builder==='advanced' ? 'down' : 'right'); return true; },
@@ -24869,7 +25224,7 @@ const WF_KEY_ACTS = {
   versions: () => { wfRailToggle('versions'); return true; },
   ai: () => { wfRailToggle('ai'); return true; },
   openStep: () => { if (WF.focus==='addt') { wfPicker('trigger', null); return true; } const k = wfTargetKey(); if (!k || !/^[nt]:/.test(k)) return false; wfOpenStep(k.slice(2)); return true; },
-  menu: () => { const k = wfTargetKey(); if (!k || !/^[nt]:/.test(k)) return false; const el = WF.el.map.get(k); wfPopOpen(k.startsWith('n:') ? 'node' : 'trigger', el && el.querySelector('.wfb-more'), k.slice(2)); return true; },
+  menu: () => { const k = wfTargetKey(); if (!k || !/^[nt]:/.test(k)) return false; const el = WF.el.map.get(k); if (WF.builder==='advanced') { wfQuickOpen(k, 0, 0, el && el.querySelector('.wfb-hov [data-act$="menu"]')); return true; } wfPopOpen(k.startsWith('n:') ? 'node' : 'trigger', el && el.querySelector('.wfb-more'), k.slice(2)); return true; },
   moveMode: () => { const k = wfTargetKey(); if (!k || !k.startsWith('n:')) return false; wfMoveStart(k.slice(2), 'one'); return true; },
   hand: e => { if (!e.repeat) { WF.spaceHand = true; WF.el.vp.classList.add('is-hand'); } return true; },
   escape: () => { wfEscape(); return true; },
@@ -25205,7 +25560,8 @@ function wfDrawerApply(doc, dr, reg){
     return { ...none, doc: { ...r.doc, triggers }, error: null, id: x.id };
   }
   const node = { kind: d.kind, type: d.type, config: wfObj(d.config), ...(name ? { name } : {}) };
-  if (!x.id) { const r = wfInsert(doc, x.slot || { src: '@entry', port: null }, node, reg); return { ...none, doc: r.doc, error: r.error, id: r.id, toast: r.toast || '' }; }
+  // (Advanced: a step dropped on the empty canvas starts a group of its own, x.detached)
+  if (!x.id) { const r = wfInsert(doc, x.detached ? null : x.slot || { src: '@entry', port: null }, node, reg); return { ...none, doc: r.doc, error: r.error, id: r.id, toast: r.toast || '' }; }
   const old = wfNodesOf(doc)[x.id];
   if (!old) return { ...none, doc, error: { code: 'E_PATCH_ID', text: 'This step is gone' }, id: null };
   const lost = wfLostSteps(doc, x.id, node, reg);
@@ -25228,11 +25584,12 @@ function leadAssigneeVacation(person, day, data, tz, profiles){
   if (!p.id || !vacs.length || !day) return null;
   const profs = Array.isArray(profiles) ? profiles : [], emps = (data && data.employees) || [];
   const prof = profs.find(x => x && x.id===p.id) || { id: p.id, fullName: p.fullName || p.name || '' };
-  const v = vacationForProfile(vacs, prof, day, tz, 'notAssignable', emps);
-  if (!v) return null;
-  const sName = vacationUsableStandIn(v, day, data, tz);
+  // the same greying as the other assign pickers: vacationPickerInfo ("Not assignable" ticked, "On vacation until …")
+  const who = vacationProfileWho(vacs, prof, emps), info = who ? vacationPickerInfo(vacs, who, day, tz) : null;
+  if (!info) return null;
+  const v = info.vacation, sName = vacationUsableStandIn(v, day, data, tz);
   const sProf = sName ? profs.find(x => x && x.id!==p.id && (emps.length ? wfObj(vacationEmployeeOfProfile(x, emps)).id===v.standInId : (x.technicianName || x.fullName)===sName)) : null;
-  return { name: String(prof.fullName || p.fullName || p.name || 'Someone'), vac: v, label: vacationUntilText(v, day, tz), standIn: sProf ? String(sProf.fullName || sName) : '', standInId: sProf ? String(sProf.id) : '' };
+  return { name: String(prof.fullName || p.fullName || p.name || 'Someone'), vac: v, label: info.label, standIn: sProf ? String(sProf.fullName || sName) : '', standInId: sProf ? String(sProf.id) : '' };
 }
 // The choices of a value (a select or chips), or null when it is typed: the business's own list (x-source; people say
 // who is on vacation), the schema's enum in GHL's words with greyed ones' reasons, days / months / weeks of the month.
@@ -25449,7 +25806,8 @@ function wfPickStore(which, kind){
 function wfPickStorePut(which, kind, list){ try { localStorage.setItem(`${WF_PICK_KEYS[which]}.${wfBiz()}.${kind}`, JSON.stringify(list.slice(0, 20))); } catch (e) { /* a convenience only */ } }
 function wfMyRole(){ try { const p = getCurrentProfile(); return p ? p.role : null; } catch (e) { return null; } }
 // WF_HOOKS.picker: the "+" (slot), "+ Add ▾", "Add new trigger", A / T. An open drawer with changes asks first.
-function wfPickerOpen(kind, slot){
+// o = { at, detached } (Advanced: a step dropped on the canvas goes there; G5.2).
+function wfPickerOpen(kind, slot, o){
   const W = WF;
   if (!W) return;
   const k = kind==='trigger' ? 'trigger' : 'action';
@@ -25458,13 +25816,14 @@ function wfPickerOpen(kind, slot){
     if (W.drawer) wfSetLayer('drawer', null);
     W.panelFocus = 'search';
     wfSetLayer('picker', { kind: k, slot: k==='action' ? (slot || { src: '@entry', port: null }) : null, sc: k==='action' ? wfSlotCtx(W.doc, slot, W.reg) : {}, q: '', tab: 'main', i: 0, rev: 1, wide: false,
-      recent: wfPickStore('recent', k), pins: wfPickStore('pins', k) });
+      recent: wfPickStore('recent', k), pins: wfPickStore('pins', k), at: k==='action' && o && Array.isArray(o.at) ? o.at : null, detached: k==='action' && !!(o && o.detached) });
   };
   if (W.drawer && W.drawer.dirty) wfDrawerAsk(go); else go();
 }
-function wfPickerRowsNow(W, D){
+// sc: another place's context (a palette drop asks before the picker moves there).
+function wfPickerRowsNow(W, D, sc){
   const P = W.picker;
-  return wfPickerRows(W.reg, P.kind, P.q, { tab: P.tab, apps: wfAppsOf(W.reg, P.kind), role: wfMyRole(), lists: D.ctx.lists }, P.recent, P.pins, P.sc);
+  return wfPickerRows(W.reg, P.kind, P.q, { tab: P.tab, apps: wfAppsOf(W.reg, P.kind), role: wfMyRole(), lists: D.ctx.lists }, P.recent, P.pins, sc===undefined ? P.sc : sc);
 }
 // WF_HOOKS.pickerHtml (paint path: memoised on the picker's own revision; typing in the search patches the list only).
 function wfPickerHtmlHook(W, D){
@@ -25513,7 +25872,7 @@ function wfPickerPick(row){
   if (Object.keys(wfNodesOf(W.doc)).length >= max) { showToast(`At most ${max} steps in one workflow`, { kind: 'warn' }); return; }
   const n = wfNodeDefault(row.kind, row.type, W.reg);
   wfDrawerNew({ kind: 'node', slot: P.slot, draft: { kind: n.kind, type: n.type, name: '', config: n.config }, view: row.kind==='wait' ? 'waitTypes' : 'form', afterSend: !!(P.sc && P.sc.afterSend),
-    reaching: (P.sc && P.sc.reaching) || [] });
+    reaching: (P.sc && P.sc.reaching) || [], at: P.at || null, detached: !!P.detached });
 }
 function wfPickerPin(i){
   const W = WF, P = W && W.picker, row = P ? wfPickerFlat(wfPickerRowsNow(W, wfDerived()))[i] : null;
@@ -25532,7 +25891,7 @@ function wfDrawerNew(o){
   wfSetLayer('picker', null);
   W.panelFocus = 'first';
   wfSetLayer('drawer', { kind: o.kind, id: null, slot: o.slot || null, draft: o.draft, tpl: W.tplDrafts, dirty: false, isNew: true, rev: 1, view: o.view || 'form', help: false, wide: false, picking: false,
-    reorder: false, afterSend: !!o.afterSend, reaching: o.reaching || null, uid: `${W.token}n${W.drawerSeq = (W.drawerSeq || 0) + 1}` });
+    reorder: false, afterSend: !!o.afterSend, reaching: o.reaching || null, uid: `${W.token}n${W.drawerSeq = (W.drawerSeq || 0) + 1}`, at: o.at || null, detached: !!o.detached });
 }
 // WF_HOOKS.openStep: a card clicked, Enter, "Open step"; ^ / v in the drawer. A drawer with changes asks first.
 function wfDrawerOpenStep(id){
@@ -25971,7 +26330,9 @@ function wfDrawerSave(drop){
   const isT = dr.kind==='trigger', no = wfCommit(`${dr.isNew ? 'Add' : 'Edit'} ${isT ? 'trigger' : 'action'}`, w => {
     res = wfDrawerApply(w.doc, { ...dr, drop }, w.reg);
     if (res.error) return res;
-    return { doc: res.doc, tplDrafts: wfPruneTplDrafts(res.doc, dr.tpl), sel: [`${isT ? 't' : 'n'}:${res.id}`], focus: `${isT ? 't' : 'n'}:${res.id}` };
+    // Advanced: a step dropped somewhere on the canvas keeps that place (every other tile keeps its own, G5.2)
+    const lay = dr.at && !isT && dr.isNew && w.builder==='advanced' ? { layout: wfAdvPlaced(w.layout, wfDerived().layout.pos, { [res.id]: dr.at }) } : {};
+    return { doc: res.doc, tplDrafts: wfPruneTplDrafts(res.doc, dr.tpl), sel: [`${isT ? 't' : 'n'}:${res.id}`], focus: `${isT ? 't' : 'n'}:${res.id}`, ...lay };
   });
   if (!no) return;
   wfSetLayer('drawer', null);
@@ -26018,6 +26379,8 @@ const WF_DRAFT = { prefix: 'wf.draft.', maxChars: 1000000, wait: 1500, keepDays:
 // Sticky notes (design §2.7): at most 50; a title of 80, a note of 2,000 (markdown-lite, wfStickyMd); GHL's colours. In the
 // Standard builder a sticky hangs beside a step (anchor) and moves with it.
 const WF_STICKY = { max: 50, title: 80, body: 2000, colors: [['yellow', 'Yellow'], ['pink', 'Pink'], ['peach', 'Peach'], ['green', 'Green'], ['blue', 'Blue'], ['purple', 'Purple']], w: 240, h: 150, gap: 24, stack: 12 };
+// The sticky editor's markdown-lite buttons (G5.2): [what, label, the letter or icon].
+const WF_STICKY_FMT = [['b', 'Bold', 'B'], ['i', 'Italic', 'I'], ['u', 'Underline', 'U'], ['li', 'List', 'menu'], ['a', 'Link', 'link']];
 const WF_NOTE_COLS = 'id, node_id, body, created_by, created_by_name, created_at, edited_by_name, edited_at';
 // What the builder opens a workflow with (the list reads no definition).
 const WF_BUILDER_COLS = 'id, name, enabled, audience, definition, layout, builder, settings, system_key, revision, trigger, steps, folder_id, template_key, origin, deleted_at, updated_by_name, updated_at';
@@ -26175,6 +26538,8 @@ function wfStickySet(layout, id, patch){
   if (wfHas(p, 'color') && WF_STICKY.colors.some(c => c[0]===p.color)) s.color = p.color;
   if (wfHas(p, 'hidden')) s.hidden = p.hidden===true;
   if (wfHas(p, 'anchor')) s.anchor = typeof p.anchor==='string' && WF_ID_RE.test(p.anchor) ? p.anchor : null;
+  // where a free (Advanced) note is and its size, in world px (G5.2)
+  ['x', 'y', 'w', 'h'].forEach(k => { const v = Number(p[k]); if (wfHas(p, k) && p[k]!==null && Number.isFinite(v)) s[k] = Math.round(k==='w' ? Math.max(160, Math.min(4000, v)) : k==='h' ? Math.max(90, Math.min(4000, v)) : v); });
   const next = list.slice();
   next[i] = s;
   return { ...L, v: 1, stickies: next };
@@ -26394,19 +26759,20 @@ function wfRailSwitchListHtml(s){
   if (!rec.length && !all.length) return `<p class="wfr-note">${x.q ? 'No workflow has that name.' : 'No other workflows yet.'}</p>`;
   return (rec.length ? `<h3>Recent</h3>${rec.map(row).join('')}` : '') + `<h3>All workflows</h3>${all.map(row).join('')}`;
 }
-// s = { list (wfStickiesOf), edit ({ id, title, body, color, anchor }), steps ([{ id, name }]), ro, max }.
+// s = { list (wfStickiesOf), edit ({ id, title, body, color, anchor }), steps ([{ id, name }]), ro, max, adv (the Advanced
+// builder: free notes, no "Next to") }. The note's markdown-lite buttons (G5.2) wrap the selected words (wfStickyFmt).
 function wfRailStickiesHtml(s){
   const x = wfObj(s), list = Array.isArray(x.list) ? x.list : [], steps = Array.isArray(x.steps) ? x.steps : [], name = id => { const f = steps.find(z => z.id===id); return f ? f.name : ''; };
   const addWhy = x.ro || (list.length >= WF_STICKY.max ? `At most ${WF_STICKY.max} sticky notes` : '');
   const form = e => `<div class="wfr-item wfr-st-ed"><div class="wfd-f"><label class="wfd-lab" for="wfr-st-t">Title</label><input id="wfr-st-t" class="input" data-act="stTitle" maxlength="${WF_STICKY.title}" value="${esc(e.title)}" dir="auto"></div>`
-    + `<div class="wfd-f"><label class="wfd-lab" for="wfr-st-b">Note</label><textarea id="wfr-st-b" class="input" rows="5" data-act="stBody" maxlength="${WF_STICKY.body}" dir="auto">${esc(e.body)}</textarea><p class="wfr-note">**bold**, *italic*, __underline__, "- " for a list, [words](https://…) for a link</p></div>`
+    + `<div class="wfd-f"><label class="wfd-lab" for="wfr-st-b">Note</label><div class="wfr-fmt" role="toolbar" aria-label="Format the note">${WF_STICKY_FMT.map(([f, label, icon]) => `<button type="button" class="wfb-ib" data-act="stFmt" data-f="${f}" aria-label="${label}" title="${label}">${f.length===1 ? `<span class="wfr-fmt-${f}" aria-hidden="true">${icon}</span>` : ico(icon, 15)}</button>`).join('')}</div><textarea id="wfr-st-b" class="input" rows="5" data-act="stBody" maxlength="${WF_STICKY.body}" dir="auto">${esc(e.body)}</textarea><p class="wfr-note">**bold**, *italic*, __underline__, "- " for a list, [words](https://…) for a link</p></div>`
     + `<div class="wfd-f"><span class="wfd-lab">Colour</span><div class="wfr-colors" role="radiogroup" aria-label="Colour">${WF_STICKY.colors.map(([c, label]) => `<button type="button" role="radio" class="is-${c}${e.color===c ? ' on' : ''}" data-act="stColor" data-c="${c}" aria-checked="${e.color===c}" aria-label="${label}" title="${label}"></button>`).join('')}</div></div>`
-    + `<div class="wfd-f"><label class="wfd-lab" for="wfr-st-a">Next to</label><select id="wfr-st-a" class="input" data-act="stAnchor">${steps.length ? steps.map(z => `<option value="${esc(z.id)}"${z.id===e.anchor ? ' selected' : ''}>${esc(z.name)}</option>`).join('') : '<option value="">The first step</option>'}</select></div>`
+    + (x.adv ? '' : `<div class="wfd-f"><label class="wfd-lab" for="wfr-st-a">Next to</label><select id="wfr-st-a" class="input" data-act="stAnchor">${steps.length ? steps.map(z => `<option value="${esc(z.id)}"${z.id===e.anchor ? ' selected' : ''}>${esc(z.name)}</option>`).join('') : '<option value="">The first step</option>'}</select></div>`)
     + `<div class="wfr-acts"><button type="button" class="btn small danger" data-act="stDel" data-sid="${esc(e.id)}">Delete</button><span class="wfd-sp"></span><button type="button" class="btn small" data-act="stCancel">Cancel</button><button type="button" class="btn small primary" data-act="stSave">Save</button></div></div>`;
   const row = t => x.edit && x.edit.id===t.id ? form(x.edit) : `<div class="wfr-sw"><span class="wfr-dot is-${esc(WF_STICKY.colors.some(c => c[0]===t.color) ? t.color : 'yellow')}" aria-hidden="true"></span>`
-    + `<button type="button" class="wfr-swo" data-act="stEdit" data-sid="${esc(t.id)}"${wfDisAttr(x.ro)}><b dir="auto">${esc(t.title || 'Untitled note')}</b><small dir="auto">${t.anchor && name(t.anchor) ? `Next to: ${esc(name(t.anchor))}` : 'Beside the steps'}${t.hidden ? ' · hidden' : ''}</small></button>`
+    + `<button type="button" class="wfr-swo" data-act="stEdit" data-sid="${esc(t.id)}"${wfDisAttr(x.ro)}><b dir="auto">${esc(t.title || 'Untitled note')}</b><small dir="auto">${x.adv ? 'On the canvas' : t.anchor && name(t.anchor) ? `Next to: ${esc(name(t.anchor))}` : 'Beside the steps'}${t.hidden ? ' · hidden' : ''}</small></button>`
     + `<button type="button" class="wfd-link" data-act="stHide" data-sid="${esc(t.id)}"${wfDisAttr(x.ro)}>${t.hidden ? 'Show' : 'Hide'}</button></div>`;
-  return `<div class="wfr"><p class="wfr-note">A sticky note sits beside a step and moves with it.</p><div class="wfr-row"><button type="button" class="btn small" data-act="stAdd"${wfDisAttr(addWhy)}>${ico('plus', 14)}Add sticky note</button></div>`
+  return `<div class="wfr"><p class="wfr-note">${x.adv ? 'A sticky note can sit behind a group of steps: drag its title to move them together (Alt-drag moves the note alone). Double-click a note to edit it.' : 'A sticky note sits beside a step and moves with it.'}</p><div class="wfr-row"><button type="button" class="btn small" data-act="stAdd"${wfDisAttr(addWhy)}>${ico('plus', 14)}Add sticky note</button></div>`
     + `<div class="wfr-list">${list.length ? list.map(row).join('') : '<p class="wfr-note">No sticky notes yet.</p>'}</div></div>`;
 }
 // The builder's own dialogs (#wf-modal; Esc and the scrim close them, Tab stays inside).
@@ -26416,7 +26782,9 @@ function wfDlgHtml(id, title, body, foot){
 }
 const WF_DIALOG_HTML = {
   keys: (W, D, mac) => wfKeysHtml(W.builder, mac),
+  connect: (W, D) => wfConnectDlg(W, D),
   q4: W => wfQ4Html(W.dialog),
+  blockers: W => wfBlockersHtml(W.dialog.rows),
   gate: W => wfDlgHtml('wfb-gate-t', 'Workflow can\'t be published yet', `<p class="wfb-dlg-p">Fix ${Number(W.dialog.n) || 0} error${Number(W.dialog.n)===1 ? '' : 's'} first. Saving is allowed with errors on a Draft; publishing is not.</p>`,
     '<button type="button" class="btn" data-act="dlgClose">Close</button><button type="button" class="btn primary" data-act="gateReview">Review issues</button>'),
   conflict: W => wfDlgHtml('wfb-409-t', 'Changed meanwhile', `<p class="wfb-dlg-p">${esc(W.dialog.text)}</p><p class="wfb-dlg-p">Your changes are still here. Load their version (yours go), or save yours as a new copy.</p>`,
@@ -26681,7 +27049,7 @@ function wfSaveDone(W, snap, b, name, aiMark){
   if (W.tplDrafts===snap.tplDrafts && keys.length) { const none = {}; W.tplDrafts = none; base.tplDrafts = none; }
   W.base = base; W.isCopy = false; W.remote = null;
   wfAiSaved(W, aiMark);   // an AI change made while it was on the way is still unsaved
-  if (wasNew) { W.templateKey = null; if (typeof WF_UI!=='undefined') WF_UI.open = id; W.recent = wfRecentPush(id); W.notesE = null; wfNotesLoad(W); wfPresenceStart(W); }
+  if (wasNew) { W.templateKey = null; if (typeof WF_UI!=='undefined') WF_UI.open = id; W.recent = wfRecentPush(id); W.notesE = null; wfNotesLoad(W); wfPresenceStart(W); wfNavHooks.saved(id, W.navTmp); }
   wfDraftClear(W, wasNew ? [null, id] : [id]);
   if (wasNew && W.folderId) wfDbWrite('It stays in Home', sb.from(AUTO_TABLE).update({ folder_id: W.folderId }).eq('id', id));
   wfListChanged(W);
@@ -27021,10 +27389,12 @@ function wfSwitchDelete(id){
 
 // ── Sticky notes (Standard: beside a step) ──
 function wfStickySteps(W){ return wfOrder(W.doc).map(id => ({ id, name: wfNodeName(wfNodesOf(W.doc)[id], W.reg) })); }
-function wfRailStickies(W, D){ const P = W.panels.stickies; return wfRailMemo(W, D, 'stickies', '', () => wfRailStickiesHtml({ list: wfStickiesOf(W.layout), edit: P.edit, steps: wfStickySteps(W), ro: wfGuardEdit() })); }
+function wfRailStickies(W, D){ const P = W.panels.stickies; return wfRailMemo(W, D, 'stickies', '', () => wfRailStickiesHtml({ list: wfStickiesOf(W.layout), edit: P.edit, steps: wfStickySteps(W), ro: wfGuardEdit(), adv: W.builder==='advanced' })); }
 function wfStickyAddNow(){
   const W = WF;
   if (!W) return;
+  // Advanced (G5.2): a free note round the selected tiles, else in the middle of the screen
+  if (W.builder==='advanced') { wfAdvStickyNew([...W.sel].filter(k => /^[nt]:/.test(k)).map(k => k.slice(2)), null); return; }
   const k = wfTargetKey(), anchor = k && k.startsWith('n:') ? k.slice(2) : typeof W.doc.entry==='string' ? W.doc.entry : null;
   let id = null;
   const no = wfCommit('Add sticky note', w => { const r = wfStickyAdd(w.layout, anchor); if (r.error) return { error: { text: r.error } }; id = r.id; return { layout: r.layout }; });
@@ -27070,8 +27440,8 @@ const WF_RAIL_ACTS = {
   conflictCopy: () => wfConflictCopy(),
   draftRestore: () => wfDraftRestore(),
   draftDiscard: () => wfDraftDiscard(),
-  leaveSave: async W => { const d = W.dialog; wfSetLayer('dialog', null); if (!d || d.kind!=='leave') return; if (W.drawer && W.drawer.dirty) { showToast('Save or cancel the step first', { kind: 'warn' }); return; } if (await wfSave({ onSaved: d.then }) && WF===W) d.then(); },
-  leaveDiscard: W => { const d = W.dialog; wfSetLayer('dialog', null); if (!d || d.kind!=='leave') return; wfDraftClear(W); d.then(); },
+  leaveSave: async W => { const d = W.dialog; if (d) d.done = true; wfSetLayer('dialog', null); if (!d || d.kind!=='leave') return; if (W.drawer && W.drawer.dirty) { showToast('Save or cancel the step first', { kind: 'warn' }); if (d.cancel) d.cancel(); return; } if (await wfSave({ onSaved: d.then }) && WF===W) d.then(); },
+  leaveDiscard: W => { const d = W.dialog; if (d) d.done = true; wfSetLayer('dialog', null); if (!d || d.kind!=='leave') return; wfDraftClear(W); d.then(); },
   recentGo: (W, a) => wfRecentGo(a.dataset.i),
   noteAdd: () => wfNoteAdd(),
   noteAll: W => { const P = W.panels.notes; P.for = null; P.rev++; wfDirty('chrome'); },
@@ -27091,6 +27461,7 @@ const WF_RAIL_ACTS = {
   swNew: () => wfSwitchNew(),
   swMenu: (W, a) => { const id = a.dataset.wid; if (WF_UUID_RE.test(String(id || ''))) wfPopOpen('switch', a, id); },
   stAdd: () => wfStickyAddNow(),
+  stFmt: (W, a) => wfStickyFmtNow(a.dataset.f),
   stEdit: (W, a) => wfStickyEditOpen(a.dataset.sid),
   sticky: (W, a) => wfStickyEditOpen(a.dataset.sid),
   stCancel: W => { W.panels.stickies.edit = null; wfPanelBump('stickies'); },
@@ -27099,7 +27470,7 @@ const WF_RAIL_ACTS = {
   stHide: (W, a) => { const id = a.dataset.sid, s = wfStickiesOf(W.layout).find(x => x.id===id); if (s) wfStickyCommit(s.hidden ? 'Show sticky note' : 'Hide sticky note', l => wfStickySet(l, id, { hidden: !s.hidden })); },
   stDel: (W, a) => { const id = a.dataset.sid; const no = wfStickyCommit('Delete sticky note', l => wfStickyRemove(l, id)); if (no) { W.panels.stickies.edit = null; showToast('Sticky note deleted', { undo: () => wfUndoCommit(no), local: true }); } },
   sysCopy: W => wfSystemCopyOpen(W.sys),
-  sysOld: W => { const page = W.sys && W.sys.page; if (!page) return; wfBuilderClose(); if (typeof setSettingsPage==='function') setSettingsPage(page); },
+  sysOld: W => { const page = W.sys && W.sys.page; if (!page) return; wfBuilderClose({ nav: false }); if (typeof setSettingsPage==='function') setSettingsPage(page); },   // the settings page's own entry follows the builder's (a back would undo it)
 };
 // Typing in a panel: its state only, and the list it filters (never a paint).
 function wfRailInput(t){
@@ -27152,6 +27523,834 @@ async function wfEdit(key){
   if (row.deleted_at) { showToast('It is in Deleted: restore it first', { kind: 'info' }); return; }
   wfBuilderOpen(row, { mode: 'edit' });
 }
+
+// ══ The workflow builder: the Advanced canvas (stage 2, phase 5 · G5.2; design §5.5 "Advanced", §5.6, §5.7, §5.8; GHL's
+// Advanced builder: tiles with their names below, a dot per path, every chain ending in a "[+]"; Ofek's Q3: on a phone
+// everything except dragging and drawing lines) ══
+// The Advanced canvas is the same paint as the Standard one (wfDerived picks the layout, wfSyncCanvas syncs by key): the
+// tiles with their dots, the "[+]"s, the lines with their arrowheads, a "+" and a trash on each line's middle (shown on
+// hover, CSS only) and the sticky notes behind the tiles. Its gestures go through the same machine (document listeners
+// for one gesture, transforms and the lines of what moves only, ONE commit at the end; Esc / blur put everything back): a
+// tile (or the selection) dragged = "Move steps"; a dot or a "[+]" dragged = drag-to-connect (a rubber-band bézier; on a
+// tile = wfConnect or a trigger's Go to; on the empty canvas = the Actions picker for that path, the new step placed
+// there); a picker row dragged onto a "[+]", the last tile of a path (append) or a line's middle (insert) = that row
+// picked for that place (on the empty canvas: a new group there); the Select tool or Shift-drag = marquee; a sticky's
+// title band = the note and the tiles fully inside it (Alt: the note alone), its corner = its size. Connect mode (Quick
+// actions → "Connect to…", or a tap on a dot) does the same connect from a list, for keyboards, screen readers and phones
+// (WCAG 2.5.7). Two or more selected show the bulk bar; right-click (a long press on touch) opens Quick actions.
+
+// ── pure helpers (tests/business-logic.test.js) ──
+// hit: how near (world px) a palette drop must be to a "[+]" or a line's middle; mid: the line's middle buttons (w, h);
+// pad / band: a sticky note drawn round tiles (the space round them, its title band); flip: Tidy up's move (ms).
+const WF_ADV_UI = { hit: 30, mid: [64, 28], pad: 28, band: 34, sticky: { minW: 160, minH: 90, max: 4000 }, flip: 220 };
+// The shown sticky notes on the Advanced canvas: where they were put (x, y, w, h; sizes kept to 160–4000 × 90–4000), in
+// the list's order.
+function wfAdvStickyBoxes(layout){
+  const U = WF_ADV_UI.sticky, num = (v, d) => v!=null && Number.isFinite(Number(v)) ? Math.round(Number(v)) : d, fit = (v, lo) => Math.max(lo, Math.min(U.max, v));
+  return wfStickiesOf(layout).filter(s => s.hidden!==true).map(s => ({ id: s.id, x: num(s.x, 0), y: num(s.y, 0), w: fit(num(s.w, WF_STICKY.w), U.minW), h: fit(num(s.h, WF_STICKY.h), U.minH),
+    color: WF_STICKY.colors.some(c => c[0]===s.color) ? s.color : 'yellow', title: String(s.title || ''), body: String(s.body || '') }));
+}
+// A "[+]"'s key on the canvas.
+function wfAdvPlusKey(p){ const x = wfObj(p); return `p:${x.src}:${x.port ?? ''}`; }
+// The keys of the boxes fully inside a box (a sticky note's group: what its title band drags along). → sorted keys.
+function wfAdvInside(box, boxes){
+  const b = wfObj(box), B = wfObj(boxes);
+  return Object.keys(B).filter(k => { const t = wfObj(B[k]); return t.x >= b.x && t.y >= b.y && t.x + t.w <= b.x + b.w && t.y + t.h <= b.y + b.h; }).sort();
+}
+// The marquee: the steps and triggers whose tile it touches (two corners in world px, any order). → sorted keys.
+function wfAdvMarquee(boxes, x0, y0, x1, y1){
+  const B = wfObj(boxes), r = { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+  return Object.keys(B).filter(k => /^[nt]:/.test(k)).filter(k => { const t = B[k]; return t.x < r.x + r.w && r.x < t.x + t.w && t.y < r.y + r.h && r.y < t.y + t.h; }).sort();
+}
+// The tile at a world point ('n:<id>' | 't:<id>' | null), 8 px of slack round each.
+function wfAdvTileAt(L, x, y){
+  const l = wfObj(L), on = b => x >= b.x - 8 && x <= b.x + b.w + 8 && y >= b.y - 8 && y <= b.y + b.h + 8;
+  const n = Object.keys(wfObj(l.nodes)).find(id => on(l.nodes[id]));
+  if (n) return `n:${n}`;
+  const t = (Array.isArray(l.triggers) ? l.triggers : []).find(on);
+  return t ? `t:${t.id}` : null;
+}
+// Which buttons a line's middle has: "+" (a step in between) on a step's line, the trash on a step's line and on a
+// trigger's own Go to (design §5.5: "Edge hover: trash (delink → cluster) and '+'").
+function wfEdgeActs(e){ const x = wfObj(e), step = x.port!=null && !x.toPlus && !x.trigger && !x.ref; return { add: step, del: step || (!!x.trigger && !!x.dashed) }; }
+// What a picker row dropped at a world point lands on (design §5.5): a "[+]" → that place; a line's middle → in between
+// there; a tile with an empty path (the last of its path) → after it; another tile → nothing (with the reason); else the
+// empty canvas (a new group there). → { kind: 'plus'|'edge'|'append'|'none'|'canvas', slot?, key? (what lights up), why?, at? }.
+function wfAdvDrop(L, doc, x, y){
+  const l = wfObj(L), nodes = wfNodesOf(doc), near = (px, py) => Math.hypot(px - x, py - y) <= WF_ADV_UI.hit;
+  const p = (Array.isArray(l.plus) ? l.plus : []).find(b => near(b.x + b.w / 2, b.y + b.h / 2));
+  if (p) return { kind: 'plus', slot: { src: p.src, port: p.port ?? null }, key: wfAdvPlusKey(p) };
+  const e = (Array.isArray(l.edges) ? l.edges : []).find(ed => wfEdgeActs(ed).add && Array.isArray(ed.mid) && near(ed.mid[0], ed.mid[1]));
+  if (e) return { kind: 'edge', slot: { src: e.from, port: e.port }, key: `m:${e.key}` };
+  const k = wfAdvTileAt(l, x, y);
+  if (k && k.startsWith('n:')) {
+    const id = k.slice(2), n = wfObj(nodes[id]), ports = wfPorts(n), port = ports.find(q => !(typeof wfObj(n.out)[q]==='string' && wfHas(nodes, n.out[q])));
+    if (port!==undefined) return { kind: 'append', slot: { src: id, port }, key: k };
+    return { kind: 'none', key: k, why: ports.length ? 'This step has a next step: drop on its line to put it in between' : 'Nothing can follow this step' };
+  }
+  if (k) return { kind: 'none', key: k, why: 'Drop it on a step, a line or a "[+]"' };
+  return { kind: 'canvas', at: [x, y] };
+}
+// Drag-to-connect and Connect mode as one edit: from = { src, port } (a step's path) or { trigger } (its own Go to). A
+// trigger sent to the Default Path's first step has no Go to of its own.
+function wfConnectDrop(doc, from, to, reg){
+  const f = wfObj(from), d = wfObj(doc);
+  if (f.trigger) return wfSetGoto(doc, f.trigger, to==null || to===d.entry ? null : to, reg);
+  return wfConnect(doc, f.src, f.port ?? null, to, reg);
+}
+// The trash on a line (design §5.5 delink): a step's line → the steps after it are a group of their own ("Not connected"
+// until something goes there); a trigger's own Go to → back to the Default Path. Other lines can't go this way.
+function wfEdgeDelink(doc, edge, reg){
+  const e = wfObj(edge);
+  if (e.trigger && e.dashed) return wfSetGoto(doc, e.from, null, reg);
+  if (wfEdgeActs(e).del) return wfDisconnect(doc, e.from, e.port, reg);
+  return { doc, error: { code: 'E_SLOT', text: e.trigger ? 'A trigger always starts somewhere: drag its dot to another step' : 'Change where a Go to goes in its step' }, idMap: {} };
+}
+// Connect mode's list (the accessible alternative to dragging, design §5.8): every step in reading order with the reason it
+// can't be the next one (the model's own refusal: a loop, the first step; "This step") and the one it is now.
+// from = { src, port } | { trigger }. → [{ id, name, why, now }].
+function wfConnectRows(doc, reg, from){
+  const d = wfObj(doc), f = wfObj(from), nodes = wfNodesOf(d), entry = typeof d.entry==='string' && wfHas(nodes, d.entry) ? d.entry : null;
+  const t = f.trigger ? (Array.isArray(d.triggers) ? d.triggers : []).map(wfObj).find(x => x.id===f.trigger) : null, n = f.trigger ? null : nodes[f.src];
+  const now = t ? (typeof t.goto==='string' && wfHas(nodes, t.goto) ? t.goto : entry) : n ? wfObj(n.out)[f.port ?? wfPorts(n)[0]] ?? null : null;
+  return wfOrder(d).map(id => {
+    const r = id===now || id===f.src ? null : wfConnectDrop(d, from, id, reg);
+    return { id, name: wfNodeName(nodes[id], reg), why: id===f.src ? 'This step' : r && r.error ? r.error.text : '', now: id===now };
+  });
+}
+// The stored positions with some moved: every position drawn now is kept (nothing else jumps once one is stored),
+// rounded; the moved ids shifted by (dx, dy). → { id: [x, y] }.
+function wfAdvMovePos(pos, ids, dx, dy){
+  const P = wfObj(pos), move = new Set(Array.isArray(ids) ? ids : [...(ids || [])]), out = {};
+  Object.keys(P).forEach(id => { const v = P[id]; if (Array.isArray(v)) out[id] = move.has(id) ? [Math.round(v[0] + dx), Math.round(v[1] + dy)] : [Math.round(v[0]), Math.round(v[1])]; });
+  return out;
+}
+// The layout with every position drawn now stored and some placed anew (extra = { id: [x, y] }).
+function wfAdvPlaced(layout, pos, extra){
+  const E = wfObj(extra), adv = wfAdvMovePos(pos, [], 0, 0);
+  Object.keys(E).forEach(id => { if (Array.isArray(E[id])) adv[id] = [Math.round(E[id][0]), Math.round(E[id][1])]; });
+  return { ...wfObj(layout), v: 1, adv };
+}
+// Where pasted steps go on the Advanced canvas: as they were copied, moved so the first one is at `at`; with no copied
+// position the first one at `at` and the others where the layout puts them. → { newId: [x, y] }.
+function wfAdvPasteAt(clip, idMap, at){
+  const c = wfObj(clip), adv = wfObj(wfObj(c.layout).adv), M = wfObj(idMap), h = adv[c.head], out = {};
+  if (!Array.isArray(at)) return out;
+  if (!Array.isArray(h)) { if (M[c.head]) out[M[c.head]] = [Math.round(at[0]), Math.round(at[1])]; return out; }
+  Object.keys(adv).forEach(id => { if (M[id] && Array.isArray(adv[id])) out[M[id]] = [Math.round(adv[id][0] + at[0] - h[0]), Math.round(adv[id][1] + at[1] - h[1])]; });
+  return out;
+}
+// "Format selection": the selected steps and triggers tidied as Tidy up would place them, moved so the selection's top-left
+// corner stays where it is. pos = the positions now. → { id: [x, y] } for those ids.
+function wfFormatSel(doc, reg, pos, ids){
+  const P = wfObj(pos), want = (Array.isArray(ids) ? ids : []).filter(id => Array.isArray(P[id])), T = wfTidy(doc, reg, want), have = want.filter(id => T[id]);
+  if (!have.length) return {};
+  const lo = (M, i) => Math.min(...have.map(id => M[id][i])), dx = lo(P, 0) - lo(T, 0), dy = lo(P, 1) - lo(T, 1);
+  return Object.fromEntries(have.map(id => [id, [T[id][0] + dx, T[id][1] + dy]]));
+}
+// "Add sticky note" on the Advanced canvas: a free note round the given boxes (a group: its title band then moves them
+// with it), else one at a point. → wfStickyAdd's { layout, id, error }.
+function wfStickyAround(layout, boxes, at){
+  const r = wfStickyAdd(layout, null);
+  if (r.error) return r;
+  const U = WF_ADV_UI, B = (Array.isArray(boxes) ? boxes : []).map(wfObj);
+  let box;
+  if (B.length) {
+    const x0 = Math.min(...B.map(b => b.x)), y0 = Math.min(...B.map(b => b.y)), x1 = Math.max(...B.map(b => b.x + b.w)), y1 = Math.max(...B.map(b => b.y + b.h));
+    box = { x: x0 - U.pad, y: y0 - U.pad - U.band, w: x1 - x0 + 2 * U.pad, h: y1 - y0 + 2 * U.pad + U.band };
+  } else { const p = Array.isArray(at) ? at : [0, 0]; box = { x: p[0], y: p[1], w: WF_STICKY.w, h: WF_STICKY.h }; }
+  return { ...r, layout: wfStickySet(r.layout, r.id, box) };
+}
+// The sticky editor's markdown-lite buttons: the selected words wrapped (**b**, *i*, __u__), each selected line made a
+// "- " list line, or a link [words](https://). → { text, s, e } (what is selected after).
+function wfStickyFmt(text, s, e, f){
+  const t = String(text ?? ''), a = Math.max(0, Math.min(Number(s) || 0, t.length)), b = Math.max(a, Math.min(Number(e) || 0, t.length)), sel = t.slice(a, b);
+  const wrap = { b: '**', i: '*', u: '__' }[f];
+  if (wrap) { const w = sel || 'text'; return { text: t.slice(0, a) + wrap + w + wrap + t.slice(b), s: a + wrap.length, e: a + wrap.length + w.length }; }
+  if (f==='a') { const w = sel || 'link', u = 'https://'; return { text: `${t.slice(0, a)}[${w}](${u})${t.slice(b)}`, s: a + w.length + 3, e: a + w.length + 3 + u.length }; }
+  if (f==='li') {
+    const ls = t.lastIndexOf('\n', a - 1) + 1, block = t.slice(ls, b).split('\n').map(l => l.startsWith('- ') ? l : `- ${l}`).join('\n');
+    return { text: t.slice(0, ls) + block + t.slice(b), s: ls, e: ls + block.length };
+  }
+  return { text: t, s: a, e: b };
+}
+// "Enable/Disable" on a selection, as one edit: the steps (not one with branches, not a locked one) and triggers in it
+// are paused, or resumed when all of them are paused already. → { doc, error, enable, n }.
+function wfBulkToggle(doc, keys, reg){
+  const d = wfObj(doc), nodes = wfNodesOf(d), trigs = (Array.isArray(d.triggers) ? d.triggers : []).map(wfObj);
+  const list = [...(keys || [])].map(String).flatMap(k => {
+    const id = k.slice(2), n = k.startsWith('n:') && wfHas(nodes, id) ? nodes[id] : null, t = k.startsWith('t:') ? trigs.find(x => x.id===id) : null;
+    if (n) return wfPorts(n).length <= 1 && n.locked!==true ? [{ id, t: false, off: n.disabled===true }] : [];
+    return t ? [{ id, t: true, off: t.disabled===true }] : [];
+  });
+  if (!list.length) return { doc, error: { code: 'E_DISABLED_BRANCHING', text: 'A step with branches can\'t be paused' }, enable: false, n: 0, idMap: {} };
+  const enable = list.every(x => x.off), ch = list.filter(x => x.off===enable);
+  const r = wfDocEdit(doc, ch.map(x => x.t ? { op: 'setTrigger', id: x.id, patch: { disabled: !enable } } : { op: 'setNode', id: x.id, patch: { disabled: enable ? null : true } }), reg);
+  return { ...r, enable, n: ch.length };
+}
+// The bulk bar (design §5.5: "Enable/Disable", "Format selection", "Add sticky note", Copy, Delete). x = { n, ro, off (all
+// that can be paused are), toggles (how many can), steps (how many steps: triggers aren't copied) }.
+function wfBulkItems(x){
+  const o = wfObj(x), ro = String(o.ro || '');
+  return [{ act: 'bulkToggle', label: o.off ? 'Enable' : 'Disable', icon: o.off ? 'play' : 'pause', why: ro || (o.toggles ? '' : 'A step with branches can\'t be paused') },
+    { act: 'bulkFormat', label: 'Format selection', icon: 'tidy', why: ro },
+    { act: 'bulkSticky', label: 'Add sticky note', icon: 'note', why: ro },
+    { act: 'bulkCopy', label: 'Copy', icon: 'copy', why: o.steps ? '' : 'Only steps are copied: pick a step' },
+    { act: 'bulkDelete', label: 'Delete', icon: 'trash', why: ro, danger: true }];
+}
+function wfBulkHtml(n, items){
+  return `<span class="wfa-bn">${Number(n) || 0} selected</span>` + (Array.isArray(items) ? items : []).map(i => `<button type="button" class="wfb-tb${i.danger ? ' is-danger' : ''}" data-act="${esc(i.act)}"${wfDisAttr(i.why)}${i.why ? ` title="${esc(i.why)}"` : ''}>${ico(i.icon, 15)}${esc(i.label)}</button>`).join('');
+}
+// Connect mode as a dialog. x = { name, trigger, ports: [{ port, label }], port, rows (wfConnectRows), canOff }.
+function wfConnectHtml(x){
+  const o = wfObj(x), rows = Array.isArray(o.rows) ? o.rows : [], ports = Array.isArray(o.ports) ? o.ports : [];
+  const portHtml = ports.length > 1 ? `<div class="wfa-cn-ports" role="radiogroup" aria-label="From path">${ports.map(p => `<button type="button" role="radio" class="btn small${p.port===o.port ? ' primary' : ''}" data-act="cnPort" data-port="${esc(p.port)}" aria-checked="${p.port===o.port}"><span dir="auto">${esc(p.label)}</span></button>`).join('')}</div>` : '';
+  const list = rows.length ? rows.map(r => `<button type="button" class="wfa-cn-row" data-act="cnTo" data-id="${esc(r.id)}"${r.now ? ' aria-current="true"' : ''}${wfDisAttr(r.why || (r.now ? 'It goes there now' : ''))}><span dir="auto">${esc(r.name)}</span>${r.now ? '<small>Now</small>' : r.why ? `<small>${esc(r.why)}</small>` : ''}</button>`).join('')
+    : '<p class="wfb-dlg-p">No steps yet: add one first.</p>';
+  const off = !o.canOff ? '' : o.trigger ? '<button type="button" class="btn" data-act="cnOff">Back to the Default Path</button>' : '<button type="button" class="btn danger" data-act="cnOff">Disconnect</button>';
+  return wfDlgHtml('wfa-cn-t', o.trigger ? `Start "${o.name}" at…` : `Connect "${o.name}" to…`,
+    `<p class="wfb-dlg-p">${o.trigger ? 'Pick the step this trigger starts at.' : 'Pick the step that comes next on this path.'}</p>${portHtml}<div class="wfa-cn-list" role="group" aria-label="Steps">${list}</div>`,
+    `${off}<button type="button" class="btn" data-act="dlgClose">Cancel</button>`);
+}
+// A tile (72 × 72, its name in a band below). c = { id, trigger, name, sub, icon, tone, disabled, unknown, issue, notes, stats,
+// verdict, ro, ports: [{ port, label }], entry ("(Default Path)", said when there are groups), head (the first step of a
+// group that is not the Default Path: the branch icon makes it so), unreached ("Not connected") }. The label is held to
+// WF_ADV.label: the name, then one row (a trigger's name, the tags). The dots are drag handles
+// (aria-hidden: "Connect to…" is their keyboard way); the buttons inside are not Tab stops; every word escaped.
+function wfAdvTileHtml(c){
+  const id = esc(c.id), ports = Array.isArray(c.ports) ? c.ports : [], A = WF_ADV, at = i => Math.round(A.tile * (i + 1) / (Math.max(1, ports.length) + 1));
+  const b = (act, label, icon) => `<button type="button" tabindex="-1" data-act="${act}" data-id="${id}" aria-label="${esc(label)}" title="${esc(label)}">${icon}</button>`;
+  const dots = c.trigger ? `<span class="wfa-dot" data-act="tdot" data-id="${id}" style="top:${A.tile / 2}px" title="Drag to a step: this trigger starts there" aria-hidden="true"></span>`
+    : ports.map((p, i) => `<span class="wfa-dot" data-act="dot" data-id="${id}" data-port="${esc(p.port)}" style="top:${at(i)}px" title="${esc(ports.length > 1 ? `${p.label}: drag to the next step` : 'Drag to the next step')}" aria-hidden="true"></span>`
+      + (ports.length > 1 ? `<small class="wfa-pl" style="top:${at(i)}px" dir="auto" aria-hidden="true">${esc(p.label)}</small>` : '')).join('');
+  const tags = [c.entry ? '<span class="wfa-def">(Default Path)</span>' : '', c.unreached ? '<span class="wfb-tag is-warn">Not connected</span>' : '', c.disabled ? '<span class="wfb-tag">Disabled</span>' : '',
+    c.unknown ? '<span class="wfb-tag">Unknown step</span>' : '', c.issue ? `<span class="wfb-tag is-${c.issue==='error' ? 'err' : 'warn'}">${c.issue==='error' ? 'Error' : 'Warning'}</span>` : '',
+    c.notes ? `<span class="wfb-tag">${ico('message', 10)}${Number(c.notes) || 0}</span>` : '', c.stats ? `<span class="wfb-tag is-stats">${esc(c.stats)}</span>` : '', c.verdict ? `<span class="wfb-tag is-verdict">${esc(c.verdict)}</span>` : ''].join('');
+  return `<span class="wfb-tile" style="--tone:var(--wf-${esc(c.tone)})">${wfIcon(c.icon, 28)}</span>${c.trigger ? '' : '<span class="wfa-in" aria-hidden="true"></span>'}${dots}`
+    + `<span class="wfa-lab"><b dir="auto" title="${esc(c.name)}">${esc(c.name)}</b>${c.sub || tags ? `<span class="wfa-tags">${c.sub ? `<small dir="auto" title="${esc(c.sub)}">${esc(c.sub)}</small>` : ''}${tags}</span>` : ''}</span>`
+    + `<span class="wfb-hov">${c.head && !c.entry && !c.ro ? b('defPath', 'Set as Default Path', ico('branch', 14)) : ''}${b(c.trigger ? 'tmenu' : 'menu', 'Quick actions', ico('moreH', 14))}</span>`;
+}
+// A sticky note on the Advanced canvas: its title band (drag: the note and the tiles on it; double-click: edit), the
+// colour button, the note, the corner (drag: its size).
+function wfAdvStickyHtml(k, ro){
+  const sid = esc(k.id);
+  return `<div class="wfa-stb" data-act="stBand" data-sid="${sid}" title="${ro ? 'Sticky note' : 'Drag to move the note and the steps on it (Alt: the note alone). Double-click to edit.'}"><b dir="auto">${esc(k.title || 'Sticky note')}</b>`
+    + `${ro ? '' : `<button type="button" tabindex="-1" class="wfa-stc" data-act="stColorMenu" data-sid="${sid}" aria-label="Colour and more" title="Colour and more">${ico('palette', 13)}</button>`}</div>`
+    + `<div class="wfa-stbody" dir="auto">${wfStickyMd(k.body)}</div>${ro ? '' : `<span class="wfa-sts" data-act="stSize" data-sid="${sid}" title="Drag to resize" aria-hidden="true"></span>`}`;
+}
+// The Advanced canvas as keyed descriptions (as wfCanvasItems: the same x, the same paint). → { items, edges }.
+function wfAdvCanvasItems(doc, L, reg, ctx, x){
+  const d = wfObj(doc), o = x || {}, lay = wfObj(L), at = wfObj(o.at), iss = wfObj(o.issueOf), ro = !!o.ro, items = [], tree = [];
+  const I = o.I || wfIndex(d), order = o.order || wfOrder(d), loaded = wfRegIx(reg).loaded, groups = wfClusters(d), unreached = new Set(lay.unreached || []);
+  const aria = k => { const a = at[k] || {}; return { role: 'treeitem', 'aria-level': a.level || 1, 'aria-setsize': a.set || 1, 'aria-posinset': a.pos || 1 }; };
+  const issueWords = k => iss[k] ? ` Has ${iss[k]==='error' ? 'an error' : 'a warning'}.` : '';
+  // the sticky notes first, behind everything
+  (Array.isArray(o.stickies) ? o.stickies : []).forEach(k => items.push({ key: `k:${k.id}`, group: 'deco', tag: 'div', cls: `wfb-sticky wfa-sticky is-${k.color}`, x: k.x, y: k.y, w: k.w, h: k.h,
+    attrs: { 'data-sid': k.id }, ck: `${k.color}|${k.title}|${k.body}|${ro}`, html: () => wfAdvStickyHtml(k, ro) }));
+  const trigs = Array.isArray(d.triggers) ? d.triggers.map(wfObj) : [];
+  (lay.triggers || []).forEach(b => {
+    const t = trigs.find(z => String(z.id)===b.id) || {}, e = wfTrigEntry(reg, t.type), N = wfTriggerNarration(t, reg, ctx), key = `t:${b.id}`, go = typeof t.goto==='string' && I.nodes[t.goto] ? wfNodeName(I.nodes[t.goto], reg) : '';
+    const c = { id: b.id, trigger: true, name: N.head, sub: N.name, icon: e ? e.icon : 'zap', tone: e ? wfToneOf(e) : 'grey', disabled: t.disabled===true, issue: iss[key] || '', ro };
+    items.push({ key, group: 'trig', act: 'card', id: b.id, cls: `wfb-card wfa-tile wfa-trig${c.disabled ? ' is-off' : ''}${c.issue ? ` iss-${c.issue}` : ''}`, x: b.x, y: b.y, w: b.w, h: b.h, attrs: aria(key),
+      al: `Trigger: ${N.head}${N.name ? `, ${N.name}` : ''}. ${N.lines.join('. ')}${N.more ? `. +${N.more} more` : ''}.${go ? ` Starts at ${go}.` : ''}${c.disabled ? ' Disabled.' : ''}${issueWords(key)}`, ck: JSON.stringify(c), html: () => wfAdvTileHtml(c) });
+  });
+  Object.entries(wfObj(lay.nodes)).forEach(([id, b]) => {
+    const n = wfObj(I.nodes[id]), e = wfNodeEntry(reg, n.kind, n.type), unknown = loaded && !e, key = `n:${id}`, gi = groups.findIndex(g => g.head===id);
+    const c = { id, name: wfNodeName(n, reg), icon: e ? e.icon : n.kind==='wait' ? 'hourglass' : 'zap', tone: e ? wfToneOf(e) : 'grey', disabled: n.disabled===true, unknown, issue: iss[key] || '',
+      notes: Number(wfObj(o.notes)[id]) || 0, stats: String(wfObj(o.stats)[id] || ''), verdict: String(wfObj(o.verdicts)[id] || ''), ro, ports: wfPorts(n).map(p => ({ port: p, label: wfPortLabel(n, p, reg) })),
+      entry: groups.length > 1 && d.entry===id, head: gi >= 0 && !I.parent[id] && d.entry!==id, unreached: unreached.has(id) };
+    const grp = gi >= 0 && groups.length > 1 ? ` Group ${gi + 1} of ${groups.length}${d.entry===id ? ' (Default Path)' : ''}.` : '';
+    tree.push({ key, group: 'tree', act: 'card', id, cls: `wfb-card wfa-tile${c.disabled ? ' is-off' : ''}${unknown ? ' is-unknown' : ''}${c.issue ? ` iss-${c.issue}` : ''}`, x: b.x, y: b.y, w: b.w, h: b.h, attrs: aria(key),
+      al: `${wfNodeAria(d, id, reg, ctx, { notes: c.notes, verdict: c.verdict, stats: c.stats, I, order })}${grp}${c.unreached ? ' Not connected.' : ''}${issueWords(key)}`, ck: JSON.stringify(c), html: () => wfAdvTileHtml(c) });
+  });
+  const seqIx = new Map((o.seq || []).map((k, i) => [k, i]));
+  tree.sort((a, b) => (seqIx.has(a.key) ? seqIx.get(a.key) : 1e9) - (seqIx.has(b.key) ? seqIx.get(b.key) : 1e9) || (a.key < b.key ? -1 : 1));
+  items.push(...tree);
+  // every chain's "[+]" (a tap: the Actions picker; a drag: connect), the "+" and trash on a line's middle
+  if (!ro) {
+    (lay.plus || []).forEach(p => items.push({ key: wfAdvPlusKey(p), group: 'deco', tag: 'button', act: 'slot', cls: 'wfa-plus', x: p.x, y: p.y, w: p.w, h: p.h,
+      attrs: { type: 'button', tabindex: '-1', 'data-src': p.src, 'data-port': p.port==null ? '' : String(p.port), title: p.src==='@entry' ? 'Add the first step' : 'Add a step here (drag it to a step to connect)' }, al: 'Add a step here', ck: 'p', html: () => ico('plus', 14) }));
+    const [mw, mh] = WF_ADV_UI.mid;
+    (lay.edges || []).forEach(ed => {
+      const can = wfEdgeActs(ed);
+      if (!can.add && !can.del) return;
+      items.push({ key: `m:${ed.key}`, group: 'deco', tag: 'span', cls: 'wfa-emid', x: ed.mid[0] - mw / 2, y: ed.mid[1] - mh / 2, w: mw, h: mh, attrs: { 'data-e': ed.key }, ck: `${can.add}|${can.del}|${!!ed.trigger}`,
+        html: () => (can.add ? `<button type="button" tabindex="-1" data-act="edgeAdd" data-e="${esc(ed.key)}" aria-label="Add a step here" title="Add a step here">${ico('plus', 13)}</button>` : '')
+          + (can.del ? `<button type="button" tabindex="-1" data-act="edgeDel" data-e="${esc(ed.key)}" aria-label="${ed.trigger ? 'Back to the Default Path' : 'Remove this line'}" title="${ed.trigger ? 'Back to the Default Path' : 'Remove this line (the steps after it become a group of their own)'}">${ico('trash', 13)}</button>` : '') });
+    });
+  }
+  return { items, edges: Array.isArray(lay.edges) ? lay.edges : [] };
+}
+
+// ── the bulk bar, Quick actions, Connect mode, Tidy up and the sticky notes (impure: state in WF) ──
+function wfBulkCtx(W, keys){
+  const nodes = wfNodesOf(W.doc), trigs = W.doc.triggers || [], node = k => nodes[k.slice(2)];
+  const can = keys.filter(k => k.startsWith('t:') ? trigs.some(t => t.id===k.slice(2)) : wfHas(nodes, k.slice(2)) && wfPorts(node(k)).length <= 1 && node(k).locked!==true);
+  const off = can.length > 0 && can.every(k => k.startsWith('t:') ? trigs.find(t => t.id===k.slice(2)).disabled===true : node(k).disabled===true);
+  return { n: keys.length, ro: wfGuardEdit(), off, toggles: can.length, steps: keys.filter(k => k.startsWith('n:')).length };
+}
+// The bulk bar, in the selection's paint (one patch, only when its words changed).
+function wfPaintBulk(W){
+  const E = W.el, keys = W.builder==='advanced' && W.tab==='builder' && !W.mobile ? [...W.sel].filter(k => /^[nt]:/.test(k) && E.map.has(k)) : [];
+  const html = keys.length > 1 ? wfBulkHtml(keys.length, wfBulkItems(wfBulkCtx(W, keys))) : '';
+  if (E.bulk.hidden!==!html) E.bulk.hidden = !html;
+  wfPatch(E.bulk, html);
+}
+function wfSelIds(W){ return [...W.sel].filter(k => /^[nt]:/.test(k)).map(k => k.slice(2)); }
+function wfBulkToggleNow(){
+  const W = WF, keys = [...W.sel].filter(k => /^[nt]:/.test(k)), pre = wfBulkToggle(W.doc, keys, W.reg);
+  if (pre.error) { showToast(pre.error.text, { kind: 'warn' }); return; }
+  const no = wfCommit(pre.enable ? 'Enable selected' : 'Disable selected', w => wfBulkToggle(w.doc, keys, w.reg));
+  if (no) showToast(`${pre.n} ${pre.enable ? 'enabled' : 'disabled'}`, { undo: () => wfUndoCommit(no), local: true });
+}
+function wfFormatSelNow(){
+  const W = WF, D = wfDerived(), ids = wfSelIds(W);
+  if (wfCommit('Format selection', w => ({ layout: wfAdvPlaced(w.layout, D.layout.pos, wfFormatSel(w.doc, w.reg, D.layout.pos, ids)) }))) wfFlip(W);
+}
+// Tidy up (the button, 2, Quick actions): one undo entry; the tiles glide there (not under reduced motion).
+function wfTidyUp(){
+  const W = WF;
+  if (!W || W.builder!=='advanced') return;
+  if (wfCommit('Tidy up', w => ({ layout: { ...wfObj(w.layout), v: 1, adv: wfTidy(w.doc, w.reg) } }))) wfFlip(W);
+}
+function wfFlip(W){
+  if (motionReduced()) return;
+  W.el.world.classList.add('wfa-flip');
+  clearTimeout(W.flipT);
+  W.flipT = setTimeout(() => { if (WF===W) W.el.world.classList.remove('wfa-flip'); }, WF_ADV_UI.flip + 40);
+}
+// The Default Path (GHL: the branch icon on a group's first step): the step runs start at when no Go to says otherwise.
+function wfSetDefaultPath(id){
+  const W = WF;
+  if (!W || !wfHas(wfNodesOf(W.doc), id)) return;
+  if (W.doc.entry===id) { showToast('It is the Default Path already', { kind: 'info' }); return; }
+  wfCommit('Set as Default Path', w => wfSetEntry(w.doc, id, w.reg));
+}
+// Duplicate (Quick actions): a copy of the step (with its paths, for one with branches) as a group of its own, placed
+// under everything; the clipboard is left as it is.
+function wfDuplicateStep(id){
+  const W = WF, clip = wfCopy(W.doc, { id, mode: 'one' }, { biz: wfBiz(), at: Date.now(), layout: W.layout, tplDrafts: W.tplDrafts });
+  if (clip) wfDoPaste(W.doc.entry ? null : { src: '@entry', port: null }, { clip, label: 'Duplicate step' });
+}
+// "Paste here" on the empty canvas: a group of its own, its first step where the menu was opened.
+function wfPasteAt(at){ const W = WF; wfDoPaste(W.doc.entry ? null : { src: '@entry', port: null }, { at: Array.isArray(at) ? [at[0] - WF_ADV.tile / 2, at[1] - WF_ADV.tile / 2] : null }); }
+// The world point in the middle of the screen.
+function wfViewMid(W){ const v = W.view, s = W.vpSize; return v && s ? [Math.round((s.w / 2 - v.x) / v.k), Math.round((s.h / 2 - v.y) / v.k)] : [0, 0]; }
+// "Add sticky note" (the bulk bar, Quick actions, the rail, ⇧S's panel): a free note round these steps / triggers, else
+// at a point (the middle of the screen); its editor opens.
+function wfAdvStickyNew(ids, at){
+  const W = WF, D = wfDerived(), boxes = (ids || []).map(id => D.layout.pos[id]).filter(Boolean).map(p => wfAdvFoot(p[0], p[1]));
+  const mid = wfViewMid(W), p = Array.isArray(at) ? at : [mid[0] - WF_STICKY.w / 2, mid[1] - WF_STICKY.h / 2];
+  let sid = null;
+  const no = wfCommit('Add sticky note', w => { const r = wfStickyAround(w.layout, boxes, p); if (r.error) return { error: { text: r.error } }; sid = r.id; return { layout: r.layout }; });
+  if (no && sid) wfStickyEditOpen(sid);
+}
+function wfStickyColor(id, c){ if (WF_STICKY.colors.some(x => x[0]===c)) wfStickyCommit('Sticky note colour', l => wfStickySet(l, id, { color: c })); }
+// A markdown-lite button in the sticky editor: the textarea's selection wrapped; the draft updated as typing does.
+function wfStickyFmtNow(f){
+  const W = WF, ta = W && W.el.lbody.querySelector('#wfr-st-b');
+  if (!ta || !WF_STICKY_FMT.some(x => x[0]===f)) return;
+  const r = wfStickyFmt(ta.value, ta.selectionStart, ta.selectionEnd, f);
+  ta.value = r.text.slice(0, WF_STICKY.body);
+  wfRailInput(ta);
+  ta.focus();
+  if (ta.setSelectionRange) ta.setSelectionRange(Math.min(r.s, ta.value.length), Math.min(r.e, ta.value.length));
+}
+// Quick actions at a point (right-click, a long press) or by an element (a tile's ⋯, Shift+F10). key = 'n:…' | 't:…' |
+// null (the empty canvas: "Paste here" and "Add sticky note" go where it was opened).
+function wfQuickOpen(key, cx, cy, anchor){
+  const W = WF;
+  if (!W) return;
+  const el = anchor || (key && !cx && !cy ? W.el.map.get(key) : null), r = W.el.vp.getBoundingClientRect(), v = W.view;
+  wfPopOpen('quick', el, key ? key.slice(2) : null, el ? null : { x: cx, y: cy });
+  if (W.menu) Object.assign(W.menu, { on: !key ? 'canvas' : key.startsWith('t:') ? 'trigger' : 'node', wat: v ? [Math.round((cx - r.left - v.x) / v.k), Math.round((cy - r.top - v.y) / v.k)] : [0, 0] });
+}
+// Right-click on the Advanced canvas: Quick actions for a tile (kept in the selection it is in) or the empty canvas.
+// → true when it took the event.
+function wfAdvContext(W, e, card){
+  const t = e.target;
+  if (W.tab!=='builder' || W.moveMode || !t || !W.el.vp.contains(t) || t.closest('.wfb-ctl, .wfb-corner, .wfa-bulk, .wfb-mini, .wfb-kbtn')) return false;
+  const k = card ? card.dataset.key : null;
+  if (k && !/^[nt]:/.test(k)) return false;
+  e.preventDefault();
+  if (k && !W.sel.has(k)) wfSelectKey(k, false);
+  wfQuickOpen(k, e.clientX, e.clientY);
+  return true;
+}
+// Double-click on a sticky note (Advanced): its editor.
+function wfOnDblClick(e){
+  const W = WF, t = e.target, s = W && W.builder==='advanced' && t && t.closest ? t.closest('.wfa-sticky[data-sid]') : null;
+  if (!s || t.closest('button')) return;
+  e.preventDefault();
+  wfStickyEditOpen(s.dataset.sid);
+}
+// Connect mode (design §5.8, WCAG 2.5.7): the dialog for one step's path or one trigger.
+function wfConnectOpen(from){
+  const W = WF, why = wfGuardEdit();
+  if (!W) return;
+  if (why) { showToast(why, { kind: 'warn' }); return; }
+  const f = wfObj(from), n = f.trigger ? null : wfNodesOf(W.doc)[f.src];
+  if (f.trigger ? !(W.doc.triggers || []).some(t => t.id===f.trigger) : !n) return;
+  if (n && !wfPorts(n).length) { showToast('Nothing can follow this step', { kind: 'info' }); return; }
+  wfSetLayer('dialog', { kind: 'connect', from: f.trigger ? { trigger: f.trigger } : { src: f.src, port: wfPorts(n).includes(f.port) ? f.port : wfPorts(n)[0] } });
+}
+// WF_DIALOG_HTML.connect (in the chrome paint; memoised on the derived key and the path shown).
+function wfConnectDlg(W, D){
+  const g = W.dialog, f = g.from, key = `${D.key}|${f.port ?? ''}`;
+  if (g.memo && g.memo.key===key) return g.memo.html;
+  const n = f.trigger ? null : wfNodesOf(W.doc)[f.src], t = f.trigger ? (W.doc.triggers || []).find(x => x.id===f.trigger) : null;
+  if (!n && !t) return '';
+  const html = wfConnectHtml({ name: n ? wfNodeName(n, W.reg) : wfTriggerNarration(t, W.reg, D.ctx).head, trigger: !!t, ports: n ? wfPorts(n).map(p => ({ port: p, label: wfPortLabel(n, p, W.reg) })) : [], port: f.port,
+    rows: wfConnectRows(W.doc, W.reg, f), canOff: t ? typeof t.goto==='string' : !!wfObj(n.out)[f.port] });
+  g.memo = { key, html };
+  return html;
+}
+// One connect (a drop on a tile, Connect mode's pick): one commit, said in words.
+function wfConnectCommit(from, to){
+  const W = WF, f = wfObj(from), nodes = wfNodesOf(W.doc), t = f.trigger ? (W.doc.triggers || []).find(x => x.id===f.trigger) : null;
+  if (!wfHas(nodes, to) || (!t && !wfHas(nodes, f.src))) return 0;
+  const now = t ? (typeof t.goto==='string' ? t.goto : W.doc.entry) : wfObj(nodes[f.src].out)[f.port ?? wfPorts(nodes[f.src])[0]];
+  if (now===to) { wfAnnounce('It goes there already'); return 0; }
+  const no = wfCommit(t ? 'Set where the trigger starts' : 'Connect steps', w => wfConnectDrop(w.doc, f, to, w.reg), { quiet: true });
+  if (!no) return no;
+  // the path's old next step (and the steps after it) left on its own: said, with Undo, as the trash on a line does
+  const N = wfNodesOf(W.doc), name = wfNodeName(N[to], W.reg), cut = !t && typeof now==='string' && wfHas(N, now) && now!==W.doc.entry && !wfIndex(W.doc).parent[now];
+  if (cut) showToast(`Connected to ${name}: "${wfNodeName(N[now], W.reg)}" and the steps after it are now a group of their own`, { undo: () => wfUndoCommit(no), local: true });
+  else wfAnnounce(`${t ? 'The trigger starts at' : 'Connected to'} ${name}`);
+  return no;
+}
+function wfAdvEdgeOf(key){ const W = WF; return W && W.builder==='advanced' ? (wfDerived().layout.edges || []).find(e => e.key===String(key || '')) || null : null; }
+// The Advanced canvas's clicks (wfOnClick, after WF_ACTS).
+const WF_ADV_ACTS = {
+  selTool: W => { W.tool = W.tool==='marquee' ? 'select' : 'marquee'; W.el.vp.classList.remove('is-hand'); wfDirty('chrome'); wfAnnounce(W.tool==='marquee' ? 'Select tool: drag over steps to select them' : 'Select tool off'); },
+  tidy: () => wfTidyUp(),
+  blkShow: (W, a) => wfBlockerShow(a.dataset.key),
+  defPath: (W, a) => wfSetDefaultPath(a.dataset.id),
+  dot: (W, a) => wfConnectOpen({ src: a.dataset.id, port: a.dataset.port }),
+  tdot: (W, a) => wfConnectOpen({ trigger: a.dataset.id }),
+  edgeAdd: (W, a) => { const ed = wfAdvEdgeOf(a.dataset.e); if (ed && wfEdgeActs(ed).add) wfPicker('action', { src: ed.from, port: ed.port }); },
+  edgeDel: (W, a) => {
+    const ed = wfAdvEdgeOf(a.dataset.e);
+    if (!ed || !wfEdgeActs(ed).del) return;
+    const no = wfCommit(ed.trigger ? 'Trigger back to the Default Path' : 'Remove line', w => wfEdgeDelink(w.doc, ed, w.reg));
+    if (no) showToast(ed.trigger ? 'The trigger starts at the Default Path again' : 'Line removed: the steps after it are a group of their own', { undo: () => wfUndoCommit(no), local: true });
+  },
+  stColorMenu: (W, a) => { const id = a.dataset.sid; if (WF_ID_RE.test(String(id || ''))) wfPopOpen('stickyColor', a, id); },
+  bulkToggle: () => wfBulkToggleNow(),
+  bulkFormat: () => wfFormatSelNow(),
+  bulkSticky: W => wfAdvStickyNew(wfSelIds(W), null),
+  bulkCopy: W => { const ids = [...W.sel].filter(k => k.startsWith('n:')).map(k => k.slice(2)); if (ids.length) wfDoCopy(ids); },
+  bulkDelete: () => wfDeleteSel('one'),
+  cnTo: (W, a) => { const g = W.dialog, id = a.dataset.id; if (!g || g.kind!=='connect' || !wfHas(wfNodesOf(W.doc), id)) return; wfSetLayer('dialog', null); wfConnectCommit(g.from, id); wfRefocus(); },
+  cnPort: (W, a) => {
+    const g = W.dialog, n = g && g.kind==='connect' && g.from.src ? wfNodesOf(W.doc)[g.from.src] : null;
+    if (!n || !wfPorts(n).includes(a.dataset.port)) return;
+    W.dialog = { ...g, from: { ...g.from, port: a.dataset.port }, memo: null }; W.modalFocus = true; wfDirty('chrome');
+  },
+  cnOff: W => {
+    const g = W.dialog;
+    if (!g || g.kind!=='connect') return;
+    wfSetLayer('dialog', null);
+    const f = g.from;
+    wfCommit(f.trigger ? 'Trigger back to the Default Path' : 'Remove line', w => f.trigger ? wfSetGoto(w.doc, f.trigger, null, w.reg) : wfDisconnect(w.doc, f.src, f.port, w.reg));
+    wfRefocus();
+  },
+};
+
+// ── the Advanced gestures (wfGestureStart / Move / End / Cancel run them: begin once past the 4 px tap (g.began), move
+// per pointer move, end(g, drop) once; nothing is drawn but transforms and the lines of what moves) ──
+// A pointer down on the Advanced canvas → true when it started one of these gestures (else the shell pans).
+function wfAdvPointerDown(W, t, e){
+  if (W.mobile || wfGuardEdit() || W.moveMode) return false;
+  const dot = t.closest('[data-act="dot"], [data-act="tdot"], .wfa-plus');
+  if (dot) {
+    const act = dot.dataset.act, port = dot.dataset.port==='' || dot.dataset.port==null ? null : dot.dataset.port;
+    const from = act==='tdot' ? { trigger: dot.dataset.id } : { src: act==='dot' ? dot.dataset.id : dot.dataset.src, port };
+    if (!wfNodeIdOk(from.trigger || from.src)) return false;   // the empty flow's "[+]" (@entry) is a tap only
+    wfGestureStart({ type: 'connect', from }, e);
+    return true;
+  }
+  const st = t.closest('[data-act="stBand"], [data-act="stSize"]');
+  if (st && !t.closest('button')) {
+    if (!WF_ID_RE.test(String(st.dataset.sid || ''))) return false;
+    wfGestureStart({ type: st.dataset.act==='stSize' ? 'stickySize' : 'sticky', sid: st.dataset.sid, alt: e.altKey }, e);
+    return true;
+  }
+  if (t.closest('button, input, textarea, select, a, .wfb-ctl, .wfb-corner, .wfa-bulk')) return false;
+  const card = t.closest('.wfb-card[data-key]'), k = card ? card.dataset.key : '';
+  if (/^[nt]:/.test(k)) {
+    wfGestureStart({ type: 'tiles', key: k, card: k }, e);
+    // a long press (touch) opens Quick actions; the gesture lasts until the finger lifts, so its click is swallowed
+    if (e.pointerType==='touch') { const g = W.gesture; W.longT = setTimeout(() => { if (WF!==W || W.gesture!==g || g.moved) return; g.long = true; g.type = 'press'; wfSelectKey(k, false); wfQuickOpen(k, e.clientX, e.clientY); }, WF_UIX.longPress); }
+    return true;
+  }
+  if (!card && (W.tool==='marquee' || e.shiftKey) && e.pointerType!=='touch') { wfGestureStart({ type: 'marquee', add: e.shiftKey }, e); return true; }
+  return false;
+}
+// A picker row pressed (Advanced; a mouse or a pen: a finger scrolls the list) → true when a palette gesture started.
+function wfPaletteDown(W, t, e){
+  const row = t.closest ? t.closest('.wfp-row[data-act="pk"]') : null;
+  if (!row || !W.picker || W.picker.kind!=='action' || W.mobile || e.pointerType==='touch' || wfGuardEdit() || !W.el.rbody.contains(row) || t.closest('button')) return false;
+  wfGestureStart({ type: 'palette', i: Number(row.dataset.i) }, e);
+  return true;
+}
+// The world point under a viewport point.
+function wfWorldAt(px, py){ const v = WF.view; return [(px - v.x) / v.k, (py - v.y) / v.k]; }
+// What moves with some tiles (worked out once, at the start): their "[+]"s and the lines touching them.
+function wfAdvMovePrep(g, D, keys){
+  const L = D.layout, ids = new Set(keys.map(k => k.slice(2))), box = id => L.nodes[id] || L.triggers.find(b => b.id===id) || null;
+  Object.assign(g, { keys, ids, D, plus: L.plus.filter(p => ids.has(p.src)) });
+  g.edges = L.edges.filter(ed => ids.has(ed.from) || (ed.to && ids.has(ed.to))).map(ed => {
+    const [i, n] = Array.isArray(ed.dot) ? ed.dot : [0, 1], b = ed.toPlus ? L.plus.find(p => p.src===ed.from && (p.port ?? null)===(ed.port ?? null)) : box(ed.to);
+    return { ed, a: box(ed.from), b, i, n, ma: ids.has(ed.from), mb: ed.toPlus ? ids.has(ed.from) : ids.has(ed.to) };
+  }).filter(x => x.a && x.b);
+}
+// Moves the prepared tiles by (dx, dy) world px: their transforms, their "[+]"s, the lines touching them (d only).
+function wfAdvShift(g, dx, dy){
+  const E = WF.el, [mw, mh] = WF_ADV_UI.mid, tf = (el, x, y) => { if (el) el.style.transform = `translate(${x}px,${y}px)`; };
+  g.keys.forEach(k => { const b = g.D.boxes[k]; tf(E.map.get(k), b.x + dx, b.y + dy); });
+  g.plus.forEach(p => tf(E.map.get(wfAdvPlusKey(p)), p.x + dx, p.y + dy));
+  g.edges.forEach(x => {
+    const a = x.ma ? { x: x.a.x + dx, y: x.a.y + dy } : x.a, b = x.mb ? { ...x.b, x: x.b.x + dx, y: x.b.y + dy } : x.b, geo = wfAdvEdgeGeom(a, x.i, x.n, b);
+    const p = E.paths.get(x.ed.key), h = E.paths.get(`${x.ed.key}>`);
+    if (p) p.setAttribute('d', geo.d);
+    if (h) h.setAttribute('d', geo.arrow);
+    tf(E.map.get(`m:${x.ed.key}`), geo.mid[0] - mw / 2, geo.mid[1] - mh / 2);
+  });
+}
+// Everything a gesture moved, back where the last paint put it (the commit, if any, then paints the new places).
+function wfAdvRestore(g){
+  const E = WF.el, back = el => { if (el) el.style.transform = `translate(${el._x}px,${el._y}px)`; };
+  (g.keys || []).forEach(k => back(E.map.get(k)));
+  (g.plus || []).forEach(p => back(E.map.get(wfAdvPlusKey(p))));
+  (g.edges || []).forEach(x => { const p = E.paths.get(x.ed.key), h = E.paths.get(`${x.ed.key}>`); if (p) p.setAttribute('d', p._d); if (h) h.setAttribute('d', h._d); back(E.map.get(`m:${x.ed.key}`)); });
+}
+// The drop target lit up (a tile, a "[+]", a line's middle): one class, moved.
+function wfAdvHot(g, key){
+  if (g.hot===key) return;
+  const E = WF.el, o = g.hot ? E.map.get(g.hot) : null, n = key ? E.map.get(key) : null;
+  if (o) o.classList.remove('is-drop');
+  if (n) n.classList.add('is-drop');
+  g.hot = key;
+}
+// Near an edge the view follows (≤ 12 px a frame) while tiles, a line or a sticky note are dragged.
+function wfAdvAutoPan(g){
+  const W = WF;
+  if (g.autoRaf || !g.last) return;
+  const a0 = wfAutoPan(g.last[0], g.last[1], g.rect.width, g.rect.height);
+  if (!a0.dx && !a0.dy) return;
+  g.autoRaf = requestAnimationFrame(() => {
+    g.autoRaf = 0;
+    if (WF!==W || W.gesture!==g) return;
+    const a = wfAutoPan(g.last[0], g.last[1], g.rect.width, g.rect.height);
+    if (!a.dx && !a.dy) return;
+    W.view = { x: W.view.x + a.dx, y: W.view.y + a.dy, k: W.view.k };
+    wfDirty('view', 'mini');
+    WF_ADV_GESTURES[g.type].move(g);   // → here again while the pointer stays near the edge
+  });
+}
+// How far (world px) the pointer is from where it went down, the view's own moves counted.
+function wfAdvDelta(g){ const [wx, wy] = wfWorldAt(g.last[0], g.last[1]), v0 = g.v0; return [wx - (g.sx - g.rect.left - v0.x) / v0.k, wy - (g.sy - g.rect.top - v0.y) / v0.k]; }
+
+// tiles: the pressed one, or the whole selection when it is in it → "Move steps" (every position kept; ONE commit)
+function wfTilesBegin(g){
+  const W = WF, D = wfDerived(), keys = (W.sel.has(g.key) ? [...W.sel].filter(k => /^[nt]:/.test(k)) : [g.key]).filter(k => D.boxes[k] && W.el.map.has(k));
+  if (!keys.length) return false;
+  wfAdvMovePrep(g, D, keys);
+  g.dx = 0; g.dy = 0;
+  W.el.shell.classList.add('is-moving-tiles');
+  keys.forEach(k => W.el.map.get(k).classList.add('is-moving'));
+  return true;
+}
+function wfTilesMove(g){ [g.dx, g.dy] = wfAdvDelta(g); wfAdvShift(g, g.dx, g.dy); wfAdvAutoPan(g); }
+function wfTilesEnd(g, drop){
+  const W = WF;
+  wfAdvRestore(g);
+  W.el.shell.classList.remove('is-moving-tiles');
+  g.keys.forEach(k => { const el = W.el.map.get(k); if (el) el.classList.remove('is-moving'); });
+  if (!drop || (!Math.round(g.dx) && !Math.round(g.dy))) return;
+  const ids = [...g.ids];
+  wfCommit(ids.length > 1 ? 'Move steps' : 'Move step', w => ({ layout: { ...wfObj(w.layout), v: 1, adv: wfAdvMovePos(g.D.layout.pos, ids, g.dx, g.dy) } }));
+}
+// connect: a rubber-band bézier from the dot; on a tile → connected; on the empty canvas → the Actions picker there
+function wfConnBegin(g){
+  const W = WF, D = wfDerived(), L = D.layout, f = g.from;
+  let a = null, i = 0, n = 1;
+  if (f.trigger) a = L.triggers.find(b => b.id===f.trigger) || null;
+  else { const ports = wfPorts(wfNodesOf(W.doc)[f.src]); a = ports.length ? L.nodes[f.src] || null : null; n = Math.max(1, ports.length); i = Math.max(0, ports.indexOf(f.port ?? ports[0])); }
+  if (!a) return false;
+  Object.assign(g, { D, a, i, n, hot: null });
+  g.rubber = document.createElementNS(WF_SVGNS, 'path');
+  g.rubber.setAttribute('class', `is-rubber${f.trigger ? ' is-dashed' : ''}`);
+  W.el.edges.appendChild(g.rubber);
+  W.el.shell.classList.add('is-connecting');
+  return true;
+}
+function wfConnMove(g){
+  const A = WF_ADV, [wx, wy] = wfWorldAt(g.last[0], g.last[1]), x1 = g.a.x + A.tile, y1 = wfAdvDotY(g.a.y, g.i, g.n);
+  g.rubber.setAttribute('d', wfBezierPath(wfBezierSegs(x1, y1, wx, wy, Math.max(g.a.y + A.tile + A.label, wy + A.label) + A.loop)));
+  const k = wfAdvTileAt(g.D.layout, wx, wy);
+  wfAdvHot(g, k && k.startsWith('n:') && k.slice(2)!==g.from.src ? k : null);
+  g.at = [wx, wy];
+  wfAdvAutoPan(g);
+}
+function wfConnEnd(g, drop){
+  const W = WF, f = g.from;
+  g.rubber.remove();
+  wfAdvHot(g, null);
+  W.el.shell.classList.remove('is-connecting');
+  if (!drop || !g.at) return;
+  const k = wfAdvTileAt(g.D.layout, g.at[0], g.at[1]);
+  if (k && k.startsWith('n:')) { if (k.slice(2)!==f.src) wfConnectCommit(f, k.slice(2)); return; }
+  if (k) return;
+  if (f.trigger) { showToast('Drop it on a step: the trigger starts there', { kind: 'info' }); return; }
+  wfPicker('action', { src: f.src, port: f.port ?? null }, { at: [g.at[0] - WF_ADV.tile / 2, g.at[1] - WF_ADV.tile / 2] });
+}
+// marquee: a box in screen space; the tiles it touches are selected at the end (Shift adds them to the selection)
+function wfMarqBegin(g){ g.box = wfMk('div', 'wfa-marq', { 'aria-hidden': 'true' }, WF.el.vp); g.w0 = wfWorldAt(g.sx - g.rect.left, g.sy - g.rect.top); return true; }
+function wfMarqMove(g){
+  const x0 = g.sx - g.rect.left, y0 = g.sy - g.rect.top, [x1, y1] = g.last;
+  g.box.style.transform = `translate(${Math.min(x0, x1)}px,${Math.min(y0, y1)}px)`;
+  g.box.style.width = `${Math.abs(x1 - x0)}px`; g.box.style.height = `${Math.abs(y1 - y0)}px`;
+}
+function wfMarqEnd(g, drop){
+  const W = WF;
+  g.box.remove();
+  if (!drop) return;
+  const [x1, y1] = wfWorldAt(g.last[0], g.last[1]), keys = wfAdvMarquee(wfDerived().boxes, g.w0[0], g.w0[1], x1, y1);
+  W.sel = new Set(g.add ? [...W.sel, ...keys] : keys);
+  if (keys.length) W.focus = keys[0];
+  wfDirty('sel');
+  wfAnnounce(`${W.sel.size} selected`);
+}
+// a sticky note: its title band moves it and the tiles fully inside it (Alt: it alone), its corner its size
+function wfStickyDragBegin(g){
+  const W = WF, D = wfDerived(), k = D.stickies.find(s => s.id===g.sid), el = W.el.map.get(`k:${g.sid}`);
+  if (!k || !el) return false;
+  const tiles = Object.fromEntries(Object.entries(D.boxes).filter(([x]) => /^[nt]:/.test(x)));
+  wfAdvMovePrep(g, D, g.type==='sticky' && !g.alt ? wfAdvInside(k, tiles) : []);
+  Object.assign(g, { k, el, dx: 0, dy: 0 });
+  el.classList.add('is-moving');
+  return true;
+}
+function wfStickyDragMove(g){
+  const U = WF_ADV_UI.sticky;
+  [g.dx, g.dy] = wfAdvDelta(g);
+  if (g.type==='stickySize') { g.el.style.width = `${Math.max(U.minW, Math.min(U.max, g.k.w + g.dx))}px`; g.el.style.height = `${Math.max(U.minH, Math.min(U.max, g.k.h + g.dy))}px`; return; }
+  g.el.style.transform = `translate(${g.k.x + g.dx}px,${g.k.y + g.dy}px)`;
+  wfAdvShift(g, g.dx, g.dy);
+  wfAdvAutoPan(g);
+}
+function wfStickyDragEnd(g, drop){
+  const el = g.el;
+  el.classList.remove('is-moving');
+  el.style.transform = `translate(${el._x}px,${el._y}px)`; el.style.width = `${el._w}px`; el.style.height = `${el._hh}px`;
+  wfAdvRestore(g);
+  if (!drop || (!Math.round(g.dx) && !Math.round(g.dy))) return;
+  if (g.type==='stickySize') { wfStickyCommit('Resize sticky note', l => wfStickySet(l, g.sid, { w: g.k.w + g.dx, h: g.k.h + g.dy })); return; }
+  const ids = [...g.ids];
+  wfStickyCommit(ids.length ? 'Move sticky note and its steps' : 'Move sticky note', l => {
+    const moved = wfStickySet(l, g.sid, { x: g.k.x + g.dx, y: g.k.y + g.dy });
+    return ids.length ? { ...moved, v: 1, adv: wfAdvMovePos(g.D.layout.pos, ids, g.dx, g.dy) } : moved;
+  });
+}
+// a picker row: a ghost follows the pointer; on a "[+]", a line's middle or the last tile of a path that place lights up;
+// letting go = that row picked for that place (the empty canvas: a new group there)
+function wfPalBegin(g){
+  const W = WF, P = W.picker, D = wfDerived(), row = P ? wfPickerFlat(wfPickerRowsNow(W, D))[g.i] : null;
+  if (!row || row.disabled || row.kind==='app') return false;
+  Object.assign(g, { row, D, hot: null, drop: null });
+  g.ghost = wfMk('div', 'wfa-ghost', { 'aria-hidden': 'true' }, W.el.root);
+  g.ghost.textContent = row.label;
+  W.el.shell.classList.add('is-palette');
+  return true;
+}
+function wfPalMove(g){
+  const W = WF, e = g.ev, [px, py] = g.last, inside = px >= 0 && py >= 0 && px <= g.rect.width && py <= g.rect.height;
+  g.ghost.style.transform = `translate(${e.clientX + 14}px,${e.clientY + 10}px)`;
+  g.drop = inside ? wfAdvDrop(g.D.layout, W.doc, ...wfWorldAt(px, py)) : null;
+  wfAdvHot(g, g.drop && g.drop.kind!=='none' && g.drop.kind!=='canvas' ? g.drop.key : null);
+}
+function wfPalEnd(g, drop){
+  const W = WF, P = W.picker, d = g.drop;
+  g.ghost.remove();
+  wfAdvHot(g, null);
+  W.el.shell.classList.remove('is-palette');
+  if (!drop || !d || !P) return;
+  if (d.kind==='none') { showToast(d.why, { kind: 'info' }); return; }
+  const canvas = d.kind==='canvas', slot = canvas ? (W.doc.entry ? null : { src: '@entry', port: null }) : d.slot;
+  const next = { slot: slot || { src: '@entry', port: null }, sc: wfSlotCtx(W.doc, slot, W.reg), at: canvas ? [d.at[0] - WF_ADV.tile / 2, d.at[1] - WF_ADV.tile / 2] : null, detached: canvas && !slot };
+  // the same row, with this place's own reasons (a Go to only at the end of a path…); refused → the picker stays where it was
+  const row = wfPickerFlat(wfPickerRowsNow(W, wfDerived(), next.sc)).find(r => r.key===g.row.key);
+  if (!row) return;
+  if (row.disabled) { showToast(row.reason || 'Not available', { kind: 'info' }); return; }
+  Object.assign(P, next);
+  P.rev++;
+  wfPickerPick(row);
+}
+const WF_ADV_GESTURES = {
+  tiles: { begin: wfTilesBegin, move: wfTilesMove, end: wfTilesEnd },
+  connect: { begin: wfConnBegin, move: wfConnMove, end: wfConnEnd },
+  marquee: { begin: wfMarqBegin, move: wfMarqMove, end: wfMarqEnd },
+  sticky: { begin: wfStickyDragBegin, move: wfStickyDragMove, end: wfStickyDragEnd },
+  stickySize: { begin: wfStickyDragBegin, move: wfStickyDragMove, end: wfStickyDragEnd },
+  palette: { begin: wfPalBegin, move: wfPalMove, end: wfPalEnd },
+};
+
+// ══ The workflow builder: switching builders and the page history (stage 2, phase 5 · G5.3; design §5.5 "Builder
+// switching", §5.7 "Stage 4", §4.4 "Default builder"; GHL: switching back to Standard needs the Advanced-only parts gone) ══
+// Builder ▾ (and the phone's ⋯) switches the same workflow between the two canvases: to Advanced always (every step and
+// trigger gets a stored position, the view fits, one undo entry); to Standard only when nothing Advanced-only is left (a
+// trigger's own Go to, steps not connected, a Default Path that is not a group's first step), else a list of what to remove
+// first, each with "Show". Draft / Published doesn't change. The builder's screen, its layers and its leave guard are
+// part of the page history (stage 4) through wfNavHooks: back closes the builder's top layer first, then asks about
+// unsaved changes (Save / Discard / Cancel) before it leaves; back or forward onto a builder entry opens that workflow again.
+
+// ── pure helpers (tests/business-logic.test.js) ──
+// The builder a new workflow opens in: Global Workflow Settings' "Default builder for new workflows" (Standard until read).
+function wfDefaultBuilder(safety){ return wfObj(safety).default_builder==='advanced' ? 'advanced' : 'standard'; }
+// The step whose tile is nearest a box (centre to centre; the first in the order on a tie). nodes = { id: box } → id | null.
+function wfStickyNearest(box, nodes){
+  const b = wfObj(box), N = wfObj(nodes), cx = (Number(b.x) || 0) + (Number(b.w) || 0) / 2, cy = (Number(b.y) || 0) + (Number(b.h) || 0) / 2;
+  let best = null, bd = Infinity;
+  Object.keys(N).forEach(id => {
+    const t = wfObj(N[id]), dx = (Number(t.x) || 0) + (Number(t.w) || 0) / 2 - cx, dy = (Number(t.y) || 0) + (Number(t.h) || 0) / 2 - cy, d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = id; }
+  });
+  return best;
+}
+// What switching to `to` changes → { builder, layout, blockers }. To Advanced: every position the Advanced layout draws is
+// stored (the ones there are kept; with none at all the whole flow is tidied), and a sticky note pinned to a step that was
+// never placed on that canvas (still at wfStickyAdd's spot) goes in a lane right of the flow at its step's height. To
+// Standard: refused while wfStandardBlockers has anything (blockers listed, nothing changed); else every free note (no step,
+// or its step gone) is pinned to the step nearest to it (stays free with no step at all). The stored
+// Advanced positions stay, so switching back finds everything where it was. The given layout is never changed.
+function wfSwitchPlan(doc, layout, reg, to){
+  const d = wfObj(doc), L = wfObj(layout), list = wfStickiesOf(L);
+  if (to==='advanced') {
+    const A = wfLayoutAdvanced(d, L, reg), lane = new Map(wfStickyBoxes(L, A).map(b => [b.id, b]));
+    let moved = false;
+    const stickies = list.map(s => {
+      const b = lane.get(s.id);
+      if (!b || !s.anchor || !wfHas(A.nodes, s.anchor) || s.x!==WF_STICKY.gap || s.y!==0) return s;
+      moved = true;
+      return { ...s, x: Math.round(b.x), y: Math.round(b.y) };
+    });
+    return { builder: 'advanced', blockers: [], layout: { ...L, v: 1, adv: wfAdvMovePos(A.pos, [], 0, 0), ...(moved ? { stickies } : {}) } };
+  }
+  const blockers = wfStandardBlockers(d);
+  if (blockers.length) return { builder: 'advanced', blockers, layout };
+  const A = wfLayoutAdvanced(d, L, reg);
+  let changed = false;
+  const stickies = list.map(s => {
+    if (s.anchor && wfHas(A.nodes, s.anchor)) return s;
+    const near = wfStickyNearest({ x: Number(s.x) || 0, y: Number(s.y) || 0, w: Number(s.w) || WF_STICKY.w, h: Number(s.h) || WF_STICKY.h }, A.nodes);
+    if (near===(s.anchor || null)) return s;
+    changed = true;
+    return { ...s, anchor: near };
+  });
+  return { builder: 'standard', blockers: [], layout: changed ? { ...L, v: 1, stickies } : layout };
+}
+// The blockers as the dialog lists them: a trigger's own Go to; the Default Path; steps not connected, one row per group
+// (its first step, and how many more). → [{ key ('t:…' | 'n:…' | ''), text, fix }].
+function wfBlockerRows(doc, blockers, reg){
+  const d = wfObj(doc), N = wfNodesOf(d), B = Array.isArray(blockers) ? blockers.map(wfObj) : [], out = [];
+  const trigs = (Array.isArray(d.triggers) ? d.triggers : []).map(wfObj), name = id => wfNodeName(N[id], reg);
+  B.filter(b => b.code==='trigger_goto').forEach(b => {
+    const t = trigs.find(x => String(x.id)===b.triggerId), e = t ? wfTrigEntry(reg, t.type) : null;
+    out.push({ key: t ? `t:${b.triggerId}` : '', text: `Trigger "${t ? String(t.name || (e && e.label) || 'Trigger') : 'Trigger'}" goes to a step of its own`, fix: 'Remove its line so it starts at the Default Path' });
+  });
+  if (B.some(b => b.code==='entry_not_head')) {
+    const on = typeof d.entry==='string' && wfHas(N, d.entry);
+    out.push({ key: on ? `n:${d.entry}` : '', text: on ? `The Default Path starts in the middle of a path ("${name(d.entry)}")` : 'No step is the Default Path', fix: 'Set the first step of a group as the Default Path' });
+  }
+  const off = new Set(B.filter(b => b.code==='delinked').map(b => b.nodeId));
+  if (off.size) wfClusters(d).forEach(c => {
+    const n = c.ids.filter(id => off.has(id)).length;
+    if (!n) return;
+    out.push({ key: `n:${c.head}`, text: `"${name(c.head)}"${n > 1 ? ` and ${n - 1} more step${n===2 ? '' : 's'} after it` : ''}: not connected`, fix: 'Connect it to a path, or delete it' });
+  });
+  return out;
+}
+function wfBlockersHtml(rows){
+  const R = Array.isArray(rows) ? rows.map(wfObj) : [];
+  return wfDlgHtml('wfb-blk-t', 'Remove these first to switch to the Standard builder', '<p class="wfb-dlg-p">The Standard builder shows one path from the triggers down. These only work in the Advanced builder:</p>'
+    + `<ul class="wfb-blk">${R.map(r => `<li><span><b dir="auto">${esc(r.text)}</b><small>${esc(r.fix)}</small></span>${r.key ? `<button type="button" class="btn small" data-act="blkShow" data-key="${esc(r.key)}">Show</button>` : ''}</li>`).join('')}</ul>`,
+    '<button type="button" class="btn primary" data-act="dlgClose">Close</button>');
+}
+
+// ── switching ──
+function wfSwitchBuilder(to){
+  const W = WF;
+  if (!W) return;
+  const b = to==='advanced' ? 'advanced' : 'standard';
+  if (b===W.builder) return;
+  const why = wfGuardEdit() || (W.publishing ? 'Wait a moment: it is being published' : '');
+  if (why) { showToast(why, { kind: 'warn' }); return; }
+  const plan = wfSwitchPlan(W.doc, W.layout, W.reg, b);
+  if (plan.blockers.length) { wfSetLayer('dialog', { kind: 'blockers', rows: wfBlockerRows(W.doc, plan.blockers, W.reg) }); return; }
+  if (!wfCommit(b==='advanced' ? 'Switch to the Advanced builder' : 'Switch to the Standard builder', () => ({ builder: b, layout: plan.layout }))) return;
+  if (W.tool==='marquee') W.tool = 'select';
+  W.focusPending = true;
+  wfFitView();
+}
+// "Show" in the blockers list: the dialog closes, the item is selected and brought into view.
+function wfBlockerShow(key){
+  const W = WF, k = String(key || '');
+  if (!W || !/^[nt]:/.test(k) || !wfNodeIdOk(k.slice(2))) return;
+  wfSetLayer('dialog', null);
+  wfSelectKey(k, false);
+  W.focusPending = true;
+  wfShowKey(k, true);
+}
+
+// ── the page history (stage 4): the builder's entry, its layers, its leave guard ──
+// The builder's entry: { kind: 'wf', x: { id } } (a System row by its key; a new one null until its first Save).
+function wfNavId(W){ return W ? W.id || (W.sys && W.sys.key) || null : null; }
+function wfNavReady(){ return [typeof navPush, typeof navReplace, typeof navBackTo, typeof navOurs, typeof navSnap].every(t => t==='function') && typeof NAV_HIST!=='undefined' && !!NAV_HIST.ready; }
+// A builder layer opened or closed: its entry follows once the change is done (never inside back's own handling).
+function wfNavSync(){ if (typeof navOverlaySync==='function') setTimeout(navOverlaySync, 0); }
+// How many of the builder's layers are open (menu, dialog, move mode, drawer, picker, side panel).
+function wfNavOpen(W){ return W ? ['menu', 'dialog', 'moveMode', 'drawer', 'picker', 'rail'].filter(k => !!W[k]).length : 0; }
+// Back with a builder layer open: the builder's own top one closes (wfNavTop's order: a menu over the side panel goes
+// first); false = nothing closed (it asked first: a step with changes), so the entry stays.
+function wfNavClose(){
+  const W = WF;
+  if (!W) return undefined;
+  const n = wfNavOpen(W);
+  wfNavTop();
+  return WF===W && wfNavOpen(W) >= n ? false : undefined;
+}
+// Back or forward off the builder's entry: it closes, asking first when something is unsaved (Save / Discard / Cancel →
+// a Promise stage 4 waits for: true goes on, false stays).
+function wfNavLeave(){
+  const W = WF;
+  if (!W) return true;
+  const go = () => { if (WF===W) wfBuilderClose({ nav: false }); render(); };
+  if (!wfUnsaved(W) && !(W.drawer && W.drawer.dirty)) { go(); return true; }
+  return new Promise(res => { wfSetLayer('dialog', { kind: 'leave', then: () => { go(); res(true); }, cancel: () => res(false) }); });
+}
+// Back or forward onto a builder entry: that workflow opens again (a new one opens empty; its local draft is offered).
+function wfNavRestore(s){
+  const x = wfObj(wfObj(s).x), id = typeof x.id==='string' && x.id ? x.id : (typeof x.tmp==='string' && WF_NAV_NEW.ids.get(x.tmp)) || null;
+  if (id && wfNavId(WF)===id) return true;
+  if (WF) wfBuilderClose({ nav: false });
+  if (id) wfEdit(id);
+  else wfBuilderOpen(null, { folderId: typeof WF_UI!=='undefined' ? WF_UI.folder || null : null });
+  return true;
+}
+// The layers (stage 4's note: a layer inside a window sits between 200 and 300): the builder's dialogs and menus 210, its
+// drawers (the step drawer, the side panel) 220, its pickers 230. Each close() is wfNavClose, so back closes what is on top.
+function wfNavWire(){
+  if (typeof navLayer!=='function') return;
+  const open = k => () => !!WF && k.some(n => !!WF[n]);
+  navLayer({ id: 'wf-modal', z: 210, isOpen: open(['menu', 'dialog', 'moveMode']), close: wfNavClose });
+  navLayer({ id: 'wf-drawer', z: 220, isOpen: open(['drawer', 'rail']), close: wfNavClose });
+  navLayer({ id: 'wf-picker', z: 230, isOpen: open(['picker']), close: wfNavClose });
+  NAV_LEAVERS.wf = wfNavLeave;
+  NAV_RESTORERS.wf = wfNavRestore;
+}
+wfNavWire();
 
 // ══ The template library (stage 2 G3.3; design §4.3 "Select from template", "Upload to Template Library") ══
 // automation_templates: the System templates (seeded by the engine's migrate) and the business's own under "Mine" (Upload
