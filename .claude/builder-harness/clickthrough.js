@@ -109,3 +109,75 @@ window.__wfClickThrough = async function(){
   console.log(`builder click-through: ${pass} passed, ${fail} failed`);
   return { pass, fail, lines };
 };
+
+// Switching builders both ways and the page history (stage 2 G5.3; design §7 Phase 5 "browser click-through both ways").
+// Run on its own after a real click on the page (the history gives a layer an entry only after the person has used the
+// page): await __wfSwitchClickThrough() → { pass, fail, lines }.
+window.__wfSwitchClickThrough = async function(){
+  const lines = [];
+  let pass = 0, fail = 0;
+  const ok = (c, name, extra) => { if (c) pass++; else fail++; const l = `${c ? 'PASS' : 'FAIL'} ${name}${!c && extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 300) : ''}`; lines.push(l); (c ? console.log : console.error)(l); };
+  const wait = ms => new Promise(r => setTimeout(r, ms || 50));
+  const until = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < (ms || 4000)) { try { if (fn()) return true; } catch (e) { /* not yet */ } await wait(40); } return false; };
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const click = (sel, root) => { const el = $(sel, root); if (!el) throw new Error('not found: ' + sel); el.click(); return el; };
+  const row = id => FAKE_DB.automations.find(a => a.id === id);
+  const ID = FAKE_IDS;
+  // the page history's own moves (a layer's entry pushed or taken away, a guard's back made again) are done before the next
+  // back: a person can't press back within the few milliseconds those take, a script can
+  const settle = async () => { await wait(60); await until(() => !NAV_HIST.skip && !NAV_HIST.syncBack && !NAV_HIST.backPending); await wait(250); };
+  try {
+    openAutomation({ tab: 'workflows' });
+    await until(() => document.querySelector('[onclick^="wfEdit("]'));
+    // switching builders both ways (G5.3): Builder ▾ → Advanced (tiles, every position stored, Save keeps it); a line
+    // removed → back to Standard refused with "Remove these first…" and "Show"; undone → Standard allowed. The page
+    // history (stage 4): back closes the open menu first, then asks about unsaved changes (Cancel stays, Discard leaves),
+    // forward opens the workflow again.
+    await wfEdit(ID.flat); await until(() => WF && WF.id === ID.flat && $('[data-act="builderMenu"]')); await wait(300);
+    if ($('#wf-modal [data-act="draftDiscard"]')) { click('#wf-modal [data-act="draftDiscard"]'); await wait(80); }
+    click('[data-act="builderMenu"]'); await until(() => $('#wf-modal [data-act="m:builderAdv"]'));
+    click('#wf-modal [data-act="m:builderAdv"]');
+    ok(await until(() => WF.builder === 'advanced' && $('.wfa-tile') && !$('#wf-modal').children.length), 'Builder ▾ → Advanced builder: tiles drawn, the menu closed');
+    ok(Object.keys(WF.layout.adv || {}).length === 3 && WF.hist.past[WF.hist.past.length - 1].label === 'Switch to the Advanced builder', 'every step and the trigger got a stored position, as one undo entry', WF.layout.adv);
+    click('[data-act="save"]');
+    ok(await until(() => row(ID.flat).builder === 'advanced' && $('.wfb-save').textContent.includes('Saved')), 'Save keeps the builder on the row (advanced)');
+    wfCommit('Remove line', w => wfDisconnect(w.doc, 'n1', 'next', w.reg));
+    click('[data-act="builderMenu"]'); await until(() => $('#wf-modal [data-act="m:builderStd"]'));
+    click('#wf-modal [data-act="m:builderStd"]');
+    ok(await until(() => $('#wf-modal [data-act="blkShow"]')) && WF.builder === 'advanced', 'Advanced → Standard with a step not connected: "Remove these first to switch to the Standard builder" with Show; still Advanced');
+    click('#wf-modal [data-act="blkShow"]');
+    ok(await until(() => !$('#wf-modal').children.length && WF.sel.has('n:n2')), '"Show" closes the list and selects the step not connected');
+    click('[data-act="undo"]'); await wait(80);
+    click('[data-act="builderMenu"]'); await until(() => $('#wf-modal [data-act="m:builderStd"]'));
+    click('#wf-modal [data-act="m:builderStd"]');
+    ok(await until(() => WF.builder === 'standard' && !$('.wfa-tile') && $('#wf-root .wfb-card')), 'nothing Advanced-only left: back to the Standard builder (cards drawn)');
+    click('[data-act="builderMenu"]'); await until(() => $('#wf-modal [role="menu"]'));
+    await settle();
+    history.back();
+    ok(await until(() => !$('#wf-modal [role="menu"]')) && WF && WF.id === ID.flat, 'back with the menu open: the menu closes, the builder stays');
+    await settle();
+    history.back();
+    ok(await until(() => $('#wf-modal [data-act="leaveDiscard"]')), 'back with unsaved changes: "Unsaved changes" Save / Discard / Cancel');
+    await settle();
+    click('#wf-modal [data-act="dlgClose"]');
+    ok(await until(() => !$('#wf-modal [data-act="leaveDiscard"]')) && WF && WF.id === ID.flat && !$('#wf-root').hidden, 'Cancel: the question closes, the builder stays');
+    await settle();
+    ok(history.state && history.state.kind === 'wf' && !history.state.ov, 'Cancel: the history is on the builder entry again', history.state);
+    history.back();
+    ok(await until(() => $('#wf-modal [data-act="leaveDiscard"]')), 'back again asks again');
+    await settle();
+    click('#wf-modal [data-act="leaveDiscard"]');
+    ok(await until(() => !WF && $('#wf-root').hidden), 'Discard: back to the list');
+    await settle();
+    ok(history.state && history.state.kind !== 'wf', 'Discard: the history moved on to the list entry', history.state);
+    history.forward();
+    ok(await until(() => WF && WF.id === ID.flat && WF.builder === 'advanced'), 'forward: the workflow opens again, as saved (Advanced)');
+    await until(() => $('[data-act="back"]'));
+    click('[data-act="back"]');
+    ok(await until(() => !WF && history.state && history.state.kind !== 'wf'), '← Workflows list: closed, and the history is back on the list entry (no builder entry left on top)', history.state);
+    const p1 = window.__wfp; await wait(1500);
+    ok(window.__wfp === p1 && !(window.__wfPaintReentry > 0), 'idle afterwards: no builder paint');
+  } catch (e) { ok(false, 'the click-through stopped: ' + (e && e.message)); }
+  console.log(`builder switching click-through: ${pass} passed, ${fail} failed`);
+  return { pass, fail, lines };
+};
