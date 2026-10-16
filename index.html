@@ -2586,6 +2586,8 @@ body.cobra-open #chase-bubbles { right: 418px !important; }
 .wfai-saved { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; padding: 7px 10px; border-radius: var(--radius-sm); background: var(--good-soft); font-size: 12.5px; }
 .wfai-saved b { flex: 1; min-width: 0; }
 .wfai-saved svg { color: var(--good); flex-shrink: 0; }
+.wfai-desc { list-style: none; margin: 8px 0 0; padding: 0; }
+.wfai-desc li { padding: 3px 0; padding-inline-start: calc(var(--d, 0) * 14px); font-size: 12.5px; overflow-wrap: anywhere; border-top: 1px solid var(--line-soft); }
 /* ══ Workflow AI (stage 7): own block, end ══ */
 </style>
 <!-- The business's colours (Look and branding), kept from the last visit so the first paint is already branded. It must come
@@ -33103,6 +33105,7 @@ async function cobraSend(text){
   const input = document.getElementById('cobra-input');
   const t = String(text ?? (input ? input.value : '')).trim();
   if (!t || COBRA.streaming) return;
+  if (wfAiDescribeAsk(t, text==null)) return;   // Workflow AI (stage 7): "Describe this workflow" is drawn here, no AI call
   if (t.length > COBRA_LIMITS.text) { cobraHint(COBRA_ERRORS.too_long); return; }
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   const block = cobraSendBlock(COBRA.status);
@@ -33672,19 +33675,20 @@ function wfAiChangeGuard(id, action){
   return true;
 }
 // After a change was confirmed or undone: the list reads again, the card shows its saved line, and a builder open (and
-// clean) on that workflow is opened again on the new revision.
+// clean) on that workflow is opened again on the new revision (an undone new Draft is deleted: the builder on it closes).
 function wfAiChangeDone(ch, action){
   const x = wfObj(ch);
   if ((x.kind!=='wf_create' && x.kind!=='wf_edit') || (action!=='confirm' && action!=='undo')) return;
   try { wfChanged(); } catch (e) { /* the list reads again when it opens */ }
   const msg = (COBRA.msgs || []).find(m => (m.proposals || []).some(p => p && p.id===x.id));
   if (msg) cobraPatchMsg(msg);
-  const tid = x.kind==='wf_edit' ? wfAiTargetOf(x) : '';
+  const tid = x.kind==='wf_edit' || action==='undo' ? wfAiTargetOf(x) : '';
   if (tid && typeof WF!=='undefined' && WF && WF.id===tid && !wfIsDirty(WF)) wfAiReopen(tid);
 }
 async function wfAiReopen(id){
   const row = await wfReadRow(id);
-  if (!row || row.deleted_at || typeof WF==='undefined' || !WF || WF.id!==id || wfIsDirty(WF)) return;
+  if (!row || typeof WF==='undefined' || !WF || WF.id!==id || wfIsDirty(WF)) return;
+  if (row.deleted_at) { wfBuilderClose(); render(); showToast('That workflow is gone (deleted)', { kind: 'info' }); return; }
   wfBuilderOpen(row, { mode: 'edit' });
 }
 // "Open" on a saved card: the builder on that workflow (on a phone the panel's sheet goes first).
@@ -33696,10 +33700,130 @@ async function wfAiOpenDraft(id){
   if (WF && WF.id===k) { await wfAiReopen(k); return; }
   openAutomation({ key: k });
 }
+// ── Describe (stage 7 C, design D10): the workflow in words, built here from the registry's narration templates (no AI
+// call). "Explain it in my words" then asks the AI (workflow_edit reads the outline itself) in the person's language.
+const WF_DESCRIBE_MAX = 200;
+const WF_AI_EXPLAIN = 'Explain this workflow in my words';
+// The triggers, then the steps from the entry in order: If / else and Split paths (and a wait's "Replied" / "Timed out")
+// as nested lists, a Go to as "Then goes back to <name>", steps that nothing reaches at the end. Pure.
+// → { lines: [{ d (depth), t (text) }], more (lines not shown, past WF_DESCRIBE_MAX) }.
+function wfDescribe(doc, reg, ctx){
+  const d = wfObj(doc), I = wfIndex(d), lines = [], seen = new Set();
+  let more = 0;
+  const add = (depth, t) => { if (lines.length < WF_DESCRIBE_MAX) lines.push({ d: Math.max(0, Math.min(depth, 8)), t: String(t) }); else more++; };
+  const trigs = Array.isArray(d.triggers) ? d.triggers.map(wfObj) : [];
+  if (!trigs.length) add(0, 'No trigger yet: nothing starts it');
+  trigs.forEach(t => {
+    const N = wfTriggerNarration(t, reg, ctx);
+    add(0, `When: ${N.head}${N.name && N.name!==N.head ? ` (${N.name})` : ''}${t.disabled===true ? ' (switched off)' : ''}`);
+    N.lines.filter(l => l!=='No filters applied').forEach(l => add(1, l));
+    if (N.more) add(1, `+${N.more} more`);
+  });
+  // a step's line: what it does (a renamed step keeps its own name first; an If / else or Split only its name, its paths follow)
+  const stepText = n => {
+    const name = wfNodeName(n, reg), sum = n.kind==='if_else' || n.kind==='split' ? '' : wfSafe(() => wfNodeSummary(n, reg, ctx, d), '');
+    return `${!sum ? name : n.name && String(n.name)!==sum ? `${name}: ${sum}` : sum}${n.disabled===true ? ' (switched off)' : ''}`;
+  };
+  const pathText = (n, port) => {
+    const label = wfPortLabel(n, port, reg) || port;
+    if (n.kind!=='if_else') return `${label}:`;
+    if (port==='none') return `${label}: ${WF_NONE_SUMMARY.toLowerCase()}`;
+    const br = wfObj((Array.isArray(wfObj(n.config).branches) ? n.config.branches : []).find(b => wfObj(b).id===port));
+    return `${label}: ${wfSafe(() => wfBranchSummary(br.when, reg, ctx), 'no conditions yet')}`;
+  };
+  const kid = (id, port) => { const t = wfObj(wfObj(I.nodes[id]).out)[port]; return typeof t==='string' && I.parent[t] && I.parent[t].from===id && I.parent[t].port===port ? t : null; };
+  const walk = (start, depth) => {
+    for (let x = start; x && wfHas(I.nodes, x) && !seen.has(x);) {
+      seen.add(x);
+      const n = wfObj(I.nodes[x]), ports = wfPorts(n), to = n.kind==='goto' ? wfObj(n.config).target : null;
+      if (n.kind==='goto' && typeof to==='string' && wfHas(I.nodes, to)) { add(depth, `Then goes back to ${wfNodeName(I.nodes[to], reg)}`); return; }
+      add(depth, stepText(n));
+      if (ports.length > 1) { ports.forEach(p => { add(depth + 1, pathText(n, p)); const k = kid(x, p); if (k) walk(k, depth + 2); else add(depth + 2, 'Ends'); }); return; }
+      x = ports.length ? kid(x, ports[0]) : null;
+    }
+  };
+  const groups = wfClusters(d), entry = typeof d.entry==='string' && wfHas(I.nodes, d.entry);
+  if (!groups.length) add(0, 'No steps yet');
+  groups.forEach((g, i) => {
+    if (i===0 && entry) add(0, 'Then:');
+    else if (i===0 || (i===1 && entry)) add(0, 'Not connected (never runs):');
+    walk(g.head, 1);
+  });
+  return { lines, more };
+}
+// A saved row's doc (as the builder opens it): schema 2, else a phase-4 row's trigger and steps.
+function wfAiDocOf(row){
+  const r = wfObj(row), def = wfObj(r.definition);
+  if (def.schema===2 && def.nodes && typeof def.nodes==='object') return def;
+  if (r.trigger || def.trigger || Array.isArray(r.steps) || Array.isArray(def.steps)) { try { return wfFromV1(r.trigger || def.trigger, Array.isArray(r.steps) ? r.steps : def.steps).doc; } catch (e) { /* below */ } }
+  return wfNewDoc();
+}
+// The business's lists for the words (the builder's own when it is open), without opening the builder.
+function wfAiCtx(){
+  try {
+    if (typeof WF!=='undefined' && WF) return wfBuilderCtx();
+    const s = (STATE.data && STATE.data.settings) || {}, list = (sec, lab) => catalogShown(sec).map(x => ({ key: x.key, label: lab(x.key) })), wl = WF_DATA.list.get('all');
+    return { lists: { services: list('services', divLabel), stages: list('stages', stageLabel), sources: list('sources', sourceLabel), tags: catalogShown('tags').map(x => ({ key: x.tag, label: x.tag })),
+      people: (STATE.profiles || []).map(p => ({ key: String(p.id), label: p.fullName || '' })), ...(wl && wl.status==='ok' && Array.isArray(wl.data) ? { workflows: wl.data.filter(r => !r.deleted_at).map(r => ({ key: String(r.id), label: String(r.name || '') })) } : {}) },
+    catalog: s.catalog || {} };
+  } catch (e) { return { lists: {} }; }
+}
+// "Describe this workflow" (the edit mode's example, or typed): drawn here, never sent.
+function wfAiIsDescribe(t){ return /^\s*(please\s+)?describe\s+(this|the|my)\s+workflow\s*[.!?]?\s*$/i.test(String(t || '')); }
+// The card's data: the open builder's doc (with its unsaved changes, said so), else the saved row. The registry is read
+// once if nobody has yet (no app redraw).
+async function wfAiDescribeData(id){
+  const W = typeof WF!=='undefined' ? WF : null;
+  let doc, name, unsaved = false;
+  if (W && W.id===id) { doc = W.doc; name = W.name; unsaved = wfIsDirty(W); }
+  else {
+    const row = await wfReadRow(id);
+    if (!row || row.deleted_at) return { id, error: 'This workflow could not be read. It may have been deleted.' };
+    doc = wfAiDocOf(row); name = String(row.name || '');
+  }
+  let e = WF_DATA.registry.get('v2');
+  if (!e) e = wfEnsure('registry', 'v2', wfFetchRegistry, () => false);
+  if (e && e.status==='loading' && e.p) { try { await e.p; } catch (err) { /* the offline labels */ } }
+  const D = wfDescribe(doc, wfBuilderReg(), wfAiCtx());
+  return { id, name, unsaved, lines: D.lines, more: D.more };
+}
+// Before a turn is sent: in Workflow AI's edit mode "Describe this workflow" becomes a local card (no AI call, nothing
+// stored). → true = handled here.
+function wfAiDescribeAsk(t, fromInput){
+  const c = COBRA, id = String(wfObj(c.context).workflowId || '');
+  if (c.mode!=='workflow' || !WF_UUID_RE.test(id) || !wfAiIsDescribe(t)) return false;
+  const first = !c.msgs.length, user = { mid: ++c.seq, role: 'user', text: String(t).trim() };
+  const msg = { mid: ++c.seq, role: 'assistant', text: '', tools: [], proposals: [], cards: [{ kind: 'wf_describe', data: { id, busy: true } }], notes: [], error: null };
+  c.msgs.push(user, msg);
+  if (fromInput) c.draft = '';
+  const input = document.getElementById('cobra-input'), list = document.getElementById('cobra-msgs');
+  if (fromInput && input) { input.value = ''; cobraInput(input); }
+  if (list && !first) { list.insertAdjacentHTML('beforeend', cobraMsgHtml(user) + cobraMsgHtml(msg, c.busy, cobraCardCtx())); cobraScrollEnd(); }
+  else cobraDraw();
+  const put = data => { msg.cards = [{ kind: 'wf_describe', data }]; cobraPatchMsg(msg); };
+  wfAiDescribeData(id).then(put, () => put({ id, error: 'This workflow could not be read.' }));
+  return true;
+}
+// The wf_describe card: the lines as a nested list (each line in its own direction), unsaved changes said, the AI button.
+function wfAiDescribeHtml(d){
+  const x = wfObj(d), lines = (Array.isArray(x.lines) ? x.lines : []).slice(0, WF_DESCRIBE_MAX).map(wfObj), more = Number(x.more) || 0;
+  const head = `<div class="cobra-card-head">${ico('info', 15)}<b dir="auto">${esc(x.name || 'This workflow')}</b>${x.unsaved ? pill('neutral', 'Not saved') : ''}</div>`;
+  if (x.busy) return `<div class="cobra-card wfai-card">${head}<div class="wfai-sum">Reading the workflow…</div></div>`;
+  if (x.error) return `<div class="cobra-card wfai-card">${head}<div class="cobra-card-err" dir="auto">${esc(x.error)}</div></div>`;
+  return `<div class="cobra-card wfai-card">${head}`
+    + (x.unsaved ? '<div class="wfai-sum">With the changes not saved yet.</div>' : '')
+    + `<ul class="wfai-desc">${lines.map(l => `<li style="--d:${Math.max(0, Math.min(8, Math.floor(Number(l.d) || 0)))}" dir="auto">${esc(l.t ?? '')}</li>`).join('')}</ul>`
+    + (more > 0 ? `<div class="wfai-sum">+${more} more line${more===1 ? '' : 's'}: ask about one part</div>` : '')
+    + `<div class="cobra-card-acts"><button type="button" class="btn small" onclick="wfAiExplain()">${ico('zap', 14)} Explain it in my words</button></div></div>`;
+}
+// "Explain it in my words": a turn to workflow_edit (the AI reads the workflow with its read tool and answers in the
+// person's language).
+function wfAiExplain(){ if (!COBRA.streaming) cobraSend(WF_AI_EXPLAIN); }
 COBRA_MODES.workflow = WF_AI_MODE;
 COBRA_CARDS.wf_preview = wfAiPreviewHtml;
 COBRA_CARDS.wf_diff = wfAiDiffHtml;
 COBRA_CARDS.wf_saved = wfAiSavedHtml;
+COBRA_CARDS.wf_describe = wfAiDescribeHtml;
 Object.assign(COBRA_KIND_UI, WF_AI_KIND_UI);
 COBRA_PAGE_MODES.push(ui => wfAiPageMode(ui));
 // ══ Workflow AI (stage 7): own block, end ══

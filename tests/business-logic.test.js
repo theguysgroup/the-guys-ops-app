@@ -237,6 +237,8 @@ const DECLS = [
   'COBRA_KIND_UI', 'cobraLeanKind', 'cobraFindChange', 'cobraIsOwner', 'wfIsDirty', 'WF_AI_OFF', 'WF_AI_DRAFT_BADGE', 'WF_AI_OWN_LINE', 'WF_AI', 'WF_AI_EXAMPLES', 'wfAiShown', 'wfAiWhy', 'wfAiStatusText',
   'wfAiButtonHtml', 'wfAiBuild', 'wfAiPageMode', 'WF_AI_MODE', 'WF_AI_KIND_UI', 'wfAiChangeOf', 'wfAiTargetOf', 'wfAiSavedHtml', 'wfAiSavedFor', 'wfAiWarnHtml', 'wfAiPreviewHtml', 'wfAiDiffHtml',
   'wfAiTick', 'wfAiChangeGuard', 'wfAiChangeDone', 'wfAiReopen', 'wfAiOpenDraft',
+  // Stage 7 C: edit and describe
+  'WF_DESCRIBE_MAX', 'WF_AI_EXPLAIN', 'wfDescribe', 'wfAiDocOf', 'wfAiCtx', 'wfAiIsDescribe', 'wfAiDescribeData', 'wfAiDescribeAsk', 'wfAiDescribeHtml', 'wfAiExplain',
 ];
 
 function extractDecl(source, name){
@@ -8216,6 +8218,111 @@ async function testWorkflowAiB(sb){
     [true, false, false, true, true, true], 'Workflow AI\'s block: no publish, no write, no builder-canvas code; the mode, page mode and three cards are registered');
 }
 
+// ── Stage 7 C: edit and describe ──
+async function testWorkflowAiC(sb){
+  console.log('\nStage 7 C: Workflow AI (describe, Explain it in my words, reopen after Confirm / Undo)');
+  const reg = wfRegFor(WF_AV_TODAY), ctx = { lists: { stages: [{ key: 'quoted', label: 'Quoted' }], tags: [{ key: 'vip', label: 'VIP' }] } };
+  const doc = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'stage', name: 'Quoted', filters: { match: 'all', segments: [{ match: 'all', rules: [{ field: 'trigger.stage', op: 'is', v: 'quoted' }] }] } }],
+    nodes: { n1: { kind: 'wait', type: 'period', config: { n: 2, unit: 'days' }, out: { next: 'n2' } },
+      n2: { kind: 'if_else', type: 'if_else', name: 'Has email?', config: { branches: [{ id: 'b3', name: 'Yes', when: { match: 'all', segments: [{ match: 'all', rules: [{ field: 'has_email', op: 'true' }] }] } }], noneName: 'No' }, out: { b3: 'n4', none: null } },
+      n4: { kind: 'action', type: 'send_email', name: 'שלח מייל', config: { subject: 'Hi', body: 'x' }, out: { next: 'n6' } },
+      n6: { kind: 'goto', type: 'goto', config: { target: 'n1' }, out: {} },
+      n7: { kind: 'action', type: 'add_tag', config: { tags: ['vip'] }, out: { next: null }, disabled: true },
+      n8: { kind: 'split', type: 'split', config: { paths: [{ id: 'p1', name: 'A', percent: 50 }, { id: 'p2', name: 'B', percent: 50 }] }, out: { p1: 'n9', p2: null } },
+      n9: { kind: 'action', type: 'add_task', config: { title: 'Call' }, out: { next: null } } } };
+  const flat = D => D.lines.map(l => '  '.repeat(l.d) + l.t);
+  assertEqual(flat(sb.wfDescribe(doc, reg, ctx)), ['When: Pipeline stage changed (Quoted)', '  Moved to stage is "Quoted"', 'Then:', '  Wait 2 days', '  Has email?', '    Yes: Has an email address is true', '      שלח מייל: Email the lead: Hi',
+    '      Then goes back to Wait', '    No: when none of the conditions are met', '      Ends', 'Not connected (never runs):', '  Add the tags VIP (switched off)', '  Split', '    A 50%:', '      Add a task: Call', '    B 50%:', '      Ends'],
+    'wfDescribe: triggers with their filters, the steps from the entry, If / else paths with their conditions, a Go to "goes back", Split paths, steps nothing reaches, switched off said, Hebrew names kept');
+  assertEqual([sb.wfDescribe({}, reg, ctx), sb.wfDescribe(null, null, null).lines.map(l => l.t), sb.wfDescribe({ triggers: [{ id: 't1', type: 'stage', filters: WF_F0 }], nodes: {} }, reg, ctx).lines.map(l => l.t)],
+    [{ lines: [{ d: 0, t: 'No trigger yet: nothing starts it' }, { d: 0, t: 'No steps yet' }], more: 0 }, ['No trigger yet: nothing starts it', 'No steps yet'], ['When: Pipeline stage changed', 'No steps yet']], 'wfDescribe: an empty or junk doc does not throw; "No filters applied" is left out');
+  // ≤ 200 lines, a broken loop (a junk doc) once, deep nesting capped
+  const chain = { entry: 'n0', triggers: [], nodes: {} };
+  for (let i = 0; i < 260; i++) chain.nodes['n' + i] = wfAct(i < 259 ? 'n' + (i + 1) : null);
+  const loop = { entry: 'n1', triggers: [], nodes: { n1: wfAct('n2'), n2: wfAct('n1') } };
+  const deep = { entry: 'n0', triggers: [], nodes: {} };
+  for (let i = 0; i < 12; i++) deep.nodes['n' + i] = { kind: 'if_else', type: 'if_else', config: { branches: [{ id: 'b' + i, name: 'B', when: WF_F0 }], noneName: 'No' }, out: { ['b' + i]: i < 11 ? 'n' + (i + 1) : null, none: null } };
+  const C = sb.wfDescribe(chain, reg, ctx), Lp = sb.wfDescribe(loop, reg, ctx), Dp = sb.wfDescribe(deep, reg, ctx);
+  assertEqual([C.lines.length, C.more, sb.WF_DESCRIBE_MAX, Lp.lines.filter(l => l.t==='Add a task: Call').length, Math.max(...Dp.lines.map(l => l.d)), Dp.lines.some(l => /^B: /.test(l.t))],
+    [200, 62, 200, 2, 8, true], 'wfDescribe: at most 200 lines + how many more; a loop of steps is told once each; the depth stops at 8');
+  // a saved row's doc
+  const v2 = { schema: 2, nodes: { n1: wfAct(null) }, triggers: [], entry: 'n1' };
+  assertEqual([sb.wfAiDocOf({ definition: v2 })===v2, sb.wfAiDocOf({ definition: { foo: 1 } }).schema, Object.keys(sb.wfAiDocOf(null).nodes).length, sb.wfAiDocOf({ trigger: { type: 'stage' }, steps: [] }).schema],
+    [true, 2, 0, 2], 'wfAiDocOf: a schema-2 definition as it is, a phase-4 row upgraded, junk an empty doc');
+  assertEqual(['Describe this workflow', ' describe the workflow. ', 'Please describe my workflow?', 'Explain this workflow in my words', 'Describe this workflow and add a tag', 'תאר את התהליך', '', null].map(sb.wfAiIsDescribe),
+    [true, true, true, false, false, false, false, false], 'wfAiIsDescribe: only the plain ask is drawn locally (anything more, or another language, goes to the AI)');
+  // the card
+  const lines = [{ d: 0, t: WFAI_HOSTILE }, { d: 1, t: 'שלח מייל: Email the lead' }, { d: 99, t: 'deep' }, { d: '"><b>', t: 'odd' }];
+  const ch = sb.wfAiDescribeHtml({ id: WFAI_ID, name: WFAI_HOSTILE, lines, more: 3, unsaved: true });
+  assertEqual([ch.includes('<img'), ch.includes('&lt;img src=x onerror=alert(1)&gt;'), ch.includes('style="--d:1" dir="auto">שלח מייל: Email the lead'), ch.includes('style="--d:8"'), ch.includes('style="--d:0" dir="auto">odd'), ch.includes('<b>'),
+    ch.includes('+3 more lines: ask about one part'), ch.includes('Not saved'), ch.includes('onclick="wfAiExplain()"') && ch.includes('Explain it in my words'), ch.includes('cobra-card-acts')],
+    [false, true, true, true, true, false, true, true, true, true], 'wf_describe: every text escaped, each line in its own direction, depth clamped, "+N more", unsaved said, "Explain it in my words"');
+  const busy = sb.wfAiDescribeHtml({ busy: true }), bad = sb.wfAiDescribeHtml({ error: WFAI_HOSTILE }), none = sb.wfAiDescribeHtml(null);
+  assertEqual([busy.includes('Reading the workflow'), busy.includes('wfAiExplain'), bad.includes('cobra-card-err') && !bad.includes('<img'), bad.includes('wfAiExplain'), none.includes('This workflow') && none.includes('wfAiExplain')],
+    [true, false, true, false, true], 'wf_describe: reading, an error (no button), empty data does not throw');
+  // "Describe this workflow" in the panel: a local card (no turn sent), the open builder's doc first
+  const tick = () => new Promise(r => setTimeout(r, 0)), log = { draw: 0, patch: [], reads: [], ensure: 0, sent: [], toasts: [], closed: 0, renders: 0, opened: [] };
+  sb.document = { getElementById: () => null };
+  sb.cobraDraw = () => { log.draw++; }; sb.cobraPatchMsg = m => log.patch.push(m.cards && m.cards[0] ? m.cards[0].data : null); sb.cobraInput = () => {}; sb.cobraScrollEnd = () => {}; sb.cobraCardCtx = () => ({});
+  sb.WF_DATA = { registry: new Map([['v2', { status: 'ok' }]]), list: new Map() };
+  sb.wfBuilderReg = () => reg; sb.wfBuilderCtx = () => ctx;
+  sb.wfFetchRegistry = async () => null; sb.wfEnsure = (b, k, f) => { log.ensure += f===sb.wfFetchRegistry ? 1 : 100; return { status: 'loading', p: Promise.resolve() }; };
+  sb.wfReadRow = async id => { log.reads.push(id); return id===WFAI_OTHER ? { id, deleted_at: '2026-10-01' } : { id, name: 'Saved one', definition: doc }; };
+  sb.cobraSend = t => log.sent.push(t); sb.showToast = (m) => log.toasts.push(m); sb.render = () => { log.renders++; };
+  const clean = { id: WFAI_ID, name: 'Open one', doc: v2, layout: 1, builder: 1, settings: 1, tplDrafts: 1, base: { doc: v2, layout: 1, builder: 1, settings: 1, name: 'Open one', tplDrafts: 1 } };
+  sb.COBRA = { mode: 'workflow', context: { workflowId: WFAI_ID }, msgs: [], seq: 0, busy: {}, draft: 'Describe this workflow', status: { enabled: true } };
+  sb.WF = { ...clean, doc: doc };
+  const asked = sb.wfAiDescribeAsk('Describe this workflow', true);
+  const first = JSON.parse(JSON.stringify(sb.COBRA.msgs));
+  await tick(); await tick();
+  const fromOpen = log.patch.splice(0);
+  sb.WF = null; sb.WF_DATA.registry = new Map();
+  sb.wfAiDescribeAsk('describe the workflow', false); await tick(); await tick();
+  const fromRow = log.patch.splice(0);
+  sb.COBRA.context = { workflowId: WFAI_OTHER };
+  sb.wfAiDescribeAsk('Describe this workflow', false); await tick(); await tick();
+  const gone = log.patch.splice(0);
+  const n0 = sb.COBRA.msgs.length;
+  sb.COBRA.context = {};
+  const notBuild = sb.wfAiDescribeAsk('Describe this workflow', false);
+  sb.COBRA.context = { workflowId: WFAI_ID }; sb.COBRA.mode = 'assistant';
+  const notAssistant = sb.wfAiDescribeAsk('Describe this workflow', false);
+  sb.COBRA.mode = 'workflow';
+  const notOther = sb.wfAiDescribeAsk('Change the first wait to 3 days', false);
+  assertEqual([asked, first.map(m => m.role + ':' + (m.text || (m.cards[0] && m.cards[0].kind + (m.cards[0].data.busy ? ':busy' : '')))), sb.COBRA.draft, log.draw, fromOpen[0].name, fromOpen[0].unsaved, fromOpen[0].lines[0].t, fromOpen[0].more,
+    fromRow[0].name, fromRow[0].unsaved, fromRow[0].lines.length > 5, log.reads, log.ensure, gone[0].error, [notBuild, notAssistant, notOther, sb.COBRA.msgs.length===n0], log.sent],
+    [true, ['user:Describe this workflow', 'assistant:wf_describe:busy'], '', 3, 'Open one', true, 'When: Pipeline stage changed (Quoted)', 0, 'Saved one', false, true, [WFAI_ID, WFAI_OTHER], 1,
+      'This workflow could not be read. It may have been deleted.', [false, false, false, true], []],
+    'Describe: drawn here, nothing sent to the AI; the open builder\'s doc (unsaved changes said) or the saved row; the registry read once if nobody has; a deleted one says so; build mode, the assistant and other asks go to the AI');
+  // Explain it in my words: one turn to the AI, not while one is streaming
+  sb.wfAiExplain(); sb.COBRA.streaming = { msg: {} }; sb.wfAiExplain(); sb.COBRA.streaming = null;
+  assertEqual(log.sent, ['Explain this workflow in my words'],
+    'Explain it in my words: sends "Explain this workflow in my words" once (the edit mode answers in the person\'s language)');
+  // the edit mode's examples: Describe first (the local card), then two changes
+  assertEqual([sb.WF_AI_EXAMPLES.edit, sb.wfAiIsDescribe(sb.WF_AI_EXAMPLES.edit[0]), sb.WF_AI_EXAMPLES.edit.slice(1).some(sb.wfAiIsDescribe)], [['Describe this workflow', 'Change the first wait to 3 days', 'Add a tag after the email'], true, false],
+    'edit mode examples: "Describe this workflow" is drawn here, the two changes go to the AI');
+  // reopen after Confirm / Undo: an undone new Draft is deleted, a clean builder on it closes; a Confirm of a new one leaves it
+  sb.wfChanged = () => {}; sb.wfBuilderClose = () => { log.closed++; }; sb.wfBuilderOpen = (row, o) => log.opened.push(row.id + ':' + o.mode);
+  const mk = { id: 'k1', kind: 'wf_create', status: 'undone', after: { id: WFAI_OTHER, revision: 1 } };
+  sb.COBRA.msgs = [{ proposals: [mk], cards: [] }];
+  sb.WF = { ...clean, id: WFAI_OTHER };
+  sb.wfAiChangeDone(mk, 'undo'); await tick(); await tick();
+  const undone = [log.closed, log.renders, log.toasts.slice(-1)[0]];
+  sb.WF = { ...clean, id: WFAI_OTHER }; log.closed = 0;
+  sb.wfAiChangeDone({ ...mk, status: 'confirmed' }, 'confirm'); await tick(); await tick();
+  sb.WF = { ...clean, id: WFAI_OTHER, doc: 2 };
+  sb.wfAiChangeDone(mk, 'undo'); await tick(); await tick();
+  sb.WF = clean;
+  sb.wfAiChangeDone({ id: 'k2', kind: 'wf_edit', target: { automation_id: WFAI_ID } }, 'undo'); await tick(); await tick();
+  assertEqual([undone, log.closed, log.opened], [[1, 1, 'That workflow is gone (deleted)'], 0, [WFAI_ID + ':edit']],
+    'after Undo of a new Draft (deleted): a clean builder on it closes and says so; a Confirm of a new one or a dirty builder is left alone; an undone change reopens the clean builder on the version back');
+  sb.WF = null;
+  // static: cobraSend asks Workflow AI first, before anything is sent; the card is registered
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1], send = extractDecl(script, 'cobraSend');
+  assertEqual([send.indexOf('wfAiDescribeAsk(t, text==null)') > -1 && send.indexOf('wfAiDescribeAsk(') < send.indexOf('cobraFetch('), /COBRA_CARDS\.wf_describe = wfAiDescribeHtml;/.test(html), /\.wfai-desc li \{[^}]*padding-inline-start: calc\(var\(--d, 0\) \* 14px\)/.test(html)],
+    [true, true, true], 'cobraSend: "Describe this workflow" is caught before any request; wf_describe registered; the nesting follows the reading direction');
+}
+
 // Review block 3 of phase 4 (16 Oct): paste keys, presence, multi-select delete, cut, Q4 counts, the drawer's Delete, Save
 // from "Unsaved changes" on a Published workflow (the Apps tab is in testWfDrawerForms). Fake DOM, fake function.
 async function testWfReviewBlock3(){
@@ -8504,6 +8611,7 @@ async function testWfReviewRound2(){
   await testCobraStream();
   await testCobraChangeFlow();
   await testWorkflowAiB(loadSandbox());
+  await testWorkflowAiC(loadSandbox());
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });
