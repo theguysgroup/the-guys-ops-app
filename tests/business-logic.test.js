@@ -235,6 +235,10 @@ const DECLS = [
   'cobraOwnClaudeCardHtml', 'cobraChatGptRowHtml', 'cobraPaidKeyReady',
   // The workflow builder: the Advanced layout (stage 2, phase 5 · G5.1)
   'WF_ADV', 'wfAdvFoot', 'wfAdvDotY', 'wfBezierSegs', 'wfBezierPath', 'wfBezierAt', 'wfArrowHead', 'wfTidy', 'wfLayoutAdvanced',
+  // The workflow builder: the Advanced canvas (stage 2, phase 5 · G5.2)
+  'wfAdvEdgeGeom', 'WF_STICKY_FMT', 'WF_ADV_UI', 'wfAdvStickyBoxes', 'wfAdvPlusKey', 'wfAdvInside', 'wfAdvMarquee', 'wfAdvTileAt', 'wfEdgeActs', 'wfAdvDrop', 'wfConnectDrop', 'wfEdgeDelink',
+  'wfConnectRows', 'wfAdvMovePos', 'wfAdvPlaced', 'wfAdvPasteAt', 'wfFormatSel', 'wfStickyAround', 'wfStickyFmt', 'wfBulkToggle', 'wfBulkItems', 'wfBulkHtml', 'wfConnectHtml', 'wfAdvTileHtml',
+  'wfAdvStickyHtml', 'wfAdvCanvasItems',
 ];
 
 function extractDecl(source, name){
@@ -6960,6 +6964,205 @@ testWfShellTokens(); testWfShellStatic(); testWfShellRuntime();
 testWfPickDrawerRuntime();
 { const sb = wfSb(); [testWfRailPure, testWfRailWords].forEach(t => t(sb)); }
 { const sb = wfSb(); testWfAdvLayout(sb); }
+{ const sb = wfSb(); testWfAdvCanvasPure(sb); }
+testWfAdvCanvasRuntime();
+
+function testWfAdvCanvasPure(sb){
+  console.log('\nWorkflow builder: the Advanced canvas — drops, connect, delink, Connect mode, bulk, stickies (stage 2, phase 5 · G5.2)');
+  const reg = wfRegFor(WF_AV_TODAY), evil = '<img src=x onerror=alert(1)>';
+  const D = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }, { id: 't2', type: 'newLead', filters: WF_F0 }],
+    nodes: { n1: wfAct('n2'), n2: { kind: 'if_else', type: 'if_else', config: { branches: [{ id: 'b3', name: 'Yes', when: WF_F0 }], noneName: 'None' }, out: { b3: 'n4', none: null } },
+      n4: wfAct('n5'), n5: { kind: 'goto', type: 'goto', config: { target: 'n1' }, out: {} }, x7: wfAct('x8', { name: evil }), x8: wfAct() } };
+  const L = sb.wfLayoutAdvanced(D, { v: 1 }, reg), E = k => L.edges.find(e => e.key===k), mid = b => [b.x + b.w / 2, b.y + b.h / 2];
+  // the edge geometry the layout and a drag share
+  const g1 = sb.wfAdvEdgeGeom(L.nodes.n1, 0, 1, L.nodes.n2), gb = sb.wfAdvEdgeGeom(L.nodes.n5, 0, 1, L.nodes.n1);
+  assertEqual([g1.d===E('n1:next').d, g1.arrow===E('n1:next').arrow, g1.back, g1.low, E('n1:next').dot, E('n2:none').dot, gb.back, gb.d===E('n5:ref:target').d, gb.low > L.nodes.n1.y],
+    [true, true, false, null, [0, 1], [1, 2], true, true, true], 'wfAdvEdgeGeom: the layout\'s own lines (a dragged tile\'s lines are the same maths); each line knows its dot (port i of n)');
+  const acts = k => { const a = sb.wfEdgeActs(E(k)); return (a.add ? '+' : '') + (a.del ? 'x' : ''); };
+  const G = { ...D, triggers: [{ id: 't1', type: 'newLead', filters: WF_F0, goto: 'x7' }, D.triggers[1]] }, LG = sb.wfLayoutAdvanced(G, { v: 1 }, reg);
+  assertEqual([acts('n1:next'), acts('n2:b3'), acts('n2:none'), acts('n5:ref:target'), acts('trigger:t1'), sb.wfEdgeActs(LG.edges.find(e => e.key==='trigger:t1'))],
+    ['+x', '+x', '', '', '', { add: false, del: true }], 'a line\'s middle: "+" and trash on a step\'s line, only the trash on a trigger\'s own Go to, nothing on a "[+]" line, a Go to step\'s line or a trigger\'s Default Path');
+  // palette drops
+  const plus = L.plus.find(p => p.src==='n2'), m1 = E('n1:next').mid, drop = (x, y) => sb.wfAdvDrop(L, D, x, y);
+  const far = drop(5000, 5000);
+  assertEqual([drop(...mid(plus)), drop(m1[0] + 10, m1[1] - 10), drop(...mid(L.nodes.x8)), drop(...mid(L.nodes.n1)).kind, drop(...mid(L.nodes.n4)).why, drop(...mid(L.nodes.n5)).why, drop(...mid(L.triggers[0])).kind, far],
+    [{ kind: 'plus', slot: { src: 'n2', port: 'none' }, key: 'p:n2:none' }, { kind: 'edge', slot: { src: 'n1', port: 'next' }, key: 'm:n1:next' }, { kind: 'append', slot: { src: 'x8', port: 'next' }, key: 'n:x8' }, 'none',
+      'This step has a next step: drop on its line to put it in between', 'Nothing can follow this step', 'none', { kind: 'canvas', at: [5000, 5000] }],
+    'wfAdvDrop: a "[+]" → that place, a line\'s middle → in between, the last tile of a path → after it, another tile → why not, the empty canvas → a new group there');
+  const empty = sb.wfLayoutAdvanced(sb.wfNewDoc(), {}, reg);
+  assertEqual([sb.wfAdvDrop(empty, sb.wfNewDoc(), ...mid(empty.plus[0])).slot, sb.wfAdvPlusKey(empty.plus[0]), sb.wfAdvTileAt(L, ...mid(L.nodes.n4)), sb.wfAdvTileAt(L, L.triggers[1].x - 6, L.triggers[1].y), sb.wfAdvTileAt(L, 5000, 0)],
+    [{ src: '@entry', port: null }, 'p:@entry:', 'n:n4', 't:t2', null], 'an empty flow\'s "[+]" starts the flow; wfAdvTileAt (8 px of slack)');
+  // connect (drag or Connect mode) and delink, through the model's own edits
+  const c1 = sb.wfConnectDrop(D, { src: 'n4', port: 'next' }, 'x7', reg), c2 = sb.wfConnectDrop(D, { trigger: 't1' }, 'x8', reg), c3 = sb.wfConnectDrop(G, { trigger: 't1' }, 'n1', reg);
+  assertEqual([c1.doc.nodes.n4.out.next, sb.wfClusters(c1.doc).map(c => c.head), c2.doc.triggers[0].goto, 'goto' in c3.doc.triggers[0] ? c3.doc.triggers[0].goto : 'none', sb.wfConnectDrop(D, { src: 'n4', port: 'next' }, 'n1', reg).error.text,
+    sb.wfConnectDrop(D, { src: 'x8' }, 'n1', reg).error.text, sb.wfConnectDrop(D, { src: 'n2', port: 'none' }, 'x7', reg).doc.nodes.n2.out.none, D.nodes.n4.out.next],
+    ['x7', ['n1', 'n5'], 'x8', null, 'Loops are made with a Go to step', 'The first step can\'t have a step above it', 'x7', 'n5'],
+    'wfConnectDrop: a path to another step (1:1: what was there becomes a group of its own), a trigger\'s own Go to (to the first step = the Default Path), loops and the first step refused; the doc given is never changed');
+  const d1 = sb.wfEdgeDelink(D, E('n1:next'), reg), d2 = sb.wfEdgeDelink(G, LG.edges.find(e => e.key==='trigger:t1'), reg);
+  assertEqual([d1.doc.nodes.n1.out.next, sb.wfClusters(d1.doc).map(c => c.head), sb.wfLayoutAdvanced(d1.doc, { v: 1 }, reg).unreached, d2.doc.triggers[0].goto ?? null, sb.wfEdgeDelink(D, E('trigger:t1'), reg).error.text, sb.wfEdgeDelink(D, E('n5:ref:target'), reg).error.text],
+    [null, ['n1', 'n2', 'x7'], ['n2', 'x7'], null, 'A trigger always starts somewhere: drag its dot to another step', 'Change where a Go to goes in its step'],
+    'wfEdgeDelink: the trash on a step\'s line makes a group "Not connected"; on a trigger\'s Go to back to the Default Path; the other lines say why not');
+  // Connect mode's list
+  const rows = sb.wfConnectRows(D, reg, { src: 'n4', port: 'next' }), rt = sb.wfConnectRows(G, reg, { trigger: 't1' }), r2 = sb.wfConnectRows(D, reg, { trigger: 't2' });
+  assertEqual([rows.map(r => `${r.id}${r.now ? '*' : ''}${r.why ? `!${r.why}` : ''}`), rt.filter(r => r.now).map(r => r.id), r2.filter(r => r.now).map(r => r.id), rt.every(r => !r.why), rows.find(r => r.id==='x7').name],
+    [['n1!Loops are made with a Go to step', 'n2!Loops are made with a Go to step', 'n4!This step', 'n5*', 'x7', 'x8'], ['x7'], ['n1'], true, evil],
+    'wfConnectRows: every step in reading order with the model\'s own reason (loops, itself) and the one it goes to now; a trigger: its Go to, else the Default Path\'s first step');
+  const ch = sb.wfConnectHtml({ name: evil, ports: [{ port: 'b3', label: 'Yes' }, { port: 'none', label: evil }], port: 'b3', rows, canOff: true });
+  const th = sb.wfConnectHtml({ name: 'Contact created', trigger: true, rows: rt, canOff: true }), nh = sb.wfConnectHtml({ name: 'x', rows: [] });
+  assertEqual([/<img|onerror=alert\(1\)>/.test(ch), ch.includes('Connect &quot;&lt;img'), ch.includes('role="radiogroup" aria-label="From path"'), ch.includes('aria-checked="true"><span dir="auto">Yes</span>'), (ch.match(/aria-disabled="true"/g) || []).length,
+    ch.includes('data-why="Loops are made with a Go to step"'), ch.includes('<small>Now</small>'), ch.includes('data-act="cnOff">Disconnect'), th.includes('Start &quot;Contact created&quot; at…'), th.includes('Back to the Default Path'), th.includes('radiogroup'), nh.includes('No steps yet'), ch.includes('aria-modal="true"')],
+    [false, true, true, true, 4, true, true, true, true, true, false, true, true], 'Connect mode: "Connect … to…" / "Start … at…", the path to connect from, every step with its reason greyed, Now, Disconnect / Back to the Default Path; escaped');
+  // positions
+  const clip = { head: 'n1', layout: { adv: { n1: [100, 100], n2: [320, 160] } } }, idm = { n1: 'n10', n2: 'n11' };
+  assertEqual([sb.wfAdvMovePos({ a: [1.4, 2.6], b: [10, 10], c: 'x' }, ['b'], 5, -5), sb.wfAdvPlaced({ v: 1, stickies: [] }, { a: [1, 2] }, { z: [3.4, 4.6], q: 'bad' }), sb.wfAdvPasteAt(clip, idm, [0, 50]),
+    sb.wfAdvPasteAt({ head: 'n1', layout: {} }, idm, [7.6, 8]), sb.wfAdvPasteAt(clip, idm, null)],
+    [{ a: [1, 3], b: [15, 5] }, { v: 1, stickies: [], adv: { a: [1, 2], z: [3, 5] } }, { n10: [0, 50], n11: [220, 110] }, { n10: [8, 8] }, {}],
+    'positions: a move keeps every other tile where it is (all stored, rounded); a pasted group keeps its shape from where it is pasted');
+  const P = { ...sb.wfTidy(D, reg), n1: [500, 500], n2: [530, 900] };
+  assertEqual([sb.wfFormatSel(D, reg, P, ['n1', 'n2']), sb.wfFormatSel(D, reg, P, ['zz']), sb.wfFormatSel(D, reg, P, ['x7', 'x8'])],
+    [{ n1: [500, 500], n2: [720, 500] }, {}, { x7: [0, 358], x8: [220, 358] }], 'wfFormatSel: the selection tidied, its top-left corner kept');
+  // sticky notes: round tiles (a group), at a point, sizes kept in range, the group inside
+  const box = sb.wfAdvFoot(220, 55), s1 = sb.wfStickyAround({ v: 1 }, [box], null), s2 = sb.wfStickyAround(s1.layout, [], [10.4, 20]);
+  const k1 = sb.wfStickiesOf(s2.layout)[0], k2 = sb.wfStickiesOf(s2.layout)[1], B = sb.wfAdvStickyBoxes(s2.layout);
+  const tiles = { 'n:n2': L.nodes.n2, 'n:n1': L.nodes.n1, 't:t1': L.triggers[0] };
+  assertEqual([[k1.x, k1.y, k1.w, k1.h, k1.anchor], [k2.x, k2.y, k2.w, k2.h], B.map(b => b.id), sb.wfAdvInside(B[0], tiles), sb.wfStickyAround({ stickies: Array.from({ length: 50 }, (_, i) => ({ id: `k${i + 1}` })) }, [], null).error,
+    sb.wfStickiesOf(sb.wfStickySet(s2.layout, 'k1', { w: 10, h: 99999, x: 'a', y: null })).map(s => [s.x, s.y, s.w, s.h])[0], sb.wfAdvStickyBoxes({ stickies: [{ id: 'k1', w: 'x', hidden: false }, { id: 'k2', hidden: true }] })],
+    [[box.x - 28, box.y - 62, box.w + 56, box.h + 90, null], [10, 20, 240, 150], ['k1', 'k2'], ['n:n2'], 'At most 50 sticky notes', [box.x - 28, box.y - 62, 160, 4000],
+      [{ id: 'k1', x: 0, y: 0, w: 240, h: 150, color: 'yellow', title: '', body: '' }]],
+    'sticky notes (Advanced): one drawn round tiles holds them (its group), one at a point; sizes kept to 160–4000 × 90–4000; at most 50');
+  assertEqual([sb.wfStickyFmt('hello world', 0, 5, 'b'), sb.wfStickyFmt('', 0, 0, 'i'), sb.wfStickyFmt('a\nb', 0, 3, 'li'), sb.wfStickyFmt('x\n- y', 2, 5, 'li').text, sb.wfStickyFmt('go here', 3, 7, 'a'), sb.wfStickyFmt('ab', 1, 1, 'u').text, sb.wfStickyFmt('ab', 0, 2, 'zz')],
+    [{ text: '**hello** world', s: 2, e: 7 }, { text: '*text*', s: 1, e: 5 }, { text: '- a\n- b', s: 0, e: 7 }, 'x\n- y', { text: 'go [here](https://)', s: 10, e: 18 }, 'a__text__b', { text: 'ab', s: 0, e: 2 }],
+    'wfStickyFmt: bold / italic / underline wrap the selection (or "text"), list lines get "- " once, a link selects its address');
+  // the bulk bar
+  const b1 = sb.wfBulkToggle(D, ['n:n1', 'n:n2', 't:t1', 'n:zz'], reg), b2 = sb.wfBulkToggle(b1.doc, new Set(['n:n1', 't:t1']), reg);
+  assertEqual([[b1.enable, b1.n, b1.doc.nodes.n1.disabled, b1.doc.nodes.n2.disabled, b1.doc.triggers[0].disabled], [b2.enable, b2.n, 'disabled' in b2.doc.nodes.n1, b2.doc.triggers[0].disabled], sb.wfBulkToggle(D, ['n:n2'], reg).error.text, D.nodes.n1.disabled],
+    [[false, 2, true, undefined, true], [true, 2, false, false], 'A step with branches can\'t be paused', undefined], 'wfBulkToggle: pause the selection in one edit (a step with branches is left), resume when all are paused');
+  const items = sb.wfBulkItems({ n: 3, off: false, toggles: 2, steps: 2 }), bh = sb.wfBulkHtml(3, sb.wfBulkItems({ n: 3, ro: 'A System workflow: make a copy to change it', off: true, toggles: 1, steps: 0 }));
+  assertEqual([items.map(i => i.label + (i.why ? '!' : '')), sb.wfBulkItems({ off: true, toggles: 0, steps: 0 }).map(i => i.label + (i.why ? '!' : '')), bh.includes('3 selected'), (bh.match(/aria-disabled="true"/g) || []).length, bh.includes('Enable')],
+    [['Disable', 'Format selection', 'Add sticky note', 'Copy', 'Delete'], ['Enable!', 'Format selection', 'Add sticky note', 'Copy!', 'Delete'], true, 5, true],
+    'the bulk bar in GHL\'s words ("Enable/Disable", "Format selection", "Add sticky note") + Copy, Delete; greyed with the reason');
+  // Quick actions
+  const lab = m => m.items.map(i => i.label + (i.why ? '!' : ''));
+  const X = { ro: '', clip: true, hasId: true, hooks: { notes: true } };
+  assertEqual([lab(sb.wfPopItems({ kind: 'quick' }, { ...X, quick: { on: 'node', head: true, ports: 1 } })), lab(sb.wfPopItems({ kind: 'quick' }, { ...X, clip: false, quick: { on: 'node', entry: true, head: true, ports: 0 } })),
+    lab(sb.wfPopItems({ kind: 'quick' }, { ...X, quick: { on: 'node', multi: true, ports: 2 } })), sb.wfPopItems({ kind: 'quick' }, { ...X, quick: { on: 'node', ports: 1 } }).items.find(i => i.act==='qDefault').why,
+    lab(sb.wfPopItems({ kind: 'quick' }, { ...X, quick: { on: 'trigger', disabled: true } })), lab(sb.wfPopItems({ kind: 'quick' }, { ...X, clip: false, quick: { on: 'canvas' } })),
+    lab(sb.wfPopItems({ kind: 'quick' }, { ...X, ro: 'View only', quick: { on: 'canvas' } })), lab(sb.wfPopItems({ kind: 'stickyColor' }, { ...X, sticky: { color: 'blue' } })), sb.wfPopItems({ kind: 'stickyColor' }, { ...X, sticky: { color: 'blue' } }).items.filter(i => i.checked).map(i => i.act)],
+    [['Copy', 'Paste here', 'Duplicate', 'Disable', 'Set as Default Path', 'Add sticky note', 'Notes', 'Connect to…', 'Delete', 'Tidy up'], ['Copy', 'Paste here!', 'Duplicate', 'Disable', 'Set as Default Path!', 'Add sticky note', 'Notes', 'Connect to…!', 'Delete', 'Tidy up'],
+      ['Copy', 'Paste here', 'Duplicate', 'Disable!', 'Set as Default Path!', 'Add sticky note', 'Notes', 'Connect to…', 'Delete', 'Tidy up'], 'Only the first step of a group can be the Default Path',
+      ['Duplicate', 'Enable', 'Connect to…', 'Add sticky note', 'Delete', 'Tidy up'], ['Paste here!', 'Add sticky note', 'Tidy up'], ['Paste here!', 'Add sticky note!', 'Tidy up!'],
+      ['Yellow', 'Pink', 'Peach', 'Green', 'Blue', 'Purple', 'Edit note', 'Delete'], ['stc-blue']],
+    'Quick actions (right-click / long press): Copy, Paste here, Duplicate, Enable/Disable, Set as Default Path, Add sticky note, Notes, Connect to…, Delete, Tidy up — each greyed with its reason; the canvas\'s and a trigger\'s own; a sticky note\'s colours');
+  // the canvas items
+  const stick = sb.wfAdvStickyBoxes(sb.wfStickyAround({ v: 1 }, [sb.wfAdvFoot(0, 55)], null).layout), T = sb.wfA11yTree(D);
+  const C = sb.wfAdvCanvasItems(D, L, reg, {}, { at: T.at, seq: T.seq, issueOf: { 'n:n4': 'error' }, stickies: stick, notes: { n4: 2 } }), by = k => C.items.find(i => i.key===k), h = k => by(k).html();
+  const R = sb.wfAdvCanvasItems(D, L, reg, {}, { ro: true, stickies: stick });
+  assertEqual([C.items.map(i => i.key.split(':')[0]).filter((v, i, a) => a.indexOf(v)===i), C.items.filter(i => i.key.startsWith('p:')).map(i => i.key), C.items.filter(i => i.key.startsWith('m:')).map(i => i.key), C.edges.length===L.edges.length,
+    (h('n:n2').match(/data-act="dot"/g) || []).length, h('n:n2').includes('class="wfa-pl"') && h('n:n2').includes('>None</small>'), h('t:t1').includes('data-act="tdot"'), h('n:n1').includes('(Default Path)'), h('n:x7').includes('Not connected') && h('n:x7').includes('data-act="defPath"'),
+    h('n:n1').includes('data-act="defPath"'), /<img|onerror=alert\(1\)>/.test(h('n:x7')), by('n:x7').al.includes('Group 2 of 2.') && by('n:x7').al.includes('Not connected.'), by('n:n1').al.includes('Group 1 of 2 (Default Path).'), by('n:n4').cls.includes('iss-error') && h('n:n4').includes('Error'),
+    h('n:n4').includes('>2</span>'), by('n:n2').attrs.role, h('k:k1').includes('data-act="stSize"') && h('k:k1').includes('data-act="stColorMenu"'), C.items.findIndex(i => i.key==='k:k1') < C.items.findIndex(i => i.key==='n:n1')],
+    [['k', 't', 'n', 'p', 'm'], ['p:n2:none', 'p:x8:next'], ['m:n1:next', 'm:n2:b3', 'm:n4:next', 'm:x7:next'], true, 2, true, true, true, true, false, false, true, true, true, true, 'treeitem', true, true],
+    'wfAdvCanvasItems: sticky notes behind, then trigger and step tiles (a dot per path, tiny path labels, "(Default Path)", "Not connected" + the branch icon on another group\'s head), the "[+]"s and the line middles; escaped; groups said to screen readers');
+  assertEqual([R.items.some(i => /^[pm]:/.test(i.key)), R.items.find(i => i.key==='n:x7').html().includes('defPath'), R.items.find(i => i.key==='k:k1').html().includes('stSize'), R.items.find(i => i.key==='k:k1').html().includes('stColorMenu')],
+    [false, false, false, false], 'read-only: no "[+]", no line buttons, no Default Path icon, a sticky note can\'t be resized or recoloured');
+}
+
+function testWfAdvCanvasRuntime(){
+  console.log('\nWorkflow builder: the Advanced canvas painted, its gestures and Connect mode (stage 2 G5.2; fake DOM)');
+  const reg = wfRegFor(WF_AV_TODAY), S = wfShellSandbox(reg), { X, flush } = S, win = S.ctx.window, C = S.ctx, V = n => vm.runInContext(n, C);
+  const DOC = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }],
+    nodes: { n1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct(null), x7: wfAct('x8'), x8: wfAct(null) } };
+  X.wfBuilderOpen({ id: 'w9', name: 'Adv', enabled: false, definition: DOC, revision: 1, builder: 'advanced' }, {});
+  const W = S.W(), E = W.el;
+  const frames = flush();
+  assertEqual([frames, W.builder, [...E.map.keys()].filter(k => /^[tn]:/.test(k)).sort(), [...E.map.keys()].filter(k => /^[pm]:/.test(k)).sort(), E.paths.has('n1:next>'), E.paths.get('n1:next>').getAttribute('class'), E.selBtn.hidden, E.tidyBtn.hidden, E.ctl.classList.contains('is-adv'), E.bulk.hidden],
+    [1, 'advanced', ['n:n1', 'n:n2', 'n:n3', 'n:x7', 'n:x8', 't:t1'], ['m:n1:next', 'm:n2:next', 'm:x7:next', 'p:n3:next', 'p:x8:next'], true, 'is-arrow', false, false, true, true],
+    'open (Advanced): one paint draws the tiles, the "[+]"s, the line middles and the arrowheads; the Select tool and Tidy up show');
+  const p0 = win.__wfp;
+  for (let i = 0; i < 3; i++) flush();
+  assertEqual([win.__wfp - p0, S.raf.size], [0, 0], 'idle: no paint');
+  // a tile dragged: transforms and its lines only while moving, ONE commit at the end; a cancel puts it all back
+  const vp = { left: 0, top: 0, width: 1200, height: 800 }, v = W.view, at = (wx, wy) => [wx * v.k + v.x, wy * v.k + v.y];
+  const n2 = E.map.get('n:n2'), path = E.paths.get('n1:next'), d0 = path.getAttribute('d'), x0 = n2._x, st0 = { ...S.ctx.window };
+  const start = at(x0 + 36, n2._y + 36), g = { type: 'tiles', key: 'n:n2', sx: start[0], sy: start[1], rect: vp, v0: v, pid: 1 };
+  const p1 = win.__wfp, h0 = W.hist.past.length;
+  assertEqual(V('wfTilesBegin')(g), true, 'tiles: begin');
+  g.last = at(x0 + 136, n2._y + 36); V('wfTilesMove')(g);
+  const moving = [n2.style.transform, path.getAttribute('d')!==d0, E.map.get('m:n1:next').style.transform!==`translate(${E.map.get('m:n1:next')._x}px,${E.map.get('m:n1:next')._y}px)`, win.__wfp - p1, S.raf.size];
+  V('wfTilesEnd')(g, false);
+  const cancelled = [n2.style.transform, path.getAttribute('d')===d0, W.hist.past.length - h0];
+  V('wfTilesBegin')(g); g.last = at(x0 + 136, n2._y + 36); V('wfTilesMove')(g); V('wfTilesEnd')(g, true); flush();
+  assertEqual([moving, cancelled, W.hist.past.length - h0, W.layout.adv.n2, W.layout.adv.n1, n2._x, path.getAttribute('d')!==d0],
+    [[`translate(${x0 + 100}px,${n2._y}px)`, true, true, 0, 0], [`translate(${x0}px,${n2._y}px)`, true, 0], 1, [x0 + 100, n2._y], [E.map.get('n:n1')._x, E.map.get('n:n1')._y], x0 + 100, true],
+    'a tile dragged: only its transform, its lines and their middles change (no paint), Esc puts them back; letting go = one "Move step" with every position stored');
+  // drag-to-connect: on a tile → connected (1:1); on the empty canvas → the Actions picker for that path, the step placed there
+  const x8 = E.map.get('n:x8'), n3 = E.map.get('n:n3'), cs = at(x8._x + 72, x8._y + 36), c = { type: 'connect', from: { src: 'x8', port: 'next' }, sx: cs[0], sy: cs[1], rect: vp, v0: W.view, pid: 2 };
+  V('wfConnBegin')(c); c.last = at(n3._x + 30, n3._y + 30); V('wfConnMove')(c);
+  const hot = [n3.classList.contains('is-drop'), !!c.rubber.getAttribute('d')];
+  V('wfConnEnd')(c, true); flush();
+  assertEqual([hot, n3.classList.contains('is-drop'), W.doc.nodes.x8.out.next, W.doc.nodes.n2.out.next, W.hist.past[W.hist.past.length - 1].label], [[true, true], false, 'n3', null, 'Connect steps'],
+    'drag-to-connect: the tile under the pointer lights up; letting go connects (what was there before loses its line)');
+  const c2 = { type: 'connect', from: { src: 'n2', port: 'next' }, sx: cs[0], sy: cs[1], rect: vp, v0: W.view, pid: 3 };
+  V('wfConnBegin')(c2); c2.last = at(3000, 3000); V('wfConnMove')(c2); V('wfConnEnd')(c2, true); flush();
+  assertEqual([W.picker && W.picker.kind, W.picker && W.picker.slot, W.picker && W.picker.at], ['action', { src: 'n2', port: 'next' }, [3000 - 36, 3000 - 36]], 'dropped on the empty canvas: the Actions picker for that path, the new step to go there');
+  // a picker row dragged: onto a tile's empty path (append) → the drawer for that place; onto the canvas → a new group there
+  const rows = X.wfPickerFlat(X.wfPickerRowsNow(W, X.wfDerived())), i = rows.findIndex(r => r.type==='add_task' && !r.disabled);
+  const pg = { type: 'palette', i, sx: 0, sy: 0, rect: vp, v0: W.view, pid: 4 }, n2b = E.map.get('n:n2');
+  V('wfPalBegin')(pg); pg.last = at(n2b._x + 36, n2b._y + 36); pg.ev = { clientX: pg.last[0], clientY: pg.last[1] }; V('wfPalMove')(pg);
+  const lit = [pg.drop && pg.drop.kind, n2b.classList.contains('is-drop')];
+  V('wfPalEnd')(pg, true); flush();
+  const dr = W.drawer;
+  assertEqual([lit, dr && dr.isNew, dr && dr.slot, dr && dr.draft.type, dr && dr.detached, W.picker], [['append', true], true, { src: 'n2', port: 'next' }, 'add_task', false, null], 'a picker row dropped on the last tile of a path: the new step\'s drawer, after that tile');
+  X.wfDrawerAct('dCancel', { dataset: {} }); X.wfNavTop(); flush();
+  X.wfPicker('action', { src: 'n3', port: 'next' }); flush();
+  const pg2 = { type: 'palette', i, sx: 0, sy: 0, rect: vp, v0: W.view, pid: 5 };
+  const spot = [1190, 790], wspot = V('wfWorldAt')(...spot);
+  V('wfPalBegin')(pg2); pg2.last = spot; pg2.ev = { clientX: spot[0], clientY: spot[1] }; V('wfPalMove')(pg2);
+  const pd = pg2.drop && pg2.drop.kind;
+  V('wfPalEnd')(pg2, true); flush();
+  const dr2 = W.drawer;
+  assertEqual([pd, !!dr2], ['canvas', true], 'a picker row over the empty canvas');
+  dr2.draft.config = { ...dr2.draft.config, title: 'Follow up' }; dr2.dirty = true;
+  X.wfDrawerAct('dSave', { dataset: {} }); flush();
+  const made = Object.keys(W.doc.nodes).find(id => !DOC.nodes[id]);
+  assertEqual([dr2.detached, dr2.at, made && W.doc.nodes[made].config.title, made && Object.values(W.doc.nodes).some(n => Object.values(n.out || {}).includes(made)), made && W.layout.adv[made], W.doc.entry],
+    [true, [Math.round(wspot[0] - 36), Math.round(wspot[1] - 36)], 'Follow up', false, [Math.round(wspot[0] - 36), Math.round(wspot[1] - 36)], 'n1'], 'a picker row dropped on the empty canvas: saved as a group of its own, its tile where it was dropped');
+  // the marquee selects what it touches; two or more show the bulk bar; Enable/Disable as one edit
+  const mq = { type: 'marquee', sx: at(-100, -1000)[0], sy: at(-100, -1000)[1], rect: vp, v0: W.view, pid: 6 };
+  V('wfMarqBegin')(mq); mq.last = at(E.map.get('n:n2')._x + 10, 2000); V('wfMarqMove')(mq); V('wfMarqEnd')(mq, true); flush();
+  const sel = [...W.sel].sort();
+  assertEqual([sel.includes('n:n1') && sel.includes('n:n2') && !sel.includes('n:n3'), E.bulk.hidden, E.bulk.innerHTML.includes(`${sel.length} selected`), E.bulk.innerHTML.includes('Format selection')], [true, false, true, true], 'marquee → the selection; the bulk bar says how many');
+  V('WF_ADV_ACTS').bulkToggle(W); flush();
+  assertEqual([W.doc.nodes.n1.disabled, W.doc.nodes.n2.disabled, E.bulk.innerHTML.includes('Enable'), W.hist.past[W.hist.past.length - 1].label], [true, true, true, 'Disable selected'], 'bulk Enable/Disable: one edit, the bar then offers Enable');
+  // Tidy up (one undo entry), Set as Default Path, Quick actions on the canvas, Connect mode
+  const hT = W.hist.past.length;
+  V('wfTidyUp')(); flush();
+  assertEqual([W.hist.past.length - hT, Object.keys(X.wfDerived().layout.pos).every(id => JSON.stringify(W.layout.adv[id])===JSON.stringify(X.wfDerived().layout.pos[id])) && Object.keys(W.layout.adv).length===Object.keys(X.wfDerived().layout.pos).length, W.hist.past[W.hist.past.length - 1].label], [1, true, 'Tidy up'], 'Tidy up: every tile at its tidy place, one undo entry');
+  V('wfQuickOpen')('n:x7', 300, 300); flush();
+  assertEqual([W.menu && W.menu.kind, W.menu && W.menu.on, E.modal.innerHTML.includes('Set as Default Path') && E.modal.innerHTML.includes('Connect to…')], ['quick', 'node', true], 'Quick actions on a tile');
+  X.WF_ACTS.menuClose(W);
+  V('wfSetDefaultPath')('x7'); flush();
+  assertEqual([W.doc.entry, X.wfDerived().layout.edges.find(e => e.key==='trigger:t1').to], ['x7', 'x7'], 'Set as Default Path: the trigger without a Go to now starts there');
+  V('wfConnectOpen')({ trigger: 't1' }); flush();
+  const cm = E.modal.innerHTML;
+  V('WF_ADV_ACTS').cnTo(W, { dataset: { id: 'n3' } }); flush();
+  assertEqual([cm.includes('Start'), cm.includes('data-act="cnTo" data-id="n1"'), W.dialog, W.doc.triggers[0].goto], [true, true, null, 'n3'], 'Connect mode (a trigger): pick the step it starts at from a list');
+  V('wfConnectOpen')({ src: 'n1' }); flush();
+  V('WF_ADV_ACTS').cnOff(W); flush();
+  assertEqual([W.doc.nodes.n1.out.next, X.wfDerived().layout.unreached.includes('n2')], [null, true], 'Connect mode: Disconnect makes the rest a group "Not connected"');
+  // sticky notes: one round a tile (its group), its band dragged moves the tile too (Alt: alone)
+  W.sel = new Set(['n:n3']); V('wfAdvStickyNew')(['n3'], null); flush();
+  const sk = X.wfStickiesOf(W.layout)[0], skEl = E.map.get(`k:${sk.id}`), n3x = W.layout.adv.n3 || X.wfDerived().layout.pos.n3;
+  const sg = { type: 'sticky', sid: sk.id, alt: false, sx: 100, sy: 100, rect: vp, v0: W.view, pid: 7 };
+  V('wfStickyDragBegin')(sg); sg.last = [100 + 50 * W.view.k, 100]; V('wfStickyDragMove')(sg); V('wfStickyDragEnd')(sg, true); flush();
+  const sk2 = X.wfStickiesOf(W.layout)[0];
+  assertEqual([!!skEl, sk.anchor, sg.keys, sk2.x - sk.x, W.layout.adv.n3[0] - n3x[0], W.hist.past[W.hist.past.length - 1].label], [true, null, ['n:n3'], 50, 50, 'Move sticky note and its steps'],
+    'a sticky note round a tile: dragging its title band moves the tile with it (one commit)');
+  const sa = { type: 'sticky', sid: sk.id, alt: true, sx: 100, sy: 100, rect: vp, v0: W.view, pid: 8 };
+  V('wfStickyDragBegin')(sa); sa.last = [100, 100 + 30 * W.view.k]; V('wfStickyDragMove')(sa); V('wfStickyDragEnd')(sa, true); flush();
+  assertEqual([X.wfStickiesOf(W.layout)[0].y - sk2.y, sa.keys], [30, []], 'Alt-drag moves the note alone');
+  assertEqual([S.renders(), win.__wfPaintReentry || 0], [0, 0], 'the Advanced canvas never drew the app, never asked for a paint while painting');
+}
 
 // ── Stage 4: page history, back closes windows first, the edge swipe, deep-link fallback ──
 function testPageHistory(sb){
