@@ -894,6 +894,8 @@ export function assistantNameOf(s: { assistant_name: string | null }, cat: any):
 // The five roles the app knows. Any other role (a typo, a role added later) is refused until it is added here.
 export const AI_ROLES = ["owner", "manager", "technician", "va", "marketing"];
 export function roleEnabled(s: AiSettings, role: string): boolean { return AI_ROLES.includes(role) && s.roles_enabled[role] !== false; }
+// Every tool and change kind as well (stage 8 on B3): an unknown role gets none, whatever its own allow() says.
+export function allowedFor(t: { allow: (me: Profile) => boolean }, me: Profile): boolean { return !!me && AI_ROLES.includes(me.role) && t.allow(me); }
 // A task's model for a provider. Anthropic and the test provider read the plain task keys; the others
 // "<provider>:<task>", then "<provider>:assistant", then PROVIDER_MODEL_DEFAULTS (a stage 7 mode's own taskKey falls back
 // to the assistant model).
@@ -1240,7 +1242,7 @@ export function registerMode(m: ModeDef): ModeDef {
 }
 // The tools a mode offers this person, in a fixed order (by name) so the cached prompt prefix never changes.
 export function toolsFor(modeId: string, me: Profile): ToolDef[] {
-  return Object.values(TOOLS).filter((t) => t.modes.includes(modeId) && t.allow(me)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return Object.values(TOOLS).filter((t) => t.modes.includes(modeId) && allowedFor(t, me)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 // As sent to the API. strict: schema-valid arguments. No eager_input_streaming: inputs are tiny and the server-side
 // buffering keeps its validation (the gateway still parses strictly and validates, so switching it on later is safe).
@@ -1313,7 +1315,7 @@ registerTool({
   run: async (_input, ctx) => ({
     name: ctx.me.fullName, role: ctx.me.role, roleLabel: ROLE_LABEL[ctx.me.role] || ctx.me.role,
     pages: Object.keys(SECTION_LABEL).filter((k) => canViewSection(ctx.me, k)).map((k) => SECTION_LABEL[k]),
-    canPropose: Object.values(CHANGE_KINDS).filter((k) => k.allow(ctx.me)).map((k) => k.label),
+    canPropose: Object.values(CHANGE_KINDS).filter((k) => allowedFor(k, ctx.me)).map((k) => k.label),
     assistantName: assistantNameOf(ctx.settings, ctx.biz.catalog), businessName: ctx.biz.companyName || productNameOf(ctx.biz.catalog),
     timeZone: ctx.biz.tz, today: bizParts(ctx.nowMs, ctx.biz.tz).day,
     tools: toolsFor("assistant", ctx.me).map((t) => t.name),
@@ -3958,7 +3960,7 @@ async function runTools(t: Turn, uses: any[], rawInputs: Map<string, string> | u
         const checked = problems.length ? null : (tool.check ? tool.check(parsed.value, ctx) : null);
         if (problems.length) content = "Invalid input: " + problems.join("; ");
         else if (checked) content = String(checked);
-        else if (!tool.allow(t.me)) content = "Not allowed for your role";
+        else if (!allowedFor(tool, t.me)) content = "Not allowed for your role";
         else {
           try {
             const out = JSON.stringify((await tool.run(parsed.value, ctx)) ?? null);
@@ -4004,7 +4006,7 @@ export function changeOut(row: any, viewer?: Profile | null, names?: Record<stri
 export async function proposeChange(ctx: ToolCtx, p: any) {
   const kind = p && typeof p.kind === "string" && own(CHANGE_KINDS, p.kind) ? CHANGE_KINDS[p.kind] : null;
   if (!kind) throw new ChangeRefused("unknown_kind", "That kind of change isn't available.");
-  if (!kind.allow(ctx.me)) throw new ChangeRefused("not_allowed", "This person isn't allowed to make that change.");
+  if (!allowedFor(kind, ctx.me)) throw new ChangeRefused("not_allowed", "This person isn't allowed to make that change.");
   const summary = typeof p.summary === "string" ? p.summary.trim() : "";
   if (!summary || summary.length > 300) throw new ChangeRefused("bad_proposal", "A change needs a summary of 1 to 300 characters.");
   if (!isObj(p.target)) throw new ChangeRefused("bad_proposal", "A change needs a target.");
@@ -4064,7 +4066,7 @@ export async function confirmChange(sb: any, body: any, me: Profile, jwt: string
     return changeError(409, "expired", "This suggestion is too old. Ask again.", changeOut(gone || row, me));
   }
   const kind = own(CHANGE_KINDS, row.kind) ? CHANGE_KINDS[row.kind] : null;
-  if (!kind || !kind.allow(me)) return changeError(403, "not_allowed", "You aren't allowed to make this change.");
+  if (!kind || !allowedFor(kind, me)) return changeError(403, "not_allowed", "You aren't allowed to make this change.");
   const claimed = await claimChange(sb, row.id, "proposed", { status: "confirmed", confirmed_at: iso(nowMs), error: null });
   if (!claimed) return changeError(409, "not_proposed", "This change isn't waiting for a confirmation any more.");
   let out: { after: any; target?: any };
@@ -4107,7 +4109,7 @@ export async function undoChange(sb: any, body: any, me: Profile, jwt: string, n
   const kind = own(CHANGE_KINDS, row.kind) ? CHANGE_KINDS[row.kind] : null;
   if (!kind) return changeError(409, "not_allowed", "This kind of change can't be undone here.");
   // Someone undoing their own change still needs the right to make it now (a role taken away since); owners always may.
-  if (me.role !== "owner" && !kind.allow(me)) return changeError(403, "not_allowed", "You aren't allowed to change this any more.");
+  if (me.role !== "owner" && !allowedFor(kind, me)) return changeError(403, "not_allowed", "You aren't allowed to change this any more.");
   const claimed = await claimChange(sb, row.id, "confirmed", { status: "undone", undone_at: iso(nowMs), undone_by: me.id });
   if (!claimed) return changeError(409, "not_confirmed", "Only a saved change can be undone.");
   try {
