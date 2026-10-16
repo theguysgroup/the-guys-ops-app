@@ -27449,7 +27449,7 @@ const WF_RAIL_ACTS = {
   stHide: (W, a) => { const id = a.dataset.sid, s = wfStickiesOf(W.layout).find(x => x.id===id); if (s) wfStickyCommit(s.hidden ? 'Show sticky note' : 'Hide sticky note', l => wfStickySet(l, id, { hidden: !s.hidden })); },
   stDel: (W, a) => { const id = a.dataset.sid; const no = wfStickyCommit('Delete sticky note', l => wfStickyRemove(l, id)); if (no) { W.panels.stickies.edit = null; showToast('Sticky note deleted', { undo: () => wfUndoCommit(no), local: true }); } },
   sysCopy: W => wfSystemCopyOpen(W.sys),
-  sysOld: W => { const page = W.sys && W.sys.page; if (!page) return; wfBuilderClose(); if (typeof setSettingsPage==='function') setSettingsPage(page); },
+  sysOld: W => { const page = W.sys && W.sys.page; if (!page) return; wfBuilderClose({ nav: false }); if (typeof setSettingsPage==='function') setSettingsPage(page); },   // the settings page's own entry follows the builder's (a back would undo it)
 };
 // Typing in a panel: its state only, and the list it filters (never a paint).
 function wfRailInput(t){

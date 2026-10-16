@@ -8843,6 +8843,11 @@ async function testWfPhase5ReviewFixes(){
   assertEqual([typeof tmp==='string' && tmp.length > 2, pushed.x.id, N.replace.slice(-1)[0], edits, !!S.W() && S.W().id], [true, null, { kind: 'wf', x: { id: 'w30' }, ov: 1 }, ['w30'], null],
     'a new one\'s entry carries a token; its first Save maps it to the id, so the entry under the layer\'s opens the saved workflow (an unknown token: a new one)');
   if (S.W()) X.wfBuilderClose({ nav: false });
+  // "Open its old settings" on a System workflow: the builder closes without its own back (a pending back would land after the
+  // settings page's entry and undo the move), the page's entry follows the builder's
+  const sysOld = extractDecl(html, 'WF_RAIL_ACTS').match(/sysOld: W => \{[^\n]*/);
+  assertEqual([!!sysOld, !!sysOld && /wfBuilderClose\(\{ nav: false \}\); if \(typeof setSettingsPage==='function'\) setSettingsPage\(page\)/.test(sysOld[0])], [true, true],
+    'a System workflow\'s "Open its old settings" closes the builder with nav false, then goes to the page');
 }
 
 (async () => {
