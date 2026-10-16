@@ -122,6 +122,15 @@
 // free_share(429; the free ones with resets_at, the next 00:00 UTC). Show `reason` as it is: it names the limit hit.
 // A client that leaves (abort) stops the turn: nothing more is sent and no partial answer is stored.
 //
+// Workflow AI (stage 7; spec .claude/plans/stage7-spec.md). Two modes, owners and managers only: workflow_build (no workflow open)
+// and workflow_edit (one saved workflow open; its id is the only workflow data in the context). Four tools: workflow_options and
+// read_workflow read; propose_workflow and propose_workflow_edit only PROPOSE, after the automations function checked the result
+// (step validate with generate, step patch: both write nothing). Two change kinds, wf_create and wf_edit: Confirm = the automations
+// function's step save with ai_edited (always a Draft, enabled=false, origin ai), called with the person's own token. Nothing in
+// this function publishes, tests, enrols, duplicates or sends: a request to do that is refused in words. The static catalog in
+// wf_catalog.ts is generated from the engine's registry (.claude/eval/gen_wf_catalog.sh; a test compares it). The free-model eval
+// is .claude/eval/run_wf_ai_eval.sh (--dry builds all 30 requests with no network; a real run needs Cloudflare env and --max-neurons).
+//
 // Owner steps: run the G1-gateway, G2-changes, G4-providers and G5-keys sections of .claude/sql/stage6-cobra.sql (staging
 // first); deploy this function with Verify JWT ON. Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY
 // (all three automatic); CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_AI_TOKEN (the free AI; Ofek adds them, the token with
