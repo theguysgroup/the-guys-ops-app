@@ -41,6 +41,8 @@ const NAMES = ['catalogHours', 'ROLE_LABEL', 'productName', 'OFFICE', 'hhmmToMin
   // stage 3 (rebase on a8c6d2d): the vacation warning on a new task, with the business's day it reads (stage 1 region helpers)
   'VACATION_OPTIONS', 'VACATION_PAY', 'vacationOptionsNorm', 'mapVacationRow', 'vacationOpt', 'vacationMatches', 'vacationOnDay', 'vacationFor', 'vacationUntilText',
   'vacationPickerInfo', 'vacationUsableStandIn', 'vacationJobStandIn', 'vacationWho', 'vacationAssignInfo', 'vacationAssignConflicts', 'listJoin', 'vacationAssignLine',
+  // stage 3 follow-ups (rebase on f9c64b6): the app's "due back" day reads the person's working days
+  'vacationWorkingDaysOf', 'vacationBackDay',
   'pad2', 'fmtLocal', 'shiftDays', 'REGION_DEFAULTS', 'REGION_NONE', 'REGION_MEMO', 'BIZ_WALL', 'BIZ_DAY_MEMO', 'TZ_VALID', 'regionNow', 'tzValid', 'regionMemo', 'bizTz',
   'bizWall', 'bizDayOf', 'bizDayMemo'];
 function extractDecl(source, name){

@@ -24986,6 +24986,7 @@ function cobraOpen(opts){
   cobraFabPatch();
   if (!readOnlyReason() && !COBRA.statusP && Date.now() - COBRA.statusAt > COBRA_STALE_MS) cobraStatusLoad(true);
   setTimeout(() => { const t = document.getElementById('cobra-input'); if (t && !t.disabled) { t.focus(); cobraInput(t); } }, 0);
+  navOverlaySync();   // the panel is a layer of its own (stage 4): back closes it first
 }
 function cobraClose(){
   cobraMicStop();
@@ -24996,7 +24997,12 @@ function cobraClose(){
   cobraFabPatch();
   const fab = document.querySelector('.cobra-fab');
   if (fab && !fab.hidden) fab.focus();
+  navOverlaySync();   // closed in the app: its history entry goes too
 }
+// The panel is a layer for the page history (stage 4): back (and the phone's back swipe) closes it before the page moves.
+// Under a window (z 200), over the phone menu (z 100), as on screen. Nothing typed is lost: the box's text stays in
+// COBRA.draft and is back when the panel opens again, so it needs no question first.
+navLayer({ id: 'cobra', z: 150, isOpen: () => !!COBRA.open, close: () => { cobraClose(); }, el: () => document.querySelector('#cobra-root .cobra-panel') });
 function cobraScrollEnd(){ const b = document.getElementById('cobra-body'); if (b) b.scrollTop = b.scrollHeight; }
 function cobraDraw(){
   if (!COBRA.open) return;

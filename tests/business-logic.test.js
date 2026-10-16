@@ -5315,6 +5315,10 @@ function testCobraStatic(){
   assertEqual(['status', 'confirm_change', 'cancel_change', 'undo_change'].filter(st => !new RegExp(`\\b${st}: \\{ run:`).test(gw)), [], 'the steps the app calls exist in the gateway');
   const ex = sb.COBRA_MODES.assistant.examples.map(x => x.toLowerCase());
   assertEqual([/office hours/.test(ex[0]) && gw.includes('/office hours|'), gw.includes('/open saturday 9 to 1/i') && ex[1].includes('open saturday 9 to 1'), gw.includes('/add a task') && ex[2].includes('add a task')], [true, true, true], 'the three examples are the test provider\'s scripts (one proposes an office-hours change)');
+  // Stage 4's page history (rebase on f9c64b6): the panel is a layer, so back (the phone's back swipe) closes it first
+  const layer = /navLayer\(\{ id: 'cobra', z: (\d+), isOpen: \(\) => !!COBRA\.open, close: /.exec(block);
+  assertEqual([!!layer && Number(layer[1]) > 100 && Number(layer[1]) < 200, /navOverlaySync\(\);/.test(extractDecl(script, 'cobraOpen')), /navOverlaySync\(\);/.test(extractDecl(script, 'cobraClose'))],
+    [true, true, true], 'the panel is a history layer (over the phone menu, under a window); opening and closing it sync its entry');
 }
 // Loaders: one request at a time, nothing drawn but what each is allowed to draw.
 async function testCobraLoadersNoLoop(){
