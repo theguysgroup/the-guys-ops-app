@@ -32125,7 +32125,9 @@ const COBRA_CARDS = {};
 // floating button then opens in that mode.
 const COBRA_PAGE_MODES = [];
 // The change kinds' icons (gateway CHANGE_KINDS); an unknown kind gets the pencil.
-const COBRA_KIND_ICON = { office_hours: 'clock', task_add: 'tasks', lead_stage: 'kanban', lead_note: 'note', task_update: 'calendarCheck', lead_follow_up: 'calendar' };
+const COBRA_KIND_ICON = { office_hours: 'clock', task_add: 'tasks', lead_stage: 'kanban', lead_note: 'note', task_update: 'calendarCheck', lead_follow_up: 'calendar',
+  // stage 7 (Workflow AI): a new workflow saved as a Draft, a change to one
+  wf_create: 'zap', wf_edit: 'zap' };
 // The models Settings offers, with the gateway's default prices (US$ per million tokens; PRICE_DEFAULTS in ai-gateway,
 // a test keeps them equal). An owner's price overrides (ai_settings.prices) are shown on top.
 // provider: which group of Settings → AI → Models lists it (the free AI, the paid AI, own OpenAI keys).

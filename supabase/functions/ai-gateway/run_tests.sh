@@ -29,7 +29,15 @@ Object.assign(Anthropic, { APIError: __APIError, APIUserAbortError: __APIUserAbo
   AuthenticationError: __AuthenticationError, PermissionDeniedError: __PermissionDeniedError, NotFoundError: __NotFoundError, RateLimitError: __RateLimitError,
   InternalServerError: __InternalServerError });
 TS
-  sed -e '/^import { createClient }/d' -e '/^import Anthropic/d' -e '/^import webpush/d' -e 's/^export //' "$DIR/index.ts"
+  # Workflow AI's catalog (stage 7, generated; the gateway imports it) before the gateway, then the generator's own output
+  # again (WF_CATALOG_REGEN, tests_wf.ts compares: a registry change without regenerating fails) and the eval cases.
+  sed -e 's/^export //' "$DIR/wf_catalog.ts"
+  sed -e '/^import { createClient }/d' -e '/^import Anthropic/d' -e '/^import webpush/d' -e '/^import { WF_CATALOG_TEXT }/d' -e 's/^export //' "$DIR/index.ts"
+  bash "$ROOT/.claude/eval/gen_wf_catalog.sh" --print > "$OUT.cat" || { echo "ai-gateway: gen_wf_catalog.sh failed" >&2; exit 1; }
+  node -e 'const fs = require("fs"), rd = (f) => JSON.stringify(fs.readFileSync(f, "utf8"));
+console.log("const WF_CATALOG_REGEN: string = " + rd(process.argv[1]) + ";"); console.log("const WF_CATALOG_FILE: string = " + rd(process.argv[2]) + ";");' "$OUT.cat" "$DIR/wf_catalog.ts"
+  rm -f "$OUT.cat"
+  echo "const WF_EVAL_CASES: any = $(cat "$ROOT/.claude/eval/workflow_ai_cases.json");"
   # The app's functions, inside one function so they never clash with the server's names (same extraction as
   # tests/business-logic.test.js). A renamed or missing function fails the run here.
   node - "$ROOT/index.html" <<'JS'

@@ -5605,11 +5605,13 @@ export async function hookAdmin(sb: any, step: string, body: any, me: any, nowMs
 // role), never by a trigger: one per save whose content (definition, settings, name) changed, always on publish /
 // unpublish; a layout-only save never makes one.
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
-export const WF_API_STEPS = ["validate", "schema", "registry", "save", "publish", "duplicate", "restore", "copy_version", "migrate", "template_upload", "template_rename", "template_delete"];
+export const WF_API_STEPS = ["validate", "patch", "schema", "registry", "save", "publish", "duplicate", "restore", "copy_version", "migrate", "template_upload", "template_rename", "template_delete"];
 // Reasons a version row may carry (= the SQL check). The client may only ask for save / save_version; the rest are set here.
 export const WF_VERSION_REASONS = ["create", "save", "save_version", "publish", "unpublish", "restore", "ai", "migration", "duplicate", "system_move"];
 const WF_SNAP_ON_CHANGE = ["save", "save_version", "ai", "restore", "create", "duplicate", "migration"];
 export const WF_API_LIMITS = { layoutBytes: 128 * 1024, migratePage: 200, templateDrafts: 20, versionsPage: 50 };
+// The most edits one `patch` call applies (Workflow AI sends one request's edits).
+export const WF_PATCH_MAX_OPS = 60;
 // layout.editor of a workflow the new builder saved last (step "save" with editor "builder"; v1EditorView).
 export const WF_EDITOR_MARK = "builder";
 export const WF_LIB_KEY_RE = /^my_[a-z0-9]{8}$/;
@@ -5832,15 +5834,23 @@ export function wfSaveGoesDraft(a: Row | null, doc: any, aiEdited: boolean): boo
   const was = wfGuardedChannels(a.definition);
   return aiEdited || a.origin === "ai" || wfNewWebhookHost(a.definition, doc) || wfGuardedChannels(doc).some((t) => !was.includes(t));
 }
-// step "validate" {definition, settings, automation_id?, base_revision?} → the codes and what a save would change.
+// step "validate" {definition, settings, automation_id?, base_revision?, generate?} → the codes and what a save would change.
+// generate (stage 7, Workflow AI): the doc is also checked against the generate-mode JSON Schema (what the AI may write:
+// no unavailable type, no greyed option, no legacy gate), its problems as E_SCHEMA with JSON-pointer paths. Without it the
+// answer is the same as before, byte for byte.
 // deno-lint-ignore no-explicit-any
 async function apiValidate(sb: any, b: Row, me: any, nowMs: number): Promise<ApiRes> {
   const doc = docOf(b); if (!doc) return apiErr(400, "definition must be a workflow");
   const a = b.automation_id ? await apiRow(sb, b.automation_id, me, nowMs) : null;
   if (b.automation_id && !a) return apiErr(404, "workflow not found");
-  const C = await apiCtx(sb), prev = a ? obj(a.settings) : {}, raw = b.settings ?? prev, settings = normWfSettings(raw, prev);
-  const chk = wfCheck(doc, raw, prev, C, a ? a.definition : null, builderOf(b.builder, a && a.builder));
+  const gen = b.generate === true;
+  const C = await apiCtx(sb, gen), prev = a ? obj(a.settings) : {}, raw = b.settings ?? prev, settings = normWfSettings(raw, prev);
+  const builder = builderOf(b.builder, a && a.builder), chk = wfCheck(doc, raw, prev, C, a ? a.definition : null, builder);
   if (b.editor === WF_EDITOR_MARK) chk.errors.push(...wfRunsOldProblems({ ...(a || {}), definition: doc, settings, ...(typeof b.name === "string" ? { name: b.name } : {}) }, C.cat));
+  if (gen) {
+    const schema = jsonSchema(C.avail, C.biz, { mode: "generate", builder, stored: a ? a.definition : undefined });
+    for (const e of schemaCheck(schema, { definition: doc, ...(b.settings != null ? { settings: b.settings } : {}) })) chk.errors.push(issue("E_SCHEMA", e.path, e.text));
+  }
   const stored = a ? obj(a.definition) : null;
   const shapeChanged = !!stored && versionChanged(stored, a && a.settings, doc), armChanged = !!stored && armKey(stored, a && a.settings) !== armKey(doc, settings);
   const idsRemoved = stored ? Object.keys(obj(stored.nodes)).filter((id) => !has(obj(doc.nodes), id)).sort() : [];
@@ -5849,6 +5859,101 @@ async function apiValidate(sb: any, b: Row, me: any, nowMs: number): Promise<Api
   return { status: 200, body: { ok: true, errors: chk.errors, warnings: chk.warnings, shapeChanged, armChanged, idsRemoved, willDraft,
     waitingRunsAffected: (shapeChanged || willDraft) && a ? await activeRuns(sb, String(a.id)) : 0,
     ...(a && b.base_revision != null ? { revision: Number(a.revision), revisionChanged: Number(b.base_revision) !== Number(a.revision) } : {}) } };
+}
+// A compact outline of a doc for Workflow AI (stage 7; what read_workflow sends the model, not the app's narration): per
+// trigger its id, type, label, name and filters as "field op value" (catalog values by their names), per step its id,
+// kind, type, label, name, the config keys the registry marks required or narrates (text clipped to 160 characters) and
+// its out ports. biz = the business's lists (registryExport's), for the names.
+// deno-lint-ignore no-explicit-any
+export function wfOutline(doc: any, biz: BizLists = {}) {
+  const d = obj(doc), cut = (v: unknown) => clip(String(v ?? "").replace(/\s+/g, " ").trim(), 160);
+  const named = (field: string, v: unknown) => {
+    const f = has(WF_FIELDS, field) ? WF_FIELDS[field] : null, list = f && f.source && f.source.startsWith("catalog.") ? biz[f.source.slice(8)] : null;
+    const one = (x: unknown) => { const hit = Array.isArray(list) ? list.find((e) => e.key === x) : null; return hit ? `${hit.label} (${String(x)})` : String(x); };
+    return Array.isArray(v) ? v.map(one).join(", ") : one(v);
+  };
+  // deno-lint-ignore no-explicit-any
+  const rule = (r: any) => {
+    const x = obj(r), val = x.v != null ? named(String(x.field), x.v) : x.n != null ? String(x.n) + (x.v2 != null ? "-" + x.v2 : "") + (x.unit ? " " + x.unit : "") : x.ref ? "{" + x.ref + "}" : "";
+    return [x.field, x.op, val].filter((y) => y !== "" && y != null).join(" ");
+  };
+  // deno-lint-ignore no-explicit-any
+  const cond = (c: any) => {
+    const x = obj(c), segs = Array.isArray(x.segments) ? x.segments : [];
+    const parts = segs.map((sg: unknown) => { const g = obj(sg), rs = Array.isArray(g.rules) ? g.rules : []; return rs.map(rule).join(g.match === "any" ? " OR " : " AND "); }).filter(Boolean);
+    return cut(parts.map((t: string) => (parts.length > 1 ? `(${t})` : t)).join(x.match === "any" ? " OR " : " AND ")) || "always";
+  };
+  const keysOf = (e: WfEntry | null) => {
+    if (!e) return null;
+    // required = the schema's required keys and its "one of these" keys (an email's body or template)
+    const f = obj(e.fields), req = [...(Array.isArray(f.required) ? f.required : []), ...(Array.isArray(f["x-requireOne"]) ? f["x-requireOne"] : [])].map(String);
+    const narr = [...String(e.narration || "").matchAll(/\{([a-zA-Z_]+)\}/g)].map((m) => m[1]);
+    const keys = [...new Set([...req, ...narr])].filter((k) => has(obj(f.properties), k));
+    return keys.length ? keys : null;
+  };
+  // deno-lint-ignore no-explicit-any
+  const config = (c: any, keys: string[] | null) => {
+    const x = obj(c), out: Row = {};
+    for (const k of keys || Object.keys(x)) {
+      if (!has(x, k)) continue;
+      const v = x[k];
+      if (k === "branches" || k === "paths") out[k] = (Array.isArray(v) ? v : []).map((b: unknown) => { const y = obj(b); return { id: y.id, name: y.name ?? null, ...(y.when ? { when: cond(y.when) } : {}), ...(y.pct != null ? { pct: y.pct } : {}) }; });
+      else if (k === "when" && v && typeof v === "object") out[k] = cond(v);
+      else if (typeof v === "string") out[k] = cut(v);
+      else { const j = JSON.stringify(v); out[k] = j && j.length > 160 ? cut(j) : v; }
+    }
+    return out;
+  };
+  return {
+    entry: d.entry ?? null,
+    triggers: (Array.isArray(d.triggers) ? d.triggers : []).map((t0: unknown) => {
+      const t = obj(t0), e = triggerEntry(t.type);
+      return { id: t.id, type: t.type, label: e ? e.label : null, name: t.name ?? null, filters: cond(t.filters), ...(t.disabled === true ? { disabled: true } : {}), ...(t.goto ? { goto: t.goto } : {}),
+        ...(Object.keys(obj(t.config)).length ? { config: config(t.config, keysOf(e)) } : {}) };
+    }),
+    nodes: Object.entries(obj(d.nodes)).map(([id, n0]) => {
+      const n = obj(n0), e = nodeEntry(n.kind, n.type);
+      return { id, kind: n.kind, type: n.type, label: e ? e.label : null, name: n.name ?? null, config: config(n.config, n.kind === "if_else" || n.kind === "split" ? null : keysOf(e)), out: obj(n.out),
+        ...(n.disabled === true ? { disabled: true } : {}), ...(n.locked === true ? { locked: true } : {}) };
+    }),
+  };
+}
+// step "patch" (stage 7, Workflow AI; design §6.3) {automation_id, base_revision, ops, builder?, ai_edited?} → the stored
+// doc with the ops applied (wfApplyPatch) and checked as validate checks a doc the new builder saves, and what a save of it
+// would change. Never written: it runs on readOnlySb (a write attempt is an error), no snapshot, no revision bump. 409 when
+// the workflow was saved after base_revision; 422 {errors (with opIndex)} when an op doesn't apply. {ops: [], outline: true}
+// → the stored doc's outline (wfOutline) and revision, unchecked (Workflow AI's read_workflow).
+// deno-lint-ignore no-explicit-any
+async function apiPatch(sb0: any, b: Row): Promise<ApiRes> {
+  const sb = readOnlySb(sb0), id = String(b.automation_id ?? "").trim();
+  if (!id || id.length > 64) return apiErr(400, "automation_id is needed");
+  if (!Array.isArray(b.ops) || b.ops.length > WF_PATCH_MAX_OPS) return apiErr(400, `ops must be a list of at most ${WF_PATCH_MAX_OPS} edits`);
+  const a = await readAutomation(sb, id);
+  if (!a || a.deleted_at) return apiErr(404, "workflow not found");
+  // a phase-4 row is upgraded by the steps that may write (apiRow); this one never writes
+  if (a.definition == null) return apiErr(409, "not_upgraded", { text: "Open this workflow in the builder once first" });
+  if (b.outline === true) {
+    const C = await apiCtx(sb, true);
+    return { status: 200, body: { ok: true, revision: Number(a.revision), name: a.name ?? "", enabled: a.enabled === true, outline: wfOutline(a.definition, C.biz) } };
+  }
+  if (!Number.isInteger(b.base_revision)) return apiErr(400, "base_revision is needed");
+  if (Number(a.revision) !== b.base_revision) return apiErr(409, "conflict", { revision: Number(a.revision), updated_by_name: a.updated_by_name || null, updated_at: a.updated_at || null });
+  const prev = obj(a.settings), p = wfApplyPatch(a.definition, b.ops, { settings: prev, name: String(a.name ?? "") });
+  if (p.errors.length) return apiErr(422, "errors", { errors: p.errors });
+  const doc = p.doc, raw = p.settings ?? prev, settings = normWfSettings(raw, prev), name = String(p.name ?? a.name ?? "");
+  const C = await apiCtx(sb), chk = wfCheck(doc, raw, prev, C, a.definition, builderOf(b.builder, a.builder));
+  chk.errors.push(...wfRunsOldProblems({ ...a, definition: doc, settings, name }, C.cat));
+  const stored = obj(a.definition), shapeChanged = versionChanged(stored, a.settings, doc);
+  const idsRemoved = Object.keys(obj(stored.nodes)).filter((x) => !has(obj(doc.nodes), x)).sort();
+  // the steps and triggers the edit adds or changes (the AI card's list)
+  const was: Record<string, string> = nul({});
+  for (const [k, n] of Object.entries(obj(stored.nodes))) was[k] = canonJson(n);
+  for (const t of Array.isArray(stored.triggers) ? stored.triggers : []) was[String(obj(t).id)] = canonJson(t);
+  const now: [string, unknown][] = [...Object.entries(obj(doc.nodes)), ...(Array.isArray(doc.triggers) ? doc.triggers : []).map((t: unknown) => [String(obj(t).id), t] as [string, unknown])];
+  const changedIds = now.filter(([k, v]) => !has(was, k) || was[k] !== canonJson(v)).map(([k]) => k).sort();
+  const willDraft = wfSaveGoesDraft(a, doc, b.ai_edited === true);
+  return { status: 200, body: { ok: true, definition: doc, settings, name, idMap: p.idMap, errors: chk.errors, warnings: chk.warnings, idsRemoved, changedIds, shapeChanged, willDraft,
+    waitingRunsAffected: shapeChanged || willDraft ? await activeRuns(sb, String(a.id)) : 0, revision: Number(a.revision) } };
 }
 // step "save" (design §3.13). A Published workflow refuses errors (422); a Draft is saved with them. 409 when someone
 // saved in between. ai_edited (or a workflow the AI made) → Draft. Only an owner adds or changes a Webhook step; a
@@ -6283,6 +6388,7 @@ export async function apiStep(sb: any, step: string, body: any, me: any, nowMs: 
     return { status: 200, body: { ok: true, schema: jsonSchema(C.avail, C.biz, { mode: b.mode === "accept" ? "accept" : "generate", builder: builderOf(b.builder, a && a.builder), stored: a ? a.definition : undefined }) } };
   }
   if (step === "validate") return await apiValidate(sb, b, me, nowMs);
+  if (step === "patch") return await apiPatch(sb, b);
   if (step === "save") return await apiSave(sb, b, me, nowMs);
   if (step === "publish") return await apiPublish(sb, b, me, nowMs);
   if (step === "duplicate" || step === "copy_version") return await apiDuplicate(sb, step === "copy_version" ? { automation_id: b.automation_id, version_no: b.version_no, version_id: b.version_id, name: b.name } : b, me, nowMs);

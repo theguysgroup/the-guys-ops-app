@@ -4749,6 +4749,90 @@ async function phase4Suite() {
     eq([dv2.acts, dv2.d.path[0].preview.notes], [["t1:would>Vicky Va"], "For Cal Tech (on vacation): given to Vicky Va, the stand-in.\n\nRing"], "dry run (a phase-4 row): the task's stand-in and its line");
   }
 
+  // ── 40. Workflow AI's steps (stage 7 A, .claude/plans/stage7-spec.md §2.1): "patch" applies edits to the stored doc and
+  //        checks the result with ZERO writes (409 stale, 422 with opIndex, the outline read); "validate" with generate
+  //        also checks the generation schema, and without it answers as before on every workflows.json case ──
+  {
+    const api = (db: any, step: string, body: any = {}, me: any = OWNER) => handle(db, { step, ...body }, me, false);
+    const P = JSON.parse(src("fixtures/patch.json")).cases, W = JSON.parse(src("fixtures/workflows.json")).cases;
+    const ID40 = "a40-0000-0000";
+    const p0 = P.find((k: any) => k.name === "add a step at the end");
+    const row40 = (o: any = {}) => auto({ id: ID40, name: "Lead alert", enabled: false, revision: 3, settings: {}, layout: { v: 1 }, builder: "standard", origin: "user", list_summary: {}, deleted_at: null, definition: JSON.parse(JSON.stringify(p0.doc)), ...o });
+    const writes = (db: any) => db.calls.filter((c: string) => !/\.select$/.test(c));
+    ok(WF_API_STEPS.includes("patch") && WF_PATCH_MAX_OPS === 60, "the API has a 'patch' step (at most 60 edits a call)");
+
+    // patch: the edits applied and checked, nothing written
+    {
+      const db = world({ automations: [row40()], automation_versions: [] });
+      db.calls.length = 0;
+      const r = await api(db, "patch", { automation_id: ID40, base_revision: 3, ops: p0.ops });
+      eq([r.status, r.body.ok, canonJson(r.body.definition) === canonJson(p0.result), r.body.idMap, r.body.changedIds, r.body.idsRemoved, r.body.shapeChanged, r.body.willDraft, r.body.revision, r.body.errors],
+        [200, true, true, p0.idMap, ["n3", "n4"], [], true, false, 3, []], "patch: the edits on the stored doc (= patch.json), the ids added or changed, what a save would change");
+      eq([writes(db), db.T.automations[0].revision, canonJson(db.T.automations[0].definition) === canonJson(p0.doc), db.T.automation_versions.length], [[], 3, true, 0], "patch: zero writes (no save, no snapshot, no revision bump)");
+      db.T.automations[0].enabled = true;
+      const ai = await api(db, "patch", { automation_id: ID40, base_revision: 3, ops: [{ op: "setNode", id: "n2", patch: { config: { title: "Lead: {name}" } } }], ai_edited: true });
+      db.T.automations[0].enabled = false;
+      eq([ai.body.willDraft, ai.body.changedIds, ai.body.shapeChanged], [true, ["n2"], false], "patch with ai_edited on a Published workflow: a save would be a Draft; words only = the same shape");
+      const st = await api(db, "patch", { automation_id: ID40, base_revision: 2, ops: p0.ops });
+      eq([st.status, st.body.reason, st.body.revision], [409, "conflict", 3], "patch at an old revision → 409 conflict (as save)");
+      const bad = await api(db, "patch", { automation_id: ID40, base_revision: 3, ops: [p0.ops[0], { op: "setNode", id: "n99", patch: {} }] });
+      eq([bad.status, bad.body.reason, bad.body.errors.length > 0 && bad.body.errors.every((e: any) => e.opIndex === 1)], [422, "errors", true], "patch: an edit that doesn't apply → 422 with its opIndex");
+      const chk = await api(db, "patch", { automation_id: ID40, base_revision: 3, ops: [{ op: "setNode", id: "n1", patch: { config: { n: -5 } } }] });
+      ok(chk.status === 200 && chk.body.errors.length > 0, "patch: a result that doesn't validate → 200 with its errors (as validate)", chk.body.errors);
+      const o = await api(db, "patch", { automation_id: ID40, ops: [], outline: true });
+      eq([o.status, o.body.revision, o.body.name, o.body.enabled, o.body.outline.entry, o.body.outline.nodes.map((n: any) => n.id), o.body.outline.triggers[0].type, "definition" in o.body],
+        [200, 3, "Lead alert", false, "n1", ["n1", "n2", "n3"], "newLead", false], "patch outline: the stored doc's outline and revision (Workflow AI's read), no definition");
+      eq([(await api(db, "patch", { automation_id: "a40-none", base_revision: 3, ops: [] })).status, (await api(db, "patch", { automation_id: ID40, ops: [] })).status,
+        (await api(db, "patch", { automation_id: ID40, base_revision: 3, ops: Array.from({ length: 61 }, () => ({ op: "rename", name: "x" })) })).status, (await api(db, "patch", { automation_id: ID40, base_revision: 3, ops: [] }, VA)).status],
+        [404, 400, 400, 403], "patch: not found 404, no base_revision 400, over 60 edits 400, not an owner or manager 403");
+      eq(writes(db), [], "patch: still zero writes after every call");
+      const db4 = world({ automations: [auto({ id: "a40-v1", revision: 1, deleted_at: null })], automation_versions: [] });
+      db4.calls.length = 0;
+      eq([(await api(db4, "patch", { automation_id: "a40-v1", ops: [], outline: true })).status, writes(db4)], [409, []], "patch on a phase-4 row (never upgraded): 409, and it doesn't upgrade it (no write)");
+      // a write attempt inside patch is an error, never a write (readOnlySb)
+      let threw = "";
+      try { await readOnlySb(db).from("automations").update({ name: "x" }); } catch (x) { threw = (x as Error).name; }
+      eq(threw, "SimulationWriteError", "patch runs on readOnlySb: a write would throw");
+    }
+
+    // validate: without generate, the same answer as before on every workflows.json case; with it, only E_SCHEMA added
+    {
+      const db = world({ automations: [], automation_versions: [] });
+      const C40 = await apiCtx(db);
+      let same = 0, superset = 0;
+      for (const k of W) {
+        const a = await api(db, "validate", { definition: k.doc, builder: k.builder }), b = await api(db, "validate", { definition: k.doc, builder: k.builder, generate: false });
+        const g = await api(db, "validate", { definition: k.doc, builder: k.builder, generate: true });
+        if (a.status !== 200) { if (JSON.stringify(a) === JSON.stringify(b) && JSON.stringify(a) === JSON.stringify(g)) { same++; superset++; } else ok(false, `validate (not a doc): ${k.name}`, [a, g]); continue; }
+        const want = wfCheck(k.doc, {}, {}, C40, null, builderOf(k.builder, null));
+        if (a.status === 200 && JSON.stringify(a.body) === JSON.stringify(b.body) && canonJson(a.body.errors) === canonJson(want.errors) && canonJson(a.body.warnings) === canonJson(want.warnings)) same++;
+        else ok(false, `validate without generate: ${k.name}`, [a.body.errors, want.errors]);
+        const extra = g.body.errors.slice(a.body.errors.length);
+        if (canonJson(g.body.errors.slice(0, a.body.errors.length)) === canonJson(a.body.errors) && extra.every((e: any) => e.code === "E_SCHEMA" && typeof e.path === "string")) superset++;
+        else ok(false, `validate with generate adds only E_SCHEMA: ${k.name}`, extra.slice(0, 3));
+      }
+      ok(W.length >= 60 && same === W.length && superset === W.length, `validate: without generate as before on all ${W.length} cases; generate adds only E_SCHEMA issues`);
+      const legacy = W.find((k: any) => k.name === "upgrade-3: the generation schema has no legacy gate");
+      const [lo, lg] = [await api(db, "validate", { definition: legacy.doc }), await api(db, "validate", { definition: legacy.doc, generate: true })];
+      eq([lo.body.errors.some((e: any) => e.code === "E_SCHEMA"), lg.body.errors.some((e: any) => e.code === "E_SCHEMA" && e.path.startsWith("/definition"))], [false, true], "generate: the legacy gate is refused (E_SCHEMA with a JSON pointer), accepted without");
+      const sms = { schema: 2, seq: 2, entry: "n1", triggers: [{ id: "t1", type: "newLead", filters: { match: "all", segments: [{ match: "all", rules: [] }] } }], nodes: { n1: { kind: "action", type: "send_sms", config: { body: "Hi {first_name}" }, out: { next: null } } } };
+      const gs = await api(db, "validate", { definition: sms, generate: true });
+      eq([gs.body.errors.some((e: any) => e.code === "E_UNAVAILABLE"), gs.body.errors.some((e: any) => e.code === "E_SCHEMA")], [true, true], "generate: a greyed type (SMS without a phone line) → E_UNAVAILABLE and E_SCHEMA");
+    }
+
+    // wfOutline (pure): ids, types, labels, names, the filters in words (catalog names), the required / narrated config
+    {
+      const d = { schema: 2, seq: 5, entry: "n1", triggers: [{ id: "t1", type: "stage", name: "To Quoted", filters: { match: "all", segments: [{ match: "all", rules: [{ field: "stage", op: "is", v: "Quoted" }] }] } }],
+        nodes: { n1: { kind: "wait", type: "period", name: "Wait", config: { n: 2, unit: "days" }, out: { next: "n2" } },
+          n2: { kind: "action", type: "send_email", config: { subject: "Hi", body: "x".repeat(400), fromName: "Office" }, out: { next: null } } } };
+      const o: any = wfOutline(d, { stages: [{ key: "Quoted", label: "Quote sent" }] });
+      eq([o.entry, o.triggers[0].id, o.triggers[0].type, o.triggers[0].name, o.triggers[0].filters, o.nodes.map((n: any) => [n.id, n.kind, n.type, n.out.next ?? null])],
+        ["n1", "t1", "stage", "To Quoted", "stage is Quote sent (Quoted)", [["n1", "wait", "period", "n2"], ["n2", "action", "send_email", null]]], "wfOutline: the trigger's filters in words with the catalog's names; the steps with their ports");
+      ok(o.nodes[1].config.body.length <= 160 && o.nodes[1].config.subject === "Hi" && typeof o.nodes[1].label === "string" && o.nodes[1].label.length > 0, "wfOutline: config text clipped to 160 characters; the registry's label", o.nodes[1]);
+      eq(wfOutline({ triggers: [], nodes: {} }), { entry: null, triggers: [], nodes: [] }, "wfOutline: an empty doc");
+    }
+  }
+
   console.log(`automations: ${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
 })().catch((e) => { console.error("automations tests crashed:", e); process.exit(1); });

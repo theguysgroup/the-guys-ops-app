@@ -159,7 +159,7 @@ SUITES.push(async () => {
   // ── 1. registry ──
   {
     const g2 = ["change_office_hours", "add_task", "move_lead_stage", "add_lead_note"];
-    eq(Object.keys(CHANGE_KINDS).filter((k) => !k.startsWith("test_")), ["office_hours", "task_add", "lead_stage", "lead_note", "task_update", "lead_follow_up"], "G2 change kinds (then stage 8's, tests_changes8.ts)");
+    eq(Object.keys(CHANGE_KINDS).filter((k) => !k.startsWith("test_") && !k.startsWith("wf_")), ["office_hours", "task_add", "lead_stage", "lead_note", "task_update", "lead_follow_up"], "G2 change kinds (then stage 8's, tests_changes8.ts; stage 7's wf_* in tests_wf.ts)");
     for (const n of g2) {
       const t = TOOLS[n];
       eq([t.kind, t.modes, strictSchemaProblems(t.input_schema)], ["change", ["assistant"], []], `${n}: a change tool of the assistant mode with a strict schema`);
