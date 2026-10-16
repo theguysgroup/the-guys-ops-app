@@ -1619,10 +1619,14 @@ body.wf-open #phone-widget { left: auto !important; right: 16px; bottom: 164px !
 .wfb-edges path.is-rubber { stroke: var(--wf-sel); stroke-width: 2; }
 .wfa-tile { display: block; padding: 0; border-radius: 14px; }
 .wfa-tile > .wfb-tile { position: absolute; inset: 7px; width: auto; height: auto; border-radius: 10px; }
-.wfa-lab { position: absolute; left: -54px; top: 76px; width: 180px; display: flex; flex-direction: column; align-items: center; text-align: center; line-height: 1.25; pointer-events: none; }
-.wfa-lab b { max-width: 100%; font-size: 12.5px; font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.wfa-lab small { max-width: 100%; font-size: 11px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wfa-tags { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 2px; }
+.wfa-lab { position: absolute; left: -54px; top: 76px; width: 180px; max-height: 36px; overflow: hidden; display: flex; flex-direction: column; align-items: center; text-align: center; line-height: 1.25; pointer-events: none; }
+/* held to WF_ADV.label (36 px: the band Tidy up and the nudges keep free): the name on one line, then one row (a trigger's
+   name, then the tags); the tile's aria-label has every word */
+.wfa-lab b { max-width: 100%; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wfa-lab small { min-width: 0; font-size: 11px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wfa-tags { display: flex; align-items: center; gap: 3px; max-width: 100%; margin-top: 2px; overflow: hidden; }
+.wfa-tags > :first-child { margin-left: auto; } .wfa-tags > :last-child { margin-right: auto; }
+.wfa-tags > span { flex: none; }
 .wfa-tags .wfb-tag { display: inline-flex; align-items: center; gap: 2px; }
 .wfa-def { font-size: 11px; font-weight: 700; color: var(--wf-sel); }
 .wfa-dot, .wfa-in { position: absolute; width: 12px; height: 12px; margin-top: -6px; border-radius: 50%; border: 2px solid var(--wf-edge); background: var(--surface); }
@@ -1631,7 +1635,7 @@ body.wf-open #phone-widget { left: auto !important; right: 16px; bottom: 164px !
 .wfa-dot:hover, .wfb-card.is-sel .wfa-dot { border-color: var(--wf-sel); background: var(--wf-sel-soft); }
 .wfa-in { left: -7px; top: 50%; pointer-events: none; }
 .wfa-pl { position: absolute; left: 80px; margin-top: -8px; max-width: 110px; font-size: 10.5px; line-height: 16px; color: var(--wf-purple); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
-.wfa-tile .wfb-hov { top: -28px; right: -4px; }
+.wfa-tile .wfb-hov { top: 0; right: calc(100% + 2px); }   /* left of the tile, never in the label band of the row above */
 .wfa-tile .wfb-hov button { opacity: 0; pointer-events: none; }
 .wfb-card.wfa-tile:hover .wfb-hov button, .wfb-card.wfa-tile:focus-within .wfb-hov button, .wfb-card.wfa-tile.is-sel .wfb-hov button { opacity: 1; pointer-events: auto; }
 .wfa-tile.is-drop, .wfa-plus.is-drop, .wfa-emid.is-drop { box-shadow: 0 0 0 3px var(--wf-sel); border-color: var(--wf-sel); }
@@ -1641,11 +1645,14 @@ body.wf-open #phone-widget { left: auto !important; right: 16px; bottom: 164px !
 .wfa-plus { display: grid; place-items: center; padding: 0; border: 1px dashed var(--wf-add); border-radius: 6px; background: var(--wf-add-soft); color: var(--wf-add); cursor: pointer; touch-action: none; }
 .wfa-plus::before { content: ""; position: absolute; inset: -8px; }
 .wfa-plus:hover, .wfa-plus:focus-visible { border-style: solid; }
-.wfa-emid { display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 12px; }
-.wfa-emid button { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--ink-soft); cursor: pointer; opacity: 0; pointer-events: none; }
+.wfa-emid { display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 14px; }
+.wfa-emid button { position: relative; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--ink-soft); cursor: pointer; opacity: 0; pointer-events: none; }
 .wfa-emid:hover button, .wfa-emid:focus-within button, .wfa-emid.is-drop button { opacity: 1; pointer-events: auto; }
 .wfa-emid button:hover { border-color: var(--wf-sel); color: var(--wf-sel); }
 .wfa-emid button[data-act="edgeDel"]:hover { border-color: var(--bad); color: var(--bad); }
+/* a finger: 40 px each, side by side (WF_ADV_UI.mid is wide enough) */
+@media (pointer: coarse) { .wfa-emid { gap: 16px; } .wfa-emid button::before { content: ""; position: absolute; inset: -8px; } }
+.wfb-mobile .wfa-emid { gap: 16px; } .wfb-mobile .wfa-emid button::before { content: ""; position: absolute; inset: -8px; }
 /* behind the lines too (the world is its own stacking context) */
 .wfa-sticky { display: flex; flex-direction: column; padding: 0; cursor: default; z-index: -1; }
 .wfa-stb { flex: none; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line-soft); cursor: grab; touch-action: none; }
@@ -1656,6 +1663,7 @@ body.wf-open #phone-widget { left: auto !important; right: 16px; bottom: 164px !
 .wfa-sts { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; border-right: 2px solid var(--line); border-bottom: 2px solid var(--line); border-bottom-right-radius: 6px; }
 .wfa-marq { position: absolute; left: 0; top: 0; border: 1px dashed var(--wf-sel); background: var(--wf-sel-soft); opacity: .6; pointer-events: none; z-index: 3; }
 .wfa-bulk { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; max-width: calc(100% - 24px); padding: 4px; overflow-x: auto; scrollbar-width: thin; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); z-index: 3; }
+.wfb-pill:not([hidden]) ~ .wfa-bulk { top: 48px; }   /* under "Stats view" / "View only mode": the reason editing is off stays seen */
 .wfa-bulk .wfb-tb { white-space: nowrap; }
 .wfa-bulk .wfb-tb.is-danger { color: var(--bad); }
 .wfa-bn { padding: 0 8px; font-size: 12.5px; font-weight: 700; color: var(--wf-sel); white-space: nowrap; }
@@ -23983,11 +23991,17 @@ const WF_HOOKS = { picker: wfPickerOpen, pickerHtml: wfPickerHtmlHook, openStep:
 // x: { id } }); saved(id) → a new one's first Save gives its entry the id, in place; closed → closed in the app (← Workflows
 // list): back to the entry under it (opts.nav false: a back, forward or another workflow opening already moves the
 // history); layer → the builder's layers get an entry, so back closes the top one first. Without stage 4 (the tests'
-// sandbox) these do nothing and the builder works on its own (Esc, "← Workflows list").
+// sandbox) these do nothing and the builder works on its own (Esc, "← Workflows list"). A new one's entry also carries a
+// token (x.tmp; tmp = W.navTmp): its first Save maps the token to the id here, so an entry under a layer's (left with id
+// null: only the top one is replaced) still opens the saved workflow on back or forward (wfNavRestore).
+const WF_NAV_NEW = { at: Date.now().toString(36), seq: 0, ids: new Map() };
+function wfNavNewKey(){ return `${WF_NAV_NEW.at}.${++WF_NAV_NEW.seq}`; }
 const wfNavHooks = {
-  opened(id){ if (wfNavReady()) navPush({ kind: 'wf', x: { id: id || null } }); },
-  saved(id){
-    if (!id || !wfNavReady()) return;
+  opened(id, tmp){ if (wfNavReady()) navPush({ kind: 'wf', x: id ? { id } : { id: null, ...(tmp ? { tmp } : {}) } }); },
+  saved(id, tmp){
+    if (!id) return;
+    if (typeof tmp==='string' && tmp) WF_NAV_NEW.ids.set(tmp, id);
+    if (!wfNavReady()) return;
     const st = history.state;
     if (navOurs(st) && st.kind==='wf' && st.x && st.x.id==null) navReplace({ kind: 'wf', x: { id }, ...(st.ov ? { ov: 1 } : {}) });
   },
@@ -24450,7 +24464,8 @@ function wfBuilderOpen(row, opts){
   wfRegWatch(W);
   W.ctxSig = wfCtxSig();
   wfDirty('chrome', 'canvas', 'sel', 'view', 'mini');
-  wfNavHooks.opened(wfNavId(W));
+  if (!wfNavId(W)) W.navTmp = wfNavNewKey();
+  wfNavHooks.opened(wfNavId(W), W.navTmp);
   // a saved workflow: its notes (the cards' counts), the pause dates (the Publish switch), this device's unsaved draft
   if (W.id && W.mode==='edit') {
     wfPresenceStart(W);
@@ -24543,6 +24558,7 @@ function wfApplySnap(W, s){
   if (s.doc!==W.doc) W.docRev++;
   if (s.layout!==W.layout || s.builder!==W.builder) W.layoutRev++;
   Object.assign(W, { doc: s.doc, layout: s.layout, builder: s.builder, settings: s.settings, name: s.name, tplDrafts: s.tplDrafts });
+  if (W.builder!=='advanced' && W.tool==='marquee') W.tool = 'select';   // the Select tool is the Advanced canvas's only
   W.sel = new Set(s.sel || []);
   if (W.focus && /^n:/.test(W.focus) && !wfHas(wfNodesOf(W.doc), W.focus.slice(2))) W.focus = null;
   if (W.drawer && W.drawer.id && !wfHas(wfNodesOf(W.doc), W.drawer.id) && !(W.doc.triggers || []).some(t => wfObj(t).id===W.drawer.id)) wfSetLayer('drawer', null);
@@ -25783,9 +25799,10 @@ function wfPickerOpen(kind, slot, o){
   };
   if (W.drawer && W.drawer.dirty) wfDrawerAsk(go); else go();
 }
-function wfPickerRowsNow(W, D){
+// sc: another place's context (a palette drop asks before the picker moves there).
+function wfPickerRowsNow(W, D, sc){
   const P = W.picker;
-  return wfPickerRows(W.reg, P.kind, P.q, { tab: P.tab, apps: wfAppsOf(W.reg, P.kind), role: wfMyRole(), lists: D.ctx.lists }, P.recent, P.pins, P.sc);
+  return wfPickerRows(W.reg, P.kind, P.q, { tab: P.tab, apps: wfAppsOf(W.reg, P.kind), role: wfMyRole(), lists: D.ctx.lists }, P.recent, P.pins, sc===undefined ? P.sc : sc);
 }
 // WF_HOOKS.pickerHtml (paint path: memoised on the picker's own revision; typing in the search patches the list only).
 function wfPickerHtmlHook(W, D){
@@ -27011,7 +27028,7 @@ function wfSaveDone(W, snap, b, name, aiMark){
   if (W.tplDrafts===snap.tplDrafts && keys.length) { const none = {}; W.tplDrafts = none; base.tplDrafts = none; }
   W.base = base; W.isCopy = false; W.remote = null;
   wfAiSaved(W, aiMark);   // an AI change made while it was on the way is still unsaved
-  if (wasNew) { W.templateKey = null; if (typeof WF_UI!=='undefined') WF_UI.open = id; W.recent = wfRecentPush(id); W.notesE = null; wfNotesLoad(W); wfPresenceStart(W); wfNavHooks.saved(id); }
+  if (wasNew) { W.templateKey = null; if (typeof WF_UI!=='undefined') WF_UI.open = id; W.recent = wfRecentPush(id); W.notesE = null; wfNotesLoad(W); wfPresenceStart(W); wfNavHooks.saved(id, W.navTmp); }
   wfDraftClear(W, wasNew ? [null, id] : [id]);
   if (wasNew && W.folderId) wfDbWrite('It stays in Home', sb.from(AUTO_TABLE).update({ folder_id: W.folderId }).eq('id', id));
   wfListChanged(W);
@@ -27504,7 +27521,7 @@ async function wfEdit(key){
 // ── pure helpers (tests/business-logic.test.js) ──
 // hit: how near (world px) a palette drop must be to a "[+]" or a line's middle; mid: the line's middle buttons (w, h);
 // pad / band: a sticky note drawn round tiles (the space round them, its title band); flip: Tidy up's move (ms).
-const WF_ADV_UI = { hit: 30, mid: [52, 24], pad: 28, band: 34, sticky: { minW: 160, minH: 90, max: 4000 }, flip: 220 };
+const WF_ADV_UI = { hit: 30, mid: [64, 28], pad: 28, band: 34, sticky: { minW: 160, minH: 90, max: 4000 }, flip: 220 };
 // The shown sticky notes on the Advanced canvas: where they were put (x, y, w, h; sizes kept to 160–4000 × 90–4000), in
 // the list's order.
 function wfAdvStickyBoxes(layout){
@@ -27676,7 +27693,8 @@ function wfConnectHtml(x){
 }
 // A tile (72 × 72, its name in a band below). c = { id, trigger, name, sub, icon, tone, disabled, unknown, issue, notes, stats,
 // verdict, ro, ports: [{ port, label }], entry ("(Default Path)", said when there are groups), head (the first step of a
-// group: the branch icon makes it the Default Path), unreached ("Not connected") }. The dots are drag handles
+// group that is not the Default Path: the branch icon makes it so), unreached ("Not connected") }. The label is held to
+// WF_ADV.label: the name, then one row (a trigger's name, the tags). The dots are drag handles
 // (aria-hidden: "Connect to…" is their keyboard way); the buttons inside are not Tab stops; every word escaped.
 function wfAdvTileHtml(c){
   const id = esc(c.id), ports = Array.isArray(c.ports) ? c.ports : [], A = WF_ADV, at = i => Math.round(A.tile * (i + 1) / (Math.max(1, ports.length) + 1));
@@ -27688,7 +27706,7 @@ function wfAdvTileHtml(c){
     c.unknown ? '<span class="wfb-tag">Unknown step</span>' : '', c.issue ? `<span class="wfb-tag is-${c.issue==='error' ? 'err' : 'warn'}">${c.issue==='error' ? 'Error' : 'Warning'}</span>` : '',
     c.notes ? `<span class="wfb-tag">${ico('message', 10)}${Number(c.notes) || 0}</span>` : '', c.stats ? `<span class="wfb-tag is-stats">${esc(c.stats)}</span>` : '', c.verdict ? `<span class="wfb-tag is-verdict">${esc(c.verdict)}</span>` : ''].join('');
   return `<span class="wfb-tile" style="--tone:var(--wf-${esc(c.tone)})">${wfIcon(c.icon, 28)}</span>${c.trigger ? '' : '<span class="wfa-in" aria-hidden="true"></span>'}${dots}`
-    + `<span class="wfa-lab"><b dir="auto" title="${esc(c.name)}">${esc(c.name)}</b>${c.sub ? `<small dir="auto" title="${esc(c.sub)}">${esc(c.sub)}</small>` : ''}${tags ? `<span class="wfa-tags">${tags}</span>` : ''}</span>`
+    + `<span class="wfa-lab"><b dir="auto" title="${esc(c.name)}">${esc(c.name)}</b>${c.sub || tags ? `<span class="wfa-tags">${c.sub ? `<small dir="auto" title="${esc(c.sub)}">${esc(c.sub)}</small>` : ''}${tags}</span>` : ''}</span>`
     + `<span class="wfb-hov">${c.head && !c.entry && !c.ro ? b('defPath', 'Set as Default Path', ico('branch', 14)) : ''}${b(c.trigger ? 'tmenu' : 'menu', 'Quick actions', ico('moreH', 14))}</span>`;
 }
 // A sticky note on the Advanced canvas: its title band (drag: the note and the tiles on it; double-click: edit), the
@@ -27719,7 +27737,7 @@ function wfAdvCanvasItems(doc, L, reg, ctx, x){
     const n = wfObj(I.nodes[id]), e = wfNodeEntry(reg, n.kind, n.type), unknown = loaded && !e, key = `n:${id}`, gi = groups.findIndex(g => g.head===id);
     const c = { id, name: wfNodeName(n, reg), icon: e ? e.icon : n.kind==='wait' ? 'hourglass' : 'zap', tone: e ? wfToneOf(e) : 'grey', disabled: n.disabled===true, unknown, issue: iss[key] || '',
       notes: Number(wfObj(o.notes)[id]) || 0, stats: String(wfObj(o.stats)[id] || ''), verdict: String(wfObj(o.verdicts)[id] || ''), ro, ports: wfPorts(n).map(p => ({ port: p, label: wfPortLabel(n, p, reg) })),
-      entry: groups.length > 1 && d.entry===id, head: gi >= 0 && !I.parent[id], unreached: unreached.has(id) };
+      entry: groups.length > 1 && d.entry===id, head: gi >= 0 && !I.parent[id] && d.entry!==id, unreached: unreached.has(id) };
     const grp = gi >= 0 && groups.length > 1 ? ` Group ${gi + 1} of ${groups.length}${d.entry===id ? ' (Default Path)' : ''}.` : '';
     tree.push({ key, group: 'tree', act: 'card', id, cls: `wfb-card wfa-tile${c.disabled ? ' is-off' : ''}${unknown ? ' is-unknown' : ''}${c.issue ? ` iss-${c.issue}` : ''}`, x: b.x, y: b.y, w: b.w, h: b.h, attrs: aria(key),
       al: `${wfNodeAria(d, id, reg, ctx, { notes: c.notes, verdict: c.verdict, stats: c.stats, I, order })}${grp}${c.unreached ? ' Not connected.' : ''}${issueWords(key)}`, ck: JSON.stringify(c), html: () => wfAdvTileHtml(c) });
@@ -27873,7 +27891,11 @@ function wfConnectCommit(from, to){
   const now = t ? (typeof t.goto==='string' ? t.goto : W.doc.entry) : wfObj(nodes[f.src].out)[f.port ?? wfPorts(nodes[f.src])[0]];
   if (now===to) { wfAnnounce('It goes there already'); return 0; }
   const no = wfCommit(t ? 'Set where the trigger starts' : 'Connect steps', w => wfConnectDrop(w.doc, f, to, w.reg), { quiet: true });
-  if (no) wfAnnounce(`${t ? 'The trigger starts at' : 'Connected to'} ${wfNodeName(wfNodesOf(W.doc)[to], W.reg)}`);
+  if (!no) return no;
+  // the path's old next step (and the steps after it) left on its own: said, with Undo, as the trash on a line does
+  const N = wfNodesOf(W.doc), name = wfNodeName(N[to], W.reg), cut = !t && typeof now==='string' && wfHas(N, now) && now!==W.doc.entry && !wfIndex(W.doc).parent[now];
+  if (cut) showToast(`Connected to ${name}: "${wfNodeName(N[now], W.reg)}" and the steps after it are now a group of their own`, { undo: () => wfUndoCommit(no), local: true });
+  else wfAnnounce(`${t ? 'The trigger starts at' : 'Connected to'} ${name}`);
   return no;
 }
 function wfAdvEdgeOf(key){ const W = WF; return W && W.builder==='advanced' ? (wfDerived().layout.edges || []).find(e => e.key===String(key || '')) || null : null; }
@@ -28136,11 +28158,14 @@ function wfPalEnd(g, drop){
   if (!drop || !d || !P) return;
   if (d.kind==='none') { showToast(d.why, { kind: 'info' }); return; }
   const canvas = d.kind==='canvas', slot = canvas ? (W.doc.entry ? null : { src: '@entry', port: null }) : d.slot;
-  Object.assign(P, { slot: slot || { src: '@entry', port: null }, sc: wfSlotCtx(W.doc, slot, W.reg), at: canvas ? [d.at[0] - WF_ADV.tile / 2, d.at[1] - WF_ADV.tile / 2] : null, detached: canvas && !slot });
+  const next = { slot: slot || { src: '@entry', port: null }, sc: wfSlotCtx(W.doc, slot, W.reg), at: canvas ? [d.at[0] - WF_ADV.tile / 2, d.at[1] - WF_ADV.tile / 2] : null, detached: canvas && !slot };
+  // the same row, with this place's own reasons (a Go to only at the end of a path…); refused → the picker stays where it was
+  const row = wfPickerFlat(wfPickerRowsNow(W, wfDerived(), next.sc)).find(r => r.key===g.row.key);
+  if (!row) return;
+  if (row.disabled) { showToast(row.reason || 'Not available', { kind: 'info' }); return; }
+  Object.assign(P, next);
   P.rev++;
-  // the same row, with this place's own reasons (a Go to only at the end of a path…)
-  const row = wfPickerFlat(wfPickerRowsNow(W, wfDerived())).find(r => r.key===g.row.key);
-  if (row) wfPickerPick(row);
+  wfPickerPick(row);
 }
 const WF_ADV_GESTURES = {
   tiles: { begin: wfTilesBegin, move: wfTilesMove, end: wfTilesEnd },
@@ -28286,7 +28311,7 @@ function wfNavLeave(){
 }
 // Back or forward onto a builder entry: that workflow opens again (a new one opens empty; its local draft is offered).
 function wfNavRestore(s){
-  const x = wfObj(wfObj(s).x), id = typeof x.id==='string' && x.id ? x.id : null;
+  const x = wfObj(wfObj(s).x), id = typeof x.id==='string' && x.id ? x.id : (typeof x.tmp==='string' && WF_NAV_NEW.ids.get(x.tmp)) || null;
   if (id && wfNavId(WF)===id) return true;
   if (WF) wfBuilderClose({ nav: false });
   if (id) wfEdit(id);

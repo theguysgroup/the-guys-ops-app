@@ -8772,6 +8772,79 @@ function testLeadAssigneeGrey(){
     'the lead\'s "Assigned to": away with "Not assignable" → greyed "Name · On vacation until …" (vacationPickerInfo, as the other pickers); not ticked → as usual; the id in its handler escaped');
 }
 
+// Stage 2 phase 5 review fixes: the Advanced label held to its 36 px band (the hover buttons beside the tile, not in the
+// band of the row above); no "Set as Default Path" on the Default Path in a one-group flow; the line middle's buttons 24 px
+// with a finger's 40 px; the bulk bar under the mode pill; a refused palette drop leaves the picker where it was; the Select
+// tool off when an undo brings back the Standard builder; a connect that leaves the old next step on its own says so with
+// Undo; a new workflow's entry under a layer's still opens it once saved (its token).
+async function testWfPhase5ReviewFixes(){
+  console.log('\nWorkflow builder: phase 5 review fixes (stage 2 G5; fake DOM)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), rule = sel => { const at = html.indexOf(`\n${sel} {`); return at < 0 ? '' : html.slice(at, html.indexOf('}', at)); };
+  const N = { push: [], replace: [], back: [], layers: [] }, edits = [];
+  const nav = { NAV_HIST: { ready: true, restoring: false }, NAV_LEAVERS: {}, NAV_RESTORERS: {}, history: { state: null }, navOurs: s => !!s && s.nav===1, navSnap: () => ({ tab: 'settings', sp: 'automation' }),
+    navPush: s => { N.push.push(s); }, navReplace: s => { N.replace.push(s); }, navBackTo: n => { N.back.push(n); return true; }, navOverlaySync: () => {}, navLayer: d => { N.layers.push(d); return d; },
+    setTimeout: () => 0, __edits: edits };
+  const reg = wfRegFor(WF_AV_TODAY), S = wfShellSandbox(reg, { ctx: nav }), { X, flush } = S, C = S.ctx, V = n => vm.runInContext(n, C);
+  vm.runInContext('wfEdit = k => { __edits.push(k); }', C);
+  V('wfNavWire')();
+  const A = V('WF_ADV'), UI = V('WF_ADV_UI'), lab = rule('.wfa-lab'), hov = rule('.wfa-tile .wfb-hov'), btn = rule('.wfa-emid button');
+  assertEqual([A.label, /max-height: 36px/.test(lab) && /overflow: hidden/.test(lab), /white-space: nowrap/.test(rule('.wfa-lab b')), /top: -/.test(hov), /right: calc\(100% \+/.test(hov),
+    /width: 24px/.test(btn) && /height: 24px/.test(btn), UI.mid[0] >= 24 * 2 + 16, UI.mid[1] >= 24, html.includes('.wfb-mobile .wfa-emid button::before { content: ""; position: absolute; inset: -8px; }'), html.includes('.wfb-pill:not([hidden]) ~ .wfa-bulk { top: 48px; }')],
+    [36, true, true, false, true, true, true, true, true, true],
+    'the label held to WF_ADV.label (36 px, one-line name); the hover buttons left of the tile (not in the band above); the line middle\'s buttons 24 px, 40 px for a finger; the bulk bar under the mode pill');
+  const t = V('wfAdvTileHtml')({ id: 't1', trigger: true, name: 'Lead created', sub: 'Website form', icon: 'zap', tone: 'blue', disabled: true, issue: 'error' }), row2 = t.slice(t.indexOf('<span class="wfa-tags">'));
+  assertEqual([row2.startsWith('<span class="wfa-tags"><small dir="auto" title="Website form">'), /Disabled/.test(row2), /Error/.test(row2)], [true, true, true],
+    'a trigger\'s label: its name on the second row with the tags (two rows in the band)');
+  // one group: the first step is the Default Path already, no "Set as Default Path"; two groups: the other one's head has it
+  const DOC = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }], nodes: { n1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct(null), x7: wfAct(null) } };
+  const one = { ...DOC, nodes: { n1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct(null) } }, items = d => V('wfAdvCanvasItems')(d, V('wfLayoutAdvanced')(d, {}, reg), reg, {}, {}).items, tile = (its, k) => its.find(i => i.key===k).html();
+  const I1 = items(one), I2 = items(DOC);
+  assertEqual([/data-act="defPath"/.test(tile(I1, 'n:n1')), /data-act="defPath"/.test(tile(I2, 'n:n1')), /data-act="defPath"/.test(tile(I2, 'n:x7')), /\(Default Path\)/.test(tile(I2, 'n:n1'))], [false, false, true, true],
+    'the branch icon only on another group\'s first step (never on the Default Path, one group or more)');
+  // a palette drop refused at that place: a toast, the picker untouched
+  X.wfBuilderOpen({ id: 'w9', name: 'Adv', enabled: false, definition: DOC, revision: 1, builder: 'advanced' }, {});
+  const W = S.W(); flush();
+  X.wfPicker('action', { src: 'n3', port: 'next' }); flush();
+  const P = W.picker, D = X.wfDerived(), here = X.wfPickerFlat(X.wfPickerRowsNow(W, D)), there = X.wfPickerFlat(X.wfPickerRowsNow(W, D, V('wfSlotCtx')(W.doc, { src: 'n1', port: 'next' }, reg)));
+  const i = here.findIndex(r => !r.disabled && r.kind!=='app' && (there.find(z => z.key===r.key) || {}).disabled);
+  const before = JSON.stringify({ slot: P.slot, sc: P.sc, at: P.at, detached: P.detached, rev: P.rev }), t0 = S.toasts.length;
+  const pg = { type: 'palette', i, sx: 0, sy: 0, rect: { left: 0, top: 0, width: 1200, height: 800 }, v0: W.view, pid: 1 };
+  V('wfPalBegin')(pg); pg.drop = { kind: 'edge', slot: { src: 'n1', port: 'next' }, key: 'm:n1:next' };
+  V('wfPalEnd')(pg, true); flush();
+  assertEqual([i >= 0, W.picker===P, JSON.stringify({ slot: P.slot, sc: P.sc, at: P.at, detached: P.detached, rev: P.rev })===before, S.toasts.length - t0, W.drawer], [true, true, true, 1, null],
+    'a row dropped where it can\'t go (a Go to on a line\'s middle): its reason, and the picker still adds where it was opened');
+  X.wfNavTop(); flush();
+  // the Select tool goes off when an undo brings back the Standard builder
+  X.wfBuilderOpen({ id: 'w8', name: 'Std', enabled: false, definition: DOC, revision: 1, builder: 'standard' }, {});
+  const W2 = S.W(); flush();
+  V('WF_POP_ACTS').builderAdv(W2); flush();
+  V('WF_ADV_ACTS').selTool(W2); flush();
+  const on = [W2.tool, W2.el.vp.classList.contains('is-marquee')];
+  X.wfUndoRedo(-1); flush();
+  assertEqual([on, W2.builder, W2.tool, W2.el.vp.classList.contains('is-marquee')], [['marquee', true], 'standard', 'select', false], 'undo back to the Standard builder: the Select tool is off (no crosshair, no hidden control left on)');
+  X.wfUndoRedo(1); flush();
+  // connecting a path that had a next step: the old one and the steps after it become a group of their own → a toast with Undo
+  const t1 = S.toasts.length;
+  V('wfConnectCommit')({ src: 'x7', port: 'next' }, 'n3'); flush();
+  const quiet = S.toasts.length - t1;
+  X.wfUndoRedo(-1); flush();
+  V('wfConnectCommit')({ src: 'n1', port: 'next' }, 'x7'); flush();
+  assertEqual([quiet, W2.doc.nodes.n1.out.next, S.toasts.slice(t1)], [0, 'x7', [`Connected to ${V('wfNodeName')(W2.doc.nodes.x7, reg)}: "${V('wfNodeName')(W2.doc.nodes.n2, reg)}" and the steps after it are now a group of their own`]],
+    'connect: nothing cut → said only to screen readers; the old next step left on its own → a toast (with Undo, as the trash on a line)');
+  X.wfBuilderClose({ nav: false });
+  // a new workflow saved while a layer's entry is on top: the entry under it opens the saved workflow on back / forward
+  X.wfBuilderOpen(null, {}); flush();
+  const W3 = S.W(), pushed = N.push.slice(-1)[0], tmp = pushed.x.tmp;
+  C.history.state = { nav: 1, kind: 'wf', x: { id: null, tmp }, ov: 1 };
+  X.wfNavHooks.saved('w30', W3.navTmp);
+  X.wfBuilderClose({ nav: false });
+  C.NAV_RESTORERS.wf({ kind: 'wf', x: { id: null, tmp } });
+  C.NAV_RESTORERS.wf({ kind: 'wf', x: { id: null, tmp: 'other' } });
+  assertEqual([typeof tmp==='string' && tmp.length > 2, pushed.x.id, N.replace.slice(-1)[0], edits, !!S.W() && S.W().id], [true, null, { kind: 'wf', x: { id: 'w30' }, ov: 1 }, ['w30'], null],
+    'a new one\'s entry carries a token; its first Save maps it to the id, so the entry under the layer\'s opens the saved workflow (an unknown token: a new one)');
+  if (S.W()) X.wfBuilderClose({ nav: false });
+}
+
 (async () => {
   await testVacationFollowUps();
   await testWfSaveRuntime();
@@ -8797,6 +8870,7 @@ function testLeadAssigneeGrey(){
   await testCobraChangeFlow();
   await testWfSwitchRuntime();
   testLeadAssigneeGrey();
+  await testWfPhase5ReviewFixes();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });
