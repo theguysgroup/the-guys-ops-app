@@ -2640,7 +2640,7 @@ as $$
              when n.value ->> 'kind' = 'action' then
                case when coalesce(public.automation_action_audience(n.value ->> 'type'), 'customer') in ('customer', 'external') then coalesce(n.value ->> 'type', '') end
              when coalesce(n.value ->> 'kind', '') in ('if_else', 'wait', 'goal', 'split', 'goto', 'workflow') then null
-             else coalesce(pg_catalog.nullif(n.value ->> 'type', ''), n.value ->> 'kind', '') end as g
+             else coalesce(nullif(n.value ->> 'type', ''), n.value ->> 'kind', '') end as g
       from pg_catalog.jsonb_each(case when pg_catalog.jsonb_typeof(def -> 'nodes') = 'object' then def -> 'nodes' else '{}'::jsonb end) as n) x
    where x.g is not null
 $$;
