@@ -10,7 +10,7 @@ What goes live in phase 1 (and nothing more):
 |---|---|---|
 | SQL Part 1 | `.claude/sql/stage2-automations.sql`, section PART 1 | additive: new tables/columns (all with defaults), the `automation_log_once` → `automation_log_action_once` swap together with `automation_claim_customer_v2` and the phase-4 `automation_claim_customer` as a wrapper (one transaction), silent capture triggers, RPCs, RLS, indexes. The phase-4 function keeps working on it. |
 | the v2 function | `supabase/functions/automations/index.ts` (pasted into the existing `automations` function) | **compat mode**: the phase-4 scanners + `enqueue` start the runs exactly as today (same five event-key formats); every claimed run is executed by `advanceV2` (a phase-4 row read through `upgradeV1`, phase-4 step ids kept in every log row, claim and window mark). Before Part 1 is in, the same build runs phase 4's own `advance` (it reads `automation_state.phase4_compat`; a missing column = phase-4 executor), so a wrong order is safe. |
-| the rollback build (prepared, NOT deployed) | `supabase/functions/automations-phase4-compat/index.ts` | the phase-4 function of commit a8c6d2d (live since 15 Oct: phase 4 + stage 5's quiet imports + stage 3's vacations) + 2 code edits (action-rows-only "already done" check, readable on both schemas; soft delete = delete) + a header. **Never deploy this folder by name.** It is pasted into `automations` only for a rollback. |
+| the rollback build (prepared, NOT deployed) | `supabase/functions/automations-phase4-compat/index.ts` | the phase-4 function of commit f9c64b6 (live since 15 Oct: phase 4 + stage 5's quiet imports + stage 3's vacations; 16 Oct: the stage 3 follow-ups' vacations block) + 2 code edits (action-rows-only "already done" check, readable on both schemas; soft delete = delete) + a header. **Never deploy this folder by name.** It is pasted into `automations` only for a rollback. |
 
 The function log says which engine runs, once per instance and on every change:
 `automations engine: v2 executor in compat mode (phase-4 scanners + enqueue, runs by advanceV2)` — or, before Part 1,
@@ -21,10 +21,10 @@ The function log says which engine runs, once per instance and on every change:
 ## 0. Preconditions (all must hold; otherwise stop)
 
 1. **Stage 1 is live** (MASTER §13): `round3-stage1.sql` applied and the stage-1 functions deployed, the live `automations`
-   function = commit `a8c6d2d` (stages 3 and 5 merged into stage 2 on 15 Oct; before that the baseline was 7ae5b19,
-   `689178985/112594`). Check: copy the live source from the dashboard editor into a file and fingerprint it (below):
-   it must be **`732447356/123206`** (= `git show a8c6d2d:supabase/functions/automations/index.ts`). If it is not, stop: the
-   rollback build and the differential baseline are built on a8c6d2d. The v2 build reads stage 5's `import_quiet` columns
+   function = commit `f9c64b6` (stage 4 and the stage 3 follow-ups merged into stage 2 on 16 Oct; before that the
+   baseline was a8c6d2d, `732447356/123206`, and before that 7ae5b19, `689178985/112594`). Check: copy the live source from the dashboard editor into a file and fingerprint it (below):
+   it must be **`746634597/123924`** (= `git show f9c64b6:supabase/functions/automations/index.ts`). If it is not, stop: the
+   rollback build and the differential baseline are built on f9c64b6. The v2 build reads stage 5's `import_quiet` columns
    and stage 3's `employee_vacations` (as the live function does), so `stage5-mcp.sql` and `stage3-vacation.sql` are in.
 2. The stage-2 phase-1 groups G1.1–G1.4 are merged and **committed** by the main builder; `bash .claude/check_all.sh` prints
    `ALL GREEN` on that commit.
@@ -38,8 +38,8 @@ node -e 'const s=require("fs").readFileSync(process.argv[1],"utf8");let x=0;for(
 ```
 
 Reference values at the time of writing (recompute from the commit — any later edit changes them):
-v2 `automations/index.ts` `816032735/539155` (6,527 lines, the merge of main a8c6d2d, before its commit) · rollback build
-`840260018/125603` (1,736 lines) · phase 4 (a8c6d2d) `732447356/123206`.
+v2 `automations/index.ts` `812003981/541959` (6,559 lines, the merge of main f9c64b6, before its commit) · rollback build
+`851073744/126364` (1,745 lines) · phase 4 (f9c64b6) `746634597/123924`.
 
 ## 1. Backups (read-only; save each output under `.claude/backups/`)
 
@@ -75,16 +75,16 @@ select status, count(*) from public.automation_runs group by 1;
 ## 3. Offline differential + read-only shadow (design §8.3 #1–#2)
 
 The harness is in the repo: `supabase/functions/automations/differential/` (`run.sh`, `harness.ts`, `corpus/builtin.json`,
-`selftest/`), with the phase-4 source vendored as `tests/phase4-reference.ts` (run.sh checks it is a8c6d2d byte for byte
+`selftest/`), with the phase-4 source vendored as `tests/phase4-reference.ts` (run.sh checks it is f9c64b6 byte for byte
 whenever git can show that commit). `check_all.sh` runs the built-in corpus every time (through the automations
 `run_tests.sh`), so ALL GREEN includes `DIFFERENTIAL: IDENTICAL`. Below, `run.sh` = `bash supabase/functions/automations/differential/run.sh`
 run from the repo root; the live exports go in the session scratchpad (never in the repo) and are passed by path.
-It builds three engines from source — old = a8c6d2d, new = the worktree's v2 function, rb = the rollback build — and replays
+It builds three engines from source — old = f9c64b6, new = the worktree's v2 function, rb = the rollback build — and replays
 every scenario on the tests' in-memory database (Part-1 shaped) through old, new, rb, the new build deployed before Part 1
 (its phase-4 fallback, which must write no v2 rows) and the cutovers old→new (deploy), new→rb and new→old (rollback),
 new→rb→new (redeploy after a rollback), new/rb alternating every tick, and before-Part-1→Part-1. Compared: action log
 rows (step id, channel, audience, status, reason, recipient, time), every run's end status/reason/step_index and every due_at,
-pushes, tasks and emails (exact text). It also proves the rollback build = a8c6d2d + its header + the 2 edits, nothing else.
+pushes, tasks and emails (exact text). It also proves the rollback build = f9c64b6 + its header + the 2 edits, nothing else.
 
 1. Built-in corpus (23 recorded-style rows mirroring the ready-made and builder shapes, incl. two long runs of 21–22 steps
    above an email + the 25 `upgrade.json` v1 shapes ×
@@ -144,7 +144,7 @@ re-run `check_all.sh` and the differential.
 
 1. **SQL Part 1 on live**: run the check-before queries, then the whole PART 1 section (one transaction; `lock_timeout 5s` —
    on a lock timeout simply run it again). Run the check-after block. Expect `select 'stage2 Part 1 ok'`.
-2. **5 minutes with the phase-4 function on the new schema** (still a8c6d2d): W1 shows ticks every minute; W3 shows actions
+2. **5 minutes with the phase-4 function on the new schema** (still f9c64b6): W1 shows ticks every minute; W3 shows actions
    as usual; the function log has no new errors; W9 = silent (0 events, 0 wanted, 0 capture errors). Anything wrong here →
    Part 1 ROLLBACK (section 7, R-B) — the function was never touched.
 3. **Deploy the v2 function**: dashboard → Edge Functions → `automations` → editor, prefilled from the GitHub raw file of the
@@ -232,11 +232,11 @@ new record's `missing details: x`) is noted, not a rollback.
 FIRST, with the stage-2 build still deployed), never R-A on its own.
 1. Dashboard → `automations` → editor: paste `supabase/functions/automations-phase4-compat/index.ts` from the committed
    stage-2 commit (GitHub raw). Verify JWT **OFF**. Deploy. Fingerprint the deployed code = the commit file
-   (`840260018/125603` at the time of writing). Never `supabase functions deploy automations-phase4-compat`, never "deploy all".
+   (`851073744/126364` at the time of writing). Never `supabase functions deploy automations-phase4-compat`, never "deploy all".
 2. Check: from the rollback time no new `step` / `exit` rows (W2 with `:deploy` = rollback time → only `action`); W1 ticks;
    W3 actions continue; waiting runs go on from `step_index` (the v2 executor kept it in step; tested both ways, including a
    later redeploy).
-3. In phase 1 the plain phase-4 file (a8c6d2d) also runs correctly on the Part-1 schema (differential "new → old"), but the
+3. In phase 1 the plain phase-4 file (f9c64b6) also runs correctly on the Part-1 schema (differential "new → old"), but the
    rollback build is the one to use: only it ignores v2 step rows in its "already done" check and treats a soft delete as a
    delete, which matters from phase 2 on.
 
@@ -245,7 +245,7 @@ FIRST, with the stage-2 build still deployed), never R-A on its own.
 2. Run the commented ROLLBACK block of PART 1 in `.claude/sql/stage2-automations.sql` (one transaction). It deletes the rows only
    the v2 engine writes (enroll / step / exit log rows, Go-to passes, new channels) and restores `automation_log_once` and the
    phase-4 `automation_claim_customer`. Then the schema check of step 1.1 again and compare with the backup.
-3. Keep the rollback build deployed (tested on the phase-4 schema: the whole phase-4 suite) or redeploy a8c6d2d.
+3. Keep the rollback build deployed (tested on the phase-4 schema: the whole phase-4 suite) or redeploy f9c64b6.
 
 After any rollback: watch 30 minutes (W1, W3, W6, W8), log it in MASTER §13 and tell Ofek in Hebrew what happened and why.
 Before deploying v2 again: fix, `check_all.sh` ALL GREEN, the differential IDENTICAL (it covers rollback → redeploy).

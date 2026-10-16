@@ -508,6 +508,41 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   const tvb = testPayload("vacationBack", notifyRules({}, 7), "2026-10-23");
   eq([tvb && tvb.title, tvb && tvb.tag], ["Test · Sample Employee is back tomorrow", "test-vacationBack"], "test: the back-tomorrow card has a test with made-up data");
 
+  // back on their next working day (stage 3 follow-up 6): employees.working_days, 0 = Sunday; none set = the next day
+  eq([vacBackDay("2026-10-23", [1, 2, 3, 4, 5]), vacBackDay("2026-10-24", []), vacBackDay("2026-10-24", null), vacBackDay("2026-10-21", [3]), vacBackDay("2026-10-21", ["x", 9, 1.5]), vacBackDay("2026-10-24", [6]), vacBackDay("2026-10-24", [0, 1])],
+    ["2026-10-26", "2026-10-25", "2026-10-25", "2026-10-28", "2026-10-22", "2026-10-31", "2026-10-25"], "vacBackDay: Friday → Monday; none set → the next day; one working day a week → a week on; odd values ignored");
+  eq([vacBackDay("2026-10-23", ["1", "5"]), vacBackDay("2026-10-21", ["3"]), vacBackDay("2026-10-24", ["", null])], ["2026-10-26", "2026-10-28", "2026-10-25"],
+    "vacBackDay: working days as text are read as numbers, as the app reads them (Number(): \"\" and null are 0 = Sunday, as there)");
+  const wdDb = (vacs: any[], days: any) => { const d = backDb(vacs); d.T.employees.find((e: any) => e.id === "e-cal").working_days = days; return d; };
+  const wd1 = wdDb([CALV()], [1, 2, 3, 4, 5]), jobsFrom: string[] = [];
+  const wdFrom = wd1.from.bind(wd1);
+  wd1.from = (t: string) => { const q = wdFrom(t); if (t !== "jobs") return q; const gte = q.gte.bind(q); q.gte = (k: string, v: any) => { jobsFrom.push(`${k}>=${v}`); return gte(k, v); }; return q; };
+  sent.length = 0;
+  await scan(wd1, BACK_9);
+  eq(msgs(), [
+    "ava:Cal is back on Monday|Waiting for them: 2 open tasks, 1 job in the first week back and 1 lead.",
+    "ben:Cal is back on Monday|Waiting for them: 2 open tasks, 1 job in the first week back and 1 lead.",
+    "cal:You're back on Monday|Waiting for you: 2 open tasks, 1 job in the first week back and 1 lead.",
+  ], "back on Monday: Cal works Monday to Friday, the last day away is Saturday → \"back on Monday\", still sent on Saturday");
+  eq([jobsFrom, wd1.T.push_sent.some((r: any) => r.key === "vacback:v-cal:2026-10-24")], [["date>=2026-10-26"], true], "back on Monday: the first week back starts on Monday; the same once-per-vacation key");
+  sent.length = 0;
+  await scan(wdDb([CALV()], [0, 1, 2]), BACK_9);
+  eq(sent.map((x) => x.msg.title).sort()[0], "Cal is back tomorrow", "back tomorrow: Sunday is one of their working days → still \"back tomorrow\"");
+  // another vacation of theirs in force on any day before the return day: not back then either
+  sent.length = 0;
+  const wdNext = wdDb([CALV(), CALV({ id: "v-cal2", starts_on: "2026-10-26", ends_on: "2026-10-28" })], [1, 2, 3, 4, 5]);
+  await scan(wdNext, BACK_9);
+  eq([sent.length, wdNext.T.push_sent.some((r: any) => String(r.key).startsWith("vacback:"))], [0, false], "back on Monday: another vacation starts on Monday → nothing, nothing claimed");
+  sent.length = 0;
+  await scan(backDb([CALV(), CALV({ id: "v-cal2", starts_on: "2026-10-26", ends_on: "2026-10-28" })]), BACK_9);
+  eq(sent.length, 3, "back tomorrow: no working days set, the next vacation starts after tomorrow → the reminder goes, as before");
+  // the people's read asks for their working days
+  const selects: string[] = [];
+  const seldb = backDb([CALV()]), sFrom = seldb.from.bind(seldb);
+  seldb.from = (t: string) => { const q = sFrom(t); if (t !== "employees") return q; const sel = q.select.bind(q); q.select = (c: string) => { selects.push(c); return sel(c); }; return q; };
+  await vacContext(seldb, BACK_9, SYD);
+  eq(selects, ["id, name, phone, status, working_days"], "vacContext: the employees' read includes working_days");
+
   console.log(`push: ${pass} passed, ${fail} failed`);
   if (fail) (globalThis as any).process?.exit(1);
 })();

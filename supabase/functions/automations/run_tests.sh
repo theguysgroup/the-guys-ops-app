@@ -13,7 +13,7 @@ OUT="${TMPDIR:-/tmp}/automations_test_$$.ts"
   sed -e '/^import { createClient }/d' -e '/^import webpush/d' -e 's/^export //' "$DIR/index.ts"
   cat "$DIR/tests.ts"
 } > "$OUT"
-# The offline differential (design §8.3 #1, the phase-1 gate): phase 4 (a8c6d2d) = the v2 compat build = the rollback
+# The offline differential (design §8.3 #1, the phase-1 gate): phase 4 (f9c64b6) = the v2 compat build = the rollback
 # build on the built-in corpus and every cutover. Its summary line comes first; the test count stays the last line.
 if ! DIFF_OUT="$(bash "$DIR/differential/run.sh" 2>&1)"; then
   echo "$DIFF_OUT" | tail -40

@@ -200,8 +200,24 @@ const DECLS = [
   // The workflow builder: the left rail, Save, undo, leaving and opening (stage 2, phase 4 · G4.4)
   'WF_DRAFT', 'WF_STICKY', 'WF_NOTE_COLS', 'WF_BUILDER_COLS', 'WF_UUID_RE', 'WF_LIB_KEY_RE', 'WF_SAVED', 'wfSaveBody', 'wfGuardedOf', 'wfSaveAsk', 'wfStamp', 'wfConflictText', 'wfAgo', 'wfRecentRows',
   'wfDraftKey', 'wfDraftPack', 'wfDraftPick', 'wfIssueRef', 'wfErrorGroups', 'wfNoteCounts', 'wfNoteRows', 'wfNoteWhy', 'wfNoteProblem', 'wfStickiesOf', 'wfStickyAdd', 'wfStickySet', 'wfStickyRemove',
-  'wfStickyReanchor', 'wfStickyBoxes', 'wfSwitchRows', 'wfRecentList', 'wfPublishGate', 'wfPubItem', 'wfTplUsage', 'wfFindTemplates', 'wfFindSnippet', 'wfCatalogWithDrafts', 'wfSystemCopy',
+  'wfStickyReanchor', 'wfStickyBoxes', 'wfBoundsWith', 'wfSwitchRows', 'wfRecentList', 'wfPublishGate', 'wfPubItem', 'wfTplUsage', 'wfFindTemplates', 'wfFindSnippet', 'wfCatalogWithDrafts', 'wfSystemCopy',
   'wfRailErrorsHtml', 'wfRailNotesHtml', 'wfRailNotesListHtml', 'wfRailFindHtml', 'wfRailFindResHtml', 'wfRailSwitcherHtml', 'wfRailSwitchListHtml', 'wfRailStickiesHtml', 'wfDlgHtml', 'WF_DIALOG_HTML', 'wfBannerHtml',
+  // Stage 4: page history, the edge swipe and deep links (landing page, where the screen is, the swipe decision)
+  'canViewSection', 'firstAccessibleTab', 'homeTabFor', 'NAV_PAGES', 'NAV_TAB_ALIASES', 'landingTab', 'navSnapOf', 'NAV_BASE_KINDS', 'navKey', 'navMode', 'navUrl', 'NAV_SWIPE_RULES', 'isBackSwipe',
+  // Stage 4 review (Ofek 15 Oct): the layer registry's order, what a leaver said
+  'navLayerOrder', 'navLeaveVerdict',
+  // Stage 4 review, part 2: a template changed and not saved, entries of another person, where "Press back again" shows
+  'tplDraftChanged', 'navEntryForeign', 'navLeaveGuardOn', 'NAV_LEAVE_MS',
+  // stage 3 follow-ups (Ofek 15 Oct): paid / unpaid leave is private (item 2)
+  'vacationPaysMap', 'vacationPrivateRow',
+  // stage 3 follow-ups (Ofek 15 Oct): the stand-in's alerts hint, "end their shift now", back on a working day (items 1, 5, 6)
+  'vacationStandInAlertHint', 'vacationShiftLogins', 'vacationOnShift', 'vacationEndShiftFor', 'vacationBackDay',
+  // stage 3 follow-ups review: one return day everywhere, pay changes live, no pay in History, the vacations list read again
+  'vacationWorkingDaysOf', 'vacationApplyPrivate', 'vacationRetryDelay', 'vacationLogText',
+  // stage 3 follow-ups SQL re-check: a pay this login doesn't know is named neutrally
+  'vacationPayText',
+  // stage 3 follow-ups, Ofek's review (16 Oct) A1: only what changed goes into the private row; no change while it didn't load
+  'vacationPrivatePatch', 'vacationNotesBlock',
 ];
 
 function extractDecl(source, name){
@@ -2045,7 +2061,7 @@ function testNotificationCards(sb){
   // The cards.
   const R = { waitMinutes: 15, from: 8, until: 20, docDays: 30, unpaidDays: 7 };
   const cards = sb.notifyCards({}, R, { phoneEnabled: false });
-  assertEqual(cards.map(c => c.id), ['newLead', 'leadWaiting', 'missedCall', 'unpaid', 'invoice', 'docExpiry', 'bizInsurance', 'vacationBack', 'googleReview'], 'notifyCards: 8 cards in the mockup\'s order (+ "back tomorrow", stage 3)');
+  assertEqual(cards.map(c => c.id), ['newLead', 'leadWaiting', 'missedCall', 'unpaid', 'invoice', 'docExpiry', 'bizInsurance', 'vacationBack', 'googleReview'], 'notifyCards: 9 cards in the mockup\'s order (+ "back tomorrow", stage 3)');
   // hand count: nothing saved = only the invoice one on (1 of 8); documents on = invoice, documents and insurance (3 of 8); "back tomorrow" (stage 3) is on unless switched off
   assertEqual([cards.filter(c => c.on).map(c => c.id), sb.notifyCards({ docExpiry: { on: true } }, R, {}).filter(c => c.on).map(c => c.id)],
     [['invoice', 'vacationBack'], ['invoice', 'docExpiry', 'bizInsurance', 'vacationBack']], 'notifyCards: how many are on');
@@ -2648,13 +2664,88 @@ function testVacations(sb){
 
   // the saved row
   assertEqual(sb.vacationRowFromDraft(draft({ options: { payroll: true, pay: 'paid' }, note: '  ' })),
-    { employee_id: 'e1', starts_on: '2026-11-02', ends_on: '2026-11-06', stand_in_id: null, options: { ...all(false), autoBack: true, payroll: true, pay: 'paid' } }, 'row: stand-in unticked → null, options normalized');
+    { employee_id: 'e1', starts_on: '2026-11-02', ends_on: '2026-11-06', stand_in_id: null, options: { ...all(false), autoBack: true, payroll: true } }, 'row: stand-in unticked → null, options normalized, no pay (its own table)');
   const row = sb.vacationRowFromDraft(draft({ note: ' Fiji ' }));
-  assertEqual([row.stand_in_id, 'note' in row, 'business_id' in row, 'employee_name' in row, 'created_by' in row, 'reminded_at' in row], ['e2', false, false, false, false, false], 'row: the stand-in kept; no note (its own table), business_id, names, created_by or reminded_at');
+  assertEqual([row.stand_in_id, 'note' in row, 'business_id' in row, 'employee_name' in row, 'created_by' in row, 'reminded_at' in row, 'pay' in row.options], ['e2', false, false, false, false, false, false], 'row: the stand-in kept; no note or pay (their own table), business_id, names, created_by or reminded_at');
   // the note: owners and managers only, from employee_vacation_notes (main builder review 1.C.1)
   const notes = sb.vacationNotesMap([{ vacation_id: 'v1', note: 'Surgery' }, { vacation_id: 'v2', note: null }, { vacation_id: null, note: 'x' }, null]);
   assertEqual([notes, sb.vacationNotesMap(undefined)], [{ v1: 'Surgery' }, {}], 'notes map: by vacation, empty ones left out');
   assertEqual([sb.vacationWithNote(V(), notes).note, sb.vacationWithNote(V({ id: 'v9' }), notes).note, sb.vacationWithNote(V(), null).note], ['Surgery', '', ''], 'with note: from the notes, else empty (someone who may not read them)');
+  // paid / unpaid leave: owners and managers only, from employee_vacation_notes.pay (stage 3 follow-up 2)
+  const pays = sb.vacationPaysMap([{ vacation_id: 'v1', pay: 'paid' }, { vacation_id: 'v2', pay: null }, { vacation_id: 'v3', pay: 'weird' }, { vacation_id: null, pay: 'paid' }, null]);
+  assertEqual([pays, sb.vacationPaysMap(undefined)], [{ v1: 'paid' }, {}], 'pays map: by vacation, empty and odd ones left out');
+  const unpaidV = V({ options: { payroll: true, pay: 'unpaid' } });
+  assertEqual([sb.vacationWithNote(unpaidV, notes, { v1: 'paid' }).options.pay, sb.vacationWithNote(unpaidV, notes, { v1: 'paid' }).options.payroll, sb.vacationWithNote(unpaidV, notes, null).options.pay, sb.vacationWithNote(unpaidV, notes, { v1: 'weird' }).options.pay, sb.vacationWithNote(unpaidV, notes, { v9: 'paid' }).options.pay],
+    ['paid', true, 'unpaid', 'unpaid', 'unpaid'], 'with note: the private pay wins; without one, the pay on the row (a row not moved yet, an old app)');
+  assertEqual([sb.vacationWithNote(unpaidV, notes, { v1: 'paid' }).note, unpaidV.options.pay, sb.vacationWithNote(unpaidV, notes).options === unpaidV.options], ['Surgery', 'unpaid', true], 'with note: the note as before; the vacation passed in is not changed');
+  assertEqual([sb.vacationPrivateRow(draft({ note: '  ' })), sb.vacationPrivateRow(draft({ note: ' Fiji ', options: { pay: 'odd' } })), sb.vacationPrivateRow(null)],
+    [{ note: null, pay: 'paid' }, { note: 'Fiji', pay: 'unpaid' }, { note: null, pay: 'unpaid' }], 'private row: the note trimmed (empty = null), pay paid or unpaid');
+
+  // back on their next working day (stage 3 follow-up 6; the functions' vacBackDay has the same cases). 23 Oct 2026 is a Friday.
+  assertEqual([sb.vacationBackDay('2026-10-23', [1, 2, 3, 4, 5]), sb.vacationBackDay('2026-10-24', []), sb.vacationBackDay('2026-10-24', null), sb.vacationBackDay('2026-10-21', [3]), sb.vacationBackDay('2026-10-21', ['x', 9, 1.5]), sb.vacationBackDay('2026-10-24', [6]), sb.vacationBackDay('2026-10-24', [0, 1])],
+    ['2026-10-26', '2026-10-25', '2026-10-25', '2026-10-28', '2026-10-22', '2026-10-31', '2026-10-25'], 'back day: Friday → Monday; none set → the next day (not Monday to Friday); one working day a week → a week on; odd values ignored');
+  const fri = V({ endsOn: '2026-10-23', options: { autoBack: false } });
+  assertEqual([sb.vacationUntilText(fri, '2026-10-27', SYD, [1, 2, 3, 4, 5]), sb.vacationUntilText(fri, '2026-10-27', SYD), sb.vacationUntilText(fri, '2026-10-27', SYD, []), sb.vacationUntilText(fri, '2026-10-22', SYD, [1, 2, 3, 4, 5])],
+    ['On vacation (due back 26 Oct)', 'On vacation (due back 24 Oct)', 'On vacation (due back 24 Oct)', 'On vacation until 23 Oct'], 'until text: "due back" on their next working day when known');
+  // review (item 6): without working days passed, the person's own from the people list, so every screen says the same day
+  const empsBefore = sb.STATE.data.employees;
+  sb.STATE.data.employees = [{ id: 'e1', workingDays: [1, 2, 3, 4, 5] }, { id: 'e2', workingDays: [3] }];
+  assertEqual([sb.vacationUntilText(fri, '2026-10-27', SYD), sb.vacationUntilText(V({ employeeId: 'e2', endsOn: '2026-10-23', options: { autoBack: false } }), '2026-10-27', SYD), sb.vacationUntilText(V({ employeeId: 'e9', endsOn: '2026-10-23', options: { autoBack: false } }), '2026-10-27', SYD), sb.vacationUntilText(fri, '2026-10-27', SYD, [])],
+    ['On vacation (due back 26 Oct)', 'On vacation (due back 28 Oct)', 'On vacation (due back 24 Oct)', 'On vacation (due back 24 Oct)'], 'until text: the working days of the person from the people list; someone not in it (or none set) → the next day');
+  assertEqual([sb.vacationWorkingDaysOf(fri), sb.vacationWorkingDaysOf(fri, [{ id: 'e1', workingDays: [6] }]), sb.vacationWorkingDaysOf(V({ employeeId: 'e9' })), sb.vacationWorkingDaysOf(null)],
+    [[1, 2, 3, 4, 5], [6], undefined, undefined], 'working days of: from the list given, else the people list; unknown → undefined');
+  sb.STATE.data.employees = empsBefore;
+  // review (item 2): another owner's pay or note change arrives live; the echo of this app's own save draws nothing
+  const pd = { vacationNotes: { v1: 'Fiji' }, vacationPays: { v1: 'unpaid' }, vacations: [V({ note: 'Fiji', options: { payroll: true, pay: 'unpaid' } })] };
+  const ap1 = sb.vacationApplyPrivate(pd, 'v1', { vacation_id: 'v1', note: 'Fiji', pay: 'paid' });
+  assertEqual([ap1, pd.vacationPays.v1, pd.vacations[0].options.pay, pd.vacations[0].options.payroll, pd.vacations[0].note], [true, 'paid', 'paid', true, 'Fiji'], 'apply private: a pay change reaches the maps and the vacation');
+  assertEqual(sb.vacationApplyPrivate(pd, 'v1', { vacation_id: 'v1', note: 'Fiji', pay: 'paid' }), false, 'apply private: the same row again (the echo of a save made here) → nothing changed, no redraw');
+  assertEqual([sb.vacationApplyPrivate(pd, 'v1', { vacation_id: 'v1', note: null, pay: 'paid' }), pd.vacationNotes.v1, pd.vacations[0].note], [true, undefined, ''], 'apply private: a note cleared');
+  assertEqual([sb.vacationApplyPrivate(pd, 'v7', { vacation_id: 'v7', note: 'x', pay: 'odd' }), pd.vacationNotes.v7, pd.vacationPays.v7], [true, 'x', undefined], 'apply private: a vacation not in the list yet (its row comes next) still fills the maps; an odd pay is left out');
+  assertEqual([sb.vacationApplyPrivate(pd, 'v7', null), 'v7' in pd.vacationNotes, sb.vacationApplyPrivate(pd, null, {}), sb.vacationApplyPrivate(null, 'v1', {}), sb.vacationApplyPrivate({}, 'v3', { pay: 'paid' })],
+    [true, false, false, false, true], 'apply private: a delete empties the maps; no id or no data → nothing; missing maps are made');
+  // review (item 7): the vacations list read again after 1, 5 and 15 minutes, then no timer
+  assertEqual([0, 1, 2, 3, 9].map(sb.vacationRetryDelay), [60000, 300000, 900000, 0, 0], 'retry delay: three timed tries, then none (only back online / tab shown)');
+  // SQL re-check: a pay this login can't read (options.pay moved out, the private row hidden by RLS) is never shown as "Unpaid"
+  const noPay = sb.mapVacationRow({ id: 'v1', options: { payroll: true } }), hasPay = sb.mapVacationRow({ id: 'v1', options: { payroll: true, pay: 'paid' } });
+  assertEqual([noPay.payKnown, noPay.options.pay, hasPay.payKnown, sb.vacationWithNote(noPay, {}, { v1: 'paid' }).payKnown, sb.vacationWithNote(noPay, {}, {}).payKnown],
+    [false, 'unpaid', true, true, false], 'pay known: from the row only when it carries one; a private pay makes it known');
+  assertEqual([sb.vacationPayText(noPay), sb.vacationPayText(hasPay), sb.vacationPayText(sb.vacationWithNote(noPay, {}, { v1: 'unpaid' })), sb.vacationPayText(V({ options: { pay: 'paid' } })), sb.vacationPayText(null)],
+    ['Leave on the payroll board', 'Paid leave', 'Unpaid leave', 'Paid leave', 'Leave on the payroll board'], 'pay text: paid / unpaid only when known (a vacation without the marker counts as known)');
+  const pk = { vacations: [{ ...noPay }], vacationNotes: {}, vacationPays: {} };
+  assertEqual([sb.vacationApplyPrivate(pk, 'v1', { vacation_id: 'v1', note: null, pay: 'unpaid' }), pk.vacations[0].payKnown, sb.vacationApplyPrivate(pk, 'v1', { vacation_id: 'v1', note: null, pay: 'unpaid' })],
+    [true, true, false], 'apply private: a pay arriving live makes an unknown one known (a redraw, even when it equals the default)');
+  const pkLines = sb.vacationPayrollLines([{ ...V({ options: { payroll: true } }), payKnown: false }], 'Ann', '2026-10-18', '2026-10-24', SYD, [], '2026-10-15');
+  assertEqual(pkLines.map(l => [l.pay, l.text]), [['', 'On leave 20–24 Oct · 4 days']], 'payroll lines: an unknown pay is neither paid nor unpaid');
+  const rsrc = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  const retryFn = rsrc.slice(rsrc.indexOf('async function retryVacationsLoad('), rsrc.indexOf("window.addEventListener('online', () => retryVacationsLoad());"));
+  assertEqual([/const start = STATE\.data;[\s\S]*await Promise\.all[\s\S]*data !== start/.test(retryFn), /VAC_NOTE_RENDER = requestAnimationFrame\(/.test(rsrc), /' · ' \+ vacationPayText\(v\)/.test(rsrc)],
+    [true, true, true], 'retry: a read from another login never lands in this one; live note bursts draw once per frame; the person card names the pay by vacationPayText');
+  // review (item 1): the History line never says paid or unpaid (employee History is owners and managers only; new lines still leave it out)
+  const lt = sb.vacationLogText(V({ standInName: 'Sam', options: { payroll: true, pay: 'paid', standIn: true, autoBack: true } }), 'Vacation set');
+  assertEqual([lt, /paid|unpaid|leave/i.test(sb.vacationLogText(V({ options: { payroll: true, pay: 'unpaid' } }), 'Vacation changed'))], ['Vacation set: 20 Oct – 24 Oct · stand-in Sam', false], 'log text: dates and stand-in, never paid / unpaid leave');
+  // review (items 2, 4): the private rows come on the vacations channel; the list is read again when back online or shown
+  const vhtml = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  assertEqual([/table: 'employee_vacation_notes' \}, handleVacationNoteRealtimeChange/.test(vhtml), /addEventListener\('online', \(\) => retryVacationsLoad\(\)\)/.test(vhtml), /visibilityState === 'visible'\) retryVacationsLoad\(\)/.test(vhtml), /if \(data\.vacationsError \|\| data\.vacationNotesError\) vacationsRetryLater\(true\)/.test(vhtml)],
+    [true, true, true, true], 'wiring: notes live on the vacations channel; retry on online, tab shown and after a failed load (the list, or only its notes)');
+  // review round 2: when only the private rows failed, they alone are read again and laid on the list there; the flag clears
+  const retryNotes = retryFn.slice(0, retryFn.indexOf('await Promise.all'));
+  assertEqual([/STATE\.data\.vacationsError \|\| STATE\.data\.vacationNotesError/.test(retryNotes), /if \(!start\.vacationsError\) \{[\s\S]*await fetchAllRows\('employee_vacation_notes', 'vacation_id'\)[\s\S]*data !== start[\s\S]*if \(nr\.error\) \{ vacationsRetryLater\(\); return; \}[\s\S]*data\.vacationNotesError = '';\s*data\.vacations = \(data\.vacations \|\| \[\]\)\.map\(v => vacationWithNote\(v, data\.vacationNotes, data\.vacationPays\)\);\s*renderKeepingInput\(\);\s*return;/.test(retryNotes),
+    /setupVacationsChannel\(\);\s*if \(data\.vacationNotesError\) vacationsRetryLater\(true\);/.test(retryFn)],
+    [true, true, true], 'retry (round 2): a notes-only failure is retried on its own (online, tab shown, timer), re-applied once, and the list retry that loses the notes schedules it');
+  const wn = sb.vacationWithNote(sb.vacationWithNote({ ...noPay }, {}, {}), { v1: 'Fiji' }, { v1: 'paid' });
+  assertEqual([wn.note, wn.options.pay, wn.payKnown, wn.privatePay], ['Fiji', 'paid', true, 'paid'], 'with note: laid again on a vacation already in the list (the notes-only retry) fills the note and the pay');
+  // review (items 1, 5, 6): the follow-ups SQL strips options.pay only in part B (after the app); Ofek's review (16 Oct): the
+  // History lines are never rewritten (owners and managers only already), and each part waits at most 5 s for a lock
+  const vsql = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage3-vacation.sql'), 'utf8');
+  const fs3 = vsql.slice(vsql.indexOf('-- Stage 3 follow-ups')), pa = fs3.indexOf('-- ── PART A'), pb = fs3.indexOf('-- ── PART B'), rb = fs3.indexOf('-- ── ROLLBACK');
+  const partA = fs3.slice(pa, pb), partB = fs3.slice(pb, rb);
+  assertEqual([pa > 0 && pb > pa && rb > pb, partA.includes("options - 'pay'"), partB.includes("set options = options - 'pay'"), /activity_log/.test(fs3.slice(0, fs3.indexOf('-- ════'))),
+    partA.includes('alter publication supabase_realtime add table public.employee_vacation_notes'), fs3.slice(0, pa).includes('add / update: {-} (= PUBLIC)'), fs3.slice(0, pa).includes('{public}')],
+    [true, false, true, false, true, true, false], 'follow-ups SQL: part A before the app (publication), part B after it (strip pay; History left as it is); the check before expects {-}');
+  const LT = "begin;\nset local lock_timeout = '5s'; set local statement_timeout = '60s';";
+  assertEqual([partA.includes(LT), partB.includes(LT), fs3.slice(rb).includes("-- begin;\n-- set local lock_timeout = '5s'; set local statement_timeout = '60s';"), (partA + partB).split('\nbegin;').length - 1],
+    [true, true, true, 2], 'follow-ups SQL (Ofek 16 Oct): lock and statement timeouts right after each begin (parts A, B and the ROLLBACK)');
 
   // words on badges and pickers
   const ut = (v, d) => sb.vacationUntilText(v, d, SYD);
@@ -2705,9 +2796,52 @@ function testVacations(sb){
 
   // the row and the errors
   assertEqual(sb.mapVacationRow({ id: 'r1', employee_id: 'e1', employee_name: 'Ann', starts_on: '2026-10-20', ends_on: '2026-10-24', stand_in_id: 'e2', stand_in_name: 'Bob', options: { noNotify: true, autoBack: false, pay: 'paid' }, note: null, created_by: 'p1', created_at: '2026-10-14T00:00:00Z', ended_at: null, cancelled_at: null, reminded_at: null }),
-    { id: 'r1', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Bob', options: { ...all(false), noNotify: true, pay: 'paid' }, createdBy: 'p1', createdAt: '2026-10-14T00:00:00Z', endedAt: null, cancelledAt: null, remindedAt: null }, 'mapVacationRow: camelCase, options normalized');
+    { id: 'r1', employeeId: 'e1', employeeName: 'Ann', startsOn: '2026-10-20', endsOn: '2026-10-24', standInId: 'e2', standInName: 'Bob', options: { ...all(false), noNotify: true, pay: 'paid' }, createdBy: 'p1', createdAt: '2026-10-14T00:00:00Z', endedAt: null, cancelledAt: null, remindedAt: null, endShift: false, payKnown: true }, 'mapVacationRow: camelCase, options normalized');
+  // "end their shift now" (stage 3 follow-up 5): a top-level marker, never a tick, never copied to the next vacation
+  const esRow = sb.mapVacationRow({ id: 'r2', employee_id: 'e1', employee_name: 'Ann', starts_on: '2026-10-20', ends_on: '2026-10-24', options: { badge: true, endShift: true }, created_at: '2026-10-14T00:00:00Z' });
+  assertEqual([esRow.endShift, 'endShift' in esRow.options, sb.mapVacationRow({ id: 'r3', options: { endShift: 'true' } }).endShift, 'endShift' in sb.vacationOptionsFor([esRow], ann), sb.vacationOptionsFor([esRow], ann).badge],
+    [true, false, false, false, true], 'mapVacationRow: endShift on the vacation, not in its options; the next vacation copies the ticks without it');
   assertEqual([sb.vacationErrorText({ code: '23P01', message: 'Already on vacation from 20 Oct to 24 Oct' }), sb.vacationErrorText({ message: 'Already on vacation from 1 Nov to 3 Nov' }), sb.vacationErrorText({ code: '42501', message: 'permission denied' })],
     ['Already on vacation from 20 Oct to 24 Oct', 'Already on vacation from 1 Nov to 3 Nov', 'Not saved: permission denied'], 'error text: the overlap message as is, else "Not saved: …"');
+  // stage 3 follow-ups (Ofek 15 Oct, items 2, 3, 4): the SQL, statically (it runs by hand on staging, then live)
+  const s3 = fs.readFileSync(path.join(__dirname, '..', '.claude', 'sql', 'stage3-vacation.sql'), 'utf8');
+  const fu = s3.slice(s3.indexOf('-- ═══ end stage 3 vacations ═══')), fuRun = fu.slice(0, fu.indexOf('-- ── ROLLBACK (stage 3 follow-ups'));
+  const fuRb = fu.slice(fu.indexOf('-- ── ROLLBACK (stage 3 follow-ups')), fuEnd = fu.indexOf('-- END stage 3 follow-ups');
+  assertEqual([s3.indexOf('-- ═══ end stage 3 vacations ═══') > 0, /Stage 3 follow-ups \(Ofek 15 Oct, stage4-review §3 items 2, 3, 4\)/.test(fu), /PART A: run BEFORE deploying the app of this change/.test(fu) && /PART B: run AFTER the app of this change is live/.test(fu), fuEnd > 0, (fuRun.match(/^begin;$/mg) || []).length === 2 && /^commit;\nselect 'stage3-followups part A ok';$/m.test(fuRun) && /^commit;\nselect 'stage3-followups part B ok';$/m.test(fuRun)],
+    [true, true, true, true, true], 'follow-up SQL: its own section after stage 3, part A before the app and part B after it, each one begin … commit, an END banner');
+  const guard = (fuRun.match(/create or replace function public\.employee_vacations_guard\(\)[\s\S]*?end \$function\$;/) || [''])[0];
+  const gi = t => guard.indexOf(t);
+  assertEqual([gi('v_pay text;') > 0, gi("if new.options ? 'pay' then") > 0 && gi("if new.options ? 'pay' then") < gi('if new.cancelled_at is not null then return new; end if;'),
+    /excluded\.pay = 'unpaid' and n\.pay is not null then n\.pay else excluded\.pay/.test(guard), /new\.options := new\.options - 'pay';/.test(guard)],
+    [true, true, true, true], 'follow-up 2: the guard moves an old app\'s options.pay to the notes before anything returns; an echoed "unpaid" never overwrites a private pay');
+  const skip = gi("and (new.options - 'pay') = (old.options - 'pay') then");
+  assertEqual([skip > gi('if new.cancelled_at is not null then return new; end if;'), skip < gi('pg_advisory_xact_lock'), skip > gi('new.cancelled_at := case'),
+    ['new.employee_id = old.employee_id', 'new.starts_on = old.starts_on', 'new.ends_on = old.ends_on', 'new.ended_at is not distinct from old.ended_at', 'new.cancelled_at is not distinct from old.cancelled_at'].every(t => gi(t) > 0 && gi(t) < skip)],
+    [true, true, true, true], 'follow-up 4: no clash check when the dates, person, ended / cancelled and options (pay aside) are the same; after the stamping, before the lock');
+  // the rest of the guard is section 5's, line for line
+  const g5 = (s3.match(/create or replace function public\.employee_vacations_guard\(\)[\s\S]*?end \$function\$;/) || [''])[0];
+  const cut = (t, a, b) => { const i = t.indexOf(a), j = t.indexOf(b, i); return i > 0 && j > i ? t.slice(0, i) + t.slice(j) : t; };
+  const without = cut(cut(guard.replace('  v_pay text;\n', ''), '  -- Paid or unpaid leave is private', '  if new.cancelled_at is not null then return new; end if;'), '  -- A rename (employee_vacations_names)', '  -- two saves for the same person');
+  assertEqual([g5 !== guard, without === g5], [true, true], 'follow-up 2/4: apart from the two additions, the guard is section 5\'s');
+  assertEqual([/deferrable initially deferred/.test(fuRun) && /confrelid = 'public\.employee_vacations'::regclass and not condeferrable/.test(fuRun), /add column if not exists pay text;/.test(fuRun), /constraint employee_vacation_notes_pay check \(pay is null or pay in \('paid', 'unpaid'\)\)/.test(fuRun)],
+    [true, true, true], 'follow-up 2: notes.pay (paid / unpaid only); the notes FK checked at commit, so the guard can write it while the vacation is inserted');
+  const copy = fuRun.indexOf("on conflict (vacation_id) do update set pay = excluded.pay\n  where n.pay is null or (excluded.pay = 'paid' and n.pay <> 'paid');"), stripRows = fuRun.indexOf("update public.employee_vacations set options = options - 'pay' where options ? 'pay';");
+  assertEqual([copy > 0, stripRows > copy, stripRows > fuRun.indexOf('create or replace function public.employee_vacations_guard()')], [true, true, true], 'follow-up 2: the pays copied first, then stripped from the rows everyone reads (after the new guard, which skips their clash check)');
+  assertEqual([/coalesce\(n\.pay, excluded\.pay\)/.test(fuRun), /set pay = case when tg_op = 'UPDATE' and excluded\.pay = 'unpaid' and n\.pay is not null then n\.pay else excluded\.pay end;/.test(guard)], [false, true],
+    'follow-up 2 (SQL re-check): the copy follows the rule of the guard ("paid" from a stale tab wins over the private value, its default "unpaid" never does), and leaves a pay that would not change alone');
+  const pols = fuRun.match(/create policy "[^"]+" on public\.employee_vacation(s|_notes) for (insert|update)[^\n]*/g) || [];
+  assertEqual([/revoke all on public\.employee_vacations, public\.employee_vacation_notes from anon;/.test(fuRun), /revoke delete, truncate, references, trigger on public\.employee_vacations, public\.employee_vacation_notes from authenticated;/.test(fuRun), pols.length, pols.every(p => / to authenticated$/.test(p)), /create policy[^\n]*for (select|delete)/.test(fuRun)],
+    [true, true, 4, true, false], 'follow-up 3: nothing for anon, no delete / truncate / references / trigger, the 4 add / update policies to authenticated only (the reads untouched)');
+  const rbLines = fuRb.slice(0, fuRb.indexOf('-- ════')).split('\n').filter(l => l.trim());
+  assertEqual([rbLines.length > 20, rbLines.every(l => l.startsWith('--')), /Redeploy the previous app FIRST/.test(fuRb), /disable trigger employee_vacations_guard[\s\S]*jsonb_build_object\('pay', n\.pay\)[\s\S]*enable trigger employee_vacations_guard/.test(fuRb), /not deferrable/.test(fuRb), /drop column if exists pay;/.test(fuRb), /grant all on public\.employee_vacations, public\.employee_vacation_notes to anon;/.test(fuRb)],
+    [true, true, true, true, true, true, true], 'follow-up SQL: a commented ROLLBACK (the app first; pay back on the rows with the guard off; the old guard, FK, grants and policies)');
+  const rbGuard = fuRb.split('\n').filter(l => l.startsWith('-- ')).map(l => l.slice(3)).join('\n');
+  assertEqual(rbGuard.includes(g5), true, 'follow-up SQL: the ROLLBACK restores section 5\'s guard verbatim');
+  // the app: pay goes into the private upsert, never on the vacation row
+  const appSrc = fs.readFileSync(INDEX_HTML_PATH, 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+  const svm = extractDecl(appSrc, 'vacationSaveNow');   // the save itself (follow-up 5 split saveVacationModal's question out)
+  assertEqual([/upsert\(\{ vacation_id: id, \.\.\.cols, business_id: AUTO_BUSINESS_ID \}\)/.test(appSrc), appSrc.includes('setNote('), svm.indexOf('db.vacations.setPrivate(') > 0 && svm.indexOf('db.vacations.setPrivate(') < svm.indexOf('logEmployeeActivity('), /vacationWithNote\(mapVacationRow\(r\), vacNotes, vacPays\)/.test(appSrc)],
+    [true, false, true, true], 'follow-up 2: one private upsert of the columns that changed, before the History line; the load passes the pays');
 }
 
 // On vacation, the screens (stage 3, group V2): pickers, flags, badges, payroll leave, the window's draft and the banner.
@@ -2812,6 +2946,18 @@ function testVacationUi(sb){
   const de = D('e1', 'v1');
   assertEqual([de.id, de.startsOn, de.endsOn, de.standInId, de.fromPrev, de.options.pay], ['v1', '2026-10-20', '2026-10-24', 'e2', false, 'paid'], 'draft: changing one copies it');
   assertEqual([D('', null).employeeId, D('', null).options], ['', sb.vacationDefaults()], 'draft: no person yet → the defaults');
+  // Ofek's review (16 Oct) A1: the private row as the window opened; only what changed since is saved
+  const pvRows = rows.map(r => r.id==='v1' ? { ...r, note: 'Surgery', privatePay: 'paid', payKnown: true } : r);
+  const dp = sb.vacationDraft('e1', 'v1', pvRows, employees, '2026-10-15'), du = sb.vacationDraft('e1', 'v1', rows.map(r => r.id==='v1' ? { ...r, payKnown: false } : r), employees, '2026-10-15');
+  assertEqual([dp.noteBefore, dp.payBefore, dp.payKnown, de.noteBefore, de.payBefore, du.payKnown, dg.noteBefore], ['Surgery', 'paid', true, '', '', false, undefined], 'draft: noteBefore / payBefore from the vacation (no private pay = \'\'); payKnown false kept');
+  const PP = sb.vacationPrivatePatch;
+  assertEqual([PP({ ...dp, startsOn: '2026-10-21' }), PP({ ...dp, options: { ...dp.options, pay: 'unpaid' } }), PP({ ...dp, note: 'Surgery, then rest' }), PP({ ...dp, note: '  ' }), PP({ ...dp, note: ' Surgery ' })],
+    [null, { pay: 'unpaid' }, { note: 'Surgery, then rest' }, { note: null }, null], 'private patch: a date edit → nothing; a pay change → only pay; a note change → only note (emptied = null); spaces only → nothing');
+  assertEqual([PP({ ...du, startsOn: '2026-10-21' }), PP({ ...du, payKnown: true, options: { ...du.options, pay: 'paid' } }), PP({ ...de, payBefore: '', payKnown: true }), PP({ ...dg, note: 'Fiji' }), PP(null)],
+    [null, { pay: 'paid' }, { pay: 'paid' }, { note: 'Fiji', pay: sb.vacationPrivateRow(dg).pay }, { note: null, pay: 'unpaid' }],
+    'private patch: a pay nobody knows is left alone until picked; a pay still on the row is written once; a new vacation → its whole row');
+  assertEqual([sb.vacationNotesBlock('v1', { vacationNotesError: 'x' }), sb.vacationNotesBlock(null, { vacationNotesError: 'x' }), sb.vacationNotesBlock('v1', { vacationNotesError: '' }), sb.vacationNotesBlock('v1', null)],
+    ['This vacation can\'t be changed right now: its note and paid / unpaid leave didn\'t load. Reload the app and try again.', '', '', ''], 'notes block: an existing vacation while the private rows did not load; a new one may still be set');
   const P = (d, more) => sb.vacationFormProblems(d, [...rows, ...(more || [])], employees, SYD);
   const ok = { id: null, employeeId: 'e1', startsOn: '2026-11-10', endsOn: '2026-11-12', standInId: 'e2', options: { standIn: true, payroll: true, pay: 'paid' }, note: '' };
   assertEqual(P(ok), [], 'problems: a valid draft');
@@ -2824,10 +2970,36 @@ function testVacationUi(sb){
   assertEqual(P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30' }), [], 'problems: a vacation changed does not overlap itself');
   assertEqual(P({ ...ok, note: 'x'.repeat(501) }), ['The note can be at most 500 characters'], 'problems: a long note');
   assertEqual(P({ ...ok, options: { payroll: true, pay: 'later' } }), ['Paid or unpaid leave?'], 'problems: payroll ticked, paid or unpaid missing');
+  assertEqual([P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30', payKnown: false, options: { payroll: true, pay: 'unpaid' } }),
+    P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30', payKnown: true, options: { payroll: true, pay: 'unpaid' } }),
+    P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30', payKnown: false, options: { payroll: false, pay: 'unpaid' } }),
+    P({ ...ok, payKnown: false, options: { payroll: true, pay: 'unpaid' } }),
+    P({ ...ok, id: 'v1', startsOn: '2026-10-23', endsOn: '2026-10-30', payKnown: false, options: { payroll: true, pay: 'later' } })],
+    [['Paid or unpaid leave?'], [], [], [], ['Paid or unpaid leave?']],
+    'problems: a vacation changed whose pay nobody knows, payroll ticked → pick one (once); not once picked, without payroll, or for a new one');
   const SW = (d, ids) => sb.vacationStandInWarning(d, employees, ids);
   assertEqual(P(ok), [], 'problems: a stand-in with no app login never blocks the save');
   assertEqual([SW(ok, new Set(['e1', 'e2'])), SW(ok, new Set(['e1'])), SW(ok, null), SW({ ...ok, options: { standIn: false } }, new Set())],
     ['', 'Sam has no app login, so their copy of the notifications goes to nobody. Open items can still move to them.', '', ''], 'stand-in warning: only when the logins are known, the stand-in is ticked and has no login');
+  // stage 3 follow-up 1: a technician stand-in never gets the lead and call alerts of an office person (owner, manager, VA)
+  const AH = (d, profs) => sb.vacationStandInAlertHint({ employeeId: 'e3', standInId: 'e2', options: { standIn: true }, ...d }, employees, profs);
+  const eveL = { id: 'pe', fullName: 'Eve', role: 'va' }, samT = { id: 'ps', fullName: 'Sam', role: 'technician' };
+  assertEqual([AH({}, [eveL, samT]), AH({}, [eveL, { ...samT, role: 'manager' }]), AH({}, [eveL, { ...samT, role: 'va' }]), AH({}, [eveL, samT, { id: 'ps2', fullName: 'X', technicianName: 'Sam', role: 'owner' }]), AH({}, [eveL]),
+    AH({ employeeId: 'e1' }, [{ id: 'pc', fullName: 'Cal', role: 'technician' }, samT]), AH({ options: { standIn: false } }, [eveL, samT]), AH({ standInId: 'e3' }, [eveL]), AH({}, null)],
+    ['Lead and call alerts only reach an owner, manager or office stand-in.', '', '', '', '', '', '', '', ''],
+    'stand-in alerts hint: an office person away with a technician-only stand-in; not for an office stand-in, a stand-in with no login (the warning above covers it), a technician away, or no stand-in');
+  assertEqual(AH({ employeeId: 'e1' }, [{ id: 'po', fullName: 'Cal', role: 'owner' }, samT]), 'Lead and call alerts only reach an owner, manager or office stand-in.', 'stand-in alerts hint: an owner away too');
+  // stage 3 follow-up 5: the office logins of a card, on shift today, and the vacation that asks their app to end it
+  const SL = sb.vacationShiftLogins([eveL, { id: 'pt', fullName: 'Eve', role: 'technician' }, { id: 'pw', fullName: 'Eve', technicianName: 'Sam', role: 'va' }, { id: 'po', fullName: 'Eve', role: 'owner' }, null], employees, 'e3');
+  assertEqual([SL.map(p => p.id), sb.vacationShiftLogins([eveL], employees, '').length, sb.vacationShiftLogins(null, employees, 'e3').length], [['pe'], 0, 0], 'shift logins: only the VA logins of that card (the Jobs & Commissions name first: pw is Sam\'s)');
+  assertEqual([sb.vacationOnShift({ onDuty: true, onDutyDate: '2026-10-22' }, '2026-10-22'), sb.vacationOnShift({ onDuty: true, onDutyDate: '2026-10-21' }, '2026-10-22'), sb.vacationOnShift({ onDuty: false, onDutyDate: '2026-10-22' }, '2026-10-22'), sb.vacationOnShift(null, '2026-10-22')],
+    [true, false, false, false], 'on shift: on duty today only (yesterday\'s shift is over)');
+  const veS = V({ id: 've', employeeId: 'e3', employeeName: 'Eve', startsOn: '2026-10-22', endsOn: '2026-10-23', options: ALL(), endShift: true });
+  const eveOn = { ...eveL, onDuty: true, onDutyDate: '2026-10-22' };
+  const EF = (vacs, prof = eveOn) => (sb.vacationEndShiftFor(vacs, prof, '2026-10-22', SYD, employees) || { id: null }).id;
+  assertEqual([EF([veS]), EF([{ ...veS, endShift: false }]), EF([veS], { ...eveOn, onDuty: false }), EF([veS], { ...eveOn, onDutyDate: '2026-10-21' }), EF([{ ...veS, startsOn: '2026-10-23' }]), EF([veS], { ...eveOn, role: 'technician' }), EF([{ ...veS, endedAt: '2026-10-21T13:30:00Z' }]), EF([veS], null), EF([veS], { ...eveOn, fullName: 'Nobody' })],
+    ['ve', null, null, null, null, null, null, null, null], 'end shift for: a VA on shift today, a vacation in force today with the marker; else nothing (no marker, off shift, starting tomorrow, not a VA, ended early, someone else)');
+  assertEqual(EF([veS], eveOn), (sb.vacationEndShiftFor([veS], eveOn, '2026-10-22', SYD, []) || {}).id, 'end shift for: the same without the employees (a VA can\'t read them: the name on the row)');
 
   // the person's own banner
   assertEqual(sb.vacationBannerText(v1, 'Sam', '2026-10-21', SYD, true), "You're on vacation until 24 Oct. No app notifications come to you, Sam gets them. No shift clock while you're away. The app works as usual.", 'banner: every tick, office staff');
@@ -2890,14 +3062,28 @@ function testVacationUi(sb){
   // Main builder's review 1.C (minor): the note in its own table, the forgot-logout acknowledgement can't stop the render.
   const vss = fx('vaSessionStart');
   assertEqual([/try \{ await sb\.rpc\('ack_forgot_logout'\); \} catch/.test(vss), vss.trim().endsWith('render();\n}') || /render\(\);\s*\}$/.test(vss.trim())], [true, true], 'static: vaSessionStart catches a failed ack_forgot_logout and still renders');
-  assertEqual([script.includes("fetchAllRows('employee_vacation_notes', 'vacation_id')"), /fetchAllRows\('employee_vacations', 'id', q => q\.is\('cancelled_at', null\)/.test(script)], [true, true], 'static: notes load from their own table; vacations load without the cancelled and old ones');
+  assertEqual([script.includes("fetchAllRows('employee_vacation_notes', 'vacation_id')"), /fetchAllRows\('employee_vacations', 'id', vacationsLoadQuery\)/.test(script), /function vacationsLoadQuery\(q\)\{\n  return q\.is\('cancelled_at', null\)/.test(script), (script.match(/fetchAllRows\('employee_vacations', 'id', vacationsLoadQuery\)/g) || []).length], [true, true, true, 2], 'static: notes load from their own table; vacations load without the cancelled and old ones (one query: the load and its retry)');
   // Main builder's review, 15 Oct.
   // A2: one time zone helper per layer (stage 1's), no zone code of the vacations' own.
   assertEqual([/function vacation(Tz|Today|DayOf)\(/.test(script), /region\.timezone|region \? c\.region\.timezone/.test(script)], [false, false], 'review A2: no vacationTz / vacationToday / vacationDayOf, nothing reads the lowercase region.timezone');
   // A3: employee_vacations on its own realtime channel, only when the list loaded, removed with the rest.
-  const rt = fx('setupRealtimeSubscriptions'), shared = rt.slice(0, rt.indexOf('.subscribe()'));
-  assertEqual([shared.includes('employee_vacations'), rt.includes("sb.channel('vacations-realtime')"), /if \(!VACATIONS_CHANNEL && STATE\.data && !STATE\.data\.vacationsError\)/.test(rt), fx('teardownRealtimeSubscriptions').includes('sb.removeChannel(VACATIONS_CHANNEL)')],
+  const vxh = fx('vacExtraHtml'), lfs0 = fx('loadFromSupabase'), rvl = fx('retryVacationsLoad');
+  assertEqual([vxh.includes("${d.payKnown!==false && o.pay===p ? 'checked' : ''}"), /if \(field==='pay'\) \{ d\.options = \{ \.\.\.d\.options, pay: value \}; d\.payKnown = true; \}/.test(fx('vacSet')),
+    /vacationNotesError: \(loadResults\[LOAD_NAMES\.indexOf\('vacation notes'\)\] \|\| \{\}\)\.error \?/.test(lfs0), /data\.vacationNotesError = ''; \}\n\s*else data\.vacationNotesError = 'the vacation notes did not load';/.test(rvl),
+    /const blocked = vacationNotesBlock\(vacId, data\);\s*if \(blocked\) \{ showToast\(blocked/.test(fx('openVacationModal')), /vacationNotesBlock\(d\.id, data\)/.test(fx('saveVacationModal'))],
+    [true, true, true, true, true, true], 'A1: the radio shows no choice for an unknown pay (a pick makes it known); the notes error set at load and by the retry; the window and the save refuse a change');
+  const rt = fx('setupRealtimeSubscriptions'), shared = rt.slice(0, rt.indexOf('.subscribe()')), rv = fx('setupVacationsChannel');
+  assertEqual([shared.includes('employee_vacations'), rt.includes('setupVacationsChannel();') && rv.includes("sb.channel('vacations-realtime')"), /if \(VACATIONS_CHANNEL \|\| !STATE\.data \|\| STATE\.data\.vacationsError\) return;/.test(rv), fx('teardownRealtimeSubscriptions').includes('sb.removeChannel(VACATIONS_CHANNEL)')],
     [false, true, true, true], 'review A3: vacations never join the shared channel; their own channel only when the list loaded; torn down on logout');
+  // stage 3 follow-ups 5 and 7: a later load that works subscribes; the save offers to end a shift; the app of the person away ends it
+  const lfs = fx('loadFromSupabase');
+  assertEqual([lfs.indexOf('if (STATE.dataLoaded) setupVacationsChannel();') > lfs.indexOf('STATE.data = data;'), /STATE\.dataLoaded = true; AUTH_DATA_LOADING = false; setupRealtimeSubscriptions\(\)/.test(script)], [true, true], 'follow-up 7: loadFromSupabase subscribes after a later load that worked (the first boot is setupRealtimeSubscriptions\')');
+  const vsn = fx('vacationSaveNow');
+  assertEqual([/^[^{]*\{\s*if \(readOnlyReason\(\)\)/.test(vsn), /if \(endShift\) row\.options = \{ \.\.\.row\.options, endShift: true \};/.test(vsn), vsn.indexOf('db.vacations.setPrivate(') < vsn.indexOf('logEmployeeActivity(') && vsn.indexOf('db.vacations.setPrivate(') > 0],
+    [true, true, true], 'follow-up 5: the save itself checks read-only mode, sends the marker only when asked, the private row before the History line');
+  const vse = vaSessionStart => vaSessionStart.indexOf('vacationEndOwnShift();') > 0 && vaSessionStart.indexOf('vacationEndOwnShift();') < vaSessionStart.lastIndexOf('render();');
+  assertEqual([vse(fx('vaSessionStart')), /if \(VAC_SHIFT_ENDING \|\| !STATE\.data \|\| VIEW_AS_ID \|\| PRESENT \|\| readOnlyReason\(\)\) return;/.test(fx('vacationEndOwnShift')), /setMyShift\(false\)\.finally/.test(fx('vacationEndOwnShift')), /set_phone_duty|rpc\(/.test(fx('vacationEndOwnShift'))],
+    [true, true, true, false], 'follow-up 5: opening the app ends a marked shift; never in a read-only mode; only through the VA\'s own setMyShift (no shift RPC of its own)');
   // A4: "back tomorrow" is a card in Settings → Notifications, on unless switched off, to the person and the owners.
   const Rn = { waitMinutes: 15, from: 7, until: 19, docDays: 30, unpaidDays: 7 }, vb = sb.notifyCards({}, Rn, {}).find(c => c.id==='vacationBack');
   assertEqual([vb.on, vb.officeOk, vb.alsoTo, vb.sub.includes('Sent between 7 am and 7 pm'), sb.notifyCards({ vacationBack: { on: false } }, Rn, {}).find(c => c.id==='vacationBack').on, sb.notifyOn(undefined, 'vacationBack')],
@@ -3466,6 +3652,7 @@ testNotificationCards(loadSandbox());
 testConnectors(loadSandbox());
 testUxRound3(loadSandbox());
 testMcpConnector(loadSandbox());
+testPageHistory(loadSandbox());
 testSecurityFaceId(loadSandbox());
 testAutomationEventBody(loadSandbox());
 testFlowView(loadSandbox());
@@ -4722,7 +4909,7 @@ function testWfList(sb){
     'wfWhenText', 'wfIconOf', 'wfGoesTo', 'wfCardHtml', 'wfFolderCardHtml', 'wfTableHtml', 'wfStatsHtml', 'wfPagerHtml', 'wfDeletedHtml', 'wfReviewHtml', 'wfBreadcrumbHtml', 'wfMenuListHtml'];
   assertEqual(pure.filter(n => /\brender\(|renderKeepingInput\(|\bdb\.|\bsb\.|fetch\(|Date\.now\(|new Date\(\)/.test(extractDecl(script, n))), [], 'the list\'s pure helpers never redraw, read the database, call a server or read the clock');
   {
-    const guard = script.indexOf('if (!UI.tab || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);'), link = script.indexOf('wfFromLink(START_LINK)');
+    const guard = script.indexOf('if (!UI.tab || !NAV_PAGES.includes(UI.tab) || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);'), link = script.indexOf('wfFromLink(START_LINK)');
     assertEqual([guard > 0, link > guard, script.includes("if (UI.tab==='settings' && canViewSection(profile, 'settings') && settingsPageKey((UI.settings || {}).page)==='automation') wfFromLink(START_LINK);\n    else START_LINK.wfUsed = true;")],
       [true, true, true], 'a ?wf= link opens the editor only after the route guard, and only for someone who may open Settings; anyone else\'s link is spent');
   }
@@ -5854,7 +6041,7 @@ function testWfShellStatic(){
     // G4.4: the rail's panels, the dialogs, the banner and what the chrome reads
     'wfRailNotes', 'wfRailErrors', 'wfRailFind', 'wfRailSwitcher', 'wfRailStickies', 'wfRailMemo', 'wfRailErrorsHtml', 'wfRailNotesHtml', 'wfRailNotesListHtml', 'wfRailFindHtml', 'wfRailFindResHtml',
     'wfRailSwitcherHtml', 'wfRailSwitchListHtml', 'wfRailStickiesHtml', 'wfDlgHtml', 'WF_DIALOG_HTML', 'wfBannerHtml', 'wfRemoteNow', 'wfRemoteExtra', 'wfPausedText', 'wfSaveWhy', 'wfGuardWrite', 'wfMe',
-    'wfRefName', 'wfSwitchData', 'wfFindNow', 'wfFindCtxNow', 'wfNoteAddWhy', 'wfRailAfterPaint', 'wfStickyBoxes', 'wfStickySteps', 'wfErrorGroups', 'wfRecentRows'];
+    'wfRefName', 'wfSwitchData', 'wfFindNow', 'wfFindCtxNow', 'wfNoteAddWhy', 'wfRailAfterPaint', 'wfStickyBoxes', 'wfBoundsWith', 'wfStickySteps', 'wfErrorGroups', 'wfRecentRows'];
   const drawers = paintPath.filter(n => /\brender(KeepingInput)?\(|\bwfDirty\(/.test(extractDecl(script, n).replace(/^function wfDirty[\s\S]*?\{/, '')) && n!=='wfAppDataChanged');
   const code = sec.replace(/^\s*\/\/.*$/gm, ''), renders = [...code.matchAll(/\brender\(\)/g)].map(m => code.slice(Math.max(0, m.index - 60), m.index).split('\n').pop().trim());
   assertEqual([drawers, renders, /openModal\(/.test(sec), /'(mouseover|mouseenter|pointerover|pointerenter|mousemove)'/.test(sec), (sec.match(/'pointermove'/g) || []).length, /render\(\)/.test(extractDecl(script, 'wfAppDataChanged'))],
@@ -6381,8 +6568,8 @@ function testWfRailPure(sb){
   assertEqual([sb.wfStickiesOf(sb.wfStickyReanchor(L, doc, after)).map(s => s.anchor), sb.wfStickiesOf(sb.wfStickyReanchor(L, doc, after2)).map(s => s.anchor), sb.wfStickyReanchor(L, doc, doc)===L],
     [['n2', 'n2'], [null, null], true], 'wfStickyReanchor: a step that goes takes its notes to the step above it (else the first step, else none); nothing gone → the same layout');
   const lay = sb.wfLayoutStandard(doc, reg, {}), bx = sb.wfStickyBoxes(L, lay), nb = lay.nodes.n3;
-  assertEqual([bx.length, bx[0].x===nb.x + nb.w + 24, bx[0].y===nb.y, bx[1].y===nb.y + bx[0].h + 12, sb.wfStickyBoxes(sb.wfStickySet(L, 'k2', { hidden: true }), lay).length, sb.wfStickyBoxes({ stickies: [{ id: 'k9', anchor: null }] }, lay)[0].x > lay.bounds.x + lay.bounds.w],
-    [2, true, true, true, 1, true], 'wfStickyBoxes: beside their step, one under the other; hidden ones not drawn; one without a step stands right of everything');
+  assertEqual([bx.length, bx[0].x===lay.bounds.x + lay.bounds.w + 48, bx[0].y===nb.y, bx[1].y===nb.y + bx[0].h + 12, sb.wfStickyBoxes(sb.wfStickySet(L, 'k2', { hidden: true }), lay).length, sb.wfStickyBoxes({ stickies: [{ id: 'k9', anchor: null }] }, lay)[0].x > lay.bounds.x + lay.bounds.w],
+    [2, true, true, true, 1, true], 'wfStickyBoxes: in the lane right of the whole layout at the height of their step, one under the other; hidden ones not drawn; one without a step stands right of everything');
   // the switcher, the publish gate, the publish questions' input
   const list = [{ id: WF_UUID1, name: 'Zeta' }, { id: WF_UUID2, name: 'alpha', enabled: true, system_key: 'team:newLead' }, { id: 'x3', name: 'Gone', deleted_at: '2026-10-01' }, { id: 'x4', name: 'Beta' }];
   const sr = sb.wfSwitchRows(list, '', ['x4', WF_UUID2, 'nope'], WF_UUID1);
@@ -6657,7 +6844,697 @@ testWfShellTokens(); testWfShellStatic(); testWfShellRuntime();
 testWfPickDrawerRuntime();
 { const sb = wfSb(); [testWfRailPure, testWfRailWords].forEach(t => t(sb)); }
 
+// ── Stage 4: page history, back closes windows first, the edge swipe, deep-link fallback ──
+function testPageHistory(sb){
+  console.log('\nPage history, the back swipe and deep links (stage 4)');
+  sb.URLSearchParams = URLSearchParams;   // navUrl builds the address (a vm context has none of its own)
+  const script = fs.readFileSync(INDEX_HTML_PATH, 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+  const P = (role, extra) => ({ id: role, role, permissions: { ...sb.defaultPermissionsFor(role), ...(extra || {}) } });
+  const owner = P('owner'), manager = P('manager'), tech = P('technician'), va = P('va'), mkt = P('marketing'), vaNoJobs = P('va', { jobs: false });
+  const nobody = { id: 'x', role: 'technician', permissions: {} };
+  const L = (p, req) => sb.landingTab(p, req);
+  // deep links: 'mcp' is not a page
+  assertEqual([L(owner, { tab: 'mcp' }), L(manager, { tab: 'mcp' }), L(va, { tab: 'mcp' }), L(mkt, { tab: 'mcp' })],
+    [{ tab: 'settings', page: 'connectors', conn: 'mcp' }, { tab: 'dashboard', open: 'mcpKeys' }, { tab: 'myDay' }, { tab: 'adsGoogle' }],
+    'landingTab ?tab=mcp: owners open the private connector, managers their keys window over the dashboard, anyone else lands home');
+  // a page that doesn't exist or isn't theirs lands home (the old empty content area)
+  assertEqual([L(manager, { tab: 'overview' }).tab, L(owner, { tab: 'overview' }).tab, L(owner, { tab: 'junk' }).tab, L(manager, { tab: 'junk' }).tab, L(tech, { tab: 'dashboard' }).tab,
+    L(tech, { tab: 'finance' }).tab, L(va, { tab: 'settings' }).tab, L(manager, { tab: 'crm' }), L(vaNoJobs, { tab: 'jobs' }).tab, L(va, { tab: 'jobs' }).tab, L(owner, { tab: null }).tab, L(owner, {}).tab, L(nobody, { tab: 'crm' }), L(null, { tab: 'crm' })],
+    ['dashboard', 'dashboard', 'dashboard', 'dashboard', 'payroll', 'payroll', 'myDay', { tab: 'crm' }, 'myDay', 'jobs', 'dashboard', 'dashboard', { tab: null }, { tab: null }],
+    'landingTab: an unknown page or one the person may not open lands on their home page; finance → payroll; a profile with no pages → none');
+  assertEqual([L(owner, { tab: 'settings', page: 'pay' }), L(owner, { tab: 'settings', page: 'connections' }), L(owner, { tab: 'settings', page: 'phone' }), L(owner, { tab: 'settings' }),
+    L(owner, { tab: 'payroll', week: '2026-10-12' }), L(tech, { tab: 'payroll', week: '2026-10-12' }), L(owner, { tab: 'crm', week: '2026-10-12' })],
+    [{ tab: 'settings', page: 'people' }, { tab: 'settings', page: 'connectors' }, { tab: 'settings', page: 'phone' }, { tab: 'settings', page: null },
+      { tab: 'payroll', week: '2026-10-12' }, { tab: 'payroll', week: '2026-10-12' }, { tab: 'crm' }],
+    'landingTab: old settings pages map to their new place; the week only goes with Payroll');
+  assertEqual([[...sb.NAV_PAGES].sort(), sb.NAV_PAGES.length], [[...sb.SECTION_ORDER, 'settings'].sort(), sb.SECTION_ORDER.length + 1], 'NAV_PAGES: every page render() draws, and nothing else');
+  const r = extractDecl(script, 'render');
+  assertEqual([r.includes('if (!UI.tab || !NAV_PAGES.includes(UI.tab) || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);'), r.includes('const L = landingTab(profile, START_LINK);'),
+    r.includes('START_LINK.used = true;'), /UI\.tab = START_LINK\.tab/.test(r), r.includes("if (UI.tab==='finance') UI.tab = 'payroll';")],
+    [true, true, true, false, true], 'render: the page guard knows the pages; START_LINK goes through landingTab once');
+  // where the screen is: each panel counts only on its own page
+  const ui = (o) => ({ tab: 'crm', settings: { page: 'phone', open: true, conn: 'mcp' }, jobs: { selectedId: 'j1' }, reference: { tab: 'equipment', contractorId: 'k1' }, crm: { view: 'inbox', selectedContactId: 'c1' }, tasks: { board: 'all' }, ...o });
+  const pp = { sel: 'e:1', tab: 'pay' };
+  const S = (o, p) => sb.navSnapOf(ui(o), p || pp);
+  assertEqual([S({}), S({ crm: { view: 'pipeline', selectedContactId: 'c1' } }).lead, S({ tab: 'jobs' }).job, S({ tab: 'reference' }).con, S({ tab: 'reference' }).rtab, S({ tab: 'tasks' }).board],
+    [{ tab: 'crm', sp: null, so: false, conn: null, per: null, pt: null, job: null, con: null, lead: 'c1', cv: 'inbox', board: null, rtab: null, wk: null }, null, 'j1', 'k1', 'equipment', 'all'],
+    'navSnapOf: the job only on Jobs, the contractor only on Resources, the lead only in the CRM inbox (not the pipeline)');
+  assertEqual([S({ tab: 'settings' }), S({ tab: 'settings', settings: { page: 'connectors', open: true, conn: 'mcp' } }).conn, S({ tab: 'settings', settings: { page: 'access', open: false } }),
+    S({ tab: 'settings', settings: {} }).sp],
+    [{ tab: 'settings', sp: 'phone', so: true, conn: null, per: null, pt: null, job: null, con: null, lead: null, cv: null, board: null, rtab: null, wk: null }, 'mcp',
+      { tab: 'settings', sp: 'people', so: false, conn: null, per: 'e:1', pt: 'pay', job: null, con: null, lead: null, cv: null, board: null, rtab: null, wk: null }, 'setup'],
+    'navSnapOf: the connector only on Connectors, the person only on People (old page ids mapped)');
+  assertEqual([S({ tab: 'payroll', payroll: { mode: 'week', week: '2026-10-05' } }).wk, S({ tab: 'payroll', payroll: { mode: 'month', week: '2026-10-05' } }).wk, S({ tab: 'payroll', payroll: { mode: 'week', week: null } }).wk,
+    S({ tab: 'crm', payroll: { mode: 'week', week: '2026-10-05' } }).wk, sb.navKey(S({ tab: 'payroll', payroll: { mode: 'week', week: '2026-10-05' } }))===sb.navKey(S({ tab: 'payroll' }))],
+    ['2026-10-05', null, null, null, true], 'navSnapOf: the Payroll week picked (week view only) goes along for the address; it never makes a new entry');
+  const base = S({ tab: 'jobs' }), K = sb.navKey;
+  assertEqual([K(base)===K({ ...base, pt: 'x', y: 300, d: 4, pk: 'a', ov: 1, cv: 'pipeline' }), K({ ...base, kind: 'tab' })===K({ ...base, kind: 'panel' }), K({ ...base, kind: 'wf', x: { id: 1 } }), K({ ...base, kind: 'wf' }),
+    K(base)===K({ ...base, job: 'j2' })],
+    [true, true, 'jobs||0|||j1||||' + '|wf:{"id":1}', 'jobs||0|||j1||||' + '|wf:null', false], 'navKey: pt, cv, y, d, pk and ov never change it; a kind of its own adds its payload; the base kinds add nothing');
+  const M = sb.navMode, jobs0 = { ...base, job: null };
+  assertEqual([M(base, { ...base }), M({ ...base, ov: 1 }, S({ tab: 'tasks' })), M(base, { ...base, job: 'j2' }), M(jobs0, base), M(base, S({})), M(S({ tab: 'settings', settings: { page: 'phone', open: true } }), S({ tab: 'settings', settings: { page: 'hours', open: true } })),
+    M(S({}), S({ crm: { view: 'inbox', selectedContactId: 'c2' } })), M(null, base)],
+    ['skip', 'replace', 'replace', 'push', 'push', 'push', 'replace', 'push'], 'navMode: same screen skips; from inside a window replaces; one panel for another replaces; a new page or panel pushes');
+  const U = sb.navUrl;
+  assertEqual([U({ tab: 'payroll' }, '?env=staging&tab=crm&week=2026-10-12'), U({ tab: 'settings', sp: 'people', so: true, per: 'e:9' }, ''), U({ tab: 'settings', sp: 'people', so: false }, '?tab=settings&page=people'),
+    U({ tab: 'jobs', job: 'j77', lead: 'c55', per: 'e:1', con: 'k3' }, '?open=backup'), U({ tab: null }, '?env=live&tab=x'), U({ tab: 'payroll', wk: '2026-10-05' }, '?tab=payroll&week=2026-10-05'), U({ tab: 'crm', wk: '2026-10-05' }, '?tab=payroll&week=2026-10-05')],
+    ['?env=staging&tab=payroll', '?tab=settings&page=people', '?tab=settings', '?open=backup&tab=jobs', '?env=live', '?tab=payroll&week=2026-10-05', '?tab=crm'], 'navUrl: only the page (the Settings page, the Payroll week) in the address, never an id; env= and open= kept');
+  const B = (a, b, c) => sb.isBackSwipe(a, b, c), go = { canBack: true };
+  assertEqual([B({ x: 10, y: 300, t: 0 }, { x: 90, y: 310, t: 300 }, go), B({ x: 20, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, go), B({ x: 21, y: 0, t: 0 }, { x: 95, y: 0, t: 10 }, go),
+    B({ x: 0, y: 0, t: 0 }, { x: 60, y: 0, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 59, y: 0, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 80, y: 40, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 81, y: 40, t: 10 }, go),
+    B({ x: 15, y: 0, t: 0 }, { x: -80, y: 0, t: 10 }, go), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, { canBack: true, blocked: true }), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, { canBack: false }),
+    B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 10 }, { canBack: true, popped: true }), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 5000 }, go), B({ x: 0, y: 0, t: 0 }, { x: 90, y: 0, t: 1000 }, go), B(null, { x: 90, y: 0, t: 1 }, go), B({ x: 0, y: 0, t: 0 }, null, go)],
+    [true, true, false, true, false, false, true, false, false, false, false, true, true, false, false], 'isBackSwipe: from the 20 px edge, 60 px right, mostly sideways, slow or fast, only when back goes somewhere and nothing else took it');
+  // no loops: restoring never adds an entry; render draws once per restore
+  const T = n => extractDecl(script, n);
+  assertEqual([['pushState', 'navPush('].filter(w => T('navOnPop').includes(w)), ['pushState', 'replaceState', 'navPush(', 'navReplace('].filter(w => T('navRestoreView').includes(w)),
+    /[^A-Za-z]render\(/.test(T('navAfterRender')), /\{\n  if \(!NAV_HIST\.ready \|\| NAV_HIST\.restoring\) return;/.test(T('navPush')), T('navStay').includes('pushState'),
+    r.startsWith('function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; }'), r.trim().endsWith('navAfterRender(profile);\n}'),
+    script.includes('NAV_BASE_KINDS.forEach(k => { NAV_RESTORERS[k] = navRestoreView; });'), /NAV_RESTORERS(\.|\[')(wf|auto)/i.test(script), sb.NAV_BASE_KINDS,
+    /navLayer\(\{ id: '(wf|auto)/i.test(script), /id: '(wf|auto)/i.test(T('NAV_LAYERS'))],
+    [[], [], false, true, false, true, true, true, false, ['tab', 'settings', 'connector', 'panel'], false, false], 'no loops: popstate and the restorer never push; a restore draws once; no automation kinds or layers registered here');
+  // the entry functions: one entry each, after the change and before the redraw; pinned texts unchanged
+  const goTabT = T('goTab'), ssp = T('setSettingsPage');
+  assertEqual([goTabT.indexOf("navPush({ kind: 'tab' })") > goTabT.indexOf('PANEL_OPEN_FOR = {}') && goTabT.indexOf("navPush({ kind: 'tab' })") < goTabT.indexOf('render()'),
+    ['goTasks', 'goResources'].every(n => /navPush\(\{ kind: 'tab' \}\); render\(\);/.test(T(n))), ssp.indexOf("navPush({ kind: 'settings' })") < ssp.indexOf('render();') && ssp.includes("if (id!=='data') DATA_EXPORT.sens = false;"),
+    ['closeSettingsPage', 'openConnector', 'closeConnector'].every(n => T(n).includes('window.scrollTo(0, 0)')), ['closeSettingsPage', 'closeConnector', 'selectJob', 'openContractor', 'openPersonCard', 'clearCrmSelection'].every(n => T(n).includes('navBackTo(')),
+    ['selectJob', 'openContractor', 'openPersonCard', 'selectCrmContact', 'clearCrmSelection', 'goToLeadConversation'].every(n => T(n).includes("navPush({ kind: 'panel' })")), /render\(\)/.test(T('selectJob'))],
+    [true, true, true, true, true, true, false], 'entry functions: goTab/goTasks/goResources/settings/connector/panels push one entry before the redraw; closing goes back to the entry below; the open job stays a DOM patch');
+  // the swipe never blocks a scroll or the pipeline's drag
+  const swipeFns = ['navSwipeOn', 'navSwipeBlocked', 'navScrollsLeft', 'navSwipeReset', 'navSwipeStart', 'navSwipeMove', 'navSwipeEnd', 'navSwipeCancel', 'navSwipeBack', 'navSwipeInAnim'];
+  const blk = T('navSwipeBlocked');
+  assertEqual([['touchstart', 'touchmove', 'touchend', 'touchcancel'].every(ev => script.includes(`document.addEventListener('${ev}', navSwipe${{ touchstart: 'Start', touchmove: 'Move', touchend: 'End', touchcancel: 'Cancel' }[ev]}, { passive: true });`)),
+    swipeFns.filter(n => T(n).includes('preventDefault')), ['PIPE_DRAG', '.pipeline', '.lead-card', '.stage-board', 'navScrollsLeft('].every(w => blk.includes(w)),
+    script.includes("document.addEventListener('touchmove', e => { if (PIPE_DRAG && PIPE_DRAG.dragging) e.preventDefault(); }, { passive: false });"),
+    T('navSwipeMove').includes("if (s.tf) c.style.transform = 'translateX(' + px + 'px)'; else c.style.left = px + 'px';") && T('navSwipeStart').includes('tf: show && !navFixedInside()') && T('navFixedInside').includes("getComputedStyle(el).position==='fixed'")],
+    [true, [], true, true, true], 'edge swipe: passive listeners, no preventDefault, never on the pipeline/boards/sideways scrollers; the pipeline drag listener unchanged; a transform on #content only while no fixed box inside it shows');
+  assertEqual([/#content\.nav-swipe-out \{[^}]*left: 28%/.test(fs.readFileSync(INDEX_HTML_PATH, 'utf8')), /@media \(prefers-reduced-motion: reduce\) \{ #content\.nav-swipe-out \{ left: 0; opacity: 1; transition: none; \} #content\.nav-swipe-out\.tf \{ transform: none; \} \}/.test(fs.readFileSync(INDEX_HTML_PATH, 'utf8')), T('navSwipeBack').includes('motionReduced()'),
+    /#content\.nav-swipe-out\.tf \{ left: 0; transform: translateX\(28%\);/.test(fs.readFileSync(INDEX_HTML_PATH, 'utf8'))],
+    [true, true, true, true], 'edge swipe: a short slide (by left, or by a transform), none with reduced motion');
+  // behaviour, with a fake history, window and document
+  const H = navHistSandbox(script);
+  const n = H.nav;
+  H.ui.tab = 'crm'; H.ui.crm.view = 'pipeline';
+  n.navInit();
+  const first = H.hist.state;
+  assertEqual([first.nav, first.kind, first.tab, first.d, first.pk, H.log.urls.pop(), n.NAV_HIST.ready, H.log.push], [1, 'tab', 'crm', 0, null, '?env=staging&tab=crm', true, 0], 'navInit: the landed page becomes the first entry (replaced, not pushed)');
+  H.ui.tab = 'jobs'; n.navPush({ kind: 'tab' });
+  assertEqual([H.log.push, H.hist.state.d, H.hist.state.pk, n.NAV_HIST.d, H.hist.entries[0].y, H.log.urls.pop()], [1, 1, n.navKey(first), 1, 0, '?env=staging&tab=jobs'], 'navPush: a new page is one entry; the one left keeps its scroll');
+  H.ui.jobs.selectedId = 'j1'; n.navPush({ kind: 'panel' });
+  H.ui.jobs.selectedId = 'j2'; n.navPush({ kind: 'panel' });
+  n.navPush({ kind: 'panel' });
+  assertEqual([H.log.push, H.hist.entries.length, H.hist.state.job, H.hist.state.d], [2, 3, 'j2', 2], 'navPush: opening a job pushes, another job replaces, the same screen adds nothing');
+  // back to the CRM (two entries down): one render, no push
+  const pushes = H.log.push; H.log.renders = 0;
+  H.pop(0);
+  assertEqual([H.ui.tab, H.log.renders, H.log.push, n.NAV_HIST.d, n.NAV_HIST.restoring, n.NAV_HIST.hold, H.log.restored], ['crm', 1, pushes, 0, false, false, 1], 'popstate to another page: restored through goTab, one render, nothing pushed');
+  // forward to the open job: the job is put back
+  H.log.renders = 0; H.pop(2);
+  assertEqual([H.ui.tab, H.ui.jobs.selectedId, H.log.renders, H.log.push], ['jobs', 'j2', 1, pushes], 'forward: the page and its open job come back, one render');
+  // a window open: back closes it and stays where it was
+  H.modal(true); n.navOverlaySync();
+  assertEqual([H.log.push, H.hist.state.ov, H.hist.state.d], [pushes + 1, 1, 3], 'an open window gets an entry of its own');
+  H.log.renders = 0; H.pop(2);
+  assertEqual([H.log.esc, H.modalOpen(), H.log.renders, H.log.go, n.NAV_HIST.skip, H.ui.tab], [1, false, 0, [], 0, 'jobs'], 'back with a window open: the window closes (its own Escape), the page stays, nothing redrawn');
+  // a window opened without its entry (back would leave the page): close it and go back where the screen is
+  H.modal(true); H.log.renders = 0;
+  H.pop(1);
+  assertEqual([H.log.esc, H.modalOpen(), H.log.go, n.NAV_HIST.skip, H.log.renders, H.ui.jobs.selectedId], [2, false, [1], 1, 0, 'j2'], 'back over a window that had no entry: it closes, the history goes forward again (no push), nothing redrawn');
+  H.pop(2);
+  assertEqual([n.NAV_HIST.skip, n.NAV_HIST.d, H.log.renders, H.log.push], [0, 2, 0, pushes + 1], 'our own history.go() popstate is skipped once');
+  // a window closed in the app takes its entry away (history.back), and the landing changes nothing
+  H.modal(true); n.navOverlaySync(); const backs = H.log.back;
+  H.modal(false); n.navOverlaySync();
+  assertEqual([H.log.back - backs, n.NAV_HIST.syncBack], [1, true], 'a window closed in the app: its entry goes (history.back)');
+  H.log.renders = 0; H.pop(2);
+  assertEqual([n.NAV_HIST.syncBack, H.log.renders, H.ui.tab, H.ui.jobs.selectedId], [false, 0, 'jobs', 'j2'], 'its popstate changes nothing on screen');
+  // closing the job goes back to the entry below instead of adding one
+  const b2 = H.log.back;
+  const miss = n.navBackTo({ ...n.navSnap(), job: 'zz' });   // asked first: once a back is on its way, a further call is taken as done (C4)
+  assertEqual([n.navBackTo({ ...n.navSnap(), job: null }), H.log.back - b2, miss], [true, 1, false], 'navBackTo: back when the entry below is the screen wanted');
+  // a guard keeps the screen: the restorer says no, the history goes back where the screen is, nothing pushed
+  H.hist.entries.splice(3); H.hist.entries[3] = { ...H.hist.state, nav: 1, kind: 'guarded', x: { id: 1 }, d: 3, pk: 'p' };
+  n.NAV_RESTORERS.guarded = () => false; H.log.go = [];
+  H.pop(3);
+  assertEqual([H.log.go, H.log.push, n.NAV_HIST.skip], [[-1], pushes + 2, 1], 'a restorer that returns false: history.go back to where the screen is, no push');
+  H.pop(2);
+  // a leaver runs once before the restorer of the entry arrived at
+  const seen = []; n.NAV_LEAVERS.guarded = (prev, next) => seen.push([prev.kind, next.kind]);
+  n.NAV_RESTORERS.guarded = () => true; H.pop(3); H.pop(2);
+  assertEqual(seen, [['guarded', 'panel']], 'NAV_LEAVERS[kind] runs when leaving that kind');
+  // ignored: not ours, not ready, signed out
+  const before = JSON.stringify([H.log, H.ui]);
+  n.navOnPop({ state: null }); n.navOnPop({ state: { tab: 'crm', d: 0 } }); H.auth.status = 'signedOut'; n.navOnPop({ state: H.hist.entries[0] }); H.auth.status = 'ready';
+  n.NAV_HIST.ready = false; n.navOnPop({ state: H.hist.entries[0] }); n.NAV_HIST.ready = true;
+  assertEqual(JSON.stringify([H.log, H.ui])===before, true, 'popstate: a state that is not ours, before the start or signed out is ignored');
+  // the phone menu closes on back too
+  H.ui.mobileNavOpen = true; H.log.renders = 0; H.hist.idx = 2; H.hist.state = H.hist.entries[2];
+  n.navOnPop({ state: { ...H.hist.entries[2] } });
+  assertEqual([H.ui.mobileNavOpen, H.log.renders], [false, 1], 'back with the phone menu open: the menu closes');
+  // a window's answer closes the panel it was opened over (a guard's Save / Don't save): back over both entries
+  H.modal(true); n.navOverlaySync();
+  const ovSt = H.hist.state;
+  assertEqual([ovSt.ov, ovSt.d, ovSt.pk, ovSt.ppk], [1, 3, n.navKey(H.hist.entries[2]), H.hist.entries[2].pk], 'a window over a panel keeps the key of the entry below the panel');
+  H.modal(false); H.log.go = []; const reps = H.log.replace;
+  H.ui.jobs.selectedId = null; n.navPush({ kind: 'panel' });
+  assertEqual([H.log.go, n.NAV_HIST.syncBack, H.log.replace - reps], [[-2], true, 0], 'navPush from a window whose answer closed the panel under it: back two entries, nothing replaced');
+  H.log.renders = 0; H.pop(1);
+  assertEqual([n.NAV_HIST.syncBack, n.NAV_HIST.d, H.log.renders, H.ui.tab, H.ui.jobs.selectedId], [false, 1, 0, 'jobs', null], 'its popstate lands on the page below the panel and changes nothing');
+  // a panel closed by the app while a window is open: the entry it leaves is not kept as a copy of the one below
+  H.ui.jobs.selectedId = 'j3'; n.navPush({ kind: 'panel' }); H.modal(true); n.navOverlaySync();
+  H.ui.jobs.selectedId = null; H.modal(false); const backs2 = H.log.back; n.navOverlaySync();
+  H.pop(2);
+  assertEqual([H.log.back - backs2, n.NAV_HIST.syncBack], [2, true], 'the window closed with its panel: back once more, past the panel\'s entry');
+  H.pop(1);
+  assertEqual([n.NAV_HIST.syncBack, n.NAV_HIST.d, H.hist.entries[2].job], [false, 1, 'j3'], 'and the page below stays as it is (forward still opens the panel)');
+  // a jump of two entries with the phone menu open: the menu shuts and the jump goes ahead, nothing pushed
+  H.ui.mobileNavOpen = true; n.navOverlaySync(); const pushes2 = H.log.push; H.log.renders = 0; H.log.go = [];
+  H.pop(0);
+  assertEqual([H.ui.mobileNavOpen, H.ui.tab, H.log.push - pushes2, H.log.go, n.NAV_HIST.skip, n.NAV_HIST.d, H.log.renders], [false, 'crm', 0, [], 0, 0, 1], 'a jump back with the phone menu open: the menu shuts, the page jumped to comes back, one render, no push');
+  // a reload on an entry that showed a panel: back to the entry below instead of a copy of it
+  const H2 = navHistSandbox(script);
+  H2.ui.tab = 'jobs';
+  const below = { nav: 1, kind: 'tab', ...H2.nav.navSnap(), d: 0, pk: null };
+  H2.hist.entries = [below, { nav: 1, kind: 'panel', ...H2.nav.navSnap(), job: 'j9', d: 1, pk: H2.nav.navKey(below) }]; H2.hist.idx = 1; H2.hist.state = H2.hist.entries[1];
+  H2.nav.navInit();
+  assertEqual([H2.log.back, H2.log.replace, H2.nav.NAV_HIST.syncBack, H2.hist.entries[1].job], [1, 0, true, 'j9'], 'navInit after a reload on a panel\'s entry: back to the page below, the entry kept for forward');
+  H2.pop(0);
+  assertEqual([H2.nav.NAV_HIST.syncBack, H2.nav.NAV_HIST.d, H2.log.renders], [false, 0, 0], 'its popstate changes nothing');
+  // windows close through their own close function; menus count as layers; a window before the first tap has no entry yet
+  const oc = T('navCloseWindow'), os = T('navOverlaySync'), zOf = id => (n.NAV_LAYERS.find(l => l.id===id) || {}).z;
+  assertEqual([oc.includes('back.click()'), oc.includes("!back.classList.contains('au-edb')"), zOf('menus') > zOf('confirm') && zOf('confirm') > zOf('popup') && zOf('popup') > zOf('window') && zOf('window') > zOf('phone-menu'), T('NAV_LAYERS').includes('isOpen: () => !!document.querySelector(NAV_MENUS)'),
+    script.includes("const NAV_MENUS = '.person-menu, .theme-menu, .pal-pop';"), os.indexOf('if (!navActivated()) return;') > 0 && os.indexOf('if (!navActivated()) return;') < os.indexOf('pushState'), T('navSwipeOn').includes('return touch && standalone;'),
+    T('navSwipeBack').includes('if (NAV_HIST.pops===pops) navGoBack();'), T('navSwipeBack').includes('history.back(); return;'), /html\.nav-swipe-on, html\.nav-swipe-on body \{ overscroll-behavior-x: none; \}/.test(fs.readFileSync(INDEX_HTML_PATH, 'utf8')),
+    T('navSwipeStart').includes('navSidePanelOpen()'), T('navSwipeStart').indexOf('navSwipeReset()') < T('navSwipeStart').indexOf('NAV_SWIPE = null;')],
+    [true, true, true, true, true, true, true, true, false, true, true, true], 'review fixes: a window closes as a click beside it does; small menus close first; no entry before the first tap; the swipe only in the installed app, once, never moving the page under a side panel');
+  // ‹ Settings (closeSettingsPage) keeps the page selected, as on main: Settings → Templates (Automation since stage 2) →
+  // ‹ Settings is Automation, closed (it was the Setup page of the list's entry). The real setSettingsPage and
+  // closeSettingsPage, the rest faked (the workflow builder's reads too).
+  const H3 = navHistSandbox(script), n3 = H3.nav;
+  vm.runInContext('var DATA_EXPORT = { sens: true, counts: null, countsBusy: false }, AUTO = {}, TPL_EDIT = null, AUTO_TPL_EDIT = null;\n' + T('setSettingsPage') + '\n' + T('closeSettingsPage') + `
+    function dropBrandTry(){} function guardPeoplePay(go){ go(); }
+    var WF_UI = {}, WF_LIST_LIMITS = { statsDays: 30 }; function wfInvalidate(){} function wfDayShift(){ return ''; } function bizDayOf(){ return ''; }
+    this.__ss = { goTab, setSettingsPage, closeSettingsPage };`, H3.ctx);
+  const ss = H3.ctx.__ss;
+  n3.navInit(); ss.goTab('settings'); ss.setSettingsPage('templates');
+  const pushes3 = H3.log.push, backs3 = H3.log.back; H3.log.renders = 0;
+  ss.closeSettingsPage(); H3.pop(1);
+  assertEqual([H3.log.back - backs3, H3.ui.settings.page, H3.ui.settings.open, H3.log.renders, H3.log.push - pushes3, H3.hist.state.sp, H3.hist.state.so, H3.hist.entries[2].sp, H3.hist.entries[2].so],
+    [1, 'automation', false, 1, 0, 'automation', false, 'automation', true], '‹ Settings: back to the list, the page stays selected (as on main), one render, no push; the entry matches, forward still opens the page');
+  ss.setSettingsPage('phone'); H3.pop(1);
+  assertEqual([H3.ui.settings.page, H3.ui.settings.open, H3.hist.entries.length], ['automation', false, 3], 'Back from a page (no ‹ Settings): the list shows the page of its entry');
+}
+// A vm context with the history layer and fakes of the browser and of the entry functions it calls.
+function navHistSandbox(script){
+  const log = { push: 0, replace: 0, back: 0, go: [], renders: 0, esc: 0, restored: 0, urls: [], closePopup: 0, closeConfirm: 0, closeMenus: 0, toasts: [], guard: 0, tplAsk: 0 };
+  // flags: what the fakes answer (a pay change not saved, a template not saved, the device for the leave guard, the
+  // installed app for the swipe, a fixed box inside the page, who is signed in and their home page)
+  const timers = [], flags = { payDirty: false, guardNext: null, tplDirty: false, env: {}, standalone: false, fixedInside: false, profile: { id: 'p1', role: 'owner' }, home: 'dashboard' };
+  let tid = 0;
+  const hist = { entries: [], idx: -1, state: null,
+    pushState(s, t, url){ log.push++; this.entries.splice(this.idx + 1); this.entries.push(s); this.idx++; this.state = s; if (url) log.urls.push(url); },
+    replaceState(s, t, url){ log.replace++; this.entries[Math.max(this.idx, 0)] = s; if (this.idx < 0) this.idx = 0; this.state = s; if (url) log.urls.push(url); },
+    back(){ log.back++; }, go(d){ log.go.push(d); } };
+  let modal = [], popup = null, confirm = null, menus = false;
+  const bodyCls = new Set();
+  // #content: its inline left / transform and its classes, for the swipe
+  const cCls = new Set(), content = { style: { left: '', transform: '' }, cls: cCls, animate: null,
+    classList: { add: (...c) => c.forEach(x => cCls.add(x)), remove: (...c) => c.forEach(x => cCls.delete(x)), contains: c => cCls.has(c) } };
+  const fixedBox = { getClientRects: () => [1], __fixed: true };
+  // timers wait in a list (H.runTimers runs them), so a test decides when "later" is; each keeps its delay
+  const ctx = { console, URLSearchParams, history: hist, location: { search: '?env=staging', href: 'https://x/?env=staging' }, __log: log, __flags: flags,
+    window: { scrollY: 0, scrollTo(){}, matchMedia: q => ({ matches: /standalone/.test(q) ? !!flags.standalone : false }) },
+    navigator: { maxTouchPoints: 1 },
+    getComputedStyle: el => ({ position: el && el.__fixed ? 'fixed' : 'static', overflowX: 'visible' }),
+    setTimeout: (f, ms) => { const id = ++tid; timers.push({ id, f, ms: ms | 0 }); return id; },
+    clearTimeout: id => { const i = timers.findIndex(t => t.id===id); if (i >= 0) timers.splice(i, 1); }, Promise,
+    document: { activeElement: null, getElementById: id => id==='modal-root' ? { children: modal } : id==='app-popup' ? popup : id==='content' ? content : null,
+      querySelector: q => q==='.confirm-back:not(.closing)' ? confirm : q==='.person-menu, .theme-menu, .pal-pop' && menus ? {} : null,
+      querySelectorAll: q => /\.set-nav/.test(q) && flags.fixedInside ? [fixedBox] : [],
+      body: { classList: { add: c => bodyCls.add(c), remove: c => bodyCls.delete(c), contains: c => bodyCls.has(c) } },
+      dispatchEvent: ev => { if (ev.key==='Escape') { log.esc++; modal = []; } } },
+    KeyboardEvent: class { constructor(type, o){ this.type = type; Object.assign(this, o); } },
+    AUTH: { status: 'ready' }, STATE: { dataLoaded: true, currentProfileId: 'p1' }, VIEW_AS_ID: null,
+    UI: { tab: 'crm', settings: { page: 'setup', open: false }, jobs: { selectedId: null }, reference: { tab: 'equipment', contractorId: null }, crm: { view: 'pipeline', selectedContactId: null }, tasks: { board: 'all' }, mobileNavOpen: false },
+    PEOPLE_UI: { sel: null, tab: 'details' } };
+  vm.createContext(ctx);
+  const names = ['OLD_SETTINGS_PAGES', 'settingsPageKey', 'navSnapOf', 'navKey', 'navMode', 'navUrl', 'NAV_HIST', 'NAV_RESTORERS', 'NAV_LEAVERS', 'NAV_BASE_KINDS', 'navSnap', 'navPid', 'navOurs',
+    'navUid', 'navEntryForeign', 'navForeign', 'navSame', 'navKeep', 'navCustom', 'navPush', 'navReplace', 'navBackTo', 'navGoBack', 'navStay', 'navAfterRender', 'navInit',
+    'NAV_LEAVE_MS', 'navLeaveGuardOn', 'navArm', 'navOffGuard', 'navLeaveWarn', 'navLandHome', 'navForget',
+    'NAV_MENUS', 'navLayerOrder', 'navTopWindow', 'navCloseWindow', 'NAV_LAYERS', 'tplDraftChanged', 'navLayer', 'navLayersOpen', 'navTopLayer', 'navOverlayOpen',
+    'navIsSticky', 'navNudge', 'navActivated', 'navOverlaySync', 'navOverlayClose', 'navRedo', 'navLeaveVerdict', 'navLeaveWait', 'navBlurField', 'navOnPop', 'navRestoreView',
+    'NAV_SWIPE_RULES', 'isBackSwipe', 'navSwipeOn', 'navSidePanelOpen', 'navSwipeBlocked', 'navScrollsLeft', 'navFixedInside', 'navSwipeReset', 'navSwipeStart', 'navSwipeMove', 'navSwipeEnd',
+    'navSwipeCancel', 'navSwipeBack', 'navSwipeInAnim', 'motionReduced'];
+  vm.runInContext('var NAV_SWIPE = null, PIPE_DRAG = null;\n' + names.map(nm => extractDecl(script, nm)).join('\n') + `
+    NAV_BASE_KINDS.forEach(k => { NAV_RESTORERS[k] = (s, prev) => { __log.restored++; return navRestoreView(s, prev); }; });
+    function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; } __log.renders++; navAfterRender({}); }
+    function goTab(id){ UI.tab = id; UI.jobs.selectedId = null; UI.reference.contractorId = null; PEOPLE_UI.sel = null; render(); }
+    function selectJob(id){ UI.jobs.selectedId = id && UI.jobs.selectedId!==id ? id : null; }
+    function openContractor(id){ UI.reference.contractorId = id || null; }
+    function closeConfirmModal(){ __log.closeConfirm++; __closeConfirm(); } function closePopup(){ __log.closePopup++; __closePopup(); }
+    function closeThemeMenu(){ __log.closeMenus++; __closeMenus(); } function closeCatalogColor(){}
+    function showToast(msg){ __log.toasts.push(msg); }
+    function peoplePayDirty(){ return !!__flags.payDirty; }
+    function guardPeoplePay(next){ __log.guard++; if (__flags.payDirty) __flags.guardNext = next; else next(); }
+    function navTplDirty(){ return !!__flags.tplDirty; } function navTplAsk(){ __log.tplAsk++; return false; }
+    function navLeaveEnv(){ return __flags.env; }
+    function getCurrentProfile(){ return __flags.profile; } function homeTabFor(p){ return __flags.home; }
+    this.__nav = { NAV_HIST, NAV_RESTORERS, NAV_LEAVERS, NAV_LAYERS, navInit, navPush, navReplace, navBackTo, navGoBack, navOverlaySync, navOnPop, navSnap, navKey, navLayer, navLayersOpen, navTopLayer,
+      navOverlayOpen, navOverlayClose, navAfterRender, navArm, navForget, navForeign, navSwipeStart, navSwipeMove, navSwipeEnd, navSwipeCancel, navSwipeBack, render };`, Object.assign(ctx, { __closePopup: () => { popup = null; }, __closeConfirm: () => { confirm = null; }, __closeMenus: () => { menus = false; } }));
+  // a fake #app-popup: its box records the nudge's classes
+  const fakePopup = o => { const box = new Set(); return { dataset: { ...(o.sticky ? { navSticky: '1' } : {}), ...(o.stay ? { navStay: o.stay } : {}) }, box,
+    querySelector: () => ({ classList: { add: c => box.add(c), remove: c => box.delete(c) }, offsetWidth: 1 }) }; };
+  return { nav: ctx.__nav, hist, log, ui: ctx.UI, pp: ctx.PEOPLE_UI, auth: ctx.AUTH, ctx, flags, timers, bodyCls, content,
+    modal: open => { modal = open ? [{ classList: { contains: () => false } }] : []; },
+    modalOpen: () => modal.length > 0,
+    popup: o => { popup = o ? fakePopup(o) : null; return popup; }, popupEl: () => popup,
+    confirm: open => { confirm = open ? { classList: { contains: () => false } } : null; }, menus: open => { menus = !!open; },
+    runTimers: () => { for (let k = 0; timers.length && k < 500; k++) timers.shift().f(); },
+    pop: i => { hist.idx = i; hist.state = hist.entries[i]; ctx.__nav.navOnPop({ state: hist.entries[i] }); } };
+}
+
+// ── Stage 4 review (Ofek 15 Oct): the layer registry, sticky one-time popups, leavers that say no, a refused restore ──
+async function testNavLayers(sb){
+  console.log('\nPage history: layers, sticky popups, leavers that say no (stage 4 review)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const T = nm => extractDecl(script, nm), tick = () => new Promise(r => setImmediate(r));
+  // pure: the open layers, topmost first; what a leaver said
+  const O = (ls, open) => sb.navLayerOrder(ls, open).map(l => l.id);
+  const Ls = [{ id: 'win', z: 200 }, { id: 'menu', z: 500 }, { id: 'drawer', z: 200 }, { id: 'pop', z: 300, shut: 1 }, { id: 'noz' }];
+  assertEqual([O(Ls, l => !l.shut), O(Ls, () => false), O(null, () => true), O([{ id: 'wf', z: 210 }, { id: 'picker', z: 230 }, { id: 'drawer', z: 220 }], () => true)],
+    [['menu', 'drawer', 'win', 'noz'], [], [], ['picker', 'drawer', 'wf']], 'navLayerOrder: topmost first by z; on the same z the one registered later; closed ones left out');
+  const V = sb.navLeaveVerdict;
+  assertEqual([V(false), V(Promise.resolve(true)), V({ then(){} }), V(undefined), V(true), V(0), V(5), V(null), V('no')],
+    ['stay', 'wait', 'wait', 'go', 'go', 'go', 'go', 'go', 'go'], 'navLeaveVerdict: false stays, a Promise waits for its answer, anything else goes on');
+  // the registry: the built-in layers in their order, one added by its z, entry: false, a throwing isOpen, the same id again
+  const H0 = navHistSandbox(script), n0 = H0.nav, ids = l => l.map(x => x.id);
+  H0.menus(true); H0.confirm(true); H0.popup({}); H0.modal(true); H0.ui.mobileNavOpen = true;
+  const all = ids(n0.navLayersOpen());
+  n0.navLayer({ id: 'x-inline', z: 250, entry: false, isOpen: () => true, close(){} });
+  n0.navLayer({ id: 'x-throw', z: 900, isOpen(){ throw new Error('gone'); }, close(){} });
+  const withX = [ids(n0.navLayersOpen()), ids(n0.navLayersOpen(true))];
+  n0.navLayer({ id: 'x-inline', z: 50, entry: false, isOpen: () => true, close(){} });
+  assertEqual([all, withX, n0.NAV_LAYERS.filter(l => l.id==='x-inline').length, ids(n0.navLayersOpen()).pop(), n0.navLayer({}), n0.navLayer(null), n0.navTopLayer().id],
+    [['menus', 'confirm', 'popup', 'window', 'phone-menu'], [['menus', 'confirm', 'popup', 'x-inline', 'window', 'phone-menu'], ['menus', 'confirm', 'popup', 'window', 'phone-menu']], 1, 'x-inline', null, null, 'menus'],
+    'navLayer: built-in layers menus > confirm > popup > window > phone menu; an added one by its z; entry: false has no entry; an isOpen that throws is closed; the same id replaces');
+  const c1 = n0.navOverlayClose(), top1 = n0.navTopLayer().id, c2 = n0.navOverlayClose(), top2 = n0.navTopLayer().id, c3 = n0.navOverlayClose();
+  n0.navLayer({ id: 'x-asks', z: 600, isOpen: () => true, close: () => false });
+  assertEqual([c1, H0.log.closeMenus, top1, c2, H0.log.closeConfirm, top2, c3, H0.log.closePopup, n0.navOverlayClose(), n0.navOverlayClose({ id: 'none', isOpen: () => false, close(){} })],
+    ['closed', 1, 'confirm', 'closed', 1, 'popup', 'closed', 1, 'asked', 'closed'], 'navOverlayClose: the top layer each time (small menus before the confirm); a close() that returns false asked first');
+  const H0b = navHistSandbox(script);
+  assertEqual([H0b.nav.navOverlayClose(), H0b.nav.navTopLayer(), H0b.nav.navOverlayOpen()], ['', null, false], 'navOverlayClose: nothing open, nothing to do');
+  // A1: back on a popup that shows a key once keeps it (the phone's back, the browser's Back, Alt+←, the mouse's back button)
+  const H1 = navHistSandbox(script), n1 = H1.nav;
+  H1.ui.tab = 'crm'; n1.navInit(); H1.ui.tab = 'jobs'; n1.navPush({ kind: 'tab' });
+  const key = H1.popup({ sticky: true, stay: 'Copy the key first' }); n1.navOverlaySync();
+  assertEqual([H1.hist.state.ov, H1.hist.state.d], [1, 2], 'a sticky popup gets an entry of its own, as any popup');
+  H1.log.renders = 0; H1.log.go = [];
+  H1.pop(1);
+  assertEqual([H1.log.closePopup, H1.log.go, n1.NAV_HIST.skip, H1.log.toasts, [...key.box], H1.log.renders, H1.popupEl()===key, H1.ui.tab],
+    [0, [1], 1, ['Copy the key first'], ['nav-nudge'], 0, true, 'jobs'], 'back on a sticky popup (a key shown once): it stays and shakes, says why, the history goes forward again, nothing redrawn');
+  H1.pop(2);
+  assertEqual([n1.NAV_HIST.skip, n1.NAV_HIST.d, H1.hist.state.ov, H1.popupEl()===key], [0, 2, 1, true], 'its own history.go() lands on the popup\'s entry again');
+  const backs1 = H1.log.back;
+  n1.navSwipeBack(); H1.runTimers();
+  assertEqual([H1.log.back - backs1, H1.log.go, H1.log.closePopup, H1.log.toasts.length, H1.popupEl()===key], [0, [1], 0, 2, true], 'the edge swipe on a sticky popup: no back at all, it shakes again');
+  H1.popup({}); H1.pop(1);
+  assertEqual([H1.log.closePopup, H1.log.go, H1.popupEl(), H1.log.renders, H1.log.toasts.length], [1, [1], null, 0, 2], 'back on a plain popup closes it, as before');
+  const backs1b = H1.log.back; n1.navSwipeBack(); H1.runTimers();
+  assertEqual(H1.log.back - backs1b, 1, 'the edge swipe with nothing sticky open: a plain back');
+  const nk = T('mcpShowNewKey'), jl = T('showJoinLink'), op = T('openPopup'), escKey = script.slice(script.lastIndexOf("if (e.key==='Escape') {"));
+  assertEqual([nk.includes("`, { sticky: true, stay: 'Copy the key first, then press \"I\\'ve saved it\".' });"), jl.includes("`, { sticky: true, stay: 'Send the link first, then press Done.' });"),
+    op.includes("if (o.sticky) { el.dataset.navSticky = '1'; if (o.stay) el.dataset.navStay = String(o.stay); }"), /onclick|addEventListener/.test(op),
+    escKey.includes('if (root && root.innerHTML.trim()) closeModal();'), /closePopup|app-popup/.test(escKey), T('navSwipeBack').indexOf('navIsSticky(top)') < T('navSwipeBack').indexOf('navGoBack()'),
+    html.includes('.nav-nudge { animation: navNudge .36s ease-in-out; }'), html.includes('@media (prefers-reduced-motion: reduce) { .nav-nudge { animation: none; box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-lg); } }')],
+    [true, true, true, false, true, false, true, true, true], 'A1: the new key and the sign-in link are sticky; a click beside a popup and Escape still never close one (as on main); the swipe checks first; the shake uses tokens');
+  // B2b: a leaver that says no changes nothing; one that asks (a Promise) makes the same back again on true, never asking twice
+  const H2 = navHistSandbox(script), n2 = H2.nav;
+  H2.ui.tab = 'jobs'; n2.navInit(); n2.navPush({ kind: 'k', x: { id: 7 } });
+  const kKey = n2.navKey(H2.hist.state), rest2 = () => H2.log.restored;
+  let asked = 0, resolve = null;
+  n2.NAV_LEAVERS.k = () => { asked++; return false; };
+  H2.log.renders = 0; H2.log.go = []; const r0 = rest2(), rep2 = H2.log.replace;
+  H2.pop(0);
+  assertEqual([asked, H2.log.go, rest2() - r0, H2.log.renders, n2.NAV_HIST.skip, H2.log.replace - rep2], [1, [1], 0, 0, 1, 0], 'a leaver that returns false: no restorer, no redraw, nothing replaced; the history goes back where the screen is');
+  H2.pop(1);
+  assertEqual([n2.navKey(n2.NAV_HIST.cur)===kKey, n2.NAV_HIST.d], [true, 1], 'after its skipped popstate the entry left is the current one again');
+  n2.NAV_LEAVERS.k = () => { asked++; return new Promise(r => { resolve = r; }); };
+  asked = 0; H2.log.go = [];
+  H2.pop(0);
+  assertEqual([asked, H2.log.go, rest2() - r0], [1, [1], 0], 'a leaver that asks (a Promise): the history stays at once');
+  H2.pop(1); resolve(true); await tick(); H2.runTimers();
+  assertEqual([H2.log.go, n2.NAV_HIST.leaveOk===kKey], [[1, -1], true], 'its answer true (Save / Discard): the same back is made again, the leaver marked as answered');
+  H2.pop(0);
+  assertEqual([asked, rest2() - r0, n2.NAV_HIST.leaveOk, H2.ui.tab], [1, 1, null, 'jobs'], 'that back goes through without asking twice');
+  H2.pop(1); asked = 0; H2.log.go = [];
+  H2.pop(0); H2.pop(1); resolve(false); await tick(); H2.runTimers();
+  assertEqual([asked, H2.log.go], [1, [1]], 'its answer false (Cancel): nothing moves');
+  H2.pop(0); H2.pop(1);
+  H2.ui.jobs.selectedId = 'j5'; n2.navPush({ kind: 'panel' });
+  resolve(true); await tick(); H2.runTimers();
+  assertEqual(H2.log.go, [1, 1], 'an answer after the screen moved on makes no back');
+  // B2c: a kind of its own gets the page under it first, then its restorer
+  const H3 = navHistSandbox(script), n3 = H3.nav, seen3 = [];
+  H3.ui.tab = 'jobs'; n3.navInit(); n3.navPush({ kind: 'wfx', x: { id: 1 } });
+  H3.ui.tab = 'crm'; n3.navPush({ kind: 'tab' });
+  n3.NAV_RESTORERS.wfx = (s, prev) => { seen3.push([H3.ui.tab, prev.tab, s.x.id]); };
+  H3.log.renders = 0; H3.pop(1);
+  assertEqual([seen3, H3.log.renders, H3.ui.tab, H3.log.go], [[['jobs', 'crm', 1]], 1, 'jobs', []], 'a kind of its own: navRestoreView puts the page back first, then its restorer runs; one render');
+  // C2: a restore the pay guard refuses applies nothing (no closeSettingsPage / openPersonCard first), no held redraw, no navReplace
+  const H4 = navHistSandbox(script), n4 = H4.nav;
+  H4.ui.tab = 'settings'; H4.ui.settings = { page: 'people', open: true }; n4.navInit();
+  H4.pp.sel = 'e:1'; n4.navPush({ kind: 'panel' });
+  H4.flags.payDirty = true; H4.log.renders = 0; H4.log.go = []; const rep4 = H4.log.replace;
+  H4.pop(0);
+  assertEqual([H4.log.guard, H4.ui.settings.open, H4.pp.sel, H4.log.renders, H4.log.go, H4.log.replace - rep4, n4.NAV_HIST.restoring, n4.NAV_HIST.hold],
+    [1, true, 'e:1', 0, [1], 0, false, false], 'a restore the pay guard refuses: the card and the page stay, nothing redrawn or replaced, the history back where the screen is');
+  H4.pop(1); H4.flags.payDirty = false; H4.flags.guardNext(); H4.runTimers();
+  assertEqual(H4.log.go, [1, -1], 'Save / Don\'t save: the same back is made again');
+  const H5 = navHistSandbox(script), n5 = H5.nav;
+  H5.ui.tab = 'settings'; H5.ui.settings = { page: 'phone', open: true }; n5.navInit();
+  H5.ui.settings.page = 'people'; n5.navPush({ kind: 'settings' });
+  H5.pp.sel = 'e:1'; n5.navPush({ kind: 'panel' });
+  H5.ui.mobileNavOpen = true; H5.flags.payDirty = true; H5.log.renders = 0; H5.log.go = [];
+  H5.pop(0);
+  assertEqual([H5.ui.mobileNavOpen, H5.log.go, H5.log.renders, H5.ui.settings.page, H5.pp.sel], [true, [2], 0, 'people', 'e:1'], 'a jump back with the phone menu open that the guard refuses: the menu stays open, nothing else changes');
+  assertEqual(T('navOnPop').includes('if (ok && NAV_HIST.held) render();'), true, 'navOnPop: the held redraw only after a restore that went through');
+  // C1: navPush over a history.state that is not ours (a stray # link) replaces it, never throws
+  const H6 = navHistSandbox(script), n6 = H6.nav;
+  H6.ui.tab = 'crm'; n6.navInit();
+  H6.hist.state = { foo: 1 }; H6.hist.entries[H6.hist.idx] = H6.hist.state;
+  H6.ui.tab = 'jobs'; const p6 = H6.log.push, r6 = H6.log.replace; let threw = null;
+  try { n6.navPush({ kind: 'tab' }); } catch (e) { threw = e.message; }
+  assertEqual([threw, H6.log.push - p6, H6.log.replace - r6, H6.hist.state.tab, H6.hist.state.nav], [null, 0, 1, 'jobs', 1], 'navPush over a foreign history.state: replaced, never throws');
+}
+
+
+// ── Stage 4 review, part 2 (Ofek 15 Oct): unsaved edits kept, code-opened panels, one back at a time, first-tap windows
+// under the swipe, entries of another person, the swipe's touch sequence, "Press back again to leave" ──
+function testNavStep3(sb){
+  console.log('\nPage history: unsaved edits, double back, per-user entries, the leave toast (stage 4 review)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const T = nm => extractDecl(script, nm);
+  // pure helpers
+  const D = sb.tplDraftChanged;
+  assertEqual([D({ a: 'x', b: 'y' }, { a: 'x', b: 'y' }), D({ a: 'x' }, { a: 'z' }), D({ a: 'one\r\ntwo' }, { a: 'one\ntwo' }), D({ a: null }, {}), D(null, null),
+    D({ name: 'New message', channel: 'text', body: '' }, { name: 'New message', channel: 'text', body: '' }), D({ name: 'New message', channel: 'text', body: 'Hi' }, { name: 'New message', channel: 'text', body: '' })],
+    [false, true, false, false, false, false, true], 'tplDraftChanged: the same words are no change (CRLF and LF alike); a new template counts once something is typed');
+  const G = sb.navLeaveGuardOn;
+  assertEqual([G({ coarse: true }), G({ standalone: true }), G({}), G({ coarse: false, standalone: false }), G(undefined), sb.NAV_LEAVE_MS],
+    [true, true, false, false, false, 2000], 'navLeaveGuardOn: "Press back again" on a touch screen or in the installed app, never on a desktop browser; 2 s');
+  const F = sb.navEntryForeign;
+  assertEqual([F({ nav: 1, u: 'p1' }, 'p1'), F({ nav: 1, u: 'p1' }, 'p2'), F({ nav: 1 }, 'p2'), F({ nav: 1, u: null }, 'p2'), F({ u: 'p1' }, 'p2'), F(null, 'p1'), F({ nav: 1, u: null }, null)],
+    [false, true, false, true, false, false, false], 'navEntryForeign: another person\'s entry (or one a sign-out wiped) is foreign; an entry from before the stamp is ours');
+
+  // B1a: the field being typed in saves before anything is torn down; its redraw joins the restore's one
+  const H = navHistSandbox(script), n = H.nav, order = [];
+  H.ui.tab = 'crm'; n.navInit(); H.ui.tab = 'jobs'; n.navPush({ kind: 'tab' });
+  const field = { matches: q => /input/.test(q), blur(){ order.push('commit'); H.ctx.document.activeElement = null; H.ctx.render(); } };
+  const restTab = n.NAV_RESTORERS.tab; n.NAV_RESTORERS.tab = (s, prev) => { order.push('restore'); return restTab(s, prev); };
+  H.ctx.document.activeElement = field; H.log.renders = 0;
+  H.pop(0);
+  assertEqual([order, H.log.renders, H.ui.tab, n.NAV_HIST.hold], [['commit', 'restore'], 1, 'crm', false], 'back with a field focused: it saves first (before the restorer), one render in all');
+  H.ui.tab = 'jobs'; n.navPush({ kind: 'tab' }); H.modal(true);   // a window opened without its entry: closed, the history goes back where the screen is
+  H.ctx.document.activeElement = field; order.length = 0; H.log.renders = 0; H.log.go = []; const rep1 = H.log.replace;
+  H.pop(0);
+  assertEqual([order, H.log.esc, H.log.go, n.NAV_HIST.skip, H.log.renders, H.log.replace - rep1, H.ui.tab], [['commit'], 1, [1], 1, 1, 0, 'jobs'],
+    'the same with a window to close first: the field saves, the window closes, one render after navStay and no navReplace while the history comes back');
+  H.pop(1);
+  const sw = T('navSwipeBack');
+  assertEqual([sw.indexOf('f.blur()') > 0 && sw.indexOf('f.blur()') < sw.indexOf("classList.add('nav-swipe-out')") && sw.indexOf('f.blur()') < sw.indexOf('navTopLayer()'),
+    T('navOnPop').indexOf('navBlurField()') < T('navOnPop').indexOf('navLayersOpen()'), T('navAfterRender').includes('if (NAV_HIST.skip) return;')],
+    [true, true, true], 'the swipe lets go of the field before #content is touched; popstate before any layer closes; navAfterRender waits while the history comes back');
+
+  // B1b: Settings → Message templates, a template being edited and not saved: back asks first
+  const H2 = navHistSandbox(script), n2 = H2.nav;
+  H2.ui.tab = 'crm'; n2.navInit(); H2.ui.tab = 'settings'; H2.ui.settings = { page: 'templates', open: true }; n2.navPush({ kind: 'settings' });
+  H2.ctx.TPL_EDIT = { id: 'review' }; H2.flags.tplDirty = true; H2.log.renders = 0; H2.log.go = []; const r2 = H2.log.restored;
+  H2.pop(0);
+  assertEqual([H2.log.tplAsk, H2.log.go, H2.log.restored - r2, H2.log.renders, H2.ctx.TPL_EDIT, H2.ui.tab, H2.ui.settings.page], [1, [1], 0, 0, { id: 'review' }, 'settings', 'templates'],
+    'back with a template changed and not saved: it asks (Discard / Keep editing), the page stays, the history goes back where the screen is');
+  H2.pop(1); H2.confirm(true);
+  H2.pop(0);
+  assertEqual([H2.log.closeConfirm, H2.log.tplAsk, H2.log.go], [1, 1, [1, 1]], 'back on that question closes it first (the confirm is above the template), the edit stays');
+  H2.pop(1); H2.flags.tplDirty = false; H2.log.renders = 0;
+  H2.pop(0);
+  assertEqual([H2.log.restored - r2, H2.ui.tab, H2.log.renders], [1, 'crm', 1], 'with nothing changed (or after Discard) back goes as before');
+  const lay = n2.NAV_LAYERS.find(l => l.id==='template') || {};
+  assertEqual([lay.z, lay.entry, n2.navLayersOpen(true).some(l => l.id==='template')], [50, false, false], 'the template layer: lowest, no entry of its own');
+  // the real navTplDirty / navTplAsk, with the editor's own ids (a rename on main makes this fail loudly)
+  const tctx = { console, __els: {}, __confirm: null, __renders: 0 };
+  vm.createContext(tctx);
+  vm.runInContext(['tplDraftChanged', 'navTplDirty', 'navTplAsk'].map(T).join('\n') + `
+    var TPL_EDIT = null, AUTO_TPL_EDIT = null, LIB = {};
+    var document = { getElementById: id => __els[id] || null };
+    function msgTemplateText(k){ return ({ a: 'Hi', my_1: 'Body' })[k] || ''; } function autoLib(){ return LIB; }
+    function confirmAction(msg, fn, opts){ __confirm = { msg, fn, opts }; } function render(){ __renders++; }
+    this.__t = { set: (a, b, l) => { TPL_EDIT = a; AUTO_TPL_EDIT = b; LIB = l || {}; }, get: () => [TPL_EDIT, AUTO_TPL_EDIT], navTplDirty, navTplAsk };`, tctx);
+  const tt = tctx.__t, dirty = (a, b, l, els) => { tt.set(a, b, l); tctx.__els = els; return tt.navTplDirty(); };
+  const onTpl = { 'tpl-actions': {} }, onAuto = { 'au-tf-body': {} };
+  assertEqual([dirty({ values: { a: 'Hi' } }, null, null, onTpl), dirty({ values: { a: 'Hello' } }, null, null, onTpl), dirty({ values: { a: 'Hello' } }, null, null, {}),
+    dirty(null, { key: 'my_2', isNew: true, name: 'New message', channel: 'text', body: '' }, null, onAuto), dirty(null, { key: 'my_2', isNew: true, name: 'New message', channel: 'text', body: 'x' }, null, onAuto),
+    dirty(null, { key: 'my_1', isNew: false, name: 'A', channel: 'email', body: 'Body' }, { my_1: { name: 'A', channel: 'email' } }, onAuto),
+    dirty(null, { key: 'my_1', isNew: false, name: 'B', channel: 'email', body: 'Body' }, { my_1: { name: 'A', channel: 'email' } }, onAuto), dirty(null, null, null, onAuto)],
+    [false, true, false, false, true, false, true, false], 'navTplDirty: a built-in or own template counts only when changed and its editor is on screen');
+  tt.set({ values: {} }, { key: 'k' });
+  const asked = tt.navTplAsk(), cf = tctx.__confirm;
+  cf.fn();
+  assertEqual([asked, cf.opts.title, cf.opts.confirmLabel, cf.opts.cancelLabel, cf.opts.danger, tt.get(), tctx.__renders, script.includes('id="tpl-actions"'), script.includes('id="au-tf-body"')],
+    [false, 'Discard changes?', 'Discard', 'Keep editing', false, [null, null], 1, true, true], 'navTplAsk: asks and stays; Discard closes the editor (no history move); the editor ids it reads exist');
+
+  // C3: panels opened by code get an entry; from a window's (or popup's) entry it becomes the panel's
+  assertEqual(['addEmployeeCard', 'saveAddContractor', 'saveAddPerson'].map(nm => { const t = T(nm), i = t.indexOf("navPush({ kind: 'panel' })"); return i > 0 && i < t.lastIndexOf('render()'); }),
+    [true, true, true], 'C3: a new employee, contractor or person: their card gets an entry before the redraw');
+  const H3 = navHistSandbox(script), n3 = H3.nav;
+  H3.ui.tab = 'reference'; H3.ui.reference.contractorId = null; n3.navInit(); const ref0 = H3.hist.state;
+  H3.popup({}); n3.navOverlaySync();
+  H3.popup(null); H3.ui.reference.contractorId = 'k9'; const p3 = H3.log.push, rp3 = H3.log.replace;
+  n3.navPush({ kind: 'panel' });
+  assertEqual([H3.log.push - p3, H3.log.replace - rp3, H3.hist.state.con, H3.hist.state.ov, H3.hist.state.d, H3.hist.state.pk===n3.navKey(ref0)], [0, 1, 'k9', undefined, 1, true],
+    'the add-contractor popup\'s entry becomes the new card\'s (pk: the page below)');
+  H3.pop(0);
+  assertEqual([H3.ui.tab, H3.ui.reference.contractorId], ['reference', null], 'and back closes the card');
+
+  // C4: one back at a time
+  const H4 = navHistSandbox(script), n4 = H4.nav;
+  H4.ui.tab = 'jobs'; n4.navInit(); H4.ui.jobs.selectedId = 'j1'; n4.navPush({ kind: 'panel' });
+  const shut = { ...n4.navSnap(), job: null };
+  const b1 = n4.navBackTo(shut), b2 = n4.navBackTo(shut);
+  assertEqual([b1, b2, H4.log.back, n4.NAV_HIST.backPending], [true, true, 1, true], 'C4: a double tap on close goes back once (the second tap is taken as done)');
+  H4.pop(0);
+  H4.ui.jobs.selectedId = 'j2'; n4.navPush({ kind: 'panel' });
+  assertEqual([n4.NAV_HIST.backPending, n4.navBackTo(shut), H4.log.back], [false, true, 2], 'the popstate clears it: the next close goes back again');
+  H4.pop(0);
+  const g1 = n4.navGoBack(), g2 = n4.navGoBack(), pend = n4.NAV_HIST.backPending, bt = H4.timers.find(t => t.ms===1000);
+  H4.runTimers();
+  assertEqual([g1, g2, pend, !!bt, n4.NAV_HIST.backPending, H4.log.back], [true, false, true, true, false, 3], 'navGoBack: no popstate within a second clears it anyway');
+
+  // C5: a window opened before the first tap (no entry of its own) under the swipe: closed directly, never history.back()
+  const H5 = navHistSandbox(script), n5 = H5.nav;
+  H5.ui.tab = 'jobs'; n5.navInit(); H5.ui.tab = 'crm'; n5.navPush({ kind: 'tab' });
+  H5.modal(true);
+  n5.navSwipeBack(); H5.runTimers();
+  assertEqual([H5.log.esc, H5.log.back, H5.log.go, H5.modalOpen()], [1, 0, [], false], 'C5: the swipe on a window with no entry closes it, no back');
+  n5.navOverlaySync(); H5.flags.tplDirty = true; n5.navSwipeBack(); H5.runTimers();
+  assertEqual([H5.log.tplAsk, H5.log.back], [1, 0], 'and on a template not saved it asks, no back');
+  assertEqual([T('navSwipeStart').includes('NAV_HIST.d > 0 && !navTopLayer() && !navSidePanelOpen()'), T('navSwipeEnd').includes('canBack: NAV_HIST.d > 0 || !!navTopLayer()')], [true, true],
+    'the swipe can close a layer on the first screen; the page only follows the finger when back goes to another screen');
+
+  // C6: sign out, sign in as someone else: their entries land on the home page, their ids never come back
+  const H6 = navHistSandbox(script), n6 = H6.nav;
+  H6.ui.tab = 'crm'; n6.navInit(); H6.ui.tab = 'jobs'; n6.navPush({ kind: 'tab' }); H6.ui.jobs.selectedId = 'j1'; n6.navPush({ kind: 'panel' }); H6.ui.tab = 'tasks'; n6.navPush({ kind: 'tab' });
+  assertEqual([H6.hist.entries.map(e => e.u), T('doLogout').includes('resetUI();\n  navForget();')], [['p1', 'p1', 'p1', 'p1'], true], 'entries carry who made them; doLogout forgets the history');
+  n6.navForget();
+  assertEqual([n6.NAV_HIST.ready, H6.hist.state.u, H6.hist.state.tab, H6.hist.state.d, H6.hist.state.job], [false, null, null, 0, undefined], 'navForget: not ready, the entry showing keeps no ids');
+  H6.ctx.STATE.currentProfileId = 'p2'; H6.flags.profile = { id: 'p2', role: 'manager' }; H6.ui.tab = 'dashboard'; H6.ui.jobs.selectedId = null;
+  n6.navAfterRender({});
+  assertEqual([H6.hist.state.d, H6.hist.state.pk, H6.hist.state.u, n6.NAV_HIST.ready], [0, null, 'p2', true], 'the next login starts again: d 0, nothing below of theirs');
+  const r6 = H6.log.restored; H6.log.renders = 0; H6.ui.tab = 'crm';
+  H6.pop(2);
+  assertEqual([H6.ui.tab, H6.ui.jobs.selectedId, H6.log.restored - r6, H6.log.renders, H6.hist.entries[2].u, H6.hist.entries[2].d, H6.hist.entries[2].job, n6.NAV_HIST.d],
+    ['dashboard', null, 0, 1, 'p2', 0, null, 0], 'back onto the other person\'s job entry: this person\'s home page, no restorer, no job id, the entry made theirs');
+  // Ofek review round: on a touch screen, sign out and in as someone else; back, back leaves past their entries (never home
+  // again, no redraw); a jump onto one of theirs lands home with the guard under it again, the field being typed in saved first
+  const HL1 = navHistSandbox(script), nl1 = HL1.nav;
+  HL1.flags.env = { coarse: true }; HL1.ui.tab = 'crm'; nl1.navInit(); HL1.ui.tab = 'jobs'; nl1.navPush({ kind: 'tab' }); HL1.ui.jobs.selectedId = 'j1'; nl1.navPush({ kind: 'panel' });
+  nl1.navForget(); HL1.ctx.STATE.currentProfileId = 'p2'; HL1.flags.profile = { id: 'p2', role: 'manager' }; HL1.ui.tab = 'dashboard'; HL1.ui.jobs.selectedId = null;
+  nl1.navAfterRender({});
+  assertEqual([HL1.hist.entries.map(e => [e.u, e.d, e.g || 0]), HL1.hist.idx], [[['p1', -1, 1], ['p1', 0, 0], ['p1', 1, 0], ['p2', -1, 1], ['p2', 0, 0]], 4], 'the next login on a touch screen: its guard sits on the entries of the one before');
+  HL1.log.renders = 0; HL1.pop(3); const bl1 = HL1.log.back;
+  HL1.pop(2); const step1 = HL1.log.back - bl1; HL1.pop(1); HL1.pop(0);
+  assertEqual([HL1.log.toasts, step1, HL1.log.back - bl1, HL1.log.renders, HL1.ui.tab, HL1.log.replace > 0 && HL1.hist.entries[2].u], [['Press back again to leave'], 1, 3, 0, 'dashboard', 'p1'],
+    'back, back: the second back goes on out past their entries one at a time, never their home page again, no redraw');
+  const HL2 = navHistSandbox(script), nl2 = HL2.nav;
+  HL2.flags.env = { coarse: true }; HL2.ui.tab = 'crm'; nl2.navInit(); HL2.ui.tab = 'jobs'; nl2.navPush({ kind: 'tab' });
+  nl2.navForget(); HL2.ctx.STATE.currentProfileId = 'p2'; HL2.flags.profile = { id: 'p2', role: 'manager' }; HL2.ui.tab = 'dashboard';
+  nl2.navAfterRender({}); HL2.ui.tab = 'tasks';
+  let blurL2 = []; HL2.ctx.document.activeElement = { matches: () => true, blur(){ blurL2.push(nl2.NAV_HIST.hold); HL2.ctx.document.activeElement = null; nl2.render(); } };
+  HL2.log.renders = 0; HL2.pop(1);
+  assertEqual([blurL2, HL2.log.renders, HL2.ui.tab, HL2.hist.entries.map(e => [e.u, e.d, e.g || 0, e.gd || 0]), HL2.hist.idx], [[true], 1, 'dashboard', [['p1', -1, 1, 0], ['p2', -1, 1, 0], ['p2', 0, 0, 1]], 2],
+    'a jump onto their entry: the field saves first (held), one render, home, and the leave guard under it again');
+  HL2.pop(1); const bl2 = HL2.log.back; HL2.pop(0);
+  assertEqual([HL2.log.toasts, HL2.log.back - bl2], [['Press back again to leave'], 1], 'so back says "Press back again", and the next one leaves');
+
+  // a forward step onto a window's entry with nothing open goes back off it: the next back is never a dead one
+  const HL3 = navHistSandbox(script), nl3 = HL3.nav;
+  HL3.ui.tab = 'jobs'; nl3.navInit(); HL3.modal(true); nl3.navOverlaySync(); HL3.modal(false);
+  HL3.pop(0); HL3.runTimers(); const bl3 = HL3.log.back;
+  HL3.pop(1); HL3.runTimers();
+  assertEqual([HL3.hist.entries[1].ov, HL3.log.back - bl3, nl3.NAV_HIST.syncBack], [1, 1, true], 'forward onto a window\'s entry, nothing open: back off it at once');
+  HL3.pop(0);
+  assertEqual([nl3.NAV_HIST.syncBack, nl3.NAV_HIST.d, HL3.log.renders], [false, 0, 0], 'its popstate is ours: the screen stays');
+  // a leaver that draws its question through render(): drawn once, though the back waits for the answer
+  const HL4 = navHistSandbox(script), nl4 = HL4.nav;
+  HL4.ui.tab = 'jobs'; nl4.navInit(); nl4.navPush({ kind: 'k', x: { id: 1 } });
+  nl4.NAV_LEAVERS.k = () => { nl4.render(); nl4.render(); return new Promise(() => {}); };
+  HL4.log.renders = 0; HL4.log.go = []; HL4.pop(0);
+  assertEqual([HL4.log.renders, HL4.log.go], [1, [1]], 'a leaver that asks through render(): its question is drawn (once), the history stays');
+
+  // the swipe, with a fake touch sequence (the installed app)
+  const H7 = navHistSandbox(script), n7 = H7.nav, tg = { nodeType: 1, parentElement: null, closest: () => null };
+  H7.flags.standalone = true; H7.ui.tab = 'crm'; n7.navInit(); H7.ui.tab = 'jobs'; n7.navPush({ kind: 'tab' });
+  const touch = (x, y, more) => ({ touches: [{ clientX: x, clientY: y }, ...(more ? [{ clientX: 300, clientY: 300 }] : [])], changedTouches: [{ clientX: x, clientY: y }], target: tg });
+  n7.navSwipeStart(touch(5, 300)); n7.navSwipeMove(touch(90, 305));
+  const moved = [H7.content.style.transform, H7.content.style.left, H7.bodyCls.has('nav-swiping')];
+  n7.navSwipeEnd(touch(100, 305));
+  const out = [...H7.content.cls].sort(), backs7 = H7.log.back;
+  H7.runTimers();
+  assertEqual([moved, out, backs7, H7.log.back, n7.NAV_HIST.backPending], [['translateX(43px)', '', true], ['nav-swipe-out', 'tf'], 0, 1, false],
+    'swipe: from the edge the page follows the finger (a transform), slides out, and goes back once a moment later');
+  H7.pop(1);
+  H7.flags.fixedInside = true; n7.navSwipeStart(touch(5, 300)); n7.navSwipeMove(touch(90, 305));
+  const leftMove = [H7.content.style.transform, H7.content.style.left]; n7.navSwipeCancel();
+  H7.flags.fixedInside = false;
+  assertEqual([leftMove, H7.content.style.left, H7.bodyCls.has('nav-swiping')], [['', '43px'], '', false], 'with a fixed box inside the page it moves with left; touchcancel puts it back');
+  const tries = [
+    () => { n7.navSwipeStart(touch(5, 300)); n7.navSwipeMove(touch(10, 340)); n7.navSwipeEnd(touch(100, 340)); },   // up / down wins
+    () => { n7.navSwipeStart(touch(5, 300)); n7.navSwipeMove(touch(60, 300, true)); n7.navSwipeEnd(touch(100, 300)); },   // a second finger
+    () => { n7.navSwipeStart(touch(5, 300, true)); n7.navSwipeEnd(touch(100, 300)); },
+    () => { tg.closest = () => ({}); n7.navSwipeStart(touch(5, 300)); n7.navSwipeMove(touch(90, 300)); n7.navSwipeEnd(touch(100, 300)); tg.closest = () => null; },   // the pipeline, a field
+    () => { n7.navSwipeStart(touch(40, 300)); n7.navSwipeEnd(touch(140, 300)); },   // not from the edge
+  ];
+  const kept = tries.map(f => { const b = H7.log.back; f(); H7.runTimers(); return [H7.log.back - b, H7.content.style.transform]; });
+  assertEqual(kept, [[0, ''], [0, ''], [0, ''], [0, ''], [0, '']], 'swipe: a scroll, a second finger, the pipeline or a field, or a touch away from the edge never go back');
+  H7.pop(0);
+  const b7 = H7.log.back; n7.navSwipeStart(touch(5, 300)); n7.navSwipeMove(touch(90, 300)); n7.navSwipeEnd(touch(100, 300)); H7.runTimers();
+  assertEqual([H7.log.back - b7, H7.content.style.transform, n7.NAV_HIST.d], [0, '', 0], 'swipe on the first screen with nothing open: no back');
+  H7.flags.standalone = false; n7.navSwipeStart(touch(5, 300));
+  assertEqual(H7.ctx.NAV_SWIPE, null, 'in a browser tab (not the installed app) the swipe is the browser\'s own');
+
+  // "Press back again to leave" on the first screen (touch screen or installed app), with a fake clock
+  const H8 = navHistSandbox(script), n8 = H8.nav;
+  H8.flags.env = { coarse: true }; H8.ui.tab = 'crm'; n8.navInit();
+  const first8 = H8.hist.state;
+  assertEqual([H8.hist.entries.length, H8.hist.entries[0].g, H8.hist.entries[0].d, first8.gd, first8.d, n8.NAV_HIST.d, H8.log.push], [2, 1, -1, 1, 0, 0, 1],
+    'the guard goes under the first screen (a copy, d -1); the first screen over it');
+  H8.log.renders = 0; const r8 = H8.log.restored;
+  H8.pop(0);
+  const lt = H8.timers.find(t => t.ms===sb.NAV_LEAVE_MS);
+  assertEqual([H8.log.toasts, H8.log.renders, H8.log.restored - r8, H8.log.go, !!lt, n8.NAV_HIST.d], [['Press back again to leave'], 0, 0, [], true, -1],
+    'back on the first screen: "Press back again to leave", nothing redrawn (a second back within 2 s leaves the app)');
+  H8.runTimers();
+  assertEqual([H8.hist.idx, H8.hist.state.gd, H8.hist.state.g, n8.NAV_HIST.d, H8.log.push], [1, 1, undefined, 0, 2], 'after 2 s the first screen goes back over the guard: back asks again');
+  H8.pop(0);
+  H8.ui.tab = 'jobs'; n8.navPush({ kind: 'tab' });
+  assertEqual([H8.hist.entries.length, H8.hist.entries[0].g, H8.hist.entries[1].gd, H8.hist.state.d, H8.hist.state.pk===n8.navKey(first8), H8.timers.some(t => t.ms===sb.NAV_LEAVE_MS)],
+    [3, 1, 1, 1, true, false], 'a move while on the guard puts the first screen back first: the new entry sits on it, not on the guard');
+  const H9 = navHistSandbox(script);
+  H9.flags.env = { coarse: false, standalone: false }; H9.ui.tab = 'crm'; H9.nav.navInit();
+  assertEqual([H9.log.push, H9.hist.state.g, H9.hist.state.gd], [0, undefined, undefined], 'a desktop browser keeps its own Back: no guard');
+  const H10 = navHistSandbox(script), n10 = H10.nav;
+  H10.flags.env = { standalone: true }; H10.ui.tab = 'settings'; H10.ui.settings = { page: 'templates', open: true }; n10.navInit();
+  H10.flags.tplDirty = true; H10.log.go = [];
+  H10.pop(0);
+  assertEqual([H10.log.tplAsk, H10.log.toasts, H10.log.go], [1, [], [1]], 'a template not saved on the first screen asks instead of "Press back again"');
+  const H11 = navHistSandbox(script), n11 = H11.nav;   // a back on the guard while signed in, then the screen is ours: re-armed by the next move only
+  H11.flags.env = { coarse: true }; H11.ui.tab = 'crm'; n11.navInit(); H11.pop(0); H11.modal(true); n11.navOverlaySync();
+  assertEqual([H11.hist.entries.length, H11.hist.entries[0].g, H11.hist.entries[1].gd, H11.hist.state.ov, H11.hist.state.d], [3, 1, 1, 1, 1], 'a window opened while on the guard: the first screen first, then the window\'s entry');
+  const H12 = navHistSandbox(script), n12 = H12.nav;   // the first screen changed in place (one job swapped for another): the guard still holds the old one
+  H12.flags.env = { coarse: true }; H12.ui.tab = 'jobs'; H12.ui.jobs.selectedId = 'j1'; n12.navInit();
+  H12.ui.jobs.selectedId = 'j2'; n12.navPush({ kind: 'panel' });
+  const r12 = H12.log.restored; H12.log.renders = 0;
+  H12.pop(0);
+  assertEqual([H12.log.toasts, H12.ui.jobs.selectedId, H12.log.restored - r12, H12.log.renders, H12.hist.entries[0].job, H12.hist.entries[0].g, H12.hist.entries[0].d, H12.hist.entries[0].gd, n12.NAV_HIST.d],
+    [['Press back again to leave'], 'j2', 0, 0, 'j2', 1, -1, undefined, -1], 'back from a first screen changed in place: the screen stays (never the older one), the guard copies it again');
+  assertEqual([T('navFirstUse').indexOf('navArm();') > 0 && T('navFirstUse').indexOf('navArm();') < T('navFirstUse').indexOf('setTimeout'), T('navInit').trim().endsWith('navArm();           // the leave guard: nothing until the first tap or key (then navFirstUse)\n}')],
+    [true, true], 'the guard is armed at the first tap (pointerup, before the click\'s own entry) and at each start');
+}
+
+// Stage 3 follow-ups 5 and 7 (Ofek 15 Oct), run in a sandbox: the vacations channel subscribes once, only when the list
+// loaded, and each change may end the shift; the save asks "End their shift now?" only for a VA on shift today.
+async function testVacationFollowUps(){
+  console.log('\nPeople: vacations, follow-ups 5 and 7 (sandbox)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const chans = [], fired = [];
+  const ctx = { console, STATE: { data: { vacationsError: 'the vacations list did not load' } },
+    sb: { channel(name){ const c = { name, ons: [], on(ev, f, cb){ c.ons.push(cb); return c; }, subscribe(){ chans.push(c); return c; } }; return c; } },
+    handleListRealtimeChange: (k, map) => p => fired.push(['list', k, typeof map]), vacationWithNote: v => v, mapVacationRow: r => r, vacationEndOwnShift: () => fired.push(['endShift']), handleVacationNoteRealtimeChange: p => fired.push(['notes', p.eventType]) };
+  vm.createContext(ctx);
+  vm.runInContext('var VACATIONS_CHANNEL = null;\n' + extractDecl(script, 'setupVacationsChannel') + '\nthis.__s = setupVacationsChannel; this.__ch = () => VACATIONS_CHANNEL;', ctx);
+  ctx.__s();
+  const afterFail = chans.length;
+  ctx.STATE.data = { vacationsError: '' };
+  ctx.__s(); ctx.__s();
+  assertEqual([afterFail, chans.length, chans[0] && chans[0].name, !!ctx.__ch()], [0, 1, 'vacations-realtime', true], 'channel: not while the list failed to load; a later load that worked subscribes, once');
+  chans[0].ons[0]({ eventType: 'UPDATE', new: { id: 'v1' } });
+  assertEqual(fired, [['list', 'vacations', 'function'], ['endShift']], 'channel: each change updates the list, then may end this login\'s shift');
+  chans[0].ons[1]({ eventType: 'DELETE', old: { vacation_id: 'v1' } });
+  assertEqual([chans[0].ons.length, fired[2]], [2, ['notes', 'DELETE']], 'channel: the private rows (note, paid / unpaid leave) on the same channel (stage 3 follow-ups review, item 2)');
+
+  // the save's question (saveVacationModal): a VA card, in force today, on shift (read fresh) → asked; else saved straight away
+  const run = async ({ startsOn = '2026-10-22', onDuty = true, profiles, readError = false } = {}) => {
+    const log = { reads: [], saves: [], confirms: [] };
+    const sx = { console, VAC_UI: null, PRESENT: false, VIEW_AS_ID: null,
+      STATE: { data: { vacations: [], employees: [{ id: 'e3', name: 'Eve Ray' }, { id: 'e2', name: 'Sam' }] }, profiles: profiles || [{ id: 'pe', fullName: 'Eve Ray', role: 'va', onDuty: false, onDutyDate: '2026-10-22' }] },
+      sb: { from: t => ({ select: cols => ({ in: (k, ids) => { log.reads.push([t, cols, ids]); return Promise.resolve(readError ? { data: null, error: { message: 'x' } } : { data: ids.map(id => ({ id, role: 'va', on_duty: onDuty, on_duty_date: '2026-10-22' })), error: null }); } }) }) },
+      bizTz: () => 'Australia/Sydney', todayStr: () => '2026-10-22', canSetVacation: () => true, vacationFormProblems: () => [], modalError: () => {}, showToast: () => {},
+      vacationSaveNow: (ui, end) => log.saves.push(end), confirmAction: (m, fn, o) => log.confirms.push({ m, fn, o }) };
+    vm.createContext(sx);
+    vm.runInContext(['readOnlyReason', 'vacationEmployeeOfProfile', 'vacationShiftLogins', 'vacationOnShift', 'vacationNotesBlock', 'saveVacationModal'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__save = saveVacationModal;', sx);
+    sx.VAC_UI = { draft: { employeeId: 'e3', startsOn, endsOn: '2026-10-24', options: {}, standInId: null }, saving: false };
+    await sx.__save();
+    return { log, ui: sx.VAC_UI };
+  };
+  const a = await run();
+  assertEqual([a.log.reads, a.log.saves, a.log.confirms.length, a.ui.saving], [[['profiles', 'id, role, on_duty, on_duty_date', ['pe']]], [], 1, false], 'save: a VA on shift (read fresh, not the stale copy) → asked first, nothing saved yet');
+  const q = a.log.confirms[0];
+  assertEqual([q.m, q.o.title, q.o.confirmLabel, q.o.cancelLabel, q.o.alt.label, q.o.danger],
+    ['Eve is on shift now. End their shift now? Their app ends it the moment it is open; otherwise it ends by itself tonight.', 'On shift now', 'End their shift now', 'Back', 'Keep the shift', false], 'save: the question says what really happens');
+  q.fn(); q.o.alt.fn();
+  assertEqual(a.log.saves, [true, false], 'save: "End their shift now" saves with the marker, "Keep the shift" without');
+  const b = await run({ onDuty: false }), c = await run({ startsOn: '2026-10-23' }), d = await run({ profiles: [{ id: 'pt', fullName: 'Eve Ray', role: 'technician' }] });
+  assertEqual([b.log.saves, b.log.confirms.length, c.log.reads.length, c.log.saves, d.log.reads.length, d.log.saves], [[false], 0, 0, [false], 0, [false]], 'save: off shift, starting tomorrow or no office login → saved straight away (no read when there is nothing to ask)');
+  const e = await run({ readError: true, profiles: [{ id: 'pe', fullName: 'Eve Ray', role: 'va', onDuty: true, onDutyDate: '2026-10-22' }] });
+  assertEqual([e.log.confirms.length, e.log.saves], [1, []], 'save: the fresh read failed → the copy the app has decides');
+
+  // Ofek's review (16 Oct) A1, the save itself (vacationSaveNow): the notes didn't load → an existing vacation is not saved
+  // and its private row never written; else only the private columns that changed are upserted
+  const save = async (change, { notesError = '', id = 'v1' } = {}) => {
+    const log = { updates: [], adds: [], priv: [], errors: [], toasts: [] };
+    const v1 = { id: 'v1', employeeId: 'e3', startsOn: '2026-11-02', endsOn: '2026-11-06', standInId: null, options: { payroll: true, pay: 'paid' }, note: 'Surgery', privatePay: 'paid', payKnown: true };
+    const sx = { console, PRESENT: false, VIEW_AS_ID: null, VAC_UI: null,
+      STATE: { data: { vacations: [v1], employees: [{ id: 'e3', name: 'Eve Ray' }], vacationNotesError: notesError } },
+      db: { vacations: { update: (vid, row) => { log.updates.push(vid); return Promise.resolve({ vacation: { ...v1, ...change } }); }, add: row => { log.adds.push(row); return Promise.resolve({ vacation: { ...v1, id: 'vn' } }); },
+        setPrivate: (vid, patch) => { log.priv.push([vid, patch]); return Promise.resolve({ ok: true }); } } },
+      bizTz: () => 'Australia/Sydney', todayStr: () => '2026-10-22', canSetVacation: () => true, modalError: m => log.errors.push(m), showToast: m => log.toasts.push(m),
+      vacationRowFromDraft: () => ({ options: {} }), getCurrentProfile: () => ({ fullName: 'Owner' }), logEmployeeActivity: () => {}, vacationLogText: () => '', vacationOpt: () => false,
+      vacationMovableItems: () => ({ tasks: [], jobs: [] }), vacationRangeText: () => '', closeVacationModal: () => {}, render: () => {}, vacationErrorText: e => e.message, AUTO_BUSINESS_ID: 'default', document: { getElementById: () => null } };
+    vm.createContext(sx);
+    vm.runInContext(['readOnlyReason', 'VACATION_PAY', 'vacationPrivateRow', 'vacationPrivatePatch', 'vacationNotesBlock', 'vacationDraft', 'vacationSaveNow'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__now = vacationSaveNow; this.__draft = vacationDraft;', sx);
+    const d = id ? sx.__draft('e3', 'v1', sx.STATE.data.vacations, sx.STATE.data.employees, '2026-10-22') : { id: null, employeeId: 'e3', startsOn: '2026-11-20', endsOn: '2026-11-21', standInId: null, options: { payroll: true, pay: 'paid' }, note: '' };
+    sx.VAC_UI = { draft: { ...d, ...change }, saving: false };
+    await sx.__now(sx.VAC_UI, false);
+    return log;
+  };
+  const s1 = await save({ startsOn: '2026-11-03' }, { notesError: 'the vacation notes did not load' }), s2 = await save({ startsOn: '2026-11-03' });
+  assertEqual([s1.updates, s1.priv, s1.errors.length + s1.toasts.length, s2.updates, s2.priv], [[], [], 1, ['v1'], []], 'A1 save: notes load error + a date edit → refused, no private upsert; loaded + a date edit → the vacation only');
+  const s3 = await save({ options: { payroll: true, pay: 'unpaid' } }), s4 = await save({ note: 'Surgery, then rest' }), s5 = await save({}, { notesError: 'x', id: null });
+  assertEqual([s3.priv, s4.priv, s5.adds.length, s5.priv], [[['v1', { pay: 'unpaid' }]], [['v1', { note: 'Surgery, then rest' }]], 1, [['vn', { note: null, pay: 'paid' }]]],
+    'A1 save: a pay-only change upserts only pay, a note-only change only note; a new vacation may still be set (its private row is new)');
+}
+
 (async () => {
+  await testVacationFollowUps();
   await testWfSaveRuntime();
   await testAuthProvidersNoLoop();
   await testAutomationsLoaderNoLoop();
@@ -6671,6 +7548,8 @@ testWfPickDrawerRuntime();
   await testHolidayLoaders();
   await testFullBackup(loadSandbox());
   await testDataExport(loadSandbox());
+  await testNavLayers(loadSandbox());
+  testNavStep3(loadSandbox());
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });

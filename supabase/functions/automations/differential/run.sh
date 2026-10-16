@@ -4,9 +4,10 @@
 #
 # Replays recorded-style phase-4 scenarios through three engines on the same in-memory fake database (the one the
 # automations tests use, Part-1 shaped):
-#   old = the phase-4 function as live before stage 2: the vendored copy tests/phase4-reference.ts (= git commit a8c6d2d,
+#   old = the phase-4 function as live before stage 2: the vendored copy tests/phase4-reference.ts (= git commit f9c64b6,
 #         supabase/functions/automations/index.ts: phase 4 + stage 5's quiet imports + stage 3's vacations, live since
-#         15 Oct; checked against the commit whenever git can show it)
+#         15 Oct, + the stage 3 follow-ups' vacations block (vacBackDay; 16 Oct); checked against the commit whenever git
+#         can show it)
 #   new = the stage-2 function in compat mode (supabase/functions/automations/index.ts: phase-4 scanners + enqueue, runs
 #         executed by advanceV2)
 #   rb  = the rollback build (supabase/functions/automations-phase4-compat/index.ts)
@@ -42,7 +43,7 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 WT="$(cd "$DIR/../../../.." && pwd)"
-PHASE4_COMMIT="${PHASE4_COMMIT:-a8c6d2d}"
+PHASE4_COMMIT="${PHASE4_COMMIT:-f9c64b6}"
 REF="$WT/tests/phase4-reference.ts"
 B="$(mktemp -d "${TMPDIR:-/tmp}/automations_differential_XXXXXX")"
 trap 'rm -rf "$B/"*.ts' EXIT

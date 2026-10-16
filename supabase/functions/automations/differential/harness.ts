@@ -319,7 +319,7 @@ function firstDiff(a: any, b: any, path = ""): string | null {
       '    const { data: prior } = await sb.from("automation_log").select("id").eq("run_id", run.id).eq("step_id", st.id).limit(1);\n    if (prior && prior.length) { i++; continue; }');
   const rbOk = rb.startsWith(bar) && undone === p4;
   const fp = (s: string) => { let x = 0; for (let i = 0; i < s.length; i++) x = (x + s.charCodeAt(i) * (i % 97 + 1)) % 1000000007; return x; };
-  say(`rollback build = phase-4 (${process.env.PHASE4_COMMIT || "a8c6d2d"}) + header + 2 documented edits: ${rbOk ? "OK" : "DIFFERENT"}`);
+  say(`rollback build = phase-4 (${process.env.PHASE4_COMMIT || "f9c64b6"}) + header + 2 documented edits: ${rbOk ? "OK" : "DIFFERENT"}`);
   say(`fingerprints (sum(charCode*(i%97+1)) % 1000000007 / length): phase-4 ${fp(p4)}/${p4.length} · rollback build ${fp(rb)}/${rb.length}`);
 
   // 1. the corpus as the phase-4 validator sees it

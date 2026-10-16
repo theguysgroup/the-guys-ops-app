@@ -1069,7 +1069,7 @@ const syd = (day: string, h: number, m = 0) => zoneToUtc(day, h, m, "Australia/S
     await tickAt(db, w2At + MIN);
     eq([runOf(db), db.T.lead_messages.length], [["cancelled:automation deleted"], 0], "rollback build: a soft-deleted automation stops its waiting runs");
     // the build itself: the phase-4 engine + the three documented edits, nothing else (the RUNBOOK's fingerprint check
-    // compares it with the committed file; the differential harness compares it line by line with commit a8c6d2d)
+    // compares it with the committed file; the differential harness compares it line by line with commit f9c64b6)
     const code = src("index.ts");
     eq([(code.match(/ROLLBACK BUILD edit 1/g) || []).length, (code.match(/ROLLBACK BUILD edit 2/g) || []).length, /never deploy this folder by name/i.test(code), /\.select\("\*"\)\.eq\("run_id", run\.id\)\.eq\("step_id", st\.id\)\.limit\(50\)/.test(code)],
       [1, 1, true, true], "rollback build: its two code edits and the do-not-deploy-by-name header are there");

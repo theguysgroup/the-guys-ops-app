@@ -1708,6 +1708,19 @@ body.wf-open #phone-widget { left: auto !important; right: 16px; bottom: 164px !
   .app-grid > div:last-child { padding-bottom: calc(var(--bottom-bar-h) + 28px) !important; }
   #chase-bubbles, #phone-widget { bottom: calc(var(--bottom-bar-h) + 12px) !important; }
 }
+/* The edge swipe back (stage 4): the page follows the finger and slides out. It moves with a transform (.tf), or with left
+   while a fixed box inside it shows (a transform on #content would carry its fixed panels and the settings menu with
+   it); the column clips it meanwhile. */
+body.nav-swiping .main-col { overflow-x: clip; }
+html.nav-swipe-on, html.nav-swipe-on body { overscroll-behavior-x: none; }   /* the browser's own swipe back stays off: one swipe, one back */
+body.nav-swiping #content, #content.nav-swipe-in { position: relative; }
+#content.nav-swipe-out { position: relative; left: 28%; opacity: .4; transition: left .14s ease-in, opacity .14s ease-in; }
+#content.nav-swipe-out.tf { left: 0; transform: translateX(28%); transition: transform .14s ease-in, opacity .14s ease-in; }
+@media (prefers-reduced-motion: reduce) { #content.nav-swipe-out { left: 0; opacity: 1; transition: none; } #content.nav-swipe-out.tf { transform: none; } }
+/* Back on a layer that stays (a key shown once): it shakes; with reduced motion a ring instead (stage 4). */
+@keyframes navNudge { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+.nav-nudge { animation: navNudge .36s ease-in-out; }
+@media (prefers-reduced-motion: reduce) { .nav-nudge { animation: none; box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-lg); } }
 .toast-stack { position: fixed; left: 50%; bottom: calc(24px + var(--bottom-bar-h, 0px)); transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; align-items: center; gap: 8px; width: max-content; max-width: calc(100vw - 32px); pointer-events: none; }
 .toast { position: relative; pointer-events: auto; cursor: default; max-width: 100%; background: var(--ink); color: var(--paper); padding: 10px 20px 10px 11px; border-radius: 99px; font-size: 13px; font-weight: 600; line-height: 1.35; box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 10px; animation: toastIn .38s cubic-bezier(.2,.9,.25,1.3) both; transition: opacity .18s ease, transform .18s ease; }
 .toast.leaving { opacity: 0; transform: translateY(8px) scale(.96); }
@@ -2834,6 +2847,17 @@ function vacationForProfile(vacations, profile, day, tz, key, employees){
   const rows = vacations || [], tn = profile.technicianName, name = tn && rows.some(v => v.employeeName===tn) ? tn : profile.fullName || tn;
   return name ? vacationFor(rows, name, day, tz, key) : null;
 }
+// "End their shift now" (stage 3 follow-up 5). Only an office login ('va') has a shift: the logins of that employee card.
+function vacationShiftLogins(profiles, employees, empId){
+  return (profiles || []).filter(p => p && p.role==='va' && empId && (vacationEmployeeOfProfile(p, employees) || {}).id===empId);
+}
+function vacationOnShift(p, today){ return !!(p && p.onDuty && p.onDutyDate===today); }
+// The vacation that asks this login's own app to end its shift: in force today, with the marker, while they are on shift.
+function vacationEndShiftFor(vacations, profile, today, tz, employees){
+  if (!profile || profile.role!=='va' || !vacationOnShift(profile, today)) return null;
+  const v = vacationForProfile(vacations, profile, today, tz, null, employees);
+  return v && v.endShift===true ? v : null;
+}
 function vacationUpcoming(vacations, who, day){
   let next = null;
   (vacations || []).forEach(v => { if (!v.cancelledAt && vacationMatches(v, who) && v.startsOn > day && (!next || v.startsOn < next.startsOn)) next = v; });
@@ -2863,11 +2887,34 @@ function vacationProblems(draft, vacations, tz){
   return out;
 }
 // The insert / update row. The name copies, created_by and reminded_at come from the database (the guard trigger); the note
-// is saved on its own (employee_vacation_notes, owners and managers only: it may hold a medical reason).
+// and paid / unpaid leave are saved on their own (employee_vacation_notes, owners and managers only: the note may hold a
+// medical reason, and pay is nobody else's business; stage 3 follow-up 2), so options goes without pay.
 function vacationRowFromDraft(draft){
-  const o = vacationOptionsNorm(draft.options);
+  const { pay, ...o } = vacationOptionsNorm(draft.options);
   return { employee_id: draft.employeeId, starts_on: draft.startsOn, ends_on: draft.endsOn,
     stand_in_id: o.standIn ? (draft.standInId || null) : null, options: o };
+}
+// The private row (employee_vacation_notes): the note (trimmed; empty = null) and paid / unpaid leave.
+function vacationPrivateRow(draft){
+  const d = draft || {}, o = d.options || {};
+  return { note: String(d.note || '').trim() || null, pay: VACATION_PAY.includes(o.pay) ? o.pay : 'unpaid' };
+}
+// What the save upserts into the private row (stage 3 follow-ups review A1): a new vacation's whole row; on a change, ONLY
+// the columns that changed since the window opened (the draft's noteBefore / payBefore), so a note nobody touched is never
+// blanked, and two owners changing one vacation never overwrite each other. A pay nobody knows (payKnown false) and nobody
+// picked is left alone. A pay still on the vacation row (not moved yet: no private pay, payBefore '') is written once.
+// null = nothing to upsert.
+function vacationPrivatePatch(draft){
+  const d = draft || {}, P = vacationPrivateRow(d), out = {};
+  if (!d.id) return P;
+  if ((P.note || '') !== (d.noteBefore || '')) out.note = P.note;
+  if (d.payKnown !== false && P.pay !== (d.payBefore || '')) out.pay = P.pay;
+  return Object.keys(out).length ? out : null;
+}
+// An existing vacation is never changed while the private rows didn't load (vacationNotesError): its note and paid / unpaid
+// leave would be saved from blanks (stage 3 follow-ups review A1). A new one may be: its private row is new too.
+function vacationNotesBlock(vacId, data){
+  return vacId && data && data.vacationNotesError ? 'This vacation can\'t be changed right now: its note and paid / unpaid leave didn\'t load. Reload the app and try again.' : '';
 }
 // The notes (employee_vacation_notes rows; only owners and managers get any back) as { vacationId: note }.
 function vacationNotesMap(rows){
@@ -2875,12 +2922,56 @@ function vacationNotesMap(rows){
   (rows || []).forEach(r => { if (r && r.vacation_id && r.note) out[r.vacation_id] = String(r.note); });
   return out;
 }
-function vacationWithNote(v, notes){ return { ...v, note: (notes && notes[v.id]) || '' }; }
-function vacationUntilText(v, day, tz){
+// Paid / unpaid leave (employee_vacation_notes.pay; only owners and managers get any back) as { vacationId: 'paid'|'unpaid' }.
+function vacationPaysMap(rows){
+  const out = {};
+  (rows || []).forEach(r => { if (r && r.vacation_id && VACATION_PAY.includes(r.pay)) out[r.vacation_id] = r.pay; });
+  return out;
+}
+// One employee_vacation_notes row as it changed live (row null = deleted; id = its vacation_id) into data's notes and pays
+// maps and onto the vacation. Returns true when something shown changed: the echo of this app's own save returns false.
+function vacationApplyPrivate(data, id, row){
+  if (!data || !id) return false;
+  const notes = data.vacationNotes || (data.vacationNotes = {}), pays = data.vacationPays || (data.vacationPays = {});
+  const note = row && row.note ? String(row.note) : '', pay = row && VACATION_PAY.includes(row.pay) ? row.pay : '';
+  let changed = (notes[id] || '') !== note || (pays[id] || '') !== pay;
+  if (note) notes[id] = note; else delete notes[id];
+  if (pay) pays[id] = pay; else delete pays[id];
+  const v = (data.vacations || []).find(x => x && x.id === id);
+  if (v && (v.note || '') !== note) { v.note = note; changed = true; }
+  if (v && pay && ((v.options || {}).pay !== pay || v.payKnown === false)) { v.options = { ...v.options, pay }; v.payKnown = true; changed = true; }
+  if (v) { if (pay) v.privatePay = pay; else delete v.privatePay; }   // not shown: the window's payBefore
+  return changed;
+}
+// Reading the vacations list again after it failed (retryVacationsLoad): 1, 5 and 15 minutes, then no timer (0).
+function vacationRetryDelay(tries){ return [60000, 300000, 900000][tries] || 0; }
+// The note, and the private pay when there is one (it wins). Without one, the row's own options.pay stays: a row not moved
+// yet, or an app from before stage 3 follow-up 2. payKnown: the pay is a real value, not options' 'unpaid' default (a login
+// that can't read the private pay, or a row moved out with none there): the screens then name no pay (vacationPayText).
+// privatePay: the private row's own pay (the window's payBefore); not there = none.
+function vacationWithNote(v, notes, pays){
+  const pay = pays && VACATION_PAY.includes(pays[v.id]) ? pays[v.id] : '';
+  return { ...v, note: (notes && notes[v.id]) || '', ...(pay ? { options: { ...v.options, pay }, payKnown: true, privatePay: pay } : {}) };
+}
+// A vacation's paid / unpaid leave in words; a pay this login doesn't know (payKnown false) is named neutrally, never "Unpaid".
+function vacationPayText(v){
+  if (!v || v.payKnown === false) return 'Leave on the payroll board';
+  return (v.options || {}).pay==='paid' ? 'Paid leave' : 'Unpaid leave';
+}
+// workingDays (optional; employee.workingDays): "due back" on their next working day (vacationBackDay). Without it, the
+// person's own from the people list, so every screen (badges, banner, assign warnings, Settings) says the same day.
+function vacationUntilText(v, day, tz, workingDays){
   if (!v || v.cancelledAt) return '';
   if (day < v.startsOn) return `Vacation from ${fmtDateShort(v.startsOn)}`;
   if (!vacationOnDay(v, day, tz)) return '';
-  return day <= v.endsOn ? `On vacation until ${fmtDateShort(v.endsOn)}` : `On vacation (due back ${fmtDateShort(shiftDays(v.endsOn, 1))})`;
+  return day <= v.endsOn ? `On vacation until ${fmtDateShort(v.endsOn)}` : `On vacation (due back ${fmtDateShort(vacationBackDay(v.endsOn, workingDays===undefined ? vacationWorkingDaysOf(v) : workingDays))})`;
+}
+// The working days of the person away (employees: STATE.data.employees when not given); undefined when not known (someone
+// who can't read the people list), and vacationBackDay then takes the next day.
+function vacationWorkingDaysOf(v, employees){
+  const list = employees || (STATE.data && STATE.data.employees) || [];
+  const e = v && v.employeeId ? list.find(x => x && x.id===v.employeeId) : null;
+  return e ? e.workingDays : undefined;
 }
 // Past the last day, autoBack off and nobody ended it: the owners get a "Back?" prompt.
 function vacationOverdue(v, day, tz){ return vacationOnDay(v, day, tz) && !vacationOpt(v, 'autoBack') && day > v.endsOn; }
@@ -2898,6 +2989,13 @@ function vacationAssignText(name, info){
 // Leave lines for one person on a payroll week [from, to]: only vacations with "Leave on the payroll board" ticked; the days
 // are their working days (0 = Sunday; Monday to Friday when none are set).
 const VACATION_WORK_DAYS = [1, 2, 3, 4, 5];
+// The day they are back after the last day away (stage 3 follow-up 6; the functions' vacBackDay): the first of their working
+// days after it, else the next day. Unlike the payroll lines, no working days set means not known, not Monday to Friday.
+function vacationBackDay(endsOn, workingDays){
+  const set = Array.isArray(workingDays) ? workingDays.filter(d => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  if (set.length) for (let i = 1; i <= 7; i++) { const d = shiftDays(endsOn, i); if (set.includes(parseLocalDate(d).getDay())) return d; }
+  return shiftDays(endsOn, 1);
+}
 function vacationPayrollLines(vacations, who, from, to, tz, workingDays, today){
   const out = [], set = Array.isArray(workingDays) ? workingDays.map(Number) : [], wd = set.length ? set : VACATION_WORK_DAYS;
   (vacations || []).forEach(v => {
@@ -2910,8 +3008,9 @@ function vacationPayrollLines(vacations, who, from, to, tz, workingDays, today){
     if (!days) return;
     const a = parseLocalDate(s), b = parseLocalDate(e);
     const range = s===e ? fmtDateShort(s) : a.getMonth()===b.getMonth() ? `${a.getDate()}–${fmtDateShort(e)}` : `${fmtDateShort(s)}–${fmtDateShort(e)}`;
-    const pay = (v.options && v.options.pay)==='paid' ? 'paid' : 'unpaid';
-    out.push({ id: v.id, pay, from: s, to: e, days, text: `${pay==='paid' ? 'Paid' : 'Unpaid'} leave ${range} · ${days} ${days===1 ? 'day' : 'days'}` });
+    // '' = a pay this login doesn't know (vacationPayText): named neutrally, never "Unpaid"
+    const pay = v.payKnown === false ? '' : (v.options && v.options.pay)==='paid' ? 'paid' : 'unpaid';
+    out.push({ id: v.id, pay, from: s, to: e, days, text: `${pay==='paid' ? 'Paid' : pay ? 'Unpaid' : 'On'} leave ${range} · ${days} ${days===1 ? 'day' : 'days'}` });
   });
   return out;
 }
@@ -3713,7 +3812,7 @@ async function loadFromSupabase(){
     // Who is on vacation (stage 3): every signed-in person reads them (badges), owners and managers write (RLS). Only the
     // ones that can still matter (main builder review 1.C.2): not cancelled, and ending in about the last year (the payroll
     // Leave card, the ticks of someone's last vacation) or left open (autoBack off, not ended yet).
-    fetchAllRows('employee_vacations', 'id', q => q.is('cancelled_at', null).or(`ends_on.gte.${shiftDays(todayStr(), -400)},and(ended_at.is.null,options->>autoBack.eq.false)`)),
+    fetchAllRows('employee_vacations', 'id', vacationsLoadQuery),
     // Their notes: owners and managers only (RLS; everyone else gets none back).
     fetchAllRows('employee_vacation_notes', 'vacation_id'),
   ]);
@@ -3732,6 +3831,7 @@ async function loadFromSupabase(){
   // Vacations too (stage 3): before the table exists nobody is on vacation, as before.
   const OPTIONAL_LOADS = new Set(['lead email checks', 'vacations', 'vacation notes']);
   const vacNotes = vacationNotesMap(vacationNoteRows);   // owners and managers only (stage 3 review 1.C.1)
+  const vacPays = vacationPaysMap(vacationNoteRows);     // the same rows: paid / unpaid leave (stage 3 follow-up 2)
   STATE.loadErrors = loadResults.map((r, i) => (r && r.error && !OPTIONAL_LOADS.has(LOAD_NAMES[i])) ? LOAD_NAMES[i] : null).filter(Boolean);
   if (STATE.loadErrors.length) console.error('Load failed for:', loadResults.filter(r => r && r.error).map(r => r.error));
 
@@ -3799,7 +3899,10 @@ async function loadFromSupabase(){
       activityLog: logsFor('employee', e.id),
     })),
     vacationNotes: vacNotes,
-    vacations: (vacationRows||[]).map(r => vacationWithNote(mapVacationRow(r), vacNotes)),
+    vacationPays: vacPays,
+    // The private rows failed to load: an existing vacation can't be changed (vacationNotesBlock), its note and pay are unknown.
+    vacationNotesError: (loadResults[LOAD_NAMES.indexOf('vacation notes')] || {}).error ? 'the vacation notes did not load' : '',
+    vacations: (vacationRows||[]).map(r => vacationWithNote(mapVacationRow(r), vacNotes, vacPays)),
     // An optional load: when it fails, the vacation screens say so instead of looking like nobody is away.
     vacationsError: (loadResults[LOAD_NAMES.indexOf('vacations')] || {}).error ? 'the vacations list did not load' : '',
     commissionRates: {},
@@ -3816,6 +3919,12 @@ async function loadFromSupabase(){
   // The lead's "Assigned to" (stage 2 G3.5) is there once SQL Part 3 · G3.5 ran: every lead row then has the column.
   ASSIGNEE_READY = !(contacts||[]).length || Object.prototype.hasOwnProperty.call(contacts[0], 'assigned_user_id');
   if (ASSIGNEE_READY) await loadTeamPeople();
+  if (STATE.dataLoaded) setupVacationsChannel();   // the first load failed and this one worked: subscribe now (stage 3 follow-up 7)
+  if (data.vacationsError || data.vacationNotesError) vacationsRetryLater(true);   // and when this one failed, the list (or only its notes) is read again on its own
+}
+// Which vacations the app reads (loadFromSupabase, retryVacationsLoad): see the comment at the load.
+function vacationsLoadQuery(q){
+  return q.is('cancelled_at', null).or(`ends_on.gte.${shiftDays(todayStr(), -400)},and(ended_at.is.null,options->>autoBack.eq.false)`);
 }
 
 // The lead card's tag rule, the same as the database's contact_tags_merge (SQL Part 2 · G2.3): the removed tags go in
@@ -3922,16 +4031,18 @@ function closingPatchToRow(patch){
   return row;
 }
 // A vacation row (stage 3; .claude/sql/stage3-vacation.sql). employeeName / standInName are the database's copies, so people
-// who can't read the employees table still see whose vacation it is.
+// who can't read the employees table still see whose vacation it is. endShift (stage 3 follow-up 5): options.endShift, "end
+// their shift now" asked by whoever set it; kept out of options, so it is never a tick nor copied to their next vacation.
 function mapVacationRow(r){
   return { id:r.id, employeeId:r.employee_id, employeeName:r.employee_name||'', startsOn:r.starts_on, endsOn:r.ends_on,
     standInId:r.stand_in_id||null, standInName:r.stand_in_name||'', options:vacationOptionsNorm(r.options),
     createdBy:r.created_by||null, createdAt:r.created_at||null, endedAt:r.ended_at||null, cancelledAt:r.cancelled_at||null,
-    remindedAt:r.reminded_at||null };
+    remindedAt:r.reminded_at||null, endShift: !!(r.options && r.options.endShift === true),
+    payKnown: !!(r.options && VACATION_PAY.includes(r.options.pay)) };
 }
 // The saved row into STATE.data.vacations (added, or replacing the old copy); returns the mapped vacation.
 function keepVacationRow(row){
-  const v = vacationWithNote(mapVacationRow(row), STATE.data.vacationNotes);
+  const v = vacationWithNote(mapVacationRow(row), STATE.data.vacationNotes, STATE.data.vacationPays);
   const list = STATE.data.vacations || (STATE.data.vacations = []);
   const idx = list.findIndex(x => x.id === v.id);
   if (idx === -1) list.push(v); else list[idx] = v;
@@ -4321,14 +4432,24 @@ const db = {
       const { data, error } = await sb.from('employee_vacations').update(patch).eq('id', id).select().single();
       return error ? { error } : { vacation: keepVacationRow(data) };
     },
-    // The note, on its own (owners and managers only). Returns { ok } or { error }.
-    async setNote(id, note){
-      const text = String(note || '').trim() || null;
-      const { error } = await sb.from('employee_vacation_notes').upsert({ vacation_id: id, note: text, business_id: AUTO_BUSINESS_ID });
+    // The note and paid / unpaid leave, on their own (owners and managers only; stage 3 follow-up 2): one upsert of
+    // vacationPrivatePatch's columns, ONLY those (a column left out keeps what the row has). Returns { ok } or { error }.
+    async setPrivate(id, patch){
+      const cols = {};
+      if ('note' in patch) cols.note = String(patch.note || '').trim() || null;
+      if ('pay' in patch) cols.pay = patch.pay;
+      const { error } = await sb.from('employee_vacation_notes').upsert({ vacation_id: id, ...cols, business_id: AUTO_BUSINESS_ID });
       if (error) return { error };
-      const notes = STATE.data.vacationNotes || (STATE.data.vacationNotes = {});
-      if (text) notes[id] = text; else delete notes[id];
-      const v = (STATE.data.vacations || []).find(x => x.id===id); if (v) v.note = text || '';
+      const v = (STATE.data.vacations || []).find(x => x.id===id);
+      if ('note' in cols) {
+        const notes = STATE.data.vacationNotes || (STATE.data.vacationNotes = {});
+        if (cols.note) notes[id] = cols.note; else delete notes[id];
+        if (v) v.note = cols.note || '';
+      }
+      if ('pay' in cols) {
+        (STATE.data.vacationPays || (STATE.data.vacationPays = {}))[id] = cols.pay;
+        if (v) { v.options = { ...v.options, pay: cols.pay }; v.payKnown = true; v.privatePay = cols.pay; }
+      }
       return { ok: true };
     },
     // the database stamps its own now() over these times (the guard trigger), so a wrong laptop clock can't move the day
@@ -4670,6 +4791,7 @@ const STATE = { profiles: [], currentProfileId: null, data: null, dataLoaded: fa
    subscription never fires after STATE.data is cleared. */
 let REALTIME_CHANNEL = null;
 let VACATIONS_CHANNEL = null;   // employee_vacations' own realtime channel (stage 3, setupRealtimeSubscriptions)
+let VAC_RETRY = { busy: false, tries: 0, timer: null };   // reading the vacations list again after it failed (retryVacationsLoad)
 // Shared by the initial load and the realtime handlers below, so both build the exact same shape.
 function mapJobRow(j){
   return {
@@ -4915,17 +5037,78 @@ function setupRealtimeSubscriptions(){
     .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_sessions' }, handleChatSessionRealtime)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'myday_days' }, handleMyDayRealtime)
     .subscribe();
-  // Vacations (stage 3) on a channel of their own: a table missing from the publication (SQL not applied yet) can never
-  // break the shared one. Only when the list loaded; otherwise the screens already say it can't be read.
-  if (!VACATIONS_CHANNEL && STATE.data && !STATE.data.vacationsError) {
-    VACATIONS_CHANNEL = sb.channel('vacations-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacations' }, handleListRealtimeChange('vacations', r => vacationWithNote(mapVacationRow(r), STATE.data && STATE.data.vacationNotes)))
-      .subscribe();
-  }
+  setupVacationsChannel();
 }
+// Vacations (stage 3) on a channel of their own: a table missing from the publication (SQL not applied yet) can never
+// break the shared one. Only when the list loaded; otherwise the screens already say it can't be read, and the list is
+// read again until it works (retryVacationsLoad), which subscribes then (stage 3 follow-up 7). Each change may ask this
+// login's app to end its shift (vacationEndOwnShift). The private rows (note, paid / unpaid leave) come on the same
+// channel: realtime sends a change only to who may read that row (its RLS read policy: owners and managers), and a
+// delete carries only the vacation_id.
+function setupVacationsChannel(){
+  if (VACATIONS_CHANNEL || !STATE.data || STATE.data.vacationsError) return;
+  const onVac = handleListRealtimeChange('vacations', r => vacationWithNote(mapVacationRow(r), STATE.data && STATE.data.vacationNotes, STATE.data && STATE.data.vacationPays));
+  VACATIONS_CHANNEL = sb.channel('vacations-realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacations' }, payload => { onVac(payload); vacationEndOwnShift(); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_vacation_notes' }, handleVacationNoteRealtimeChange)
+    .subscribe();
+}
+// Another owner's or manager's change to a note or paid / unpaid leave (stage 3 follow-up 2, review): into the maps the
+// vacations' own live updates read, and onto the vacation. The echo of this app's own save changes nothing: no redraw.
+// One redraw per frame: part B's copy sends one event per vacation, so a burst draws once, not once per row.
+let VAC_NOTE_RENDER = 0;
+function handleVacationNoteRealtimeChange(payload){
+  if (PRESENT || !STATE.data) return;
+  const del = payload.eventType === 'DELETE', id = del ? payload.old && payload.old.vacation_id : payload.new && payload.new.vacation_id;
+  if (!vacationApplyPrivate(STATE.data, id, del ? null : payload.new) || VAC_NOTE_RENDER) return;
+  VAC_NOTE_RENDER = requestAnimationFrame(() => { VAC_NOTE_RENDER = 0; renderKeepingInput(); });
+}
+// The vacations list did not load (stage 3 follow-up 7, review): it is read again on its own, and the channel subscribes
+// once it works, for every role. Tried when the browser is back online, when the tab is shown again, and 1, 5 and 15
+// minutes after the failed load (vacationRetryDelay; then only on those two events). When only the private rows failed
+// (vacationNotesError: existing vacations can't be changed), they alone are read again the same way, and laid on the list
+// that is there (stage 3 follow-ups review, round 2). Nothing is read or drawn while both are there; one redraw when they
+// come back.
+function vacationsRetryLater(fresh){
+  if (fresh) VAC_RETRY.tries = 0;
+  clearTimeout(VAC_RETRY.timer);
+  const ms = vacationRetryDelay(VAC_RETRY.tries++);
+  VAC_RETRY.timer = ms ? setTimeout(retryVacationsLoad, ms) : null;
+}
+async function retryVacationsLoad(){
+  if (VAC_RETRY.busy || !STATE.dataLoaded || !STATE.data || !(STATE.data.vacationsError || STATE.data.vacationNotesError)) return;
+  VAC_RETRY.busy = true;
+  const start = STATE.data;   // a read made under one login never lands in the next one's data (a shared office device)
+  try {
+    if (!start.vacationsError) {   // the list is there, only its private rows are missing
+      const nr = await fetchAllRows('employee_vacation_notes', 'vacation_id');
+      const data = STATE.data;
+      if (!data || data !== start || data.vacationsError || !data.vacationNotesError) return;   // signed out or in again, or a full load came meanwhile
+      if (nr.error) { vacationsRetryLater(); return; }
+      data.vacationNotes = vacationNotesMap(nr.data); data.vacationPays = vacationPaysMap(nr.data); data.vacationNotesError = '';
+      data.vacations = (data.vacations || []).map(v => vacationWithNote(v, data.vacationNotes, data.vacationPays));
+      renderKeepingInput();
+      return;
+    }
+    const [vr, nr] = await Promise.all([fetchAllRows('employee_vacations', 'id', vacationsLoadQuery), fetchAllRows('employee_vacation_notes', 'vacation_id')]);
+    const data = STATE.data;
+    if (!data || data !== start || !data.vacationsError) return;   // signed out or in again, or a full load brought the list meanwhile
+    if (vr.error) { vacationsRetryLater(); return; }
+    if (!nr.error) { data.vacationNotes = vacationNotesMap(nr.data); data.vacationPays = vacationPaysMap(nr.data); data.vacationNotesError = ''; }
+    else data.vacationNotesError = 'the vacation notes did not load';
+    data.vacations = (vr.data || []).map(r => vacationWithNote(mapVacationRow(r), data.vacationNotes, data.vacationPays));
+    data.vacationsError = '';
+    setupVacationsChannel();
+    if (data.vacationNotesError) vacationsRetryLater(true);   // the private rows are then read again on their own
+    renderKeepingInput();
+  } finally { VAC_RETRY.busy = false; }
+}
+window.addEventListener('online', () => retryVacationsLoad());
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') retryVacationsLoad(); });
 function teardownRealtimeSubscriptions(){
   if (REALTIME_CHANNEL) { sb.removeChannel(REALTIME_CHANNEL); REALTIME_CHANNEL = null; }
   if (VACATIONS_CHANNEL) { sb.removeChannel(VACATIONS_CHANNEL); VACATIONS_CHANNEL = null; }
+  clearTimeout(VAC_RETRY.timer); VAC_RETRY.timer = null;
 }
 let UI = { tab: null, jobs:{tech:'all',status:'all',range:'all',customFrom:'',customTo:'',page:1,pageSize:25,q:'',noReview:false,selectedId:null}, payroll:{week:null, expanded:{}, logDate:null, viewAs:null, mode:'week', month:null, from:'', to:''}, dashboard:{range:'month', customFrom:'', customTo:'', view:'summary', adsWin:'30d'}, tasks:{board:'all', showDone:false, view:'list', calGranularity:'week', calAnchor:null}, openItems:{view:'list', calGranularity:'week', calAnchor:null}, crm:{view:'inbox', source:'all', division:'all', status:'all', tag:'all', sortBy:'stage', search:'', inboxFilter:'all', selectedContactId:null, page:1, pageSize:25}, crmOverview:{range:'30d', customFrom:null, customTo:null, source:'all', division:'all'}, outstanding:{page:1,pageSize:25}, reference:{tab:'contractors'}, resourcesOpen:true, techTasksOpen:true, mobileNavOpen:false };
 let MODAL_FILES = {};   // transient per-modal file state (see fileField / onFilePicked below)
@@ -6094,6 +6277,7 @@ async function doLogout(){
   SEC = secBlank();   // Security locks again, and its history leaves memory
   MCP_UI = mcpBlank();   // the owner's keys, servers, imports and access log leave memory too
   resetUI();
+  navForget();   // the page history keeps no ids of this person; their entries land on the next person's home page
   // onAuthStateChange fires SIGNED_OUT and calls render() itself
 }
 // Lets anyone signed in replace their own password (e.g. the temporary one Ofek set manually via
@@ -6143,10 +6327,621 @@ const NAV = [
   { group:'Finance', items:[ {id:'closings', label:'Closings', icon:'receipt'}, {id:'outstanding', label:'Outstanding', icon:'hourglass'}, {id:'jobs', label:'Jobs & Commissions', icon:'briefcase'} ] },
   { group:'Management', items:[ {id:'reference', label:'Resources', icon:'folder', go:'goResources()'}, {id:'settings', label:'Settings', icon:'sliders'} ] },
 ];
-function goTab(id){ const go = () => { dropBrandTry(); UI.tab = id; UI.mobileNavOpen = false; if (UI.jobs) UI.jobs.selectedId = null; if (UI.reference) UI.reference.contractorId = null; PEOPLE_UI.sel = null; PEOPLE_UI.draft = null; PANEL_OPEN_FOR = {}; render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
-function goTasks(board){ UI.tab = 'tasks'; if (board) UI.tasks.board = board; UI.mobileNavOpen = false; render(); }
-function goResources(tab){ UI.tab = 'reference'; if (tab) UI.reference.tab = tab; UI.mobileNavOpen = false; render(); }
+function goTab(id){ const go = () => { dropBrandTry(); UI.tab = id; UI.mobileNavOpen = false; if (UI.jobs) UI.jobs.selectedId = null; if (UI.reference) UI.reference.contractorId = null; PEOPLE_UI.sel = null; PEOPLE_UI.draft = null; PANEL_OPEN_FOR = {}; navPush({ kind: 'tab' }); render(); }; if (UI.tab==='crm' && id!=='crm' && UI.crm.view==='inbox' && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
+function goTasks(board){ UI.tab = 'tasks'; if (board) UI.tasks.board = board; UI.mobileNavOpen = false; navPush({ kind: 'tab' }); render(); }
+function goResources(tab){ UI.tab = 'reference'; if (tab) UI.reference.tab = tab; UI.mobileNavOpen = false; navPush({ kind: 'tab' }); render(); }
 function toggleMobileNav(){ UI.mobileNavOpen = !UI.mobileNavOpen; render(); }
+/* ── Page history, deep links and the back swipe (stage 4) ─────────────────────────────────────────────────────────
+   Every page, Settings page, connector page and side panel the person opens is an entry in the browser's history, so the
+   phone's back (Android, the app added to an iPhone's home screen), the browser's Back and a swipe from the left edge go
+   to the previous screen instead of leaving the app; an open window (or the phone menu) closes first. A field being typed
+   in is let go of first, so it saves as a click elsewhere would. Back on the first screen says "Press back again to
+   leave" on a touch screen and in the installed app (a second back within 2 s leaves); elsewhere it does what the
+   browser does. A link to a page the person may not open lands on their home page, and so does an entry of someone
+   who signed in before on this tab (their record ids are never put back).
+   An entry is a small plain object { nav: 1, kind, u: who made it, ...where the screen is (navSnapOf) }. It is a registry,
+   not a switch; another part of the app (the automation builder) plugs in without editing this code:
+   - A kind of its own, with its payload in state.x: NAV_RESTORERS.myKind = fn; navPush({ kind: 'myKind', x: { ... } }).
+     navRestoreView puts the page under it back first, then NAV_RESTORERS[kind](state, prev) adds its own part (return
+     false when a guard kept the screen as it is).
+   - NAV_LEAVERS[kind](prev, next) runs when leaving that kind, before the restorer and before anything changes. It may
+     tidy up a screen drawn outside UI and go on, or say no and change nothing: false stays; a Promise (Unsaved changes →
+     Save / Discard / Cancel) stays for now and resolves true to go on (the same back is made again, the leaver is not asked
+     twice) or false to stay. Resolve it once, and don't navigate from Save yourself. Any other return value goes on.
+     render() is held while it runs and drawn once after it (also when it says no or asks), so its question may use it.
+   - Layers (anything back closes before it moves): navLayer({ id, z, isOpen(), close(), sticky?, entry?, el?, stay? }).
+     Back closes the top open layer (highest z) first; close() returning false means it asked first and stays until
+     answered. A sticky layer (sticky: true or a function; data-nav-sticky on the element; openPopup(html, { sticky: true,
+     stay: 'what to do' })) is never closed by back: it shakes and says why. entry: false is an inline guard with no entry
+     of its own (isOpen() true only while it has something to lose; its close() asks and returns false). A layer that is
+     not a direct child of the body or #modal-root calls navOverlaySync() after it opens or closes. Built in: small menus
+     500, the confirm 400, the popup 300, the window 200, the phone menu 100, the template being edited 50 (entry: false);
+     a layer inside a window sits between 200 and 300 (e.g. #wf-modal 210, its drawers 220, its pickers 230).
+   - A close or ‹ control that goes back calls navBackTo(next) (or navGoBack()): a second tap before the first back lands
+     does nothing.
+   Rules: restoring never adds an entry (no loops) and redraws once at most; filters and searches never add entries. */
+const NAV_PAGES = [...SECTION_ORDER, 'settings'];   // exactly the pages render() draws
+const NAV_TAB_ALIASES = { finance: 'payroll' };     // Financial Summary was removed (6 Oct): its technician part is in Payroll
+// Where a link (?tab=&page=&week=, a phone notification) lands: the page when this person may open it, else their home page.
+// 'mcp' is not a page: owners get Settings → Connectors → Private connector, managers their keys window over the home page.
+function landingTab(profile, req){
+  if (!profile) return { tab: null };
+  req = req || {};
+  const home = homeTabFor(profile), tab = NAV_TAB_ALIASES[req.tab] || req.tab;
+  if (tab==='mcp') {
+    if (profile.role==='owner') return { tab: 'settings', page: 'connectors', conn: 'mcp' };
+    if (profile.role==='manager') return { tab: home, open: 'mcpKeys' };
+    return { tab: home };
+  }
+  if (!tab || !NAV_PAGES.includes(tab) || !canViewSection(profile, tab)) return { tab: home };
+  if (tab==='settings') return { tab, page: req.page ? settingsPageKey(req.page) : null };
+  if (tab==='payroll') return { tab, week: req.week || null };
+  return { tab };
+}
+// Where the screen is, from UI and PEOPLE_UI. Each panel only counts on the page that draws it. pt (the person's tab) and
+// cv (the CRM view) are put back on restore but don't make a new entry; wk (the Payroll week picked) only goes in the address.
+function navSnapOf(ui, pp){
+  ui = ui || {}; pp = pp || {};
+  const tab = ui.tab || null, st = ui.settings || {};
+  const sp = tab==='settings' ? settingsPageKey(st.page || 'setup') : null;
+  const per = sp==='people' && pp.sel || null;
+  return {
+    tab, sp, so: tab==='settings' && !!st.open,
+    conn: sp==='connectors' && st.conn || null,
+    per, pt: per ? pp.tab || 'details' : null,
+    job: tab==='jobs' && ui.jobs && ui.jobs.selectedId || null,
+    con: tab==='reference' && ui.reference && ui.reference.contractorId || null,
+    lead: tab==='crm' && ui.crm && ui.crm.view==='inbox' && ui.crm.selectedContactId || null,
+    cv: tab==='crm' && ui.crm && ui.crm.view || null,
+    board: tab==='tasks' && ui.tasks && ui.tasks.board || null,
+    rtab: tab==='reference' && ui.reference && ui.reference.tab || null,
+    wk: tab==='payroll' && ui.payroll && ui.payroll.mode==='week' && ui.payroll.week || null,
+  };
+}
+// The entries' identity: two entries with the same key are the same screen. A kind of its own (not a base kind) adds its payload.
+function navKey(s){
+  s = s || {};
+  const k = [s.tab, s.sp, s.so ? 1 : 0, s.conn, s.per, s.job, s.con, s.lead, s.board, s.rtab].join('|');
+  return s.kind && !NAV_BASE_KINDS.includes(s.kind) ? k + '|' + s.kind + ':' + JSON.stringify(s.x ?? null) : k;
+}
+// What a move does to the history: nothing (same screen), replace (a move made from inside a window, or one open panel
+// swapped for another on the same page) or push.
+function navMode(cur, next){
+  if (!cur) return 'push';
+  if (navKey(cur)===navKey(next)) return 'skip';
+  if (cur.ov) return 'replace';
+  const panel = s => !!(s.per || s.job || s.con || s.lead || s.conn);
+  const base = s => [s.tab, s.sp, s.so ? 1 : 0, s.board, s.rtab].join('|');
+  return panel(cur) && panel(next) && base(cur)===base(next) ? 'replace' : 'push';
+}
+// The address for an entry: the page (the Settings page, the Payroll week) only, never an id or a name; everything else
+// (env=, open=) is kept. The week stays so a reload (or the phone reopening the app) lands on it again.
+function navUrl(snap, search){
+  const q = new URLSearchParams(search || '');
+  ['tab', 'page', 'week'].forEach(k => q.delete(k));
+  if (snap && snap.tab) q.set('tab', snap.tab);
+  if (snap && snap.tab==='settings' && snap.so && snap.sp) q.set('page', snap.sp);
+  if (snap && snap.tab==='payroll' && snap.wk) q.set('week', snap.wk);
+  return '?' + q.toString();
+}
+// The edge swipe: starts within 20 px of the left edge, moves right at least 60 px, mostly sideways. No time limit: the
+// page follows the finger, so a slow drag counts (as the iPhone's own swipe does).
+const NAV_SWIPE_RULES = { edge: 20, minDx: 60, ratio: 2 };
+function isBackSwipe(start, end, ctx){
+  const r = { ...NAV_SWIPE_RULES, ...(ctx || {}) };
+  if (!start || !end || r.blocked || !r.canBack || r.popped) return false;
+  const dx = end.x - start.x, dy = end.y - start.y;
+  return start.x <= r.edge && dx >= r.minDx && Math.abs(dx) > r.ratio * Math.abs(dy);
+}
+// d: how many entries of ours are below this one. hold/held: a restore's redraws become one. skip: popstates of our own
+// history.go() still to come. syncBack: our own back whose screen is already right (a window closed in the app, a panel its
+// answer closed, a reload). pops: popstates seen. redo: the last back a guard may make again (navRedo); leaveOk: the
+// entry whose leaver already said yes to it. backPending: a close control's back is on its way (bpT clears it if no
+// popstate comes). leaveT: the leave guard's timer. outT: leaving past someone else's entries until then. swipeTf: the swipe moved the page with a transform.
+const NAV_HIST = { ready: false, pid: null, d: 0, cur: null, restoring: false, hold: false, held: false, skip: 0, pops: 0, syncBack: false, swipeIn: false, swipeTf: false, mo: null, redo: null, leaveOk: null, backPending: false, leaveT: 0, bpT: 0, outT: 0 };
+const NAV_RESTORERS = {};
+const NAV_LEAVERS = {};
+const NAV_BASE_KINDS = ['tab', 'settings', 'connector', 'panel'];
+NAV_BASE_KINDS.forEach(k => { NAV_RESTORERS[k] = navRestoreView; });
+function navSnap(){ return navSnapOf(UI, PEOPLE_UI); }
+function navPid(){ return STATE.currentProfileId + '|' + (VIEW_AS_ID || ''); }
+function navOurs(st){ return !!st && st.nav===1; }
+// Who an entry belongs to: the signed-in profile (View as keeps the real one). An entry of someone else (signed in before on
+// this tab, or wiped by a sign-out: u null) is foreign; one from before entries were stamped (no u) counts as ours.
+function navUid(){ return STATE.currentProfileId || null; }
+function navEntryForeign(st, uid){ return !!st && st.nav===1 && st.u!==undefined && st.u!==(uid || null); }
+function navForeign(st){ return navEntryForeign(st, navUid()); }
+// The screen shows this entry, as far as UI tells (a kind of its own keeps its payload); navKeep: what an entry keeps when replaced.
+function navSame(st){ return navKey(st)===navKey({ ...navSnap(), kind: st.kind, x: st.x }); }
+function navKeep(st){ return { kind: st.kind, ...(st.x!==undefined ? { x: st.x } : {}) }; }
+function navCustom(kind){ return !!kind && !NAV_BASE_KINDS.includes(kind); }
+// A new screen: one entry (after the change to UI, before its render, so the entry left keeps its scroll).
+function navPush(state){
+  if (!NAV_HIST.ready || NAV_HIST.restoring) return;
+  navOffGuard();   // never on top of the leave guard: the first screen goes back over it first
+  const next = { nav: 1, ...navSnap(), ...(state || {}), u: navUid() }, cur = navOurs(history.state) ? history.state : null;
+  const mode = cur ? navMode(cur, next) : 'replace';
+  if (mode==='skip') return;
+  // A window's answer closed the panel it was opened over (a guard's Save / Don't save): back over both entries to the one
+  // below the panel, which is the screen now. Replacing would leave the panel's entry for the next back to reopen.
+  if (mode==='replace' && cur && cur.ov && cur.ppk && cur.ppk===navKey(next) && (cur.d|0) >= 2) { NAV_HIST.syncBack = true; history.go(-2); return; }
+  const url = navUrl(next, location.search);
+  if (mode==='replace') {
+    NAV_HIST.cur = { ...next, d: cur ? cur.d|0 : NAV_HIST.d, pk: cur ? cur.pk ?? null : null, ...(cur && cur.gd ? { gd: 1 } : {}) };
+    history.replaceState(NAV_HIST.cur, '', url);
+  } else {
+    history.replaceState({ ...cur, y: window.scrollY }, '');
+    NAV_HIST.cur = { ...next, d: (cur.d|0) + 1, pk: navKey(cur) };
+    history.pushState(NAV_HIST.cur, '', url);
+  }
+  NAV_HIST.d = NAV_HIST.cur.d;
+}
+// The same screen, changed in place (allowed while restoring: it never adds an entry).
+function navReplace(state){
+  if (!NAV_HIST.ready) return;
+  if (!NAV_HIST.restoring) navOffGuard();
+  const cur = navOurs(history.state) ? history.state : {};
+  NAV_HIST.cur = { nav: 1, ...navSnap(), ...(state || {}), d: NAV_HIST.d, pk: cur.pk ?? null, ...((state || {}).ov && cur.ppk ? { ppk: cur.ppk } : {}), ...(cur.gd ? { gd: 1 } : {}), u: navUid() };
+  history.replaceState(NAV_HIST.cur, '', navUrl(NAV_HIST.cur, location.search));
+}
+// Closing something the entry below already shows goes back to that entry instead of adding one (its restorer does the
+// change, guards included). next: the screen wanted, or a test on the key below.
+function navBackTo(next){
+  if (NAV_HIST.ready && NAV_HIST.backPending) return true;   // the first tap's back is on its way
+  const st = history.state;
+  if (!NAV_HIST.ready || NAV_HIST.restoring || NAV_HIST.skip || NAV_HIST.syncBack || !navOurs(st) || st.ov || NAV_HIST.d <= 0 || !st.pk) return false;
+  if (!(typeof next==='function' ? next(st.pk) : st.pk===navKey(next))) return false;
+  navGoBack();
+  return true;
+}
+// One back at a time: a second tap on a close or ‹ control before the first back lands would go back twice (and out of the
+// app from the second entry). Cleared by the next popstate, or after a second if none comes.
+function navGoBack(){
+  if (NAV_HIST.backPending) return false;
+  NAV_HIST.backPending = true;
+  clearTimeout(NAV_HIST.bpT); NAV_HIST.bpT = setTimeout(() => { NAV_HIST.backPending = false; }, 1000);
+  history.back();
+  return true;
+}
+// Puts the history back where the screen is (a guard kept the screen): our own go(), whose popstate is skipped.
+function navStay(delta){
+  if (!delta) return;
+  NAV_HIST.skip++; NAV_HIST.d -= delta;
+  history.go(-delta);
+}
+// After every full render: the first one (or a new login / View as) starts the history; later ones keep the entry right
+// for the paths that change the page without an entry function. Never redraws.
+function navAfterRender(profile){
+  if (!profile) return;
+  if (!NAV_HIST.ready || NAV_HIST.pid!==navPid() || !navOurs(history.state)) { navInit(); return; }
+  if (NAV_HIST.skip) return;   // the history is on its way back to where the screen is (navStay): its popstate puts the entry right
+  const s = navSnap(), st = history.state, open = navOverlayOpen();
+  if (NAV_HIST.restoring) { if (!navSame(st)) navReplace({ kind: 'tab' }); return; }   // the page guard sent the restore elsewhere
+  if (st.tab!==s.tab) navPush({ kind: 'tab' });
+  else if ((!navSame(st) || s.pt!==st.pt || s.cv!==st.cv || s.wk!==(st.wk || null)) && !(st.ov && !open)) navReplace({ ...navKeep(st), ...(st.ov ? { ov: 1 } : {}) });
+  navOverlaySync();
+}
+function navInit(){
+  const first = !NAV_HIST.mo, old = navOurs(history.state) && !navForeign(history.state) ? history.state : null, snap = navSnap();
+  NAV_HIST.d = old ? old.d|0 : NAV_HIST.ready ? NAV_HIST.d : 0;   // an entry made outside this layer keeps the depth
+  NAV_HIST.ready = true; NAV_HIST.pid = navPid(); NAV_HIST.skip = 0; NAV_HIST.syncBack = false;
+  try { history.scrollRestoration = 'manual'; } catch (e) {}
+  if (first && old && (old.d|0) > 0 && old.pk && !navCustom(old.kind) && old.pk===navKey(snap) && AUTH.status==='ready' && STATE.dataLoaded) {
+    // A reload on an entry that showed a panel or a window: it is gone, so the screen is the entry below. Go back to that
+    // one (this entry stays, forward opens it again) instead of making this one a copy of it that a back would seem to ignore.
+    NAV_HIST.cur = old; NAV_HIST.syncBack = true; history.back();
+  } else {
+    // The page landed on; after a reload the entries below still work (and the leave guard under the first screen stays).
+    NAV_HIST.cur = { nav: 1, kind: 'tab', ...snap, d: NAV_HIST.d, pk: old ? old.pk ?? null : null, ...(old && old.gd ? { gd: 1 } : {}), ...(old && old.g ? { g: 1 } : {}), u: navUid() };
+    history.replaceState(NAV_HIST.cur, '', navUrl(snap, location.search));
+  }
+  if (first && typeof MutationObserver!=='undefined') {
+    NAV_HIST.mo = new MutationObserver(() => navOverlaySync());
+    const root = document.getElementById('modal-root');
+    if (root) NAV_HIST.mo.observe(root, { childList: true });
+    NAV_HIST.mo.observe(document.body, { childList: true });   // the small popup (#app-popup) sits on the body
+  }
+  navOverlaySync();   // a window opened before the first render (e.g. ?open=backup)
+  navArm();           // the leave guard: nothing until the first tap or key (then navFirstUse)
+}
+// "Press back again to leave" on the first screen (Ofek, 15 Oct). Under the first screen sits a copy of it, the guard
+// (g: 1, d: -1; the first screen over it carries gd: 1). Back onto the guard says so; a second back within 2 s finds
+// nothing of ours below and leaves, as the platform does. Only on a touch screen or in the installed app, where the
+// phone's back leaves by accident; a desktop browser keeps its own Back (a guard would show twice in its history list).
+const NAV_LEAVE_MS = 2000;
+function navLeaveGuardOn(env){ return !!env && (!!env.coarse || !!env.standalone); }
+function navLeaveEnv(){
+  try { return { coarse: window.matchMedia('(pointer: coarse)').matches, standalone: navigator.standalone===true || window.matchMedia('(display-mode: standalone)').matches }; }
+  catch (e) { return {}; }
+}
+// Puts the guard under the first screen or, standing on the guard, the first screen back over it. Only after the first tap
+// or key (Chrome may skip an entry pushed before that). Returns true when it pushed.
+function navArm(){
+  const st = history.state;
+  if (!NAV_HIST.ready || NAV_HIST.restoring || NAV_HIST.skip || NAV_HIST.syncBack || !navOurs(st) || navForeign(st) || st.ov || !navActivated()) return false;
+  if (st.g) {
+    const { g, ...b } = st;
+    NAV_HIST.cur = { ...b, d: 0, gd: 1, u: navUid() };
+    history.pushState(NAV_HIST.cur, '', location.href); NAV_HIST.d = 0;
+    return true;
+  }
+  if ((st.d|0)!==0 || st.gd || !navLeaveGuardOn(navLeaveEnv())) return false;
+  history.replaceState({ ...st, g: 1, d: -1 }, '');
+  NAV_HIST.cur = { ...st, d: 0, gd: 1, u: navUid() };
+  history.pushState(NAV_HIST.cur, '', location.href); NAV_HIST.d = 0;
+  return true;
+}
+// Standing on the guard (a back just said "Press back again"), anything that moves puts the first screen back over it first.
+function navOffGuard(){ if (navOurs(history.state) && history.state.g) { clearTimeout(NAV_HIST.leaveT); navArm(); } }
+function navLeaveWarn(){
+  showToast('Press back again to leave', { kind: 'info' });
+  clearTimeout(NAV_HIST.leaveT);
+  NAV_HIST.leaveT = setTimeout(() => { if (navOurs(history.state) && history.state.g) navArm(); }, NAV_LEAVE_MS);
+}
+// An entry of someone else (C6): their screen and record ids are never put back; this person's home page instead, as this entry.
+function navLandHome(){
+  const p = getCurrentProfile(); if (!p) return;
+  NAV_HIST.restoring = true; NAV_HIST.hold = true;
+  try { goTab(homeTabFor(p)); } finally { NAV_HIST.hold = false; NAV_HIST.restoring = false; }
+  NAV_HIST.d = 0;
+  NAV_HIST.cur = { nav: 1, kind: 'tab', ...navSnap(), d: 0, pk: null, u: navUid() };
+  history.replaceState(NAV_HIST.cur, '', navUrl(NAV_HIST.cur, location.search));
+  navArm();   // the leave guard under it again, so the next back says "Press back again" (and then leaves)
+  render();
+}
+// Sign-out (doLogout): the history starts again at the next login, and the entry showing keeps no ids of this person. The
+// entries below keep their u, so a back onto one lands on the next person's home page.
+function navForget(){
+  NAV_HIST.ready = false; NAV_HIST.cur = null; NAV_HIST.d = 0; NAV_HIST.skip = 0; NAV_HIST.syncBack = false; NAV_HIST.backPending = false; NAV_HIST.redo = null; NAV_HIST.outT = 0;
+  clearTimeout(NAV_HIST.leaveT);
+  try { if (navOurs(history.state)) history.replaceState({ nav: 1, kind: 'tab', tab: null, d: 0, pk: null, u: null }, '', navUrl(null, location.search)); } catch (e) {}
+}
+// The small menus on the body: a person's ⋯ menu, the light / dark menu, a category's colour.
+const NAV_MENUS = '.person-menu, .theme-menu, .pal-pop';
+// The open layers, topmost first: by z, and on the same z the one registered later.
+function navLayerOrder(layers, isOpen){ return (layers || []).map((l, i) => ({ l, i })).filter(x => isOpen(x.l)).sort((a, b) => ((b.l.z|0) - (a.l.z|0)) || (b.i - a.i)).map(x => x.l); }
+// The window on top in #modal-root (one closing is not; the confirm is a layer of its own).
+function navTopWindow(){ const r = document.getElementById('modal-root'); return r ? [...r.children].filter(el => !el.classList.contains('closing') && !el.classList.contains('confirm-back')).pop() || null : null; }
+// The window closes as a click beside it does, through its own close function (closeLeadModal's follow-up date check, the
+// commission popup's reset); one without that (or the automation editor) through Escape.
+function navCloseWindow(){
+  const top = navTopWindow(); if (!top) return;
+  const back = top.matches && top.matches('.modal-back') ? top : top.querySelector ? top.querySelector('.modal-back') : null;
+  if (back && back.getAttribute('onclick') && !back.classList.contains('au-edb')) back.click();
+  else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+}
+// What back closes before it moves (see the comment block above): the built-in layers. Another part of the app adds its
+// own with navLayer(); this list never names one of theirs.
+const NAV_LAYERS = [
+  { id: 'menus', z: 500, isOpen: () => !!document.querySelector(NAV_MENUS), close: () => { closeThemeMenu(); closeCatalogColor(); document.querySelectorAll('.person-menu').forEach(x => x.remove()); } },
+  { id: 'confirm', z: 400, el: () => document.querySelector('.confirm-back:not(.closing)'), isOpen: () => !!document.querySelector('.confirm-back:not(.closing)'), close: () => { closeConfirmModal(); } },
+  { id: 'popup', z: 300, el: () => document.getElementById('app-popup'), isOpen: () => !!document.getElementById('app-popup'), close: () => { closePopup(); },
+    sticky: () => { const e = document.getElementById('app-popup'); return !!(e && e.dataset && e.dataset.navSticky); } },
+  { id: 'window', z: 200, el: navTopWindow, isOpen: () => !!navTopWindow(), close: navCloseWindow,
+    sticky: () => { const t = navTopWindow(); return !!(t && ((t.matches && t.matches('[data-nav-sticky]')) || (t.querySelector && t.querySelector('[data-nav-sticky]')))); } },
+  { id: 'phone-menu', z: 100, isOpen: () => !!UI.mobileNavOpen, close: () => { UI.mobileNavOpen = false; render(); } },
+  { id: 'template', z: 50, entry: false, isOpen: () => navTplDirty(), close: () => navTplAsk() },
+];
+// Settings → Message templates (B1b): a template being edited with changes not saved is an inline layer with no entry of its
+// own. Back (or forward, or the swipe) asks first instead of the page change dropping the edit; a click on another Settings
+// page still drops it, as on main. The editor only counts while it is on screen.
+function tplDraftChanged(draft, base){ draft = draft || {}; base = base || {}; const t = v => String(v ?? '').replace(/\r\n/g, '\n'); return Object.keys(draft).some(k => t(draft[k])!==t(base[k])); }
+function navTplDirty(){
+  if (typeof TPL_EDIT!=='undefined' && TPL_EDIT && document.getElementById('tpl-actions')) return tplDraftChanged(TPL_EDIT.values, Object.fromEntries(Object.keys(TPL_EDIT.values || {}).map(k => [k, msgTemplateText(k)])));
+  if (typeof AUTO_TPL_EDIT!=='undefined' && AUTO_TPL_EDIT && document.getElementById('au-tf-body')) {
+    const V = AUTO_TPL_EDIT, t = V.isNew ? null : (autoLib() || {})[V.key];
+    return tplDraftChanged({ name: V.name, channel: V.channel, body: V.body }, t ? { name: t.name || '', channel: t.channel==='email' ? 'email' : 'text', body: msgTemplateText(V.key) } : { name: 'New message', channel: 'text', body: '' });
+  }
+  return false;
+}
+// Discard closes the editor and stays on the page (the next back moves); Keep editing, or a back on the confirm, keeps it.
+function navTplAsk(){
+  confirmAction('The changes to this template are not saved. If you leave now, they are lost.', () => { TPL_EDIT = null; AUTO_TPL_EDIT = null; render(); },
+    { danger: false, title: 'Discard changes?', confirmLabel: 'Discard', cancelLabel: 'Keep editing' });
+  return false;
+}
+// Adds a layer (or replaces the one with the same id). Returns it.
+function navLayer(def){ if (!def || !def.id) return null; const i = NAV_LAYERS.findIndex(l => l.id===def.id); if (i >= 0) NAV_LAYERS[i] = def; else NAV_LAYERS.push(def); return def; }
+// The open layers, topmost first (entryOnly: only those with an entry of their own). An isOpen that throws counts as closed.
+function navLayersOpen(entryOnly){ return navLayerOrder(NAV_LAYERS, l => { if (entryOnly && l.entry===false) return false; try { return !!l.isOpen(); } catch (e) { return false; } }); }
+function navTopLayer(){ return navLayersOpen()[0] || null; }
+// Something with an entry of its own is open: a small menu, the confirm, the popup, a window, the phone menu, or one added.
+function navOverlayOpen(){ return navLayersOpen(true).length > 0; }
+function navIsSticky(l){ return !!l && (typeof l.sticky==='function' ? !!l.sticky() : !!l.sticky); }
+// A sticky layer shakes and says why it stays (its data-nav-stay, or the layer's stay).
+function navNudge(l){
+  const el = l && l.el ? l.el() : null, box = el && el.querySelector ? (el.querySelector('.modal, .confirm-card') || el) : null;
+  // The class stays on once it has run: taking it off would play the window's own opening animation again.
+  if (box && box.classList) { box.classList.remove('nav-nudge'); void box.offsetWidth; box.classList.add('nav-nudge'); }
+  const msg = (el && el.dataset && el.dataset.navStay) || (l && l.stay);
+  if (msg) showToast(msg, { kind: 'info' });
+}
+// The person has tapped or typed on the page. Chrome may skip an entry pushed before that (a window a link opened), and
+// back would then leave the app; such a window gets its entry at the first tap or key instead.
+function navActivated(){ try { const u = typeof navigator!=='undefined' && navigator.userActivation; return !u || !!u.hasBeenActive; } catch (e) { return true; } }
+// An open window gets an entry of its own, so back closes it and stays; a window closed in the app takes its entry away.
+function navOverlaySync(){
+  if (!NAV_HIST.ready || NAV_HIST.restoring || NAV_HIST.skip || NAV_HIST.syncBack || AUTH.status!=='ready' || !STATE.dataLoaded) return;
+  let st = history.state; if (!navOurs(st)) return;
+  const open = navOverlayOpen();
+  if (open && !st.ov) {
+    if (!navActivated()) return;
+    if (st.g) { navOffGuard(); st = history.state; }   // never on the leave guard
+    NAV_HIST.cur = { ...st, ov: 1, pk: navKey(st), ppk: st.pk ?? null, d: (st.d|0) + 1, u: navUid() };   // ppk: the entry below the screen under it
+    history.pushState(NAV_HIST.cur, '', location.href);
+    NAV_HIST.d = NAV_HIST.cur.d;
+  } else if (!open && st.ov) { NAV_HIST.syncBack = true; history.back(); }
+}
+// Back with something open closes one layer, the top one: 'closed'; 'asked' when its close() asked first (it stays until
+// answered); 'stay' when it is sticky (it shakes instead); '' when nothing was open.
+function navOverlayClose(top){
+  top = top || navTopLayer(); if (!top) return '';
+  if (navIsSticky(top)) { navNudge(top); return 'stay'; }
+  return top.close()===false ? 'asked' : 'closed';
+}
+// A back a guard held up, made again once it is answered: only while the screen is still the one it was made from, after
+// the guard's window has gone (its own back first). pass: the leaver already said yes, so it is not asked twice.
+function navRedo(r, pass){
+  r = r || NAV_HIST.redo; if (!r) return;
+  let tries = 0;
+  const run = () => {
+    if (NAV_HIST.skip || NAV_HIST.syncBack || (NAV_HIST.cur && NAV_HIST.cur.ov)) { if (++tries < 40) setTimeout(run, 25); return; }
+    if (!NAV_HIST.cur || navKey(NAV_HIST.cur)!==r.key) return;
+    if (pass) NAV_HIST.leaveOk = r.key;
+    history.go(r.delta);
+  };
+  setTimeout(run, 0);
+}
+// What a leaver said: 'stay' (false), 'wait' (a Promise: Save / Discard / Cancel still open) or 'go' (anything else).
+function navLeaveVerdict(v){ return v===false ? 'stay' : v && typeof v.then==='function' ? 'wait' : 'go'; }
+// A leaver's Promise: true goes on with the same back, false (or a failure) stays.
+function navLeaveWait(p){ const r = NAV_HIST.redo; Promise.resolve(p).then(go => { if (go===true) navRedo(r, true); }, () => {}); }
+// A field that saves on change or blur (commitJobCellEdit, commitContactCellEdit, the panels' fields): WebKit fires neither
+// when it is removed, so back lets go of it first (B1a). Its redraw is held; returns true when it wanted one.
+function navBlurField(){
+  const a = document.activeElement;
+  if (!a || a===document.body || typeof a.blur!=='function' || !a.matches || !a.matches('input, textarea, select, [contenteditable="true"]')) return false;
+  const was = NAV_HIST.hold, held = NAV_HIST.held;
+  NAV_HIST.hold = true; NAV_HIST.held = false;
+  try { a.blur(); } catch (e) {}
+  const drew = NAV_HIST.held;
+  NAV_HIST.hold = was; NAV_HIST.held = held;
+  return drew;
+}
+// Back / forward. Never adds an entry (but the leave guard under the home page someone else's entry lands on); one render at most.
+function navOnPop(e){
+  const s = e.state;
+  NAV_HIST.backPending = false;   // the back a close control made has landed (or another one came first)
+  if (!NAV_HIST.ready || AUTH.status!=='ready' || !STATE.dataLoaded || !navOurs(s)) return;
+  if (NAV_HIST.skip) { NAV_HIST.skip--; NAV_HIST.d = s.d|0; NAV_HIST.cur = s; setTimeout(navOverlaySync, 0); return; }
+  const delta = (s.d|0) - NAV_HIST.d, prev = NAV_HIST.cur;
+  NAV_HIST.d = s.d|0; NAV_HIST.cur = s; NAV_HIST.pops++;
+  // An entry of someone who signed in before on this tab: never their screen or ids, this person's home page instead (the
+  // field being typed in saves first; its redraw joins navLandHome's). The second back from the leave guard leaves: on past
+  // their entries one at a time (their depths are theirs, and a step past the first entry would do nothing), never home again.
+  if (navForeign(s)) {
+    NAV_HIST.syncBack = false;
+    navBlurField();
+    if ((prev && prev.g && !navForeign(prev)) || NAV_HIST.outT > Date.now()) { clearTimeout(NAV_HIST.leaveT); NAV_HIST.outT = Date.now() + NAV_LEAVE_MS; history.back(); return; }
+    navLandHome(); return;
+  }
+  // Our own back for a window closed in the app: the screen is already right (it may have moved on under the window).
+  // When the window's answer also closed the panel under it, the screen is the entry below: back once more, no copy of it.
+  if (NAV_HIST.syncBack) {
+    NAV_HIST.syncBack = false;
+    if (!navSame(s)) {
+      if (!navCustom(s.kind) && s.pk && (s.d|0) > 0 && s.pk===navKey(navSnap())) { NAV_HIST.syncBack = true; history.back(); return; }
+      navReplace(navKeep(s));
+    }
+    setTimeout(navOverlaySync, 0); return;
+  }
+  const pass = NAV_HIST.leaveOk; NAV_HIST.leaveOk = null;   // the back navRedo made again: its leaver already said yes
+  // The field being typed in saves first, before anything is torn down; its redraw joins the one below (or runs at the end).
+  const drew = navBlurField();
+  // Back with a layer open closes the top one and stays; the page under the window may have changed while it was open. A
+  // sticky layer (a key shown once) or one that asked first (a template not saved) stays: the history goes back where the
+  // screen is. A jump of more than one step (the browser's history list) with only the phone menu open: the menu shuts and
+  // the jump goes ahead (closing it on its own would redraw, push, and cut off the entries the jump goes to).
+  const open = navLayersOpen(), top = open[0] || null;
+  const menuShut = !!top && top.id==='phone-menu' && open.length===1 && delta!==-1;
+  if (menuShut) UI.mobileNavOpen = false;
+  else if (top) {
+    const r = navOverlayClose(top);
+    if (r!=='closed' || s.g) navStay(delta);
+    else if (!navSame(s)) { if (prev && prev.ov && delta===-1) navReplace(navKeep(s)); else navStay(delta); }
+    if (drew) render();
+    if (NAV_HIST.swipeIn) navSwipeInAnim();
+    return;
+  }
+  // Back onto the leave guard under the first screen (checked after the layers: a template not saved asks first). The
+  // screen stays as it is, and the guard becomes a copy of it again (the first screen may have changed in place since).
+  if (s.g && (delta===-1 || navSame(s))) {
+    if (prev && delta===-1) { const { gd, ...b } = prev; NAV_HIST.cur = { ...b, g: 1, d: -1 }; history.replaceState(NAV_HIST.cur, '', navUrl(NAV_HIST.cur, location.search)); }
+    navLeaveWarn(); if (menuShut || drew) render(); return;
+  }
+  // Nothing to do when the screen already shows it (a forward step onto a window's entry), unless a kind of its own is involved.
+  // A window's entry with nothing open (forward onto it) goes back off it, so the next back is never a dead one.
+  if (!navCustom(s.kind) && !(prev && navCustom(prev.kind)) && navSame(s)) { if (menuShut || drew) render(); if (s.ov && !navOverlayOpen()) setTimeout(navOverlaySync, 0); return; }
+  // The leaver first, before anything changes: it may say no (false) or ask (a Promise). Then, for a kind of its own, the
+  // page under it (navRestoreView), then its restorer. A restore a guard refused applies nothing: no held redraw, the
+  // phone menu as it was, the history back where the screen is.
+  const leave = prev && NAV_LEAVERS[prev.kind], fn = NAV_RESTORERS[s.kind] || navRestoreView, pk = prev ? navKey(prev) : null;
+  NAV_HIST.redo = { key: pk, delta };
+  NAV_HIST.restoring = true; NAV_HIST.hold = true; NAV_HIST.held = menuShut || drew;   // the shut menu and the saved field: one redraw
+  let ok = true, wait = null, asked = false;
+  try {
+    const h = NAV_HIST.held; NAV_HIST.held = false;
+    const v = leave && pass!==pk ? leave(prev, s) : true, how = navLeaveVerdict(v);
+    asked = NAV_HIST.held; NAV_HIST.held = h || asked;   // the leaver drew (its question) through render()
+    if (how!=='go') { ok = false; if (how==='wait') wait = v; }
+    if (ok && navCustom(s.kind) && fn!==navRestoreView) ok = navRestoreView(s, prev)!==false;
+    if (ok) ok = fn(s, prev)!==false;
+    NAV_HIST.hold = false;
+    if (ok && NAV_HIST.held) render();
+  } finally { NAV_HIST.hold = false; NAV_HIST.restoring = false; }
+  if (!ok) {
+    if (menuShut) UI.mobileNavOpen = true;
+    navStay(delta);
+    if (drew || asked) render();   // the saved field's redraw and the leaver's question (navAfterRender waits for the history to come back)
+    if (wait) navLeaveWait(wait);
+    if (NAV_HIST.swipeIn) navSwipeInAnim();
+    return;
+  }
+  if (typeof s.y==='number') window.scrollTo(0, s.y);
+  if (s.g) navLeaveWarn();   // a jump straight onto the guard (the browser's history list)
+  if (NAV_HIST.swipeIn) navSwipeInAnim();
+}
+window.addEventListener('popstate', navOnPop);
+// The first tap or key: the leave guard goes under the first screen now (pointerup comes before the click's own entry), and
+// a window opened before it gets its entry.
+function navFirstUse(){ if (!navActivated()) return; document.removeEventListener('pointerup', navFirstUse, true); document.removeEventListener('keydown', navFirstUse, true); navArm(); setTimeout(navOverlaySync, 0); }
+document.addEventListener('pointerup', navFirstUse, true); document.addEventListener('keydown', navFirstUse, true);
+// The built-in restorer: through the same entry functions a click uses (their guards run; their renders are held and
+// their navPush calls do nothing while restoring). Only a value that differs is changed (several of them toggle).
+function navRestoreView(s, prev){
+  const cur = navSnap(), same = (a, b) => (a || null)===(b || null);
+  if (s.tab!==cur.tab) {
+    goTab(s.tab);
+    if (UI.tab!==s.tab) return false;   // the lead's follow-up date was asked for first
+    if (s.tab==='tasks' && s.board) UI.tasks.board = s.board;
+    if (s.tab==='reference' && s.rtab) UI.reference.tab = s.rtab;
+    if (s.tab==='settings') {
+      if (s.so) setSettingsPage(s.sp);
+      else UI.settings = { ...(UI.settings || {}), page: s.sp || 'setup', open: false, conn: null };
+      UI.settings.conn = s.conn || null;
+      PEOPLE_UI.sel = s.per || null; if (s.per) PEOPLE_UI.tab = s.pt || 'details';
+    }
+    if (s.tab==='jobs') UI.jobs.selectedId = s.job || null;
+    if (s.tab==='reference') UI.reference.contractorId = s.con || null;
+    if (s.tab==='crm') { if (s.cv) UI.crm.view = s.cv; if (s.lead) { UI.crm.view = 'inbox'; UI.crm.selectedContactId = s.lead; } }
+    render();
+    return true;
+  }
+  if (s.tab==='settings') {
+    // An hourly pay change is asked about before the page, the list or the card changes (nothing is applied first); Save /
+    // Don't save go on with this back.
+    if (peoplePayDirty() && (!same(s.per, cur.per) || !same(s.sp, cur.sp) || (!s.so && cur.so))) { const r = NAV_HIST.redo; guardPeoplePay(() => navRedo(r)); return false; }
+    // ‹ Settings went back to the list (closeSettingsPage): the page only closes and stays selected, as on main (above 640 px
+    // the list shows it); the entry is then made to match the screen (navAfterRender). Back from a page shows the entry's page.
+    if (prev && prev.keepPage && !s.so) { if (cur.so) closeSettingsPage(); return true; }
+    if (!same(s.sp, cur.sp) || (s.so && !cur.so)) { setSettingsPage(s.sp); if (navSnap().sp!==s.sp) return false; }
+    if (!s.so && navSnap().so) closeSettingsPage();
+    if (!same(s.conn, navSnap().conn)) { if (s.conn) openConnector(s.conn); else closeConnector(); }
+    if (!same(s.per, navSnap().per)) { openPersonCard(s.per || null, s.per ? s.pt || 'details' : undefined); if (!same(navSnap().per, s.per)) return false; }
+    return true;
+  }
+  if (s.tab==='jobs') { if (!same(s.job, cur.job)) selectJob(s.job || null); return true; }
+  if (s.tab==='reference') {
+    if (s.rtab && s.rtab!==cur.rtab) { UI.reference.tab = s.rtab; render(); }
+    if (!same(s.con, cur.con)) openContractor(s.con || null);
+    return true;
+  }
+  if (s.tab==='crm') {
+    if (!same(s.lead, cur.lead)) {
+      if (s.lead) { UI.crm.view = 'inbox'; selectCrmContact(s.lead); } else clearCrmSelection();
+      if (!same(navSnap().lead, s.lead)) return false;
+    }
+    if (s.cv && s.cv!==UI.crm.view) { UI.crm.view = s.cv; render(); }
+    return true;
+  }
+  if (s.tab==='tasks' && s.board && s.board!==cur.board) { UI.tasks.board = s.board; render(); }
+  return true;
+}
+// ── The edge swipe (touch screens). Every listener is passive: it never blocks a scroll or the pipeline's long-press drag.
+// Only in the app installed on the home screen: a browser tab has a swipe back of its own (Safari's, Chrome's and Edge's
+// overscroll arrow, Samsung Internet's) that the same swipe sets off too, so it would go back twice.
+let NAV_SWIPE = null;
+function navSwipeOn(){
+  try {
+    const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const standalone = navigator.standalone===true || window.matchMedia('(display-mode: standalone)').matches;
+    return touch && standalone;
+  } catch (e) { return false; }
+}
+// A job, contractor or person panel is open: it is fixed over the page (the whole screen on a phone), so moving the page
+// under it shows nothing and fading it flickers. The swipe is then a plain back.
+function navSidePanelOpen(){ return !!document.querySelector('#content .job-panel:not([hidden])'); }
+// Not a back swipe: a card being dragged, the pipeline and the boards that move sideways, drag handles, fields, and any
+// box under the finger that can still scroll left. A new sideways board scrolls (overflow-x auto) or carries data-no-back-swipe.
+function navSwipeBlocked(target){
+  if (PIPE_DRAG || document.body.classList.contains('pipe-dragging')) return true;
+  if (!target || !target.closest) return false;
+  return !!target.closest('.pipeline, .pipe-jump, .lead-card, .stage-board, .drag-ghost, .cat-grip, .flow-grip, canvas, input, textarea, select, [contenteditable="true"], [draggable="true"], [data-no-back-swipe]') || navScrollsLeft(target);
+}
+function navScrollsLeft(el){
+  for (let n = el; n && n.nodeType===1 && n!==document.body; n = n.parentElement) {
+    const ox = getComputedStyle(n).overflowX;
+    if ((ox==='auto' || ox==='scroll') && n.scrollWidth > n.clientWidth + 1 && n.scrollLeft > 0) return true;
+  }
+  return false;
+}
+// The page moves with a transform (no layout each frame), unless a fixed box inside it is showing (the settings menu at 901
+// px and up, a side panel): a transform would carry that box with the page, so the page then moves with left.
+function navFixedInside(){ return [...document.querySelectorAll('#content .set-nav, #content .job-panel:not([hidden])')].some(el => el.getClientRects().length && getComputedStyle(el).position==='fixed'); }
+function navSwipeReset(){
+  document.body.classList.remove('nav-swiping');
+  const c = document.getElementById('content'); if (c) { c.style.left = ''; c.style.transform = ''; }
+}
+function navSwipeStart(e){
+  if ((NAV_SWIPE || e.touches.length!==1) && !NAV_HIST.swipeIn) navSwipeReset();   // a second finger, or a swipe a redraw cut off
+  NAV_SWIPE = null;
+  if (e.touches.length!==1 || !NAV_HIST.ready || !navSwipeOn()) return;
+  const t = e.touches[0]; if (t.clientX > NAV_SWIPE_RULES.edge) return;
+  const show = NAV_HIST.d > 0 && !navTopLayer() && !navSidePanelOpen();
+  NAV_SWIPE = { x: t.clientX, y: t.clientY, t: Date.now(), pops: NAV_HIST.pops, blocked: navSwipeBlocked(e.target), show, tf: show && !navFixedInside() };
+}
+function navSwipeMove(e){
+  const s = NAV_SWIPE; if (!s) return;
+  const t = e.touches[0]; if (!t || e.touches.length!==1) { NAV_SWIPE = null; navSwipeReset(); return; }
+  const dx = t.clientX - s.x, dy = t.clientY - s.y;
+  if (Math.abs(dy) > 12 && Math.abs(dy) >= Math.abs(dx)) { NAV_SWIPE = null; navSwipeReset(); return; }   // a scroll up or down wins
+  // The page follows the finger: a transform, or left when a fixed box inside the page is showing (navFixedInside).
+  if (!s.blocked && s.show && dx > 10 && !motionReduced()) {
+    const c = document.getElementById('content');
+    if (c) { document.body.classList.add('nav-swiping'); const px = Math.round(Math.min(dx, 140) * 0.5); if (s.tf) c.style.transform = 'translateX(' + px + 'px)'; else c.style.left = px + 'px'; }
+  }
+}
+function navSwipeEnd(e){
+  const s = NAV_SWIPE; NAV_SWIPE = null; if (!s) return;
+  const t = e.changedTouches && e.changedTouches[0];
+  const ok = !!t && isBackSwipe(s, { x: t.clientX, y: t.clientY, t: Date.now() }, { ...NAV_SWIPE_RULES, blocked: s.blocked, canBack: NAV_HIST.d > 0 || !!navTopLayer(), popped: NAV_HIST.pops!==s.pops });
+  if (ok) { NAV_HIST.swipeTf = !!s.tf; navSwipeBack(); } else navSwipeReset();
+}
+function navSwipeCancel(){ NAV_SWIPE = null; navSwipeReset(); }   // the system took the touch (Android's own back gesture)
+// The page slides out, then back; with reduced motion (or a window or a side panel open) it is a plain back. The back comes
+// a moment later and only when nothing went back meanwhile (a swipe back of the browser's own lands after the touch ends).
+function navSwipeBack(){
+  // The field being typed in saves first (B1a), before #content is touched: the commit's redraw replaces it.
+  const f = document.activeElement; if (f && f!==document.body && typeof f.blur==='function') f.blur();
+  // Closed (or nudged) here, never a history back: a sticky layer (a key shown once); a layer with no entry of its own (a
+  // window opened by ?open=backup or a manager's ?tab=mcp, or "You forgot to log out", before the first tap); an inline
+  // guard (a template not saved), which asks.
+  const st = history.state, top = navTopLayer();
+  if (top && (navIsSticky(top) || top.entry===false || !(navOurs(st) && st.ov))) { navSwipeReset(); navOverlayClose(top); return; }
+  const c = document.getElementById('content'), pops = NAV_HIST.pops, back = () => { if (NAV_HIST.pops===pops) navGoBack(); };
+  if (!c || top || motionReduced() || !document.body.classList.contains('nav-swiping')) { NAV_HIST.swipeTf = false; navSwipeReset(); setTimeout(back, 120); return; }
+  c.style.left = ''; c.style.transform = ''; c.classList.add('nav-swipe-out'); if (NAV_HIST.swipeTf) c.classList.add('tf');
+  NAV_HIST.swipeIn = true;
+  setTimeout(back, 120);
+  setTimeout(() => { NAV_HIST.swipeIn = false; document.body.classList.remove('nav-swiping'); const n = document.getElementById('content'); if (n) n.classList.remove('nav-swipe-out', 'tf'); }, 500);
+}
+function navSwipeInAnim(){
+  const tf = NAV_HIST.swipeTf && !navFixedInside();   // the screen come back may have a fixed box of its own
+  NAV_HIST.swipeIn = false; NAV_HIST.swipeTf = false;
+  document.body.classList.remove('nav-swiping');
+  const c = document.getElementById('content'); if (!c) return;
+  c.classList.remove('nav-swipe-out', 'tf');
+  if (motionReduced() || !c.animate) return;
+  c.classList.add('nav-swipe-in');
+  const a = c.animate(tf ? [{ transform: 'translateX(-10%)', opacity: 0.6 }, { transform: 'none', opacity: 1 }] : [{ left: '-10%', opacity: 0.6 }, { left: '0px', opacity: 1 }], { duration: 160, easing: 'ease-out' });
+  const done = () => c.classList.remove('nav-swipe-in');
+  a.onfinish = done; a.oncancel = done; setTimeout(done, 400);   // also when the animation never runs (a hidden tab)
+}
+document.addEventListener('touchstart', navSwipeStart, { passive: true });
+document.addEventListener('touchmove', navSwipeMove, { passive: true });
+document.addEventListener('touchend', navSwipeEnd, { passive: true });
+document.addEventListener('touchcancel', navSwipeCancel, { passive: true });
+try { if (navSwipeOn()) document.documentElement.classList.add('nav-swipe-on'); } catch (e) {}
 // board model: 'ron' is the office's board (the key is only a storage key; the label is the office's name, Settings →
 // Phone); any other string is that person's own board (their name). A task's board follows its first assignee
 // (boardForAssignees). This function is the single source of truth for labels.
@@ -8062,10 +8857,13 @@ function leadLeaveGuard(id, then){
 }
 // Small centred popup, separate from the main modal so it can sit on top of it.
 let POPUP_AFTER = null;
-function openPopup(html){
+// opts.sticky: a popup that shows something only once (a new key, a sign-in link). Back (the phone's, the browser's, Alt+←,
+// the mouse button, the swipe) never closes it, just as a click beside it never does: it shakes and shows opts.stay.
+function openPopup(html, opts){
   closePopup();
-  const el = document.createElement('div');
+  const o = opts || {}, el = document.createElement('div');
   el.id = 'app-popup'; el.className = 'modal-back'; el.style.zIndex = '2000';
+  if (o.sticky) { el.dataset.navSticky = '1'; if (o.stay) el.dataset.navStay = String(o.stay); }
   el.innerHTML = `<div class="modal" style="max-width:420px">${html}</div>`;
   document.body.appendChild(el);
 }
@@ -9130,6 +9928,7 @@ async function vaSessionStart(){
       <div style="font-size:14px;margin-bottom:12px">On ${esc(parseLocalDate(p.forgotLogoutOn).toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' }))} you didn't press Log Out, so the system finished your day by itself${end ? `, with the end time ${esc(end)}` : ''}. Please press Log Out on My Day at the end of every day.</div>
       <div style="display:flex;justify-content:flex-end"><button class="btn primary" onclick="sb.rpc('ack_forgot_logout');closePopup()">OK</button></div>`);
   }
+  vacationEndOwnShift();   // a vacation set while their app was closed asked to end the shift (stage 3 follow-up 5)
   render();
 }
 function setMyDayView(v){ UI.myDayView = v; render(); }
@@ -9359,7 +10158,7 @@ function pipelinePatchMove(c, from){
    unified-inbox layout Ofek uses day to day (screenshots he sent), since this screen is where
    Ron spends most of his time and needs to live entirely in conversations, not a modal per lead. */
 function setCrmInboxFilter(f){ UI.crm.inboxFilter = f; UI.crm.inboxShow = 0; render(); }
-function selectCrmContact(id){ const go = () => { UI.crm.selectedContactId = id; if (!inboxPatchSelect(id)) render(); }; if (UI.crm.selectedContactId && UI.crm.selectedContactId!==id && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
+function selectCrmContact(id){ const go = () => { UI.crm.selectedContactId = id; navPush({ kind: 'panel' }); if (!inboxPatchSelect(id)) render(); }; if (UI.crm.selectedContactId && UI.crm.selectedContactId!==id && !leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 // Opening a lead in the inbox swaps the conversation and the details beside the list, without redrawing the page and
 // its ~100 rows (Ofek 12 Oct). Returns false (the page is redrawn) when the inbox isn't on screen or the row isn't drawn.
 function inboxPatchSelect(id){
@@ -9374,7 +10173,7 @@ function inboxPatchSelect(id){
   if (!motionReduced()) box.querySelectorAll('.crm-inbox-thread-col, .crm-inbox-details').forEach(el => el.animate && el.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' }));
   return true;
 }
-function clearCrmSelection(){ const go = () => { UI.crm.selectedContactId = null; render(); }; if (!leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
+function clearCrmSelection(){ if (navBackTo({ ...navSnap(), lead: null })) return; const go = () => { UI.crm.selectedContactId = null; navPush({ kind: 'panel' }); render(); }; if (!leadLeaveGuard(UI.crm.selectedContactId, go)) return; go(); }
 // Clicking a lead's name anywhere (Pipeline card, Table row, the Reminders follow-up banner) jumps
 // straight into the live conversation, instead of opening the full edit modal. Explicit action buttons
 // ("Follow-up / edit", "Full profile", "Open") still open the modal — only the plain name-click changes.
@@ -9390,6 +10189,7 @@ function goToLeadConversation(contactId){
     UI.tab = 'crm';
     UI.crm.view = 'inbox';
     UI.crm.selectedContactId = contactId;
+    navPush({ kind: 'panel' });
     render();
   });
 }
@@ -11106,7 +11906,10 @@ function renderJobsStats(data, jobs){
 let PANEL_OPEN_FOR = {};
 function panelAnimClass(key, id){ const was = PANEL_OPEN_FOR[key]; PANEL_OPEN_FOR[key] = id || null; return id && !was ? ' anim' : ''; }
 function selectJob(id){
-  UI.jobs.selectedId = id && UI.jobs.selectedId!==id ? id : null;
+  const next = id && UI.jobs.selectedId!==id ? id : null;
+  if (!next && UI.jobs.selectedId && navBackTo({ ...navSnap(), job: null })) return;
+  UI.jobs.selectedId = next;
+  navPush({ kind: 'panel' });
   refreshJobsTable();
 }
 // Esc closes the open job (unless a window is open on top of it).
@@ -15759,7 +16562,7 @@ async function addEmployeeCard(profileId){
   try { emp = await db.employees.create({ activityLog: [], name, roles: empRolesForLogin(p.role), status: 'Active', employmentType: empTypeForRole(p.role) }); }
   catch (err) { return; }   // db.employees.create() already showed what went wrong
   logEmployeeActivity(emp, getCurrentProfile()?.fullName || 'Unknown', 'Employee added');
-  PEOPLE_UI.sel = 'e:' + emp.id; PEOPLE_UI.tab = 'details';
+  PEOPLE_UI.sel = 'e:' + emp.id; PEOPLE_UI.tab = 'details'; navPush({ kind: 'panel' });   // back closes the new card
   showToast('Added'); render();
 }
 /* ── Equipment (Ofek 13 Oct, approved mockup): only the product name and its category. Purchases (price, shop, date)
@@ -16038,7 +16841,9 @@ function renderContractorsTab(data){
     <aside class="job-panel emp-panel${panelAnimClass('con', sel && sel.id)}" id="con-panel"${sel ? '' : ' hidden'}>${renderContractorPanel(sel)}</aside>`;
 }
 function openContractor(id){
-  UI.reference.contractorId = id && UI.reference.contractorId!==id ? id : null; CON_UI.showBank = null; render();
+  const next = id && UI.reference.contractorId!==id ? id : null;
+  if (!next && UI.reference.contractorId && navBackTo({ ...navSnap(), con: null })) return;
+  UI.reference.contractorId = next; CON_UI.showBank = null; navPush({ kind: 'panel' }); render();
   if (UI.reference.contractorId) refreshContractor(UI.reference.contractorId);
 }
 function refreshContractorCards(){ const g = document.querySelector('.con-grid'); if (g) g.innerHTML = renderContractorCards(STATE.data) || '<div class="hint">No contractor matches.</div>'; }
@@ -16205,7 +17010,7 @@ async function saveAddContractor(){
   const services = [...document.querySelectorAll('#ac-svcs .svc.on')].map(b => b.dataset.s);
   let c;
   try { c = await db.suppliers.create({ name: v('ac-name'), contactPerson: v('ac-person'), phone: v('ac-phone'), email: v('ac-email'), services, paymentTerms: '7 days', deal: { type: 'commission', amount: null, note: '' } }); } catch (e) { return; }
-  closePopup(); UI.reference.contractorId = c.id; showToast('Contractor added'); render();
+  closePopup(); UI.reference.contractorId = c.id; navPush({ kind: 'panel' }); showToast('Contractor added'); render();   // the popup's entry becomes the card's: back closes it
 }
 // The agreement: a snapshot of the text as it was made, so a signed agreement never changes afterwards.
 function newSignToken(){ const b = new Uint8Array(24); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
@@ -25126,6 +25931,13 @@ function wfStickyBoxes(layout, L){
   want.slice().sort((a, c) => a.y - c.y || a.i - c.i).forEach(k => { k.y = Math.max(k.y, free); free = k.y + k.h + WF_STICKY.stack; });
   return want.map(({ s, w, h, y }) => ({ id: s.id, x, y, w, h, color: WF_STICKY.colors.some(c => c[0]===s.color) ? s.color : 'yellow', title: String(s.title || ''), body: String(s.body || '') }));
 }
+// The bounds widened to cover the boxes too (the sticky notes' lane), so Fit and the minimap show everything drawn.
+function wfBoundsWith(bounds, boxes){
+  const b = wfObj(bounds), all = [b, ...(Array.isArray(boxes) ? boxes : [])].map(wfObj);
+  const x0 = Math.min(...all.map(k => Number(k.x) || 0)), y0 = Math.min(...all.map(k => Number(k.y) || 0));
+  const x1 = Math.max(...all.map(k => (Number(k.x) || 0) + (Number(k.w) || 0))), y1 = Math.max(...all.map(k => (Number(k.y) || 0) + (Number(k.h) || 0)));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
 // The Workflow switcher (design §5.5; GHL: search, recent, "+", "Open in new tab", Duplicate / Delete): the other workflows
 // (not deleted), the recent ones first (no search), then A–Z. list = automations rows of the list's read.
 function wfSwitchRows(list, q, recent, curId){
@@ -26673,10 +27485,12 @@ function renderPeopleCards(data){
 function refreshPeopleGrid(){ const g = document.querySelector('.people-grid'); if (g) g.innerHTML = renderPeopleCards(STATE.data); }
 // Opens a person's card (on a tab), or closes it (the same card again, or none). An hourly pay change not saved yet is asked about first.
 function openPersonCard(key, tab){
+  if (PEOPLE_UI.sel && (!key || (key===PEOPLE_UI.sel && !tab)) && !peoplePayDirty() && navBackTo({ ...navSnap(), per: null })) return;
   guardPeoplePay(() => {
     if (!key || (key===PEOPLE_UI.sel && !tab)) PEOPLE_UI.sel = null;
     else { PEOPLE_UI.sel = key; PEOPLE_UI.tab = tab || 'details'; }
     PEOPLE_UI.draft = null; PEOPLE_UI.from = ''; UI.reference.showBank = null;
+    navPush({ kind: 'panel' });
     render();
     const n = document.getElementById('emp-panel'); if (n) n.scrollTop = 0;
   });
@@ -26889,7 +27703,7 @@ function vacationTeamRows(data, today, tz, all){
       && (vacationOnDay(v, today, tz) || (v.startsOn > today && v.startsOn <= soon)))
     .map(v => { const e = emps.find(x => x.id===v.employeeId); return { v, e, name: (e && e.name) || v.employeeName }; })
     .filter(x => x.name && (!x.e || (x.e.status || 'Active')==='Active'))
-    .map(({ v, name }) => ({ v, name, now: v.startsOn <= today, label: vacationUntilText(v, today, tz), standIn: vacationOpt(v, 'standIn') ? v.standInName || '' : '', overdue: vacationOverdue(v, today, tz) }))
+    .map(({ v, e, name }) => ({ v, name, now: v.startsOn <= today, label: vacationUntilText(v, today, tz, e && e.workingDays), standIn: vacationOpt(v, 'standIn') ? v.standInName || '' : '', overdue: vacationOverdue(v, today, tz) }))
     .sort((a, b) => a.v.startsOn.localeCompare(b.v.startsOn) || a.name.localeCompare(b.name));
 }
 function vacationAllTicked(opts){ return VACATION_OPTIONS.every(o => !!opts && opts[o.key]===true); }
@@ -26906,7 +27720,9 @@ function vacationBannerText(v, standInName, today, tz, shift){
 // vacation (the first time: everything ticked) and the same stand-in while they are still Active.
 function vacationDraft(empId, vacId, rows, employees, today){
   const list = rows || [], emps = employees || [], v = vacId ? list.find(r => r.id===vacId) : null;
-  if (v) return { id: v.id, employeeId: v.employeeId, startsOn: v.startsOn, endsOn: v.endsOn, standInId: v.standInId, options: { ...v.options }, note: v.note || '', fromPrev: false };
+  // noteBefore / payBefore: the private row as the window opened (only what changed since is saved: vacationPrivatePatch).
+  if (v) return { id: v.id, employeeId: v.employeeId, startsOn: v.startsOn, endsOn: v.endsOn, standInId: v.standInId, options: { ...v.options }, note: v.note || '', fromPrev: false,
+    noteBefore: v.note || '', payBefore: v.privatePay || '', payKnown: v.payKnown !== false };
   const emp = emps.find(e => e.id===empId), who = emp ? { id: emp.id, name: emp.name } : { id: empId };
   const prev = empId ? list.filter(r => !r.cancelledAt && vacationMatches(r, who)).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null : null;
   const s = prev && prev.standInId ? emps.find(e => e.id===prev.standInId) : null;
@@ -26920,6 +27736,9 @@ function vacationFormProblems(d, rows, employees, tz){
   const out = [], o = (d && d.options) || {};
   if (!d || !d.employeeId) out.push('Pick who is going on vacation');
   out.push(...vacationProblems(d, rows, tz));
+  // A vacation whose paid / unpaid leave nobody knows (payKnown false: its private pay is missing) with payroll ticked: pick
+  // one, or it would be saved with none for good (options always holds 'unpaid', so vacationProblems can't tell).
+  if (d && d.id && o.payroll===true && d.payKnown===false && !out.includes('Paid or unpaid leave?')) out.push('Paid or unpaid leave?');
   if (d && o.standIn===true && d.standInId && d.standInId!==d.employeeId && d.startsOn && d.endsOn && d.endsOn >= d.startsOn) {
     const probe = { id: null, employeeId: d.standInId, startsOn: d.startsOn, endsOn: d.endsOn, options: {}, endedAt: null, cancelledAt: null };
     if ((rows || []).some(r => vacationsOverlap(probe, r, tz))) {
@@ -26935,6 +27754,16 @@ function vacationStandInWarning(d, employees, loginIds){
   if (!d || o.standIn!==true || !d.standInId || d.standInId===d.employeeId || !loginIds || loginIds.has(d.standInId)) return '';
   const s = (employees || []).find(e => e.id===d.standInId);
   return `${(s && s.name) || 'The stand-in'} has no app login, so their copy of the notifications goes to nobody. Open items can still move to them.`;
+}
+// Shown under the stand-in too (stage 3 follow-up 1): the person away gets the lead and call alerts (an owner, manager or
+// office login), and the stand-in's logins can't (a technician only). No login at all is vacationStandInWarning's.
+function vacationStandInAlertHint(d, employees, profiles){
+  const o = (d && d.options) || {}, office = ['owner', 'manager', 'va'];
+  if (!d || o.standIn!==true || !d.standInId || d.standInId===d.employeeId) return '';
+  const of = id => (profiles || []).filter(p => p && (vacationEmployeeOfProfile(p, employees) || {}).id===id);
+  const away = of(d.employeeId), stand = of(d.standInId);
+  if (!away.some(p => office.includes(p.role)) || !stand.length || stand.some(p => office.includes(p.role))) return '';
+  return 'Lead and call alerts only reach an owner, manager or office stand-in.';
 }
 // The phone_routing.people entry's employee, the voice function's rule (vacPhoneEmployee), one clear match, never a guess:
 // the same mobile; else the same full name; else their first name when nobody else has it (no other employee, and no login
@@ -27014,7 +27843,7 @@ function vacationBox(x, canEdit){
   const vid = esc(jsStr(v.id)), now = v.startsOn <= today, overdue = vacationOverdue(v, today, tz);
   const standIn = vacationOpt(v, 'standIn') ? v.standInName || '' : '';
   const desc = 'From ' + vacationRangeText(v.startsOn, v.endsOn) + (vacationOpt(v, 'autoBack') ? '' : ', then until someone ends it')
-    + (standIn ? ' · Stand-in: ' + standIn : '') + (vacationOpt(v, 'payroll') ? ` · ${v.options.pay==='paid' ? 'Paid' : 'Unpaid'} leave` : '') + (v.note ? ' · ' + v.note : '');
+    + (standIn ? ' · Stand-in: ' + standIn : '') + (vacationOpt(v, 'payroll') ? ' · ' + vacationPayText(v) : '') + (v.note ? ' · ' + v.note : '');
   const acts = edit ? btn('Edit', `openVacationModal('${eid}','${vid}')`, '', 'pencil')
     + (now ? btn(overdue ? 'They\'re back' : 'End now', `endVacationNow('${vid}')`, overdue ? 'primary' : '') : btn('Cancel it', `cancelVacation('${vid}')`)) : '';
   const ticks = VACATION_OPTIONS.filter(o => vacationOpt(v, o.key)).map(o => pill('neutral', o.label)).join('');
@@ -27035,7 +27864,7 @@ function vacationBox(x, canEdit){
     open = `<div class="grp">In these dates${n >= 2 && edit && s ? ` <button type="button" class="btn ghost small" onclick="moveAllToStandIn('${vid}')">Move all to ${esc(s)}</button>` : ''}</div>`
       + (n ? `<div class="vac-items">${items}</div>` : '<div class="hint">Nothing open in these dates. ✓</div>');
   }
-  return head + `<div class="pp-box">${setRows([[pill('vac', vacationUntilText(v, today, tz)), desc, acts]])}</div>`
+  return head + `<div class="pp-box">${setRows([[pill('vac', vacationUntilText(v, today, tz, e.workingDays)), desc, acts]])}</div>`
     + (ticks ? `<div class="emp-flags" style="margin-top:8px">${ticks}</div>` : '') + open;
 }
 // The Dashboard's Away card (the team home of owners and managers). Managers can't open Settings → People, so it is
@@ -27062,7 +27891,7 @@ function payrollLeaveCard(data, wk){
   if (data.vacationsError) return `<div class="hint" style="margin-top:14px">Leave can't be shown right now: ${esc(data.vacationsError)}</div>`;
   const lines = vacationPayLines(data, wk, bizTz(), todayStr());
   if (!lines.length) return '';
-  const rows = lines.map(({ emp, line, v }) => `<tr><td>${techTag(emp.name)}</td><td>${pill(line.pay==='paid' ? 'good' : 'neutral', line.pay==='paid' ? 'Paid leave' : 'Unpaid leave')} ${esc(vacationRangeText(line.from, line.to))} (${line.days} day${line.days===1 ? '' : 's'})${line.pay==='paid' ? `<div class="hint">Paid leave: ${line.days} day${line.days===1 ? '' : 's'}, add it by hand</div>` : ''}</td><td>${esc((v && vacationOpt(v, 'standIn') && v.standInName) || '—')}</td></tr>`).join('');
+  const rows = lines.map(({ emp, line, v }) => `<tr><td>${techTag(emp.name)}</td><td>${pill(line.pay==='paid' ? 'good' : 'neutral', line.pay==='paid' ? 'Paid leave' : line.pay ? 'Unpaid leave' : 'On leave')} ${esc(vacationRangeText(line.from, line.to))} (${line.days} day${line.days===1 ? '' : 's'})${line.pay==='paid' ? `<div class="hint">Paid leave: ${line.days} day${line.days===1 ? '' : 's'}, add it by hand</div>` : ''}</td><td>${esc((v && vacationOpt(v, 'standIn') && v.standInName) || '—')}</td></tr>`).join('');
   return `<div class="section-title">Leave <span class="tag">${payrollWeekLabel(wk)}</span></div>
     <div class="table-wrap"><table><thead><tr><th>Name</th><th>Leave</th><th>Stand-in</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="hint" style="margin-top:6px">Set on each person's card (Settings → People). The days are their working days (Monday to Friday when none are set). A mark only: pay is not changed automatically, so add paid leave to their pay by hand.</div>`;
@@ -27083,6 +27912,8 @@ function openVacationModal(empId, vacId){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   if (!canSetVacation()) return;
   const data = STATE.data, rows = data.vacations || [], today = todayStr(), tz = bizTz();
+  const blocked = vacationNotesBlock(vacId, data);
+  if (blocked) { showToast(blocked, { kind: 'warn' }); return; }
   VAC_UI = { draft: vacationDraft(empId || '', vacId || null, rows, data.employees || [], today), saving: false };
   const d = VAC_UI.draft, emp = (data.employees || []).find(e => e.id===d.employeeId);
   const people = (data.employees || []).filter(e => (e.status || 'Active')==='Active').sort((a, b) => String(a.name).localeCompare(String(b.name)));
@@ -27132,17 +27963,17 @@ function vacExtraHtml(){
   const logins = vacationLoginIds(STATE.profiles, data.employees);
   const owner = (STATE.profiles || []).some(p => p.role==='owner' && (vacationEmployeeOfProfile(p, data.employees) || {}).id===d.employeeId);
   const stand = o.standIn===true
-    ? `<div class="field" style="margin-top:11px"><label>Stand-in</label><select onchange="vacSet('standInId', this.value)"><option value="">Pick the stand-in</option>${people.map(e => `<option value="${esc(e.id)}" ${e.id===d.standInId ? 'selected' : ''}>${esc(e.name)}${awayThen(e) ? ' · on vacation then' : ''}${logins && !logins.has(e.id) ? ' · no app login: gets no notifications' : ''}</option>`).join('')}</select><span class="job-sub">Gets their notifications${o.flagOpen===true ? ', and their open items move to them with one click (jobs only to a technician)' : ''}.${owner ? ' Money and private owner alerts only go to a stand-in who is an owner.' : ''}</span>${(w => w ? `<span class="job-sub" style="display:block;margin-top:3px;color:var(--warn)">${esc(w)}</span>` : '')(vacationStandInWarning(d, data.employees, logins))}</div>`
+    ? `<div class="field" style="margin-top:11px"><label>Stand-in</label><select onchange="vacSet('standInId', this.value)"><option value="">Pick the stand-in</option>${people.map(e => `<option value="${esc(e.id)}" ${e.id===d.standInId ? 'selected' : ''}>${esc(e.name)}${awayThen(e) ? ' · on vacation then' : ''}${logins && !logins.has(e.id) ? ' · no app login: gets no notifications' : ''}</option>`).join('')}</select><span class="job-sub">Gets their notifications${o.flagOpen===true ? ', and their open items move to them with one click (jobs only to a technician)' : ''}.${owner ? ' Money and private owner alerts only go to a stand-in who is an owner.' : ''}</span>${[vacationStandInWarning(d, data.employees, logins), vacationStandInAlertHint(d, data.employees, STATE.profiles)].map(w => w ? `<span class="job-sub" style="display:block;margin-top:3px;color:var(--warn)">${esc(w)}</span>` : '').join('')}</div>`
     : o.flagOpen===true ? `<div class="hint" style="margin-top:8px">Tick "${esc(standLabel)}" to move their open items to someone with one click.</div>` : '';
   const pay = o.payroll===true
-    ? `<div class="field" style="margin-top:11px"><label>Leave on the payroll board</label><div class="vac-pay">${VACATION_PAY.map(p => `<label class="checkline"><input type="radio" name="vac-pay" value="${esc(p)}" ${o.pay===p ? 'checked' : ''} onchange="vacSet('pay', this.value)">${p==='paid' ? 'Paid leave' : 'Unpaid leave'}</label>`).join('')}</div></div>` : '';
+    ? `<div class="field" style="margin-top:11px"><label>Leave on the payroll board</label><div class="vac-pay">${VACATION_PAY.map(p => `<label class="checkline"><input type="radio" name="vac-pay" value="${esc(p)}" ${d.payKnown!==false && o.pay===p ? 'checked' : ''} onchange="vacSet('pay', this.value)">${p==='paid' ? 'Paid leave' : 'Unpaid leave'}</label>`).join('')}</div></div>` : '';
   return stand + pay;
 }
 // Only the draft changes; a date redraws the stand-in list (who is away then), never the field being typed in.
 function vacSet(field, value){
   if (!VAC_UI) return;
   const d = VAC_UI.draft;
-  if (field==='pay') d.options = { ...d.options, pay: value };
+  if (field==='pay') { d.options = { ...d.options, pay: value }; d.payKnown = true; }
   else if (field==='standInId') d.standInId = value || null;
   else if (field==='startsOn' || field==='endsOn' || field==='note') d[field] = value || '';
   if (field==='startsOn' || field==='endsOn' || field==='standInId') { const x = document.getElementById('vac-extra'); if (x) x.innerHTML = vacExtraHtml(); }
@@ -27170,21 +28001,51 @@ function vacRefresh(){
   [['vac-opts', vacOptsHtml], ['vac-extra', vacExtraHtml]].forEach(([id, fn]) => { const n = document.getElementById(id); if (n) n.innerHTML = fn(); });
   const s = document.getElementById('vac-sub'); if (s) s.textContent = vacSubText();
 }
-// "Vacation set: 20 Oct – 24 Oct · stand-in Sam · paid leave" (the person's History).
+// "Vacation set: 20 Oct – 24 Oct · stand-in Sam" (the person's History). Employee History (activity_log) is owners and
+// managers only since rls-tighten-2026-09-30.sql; new lines still leave out paid / unpaid leave, and old lines are left as
+// they are (stage 3 follow-up 2).
 function vacationLogText(v, verb){
-  return `${verb}: ${vacationRangeText(v.startsOn, v.endsOn)}${vacationOpt(v, 'autoBack') ? '' : ' (until someone ends it)'}${vacationOpt(v, 'standIn') && v.standInName ? ' · stand-in ' + v.standInName : ''}${vacationOpt(v, 'payroll') ? ` · ${v.options.pay==='paid' ? 'paid' : 'unpaid'} leave` : ''}`;
+  return `${verb}: ${vacationRangeText(v.startsOn, v.endsOn)}${vacationOpt(v, 'autoBack') ? '' : ' (until someone ends it)'}${vacationOpt(v, 'standIn') && v.standInName ? ' · stand-in ' + v.standInName : ''}`;
 }
 async function saveVacationModal(){
   if (readOnlyReason()) { showToast(readOnlyReason()); return; }
   if (!VAC_UI || VAC_UI.saving || !canSetVacation()) return;
   const d = VAC_UI.draft, data = STATE.data, tz = bizTz(), today = todayStr();
+  const blocked = vacationNotesBlock(d.id, data);
+  if (blocked) { modalError(blocked); return; }
   const problems = vacationFormProblems(d, data.vacations || [], data.employees || [], tz);
   if (problems.length) { modalError(problems[0]); return; }
-  const emp = (data.employees || []).find(e => e.id===d.employeeId), first = String((emp && emp.name) || '').split(' ')[0] || 'them';
   const ui = VAC_UI;   // the window this save belongs to: closed (or another one opened) while saving = left alone
+  // In force from today on an office person who is on shift (stage 3 follow-up 5): offer to end it. Their own app ends it
+  // (vacationEndOwnShift): the shift functions only ever act on the caller. Read fresh: the logins have no live updates.
+  const logins = d.startsOn <= today && today <= d.endsOn ? vacationShiftLogins(STATE.profiles, data.employees, d.employeeId) : [];
+  if (logins.length) {
+    ui.saving = true;
+    const { data: fresh, error } = await sb.from('profiles').select('id, role, on_duty, on_duty_date').in('id', logins.map(p => p.id));
+    ui.saving = false;
+    if (VAC_UI!==ui) return;
+    const now = error || !fresh ? logins : fresh.map(r => ({ onDuty: r.on_duty, onDutyDate: r.on_duty_date }));
+    if (now.some(p => vacationOnShift(p, today))) {
+      const emp = (data.employees || []).find(e => e.id===d.employeeId), first = String((emp && emp.name) || '').split(' ')[0] || 'This person';
+      confirmAction(`${first} is on shift now. End their shift now?` + ' Their app ends it the moment it is open; otherwise it ends by itself tonight.', () => vacationSaveNow(ui, true),
+        { danger: false, title: 'On shift now', confirmLabel: 'End their shift now', cancelLabel: 'Back', alt: { label: 'Keep the shift', fn: () => vacationSaveNow(ui, false) } });
+      return;
+    }
+  }
+  return vacationSaveNow(ui, false);
+}
+// The save itself. endShift: options.endShift, the marker their own app acts on (vacationEndOwnShift).
+async function vacationSaveNow(ui, endShift){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (!ui || VAC_UI!==ui || ui.saving || !canSetVacation()) return;
+  const d = ui.draft, data = STATE.data, tz = bizTz(), today = todayStr();
+  const blocked = vacationNotesBlock(d.id, data);   // checked again: the shift question may have been open meanwhile
+  if (blocked) { if (VAC_UI===ui && document.getElementById('modal-error')) modalError(blocked); else showToast(blocked, { kind: 'warn' }); return; }
+  const emp = (data.employees || []).find(e => e.id===d.employeeId), first = String((emp && emp.name) || '').split(' ')[0] || 'them';
   ui.saving = true;
   const row = { ...vacationRowFromDraft(d), business_id: AUTO_BUSINESS_ID };
-  const noteBefore = d.id ? (data.vacationNotes || {})[d.id] || '' : '', note = String(d.note || '').trim();
+  if (endShift) row.options = { ...row.options, endShift: true };
+  const P = vacationPrivatePatch(d);   // only what changed since the window opened (a new vacation: the whole row)
   const res = d.id ? await db.vacations.update(d.id, row) : await db.vacations.add(row);
   ui.saving = false;
   if (res.error) {
@@ -27193,10 +28054,13 @@ async function saveVacationModal(){
     if (VAC_UI===ui && document.getElementById('modal-error')) modalError(msg); else showToast(msg, { kind: 'warn' });
     return;
   }
-  const v = res.vacation, actor = getCurrentProfile()?.fullName || 'Unknown';
-  if (note!==noteBefore) {
-    const nr = await db.vacations.setNote(v.id, note);
-    if (nr.error) showToast('The vacation is saved, but not its note: ' + nr.error.message, { kind: 'warn' });
+  let v = res.vacation;
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  // the private row, then the list's copy for the History line (a live update may have replaced the one the save returned)
+  if (P) {
+    const nr = await db.vacations.setPrivate(v.id, P);
+    if (nr.error) showToast('The vacation is saved, but not its note or paid / unpaid leave: ' + nr.error.message, { kind: 'warn' });
+    else v = (STATE.data.vacations || []).find(x => x.id===v.id) || v;
   }
   if (emp) logEmployeeActivity(emp, actor, vacationLogText(v, d.id ? 'Vacation changed' : 'Vacation set'));
   const it = vacationOpt(v, 'flagOpen') ? vacationMovableItems(data, v, tz, today) : { tasks: [], jobs: [] }, n = it.tasks.length + it.jobs.length;
@@ -27613,7 +28477,8 @@ async function saveAddPerson(){
   } else { PEOPLE_UI.add = null; closeModal(); }
   // The new card opens: on Access when they got a link to join, otherwise on Details.
   const key = emp ? 'e:' + emp.id : ((peopleList(STATE.data.employees, STATE.profiles).find(y => y.prof && out && y.prof.id===out.id) || {}).key || null);
-  if (key) { PEOPLE_UI.sel = key; PEOPLE_UI.tab = invite ? 'access' : 'details'; PEOPLE_UI.draft = null; }
+  // It gets an entry (the window's becomes the card's), so back closes it; the join link's popup then gets one over it.
+  if (key) { PEOPLE_UI.sel = key; PEOPLE_UI.tab = invite ? 'access' : 'details'; PEOPLE_UI.draft = null; navPush({ kind: 'panel' }); }
   showToast('Added'); render();
 }
 // Invite someone who has a card but no login: the invite window, filled in from their card.
@@ -27732,7 +28597,7 @@ function showJoinLink(name, link, kind){
       <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('join-link-text').value).then(() => showToast('Copied'))">${ico('copy', 14)} Copy</button>
       <a class="btn" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a>
       <button class="btn primary" onclick="closePopup()">Done</button>
-    </div>`);
+    </div>`, { sticky: true, stay: 'Send the link first, then press Done.' });
 }
 async function teamLink(id){
   const p = STATE.profiles.find(x => x.id===id); if (!p) return;
@@ -28393,9 +29258,13 @@ async function loadConnLog(){
 }
 function openConnector(id){
   UI.settings = { ...(UI.settings || {}), page: 'connectors', open: true, conn: id };
+  navPush({ kind: 'connector' });
   render(); window.scrollTo(0, 0);
 }
-function closeConnector(){ if (UI.settings) UI.settings.conn = null; render(); window.scrollTo(0, 0); }
+function closeConnector(){
+  if (navBackTo({ ...navSnap(), conn: null })) return;
+  if (UI.settings) UI.settings.conn = null; navPush({ kind: 'connector' }); render(); window.scrollTo(0, 0);
+}
 // Saves one connector's switches (a fresh copy: catalogObject is a shallow copy, so the saved maps are never changed in place).
 function connSave(id, fn, what, opts){ return catalogSave('connectors', connPatched(catalogObject('connectors'), id, fn), what, opts); }
 function connCfgNow(id){ return connCfgOf(STATE.data.settings.catalog, id); }
@@ -28689,7 +29558,7 @@ function mcpShowNewKey(token, url, pathUrl){
     <div class="hint">This is the only time it is shown. Copy it now; if you lose it, revoke it and make a new one.</div>
     ${row('mcp-reveal-path', 'Address with the key (for Claude)', pathUrl)}${row('mcp-reveal-key', 'Key', token)}${row('mcp-reveal-url', 'Address (for tools that take a header)', url)}
     <ol class="mcp-howto">${MCP_HOWTO.slice(1).map(t => `<li>${esc(t)}</li>`).join('')}</ol>
-    <div class="modal-acts"><button type="button" class="btn primary" onclick="closePopup()">I've saved it</button></div>`);
+    <div class="modal-acts"><button type="button" class="btn primary" onclick="closePopup()">I've saved it</button></div>`, { sticky: true, stay: 'Copy the key first, then press "I\'ve saved it".' });
 }
 function mcpCopy(id){
   const el = document.getElementById(id); if (!el) return;
@@ -29985,12 +30854,18 @@ function setSettingsPage(id){
       if (asked==='templates') WF_UI.tab = 'templates'; else if (asked==='notifications') WF_UI.tab = 'workflows';
     } else wfInvalidate();
     TPL_EDIT = null; AUTO_TPL_EDIT = null;
+    navPush({ kind: 'settings' });
     render();
     window.scrollTo(0, 0);   // a different settings page opens at its top on every width (the menu panel stays where it is, T1.10)
   };
   if (id!=='people') guardPeoplePay(go); else go();
 }
-function closeSettingsPage(){ dropBrandTry(); DATA_EXPORT.sens = false; UI.settings.open = false; render(); window.scrollTo(0, 0); }
+function closeSettingsPage(){
+  // The list is the entry below: back to it. The list keeps this page selected, as it did before the history (keepPage, see
+  // navRestoreView); the entry below may hold another page (the one Settings opened on, or one closed earlier).
+  if (navBackTo(k => { const p = k.split('|'); return p[0]==='settings' && p[2]==='0' && !p[3] && !p[4]; })) { NAV_HIST.cur = { ...NAV_HIST.cur, keepPage: 1 }; return; }
+  dropBrandTry(); DATA_EXPORT.sens = false; UI.settings.open = false; navPush({ kind: 'settings' }); render(); window.scrollTo(0, 0);
+}
 // The text a settings page is found by in Search settings, and whether a search finds it (empty finds everything).
 function settingsNavText(pg){ return (pg.title + ' ' + pg.desc + ' ' + pg.group + ' ' + (pg.keywords || '')).toLowerCase(); }
 function settingsNavMatch(text, q){ const t = String(q || '').toLowerCase().trim(); return !t || String(text || '').includes(t); }
@@ -30314,6 +31189,17 @@ function vacationBlocksShift(me){
   if (!vacationForProfile(STATE.data.vacations || [], me, todayStr(), bizTz(), null, STATE.data.employees)) return false;
   showToast('You are on vacation today: no shift clock', { kind: 'warn' }); render();
   return true;
+}
+// "End their shift now" (stage 3 follow-up 5): the person who set the vacation can't end someone else's shift, so this
+// login's own app does it, the moment the marked vacation reaches it (live update, or opening the app). Once ended,
+// vacationBlocksShift keeps it from starting again while the vacation is in force, so this never loops.
+let VAC_SHIFT_ENDING = false;
+function vacationEndOwnShift(){
+  if (VAC_SHIFT_ENDING || !STATE.data || VIEW_AS_ID || PRESENT || readOnlyReason()) return;
+  const me = getRealProfile();
+  if (!vacationEndShiftFor(STATE.data.vacations || [], me, todayStr(), bizTz(), STATE.data.employees)) return;
+  VAC_SHIFT_ENDING = true;
+  setMyShift(false).finally(() => { VAC_SHIFT_ENDING = false; });
 }
 async function vaLogIn(){
   const me = getCurrentProfile(); if (!me) return;
@@ -30855,7 +31741,8 @@ function renderFreshness(){
   </div>`;
 }
 
-function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderChaseBubbles, 0); setTimeout(mdTick, 0); } catch(e) {}
+function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; }   // a back/forward restore draws once, at its end (stage 4)
+  JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderChaseBubbles, 0); setTimeout(mdTick, 0); } catch(e) {}
   // The workflow builder first, before any early return (design §5.1): signed out / another profile → it closes; new lists → its words again.
   try { wfAppDataChanged(); } catch (e) { console.error('workflow builder', e); }
   const app = document.getElementById('app');
@@ -30882,11 +31769,12 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   // route guard — mirrors src/lib/permissions.ts + the (app)/layout.tsx guard:
   // never render a section the current profile isn't permitted to view.
   if (UI.tab==='finance') UI.tab = 'payroll';   // Financial Summary was removed (6 Oct): its technician part lives in Payroll
-  // Opened from a phone notification (?tab=payroll&week=…, ?tab=settings&page=…): go there once.
-  if (!START_LINK.used && START_LINK.tab) { START_LINK.used = true; UI.tab = START_LINK.tab; if (START_LINK.week) { UI.payroll.mode = 'week'; UI.payroll.week = START_LINK.week; } if (START_LINK.page && START_LINK.tab==='settings') UI.settings = { ...(UI.settings || {}), page: START_LINK.page, open: true }; if (START_LINK.page==='templates') WF_UI.tab = 'templates'; }
+  // Opened from a link or a phone notification (?tab=payroll&week=…, ?tab=settings&page=…): go there once. A page this person
+  // may not open lands on their home page (stage 4, every gated page); ?tab=mcp opens the private connector where they have it.
+  if (!START_LINK.used && START_LINK.tab) { START_LINK.used = true; const L = landingTab(profile, START_LINK); UI.tab = L.tab; if (L.week) { UI.payroll.mode = 'week'; UI.payroll.week = L.week; } if (L.tab==='settings' && (L.page || L.conn)) UI.settings = { ...(UI.settings || {}), page: L.page || 'setup', open: true, conn: L.conn || null }; if (L.open==='mcpKeys') setTimeout(openMcpKeys, 0); if (L.page==='automation' && START_LINK.page==='templates') WF_UI.tab = 'templates'; }
   // Back from "Continue with Google" on Security's lock: open Security and unlock it (once).
   secGoogleFinish(profile);
-  if (!UI.tab || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);
+  if (!UI.tab || !NAV_PAGES.includes(UI.tab) || !canViewSection(profile, UI.tab)) UI.tab = homeTabFor(profile);   // a page that doesn't exist too (no empty page)
   // …and a workflow in Automation (?wf=…&wfTab=…&listTab=…), once, opened after this draw — only AFTER the route guard
   // and only for someone who may open Settings → Automation; anyone else's link is spent and ignored.
   if (!START_LINK.wfUsed) {
@@ -30937,6 +31825,7 @@ function render(){ JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderCh
   RENDER_LAST = { key: view, tab: UI.tab };
   motionAfterRender(motionBefore, flipBefore);
   trackCelebrations();
+  navAfterRender(profile);
 }
 // A redraw keeps the field being typed in (marked data-keep-focus="<key>"; the keys are code constants, never user text)
 // focused, with its caret where it was. Returns a function that puts it back, or null.

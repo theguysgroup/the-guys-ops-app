@@ -63,6 +63,7 @@ async function testGuard(){
       `sb.from('contacts').update({ notes: 'x' }).eq('id', 1).select().single()`,
       `sb.from('sales_daily_log').upsert({ person: 'Ron' }, { onConflict: 'person,date' })`,
       `sb.from('tasks').delete().eq('id', 1)`,
+      `sb.from('employee_vacation_notes').upsert({ vacation_id: 'v1', note: null, pay: 'paid', business_id: 'default' })`,   // db.vacations.setPrivate (stage 3 follow-up 2)
       `sb.rpc('set_phone_duty', { p_on: true })`,
       `sb.rpc('myday_merge', {})`,
     ]) results.push(await run(w));
@@ -690,8 +691,25 @@ function testAutomationsLock(){
     && o17.indexOf('**App**') < step('G3.4') && /PASS 1 … 26/.test(o17) && /### 17\.2 Roll back/.test(r17), 'RUNBOOK §17: the Part-3 live order (G3.5, G3.1, function, app, then G3.4 last), PASS 26, the roll back');
 }
 
+// "End their shift now" (stage 3 follow-up 5): the office person's own app ends a marked shift, never in a read-only mode
+// (an owner viewing as the VA, or a presentation, must not end the real person's shift).
+function testVacationShiftReadOnly(){
+  for (const [mode, present, viewAs, want] of [['presentation mode', true, null, 0], ['View as', false, 'ron', 0], ['normal mode', false, null, 1]]) {
+    const log = [];
+    const ctx = { PRESENT: present, VIEW_AS_ID: viewAs, STATE: { data: { vacations: [], employees: [] } },
+      getRealProfile: () => ({ id: 'ron', role: 'va', onDuty: true, onDutyDate: '2026-10-22' }), todayStr: () => '2026-10-22', bizTz: () => 'Australia/Sydney',
+      vacationEndShiftFor: () => ({ id: 'v1', endShift: true }),
+      setMyShift: (on) => { log.push('setMyShift:' + on); return new Promise(() => {}); } };   // still running: a second call must wait
+    vm.createContext(ctx);
+    vm.runInContext(`${fnText('readOnlyReason')}\nvar VAC_SHIFT_ENDING = false;\n${fnText('vacationEndOwnShift')}`, ctx);
+    vm.runInContext('vacationEndOwnShift(); vacationEndOwnShift();', ctx);
+    ok(log.length === want && (!want || log[0] === 'setMyShift:false'), `${mode}: a vacation that asks to end the shift ${want ? 'ends it once (not twice while it runs)' : 'changes nothing'}`, log);
+  }
+}
+
 (async () => {
   await testGuard();
+  testVacationShiftReadOnly();
   testStaticScan();
   await testDropUploadsReadOnly();
   await testActions();
