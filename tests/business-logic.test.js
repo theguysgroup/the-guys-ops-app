@@ -183,6 +183,8 @@ const DECLS = [
   'cobraSettingProblem', 'cobraPatchOf', 'cobraPatchText', 'cobraSpeechLang', 'cobraWhen', 'cobraEnterSends', 'cobraStick', 'cobraPageMode',
   // Stage 6 review fixes: a saved chat's context, tool chips left spinning, the chat a load is for
   'cobraClientContext', 'cobraEndTools', 'cobraConvWanted',
+  // Stage 8 D: the example questions follow the role
+  'cobraExamples',
   // Stage 6 rebase on a8c6d2d: the vacation line the assign question and the assistant's new-task card share
   'vacationAssignLine',
   // Stage 6 v2 G6: provider status, the free quota, own keys, the own-Claude card, the ChatGPT row (coming later)
@@ -5180,7 +5182,12 @@ function testCobraHelpers(sb){
   assertEqual([sb.cobraClientMode('workflow_edit', { workflowId: 'w' }), sb.cobraClientMode('assistant', {}), sb.cobraClientMode('other', {})], ['testwf', 'assistant', 'assistant'], 'cobraClientMode: a saved chat opens in the mode that made it');
   delete sb.COBRA_MODES.testwf;
   assertEqual([sb.cobraRequestContext('assistant', { x: 1 }, { tab: 'crm' }), sb.cobraRequestContext('nope', {}, {})], [{ page: 'crm' }, { page: '' }], 'cobraRequestContext: the assistant tells the gateway the page (its schema allows only page)');
-  assertEqual(sb.COBRA_MODES.assistant.examples.length, 3, 'the assistant offers three examples');
+  const exFor = role => { sb.getCurrentProfile = () => (role ? { role } : null); return sb.cobraExamples(sb.COBRA_MODES.assistant); };
+  assertEqual([exFor('technician'), exFor('marketing'), exFor('owner'), exFor('manager'), exFor('va'), exFor(null).length], [
+    ['When is my next job?', 'What are my tasks?', 'What are our office hours?'], ['What are our office hours?', "What's our time zone?"],
+    ['How many leads came in this month?', 'What are my tasks?', 'Add a task: call the supplier tomorrow'], ['How many leads came in this month?', 'What are my tasks?', 'Add a task: call the supplier tomorrow'],
+    ['How many leads came in this month?', 'What are my tasks?', 'Add a task: call the supplier tomorrow'], 3], 'cobraExamples: examples by role (technician: his jobs and tasks; marketing: office hours and region; others: leads, tasks, a new task)');
+  assertEqual([sb.cobraExamples({ examples: ['a'] }), sb.cobraExamples({}), sb.cobraExamples(null)], [['a'], [], []], 'cobraExamples: a plain array, or nothing, also works');
   // formatting: escaped, RTL-safe
   const x1 = sb.cobraFormat('<img src=x onerror=alert(1)>');
   assertEqual([x1.includes('<img'), sb.cobraFormat('**bold**'), sb.cobraFormat('- a\n- b'), sb.cobraFormat('1. a\n2. b'), sb.cobraFormat('שלום\n\nhello'), sb.cobraFormat('a\nb `c`'), sb.cobraFormat('')],
@@ -5313,8 +5320,12 @@ function testCobraStatic(){
   const defs = /export const AI_DEFAULTS = \{[\s\S]*?model_per_task: \{ assistant: "([^"]+)", heavy: "([^"]+)" \}[\s\S]*?monthly_cap_usd: (\d+), daily_user_limit: (\d+)/.exec(gw);
   assertEqual(defs ? [defs[1], defs[2], Number(defs[3]), Number(defs[4])] : null, [sb.COBRA_DEFAULTS.model_per_task.assistant, sb.COBRA_DEFAULTS.model_per_task.heavy, sb.COBRA_DEFAULTS.monthly_cap_usd, sb.COBRA_DEFAULTS.daily_user_limit], 'the settings page\'s defaults are the gateway\'s');
   assertEqual(['status', 'confirm_change', 'cancel_change', 'undo_change'].filter(st => !new RegExp(`\\b${st}: \\{ run:`).test(gw)), [], 'the steps the app calls exist in the gateway');
-  const ex = sb.COBRA_MODES.assistant.examples.map(x => x.toLowerCase());
-  assertEqual([/office hours/.test(ex[0]) && gw.includes('/office hours|'), gw.includes('/open saturday 9 to 1/i') && ex[1].includes('open saturday 9 to 1'), gw.includes('/add a task') && ex[2].includes('add a task')], [true, true, true], 'the three examples are the test provider\'s scripts (one proposes an office-hours change)');
+  // every example, for every role, is a gateway test-provider script (the gateway tests pin what each one answers)
+  const asScript = x => x.toLowerCase().replace(/[?.]$/, '').replace(/'s /, "'?s ");
+  const gwl = gw.toLowerCase();
+  const exAll = [...new Set(['technician', 'marketing', 'owner'].flatMap(role => { sb.getCurrentProfile = () => ({ role }); return sb.cobraExamples(sb.COBRA_MODES.assistant); }))];
+  assertEqual([exAll.filter(x => !/^(what are our office hours|add a task)/i.test(x) && !gwl.includes(asScript(x))), gw.includes('/office hours|'), gw.includes('/add a task')], [[], true, true],
+    'the examples are the test provider scripts (one gateway MOCK_SCRIPTS entry each; office hours and add a task have the older ones)');
   // Stage 4's page history (rebase on f9c64b6): the panel is a layer, so back (the phone's back swipe) closes it first
   const layer = /navLayer\(\{ id: 'cobra', z: (\d+), isOpen: \(\) => !!COBRA\.open, close: /.exec(block);
   assertEqual([!!layer && Number(layer[1]) > 100 && Number(layer[1]) < 200, /navOverlaySync\(\);/.test(extractDecl(script, 'cobraOpen')), /navOverlaySync\(\);/.test(extractDecl(script, 'cobraClose'))],

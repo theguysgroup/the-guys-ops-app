@@ -24265,8 +24265,11 @@ const COBRA_MODES = {
   assistant: {
     label: 'Assistant', serverMode: 'assistant', placeholder: 'Ask a question, or ask for a change',
     intro: name => `Hi, I'm ${name}. Ask me about the business, or ask me to change something. I show you exactly what will change before anything is saved.`,
-    // The test provider answers these three the same way every time (one of them proposes an office-hours change).
-    examples: ['What are our office hours?', 'Open Saturday 9 to 1', 'Add a task: call the supplier tomorrow'],
+    // What to try, by role (an array, or a function of the profile; render through cobraExamples). The test provider
+    // answers each one the same way every time (a gateway MOCK_SCRIPTS entry each).
+    examples: p => p && p.role==='technician' ? ['When is my next job?', 'What are my tasks?', 'What are our office hours?']
+      : p && p.role==='marketing' ? ['What are our office hours?', "What's our time zone?"]
+      : ['How many leads came in this month?', 'What are my tasks?', 'Add a task: call the supplier tomorrow'],
     requestContext: (ctx, ui) => ({ page: String((ui && ui.tab) || '') }),
     // The page is sent fresh with every turn: a saved chat's page isn't part of the chat.
     savedContext: () => ({}),
@@ -24279,7 +24282,7 @@ const COBRA_CARDS = {};
 // floating button then opens in that mode.
 const COBRA_PAGE_MODES = [];
 // The change kinds' icons (gateway CHANGE_KINDS); an unknown kind gets the pencil.
-const COBRA_KIND_ICON = { office_hours: 'clock', task_add: 'tasks', lead_stage: 'kanban', lead_note: 'note', task_update: 'check', lead_follow_up: 'calendar' };
+const COBRA_KIND_ICON = { office_hours: 'clock', task_add: 'tasks', lead_stage: 'kanban', lead_note: 'note', task_update: 'calendarCheck', lead_follow_up: 'calendar' };
 // The models Settings offers, with the gateway's default prices (US$ per million tokens; PRICE_DEFAULTS in ai-gateway,
 // a test keeps them equal). An owner's price overrides (ai_settings.prices) are shown on top.
 // provider: which group of Settings → AI → Models lists it (the free AI, the paid AI, own OpenAI keys).
@@ -24847,6 +24850,8 @@ async function cobraFetch(path, body, opts){
   }
   return out;
 }
+// The example questions for this person's role: the mode's list, or its function of the profile you are viewing as.
+function cobraExamples(m){ const e = m && m.examples; return (typeof e==='function' ? e(getCurrentProfile()) : e) || []; }
 function cobraIsOwner(){ const me = getRealProfile(); return !!me && me.role==='owner'; }
 function cobraStatusLoad(force){
   const c = COBRA;
@@ -25061,7 +25066,7 @@ function cobraBodyHtml(){
   }
   if (!c.msgs.length) {
     const off = cobraComposerOff();
-    return `<p class="cobra-intro" dir="auto">${esc(m.intro(cobraName()))}</p><div class="cobra-examples">${(m.examples || []).map(x => `<button type="button" dir="auto" onclick="cobraSend('${esc(jsStr(x))}')"${off ? ' disabled' : ''}>${esc(x)}</button>`).join('')}</div>`;
+    return `<p class="cobra-intro" dir="auto">${esc(m.intro(cobraName()))}</p><div class="cobra-examples">${cobraExamples(m).map(x => `<button type="button" dir="auto" onclick="cobraSend('${esc(jsStr(x))}')"${off ? ' disabled' : ''}>${esc(x)}</button>`).join('')}</div>`;
   }
   const cardCtx = cobraCardCtx();
   return `<div class="cobra-msgs" id="cobra-msgs" role="log" aria-live="polite" aria-busy="${!!c.streaming}">${c.msgs.slice(-200).map(x => cobraMsgHtml(x, c.busy, cardCtx)).join('')}</div>`;

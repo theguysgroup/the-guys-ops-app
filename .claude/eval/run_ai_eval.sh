@@ -21,6 +21,9 @@
 #   qwen3.8-27b    about 210          about 24
 # All 4 models x 13 cases x 2 stream modes is about 10k neurons: the whole day. Run it in TWO SITTINGS (day 1: glm +
 # gemma; day 2: gpt-oss + qwen with --stream off), and only BEFORE live uses the free AI on the same account.
+# Stage 8 added 34 cases (each example question in English and Hebrew) and the assistant now sends about 12.8k characters of
+# tool schemas: the full run is several times bigger. Run the first 13 for the model pick as before, and the stage 8 cases
+# on the picked model only (--models <id> --cases en-leads-month,he-leads-month,...), one stream mode.
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 GW="$(cd "$DIR/../../supabase/functions/ai-gateway" && pwd)"
