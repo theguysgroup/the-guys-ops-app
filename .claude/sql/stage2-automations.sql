@@ -3092,6 +3092,7 @@ commit;
 --   select public.automation_list_stats(now() - interval '180 days');   -- note it (the same keys + 'ch' after)
 -- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 begin;
+set local lock_timeout = '5s';
 create or replace function public.automation_list_stats(p_since timestamptz)
 returns jsonb language sql stable security invoker set search_path = ''
 as $$
