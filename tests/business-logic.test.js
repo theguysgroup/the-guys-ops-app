@@ -218,6 +218,21 @@ const DECLS = [
   'vacationPayText',
   // stage 3 follow-ups, Ofek's review (16 Oct) A1: only what changed goes into the private row; no change while it didn't load
   'vacationPrivatePatch', 'vacationNotesBlock',
+  // Stage 6: the AI assistant (pure helpers)
+  'COBRA_ROLES', 'COBRA_LIMITS', 'COBRA_MODES', 'COBRA_CARDS', 'COBRA_PAGE_MODES', 'COBRA_KIND_ICON', 'COBRA_MODELS', 'COBRA_DEFAULTS', 'COBRA_ERRORS', 'COBRA_DOTS', 'COBRA_STALE_MS',
+  'cobraNameOf', 'cobraSettingsTitle', 'cobraIconKind', 'cobraRolesOf', 'cobraFabState', 'cobraShouldLoadStatus', 'cobraErrorText', 'cobraStopNote', 'cobraSseParse', 'cobraCleanContext', 'cobraNeedsNewConv',
+  'cobraServerMode', 'cobraClientMode', 'cobraRequestContext', 'cobraFormat', 'cobraJoinParts', 'cobraDiffRows', 'cobraRowsOf', 'cobraDiffRowHtml', 'cobraStatusPill', 'cobraChangeError', 'cobraProposalHtml', 'cobraCardHtml',
+  'cobraToolHtml', 'cobraMsgHtml', 'cobraMsgsFromRows', 'cobraCanUndo', 'cobraLogRowHtml', 'cobraUsd', 'cobraUsageMeter', 'cobraBannerOf', 'cobraSendBlock', 'cobraLeftText', 'cobraPricesOf', 'cobraSettingsOf',
+  'cobraSettingProblem', 'cobraPatchOf', 'cobraPatchText', 'cobraSpeechLang', 'cobraWhen', 'cobraEnterSends', 'cobraStick', 'cobraPageMode',
+  // Stage 6 review fixes: a saved chat's context, tool chips left spinning, the chat a load is for
+  'cobraClientContext', 'cobraEndTools', 'cobraConvWanted',
+  // Stage 8 D: the example questions follow the role
+  'cobraExamples',
+  // Stage 6 rebase on a8c6d2d: the vacation line the assign question and the assistant's new-task card share
+  'vacationAssignLine',
+  // Stage 6 v2 G6: provider status, the free quota, own keys, the own-Claude card, the ChatGPT row (coming later)
+  'COBRA_PROVIDER_MODELS', 'COBRA_SOURCE_LABEL', 'COBRA_KEY_RE', 'COBRA_KEY_PROVIDERS', 'cobraSourcePill', 'cobraFreeMeter', 'cobraFreeResetText', 'cobraKeyProblem', 'cobraKeyCardHtml',
+  'cobraOwnClaudeCardHtml', 'cobraChatGptRowHtml', 'cobraPaidKeyReady',
 ];
 
 function extractDecl(source, name){
@@ -7565,6 +7580,474 @@ async function testVacationFollowUps(){
   assertEqual([s3.priv, s4.priv, s5.adds.length, s5.priv], [[['v1', { pay: 'unpaid' }]], [['v1', { note: 'Surgery, then rest' }]], 1, [['vn', { note: null, pay: 'paid' }]]],
     'A1 save: a pay-only change upserts only pay, a note-only change only note; a new vacation may still be set (its private row is new)');
 }
+// ── Stage 6: the AI assistant (G3: the floating button, the panel, the change log, Settings → AI) ──
+const COBRA_GATEWAY = path.join(__dirname, '..', 'supabase', 'functions', 'ai-gateway', 'index.ts');
+function testCobraHelpers(sb){
+  console.log('\nStage 6: the AI assistant (pure helpers)');
+  // names, icon, roles
+  assertEqual([sb.cobraNameOf(null, ''), sb.cobraNameOf('  Max ', 'X'), sb.cobraNameOf(null, 'Acme Ops'), sb.cobraNameOf('x'.repeat(50), '').length], ['OPS Service', 'Max', 'Acme Ops', 40], 'cobraNameOf: the set name, else the app name, else OPS Service; at most 40 characters');
+  assertEqual([sb.cobraSettingsTitle('OPS Service'), sb.cobraSettingsTitle('Cobra AI'), sb.cobraSettingsTitle('Ai')], ['OPS Service AI', 'Cobra AI', 'Ai'], 'cobraSettingsTitle: "<name> AI", never "AI AI"');
+  assertEqual([sb.cobraIconKind({}), sb.cobraIconKind({ assistantIcon: 'logo', logo: sb.BRAND_MARK }), sb.cobraIconKind({ assistantIcon: 'logo', logo: 'https://x.supabase.co/storage/v1/object/public/branding/a.png' }), sb.cobraIconKind({ assistantIcon: 'logo' })],
+    ['default', 'default', 'logo', 'logo'], 'cobraIconKind: the business logo only when picked and there is one (the OPS mark is not one)');
+  assertEqual(sb.cobraRolesOf(undefined), { owner: true, manager: true, va: true, technician: true, marketing: true }, 'cobraRolesOf: nothing saved = every role on');
+  assertEqual(sb.cobraRolesOf({ technician: false, va: 'no' }), { owner: true, manager: true, va: true, technician: false, marketing: true }, 'cobraRolesOf: only false switches a role off');
+  assertEqual([sb.cobraFabState(null, 'ro').show, sb.cobraFabState(null, '').show, sb.cobraFabState({ enabled: false, reason: 'role_off' }, ''), sb.cobraFabState({ enabled: true, month: { blocked: true } }, '').show],
+    [false, false, { show: false, why: 'role_off' }, true], 'cobraFabState: hidden read-only, while loading and when off; shown when the budget is used up (the panel explains)');
+  const blank = { statusP: null, statusAt: 0, statusErr: '' }, now = Date.now();
+  assertEqual([sb.cobraShouldLoadStatus(blank, '', now), sb.cobraShouldLoadStatus(blank, 'ro', now), sb.cobraShouldLoadStatus({ ...blank, statusP: {} }, '', now), sb.cobraShouldLoadStatus({ ...blank, statusAt: now }, '', now),
+    sb.cobraShouldLoadStatus({ ...blank, statusAt: now - 240000, statusErr: 'network' }, '', now), sb.cobraShouldLoadStatus({ ...blank, statusAt: now - 360000, statusErr: 'network' }, '', now)],
+    [true, false, false, false, false, true], 'cobraShouldLoadStatus: once; never read-only or while loading; a failure again only after 5 minutes');
+  // errors and notes
+  assertEqual([/Settings/.test(sb.cobraErrorText('off', { name: 'OPS Service', isOwner: true })), /Settings/.test(sb.cobraErrorText('off', { isOwner: false })), /^OPS Service /.test(sb.cobraErrorText('role_off', { name: 'OPS Service' })),
+    /50/.test(sb.cobraErrorText('daily_limit', { limit: 50 })), sb.cobraErrorText('nope'), Object.keys(sb.COBRA_ERRORS).every(k => { const t = sb.cobraErrorText(k, { name: 'N' }); return t && !/undefined/.test(t); })],
+    [true, false, true, true, sb.COBRA_ERRORS.server, true], 'cobraErrorText: named switches, Settings only for owners, the daily limit number, the server text for anything unknown');
+  assertEqual(['max_tokens', 'refusal', 'tool_limit', 'step_limit'].every(k => sb.cobraStopNote(k)) && sb.cobraStopNote('end_turn')==='', true, 'cobraStopNote: a note for a cut, refused or too-long answer; nothing for a normal end');
+  // the stream's framing
+  const a = sb.cobraSseParse('event: text\ndata: {"delta":"Hi"}\n\nevent: done\nda');
+  assertEqual([a.events, a.rest.startsWith('event: done')], [[{ event: 'text', data: '{"delta":"Hi"}' }], true], 'cobraSseParse: whole frames out, the unfinished tail kept');
+  assertEqual(sb.cobraSseParse('event: text\r\ndata: {"delta":"Hi"}\r\n\r\n').events, [{ event: 'text', data: '{"delta":"Hi"}' }], 'cobraSseParse: \\r\\n framing parses the same');
+  assertEqual([sb.cobraSseParse(': ping\n\n').events, sb.cobraSseParse('data: a\ndata: b\n\n').events[0].data, sb.cobraSseParse('data: x\n\n').events[0].event, sb.cobraSseParse('event: text\ndata:{"a":1}\n\n').events[0].data],
+    [[], 'a\nb', 'message', '{"a":1}'], 'cobraSseParse: pings skipped, data lines joined, event defaults to message, "data:" without a space');
+  const split = sb.cobraSseParse('event: text\ndata: 1\r');
+  assertEqual([split.events.length, sb.cobraSseParse(split.rest + '\n\n').events.length], [0, 1], 'cobraSseParse: a \\r\\n split across two chunks is not a blank line');
+  // context, modes
+  const circ = {}; circ.self = circ;
+  assertEqual([sb.cobraCleanContext([1]), sb.cobraCleanContext('x'), sb.cobraCleanContext({ workflowId: 'w1' }), sb.cobraCleanContext({ big: 'x'.repeat(5000) }), sb.cobraCleanContext(circ)],
+    [{}, {}, { workflowId: 'w1' }, {}, {}], 'cobraCleanContext: plain objects only, at most 4,096 characters, never throws');
+  assertEqual([sb.cobraNeedsNewConv(null, 'assistant', {}), sb.cobraNeedsNewConv({ mode: 'assistant', context: {} }, 'assistant', {}), sb.cobraNeedsNewConv({ mode: 'assistant', context: {} }, 'assistant', { a: 1 })], [true, false, true], 'cobraNeedsNewConv: a new mode or context starts a new chat');
+  sb.COBRA_MODES.testwf = { label: 'Workflow', serverMode: ctx => ctx.workflowId ? 'workflow_edit' : 'workflow_build', placeholder: '', intro: () => '', examples: [] };
+  assertEqual([sb.cobraServerMode('assistant', {}), sb.cobraServerMode('testwf', { workflowId: 'w' }), sb.cobraServerMode('testwf', {}), sb.cobraServerMode('nope', {})], ['assistant', 'workflow_edit', 'workflow_build', 'assistant'], 'cobraServerMode: a function of the context, or the mode itself; unknown = the assistant');
+  assertEqual([sb.cobraClientMode('workflow_edit', { workflowId: 'w' }), sb.cobraClientMode('assistant', {}), sb.cobraClientMode('other', {})], ['testwf', 'assistant', 'assistant'], 'cobraClientMode: a saved chat opens in the mode that made it');
+  delete sb.COBRA_MODES.testwf;
+  assertEqual([sb.cobraRequestContext('assistant', { x: 1 }, { tab: 'crm' }), sb.cobraRequestContext('nope', {}, {})], [{ page: 'crm' }, { page: '' }], 'cobraRequestContext: the assistant tells the gateway the page (its schema allows only page)');
+  const exPr = (role, permissions = {}, technicianName = '') => ({ role, permissions, technicianName });
+  const exFor = p => { sb.getRealProfile = () => p; sb.getCurrentProfile = () => exPr('owner'); return sb.cobraExamples(sb.COBRA_MODES.assistant); };
+  const [EL, ET, EA, EO, EW, EN] = ['How many leads came in this month?', 'What are my tasks?', 'Add a task: call the supplier tomorrow', 'What are our office hours?', 'What can you do for me?', 'When is my next job?'];
+  assertEqual([exFor(exPr('owner')), exFor(exPr('manager')), exFor(exPr('va', { crm: true, tasks: true })), exFor(exPr('va', { tasks: true })), exFor(exPr('va')),
+    exFor(exPr('technician', { jobs: true, tasks: true }, 'Tia')), exFor(exPr('technician', { tasks: true }, 'Tia')), exFor(exPr('technician', { jobs: true })),
+    exFor(exPr('marketing')), exFor(exPr('marketing', { crmOverview: true })), exFor(null)], [
+    [EL, ET, EA], [EL, ET, EA], [EL, ET, EA], [ET, EA, EO], [EO, EW], [EN, ET, EO], [ET, EO, EW], [EO, EW], [EW], [EL, EW], []],
+    'cobraExamples: only what the person\'s tools answer (leads with the CRM or Leads & Marketing, tasks with Tasks, a technician\'s next job with jobs and his name, no settings for marketing)');
+  sb.getRealProfile = () => exPr('owner'); sb.getCurrentProfile = () => exPr('technician', { jobs: true, tasks: true }, 'Tia');
+  assertEqual(sb.cobraExamples(sb.COBRA_MODES.assistant), [EL, ET, EA], 'cobraExamples: the real signed-in person (as the gateway answers), not the profile an owner is viewing as');
+  assertEqual([sb.cobraExamples({ examples: ['a'] }), sb.cobraExamples({}), sb.cobraExamples(null)], [['a'], [], []], 'cobraExamples: a plain array, or nothing, also works');
+  // formatting: escaped, RTL-safe
+  const x1 = sb.cobraFormat('<img src=x onerror=alert(1)>');
+  assertEqual([x1.includes('<img'), sb.cobraFormat('**bold**'), sb.cobraFormat('- a\n- b'), sb.cobraFormat('1. a\n2. b'), sb.cobraFormat('שלום\n\nhello'), sb.cobraFormat('a\nb `c`'), sb.cobraFormat('')],
+    [false, '<p dir="auto"><b>bold</b></p>', '<ul dir="auto"><li>a</li><li>b</li></ul>', '<ol dir="auto"><li>a</li><li>b</li></ol>', '<p dir="auto">שלום</p><p dir="auto">hello</p>', '<p dir="auto">a<br>b <code>c</code></p>', ''],
+    'cobraFormat: escaped first; bold, lists, paragraphs (dir=auto), code and line breaks only');
+  assertEqual([sb.cobraJoinParts(['Let me check. ', '', 'Done.']), sb.cobraJoinParts([])], ['Let me check.\n\nDone.', ''], 'cobraJoinParts: the steps of an answer, a taken-back step left out');
+  // what will change
+  assertEqual(sb.cobraDiffRows({ a: 1, b: 'x' }, { a: 1, b: 'y', c: true }), [{ label: 'B', before: 'x', after: 'y' }, { label: 'C', before: null, after: 'Yes' }], 'cobraDiffRows: only what changes, booleans as Yes / No');
+  const many = {}; for (let i = 0; i < 20; i++) many['k' + i] = i;
+  assertEqual([sb.cobraDiffRows({}, { open_from: '9:00', dueDate: '' }).map(r => [r.label, r.after]), sb.cobraDiffRows({}, many).length, sb.cobraDiffRows(null, { o: { a: 'x'.repeat(100) } })[0].after.length],
+    [[['Open from', '9:00'], ['Due date', null]], 12, 80], 'cobraDiffRows: snake_case and camelCase labels read as words, empty = none, at most 12 rows, objects cut to 80 characters');
+  assertEqual([sb.cobraRowsOf({ display: { rows: [{ label: 'L', before: 'a', after: 'b' }] }, before: { x: 1 }, after: { x: 2 } }), sb.cobraRowsOf({ display: { rows: [] }, before: { x: 1 }, after: { x: 2 } })],
+    [[{ label: 'L', before: 'a', after: 'b' }], [{ label: 'X', before: '1', after: '2' }]], 'cobraRowsOf: the gateway\'s display rows first, else before / after');
+  const prop = { id: "x'y", kind: 'office_hours', summary: 'Office hours: Friday 9:00–15:00', status: 'proposed', display: { title: 'Office hours', rows: [{ label: '<b>', before: 'א', after: null }] } };
+  const ph = sb.cobraProposalHtml(prop, false);
+  assertEqual([ph.includes("cobraChange('x\\'y','confirm')"), ph.includes("cobraChange('x\\'y','cancel')"), ph.includes("'x'y'"), ph.includes('&lt;b&gt;'), ph.includes('<b>'), (ph.match(/dir="auto"/g) || []).length, ph.includes('>Confirm<') && ph.includes('>Cancel<'), ph.includes(' disabled')],
+    [true, true, false, true, false, 4, true, false], 'cobraProposalHtml: Confirm / Cancel with esc(jsStr()) ids, every text escaped and dir=auto');
+  assertEqual([sb.cobraProposalHtml(prop, true).includes(' disabled'), sb.cobraProposalHtml({ ...prop, status: 'confirmed' }).includes('<button'), sb.cobraProposalHtml({ ...prop, status: 'confirmed' }).includes('Saved'),
+    sb.cobraProposalHtml({ ...prop, can_confirm: false }).includes('<button'), sb.cobraProposalHtml({ ...prop, status: 'failed', error: '<oops>' }).includes('&lt;oops&gt;'), sb.cobraProposalHtml({ ...prop, status: 'cancelled', error: 'expired' }).includes(sb.COBRA_ERRORS.expired)],
+    [true, false, true, false, true, true], 'cobraProposalHtml: busy disables, a saved change has no buttons, an old one cannot be confirmed, errors escaped and in words');
+  sb.COBRA_CARDS.test = d => `<div class="t">${d.n}</div>`;
+  sb.COBRA_CARDS.boom = () => { throw new Error('x'); };
+  assertEqual([sb.cobraCardHtml({ kind: 'test', data: { n: 1 } }), sb.cobraCardHtml({ kind: 'boom', data: { title: '<t>' } }).includes('&lt;t&gt;'), sb.cobraCardHtml({ kind: 'nope', data: { title: 'T', text: 'x' } })],
+    ['<div class="t">1</div>', true, '<div class="cobra-card"><b dir="auto">T</b><div dir="auto">x</div></div>'], 'cobraCardHtml: a registered card, the generic card when it throws or is unknown');
+  delete sb.COBRA_CARDS.test; delete sb.COBRA_CARDS.boom;
+  // a warning from the gateway (someone on vacation then): shown, escaped, only while it is asked
+  const warned = { ...prop, display: { ...prop.display, warnings: ['<Cal> is on vacation then (On vacation until 24 Oct).'] } };
+  assertEqual([sb.cobraProposalHtml(warned).includes('cobra-card-warn'), sb.cobraProposalHtml(warned).includes('&lt;Cal&gt; is on vacation'), sb.cobraProposalHtml({ ...warned, status: 'confirmed' }).includes('cobra-card-warn'), sb.cobraProposalHtml(prop).includes('cobra-card-warn')],
+    [true, true, false, false], "cobraProposalHtml: the gateway's warnings above Confirm, escaped, gone once it is answered");
+  assertEqual([sb.vacationAssignLine([]), sb.vacationAssignLine([{ name: 'Cal', label: 'On vacation until 24 Oct' }]), sb.vacationAssignLine([{ name: 'Cal', label: 'On vacation until 24 Oct' }, { name: 'Eve', label: 'On vacation until 1 Nov' }])],
+    ['', 'Cal is on vacation then (On vacation until 24 Oct).', 'Cal (On vacation until 24 Oct) and Eve (On vacation until 1 Nov) are on vacation then.'], 'vacationAssignLine: one person, several, none');
+  assertEqual([sb.cobraMsgHtml({ role: 'user', text: 'hi' }).includes('class="cobra-text" dir="auto"'), sb.cobraMsgHtml({ role: 'assistant', text: '', streaming: true }).includes('cobra-dots'),
+    sb.cobraMsgHtml({ role: 'assistant', text: 'x', error: { code: 'server', reason: '<e>' } }).includes('&lt;e&gt;'), sb.cobraMsgHtml({ role: 'assistant', text: 'x', tools: [{ id: 't', label: 'Checking office hours', state: 'running' }] }).includes('cobra-spin'),
+    sb.cobraMsgHtml({ role: 'assistant', text: 'x', proposals: [prop] }, { "x'y": true }).includes(' disabled')],
+    [true, true, true, true, true], 'cobraMsgHtml: dir=auto bubbles, dots while waiting, escaped errors, tool chips, busy cards');
+  // a saved chat back into messages
+  const rows = [
+    { role: 'user', text: 'hi', visible: true, meta: {} },
+    { role: 'assistant', text: '', visible: false, meta: { proposals: ['c1', 'gone'] } },
+    { role: 'user', text: null, visible: false, meta: {} },
+    { role: 'assistant', text: 'Done', visible: true, meta: {} },
+    { role: 'assistant', text: 'Cut', visible: true, meta: { notice: 'max_tokens' } },
+    { role: 'user', text: 'next', visible: true, meta: {} },
+    { role: 'assistant', text: 'Busy', visible: true, meta: { notice: 'error', code: 'provider_busy' } },
+  ];
+  const back = sb.cobraMsgsFromRows(rows, [{ id: 'c1', status: 'confirmed' }]);
+  assertEqual(back.map(m => [m.role, m.text, (m.proposals || []).map(p => p.id + ':' + p.status), m.notes || [], m.error ? m.error.code : null]),
+    [['user', 'hi', [], [], null], ['assistant', 'Done', ['c1:confirmed'], ['Cut'], null], ['user', 'next', [], [], null], ['assistant', '', [], [], 'provider_busy']],
+    'cobraMsgsFromRows: one bubble per answer with its proposals (current status), notes and errors; hidden turns left out');
+  // the change log
+  const row = { id: 'r1', user_id: 'u2', status: 'confirmed', summary: 'Add a task', kind: 'task_add', created_at: new Date().toISOString() };
+  const owner = { id: 'o', role: 'owner' }, va = { id: 'u2', role: 'va' }, other = { id: 'u3', role: 'va' };
+  assertEqual([sb.cobraCanUndo(row, owner), sb.cobraCanUndo(row, va), sb.cobraCanUndo(row, other), sb.cobraCanUndo({ ...row, status: 'undone' }, owner), sb.cobraCanUndo({ ...row, status: 'failed' }, va), sb.cobraCanUndo(row, null)],
+    [true, true, false, false, false, false], 'cobraCanUndo: owners any saved change, others their own');
+  const nameOf = id => id==='u2' ? 'Sam' : '?';
+  const lo = sb.cobraLogRowHtml(row, owner, nameOf), lv = sb.cobraLogRowHtml(row, va, nameOf), lx = sb.cobraLogRowHtml(row, other, nameOf);
+  assertEqual([lo.includes('by Sam'), lv.includes('by '), lo.includes(">Undo<"), lv.includes(">Undo<"), lx.includes(">Undo<"), lo.includes("cobraChange('r1','undo')"), sb.cobraLogRowHtml({ ...row, status: 'undone' }, owner, nameOf).includes('>Undo<')],
+    [true, false, true, true, false, true, false], 'cobraLogRowHtml: owners see who asked; Undo exactly when allowed');
+  // money and the meter
+  assertEqual([sb.cobraUsd(0), sb.cobraUsd(0.004), sb.cobraUsd(3.2), sb.cobraUsd(12345.678), sb.cobraUsd(NaN)], ['US$0.00', '<US$0.01', 'US$3.20', 'US$12,345.68', 'US$0.00'], 'cobraUsd: US dollars with separators');
+  const m1 = sb.cobraUsageMeter(16, 20), m2 = sb.cobraUsageMeter(25, 20), m3 = sb.cobraUsageMeter(1, 0), m4 = sb.cobraUsageMeter(0, 20);
+  assertEqual([m1.bar, m1.tone, m2.bar, m2.tone, /125%/.test(m2.text), m3.bar, m3.tone, m4.tone], [80, 'warn', 100, 'bad', true, 100, 'bad', 'good'], 'cobraUsageMeter: the bar stops at 100, warn from 80%, bad from 100%');
+  // the panel's banner and the send checks
+  const st = { enabled: true, provider: 'anthropic', provider_ready: true, today: { used: 1, limit: 50 }, month: { blocked: false, pct: 85, cap_usd: 20 } };
+  assertEqual([sb.cobraBannerOf(null, 'not_installed', {}).tone, sb.cobraBannerOf({ enabled: false, reason: 'role_off' }, '', { name: 'N' }).text.startsWith('N '), sb.cobraBannerOf({ ...st, month: { blocked: true } }, '', {}).text, sb.cobraBannerOf(st, '', { isOwner: true }).tone,
+    sb.cobraBannerOf(st, '', { isOwner: false }), sb.cobraBannerOf({ ...st, provider: 'mock', provider_ready: false }, '', {}).tone, sb.cobraBannerOf(null, '', {})],
+    ['bad', true, sb.COBRA_ERRORS.cap_reached, 'warn', null, 'info', null], 'cobraBannerOf: not installed, off, budget used up, 80% (owners), test mode, in that order');
+  assertEqual([sb.cobraSendBlock(null), sb.cobraSendBlock(st), sb.cobraSendBlock({ enabled: false }), sb.cobraSendBlock({ ...st, month: { blocked: true } }), sb.cobraSendBlock({ ...st, today: { used: 50, limit: 50 } })],
+    ['', '', 'off', 'cap_reached', 'daily_limit'], 'cobraSendBlock: off, budget, today\'s limit');
+  assertEqual([sb.cobraLeftText(st), sb.cobraLeftText({ today: { used: 45, limit: 50 } }), sb.cobraLeftText({ today: { used: 49, limit: 50 } }), sb.cobraLeftText({ today: { used: 50, limit: 50 } })], ['', '5 questions left today', '1 question left today', ''], 'cobraLeftText: the count when fewer than 10 are left');
+  // settings
+  const set = sb.cobraSettingsOf(null);
+  assertEqual([set.enabled, set.monthly_cap_usd, set.daily_user_limit, set.model_per_task, set.provider, Object.keys(set.prices)], [true, 0, 50, { assistant: 'claude-haiku-5-5', heavy: 'claude-sonnet-5-5' }, 'auto', Object.keys(sb.COBRA_MODELS)], 'cobraSettingsOf: the defaults when nothing is saved');
+  const po = sb.cobraPricesOf({ 'claude-haiku-5-5': { in: 0.2 }, 'my-model': { in: 1, out: 2 }, bad: { in: -1, out: 1 } });
+  assertEqual([po['claude-haiku-5-5'], po['claude-sonnet-5-5'], po['my-model'], po.bad, Object.keys(po).length], [{ label: 'Claude Haiku 5.5', in: 0.2, out: 0.5, provider: 'anthropic' }, { label: 'Claude Sonnet 5.5', in: 2, out: 10, provider: 'anthropic' }, { label: 'my-model', provider: 'anthropic', in: 1, out: 2 }, undefined, Object.keys(sb.COBRA_MODELS).length + 1], 'cobraPricesOf: an owner\'s prices on top, broken ones left out');
+  const P = sb.cobraSettingProblem, prices = set.prices;
+  assertEqual([P('monthly_cap_usd', '-1'), P('monthly_cap_usd', '10001'), P('monthly_cap_usd', '2.555')].every(Boolean) && [P('monthly_cap_usd', '0'), P('monthly_cap_usd', '25.5'), P('monthly_cap_usd', '0.29')].every(x => x===''), true, 'cobraSettingProblem: the cap is 0 to 10,000 with cents');
+  assertEqual([P('daily_user_limit', '0'), P('daily_user_limit', '1.5'), P('daily_user_limit', '1001')].every(Boolean) && P('daily_user_limit', '50')==='', true, 'cobraSettingProblem: the daily limit is a whole number from 1 to 1,000');
+  assertEqual([!!P('assistant_name', 'x'.repeat(41)), P('assistant_name', 'Max'), !!P('model_per_task.heavy', 'gpt', prices), P('model_per_task.heavy', 'claude-haiku-5-5', prices), !!P('provider', 'anthropic', prices, { cap: 20, keyReady: false }), P('provider', 'anthropic', prices, { cap: 20, keyReady: true }), P('enabled', false)],
+    [true, '', true, '', true, '', ''], 'cobraSettingProblem: a 40-character name, a listed model, the paid AI only with a key');
+  const s0 = { model_per_task: { assistant: 'a', heavy: 'h' }, roles_enabled: { va: false } }, s0json = JSON.stringify(s0);
+  assertEqual([sb.cobraPatchOf('model_per_task.heavy', 'm2', s0), sb.cobraPatchOf('roles.technician', false, s0), sb.cobraPatchOf('assistant_name', '  ', s0), sb.cobraPatchOf('monthly_cap_usd', ' 25.5 ', s0), sb.cobraPatchOf('provider', 'x', s0), JSON.stringify(s0)===s0json],
+    [{ model_per_task: { assistant: 'a', heavy: 'm2' } }, { roles_enabled: { owner: true, manager: true, va: false, technician: false, marketing: true } }, { assistant_name: null }, { monthly_cap_usd: 25.5 }, { provider: 'auto' }, true],
+    'cobraPatchOf: one field, merged with the rest; the current settings untouched');
+  assertEqual([sb.cobraPatchText('enabled', true), sb.cobraPatchText('monthly_cap_usd', '25'), sb.cobraPatchText('daily_user_limit', '60'), sb.cobraPatchText('roles.technician', false), sb.cobraPatchText('model_per_task.assistant', 'claude-haiku-5-5'), sb.cobraPatchText('assistant_name', ' ')],
+    ['switched on', 'monthly cap US$25.00', 'daily limit 60 questions', 'Technician: off', 'everyday model claude-haiku-5-5', 'name back to the app name'], 'cobraPatchText: the settings history in words');
+  // voice, keys, scrolling, time, page modes
+  assertEqual([sb.cobraSpeechLang('מה השעות?', 'AU'), sb.cobraSpeechLang('', 'IL'), sb.cobraSpeechLang('hello', 'AU'), sb.cobraSpeechLang('hello', 'GB'), sb.cobraSpeechLang('hello', 'FR')], ['he-IL', 'he-IL', 'en-AU', 'en-GB', 'en-AU'], 'cobraSpeechLang: Hebrew follows the last message; else the business\'s English');
+  assertEqual([sb.cobraEnterSends({ key: 'Enter' }, false), sb.cobraEnterSends({ key: 'Enter', shiftKey: true }, false), sb.cobraEnterSends({ key: 'Enter', isComposing: true }, false), sb.cobraEnterSends({ key: 'Enter' }, true), sb.cobraEnterSends({ key: 'a' }, false)],
+    [true, false, false, false, false], 'cobraEnterSends: Enter sends on a keyboard; Shift+Enter, typing Hebrew vowels (composing) and phones make a new line');
+  assertEqual([sb.cobraStick(460, 1000, 500), sb.cobraStick(300, 1000, 500)], [true, false], 'cobraStick: the answer keeps the view at the bottom only when it was there');
+  const noon = new Date(2026, 9, 15, 12, 0, 0).getTime(), yest = new Date(2026, 9, 14, 12, 0, 0).getTime();
+  assertEqual([sb.cobraWhen(new Date(noon - 30000).toISOString(), noon), sb.cobraWhen(new Date(noon - 300000).toISOString(), noon), sb.cobraWhen(new Date(noon - 3 * 3600000).toISOString(), noon), sb.cobraWhen(new Date(yest).toISOString(), noon), sb.cobraWhen(new Date(2026, 8, 3, 10).toISOString(), noon), sb.cobraWhen('x', noon)],
+    ['Just now', '5 min ago', '9:00am', 'Yesterday', '3 Sep', ''], 'cobraWhen: just now, minutes, the time today, yesterday, the day');
+  assertEqual([sb.cobraPageMode({}, [() => null, () => ({ mode: 'workflow' })]), sb.cobraPageMode({}, [() => { throw new Error('x'); }, () => ({ mode: 'b' })]), sb.cobraPageMode({}, [])], [{ mode: 'workflow' }, { mode: 'b' }, null], 'cobraPageMode: the first page hook that answers; a failing one is skipped');
+}
+// The static rules of the block, read from the live index.html (and the gateway, when it is in this tree).
+function testCobraStatic(){
+  console.log('\nStage 6: the AI assistant (static rules)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const shell = extractDecl(script, 'renderShell'), settings = extractDecl(script, 'renderSettings');
+  assertEqual([(shell.match(/cobraFab\(/g) || []).length, /\$\{renderBottomBar\(profile, reminderCount\)\}\n\s*\$\{cobraFab\(profile\)\}/.test(shell)], [1, true], 'renderShell: exactly one injected call, after the bottom bar');
+  const aiLine = settings.split('\n').filter(l => l.includes("id: 'ai'"));
+  assertEqual([aiLine.length, aiLine.length===1 && aiLine[0].includes("group: 'Account'") && aiLine[0].includes('body: () => renderCobraSettingsPage()') && aiLine[0].includes('cobraSettingsTitle(')], [1, true], 'renderSettings: one registry entry, page id ai (the 80% notification links to it)');
+  const js0 = html.indexOf('// ══ AI assistant (stage 6): own block, start ══'), js1 = html.indexOf('// ══ AI assistant (stage 6): own block, end ══');
+  const css0 = html.indexOf('/* ══ AI assistant (stage 6): own block, start ══ */'), css1 = html.indexOf('/* ══ AI assistant (stage 6): own block, end ══ */');
+  assertEqual([js0 > 0 && js1 > js0, css0 > 0 && css1 > css0, js0 < html.indexOf('function render(){')], [true, true, true], 'the JS and CSS blocks are marked, the JS before render() (no TDZ)');
+  const block = html.slice(js0, js1), css = html.slice(css0, css1);
+  assertEqual((block.replace(/\b(cobra|COBRA)\w*/g, '').replace(/\brenderCobraSettingsPage\b/g, '').match(/cobra/gi) || []).length, 0, 'the block never names the product in its text (the name comes from branding)');
+  assertEqual([/#[0-9a-f]{3,8}\b/i.test(css), css.includes('rgb(')], [false, false], 'the CSS block uses tokens only');
+  const fetchFn = extractDecl(script, 'cobraFetch');
+  assertEqual([fetchFn.includes('readOnlyReason()'), fetchFn.includes("fetch(SUPABASE_URL + '/functions/v1/ai-gateway/")], [true, true], 'cobraFetch checks the read-only modes and is found by the read-only scan');
+  const noRender = ['cobraOnEvent', 'cobraStream', 'cobraFlush', 'cobraFab', 'cobraFabPatch', 'cobraStatusLoad', 'cobraHistoryLoad', 'cobraLogLoad', 'cobraChange', 'cobraPutChange', 'cobraDraw', 'cobraSend', 'cobraPatchMsg', 'cobraConvLoad', 'cobraOpen', 'cobraClose'];
+  assertEqual(noRender.filter(n => /\brender\(/.test(extractDecl(script, n))), [], 'streaming, loading and changes never draw the app (render)');
+  assertEqual((extractDecl(script, 'cobraDetailLoad').match(/\brender\(/g) || []).length, 1, 'the settings loader draws once, when its page is open');
+  assertEqual(/if \(cobraSettingsOpen\(\)\) render\(\)/.test(extractDecl(script, 'cobraDetailLoad')), true, 'and only when the page is open');
+  assertEqual(block.match(/onclick="[^"]*'\$\{(?!esc\(jsStr\()/g), null, 'every handler argument in the block is esc(jsStr())');
+  assertEqual([/sb\.auth\.onAuthStateChange\([\s\S]{0,200}cobraReset\(\)/.test(block), /cobra/i.test(extractDecl(script, 'doLogout')), /cobra/i.test(extractDecl(script, 'setSettingsPage'))], [true, false, false], 'signing out clears the chats through its own listener (doLogout and setSettingsPage untouched)');
+  // G1 ↔ G3: the gateway's codes, events, prices and test scripts.
+  if (!fs.existsSync(COBRA_GATEWAY)) { console.log('  (skipped: supabase/functions/ai-gateway/index.ts is not in this tree)'); return; }
+  const gw = fs.readFileSync(COBRA_GATEWAY, 'utf8'), sb = loadSandbox();
+  const listOf = name => { const m = new RegExp(`export const ${name} = \\[([\\s\\S]*?)\\];`).exec(gw); return m ? [...m[1].matchAll(/"([a-z_0-9]+)"/g)].map(x => x[1]) : null; };
+  const codes = listOf('ERROR_CODES'), events = listOf('SSE_EVENTS'), onEvent = extractDecl(script, 'cobraOnEvent');
+  assertEqual([!!codes && codes.length > 10, (codes || []).filter(c => !sb.COBRA_ERRORS[c])], [true, []], 'every gateway error code has words in the app');
+  assertEqual([!!events && events.length >= 8, (events || []).filter(e => !onEvent.includes(`case '${e}'`))], [true, []], 'the app handles every event the gateway streams');
+  const kinds = [...gw.matchAll(/registerChangeKind\(\{\s*kind: "([a-z_]+)"/g)].map(m => m[1]);
+  assertEqual([kinds.length >= 4, kinds.filter(k => !sb.COBRA_KIND_ICON[k]), Object.keys(sb.COBRA_KIND_ICON).filter(k => !kinds.includes(k))], [true, [], []], 'every change kind has its icon');
+  const priceOf = k => { const m = new RegExp(`"${k}": \\{ in: ([0-9.]+), out: ([0-9.]+)`).exec(gw); return m ? [Number(m[1]), Number(m[2])] : null; };
+  assertEqual(Object.keys(sb.COBRA_MODELS).map(k => [k, priceOf(k)]), Object.keys(sb.COBRA_MODELS).map(k => [k, [sb.COBRA_MODELS[k].in, sb.COBRA_MODELS[k].out]]), 'the models Settings shows have the gateway\'s default prices');
+  const defs = /export const AI_DEFAULTS = \{[\s\S]*?model_per_task: \{ assistant: "([^"]+)", heavy: "([^"]+)" \}[\s\S]*?monthly_cap_usd: (\d+), daily_user_limit: (\d+)/.exec(gw);
+  assertEqual(defs ? [defs[1], defs[2], Number(defs[3]), Number(defs[4])] : null, [sb.COBRA_DEFAULTS.model_per_task.assistant, sb.COBRA_DEFAULTS.model_per_task.heavy, sb.COBRA_DEFAULTS.monthly_cap_usd, sb.COBRA_DEFAULTS.daily_user_limit], 'the settings page\'s defaults are the gateway\'s');
+  assertEqual(['status', 'confirm_change', 'cancel_change', 'undo_change'].filter(st => !new RegExp(`\\b${st}: \\{ run:`).test(gw)), [], 'the steps the app calls exist in the gateway');
+  // every example, for every role, is a gateway test-provider script (the gateway tests pin what each one answers)
+  const asScript = x => x.toLowerCase().replace(/[?.]$/, '').replace(/'s /, "'?s ");
+  const gwl = gw.toLowerCase();
+  const exAll = [...new Set([{ role: 'technician', permissions: { jobs: true, tasks: true }, technicianName: 'Tia' }, { role: 'marketing', permissions: {} }, { role: 'va', permissions: {} }, { role: 'owner', permissions: {} }]
+    .flatMap(p => { sb.getRealProfile = () => p; return sb.cobraExamples(sb.COBRA_MODES.assistant); }))];
+  assertEqual([exAll.filter(x => !/^(what are our office hours|add a task)/i.test(x) && !gwl.includes(asScript(x))), gw.includes('/office hours|'), gw.includes('/add a task')], [[], true, true],
+    'the examples are the test provider scripts (one gateway MOCK_SCRIPTS entry each; office hours and add a task have the older ones)');
+  // Stage 4's page history (rebase on f9c64b6): the panel is a layer, so back (the phone's back swipe) closes it first
+  const layer = /navLayer\(\{ id: 'cobra', z: (\d+), isOpen: \(\) => !!COBRA\.open, close: /.exec(block);
+  assertEqual([!!layer && Number(layer[1]) > 100 && Number(layer[1]) < 200, /navOverlaySync\(\);/.test(extractDecl(script, 'cobraOpen')), /navOverlaySync\(\);/.test(extractDecl(script, 'cobraClose'))],
+    [true, true, true], 'the panel is a history layer (over the phone menu, under a window); opening and closing it sync its entry');
+}
+// Loaders: one request at a time, nothing drawn but what each is allowed to draw.
+async function testCobraLoadersNoLoop(){
+  console.log('\nStage 6: the AI assistant (loaders, no render loops)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const log = { fetches: 0, renders: 0, fab: 0, draws: 0, from: [] }, release = [];
+  const flags = { failFetch: false, failRow: false };
+  const statusBody = { ok: true, enabled: true, reason: null, assistant_name: null, provider: 'mock', provider_ready: false, today: { used: 1, limit: 50 }, month: { key: '2026-10', spend_usd: 1, cap_usd: 20, pct: 5, blocked: false, by_user: [] },
+    // v2: who answers, a limit hit, the free quota, own keys, the paid switch
+    source: { provider: 'cloudflare', key_source: 'free', model: '@cf/zai-org/glm-4.7-flash', label: 'Free AI' }, blocked: null, blocked_text: null, test_mode: null,
+    free: { configured: true, left_pct: 80, resets_at: '2026-10-17T00:00:00.000Z', exhausted: false, daily_neurons: 10000, used_neurons: 2000, business_neurons: 2000, share_pct: 100 },
+    keys: { allow_own: true, me: null, business: null, people: [] }, paid: { switched_on: false, platform_key_ready: false, cap_usd: 0, available: false } };
+  const builder = (t) => {
+    const q = { select(){ return q; }, eq(){ return q; }, in(){ return q; }, order(){ return q; },
+      limit(){ log.from.push(t); return Promise.resolve({ data: [], error: null }); },
+      maybeSingle(){ log.from.push(t); return Promise.resolve(flags.failRow ? { data: null, error: { message: 'relation does not exist' } } : { data: { enabled: true, monthly_cap_usd: 25 }, error: null }); } };
+    return q;
+  };
+  const ctx = { console, RO: '', UI: { tab: 'crm' }, STATE: { profiles: [] }, SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'k', AUTO_BUSINESS_ID: 'default', ME: { id: 'o1', role: 'owner' },
+    setTimeout, clearTimeout,
+    readOnlyReason: () => ctx.RO, getRealProfile: () => ctx.ME, productName: () => 'OPS Service',
+    sb: { auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) }, from: builder },
+    fetch: () => { log.fetches++; return new Promise(res => release.push(() => res(flags.failFetch
+      ? { ok: false, status: 404, headers: { get: () => 'application/json' }, json: async () => ({ code: 'NOT_FOUND', message: 'Requested function was not found' }) }
+      : { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => JSON.parse(JSON.stringify(statusBody)) }))); },
+    render: () => { log.renders++; }, cobraFabPatch: () => { log.fab++; }, cobraPatchBanner: () => {}, cobraPatchHint: () => {}, cobraDraw: () => { log.draws++; },
+    setBlock: (t, d, b) => `[${t}]${b}`, esc: s => String(s) };
+  vm.createContext(ctx);
+  vm.runInContext(['COBRA_ERRORS', 'COBRA_STALE_MS', 'COBRA_ROLES', 'COBRA_MODELS', 'COBRA_DEFAULTS', 'COBRA_SETTING_COLS', 'COBRA_CHANGE_COLS', 'cobraBlank', 'cobraErr', 'cobraFetch', 'cobraIsOwner', 'cobraStatusLoad', 'cobraSettingsOpen',
+    'cobraDetailLoad', 'cobraDetailRetry', 'cobraHistoryLoad', 'cobraLogLoad', 'cobraShouldLoadStatus', 'cobraRolesOf', 'cobraPricesOf', 'cobraSettingsOf', 'cobraErrorText', 'renderCobraSettingsPage'].map(n => extractDecl(script, n)).join('\n')
+    + '\nlet COBRA = cobraBlank();\nthis.__C = () => COBRA; this.__reset = () => { COBRA = cobraBlank(); };', ctx);
+  const tick = () => new Promise(r => setImmediate(r));
+  const settle = async () => { for (let i = 0; i < 5; i++) await tick(); };
+  // status: one request, nothing drawn but the button
+  const p1 = ctx.cobraStatusLoad(), p2 = ctx.cobraStatusLoad();
+  await settle();
+  assertEqual([p1===p2, log.fetches], [true, 1], 'status: a second load while one runs is the same promise, one request');
+  release.shift()(); await p1;
+  assertEqual([log.renders, log.fab, ctx.__C().status.enabled, ctx.__C().statusAt > 0, ctx.__C().statusP], [0, 1, true, true, null], 'status: it arrives, the button is patched, the app is not drawn');
+  await ctx.cobraStatusLoad(); await settle();
+  assertEqual(log.fetches, 1, 'status: fresh status is not read again');
+  ctx.__reset(); ctx.RO = 'Presentation mode is on, changes are not saved';
+  await ctx.cobraStatusLoad(); await settle();
+  assertEqual([log.fetches, ctx.__C().statusAt], [1, 0], 'status: nothing is read in a read-only mode');
+  ctx.RO = ''; ctx.__reset(); flags.failFetch = true;
+  const p3 = ctx.cobraStatusLoad(); await settle(); release.shift()(); await p3;
+  const c3 = ctx.__C();
+  assertEqual([c3.statusErr, c3.statusAt > 0, ctx.cobraShouldLoadStatus(c3, '', Date.now()), ctx.cobraShouldLoadStatus(c3, '', Date.now() + 360000), log.renders], ['not_installed', true, false, true, 0], 'status: a function not deployed = not installed; asked again only after 5 minutes');
+  flags.failFetch = false;
+  // Settings → AI: one load, one draw when the page is open, none otherwise
+  ctx.__reset(); ctx.UI = { tab: 'settings', settings: { page: 'ai' } };
+  const f0 = log.fetches, from0 = log.from.length, r0 = log.renders;
+  const d1 = ctx.cobraDetailLoad(), d2 = ctx.cobraDetailLoad();
+  await settle();
+  assertEqual([d1===d2, log.fetches - f0, log.from.slice(from0)], [true, 1, ['ai_settings']], 'settings: a second load while one runs is the same promise (one request, one read)');
+  release.shift()(); await d1;
+  assertEqual([log.renders - r0, ctx.__C().detail.settings.monthly_cap_usd, ctx.__C().status.enabled], [1, 25, true], 'settings: drawn once when they arrive');
+  ctx.__reset(); ctx.UI = { tab: 'crm' };
+  const d3 = ctx.cobraDetailLoad(true); await settle(); release.shift()(); await d3;
+  assertEqual(log.renders - r0, 1, 'settings: nothing drawn when the page is not open');
+  ctx.__reset(); ctx.UI = { tab: 'settings', settings: { page: 'ai' } }; flags.failRow = true;
+  const d4 = ctx.cobraDetailLoad(); await settle(); release.shift()(); await d4;
+  const f1 = log.fetches, from1 = log.from.length;
+  const pages = [ctx.renderCobraSettingsPage(), ctx.renderCobraSettingsPage(), ctx.renderCobraSettingsPage()];
+  await settle(); await new Promise(r => setTimeout(r, 5)); await settle();
+  assertEqual([log.fetches - f1, log.from.length - from1, pages.every(x => x.includes('Try again')), !!ctx.__C().detailErr], [0, 0, true, true], 'settings: after a failure the page shows Try again and reads nothing by itself');
+  flags.failRow = false;
+  ctx.ME = { id: 'v1', role: 'va' }; ctx.__reset();
+  const f2 = log.fetches; await ctx.cobraDetailLoad(); await settle();
+  assertEqual([log.fetches - f2, ctx.renderCobraSettingsPage().includes('Only owners')], [0, true], 'settings: not read for someone who is not an owner');
+  ctx.ME = { id: 'o1', role: 'owner' };
+  // history and the change log
+  ctx.__reset();
+  const from2 = log.from.length, draws0 = log.draws;
+  const h1 = ctx.cobraHistoryLoad(), h2 = ctx.cobraHistoryLoad(), l1 = ctx.cobraLogLoad(), l2 = ctx.cobraLogLoad();
+  await Promise.all([h1, l1]);
+  assertEqual([h1===h2, l1===l2, log.from.slice(from2).sort(), ctx.__C().history, ctx.__C().log, log.draws - draws0, log.renders - r0], [true, true, ['ai_changes', 'ai_conversations'], [], [], 0, 2], 'history and change log: one read each; drawn only when their view is open');
+  await ctx.cobraHistoryLoad(); await ctx.cobraLogLoad();
+  assertEqual(log.from.length - from2, 2, 'history and change log: not read again while fresh');
+}
+// The stream reader: frames split anywhere, pings, a broken frame, and how a stream that just stops is told.
+async function testCobraStream(){
+  console.log('\nStage 6: the AI assistant (reading the stream)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const timers = [];
+  const ctx = { console, TextDecoder, setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: () => {} };
+  vm.createContext(ctx);
+  vm.runInContext(['COBRA_SILENCE_MS', 'cobraSseParse', 'cobraStream'].map(n => extractDecl(script, n)).join('\n'), ctx);
+  const enc = new TextEncoder();
+  const fakeRes = (chunks, endWith) => ({ body: { getReader(){ let i = 0; return { read: async () => { if (i < chunks.length) return { value: enc.encode(chunks[i++]), done: false }; if (endWith) throw endWith; return { value: undefined, done: true }; }, cancel: async () => {} }; } } });
+  const run = async (chunks, ctrl, endWith) => { const got = []; await ctx.cobraStream(fakeRes(chunks, endWith), ev => got.push(ev), ctrl || new AbortController()); return got; };
+  const got = await run([
+    'event: start\ndata: {"conversation_id":"c1"}\n\nevent: text\ndata: {"del',
+    'ta":"Hi"}\n',
+    '\n: ping\n\nevent: text\r\ndata: {"delta":" there"}\r\n\r\nevent: text\ndata: {broken\n\nevent: proposal\ndata: {"change":{"id":"x"}}\n\nevent: done\ndata: {"stop":"ok"}\n\n',
+  ]);
+  assertEqual(got.map(e => [e.event, e.data]), [['start', { conversation_id: 'c1' }], ['text', { delta: 'Hi' }], ['text', { delta: ' there' }], ['proposal', { change: { id: 'x' } }], ['done', { stop: 'ok' }]], 'stream: events in order, frames split mid-JSON and mid-blank-line, \\r\\n, a ping and a broken frame skipped');
+  assertEqual([timers.length > 0, timers.every(t => t.ms===45000)], [true, true], 'stream: a 45-second watchdog, set again on every chunk');
+  const cut = await run(['event: text\ndata: {"delta":"a"}\n\n']);
+  assertEqual(cut.map(e => [e.event, e.data.code || null]), [['text', null], ['error', 'network']], 'stream: one that ends without done or error reports a dropped connection');
+  const lastFrame = await run(['event: text\ndata: {"delta":"a"}\n\nevent: done\ndata: {}']);
+  assertEqual(lastFrame.map(e => e.event), ['text', 'done'], 'stream: a last frame without its blank line still counts');
+  const stopped = new AbortController(); stopped.stopped = true; stopped.abort();
+  const abortErr = Object.assign(new Error('aborted'), { name: 'AbortError' });
+  assertEqual((await run([], stopped, abortErr)).map(e => [e.event, e.data.code]), [['error', 'aborted']], 'stream: Stop is told as stopped');
+  const timedOut = new AbortController(); timedOut.abort();
+  assertEqual((await run([], timedOut, abortErr)).map(e => [e.event, e.data.code]), [['error', 'timeout']], 'stream: the watchdog is told as no answer for a while');
+}
+// Confirm / Cancel / Undo: one request per click, the card patched in place, never the app drawn.
+async function testCobraChangeFlow(){
+  console.log('\nStage 6: the AI assistant (Confirm, Cancel, Undo)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const log = { calls: [], puts: [], toasts: [], renders: 0 }, pending = [];
+  const ctx = { console, RO: '', COBRA: { busy: {}, logAt: 5, msgs: [], log: null },
+    readOnlyReason: () => ctx.RO, render: () => { log.renders++; }, productName: () => 'OPS Service',
+    cobraFetch: (path, body) => { log.calls.push([path, body]); return new Promise((res, rej) => pending.push({ res, rej })); },
+    cobraPutChange: ch => log.puts.push(ch), cobraFindChange: id => ({ id, status: 'proposed', summary: 'S' }), cobraChangeEls: () => [],
+    showToast: (m, o) => log.toasts.push([m, !!(o && o.undo)]) };
+  vm.createContext(ctx);
+  vm.runInContext(['COBRA_ERRORS', 'COBRA_CHANGE_STEPS', 'cobraErr', 'cobraErrorText', 'cobraChange'].map(n => extractDecl(script, n)).join('\n'), ctx);
+  const c1 = ctx.cobraChange('x', 'confirm'), c2 = ctx.cobraChange('x', 'confirm');
+  assertEqual([log.calls.length, log.calls[0], ctx.COBRA.busy.x], [1, ['manage', { step: 'confirm_change', id: 'x' }], true], 'changes: a double click sends one request');
+  pending.shift().res({ ok: true, change: { id: 'x', status: 'confirmed', summary: 'Office hours: Friday 9:00–15:00' } }); await c1; await c2;
+  assertEqual([log.puts[0].status, log.puts[0].error, log.toasts[0], ctx.COBRA.busy.x, ctx.COBRA.logAt], ['confirmed', null, ['Saved: Office hours: Friday 9:00–15:00', true], undefined, 0], 'changes: confirmed, the card patched, a toast with Undo, the log marked stale');
+  const u = ctx.cobraChange('x', 'undo');
+  pending.shift().rej(ctx.cobraErr('changed_since', 'Edited by Sam at 3:10pm', { ok: false, code: 'changed_since', reason: 'Edited by Sam at 3:10pm', change: { id: 'x', status: 'confirmed' } })); await u;
+  assertEqual([log.calls[1][1].step, log.puts[1], ctx.COBRA.busy.x, log.toasts.length], ['undo_change', { id: 'x', status: 'confirmed', error: 'Edited by Sam at 3:10pm' }, undefined, 1], 'changes: a refused undo shows the server\'s reason on the card and frees the buttons');
+  const k = ctx.cobraChange('y', 'cancel');
+  pending.shift().rej(ctx.cobraErr('network')); await k;
+  assertEqual(log.puts[2], { id: 'y', status: 'proposed', summary: 'S', error: ctx.cobraErrorText('network') }, 'changes: a dropped connection is said in words on the card');
+  ctx.RO = 'You are viewing as someone else, changes are not saved';
+  await ctx.cobraChange('z', 'confirm');
+  assertEqual([log.calls.length, log.toasts[log.toasts.length - 1][0], log.renders], [3, ctx.RO, 0], 'changes: nothing is sent in a read-only mode (a toast says so); the app is never drawn');
+}
+// Stage 6 review fixes (15 Oct): reopened chats, cards in their chat, right-to-left values, chips, loads.
+function testCobraReviewFixes(sb){
+  console.log('\nStage 6: the AI assistant (review fixes)');
+  const loaded = { mode: 'assistant', context: sb.cobraClientContext('assistant', { page: 'crm' }) };
+  assertEqual([loaded.context, sb.cobraNeedsNewConv(loaded, 'assistant', {})], [{}, false], 'a chat loaded from History with {page:"crm"}, then cobraOpen({ mode: "assistant" }): the chat is kept');
+  sb.COBRA_MODES.testwf = { label: 'W', serverMode: 'workflow_edit', placeholder: '', intro: () => '', examples: [], savedContext: s => ({ workflowId: s.workflowId }) };
+  sb.COBRA_MODES.testplain = { label: 'P', serverMode: 'plain', placeholder: '', intro: () => '', examples: [] };
+  assertEqual([sb.cobraClientContext('testwf', { workflowId: 'w1', page: 'x' }), sb.cobraClientContext('testplain', { a: 1 }), sb.cobraClientContext('testwf', null), sb.cobraClientContext('nope', { page: 'crm' })],
+    [{ workflowId: 'w1' }, { a: 1 }, {}, {}], "cobraClientContext: the mode's savedContext, else the saved context as it is; the assistant keeps none");
+  let got = null;
+  sb.COBRA_CARDS.seen = (data, ctx) => { got = ctx; return 'x'; };
+  sb.cobraMsgHtml({ role: 'assistant', text: '', cards: [{ kind: 'seen', data: {} }] }, {}, { mode: 'testwf', context: { workflowId: 'w1' }, conversationId: 'c1' });
+  assertEqual(got, { mode: 'testwf', context: { workflowId: 'w1' }, conversationId: 'c1' }, 'COBRA_CARDS[kind](data, ctx): ctx is the chat the card is in (mode, context, conversation)');
+  sb.cobraCardHtml({ kind: 'seen', data: {} });
+  assertEqual(got, { mode: 'assistant', context: {}, conversationId: null }, 'cobraCardHtml without a chat: the assistant, no context');
+  delete sb.COBRA_CARDS.seen; delete sb.COBRA_MODES.testwf; delete sb.COBRA_MODES.testplain;
+  const row = sb.cobraDiffRowHtml({ label: 'Note', before: '—', after: 'להתקשר מחר.' });
+  assertEqual([row.includes('<i>After</i><bdi dir="auto">להתקשר מחר.</bdi>'), /class="cobra-diff-(before|after)" dir=/.test(row)], [true, false], "cobraDiffRowHtml: a Hebrew value in its own dir=auto run, outside the English label's");
+  assertEqual(sb.cobraEndTools([{ id: 'a', state: 'running' }, { id: 'b', state: 'ok' }, { id: 'c', state: 'error' }]).map(t => t.state), ['error', 'ok', 'error'], 'cobraEndTools: a chip still spinning when the answer ends shows as not run');
+  assertEqual([sb.cobraConvWanted({ convWant: 'a' }, 'a'), sb.cobraConvWanted({ convWant: 'b' }, 'a'), sb.cobraConvWanted({ convWant: null }, 'a')], [true, false, false], 'cobraConvWanted: only the chat picked last is shown when its load ends');
+}
+function testCobraReviewStatic(){
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const css = html.slice(html.indexOf('/* ══ AI assistant (stage 6): own block, start ══ */'), html.indexOf('/* ══ AI assistant (stage 6): own block, end ══ */'));
+  const phone = css.slice(css.indexOf('@media (max-width: 640px)'));
+  assertEqual([/\.cobra-panel \{[^}]*padding-top: env\(safe-area-inset-top, 0px\)/.test(phone), /body\.cobra-open #phone-widget \{[^}]*bottom:/.test(phone)], [true, true], 'phone sheet: clear of the status bar and notch; the phone widget moves above the composer');
+  const block = html.slice(html.indexOf('// ══ AI assistant (stage 6): own block, start ══'), html.indexOf('// ══ AI assistant (stage 6): own block, end ══'));
+  assertEqual(/document\.addEventListener\('keydown', e => \{[\s\S]{0,300}e\.stopImmediatePropagation\(\);\s*cobraClose\(\);\s*\}, true\);/.test(block), true, "Escape closes the panel only (capture phase; the page's own Escape handlers don't run)");
+  const ctx = { COBRA: { mic: null } }; vm.createContext(ctx); vm.runInContext(extractDecl(script, 'cobraMicStop'), ctx);
+  const calls = [], rec = { onresult: () => {}, stop(){ calls.push('stop'); }, abort(){ calls.push('abort'); } };
+  ctx.COBRA.mic = rec; ctx.cobraMicStop(true);
+  assertEqual([calls, rec.onresult], [['abort'], null], 'Send stops voice typing by dropping its pending result (abort, no onresult)');
+  calls.length = 0; rec.onresult = () => {}; ctx.cobraMicStop();
+  assertEqual([calls, typeof rec.onresult], [['stop'], 'function'], 'the mic button stops it normally (the last words still arrive)');
+  assertEqual(/cobraMicStop\(true\)/.test(extractDecl(script, 'cobraSend')), true, 'cobraSend drops the pending voice result');
+  const toggle = extractDecl(script, 'cobraMicToggle');
+  assertEqual(["'audio-capture'", "'network'", "!=='aborted'"].every(s => toggle.includes(s)), true, 'voice typing explains a missing microphone, an unreachable speech service and any other error');
+  assertEqual(/key==='assistant_name'[\s\S]{0,300}COBRA\.status\.assistant_name = name/.test(extractDecl(script, 'cobraSaveSetting')), true, 'a renamed assistant shows its new name at once');
+  assertEqual([/cobraConvWanted\(c, id\)/.test(extractDecl(script, 'cobraConvLoad')), /convWant = id/.test(extractDecl(script, 'cobraOpenConv')), /convWant = null/.test(extractDecl(script, 'cobraNewChat')), /cobraClientContext\(mode, a\.data\.context\)/.test(extractDecl(script, 'cobraConvLoad'))],
+    [true, true, true, true], 'a slow chat load never replaces New chat or a chat picked later; a loaded chat keeps the app-side context');
+}
+// Stage 6 v2 G6: who answers, the free quota, own keys, the own-Claude card and the ChatGPT row (coming later).
+function testCobraV2Helpers(sb){
+  console.log('\nStage 6 v2: provider status, free quota, own keys (pure helpers)');
+  const refused = "Your own AI key didn't work, so the business's AI answers for now. Check it in Your AI key.";
+  const base = { enabled: true, provider: 'cloudflare', today: { used: 1, limit: 50 }, month: { blocked: false, pct: 90, cap_usd: 20 }, paid: { switched_on: true }, keys: { me: { provider: 'openai', last4: 'WXYZ', status: 'invalid' } }, test_mode: 'forced' };
+  const B = (st, owner) => (sb.cobraBannerOf(st, '', { isOwner: owner }) || {}).text || null;
+  const calm = { ...base, keys: {}, paid: { switched_on: false } };
+  assertEqual([B({ ...base, blocked: 'free_quota', blocked_text: 'The gateway says which limit.' }, true), B({ ...base, blocked: 'free_share', blocked_text: null }, true), B(base, true), /^This month's paid AI spend is at 90%/.test(B({ ...base, keys: {} }, true)),
+    B(calm, true), B({ ...calm, test_mode: 'not_configured' }, false), B({ ...calm, test_mode: null }, true)],
+  ['The gateway says which limit.', sb.COBRA_ERRORS.free_share, refused, true, 'Test mode is on in Settings.', "Test mode: the free AI isn't set up yet.", null],
+  'cobraBannerOf: a limit hit (in the gateway\'s words) > own key refused > 80% (paid on only) > test mode');
+  assertEqual([sb.cobraSendBlock({ ...base, blocked: 'free_quota' }), sb.cobraSendBlock({ ...base, blocked: null }), sb.cobraSendBlock({ ...base, blocked: 'cap_reached', enabled: false, reason: 'off' })], ['free_quota', '', 'off'], 'cobraSendBlock: a limit hit stops sending (after off)');
+  const free = (pct, ks, used) => ({ today: { used: used || 1, limit: 50 }, free: { left_pct: pct }, source: { key_source: ks } });
+  assertEqual([sb.cobraLeftText(free(10, 'free')), sb.cobraLeftText(free(20, 'free')), sb.cobraLeftText(free(10, 'own_user')), sb.cobraLeftText(free(0, 'free')), sb.cobraLeftText(free(null, 'free')), sb.cobraLeftText(free(10, 'free', 45))],
+    ['Free AI is low today', '', '', '', '', '5 questions left today · Free AI is low today'], 'cobraLeftText: "Free AI is low today" under 15% left, only while the free AI answers');
+  // the reset at 00:00 UTC, in the business's time zone
+  const R = sb.cobraFreeResetText, at = (iso) => Date.parse(iso);
+  assertEqual([R('2026-10-17T00:00:00.000Z', 'Australia/Sydney', at('2026-10-16T22:00:00Z')), R('2026-10-17T00:00:00.000Z', 'Australia/Sydney', at('2026-10-16T03:00:00Z')),
+    R('2026-10-17T00:00:00.000Z', 'America/New_York', at('2026-10-16T15:00:00Z')), R('2026-10-18T00:00:00.000Z', 'America/New_York', at('2026-10-17T01:00:00Z')), R('', 'UTC', 0), R('2026-10-17T00:00:00.000Z', 'Not/AZone', 0)],
+  ['at 11:00', 'tomorrow', 'at 20:00', 'tomorrow', 'tomorrow', 'tomorrow'], 'cobraFreeResetText: Sydney 11:00 / New York 20:00 later today, else tomorrow');
+  const M = (f) => sb.cobraFreeMeter(f, 'Australia/Sydney', at('2026-10-16T22:00:00Z')), r = '2026-10-17T00:00:00.000Z';
+  assertEqual([M(null), M({ configured: false, left_pct: 50 }), M({ configured: true, daily_neurons: 10000, used_neurons: 3800, left_pct: 20, resets_at: r }), M({ configured: true, left_pct: 10, resets_at: r }).tone,
+    M({ configured: true, left_pct: 40, exhausted: true, resets_at: r }).bar, M({ configured: true, left_pct: null })],
+  [null, null, { bar: 62, tone: 'good', text: '62% left today · back at 11:00' }, 'warn', 0, null], 'cobraFreeMeter: used / daily neurons (owners), else left_pct; used up = 0');
+  // keys: the gateway's KEY_RE and keyProviderOf, fakes only
+  const K = sb.cobraKeyProblem, oa = 'sk-test-FAKE-0000000000000000', an = 'sk-ant-test-FAKE-000000000000';
+  assertEqual([K('', ' '), K('openai', oa), K('', ` ${an} `), K('anthropic', oa), K('openai', 'pk-test-FAKE-0000000000000000'), K('openai', 'sk-test FAKE 0000000000000000'), K('openai', 'sk-test-FAKE'), K('openai', 'sk-' + 'x'.repeat(298))],
+    ['Paste the key first.', '', '', sb.COBRA_ERRORS.key_provider_mismatch, sb.COBRA_ERRORS.key_format, sb.COBRA_ERRORS.key_format, sb.COBRA_ERRORS.key_format, sb.COBRA_ERRORS.key_format], 'cobraKeyProblem: the shape and provider checks the gateway makes');
+  const none = sb.cobraKeyCardHtml({ scope: 'me', key: null }, false), bad = sb.cobraKeyCardHtml({ scope: 'me', key: { provider: 'openai', last4: 'W<YZ', status: 'invalid' } }, false);
+  const off = sb.cobraKeyCardHtml({ scope: 'me', key: null, off: true }), biz = sb.cobraKeyCardHtml({ scope: 'business', key: { provider: 'anthropic', last4: 'ABCD', status: 'ok' } }, true);
+  assertEqual([none.includes('No key saved'), none.includes('Remove'), (none.match(/<input /g) || []).length, bad.includes('OpenAI ••••W&lt;YZ'), bad.includes('Refused'), bad.includes('Check again') && bad.includes('Remove'), bad.includes("don't count against the business's limits")],
+    [true, false, 1, true, true, true, true], 'cobraKeyCardHtml: no key / provider and the last 4 / Refused; the data note');
+  assertEqual([off.includes(sb.COBRA_ERRORS.keys_off), off.includes('<input'), biz.includes('id="cobra-key-input-business"'), biz.includes('monthly cap'), biz.includes('Working'), (biz.match(/ disabled/g) || []).length >= 4],
+    [true, false, true, true, true, true], 'cobraKeyCardHtml: switched off by an owner; the business key counts against the cap; busy disables it');
+  assertEqual([none, biz].map(h => [/type="password"/.test(h), /<input class="set-input cobra-key-secret" type="text" autocomplete="off"[^>]* data-lpignore="true" data-1p-ignore/.test(h)]),
+    [[false, true], [false, true]], 'cobraKeyCardHtml: the key field is masked text, not a password field (no password manager saves the key)');
+  const card = (role) => sb.cobraOwnClaudeCardHtml({ id: 'u', role }, 'Acme <Air>');
+  assertEqual([card('va'), card('technician'), card('marketing'), sb.cobraOwnClaudeCardHtml(null, 'x'), card('owner').includes('Get your connector key'), card('manager').includes('read Acme &lt;Air&gt; through your private connector')],
+    ['', '', '', '', true, true], 'cobraOwnClaudeCardHtml: owners and managers only; the name from branding, escaped');
+  const gpt = sb.cobraChatGptRowHtml();
+  assertEqual([gpt.includes('onclick'), / disabled>/.test(gpt), gpt.includes('aria-disabled="true"'), gpt.includes('Coming later')], [false, true, true, true], 'cobraChatGptRowHtml: greyed, disabled, no handler');
+  const S = sb.cobraSourcePill;
+  assertEqual([S(null).html.includes('Unknown'), S({ blocked: 'free_quota', blocked_text: 'Used up.' }).text, S({ source: { key_source: 'free', model: '@cf/zai-org/glm-4.7-flash' } }).html.includes('Free AI'), S({ source: { key_source: 'free', model: '@cf/zai-org/glm-4.7-flash' } }).text.startsWith('GLM 4.7 Flash (free).'),
+    S({ source: { key_source: 'mock' }, test_mode: 'forced' }).html.includes('Test mode'), S({ source: { key_source: 'own_business', model: 'gpt-4.1-mini' } }).text.includes('monthly cap'), S({ source: null }).html.includes('Nothing yet')],
+  [true, 'Used up.', true, true, true, true, true], 'cobraSourcePill: who answers now, in words');
+  assertEqual([sb.cobraPaidKeyReady(null), sb.cobraPaidKeyReady({ provider_ready: true }), sb.cobraPaidKeyReady({ keys: { business: { provider: 'openai', status: 'invalid' } } }), sb.cobraPaidKeyReady({ keys: { business: { provider: 'anthropic', status: 'ok' } } })],
+    [false, true, false, true], "cobraPaidKeyReady: the server's key, or a business key that wasn't refused");
+  // settings: provider 3-state, own keys, the provider's models
+  const P = sb.cobraSettingProblem, prices = sb.cobraPricesOf({});
+  assertEqual([P('provider', 'anthropic', prices, { cap: 0, keyReady: true }), P('provider', 'anthropic', prices, { cap: 5, keyReady: false }), P('provider', 'auto', prices, { cap: 0 }), P('provider', 'mock', prices, null),
+    P('model_per_task.cloudflare:heavy', '@cf/zai-org/glm-4.7-flash', prices), !!P('model_per_task.openai:assistant', 'gpt-9', prices)],
+  ['Set a monthly cap above 0 first, so paid use has a limit.', "The server's Anthropic key isn't added yet, and there's no business key.", '', '', '', true], 'cobraSettingProblem: the paid switch needs a cap above 0 and a key; any listed model');
+  const s2 = sb.cobraSettingsOf({ provider: 'anthropic', allow_own_keys: false, free_quota: { share_pct: 50 }, model_per_task: { 'cloudflare:assistant': '@cf/qwen/qwen3.8-27b' } });
+  assertEqual([s2.provider, s2.allow_own_keys, s2.free_quota, s2.model_per_task['cloudflare:assistant'], sb.cobraSettingsOf({ provider: 'mock' }).provider, sb.cobraSettingsOf({ provider: 'x' }).provider, sb.cobraSettingsOf({}).allow_own_keys],
+    ['anthropic', false, { share_pct: 50 }, '@cf/qwen/qwen3.8-27b', 'mock', 'auto', true], 'cobraSettingsOf: provider auto / anthropic / mock, own keys, the free quota read-only');
+  assertEqual([sb.cobraPatchOf('provider', 'anthropic', s2), sb.cobraPatchOf('provider', 'mock', s2), sb.cobraPatchOf('provider', 'auto', s2), sb.cobraPatchOf('allow_own_keys', 1, s2), sb.cobraPatchOf('model_per_task.openai:heavy', 'gpt-4o-mini', { model_per_task: { assistant: 'a' } })],
+    [{ provider: 'anthropic' }, { provider: 'mock' }, { provider: 'auto' }, { allow_own_keys: true }, { model_per_task: { assistant: 'a', 'openai:heavy': 'gpt-4o-mini' } }], 'cobraPatchOf: the paid switch, test mode, own keys, a provider\'s model');
+  assertEqual([sb.cobraPatchText('provider', 'anthropic'), sb.cobraPatchText('provider', 'auto'), sb.cobraPatchText('provider', 'mock'), sb.cobraPatchText('allow_own_keys', false), sb.cobraPatchText('model_per_task.cloudflare:assistant', 'm'), sb.cobraPatchText('model_per_task.heavy', 'm')],
+    ['paid AI (Anthropic) on', 'paid AI and test mode off', 'test mode on', 'own AI keys switched off', 'free AI everyday model m', 'heavy-task model m'], 'cobraPatchText: the settings history in words');
+}
+function testCobraV2Static(){
+  console.log('\nStage 6 v2: own keys and the AI provider block (static rules)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const block = html.slice(html.indexOf('// ══ AI assistant (stage 6): own block, start ══'), html.indexOf('// ══ AI assistant (stage 6): own block, end ══'));
+  const card = extractDecl(script, 'cobraKeyCardHtml'), save = extractDecl(script, 'cobraKeySave');
+  const inputs = card.match(/<input [^>]*>/g) || [];
+  assertEqual([inputs.length, inputs.every(i => i.includes('type="text"') && i.includes('cobra-key-secret') && i.includes('autocomplete="off"') && i.includes('spellcheck="false"'))], [1, true], 'the key input is a masked text field (no password manager), no autocomplete, no spellcheck');
+  const cleared = save.indexOf("input.value = ''"), firstAwait = save.indexOf('await ');
+  assertEqual([cleared > 0, firstAwait > cleared], [true, true], 'cobraKeySave clears the input before the first await');
+  assertEqual(block.split('\n').filter(l => /localStorage|sessionStorage/.test(l) && /key/i.test(l)), [], 'no browser storage in the block mentions a key');
+  const flows = ['cobraKeySave', 'cobraKeyTest', 'cobraKeyDelete', 'cobraPatchKey', 'cobraKeyPut', 'cobraKeyAfter', 'cobraKeyState', 'cobraOpenMcpKeys', 'cobraPatchSource'];
+  assertEqual(flows.filter(n => /\brender\(/.test(extractDecl(script, n))), [], 'the key flows never draw the app (render)');
+  const mcpKeys = extractDecl(script, 'cobraOpenMcpKeys'), at = s => mcpKeys.indexOf(s);
+  assertEqual([at("goTab('settings')") > 0, at("openConnector('mcp')") > at("goTab('settings')"), at('cobraClose()') > at("openConnector('mcp')")], [true, true, true],
+    'cobraOpenMcpKeys (owner): moves to the connector first, then closes the panel (its history back never races the new entries)');
+  assertEqual([/showToast/.test(save), /COBRA\.\w+\s*=\s*(key|req)\b/.test(save), /cobraKeyLog\([^;]*\$\{(key|req)\b/.test(save), /console\./.test(save)], [false, false, false, false], 'the pasted key never reaches a toast, COBRA, the settings history or the console');
+  assertEqual(['cobraKeySave', 'cobraKeyTest', 'cobraKeyDelete'].map(n => (extractDecl(script, n).match(/step: '(key_[a-z]+)'/) || [])[1]), ['key_save', 'key_test', 'key_delete'], 'the key flows call key_save / key_test / key_delete');
+  const page = extractDecl(script, 'renderCobraSettingsPage');
+  assertEqual([page.includes('cobraChatGptRowHtml()'), page.includes("cobraKeyCardHtml(cobraKeyState('business')"), page.includes("cobraSaveSetting('allow_own_keys'"), page.includes("? 'auto' : 'mock')"), page.includes("setBlock('AI provider'"), page.includes("setBlock('Provider'")],
+    [true, true, true, true, true, false], 'Settings → AI: the AI provider block (business key, own keys, ChatGPT coming later, test mode) replaces Provider');
+  const panel = extractDecl(script, 'cobraPanelHtml'), view = extractDecl(script, 'cobraView'), body = extractDecl(script, 'cobraBodyHtml');
+  assertEqual([panel.includes("btn('key', 'key', 'Your AI key', \"cobraView('key')\")"), view.includes("'key'"), body.includes('cobraOwnClaudeCardHtml(getRealProfile()'), panel.includes('id="cobra-src"')], [true, true, true, true], "the panel: the Your AI key view with the own-Claude card, and who answers under the name");
+  if (!fs.existsSync(COBRA_GATEWAY)) { console.log('  (skipped: supabase/functions/ai-gateway/index.ts is not in this tree)'); return; }
+  const gw = fs.readFileSync(COBRA_GATEWAY, 'utf8'), sb = loadSandbox();
+  const keyRe = (/export const KEY_RE = \/(.+)\/;/.exec(gw) || [])[1];
+  assertEqual([keyRe, gw.includes('key.startsWith("sk-ant-") ? "anthropic" : key.startsWith("sk-") ? "openai" : null')], [sb.COBRA_KEY_RE.source, true], 'cobraKeyProblem: the gateway\'s KEY_RE and keyProviderOf');
+  assertEqual(['key_save', 'key_test', 'key_delete'].filter(st => !new RegExp(`\\b${st}: \\{ run:`).test(gw)), [], 'the gateway has the key steps the app calls (MANAGE_STEPS)');
+  const labels = /export const SOURCE_LABEL[^=]*= \{([^}]*)\}/.exec(gw), pdm = /export const PROVIDER_MODEL_DEFAULTS[^=]*= \{([^}]*)\}/.exec(gw);
+  assertEqual([labels ? [...labels[1].matchAll(/(\w+):/g)].map(m => m[1]).sort() : null, pdm ? Object.fromEntries([...pdm[1].matchAll(/"([^"]+)": "([^"]+)"/g)].map(m => [m[1], m[2]])) : null],
+    [Object.keys(sb.COBRA_SOURCE_LABEL).sort(), { ...sb.COBRA_PROVIDER_MODELS }], 'who answers and each provider\'s default models are the gateway\'s');
+  const cf = Object.keys(sb.COBRA_MODELS).filter(k => k.startsWith('@cf/')), oa = Object.keys(sb.COBRA_MODELS).filter(k => sb.COBRA_MODELS[k].provider==='openai');
+  assertEqual([cf.length, oa.length, sb.COBRA_DEFAULTS.monthly_cap_usd, [...cf, ...oa].filter(k => !gw.includes(`"${k}": { in: `))], [5, 3, 0, []], 'Settings lists the 5 free and 3 OpenAI models the gateway prices; the cap defaults to 0');
+}
+testCobraHelpers(loadSandbox());
+testCobraStatic();
+testCobraReviewFixes(loadSandbox());
+testCobraReviewStatic();
+testCobraV2Helpers(loadSandbox());
+testCobraV2Static();
 
 // Review block 3 of phase 4 (16 Oct): paste keys, presence, multi-select delete, cut, Q4 counts, the drawer's Delete, Save
 // from "Unsaved changes" on a Published workflow (the Apps tab is in testWfDrawerForms). Fake DOM, fake function.
@@ -7850,6 +8333,9 @@ async function testWfReviewRound2(){
   await testDataExport(loadSandbox());
   await testNavLayers(loadSandbox());
   testNavStep3(loadSandbox());
+  await testCobraLoadersNoLoop();
+  await testCobraStream();
+  await testCobraChangeFlow();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });

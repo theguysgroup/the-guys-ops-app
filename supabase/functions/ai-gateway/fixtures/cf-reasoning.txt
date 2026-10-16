@@ -1,0 +1,12 @@
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1792000000,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"The user wants a greeting. "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1792000000,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{"reasoning_content":"Keep it short."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1792000000,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{"content":"Hi!"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1792000000,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1792000000,"model":"@cf/zai-org/glm-4.7-flash","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":15,"total_tokens":115,"completion_tokens_details":{"reasoning_tokens":12}}}
+
+data: [DONE]
+

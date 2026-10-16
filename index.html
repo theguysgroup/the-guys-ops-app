@@ -2447,6 +2447,129 @@ textarea.inv-in { resize: vertical; }
 .sidebar .footer-block { border-top: 1px solid var(--sidebar-line) !important; color: var(--sidebar-ink-soft) !important; }
 .sidebar .footer-block .btn.ghost { color: var(--sidebar-ink-soft); }
 .sidebar .footer-block .btn.ghost:hover { background: var(--sidebar-bg-hover); color: var(--sidebar-ink); }
+/* ══ AI assistant (stage 6): own block, start ══ */
+/* The assistant's floating button (renderShell, one call), its side panel (a full-screen sheet on a phone) and its
+   Settings page parts. The panel lives in #cobra-root outside #app. Tokens only. */
+.cobra-fab { position: fixed; inset-inline-end: 18px; bottom: 18px; z-index: 65; width: 52px; height: 52px; border-radius: 99px; border: 1px solid var(--line); background: var(--primary); color: var(--on-primary); box-shadow: var(--shadow-lg); display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; transition: transform .15s var(--ease-out); }
+.cobra-fab:hover { transform: translateY(-1px); }
+.cobra-fab:active { transform: scale(.94); }
+.cobra-fab[hidden], body.cobra-open .cobra-fab { display: none; }
+.cobra-fab svg { width: 26px; height: 26px; }
+.cobra-fab img { width: 30px; height: 30px; border-radius: 99px; object-fit: cover; }
+.cobra-fab:focus-visible { outline: none; box-shadow: var(--focus-ring), var(--shadow-lg); }
+body:has(.cobra-fab:not([hidden])) #chase-bubbles { bottom: 82px !important; }
+.cobra-panel { position: fixed; top: 0; bottom: 0; inset-inline-end: 0; width: 400px; max-width: 100vw; z-index: 95; display: flex; flex-direction: column; background: var(--surface); color: var(--ink); border-inline-start: 1px solid var(--line); box-shadow: var(--shadow-lg); animation: cobraIn .22s var(--ease-out) both; }
+body.cobra-open #chase-bubbles { right: 418px !important; }
+.cobra-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); flex: none; }
+.cobra-head-icon { flex: none; width: 30px; height: 30px; border-radius: 99px; display: flex; align-items: center; justify-content: center; background: var(--primary); color: var(--on-primary); overflow: hidden; }
+.cobra-head-icon svg { width: 20px; height: 20px; }
+.cobra-head-icon img { width: 30px; height: 30px; object-fit: cover; }
+.cobra-head-name { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.cobra-head-name b { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cobra-head-name span { font-size: 11.5px; color: var(--ink-soft); }
+.cobra-hbtn { flex: none; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); background: none; color: var(--ink-soft); cursor: pointer; padding: 0; }
+.cobra-hbtn:hover, .cobra-hbtn[aria-pressed="true"] { background: var(--surface-2); color: var(--ink); }
+.cobra-hbtn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cobra-banner { margin: 10px 14px 0; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 12.5px; line-height: 1.45; color: var(--ink); }
+.cobra-banner.warn { background: var(--warn-soft); }
+.cobra-banner.bad { background: var(--bad-soft); }
+.cobra-banner.info { background: var(--surface-2); }
+.cobra-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px; }
+.cobra-intro { font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); margin: 0 0 12px; }
+.cobra-examples { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.cobra-examples button { border: 1px solid var(--line); border-radius: 99px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12.8px; padding: 7px 12px; min-height: 34px; cursor: pointer; text-align: start; }
+.cobra-examples button:hover { background: var(--surface-2); }
+.cobra-examples button:disabled { opacity: .5; cursor: default; }
+.cobra-msg { max-width: 88%; margin-bottom: 10px; font-size: 13.5px; line-height: 1.5; }
+.cobra-msg.user { margin-inline-start: auto; }
+.cobra-msg.user .cobra-text { background: var(--primary-soft); border-radius: 14px 14px 4px 14px; padding: 8px 12px; }
+.cobra-text { text-align: start; overflow-wrap: anywhere; }
+.cobra-text p, .cobra-text ul, .cobra-text ol { margin: 0 0 6px; }
+.cobra-text p:last-child, .cobra-text ul:last-child, .cobra-text ol:last-child { margin-bottom: 0; }
+.cobra-text ul, .cobra-text ol { padding-inline-start: 20px; }
+.cobra-text code { font-size: 12.5px; background: var(--surface-2); border-radius: 3px; padding: 0 3px; }
+.cobra-tool { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); margin-bottom: 4px; }
+.cobra-tool[data-state="error"] { color: var(--bad); }
+.cobra-spin { width: 11px; height: 11px; border-radius: 99px; border: 2px solid var(--line); border-top-color: var(--ink-soft); animation: cobraSpin .8s linear infinite; flex: none; }
+.cobra-note { font-size: 12px; color: var(--ink-soft); font-style: italic; margin-top: 6px; }
+.cobra-err { margin-top: 6px; padding: 7px 10px; border-radius: var(--radius-sm); background: var(--bad-soft); color: var(--ink); font-size: 12.5px; }
+.cobra-dots { display: inline-flex; gap: 4px; padding: 6px 0; }
+.cobra-dots i { width: 6px; height: 6px; border-radius: 99px; background: var(--ink-faint); animation: cobraDot 1.2s infinite ease-in-out; }
+.cobra-dots i:nth-child(2) { animation-delay: .15s; }
+.cobra-dots i:nth-child(3) { animation-delay: .3s; }
+.cobra-card { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); padding: 10px 12px; margin-top: 8px; }
+.cobra-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cobra-card-head b { flex: 1; min-width: 0; font-size: 13px; }
+.cobra-card-acts { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.cobra-card-acts .btn { min-height: 34px; }
+.cobra-card-err { margin-top: 6px; font-size: 12px; color: var(--bad); }
+.cobra-card-warn { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--warn); font-size: 12px; }
+.cobra-card-warn svg { flex-shrink: 0; margin-top: 1px; }
+.cobra-diff-row { display: flex; flex-wrap: wrap; gap: 2px 10px; padding: 5px 0; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
+.cobra-card-head + .cobra-diff-row { margin-top: 6px; }
+.cobra-diff-label { flex-basis: 100%; font-weight: 600; font-size: 12px; }
+.cobra-diff-before { color: var(--ink-soft); text-decoration: line-through; }
+.cobra-diff-before i, .cobra-diff-after i { font-style: normal; font-size: 11px; color: var(--ink-faint); margin-inline-end: 4px; text-decoration: none; display: inline-block; }
+.cobra-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 12.5px; color: var(--ink-soft); }
+.cobra-hist-row { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--line-soft); }
+.cobra-hist-row.on .cobra-hist-open { background: var(--surface-2); }
+.cobra-hist-open { flex: 1; min-width: 0; min-height: 44px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 7px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--ink); font: inherit; text-align: start; cursor: pointer; }
+.cobra-hist-open:hover { background: var(--surface-2); }
+.cobra-hist-title { font-size: 13px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cobra-hist-when, .cobra-log-meta { font-size: 11.5px; color: var(--ink-soft); }
+.cobra-log-row { padding: 10px 0; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+.cobra-log-head { display: flex; align-items: center; gap: 8px; }
+.cobra-log-head > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cobra-log-meta { display: flex; gap: 10px; margin-top: 3px; padding-inline-start: 23px; }
+.cobra-log-row details { margin-top: 4px; padding-inline-start: 23px; }
+.cobra-log-row summary { font-size: 12px; color: var(--ink-soft); cursor: pointer; min-height: 28px; display: flex; align-items: center; }
+.cobra-log-row .cobra-card-acts, .cobra-log-row .cobra-card-err { padding-inline-start: 23px; }
+.cobra-empty { color: var(--ink-soft); font-size: 13px; padding: 18px 0; text-align: center; }
+.cobra-compose { border-top: 1px solid var(--line); padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; flex: none; background: var(--surface); }
+.cobra-compose textarea { flex: 1; min-width: 0; resize: none; max-height: 140px; overflow-y: hidden; font: inherit; font-size: 16px; line-height: 1.4; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); padding: 8px 10px; }
+.cobra-compose textarea:focus { outline: none; border-color: var(--primary); box-shadow: var(--focus-ring); }
+.cobra-compose textarea:disabled { background: var(--surface-2); color: var(--ink-faint); }
+.cobra-compose .btn { min-height: 40px; min-width: 40px; padding: 8px 10px; }
+.cobra-compose .btn svg { width: 18px; height: 18px; }
+.cobra-mic[aria-disabled="true"] { opacity: .5; }
+.cobra-mic.on { color: var(--bad); border-color: var(--bad); }
+.cobra-hint { flex-basis: 100%; font-size: 11.5px; color: var(--ink-soft); min-height: 0; }
+.cobra-hint:empty { display: none; }
+.cobra-set-pad { padding: 12px 20px 16px; }
+.cobra-meter-wrap { max-width: 520px; }
+.cobra-model { width: auto; max-width: 100%; }
+.cobra-meter-wrap .meter { position: relative; }
+.cobra-meter-80 { position: absolute; top: 0; bottom: 0; inset-inline-start: 80%; width: 2px; background: var(--ink-soft); }
+.cobra-icon-pick { display: flex; gap: 8px; flex-wrap: wrap; }
+.cobra-set-label { display: block; font-size: 13.5px; margin-bottom: 2px; }
+.cobra-key { margin-top: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.cobra-key-now { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cobra-key-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.cobra-key-form select { flex: 0 0 auto; width: auto; }
+.cobra-key-form input { flex: 1 1 180px; min-width: 0; }
+/* the API key field is a masked text field, not a password one, so no password manager offers to save (and sync) it */
+.cobra-key-form input.cobra-key-secret { -webkit-text-security: disc; text-security: disc; }
+.cobra-key-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.cobra-key-note { font-size: 12.5px; color: var(--ink-soft); }
+.cobra-key-note.bad { color: var(--bad); }
+.cobra-key-data { margin: 0; font-size: 12px; line-height: 1.45; color: var(--ink-soft); }
+.cobra-soon { opacity: .55; }
+.cobra-head-name span:empty { display: none; }
+@keyframes cobraIn { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes cobraDot { 0%, 80%, 100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+@keyframes cobraSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cobra-panel, .cobra-dots i, .cobra-spin { animation: none; } .cobra-fab { transition: none; } }
+@media (max-width: 640px) {
+  .cobra-fab { bottom: calc(var(--bottom-bar-h) + 12px); inset-inline-end: 14px; }
+  body:has(.cobra-fab:not([hidden])) #chase-bubbles { bottom: calc(var(--bottom-bar-h) + 76px) !important; }
+  .cobra-panel { width: 100vw; height: 100dvh; border: 0; animation-name: sheetUp; padding-top: env(safe-area-inset-top, 0px); }
+  body.cobra-open { overflow: hidden; }
+  body.cobra-open #chase-bubbles { display: none; }
+  body.cobra-open #phone-widget { bottom: calc(76px + env(safe-area-inset-bottom, 0px)) !important; }
+  .cobra-msg { max-width: 92%; }
+  .cobra-set-pad { padding: 12px 16px 14px; }
+}
+/* ══ AI assistant (stage 6): own block, end ══ */
 </style>
 <!-- The business's colours (Look and branding), kept from the last visit so the first paint is already branded. It must come
      after the main <style>, or the light-mode values lose to :root. applyBranding() rewrites it once the settings load. -->
@@ -7078,6 +7201,7 @@ function renderShell(profile, data){
       </div>
     </div>
     ${renderBottomBar(profile, reminderCount)}
+    ${cobraFab(profile)}
   `;
 }
 
@@ -17280,6 +17404,7 @@ function renderSettings(profile){
     // Security opens behind its lock (14 Oct, plan item 6 / P4): the pill in the title says which.
     { group: 'Account', id: 'security', icon: 'lock', title: 'Security', desc: 'Keeping the business\'s data safe.', keywords: 'face id fingerprint passkey touch id history presentation view as two-step', titleExtra: () => secUnlocked() ? pill('good', 'Unlocked') : pill('neutral', 'Locked'), body: () => renderSecurityPage() },
     { group: 'Account', id: 'branding', icon: 'palette', title: 'Look and branding', desc: 'How the app looks for everyone in the business.', body: () => renderBrandingPage() },
+    { group: 'Account', id: 'ai', icon: 'zap', title: cobraSettingsTitle(cobraName()), desc: 'The assistant behind the button on every screen: free AI by default, a paid AI or own keys by choice, who can use it, and what it may spend.', keywords: 'assistant ai chat budget cap usage model voice cost limit change log undo', titleExtra: () => cobraSettingsPill(), body: () => renderCobraSettingsPage() },
     // Plan and billing (renderBillingPage) stays hidden until the app is offered to other businesses (Ofek 13 Oct).
   ];
   const ui = UI.settings || (UI.settings = { page: 'setup', open: false });
@@ -28001,11 +28126,16 @@ function vacationPhoneAway(people, vacations, employees, profiles, day, tz){
 // Owners and managers set vacations (Ofek 14 Oct); the database allows the same (is_owner_or_manager).
 function canSetVacation(){ const me = getCurrentProfile(); return !!me && (me.role==='owner' || me.role==='manager'); }
 function vacationFirst(v){ return String((v && v.employeeName) || '').split(' ')[0] || 'They'; }
+// Who of them is away then, one line (vacationAssignConflicts' infos; '' for none). The assistant's new-task card shows the
+// same line (ai-gateway, vacationAssignLine).
+function vacationAssignLine(infos){
+  const x = infos || [];
+  return !x.length ? '' : x.length===1 ? `${x[0].name} is on vacation then (${x[0].label}).` : `${listJoin(x.map(i => `${i.name} (${i.label})`))} are on vacation then.`;
+}
 // The question when someone picks a person who is away: asked, not blocked, with the stand-in as the other answer.
 function vacationAssignConfirm(infos, onYes, onStand){
   const stand = [...new Set(infos.filter(i => i.standIn).map(i => i.standIn))];
-  const msg = infos.length===1 ? `${infos[0].name} is on vacation then (${infos[0].label}). Assign anyway?`
-    : `${listJoin(infos.map(i => `${i.name} (${i.label})`))} are on vacation then. Assign anyway?`;
+  const msg = `${vacationAssignLine(infos)} Assign anyway?`;
   confirmAction(msg, onYes, { danger: false, title: infos.length===1 ? infos[0].label : 'On vacation then', confirmLabel: 'Assign anyway',
     alt: stand.length ? { label: `Assign ${listJoin(stand)} instead`, fn: onStand } : null });
 }
@@ -31946,6 +32076,1428 @@ function renderFreshness(){
   </div>`;
 }
 
+// ══ AI assistant (stage 6): own block, start ══
+// The AI assistant (stage 6, Ofek 14 Oct): one floating button on every screen (renderShell, one call), a side panel
+// (a full-screen sheet on a phone) with streaming answers, the person's own chat history, a mic, "what will change"
+// cards with Confirm / Cancel, a change log with Undo, and Settings → "<name> AI" (the settings registry). The panel
+// lives in #cobra-root outside #app, so the app's render() never touches it; streaming patches the panel's DOM only.
+// The name and icon come from branding and ai_settings, never from this code. Server: supabase/functions/ai-gateway
+// (POST chat → Server-Sent Events, POST manage {step} → JSON); history and the change log are read under RLS.
+// Stage 7 hooks: cobraOpen({ mode, context }), COBRA_MODES (a mode), COBRA_CARDS[kind] (a result card),
+// COBRA_PAGE_MODES (the button opens in a page's own mode).
+const COBRA_ROLES = ['owner', 'manager', 'va', 'technician', 'marketing'];
+const COBRA_LIMITS = { monthly_cap_usd: [0, 10000], daily_user_limit: [1, 1000], assistant_name: 40, text: 4000, context: 4096 };
+// The kinds of chat. serverMode is the gateway's mode (a function of the context when one client mode maps to several);
+// requestContext is what each turn tells the gateway about where the person is (it must fit the mode's schema there).
+// savedContext turns a saved chat's stored context (what its first turn sent) back into the mode's own context.
+// Stage 7: COBRA_MODES.workflow = { label, serverMode: ctx => ctx.workflowId ? 'workflow_edit' : 'workflow_build',
+// placeholder, intro, examples, requestContext, savedContext }.
+const COBRA_MODES = {
+  assistant: {
+    label: 'Assistant', serverMode: 'assistant', placeholder: 'Ask a question, or ask for a change',
+    intro: name => `Hi, I'm ${name}. Ask me about the business, or ask me to change something. I show you exactly what will change before anything is saved.`,
+    // What to try (an array, or a function of the signed-in person's profile; render through cobraExamples): only what
+    // this person's tools answer (the gateway's scopeOf: leads with the CRM or Leads & Marketing, tasks with Tasks, a
+    // technician's next job with jobs and his name; the settings row is hidden from marketing). The test provider
+    // answers each one the same way every time (a gateway MOCK_SCRIPTS entry each).
+    examples: p => {
+      if (!p) return [];
+      const P = p.permissions || {}, om = p.role==='owner' || p.role==='manager', tech = p.role==='technician';
+      const jobs = om || !!P.jobs || !!P.finance || (tech && !!P.payroll), tasks = om || !!P.tasks;
+      return [
+        tech && jobs && p.technicianName ? 'When is my next job?' : '',
+        om || P.crm || P.crmOverview ? 'How many leads came in this month?' : '',
+        tasks ? 'What are my tasks?' : '',
+        tasks && !tech ? 'Add a task: call the supplier tomorrow' : '',
+        p.role!=='marketing' ? 'What are our office hours?' : '',
+        'What can you do for me?',
+      ].filter(Boolean).slice(0, 3);
+    },
+    requestContext: (ctx, ui) => ({ page: String((ui && ui.tab) || '') }),
+    // The page is sent fresh with every turn: a saved chat's page isn't part of the chat.
+    savedContext: () => ({}),
+  },
+};
+// Stage 7: COBRA_CARDS[kind] = (data, ctx) => html. The card escapes all of its own text and uses esc(jsStr()) in its
+// handlers. Example: "Draft created → Open".
+const COBRA_CARDS = {};
+// Stage 7: COBRA_PAGE_MODES.push(ui => isAutomationsBoard(ui) ? { mode: 'workflow', context: { ... } } : null). The
+// floating button then opens in that mode.
+const COBRA_PAGE_MODES = [];
+// The change kinds' icons (gateway CHANGE_KINDS); an unknown kind gets the pencil.
+const COBRA_KIND_ICON = { office_hours: 'clock', task_add: 'tasks', lead_stage: 'kanban', lead_note: 'note', task_update: 'calendarCheck', lead_follow_up: 'calendar' };
+// The models Settings offers, with the gateway's default prices (US$ per million tokens; PRICE_DEFAULTS in ai-gateway,
+// a test keeps them equal). An owner's price overrides (ai_settings.prices) are shown on top.
+// provider: which group of Settings → AI → Models lists it (the free AI, the paid AI, own OpenAI keys).
+const COBRA_MODELS = {
+  'claude-haiku-5-5': { label: 'Claude Haiku 5.5', in: 0.1, out: 0.5, provider: 'anthropic' },
+  'claude-sonnet-5-5': { label: 'Claude Sonnet 5.5', in: 2, out: 10, provider: 'anthropic' },
+  '@cf/zai-org/glm-4.7-flash': { label: 'GLM 4.7 Flash (free)', in: 0, out: 0, provider: 'cloudflare' },
+  '@cf/google/gemma-4-26b-a4b-it': { label: 'Gemma 4 26B (free)', in: 0, out: 0, provider: 'cloudflare' },
+  '@cf/qwen/qwen3.8-27b': { label: 'Qwen 3.8 27B (free)', in: 0, out: 0, provider: 'cloudflare' },
+  '@cf/openai/gpt-oss-120b': { label: 'GPT-OSS 120B (free)', in: 0, out: 0, provider: 'cloudflare' },
+  '@cf/openai/gpt-oss-20b': { label: 'GPT-OSS 20B (free)', in: 0, out: 0, provider: 'cloudflare' },
+  'gpt-4.1-mini': { label: 'GPT-4.1 mini', in: 0.4, out: 1.6, provider: 'openai' },
+  'gpt-4.1-nano': { label: 'GPT-4.1 nano', in: 0.1, out: 0.4, provider: 'openai' },
+  'gpt-4o-mini': { label: 'GPT-4o mini', in: 0.15, out: 0.6, provider: 'openai' },
+};
+// Each provider's model per task when the settings row has no "<provider>:<task>" entry (the gateway's PROVIDER_MODEL_DEFAULTS).
+const COBRA_PROVIDER_MODELS = { 'cloudflare:assistant': '@cf/zai-org/glm-4.7-flash', 'cloudflare:heavy': '@cf/zai-org/glm-4.7-flash', 'openai:assistant': 'gpt-4.1-mini', 'openai:heavy': 'gpt-4.1-mini' };
+// Who answers (the gateway's key_source) in words, and the shape of an own key (the gateway's KEY_RE; a test keeps them equal).
+const COBRA_SOURCE_LABEL = { own_user: 'Your own key', own_business: 'Business key', platform_paid: 'Paid AI', free: 'Free AI', mock: 'Test mode' };
+const COBRA_KEY_RE = /^[\x21-\x7e]{20,300}$/;
+const COBRA_KEY_PROVIDERS = { openai: 'OpenAI', anthropic: 'Anthropic' };
+// What the settings row holds when a value is missing (the gateway's AI_DEFAULTS).
+const COBRA_DEFAULTS = { monthly_cap_usd: 0, daily_user_limit: 50, model_per_task: { assistant: 'claude-haiku-5-5', heavy: 'claude-sonnet-5-5' } };
+const COBRA_SETTING_COLS = 'enabled, kill_switch, roles_enabled, model_per_task, prices, monthly_cap_usd, daily_user_limit, max_tokens, provider, assistant_name, allow_own_keys, free_quota';
+const COBRA_CHANGE_STEPS = { confirm: 'confirm_change', cancel: 'cancel_change', undo: 'undo_change' };
+// Plain English for every code the gateway sends (its ERROR_CODES; a test keeps them in step) and the app's own.
+const COBRA_ERRORS = {
+  off: 'is switched off for the business.',
+  role_off: "isn't switched on for your role. Ask an owner.",
+  kill_switch: 'is paused right now. Try again later.',
+  cap_reached: "This month's AI budget is used up. It starts again on the 1st, or an owner can raise the cap in Settings.",
+  daily_limit: "You've reached today's limit of questions. It resets tomorrow.",
+  free_quota: "Today's free AI quota is used up. It's back tomorrow, or an owner can switch on a paid AI in Settings → AI.",
+  free_share: "This business's share of today's free AI is used up. It's back tomorrow, or an owner can switch on a paid AI in Settings → AI.",
+  unauthorized: 'Please sign in again.',
+  bad_request: "Something in the request wasn't right.",
+  unknown_mode: "That kind of chat isn't available.",
+  bad_context: "This chat's details weren't right. Start a new chat.",
+  mode_mismatch: 'This chat is of another kind. Start a new chat.',
+  conversation_full: 'This chat is full. Start a new chat to carry on.',
+  model_not_priced: "The AI model for this chat has no price set, so it can't be used. An owner can pick another in Settings.",
+  conversation_not_found: "That chat couldn't be found. Start a new chat.",
+  busy: 'This chat is still answering. Wait for it to finish.',
+  provider_auth: "The AI service didn't accept the server's key. An owner needs to check it.",
+  model_not_found: "The AI model chosen in Settings isn't available.",
+  model_needs_paid: 'The free AI model chosen in Settings needs a paid Cloudflare plan. An owner can pick another model.',
+  provider_bad_request: "The AI service couldn't read this request.",
+  provider_busy: 'The AI service is busy. Try again in a minute.',
+  provider_unreachable: "The AI service couldn't be reached. Try again.",
+  provider_error: "The AI service didn't answer. Try again.",
+  server: 'Something went wrong on the server. Try again.',
+  not_found: "That couldn't be found.",
+  not_yours: 'Only the person who asked for this change can do that.',
+  not_proposed: "This change isn't waiting for a confirmation any more.",
+  not_confirmed: 'Only a saved change can be undone.',
+  expired: 'That suggestion is too old. Ask again.',
+  not_allowed: "You can't do that.",
+  changed_since: "It was changed after that, so it can't be undone here.",
+  unknown_step: "The server doesn't know that yet. It may need updating.",
+  denied: "You don't have access to change this.",
+  gone: 'That record no longer exists.',
+  invalid: "That value isn't allowed.",
+  failed: "The change couldn't be saved.",
+  validation: "That value isn't allowed.",
+  owners_only: 'Only owners can change this.',
+  network: 'The connection dropped. Try again.',
+  timeout: 'No answer for a while, so it stopped. Try again.',
+  not_installed: "The assistant isn't installed on the server yet.",
+  too_long: 'That message is too long. Keep it under 4,000 characters.',
+  read_only: 'Changes are not saved in this mode.',
+  aborted: 'Stopped.',
+  // own keys (stage 6 v2 G5)
+  own_key_refused: "Your own key didn't work, so it's switched off for now. Check it in Your AI key, or ask again to use the business's AI.",
+  business_key_refused: "The business's AI key didn't work, so it's switched off for now. An owner needs to check it in Settings → AI. Ask again to carry on.",
+  key_format: "That doesn't look like an OpenAI or Anthropic API key.",
+  key_provider_mismatch: 'That key belongs to the other AI service. Pick the matching one.',
+  key_invalid: "The AI service didn't accept that key. It wasn't saved.",
+  key_unchecked: "The AI service couldn't check that key right now. It wasn't saved. Try again in a minute.",
+  keys_off: 'An owner has switched off personal AI keys.',
+  key_in_chat: "That looks like an API key. It wasn't sent or saved: add your key in Your AI key instead.",
+  too_many_tries: 'Too many tries. Wait 10 minutes and try again.',
+  no_key: "There's no saved key.",
+};
+const COBRA_ICON_SVG = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c-3.3 0-6 2.9-6 6.6 0 2.6 1.3 4.6 3.2 5.6L8 21h8l-1.2-5.8c1.9-1 3.2-3 3.2-5.6C18 5.9 15.3 3 12 3z"/><path d="M10 8.3h.01M14 8.3h.01"/><path d="M12 11.6v2l-1.1 1.3M12 13.6l1.1 1.3"/></svg>';
+const COBRA_MIC_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+const COBRA_STOP_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" stroke="none" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+const COBRA_DOTS = '<span class="cobra-dots" role="img" aria-label="Writing"><i></i><i></i><i></i></span>';
+const COBRA_STALE_MS = 300000;   // status and settings are read again after 5 minutes
+const COBRA_SILENCE_MS = 45000;  // a stream with nothing (not even a ping) for this long is stopped
+
+// ── pure helpers (tests/business-logic.test.js) ──
+// The assistant's name: the one set in Settings, else the app's product name (branding).
+function cobraNameOf(assistantName, appName){ return String(assistantName || '').trim().slice(0, 40) || productName({ appName }); }
+function cobraSettingsTitle(name){ const n = String(name || ''); return /\bAI$/i.test(n) ? n : n + ' AI'; }
+// The button's icon: the business logo when the owner picked it and there is one, else the built-in icon.
+function cobraIconKind(branding){ const b = branding || {}; return b.assistantIcon==='logo' && brandLogoKind(b).kind!=='mark' ? 'logo' : 'default'; }
+function cobraRolesOf(rolesEnabled){ const r = rolesEnabled && typeof rolesEnabled==='object' ? rolesEnabled : {}; const o = {}; COBRA_ROLES.forEach(k => { o[k] = typeof r[k]==='boolean' ? r[k] : true; }); return o; }
+// status = the gateway's manage 'status' answer. The button stays when the budget or today's limit is used up: the
+// panel says why.
+function cobraFabState(status, ro){
+  if (ro) return { show: false, why: 'read_only' };
+  if (!status) return { show: false, why: 'loading' };
+  if (status.enabled===false) return { show: false, why: status.reason || 'off' };
+  return { show: true };
+}
+// A failed status read is tried again only after 5 minutes (the button is drawn on every click).
+function cobraShouldLoadStatus(c, ro, now){ return !ro && !c.statusP && (!c.statusAt || (!!c.statusErr && now - c.statusAt > COBRA_STALE_MS)); }
+function cobraErrorText(code, o){
+  const x = o || {}, name = x.name || productName({});
+  if (code==='off' || code==='role_off' || code==='kill_switch') return `${name} ${COBRA_ERRORS[code]}` + (code==='off' && x.isOwner ? ' Switch it on in Settings.' : '');
+  if (code==='daily_limit' && Number(x.limit) > 0) return `You've reached today's limit of ${Number(x.limit)} questions. It resets tomorrow.`;
+  return COBRA_ERRORS[code] || COBRA_ERRORS.server;
+}
+function cobraStopNote(stop){
+  if (stop==='max_tokens') return 'The answer was cut short. Ask me to continue.';
+  if (stop==='refusal') return "I can't help with that one.";
+  if (stop==='tool_limit' || stop==='step_limit') return 'That needed too many steps, so I stopped. Try a smaller question.';
+  if (stop==='cap_reached') return "This month's AI budget is used up, so I stopped here.";
+  return '';
+}
+// Server-Sent Events: whole frames out, the unfinished tail kept for the next chunk. data stays a raw string.
+function cobraSseParse(buf){
+  let s = String(buf || ''), hold = '';
+  if (s.endsWith('\r')) { hold = '\r'; s = s.slice(0, -1); }   // a \r\n split across two chunks
+  const parts = s.replace(/\r\n?/g, '\n').split('\n\n');
+  const rest = parts.pop() + hold, events = [];
+  for (const frame of parts) {
+    let event = 'message';
+    const data = [];
+    for (const line of frame.split('\n')) {
+      if (!line || line[0]===':') continue;
+      const i = line.indexOf(':');
+      const field = i < 0 ? line : line.slice(0, i);
+      let value = i < 0 ? '' : line.slice(i + 1);
+      if (value[0]===' ') value = value.slice(1);
+      if (field==='event') event = value || 'message';
+      else if (field==='data') data.push(value);
+    }
+    if (data.length) events.push({ event, data: data.join('\n') });
+  }
+  return { events, rest };
+}
+function cobraCleanContext(ctx){
+  try {
+    if (!ctx || typeof ctx!=='object' || Array.isArray(ctx)) return {};
+    const j = JSON.stringify(ctx);
+    if (!j || j.length > COBRA_LIMITS.context) return {};
+    const o = JSON.parse(j);
+    return o && typeof o==='object' && !Array.isArray(o) ? o : {};
+  } catch (e) { return {}; }
+}
+function cobraNeedsNewConv(conv, mode, ctx){ return !conv || conv.mode!==mode || JSON.stringify(conv.context || {})!==JSON.stringify(ctx || {}); }
+function cobraServerMode(mode, ctx){
+  const m = COBRA_MODES[mode] || COBRA_MODES.assistant;
+  return typeof m.serverMode==='function' ? m.serverMode(ctx || {}) : (m.serverMode || mode);
+}
+// A saved chat's gateway mode → the app's mode (the first whose serverMode gives it), else the assistant.
+function cobraClientMode(serverMode, ctx){
+  for (const k of Object.keys(COBRA_MODES)) { try { if (cobraServerMode(k, ctx)===serverMode) return k; } catch (e) { /* a mode that can't tell */ } }
+  return 'assistant';
+}
+function cobraRequestContext(mode, ctx, ui){
+  const m = COBRA_MODES[mode] || COBRA_MODES.assistant;
+  try { return cobraCleanContext(typeof m.requestContext==='function' ? m.requestContext(ctx || {}, ui || {}) : ctx); } catch (e) { return {}; }
+}
+// A saved chat's context (the gateway keeps what its first turn sent: cobraRequestContext) → the chat's context in the
+// app, the one cobraOpen compares, so a chat reopened from History survives closing and reopening the panel. The mode
+// says how (savedContext); without it the saved context is used as it is.
+function cobraClientContext(mode, saved){
+  const m = COBRA_MODES[mode] || COBRA_MODES.assistant;
+  try { return cobraCleanContext(typeof m.savedContext==='function' ? m.savedContext(saved || {}) : saved); } catch (e) { return {}; }
+}
+// Message text → safe HTML: escaped first; paragraphs, lists, **bold**, `code` and line breaks. No links, no raw HTML.
+function cobraFormat(text){
+  const inline = s => s.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  const ul = /^\s*[-*•]\s+(.*)$/, ol = /^\s*\d+[.)]\s+(.*)$/, out = [];
+  for (const block of esc(String(text ?? '')).replace(/\r\n?/g, '\n').split(/\n[ \t]*\n/)) {
+    const lines = block.split('\n').filter(l => l.trim()!=='');
+    let para = [], i = 0;
+    const flush = () => { if (para.length) out.push(`<p dir="auto">${para.map(inline).join('<br>')}</p>`); para = []; };
+    while (i < lines.length) {
+      if (ul.test(lines[i]) || ol.test(lines[i])) {
+        flush();
+        const re = ul.test(lines[i]) ? ul : ol, tag = re===ul ? 'ul' : 'ol', items = [];
+        while (i < lines.length && re.test(lines[i])) items.push(`<li>${inline(re.exec(lines[i++])[1])}</li>`);
+        out.push(`<${tag} dir="auto">${items.join('')}</${tag}>`);
+      } else para.push(lines[i++]);
+    }
+    flush();
+  }
+  return out.join('');
+}
+// The streamed text of an answer, step by step (a step's text can be taken back: a refusal).
+function cobraJoinParts(parts){ return (parts || []).map(p => String(p || '').trim()).filter(Boolean).join('\n\n'); }
+// When an answer ends, a tool chip still spinning (its end never arrived: stopped, cut off) shows as not run.
+function cobraEndTools(tools){ return (tools || []).map(t => (t && t.state==='running' ? { ...t, state: 'error' } : t)); }
+// Whether a chat that finished loading is still the one the person asked for last (not replaced by New chat, or by
+// another chat picked meanwhile).
+function cobraConvWanted(c, id){ return !!c && c.convWant===id; }
+function cobraDiffRows(before, after){
+  const isObj = v => !!v && typeof v==='object' && !Array.isArray(v);
+  const b = isObj(before) ? before : {}, a = isObj(after) ? after : {};
+  const keys = [...Object.keys(a), ...Object.keys(b).filter(k => !Object.prototype.hasOwnProperty.call(a, k))];
+  const label = k => { const s = String(k).replace(/_/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().trim(); return s.charAt(0).toUpperCase() + s.slice(1); };
+  const text = v => {
+    if (v===null || v===undefined || v==='') return null;
+    if (typeof v==='boolean') return v ? 'Yes' : 'No';
+    if (typeof v==='object') { const j = JSON.stringify(v); return j.length > 80 ? j.slice(0, 79) + '…' : j; }
+    return String(v);
+  };
+  return keys.filter(k => JSON.stringify(a[k])!==JSON.stringify(b[k])).slice(0, 12).map(k => ({ label: label(k), before: text(b[k]), after: text(a[k]) }));
+}
+function cobraRowsOf(p){
+  const rows = p && p.display && Array.isArray(p.display.rows) ? p.display.rows : [];
+  return rows.length ? rows.slice(0, 12) : cobraDiffRows(p && p.before, p && p.after);
+}
+function cobraDiffRowHtml(r){
+  const x = r || {};
+  // The value has its own direction (a Hebrew note stays right to left); the English Now / After labels sit outside it.
+  return `<div class="cobra-diff-row"><span class="cobra-diff-label" dir="auto">${esc(x.label ?? '')}</span><span class="cobra-diff-before"><i>Now</i><bdi dir="auto">${esc(x.before ?? '—')}</bdi></span><span class="cobra-diff-after"><i>After</i><bdi dir="auto">${esc(x.after ?? '—')}</bdi></span></div>`;
+}
+function cobraStatusPill(status){ return ({ confirmed: pill('good', 'Saved'), undone: pill('neutral', 'Undone'), cancelled: pill('neutral', 'Cancelled'), failed: pill('bad', 'Not saved') })[status] || ''; }
+// A stored error is plain English, or one of the gateway's codes (e.g. an expired proposal).
+function cobraChangeError(err){ const e = String(err || ''); return /^[a-z_]+$/.test(e) && COBRA_ERRORS[e] ? COBRA_ERRORS[e] : e; }
+// A proposal ("what will change") card. p = the gateway's change (changeOut) or an ai_changes row.
+function cobraProposalHtml(p, busy){
+  const x = p || {}, d = x.display && typeof x.display==='object' ? x.display : {};
+  const ask = x.status==='proposed' && x.can_confirm!==false;
+  const err = cobraChangeError(x.error);
+  return `<div class="cobra-card" data-change="${esc(x.id || '')}">`
+    + `<div class="cobra-card-head">${ico(COBRA_KIND_ICON[x.kind] || 'pencil', 15)}<b dir="auto">${esc(d.title || x.summary || x.label || '')}</b>${cobraStatusPill(x.status)}</div>`
+    + cobraRowsOf(x).map(cobraDiffRowHtml).join('')
+    // The gateway's warnings for the person to weigh before confirming (e.g. someone on vacation then); while it is asked only.
+    + (ask && Array.isArray(d.warnings) ? d.warnings.slice(0, 4).map(w => `<div class="cobra-card-warn">${ico('alert', 13)}<span dir="auto">${esc(w)}</span></div>`).join('') : '')
+    + (ask ? `<div class="cobra-card-acts"><button type="button" class="btn primary small" onclick="cobraChange('${esc(jsStr(x.id || ''))}','confirm')"${busy ? ' disabled' : ''}>Confirm</button><button type="button" class="btn small" onclick="cobraChange('${esc(jsStr(x.id || ''))}','cancel')"${busy ? ' disabled' : ''}>Cancel</button></div>` : '')
+    + (err ? `<div class="cobra-card-err" dir="auto">${esc(err)}</div>` : '')
+    + '</div>';
+}
+// ctx = the chat the card is in ({ mode, context, conversationId }; cobraCardCtx), handed to a registered card.
+function cobraCardHtml(card, ctx){
+  const c = card || {}, data = c.data && typeof c.data==='object' ? c.data : {};
+  const x = ctx && typeof ctx==='object' ? ctx : {};
+  const chat = { mode: x.mode || 'assistant', context: x.context && typeof x.context==='object' ? x.context : {}, conversationId: x.conversationId || null };
+  const fn = Object.prototype.hasOwnProperty.call(COBRA_CARDS, c.kind) ? COBRA_CARDS[c.kind] : null;
+  if (typeof fn==='function') { try { return String(fn(data, chat) ?? ''); } catch (e) { /* the generic card below */ } }
+  return `<div class="cobra-card"><b dir="auto">${esc(data.title || '')}</b><div dir="auto">${esc(data.text || '')}</div></div>`;
+}
+function cobraToolHtml(t){
+  const x = t || {}, state = x.state==='running' ? 'running' : x.state==='error' ? 'error' : 'ok';
+  return `<div class="cobra-tool" data-id="${esc(x.id || '')}" data-state="${state}">${state==='running' ? '<span class="cobra-spin" aria-hidden="true"></span>' : ico(state==='error' ? 'alert' : 'check', 13)}<span dir="auto">${esc(x.label || 'Working')}</span></div>`;
+}
+// One message: the person's, or the assistant's (tools, text, proposals, cards, notes, an error). busy = change id → true;
+// ctx = the chat, for the cards (cobraCardHtml).
+function cobraMsgHtml(m, busy, ctx){
+  const x = m || {}, mid = x.mid ? ` data-mid="${esc(x.mid)}"` : '';
+  if (x.role==='user') return `<div class="cobra-msg user"${mid}><div class="cobra-text" dir="auto">${cobraFormat(x.text)}</div></div>`;
+  const b = busy || {};
+  return `<div class="cobra-msg bot${x.streaming ? ' streaming' : ''}"${mid}>`
+    + (x.tools || []).map(cobraToolHtml).join('')
+    + `<div class="cobra-text" dir="auto">${x.text ? cobraFormat(x.text) : (x.streaming ? COBRA_DOTS : '')}</div>`
+    + (x.proposals || []).map(p => cobraProposalHtml(p, !!b[p && p.id])).join('')
+    + (x.cards || []).map(card => cobraCardHtml(card, ctx)).join('')
+    + (x.notes || []).map(n => `<div class="cobra-note" dir="auto">${esc(n)}</div>`).join('')
+    + (x.error ? `<div class="cobra-err" role="alert" dir="auto">${esc(x.error.reason || cobraErrorText(x.error.code))}</div>` : '')
+    + '</div>';
+}
+// A saved chat → messages: the person's texts, and the assistant's steps of one turn joined into one bubble with the
+// proposals (ai_changes rows by id, current status) and cards of those steps. Display-only notices become notes.
+function cobraMsgsFromRows(rows, changes){
+  const byId = {}; (changes || []).forEach(c => { if (c && c.id) byId[c.id] = c; });
+  const out = [];
+  let bot = null;
+  const botMsg = () => bot || (bot = (out.push({ role: 'assistant', text: '', tools: [], proposals: [], cards: [], notes: [], error: null, streaming: false }), out[out.length - 1]));
+  for (const r of rows || []) {
+    const meta = r && r.meta && typeof r.meta==='object' ? r.meta : {};
+    if (r.role==='user') { if (r.visible!==false && r.text) { out.push({ role: 'user', text: String(r.text) }); bot = null; } continue; }
+    if (r.role!=='assistant') continue;
+    if (meta.notice) {
+      const m = botMsg();
+      if (meta.notice==='error') m.error = { code: meta.code || 'server', reason: r.text || '' };
+      else if (r.text) m.notes.push(String(r.text));
+      continue;
+    }
+    const props = (Array.isArray(meta.proposals) ? meta.proposals : []).map(id => byId[id]).filter(Boolean);
+    const cards = Array.isArray(meta.cards) ? meta.cards.filter(c => c && c.kind) : [];
+    if (!(r.visible!==false && r.text) && !props.length && !cards.length) continue;
+    const m = botMsg();
+    if (r.visible!==false && r.text) m.text = m.text ? m.text + '\n\n' + r.text : String(r.text);
+    m.proposals.push(...props); m.cards.push(...cards);
+  }
+  return out;
+}
+function cobraCanUndo(row, me){ return !!row && !!me && row.status==='confirmed' && (me.role==='owner' || row.user_id===me.id); }
+// A change log row. Owners see who asked; Undo when allowed (owners any change, others their own).
+function cobraLogRowHtml(row, me, nameOf, now){
+  const x = row || {}, owner = !!me && me.role==='owner', err = cobraChangeError(x.error);
+  const rows = cobraRowsOf(x).map(cobraDiffRowHtml).join('');
+  return `<div class="cobra-log-row" data-change="${esc(x.id || '')}">`
+    + `<div class="cobra-log-head">${ico(COBRA_KIND_ICON[x.kind] || 'pencil', 15)}<span dir="auto">${esc(x.summary || '')}</span>${cobraStatusPill(x.status)}</div>`
+    + `<div class="cobra-log-meta">${owner ? `<span dir="auto">by ${esc(nameOf ? nameOf(x.user_id) : '')}</span>` : ''}<span>${esc(cobraWhen(x.created_at, now))}</span></div>`
+    + (rows ? `<details><summary>What changed</summary>${rows}</details>` : '')
+    + (cobraCanUndo(x, me) ? `<div class="cobra-card-acts"><button type="button" class="btn small" onclick="cobraChange('${esc(jsStr(x.id || ''))}','undo')">Undo</button></div>` : '')
+    + (err ? `<div class="cobra-card-err" dir="auto">${esc(err)}</div>` : '')
+    + '</div>';
+}
+function cobraUsd(n){
+  const v = Number(n);
+  if (!Number.isFinite(v) || v===0) return 'US$0.00';
+  if (v > 0 && v < 0.01) return '<US$0.01';
+  return (v < 0 ? '-' : '') + 'US$' + Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+function cobraUsageMeter(spent, cap){
+  const s = Number(spent) || 0, c = Number(cap) || 0;
+  const pctRaw = c > 0 ? s / c * 100 : (s > 0 ? 100 : 0);
+  const bar = Math.round(Math.min(100, Math.max(0, pctRaw)) * 10) / 10;
+  return { bar, tone: pctRaw >= 100 ? 'bad' : pctRaw >= 80 ? 'warn' : 'good', text: `${cobraUsd(s)} of ${cobraUsd(c)} (${Math.round(pctRaw)}%)` };
+}
+// The banner under the panel's head: one line, the most important first. me = { isOwner, name }.
+// A limit hit (the free quota, this business's share of it, the paid cap) > own key refused > owners at 80% of the
+// paid cap (paid AI on only) > test mode.
+function cobraBannerOf(status, statusErr, me){
+  const o = me || {};
+  if (statusErr==='not_installed') return { tone: 'bad', text: COBRA_ERRORS.not_installed };
+  if (!status) return null;
+  if (status.enabled===false) return { tone: 'bad', text: cobraErrorText(status.reason || 'off', { name: o.name, isOwner: o.isOwner }) };
+  const month = status.month || {}, mine = status.keys && status.keys.me;
+  if (status.blocked) return { tone: 'bad', text: status.blocked_text || COBRA_ERRORS[status.blocked] || COBRA_ERRORS.server };
+  if (month.blocked) return { tone: 'bad', text: COBRA_ERRORS.cap_reached };
+  if (mine && mine.status==='invalid') return { tone: 'warn', text: "Your own AI key didn't work, so the business's AI answers for now. Check it in Your AI key." };
+  const paidOn = status.paid ? !!status.paid.switched_on : status.provider==='anthropic';
+  if (o.isOwner && paidOn && Number(month.pct) >= 80) return { tone: 'warn', text: `This month's paid AI spend is at ${Math.round(Number(month.pct))}% of the ${cobraUsd(month.cap_usd)} cap.` };
+  const test = status.test_mode || (status.provider==='mock' ? 'not_configured' : null);
+  if (test==='forced') return { tone: 'info', text: 'Test mode is on in Settings.' };
+  if (test) return { tone: 'info', text: "Test mode: the free AI isn't set up yet." };
+  return null;
+}
+// Why a message can't be sent now ('' = it can); the gateway checks the same itself.
+function cobraSendBlock(status){
+  if (!status) return '';
+  if (status.enabled===false) return status.reason || 'off';
+  if (status.blocked) return String(status.blocked);
+  if (status.month && status.month.blocked) return 'cap_reached';
+  const t = status.today;
+  if (t && Number.isFinite(Number(t.limit)) && Number(t.used) >= Number(t.limit)) return 'daily_limit';
+  return '';
+}
+function cobraLeftText(status){
+  const t = status && status.today, f = status && status.free, src = status && status.source, out = [];
+  if (t && Number.isFinite(Number(t.limit))) {
+    const left = Number(t.limit) - (Number(t.used) || 0);
+    if (left > 0 && left < 10) out.push(`${left} question${left===1 ? '' : 's'} left today`);
+  }
+  const pct = f && f.left_pct!==null && f.left_pct!==undefined ? Number(f.left_pct) : NaN;
+  if (src && src.key_source==='free' && pct > 0 && pct < 15) out.push('Free AI is low today');
+  return out.join(' · ');
+}
+// The settings row as the page uses it (the gateway's normSettings, for what the page shows).
+function cobraPricesOf(over){
+  const out = {};
+  Object.keys(COBRA_MODELS).forEach(k => { out[k] = { ...COBRA_MODELS[k] }; });
+  const o = over && typeof over==='object' && !Array.isArray(over) ? over : {};
+  const num = v => typeof v==='number' && Number.isFinite(v) && v >= 0;
+  const providerOf = k => (k.startsWith('@cf/') ? 'cloudflare' : /^(gpt-|o\d)/.test(k) ? 'openai' : 'anthropic');
+  Object.keys(o).forEach(k => { const p = o[k] || {}; const cur = out[k] || { label: k, provider: providerOf(k) }; if (num(p.in)) cur.in = p.in; if (num(p.out)) cur.out = p.out; if (num(cur.in) && num(cur.out)) out[k] = cur; });
+  return out;
+}
+// provider: 'auto' (own key → paid AI when switched on → the free AI → test mode), 'anthropic' (the paid switch on) or
+// 'mock' (test mode). free_quota is the platform's and read-only here.
+function cobraSettingsOf(row){
+  const r = row && typeof row==='object' ? row : {};
+  const n = (v, d) => { const x = Number(v); return v!==null && v!==undefined && v!=='' && Number.isFinite(x) ? x : d; };
+  const tasks = { ...COBRA_DEFAULTS.model_per_task };
+  if (r.model_per_task && typeof r.model_per_task==='object') Object.keys(r.model_per_task).forEach(k => { const v = r.model_per_task[k]; if (typeof v==='string' && v.trim()) tasks[k] = v.trim(); });
+  return {
+    enabled: r.enabled!==false, kill_switch: r.kill_switch===true, roles_enabled: cobraRolesOf(r.roles_enabled), model_per_task: tasks,
+    prices: cobraPricesOf(r.prices), monthly_cap_usd: n(r.monthly_cap_usd, COBRA_DEFAULTS.monthly_cap_usd), daily_user_limit: n(r.daily_user_limit, COBRA_DEFAULTS.daily_user_limit),
+    provider: ['anthropic', 'mock'].includes(r.provider) ? r.provider : 'auto', assistant_name: typeof r.assistant_name==='string' && r.assistant_name.trim() ? r.assistant_name.trim() : null,
+    allow_own_keys: r.allow_own_keys!==false, free_quota: r.free_quota && typeof r.free_quota==='object' && !Array.isArray(r.free_quota) ? r.free_quota : {},
+  };
+}
+// paid = { cap, keyReady }: the paid switch needs a cap above 0 and a key (the server's or the business's).
+function cobraSettingProblem(key, v, prices, paid){
+  const s = String(v ?? '').trim();
+  if (key==='monthly_cap_usd') return /^\d+(\.\d{1,2})?$/.test(s) && Number(s) <= COBRA_LIMITS.monthly_cap_usd[1] ? '' : 'Enter an amount from 0 to 10,000 US dollars.';
+  if (key==='daily_user_limit') return /^\d+$/.test(s) && Number(s) >= COBRA_LIMITS.daily_user_limit[0] && Number(s) <= COBRA_LIMITS.daily_user_limit[1] ? '' : 'Enter a whole number from 1 to 1,000.';
+  if (key==='assistant_name') return s.length <= COBRA_LIMITS.assistant_name ? '' : 'Keep the name to 40 characters.';
+  if (key.startsWith('model_per_task.')) return prices && Object.prototype.hasOwnProperty.call(prices, s) ? '' : 'Pick one of the models listed.';
+  if (key==='provider' && s==='anthropic') {
+    const p = paid && typeof paid==='object' ? paid : {};
+    if (!(Number(p.cap) > 0)) return 'Set a monthly cap above 0 first, so paid use has a limit.';
+    if (!p.keyReady) return "The server's Anthropic key isn't added yet, and there's no business key.";
+  }
+  return '';
+}
+// Whether the paid AI has a key: the server's Anthropic key, or the business's own key that wasn't refused.
+function cobraPaidKeyReady(status){
+  const st = status || {}, biz = st.keys && st.keys.business;
+  return !!(st.provider_ready || (st.paid && st.paid.platform_key_ready) || (biz && biz.provider && biz.status!=='invalid'));
+}
+function cobraPatchOf(key, v, s){
+  const cur = s || {};
+  if (key.startsWith('model_per_task.')) return { model_per_task: { ...(cur.model_per_task || {}), [key.slice(15)]: String(v) } };
+  if (key.startsWith('roles.')) return { roles_enabled: { ...cobraRolesOf(cur.roles_enabled), [key.slice(6)]: !!v } };
+  if (key==='monthly_cap_usd' || key==='daily_user_limit') return { [key]: Number(String(v).trim()) };
+  if (key==='assistant_name') { const t = String(v || '').trim(); return { assistant_name: t || null }; }
+  if (key==='enabled' || key==='kill_switch' || key==='allow_own_keys') return { [key]: !!v };
+  if (key==='provider') return { provider: ['anthropic', 'mock'].includes(v) ? v : 'auto' };
+  return {};
+}
+// The settings-history wording of one change.
+function cobraPatchText(key, v){
+  if (key==='enabled') return v ? 'switched on' : 'switched off';
+  if (key==='kill_switch') return v ? 'paused by the safety switch' : 'safety switch released';
+  if (key==='monthly_cap_usd') return `monthly cap ${cobraUsd(Number(v))}`;
+  if (key==='daily_user_limit') return `daily limit ${Number(v)} questions`;
+  if (key.startsWith('roles.')) return `${roleLabel(key.slice(6))}: ${v ? 'on' : 'off'}`;
+  if (key.startsWith('model_per_task.')) {
+    const k = key.slice(15), i = k.indexOf(':'), task = k.slice(i + 1), prov = i < 0 ? '' : k.slice(0, i);
+    const what = `${task==='assistant' ? 'everyday' : task==='heavy' ? 'heavy-task' : task} model ${v}`;
+    return prov ? `${({ cloudflare: 'free AI', openai: 'own OpenAI keys', anthropic: 'paid AI' })[prov] || prov} ${what}` : what;
+  }
+  if (key==='assistant_name') { const t = String(v || '').trim(); return t ? `name ${t}` : 'name back to the app name'; }
+  if (key==='provider') return v==='anthropic' ? 'paid AI (Anthropic) on' : v==='mock' ? 'test mode on' : 'paid AI and test mode off';
+  if (key==='allow_own_keys') return v ? 'own AI keys allowed' : 'own AI keys switched off';
+  return key;
+}
+// "Now answering" (Settings → AI): a pill and a line, from the gateway's status.
+function cobraSourcePill(status){
+  const st = status || null, src = st && st.source;
+  if (!st) return { html: pill('neutral', 'Unknown'), text: "The server didn't answer, so this isn't known right now." };
+  if (st.blocked) return { html: pill('bad', 'Paused'), text: st.blocked_text || COBRA_ERRORS[st.blocked] || '' };
+  const ks = src && src.key_source, label = COBRA_SOURCE_LABEL[ks];
+  if (!label) return { html: pill('neutral', 'Nothing yet'), text: 'No AI is set up to answer yet.' };
+  const model = (COBRA_MODELS[src.model] || {}).label || src.model || '';
+  const text = ks==='free' ? `${model}. It costs the business nothing, up to today's free quota.`
+    : ks==='platform_paid' ? `${model}, counted against the monthly cap.`
+    : ks==='own_business' ? `${model} on the business's own key, counted against the monthly cap.`
+    : ks==='own_user' ? `${model} on your own key, paid by you.`
+    : st.test_mode==='forced' ? 'Test mode is on: answers are scripted and nothing is paid.' : "The free AI isn't set up yet, so answers are scripted.";
+  return { html: pill(ks==='mock' ? 'warn' : 'good', label), text };
+}
+// When the free quota is back, in the business's time zone: "at 11:00" (later today) or "tomorrow".
+function cobraFreeResetText(resetsAt, tz, now){
+  const t = Date.parse(resetsAt || ''), n = now===null || now===undefined || !Number.isFinite(Number(now)) ? Date.now() : Number(now);
+  if (!Number.isFinite(t)) return 'tomorrow';
+  try {
+    const zone = tz || 'UTC', day = ms => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+    if (day(t)!==day(n)) return 'tomorrow';
+    return 'at ' + new Intl.DateTimeFormat('en-GB', { timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(t));
+  } catch (e) { return 'tomorrow'; }
+}
+// The free AI left today (status.free): owners see the account's used / daily neurons, everyone else left_pct. null =
+// not set up, or nothing known.
+function cobraFreeMeter(free, tz, now){
+  const f = free || {};
+  if (!f.configured) return null;
+  const daily = Number(f.daily_neurons), used = f.used_neurons===null || f.used_neurons===undefined ? NaN : Number(f.used_neurons);
+  const pct = f.left_pct===null || f.left_pct===undefined ? NaN : Number(f.left_pct);
+  let left = daily > 0 && Number.isFinite(used) ? 100 - used / daily * 100 : Number.isFinite(pct) ? pct : null;
+  if (left===null) return null;
+  left = f.exhausted ? 0 : Math.min(100, Math.max(0, left));
+  return { bar: Math.round(left * 10) / 10, tone: left <= 0 ? 'bad' : left < 15 ? 'warn' : 'good', text: `${Math.round(left)}% left today · back ${cobraFreeResetText(f.resets_at, tz, now)}` };
+}
+// What's wrong with a pasted key before it is sent ('' = nothing): the gateway's KEY_RE and keyProviderOf.
+function cobraKeyProblem(provider, key){
+  const k = String(key ?? '').trim();
+  if (!k) return 'Paste the key first.';
+  const p = COBRA_KEY_RE.test(k) ? (k.startsWith('sk-ant-') ? 'anthropic' : k.startsWith('sk-') ? 'openai' : null) : null;
+  if (!p) return COBRA_ERRORS.key_format;
+  return provider && provider!==p ? COBRA_ERRORS.key_provider_mismatch : '';
+}
+// The own-key card (the panel's "Your AI key" for 'me', Settings → AI for 'business'). keyState = { scope, key:
+// {provider, last4, status} | null, off (owners switched personal keys off), note: {tone, text} }. Only the last 4.
+function cobraKeyCardHtml(keyState, busy){
+  const ks = keyState || {}, scope = ks.scope==='business' ? 'business' : 'me', k = ks.key && ks.key.provider ? ks.key : null, dis = busy ? ' disabled' : '';
+  const now = k ? `<b>${esc(COBRA_KEY_PROVIDERS[k.provider] || k.provider)} ••••${esc(k.last4 || '')}</b> ${k.status==='invalid' ? pill('bad', 'Refused') : pill('good', 'Working')}` : '<b>No key saved</b>';
+  const note = ks.note && ks.note.text ? `<div class="cobra-key-note${ks.note.tone==='bad' ? ' bad' : ''}" role="status">${esc(ks.note.text)}</div>`
+    : busy ? '<div class="cobra-key-note" role="status">Checking with the AI service…</div>' : '';
+  const remove = k ? `<button type="button" class="btn small" onclick="cobraKeyDelete(null, '${esc(jsStr(scope))}')"${dis}>Remove</button>` : '';
+  const head = `<div class="cobra-key" id="cobra-key-${scope}"><div class="cobra-key-now">${now}</div>`;
+  if (ks.off && scope==='me') return head + `<p class="cobra-key-data">${esc(COBRA_ERRORS.keys_off)}</p>${note}${remove ? `<div class="cobra-key-btns">${remove}</div>` : ''}</div>`;
+  const id = scope==='business' ? 'cobra-key-input-business' : 'cobra-key-input';
+  const data = scope==='business' ? "Paid AI then answers on this key instead of the server's. It counts against the monthly cap."
+    : "Your questions and the business data they need then go to your own OpenAI / Anthropic account, paid by you. They don't count against the business's limits.";
+  return head + `<div class="cobra-key-form"><select class="set-input" id="${id}-provider" aria-label="AI service"${dis}>${Object.keys(COBRA_KEY_PROVIDERS).map(p => `<option value="${p}"${k && k.provider===p ? ' selected' : ''}>${COBRA_KEY_PROVIDERS[p]}</option>`).join('')}</select>`
+    + `<input class="set-input cobra-key-secret" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" id="${id}" aria-label="API key" placeholder="${k ? 'Paste a new key to replace it' : 'Paste the API key'}"${dis}></div>`
+    + `<div class="cobra-key-btns"><button type="button" class="btn small primary" onclick="cobraKeySave('${esc(jsStr(scope))}')"${dis}>Save and check</button>`
+    + (k ? `<button type="button" class="btn small" onclick="cobraKeyTest('${esc(jsStr(scope))}')"${dis}>Check again</button>` : '') + remove + '</div>'
+    + note + `<p class="cobra-key-data">${esc(data)}</p></div>`;
+}
+// "Use your own Claude": owners and managers (who may make a private connector key); '' for everyone else.
+function cobraOwnClaudeCardHtml(me, name){
+  if (!canUseMcp(me)) return '';
+  return `<div class="cobra-key cobra-own-claude"><b>Use your own Claude</b><p class="cobra-key-data">Have Claude.ai or the Claude app? It can read ${esc(name)} through your private connector. It can look, not change.</p>`
+    + '<div class="cobra-key-btns"><button type="button" class="btn small" onclick="cobraOpenMcpKeys()">Get your connector key</button></div></div>';
+}
+// Settings → AI: the ChatGPT sign-in that isn't built yet. Greyed, no handler.
+function cobraChatGptRowHtml(){
+  return `<div class="set-row cobra-soon" aria-disabled="true"><div class="set-row-text"><b>Sign in with ChatGPT ${pill('neutral', 'Coming later')}</b><span>Use your ChatGPT plan instead of a key. Coming later.</span></div>`
+    + '<div class="set-row-ctl"><button type="button" class="set-toggle" role="switch" aria-checked="false" aria-label="Sign in with ChatGPT" disabled></button></div></div>';
+}
+// Voice typing's language: Hebrew when the person last wrote Hebrew (or wrote nothing yet in Israel), else English of
+// the business's country.
+function cobraSpeechLang(lastText, country){
+  const t = String(lastText || '');
+  if (/[֐-׿]/.test(t) || (!t.trim() && country==='IL')) return 'he-IL';
+  return ['AU', 'NZ', 'GB', 'US', 'CA', 'IE', 'ZA', 'IN'].includes(country) ? 'en-' + country : 'en-AU';
+}
+function cobraWhen(iso, now){
+  const t = Date.parse(iso || '');
+  if (!Number.isFinite(t)) return '';
+  const n = Number.isFinite(now) ? now : Date.now(), d = n - t;
+  if (d < 60000) return 'Just now';
+  if (d < 3600000) return `${Math.floor(d / 60000)} min ago`;
+  const a = new Date(t), b = new Date(n), y = new Date(n);
+  y.setDate(y.getDate() - 1);
+  const same = (p, q) => p.getFullYear()===q.getFullYear() && p.getMonth()===q.getMonth() && p.getDate()===q.getDate();
+  if (same(a, b)) { const h = a.getHours(); return `${h % 12 || 12}:${String(a.getMinutes()).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`; }
+  if (same(a, y)) return 'Yesterday';
+  return `${a.getDate()} ${MONTHS[a.getMonth()]}`;
+}
+function cobraEnterSends(e, coarse){ return e.key==='Enter' && !e.shiftKey && !e.isComposing && !coarse; }
+function cobraStick(top, height, client){ return height - top - client < 48; }
+function cobraPageMode(ui, list){
+  for (const f of list || []) {
+    try { const r = typeof f==='function' ? f(ui) : null; if (r && typeof r==='object') return r; } catch (e) { /* a page hook that fails is skipped */ }
+  }
+  return null;
+}
+
+// ── state: data first, the DOM is patched from it (a view switch while an answer streams loses nothing) ──
+function cobraBlank(){
+  return { open: false, view: 'chat', mode: 'assistant', context: {}, conv: null /* {id, mode, context, title} */, msgs: [], seq: 0, draft: '',
+    streaming: null /* {ctrl, msg, el, raf, stopped} */, status: null, statusAt: 0, statusP: null, statusErr: '',
+    detail: null /* {settings, status, statusErr, missing} */, detailAt: 0, detailP: null, detailErr: '',
+    history: null, historyAt: 0, historyP: null, historyErr: '', convP: {}, convWant: null, log: null, logAt: 0, logP: null, logErr: '',
+    busy: {}, saving: false, mic: null, micBase: '', hint: '', uid: null,
+    keySource: '' /* the last answer's key_source */, keyBusy: '' /* the scope being saved or checked */, keyNote: null /* {scope, tone, text} */ };
+}
+let COBRA = cobraBlank();
+
+// ── server access and loaders: each keeps its promise while it runs and sets *At even when it fails ──
+function cobraErr(code, reason, out){ const e = new Error(reason || code); e.code = code; e.reason = reason || ''; e.out = out || null; return e; }
+async function cobraFetch(path, body, opts){
+  if (readOnlyReason()) throw cobraErr('read_only', readOnlyReason());
+  const o = opts || {};
+  let token = '';
+  try { const { data } = await sb.auth.getSession(); token = (data && data.session && data.session.access_token) || ''; } catch (e) { token = ''; }
+  if (!token) throw cobraErr('unauthorized', COBRA_ERRORS.unauthorized);
+  let r;
+  try {
+    r = await fetch(SUPABASE_URL + '/functions/v1/ai-gateway/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token, Accept: o.stream ? 'text/event-stream' : 'application/json' }, body: JSON.stringify(body || {}), signal: o.signal });
+  } catch (e) {
+    throw cobraErr(o.signal && o.signal.aborted ? 'aborted' : 'network');
+  }
+  const type = String((r.headers && r.headers.get && r.headers.get('content-type')) || '');
+  if (o.stream && r.ok && /text\/event-stream/i.test(type)) return r;
+  let out = null;
+  try { out = await r.json(); } catch (e) { out = null; }
+  const known = !!out && typeof out.code==='string' && Object.prototype.hasOwnProperty.call(COBRA_ERRORS, out.code);
+  if (r.status===404 && !known) throw cobraErr('not_installed', COBRA_ERRORS.not_installed, out);
+  if (!r.ok || !out || out.ok===false) {
+    const code = known ? out.code : r.status===401 ? 'unauthorized' : 'server';
+    throw cobraErr(code, known && typeof out.reason==='string' ? out.reason : '', out);
+  }
+  return out;
+}
+// The example questions: the mode's list, or its function of the REAL signed-in person's profile (the gateway answers as
+// them, never as the profile an owner is viewing as).
+function cobraExamples(m){ const e = m && m.examples; return (typeof e==='function' ? e(getRealProfile()) : e) || []; }
+function cobraIsOwner(){ const me = getRealProfile(); return !!me && me.role==='owner'; }
+function cobraStatusLoad(force){
+  const c = COBRA;
+  if (c.statusP) return c.statusP;
+  if (readOnlyReason()) return Promise.resolve(c.status);
+  if (!force && c.statusAt && !c.statusErr && Date.now() - c.statusAt < COBRA_STALE_MS) return Promise.resolve(c.status);
+  const p = c.statusP = cobraFetch('manage', { step: 'status' })
+    .then(out => { c.status = out; c.statusErr = ''; c.statusAt = Date.now(); c.keySource = ''; },
+      e => { c.statusErr = e.code || 'server'; c.statusAt = Date.now(); })
+    .then(() => {
+      if (c.statusP===p) c.statusP = null;
+      if (COBRA!==c) return null;
+      cobraFabPatch();
+      if (c.open) { cobraPatchBanner(); cobraPatchHint(); cobraPatchSource(); cobraPatchKey('me'); }
+      return c.status;
+    });
+  return p;
+}
+// Settings → AI (owners): the settings row (read under RLS) and the gateway's status (spend, who used it, provider).
+function cobraSettingsOpen(){ return UI.tab==='settings' && (UI.settings || {}).page==='ai'; }
+function cobraDetailLoad(force){
+  const c = COBRA;
+  if (c.detailP) return c.detailP;
+  if (readOnlyReason() || !cobraIsOwner()) return Promise.resolve(c.detail);
+  if (!force && c.detail && Date.now() - c.detailAt < COBRA_STALE_MS) return Promise.resolve(c.detail);
+  const st = cobraFetch('manage', { step: 'status' }).then(x => ({ x }), e => ({ e }));
+  const row = Promise.resolve(sb.from('ai_settings').select(COBRA_SETTING_COLS).eq('business_id', AUTO_BUSINESS_ID).maybeSingle());
+  const p = c.detailP = Promise.all([st, row])
+    .then(([a, b]) => {
+      if (b.error) throw cobraErr('server', "The assistant's settings couldn't be read. Its tables may not be set up yet.");
+      c.detail = { settings: cobraSettingsOf(b.data), missing: !b.data, status: a.x || null, statusErr: a.e ? (a.e.code || 'server') : '' };
+      if (a.x) { c.status = a.x; c.statusErr = ''; c.statusAt = Date.now(); }
+      c.detailErr = ''; c.detailAt = Date.now();
+    })
+    .catch(e => { c.detailErr = e.reason || cobraErrorText(e.code); c.detailAt = Date.now(); })
+    .then(() => {
+      if (c.detailP===p) c.detailP = null;
+      if (COBRA!==c) return null;
+      cobraFabPatch();
+      if (cobraSettingsOpen()) render();
+      return c.detail;
+    });
+  return p;
+}
+function cobraDetailRetry(){ COBRA.detailAt = 0; COBRA.detailErr = ''; cobraDetailLoad(true); }
+function cobraHistoryLoad(force){
+  const c = COBRA;
+  if (c.historyP) return c.historyP;
+  if (!force && c.history && c.historyAt) return Promise.resolve(c.history);
+  const p = c.historyP = Promise.resolve(sb.from('ai_conversations').select('id, title, mode, context, last_message_at').order('last_message_at', { ascending: false }).limit(50))
+    .then(({ data, error }) => { if (error) throw error; c.history = data || []; c.historyErr = ''; c.historyAt = Date.now(); })
+    .catch(() => { c.historyErr = "Your chats couldn't be loaded."; c.historyAt = Date.now(); })
+    .then(() => { if (c.historyP===p) c.historyP = null; if (COBRA===c && c.open && c.view==='history') cobraDraw(); return c.history; });
+  return p;
+}
+const COBRA_CHANGE_COLS = 'id, user_id, conversation_id, kind, summary, display, before, after, status, error, created_at, confirmed_at, undone_at, undone_by';
+function cobraConvLoad(id){
+  const c = COBRA;
+  if (c.convP[id]) return c.convP[id];
+  const p = c.convP[id] = Promise.all([
+    sb.from('ai_conversations').select('id, title, mode, context').eq('id', id).maybeSingle(),
+    sb.from('ai_messages').select('id, role, text, visible, meta, seq, created_at').eq('conversation_id', id).in('role', ['user', 'assistant']).order('seq').limit(400),
+    sb.from('ai_changes').select(COBRA_CHANGE_COLS).eq('conversation_id', id),
+  ]).then(([a, b, d]) => {
+    if (a.error || b.error || d.error) throw new Error('read');
+    if (!a.data) throw new Error('gone');
+    if (COBRA!==c || c.streaming || !cobraConvWanted(c, id)) return;   // New chat or another chat was picked meanwhile
+    c.convWant = null;
+    const mode = cobraClientMode(a.data.mode, a.data.context || {});
+    c.conv = { id: a.data.id, mode, context: cobraClientContext(mode, a.data.context), title: a.data.title || '' };
+    c.mode = mode; c.context = c.conv.context;
+    c.msgs = cobraMsgsFromRows(b.data || [], d.data || []).map(m => ({ ...m, mid: ++c.seq }));
+    c.view = 'chat'; c.hint = '';
+    cobraDraw();
+  }).catch(e => {
+    if (COBRA!==c || !cobraConvWanted(c, id)) return;
+    c.convWant = null;
+    c.hint = e && e.message==='gone' ? 'That chat was deleted.' : "That chat couldn't be opened. Try again.";
+    if (c.open) cobraDraw();
+  }).then(() => { delete c.convP[id]; });
+  return p;
+}
+function cobraLogLoad(force){
+  const c = COBRA;
+  if (c.logP) return c.logP;
+  if (!force && c.log && c.logAt) return Promise.resolve(c.log);
+  const p = c.logP = Promise.resolve(sb.from('ai_changes').select(COBRA_CHANGE_COLS).in('status', ['confirmed', 'undone', 'failed']).order('created_at', { ascending: false }).limit(100))
+    .then(({ data, error }) => { if (error) throw error; c.log = data || []; c.logErr = ''; c.logAt = Date.now(); })
+    .catch(() => { c.logErr = "The change log couldn't be loaded."; c.logAt = Date.now(); })
+    .then(() => { if (c.logP===p) c.logP = null; if (COBRA===c && c.open && c.view==='log') cobraDraw(); return c.log; });
+  return p;
+}
+function cobraRetry(what){ if (what==='history') { COBRA.historyAt = 0; COBRA.historyErr = ''; cobraHistoryLoad(true); } else { COBRA.logAt = 0; COBRA.logErr = ''; cobraLogLoad(true); } cobraDraw(); }
+
+// ── the floating button (renderShell's one call) ──
+function cobraName(){ return cobraNameOf(COBRA.status && COBRA.status.assistant_name, (brandSource() || {}).appName); }
+function cobraIconHtml(){ const b = brandSource() || {}; return cobraIconKind(b)==='logo' ? brandLogoHtml(b) : COBRA_ICON_SVG; }
+function cobraFab(profile){
+  if (!profile) return '';
+  if (cobraShouldLoadStatus(COBRA, readOnlyReason(), Date.now())) setTimeout(() => cobraStatusLoad(), 0);
+  const st = cobraFabState(COBRA.status, readOnlyReason());
+  return `<button type="button" class="cobra-fab"${st.show ? '' : ' hidden'} aria-label="${esc('Open ' + cobraName())}" title="${esc(cobraName())}" aria-expanded="${COBRA.open}" onclick="cobraFabClick()">${cobraIconHtml()}</button>`;
+}
+function cobraFabPatch(){
+  const st = cobraFabState(COBRA.status, readOnlyReason()), name = cobraName(), icon = cobraIconHtml();
+  document.querySelectorAll('.cobra-fab').forEach(el => {
+    el.hidden = !st.show;
+    el.setAttribute('aria-label', 'Open ' + name);
+    el.setAttribute('title', name);
+    el.setAttribute('aria-expanded', String(COBRA.open));
+    if (el.innerHTML!==icon) el.innerHTML = icon;
+  });
+}
+function cobraFabClick(){ if (COBRA.open) cobraClose(); else cobraOpen(cobraPageMode(UI, COBRA_PAGE_MODES) || { mode: 'assistant' }); }
+
+// ── the panel ──
+function cobraEnsureRoot(){
+  let root = document.getElementById('cobra-root');
+  if (!root) { root = document.createElement('div'); root.id = 'cobra-root'; document.body.appendChild(root); }
+  return root;
+}
+// STAGE 7 CONTRACT: cobraOpen({ mode = 'assistant', context = {}, view = 'chat' | 'history' | 'log', text }) opens the
+// panel in a mode with its context. A new mode or context starts a new chat; text only fills the box (never sent).
+function cobraOpen(opts){
+  const o = opts || {};
+  let mode = o.mode || 'assistant';
+  if (!Object.prototype.hasOwnProperty.call(COBRA_MODES, mode)) { console.warn('The assistant has no mode "' + mode + '"; opening the assistant.'); mode = 'assistant'; }
+  const ctx = cobraCleanContext(o.context);
+  if (!COBRA.streaming && cobraNeedsNewConv(COBRA.conv || { mode: COBRA.mode, context: COBRA.context }, mode, ctx)) { COBRA.conv = null; COBRA.msgs = []; COBRA.convWant = null; }
+  if (!COBRA.streaming) { COBRA.mode = mode; COBRA.context = ctx; }
+  COBRA.view = ['chat', 'history', 'log'].includes(o.view) ? o.view : 'chat';
+  if (typeof o.text==='string') COBRA.draft = o.text.slice(0, COBRA_LIMITS.text);
+  COBRA.open = true;
+  cobraEnsureRoot();
+  document.body.classList.add('cobra-open');
+  cobraDraw();
+  cobraFabPatch();
+  if (!readOnlyReason() && !COBRA.statusP && Date.now() - COBRA.statusAt > COBRA_STALE_MS) cobraStatusLoad(true);
+  setTimeout(() => { const t = document.getElementById('cobra-input'); if (t && !t.disabled) { t.focus(); cobraInput(t); } }, 0);
+  navOverlaySync();   // the panel is a layer of its own (stage 4): back closes it first
+}
+function cobraClose(){
+  cobraMicStop();
+  COBRA.open = false;
+  const root = document.getElementById('cobra-root');
+  if (root) root.innerHTML = '';
+  document.body.classList.remove('cobra-open');
+  cobraFabPatch();
+  const fab = document.querySelector('.cobra-fab');
+  if (fab && !fab.hidden) fab.focus();
+  navOverlaySync();   // closed in the app: its history entry goes too
+}
+// The panel is a layer for the page history (stage 4): back (and the phone's back swipe) closes it before the page moves.
+// Under a window (z 200), over the phone menu (z 100), as on screen. Nothing typed is lost: the box's text stays in
+// COBRA.draft and is back when the panel opens again, so it needs no question first.
+navLayer({ id: 'cobra', z: 150, isOpen: () => !!COBRA.open, close: () => { cobraClose(); }, el: () => document.querySelector('#cobra-root .cobra-panel') });
+function cobraScrollEnd(){ const b = document.getElementById('cobra-body'); if (b) b.scrollTop = b.scrollHeight; }
+function cobraDraw(){
+  if (!COBRA.open) return;
+  const root = cobraEnsureRoot();
+  root.innerHTML = cobraPanelHtml();
+  if (COBRA.streaming) COBRA.streaming.el = root.querySelector('.cobra-msg.streaming .cobra-text');
+  if (COBRA.view==='chat') { cobraGrow(root.querySelector('#cobra-input')); cobraScrollEnd(); }
+}
+function cobraComposerOff(){ return !!readOnlyReason() || (!!COBRA.status && COBRA.status.enabled===false) || COBRA.statusErr==='not_installed'; }
+function cobraPanelHtml(){
+  const m = COBRA_MODES[COBRA.mode] || COBRA_MODES.assistant, v = COBRA.view;
+  const btn = (view, icon, label, fn) => `<button type="button" class="cobra-hbtn" aria-label="${label}" title="${label}"${view ? ` aria-pressed="${v===view}"` : ''} onclick="${fn}">${ico(icon, 18)}</button>`;
+  return `<aside class="cobra-panel" role="dialog" aria-modal="false" aria-label="${esc(cobraName())}">`
+    + `<div class="cobra-head"><span class="cobra-head-icon">${cobraIconHtml()}</span><span class="cobra-head-name"><b>${esc(cobraName())}</b>${COBRA.mode!=='assistant' ? `<span>${esc(m.label || COBRA.mode)}</span>` : ''}<span id="cobra-src">${esc(cobraSourceText())}</span></span>`
+    + btn('', 'plus', 'New chat', 'cobraNewChat()') + btn('history', 'history', 'History', "cobraView('history')") + btn('log', 'refresh', 'Changes', "cobraView('log')") + btn('key', 'key', 'Your AI key', "cobraView('key')") + btn('', 'x', 'Close', 'cobraClose()')
+    + '</div>'
+    + `<div id="cobra-banner">${cobraBannerHtml()}</div>`
+    + `<div class="cobra-body" id="cobra-body">${cobraBodyHtml()}</div>`
+    + (v==='chat' ? cobraComposeHtml() : '')
+    + '</aside>';
+}
+function cobraBannerHtml(){
+  const b = cobraBannerOf(COBRA.status, COBRA.statusErr, { isOwner: cobraIsOwner(), name: cobraName() });
+  return b ? `<div class="cobra-banner ${b.tone}" role="status">${esc(b.text)}</div>` : '';
+}
+function cobraPatchBanner(){
+  const el = document.getElementById('cobra-banner');
+  if (el) el.innerHTML = cobraBannerHtml();
+  const t = document.getElementById('cobra-input');
+  if (t) t.disabled = cobraComposerOff();
+  cobraPatchSend();
+}
+function cobraBodyHtml(){
+  const c = COBRA, m = COBRA_MODES[c.mode] || COBRA_MODES.assistant;
+  if (c.view==='key') {
+    const head = '<div class="cobra-list-head"><span>Your own OpenAI or Anthropic key answers your questions instead of the business\'s AI.</span></div>';
+    if (!c.status) return head + (c.statusErr ? `<div class="cobra-empty">${esc(cobraErrorText(c.statusErr))}</div>` : `<div class="cobra-empty">${COBRA_DOTS}</div>`);
+    return head + cobraKeyCardHtml(cobraKeyState('me'), c.keyBusy==='me') + cobraOwnClaudeCardHtml(getRealProfile(), productName(brandSource() || {}));
+  }
+  if (c.view==='history') {
+    if (!c.historyP && !c.historyAt) setTimeout(() => cobraHistoryLoad(), 0);
+    const head = `<div class="cobra-list-head"><span>Your chats. They are deleted after 90 days.</span></div>`;
+    if (c.historyErr) return head + `<div class="cobra-empty">${esc(c.historyErr)} <button type="button" class="btn small" onclick="cobraRetry('history')">Try again</button></div>`;
+    if (!c.history) return head + `<div class="cobra-empty">${COBRA_DOTS}</div>`;
+    if (!c.history.length) return head + '<div class="cobra-empty">No chats yet.</div>';
+    return head + c.history.map(h => `<div class="cobra-hist-row${c.conv && c.conv.id===h.id ? ' on' : ''}"><button type="button" class="cobra-hist-open" onclick="cobraOpenConv('${esc(jsStr(h.id))}')"><span class="cobra-hist-title" dir="auto">${esc(h.title || 'New chat')}</span><span class="cobra-hist-when">${esc(cobraWhen(h.last_message_at))}</span></button><button type="button" class="cobra-hbtn" aria-label="Delete this chat" title="Delete" onclick="cobraDeleteConv('${esc(jsStr(h.id))}')">${ico('trash', 16)}</button></div>`).join('');
+  }
+  if (c.view==='log') {
+    if (!c.logP && !c.logAt) setTimeout(() => cobraLogLoad(), 0);
+    const head = `<div class="cobra-list-head"><span>${cobraIsOwner() ? 'Every change the assistant saved, for everyone.' : 'The changes the assistant saved for you.'}</span><button type="button" class="btn small" onclick="cobraRetry('log')">Refresh</button></div>`;
+    if (c.logErr) return head + `<div class="cobra-empty">${esc(c.logErr)} <button type="button" class="btn small" onclick="cobraRetry('log')">Try again</button></div>`;
+    if (!c.log) return head + `<div class="cobra-empty">${COBRA_DOTS}</div>`;
+    if (!c.log.length) return head + '<div class="cobra-empty">No changes yet.</div>';
+    const me = getRealProfile();
+    return head + c.log.map(r => cobraLogRowHtml(r, me, cobraPersonName)).join('');
+  }
+  if (!c.msgs.length) {
+    const off = cobraComposerOff();
+    return `<p class="cobra-intro" dir="auto">${esc(m.intro(cobraName()))}</p><div class="cobra-examples">${cobraExamples(m).map(x => `<button type="button" dir="auto" onclick="cobraSend('${esc(jsStr(x))}')"${off ? ' disabled' : ''}>${esc(x)}</button>`).join('')}</div>`;
+  }
+  const cardCtx = cobraCardCtx();
+  return `<div class="cobra-msgs" id="cobra-msgs" role="log" aria-live="polite" aria-busy="${!!c.streaming}">${c.msgs.slice(-200).map(x => cobraMsgHtml(x, c.busy, cardCtx)).join('')}</div>`;
+}
+function cobraPersonName(id){ const p = (STATE.profiles || []).find(x => x.id===id); return (p && p.fullName) || 'Someone who left'; }
+function cobraSendBtnHtml(){
+  return COBRA.streaming
+    ? `<button type="button" class="btn cobra-send" id="cobra-send" aria-label="Stop" title="Stop" onclick="cobraStop()">${COBRA_STOP_SVG}</button>`
+    : `<button type="button" class="btn primary cobra-send" id="cobra-send" aria-label="Send" title="Send" onclick="cobraSend()"${cobraComposerOff() ? ' disabled' : ''}>${ico('send', 18)}</button>`;
+}
+function cobraMicSupported(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
+const COBRA_LISTENING = 'Listening… Speak, then press Send.';
+const COBRA_NO_MIC = "Voice typing isn't available in this browser. Use your keyboard's microphone instead.";
+function cobraMicBtnHtml(){
+  const ok = cobraMicSupported();
+  return `<button type="button" class="btn cobra-mic${COBRA.mic ? ' on' : ''}" id="cobra-mic" aria-label="${ok ? (COBRA.mic ? 'Stop voice typing' : 'Voice typing') : esc(COBRA_NO_MIC)}" title="${ok ? (COBRA.mic ? 'Stop voice typing' : 'Voice typing') : esc(COBRA_NO_MIC)}"${ok ? ` aria-pressed="${!!COBRA.mic}"` : ' aria-disabled="true"'} onclick="cobraMicToggle()">${COBRA_MIC_SVG}</button>`;
+}
+function cobraHintText(){ return COBRA.hint || cobraLeftText(COBRA.status); }
+function cobraComposeHtml(){
+  const m = COBRA_MODES[COBRA.mode] || COBRA_MODES.assistant, off = cobraComposerOff();
+  return `<div class="cobra-compose" id="cobra-compose"><textarea id="cobra-input" dir="auto" rows="1" maxlength="${COBRA_LIMITS.text}" placeholder="${esc(m.placeholder)}" aria-label="Message" oninput="cobraInput(this)" onkeydown="cobraComposeKey(event)"${off ? ' disabled' : ''}>${esc(COBRA.draft)}</textarea>`
+    + cobraMicBtnHtml() + cobraSendBtnHtml()
+    + `<div class="cobra-hint" id="cobra-hint" aria-live="polite">${esc(cobraHintText())}</div></div>`;
+}
+function cobraPatchHint(){ const el = document.getElementById('cobra-hint'); if (el) el.textContent = cobraHintText(); }
+function cobraHint(text){ COBRA.hint = text || ''; cobraPatchHint(); }
+function cobraPatchSend(){ const el = document.getElementById('cobra-send'); if (el) el.outerHTML = cobraSendBtnHtml(); }
+function cobraGrow(el){
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(140, el.scrollHeight + 2) + 'px';
+  el.style.overflowY = el.scrollHeight > 140 ? 'auto' : 'hidden';
+}
+function cobraInput(el){
+  if (!el) return;
+  COBRA.draft = el.value;
+  if (COBRA.hint && !COBRA.mic) cobraHint('');
+  cobraGrow(el);
+}
+function cobraComposeKey(e){
+  let coarse = false;
+  try { coarse = matchMedia('(pointer: coarse)').matches; } catch (err) { coarse = false; }
+  if (cobraEnterSends(e, coarse)) { e.preventDefault(); cobraSend(); }
+}
+function cobraView(v){ COBRA.view = ['chat', 'history', 'log', 'key'].includes(v) ? v : 'chat'; COBRA.keyNote = null; cobraDraw(); }
+function cobraNewChat(){
+  if (COBRA.streaming) { cobraHint('Wait for the answer to finish, or press Stop.'); return; }
+  COBRA.conv = null; COBRA.msgs = []; COBRA.hint = ''; COBRA.view = 'chat'; COBRA.convWant = null;
+  if (COBRA.mode==='assistant') COBRA.context = {};
+  cobraDraw();
+  setTimeout(() => { const t = document.getElementById('cobra-input'); if (t && !t.disabled) t.focus(); }, 0);
+}
+function cobraOpenConv(id){
+  if (COBRA.streaming) { cobraHint('Wait for the answer to finish, or press Stop.'); COBRA.view = 'chat'; cobraDraw(); return; }
+  if (COBRA.conv && COBRA.conv.id===id && COBRA.msgs.length) { COBRA.convWant = null; cobraView('chat'); return; }
+  COBRA.convWant = id;   // only the chat picked last is shown when its load ends
+  cobraConvLoad(id);
+}
+function cobraDeleteConv(id){
+  confirmAction('This chat is deleted for good. Changes it made stay in the change log.', async () => {
+    if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+    const { error } = await sb.from('ai_conversations').delete().eq('id', id);
+    if (error) { showToast('Could not delete the chat'); return; }
+    COBRA.history = (COBRA.history || []).filter(c => c.id!==id);
+    delete COBRA.convP[id];
+    if (COBRA.conv && COBRA.conv.id===id && !COBRA.streaming) { COBRA.conv = null; COBRA.msgs = []; }
+    cobraDraw();
+    showToast('Chat deleted');
+  }, { title: 'Delete this chat?' });
+}
+
+// ── own AI keys (the panel's "Your AI key"; Settings → AI's business key and the people with keys). A pasted key lives
+// in one local for one request: it leaves the input at once and is never put in COBRA, storage, a toast or the settings
+// history. Only {provider, last4, status} is kept. The card is patched, never render(). ──
+function cobraSourceText(){ const st = COBRA.status, ks = COBRA.keySource || (st && st.source && st.source.key_source) || ''; return COBRA_SOURCE_LABEL[ks] || ''; }
+function cobraPatchSource(){ const el = document.getElementById('cobra-src'); if (el) el.textContent = cobraSourceText(); }
+function cobraKeyState(scope){
+  const st = scope==='business' ? ((COBRA.detail && COBRA.detail.status) || COBRA.status) : COBRA.status, keys = (st && st.keys) || {};
+  return { scope, key: (scope==='business' ? keys.business : keys.me) || null, off: scope==='me' && keys.allow_own===false, note: COBRA.keyNote && COBRA.keyNote.scope===scope ? COBRA.keyNote : null };
+}
+function cobraPatchKey(scope){ const el = document.getElementById('cobra-key-' + scope); if (el) el.outerHTML = cobraKeyCardHtml(cobraKeyState(scope), COBRA.keyBusy===scope); }
+// What the gateway said about a key (never the key), kept in the status the panel and Settings read.
+function cobraKeyPut(scope, out){
+  const k = out && out.provider ? { provider: String(out.provider), last4: String(out.last4 || ''), status: out.status==='invalid' ? 'invalid' : 'ok' } : null;
+  [COBRA.status, COBRA.detail && COBRA.detail.status].forEach(st => { if (st) st.keys = { ...(st.keys || {}), [scope==='business' ? 'business' : 'me']: k }; });
+  return k;
+}
+// After a key changes: Settings → AI (its paid switch depends on the business key) is read again and drawn once by its
+// loader; anywhere else only the status is read again.
+function cobraKeyAfter(){ if (cobraSettingsOpen() && cobraIsOwner()) cobraDetailLoad(true); else cobraStatusLoad(true); }
+function cobraKeyLog(text){ logSettingsActivity((getRealProfile() || {}).fullName || 'Unknown', `${cobraSettingsTitle(cobraName())}: ${text}`); }
+async function cobraKeySave(scope){
+  const sc = scope==='business' ? 'business' : 'me', id = sc==='business' ? 'cobra-key-input-business' : 'cobra-key-input';
+  const input = document.getElementById(id), sel = document.getElementById(id + '-provider');
+  let key = input ? String(input.value || '').trim() : '';
+  if (input) input.value = '';   // off the page at once, before anything is awaited
+  const provider = sel ? sel.value : '', problem = cobraKeyProblem(provider, key);
+  if (problem || COBRA.keyBusy) { key = ''; if (problem) { COBRA.keyNote = { scope: sc, tone: 'bad', text: problem }; cobraPatchKey(sc); } return; }
+  COBRA.keyBusy = sc; COBRA.keyNote = null; cobraPatchKey(sc);
+  try {
+    const req = { step: 'key_save', scope: sc, provider, key };
+    key = '';
+    const out = await cobraFetch('manage', req);
+    const k = cobraKeyPut(sc, out && out.key);
+    cobraKeyLog(`${sc==='business' ? 'business' : 'own'} AI key saved (${COBRA_KEY_PROVIDERS[k && k.provider] || 'AI service'})`);
+    COBRA.keyNote = { scope: sc, tone: 'good', text: 'Saved. The AI service accepted the key.' };
+    cobraKeyAfter();
+  } catch (e) {
+    COBRA.keyNote = { scope: sc, tone: 'bad', text: e.reason || cobraErrorText(e.code) };
+  } finally {
+    COBRA.keyBusy = '';
+    cobraPatchKey(sc);
+  }
+}
+async function cobraKeyTest(scope){
+  const sc = scope==='business' ? 'business' : 'me';
+  if (COBRA.keyBusy) return;
+  COBRA.keyBusy = sc; COBRA.keyNote = null; cobraPatchKey(sc);
+  try {
+    const out = await cobraFetch('manage', { step: 'key_test', scope: sc });
+    const k = cobraKeyPut(sc, out && out.key), ok = !!k && k.status==='ok';
+    COBRA.keyNote = { scope: sc, tone: ok ? 'good' : 'bad', text: ok ? 'The key works.' : 'The AI service refused the key. Paste a new one, or remove it.' };
+    cobraKeyAfter();
+  } catch (e) {
+    COBRA.keyNote = { scope: sc, tone: 'bad', text: e.reason || cobraErrorText(e.code) };
+  } finally {
+    COBRA.keyBusy = '';
+    cobraPatchKey(sc);
+  }
+}
+// userId: an owner removing another person's key (Settings → AI); otherwise the scope's own key.
+function cobraKeyDelete(userId, scope){
+  const sc = scope==='business' ? 'business' : 'me', other = !!userId;
+  const text = other ? `${cobraPersonName(userId)}'s own AI key is removed. Their questions go to the business's AI again.`
+    : sc==='business' ? "The business key is removed. Paid AI then uses the server's key, if there is one."
+    : "Your key is removed. The business's AI answers your questions again.";
+  confirmAction(text, async () => {
+    if (COBRA.keyBusy) return;
+    if (!other) { COBRA.keyBusy = sc; COBRA.keyNote = null; cobraPatchKey(sc); }
+    try {
+      await cobraFetch('manage', { step: 'key_delete', scope: sc, ...(other ? { user_id: userId } : {}) });
+      if (!other) { cobraKeyPut(sc, null); COBRA.keyNote = { scope: sc, tone: 'good', text: 'Removed.' }; }
+      cobraKeyLog(other ? `${cobraPersonName(userId)}'s own AI key removed` : `${sc==='business' ? 'business' : 'own'} AI key removed`);
+      cobraKeyAfter();
+    } catch (e) {
+      if (other) showToast(e.reason || cobraErrorText(e.code)); else COBRA.keyNote = { scope: sc, tone: 'bad', text: e.reason || cobraErrorText(e.code) };
+    } finally {
+      if (!other) { COBRA.keyBusy = ''; cobraPatchKey(sc); }
+    }
+  }, { title: 'Remove this key?' });
+}
+// "Use your own Claude" → owners: Settings → Connectors → the private connector; managers: the keys window. The panel is
+// closed after the move: the move replaces its history entry, so closing first would start a back racing the new entries.
+function cobraOpenMcpKeys(){
+  const me = getRealProfile();
+  if (me && me.role==='owner') { goTab('settings'); openConnector('mcp'); cobraClose(); }
+  else if (canUseMcp(me)) openMcpKeys();
+}
+
+// ── sending and streaming: never render(); the panel's DOM is patched ──
+async function cobraSend(text){
+  const input = document.getElementById('cobra-input');
+  const t = String(text ?? (input ? input.value : '')).trim();
+  if (!t || COBRA.streaming) return;
+  if (t.length > COBRA_LIMITS.text) { cobraHint(COBRA_ERRORS.too_long); return; }
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const block = cobraSendBlock(COBRA.status);
+  if (block) { cobraHint(block===COBRA.status.blocked && COBRA.status.blocked_text ? String(COBRA.status.blocked_text) : cobraErrorText(block, { name: cobraName(), limit: COBRA.status && COBRA.status.today && COBRA.status.today.limit, isOwner: cobraIsOwner() })); return; }
+  cobraMicStop(true);   // sent: a late voice result must not put the text back in the box
+  const c = COBRA, first = !c.msgs.length;
+  c.convWant = null;    // this chat is the person's latest choice (a History load still running is dropped)
+  const user = { mid: ++c.seq, role: 'user', text: t };
+  const msg = { mid: ++c.seq, role: 'assistant', text: '', parts: [], tools: [], proposals: [], cards: [], notes: [], error: null, streaming: true };
+  c.msgs.push(user, msg);
+  const ctrl = new AbortController();
+  c.streaming = { ctrl, msg, el: null, raf: 0, stopped: false };
+  c.hint = '';
+  if (text==null) c.draft = '';
+  const list = document.getElementById('cobra-msgs');
+  if (list && !first) {
+    list.insertAdjacentHTML('beforeend', cobraMsgHtml(user) + cobraMsgHtml(msg, c.busy, cobraCardCtx()));
+    list.setAttribute('aria-busy', 'true');
+    c.streaming.el = list.querySelector('.cobra-msg.streaming .cobra-text');
+    if (input && text==null) { input.value = ''; cobraInput(input); }
+    cobraPatchSend(); cobraPatchHint(); cobraScrollEnd();
+  } else cobraDraw();
+  try {
+    const res = await cobraFetch('chat', {
+      conversation_id: (c.conv && c.conv.id) || null, mode: cobraServerMode(c.mode, c.context), context: cobraRequestContext(c.mode, c.context, UI), text: t,
+    }, { stream: true, signal: ctrl.signal });
+    await cobraStream(res, cobraOnEvent, ctrl);
+  } catch (e) {
+    cobraOnEvent({ event: 'error', data: { code: ctrl.stopped ? 'aborted' : (e.code || 'network'), reason: e.reason } });
+  } finally {
+    if (c.streaming && c.streaming.msg===msg) {
+      cobraFlush();
+      msg.streaming = false;
+      c.streaming = null;
+      delete msg.parts;
+      msg.tools = cobraEndTools(msg.tools);
+      cobraPatchMsg(msg);
+      cobraPatchSend();
+      const l = document.getElementById('cobra-msgs');
+      if (l) l.setAttribute('aria-busy', 'false');
+    }
+    c.historyAt = 0;   // the list is stale now; read again when it is opened
+  }
+}
+// Reads the stream (DOM-free). A watchdog stops it after COBRA_SILENCE_MS without a byte. Without a final done/error
+// it reports one: 'aborted' (the person pressed Stop), 'timeout' (the watchdog) or 'network'.
+async function cobraStream(res, onEvent, ctrl){
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = '', terminal = false, dog = 0;
+  const arm = () => { clearTimeout(dog); dog = setTimeout(() => { try { ctrl.abort(); } catch (e) { /* already stopped */ } }, COBRA_SILENCE_MS); };
+  const take = (text) => {
+    const { events, rest } = cobraSseParse(text);
+    for (const ev of events) {
+      let data;
+      try { data = JSON.parse(ev.data); } catch (e) { continue; }   // a broken frame is skipped
+      try { onEvent({ event: ev.event, data }); } catch (e) { console.error(e); }
+      if (ev.event==='done' || ev.event==='error') terminal = true;
+    }
+    return rest;
+  };
+  // Stop and the watchdog abort the request; the reader is cancelled too, so a read that waits ends at once.
+  const onAbort = () => { try { const x = reader.cancel(); if (x && x.catch) x.catch(() => null); } catch (e) { /* closed */ } };
+  const sig = ctrl.signal;
+  if (sig && sig.addEventListener) sig.addEventListener('abort', onAbort);
+  arm();
+  try {
+    while (!terminal) {
+      const { value, done } = await reader.read();
+      if (done || (sig && sig.aborted)) break;
+      arm();
+      buf = take(buf + dec.decode(value, { stream: true }));
+    }
+    if (!terminal && !(sig && sig.aborted)) take(buf + dec.decode() + '\n\n');
+  } catch (e) {
+    /* stopped, timed out or dropped: told below */
+  } finally {
+    clearTimeout(dog);
+    if (sig && sig.removeEventListener) sig.removeEventListener('abort', onAbort);
+  }
+  if (terminal) { try { const x = reader.cancel(); if (x && x.catch) x.catch(() => null); } catch (e) { /* closed */ } return; }
+  onEvent({ event: 'error', data: { code: ctrl.stopped ? 'aborted' : ctrl.signal.aborted ? 'timeout' : 'network' } });
+}
+function cobraStreamEl(){ return document.querySelector('#cobra-root .cobra-msg.streaming .cobra-text'); }
+// The chat a result card is in, handed to COBRA_CARDS[kind](data, ctx): its mode, context and conversation.
+function cobraCardCtx(){ return { mode: COBRA.mode, context: COBRA.context, conversationId: (COBRA.conv && COBRA.conv.id) || null }; }
+// One message's bubble, drawn again from its data (tools, a proposal, a card, a note, the end). The text in between is
+// patched by cobraFlush at most once a frame.
+function cobraPatchMsg(msg){
+  if (!msg || !msg.mid) return;
+  if (msg.parts) msg.text = cobraJoinParts(msg.parts);
+  const el = document.querySelector(`#cobra-root [data-mid="${msg.mid}"]`);
+  if (!el || !el.isConnected) return;
+  const body = document.getElementById('cobra-body'), stick = body ? cobraStick(body.scrollTop, body.scrollHeight, body.clientHeight) : false;
+  el.outerHTML = cobraMsgHtml(msg, COBRA.busy, cobraCardCtx());
+  if (COBRA.streaming && COBRA.streaming.msg===msg) COBRA.streaming.el = cobraStreamEl();
+  if (stick && body) body.scrollTop = body.scrollHeight;
+}
+function cobraOnEvent(ev){
+  const s = COBRA.streaming;
+  if (!s) return;
+  const msg = s.msg, d = (ev && ev.data && typeof ev.data==='object') ? ev.data : {};
+  switch (ev && ev.event) {
+    case 'start':
+      if (d.conversation_id && (!COBRA.conv || COBRA.conv.id!==d.conversation_id)) COBRA.conv = { id: d.conversation_id, mode: COBRA.mode, context: COBRA.context, title: '' };
+      if (d.assistant_name && COBRA.status && COBRA.status.assistant_name!==d.assistant_name) { COBRA.status.assistant_name = d.assistant_name; cobraFabPatch(); }
+      if (d.key_source && d.key_source!==COBRA.keySource) { COBRA.keySource = String(d.key_source); cobraPatchSource(); }
+      return;
+    case 'phase':
+      return;   // the dots show until the first words arrive
+    case 'text': {
+      const k = Number(d.step) || 0;
+      msg.parts[k] = (msg.parts[k] || '') + String(d.delta ?? '');
+      if (!s.raf) s.raf = requestAnimationFrame(cobraFlush);
+      return;
+    }
+    case 'discard':
+      msg.parts[Number(d.step) || 0] = '';
+      if (Array.isArray(d.tools) && d.tools.length) { const gone = d.tools.map(String); msg.tools = msg.tools.filter(t => !gone.includes(t.id)); cobraPatchMsg(msg); }
+      cobraFlush();
+      return;
+    case 'tool': {
+      if (!d.id) return;
+      const state = d.status==='running' ? 'running' : d.status==='error' ? 'error' : 'ok';
+      const t = msg.tools.find(x => x.id===d.id);
+      if (t) { t.state = state; if (d.label) t.label = String(d.label); } else msg.tools.push({ id: String(d.id), label: String(d.label || 'Working'), state });
+      cobraPatchMsg(msg);
+      return;
+    }
+    case 'proposal': {
+      const ch = d.change && typeof d.change==='object' ? d.change : null;
+      if (ch && ch.id) { msg.proposals.push(ch); cobraPatchMsg(msg); }
+      return;
+    }
+    case 'card':
+      if (d.kind) { msg.cards.push({ kind: String(d.kind), data: d.data }); cobraPatchMsg(msg); }
+      return;
+    case 'notice': {
+      const t = String(d.text || cobraStopNote(d.code) || '');
+      if (t) msg.notes.push(t);
+      if (['cap_80', 'cap_reached', 'free_quota', 'free_share', 'cap_fallback'].includes(d.code)) cobraStatusLoad(true);
+      cobraPatchMsg(msg);
+      return;
+    }
+    case 'done': {
+      cobraFlush();
+      const l = d.limits || {};
+      if (COBRA.status && Number.isFinite(Number(l.today_limit))) COBRA.status.today = { used: Number(l.today_used) || 0, limit: Number(l.today_limit) };
+      if (COBRA.status && l.free && typeof l.free==='object') COBRA.status.free = { ...(COBRA.status.free || {}), ...l.free };
+      if (COBRA.conv && d.title) COBRA.conv.title = String(d.title);
+      cobraPatchHint();
+      return;
+    }
+    case 'error': {
+      cobraFlush();
+      const code = String(d.code || 'server');
+      if (code==='aborted') msg.notes.push(COBRA_ERRORS.aborted);
+      else {
+        const named = ['off', 'role_off', 'kill_switch', 'daily_limit'].includes(code);
+        const opts = { name: cobraName(), limit: COBRA.status && COBRA.status.today && COBRA.status.today.limit, isOwner: cobraIsOwner() };
+        msg.error = { code, reason: named ? cobraErrorText(code, opts) : String(d.reason || d.text || cobraErrorText(code, opts)) };
+      }
+      if (['off', 'role_off', 'kill_switch', 'cap_reached', 'daily_limit', 'not_installed', 'free_quota', 'free_share', 'own_key_refused', 'business_key_refused'].includes(code)) cobraStatusLoad(true);
+      cobraPatchMsg(msg);
+      return;
+    }
+    default:
+      return;   // an event this app doesn't know yet
+  }
+}
+function cobraFlush(){
+  const s = COBRA.streaming;
+  if (!s) return;
+  if (s.raf) { cancelAnimationFrame(s.raf); s.raf = 0; }
+  if (s.msg.parts) s.msg.text = cobraJoinParts(s.msg.parts);
+  if (!s.el || !s.el.isConnected) s.el = cobraStreamEl();
+  if (!s.el) return;
+  const body = document.getElementById('cobra-body'), stick = body ? cobraStick(body.scrollTop, body.scrollHeight, body.clientHeight) : false;
+  s.el.innerHTML = s.msg.text ? cobraFormat(s.msg.text) : COBRA_DOTS;
+  if (stick && body) body.scrollTop = body.scrollHeight;
+}
+function cobraStop(){ const s = COBRA.streaming; if (!s) return; s.stopped = true; s.ctrl.stopped = true; try { s.ctrl.abort(); } catch (e) { /* already stopped */ } }
+
+// ── changes: Confirm / Cancel / Undo (the gateway applies them with the person's own token) ──
+function cobraFindChange(id){
+  for (const m of COBRA.msgs) for (const p of (m.proposals || [])) if (p && p.id===id) return p;
+  return (COBRA.log || []).find(r => r.id===id) || null;
+}
+function cobraChangeEls(id){ const cid = window.CSS && CSS.escape ? CSS.escape(id) : String(id).replace(/["\\\]]/g, ''); return document.querySelectorAll(`#cobra-root [data-change="${cid}"]`); }
+// The change's new state everywhere it shows (chat cards and the change log), patched in place. The records it
+// touched reach the app through the realtime subscriptions (contacts, tasks, settings).
+function cobraPutChange(ch){
+  if (!ch || !ch.id) return;
+  for (const m of COBRA.msgs) (m.proposals || []).forEach((p, i) => { if (p && p.id===ch.id) m.proposals[i] = { ...p, ...ch }; });
+  if (COBRA.log) COBRA.log = COBRA.log.map(r => r.id===ch.id ? { ...r, ...ch } : r);
+  let card = null;
+  for (const m of COBRA.msgs) for (const p of (m.proposals || [])) if (p && p.id===ch.id) card = p;
+  const row = (COBRA.log || []).find(r => r.id===ch.id) || ch, busy = !!COBRA.busy[ch.id];
+  cobraChangeEls(ch.id).forEach(el => {
+    if (el.classList.contains('cobra-card')) el.outerHTML = cobraProposalHtml(card || ch, busy);
+    else if (el.classList.contains('cobra-log-row')) el.outerHTML = cobraLogRowHtml(row, getRealProfile(), cobraPersonName);
+  });
+}
+async function cobraChange(id, action){
+  if (!id || COBRA.busy[id]) return;
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const step = COBRA_CHANGE_STEPS[action];
+  if (!step) return;
+  COBRA.busy[id] = true;
+  cobraChangeEls(id).forEach(el => el.querySelectorAll('button').forEach(b => { b.disabled = true; }));
+  let ch = null, ok = false;
+  try {
+    const out = await cobraFetch('manage', { step, id });
+    ch = { error: null, ...(out.change || cobraFindChange(id) || { id }) };
+    ok = true;
+  } catch (e) {
+    const c = e.out && e.out.change;
+    ch = { ...(c || cobraFindChange(id) || { id }), error: e.reason || cobraErrorText(e.code) };
+  } finally {
+    delete COBRA.busy[id];
+    COBRA.logAt = 0;
+  }
+  cobraPutChange(ch);
+  if (ok && action==='confirm') showToast(`Saved: ${ch.summary || 'the change'}`, { undo: () => cobraChange(id, 'undo') });
+  else if (ok && action==='undo') showToast('Undone');
+}
+
+// ── voice typing (Web Speech API; never sent by itself: the person reads it and presses Send) ──
+// drop = the text was sent: results still on their way are thrown away (abort), never written back into the box.
+function cobraMicStop(drop){
+  const rec = COBRA.mic;
+  if (!rec) return;
+  try { if (drop) { rec.onresult = null; rec.abort(); } else rec.stop(); } catch (e) { /* already stopped */ }
+}
+function cobraMicToggle(){
+  if (!cobraMicSupported()) { cobraHint(COBRA_NO_MIC); return; }
+  if (COBRA.mic) { cobraMicStop(); return; }
+  const ta = document.getElementById('cobra-input');
+  if (!ta || ta.disabled) return;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const lastUser = [...COBRA.msgs].reverse().find(m => m.role==='user');
+  const rec = new SR();
+  rec.lang = cobraSpeechLang(lastUser ? lastUser.text : ta.value, regionCountry());
+  rec.interimResults = true;
+  rec.continuous = false;
+  COBRA.micBase = ta.value.trim() ? ta.value.replace(/\s*$/, ' ') : '';
+  rec.onresult = (e) => {
+    const t = document.getElementById('cobra-input');
+    if (!t) return;
+    t.value = COBRA.micBase + Array.from(e.results).map(r => r[0] ? r[0].transcript : '').join('');
+    cobraInput(t);
+  };
+  rec.onerror = (e) => {
+    const code = e && e.error;
+    if (code==='not-allowed' || code==='service-not-allowed') cobraHint('Allow the microphone for this site to use voice typing.');
+    else if (code==='no-speech') cobraHint("Didn't catch that. Try again.");
+    else if (code==='audio-capture') cobraHint('No microphone was found. Type instead.');
+    else if (code==='network') cobraHint("Voice typing needs a connection to the browser's speech service. Type instead.");
+    else if (code && code!=='aborted') cobraHint('Voice typing stopped. Try again.');
+  };
+  rec.onend = () => {
+    if (COBRA.mic!==rec) return;
+    COBRA.mic = null;
+    if (COBRA.hint===COBRA_LISTENING) cobraHint('');
+    const b = document.getElementById('cobra-mic');
+    if (b) b.outerHTML = cobraMicBtnHtml();
+    const t = document.getElementById('cobra-input');
+    if (t && COBRA.open) t.focus();
+  };
+  try {
+    rec.start();
+    COBRA.mic = rec;
+    cobraHint(COBRA_LISTENING);
+    const b = document.getElementById('cobra-mic');
+    if (b) b.outerHTML = cobraMicBtnHtml();
+  } catch (e) {
+    COBRA.mic = null;
+    cobraHint("Voice typing couldn't start. Try again.");
+  }
+}
+
+// ── Settings → "<name> AI" (the settings registry entry) ──
+function cobraSettingsPill(){
+  const s = COBRA.detail && COBRA.detail.settings;
+  if (!s) return '';
+  return s.enabled && !s.kill_switch ? pill('good', 'On') : pill('neutral', 'Off');
+}
+function renderCobraSettingsPage(){
+  const c = COBRA, logBlock = setBlock('Changes it made', 'Every change the assistant saved, who asked for it, and Undo.', `<div class="cobra-set-pad"><button type="button" class="btn small" onclick="cobraOpen({ view: 'log' })">Open the change log</button></div>`);
+  if (!cobraIsOwner()) return setBlock('The assistant', '', '<div class="cobra-set-pad hint">Only owners can change the assistant\'s settings.</div>') + logBlock;
+  if (!c.detail) {
+    if (readOnlyReason()) return setBlock('The assistant', '', `<div class="cobra-set-pad hint">${esc(readOnlyReason())}</div>`);
+    if (c.detailErr) return setBlock("Couldn't load", '', `<div class="cobra-set-pad"><div class="hint">${esc(c.detailErr)}</div><div style="margin-top:10px"><button type="button" class="btn small" onclick="cobraDetailRetry()">Try again</button></div></div>`);
+    if (!c.detailP && !c.detailAt) setTimeout(() => cobraDetailLoad(), 0);
+    return setBlock('Loading', '', '<div class="cobra-set-pad hint">Reading the assistant\'s settings…</div>');
+  }
+  if (!c.detailP && !readOnlyReason() && Date.now() - c.detailAt > COBRA_STALE_MS) setTimeout(() => cobraDetailLoad(true), 0);
+  const d = c.detail, s = d.settings, st = d.status, month = (st && st.month) || {}, b = brandSource() || {};
+  const iconKind = (b.assistantIcon || '')==='logo' ? 'logo' : 'default';
+  const chip = (k, label) => `<button type="button" class="week-chip${iconKind===k ? ' active' : ''}" role="radio" aria-checked="${iconKind===k}" onclick="cobraSetIcon('${esc(jsStr(k))}')">${label}</button>`;
+  const warn = d.missing ? `<div class="hint" style="margin-bottom:10px">The assistant's settings aren't set up on the server yet (the stage 6 SQL), so nothing here can be saved.</div>` : '';
+  const err = c.detailErr ? `<div class="hint" style="margin-bottom:10px">${esc(c.detailErr)} <button type="button" class="btn small" onclick="cobraDetailRetry()">Try again</button></div>` : '';
+  const roles = s.roles_enabled;
+  const prices = s.prices;
+  // provider: 'anthropic' (the paid AI) uses the plain task keys; the free AI and OpenAI keys use "<provider>:<task>".
+  const modelSel = (task, label, provider) => {
+    const t = s.model_per_task, key = provider==='anthropic' ? task : `${provider}:${task}`;
+    const cur = (provider==='anthropic' ? t[task] : t[key] || t[`${provider}:assistant`] || COBRA_PROVIDER_MODELS[key] || COBRA_PROVIDER_MODELS[`${provider}:assistant`]) || '';
+    const keys = Object.keys(prices).filter(k => (prices[k].provider || 'anthropic')===provider);
+    if (cur && !keys.includes(cur)) keys.push(cur);
+    return `<select class="set-input cobra-model" aria-label="${esc(label)}" onchange="cobraSaveSetting('model_per_task.${key}', this.value)">${keys.map(k => { const p = prices[k] || {}; return `<option value="${esc(k)}"${k===cur ? ' selected' : ''}>${esc(`${p.label || k}${prices[k] && provider!=='cloudflare' ? ` · ${cobraUsd(p.in)} in / ${cobraUsd(p.out)} out` : ''}`)}</option>`; }).join('')}</select>`;
+  };
+  const meter = cobraUsageMeter(month.spend_usd, s.monthly_cap_usd);
+  const usage = st && st.month && Number.isFinite(Number(month.spend_usd))
+    ? `<div class="cobra-set-pad"><div class="cobra-meter-wrap"><div class="meter" role="meter" aria-label="Spent this month" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${meter.bar}"><span style="width:${meter.bar}%;background:var(--${meter.tone})"></span><i class="cobra-meter-80" aria-hidden="true"></i></div><div class="meter-caption"><span><b>${esc(meter.text)}</b> this month</span><span>Line: 80% alert${month.alert_80_sent ? ' (sent)' : ''}</span></div></div></div>`
+    : `<div class="cobra-set-pad hint">${esc(d.statusErr ? cobraErrorText(d.statusErr) + ' Usage shows once the assistant answers.' : 'No usage yet.')}</div>`;
+  const people = (st && st.month && Array.isArray(month.by_user) ? month.by_user : []).slice().sort((x, y) => (Number(y.cost_usd) || 0) - (Number(x.cost_usd) || 0));
+  // The AI provider block: who answers now, the free AI left today, the paid switch, the business key, own keys,
+  // the ChatGPT sign-in (coming later) and test mode.
+  const keys = (st && st.keys) || {}, free = st && st.free, now = cobraSourcePill(st), fm = st ? cobraFreeMeter(free, bizTz()) : null;
+  const paidOn = s.provider==='anthropic', paidWhy = cobraSettingProblem('provider', 'anthropic', prices, { cap: s.monthly_cap_usd, keyReady: cobraPaidKeyReady(st) });
+  const share = free && Number(free.share_pct) < 100 ? `<span>Your business's share: ${esc(Number(free.share_pct))}%</span>` : '';
+  const freeHtml = !st || !free ? ''
+    : !free.configured ? setRows([['Free AI left today', 'Not set up yet (waiting for the Cloudflare account).', '']])
+    : fm ? `<div class="cobra-set-pad"><div class="cobra-meter-wrap"><b class="cobra-set-label">Free AI left today</b><div class="meter" role="meter" aria-label="Free AI left today" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${fm.bar}"><span style="width:${fm.bar}%;background:var(--${fm.tone})"></span></div><div class="meter-caption"><span><b>${esc(fm.text)}</b></span>${share}</div></div></div>`
+    : '';
+  const ownKeys = (Array.isArray(keys.people) ? keys.people : []).map(u => [`${esc(cobraPersonName(u.user_id))}${u.status==='invalid' ? ' ' + pill('bad', 'Refused') : ''}`, COBRA_KEY_PROVIDERS[u.provider] || String(u.provider || ''), `<button type="button" class="btn small" onclick="cobraKeyDelete('${esc(jsStr(u.user_id))}')">Remove</button>`]);
+  const providerBody = setRows([[`Now answering ${now.html}`, now.text, '']])
+    + freeHtml
+    + setRows([['Paid AI (Anthropic)', paidOn ? 'On: Anthropic answers when nobody uses their own key, up to the monthly cap.' : paidWhy || 'Off: the free AI answers. Switch on to use Anthropic, up to the monthly cap.',
+      setToggle(paidOn, `cobraSaveSetting('provider', this.classList.contains('on') ? 'auto' : 'anthropic')`, !paidOn && paidWhy ? paidWhy : null, 'aria-label="Paid AI (Anthropic)"')]])
+    + `<div class="cobra-set-pad"><b class="cobra-set-label">Business AI key</b><div class="hint">The business's own Anthropic or OpenAI account for the paid AI. It counts against the monthly cap.</div>${cobraKeyCardHtml(cobraKeyState('business'), c.keyBusy==='business')}</div>`
+    + setRows([['People may use their own AI key', "Their own OpenAI or Anthropic account answers their questions, paid by them, outside the business's limits.", setToggle(s.allow_own_keys, "cobraSaveSetting('allow_own_keys', !this.classList.contains('on'))", null, 'aria-label="People may use their own AI key"')], ...ownKeys])
+    + `<div class="set-rows">${cobraChatGptRowHtml()}</div>`
+    + setRows([['Test mode', 'Scripted answers, nothing paid. For trying things out.', setToggle(s.provider==='mock', `cobraSaveSetting('provider', this.classList.contains('on') ? 'auto' : 'mock')`, null, 'aria-label="Test mode"')]]);
+  return warn + err
+    + setBlock('The assistant', '', setRows([
+      ['Switched on', 'Off hides the button for everyone.', setToggle(s.enabled, "cobraSaveSetting('enabled', !this.classList.contains('on'))", null, 'aria-label="Switched on"')],
+      ...(s.kill_switch ? [['Paused by the safety switch', 'The assistant is paused for everyone until this is switched off.', setToggle(true, "cobraSaveSetting('kill_switch', false)", null, 'aria-label="Safety switch"')]] : []),
+      ['Name', `Shown on the button and in the chat. Empty uses the app's name (${esc(productName(b))}).`, `<input class="set-input" maxlength="40" value="${esc(s.assistant_name || '')}" placeholder="${esc(productName(b))}" aria-label="Assistant name" onchange="cobraSaveSetting('assistant_name', this.value)">`, { html: true }],
+      ['Icon', 'The business logo needs one uploaded in Look and branding.', `<div class="cobra-icon-pick" role="radiogroup" aria-label="Icon">${chip('default', 'Built-in')}${chip('logo', 'Business logo')}</div>`],
+    ]))
+    + setBlock('Who can use it', 'Each person only sees and changes what their role already allows in the app.', setRows(COBRA_ROLES.map(r => [esc(roleLabel(r)), '', setToggle(roles[r], `cobraSaveSetting('roles.${r}', !this.classList.contains('on'))`, null, `aria-label="${esc(roleLabel(r))}"`)])))
+    + setBlock('Models', 'Prices are per million tokens, in US dollars. A change applies to new chats.', setRows([
+      ['Free AI: everyday questions', '', modelSel('assistant', 'Free AI: everyday questions', 'cloudflare')],
+      ['Free AI: heavy tasks', '', modelSel('heavy', 'Free AI: heavy tasks', 'cloudflare')],
+      ['Paid AI (Anthropic): everyday questions', '', modelSel('assistant', 'Paid AI: everyday questions', 'anthropic')],
+      ['Paid AI (Anthropic): heavy tasks', '', modelSel('heavy', 'Paid AI: heavy tasks', 'anthropic')],
+      ['Own OpenAI keys: everyday questions', '', modelSel('assistant', 'Own OpenAI keys: everyday questions', 'openai')],
+      ['Own OpenAI keys: heavy tasks', '', modelSel('heavy', 'Own OpenAI keys: heavy tasks', 'openai')],
+    ]))
+    + setBlock('Spending', 'Paid AI only. 0 keeps paid AI off. Owners get a phone notification at 80%; at 100% the free AI takes over until the 1st.', usage + setRows([
+      ['Monthly cap', 'In US dollars, 0 to 10,000.', `<span class="set-num"><input type="number" min="0" max="10000" step="1" value="${esc(s.monthly_cap_usd)}" aria-label="Monthly cap" onchange="cobraSaveSetting('monthly_cap_usd', this.value)"><span>US$</span></span>`],
+      ['Questions per person per day', '1 to 1,000.', `<span class="set-num"><input type="number" min="1" max="1000" step="1" value="${esc(s.daily_user_limit)}" aria-label="Questions per person per day" onchange="cobraSaveSetting('daily_user_limit', this.value)"><span>a day</span></span>`],
+      ...people.map(u => [esc(cobraPersonName(u.user_id)), `${Number(u.requests) || 0} question${Number(u.requests)===1 ? '' : 's'} this month`, `<span>${esc(cobraUsd(u.cost_usd))}</span>`]),
+    ]))
+    + setBlock('AI provider', 'The free AI answers by default. A paid AI and own keys are a choice.', providerBody)
+    + logBlock;
+}
+async function cobraSaveSetting(key, value){
+  if (readOnlyReason()) { showToast(readOnlyReason()); render(); return; }
+  const d = COBRA.detail, s = d && d.settings;
+  if (COBRA.saving || !s) return;
+  if (d.missing) { showToast("The assistant's settings aren't set up on the server yet."); render(); return; }
+  const problem = cobraSettingProblem(key, value, s.prices, { cap: s.monthly_cap_usd, keyReady: cobraPaidKeyReady(d.status) });
+  if (problem) { showToast(problem); render(); return; }
+  const patch = cobraPatchOf(key, value, s);
+  if (!Object.keys(patch).length || Object.keys(patch).every(k => JSON.stringify(patch[k])===JSON.stringify(s[k]))) return;
+  COBRA.saving = true;
+  try {
+    const { data, error } = await sb.from('ai_settings').update(patch).eq('business_id', AUTO_BUSINESS_ID).select(COBRA_SETTING_COLS).maybeSingle();
+    if (error) throw cobraErr(error.code==='23514' ? 'validation' : error.code==='42501' ? 'owners_only' : 'server');
+    if (!data) throw cobraErr('owners_only');
+    d.settings = cobraSettingsOf(data);
+    // A new name shows at once (menu, title, button): the status that carries it is read again only afterwards.
+    if (key==='assistant_name') {
+      const name = cobraNameOf(d.settings.assistant_name, (brandSource() || {}).appName);
+      if (COBRA.status) COBRA.status.assistant_name = name;
+      if (d.status) d.status.assistant_name = name;
+      cobraFabPatch();
+    }
+    logSettingsActivity((getRealProfile() || {}).fullName || 'Unknown', `${cobraSettingsTitle(cobraName())}: ${cobraPatchText(key, value)}`);
+    showToast('Saved');
+  } catch (e) {
+    showToast(e.reason || cobraErrorText(e.code));
+  } finally {
+    COBRA.saving = false;
+    COBRA.statusAt = 0;
+    cobraStatusLoad(true);
+    render();
+  }
+}
+// The button's icon is a branding setting (catalog.branding.assistantIcon: '' or 'logo'), saved by the generic writer.
+function cobraSetIcon(kind){
+  const b = catalogObject('branding');
+  if ((b.assistantIcon || 'default')===kind) return;
+  if (kind==='logo' && brandLogoKind(b).kind==='mark') { showToast('Upload the business logo in Look and branding first'); return; }
+  b.assistantIcon = kind==='logo' ? 'logo' : '';
+  catalogSave('branding', b, kind==='logo' ? 'assistant icon: the business logo' : 'assistant icon: built-in');
+  cobraFabPatch();
+}
+// Signing out: nothing of the chats stays in memory or on the page for the next person.
+function cobraReset(){
+  const s = COBRA.streaming;
+  if (s) { s.stopped = true; s.ctrl.stopped = true; try { s.ctrl.abort(); } catch (e) { /* already stopped */ } }
+  cobraMicStop(true);
+  const root = document.getElementById('cobra-root');
+  if (root) root.remove();
+  document.body.classList.remove('cobra-open');
+  COBRA = cobraBlank();
+}
+// Escape closes the panel and only the panel: caught first (capture) and kept from the page's own Escape handlers, so
+// an open job, contractor or person card behind it stays open.
+document.addEventListener('keydown', e => {
+  if (e.key!=='Escape' || !COBRA.open || document.querySelector('#modal-root > *') || document.querySelector('.confirm-back')) return;
+  e.stopImmediatePropagation();
+  cobraClose();
+}, true);
+sb.auth.onAuthStateChange((ev, session) => {
+  const uid = session && session.user ? session.user.id : null;
+  if (ev==='SIGNED_OUT' || (uid && COBRA.uid && uid!==COBRA.uid)) cobraReset();
+  if (uid) COBRA.uid = uid;
+});
+// ══ AI assistant (stage 6): own block, end ══
 function render(){ if (NAV_HIST.hold) { NAV_HIST.held = true; return; }   // a back/forward restore draws once, at its end (stage 4)
   JOB_CACHE.index = null; DRILL = []; try { setTimeout(renderChaseBubbles, 0); setTimeout(mdTick, 0); } catch(e) {}
   // The workflow builder first, before any early return (design §5.1): signed out / another profile → it closes; new lists → its words again.

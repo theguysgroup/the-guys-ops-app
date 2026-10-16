@@ -80,8 +80,6 @@ export const TOKEN_RE = /^ops_mcp_[A-Za-z0-9_-]{43}$/;
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];   // the first is the latest
 export const SERVER_INFO = { name: "ops-mcp", version: "1.0.0" };
 export const MCP_DEFAULTS = { rateLimitPerMin: 60, logKeepDays: 90, importSource: "MCP import" };
-export const PAGE = 1000;                 // rows per .range() page
-export const MAX_SCAN = 20000;            // rows read per call, all pages
 export const MAX_ROWS = 500;              // rows returned per call
 export const DEFAULT_LIMIT = 50;
 export const NAME_CHUNK = 100;            // ids per .in() lookup (keeps the request address short)
@@ -290,9 +288,6 @@ export function holidayDaysOf(cat: any): Record<string, string> {
 }
 // ── end region ──
 // ── time zone: the business's (settings.catalog.region.timeZone, read with the region block's bizTzOf) ──
-export function shiftDay(day: string, n: number) { const [y, m, d] = day.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); }
-const dowOf = (day: string) => { const [y, m, d] = day.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); };
-const dayDiff = (a: string, b: string) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000);
 // A tool error: shown to the assistant as an isError result, never a JSON-RPC error.
 export class ToolError extends Error {}
 // A tool's from/to (days in tz) and the UTC instants around them: [fromIso, toIso). Default: the last `defaultDays`
@@ -309,6 +304,77 @@ export function rangeOf(args: any, tz: string, nowMs: number, defaultDays = 30) 
   return { from, to, fromIso: new Date(bizToUtc(from, 0, 0, tz)).toISOString(), toIso: new Date(bizToUtc(shiftDay(to, 1), 0, 0, tz)).toISOString() };
 }
 
+// ── shared: role scope + money (stage 8) BEGIN — ONE block, byte-identical in mcp and ai-gateway (ai-gateway's tests check); needs only the region block (bizParts) ──
+export function shiftDay(day: string, n: number) { const [y, m, d] = day.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); }
+const dowOf = (day: string) => { const [y, m, d] = day.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); };
+const dayDiff = (a: string, b: string) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000);
+export const PAGE = 1000;                 // rows per .range() page
+export const MAX_SCAN = 20000;            // rows read per call, all pages
+// deno-lint-ignore no-explicit-any
+export async function pageAll(build: (from: number, to: number) => any, max = MAX_SCAN): Promise<{ rows: any[]; truncated: boolean }> {
+  // deno-lint-ignore no-explicit-any
+  const rows: any[] = [];
+  for (let from = 0; from < max; from += PAGE) {
+    const to = Math.min(from + PAGE, max) - 1;
+    const { data, error } = await build(from, to);
+    if (error) throw new Error(error.message || "read failed");
+    const got = data || [];
+    rows.push(...got);
+    if (got.length < to - from + 1) return { rows, truncated: false };
+  }
+  return { rows, truncated: true };
+}
+// The app's built-in lists (index.html LEAD_DIVISIONS / LEAD_STATUSES / LEAD_SOURCES and their labels, parity-tested),
+// used as the app's catalogList does: what the business saved, plus any built-in entry the saved list is missing.
+export type CatalogSection = "services" | "stages" | "sources";
+export const BASE_LISTS: Record<CatalogSection, string[]> = {
+  services: ["Aircon", "Chimney", "Pressure Washing", "Other"],
+  stages: ["New", "Chasing", "Quoted", "Follow-up", "Booked", "Won", "Lost"],
+  sources: ["Google Ads", "Meta Ads", "Google Maps", "Organic", "Unknown"],
+};
+export const BASE_LABELS: Record<CatalogSection, Record<string, string>> = {
+  services: {}, stages: { New: "New lead", Chasing: "Chasing", Quoted: "Quoted", "Follow-up": "Follow up", Booked: "Booked", Won: "Won", Lost: "Lost" }, sources: { Organic: "Organic web", "Phone Call": "Phone (old)" },   // "Phone Call": a legacy value on old rows only
+};
+export const STAGE_CORE = ["New", "Won", "Lost"];        // always on (index.html STAGE_CORE)
+// The four built-in words a business can rename (their stage 2: settings.catalog.keys = { paid, done, won, lost }).
+// Until then, and for any that is missing or not a plain short word, the app's own.
+export const KEY_DEFAULTS = { paid: "Paid", done: "Done", won: "Won", lost: "Lost" };
+export type CatalogKeys = typeof KEY_DEFAULTS;
+// deno-lint-ignore no-explicit-any
+export function catalogKeys(cat: any): CatalogKeys {
+  const k = cat && typeof cat === "object" && cat.keys && typeof cat.keys === "object" && !Array.isArray(cat.keys) ? cat.keys : {};
+  const word = (v: unknown, d: string) => (typeof v === "string" && /^[^",()\\<>]{1,40}$/.test(v.trim()) ? v.trim() : d);
+  return { paid: word(k.paid, KEY_DEFAULTS.paid), done: word(k.done, KEY_DEFAULTS.done), won: word(k.won, KEY_DEFAULTS.won), lost: word(k.lost, KEY_DEFAULTS.lost) };
+}
+// A built-in word as the business calls it (a value that is not one of the four is itself).
+export function renamedKey(keys: CatalogKeys | undefined, v: string): string {
+  if (!keys) return v;
+  for (const n of Object.keys(KEY_DEFAULTS) as (keyof CatalogKeys)[]) if (v === KEY_DEFAULTS[n]) return keys[n];
+  return v;
+}
+export type CatalogLists = Record<CatalogSection, { key: string; label: string }[]>;
+// The lists an import checks against: deleted and switched-off entries left out (New, Won and Lost are always on).
+// deno-lint-ignore no-explicit-any
+export function catalogLists(cat: any, keys: CatalogKeys = KEY_DEFAULTS): CatalogLists {
+  // deno-lint-ignore no-explicit-any
+  const out: any = {};
+  for (const sec of Object.keys(BASE_LISTS) as CatalogSection[]) {
+    const saved = cat && typeof cat === "object" && Array.isArray(cat[sec]) ? cat[sec] : [];
+    // deno-lint-ignore no-explicit-any
+    const list: any[] = saved.filter((x: any) => x && typeof x === "object" && typeof x.key === "string" && x.key.trim());
+    BASE_LISTS[sec].forEach((k) => { if (!list.some((x) => x.key === k)) list.push({ key: k, label: BASE_LABELS[sec][k] || k }); });
+    out[sec] = list
+      .filter((x) => !x.deleted && (x.active !== false || (sec === "stages" && STAGE_CORE.includes(x.key))))
+      .map((x) => { const key = sec === "stages" ? renamedKey(keys, x.key) : x.key; return { key, label: typeof x.label === "string" && x.label.trim() ? x.label.trim() : key }; });
+  }
+  return out as CatalogLists;
+}
+// A value matched to a list entry by its key or its label, any case: the entry's key, or null.
+export function catalogMatch(list: { key: string; label: string }[], v: string): string | null {
+  const s = v.trim().toLowerCase();
+  const hit = list.find((x) => x.key.toLowerCase() === s) || list.find((x) => x.label.toLowerCase() === s);
+  return hit ? hit.key : null;
+}
 // ── role scope: the app's canViewSection / filterForProfile (index.html), parity-tested ──
 // Pure: a profile in the app's shape, rows in the database's shape. run_tests.sh extracts the live app functions and
 // tests.ts checks every profile × section and every row filter against them.
@@ -627,22 +693,9 @@ export function salesLogFromRow(l: any) {
 // deno-lint-ignore no-explicit-any
 export const employeeFromRow = (e: any) => ({ name: e.name, roles: e.roles || [], status: e.status, employmentType: e.employment_type || "" });
 // ── end calc ──
+// ── shared: role scope + money END ──
 
 // ── data access (service role; every read pages and names its columns) ──
-// deno-lint-ignore no-explicit-any
-export async function pageAll(build: (from: number, to: number) => any, max = MAX_SCAN): Promise<{ rows: any[]; truncated: boolean }> {
-  // deno-lint-ignore no-explicit-any
-  const rows: any[] = [];
-  for (let from = 0; from < max; from += PAGE) {
-    const to = Math.min(from + PAGE, max) - 1;
-    const { data, error } = await build(from, to);
-    if (error) throw new Error(error.message || "read failed");
-    const got = data || [];
-    rows.push(...got);
-    if (got.length < to - from + 1) return { rows, truncated: false };
-  }
-  return { rows, truncated: true };
-}
 // The business's name, GST rate, catalog and time zone (settings.catalog.region.timeZone). Read per request (never cached across requests).
 // deno-lint-ignore no-explicit-any
 export async function loadBusiness(sb: any) {
@@ -2115,59 +2168,8 @@ export const IMPORT_FIELDS: Record<string, Record<string, ImportField>> = {
 export const DEFAULT_DEDUPE = { contacts: { fields: ["phone", "email"], match: "any" }, jobs: { fields: ["invoice_number"], match: "any" }, tasks: { fields: ["title", "due"], match: "all" } };
 
 // ── imports: the business's own lists (Settings → Pipeline / Services / Lead sources) and renamable words ──
-// The app's built-in lists (index.html LEAD_DIVISIONS / LEAD_STATUSES / LEAD_SOURCES and their labels, parity-tested),
-// used as the app's catalogList does: what the business saved, plus any built-in entry the saved list is missing.
-export type CatalogSection = "services" | "stages" | "sources";
-export const BASE_LISTS: Record<CatalogSection, string[]> = {
-  services: ["Aircon", "Chimney", "Pressure Washing", "Other"],
-  stages: ["New", "Chasing", "Quoted", "Follow-up", "Booked", "Won", "Lost"],
-  sources: ["Google Ads", "Meta Ads", "Google Maps", "Organic", "Unknown"],
-};
-export const BASE_LABELS: Record<CatalogSection, Record<string, string>> = {
-  services: {}, stages: { New: "New lead", Chasing: "Chasing", Quoted: "Quoted", "Follow-up": "Follow up", Booked: "Booked", Won: "Won", Lost: "Lost" }, sources: { Organic: "Organic web", "Phone Call": "Phone (old)" },   // "Phone Call": a legacy value on old rows only
-};
-export const STAGE_CORE = ["New", "Won", "Lost"];        // always on (index.html STAGE_CORE)
 export const CATCH_ALL_SERVICE = "Other";                 // an unknown service lands here (as conversations / voice)
 export const NEW_STAGE = "New";                           // an unknown stage lands here (every new lead starts in New)
-// The four built-in words a business can rename (their stage 2: settings.catalog.keys = { paid, done, won, lost }).
-// Until then, and for any that is missing or not a plain short word, the app's own.
-export const KEY_DEFAULTS = { paid: "Paid", done: "Done", won: "Won", lost: "Lost" };
-export type CatalogKeys = typeof KEY_DEFAULTS;
-// deno-lint-ignore no-explicit-any
-export function catalogKeys(cat: any): CatalogKeys {
-  const k = cat && typeof cat === "object" && cat.keys && typeof cat.keys === "object" && !Array.isArray(cat.keys) ? cat.keys : {};
-  const word = (v: unknown, d: string) => (typeof v === "string" && /^[^",()\\<>]{1,40}$/.test(v.trim()) ? v.trim() : d);
-  return { paid: word(k.paid, KEY_DEFAULTS.paid), done: word(k.done, KEY_DEFAULTS.done), won: word(k.won, KEY_DEFAULTS.won), lost: word(k.lost, KEY_DEFAULTS.lost) };
-}
-// A built-in word as the business calls it (a value that is not one of the four is itself).
-export function renamedKey(keys: CatalogKeys | undefined, v: string): string {
-  if (!keys) return v;
-  for (const n of Object.keys(KEY_DEFAULTS) as (keyof CatalogKeys)[]) if (v === KEY_DEFAULTS[n]) return keys[n];
-  return v;
-}
-export type CatalogLists = Record<CatalogSection, { key: string; label: string }[]>;
-// The lists an import checks against: deleted and switched-off entries left out (New, Won and Lost are always on).
-// deno-lint-ignore no-explicit-any
-export function catalogLists(cat: any, keys: CatalogKeys = KEY_DEFAULTS): CatalogLists {
-  // deno-lint-ignore no-explicit-any
-  const out: any = {};
-  for (const sec of Object.keys(BASE_LISTS) as CatalogSection[]) {
-    const saved = cat && typeof cat === "object" && Array.isArray(cat[sec]) ? cat[sec] : [];
-    // deno-lint-ignore no-explicit-any
-    const list: any[] = saved.filter((x: any) => x && typeof x === "object" && typeof x.key === "string" && x.key.trim());
-    BASE_LISTS[sec].forEach((k) => { if (!list.some((x) => x.key === k)) list.push({ key: k, label: BASE_LABELS[sec][k] || k }); });
-    out[sec] = list
-      .filter((x) => !x.deleted && (x.active !== false || (sec === "stages" && STAGE_CORE.includes(x.key))))
-      .map((x) => { const key = sec === "stages" ? renamedKey(keys, x.key) : x.key; return { key, label: typeof x.label === "string" && x.label.trim() ? x.label.trim() : key }; });
-  }
-  return out as CatalogLists;
-}
-// A value matched to a list entry by its key or its label, any case: the entry's key, or null.
-export function catalogMatch(list: { key: string; label: string }[], v: string): string | null {
-  const s = v.trim().toLowerCase();
-  const hit = list.find((x) => x.key.toLowerCase() === s) || list.find((x) => x.label.toLowerCase() === s);
-  return hit ? hit.key : null;
-}
 // Where an unknown value of a list lands: the New stage, the catch-all service; an unknown source is left empty, so the
 // row gets the import's own source (catalog.mcp.importSource).
 export const CATALOG_FALLBACK: Record<CatalogSection, string> = { stages: NEW_STAGE, services: CATCH_ALL_SERVICE, sources: "" };
