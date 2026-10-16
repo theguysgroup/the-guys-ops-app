@@ -236,6 +236,12 @@ const DECLS = [
   // Stage 2 phase 6 G6.4: the lead card's Automation block (who sees / adds, the runs, the picker, Start, the history lines)
   'WF_LEAD_LIMITS', 'WF_LEAD_STATUS', 'WF_LEAD', 'wfLeadMayRead', 'wfLeadMayAdd', 'wfLeadRuns', 'wfLeadWhere', 'wfLeadRecentLine', 'wfLeadPickRows', 'wfLeadWall',
   'wfLeadStartAt', 'wfLeadActivityText', 'wfLeadInnerHtml',
+  // Stage 2 phase 6 G6.2: a workflow's Settings tab, Enrollment history, Execution logs, View details (registries, search filter, range, rows, pages)
+  'WF_HIST', 'WF_HIST_PRESETS', 'WF_RUN_STATUS', 'WF_RUN_FILTERS', 'WF_RUN_REMOVED', 'WF_LOG_STATUS', 'WF_LOG_FILTERS', 'WF_DETAIL_LABELS', 'WF_DETAIL_BLOCKS', 'WF_DETAIL_HIDDEN', 'WF_KIND_WORD',
+  'WF_DAYS', 'WF_SET_LABELS', 'wfRecordSearchFilter', 'wfhDayOk', 'wfhDaysBetween', 'wfhRange', 'wfhMs', 'wfhWhen', 'wfhTzText', 'wfhRemovedText', 'wfhRunStatus', 'wfhKeepRun', 'wfhLogStatus',
+  'wfhFilterStatuses', 'wfhTriggers', 'wfhRecordWord', 'wfhEnrollReason', 'wfhLogAction', 'wfhVal', 'wfhDetailRows', 'wfhHm', 'wfhSettingsSet', 'wfSettingsProblems', 'wfhPauseRanges',
+  'wfhTimeLabel', 'wfhSettingsHtml', 'wfhEnrollRow', 'wfhLogRow', 'wfhFilterBarHtml', 'wfhPillHtml', 'wfhPageHtml', 'wfhRecCell', 'wfhEnrollTableHtml', 'wfhLogTableHtml', 'wfhLeadHeadHtml',
+  'wfhDetailHtml',
 ];
 
 function extractDecl(source, name){
@@ -8449,6 +8455,252 @@ async function testWfLeadBlock(){
   assertEqual([X.WF_LEAD.error, X.WF_LEAD.errFor, /try again in a minute/.test(el.innerHTML)], ['It is moving to its next step right now: try again in a minute', 'c1', true], 'busy: the function\'s words under the block');
 }
 
+// Stage 2 phase 6 G6.2 (design §4.6, §4.8): a workflow's Settings tab, Enrollment history, Execution logs and View details.
+// The pure helpers and the drawing first; then the reads (keyset paging, the search, one read per filter change) and the
+// section's shape (what it plugs into, what it may write).
+async function testWfHistoryTabs(){
+  console.log('\nSettings tab, Enrollment history, Execution logs (G6.2)');
+  const S = loadSandbox(), html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const tz = 'Australia/Sydney', now = Date.parse('2026-10-17T00:00:00Z');   // 11:00 am, 17 Oct, Sydney (AEDT +11:00)
+  // 1. the search filter: quotes, escapes, the phone clause only from 3 digits, nothing under 2 characters
+  const F = S.wfRecordSearchFilter;
+  assertEqual([F(''), F(' a '), F(null)], [null, null, null], 'wfRecordSearchFilter: under 2 characters → no search');
+  assertEqual(F('Dana'), { contacts: 'full_name.ilike."%Dana%",email.ilike."%Dana%"', jobs: 'customer_name.ilike."%Dana%",invoice_number.ilike."%Dana%"', digits: '' },
+    'wfRecordSearchFilter: a name → name and email on leads, name and invoice on jobs, values in double quotes, no phone clause');
+  assertEqual(F('04 12').contacts.split(',').pop(), 'phone.ilike."%0%4%1%2%"', 'wfRecordSearchFilter: 4 digits → a phone clause with the digits spaced (formatted numbers match)');
+  assertEqual(F('a1').contacts.includes('phone'), false, 'wfRecordSearchFilter: 1 digit → no phone clause');
+  assertEqual(F('O"Br\\ie*n, (x)%_').contacts.startsWith('full_name.ilike."%O Br ie n, (x)\\\\%\\\\_%",email'), true, 'wfRecordSearchFilter: " \\ * dropped, % and _ escaped, a comma and brackets stay safe inside the quotes');
+  assertEqual(F('x'.repeat(200)).contacts.length < 200, true, 'wfRecordSearchFilter: the term is cut');
+  // 2. the date range
+  const R = S.wfhRange, def = R({}, now, tz);
+  assertEqual([def.from, def.to, def.days, def.fromIso, def.toIso], ['2026-09-18', '2026-10-17', 30, '2026-09-17T14:00:00.000Z', '2026-10-17T13:00:00.000Z'],
+    'wfhRange: default = the last 30 business days, up to the start of tomorrow in the business zone');
+  assertEqual([R({ preset: '180' }, now, tz).days, R({ preset: 'custom', from: '2026-10-01', to: '2026-10-05' }, now, tz).days, R({ preset: 'custom', from: '2026-10-06', to: '2026-10-05' }, now, tz).error,
+    R({ preset: 'custom', from: '', to: '2026-10-05' }, now, tz).error, R({ preset: 'custom', from: '2026-01-01', to: '2026-10-05' }, now, tz).error, R({ preset: 'custom', from: '2025-01-01', to: '2025-02-01' }, now, tz).error,
+    R({ preset: 'custom', from: '2026-10-10', to: '2027-01-01' }, now, tz).to, R({ preset: 'nope' }, now, tz).days],
+    [180, 5, 'The first date is after the last one', 'Pick both dates', 'Pick at most 180 days', 'Only the last 180 days are kept', '2026-10-17', 30],
+    'wfhRange: presets, custom dates (at most 180 days, not older than the 180 kept, never the future), a bad preset = 30');
+  // 3. dates on the business clock
+  assertEqual([S.wfhWhen('2026-10-17T04:00:00Z', tz), S.wfhTzText('2026-10-17T04:00:00Z', tz), S.wfhTzText('2026-07-17T04:00:00Z', tz), S.wfhWhen(null, tz), S.wfhTzText('x', tz), S.wfhTzText('2026-10-17T04:00:00Z', 'Asia/Kolkata')],
+    ['17 Oct 2026, 3:00pm', 'AEDT +11:00', 'AEST +10:00', '—', '', '+05:30'], 'wfhWhen / wfhTzText: the business clock, the zone\'s name and offset (daylight saving included)');
+  // 4. statuses
+  const st = r => { const x = S.wfhRunStatus(r); return [x.label, x.tone, x.tip]; };
+  assertEqual([st({ status: 'waiting' }), st({ status: 'waiting', watch: ['pause'] }), st({ status: 'running' }), st({ status: 'done' }), st({ status: 'skipped', reason: 'outside hours' }), st({ status: 'stopped' }),
+    st({ status: 'failed', reason: 'No phone' }), st({ status: 'removed', exit_reason: 'removed_by_user', reason: 'Removed by Kim' }), st({ status: 'removed', exit_reason: 'removed_by_action' }), st({ status: 'removed', exit_reason: 'removed_by_external_action' }),
+    st({ status: 'cancelled', exit_reason: 'automation_changed' }), st({ status: 'cancelled', exit_reason: 'switched_off' }), st({ status: 'weird' })],
+    [['Waiting', 'neutral', ''], ['Paused', 'warn', 'Held by a Pause workflow range'], ['Executing', 'good', ''], ['Finished', 'good', ''], ['Ended', 'neutral', 'outside hours'], ['Stopped', 'warn', 'The lead replied'], ['Failed', 'bad', 'No phone'],
+      ['Removed', 'neutral', 'Removed by Kim'], ['Removed', 'neutral', 'Removed by Workflow Action'], ['Removed', 'neutral', 'Removed by External Workflow Action'], ['Removed', 'neutral', 'Workflow changed'], ['Removed', 'neutral', 'Switched to Draft'], ['weird', 'neutral', '']],
+    'wfhRunStatus: every status; Paused for a held waiting run; Removed with who or what removed it; Stopped = the lead replied');
+  assertEqual(S.WF_RUN_FILTERS.length, 9, 'WF_RUN_FILTERS: All statuses + Active + GHL\'s Waiting, Paused, Finished, Ended, Removed, Stopped, Failed');
+  assertEqual([S.wfhFilterStatuses(S.WF_RUN_FILTERS, ''), S.wfhFilterStatuses(S.WF_RUN_FILTERS, 'active'), S.wfhFilterStatuses(S.WF_RUN_FILTERS, 'removed'), S.wfhFilterStatuses(S.WF_LOG_FILTERS, 'executed'), S.wfhFilterStatuses(S.WF_LOG_FILTERS, 'x')],
+    [null, ['waiting', 'running'], ['removed', 'cancelled'], ['executed', 'sent', 'sending', 'queued', 'branch', 'jumped'], null], 'wfhFilterStatuses: a filter → the database statuses it asks for');
+  assertEqual([S.wfhKeepRun('paused', { status: 'waiting', watch: ['pause'] }), S.wfhKeepRun('paused', { status: 'waiting' }), S.wfhKeepRun('waiting', { status: 'waiting', watch: ['pause'] }), S.wfhKeepRun('waiting', { status: 'waiting' }), S.wfhKeepRun('', { status: 'done' })],
+    [true, false, false, true, true], 'wfhKeepRun: Waiting leaves the held runs out, Paused keeps only them');
+  const ls = r => { const x = S.wfhLogStatus(r); return [x.label, x.tone]; };
+  assertEqual([ls({ status: 'added' }), ls({ status: 'executed' }), ls({ status: 'waiting' }), ls({ status: 'wait_finished' }), ls({ status: 'skipped' }), ls({ status: 'failed' }), ls({ status: 'finished' }), ls({ status: 'removed' })],
+    [['Added To Workflow', 'neutral'], ['Executed', 'good'], ['Waiting', 'neutral'], ['Wait Finished', 'good'], ['Skipped', 'neutral'], ['Failed', 'bad'], ['Finished', 'good'], ['Removed', 'neutral']], 'wfhLogStatus: GHL\'s eight words');
+  const covered = new Set(S.WF_LOG_FILTERS.flatMap(f => f[2] || []));
+  assertEqual(Object.keys(S.WF_LOG_STATUS).filter(x => !covered.has(x)), [], 'WF_LOG_FILTERS: every log status is in one filter');
+  // 5. reason, action
+  assertEqual([S.wfhEnrollReason({ source: 'trigger', trigger_id: 't1' }, 'Contact created', ''), S.wfhEnrollReason({ source: 'trigger', trigger_id: 't9' }, '', ''), S.wfhEnrollReason({ source: 'manual', context: { byName: 'Kim' } }, '', ''),
+    S.wfhEnrollReason({ source: 'manual' }, '', ''), S.wfhEnrollReason({ source: 'workflow' }, '', 'Quote chase'), S.wfhEnrollReason({ source: 'workflow' }, '', '')],
+    ['Contact created', 'Removed trigger', 'Added manually by Kim', 'Added manually', 'Added by workflow Quote chase', 'Added by another workflow'], 'wfhEnrollReason: the trigger\'s name, Removed trigger, manual, by a workflow');
+  const A = r => { const x = S.wfhLogAction(r); return [x.name, x.icon, x.system]; };
+  assertEqual([A({ row_kind: 'enroll' }), A({ row_kind: 'exit', reason: 'Removed by - End Of Workflow' }), A({ row_kind: 'exit', reason: 'Removed by Kim' }), A({ row_kind: 'exit' }), A({ row_kind: 'action', channel: 'email', step_name: 'Send <b>' }),
+    A({ row_kind: 'step', step_type: 'wait_period' }), A({ row_kind: 'step', step_type: 'if_else', step_name: 'Check' })],
+    [['Add to workflow', 'userPlus', true], ['Removed by - End Of Workflow', 'x', true], ['Removed by - Kim', 'x', true], ['Removed by - End Of Workflow', 'x', true], ['Send <b>', 'mail', false], ['wait period', 'clock', false], ['Check', 'branch', false]],
+    'wfhLogAction: system rows have their own words; icons by channel and step type');
+  // 6. the details
+  const D = S.wfhDetailRows({ subject: 'Hi', body: 'Hello <i>x</i>', met: true, branch_id: 'b1', by: 'uuid', weird: { a: 1 }, applied: ['tag', 'note'], percent: 0 });
+  assertEqual([D.rows.map(r => [r.label, r.text, r.block]), D.other.replace(/\s+/g, '')],
+    [[['Subject', 'Hi', false], ['Message', 'Hello <i>x</i>', true], ['Goal met', 'Yes', false], ['Branch', 'b1', false], ['Changes made', 'tag, note', false], ['Share (%)', '0', false]], '{"weird":{"a":1}}'],
+    'wfhDetailRows: known keys by their labels (a message is a block), the user id hidden, the rest as JSON');
+  assertEqual([S.wfhDetailRows(null), S.wfhDetailRows({}).other], [{ rows: [], other: '' }, ''], 'wfhDetailRows: no detail → nothing');
+  // 7. settings: the next settings after one control, the problems (the engine's cases), the pause ranges
+  const cur = { reentry: 'legacy_always', perRecord: true, stopOnResponse: false, timezone: 'business', window: { on: false }, sender: { fromName: null }, markRead: false }, SS = S.wfhSettingsSet;
+  assertEqual([SS(cur, 'perRecord', false).reentry, SS(cur, 'reentry', false).reentry, SS(SS(cur, 'reentry', false), 'reentry', true).reentry, SS({}, 'stopOnResponse', true).stopOnResponse, SS({}, 'markRead', true).markRead,
+    SS({}, 'fromName', '  Kim  ').sender.fromName, SS({}, 'fromName', 'x'.repeat(90)).sender.fromName.length, SS({}, 'fromName', ' ').sender.fromName, SS({}, 'windowOn', true).window.on],
+    ['legacy_always', 'off', 'after_exit', true, true, 'Kim', 60, null, true], 'wfhSettingsSet: legacy_always stays until re-entry is switched off; the name is trimmed and cut at 60');
+  const w1 = SS({}, 'windowOn', true);
+  assertEqual([SS(w1, 'from', '17:30').window, SS(w1, 'until', '07:45').window, SS(w1, 'from', 'junk').window.from, SS(w1, 'day', 1).window.days, SS(w1, 'day', 0).window.days, SS(SS(SS(SS(w1, 'day', 2), 'day', 3), 'day', 4), 'day', 5).window.days, SS(w1, 'day', 9).window.days],
+    [{ on: true, days: [1, 2, 3, 4, 5], from: '17:30', until: '17:45' }, { on: true, days: [1, 2, 3, 4, 5], from: '07:30', until: '07:45' }, '08:00', [2, 3, 4, 5], [0, 1, 2, 3, 4, 5], [1], [1, 2, 3, 4, 5]],
+    'wfhSettingsSet: the start pushes the end (and the reverse); days toggle; the last day stays; a bad time or day is ignored');
+  assertEqual([SS(w1, 'until', '24:00').window.until, SS(w1, 'from', '23:45').window.until], ['24:00', '24:00'], 'wfhSettingsSet: the end of the day is midnight (24:00)');
+  const codes = (r, p) => S.wfSettingsProblems(r, p, {}).map(x => x.code);
+  assertEqual([codes({ reentry: 'legacy_always' }, { reentry: 'off' }), codes({ reentry: 'legacy_always' }, { reentry: 'legacy_always' }), codes({ timezone: 'contact' }, {}), codes({ window: { on: true, days: [], from: '09:00', until: '08:00' } }, {}), codes(SS({}, 'markRead', false), {})],
+    [['E_SCHEMA'], [], ['E_UNAVAILABLE'], ['E_SCHEMA', 'E_SCHEMA'], []], 'wfSettingsProblems: the engine\'s cases (legacy_always only when already set, no lead time zone, a valid window)');
+  assertEqual(S.wfSettingsProblems({ timezone: 'contact', sender: { fromName: 'x'.repeat(61) } }, {}, {}).map(x => [x.path, x.text]),
+    [['/settings/timezone', 'Leads have no time zone yet'], ['/settings/sender/fromName', 'The sender name is at most 60 characters']], 'wfSettingsProblems: paths and words');
+  const P = [{ automation_ids: ['w1'], start_wall: '2026-10-10T09:00', end_wall: '2026-10-20T09:00', annually: false }, { automation_ids: ['w1', 'w2'], start_wall: '2026-12-24T09:00', end_wall: '2027-01-03T09:00', annually: false },
+    { automation_ids: ['w2'], start_wall: '2026-10-18T09:00', end_wall: '2026-10-19T09:00', annually: false }, { automation_ids: ['w1'], start_wall: '2026-01-01T09:00', end_wall: '2026-01-02T09:00', annually: false }];
+  const pr = S.wfhPauseRanges(P, 'w1', now, tz);
+  assertEqual([pr.length, pr[0].now, pr[1].now, S.wfhPauseRanges(P, 'w3', now, tz), S.wfhPauseRanges(null, 'w1', now, tz)], [2, true, false, [], []],
+    'wfhPauseRanges: the current and the coming ranges that cover the workflow (past ones and other workflows\' left out)');
+  // 8. the Settings tab drawn
+  const ST = (o) => S.wfhSettingsHtml({ settings: cur, base: cur, ro: '', tz, tzLabel: 'Sydney time', signature: 'Kim\nEco <b>\n1300', pause: [], ...o });
+  const h1 = ST();
+  assertEqual([/Allow re-entry/.test(h1), /Also while still in it \(kept from before\)\. Switch off and on to use the standard rule\./.test(h1), /Allow multiple jobs/.test(h1), /Stop on response/.test(h1), /Replies by text count once the phone line \(Twilio\) is connected\./.test(h1),
+    /Business timezone \(Sydney time\)/.test(h1), /Lead timezone/.test(h1), /Leads have no time zone yet/.test(h1), /Conversations: Mark as read/.test(h1), /Eco &lt;b&gt;/.test(h1), /Needs the phone line \(Twilio\)/.test(h1), /Emails go from your connected mailbox/.test(h1),
+    /Customer messages also keep the business's customer hours/.test(h1), /wfhGoProfile/.test(h1), /Pause workflow/.test(h1), /wfh-bad/.test(h1)],
+    [true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false],
+    'wfhSettingsHtml: both cards with their words, the migrated re-entry hint, greyed Lead timezone / email / number, the signature escaped, no Pause section when none covers it');
+  assertEqual([(h1.match(/role="switch"/g) || []).length, /class="set-toggle on" role="switch" aria-checked="true"[^>]*data-f="set-reentry"/.test(h1), /<select data-f="set-from"[^>]*disabled/.test(h1), (h1.match(/class="wfh-day"[^>]*disabled/g) || []).length],
+    [5, true, true, 7], 'wfhSettingsHtml: five switches (re-entry on for a migrated row), the window\'s controls disabled while it is off');
+  const h2 = ST({ settings: SS(cur, 'windowOn', true), ro: 'A System workflow: make a copy to change it' });
+  assertEqual([/A System workflow: make a copy to change it/.test(h2), (h2.match(/<button[^>]*role="switch"[^>]*disabled/g) || []).length, /data-f="set-fromName"[^>]*disabled/.test(h2), /<select data-f="set-from"[^>]*disabled/.test(h2)],
+    [true, 5, true, true], 'wfhSettingsHtml: read-only → the reason, every control disabled');
+  const h3 = ST({ settings: SS(cur, 'windowOn', true), pause: pr });
+  assertEqual([/<select data-f="set-from"[^>]*disabled/.test(h3), /data-f="set-day-1" aria-pressed="true"/.test(h3), /Paused now, until 20 Oct 2026, 9:00am\./.test(h3), /Paused from 24 Dec 2026, 9:00am to 3 Jan 2027, 9:00am\./.test(h3), /wfhGoGlobal/.test(h3)],
+    [false, true, true, true, true], 'wfhSettingsHtml: window on → controls enabled, Mon–Fri pressed; Pause workflow lists the ranges with a link to Global Workflow Settings');
+  assertEqual(/role="alert"[^>]*>.*Leads have no time zone yet/.test(ST({ settings: { ...cur, timezone: 'contact', reentry: 'off' } })), true, 'wfhSettingsHtml: a problem is listed (role alert)');
+  // 9. the history tabs drawn (names escaped, tooltips, tint, buttons, ids escaped)
+  const c = { tz, name: r => r._n || '', trigger: id => id==='t1' ? 'Contact created' : '', step: id => id==='n1' ? 'Send text' : '', parent: id => id==='p1' ? 'Quote chase' : '' };
+  const runs = [{ id: 'r1', contact_id: 'c1', record_kind: 'contact', record_id: 'c1', status: 'waiting', trigger_id: 't1', cursor_step: 'n1', created_at: '2026-10-17T04:00:00Z', due_at: '2026-10-18T04:00:00Z', source: 'trigger', _n: 'Dana <img src=x>' },
+    { id: "r'2", contact_id: null, record_kind: 'job', record_id: 'j1', status: 'removed', exit_reason: 'removed_by_user', reason: 'Removed by "Kim"', source: 'workflow', parent_run_id: 'p1', created_at: '2026-10-16T04:00:00Z' }];
+  const rows = runs.map(r => S.wfhEnrollRow(r, c));
+  assertEqual([rows[0].name, rows[0].reason, rows[0].enrolled, rows[0].tz, rows[0].step, rows[0].status.label, rows[0].next, rows[1].name, rows[1].kind, rows[1].reason, rows[1].next, rows[1].step],
+    ['Dana <img src=x>', 'Contact created', '17 Oct 2026, 3:00pm', 'AEDT +11:00', 'Send text', 'Waiting', '18 Oct 2026, 3:00pm', 'Job j1', 'Job', 'Added by workflow Quote chase', 'Not available', ''],
+    'wfhEnrollRow: the record, why it entered, when (business zone), where it is, when next');
+  const model = { kind: 'enr', word: 'job', head: 'View a history of all the jobs that have entered this workflow', filters: { word: 'job', range: { preset: '30' }, today: '2026-10-17', events: [['t:t1', 'Contact created'], ['manual', 'Added manually'], ['workflow', 'Added by another workflow']], status: '', q: 'da"n' }, state: 'ok', rows, more: true };
+  const hE = S.wfhPageHtml(model);
+  assertEqual([/Enrollment history/.test(hE), /View a history of all the jobs that have entered this workflow/.test(hE), /Search job/.test(hE), /value="da&quot;n"/.test(hE), /Dana &lt;img src=x&gt;/.test(hE), /<img src=x>/.test(hE), /title="Removed by &quot;Kim&quot;"/.test(hE),
+    /wfhHistory\('r\\'2'\)/.test(hE), /Load more/.test(hE), /All events/.test(hE), /All statuses/.test(hE), /Last 30 days/.test(hE), /<th>Next execution on<\/th>/.test(hE), /AEDT \+11:00/.test(hE), /aria-label="Refresh"/.test(hE), /<caption class="sr-only">Enrollment history/.test(hE)],
+    [true, true, true, true, true, false, true, true, true, true, true, true, true, true, true, true],
+    'wfhPageHtml (enrollment): header in the record\'s word, filters, escaped names and tooltips, an apostrophe in an id safe, Load more, a caption for screen readers');
+  const hC = S.wfhPageHtml({ ...model, kind: 'log', state: 'loading', rows: [], more: false });
+  assertEqual([/Loading…/.test(hC), /Execution logs/.test(hC), /<option value="">All actions<\/option>/.test(hC)], [true, true, true], 'wfhPageHtml: loading shows "Loading…"; the logs\' filter says All actions');
+  assertEqual([/Couldn't read it: boom &lt;x&gt;/.test(S.wfhPageHtml({ ...model, state: 'error', error: 'boom <x>', rows: [] })), /Nothing here for these filters/.test(S.wfhPageHtml({ ...model, state: 'ok', rows: [], more: false }))],
+    [true, true], 'wfhPageHtml: an error (escaped) with Try again; an empty list says so');
+  const lrows = [{ id: 'l1', run_id: 'r1', contact_id: 'c1', record_kind: 'contact', record_id: 'c1', row_kind: 'action', step_id: 'n1', step_name: 'Send text', channel: 'text', status: 'failed', reason: 'No phone', at: '2026-10-17T04:00:00Z' },
+    { id: 'l2', run_id: 'r1', contact_id: 'c1', record_kind: 'contact', record_id: 'c1', row_kind: 'step', step_id: 'gone', step_name: 'Old step', status: 'executed', at: '2026-10-17T03:00:00Z' }, { id: 'l3', run_id: 'r1', row_kind: 'enroll', status: 'added', at: '2026-10-17T02:00:00Z' }]
+    .map(r => S.wfhLogRow(r, { tz, name: () => 'Dana', exists: id => id==='n1' }));
+  assertEqual(lrows.map(r => [r.failed, r.stepId, r.stepHere, r.action.name]), [[true, 'n1', true, 'Send text'], [false, 'gone', false, 'Old step'], [false, '', false, 'Add to workflow']],
+    'wfhLogRow: failed flag; Go to action only for a step that is still there; system rows have none');
+  const hL = S.wfhPageHtml({ kind: 'log', word: 'lead', head: 'x', filters: { word: 'lead', range: { preset: '30' }, steps: { current: [{ id: 'n1', name: 'Send text' }], older: [{ id: 'gone', name: 'Old <step>' }] }, status: 'failed' }, state: 'ok', rows: lrows, canReview: true });
+  assertEqual([(hL.match(/wfh-fail/g) || []).length, /class="btn small wfh-det bad"/.test(hL), /No longer in the workflow/.test(hL), /<optgroup label="Older steps"><option value="gone">Old &lt;step&gt;<\/option>/.test(hL), /Mark as reviewed/.test(hL),
+    /wfhGoStep\('n1'\)/.test(hL), /wfhLeadView\('c1', 'r1'\)/.test(hL), /option value="failed" selected/.test(hL), /Nothing is sent/.test(hL)], [1, true, true, true, true, true, true, true, true],
+    'wfhPageHtml (logs): the failed row tinted with a red View details, Older steps, Mark as reviewed (never a send), Go to action greyed for a step that is gone');
+  assertEqual(/Mark as reviewed/.test(S.wfhPageHtml({ kind: 'log', filters: {}, state: 'ok', rows: lrows })), false, 'wfhPageHtml: no Mark as reviewed unless failures are in view');
+  const hLead = S.wfhPageHtml({ kind: 'log', filters: {}, state: 'ok', rows: lrows, lead: { name: 'Dana <b>', contactId: 'c1', runId: '1234567890abcdef', runs: [{ id: '1234567890abcdef', label: '17 Oct 2026, 3:00pm · Waiting' }] } });
+  assertEqual([/Execution ID - 12345678</.test(hLead), /Dana &lt;b&gt;/.test(hLead), /See contact path/.test(hLead), /aria-label="Enrollment"/.test(hLead), /option value="1234567890abcdef" selected/.test(hLead), /wfhLeadBack/.test(hLead), /wfhLeadView/.test(hLead)],
+    [true, true, true, true, true, true, false], 'wfhPageHtml (one lead\'s logs): the breadcrumb with the 8 characters of the execution id, "See contact path", the Enrollment switcher; no per-row lead button');
+  // 10. the drawer
+  const dm = { name: 'Dana <x>', kind: '', action: 'Send text', stepType: 'send_sms', status: S.wfhLogStatus({ status: 'failed' }), at: '17 Oct 2026, 3:00pm', tz: 'AEDT +11:00', reason: 'No phone', runId: '1234567890abcdef', version: 3, rows: D.rows, other: D.other, failed: true, stepId: 'n1', stepHere: true, contactId: 'c1' };
+  const hD = S.wfhDetailHtml(dm);
+  assertEqual([/role="dialog" aria-modal="true" aria-labelledby="wfh-dt"/.test(hD), /Dana &lt;x&gt;/.test(hD), /Hello &lt;i&gt;x&lt;\/i&gt;/.test(hD), /<i>x<\/i>/.test(hD), /<code>12345678<\/code>/.test(hD), /v3/.test(hD), /wfhDetailGo\('n1'\)/.test(hD), /Other details/.test(hD), /data-f="dclose"/.test(hD), /send sms/.test(hD)],
+    [true, true, true, false, true, true, true, true, true, true], 'wfhDetailHtml: a modal dialog; the message preview and every value as escaped text; the ids; Go to action; Other details');
+  await testWfHistoryReads(script);
+}
+
+// The reads of the history tabs: keyset paging, one read per filter change (a stale answer never replaces the newer), the lead
+// search, the per-lead view; and the shape of the whole section.
+async function testWfHistoryReads(script){
+  const tz = 'Australia/Sydney', calls = [], painted = [], tick = () => new Promise(r => setImmediate(r));
+  let replyRows = null, fail = null;
+  const mk = (n, o) => Array.from({ length: n }, (_, i) => ({ id: 'id' + i, created_at: `2026-10-17T0${i % 10}:00:00Z`, at: `2026-10-17T0${i % 10}:00:00Z`, contact_id: 'c1', record_kind: 'contact', record_id: 'c1', status: 'done', ...(o || {}) }));
+  const X = loadSandbox();
+  const fns = ['WFH', 'WF_DATA', 'wfhNewList', 'wfhInit', 'wfhGate', 'wfhLoad', 'wfhSearch', 'wfhFilter', 'wfhRefresh', 'wfhMore', 'wfhLeadView', 'wfhLeadBack', 'wfhRunPick', 'wfhPickLead', 'wfhHistory', 'wfhModel', 'wfhSteps', 'wfhNameOf', 'wfhParentName',
+    'wfhHistoryTab', 'wfhEnrollTab', 'wfhLogsTab'];
+  vm.runInContext(fns.map(n => extractDecl(script, n)).join('\n'), X);
+  const doc = { entry: 'n1', triggers: [{ id: 't1', type: 'newLead', name: 'Contact created' }], nodes: { n1: { kind: 'action', type: 'send_sms', name: 'Send text', config: {}, out: { next: null } } } };
+  Object.assign(X, { WF: { id: 'w1', token: 7, mode: 'edit', tab: 'enrollment', tz, doc, reg: {}, el: {} }, bizTz: () => tz, wfhPaint: () => painted.push(1), wfhLoadParents: () => {}, wfhLoadOlder: () => {}, wfhLoadRuns: () => {}, wfhDetailClose: () => {},
+    wfGuardWrite: () => '', contactById: id => id==='c1' ? { id: 'c1', fullName: 'Dana <b>' } : null, WF_ACTS: { tab: (W, a) => { W.tab = a.dataset.tab; } },
+    wfFetchRpc: async (name, args) => { calls.push([name, JSON.parse(JSON.stringify(args))]); await null; if (fail) throw new Error(fail); return replyRows ? replyRows(name, args) : []; } });
+  vm.runInContext(`Date.now = () => ${Date.parse('2026-10-17T00:00:00Z')}`, X);
+  const sbWith = (cs, js) => ({ from: (t) => ({ select: () => ({ or: () => ({ limit: async () => ({ data: t==='contacts' ? cs : js, error: null }) }) }) }) });
+  X.sb = sbWith([{ id: 'c1', full_name: 'Dana' }, { id: 'c2', full_name: 'Dan' }], [{ id: 'j9', contact_id: 'c3', customer_name: 'Dan Jobs' }]);
+  const run = c => vm.runInContext(c, X);
+  // paging
+  replyRows = () => mk(51);
+  run(`wfhInit(WF); wfhLoad('enr')`); await tick(); await tick();
+  const a0 = calls[0][1];
+  assertEqual([calls.length, calls[0][0], a0.p_limit, a0.p_before_created, a0.p_before_id, a0.p_status, a0.p_source, a0.p_trigger, a0.p_record_ids, a0.p_contact, a0.p_automation, a0.p_from, a0.p_to, run('WFH.enr.rows.length'), run('WFH.enr.more'), run('WFH.enr.state')],
+    [1, 'automation_enrollments', 51, null, null, null, null, null, null, null, 'w1', '2026-09-17T14:00:00.000Z', '2026-10-17T13:00:00.000Z', 50, true, 'ok'],
+    'the first page: 51 asked for 50 shown + "more"; no cursor; the 30 days on the business clock');
+  replyRows = () => mk(7);
+  run(`wfhMore('enr')`); await tick(); await tick();
+  const a1 = calls[1][1];
+  assertEqual([calls.length, a1.p_before_id, a1.p_before_created, run('WFH.enr.rows.length'), run('WFH.enr.more')], [2, 'id49', '2026-10-17T09:00:00Z', 57, false],
+    'Load more: the keyset is the last row\'s (created_at, id); the rows are appended; fewer than a page = no more');
+  run(`wfhMore('enr')`); await tick();
+  assertEqual(calls.length, 2, 'no more rows → Load more reads nothing');
+  // a filter change reads once; the first answer, stale by then, never replaces the second
+  replyRows = () => mk(2);
+  run(`wfhFilter('enr', 'status', 'active'); wfhFilter('enr', 'event', 't:t1')`); await tick(); await tick();
+  assertEqual([calls.length, calls[2][1].p_status, calls[3][1].p_status, calls[3][1].p_trigger, calls[3][1].p_source, run('WFH.enr.rows.length')], [4, ['waiting', 'running'], ['waiting', 'running'], 't1', 'trigger', 2],
+    'each filter change reads once; the older read\'s answer is dropped');
+  run(`wfhFilter('enr', 'event', 'manual'); wfhFilter('enr', 'status', '')`); await tick(); await tick();
+  assertEqual([calls[5][1].p_source, calls[5][1].p_trigger, calls[5][1].p_status], ['manual', null, null], 'event "Added manually" → source manual, no trigger');
+  // the search
+  const n0 = calls.length;
+  run(`wfhFilter('enr', 'q', 'Dan')`); await tick(); await tick(); await tick();
+  assertEqual([calls.length - n0, calls[calls.length - 1][1].p_record_ids, run('WFH.enr.note')], [1, ['c1', 'c2', 'j9'], ''], 'search (enrollments): the matching leads and jobs become the record ids');
+  X.sb = sbWith([], []);
+  const n1 = calls.length;
+  run(`wfhFilter('enr', 'q', 'nobody')`); await tick(); await tick(); await tick();
+  assertEqual([calls.length - n1, run('WFH.enr.empty'), run('WFH.enr.rows.length')], [0, 'No lead matches that.', 0], 'search with no match: nothing read, "No lead matches that."');
+  const many = Array.from({ length: 50 }, (_, i) => ({ id: 'c' + i, full_name: 'A' + i, customer_name: 'A', contact_id: 'c' + i }));
+  X.sb = sbWith(many, many);
+  run(`wfhFilter('enr', 'q', 'Aa')`); await tick(); await tick(); await tick();
+  assertEqual(run('WFH.enr.note'), 'Showing the first 50 matching leads; type more to narrow it', 'a search that hit the cap says so');
+  run(`wfhFilter('enr', 'q', '')`); await tick(); await tick(); await tick();
+  const n2 = calls.length;
+  run(`wfhFilter('log', 'q', 'Dana')`); await tick(); await tick(); await tick();
+  assertEqual([calls.length - n2, run('WFH.log.matches.length'), run('WFH.log.state')], [0, 50, 'ok'], 'logs: a search with several leads asks to pick one (the log function takes one lead); nothing read yet');
+  run(`wfhPickLead('c3')`); await tick(); await tick();
+  assertEqual([calls[calls.length - 1][0], calls[calls.length - 1][1].p_contact, run('WFH.log.lead.name'), run('WFH.log.q')], ['automation_execution_log', 'c3', 'A3', ''], 'picking one: that lead\'s logs');
+  run(`wfhLeadBack()`); await tick(); await tick();
+  X.sb = sbWith([{ id: 'c1', full_name: 'Dana', customer_name: 'D', contact_id: 'c1' }], []);
+  replyRows = () => mk(1);
+  const n3 = calls.length;
+  run(`wfhFilter('log', 'q', 'Dana')`); await tick(); await tick(); await tick();
+  const al = calls[calls.length - 1][1];
+  assertEqual([calls.length - n3, calls[calls.length - 1][0], al.p_contact, al.p_run, al.p_steps, al.p_status, al.p_before_at], [1, 'automation_execution_log', 'c1', null, null, null, null], 'logs: one matching lead → its id is the p_contact; no run, step or status filter');
+  run(`wfhFilter('log', 'step', 'n1'); wfhFilter('log', 'status', 'failed')`); await tick(); await tick();
+  const af = calls[calls.length - 1][1];
+  assertEqual([af.p_steps, af.p_status], [['n1'], ['failed']], 'logs: the action and the status filters');
+  fail = 'denied';
+  run(`wfhRefresh('log')`); await tick(); await tick();
+  assertEqual([run('WFH.log.state'), run('WFH.log.error')], ['error', 'denied'], 'a failed read → the error state with its words (Try again reads again)');
+  fail = null;
+  run(`WFH.log.q = ''; WFH.log.step = ''; WFH.log.status = ''; wfhLeadView('c1', 'run1')`); await tick(); await tick();
+  assertEqual([run('WFH.log.lead.name'), run('WFH.log.runId'), calls[calls.length - 1][1].p_run, calls[calls.length - 1][1].p_contact, run('WF.tab'), run('WFH.log.range.preset')], ['Dana <b>', 'run1', 'run1', 'c1', 'logs', '180'],
+    'a run\'s clock: that lead and run, the logs tab, the 180 days');
+  run(`wfhRunPick('')`); await tick(); await tick();
+  assertEqual([calls[calls.length - 1][1].p_run, calls[calls.length - 1][1].p_contact], [null, 'c1'], 'the Enrollment switcher: all of the lead\'s runs');
+  run(`wfhLeadBack()`); await tick(); await tick();
+  assertEqual([run('WFH.log.lead'), calls[calls.length - 1][1].p_contact], [null, null], 'Logs / back → all leads');
+  // the tab functions only draw: a second drawing reads nothing; the names are the lead card's, escaped
+  replyRows = () => mk(2, { trigger_id: 't1', cursor_step: 'n1', status: 'waiting', due_at: '2026-10-18T04:00:00Z', source: 'trigger' });
+  run(`WF.tab = 'enrollment'; WFH.enr = wfhNewList(); WFH.enr.status = ''; wfhLoad('enr')`); await tick(); await tick();
+  const n4 = calls.length, h = run('wfhEnrollTab(WF)'), h2 = run('wfhEnrollTab(WF)');
+  assertEqual([h===h2, calls.length - n4, /Dana &lt;b&gt;/.test(h), /Contact created/.test(h), /Send text/.test(h), /17 Oct 2026, 11:00am/.test(h)], [true, 0, true, true, true, true],
+    'a history tab drawn twice reads nothing; names, trigger and step are there');
+  run(`WFH.log = wfhNewList(); WF.tab = 'logs'`);
+  const n5 = calls.length, hl = run('wfhLogsTab(WF)'); await tick(); await tick();
+  assertEqual([calls.length - n5, /Execution logs/.test(hl)], [1, true], 'the Execution logs tab starts its first read once (state idle → loading) and draws');
+  run(`WF.id = null`); const n6 = calls.length; run(`wfhLoad('enr')`); await tick();
+  assertEqual([calls.length, /Save the workflow first/.test(run('wfhEnrollTab(WF)'))], [n6, true], 'an unsaved workflow reads nothing and says so');
+  run(`WF.id = 'w1'; WF.mode = 'system'`); run(`wfhLoad('enr')`); await tick();
+  assertEqual([calls.length, /built-in system/.test(run('wfhLogsTab(WF)'))], [n6, true], 'a System workflow reads nothing (its history starts when it moves into the engine)');
+  // the section's shape: what it plugs into, what it may write
+  const sec = script.slice(script.indexOf('// ══ A workflow\'s Settings, Enrollment history and Execution logs tabs'), script.indexOf('// ══ The template library (stage 2 G3.3;'));
+  const code = sec.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
+  assertEqual([sec.length > 1000, /\brender\(\)/.test(code), /autoFnCall\(/.test(code), code.match(/sb\.rpc\('[a-z_]+'/g), /\.(insert|update|upsert|delete)\(/.test(code), /\bfetch\(/.test(code)],
+    [true, false, false, ["sb.rpc('automation_mark_reviewed'"], false, false], 'the section: no render(), no function step, no table write, no fetch; "Mark as reviewed" is the only write');
+  const rpcs = [...code.matchAll(/wfFetchRpc\(\s*'([a-z_]+)'/g)].map(m => m[1]).concat([...code.matchAll(/name = '([a-z_]+)'/g)].map(m => m[1]));
+  const RO = vm.runInContext(`${extractDecl(script, 'READ_ONLY_CALLS')}; READ_ONLY_CALLS`, vm.createContext({}));
+  assertEqual([[...new Set(rpcs)].sort(), [...new Set(rpcs)].filter(n => !RO.rpc.includes(n)), RO.rpc.includes('automation_trigger_days')], [['automation_enrollments', 'automation_execution_log', 'automation_log_steps'], [], true],
+    'every RPC the tabs read is in READ_ONLY_CALLS (Presentation mode and View as can look); automation_trigger_days (G6.1) is there too');
+  assertEqual([/Object\.assign\(WF_HOOKS\.tabs, \{ settings: wfhSettingsTab, enrollment: wfhEnrollTab, logs: wfhLogsTab \}\)/.test(code), /navLayer\(\{ id: 'history-details', z: 220,/.test(code), /el\.id = 'wfh-drawer'/.test(code), /getElementById\('modal-root'\)/.test(code)],
+    [true, true, true, true], 'the tabs plug into WF_HOOKS.tabs; the drawer is a navLayer at z 220 in #modal-root (the builder\'s keys step aside while it is open)');
+  assertEqual([/wfhOpenLogs\('\$\{k\}', 'failed'\)/.test(script), /The execution logs come with the new builder/.test(script), /wfhFromLink\(L\)/.test(script)], [true, false, true], 'Needs review → Review opens the workflow on its Execution logs (Failed); a link\'s wfTab opens its tab');
+  const tabFn = (code.match(/function wfhHistoryTab\(W, kind\)\{[\s\S]*?\n\}/) || [''])[0];
+  assertEqual([/L\.state==='idle'\) \{ L\.state = 'loading'; Promise\.resolve\(\)\.then\(\(\) => wfhLoad\(kind\)\); \}/.test(tabFn), /sb\./.test(tabFn)], [true, false], 'a history tab starts its first read once, from state idle (a repaint never reads again)');
+  const sset = (code.match(/function wfhSet\(key, v\)\{[\s\S]*?\n\}/) || [''])[0];
+  assertEqual([/wfCommit\(WF_SET_LABELS\[key\]/.test(sset), /coalesce: true/.test(sset)], [true, true], 'a Settings control is a builder commit (undo, the local draft, the top Save)');
+}
+
 (async () => {
   await testVacationFollowUps();
   await testWfSaveRuntime();
@@ -8473,6 +8725,7 @@ async function testWfLeadBlock(){
   await testCobraStream();
   await testCobraChangeFlow();
   await testWfLeadBlock();
+  await testWfHistoryTabs();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });

@@ -2216,6 +2216,70 @@ body.pipe-dragging, body.pipe-dragging * { cursor: grabbing !important; user-sel
 .lm-wf-when label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; }
 .lm-wf-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .lm-wf-err { color: var(--bad); font-size: 12px; margin-top: 6px; }
+/* a workflow's Settings, Enrollment history and Execution logs tabs and the View details drawer (stage 2 G6.2, design §4.6, §4.8) */
+.wfh { position: relative; min-width: 0; max-width: 1120px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.wfh h2 { margin: 0; font-size: 16px; }
+.wfh-head { display: flex; flex-direction: column; gap: 2px; }
+.wfh-sub-p { margin: 0; color: var(--ink-soft); font-size: 13px; }
+.wfh-note { margin: 0; padding: 10px 12px; border: 1px solid var(--wf-ro-line); border-radius: var(--radius); background: var(--wf-ro); color: var(--wf-ro-ink); font-size: 13px; }
+.wfh-bad { margin: 0; padding: 8px 12px; border-radius: var(--radius); background: var(--bad-soft); color: var(--bad); font-size: 13px; }
+.wfh-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; }
+.wfh-card > h2 { margin-bottom: 4px; }
+.wfh-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line-soft); }
+.wfh-card > h2 + .wfh-row { border-top: 0; }
+.wfh-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.wfh-txt b { font-size: 13.5px; }
+.wfh-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; max-width: 100%; }
+.wfh-radios { display: flex; flex-direction: column; gap: 2px; }
+.wfh-sub { display: flex; flex-direction: column; gap: 10px; padding: 0 0 12px; }
+.wfh-sub.off { opacity: .55; }
+.wfh-times { display: flex; flex-wrap: wrap; gap: 12px; }
+.wfh-times label, .wfh-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+.wfh-times select { min-width: 130px; }
+.wfh-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.wfh-day { min-width: 46px; min-height: 34px; font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink-soft); cursor: pointer; }
+.wfh-day[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.wfh-day:disabled { cursor: default; opacity: .6; }
+.wfh-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.wfh-sigrow { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.wfh-sig, .wfh-pre { margin: 0; max-width: 100%; padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--surface-2); color: var(--ink); font: inherit; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wfh-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wfh-bar select, .wfh-bar input { width: auto; max-width: 100%; min-height: 34px; }
+.wfh-bar input[type=search] { flex: 1 1 180px; min-width: 140px; }
+.wfh-ib { min-width: 32px; min-height: 32px; padding: 5px; }
+.wfh-cap { margin: 0; }
+.wfh-review, .wfh-more, .wfh-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wfh-more { justify-content: center; }
+.wfh-table td { vertical-align: middle; }
+.wfh-rec { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.wfh-rec b { font-weight: 600; overflow-wrap: anywhere; }
+.wfh-tz { display: block; font-size: 11px; color: var(--ink-faint); }
+.wfh-act { display: inline-flex; align-items: center; gap: 6px; }
+.wfh-table tr.wfh-fail { background: var(--bad-soft); }
+.wfh-table tr.wfh-fail:hover { background: var(--bad-soft); }
+.wfh-det.bad { background: var(--bad); border-color: var(--bad); color: var(--surface); }
+.wfh-lead { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.wfh-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
+.wfh-leadrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wfh-sw { display: inline-flex; align-items: center; gap: 6px; margin-inline-start: auto; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
+.wfh-sw select { width: auto; max-width: 100%; min-height: 34px; }
+.wfh-back { position: fixed; inset: 0; z-index: 110; display: flex; justify-content: flex-end; background: var(--wf-scrim); }
+.wfh-drawer { width: min(480px, 100%); height: 100%; display: flex; flex-direction: column; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-lg); border-inline-start: 1px solid var(--line); }
+.wfh-dhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.wfh-dhead h2 { margin: 0; font-size: 16px; }
+.wfh-dbody { flex: 1; min-height: 0; overflow: auto; padding: 8px 16px; }
+.wfh-dbody dl { margin: 0; }
+.wfh-d { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+.wfh-d dt { color: var(--ink-soft); font-size: 12px; font-weight: 600; }
+.wfh-d dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.wfh-dfoot { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+@media (max-width: 600px) {
+  .wfh { padding: 12px; }
+  .wfh-row { flex-direction: column; }
+  .wfh-ctl { justify-content: flex-start; }
+  .wfh-sw { margin-inline-start: 0; }
+  .wfh-d { grid-template-columns: 1fr; gap: 2px; }
+}
 .lead-sub-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 99px; white-space: nowrap; color: var(--ink-soft); border: 1px solid var(--line); }
 .stage-select { border-color: color-mix(in srgb, var(--stage) 70%, var(--line)) !important; box-shadow: inset 4px 0 0 var(--stage); }
 .jobs-table select.lead-assignee { width: auto; max-width: 160px; }
@@ -4829,7 +4893,7 @@ function presentBlocked(){
 // 'record_runs' join the steps once each is proven to write nothing: today schema and validate, given a workflow id, can
 // upgrade a row that has no doc yet.)
 const READ_ONLY_CALLS = { rpc: ['automation_list_stats', 'automation_trigger_stats', 'automation_trigger_evals', 'automation_unmatch_reasons', 'automation_step_stats',
-  'automation_enrollments', 'automation_execution_log', 'automation_log_steps', 'automation_needs_review'], fn: ['registry', 'record_runs'] };
+  'automation_enrollments', 'automation_execution_log', 'automation_log_steps', 'automation_needs_review', 'automation_trigger_days'], fn: ['registry', 'record_runs'] };
 {
   const realFrom = sb.from.bind(sb);
   sb.from = (table) => { const q = realFrom(table); if (!PRESENT && !VIEW_AS_ID) return q; ['insert','update','upsert','delete'].forEach(m => { q[m] = () => presentBlocked(); }); return q; };
@@ -20925,7 +20989,7 @@ function wfReviewHtml(rows){
   return `<div class="table-wrap wf-table"><table><thead><tr><th>Name</th><th>Status</th><th>Errors</th><th>Last error</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows.map(x => { const S = wfStatusOf(x), k = esc(jsStr(x.key)); return `<tr>
     <td class="wrap"><span class="wf-name">${esc(x.name || 'Untitled workflow')}</span>${x.problems.length ? `<div class="hint">${x.problems.map(p => esc(wfProblemText(p))).join('<br>')}</div>` : ''}</td><td>${pill(S.tone, S.label)}</td>
     <td>${esc(x.errors)}</td><td>${esc(wfDateText(x.lastErrorAt))}</td>
-    <td class="wf-acts"><button type="button" class="btn small ghost" aria-disabled="true" title="The execution logs come with the new builder" onclick="showToast('The execution logs come with the new builder', { kind: 'info' })">Review</button><button type="button" class="btn small" onclick="wfMarkReviewed('${k}')">Mark as reviewed</button></td></tr>`; }).join('')}</tbody></table></div>`;
+    <td class="wf-acts"><button type="button" class="btn small ghost" onclick="wfhOpenLogs('${k}', 'failed')">Review</button><button type="button" class="btn small" onclick="wfMarkReviewed('${k}')">Mark as reviewed</button></td></tr>`; }).join('')}</tbody></table></div>`;
 }
 function wfBreadcrumbHtml(path){
   const parts = [`<button type="button" class="wf-crumb" onclick="wfOpenFolder(null)">Home</button>`].concat((path || []).map((f, i) => i===path.length - 1
@@ -21591,7 +21655,7 @@ function wfFromLink(L){
   if (!L.wf && !L.listTab) return;
   WF_UI.tab = 'workflows';
   if (L.listTab) WF_UI.listTab = L.listTab;
-  if (L.wf) setTimeout(() => wfEdit(L.wf), 0);
+  if (L.wf) setTimeout(() => { Promise.resolve(wfEdit(L.wf)).then(() => wfhFromLink(L)); }, 0);
 }
 // Edit, a link's ?wf=…, Duplicate: wfEdit (the workflow builder's section) opens the new builder; a System row read-only.
 
@@ -27325,6 +27389,620 @@ async function wfEdit(key){
   if (!row) { if (WF_UUID_RE.test(k)) showToast('That workflow is no longer there', { kind: 'warn' }); return; }
   if (row.deleted_at) { showToast('It is in Deleted: restore it first', { kind: 'info' }); return; }
   wfBuilderOpen(row, { mode: 'edit' });
+}
+
+// ══ A workflow's Settings, Enrollment history and Execution logs tabs (stage 2, phase 6 · G6.2; design §4.6, §4.8) ══
+// They plug into the builder shell through WF_HOOKS.tabs (the shell paints the tab body; wfPatch skips an unchanged string),
+// and nothing here calls render(). The Settings tab edits the builder's draft: every change is a builder commit (undo, the
+// local draft, the top Save). The two history tabs read the database's own functions (automation_enrollments and
+// automation_execution_log: security invoker, stable, keyset paged on created_at | at plus id) once per filter change; a
+// read that ends repaints this tab only (wfhPaint), never the page. Nothing here sends anything to a customer: reading, and
+// "Mark as reviewed" (automation_mark_reviewed, an acknowledgement), are all it does. The View details drawer is a layer of
+// stage 4's page history (navLayer, z 220: a window's drawer sits between 200 and 300).
+const WF_HIST = { page: 50, cap: 1000, maxDays: 180, defDays: 30, leads: 50, term: 60, digitsMin: 3, digitsMax: 15, older: 100, text: 2000 };
+const WF_HIST_PRESETS = [['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days'], ['180', 'Last 180 days'], ['custom', 'Custom dates']];
+// A run's status pill (design §4.8; a waiting run held by a Pause workflow range shows Paused, amber).
+const WF_RUN_STATUS = { waiting: ['Waiting', 'neutral'], paused: ['Paused', 'warn'], running: ['Executing', 'good'], done: ['Finished', 'good'], skipped: ['Ended', 'neutral'],
+  removed: ['Removed', 'neutral'], cancelled: ['Removed', 'neutral'], stopped: ['Stopped', 'warn'], failed: ['Failed', 'bad'] };
+// The "All statuses" filter: [key, label, the run statuses it asks for]; "Paused" is waiting runs the page keeps when they are held.
+const WF_RUN_FILTERS = [['', 'All statuses', null], ['active', 'Active', ['waiting', 'running']], ['waiting', 'Waiting', ['waiting']], ['paused', 'Paused', ['waiting']], ['done', 'Finished', ['done']],
+  ['skipped', 'Ended', ['skipped']], ['removed', 'Removed', ['removed', 'cancelled']], ['stopped', 'Stopped', ['stopped']], ['failed', 'Failed', ['failed']]];
+// Why a run was removed, by the run's exit_reason (the engine's words); "Removed by <name>" is the run's own reason.
+const WF_RUN_REMOVED = { removed_by_action: 'Removed by Workflow Action', removed_by_external_action: 'Removed by External Workflow Action', automation_changed: 'Workflow changed',
+  switched_off: 'Switched to Draft', deleted: 'Workflow deleted' };
+// A log row's status: [label, tone]; the filter groups them the way GHL's eight do.
+const WF_LOG_STATUS = { added: ['Added To Workflow', 'neutral'], executed: ['Executed', 'good'], sent: ['Sent', 'good'], sending: ['Sending', 'neutral'], queued: ['Queued', 'neutral'],
+  waiting_phone: ['Waiting for the phone line', 'warn'], waiting: ['Waiting', 'neutral'], wait_finished: ['Wait Finished', 'good'], branch: ['Branch taken', 'good'], jumped: ['Went to a step', 'good'],
+  skipped: ['Skipped', 'neutral'], failed: ['Failed', 'bad'], finished: ['Finished', 'good'], removed: ['Removed', 'neutral'], stopped: ['Stopped', 'warn'] };
+const WF_LOG_FILTERS = [['', 'All statuses', null], ['added', 'Added To Workflow', ['added']], ['executed', 'Executed', ['executed', 'sent', 'sending', 'queued', 'branch', 'jumped']],
+  ['waiting', 'Waiting', ['waiting', 'waiting_phone']], ['wait_finished', 'Wait Finished', ['wait_finished']], ['skipped', 'Skipped', ['skipped']], ['failed', 'Failed', ['failed']],
+  ['finished', 'Finished', ['finished']], ['removed', 'Removed', ['removed', 'stopped']]];
+// The words for a log row's detail keys (View details); a key not here is shown as escaped JSON under "Other details".
+const WF_DETAIL_LABELS = { to: 'To', subject: 'Subject', body: 'Message', title: 'Title', signature: 'Signature', author: 'Written as', host: 'Sent to', text: 'Details', code: 'Code', outcome: 'Outcome',
+  resumed_by: 'Resumed by', branch_id: 'Branch', path_id: 'Path', path_name: 'Path name', percent: 'Share (%)', kept: 'Kept its path', met: 'Goal met', then: 'Then', waited: 'Waited first', goal: 'Goal',
+  target: 'Goes to', target_step_id: 'Goes to step', workflow_id: 'Workflow', run_id: 'Run', scope: 'Scope', paused_until: 'Paused until', exit_reason: 'Exit reason', run_reason: 'Run reason',
+  by_name: 'Removed by', by_run: 'Removed by run', applied: 'Changes made', skipped: 'Left out', ops: 'Changes', invoice: 'Invoice', review_link: 'Review link', phone: 'Has a phone number', email: 'Has an email',
+  vacation: 'Vacation', chain_depth: 'Workflows chained' };
+const WF_DETAIL_BLOCKS = ['body', 'signature', 'text'];
+const WF_DETAIL_HIDDEN = ['by'];
+const WF_KIND_WORD = { contact: 'Lead', job: 'Job', call: 'Call', chat: 'Chat', task: 'Task', supplier: 'Supplier', employee: 'Employee', hook: 'Webhook', none: '' };
+const WF_DAYS = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [0, 'Sun']];
+const WF_SET_LABELS = { reentry: 'Allow re-entry', perRecord: 'Allow multiple jobs', stopOnResponse: 'Stop on response', timezone: 'Timezone', windowOn: 'Time window', from: 'Time window start',
+  until: 'Time window end', day: 'Time window days', fromName: 'Sender name', markRead: 'Mark as read' };
+
+// ── pure helpers (tests/business-logic.test.js) ──
+// The records a search term can mean, as PostgREST .or() filters → { contacts, jobs, digits } | null (under 2 characters). Values go
+// in double quotes (a comma or bracket in a name can't break the filter); '"', '\' and control characters are dropped, and so is
+// '*' (a wildcard there); '%' and '_' are escaped so they match themselves. The phone clause only with 3 or more digits, the
+// digits spaced with '%' so "0412 345 678" and "+61 412…" both match. Jobs match through the customer's name and the invoice number.
+function wfRecordSearchFilter(term){
+  const raw = String(term ?? '').replace(/[\u0000-\u001f"\\*]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, WF_HIST.term);
+  if (raw.length < 2) return null;
+  const like = `"%${raw.replace(/[%_]/g, m => '\\\\' + m)}%"`, digits = raw.replace(/\D/g, '').slice(0, WF_HIST.digitsMax), phone = digits.length >= WF_HIST.digitsMin;
+  return { contacts: [`full_name.ilike.${like}`, `email.ilike.${like}`].concat(phone ? [`phone.ilike."%${digits.split('').join('%')}%"`] : []).join(','),
+    jobs: `customer_name.ilike.${like},invoice_number.ilike.${like}`, digits: phone ? digits : '' };
+}
+function wfhDayOk(d){ const s = String(d ?? ''); return /^\d{4}-\d{2}-\d{2}$/.test(s) && wfDayShift(s, 0)===s; }
+function wfhDaysBetween(a, b){ return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000); }
+// The date filter ({ preset, from, to } as the business's days) → { from, to (days), fromIso, toIso (to is the start of the next day),
+// days } | { error }. A preset counts back from today; custom dates are at most 180 days and not older than the 180 days kept.
+function wfhRange(rg, nowMs, tz){
+  const x = wfObj(rg), today = bizPartsIn(nowMs, tz).day, preset = WF_HIST_PRESETS.some(p => p[0]===String(x.preset)) ? String(x.preset) : String(WF_HIST.defDays);
+  let from, to;
+  if (preset==='custom') {
+    from = String(x.from ?? ''); to = String(x.to ?? '');
+    if (!wfhDayOk(from) || !wfhDayOk(to)) return { error: 'Pick both dates' };
+    if (to > today) to = today;
+  } else { to = today; from = wfDayShift(today, 1 - Number(preset)); }
+  if (from > to) return { error: 'The first date is after the last one' };
+  if (wfhDaysBetween(from, to) + 1 > WF_HIST.maxDays) return { error: `Pick at most ${WF_HIST.maxDays} days` };
+  if (wfhDaysBetween(from, today) > WF_HIST.maxDays) return { error: `Only the last ${WF_HIST.maxDays} days are kept` };
+  return { from, to, days: wfhDaysBetween(from, to) + 1, fromIso: new Date(bizToUtc(from, 0, 0, tz)).toISOString(), toIso: new Date(bizToUtc(wfDayShift(to, 1), 0, 0, tz)).toISOString() };
+}
+function wfhMs(t){ return typeof t==='number' ? t : t instanceof Date ? t.getTime() : Date.parse(String(t ?? '')); }
+// "17 Oct 2026, 3:00pm" on the business's clock ('—' for no date); and "AEDT +11:00": the zone's short name and offset at that instant.
+function wfhWhen(t, tz){
+  const ms = wfhMs(t); if (!Number.isFinite(ms)) return '—';
+  const p = bizPartsIn(ms, tz), m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(p.day);
+  return m ? `${+m[3]} ${MONTHS[+m[2] - 1]} ${m[1]}, ${hhmm12(String(p.hour).padStart(2, '0') + ':' + String(p.minute).padStart(2, '0'))}` : '—';
+}
+function wfhTzText(t, tz){
+  const ms0 = wfhMs(t); if (!Number.isFinite(ms0)) return '';
+  const ms = ms0 - ms0 % 60000, p = bizPartsIn(ms, tz), [y, mo, d] = p.day.split('-').map(Number), off = Math.round((Date.UTC(y, mo - 1, d, p.hour, p.minute) - ms) / 60000), a = Math.abs(off);
+  let name = '';
+  try { name = (new Intl.DateTimeFormat('en-AU', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date(ms)).find(x => x.type==='timeZoneName') || {}).value || ''; } catch (e) { name = ''; }
+  return `${/^[A-Z]{2,5}$/.test(name) ? name + ' ' : ''}${off < 0 ? '-' : '+'}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`;
+}
+// A run's status → { key, label, tone, tip }: Paused when it waits held by a pause; Removed with who or what removed it;
+// Stopped "The lead replied"; an unknown status keeps its own word.
+function wfhRemovedText(run){
+  const r = wfObj(run), code = String(r.exit_reason ?? '');
+  return code==='removed_by_user' ? String(r.reason || 'Removed by someone') : WF_RUN_REMOVED[code] || String(r.reason || 'Removed');
+}
+function wfhRunStatus(run){
+  const r = wfObj(run), st = String(r.status ?? ''), paused = st==='waiting' && Array.isArray(r.watch) && r.watch.includes('pause'), key = paused ? 'paused' : st, e = WF_RUN_STATUS[key];
+  const tip = key==='removed' || key==='cancelled' ? wfhRemovedText(r) : key==='stopped' ? 'The lead replied' : key==='paused' ? 'Held by a Pause workflow range' : key==='skipped' || key==='failed' ? String(r.reason || '') : '';
+  return { key, label: e ? e[0] : (st || 'Unknown'), tone: e ? e[1] : 'neutral', tip };
+}
+// "Waiting" leaves the held runs out and "Paused" keeps only them (the database knows only the status waiting).
+function wfhKeepRun(filter, run){ const k = wfhRunStatus(run).key; return filter==='paused' ? k==='paused' : filter==='waiting' ? k==='waiting' : true; }
+function wfhLogStatus(row){ const st = String(wfObj(row).status ?? ''), e = WF_LOG_STATUS[st]; return { key: st, label: e ? e[0] : (st || 'Unknown'), tone: e ? e[1] : 'neutral' }; }
+// The run statuses a filter key asks the database for (null = all); the key's other label parts are in WF_RUN_FILTERS / WF_LOG_FILTERS.
+function wfhFilterStatuses(list, key){ const f = (Array.isArray(list) ? list : []).find(x => x[0]===String(key ?? '')); return f && f[2] ? f[2].slice() : null; }
+// The triggers' names (a trigger's own name, else the registry's) and the kind of record the workflow is about: "job" when every
+// trigger starts from a job, and so on; "lead" otherwise.
+function wfhTriggers(doc, reg){
+  return (Array.isArray(wfObj(doc).triggers) ? doc.triggers : []).map(t => { const x = wfObj(t), e = wfTrigEntry(reg, x.type); return { id: String(x.id ?? ''), name: String(x.name || (e && (e.ghl || e.label)) || x.type || 'Trigger'), kind: e ? String(e.recordKind || '') : '' }; }).filter(t => t.id);
+}
+function wfhRecordWord(doc, reg){
+  const kinds = [...new Set(wfhTriggers(doc, reg).map(t => t.kind).filter(Boolean))];
+  return kinds.length===1 && ['job', 'call', 'chat'].includes(kinds[0]) ? kinds[0] : 'lead';
+}
+// "Added manually by Kim" | "Added by workflow <name>" | the trigger's name | "Removed trigger" (the trigger is not in the workflow now).
+function wfhEnrollReason(run, triggerName, parentName){
+  const r = wfObj(run), c = wfObj(r.context);
+  if (r.source==='manual') return c.byName ? `Added manually by ${c.byName}` : 'Added manually';
+  if (r.source==='workflow') return parentName ? `Added by workflow ${parentName}` : 'Added by another workflow';
+  return triggerName || 'Removed trigger';
+}
+// The Action column of a log row: its name and icon; the system rows have words of their own.
+function wfhLogAction(row){
+  const r = wfObj(row), kind = String(r.row_kind ?? ''), type = String(r.step_type ?? ''), ch = String(r.channel ?? '');
+  if (kind==='enroll') return { name: 'Add to workflow', icon: 'userPlus', system: true };
+  if (kind==='exit') return { name: 'Removed by - ' + (String(r.reason ?? '').replace(/^Removed by\s*-?\s*/i, '').trim() || 'End Of Workflow'), icon: 'x', system: true };
+  const byChannel = { push: 'bell', task: 'tasks', email: 'mail', text: 'message', chat: 'chat', review: 'star', webhook: 'link', record: 'pencil' };
+  const icon = byChannel[ch] || (/wait/.test(type) ? 'clock' : /if_else|branch/.test(type) ? 'branch' : /split/.test(type) ? 'split' : /goto|go_to/.test(type) ? 'corner' : /goal/.test(type) ? 'flag' : 'zap');
+  return { name: String(r.step_name || type.replace(/_/g, ' ') || 'Step'), icon, system: false };
+}
+// A log row's detail → [{ label, text, block }] for the keys WF_DETAIL_LABELS knows, and the rest as one escaped-JSON text ('' = none).
+function wfhVal(v){
+  if (v===null || v===undefined || v==='') return '—';
+  if (typeof v==='boolean') return v ? 'Yes' : 'No';
+  if (typeof v==='string' || typeof v==='number') return String(v).slice(0, WF_HIST.text);
+  if (Array.isArray(v) && v.every(x => typeof x==='string' || typeof x==='number')) return v.join(', ').slice(0, WF_HIST.text);
+  try { return JSON.stringify(v).slice(0, WF_HIST.text); } catch (e) { return '—'; }
+}
+function wfhDetailRows(detail){
+  const d = wfObj(detail), rows = [], rest = {};
+  Object.keys(d).forEach(k => {
+    if (WF_DETAIL_HIDDEN.includes(k)) return;
+    if (wfHas(WF_DETAIL_LABELS, k)) { const text = wfhVal(d[k]); rows.push({ label: WF_DETAIL_LABELS[k], text, block: WF_DETAIL_BLOCKS.includes(k) || text.length > 90 }); }
+    else rest[k] = d[k];
+  });
+  let other = ''; try { other = Object.keys(rest).length ? JSON.stringify(rest, null, 1).slice(0, WF_HIST.text) : ''; } catch (e) { other = ''; }
+  return { rows, other };
+}
+// The Settings tab: the next settings after one control changed (always the full, clamped object; legacy_always stays until
+// the person switches re-entry off). Moving the start past the end pushes the end 15 minutes after it, and the reverse;
+// the last allowed day can't be taken off.
+function wfhHm(min){ const m = Math.max(0, Math.min(1440, Math.round(min))); return m===1440 ? '24:00' : `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; }
+function wfhSettingsSet(cur, key, v){
+  const s = wfNormSettings(cur), w = { ...s.window, days: [...s.window.days] }, next = { ...s, window: w, sender: { ...s.sender } };
+  if (key==='reentry') next.reentry = v===true ? 'after_exit' : 'off';
+  else if (key==='perRecord') next.perRecord = v===true;
+  else if (key==='stopOnResponse') next.stopOnResponse = v===true;
+  else if (key==='timezone') next.timezone = v==='contact' ? 'contact' : 'business';
+  else if (key==='windowOn') w.on = v===true;
+  else if (key==='from' || key==='until') {
+    const m = wfHm(String(v ?? ''));
+    if (m!==null) { w[key] = String(v); if (key==='from' && m >= wfHm(w.until)) w.until = wfhHm(Math.min(1440, m + 15)); if (key==='until' && m <= wfHm(w.from)) w.from = wfhHm(Math.max(0, m - 15)); }
+  } else if (key==='day') {
+    const d = Number(v);
+    if (Number.isInteger(d) && d >= 0 && d <= 6) { const days = w.days.includes(d) ? w.days.filter(x => x!==d) : w.days.concat([d]); if (days.length) w.days = days; }
+  } else if (key==='fromName') next.sender.fromName = String(v ?? '').trim().slice(0, 60) || null;
+  else if (key==='markRead') next.markRead = v===true;
+  return wfNormSettings(next, cur);
+}
+// What the person must fix in the settings (the engine's wfSettingsProblems: the same codes and words on every case).
+function wfSettingsProblems(raw, prev, ctx){
+  const r = wfObj(raw), p = wfObj(prev), out = [], err = (code, path, text) => out.push({ code, severity: 'error', path: '/settings' + path, text });
+  if (r.reentry!=null && !['off', 'after_exit', 'legacy_always'].includes(r.reentry)) err('E_SCHEMA', '/reentry', 'Pick how leads can enter again');
+  if (r.reentry==='legacy_always' && p.reentry!=='legacy_always') err('E_SCHEMA', '/reentry', 'This re-entry option is only kept on upgraded workflows');
+  if (r.timezone==='contact') err('E_UNAVAILABLE', '/timezone', 'Leads have no time zone yet');
+  else if (r.timezone!=null && r.timezone!=='business') err('E_SCHEMA', '/timezone', 'Pick the time zone');
+  const w = wfObj(r.window);
+  if (w.on===true) {
+    if (!Array.isArray(w.days) || !w.days.length || w.days.some(d => !Number.isInteger(d) || d < 0 || d > 6)) err('E_SCHEMA', '/window/days', 'The time window has no allowed day');
+    const f = wfHm(w.from), u = wfHm(w.until);
+    if (f===null || u===null || f >= u || f >= 1440) err('E_SCHEMA', '/window/from', 'The time window\'s hours are not valid');
+  }
+  const nm = wfObj(r.sender).fromName;
+  if (nm!=null && (typeof nm!=='string' || nm.length > 60)) err('E_SCHEMA', '/sender/fromName', 'The sender name is at most 60 characters');
+  void ctx;
+  return out;
+}
+// The Pause workflow ranges that cover this workflow now or later → [{ start, end, now }] (ms; the next three, soonest first).
+function wfhPauseRanges(pauses, id, nowMs, tz){
+  const out = [];
+  (Array.isArray(pauses) ? pauses : []).forEach(p => {
+    if (!(p && Array.isArray(p.automation_ids) && p.automation_ids.map(String).includes(String(id)))) return;
+    wfPauseOccurrences(p, nowMs, tz).forEach(o => { if (o.end > nowMs) out.push({ start: o.start, end: o.end, now: o.start <= nowMs }); });
+  });
+  return out.sort((a, b) => a.start - b.start).slice(0, 3);
+}
+function wfhTimeLabel(t){ return t==='24:00' ? 'Midnight' : hhmm12(t) || String(t); }
+// The Settings tab. s = { settings (the draft), base (what is saved), ro (why it can't be changed, ''), tzLabel, signature, pause: [wfhPauseRanges],
+// tz }. Every control calls wfhSet(key, value); a locked one says why.
+function wfhSettingsHtml(s){
+  const x = wfObj(s), S = wfNormSettings(x.settings), ro = String(x.ro || ''), tz = String(x.tz || 'UTC'), legacy = S.reentry==='legacy_always';
+  const sw = (on, key, id) => setToggle(on, `wfhSet('${key}', ${!on})`, ro || false, `data-f="set-${key}" aria-labelledby="wfh-l-${id}"`);
+  const row = (id, label, help, ctl) => `<div class="wfh-row"><div class="wfh-txt"><b id="wfh-l-${id}">${esc(label)}</b>${help ? `<span class="hint">${help}</span>` : ''}</div><div class="wfh-ctl">${ctl}</div></div>`;
+  const dis = ro ? ` disabled title="${esc(ro)}"` : '';
+  const opts = (from, to, sel) => { const list = []; for (let m = from; m <= to; m += 15) list.push(wfhHm(m)); if (wfHm(sel)!==null && !list.includes(sel)) list.push(sel); list.sort((a, b) => wfHm(a) - wfHm(b));
+    return list.map(t => `<option value="${esc(t)}"${t===sel ? ' selected' : ''}>${esc(wfhTimeLabel(t))}</option>`).join(''); };
+  const win = S.window, wd = !win.on || ro ? ' disabled' : '';
+  const lead = `<section class="wfh-card" aria-labelledby="wfh-h-lead"><h2 id="wfh-h-lead">Lead</h2>`
+    + row('reentry', 'Allow re-entry', esc('Lets a lead go through this workflow again after it has finished.') + (legacy ? '<br>' + esc('Also while still in it (kept from before). Switch off and on to use the standard rule.') : ''), sw(S.reentry!=='off', 'reentry', 'reentry'))
+    + row('perRecord', 'Allow multiple jobs', esc('Lets a lead with several jobs go through this workflow once per job. Off: once per lead.'), sw(S.perRecord, 'perRecord', 'perRecord'))
+    + row('stopOnResponse', 'Stop on response', esc('Stops the workflow for a lead who replies. Replies by text count once the phone line (Twilio) is connected.'), sw(S.stopOnResponse, 'stopOnResponse', 'stopOnResponse')) + '</section>';
+  const comm = `<section class="wfh-card" aria-labelledby="wfh-h-comm"><h2 id="wfh-h-comm">Communication</h2>`
+    + row('tz', 'Timezone', esc('The clock the waits, the time window and the dates in messages follow.'), `<div class="wfh-radios" role="radiogroup" aria-labelledby="wfh-l-tz">`
+      + `<label class="au-check"><input type="radio" name="wfh-tz" value="business" data-f="set-timezone" ${S.timezone==='business' ? 'checked' : ''}${dis} onchange="wfhSet('timezone', 'business')"><span>${esc(`Business timezone (${x.tzLabel || tz})`)}</span></label>`
+      + `<label class="au-check off"><input type="radio" name="wfh-tz" value="contact" disabled><span>Lead timezone <span class="hint wf-why">Leads have no time zone yet</span></span></label></div>`)
+    + row('window', 'Time window', esc('Does its actions only on these days and between these hours. Customer messages also keep the business\'s customer hours (Global Workflow Settings).'), sw(win.on, 'windowOn', 'window'))
+    + `<div class="wfh-sub${win.on ? '' : ' off'}"><div class="wfh-times"><label>Start <select data-f="set-from" aria-label="Start time" onchange="wfhSet('from', this.value)"${wd}>${opts(0, 1425, win.from)}</select></label>`
+    + `<label>End <select data-f="set-until" aria-label="End time" onchange="wfhSet('until', this.value)"${wd}>${opts(15, 1440, win.until)}</select></label></div>`
+    + `<div class="wfh-days" role="group" aria-label="Include days">${WF_DAYS.map(([d, l]) => `<button type="button" class="wfh-day" data-f="set-day-${d}" aria-pressed="${win.days.includes(d)}"${wd} onclick="wfhSet('day', ${d})">${l}</button>`).join('')}</div></div>`
+    + row('sender', 'Sender details', esc('How its emails and texts are signed.'), '')
+    + `<div class="wfh-sub"><div class="wfh-fields"><label>From name<input class="input" data-f="set-fromName" maxlength="60" value="${esc(S.sender.fromName || '')}" placeholder="The business's name" onchange="wfhSet('fromName', this.value)"${dis}></label>`
+    + `<label>From email<input class="input" value="" placeholder="Emails go from your connected mailbox" disabled></label>`
+    + `<label>From number<input class="input" value="" placeholder="${esc('Needs the phone line (Twilio)')}" disabled></label></div>`
+    + `<div class="wfh-sigrow"><b>Signature</b><pre class="wfh-sig" aria-label="Signature preview">${esc(String(x.signature || '').trim() || '—')}</pre><button type="button" class="btn ghost small" onclick="wfhGoProfile()">Edit in Business details</button></div></div>`
+    + row('markRead', 'Conversations: Mark as read', esc('Marks the lead\'s conversation as read once this workflow has messaged them.'), sw(S.markRead, 'markRead', 'markRead')) + '</section>';
+  const rs = Array.isArray(x.pause) ? x.pause : [];
+  const pause = rs.length ? `<section class="wfh-card" aria-labelledby="wfh-h-pause"><h2 id="wfh-h-pause">Pause workflow</h2><p class="wfh-sub-p">${rs.map(p => esc(p.now ? `Paused now, until ${wfhWhen(p.end, tz)}.` : `Paused from ${wfhWhen(p.start, tz)} to ${wfhWhen(p.end, tz)}.`)).join('<br>')}`
+    + ` Nothing it does happens in between; leads wait.</p><button type="button" class="btn ghost small" onclick="wfhGoGlobal()">Open Global Workflow Settings</button></section>` : '';
+  const bad = wfSettingsProblems(x.settings, x.base, {}), problems = bad.length ? `<div class="wfh-bad" role="alert">${bad.map(p => `<div>${esc(p.text)}</div>`).join('')}</div>` : '';
+  return `<div class="wfh wfh-set">${ro ? `<p class="wfh-note">${esc(ro)}</p>` : ''}${problems}${lead}${comm}${pause}</div>`;
+}
+// One enrollment row as the table shows it. c = { tz, name(run), trigger(id), step(id), parent(id) }.
+function wfhEnrollRow(run, c){
+  const r = wfObj(run), x = wfObj(c), st = wfhRunStatus(r), tz = String(x.tz || 'UTC'), f = typeof x.name==='function' ? x.name : () => '';
+  return { id: String(r.id ?? ''), contactId: r.contact_id ? String(r.contact_id) : '', name: f(r) || `${WF_KIND_WORD[r.record_kind] || 'Record'} ${String(r.record_id ?? '').slice(0, 8)}`.trim(), kind: r.record_kind==='contact' ? '' : (WF_KIND_WORD[r.record_kind] || ''),
+    reason: wfhEnrollReason(r, r.trigger_id ? (typeof x.trigger==='function' ? x.trigger(r.trigger_id) : '') : '', r.parent_run_id && typeof x.parent==='function' ? x.parent(r.parent_run_id) : ''),
+    enrolled: wfhWhen(r.created_at, tz), tz: wfhTzText(r.created_at, tz), step: r.cursor_step && typeof x.step==='function' ? x.step(r.cursor_step) : '', status: st,
+    next: r.status==='waiting' && r.due_at ? wfhWhen(r.due_at, tz) : 'Not available' };
+}
+// One execution-log row. c = { tz, name(row), exists(stepId) }.
+function wfhLogRow(row, c){
+  const r = wfObj(row), x = wfObj(c), tz = String(x.tz || 'UTC'), f = typeof x.name==='function' ? x.name : () => '', st = wfhLogStatus(r), a = wfhLogAction(r), step = r.row_kind==='step' || r.row_kind==='action';
+  return { id: String(r.id ?? ''), runId: r.run_id ? String(r.run_id) : '', contactId: r.contact_id ? String(r.contact_id) : '', name: f(r) || `${WF_KIND_WORD[r.record_kind] || 'Record'} ${String(r.record_id ?? '').slice(0, 8)}`.trim(),
+    kind: r.record_kind && r.record_kind!=='contact' ? (WF_KIND_WORD[r.record_kind] || '') : '', action: a, status: st, at: wfhWhen(r.at, tz), tz: wfhTzText(r.at, tz), failed: st.key==='failed',
+    stepId: step && r.step_id ? String(r.step_id) : '', stepHere: !!(step && r.step_id && typeof x.exists==='function' && x.exists(String(r.step_id))), reason: String(r.reason ?? '') };
+}
+// The filter bar of both history tabs. f = { kind ('enr' | 'log'), word, range, today, busy, events | steps, event | step, status, q, statuses }.
+function wfhFilterBarHtml(f){
+  const x = wfObj(f), k = x.kind==='log' ? 'log' : 'enr', R = wfObj(x.range), custom = R.preset==='custom', word = String(x.word || 'lead');
+  const sel = (id, label, list, cur) => `<select data-f="${id}" aria-label="${esc(label)}" onchange="wfhFilter('${k}', '${id}', this.value)">${list.map(([v, l]) => `<option value="${esc(v)}"${String(v)===String(cur) ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const min = x.today ? wfDayShift(x.today, -WF_HIST.maxDays) : '';
+  const dates = custom ? `<input type="date" data-f="from" aria-label="From" value="${esc(R.from || '')}" min="${esc(min)}" max="${esc(x.today || '')}" onchange="wfhFilter('${k}', 'from', this.value)">`
+    + `<input type="date" data-f="to" aria-label="To" value="${esc(R.to || '')}" min="${esc(min)}" max="${esc(x.today || '')}" onchange="wfhFilter('${k}', 'to', this.value)">` : '';
+  let mid;
+  if (k==='enr') mid = sel('event', 'Events', [['', 'All events']].concat((x.events || []).map(e => [e[0], e[1]])), x.event);
+  else {
+    const cur = (x.steps && x.steps.current) || [], old = (x.steps && x.steps.older) || [];
+    mid = `<select data-f="step" aria-label="Actions" onchange="wfhFilter('log', 'step', this.value)"><option value="">All actions</option>${cur.map(s => `<option value="${esc(s.id)}"${s.id===x.step ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}`
+      + (old.length ? `<optgroup label="Older steps">${old.map(s => `<option value="${esc(s.id)}"${s.id===x.step ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</optgroup>` : '') + '</select>';
+  }
+  return `<div class="wfh-bar" role="search">${sel('preset', 'Date range', WF_HIST_PRESETS, R.preset)}${dates}${mid}${sel('status', 'Statuses', (k==='enr' ? WF_RUN_FILTERS : WF_LOG_FILTERS).map(e => [e[0], e[1]]), x.status)}`
+    + `<input type="search" data-f="q" aria-label="${esc(`Search ${word}`)}" placeholder="${esc(`Search ${word}`)}" maxlength="${WF_HIST.term}" value="${esc(x.q || '')}" autocomplete="off" onchange="wfhFilter('${k}', 'q', this.value)">`
+    + `<button type="button" class="btn ghost small wfh-ib" aria-label="Refresh" title="Refresh" ${x.busy ? 'disabled' : ''} onclick="wfhRefresh('${k}')">${ico('refresh', 15)}</button></div>`
+    + (R.error ? `<p class="wfh-bad" role="alert">${esc(R.error)}</p>` : '');
+}
+// The status pill with its tooltip (a tooltip is not the only place the words are: the screen reader gets them too).
+function wfhPillHtml(st){ const s = wfObj(st); return `<span class="pill ${esc(s.tone || 'neutral')}"${s.tip ? ` title="${esc(s.tip)}"` : ''}>${esc(s.label)}${s.tip ? `<span class="sr-only"> (${esc(s.tip)})</span>` : ''}</span>`; }
+// The page of one history tab. m = { kind, word, head, filters (wfhFilterBarHtml's), state ('loading' | 'ok' | 'error'), error, rows (display rows), more, capped,
+// note, matches [{ id, name }], lead (the per-lead header), canReview, reviewed }.
+function wfhPageHtml(m){
+  const x = wfObj(m), k = x.kind==='log' ? 'log' : 'enr', rows = Array.isArray(x.rows) ? x.rows : [], busy = x.state==='loading';
+  let h = `<div class="wfh"><div class="wfh-head"><h2>${esc(k==='enr' ? 'Enrollment history' : 'Execution logs')}</h2><p class="wfh-sub-p">${esc(x.head || '')}</p></div>`;
+  h += x.lead ? wfhLeadHeadHtml(x.lead) : '';
+  h += wfhFilterBarHtml({ ...wfObj(x.filters), kind: k, busy });
+  if (x.note) h += `<p class="hint wfh-cap">${esc(x.note)}</p>`;
+  if (k==='log' && x.canReview) h += `<div class="wfh-review"><button type="button" class="btn small" ${x.reviewed ? 'disabled' : ''} onclick="wfhReviewed()">${x.reviewed ? 'Marked as reviewed' : 'Mark as reviewed'}</button><span class="hint">Takes these failures off Needs review. Nothing is sent.</span></div>`;
+  if (Array.isArray(x.matches) && x.matches.length) h += `<div class="wfh-pick" role="group" aria-label="Pick a lead">${x.matches.map(l => `<button type="button" class="btn ghost small" onclick="wfhPickLead('${esc(jsStr(l.id))}')">${esc(l.name)}</button>`).join('')}</div>`;
+  h += `<p class="sr-only" role="status" aria-live="polite">${busy ? 'Loading' : x.state==='error' ? 'Could not load' : `${rows.length} shown`}</p>`;
+  if (x.state==='error') h += `<div class="au-empty wfh-bad" role="alert">${esc("Couldn't read it: " + String(x.error || 'not read'))} <button type="button" class="btn small" onclick="wfhRefresh('${k}')">Try again</button></div>`;
+  else if (!rows.length) h += `<div class="au-empty hint">${esc(busy ? 'Loading…' : x.empty || 'Nothing here for these filters.')}</div>`;
+  else h += k==='enr' ? wfhEnrollTableHtml(rows) : wfhLogTableHtml(rows, !!x.lead);
+  if (rows.length && x.more) h += `<div class="wfh-more"><button type="button" class="btn small" ${busy ? 'disabled' : ''} onclick="wfhMore('${k}')">${busy ? 'Loading…' : 'Load more'}</button></div>`;
+  else if (rows.length && x.capped) h += `<p class="hint wfh-cap">${esc(`Showing the latest ${WF_HIST.cap}: narrow the dates to see more.`)}</p>`;
+  return h + '</div>';
+}
+function wfhRecCell(r){ return `<td class="wrap"><div class="wfh-rec"><b dir="auto">${esc(r.name)}</b>${r.kind ? `<span class="hint">${esc(r.kind)}</span>` : ''}</div></td>`; }
+function wfhEnrollTableHtml(rows){
+  const body = rows.map(r => `<tr><td class="wrap"><div class="wfh-rec"><b dir="auto">${esc(r.name)}</b>${r.kind ? `<span class="hint">${esc(r.kind)}</span>` : ''}</div></td><td class="wrap">${esc(r.reason)}</td>`
+    + `<td>${esc(r.enrolled)}<small class="wfh-tz">${esc(r.tz)}</small></td><td class="wrap">${esc(r.step || '—')}</td><td>${wfhPillHtml(r.status)}</td><td>${esc(r.next)}</td>`
+    + `<td class="wf-acts"><button type="button" class="btn ghost small wfh-ib" aria-label="${esc('View lead history of ' + r.name)}" title="View lead history" onclick="wfhHistory('${esc(jsStr(r.id))}')">${ico('clock', 15)}</button>`
+    + `<button type="button" class="btn ghost small wfh-ib" aria-disabled="true" aria-label="Highlight lead path" title="${esc(WF_SOON)}" onclick="showToast('${esc(jsStr(WF_SOON))}', { kind: 'info' })">${ico('branch', 15)}</button>`
+    + `<button type="button" class="btn ghost small wfh-ib" aria-label="${esc('Open ' + r.name)}" title="Open the lead card"${r.contactId ? '' : ' disabled'} onclick="wfhOpenLead('${esc(jsStr(r.contactId))}')">${ico('external', 15)}</button></td></tr>`).join('');
+  return `<div class="table-wrap wf-table wfh-table"><table><caption class="sr-only">Enrollment history</caption><thead><tr><th>Record</th><th>Enrollment reason</th><th>Date enrolled</th><th>Current action</th><th>Current status</th><th>Next execution on</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function wfhLogTableHtml(rows, perLead){
+  const body = rows.map(r => `<tr${r.failed ? ' class="wfh-fail"' : ''}>${wfhRecCell(r)}<td class="wrap"><span class="wfh-act">${ico(r.action.icon, 15)}<span dir="auto">${esc(r.action.name)}</span></span></td><td>${wfhPillHtml(r.status)}</td>`
+    + `<td>${esc(r.at)}<small class="wfh-tz">${esc(r.tz)}</small></td><td class="wf-acts"><button type="button" class="btn small wfh-det${r.failed ? ' bad' : ' ghost'}" onclick="wfhDetailOpen('${esc(jsStr(r.id))}')">View details</button>`
+    + (perLead ? '' : `<button type="button" class="btn ghost small wfh-ib" aria-label="${esc('View lead history of ' + r.name)}" title="View lead history"${r.contactId ? '' : ' disabled'} onclick="wfhLeadView('${esc(jsStr(r.contactId))}', '${esc(jsStr(r.runId))}')">${ico('clock', 15)}</button>`)
+    + `<button type="button" class="btn ghost small wfh-ib" aria-label="${esc('Open ' + r.name)}" title="Open the lead card"${r.contactId ? '' : ' disabled'} onclick="wfhOpenLead('${esc(jsStr(r.contactId))}')">${ico('user', 15)}</button>`
+    + (r.stepId ? `<button type="button" class="btn ghost small" ${r.stepHere ? `onclick="wfhGoStep('${esc(jsStr(r.stepId))}')"` : 'aria-disabled="true" title="No longer in the workflow"'}>Go to action</button>` : '') + '</td></tr>').join('');
+  return `<div class="table-wrap wf-table wfh-table"><table><caption class="sr-only">Execution logs</caption><thead><tr><th>Record</th><th>Action</th><th>Status</th><th>Executed on</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+// The per-lead header of the logs: breadcrumb, the lead, "See contact path" (G6.3) and the Enrollment switcher (the lead's runs here).
+// l = { name, contactId, runId, runs [{ id, label }] }.
+function wfhLeadHeadHtml(l){
+  const x = wfObj(l), runs = Array.isArray(x.runs) ? x.runs : [], id = String(x.runId || '');
+  return `<div class="wfh-lead"><nav class="wfh-crumbs" aria-label="Logs"><button type="button" class="wf-crumb" onclick="wfhLeadBack()">Logs</button><span aria-hidden="true">/</span><span>${esc(x.name || 'Lead')}</span>`
+    + (id ? `<span aria-hidden="true">/</span><span class="wf-crumb on" aria-current="location">Execution ID - ${esc(id.slice(0, 8))}</span>` : '') + `</nav>`
+    + `<div class="wfh-leadrow"><b dir="auto">${esc(x.name || 'Lead')}</b><button type="button" class="btn ghost small" aria-disabled="true" title="${esc(WF_SOON)}" onclick="showToast('${esc(jsStr(WF_SOON))}', { kind: 'info' })">See contact path</button>`
+    + (x.contactId ? `<button type="button" class="btn ghost small" onclick="wfhOpenLead('${esc(jsStr(x.contactId))}')">Open lead card</button>` : '')
+    + `<label class="wfh-sw">Enrollment <select data-f="run" aria-label="Enrollment" onchange="wfhRunPick(this.value)"><option value="">All enrollments</option>${runs.map(r => `<option value="${esc(r.id)}"${r.id===id ? ' selected' : ''}>${esc(r.label)}</option>`).join('')}</select></label></div></div>`;
+}
+// The View details drawer. d = { name, kind, action, status, at, tz, reason, runId, version, stepType, nextAt, rows, other, failed, stepId, stepHere, contactId }.
+function wfhDetailHtml(d){
+  const x = wfObj(d), dl = (label, v) => `<div class="wfh-d"><dt>${esc(label)}</dt><dd>${v}</dd></div>`, rows = Array.isArray(x.rows) ? x.rows : [];
+  let h = `<div class="wfh-dhead"><h2 id="wfh-dt">Execution details</h2><button type="button" class="btn ghost small wfh-ib" data-f="dclose" aria-label="Close" onclick="wfhDetailClose()">${ico('x', 16)}</button></div><div class="wfh-dbody"><dl>`;
+  h += dl('Record', `<span dir="auto">${esc(x.name)}</span>${x.kind ? ` <span class="hint">${esc(x.kind)}</span>` : ''}`);
+  h += dl('Action', `<span dir="auto">${esc(x.action)}</span>${x.stepType ? ` <span class="hint">${esc(String(x.stepType).replace(/_/g, ' '))}</span>` : ''}`);
+  h += dl('Status', wfhPillHtml(x.status));
+  h += dl('Executed on', `${esc(x.at)} <span class="hint">${esc(x.tz)}</span>`);
+  if (x.reason) h += dl('Reason', `<span dir="auto">${esc(x.reason)}</span>`);
+  if (x.nextAt) h += dl('Next step at', esc(x.nextAt));
+  if (x.runId) h += dl('Execution ID', `<code>${esc(String(x.runId).slice(0, 8))}</code>`);
+  if (x.version) h += dl('Workflow version', esc('v' + x.version));
+  rows.forEach(r => { h += dl(r.label, r.block ? `<pre class="wfh-pre" dir="auto">${esc(r.text)}</pre>` : `<span dir="auto">${esc(r.text)}</span>`); });
+  if (x.other) h += dl('Other details', `<pre class="wfh-pre">${esc(x.other)}</pre>`);
+  h += '</dl></div><div class="wfh-dfoot">'
+    + (x.stepId ? `<button type="button" class="btn ghost small" ${x.stepHere ? `onclick="wfhDetailGo('${esc(jsStr(x.stepId))}')"` : 'aria-disabled="true" title="No longer in the workflow"'}>Go to action</button>` : '')
+    + (x.contactId ? `<button type="button" class="btn ghost small" onclick="wfhOpenLead('${esc(jsStr(x.contactId))}')">Open lead card</button>` : '') + '</div>';
+  return `<aside class="wfh-drawer" role="dialog" aria-modal="true" aria-labelledby="wfh-dt">${h}</aside>`;
+}
+
+// ── state and reads ──
+// One state per opening of the builder (the token): the filters, the rows read, the open row. Reset when another workflow opens.
+const WFH = { token: -1, enr: null, log: null, parents: new Map(), opener: null };
+function wfhNewList(){ return { range: { preset: String(WF_HIST.defDays), from: '', to: '' }, event: '', step: '', status: '', q: '', rows: [], more: false, capped: false, state: 'idle', error: '', seq: 0, matches: null, note: '',
+  older: [], lead: null, runId: '', runs: [], reviewed: false, empty: '' }; }
+function wfhInit(W){
+  if (WFH.token===W.token) return;
+  wfhDetailClose(true);
+  Object.assign(WFH, { token: W.token, enr: wfhNewList(), log: wfhNewList(), parents: new Map() });
+}
+function wfhGate(W){
+  if (W.mode==='system') return 'Runs on the built-in system. Its history starts when it moves into the engine.';
+  if (!W.id) return 'Save the workflow first: its history starts after it is published.';
+  return '';
+}
+function wfhNameOf(r){
+  const x = wfObj(r), c = x.contact_id ? contactById(String(x.contact_id)) : x.record_kind==='contact' && x.record_id ? contactById(String(x.record_id)) : null;
+  if (x.record_kind==='job') { const j = ((STATE.data || {}).jobs || []).find(z => String(z.id)===String(x.record_id)); if (j) return `${j.customerName || ''}${j.invoiceNumber ? ' · #' + j.invoiceNumber : ''}`.trim(); }
+  return c ? String(c.fullName || '') : x.recipient ? String(x.recipient) : '';
+}
+function wfhSteps(W){
+  const nodes = wfNodesOf(W.doc);
+  return Object.keys(nodes).map(id => ({ id, name: wfNodeName(nodes[id], W.reg) }));
+}
+function wfhParentName(runId){
+  const aid = WFH.parents.get(String(runId)); if (!aid) return '';
+  const e = WF_DATA.list.get('all'), row = e && e.status==='ok' ? (e.data || []).find(z => String(z.id)===String(aid)) : null;
+  return row ? String(row.name || '') : '';
+}
+// Reads one page (the first, or the next with append). Never starts twice for one filter (L.seq), never repaints the page.
+async function wfhLoad(kind, append){
+  const W = WF; if (!W || !W.id || wfhGate(W)) return;
+  wfhInit(W);
+  const L = WFH[kind], seq = ++L.seq, tz = W.tz || bizTz(), rg = wfhRange(L.range, Date.now(), tz), enr = kind==='enr';
+  if (rg.error) { Object.assign(L, { state: 'ok', rows: [], more: false, capped: false, matches: null, note: '', empty: '' }); wfhPaint(); return; }
+  if (!append) Object.assign(L, { rows: [], more: false, capped: false, matches: null, note: '', empty: '', reviewed: false });
+  L.state = 'loading'; L.error = ''; wfhPaint();
+  try {
+    let ids = null, contact = L.lead ? L.lead.id : null;
+    if (!append && !L.lead && String(L.q).trim()) {
+      const f = await wfhSearch(L.q);
+      if (WF!==W || L.seq!==seq) return;
+      if (f) {
+        const leads = new Map();
+        f.contacts.forEach(c => leads.set(String(c.id), String(c.full_name || '')));
+        f.jobs.forEach(j => { if (j.contact_id && !leads.has(String(j.contact_id))) leads.set(String(j.contact_id), String(j.customer_name || '')); });
+        L.note = f.capped ? `Showing the first ${WF_HIST.leads} matching leads; type more to narrow it` : '';
+        if (!leads.size && !f.jobs.length) { Object.assign(L, { state: 'ok', empty: 'No lead matches that.' }); wfhPaint(); return; }
+        if (enr) ids = [...new Set([...f.contacts.map(c => String(c.id)), ...f.jobs.map(j => String(j.id))])];
+        else if (leads.size > 1) { L.matches = [...leads].slice(0, WF_HIST.leads).map(([id, name]) => ({ id, name: name || 'Lead' })); Object.assign(L, { state: 'ok', empty: 'Pick a lead above.' }); wfhPaint(); return; }
+        else contact = [...leads.keys()][0];
+      }
+    }
+    const last = append && L.rows.length ? L.rows[L.rows.length - 1] : null;
+    const base = { p_automation: W.id, p_from: rg.fromIso, p_to: rg.toIso, p_limit: WF_HIST.page + 1, p_contact: contact || null };
+    let args, name;
+    if (enr) {
+      const ev = String(L.event), st = wfhFilterStatuses(WF_RUN_FILTERS, L.status);
+      name = 'automation_enrollments';
+      args = { ...base, p_status: st, p_source: ev==='manual' || ev==='workflow' ? ev : ev ? 'trigger' : null, p_trigger: ev.startsWith('t:') ? ev.slice(2) : null, p_record_ids: ids, p_before_created: last ? last.created_at : null, p_before_id: last ? last.id : null };
+    } else {
+      name = 'automation_execution_log';
+      args = { ...base, p_steps: L.step ? [L.step] : null, p_status: wfhFilterStatuses(WF_LOG_FILTERS, L.status), p_run: L.runId || null, p_before_at: last ? last.at : null, p_before_id: last ? last.id : null };
+    }
+    const data = await wfFetchRpc(name, args);
+    if (WF!==W || L.seq!==seq) return;
+    const got = Array.isArray(data) ? data : [], more = got.length > WF_HIST.page, page = got.slice(0, WF_HIST.page);
+    L.rows = append ? L.rows.concat(page) : page;
+    if (L.rows.length >= WF_HIST.cap) { L.rows = L.rows.slice(0, WF_HIST.cap); L.more = false; L.capped = more || L.rows.length >= WF_HIST.cap; } else L.more = more;
+    L.state = 'ok';
+    if (enr) wfhLoadParents(W, L);
+    else if (!append) wfhLoadOlder(W, L, rg, seq);
+  } catch (e) {
+    if (WF!==W || L.seq!==seq) return;
+    L.state = 'error'; L.error = String((e && e.message) || e || 'not read');
+  }
+  wfhPaint();
+}
+// The search term → the leads and jobs it can mean (≤ 50 each); { contacts, jobs, capped } | null (a term too short to search).
+async function wfhSearch(term){
+  const f = wfRecordSearchFilter(term); if (!f) return null;
+  const [c, j] = await Promise.all([sb.from('contacts').select('id, full_name').or(f.contacts).limit(WF_HIST.leads), sb.from('jobs').select('id, contact_id, customer_name').or(f.jobs).limit(WF_HIST.leads)]);
+  if (c.error) throw c.error;
+  if (j.error) throw j.error;
+  const cs = c.data || [], js = j.data || [];
+  return { contacts: cs, jobs: js, capped: cs.length >= WF_HIST.leads || js.length >= WF_HIST.leads };
+}
+// "Added by workflow <name>": the parent runs' workflows, one read per page.
+async function wfhLoadParents(W, L){
+  const ids = [...new Set(L.rows.filter(r => r.source==='workflow' && r.parent_run_id && !WFH.parents.has(String(r.parent_run_id))).map(r => String(r.parent_run_id)))].slice(0, 100);
+  if (!ids.length) return;
+  try {
+    wfEnsure('list', 'all', wfFetchList, () => false, () => { /* the names come with the next paint */ });
+    const { data, error } = await sb.from('automation_runs').select('id, automation_id').in('id', ids);
+    if (error) throw error;
+    (data || []).forEach(r => WFH.parents.set(String(r.id), String(r.automation_id)));
+    const e = WF_DATA.list.get('all'); if (e && e.status==='loading' && e.p) await e.p;
+  } catch (e) { return; /* "another workflow" stands */ }
+  if (WF===W && WFH.token===W.token) wfhPaint();
+}
+// The logs' "Older steps" (steps this workflow logged that are not in it now), and the per-lead view's runs.
+async function wfhLoadOlder(W, L, rg, seq){
+  try {
+    const data = await wfFetchRpc('automation_log_steps', { p_automation: W.id, p_from: rg.fromIso, p_to: rg.toIso }), here = wfNodesOf(W.doc);
+    if (WF!==W || L.seq!==seq) return;
+    L.older = (Array.isArray(data) ? data : []).filter(s => s && s.step_id && !wfHas(here, String(s.step_id))).slice(0, WF_HIST.older).map(s => ({ id: String(s.step_id), name: String(s.step_name || s.step_id) }));
+  } catch (e) { return; /* the filter just has no older steps */ }
+  wfhPaint();
+}
+async function wfhLoadRuns(W, L, contactId){
+  try {
+    const tz = W.tz || bizTz(), rg = wfhRange({ preset: String(WF_HIST.maxDays) }, Date.now(), tz);
+    const data = await wfFetchRpc('automation_enrollments', { p_automation: W.id, p_from: rg.fromIso, p_to: rg.toIso, p_status: null, p_source: null, p_trigger: null, p_record_ids: null, p_contact: contactId, p_before_created: null, p_before_id: null, p_limit: 50 });
+    if (WF!==W || !L.lead || L.lead.id!==contactId) return;
+    L.runs = (Array.isArray(data) ? data : []).map(r => ({ id: String(r.id), label: `${wfhWhen(r.created_at, tz)} · ${wfhRunStatus(r).label}` }));
+  } catch (e) { return; /* the switcher stays "All enrollments" */ }
+  wfhPaint();
+}
+
+// ── drawing ──
+function wfhModel(W, kind){
+  const L = WFH[kind], enr = kind==='enr', tz = W.tz || bizTz(), word = wfhRecordWord(W.doc, W.reg), trig = wfhTriggers(W.doc, W.reg), here = wfNodesOf(W.doc), steps = wfhSteps(W);
+  const nameOfStep = id => { const s = steps.find(z => z.id===id) || L.older.find(z => z.id===id); return s ? s.name : ''; };
+  const rg = wfhRange(L.range, Date.now(), tz), plural = word + 's';
+  const m = { kind, word, state: L.state, error: L.error, more: L.more, capped: L.capped, note: L.note, matches: L.matches, empty: L.empty,
+    head: enr ? `View a history of all the ${plural} that have entered this workflow` : 'View a history and details of all executions performed by this workflow',
+    filters: { word, range: { ...L.range, error: rg.error || '' }, today: bizPartsIn(Date.now(), tz).day, event: L.event, step: L.step, status: L.status, q: L.q,
+      events: trig.map(t => ['t:' + t.id, t.name]).concat([['manual', 'Added manually'], ['workflow', 'Added by another workflow']]), steps: { current: steps, older: L.older } },
+    rows: enr ? L.rows.filter(r => wfhKeepRun(L.status, r)).map(r => wfhEnrollRow(r, { tz, name: wfhNameOf, trigger: id => (trig.find(t => t.id===id) || {}).name || '', step: nameOfStep, parent: wfhParentName }))
+      : L.rows.map(r => wfhLogRow(r, { tz, name: wfhNameOf, exists: id => wfHas(here, id) })) };
+  if (!enr) {
+    m.canReview = !wfGuardWrite() && (L.status==='failed' || L.rows.some(r => r.status==='failed'));
+    m.reviewed = L.reviewed;
+    if (L.lead) m.lead = { name: L.lead.name, contactId: L.lead.id, runId: L.runId, runs: L.runs };
+  }
+  return m;
+}
+function wfhHistoryTab(W, kind){
+  wfhInit(W);
+  const gate = wfhGate(W);
+  if (gate) return `<div class="wfh"><p class="wfh-note">${esc(gate)}</p></div>`;
+  const L = WFH[kind];
+  if (L.state==='idle') { L.state = 'loading'; Promise.resolve().then(() => wfhLoad(kind)); }   // once; its end repaints this tab only
+  return wfhPageHtml(wfhModel(W, kind));
+}
+function wfhEnrollTab(W){ return wfhHistoryTab(W, 'enr'); }
+function wfhLogsTab(W){ return wfhHistoryTab(W, 'log'); }
+function wfhSettingsTab(W){
+  wfhInit(W);
+  let e = WF_DATA.pauses.get('all');
+  if (!e && W.id) e = wfEnsure('pauses', 'all', wfFetchPauses, () => false, () => { if (WF && WF.tab==='settings') wfhPaint(); });
+  if (e && e.status==='loading' && e.p && !e._wfh) { e._wfh = true; const tok = W.token; e.p.then(() => { if (WF && WF.token===tok && WF.tab==='settings') wfhPaint(); }); }
+  const tz = W.tz || bizTz(), me = typeof getCurrentProfile==='function' ? getCurrentProfile() : null, biz = catalogObject('business');
+  return wfhSettingsHtml({ settings: W.settings, base: W.base ? W.base.settings : W.settings, ro: wfGuardEdit(), tz, tzLabel: autoTzLabel(tz),
+    signature: signatureOf(me && me.fullName, { name: (STATE.data.settings || {}).companyName, phone: biz && biz.phone }), pause: W.id && e && e.status==='ok' ? wfhPauseRanges(e.data, W.id, Date.now(), tz) : [] });
+}
+// Draws the open tab again (a read ended, a filter changed): this tab's body only; the field being used keeps its focus.
+function wfhPaint(){
+  const W = WF; if (!W || !W.el || W.tab==='builder') return;
+  const fn = WF_HOOKS.tabs[W.tab]; if (typeof fn!=='function') return;
+  const body = W.el.tabBody, a = document.activeElement, f = a && body.contains(a) && a.dataset ? a.dataset.f : '';
+  if (!wfPatch(body, String(fn(W) || '')) || !f) return;
+  const el = body.querySelector(`[data-f="${f}"]`);
+  if (el && el.focus) { el.focus({ preventScroll: true }); try { if (/^(text|search)$/.test(el.type)) el.setSelectionRange(el.value.length, el.value.length); } catch (e) { /* not a text box */ } }
+}
+
+// ── the clicks ──
+function wfhSet(key, v){
+  const W = WF; if (!W || W.tab!=='settings' || !wfHas(WF_SET_LABELS, key)) return;
+  const next = wfhSettingsSet(W.settings, key, v), f = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.f : '';
+  if (wfCanon(next)!==wfCanon(wfNormSettings(W.settings))) { if (wfCommit(WF_SET_LABELS[key], () => ({ settings: next }), { coalesce: true })) { if (f) requestAnimationFrame(() => { const el = WF && WF===W && W.el.tabBody.querySelector(`[data-f="${f}"]`); if (el && el.focus) el.focus({ preventScroll: true }); }); return; } }
+  wfhPaint();   // nothing changed (or it was refused): the controls show what is kept
+}
+function wfhFilter(kind, key, v){
+  const W = WF; if (!W || (kind!=='enr' && kind!=='log')) return;
+  wfhInit(W);
+  const L = WFH[kind], val = String(v ?? '');
+  if (key==='preset') { L.range = { ...L.range, preset: val, from: L.range.from || '', to: L.range.to || '' }; if (val==='custom' && !L.range.from) { const t = bizPartsIn(Date.now(), W.tz || bizTz()).day; L.range = { preset: 'custom', from: wfDayShift(t, -(WF_HIST.defDays - 1)), to: t }; } }
+  else if (key==='from' || key==='to') L.range = { ...L.range, [key]: val };
+  else if (key==='event' || key==='step' || key==='status') L[key] = val;
+  else if (key==='q') { L.q = val.slice(0, WF_HIST.term); if (kind==='log' && L.lead) Object.assign(L, { lead: null, runId: '', runs: [] }); }   // a search leaves one lead's view
+  else return;
+  if (key==='preset' && val==='custom') { wfhPaint(); return; }   // pick the two dates first
+  wfhLoad(kind);
+}
+function wfhRefresh(kind){ const W = WF; if (W && (kind==='enr' || kind==='log')) { wfhInit(W); wfhLoad(kind); } }
+function wfhMore(kind){ const W = WF; if (W && (kind==='enr' || kind==='log') && WFH[kind].more && WFH[kind].state!=='loading') wfhLoad(kind, true); }
+function wfhPickLead(id){
+  const W = WF, L = W && WFH.log; if (!L) return;
+  const m = (L.matches || []).find(l => l.id===String(id)); if (!m) return;
+  wfhLeadView(m.id, '', m.name);
+}
+// Opens one lead's logs: the Enrollment history's clock (that run) or a logs row's clock (all of the lead's runs here).
+function wfhLeadView(contactId, runId, name){
+  const W = WF; if (!W || !contactId) return;
+  wfhInit(W);
+  const L = WFH.log, c = contactById(String(contactId));
+  Object.assign(L, { lead: { id: String(contactId), name: String(name || (c && c.fullName) || 'Lead') }, runId: String(runId || ''), runs: [], q: '', step: '', status: '', matches: null });
+  if (runId) L.range = { preset: String(WF_HIST.maxDays), from: '', to: '' };   // an old run: its rows may be older than 30 days
+  if (W.tab!=='logs') WF_ACTS.tab(W, { dataset: { tab: 'logs' } });
+  wfhLoad('log');
+  wfhLoadRuns(W, L, L.lead.id);
+}
+function wfhHistory(runId){
+  const W = WF; if (!W) return;
+  const r = (WFH.enr ? WFH.enr.rows : []).find(z => String(z.id)===String(runId)); if (!r) return;
+  if (!r.contact_id) { showToast('This one has no lead card to show', { kind: 'info' }); return; }
+  wfhLeadView(String(r.contact_id), String(r.id), wfhNameOf(r));
+}
+function wfhLeadBack(){ const W = WF; if (!W) return; Object.assign(WFH.log, { lead: null, runId: '', runs: [], matches: null }); wfhLoad('log'); }
+function wfhRunPick(v){ const W = WF; if (!W || !WFH.log.lead) return; WFH.log.runId = String(v || ''); wfhLoad('log'); }
+function wfhOpenLead(id){ if (id && typeof openLeadModal==='function') openLeadModal(String(id)); }
+// Go to action: back to the canvas with the step selected.
+function wfhGoStep(stepId){
+  const W = WF; if (!W || !wfNodeIdOk(stepId) || !wfHas(wfNodesOf(W.doc), stepId)) return;
+  WF_ACTS.tab(W, { dataset: { tab: 'builder' } });
+  wfSelectKey(`n:${stepId}`, false);
+  W.focusPending = true;
+}
+async function wfhReviewed(){
+  const W = WF; if (!W || !W.id) return;
+  const why = wfGuardWrite(); if (why) { showToast(why, { kind: 'warn' }); return; }
+  if (!(await wfDbWrite('Not marked', sb.rpc('automation_mark_reviewed', { p_automation: W.id })))) return;
+  showToast('Marked as reviewed'); wfInvalidate('review');
+  if (WF===W && WFH.log) { WFH.log.reviewed = true; wfhPaint(); }
+}
+// The Settings tab's two links: the builder closes (asking about unsaved changes first) and the page opens.
+function wfhGoGlobal(){ wfLeave(() => { wfBuilderClose(); wfSetTab('settings'); }); }
+function wfhGoProfile(){ wfLeave(() => { wfBuilderClose(); setSettingsPage('profile'); }); }
+
+// ── the View details drawer (a layer of the page history: back closes it first) ──
+function wfhDetailModel(W, row){
+  const tz = W.tz || bizTz(), here = wfNodesOf(W.doc), lr = wfhLogRow(row, { tz, name: wfhNameOf, exists: id => wfHas(here, id) }), d = wfhDetailRows(row.detail);
+  return { name: lr.name, kind: lr.kind, action: lr.action.name, stepType: lr.action.system ? '' : row.step_type, status: lr.status, at: lr.at, tz: lr.tz, reason: lr.reason, runId: lr.runId, version: row.version || '',
+    nextAt: row.next_at ? wfhWhen(row.next_at, tz) : '', rows: d.rows, other: d.other, failed: lr.failed, stepId: lr.stepId, stepHere: lr.stepHere, contactId: lr.contactId };
+}
+function wfhDetailOpen(id){
+  const W = WF, row = W && WFH.log ? WFH.log.rows.find(r => String(r.id)===String(id)) : null, host = document.getElementById('modal-root');
+  if (!row || !host) return;
+  wfhDetailClose(true);
+  WFH.opener = document.activeElement;
+  const el = document.createElement('div');
+  el.id = 'wfh-drawer'; el.className = 'wfh-back'; el.innerHTML = wfhDetailHtml(wfhDetailModel(W, row));
+  el.addEventListener('click', e => { if (e.target===el) wfhDetailClose(); });
+  el.addEventListener('keydown', wfhDetailKey);
+  host.appendChild(el);
+  const b = el.querySelector('[data-f="dclose"]'); if (b) b.focus();
+  if (typeof navOverlaySync==='function') navOverlaySync();
+}
+// Esc closes it; Tab stays inside it.
+function wfhDetailKey(e){
+  const el = document.getElementById('wfh-drawer'); if (!el) return;
+  if (e.key==='Escape') { e.preventDefault(); e.stopPropagation(); wfhDetailClose(); return; }
+  if (e.key!=='Tab') return;
+  const f = [...el.querySelectorAll('button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(x => x.offsetParent!==null || x===document.activeElement);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && document.activeElement===first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement===last) { e.preventDefault(); first.focus(); }
+}
+function wfhDetailClose(quiet){
+  const el = document.getElementById('wfh-drawer'); if (!el) return;
+  el.remove();
+  const o = WFH.opener; WFH.opener = null;
+  if (!quiet && o && o.isConnected && o.focus) o.focus({ preventScroll: true });
+  if (typeof navOverlaySync==='function') navOverlaySync();
+}
+function wfhDetailGo(stepId){ wfhDetailClose(true); wfhGoStep(stepId); }
+navLayer({ id: 'history-details', z: 220, isOpen: () => !!document.getElementById('wfh-drawer'), close: () => { wfhDetailClose(); }, el: () => document.getElementById('wfh-drawer') });
+
+// ── the way in: the tabs, the list's Review button, a link's ?wfTab= ──
+Object.assign(WF_HOOKS.tabs, { settings: wfhSettingsTab, enrollment: wfhEnrollTab, logs: wfhLogsTab });
+// Needs review → Review: the workflow opens on its Execution logs, Failed.
+async function wfhOpenLogs(key, status){
+  await wfEdit(key);
+  const W = WF; if (!W || W.id!==key) return;
+  wfhInit(W);
+  Object.assign(WFH.log, { status: status || '', state: 'idle' });
+  if (W.tab!=='logs') WF_ACTS.tab(W, { dataset: { tab: 'logs' } }); else wfhPaint();
+}
+// A link's ?wfTab=settings | enroll | logs (&run=…): once the workflow is open.
+function wfhFromLink(L){
+  const W = WF, tab = L && ({ settings: 'settings', enroll: 'enrollment', logs: 'logs' })[L.wfTab];
+  if (!W || !tab || !W.id || W.id!==L.wf) return;
+  wfhInit(W);
+  if (tab==='logs' && L.run) Object.assign(WFH.log, { runId: String(L.run), range: { preset: String(WF_HIST.maxDays), from: '', to: '' }, state: 'idle' });
+  WF_ACTS.tab(W, { dataset: { tab } });
 }
 
 // ══ The template library (stage 2 G3.3; design §4.3 "Select from template", "Upload to Template Library") ══

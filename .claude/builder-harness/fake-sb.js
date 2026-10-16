@@ -40,11 +40,27 @@
       row(IDS.email, 'Thank you email', { schema: 2, seq: 1, entry: 'n1', triggers: [{ id: 't1', type: 'jobClosed', filters: F0 }],
         nodes: { n1: { kind: 'action', type: 'send_email', config: { subject: 'Thanks from {business_name}', body: '{hi}, thanks for choosing us.' }, out: { next: null } } } }, { list_summary: { triggers: ['jobClosed'], actions: ['send_email'], audience: 'customer' }, audience: 'customer' }),
     ],
+    automation_runs: [], automation_log: [],
     automation_notes: [], automation_folders: [], automation_pauses: [], automation_system_meta: [], automation_reviews: [],
     automation_templates: [{ id: 'tpl-1', key: 'team_new_lead', name: 'Tell the team about a new lead', description: 'A phone notification.', category: 'Team notifications', origin: 'system',
       definition: { schema: 2, seq: 1, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: F0 }], nodes: { n1: pushNode(1, true) } }, settings: {}, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z' }],
   };
   const T = name => (window.FAKE_DB[name] = window.FAKE_DB[name] || []);
+  // 70 runs and their logs for the first workflow (some failed, one manual, one by another workflow, one held by a pause).
+  (function seedHistory(){
+    const aid = IDS.flat, base = Date.now() - 3 * 86400000, statuses = ['waiting', 'done', 'done', 'failed', 'removed', 'skipped', 'stopped', 'running'];
+    for (let i = 0; i < 70; i++) {
+      const st = statuses[i % statuses.length], at = new Date(base - i * 3600000).toISOString(), id = `aaaaaaaa-0000-4000-8000-${String(i).padStart(12, '0')}`;
+      T('automation_runs').push({ id, business_id: 'default', automation_id: aid, automation_version: 1, event_key: 'e' + i, event_type: 'stage', event_at: at, record_kind: 'contact', record_id: 'c-demo-1', contact_id: 'c-demo-1', status: st, step_index: 0, anchor_at: at,
+        due_at: new Date(Date.now() + 86400000).toISOString(), context: i === 9 ? { manual: true, byName: 'Kim Office' } : {}, reason: st === 'failed' ? 'No phone number' : st === 'removed' ? 'Removed by Kim Office' : null, created_at: at, finished_at: st === 'waiting' ? null : at,
+        trigger_id: i === 9 || i === 10 ? null : 't1', cursor_step: 'n1', source: i === 9 ? 'manual' : i === 10 ? 'workflow' : 'trigger', exit_reason: st === 'removed' ? 'removed_by_user' : null, parent_run_id: null, watch: i === 16 ? ['pause'] : null, revision: 2 });
+      T('automation_log').push({ id: `bbbbbbbb-0000-4000-8000-${String(i * 2).padStart(12, '0')}`, business_id: 'default', run_id: id, automation_id: aid, automation_name: 'Quote follow-up email', step_id: 'enroll', channel: null, audience: null, record_kind: 'contact', record_id: 'c-demo-1',
+        contact_id: 'c-demo-1', recipient: null, status: 'added', reason: null, at, row_kind: 'enroll', step_type: null, step_name: null, detail: { trigger: 't1' }, version: 1, revision: 2 });
+      T('automation_log').push({ id: `bbbbbbbb-0000-4000-8000-${String(i * 2 + 1).padStart(12, '0')}`, business_id: 'default', run_id: id, automation_id: aid, automation_name: 'Quote follow-up email', step_id: i % 7 === 3 ? 'gone1' : 'n2', channel: 'task', audience: 'team', record_kind: 'contact', record_id: 'c-demo-1',
+        contact_id: 'c-demo-1', recipient: null, status: st === 'failed' ? 'failed' : 'executed', reason: st === 'failed' ? 'No phone number' : null, at: new Date(Date.parse(at) + 60000).toISOString(), row_kind: 'action', step_type: 'add_task', step_name: i % 7 === 3 ? 'An old step <b>' : 'Call about the quote',
+        detail: st === 'failed' ? { code: 'no_phone', text: 'No phone number', subject: 'Hi <script>alert(1)</script>', body: 'Hello Sam, just checking in.', extra: { a: 1 } } : { title: 'Call Sam', body: 'Call about the quote' }, version: 1, revision: 2 });
+    }
+  })();
   // ── the client: select with eq / is / in filters, insert, update (by the filters), upsert, delete ──
   function builder(table){
     let op = 'select', payload = null, single = false, maybe = false;
@@ -145,7 +161,23 @@
     return async () => ({ data: { session, user }, error: null });
   } });
   const rpcData = { automation_list_stats: {}, automation_needs_review: [], automation_trigger_stats: [], automation_step_stats: [] };
-  const client = { auth: authApi, from: builder, rpc: async (name) => { window.__writes.push({ rpc: name }); return { data: name in rpcData ? clone(rpcData[name]) : null, error: null }; },
+  // The history tabs' reads (stage 2 G6.2): the database's keyset-paged functions over FAKE_DB.automation_runs / automation_log
+  // (the same filters and order as the SQL: created_at | at, then id, newest first; status, source, trigger, record ids, contact, run).
+  const keyset = (rows, key, a) => {
+    const before = a.p_before_id ? [a['p_before_' + (key === 'at' ? 'at' : 'created')], a.p_before_id] : null;
+    return rows.filter(r => r.automation_id === a.p_automation && r[key] >= a.p_from && r[key] < a.p_to && (!before || r[key] < before[0] || (r[key] === before[0] && r.id < before[1])))
+      .sort((x, y) => (y[key] < x[key] ? -1 : y[key] > x[key] ? 1 : y.id < x.id ? -1 : 1)).slice(0, Math.min(Math.max(a.p_limit || 50, 1), 100));
+  };
+  const readRpc = (name, a) => {
+    if (name === 'automation_enrollments') return keyset(T('automation_runs').filter(r => (!a.p_status || a.p_status.includes(r.status)) && (!a.p_source || r.source === a.p_source) && (!a.p_trigger || r.trigger_id === a.p_trigger)
+      && (!a.p_record_ids || a.p_record_ids.includes(r.record_id)) && (!a.p_contact || r.contact_id === a.p_contact)), 'created_at', a);
+    if (name === 'automation_execution_log') return keyset(T('automation_log').filter(r => (!a.p_steps || a.p_steps.includes(r.step_id)) && (!a.p_status || a.p_status.includes(r.status)) && (!a.p_run || r.run_id === a.p_run) && (!a.p_contact || r.contact_id === a.p_contact)), 'at', a);
+    if (name === 'automation_log_steps') { const seen = new Map(); T('automation_log').filter(r => r.automation_id === a.p_automation && r.step_id && (r.row_kind === 'step' || r.row_kind === 'action')).forEach(r => seen.set(r.step_id, r.step_name)); return [...seen].map(([step_id, step_name]) => ({ step_id, step_name, last_at: now() })); }
+    return undefined;
+  };
+  const client = { auth: authApi, from: builder, rpc: async (name, a) => { window.__writes.push({ rpc: name, args: a ? clone(a) : null }); const r = readRpc(name, a || {}); if (r !== undefined) return { data: clone(r), error: null };
+      if (name === 'automation_mark_reviewed') { window.__reviewed = (window.__reviewed || 0) + 1; return { data: now(), error: null }; }
+      return { data: name in rpcData ? clone(rpcData[name]) : null, error: null }; },
     channel: () => { const c = { on: () => c, subscribe: () => c, unsubscribe(){}, track: async () => {}, presenceState: () => ({}) }; return c; }, removeChannel(){},
     storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: '' } }), upload: async () => ({ data: null, error: null }), createSignedUrl: async () => ({ data: { signedUrl: '' }, error: null }) }) },
     functions: { invoke: async () => ({ data: null, error: null }) } };
