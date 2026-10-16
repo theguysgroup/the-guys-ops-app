@@ -1746,7 +1746,7 @@ registerTool({
 });
 
 // ── change kinds (G2): registerChangeKind + registerTool({ kind: "change" }) only; nothing above this line changes ──
-// ── change pipeline (stage 6 G2): the change kinds office_hours, task_add, lead_stage, lead_note ──
+// ── change pipeline (stage 6 G2): the change kinds office_hours, task_add, lead_stage, lead_note (stage 8 adds task_update, lead_follow_up) ──
 // Each change tool only PROPOSES (reads, then ctx.propose → an ai_changes row 'proposed'; nothing else is written).
 // Confirm and undo run the kind's apply / undo with the person's OWN client (io.userClient(jwt)), so the database's
 // row-level security applies exactly as in the app, and write through three compare-and-set functions
@@ -2419,6 +2419,162 @@ registerTool({
       kind: "lead_note", target: { table: "contacts", id: c.id, label: name },
       before: null, after: { note: { id: uid(), text, by: ctx.me.fullName, at: AT_CONFIRM } }, summary,
       display: { title: summary, rows: [{ label: "Note", before: "—", after: text }] },
+    });
+  },
+});
+
+// ── stage 8: change kinds task_update and lead_follow_up (the commonest follow-ons to the read answers) ──
+// The same pipeline as the four above: the tool only proposes; Confirm and Undo write with the person's own client
+// through a compare-and-set function (a task: ai_task_cas, .claude/sql/stage8-assistant.sql section S8-changes; a lead:
+// ai_contact_cas), so RLS, the app's rules and the optimistic lock all apply, and each change is one row, two fields at
+// most. A history line in the app's own words, "(via <name>)", goes with each.
+export const PIPELINE_RULES_FROM = "2026-09-27";   // Verbatim from index.html.
+// The app's leadRulesApply(c) for a contacts row (its localDay is the business's day of created_at).
+export function leadRulesApply(c: any, tz: string): boolean { return !!c && (!!c.stage_changed_at || localDayOf(c.created_at, tz) >= PIPELINE_RULES_FROM); }
+// The fields a task change touches, and how far a due date may move (the strict schemas have no min / max).
+export const TASK_UPDATE_COLS = ["status", "due"];
+export const TASK_DUE_DAYS_MAX = 731;
+const TASK_COLS = "id, title, board, status, due, assignees, assigned_to";
+// The fields of `to` that differ from `from` (a write never touches a field the change leaves alone).
+const changedCols = (from: any, to: any) => { const p: Record<string, any> = {}; for (const k of Object.keys(to)) if ((to[k] ?? null) !== (from[k] ?? null)) p[k] = to[k] ?? null; return p; };
+// saveTaskModal's history lines for the two fields, from → to.
+export function taskChangeLines(from: any, to: any): string[] {
+  const out: string[] = [];
+  if ((from.status || "") !== (to.status || "")) out.push(`Status changed from "${from.status || ""}" to "${to.status || ""}"`);
+  if ((from.due || "") !== (to.due || "")) out.push(`Due date changed from "${from.due || "—"}" to "${to.due || "—"}"`);
+  return out;
+}
+// Which task: by id, or by words of its title, among the tasks the person can see (RLS, then the shared block's
+// taskVisible: a technician only his own board's tasks or the ones assigned to him). One match, or a "which one?" list.
+export async function resolveTask(ctx: ToolCtx, input: { task_id?: string; task?: string }): Promise<any> {
+  const s = scopeOf(ctx.me);
+  if (input.task_id) {
+    const { data, error } = await ctx.userSb.from("tasks").select(TASK_COLS).eq("id", input.task_id).maybeSingle();
+    if (error) throw new Error("tasks: " + clip(error.message, 200));
+    if (!data) throw invalid("No task with that id that you can see.");
+    if (!taskVisible(s, data)) throw new ChangeRefused("not_allowed", "That task isn't on your board or assigned to you, so you can't change it.");
+    return data;
+  }
+  const words = leadQueryOf(input.task).split(" ").filter(Boolean);
+  if (!words.length) throw invalid("Say which task: words from its title (or its task_id).");
+  let q = ctx.userSb.from("tasks").select(TASK_COLS);
+  for (const w of words) q = q.ilike("title", `%${likeExact(w)}%`);
+  const rows = (await readAll(q.order("due", { ascending: true, nullsFirst: false }).order("id").limit(CHANGE.listMax), "tasks")).filter((t: any) => taskVisible(s, t));
+  if (!rows.length) throw invalid("No task matches that you can see.");
+  if (rows.length > 1) {
+    const office = officeLabelOf(ctx.biz.catalog);
+    const list = rows.slice(0, CHANGE.candidatesMax).map((t: any) => ({ task_id: t.id, title: t.title || "", board: boardLabel(t.board || "ron", office), status: t.status || "", due: t.due || null }));
+    throw invalid("More than one task matches. Ask the person which one, then call again with its task_id: " + JSON.stringify(list));
+  }
+  return rows[0];
+}
+registerChangeKind({
+  kind: "task_update", label: "Task change", allow: mayAddTask,
+  apply: async (userSb, ch, x) => {
+    const id = ch.target.id, b = ch.before.cols, a = ch.after.cols;
+    const out = await cas(userSb, "ai_task_cas", { p_id: id, p_expected: b, p_patch: changedCols(b, a) });
+    if (!out.ok) throw await casRefusal(out, () => `The task was changed after this was suggested (${taskFieldText(out.field, out.now)}), so nothing was changed.`);
+    for (const line of taskChangeLines(b, a)) await logActivity(userSb, "task", id, x.me.fullName, `${line} (via ${viaName(x)})`);
+    return { after: { ...ch.after, cols: pick(out.row, TASK_UPDATE_COLS) } };
+  },
+  // Back exactly as it was, only while the task is still as the change left it.
+  undo: async (userSb, ch, x) => {
+    const id = ch.target.id, b = ch.before.cols, a = ch.after.cols;
+    const out = await cas(userSb, "ai_task_cas", { p_id: id, p_expected: a, p_patch: changedCols(a, b) });
+    if (!out.ok) throw await casRefusal(out, () => `The task was changed again after this (${taskFieldText(out.field, out.now)}), so it can't be put back.`);
+    for (const line of taskChangeLines(a, b)) await logActivity(userSb, "task", id, x.me.fullName, `${line} (undone, via ${viaName(x)})`);
+  },
+});
+registerTool({
+  name: "update_task", kind: "change", modes: ["assistant"], allow: mayAddTask, status: "Preparing a task change",
+  description: "Proposes changing one task's status and/or due date (e.g. mark it done, move it to Friday). Name the task by task_id (from list_tasks) or by words of its title. Nothing changes until the person presses Confirm on the card; tell them what will change and that they must confirm; never say it is done.",
+  input_schema: {
+    type: "object", additionalProperties: false,
+    properties: {
+      task_id: { type: "string", format: "uuid", description: "The task's id, when it is known" },
+      task: { type: "string", description: "Words of the task's title" },
+      status: { type: "string", enum: TASK_STATUSES },
+      due: { type: "string", format: "date", description: "New due date, YYYY-MM-DD" },
+    },
+  },
+  check: (x) => (typeof x.task === "string" && x.task.length > CHANGE.leadQueryMax ? `task must be at most ${CHANGE.leadQueryMax} characters.` : null),
+  run: async (input, ctx) => {
+    if (!input.task_id && !input.task) throw invalid("Say which task: words from its title (or its task_id).");
+    if (input.status === undefined && input.due === undefined) throw invalid("Say what changes: the status, the due date or both.");
+    const tz = ctx.biz.tz, today = bizParts(ctx.nowMs, tz).day;
+    if (input.due !== undefined && Math.abs(dayDiff(today, input.due)) > TASK_DUE_DAYS_MAX) throw invalid("Pick a due date within two years of today.");
+    const t = await resolveTask(ctx, input), title = String(t.title || "");
+    const b = { status: t.status ?? null, due: t.due ? String(t.due).slice(0, 10) : null };
+    // The app's statuses, with Done as the business calls it (Settings → keys).
+    const a = { status: input.status !== undefined ? renamedKey(catalogKeys(ctx.biz.catalog), input.status) : b.status, due: input.due !== undefined ? input.due : b.due };
+    if (a.status === b.status && a.due === b.due) throw invalid(`"${clip(title, 60)}" already has that ${input.status !== undefined && input.due !== undefined ? "status and due date" : input.status !== undefined ? `status (${a.status})` : `due date (${fmtDateShort(a.due)})`}.`);
+    // A due date moved to a day someone on the task is away (with "Not assignable" ticked): the app's question, as lines
+    // on the card (a warning, never a block; the app asks it for the people newly assigned on that day).
+    const warnings = a.due && a.due !== b.due ? vacationWarnings(await taskVacationInfos(ctx.userSb, assigneeNames(t), a.due, tz)) : [];
+    const rows = [
+      ...(a.status !== b.status ? [{ label: "Status", before: b.status || "—", after: a.status }] : []),
+      ...(a.due !== b.due ? [{ label: "Due", before: fmtDateShort(b.due), after: fmtDateShort(a.due) }] : []),
+    ];
+    const what = [...(a.status !== b.status ? [`to ${a.status}`] : []), ...(a.due !== b.due ? [`due ${fmtDateShort(a.due)}`] : [])].join(", ");
+    const summary = clip(`Set the task "${title}" ${what}`, 300);
+    return await ctx.propose({
+      kind: "task_update", target: { table: "tasks", id: t.id, label: title },
+      before: { cols: b }, after: { cols: a }, summary, display: { title: summary, rows, ...(warnings.length ? { warnings } : {}) },
+    });
+  },
+});
+// A lead's next follow-up day (the app's setLeadFollowupDate). A New or Chasing lead with Follow up switched on moves to
+// Follow up with that day: that proposal is a lead_stage one (kind 3, its rules and undo). Otherwise only the date.
+const followUpNowText = async (userSb: any, id: string) => {
+  const { data } = await userSb.from("contacts").select("next_follow_up").eq("id", id).maybeSingle();
+  return !data ? "gone" : data.next_follow_up ? fmtDateShort(data.next_follow_up) : "none";
+};
+registerChangeKind({
+  kind: "lead_follow_up", label: "Follow-up date", allow: mayWorkLeads,
+  apply: async (userSb, ch, x) => {
+    const nowIso = iso(x.nowMs), id = ch.target.id, a = ch.after;
+    const contacted = await contactedPatch(userSb, id, nowIso);
+    if (!contacted) throw new ChangeRefused("gone", REFUSAL_TEXT.gone);
+    const out = await cas(userSb, "ai_contact_cas", { p_id: id, p_expected: ch.before.cols, p_patch: { ...a.cols, ...contacted } });
+    if (!out.ok) throw await casRefusal(out, async () => `${ch.target.label}'s follow-up date was changed after this was suggested (now ${await followUpNowText(userSb, id)}), so nothing was changed.`);
+    await logActivity(userSb, "contact", id, x.me.fullName, `Follow-up date changed from "${a.from || "—"}" to "${a.to}" (via ${viaName(x)})`);
+    return { after: { ...a, cols: pick(out.row, ["next_follow_up"]) } };
+  },
+  undo: async (userSb, ch, x) => {
+    const id = ch.target.id;
+    const out = await cas(userSb, "ai_contact_cas", { p_id: id, p_expected: ch.after.cols, p_patch: ch.before.cols });
+    if (!out.ok) throw await casRefusal(out, async () => `${ch.target.label}'s follow-up date was changed again after this (now ${await followUpNowText(userSb, id)}), so it can't be put back.`);
+    await logActivity(userSb, "contact", id, x.me.fullName, `Follow-up date change undone (via ${viaName(x)})`);
+  },
+});
+registerTool({
+  name: "set_lead_follow_up", kind: "change", modes: ["assistant"], allow: mayWorkLeads, status: "Preparing a follow-up date",
+  description: "Proposes a lead's next follow-up day (after today), as the app's follow-up date: a New or Chasing lead also moves to Follow up when that stage is on. Name the lead by lead_id or by name or phone. Nothing changes until the person presses Confirm on the card; tell them what will change and that they must confirm; never say it is done.",
+  input_schema: {
+    type: "object", additionalProperties: false, required: ["follow_up"],
+    properties: { ...LEAD_PROPS, follow_up: { type: "string", format: "date", description: "The follow-up day, YYYY-MM-DD, after today" } },
+  },
+  run: async (input, ctx) => {
+    if (!input.lead_id && !input.lead) throw invalid("Say which lead: its name or phone number (or its lead_id).");
+    const c = await resolveLead(ctx, input), cat = ctx.biz.catalog, tz = ctx.biz.tz, today = bizParts(ctx.nowMs, tz).day, day = String(input.follow_up);
+    const won = c.status === "Won" ? true : await wonByJobOf(ctx.sb, c, tz);
+    const stage = leadStageOf(cat, c, won), name = String(c.full_name || "This lead");
+    if (["New", "Chasing"].includes(stage) && stageOn(cat, "Follow-up")) {
+      if (!(day > today)) throw invalid("Pick a follow-up day after today.");
+      const p = leadStageProposal(cat, c, won, { stage: "Follow-up", follow_up: day }, today);
+      return await ctx.propose({
+        kind: "lead_stage", target: { table: "contacts", id: c.id, label: String(c.full_name || "") },
+        before: p.before, after: p.after, summary: p.summary, display: { title: p.summary, rows: p.rows },
+      });
+    }
+    if (!(day > today)) throw invalid(leadRulesApply(c, tz) && needDateOf(cat).includes(stage) ? `A lead in ${stageLabelOf(cat, stage)} needs a follow-up day after today.` : "Pick a follow-up day after today.");
+    const cur = c.next_follow_up ? String(c.next_follow_up).slice(0, 10) : "";
+    if (cur === day) throw invalid(`${name}'s follow-up is already ${fmtDateShort(day)}.`);
+    const summary = clip(`Set ${name}'s follow-up to ${fmtDateShort(day)}${cur ? ` (was ${fmtDateShort(cur)})` : ""}`, 300);
+    return await ctx.propose({
+      kind: "lead_follow_up", target: { table: "contacts", id: c.id, label: String(c.full_name || "") },
+      before: { cols: { next_follow_up: cur || null } }, after: { cols: { next_follow_up: day }, from: cur, to: day }, summary,
+      display: { title: summary, rows: [{ label: "Follow-up", before: cur ? fmtDateShort(cur) : "—", after: fmtDateShort(day) }] },
     });
   },
 });

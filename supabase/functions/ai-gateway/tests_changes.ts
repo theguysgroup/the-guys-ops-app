@@ -159,7 +159,7 @@ SUITES.push(async () => {
   // ── 1. registry ──
   {
     const g2 = ["change_office_hours", "add_task", "move_lead_stage", "add_lead_note"];
-    eq(Object.keys(CHANGE_KINDS).filter((k) => !k.startsWith("test_")), ["office_hours", "task_add", "lead_stage", "lead_note"], "G2 change kinds");
+    eq(Object.keys(CHANGE_KINDS).filter((k) => !k.startsWith("test_")), ["office_hours", "task_add", "lead_stage", "lead_note", "task_update", "lead_follow_up"], "G2 change kinds (then stage 8's, tests_changes8.ts)");
     for (const n of g2) {
       const t = TOOLS[n];
       eq([t.kind, t.modes, strictSchemaProblems(t.input_schema)], ["change", ["assistant"], []], `${n}: a change tool of the assistant mode with a strict schema`);
@@ -190,7 +190,7 @@ SUITES.push(async () => {
   {
     const db = world2();
     const r = await toolCall(db, "jwt-tech", "move_lead_stage", { lead: "Demo Lead", stage: "Quoted", follow_up: "2026-10-20" });
-    eq([errText(db, r), db.T.ai_changes.length], ["Unknown tool move_lead_stage. Available: add_task, list_tasks, read_office_hours, read_settings, upcoming_work, whoami", 0], "a technician's move_lead_stage: not even offered → is_error, no row");
+    eq([errText(db, r), db.T.ai_changes.length], ["Unknown tool move_lead_stage. Available: add_task, list_tasks, read_office_hours, read_settings, upcoming_work, update_task, whoami", 0], "a technician's move_lead_stage: not even offered → is_error, no row");
     const r2 = await toolCall(db, "jwt-mkt", "add_lead_note", { lead: "Demo Lead", text: "x" });
     ok(/^Unknown tool add_lead_note/.test(errText(db, r2)) && db.T.ai_changes.length === 0, "marketing's add_lead_note: refused, no row");
   }

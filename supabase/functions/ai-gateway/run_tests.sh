@@ -46,7 +46,9 @@ const NAMES = ['catalogHours', 'ROLE_LABEL', 'productName', 'OFFICE', 'hhmmToMin
   'pad2', 'fmtLocal', 'shiftDays', 'REGION_DEFAULTS', 'REGION_NONE', 'REGION_MEMO', 'BIZ_WALL', 'BIZ_DAY_MEMO', 'TZ_VALID', 'regionNow', 'tzValid', 'regionMemo', 'bizTz',
   'bizWall', 'bizDayOf', 'bizDayMemo',
   // stage 8 (tests_read.ts): the role fixtures' pages and the task statuses
-  'defaultPermissionsFor', 'TASK_STATUSES'];
+  'defaultPermissionsFor', 'TASK_STATUSES',
+  // stage 8 C (tests_changes8.ts): the follow-up date's pipeline rules
+  'PIPELINE_RULES_FROM', 'localDay', 'leadRulesApply', 'ACTIVE', 'stageOn'];
 function extractDecl(source, name){
   const fnIdx = source.indexOf(`function ${name}(`);
   const constIdx = source.search(new RegExp(`\\bconst ${name}\\s*=`));
