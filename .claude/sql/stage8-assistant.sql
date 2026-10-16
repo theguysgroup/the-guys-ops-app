@@ -26,6 +26,8 @@
 --   select to_regclass('public.ai_changes');   -- not null (stage 6 G1 ran)
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════════
 begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '60s';
 
 -- A task: status and due only. p_expected: the columns as the person was shown them (compared after casting to the
 -- column types; a key left out is not compared). Returns {ok, row: {id, status, due}} |
@@ -86,6 +88,7 @@ select 'S8-changes ok';
 -- ── ROLLBACK (S8-changes; run by hand only) ──────────────────────────────────────────────────────────────────
 -- Tasks the assistant already changed stay as they are (ordinary rows); the change log keeps its rows.
 -- begin;
+-- set local lock_timeout = '5s';
 -- drop function if exists public.ai_task_cas(uuid, jsonb, jsonb);
 -- commit;
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════════
