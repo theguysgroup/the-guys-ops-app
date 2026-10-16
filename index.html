@@ -23201,6 +23201,152 @@ function wfZoomAt(view, k, px, py){
   return { x: px - (px - (Number(v.x) || 0)) * (k1 / k0), y: py - (py - (Number(v.y) || 0)) * (k1 / k0), k: k1 };
 }
 
+// ── the Advanced layout (design §5.4): tiles 72×72 with a 36 px label band under them, at free positions kept in
+// layout.adv ({ id: [x, y] }: a tile's top-left in world units; steps and triggers share the id space). wfTidy lays a
+// whole flow out: each group of steps (the entry's first) a tree from left to right, x = depth × 220, leaf rows 110 apart
+// and a parent in the middle of its children, the groups 140 apart one under the other; triggers at x −240 at the height
+// of the step they start (several on one step spread ±90). Every path without a next step ends in a "[+]" where that step
+// would go. Edges are cubic béziers into a tile's left side with an arrowhead; one that goes backwards loops round under
+// both tiles. Deterministic, no DOM measurement. ──
+const WF_ADV = { tile: 72, label: 36, labelW: 180, col: 220, row: 110, clusterGap: 140, trigX: -240, spread: 90, plus: 28, bend: 100, fwd: 24, loop: 18, arrow: 8 };
+// What a tile at (x, y) covers: the tile and its label band (the label is wider than the tile, centred under it).
+function wfAdvFoot(x, y){ const A = WF_ADV; return { x: x + (A.tile - A.labelW) / 2, y, w: A.labelW, h: A.tile + A.label }; }
+// The y of a tile's out dot for its port i of n (a multi-port tile stacks one dot per port, evenly).
+function wfAdvDotY(y, i, n){ return y + WF_ADV.tile * (i + 1) / (Math.max(1, n) + 1); }
+// An Advanced edge from an out dot (x1, y1) to a tile's left side (x2, y2) as cubic segments [[p0, p1, p2, p3], …]: one
+// S curve forwards; backwards (the target not right of the source) out to the right, along y = under (below both tiles),
+// and back in from the left.
+function wfBezierSegs(x1, y1, x2, y2, under){
+  const A = WF_ADV;
+  if (x2 - x1 >= A.fwd) { const dx = Math.max(40, (x2 - x1) / 2); return [[[x1, y1], [x1 + dx, y1], [x2 - dx, y2], [x2, y2]]]; }
+  const m = [(x1 + x2) / 2, under];
+  return [[[x1, y1], [x1 + A.bend, y1], [x1 + A.bend, under], m], [m, [x2 - A.bend, under], [x2 - A.bend, y2], [x2, y2]]];
+}
+function wfBezierPath(segs){
+  const f = v => Math.round(v * 10) / 10, S = Array.isArray(segs) ? segs : [];
+  if (!S.length) return '';
+  return `M${f(S[0][0][0])} ${f(S[0][0][1])}` + S.map(s => ` C${s.slice(1).map(p => `${f(p[0])} ${f(p[1])}`).join(' ')}`).join('');
+}
+// The point at t (0..1) along the segments, each segment an equal share of t (the "+" and trash buttons sit at 0.5).
+function wfBezierAt(segs, t){
+  const S = Array.isArray(segs) ? segs : [];
+  if (!S.length) return [0, 0];
+  const tt = Math.max(0, Math.min(1, Number(t) || 0)) * S.length, i = Math.min(S.length - 1, Math.floor(tt)), u = tt - i, v = 1 - u, [p0, p1, p2, p3] = S[i];
+  const at = k => v * v * v * p0[k] + 3 * v * v * u * p1[k] + 3 * v * u * u * p2[k] + u * u * u * p3[k];
+  return [Math.round(at(0) * 10) / 10, Math.round(at(1) * 10) / 10];
+}
+// A filled arrowhead at the end of the last segment, along its end tangent.
+function wfArrowHead(segs){
+  const S = Array.isArray(segs) ? segs : [];
+  if (!S.length) return '';
+  const f = v => Math.round(v * 10) / 10, [, , p2, p3] = S[S.length - 1], s = WF_ADV.arrow;
+  const dx = p3[0] - p2[0], dy = p3[1] - p2[1], l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l, bx = p3[0] - ux * s, by = p3[1] - uy * s;
+  return `M${f(bx - uy * s * 0.6)} ${f(by + ux * s * 0.6)} L${f(p3[0])} ${f(p3[1])} L${f(bx + uy * s * 0.6)} ${f(by - ux * s * 0.6)} Z`;
+}
+// Tidy up: every step and trigger at its tidy position → { id: [x, y] } (only the ids in onlyIds when given).
+function wfTidy(doc, reg, onlyIds){
+  const d = wfObj(doc), I = wfIndex(d), A = WF_ADV, pos = Object.create(null), seen = new Set();
+  const childOf = (id, p) => { const t = wfObj(wfObj(I.nodes[id]).out)[p]; return typeof t==='string' && I.parent[t] && I.parent[t].from===id && I.parent[t].port===p ? t : null; };
+  let top = 0, row = 0;
+  // a step at depth and everything below it; leaves (and empty ports, where a "[+]" goes) take the next row → its row
+  const place = (id, depth) => {
+    seen.add(id);
+    const n = wfObj(I.nodes[id]), out = wfObj(n.out), ys = [];
+    wfPorts(n).forEach(p => {
+      const c = childOf(id, p);
+      if (c && !seen.has(c)) ys.push(place(c, depth + 1));
+      else if (!(typeof out[p]==='string' && wfHas(I.nodes, out[p]))) ys.push(row++);
+    });
+    const r = ys.length ? (ys[0] + ys[ys.length - 1]) / 2 : row++;
+    pos[id] = [depth * A.col, Math.round(top + r * A.row)];
+    return r;
+  };
+  wfClusters(d).forEach(c => {
+    if (seen.has(c.head)) return;
+    row = 0; place(c.head, 0);
+    top += (row - 1) * A.row + A.tile + A.label + A.clusterGap;
+  });
+  // the triggers: each at the height of the step it starts (its own Go to, else the entry), shared steps spread ±90, then
+  // pushed down so none overlaps the one above
+  const entry = typeof d.entry==='string' && wfHas(I.nodes, d.entry) ? d.entry : null;
+  const trigs = (Array.isArray(d.triggers) ? d.triggers : []).map(wfObj).map((t, i) => ({ id: String(t.id), i, to: typeof t.goto==='string' && wfHas(I.nodes, t.goto) ? t.goto : entry }));
+  const count = {}, nth = {};
+  trigs.forEach(t => { count[t.to] = (count[t.to] || 0) + 1; });
+  trigs.forEach(t => { const k = nth[t.to] = (nth[t.to] ?? -1) + 1; t.want = (t.to && pos[t.to] ? pos[t.to][1] : 0) + (k - (count[t.to] - 1) / 2) * 2 * A.spread; });
+  let free = -Infinity;
+  trigs.slice().sort((a, b) => a.want - b.want || a.i - b.i).forEach(t => { const y = Math.max(t.want, free); pos[t.id] = [A.trigX, Math.round(y)]; free = y + A.row; });
+  if (onlyIds==null) return pos;
+  const only = new Set(onlyIds instanceof Set ? onlyIds : Array.isArray(onlyIds) ? onlyIds : []), out = Object.create(null);
+  Object.keys(pos).forEach(id => { if (only.has(id)) out[id] = pos[id]; });
+  return out;
+}
+// → { builder: 'advanced', nodes: { id: tile box }, triggers: [tile box + id], plus: [box + src, port] (the "[+]"s; src
+// "@entry" on an empty flow), edges: [{ key, from, to, port?, d, mid, arrow, back, dashed?, trigger?, ref?, toPlus? }],
+// pos: { id: [x, y] } (every position used), filled: [ids without a stored position], unreached: [heads of groups no run
+// reaches, Go to steps counted], bounds }, plus the Standard layout's empty lists so the shared helpers take it. Stored
+// positions are kept as they are; a step without one goes at its parent's x + 220 at its port's row, a group's first step
+// under everything, a trigger 240 left of its step, each nudged down a row at a time off anything it would cover; with no
+// stored position at all the whole flow is tidied.
+function wfLayoutAdvanced(doc, layout, reg){
+  const d = wfObj(doc), I = wfIndex(d), A = WF_ADV, adv = wfObj(wfObj(layout).adv), order = wfOrder(d);
+  const L = { builder: 'advanced', nodes: {}, triggers: [], addTrigger: null, heads: [], ends: [], jumps: [], slots: [], plus: [], edges: [], pos: {}, filled: [], unreached: [], bounds: null };
+  const trigs = (Array.isArray(d.triggers) ? d.triggers : []).map(wfObj);
+  const entry = typeof d.entry==='string' && wfHas(I.nodes, d.entry) ? d.entry : null;
+  const targetOf = t => typeof t.goto==='string' && wfHas(I.nodes, t.goto) ? t.goto : entry;
+  const ok = v => Array.isArray(v) && v.length >= 2 && Number.isFinite(v[0]) && Number.isFinite(v[1]);
+  const ids = [...order, ...trigs.map(t => String(t.id))], pos = L.pos;
+  ids.forEach(id => { if (ok(adv[id])) pos[id] = [adv[id][0], adv[id][1]]; });
+  const foot = [], hit = b => foot.some(f => b.x < f.x + f.w && f.x < b.x + b.w && b.y < f.y + f.h && f.y < b.y + b.h);
+  // a box at (x, y), moved down a row at a time until it covers nothing (bounded), then taken
+  const nudge = (x, y, boxAt) => { const most = 2 * foot.length + 1; let n = 0; while (hit(boxAt(x, y)) && n++ < most) y += A.row; const b = boxAt(Math.round(x), Math.round(y)); foot.push(b); return b; };
+  if (ids.length && !ids.some(id => pos[id])) { const t = wfTidy(d, reg); ids.forEach(id => { pos[id] = t[id]; }); L.filled = ids.slice(); ids.forEach(id => foot.push(wfAdvFoot(pos[id][0], pos[id][1]))); }
+  else {
+    ids.forEach(id => { if (pos[id]) foot.push(wfAdvFoot(pos[id][0], pos[id][1])); });
+    const put = (id, x, y) => { const b = nudge(x, y, wfAdvFoot); pos[id] = [b.x - (A.tile - A.labelW) / 2, b.y]; L.filled.push(id); };
+    order.forEach(id => {
+      if (pos[id]) return;
+      const p = I.parent[id], at = p && pos[p.from];
+      if (at) { const ports = wfPorts(I.nodes[p.from]), i = Math.max(0, ports.indexOf(p.port)); put(id, at[0] + A.col, at[1] + (i - (ports.length - 1) / 2) * A.row); }
+      else put(id, 0, foot.length ? Math.max(...foot.map(f => f.y + f.h)) + A.clusterGap : 0);
+    });
+    trigs.forEach(t => { const id = String(t.id), to = targetOf(t); if (!pos[id]) put(id, to ? pos[to][0] + A.trigX : A.trigX, to ? pos[to][1] : 0); });
+  }
+  const tile = (x, y) => ({ x, y, w: A.tile, h: A.tile });
+  order.forEach(id => { L.nodes[id] = tile(pos[id][0], pos[id][1]); });
+  trigs.forEach(t => { const id = String(t.id); L.triggers.push({ ...tile(pos[id][0], pos[id][1]), id }); });
+  // the "[+]"s: where the next step of an empty port would go (centred in that tile's place), nudged off anything drawn
+  const plusAt = (x, y) => ({ x: x + (A.tile - A.plus) / 2, y: y + (A.tile - A.plus) / 2, w: A.plus, h: A.plus });
+  if (!order.length) L.plus.push({ ...nudge(0, 0, plusAt), src: '@entry', port: null });
+  // the edges: dot → tile (or "[+]"), a loop under both when it goes backwards
+  const lows = [], edge = (key, from, a, i, n, to, b, extra) => {
+    const x1 = a.x + A.tile, y1 = wfAdvDotY(a.y, i, n), x2 = b.x, y2 = b.y + b.h / 2, under = Math.max(a.y + A.tile + A.label, b.y + b.h + A.label) + A.loop;
+    const segs = wfBezierSegs(x1, y1, x2, y2, under);
+    if (segs.length > 1) lows.push(under + 1);
+    L.edges.push({ key, from, to, ...extra, d: wfBezierPath(segs), mid: wfBezierAt(segs, 0.5), arrow: wfArrowHead(segs), back: segs.length > 1 });
+  };
+  order.forEach(id => {
+    const n = wfObj(I.nodes[id]), out = wfObj(n.out), ports = wfPorts(n), a = L.nodes[id];
+    ports.forEach((p, i) => {
+      const t = out[p];
+      if (typeof t==='string' && wfHas(I.nodes, t)) { if (t!==id) edge(`${id}:${p}`, id, a, i, ports.length, t, L.nodes[t], { port: p }); return; }
+      const pb = { ...nudge(a.x + A.col, a.y + (i - (ports.length - 1) / 2) * A.row, plusAt), src: id, port: p };
+      L.plus.push(pb);
+      edge(`${id}:${p}`, id, a, i, ports.length, null, pb, { port: p, toPlus: true });
+    });
+    wfRefs(n, reg).forEach(r => { if (r.to && wfHas(I.nodes, r.to) && r.to!==id) edge(`${id}:ref:${r.key}`, id, a, 0, 1, r.to, L.nodes[r.to], { ref: true }); });
+  });
+  L.triggers.forEach((b, k) => { const t = trigs[k], to = targetOf(t); if (to) edge(`trigger:${b.id}`, b.id, b, 0, 1, to, L.nodes[to], { trigger: true, ...(to===t.goto ? { dashed: true } : {}) }); });
+  // groups of steps no run reaches (W_DELINKED counts Go to steps: viaRefs)
+  const reach = wfReachable(d, { viaRefs: true, reg });
+  L.unreached = wfClusters(d).map(c => c.head).filter(h => !reach.has(h));
+  // the bounds of everything drawn: tiles with their labels, "[+]"s and the loops under them
+  const all = [...order.map(id => wfAdvFoot(pos[id][0], pos[id][1])), ...L.triggers.map(b => wfAdvFoot(b.x, b.y)), ...L.plus];
+  if (!all.length) all.push(wfAdvFoot(0, 0));
+  const x0 = Math.min(...all.map(b => b.x)), y0 = Math.min(...all.map(b => b.y)), x1 = Math.max(...all.map(b => b.x + b.w)), y1 = Math.max(...all.map(b => b.y + b.h), ...lows);
+  L.bounds = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  return L;
+}
+
 // ── the pickers (design §5.5): "Add trigger" / "Actions" with search, Recent, Pinned and the categories in GHL's order and
 // colours; unavailable rows greyed with the reason (never hidden), slot reasons ("Go to must be the last step of its
 // path", "Not available for the <trigger> trigger"), "Not in OPS" for GHL items this app doesn't have. ──

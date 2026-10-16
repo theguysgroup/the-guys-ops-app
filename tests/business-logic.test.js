@@ -233,6 +233,8 @@ const DECLS = [
   // Stage 6 v2 G6: provider status, the free quota, own keys, the own-Claude card, the ChatGPT row (coming later)
   'COBRA_PROVIDER_MODELS', 'COBRA_SOURCE_LABEL', 'COBRA_KEY_RE', 'COBRA_KEY_PROVIDERS', 'cobraSourcePill', 'cobraFreeMeter', 'cobraFreeResetText', 'cobraKeyProblem', 'cobraKeyCardHtml',
   'cobraOwnClaudeCardHtml', 'cobraChatGptRowHtml', 'cobraPaidKeyReady',
+  // The workflow builder: the Advanced layout (stage 2, phase 5 · G5.1)
+  'WF_ADV', 'wfAdvFoot', 'wfAdvDotY', 'wfBezierSegs', 'wfBezierPath', 'wfBezierAt', 'wfArrowHead', 'wfTidy', 'wfLayoutAdvanced',
 ];
 
 function extractDecl(source, name){
@@ -5812,6 +5814,72 @@ function testWfLayout(sb){
     [{ x: 400, y: 120, k: 0.72 }, { x: 350, y: 250, k: 1 }, 0.2, 2, 0.2, { x: -100, y: -100, k: 2 }], 'wfFit (k in [0.2, 1], centred), wfClampZoom [0.2, 2], wfZoomAt keeps the point under the cursor');
 }
 
+function testWfAdvLayout(sb){
+  console.log('\nWorkflow builder: the Advanced layout (stage 2, phase 5 · G5.1)');
+  const reg = wfRegFor(WF_AV_TODAY), A = sb.WF_ADV;
+  const D = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }, { id: 't2', type: 'newLead', filters: WF_F0 }],
+    nodes: { n1: wfAct('n2'), n2: { kind: 'if_else', type: 'if_else', config: { branches: [{ id: 'b3', name: 'Yes', when: WF_F0 }], noneName: 'None' }, out: { b3: 'n4', none: null } },
+      n4: wfAct('n5'), n5: { kind: 'goto', type: 'goto', config: { target: 'n1' }, out: {} }, x7: wfAct('x8'), x8: wfAct() } };
+  const T = sb.wfTidy(D, reg);
+  assertEqual(T, { n5: [660, 0], n4: [440, 0], n2: [220, 55], n1: [0, 55], x8: [220, 358], x7: [0, 358], t1: [-240, -35], t2: [-240, 145] },
+    'wfTidy: x = depth × 220, leaves (and an empty port\'s "[+]") 110 apart, a parent in the middle of its children, the next group 140 under, triggers at −240 spread ±90 on a shared step');
+  assertEqual([sb.wfTidy(D, reg, ['n2', 't1', 'zz']), sb.wfTidy(sb.wfNewDoc(), reg), sb.wfTidy({ ...sb.wfNewDoc(), triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }, { id: 't2', type: 'newLead', filters: WF_F0 }] }, reg)],
+    [{ n2: [220, 55], t1: [-240, -35] }, {}, { t1: [-240, -90], t2: [-240, 90] }], 'wfTidy: only the ids asked for; an empty flow; triggers with no step to start');
+  const L = sb.wfLayoutAdvanced(D, { v: 1 }, reg);
+  assertEqual([L.builder, L.filled.length, L.nodes.n2, L.triggers.map(t => t.id + '@' + t.x + ',' + t.y), L.plus.map(p => `${p.src}:${p.port}@${p.x},${p.y}`), L.edges.map(e => e.key + (e.back ? '↺' : '') + (e.dashed ? '┄' : '') + (e.toPlus ? '+' : '')), L.unreached],
+    ['advanced', 8, { x: 220, y: 55, w: 72, h: 72 }, ['t1@-240,-35', 't2@-240,145'], ['n2:none@462,132', 'x8:next@462,380'],
+      ['n1:next', 'n2:b3', 'n2:none+', 'n4:next', 'n5:ref:target↺', 'x7:next', 'x8:next+', 'trigger:t1', 'trigger:t2'], ['x7']],
+    'wfLayoutAdvanced: no stored positions → tidied; a "[+]" on each empty port; the Go to\'s edge loops back; a group no run reaches');
+  const back = L.edges.find(e => e.key==='n5:ref:target'), n1 = L.edges.find(e => e.key==='n1:next');
+  assertEqual([back.d.split(' C').length - 1, back.mid[1] > Math.max(L.nodes.n5.y, L.nodes.n1.y) + A.tile + A.label, n1.d, n1.mid, n1.arrow, L.bounds.y + L.bounds.h >= back.mid[1]],
+    [2, true, 'M72 91 C146 91 146 91 220 91', [146, 91], 'M212 95.8 L220 91 L212 86.2 Z', true], 'Advanced edges: a backward one loops under both tiles (and the bounds cover it); forwards one bézier into the tile\'s left side with an arrowhead');
+  // stored positions are kept; a new step goes at its parent's x + 220 on its port's row, nudged off what it would cover
+  const adv = { ...T, n2: [300, 500], x7: [520, 445] }; delete adv.n4; delete adv.t2;
+  const P = sb.wfLayoutAdvanced(D, { v: 1, adv }, reg);
+  assertEqual([P.pos.n4, P.pos.t2, P.pos.n2, P.pos.n5, P.filled], [[520, 555], [-240, 165], [300, 500], [660, 0], ['n4', 't2']],
+    'wfLayoutAdvanced: stored positions kept, a new step at parent.x + 220 on its port row nudged down a row, a new trigger 240 left of its step nudged off the other');
+  const G = { ...D, nodes: { ...D.nodes, n5: { kind: 'goto', type: 'goto', config: { target: 'x7' }, out: {} } } };
+  assertEqual([sb.wfLayoutAdvanced(G, { adv: T }, reg).unreached, sb.wfStandardBlockers(G).map(b => b.code + ':' + (b.nodeId || '')), [...sb.wfReachable(G, {})].sort(), [...sb.wfReachable(G, { viaRefs: true, reg })].sort(),
+    sb.wfLayoutAdvanced({ ...D, triggers: [{ id: 't1', type: 'newLead', filters: WF_F0, goto: 'x7' }] }, { adv: T }, reg).edges.filter(e => e.trigger).map(e => e.to + (e.dashed ? '┄' : ''))],
+    [[], ['delinked:x7', 'delinked:x8'], ['n1', 'n2', 'n4', 'n5'], ['n1', 'n2', 'n4', 'n5', 'x7', 'x8'], ['x7┄']],
+    'reachability: a Go to reaches a group (viaRefs: not "Not connected"), yet it still keeps the flow out of the Standard builder; a trigger\'s own Go to is dashed');
+  const E = sb.wfLayoutAdvanced(sb.wfNewDoc(), {}, reg);
+  assertEqual([Object.keys(E.nodes).length, E.plus.map(p => `${p.src}@${p.x},${p.y}`), E.edges, E.bounds], [0, ['@entry@22,22'], [], { x: 22, y: 22, w: 28, h: 28 }], 'an empty flow: one "[+]" to start from');
+  // béziers
+  const S = sb.wfBezierSegs(0, 0, 200, 100, 0), B = sb.wfBezierSegs(100, 0, 0, 0, 200);
+  assertEqual([sb.wfBezierPath(S), sb.wfBezierAt(S, 0.5), sb.wfBezierAt(S, 0), sb.wfBezierAt(S, 1), sb.wfArrowHead(S), sb.wfBezierPath(B), sb.wfBezierAt(B, 0.5), sb.wfBezierSegs(0, 0, 30, 0, 0)[0][1], sb.wfBezierPath([]), sb.wfBezierAt([], 0.5)],
+    ['M0 0 C100 0 100 100 200 100', [100, 50], [0, 0], [200, 100], 'M192 104.8 L200 100 L192 95.2 Z', 'M100 0 C200 0 200 200 50 200 C-100 200 -100 0 0 0', [50, 200], [40, 0], '', [0, 0]],
+    'wfBezierSegs / wfBezierPath / wfBezierAt / wfArrowHead: an S curve forwards, a loop backwards, the midpoint, the arrowhead along the end');
+  // 200 steps in several groups, triggers sharing steps: after Tidy every parent is left of its children, nothing overlaps,
+  // the same doc lays out the same, < 15 ms
+  const rnd = wfRng(7), slotsOf = d => [{ src: '@entry' }, ...Object.keys(d.nodes).flatMap(id => sb.wfPorts(d.nodes[id]).filter(p => d.nodes[id].out[p]==null).map(p => ({ src: id, port: p })))];
+  let doc = { schema: 2, seq: 0, entry: null, triggers: [], nodes: {} };
+  while (Object.keys(doc.nodes).length < 200) {
+    const s = slotsOf(doc), slot = s[Math.floor(rnd() * s.length)], r = rnd();
+    const node = r < 0.12 ? { kind: 'if_else', type: 'if_else', config: { branches: [{ id: 'x', name: 'A', when: WF_F0 }] } }
+      : r < 0.16 ? { kind: 'split', type: 'split', config: { paths: [{ id: 'p', name: 'A', percent: 50 }, { id: 'q', name: 'B', percent: 50 }] } } : r < 0.18 ? { kind: 'goto', type: 'goto', config: { target: null } } : { kind: 'action', type: 'add_task', config: { title: 'x' } };
+    const x = sb.wfInsert(doc, slot, node, reg); if (!x.error) doc = x.doc;
+  }
+  doc = JSON.parse(JSON.stringify(doc));
+  const ids = Object.keys(doc.nodes);
+  ids.filter((id, i) => i % 23===5 && doc.nodes[id].out && typeof doc.nodes[id].out.next==='string').forEach(id => { doc.nodes[id].out.next = null; });
+  doc.triggers = [0, 1, 2, 3, 4, 5].map(i => ({ id: 't' + (900 + i), type: 'newLead', filters: WF_F0, ...(i > 1 ? { goto: ids[(i * 37) % ids.length] } : {}) }));
+  doc.triggers[5].goto = doc.triggers[4].goto;
+  const tid = sb.wfTidy(doc, reg), a = sb.wfLayoutAdvanced(doc, { adv: tid }, reg), b = sb.wfLayoutAdvanced(JSON.parse(JSON.stringify(doc)), { adv: sb.wfTidy(JSON.parse(JSON.stringify(doc)), reg) }, reg);
+  const I = sb.wfIndex(doc), bad = Object.keys(I.parent).filter(c => !(tid[I.parent[c].from][0] < tid[c][0]));
+  const boxes = [...Object.entries(a.nodes).map(([k, v]) => ['n:' + k, sb.wfAdvFoot(v.x, v.y)]), ...a.triggers.map(v => ['t:' + v.id, sb.wfAdvFoot(v.x, v.y)]), ...a.plus.map(v => ['+' + v.src + v.port, v])];
+  const over = [];
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const [p, u] = boxes[i], [q, v] = boxes[j];
+    if (u.x < v.x + v.w && v.x < u.x + u.w && u.y < v.y + v.h && v.y < u.y + u.h) over.push(p + '×' + q);
+  }
+  let best = Infinity;
+  for (let i = 0; i < 7; i++) { const t0 = process.hrtime.bigint(); sb.wfLayoutAdvanced(doc, { adv: sb.wfTidy(doc, reg) }, reg); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); }
+  assertEqual([sb.wfClusters(doc).length > 3, Object.keys(a.nodes).length, a.filled, bad, over.slice(0, 3), JSON.stringify(a)===JSON.stringify(b), JSON.stringify(sb.wfLayoutAdvanced(doc, {}, reg).pos)===JSON.stringify(a.pos), best < 15,
+    a.edges.every(e => /^M[-\d.]+ [-\d.]+( C[-\d.]+ [-\d.]+ [-\d.]+ [-\d.]+ [-\d.]+ [-\d.]+)+$/.test(e.d)), a.plus.length===slotsOf(doc).length - 1],
+    [true, 200, [], [], [], true, true, true, true, true], `200 steps in groups: after Tidy each parent left of its children, nothing overlaps, deterministic, ${best.toFixed(2)} ms (< 15 ms), every edge a valid path, a "[+]" on every empty port`);
+}
+
 function testWfWords(sb){
   console.log('\nWorkflow builder: the words on the canvas, Find and replace, the pickers, the keys');
   const reg = wfRegFor(WF_AV_TODAY), ctx = { lists: { stages: [{ key: 'quoted', label: 'Quoted' }], templates: [{ key: 'my_t1', label: 'Quote follow-up' }], workflows: [{ key: 'w1', label: 'Nurture' }], tags: [{ key: 'vip', label: 'VIP' }] } };
@@ -6891,6 +6959,7 @@ testWfShellTokens(); testWfShellStatic(); testWfShellRuntime();
 { const sb = wfSb(); [testWfPickDrawerPure, testWfPickDrawerWords].forEach(t => t(sb)); }
 testWfPickDrawerRuntime();
 { const sb = wfSb(); [testWfRailPure, testWfRailWords].forEach(t => t(sb)); }
+{ const sb = wfSb(); testWfAdvLayout(sb); }
 
 // ── Stage 4: page history, back closes windows first, the edge swipe, deep-link fallback ──
 function testPageHistory(sb){
