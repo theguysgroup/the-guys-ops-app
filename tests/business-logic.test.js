@@ -5566,6 +5566,9 @@ function testCobraV2Static(){
   assertEqual(block.split('\n').filter(l => /localStorage|sessionStorage/.test(l) && /key/i.test(l)), [], 'no browser storage in the block mentions a key');
   const flows = ['cobraKeySave', 'cobraKeyTest', 'cobraKeyDelete', 'cobraPatchKey', 'cobraKeyPut', 'cobraKeyAfter', 'cobraKeyState', 'cobraOpenMcpKeys', 'cobraPatchSource'];
   assertEqual(flows.filter(n => /\brender\(/.test(extractDecl(script, n))), [], 'the key flows never draw the app (render)');
+  const mcpKeys = extractDecl(script, 'cobraOpenMcpKeys'), at = s => mcpKeys.indexOf(s);
+  assertEqual([at("goTab('settings')") > 0, at("openConnector('mcp')") > at("goTab('settings')"), at('cobraClose()') > at("openConnector('mcp')")], [true, true, true],
+    'cobraOpenMcpKeys (owner): moves to the connector first, then closes the panel (its history back never races the new entries)');
   assertEqual([/showToast/.test(save), /COBRA\.\w+\s*=\s*(key|req)\b/.test(save), /cobraKeyLog\([^;]*\$\{(key|req)\b/.test(save), /console\./.test(save)], [false, false, false, false], 'the pasted key never reaches a toast, COBRA, the settings history or the console');
   assertEqual(['cobraKeySave', 'cobraKeyTest', 'cobraKeyDelete'].map(n => (extractDecl(script, n).match(/step: '(key_[a-z]+)'/) || [])[1]), ['key_save', 'key_test', 'key_delete'], 'the key flows call key_save / key_test / key_delete');
   const page = extractDecl(script, 'renderCobraSettingsPage');

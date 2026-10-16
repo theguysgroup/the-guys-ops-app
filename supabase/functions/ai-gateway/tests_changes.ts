@@ -423,6 +423,11 @@ SUITES.push(async () => {
     db = world([vac(1, { options: { notAssignable: true, autoBack: false }, stand_in_id: null, stand_in_name: "" })]);
     ({ row } = await propose(db, { assignees: ["Gabe"], due: "2026-10-28" }));
     eq(row.display.warnings, ["Gabe Tech is on vacation then (On vacation (due back 25 Oct))."], "autoBack off: still away past the end date; no stand-in → one line");
+    // … with his working days set (Monday to Friday): due back on the next one, as the app's assign line says (vacationBackDay)
+    db = world2({ seed: { employees: EMPS().map((e: any) => (e.id === "e0" ? { ...e, working_days: [1, 2, 3, 4, 5] } : e)),
+      employee_vacations: [vac(1, { options: { notAssignable: true, autoBack: false }, stand_in_id: null, stand_in_name: "" })] } });
+    ({ row } = await propose(db, { assignees: ["Gabe"], due: "2026-10-28" }));
+    eq(row.display.warnings, ["Gabe Tech is on vacation then (On vacation (due back 26 Oct))."], "autoBack off, working days Monday to Friday: ends Saturday 24 Oct → due back Monday 26 Oct");
     // two people away; the stand-in away too is not offered
     db = world([vac(1, {}), vac(2, { employee_id: "e1", employee_name: "Kim Lane", stand_in_id: "e0", stand_in_name: "Gabe Tech", ends_on: "2026-10-31" })]);
     ({ row } = await propose(db, { assignees: ["Gabe", "Kim Lane"], due: "2026-10-16" }));
@@ -451,13 +456,15 @@ SUITES.push(async () => {
     // parity: the helpers = the app's (vacationAssignInfo / vacationAssignConflicts / vacationAssignLine), in the business's zone
     {
       APP.STATE.data.settings.catalog = { region: { timeZone: TZ } };
-      const emps = EMPS();
+      const emps = EMPS().map((e: any) => (e.id === "e0" ? { ...e, working_days: [1, 2, 3, 4, 5] } : e.id === "e6" ? { ...e, working_days: [2, "4"] } : e));   // Gabe Mon-Fri, Tia Tue/Thu
       const rows = [vac(1, {}), vac(2, { employee_id: "e1", employee_name: "Kim Lane", stand_in_id: "e0", stand_in_name: "Gabe Tech", ends_on: "2026-10-31" }),
         vac(3, { employee_id: "e6", employee_name: "Tia", starts_on: "2026-10-01", ends_on: "2026-10-05", options: { notAssignable: true, autoBack: false }, ended_at: "2026-10-18T03:30:00Z" }),
         vac(4, { employee_id: "e2", employee_name: "Sam Lee", options: { notAssignable: true, standIn: true }, stand_in_id: "e8", stand_in_name: "Desk Helper", starts_on: "2026-10-20", cancelled_at: null }),
         vac(5, { employee_id: "e8", employee_name: "Desk Helper", cancelled_at: "2026-10-01T00:00:00Z" })];
-      const appData = (withEmps: boolean) => ({ vacations: rows.map((r) => APP.mapVacationRow(r)), employees: withEmps ? emps.map((e: any) => ({ id: e.id, name: e.name, status: e.status, roles: e.roles })) : [] });
-      const ours = (withEmps: boolean) => ({ vacations: rows.map(mapVacRow), employees: withEmps ? emps : [] });
+      // the app's employees as it maps them (workingDays from working_days); its vacationUntilText reads them from STATE
+      const appEmps = emps.map((e: any) => ({ id: e.id, name: e.name, status: e.status, roles: e.roles, workingDays: Array.isArray(e.working_days) ? e.working_days.map(Number) : [] }));
+      const appData = (withEmps: boolean) => { APP.STATE.data.employees = withEmps ? appEmps : []; return { vacations: rows.map((r) => APP.mapVacationRow(r)), employees: APP.STATE.data.employees }; };
+      const ours = (withEmps: boolean) => ({ vacations: rows.map(mapVacRow), employees: withEmps ? emps.map(mapEmpRow) : [] });
       const people = ["Gabe Tech", "Kim Lane", "Tia", "Sam Lee", "Desk Helper", "Nobody"];
       const strip = (x: any) => (x ? { name: x.name, id: x.vac.id, label: x.label, standIn: x.standIn } : null);
       for (const withEmps of [true, false]) for (const day of ["2026-10-13", "2026-10-14", "2026-10-17", "2026-10-18", "2026-10-21", "2026-10-24", "2026-10-25", "2026-11-01"]) {
@@ -465,6 +472,11 @@ SUITES.push(async () => {
         const c1 = vacationAssignConflicts(people, ["Kim Lane"], day, ours(withEmps), TZ), c2 = APP.vacationAssignConflicts(people, ["Kim Lane"], day, appData(withEmps), TZ);
         eq([c1.map(strip), vacationAssignLine(c1)], [c2.map(strip), APP.vacationAssignLine(c2)], `vacationAssignConflicts + the line = the app's (${day})`);
       }
+      APP.STATE.data.employees = [];
+      const wds: any[] = [undefined, [], [1, 2, 3, 4, 5], [0, 6], [3], [7, -1, 2.5], [2, 4]];
+      eq(["2026-10-23", "2026-10-24", "2026-10-25", "2026-12-31"].flatMap((d) => wds.map((w) => vacationBackDay(d, w))), ["2026-10-23", "2026-10-24", "2026-10-25", "2026-12-31"].flatMap((d) => wds.map((w) => APP.vacationBackDay(d, w))), "vacationBackDay = the app's");
+      eq([vacationWorkingDaysOf({ employeeId: "e0" }, emps.map(mapEmpRow)), vacationWorkingDaysOf({ employeeId: "e9" }, emps.map(mapEmpRow)), vacationWorkingDaysOf({ employeeId: "e0" }, [])],
+        [APP.vacationWorkingDaysOf({ employeeId: "e0" }, appEmps), APP.vacationWorkingDaysOf({ employeeId: "e9" }, appEmps), APP.vacationWorkingDaysOf({ employeeId: "e0" }, [])], "vacationWorkingDaysOf = the app's");
       eq([listJoin([]), listJoin(["A"]), listJoin(["A", "", "B", "C"]), listJoin(["A", "B"], "or")], [APP.listJoin([]), APP.listJoin(["A"]), APP.listJoin(["A", "", "B", "C"]), APP.listJoin(["A", "B"], "or")], "listJoin = the app's");
       APP.STATE.data.settings.catalog = {};
     }

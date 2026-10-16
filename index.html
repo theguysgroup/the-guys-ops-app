@@ -25213,10 +25213,11 @@ function cobraKeyDelete(userId, scope){
     }
   }, { title: 'Remove this key?' });
 }
-// "Use your own Claude" → owners: Settings → Connectors → the private connector; managers: the keys window.
+// "Use your own Claude" → owners: Settings → Connectors → the private connector; managers: the keys window. The panel is
+// closed after the move: the move replaces its history entry, so closing first would start a back racing the new entries.
 function cobraOpenMcpKeys(){
   const me = getRealProfile();
-  if (me && me.role==='owner') { cobraClose(); goTab('settings'); openConnector('mcp'); }
+  if (me && me.role==='owner') { goTab('settings'); openConnector('mcp'); cobraClose(); }
   else if (canUseMcp(me)) openMcpKeys();
 }
 

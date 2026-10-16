@@ -1283,18 +1283,35 @@ export function vacationFor(vacations: any[], who: any, day: string, tz: string,
   });
   return best;
 }
-// The app's vacationUntilText (shiftDays → shiftDay).
-export function vacationUntilText(v: any, day: string, tz: string): string {
+// The app's vacationUntilText (shiftDays → shiftDay). The app's default for workingDays reads its people list (STATE);
+// here the caller passes them (vacationWorkingDaysOf with the employees read as the person).
+export function vacationUntilText(v: any, day: string, tz: string, workingDays?: number[]): string {
   if (!v || v.cancelledAt) return "";
   if (day < v.startsOn) return `Vacation from ${fmtDateShort(v.startsOn)}`;
   if (!vacationOnDay(v, day, tz)) return "";
-  return day <= v.endsOn ? `On vacation until ${fmtDateShort(v.endsOn)}` : `On vacation (due back ${fmtDateShort(shiftDay(v.endsOn, 1))})`;
+  return day <= v.endsOn ? `On vacation until ${fmtDateShort(v.endsOn)}` : `On vacation (due back ${fmtDateShort(vacationBackDay(v.endsOn, workingDays))})`;
 }
-// Verbatim from index.html.
-export function vacationPickerInfo(vacations: any[], who: any, day: string, tz: string): any {
+// The app's vacationWorkingDaysOf, with the employees always passed (rows as mapEmpRow gives them).
+export function vacationWorkingDaysOf(v: any, employees: any[]): number[] | undefined {
+  const list = employees || [];
+  const e = v && v.employeeId ? list.find((x: any) => x && x.id === v.employeeId) : null;
+  return e ? e.workingDays : undefined;
+}
+// The app's vacationBackDay (shiftDays → shiftDay; the day of the week of a plain date, in UTC).
+export function vacationBackDay(endsOn: string, workingDays?: number[]): string {
+  const set = Array.isArray(workingDays) ? workingDays.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  if (set.length) for (let i = 1; i <= 7; i++) { const d = shiftDay(endsOn, i); if (set.includes(new Date(d + "T00:00:00Z").getUTCDay())) return d; }
+  return shiftDay(endsOn, 1);
+}
+// The app's employee row, for the fields read here (workingDays as the app maps employees.working_days).
+export function mapEmpRow(e: any) {
+  return { id: e.id, name: e.name, status: e.status, roles: Array.isArray(e.roles) ? e.roles : [], workingDays: Array.isArray(e.working_days) ? e.working_days.map(Number) : [] };
+}
+// The app's vacationPickerInfo; employees: the people list its vacationUntilText reads for the "due back" day.
+export function vacationPickerInfo(vacations: any[], who: any, day: string, tz: string, employees: any[] = []): any {
   const v = vacationFor(vacations, who, day, tz, "notAssignable");
   if (!v) return null;
-  return { vacation: v, label: vacationUntilText(v, day, tz),
+  return { vacation: v, label: vacationUntilText(v, day, tz, vacationWorkingDaysOf(v, employees)),
     standIn: vacationOpt(v, "standIn") && v.standInId ? { id: v.standInId, name: v.standInName } : null };
 }
 // Verbatim from index.html.
@@ -1309,7 +1326,7 @@ export function vacationWho(name: string, data: any): any { const e = ((data && 
 // The app's vacationAssignInfo for a task (the job pickers' forJob rule is not needed here).
 export function vacationAssignInfo(name: string, day: string, data: any, tz: string): any {
   if (!name || !day || !data || !(data.vacations || []).length) return null;
-  const info = vacationPickerInfo(data.vacations, vacationWho(name, data), day, tz);
+  const info = vacationPickerInfo(data.vacations, vacationWho(name, data), day, tz, data.employees || []);
   if (!info) return null;
   return { name, vac: info.vacation, label: info.label, standIn: vacationUsableStandIn(info.vacation, day, data, tz) };
 }
@@ -1340,9 +1357,9 @@ export async function taskVacationInfos(userSb: any, names: string[], day: strin
       .or(`ends_on.gte.${day},options->>autoBack.eq.false`);
     if (error) throw new Error("employee_vacations: " + clip(error.message, 200));
     if (!Array.isArray(rows) || !rows.length) return [];
-    const emp = await userSb.from("employees").select("id, name, status, roles");
+    const emp = await userSb.from("employees").select("id, name, status, roles, working_days");
     if (emp.error) console.error("ai-gateway: employees not read for the vacation check:", clip(emp.error.code || emp.error.message, 80));
-    return vacationAssignConflicts(names, [], day, { vacations: rows.map(mapVacRow), employees: (!emp.error && emp.data) || [] }, tz);
+    return vacationAssignConflicts(names, [], day, { vacations: rows.map(mapVacRow), employees: ((!emp.error && emp.data) || []).map(mapEmpRow) }, tz);
   } catch (e) {
     console.error("ai-gateway: vacations not read:", clip((e as Error)?.message, 120));
     return [];
