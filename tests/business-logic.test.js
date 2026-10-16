@@ -233,6 +233,9 @@ const DECLS = [
   // Stage 6 v2 G6: provider status, the free quota, own keys, the own-Claude card, the ChatGPT row (coming later)
   'COBRA_PROVIDER_MODELS', 'COBRA_SOURCE_LABEL', 'COBRA_KEY_RE', 'COBRA_KEY_PROVIDERS', 'cobraSourcePill', 'cobraFreeMeter', 'cobraFreeResetText', 'cobraKeyProblem', 'cobraKeyCardHtml',
   'cobraOwnClaudeCardHtml', 'cobraChatGptRowHtml', 'cobraPaidKeyReady',
+  // Stage 2 phase 6 G6.4: the lead card's Automation block (who sees / adds, the runs, the picker, Start, the history lines)
+  'WF_LEAD_LIMITS', 'WF_LEAD_STATUS', 'WF_LEAD', 'wfLeadMayRead', 'wfLeadMayAdd', 'wfLeadRuns', 'wfLeadWhere', 'wfLeadRecentLine', 'wfLeadPickRows', 'wfLeadWall',
+  'wfLeadStartAt', 'wfLeadActivityText', 'wfLeadInnerHtml',
 ];
 
 function extractDecl(source, name){
@@ -8313,6 +8316,139 @@ async function testWfReviewRound2(){
   }
 }
 
+// Stage 2 phase 6 G6.4 (design §4.9, Appendix A P22, Q2): the lead card's Automation block. Drawn from WF_DATA.lead on every
+// build of the card; one read per lead (a redraw never reads again; Refresh / add / remove read once more); add and remove
+// for owners and managers only, nothing in a read-only mode; a double click on Add is one call with one request id.
+async function testWfLeadBlock(){
+  console.log('\nThe lead card\'s Automation block (G6.4)');
+  const S = loadSandbox(), html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  // 1. who
+  const P = (role, crm) => ({ role, permissions: { crm: !!crm } });
+  assertEqual([P('owner'), P('manager'), P('va', true), P('va', false), P('technician', true), P('marketing'), null].map(p => [S.wfLeadMayRead(p), S.wfLeadMayAdd(p)]),
+    [[true, true], [true, true], [true, false], [false, false], [false, false], [false, false], [false, false]], 'wfLeadMayRead / wfLeadMayAdd: owners and managers add (Q2); a VA with CRM reads; no one else sees it');
+  // 2. the runs: active (waiting / running) and the last 5 others, newest first as given
+  const runs = [{ id: 'a', name: 'A', status: 'waiting', due_at: '2026-10-20T04:00:00Z', step: 'Wait' }, { id: 'b', name: 'B', status: 'running', step: 'Send text' },
+    ...['done', 'failed', 'removed', 'stopped', 'skipped', 'cancelled'].map((st, i) => ({ id: 'r' + i, name: 'R' + i, status: st, created_at: '2026-10-1' + i + 'T01:00:00Z' })), null, 'x'];
+  const R = S.wfLeadRuns(runs);
+  assertEqual([R.active.map(r => r.id), R.recent.map(r => r.id), S.wfLeadRuns(null)], [['a', 'b'], ['r0', 'r1', 'r2', 'r3', 'r4'], { active: [], recent: [] }], 'wfLeadRuns: waiting and running are active; Recent = the last 5 others; bad rows ignored');
+  assertEqual([S.wfLeadWhere(runs[0]), S.wfLeadWhere(runs[1]), S.wfLeadWhere({ status: 'waiting' }), S.wfLeadWhere(null)],
+    ['Waiting until ' + S.wfDateText('2026-10-20T04:00:00Z'), 'At: Send text', 'Starting', 'Starting'], 'wfLeadWhere: "Waiting until …" | "At: <step>" | "Starting"');
+  assertEqual(S.wfLeadRecentLine({ status: 'removed', finished_at: '2026-10-12T08:36:00Z', reason: 'Removed by Ofek', source: 'manual', by: 'Tomer' }),
+    `Removed · ${S.wfDateText('2026-10-12T08:36:00Z')} · Removed by Ofek · Added by Tomer`, 'wfLeadRecentLine: status, when, why, who added it');
+  assertEqual(S.wfLeadRecentLine({ status: 'done' }), 'Finished', 'wfLeadRecentLine: no date → no "—"');
+  // 3. the picker's rows: addable first; greyed with the function's reason; System rows on the built-in system greyed (not twice)
+  const rows = S.wfLeadPickRows([{ id: '1', name: 'Draft one', why: 'Publish it first' }, { id: '2', name: 'Quote chase', why: null }, { id: '3', name: 'Job only', why: 'Starts from a job, not a lead' }, { name: 'no id' }],
+    [{ virtual: true, name: 'Review request after a closed job' }, { virtual: true, name: 'Quote chase' }, { virtual: true, name: 'Moved', movedTo: 'x' }, { virtual: false, name: 'Engine' }]);
+  assertEqual(rows, [{ id: '2', name: 'Quote chase', why: '' }, { id: '1', name: 'Draft one', why: 'Publish it first' }, { id: '3', name: 'Job only', why: 'Starts from a job, not a lead' },
+    { id: '', name: 'Review request after a closed job', why: 'Runs on the built-in system' }], 'wfLeadPickRows: addable first, greyed reasons kept, virtual System rows greyed, moved ones and same names left out');
+  // 4. Start: now / at a time (≤ 30 days, the business's wall clock)
+  const tz = 'Australia/Sydney', now = Date.parse('2026-10-17T00:00:00Z');   // 11:00 am in Sydney
+  const at = w => S.wfLeadStartAt('at', w, now, tz);
+  assertEqual([S.wfLeadStartAt('now', 'junk', now, tz), at('2026-10-17T15:30'), at(''), at('2026-02-30T10:00'), at('2026-10-17T10:00'), at('2026-11-16T11:00'), at('2026-11-16T11:01'), at('2026-10-17T10:59').at],
+    [{ at: null, error: '' }, { at: '2026-10-17T04:30:00.000Z', error: '' }, { at: null, error: 'Pick a date and time' }, { at: null, error: 'Pick a date and time' }, { at: null, error: 'Pick a time from now on' },
+      { at: '2026-11-16T00:00:00.000Z', error: '' }, { at: null, error: 'Pick a time in the next 30 days' }, '2026-10-17T00:00:00.000Z'],
+    'wfLeadStartAt: now → no start; a wall time in the business zone → its instant; past / bad / beyond 30 days refused; a minute ago = now');
+  assertEqual([S.wfLeadWall(now, tz), S.wfLeadWall(now + 30 * 86400000, tz)], ['2026-10-17T11:00', '2026-11-16T11:00'], 'wfLeadWall: the date-and-time field\'s min / max on the business\'s clock');
+  assertEqual([S.wfLeadActivityText('add', 'Quote chase'), S.wfLeadActivityText('add', 'Quote chase', '2026-10-20T04:00:00Z'), S.wfLeadActivityText('remove', 'Quote chase')],
+    ['Added to workflow "Quote chase"', `Added to workflow "Quote chase" (starts ${S.wfDateText('2026-10-20T04:00:00Z')})`, 'Removed from workflow "Quote chase"'], 'wfLeadActivityText: the lead\'s history lines');
+  // 5. the block's inside
+  const St = (o) => Object.assign({ open: null, pick: '', when: 'now', at: '', req: '', busy: false, error: '', errFor: null }, o || {});
+  const okData = { runs: [runs[0], runs[1], runs[2]], enrollable: [{ id: '2', name: 'Quote <chase>', why: null }, { id: '1', name: 'D', why: 'Publish it first' }], canAdd: true }, okE = { status: 'ok', data: okData };
+  const h1 = S.wfLeadInnerHtml(okE, "c'1", St(), { canAdd: true });
+  assertEqual([/Active workflows/.test(h1), (h1.match(/>Remove</g) || []).length, h1.includes(`wfLeadRemove('${S.esc(S.jsStr("c'1"))}', 'a')`), /Recent/.test(h1), /wfLeadPickOpen/.test(h1), /<select/.test(h1)],
+    [true, 1, true, true, true, false], 'wfLeadInnerHtml: active runs, Remove on the waiting one only (escaped id), Recent, "Add to workflow" (picker closed)');
+  const h2 = S.wfLeadInnerHtml(okE, "c'1", St(), { canAdd: false }), h3 = S.wfLeadInnerHtml({ status: 'ok', data: { ...okData, canAdd: false } }, 'c1', St(), { canAdd: true });
+  assertEqual([/>Remove</.test(h2) || /wfLeadPickOpen/.test(h2), />Remove</.test(h3) || /wfLeadPickOpen/.test(h3), /Active workflows/.test(h2)], [false, false, true], 'a VA (or the function saying canAdd false) sees the runs, no Add, no Remove');
+  const h4 = S.wfLeadInnerHtml(okE, 'c1', St({ open: 'c1', pick: '2', when: 'at', at: '2026-10-18T09:00', error: 'Pick <x>' }), { canAdd: true, sys: [{ virtual: true, name: 'Sys' }], min: '2026-10-17T11:00', max: '2026-11-16T11:00' });
+  assertEqual([/<option value="2" selected>Quote &lt;chase&gt;<\/option>/.test(h4), /<option value="" disabled>D — Publish it first<\/option>/.test(h4), /Sys — Runs on the built-in system/.test(h4),
+    /type="datetime-local"[^>]*value="2026-10-18T09:00" min="2026-10-17T11:00" max="2026-11-16T11:00"/.test(h4), /Pick &lt;x&gt;/.test(h4), /wfLeadAdd\('c1'\)/.test(h4)],
+    [true, true, true, true, true, true], 'the picker: the chosen workflow, greyed rows with their reason, "At a date and time" with its range, the error escaped, Add');
+  const h5 = S.wfLeadInnerHtml(okE, 'c1', St({ open: 'c1', busy: true, pick: '2' }), { canAdd: true });
+  assertEqual([/disabled onclick="wfLeadAdd/.test(h5), /Adding…/.test(h5), /type="datetime-local"/.test(h5)], [true, true, false], 'busy: Add is off ("Adding…"); Now hides the date field');
+  assertEqual([/Loading the workflows/.test(S.wfLeadInnerHtml({ status: 'loading' }, 'c1', St(), {})), /Couldn't load the workflows: no &lt;access&gt;/.test(S.wfLeadInnerHtml({ status: 'error', error: 'no <access>' }, 'c1', St(), {})),
+    /Not in a workflow right now/.test(S.wfLeadInnerHtml({ status: 'ok', data: { runs: [], enrollable: [] } }, 'c1', St(), { canAdd: true }))], [true, true, true], 'loading / error (escaped) / no runs');
+  // 6. the lead card: the block right after Tags
+  const om = (script.match(/function openLeadModal\(contactId\)\{[\s\S]*?\n\}/) || [''])[0];
+  assertEqual(/renderLeadTags\(c\.id, 'modal'\)\}<\/div>` : ''\}\n\s*\$\{c \? wfLeadBlock\(c\) : ''\}/.test(om), true, 'openLeadModal: #lm-workflows comes right after Tags in the Details tab');
+  // 7. the reads and the actions (render-loop safe, Q2, read-only, a double click)
+  const calls = [], el = { innerHTML: '' }, logs = [], toasts = [], tick = () => new Promise(r => setImmediate(r));
+  let me = { role: 'owner', fullName: 'Ofek', permissions: {} }, ro = '', reply = null, confirmFn = null, n = 0;
+  const ctx = { console, Map, Set, Promise, String, Number, Math, Object, Array, Date, JSON, RegExp, Intl,
+    STATE: { data: { settings: {}, contacts: [{ id: 'c1', fullName: 'Dana' }] } }, LEAD_MODAL_ID: 'c1',
+    document: { getElementById: (id) => id==='lm-workflows' ? el : null },
+    getCurrentProfile: () => me, readOnlyReason: () => ro, showToast: (m) => toasts.push(m), uid: () => 'id' + (++n) + 'abcdef',
+    confirmAction: (m, fn) => { confirmFn = fn; }, wfSystemRows: () => [], renderRecordActivityList: () => '', renderKeepingInput: () => { throw new Error('the page redrawn'); },
+    logActivity: (c, a, t) => logs.push(['mem', a, t]), db: { activityLog: { insert: (k, id, a, t) => logs.push(['db', k, id, a, t]) } },
+    autoFnCall: async (b) => { calls.push(JSON.parse(JSON.stringify(b))); await null; return reply ? reply(b) : { ok: true, status: 200, body: b.step==='record_runs' ? okData : { ok: true } }; },
+    autoFnReason: (b) => String((b && (b.text || b.reason)) || 'x') };
+  vm.createContext(ctx);
+  vm.runInContext([...['esc', 'jsStr', 'MONTHS', 'hhmm12', 'REGION_DEFAULTS', 'TZ_ALLOWED', 'TZ_FALLBACK', 'TZ_VALID', 'REGION_NONE', 'REGION_MEMO', 'BIZ_WALL', 'regionNow', 'tzValid', 'regionMemo', 'bizTz', 'bizWall',
+    'BIZ_TZ_FMT', 'bizPartsIn', 'bizToUtc', 'WF_WALL_RE', 'wfWallMs', 'wfDateText', 'contactById', 'WF_LIST_LIMITS', 'WF_DATA', 'wfEnsure'].map(x => extractDecl(script, x)),
+    ...['WF_LEAD_LIMITS', 'WF_LEAD_STATUS', 'WF_LEAD', 'wfLeadMayRead', 'wfLeadMayAdd', 'wfLeadRuns', 'wfLeadWhere', 'wfLeadRecentLine', 'wfLeadPickRows', 'wfLeadWall', 'wfLeadStartAt', 'wfLeadActivityText', 'wfLeadInnerHtml',
+      'wfLeadReset', 'wfLeadFetch', 'wfLeadEntry', 'wfLeadInner', 'wfLeadBlock', 'wfLeadPaint', 'wfLeadRefresh', 'wfLeadPickOpen', 'wfLeadPickClose', 'wfLeadSet', 'wfLeadLog', 'wfLeadAdd', 'wfLeadRemove'].map(x => extractDecl(script, x))].join('\n')
+    + '\nthis.__x = { WF_DATA, WF_LEAD };', ctx);
+  const X = ctx.__x, run = (c) => vm.runInContext(c, ctx), card = run(`wfLeadBlock(contactById('c1'))`);
+  run(`wfLeadBlock(contactById('c1'))`); await tick(); await tick();
+  assertEqual([calls.map(c => c.step), /id="lm-workflows"/.test(card), /Active workflows/.test(el.innerHTML)], [['record_runs'], true, true], 'two builds of the card → one read; its end redraws the block only (never the page)');
+  run(`wfLeadPaint('c1'); wfLeadPaint('c1')`); await tick();
+  assertEqual(calls.length, 1, 'a redraw reads nothing');
+  ctx.LEAD_MODAL_ID = 'c2'; run(`wfLeadRefresh('c1')`); await tick(); await tick(); ctx.LEAD_MODAL_ID = 'c1';
+  assertEqual([calls.length, X.WF_DATA.lead.has('c1')], [1, false], 'Refresh with another card open: nothing drawn, nothing read until the card draws');
+  run(`wfLeadPaint('c1')`); await tick(); await tick();
+  assertEqual(calls.length, 2, 'Refresh → one read');
+  // a VA: no picker, no remove; a technician: no block
+  me = { role: 'va', fullName: 'Val', permissions: { crm: true } };
+  run(`wfLeadPickOpen('c1'); wfLeadRemove('c1', 'a')`);
+  assertEqual([X.WF_LEAD.open, confirmFn, calls.length], [null, null, 2], 'a VA cannot open the picker or remove (Q2)');
+  me = { role: 'technician', permissions: { crm: true } };
+  assertEqual(run(`wfLeadBlock(contactById('c1'))`), '', 'a technician sees no block');
+  me = { role: 'owner', fullName: 'Ofek', permissions: {} };
+  // read-only: nothing opens, nothing is called
+  ro = 'Presentation mode is on, changes are not saved';
+  run(`wfLeadPickOpen('c1')`);
+  assertEqual([X.WF_LEAD.open, toasts.pop()], [null, ro], 'read-only mode: the picker does not open (the reason is shown)');
+  ro = '';
+  run(`wfLeadPickOpen('c1')`);
+  const req = X.WF_LEAD.req;
+  await run(`wfLeadAdd('c1')`);
+  assertEqual([X.WF_LEAD.error, calls.length], ['Pick a workflow', 2], 'Add with no workflow chosen: "Pick a workflow", nothing called');
+  run(`wfLeadSet('pick', '1')`); await run(`wfLeadAdd('c1')`);
+  assertEqual([X.WF_LEAD.error, calls.length], ['Pick a workflow', 2], 'a greyed workflow cannot be added');
+  run(`wfLeadSet('pick', '2')`);
+  assertEqual(X.WF_LEAD.req!==req && /^[A-Za-z0-9_-]{8,64}$/.test(X.WF_LEAD.req), true, 'another workflow → another request id (the function\'s format)');
+  const req2 = X.WF_LEAD.req;
+  const p1 = run(`wfLeadAdd('c1')`), p2 = run(`wfLeadAdd('c1')`); await p1; await p2; await tick(); await tick();
+  const enr = calls.filter(c => c.step==='enroll');
+  assertEqual([enr.length, enr[0] && enr[0].automation_id, enr[0] && enr[0].record, enr[0] && enr[0].request_id, !!enr[0] && 'start_at' in enr[0]], [1, '2', { kind: 'contact', id: 'c1' }, req2, false],
+    'a double click on Add → one enroll call (the lead, the workflow, this choice\'s request id, Start now)');
+  assertEqual([logs, X.WF_LEAD.open, calls[calls.length - 1].step, toasts.pop()], [[['mem', 'Ofek', 'Added to workflow "Quote <chase>"'], ['db', 'contact', 'c1', 'Ofek', 'Added to workflow "Quote <chase>"']], null, 'record_runs', 'Added to "Quote <chase>"'],
+    'added: one history line (memory + activity_log), the picker closes, the block reads again');
+  // refused: the function's words, the picker stays
+  logs.length = 0; reply = (b) => b.step==='enroll' ? { ok: false, status: 409, body: { ok: false, reason: 'not_ready', text: 'Adding a lead by hand starts with the next engine update' } } : { ok: true, body: okData };
+  run(`wfLeadPickOpen('c1'); wfLeadSet('pick', '2'); wfLeadSet('when', 'at'); wfLeadSet('at', 'nonsense')`);
+  await run(`wfLeadAdd('c1')`);
+  assertEqual([X.WF_LEAD.error, calls.filter(c => c.step==='enroll').length], ['Pick a date and time', 1], 'a bad Start → its words, nothing called');
+  run(`wfLeadSet('when', 'now')`); await run(`wfLeadAdd('c1')`);
+  assertEqual([X.WF_LEAD.error, X.WF_LEAD.open, logs.length], ['Adding a lead by hand starts with the next engine update', 'c1', 0], 'refused by the function: its words in the picker, no history line');
+  // "again" (the same request answered twice): no second history line
+  reply = (b) => b.step==='enroll' ? { ok: true, body: { ok: true, run_id: 'r9', again: true } } : { ok: true, body: okData };
+  await run(`wfLeadAdd('c1')`);
+  assertEqual([logs.length, X.WF_LEAD.open], [0, null], 'the function says it was the same click again: no second history line');
+  // Remove: asks first, then one unenroll, one history line
+  reply = null; await tick(); await tick();
+  run(`wfLeadRemove('c1', 'b')`);
+  assertEqual(confirmFn, null, 'the running run is not removed from here (waiting only)');
+  confirmFn = null; run(`wfLeadRemove('c1', 'a')`);
+  const before = calls.length;
+  assertEqual([typeof confirmFn, calls.length], ['function', before], 'Remove asks first (nothing called yet)');
+  await confirmFn(); await tick(); await tick();
+  assertEqual([calls.slice(before).map(c => c.step + ':' + (c.run_id || '')), logs.map(l => l[0] + ':' + l[l.length - 1])], [['unenroll:a', 'record_runs:'], ['mem:Removed from workflow "A"', 'db:Removed from workflow "A"']],
+    'yes → one unenroll for that run, one history line, the block reads again');
+  confirmFn = null; reply = (b) => b.step==='unenroll' ? { ok: false, status: 409, body: { ok: false, reason: 'busy', text: 'It is moving to its next step right now: try again in a minute' } } : { ok: true, body: okData };
+  run(`wfLeadRemove('c1', 'a')`); await confirmFn(); await tick();
+  assertEqual([X.WF_LEAD.error, X.WF_LEAD.errFor, /try again in a minute/.test(el.innerHTML)], ['It is moving to its next step right now: try again in a minute', 'c1', true], 'busy: the function\'s words under the block');
+}
+
 (async () => {
   await testVacationFollowUps();
   await testWfSaveRuntime();
@@ -8336,6 +8472,7 @@ async function testWfReviewRound2(){
   await testCobraLoadersNoLoop();
   await testCobraStream();
   await testCobraChangeFlow();
+  await testWfLeadBlock();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });

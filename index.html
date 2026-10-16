@@ -2202,6 +2202,20 @@ body.pipe-dragging, body.pipe-dragging * { cursor: grabbing !important; user-sel
 .lead-sub-tags { margin-top: 4px; }
 .lead-chip-edit { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
 .lead-chip-edit-title { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px; }
+/* the lead card's Automation block (stage 2 G6.4, design §4.9): the lead's workflows, Add to workflow, Remove */
+.lm-wf-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lm-wf-head label { margin: 0; }
+.lm-wf-sub { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-faint); margin: 8px 0 4px; }
+.lm-wf-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line-soft); }
+.lm-wf-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.lm-wf-main b { font-size: 13px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.lm-wf-main span { font-size: 12px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.lm-wf-pick { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.lm-wf-pick select, .lm-wf-pick input[type=datetime-local] { width: 100%; max-width: 100%; }
+.lm-wf-when { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--ink); }
+.lm-wf-when label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; }
+.lm-wf-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.lm-wf-err { color: var(--bad); font-size: 12px; margin-top: 6px; }
 .lead-sub-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 99px; white-space: nowrap; color: var(--ink-soft); border: 1px solid var(--line); }
 .stage-select { border-color: color-mix(in srgb, var(--stage) 70%, var(--line)) !important; box-shadow: inset 4px 0 0 var(--stage); }
 .jobs-table select.lead-assignee { width: auto; max-width: 160px; }
@@ -4815,7 +4829,7 @@ function presentBlocked(){
 // 'record_runs' join the steps once each is proven to write nothing: today schema and validate, given a workflow id, can
 // upgrade a row that has no doc yet.)
 const READ_ONLY_CALLS = { rpc: ['automation_list_stats', 'automation_trigger_stats', 'automation_trigger_evals', 'automation_unmatch_reasons', 'automation_step_stats',
-  'automation_enrollments', 'automation_execution_log', 'automation_log_steps', 'automation_needs_review'], fn: ['registry'] };
+  'automation_enrollments', 'automation_execution_log', 'automation_log_steps', 'automation_needs_review'], fn: ['registry', 'record_runs'] };
 {
   const realFrom = sb.from.bind(sb);
   sb.from = (table) => { const q = realFrom(table); if (!PRESENT && !VIEW_AS_ID) return q; ['insert','update','upsert','delete'].forEach(m => { q[m] = () => presentBlocked(); }); return q; };
@@ -10983,6 +10997,7 @@ function openLeadModal(contactId){
             <div class="field"><label>Sales value</label>${salesValueField(c, `<input type="number" id="lm-sales" value="${c?(c.salesValue||0):0}">`)}</div>
           </div>
           ${c ? `<div class="field" style="margin-top:11px"><label>Tags</label>${renderLeadTags(c.id, 'modal')}</div>` : ''}
+          ${c ? wfLeadBlock(c) : ''}
           <div class="field" style="margin-top:11px"><label>What they need</label><textarea rows="2" id="lm-desc">${c?esc(c.jobDescription||''):''}</textarea></div>
           ${c ? renderContactJobsBlock(c) : ''}
           ${c ? renderCallsBlock(c) : ''}
@@ -20321,6 +20336,186 @@ function autoFnReason(b){
   return String(x.text || x.reason || 'no access');
 }
 
+// ══ The lead card's "Automation" block (stage 2, phase 6 · G6.4; design §4.9, Appendix A P22, Ofek's Q2) ══
+// Details tab, after Tags (#lm-workflows): the lead's workflows from WF_DATA.lead, drawn on every build of the card from
+// the cache; read (the function's step "record_runs") only on a miss, after Add / Remove, or Refresh. A read that finishes
+// redraws this block only. "Add to workflow" (the function's "enroll") and "Remove" (its "unenroll", a waiting run only)
+// are for owners and managers (Q2); a VA with CRM access sees the lead's workflows. Each add / remove writes a line in the
+// lead's history. Nothing here sends anything: the engine runs the workflow as it would for its trigger.
+const WF_LEAD_LIMITS = { recent: 5, startDays: 30, pastMs: 60000 };
+const WF_LEAD_STATUS = { waiting: 'Waiting', running: 'Running', done: 'Finished', skipped: 'Skipped', cancelled: 'Cancelled', failed: 'Failed', removed: 'Removed', stopped: 'Stopped' };
+// The picker (one lead at a time): open = the lead whose picker shows, pick = the workflow, when 'now' | 'at', at = the
+// business wall clock 'YYYY-MM-DDTHH:MM', req = this choice's request id (a double click or a retry is one run), busy, error.
+const WF_LEAD = { open: null, pick: '', when: 'now', at: '', req: '', busy: false, error: '', errFor: null };
+
+// ── pure helpers (tests/business-logic.test.js) ──
+// Who sees the block (the engine's wfMayReadRuns) and who adds / removes (Q2: owners and managers).
+function wfLeadMayRead(p){ return !!p && (p.role==='owner' || p.role==='manager' || (p.role==='va' && !!(p.permissions && p.permissions.crm))); }
+function wfLeadMayAdd(p){ return !!p && (p.role==='owner' || p.role==='manager'); }
+// The lead's runs (newest first, as record_runs returns them) → { active: waiting / running, recent: the last 5 others }.
+function wfLeadRuns(runs){
+  const list = (Array.isArray(runs) ? runs : []).filter(r => r && typeof r==='object');
+  const active = list.filter(r => r.status==='waiting' || r.status==='running');
+  return { active, recent: list.filter(r => !active.includes(r)).slice(0, WF_LEAD_LIMITS.recent) };
+}
+// Where an active run is: "Waiting until 17 Oct 2026, 3:00 pm" | "At: <step>" | "Starting".
+function wfLeadWhere(r){
+  const x = r || {};
+  if (x.status==='waiting' && x.due_at) return `Waiting until ${wfDateText(x.due_at)}`;
+  return x.step ? `At: ${x.step}` : 'Starting';
+}
+// An ended run's line: "Finished · 12 Oct 2026, 7:36 pm · Removed by Ofek" (+ "Added by <name>" for a manual one).
+function wfLeadRecentLine(r){
+  const x = r || {}, bits = [WF_LEAD_STATUS[x.status] || String(x.status || ''), wfDateText(x.finished_at || x.created_at)];
+  if (x.reason) bits.push(String(x.reason));
+  if (x.source==='manual' && x.by) bits.push(`Added by ${x.by}`);
+  return bits.filter(b => b && b!=='—').join(' · ');
+}
+// The picker's rows: the function's enrollable list (why = the greyed reason) and the System workflows still on the built-in
+// system (greyed); the ones that can be picked first, each group in the function's order (by name).
+function wfLeadPickRows(enrollable, sys){
+  const out = (Array.isArray(enrollable) ? enrollable : []).filter(x => x && x.id).map(x => ({ id: String(x.id), name: String(x.name || 'Workflow'), why: x.why ? String(x.why) : '' }));
+  const names = new Set(out.map(x => x.name));
+  (Array.isArray(sys) ? sys : []).forEach(r => { if (r && r.virtual && !r.movedTo && r.name && !names.has(String(r.name))) out.push({ id: '', name: String(r.name), why: 'Runs on the built-in system' }); });
+  return out.filter(x => !x.why).concat(out.filter(x => x.why));
+}
+// 'YYYY-MM-DDTHH:MM' of an instant on the business's wall clock (the date-and-time field's min / max).
+function wfLeadWall(ms, tz){ const p = bizPartsIn(ms, tz); return `${p.day}T${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`; }
+// "Start": now → no start_at; at a date and time (the business's wall clock) → the instant, no further than 30 days ahead
+// (the function refuses more); a minute in the past counts as now.
+function wfLeadStartAt(when, wall, nowMs, tz){
+  if (when!=='at') return { at: null, error: '' };
+  const ms = wfWallMs(wall, 0, tz);
+  if (ms===null) return { at: null, error: 'Pick a date and time' };
+  if (ms < nowMs - WF_LEAD_LIMITS.pastMs) return { at: null, error: 'Pick a time from now on' };
+  if (ms > nowMs + WF_LEAD_LIMITS.startDays * 86400000) return { at: null, error: `Pick a time in the next ${WF_LEAD_LIMITS.startDays} days` };
+  return { at: new Date(Math.max(ms, nowMs)).toISOString(), error: '' };
+}
+// The lead's history line for an add / a remove.
+function wfLeadActivityText(kind, name, startIso){
+  const n = `"${String(name || 'Workflow')}"`;
+  if (kind==='remove') return `Removed from workflow ${n}`;
+  return `Added to workflow ${n}` + (startIso ? ` (starts ${wfDateText(startIso)})` : '');
+}
+// The block's inside. e = the WF_DATA.lead entry, S = WF_LEAD, o = { canAdd (this person may add), sys (System rows, while
+// the picker shows), min, max (the date-and-time field's range) }.
+function wfLeadInnerHtml(e, cid, S, o){
+  const x = o || {}, id = esc(jsStr(cid)), mine = S && S.open===cid, err = S && S.errFor===cid && S.error && !mine ? `<div class="lm-wf-err">${esc(S.error)}</div>` : '';
+  const head = `<div class="lm-wf-head"><label>Automation</label>${e && e.status!=='loading' ? `<button type="button" class="btn ghost small" onclick="wfLeadRefresh('${id}')">Refresh</button>` : ''}</div>`;
+  if (!e || e.status==='loading') return head + '<div class="hint">Loading the workflows…</div>';
+  if (e.status==='error') return head + `<div class="hint">Couldn't load the workflows: ${esc(e.error || 'not read')}</div>`;
+  const d = e.data || {}, R = wfLeadRuns(d.runs), canAdd = !!x.canAdd && d.canAdd!==false, busy = !!(S && S.busy);
+  const row = (name, line, btn) => `<div class="lm-wf-row"><div class="lm-wf-main"><b>${esc(name || 'Workflow')}</b>${line ? `<span>${esc(line)}</span>` : ''}</div>${btn || ''}</div>`;
+  let h = head + '<div class="lm-wf-sub">Active workflows</div>';
+  h += R.active.length ? R.active.map(r => row(r.name, wfLeadWhere(r), canAdd && r.status==='waiting'
+    ? `<button type="button" class="btn ghost small" ${busy ? 'disabled' : ''} onclick="wfLeadRemove('${id}', '${esc(jsStr(r.id))}')">Remove</button>` : '')).join('')
+    : '<div class="hint">Not in a workflow right now</div>';
+  if (R.recent.length) h += '<div class="lm-wf-sub">Recent</div>' + R.recent.map(r => row(r.name, wfLeadRecentLine(r))).join('');
+  if (!canAdd) return h + err;
+  if (!mine) return h + err + `<div style="margin-top:8px"><button type="button" class="btn small" onclick="wfLeadPickOpen('${id}')">Add to workflow</button></div>`;
+  const rows = wfLeadPickRows(d.enrollable, x.sys), at = S.when==='at';
+  const opts = rows.map(r => r.why ? `<option value="" disabled>${esc(r.name)} — ${esc(r.why)}</option>` : `<option value="${esc(r.id)}"${S.pick===r.id ? ' selected' : ''}>${esc(r.name)}</option>`).join('');
+  return h + `<div class="lm-wf-pick">
+    ${rows.length ? `<select aria-label="Workflow" onchange="wfLeadSet('pick', this.value)"><option value="">— choose a workflow —</option>${opts}</select>` : '<div class="hint">No workflows yet: make one in Settings → Automation.</div>'}
+    <div class="lm-wf-when" role="radiogroup" aria-label="Start"><span>Start:</span>
+      <label><input type="radio" name="lm-wf-when" value="now"${at ? '' : ' checked'} onchange="wfLeadSet('when', 'now')"> Now</label>
+      <label><input type="radio" name="lm-wf-when" value="at"${at ? ' checked' : ''} onchange="wfLeadSet('when', 'at')"> At a date and time</label></div>
+    ${at ? `<input type="datetime-local" aria-label="Start at" value="${esc(S.at)}" min="${esc(x.min || '')}" max="${esc(x.max || '')}" onchange="wfLeadSet('at', this.value)">` : ''}
+    ${S.error ? `<div class="lm-wf-err">${esc(S.error)}</div>` : ''}
+    <div class="lm-wf-actions"><button type="button" class="btn ghost small" onclick="wfLeadPickClose()">Cancel</button><button type="button" class="btn primary small" ${busy || !S.pick ? 'disabled' : ''} onclick="wfLeadAdd('${id}')">${busy ? 'Adding…' : 'Add'}</button></div>
+  </div>`;
+}
+
+// ── the block, its read and its actions ──
+function wfLeadReset(){ Object.assign(WF_LEAD, { open: null, pick: '', when: 'now', at: '', req: '', busy: false, error: '', errFor: null }); }
+async function wfLeadFetch(cid){
+  const res = await autoFnCall({ step: 'record_runs', record: { kind: 'contact', id: String(cid) } });
+  if (!res.ok) throw new Error(autoFnReason(res.body));
+  return res.body;
+}
+// The cache entry (one read per lead; its end redraws this block only, never the page).
+function wfLeadEntry(cid){ return wfEnsure('lead', cid, () => wfLeadFetch(cid), null, () => wfLeadPaint(cid)); }
+function wfLeadInner(cid){
+  const nowMs = Date.now(), tz = bizTz();
+  let sys = [];
+  if (WF_LEAD.open===cid) { try { sys = wfSystemRows(false); } catch (err) { sys = []; } }
+  return wfLeadInnerHtml(wfLeadEntry(cid), cid, WF_LEAD, { canAdd: wfLeadMayAdd(getCurrentProfile()), sys, min: wfLeadWall(nowMs, tz), max: wfLeadWall(nowMs + WF_LEAD_LIMITS.startDays * 86400000, tz) });
+}
+// The lead card's block (openLeadModal): '' for a person who may not see a lead's workflows.
+function wfLeadBlock(c){
+  if (!c || !c.id || !wfLeadMayRead(getCurrentProfile())) return '';
+  if (WF_LEAD.open!==c.id && (WF_LEAD.open || WF_LEAD.errFor)) wfLeadReset();
+  return `<div class="field lm-wf" id="lm-workflows" style="margin-top:11px">${wfLeadInner(c.id)}</div>`;
+}
+// Redraw the block only, while this lead's card is open.
+function wfLeadPaint(cid){
+  const el = document.getElementById('lm-workflows');
+  if (!el || LEAD_MODAL_ID!==cid) return;
+  el.innerHTML = wfLeadInner(cid);
+}
+function wfLeadRefresh(cid){ WF_DATA.lead.delete(String(cid)); wfLeadPaint(cid); }
+function wfLeadPickOpen(cid){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (!wfLeadMayAdd(getCurrentProfile())) return;
+  wfLeadReset(); WF_LEAD.open = cid; WF_LEAD.req = 'lm' + uid();
+  wfLeadPaint(cid);
+}
+function wfLeadPickClose(){ const cid = WF_LEAD.open; if (WF_LEAD.busy) return; wfLeadReset(); if (cid) wfLeadPaint(cid); }
+function wfLeadSet(k, v){
+  const cid = WF_LEAD.open; if (!cid || WF_LEAD.busy) return;
+  if (k==='pick') { WF_LEAD.pick = String(v || ''); WF_LEAD.req = 'lm' + uid(); }   // another workflow: another request
+  else if (k==='when') WF_LEAD.when = v==='at' ? 'at' : 'now';
+  else if (k==='at') WF_LEAD.at = String(v || '');
+  else return;
+  WF_LEAD.error = '';
+  if (k!=='at') wfLeadPaint(cid);
+}
+// A line in the lead's history (not "contacted": nothing was said to the customer).
+function wfLeadLog(c, text){
+  const actor = getCurrentProfile()?.fullName || 'Unknown';
+  logActivity(c, actor, text);
+  db.activityLog.insert('contact', c.id, actor, text);
+  const el = document.getElementById('lead-activity');
+  if (el && LEAD_MODAL_ID===c.id) el.innerHTML = renderRecordActivityList('contact', c.id);
+}
+async function wfLeadAdd(cid){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const S = WF_LEAD, c = contactById(cid);
+  if (S.busy || S.open!==cid || !c || !wfLeadMayAdd(getCurrentProfile())) return;
+  const e = WF_DATA.lead.get(String(cid)), row = e && e.status==='ok' ? wfLeadPickRows((e.data || {}).enrollable, []).find(r => r.id===S.pick && !r.why) : null;
+  if (!row) { S.error = 'Pick a workflow'; wfLeadPaint(cid); return; }
+  const st = wfLeadStartAt(S.when, S.at, Date.now(), bizTz());
+  if (st.error) { S.error = st.error; wfLeadPaint(cid); return; }
+  S.busy = true; S.error = ''; wfLeadPaint(cid);
+  const res = await autoFnCall({ step: 'enroll', automation_id: row.id, record: { kind: 'contact', id: String(cid) }, ...(st.at ? { start_at: st.at } : {}), request_id: S.req });
+  S.busy = false;
+  if (S.open!==cid) return;   // another lead's card meanwhile
+  if (!res.ok) { S.error = autoFnReason(res.body); wfLeadPaint(cid); return; }
+  if (!res.body.again) wfLeadLog(c, wfLeadActivityText('add', row.name, st.at));
+  wfLeadReset(); WF_DATA.lead.delete(String(cid)); wfLeadPaint(cid);
+  showToast(`Added to "${row.name}"`, { kind: 'ok' });
+}
+function wfLeadRemove(cid, runId){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const e = WF_DATA.lead.get(String(cid)), run = e && e.status==='ok' ? ((e.data || {}).runs || []).find(r => r && String(r.id)===String(runId)) : null;
+  if (!run || run.status!=='waiting' || WF_LEAD.busy || !wfLeadMayAdd(getCurrentProfile())) return;   // a waiting run only (the function says busy otherwise)
+  confirmAction(`The lead leaves "${run.name || 'Workflow'}" where it is now; nothing more from this workflow is done for it.`, async () => {
+    if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+    WF_LEAD.busy = true; wfLeadPaint(cid);
+    const res = await autoFnCall({ step: 'unenroll', run_id: String(runId) });
+    WF_LEAD.busy = false;
+    if (!res.ok) {
+      Object.assign(WF_LEAD, { error: autoFnReason(res.body), errFor: cid });
+      if (res.body && res.body.reason==='not_active') WF_DATA.lead.delete(String(cid));   // it ended meanwhile: read it again
+      wfLeadPaint(cid); return;
+    }
+    const c = contactById(cid); if (c) wfLeadLog(c, wfLeadActivityText('remove', run.name));
+    if (WF_LEAD.errFor===cid) Object.assign(WF_LEAD, { error: '', errFor: null });
+    WF_DATA.lead.delete(String(cid)); wfLeadPaint(cid);
+    showToast(`Removed from "${run.name || 'Workflow'}"`, { kind: 'ok' });
+  }, { title: 'Remove from workflow?', confirmLabel: 'Remove' });
+}
+
 // ══ Settings → Automation (stage 2, phase 3 · G3.1; design §4.1–§4.3, Ofek's Q1: inside Settings) ══
 // One page instead of "Message templates & Automations" and "Notifications": tabs Workflows | Global Workflow Settings |
 // Message templates. GHL's words and order, our nouns. The list reads `automations` without its doc (list_summary
@@ -20336,7 +20531,7 @@ const WF_LIST_COLS = 'id, name, description, enabled, audience, trigger, folder_
 // What the list remembers (serialisable; stage 4 pushes it to the browser history). view: localStorage 'ops.wfListView'.
 const WF_UI = { tab: 'workflows', listTab: 'all', view: null, folder: null, q: '', filter: null, sort: { by: 'updated', dir: 'desc' }, page: 1, pageSize: 10, sel: [], statsOpen: [], open: null, sinceDay: null };
 // The reads, one promise per (bucket, key); never started twice, never by a redraw of a finished one.
-const WF_DATA = { list: new Map(), folders: new Map(), meta: new Map(), pauses: new Map(), review: new Map(), stats: new Map(), registry: new Map(), templates: new Map() };
+const WF_DATA = { list: new Map(), folders: new Map(), meta: new Map(), pauses: new Map(), review: new Map(), stats: new Map(), registry: new Map(), templates: new Map(), lead: new Map() };
 // The items of the last drawn list by key (the ⋮ menu, bulk and the modals act on what the person saw).
 const WF_VIEW = { byKey: new Map(), folders: [] };
 
