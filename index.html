@@ -1281,6 +1281,7 @@ body.wf-open #phone-widget { left: auto !important; right: 16px; bottom: 164px !
 .wfb-title { margin: 0; font-size: 16px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wfb-rename { max-width: 420px; width: 100%; height: 32px; margin: 0; }
 .wfb-presence { display: flex; gap: 4px; }
+.wfb-av { display: inline-grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 50%; border: 2px solid var(--surface); background: var(--wf-sel-soft); color: var(--wf-sel); font-size: 11px; font-weight: 700; cursor: default; }
 .wfb-save { position: relative; min-height: 32px; padding: 6px 14px; }
 .wfb-save.is-saved { background: var(--wf-sel-soft); border-color: var(--wf-sel-soft); color: var(--wf-sel); box-shadow: none; }
 .wfb .wfb-save.is-saved[aria-disabled="true"] { opacity: 1; cursor: default; }
@@ -23129,7 +23130,10 @@ function wfPickerRows(reg, kind, q, ctx, recent, pins, slotCtx){
   const rank = e => { const i = order.keys.indexOf(e.key); return i < 0 ? order.keys.length : i; };
   const rows = shown.slice().sort((a, b) => rank(a) - rank(b)).map(rowOf);
   const needle = String(q ?? '').trim().toLowerCase(), byKey = new Map(rows.map(r => [r.key, r]));
-  const found = needle ? rows.filter(r => [r.label, r.ghl, r.desc, r.category, ...((shown.find(e => String(e.key)===r.key) || {}).keywords || []), ...(WF_PICK_WORDS[r.key] || [])].some(s => String(s || '').toLowerCase().includes(needle))) : rows;
+  // the app a step needs is found by its name too (the Apps tab opens its steps that way)
+  const appName = Object.fromEntries((Array.isArray(ix.reg.apps) ? ix.reg.apps : []).filter(a => a && a.key).map(a => [a.key, a.label]));
+  const wordsOf = r => { const e = shown.find(x => String(x.key)===r.key) || {}; return [r.label, r.ghl, r.desc, r.category, ...(e.keywords || []), ...(WF_PICK_WORDS[r.key] || []), e.app ? appName[e.app] : '']; };
+  const found = needle ? rows.filter(r => wordsOf(r).some(s => String(s || '').toLowerCase().includes(needle))) : rows;
   const out = [];
   if (!needle) {
     const rec = (Array.isArray(recent) ? recent : []).map(k => byKey.get(k)).filter(Boolean).slice(0, 5);
@@ -23459,7 +23463,8 @@ const WF_ADV_SOON = 'The Advanced builder comes next';
 function wfDisAttr(why){ return why ? ` aria-disabled="true" data-why="${esc(why)}"` : ''; }
 function wfKeyHint(id, mac){ const k = WF_KEYS.find(x => x.id===id); return k ? wfKeyText(k, mac) : ''; }
 // s = wfChromeState (name, mobile, dirty, canUndo, canRedo, renaming, renameDraft, railHidden, status, tab, builder, mode,
-// ro, rail, errors, hasId, hooks; G4.4: saving, publishing, saveWhy (Save refused: why), pubWhy (the switch greyed: why)).
+// ro, rail, errors, hasId, hooks; G4.4: saving, publishing, saveWhy (Save refused: why), pubWhy (the switch greyed: why);
+// presence = the others who have it open, wfPresenceOf).
 function wfTopHtml(s){
   const h = wfObj(s.hooks), save = s.saving ? 'Saving…' : s.dirty ? (h.save ? s.saveWhy || '' : WF_SOON) : 'Nothing to save';
   const saveBtn = `<button type="button" class="btn primary wfb-save${s.dirty ? '' : ' is-saved'}" data-act="save"${wfDisAttr(save)}>${s.saving ? 'Saving…' : s.dirty ? 'Save<i class="wfb-dot" aria-hidden="true"></i>' : 'Saved'}</button>`;
@@ -23470,7 +23475,7 @@ function wfTopHtml(s){
     + `<button type="button" class="wfb-ib" data-act="more" aria-label="More" aria-haspopup="menu">${ico('moreH', 18)}</button>${saveBtn}`;
   return `<button type="button" class="wfb-tb wfb-back" data-act="back">${ico('arrowLeft', 16)}Workflows list</button>`
     + `<button type="button" class="wfb-ib" data-act="railToggle" aria-label="Side panel" aria-pressed="${!s.railHidden}" title="Show or hide the side panel">${ico('sidebar', 16)}</button>`
-    + `<div class="wfb-name">${name}</div><div class="wfb-presence" aria-label="Editing now"></div>`
+    + `<div class="wfb-name">${name}</div><div class="wfb-presence" role="group" aria-label="Editing now">${wfPresenceHtml(s.presence)}</div>`
     + `<button type="button" class="wfb-tb" data-act="recent"${wfDisAttr(h.recent ? (s.canUndo ? '' : 'No changes yet') : WF_SOON)}>${ico('history', 15)}Recent changes</button>`
     + `<button type="button" class="wfb-ib" data-act="undo" aria-label="Undo" title="Undo"${wfDisAttr(s.ro || (s.canUndo ? '' : 'Nothing to undo'))}>${ico('undo', 16)}</button>`
     + `<button type="button" class="wfb-ib" data-act="redo" aria-label="Redo" title="Redo"${wfDisAttr(s.ro || (s.canRedo ? '' : 'Nothing to redo'))}>${ico('redo', 16)}</button>${saveBtn}`;
@@ -23775,6 +23780,7 @@ function wfChromeState(W, D){
   const saveWhy = W.mode==='edit' ? wfSaveWhy(W) : '', pub = W.status==='published', paused = pub ? '' : wfPausedText(W);
   return { name: W.name, mobile: W.mobile, dirty: wfIsDirty(W) || (W.mode==='edit' && !W.id), canUndo: W.hist.past.length > 0, canRedo: W.hist.future.length > 0, renaming: W.renaming, renameDraft: W.renameDraft,
     railHidden: W.railHidden, status: W.status, tab: W.tab, builder: W.builder, mode: W.mode, ro: wfGuardEdit(), rail: W.rail, errors: D.issues.errors.length + wfRemoteExtra(W, D), hasId: !!W.id,
+    presence: W.presence || [],
     saving: !!W.saving, publishing: !!W.publishing, saveWhy, pubWhy: wfGuardWrite() || wfGuardEdit() || (paused ? `Paused until ${paused} (Global Workflow Settings)` : ''),
     hooks: { save: !!h.save, publish: !!h.publish, recent: !!h.recent, test: !!h.test, picker: !!h.picker, openStep: !!h.openStep, notes: !!h.notes,
       tabs: Object.keys(h.tabs).filter(k => typeof h.tabs[k]==='function'), rail: Object.keys(h.rail).filter(k => typeof h.rail[k]==='function') } };
@@ -23888,6 +23894,42 @@ function wfMount(){
 // nothing can be edited), sys (a System row, mode 'system'), isCopy (a new one made from something: unsaved until its
 // first Save), templateKey (where a new one came from), tplDrafts (template words it brings), folderId (where a new one
 // goes) }. Who may open it and where from is the opener's business (G4.4: wfEdit, the list's Create / templates).
+// Presence (design §5.1, §5.11 "Two editors"): who else has this saved workflow open, on the Realtime presence channel
+// wf:<id> (no table). → [{ id, name }] without me, each person once (two tabs = one avatar), by name.
+function wfPresenceOf(state, selfId){
+  const seen = new Map(), me = String(selfId || '');
+  Object.values(wfObj(state)).forEach(metas => (Array.isArray(metas) ? metas : []).forEach(m => {
+    const id = String(wfObj(m).id || '');
+    if (id && id!==me && !seen.has(id)) seen.set(id, String(wfObj(m).name || '').trim().slice(0, 80) || 'Someone');
+  }));
+  return [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+// The top bar's avatars: three, then "+N" (the names in its title).
+function wfPresenceHtml(list){
+  const l = Array.isArray(list) ? list : [], more = l.slice(3);
+  return l.slice(0, 3).map(p => `<span class="wfb-av" title="${esc(p.name)} has it open" aria-label="${esc(p.name)} has it open">${esc(initials(p.name))}</span>`).join('')
+    + (more.length ? `<span class="wfb-av" title="${esc(more.map(p => p.name).join(', '))}" aria-label="${more.length} more">+${more.length}</span>` : '');
+}
+// Joins wf:<id> for a saved workflow being edited; a sync repaints the chrome only when the list changed (never render()).
+// Left when the builder closes (W.off).
+function wfPresenceStart(W){
+  if (!W.id || W.mode!=='edit' || W.presenceOn || typeof sb==='undefined' || !sb || typeof sb.channel!=='function') return;
+  const p = typeof getCurrentProfile==='function' ? getCurrentProfile() : null, me = String(W.profileId || '');
+  let ch;
+  try {
+    ch = sb.channel(`wf:${W.id}`, { config: { presence: { key: me } } });
+    ch.on('presence', { event: 'sync' }, () => {
+      if (WF!==W) return;
+      const list = wfPresenceOf(ch.presenceState(), me), sig = JSON.stringify(list);
+      if (sig===W.presenceSig) return;
+      W.presence = list; W.presenceSig = sig;
+      // the rename box lives in the top bar: shown when the rename is done (wfRenameDone paints the chrome)
+      if (!W.renaming) wfDirty('chrome');
+    }).subscribe(st => { if (st==='SUBSCRIBED' && WF===W) ch.track({ id: me, name: String((p && p.fullName) || '') }); });
+  } catch (e) { return; /* no avatars: the 409 dialog still guards the save */ }
+  W.presenceOn = true;
+  W.off.push(() => { try { sb.removeChannel(ch); } catch (e) { /* already gone */ } });
+}
 function wfBuilderOpen(row, opts){
   const o = opts || {}, r = wfObj(row), def = wfObj(r.definition);
   if (WF) wfBuilderClose();
@@ -23904,7 +23946,8 @@ function wfBuilderOpen(row, opts){
     noteCounts: {}, statsText: {}, verdicts: {}, off: [], focusPending: true, modalFocus: false, suppressClick: false, prevFocus: document.activeElement, ctxSig: null, panelFocus: null, drawerSeq: 0,
     // G4.4: the rail's panels, the notes and the server's check, the local draft, where a new one came from and goes
     panels: wfPanelsNew(), notesE: null, remote: null, remoteT: 0, draftT: 0, tabKey: wfTabSession(), restoredKey: null, railFocus: null, sys: o.sys || null, isCopy: !!o.isCopy && r.id==null,
-    templateKey: r.id==null ? o.templateKey || null : null, folderId: r.id==null ? o.folderId || null : null, homeFolder: r.folder_id || null, aiDirty: false, publishing: false, tz: wfTz(), recent: [] };
+    templateKey: r.id==null ? o.templateKey || null : null, folderId: r.id==null ? o.folderId || null : null, homeFolder: r.folder_id || null, aiDirty: false, publishing: false, tz: wfTz(), recent: [],
+    presence: [], presenceSig: '[]', presenceOn: false };
   W.base = { ...wfSnap(W), rev: W.rev };
   // a copy: nothing is saved yet, and its messages are its own (never the saved templates the original sends)
   if (W.isCopy) { W.base.doc = wfNewDoc(); const c = wfCopyTpls(W.doc, o.tplDrafts, wfCopyTplsLib()); W.doc = c.doc; W.tplDrafts = c.drafts; }
@@ -23941,6 +23984,7 @@ function wfBuilderOpen(row, opts){
   wfNavHooks.opened(W.id);
   // a saved workflow: its notes (the cards' counts), the pause dates (the Publish switch), this device's unsaved draft
   if (W.id && W.mode==='edit') {
+    wfPresenceStart(W);
     W.recent = wfRecentPush(W.id);
     wfNotesLoad(W);
     if (typeof wfEnsure==='function' && typeof WF_DATA!=='undefined') wfEnsure('pauses', 'all', wfFetchPauses, null, () => { if (WF===W) wfDirty('chrome'); });
@@ -24781,8 +24825,6 @@ const WF_SHOW_IF = {
 const WF_WAIT_ORDER = ['period', 'date', 'recurring', 'scheduled', 'reply', 'user_reply', 'action', 'conditions'];
 const WF_WAIT_EX = { period: 'Ex: 2 days, 6 hours, 30 minutes', date: 'Ex: December 4th at 9:00 AM', recurring: 'Ex: Every Tuesday, 15th of each month', scheduled: 'Ex: 1 day before the booked job',
   reply: 'Wait for a reply on SMS, Email, etc.', user_reply: 'Wait for a user to send a message to the lead', action: 'Ex: Clicks a link, Opens an email', conditions: 'Build a custom segment with any of your fields' };
-// The Apps tab (Connectors): an app shows its steps in the Actions tab (a search), or says where to connect it.
-const WF_APPS = [{ key: 'xero', label: 'Xero', icon: 'receipt', need: 'xero', q: 'invoice' }, { key: 'gbp', label: 'Google Business Profile', icon: 'star', need: 'gbp', q: 'review' }];
 const WF_DYN_SOON = 'Dynamic values come later';
 const WF_RECIPES_SOON = 'Pre-built recipes come later';
 const WF_PTR_BAD = ['__proto__', 'prototype', 'constructor'];
@@ -24792,7 +24834,13 @@ function wfFieldLabel(key, schema){
   if (key==='at' && typeof s.pattern==='string' && s.pattern.includes('24:00')) return 'At';
   return WF_FIELD_WORDS[key] || wfCap(String(key || '').replace(/_/g, ' '));
 }
-function wfAppsOf(reg){ const a = wfRegIx(reg).avail; return WF_APPS.map(x => ({ key: x.key, label: x.label, icon: x.icon, connected: !!a[x.need], q: x.q })); }
+// The Apps tab (design §5.5: Apps = Connectors items): the registry's connectors (reg.apps, availCtx flags) that give this
+// picker a step (an entry whose .app is theirs); a row shows its steps in the main tab (a search by its name), or says where
+// to connect it. kind 'trigger' | 'action'.
+function wfAppsOf(reg, kind){
+  const ix = wfRegIx(reg), list = kind==='trigger' ? [...ix.trig.values()] : [...ix.node.values()], has = new Set(list.filter(e => !e.hidden && e.engine!==false).map(e => e.app).filter(Boolean));
+  return (Array.isArray(ix.reg.apps) ? ix.reg.apps : []).filter(a => a && a.key && has.has(a.key)).map(a => ({ key: String(a.key), label: String(a.label || a.key), icon: String(a.icon || 'plug'), connected: !!ix.avail[a.key] }));
+}
 // What a "+" knows about its place (the picker greys by it): below = a step already under it (a Go to can't go there),
 // reaching = the trigger types that can get there, afterSend = a message to the lead comes before it.
 function wfSlotCtx(doc, slot, reg){
@@ -25216,7 +25264,7 @@ function wfPickerOpen(kind, slot){
 }
 function wfPickerRowsNow(W, D){
   const P = W.picker;
-  return wfPickerRows(W.reg, P.kind, P.q, { tab: P.tab, apps: wfAppsOf(W.reg), role: wfMyRole(), lists: D.ctx.lists }, P.recent, P.pins, P.sc);
+  return wfPickerRows(W.reg, P.kind, P.q, { tab: P.tab, apps: wfAppsOf(W.reg, P.kind), role: wfMyRole(), lists: D.ctx.lists }, P.recent, P.pins, P.sc);
 }
 // WF_HOOKS.pickerHtml (paint path: memoised on the picker's own revision; typing in the search patches the list only).
 function wfPickerHtmlHook(W, D){
@@ -25257,7 +25305,7 @@ function wfPickerPick(row){
   const W = WF, P = W && W.picker;
   if (!P || !row) return;
   if (row.disabled) { showToast(row.reason || 'Not available', { kind: 'info' }); return; }
-  if (row.kind==='app') { const a = WF_APPS.find(x => `app:${x.key}`===row.key); P.tab = 'main'; P.q = a ? a.q : ''; P.i = 0; P.rev++; W.panelFocus = 'search'; wfDirty('chrome'); return; }
+  if (row.kind==='app') { const a = wfAppsOf(W.reg, P.kind).find(x => `app:${x.key}`===row.key); P.tab = 'main'; P.q = a ? a.label : ''; P.i = 0; P.rev++; W.panelFocus = 'search'; wfDirty('chrome'); return; }
   const rec = [row.key, ...P.recent.filter(k => k!==row.key)];
   wfPickStorePut('recent', P.kind, rec);
   if (P.kind==='trigger') { wfDrawerNew({ kind: 'trigger', draft: { ...wfTriggerDefault(row.type, W.reg), name: '' } }); return; }
@@ -26386,7 +26434,7 @@ function wfSaveDone(W, snap, b, name){
   const base = { ...snap, rev: W.rev };
   if (W.tplDrafts===snap.tplDrafts && keys.length) { const none = {}; W.tplDrafts = none; base.tplDrafts = none; }
   W.base = base; W.aiDirty = false; W.isCopy = false; W.remote = null;
-  if (wasNew) { W.templateKey = null; if (typeof WF_UI!=='undefined') WF_UI.open = id; W.recent = wfRecentPush(id); W.notesE = null; wfNotesLoad(W); }
+  if (wasNew) { W.templateKey = null; if (typeof WF_UI!=='undefined') WF_UI.open = id; W.recent = wfRecentPush(id); W.notesE = null; wfNotesLoad(W); wfPresenceStart(W); }
   wfDraftClear(W, wasNew ? [null, id] : [id]);
   if (wasNew && W.folderId) wfDbWrite('It stays in Home', sb.from(AUTO_TABLE).update({ folder_id: W.folderId }).eq('id', id));
   wfListChanged(W);

@@ -187,11 +187,11 @@ const DECLS = [
   // The workflow builder: the shell, the paint, the canvas and the gestures (stage 2, phase 4 · G4.2)
   'WF_UIX', 'WF_SVGNS', 'WF_ICON_ALIAS', 'wfIcon', 'wfMobileMode', 'wfLod', 'wfPastTap', 'wfWheelView', 'wfPinchView', 'wfAutoPan', 'wfMiniGeom', 'wfMiniPoint', 'wfCenterOn', 'wfViewToShow', 'wfViewKey',
   'wfViewRead', 'wfBoxesOf', 'wfA11yTree', 'wfSlotKey', 'wfMoveSlots', 'wfNearestSlot', 'wfHistPush', 'wfHistStep', 'wfToneOf', 'WF_NONE_SUMMARY', 'wfStepCardHtml', 'wfTriggerCardHtml', 'wfHeadCardHtml',
-  'wfCanvasItems', 'WF_BUILDER_TABS', 'WF_RAIL', 'WF_MODE_RO', 'WF_MODE_PILL', 'WF_SOON', 'WF_ADV_SOON', 'wfDisAttr', 'wfKeyHint', 'wfTopHtml', 'wfSubHtml', 'wfRailHtml', 'wfPillHtml', 'wfPopItems', 'wfPopHtml',
+  'wfCanvasItems', 'WF_BUILDER_TABS', 'WF_RAIL', 'WF_MODE_RO', 'WF_MODE_PILL', 'WF_SOON', 'WF_ADV_SOON', 'wfDisAttr', 'wfKeyHint', 'wfTopHtml', 'wfPresenceHtml', 'wfPresenceOf', 'initials', 'wfSubHtml', 'wfRailHtml', 'wfPillHtml', 'wfPopItems', 'wfPopHtml',
   'wfKeysHtml', 'wfQ4Html', 'wfRailWhy',
   // The workflow builder: the pickers, the step drawer and its forms (stage 2, phase 4 · G4.3), and the old editor's widgets
   // they reuse (now taking the template drafts and their bindings)
-  'WF_FIELD_WORDS', 'WF_ENUM_WORDS', 'WF_NEW_CFG', 'WF_NEW_TRIG', 'WF_OBJ_DEFAULT', 'WF_SHOW_IF', 'WF_WAIT_ORDER', 'WF_WAIT_EX', 'WF_APPS', 'WF_DYN_SOON', 'WF_RECIPES_SOON', 'WF_PTR_BAD',
+  'WF_FIELD_WORDS', 'WF_ENUM_WORDS', 'WF_NEW_CFG', 'WF_NEW_TRIG', 'WF_OBJ_DEFAULT', 'WF_SHOW_IF', 'WF_WAIT_ORDER', 'WF_WAIT_EX', 'WF_DYN_SOON', 'WF_RECIPES_SOON', 'WF_PTR_BAD',
   'wfFieldLabel', 'wfAppsOf', 'wfSlotCtx', 'wfSchemaDefault', 'wfCondNew', 'wfNodeDefault', 'wfTriggerDefault', 'wfPtrKeys', 'wfDraftGet', 'wfDraftSet', 'wfParseInput', 'wfPruneHidden',
   'wfCondFields', 'wfFieldValues', 'wfRuleSetOp', 'wfRuleNew', 'wfWaitCards', 'wfSplitTotal', 'wfTempId', 'wfSplitAdd', 'wfGotoTargets', 'wfLostSteps', 'wfDrawerApply', 'wfPruneTplDrafts',
   'leadAssigneeVacation', 'wfChoices', 'wfPickerFlat', 'wfPickerListHtml', 'wfPickerHtml', 'wfFid', 'wfDis', 'wfOptHtml', 'wfBlankSelHtml', 'wfStepSelHtml', 'wfChipsHtml', 'wfFieldHtml',
@@ -6043,7 +6043,7 @@ function testWfShellStatic(){
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   const sec = script.slice(script.indexOf('// ══ The workflow builder: the shell'), script.indexOf('// ══ The template library'));
   const paintPath = ['wfDirty', 'wfPaint', 'wfDerived', 'wfBuilderCtx', 'wfSyncCanvas', 'wfPaintSel', 'wfPaintView', 'wfPaintMini', 'wfTokenColors', 'wfPaintChrome', 'wfChromeState', 'wfPopCtx', 'wfCanvasItems',
-    'wfTopHtml', 'wfSubHtml', 'wfRailHtml', 'wfPopItems', 'wfPopHtml', 'wfKeysHtml', 'wfQ4Html', 'wfStepCardHtml', 'wfTriggerCardHtml', 'wfHeadCardHtml', 'wfAppDataChanged', 'wfCtxSig', 'wfBuilderReg',
+    'wfTopHtml', 'wfPresenceHtml', 'wfSubHtml', 'wfRailHtml', 'wfPopItems', 'wfPopHtml', 'wfKeysHtml', 'wfQ4Html', 'wfStepCardHtml', 'wfTriggerCardHtml', 'wfHeadCardHtml', 'wfAppDataChanged', 'wfCtxSig', 'wfBuilderReg',
     // G4.3: the picker and the step drawer are drawn inside the chrome paint
     'wfPickerHtmlHook', 'wfPickerRowsNow', 'wfPickerHtml', 'wfPickerListHtml', 'wfDrawerHtmlHook', 'wfDrawerHtml', 'wfDrawerIssues', 'wfTriggerFormHtml', 'wfNodeFormHtml', 'wfMsgFormHtml', 'wfDrawerPreview',
     'wfTplOthers', 'wfFieldsHtml', 'wfFieldHtml', 'wfCondHtml', 'wfRuleHtml', 'wfIfElseHtml', 'wfSplitHtml', 'wfGotoHtml', 'wfWaitChooserHtml', 'wfChipsHtml', 'wfChoices', 'wfPanelAfterPaint', 'wfDrawerSaveWhy',
@@ -6356,7 +6356,13 @@ function testWfPickDrawerPure(sb){
     sb.wfChoices('days', { type: 'integer', minimum: 0, maximum: 6 }, {}).map(c => c.label).join(), sb.wfChoices('monthDays', { type: 'integer', minimum: -1, maximum: 31 }, {}).slice(-1)[0].label, sb.wfChoices('ifNotMet', { enum: ['end', 'continue', 'wait'] }, {}).map(c => c.label), sb.wfChoices('x', { type: 'string' }, {})],
     [['Live chat', 'Email', 'SMS!Needs the phone line (Twilio)'], '', ['Ann · On vacation until 24 Oct', 'Bob'], 'Sun,Mon,Tue,Wed,Thu,Fri,Sat', 'Last', ['End this workflow', 'Continue anyway', 'Wait until the goal is met'], null],
     'wfChoices: GHL\'s words; a greyed value says why (SMS "Needs the phone line (Twilio)" until the phone is on); people say who is on vacation; day / month names');
-  assertEqual(sb.wfAppsOf(reg).map(a => a.key + ':' + a.connected), ['xero:false', 'gbp:false'], 'the Apps tab: the connectors, connected or not (from the registry\'s availability)');
+  // the Apps tab (review block 3 #21): the registry's connectors that give this picker a step, never a list in the app
+  const appsOf = (r, k) => sb.wfAppsOf(r, k).map(a => a.key + ':' + a.connected + ':' + a.label);
+  const regP = { ...reg, apps: [...reg.apps, { key: 'phone', label: 'Phone line', icon: 'phone' }], actions: reg.actions.map(a => a.key==='send_sms' ? { ...a, app: 'phone' } : a) };
+  const xeroRows = sb.wfPickerRows(regAll, 'action', 'Xero', { tab: 'main' }, [], [], {}).flatMap(g => g.rows.map(r => r.key)).sort();
+  assertEqual([appsOf(reg, 'trigger'), appsOf(regAll, 'action'), appsOf(regP, 'action'), appsOf({ ...reg, apps: undefined }, 'trigger'), xeroRows],
+    [['xero:false:Xero', 'gbp:false:Google Business Profile'], ['xero:true:Xero'], ['xero:false:Xero', 'phone:false:Phone line'], [], ['send_estimate', 'send_invoice']],
+    'the Apps tab: the registry\'s connectors with a step for this picker (connected or not, from availCtx); a connector the engine adds shows without an app change; its row searches by its name');
 }
 function testWfPickDrawerWords(sb){
   console.log('\nWorkflow builder: the picker and the drawer\'s forms as words (stage 2 G4.3)');
@@ -7553,9 +7559,101 @@ async function testVacationFollowUps(){
     'A1 save: a pay-only change upserts only pay, a note-only change only note; a new vacation may still be set (its private row is new)');
 }
 
+// Review block 3 of phase 4 (16 Oct): paste keys, presence, multi-select delete, cut, Q4 counts, the drawer's Delete, Save
+// from "Unsaved changes" on a Published workflow (the Apps tab is in testWfDrawerForms). Fake DOM, fake function.
+async function testWfReviewBlock3(){
+  console.log('\nWorkflow builder: review block 3 (paste keys, presence, delete with paths, cut, Q4 counts, drawer Delete, leave + Save)');
+  const reg = wfRegFor(WF_AV_TODAY), chans = [], removed = [];
+  const fakeSb = Object.assign(wfFakeServer().sb, { channel(name, opt){ const c = { name, opt, ons: [], tracked: [], state: {}, on(ev, f, cb){ c.ons.push([ev, f && f.event, cb]); return c; }, subscribe(cb){ chans.push(c); if (cb) cb('SUBSCRIBED'); return c; },
+    track(x){ c.tracked.push(x); }, presenceState(){ return c.state; } }; return c; }, removeChannel(c){ removed.push(c.name); } });
+  const DOC = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }],
+    nodes: { n1: wfAct('n2'), n2: { kind: 'if_else', type: 'if_else', config: { noneName: 'None', branches: [{ id: 'b1', name: 'Has email', when: { match: 'any', segments: [{ match: 'all', rules: [{ field: 'has_email', op: 'true' }] }] } }] }, out: { b1: 'n3', none: 'n5' } },
+      n3: wfAct('n4'), n4: { kind: 'action', type: 'send_email', config: { subject: 'Hi', templateKey: 'my_abcdefgh' }, out: { next: null } }, n5: wfAct(null) } };
+  const S = wfShellSandbox(reg, { ctx: { sb: fakeSb, STATE: { data: { settings: { catalog: { templates: {}, msgTemplates: {} } } }, profiles: [{ id: 'p1', role: 'owner', fullName: 'Alex Owner' }] } } });
+  const { X, flush, ctx } = S;
+  // #15 presence: a saved workflow joins wf:<id> and tracks me; the others' avatars are patched into the top bar (no render)
+  X.wfBuilderOpen({ id: 'w1', name: 'Nurture', enabled: false, definition: DOC, revision: 3 }, {}); flush();
+  const W = S.W(), ch = chans[0];
+  ch.state = { p1: [{ id: 'p1', name: 'Alex Owner' }, { id: 'p1', name: 'Alex Owner' }], p2: [{ id: 'p2', name: 'Kim Office' }], p3: [{ id: 'p3', name: 'Bo Tech' }] };
+  const sync = ch.ons.find(o => o[0]==='presence' && o[1]==='sync')[2];
+  const p0 = ctx.window.__wfp;
+  sync(); flush();
+  const top = W.el.top.innerHTML, p1 = ctx.window.__wfp;
+  sync(); flush();
+  assertEqual([ch.name, ch.opt.config.presence.key, ch.tracked, W.presence.map(p => p.name), top.includes('title="Kim Office has it open"') && top.includes('>KO</span>') && top.includes('>BT</span>'), top.includes('Alex Owner has it open'), p1 - p0, ctx.window.__wfp - p1, S.renders()],
+    ['wf:w1', 'p1', [{ id: 'p1', name: 'Alex Owner' }], ['Bo Tech', 'Kim Office'], true, false, 1, 0, 0],
+    'presence: a saved workflow joins wf:<id> and tracks me; the others (each once, never me) show as avatars; a sync with no change paints nothing; never render()');
+  assertEqual([ctx.wfPresenceHtml([1, 2, 3, 4, 5].map(i => ({ id: 'u' + i, name: 'P <' + i + '>' }))).split('class="wfb-av"').length - 1, ctx.wfPresenceHtml([1, 2, 3, 4].map(i => ({ id: 'u' + i, name: 'P' + i }))).includes('>+1</span>'), ctx.wfPresenceHtml([{ id: 'x', name: '<b>' }]).includes('<b>')],
+    [4, true, false], 'presence avatars: three, then +N; names escaped');
+  W.renaming = true; W.renameDraft = 'Nurture';
+  ch.state = { ...ch.state, p4: [{ id: 'p4', name: 'Cy New' }] };
+  const pr = ctx.window.__wfp;
+  sync(); flush();
+  const whileRenaming = [ctx.window.__wfp - pr, W.presence.length];
+  ctx.wfRenameDone(false); flush();
+  assertEqual([whileRenaming, W.el.top.innerHTML.includes('>CN</span>')], [[0, 3], true], 'presence: while the name is being typed (the top bar\'s box) nothing repaints; shown once the rename is done');
+  // #16 several selected with a step that has paths (not all of them selected): refused, nothing deleted
+  const d0 = W.doc;
+  W.sel = new Set(['n:n1', 'n:n2']);
+  ctx.wfDeleteSel('one'); flush();
+  assertEqual([W.doc===d0, S.toasts.slice(-1)[0]], [true, '"If / else" has paths: delete it on its own to choose which path to keep'], 'delete of a selection: a step with paths not all selected is refused (Q4 is asked on its own)');
+  W.sel = new Set(['n:n2', 'n:n3', 'n:n4', 'n:n5']);
+  ctx.wfDeleteSel('one'); flush();
+  assertEqual([Object.keys(W.doc.nodes), W.doc.nodes.n1.out.next, S.toasts.slice(-1)[0]], [['n1'], null, 'Deleted'], '… with all its paths selected: they all go');
+  X.wfUndoRedo(-1); flush();
+  // #18 the Q4 toasts count what went
+  const q4 = port => { X.wfDoDelete('n2', 'one'); flush(); if (port) X.WF_ACTS.q4keep(W, { dataset: { port } }); else X.WF_ACTS.q4all(W); flush(); const t = S.toasts.slice(-1)[0], n = Object.keys(W.doc.nodes).length; X.wfUndoRedo(-1); flush(); return [t, n]; };
+  assertEqual([q4(null), q4('b1'), q4('none'), W.doc===d0], [['4 steps deleted', 1], ['2 steps deleted', 3], ['3 steps deleted', 2], true], 'Q4: the Undo toast counts what went (all paths 4; keep Has email 2; keep None 3)');
+  // #17 Cut of a step with paths: everything it copied goes (no Q4), so the clipboard never duplicates a kept path
+  ctx.wfDoCut('n2', 'one'); flush();
+  const clip = ctx.wfClipLoad(ctx.wfBiz(), Date.now());
+  assertEqual([W.dialog, Object.keys(W.doc.nodes), Object.keys(clip.nodes).sort(), S.toasts.slice(-1)[0].startsWith('Cut:')], [null, ['n1'], ['n2', 'n3', 'n4', 'n5'], true], 'Cut of a step with paths: no Q4, it and all its paths go, the clipboard has exactly those');
+  X.wfUndoRedo(-1); flush();
+  // #14 paste of a step with an unsaved template draft: a new key the engine takes (my_ + 8), its own draft
+  W.tplDrafts = { my_abcdefgh: { name: 'Hello', channel: 'email', body: 'Hi {first_name}' } };
+  ctx.wfDoCopy({ id: 'n4', mode: 'one' });
+  ctx.wfDoPaste({ src: 'n5', port: 'next' }); flush();
+  const pid = W.doc.nodes.n5.out.next, pk = pid && W.doc.nodes[pid].config.templateKey;
+  assertEqual([!!pid, /^my_[a-z0-9]{8}$/.test(pk || ''), pk!=='my_abcdefgh', W.tplDrafts[pk] && W.tplDrafts[pk].body, W.doc.nodes.n4.config.templateKey], [true, true, true, 'Hi {first_name}', 'my_abcdefgh'],
+    'paste (Quick paste, no tplKey of its own): the copied draft gets a new my_ + 8 key the engine\'s writeTemplateDrafts takes');
+  X.wfUndoRedo(-1); flush();
+  // #19 the drawer's Delete: open until the step really goes; a cancelled Q4 keeps the typing
+  X.wfDrawerOpenStep('n2'); flush();
+  W.drawer.dirty = true;
+  X.wfDrawerAct('dDelete'); flush();
+  const asked = [W.dialog && W.dialog.kind, !!W.drawer, W.drawer && W.drawer.dirty];
+  X.WF_ACTS.dlgClose(W); flush();
+  assertEqual([asked, !!W.drawer && W.drawer.id, W.drawer && W.drawer.dirty, X.wfHas(W.doc.nodes, 'n2')], [['q4', true, true], 'n2', true, true], 'the drawer\'s Delete: Q4 asks with the drawer still open; Cancel keeps the step and the unsaved typing');
+  X.wfDrawerAct('dDelete'); flush(); X.WF_ACTS.q4all(W); flush();
+  assertEqual([W.drawer, X.wfHas(W.doc.nodes, 'n2')], [null, false], '… and the drawer closes once the step is gone');
+  X.wfBuilderClose();
+  assertEqual(removed, ['wf:w1'], 'presence: the channel is left when the builder closes');
+  // a new (unsaved) workflow joins no channel; a System one neither
+  X.wfBuilderOpen({ name: 'New', definition: DOC }, {}); flush(); X.wfBuilderClose();
+  assertEqual(chans.length, 1, 'presence: only a saved workflow being edited joins');
+  // #20 "Unsaved changes" → Save on a Published workflow whose save asks first: once saved, it leaves
+  const srv = wfFakeServer(), confirms = [], tick = () => new Promise(r => setImmediate(r));
+  const S2 = wfShellSandbox(reg, { ctx: { autoFnCall: srv.fn, sb: srv.sb, localStorage: wfMemStore(), sessionStorage: wfMemStore(), readOnlyReason: () => '', confirmAction: (m, fn, o) => { confirms.push(o && o.title); fn(); },
+    STATE: { data: { settings: { catalog: { templates: {}, msgTemplates: {} } } }, profiles: [{ id: 'p1', role: 'owner', fullName: 'Alex Owner' }] } } });
+  const settle = async () => { for (let i = 0; i < 6; i++) { await tick(); S2.flush(); } };
+  const PUB = { schema: 2, seq: 2, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }], nodes: { n1: wfAct(null) } };
+  srv.rows[WF_UUID1] = { id: WF_UUID1, name: 'Live one', enabled: true, revision: 4, definition: PUB, settings: {}, builder: 'standard', layout: { v: 1 } };
+  srv.shape = true;
+  S2.X.wfBuilderOpen({ id: WF_UUID1, name: 'Live one', enabled: true, definition: PUB, revision: 4 }, {}); S2.flush();
+  const W2 = S2.W();
+  S2.X.wfCommit('Rename workflow', () => ({ name: 'Live one, renamed' })); S2.flush();
+  let left = 0;
+  S2.X.wfLeaveGuard(() => { left++; }); S2.flush();
+  const leaveAsked = W2.dialog && W2.dialog.kind;
+  await S2.X.WF_RAIL_ACTS.leaveSave(W2); await settle();
+  assertEqual([leaveAsked, confirms, srv.calls.map(c => c.step), srv.rows[WF_UUID1].name, left], ['leave', ['Start it afresh?'], ['validate', 'save'], 'Live one, renamed', 1],
+    '"Unsaved changes" → Save on a Published workflow: its question ("Start it afresh?") is asked, and once saved it leaves (one click)');
+}
+
 (async () => {
   await testVacationFollowUps();
   await testWfSaveRuntime();
+  await testWfReviewBlock3();
   await testAuthProvidersNoLoop();
   await testAutomationsLoaderNoLoop();
   await testAutomationEventsGate();

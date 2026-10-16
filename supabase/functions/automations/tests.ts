@@ -1746,6 +1746,11 @@ async function phase4Suite() {
       const sms = ex.actions.find((a: any) => a.key === "send_sms"), mv = ex.actions.find((a: any) => a.key === "move_stage");
       eq([sms.availability, sms.ghl, sms.audience, mv.fields.properties.stage.enum.length, mv.fields.properties.stage["x-enumLabels"][2], ex.fields.find((f: any) => f.key === "stage").values[1], ex.ops.find((o: any) => o.op === "contains_any").label, ex.reasons.end_of_workflow, ex.triggers.find((t: any) => t.key === "call_details").aliases],
         [{ ok: false, reason: "Needs the phone line (Twilio)" }, "Send SMS", "customer", 6, "Site visit", { key: "Quoted", label: "Quote sent" }, "Contains any of", "Removed by - End Of Workflow", ["missedCall"]], "registryExport: availability, GHL words, resolved lists, ops, reasons, aliases");
+      // the pickers' Apps tab (design §5.5, review block 3 #21): the connectors come from the registry, each entry says its own
+      const appOf = (l: string, k: string) => ((ex as any)[l].find((e: any) => e.key === k) || {}).app ?? null;
+      eq([ex.apps, appOf("triggers", "invoice"), appOf("triggers", "review_received"), appOf("actions", "send_invoice"), appOf("actions", "send_estimate"), appOf("actions", "send_sms"), appOf("actions", "move_stage")],
+        [[{ key: "xero", label: "Xero", icon: "receipt" }, { key: "gbp", label: "Google Business Profile", icon: "star" }], "xero", "gbp", "xero", "xero", null, null],
+        "registryExport: the Apps (connectors) and the entries that need each one; the phone line is not an app");
       eq(JSON.stringify(ex).includes("function"), false, "the export is data only");
     }
 

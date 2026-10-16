@@ -165,6 +165,18 @@
    "teamEmail": true,
    "atomicTags": true
   },
+  "apps": [
+   {
+    "key": "xero",
+    "label": "Xero",
+    "icon": "receipt"
+   },
+   {
+    "key": "gbp",
+    "label": "Google Business Profile",
+    "icon": "star"
+   }
+  ],
   "triggers": [
    {
     "key": "newLead",
@@ -1410,6 +1422,7 @@
      "required": [],
      "additionalProperties": false
     },
+    "app": "xero",
     "recordKind": "job",
     "source": "capture",
     "filters": [
@@ -1587,6 +1600,7 @@
      "required": [],
      "additionalProperties": false
     },
+    "app": "gbp",
     "recordKind": "none",
     "source": "capture",
     "filters": [
@@ -2546,6 +2560,7 @@
      "required": [],
      "additionalProperties": false
     },
+    "app": "xero",
     "kind": "action",
     "audience": "customer",
     "channel": "email",
@@ -2574,6 +2589,7 @@
      "required": [],
      "additionalProperties": false
     },
+    "app": "xero",
     "kind": "action",
     "audience": "customer",
     "channel": "email",

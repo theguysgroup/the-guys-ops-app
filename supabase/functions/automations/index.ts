@@ -1186,6 +1186,11 @@ export const AVAIL_REASONS: Record<string, string> = {
   reviews: "Turn on Google reviews first", ai: "Coming with Workflow AI", teamEmail: "Needs a team email sender",
   atomicTags: "Coming with the new lead card",
 };
+// The connectors whose steps the pickers show under "Apps" (design §5.5: Apps = Connectors items): an AvailCtx flag each,
+// with the Connectors page's name. A new connector with workflow steps is added here and in availCtxOf, never in the app.
+export const WF_APPS: { key: keyof AvailCtx; label: string; icon: string }[] = [
+  { key: "xero", label: "Xero", icon: "receipt" }, { key: "gbp", label: "Google Business Profile", icon: "star" },
+];
 export const WF_NOT_YET = {
   later: "Coming later", tracking: "Needs tracking (not in OPS)", builtIn: "Built-in only for now",
   action: "Needs link and email-open tracking (not in OPS)", seconds: "The timer runs once a minute",
@@ -1208,7 +1213,10 @@ export function availCtxOf(settingsRow: any, cat: any, extra: Partial<AvailCtx> 
 }
 const AV_OK: Avail = { ok: true };
 const avAlways = (): Avail => AV_OK;
-const avNeeds = (flag: keyof AvailCtx) => (c: AvailCtx): Avail => (c && c[flag]) ? AV_OK : { ok: false, reason: AVAIL_REASONS[flag] };
+// .app = the connector it waits for (a WF_APPS key; the phone line is not one): the export says it, so the picker's Apps
+// tab groups those entries.
+const avNeeds = (flag: keyof AvailCtx) => Object.assign((c: AvailCtx): Avail => (c && c[flag]) ? AV_OK : { ok: false, reason: AVAIL_REASONS[flag] },
+  WF_APPS.some((a) => a.key === flag) ? { app: flag } : {});
 const avNever = (reason: string) => (): Avail => ({ ok: false, reason });
 // An x-greyed value: an AvailCtx flag (greyed while it is off) or a fixed reason (always greyed).
 function greyedReason(g: string, c: AvailCtx): string | null {
@@ -2636,11 +2644,12 @@ export const WF_FEATURES = { errorDigest: false };
 // deno-lint-ignore no-explicit-any
 export function registryExport(ctx: AvailCtx, biz: BizLists = {}) {
   const base = (e: WfEntry) => ({ key: e.key, ghl: e.ghl, label: e.label, description: e.description, category: e.category, icon: e.icon, keywords: e.keywords, help: e.help,
-    aliases: e.aliases || [], engine: e.engine, hidden: !!e.hidden, availability: e.available(ctx), narration: e.narration, fields: resolveSchema(e.fields, { inline: biz, ctx }) });
+    aliases: e.aliases || [], engine: e.engine, hidden: !!e.hidden, availability: e.available(ctx), narration: e.narration, fields: resolveSchema(e.fields, { inline: biz, ctx }),
+    ...((e.available as { app?: string }).app ? { app: (e.available as { app?: string }).app } : {}) });
   const node = (e: WfNodeEntry) => ({ ...base(e), kind: e.kind, ...(e.audience ? { audience: e.audience, channel: e.channel || null, needsContact: !!e.needsContact, outbound: !!e.outbound } : {}),
     ...(e.wakeOn ? { wakeOn: e.wakeOn } : {}), ...(e.portLabels ? { portLabels: e.portLabels } : {}) });
   return {
-    v: 2, availCtx: ctx,
+    v: 2, availCtx: ctx, apps: WF_APPS.map((a) => ({ ...a })),
     triggers: Object.values(WF_TRIGGERS).map((t) => ({ ...base(t), recordKind: t.recordKind, source: t.source, filters: t.filters, alwaysReenter: !!t.alwaysReenter, contactless: t.contactless || false, ...(t.mirror ? { mirror: t.mirror } : {}) })),
     actions: Object.values(WF_ACTIONS).map(node), waits: Object.values(WF_WAITS).map(node), goals: Object.values(WF_GOALS).map(node), logic: Object.values(WF_LOGIC).map(node),
     fields: Object.values(WF_FIELDS).map((f) => ({ key: f.key, label: f.label, group: f.group, valueType: f.valueType, ops: f.ops, source: f.source || null, recordKinds: f.recordKinds,
