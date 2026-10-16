@@ -1,0 +1,1858 @@
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- STAGE 2 — Part 1 STAGING checks (design §7 G1.3, §8.2 items 25–26, §9.2 risk 3). STAGING ONLY (ops-staging), after
+-- .claude/sql/stage2-automations.sql Part 1 ran there and before Part 1 goes live.
+-- How to run: paste the whole file into the SQL editor of the STAGING project and run it. Every check is one DO block
+-- that writes its own test rows, checks them and then UNDOES everything it wrote (it ends by raising '__undo__' inside
+-- its own sub-block, which rolls the sub-block back, and only then prints "PASS …"). So the script leaves the database
+-- exactly as it found it, also when a check fails. A failing check stops the script with "FAIL <n>: …".
+-- Expected output: the notices "PASS 1" … "PASS 13" (and possibly "NOTE …" lines), then 'stage2 Part 1 staging checks done';
+-- since phase 2 (G2.1) also "PASS 14", "PASS 15" and 'stage2 phase 2 · G2.1 staging checks done' (the event store);
+-- since G2.2 also "PASS 16" and 'stage2 phase 2 · G2.2 staging checks done' (the logic steps' writes).
+-- since G2.3 also "PASS 17", "PASS 18" and 'stage2 phase 2 · G2.3 staging checks done' (after PART 2 · G2.3: the lead card's
+-- atomic tag / note edits, automation_apply's record writes and their events, the inbound link counter);
+-- since G2.4 also "PASS 19", "PASS 20", "PASS 21" and 'stage2 phase 2 · G2.4 staging checks done' (after PART 2 · G2.4: the
+-- guard v2, save / publish / migrate, Needs review, the ROLLBACK list, the SQL shape / arm keys on every fixture pair).
+-- since G3.1 also "PASS 22" and 'stage2 phase 3 · G3.1 staging checks done' (after PART 3 · G3.1: the list's counts per
+-- channel);
+-- since G3.2 also "PASS 23" and 'stage2 phase 3 · G3.2 staging checks done' (Global Workflow Settings: the Pause workflow
+-- rules of Part 1's automation_pauses_guard and its targeted wake; needs no new SQL).
+-- since G3.3 also "PASS 24" and 'stage2 phase 3 · G3.3 staging checks done' (the template library: a template of the
+-- business's own as the automations function writes it; needs no new SQL).
+-- since G3.5 also "PASS 25" and 'stage2 phase 3 · G3.5 staging checks done' (after PART 3 · G3.5: quiet imports, the
+-- lead's Assigned to, no Quote status).
+-- since G4.4 also "PASS 27" and 'stage2 phase 4 · G4.4 staging checks done' (the builder's notes as owner / manager / VA;
+-- needs no new SQL).
+-- since G3.4 also "PASS 26" and 'stage2 phase 3 · G3.4 staging checks done' (after PART 3 · G3.4, the LAST block of Part 3:
+-- the lock on direct writes as owner / manager / VA / technician / anon; before that block ran it prints "NOTE 26 …"). After
+-- G3.4, the signed-in parts of checks 12 and 19 print "NOTE 12: PART 3 · G3.4 is applied …" and "NOTE 19: PART 3 · G3.4
+-- is applied …" (the app can't insert any more; the SQL-editor control 12a still runs).
+-- It needs the staging demo data (staging-seed-demo.sql): at least one contact. Nothing here sends anything (no function
+-- is called; the capture triggers only write automation_events rows, which are undone).
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+-- 1. The phase-4 claim still claims exactly once (the wrapper over _v2), the cap holds, a step row never blocks a
+--    claim, each Go-to pass claims once, and phase 4's plain insert of a second action row of a (run, step) still fails.
+do $$
+declare a uuid; r1 uuid; r2 uuid; x text; y text; z text; v text; w text; w2 text; n integer;
+begin
+  begin
+    insert into public.automations (name, enabled, trigger, steps)
+    values ('stage2 check 1', false, '{"type":"newLead","params":{}}', '[{"id":"e1","kind":"action","type":"email","subject":"x","body":"y"}]')
+    returning id into a;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at)
+    values (a, 1, 'stage2-check-1a', 'newLead', now(), 'contact', 'stage2-check', now(), now()) returning id into r1;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at)
+    values (a, 1, 'stage2-check-1b', 'newLead', now(), 'contact', 'stage2-check', now(), now()) returning id into r2;
+    x := public.automation_claim_customer('default', r1, 'e1', a, 'stage2 check 1', 'email', 'contact', 'stage2-check', null,
+                                          array['stage2-check-1@example.invalid'], now() - interval '1 day', 5, now());
+    y := public.automation_claim_customer('default', r1, 'e1', a, 'stage2 check 1', 'email', 'contact', 'stage2-check', null,
+                                          array['stage2-check-1@example.invalid'], now() - interval '1 day', 5, now());
+    if x not like 'claimed:%' or y <> 'done' then raise exception 'FAIL 1a: the phase-4 claim gave % then % (want claimed:<id> then done)', x, y; end if;
+    select count(*) into n from public.automation_log l where l.run_id = r1;
+    if n <> 1 then raise exception 'FAIL 1b: % log rows after two claims (want 1)', n; end if;
+    select count(*) into n from public.automation_log l where l.run_id = r1 and l.row_kind = 'action' and l."loop" = 0 and l.status = 'sending';
+    if n <> 1 then raise exception 'FAIL 1c: the claimed row is not an action row of loop 0'; end if;
+    z := public.automation_claim_customer('default', r2, 'e1', a, 'stage2 check 1', 'email', 'contact', 'stage2-check', null,
+                                          array['stage2-check-1@example.invalid'], now() - interval '1 day', 1, now());
+    if z <> 'capped' then raise exception 'FAIL 1d: a second message to the same address under cap 1 gave % (want capped)', z; end if;
+    insert into public.automation_log (business_id, run_id, step_id, row_kind, status, automation_name, at)
+    values ('default', r2, 'e2', 'step', 'waiting', 'stage2 check 1', now());
+    v := public.automation_claim_customer_v2('default', r2, 'e2', a, 'stage2 check 1', 'email', 'contact', 'stage2-check', null,
+                                             array['stage2-check-1-other@example.invalid'], now() - interval '1 day', 5, now(), 0);
+    if v not like 'claimed:%' then raise exception 'FAIL 1e: a step row blocked the claim (%)', v; end if;
+    w := public.automation_claim_customer_v2('default', r1, 'e1', a, 'stage2 check 1', 'email', 'contact', 'stage2-check', null,
+                                             array['stage2-check-1@example.invalid'], now() - interval '1 day', 5, now(), 1);
+    w2 := public.automation_claim_customer_v2('default', r1, 'e1', a, 'stage2 check 1', 'email', 'contact', 'stage2-check', null,
+                                              array['stage2-check-1@example.invalid'], now() - interval '1 day', 5, now(), 1);
+    if w not like 'claimed:%' or w2 <> 'done' then raise exception 'FAIL 1f: Go-to pass 1 gave % then % (want claimed then done)', w, w2; end if;
+    begin
+      insert into public.automation_log (business_id, run_id, step_id, status, channel, audience, automation_name, at)
+      values ('default', r1, 'e1', 'sending', 'email', 'customer', 'stage2 check 1', now());
+      raise exception 'FAIL 1g: a second action row of the same (run, step, loop 0) was accepted';
+    exception when unique_violation then null;
+    end;
+    if exists (select 1 from pg_constraint where conrelid = 'public.automation_log'::regclass and conname = 'automation_log_once') then
+      raise exception 'FAIL 1h: automation_log_once still exists';
+    end if;
+    if (select prosrc from pg_proc where proname = 'automation_claim_customer' and pronamespace = 'public'::regnamespace) !~ 'automation_claim_customer_v2\(' then
+      raise exception 'FAIL 1i: automation_claim_customer is not the wrapper over automation_claim_customer_v2';
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 1 — the phase-4 claim claims once (wrapper over _v2), cap, step rows, Go-to passes, the unique swap';
+end $$;
+
+-- 2. Capture triggers: silent while nothing is wanted; a forced capture failure NEVER blocks the contacts UPDATE (the
+--    save goes through, the failure is counted); events when wanted; the cause is stamped; INSERT tags; opt-out DELETE
+--    reads OLD.
+do $$
+declare c uuid; e0 integer; e1 integer; n integer; pc text; o uuid; r uuid := gen_random_uuid(); a uuid := gen_random_uuid(); ev record;
+begin
+  begin
+    select id into c from public.contacts order by created_at desc nulls last limit 1;
+    if c is null then raise exception 'FAIL 2: staging has no contacts (run staging-seed-demo.sql first)'; end if;
+    insert into public.automation_state (business_id) values ('default') on conflict (business_id) do nothing;
+    select capture_errors into e0 from public.automation_state where business_id = 'default';
+    delete from public.automation_wanted where business_id = 'default';
+    update public.contacts set full_name = coalesce(full_name, '') || ' x' where id = c;
+    select count(*) into n from public.automation_events where contact_id = c and at = now();   -- written by this check (its transaction's time)
+    if n <> 0 then raise exception 'FAIL 2a: a capture wrote % events while nothing was wanted', n; end if;
+    insert into public.automation_wanted (business_id, event_type)
+    values ('default', 'contact_changed'), ('default', 'contact_tag'), ('default', 'contact_dnd'), ('default', 'lead_status');
+    perform set_config('automation.capture_test_error', 'on', true);
+    update public.contacts set postcode = 'S2C9' where id = c;
+    get diagnostics n = row_count;
+    select postcode into pc from public.contacts where id = c;
+    if n <> 1 or pc is distinct from 'S2C9' then raise exception 'FAIL 2b: a forced capture failure blocked the contacts update (rows %, postcode %)', n, pc; end if;
+    select capture_errors into e1 from public.automation_state where business_id = 'default';
+    if e1 <> e0 + 1 then raise exception 'FAIL 2c: capture_errors went from % to % (want +1)', e0, e1; end if;
+    if exists (select 1 from public.automation_events where contact_id = c and at = now()) then raise exception 'FAIL 2d: the failed capture still wrote an event'; end if;
+    perform set_config('automation.capture_test_error', 'off', true);
+    update public.contacts set full_name = 'Stage2 Check', tags = array_append(array_remove(coalesce(tags, '{}'::text[]), 'stage2-check'), 'stage2-check')
+     where id = c;
+    select * into ev from public.automation_events where contact_id = c and at = now() and type = 'contact_changed' and ctx ->> 'field' = 'full_name';
+    if ev.id is null or ev.event_key not like c::text || ':chg:full_name:%' or ev.source <> 'capture' or ev.chain_depth <> 0
+       or ev.cause_run_id is not null or ev.ctx ->> 'new' <> 'Stage2 Check' then
+      raise exception 'FAIL 2e: the full_name change event is wrong: %', row_to_json(ev);
+    end if;
+    if not exists (select 1 from public.automation_events where contact_id = c and at = now() and type = 'contact_tag'
+                    and event_key like c::text || ':tag:+:stage2-check:%' and ctx ->> 'action' = 'added') then
+      raise exception 'FAIL 2f: no "tag added" event';
+    end if;
+    perform set_config('automation.cause', r::text || ':2:' || a::text, true);
+    update public.contacts set postcode = 'S2C8' where id = c;
+    perform set_config('automation.cause', '', true);
+    select * into ev from public.automation_events where contact_id = c and at = now() and type = 'contact_changed' and ctx ->> 'new' = 'S2C8';
+    if ev.id is null or ev.cause_run_id is distinct from r or ev.cause_automation_id is distinct from a or ev.chain_depth <> 3 then
+      raise exception 'FAIL 2g: a workflow''s write was not stamped with its cause (depth 2 → event depth 3): %', row_to_json(ev);
+    end if;
+    insert into public.customer_opt_outs (contact_id, channel, value_key) values (c, 'email', 'stage2-check-2@example.invalid') returning id into o;
+    delete from public.customer_opt_outs where id = o;
+    select count(*) into n from public.automation_events where type = 'contact_dnd' and event_key in (o::text || ':on', o::text || ':off') and contact_id = c and at = now();
+    if n <> 2 then raise exception 'FAIL 2h: the opt-out on/off events are % (want 2: INSERT and the DELETE reading OLD)', n; end if;
+    select count(*) into n from public.automation_events where contact_id = c and at = now() and available_at <> at;
+    if n <> 0 then raise exception 'FAIL 2i: a captured event of a non-settling type has available_at <> at'; end if;
+    -- a new card that already has a tag: "tag added" on INSERT (a copy of the demo card with a new id; skipped with a note
+    -- if this staging schema refuses a copy, e.g. a unique phone or email)
+    begin
+      insert into public.contacts
+      select (jsonb_populate_record(null::public.contacts, to_jsonb(x) || jsonb_build_object('id', gen_random_uuid(), 'tags', array['stage2-ins'],
+              'email', 'stage2-check-ins@example.invalid', 'phone', '0491570000'))).*
+        from public.contacts x where x.id = c
+      returning id into o;
+      if not exists (select 1 from public.automation_events where contact_id = o and type = 'contact_tag' and event_key like o::text || ':tag:+:stage2-ins:%') then
+        raise exception 'FAIL 2j: a card inserted with a tag gave no "tag added" event';
+      end if;
+    exception when others then
+      if sqlerrm like 'FAIL%' then raise; end if;
+      raise notice 'NOTE 2: the INSERT-with-tags case was skipped (%): staging refused a copied card', left(sqlerrm, 120);
+    end;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 2 — capture: silent when not wanted, a forced failure never blocks the save, events, cause stamp, tags, opt-out on/off';
+end $$;
+
+-- 3. RLS: a VA, a technician, a signed-in person with no profile and anon read NOTHING from the engine tables and the
+--    read RPCs (the wanted list is readable by anyone signed in, by design); an owner reads the same rows (control).
+do $$
+declare a uuid; f uuid; r uuid; hk uuid; who text; uid uuid; t text; n integer; seen integer; owner_id uuid; obj jsonb;
+  tabs text[] := array['automation_folders', 'automation_versions', 'automation_notes', 'automation_events', 'automation_trigger_log',
+    'automation_trigger_daily', 'automation_enrollment_keys', 'automation_pauses', 'automation_hooks', 'automation_hook_secrets',
+    'automation_custom_values', 'automation_templates', 'automation_reviews', 'automation_system_meta', 'system_claims',
+    'automation_runs', 'automation_log'];
+begin
+  begin
+    -- one row in every table (as the owner of the tables: RLS does not apply to it)
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 3', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automation_folders (name) values ('stage2 check 3') returning id into f;
+    insert into public.automation_versions (automation_id, version_no, revision, version, status, reason, name) values (a, 1, 1, 1, 'draft', 'create', 'stage2 check 3');
+    insert into public.automation_notes (automation_id, body) values (a, 'stage2 check 3');
+    insert into public.automation_events (type, event_key, at, available_at, source) values ('newLead', 'stage2-check-3', now(), now(), 'app');
+    insert into public.automation_wanted (business_id, event_type) values ('default', 'stage2_check') on conflict do nothing;
+    insert into public.automation_trigger_log (automation_id, trigger_id, event_key, event_type, matched) values (a, 't1', 'stage2-check-3', 'newLead', true);
+    insert into public.automation_trigger_daily (automation_id, trigger_id, day, attempted) values (a, 't1', current_date, 1);
+    insert into public.automation_enrollment_keys (automation_id, enrollment_key) values (a, 'stage2-check-3');
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2031-01-05T09:00', '2031-01-06T09:00', array[a]);
+    insert into public.automation_hooks (automation_id, trigger_id) values (a, 't1') returning id into hk;
+    insert into public.automation_hook_secrets (hook_id, token_hash) values (hk, repeat('ab', 32));
+    insert into public.automation_custom_values (key, value) values ('stage2_check', 'x');
+    insert into public.automation_templates (key, name, definition) values ('stage2_check', 'stage2 check 3', '{"schema":2,"seq":0,"entry":null,"triggers":[],"nodes":{}}');
+    insert into public.automation_reviews (automation_id, acked_until) values (a, now() - interval '40 days');
+    insert into public.automation_system_meta (base, folder_id) values ('stage2check', f);
+    insert into public.system_claims (key) values ('stage2-check-3');
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status)
+    values (a, 1, 'stage2-check-3', 'newLead', now(), 'contact', 'stage2-check', now(), now(), 'failed') returning id into r;
+    insert into public.automation_log (run_id, step_id, status, channel, audience, automation_id, automation_name, at)
+    values (r, 'p1', 'failed', 'push', 'team', a, 'stage2 check 3', now());
+    -- the people to sign in as (a made-up id = someone signed in with no profile)
+    for who in select unnest(array['va', 'technician', 'nobody', 'anon']) loop
+      uid := null;
+      if who in ('va', 'technician') then
+        begin
+          execute 'select id from public.profiles where role = $1 order by id limit 1' into uid using who;
+        exception when others then uid := null;
+        end;
+        if uid is null then raise notice 'NOTE 3: no % profile on staging; checked as someone signed in with no profile instead', who; end if;
+      end if;
+      uid := coalesce(uid, gen_random_uuid());
+      begin
+        if who = 'anon' then
+          perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+          perform set_config('request.jwt.claim.sub', '', true);
+          execute 'set local role anon';
+        else
+          perform set_config('request.jwt.claims', json_build_object('sub', uid, 'role', 'authenticated')::text, true);
+          perform set_config('request.jwt.claim.sub', uid::text, true);
+          execute 'set local role authenticated';
+        end if;
+        foreach t in array tabs loop
+          begin
+            execute format('select count(*) from public.%I', t) into n;
+          exception when insufficient_privilege then n := 0;
+          end;
+          if n <> 0 then raise exception 'FAIL 3a: % reads % rows of %', who, n, t; end if;
+        end loop;
+        begin
+          execute 'select count(*) from public.automation_wanted' into n;
+        exception when insufficient_privilege then n := 0;
+        end;
+        if who <> 'anon' and n = 0 then raise exception 'FAIL 3b: % (signed in) cannot read the wanted list', who; end if;
+        if who = 'anon' and n <> 0 then raise exception 'FAIL 3c: anon reads the wanted list'; end if;
+        if who <> 'anon' then
+          obj := public.automation_list_stats(now() - interval '30 days');
+          if obj <> '{}'::jsonb then raise exception 'FAIL 3d: % gets list stats %', who, obj; end if;
+          select count(*) into n from public.automation_needs_review();
+          if n <> 0 then raise exception 'FAIL 3e: % sees Needs review rows', who; end if;
+          select count(*) into n from public.automation_execution_log(a, now() - interval '1 day', now() + interval '1 day');
+          if n <> 0 then raise exception 'FAIL 3f: % reads the execution log', who; end if;
+          begin
+            insert into public.automation_folders (name) values ('stage2 check 3 by ' || who);
+            raise exception 'FAIL 3g: % added a folder', who;
+          exception when insufficient_privilege then null;
+          end;
+          begin
+            insert into public.automation_events (type, event_key, at, available_at, source) values ('newLead', 'stage2-check-3-' || who, now(), now(), 'app');
+            raise exception 'FAIL 3h: % wrote an event', who;
+          exception when insufficient_privilege then null;
+          end;
+        end if;
+        raise exception '__role_undo__';
+      exception when others then
+        if sqlerrm <> '__role_undo__' then raise; end if;
+      end;
+    end loop;
+    -- control: an owner sees the rows (so the zeros above mean something)
+    begin
+      execute 'select id from public.profiles where role = ''owner'' order by id limit 1' into owner_id;
+    exception when others then owner_id := null;
+    end;
+    if owner_id is null then
+      raise notice 'NOTE 3: no owner profile on staging; the owner control was skipped';
+    else
+      begin
+        perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+        perform set_config('request.jwt.claim.sub', owner_id::text, true);
+        execute 'set local role authenticated';
+        seen := 0;
+        foreach t in array array['automation_folders', 'automation_versions', 'automation_notes', 'automation_events', 'automation_trigger_log',
+                                 'automation_trigger_daily', 'automation_pauses', 'automation_hooks', 'automation_custom_values', 'automation_templates',
+                                 'automation_reviews', 'automation_system_meta', 'automation_runs', 'automation_log'] loop
+          execute format('select count(*) from public.%I', t) into n;
+          if n = 0 then raise exception 'FAIL 3i: the owner reads nothing from %', t; end if;
+          seen := seen + 1;
+        end loop;
+        foreach t in array array['automation_enrollment_keys', 'automation_hook_secrets', 'system_claims'] loop
+          begin
+            execute format('select count(*) from public.%I', t) into n;
+            raise exception 'FAIL 3j: the owner can read % (service role only)', t;
+          exception when insufficient_privilege then null;
+          end;
+        end loop;
+        select count(*) into n from public.automation_needs_review() x where x.automation_id = a;
+        if n <> 1 then raise exception 'FAIL 3k: the owner does not see the failed run in Needs review'; end if;
+        if public.automation_mark_reviewed(a) is null then raise exception 'FAIL 3l: Mark as reviewed did nothing'; end if;
+        select count(*) into n from public.automation_needs_review() x where x.automation_id = a;
+        if n <> 0 then raise exception 'FAIL 3m: still in Needs review after Mark as reviewed'; end if;
+        raise exception '__role_undo__';
+      exception when others then
+        if sqlerrm <> '__role_undo__' then raise; end if;
+      end;
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 3 — RLS: VA / technician / no profile / anon read nothing (wanted list: signed-in only); owner control';
+end $$;
+
+-- 4. Table, column and function privileges (read-only).
+do $$
+declare t text; bad text := '';
+begin
+  foreach t in array array['automation_events', 'automation_versions', 'automation_trigger_log', 'automation_trigger_daily', 'automation_wanted',
+                           'automation_hooks', 'automation_templates', 'automation_runs', 'automation_log'] loop
+    if has_table_privilege('authenticated', 'public.' || t, 'INSERT') or has_table_privilege('authenticated', 'public.' || t, 'UPDATE')
+       or has_table_privilege('authenticated', 'public.' || t, 'DELETE') then bad := bad || ' authenticated writes ' || t || ';'; end if;
+  end loop;
+  foreach t in array array['automation_enrollment_keys', 'automation_hook_secrets', 'system_claims'] loop
+    if has_table_privilege('authenticated', 'public.' || t, 'SELECT') then bad := bad || ' authenticated reads ' || t || ';'; end if;
+  end loop;
+  foreach t in array array['automation_folders', 'automation_versions', 'automation_notes', 'automation_events', 'automation_wanted', 'automation_trigger_log',
+                           'automation_trigger_daily', 'automation_enrollment_keys', 'automation_pauses', 'automation_hooks', 'automation_hook_secrets',
+                           'automation_custom_values', 'automation_templates', 'automation_reviews', 'automation_system_meta', 'system_claims'] loop
+    if has_table_privilege('anon', 'public.' || t, 'SELECT') or has_table_privilege('anon', 'public.' || t, 'INSERT') then bad := bad || ' anon on ' || t || ';'; end if;
+    if not (select c.relrowsecurity from pg_class c where c.oid = ('public.' || t)::regclass) then bad := bad || ' RLS off on ' || t || ';'; end if;
+  end loop;
+  if has_column_privilege('authenticated', 'public.automation_log', 'row_kind', 'UPDATE') then bad := bad || ' log.row_kind updatable;'; end if;
+  if has_column_privilege('authenticated', 'public.automation_log', 'loop', 'INSERT') then bad := bad || ' log.loop insertable;'; end if;
+  if has_column_privilege('authenticated', 'public.automation_runs', 'active_lock', 'UPDATE') then bad := bad || ' runs.active_lock updatable;'; end if;
+  if has_column_privilege('authenticated', 'public.automation_runs', 'status', 'UPDATE') then bad := bad || ' runs.status updatable;'; end if;
+  if not has_column_privilege('authenticated', 'public.automation_hooks', 'token_hint', 'SELECT') then bad := bad || ' hooks.token_hint not readable;'; end if;
+  foreach t in array array[
+      'public.automation_enroll(text, uuid, integer, integer, text, text, text, timestamptz, text, text, uuid, text, text, text, text, jsonb, text, integer, uuid, uuid, boolean, timestamptz, timestamptz)',
+      'public.automation_claim_events(text, timestamptz, integer, integer, uuid, text, text)', 'public.automation_wake(text, uuid, text[], timestamptz)',
+      'public.automation_stop_on_reply(text, uuid, timestamptz, timestamptz)', 'public.automation_apply(text, text, text, text, jsonb)',
+      'public.automation_prune(text, timestamptz, integer)', 'public.automation_trigger_daily_add(text, jsonb)',
+      'public.automation_capture_put(text, text, text, text, text, uuid, jsonb)',
+      'public.automation_claim_customer_v2(text, uuid, text, uuid, text, text, text, text, uuid, text[], timestamptz, integer, timestamptz, integer)',
+      'public.automation_claim_customer(text, uuid, text, uuid, text, text, text, text, uuid, text[], timestamptz, integer, timestamptz)'] loop
+    if has_function_privilege('authenticated', t, 'EXECUTE') or has_function_privilege('anon', t, 'EXECUTE') then bad := bad || ' callable by the app: ' || t || ';'; end if;
+    if not has_function_privilege('service_role', t, 'EXECUTE') then bad := bad || ' not callable by the function: ' || t || ';'; end if;
+  end loop;
+  foreach t in array array['public.automation_list_stats(timestamptz)', 'public.automation_trigger_stats(uuid, date, date)',
+      'public.automation_trigger_evals(uuid, text, timestamptz, timestamptz, boolean, uuid, timestamptz, uuid, integer)',
+      'public.automation_unmatch_reasons(uuid, text, date, date)', 'public.automation_step_stats(uuid, timestamptz)',
+      'public.automation_enrollments(uuid, timestamptz, timestamptz, text[], text, text, text[], uuid, timestamptz, uuid, integer)',
+      'public.automation_execution_log(uuid, timestamptz, timestamptz, text[], text[], uuid, uuid, timestamptz, uuid, integer)',
+      'public.automation_log_steps(uuid, timestamptz, timestamptz)', 'public.automation_needs_review()', 'public.automation_mark_reviewed(uuid)'] loop
+    if not has_function_privilege('authenticated', t, 'EXECUTE') then bad := bad || ' read RPC not callable: ' || t || ';'; end if;
+    if has_function_privilege('anon', t, 'EXECUTE') then bad := bad || ' read RPC callable by anon: ' || t || ';'; end if;
+    if (select p.prosecdef from pg_proc p where p.oid = t::regprocedure) then bad := bad || ' read RPC is security definer: ' || t || ';'; end if;
+  end loop;
+  if bad <> '' then raise exception 'FAIL 4:%', bad; end if;
+  raise notice 'PASS 4 — table, column and function privileges';
+end $$;
+
+-- 5. automation_enroll: enrolled / already_enrolled / reentry_off / duplicate_event / not_found; the lock clears when the
+--    run ends; one ledger row; enrolled_total; one enroll log row; another business's call touches nothing.
+do $$
+declare a uuid; x text; rid uuid; n integer; tot bigint;
+begin
+  begin
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 5', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    x := public.automation_enroll('default', a, 1, 1, 't1', 'k1', 'newLead', now(), 'contact', 'c5', null, 'c5', 'c5', 'off', 'n1', '{}', 'trigger', 0, null, null, false, now());
+    if x not like 'enrolled:%' then raise exception 'FAIL 5a: first enrol gave %', x; end if;
+    rid := substr(x, 10)::uuid;
+    if not exists (select 1 from public.automation_runs r where r.id = rid and r.status = 'waiting' and r.active_lock = 'c5' and r.cursor_step = 'n1'
+                    and r.enrollment_key = 'c5' and r.due_at = r.event_at and r.trigger_id = 't1' and r.source = 'trigger') then
+      raise exception 'FAIL 5b: the enrolled run is not as expected';
+    end if;
+    x := public.automation_enroll('default', a, 1, 1, 't1', 'k2', 'newLead', now(), 'contact', 'c5', null, 'c5', 'c5', 'after_exit', 'n1', '{}', 'trigger', 0, null, null, false, now());
+    if x <> 'already_enrolled' then raise exception 'FAIL 5c: while active gave % (want already_enrolled)', x; end if;
+    update public.automation_runs set status = 'done', finished_at = now() where id = rid;
+    if (select active_lock from public.automation_runs where id = rid) is not null then raise exception 'FAIL 5d: the lock did not clear when the run ended'; end if;
+    x := public.automation_enroll('default', a, 1, 1, 't1', 'k3', 'newLead', now(), 'contact', 'c5', null, 'c5', 'c5', 'off', 'n1', '{}', 'trigger', 0, null, null, false, now());
+    if x <> 'reentry_off' then raise exception 'FAIL 5e: re-entry off gave % (want reentry_off)', x; end if;
+    x := public.automation_enroll('default', a, 1, 1, 't1', 'k3', 'newLead', now(), 'contact', 'c5', null, 'c5', 'c5', 'after_exit', 'n1', '{}', 'trigger', 0, null, null, false, now());
+    if x not like 'enrolled:%' then raise exception 'FAIL 5f: re-entry after exit gave %', x; end if;
+    x := public.automation_enroll('default', a, 1, 1, 't1', 'k3', 'newLead', now(), 'contact', 'c5', null, 'c5', null, 'legacy_always', 'n1', '{}', 'trigger', 0, null, null, false, now());
+    if x <> 'duplicate_event' then raise exception 'FAIL 5g: the same event again gave % (want duplicate_event)', x; end if;
+    x := public.automation_enroll('other', a, 1, 1, 't1', 'k9', 'newLead', now(), 'contact', 'c5', null, 'c9', 'c9', 'off', 'n1', '{}', 'trigger', 0, null, null, false, now());
+    if x <> 'not_found' then raise exception 'FAIL 5h: another business enrolled into this workflow (%)', x; end if;
+    select runs into n from public.automation_enrollment_keys where automation_id = a and enrollment_key = 'c5';
+    select enrolled_total into tot from public.automations where id = a;
+    if n <> 2 or tot <> 2 then raise exception 'FAIL 5i: ledger runs % / enrolled_total % (want 2 / 2)', n, tot; end if;
+    select count(*) into n from public.automation_log where automation_id = a and row_kind = 'enroll' and status = 'added';
+    if n <> 2 then raise exception 'FAIL 5j: % enroll log rows (want 2)', n; end if;
+    select count(*) into n from public.automation_runs where automation_id = a;
+    if n <> 2 then raise exception 'FAIL 5k: % runs (want 2)', n; end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 5 — automation_enroll outcomes, the lock clears on finish, ledger, total, enroll rows, business scoping';
+end $$;
+
+-- 6. automation_claim_events: a settling event waits for available_at; a lease is taken and only an expired one is
+--    taken again; one record's events only; done events never.
+do $$
+declare n integer; ids uuid[];
+begin
+  begin
+    insert into public.automation_events (type, event_key, record_kind, record_id, at, available_at, source)
+    values ('stage', 'stage2-check-6a', 'contact', 'r6', now(), now() + interval '30 seconds', 'scan'),
+           ('newLead', 'stage2-check-6b', 'contact', 'r6', now(), now(), 'scan'),
+           ('newLead', 'stage2-check-6c', 'contact', 'r6other', now(), now(), 'scan');
+    insert into public.automation_events (type, event_key, record_kind, record_id, at, available_at, source, status)
+    values ('newLead', 'stage2-check-6d', 'contact', 'r6', now(), now(), 'scan', 'done');
+    select array_agg(e.id) into ids from public.automation_claim_events('default', now(), 50, 60, null, 'contact', 'r6') e;
+    if coalesce(cardinality(ids), 0) <> 1 or not exists (select 1 from public.automation_events where id = ids[1] and event_key = 'stage2-check-6b' and status = 'processing') then
+      raise exception 'FAIL 6a: one record''s due events = only 6b (got %)', ids;
+    end if;
+    select count(*) into n from public.automation_claim_events('default', now() + interval '10 seconds', 50, 60, null, 'contact', 'r6');
+    if n <> 0 then raise exception 'FAIL 6b: a leased or settling event was claimed again (%)', n; end if;
+    select count(*) into n from public.automation_claim_events('default', now() + interval '31 seconds', 50, 60, null, 'contact', 'r6');
+    if n <> 1 then raise exception 'FAIL 6c: the settled stage event was not claimed after 30 s (%)', n; end if;
+    select count(*) into n from public.automation_claim_events('default', now() + interval '2 minutes', 50, 60, null, 'contact', 'r6');
+    if n <> 2 then raise exception 'FAIL 6d: expired leases were not claimed again (% of 2)', n; end if;
+    select count(*) into n from public.automation_claim_events('other', now() + interval '1 hour', 50, 60);
+    if n <> 0 then raise exception 'FAIL 6e: another business claimed this business''s events'; end if;
+    -- housekeeping: a done event older than 7 days goes, only for its own business
+    insert into public.automation_events (type, event_key, at, available_at, source, status, processed_at, created_at)
+    values ('newLead', 'stage2-check-6old', now() - interval '9 days', now() - interval '9 days', 'scan', 'done', now() - interval '8 days', now() - interval '9 days');
+    perform public.automation_prune('other', now(), 1000);
+    if not exists (select 1 from public.automation_events where event_key = 'stage2-check-6old') then raise exception 'FAIL 6f: another business''s prune deleted this business''s event'; end if;
+    perform public.automation_prune('default', now(), 1000);
+    if exists (select 1 from public.automation_events where event_key = 'stage2-check-6old') then raise exception 'FAIL 6g: a done event older than 7 days was not pruned'; end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 6 — automation_claim_events: settle, leases, one record, done never, business scoping; prune';
+end $$;
+
+-- 7. automation_wake / automation_stop_on_reply: only this lead's waiting runs whose watch matches / that sent before
+--    the reply; one exit row per stopped run; another business's call touches nothing.
+do $$
+declare a uuid; c uuid := gen_random_uuid(); n integer; later timestamptz := now() + interval '3 days';
+begin
+  begin
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 7', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, contact_id,
+                                        anchor_at, due_at, status, watch, stop_on_reply, first_sent_at)
+    values (a, 1, 'w1', 'newLead', now(), 'contact', c::text, c, now(), later, 'waiting', array['customer_replied'], true, now() - interval '1 hour'),
+           (a, 1, 'w2', 'newLead', now(), 'contact', c::text, c, now(), later, 'waiting', array['stage'], true, now() + interval '1 hour'),
+           (a, 1, 'w3', 'newLead', now(), 'contact', c::text, c, now(), later, 'done', array['customer_replied'], true, now() - interval '1 hour');
+    if public.automation_wake('other', c, array['customer_replied'], now()) <> 0 then raise exception 'FAIL 7a: another business woke this lead''s runs'; end if;
+    n := public.automation_wake('default', c, array['customer_replied'], now());
+    if n <> 1 or (select due_at from public.automation_runs where automation_id = a and event_key = 'w1') > now()
+       or (select due_at from public.automation_runs where automation_id = a and event_key = 'w2') <> later then
+      raise exception 'FAIL 7b: wake touched % runs (want only w1)', n;
+    end if;
+    if public.automation_stop_on_reply('other', c, now(), now()) <> 0 then raise exception 'FAIL 7c: another business stopped this lead''s runs'; end if;
+    n := public.automation_stop_on_reply('default', c, now(), now());
+    if n <> 1 or (select status from public.automation_runs where automation_id = a and event_key = 'w1') <> 'stopped'
+       or (select status from public.automation_runs where automation_id = a and event_key = 'w2') <> 'waiting' then
+      raise exception 'FAIL 7d: stop on reply stopped % runs (want only w1: w2 sent after the reply)', n;
+    end if;
+    select count(*) into n from public.automation_log where automation_id = a and row_kind = 'exit' and status = 'stopped' and reason = 'Stopped: the lead replied';
+    if n <> 1 then raise exception 'FAIL 7e: % exit rows (want 1)', n; end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 7 — automation_wake and automation_stop_on_reply';
+end $$;
+
+-- 8. Pause ranges: ≤ 15 days; no workflow in two overlapping ranges (also annual across New Year and 29 February);
+--    ≤ 15 per business; a changed range wakes only the runs it held.
+do $$
+declare a uuid; b uuid; p uuid; i integer;
+begin
+  begin
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 8a', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 8b', false, '{"type":"newLead","params":{}}', '[]') returning id into b;
+    begin
+      insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2031-03-01T09:00', '2031-03-17T09:00', array[a]);
+      raise exception 'FAIL 8a: a 16-day pause was accepted';
+    exception when raise_exception then if sqlerrm not like 'Maximum allowed difference%' then raise; end if;
+    end;
+    insert into public.automation_pauses (start_wall, end_wall, annually, automation_ids) values ('2030-12-24T17:00', '2031-01-02T08:00', true, array[a]) returning id into p;
+    begin   -- the same workflow, a later year, inside the annual range across New Year
+      insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2033-12-31T10:00', '2034-01-01T10:00', array[a, b]);
+      raise exception 'FAIL 8b: an overlap with an annual range across New Year was accepted';
+    exception when raise_exception then if sqlerrm not like 'A workflow should not be part of two%' then raise; end if;
+    end;
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2033-12-31T10:00', '2034-01-01T10:00', array[b]);   -- another workflow: fine
+    insert into public.automation_pauses (start_wall, end_wall, annually, automation_ids) values ('2032-02-29T09:00', '2032-03-01T09:00', true, array[b]);   -- 29 Feb, annual
+    begin
+      insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2033-02-28T12:00', '2033-02-28T13:00', array[b]);
+      raise exception 'FAIL 8c: 28 Feb 2033 inside an annual 29 Feb range was accepted';
+    exception when raise_exception then if sqlerrm not like 'A workflow should not be part of two%' then raise; end if;
+    end;
+    begin
+      insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2031-02-30T09:00', '2031-03-01T09:00', array[b]);
+      raise exception 'FAIL 8d: 30 February was accepted';
+    exception when others then if sqlerrm like 'FAIL%' then raise; end if;
+    end;
+    for i in 1..12 loop   -- 3 rows exist; 12 more = 15
+      insert into public.automation_pauses (start_wall, end_wall, automation_ids)
+      values (format('2040-%s-10T09:00', lpad(i::text, 2, '0')), format('2040-%s-11T09:00', lpad(i::text, 2, '0')), array[a]);
+    end loop;
+    begin
+      insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2041-01-01T09:00', '2041-01-02T09:00', array[a]);
+      raise exception 'FAIL 8e: a 16th pause date was accepted';
+    exception when raise_exception then if sqlerrm not like 'At most 15%' then raise; end if;
+    end;
+    -- a run held by the pause (watch 'pause') wakes when the range changes; one that is not held does not
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status, watch)
+    values (a, 1, 'p1', 'newLead', now(), 'contact', 'r8', now(), now() + interval '9 days', 'waiting', array['pause']),
+           (a, 1, 'p2', 'newLead', now(), 'contact', 'r8', now(), now() + interval '9 days', 'waiting', array['stage']);
+    update public.automation_pauses set end_wall = '2031-01-01T08:00' where id = p;
+    if (select due_at from public.automation_runs where automation_id = a and event_key = 'p1') > now()
+       or (select due_at from public.automation_runs where automation_id = a and event_key = 'p2') <= now() + interval '8 days' then
+      raise exception 'FAIL 8f: a changed range did not wake exactly the held run';
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 8 — pause ranges: 15 days, overlaps (annual, New Year, 29 Feb), 15 per business, wake on change';
+end $$;
+
+-- 9. Folders: at most 5 levels (also when a subtree moves), never inside itself, a name once per parent.
+do $$
+declare f1 uuid; f2 uuid; f3 uuid; f4 uuid; f5 uuid; g1 uuid; g2 uuid;
+begin
+  begin
+    insert into public.automation_folders (name) values ('s2c L1') returning id into f1;
+    insert into public.automation_folders (name, parent_id) values ('s2c L2', f1) returning id into f2;
+    insert into public.automation_folders (name, parent_id) values ('s2c L3', f2) returning id into f3;
+    insert into public.automation_folders (name, parent_id) values ('s2c L4', f3) returning id into f4;
+    insert into public.automation_folders (name, parent_id) values ('s2c L5', f4) returning id into f5;
+    begin
+      insert into public.automation_folders (name, parent_id) values ('s2c L6', f5);
+      raise exception 'FAIL 9a: a 6th level was accepted';
+    exception when raise_exception then if sqlerrm not like 'Folders go at most 5 levels deep%' then raise; end if;
+    end;
+    begin
+      update public.automation_folders set parent_id = f3 where id = f1;
+      raise exception 'FAIL 9b: a folder went inside its own subfolder';
+    exception when raise_exception then if sqlerrm not like 'A folder cannot go inside itself%' and sqlerrm not like 'Folders go at most%' then raise; end if;
+    end;
+    insert into public.automation_folders (name) values ('s2c G1') returning id into g1;
+    insert into public.automation_folders (name, parent_id) values ('s2c G2', g1) returning id into g2;
+    begin   -- a 2-level subtree under level 4 would make 6 levels
+      update public.automation_folders set parent_id = f4 where id = g1;
+      raise exception 'FAIL 9c: moving a subtree made 6 levels';
+    exception when raise_exception then if sqlerrm not like 'Folders go at most 5 levels deep%' then raise; end if;
+    end;
+    begin
+      insert into public.automation_folders (name, parent_id) values ('S2C l2 ', f1);
+      raise exception 'FAIL 9d: the same name twice under one parent was accepted';
+    exception when unique_violation then null;
+    end;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 9 — folders: 5 levels, subtree moves, no cycles, unique names';
+end $$;
+
+-- 10. The schema state of the swap and the new checks (read-only).
+do $$
+declare d text;
+begin
+  select pg_get_indexdef(i.indexrelid) into d from pg_index i join pg_class c on c.oid = i.indexrelid where c.relname = 'automation_log_action_once';
+  if d is null or d !~ 'UNIQUE' or d !~ 'run_id, step_id, "?loop"?' or d !~ 'row_kind = ''action''' then raise exception 'FAIL 10a: automation_log_action_once is %', d; end if;
+  select pg_get_indexdef(i.indexrelid) into d from pg_index i join pg_class c on c.oid = i.indexrelid where c.relname = 'automation_runs_active_lock';
+  if d is null or d !~ 'UNIQUE' or d !~ 'active_lock IS NOT NULL' then raise exception 'FAIL 10b: automation_runs_active_lock is %', d; end if;
+  if (select is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'automation_log' and column_name = 'channel') <> 'YES'
+     or (select is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'automation_log' and column_name = 'audience') <> 'YES' then
+    raise exception 'FAIL 10c: automation_log.channel / audience are still NOT NULL';
+  end if;
+  if exists (select 1 from public.automation_log where row_kind <> 'action' or "loop" <> 0) then
+    raise notice 'NOTE 10: automation_log already has v2 rows (fine once the v2 function runs on staging)';
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'automation_capture' and tgrelid = 'public.contacts'::regclass)
+     or (select count(*) from pg_trigger where tgname = 'automation_capture') <> 6 then
+    raise exception 'FAIL 10d: the six capture triggers are not all there';
+  end if;
+  raise notice 'PASS 10 — the swap, the partial unique indexes, nullable channel/audience, the six capture triggers';
+end $$;
+
+-- 11. automation_apply: a typed field write, tags, Won refused, a stage move writes the 'stage' event with the scanner's
+--     exact key (the stored stage_changed_at as PostgREST shows it) and every captured event carries the cause.
+do $$
+declare a uuid; c uuid; r uuid := gen_random_uuid(); res jsonb; k text; st text; tgt text; n integer;
+begin
+  begin
+    select id, status into c, st from public.contacts order by created_at desc nulls last limit 1;
+    if c is null then raise exception 'FAIL 11: staging has no contacts'; end if;
+    -- a stage this business already uses (a check on contacts.status, if any, accepts it), not the lead's own, not the won key
+    select x.status into tgt from public.contacts x where x.status is distinct from st and x.status <> public.automation_catalog_key('stageWon', 'Won')
+     group by x.status order by count(*) desc limit 1;
+    if tgt is null then raise exception 'FAIL 11: the demo contacts have only one stage'; end if;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 11', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automation_wanted (business_id, event_type) values ('default', 'stage'), ('default', 'contact_changed'), ('default', 'contact_tag')
+      on conflict do nothing;
+    res := public.automation_apply('default', r::text || ':0:' || a::text, 'contact', c::text, jsonb_build_array(
+      jsonb_build_object('op', 'set', 'field', 'postcode', 'value', 'S2C11'),
+      jsonb_build_object('op', 'set', 'field', 'phone', 'value', '000'),
+      jsonb_build_object('op', 'tags', 'add', jsonb_build_array('stage2-apply')),
+      jsonb_build_object('op', 'stage', 'to', public.automation_catalog_key('stageWon', 'Won')),
+      jsonb_build_object('op', 'stage', 'to', tgt)));
+    if (res ->> 'ok')::boolean is not true or jsonb_array_length(res -> 'applied') <> 3 or jsonb_array_length(res -> 'skipped') <> 2 then
+      raise exception 'FAIL 11a: apply gave % (want 3 applied: postcode, tags, stage; 2 skipped: phone, Won)', res;
+    end if;
+    if (select postcode from public.contacts where id = c) <> 'S2C11' or not ('stage2-apply' = any((select tags from public.contacts where id = c))) then
+      raise exception 'FAIL 11b: the field / tag writes did not land';
+    end if;
+    select c::text || ':' || status || ':' || (to_jsonb(stage_changed_at) #>> '{}') into k from public.contacts where id = c;
+    if not exists (select 1 from public.automation_events where type = 'stage' and event_key = k and source = 'engine' and cause_run_id = r and chain_depth = 1) then
+      raise exception 'FAIL 11c: no stage event with the scanner key % and the cause', k;
+    end if;
+    select count(*) into n from public.automation_events where contact_id = c and at = now() and type in ('contact_changed', 'contact_tag') and cause_run_id is distinct from r;
+    if n <> 0 then raise exception 'FAIL 11d: % captured events without the cause', n; end if;
+    select count(*) into n from public.activity_log where record_kind = 'contact' and record_id = c::text and actor = 'Automation: stage2 check 11';
+    if n <> 3 then raise exception 'FAIL 11e: % activity lines (want 3)', n; end if;
+    res := public.automation_apply('other', r::text || ':0:' || a::text, 'contact', c::text, jsonb_build_array(jsonb_build_object('op', 'set', 'field', 'postcode', 'value', 'S2C12')));
+    if (res ->> 'ok')::boolean or (select postcode from public.contacts where id = c) <> 'S2C11' then raise exception 'FAIL 11f: another business''s apply wrote (%)', res; end if;
+    begin
+      perform public.automation_apply('default', 'no cause', 'contact', c::text, '[]'::jsonb);
+      raise exception 'FAIL 11g: apply ran without a cause';
+    exception when raise_exception then if sqlerrm not like 'automation_apply needs p_cause%' then raise; end if;
+    end;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 11 — automation_apply: typed write, whitelist, tags, Won refused, stage event with the scanner key, cause on every event';
+end $$;
+
+-- 12. The v2-only columns are out of the app's reach (automations_a_v2_pin): an owner signed in through the app inserts
+--     an enabled automation with a customer doc in `definition` → the doc is dropped (null) and phase 4's guards see only
+--     the steps; an UPDATE of `definition` / `enrolled_total` / `system_key` keeps the stored values. Control: the table
+--     owner (SQL editor) can still write them.
+do $$
+declare a uuid; b uuid; owner_id uuid; d jsonb; n bigint; k text; doc jsonb :=
+  '{"schema":2,"seq":1,"entry":"s1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"s1":{"kind":"action","type":"send_email","config":{"subject":"x","body":"y"},"out":{"next":null}}}}';
+begin
+  begin
+    insert into public.automations (name, enabled, trigger, steps, definition) values ('stage2 check 12 control', false, '{"type":"newLead","params":{}}', '[]', doc)
+    returning id, definition into a, d;
+    if d is null then raise exception 'FAIL 12a: the table owner could not write definition (the pin must leave the SQL editor and the service role alone)'; end if;
+    update public.automations set definition = null where id = a;
+    begin
+      execute 'select id from public.profiles where role = ''owner'' order by id limit 1' into owner_id;
+    exception when others then owner_id := null;
+    end;
+    if owner_id is null then
+      raise notice 'NOTE 12: no owner profile on staging; the signed-in part was skipped';
+    elsif not has_table_privilege('authenticated', 'public.automations', 'INSERT') then
+      -- after PART 3 · G3.4 an app insert / a write of the v2-only columns is refused before the pin runs
+      raise notice 'NOTE 12: PART 3 · G3.4 is applied (the app can''t insert or write the v2-only columns any more); PASS 26 checks the app''s writes';
+    else
+      begin
+        perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+        perform set_config('request.jwt.claim.sub', owner_id::text, true);
+        execute 'set local role authenticated';
+        insert into public.automations (name, enabled, trigger, steps, definition, enrolled_total, system_key, origin)
+        values ('stage2 check 12', true, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]', doc, 99, 'stage2-check-12', 'system')
+        returning id into b;
+        select definition, enrolled_total, system_key into d, n, k from public.automations where id = b;
+        if d is not null or n <> 0 or k is not null then raise exception 'FAIL 12b: an app INSERT set the v2-only columns (definition %, enrolled_total %, system_key %)', d is not null, n, k; end if;
+        update public.automations set definition = doc, enrolled_total = 7, system_key = 'stage2-check-12b', settings = '{"stopOnResponse":true}' where id = b;
+        select definition, enrolled_total, system_key into d, n, k from public.automations where id = b;
+        if d is not null or n <> 0 or k is not null then raise exception 'FAIL 12c: an app UPDATE changed the v2-only columns (definition %, enrolled_total %, system_key %)', d is not null, n, k; end if;
+        -- before PART 2 · G2.4 the phase-4 guard keeps a team automation on; after it every insert is a Draft (guard v2)
+        if (select enabled from public.automations where id = b) is distinct from (to_regprocedure('public.automation_save(text, uuid, integer, text, jsonb, jsonb, jsonb, text, text, text, boolean, jsonb, uuid, text)') is null) then
+          raise exception 'FAIL 12d: the ignored doc changed the switch (before G2.4: kept on; after: an insert is always a Draft)';
+        end if;
+        update public.automations set name = 'stage2 check 12 renamed' where id = a;   -- the control row: RLS lets the owner change it
+        if (select definition from public.automations where id = a) is not null then raise exception 'FAIL 12e: an app UPDATE of another column touched definition'; end if;
+        raise exception '__role_undo__';
+      exception when others then
+        if sqlerrm <> '__role_undo__' then raise; end if;
+      end;
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 12 — the app''s roles never write definition & the other v2-only columns (INSERT: defaults; UPDATE: kept); the SQL editor still can';
+end $$;
+
+-- 13. The capture failure counter never waits (read-only here): all six capture functions take the automation_state row
+--     with FOR UPDATE SKIP LOCKED. The two-session case (one SQL editor tab can't hold a lock for another) is checked BY
+--     HAND on staging, in two SQL editor tabs:
+--       tab A:  begin; select * from public.automation_state where business_id = 'default' for update;   -- keep it open
+--       tab B:  select set_config('automation.capture_test_error', 'on', false);
+--               insert into public.automation_wanted (business_id, event_type) values ('default', 'contact_changed') on conflict do nothing;
+--               update public.contacts set postcode = postcode where id = (select id from public.contacts limit 1);
+--               -- → returns AT ONCE (UPDATE 1); then: select set_config('automation.capture_test_error', 'off', false);
+--               delete from public.automation_wanted where business_id = 'default' and event_type = 'contact_changed';
+--       tab A:  rollback;
+do $$
+declare n integer;
+begin
+  select count(*) into n from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'automation\_capture\_%'
+     and p.prorettype = 'trigger'::regtype and p.prosrc ~* 'for update skip locked';
+  if n <> 6 then raise exception 'FAIL 13: % of the six capture functions count failures without waiting (want 6)', n; end if;
+  raise notice 'PASS 13 — the capture failure counter takes the state row with SKIP LOCKED (two-tab check: by hand, see above)';
+end $$;
+
+select 'stage2 Part 1 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 2 · G2.1 — the event store (design §3.2–§3.3, §8.1 #11–12, §8.2 #25). STAGING ONLY, after Part 1 is in. Same
+-- rules as above: every block undoes what it wrote ('__undo__'), prints "PASS 14" / "PASS 15", or stops with "FAIL …".
+-- Run it before Part 2 step E goes live (it also runs step E itself inside its own undone sub-block).
+-- The concurrent enrolment through PostgREST (two HTTP calls at the same moment) is the RUNBOOK's section 9.2 check.
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+-- 14. What the engine writes in event-store mode fits the Part-1 tables: a contactless scheduler event (record 'none',
+--     no record id) and its run (record id = the event key); a time / app source; the trigger log once per (workflow,
+--     trigger, event) (on conflict nothing, as the engine's bulk insert); the daily totals add up; the claim → hand back
+--     (attempts − 1) → claim again → done path; the step-E switch itself and its rollback.
+do $$
+declare a uuid; x text; n integer; s record; ids uuid[];
+begin
+  begin
+    insert into public.automation_state (business_id) values ('default') on conflict (business_id) do nothing;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 14', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    -- a scheduler event and an app event, as the engine writes them
+    insert into public.automation_events (type, event_key, record_kind, record_id, contact_id, at, available_at, ctx, source)
+    values ('scheduler', 'sched:' || a::text || ':t1:2026-10-14T09:00', 'none', null, null, now(), now(),
+            jsonb_build_object('wf_id', a::text, 'trigger_id', 't1', 'slot', '2026-10-14T09:00'), 'time'),
+           ('newLead', 'stage2-check-14:new', 'contact', 'c14', null, now(), now(), '{}'::jsonb, 'app');
+    begin
+      insert into public.automation_events (type, event_key, at, available_at, source) values ('newLead', 'stage2-check-14:new', now(), now(), 'scan');
+      raise exception 'FAIL 14a: the same (type, key) was stored twice';
+    exception when unique_violation then null;
+    end;
+    x := public.automation_enroll('default', a, 1, 1, 't1', 'sched:' || a::text || ':t1:2026-10-14T09:00', 'scheduler', now(), 'none',
+           left('sched:' || a::text || ':t1:2026-10-14T09:00', 100), null, 'sched:' || a::text || ':t1:2026-10-14T09:00', 'sched:' || a::text || ':t1:2026-10-14T09:00',
+           'after_exit', 'n1', jsonb_build_object('slot', '2026-10-14T09:00'), 'trigger', 0, null, null, false, now());
+    if x not like 'enrolled:%' then raise exception 'FAIL 14b: a contactless scheduler run was not enrolled (%)', x; end if;
+    if not exists (select 1 from public.automation_runs r where r.id = substr(x, 10)::uuid and r.record_kind = 'none' and r.contact_id is null and r.event_type = 'scheduler') then
+      raise exception 'FAIL 14c: the scheduler run is not as the engine expects';
+    end if;
+    -- the trigger log: one row per (workflow, trigger, event); a retried event's insert is nothing
+    insert into public.automation_trigger_log (automation_id, trigger_id, event_key, event_type, matched, reason, detail)
+    values (a, 't1', 'stage2-check-14:new', 'newLead', false, 'filter:service', jsonb_build_object('code', 'filter:service', 'text', 'Filter not matched - Service - Received value: s9q, Expected value: Aircon'))
+    on conflict (automation_id, trigger_id, event_key) do nothing;
+    insert into public.automation_trigger_log (automation_id, trigger_id, event_key, event_type, matched, reason)
+    values (a, 't1', 'stage2-check-14:new', 'newLead', true, null) on conflict (automation_id, trigger_id, event_key) do nothing;
+    select count(*) into n from public.automation_trigger_log where automation_id = a;
+    if n <> 1 then raise exception 'FAIL 14d: % trigger-log rows for one event (want 1)', n; end if;
+    -- the daily totals add up (two batches of the same day)
+    perform public.automation_trigger_daily_add('default', jsonb_build_array(jsonb_build_object('automation_id', a, 'trigger_id', 't1', 'day', current_date,
+      'attempted', 3, 'matched', 1, 'enrolled', 1, 'reasons', jsonb_build_object('filter:service', 1, 'before_published', 1))));
+    perform public.automation_trigger_daily_add('default', jsonb_build_array(jsonb_build_object('automation_id', a, 'trigger_id', 't1', 'day', current_date,
+      'attempted', 2, 'matched', 2, 'enrolled', 0, 'reasons', jsonb_build_object('already_enrolled', 2))));
+    select * into s from public.automation_trigger_daily where automation_id = a and trigger_id = 't1' and day = current_date;
+    if s.attempted <> 5 or s.matched <> 3 or s.enrolled <> 1 or s.reasons <> '{"filter:service": 1, "before_published": 1, "already_enrolled": 2}'::jsonb then
+      raise exception 'FAIL 14e: daily totals % / % / % %', s.attempted, s.matched, s.enrolled, s.reasons;
+    end if;
+    -- claim → hand back as the engine does out of time (status new, attempts − 1) → claim again → done
+    select array_agg(c.id) into ids from public.automation_claim_events('default', now(), 10, 120, null, 'contact', 'c14') c;
+    if coalesce(cardinality(ids), 0) <> 1 then raise exception 'FAIL 14f: the app event was not claimed (%)', ids; end if;
+    update public.automation_events set status = 'new', lease_until = null, attempts = attempts - 1 where id = ids[1] and status = 'processing';
+    if (select attempts from public.automation_events where id = ids[1]) <> 0 then raise exception 'FAIL 14g: a handed-back claim still counts'; end if;
+    select count(*) into n from public.automation_claim_events('default', now(), 10, 120, ids[1]);
+    update public.automation_events set status = 'done', processed_at = now(), lease_until = null, error = null where id = ids[1] and status = 'processing';
+    if n <> 1 or (select status from public.automation_events where id = ids[1]) <> 'done' then raise exception 'FAIL 14h: claim by id + done failed'; end if;
+    -- step E and its rollback (the exact statements of Part 2 step E)
+    update public.automation_state set phase4_compat = false where business_id = public.current_business_id();
+    insert into public.automation_wanted (business_id, event_type) values ('default', 'contact_changed') on conflict do nothing;
+    update public.automation_state set wanted_hash = 'contact_changed' where business_id = public.current_business_id();
+    if (select phase4_compat from public.automation_state where business_id = 'default') is not false then raise exception 'FAIL 14i: step E did not switch'; end if;
+    update public.automation_state set phase4_compat = true, wanted_hash = null where business_id = public.current_business_id();
+    delete from public.automation_wanted where business_id = public.current_business_id();
+    update public.automation_events set status = 'done', processed_at = now(), lease_until = null, error = 'event store switched off (step E rolled back)'
+     where business_id = public.current_business_id() and status in ('new', 'processing');
+    if (select phase4_compat from public.automation_state where business_id = 'default') is not true
+       or exists (select 1 from public.automation_wanted where business_id = 'default')
+       or exists (select 1 from public.automation_events where business_id = 'default' and status in ('new', 'processing')) then
+      raise exception 'FAIL 14j: the step-E rollback left the event store half on';
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 14 — event-store rows fit (scheduler / app events, contactless run), trigger log once, daily totals, claim / hand back / done, step E + rollback';
+end $$;
+
+-- 15. The capture key formats the matcher relies on (the engine's registry eventKey) with the switch on: a captured
+--     'Lead changed' event is '<id>:chg:<field>:<txid>' with available_at = at (no settle), claimable at once.
+do $$
+declare c uuid; ev record; n integer;
+begin
+  begin
+    select id into c from public.contacts order by created_at desc nulls last limit 1;
+    if c is null then raise exception 'FAIL 15: staging has no contacts (run staging-seed-demo.sql first)'; end if;
+    insert into public.automation_state (business_id) values ('default') on conflict (business_id) do nothing;
+    update public.automation_state set phase4_compat = false where business_id = 'default';
+    insert into public.automation_wanted (business_id, event_type) values ('default', 'contact_changed') on conflict do nothing;
+    update public.contacts set postcode = 'S2E1' where id = c;
+    select * into ev from public.automation_events where contact_id = c and at = now() and type = 'contact_changed' and ctx ->> 'field' = 'postcode';
+    if ev.id is null or ev.event_key <> c::text || ':chg:postcode:' || txid_current()::text or ev.available_at <> ev.at or ev.record_kind <> 'contact'
+       or ev.record_id <> c::text or ev.status <> 'new' then
+      raise exception 'FAIL 15a: the captured event is not what the matcher reads: %', row_to_json(ev);
+    end if;
+    select count(*) into n from public.automation_claim_events('default', now(), 10, 120, null, 'contact', c::text);
+    if n < 1 then raise exception 'FAIL 15b: the captured event was not claimable at once'; end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 15 — a captured Lead changed event has the engine''s key and is due at once';
+end $$;
+
+select 'stage2 phase 2 · G2.1 staging checks done';
+
+-- 16. (G2.2) What the logic steps write fits the Part-1 tables (no new SQL: G2.2 uses Part 1 only):
+--     Add to workflow — automation_enroll with no trigger, source 'workflow', the parent / cause run, chain depth 1, due
+--     now, the trigger data, and its 'enroll' row; Split — the path kept in the re-entry ledger (the engine's update of
+--     splits); the step rows of the new steps ('executed', 'branch', 'jumped', 'skipped', 'waiting' with detail and
+--     next_at; the same step twice is fine); Remove from workflow — a waiting run → 'removed' (exit_reason, reason, the
+--     lock given back) with its exit row, a running run flagged (remove_requested) so the engine's guarded write
+--     (status = 'running' and remove_requested = false) changes nothing and its removed write ends it; a pause range
+--     wakes only the held runs of ITS workflows; "Mark as read" through automation_apply (op 'read').
+do $$
+declare a uuid; b uuid; c uuid; x text; r1 uuid; r2 uuid; p uuid; n integer; got jsonb; later timestamptz := now() + interval '9 days';
+begin
+  begin
+    select id into c from public.contacts order by created_at desc nulls last limit 1;
+    if c is null then raise exception 'FAIL 16: staging has no contacts (run staging-seed-demo.sql first)'; end if;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 16a', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 16b', false, '{"type":"newLead","params":{}}', '[]') returning id into b;
+    -- the parent run (a trigger run, as the matcher enrols it) and the run it adds to workflow b
+    x := public.automation_enroll('default', a, 1, 1, 't1', 'stage2-check-16:p', 'newLead', now(), 'contact', c::text, c, c::text, c::text, 'off', 'n1',
+           '{}'::jsonb, 'trigger', 0, null, null, false, now());
+    if x not like 'enrolled:%' then raise exception 'FAIL 16a: the parent run was not enrolled (%)', x; end if;
+    r1 := substr(x, 10)::uuid;
+    x := public.automation_enroll('default', b, 1, 1, null, 'wf:' || r1::text || ':n1:0', 'newLead', now(), 'contact', c::text, c, c::text, c::text, 'off', 'n1',
+           '{"form":"website"}'::jsonb, 'workflow', 1, r1, r1, false, now(), now());
+    if x not like 'enrolled:%' then raise exception 'FAIL 16b: Add to workflow did not enrol (%)', x; end if;
+    r2 := substr(x, 10)::uuid;
+    if not exists (select 1 from public.automation_runs r where r.id = r2 and r.source = 'workflow' and r.parent_run_id = r1 and r.cause_run_id = r1 and r.chain_depth = 1
+                    and r.trigger_id is null and r.cursor_step = 'n1' and r.context = '{"form":"website"}'::jsonb and r.due_at <= now() and r.active_lock = c::text)
+       or not exists (select 1 from public.automation_log l where l.run_id = r2 and l.row_kind = 'enroll' and l.step_id = 'workflow' and l.trigger_id is null) then
+      raise exception 'FAIL 16c: the added run or its enroll row is not what the engine writes';
+    end if;
+    -- the same step again (a retry after a crash) is the same event key: duplicate_event, never a second run
+    x := public.automation_enroll('default', b, 1, 1, null, 'wf:' || r1::text || ':n1:0', 'newLead', now(), 'contact', c::text, c, c::text, null, 'off', 'n1',
+           '{}'::jsonb, 'workflow', 1, r1, r1, false, now(), now());
+    if x <> 'duplicate_event' then raise exception 'FAIL 16d: a retried Add to workflow gave % (want duplicate_event)', x; end if;
+    -- Split: the path kept in the ledger row automation_enroll wrote
+    update public.automation_enrollment_keys set splits = splits || '{"n3":"p1"}'::jsonb where automation_id = a and enrollment_key = c::text;
+    get diagnostics n = row_count;
+    if n <> 1 or (select splits ->> 'n3' from public.automation_enrollment_keys where automation_id = a and enrollment_key = c::text) <> 'p1' then
+      raise exception 'FAIL 16e: the Split path was not kept in the ledger';
+    end if;
+    -- the step rows of the new steps
+    insert into public.automation_log (business_id, run_id, step_id, row_kind, status, reason, automation_id, automation_name, record_kind, record_id, contact_id,
+                                       trigger_id, step_type, step_name, "loop", seq, detail, next_at, at)
+    values ('default', r1, 'n1', 'step', 'executed', null, a, 'stage2 check 16a', 'contact', c::text, c, 't1', 'add_to_workflow', 'Add to workflow', 0, 1,
+            jsonb_build_object('workflow_id', b, 'run_id', r2), null, now()),
+           ('default', r1, 'n1', 'step', 'executed', null, a, 'stage2 check 16a', 'contact', c::text, c, 't1', 'add_to_workflow', 'Add to workflow', 0, 1,
+            jsonb_build_object('workflow_id', b, 'result', 'duplicate_event'), null, now()),
+           ('default', r1, 'n3', 'step', 'branch', null, a, 'stage2 check 16a', 'contact', c::text, c, 't1', 'split', 'Split', 0, 2,
+            '{"path_id":"p1","path_name":"A","percent":50,"kept":false}'::jsonb, null, now()),
+           ('default', r1, 'n4', 'step', 'jumped', null, a, 'stage2 check 16a', 'contact', c::text, c, 't1', 'goto', 'Go to', 0, 3, '{"to":"n1","visits":1}'::jsonb, null, now()),
+           ('default', r1, 'n5', 'step', 'skipped', 'target is a Draft', a, 'stage2 check 16a', 'contact', c::text, c, 't1', 'add_to_workflow', 'Add to workflow', 1, 4,
+            '{"workflow_id":"x"}'::jsonb, null, now()),
+           ('default', r1, 'n6', 'step', 'waiting', 'paused until 2035-01-06T09:00:00.000Z', a, 'stage2 check 16a', 'contact', c::text, c, 't1', 'send_email', 'Send email', 1, 5,
+            '{"paused_until":"2035-01-06T09:00:00.000Z"}'::jsonb, now() + interval '1 day', now());
+    -- Remove from workflow ("another": workflow b): the lead's waiting run of b → removed, its lock given back, one exit row
+    update public.automation_runs set status = 'removed', exit_reason = 'removed_by_external_action', reason = 'Removed by External Workflow Action',
+           active_lock = null, finished_at = now(), updated_at = now(), watch = null, recheck = false
+     where business_id = 'default' and contact_id = c and automation_id = b and status = 'waiting' and id <> r1;
+    get diagnostics n = row_count;
+    if n <> 1 or (select active_lock from public.automation_runs where id = r2) is not null then raise exception 'FAIL 16f: the removed run (% rows) kept its lock', n; end if;
+    insert into public.automation_log (business_id, run_id, step_id, row_kind, status, reason, channel, audience, automation_id, automation_name, record_kind, record_id,
+                                       contact_id, trigger_id, version, revision, seq, "loop", detail, at)
+    values ('default', r2, 'n1', 'exit', 'removed', 'Removed by External Workflow Action', null, null, b, 'stage2 check 16b', 'contact', c::text, c, null, 1, 1, 0, 0,
+            jsonb_build_object('exit_reason', 'removed_by_external_action', 'by_run', r1), now());
+    -- a running run flagged: the engine's guarded write changes nothing, its removed write ends it
+    update public.automation_runs set status = 'running', lease_until = now() + interval '2 minutes' where id = r1;
+    update public.automation_runs set remove_requested = true where business_id = 'default' and contact_id = c and status = 'running' and automation_id <> b;
+    update public.automation_runs set status = 'waiting', due_at = now() + interval '1 hour' where id = r1 and status = 'running' and remove_requested = false;
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAIL 16g: the guarded write changed a run that was asked to stop'; end if;
+    update public.automation_runs set status = 'removed', exit_reason = 'removed_by_external_action', reason = 'Removed by External Workflow Action', finished_at = now(),
+           updated_at = now(), lease_until = null, watch = null, recheck = false, active_lock = null
+     where id = r1 and status = 'running' and remove_requested = true;
+    get diagnostics n = row_count;
+    if n <> 1 or (select active_lock from public.automation_runs where id = r1) is not null then raise exception 'FAIL 16h: the flagged run did not end removed'; end if;
+    -- a pause wakes only the held runs of its own workflows
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, contact_id, anchor_at, due_at, status, watch)
+    values (a, 1, 'pz-a', 'newLead', now(), 'contact', c::text, c, now(), later, 'waiting', array['pause']),
+           (b, 1, 'pz-b', 'newLead', now(), 'contact', c::text, c, now(), later, 'waiting', array['pause']);
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2035-01-05T09:00', '2035-01-06T09:00', array[a]) returning id into p;
+    update public.automation_pauses set end_wall = '2035-01-05T18:00' where id = p;
+    if (select due_at from public.automation_runs where automation_id = a and event_key = 'pz-a') > now()
+       or (select due_at from public.automation_runs where automation_id = b and event_key = 'pz-b') <> later then
+      raise exception 'FAIL 16i: a changed pause woke another workflow''s held run (or not its own)';
+    end if;
+    -- "Conversations: Mark as read": op read through automation_apply, with the run's cause
+    got := public.automation_apply('default', r1::text || ':0:' || a::text, 'contact', c::text, '[{"op":"read"}]'::jsonb);
+    if coalesce((got ->> 'ok')::boolean, false) is not true or (got -> 'applied' -> 0 ->> 'op') is distinct from 'read' then
+      raise exception 'FAIL 16j: mark as read gave %', got;
+    end if;
+    if (select last_read_at from public.contacts where id = c) is null then raise exception 'FAIL 16k: mark as read left last_read_at empty'; end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 16 — Add to workflow run + enroll row + retry, Split ledger, the new step rows, Remove (waiting / running flagged), pause wake per workflow, mark as read';
+end $$;
+
+select 'stage2 phase 2 · G2.2 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 2 · G2.3 — record actions and the inbound webhook (design §3.8–§3.11, §8.1 #18, §8.2). STAGING ONLY, after
+-- PART 2 · G2.3 of .claude/sql/stage2-automations.sql ran there. Same rules: every block undoes what it wrote
+-- ('__undo__'), prints "PASS 17" / "PASS 18", or stops with "FAIL …".
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+-- 17. (G2.3) The lead card's atomic edits and automation_apply's writes make THE SAME events, the workflow's with its
+--     cause: contact_tags_edit (add in any case = one tag; remove in any case) as a signed-in owner (RLS, security
+--     invoker), contact_note_add (idempotent on the note id; any id up to 128 characters without control characters,
+--     e.g. an imported 'ghl:123/x') / contact_note_remove, then the same writes through
+--     automation_apply ('tags', 'note' {id, text, by 'Automation: <name>', at}, 'set'); "Note added" captured; a tag a
+--     workflow added survives the card's later edit of another tag (the E53 case); a team task with no lead.
+do $$
+declare a uuid; c uuid; r uuid := gen_random_uuid(); owner_id uuid; res jsonb; tg text[]; nl jsonb; n integer; k1 text; k2 text;
+begin
+  begin
+    select id into c from public.contacts order by created_at desc nulls last limit 1;
+    if c is null then raise exception 'FAIL 17: staging has no contacts (run staging-seed-demo.sql first)'; end if;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 17', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    update public.contacts set tags = array['Callback'], customer_notes = '[]'::jsonb where id = c;
+    insert into public.automation_wanted (business_id, event_type) values ('default', 'contact_tag'), ('default', 'note_added'), ('default', 'contact_changed')
+      on conflict do nothing;
+    if public.contact_tags_merge(array['VIP', 'Callback'], array['vip', 'Complaint'], array['callback']) is distinct from array['VIP', 'Complaint'] then
+      raise exception 'FAIL 17a: contact_tags_merge gave % (want {VIP,Complaint} = the app''s leadTagsMerge)', public.contact_tags_merge(array['VIP', 'Callback'], array['vip', 'Complaint'], array['callback']);
+    end if;
+    -- the app (a signed-in owner, RLS decides): one tag added, the same tag in another case is not added twice
+    begin
+      execute 'select id from public.profiles where role = ''owner'' order by id limit 1' into owner_id;
+    exception when others then owner_id := null;
+    end;
+    if owner_id is not null then
+      perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', owner_id::text, true);
+      execute 'set local role authenticated';
+    else
+      raise notice 'NOTE 17: no owner profile on staging; the card''s edits ran as the SQL editor (RLS not exercised)';
+    end if;
+    tg := public.contact_tags_edit(c, array['VIP', 'vip'], '{}'::text[]);
+    tg := public.contact_tags_edit(c, '{}'::text[], array['CALLBACK']);
+    nl := public.contact_note_add(c, '{"id":"s2c17n1","text":"Gate 12","by":"Stage2","at":"2026-10-15T01:00:00.000Z"}'::jsonb);
+    nl := public.contact_note_add(c, '{"id":"s2c17n1","text":"again","by":"Stage2","at":"2026-10-15T01:00:00.000Z"}'::jsonb);
+    if owner_id is not null then execute 'reset role'; end if;
+    if tg is distinct from array['VIP'] or jsonb_array_length(nl) <> 1 or nl -> 0 ->> 'text' <> 'Gate 12' then
+      raise exception 'FAIL 17b: the card''s edits gave tags % notes %', tg, nl;
+    end if;
+    select count(*) into n from public.automation_events where contact_id = c and at = now() and cause_run_id is null and (
+      (type = 'contact_tag' and event_key like c::text || ':tag:+:VIP:%') or (type = 'contact_tag' and event_key like c::text || ':tag:-:Callback:%')
+      or (type = 'note_added' and event_key = c::text || ':note:s2c17n1'));
+    if n <> 3 then raise exception 'FAIL 17c: the card''s edits made % of the 3 events (tag +VIP, tag -Callback, note added)', n; end if;
+    -- the same writes by a workflow: the same event types and key shapes, each with the run's cause (depth 0 → 1)
+    res := public.automation_apply('default', r::text || ':0:' || a::text, 'contact', c::text, jsonb_build_array(
+      jsonb_build_object('op', 'tags', 'add', jsonb_build_array('Complaint', 'vip')), jsonb_build_object('op', 'tags', 'remove', jsonb_build_array('vip')),
+      jsonb_build_object('op', 'note', 'text', 'Called by the workflow'), jsonb_build_object('op', 'set', 'field', 'postcode', 'value', 'S2C17')));
+    if (res ->> 'ok')::boolean is not true or jsonb_array_length(res -> 'applied') <> 4 then raise exception 'FAIL 17d: apply gave %', res; end if;
+    select tags, customer_notes into tg, nl from public.contacts where id = c;
+    if tg is distinct from array['Complaint'] or jsonb_array_length(nl) <> 2 or nl -> 1 ->> 'by' <> 'Automation: stage2 check 17' or nl -> 1 ->> 'id' !~ '^wf[0-9a-f]{32}$' then
+      raise exception 'FAIL 17e: after apply tags % notes %', tg, nl;
+    end if;
+    select count(*) into n from public.automation_events where contact_id = c and at = now() and cause_run_id = r and cause_automation_id = a and chain_depth = 1 and (
+      (type = 'contact_tag' and event_key like c::text || ':tag:+:Complaint:%') or (type = 'contact_tag' and event_key like c::text || ':tag:-:VIP:%')
+      or (type = 'note_added' and event_key = c::text || ':note:' || (nl -> 1 ->> 'id')) or (type = 'contact_changed' and event_key like c::text || ':chg:postcode:%'));
+    if n <> 4 then raise exception 'FAIL 17f: the workflow''s writes made % of the 4 events with its cause', n; end if;
+    -- E53: the card removes ITS tag later; the workflow's tag stays (a whole-list save would have erased it)
+    tg := public.contact_tags_edit(c, array['Refunded'], '{}'::text[]);
+    tg := public.contact_tags_edit(c, '{}'::text[], array['Refunded']);
+    if tg is distinct from array['Complaint'] then raise exception 'FAIL 17g: the card''s edit lost the workflow''s tag (%)', tg; end if;
+    nl := public.contact_note_remove(c, 's2c17n1');
+    if jsonb_array_length(nl) <> 1 or nl -> 0 ->> 'by' <> 'Automation: stage2 check 17' then raise exception 'FAIL 17h: the note delete took the wrong note (%)', nl; end if;
+    -- a team task with no lead (a Scheduler run): allowed, no activity line; a lead write without a lead: wrong_kind
+    res := public.automation_apply('default', r::text || ':0:' || a::text, 'none', r::text, jsonb_build_array(
+      jsonb_build_object('op', 'task', 'board', 'ron', 'title', 'stage2 check 17 task'), jsonb_build_object('op', 'tags', 'add', jsonb_build_array('x'))));
+    if jsonb_array_length(res -> 'applied') <> 1 or res -> 'skipped' -> 0 ->> 'reason' <> 'wrong_kind'
+       or not exists (select 1 from public.tasks where title = 'stage2 check 17 task' and contact_id is null and created_by = 'Automation: stage2 check 17') then
+      raise exception 'FAIL 17i: the no-lead task / lead write gave %', res;
+    end if;
+    -- any non-empty note id up to 128 characters without control characters: the Undo of a deleted imported note puts it
+    -- back as it was (its empty time too); an empty id, one of 129 characters or one with a control character is refused
+    nl := public.contact_note_add(c, '{"id":"ghl:123/x","text":"Imported","by":"","at":""}'::jsonb);
+    if nl -> -1 ->> 'id' is distinct from 'ghl:123/x' or nl -> -1 ->> 'text' is distinct from 'Imported' or nl -> -1 ->> 'at' is distinct from '' then
+      raise exception 'FAIL 17j: a note with a foreign id was not kept as it was (%)', nl;
+    end if;
+    nl := public.contact_note_add(c, jsonb_build_object('id', repeat('n', 128), 'text', 'Long id'));
+    if nl -> -1 ->> 'id' is distinct from repeat('n', 128) then raise exception 'FAIL 17j: a 128-character note id was not kept (%)', nl -> -1; end if;
+    foreach k1 in array array['', repeat('n', 129), E'a\nb', E'a\tb'] loop
+      begin
+        perform public.contact_note_add(c, jsonb_build_object('id', k1, 'text', 'x'));
+        raise exception 'FAIL 17j: a note with the id % was accepted', to_jsonb(k1);
+      exception when raise_exception then if sqlerrm not like 'a note needs%' then raise; end if;
+      end;
+    end loop;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 17 — the card''s atomic tag / note edits and automation_apply make the same events (the workflow''s with its cause); a workflow''s tag survives the card; a no-lead task; any note id up to 128 characters';
+end $$;
+
+-- 18. (G2.3) The inbound webhook's link counter (automation_hook_hit): 1, 2, … within a minute, back to 1 the next
+--     minute, -1 for a revoked link or another business; the secrets table stays unreadable for a signed-in person; the
+--     event the function writes for a call fits automation_events (source 'hook', a run with no lead).
+do $$
+declare a uuid; h uuid; x integer; y integer; z integer; owner_id uuid; n integer;
+begin
+  begin
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 18', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automation_hooks (automation_id, trigger_id, token_hint) values (a, 't1', 'abcd') returning id into h;
+    insert into public.automation_hook_secrets (hook_id, token_hash) values (h, repeat('a', 64));
+    x := public.automation_hook_hit('default', h, now(), 60);
+    y := public.automation_hook_hit('default', h, now() + interval '10 seconds', 60);
+    z := public.automation_hook_hit('default', h, now() + interval '2 minutes', 60);
+    if x <> 1 or y <> 2 or z <> 1 then raise exception 'FAIL 18a: the link counter gave %, %, % (want 1, 2, 1)', x, y, z; end if;
+    if public.automation_hook_hit('other', h, now(), 60) <> -1 then raise exception 'FAIL 18b: another business counted this link'; end if;
+    update public.automation_hooks set revoked_at = now() where id = h;
+    if public.automation_hook_hit('default', h, now(), 60) <> -1 then raise exception 'FAIL 18c: a revoked link still counts'; end if;
+    insert into public.automation_events (business_id, type, event_key, record_kind, record_id, contact_id, at, available_at, ctx, source)
+    values ('default', 'inbound_webhook', 'hook:' || h::text || ':' || gen_random_uuid()::text, 'hook', h::text, null, now(), now(),
+            jsonb_build_object('email', 'x@example.invalid', '_hook', h::text, '_wf', a::text, '_trigger', 't1'), 'hook');
+    begin
+      execute 'select id from public.profiles where role = ''owner'' order by id limit 1' into owner_id;
+    exception when others then owner_id := null;
+    end;
+    if owner_id is not null then
+      perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', owner_id::text, true);
+      execute 'set local role authenticated';
+      begin
+        execute 'select count(*) from public.automation_hook_secrets' into n;
+        raise exception 'FAIL 18d: a signed-in owner read % hook secrets', n;
+      exception when insufficient_privilege then null;
+      end;
+      begin
+        perform public.automation_hook_hit('default', h, now(), 60);
+        raise exception 'FAIL 18e: a signed-in person may call automation_hook_hit';
+      exception when insufficient_privilege then null;
+      end;
+      execute 'reset role';
+    else
+      raise notice 'NOTE 18: no owner profile on staging; the signed-in part was skipped';
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 18 — the inbound link counter (per minute, revoked, business), secrets unreadable, the hook event fits';
+end $$;
+
+select 'stage2 phase 2 · G2.3 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 2 · G2.4 — the guards on the doc, save / publish / migrate, Needs review, the ROLLBACK list (design §2.9 Part 2,
+-- §3.13, §3.16, §8.2 item 24). STAGING ONLY, after PART 2 · G2.4 of .claude/sql/stage2-automations.sql ran there. Same
+-- rules: every block undoes what it wrote ('__undo__'), prints "PASS 19" / "PASS 20" / "PASS 21", or stops with "FAIL …".
+-- (Part 3's "a client update of enabled / definition fails and DELETE affects 0 rows" comes with Part 3, phase 3.)
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+-- 19. (G2.4) The guard v2 (§8.2 #24): insert → Draft always (also a client insert with enabled = true, origin pinned);
+--     a guarded channel added to a Published row → Draft (a customer email, a PAUSED customer step, an UNCONNECTED
+--     webhook); a new shape → version + 1, armed_at moved, the waiting run cancelled + its exit row + its key deleted;
+--     a filter-only change while Published → armed_at moved, version kept; new words → neither; the migration keeps
+--     version / armed_at / enabled; a write of trigger / steps on an upgraded row is refused; a soft delete → Draft with
+--     deleted_by; origin / revision / published_* / enrolled_total kept for the app's roles; automation_enroll still counts.
+--     Since the phase-2 review: publish refuses another revision than the one checked (p_expected); a re-arm keeps
+--     switched_on_at; the migration is a compare-and-set on trigger / steps; an upgraded row's trigger change is a new
+--     version (phase 4's rule); the app's part runs with the function's GUCs cleared (the guard's own pins, untrusted).
+do $$
+declare a uuid; b uuid; c uuid; r uuid; res jsonb; v integer; v2 integer; t0 timestamptz; t1 timestamptz; en boolean; n integer; owner_id uuid; x text; rv integer;
+  week_ago timestamptz := now() - interval '7 days';
+  tr jsonb := '[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}]';
+  push jsonb := '{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead"},"out":{"next":null}}';
+  d1 jsonb; d2 jsonb;
+begin
+  begin
+    d1 := jsonb_build_object('schema', 2, 'seq', 5, 'entry', 'w1', 'triggers', tr, 'nodes', jsonb_build_object(
+      'w1', '{"kind":"wait","type":"period","config":{"n":1,"unit":"hours"},"out":{"next":"n1"}}'::jsonb, 'n1', push));
+    res := public.automation_save('default', null, null, 'stage2 check 19', d1, '{"reentry":"off"}', null, null, 'user', 'create', false, '{}', null, 'Stage2');
+    a := (res ->> 'id')::uuid;
+    if (res ->> 'ok')::boolean is not true or (res ->> 'enabled')::boolean or (res ->> 'revision')::int <> 1 then raise exception 'FAIL 19a: a new workflow %', res; end if;
+    -- publish checks the revision the function validated (p_expected): another one → conflict, nothing switched on
+    if (public.automation_publish('default', a, true, 2, null, 'Stage2')) ->> 'reason' <> 'conflict' or (select enabled from public.automations where id = a) then
+      raise exception 'FAIL 19b0: a publish of another revision than the one checked switched it on';
+    end if;
+    res := public.automation_publish('default', a, true, 1, null, 'Stage2');
+    select version, armed_at, enabled, revision into v, t0, en, rv from public.automations where id = a;
+    if not en or t0 is null or rv <> 1 or (res ->> 'revision')::int <> 1 or (select switched_on_at from public.automations where id = a) is distinct from t0 then
+      raise exception 'FAIL 19b: publish gave % (enabled %, armed %, revision %, switched_on_at = armed_at)', res, en, t0, rv;
+    end if;
+    -- a waiting run with its key: a new shape cancels it at once
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status, cursor_step, enrollment_key, active_lock)
+    values (a, v, 'stage2-check-19', 'newLead', now(), 'contact', 'c19', now(), now() + interval '1 hour', 'waiting', 'w1', 'c19', 'c19') returning id into r;
+    insert into public.automation_enrollment_keys (automation_id, enrollment_key) values (a, 'c19');
+    -- now() is the same all through this check (one transaction): pretend it was armed a week ago (the guard is off only
+    -- for that one update; everything is rolled back at the end), so "re-armed" = armed_at is now() again
+    execute 'alter table public.automations disable trigger automations_guard';
+    update public.automations set armed_at = week_ago, switched_on_at = week_ago where id = a;
+    execute 'alter table public.automations enable trigger automations_guard';
+    t0 := week_ago;
+    -- filter only (a published workflow): armed_at moves, switched_on_at stays (the engine's "switched off and on
+    -- again" marker: a re-arm never stops a run), the version and the run stay
+    res := public.automation_save('default', a, 1, 'stage2 check 19', jsonb_set(d1, '{triggers,0,filters,segments,0,rules}', '[{"field":"source","op":"is","v":"Referral"}]'),
+                                  '{"reentry":"off"}', null, null, 'user', 'save', false, '{}', null, 'Stage2');
+    select version, armed_at into v2, t1 from public.automations where id = a;
+    if v2 <> v or t1 <> now() or (res ->> 'arm_changed')::boolean is not true or (res ->> 'shape_changed')::boolean or (select status from public.automation_runs where id = r) <> 'waiting'
+       or (select switched_on_at from public.automations where id = a) <> week_ago then
+      raise exception 'FAIL 19c: a filter edit gave version %→%, armed moved %, switched_on_at moved, or res %', v, v2, t1 <> t0, res;
+    end if;
+    -- new words only: neither (armed a week ago again first)
+    execute 'alter table public.automations disable trigger automations_guard';
+    update public.automations set armed_at = week_ago where id = a;
+    execute 'alter table public.automations enable trigger automations_guard';
+    d2 := jsonb_set(d1, '{nodes,n1,config,title}', '"Other words"');
+    d2 := jsonb_set(d2, '{triggers}', (select definition -> 'triggers' from public.automations where id = a));
+    res := public.automation_save('default', a, 2, 'stage2 check 19', d2, '{"reentry":"off"}', null, null, 'user', 'save', false, '{}', null, 'Stage2');
+    if (res ->> 'shape_changed')::boolean or (res ->> 'arm_changed')::boolean or (select armed_at from public.automations where id = a) <> week_ago then raise exception 'FAIL 19d: new words gave %', res; end if;
+    -- a new shape: version + 1, armed_at now, the run cancelled with its exit row, its key gone
+    res := public.automation_save('default', a, 3, 'stage2 check 19', jsonb_set(jsonb_set(d2, '{entry}', '"n1"'), '{nodes}', jsonb_build_object('n1', push)),
+                                  '{"reentry":"off"}', null, null, 'user', 'save', false, '{}', null, 'Stage2');
+    if (res ->> 'version')::int <> v + 1 or (res ->> 'shape_changed')::boolean is not true or (select armed_at from public.automations where id = a) <> now()
+       or not exists (select 1 from public.automation_runs where id = r and status = 'cancelled' and exit_reason = 'automation_changed' and reason = 'automation changed' and active_lock is null)
+       or not exists (select 1 from public.automation_log where run_id = r and row_kind = 'exit' and status = 'removed')
+       or exists (select 1 from public.automation_enrollment_keys where automation_id = a and enrollment_key = 'c19') then
+      raise exception 'FAIL 19e: a new shape gave % (the run, its exit row or its key)', res;
+    end if;
+    -- a guarded channel while Published → Draft: a customer email; a PAUSED one; an UNCONNECTED webhook
+    rv := (res ->> 'revision')::int;
+    res := public.automation_save('default', a, rv, 'stage2 check 19', jsonb_set(d2, '{nodes}', jsonb_build_object('n1', push,
+             'x1', '{"kind":"action","type":"send_email","disabled":true,"config":{"subject":"a","body":"b"},"out":{"next":null}}'::jsonb)), '{"reentry":"off"}', null, null, 'user', 'save', false, '{}', null, 'Stage2');
+    if (res ->> 'enabled')::boolean then raise exception 'FAIL 19f: a paused, unconnected customer email left it Published'; end if;
+    rv := (res ->> 'revision')::int;
+    perform public.automation_publish('default', a, true, rv, null, 'Stage2');
+    res := public.automation_save('default', a, rv, 'stage2 check 19', jsonb_set(d2, '{nodes}', jsonb_build_object('n1', push,
+             'x1', '{"kind":"action","type":"send_email","disabled":true,"config":{"subject":"a","body":"b"},"out":{"next":null}}'::jsonb,
+             'h1', '{"kind":"action","type":"webhook","config":{"url":"https://example.com/x"},"out":{"next":null}}'::jsonb)), '{"reentry":"off"}', null, null, 'user', 'save', false, '{}', null, 'Stage2');
+    if (res ->> 'enabled')::boolean then raise exception 'FAIL 19g: an unconnected webhook left it Published'; end if;
+    if (select audience from public.automations where id = a) <> 'customer' then raise exception 'FAIL 19h: the audience is not customer'; end if;
+    if (public.automation_save('default', a, 1, 'x', d1, '{}', null, null, 'user', 'save', false, '{}', null, null)) ->> 'reason' <> 'conflict' then raise exception 'FAIL 19i: an old revision was not a conflict'; end if;
+    -- migration keeps version / armed_at / enabled; a phase-4 write on an upgraded row is refused
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 19 v1', false, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]') returning id into b;
+    update public.automations set enabled = true where id = b;
+    select version, armed_at, revision into v, t0, rv from public.automations where id = b;
+    -- compare-and-set: steps other than the ones the doc was made from (an old tab wrote in between) → not migrated
+    if (public.automation_migrate_row('default', b, '{"type":"newLead","params":{}}', '[]', jsonb_build_object('schema', 2, 'seq', 1, 'entry', 'p1', 'triggers', tr, 'nodes', jsonb_build_object('p1', push)),
+          '{"reentry":"legacy_always"}', '{}')) ->> 'migrated' <> 'false' or (select definition from public.automations where id = b) is not null then
+      raise exception 'FAIL 19j0: a migration from steps that are not the row''s any more was written';
+    end if;
+    res := public.automation_migrate_row('default', b, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]',
+             jsonb_build_object('schema', 2, 'seq', 1, 'entry', 'p1', 'triggers', tr, 'nodes', jsonb_build_object('p1', push)), '{"reentry":"legacy_always"}', '{}');
+    if (res ->> 'migrated')::boolean is not true or (select (version, armed_at, enabled, revision) from public.automations where id = b) is distinct from (v, t0, true, rv + 1) then
+      raise exception 'FAIL 19j: the migration gave % (version / armed_at / enabled must stay, revision + 1)', res;
+    end if;
+    if (public.automation_migrate_row('default', b, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]',
+          jsonb_build_object('schema', 2, 'seq', 0, 'entry', null, 'triggers', '[]'::jsonb, 'nodes', '{}'::jsonb), '{}', '{}')) ->> 'migrated' <> 'false' then
+      raise exception 'FAIL 19k: a second migration of the same row changed it';
+    end if;
+    begin
+      update public.automations set steps = '[]' where id = b;
+      raise exception 'FAIL 19l: a phase-4 write on an upgraded row was accepted';
+    exception when raise_exception then if sqlerrm not like 'This workflow was upgraded%' then raise; end if;
+    end;
+    -- automation_enroll still counts (the engine's counter is not the app's)
+    x := public.automation_enroll('default', b, v, rv + 1, 't1', 'k19', 'newLead', now(), 'contact', 'c19b', null, 'c19b', null, 'legacy_always', 'p1', '{}', 'trigger', 0, null, null, false, now());
+    if x not like 'enrolled:%' or (select enrolled_total from public.automations where id = b) <> 1 then raise exception 'FAIL 19m: automation_enroll gave % / the counter did not move', x; end if;
+    -- an upgraded row (re-entry legacy_always, still run as phase 4): a trigger change is a new version as in phase 4,
+    -- its waiting run stops "automation changed"; new words on it are neither
+    select version, revision into v, rv from public.automations where id = b;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status, cursor_step)
+    values (b, v, 'stage2-check-19q', 'newLead', now(), 'contact', 'c19q', now(), now() + interval '1 hour', 'waiting', 'p1') returning id into r;
+    res := public.automation_save('default', b, rv, 'stage2 check 19 v1', jsonb_build_object('schema', 2, 'seq', 1, 'entry', 'p1', 'nodes', jsonb_build_object('p1', push),
+             'triggers', jsonb_set(tr, '{0,filters,segments,0,rules}', '[{"field":"source","op":"is","v":"Referral"}]')), '{"reentry":"legacy_always"}', null, null, 'user', 'save', false, '{}', null, 'Stage2');
+    if (res ->> 'version')::int <> v + 1 or (res ->> 'shape_changed')::boolean is not true
+       or not exists (select 1 from public.automation_runs where id = r and status = 'cancelled' and exit_reason = 'automation_changed') then
+      raise exception 'FAIL 19q: a trigger change on an upgraded row gave % (want a new version, its run stopped "automation changed")', res;
+    end if;
+    -- the signed-in part below must meet the guard as the app does: no function GUC left over from the calls above
+    -- (automation.via = 'fn' would make every write trusted and skip the guard's own pins)
+    perform set_config('automation.via', '', true);
+    perform set_config('automation.migrating', '', true);
+    -- the app's roles: an insert is a Draft with origin user; pinned columns; a soft delete → Draft with deleted_by
+    begin
+      execute 'select id from public.profiles where role = ''owner'' order by id limit 1' into owner_id;
+    exception when others then owner_id := null;
+    end;
+    if owner_id is null then
+      raise notice 'NOTE 19: no owner profile on staging; the signed-in part was skipped';
+    elsif not has_table_privilege('authenticated', 'public.automations', 'INSERT') then
+      -- after PART 3 · G3.4 an app insert / a write of enabled or origin & co. is refused before the guard runs
+      raise notice 'NOTE 19: PART 3 · G3.4 is applied (the app''s roles can''t insert or write enabled / origin & co. any more); PASS 26 checks the app''s writes';
+    else
+      begin
+        perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+        perform set_config('request.jwt.claim.sub', owner_id::text, true);
+        execute 'set local role authenticated';
+        insert into public.automations (name, enabled, trigger, steps, origin, revision) values ('stage2 check 19 app', true, '{"type":"newLead","params":{}}',
+          '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]', 'system', 9) returning id into c;
+        if (select (enabled, origin, revision) from public.automations where id = c) is distinct from (false, 'user'::text, 1) then raise exception 'FAIL 19n: an app insert was not a plain Draft'; end if;
+        update public.automations set enabled = true where id = c;
+        update public.automations set origin = 'ai', revision = 50, published_at = now(), enrolled_total = 9 where id = c;
+        if (select (origin, revision, published_at, enrolled_total) from public.automations where id = c) is distinct from ('user'::text, 1, null::timestamptz, 0::bigint) then
+          raise exception 'FAIL 19o: the app changed a pinned column';
+        end if;
+        update public.automations set deleted_at = now() where id = c;
+        if (select (enabled, deleted_by) from public.automations where id = c) is distinct from (false, owner_id) then raise exception 'FAIL 19p: a soft delete did not make a Draft with deleted_by'; end if;
+        execute 'reset role';
+      exception when others then
+        execute 'reset role';
+        raise;
+      end;
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 19 — the guard v2: Draft on insert, guarded channels (paused, unconnected) → Draft, shape / arm / words, the after trigger, migration, refusals, pins';
+end $$;
+
+-- 20. (G2.4) Needs review reads the sweep's codes and the failed runs; the ROLLBACK's list names exactly the rows made
+--     or edited in stage 2 (a migrated row nobody touched is not on it; one edited after the migration and one made
+--     in stage 2 are) — the same query as the commented ROLLBACK block; the ready-made templates' key refuses an
+--     ON CONFLICT on its partial index (42P10: why the function inserts them one by one) and a second insert (23505).
+do $$
+declare a uuid; b uuid; c uuid; res jsonb; listed uuid[]; owner_id uuid; n integer;
+  tr jsonb := '[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}]';
+  doc jsonb := '{"schema":2,"seq":1,"entry":"p1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"p1":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"x"},"out":{"next":null}}}}';
+begin
+  begin
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 20a', false, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]') returning id into a;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 20b', false, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]') returning id into b;
+    -- the function's migrate: the row, then its 'migration' version; v2_migrated_at after all of them
+    perform public.automation_migrate_row('default', a, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]', doc, '{"reentry":"legacy_always"}', '{}');
+    perform public.automation_migrate_row('default', b, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]', doc, '{"reentry":"legacy_always"}', '{}');
+    if exists (select 1 from public.automations where id in (a, b) and definition is null) then raise exception 'FAIL 20-: the two rows were not migrated'; end if;
+    insert into public.automation_versions (automation_id, version_no, revision, version, status, reason, name, definition)
+    select id, 1, revision, version, 'draft', 'migration', name, definition from public.automations where id in (a, b);
+    update public.automation_state set v2_migrated_at = now() + interval '1 second' where business_id = public.current_business_id();
+    -- b is edited in stage 2; c is made in stage 2
+    res := public.automation_save('default', b, (select revision from public.automations where id = b), 'stage2 check 20b', jsonb_set(doc, '{nodes,p1,config,title}', '"edited"'),
+                                  '{"reentry":"legacy_always"}', null, null, 'user', 'save', false, '{}', null, 'Stage2');
+    res := public.automation_save('default', null, null, 'stage2 check 20c', doc, '{"reentry":"off"}', null, null, 'user', 'create', false, '{}', null, 'Stage2');
+    c := (res ->> 'id')::uuid;
+    select array_agg(a2.id order by a2.name) into listed
+      from public.automations a2
+      cross join (select z.v2_migrated_at from public.automation_state z where z.business_id = public.current_business_id()) s
+      left join lateral (select max(v.revision) as rev from public.automation_versions v where v.automation_id = a2.id and v.reason = 'migration') m on true
+     where a2.business_id = public.current_business_id() and a2.definition is not null and a2.deleted_at is null and a2.id in (a, b, c)
+       and (a2.trigger = '{}'::jsonb or m.rev is null or a2.revision > m.rev or s.v2_migrated_at is null or a2.updated_at > s.v2_migrated_at);
+    if listed is distinct from array[b, c] then raise exception 'FAIL 20a: the ROLLBACK would switch off % (want only the edited and the new one)', listed; end if;
+    -- the ready-made templates are plain inserts: Postgres can't take the PARTIAL unique index of automation_templates
+    -- as an ON CONFLICT target (what an upsert through PostgREST sends), and a second insert of a key is a 23505
+    begin
+      insert into public.automation_templates (business_id, key, name, definition) values ('default', 'stage2_check_20', 'x', doc) on conflict (business_id, key) do nothing;
+      raise exception 'FAIL 20t: an ON CONFLICT on the partial template key was accepted (the function''s fake says 42P10)';
+    exception when invalid_column_reference then null;   -- 42P10
+    end;
+    insert into public.automation_templates (business_id, key, name, definition) values ('default', 'stage2_check_20', 'x', doc);
+    begin
+      insert into public.automation_templates (business_id, key, name, definition) values ('default', 'stage2_check_20', 'x', doc);
+      raise exception 'FAIL 20u: a second ready-made template with the same key was accepted';
+    exception when unique_violation then null;
+    end;
+    -- Needs review: the sweep's codes (unacknowledged), then acknowledged
+    update public.automations set list_summary = jsonb_build_object('review', jsonb_build_object('codes', jsonb_build_array('E_UNAVAILABLE'), 'at', now())) where id = a;
+    begin
+      execute 'select id from public.profiles where role = ''owner'' order by id limit 1' into owner_id;
+    exception when others then owner_id := null;
+    end;
+    if owner_id is not null then
+      perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', owner_id::text, true);
+      execute 'set local role authenticated';
+    else
+      raise notice 'NOTE 20: no owner profile on staging; Needs review read as the SQL editor';
+    end if;
+    select count(*) into n from public.automation_needs_review() x where x.automation_id = a and x.problems = '["E_UNAVAILABLE"]'::jsonb and x.failed_runs = 0;
+    if n <> 1 then raise exception 'FAIL 20b: Needs review does not show the stored problem'; end if;
+    perform public.automation_mark_reviewed(a);
+    perform pg_sleep(0.01);
+    select count(*) into n from public.automation_needs_review() x where x.automation_id = a;
+    if n <> 0 then raise exception 'FAIL 20c: an acknowledged problem still shows'; end if;
+    if owner_id is not null then
+      begin
+        perform public.automation_save('default', null, null, 'x', doc, '{}', null, null, 'user', 'create', false, '{}', null, null);
+        raise exception 'FAIL 20d: a signed-in person may call automation_save';
+      exception when insufficient_privilege then null;
+      end;
+      execute 'reset role';
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 20 — the ROLLBACK list (made / edited in stage 2 only), Needs review with the sweep''s codes, the content writes are the service role''s';
+end $$;
+
+-- 21. (G2.4) The SQL shape and arm keys = the engine's defShape / armKey on every pair of fixtures/shape.json (design
+--     §2.8; settings as the function stores them, normWfSettings). The literal below is generated from the fixture
+--     (a test of the engine suite compares the two; regenerate both together).
+-- shape.json (generated): [{"name":"identical","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"keys in another order at every level","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"nodes":{"n8":{"out":{"next":null},"config":{"title":"Call {name} about the quote"},"type":"manual_call","kind":"action"},"n7":{"out":{"next":"n8"},"config":{"ifNotMet":"continue","stages":["booked"]},"name":"Booked?","type":"stage_reached","kind":"goal"},"n6":{"out":{"next":null},"config":{"title":"{name} replied about the quote","to":{"roles":["va"]},"channel":"push"},"type":"internal_notification","kind":"action"},"n5":{"out":{"timeout":"n7","next":"n6"},"config":{"timeout":{"unit":"days","n":3},"channels":["email","chat"]},"name":"Wait for a reply","type":"reply","kind":"wait"},"n4":{"out":{"next":"n5"},"config":{"body":"Hi {first_name}, just checking you got our quote…","subject":"Your {service} quote"},"name":"Quote follow-up","type":"send_email","kind":"action"},"n2":{"out":{"none":null,"b3":"n4"},"config":{"noneName":"None","branches":[{"when":{"segments":[{"rules":[{"v":"quoted","op":"is","field":"stage"},{"op":"true","field":"has_email"}],"match":"all"}],"match":"any"},"name":"Still quoted","id":"b3"}]},"name":"Still quoted?","type":"if_else","kind":"if_else"},"n1":{"out":{"next":"n2"},"config":{"resume":{"until":"17:00","from":"09:00","days":[1,2,3,4,5]},"unit":"days","n":2},"name":"Wait 2 days","type":"period","kind":"wait"}},"triggers":[{"filters":{"segments":[{"rules":[{"v":"quoted","op":"is","field":"stage"}],"match":"all"}],"match":"all"},"name":"Moved to Quoted","type":"stage","id":"t1"},{"filters":{"segments":[{"rules":[{"v":"quote-sent","op":"is","field":"trigger.tag"},{"v":"added","op":"is","field":"trigger.action"}],"match":"all"}],"match":"all"},"name":"Tagged quote-sent","type":"contact_tag","id":"t2"}],"entry":"n1","seq":9,"schema":2},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"names and notes","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Other","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"},"note":"A note"},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"pause a step (disabled)","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"},"disabled":true},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"lock a step","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"},"locked":true},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"message words","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"New words"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"wait length","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":3,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"branch condition","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"has_email","op":"false"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"Go to retarget","a":{"schema":2,"seq":4,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","config":{"n":1,"unit":"days"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"goto","type":"goto","config":{"target":"n1"},"out":{}}}},"b":{"schema":2,"seq":4,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","config":{"n":1,"unit":"days"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"goto","type":"goto","config":{"target":"n2"},"out":{}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"branch order","a":{"schema":2,"seq":6,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"if_else","type":"if_else","config":{"branches":[{"id":"b1","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"has_email","op":"true"}]}]}},{"id":"b2","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"has_mobile","op":"true"}]}]}}]},"out":{"b1":"n2","b2":"n3","none":null}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":null}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"b":{"schema":2,"seq":6,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"if_else","type":"if_else","config":{"branches":[{"id":"b2","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"has_mobile","op":"true"}]}]}},{"id":"b1","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"has_email","op":"true"}]}]}}]},"out":{"b2":"n3","b1":"n2","none":null}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":null}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"trigger filter","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"booked"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":false},{"name":"trigger switched off","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]},"disabled":true}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":false},{"name":"trigger added","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}},{"id":"t9","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":false},{"name":"trigger name","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Other","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"a step added at the end","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":"n9"}},"n9":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"a step's type","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_live_chat","name":"Quote follow-up","config":{"body":"Hi"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"a reply wait loses its timeout","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"]},"out":{"next":"n6"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":"n7"}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"split percents","a":{"schema":2,"seq":5,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"split","type":"split","config":{"paths":[{"id":"p1","name":"A","percent":50},{"id":"p2","name":"B","percent":50}]},"out":{"p1":"n2","p2":"n3"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":null}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"b":{"schema":2,"seq":5,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"split","type":"split","config":{"paths":[{"id":"p1","name":"A","percent":70},{"id":"p2","name":"B","percent":30}]},"out":{"p1":"n2","p2":"n3"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":null}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"entry moves","a":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","config":{"n":10,"unit":"minutes"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":null}}}},"b":{"schema":2,"seq":3,"entry":"n2","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","config":{"n":10,"unit":"minutes"},"out":{"next":null}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n1"}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":false},{"name":"a date wait's go-to step","a":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"date","config":{"at":"2026-12-01T09:00","when":"on","ifPassed":"goto","gotoStep":"n2"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"b":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"date","config":{"at":"2026-12-01T09:00","when":"on","ifPassed":"goto","gotoStep":"n3"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"a scheduled wait's go-to step","a":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"scheduled","config":{"anchor":"lead.booked_for","when":"at","ifPassed":"goto","gotoStep":"n2"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"b":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"scheduled","config":{"anchor":"lead.booked_for","when":"at","ifPassed":"goto","gotoStep":"n3"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"a scheduled wait's offset","a":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"scheduled","config":{"anchor":"lead.booked_for","when":"at","ifPassed":"goto","gotoStep":"n2"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"b":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"scheduled","config":{"anchor":"lead.booked_for","when":"at","ifPassed":"goto","gotoStep":"n2","offset":{"n":2,"unit":"hours"}},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"re-entry setting","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"after_exit","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":false},{"name":"time window hours while it is off","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"07:00","until":"18:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"time window switched on","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":true,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":false},{"name":"mark as read and stop on response","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":true,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":"Kim"},"markRead":true},"shape":true,"arm":true},{"name":"settings left out = defaults","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true}]
+do $$
+declare k jsonb; bad text[] := '{}'; cases jsonb := '[{"name":"identical","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"keys in another order at every level","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"nodes":{"n8":{"out":{"next":null},"config":{"title":"Call {name} about the quote"},"type":"manual_call","kind":"action"},"n7":{"out":{"next":"n8"},"config":{"ifNotMet":"continue","stages":["booked"]},"name":"Booked?","type":"stage_reached","kind":"goal"},"n6":{"out":{"next":null},"config":{"title":"{name} replied about the quote","to":{"roles":["va"]},"channel":"push"},"type":"internal_notification","kind":"action"},"n5":{"out":{"timeout":"n7","next":"n6"},"config":{"timeout":{"unit":"days","n":3},"channels":["email","chat"]},"name":"Wait for a reply","type":"reply","kind":"wait"},"n4":{"out":{"next":"n5"},"config":{"body":"Hi {first_name}, just checking you got our quote…","subject":"Your {service} quote"},"name":"Quote follow-up","type":"send_email","kind":"action"},"n2":{"out":{"none":null,"b3":"n4"},"config":{"noneName":"None","branches":[{"when":{"segments":[{"rules":[{"v":"quoted","op":"is","field":"stage"},{"op":"true","field":"has_email"}],"match":"all"}],"match":"any"},"name":"Still quoted","id":"b3"}]},"name":"Still quoted?","type":"if_else","kind":"if_else"},"n1":{"out":{"next":"n2"},"config":{"resume":{"until":"17:00","from":"09:00","days":[1,2,3,4,5]},"unit":"days","n":2},"name":"Wait 2 days","type":"period","kind":"wait"}},"triggers":[{"filters":{"segments":[{"rules":[{"v":"quoted","op":"is","field":"stage"}],"match":"all"}],"match":"all"},"name":"Moved to Quoted","type":"stage","id":"t1"},{"filters":{"segments":[{"rules":[{"v":"quote-sent","op":"is","field":"trigger.tag"},{"v":"added","op":"is","field":"trigger.action"}],"match":"all"}],"match":"all"},"name":"Tagged quote-sent","type":"contact_tag","id":"t2"}],"entry":"n1","seq":9,"schema":2},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"names and notes","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Other","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"},"note":"A note"},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"pause a step (disabled)","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"},"disabled":true},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"lock a step","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"},"locked":true},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"message words","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"New words"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"wait length","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":3,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"branch condition","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"has_email","op":"false"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"Go to retarget","a":{"schema":2,"seq":4,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","config":{"n":1,"unit":"days"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"goto","type":"goto","config":{"target":"n1"},"out":{}}}},"b":{"schema":2,"seq":4,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","config":{"n":1,"unit":"days"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"goto","type":"goto","config":{"target":"n2"},"out":{}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"branch order","a":{"schema":2,"seq":6,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"if_else","type":"if_else","config":{"branches":[{"id":"b1","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"has_email","op":"true"}]}]}},{"id":"b2","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"has_mobile","op":"true"}]}]}}]},"out":{"b1":"n2","b2":"n3","none":null}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":null}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"b":{"schema":2,"seq":6,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"if_else","type":"if_else","config":{"branches":[{"id":"b2","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"has_mobile","op":"true"}]}]}},{"id":"b1","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"has_email","op":"true"}]}]}}]},"out":{"b2":"n3","b1":"n2","none":null}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":null}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"trigger filter","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"booked"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":false},{"name":"trigger switched off","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]},"disabled":true}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":false},{"name":"trigger added","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}},{"id":"t9","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":false},{"name":"trigger name","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Other","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"a step added at the end","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":"n9"}},"n9":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"a step''s type","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_live_chat","name":"Quote follow-up","config":{"body":"Hi"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"a reply wait loses its timeout","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"]},"out":{"next":"n6"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":"n7"}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"split percents","a":{"schema":2,"seq":5,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"split","type":"split","config":{"paths":[{"id":"p1","name":"A","percent":50},{"id":"p2","name":"B","percent":50}]},"out":{"p1":"n2","p2":"n3"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":null}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"b":{"schema":2,"seq":5,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"split","type":"split","config":{"paths":[{"id":"p1","name":"A","percent":70},{"id":"p2","name":"B","percent":30}]},"out":{"p1":"n2","p2":"n3"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":null}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"entry moves","a":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","config":{"n":10,"unit":"minutes"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":null}}}},"b":{"schema":2,"seq":3,"entry":"n2","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","config":{"n":10,"unit":"minutes"},"out":{"next":null}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n1"}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":false},{"name":"a date wait''s go-to step","a":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"date","config":{"at":"2026-12-01T09:00","when":"on","ifPassed":"goto","gotoStep":"n2"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"b":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"date","config":{"at":"2026-12-01T09:00","when":"on","ifPassed":"goto","gotoStep":"n3"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"a scheduled wait''s go-to step","a":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"scheduled","config":{"anchor":"lead.booked_for","when":"at","ifPassed":"goto","gotoStep":"n2"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"b":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"scheduled","config":{"anchor":"lead.booked_for","when":"at","ifPassed":"goto","gotoStep":"n3"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":false,"arm":true},{"name":"a scheduled wait''s offset","a":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"scheduled","config":{"anchor":"lead.booked_for","when":"at","ifPassed":"goto","gotoStep":"n2"},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"b":{"schema":2,"seq":3,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"wait","type":"scheduled","config":{"anchor":"lead.booked_for","when":"at","ifPassed":"goto","gotoStep":"n2","offset":{"n":2,"unit":"hours"}},"out":{"next":"n2"}},"n2":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead: {name}"},"out":{"next":"n3"}},"n3":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"Check the office"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"re-entry setting","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"after_exit","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":false},{"name":"time window hours while it is off","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"07:00","until":"18:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true},{"name":"time window switched on","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":true,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":false},{"name":"mark as read and stop on response","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":true,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":"Kim"},"markRead":true},"shape":true,"arm":true},{"name":"settings left out = defaults","a":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"b":{"schema":2,"seq":9,"entry":"n1","triggers":[{"id":"t1","type":"stage","name":"Moved to Quoted","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"}]}]}},{"id":"t2","type":"contact_tag","name":"Tagged quote-sent","filters":{"match":"all","segments":[{"match":"all","rules":[{"field":"trigger.tag","op":"is","v":"quote-sent"},{"field":"trigger.action","op":"is","v":"added"}]}]}}],"nodes":{"n1":{"kind":"wait","type":"period","name":"Wait 2 days","config":{"n":2,"unit":"days","resume":{"days":[1,2,3,4,5],"from":"09:00","until":"17:00"}},"out":{"next":"n2"}},"n2":{"kind":"if_else","type":"if_else","name":"Still quoted?","config":{"branches":[{"id":"b3","name":"Still quoted","when":{"match":"any","segments":[{"match":"all","rules":[{"field":"stage","op":"is","v":"quoted"},{"field":"has_email","op":"true"}]}]}}],"noneName":"None"},"out":{"b3":"n4","none":null}},"n4":{"kind":"action","type":"send_email","name":"Quote follow-up","config":{"subject":"Your {service} quote","body":"Hi {first_name}, just checking you got our quote…"},"out":{"next":"n5"}},"n5":{"kind":"wait","type":"reply","name":"Wait for a reply","config":{"channels":["email","chat"],"timeout":{"n":3,"unit":"days"}},"out":{"next":"n6","timeout":"n7"}},"n6":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["va"]},"title":"{name} replied about the quote"},"out":{"next":null}},"n7":{"kind":"goal","type":"stage_reached","name":"Booked?","config":{"stages":["booked"],"ifNotMet":"continue"},"out":{"next":"n8"}},"n8":{"kind":"action","type":"manual_call","config":{"title":"Call {name} about the quote"},"out":{"next":null}}}},"sa":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"sb":{"reentry":"off","perRecord":true,"stopOnResponse":false,"timezone":"business","window":{"on":false,"days":[1,2,3,4,5],"from":"08:00","until":"17:00"},"sender":{"fromName":null},"markRead":false},"shape":true,"arm":true}]';
+begin
+  for k in select x from jsonb_array_elements(cases) x loop
+    if (public.automation_def_shape(k -> 'a') = public.automation_def_shape(k -> 'b')) is distinct from (k ->> 'shape')::boolean
+       or (public.automation_arm_key(k -> 'a', k -> 'sa') = public.automation_arm_key(k -> 'b', k -> 'sb')) is distinct from (k ->> 'arm')::boolean then
+      bad := bad || (k ->> 'name');
+    end if;
+  end loop;
+  if cardinality(bad) > 0 then raise exception 'FAIL 21: the SQL keys disagree with the engine on %', bad; end if;
+  raise notice 'PASS 21 — the SQL shape and arm keys = the engine''s on all % shape.json pairs', jsonb_array_length(cases);
+end $$;
+
+select 'stage2 phase 2 · G2.4 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 3 · G3.1 — the Automation list's counts (design §4.3). STAGING ONLY, after PART 3 · G3.1 of
+-- .claude/sql/stage2-automations.sql ran there. Same rules: the block undoes what it wrote, then prints "PASS 22".
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 22. (G3.1) automation_list_stats: per workflow enrolled since p_since, active (waiting + running), failed runs and
+--     'ch' = the action rows per "channel:status" since p_since (step rows and older rows are not counted); a workflow
+--     whose runs were pruned still shows its 'ch'; the function stays stable + security invoker (Presentation mode and
+--     View as may call it: READ_ONLY_CALLS in index.html).
+do $$
+declare a uuid; b uuid; r1 uuid; r2 uuid; res jsonb; want jsonb;
+begin
+  begin
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 22a', false, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]') returning id into a;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 22b', false, '{"type":"newLead","params":{}}', '[{"id":"p1","kind":"action","type":"push","to":{"roles":["owner"]},"title":"x"}]') returning id into b;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status)
+    values (a, 1, 'stage2-check-22-1', 'newLead', now(), 'contact', 'stage2-check', now(), now(), 'waiting') returning id into r1;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status, created_at)
+    values (a, 1, 'stage2-check-22-2', 'newLead', now(), 'contact', 'stage2-check', now(), now(), 'done', now() - interval '200 days') returning id into r2;
+    insert into public.automation_log (run_id, step_id, status, channel, audience, automation_id, automation_name, at) values
+      (r1, 'e1', 'sent', 'email', 'customer', a, 'stage2 check 22a', now()),
+      (r1, 'e2', 'failed', 'email', 'customer', a, 'stage2 check 22a', now()),
+      (r1, 'p1', 'sent', 'push', 'team', a, 'stage2 check 22a', now()),
+      (r2, 'e1', 'sent', 'email', 'customer', a, 'stage2 check 22a', now() - interval '200 days');   -- older than p_since: not counted
+    insert into public.automation_log (run_id, step_id, row_kind, status, automation_id, automation_name, at) values (r1, 'w1', 'step', 'waiting', a, 'stage2 check 22a', now());
+    -- b: its runs are gone (pruned), one task row is left
+    insert into public.automation_log (run_id, step_id, status, channel, audience, automation_id, automation_name, at) values (null, 't1', 'sent', 'task', 'team', b, 'stage2 check 22b', now());
+    res := public.automation_list_stats(now() - interval '180 days');
+    want := '{"enrolled":1,"active":1,"failed":1,"ch":{"email:sent":1,"email:failed":1,"push:sent":1}}';
+    if (res -> a::text) - 'last_at' is distinct from want then raise exception 'FAIL 22a: workflow a reads % (want %)', res -> a::text, want; end if;
+    if (res -> b::text) - 'last_at' is distinct from '{"enrolled":0,"active":0,"failed":0,"ch":{"task:sent":1}}'::jsonb then raise exception 'FAIL 22b: a workflow with no runs left reads %', res -> b::text; end if;
+    if not exists (select 1 from pg_proc p where p.oid = 'public.automation_list_stats(timestamptz)'::regprocedure and p.provolatile = 's' and not p.prosecdef) then
+      raise exception 'FAIL 22c: automation_list_stats is not stable + security invoker (READ_ONLY_CALLS relies on it)';
+    end if;
+    if has_function_privilege('anon', 'public.automation_list_stats(timestamptz)', 'execute') then raise exception 'FAIL 22d: anon may call automation_list_stats'; end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 22 — the list counts: enrolled since, active, failed runs, per channel (action rows only, since p_since), also with no runs left';
+end $$;
+
+select 'stage2 phase 3 · G3.1 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 3 · G3.2 — Global Workflow Settings → Pause workflow (design §4.4, §2.9). STAGING ONLY. Part 1 already has the
+-- table, its guard and its wake; this proves them with the cases the app's wfPauseProblems tests use
+-- (tests/business-logic.test.js testWfGlobalSettings). Same rules: the block undoes what it wrote, then prints "PASS 23".
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 23. (G3.2) automation_pauses_guard: one workflow in two overlapping ranges refused (another workflow / a range starting at
+--     the other's end fine); at most 15 dates; at most 15 days (exactly 15 fine); end after start; a real date; at least one
+--     workflow (duplicates stored once); deleted or unknown workflows refused; an annual range across New Year meets a one-off
+--     years later on both sides of New Year; an annual 29 February = 28 February in 2027; GHL's / the guard's words.
+--     automation_pauses_after: removing a range or changing only its workflows wakes only the held runs of the workflows
+--     that left or joined (watch 'pause'), never the others.
+do $$
+declare a uuid; b uuid; c uuid; d uuid; e uuid; x uuid; pa uuid; px uuid; r1 uuid; r2 uuid; n integer; i integer; got text;
+  ov constant text := 'A workflow should not be part of two or more date ranges that are overlapping.';
+begin
+  begin
+    delete from public.automation_pauses where business_id = 'default';   -- a clean slate (undone with the rest)
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23a', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23b', false, '{"type":"newLead","params":{}}', '[]') returning id into b;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23c', false, '{"type":"newLead","params":{}}', '[]') returning id into c;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23d', false, '{"type":"newLead","params":{}}', '[]') returning id into d;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23e', false, '{"type":"newLead","params":{}}', '[]') returning id into e;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 23x', false, '{"type":"newLead","params":{}}', '[]') returning id into x;
+    update public.automations set deleted_at = now() where id = d;
+    -- 23a. overlap
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-12-01T00:00', '2026-12-05T00:00', array[a]) returning id into pa;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-12-04T00:00', '2026-12-08T00:00', array[a]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23a: an overlapping range of the same workflow gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-12-04T00:00', '2026-12-08T00:00', array[b, a]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23a: an overlap through one of two workflows gave %', got; end if;
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-12-04T00:00', '2026-12-08T00:00', array[b]);         -- another workflow: fine
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-12-05T00:00', '2026-12-06T00:00', array[a]);         -- starts at the other's end: fine
+    -- 23b. 15 days, end after start, a real date
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2026-11-01T00:00', '2026-11-16T00:00', array[c]);         -- exactly 15 days: fine
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2027-11-01T00:00', '2027-11-16T00:01', array[c]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'Maximum allowed difference between the start and end date is 15 days.' then raise exception 'FAIL 23b: 15 days and a minute gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2027-11-02T00:00', '2027-11-01T00:00', array[c]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'The end must be after the start' then raise exception 'FAIL 23b: an end before the start gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2027-02-30T09:00', '2027-03-02T09:00', array[c]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got = 'saved' then raise exception 'FAIL 23b: 30 February was saved'; end if;
+    -- 23c. workflows: at least one, once each, existing and not deleted
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2045-01-01T00:00', '2045-01-02T00:00', array[]::uuid[]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'Choose at least one workflow to pause' then raise exception 'FAIL 23c: no workflow gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2045-01-01T00:00', '2045-01-02T00:00', array[d]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'A chosen workflow does not exist (or was deleted)' then raise exception 'FAIL 23c: a deleted workflow gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2045-01-01T00:00', '2045-01-02T00:00', array[gen_random_uuid(), a]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'A chosen workflow does not exist (or was deleted)' then raise exception 'FAIL 23c: an unknown workflow gave %', got; end if;
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2045-01-01T00:00', '2045-01-02T00:00', array[e, e]);
+    if (select cardinality(automation_ids) from public.automation_pauses where start_wall = '2045-01-01T00:00') <> 1 then raise exception 'FAIL 23c: a workflow chosen twice is stored twice'; end if;
+    -- 23d. an annual range across New Year
+    insert into public.automation_pauses (start_wall, end_wall, annually, automation_ids) values ('2026-12-24T17:00', '2027-01-02T08:00', true, array[b]);
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2031-12-31T10:00', '2032-01-01T10:00', array[b]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23d: New Year''s Eve five years on gave %', got; end if;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2031-01-01T00:00', '2031-01-02T00:00', array[b]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23d: 1 January (the year before''s range) gave %', got; end if;
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2031-01-03T00:00', '2031-01-05T00:00', array[b]);         -- after it: fine
+    -- 23e. 29 February, annually (28 February in 2027), compared from both sides
+    insert into public.automation_pauses (start_wall, end_wall, annually, automation_ids) values ('2028-02-29T09:00', '2028-03-01T09:00', true, array[c]);
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2027-02-28T10:00', '2027-02-28T12:00', array[c]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23e: 28 February 2027 gave %', got; end if;
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2027-03-01T09:00', '2027-03-01T10:00', array[c]);         -- at its end: fine
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2029-02-28T10:00', '2029-02-28T12:00', array[e]);
+    begin insert into public.automation_pauses (start_wall, end_wall, annually, automation_ids) values ('2028-02-29T09:00', '2028-03-01T09:00', true, array[e]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from ov then raise exception 'FAIL 23e: an annual 29 February against a one-off 28 February 2029 gave %', got; end if;
+    -- 23f. the wake: removing a range / changing only its workflows wakes the held runs of the workflows that left or joined
+    insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2040-01-01T00:00', '2040-01-02T00:00', array[x]) returning id into px;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status, watch)
+    values (x, 1, 'stage2-check-23-1', 'newLead', now(), 'contact', 'stage2-check', now(), now() + interval '1 day', 'waiting', array['pause']) returning id into r1;
+    insert into public.automation_runs (automation_id, automation_version, event_key, event_type, event_at, record_kind, record_id, anchor_at, due_at, status, watch)
+    values (a, 1, 'stage2-check-23-2', 'newLead', now(), 'contact', 'stage2-check', now(), now() + interval '1 day', 'waiting', array['pause']) returning id into r2;
+    delete from public.automation_pauses where id = px;
+    if (select due_at from public.automation_runs where id = r1) <> now() or (select due_at from public.automation_runs where id = r2) <> now() + interval '1 day' then
+      raise exception 'FAIL 23f: removing x''s range did not wake only x''s held run';
+    end if;
+    update public.automation_runs set due_at = now() + interval '1 day' where id = r1;
+    update public.automation_pauses set automation_ids = array[a, x] where id = pa;   -- x joins, a stays
+    if (select due_at from public.automation_runs where id = r1) <> now() or (select due_at from public.automation_runs where id = r2) <> now() + interval '1 day' then
+      raise exception 'FAIL 23f: x joining a range did not wake only x''s held run';
+    end if;
+    -- 23g. at most 15 dates (counted per business; the rows above are kept until the undo)
+    select count(*) into n from public.automation_pauses where business_id = 'default';
+    for i in 1..(15 - n) loop
+      insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ((2050 + i)::text || '-01-01T00:00', (2050 + i)::text || '-01-02T00:00', array[e]);
+    end loop;
+    begin insert into public.automation_pauses (start_wall, end_wall, automation_ids) values ('2049-01-01T00:00', '2049-01-02T00:00', array[e]); got := 'saved'; exception when others then got := sqlerrm; end;
+    if got is distinct from 'At most 15 pause dates' then raise exception 'FAIL 23g: a 16th date gave % (there were %)', got, n; end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 23 — Pause workflow: overlap, 15 dates, 15 days, end after start, real dates, deleted / unknown workflows, annual across New Year, 29 February, the targeted wake';
+end $$;
+
+select 'stage2 phase 3 · G3.2 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 3 · G3.3 — the template library (design §4.3, §2.9). STAGING ONLY. Part 1 already has automation_templates; this
+-- proves what the automations function's template_upload / _rename / _delete rely on. Same rules: the block undoes what it
+-- wrote, then prints "PASS 24".
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 24. (G3.3) a template of the business's own (origin user, key mine_ + 10, the workflow it came from) saves; a second live
+--     row with the same key is refused (automation_templates_key_once); after a soft delete (deleted_at) the key is free
+--     again in the index (the function never reuses one: it reads every key, deleted or not); a doc that is not schema 2,
+--     an empty name or an origin other than system / user is refused; deleting the source workflow keeps the template
+--     (source_automation_id set null); the app's role reads it but can't write it.
+do $$
+declare a uuid; t uuid; got text;
+  doc constant jsonb := '{"schema":2,"seq":1,"entry":"n1","triggers":[{"id":"t1","type":"newLead","filters":{"match":"all","segments":[{"match":"all","rules":[]}]}}],"nodes":{"n1":{"kind":"action","type":"internal_notification","config":{"channel":"push","to":{"roles":["owner"]},"title":"New lead"},"out":{"next":null}}}}';
+begin
+  begin
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 24', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automation_templates (key, name, description, category, definition, origin, source_automation_id, created_by_name)
+      values ('mine_check24abc', 'Check 24', 'From a workflow', 'Team notifications', doc, 'user', a, 'Staging') returning id into t;
+    begin insert into public.automation_templates (key, name, definition, origin) values ('mine_check24abc', 'Again', doc, 'user'); got := 'saved'; exception when unique_violation then got := 'unique'; end;
+    if got <> 'unique' then raise exception 'FAIL 24a: a second live template with the same key gave %', got; end if;
+    update public.automation_templates set deleted_at = now() where id = t;
+    insert into public.automation_templates (key, name, definition, origin) values ('mine_check24abc', 'After delete', doc, 'user');
+    begin insert into public.automation_templates (key, name, definition, origin) values ('mine_check24x', 'Old doc', '{"trigger":{},"steps":[]}', 'user'); got := 'saved'; exception when check_violation then got := 'check'; end;
+    if got <> 'check' then raise exception 'FAIL 24b: a doc that is not schema 2 gave %', got; end if;
+    begin insert into public.automation_templates (key, name, definition, origin) values ('mine_check24y', '', doc, 'user'); got := 'saved'; exception when check_violation then got := 'check'; end;
+    if got <> 'check' then raise exception 'FAIL 24b: an empty name gave %', got; end if;
+    begin insert into public.automation_templates (key, name, definition, origin) values ('mine_check24z', 'X', doc, 'ai'); got := 'saved'; exception when check_violation then got := 'check'; end;
+    if got <> 'check' then raise exception 'FAIL 24b: origin ai gave %', got; end if;
+    delete from public.automations where id = a;
+    if (select source_automation_id from public.automation_templates where id = t) is not null then raise exception 'FAIL 24c: deleting the source workflow did not clear source_automation_id'; end if;
+    if not has_table_privilege('authenticated', 'public.automation_templates', 'select') or has_table_privilege('authenticated', 'public.automation_templates', 'insert')
+       or has_table_privilege('authenticated', 'public.automation_templates', 'update') or has_table_privilege('authenticated', 'public.automation_templates', 'delete') then
+      raise exception 'FAIL 24d: the app''s role can write automation_templates (or can''t read it)';
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 24 — the template library: a template of the business''s own, one live key, the doc check, the source kept optional, the app reads but can''t write';
+end $$;
+
+select 'stage2 phase 3 · G3.3 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 3 · G3.5 — Ofek's Q5 / Q6 and quiet imports (design §10). STAGING ONLY, after PART 3 · G3.5 of
+-- .claude/sql/stage2-automations.sql ran there. Same rules: the block undoes what it wrote, then prints "PASS 25".
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 25. (G3.5) a) an imported lead (import_quiet, a copy of the demo card with a tag and a note) and an imported task make
+--     no event; the import marking an existing lead quiet (with a tag) makes none; the import's own later write (the
+--     transaction says automation.import = on) makes none; a person's later change of the quiet lead does ("tag added",
+--     "Lead changed"); a normal new task does ("Task added"); b) automation_apply 'assign' sets the lead's Assigned to with a
+--     history line and a "Lead changed" event for field assigned_user with the run's cause, then 'assign' null clears it,
+--     a person not in the team is skipped; c) as a signed-in VA (RLS + contacts_assignee_guard): assigning someone else is
+--     refused (42501), themselves and nobody pass; as an owner anyone passes; d) team_people() answers a signed-in person
+--     and nobody else; e) no 'estimates' in the contacts capture any more; f) a quiet job's imported date
+--     (jobs.import_quiet_date): the import marking a job keeps its date, a person's reschedule leaves it, the import's own
+--     later date change moves it.
+do $$
+declare a uuid; c uuid; q uuid; t1 uuid; t2 uuid; r uuid := gen_random_uuid(); owner_id uuid; va_id uuid; res jsonb; n integer; got text; nrows integer; j text;
+begin
+  begin
+    select id into c from public.contacts order by created_at desc nulls last limit 1;
+    if c is null then raise exception 'FAIL 25: staging has no contacts (run staging-seed-demo.sql first)'; end if;
+    select id into owner_id from public.profiles where role = 'owner' order by id limit 1;
+    select id into va_id from public.profiles where role = 'va' order by id limit 1;
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 25', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automation_wanted (business_id, event_type) values ('default', 'contact_tag'), ('default', 'note_added'), ('default', 'contact_changed'), ('default', 'task_added'), ('default', 'job_booked')
+      on conflict do nothing;
+    -- a) the import: a quiet copy of the demo card (a tag, a note, a booking), a quiet task
+    insert into public.contacts
+    select (jsonb_populate_record(null::public.contacts, to_jsonb(x) || jsonb_build_object('id', gen_random_uuid(), 'tags', array['s2c25-imp'], 'import_quiet', true,
+            'customer_notes', '[{"id":"s2c25n","text":"imported note"}]'::jsonb, 'booked_for', (current_date + 3)::text,
+            'email', 'stage2-check-25@example.invalid', 'phone', '0491570025'))).*
+      from public.contacts x where x.id = c
+    returning id into q;
+    insert into public.tasks (board, title, status, contact_id, import_quiet) values ('ron', 'Imported task (s2c25)', 'Not Started', q, true) returning id into t1;
+    select count(*) into n from public.automation_events where (contact_id = q or record_id = t1::text) and at = now();
+    if n <> 0 then raise exception 'FAIL 25a: an imported lead / task made % events (want 0)', n; end if;
+    update public.contacts set import_quiet = true, tags = coalesce(tags, '{}'::text[]) || array['s2c25-mark'] where id = c;
+    perform set_config('automation.import', 'on', true);
+    update public.contacts set tags = coalesce(tags, '{}'::text[]) || array['s2c25-sync'] where id = q;
+    perform set_config('automation.import', '', true);
+    select count(*) into n from public.automation_events where contact_id in (c, q) and at = now();
+    if n <> 0 then raise exception 'FAIL 25a: the import marking a lead / its own later write made % events (want 0)', n; end if;
+    update public.contacts set tags = coalesce(tags, '{}'::text[]) || array['s2c25-person'], postcode = 'S2C25' where id = q;   -- a person, later
+    insert into public.tasks (board, title, status, contact_id) values ('ron', 'A person''s task (s2c25)', 'Not Started', c) returning id into t2;
+    select count(*) into n from public.automation_events where at = now() and (
+      (contact_id = q and type = 'contact_tag' and event_key like q::text || ':tag:+:s2c25-person:%') or (contact_id = q and type = 'contact_changed' and event_key like q::text || ':chg:postcode:%')
+      or (type = 'task_added' and event_key = t2::text || ':added'));
+    if n <> 3 then raise exception 'FAIL 25a: a person''s later change / a new task made % of the 3 events', n; end if;
+    -- b) Assign to user / Remove assigned user through the workflow writes
+    if owner_id is not null then
+      res := public.automation_apply('default', r::text || ':0:' || a::text, 'contact', q::text, jsonb_build_array(jsonb_build_object('op', 'assign', 'user', owner_id),
+        jsonb_build_object('op', 'assign', 'user', owner_id), jsonb_build_object('op', 'assign', 'user', gen_random_uuid())));
+      if jsonb_array_length(res -> 'applied') <> 1 or res -> 'skipped' -> 0 ->> 'reason' <> 'already assigned to that person' or res -> 'skipped' -> 1 ->> 'reason' <> 'that person is not in the team'
+         or (select assigned_user_id from public.contacts where id = q) is distinct from owner_id then
+        raise exception 'FAIL 25b: assign gave % (the lead has %)', res, (select assigned_user_id from public.contacts where id = q);
+      end if;
+      if not exists (select 1 from public.activity_log where record_kind = 'contact' and record_id = q::text and text like 'Assigned to %' and actor = 'Automation: stage2 check 25')
+         or not exists (select 1 from public.automation_events where contact_id = q and type = 'contact_changed' and event_key like q::text || ':chg:assigned_user:%' and cause_run_id = r and ctx ->> 'new' = owner_id::text) then
+        raise exception 'FAIL 25b: no history line or no Lead changed event (assigned_user, with the cause) for the assignment';
+      end if;
+      res := public.automation_apply('default', r::text || ':0:' || a::text, 'contact', q::text, '[{"op":"assign","user":null}]'::jsonb);
+      if jsonb_array_length(res -> 'applied') <> 1 or (select assigned_user_id from public.contacts where id = q) is not null
+         or not exists (select 1 from public.activity_log where record_kind = 'contact' and record_id = q::text and text = 'Assigned user removed') then
+        raise exception 'FAIL 25b: removing the assigned user gave %', res;
+      end if;
+    else
+      raise notice 'NOTE 25b: no owner profile on staging; Assign to user not exercised';
+    end if;
+    -- c) who may assign (as the app: RLS + the guard)
+    if va_id is not null and owner_id is not null then
+      perform set_config('request.jwt.claims', json_build_object('sub', va_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', va_id::text, true);
+      execute 'set local role authenticated';
+      update public.contacts set assigned_user_id = va_id where id = q;
+      get diagnostics nrows = row_count;
+      if nrows = 0 then
+        execute 'reset role';
+        raise notice 'NOTE 25c: this staging VA can''t edit leads (RLS); the VA rule is not exercised';
+      else
+        begin update public.contacts set assigned_user_id = owner_id where id = q; got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+        if got <> 'refused' then execute 'reset role'; raise exception 'FAIL 25c: a VA assigned a lead to someone else (%)', got; end if;
+        update public.contacts set assigned_user_id = null where id = q;   -- nobody: allowed
+        execute 'reset role';
+      end if;
+      perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', owner_id::text, true);
+      execute 'set local role authenticated';
+      update public.contacts set assigned_user_id = va_id where id = q;
+      select count(*) into n from public.team_people();
+      execute 'reset role';
+      if (select assigned_user_id from public.contacts where id = q) is distinct from va_id then raise exception 'FAIL 25c: an owner could not assign the VA'; end if;
+      if n < 2 then raise exception 'FAIL 25d: team_people() gave % people to a signed-in owner', n; end if;
+    else
+      raise notice 'NOTE 25c: no VA or no owner profile on staging; the assign rule is not exercised';
+    end if;
+    -- d) nobody signed in: no names
+    perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    if has_function_privilege('anon', 'public.team_people()', 'execute') then raise exception 'FAIL 25d: anon may call team_people()'; end if;
+    -- f) a quiet job's imported date
+    select id::text into j from public.jobs where date is not null and not import_quiet order by created_at desc nulls last limit 1;
+    if j is null then
+      raise notice 'NOTE 25f: staging has no job with a date; the imported job date is not exercised';
+    else
+      update public.jobs set import_quiet = true where id::text = j;   -- the import marks it
+      select import_quiet_date into got from public.jobs where id::text = j;
+      if got is distinct from (select date::text from public.jobs where id::text = j) then raise exception 'FAIL 25f: the import marking a job kept % as its date', got; end if;
+      execute format('update public.jobs set date = %L where id::text = $1', (got::date + 9)::text) using j;   -- a person reschedules
+      if (select import_quiet_date from public.jobs where id::text = j) is distinct from got then raise exception 'FAIL 25f: a person''s reschedule moved the imported date'; end if;
+      perform set_config('automation.import', 'on', true);
+      execute format('update public.jobs set date = %L where id::text = $1', (got::date + 11)::text) using j;   -- the import's own re-sync
+      perform set_config('automation.import', '', true);
+      if (select import_quiet_date from public.jobs where id::text = j) is distinct from (got::date + 11)::text then raise exception 'FAIL 25f: the import''s own date change did not move the imported date'; end if;
+    end if;
+    -- e) Q5
+    if pg_get_functiondef('public.automation_capture_contacts()'::regprocedure) ~ 'estimates' then raise exception 'FAIL 25e: the contacts capture still writes Quote status'; end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 25 — quiet imports (no event; a person''s later change counts), Assign to user / Remove assigned user (history, Lead changed), who may assign, the team''s names, no Quote status, a quiet job''s imported date';
+end $$;
+
+select 'stage2 phase 3 · G3.5 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 3 · G3.4 — the lock on direct writes (design §2.9 Part 3, §8.2 #24/#26). STAGING ONLY, after PART 3 · G3.4 of
+-- .claude/sql/stage2-automations.sql ran there (the LAST block of Part 3). Same rules: the block undoes what it wrote,
+-- then prints "PASS 26" (before G3.4 ran it prints "NOTE 26 …" and checks nothing).
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 26. (G3.4) a) the privileges and policies are the lock's (enabled not updatable, four columns, no DELETE policy, read /
+--     change scoped to the business, the backup row); b) a signed-in owner renames (revision + 1), moves into a folder of
+--     the business, deletes (to Deleted: stamped now even when back-dated, a Draft, deleted_by; the date never moves
+--     again) and restores; every other column, a new row, a hard delete and a folder of another business are refused
+--     (42501) and change nothing; c) a manager renames, cannot switch on; d) a VA / a technician changes 0 rows (RLS) and
+--     cannot switch on; e) anon cannot even rename; f) another business's workflow: an owner sees 0 rows of it and changes 0 rows;
+--     g) the SQL editor (= the function's side) still writes every column.
+do $$
+declare a uuid; o uuid; f uuid; fx uuid; owner_id uuid; mgr_id uuid; va_id uuid; got text; n integer; rv integer; t text;
+  r public.automations%rowtype;
+begin
+  if has_table_privilege('authenticated', 'public.automations', 'INSERT') then
+    raise notice 'NOTE 26: PART 3 · G3.4 has not run here yet: check 26 skipped (run it again after that block)';
+    return;
+  end if;
+  begin
+    select id into owner_id from public.profiles where role = 'owner' order by id limit 1;
+    select id into mgr_id from public.profiles where role = 'manager' order by id limit 1;
+    if owner_id is null then raise exception 'FAIL 26: staging has no owner profile (run staging-seed-demo.sql first)'; end if;
+    -- as the SQL editor (the owner of the table: not locked): a Draft of this business, one of another, two folders
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 26', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automations (business_id, name, enabled, trigger, steps) values ('stage2-check-26-other', 'stage2 check 26 other', false, '{"type":"newLead","params":{}}', '[]') returning id into o;
+    insert into public.automation_folders (name) values ('s2c26 folder') returning id into f;
+    insert into public.automation_folders (business_id, name) values ('stage2-check-26-other', 's2c26 other') returning id into fx;
+    select revision into rv from public.automations where id = a;
+    -- a) privileges and policies
+    if has_column_privilege('authenticated', 'public.automations', 'enabled', 'UPDATE') or has_column_privilege('authenticated', 'public.automations', 'definition', 'UPDATE')
+       or has_table_privilege('authenticated', 'public.automations', 'DELETE') or has_any_column_privilege('anon', 'public.automations', 'UPDATE')
+       or not has_column_privilege('authenticated', 'public.automations', 'deleted_at', 'UPDATE') or not has_column_privilege('authenticated', 'public.automations', 'name', 'UPDATE')
+       or exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'automations' and cmd = 'DELETE')
+       or (select count(*) from pg_policies where schemaname = 'public' and tablename = 'automations' and cmd in ('SELECT', 'UPDATE') and qual ~ 'current_business_id') <> 2
+       or not exists (select 1 from backup.automations_grants_before_part3 where id = 1 and relacl is not null) then
+      raise exception 'FAIL 26a: the privileges / policies / backup are not the lock''s';
+    end if;
+    -- b) a signed-in owner (as the app: RLS + column grants + the pin + the guard)
+    perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+    perform set_config('request.jwt.claim.sub', owner_id::text, true);
+    execute 'set local role authenticated';
+    update public.automations set name = 'stage2 check 26 renamed' where id = a;
+    get diagnostics n = row_count;
+    update public.automations set folder_id = f where id = a;
+    select * into r from public.automations where id = a;
+    if n <> 1 or r.name <> 'stage2 check 26 renamed' or r.revision <> rv + 1 or r.folder_id is distinct from f then
+      raise exception 'FAIL 26b: an owner''s rename / move gave % rows, revision % (want %), folder %', n, r.revision, rv + 1, r.folder_id;
+    end if;
+    foreach t in array array['enabled = true', 'definition = ''{"schema":2,"seq":0,"entry":null,"triggers":[],"nodes":{}}''::jsonb', 'settings = ''{}''::jsonb',
+      'layout = ''{"v":1}''::jsonb', 'builder = ''advanced''', 'origin = ''system''', 'revision = 99', 'version = 99', 'system_key = ''s2c26''', 'template_key = ''s2c26''',
+      'trigger = ''{"type":"newLead","params":{"x":1}}''::jsonb', 'steps = ''[]''::jsonb', 'business_id = ''stage2-check-26-other''', 'published_at = now()', 'enrolled_total = 9'] loop
+      begin
+        execute format('update public.automations set %s where id = $1', t) using a;
+        got := 'saved';
+      exception when insufficient_privilege then got := 'refused';
+      end;
+      if got <> 'refused' then raise exception 'FAIL 26b: a signed-in owner could set %', t; end if;
+    end loop;
+    begin
+      insert into public.automations (name, trigger, steps) values ('stage2 check 26 app', '{"type":"newLead","params":{}}', '[]');
+      got := 'saved';
+    exception when insufficient_privilege then got := 'refused';
+    end;
+    if got <> 'refused' then raise exception 'FAIL 26b: a signed-in owner added a workflow straight to the table'; end if;
+    begin
+      delete from public.automations where id = a;
+      got := 'deleted';
+    exception when insufficient_privilege then got := 'refused';
+    end;
+    if got <> 'refused' then raise exception 'FAIL 26b: a signed-in owner hard-deleted a workflow (%)', got; end if;
+    begin
+      update public.automations set folder_id = fx where id = a;
+      got := 'saved';
+    exception when insufficient_privilege then got := 'refused';
+    end;
+    if got <> 'refused' then raise exception 'FAIL 26b: a workflow moved into another business''s folder'; end if;
+    update public.automations set deleted_at = now() - interval '40 days' where id = a;   -- back-dated by hand: stamped now
+    select * into r from public.automations where id = a;
+    if r.deleted_at is distinct from now() or r.enabled or r.deleted_by is distinct from owner_id then
+      raise exception 'FAIL 26b: a soft delete gave deleted_at % (want now), enabled %, deleted_by %', r.deleted_at, r.enabled, r.deleted_by;
+    end if;
+    update public.automations set deleted_at = '2000-01-01T00:00:00Z' where id = a;
+    if (select deleted_at from public.automations where id = a) is distinct from now() then raise exception 'FAIL 26b: a deleted workflow''s date moved'; end if;
+    update public.automations set deleted_at = null, folder_id = null where id = a;   -- Restore
+    select * into r from public.automations where id = a;
+    if r.deleted_at is not null or r.folder_id is not null or r.enabled then raise exception 'FAIL 26b: Restore did not bring it back as a Draft in Home'; end if;
+    -- f) another business's workflow: not seen, not changed
+    select count(*) into n from public.automations where id = o;
+    if n <> 0 then raise exception 'FAIL 26f: an owner sees another business''s workflow'; end if;
+    update public.automations set name = 'stage2 check 26 other renamed' where id = o;
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAIL 26f: an owner renamed another business''s workflow'; end if;
+    execute 'reset role';
+    -- c) a manager: rename yes, switch on no
+    if mgr_id is not null then
+      perform set_config('request.jwt.claims', json_build_object('sub', mgr_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', mgr_id::text, true);
+      execute 'set local role authenticated';
+      update public.automations set name = 'stage2 check 26 by manager' where id = a;
+      get diagnostics n = row_count;
+      begin update public.automations set enabled = true where id = a; got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+      execute 'reset role';
+      if n <> 1 or got <> 'refused' then raise exception 'FAIL 26c: a manager renamed % rows / switched on: %', n, got; end if;
+    else
+      raise notice 'NOTE 26c: no manager profile on staging; the manager case is not exercised';
+    end if;
+    -- d) a VA and a technician: RLS keeps every row out of reach; the switch is refused before RLS
+    foreach t in array array['va', 'technician'] loop
+      va_id := null;
+      select id into va_id from public.profiles where role::text = t order by id limit 1;
+      if va_id is null then raise notice 'NOTE 26d: no % profile on staging; that case is not exercised', t; continue; end if;
+      perform set_config('request.jwt.claims', json_build_object('sub', va_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', va_id::text, true);
+      execute 'set local role authenticated';
+      update public.automations set name = 'stage2 check 26 by ' || t, deleted_at = now() where id = a;
+      get diagnostics n = row_count;
+      begin update public.automations set enabled = true where id = a; got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+      execute 'reset role';
+      if n <> 0 or got <> 'refused' then raise exception 'FAIL 26d: a % changed % rows / switched on: %', t, n, got; end if;
+    end loop;
+    -- e) anon: no column to write at all
+    perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    execute 'set local role anon';
+    begin update public.automations set name = 'stage2 check 26 by anon' where id = a; got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+    execute 'reset role';
+    if got <> 'refused' then raise exception 'FAIL 26e: anon could rename a workflow'; end if;
+    -- g) the SQL editor (the function's side) is not locked
+    update public.automations set enabled = false, template_key = 's2c26', deleted_at = now() - interval '40 days' where id = a;
+    if (select (template_key, deleted_at) from public.automations where id = a) is distinct from ('s2c26'::text, now() - interval '40 days') then
+      raise exception 'FAIL 26g: the SQL editor''s write was changed (the pin must touch the app''s roles only)';
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 26 — the lock: four columns for the app (rename, move, Deleted stamped now, Restore), everything else refused, no hard delete, this business only, VA / technician / anon nothing, the function''s side untouched';
+end $$;
+
+select 'stage2 phase 3 · G3.4 staging checks done';
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PHASE 4 · G4.4 — the builder's Notes panel (design §5.5 "Notes", §2.9 automation_notes). STAGING ONLY. NO SCHEMA CHANGE:
+-- Part 1 has the table, its guard and its policies; this proves what the builder writes there. Same rules: the block
+-- undoes what it wrote, then prints "PASS 27".
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- 27. (G4.4) a) a signed-in owner adds a workflow note and a step note exactly as the builder writes them (business_id,
+--     automation_id, node_id, body, created_by_name; created_by = the signed-in person) and reads both back; b) edits one
+--     (edited_by_name / edited_at) while the guard keeps who / when / where; soft-deletes the other (deleted_at); an empty
+--     note or a bad step id is refused; c) a manager adds a note but changes 0 rows of the owner's; the owner may change
+--     the manager's; d) a VA / technician reads 0 notes and can't add one; e) a note on another business's workflow is
+--     refused.
+do $$
+declare a uuid; o uuid; owner_id uuid; mgr_id uuid; va_id uuid; n1 uuid; n2 uuid; m1 uuid; got text; n integer; r public.automation_notes%rowtype;
+  claims constant text := 'request.jwt.claims';
+begin
+  begin
+    select id into owner_id from public.profiles where role = 'owner' order by id limit 1;
+    select id into mgr_id from public.profiles where role = 'manager' order by id limit 1;
+    select id into va_id from public.profiles where role in ('va', 'technician') order by id limit 1;
+    if owner_id is null then raise exception 'FAIL 27: staging has no owner profile (run staging-seed-demo.sql first)'; end if;
+    -- as the SQL editor: a workflow of this business and one of another
+    insert into public.automations (name, enabled, trigger, steps) values ('stage2 check 27', false, '{"type":"newLead","params":{}}', '[]') returning id into a;
+    insert into public.automations (business_id, name, enabled, trigger, steps) values ('stage2-check-27-other', 'stage2 check 27 other', false, '{"type":"newLead","params":{}}', '[]') returning id into o;
+    -- a) the owner, as the app
+    perform set_config(claims, json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+    perform set_config('request.jwt.claim.sub', owner_id::text, true);
+    execute 'set local role authenticated';
+    insert into public.automation_notes (business_id, automation_id, node_id, body, created_by_name) values ('default', a, null, 'Checked with Noam', 'Staging Owner') returning id into n1;
+    insert into public.automation_notes (business_id, automation_id, node_id, body, created_by_name) values ('default', a, 'n1', 'Words checked', 'Staging Owner') returning id into n2;
+    select count(*) into n from public.automation_notes where automation_id = a and deleted_at is null;
+    select * into r from public.automation_notes where id = n2;
+    if n <> 2 or r.created_by is distinct from owner_id or r.node_id is distinct from 'n1' or r.created_by_name <> 'Staging Owner' then
+      raise exception 'FAIL 27a: the owner''s notes read back as % rows, created_by %, node %', n, r.created_by, r.node_id;
+    end if;
+    -- b) edit (the guard keeps who / when / where), soft delete, refused shapes
+    update public.automation_notes set body = 'Words checked twice', edited_by_name = 'Staging Owner', edited_at = now(), node_id = 'n9', created_by_name = 'Someone else', created_at = now() - interval '9 days' where id = n2;
+    select * into r from public.automation_notes where id = n2;
+    if r.body <> 'Words checked twice' or r.edited_at is null or r.node_id is distinct from 'n1' or r.created_by_name <> 'Staging Owner' or r.created_at < now() - interval '1 day' then
+      raise exception 'FAIL 27b: an edit gave body %, node %, author %', r.body, r.node_id, r.created_by_name;
+    end if;
+    update public.automation_notes set deleted_at = now() where id = n1;
+    get diagnostics n = row_count;
+    if n <> 1 or (select count(*) from public.automation_notes where automation_id = a and deleted_at is null) <> 1 then raise exception 'FAIL 27b: the soft delete changed % rows', n; end if;
+    begin insert into public.automation_notes (business_id, automation_id, body, created_by_name) values ('default', a, '   ', 'Staging Owner'); got := 'saved'; exception when check_violation then got := 'check'; end;
+    if got <> 'check' then raise exception 'FAIL 27b: an empty note gave %', got; end if;
+    begin insert into public.automation_notes (business_id, automation_id, node_id, body, created_by_name) values ('default', a, '1bad id', 'x', 'Staging Owner'); got := 'saved'; exception when check_violation then got := 'check'; end;
+    if got <> 'check' then raise exception 'FAIL 27b: a bad step id gave %', got; end if;
+    -- e) another business's workflow
+    begin insert into public.automation_notes (business_id, automation_id, body, created_by_name) values ('stage2-check-27-other', o, 'x', 'Staging Owner'); got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+    if got <> 'refused' then raise exception 'FAIL 27e: a note for another business gave %', got; end if;
+    execute 'reset role';
+    -- c) a manager: adds own, can't change the owner's; the owner can change the manager's
+    if mgr_id is not null then
+      perform set_config(claims, json_build_object('sub', mgr_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', mgr_id::text, true);
+      execute 'set local role authenticated';
+      insert into public.automation_notes (business_id, automation_id, body, created_by_name) values ('default', a, 'From the manager', 'Staging Manager') returning id into m1;
+      update public.automation_notes set body = 'Changed by the manager' where id = n2;
+      get diagnostics n = row_count;
+      if n <> 0 then raise exception 'FAIL 27c: a manager changed the owner''s note'; end if;
+      execute 'reset role';
+      perform set_config(claims, json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', owner_id::text, true);
+      execute 'set local role authenticated';
+      update public.automation_notes set body = 'Owner tidied it', edited_by_name = 'Staging Owner', edited_at = now() where id = m1;
+      get diagnostics n = row_count;
+      if n <> 1 then raise exception 'FAIL 27c: the owner could not change the manager''s note'; end if;
+      execute 'reset role';
+    else
+      raise notice 'NOTE 27: no manager profile on staging; the manager part was skipped';
+    end if;
+    -- d) a VA / technician: nothing to read, nothing to add
+    if va_id is not null then
+      perform set_config(claims, json_build_object('sub', va_id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', va_id::text, true);
+      execute 'set local role authenticated';
+      select count(*) into n from public.automation_notes where automation_id = a;
+      if n <> 0 then raise exception 'FAIL 27d: a VA / technician read % notes', n; end if;
+      begin insert into public.automation_notes (business_id, automation_id, body, created_by_name) values ('default', a, 'x', 'Staging VA'); got := 'saved'; exception when insufficient_privilege then got := 'refused'; end;
+      if got <> 'refused' then raise exception 'FAIL 27d: a VA / technician added a note'; end if;
+      execute 'reset role';
+    else
+      raise notice 'NOTE 27: no VA / technician profile on staging; that part was skipped';
+    end if;
+    raise exception '__undo__';
+  exception when others then
+    if sqlerrm <> '__undo__' then raise; end if;
+  end;
+  raise notice 'PASS 27 — the builder''s notes: added (workflow / step) and read back as the signed-in owner, edited with who / when / where kept, soft-deleted; empty or bad ones refused; a manager adds but can''t change others''; a VA reads and adds nothing; another business refused';
+end $$;
+
+select 'stage2 phase 4 · G4.4 staging checks done';
