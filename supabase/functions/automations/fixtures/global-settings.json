@@ -1,0 +1,55 @@
+{
+  "about": "Global Workflow Settings (design §4.4, group G3.2): the engine's region / message helpers and its pause rules, and the app's copies of them, give exactly these results (supabase/functions/automations/tests.ts block 36 and tests/business-logic.test.js testWfGlobalSettings read this file). Hand-worked: Sydney is UTC+11 in summer (AEDT, from the first Sunday of October) and UTC+10 in winter; Chicago jumps from 02:00 CST to 03:00 CDT on 8 March 2026; a wall time inside a jump counts as the same time after it.",
+  "bizToUtc": [
+    { "name": "Sydney, a summer morning", "day": "2026-10-14", "hh": 9, "mm": 0, "tz": "Australia/Sydney", "utc": "2026-10-13T22:00:00.000Z" },
+    { "name": "Sydney, inside the October jump (02:30 → 03:30 AEDT)", "day": "2026-10-04", "hh": 2, "mm": 30, "tz": "Australia/Sydney", "utc": "2026-10-03T16:30:00.000Z" },
+    { "name": "Sydney, the April hour that happens twice (the AEST one)", "day": "2026-04-05", "hh": 2, "mm": 30, "tz": "Australia/Sydney", "utc": "2026-04-04T16:30:00.000Z" },
+    { "name": "Chicago, inside the March jump (02:30 → 03:30 CDT)", "day": "2026-03-08", "hh": 2, "mm": 30, "tz": "America/Chicago", "utc": "2026-03-08T08:30:00.000Z" },
+    { "name": "Chicago, the November hour that happens twice (the CDT one)", "day": "2026-11-01", "hh": 1, "mm": 30, "tz": "America/Chicago", "utc": "2026-11-01T06:30:00.000Z" },
+    { "name": "Auckland, inside the September jump", "day": "2026-09-27", "hh": 2, "mm": 30, "tz": "Pacific/Auckland", "utc": "2026-09-26T14:30:00.000Z" },
+    { "name": "UTC, the last minute of a day", "day": "2026-12-31", "hh": 23, "mm": 59, "tz": "UTC", "utc": "2026-12-31T23:59:00.000Z" }
+  ],
+  "cleanEmail": [
+    { "in": " Sam@Example.com ", "out": "sam@example.com" },
+    { "in": "first.last+tag@sub.example.co", "out": "first.last+tag@sub.example.co" },
+    { "in": "a,b@x.com", "out": "" },
+    { "in": "a(b)@x.com", "out": "" },
+    { "in": "o'neil@x.com", "out": "" },
+    { "in": "a b@x.com", "out": "" },
+    { "in": "no-at.example.com", "out": "" },
+    { "in": "x@y", "out": "" },
+    { "in": null, "out": "" }
+  ],
+  "signatureOf": [
+    { "author": "Ron Smith", "biz": { "name": "The Guys Service Group", "phone": "1300 380 090", "office": "Office" }, "out": "\n\nRon\nThe Guys Service Group\n1300 380 090" },
+    { "author": "", "biz": { "name": "Acme", "phone": "", "office": "Office" }, "out": "\n\nOffice\nAcme" },
+    { "author": "", "biz": { "name": "Acme", "office": "Reception" }, "out": "\n\nReception\nAcme" },
+    { "author": "  Dana Lee ", "biz": { "name": " Acme ", "phone": " 02 1234 5678 " }, "out": "\n\nDana\nAcme\n02 1234 5678" },
+    { "author": "", "biz": {}, "out": "\n\nOffice" }
+  ],
+  "pauses": [
+    { "id": "p1", "start_wall": "2030-12-24T17:00", "end_wall": "2031-01-02T08:00", "annually": true, "automation_ids": ["wA"] },
+    { "id": "p2", "start_wall": "2032-02-29T09:00", "end_wall": "2032-03-01T09:00", "annually": true, "automation_ids": ["wB"] },
+    { "id": "p3", "start_wall": "2026-10-14T10:00", "end_wall": "2026-10-16T10:00", "annually": false, "automation_ids": ["wC", "wA"] },
+    { "id": "p4", "start_wall": "2026-03-08T02:30", "end_wall": "2026-03-08T05:00", "annually": false, "automation_ids": ["wD"] }
+  ],
+  "pauseUntil": [
+    { "name": "annual across New Year, inside it", "id": "wA", "now": "2026-12-31T01:00:00.000Z", "tz": "Australia/Sydney", "until": "2027-01-01T21:00:00.000Z" },
+    { "name": "annual across New Year, the first minute of the new year", "id": "wA", "now": "2026-12-31T13:00:00.000Z", "tz": "Australia/Sydney", "until": "2027-01-01T21:00:00.000Z" },
+    { "name": "annual, one minute before it starts", "id": "wA", "now": "2026-12-24T05:59:00.000Z", "tz": "Australia/Sydney", "until": null },
+    { "name": "29 February = 28 February in a year without it", "id": "wB", "now": "2027-02-27T23:00:00.000Z", "tz": "Australia/Sydney", "until": "2027-02-28T22:00:00.000Z" },
+    { "name": "29 February in a leap year", "id": "wB", "now": "2028-02-28T23:00:00.000Z", "tz": "Australia/Sydney", "until": "2028-02-29T22:00:00.000Z" },
+    { "name": "28 February, one minute before 9:00", "id": "wB", "now": "2027-02-27T21:59:00.000Z", "tz": "Australia/Sydney", "until": null },
+    { "name": "one range, several workflows (the first)", "id": "wC", "now": "2026-10-15T01:00:00.000Z", "tz": "Australia/Sydney", "until": "2026-10-15T23:00:00.000Z" },
+    { "name": "one range, several workflows (the second)", "id": "wA", "now": "2026-10-15T01:00:00.000Z", "tz": "Australia/Sydney", "until": "2026-10-15T23:00:00.000Z" },
+    { "name": "a workflow in no range", "id": "wZ", "now": "2026-10-15T01:00:00.000Z", "tz": "Australia/Sydney", "until": null },
+    { "name": "the end itself is not paused", "id": "wC", "now": "2026-10-15T23:00:00.000Z", "tz": "Australia/Sydney", "until": null },
+    { "name": "a start inside the Chicago jump begins at 03:30 CDT, not an hour early", "id": "wD", "now": "2026-03-08T08:00:00.000Z", "tz": "America/Chicago", "until": null },
+    { "name": "a start inside the Chicago jump, once it began", "id": "wD", "now": "2026-03-08T08:30:00.000Z", "tz": "America/Chicago", "until": "2026-03-08T10:00:00.000Z" }
+  ],
+  "pauseOccurrences": [
+    { "name": "an annual range near now: last, this and next year", "pause": "p1", "now": "2026-10-15T01:00:00.000Z", "tz": "Australia/Sydney",
+      "out": [["2025-12-24T06:00:00.000Z", "2026-01-01T21:00:00.000Z"], ["2026-12-24T06:00:00.000Z", "2027-01-01T21:00:00.000Z"], ["2027-12-24T06:00:00.000Z", "2028-01-01T21:00:00.000Z"]] },
+    { "name": "a one-off range: itself", "pause": "p3", "now": "2030-01-01T00:00:00.000Z", "tz": "Australia/Sydney", "out": [["2026-10-13T23:00:00.000Z", "2026-10-15T23:00:00.000Z"]] }
+  ]
+}

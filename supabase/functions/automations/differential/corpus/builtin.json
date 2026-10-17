@@ -1,0 +1,1240 @@
+{
+ "about": "Recorded-style phase-4 automations (stage 2 phase 1 differential, design §8.3). The ready-made rows mirror the app's autoReadyRows shapes (review, chat text, missed-call text, team notifications); the custom rows mirror what the phase-4 builder saves (every step kind, window mode, outside variant, condition and action). Replace or extend with a READ-ONLY export of the live automations table (RUNBOOK step 3) via --corpus.",
+ "automations": [
+  {
+   "name": "Review request after a closed job (ready-made shape)",
+   "trigger": {
+    "type": "jobClosed",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "r1",
+     "kind": "window",
+     "days": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "from": "09:00",
+     "until": "19:00",
+     "outside": "at",
+     "at": "10:00"
+    },
+    {
+     "id": "r2",
+     "kind": "if",
+     "match": "all",
+     "conds": [
+      {
+       "field": "dont_ask",
+       "op": "true",
+       "lock": true
+      },
+      {
+       "field": "asked_within_months",
+       "op": "true",
+       "n": 6
+      }
+     ]
+    },
+    {
+     "id": "r3",
+     "kind": "action",
+     "type": "text",
+     "templateKey": "reviewSms"
+    },
+    {
+     "id": "r4",
+     "kind": "action",
+     "type": "email",
+     "templateKey": "reviewEmailBody",
+     "subject": "How did we go, {first_name}?"
+    }
+   ]
+  },
+  {
+   "name": "Text after an unanswered website chat (ready-made shape)",
+   "trigger": {
+    "type": "chat",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "c1",
+     "kind": "wait",
+     "n": 5,
+     "unit": "minutes"
+    },
+    {
+     "id": "c2",
+     "kind": "if",
+     "match": "all",
+     "conds": [
+      {
+       "field": "has_mobile",
+       "op": "true",
+       "lock": true
+      },
+      {
+       "field": "chat_age_hours",
+       "op": "lte",
+       "n": 12
+      }
+     ]
+    },
+    {
+     "id": "c3",
+     "kind": "action",
+     "type": "text",
+     "templateKey": "chatOpen"
+    }
+   ]
+  },
+  {
+   "name": "Text after a missed call (ready-made shape)",
+   "trigger": {
+    "type": "missedCall",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "m1",
+     "kind": "if",
+     "match": "all",
+     "conds": [
+      {
+       "field": "has_mobile",
+       "op": "true",
+       "lock": true
+      }
+     ]
+    },
+    {
+     "id": "m2",
+     "kind": "action",
+     "type": "text",
+     "templateKey": "missedCall"
+    }
+   ]
+  },
+  {
+   "name": "New lead (team card)",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "t9",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner",
+       "va",
+       "manager"
+      ],
+      "people": []
+     },
+     "title": "New lead",
+     "body": ""
+    }
+   ]
+  },
+  {
+   "name": "Lead waiting (team card)",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "t1",
+     "kind": "wait",
+     "n": 15,
+     "unit": "minutes"
+    },
+    {
+     "id": "t2",
+     "kind": "window",
+     "days": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "from": "08:00",
+     "until": "18:00",
+     "outside": "skip"
+    },
+    {
+     "id": "t3",
+     "kind": "if",
+     "match": "all",
+     "conds": [
+      {
+       "field": "not_picked",
+       "op": "true",
+       "lock": true
+      }
+     ]
+    },
+    {
+     "id": "t9",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ],
+      "people": []
+     },
+     "title": "Lead waiting: {name}",
+     "body": "{service} from {source}"
+    }
+   ]
+  },
+  {
+   "name": "Unpaid job (team card)",
+   "trigger": {
+    "type": "jobClosed",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "t1",
+     "kind": "wait",
+     "n": 3,
+     "unit": "days"
+    },
+    {
+     "id": "t3",
+     "kind": "if",
+     "match": "all",
+     "conds": [
+      {
+       "field": "unpaid",
+       "op": "true",
+       "lock": true
+      }
+     ]
+    },
+    {
+     "id": "t9",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ],
+      "people": []
+     },
+     "title": "Unpaid: {name} {amount}",
+     "body": ""
+    }
+   ]
+  },
+  {
+   "name": "Missed call (team card)",
+   "trigger": {
+    "type": "missedCall",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "t9",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner",
+       "va"
+      ],
+      "people": []
+     },
+     "title": "Missed call {number}",
+     "body": ""
+    }
+   ]
+  },
+  {
+   "name": "Welcome email in office hours",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "w1",
+     "kind": "wait",
+     "n": 5,
+     "unit": "minutes"
+    },
+    {
+     "id": "w2",
+     "kind": "window",
+     "mode": "office",
+     "outside": "next"
+    },
+    {
+     "id": "w3",
+     "kind": "if",
+     "match": "all",
+     "conds": [
+      {
+       "field": "has_email",
+       "op": "true"
+      }
+     ]
+    },
+    {
+     "id": "w4",
+     "kind": "action",
+     "type": "email",
+     "templateKey": "welcomeEmail",
+     "subject": "Thanks for contacting {business_name}"
+    }
+   ]
+  },
+  {
+   "name": "Quote follow-up after 2 days",
+   "trigger": {
+    "type": "stage",
+    "params": {
+     "stage": "Quoted"
+    }
+   },
+   "steps": [
+    {
+     "id": "q1",
+     "kind": "wait",
+     "n": 2,
+     "unit": "days"
+    },
+    {
+     "id": "q2",
+     "kind": "if",
+     "match": "all",
+     "conds": [
+      {
+       "field": "stage_unchanged",
+       "op": "true"
+      }
+     ]
+    },
+    {
+     "id": "q3",
+     "kind": "action",
+     "type": "email",
+     "subject": "Your {service} quote",
+     "body": "{hi}, just checking you got our quote. {agent} at {business_name}"
+    },
+    {
+     "id": "q4",
+     "kind": "action",
+     "type": "task",
+     "title": "Call {name} about the quote",
+     "notes": "{number}",
+     "assignees": [
+      "e-va"
+     ],
+     "due_days": 1,
+     "priority": "High"
+    }
+   ]
+  },
+  {
+   "name": "Any stage move: a task",
+   "trigger": {
+    "type": "stage",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "s1",
+     "kind": "action",
+     "type": "task",
+     "title": "Check {name} ({stage})",
+     "due_days": 0
+    }
+   ]
+  },
+  {
+   "name": "After-hours lead ping",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "o1",
+     "kind": "window",
+     "mode": "outsideOffice",
+     "outside": "next"
+    },
+    {
+     "id": "o2",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "After-hours lead: {name}"
+    }
+   ]
+  },
+  {
+   "name": "Office-hours email at 07:30 otherwise",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "a1",
+     "kind": "window",
+     "mode": "office",
+     "outside": "at",
+     "at": "07:30"
+    },
+    {
+     "id": "a2",
+     "kind": "action",
+     "type": "email",
+     "subject": "We got your message",
+     "body": "{hi}, {agent} will call you soon."
+    }
+   ]
+  },
+  {
+   "name": "Unanswered chat ping",
+   "trigger": {
+    "type": "chat",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "h1",
+     "kind": "wait",
+     "n": 10,
+     "unit": "minutes"
+    },
+    {
+     "id": "h2",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner",
+       "va"
+      ]
+     },
+     "title": "Chat not answered: {name}"
+    }
+   ]
+  },
+  {
+   "name": "Aircon Google Ads leads, not VIP",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "g1",
+     "kind": "if",
+     "match": "all",
+     "conds": [
+      {
+       "field": "service",
+       "op": "in",
+       "v": [
+        "Aircon"
+       ]
+      },
+      {
+       "field": "source",
+       "op": "is",
+       "v": "Google Ads"
+      },
+      {
+       "field": "tag",
+       "op": "has_not",
+       "v": "VIP"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "kind": "action",
+     "type": "email",
+     "subject": "Your {service} enquiry",
+     "body": "{hi}, thanks for asking {business_name} about {service} ({brand})."
+    }
+   ]
+  },
+  {
+   "name": "Review email an hour after a recent job",
+   "trigger": {
+    "type": "jobClosed",
+    "params": {
+     "maxJobAgeDays": 3
+    }
+   },
+   "steps": [
+    {
+     "id": "v1",
+     "kind": "wait",
+     "n": 1,
+     "unit": "hours"
+    },
+    {
+     "id": "v2",
+     "kind": "if",
+     "match": "all",
+     "conds": [
+      {
+       "field": "dont_ask",
+       "op": "true"
+      },
+      {
+       "field": "asked_within_months",
+       "op": "true",
+       "n": 3
+      }
+     ]
+    },
+    {
+     "id": "v3",
+     "kind": "action",
+     "type": "email",
+     "subject": "Thanks, {first_name}",
+     "body": "{hi}, {technician} did your job on {job_date} ({amount})."
+    }
+   ]
+  },
+  {
+   "name": "Long nurture",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "n1",
+     "kind": "wait",
+     "n": 1,
+     "unit": "minutes"
+    },
+    {
+     "id": "n2",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Nurture start {name}"
+    },
+    {
+     "id": "n3",
+     "kind": "wait",
+     "n": 1,
+     "unit": "days"
+    },
+    {
+     "id": "n4",
+     "kind": "action",
+     "type": "email",
+     "subject": "Still need {service}?",
+     "body": "{hi}, it took {minutes} minutes to say hello."
+    },
+    {
+     "id": "n5",
+     "kind": "wait",
+     "n": 2,
+     "unit": "days"
+    },
+    {
+     "id": "n6",
+     "kind": "action",
+     "type": "text",
+     "body": "{hi}, {business_name} here."
+    },
+    {
+     "id": "n7",
+     "kind": "action",
+     "type": "task",
+     "title": "Nurture done: {name}"
+    }
+   ]
+  },
+  {
+   "name": "Booked: any-of with the moved-on gate",
+   "trigger": {
+    "type": "stage",
+    "params": {
+     "stage": "Booked"
+    }
+   },
+   "steps": [
+    {
+     "id": "b1",
+     "kind": "if",
+     "match": "any",
+     "conds": [
+      {
+       "field": "has_email",
+       "op": "true"
+      },
+      {
+       "field": "has_mobile",
+       "op": "true"
+      },
+      {
+       "field": "stage_unchanged",
+       "op": "true"
+      }
+     ]
+    },
+    {
+     "id": "b2",
+     "kind": "action",
+     "type": "email",
+     "subject": "You're booked",
+     "body": "{hi}, see you soon."
+    }
+   ]
+  },
+  {
+   "name": "Instant customer email",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "i1",
+     "kind": "action",
+     "type": "email",
+     "subject": "Hello from {business_name}",
+     "body": "{hi}."
+    }
+   ]
+  },
+  {
+   "name": "If, then a weekday window, then an email",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "k1",
+     "kind": "if",
+     "match": "all",
+     "conds": [
+      {
+       "field": "has_email",
+       "op": "true"
+      }
+     ]
+    },
+    {
+     "id": "k2",
+     "kind": "window",
+     "days": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "from": "09:00",
+     "until": "17:00",
+     "outside": "next"
+    },
+    {
+     "id": "k3",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Emailing {name}"
+    },
+    {
+     "id": "k4",
+     "kind": "action",
+     "type": "email",
+     "subject": "Weekday hello",
+     "body": "{hi}."
+    }
+   ]
+  },
+  {
+   "name": "Weekend window that ends the run",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "y1",
+     "kind": "window",
+     "days": [
+      0,
+      6
+     ],
+     "from": "10:00",
+     "until": "16:00",
+     "outside": "skip"
+    },
+    {
+     "id": "y2",
+     "kind": "action",
+     "type": "email",
+     "subject": "Weekend",
+     "body": "{hi}."
+    }
+   ]
+  },
+  {
+   "name": "A blank that cannot be filled",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "x1",
+     "kind": "action",
+     "type": "email",
+     "subject": "About {technician}",
+     "body": "{hi}."
+    }
+   ]
+  },
+  {
+   "name": "Long run: weekday window, 21 team notifications, then the email (planDefer walks back 22 steps)",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "w1",
+     "kind": "window",
+     "days": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "from": "06:00",
+     "until": "23:00",
+     "outside": "next"
+    },
+    {
+     "id": "q1",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 1: {name}"
+    },
+    {
+     "id": "q2",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 2: {name}"
+    },
+    {
+     "id": "q3",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 3: {name}"
+    },
+    {
+     "id": "q4",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 4: {name}"
+    },
+    {
+     "id": "q5",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 5: {name}"
+    },
+    {
+     "id": "q6",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 6: {name}"
+    },
+    {
+     "id": "q7",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 7: {name}"
+    },
+    {
+     "id": "q8",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 8: {name}"
+    },
+    {
+     "id": "q9",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 9: {name}"
+    },
+    {
+     "id": "q10",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 10: {name}"
+    },
+    {
+     "id": "q11",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 11: {name}"
+    },
+    {
+     "id": "q12",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 12: {name}"
+    },
+    {
+     "id": "q13",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 13: {name}"
+    },
+    {
+     "id": "q14",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 14: {name}"
+    },
+    {
+     "id": "q15",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 15: {name}"
+    },
+    {
+     "id": "q16",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 16: {name}"
+    },
+    {
+     "id": "q17",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 17: {name}"
+    },
+    {
+     "id": "q18",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 18: {name}"
+    },
+    {
+     "id": "q19",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 19: {name}"
+    },
+    {
+     "id": "q20",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 20: {name}"
+    },
+    {
+     "id": "q21",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 21: {name}"
+    },
+    {
+     "id": "e1",
+     "kind": "action",
+     "type": "email",
+     "subject": "Hello from {business_name}",
+     "body": "{hi}."
+    }
+   ]
+  },
+  {
+   "name": "Long run: not picked up, 20 team notifications, then the email (the If is checked again)",
+   "trigger": {
+    "type": "newLead",
+    "params": {}
+   },
+   "steps": [
+    {
+     "id": "c1",
+     "kind": "if",
+     "match": "all",
+     "conds": [
+      {
+       "field": "not_picked",
+       "op": "true"
+      }
+     ]
+    },
+    {
+     "id": "q1",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 1: {name}"
+    },
+    {
+     "id": "q2",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 2: {name}"
+    },
+    {
+     "id": "q3",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 3: {name}"
+    },
+    {
+     "id": "q4",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 4: {name}"
+    },
+    {
+     "id": "q5",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 5: {name}"
+    },
+    {
+     "id": "q6",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 6: {name}"
+    },
+    {
+     "id": "q7",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 7: {name}"
+    },
+    {
+     "id": "q8",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 8: {name}"
+    },
+    {
+     "id": "q9",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 9: {name}"
+    },
+    {
+     "id": "q10",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 10: {name}"
+    },
+    {
+     "id": "q11",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 11: {name}"
+    },
+    {
+     "id": "q12",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 12: {name}"
+    },
+    {
+     "id": "q13",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 13: {name}"
+    },
+    {
+     "id": "q14",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 14: {name}"
+    },
+    {
+     "id": "q15",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 15: {name}"
+    },
+    {
+     "id": "q16",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 16: {name}"
+    },
+    {
+     "id": "q17",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 17: {name}"
+    },
+    {
+     "id": "q18",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 18: {name}"
+    },
+    {
+     "id": "q19",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 19: {name}"
+    },
+    {
+     "id": "q20",
+     "kind": "action",
+     "type": "push",
+     "to": {
+      "roles": [
+       "owner"
+      ]
+     },
+     "title": "Step 20: {name}"
+    },
+    {
+     "id": "e2",
+     "kind": "action",
+     "type": "email",
+     "subject": "We got your message",
+     "body": "{hi}."
+    }
+   ]
+  }
+ ]
+}

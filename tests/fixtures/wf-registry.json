@@ -1,0 +1,8975 @@
+{
+ "about": "Written by supabase/functions/automations/tests.ts (do not edit): the engine's registry export (step \"registry\") for AV_ALL, and per business context the availability of every entry. The app's tests rebuild the export of a context from these.",
+ "availReasons": {
+  "phone": "Needs the phone line (Twilio)",
+  "xero": "Needs Xero",
+  "gbp": "Needs the Google Business Profile connector",
+  "reviews": "Turn on Google reviews first",
+  "ai": "Coming with Workflow AI",
+  "teamEmail": "Needs a team email sender",
+  "atomicTags": "Coming with the new lead card"
+ },
+ "provides": {
+  "newLead": [
+   "contact"
+  ],
+  "contact_changed": [
+   "contact"
+  ],
+  "contact_tag": [
+   "contact"
+  ],
+  "custom_date": [
+   "contact"
+  ],
+  "note_added": [
+   "contact"
+  ],
+  "task_added": [
+   "task",
+   "contact"
+  ],
+  "task_completed": [
+   "task",
+   "contact"
+  ],
+  "task_reminder": [
+   "task",
+   "contact"
+  ],
+  "contact_dnd": [
+   "contact"
+  ],
+  "inbound_webhook": [
+   "contact"
+  ],
+  "scheduler": [],
+  "call_details": [
+   "call",
+   "contact"
+  ],
+  "customer_replied": [
+   "contact"
+  ],
+  "user_replied": [
+   "contact"
+  ],
+  "form_submitted": [
+   "contact"
+  ],
+  "chat": [
+   "chat",
+   "contact"
+  ],
+  "job_booked": [
+   "contact"
+  ],
+  "booking_status": [
+   "contact"
+  ],
+  "jobClosed": [
+   "job",
+   "contact"
+  ],
+  "stage": [
+   "contact"
+  ],
+  "lead_status": [
+   "contact"
+  ],
+  "stale": [
+   "contact"
+  ],
+  "invoice": [
+   "job",
+   "contact"
+  ],
+  "commission_invoice": [],
+  "payment_received": [
+   "job",
+   "contact"
+  ],
+  "documents_contracts": [
+   "supplier"
+  ],
+  "review_received": [],
+  "doc_expiring": [
+   "employee"
+  ],
+  "insurance_expiring": []
+ },
+ "waitMax": {
+  "minutes": 1440,
+  "hours": 168,
+  "days": 365
+ },
+ "holdingWaits": [
+  "period",
+  "date",
+  "recurring",
+  "scheduled"
+ ],
+ "limits": {
+  "triggers": 10,
+  "maxStepsDefault": 100,
+  "maxStepsCeiling": 200,
+  "docBytes": 262144,
+  "name": 120,
+  "note": 2000,
+  "segments": 5,
+  "rules": 10
+ },
+ "settingsDefaults": {
+  "reentry": "off",
+  "perRecord": true,
+  "stopOnResponse": false,
+  "timezone": "business",
+  "window": {
+   "on": false,
+   "days": [
+    1,
+    2,
+    3,
+    4,
+    5
+   ],
+   "from": "08:00",
+   "until": "17:00"
+  },
+  "sender": {
+   "fromName": null
+  },
+  "markRead": false
+ },
+ "migratedSettings": {
+  "reentry": "legacy_always",
+  "perRecord": true,
+  "stopOnResponse": false,
+  "timezone": "business",
+  "window": {
+   "on": false
+  },
+  "sender": {
+   "fromName": null
+  },
+  "markRead": false
+ },
+ "base": {
+  "v": 2,
+  "availCtx": {
+   "phone": true,
+   "xero": true,
+   "gbp": true,
+   "reviews": true,
+   "ai": true,
+   "teamEmail": true,
+   "atomicTags": true
+  },
+  "apps": [
+   {
+    "key": "xero",
+    "label": "Xero",
+    "icon": "receipt"
+   },
+   {
+    "key": "gbp",
+    "label": "Google Business Profile",
+    "icon": "star"
+   }
+  ],
+  "triggers": [
+   {
+    "key": "newLead",
+    "ghl": "Contact created",
+    "label": "Lead created",
+    "description": "Runs when a new lead comes in (or a closed one is reopened).",
+    "category": "Contact",
+    "icon": "user-plus",
+    "keywords": [],
+    "help": "Runs when a new lead comes in (or a closed one is reopened).",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "When a new lead comes in",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "scan",
+    "filters": [
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month",
+     "not_picked"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "contact_changed",
+    "ghl": "Contact changed",
+    "label": "Lead changed",
+    "description": "Runs when a field on the lead card changes.",
+    "category": "Contact",
+    "icon": "zap",
+    "keywords": [],
+    "help": "Runs when a field on the lead card changes.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Lead changed",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "capture",
+    "filters": [
+     "trigger.field",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "contact_tag",
+    "ghl": "Contact tag",
+    "label": "Lead tag",
+    "description": "Runs when a tag is added to or removed from a lead.",
+    "category": "Contact",
+    "icon": "tag",
+    "keywords": [],
+    "help": "Runs when a tag is added to or removed from a lead.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Lead tag",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "capture",
+    "filters": [
+     "trigger.tag",
+     "trigger.action",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "custom_date",
+    "ghl": "Custom date reminder",
+    "label": "Custom date reminder",
+    "description": "Runs on, before or after a date on the lead or job.",
+    "category": "Contact",
+    "icon": "calendar",
+    "keywords": [],
+    "help": "Runs on, before or after a date on the lead or job.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{when} the {field}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "field": {
+       "type": "string",
+       "enum": [
+        "lead.booked_for",
+        "lead.next_follow_up",
+        "job.date"
+       ]
+      },
+      "when": {
+       "type": "string",
+       "enum": [
+        "on",
+        "before",
+        "after"
+       ]
+      },
+      "offset": {
+       "type": "object",
+       "properties": {
+        "n": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 365
+        },
+        "unit": {
+         "type": "string",
+         "enum": [
+          "minutes",
+          "hours",
+          "days"
+         ]
+        }
+       },
+       "required": [
+        "n",
+        "unit"
+       ],
+       "additionalProperties": false
+      },
+      "at": {
+       "type": "string",
+       "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+      }
+     },
+     "required": [
+      "field",
+      "when"
+     ],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "time",
+    "filters": [
+     "job.amount",
+     "job.date",
+     "job.type",
+     "job.technician",
+     "job.payment_status",
+     "unpaid",
+     "dont_ask",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": true,
+    "contactless": false
+   },
+   {
+    "key": "note_added",
+    "ghl": "Note added",
+    "label": "Note added",
+    "description": "Runs when a note is added to a lead.",
+    "category": "Contact",
+    "icon": "note",
+    "keywords": [],
+    "help": "Runs when a note is added to a lead.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Note added",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "capture",
+    "filters": [
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "task_added",
+    "ghl": "Task added",
+    "label": "Task added",
+    "description": "Runs when a task is added.",
+    "category": "Contact",
+    "icon": "check",
+    "keywords": [],
+    "help": "Runs when a task is added.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Task added",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "task",
+    "source": "capture",
+    "filters": [
+     "task.title",
+     "task.due",
+     "task.status",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "task_completed",
+    "ghl": "Task completed",
+    "label": "Task completed",
+    "description": "Runs when a task is marked done.",
+    "category": "Contact",
+    "icon": "check",
+    "keywords": [],
+    "help": "Runs when a task is marked done.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Task completed",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "task",
+    "source": "capture",
+    "filters": [
+     "task.title",
+     "task.due",
+     "task.status",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "task_reminder",
+    "ghl": "Task reminder",
+    "label": "Task reminder",
+    "description": "Runs before a task is due.",
+    "category": "Contact",
+    "icon": "bell",
+    "keywords": [],
+    "help": "Runs before a task is due.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Task reminder",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "before": {
+       "type": "object",
+       "properties": {
+        "n": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 365
+        },
+        "unit": {
+         "type": "string",
+         "enum": [
+          "minutes",
+          "hours",
+          "days"
+         ]
+        }
+       },
+       "required": [
+        "n",
+        "unit"
+       ],
+       "additionalProperties": false
+      }
+     },
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "task",
+    "source": "time",
+    "filters": [
+     "task.title",
+     "task.due",
+     "task.status",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": true,
+    "contactless": false
+   },
+   {
+    "key": "contact_dnd",
+    "ghl": "Contact DND",
+    "label": "Lead DND",
+    "description": "Runs when automatic messages to a lead are stopped or allowed again.",
+    "category": "Contact",
+    "icon": "slash",
+    "keywords": [],
+    "help": "Runs when automatic messages to a lead are stopped or allowed again.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Lead DND",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "capture",
+    "filters": [
+     "trigger.action",
+     "trigger.channel",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "inbound_webhook",
+    "ghl": "Inbound webhook",
+    "label": "Inbound webhook",
+    "description": "Runs when another system sends data to this workflow's link.",
+    "category": "Events",
+    "icon": "link",
+    "keywords": [],
+    "help": "Runs when another system sends data to this workflow's link.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "When data comes in by webhook",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "match": {
+       "type": "object",
+       "properties": {
+        "phone": {
+         "type": "string",
+         "maxLength": 40,
+         "pattern": "^[a-z0-9_]{1,40}$"
+        },
+        "email": {
+         "type": "string",
+         "maxLength": 40,
+         "pattern": "^[a-z0-9_]{1,40}$"
+        }
+       },
+       "required": [],
+       "additionalProperties": false
+      }
+     },
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "hook",
+    "source": "hook",
+    "filters": [
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": "maybe"
+   },
+   {
+    "key": "scheduler",
+    "ghl": "Scheduler",
+    "label": "Scheduler",
+    "description": "Runs on a schedule (no lead).",
+    "category": "Events",
+    "icon": "clock",
+    "keywords": [],
+    "help": "Runs on a schedule (no lead).",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Every {freq} at {at}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "freq": {
+       "type": "string",
+       "enum": [
+        "daily",
+        "weekly",
+        "monthly"
+       ]
+      },
+      "days": {
+       "type": "array",
+       "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 6
+       },
+       "minItems": 1,
+       "maxItems": 7,
+       "uniqueItems": true
+      },
+      "monthDays": {
+       "type": "array",
+       "items": {
+        "type": "integer",
+        "minimum": -1,
+        "maximum": 31
+       },
+       "minItems": 1,
+       "maxItems": 31,
+       "uniqueItems": true
+      },
+      "at": {
+       "type": "string",
+       "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+      }
+     },
+     "required": [
+      "freq",
+      "at"
+     ],
+     "additionalProperties": false
+    },
+    "recordKind": "none",
+    "source": "time",
+    "filters": [
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": true,
+    "contactless": true
+   },
+   {
+    "key": "call_details",
+    "ghl": "Call details",
+    "label": "Call details",
+    "description": "Runs when a call is missed, answered or made.",
+    "category": "Events",
+    "icon": "phone",
+    "keywords": [],
+    "help": "Runs when a call is missed, answered or made.",
+    "aliases": [
+     "missedCall"
+    ],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "When a call comes in",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "call",
+    "source": "scan",
+    "filters": [
+     "trigger.call_status",
+     "call.status",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "customer_replied",
+    "ghl": "Customer replied",
+    "label": "Lead replied",
+    "description": "Runs when a lead replies by chat or email.",
+    "category": "Events",
+    "icon": "message",
+    "keywords": [],
+    "help": "Runs when a lead replies by chat or email.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "When the lead replies",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "capture",
+    "filters": [
+     "trigger.channel",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "user_replied",
+    "ghl": "User replied",
+    "label": "User replied",
+    "description": "Someone in the office replied",
+    "category": "Events",
+    "icon": "message",
+    "keywords": [],
+    "help": "Someone in the office replied",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "When someone in the office replies",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "capture",
+    "filters": [
+     "trigger.channel",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "form_submitted",
+    "ghl": "Form submitted",
+    "label": "Website form submitted",
+    "description": "Runs when the website form is sent.",
+    "category": "Events",
+    "icon": "form",
+    "keywords": [],
+    "help": "Runs when the website form is sent.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "When the website form is sent",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "scan",
+    "filters": [
+     "trigger.form",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month",
+     "not_picked"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "chat",
+    "ghl": "Conversations SLA",
+    "label": "Conversations SLA",
+    "description": "Runs when a website chat is not answered in time.",
+    "category": "Communication",
+    "icon": "chat",
+    "keywords": [],
+    "help": "Runs when a website chat is not answered in time.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "When a website chat is not answered",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "chat",
+    "source": "scan",
+    "filters": [
+     "chat_age_hours",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "job_booked",
+    "ghl": "Customer booked appointment",
+    "label": "Customer booked a job",
+    "description": "Runs when a lead is booked in.",
+    "category": "Jobs",
+    "icon": "calendar",
+    "keywords": [],
+    "help": "Runs when a lead is booked in.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Customer booked a job",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "capture",
+    "filters": [
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": true,
+    "contactless": false
+   },
+   {
+    "key": "booking_status",
+    "ghl": "Appointment status",
+    "label": "Job booking status",
+    "description": "Runs when a booking's status changes.",
+    "category": "Jobs",
+    "icon": "calendar",
+    "keywords": [],
+    "help": "Runs when a booking's status changes.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Job booking status",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "capture",
+    "filters": [
+     "trigger.status",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": true,
+    "contactless": false
+   },
+   {
+    "key": "jobClosed",
+    "ghl": null,
+    "label": "Job closed",
+    "description": "Runs when a job is entered as done.",
+    "category": "Jobs",
+    "icon": "briefcase",
+    "keywords": [],
+    "help": "Runs when a job is entered as done.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "When a job is closed",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "maxJobAgeDays": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 30
+      }
+     },
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "job",
+    "source": "scan",
+    "filters": [
+     "job.amount",
+     "job.date",
+     "job.type",
+     "job.technician",
+     "job.payment_status",
+     "unpaid",
+     "dont_ask",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": true,
+    "contactless": false
+   },
+   {
+    "key": "stage",
+    "ghl": "Pipeline stage changed",
+    "label": "Pipeline stage changed",
+    "description": "Runs when a lead moves to a pipeline stage.",
+    "category": "Pipeline",
+    "icon": "columns",
+    "keywords": [],
+    "help": "Runs when a lead moves to a pipeline stage.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "When a lead moves to a pipeline stage",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "scan",
+    "filters": [
+     "trigger.stage",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "lead_status",
+    "ghl": "Opportunity status changed",
+    "label": "Lead status changed",
+    "description": "Runs when a lead is marked open, won or lost.",
+    "category": "Pipeline",
+    "icon": "flag",
+    "keywords": [],
+    "help": "Runs when a lead is marked open, won or lost.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Lead status changed",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "capture",
+    "filters": [
+     "trigger.stage",
+     "trigger.status",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "stale",
+    "ghl": "Stale opportunities",
+    "label": "Stale leads",
+    "description": "Runs when a lead has stayed in its stage for some days.",
+    "category": "Pipeline",
+    "icon": "hourglass",
+    "keywords": [],
+    "help": "Runs when a lead has stayed in its stage for some days.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "When a lead stays {days} days in its stage",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "days": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 365
+      }
+     },
+     "required": [
+      "days"
+     ],
+     "additionalProperties": false
+    },
+    "recordKind": "contact",
+    "source": "time",
+    "filters": [
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": true,
+    "contactless": false
+   },
+   {
+    "key": "invoice",
+    "ghl": "Invoice",
+    "label": "Invoice",
+    "description": "Runs when an invoice changes.",
+    "category": "Payments",
+    "icon": "receipt",
+    "keywords": [],
+    "help": "Runs when an invoice changes.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Invoice",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "app": "xero",
+    "recordKind": "job",
+    "source": "capture",
+    "filters": [
+     "job.amount",
+     "job.date",
+     "job.type",
+     "job.technician",
+     "job.payment_status",
+     "unpaid",
+     "dont_ask",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": false
+   },
+   {
+    "key": "commission_invoice",
+    "ghl": null,
+    "label": "Commission invoice received",
+    "description": "Runs when a contractor's weekly invoice comes in.",
+    "category": "Ours",
+    "icon": "receipt",
+    "keywords": [],
+    "help": "Runs when a contractor's weekly invoice comes in.",
+    "aliases": [],
+    "engine": false,
+    "hidden": true,
+    "availability": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "narration": "Commission invoice received",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "none",
+    "source": "capture",
+    "filters": [
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": true,
+    "mirror": "invoice"
+   },
+   {
+    "key": "payment_received",
+    "ghl": "Payment received",
+    "label": "Payment received (job paid)",
+    "description": "Runs when a job is marked paid.",
+    "category": "Payments",
+    "icon": "dollar",
+    "keywords": [],
+    "help": "Runs when a job is marked paid.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Payment received (job paid)",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "job",
+    "source": "capture",
+    "filters": [
+     "job.amount",
+     "job.date",
+     "job.type",
+     "job.technician",
+     "job.payment_status",
+     "unpaid",
+     "dont_ask",
+     "service",
+     "source",
+     "tag",
+     "stage",
+     "has_mobile",
+     "has_email",
+     "lead.name",
+     "lead.email",
+     "lead.phone",
+     "lead.postcode",
+     "lead.created",
+     "lead.stage_changed",
+     "lead.booked_for",
+     "lead.next_follow_up",
+     "lead.quote_amount",
+     "lead.lost_reason",
+     "lead.assigned_user",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": true,
+    "contactless": false
+   },
+   {
+    "key": "documents_contracts",
+    "ghl": "Documents & contracts",
+    "label": "Contractor agreement signed",
+    "description": "Runs when a contractor signs the agreement.",
+    "category": "Payments",
+    "icon": "file",
+    "keywords": [],
+    "help": "Runs when a contractor signs the agreement.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Contractor agreement signed",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "supplier",
+    "source": "capture",
+    "filters": [
+     "trigger.status",
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": true
+   },
+   {
+    "key": "review_received",
+    "ghl": "New review received",
+    "label": "New Google review",
+    "description": "Runs when a new Google review comes in.",
+    "category": "Events",
+    "icon": "star",
+    "keywords": [],
+    "help": "Runs when a new Google review comes in.",
+    "aliases": [
+     "googleReview"
+    ],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "New Google review",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "app": "gbp",
+    "recordKind": "none",
+    "source": "capture",
+    "filters": [
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": true
+   },
+   {
+    "key": "doc_expiring",
+    "ghl": null,
+    "label": "Employee document expiring",
+    "description": "Runs before an employee's document expires.",
+    "category": "Ours",
+    "icon": "id",
+    "keywords": [],
+    "help": "Runs before an employee's document expires.",
+    "aliases": [
+     "docExpiry"
+    ],
+    "engine": false,
+    "hidden": true,
+    "availability": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "narration": "Employee document expiring",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "employee",
+    "source": "time",
+    "filters": [
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": true
+   },
+   {
+    "key": "insurance_expiring",
+    "ghl": null,
+    "label": "Business insurance expiring",
+    "description": "Runs before the business insurance expires.",
+    "category": "Ours",
+    "icon": "shield",
+    "keywords": [],
+    "help": "Runs before the business insurance expires.",
+    "aliases": [
+     "bizInsurance"
+    ],
+    "engine": false,
+    "hidden": true,
+    "availability": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "narration": "Business insurance expiring",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "recordKind": "none",
+    "source": "time",
+    "filters": [
+     "now.day_of_week",
+     "now.day_of_month"
+    ],
+    "alwaysReenter": false,
+    "contactless": true
+   }
+  ],
+  "actions": [
+   {
+    "key": "update_field",
+    "ghl": "Update contact field",
+    "label": "Update lead field",
+    "description": "Changes a field on the lead card.",
+    "category": "Contact",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Changes a field on the lead card.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Set {field} to {value}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "field": {
+       "type": "string",
+       "enum": [
+        "full_name",
+        "postcode",
+        "division",
+        "source",
+        "next_follow_up",
+        "booked_for",
+        "quote_amount",
+        "lost_reason"
+       ]
+      },
+      "value": {
+       "type": "string",
+       "maxLength": 500
+      }
+     },
+     "required": [
+      "field",
+      "value"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "add_tag",
+    "ghl": "Add contact tag",
+    "label": "Add lead tag",
+    "description": "Adds tags to the lead.",
+    "category": "Contact",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Adds tags to the lead.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Add the tags {tags}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "tags": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "x-source": "catalog.tags",
+        "minLength": 1,
+        "maxLength": 100
+       },
+       "minItems": 1,
+       "maxItems": 10
+      }
+     },
+     "required": [
+      "tags"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "remove_tag",
+    "ghl": "Remove contact tag",
+    "label": "Remove lead tag",
+    "description": "Removes tags from the lead.",
+    "category": "Contact",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Removes tags from the lead.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Remove the tags {tags}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "tags": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "x-source": "catalog.tags",
+        "minLength": 1,
+        "maxLength": 100
+       },
+       "minItems": 1,
+       "maxItems": 10
+      }
+     },
+     "required": [
+      "tags"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "assign_user",
+    "ghl": "Assign to user",
+    "label": "Assign to user",
+    "description": "Sets who the lead is assigned to.",
+    "category": "Contact",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Sets who the lead is assigned to.",
+    "aliases": [
+     "assign_owner"
+    ],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Assign to user",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "user": {
+       "type": "string",
+       "x-source": "catalog.people",
+       "minLength": 1,
+       "maxLength": 100
+      }
+     },
+     "required": [
+      "user"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "remove_assigned_user",
+    "ghl": "Remove assigned user",
+    "label": "Remove assigned user",
+    "description": "Clears who the lead is assigned to.",
+    "category": "Contact",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Clears who the lead is assigned to.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Remove assigned user",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "dnd",
+    "ghl": "Enable/disable DND",
+    "label": "Stop automatic messages",
+    "description": "Stops automatic messages to the lead.",
+    "category": "Contact",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Stops automatic messages to the lead.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Stop automatic messages ({channel})",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "mode": {
+       "type": "string",
+       "enum": [
+        "enable",
+        "disable"
+       ],
+       "x-greyed": {
+        "disable": "Only a person can turn automatic messages back on"
+       }
+      },
+      "channel": {
+       "type": "string",
+       "enum": [
+        "all",
+        "email",
+        "sms",
+        "chat"
+       ]
+      }
+     },
+     "required": [
+      "mode",
+      "channel"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "add_note",
+    "ghl": "Add to notes",
+    "label": "Add to notes",
+    "description": "Adds a note to the lead card.",
+    "category": "Contact",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Adds a note to the lead card.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Add a note",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "text": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 2000
+      }
+     },
+     "required": [
+      "text"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "add_task",
+    "ghl": "Add task",
+    "label": "Add task",
+    "description": "Adds a task in the app.",
+    "category": "Contact",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Adds a task in the app.",
+    "aliases": [
+     "task"
+    ],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Add a task: {title}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "title": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 120
+      },
+      "notes": {
+       "type": "string",
+       "maxLength": 2000
+      },
+      "due_days": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 365
+      },
+      "assignees": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "maxLength": 100
+       },
+       "minItems": 0,
+       "maxItems": 10
+      },
+      "priority": {
+       "type": "string",
+       "enum": [
+        "Low",
+        "Medium",
+        "High",
+        "Urgent"
+       ]
+      }
+     },
+     "required": [
+      "title"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "team",
+    "channel": "task",
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "edit_conversation",
+    "ghl": "Edit conversation",
+    "label": "Edit conversation",
+    "description": "Marks the lead's conversation as read",
+    "category": "Contact",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Marks the lead's conversation as read",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Edit conversation",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "send_email",
+    "ghl": "Send email",
+    "label": "Send email",
+    "description": "Sends an email to the lead.",
+    "category": "Communication",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Sends an email to the lead.",
+    "aliases": [
+     "email"
+    ],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Email the lead: {subject}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "subject": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 200
+      },
+      "body": {
+       "type": "string",
+       "maxLength": 5000
+      },
+      "templateKey": {
+       "type": "string",
+       "x-source": "catalog.templates",
+       "minLength": 1,
+       "maxLength": 100
+      }
+     },
+     "required": [
+      "subject"
+     ],
+     "additionalProperties": false,
+     "x-requireOne": [
+      "body",
+      "templateKey"
+     ],
+     "anyOf": [
+      {
+       "required": [
+        "body"
+       ]
+      },
+      {
+       "required": [
+        "templateKey"
+       ]
+      }
+     ]
+    },
+    "kind": "action",
+    "audience": "customer",
+    "channel": "email",
+    "needsContact": true,
+    "outbound": true
+   },
+   {
+    "key": "send_sms",
+    "ghl": "Send SMS",
+    "label": "Send SMS",
+    "description": "Sends a text to the lead.",
+    "category": "Communication",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Sends a text to the lead.",
+    "aliases": [
+     "text"
+    ],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Text the lead",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "body": {
+       "type": "string",
+       "maxLength": 640
+      },
+      "templateKey": {
+       "type": "string",
+       "x-source": "catalog.templates",
+       "minLength": 1,
+       "maxLength": 100
+      }
+     },
+     "required": [],
+     "additionalProperties": false,
+     "x-requireOne": [
+      "body",
+      "templateKey"
+     ],
+     "anyOf": [
+      {
+       "required": [
+        "body"
+       ]
+      },
+      {
+       "required": [
+        "templateKey"
+       ]
+      }
+     ]
+    },
+    "kind": "action",
+    "audience": "customer",
+    "channel": "sms",
+    "needsContact": true,
+    "outbound": true
+   },
+   {
+    "key": "internal_notification",
+    "ghl": "Send internal notification",
+    "label": "Send internal notification",
+    "description": "Notifies people in the team.",
+    "category": "Communication",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Notifies people in the team.",
+    "aliases": [
+     "push"
+    ],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Notify the team: {title}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "channel": {
+       "type": "string",
+       "enum": [
+        "push",
+        "email",
+        "sms"
+       ],
+       "x-greyed": {
+        "email": "teamEmail",
+        "sms": "phone"
+       }
+      },
+      "to": {
+       "type": "object",
+       "properties": {
+        "people": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "x-source": "catalog.people",
+          "minLength": 1,
+          "maxLength": 100
+         },
+         "minItems": 0,
+         "maxItems": 20
+        },
+        "roles": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "enum": [
+           "owner",
+           "manager",
+           "va",
+           "technician"
+          ]
+         },
+         "minItems": 0,
+         "maxItems": 4,
+         "uniqueItems": true
+        }
+       },
+       "required": [],
+       "additionalProperties": false
+      },
+      "title": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 120
+      },
+      "body": {
+       "type": "string",
+       "maxLength": 240
+      }
+     },
+     "required": [
+      "to",
+      "title"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "team",
+    "channel": "push",
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "send_review_request",
+    "ghl": "Send review request",
+    "label": "Send review request",
+    "description": "Asks the customer for a Google review.",
+    "category": "Communication",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Asks the customer for a Google review.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Send review request",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "customer",
+    "channel": "review",
+    "needsContact": true,
+    "outbound": true
+   },
+   {
+    "key": "send_live_chat",
+    "ghl": "Send live chat message",
+    "label": "Send live chat message",
+    "description": "Replies in the lead's open website chat.",
+    "category": "Communication",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Replies in the lead's open website chat.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Reply in the lead's chat",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "body": {
+       "type": "string",
+       "maxLength": 640
+      },
+      "templateKey": {
+       "type": "string",
+       "x-source": "catalog.templates",
+       "minLength": 1,
+       "maxLength": 100
+      }
+     },
+     "required": [],
+     "additionalProperties": false,
+     "x-requireOne": [
+      "body",
+      "templateKey"
+     ],
+     "anyOf": [
+      {
+       "required": [
+        "body"
+       ]
+      },
+      {
+       "required": [
+        "templateKey"
+       ]
+      }
+     ]
+    },
+    "kind": "action",
+    "audience": "customer",
+    "channel": "chat",
+    "needsContact": true,
+    "outbound": true
+   },
+   {
+    "key": "manual_call",
+    "ghl": "Manual action to call",
+    "label": "Manual action to call",
+    "description": "Adds a call-the-lead task for the office.",
+    "category": "Communication",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Adds a call-the-lead task for the office.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Task to call the lead: {title}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "title": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 120
+      },
+      "notes": {
+       "type": "string",
+       "maxLength": 2000
+      }
+     },
+     "required": [
+      "title"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "team",
+    "channel": "task",
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "manual_sms",
+    "ghl": "Manual action to SMS",
+    "label": "Manual action to SMS",
+    "description": "Adds a text-the-lead task for the office.",
+    "category": "Communication",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Adds a text-the-lead task for the office.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Task to text the lead: {title}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "title": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 120
+      },
+      "notes": {
+       "type": "string",
+       "maxLength": 2000
+      }
+     },
+     "required": [
+      "title"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "team",
+    "channel": "task",
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "internal_comment",
+    "ghl": "Add internal comments",
+    "label": "Add internal comment",
+    "description": "Adds a comment to the lead's history.",
+    "category": "Communication",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Adds a comment to the lead's history.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Add an internal comment",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "text": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 2000
+      }
+     },
+     "required": [
+      "text"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "move_stage",
+    "ghl": "Create/update opportunity",
+    "label": "Move lead to pipeline stage",
+    "description": "Moves the lead to a stage.",
+    "category": "Pipeline",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Moves the lead to a stage.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Move the lead to {stage}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "stage": {
+       "type": "string",
+       "x-source": "catalog.stages",
+       "minLength": 1,
+       "maxLength": 100
+      }
+     },
+     "required": [
+      "stage"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "mark_lost",
+    "ghl": null,
+    "label": "Mark lead lost",
+    "description": "Marks the lead lost.",
+    "category": "Pipeline",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Marks the lead lost.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Mark the lead lost",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "reason": {
+       "type": "string",
+       "maxLength": 100
+      }
+     },
+     "required": [],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "send_invoice",
+    "ghl": "Send invoice",
+    "label": "Send invoice",
+    "description": "Sends an invoice.",
+    "category": "Payments",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Sends an invoice.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Send invoice",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "app": "xero",
+    "kind": "action",
+    "audience": "customer",
+    "channel": "email",
+    "needsContact": true,
+    "outbound": true
+   },
+   {
+    "key": "send_estimate",
+    "ghl": "Send estimate",
+    "label": "Send quote",
+    "description": "Sends a quote.",
+    "category": "Payments",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Sends a quote.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Send quote",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "app": "xero",
+    "kind": "action",
+    "audience": "customer",
+    "channel": "email",
+    "needsContact": true,
+    "outbound": true
+   },
+   {
+    "key": "webhook",
+    "ghl": "Webhook",
+    "label": "Webhook",
+    "description": "Sends the lead's details to another system.",
+    "category": "Send data",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Sends the lead's details to another system.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Send data to {url}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "url": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 2048
+      },
+      "method": {
+       "type": "string",
+       "enum": [
+        "POST",
+        "PUT"
+       ]
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 60
+       },
+       "minItems": 0,
+       "maxItems": 50
+      },
+      "template": {
+       "type": "string",
+       "maxLength": 16000
+      },
+      "headers": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "properties": {
+         "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+         },
+         "value": {
+          "type": "string",
+          "maxLength": 500
+         }
+        },
+        "required": [
+         "name",
+         "value"
+        ],
+        "additionalProperties": false
+       },
+       "minItems": 0,
+       "maxItems": 10
+      }
+     },
+     "required": [
+      "url"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "external",
+    "channel": "webhook",
+    "needsContact": false,
+    "outbound": true
+   },
+   {
+    "key": "update_custom_value",
+    "ghl": "Update custom value",
+    "label": "Update custom value",
+    "description": "Changes one of the business's custom values.",
+    "category": "Internal",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Changes one of the business's custom values.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Set the custom value {key} to {value}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "key": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 40,
+       "pattern": "^[a-z][a-z0-9_]{0,39}$"
+      },
+      "value": {
+       "type": "string",
+       "maxLength": 500
+      }
+     },
+     "required": [
+      "key",
+      "value"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "internal",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "math",
+    "ghl": "Math operation",
+    "label": "Math operation",
+    "description": "Works out a number.",
+    "category": "Internal",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Works out a number.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": false,
+     "reason": "Coming later"
+    },
+    "narration": "Math operation",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "none",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "ai_agent",
+    "ghl": "AI Agent",
+    "label": "AI Agent",
+    "description": "An AI agent step.",
+    "category": "Workflow AI",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "An AI agent step.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "AI Agent",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "none",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "ai_decision",
+    "ghl": "AI decision maker",
+    "label": "AI decision maker",
+    "description": "Lets AI pick a branch.",
+    "category": "Workflow AI",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Lets AI pick a branch.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "AI decision maker",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "none",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   },
+   {
+    "key": "ai_summarize",
+    "ghl": "AI summarize",
+    "label": "AI summarize",
+    "description": "Lets AI summarise the conversation.",
+    "category": "Workflow AI",
+    "icon": "bolt",
+    "keywords": [],
+    "help": "Lets AI summarise the conversation.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "AI summarize",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "kind": "action",
+    "audience": "none",
+    "channel": null,
+    "needsContact": false,
+    "outbound": false
+   }
+  ],
+  "waits": [
+   {
+    "key": "period",
+    "ghl": "For a set period of time",
+    "label": "For a set period of time",
+    "description": "Ex: 2 days, 6 hours, 30 minutes",
+    "category": "Internal",
+    "icon": "hourglass",
+    "keywords": [],
+    "help": "Ex: 2 days, 6 hours, 30 minutes",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Wait {n} {unit}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "n": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 1440
+      },
+      "unit": {
+       "type": "string",
+       "enum": [
+        "seconds",
+        "minutes",
+        "hours",
+        "days"
+       ],
+       "x-greyed": {
+        "seconds": "The timer runs once a minute"
+       }
+      },
+      "resume": {
+       "type": "object",
+       "properties": {
+        "days": {
+         "type": "array",
+         "items": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+         },
+         "minItems": 1,
+         "maxItems": 7,
+         "uniqueItems": true
+        },
+        "from": {
+         "type": "string",
+         "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+        },
+        "until": {
+         "type": "string",
+         "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+        }
+       },
+       "required": [
+        "days",
+        "from",
+        "until"
+       ],
+       "additionalProperties": false
+      }
+     },
+     "required": [
+      "n",
+      "unit"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "wait",
+    "wakeOn": []
+   },
+   {
+    "key": "date",
+    "ghl": "Until a specific date/time",
+    "label": "Until a specific date/time",
+    "description": "Ex: December 4th at 9:00 AM",
+    "category": "Internal",
+    "icon": "hourglass",
+    "keywords": [],
+    "help": "Ex: December 4th at 9:00 AM",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Wait until {at}{ref}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "at": {
+       "type": "string",
+       "maxLength": 16,
+       "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$"
+      },
+      "ref": {
+       "type": "string",
+       "enum": [
+        "lead.booked_for",
+        "lead.next_follow_up",
+        "job.date",
+        "task.due"
+       ]
+      },
+      "dayTime": {
+       "type": "string",
+       "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+      },
+      "when": {
+       "type": "string",
+       "enum": [
+        "on",
+        "before",
+        "after"
+       ]
+      },
+      "offset": {
+       "type": "object",
+       "properties": {
+        "n": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 365
+        },
+        "unit": {
+         "type": "string",
+         "enum": [
+          "minutes",
+          "hours",
+          "days"
+         ]
+        }
+       },
+       "required": [
+        "n",
+        "unit"
+       ],
+       "additionalProperties": false
+      },
+      "ifPassed": {
+       "type": "string",
+       "enum": [
+        "continue",
+        "end",
+        "goto",
+        "skip_comms"
+       ]
+      },
+      "gotoStep": {
+       "type": [
+        "string",
+        "null"
+       ],
+       "pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$",
+       "x-ref": "node"
+      }
+     },
+     "required": [
+      "when",
+      "ifPassed"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "wait",
+    "wakeOn": []
+   },
+   {
+    "key": "recurring",
+    "ghl": "Until a recurring window opens",
+    "label": "Until a recurring window opens",
+    "description": "Ex: Every Tuesday, 15th of each month",
+    "category": "Internal",
+    "icon": "hourglass",
+    "keywords": [],
+    "help": "Ex: Every Tuesday, 15th of each month",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Wait for the next allowed time",
+    "fields": {
+     "oneOf": [
+      {
+       "type": "object",
+       "properties": {
+        "mode": {
+         "const": "times"
+        },
+        "freq": {
+         "type": "string",
+         "enum": [
+          "weekly",
+          "monthly",
+          "yearly"
+         ]
+        },
+        "days": {
+         "type": "array",
+         "items": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+         },
+         "minItems": 1,
+         "maxItems": 7,
+         "uniqueItems": true
+        },
+        "monthDays": {
+         "type": "array",
+         "items": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 31
+         },
+         "minItems": 1,
+         "maxItems": 31,
+         "uniqueItems": true
+        },
+        "nth": {
+         "type": "array",
+         "items": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 5
+         },
+         "minItems": 1,
+         "maxItems": 5,
+         "uniqueItems": true
+        },
+        "months": {
+         "type": "array",
+         "items": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+         },
+         "minItems": 1,
+         "maxItems": 12,
+         "uniqueItems": true
+        },
+        "date": {
+         "type": "string",
+         "maxLength": 5,
+         "pattern": "^\\d{2}-\\d{2}$"
+        },
+        "at": {
+         "type": "string",
+         "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+        }
+       },
+       "required": [
+        "mode",
+        "freq",
+        "at"
+       ],
+       "additionalProperties": false
+      },
+      {
+       "type": "object",
+       "properties": {
+        "mode": {
+         "const": "window"
+        },
+        "window": {
+         "type": "object",
+         "properties": {
+          "use": {
+           "type": "string",
+           "enum": [
+            "office",
+            "outsideOffice",
+            "custom"
+           ]
+          },
+          "days": {
+           "type": "array",
+           "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6
+           },
+           "minItems": 1,
+           "maxItems": 7,
+           "uniqueItems": true
+          },
+          "from": {
+           "type": "string",
+           "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+          },
+          "until": {
+           "type": "string",
+           "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+          },
+          "outside": {
+           "type": "string",
+           "enum": [
+            "next",
+            "at",
+            "end"
+           ]
+          },
+          "at": {
+           "type": "string",
+           "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+          }
+         },
+         "required": [
+          "use",
+          "outside"
+         ],
+         "additionalProperties": false
+        }
+       },
+       "required": [
+        "mode",
+        "window"
+       ],
+       "additionalProperties": false
+      }
+     ]
+    },
+    "kind": "wait",
+    "wakeOn": []
+   },
+   {
+    "key": "scheduled",
+    "ghl": "Until a scheduled date/time",
+    "label": "Until a scheduled date/time",
+    "description": "Ex: 1 hour before scheduled appointment",
+    "category": "Internal",
+    "icon": "hourglass",
+    "keywords": [],
+    "help": "Ex: 1 hour before scheduled appointment",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Wait until {when} the {anchor}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "anchor": {
+       "type": "string",
+       "enum": [
+        "job.date",
+        "lead.booked_for",
+        "lead.next_follow_up",
+        "invoice.due"
+       ],
+       "x-greyed": {
+        "invoice.due": "xero"
+       }
+      },
+      "when": {
+       "type": "string",
+       "enum": [
+        "at",
+        "before",
+        "after"
+       ]
+      },
+      "offset": {
+       "type": "object",
+       "properties": {
+        "n": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 365
+        },
+        "unit": {
+         "type": "string",
+         "enum": [
+          "minutes",
+          "hours",
+          "days"
+         ]
+        }
+       },
+       "required": [
+        "n",
+        "unit"
+       ],
+       "additionalProperties": false
+      },
+      "dayTime": {
+       "type": "string",
+       "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$"
+      },
+      "ifPassed": {
+       "type": "string",
+       "enum": [
+        "continue",
+        "end",
+        "goto",
+        "skip_comms"
+       ]
+      },
+      "gotoStep": {
+       "type": [
+        "string",
+        "null"
+       ],
+       "pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$",
+       "x-ref": "node"
+      }
+     },
+     "required": [
+      "anchor",
+      "when",
+      "ifPassed"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "wait",
+    "wakeOn": []
+   },
+   {
+    "key": "reply",
+    "ghl": "Until the contact replies",
+    "label": "Until the lead replies",
+    "description": "Wait for a reply on SMS, Email, etc.",
+    "category": "Internal",
+    "icon": "hourglass",
+    "keywords": [],
+    "help": "Wait for a reply on SMS, Email, etc.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Wait for the lead to reply ({channels})",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "channels": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "enum": [
+         "chat",
+         "email",
+         "sms"
+        ],
+        "x-greyed": {
+         "sms": "phone"
+        }
+       },
+       "minItems": 1,
+       "maxItems": 3,
+       "uniqueItems": true
+      },
+      "timeout": {
+       "type": "object",
+       "properties": {
+        "n": {
+         "type": "integer",
+         "minimum": 1,
+         "maximum": 365
+        },
+        "unit": {
+         "type": "string",
+         "enum": [
+          "minutes",
+          "hours",
+          "days"
+         ]
+        }
+       },
+       "required": [
+        "n",
+        "unit"
+       ],
+       "additionalProperties": false
+      }
+     },
+     "required": [
+      "channels"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "wait",
+    "wakeOn": [
+     "customer_replied"
+    ],
+    "portLabels": {
+     "next": "Replied",
+     "timeout": "Timed out"
+    }
+   },
+   {
+    "key": "user_reply",
+    "ghl": "Until a user replies",
+    "label": "Until a user replies",
+    "description": "Wait for a user to send a message to the contact",
+    "category": "Internal",
+    "icon": "hourglass",
+    "keywords": [],
+    "help": "Wait for a user to send a message to the contact",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Wait for the office to reply ({channels})",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "channels": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "enum": [
+         "chat",
+         "email",
+         "sms"
+        ],
+        "x-greyed": {
+         "sms": "phone"
+        }
+       },
+       "minItems": 1,
+       "maxItems": 3,
+       "uniqueItems": true
+      },
+      "users": {
+       "oneOf": [
+        {
+         "type": "string",
+         "enum": [
+          "any",
+          "assigned"
+         ]
+        },
+        {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "x-source": "catalog.people",
+          "minLength": 1,
+          "maxLength": 100
+         },
+         "minItems": 1,
+         "maxItems": 20
+        }
+       ]
+      },
+      "timeout": {
+       "type": "object",
+       "properties": {
+        "n": {
+         "type": "integer",
+         "minimum": 1,
+         "maximum": 365
+        },
+        "unit": {
+         "type": "string",
+         "enum": [
+          "minutes",
+          "hours",
+          "days"
+         ]
+        }
+       },
+       "required": [
+        "n",
+        "unit"
+       ],
+       "additionalProperties": false
+      }
+     },
+     "required": [
+      "channels",
+      "users"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "wait",
+    "wakeOn": [
+     "user_replied"
+    ],
+    "portLabels": {
+     "next": "Replied",
+     "timeout": "Timed out"
+    }
+   },
+   {
+    "key": "action",
+    "ghl": "Until the contact takes a specific action",
+    "label": "Until the lead takes a specific action",
+    "description": "Ex: Clicks a link, Opens an email",
+    "category": "Internal",
+    "icon": "hourglass",
+    "keywords": [],
+    "help": "Ex: Clicks a link, Opens an email",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": false,
+     "reason": "Needs link and email-open tracking (not in OPS)"
+    },
+    "narration": "Until the lead takes a specific action",
+    "fields": {
+     "type": "object",
+     "properties": {},
+     "required": [],
+     "additionalProperties": false
+    },
+    "kind": "wait",
+    "wakeOn": []
+   },
+   {
+    "key": "conditions",
+    "ghl": "Until specific conditions are met",
+    "label": "Until specific conditions are met",
+    "description": "Build a custom segment with any of your fields",
+    "category": "Internal",
+    "icon": "hourglass",
+    "keywords": [],
+    "help": "Build a custom segment with any of your fields",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Wait until the conditions are met",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "when": {
+       "$ref": "#/$defs/condition"
+      },
+      "timeout": {
+       "type": "object",
+       "properties": {
+        "n": {
+         "type": "integer",
+         "minimum": 1,
+         "maximum": 365
+        },
+        "unit": {
+         "type": "string",
+         "enum": [
+          "minutes",
+          "hours",
+          "days"
+         ]
+        }
+       },
+       "required": [
+        "n",
+        "unit"
+       ],
+       "additionalProperties": false
+      }
+     },
+     "required": [
+      "when"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "wait",
+    "wakeOn": [],
+    "portLabels": {
+     "next": "Conditions met",
+     "timeout": "Timed out"
+    }
+   }
+  ],
+  "goals": [
+   {
+    "key": "tag_added",
+    "ghl": "Contact Tag Added or Removed",
+    "label": "Tag added",
+    "description": "Jumps here as soon as: tag added.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: tag added.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Goal: the tags {tags} are added",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "tags": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "x-source": "catalog.tags",
+        "minLength": 1,
+        "maxLength": 100
+       },
+       "minItems": 1,
+       "maxItems": 10
+      },
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "tags",
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": [
+     "contact_tag"
+    ]
+   },
+   {
+    "key": "tag_removed",
+    "ghl": "Contact Tag Added or Removed",
+    "label": "Tag removed",
+    "description": "Jumps here as soon as: tag removed.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: tag removed.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Goal: the tags {tags} are removed",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "tags": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "x-source": "catalog.tags",
+        "minLength": 1,
+        "maxLength": 100
+       },
+       "minItems": 1,
+       "maxItems": 10
+      },
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "tags",
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": [
+     "contact_tag"
+    ]
+   },
+   {
+    "key": "stage_reached",
+    "ghl": null,
+    "label": "Lead reached a stage",
+    "description": "Jumps here as soon as: lead reached a stage.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: lead reached a stage.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Goal: the lead reaches {stages}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "stages": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "x-source": "catalog.stages",
+        "minLength": 1,
+        "maxLength": 100
+       },
+       "minItems": 1,
+       "maxItems": 20
+      },
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "stages",
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": [
+     "stage",
+     "lead_status"
+    ]
+   },
+   {
+    "key": "lead_status",
+    "ghl": null,
+    "label": "Lead status",
+    "description": "Jumps here as soon as: lead status.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: lead status.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Lead status",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "statuses": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "enum": [
+         "open",
+         "won",
+         "lost"
+        ]
+       },
+       "minItems": 1,
+       "maxItems": 3,
+       "uniqueItems": true
+      },
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "statuses",
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": [
+     "lead_status"
+    ]
+   },
+   {
+    "key": "appointment",
+    "ghl": "Appointment Status",
+    "label": "Job booking status",
+    "description": "Jumps here as soon as: job booking status.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: job booking status.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Job booking status",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "statuses": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 40
+       },
+       "minItems": 1,
+       "maxItems": 10
+      },
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "statuses",
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": [
+     "job_booked",
+     "booking_status"
+    ]
+   },
+   {
+    "key": "payment",
+    "ghl": "Payment Received",
+    "label": "Job paid",
+    "description": "Jumps here as soon as: job paid.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: job paid.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Job paid",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": [
+     "payment_received"
+    ]
+   },
+   {
+    "key": "form",
+    "ghl": "Form Submitted",
+    "label": "Website form submitted",
+    "description": "Jumps here as soon as: website form submitted.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: website form submitted.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Website form submitted",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": [
+     "form_submitted"
+    ]
+   },
+   {
+    "key": "user_replied",
+    "ghl": "User Replied",
+    "label": "Someone in the office replied",
+    "description": "Jumps here as soon as: someone in the office replied.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: someone in the office replied.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Someone in the office replied",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "channels": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "enum": [
+         "chat",
+         "email",
+         "sms"
+        ]
+       },
+       "minItems": 1,
+       "maxItems": 3,
+       "uniqueItems": true
+      },
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": [
+     "user_replied"
+    ]
+   },
+   {
+    "key": "task",
+    "ghl": "Task Status",
+    "label": "Task status",
+    "description": "Jumps here as soon as: task status.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: task status.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Task status",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "status": {
+       "type": "string",
+       "enum": [
+        "created",
+        "completed"
+       ]
+      },
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "status",
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": [
+     "task_added",
+     "task_completed"
+    ]
+   },
+   {
+    "key": "document",
+    "ghl": "Document Status",
+    "label": "Contractor agreement signed",
+    "description": "Jumps here as soon as: contractor agreement signed.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: contractor agreement signed.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Contractor agreement signed",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": [
+     "documents_contracts"
+    ]
+   },
+   {
+    "key": "email_event",
+    "ghl": "Email Events",
+    "label": "Email events",
+    "description": "Jumps here as soon as: email events.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: email events.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "narration": "Email events",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": []
+   },
+   {
+    "key": "trigger_link",
+    "ghl": "Clicked a Trigger Link",
+    "label": "Clicked a trigger link",
+    "description": "Jumps here as soon as: clicked a trigger link.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: clicked a trigger link.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "narration": "Clicked a trigger link",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": []
+   },
+   {
+    "key": "review_clicked",
+    "ghl": "Review Request Clicked",
+    "label": "Review request clicked",
+    "description": "Jumps here as soon as: review request clicked.",
+    "category": "Internal",
+    "icon": "target",
+    "keywords": [],
+    "help": "Jumps here as soon as: review request clicked.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "narration": "Review request clicked",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "ifNotMet": {
+       "type": "string",
+       "enum": [
+        "end",
+        "continue",
+        "wait"
+       ]
+      }
+     },
+     "required": [
+      "ifNotMet"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goal",
+    "wakeOn": []
+   }
+  ],
+  "logic": [
+   {
+    "key": "if_else",
+    "ghl": "If / else",
+    "label": "If / else",
+    "description": "Sends the lead down the first branch whose conditions match.",
+    "category": "Internal",
+    "icon": "branch",
+    "keywords": [],
+    "help": "Sends the lead down the first branch whose conditions match.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "If / else",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "branches": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "properties": {
+         "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$"
+         },
+         "name": {
+          "type": "string",
+          "maxLength": 60
+         },
+         "when": {
+          "$ref": "#/$defs/condition"
+         }
+        },
+        "required": [
+         "id",
+         "when"
+        ],
+        "additionalProperties": false
+       },
+       "minItems": 1,
+       "maxItems": 10
+      },
+      "noneName": {
+       "type": "string",
+       "maxLength": 60
+      },
+      "gate": {
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "branches"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "if_else"
+   },
+   {
+    "key": "split",
+    "ghl": "Split",
+    "label": "Split",
+    "description": "Sends leads down paths at random, by percent.",
+    "category": "Internal",
+    "icon": "split",
+    "keywords": [],
+    "help": "Sends leads down paths at random, by percent.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Split",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "paths": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "properties": {
+         "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$"
+         },
+         "name": {
+          "type": "string",
+          "maxLength": 60
+         },
+         "percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+         }
+        },
+        "required": [
+         "id",
+         "percent"
+        ],
+        "additionalProperties": false
+       },
+       "minItems": 2,
+       "maxItems": 5
+      }
+     },
+     "required": [
+      "paths"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "split"
+   },
+   {
+    "key": "goto",
+    "ghl": "Go to",
+    "label": "Go to",
+    "description": "Jumps to another step of this workflow.",
+    "category": "Internal",
+    "icon": "corner",
+    "keywords": [],
+    "help": "Jumps to another step of this workflow.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Go to {target}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "target": {
+       "type": [
+        "string",
+        "null"
+       ],
+       "pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$",
+       "x-ref": "node"
+      }
+     },
+     "required": [
+      "target"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "goto"
+   },
+   {
+    "key": "add_to_workflow",
+    "ghl": "Add to workflow",
+    "label": "Add to workflow",
+    "description": "Starts another workflow for this lead.",
+    "category": "Internal",
+    "icon": "plus",
+    "keywords": [],
+    "help": "Starts another workflow for this lead.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Add to the workflow {workflowId}",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "workflowId": {
+       "type": "string",
+       "x-source": "catalog.workflows",
+       "minLength": 1,
+       "maxLength": 100
+      },
+      "passTriggerData": {
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "workflowId"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "workflow"
+   },
+   {
+    "key": "remove_from_workflow",
+    "ghl": "Remove from workflow",
+    "label": "Remove from workflow",
+    "description": "Takes the lead out of workflows.",
+    "category": "Internal",
+    "icon": "minus",
+    "keywords": [],
+    "help": "Takes the lead out of workflows.",
+    "aliases": [],
+    "engine": true,
+    "hidden": false,
+    "availability": {
+     "ok": true
+    },
+    "narration": "Remove from workflows ({scope})",
+    "fields": {
+     "type": "object",
+     "properties": {
+      "scope": {
+       "type": "string",
+       "enum": [
+        "current",
+        "another",
+        "all_except_current",
+        "all"
+       ]
+      },
+      "workflowId": {
+       "type": "string",
+       "x-source": "catalog.workflows",
+       "minLength": 1,
+       "maxLength": 100
+      }
+     },
+     "required": [
+      "scope"
+     ],
+     "additionalProperties": false
+    },
+    "kind": "workflow"
+   }
+  ],
+  "fields": [
+   {
+    "key": "service",
+    "label": "Service",
+    "group": "Lead",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": "catalog.services",
+    "recordKinds": [
+     "contact",
+     "job",
+     "call",
+     "chat"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_changed"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "source",
+    "label": "Lead source",
+    "group": "Lead",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": "catalog.sources",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_changed"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "tag",
+    "label": "Tag",
+    "group": "Lead",
+    "valueType": "tags",
+    "ops": [
+     "has",
+     "has_not",
+     "has_any",
+     "has_none",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": "catalog.tags",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_tag"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "stage",
+    "label": "Pipeline stage now",
+    "group": "Lead",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": "catalog.stages",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "stage",
+     "lead_status"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "stage_unchanged",
+    "label": "Still in the stage that started it (stop if the lead moved on)",
+    "group": "Lead",
+    "valueType": "bool",
+    "ops": [
+     "true",
+     "false"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": [
+     "stage"
+    ],
+    "gate": true,
+    "hidden": false,
+    "wakeOn": [
+     "stage"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "stage_move_stands",
+    "label": "The stage move was not undone",
+    "group": "Lead",
+    "valueType": "bool",
+    "ops": [
+     "true",
+     "false"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": [
+     "stage"
+    ],
+    "gate": false,
+    "hidden": true,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "has_mobile",
+    "label": "Has a mobile number",
+    "group": "Lead",
+    "valueType": "bool",
+    "ops": [
+     "true",
+     "false"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact",
+     "call",
+     "chat"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_changed"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "has_email",
+    "label": "Has an email address",
+    "group": "Lead",
+    "valueType": "bool",
+    "ops": [
+     "true",
+     "false"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_changed"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "dont_ask",
+    "label": "Not marked don't ask",
+    "group": "Lead",
+    "valueType": "bool",
+    "ops": [
+     "true",
+     "false"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact",
+     "job"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "asked_within_months",
+    "label": "Not asked for a review in the last … months",
+    "group": "Lead",
+    "valueType": "bool",
+    "ops": [
+     "true",
+     "false"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact",
+     "job",
+     "call",
+     "chat"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": {
+     "n": {
+      "min": 1,
+      "max": 36
+     }
+    },
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "not_picked",
+    "label": "Nobody has picked it up yet",
+    "group": "Lead",
+    "valueType": "bool",
+    "ops": [
+     "true",
+     "false"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": [
+     "newLead",
+     "form_submitted"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "stage",
+     "lead_status"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "unpaid",
+    "label": "The job is unpaid",
+    "group": "Job",
+    "valueType": "bool",
+    "ops": [
+     "true",
+     "false"
+    ],
+    "source": null,
+    "recordKinds": [
+     "job"
+    ],
+    "triggers": [
+     "jobClosed"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "payment_received"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "chat_unanswered",
+    "label": "Nobody answered the chat",
+    "group": "Chat",
+    "valueType": "bool",
+    "ops": [
+     "true",
+     "false"
+    ],
+    "source": null,
+    "recordKinds": [
+     "chat"
+    ],
+    "triggers": [
+     "chat"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "user_replied"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "chat_age_hours",
+    "label": "The chat started at most / at least … hours ago",
+    "group": "Chat",
+    "valueType": "number",
+    "ops": [
+     "eq",
+     "neq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "between",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "chat"
+    ],
+    "triggers": [
+     "chat"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": true,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "lead.name",
+    "label": "Full name",
+    "group": "Lead",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_changed"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "lead.email",
+    "label": "Email",
+    "group": "Lead",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_changed"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "lead.phone",
+    "label": "Phone",
+    "group": "Lead",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_changed"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "lead.postcode",
+    "label": "Suburb or postcode",
+    "group": "Lead",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_changed"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "lead.created",
+    "label": "Created",
+    "group": "Lead",
+    "valueType": "date",
+    "ops": [
+     "before",
+     "after",
+     "on",
+     "within_last",
+     "within_next",
+     "more_than_ago",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": true,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "lead.stage_changed",
+    "label": "Moved stage at",
+    "group": "Lead",
+    "valueType": "date",
+    "ops": [
+     "before",
+     "after",
+     "on",
+     "within_last",
+     "within_next",
+     "more_than_ago",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "stage"
+    ],
+    "timeRelative": true,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "lead.booked_for",
+    "label": "Booked for",
+    "group": "Lead",
+    "valueType": "date",
+    "ops": [
+     "before",
+     "after",
+     "on",
+     "within_last",
+     "within_next",
+     "more_than_ago",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "job_booked",
+     "booking_status"
+    ],
+    "timeRelative": true,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "lead.next_follow_up",
+    "label": "Next follow-up",
+    "group": "Lead",
+    "valueType": "date",
+    "ops": [
+     "before",
+     "after",
+     "on",
+     "within_last",
+     "within_next",
+     "more_than_ago",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_changed"
+    ],
+    "timeRelative": true,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "lead.quote_amount",
+    "label": "Quote amount",
+    "group": "Lead",
+    "valueType": "money",
+    "ops": [
+     "eq",
+     "neq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "between",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_changed"
+    ],
+    "timeRelative": false,
+    "sensitivity": "money",
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "lead.lost_reason",
+    "label": "Lost reason",
+    "group": "Lead",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "lead_status"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "lead.assigned_user",
+    "label": "Assigned to",
+    "group": "Lead",
+    "valueType": "people",
+    "ops": [
+     "is",
+     "in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": "catalog.people",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "contact_changed"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "job.amount",
+    "label": "Job amount",
+    "group": "Job",
+    "valueType": "money",
+    "ops": [
+     "eq",
+     "neq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "between",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "job"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "payment_received"
+    ],
+    "timeRelative": false,
+    "sensitivity": "money",
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "job.date",
+    "label": "Job date",
+    "group": "Job",
+    "valueType": "date",
+    "ops": [
+     "before",
+     "after",
+     "on",
+     "within_last",
+     "within_next",
+     "more_than_ago",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "job"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": true,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "job.type",
+    "label": "Job service",
+    "group": "Job",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": "catalog.services",
+    "recordKinds": [
+     "job"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "job.technician",
+    "label": "Technician",
+    "group": "Job",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "job"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "job.payment_status",
+    "label": "Payment status",
+    "group": "Job",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "job"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "payment_received"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "call.status",
+    "label": "Call status",
+    "group": "Call",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "call"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [
+     {
+      "key": "missed",
+      "label": "Missed"
+     },
+     {
+      "key": "answered",
+      "label": "Answered"
+     },
+     {
+      "key": "outbound",
+      "label": "Outbound"
+     }
+    ],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "task.title",
+    "label": "Task title",
+    "group": "Task",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "task"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "task.due",
+    "label": "Task due",
+    "group": "Task",
+    "valueType": "date",
+    "ops": [
+     "before",
+     "after",
+     "on",
+     "within_last",
+     "within_next",
+     "more_than_ago",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "task"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": true,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "task.status",
+    "label": "Task status",
+    "group": "Task",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [
+     "task"
+    ],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [
+     "task_completed"
+    ],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "trigger.id",
+    "label": "Workflow trigger",
+    "group": "Trigger",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": "doc.triggers",
+    "recordKinds": [],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "trigger.type",
+    "label": "Workflow trigger type",
+    "group": "Trigger",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": "registry.triggers",
+    "recordKinds": [],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "trigger.stage",
+    "label": "Moved to stage",
+    "group": "Trigger",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": "catalog.stages",
+    "recordKinds": [],
+    "triggers": [
+     "stage",
+     "lead_status"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "trigger.tag",
+    "label": "Tag",
+    "group": "Trigger",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [],
+    "triggers": [
+     "contact_tag"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "trigger.action",
+    "label": "Added or removed",
+    "group": "Trigger",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [],
+    "triggers": [
+     "contact_tag",
+     "contact_dnd"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [
+     {
+      "key": "added",
+      "label": "Added"
+     },
+     {
+      "key": "removed",
+      "label": "Removed"
+     },
+     {
+      "key": "on",
+      "label": "Turned on"
+     },
+     {
+      "key": "off",
+      "label": "Turned off"
+     }
+    ],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "trigger.channel",
+    "label": "Channel",
+    "group": "Trigger",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [],
+    "triggers": [
+     "customer_replied",
+     "user_replied",
+     "contact_dnd"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [
+     {
+      "key": "chat",
+      "label": "Chat"
+     },
+     {
+      "key": "email",
+      "label": "Email"
+     },
+     {
+      "key": "sms",
+      "label": "SMS"
+     }
+    ],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "trigger.field",
+    "label": "Changed field",
+    "group": "Trigger",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [],
+    "triggers": [
+     "contact_changed"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [
+     {
+      "key": "full_name",
+      "label": "full_name"
+     },
+     {
+      "key": "phone",
+      "label": "phone"
+     },
+     {
+      "key": "email",
+      "label": "email"
+     },
+     {
+      "key": "postcode",
+      "label": "postcode"
+     },
+     {
+      "key": "division",
+      "label": "division"
+     },
+     {
+      "key": "source",
+      "label": "source"
+     },
+     {
+      "key": "next_follow_up",
+      "label": "next_follow_up"
+     },
+     {
+      "key": "booked_for",
+      "label": "booked_for"
+     },
+     {
+      "key": "quote_amount",
+      "label": "quote_amount"
+     },
+     {
+      "key": "lost_reason",
+      "label": "lost_reason"
+     },
+     {
+      "key": "assigned_user",
+      "label": "assigned_user"
+     }
+    ],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "trigger.call_status",
+    "label": "Call status",
+    "group": "Trigger",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [],
+    "triggers": [
+     "call_details"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": [
+     {
+      "key": "missed",
+      "label": "Missed"
+     },
+     {
+      "key": "answered",
+      "label": "Answered"
+     },
+     {
+      "key": "outbound",
+      "label": "Outbound"
+     }
+    ],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "trigger.job_date",
+    "label": "Job date",
+    "group": "Trigger",
+    "valueType": "date",
+    "ops": [
+     "before",
+     "after",
+     "on",
+     "within_last",
+     "within_next",
+     "more_than_ago",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [],
+    "triggers": [
+     "jobClosed"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "trigger.status",
+    "label": "Status",
+    "group": "Trigger",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [],
+    "triggers": [
+     "booking_status",
+     "lead_status",
+     "documents_contracts"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "trigger.form",
+    "label": "Form",
+    "group": "Trigger",
+    "valueType": "text",
+    "ops": [
+     "is",
+     "is_not",
+     "contains",
+     "not_contains",
+     "contains_any",
+     "contains_none",
+     "starts_with",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [],
+    "triggers": [
+     "form_submitted"
+    ],
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": false,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "now.day_of_week",
+    "label": "Day of the week",
+    "group": "Now",
+    "valueType": "enum",
+    "ops": [
+     "is",
+     "is_not",
+     "in",
+     "not_in",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": true,
+    "sensitivity": null,
+    "arg": null,
+    "values": [
+     {
+      "key": "0",
+      "label": "Sun"
+     },
+     {
+      "key": "1",
+      "label": "Mon"
+     },
+     {
+      "key": "2",
+      "label": "Tue"
+     },
+     {
+      "key": "3",
+      "label": "Wed"
+     },
+     {
+      "key": "4",
+      "label": "Thu"
+     },
+     {
+      "key": "5",
+      "label": "Fri"
+     },
+     {
+      "key": "6",
+      "label": "Sat"
+     }
+    ],
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   },
+   {
+    "key": "now.day_of_month",
+    "label": "Day of the month",
+    "group": "Now",
+    "valueType": "number",
+    "ops": [
+     "eq",
+     "neq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "between",
+     "is_empty",
+     "is_not_empty"
+    ],
+    "source": null,
+    "recordKinds": [],
+    "triggers": null,
+    "gate": false,
+    "hidden": false,
+    "wakeOn": [],
+    "timeRelative": true,
+    "sensitivity": null,
+    "arg": null,
+    "values": null,
+    "availability": {
+     "ok": true
+    },
+    "narration": "{field} {opLabel} {values}"
+   }
+  ],
+  "ops": [
+   {
+    "op": "is",
+    "label": "Is",
+    "valueTypes": [
+     "text",
+     "enum",
+     "people"
+    ],
+    "args": "one",
+    "ref": true,
+    "props": {
+     "v": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+     },
+     "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+     }
+    },
+    "required": [],
+    "alt": "v"
+   },
+   {
+    "op": "is_not",
+    "label": "Is not",
+    "valueTypes": [
+     "text",
+     "enum"
+    ],
+    "args": "one",
+    "ref": true,
+    "props": {
+     "v": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+     },
+     "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+     }
+    },
+    "required": [],
+    "alt": "v"
+   },
+   {
+    "op": "contains",
+    "label": "Contains",
+    "valueTypes": [
+     "text"
+    ],
+    "args": "one",
+    "ref": false,
+    "props": {
+     "v": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+     }
+    },
+    "required": [
+     "v"
+    ]
+   },
+   {
+    "op": "not_contains",
+    "label": "Does not contain",
+    "valueTypes": [
+     "text"
+    ],
+    "args": "one",
+    "ref": false,
+    "props": {
+     "v": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+     }
+    },
+    "required": [
+     "v"
+    ]
+   },
+   {
+    "op": "contains_any",
+    "label": "Contains any of",
+    "valueTypes": [
+     "text"
+    ],
+    "args": "many",
+    "ref": false,
+    "props": {
+     "v": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 100
+      },
+      "minItems": 1,
+      "maxItems": 50
+     }
+    },
+    "required": [
+     "v"
+    ]
+   },
+   {
+    "op": "contains_none",
+    "label": "Does not contain any of",
+    "valueTypes": [
+     "text"
+    ],
+    "args": "many",
+    "ref": false,
+    "props": {
+     "v": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 100
+      },
+      "minItems": 1,
+      "maxItems": 50
+     }
+    },
+    "required": [
+     "v"
+    ]
+   },
+   {
+    "op": "starts_with",
+    "label": "Starts with",
+    "valueTypes": [
+     "text"
+    ],
+    "args": "one",
+    "ref": false,
+    "props": {
+     "v": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+     }
+    },
+    "required": [
+     "v"
+    ]
+   },
+   {
+    "op": "in",
+    "label": "Is any of",
+    "valueTypes": [
+     "text",
+     "enum",
+     "people"
+    ],
+    "args": "many",
+    "ref": false,
+    "props": {
+     "v": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 100
+      },
+      "minItems": 1,
+      "maxItems": 50
+     }
+    },
+    "required": [
+     "v"
+    ]
+   },
+   {
+    "op": "not_in",
+    "label": "Is none of",
+    "valueTypes": [
+     "text",
+     "enum"
+    ],
+    "args": "many",
+    "ref": false,
+    "props": {
+     "v": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 100
+      },
+      "minItems": 1,
+      "maxItems": 50
+     }
+    },
+    "required": [
+     "v"
+    ]
+   },
+   {
+    "op": "is_empty",
+    "label": "Is empty",
+    "valueTypes": [
+     "text",
+     "enum",
+     "tags",
+     "number",
+     "money",
+     "date",
+     "people"
+    ],
+    "args": "none",
+    "ref": false,
+    "props": {},
+    "required": []
+   },
+   {
+    "op": "is_not_empty",
+    "label": "Is not empty",
+    "valueTypes": [
+     "text",
+     "enum",
+     "tags",
+     "number",
+     "money",
+     "date",
+     "people"
+    ],
+    "args": "none",
+    "ref": false,
+    "props": {},
+    "required": []
+   },
+   {
+    "op": "has",
+    "label": "Has",
+    "valueTypes": [
+     "tags"
+    ],
+    "args": "one",
+    "ref": false,
+    "props": {
+     "v": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+     }
+    },
+    "required": [
+     "v"
+    ]
+   },
+   {
+    "op": "has_not",
+    "label": "Does not have",
+    "valueTypes": [
+     "tags"
+    ],
+    "args": "one",
+    "ref": false,
+    "props": {
+     "v": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+     }
+    },
+    "required": [
+     "v"
+    ]
+   },
+   {
+    "op": "has_any",
+    "label": "Has any of",
+    "valueTypes": [
+     "tags"
+    ],
+    "args": "many",
+    "ref": false,
+    "props": {
+     "v": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 100
+      },
+      "minItems": 1,
+      "maxItems": 50
+     }
+    },
+    "required": [
+     "v"
+    ]
+   },
+   {
+    "op": "has_none",
+    "label": "Has none of",
+    "valueTypes": [
+     "tags"
+    ],
+    "args": "many",
+    "ref": false,
+    "props": {
+     "v": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 100
+      },
+      "minItems": 1,
+      "maxItems": 50
+     }
+    },
+    "required": [
+     "v"
+    ]
+   },
+   {
+    "op": "eq",
+    "label": "Is equal to",
+    "valueTypes": [
+     "number",
+     "money"
+    ],
+    "args": "num",
+    "ref": true,
+    "props": {
+     "n": {
+      "type": "number"
+     },
+     "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+     }
+    },
+    "required": [],
+    "alt": "n"
+   },
+   {
+    "op": "neq",
+    "label": "Is not equal to",
+    "valueTypes": [
+     "number",
+     "money"
+    ],
+    "args": "num",
+    "ref": true,
+    "props": {
+     "n": {
+      "type": "number"
+     },
+     "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+     }
+    },
+    "required": [],
+    "alt": "n"
+   },
+   {
+    "op": "gt",
+    "label": "Is greater than",
+    "valueTypes": [
+     "number",
+     "money"
+    ],
+    "args": "num",
+    "ref": true,
+    "props": {
+     "n": {
+      "type": "number"
+     },
+     "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+     }
+    },
+    "required": [],
+    "alt": "n"
+   },
+   {
+    "op": "gte",
+    "label": "Is greater than or equal to",
+    "valueTypes": [
+     "number",
+     "money"
+    ],
+    "args": "num",
+    "ref": true,
+    "props": {
+     "n": {
+      "type": "number"
+     },
+     "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+     }
+    },
+    "required": [],
+    "alt": "n"
+   },
+   {
+    "op": "lt",
+    "label": "Is less than",
+    "valueTypes": [
+     "number",
+     "money"
+    ],
+    "args": "num",
+    "ref": true,
+    "props": {
+     "n": {
+      "type": "number"
+     },
+     "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+     }
+    },
+    "required": [],
+    "alt": "n"
+   },
+   {
+    "op": "lte",
+    "label": "Is less than or equal to",
+    "valueTypes": [
+     "number",
+     "money"
+    ],
+    "args": "num",
+    "ref": true,
+    "props": {
+     "n": {
+      "type": "number"
+     },
+     "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+     }
+    },
+    "required": [],
+    "alt": "n"
+   },
+   {
+    "op": "between",
+    "label": "Is between",
+    "valueTypes": [
+     "number",
+     "money"
+    ],
+    "args": "range",
+    "ref": false,
+    "props": {
+     "n": {
+      "type": "number"
+     },
+     "v2": {
+      "type": "number"
+     }
+    },
+    "required": [
+     "n",
+     "v2"
+    ]
+   },
+   {
+    "op": "before",
+    "label": "Is before",
+    "valueTypes": [
+     "date"
+    ],
+    "args": "date",
+    "ref": true,
+    "props": {
+     "v": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+     },
+     "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+     }
+    },
+    "required": [],
+    "alt": "v"
+   },
+   {
+    "op": "after",
+    "label": "Is after",
+    "valueTypes": [
+     "date"
+    ],
+    "args": "date",
+    "ref": true,
+    "props": {
+     "v": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+     },
+     "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+     }
+    },
+    "required": [],
+    "alt": "v"
+   },
+   {
+    "op": "on",
+    "label": "Is on",
+    "valueTypes": [
+     "date"
+    ],
+    "args": "date",
+    "ref": true,
+    "props": {
+     "v": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+     },
+     "ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+     }
+    },
+    "required": [],
+    "alt": "v"
+   },
+   {
+    "op": "within_last",
+    "label": "Is within the last",
+    "valueTypes": [
+     "date"
+    ],
+    "args": "rel",
+    "ref": false,
+    "props": {
+     "n": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+     },
+     "unit": {
+      "type": "string",
+      "enum": [
+       "minutes",
+       "hours",
+       "days",
+       "weeks",
+       "months"
+      ]
+     }
+    },
+    "required": [
+     "n",
+     "unit"
+    ]
+   },
+   {
+    "op": "within_next",
+    "label": "Is within the next",
+    "valueTypes": [
+     "date"
+    ],
+    "args": "rel",
+    "ref": false,
+    "props": {
+     "n": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+     },
+     "unit": {
+      "type": "string",
+      "enum": [
+       "minutes",
+       "hours",
+       "days",
+       "weeks",
+       "months"
+      ]
+     }
+    },
+    "required": [
+     "n",
+     "unit"
+    ]
+   },
+   {
+    "op": "more_than_ago",
+    "label": "Is more than … ago",
+    "valueTypes": [
+     "date"
+    ],
+    "args": "rel",
+    "ref": false,
+    "props": {
+     "n": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+     },
+     "unit": {
+      "type": "string",
+      "enum": [
+       "minutes",
+       "hours",
+       "days",
+       "weeks",
+       "months"
+      ]
+     }
+    },
+    "required": [
+     "n",
+     "unit"
+    ]
+   },
+   {
+    "op": "true",
+    "label": "Is true",
+    "valueTypes": [
+     "bool"
+    ],
+    "args": "none",
+    "ref": false,
+    "props": {
+     "n": {
+      "type": "number"
+     }
+    },
+    "required": []
+   },
+   {
+    "op": "false",
+    "label": "Is false",
+    "valueTypes": [
+     "bool"
+    ],
+    "args": "none",
+    "ref": false,
+    "props": {
+     "n": {
+      "type": "number"
+     }
+    },
+    "required": []
+   }
+  ],
+  "merge": [
+   {
+    "key": "hi",
+    "label": "Hi + first name (or Hi there)",
+    "recordKinds": [
+     "contact",
+     "job",
+     "call",
+     "chat"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "first_name",
+    "label": "First name",
+    "recordKinds": [
+     "contact",
+     "job",
+     "call",
+     "chat"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "name",
+    "label": "Full name",
+    "recordKinds": [
+     "contact",
+     "job",
+     "call",
+     "chat"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "service",
+    "label": "Service",
+    "recordKinds": [
+     "contact",
+     "job",
+     "call",
+     "chat"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "brand",
+    "label": "Brand of the service",
+    "recordKinds": [
+     "contact",
+     "job",
+     "call",
+     "chat"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "business_name",
+    "label": "Business name",
+    "recordKinds": "*",
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "agent",
+    "label": "Office person's first name",
+    "recordKinds": "*",
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "suburb",
+    "label": "Suburb or postcode",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "source",
+    "label": "Lead source",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "stage",
+    "label": "Pipeline stage",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "number",
+    "label": "Phone number",
+    "recordKinds": [
+     "contact",
+     "call",
+     "chat"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "technician",
+    "label": "Technician's first name",
+    "recordKinds": [
+     "job"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "amount",
+    "label": "Job amount",
+    "recordKinds": [
+     "job"
+    ],
+    "triggers": null,
+    "sensitivity": "money",
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "job_date",
+    "label": "Job date",
+    "recordKinds": [
+     "job"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "minutes",
+    "label": "The first wait, in minutes",
+    "recordKinds": "*",
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "automation",
+    "label": "This automation's name",
+    "recordKinds": "*",
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "task_title",
+    "label": "Task title",
+    "recordKinds": [
+     "task"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "due_date",
+    "label": "Task due date",
+    "recordKinds": [
+     "task"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "quote_amount",
+    "label": "Quote amount",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "sensitivity": "money",
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "booked_date",
+    "label": "Booked date",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "follow_up_date",
+    "label": "Next follow-up date",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "lost_reason",
+    "label": "Lost reason",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "lead.assigned_to",
+    "label": "Assigned to (full name)",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   },
+   {
+    "key": "lead.assigned_to_first_name",
+    "label": "Assigned to (first name)",
+    "recordKinds": [
+     "contact"
+    ],
+    "triggers": null,
+    "sensitivity": null,
+    "availability": {
+     "ok": true
+    }
+   }
+  ],
+  "reasons": {
+   "filter": "Filter not matched - {label} - Received value: {received}, Expected value: {expected}",
+   "before_published": "The event happened before the workflow was published",
+   "test_record": "A test record",
+   "loop_guard": "Stopped a loop between workflows",
+   "own_change": "This workflow's own change",
+   "reentry_off": "Already went through this workflow (re-entry is off)",
+   "already_enrolled": "Already in this workflow",
+   "duplicate_event": "The same event again",
+   "no_contact": "No lead card",
+   "unavailable": "Not available",
+   "paused_step": "The step is paused",
+   "too_late": "Too late",
+   "opted_out": "Opted out",
+   "capped": "Already contacted today",
+   "outside_hours": "Outside the allowed days and hours",
+   "missing_details": "Missing details",
+   "skip_comms": "Messages skipped until the next wait",
+   "removed_by_action": "Removed by Workflow Action",
+   "removed_by_external_action": "Removed by External Workflow Action",
+   "end_of_workflow": "Removed by - End Of Workflow",
+   "replied": "Stopped: the lead replied",
+   "automation_changed": "The workflow changed",
+   "switched_off": "The workflow was switched off",
+   "deleted": "The workflow was deleted",
+   "wrong_kind": "This workflow is not for this kind of record",
+   "move_undone": "The stage move was undone",
+   "moved_on": "The lead had already moved to another stage",
+   "system": "A System workflow runs on its own"
+  },
+  "settings": {
+   "defaults": {
+    "reentry": "off",
+    "perRecord": true,
+    "stopOnResponse": false,
+    "timezone": "business",
+    "window": {
+     "on": false,
+     "days": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "from": "08:00",
+     "until": "17:00"
+    },
+    "sender": {
+     "fromName": null
+    },
+    "markRead": false
+   }
+  },
+  "features": {
+   "errorDigest": true
+  }
+ },
+ "byAvail": {
+  "{\"ai\":true,\"atomicTags\":true,\"gbp\":true,\"phone\":true,\"reviews\":true,\"teamEmail\":true,\"xero\":true}": {
+   "availCtx": {
+    "phone": true,
+    "xero": true,
+    "gbp": true,
+    "reviews": true,
+    "ai": true,
+    "teamEmail": true,
+    "atomicTags": true
+   },
+   "availability": {
+    "t:newLead": {
+     "ok": true
+    },
+    "t:contact_changed": {
+     "ok": true
+    },
+    "t:contact_tag": {
+     "ok": true
+    },
+    "t:custom_date": {
+     "ok": true
+    },
+    "t:note_added": {
+     "ok": true
+    },
+    "t:task_added": {
+     "ok": true
+    },
+    "t:task_completed": {
+     "ok": true
+    },
+    "t:task_reminder": {
+     "ok": true
+    },
+    "t:contact_dnd": {
+     "ok": true
+    },
+    "t:inbound_webhook": {
+     "ok": true
+    },
+    "t:scheduler": {
+     "ok": true
+    },
+    "t:call_details": {
+     "ok": true
+    },
+    "t:customer_replied": {
+     "ok": true
+    },
+    "t:user_replied": {
+     "ok": true
+    },
+    "t:form_submitted": {
+     "ok": true
+    },
+    "t:chat": {
+     "ok": true
+    },
+    "t:job_booked": {
+     "ok": true
+    },
+    "t:booking_status": {
+     "ok": true
+    },
+    "t:jobClosed": {
+     "ok": true
+    },
+    "t:stage": {
+     "ok": true
+    },
+    "t:lead_status": {
+     "ok": true
+    },
+    "t:stale": {
+     "ok": true
+    },
+    "t:invoice": {
+     "ok": true
+    },
+    "t:commission_invoice": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "t:payment_received": {
+     "ok": true
+    },
+    "t:documents_contracts": {
+     "ok": true
+    },
+    "t:review_received": {
+     "ok": true
+    },
+    "t:doc_expiring": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "t:insurance_expiring": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "n:action/update_field": {
+     "ok": true
+    },
+    "n:action/add_tag": {
+     "ok": true
+    },
+    "n:action/remove_tag": {
+     "ok": true
+    },
+    "n:action/assign_user": {
+     "ok": true
+    },
+    "n:action/remove_assigned_user": {
+     "ok": true
+    },
+    "n:action/dnd": {
+     "ok": true
+    },
+    "n:action/add_note": {
+     "ok": true
+    },
+    "n:action/add_task": {
+     "ok": true
+    },
+    "n:action/edit_conversation": {
+     "ok": true
+    },
+    "n:action/send_email": {
+     "ok": true
+    },
+    "n:action/send_sms": {
+     "ok": true
+    },
+    "n:action/internal_notification": {
+     "ok": true
+    },
+    "n:action/send_review_request": {
+     "ok": true
+    },
+    "n:action/send_live_chat": {
+     "ok": true
+    },
+    "n:action/manual_call": {
+     "ok": true
+    },
+    "n:action/manual_sms": {
+     "ok": true
+    },
+    "n:action/internal_comment": {
+     "ok": true
+    },
+    "n:action/move_stage": {
+     "ok": true
+    },
+    "n:action/mark_lost": {
+     "ok": true
+    },
+    "n:action/send_invoice": {
+     "ok": true
+    },
+    "n:action/send_estimate": {
+     "ok": true
+    },
+    "n:action/webhook": {
+     "ok": true
+    },
+    "n:action/update_custom_value": {
+     "ok": true
+    },
+    "n:action/math": {
+     "ok": false,
+     "reason": "Coming later"
+    },
+    "n:action/ai_agent": {
+     "ok": true
+    },
+    "n:action/ai_decision": {
+     "ok": true
+    },
+    "n:action/ai_summarize": {
+     "ok": true
+    },
+    "n:wait/period": {
+     "ok": true
+    },
+    "n:wait/date": {
+     "ok": true
+    },
+    "n:wait/recurring": {
+     "ok": true
+    },
+    "n:wait/scheduled": {
+     "ok": true
+    },
+    "n:wait/reply": {
+     "ok": true
+    },
+    "n:wait/user_reply": {
+     "ok": true
+    },
+    "n:wait/action": {
+     "ok": false,
+     "reason": "Needs link and email-open tracking (not in OPS)"
+    },
+    "n:wait/conditions": {
+     "ok": true
+    },
+    "n:goal/tag_added": {
+     "ok": true
+    },
+    "n:goal/tag_removed": {
+     "ok": true
+    },
+    "n:goal/stage_reached": {
+     "ok": true
+    },
+    "n:goal/lead_status": {
+     "ok": true
+    },
+    "n:goal/appointment": {
+     "ok": true
+    },
+    "n:goal/payment": {
+     "ok": true
+    },
+    "n:goal/form": {
+     "ok": true
+    },
+    "n:goal/user_replied": {
+     "ok": true
+    },
+    "n:goal/task": {
+     "ok": true
+    },
+    "n:goal/document": {
+     "ok": true
+    },
+    "n:goal/email_event": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:goal/trigger_link": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:goal/review_clicked": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:if_else/if_else": {
+     "ok": true
+    },
+    "n:split/split": {
+     "ok": true
+    },
+    "n:goto/goto": {
+     "ok": true
+    },
+    "n:workflow/add_to_workflow": {
+     "ok": true
+    },
+    "n:workflow/remove_from_workflow": {
+     "ok": true
+    },
+    "f:service": {
+     "ok": true
+    },
+    "f:source": {
+     "ok": true
+    },
+    "f:tag": {
+     "ok": true
+    },
+    "f:stage": {
+     "ok": true
+    },
+    "f:stage_unchanged": {
+     "ok": true
+    },
+    "f:stage_move_stands": {
+     "ok": true
+    },
+    "f:has_mobile": {
+     "ok": true
+    },
+    "f:has_email": {
+     "ok": true
+    },
+    "f:dont_ask": {
+     "ok": true
+    },
+    "f:asked_within_months": {
+     "ok": true
+    },
+    "f:not_picked": {
+     "ok": true
+    },
+    "f:unpaid": {
+     "ok": true
+    },
+    "f:chat_unanswered": {
+     "ok": true
+    },
+    "f:chat_age_hours": {
+     "ok": true
+    },
+    "f:lead.name": {
+     "ok": true
+    },
+    "f:lead.email": {
+     "ok": true
+    },
+    "f:lead.phone": {
+     "ok": true
+    },
+    "f:lead.postcode": {
+     "ok": true
+    },
+    "f:lead.created": {
+     "ok": true
+    },
+    "f:lead.stage_changed": {
+     "ok": true
+    },
+    "f:lead.booked_for": {
+     "ok": true
+    },
+    "f:lead.next_follow_up": {
+     "ok": true
+    },
+    "f:lead.quote_amount": {
+     "ok": true
+    },
+    "f:lead.lost_reason": {
+     "ok": true
+    },
+    "f:lead.assigned_user": {
+     "ok": true
+    },
+    "f:job.amount": {
+     "ok": true
+    },
+    "f:job.date": {
+     "ok": true
+    },
+    "f:job.type": {
+     "ok": true
+    },
+    "f:job.technician": {
+     "ok": true
+    },
+    "f:job.payment_status": {
+     "ok": true
+    },
+    "f:call.status": {
+     "ok": true
+    },
+    "f:task.title": {
+     "ok": true
+    },
+    "f:task.due": {
+     "ok": true
+    },
+    "f:task.status": {
+     "ok": true
+    },
+    "f:trigger.id": {
+     "ok": true
+    },
+    "f:trigger.type": {
+     "ok": true
+    },
+    "f:trigger.stage": {
+     "ok": true
+    },
+    "f:trigger.tag": {
+     "ok": true
+    },
+    "f:trigger.action": {
+     "ok": true
+    },
+    "f:trigger.channel": {
+     "ok": true
+    },
+    "f:trigger.field": {
+     "ok": true
+    },
+    "f:trigger.call_status": {
+     "ok": true
+    },
+    "f:trigger.job_date": {
+     "ok": true
+    },
+    "f:trigger.status": {
+     "ok": true
+    },
+    "f:trigger.form": {
+     "ok": true
+    },
+    "f:now.day_of_week": {
+     "ok": true
+    },
+    "f:now.day_of_month": {
+     "ok": true
+    },
+    "m:hi": {
+     "ok": true
+    },
+    "m:first_name": {
+     "ok": true
+    },
+    "m:name": {
+     "ok": true
+    },
+    "m:service": {
+     "ok": true
+    },
+    "m:brand": {
+     "ok": true
+    },
+    "m:business_name": {
+     "ok": true
+    },
+    "m:agent": {
+     "ok": true
+    },
+    "m:suburb": {
+     "ok": true
+    },
+    "m:source": {
+     "ok": true
+    },
+    "m:stage": {
+     "ok": true
+    },
+    "m:number": {
+     "ok": true
+    },
+    "m:technician": {
+     "ok": true
+    },
+    "m:amount": {
+     "ok": true
+    },
+    "m:job_date": {
+     "ok": true
+    },
+    "m:minutes": {
+     "ok": true
+    },
+    "m:automation": {
+     "ok": true
+    },
+    "m:task_title": {
+     "ok": true
+    },
+    "m:due_date": {
+     "ok": true
+    },
+    "m:quote_amount": {
+     "ok": true
+    },
+    "m:booked_date": {
+     "ok": true
+    },
+    "m:follow_up_date": {
+     "ok": true
+    },
+    "m:lost_reason": {
+     "ok": true
+    },
+    "m:lead.assigned_to": {
+     "ok": true
+    },
+    "m:lead.assigned_to_first_name": {
+     "ok": true
+    }
+   }
+  },
+  "{\"ai\":false,\"atomicTags\":false,\"gbp\":false,\"phone\":false,\"reviews\":false,\"teamEmail\":false,\"xero\":false}": {
+   "availCtx": {
+    "phone": false,
+    "xero": false,
+    "gbp": false,
+    "reviews": false,
+    "ai": false,
+    "teamEmail": false,
+    "atomicTags": false
+   },
+   "availability": {
+    "t:newLead": {
+     "ok": true
+    },
+    "t:contact_changed": {
+     "ok": true
+    },
+    "t:contact_tag": {
+     "ok": false,
+     "reason": "Coming with the new lead card"
+    },
+    "t:custom_date": {
+     "ok": true
+    },
+    "t:note_added": {
+     "ok": false,
+     "reason": "Coming with the new lead card"
+    },
+    "t:task_added": {
+     "ok": true
+    },
+    "t:task_completed": {
+     "ok": true
+    },
+    "t:task_reminder": {
+     "ok": true
+    },
+    "t:contact_dnd": {
+     "ok": true
+    },
+    "t:inbound_webhook": {
+     "ok": true
+    },
+    "t:scheduler": {
+     "ok": true
+    },
+    "t:call_details": {
+     "ok": true
+    },
+    "t:customer_replied": {
+     "ok": true
+    },
+    "t:user_replied": {
+     "ok": true
+    },
+    "t:form_submitted": {
+     "ok": true
+    },
+    "t:chat": {
+     "ok": true
+    },
+    "t:job_booked": {
+     "ok": true
+    },
+    "t:booking_status": {
+     "ok": true
+    },
+    "t:jobClosed": {
+     "ok": true
+    },
+    "t:stage": {
+     "ok": true
+    },
+    "t:lead_status": {
+     "ok": true
+    },
+    "t:stale": {
+     "ok": true
+    },
+    "t:invoice": {
+     "ok": false,
+     "reason": "Needs Xero"
+    },
+    "t:commission_invoice": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "t:payment_received": {
+     "ok": true
+    },
+    "t:documents_contracts": {
+     "ok": true
+    },
+    "t:review_received": {
+     "ok": false,
+     "reason": "Needs the Google Business Profile connector"
+    },
+    "t:doc_expiring": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "t:insurance_expiring": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "n:action/update_field": {
+     "ok": true
+    },
+    "n:action/add_tag": {
+     "ok": false,
+     "reason": "Coming with the new lead card"
+    },
+    "n:action/remove_tag": {
+     "ok": false,
+     "reason": "Coming with the new lead card"
+    },
+    "n:action/assign_user": {
+     "ok": true
+    },
+    "n:action/remove_assigned_user": {
+     "ok": true
+    },
+    "n:action/dnd": {
+     "ok": true
+    },
+    "n:action/add_note": {
+     "ok": false,
+     "reason": "Coming with the new lead card"
+    },
+    "n:action/add_task": {
+     "ok": true
+    },
+    "n:action/edit_conversation": {
+     "ok": true
+    },
+    "n:action/send_email": {
+     "ok": true
+    },
+    "n:action/send_sms": {
+     "ok": false,
+     "reason": "Needs the phone line (Twilio)"
+    },
+    "n:action/internal_notification": {
+     "ok": true
+    },
+    "n:action/send_review_request": {
+     "ok": false,
+     "reason": "Turn on Google reviews first"
+    },
+    "n:action/send_live_chat": {
+     "ok": true
+    },
+    "n:action/manual_call": {
+     "ok": true
+    },
+    "n:action/manual_sms": {
+     "ok": false,
+     "reason": "Needs the phone line (Twilio)"
+    },
+    "n:action/internal_comment": {
+     "ok": true
+    },
+    "n:action/move_stage": {
+     "ok": true
+    },
+    "n:action/mark_lost": {
+     "ok": true
+    },
+    "n:action/send_invoice": {
+     "ok": false,
+     "reason": "Needs Xero"
+    },
+    "n:action/send_estimate": {
+     "ok": false,
+     "reason": "Needs Xero"
+    },
+    "n:action/webhook": {
+     "ok": true
+    },
+    "n:action/update_custom_value": {
+     "ok": true
+    },
+    "n:action/math": {
+     "ok": false,
+     "reason": "Coming later"
+    },
+    "n:action/ai_agent": {
+     "ok": false,
+     "reason": "Coming with Workflow AI"
+    },
+    "n:action/ai_decision": {
+     "ok": false,
+     "reason": "Coming with Workflow AI"
+    },
+    "n:action/ai_summarize": {
+     "ok": false,
+     "reason": "Coming with Workflow AI"
+    },
+    "n:wait/period": {
+     "ok": true
+    },
+    "n:wait/date": {
+     "ok": true
+    },
+    "n:wait/recurring": {
+     "ok": true
+    },
+    "n:wait/scheduled": {
+     "ok": true
+    },
+    "n:wait/reply": {
+     "ok": true
+    },
+    "n:wait/user_reply": {
+     "ok": true
+    },
+    "n:wait/action": {
+     "ok": false,
+     "reason": "Needs link and email-open tracking (not in OPS)"
+    },
+    "n:wait/conditions": {
+     "ok": true
+    },
+    "n:goal/tag_added": {
+     "ok": true
+    },
+    "n:goal/tag_removed": {
+     "ok": true
+    },
+    "n:goal/stage_reached": {
+     "ok": true
+    },
+    "n:goal/lead_status": {
+     "ok": true
+    },
+    "n:goal/appointment": {
+     "ok": true
+    },
+    "n:goal/payment": {
+     "ok": true
+    },
+    "n:goal/form": {
+     "ok": true
+    },
+    "n:goal/user_replied": {
+     "ok": true
+    },
+    "n:goal/task": {
+     "ok": true
+    },
+    "n:goal/document": {
+     "ok": true
+    },
+    "n:goal/email_event": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:goal/trigger_link": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:goal/review_clicked": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:if_else/if_else": {
+     "ok": true
+    },
+    "n:split/split": {
+     "ok": true
+    },
+    "n:goto/goto": {
+     "ok": true
+    },
+    "n:workflow/add_to_workflow": {
+     "ok": true
+    },
+    "n:workflow/remove_from_workflow": {
+     "ok": true
+    },
+    "f:service": {
+     "ok": true
+    },
+    "f:source": {
+     "ok": true
+    },
+    "f:tag": {
+     "ok": true
+    },
+    "f:stage": {
+     "ok": true
+    },
+    "f:stage_unchanged": {
+     "ok": true
+    },
+    "f:stage_move_stands": {
+     "ok": true
+    },
+    "f:has_mobile": {
+     "ok": true
+    },
+    "f:has_email": {
+     "ok": true
+    },
+    "f:dont_ask": {
+     "ok": true
+    },
+    "f:asked_within_months": {
+     "ok": true
+    },
+    "f:not_picked": {
+     "ok": true
+    },
+    "f:unpaid": {
+     "ok": true
+    },
+    "f:chat_unanswered": {
+     "ok": true
+    },
+    "f:chat_age_hours": {
+     "ok": true
+    },
+    "f:lead.name": {
+     "ok": true
+    },
+    "f:lead.email": {
+     "ok": true
+    },
+    "f:lead.phone": {
+     "ok": true
+    },
+    "f:lead.postcode": {
+     "ok": true
+    },
+    "f:lead.created": {
+     "ok": true
+    },
+    "f:lead.stage_changed": {
+     "ok": true
+    },
+    "f:lead.booked_for": {
+     "ok": true
+    },
+    "f:lead.next_follow_up": {
+     "ok": true
+    },
+    "f:lead.quote_amount": {
+     "ok": true
+    },
+    "f:lead.lost_reason": {
+     "ok": true
+    },
+    "f:lead.assigned_user": {
+     "ok": true
+    },
+    "f:job.amount": {
+     "ok": true
+    },
+    "f:job.date": {
+     "ok": true
+    },
+    "f:job.type": {
+     "ok": true
+    },
+    "f:job.technician": {
+     "ok": true
+    },
+    "f:job.payment_status": {
+     "ok": true
+    },
+    "f:call.status": {
+     "ok": true
+    },
+    "f:task.title": {
+     "ok": true
+    },
+    "f:task.due": {
+     "ok": true
+    },
+    "f:task.status": {
+     "ok": true
+    },
+    "f:trigger.id": {
+     "ok": true
+    },
+    "f:trigger.type": {
+     "ok": true
+    },
+    "f:trigger.stage": {
+     "ok": true
+    },
+    "f:trigger.tag": {
+     "ok": true
+    },
+    "f:trigger.action": {
+     "ok": true
+    },
+    "f:trigger.channel": {
+     "ok": true
+    },
+    "f:trigger.field": {
+     "ok": true
+    },
+    "f:trigger.call_status": {
+     "ok": true
+    },
+    "f:trigger.job_date": {
+     "ok": true
+    },
+    "f:trigger.status": {
+     "ok": true
+    },
+    "f:trigger.form": {
+     "ok": true
+    },
+    "f:now.day_of_week": {
+     "ok": true
+    },
+    "f:now.day_of_month": {
+     "ok": true
+    },
+    "m:hi": {
+     "ok": true
+    },
+    "m:first_name": {
+     "ok": true
+    },
+    "m:name": {
+     "ok": true
+    },
+    "m:service": {
+     "ok": true
+    },
+    "m:brand": {
+     "ok": true
+    },
+    "m:business_name": {
+     "ok": true
+    },
+    "m:agent": {
+     "ok": true
+    },
+    "m:suburb": {
+     "ok": true
+    },
+    "m:source": {
+     "ok": true
+    },
+    "m:stage": {
+     "ok": true
+    },
+    "m:number": {
+     "ok": true
+    },
+    "m:technician": {
+     "ok": true
+    },
+    "m:amount": {
+     "ok": true
+    },
+    "m:job_date": {
+     "ok": true
+    },
+    "m:minutes": {
+     "ok": true
+    },
+    "m:automation": {
+     "ok": true
+    },
+    "m:task_title": {
+     "ok": true
+    },
+    "m:due_date": {
+     "ok": true
+    },
+    "m:quote_amount": {
+     "ok": true
+    },
+    "m:booked_date": {
+     "ok": true
+    },
+    "m:follow_up_date": {
+     "ok": true
+    },
+    "m:lost_reason": {
+     "ok": true
+    },
+    "m:lead.assigned_to": {
+     "ok": true
+    },
+    "m:lead.assigned_to_first_name": {
+     "ok": true
+    }
+   }
+  },
+  "{\"ai\":false,\"atomicTags\":true,\"gbp\":false,\"phone\":false,\"reviews\":false,\"teamEmail\":false,\"xero\":false}": {
+   "availCtx": {
+    "phone": false,
+    "xero": false,
+    "gbp": false,
+    "reviews": false,
+    "ai": false,
+    "teamEmail": false,
+    "atomicTags": true
+   },
+   "availability": {
+    "t:newLead": {
+     "ok": true
+    },
+    "t:contact_changed": {
+     "ok": true
+    },
+    "t:contact_tag": {
+     "ok": true
+    },
+    "t:custom_date": {
+     "ok": true
+    },
+    "t:note_added": {
+     "ok": true
+    },
+    "t:task_added": {
+     "ok": true
+    },
+    "t:task_completed": {
+     "ok": true
+    },
+    "t:task_reminder": {
+     "ok": true
+    },
+    "t:contact_dnd": {
+     "ok": true
+    },
+    "t:inbound_webhook": {
+     "ok": true
+    },
+    "t:scheduler": {
+     "ok": true
+    },
+    "t:call_details": {
+     "ok": true
+    },
+    "t:customer_replied": {
+     "ok": true
+    },
+    "t:user_replied": {
+     "ok": true
+    },
+    "t:form_submitted": {
+     "ok": true
+    },
+    "t:chat": {
+     "ok": true
+    },
+    "t:job_booked": {
+     "ok": true
+    },
+    "t:booking_status": {
+     "ok": true
+    },
+    "t:jobClosed": {
+     "ok": true
+    },
+    "t:stage": {
+     "ok": true
+    },
+    "t:lead_status": {
+     "ok": true
+    },
+    "t:stale": {
+     "ok": true
+    },
+    "t:invoice": {
+     "ok": false,
+     "reason": "Needs Xero"
+    },
+    "t:commission_invoice": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "t:payment_received": {
+     "ok": true
+    },
+    "t:documents_contracts": {
+     "ok": true
+    },
+    "t:review_received": {
+     "ok": false,
+     "reason": "Needs the Google Business Profile connector"
+    },
+    "t:doc_expiring": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "t:insurance_expiring": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "n:action/update_field": {
+     "ok": true
+    },
+    "n:action/add_tag": {
+     "ok": true
+    },
+    "n:action/remove_tag": {
+     "ok": true
+    },
+    "n:action/assign_user": {
+     "ok": true
+    },
+    "n:action/remove_assigned_user": {
+     "ok": true
+    },
+    "n:action/dnd": {
+     "ok": true
+    },
+    "n:action/add_note": {
+     "ok": true
+    },
+    "n:action/add_task": {
+     "ok": true
+    },
+    "n:action/edit_conversation": {
+     "ok": true
+    },
+    "n:action/send_email": {
+     "ok": true
+    },
+    "n:action/send_sms": {
+     "ok": false,
+     "reason": "Needs the phone line (Twilio)"
+    },
+    "n:action/internal_notification": {
+     "ok": true
+    },
+    "n:action/send_review_request": {
+     "ok": false,
+     "reason": "Turn on Google reviews first"
+    },
+    "n:action/send_live_chat": {
+     "ok": true
+    },
+    "n:action/manual_call": {
+     "ok": true
+    },
+    "n:action/manual_sms": {
+     "ok": false,
+     "reason": "Needs the phone line (Twilio)"
+    },
+    "n:action/internal_comment": {
+     "ok": true
+    },
+    "n:action/move_stage": {
+     "ok": true
+    },
+    "n:action/mark_lost": {
+     "ok": true
+    },
+    "n:action/send_invoice": {
+     "ok": false,
+     "reason": "Needs Xero"
+    },
+    "n:action/send_estimate": {
+     "ok": false,
+     "reason": "Needs Xero"
+    },
+    "n:action/webhook": {
+     "ok": true
+    },
+    "n:action/update_custom_value": {
+     "ok": true
+    },
+    "n:action/math": {
+     "ok": false,
+     "reason": "Coming later"
+    },
+    "n:action/ai_agent": {
+     "ok": false,
+     "reason": "Coming with Workflow AI"
+    },
+    "n:action/ai_decision": {
+     "ok": false,
+     "reason": "Coming with Workflow AI"
+    },
+    "n:action/ai_summarize": {
+     "ok": false,
+     "reason": "Coming with Workflow AI"
+    },
+    "n:wait/period": {
+     "ok": true
+    },
+    "n:wait/date": {
+     "ok": true
+    },
+    "n:wait/recurring": {
+     "ok": true
+    },
+    "n:wait/scheduled": {
+     "ok": true
+    },
+    "n:wait/reply": {
+     "ok": true
+    },
+    "n:wait/user_reply": {
+     "ok": true
+    },
+    "n:wait/action": {
+     "ok": false,
+     "reason": "Needs link and email-open tracking (not in OPS)"
+    },
+    "n:wait/conditions": {
+     "ok": true
+    },
+    "n:goal/tag_added": {
+     "ok": true
+    },
+    "n:goal/tag_removed": {
+     "ok": true
+    },
+    "n:goal/stage_reached": {
+     "ok": true
+    },
+    "n:goal/lead_status": {
+     "ok": true
+    },
+    "n:goal/appointment": {
+     "ok": true
+    },
+    "n:goal/payment": {
+     "ok": true
+    },
+    "n:goal/form": {
+     "ok": true
+    },
+    "n:goal/user_replied": {
+     "ok": true
+    },
+    "n:goal/task": {
+     "ok": true
+    },
+    "n:goal/document": {
+     "ok": true
+    },
+    "n:goal/email_event": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:goal/trigger_link": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:goal/review_clicked": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:if_else/if_else": {
+     "ok": true
+    },
+    "n:split/split": {
+     "ok": true
+    },
+    "n:goto/goto": {
+     "ok": true
+    },
+    "n:workflow/add_to_workflow": {
+     "ok": true
+    },
+    "n:workflow/remove_from_workflow": {
+     "ok": true
+    },
+    "f:service": {
+     "ok": true
+    },
+    "f:source": {
+     "ok": true
+    },
+    "f:tag": {
+     "ok": true
+    },
+    "f:stage": {
+     "ok": true
+    },
+    "f:stage_unchanged": {
+     "ok": true
+    },
+    "f:stage_move_stands": {
+     "ok": true
+    },
+    "f:has_mobile": {
+     "ok": true
+    },
+    "f:has_email": {
+     "ok": true
+    },
+    "f:dont_ask": {
+     "ok": true
+    },
+    "f:asked_within_months": {
+     "ok": true
+    },
+    "f:not_picked": {
+     "ok": true
+    },
+    "f:unpaid": {
+     "ok": true
+    },
+    "f:chat_unanswered": {
+     "ok": true
+    },
+    "f:chat_age_hours": {
+     "ok": true
+    },
+    "f:lead.name": {
+     "ok": true
+    },
+    "f:lead.email": {
+     "ok": true
+    },
+    "f:lead.phone": {
+     "ok": true
+    },
+    "f:lead.postcode": {
+     "ok": true
+    },
+    "f:lead.created": {
+     "ok": true
+    },
+    "f:lead.stage_changed": {
+     "ok": true
+    },
+    "f:lead.booked_for": {
+     "ok": true
+    },
+    "f:lead.next_follow_up": {
+     "ok": true
+    },
+    "f:lead.quote_amount": {
+     "ok": true
+    },
+    "f:lead.lost_reason": {
+     "ok": true
+    },
+    "f:lead.assigned_user": {
+     "ok": true
+    },
+    "f:job.amount": {
+     "ok": true
+    },
+    "f:job.date": {
+     "ok": true
+    },
+    "f:job.type": {
+     "ok": true
+    },
+    "f:job.technician": {
+     "ok": true
+    },
+    "f:job.payment_status": {
+     "ok": true
+    },
+    "f:call.status": {
+     "ok": true
+    },
+    "f:task.title": {
+     "ok": true
+    },
+    "f:task.due": {
+     "ok": true
+    },
+    "f:task.status": {
+     "ok": true
+    },
+    "f:trigger.id": {
+     "ok": true
+    },
+    "f:trigger.type": {
+     "ok": true
+    },
+    "f:trigger.stage": {
+     "ok": true
+    },
+    "f:trigger.tag": {
+     "ok": true
+    },
+    "f:trigger.action": {
+     "ok": true
+    },
+    "f:trigger.channel": {
+     "ok": true
+    },
+    "f:trigger.field": {
+     "ok": true
+    },
+    "f:trigger.call_status": {
+     "ok": true
+    },
+    "f:trigger.job_date": {
+     "ok": true
+    },
+    "f:trigger.status": {
+     "ok": true
+    },
+    "f:trigger.form": {
+     "ok": true
+    },
+    "f:now.day_of_week": {
+     "ok": true
+    },
+    "f:now.day_of_month": {
+     "ok": true
+    },
+    "m:hi": {
+     "ok": true
+    },
+    "m:first_name": {
+     "ok": true
+    },
+    "m:name": {
+     "ok": true
+    },
+    "m:service": {
+     "ok": true
+    },
+    "m:brand": {
+     "ok": true
+    },
+    "m:business_name": {
+     "ok": true
+    },
+    "m:agent": {
+     "ok": true
+    },
+    "m:suburb": {
+     "ok": true
+    },
+    "m:source": {
+     "ok": true
+    },
+    "m:stage": {
+     "ok": true
+    },
+    "m:number": {
+     "ok": true
+    },
+    "m:technician": {
+     "ok": true
+    },
+    "m:amount": {
+     "ok": true
+    },
+    "m:job_date": {
+     "ok": true
+    },
+    "m:minutes": {
+     "ok": true
+    },
+    "m:automation": {
+     "ok": true
+    },
+    "m:task_title": {
+     "ok": true
+    },
+    "m:due_date": {
+     "ok": true
+    },
+    "m:quote_amount": {
+     "ok": true
+    },
+    "m:booked_date": {
+     "ok": true
+    },
+    "m:follow_up_date": {
+     "ok": true
+    },
+    "m:lost_reason": {
+     "ok": true
+    },
+    "m:lead.assigned_to": {
+     "ok": true
+    },
+    "m:lead.assigned_to_first_name": {
+     "ok": true
+    }
+   }
+  },
+  "{\"ai\":false,\"atomicTags\":true,\"gbp\":false,\"phone\":true,\"reviews\":false,\"teamEmail\":false,\"xero\":false}": {
+   "availCtx": {
+    "phone": true,
+    "xero": false,
+    "gbp": false,
+    "reviews": false,
+    "ai": false,
+    "teamEmail": false,
+    "atomicTags": true
+   },
+   "availability": {
+    "t:newLead": {
+     "ok": true
+    },
+    "t:contact_changed": {
+     "ok": true
+    },
+    "t:contact_tag": {
+     "ok": true
+    },
+    "t:custom_date": {
+     "ok": true
+    },
+    "t:note_added": {
+     "ok": true
+    },
+    "t:task_added": {
+     "ok": true
+    },
+    "t:task_completed": {
+     "ok": true
+    },
+    "t:task_reminder": {
+     "ok": true
+    },
+    "t:contact_dnd": {
+     "ok": true
+    },
+    "t:inbound_webhook": {
+     "ok": true
+    },
+    "t:scheduler": {
+     "ok": true
+    },
+    "t:call_details": {
+     "ok": true
+    },
+    "t:customer_replied": {
+     "ok": true
+    },
+    "t:user_replied": {
+     "ok": true
+    },
+    "t:form_submitted": {
+     "ok": true
+    },
+    "t:chat": {
+     "ok": true
+    },
+    "t:job_booked": {
+     "ok": true
+    },
+    "t:booking_status": {
+     "ok": true
+    },
+    "t:jobClosed": {
+     "ok": true
+    },
+    "t:stage": {
+     "ok": true
+    },
+    "t:lead_status": {
+     "ok": true
+    },
+    "t:stale": {
+     "ok": true
+    },
+    "t:invoice": {
+     "ok": false,
+     "reason": "Needs Xero"
+    },
+    "t:commission_invoice": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "t:payment_received": {
+     "ok": true
+    },
+    "t:documents_contracts": {
+     "ok": true
+    },
+    "t:review_received": {
+     "ok": false,
+     "reason": "Needs the Google Business Profile connector"
+    },
+    "t:doc_expiring": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "t:insurance_expiring": {
+     "ok": false,
+     "reason": "Built-in only for now"
+    },
+    "n:action/update_field": {
+     "ok": true
+    },
+    "n:action/add_tag": {
+     "ok": true
+    },
+    "n:action/remove_tag": {
+     "ok": true
+    },
+    "n:action/assign_user": {
+     "ok": true
+    },
+    "n:action/remove_assigned_user": {
+     "ok": true
+    },
+    "n:action/dnd": {
+     "ok": true
+    },
+    "n:action/add_note": {
+     "ok": true
+    },
+    "n:action/add_task": {
+     "ok": true
+    },
+    "n:action/edit_conversation": {
+     "ok": true
+    },
+    "n:action/send_email": {
+     "ok": true
+    },
+    "n:action/send_sms": {
+     "ok": true
+    },
+    "n:action/internal_notification": {
+     "ok": true
+    },
+    "n:action/send_review_request": {
+     "ok": false,
+     "reason": "Turn on Google reviews first"
+    },
+    "n:action/send_live_chat": {
+     "ok": true
+    },
+    "n:action/manual_call": {
+     "ok": true
+    },
+    "n:action/manual_sms": {
+     "ok": true
+    },
+    "n:action/internal_comment": {
+     "ok": true
+    },
+    "n:action/move_stage": {
+     "ok": true
+    },
+    "n:action/mark_lost": {
+     "ok": true
+    },
+    "n:action/send_invoice": {
+     "ok": false,
+     "reason": "Needs Xero"
+    },
+    "n:action/send_estimate": {
+     "ok": false,
+     "reason": "Needs Xero"
+    },
+    "n:action/webhook": {
+     "ok": true
+    },
+    "n:action/update_custom_value": {
+     "ok": true
+    },
+    "n:action/math": {
+     "ok": false,
+     "reason": "Coming later"
+    },
+    "n:action/ai_agent": {
+     "ok": false,
+     "reason": "Coming with Workflow AI"
+    },
+    "n:action/ai_decision": {
+     "ok": false,
+     "reason": "Coming with Workflow AI"
+    },
+    "n:action/ai_summarize": {
+     "ok": false,
+     "reason": "Coming with Workflow AI"
+    },
+    "n:wait/period": {
+     "ok": true
+    },
+    "n:wait/date": {
+     "ok": true
+    },
+    "n:wait/recurring": {
+     "ok": true
+    },
+    "n:wait/scheduled": {
+     "ok": true
+    },
+    "n:wait/reply": {
+     "ok": true
+    },
+    "n:wait/user_reply": {
+     "ok": true
+    },
+    "n:wait/action": {
+     "ok": false,
+     "reason": "Needs link and email-open tracking (not in OPS)"
+    },
+    "n:wait/conditions": {
+     "ok": true
+    },
+    "n:goal/tag_added": {
+     "ok": true
+    },
+    "n:goal/tag_removed": {
+     "ok": true
+    },
+    "n:goal/stage_reached": {
+     "ok": true
+    },
+    "n:goal/lead_status": {
+     "ok": true
+    },
+    "n:goal/appointment": {
+     "ok": true
+    },
+    "n:goal/payment": {
+     "ok": true
+    },
+    "n:goal/form": {
+     "ok": true
+    },
+    "n:goal/user_replied": {
+     "ok": true
+    },
+    "n:goal/task": {
+     "ok": true
+    },
+    "n:goal/document": {
+     "ok": true
+    },
+    "n:goal/email_event": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:goal/trigger_link": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:goal/review_clicked": {
+     "ok": false,
+     "reason": "Needs tracking (not in OPS)"
+    },
+    "n:if_else/if_else": {
+     "ok": true
+    },
+    "n:split/split": {
+     "ok": true
+    },
+    "n:goto/goto": {
+     "ok": true
+    },
+    "n:workflow/add_to_workflow": {
+     "ok": true
+    },
+    "n:workflow/remove_from_workflow": {
+     "ok": true
+    },
+    "f:service": {
+     "ok": true
+    },
+    "f:source": {
+     "ok": true
+    },
+    "f:tag": {
+     "ok": true
+    },
+    "f:stage": {
+     "ok": true
+    },
+    "f:stage_unchanged": {
+     "ok": true
+    },
+    "f:stage_move_stands": {
+     "ok": true
+    },
+    "f:has_mobile": {
+     "ok": true
+    },
+    "f:has_email": {
+     "ok": true
+    },
+    "f:dont_ask": {
+     "ok": true
+    },
+    "f:asked_within_months": {
+     "ok": true
+    },
+    "f:not_picked": {
+     "ok": true
+    },
+    "f:unpaid": {
+     "ok": true
+    },
+    "f:chat_unanswered": {
+     "ok": true
+    },
+    "f:chat_age_hours": {
+     "ok": true
+    },
+    "f:lead.name": {
+     "ok": true
+    },
+    "f:lead.email": {
+     "ok": true
+    },
+    "f:lead.phone": {
+     "ok": true
+    },
+    "f:lead.postcode": {
+     "ok": true
+    },
+    "f:lead.created": {
+     "ok": true
+    },
+    "f:lead.stage_changed": {
+     "ok": true
+    },
+    "f:lead.booked_for": {
+     "ok": true
+    },
+    "f:lead.next_follow_up": {
+     "ok": true
+    },
+    "f:lead.quote_amount": {
+     "ok": true
+    },
+    "f:lead.lost_reason": {
+     "ok": true
+    },
+    "f:lead.assigned_user": {
+     "ok": true
+    },
+    "f:job.amount": {
+     "ok": true
+    },
+    "f:job.date": {
+     "ok": true
+    },
+    "f:job.type": {
+     "ok": true
+    },
+    "f:job.technician": {
+     "ok": true
+    },
+    "f:job.payment_status": {
+     "ok": true
+    },
+    "f:call.status": {
+     "ok": true
+    },
+    "f:task.title": {
+     "ok": true
+    },
+    "f:task.due": {
+     "ok": true
+    },
+    "f:task.status": {
+     "ok": true
+    },
+    "f:trigger.id": {
+     "ok": true
+    },
+    "f:trigger.type": {
+     "ok": true
+    },
+    "f:trigger.stage": {
+     "ok": true
+    },
+    "f:trigger.tag": {
+     "ok": true
+    },
+    "f:trigger.action": {
+     "ok": true
+    },
+    "f:trigger.channel": {
+     "ok": true
+    },
+    "f:trigger.field": {
+     "ok": true
+    },
+    "f:trigger.call_status": {
+     "ok": true
+    },
+    "f:trigger.job_date": {
+     "ok": true
+    },
+    "f:trigger.status": {
+     "ok": true
+    },
+    "f:trigger.form": {
+     "ok": true
+    },
+    "f:now.day_of_week": {
+     "ok": true
+    },
+    "f:now.day_of_month": {
+     "ok": true
+    },
+    "m:hi": {
+     "ok": true
+    },
+    "m:first_name": {
+     "ok": true
+    },
+    "m:name": {
+     "ok": true
+    },
+    "m:service": {
+     "ok": true
+    },
+    "m:brand": {
+     "ok": true
+    },
+    "m:business_name": {
+     "ok": true
+    },
+    "m:agent": {
+     "ok": true
+    },
+    "m:suburb": {
+     "ok": true
+    },
+    "m:source": {
+     "ok": true
+    },
+    "m:stage": {
+     "ok": true
+    },
+    "m:number": {
+     "ok": true
+    },
+    "m:technician": {
+     "ok": true
+    },
+    "m:amount": {
+     "ok": true
+    },
+    "m:job_date": {
+     "ok": true
+    },
+    "m:minutes": {
+     "ok": true
+    },
+    "m:automation": {
+     "ok": true
+    },
+    "m:task_title": {
+     "ok": true
+    },
+    "m:due_date": {
+     "ok": true
+    },
+    "m:quote_amount": {
+     "ok": true
+    },
+    "m:booked_date": {
+     "ok": true
+    },
+    "m:follow_up_date": {
+     "ok": true
+    },
+    "m:lost_reason": {
+     "ok": true
+    },
+    "m:lead.assigned_to": {
+     "ok": true
+    },
+    "m:lead.assigned_to_first_name": {
+     "ok": true
+    }
+   }
+  }
+ }
+}
