@@ -7072,9 +7072,12 @@ function testWfAdvCanvasPure(sb){
     lab(sb.wfPopItems({ kind: 'quick' }, { ...X, ro: 'View only', quick: { on: 'canvas' } })), lab(sb.wfPopItems({ kind: 'stickyColor' }, { ...X, sticky: { color: 'blue' } })), sb.wfPopItems({ kind: 'stickyColor' }, { ...X, sticky: { color: 'blue' } }).items.filter(i => i.checked).map(i => i.act)],
     [['Copy', 'Paste here', 'Duplicate', 'Disable', 'Set as Default Path', 'Add sticky note', 'Notes', 'Connect to…', 'Delete', 'Tidy up'], ['Copy', 'Paste here!', 'Duplicate', 'Disable', 'Set as Default Path!', 'Add sticky note', 'Notes', 'Connect to…!', 'Delete', 'Tidy up'],
       ['Copy', 'Paste here', 'Duplicate', 'Disable!', 'Set as Default Path!', 'Add sticky note', 'Notes', 'Connect to…', 'Delete', 'Tidy up'], 'Only the first step of a group can be the Default Path',
-      ['Duplicate', 'Enable', 'Connect to…', 'Add sticky note', 'Delete', 'Tidy up'], ['Paste here!', 'Add sticky note', 'Tidy up'], ['Paste here!', 'Add sticky note!', 'Tidy up!'],
+      ['Stats', 'Duplicate', 'Enable', 'Connect to…', 'Add sticky note', 'Delete', 'Tidy up'], ['Paste here!', 'Add sticky note', 'Tidy up'], ['Paste here!', 'Add sticky note!', 'Tidy up!'],
       ['Yellow', 'Pink', 'Peach', 'Green', 'Blue', 'Purple', 'Edit note', 'Delete'], ['stc-blue']],
     'Quick actions (right-click / long press): Copy, Paste here, Duplicate, Enable/Disable, Set as Default Path, Add sticky note, Notes, Connect to…, Delete, Tidy up — each greyed with its reason; the canvas\'s and a trigger\'s own; a sticky note\'s colours');
+  const qs = o => sb.wfPopItems({ kind: 'quick' }, { ...X, quick: { on: 'trigger', ...o } }).items[0];
+  assertEqual([qs({ statsOn: true }).act, qs({ statsOn: true }).label, qs({ statsWhy: 'Save the workflow first' }).why, qs({ statsWhy: 'Save the workflow first' }).label],
+    ['qStats', 'View Detailed Stats', 'Save the workflow first', 'Stats'], 'Advanced: the Quick actions of a trigger open its "Stats: <trigger>" window ("View Detailed Stats" in Stats view), greyed with the reason');
   // the canvas items
   const stick = sb.wfAdvStickyBoxes(sb.wfStickyAround({ v: 1 }, [sb.wfAdvFoot(0, 55)], null).layout), T = sb.wfA11yTree(D);
   const C = sb.wfAdvCanvasItems(D, L, reg, {}, { at: T.at, seq: T.seq, issueOf: { 'n:n4': 'error' }, stickies: stick, notes: { n4: 2 } }), by = k => C.items.find(i => i.key===k), h = k => by(k).html();
@@ -8856,6 +8859,12 @@ async function testWfHistoryTabs(){
   assertEqual([/Loading…/.test(hC), /Execution logs/.test(hC), /<option value="">All actions<\/option>/.test(hC)], [true, true, true], 'wfhPageHtml: loading shows "Loading…"; the logs\' filter says All actions');
   assertEqual([/Couldn't read it: boom &lt;x&gt;/.test(S.wfhPageHtml({ ...model, state: 'error', error: 'boom <x>', rows: [] })), /Nothing here for these filters/.test(S.wfhPageHtml({ ...model, state: 'ok', rows: [], more: false }))],
     [true, true], 'wfhPageHtml: an error (escaped) with Try again; an empty list says so');
+  const hM = S.wfhPageHtml({ ...model, state: 'ok', rows: [], more: true });
+  assertEqual([/wfhMore\('enr'\)/.test(hM), /load more to look further back/.test(hM), /wfhMore/.test(S.wfhPageHtml({ ...model, state: 'error', error: 'x', rows: [], more: true }))], [true, true, false],
+    'wfhPageHtml: a page whose rows were all filtered out (Paused / Waiting) still offers Load more');
+  const hR = S.wfhPageHtml({ kind: 'log', filters: {}, state: 'ok', rows: [], runOnly: '1234567890abcdef' });
+  assertEqual([/Execution ID - 12345678</.test(hR), /onclick="wfhLeadBack\(\)">Show all executions/.test(hR), /Show all executions/.test(S.wfhPageHtml({ kind: 'log', filters: {}, state: 'ok', rows: [], runOnly: 'r1', lead: { name: 'Dana', contactId: 'c1', runId: 'r1', runs: [] } }))],
+    [true, true, false], 'wfhPageHtml: the one-run filter of a ?run= link is shown and can be cleared (the lead header has its own)');
   const lrows = [{ id: 'l1', run_id: 'r1', contact_id: 'c1', record_kind: 'contact', record_id: 'c1', row_kind: 'action', step_id: 'n1', step_name: 'Send text', channel: 'text', status: 'failed', reason: 'No phone', at: '2026-10-17T04:00:00Z' },
     { id: 'l2', run_id: 'r1', contact_id: 'c1', record_kind: 'contact', record_id: 'c1', row_kind: 'step', step_id: 'gone', step_name: 'Old step', status: 'executed', at: '2026-10-17T03:00:00Z' }, { id: 'l3', run_id: 'r1', row_kind: 'enroll', status: 'added', at: '2026-10-17T02:00:00Z' }]
     .map(r => S.wfhLogRow(r, { tz, name: () => 'Dana', exists: id => id==='n1' }));

@@ -20704,11 +20704,12 @@ async function wfLeadAdd(cid){
   if (st.error) { S.error = st.error; wfLeadPaint(cid); return; }
   S.busy = true; S.error = ''; wfLeadPaint(cid);
   const res = await autoFnCall({ step: 'enroll', automation_id: row.id, record: { kind: 'contact', id: String(cid) }, ...(st.at ? { start_at: st.at } : {}), request_id: S.req });
-  S.busy = false;
-  if (S.open!==cid) return;   // another lead's card meanwhile
-  if (!res.ok) { S.error = autoFnReason(res.body); wfLeadPaint(cid); return; }
+  const here = S.open===cid;   // another lead's card may have opened meanwhile: its state is left alone
+  if (here) S.busy = false;
+  if (!res.ok) { if (here) { S.error = autoFnReason(res.body); wfLeadPaint(cid); } else showToast(autoFnReason(res.body)); return; }
   if (!res.body.again) wfLeadLog(c, wfLeadActivityText('add', row.name, st.at));
-  wfLeadReset(); WF_DATA.lead.delete(String(cid)); wfLeadPaint(cid);
+  WF_DATA.lead.delete(String(cid));
+  if (here) { wfLeadReset(); wfLeadPaint(cid); }
   showToast(`Added to "${row.name}"`, { kind: 'ok' });
 }
 function wfLeadRemove(cid, runId){
@@ -24247,7 +24248,9 @@ function wfPopItems(m, x){
   // the Advanced builder's right-click "Quick actions" (G5.2) on a step, a trigger or the empty canvas (o.quick)
   if (M.kind==='quick') {
     const q = wfObj(o.quick), noClip = o.clip ? '' : 'Nothing copied yet: copy a step first';
-    if (q.on==='trigger') return { title: 'Quick actions', items: [it('tcopy', 'Duplicate', { why: ro }), it('ttoggle', q.disabled ? 'Enable' : 'Disable', { why: ro }), it('qConnect', 'Connect to…', { why: ro }),
+    // the tile has no footer: its "Stats: <trigger>" window opens from here (G6.3)
+    if (q.on==='trigger') return { title: 'Quick actions', items: [it('qStats', q.statsOn ? 'View Detailed Stats' : 'Stats', { why: String(q.statsWhy || '') }),
+      it('tcopy', 'Duplicate', { why: ro }), it('ttoggle', q.disabled ? 'Enable' : 'Disable', { why: ro }), it('qConnect', 'Connect to…', { why: ro }),
       it('qSticky', 'Add sticky note', { why: ro }), it('tdel', 'Delete', { why: ro, danger: true }), it('qTidy', 'Tidy up', { why: ro })] };
     if (q.on!=='node') return { title: 'Quick actions', items: [it('qPaste', 'Paste here', { why: ro || noClip }), it('qSticky', 'Add sticky note', { why: ro }), it('qTidy', 'Tidy up', { why: ro })] };
     const unknown = q.unknown ? 'This step is from a newer version of the app: it can\'t be changed here' : '', end = q.ports ? '' : 'Nothing can follow this step';
@@ -24591,7 +24594,8 @@ function wfPopCtx(W, D){
       unknown: wfRegIx(W.reg).loaded && !wfNodeEntry(W.reg, n.kind, n.type) } : null,
     trigger: t ? { disabled: t.disabled===true } : null,
     quick: Q==='node' && n ? { on: 'node', disabled: n.disabled===true, multi: wfPorts(n).length > 1, unknown: wfRegIx(W.reg).loaded && !wfNodeEntry(W.reg, n.kind, n.type), entry: W.doc.entry===M.id,
-      head: !D.I.parent[M.id], ports: wfPorts(n).length } : Q==='trigger' && t ? { on: 'trigger', disabled: t.disabled===true } : Q ? { on: 'canvas' } : null,
+      head: !D.I.parent[M.id], ports: wfPorts(n).length } : Q==='trigger' && t ? { on: 'trigger', disabled: t.disabled===true,
+      statsWhy: WF_HOOKS.stats ? (W.id ? '' : 'Save the workflow first') : WF_SOON, statsOn: !!(W.cm && W.cm.kind==='stats') } : Q ? { on: 'canvas' } : null,
     sticky: M.kind==='stickyColor' ? wfObj(wfStickiesOf(W.layout).find(k => k.id===M.id)) : null };
 }
 function wfPaintChrome(D){
@@ -25191,7 +25195,8 @@ function wfPicker(kind, slot, o){
   if (wfGuardEdit()) { showToast(wfGuardEdit(), { kind: 'warn' }); return; }
   if (WF_HOOKS.picker) WF_HOOKS.picker(kind, slot, o); else showToast(WF_SOON, { kind: 'info' });
 }
-function wfOpenStep(id){ if (WF_HOOKS.openStep) WF_HOOKS.openStep(id); }
+// Not while the canvas shows another document (a version, a contact's path): the drawer reads the draft.
+function wfOpenStep(id){ const W = WF; if (W && W.cm && W.cm.doc) return; if (WF_HOOKS.openStep) WF_HOOKS.openStep(id); }
 // Opens a menu by its anchor element (or a point: right-click, long-press).
 function wfPopOpen(kind, anchor, id, at){
   const W = WF;
@@ -25238,6 +25243,7 @@ const WF_POP_ACTS = {
   qConnect: W => { const M = W.menu; wfSetLayer('menu', null); wfConnectOpen(M.on==='trigger' ? { trigger: M.id } : { src: M.id }); },
   qDelete: W => { const id = W.menu.id; wfSetLayer('menu', null); wfDoDelete(id, 'one'); },
   qTidy: () => { wfSetLayer('menu', null); wfTidyUp(); },
+  qStats: W => { const id = W.menu.id; wfSetLayer('menu', null); if (WF_HOOKS.stats) WF_HOOKS.stats(id); },
   stEditM: W => { const id = W.menu.id; wfSetLayer('menu', null); wfStickyEditOpen(id); },
   stDelM: W => { const id = W.menu.id; wfSetLayer('menu', null); const no = wfStickyCommit('Delete sticky note', l => wfStickyRemove(l, id)); if (no) showToast('Sticky note deleted', { undo: () => wfUndoCommit(no), local: true }); },
   swDup: W => { const id = W.menu.id; wfSetLayer('menu', null); wfSwitchDuplicate(id); },
@@ -27381,6 +27387,7 @@ function wfSaveDone(W, snap, b, name, aiMark){
   try { logSettingsActivity(wfActor(), `${CAT_NAMES.automations}: "${name}" ${wasNew ? 'made' : 'changed'} in the builder${W.status==='published' ? '' : ' (Draft)'}`); } catch (e) { /* the log is a convenience */ }
   showToast(b.drafted ? 'Saved as a Draft: publish it again when you have checked it.' : WF_SAVED);
   wfPanelBump('notes');
+  if (W.rail==='versions') wfVersionsLoad(W);   // the save made a version: an open Version history shows it
   wfDirty('chrome', 'canvas');
 }
 // The 409 dialog's two ways out.
@@ -27474,6 +27481,7 @@ async function wfPublishSet(W, on, confirmed){
     W.status = b.enabled===true ? 'published' : 'draft';
     if (Number.isInteger(b.revision)) { W.rev = b.revision; W.base = { ...W.base, rev: b.revision }; }
     wfListChanged(W);
+    if (W.rail==='versions') wfVersionsLoad(W);
     try { logSettingsActivity(wfActor(), `${CAT_NAMES.automations}: "${W.name}" ${W.status==='published' ? 'published' : 'switched to Draft'}`); } catch (e) { /* a convenience */ }
     const warn = Array.isArray(b.warnings) && b.warnings.length ? ` ${String(wfObj(b.warnings[0]).text || '')}` : '';
     showToast(W.status==='published' ? `${W.name}: published.${warn}` : `${W.name}: Draft`);
@@ -28126,14 +28134,17 @@ function wfhPageHtml(m){
   let h = `<div class="wfh"><div class="wfh-head"><h2>${esc(k==='enr' ? 'Enrollment history' : 'Execution logs')}</h2><p class="wfh-sub-p">${esc(x.head || '')}</p></div>`;
   h += x.lead ? wfhLeadHeadHtml(x.lead) : '';
   h += wfhFilterBarHtml({ ...wfObj(x.filters), kind: k, busy });
+  // one run with no lead header (a ?run= link): said, and undone here
+  if (k==='log' && !x.lead && x.runOnly) h += `<div class="wfh-pick" role="group" aria-label="Filtered to one execution"><span class="wfb-tag">Execution ID - ${esc(String(x.runOnly).slice(0, 8))}</span><button type="button" class="btn ghost small" ${busy ? 'disabled' : ''} onclick="wfhLeadBack()">Show all executions</button></div>`;
   if (x.note) h += `<p class="hint wfh-cap">${esc(x.note)}</p>`;
   if (k==='log' && x.canReview) h += `<div class="wfh-review"><button type="button" class="btn small" ${x.reviewed ? 'disabled' : ''} onclick="wfhReviewed()">${x.reviewed ? 'Marked as reviewed' : 'Mark as reviewed'}</button><span class="hint">Takes these failures off Needs review. Nothing is sent.</span></div>`;
   if (Array.isArray(x.matches) && x.matches.length) h += `<div class="wfh-pick" role="group" aria-label="Pick a lead">${x.matches.map(l => `<button type="button" class="btn ghost small" onclick="wfhPickLead('${esc(jsStr(l.id))}')">${esc(l.name)}</button>`).join('')}</div>`;
   h += `<p class="sr-only" role="status" aria-live="polite">${busy ? 'Loading' : x.state==='error' ? 'Could not load' : `${rows.length} shown`}</p>`;
   if (x.state==='error') h += `<div class="au-empty wfh-bad" role="alert">${esc("Couldn't read it: " + String(x.error || 'not read'))} <button type="button" class="btn small" onclick="wfhRefresh('${k}')">Try again</button></div>`;
-  else if (!rows.length) h += `<div class="au-empty hint">${esc(busy ? 'Loading…' : x.empty || 'Nothing here for these filters.')}</div>`;
+  else if (!rows.length) h += `<div class="au-empty hint">${esc(busy ? 'Loading…' : x.empty || (x.more ? 'None in the latest read: load more to look further back.' : 'Nothing here for these filters.'))}</div>`;
   else h += k==='enr' ? wfhEnrollTableHtml(rows) : wfhLogTableHtml(rows, !!x.lead);
-  if (rows.length && x.more) h += `<div class="wfh-more"><button type="button" class="btn small" ${busy ? 'disabled' : ''} onclick="wfhMore('${k}')">${busy ? 'Loading…' : 'Load more'}</button></div>`;
+  // "Paused" / "Waiting" are kept after the read, so a page can show none and still have more behind it
+  if (x.state!=='error' && x.more) h += `<div class="wfh-more"><button type="button" class="btn small" ${busy ? 'disabled' : ''} onclick="wfhMore('${k}')">${busy ? 'Loading…' : 'Load more'}</button></div>`;
   else if (rows.length && x.capped) h += `<p class="hint wfh-cap">${esc(`Showing the latest ${WF_HIST.cap}: narrow the dates to see more.`)}</p>`;
   return h + '</div>';
 }
@@ -28189,7 +28200,7 @@ function wfhDetailHtml(d){
 // One state per opening of the builder (the token): the filters, the rows read, the open row. Reset when another workflow opens.
 const WFH = { token: -1, enr: null, log: null, parents: new Map(), opener: null };
 function wfhNewList(){ return { range: { preset: String(WF_HIST.defDays), from: '', to: '' }, event: '', step: '', status: '', q: '', rows: [], more: false, capped: false, state: 'idle', error: '', seq: 0, matches: null, note: '',
-  older: [], lead: null, runId: '', runs: [], reviewed: false, empty: '' }; }
+  older: [], lead: null, runId: '', runs: [], reviewed: false, empty: '', sIds: null, sContact: null }; }
 function wfhInit(W){
   if (WFH.token===W.token) return;
   wfhDetailClose(true);
@@ -28220,10 +28231,11 @@ async function wfhLoad(kind, append){
   wfhInit(W);
   const L = WFH[kind], seq = ++L.seq, tz = W.tz || bizTz(), rg = wfhRange(L.range, Date.now(), tz), enr = kind==='enr';
   if (rg.error) { Object.assign(L, { state: 'ok', rows: [], more: false, capped: false, matches: null, note: '', empty: '' }); wfhPaint(); return; }
-  if (!append) Object.assign(L, { rows: [], more: false, capped: false, matches: null, note: '', empty: '', reviewed: false });
+  if (!append) Object.assign(L, { rows: [], more: false, capped: false, matches: null, note: '', empty: '', reviewed: false, sIds: null, sContact: null });
   L.state = 'loading'; L.error = ''; wfhPaint();
   try {
-    let ids = null, contact = L.lead ? L.lead.id : null;
+    // The search resolves on the first page only; the next pages reuse what it resolved to (L.sIds / L.sContact).
+    let ids = append ? L.sIds : null, contact = L.lead ? L.lead.id : append ? L.sContact : null;
     if (!append && !L.lead && String(L.q).trim()) {
       const f = await wfhSearch(L.q);
       if (WF!==W || L.seq!==seq) return;
@@ -28232,10 +28244,12 @@ async function wfhLoad(kind, append){
         f.contacts.forEach(c => leads.set(String(c.id), String(c.full_name || '')));
         f.jobs.forEach(j => { if (j.contact_id && !leads.has(String(j.contact_id))) leads.set(String(j.contact_id), String(j.customer_name || '')); });
         L.note = f.capped ? `Showing the first ${WF_HIST.leads} matching leads; type more to narrow it` : '';
-        if (!leads.size && !f.jobs.length) { Object.assign(L, { state: 'ok', empty: 'No lead matches that.' }); wfhPaint(); return; }
+        // The logs filter by lead only, so a job with no lead matches nothing there.
+        if (!leads.size && (!enr || !f.jobs.length)) { Object.assign(L, { state: 'ok', empty: 'No lead matches that.' }); wfhPaint(); return; }
         if (enr) ids = [...new Set([...f.contacts.map(c => String(c.id)), ...f.jobs.map(j => String(j.id))])];
         else if (leads.size > 1) { L.matches = [...leads].slice(0, WF_HIST.leads).map(([id, name]) => ({ id, name: name || 'Lead' })); Object.assign(L, { state: 'ok', empty: 'Pick a lead above.' }); wfhPaint(); return; }
         else contact = [...leads.keys()][0];
+        L.sIds = ids; L.sContact = contact;
       }
     }
     const last = append && L.rows.length ? L.rows[L.rows.length - 1] : null;
@@ -28319,6 +28333,7 @@ function wfhModel(W, kind){
     m.canReview = !wfGuardWrite() && (L.status==='failed' || L.rows.some(r => r.status==='failed'));
     m.reviewed = L.reviewed;
     if (L.lead) m.lead = { name: L.lead.name, contactId: L.lead.id, runId: L.runId, runs: L.runs };
+    else if (L.runId) m.runOnly = L.runId;
   }
   return m;
 }
@@ -29103,7 +29118,7 @@ async function wfVersionCopy(vno){
 async function wfVersionSave(){
   const W = WF;
   if (!W) return;
-  if (await wfSave({ force: true, reason: 'save_version' }) && WF===W) wfVersionsLoad(W);
+  if (await wfSave({ force: true, reason: 'save_version' }) && WF===W && W.rail!=='versions') wfVersionsLoad(W);   // an open panel reloaded with the save
 }
 
 // ── See contact path ──

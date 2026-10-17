@@ -4870,6 +4870,11 @@ async function phase4Suite() {
         [200, true, 4, "Olivia Owner", "Nurture"], "record_runs: the lead's runs, who added them, the workflow's name");
       eq(why, { "Again": null, "Draft one": "Publish it first", "Job one": "Starts from a job, not a lead", "Merge one": "Uses details only its trigger has (e.g. {technician})", "Nurture": null },
         "record_runs: the picker's greyed reasons (Draft, job-only, a blank only its trigger has)");
+      // a saved template's blanks count as the step's own: one with job-only blanks is greyed (it would be sent with them blank)
+      const TPL = flowOf({ n1: { kind: "action", type: "send_email", config: { subject: "Thanks", templateKey: "my_job12345" }, out: { next: null } } }, { name: "Template one" });
+      const tcat = (t: string) => ({ templates: { my_job12345: t } }), mw = (t: string) => { const x = wfManualWhy(wfRunRow(TPL), tcat(t)); return x ? x.code : null; };
+      eq([mw("Hi {first_name}, {technician} will see you on {job_date}."), mw("Hi {first_name}, see you soon.")], ["merge", null],
+        "enroll: a saved template with job-only blanks ({technician}, {job_date}) → merge, as the same words typed in; a lead-only one → fine");
       const rv: any = await handle(db, { step: "record_runs", record: { kind: "contact", id: "c1" } }, VA, false);
       eq([rv.status, rv.body.canAdd, rv.body.enrollable, rv.body.runs.length], [200, false, [], 4], "record_runs: a VA with CRM access sees the lead's runs, cannot add (Q2)");
       eq([(await handle(db, { step: "record_runs", record: { kind: "contact", id: "c1" } }, VA_NOCRM, false)).status, (await handle(db, { step: "record_runs", record: { kind: "contact", id: "c1" } }, TECH, false)).status,
@@ -4918,6 +4923,16 @@ async function phase4Suite() {
       sent.length = 0;
       await tickAt(tdb, NOW); await tickAt(tdb, NOW + 5 * MIN);
       eq([sent.filter((x) => x.msg.tag === "automation-errors").length, tdb.T.automation_state[0].error_notice_at], [1, isoMs(NOW)], "digest: the tick sends it once a day");
+      // vacations (stage 3), as every push: away with "No notifications" → left out, a stand-in gets it, all the chosen away → the owners
+      const vemps = [{ id: "e-own", name: "Olivia Owner", status: "Active" }, { id: "e-mgr", name: "Max Manager", status: "Active" }];
+      const vac = (o: any = {}) => ({ id: "v1", business_id: "default", employee_id: "e-own", starts_on: "2026-10-13", ends_on: "2026-10-17", stand_in_id: null, options: { noNotify: true }, ended_at: null, cancelled_at: null, reminded_at: null, ...o });
+      const vd = async (vacs: any[], notify: any = null) => {
+        const v = W({ automation_log: [fail("l1", "r1", "A", NOW - HR)], employees: vemps, employee_vacations: vacs });
+        if (notify) v.T.automation_settings[0].error_notify = notify;
+        sent.length = 0; await errorDigest(v, NOW); return sent.filter((x) => x.msg.tag === "automation-errors").map((x) => x.to);
+      };
+      eq([await vd([]), await vd([vac()]), await vd([vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } })]), await vd([vac({ employee_id: "e-mgr" })], { push: true, users: ["u-mgr"] })],
+        [["https://push/owner"], [], ["https://push/mgr"], ["https://push/owner"]], "digest (stage 3): the owner away with No notifications → not to them; their stand-in manager gets it; the chosen manager away → the owners");
     }
   }
 

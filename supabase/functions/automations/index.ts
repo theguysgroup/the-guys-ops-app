@@ -5113,7 +5113,7 @@ export async function tick(sb: any, nowMs: number) {
       try { await housekeeping(sb, T, nowMs, started); }
       catch (e) { console.error("automations housekeeping failed:", clip(String((e as Error).message || e), 200)); }
       // the daily error digest (G6.1, Q7): at most one phone alert a day; a failure here never stops the tick
-      try { await errorDigest(sb, nowMs); }
+      try { await errorDigest(sb, nowMs, T); }
       catch (e) { console.error("automations error digest failed:", clip(String((e as Error).message || e), 200)); }
     }
     return { ok: true, engine: !mode.v2 ? "phase4" : mode.compat ? "v2-compat" : "v2-events", ...T.counts };
@@ -6496,7 +6496,10 @@ export function wfManualWhy(a: Row | null, cat: any): { code: string; why: strin
   if (kinds.length && kinds.every((k: string) => !LEAD_KINDS.includes(k))) return { code: "wrong_kind", why: `Starts from ${KIND_WORD[kinds[0]] || "another record"}, not a lead` };
   for (const n of Object.values(obj(doc.nodes)).map(obj)) {
     if (n.kind !== "action") continue;
-    for (const k of blanksIn(n.config)) {
+    // a saved template's words count too (blanksIn leaves templateKey out: the template is read here)
+    const cfg = obj(n.config), keys = blanksIn(cfg);
+    if (hasText(cfg.templateKey)) blanksIn(messageOf(cfg, cat) || "", keys);
+    for (const k of keys) {
       const m = has(WF_MERGE, k) ? WF_MERGE[k] : null;
       if (k.startsWith("trigger.") || (m && (m.triggers || (m.recordKinds !== "*" && !m.recordKinds.includes("contact"))))) return { code: "merge", why: `Uses details only its trigger has (e.g. {${k}})` };
     }
@@ -6608,7 +6611,9 @@ export async function apiUnenroll(sb: any, b: Row, me: any, nowMs: number): Prom
 // ── the error digest (design §3.15, Q7): at most once in 24 h, the failed runs since the last digest (at most 7 days
 // back), one phone alert to the people chosen in Notifications who are still owners or managers (none left, or none
 // chosen: the owners). Phone alert switched off (push: false) or nothing failed: nothing sent. The claim on
-// automation_state.error_notice_at (compare and set) makes two ticks send it once. ──
+// automation_state.error_notice_at (compare and set) makes two ticks send it once. Vacations (stage 3) as every push:
+// someone away with "No notifications" is left out, a stand-in (an owner or manager) gets it; all the chosen away → the
+// owners who are not. T: the tick's context (its one vacations read); without it the vacations are read here. ──
 export const WF_DIGEST = { everyMs: DAY, backMs: 7 * DAY, names: 3, rows: 1000 };
 // Who gets it (pure): the chosen people still owners / managers, else the owners.
 export function wfDigestPeople(notify: unknown, profiles: Row[]): string[] {
@@ -6624,7 +6629,7 @@ export function wfDigestText(failed: { name: string; runs: number }[]): { title:
   return { title: "Workflow errors", body: `${runs} run${runs === 1 ? "" : "s"} failed in ${n} workflow${n === 1 ? "" : "s"}: ${names}. Open Automation → Needs review.` };
 }
 // deno-lint-ignore no-explicit-any
-export async function errorDigest(sb: any, nowMs: number): Promise<Row> {
+export async function errorDigest(sb: any, nowMs: number, T?: TickCtx): Promise<Row> {
   const { data: st, error } = await sb.from("automation_state").select("error_notice_at").eq("business_id", BUSINESS_ID).maybeSingle();
   if (error) throw new Error("automation_state not read: " + clip(String(error.message || error), 200));
   if (!st) return { sent: false, why: "no state" };
@@ -6648,7 +6653,13 @@ export async function errorDigest(sb: any, nowMs: number): Promise<Row> {
   const { data: got, error: ce } = await q.select("business_id");
   if (ce) throw new Error(String(ce.message || ce));
   if (!got || !got.length) return { sent: false, why: "taken" };
-  const people = wfDigestPeople(notify, await rows(sb.from("profiles").select("id, role").in("role", ["owner", "manager"])));
+  const profs = await rows(sb.from("profiles").select("id, role").in("role", ["owner", "manager"]));
+  let C: VacCtx;
+  if (T) C = vacOnDayOf(await vacOf(sb, T, nowMs), nowMs);
+  else { const { data: set } = await sb.from("settings").select("catalog").limit(1); C = await vacContext(sb, nowMs, bizTzOf(obj(set && set[0] && set[0].catalog)), 0); }
+  const roles = ["owner", "manager"];
+  let people = vacRecipients(wfDigestPeople(notify, profs), C, roles);
+  if (!people.length) people = vacRecipients(wfDigestPeople({}, profs), C, roles);
   const w = wfDigestText(failed);
   const out = people.length ? await sendTo(sb, people, { title: w.title, body: w.body, url: wfLink("", null, { base: APP_URL, listTab: "review" }), tag: "automation-errors" }, await vapidKeys(sb)) : null;
   return { sent: true, people: people.length, failed, push: out };
