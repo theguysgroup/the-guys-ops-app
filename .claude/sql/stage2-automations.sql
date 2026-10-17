@@ -4342,3 +4342,80 @@ commit;
 --   commit;
 -- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 -- END PART 3 · G4.4b
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- PART 3 · G6.1 (phase 6: the history screens' stats, final shapes; design §4.8 Stats view, §7 G6.1). ADDITIVE, staging
+-- first, before or after the G6.1 function (the function calls neither: the app reads them, security INVOKER, this
+-- business only, stable):
+--   1. automation_step_stats keeps its signature and its rows (step_id, status, branch, n) and gains, per step, the runs
+--      held there NOW: status 'now_waiting' (branch null) — the Stats view's "waiting" on an action / wait node.
+--   2. NEW automation_trigger_days(p_automation, p_trigger, p_from, p_to) → one row a business day: attempted, matched,
+--      enrolled, unmatched (= attempted − matched) and before_published (counted, never a detail row). The "Stats:
+--      <trigger>" modal says "+N more unmatched that day, counted in the totals" with N = unmatched − before_published
+--      − the engine's daily detail cap (registry, EV_LIMITS.unmatchedPerDay = 200) when that is > 0.
+-- Nothing in the engine changes with it; the manual add (enroll / unenroll / record_runs), the test step and the error
+-- digest use only what Part 1 made (automation_enroll with p_source 'manual', automation_state.error_notice_at,
+-- automation_settings.error_notify).
+-- Check before (read-only):
+--   select to_regprocedure('public.automation_trigger_days(uuid, text, date, date)') is null;   -- true
+--   select pg_get_functiondef('public.automation_step_stats(uuid, timestamptz)'::regprocedure) ~ 'now_waiting';   -- false
+--   select 'manual' = any(regexp_split_to_array(pg_get_constraintdef(oid), '''')) from pg_constraint where conname = 'automation_runs_source_kind';   -- true
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+begin;
+set local lock_timeout = '5s';
+create or replace function public.automation_step_stats(p_automation uuid, p_since timestamptz)
+returns table (step_id text, status text, branch text, n bigint) language sql stable security invoker set search_path = ''
+as $$
+  select x.step_id, x.status, x.branch, x.n from (
+    select l.step_id, l.status, coalesce(l.detail ->> 'branch_id', l.detail ->> 'path_id', l.detail ->> 'outcome') as branch, count(*)::bigint as n
+      from public.automation_log l
+     where l.business_id = public.current_business_id() and l.automation_id = p_automation and l.at >= p_since and l.row_kind in ('step', 'action')
+     group by 1, 2, 3
+    union all
+    select r.cursor_step, 'now_waiting', null::text, count(*)::bigint
+      from public.automation_runs r
+     where r.business_id = public.current_business_id() and r.automation_id = p_automation and r.status = 'waiting' and r.cursor_step is not null
+     group by 1
+  ) as x
+  order by 1, 2, 3 limit 2000
+$$;
+create or replace function public.automation_trigger_days(p_automation uuid, p_trigger text, p_from date, p_to date)
+returns table (day date, attempted bigint, matched bigint, enrolled bigint, unmatched bigint, before_published bigint)
+language sql stable security invoker set search_path = ''
+as $$
+  select d.day, d.attempted::bigint, d.matched::bigint, d.enrolled::bigint, greatest(d.attempted - d.matched, 0)::bigint,
+         coalesce((d.reasons ->> 'before_published')::bigint, 0)
+    from public.automation_trigger_daily d
+   where d.business_id = public.current_business_id() and d.automation_id = p_automation and d.trigger_id = p_trigger and d.day between p_from and p_to
+   order by d.day desc
+   limit 400
+$$;
+revoke all on function public.automation_step_stats(uuid, timestamptz) from public, anon;
+revoke all on function public.automation_trigger_days(uuid, text, date, date) from public, anon;
+grant execute on function public.automation_step_stats(uuid, timestamptz) to authenticated, service_role;
+grant execute on function public.automation_trigger_days(uuid, text, date, date) to authenticated, service_role;
+commit;
+-- Check after (read-only):
+--   select p.oid::regprocedure, p.provolatile = 's' and not p.prosecdef from pg_proc p
+--    where p.oid in ('public.automation_step_stats(uuid, timestamptz)'::regprocedure, 'public.automation_trigger_days(uuid, text, date, date)'::regprocedure);   -- 2 rows, true (stable, invoker)
+--   select has_function_privilege('anon', 'public.automation_trigger_days(uuid, text, date, date)', 'execute');   -- false
+--   select * from public.automation_step_stats('<a workflow id>', now() - interval '30 days');   -- the rows of before + 'now_waiting' per step with waiting runs
+--   select sum(attempted), sum(matched) from public.automation_trigger_days('<id>', '<trigger id>', current_date - 30, current_date);   -- = automation_trigger_stats' row
+-- ROLLBACK (exact: Part 1's automation_step_stats back as it was; the new function gone):
+-- begin;
+-- set local lock_timeout = '5s';
+-- drop function if exists public.automation_trigger_days(uuid, text, date, date);
+-- create or replace function public.automation_step_stats(p_automation uuid, p_since timestamptz)
+-- returns table (step_id text, status text, branch text, n bigint) language sql stable security invoker set search_path = ''
+-- as $$
+--   select l.step_id, l.status, coalesce(l.detail ->> 'branch_id', l.detail ->> 'path_id', l.detail ->> 'outcome'), count(*)::bigint
+--     from public.automation_log l
+--    where l.business_id = public.current_business_id() and l.automation_id = p_automation and l.at >= p_since and l.row_kind in ('step', 'action')
+--    group by 1, 2, 3 order by 1, 2, 3 limit 2000
+-- $$;
+-- revoke all on function public.automation_step_stats(uuid, timestamptz) from public, anon;
+-- grant execute on function public.automation_step_stats(uuid, timestamptz) to authenticated, service_role;
+-- commit;
+-- Check after the rollback: select to_regprocedure('public.automation_trigger_days(uuid, text, date, date)') is null;   -- true
+-- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- END PART 3 · G6.1

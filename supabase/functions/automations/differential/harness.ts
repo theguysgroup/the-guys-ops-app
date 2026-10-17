@@ -290,7 +290,10 @@ async function play(scn: Scn, autos: any[], plan: Plan) {
     v2rows: db.T.automation_log.filter((l: any) => (l.row_kind ?? "action") !== "action").length,
     docs: db.T.automations.filter((a: any) => a.definition && a.definition.schema === 2).length,   // rows running their doc (G2.4 migrate)
     evrows: (db.T.automation_events || []).length + db.T.automation_log.filter((l: any) => l.row_kind === "enroll").length,   // the event store really ran (G2.1)
-    pushes: PUSHES.map((p) => [p.to, p.title, p.body, p.url, p.tag]),
+    // the daily error digest (G6.1, design §3.15, tag "automation-errors") is the office's alert ABOUT failed runs, new
+    // in stage 2 (phase 4 had none): not an automation's own push, so it is left out of the comparison; every other
+    // push is compared exactly
+    pushes: PUSHES.filter((p) => p.tag !== "automation-errors").map((p) => [p.to, p.title, p.body, p.url, p.tag]),
     tasks: db.T.tasks.map((x: any) => [x.board, x.title, x.notes, x.due, x.assignees, x.priority, x.client, x.contact_id, x.created_by, x.created_at]),
     emails: db.T.lead_messages.filter((m: any) => m.auto === true && !String(m.id).startsWith("lm")).map((m: any) => [m.contact_id, m.channel, m.subject, m.body, m.author, m.email, m.status, m.at]),
     lines: LINES.slice(),
