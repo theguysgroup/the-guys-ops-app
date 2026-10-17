@@ -707,6 +707,30 @@ function testVacationShiftReadOnly(){
   }
 }
 
+// Workflow AI (stage 7, spec §4): its entry points and Confirm do nothing that writes or asks the AI in a read-only mode
+// (Build using AI, the builder's rail row and ⇧A, Open on a saved card, Explain it in my words, Confirm on a card).
+async function testWorkflowAiReadOnly(){
+  const WID = '70000000-0000-4000-8000-000000000001';
+  for (const [mode, present, viewAs] of [['presentation mode', true, null], ['View as', false, 'ron']]) {
+    const log = { writes: [], fetches: [], opened: [], toasts: [], autos: [] };
+    const ctx = { PRESENT: present, VIEW_AS_ID: viewAs, console, WF: null, getRealProfile: () => ({ id: 'p', role: 'owner' }),
+      COBRA: { status: { enabled: true }, statusErr: '', mode: 'workflow', context: { workflowId: WID }, msgs: [], seq: 0, busy: {}, streaming: null, open: false },
+      showToast: (m) => log.toasts.push(m), cobraOpen: (o) => log.opened.push(o), cobraFetch: (path, body) => { log.fetches.push([path, body]); return new Promise(() => {}); },
+      openAutomation: (o) => log.autos.push(o.key), wfIsDirty: () => false, wfMobileNow: () => false, cobraClose: () => {}, wfAiReopen: async () => {}, wfAiChangeOf: () => null,
+      regionCountry: () => 'IL', document: { getElementById: () => null }, wfObj: v => (v && typeof v==='object' && !Array.isArray(v) ? v : {}),
+      sb: { from: (t) => ({ insert: () => log.writes.push(t), update: () => log.writes.push(t), upsert: () => log.writes.push(t), delete: () => log.writes.push(t) }), rpc: (n) => log.writes.push(n) } };
+    vm.createContext(ctx);
+    vm.runInContext([constText('WF_UUID_RE'), constText('COBRA_LIMITS'), constText('COBRA_CHANGE_STEPS'), constText('WF_AI_OFF'), constText('WF_AI'), constText('WF_AI_EXAMPLES'), constText('WF_AI_EXPLAIN'),
+      ...['readOnlyReason', 'wfAiShown', 'wfAiWhy', 'wfAiBuild', 'wfAiOpenFromBuilder', 'wfAiOpenDraft', 'wfAiIsDescribe', 'wfAiDescribeAsk', 'wfAiLangOf', 'wfAiLang', 'wfAiExplainText', 'wfAiExplain',
+        'cobraSend', 'wfAiChangeGuard', 'cobraChange'].map(fnText)].join('\n'), ctx);
+    await vm.runInContext(`(async () => { wfAiBuild(); wfAiOpenFromBuilder({ id: '${WID}', builder: 'standard' }); wfAiOpenFromBuilder(null); await wfAiOpenDraft('${WID}'); wfAiExplain();
+      await cobraSend('Change the first wait to 3 days'); await cobraChange('c1', 'confirm'); await cobraChange('c1', 'undo'); })()`, ctx);
+    ok(log.writes.length === 0 && log.fetches.length === 0 && log.opened.length === 0, `${mode}: Workflow AI opens no panel, sends nothing to the AI and writes nothing (Build, the rail row / ⇧A, Explain, a typed ask, Confirm, Undo)`, log);
+    ok(log.toasts.length >= 6 && log.toasts.every(t => t === vm.runInContext('readOnlyReason()', ctx)), `${mode}: each one says why (the read-only reason)`, log.toasts);
+    ok(log.autos.length <= 1, `${mode}: Open on a saved card only opens the builder to look (no write)`, log.autos);
+  }
+}
+
 (async () => {
   await testGuard();
   testVacationShiftReadOnly();
@@ -721,6 +745,7 @@ function testVacationShiftReadOnly(){
   await testAutomationsReadOnly();
   await testAutomationPageReadOnly();
   testAutomationsLock();
+  await testWorkflowAiReadOnly();
   console.log(`read-only: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

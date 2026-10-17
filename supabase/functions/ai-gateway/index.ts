@@ -7,10 +7,10 @@
 //   POST /ai-gateway/manage  { step, ... } → JSON. Steps: status, confirm_change, cancel_change, undo_change
 //                            (MANAGE_STEPS; later groups add theirs there), list_changes, key_save, key_test, key_delete.
 //
-// Changes (the app's contract). confirm_change / cancel_change / undo_change take { id } and answer
-// 200 { ok:true, change } or { ok:false, code, reason, change? }: 400 bad_request, 401 unauthorized, 403 off |
-// role_off | not_yours | not_allowed | denied, 404 not_found, 409 not_proposed | not_confirmed | expired |
-// changed_since | gone | invalid, 500 failed. Show `reason` as it is (plain English). Confirm needs the assistant on
+// Changes (the app's contract). confirm_change / cancel_change / undo_change take { id } (a confirm also ack:true when
+// the card asks for an extra tick) and answer 200 { ok:true, change } or { ok:false, code, reason, change? }: 400
+// bad_request, 401 unauthorized, 403 off | role_off | not_yours | not_allowed | denied, 404 not_found, 409 not_proposed |
+// not_confirmed | expired | changed_since | gone | invalid | needs_ack, 500 failed. Show `reason` as it is (plain English). Confirm needs the assistant on
 // for the person; cancel and undo work even when it is off. Owners undo anyone's change, others their own.
 // list_changes { scope?: 'mine'|'all' (owners only), before?: <created_at of the last row shown>, limit?: ≤ 50 } →
 // { ok, changes: change[], next: <created_at to pass as before> | null }. A change (changeOut):
@@ -187,7 +187,7 @@ export const ERROR_CODES = ["unauthorized", "off", "role_off", "bad_request", "u
   "model_not_priced", "conversation_not_found", "busy", "cap_reached", "daily_limit", "provider_auth", "model_not_found", "provider_bad_request",
   "provider_busy", "provider_unreachable", "provider_error", "server", "not_found", "not_yours", "not_proposed", "not_confirmed", "expired",
   "not_allowed", "changed_since", "unknown_step", "denied", "gone", "invalid", "failed", "free_quota", "free_share", "model_needs_paid",
-  "own_key_refused", "business_key_refused", "key_format", "key_provider_mismatch", "key_invalid", "key_unchecked", "keys_off", "key_in_chat", "too_many_tries", "no_key"];
+  "own_key_refused", "business_key_refused", "key_format", "key_provider_mismatch", "key_invalid", "key_unchecked", "keys_off", "key_in_chat", "too_many_tries", "no_key", "needs_ack"];
 
 export const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -2805,7 +2805,9 @@ export function contextText(ctx: { nowMs: number; biz: Biz; assistantName: strin
     `- Your name: ${ctx.assistantName}`,
     `- Person: ${ctx.me.fullName || "(no name)"} (${ROLE_LABEL[ctx.me.role] || ctx.me.role})`,
   ];
-  if (ctx.lang === "he" || ctx.lang === "en") lines.push(`- App language: ${ctx.lang === "he" ? "Hebrew" : "English"}`);
+  // the turn's lang, else the mode's context.lang (Workflow AI sends it there; its schema allows only he / en)
+  const lang = ctx.lang || (isObj(ctx.context) ? ctx.context.lang : null);
+  if (lang === "he" || lang === "en") lines.push(`- App language: ${lang === "he" ? "Hebrew" : "English"}`);
   // Only the page id, checked again (a chat saved before the check may hold anything): never the app's text as it came.
   const page = isObj(ctx.context) ? pageIdOf(ctx.context.page) : "";
   if (page) lines.push(`- Where they are in the app: the ${page} page`);
@@ -2834,6 +2836,7 @@ const WF_AI_NODE_GROUPS = ["actions", "waits", "goals", "logic"];
 const mayWorkflows = (me: Profile) => !!me && (me.role === "owner" || me.role === "manager");
 const WF_DRAFT_LINE = "Saved as a Draft: nothing runs until a person publishes it.";
 const WF_STALE = "Someone saved this workflow after the AI read it: ask again.";
+const WF_PUBLISHED_SINCE = "It was published or switched to Draft after the AI read it: ask again.";
 // One automations call (the person's token). 401/403 = a refusal the person can be shown; 5xx = a server failure.
 async function wfCall(userSb: any, body: any): Promise<{ status: number; body: any }> {
   if (!isObj(body) || !WF_AI_STEPS.includes(body.step)) throw new Error("internal: not a Workflow AI step");
@@ -2931,8 +2934,17 @@ export function wfDocRows(doc: any, reg: any) {
   ];
   return rows.slice(0, WF_AI.rowsMax);
 }
-// The edit card's rows: the name, each step or trigger added or changed (before = the outline's words), each one removed.
-export function wfEditRows(outline: any, doc: any, reg: any, changedIds: string[], idsRemoved: string[], names: { before: string; after: string }) {
+// The settings' words on the edit card (the automations function's normWfSettings keys); another key shows as itself.
+const WF_SETTING_WORDS: Record<string, string> = { reentry: "Re-entry", perRecord: "One run per lead", stopOnResponse: "Stop when the lead replies", timezone: "Time zone", window: "Sending hours", sender: "Sender name", markRead: "Mark as read" };
+export function wfSettingText(k: string, v: unknown): string {
+  const w = own(WF_SETTING_WORDS, k) ? WF_SETTING_WORDS[k] : k;
+  const x = typeof v === "boolean" ? (v ? "on" : "off") : isObj(v) && typeof v.on === "boolean" ? (v.on ? "on" : "off") : isObj(v) ? clip(JSON.stringify(v), 60) : v == null ? "none" : clip(String(v), 60);
+  return `${w}: ${x}`;
+}
+// The edit card's rows: the name, each step or trigger added or changed (before = the outline's words), each one removed,
+// each trigger removed, the settings changed (their new values) and a new first step: everything Confirm saves.
+export function wfEditRows(outline: any, doc: any, reg: any, changedIds: string[], idsRemoved: string[], names: { before: string; after: string },
+  more: { triggersRemoved?: string[]; settingsChanged?: string[]; settings?: any } = {}) {
   const o = isObj(outline) ? outline : {}, d = isObj(doc) ? doc : {};
   const was: Record<string, string> = {};
   for (const n of Array.isArray(o.nodes) ? o.nodes : []) if (n && n.id) was[n.id] = clip(n.name || n.label || n.type, 120);
@@ -2945,6 +2957,9 @@ export function wfEditRows(outline: any, doc: any, reg: any, changedIds: string[
       return { label: t ? "When" : "Step", before: was[id] || "—", after: t ? wfLabelOf(reg, t, true) : n ? wfLabelOf(reg, n, false) + (!own(was, id) ? " (new)" : "") : "—" };
     }),
     ...idsRemoved.map((id) => ({ label: "Step", before: was[id] || id, after: "Removed" })),
+    ...(more.triggersRemoved || []).map((id) => ({ label: "When", before: was[id] || id, after: "Removed" })),
+    ...(more.settingsChanged || []).map((k) => ({ label: "Settings", before: "As saved", after: wfSettingText(k, isObj(more.settings) ? more.settings[k] : null) })),
+    ...((o.entry ?? null) !== (d.entry ?? null) ? [{ label: "Starts at", before: (o.entry && was[o.entry]) || "None", after: isObj(d.nodes) && d.entry && own(d.nodes, d.entry) ? wfLabelOf(reg, d.nodes[d.entry], false) : "None" }] : []),
   ];
   return rows.slice(0, WF_AI.rowsMax);
 }
@@ -2983,7 +2998,7 @@ async function wfReadOutline(ctx: ToolCtx, id: string) {
   return (t.wfSeen = { id, revision: r.body.revision, name: String(r.body.name || ""), enabled: r.body.enabled === true, outline: r.body.outline });
 }
 const wfSaveRefused = (r: { status: number; body: any }) => {
-  if (r.status === 409) return new ChangeRefused("changed_since", r.body.reason === "published" ? clip(r.body.text || "It was published after this: switch it to Draft first.", 200) : WF_STALE);
+  if (r.status === 409) return new ChangeRefused("changed_since", r.body.reason === "published" ? clip(r.body.text || "It was published after this: switch it to Draft first.", 200) : r.body.reason === "status" ? WF_PUBLISHED_SINCE : WF_STALE);
   if (r.status === 404) return new ChangeRefused("gone", "That workflow is gone (deleted).");
   if (r.status === 422 || r.status === 400) {
     const e = Array.isArray(r.body.errors) && r.body.errors[0] ? `: ${clip(r.body.errors[0].text, 160)}` : "";
@@ -3080,7 +3095,8 @@ registerTool({
     if (p.status !== 200 || p.body.ok !== true) return wfBad([{ code: "E_INVALID", path: "", text: clip(p.body.reason || "The change couldn't be checked.", 200) }], WF_HINT_EDIT);
     if (Array.isArray(p.body.errors) && p.body.errors.length) return wfBad(p.body.errors, WF_HINT_EDIT);
     const changedIds: string[] = Array.isArray(p.body.changedIds) ? p.body.changedIds.map(String) : [], idsRemoved: string[] = Array.isArray(p.body.idsRemoved) ? p.body.idsRemoved.map(String) : [];
-    if (!changedIds.length && !idsRemoved.length && p.body.name === seen.name) return wfBad([{ code: "E_NO_CHANGE", path: "", text: "These edits change nothing." }], WF_HINT_EDIT);
+    const triggersRemoved: string[] = Array.isArray(p.body.triggersRemoved) ? p.body.triggersRemoved.map(String) : [], settingsChanged: string[] = Array.isArray(p.body.settingsChanged) ? p.body.settingsChanged.map(String) : [];
+    if (!changedIds.length && !idsRemoved.length && !triggersRemoved.length && !settingsChanged.length && p.body.entryChanged !== true && p.body.name === seen.name) return wfBad([{ code: "E_NO_CHANGE", path: "", text: "These edits change nothing." }], WF_HINT_EDIT);
     const reg = await wfRegistry(ctx), forbidden = forbidUnavailable(p.body.definition, reg, changedIds);
     if (forbidden.length) return wfBad(forbidden.map((f) => ({ code: "E_UNAVAILABLE", path: f.path, text: `${f.type} is not available here (${f.reason}). Use one that is, or tell the person.` })), WF_HINT_EDIT);
     const name = String(p.body.name || seen.name), waiting = Number(p.body.waitingRunsAffected) || 0;
@@ -3093,15 +3109,16 @@ registerTool({
       ...(Array.isArray(p.body.warnings) ? p.body.warnings : []).slice(0, 3).map((w: any) => clip(w && w.text, 200)).filter(Boolean),
       WF_DRAFT_LINE,
     ];
-    const after = { ops, idMap: isObj(p.body.idMap) ? p.body.idMap : {}, changedIds, idsRemoved, name };
+    // willDraft and waiting: what the card said about runs (the apply refuses when it no longer holds)
+    const after = { ops, idMap: isObj(p.body.idMap) ? p.body.idMap : {}, changedIds, idsRemoved, triggersRemoved, settingsChanged, name, willDraft: p.body.willDraft === true, waiting };
     if (JSON.stringify(after).length > MAX_CHANGE_JSON_CHARS) throw new ChangeRefused("too_big", "This change is too big to make in one go: change one part first.");
-    const rows = wfEditRows(seen.outline, p.body.definition, reg, changedIds, idsRemoved, { before: seen.name, after: name }), title = clip(`Change workflow: ${seen.name || name}`, 300);
+    const rows = wfEditRows(seen.outline, p.body.definition, reg, changedIds, idsRemoved, { before: seen.name, after: name }, { triggersRemoved, settingsChanged, settings: p.body.settings }), title = clip(`Change workflow: ${seen.name || name}`, 300);
     const res = await ctx.propose({
       kind: "wf_edit", target: { table: "automations", id, label: seen.name, automation_id: id, base_revision: seen.revision },
       before: { name: seen.name, revision: seen.revision, enabled: seen.enabled }, after, summary,
       display: { title, rows, warnings, ...(extra ? { needs_extra_confirm: true } : {}) },
     });
-    ctx.card("wf_diff", { change_id: res.change_id, id, name, summary, rows, warnings, changedIds, idsRemoved, willDraft: p.body.willDraft === true, waitingRunsAffected: waiting, needs_extra_confirm: extra });
+    ctx.card("wf_diff", { change_id: res.change_id, id, name, summary, rows, warnings, changedIds, idsRemoved, triggersRemoved, willDraft: p.body.willDraft === true, waitingRunsAffected: waiting, needs_extra_confirm: extra });
     return res;
   },
 });
@@ -3117,6 +3134,10 @@ registerChangeKind({
   kind: "wf_create", label: "New workflow (Draft)", allow: mayWorkflows,
   apply: async (userSb, ch) => {
     const a = isObj(ch.after) ? ch.after : {};
+    // checked again first (it may be days later: a template deleted, a channel disconnected); a Draft is saved with
+    // errors, so they are refused here, never reported as a clean save
+    const v = await wfCall(userSb, { step: "validate", definition: a.definition, settings: isObj(a.settings) ? a.settings : {}, name: a.name, generate: true, builder: "standard", editor: WF_AI_EDITOR });
+    if (v.status !== 200 || v.body.ok !== true || (Array.isArray(v.body.errors) && v.body.errors.length)) throw new ChangeRefused("invalid", "This workflow no longer fits what is available: ask again.");
     const r = await wfCall(userSb, { step: "save", automation_id: null, name: a.name, definition: a.definition, settings: isObj(a.settings) ? a.settings : {}, builder: "standard", editor: WF_AI_EDITOR, ai_edited: true });
     if (r.status !== 200 || r.body.ok !== true || !r.body.id) throw wfSaveRefused(r);
     return { after: { ...a, id: r.body.id, revision: r.body.revision, version_no: r.body.version_no ?? null }, target: { ...(isObj(ch.target) ? ch.target : {}), id: r.body.id, automation_id: r.body.id } };
@@ -3139,7 +3160,11 @@ registerChangeKind({
     if (p.status === 409) throw new ChangeRefused("changed_since", WF_STALE);
     if (p.status === 404) throw new ChangeRefused("gone", "That workflow is gone (deleted).");
     if (p.status !== 200 || p.body.ok !== true || (Array.isArray(p.body.errors) && p.body.errors.length)) throw new ChangeRefused("invalid", "This change doesn't fit the workflow any more: ask again.");
-    const s = await wfCall(userSb, { step: "save", automation_id: id, expected_revision: t.base_revision, name: p.body.name, definition: p.body.definition, settings: p.body.settings, editor: WF_AI_EDITOR, ai_edited: true });
+    // a publish never bumps the revision: the card's "it is live" (or its absence) and its waiting count must still hold
+    const b = isObj(ch.before) ? ch.before : {};
+    if ((p.body.willDraft === true) !== (a.willDraft === true)) throw new ChangeRefused("changed_since", WF_PUBLISHED_SINCE);
+    if ((Number(p.body.waitingRunsAffected) || 0) > (Number(a.waiting) || 0)) throw new ChangeRefused("changed_since", "More leads are waiting in it now than the card said: ask again.");
+    const s = await wfCall(userSb, { step: "save", automation_id: id, expected_revision: t.base_revision, expected_enabled: b.enabled === true, name: p.body.name, definition: p.body.definition, settings: p.body.settings, editor: WF_AI_EDITOR, ai_edited: true });
     if (s.status !== 200 || s.body.ok !== true) throw wfSaveRefused(s);
     const vn = Number.isInteger(s.body.version_no) ? s.body.version_no : null;
     return { after: { ...a, revision: s.body.revision, version_no: vn, prev_version_no: vn ? await wfPrevVersion(userSb, id, vn) : null, drafted: s.body.drafted === true } };
@@ -3152,7 +3177,8 @@ registerChangeKind({
     if (!data || data.deleted_at) throw new ChangeRefused("gone", "That workflow is gone (deleted).");
     if (Number(data.revision) !== Number(a.revision) || data.enabled === true) throw new ChangeRefused("changed_since", "It was changed or published after this; open its Versions to go back.");
     if (!Number.isInteger(a.prev_version_no)) throw new ChangeRefused("invalid", "There is no saved version to go back to; open its Versions.");
-    const r = await wfCall(userSb, { step: "restore", automation_id: id, version_no: a.prev_version_no });
+    // expected_revision: a save between this read and the restore is refused (409), never overwritten
+    const r = await wfCall(userSb, { step: "restore", automation_id: id, version_no: a.prev_version_no, expected_revision: Number(a.revision) });
     if (r.status !== 200 || r.body.ok !== true) throw wfSaveRefused(r);
   },
 });
@@ -4490,6 +4516,8 @@ export async function confirmChange(sb: any, body: any, me: Profile, jwt: string
   }
   const kind = own(CHANGE_KINDS, row.kind) ? CHANGE_KINDS[row.kind] : null;
   if (!kind || !allowedFor(kind, me)) return changeError(403, "not_allowed", "You aren't allowed to make this change.");
+  // a card that asks for an extra tick (Workflow AI: many steps removed while leads wait) is confirmed only with it
+  if (isObj(row.display) && row.display.needs_extra_confirm === true && body?.ack !== true) return changeError(409, "needs_ack", "Tick the box on the card to confirm.", changeOut(row, me));
   const claimed = await claimChange(sb, row.id, "proposed", { status: "confirmed", confirmed_at: iso(nowMs), error: null });
   if (!claimed) return changeError(409, "not_proposed", "This change isn't waiting for a confirmation any more.");
   let out: { after: any; target?: any };

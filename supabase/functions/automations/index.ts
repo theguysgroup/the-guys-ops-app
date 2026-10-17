@@ -5892,12 +5892,14 @@ export function wfOutline(doc: any, biz: BizLists = {}) {
     return keys.length ? keys : null;
   };
   // deno-lint-ignore no-explicit-any
-  const config = (c: any, keys: string[] | null) => {
+  // a webhook's url only by its host (its path or query may hold the integration's secret), as the Publish lines show it
+  const config = (c: any, keys: string[] | null, hook = false) => {
     const x = obj(c), out: Row = {};
     for (const k of keys || Object.keys(x)) {
       if (!has(x, k)) continue;
       const v = x[k];
-      if (k === "branches" || k === "paths") out[k] = (Array.isArray(v) ? v : []).map((b: unknown) => { const y = obj(b); return { id: y.id, name: y.name ?? null, ...(y.when ? { when: cond(y.when) } : {}), ...(y.pct != null ? { pct: y.pct } : {}) }; });
+      if (hook && k === "url") { try { out[k] = new URL(String(v)).hostname || "another system"; } catch { out[k] = "another system"; } }
+      else if (k === "branches" || k === "paths") out[k] = (Array.isArray(v) ? v : []).map((b: unknown) => { const y = obj(b); return { id: y.id, name: y.name ?? null, ...(y.when ? { when: cond(y.when) } : {}), ...(y.pct != null ? { pct: y.pct } : {}) }; });
       else if (k === "when" && v && typeof v === "object") out[k] = cond(v);
       else if (typeof v === "string") out[k] = cut(v);
       else { const j = JSON.stringify(v); out[k] = j && j.length > 160 ? cut(j) : v; }
@@ -5913,7 +5915,7 @@ export function wfOutline(doc: any, biz: BizLists = {}) {
     }),
     nodes: Object.entries(obj(d.nodes)).map(([id, n0]) => {
       const n = obj(n0), e = nodeEntry(n.kind, n.type);
-      return { id, kind: n.kind, type: n.type, label: e ? e.label : null, name: n.name ?? null, config: config(n.config, n.kind === "if_else" || n.kind === "split" ? null : keysOf(e)), out: obj(n.out),
+      return { id, kind: n.kind, type: n.type, label: e ? e.label : null, name: n.name ?? null, config: config(n.config, n.kind === "if_else" || n.kind === "split" ? null : keysOf(e), n.kind === "action" && n.type === "webhook"), out: obj(n.out),
         ...(n.disabled === true ? { disabled: true } : {}), ...(n.locked === true ? { locked: true } : {}) };
     }),
   };
@@ -5951,8 +5953,13 @@ async function apiPatch(sb0: any, b: Row): Promise<ApiRes> {
   for (const t of Array.isArray(stored.triggers) ? stored.triggers : []) was[String(obj(t).id)] = canonJson(t);
   const now: [string, unknown][] = [...Object.entries(obj(doc.nodes)), ...(Array.isArray(doc.triggers) ? doc.triggers : []).map((t: unknown) => [String(obj(t).id), t] as [string, unknown])];
   const changedIds = now.filter(([k, v]) => !has(was, k) || was[k] !== canonJson(v)).map(([k]) => k).sort();
+  // what else a save would change: triggers taken away, the settings, the first step (the card shows each)
+  const triggerIds = (d: Row) => (Array.isArray(d.triggers) ? d.triggers : []).map((t: unknown) => String(obj(t).id));
+  const triggersRemoved = triggerIds(stored).filter((x: string) => !triggerIds(doc).includes(x)).sort();
+  const was0 = normWfSettings(prev) as Row, now0 = settings as Row;
+  const settingsChanged = Object.keys(now0).filter((k) => canonJson(now0[k]) !== canonJson(was0[k])).sort(), entryChanged = (doc.entry ?? null) !== (stored.entry ?? null);
   const willDraft = wfSaveGoesDraft(a, doc, b.ai_edited === true);
-  return { status: 200, body: { ok: true, definition: doc, settings, name, idMap: p.idMap, errors: chk.errors, warnings: chk.warnings, idsRemoved, changedIds, shapeChanged, willDraft,
+  return { status: 200, body: { ok: true, definition: doc, settings, name, idMap: p.idMap, errors: chk.errors, warnings: chk.warnings, idsRemoved, changedIds, triggersRemoved, settingsChanged, entryChanged, shapeChanged, willDraft,
     waitingRunsAffected: shapeChanged || willDraft ? await activeRuns(sb, String(a.id)) : 0, revision: Number(a.revision) } };
 }
 // step "save" (design §3.13). A Published workflow refuses errors (422); a Draft is saved with them. 409 when someone
@@ -5997,7 +6004,7 @@ async function apiSave(sb: any, b: Row, me: any, nowMs: number, opts: { reason?:
   const newHost = wfNewWebhookHost(a && a.definition, doc);
   const tpl = await writeTemplateDrafts(sb, b.template_drafts, me, nowMs, { selfId: a ? String(a.id) : null, confirmed: b.templates_confirmed === true });
   if (!Array.isArray(tpl)) return tpl;
-  const reason = opts.reason || (!a ? "create" : b.ai_edited === true ? "ai" : b.reason === "save_version" ? "save_version" : "save");
+  const reason = opts.reason || (b.ai_edited === true ? "ai" : !a ? "create" : b.reason === "save_version" ? "save_version" : "save");
   const r = await rpcObj(sb, "automation_save", { p_business: BUSINESS_ID, p_id: a ? a.id : null, p_expected: a ? expected : null, p_name: name, p_definition: doc,
     p_settings: settings, p_layout: layout, p_builder: builder, p_origin: opts.origin || (b.ai_edited === true ? "ai" : "user"), p_reason: reason,
     p_draft: b.ai_edited === true || !!(a && a.origin === "ai") || newHost, p_summary: wfListSummary(doc, settings), p_actor: me.id ?? null, p_actor_name: clip(String(me.full_name || ""), 120) || null });
@@ -6296,13 +6303,15 @@ async function apiDuplicate(sb: any, b: Row, me: any, nowMs: number): Promise<Ap
   if (r.status === 200 && src.template_key) await sb.from("automations").update({ template_key: String(src.template_key) }).eq("id", r.body.id);
   return r;
 }
-// step "restore" {automation_id, version_no}: only while the workflow is a Draft (design §4.7); writes the snapshot
-// back as a Draft (reason restore).
+// step "restore" {automation_id, version_no, expected_revision?}: only while the workflow is a Draft (design §4.7); writes
+// the snapshot back as a Draft (reason restore). With expected_revision, 409 when it was saved since.
 // deno-lint-ignore no-explicit-any
 async function apiRestore(sb: any, b: Row, me: any, nowMs: number): Promise<ApiRes> {
   const a = await apiRow(sb, b.automation_id, me, nowMs);
   if (!a) return apiErr(404, "workflow not found");
   if (a.enabled === true) return apiErr(409, "published", { text: "Switch to Draft first, or create a new workflow from this version" });
+  // the revision the caller read it at, when given (Workflow AI's undo): a save since → 409, never overwritten
+  if (b.expected_revision != null && Number(b.expected_revision) !== Number(a.revision)) return apiErr(409, "conflict", { revision: Number(a.revision), updated_by_name: a.updated_by_name || null, updated_at: a.updated_at || null });
   const v = (await rows(sb.from("automation_versions").select("*").eq("automation_id", a.id).eq("version_no", Number(b.version_no)).limit(1)))[0];
   if (!v || !v.definition) return apiErr(404, "version not found");
   return await apiSave(sb, { automation_id: a.id, expected_revision: Number(a.revision), name: v.name, definition: v.definition, settings: v.settings, layout: v.layout, builder: v.builder }, me, nowMs, { reason: "restore" });

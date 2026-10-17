@@ -63,6 +63,9 @@ SUITES.push(async () => {
       if (op.op === "setNode" && d.nodes[op.id]) { const p = op.patch || {}; d.nodes[op.id] = { ...d.nodes[op.id], ...(p.name ? { name: p.name } : {}), config: { ...d.nodes[op.id].config, ...(p.config || {}) } }; }
       else if (op.op === "removeNode" && d.nodes[op.id]) { delete d.nodes[op.id]; for (const n of Object.values(d.nodes) as any[]) for (const k of Object.keys(n.out)) if (n.out[k] === op.id) n.out[k] = null; if (d.entry === op.id) d.entry = null; }
       else if (op.op === "addNode") { d.seq++; const id = "n" + d.seq; d.nodes[id] = { kind: op.node.kind, type: op.node.type, config: op.node.config || {}, out: { next: null } }; }
+      else if (op.op === "removeTrigger" && d.triggers.some((t: any) => t.id === op.id)) d.triggers = d.triggers.filter((t: any) => t.id !== op.id);
+      else if (op.op === "setSettings") d.__settings = { ...(d.__settings || {}), ...(op.patch || {}) };
+      else if (op.op === "setEntry" && d.nodes[op.id]) d.entry = op.id;
       else errors.push({ code: "E_PATCH_ID", path: "/id", opIndex: i, text: "No such step" });
     });
     return { doc: d, errors };
@@ -83,9 +86,13 @@ SUITES.push(async () => {
       if (body.base_revision !== a.revision) return { status: 409, body: { ok: false, reason: "conflict", revision: a.revision } };
       const p = applyOps(a.definition, body.ops);
       if (p.errors.length) return { status: 422, body: { ok: false, reason: "errors", errors: p.errors } };
+      const sp = p.doc.__settings || null, settings = sp ? { ...a.settings, ...sp } : a.settings;
+      delete p.doc.__settings;
       const was = a.definition.nodes, now = p.doc.nodes;
       const changedIds = Object.keys(now).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(was[k])).sort(), idsRemoved = Object.keys(was).filter((k) => !(k in now)).sort();
-      return { status: 200, body: { ok: true, definition: p.doc, settings: a.settings, name: a.name, idMap: {}, errors: [], warnings: [], idsRemoved, changedIds, shapeChanged: idsRemoved.length > 0, willDraft: a.enabled === true && body.ai_edited === true, waitingRunsAffected: FA.waiting, revision: a.revision } };
+      const triggersRemoved = a.definition.triggers.map((t: any) => t.id).filter((x: string) => !p.doc.triggers.some((t: any) => t.id === x)).sort();
+      return { status: 200, body: { ok: true, definition: p.doc, settings, name: a.name, idMap: {}, errors: [], warnings: [], idsRemoved, changedIds, triggersRemoved, settingsChanged: sp ? Object.keys(sp).sort() : [], entryChanged: p.doc.entry !== a.definition.entry,
+        shapeChanged: idsRemoved.length > 0, willDraft: a.enabled === true && body.ai_edited === true, waitingRunsAffected: FA.waiting, revision: a.revision } };
     }
     if (body.step === "save") {
       if (FA.saveStatus) return FA.saveStatus;
@@ -97,6 +104,7 @@ SUITES.push(async () => {
       const a = rowOf(db, body.automation_id);
       if (!a) return { status: 404, body: { ok: false, reason: "workflow not found" } };
       if (body.expected_revision !== a.revision) return { status: 409, body: { ok: false, reason: "conflict", revision: a.revision } };
+      if (typeof body.expected_enabled === "boolean" && (a.enabled === true) !== body.expected_enabled) return { status: 409, body: { ok: false, reason: "status", enabled: a.enabled === true, revision: a.revision } };
       const was = a.enabled;
       Object.assign(a, { name: body.name, definition: clone(body.definition), settings: clone(body.settings), revision: a.revision + 1, enabled: body.ai_edited === true ? false : a.enabled });
       return { status: 200, body: { ok: true, id: a.id, revision: a.revision, enabled: a.enabled, version_no: snap(db, a), drafted: was === true && a.enabled === false, errors: [], warnings: [] } };
@@ -105,6 +113,7 @@ SUITES.push(async () => {
       const a = rowOf(db, body.automation_id);
       if (!a) return { status: 404, body: { ok: false, reason: "workflow not found" } };
       if (a.enabled) return { status: 409, body: { ok: false, reason: "published", text: "Switch to Draft first, or create a new workflow from this version" } };
+      if (body.expected_revision != null && body.expected_revision !== a.revision) return { status: 409, body: { ok: false, reason: "conflict", revision: a.revision } };
       const v = db.T.automation_versions.find((x: any) => x.automation_id === a.id && x.version_no === body.version_no);
       if (!v) return { status: 404, body: { ok: false, reason: "version not found" } };
       Object.assign(a, { definition: clone(v.definition), name: v.name, revision: a.revision + 1 });
@@ -263,7 +272,7 @@ SUITES.push(async () => {
     REC.length = 0;
     let c = await manage(db, { step: "confirm_change", id: ch.id });
     const a = db.T.automations[0];
-    eq([c.status, c.body.ok, steps(), REC[0].body.ai_edited, REC[0].body.editor, REC[0].body.automation_id, REC[0].jwt], [200, true, ["save"], true, "builder", null, "jwt-owner"], "Confirm: one save with ai_edited (as the person), nothing else");
+    eq([c.status, c.body.ok, steps(), REC[0].body.generate, REC[1].body.ai_edited, REC[1].body.editor, REC[1].body.automation_id, REC[1].jwt], [200, true, ["validate", "save"], true, true, "builder", null, "jwt-owner"], "Confirm: checked again, then one save with ai_edited (as the person), nothing else");
     eq([a.enabled, a.origin, a.name, c.body.change.after.id, c.body.change.target.id], [false, "ai", "Welcome email", a.id, a.id], "… a Draft the AI made; the change knows its id");
     REC.length = 0;
     let u = await manage(db, { step: "undo_change", id: ch.id });
@@ -280,6 +289,13 @@ SUITES.push(async () => {
     FA.saveStatus = { status: 403, body: { ok: false, reason: "Only an owner can add a Webhook step or change where it sends" } };
     c = await manage(db, { step: "confirm_change", id: db.T.ai_changes[0].id }, "jwt-manager");
     eq([c.status, c.body.code, c.body.reason, db.T.automations.length], [403, "denied", "Only an owner can add a Webhook step or change where it sends", 0], "a save the automations function refuses → denied, its words");
+    // what was valid when proposed no longer is (a template deleted, a channel disconnected): refused, nothing saved
+    db = wfWorld();
+    await chat(db, { text: "build me a welcome email", mode: "workflow_build" });
+    FA.validateQueue.push({ status: 200, body: { ok: true, errors: [{ code: "E_UNAVAILABLE", path: "/nodes/n2", text: "Needs the phone line" }], warnings: [] } });
+    REC.length = 0;
+    c = await manage(db, { step: "confirm_change", id: db.T.ai_changes[0].id });
+    eq([c.status, c.body.code, c.body.reason, steps(), db.T.automations.length], [409, "invalid", "This workflow no longer fits what is available: ask again.", ["validate"], 0], "Confirm on a new workflow that no longer validates: refused, nothing saved");
   }
 
   // ── 7. edit: read_workflow, propose_workflow_edit (the wf_diff card), Confirm at base_revision, stale, undo ──
@@ -353,6 +369,74 @@ SUITES.push(async () => {
     r = await edit(db, `[mock:tool propose_workflow_edit ${JSON.stringify({ summary: "S", ops_json: JSON.stringify([{ op: "removeNode", id: "n4" }, { op: "removeNode", id: "n8" }]) })}]`);
     const ch2 = db.T.ai_changes[0];
     eq([ch2 && ch2.display.needs_extra_confirm, ch2 && ch2.display.rows.filter((x: any) => x.after === "Removed").length], [true, 2], "removing > 30% of the steps while leads wait: needs_extra_confirm");
+  }
+
+  // ── 7b. review fixes: everything Confirm saves is on the card; the card's run facts hold at Confirm; the tick is
+  //        checked by the server; undo never overwrites a save; the app's own request body gives the language ──
+  {
+    const tool = (ops: any[]) => `[mock:tool propose_workflow_edit ${JSON.stringify({ summary: "S", ops_json: JSON.stringify(ops) })}]`;
+    const twoTriggers = () => ({ ...CANON(), triggers: [...CANON().triggers, { id: "t2", type: "newLead", name: "New lead", filters: { match: "all", segments: [{ match: "all", rules: [] }] } }] });
+    let db = wfWorld([canonRow({ definition: twoTriggers() })]);
+    await edit(db, tool([{ op: "removeTrigger", id: "t2" }]));
+    let ch = db.T.ai_changes[0];
+    eq([ch && ch.after.triggersRemoved, ch && ch.display.rows], [["t2"], [{ label: "When", before: "New lead", after: "Removed" }]], "a removeTrigger-only edit is proposed; the card says the trigger is removed");
+    db = wfWorld([canonRow()]);
+    await edit(db, tool([{ op: "setSettings", patch: { stopOnResponse: true } }]));
+    ch = db.T.ai_changes[0];
+    eq([ch && ch.after.settingsChanged, ch && ch.display.rows], [["stopOnResponse"], [{ label: "Settings", before: "As saved", after: "Stop when the lead replies: on" }]], "a setSettings-only edit is proposed; the card shows the setting and its new value");
+    db = wfWorld([canonRow()]);
+    await edit(db, tool([{ op: "setNode", id: "n1", patch: { config: { n: 3 } } }, { op: "setEntry", id: "n4" }]));
+    ch = db.T.ai_changes[0];
+    eq(ch && ch.display.rows.find((x: any) => x.label === "Starts at"), { label: "Starts at", before: "Wait 2 days", after: "Quote follow-up" }, "a new first step is on the card");
+    eq([wfSettingText("window", { on: false, days: [1] }), wfSettingText("reentry", "after_exit"), wfSettingText("other", null)], ["Sending hours: off", "Re-entry: after_exit", "other: none"], "wfSettingText: a setting in words");
+    // published between the proposal and Confirm (a publish never bumps the revision): refused, nothing saved
+    db = wfWorld([canonRow()]);
+    await edit(db, "make the wait longer");
+    db.T.automations[0].enabled = true;
+    REC.length = 0;
+    let c = await manage(db, { step: "confirm_change", id: db.T.ai_changes[0].id });
+    eq([c.status, c.body.code, c.body.reason, steps(), db.T.automations[0].enabled, db.T.automations[0].revision], [409, "changed_since", "It was published or switched to Draft after the AI read it: ask again.", ["patch"], true, 4],
+      "published after the proposal: Confirm refused, the live workflow untouched");
+    // the save itself guards the same (expected_enabled), should the patch not see it
+    db = wfWorld([canonRow()]);
+    await edit(db, "make the wait longer");
+    const real = io.automations;
+    io.automations = async (sb: any, body: any) => { if (body.step === "save") db.T.automations[0].enabled = true; return real(sb, body); };
+    REC.length = 0;
+    c = await manage(db, { step: "confirm_change", id: db.T.ai_changes[0].id });
+    io.automations = real;
+    eq([c.status, c.body.code, REC[1] && REC[1].body.expected_enabled, db.T.automations[0].revision], [409, "changed_since", false, 4], "the save sends expected_enabled; published meanwhile → 409 status → refused");
+    // more leads waiting at Confirm than the card said: refused
+    db = wfWorld([canonRow({ enabled: true })]);
+    FA.waiting = 0;
+    await edit(db, "make the wait longer");
+    FA.waiting = 40;
+    c = await manage(db, { step: "confirm_change", id: db.T.ai_changes[0].id });
+    eq([c.status, c.body.code, db.T.automations[0].enabled, db.T.automations[0].revision], [409, "changed_since", true, 4], "40 leads waiting now, 0 on the card: refused, the live workflow untouched");
+    // the extra tick is checked by the server: without ack → needs_ack (still proposed); with it → saved
+    db = wfWorld([canonRow()]);
+    FA.waiting = 1;
+    await edit(db, tool([{ op: "removeNode", id: "n4" }, { op: "removeNode", id: "n8" }]));
+    ch = db.T.ai_changes[0];
+    c = await manage(db, { step: "confirm_change", id: ch.id });
+    eq([c.status, c.body.code, db.T.ai_changes[0].status, db.T.automations[0].revision], [409, "needs_ack", "proposed", 4], "a card that needs the tick: Confirm without ack refused, still proposed");
+    c = await manage(db, { step: "confirm_change", id: ch.id, ack: true });
+    eq([c.status, db.T.automations[0].revision], [200, 5], "… with ack: saved");
+    ok(ERROR_CODES.includes("needs_ack"), "needs_ack is one of the error codes");
+    // undo: a save between the gateway's read and the restore is refused, never overwritten
+    db = wfWorld([canonRow()]);
+    await edit(db, "make the wait longer");
+    await manage(db, { step: "confirm_change", id: db.T.ai_changes[0].id });
+    io.automations = async (sb: any, body: any) => { if (body.step === "restore") { const a = db.T.automations[0]; a.revision++; a.name = "Saved by a manager"; } return real(sb, body); };
+    REC.length = 0;
+    const u = await manage(db, { step: "undo_change", id: db.T.ai_changes[0].id });
+    io.automations = real;
+    eq([u.status, u.body.code, REC[0] && REC[0].body.expected_revision, db.T.automations[0].name], [409, "changed_since", 5, "Saved by a manager"], "undo sends expected_revision: a save in between → refused, the save kept");
+    // the language: the app sends it inside context (cobraRequestContext), never at the top of the body
+    const body = { conversation_id: null, mode: "workflow_edit", context: { page: "settings", workflowId: WID, lang: "he" }, text: "Explain this workflow in my words, in Hebrew" };
+    eq(validateInput(body.context, MODES.workflow_edit.contextSchema, "context"), [], "the app's context fits the edit schema");
+    const t = MODES.workflow_edit.context({ nowMs: NOW, biz: { companyName: "Acme", catalog: {}, tz: TZ, gstRate: 10 }, assistantName: "Cobra", me: owner, context: body.context, lang: (body as any).lang || null, changes: [] });
+    ok(t.includes("- App language: Hebrew"), "the app's real request body → 'App language: Hebrew' in the turn's context", t);
   }
 
   // ── 8. the test provider's scripts are deterministic and only where their tool is offered ──

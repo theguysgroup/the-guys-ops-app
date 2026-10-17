@@ -33418,6 +33418,7 @@ const COBRA_ERRORS = {
   validation: "That value isn't allowed.",
   owners_only: 'Only owners can change this.',
   network: 'The connection dropped. Try again.',
+  needs_ack: 'Tick the box on the card to confirm.',
   timeout: 'No answer for a while, so it stopped. Try again.',
   not_installed: "The assistant isn't installed on the server yet.",
   too_long: 'That message is too long. Keep it under 4,000 characters.',
@@ -33940,6 +33941,7 @@ function cobraStatusLoad(force){
       if (COBRA!==c) return null;
       cobraFabPatch();
       if (c.open) { cobraPatchBanner(); cobraPatchHint(); cobraPatchSource(); cobraPatchKey('me'); }
+      wfAiStatusDone();   // Workflow AI (stage 7): the automations page's AI Builder card and "Build using AI"
       return c.status;
     });
   return p;
@@ -34518,7 +34520,7 @@ async function cobraChange(id, action){
   cobraChangeEls(id).forEach(el => el.querySelectorAll('button').forEach(b => { b.disabled = true; }));
   let ch = null, ok = false;
   try {
-    const out = await cobraFetch('manage', { step, id });
+    const out = await cobraFetch('manage', { step, id, ...(action==='confirm' && WF_AI.ticked[id] ? { ack: true } : {}) });
     ch = { error: null, ...(out.change || cobraFindChange(id) || { id }) };
     ok = true;
   } catch (e) {
@@ -34531,7 +34533,7 @@ async function cobraChange(id, action){
   cobraPutChange(ch);
   if (ok) wfAiChangeDone(ch, action);   // Workflow AI (stage 7): "Draft created → Open" and the list
   if (ok && action==='confirm') showToast(`Saved: ${ch.summary || 'the change'}`, { undo: () => cobraChange(id, 'undo') });
-  else if (ok && action==='undo') showToast('Undone');
+  else if (ok && action==='undo') showToast(wfAiUndoneText(ch));
 }
 
 // ── voice typing (Web Speech API; never sent by itself: the person reads it and presses Send) ──
@@ -34757,8 +34759,16 @@ function wfAiWhy(){
 // The AI Builder card's read-only status (Global Workflow Settings): the assistant's own switch, never stored here.
 function wfAiStatusText(){
   const st = COBRA.status;
-  if (!st) return { on: false, text: COBRA.statusErr==='not_installed' ? 'Off: Settings → AI' : 'Checking the assistant' };
+  if (!st) return { on: false, text: COBRA.statusErr==='not_installed' ? 'Off: Settings → AI' : readOnlyReason() ? 'Shown in Settings → AI' : 'Checking the assistant' };
   return st.enabled===false ? { on: false, text: 'Off: Settings → AI' } : { on: true, text: 'On for owners and managers' };
+}
+// After the assistant's status arrives (cobraStatusLoad): the automations page, when it shows (the list or Global
+// settings, no builder open), is drawn once more for the AI Builder card and "Build using AI". Never from a render.
+function wfAiStatusDone(){
+  try {
+    const u = (typeof UI!=='undefined' && UI) || {};
+    if (u.tab==='settings' && settingsPageKey((u.settings || {}).page)==='automation' && !WF_UI.open && !(typeof WF!=='undefined' && WF)) renderKeepingInput();
+  } catch (e) { /* drawn on the next render */ }
 }
 function wfAiButtonHtml(){
   if (!wfAiShown()) return '';
@@ -34801,7 +34811,8 @@ const WF_AI_MODE = {
     const c = ctx || {}, o = { page: String((ui && ui.tab) || '') };
     if (WF_UUID_RE.test(String(c.workflowId || ''))) o.workflowId = String(c.workflowId);
     if (c.builder==='standard' || c.builder==='advanced') o.builder = c.builder;
-    try { if (regionCountry()==='IL') o.lang = 'he'; } catch (e) { /* the person's words give the language */ }
+    const lang = wfAiLang();
+    if (lang) o.lang = lang;
     return o;
   },
   // A saved chat keeps the workflow it was about (the page and language go with every turn).
@@ -34835,7 +34846,14 @@ function wfAiSavedHtml(d){
 }
 function wfAiSavedFor(changeId, kind){
   const ch = wfAiChangeOf(changeId);
+  if (ch && ch.status==='undone' && wfAiUndoneText(ch)!=='Undone') return `<div class="wfai-saved">${ico('info', 14)}<b dir="auto">${esc(wfAiUndoneText(ch))}</b></div>`;
   return ch && ch.status==='confirmed' ? wfAiSavedHtml({ kind, id: wfAiTargetOf(ch) }) : '';
+}
+// The words after an Undo: an AI edit to a workflow that was live is back as it was, but stays a Draft (a restore never
+// publishes), so the person is told to publish it again. Pure.
+function wfAiUndoneText(ch){
+  const x = wfObj(ch);
+  return x.kind==='wf_edit' && wfObj(x.before).enabled===true ? 'Undone: it stays a Draft. Publish again to make it live' : 'Undone';
 }
 function wfAiWarnHtml(w){ return `<div class="cobra-card-warn">${ico('alert', 13)}<span dir="auto">${esc(w)}</span></div>`; }
 // A new workflow proposal: its name, the steps in order, the warnings, and that it is only a Draft.
@@ -34888,6 +34906,7 @@ function wfAiChangeDone(ch, action){
   const x = wfObj(ch);
   if ((x.kind!=='wf_create' && x.kind!=='wf_edit') || (action!=='confirm' && action!=='undo')) return;
   try { wfChanged(); } catch (e) { /* the list reads again when it opens */ }
+  if (wfShowing()) renderKeepingInput();   // the list beside the panel (desktop): one redraw, its Draft / Published badges
   const msg = (COBRA.msgs || []).find(m => (m.proposals || []).some(p => p && p.id===x.id));
   if (msg) cobraPatchMsg(msg);
   const tid = x.kind==='wf_edit' || action==='undo' ? wfAiTargetOf(x) : '';
@@ -34919,11 +34938,12 @@ function wfDescribe(doc, reg, ctx){
   const d = wfObj(doc), I = wfIndex(d), lines = [], seen = new Set();
   let more = 0;
   const add = (depth, t) => { if (lines.length < WF_DESCRIBE_MAX) lines.push({ d: Math.max(0, Math.min(depth, 8)), t: String(t) }); else more++; };
-  const trigs = Array.isArray(d.triggers) ? d.triggers.map(wfObj) : [];
+  const trigs = Array.isArray(d.triggers) ? d.triggers.map(wfObj) : [], starts = new Map();   // a trigger's own Go to (Advanced) → its words
   if (!trigs.length) add(0, 'No trigger yet: nothing starts it');
   trigs.forEach(t => {
-    const N = wfTriggerNarration(t, reg, ctx);
-    add(0, `When: ${N.head}${N.name && N.name!==N.head ? ` (${N.name})` : ''}${t.disabled===true ? ' (switched off)' : ''}`);
+    const N = wfTriggerNarration(t, reg, ctx), go = typeof t.goto==='string' && wfHas(I.nodes, t.goto) ? t.goto : null;
+    if (go && !starts.has(go)) starts.set(go, N.head);
+    add(0, `When: ${N.head}${N.name && N.name!==N.head ? ` (${N.name})` : ''}${t.disabled===true ? ' (switched off)' : ''}${go ? ` — starts at ${wfNodeName(I.nodes[go], reg)}` : ''}`);
     N.lines.filter(l => l!=='No filters applied').forEach(l => add(1, l));
     if (N.more) add(1, `+${N.more} more`);
   });
@@ -34950,11 +34970,15 @@ function wfDescribe(doc, reg, ctx){
       x = ports.length ? kid(x, ports[0]) : null;
     }
   };
+  // the entry's group, then each group a trigger's Go to starts (as wfReachable counts them), then the rest
   const groups = wfClusters(d), entry = typeof d.entry==='string' && wfHas(I.nodes, d.entry);
   if (!groups.length) add(0, 'No steps yet');
+  let prev = '';
   groups.forEach((g, i) => {
-    if (i===0 && entry) add(0, 'Then:');
-    else if (i===0 || (i===1 && entry)) add(0, 'Not connected (never runs):');
+    const from = g.ids.find(x => starts.has(x));
+    if (i===0 && entry) { add(0, 'Then:'); prev = 'entry'; }
+    else if (from) { add(0, `Starts from ${starts.get(from)}:`); prev = 'goto'; }
+    else if (prev!=='none') { add(0, 'Not connected (never runs):'); prev = 'none'; }
     walk(g.head, 1);
   });
   return { lines, more };
@@ -35026,7 +35050,22 @@ function wfAiDescribeHtml(d){
 }
 // "Explain it in my words": a turn to workflow_edit (the AI reads the workflow with its read tool and answers in the
 // person's language).
-function wfAiExplain(){ if (!COBRA.streaming) cobraSend(WF_AI_EXPLAIN); }
+function wfAiExplain(){ if (!COBRA.streaming) cobraSend(wfAiExplainText(wfAiLang())); }
+// The person's language for Workflow AI: their latest own message with letters (Hebrew letters → 'he', else 'en'; the
+// app's own texts, the examples, Describe and Explain, don't count), else the app's region (Israel → 'he'). Pure.
+function wfAiLangOf(msgs, region){
+  const fixed = [...WF_AI_EXAMPLES.build, ...WF_AI_EXAMPLES.edit];
+  const mine = t => !!t && !wfAiIsDescribe(t) && !t.startsWith(WF_AI_EXPLAIN) && !fixed.includes(t);
+  const list = (Array.isArray(msgs) ? msgs : []).filter(m => m && m.role==='user' && typeof m.text==='string' && mine(m.text.trim()));
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (/[\u0590-\u05FF]/.test(list[i].text)) return 'he';
+    if (/[A-Za-z]/.test(list[i].text)) return 'en';
+  }
+  return region==='IL' ? 'he' : null;
+}
+function wfAiLang(){ let r = ''; try { r = regionCountry(); } catch (e) { /* the person's words only */ } return wfAiLangOf(COBRA.msgs, r); }
+// The model answers in the language of the message: Explain names Hebrew when that is the person's language. Pure.
+function wfAiExplainText(lang){ return lang==='he' ? `${WF_AI_EXPLAIN}, in Hebrew` : WF_AI_EXPLAIN; }
 COBRA_MODES.workflow = WF_AI_MODE;
 COBRA_CARDS.wf_preview = wfAiPreviewHtml;
 COBRA_CARDS.wf_diff = wfAiDiffHtml;

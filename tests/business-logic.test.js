@@ -250,6 +250,8 @@ const DECLS = [
   'wfDefaultBuilder', 'wfStickyNearest', 'wfSwitchPlan', 'wfBlockerRows', 'wfBlockersHtml', 'vacationProfileWho',
   // Stage 7 C2: the builder's entry (rail row and ⇧A)
   'wfAiOpenFromBuilder',
+  // Stage 7 review fixes: the undo words, the status redraw, the person's language
+  'wfAiUndoneText', 'wfAiStatusDone', 'wfAiLangOf', 'wfAiLang', 'wfAiExplainText',
 ];
 
 function extractDecl(source, name){
@@ -8096,7 +8098,7 @@ async function testCobraLoadersNoLoop(){
       ? { ok: false, status: 404, headers: { get: () => 'application/json' }, json: async () => ({ code: 'NOT_FOUND', message: 'Requested function was not found' }) }
       : { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => JSON.parse(JSON.stringify(statusBody)) }))); },
     render: () => { log.renders++; }, cobraFabPatch: () => { log.fab++; }, cobraPatchBanner: () => {}, cobraPatchHint: () => {}, cobraDraw: () => { log.draws++; },
-    setBlock: (t, d, b) => `[${t}]${b}`, esc: s => String(s) };
+    wfAiStatusDone: () => {}, setBlock: (t, d, b) => `[${t}]${b}`, esc: s => String(s) };
   vm.createContext(ctx);
   vm.runInContext(['COBRA_ERRORS', 'COBRA_STALE_MS', 'COBRA_ROLES', 'COBRA_MODELS', 'COBRA_DEFAULTS', 'COBRA_SETTING_COLS', 'COBRA_CHANGE_COLS', 'cobraBlank', 'cobraErr', 'cobraFetch', 'cobraIsOwner', 'cobraStatusLoad', 'cobraSettingsOpen',
     'cobraDetailLoad', 'cobraDetailRetry', 'cobraHistoryLoad', 'cobraLogLoad', 'cobraShouldLoadStatus', 'cobraRolesOf', 'cobraPricesOf', 'cobraSettingsOf', 'cobraErrorText', 'renderCobraSettingsPage'].map(n => extractDecl(script, n)).join('\n')
@@ -8184,7 +8186,7 @@ async function testCobraChangeFlow(){
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   const log = { calls: [], puts: [], toasts: [], renders: 0, done: [] }, pending = [];
   const ctx = { console, RO: '', GUARD: true, COBRA: { busy: {}, logAt: 5, msgs: [], log: null },
-    wfAiChangeGuard: (id, a) => ctx.GUARD, wfAiChangeDone: (ch, a) => log.done.push([ch.id, a]),
+    wfAiChangeGuard: (id, a) => ctx.GUARD, wfAiChangeDone: (ch, a) => log.done.push([ch.id, a]), WF_AI: { ticked: { t1: true } }, wfAiUndoneText: ch => ch.kind==='wf_edit' ? 'Undone: publish again' : 'Undone',
     readOnlyReason: () => ctx.RO, render: () => { log.renders++; }, productName: () => 'OPS Service',
     cobraFetch: (path, body) => { log.calls.push([path, body]); return new Promise((res, rej) => pending.push({ res, rej })); },
     cobraPutChange: ch => log.puts.push(ch), cobraFindChange: id => ({ id, status: 'proposed', summary: 'S' }), cobraChangeEls: () => [],
@@ -8207,6 +8209,13 @@ async function testCobraChangeFlow(){
   ctx.RO = ''; ctx.GUARD = false;
   await ctx.cobraChange('g', 'confirm');
   assertEqual([log.calls.length, ctx.COBRA.busy.g, log.done.map(d => d.join(':'))], [3, undefined, ['x:confirm']], 'changes: the guard of Workflow AI can stop a Confirm before anything is sent; its after-hook sees a change that was answered');
+  ctx.GUARD = true;
+  const t1 = ctx.cobraChange('t1', 'confirm'), t2 = ctx.cobraChange('t1x', 'confirm');
+  pending.shift().rej(ctx.cobraErr('network')); pending.shift().rej(ctx.cobraErr('network')); await t1; await t2;
+  const t3 = ctx.cobraChange('t1', 'undo');
+  pending.shift().res({ ok: true, change: { id: 't1', kind: 'wf_edit', status: 'undone' } }); await t3;
+  assertEqual([log.calls[3][1], log.calls[4][1], log.calls[5][1], log.toasts[log.toasts.length - 1][0]], [{ step: 'confirm_change', id: 't1', ack: true }, { step: 'confirm_change', id: 't1x' }, { step: 'undo_change', id: 't1' }, 'Undone: publish again'],
+    'changes: a ticked card\'s Confirm sends ack (the server checks the tick too), others never; Undo\'s toast comes from Workflow AI\'s words');
 }
 // Stage 6 review fixes (15 Oct): reopened chats, cards in their chat, right-to-left values, chips, loads.
 function testCobraReviewFixes(sb){
@@ -8468,6 +8477,23 @@ async function testWorkflowAiB(sb){
   const cardMgr = sb.wfAiCardHtml();
   role('owner');
   assertEqual([cardMgr.includes('Open AI settings'), sb.wfAiCardHtml().includes("setSettingsPage('ai')"), sb.wfAiStatusText().on], [false, true, true], 'AI Builder card: the link to Settings → AI is for owners; the card only shows the assistant\'s switch');
+  {
+    const st0 = sb.COBRA.status, ro0 = sb.readOnlyReason, rk0 = sb.renderKeepingInput, ui0 = sb.UI, wu0 = sb.WF_UI;
+    sb.COBRA.status = null; sb.COBRA.statusErr = '';
+    sb.readOnlyReason = () => 'Presentation mode is on, changes are not saved';
+    const roText = sb.wfAiStatusText();
+    sb.readOnlyReason = () => '';
+    const loading = sb.wfAiStatusText();
+    let draws = 0;
+    sb.renderKeepingInput = () => { draws++; };
+    sb.UI = { tab: 'settings', settings: { page: 'automation' } }; sb.WF_UI = { open: null }; sb.WF = null;
+    sb.wfAiStatusDone();
+    sb.WF = { id: WFAI_ID }; sb.wfAiStatusDone(); sb.WF = null;
+    sb.UI = { tab: 'crm', settings: {} }; sb.wfAiStatusDone();
+    assertEqual([roText, loading, draws], [{ on: false, text: 'Shown in Settings → AI' }, { on: false, text: 'Checking the assistant' }, 1],
+      'AI Builder card: a read-only mode (no status loaded there) says where it is shown, not "Checking"; a status that arrives draws the automations page once (not over the builder, not on another page)');
+    sb.COBRA.status = st0; sb.readOnlyReason = ro0; sb.renderKeepingInput = rk0; sb.UI = ui0; sb.WF_UI = wu0;
+  }
   // after a confirm: the list reads again, the card is drawn again, a clean open builder is reopened
   const calls = [], tick = () => new Promise(r => setTimeout(r, 0));
   sb.wfChanged = () => calls.push('list'); sb.cobraPatchMsg = m => calls.push('patch:' + (m.proposals[0] && m.proposals[0].id));
@@ -8475,6 +8501,7 @@ async function testWorkflowAiB(sb){
   sb.wfBuilderOpen = (row, o) => { calls.push('open:' + row.id + ':' + o.mode); };
   sb.openAutomation = o => calls.push('openAuto:' + o.key);
   sb.wfMobileNow = () => false; sb.cobraClose = () => calls.push('close');
+  sb.wfShowing = () => false; sb.renderKeepingInput = () => calls.push('render');
   const chg = { id: 'e1', kind: 'wf_edit', target: { automation_id: WFAI_ID } };
   sb.COBRA.msgs = [{ proposals: [{ ...chg, status: 'confirmed' }], cards: [] }];
   sb.WF = clean;
@@ -8486,6 +8513,10 @@ async function testWorkflowAiB(sb){
   sb.WF = null;
   sb.wfAiChangeDone(chg, 'cancel'); sb.wfAiChangeDone({ id: 'z', kind: 'task_add' }, 'confirm'); await tick();
   assertEqual([afterClean, afterDirty, calls], [['list', 'patch:e1', 'read:' + WFAI_ID, 'open:' + WFAI_ID + ':edit'], ['list', 'patch:e1'], []], 'after a confirm: the list reads again, the card is drawn again, a clean builder open on it is reopened on the new revision, a dirty one is left alone; Cancel and other kinds do nothing');
+  sb.wfShowing = () => true;
+  sb.wfAiChangeDone({ id: 'n9', kind: 'wf_create', after: { id: WFAI_OTHER } }, 'confirm'); sb.wfAiChangeDone({ id: 'n9', kind: 'wf_create', after: { id: WFAI_OTHER } }, 'undo'); await tick();
+  sb.wfShowing = () => false;
+  assertEqual(calls.splice(0), ['list', 'render', 'list', 'render'], 'after a Confirm or Undo with the list showing (desktop, beside the panel): the list reads again and is drawn once');
   // Open
   toasts.length = 0; sb.COBRA.open = true;
   sb.WF = dirty; await sb.wfAiOpenDraft(WFAI_ID);
@@ -8545,6 +8576,12 @@ async function testWorkflowAiC(sb){
     'wfDescribe: triggers with their filters, the steps from the entry, If / else paths with their conditions, a Go to "goes back", Split paths, steps nothing reaches, switched off said, Hebrew names kept');
   assertEqual([sb.wfDescribe({}, reg, ctx), sb.wfDescribe(null, null, null).lines.map(l => l.t), sb.wfDescribe({ triggers: [{ id: 't1', type: 'stage', filters: WF_F0 }], nodes: {} }, reg, ctx).lines.map(l => l.t)],
     [{ lines: [{ d: 0, t: 'No trigger yet: nothing starts it' }, { d: 0, t: 'No steps yet' }], more: 0 }, ['No trigger yet: nothing starts it', 'No steps yet'], ['When: Pipeline stage changed', 'No steps yet']], 'wfDescribe: an empty or junk doc does not throw; "No filters applied" is left out');
+  // an Advanced trigger's own Go to: its When line says where it starts; the group it starts is not "Not connected"
+  const adv = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'stage', filters: WF_F0 }, { id: 't2', type: 'stage', filters: WF_F0, goto: 'n5' }, { id: 't3', type: 'stage', filters: WF_F0, goto: 'n99' }],
+    nodes: { n1: wfAct(null), n5: { kind: 'action', type: 'add_task', name: 'Call back', config: { title: 'Call' }, out: { next: 'n6' } }, n6: wfAct(null), n8: { kind: 'action', type: 'add_task', config: { title: 'Orphan' }, out: { next: null } } } };
+  const advL = sb.wfDescribe(adv, reg, ctx).lines.filter(l => l.d===0).map(l => l.t);
+  assertEqual(advL, ['When: Pipeline stage changed', 'When: Pipeline stage changed — starts at Call back', 'When: Pipeline stage changed', 'Then:', 'Starts from Pipeline stage changed:', 'Not connected (never runs):'],
+    'wfDescribe: a trigger\'s own Go to (Advanced) — its When line says where it starts, its group is "Starts from", only the rest is "Not connected"; a Go to a missing step is ignored');
   // ≤ 200 lines, a broken loop (a junk doc) once, deep nesting capped
   const chain = { entry: 'n0', triggers: [], nodes: {} };
   for (let i = 0; i < 260; i++) chain.nodes['n' + i] = wfAct(i < 259 ? 'n' + (i + 1) : null);
@@ -8607,11 +8644,30 @@ async function testWorkflowAiC(sb){
   sb.wfAiExplain(); sb.COBRA.streaming = { msg: {} }; sb.wfAiExplain(); sb.COBRA.streaming = null;
   assertEqual(log.sent, ['Explain this workflow in my words'],
     'Explain it in my words: sends "Explain this workflow in my words" once (the edit mode answers in the person\'s language)');
+  // the person's language: their own latest words, never the app's fixed texts; else the region
+  const U = t => ({ role: 'user', text: t }), A = t => ({ role: 'assistant', text: t });
+  assertEqual([sb.wfAiLangOf([U('תשנה את ההמתנה ל-3 ימים'), A('Done'), U('Describe this workflow'), U('Explain this workflow in my words, in Hebrew')], ''), sb.wfAiLangOf([U('שלום'), U('make it 3 days')], 'IL'),
+    sb.wfAiLangOf([U('Describe this workflow'), U('Change the first wait to 3 days')], 'IL'), sb.wfAiLangOf([U('Describe this workflow')], 'AU'), sb.wfAiLangOf([U('123'), A('שלום')], ''), sb.wfAiLangOf(null, 'IL')],
+    ['he', 'en', 'he', null, null, 'he'], 'wfAiLangOf: the person\'s latest own message with letters (Hebrew or English); the examples, Describe and Explain don\'t count; else Israel → Hebrew');
+  log.sent.length = 0;
+  sb.COBRA.msgs = [U('תוסיף תגית אחרי המייל'), A('x')];
+  sb.wfAiExplain();
+  const ctxHe = sb.WF_AI_MODE.requestContext({ workflowId: WFAI_ID }, { tab: 'settings' });
+  sb.COBRA.msgs = [U('add a tag after the email')];
+  const ctxEn = sb.WF_AI_MODE.requestContext({ workflowId: WFAI_ID }, { tab: 'settings' });
+  assertEqual([log.sent, sb.wfAiExplainText('en'), ctxHe.lang, ctxEn.lang], [['Explain this workflow in my words, in Hebrew'], 'Explain this workflow in my words', 'he', 'en'],
+    'Explain it in my words: names Hebrew for a Hebrew person (the model answers in the message\'s language); the request context carries the person\'s language');
+  // the undo words: an AI edit to a live workflow stays a Draft
+  const unLive = { id: 'u1', kind: 'wf_edit', status: 'undone', before: { enabled: true }, target: { automation_id: WFAI_ID } };
+  sb.COBRA.msgs = [{ proposals: [unLive], cards: [] }];
+  assertEqual([sb.wfAiUndoneText(unLive), sb.wfAiUndoneText({ ...unLive, before: { enabled: false } }), sb.wfAiUndoneText({ kind: 'wf_create' }), sb.wfAiUndoneText(null), sb.wfAiSavedFor('u1', 'wf_edit').includes('Publish again to make it live')],
+    ['Undone: it stays a Draft. Publish again to make it live', 'Undone', 'Undone', 'Undone', true], 'Undo of an AI edit to a live workflow: the toast and the card say it stays a Draft and to publish again');
+  sb.COBRA.msgs = [];
   // the edit mode's examples: Describe first (the local card), then two changes
   assertEqual([sb.WF_AI_EXAMPLES.edit, sb.wfAiIsDescribe(sb.WF_AI_EXAMPLES.edit[0]), sb.WF_AI_EXAMPLES.edit.slice(1).some(sb.wfAiIsDescribe)], [['Describe this workflow', 'Change the first wait to 3 days', 'Add a tag after the email'], true, false],
     'edit mode examples: "Describe this workflow" is drawn here, the two changes go to the AI');
   // reopen after Confirm / Undo: an undone new Draft is deleted, a clean builder on it closes; a Confirm of a new one leaves it
-  sb.wfChanged = () => {}; sb.wfBuilderClose = () => { log.closed++; }; sb.wfBuilderOpen = (row, o) => log.opened.push(row.id + ':' + o.mode);
+  sb.wfChanged = () => {}; sb.wfShowing = () => false; sb.wfBuilderClose = () => { log.closed++; }; sb.wfBuilderOpen = (row, o) => log.opened.push(row.id + ':' + o.mode);
   const mk = { id: 'k1', kind: 'wf_create', status: 'undone', after: { id: WFAI_OTHER, revision: 1 } };
   sb.COBRA.msgs = [{ proposals: [mk], cards: [] }];
   sb.WF = { ...clean, id: WFAI_OTHER };

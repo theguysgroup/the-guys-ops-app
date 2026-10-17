@@ -4830,6 +4830,29 @@ async function phase4Suite() {
         ["n1", "t1", "stage", "To Quoted", "stage is Quote sent (Quoted)", [["n1", "wait", "period", "n2"], ["n2", "action", "send_email", null]]], "wfOutline: the trigger's filters in words with the catalog's names; the steps with their ports");
       ok(o.nodes[1].config.body.length <= 160 && o.nodes[1].config.subject === "Hi" && typeof o.nodes[1].label === "string" && o.nodes[1].label.length > 0, "wfOutline: config text clipped to 160 characters; the registry's label", o.nodes[1]);
       eq(wfOutline({ triggers: [], nodes: {} }), { entry: null, triggers: [], nodes: [] }, "wfOutline: an empty doc");
+      const hk = (url: string) => wfOutline({ schema: 2, seq: 1, entry: "n1", triggers: [], nodes: { n1: { kind: "action", type: "webhook", config: { url, method: "POST" }, out: { next: null } } } });
+      const ho: any = hk("https://hooks.slack.com/services/T000/B000/s3cr3tToken?api_key=k123");
+      eq([ho.nodes[0].config.url, JSON.stringify(ho).includes("s3cr3t"), JSON.stringify(ho).includes("k123"), (hk("not a url") as any).nodes[0].config.url], ["hooks.slack.com", false, false, "another system"],
+        "wfOutline: a webhook's url only by its host (its path and query never reach the AI)");
+    }
+
+    // patch: the other things a save would change (a trigger taken away, the settings, the first step); restore with
+    // expected_revision; a new workflow the AI made is saved with version reason "ai"
+    {
+      const db = world({ automations: [row40({ definition: { ...JSON.parse(JSON.stringify(p0.doc)), triggers: [...JSON.parse(JSON.stringify(p0.doc.triggers)), { id: "t9", type: "newLead", filters: { match: "all", segments: [{ match: "all", rules: [] }] } }] } })], automation_versions: [] });
+      const pt = await api(db, "patch", { automation_id: ID40, base_revision: 3, ops: [{ op: "removeTrigger", id: "t9" }], ai_edited: true });
+      eq([pt.status, pt.body.changedIds, pt.body.idsRemoved, pt.body.triggersRemoved, pt.body.settingsChanged, pt.body.entryChanged], [200, [], [], ["t9"], [], false], "patch: a trigger taken away is listed (triggersRemoved)");
+      const ps = await api(db, "patch", { automation_id: ID40, base_revision: 3, ops: [{ op: "setSettings", patch: { stopOnResponse: true } }], ai_edited: true });
+      eq([ps.status, ps.body.changedIds, ps.body.triggersRemoved, ps.body.settingsChanged, ps.body.entryChanged], [200, [], [], ["stopOnResponse"], false], "patch: a settings-only edit lists the settings it changes");
+      const pn = await api(db, "patch", { automation_id: ID40, base_revision: 3, ops: [{ op: "rename", name: "Other" }] });
+      eq([pn.body.settingsChanged, pn.body.entryChanged, pn.body.triggersRemoved], [[], false, []], "patch: a rename changes neither the settings nor the first step");
+      const dbs = world({ contacts: [], automations: [], automation_versions: [], automation_templates: [] });
+      const sv = await api(dbs, "save", { automation_id: null, name: "Welcome", definition: JSON.parse(JSON.stringify(p0.doc)), settings: {}, ai_edited: true });
+      eq([sv.status, sv.body.enabled, dbs.T.automations[0].origin, dbs.T.automation_versions[0].reason], [200, false, "ai", "ai"], "save: a new workflow the AI made is a Draft, origin ai, version reason ai");
+      const s2 = await api(dbs, "save", { automation_id: sv.body.id, expected_revision: sv.body.revision, name: "Welcome 2", definition: JSON.parse(JSON.stringify(p0.result)), settings: {} });
+      const rs = await api(dbs, "restore", { automation_id: sv.body.id, version_no: 1, expected_revision: s2.body.revision - 1 });
+      const rok = await api(dbs, "restore", { automation_id: sv.body.id, version_no: 1, expected_revision: s2.body.revision });
+      eq([s2.status, rs.status, rs.body.reason, rok.status], [200, 409, "conflict", 200], "restore with expected_revision: saved since → 409 (nothing overwritten); the current one → restored");
     }
   }
 
