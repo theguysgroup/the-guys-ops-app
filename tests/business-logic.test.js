@@ -118,20 +118,17 @@ const DECLS = [
   'exportActivityText', 'exportSheetAoa', 'exportColWidths', 'exportSheetName', 'settingsExportRows', 'payRateRows', 'ownerSalaryRows', 'countWord', 'exportCountText', 'exportFileName', 'exportSummaryHtml', 'exportFetchAll', 'exportCardHtml',
   // the automation engine's "look now" from the app (settings round 2, phase 4)
   'automationEventBody',
-  // Automations: the flow view (phase 4, group J)
-  'ICONS', 'ico', 'FLOW_MAX_STEPS_DEFAULT', 'FLOW_MAX_STEPS_CEILING', 'FLOW_STEP_KINDS', 'flowRegs', 'flowSafe', 'flowLc', 'flowCap', 'flowLocked', 'flowStepId', 'flowCanMove', 'flowMove',
-  'flowInsert', 'flowRemove', 'flowDropIndex', 'flowFormSlots', 'flowIsFormShaped', 'flowCompact', 'flowMaxSteps', 'flowWaitPhrase', 'flowClock', 'flowDaysText', 'flowOfficeWindow', 'flowWindowPhrase',
-  'flowValueLabel', 'flowCondPhrase', 'flowIfPhrase', 'flowActionPhrase', 'flowTriggerPhrase', 'flowStepSummary', 'flowSentence', 'flowStepLook', 'flowAvailable', 'flowProblems', 'flowAddMenuItems',
-  'flowViewPref', 'setFlowViewPref', 'flowMoveLabel', 'flowViewToggleHtml', 'flowOpenInnerHtml', 'flowMsgHtml', 'flowCanvasHtml', 'flowMoreStepsHtml', 'flowFormSetSlot', 'flowFormSetAction',
+  // Icons
+  'ICONS', 'ico',
   // Automations builder (14 Oct, phase 4)
   'chatRulesApp', 'notifyRulesApp', 'notifyCardsNow', 'setRows', 'setToggle',
-  'AUTO_TABLE', 'AUTO_BUSINESS_ID', 'AUTO_TRIGGERS', 'AUTO_MIRROR_TRIGGERS', 'AUTO_CONDS', 'AUTO_OP_WORDS', 'AUTO_ACTIONS', 'AUTO_FIELDS', 'AUTO_WAIT_UNITS', 'AUTO_DUE', 'AUTO_LIMITS', 'AUTO_PUSH_DEFAULT', 'AUTO_TPL_MIRROR',
+  'AUTO_TABLE', 'AUTO_BUSINESS_ID', 'AUTO_TRIGGERS', 'AUTO_MIRROR_TRIGGERS', 'AUTO_CONDS', 'AUTO_ACTIONS', 'AUTO_FIELDS', 'AUTO_WAIT_UNITS', 'AUTO_DUE', 'AUTO_LIMITS', 'AUTO_PUSH_DEFAULT', 'AUTO_TPL_MIRROR',
   'autoTrig', 'autoValueLabel', 'autoCondValues', 'autoCondFits', 'autoFieldsFor', 'autoDefaultPush', 'autoHm', 'autoHhmm', 'autoAndList', 'autoIsCustomerStep', 'autoHasCustomer', 'autoAudience', 'autoCleanStep', 'WF_ID_RE', 'WF_EDITOR_MARK', 'wfCanon', 'WF_V1_ACTIONS', 'WF_V1_TRIGGER_NAMES', 'wfWinDormant', 'wfToFlat', 'wfFromFlat', 'autoIdsBad', 'autoNormalize', 'autoRunsOld',
-  'autoPeopleText', 'autoTaskWho', 'autoDueText', 'autoHoursShort', 'autoDoShort', 'autoFlowChips', 'autoWhenShort', 'autoSentence', 'autoBadBlanks', 'autoStepIssues', 'autoStepProblems', 'autoProblems', 'autoTplUsers', 'autoPreviewHtml',
-  'wfSystemRows', 'autoReadyRows', 'autoGatePill', 'autoStatusPill',
+  'autoPeopleText', 'autoTaskWho', 'autoDueText', 'autoWhenShort', 'autoBadBlanks', 'autoStepIssues', 'autoProblems', 'autoTplUsers', 'autoPreviewHtml',
+  'wfSystemRows',
   // the 14 Oct review: safety settings, opt-outs, "Try it", versions, ready-mades off the list
-  'AUTO_SAFETY_DEFAULTS', 'AUTO_EMAIL_FOOTER_DEFAULT', 'autoSafetyNorm', 'autoSafetyProblems', 'autoSafetyPatch', 'autoTzLabel', 'autoSafetyLine', 'autoEmailSigner',
-  'autoCustomerChannels', 'autoNewVersion', 'autoNewStart', 'autoTryRecords', 'autoTryWhen', 'autoTryResultHtml', 'optOutKeys', 'optOutRowsFor', 'optOutInserts', 'optOutControlHtml',
+  'AUTO_SAFETY_DEFAULTS', 'AUTO_EMAIL_FOOTER_DEFAULT', 'autoSafetyNorm', 'autoSafetyProblems', 'autoSafetyPatch', 'autoTzLabel', 'autoEmailSigner',
+  'optOutKeys', 'optOutRowsFor', 'optOutInserts', 'optOutControlHtml',
   // Names and labels (round 3, C-names)
   'officeLabel', 'officePossessive', 'bizShortName', 'ownerNamesText', 'officeAgentName', 'officeAssignee', 'taskBoardLabel', 'PERSON_COLORS', 'techColor', 'personReportName', 'payCashTo',
   'brandCacheRead', 'brandSource', 'tplExample', 'brandOf', 'contractorServices', 'CONTRACTOR_TRADES', 'REVIEW_FAMILIES', 'AU_STATE_NAMES', 'COUNTRY_ADJ', 'agreementPlace', 'bizLegalName', 'connWordsIn', 'connWordsNow', 'contractorServiceColor', 'CONTRACTOR_SERVICE_COLOR',
@@ -189,7 +186,7 @@ const DECLS = [
   'wfViewRead', 'wfBoxesOf', 'wfA11yTree', 'wfSlotKey', 'wfMoveSlots', 'wfNearestSlot', 'wfHistPush', 'wfHistStep', 'wfToneOf', 'WF_NONE_SUMMARY', 'wfStepCardHtml', 'wfTriggerCardHtml', 'wfHeadCardHtml',
   'wfCanvasItems', 'WF_BUILDER_TABS', 'WF_RAIL', 'WF_MODE_RO', 'WF_MODE_PILL', 'WF_SOON', 'WF_ADV_SOON', 'wfDisAttr', 'wfKeyHint', 'wfTopHtml', 'wfPresenceHtml', 'wfPresenceOf', 'initials', 'wfSubHtml', 'wfRailHtml', 'wfPillHtml', 'wfPopItems', 'wfPopHtml',
   'wfKeysHtml', 'wfQ4Html', 'wfRailWhy',
-  // The workflow builder: the pickers, the step drawer and its forms (stage 2, phase 4 · G4.3), and the old editor's widgets
+  // The workflow builder: the pickers, the step drawer and its forms (stage 2, phase 4 · G4.3), and the widgets they share
   // they reuse (now taking the template drafts and their bindings)
   'WF_FIELD_WORDS', 'WF_ENUM_WORDS', 'WF_NEW_CFG', 'WF_NEW_TRIG', 'WF_OBJ_DEFAULT', 'WF_SHOW_IF', 'WF_WAIT_ORDER', 'WF_WAIT_EX', 'WF_DYN_SOON', 'WF_RECIPES_SOON', 'WF_PTR_BAD',
   'wfFieldLabel', 'wfAppsOf', 'wfSlotCtx', 'wfSchemaDefault', 'wfCondNew', 'wfNodeDefault', 'wfTriggerDefault', 'wfPtrKeys', 'wfDraftGet', 'wfDraftSet', 'wfParseInput', 'wfPruneHidden',
@@ -256,6 +253,8 @@ const DECLS = [
   'WF_CM', 'WF_CM_SEQ', 'WF_CM_VER_COLS', 'WF_CM_RUN_COLS', 'WF_VERSION_WORDS', 'WF_RESTORE_WHY', 'WF_UNMATCH_WORDS', 'WF_TEST_GUARD_WORDS', 'wfCmMs', 'wfPathFromLog', 'wfTestRows',
   'wfPathDeco', 'wfVersionPick', 'wfRestoreWhy', 'wfStatsModel', 'wfStatsRange', 'wfStatsKpi', 'wfStatsCapNotes', 'wfUnmatchText', 'wfTestKind', 'wfTestAssumeRows', 'wfTestRunWhy',
   'wfTestVerdict', 'wfTestResult', 'wfModeBannerHtml', 'wfVersionsHtml', 'wfTestPanelHtml', 'wfStatsDlgHtml',
+  // Stage 2 phase 7 G7.1: what stays of the phase-4 words once the old editor and its flow view are gone
+  'autoMaxSteps', 'wfOfficeWindow', 'autoTriggerPhrase', 'wfFlatSentence',
 ];
 
 function extractDecl(source, name){
@@ -3142,176 +3141,6 @@ function testAutomationEventBody(sb){
   assertEqual([B('rain', 'abc'), B('stage', ''), B('stage', null), B('stage', '  ')], [null, null, null, null], 'an unknown event or no id: nothing');
   assertEqual([B('missedCall', 'k1'), B('chat', 's1')], [null, null], 'missed calls and chats are never sent by the app (the timer finds them)');
 }
-// Automations: the flow view (phase 4, group J). Every list comes from a registry fixture and a catalog fixture, the
-// same way the builder passes its own (ctx.registry) — nothing about one business is written into the flow code.
-function flowFixture(){
-  const REG = {
-    triggers: {
-      stage: { label: 'A lead moves to a stage', icon: 'kanban', customer: true, phrase: t => `a lead moves to ${t.params && t.params.stage}` },
-      newLead: { label: 'A new lead comes in', icon: 'userPlus', customer: true },
-      shift: { label: 'A team member starts a shift', customer: false },
-    },
-    conds: {
-      service: { label: 'Service', valueSource: 'catalog.services', appliesTo: ['stage', 'newLead'] },
-      tag: { label: 'Tag', valueSource: 'catalog.tags', appliesTo: ['stage', 'newLead', 'shift'] },
-      has_email: { label: 'Has an email address', appliesTo: ['stage', 'newLead'] },
-      stage_unchanged: { label: 'Still in the stage that started it', fits: t => !!t && t.type==='stage' },
-    },
-    actions: {
-      push: { label: 'A phone notification to team members', icon: 'bell', audience: 'team' },
-      task: { label: 'A task in the app', icon: 'tasks', audience: 'team', make: () => ({ title: 'Call them back' }) },
-      email: { label: 'An email to the customer', icon: 'mail', audience: 'customer', make: () => ({ subject: '', body: '' }) },
-      text: { label: 'A text message to the customer', icon: 'message', audience: 'customer',
-        available: ctx => ctx.phoneLive ? { ok: true } : { ok: false, why: 'Needs the business phone (Twilio)' } },
-    },
-  };
-  const ctx = { registry: REG, phoneLive: false, sample: { first_name: 'Sam' },
-    catalog: { services: [{ key: 'Aircon', label: 'Aircon' }], tags: [{ tag: 'VIP' }], stages: [{ key: 'Quoted', label: 'Quoted' }] } };
-  return { REG, ctx };
-}
-function testFlowView(sb){
-  console.log('\nAutomations: the flow view (phase 4, group J)');
-  const J = x => JSON.stringify(x), ids = list => list.map(s => s.id);
-  const { REG, ctx } = flowFixture();
-  const W = (id, n) => ({ id, kind: 'wait', n: n || 1, unit: 'days' }), D = (id, type) => ({ id, kind: 'action', type: type || 'email' });
-  const WIN = id => ({ id, kind: 'window', days: [1, 2, 3, 4, 5], from: '09:00', until: '17:00', outside: 'next' }), IF = (id, conds) => ({ id, kind: 'if', match: 'all', conds: conds || [] });
-
-  // ids and the pure list moves
-  const idIn = [{ id: 's1' }, { id: 's4' }, { id: 'x' }, { id: 's10a' }], idBefore = J(idIn);
-  assertEqual([sb.flowStepId([]), sb.flowStepId(idIn), J(idIn)===idBefore], ['s1', 's5', true], 'flowStepId: s1 for none; the largest sN + 1 (ignores x and s10a); the input untouched');
-  const abcd = ['a', 'b', 'c', 'd'].map(id => ({ id, kind: 'wait', n: 1, unit: 'days' })), abcdJ = J(abcd);
-  const mv = (f, t, list) => ids(sb.flowMove(list || abcd, f, t));
-  assertEqual([mv(0, 2), mv(3, 0), mv(1, 1), mv(-1, 2), mv(0, 4)], [['b', 'c', 'a', 'd'], ['d', 'a', 'b', 'c'], ['a', 'b', 'c', 'd'], ['a', 'b', 'c', 'd'], ['a', 'b', 'c', 'd']], 'flowMove: 0→2, 3→0; the same place, or out of range, leaves the order');
-  const locked = abcd.map((s, i) => i===0 ? { ...s, lock: true } : s);
-  assertEqual([mv(0, 2, locked), sb.flowMove(abcd, 0, 2)!==abcd, J(abcd)===abcdJ], [['a', 'b', 'c', 'd'], true, true], 'flowMove: a locked step stays; the result is a new array; the input is never changed');
-  assertEqual([sb.flowCanMove(abcd, 0, 2), sb.flowCanMove(locked, 0, 2), sb.flowCanMove(abcd, 1, 1), sb.flowCanMove(abcd, 0.5, 2), sb.flowCanMove(abcd, 0, '2')], [true, false, false, false, false], 'flowCanMove: only an unlocked, in-range, real move');
-  assertEqual(ids(sb.flowMove([{ id: 'u', kind: 'later' }, ...abcd], 0, 2))[0], 'u', 'a step of a kind this app version does not know can\'t be moved (kept as it is)');
-  const ins = sb.flowInsert(abcd, -3, { kind: 'wait', n: 2, unit: 'hours' });
-  assertEqual([ids(ins)[0], ins[0].id, ids(sb.flowInsert(abcd, 99, { id: 'z', kind: 'if', conds: [] }))[4], J(abcd)===abcdJ], ['s1', 's1', 'z', true], 'flowInsert: clamps to the start / the end; a new step gets the next free id, one with an id keeps it; the input untouched');
-  const rm = sb.flowRemove(abcd, 1), rmL = sb.flowRemove(locked, 0), rmO = sb.flowRemove(abcd, 9);
-  assertEqual([ids(rm.steps), rm.removed.id, rmL.removed, ids(rmL.steps), rmO.removed, J(abcd)===abcdJ], [['a', 'c', 'd'], 'b', null, ['a', 'b', 'c', 'd'], null, true], 'flowRemove: the middle step comes out and is returned; a locked or missing one is refused');
-  const M = [10, 30, 50, 70];
-  assertEqual([sb.flowDropIndex(M, 35, 0), sb.flowDropIndex(M, 5, 0), sb.flowDropIndex(M, 100, 0), sb.flowDropIndex(M, 25, 3), sb.flowDropIndex(M, 50, 2)], [1, 0, 3, 1, 2], 'flowDropIndex: counts the other blocks\' midpoints above the dragged one');
-
-  // what the form can show
-  const S = (...kinds) => kinds.map((k, i) => ({ id: 's' + (i + 1), kind: k }));
-  assertEqual(sb.flowFormSlots(S('wait', 'window', 'if', 'action', 'action')), { wait: 0, window: 1, if: 2, doFrom: 3, doTo: 4, extra: false }, 'form slots: wait, window, condition, then two Do steps — all in the form');
-  const fi = sb.flowFormSlots(S('if', 'wait', 'action'));
-  assertEqual([fi.wait, fi.if, fi.extra], [1, 0, false], 'form slots: a condition before the wait is still form-shaped');
-  const wdwd = sb.flowFormSlots(S('wait', 'action', 'wait', 'action'));
-  assertEqual([wdwd.doFrom, wdwd.doTo, wdwd.extra, sb.flowIsFormShaped(S('wait', 'action', 'wait', 'action'))], [1, 1, true, false], 'form slots: wait, do, wait, do has more than the form can show');
-  assertEqual([sb.flowFormSlots(S('wait', 'wait', 'action')).extra, sb.flowFormSlots([]), sb.flowFormSlots(S('action'))], [true, { wait: -1, window: -1, if: -1, doFrom: -1, doTo: -1, extra: false }, { wait: -1, window: -1, if: -1, doFrom: 0, doTo: 0, extra: false }], 'form slots: two waits before the first Do → extra; none; a single Do');
-  assertEqual(sb.flowFormSlots([{ id: 'u', kind: 'later' }, D('s2')]).extra, true, 'form slots: a step the app does not know is never hidden by the form (it shows under "More steps")');
-  const comp = [IF('a'), W('b'), { ...IF('c'), lock: true }, IF('d', [{ field: 'has_email', op: 'true' }]), { id: 'e', kind: 'later' }], compJ = J(comp);
-  assertEqual([ids(sb.flowCompact(comp)), J(comp)===compJ], [['b', 'c', 'd', 'e'], true], 'flowCompact (on Save): an empty "Only if" goes; a locked one, the rest and unknown kinds stay, in order');
-  assertEqual([undefined, 5, 0, 500, 'abc', 25].map(v => sb.flowMaxSteps({ maxSteps: v })), [20, 5, 1, 30, 20, 25], 'max steps: a setting (default 20), between 1 and the database\'s 30');
-
-  // problems
-  const has = (list, t) => list.some(p => p.text===t);
-  assertEqual([has(sb.flowProblems({ steps: [D('s1')] }, ctx), 'Pick what starts it.'), has(sb.flowProblems({ trigger: { type: 'newLead' }, steps: [] }, ctx), 'Add at least one Do step.')], [true, true], 'problems: nothing starts it; no Do step');
-  const last = sb.flowProblems({ trigger: { type: 'newLead' }, steps: [D('s1'), W('s2')] }, ctx).find(p => p.id==='s2');
-  assertEqual(last && last.text, 'Step 2: The last step does nothing. End with a Do step, or remove it.', 'problems: a last step that does nothing is named by its place');
-  const many = Array.from({ length: 21 }, (_, i) => D('s' + (i + 1), 'push'));
-  assertEqual([has(sb.flowProblems({ trigger: { type: 'newLead' }, steps: many }, ctx), 'At most 20 steps.'), has(sb.flowProblems({ trigger: { type: 'newLead' }, steps: many }, { ...ctx, maxSteps: 25 }), 'At most 25 steps.')], [true, false], 'problems: more steps than the business allows');
-  assertEqual(sb.flowProblems({ trigger: { type: 'shift' }, steps: [D('s1', 'email')] }, ctx).map(p => p.text), ['Step 1: There is no customer to send to for this start.'], 'problems: a customer message under a start with no customer');
-  assertEqual(sb.flowProblems({ trigger: { type: 'newLead' }, steps: [IF('s1', [{ field: 'stage_unchanged', op: 'true' }]), D('s2', 'push')] }, ctx).map(p => p.text), ['Step 1: This condition doesn\'t fit what starts it.'], 'problems: a condition that does not fit the start (the registry decides)');
-  assertEqual(sb.flowProblems({ trigger: { type: 'stage', params: { stage: 'Quoted' } }, steps: [W('s1', 3), D('s2', 'email')] }, ctx), [], 'problems: a valid wait + email under a customer start: none');
-
-  // the "+" menu comes from the registry
-  const menu = (type, c) => sb.flowAddMenuItems({ trigger: type ? { type } : null, steps: [] }, c || ctx);
-  const byA = (list, a) => list.find(x => x.action===a);
-  const team = menu('shift');
-  assertEqual([team.slice(0, 3).map(x => x.kind), byA(team, 'email').disabled, byA(team, 'email').why, byA(team, 'push').disabled], [['wait', 'window', 'if'], true, 'There is no customer for this start', false], '+ menu: wait, window, condition; under a team-only start every customer action is off, with why');
-  const t0 = byA(menu('newLead'), 'text'), t1 = byA(menu('newLead', { ...ctx, phoneLive: true }), 'text');
-  assertEqual([t0.disabled, /business phone/.test(t0.why), t1.disabled], [true, true, false], '+ menu: a text needs the business phone (Twilio); on once it is live');
-  REG.actions.slack = { label: 'A message to a team chat', icon: 'chat', audience: 'team' };
-  assertEqual([byA(menu('newLead'), 'slack').label, menu('newLead').length], ['Do: A message to a team chat', 8], '+ menu: one more action in the registry = one more line, no flow code changed');
-  delete REG.actions.slack;
-
-  // phrases: registries + the business's catalog, never fixed names
-  const def = { trigger: { type: 'stage', params: { stage: 'Quoted' } }, steps: [W('s1', 3), WIN('s2'), IF('s3', [{ field: 'service', op: 'is', v: 'Aircon' }]),
-    { id: 's4', kind: 'action', type: 'email', subject: 'Quote follow-up', body: '{first_name}, any questions about the quote?' }, W('s5', 2), { id: 's6', kind: 'action', type: 'task', title: 'Call them' }] };
-  const sentence = 'When a lead moves to Quoted, then wait 3 days, then only Mon–Fri, 9 am–5 pm (otherwise wait), then only if service is Aircon, then an email to the customer: Quote follow-up, then wait 2 days, then a task in the app: Call them.';
-  assertEqual(sb.flowSentence(def, ctx), sentence, 'the sentence: When …, then each step in order, ending with a full stop');
-  const renamed = { ...ctx, catalog: { ...ctx.catalog, services: [{ key: 'Aircon', label: 'Air conditioning' }] } };
-  assertEqual(sb.flowSentence(def, renamed).includes('only if service is Air conditioning'), true, 'the service\'s name comes from the business\'s own catalog (renamed there → renamed here)');
-  assertEqual([sb.flowStepSummary(W('x', 1), def, ctx), sb.flowStepSummary({ id: 'u', kind: 'later' }, def, ctx), sb.flowStepSummary(IF('x'), def, ctx)], ['Wait 1 day', 'Unknown step', 'Only if … (no condition yet)'], 'summaries: one day; an unknown kind; an empty condition');
-  assertEqual([sb.flowWindowPhrase({ days: [0, 1, 2, 3, 4, 5, 6], from: '08:00', until: '24:00', outside: 'skip' }), sb.flowWindowPhrase({ mode: 'office', outside: 'at', at: '08:30' }), sb.flowDaysText([1, 3, 5]), sb.flowDaysText([6, 0])],
-    ['Only every day, 8 am–midnight (otherwise stop)', 'Only in office hours (otherwise at 8:30 am on the next allowed day)', 'Mon, Wed, Fri', 'Sat, Sun'], 'windows in plain words');
-  assertEqual(sb.flowMoveLabel('Wait 3 days', 2, 6), 'Moved "Wait 3 days" to step 3 of 6.', 'the screen-reader line after a move');
-
-  // the canvas
-  const four = { trigger: { type: 'newLead' }, steps: [W('s1'), WIN('s2'), IF('s3', [{ field: 'has_email', op: 'true' }]), { id: 's4', kind: 'action', type: 'email', subject: 'Hello', body: '{first_name}, thanks!' }] };
-  const html = sb.flowCanvasHtml(four, ctx, { sel: 's2' });
-  const count = (h, re) => (h.match(re) || []).length;
-  assertEqual([count(html, /class="flow-block/g), count(html, /class="flow-add"/g), count(html, /class="flow-grip"/g)], [5, 5, 4], 'canvas: 4 steps + the start = 5 blocks, 5 "+", 4 handles');
-  const block = id => html.slice(html.indexOf(`data-step="${id}"`), html.indexOf('</li>', html.indexOf(`data-step="${id}"`)));
-  assertEqual([/aria-label="Move up" title="Move up" disabled/.test(block('s1')), /aria-label="Move down" title="Move down" disabled/.test(block('s4')), /aria-label="Move down" title="Move down" disabled/.test(block('s1'))], [true, true, false], 'canvas: the first can\'t go up, the last can\'t go down');
-  assertEqual([/flow-block k-window sel"/.test(html), /aria-expanded="true" aria-controls="flow-panel" onclick="flowSelect\('s2'\)"/.test(html), count(html, /aria-expanded="true"/g)], [true, true, 1], 'canvas: the chosen step is marked and its button says it is open');
-  assertEqual(/<div class="flow-msg"[^>]*><b>Hello<\/b> · Sam, thanks!<\/div>/.test(html), true, 'canvas: a Do step carries its message, filled with sample words');
-  assertEqual(sb.flowCanvasHtml({ trigger: { type: 'newLead' }, steps: [{ id: 't1', kind: 'action', type: 'task', title: 'Call them' }] }, ctx, {}).includes('flow-msg'), false, 'canvas: a Do step with no words of its own has no message card (its title is already in the block)');
-  assertEqual([sb.flowMsgHtml({ id: 'm1', kind: 'action', type: 'email', subject: 'For {first_name}', body: 'Hi <b>{first_name}</b>' }, ctx), sb.flowMsgHtml(W('w1'), ctx), sb.flowMsgHtml({ id: "q'1", kind: 'action', type: 'email', body: 'x' }, ctx).includes("flowSelect('q\\'1')")],
-    ['<div class="flow-msg" onclick="flowSelect(\'m1\')"><b>For Sam</b> · Hi &lt;b&gt;Sam&lt;/b&gt;</div>', '', true], 'message card: its name and words are filled with sample values and escaped; none on a non-Do step');
-  assertEqual(sb.flowOpenInnerHtml('Wait', 'Wait <3> days', true).replace(/<span class="pill[\s\S]*$/, ''), '<small>Wait</small><b>Wait &lt;3&gt; days</b><span class="flow-warn">', 'a block\'s words are escaped; "Needs a look" when Save would object');
-  const atMax = sb.flowCanvasHtml(four, { ...ctx, maxSteps: 4 }, {});
-  assertEqual([count(atMax, /class="flow-add"[^>]* disabled title="At most 4 steps"/g)], [5], 'canvas: at the business\'s maximum every "+" is off');
-  const mir = sb.flowCanvasHtml(four, ctx, { locked: true });
-  assertEqual([count(mir, /class="flow-grip"/g), count(mir, /class="flow-add"/g), count(mir, /Delete this step/g), count(mir, /Move up/g), count(mir, /class="flow-lock"/g)], [0, 0, 0, 0, 4], 'canvas: a ready-made mirror has no handle, no "+", no bin and no moves (its order is fixed)');
-  const tail = { trigger: { type: 'newLead' }, steps: [D('s1', 'push'), W('s2')] };
-  assertEqual([sb.flowCanvasHtml(tail, ctx, {}).includes('Needs a look'), sb.flowCanvasHtml(tail, ctx, { locked: true }).includes('Needs a look')], [true, false], 'canvas: "Needs a look" marks a step Save would object to; never on a ready-made mirror (it runs on its existing code)');
-  const evil = '"><img src=x onerror=alert(1)>';
-  const xs = sb.flowCanvasHtml({ trigger: { type: 'newLead' }, steps: [IF("a'b", [{ field: 'tag', op: 'has', v: evil }]), D('s2', 'push')] }, { ...ctx, catalog: { ...ctx.catalog, tags: [{ tag: evil }] } }, {});
-  assertEqual([xs.includes('&lt;img'), xs.includes('<img'), xs.includes("flowSelect('a\\'b')"), xs.includes("flowSelect('a'b')")], [true, false, true, false], 'canvas: a tag name with HTML is shown as text; a step id with a quote is escaped in the handlers');
-  assertEqual(/#[0-9a-f]{3,6}\b|rgb\(/i.test(html.replace(/<svg[\s\S]*?<\/svg>/g, '')), false, 'canvas: no colour literal (tokens only)');
-  const inl = sb.flowCanvasHtml(four, ctx, { sel: 's3', inline: true, panelHtml: '<section id="flow-panel">P</section>' });
-  assertEqual([count(inl, /flow-inline-panel/g), inl.indexOf('flow-inline-panel') > inl.indexOf('data-step="s3"') && inl.indexOf('flow-inline-panel') < inl.indexOf('data-step="s4"')], [1, true], 'canvas on a phone: the panel opens under the chosen block');
-
-  // nothing on the render path redraws (the phase-3 freeze)
-  let renders = 0, edRenders = 0; sb.render = () => { renders++; }; sb.autoEdRender = () => { edRenders++; };
-  for (let k = 0; k < 3; k++) { sb.flowCanvasHtml(def, ctx, { sel: 's1' }); sb.flowSentence(def, ctx); sb.flowProblems(def, ctx); sb.flowFormSlots(def.steps); sb.flowMoreStepsHtml(def, ctx); }
-  assertEqual([renders, edRenders], [0, 0], 'drawing the flow view never asks for a redraw (no loader, nothing async)');
-
-  // the viewer's choice of view
-  sb.localStorage = { getItem(){ throw new Error('blocked'); }, setItem(){ throw new Error('blocked'); } };
-  let threw = false; try { sb.setFlowViewPref('flow'); } catch (e) { threw = true; }
-  const pref = [sb.flowViewPref(), threw];
-  const store = {}; sb.localStorage = { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = v; } };
-  sb.setFlowViewPref('flow'); pref.push(sb.flowViewPref()); store['ops.autoEditorView'] = 'xyz'; pref.push(sb.flowViewPref());
-  assertEqual(pref, ['form', false, 'flow', 'form'], 'the view choice: blocked storage → Form, no error; Flow is remembered; anything else → Form');
-  const tog = sb.flowViewToggleHtml('flow');
-  assertEqual([/role="radiogroup" aria-label="How to edit"/.test(tog), /aria-checked="true" tabindex="0" onclick="flowSetView\('flow'\)">Flow/.test(tog)], [true, true], 'the Form / Flow switch is a radio group');
-
-  // the form writes into the same steps (round trip)
-  const formDef = [W('s1', 3), IF('s2', [{ field: 'has_email', op: 'true' }]), D('s3', 'email')];
-  const rightAway = sb.flowFormSetSlot(formDef, 'wait', null, ctx), after = sb.flowFormSetSlot(rightAway, 'wait', { n: 3, unit: 'days' }, ctx);
-  assertEqual([ids(rightAway), [after[0].kind, after[0].n, after[0].unit, after[0].id], J(after.slice(1))===J(formDef.slice(1)), after.length], [['s2', 's3'], ['wait', 3, 'days', 's4'], true, 3], 'form: "Right away" removes the wait, "After 3 days" puts it back first (only its id is new)');
-  const win = sb.flowFormSetSlot(formDef, 'window', { outside: 'skip' }, { ...ctx, office: { days: { 1: { from: 540, to: 1020 }, 2: { from: 540, to: 1020 } } } });
-  assertEqual([win[1].kind, win[1].days, win[1].from, win[1].until, win[1].outside], ['window', [1, 2], '09:00', '17:00', 'skip'], 'form: unticking "Any day, any time" adds a window after the wait, from the business\'s office hours');
-  const noIf = [W('s1'), D('s2')];
-  assertEqual([ids(sb.flowFormSetSlot(noIf, 'if', { conds: [] }, ctx)), sb.flowFormSetSlot(noIf, 'if', { conds: [{ field: 'has_email', op: 'true' }] }, ctx).map(s => s.kind)], [['s1', 's2'], ['wait', 'if', 'action']], 'form: the first condition adds an "Only if" just before the Do steps');
-  const withTask = sb.flowFormSetAction(formDef, 'task', true, ctx, { type: 'newLead' });
-  assertEqual([withTask.map(s => s.type || s.kind), withTask[2].title, ids(sb.flowFormSetAction(withTask, 'email', false, ctx))], [['wait', 'if', 'task', 'email'], 'Call them back', ['s1', 's2', 's4']], 'form: a channel switch adds its Do step in the registry\'s order (a task before an email), and removes it');
-  const push = sb.flowFormSetAction(formDef, 'push', true, ctx, { type: 'newLead' });
-  assertEqual(push.map(s => s.type || s.kind), ['wait', 'if', 'push', 'email'], 'form: a notification goes before the email (registry order)');
-  const seq = [W('s1'), D('s2', 'email'), W('s3', 2), D('s4', 'task')];
-  assertEqual([ids(sb.flowFormSetSlot(seq, 'wait', null, ctx)), ids(sb.flowFormSetAction(seq, 'task', false, ctx))], [['s2', 's3', 's4'], ['s1', 's2', 's3', 's4']], 'form on a longer automation: only the first part changes (the later task stays)');
-  const more = sb.flowMoreStepsHtml({ trigger: { type: 'newLead' }, steps: seq }, ctx);
-  assertEqual([/More steps/.test(more), /<b>Step 3<\/b> Wait 2 days/.test(more), /<b>Step 4<\/b> A task in the app/.test(more), /Step 1/.test(more), /flowSetView\('flow'\)/.test(more), sb.flowMoreStepsHtml({ steps: formDef }, ctx)], [true, true, true, false, true, ''], '"More steps" lists every step the form can\'t show, with the way to Flow; nothing for a form-shaped one');
-  const made = sb.FLOW_STEP_KINDS.action.make(ctx, { type: 'newLead' }, 'email');
-  assertEqual([made.kind, made.type], ['action', 'email'], 'a new Do step is the engine\'s own shape (kind action + type)');
-
-  // the static rules of the flow view's code
-  const html0 = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html0.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const fns = [...script.matchAll(/function ((?:flow|setFlow)\w*)\(/g)].map(m => m[1]);
-  const bodyOf = n => extractDecl(script, n);
-  assertEqual(['pointermove', 'pointerup', 'pointercancel', 'keydown'].map(ev => bodyOf('flowDragStart').includes(`addEventListener('${ev}'`) && bodyOf('flowDragCleanup').includes(`removeEventListener('${ev}'`)), [true, true, true, true], 'drag: the four listeners go on at the start and all come off in the one cleanup');
-  assertEqual([/flowDragCleanup\(\)/.test(bodyOf('flowDragEnd')), /flowDragCleanup\(\)/.test(bodyOf('flowDragCancel'))], [true, true], 'drag: the end and the cancel both use that cleanup');
-  assertEqual(fns.filter(n => /\brender\(\)|\bdb\.|\bsb\.|fetch\(/.test(bodyOf(n))), [], 'no flow function redraws the whole app, touches the database or calls a server');
-  assertEqual([fns.length >= 40, /FLOW_DRAG/.test(bodyOf('renderKeepingInput'))], [true, true], 'live updates wait while a flow block is dragged');
-  assertEqual([/flowRefreshBlocks\(\)/.test(bodyOf('autoEdRefresh')), /autoEdRender|flowRedraw|\brender\(|focus\(/.test(bodyOf('flowRefreshBlocks'))], [true, false], 'typing in a panel updates the blocks in place (no redraw, no focus change)');
-  const css = html0.slice(html0.indexOf('/* flow view */'), html0.indexOf('/* /flow view */'));
-  assertEqual([css.length > 500, /#[0-9a-f]{3,6}\b|rgb\(/i.test(css)], [true, false], 'the flow view\'s CSS uses the theme tokens only');
-}
 function testSecurityFaceId(sb){
   console.log('\nSettings → Security: Face ID / fingerprint and the 30-minute lock (14 Oct)');
   const fnSrc = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'passkey', 'index.ts'), 'utf8');
@@ -3693,11 +3522,9 @@ testMcpConnector(loadSandbox());
 testPageHistory(loadSandbox());
 testSecurityFaceId(loadSandbox());
 testAutomationEventBody(loadSandbox());
-testFlowView(loadSandbox());
 testAutomationsBuilder(loadSandbox());
 testNamesAndLabels(loadSandbox());
 testAutomationsEditor();
-testAutomationsEditorKeys();
 testLeadAtomicEdits(loadSandbox());
 testWorkflowAdapter(loadSandbox());
 testWfList(loadSandbox());
@@ -4048,7 +3875,7 @@ function testAutomationsBuilder(sb){
   const html0 = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html0.match(/<script>([\s\S]*?)<\/script>/)[1];
   const ctx = autoFixtureCtx(sb);
   // registries: data only, no business names; every start a condition or blank names exists
-  const regSrc = ['AUTO_TRIGGERS', 'AUTO_MIRROR_TRIGGERS', 'AUTO_CONDS', 'AUTO_ACTIONS', 'AUTO_FIELDS', 'AUTO_PUSH_DEFAULT', 'AUTO_DUE', 'AUTO_OP_WORDS'].map(n => extractDecl(script, n)).join('\n');
+  const regSrc = ['AUTO_TRIGGERS', 'AUTO_MIRROR_TRIGGERS', 'AUTO_CONDS', 'AUTO_ACTIONS', 'AUTO_FIELDS', 'AUTO_PUSH_DEFAULT', 'AUTO_DUE'].map(n => extractDecl(script, n)).join('\n');
   assertEqual(['Aircon', 'Chimney', 'Pressure', 'Ron', 'Noam', 'Ofek', 'The Guys', '1300'].filter(w => regSrc.includes(w)), [], 'registries: no business, person or phone number is written in');
   const trig = Object.keys(sb.AUTO_TRIGGERS);
   assertEqual(Object.values(sb.AUTO_CONDS).flatMap(c => c.appliesTo || []).filter(t => !trig.includes(t)), [], 'registries: every start a condition is limited to exists');
@@ -4106,32 +3933,28 @@ function testAutomationsBuilder(sb){
   assertEqual(T({ trigger: { type: 'newLead' }, steps: [push, { id: 's2', kind: 'wait', n: 1, unit: 'days' }] }), ['The last step does nothing. End with a Do step, or remove it.'], 'problems: a last step that does nothing');
   assertEqual(T({ trigger: { type: 'invoice' }, steps: [push] }), ['This start can\'t be used in an automation of your own yet (step 1).'], 'problems: a start only a ready-made has');
   assertEqual(T({ trigger: { type: 'newLead' }, steps: [push, { ...push }] }), ['Two steps share the same inside name: remove one and add it again.'], 'problems: two steps with the same id (the engine would refuse it)');
-  assertEqual(sb.autoStepProblems({ id: 'x', kind: 'action', type: 'push', to: {}, title: '' }, { trigger: { type: 'newLead' } }, ctx), ['Pick who gets the notification.', 'Write the notification.'], 'the flow view\'s "Needs a look" uses the same checks, without the step number');
-  // the sentence and the chips: registries + the business's own names; every name escaped
+  // when, in short (the Message templates tab): the start and the hours, in the registries' words
   const quote = { trigger: { type: 'stage', params: { stage: 'Quoted' } }, steps: [{ id: 's1', kind: 'wait', n: 3, unit: 'days' }, { id: 's2', kind: 'window', days: [1, 2, 3, 4, 5], from: '09:00', until: '17:00', outside: 'skip' },
     { id: 's3', kind: 'if', match: 'all', conds: [{ field: 'service', op: 'is', v: 'svcA' }, { field: 'has_email', op: 'true' }] }, { id: 's4', kind: 'action', type: 'email', subject: 'Your quote', templateKey: 'my_q' },
     { id: 's5', kind: 'action', type: 'task', title: 'Call {name}', assignees: ['e1'], due_days: 1 }] };
-  assertEqual(sb.autoSentence(quote, ctx), 'When <b>a lead moves to Quote sent</b>, then <b>wait 3 days</b>, then <b>only Mon–Fri, 9 am–5 pm (otherwise stop)</b>, then <b>only if the service is Window cleaning and the customer has an email address</b>, then <b>email the customer &quot;Your quote&quot;</b>, then <b>give Kim a task due the next day</b>.', 'sentence: a quote follow-up, from the registries and the business\'s names');
-  assertEqual(sb.autoSentence({ trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'wait', n: 15, unit: 'minutes' }, { id: 's2', kind: 'if', match: 'all', conds: [{ field: 'not_picked', op: 'true' }] }, push] }, ctx),
-    'When <b>a new lead comes in</b>, then <b>wait 15 minutes</b>, then <b>only if nobody has opened, called or moved the lead</b>, then <b>send a notification to the owners</b>.', 'sentence: a waiting-lead alert');
-  assertEqual(sb.autoSentence({ trigger: { type: 'jobClosed' }, steps: [] }, ctx), 'When <b>a job is closed</b>, then… <span class="hint">(pick what to do in step 5)</span>', 'sentence: nothing to do yet');
-  const renamed = autoFixtureCtx(sb, { catalog: { ...ctx.catalog, services: [{ key: 'svcA', label: 'Glass' }] } });
-  assertEqual([sb.autoSentence(quote, renamed).includes('the service is Glass'), quote.steps[2].conds[0].v], [true, 'svcA'], 'sentence: a service renamed in Settings is renamed here; the saved key stays');
-  const gone = autoFixtureCtx(sb, { catalog: { ...ctx.catalog, services: [] } });
-  assertEqual(sb.autoSentence(quote, gone).includes('svcA (deleted)'), true, 'sentence: a deleted value says so');
-  const evil = '<script>alert(1)</script>';
-  const evilCtx = autoFixtureCtx(sb, { catalog: { ...ctx.catalog, stages: [{ key: 'Quoted', label: evil }] } });
-  const es = sb.autoSentence(quote, evilCtx);
-  assertEqual([es.includes('<script>'), es.includes('&lt;script&gt;')], [false, true], 'sentence: a stage name with HTML is shown as text');
-  assertEqual(sb.autoFlowChips(quote, ctx), ['Moves to a stage: Quote sent', 'After 3 days', 'Mon–Fri, 9 am–5 pm', '2 conditions', 'Email + Task for Kim'], 'chips: start › wait › hours › conditions › what it does');
-  assertEqual(sb.autoFlowChips({ trigger: { type: 'newLead' }, steps: [push, { id: 's2', kind: 'wait', n: 2, unit: 'hours' }, { ...push, id: 's3' }] }, ctx), ['New lead', 'Right away', 'Any day, any time', 'Push to the owners', '+2 more steps'], 'chips: a longer automation says how many more steps it has');
   assertEqual(sb.autoWhenShort(quote, ctx), '3 days after a lead moves to Quote sent, Mon–Fri, 9 am–5 pm', 'when, in short: the wait, the start and the hours');
+  // what the flow view's helpers became (stage 2 phase 7): the start in a few words, a straight workflow in one sentence, the step limit, the office window
+  assertEqual([sb.autoTriggerPhrase({ type: 'stage', params: { stage: 'Quoted' } }, ctx), sb.autoTriggerPhrase({ type: 'stage' }, ctx), sb.autoTriggerPhrase({ type: 'jobClosed' }, ctx), sb.autoTriggerPhrase({ type: 'docExpiry', params: { days: 45 } }, ctx),
+    sb.autoTriggerPhrase({ type: 'nope' }, ctx), sb.autoTriggerPhrase(null, ctx)],
+    ['a lead moves to Quote sent', 'a lead moves to any stage', 'a job is closed', 'an employee document expires within 45 days', 'something this version of the app does not know happens', ''], 'trigger phrase: the registry\'s words, a start it does not know, none');
+  assertEqual(sb.wfFlatSentence(quote, ctx), 'When a lead moves to Quote sent, then wait 3 days, then only Mon–Fri, 9 am–5 pm, then only if the service is Window cleaning and the customer has an email address, then email the customer "Your quote", then give Kim a task due the next day.',
+    'flat sentence: the start, then each step in the registries\' words');
+  assertEqual([sb.wfFlatSentence({ trigger: null, steps: [] }, ctx), sb.wfFlatSentence({ trigger: { type: 'newLead' }, steps: [{ id: 'i', kind: 'if', match: 'all', conds: [] }, { id: 'x', kind: 'action', type: 'fax' }, null] }, ctx), sb.wfFlatSentence(null, ctx)],
+    ['When something happens.', 'When a new lead comes in, then only if …, then do something this version of the app does not know.', 'When something happens.'], 'flat sentence: nothing yet, an empty condition and an unknown action, no definition');
+  assertEqual([sb.autoMaxSteps(), sb.autoMaxSteps({ maxSteps: 12 }), sb.autoMaxSteps({ maxSteps: 99 }), sb.autoMaxSteps({ maxSteps: 0 }), sb.autoMaxSteps({ maxSteps: 'x' }), sb.autoMaxSteps({ maxSteps: '' })], [20, 12, 30, 1, 20, 20], 'step limit: 20 unless the setting says otherwise, between 1 and 30 (the database\'s own limit)');
+  assertEqual([sb.wfOfficeWindow({}), sb.wfOfficeWindow({ office: { days: [null, null, { from: 540, to: 780 }, null, null, { from: 480, to: 1440 }, null] } })],
+    [{ kind: 'window', days: [1, 2, 3, 4, 5], from: '08:00', until: '17:00', outside: 'next' }, { kind: 'window', days: [2, 5], from: '09:00', until: '13:00', outside: 'next' }], 'office window: Monday to Friday 8–5 without office hours; else the business\'s own open days and the first one\'s hours');
   // the ready-made rows, from today's settings
   sb.STATE.data.settings = { reviewRequestsAuto: false, chatAutoSms: true, phoneEnabled: false, unpaidReminderDays: 9,
     catalog: { reviews: { sendFrom: 9, askAgainMonths: 4 }, chat: { waitMinutes: 7, windowHours: 3, oneADay: false }, notify: { newLead: { on: true, office: true }, leadWaiting: { on: false }, rules: { waitMinutes: 20, from: 7, until: 19, docDays: 45 } } } };
   sb.STATE.profiles = [];
-  const R = sb.autoReadyRows(), by = k => R.find(r => r.key===k);
-  assertEqual([by('ready:review').on, by('ready:review').gate, sb.autoGatePill(by('ready:review')).includes('Off until go-live'), by('ready:review').notes[0], by('ready:review').toggle], [false, 'golive', true, 'Texts go through GoHighLevel for now.', ['setReviewAuto', true]], 'ready-made review: off until go-live, through GoHighLevel, its switch is the existing one (with its own confirm)');
+  const R = sb.wfSystemRows(), by = k => R.find(r => r.key===k);
+  assertEqual([by('ready:review').on, by('ready:review').gate, by('ready:review').notes[0], by('ready:review').toggle], [false, 'golive', 'Texts go through GoHighLevel for now.', ['setReviewAuto', true]], 'ready-made review: off until go-live, through GoHighLevel, its switch is the existing one (with its own confirm)');
   const rv = by('ready:review').def.steps;
   assertEqual([rv[0].from, rv[0].until, rv[0].at, rv[1].conds.map(c => c.field + (c.n ? ':' + c.n : '')), rv.slice(2).map(s => s.templateKey)], ['09:00', '20:00', '10:00', ['dont_ask', 'asked_within_months:4'], ['reviewSms', 'reviewEmailBody']], 'ready-made review: the hours and months are the Google reviews settings; the words are the built-in messages');
   const ch = by('ready:chatText');
@@ -4153,13 +3976,6 @@ function testAutomationsBuilder(sb){
   assertEqual([pv.includes('Hi Sarah, it’s &lt;b&gt;us&lt;/b&gt;'), /\d+ characters · 1 text · a curly quote/.test(pv)], [true, true], 'preview: a text bubble, escaped, with its count (a curly quote warns)');
   const pe = sb.autoPreviewHtml('email', 'Hi {first_name}', 'Line one\n\nLine {name}', ctx.sample);
   assertEqual([pe.includes('<span>Subject</span>Hi Sarah'), pe.includes('<p>Line one</p><p>Line Sarah Mitchell</p>')], [true, true], 'preview: an email with its subject and paragraphs');
-  // the form and the flow view edit the same steps (J's slot helpers with the builder's registry)
-  const tail = [{ id: 's1', kind: 'wait', n: 1, unit: 'days' }, { id: 's2', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'A' }, { id: 's3', kind: 'wait', n: 2, unit: 'days' }, { id: 's4', kind: 'action', type: 'task', title: 'B', assignees: ['e1'] }];
-  const tailJ = JSON.stringify(tail.slice(2));
-  const edited = sb.flowFormSetSlot(tail, 'wait', { n: 5, unit: 'hours' }, ctx);
-  assertEqual([sb.flowIsFormShaped(tail), edited[0].n, edited[0].unit, edited[0].id, JSON.stringify(edited.slice(2))===tailJ], [false, 5, 'hours', 's1', true], 'form on a longer automation: the first part changes, the rest is kept byte for byte, ids stay');
-  const added = sb.flowFormSetAction([{ id: 's1', kind: 'wait', n: 1, unit: 'days' }], 'email', true, ctx, { type: 'newLead' });
-  assertEqual([added[1].kind, added[1].type, added[1].subject, added[1].templateKey, added[1].id], ['action', 'email', '', '', 's2'], 'form: ticking Email adds the engine\'s own email step');
   const pushMade = sb.AUTO_ACTIONS.push.make(ctx, { type: 'newLead' });
   assertEqual([pushMade.to, pushMade.title, pushMade.body], [{ roles: ['owner'], people: [] }, 'New lead: {name}', '{service} · {source}'], 'a new notification goes to the owners with blanks for that start');
   // library templates: who uses one
@@ -4172,15 +3988,15 @@ function testAutomationsBuilder(sb){
   const als = extractDecl(script, 'applyLeadStage');
   assertEqual([als.includes('const patch = { status: stage, stageChangedAt: nowIso, ...extra };'), /db\.contacts\.update\(c\.id, patch\)\.then\(saved => \{ if \(saved\) autoEmitStage\(c\.id, stage\); \}\)/.test(als)], [true, true], 'a stage move saves the same patch; the engine is told only after the save (and the Undo)');
   // the pure helpers never redraw or touch the database
-  const pure = ['autoNormalize', 'wfToFlat', 'wfFromFlat', 'autoProblems', 'autoStepIssues', 'autoSentence', 'autoFlowChips', 'wfSystemRows', 'autoReadyRows', 'autoPreviewHtml'];
+  const pure = ['autoNormalize', 'wfToFlat', 'wfFromFlat', 'autoProblems', 'autoStepIssues', 'wfSystemRows', 'autoPreviewHtml'];
   assertEqual(pure.filter(n => /\brender\(|\bdb\.|\bsb\.|fetch\(/.test(extractDecl(script, n))), [], 'the builder\'s pure helpers never redraw, read the database or call a server');
 }
-// A sandbox with the whole builder (every auto* function and AUTO* constant) for its windows and saves.
+// A sandbox with the phase-4 words (every auto* function and AUTO* constant) for the Message templates tab and the safety numbers.
 function autoSandbox(extra){
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   const autoNames = [...new Set([...script.matchAll(/\n(?:async )?function (auto\w*)\(/g)].map(m => m[1]).concat([...script.matchAll(/\nconst (AUTO\w*)\s*=/g)].map(m => m[1])))].filter(n => !DECLS.includes(n) && !/^automation/i.test(n));
-  const more = ['readOnlyReason', 'flowEd', 'flowCtx', 'flowRenderBlocked', 'flowMainHtml', 'flowSideHtml', 'flowPanelHtml', 'flowIsInline', 'tplHighlight', 'renderTemplatesPage', 'TPL_EXAMPLE', 'tplPreviewHtml', 'tplActionsHtml', 'tplProblemsHtml',
-    'toggleAutomation', 'deleteAutomation', 'duplicateAutomation', 'openAutoEditor', 'openAutoPage', 'loadAutomations', 'loadAutoRunCounts', 'wfSystemHide', 'newMsgTemplate', 'editMsgTemplate', 'saveMsgTemplate', 'deleteMsgTemplate', 'cancelMsgTemplate', 'brandOf', 'WF_DATA', 'wfInvalidate',
+  const more = ['readOnlyReason', 'tplHighlight', 'renderTemplatesPage', 'TPL_EXAMPLE', 'tplPreviewHtml', 'tplActionsHtml', 'tplProblemsHtml',
+    'loadAutomations', 'wfSystemHide', 'newMsgTemplate', 'editMsgTemplate', 'saveMsgTemplate', 'deleteMsgTemplate', 'cancelMsgTemplate', 'brandOf', 'WF_DATA', 'wfInvalidate',
     'wfTplPill', 'wfEnsure', 'WF_PAUSE_COLS', 'wfFetchPauses', 'wfFetchRows', 'wfPageShowing', 'settingsPageKey', 'OLD_SETTINGS_PAGES', 'WF_UI', 'wfGlobalSettingsHtml', 'WF_GS', 'wfFetchList', 'WF_LIST_COLS', 'wfFetchRegistry'];
   const src = DECLS.map(n => extractDecl(script, n)).concat(autoNames.map(n => extractDecl(script, n)), more.filter(n => !autoNames.includes(n) && !DECLS.includes(n)).map(n => extractDecl(script, n))).join('\n\n');
   const log = { toasts: [], confirms: [], db: [], renders: 0, opened: [], modal: '' };
@@ -4199,56 +4015,16 @@ function autoSandbox(extra){
     ...(extra || {}),
   };
   vm.createContext(sandbox);
-  vm.runInContext('var AUTO_ED = null, AUTO_TPL_EDIT = null, TPL_EDIT = null, FLOW_DRAG = null, FLOW_EDRENDER_PENDING = false;\n' + src + '\nthis.__get = n => eval(n); this.__set = (n, v) => eval(n + " = v");', sandbox, { filename: 'index.html (builder)' });
+  vm.runInContext('var AUTO_TPL_EDIT = null, TPL_EDIT = null;\n' + src + '\nthis.__get = n => eval(n); this.__set = (n, v) => eval(n + " = v");', sandbox, { filename: 'index.html (builder)' });
   return sandbox;
 }
 function testAutomationsEditor(){
-  console.log('\nAutomations: the editor window and the Message templates tab (phase 4, group I)');
+  console.log('\nAutomations: the Message templates tab and the app\'s Escape (phase 4, group I; the old editor is gone, stage 2 phase 7)');
   const sb = autoSandbox(), AUTO = sb.__get('AUTO'), log = sb.log;
-  // a new automation: 6 steps, the flow switch in the head, nothing saved by opening it
-  sb.openAutoEditor(null);
-  let h = log.modal;
-  assertEqual([...['When', 'Wait', 'Only on', 'Only if', 'Do', 'Message'].map(t => h.includes(`<h4>${t}</h4>`)), h.includes('role="radiogroup" aria-label="How to edit"'), h.includes('Save automation'), h.includes('Pick what starts it (step 1).'), log.db.length],
-    [true, true, true, true, true, true, true, true, true, 0], 'new automation: the 6 steps, the Form / Flow switch, "Before you save", and nothing written');
-  assertEqual([h.includes('A new lead comes in'), h.includes('A call is missed'), h.includes('Starts once the business phone is connected')], [true, true, true], 'new automation: the starts come from the registry (a missed call waits for the phone)');
-  // pick a start, add a notification to the office, write it
-  sb.autoEdSetTrigger('newLead');
-  sb.autoEdWho('', 'role:office');
-  const ed = sb.__get('AUTO_ED'), push = ed.def.steps.find(s => s.type==='push');
-  assertEqual([push.to, push.title], [{ roles: ['va', 'manager'], people: [] }, 'New lead: {name}'], 'form: picking "The office" adds a notification to the office, with words for that start');
-  sb.autoEdAction('email', true);
-  const email = ed.def.steps.find(s => s.type==='email');
-  assertEqual([!!email, /^my_\w+$/.test(email.templateKey), ed.drafts[email.templateKey].channel], [true, true, 'email'], 'form: ticking Email starts a new template of your own (a draft until Save)');
-  sb.autoEdAction('text', true);
-  assertEqual([ed.def.steps.some(s => s.type==='text'), log.toasts.slice(-1)[0]], [false, 'Needs the business phone (Twilio). It turns on here once the phone is connected.'], 'form: a text can\'t be added before the business phone');
-  h = sb.autoEditorHtml();
-  assertEqual([h.includes('Not available yet'), h.includes('This one messages customers. It is saved off'), h.includes('id="au-step-6"')], [true, true, true], 'form: the text card says why; a customer automation says it is saved off');
-  // the editor's On switch on a NEW customer automation stays off
-  sb.autoEdToggle();
-  assertEqual([ed.enabled, /saved off/.test(log.toasts.slice(-1)[0])], [false, true], 'a new automation that messages customers can\'t be switched on before it is saved');
-  // escaping in the editor
-  ed.name = '"><script>x</script>';
-  h = sb.autoEditorHtml();
-  assertEqual([h.includes('<script>x'), h.includes('&quot;&gt;&lt;script&gt;')], [false, true], 'editor: a typed name is escaped');
-  // ready-made mirrors open on their live settings
-  sb.STATE.data.settings = { reviewRequestsAuto: false, phoneEnabled: false, catalog: { reviews: { sendFrom: 9 } } };
-  sb.openAutoEditor('ready:review');
-  h = log.modal;
-  assertEqual([h.includes('System workflow'), h.includes('This sends to real customers. It stays off until you turn it on at go-live.'), h.includes('Through GoHighLevel for now'), h.includes("autoReadyAct('setReviewCfg', 'sendFrom', this.value)"),
-    h.includes('<option value="9" selected>9 am</option>'), h.includes('Back to the default'), h.includes('Duplicate'), h.includes('>Delete<'), h.includes('readonly')],
-    [true, true, true, true, true, true, true, false, true], 'ready-made review: its live hours with the Google reviews setter, go-live banner, Back to the default and Duplicate, no Delete');
-  sb.openAutoEditor('ready:missedText');
-  h = log.modal;
-  assertEqual([h.includes('disabled title="On whenever the business phone is on. Its own switch comes when it moves here."'), h.includes('Back to the default')], [true, false], 'ready-made missed-call text: its switch is locked, nothing to put back');
-  sb.openAutoEditor('ready:team:leadWaiting');
-  h = log.modal;
-  assertEqual([h.includes("autoReadyAct('setNotifyNumber', 'waitMinutes', this.value)"), h.includes("sendNotifyTest('leadWaiting')"), h.includes("autoReadyAct('toggleNotifyOffice', 'leadWaiting')")], [true, true, true], 'ready-made team alert: its numbers and "Office" use the Notifications setters; Send a test');
-  // Duplicate a ready-made: the built-in words are COPIED, never pointed at; nothing is saved; it is off
-  sb.duplicateAutomation('ready:review');
-  const dup = sb.__get('AUTO_ED'), keys = dup.def.steps.filter(s => s.kind==='action').map(s => s.templateKey);
-  assertEqual([dup.isNew, dup.enabled, dup.baseKey, dup.name, keys.every(k => /^my_/.test(k)), keys.some(k => ['reviewSms', 'reviewEmailBody'].includes(k)), dup.drafts[keys[0]].body===sb.msgTemplateText('reviewSms'), log.db.length],
-    [true, false, 'review', 'Copy of Review request after a closed job', true, false, true, 0], 'duplicate a ready-made: a new automation (not saved, off) with COPIES of the built-in words');
-  assertEqual(sb.autoProblems(dup.def, sb.autoCtx(), {}).some(p => p.block && /\{review_link\}/.test(p.text)), true, 'the copied review words keep {review_link}, which the engine can\'t fill: it has to be changed before saving');
+  // the app's own Escape closes any window: no automation editor is special any more
+  const html0 = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script0 = html0.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const glob = script0.slice(script0.lastIndexOf("document.addEventListener('keydown'"));
+  assertEqual([/AUTO_ED|autoEdKey|\.auto-ed/.test(script0), /ops\.wfOldEditor/.test(script0), /if \(e\.key==='Escape'\) \{\s*const root = document\.getElementById\('modal-root'\);/.test(glob)], [false, false, true], 'the old automation editor and its rollback switch are gone; the app\'s Escape closes any window');
   // deleting a template of your own is refused while an automation uses it
   sb.STATE.data.settings = { catalog: { msgTemplates: { my_a: { name: 'Quote', channel: 'email' } }, templates: { my_a: 'Hi' } } };
   AUTO.list = [sb.autoNormalize({ id: 'c1', name: 'Quote follow-up', enabled: false, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'x', templateKey: 'my_a' }] })];
@@ -4265,41 +4041,6 @@ function testAutomationsEditor(){
   const mine = tp.slice(tp.indexOf('<h3>Your templates</h3>'));
   assertEqual([mine.includes('Quote'), mine.includes('Made by you'), mine.includes('Sent by'), mine.includes('Quote follow-up')], [true, true, true, true], 'templates tab: your own templates, with the automations that send them');
 }
-// The editor's Escape and redraws (14 Oct): a question asked over the editor (the review request's go-live switch asks
-// first) survives a redraw of the window, and Escape never drops the editor or its changes through the app's own
-// "Escape closes any window".
-function testAutomationsEditorKeys(){
-  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const calls = [];
-  let ask = null, popup = null;
-  const root = { children: [], appendChild(el){ calls.push('append:' + el.id); this.children.push(el); }, querySelector: () => null };
-  const ctx = { console, calls,
-    document: { querySelector: s => s.includes('confirm-back') ? ask : (s==='.auto-ed' || s==='#modal-root .auto-ed') ? {} : null, getElementById: id => id==='modal-root' ? root : id==='app-popup' ? popup : null },
-    reopenModal: () => { calls.push('reopen'); }, autoEditorHtml: () => '<div class="auto-ed"></div>', flowRenderBlocked: () => false,
-    closePopup: () => calls.push('closePopup'), closeConfirmModal: () => calls.push('closeConfirm'), autoCloseEditor: () => calls.push('closeEditor'), flowDragCancel: () => calls.push('dragCancel') };
-  vm.createContext(ctx);
-  vm.runInContext('var AUTO_ED = { mirror: true }, FLOW_DRAG = null;\n' + ['autoEdRender', 'autoEdKey'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__set = (k, v) => { if (k==="drag") FLOW_DRAG = v; else AUTO_ED = v; };', ctx);
-  ask = { id: 'ask' };
-  ctx.autoEdRender();
-  assertEqual(calls, ['reopen', 'append:ask'], 'editor: a question open over it stays open (and on top) when the window redraws');
-  calls.length = 0; ask = null; ctx.autoEdRender();
-  assertEqual(calls, ['reopen'], 'editor: with no question open, only the window redraws');
-  const key = (k) => { const e = { key: k, stopped: false, prevented: false, stopPropagation(){ this.stopped = true; }, preventDefault(){ this.prevented = true; } }; ctx.autoEdKey(e); return e; };
-  calls.length = 0; ask = { id: 'ask' };
-  let e = key('Escape');
-  assertEqual([calls, e.stopped], [['closeConfirm'], true], 'Escape with a question open closes only the question (the app\'s own Escape never sees it)');
-  calls.length = 0; ask = null; e = key('Escape');
-  assertEqual([calls, e.stopped], [['closeEditor'], true], 'Escape closes the editor through its own check (changes are asked about first)');
-  calls.length = 0; ctx.__set('drag', { started: true }); e = key('Escape');
-  assertEqual(calls, ['dragCancel'], 'Escape while a block is dragged only ends the drag');
-  calls.length = 0; ctx.__set('drag', null); popup = {}; ask = { id: 'ask' }; e = key('Escape');
-  assertEqual(calls, ['closePopup'], 'Escape with the "Add a step" menu open closes only the menu');
-  popup = null; ask = null;
-  calls.length = 0; e = key('Enter');
-  assertEqual([calls, e.stopped], [[], false], 'other keys pass through');
-  const glob = script.slice(script.lastIndexOf("document.addEventListener('keydown'"));
-  assertEqual(/if \(e\.key==='Escape'\) \{\s*\/\/[^\n]*\n\s*if \(typeof AUTO_ED!=='undefined' && AUTO_ED && document\.querySelector\('#modal-root \.auto-ed'\)\) \{ autoEdKey\(e\); return; \}/.test(glob), true, 'the app\'s own Escape hands an open automation editor to its own handler');
-}
 // The page's loader can't loop: a second call while it loads gets the SAME promise; the page never redraws by itself
 // until the answer is in, and then once, later (renderKeepingInput); a failed load is not retried by itself.
 async function testAutomationsLoaderNoLoop(){
@@ -4315,7 +4056,7 @@ async function testAutomationsLoaderNoLoop(){
   vm.createContext(ctx);
   // the Automation page (stage 2 G3.3: the old "Message templates & Automations" and "Notifications" pages are gone) on
   // its Message templates tab (it loads the phase-4 list and the safety numbers) and on Workflows (it loads neither)
-  vm.runInContext('var AUTO_ED = null, TPL_EDIT = null, AUTO_TPL_EDIT = null;\n' + ['AUTO', 'OLD_SETTINGS_PAGES', 'settingsPageKey', 'loadAutomations', 'loadAutoRunCounts', 'loadAutoSafety', 'autoPageOpen', 'WF_PAGE_TABS', 'WF_UI', 'renderAutomationPage'].map(n => extractDecl(script, n)).join('\n')
+  vm.runInContext('var TPL_EDIT = null, AUTO_TPL_EDIT = null;\n' + ['AUTO', 'OLD_SETTINGS_PAGES', 'settingsPageKey', 'loadAutomations', 'loadAutoSafety', 'autoPageOpen', 'WF_PAGE_TABS', 'WF_UI', 'renderAutomationPage'].map(n => extractDecl(script, n)).join('\n')
     + '\nthis.__A = AUTO; this.__load = loadAutomations; this.__safety = loadAutoSafety; this.__page = () => { WF_UI.tab = "templates"; return renderAutomationPage(); }; this.__np = () => { WF_UI.tab = "workflows"; return renderAutomationPage(); };', ctx);
   const A = ctx.__A;
   const p1 = ctx.__load(), p2 = ctx.__load();
@@ -4328,10 +4069,7 @@ async function testAutomationsLoaderNoLoop(){
   assertEqual([A.loaded, A.list.map(a => a.id), A.error, renders, keeps], [true, ['a1'], '', 0, 1], 'automations: the list arrives once; the page is drawn again once, later');
   ctx.__page(); ctx.__page();
   await new Promise(r => setTimeout(r, 0));
-  assertEqual(queries, 2, 'automations: once loaded, drawing the page again only reads how often they ran (one query), never the list again');
-  release(); await new Promise(r => setTimeout(r, 0));
-  ctx.__page();
-  assertEqual(queries, 2, 'automations: and that only once');
+  assertEqual(queries, 1, 'automations: once loaded, drawing the page again reads nothing more (never the list again)');
   const keeps0 = keeps; safetyRelease(); await s2;
   ctx.__page(); ctx.__page(); await new Promise(r => setTimeout(r, 0));
   assertEqual([A.safetyLoaded, A.safety && A.safety.customer_from, safetyQueries, keeps - keeps0, renders], [true, '07:00', 1, 1, 0], 'safety settings: they arrive once, the page is drawn again once, and drawing it again reads nothing more');
@@ -4340,7 +4078,7 @@ async function testAutomationsLoaderNoLoop(){
   await new Promise(r => setTimeout(r, 0));
   release(); await p3;
   ctx.__page(); ctx.__page();
-  assertEqual([A.loaded, A.list, /does not exist/.test(A.error), queries], [true, [], true, 3], 'automations: a failed load shows its message and is not tried again by itself');
+  assertEqual([A.loaded, A.list, /does not exist/.test(A.error), queries], [true, [], true, 2], 'automations: a failed load shows its message and is not tried again by itself');
 }
 // The app tells the engine only when a workflow that is on starts that way (stage 2 G2.4: the engine's automation_wanted,
 // read at most once a minute, one read at a time); a stage move only after its Undo ran out. Before SQL Part 1 (the
@@ -4444,57 +4182,6 @@ function autoFnFake(seed){
   return { rows, calls, ctl, fetch, sb: { from: () => table, auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) } },
     extra(){ return { sb: this.sb, fetch: this.fetch, AUTOMATIONS_URL: 'https://x.supabase.co/functions/v1/automations', SUPABASE_ANON_KEY: 'k' }; } };
 }
-// Saving and switching on: a customer automation is never switched on by the builder without the owner's own yes.
-// Since stage 2 (G2.4) every save is the function's step "save" (the doc) and every switch its step "publish".
-async function testAutomationsCustomerSafety(){
-  const F = autoFnFake([]);
-  const sb = autoSandbox(F.extra()), A = sb.__get('AUTO'), log = sb.log;
-  sb.openAutoEditor(null);
-  const ed = sb.__get('AUTO_ED');
-  ed.name = 'Thanks'; ed.enabled = true;
-  ed.def = { trigger: { type: 'jobClosed', params: {} }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'Thanks {first_name}', templateKey: 'my_t' }] };
-  ed.drafts = { my_t: { name: 'Thanks', channel: 'email', body: '{hi}, thanks!' } };
-  await sb.autoSaveEditor();
-  assertEqual([F.calls.map(c => c.step), F.calls[0].automation_id, F.calls[0].definition.nodes.s1.type, F.rows.n1.enabled, sb.STATE.data.settings.catalog.templates.my_t, sb.STATE.data.settings.catalog.msgTemplates.my_t.channel, sb.__get('AUTO_ED')],
-    [['save'], null, 'send_email', false, '{hi}, thanks!', 'email', null], 'save: a NEW automation that emails customers is saved OFF through the function (no publish), even with its switch on; its words go to the library');
-  // an ON team automation gets an email: the guard puts it off, and the builder says so (no publish to put it back on)
-  F.rows.c1 = { id: 'c1', name: 'Team alert', enabled: true, revision: 1, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'New' }] };
-  A.list = [sb.autoNormalize(F.rows.c1)];
-  sb.openAutoEditor('c1');
-  const e2 = sb.__get('AUTO_ED');
-  e2.def.steps.push({ id: 's2', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' });
-  F.calls.length = 0;
-  await sb.autoSaveEditor();
-  assertEqual([F.calls.map(c => c.step + (c.step==='publish' ? ':' + c.on : '')), F.calls[1].expected_revision, F.rows.c1.enabled, /It is off: switch it on from the list/.test(log.toasts.slice(-1)[0]), A.list[0].doc!=null],
-    [['publish:false', 'save'], 1, false, true, true], 'save: adding a customer email to an automation that is on switches it OFF first, then saves (never live with the email), and says so; the list has its doc now');
-  // switching on from the list
-  F.rows.c1 = { id: 'c1', name: 'Mail', enabled: false, revision: 1, trigger: { type: 'jobClosed' }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' }] };
-  F.rows.c2 = { id: 'c2', name: 'Team', enabled: false, revision: 1, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'New' }] };
-  A.list = [sb.autoNormalize(F.rows.c1), sb.autoNormalize(F.rows.c2)];
-  F.calls.length = 0; const c0 = log.confirms.length;
-  sb.toggleAutomation('c1');
-  assertEqual([log.confirms.length - c0, F.calls.length, /This sends to real customers/.test(log.confirms.slice(-1)[0].m)], [1, 0, true], 'switching on a customer automation asks first and calls nothing until yes');
-  await log.confirms.slice(-1)[0].fn(); await new Promise(r => setImmediate(r));
-  assertEqual([F.calls, A.list[0].enabled], [[{ step: 'publish', automation_id: 'c1', on: true, expected_revision: 1, confirm: true }], true], 'after yes: the function publishes it (with that yes and the revision the list showed)');
-  F.calls.length = 0;
-  sb.toggleAutomation('c2'); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
-  assertEqual([log.confirms.length - c0, F.calls.map(c => [c.step, c.on])], [1, [['publish', true]]], 'a team automation switches on without asking');
-  // a broken automation can't be switched on
-  A.list = [sb.autoNormalize({ id: 'c3', name: 'Broken', enabled: false, trigger: { type: 'newLead' }, steps: [] })];
-  F.calls.length = 0; sb.toggleAutomation('c3');
-  assertEqual([F.calls.length, /^Fix it first/.test(log.toasts.slice(-1)[0])], [0, true], 'an automation with a problem can\'t be switched on');
-  // the function refuses (its own checks): the switch goes back and says why
-  F.rows.c4 = { id: 'c4', name: 'Gone', enabled: false, revision: 1, trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'x' }] };
-  A.list = [sb.autoNormalize(F.rows.c4)]; delete F.rows.c4;
-  sb.toggleAutomation('c4'); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
-  assertEqual([A.list[0].enabled, /^Not switched on: workflow not found/.test(log.toasts.slice(-1)[0])], [false, true], 'a refusal by the function: the switch stays off and says why');
-  // a workflow that needs the new builder: listed and switched, never opened here
-  const doc2 = { schema: 2, seq: 3, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: { match: 'all', segments: [{ match: 'all', rules: [] }] } }],
-    nodes: { n1: { kind: 'action', type: 'add_tag', name: 'Tag it', config: { tags: ['VIP'] }, out: { next: null } } } };
-  const nb = sb.autoNormalize({ id: 'c5', name: 'New kind', enabled: false, definition: doc2, revision: 4, list_summary: { audience: 'team' } });
-  A.list = [nb]; sb.openAutoEditor('c5');
-  assertEqual([nb.newBuilder, nb.revision, sb.__get('AUTO_ED'), /only the new builder shows/.test(log.toasts.slice(-1)[0])], [true, 4, null, true], 'a workflow with stage-2 steps is listed, never opened in the old builder');
-}
 // The Security page froze the browser on 14 Oct: while the sign-in options were loading, every redraw started another
 // load that returned at once and asked for another redraw, an endless loop. Now a second call gets the SAME promise,
 // so nothing can redraw before the real answer comes.
@@ -4513,8 +4200,8 @@ async function testAuthProvidersNoLoop(){
   assertEqual([ctx.__ap(), ctx.__lap() === p1, calls], [{ google: true }, true, 1], 'security page: the options arrive once and are kept');
 }
 
-// The 14 Oct review of phase 4: customer safety in the builder, the lead card's "Stop automatic messages", the Safety
-// settings, "Try it", ready-made automations taken off the list, the flow view's drag scrolling.
+// The 14 Oct review of phase 4: the editor's customer-safety checks that stay, the lead card's "Stop automatic messages",
+// the Safety settings, ready-made automations taken off the list.
 async function testAutomationsReview14Oct(){
   console.log('\nAutomations: the 14 Oct review fixes (phase 4)');
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -4532,9 +4219,8 @@ async function testAutomationsReview14Oct(){
   const patch = m.autoSafetyPatch({ ...D, email_signer: '  ', email_footer: '', customer_days: [3, 1, 1] });
   assertEqual([patch.email_signer, patch.email_footer, patch.customer_days, Object.keys(patch).includes('business_id')], [null, null, [1, 3], false], 'safety: an empty signer or way out is "not set"; days once each, in order; the business never changes');
   assertEqual([m.autoTzLabel('Australia/Perth'), m.autoTzLabel('Pacific/Auckland'), m.autoTzLabel('')], ['Perth time', 'Auckland time', 'local time'], 'safety: the time zone in words (no fixed "Sydney time")');
-  assertEqual(m.autoSafetyLine(null), 'Customers only get automatic messages every day, 8 am–8 pm (Sydney time), at most 1 a day each; a later one waits for the morning.', 'safety: the line the editor shows next to a customer email');
   { const keep = m.STATE.data.settings; m.STATE.data.settings = { ...keep, catalog: { region: { timeZone: 'America/Chicago' } } };
-    assertEqual([m.autoSafetyLine({ timezone: 'Australia/Perth' }).includes('(Chicago time)'), m.autoSafetyNorm(null).timezone], [true, 'Australia/Sydney'], 'safety: the line follows the business\'s time zone (Region and format), not the old column; the column default stays the engine\'s');
+    assertEqual(m.autoSafetyNorm(null).timezone, 'Australia/Sydney', 'safety: the column default stays the engine\'s whatever the business\'s time zone (Region and format)');
     m.STATE.data.settings = keep; }
   assertEqual([m.autoEmailSigner({ email_signer: 'Dana Lee' }, 'Olivia Owner'), m.autoEmailSigner({}, 'Olivia Owner'), m.autoEmailSigner({}, 'The team'), m.autoEmailSigner({}, '')], ['Dana Lee', 'Olivia', '', ''], 'safety: who signs (never "The")');
   const A = sb.__get('AUTO');
@@ -4556,166 +4242,20 @@ async function testAutomationsReview14Oct(){
   assertEqual([m.autoStepIssues(win, def, ctx).some(p => p.block && /inside those hours/.test(p.text)), m.autoStepIssues({ ...win, at: '10:00' }, def, ctx).length], [true, 0], 'editor: a 9–5 window can\'t "go at 8 pm"');
   const ask = { trigger: { type: 'jobClosed', params: {} }, steps: [{ id: 'i1', kind: 'if', match: 'all', conds: [{ field: 'asked_within_months', op: 'true', n: 6 }] }, email] };
   assertEqual(m.autoProblems(ask, ctx, {}).some(p => !p.block && /"Ask for review" button doesn't see them/.test(p.text)), true, 'editor: an automation that asks for reviews warns that the office\'s button doesn\'t see its asks');
-  const any = { id: 'i1', kind: 'if', match: 'any', conds: [{ field: 'service', op: 'is', v: 'svcA' }, { field: 'source', op: 'is', v: 'web' }, { field: 'stage_unchanged', op: 'true' }] };
-  assertEqual(m.flowIfPhrase(any, { trigger: { type: 'stage' } }, ctx), 'Only if (the service is Window cleaning or the lead source is Website) and the lead is still in that stage', 'editor: "Still in the stage" reads as an AND in an "any" group (as the engine runs it)');
   assertEqual([m.AUTO_CONDS.stage_unchanged.gate, m.AUTO_CONDS.stage_move_stands.hidden, /stage_unchanged: \{[^\n]*gate: true/.test(eng)], [true, true, true], 'editor: the gate is the engine\'s; the undo check is never offered');
-  // customer channels and new versions (the database's rules)
-  assertEqual([m.autoCustomerChannels({ steps: [email, { kind: 'action', type: 'text' }, { kind: 'action', type: 'push' }, { ...email, id: 's9' }] }), m.autoCustomerChannels({ steps: [] })], [['email', 'text'], []], 'channels: the customer channels it uses');
-  const base = { trigger: { type: 'stage', params: { stage: 'Lost', x: 1 } }, steps: [{ id: 'w', kind: 'wait', n: 1, unit: 'days' }, { id: 'p', kind: 'action', type: 'push', title: 'a' }] };
-  const V = (o) => m.autoNewVersion(base, { ...base, ...o });
-  assertEqual([V({}), V({ steps: [base.steps[0], { ...base.steps[1], title: 'b', to: { roles: ['va'] } }] }), V({ steps: [{ ...base.steps[0], n: 3 }, base.steps[1]] }), V({ trigger: { type: 'stage', params: { x: 1, stage: 'Lost' } } }),
-    V({ trigger: { type: 'stage', params: { stage: 'Quoted', x: 1 } } }), V({ steps: [base.steps[1], base.steps[0]] }), V({ steps: [base.steps[0]] }), m.autoNewVersion(null, base)],
-    [false, false, false, false, false, true, true, false], 'versions: words, numbers, recipients and another start keep what is waiting (a start is a re-arm, stage 2); steps added, moved or removed start it afresh');
-  assertEqual([m.autoNewStart(base, { ...base, trigger: { type: 'stage', params: { stage: 'Quoted', x: 1 } } }), m.autoNewStart(base, { ...base, trigger: { type: 'stage', params: { x: 1, stage: 'Lost' } } }), m.autoNewStart(null, base)],
-    [true, false, false], 'versions: another start is told apart (the save says what waits goes on)');
-  assertEqual([m.autoNewVersion(base, { ...base, trigger: { type: 'stage', params: { stage: 'Quoted', x: 1 } } }, true), m.autoNewVersion(base, { ...base, steps: [base.steps[0], { ...base.steps[1], title: 'b' }] }, true),
-    m.autoNewVersion(base, { ...base, trigger: { type: 'stage', params: { x: 1, stage: 'Lost' } } }, true)],
-    [true, false, false], 'versions: on an upgraded automation (legacy, still run as phase 4) another start is a new version, as phase 4 made it (what waits stops); words still are not');
-  // saving an automation that is on: another channel → off; another start → asked first (stage 2: through the function)
-  const F2 = autoFnFake([]);
-  const s2 = autoSandbox(F2.extra()), A2 = s2.__get('AUTO'), log2 = s2.log, saves = () => F2.calls.filter(c => c.step==='save');
-  s2.STATE.data.settings = { catalog: { templates: { my_t: '{hi}, thanks for asking.' }, msgTemplates: { my_t: { name: 'Thanks', channel: 'email' } } } };
-  F2.rows.c1 = { id: 'c1', name: 'Texts', enabled: true, revision: 1, created_by_name: 'Alex Owner', trigger: { type: 'newLead' }, steps: [{ id: 's1', kind: 'action', type: 'text', templateKey: 'my_t' }] };
-  A2.list = [s2.autoNormalize(F2.rows.c1)];
-  s2.openAutoEditor('c1');
-  let e2 = s2.__get('AUTO_ED');
-  e2.def.steps = [{ id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' }];
-  await s2.autoSaveEditor();
-  assertEqual([saves().length, F2.rows.c1.enabled, /It is off/.test(log2.toasts.slice(-1)[0]), F2.calls.map(c => c.step + (c.step==='publish' ? ':' + c.on : ''))], [1, false, true, ['publish:false', 'save']], 'save: an automation that is on and swaps its text for an email is switched OFF first, then saved (a new channel needs its own switch-on)');
-  F2.rows.c1 = { id: 'c1', name: 'Team', enabled: true, revision: 1, created_by_name: 'Alex Owner', trigger: { type: 'stage', params: { stage: 'Lost' } }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'Moved' }] };
-  A2.list = [s2.autoNormalize(F2.rows.c1)];
-  F2.calls.length = 0; const c0 = log2.confirms.length;
-  s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
-  e2.def.trigger = { type: 'stage', params: { stage: 'Quoted' } };
-  await s2.autoSaveEditor();
-  const sv = saves()[0];
-  assertEqual([log2.confirms.length - c0, saves().length, sv && sv.definition.triggers[0].filters.segments[0].rules[0].v, F2.rows.c1.enabled, F2.calls.some(c => c.step==='publish'), /What was already waiting goes on; the new start counts from now/.test(log2.toasts.slice(-1)[0])],
-    [0, 1, 'Quoted', true, false, true], 'save: another start on an automation that is on: saved at once, still on (the database re-arms it, what waits goes on), and the toast says so');
-  const flush = async () => { for (let i = 0; i < 6; i++) await new Promise(r => setImmediate(r)); };
-  F2.calls.length = 0; const c0b = log2.confirms.length;
-  A2.list = [s2.autoNormalize(F2.rows.c1)];
-  s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
-  e2.def.steps.push({ id: 's2', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'Also' });
-  await s2.autoSaveEditor();
-  assertEqual([F2.calls.length, log2.confirms.length - c0b, /3 runs are waiting to act/.test(log2.confirms.slice(-1)[0].m), /only acts on what happens after you save/.test(log2.confirms.slice(-1)[0].m)], [0, 1, true, true], 'save: an automation that is on and gets a step more asks first, with the runs waiting, and saves nothing yet');
-  await log2.confirms.slice(-1)[0].fn(); await flush();
-  assertEqual([saves().length, F2.rows.c1.enabled, F2.calls.some(c => c.step==='publish')], [1, true, false], 'save: after yes it is saved (still on; a new version: what waited stops)');
-  F2.calls.length = 0; const c1 = log2.confirms.length;
-  A2.list = [s2.autoNormalize(F2.rows.c1)];
-  s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
-  e2.def.steps[0].title = 'New words';
-  await s2.autoSaveEditor();
-  assertEqual([saves().length, log2.confirms.length - c1, saves()[0].expected_revision, saves()[0].definition.triggers[0].name], [1, 0, 4, 'Pipeline stage changed'], 'save: new words only: saved at once, nothing waiting stops (the revision it was opened at)');
-  // switched off from the list while the editor was open: a save of other changes never switches it back on
-  A2.list = [s2.autoNormalize(F2.rows.c1)];
-  s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
-  F2.rows.c1.enabled = false;
-  e2.def.steps[0].title = 'Typo fixed'; F2.calls.length = 0;
-  await s2.autoSaveEditor();
-  assertEqual([F2.calls.map(c => c.step), F2.rows.c1.enabled, /switched off meanwhile/.test(log2.toasts.slice(-1)[0])], [['save'], false, true], 'save: switched off meanwhile (another tab): saved, kept OFF (only a switch moved in this editor publishes), and it says so');
-  // switching off in the editor: the switch-off goes first; when it fails nothing is saved and it says it is still ON
-  F2.rows.c1.enabled = true; A2.list = [s2.autoNormalize(F2.rows.c1)];
-  s2.openAutoEditor('c1'); e2 = s2.__get('AUTO_ED');
-  e2.enabled = false; e2.def.steps[0].title = 'Other words'; F2.calls.length = 0;
-  F2.ctl.failPublish = { on: false, reason: 'no connection' };
-  await s2.autoSaveEditor();
-  assertEqual([F2.calls.map(c => c.step), F2.rows.c1.enabled, F2.rows.c1.definition.nodes.s1.config.title, /still ON/.test(log2.toasts.slice(-1)[0])], [['publish'], true, 'Typo fixed', true],
-    'save with the switch turned off: the switch-off fails → nothing saved, it says it is still ON (never "saved, but it is off")');
-  F2.ctl.failPublish = null; F2.calls.length = 0;
-  await s2.autoSaveEditor();
-  assertEqual([F2.calls.map(c => c.step + (c.step==='publish' ? ':' + c.on : '')), F2.rows.c1.enabled, F2.rows.c1.definition.nodes.s1.config.title], [['publish:false', 'save'], false, 'Other words'],
-    '…again: switched off first, then saved (never live with the new words)');
-  // switched on in the editor: the function's own words are asked about before it goes on
-  F2.rows.c7 = { id: 'c7', name: 'Mail later', enabled: false, revision: 1, trigger: { type: 'jobClosed' }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' }] };
-  A2.list = [s2.autoNormalize(F2.rows.c7)];
-  s2.openAutoEditor('c7'); e2 = s2.__get('AUTO_ED');
-  e2.enabled = true; F2.calls.length = 0; const c2 = log2.confirms.length;
-  await s2.autoSaveEditor();
-  assertEqual([F2.calls.map(c => c.step + (c.step==='publish' ? ':' + c.on + ':' + (c.confirm===true) : '')), F2.rows.c7.enabled, log2.confirms.length - c2, /Sends to customers: Send email/.test(log2.confirms.slice(-1)[0].m), /once you say yes/.test(log2.toasts.slice(-1)[0])],
-    [['save', 'publish:true:false'], false, 1, true, true], 'save with the switch turned on: saved, then the function\'s words are asked about (what it sends) before it goes on');
-  await log2.confirms.slice(-1)[0].fn(); await flush();
-  assertEqual([F2.calls.slice(-1)[0].confirm, F2.calls.slice(-1)[0].expected_revision, F2.rows.c7.enabled], [true, 3, true], '…yes → published with that yes (at the revision just saved)');
-  // the editor's own switch, turned on with its "This sends to real customers" yes: the save publishes with that yes
-  // (asked once, as the list switch), never a second question about the same sends
-  F2.rows.c8 = { id: 'c8', name: 'Mail soon', enabled: false, revision: 1, trigger: { type: 'jobClosed' }, steps: [{ id: 's1', kind: 'action', type: 'email', subject: 'Hi', templateKey: 'my_t' }] };
-  A2.list = [s2.autoNormalize(F2.rows.c8)];
-  s2.openAutoEditor('c8'); e2 = s2.__get('AUTO_ED');
-  F2.calls.length = 0; const c4 = log2.confirms.length;
-  s2.autoEdToggle();
-  assertEqual([log2.confirms.length - c4, /This sends to real customers/.test(log2.confirms.slice(-1)[0].m), e2.enabled, F2.calls.length], [1, true, false, 0], 'the editor\'s switch on a customer automation asks first (nothing called)');
-  log2.confirms.slice(-1)[0].fn();
-  await s2.autoSaveEditor(); await flush();
-  assertEqual([F2.calls.map(c => c.step + (c.step==='publish' ? ':' + c.on + ':' + (c.confirm===true) : '')), F2.rows.c8.enabled, log2.confirms.length - c4, s2.__get('AUTO_ED')],
-    [['save', 'publish:true:true'], true, 1, null], '…yes, then Save: saved and published with that yes, asked once');
-  // an upgraded row whose doc is still its upgrade (the engine runs its phase-4 steps) and whose phase-4 steps share an
-  // id (phase 4 refuses them): it opens as those steps, as before stage 2, so the switch and Save refuse with the same
-  // words (never "on" while nothing can run); removing one and adding it again saves. Once its doc changed, the doc rules.
-  const twice = { trigger: { type: 'newLead', params: {} }, steps: [{ id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'One' }, { id: 's1', kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'Two' }] };
-  F2.rows.c10 = { id: 'c10', name: 'Twice', enabled: false, revision: 2, ...JSON.parse(JSON.stringify(twice)), definition: s2.wfFromFlat(twice, null), settings: { reentry: 'legacy_always' } };
-  A2.list = [s2.autoNormalize(F2.rows.c10)]; F2.calls.length = 0;
-  s2.toggleAutomation('c10'); await flush();
-  assertEqual([A2.list[0].def.steps.map(s => s.id), Object.keys(F2.rows.c10.definition.nodes), F2.calls.length, log2.toasts.slice(-1)[0], F2.rows.c10.enabled],
-    [['s1', 's1'], ['s1', 's3'], 0, 'Fix it first: Two steps share the same inside name: remove one and add it again.', false], 'a row that still runs its phase-4 steps with an id twice: listed as those steps; the switch refuses with the same words, nothing called');
-  s2.openAutoEditor('c10'); e2 = s2.__get('AUTO_ED');
-  await s2.autoSaveEditor();
-  assertEqual([F2.calls.length, log2.toasts.slice(-1)[0], s2.__get('AUTO_ED')===e2], [0, 'Two steps share the same inside name: remove one and add it again.', true], '…Save refuses with the same words (the editor stays open)');
-  e2.def.steps.splice(1, 1); e2.def.steps.push({ id: s2.flowStepId(e2.def.steps), kind: 'action', type: 'push', to: { roles: ['owner'] }, title: 'Two' });
-  await s2.autoSaveEditor();
-  assertEqual([F2.calls.map(c => c.step), Object.keys(F2.calls[0].definition.nodes), A2.list[0].def.steps.map(s => s.id)], [['save'], ['s1', 's2'], ['s1', 's2']], '…one removed and added again: saved (what runs now is the doc, its ids each once)');
-  const moved = { ...JSON.parse(JSON.stringify(twice)), steps: [twice.steps[0], { ...twice.steps[1], title: 'Two, changed' }] };
-  F2.rows.c11 = { id: 'c11', name: 'Twice, edited', enabled: false, revision: 3, ...JSON.parse(JSON.stringify(twice)), definition: s2.wfFromFlat(moved, null), settings: { reentry: 'legacy_always' } };
-  A2.list = [s2.autoNormalize(F2.rows.c11)]; F2.calls.length = 0;
-  s2.toggleAutomation('c11'); await flush();
-  assertEqual([A2.list[0].def.steps.map(s => s.id), F2.calls.map(c => c.step + ':' + c.on), F2.rows.c11.enabled], [['s1', 's3'], ['publish:true'], true], 'an upgraded row whose doc changed since (the engine runs the doc): opens and switches on as its doc');
-  // the list switch of a workflow only the new builder shows: the function asks first, with its own words
-  const docN = { schema: 2, seq: 3, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: { match: 'all', segments: [{ match: 'all', rules: [] }] } }], nodes: { n1: { kind: 'action', type: 'send_email', name: 'Mail', config: { subject: 'Hi', body: 'x' }, out: { next: null } } } };
-  F2.rows.c9 = { id: 'c9', name: 'New kind', enabled: false, revision: 2, definition: docN, list_summary: { audience: 'customer' } };
-  A2.list = [s2.autoNormalize(F2.rows.c9)]; F2.calls.length = 0; const c3 = log2.confirms.length;
-  s2.toggleAutomation('c9'); await flush();
-  assertEqual([A2.list[0].newBuilder, F2.calls.map(c => [c.step, c.on, c.confirm===true, c.expected_revision]), F2.rows.c9.enabled, log2.confirms.length - c3, /Sends to customers: Send email/.test(log2.confirms.slice(-1)[0].m)],
-    [true, [['publish', true, false, 2]], false, 1, true], 'the list switch of a new-builder workflow: the function asks first and its words (what it sends, where) are shown');
-  await log2.confirms.slice(-1)[0].fn(); await flush();
-  assertEqual([F2.calls.slice(-1)[0].confirm, F2.rows.c9.enabled, A2.list[0].enabled], [true, true, true], '…yes → published with that yes');
-  // someone saved since the list was shown: not switched on, the row read again
-  F2.rows.c9.enabled = false; F2.rows.c9.revision = 5; A2.list[0].enabled = false; A2.list[0].revision = 2;
-  s2.toggleAutomation('c9'); await flush();
-  assertEqual([F2.rows.c9.enabled, A2.list[0].revision, /changed this automation meanwhile/.test(log2.toasts.slice(-1)[0])], [false, 5, true], 'the list switch after someone else saved: 409 → not on, the row read again, and it says so');
   // ready-made automations taken off the list
   const s3 = autoSandbox(), log3 = s3.log;
   s3.STATE.data.settings = { catalog: { notify: { newLead: { on: true } } } };
-  const team = s3.autoReadyRows().find(r => r.base==='team:newLead');
+  const team = s3.wfSystemRows().find(r => r.base==='team:newLead');
   assertEqual(!!team && team.on, true, 'ready-made: the new-lead notification is on');
   s3.autoRemoveReady(team.key);
   assertEqual(log3.db.filter(x => x==='settings.update').length, 0, 'ready-made: removing asks first');
   log3.confirms.slice(-1)[0].fn();
   const cat3 = s3.STATE.data.settings.catalog;
-  assertEqual([log3.db.filter(x => x==='settings.update').length, cat3.notify.newLead.on, cat3.automations.hiddenReady, s3.autoReadyRows().some(r => r.base==='team:newLead'), s3.autoReadyRows(true).some(r => r.base==='team:newLead')],
+  assertEqual([log3.db.filter(x => x==='settings.update').length, cat3.notify.newLead.on, cat3.automations.hiddenReady, s3.wfSystemRows().some(r => r.base==='team:newLead'), s3.wfSystemRows(true).some(r => r.base==='team:newLead')],
     [1, false, ['team:newLead'], false, true], 'ready-made: removed = switched off and off the list in ONE settings write; it still exists for "Put back"');
   s3.autoRestoreReady('team:newLead');
   assertEqual([s3.STATE.data.settings.catalog.automations.hiddenReady, s3.STATE.data.settings.catalog.notify.newLead.on], [[], false], 'ready-made: put back on the list, still off');
-  // Try it
-  const data = { contacts: [{ id: 'c1', fullName: 'Old <b>', createdAt: '2026-01-01', status: 'New' }, { id: 'c2', fullName: 'New one', createdAt: '2026-10-14', status: 'Quoted' }], jobs: [{ id: 'j1', customerName: 'Pat', date: '2026-10-13' }] };
-  assertEqual([m.autoTryRecords('stage', data).map(r => r.id), m.autoTryRecords('jobClosed', data).map(r => r.kind + ':' + r.id), m.autoTryRecords('chat', data)], [['c2', 'c1'], ['job:j1'], []], 'try it: the latest leads for a lead start, jobs for a job start');
-  const res = { ok: true, steps: [{ id: 'w', kind: 'wait', would: 'wait', until: '2026-10-14T21:00:00.000Z' }, { id: 'e1', kind: 'action', type: 'email', would: 'queue', to: 'sam@x.com', subject: '<img src=x>', body: 'Hi Sam', signature: '\n\nAlex', note: 'this automation is off: nothing is sent' }, { id: 'p1', kind: 'action', type: 'push', would: 'skip', reason: 'condition: <b>' }] };
-  const out = m.autoTryResultHtml(res, { safety: { timezone: 'Australia/Sydney' } });
-  assertEqual([out.includes('<img'), out.includes('&lt;img'), out.includes('Stops: condition: &lt;b&gt;'), /Waits until <b>Thu/.test(out), out.includes('nothing is sent')], [false, true, true, true, true], 'try it: every word from the server escaped; waits in the business\'s time; stops say why');
-  assertEqual([/could not be reached/.test(m.autoTryResultHtml({ error: 'The automations service could not be reached. Try again in a moment.' })), /record not found/.test(m.autoTryResultHtml({ ok: false, problems: ['record not found'] }))], [true, true], 'try it: a failure says so');
-  {
-    let calls = 0, release = null; const shown = {};
-    const tctx = { console, PRESENT: false, VIEW_AS_ID: null, AUTOMATIONS_URL: 'u', SUPABASE_ANON_KEY: 'k', AUTO: { tryOut: null }, AUTO_ED: { token: 't1', mirror: false, name: 'X', def: { trigger: { type: 'newLead' }, steps: [] }, enabled: false },
-      sb: { auth: { getSession: async () => ({ data: { session: { access_token: 'a' } } }) } }, showToast(){}, autoCtx: () => ({}), autoTryResultHtml: (r) => 'RESULT:' + JSON.stringify(r), flowCompact: x => x,
-      document: { getElementById: id => id==='au-try-rec' ? { value: 'contact:c1' } : (shown[id] = shown[id] || { innerHTML: '' }) },
-      fetch(u, o){ calls++; tctx.body = JSON.parse(o.body); return new Promise(r => { release = () => r({ json: async () => ({ ok: true, steps: [] }) }); }); } };
-    vm.createContext(tctx);
-    vm.runInContext(['readOnlyReason', 'autoTryIt'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__try = autoTryIt;', tctx);
-    const p1 = tctx.__try(), p2 = tctx.__try();
-    await new Promise(r => setImmediate(r));
-    assertEqual([p1===p2, calls, tctx.body.step, tctx.body.record, shown['au-try-out'].innerHTML], [true, 1, 'preview', { kind: 'contact', id: 'c1' }, '<div class="hint">Working it out…</div>'], 'try it: one question at a time (a second click waits for the same answer); only the preview step');
-    release(); await p2;
-    assertEqual([shown['au-try-out'].innerHTML, !!tctx.AUTO.tryOut], ['RESULT:{"ok":true,"steps":[]}', true], 'try it: the answer fills the card only (no redraw)');
-    tctx.PRESENT = true; calls = 0;
-    assertEqual([tctx.__try(), calls], [null, 0], 'try it: in a read-only mode no server is called');
-  }
   // the lead card's "Stop automatic messages"
   const o = loadOptOutSandbox(script);
   const C = { id: 'c1', fullName: 'Sam <Smith>', email: ' Sam@Example.com ', phone: '0412 345 678' };
@@ -4737,29 +4277,6 @@ async function testAutomationsReview14Oct(){
   o.__ctx.PRESENT = true; const w0 = o.__q.writes.length, k0 = o.__confirms.length;
   o.stopAutoMessages('c1');
   assertEqual([o.__q.writes.length - w0, o.__confirms.length - k0], [0, 0], 'opt-out: nothing in a read-only mode');
-  // the flow view's drag: never the page behind the editor
-  {
-    // scrollTop clamps to the end, as a browser does
-    const node = (o2) => { let top = 0; const n = { parentElement: null, scrollHeight: 100, clientHeight: 100, id: '', cls: [], matches(sel){ return sel.split(',').some(x => this.cls.includes(x.trim().slice(1))); }, getBoundingClientRect: () => ({ top: 0, bottom: 600 }), ...o2 };
-      Object.defineProperty(n, 'scrollTop', { get: () => top, set: v => { top = Math.max(0, Math.min(n.scrollHeight - n.clientHeight, v)); } }); return n; };
-    const docEl = node({ cls: [] }), styles = new Map();
-    const fctx = { console, document: { scrollingElement: docEl, documentElement: docEl }, window: { innerHeight: 800 }, getComputedStyle: el => ({ overflowY: styles.get(el) || 'visible' }), requestAnimationFrame: () => 7, FLOW_DRAG: null };
-    vm.createContext(fctx);
-    vm.runInContext(['flowScroller', 'flowScrollTop', 'flowDropIndex', 'flowDragUpdate', 'flowDragEdge'].map(n => extractDecl(script, n)).join('\n') + '\nthis.__sc = flowScroller; this.__edge = flowDragEdge; this.__set = d => { FLOW_DRAG = d; };', fctx);
-    const back = node({ cls: ['modal-back'] }), modal = node({ cls: ['modal', 'auto-ed'], parentElement: back }), body = node({ cls: ['au-ed-body'], parentElement: modal }), main = node({ cls: ['ed-main'], parentElement: body }), canvas = node({ cls: ['flow'], parentElement: main });
-    styles.set(modal, 'hidden'); styles.set(back, 'hidden'); styles.set(main, 'auto');
-    assertEqual(fctx.__sc(canvas)===main, true, 'drag: a short flow in the editor scrolls the editor\'s own area (even when it is not longer than it shows), never the page');
-    styles.set(main, 'visible'); styles.set(body, 'visible');
-    assertEqual(fctx.__sc(canvas), null, 'drag: no scroll area in the window = nothing scrolls');
-    const loose = node({ cls: ['flow'], parentElement: node({ cls: ['card'] }) });
-    assertEqual(fctx.__sc(loose)===docEl, true, 'drag: outside a window the page scrolls');
-    const item = { style: {} }, d = { started: true, scroller: null, y: 790, y0: 300, scroll0: 0, item, items: [item], mids: [100], from: 0, to: 0, h: 50, raf: 1 };
-    fctx.__set(d); fctx.__edge();
-    assertEqual([d.raf, docEl.scrollTop], [null, 0], 'drag: at the bottom edge with nothing to scroll, the frame loop stops and the page stays put');
-    styles.set(main, 'auto'); d.scroller = main; d.raf = 1; main.scrollHeight = 100; main.clientHeight = 100;
-    fctx.__edge();
-    assertEqual([d.raf, main.scrollTop], [null, 0], 'drag: an area already at its end stops the loop too (no endless frames)');
-  }
   // the job's event is told after its card is linked (both ways a job is made)
   const sj = extractDecl(script, 'saveJobModal'), fc = extractDecl(script, 'finalizeClosing');
   assertEqual([sj.indexOf("automationEvent('jobClosed'") > sj.indexOf('await ensureContactForJob(job, contactId)'), fc.indexOf("automationEvent('jobClosed'") > fc.indexOf('await ensureContactForJob(job, g.contactId)'), (sj.match(/automationEvent\('jobClosed'/g) || []).length, (fc.match(/automationEvent\('jobClosed'/g) || []).length],
@@ -4954,7 +4471,7 @@ function testWfList(sb){
   assertEqual(['renderAutomationPage', 'wfWorkflowsHtml', 'wfListHtml', 'wfData', 'wfItemsNow'].filter(n => /\brender\(\)|renderKeepingInput\(\)/.test(extractDecl(script, n))), [], 'the page\'s drawing never asks for another drawing (no render loop)');
 }
 // ── Settings → Automation: System rows, the template library, the Notifications page merged in (stage 2, G3.3; design
-// §4.3, §4.10, §7 G3.3): wfSystemRows = today's autoReadyRows (fixtures/system-rows.json, taken from the phase-4 code
+// §4.3, §4.10, §7 G3.3): wfSystemRows = the phase-4 ready-made rows (fixtures/system-rows.json, taken from the phase-4 code
 // before the change) plus the System fields; the System team cards keep their legacy controls; taking System rows off the
 // list is ONE catalog write; the phone bar shows only while something sends a phone notification; templates say why they
 // are greyed (a branching one: "Opens in the new builder (phase 4)"); everything drawn is escaped. ──
@@ -4965,8 +4482,8 @@ function testWfSystemRows(sb){
   sb.STATE.profiles = [];
   for (const c of FX.cases) {
     sb.STATE.data.settings = JSON.parse(JSON.stringify(c.settings));
-    assertEqual([sb.wfSystemRows().map(pick), sb.wfSystemRows(true).map(pick), sb.autoReadyRows().map(pick)], [c.rows, c.all, c.rows],
-      `wfSystemRows = today's autoReadyRows on "${c.name}" (key, base, on, gate, switch, lock; taken off the list or not); the old name gives the same`);
+    assertEqual([sb.wfSystemRows().map(pick), sb.wfSystemRows(true).map(pick)], [c.rows, c.all],
+      `wfSystemRows = the phase-4 ready-made rows on "${c.name}" (key, base, on, gate, switch, lock; taken off the list or not)`);
   }
   sb.STATE.data.settings = JSON.parse(JSON.stringify(FX.cases[1].settings));
   const S = sb.wfSystemRows(true, { meta: { 'team:newLead': 'f9' }, moved: { review: 'a-77' } }), by = k => S.find(r => r.key===k);
@@ -5067,9 +4584,9 @@ function testWfSystemRows(sb){
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   assertEqual([/function (renderNotificationsPage|renderAutomationsPage|autoListsHtml|autoRowHtml|autoMatches|notifyCardHtml|autoRemovedHtml)\(/.test(script), extractDecl(script, 'checkPhoneNotifications').includes("UI.tab==='payroll' || wfShowing()"),
     /const bar = wfPhoneBarWanted\(V\.items, /.test(extractDecl(script, 'wfWorkflowsHtml')), extractDecl(script, 'wfCreateMenu').includes("{ id: 'template', label: 'Select from template' }") && extractDecl(script, 'wfCreateMenu').includes('wfTplOpen()'),
-    /wfSystemHide\(hide, /.test(extractDecl(script, 'wfBulkExec')), /wfSystemHide\(\[row\], /.test(extractDecl(script, 'autoRemoveReady')), extractDecl(script, 'wfItemsNow').includes('flowSentence(r.def, actx)'),
-    /if \(AUTO_ED && AUTO_ED\.pendingSync\) \{ AUTO_ED\.pendingSync = false;/.test(extractDecl(script, 'renderAutomationPage')), /x\.virtual && x\.card \? wfSystemCardHtml\(/.test(extractDecl(script, 'wfListHtml')), extractDecl(script, 'wfMenuDo').includes("id==='upload') wfTplUpload(key)")],
-    [false, true, true, true, true, true, true, true, true, true], 'the Notifications page and the old list are gone; the phone bar follows the Workflows tab; Select from template and Upload are on; one way to hide System rows; a confirm asked by a System setter redraws the open editor');
+    /wfSystemHide\(hide, /.test(extractDecl(script, 'wfBulkExec')), /wfSystemHide\(\[row\], /.test(extractDecl(script, 'autoRemoveReady')), extractDecl(script, 'wfItemsNow').includes('wfFlatSentence(r.def, actx)'),
+    !/AUTO_ED|loadAutoRunCounts/.test(extractDecl(script, 'renderAutomationPage')), /x\.virtual && x\.card \? wfSystemCardHtml\(/.test(extractDecl(script, 'wfListHtml')), extractDecl(script, 'wfMenuDo').includes("id==='upload') wfTplUpload(key)")],
+    [false, true, true, true, true, true, true, true, true, true], 'the Notifications page and the old list are gone; the phone bar follows the Workflows tab; Select from template and Upload are on; one way to hide System rows; the Automation page no longer reads the run counts of the old editor');
   const pure = ['wfSystemRows', 'wfPublishAsk', 'wfSystemHidePlan', 'wfSystemCardHtml', 'wfPhoneBarWanted', 'wfTemplateItem', 'wfTemplateRows', 'wfTemplateCardHtml'];
   assertEqual(pure.filter(n => /\brender\(|renderKeepingInput\(|\bdb\.|\bsb\.|fetch\(|Date\.now\(|new Date\(\)/.test(extractDecl(script, n))), [], 'G3.3\'s pure helpers never redraw, read the database, call a server or read the clock');
   assertEqual(['wfTplOpen', 'wfTplPaint', 'wfTplListHtml', 'wfTplListPaint', 'wfTplChip', 'wfTplSearch', 'wfTplPreview', 'wfTplCancel', 'wfTplEntry', 'wfTplItems', 'wfTplRename', 'wfTplDelete'].filter(n => /\brender\(\)|renderKeepingInput\(\)/.test(extractDecl(script, n))), [],
@@ -5085,7 +4602,7 @@ async function testWfTemplatesWindow(){
   const rowsDb = [{ id: 't-1', key: 'team_new_lead', name: 'Tell the team about a new lead', category: 'Team notifications', origin: 'system', definition: { schema: 2, seq: 1, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: NONE }], nodes: { n1: { kind: 'action', type: 'internal_notification', config: { channel: 'push', to: { roles: ['owner'] }, title: 'New lead' }, out: { next: null } } } } },
     { id: 't-2', key: 'lead_q', name: 'Quote follow-up', category: 'Leads', origin: 'system', definition: { schema: 2, seq: 2, entry: 'n1', triggers: [{ id: 't1', type: 'stage', filters: NONE }], nodes: { n1: { kind: 'split', type: 'split', config: {}, out: {} } } } },
     { id: 't-3', key: 'mine_abcdefghij', name: 'Ours', category: null, origin: 'user', definition: { schema: 2, seq: 1, entry: null, triggers: [{ id: 't1', type: 'newLead', filters: NONE }], nodes: {} } }];
-  const n = { reads: 0, renders: 0, keeps: 0, paints: 0, fn: [], toasts: [], edits: [], opened: [], built: [], closed: 0, readOnly: '', oldEditor: false }, tick = () => new Promise(r => setImmediate(r));
+  const n = { reads: 0, renders: 0, keeps: 0, paints: 0, fn: [], toasts: [], edits: [], opened: [], built: [], closed: 0, readOnly: '' }, tick = () => new Promise(r => setImmediate(r));
   const el = id => (n.dom[id] = n.dom[id] || { id, innerHTML: '', value: '', focus(){}, select(){} });
   n.dom = {};
   const q = () => { const b = { select: () => b, eq: () => b, is: () => b, order: () => b, range: () => { n.reads++; return Promise.resolve({ data: rowsDb, error: null }); }, update: () => b }; return b; };
@@ -5095,8 +4612,8 @@ async function testWfTemplatesWindow(){
     wfPopup: () => { n.open = true; }, closePopup: () => { n.open = false; n.closed++; }, wfMenuClose: () => {}, render: () => { n.renders++; }, renderKeepingInput: () => { n.keeps++; },
     readOnlyReason: () => n.readOnly, showToast: (m) => n.toasts.push(m), logSettingsActivity: () => {}, wfActor: () => 'Alex', wfChanged: () => {}, wfEdit: id => n.edits.push(id), wfDbWrite: async () => true,
     autoFnCall: async b => { n.fn.push(b); return b.step==='duplicate' ? { ok: true, body: { id: 'new-1' } } : { ok: true, body: { ok: true } }; }, autoFnReason: () => 'x',
-    openAutoEditor: (k, o) => n.opened.push([k, o]), wfUseOldEditor: () => n.oldEditor===true, wfBuilderOpen: (row, o) => n.built.push([row, o]), wfClone: x => JSON.parse(JSON.stringify(x)),
-    autoCtx: () => ({}), flowSentence: () => 'When a lead comes in, tell the owners.', ico: () => '', pill: (t, x) => `<span class="pill ${t}">${x}</span>`,
+    wfBuilderOpen: (row, o) => n.built.push([row, o]), wfClone: x => JSON.parse(JSON.stringify(x)),
+    autoCtx: () => ({}), wfFlatSentence: () => 'When a lead comes in, tell the owners.', ico: () => '', pill: (t, x) => `<span class="pill ${t}">${x}</span>`,
     WF_LIST_LIMITS: { name: 120, cacheKeys: 30 }, AUTO_TRIGGERS: {}, AUTO_MIRROR_TRIGGERS: {}, WF_V1_TRIGGER_NAMES: {} };
   vm.createContext(ctx);
   vm.runInContext(['esc', 'jsStr', 'WF_ID_RE', 'wfWinDormant', 'wfToFlat', 'wfLabels', 'wfIconOf', 'WF_DATA', 'wfEnsure', 'wfInvalidate', 'WF_TPL_CHIPS', 'WF_TPL_COLS', 'WF_TPL_LIMITS', 'WF_TPL_WHY', 'wfTemplateItem', 'wfTemplateRows', 'wfTemplateCardHtml',
@@ -5111,8 +4628,6 @@ async function testWfTemplatesWindow(){
   await tick();
   assertEqual([n.reads, n.renders, n.keeps, n.dom['wf-tpl-list'].innerHTML.includes('When a lead comes in, tell the owners.'), n.dom['wf-tpl'].innerHTML.includes(`aria-pressed="true" onclick="wfTplChip('all')">All`)],
     [1, 0, 0, true, true], 'template window: chips, search and Preview redraw only the window; nothing is read again');
-  n.oldEditor = true; await ctx.wfTplChoose('t-2'); n.oldEditor = false;
-  assertEqual([n.fn.length, n.toasts.slice(-1)[0], n.opened.length, n.built.length], [0, 'Choose it to see its steps in the builder', 0, 0], 'Choose on a branching template with the old editor (the rollback switch): nothing is sent or opened; it says why');
   n.readOnly = 'Presentation mode: nothing is saved'; await ctx.wfTplChoose('t-1'); await ctx.wfTplDeleteSave('t-3'); n.readOnly = '';
   assertEqual([n.fn.length, n.toasts.slice(-1)[0]], [0, 'Presentation mode: nothing is saved'], 'Choose / Delete in a read-only mode: nothing is sent');
   ctx.wfTplRename('t-3'); el('wf-tpl-name').value = '  Our alert '; await ctx.wfTplRenameSave('t-3'); await tick(); await tick();
@@ -5344,7 +4859,7 @@ async function testWfListLoads(){
   assertEqual(vm.runInContext('wfShowing()', ctx), true, 'an old Notifications link counts as the Automation page');
 }
 // Publishing from Settings → Automation (stage 2 phase 3 fix, 15 Oct; customer safety): the list's switch, its ⋮ Publish
-// and the bulk Publish refuse what the old list switch refused (toggleAutomation): the old editor's own checks on the
+// and the bulk Publish refuse what the old list switch refused: the old editor's own checks on the
 // steps it shows — "Fix it first: …", before any question and before the function is called. The words = the engine's
 // v1EditorProblems on fixtures/editor-blocks.json (tests.ts block 38 runs the same file, and the function's step
 // "publish" refuses the same), and the engine's V1_EDITOR (the registries those words need) = this app's own.
@@ -5360,8 +4875,8 @@ async function testWfPublishGuards(){
   assertEqual(JSON.parse(JSON.stringify(V && [V.triggers, V.mirrorTriggers, V.conds, V.actions, V.fields, V.waitMax, V.maxSteps, V.stepKinds])), [pickT(sb0.AUTO_TRIGGERS), pickT(sb0.AUTO_MIRROR_TRIGGERS),
     Object.fromEntries(Object.entries(sb0.AUTO_CONDS).map(([k, c]) => [k, { label: c.label, ops: c.ops, values: !!c.values, appliesTo: Array.isArray(c.appliesTo) ? c.appliesTo : null, ...(c.n ? { n: { min: c.n.min, max: c.n.max } } : {}) }])),
     Object.fromEntries(Object.entries(sb0.AUTO_ACTIONS).map(([k, a]) => [k, { label: a.label, audience: a.audience }])), Object.fromEntries(Object.entries(sb0.AUTO_FIELDS).map(([k, f]) => [k, f.triggers])),
-    Object.fromEntries(Object.entries(sb0.AUTO_WAIT_UNITS).map(([k, u]) => [k, u.max])), { default: sb0.FLOW_MAX_STEPS_DEFAULT, ceiling: sb0.FLOW_MAX_STEPS_CEILING }, Object.keys(sb0.FLOW_STEP_KINDS)],
-    'the engine\'s V1_EDITOR = the old editor\'s own registries (starts, conditions with their comparisons, actions, which start fills which blank, wait units, step limits, step kinds)');
+    Object.fromEntries(Object.entries(sb0.AUTO_WAIT_UNITS).map(([k, u]) => [k, u.max])), { default: sb0.autoMaxSteps(), ceiling: sb0.autoMaxSteps({ maxSteps: 999 }) }, ['wait', 'window', 'if', 'action']],
+    'the engine\'s V1_EDITOR = the app\'s phase-4 registries (starts, conditions with their comparisons, actions, which start fills which blank, wait units, step limits; the four step kinds)');
   // 2. the old editor's blocking checks = the shared fixture, word for word
   const sb = autoSandbox(), ctxOf = cat => { sb.STATE.data.settings = { catalog: { ...JSON.parse(JSON.stringify(FX.catalog)), ...(cat || {}) } }; return sb.autoCtx(); };
   assertEqual(FX.cases.length >= 60, true, 'editor blocks: the shared fixture has its cases');
@@ -6537,11 +6052,11 @@ function testWfPickDrawerWords(sb){
   const chips = sb.autoWhoChipsHtml({ to: { roles: ['owner'], people: ['p1'] } }, { profiles: [{ id: 'p1', name: 'Ann' }], vac: { p1: { label: 'On vacation until 24 Oct' } } }, '', { act: t => `data-act="dWho" data-v="${t}"` });
   sb.STATE.data.settings = { catalog: { msgTemplates: { my_lib: { name: 'Lib one', channel: 'text' } } } };
   const opts = sb.autoTplOptionsHtml('text', 'my_new', { my_new: { name: 'Fresh <one>', channel: 'text', body: 'Hi' } });
-  assertEqual([ww.includes('data-wfp="/config/n"'), /onchange|oninput/.test(ww), ww.includes('<option value="seconds" disabled>seconds (x)</option>'), wo.includes('oninput="autoEdNum(\'s1\', \'n\', this.value)"'),
+  assertEqual([ww.includes('data-wfp="/config/n"'), /onchange|oninput/.test(ww), ww.includes('<option value="seconds" disabled>seconds (x)</option>'), /oninput|onchange/.test(wo),
     win.includes('data-wfp="/r/from"'), win.includes('Which hours'), /onclick|onchange/.test(win), chips.includes('data-act="dWho" data-v="role:owner"'), chips.includes('vac-off'), chips.includes('On vacation until 24 Oct'), /onclick/.test(chips),
     opts.includes('<option value="my_new" selected>Fresh &lt;one&gt;</option>'), opts.includes('Lib one'), opts.includes('+ Write a new one'), sb.autoTplWords('my_new', { my_new: { body: 'Hi' } }), sb.autoTplName('my_new', { my_new: { name: 'N' } })],
-    [true, false, true, true, true, false, false, true, true, true, false, true, true, true, 'Hi', 'N'],
-    'the old editor\'s widgets take the builder\'s bindings and template drafts (and keep their own handlers without them); people on vacation say so');
+    [true, false, true, false, true, false, false, true, true, true, false, true, true, true, 'Hi', 'N'],
+    'the shared widgets take the builder\'s bindings and template drafts (and carry no handlers without them); people on vacation say so');
   sb.STATE.data.settings = { gstRatePercent: 10 };
   // the lead card's "Assigned to" (Q6) greys people on vacation as the other pickers do (stage 3)
   const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -7367,11 +6882,11 @@ function testPageHistory(sb){
   assertEqual([H2.nav.NAV_HIST.syncBack, H2.nav.NAV_HIST.d, H2.log.renders], [false, 0, 0], 'its popstate changes nothing');
   // windows close through their own close function; menus count as layers; a window before the first tap has no entry yet
   const oc = T('navCloseWindow'), os = T('navOverlaySync'), zOf = id => (n.NAV_LAYERS.find(l => l.id===id) || {}).z;
-  assertEqual([oc.includes('back.click()'), oc.includes("!back.classList.contains('au-edb')"), zOf('menus') > zOf('confirm') && zOf('confirm') > zOf('popup') && zOf('popup') > zOf('window') && zOf('window') > zOf('phone-menu'), T('NAV_LAYERS').includes('isOpen: () => !!document.querySelector(NAV_MENUS)'),
+  assertEqual([oc.includes('back.click()'), oc.includes('au-edb'), zOf('menus') > zOf('confirm') && zOf('confirm') > zOf('popup') && zOf('popup') > zOf('window') && zOf('window') > zOf('phone-menu'), T('NAV_LAYERS').includes('isOpen: () => !!document.querySelector(NAV_MENUS)'),
     script.includes("const NAV_MENUS = '.person-menu, .theme-menu, .pal-pop';"), os.indexOf('if (!navActivated()) return;') > 0 && os.indexOf('if (!navActivated()) return;') < os.indexOf('pushState'), T('navSwipeOn').includes('return touch && standalone;'),
     T('navSwipeBack').includes('if (NAV_HIST.pops===pops) navGoBack();'), T('navSwipeBack').includes('history.back(); return;'), /html\.nav-swipe-on, html\.nav-swipe-on body \{ overscroll-behavior-x: none; \}/.test(fs.readFileSync(INDEX_HTML_PATH, 'utf8')),
     T('navSwipeStart').includes('navSidePanelOpen()'), T('navSwipeStart').indexOf('navSwipeReset()') < T('navSwipeStart').indexOf('NAV_SWIPE = null;')],
-    [true, true, true, true, true, true, true, true, false, true, true, true], 'review fixes: a window closes as a click beside it does; small menus close first; no entry before the first tap; the swipe only in the installed app, once, never moving the page under a side panel');
+    [true, false, true, true, true, true, true, true, false, true, true, true], 'review fixes: a window closes as a click beside it does; small menus close first; no entry before the first tap; the swipe only in the installed app, once, never moving the page under a side panel');
   // ‹ Settings (closeSettingsPage) keeps the page selected, as on main: Settings → Templates (Automation since stage 2) →
   // ‹ Settings is Automation, closed (it was the Setup page of the list's entry). The real setSettingsPage and
   // closeSettingsPage, the rest faked (the workflow builder's reads too).
@@ -8484,7 +7999,7 @@ function testWfReviewBlocks45(){
   vm.runInContext('OFFICE.days[1] = null; OFFICE.days[6] = { from: 540, to: 780 };', ctx);
   W.drawer.draft = { ...W.drawer.draft, config: { ...W.drawer.draft.config, window: { use: 'office', outside: 'next' } } };
   sel('winUse', 'custom');
-  assertEqual(W.drawer.draft.config.window, { use: 'custom', outside: 'next', days: [2, 3, 4, 5, 6], from: '08:00', until: '17:00' }, 'winUse: with no custom hours kept, the days start as the business\'s office days (flowOfficeWindow)');
+  assertEqual(W.drawer.draft.config.window, { use: 'custom', outside: 'next', days: [2, 3, 4, 5, 6], from: '08:00', until: '17:00' }, 'winUse: with no custom hours kept, the days start as the business\'s office days (wfOfficeWindow)');
   X.wfBuilderClose();
 }
 
@@ -9481,7 +8996,6 @@ async function testWfCanvasModesRuntime(){
   await testAuthProvidersNoLoop();
   await testAutomationsLoaderNoLoop();
   await testAutomationEventsGate();
-  await testAutomationsCustomerSafety();
   await testAutomationsReview14Oct();
   await testWfListLoads();
   await testWfGlobalSettingsPage();

@@ -921,27 +921,9 @@ async function phase4Suite() {
     eq(db.T.automation_runs.some((r: any) => r.id === "old2"), true, "prune: once a day");
   }
 
-  // ── 17. preview and registry ──
+  // ── 17. registry (the step "preview" went with the old editor: stage 2 phase 7; the dry run is the step "test") ──
   {
-    const a = auto({ id: "a-prev", enabled: false, steps: [{ id: "w", kind: "wait", unit: "hours", n: 1 }, { id: "i", kind: "if", match: "all", conds: [{ field: "service", op: "is", v: "Aircon" }] },
-      emailStep(), { id: "x1", kind: "action", type: "text", body: "{hi}!" }, { id: "p1", kind: "action", type: "push", to: { roles: ["owner"] }, title: "Lead {name}" }, { id: "t1", kind: "action", type: "task", title: "Call {first_name}", assignees: ["e-va"], due_days: 2 }] });
-    const db = world({ automations: [a], contacts: [lead("c1")] });
-    const before = JSON.stringify(db.T);
-    sent.length = 0;
-    const p = await handle(db, { step: "preview", automation_id: "a-prev", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([p.status, p.body.ok, p.body.steps.map((s: any) => s.would)], [200, true, ["wait", "go on", "queue", "wait for the business phone", "send", "add"]], "preview: what each step would do");
-    const em = p.body.steps[2];
-    eq([em.subject, em.body, em.signature, em.to, em.note], ["Your Aircon cleaning enquiry", "Hi Sam, thanks for contacting Acme Home Services." + FOOT, "\n\nOlivia\nAcme Home Services", "sam@example.com", "this automation is off: nothing is sent"], "preview: the filled email with its way out, the signature the mailbox adds (a real first name), and that it is off");
-    eq([p.body.steps[4].to, p.body.steps[5].board, p.body.steps[5].due], [["Olivia Owner"], "ron", "2026-10-16"], "preview: recipients and the task");
-    eq([JSON.stringify(db.T) === before, sent.length], [true, 0], "preview: writes nothing and sends nothing");
-    const bad = await handle(db, { step: "preview", automation: { name: "x", trigger: { type: "newLead" }, steps: [{ id: "q", kind: "action", type: "fax" }] }, record: { kind: "contact", id: "c1" } }, MANAGER, false);
-    ok(bad.body.ok === false && bad.body.problems.some((x: string) => x.includes("unknown action")), "preview: reports the problems");
-    const nightDb = world({ automations: [a], contacts: [lead("c1")] });
-    clock = syd("2026-10-14", 20, 30);
-    const pn = await handle(nightDb, { step: "preview", automation_id: "a-prev", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([pn.body.steps[2].would, pn.body.steps[2].until], ["wait", isoMs(syd("2026-10-15", 8))], "preview: an email that would land at night waits for the morning");
-    clock = NOW;
-    eq((await handle(db, { step: "preview", automation_id: "a-prev", record: { kind: "contact", id: "c1" } }, VA, false)).status, 403, "preview: owners and managers only");
+    const db = world({ contacts: [lead("c1")] });
     // the phase-4 lists (since G2.4 the step "registry" answers with the stage-2 DTO: section 34)
     const reg = { status: 200, body: registry() as any };
     const text = JSON.stringify(reg.body);
@@ -1211,21 +1193,6 @@ async function phase4Suite() {
     eq([vacTaskPeople([EMPS[3], EMPS[1]], C, undefined, moved), moved], [["Vicky Va", "Max Manager"], [{ from: "Cal Tech", to: "Vicky Va" }]], "vacTaskPeople: who was swapped for whom");
     eq([vacMovedNote([]), vacMovedNote([{ from: "A", to: "B" }, { from: "C", to: "B" }])], ["", "For A (on vacation): given to B, the stand-in.\nFor C (on vacation): given to B, the stand-in."], "vacMovedNote: one line each, none when nobody moved");
     eq([vacTaskPeople([EMPS[3]], C, "2026-10-18"), vacTaskPeople([EMPS[3]], C, "2026-10-17"), vacTaskPeople([EMPS[3]], C, day)], [["Cal Tech"], ["Vicky Va"], ["Vicky Va"]], "vacTaskPeople: on the day given (the due day)");
-    // preview shows the same
-    const a = auto({ id: "a-vac", enabled: false, steps: [pushTo(["owner", "manager"]), { ...task(["e-cal"]), id: "t1" }] });
-    const pdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } }), vac({ id: "v2", employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], automations: [a], contacts: [lead("c1")] });
-    const p = await handle(pdb, { step: "preview", automation_id: "a-vac", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([p.body.steps[0].to, p.body.steps[1].assignees, p.body.steps[1].board, p.body.steps[1].notes], [["Max Manager"], ["Vicky Va"], "ron", "For Cal Tech (on vacation): given to Vicky Va, the stand-in."], "preview: the redirected push names, task assignees and the line in its notes");
-    const sdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac()], automations: [auto({ id: "a-skip", enabled: false, steps: [pushTo(["owner"])] })], contacts: [lead("c1")] });
-    const ps = await handle(sdb, { step: "preview", automation_id: "a-skip", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([ps.body.steps[0].would, ps.body.steps[0].reason], ["skip", "on vacation"], "preview: everyone picked is away → 'skip: on vacation'");
-    // the preview reads the vacations of the day the action would run (after its waits), not today's
-    const later = (vacs: any[]) => world({ profiles: PROFS, employees: EMPS, employee_vacations: vacs, contacts: [lead("c1")],
-      automations: [auto({ id: "a-later", enabled: false, steps: [{ id: "w", kind: "wait", unit: "days", n: 7 }, pushTo(["owner"])] })] });
-    const pl = await handle(later([vac()]), { step: "preview", automation_id: "a-later", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([pl.body.steps[1].would, pl.body.steps[1].to], ["send", ["Olivia Owner"]], "preview: the owner away today but back before the action (in 7 days) → sent to them");
-    const pf = await handle(later([vac({ starts_on: "2026-10-20", ends_on: "2026-10-23" })]), { step: "preview", automation_id: "a-later", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([pf.body.steps[1].would, pf.body.steps[1].reason], ["skip", "on vacation"], "preview: the owner away on the action's day (not today) → 'skip: on vacation'");
     // read once per tick
     const twice = auto({ steps: [pushTo(["owner"]), { ...pushTo(["manager"]), id: "p2" }] });
     const odb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac({ starts_on: "2026-10-01", ends_on: "2026-10-02" })], automations: [twice, auto({ steps: [pushTo(["manager"])] })], contacts: [lead("c1")] });
@@ -1344,7 +1311,6 @@ async function phase4Suite() {
     ok(bad({ steps: [emailStep({ subject: "" })] }).some((p) => p.includes("subject")), "an email without a subject");
     ok(bad({ steps: [{ id: "t", kind: "action", type: "text", body: "x".repeat(641) }] }).some((p) => p.includes("longer than 640")), "a text that is too long");
     ok(bad({ trigger: { type: "jobClosed", params: { maxJobAgeDays: 40 } } }).some((p) => p.includes("1 to 30")), "job age out of range");
-    eq([audienceOf(good), audienceOf({ steps: [emailStep()] }), audienceOf({ steps: [{ kind: "action", type: "text" }] })], ["team", "customer", "customer"], "audience from the steps");
   }
 
   // ── 4. conditions (on fresh facts) ──

@@ -698,10 +698,10 @@ What changes:
 
 What changes:
 - **App**: Settings → Automation → Workflows becomes the one place for the notifications too (Ofek's Q1):
-  - **System rows** (`wfSystemRows`, the old `autoReadyRows` kept as an alias until phase 7): the same 11 ready-made rows
+  - **System rows** (`wfSystemRows`; the old `autoReadyRows` alias was removed in phase 7, §21): the same 11 ready-made rows
     with the same switch, gate and lock (pinned by `fixtures/system-rows.json`, taken from the phase-4 code), plus
     System / virtual, a stage-2 doc (`wfFromFlat`), their folder (`automation_system_meta`), `movable` (false: nothing
-    moves before phase 7) and `movedTo`. Each card's summary is its steps in one sentence (`flowSentence`; no canvas yet).
+    moves before phase 7) and `movedTo`. Each card's summary is its steps in one sentence (`flowSentence` then, `wfFlatSentence` since phase 7).
   - The 8 **team notification cards** are System cards in the list with their old controls kept (the numbers in the
     sentence, Office, Send a test — each through its old setter) plus the list's tick, ⋮ and Draft ⬤ Publish.
   - **Notifications page and the old "Message templates & Automations" list are removed** (old `?page=notifications` /
@@ -976,8 +976,8 @@ What changes:
   revision). A System row opens **read-only** with the yellow "System workflow · view only" pill and the banner "System
   workflow · runs on the built-in system" + "Duplicate to edit" (an unsaved copy; built-in words copied into templates of
   the business's own) + "Open its old settings" (rows with a page) + "Move into the engine" (greyed with the reason). The
-  old editor stays only for a rollback: `localStorage.setItem('ops.wfOldEditor', '1')` in that browser (and `removeItem`
-  to go back).
+  old editor stayed only for a rollback: `localStorage.setItem('ops.wfOldEditor', '1')` in that browser (and `removeItem`
+  to go back); phase 7 removed the old editor and that switch (§21).
 - **App — Save** (button / ⌘S): through the function only. A Published workflow is checked first (step `validate`):
   "Start it afresh?" (N leads waiting will be stopped), "It only acts on what happens after you save", a new customer
   step or Workflow AI's change → "Save as a Draft?"; a Published one with errors is refused ("Fix the errors first: this
@@ -1031,7 +1031,8 @@ What changes:
 ### 20.2 Roll back
 
 - **App**: back to the commit before phase 4 (the list's Edit opens the old editor again). Or, per browser, without a
-  deploy: `localStorage.setItem('ops.wfOldEditor', '1')` → Edit / Create / templates / System Duplicate use the old editor.
+  deploy: `localStorage.setItem('ops.wfOldEditor', '1')` → Edit / Create / templates / System Duplicate use the old editor
+  (only until phase 7, §21: the switch is gone then).
   Rows the builder saved keep `layout.editor = "builder"` (judged by the v2 checks, as made); the old editor's save takes
   the mark off. To take every mark off at once: PART 3 · G4.4's ROLLBACK lines.
 - **Function**: redeploy the previous build (the mark is then ignored: the old editor's blocks apply to every straight
@@ -1039,3 +1040,45 @@ What changes:
 - Roll back on: a Save that loses changes or saves over someone else's (no 409), a Publish that skips the customer
   question or the phase-3 check, a builder that repaints while idle, a draft offered for the wrong workflow, or notes
   visible to a VA / technician.
+
+## 21. Phase 7 · G7.1 — the old automation code is gone (app + function; no SQL is run)
+
+What changes:
+- **App**: the flow view (`FLOW_*`, `flow*`), the phase-4 editor window with its handlers (`openAutoEditor`, `autoEd*`, `autoTry*`,
+  the "Lately" run counts `loadAutoRunCounts`, the old list switch `toggleAutomation` and everything only they called) and its
+  CSS (`.flow*`, `.auto-ed`, `.au-ed-*`, `.au-step*` …) are deleted. The **rollback switch is gone**:
+  `localStorage 'ops.wfOldEditor'` does nothing any more (§18–§20 mention it for phase 4); Edit, Create, a template, a link and
+  System → Duplicate always open the new builder. The shims `openAutoPage` and `autoReadyRows` are gone (callers use
+  `openAutomation` and `wfSystemRows`). A System row's card sentence and a template's preview sentence are `wfFlatSentence`.
+  **Kept on purpose** (still called by live code): the phase-4 registries `AUTO_TRIGGERS` / `AUTO_MIRROR_TRIGGERS` /
+  `AUTO_CONDS` / `AUTO_ACTIONS` / `AUTO_FIELDS` / `AUTO_WAIT_UNITS`, `autoProblems` / `autoStepIssues` (the Publish pre-check
+  `wfPublishBlock` for a workflow the engine still runs as phase 4) and the Message templates tab's words (`autoWhenShort`,
+  `autoTplFieldsFor`). They go with G7.1b below.
+- **Function** (`automations`): the step `preview` (the old editor's "Try it", phase 4's dry run) and `audienceOf` are removed; the
+  dry run is the step `test`. The **compat switch is kept** (`automation_state.phase4_compat`, `enqueue`, the phase-4 scanners):
+  it is the way back from the event store (§9, step E rollback) and the offline differential still compares it. The rollback
+  build `automations-phase4-compat` is kept as it is.
+- **SQL**: nothing is run. `.claude/sql/stage2-automations.sql` PART 4 · G7.1 is the **plan** (all commented) to drop
+  `public.automations.trigger` and `.steps`: not before 30 days after step "migrate" (`automation_state.v2_migrated_at`), with its
+  four gates, backup table, stop-checks, proof, check-after and exact ROLLBACK. Read the gates there before anyone un-comments it.
+
+### 21.1 Order
+1. `check_all.sh` ALL GREEN (engine: tests 17 (registry) and 34; app: `testAutomationsEditor` now checks the old editor is gone).
+2. Staging: open Settings → Automation → Workflows: Create workflow → Start from scratch / Select from template, Edit on a
+   workflow and on a System row, Duplicate on a System row, the Message templates tab (the "Sent by … · when" lines), Global Workflow
+   Settings; a customer workflow's Publish still asks (the function's questions); 375 × 812: nothing sideways.
+3. Deploy the **app first**, then the function (an old tab's "Try it" would otherwise ask a step that no longer exists; it
+   answers "unknown step" and the tab says to reload). Fingerprint the function as before (dashboard editor, never "deploy all").
+4. Fast-forward main.
+
+### 21.2 Roll back
+- **App**: back to the commit before phase 7 (the old editor and the `ops.wfOldEditor` switch come back as in §20.2).
+- **Function**: redeploy the previous build (the step `preview` is back).
+- Nothing in the database changes in G7.1, so there is nothing to roll back there.
+
+### 21.3 Still to do (G7.1b, after step E has been live and quiet, and after the 30 days)
+Remove the compat producer (`phase4_compat`, `enqueue`, the phase-4 `advance` / `prune`, the "before Part 1" fallback),
+`wfRunRow` / `upgradeV1` reads of `trigger` + `steps`, `v1EditorView` / `v1EditorProblems` and the step `migrate` from the function;
+`wfPublishBlock`, `autoProblems`, `autoStepIssues` and the six registries from the app (the Message templates tab then reads the
+engine's registry); retire `automations-phase4-compat` (it runs `trigger` + `steps`, so it can not outlive the columns); the offline
+differential then ends. Only then un-comment PART 4 · G7.1 on staging, then live.

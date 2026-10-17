@@ -21,9 +21,6 @@
 //   event     { type, id } from the app right after it saved something (owners, managers, and the office with CRM / Jobs
 //             access): "look now". The server re-reads the record itself (the app's data is never used) and starts
 //             only what the tick would start; the same event later seen by the tick does nothing more.
-//   preview   { automation | automation_id, record: { kind, id } } (owners and managers): what this automation would do
-//             for that record — the filled messages, the guard verdicts, would-wait-until / would-skip-because. Writes
-//             nothing and sends nothing.
 //   registry  (owners and managers) the lists the builder shows: triggers, conditions, actions, merge fields.
 //
 // Guard rails (always on; their numbers are settings in public.automation_settings):
@@ -1159,11 +1156,6 @@ export function validateAutomation(a: any, _catalog?: any): string[] {
     }
   });
   return out;
-}
-// deno-lint-ignore no-explicit-any
-export function audienceOf(a: any): "team" | "customer" {
-  // deno-lint-ignore no-explicit-any
-  return (Array.isArray(a && a.steps) ? a.steps : []).some((s: any) => s && s.kind === "action" && ACTIONS[s.type] && ACTIONS[s.type].audience === "customer") ? "customer" : "team";
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -5956,7 +5948,7 @@ async function lastLiveDoc(sb: any, id: string): Promise<Row | null> {
 // unsigned email). Words of a saved template: the catalog's (what the engine sends; the app may fall back to a built-in
 // text the engine doesn't have — stricter here, never looser). V1_EDITOR = the app's registries these words need
 // (tests/business-logic.test.js compares it with index.html's AUTO_TRIGGERS / AUTO_MIRROR_TRIGGERS / AUTO_CONDS /
-// AUTO_ACTIONS / AUTO_FIELDS / AUTO_WAIT_UNITS / FLOW_MAX_STEPS_* / FLOW_STEP_KINDS); fixtures/editor-blocks.json holds
+// AUTO_ACTIONS / AUTO_FIELDS / AUTO_WAIT_UNITS / autoMaxSteps); fixtures/editor-blocks.json holds
 // the cases both run. ──
 export const V1_EDITOR: Row = {
   triggers: {
@@ -6828,77 +6820,6 @@ async function eventStep(sb: any, body: any, me: any, nowMs: number) {
   return { status: 200, body: { ok: true, runs: ids.length, statuses } };
 }
 
-// ── preview: what an automation would do for one record (writes nothing, sends nothing) ──
-// deno-lint-ignore no-explicit-any
-async function previewStep(sb: any, body: any, me: any, nowMs: number) {
-  if (!isOffice(me)) return { status: 403, body: { ok: false, reason: "owners and managers only" } };
-  const T = await loadContext(sb, nowMs);
-  // deno-lint-ignore no-explicit-any
-  let a: any = body.automation && typeof body.automation === "object" ? body.automation : null;
-  if (!a && body.automation_id) a = wfRunRow(await readAutomation(sb, String(body.automation_id)));
-  if (!a) return { status: 404, body: { ok: false, reason: "automation not found" } };
-  a = { id: a.id || "preview", name: String(a.name || ""), enabled: a.enabled === true, trigger: obj(a.trigger), steps: a.steps, version: a.version || 1,
-    created_by_name: String(a.created_by_name || (body.automation ? me.full_name : "") || "") };
-  const problems = validateAutomation(a, T.cat);
-  if (problems.length) return { status: 200, body: { ok: false, problems, steps: [] } };
-  const rec = obj(body.record), kind = String(rec.kind || ""), rid = String(rec.id || "");
-  const trig = TRIGGERS[a.trigger.type];
-  // deno-lint-ignore no-explicit-any
-  let e: Ev | null = null;
-  if (kind === trig.recordKind && rid) {
-    const { data: row } = await sb.from(trig.table).select(trig.cols).eq("id", rid).maybeSingle();
-    if (row) e = trig.fromRecord(row, { ...T.S, ignore_test_records: false });
-  }
-  const run = { record_kind: kind, record_id: rid, event_type: a.trigger.type, event_at: e ? e.at : iso(nowMs), context: e ? e.ctx : {} };
-  const f = ["contact", "job", "call", "chat"].includes(kind) && rid ? await loadFacts(sb, run, T, nowMs) : null;
-  if (!f) return { status: 200, body: { ok: false, problems: ["record not found"], steps: [] } };
-  // deno-lint-ignore no-explicit-any
-  const out: any[] = [];
-  const tz = T.S.timezone, vars = mergeVars(f, a), known = fieldsFor(f.type);
-  let at = nowMs, stopped = "";
-  for (const st of a.steps) {
-    if (stopped) { out.push({ id: st.id, kind: st.kind, would: "not reached" }); continue; }
-    if (st.kind === "wait") { at = planWait(at, st, tz); out.push({ id: st.id, kind: "wait", would: "wait", until: iso(at) }); continue; }
-    if (st.kind === "window") {
-      if (inWindow(at, st, tz, T.cat)) { out.push({ id: st.id, kind: "window", would: "go on" }); continue; }
-      if (st.outside === "skip") { stopped = "outside the allowed days and hours"; out.push({ id: st.id, kind: "window", would: "skip", reason: stopped }); continue; }
-      const next = st.outside === "at" ? nextAt(at, st, st.at, tz, T.cat) : nextAllowed(at, st, tz, T.cat);
-      if (next === null) { stopped = "the window never opens"; out.push({ id: st.id, kind: "window", would: "skip", reason: stopped }); continue; }
-      at = next; out.push({ id: st.id, kind: "window", would: "wait", until: iso(at) }); continue;
-    }
-    if (st.kind === "if") {
-      const imp = trig.implicit.length ? await evalConds(sb, f, trig.implicit, "all") : { ok: true, failed: null };
-      const r = imp.ok ? await evalConds(sb, f, st.conds, st.match) : imp;
-      if (!r.ok) stopped = "condition: " + (r.failed || "not met");
-      out.push({ id: st.id, kind: "if", would: r.ok ? "go on" : "skip", reason: r.ok ? undefined : stopped });
-      continue;
-    }
-    const act = ACTIONS[st.type];
-    // vacations on the day the action would run (after the waits and windows above), not today (stage 3)
-    const vacAt = async (): Promise<VacCtx> => { const C = await vacOf(sb, T, nowMs); return { ...C, day: bizParts(at, C.tz).day }; };
-    if (st.type === "push") {
-      const r = await pushRecipients(sb, st, await vacAt());
-      out.push({ id: st.id, kind: "action", type: "push", ...(!r.ids.length && r.chosen ? { would: "skip", reason: "on vacation" } : { would: "send" }), to: r.names, title: fillMerge(st.title, vars, known), body: fillMerge(st.body || "", vars, known) });
-    } else if (st.type === "task") {
-      const due = st.due_days == null ? null : shiftDay(zoneParts(at, tz).day, Number(st.due_days));
-      const { names, moved } = await taskPeople(sb, st, await vacAt(), due || undefined);
-      const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
-      const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
-      out.push({ id: st.id, kind: "action", type: "task", would: "add", board: boardFor(names, profiles, employees), assignees: names, title: fillMerge(st.title, vars, known), notes: [vacMovedNote(moved), fillMerge(st.notes || "", vars, known)].filter(Boolean).join("\n\n"),
-        due });
-    } else {
-      const msg = messageOf(st, T.cat);
-      const texts = st.type === "email" ? [fillMerge(st.subject, vars, known), fillMerge(msg ?? "{template}", vars, known)] : [fillMerge(msg ?? "{template}", vars, known)];
-      const author = st.type === "email" ? emailAuthor(T.S, a) : "";
-      const g = st.type === "email" && !author ? { skip: "no email signer set" } : await customerGuard(sb, T.S, f, st.type, at, { ...a, enabled: true }, texts, T.cat);
-      const verdict = "defer" in g ? { would: "wait", until: iso(g.defer) } : "skip" in g ? { would: "skip", reason: g.skip } : { would: st.type === "text" ? "wait for the business phone" : "queue", to: g.to };
-      out.push({ id: st.id, kind: "action", type: st.type, audience: act.audience, ...verdict, ...(st.type === "email" ? { subject: texts[0], body: emailBody(texts[1], T.S), signature: author ? signatureOf(author, bizOf(T.company, T.cat)) : "" } : { body: texts[0] }),
-        ...(a.enabled ? {} : { note: "this automation is off: nothing is sent" }) });
-    }
-  }
-  return { status: 200, body: { ok: true, problems: [], steps: out } };
-}
-
 // The lists the builder shows (labels only: no code, no secrets).
 export function registry() {
   return {
@@ -6923,7 +6844,6 @@ export async function handle(sb: any, body: any, me: any, secretOk: boolean) {
   }
   if (!me) return { status: 401, body: { ok: false, reason: "unauthorized" } };
   if (step === "event") return await eventStep(sb, body, me, nowMs);
-  if (step === "preview") return await previewStep(sb, body, me, nowMs);
   // the stage-2 API (G2.4): registry = the v2 DTO (the phase-4 lists stay in registry() for the tests only)
   if (WF_API_STEPS.includes(step)) return await apiStep(sb, step, body, me, nowMs);
   if (step === "hook_create" || step === "hook_revoke" || step === "hook_sample") return await hookAdmin(sb, step, body, me, nowMs);
