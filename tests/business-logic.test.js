@@ -4309,6 +4309,8 @@ function testWfList(sb){
   const del = sb.wfItem(row({ id: 'a3', deleted_at: new Date(NOW - 10 * DAY - 3600e3).toISOString(), deleted_by: 'p1' }), {}, settings, ctx);
   assertEqual([del.deleted, del.on, del.paused, del.daysLeft, del.deletedBy], [true, false, null, 20, 'p1'], 'wfItem: a deleted workflow is off, with 30 − 10 = 20 days left in Deleted');
   assertEqual([sb.wfItem(row({ deleted_at: new Date(NOW - 40 * DAY).toISOString() }), {}, {}, ctx).daysLeft, sb.wfItem(row({ system_key: 'review' }), {}, {}, ctx).moved], [0, true], 'wfItem: never fewer than 0 days left; a row with a system_key is a moved System row');
+  assertEqual([sb.wfItem(row({ system_key: 'team:newLead' }), {}, settings, ctx).paused, sb.wfStatusOf(sb.wfItem(row({ system_key: 'team:newLead' }), {}, settings, ctx)).key],
+    [null, 'published'], 'wfItem (G7.2 review): a moved System row inside a pause range is not "Paused" (its System mirror sends as the built-in one did: pauses don\'t apply)');
   const f = sb.wfItem({ kind: 'folder', id: 'f2', parent_id: 'f1', name: 'Leads', created_at: '2026-10-01T00:00:00Z' }, null, {}, ctx);
   assertEqual([f.key, f.kind, f.id, f.folderId, f.name, f.updatedAt], ['folder:f2', 'folder', 'f2', 'f1', 'Leads', '2026-10-01T00:00:00Z'], 'wfItem: a folder row (its updated time falls back to created)');
   const ready = (o) => ({ key: 'ready:team:newLead', base: 'team:newLead', ready: true, name: 'New lead', audience: 'team', on: true, gate: '', toggle: ['toggleNotifyCard', 'newLead'], locked: false, page: '',
@@ -4528,6 +4530,9 @@ function testWfSystemRows(sb){
   assertEqual(sb.wfPublishAsk({ name: 'Copy', audience: 'customer', triggers: ['stage', 'newLead'] }, sysTwo),
     ['"Copy" sends to customers. This sends to real customers.', 'The System workflow "A new lead comes in" is on and starts the same way: both would send.', 'The System workflow "A new lead nobody picked up for 15 minutes" is on and starts the same way: both would send.'],
     'wfPublishAsk: EVERY System workflow that is on and starts the same way is named (the old switch named every ready-made it doubled), not only the first; an off one or an engine workflow never');
+  assertEqual([sb.wfPublishAsk({ name: 'A new lead comes in', audience: 'team', triggers: ['newLead'], moved: true }, sysTwo), sb.wfPublishAsk({ name: 'A new lead comes in', audience: 'customer', triggers: ['newLead'], moved: true }, sysTwo)],
+    [[], ['"A new lead comes in" sends to customers. This sends to real customers.']],
+    'wfPublishAsk (G7.2 review): Publishing a moved System row (the handover) never asks a false double-send about another System row on the same start (the waiting-lead reminder sends something else)');
   // the System team card: the old Notifications card with its controls, inside the list
   const ctx = { meta: {}, hidden: [] }, lwRow = by('ready:team:leadWaiting');
   const lw = sb.wfItem({ ...lwRow, sentence: 'When a new lead comes in: wait 20 minutes, then <notify>' }, null, {}, ctx);
@@ -8372,6 +8377,8 @@ async function testWfHistoryTabs(){
   assertEqual([/<select data-f="set-from"[^>]*disabled/.test(h3), /data-f="set-day-1" aria-pressed="true"/.test(h3), /Paused now, until 20 Oct 2026, 9:00am\./.test(h3), /Paused from 24 Dec 2026, 9:00am to 3 Jan 2027, 9:00am\./.test(h3), /wfhGoGlobal/.test(h3)],
     [false, true, true, true, true], 'wfhSettingsHtml: window on → controls enabled, Mon–Fri pressed; Pause workflow lists the ranges with a link to Global Workflow Settings');
   assertEqual(/role="alert"[^>]*>.*Leads have no time zone yet/.test(ST({ settings: { ...cur, timezone: 'contact', reentry: 'off' } })), true, 'wfhSettingsHtml: a problem is listed (role alert)');
+  const hSys = ST({ pause: pr, system: true });
+  assertEqual([/Pause workflow/.test(hSys), /Pauses don.{1,6}t apply to a System workflow/.test(hSys), /Paused now/.test(hSys)], [true, true, false], 'wfhSettingsHtml (G7.2 review): a moved System row says pauses don\'t apply, never "Paused now"');
   // 9. the history tabs drawn (names escaped, tooltips, tint, buttons, ids escaped)
   const c = { tz, name: r => r._n || '', trigger: id => id==='t1' ? 'Contact created' : '', step: id => id==='n1' ? 'Send text' : '', parent: id => id==='p1' ? 'Quote chase' : '' };
   const runs = [{ id: 'r1', contact_id: 'c1', record_kind: 'contact', record_id: 'c1', status: 'waiting', trigger_id: 't1', cursor_step: 'n1', created_at: '2026-10-17T04:00:00Z', due_at: '2026-10-18T04:00:00Z', source: 'trigger', _n: 'Dana <img src=x>' },
@@ -9003,6 +9010,37 @@ async function testWfCanvasModesRuntime(){
 }
 { const sb = wfSb(); testWfCanvasModesPure(sb); }
 
+// Stage 2 phase 7 review: a base that has moved opens as its engine row (a link or Back to the built-in one never offers
+// Move again); Move on a base already moved says so and logs nothing; the pause picker greys a moved System row.
+async function testWfSystemMovedGuards(){
+  console.log('\nSettings → Automation: a moved System workflow (stage 2 G7.2 review)');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const n = { opened: [], read: [], toasts: [], logs: [], fn: [], renders: 0, movedRow: null };
+  const q = () => { const b = { select: () => b, eq: (k, v) => { n.read.push([k, v]); return b; }, is: () => b, limit: () => Promise.resolve({ data: n.movedRow ? [n.movedRow] : [], error: null }) }; return b; };
+  const sys = { key: 'ready:team:newLead', base: 'team:newLead', name: 'A new lead comes in', on: true, doc: { schema: 2 } };
+  const ctx = { console, Promise, String, Object, Array, JSON, AUTO_TABLE: 'automations', WF: null, WF_UUID_RE: /^[0-9a-f-]{36}$/, WF_SYSTEM_MOVABLE: ['team:newLead'], CAT_NAMES: { automations: 'Automations' },
+    sb: { from: q }, wfSystemRows: () => [sys], wfBuilderOpen: (row, o) => n.opened.push([row, o]), wfReadRow: async id => ({ id, name: 'A new lead comes in', system_key: 'team:newLead', definition: {} }),
+    showToast: m => n.toasts.push(m), logSettingsActivity: (a, t) => n.logs.push(t), wfActor: () => 'Alex', wfChanged: () => {}, render: () => { n.renders++; },
+    autoFnCall: async b => { n.fn.push(b); return { ok: true, body: { ok: true, id: 'a-1', already: n.already === true } }; }, autoFnReason: () => 'x' };
+  vm.createContext(ctx);
+  vm.runInContext(['wfEdit', 'wfSystemMoveGo'].map(x => extractDecl(script, x)).join('\n'), ctx);
+  await ctx.wfEdit('ready:team:newLead');
+  assertEqual([n.opened.length, n.opened[0] && n.opened[0][1].mode, n.read], [1, 'system', [['system_key', 'team:newLead']]], 'wfEdit: a base not moved yet opens as the built-in System row (one read of the moved row)');
+  n.movedRow = { id: '11111111-2222-4333-8444-555555555555' }; n.opened = [];
+  await ctx.wfEdit('ready:team:newLead');
+  assertEqual([n.opened.length, n.opened[0] && n.opened[0][0].id, n.opened[0] && n.opened[0][1].mode, !!(n.opened[0] && n.opened[0][1].ro)], [1, '11111111-2222-4333-8444-555555555555', 'edit', true],
+    'wfEdit (G7.2 review): a link or Back to a base that has moved opens its engine row (read-only steps), never the built-in one with Move');
+  n.already = true;
+  await ctx.wfSystemMoveGo(sys, { step: 'system_move', base: 'team:newLead', name: sys.name }, 'moved into the engine (Draft)');
+  n.already = false;
+  await ctx.wfSystemMoveGo(sys, { step: 'system_move', base: 'team:newLead', name: sys.name }, 'moved into the engine (Draft)');
+  assertEqual([n.toasts, n.logs], [['A new lead comes in: it is already in the engine', 'A new lead comes in: moved into the engine (Draft)'], ['Automations: "A new lead comes in" moved into the engine (Draft)']],
+    'wfSystemMoveGo (G7.2 review): Move on a base already moved says so and logs nothing (the activity log never says a Published row moved as a Draft)');
+  // the pause picker: a moved System row is greyed with why (pauses don't apply), never offered
+  const g = extractDecl(script, 'wfGlobalSettingsHtml'), pc = extractDecl(script, 'wfPauseCardHtml');
+  assertEqual([/filter\(\(\[, w\]\) => w\.on && !w\.system\)/.test(g), /WF_GLOBAL_WHY\.systemMoved/.test(g), /esc\(w\.why \|\| WF_GLOBAL_WHY\.system\)/.test(pc), /W\.systemKey/.test(extractDecl(script, 'wfPausedText'))], [true, true, true, true],
+    'the pause picker never offers a moved System row (greyed: pauses don\'t apply); the builder never says it is paused');
+}
 (async () => {
   await testVacationFollowUps();
   await testWfSaveRuntime();
@@ -9031,6 +9069,7 @@ async function testWfCanvasModesRuntime(){
   testLeadAssigneeGrey();
   await testWfPhase5ReviewFixes();
   await testWfCanvasModesRuntime();
+  await testWfSystemMovedGuards();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });

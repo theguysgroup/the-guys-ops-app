@@ -1462,7 +1462,7 @@ export const WF_REASONS: Record<string, string> = nul({
   missing_details: "Missing details", skip_comms: "Messages skipped until the next wait", removed_by_action: "Removed by Workflow Action",
   removed_by_external_action: "Removed by External Workflow Action", end_of_workflow: "Removed by - End Of Workflow", replied: "Stopped: the lead replied",
   automation_changed: "The workflow changed", switched_off: "The workflow was switched off", deleted: "The workflow was deleted", wrong_kind: "This workflow is not for this kind of record",
-  move_undone: "The stage move was undone", moved_on: "The lead had already moved to another stage",
+  move_undone: "The stage move was undone", moved_on: "The lead had already moved to another stage", system: "A System workflow runs on its own",
 });
 // "Filter not matched - Service - Received value: Gutters, Expected value: Aircon" (GHL's format).
 export function filterReasonText(label: string, received: unknown, expected: unknown): string {
@@ -4018,6 +4018,8 @@ export async function advanceV2(sb: any, run: any, T: TickCtx, nowMs: number, fx
   a = T.autos.get(run.automation_id);
   const gone = staleV2(a, run);
   if (gone) return await end("cancelled", gone.text, gone.code);
+  // a moved System workflow is sent by its System mirror, never as a run: a run that got in anyway ends before any step
+  if (has(WF_SYSTEM_MIRRORS, String(a.system_key ?? ""))) return await end("cancelled", WF_REASONS.system, "system");
   // a Remove from workflow (another run's) asked for this run while it was claimed
   if (run.remove_requested === true) return await end("removed", WF_REASONS.removed_by_external_action, "removed_by_external_action");
   R = runDocOf(a);
@@ -4247,6 +4249,7 @@ export async function advanceV2(sb: any, run: any, T: TickCtx, nowMs: number, fx
       const wid = String(c.workflowId ?? "");
       const target = wid ? await fx.readAutomation(wid) : null;
       if (!target || target.deleted_at || (target.business_id && target.business_id !== BUSINESS_ID)) return await skipped("the workflow is gone", { workflow_id: wid });
+      if (has(WF_SYSTEM_MIRRORS, String(target.system_key ?? ""))) return await skipped(WF_REASONS.system, { workflow_id: wid, code: "system" });
       if (target.enabled !== true || !target.armed_at) return await skipped("target is a Draft", { workflow_id: wid });
       if (!wfEligible(target, T.cat)) return await skipped("the workflow has errors", { workflow_id: wid });
       const chain = (Number(run.chain_depth) || 0) + 1;
@@ -6687,11 +6690,13 @@ export const wfMayReadRuns = (me: any) => isOffice(me) || (!!me && me.role === "
 const LEAD_KINDS = ["contact", "hook", "none"];
 const KIND_WORD: Record<string, string> = nul({ job: "a job", call: "a call", chat: "a chat", task: "a task", supplier: "a supplier", employee: "an employee" });
 // Can a lead be added to this workflow by hand? null = yes, else { code, why } (the picker greys it with why; enroll
-// refuses with code). Published (not a Draft), valid, starts from a lead (not only from a job / call / chat), and its
-// steps use only blanks a lead has.
+// refuses with code). Not a moved System workflow, Published (not a Draft), valid, starts from a lead (not only from a
+// job / call / chat), and its steps use only blanks a lead has.
 // deno-lint-ignore no-explicit-any
 export function wfManualWhy(a: Row | null, cat: any): { code: string; why: string } | null {
   if (!a || a.deleted_at || (a.business_id && a.business_id !== BUSINESS_ID)) return { code: "not_found", why: "The workflow is gone" };
+  // a moved System workflow: its System mirror sends it, never a run (a second team notification)
+  if (has(WF_SYSTEM_MIRRORS, String(a.system_key ?? ""))) return { code: "system", why: WF_REASONS.system };
   if (a.enabled !== true || !a.armed_at) return { code: "draft", why: "Publish it first" };
   if (!wfEligible(a, cat)) return { code: "invalid", why: "Fix its errors first" };
   const doc = runDocOf(a).doc, kinds = (Array.isArray(doc.triggers) ? doc.triggers : []).map(obj).filter((t: Row) => t.disabled !== true)

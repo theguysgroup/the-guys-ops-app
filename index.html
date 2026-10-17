@@ -19268,7 +19268,7 @@ function wfItem(row, stats, settings, ctx){
   const delMs = deleted ? Date.parse(r.deleted_at) : NaN, nowMs = Number(c.nowMs);
   const on = r.enabled===true && !deleted;
   return { ...base, key: id, kind: 'workflow', id, system: !!r.system_key, moved: !!r.system_key, base: r.system_key ? String(r.system_key) : null, name: String(r.name || ''), description: String(r.description || ''),
-    on, paused: on ? (c.tz ? wfPausedInfo(S.pauses, id, c.nowMs, c.tz) : wfPausedUntil(S.pauses, id, c.nowWall)) : null, folderId: r.folder_id ? String(r.folder_id) : null,
+    on, paused: on && !r.system_key ? (c.tz ? wfPausedInfo(S.pauses, id, c.nowMs, c.tz) : wfPausedUntil(S.pauses, id, c.nowWall)) : null, folderId: r.folder_id ? String(r.folder_id) : null,
     audience: (sum.audience || r.audience)==='customer' ? 'customer' : 'team', external: Array.isArray(sum.guarded) && sum.guarded.includes('webhook'),
     triggers, actions: Array.isArray(sum.actions) ? sum.actions.map(String) : [], steps: n(sum.steps), enrolled: n(r.enrolled_total), active: stats ? n(st.active) : null,
     errors: n(rev.failed_runs), problems: Array.isArray(rev.problems) ? rev.problems.map(String) : [], lastErrorAt: rev.last_failed_at || null,
@@ -19386,8 +19386,9 @@ function wfPublishAsk(x, items){
   const what = [it.audience==='customer' ? `"${it.name}" sends to customers` : '', it.external ? `${it.audience==='customer' ? 'it' : `"${it.name}"`} sends lead details to another system` : ''].filter(Boolean).join(' and ');
   if (what) out.push(`${what.charAt(0).toUpperCase() + what.slice(1)}.${it.audience==='customer' ? ' This sends to real customers.' : ''}`);
   // any System row that is really on counts, also one listed under Deleted (its own page can switch it on again); each
-  // one is named
-  (items || []).filter(y => y && y.virtual && y.on && (y.triggers || []).some(t => (it.triggers || []).includes(t)))
+  // one is named. A moved System row is itself the built-in notification (its own base is no longer listed): another
+  // System row on the same start sends something else, so nothing would be sent twice.
+  if (!it.moved) (items || []).filter(y => y && y.virtual && y.on && (y.triggers || []).some(t => (it.triggers || []).includes(t)))
     .forEach(y => out.push(`The System workflow "${y.name}" is on and starts the same way: both would send.`));
   return out;
 }
@@ -19827,6 +19828,7 @@ const WF_GLOBAL = { pauseRows: 15, pauseDays: 15, pauseIds: 500, notifyUsers: 50
 // Why a greyed control is greyed (shown next to it, never only as a tooltip: phones have no hover).
 const WF_GLOBAL_WHY = { email: 'Needs a team email sender', ai: 'Coming with Workflow AI', autoSave: 'We keep Save with undo',
   switch: 'Only owners and managers can edit workflows', system: 'Runs on the built-in system until it moves into the engine', digest: 'Phone alerts start with the next engine update',
+  systemMoved: 'A System workflow: pauses don\'t apply, it sends as the built-in one did',
   noDb: 'Comes with the next database update' };
 // The database's own words for each pause problem (automation_pauses_guard raises exactly these; GHL's for the last two).
 const WF_PAUSE_TEXT = { max_rows: 'At most 15 pause dates', no_workflow: 'Choose at least one workflow to pause', too_many: 'At most 500 workflows in one pause date',
@@ -20081,10 +20083,10 @@ function wfPauseCardHtml(draft, ctx){
     const k = esc(jsStr(r.key)), kf = esc('wf-pz-' + r.key), dis = c.ro ? ' disabled' : '', mine = probs.filter(p => p.row===i), st = !draft || !plan.dirty.has(r.key) ? wfPauseStatus(r, c.nowMs, c.tz) : null;
     // (until the workflows are read a chosen one is just "Workflow": never "deleted" before it is known)
     const chips = r.automation_ids.map(id => { const w = W[id], gone = !!c.wfsLoaded && (!w || w.deleted), name = w ? w.name || 'Untitled workflow' : c.wfsLoaded ? 'Deleted workflow' : 'Workflow';
-      const note = gone ? ' (deleted: remove it)' : w && !w.on ? ' (Draft)' : '';
+      const note = gone ? ' (deleted: remove it)' : w && w.system ? ' (System: not paused)' : w && !w.on ? ' (Draft)' : '';
       return `<span class="wf-chip wf-pz-chip${gone ? ' bad' : ''}">${esc(name + note)}<button type="button" class="wf-pz-x" aria-label="Remove ${esc(name)}" onclick="wfPauseWf('${k}', '${esc(jsStr(id))}', false)">${ico('x', 12)}</button></span>`; }).join('');
     const options = pick.filter(w => !r.automation_ids.includes(w.id)).map(w => `<option value="${esc(w.id)}">${esc(w.name || 'Untitled workflow')}</option>`).join('')
-      + blocked.map(w => `<option disabled>${esc(w.name)} — ${esc(WF_GLOBAL_WHY.system)}</option>`).join('');
+      + blocked.map(w => `<option disabled>${esc(w.name)} — ${esc(w.why || WF_GLOBAL_WHY.system)}</option>`).join('');
     const stText = st ? (st.key==='now' ? `Pausing now, until ${wfDateText(new Date(st.until).toISOString())}` : st.key==='next' ? `Next: ${wfDateText(new Date(st.at).toISOString())}` : 'Over') : '';
     return `<div class="wf-pz-row" data-key="${esc(r.key)}">
       <div class="wf-pz-dates"><label class="wf-pz-f"><span>Start date and time</span><input type="datetime-local"${dis} data-keep-focus="${kf}-start" value="${esc(r.start_wall)}" aria-label="Start date and time, pause date ${i + 1}" onchange="wfPauseSet('${k}', 'start_wall', this.value)"></label>
@@ -20128,9 +20130,12 @@ function wfGlobalSettingsHtml(){
   const ok = e => e && e.status==='ok' ? e.data : null;
   const list = wfEnsure('list', 'all', wfFetchList, wfPageShowing), pz = wfEnsure('pauses', 'all', wfFetchPauses, wfPageShowing), reg = wfEnsure('registry', 'v2', wfFetchRegistry, wfPageShowing);
   const R = ok(reg) || {}, rows = ok(list), wfs = {};
-  (rows || []).forEach(r => { if (r && r.id) wfs[String(r.id)] = { name: String(r.name || ''), deleted: !!r.deleted_at, on: r.enabled===true && !r.deleted_at }; });
-  const pickable = Object.entries(wfs).filter(([, w]) => w.on).map(([id, w]) => ({ id, name: w.name })).sort((a, b) => a.name.localeCompare(b.name));
-  const blocked = wfSystemRows(true).map(r => ({ name: String(r.name || '') }));
+  (rows || []).forEach(r => { if (r && r.id) wfs[String(r.id)] = { name: String(r.name || ''), deleted: !!r.deleted_at, on: r.enabled===true && !r.deleted_at, system: !!r.system_key }; });
+  // a moved System workflow is not paused (its System mirror sends as the built-in one did): greyed with why, as the built-in ones
+  const pickable = Object.entries(wfs).filter(([, w]) => w.on && !w.system).map(([id, w]) => ({ id, name: w.name })).sort((a, b) => a.name.localeCompare(b.name));
+  const moved = {}; (rows || []).forEach(r => { if (r && r.system_key && !r.deleted_at) moved[r.system_key] = String(r.id); });
+  const blocked = [...wfSystemRows(true, { moved }).filter(r => !r.movedTo).map(r => ({ name: String(r.name || '') })),
+    ...Object.values(wfs).filter(w => w.system && !w.deleted).map(w => ({ name: w.name, why: WF_GLOBAL_WHY.systemMoved }))];
   const people = (STATE.profiles || []).filter(p => p && (p.role==='owner' || p.role==='manager')).sort((a, b) => String(a.fullName || '').localeCompare(String(b.fullName || '')));
   const ctx = { people, avail: R.availCtx || {}, features: R.features || {}, regLoaded: !!R.availCtx, tz: bizTz(), nowMs: Date.now(), wfs, wfsLoaded: !!rows, pickable, blocked,
     pauses: pz, ro: readOnlyReason() };
@@ -20347,6 +20352,8 @@ function wfSystemUnmove(x){
 async function wfSystemMoveGo(x, body, done){
   const res = await autoFnCall(body);
   if (!res.ok) { showToast('Not moved: ' + autoFnReason(res.body), { kind: 'warn' }); return; }
+  // moved before (another tab, an old page): nothing changed, so nothing is logged
+  if (body.step==='system_move' && res.body && res.body.already) { showToast(`${x.name}: it is already in the engine`, { kind: 'info' }); wfChanged(); render(); return; }
   logSettingsActivity(wfActor(), `${CAT_NAMES.automations}: "${x.name}" ${done}`);
   showToast(`${x.name}: ${done}`);
   wfChanged(); render();
@@ -25900,7 +25907,8 @@ async function wfReadRow(id){
 
 // ── Publish (design §5.5 "Publish toggle", §3.13) ──
 function wfPausedText(W){
-  if (!W || !W.id || typeof WF_DATA==='undefined') return '';
+  // a moved System workflow is never paused (its System mirror sends as the built-in one did)
+  if (!W || !W.id || W.systemKey || typeof WF_DATA==='undefined') return '';
   const e = WF_DATA.pauses.get('all');
   if (!e || e.status!=='ok') return '';
   try { const p = wfPausedInfo(e.data, W.id, Date.now(), W.tz); return p ? wfWallShort(p.until) || 'later' : ''; } catch (err) { return ''; }
@@ -25933,7 +25941,7 @@ async function wfPublishToggle(){
     if (fix) { showToast(fix, { kind: 'warn' }); return; }
     // the function publishes what is saved: the question is about that (W.base), and a change made meanwhile stops it
     if (wfUnsaved(W) || (W.drawer && W.drawer.dirty)) { showToast('It changed meanwhile: save it, then publish', { kind: 'warn' }); return; }
-    ask = wfPublishAsk(wfPubItem(W.base.doc, W.reg, W.base.name || W.name), typeof WF_VIEW!=='undefined' ? [...WF_VIEW.byKey.values()] : []);
+    ask = wfPublishAsk({ ...wfPubItem(W.base.doc, W.reg, W.base.name || W.name), moved: !!W.systemKey }, typeof WF_VIEW!=='undefined' ? [...WF_VIEW.byKey.values()] : []);
   } finally { if (WF===W) { W.publishing = false; wfDirty('chrome'); } }
   if (WF!==W) return;
   if (ask.length) { confirmAction(`${ask.join(' ')} Publish it?`, () => wfPublishSet(W, true, true), { danger: false, title: 'Publish workflow?', confirmLabel: 'Publish' }); return; }
@@ -26333,6 +26341,13 @@ async function wfEdit(key){
   if (k.startsWith('ready:')) {
     const row = wfSystemRows(true).find(r => r.key===k);
     if (!row) { showToast('That System workflow is not there', { kind: 'warn' }); return; }
+    // a base that moved into the engine opens as its engine row (a link or Back to the built-in one never offers Move
+    // again); a failed read opens the built-in one (Move then answers "already in the engine")
+    let movedId = null;
+    if (WF_SYSTEM_MOVABLE.includes(row.base)) {
+      try { const { data, error } = await sb.from(AUTO_TABLE).select('id').eq('system_key', row.base).is('deleted_at', null).limit(1); if (!error && data && data[0]) movedId = String(data[0].id); } catch (e) { movedId = null; }
+    }
+    if (movedId) { await wfEdit(movedId); return; }
     wfBuilderOpen({ name: row.name, enabled: row.on, definition: row.doc }, { mode: 'system', sys: row });
     return;
   }
@@ -26563,7 +26578,8 @@ function wfhSettingsHtml(s){
     + `<div class="wfh-sigrow"><b>Signature</b><pre class="wfh-sig" aria-label="Signature preview">${esc(String(x.signature || '').trim() || '—')}</pre><button type="button" class="btn ghost small" onclick="wfhGoProfile()">Edit in Business details</button></div></div>`
     + row('markRead', 'Conversations: Mark as read', esc('Marks the lead\'s conversation as read once this workflow has messaged them.'), sw(S.markRead, 'markRead', 'markRead')) + '</section>';
   const rs = Array.isArray(x.pause) ? x.pause : [];
-  const pause = rs.length ? `<section class="wfh-card" aria-labelledby="wfh-h-pause"><h2 id="wfh-h-pause">Pause workflow</h2><p class="wfh-sub-p">${rs.map(p => esc(p.now ? `Paused now, until ${wfhWhen(p.end, tz)}.` : `Paused from ${wfhWhen(p.start, tz)} to ${wfhWhen(p.end, tz)}.`)).join('<br>')}`
+  const pause = x.system ? `<section class="wfh-card" aria-labelledby="wfh-h-pause"><h2 id="wfh-h-pause">Pause workflow</h2><p class="wfh-sub-p">${esc('Pauses don\'t apply to a System workflow: it sends as the built-in one did.')}</p></section>`
+    : rs.length ? `<section class="wfh-card" aria-labelledby="wfh-h-pause"><h2 id="wfh-h-pause">Pause workflow</h2><p class="wfh-sub-p">${rs.map(p => esc(p.now ? `Paused now, until ${wfhWhen(p.end, tz)}.` : `Paused from ${wfhWhen(p.start, tz)} to ${wfhWhen(p.end, tz)}.`)).join('<br>')}`
     + ` Nothing it does happens in between; leads wait.</p><button type="button" class="btn ghost small" onclick="wfhGoGlobal()">Open Global Workflow Settings</button></section>` : '';
   const bad = wfSettingsProblems(x.settings, x.base, {}), problems = bad.length ? `<div class="wfh-bad" role="alert">${bad.map(p => `<div>${esc(p.text)}</div>`).join('')}</div>` : '';
   return `<div class="wfh wfh-set">${ro ? `<p class="wfh-note">${esc(ro)}</p>` : ''}${problems}${lead}${comm}${pause}</div>`;
@@ -26832,7 +26848,7 @@ function wfhSettingsTab(W){
   const tz = W.tz || bizTz(), me = typeof getCurrentProfile==='function' ? getCurrentProfile() : null, biz = catalogObject('business');
   const vs = W.cm && W.cm.kind==='version' ? W.cm.settings : null;   // a version's own settings, read-only (G6.3)
   return wfhSettingsHtml({ settings: vs || W.settings, base: vs || (W.base ? W.base.settings : W.settings), ro: wfGuardEdit(), tz, tzLabel: autoTzLabel(tz),
-    signature: signatureOf(me && me.fullName, { name: (STATE.data.settings || {}).companyName, phone: biz && biz.phone }), pause: W.id && e && e.status==='ok' ? wfhPauseRanges(e.data, W.id, Date.now(), tz) : [] });
+    signature: signatureOf(me && me.fullName, { name: (STATE.data.settings || {}).companyName, phone: biz && biz.phone }), pause: W.id && !W.systemKey && e && e.status==='ok' ? wfhPauseRanges(e.data, W.id, Date.now(), tz) : [], system: !!W.systemKey });
 }
 // Draws the open tab again (a read ended, a filter changed): this tab's body only; the field being used keeps its focus.
 function wfhPaint(){

@@ -5071,6 +5071,30 @@ async function phase4Suite() {
       eq(sent.length, 0, "tick: a moved row in Draft sends nothing (push has it)");
     }
 
+    // a moved row never runs as a workflow: no manual add, no Add to workflow step into it, and a run that got in anyway
+    // ends before its push (the mirror's push_sent key is the only new-lead notification)
+    {
+      const NONE = { match: "all", segments: [{ match: "all", rules: [] }] };
+      const adds = { id: "w-adds-0001", business_id: "default", name: "Adds", enabled: true, armed_at: isoMs(H), version: 1, revision: 1, trigger: {}, steps: [], deleted_at: null,
+        settings: { reentry: "off", perRecord: true }, definition: { schema: 2, seq: 2, entry: "e1", triggers: [{ id: "t1", type: "newLead", filters: NONE }],
+          nodes: { e1: { kind: "workflow", type: "add_to_workflow", config: { workflowId: "a-sys1-0000" }, out: { next: null } } } } };
+      const runOf = (id: string, a: any) => ({ id, business_id: "default", automation_id: a.id, automation_version: a.version, event_key: "n1:new", event_type: "newLead", event_at: isoMs(NOW),
+        record_kind: "contact", record_id: "n1", contact_id: "n1", status: "running", step_index: 0, anchor_at: isoMs(NOW), due_at: isoMs(NOW), attempts: 1, context: {}, trigger_id: "t1",
+        cursor_step: null, remove_requested: false });
+      const sys = movedRow({ armed_at: isoMs(H), system_handover_at: isoMs(NOW - 2 * HR) });
+      const db = sysWorld(CFG[1], { automations: [sys, adds], automation_runs: [runOf("r-adds", adds), runOf("r-sys", sys)], automation_enrollment_keys: [] });
+      const rr: any = await api41(db, "record_runs", { record: { kind: "contact", id: "n1" } });
+      const en: any = await api41(db, "enroll", { automation_id: sys.id, record: { kind: "contact", id: "n1" }, request_id: "req-sys00001" });
+      eq([(rr.body.enrollable.find((x: any) => x.id === sys.id) || {}).why, (rr.body.enrollable.find((x: any) => x.id === adds.id) || {}).why, en.status, en.body.reason, db.T.automation_runs.length],
+        [WF_REASONS.system, null, 409, "system", 2], "Add to workflow by hand: a moved System row is greyed ('runs on its own') and refused — no run");
+      sent.length = 0; clock = NOW;
+      const pa: any = await advanceV2(db, { ...db.T.automation_runs[0] }, ctxOf(db), NOW), ps: any = await advanceV2(db, { ...db.T.automation_runs[1] }, ctxOf(db), NOW);
+      const e1 = db.T.automation_log.find((l: any) => l.run_id === "r-adds" && l.step_id === "e1");
+      eq([pa.status, e1 && e1.status, e1 && e1.reason, db.T.automation_runs.filter((r: any) => r.automation_id === sys.id).map((r: any) => r.id), ps.status, ps.exit_reason, sent.length],
+        ["done", "skipped", WF_REASONS.system, ["r-sys"], "cancelled", "system", 0],
+        "Add to workflow step into a moved System row: skipped, no run; a run of it that got in anyway ends before any step — no second new-lead push");
+    }
+
     // the API: move, publish (the handover), Draft, steps kept, move back
     {
       const db = sysWorld(CFG[1], { automation_system_meta: [{ business_id: "default", base: "team:newLead", folder_id: "f-sys" }], automation_folders: [{ id: "f-sys", business_id: "default", name: "Team", parent_id: null }] });
@@ -5118,6 +5142,20 @@ async function phase4Suite() {
     {
       const m = /const WF_SYSTEM_MOVABLE = (\[[^\]]*\]);/.exec(src("../../../index.html"));
       eq(m ? JSON.parse(m[1].replace(/'/g, '"')) : null, Object.keys(WF_SYSTEM).filter((b) => WF_SYSTEM[b].movable), "the app's WF_SYSTEM_MOVABLE = the engine's movable bases (team:newLead first, one per release)");
+    }
+    // PART 4 (the plan to drop trigger / steps): the phase-4 off guard's function (its trigger went in G2.4, the function names
+    // new.steps) is dropped by the plan, not a "still read by" stop; its ROLLBACK puts both functions back byte for byte (no trigger)
+    {
+      const sql = src(SQL_DIR + "stage2-automations.sql"), p4 = src(SQL_DIR + "settings-round2-phase4.sql");
+      const plan = sql.slice(sql.indexOf("-- PART 4 · G7.1"), sql.indexOf("-- END PART 4 · G7.1")).split("\n").map((l: string) => l.startsWith("-- ") ? l.slice(3) : l === "--" ? "" : l).join("\n");
+      const fwd = plan.slice(plan.indexOf("\nbegin;\n"), plan.indexOf("\ncommit;\n")), rb = plan.slice(plan.indexOf("ROLLBACK (exact"));
+      const fnTo = (text: string, name: string, end: string) => { const a0 = text.indexOf(`create or replace function public.${name}(`); return a0 < 0 ? "" : text.slice(a0, text.indexOf(end, a0) + end.length); };
+      ok(fwd.includes("drop function if exists public.automations_customer_off_guard();") && fwd.includes("drop function if exists public.automation_customer_channels(jsonb);")
+        && /where f\.proname not in \([^)]*'automations_customer_off_guard'/.test(fwd) && /\bnew\.steps\b/.test(fnTo(p4, "automations_customer_off_guard", "end $$;")),
+        "PART 4: the off guard's function (it names new.steps) is dropped by the plan, never a 'still read by' stop");
+      ok(fnTo(rb, "automations_customer_off_guard", "end $$;").length > 100 && fnTo(rb, "automations_customer_off_guard", "end $$;") === fnTo(p4, "automations_customer_off_guard", "end $$;")
+        && fnTo(rb, "automation_customer_channels", "\n$$;") === fnTo(p4, "automation_customer_channels", "\n$$;") && fnTo(p4, "automation_customer_channels", "\n$$;").length > 100
+        && !rb.includes("create trigger automations_customer_off_guard"), "PART 4 ROLLBACK: the off guard's two functions back byte for byte, without their trigger (G2.4 dropped it)");
     }
   }
 

@@ -4433,7 +4433,9 @@ commit;
 --        retired in the same release (RUNBOOK §21).
 --   G-b  The function no longer reads the columns (the follow-up build "G7.1b" that removes the compat producer, wfRunRow,
 --        upgradeV1's reads, v1EditorView and the step "migrate"). Check: none of these finds a read of a row's trigger or steps
---          grep -nE "\.(trigger|steps)\b" supabase/functions/automations/index.ts | grep -vE "\b(a|doc|def|flat|v|r|st|n|s)\.(trigger|steps)\b"
+--        (every hit of the first one is reviewed by hand: a row is mostly `a`, `r`, `x`, `v` or `row` — enqueue's obj(a.trigger)
+--        is one; only a flat step list's or an op's own field may stay, e.g. flat.trigger, op.trigger)
+--          grep -nE "\b[A-Za-z_]+\.(trigger|steps)\b" supabase/functions/automations/index.ts
 --          grep -nE "wfRunRow|upgradeV1|v1EditorView|v1EditorProblems|automation_migrate_row" supabase/functions/automations/index.ts
 --   G-c  The app no longer reads them: WF_LIST_COLS has no `trigger`, autoNormalize reads no r.trigger / r.steps. Check:
 --          grep -nE "r\.(trigger|steps)\b|WF_LIST_COLS = .*trigger" index.html
@@ -4446,7 +4448,7 @@ commit;
 --   select format('insert into backup.automations_v1_columns (id, business_id, trigger, steps) values (%L, %L, %L::jsonb, %L::jsonb) on conflict (id) do nothing;',
 --                 id, business_id, trigger::text, steps::text) from public.automations order by created_at;
 --   select pg_get_functiondef(p.oid) || ';' from pg_proc p join pg_namespace n on n.oid = p.pronamespace
---    where n.nspname = 'public' and p.proname in ('automations_guard', 'automation_save', 'automation_migrate_row');
+--    where n.nspname = 'public' and p.proname in ('automations_guard', 'automation_save', 'automation_migrate_row', 'automations_customer_off_guard', 'automation_customer_channels');
 --   select format('alter table public.automations add constraint %I %s;', conname, pg_get_constraintdef(oid))
 --     from pg_constraint where conrelid = 'public.automations'::regclass and conname in ('automations_trigger_obj', 'automations_steps_arr');
 --
@@ -4455,7 +4457,8 @@ commit;
 --   select v2_migrated_at, v2_migrated_at < now() - interval '30 days' from public.automation_state where business_id = 'default';   -- a date, true
 --   select f.oid::regprocedure from (select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind = 'f' offset 0) f
 --    where pg_get_functiondef(f.oid) ~ '\m(new|old|a|r)\.(trigger|steps)\M|\m(trigger|steps) ->'
---    order by 1;                                -- exactly: automations_guard(), automation_save(...), automation_migrate_row(...) (this block replaces or drops them)
+--    order by 1;                                -- exactly: automations_customer_off_guard(), automations_guard(), automation_save(...), automation_migrate_row(...)
+--                                               -- (this block replaces or drops them; the off guard's trigger went in Part 2 · G2.4, its function stayed)
 --   select attname, attnum from pg_attribute where attrelid = 'public.automations'::regclass and attname in ('trigger', 'steps') and not attisdropped;   -- 2 rows
 --   select conname from pg_constraint where conrelid = 'public.automations'::regclass and contype = 'c' and conname in ('automations_trigger_obj', 'automations_steps_arr');   -- 2 rows (they go with the columns)
 --   select to_regclass('backup.automations_v1_columns');                                               -- null the first time
@@ -4476,10 +4479,10 @@ commit;
 --   if not exists (select 1 from public.automation_state s where s.v2_migrated_at is not null and s.v2_migrated_at < now() - interval '30 days') then
 --     raise exception 'Part 4 · G7.1: less than 30 days since step "migrate" (or never run), nothing changed';
 --   end if;
---   -- any function other than the three this block replaces that still names the columns: stop
+--   -- any function other than the four this block replaces or drops that still names the columns: stop
 --   select string_agg(f.oid::regprocedure::text, ', ' order by f.oid::regprocedure::text) into left_over
 --     from (select p.oid, p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind = 'f' offset 0) f
---    where f.proname not in ('automations_guard', 'automation_save', 'automation_migrate_row')
+--    where f.proname not in ('automations_guard', 'automation_save', 'automation_migrate_row', 'automations_customer_off_guard')
 --      and pg_get_functiondef(f.oid) ~ '\m(new|old|a|r)\.(trigger|steps)\M|\m(trigger|steps) ->';
 --   if left_over is not null then raise exception 'Part 4 · G7.1: still read by %: nothing changed', left_over; end if;
 --   -- the backup (kept from the first run)
@@ -4595,6 +4598,10 @@ commit;
 -- grant execute on function public.automation_save(text, uuid, integer, text, jsonb, jsonb, jsonb, text, text, text, boolean, jsonb, uuid, text) to service_role;
 -- -- 3. The migration is over: the one-row migrate function compared trigger / steps, which are going. Its step "migrate" left the function in G7.1b (gate G-b).
 -- drop function if exists public.automation_migrate_row(text, uuid, jsonb, jsonb, jsonb, jsonb, jsonb);
+-- -- 3b. The phase-4 off guard (settings-round2-phase4.sql): its trigger went in Part 2 · G2.4 (the v2 guard does the same from the
+-- --     doc), its function compares new.steps / old.steps; the channels helper only it used goes with it.
+-- drop function if exists public.automations_customer_off_guard();
+-- drop function if exists public.automation_customer_channels(jsonb);
 -- -- 4. The columns (their two check constraints go with them).
 -- alter table public.automations drop column if exists trigger, drop column if exists steps;
 -- -- 5. The proof, inside the transaction: the columns and their constraints are gone, the guard and the save no longer name them, the rows are all still there.
@@ -4610,7 +4617,7 @@ commit;
 --     raise exception 'Part 4 · G7.1: the backup has fewer rows than the table';
 --   end if;
 --   if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
---               where n.nspname = 'public' and p.prokind = 'f' and p.proname in ('automations_guard', 'automation_save')
+--               where n.nspname = 'public' and p.prokind = 'f' and p.proname in ('automations_guard', 'automation_save', 'automations_customer_off_guard')
 --                 and pg_get_functiondef(p.oid) ~ '\m(new|old|a|r)\.(trigger|steps)\M') then
 --     raise exception 'Part 4 · G7.1: a replaced function still names the columns';
 --   end if;
@@ -4622,7 +4629,8 @@ commit;
 --   select count(*) from public.automations where definition is null;                                    -- 0
 --   select has_function_privilege('authenticated', 'public.automation_save(text, uuid, integer, text, jsonb, jsonb, jsonb, text, text, text, boolean, jsonb, uuid, text)', 'execute');   -- false
 --   -- then in the app (staging): open a workflow, Save, Publish, Draft, Duplicate, Delete and Restore; each answers 200 and the list loads
--- ROLLBACK (exact: the two columns back with their phase-4 definition and data, their two constraints, the three functions as Part 2 · G2.4 defines them):
+-- ROLLBACK (exact: the two columns back with their phase-4 definition and data, their two constraints, the three functions as Part 2 · G2.4 defines them,
+-- the off guard's two functions as settings-round2-phase4.sql defines them — without their trigger, which Part 2 · G2.4 dropped):
 -- begin;
 -- set local lock_timeout = '5s';
 -- alter table public.automations add column if not exists trigger jsonb not null default '{}'::jsonb;
@@ -4637,6 +4645,23 @@ commit;
 -- alter table public.automations add constraint automations_steps_arr check (jsonb_typeof(steps) = 'array' and jsonb_array_length(steps) <= 30);
 -- -- then run, unchanged and in this order, from this same file: PART 2 · G2.4 §4 (create or replace function public.automations_guard() … and its revoke) and §6
 -- -- (create or replace function public.automation_save(…), public.automation_migrate_row(…), and their revoke / grant lines).
+-- create or replace function public.automation_customer_channels(steps jsonb) returns text[]
+-- language sql immutable set search_path = ''
+-- as $$
+--   select coalesce(pg_catalog.array_agg(distinct s ->> 'type' order by s ->> 'type'), '{}'::text[])
+--     from pg_catalog.jsonb_array_elements(case when pg_catalog.jsonb_typeof(steps) = 'array' then steps else '[]'::jsonb end) s
+--    where s ->> 'kind' = 'action' and s ->> 'type' in ('email', 'text')
+-- $$;
+-- create or replace function public.automations_customer_off_guard() returns trigger
+-- language plpgsql security invoker set search_path = ''
+-- as $$
+-- begin
+--   if new.enabled
+--      and not (public.automation_customer_channels(new.steps) <@ public.automation_customer_channels(old.steps)) then
+--     new.enabled := false;
+--   end if;
+--   return new;
+-- end $$;
 -- commit;
 -- Check after the rollback:
 --   select count(*) from public.automations a join backup.automations_v1_columns b on b.id = a.id where a.trigger is distinct from b.trigger or a.steps is distinct from b.steps;   -- 0
