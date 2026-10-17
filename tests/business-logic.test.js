@@ -9192,6 +9192,7 @@ async function testWfPhase5ReviewFixes(){
     setTimeout: () => 0, __edits: edits };
   const reg = wfRegFor(WF_AV_TODAY), S = wfShellSandbox(reg, { ctx: nav }), { X, flush } = S, C = S.ctx, V = n => vm.runInContext(n, C);
   vm.runInContext('wfEdit = k => { __edits.push(k); }', C);
+  assertEqual([/\.wfb-mobile \.wfb-tabs \{[^}]*flex: 1 1 0[^}]*min-width: 0[^}]*overflow-x: auto/.test(html), html.includes('.wfb-mobile .wfb-tabs .wfb-tab { flex: none; }'), html.includes('.wfb-mobile .wfb-sub .wfb-pub { flex: none; }')], [true, true, true], 'phone builder header: the tab strip scrolls inside the remaining width and the Draft/Publish group never sits on top of it');
   V('wfNavWire')();
   const A = V('WF_ADV'), UI = V('WF_ADV_UI'), lab = rule('.wfa-lab'), hov = rule('.wfa-tile .wfb-hov'), btn = rule('.wfa-emid button');
   assertEqual([A.label, /max-height: 36px/.test(lab) && /overflow: hidden/.test(lab), /white-space: nowrap/.test(rule('.wfa-lab b')), /top: -/.test(hov), /right: calc\(100% \+/.test(hov),
