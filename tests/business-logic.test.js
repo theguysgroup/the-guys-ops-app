@@ -255,6 +255,8 @@ const DECLS = [
   'wfTestVerdict', 'wfTestResult', 'wfModeBannerHtml', 'wfVersionsHtml', 'wfTestPanelHtml', 'wfStatsDlgHtml',
   // Stage 2 phase 7 G7.1: what stays of the phase-4 words once the old editor and its flow view are gone
   'autoMaxSteps', 'wfOfficeWindow', 'autoTriggerPhrase', 'wfFlatSentence',
+  // Stage 2 phase 7 G7.2: System workflows move into the engine (the bases movable now; why the move is greyed)
+  'WF_SYSTEM_MOVABLE', 'wfSystemMoveWhy',
 ];
 
 function extractDecl(source, name){
@@ -4392,7 +4394,7 @@ function testWfList(sb){
   assertEqual(menu(a2), ['Upload to Template Library', 'Edit workflow', 'Rename workflow', 'Open in new tab', 'Publish', 'Move to folder', 'Duplicate workflow',
     'Test workflow [Comes with Test workflow in the builder]', 'Delete workflow', 'Copy To Sub-Account [Comes with multi-business accounts]'], 'wfMenuItems: a Draft workflow, in GHL\'s order');
   assertEqual([menu(a1)[4], menu(sb.wfItem(row({ system_key: 'review' }), {}, {}, ctx)).slice(-3), menu(del), menu(f)],
-    ['Draft workflow', ['Move back to the built-in system [Comes when System workflows move into the engine]', 'Delete workflow [Move it back to the built-in system first]', 'Copy To Sub-Account [Comes with multi-business accounts]'],
+    ['Draft workflow', ['Move back to the built-in system', 'Delete workflow [Move it back to the built-in system first]', 'Copy To Sub-Account [Comes with multi-business accounts]'],
       ['Restore'], ['Rename folder', 'Move to folder', 'Delete folder', 'Manage permissions [Only owners and managers can edit workflows]']],
     'wfMenuItems: Published → "Draft workflow"; a moved System row; a deleted one only restores; a folder\'s menu');
   const lockedReady = ready({ key: 'ready:missedText', base: 'missedText', toggle: undefined, locked: 'On whenever the business phone is on.', page: 'phone' });
@@ -4402,6 +4404,16 @@ function testWfList(sb){
      ['Upload to Template Library [Duplicate it first: a System workflow runs on the built-in system]', 'Edit workflow', 'Open its old settings', 'Draft workflow [On whenever the business phone is on.]', 'Move to folder', 'Duplicate workflow',
       'Test workflow [Comes with Test workflow in the builder]', 'Move into the engine [Only owners move System workflows]', 'Delete workflow [On whenever the business phone is on.]', 'Copy To Sub-Account [Comes with multi-business accounts]']],
     'wfMenuItems: System rows — no rename / new tab, no upload (duplicate first); the team ones have no old page (their card is in the list); a locked one says why on its switch and on Delete');
+  // G7.2: a base movable now moves (owners); a moved row moves back (owners); a customer base says why
+  const mvIn = (x, o) => menu(sb.wfItem(x, null, {}, ctx), o).find(l => l.startsWith('Move into the engine'));
+  assertEqual([mvIn(ready({ movable: true })), mvIn(ready({ movable: true }), { owner: false }), mvIn(ready({ key: 'ready:review', base: 'review', audience: 'customer' })),
+    menu(sb.wfItem(row({ system_key: 'team:newLead' }), {}, {}, ctx), { owner: false }).find(l => l.startsWith('Move back')), sb.wfItem(row({ system_key: 'team:newLead' }), {}, {}, ctx).base],
+    ['Move into the engine', 'Move into the engine [Only owners move System workflows]', 'Move into the engine [Customer System workflows stay on the built-in system for now]',
+      'Move back to the built-in system [Only owners move System workflows]', 'team:newLead'],
+    'wfMenuItems (G7.2): "Move into the engine" for a base movable now (owners); a customer base stays until Ofek says OK; "Move back" for owners; a moved row knows its base');
+  assertEqual([sb.wfSystemMoveWhy({ movable: true }, true), sb.wfSystemMoveWhy({ movable: true }, false), sb.wfSystemMoveWhy({ audience: 'customer' }, true), sb.wfSystemMoveWhy({ audience: 'team' }, true), sb.wfSystemMoveWhy(null, true)],
+    ['', 'Only owners move System workflows', 'Customer System workflows stay on the built-in system for now', 'It moves into the engine in a later release', 'It moves into the engine in a later release'],
+    'wfSystemMoveWhy: owners only; only a movable base; customer bases stay on the built-in system');
   {
     const lk = sb.wfItem(lockedReady, null, {}, ctx), sw = sb.wfPubSwitch(lk), card = sb.wfCardHtml(lk, null, false);
     assertEqual([/aria-disabled="true"/.test(sw), /\sdisabled[\s>]/.test(sw), /onclick="event\.stopPropagation\(\);wfSetPublished\('ready:missedText', (true|false)\)"/.test(sw), card.includes('nc-locked') && card.includes('On whenever the business phone is on.'),
@@ -4487,8 +4499,9 @@ function testWfSystemRows(sb){
   }
   sb.STATE.data.settings = JSON.parse(JSON.stringify(FX.cases[1].settings));
   const S = sb.wfSystemRows(true, { meta: { 'team:newLead': 'f9' }, moved: { review: 'a-77' } }), by = k => S.find(r => r.key===k);
-  assertEqual([S.length, S.every(r => r.system===true && r.virtual===true && r.movable===false), by('ready:team:newLead').folderId, by('ready:review').movedTo, by('ready:chatText').folderId, by('ready:chatText').movedTo],
-    [12, true, 'f9', 'a-77', null, null], 'wfSystemRows: System and virtual; none can move yet; its folder (automation_system_meta) and the engine row it moved into');
+  assertEqual([S.length, S.every(r => r.system===true && r.virtual===true), S.filter(r => r.movable).map(r => r.base), by('ready:team:newLead').folderId, by('ready:review').movedTo, by('ready:chatText').folderId, by('ready:chatText').movedTo],
+    [12, true, ['team:newLead'], 'f9', 'a-77', null, null], 'wfSystemRows: System and virtual; only team:newLead can move (G7.2, one base per release); its folder (automation_system_meta) and the engine row it moved into');
+  assertEqual([sb.WF_SYSTEM_MOVABLE, sb.wfSystemRows(true, { moved: { 'team:newLead': 'a-9' } }).some(r => r.movable)], [['team:newLead'], false], 'wfSystemRows (G7.2): a base that has moved is not movable again');
   const rd = by('ready:review').doc, gate = Object.values(rd.nodes).find(n => n.kind==='if_else');
   assertEqual([rd.schema, rd.triggers[0].type, gate.config.branches[0].when.segments[0].rules[0], by('ready:team:leadWaiting').doc.triggers[0].type, by('ready:team:missedCall').doc.triggers[0].filters.segments[0].rules],
     [2, 'jobClosed', { field: 'dont_ask', op: 'true', lock: true }, 'newLead', [{ field: 'call.status', op: 'is', v: 'missed' }]], 'wfSystemRows: each one also as a stage-2 doc (wfFromFlat = the engine\'s upgradeV1); its guard condition stays locked');
@@ -6291,6 +6304,9 @@ function testWfRailWords(sb){
   const bn = sb.wfBannerHtml({ page: 'reviews' }, true), bn2 = sb.wfBannerHtml({}, false);
   assertEqual([bn.includes('System workflow · runs on the built-in system'), bn.includes('data-act="sysCopy">Duplicate to edit'), bn.includes('Open its old settings'), !bn2.includes('Open its old settings'), bn.includes('data-why="It moves into the engine in a later release"'), bn2.includes('data-why="Only owners move System workflows"')],
     [true, true, true, true, true, true], 'the System banner: "Duplicate to edit", its old settings when it has a page, "Move into the engine" greyed with the reason');
+  const bn3 = sb.wfBannerHtml({ movable: true }, true);
+  assertEqual([bn3.includes('<button type="button" class="btn small" data-act="sysMove">Move into the engine</button>'), sb.wfBannerHtml({ movable: true }, false).includes('data-why="Only owners move System workflows" data-act="sysMove"')],
+    [true, true], 'the System banner (G7.2): "Move into the engine" for an owner when its base is movable now');
 }
 // A fake automations function (step validate / save / publish / duplicate with the revision rules: a save or a
 // switch-on with an old revision → 409) and a fake notes table, for the write path.

@@ -18530,8 +18530,11 @@ function autoPreviewHtml(channel, subject, body, sample){
 // folderId } (automation_system_meta), moved: { [base]: automation id } } from the list's reads (optional). Each row:
 // key, base, name, audience, on, gate, toggle, locked, page, notes, def (the phase-4 shape), doc
 // (the same as a stage-2 doc: wfFromFlat, the app's twin of the engine's upgradeV1; locked conditions stay lock:true),
-// card (team rows), system / virtual (true), folderId, movable (false until its base moves, one per release)
-// and movedTo (the engine row it moved into, if any). fixtures/system-rows.json pins key/base/on/gate/toggle/locked.
+// card (team rows), system / virtual (true), folderId, movable (its base may move into the engine now: WF_SYSTEM_MOVABLE,
+// not moved yet) and movedTo (the engine row it moved into, if any). fixtures/system-rows.json pins key/base/on/gate/toggle/locked.
+// The bases that may move into the engine in this release (stage 2 G7.2, one per release; the engine's WF_SYSTEM decides
+// and checks again; automations' tests keep the two lists the same). Customer bases stay until Ofek's OK.
+const WF_SYSTEM_MOVABLE = ['team:newLead'];
 function wfSystemRows(all, o){
   const s = (STATE.data && STATE.data.settings) || {}, c = reviewCfg(), R = chatRulesApp(), N = notifyRulesApp(), phoneOn = !!s.phoneEnabled;
   const all7 = [0, 1, 2, 3, 4, 5, 6], hh = h => autoHhmm(h * 60);
@@ -18573,7 +18576,7 @@ function wfSystemRows(all, o){
   // The business took some off its list (they are off); all = every one (for "put back" and the open editor).
   const hidden = all ? [] : ((((s.catalog || {}).automations || {}).hiddenReady) || []).map(String);
   const x = o && typeof o==='object' ? o : {}, meta = x.meta && typeof x.meta==='object' ? x.meta : {}, moved = x.moved && typeof x.moved==='object' ? x.moved : {};
-  return rows.filter(r => !hidden.includes(r.base)).map(r => ({ ...r, system: true, virtual: true, doc: wfFromFlat(r.def, null), folderId: meta[r.base] || null, movable: false, movedTo: moved[r.base] || null }));
+  return rows.filter(r => !hidden.includes(r.base)).map(r => ({ ...r, system: true, virtual: true, doc: wfFromFlat(r.def, null), folderId: meta[r.base] || null, movable: WF_SYSTEM_MOVABLE.includes(r.base) && !moved[r.base], movedTo: moved[r.base] || null }));
 }
 
 // ── Safety for customer messages (public.automation_settings: the numbers of the engine's guard rails; the rails always
@@ -19264,7 +19267,7 @@ function wfItem(row, stats, settings, ctx){
   const triggers = Array.isArray(sum.triggers) ? sum.triggers.map(String) : (o(r.trigger).type ? [String(r.trigger.type)] : []);
   const delMs = deleted ? Date.parse(r.deleted_at) : NaN, nowMs = Number(c.nowMs);
   const on = r.enabled===true && !deleted;
-  return { ...base, key: id, kind: 'workflow', id, system: !!r.system_key, moved: !!r.system_key, name: String(r.name || ''), description: String(r.description || ''),
+  return { ...base, key: id, kind: 'workflow', id, system: !!r.system_key, moved: !!r.system_key, base: r.system_key ? String(r.system_key) : null, name: String(r.name || ''), description: String(r.description || ''),
     on, paused: on ? (c.tz ? wfPausedInfo(S.pauses, id, c.nowMs, c.tz) : wfPausedUntil(S.pauses, id, c.nowWall)) : null, folderId: r.folder_id ? String(r.folder_id) : null,
     audience: (sum.audience || r.audience)==='customer' ? 'customer' : 'team', external: Array.isArray(sum.guarded) && sum.guarded.includes('webhook'),
     triggers, actions: Array.isArray(sum.actions) ? sum.actions.map(String) : [], steps: n(sum.steps), enrolled: n(r.enrolled_total), active: stats ? n(st.active) : null,
@@ -19437,11 +19440,18 @@ function wfMenuItems(x, ctx){
   add('move', 'Move to folder');
   add('duplicate', 'Duplicate workflow');
   add('test', 'Test workflow', 'Comes with Test workflow in the builder');
-  if (it.virtual) add('moveIn', 'Move into the engine', c.owner ? 'It moves into the engine in a later release' : 'Only owners move System workflows');
-  if (it.moved) add('moveBack', 'Move back to the built-in system', 'Comes when System workflows move into the engine');
+  if (it.virtual) add('moveIn', 'Move into the engine', wfSystemMoveWhy(it, c.owner));
+  if (it.moved) add('moveBack', 'Move back to the built-in system', c.owner ? '' : 'Only owners move System workflows');
   add('delete', 'Delete workflow', it.moved ? 'Move it back to the built-in system first' : locked, true);
   add('copySub', 'Copy To Sub-Account', 'Comes with multi-business accounts');
   return out;
+}
+// Why "Move into the engine" is greyed for a System row ('' = it can move now; G7.2). owner = the signed-in person is an owner.
+function wfSystemMoveWhy(x, owner){
+  const it = x || {};
+  if (!owner) return 'Only owners move System workflows';
+  if (it.movable===true) return '';
+  return it.audience==='customer' ? 'Customer System workflows stay on the built-in system for now' : 'It moves into the engine in a later release';
 }
 // "When a new lead comes in" / "When Lead created, or 2 more" (an empty list: "Starts only when added by hand").
 function wfWhenText(x, L){
@@ -19802,6 +19812,8 @@ function wfMenuDo(id, key){
   else if (id==='deleteFolder') wfFolderDelete(key);
   else if (id==='restore') wfRestore(key);
   else if (id==='upload') wfTplUpload(key);
+  else if (id==='moveIn') wfSystemMove(x);
+  else if (id==='moveBack') wfSystemUnmove(x);
 }
 
 // ══ Settings → Automation → Global Workflow Settings (stage 2, phase 3 · G3.2; design §4.4, Ofek's Q7) ══
@@ -20294,7 +20306,7 @@ async function wfSetPublished(key, on, opts){
   if (!!x.on===!!on) return;
   if (!o.asked) {
     if (!on) {
-      const lines = [x.moved ? `${x.name} stops completely: the built-in one is off since the move.` : '', x.active ? `${x.active} record${x.active===1 ? '' : 's'} waiting in this workflow will stop.` : ''].filter(Boolean);
+      const lines = [x.moved ? `${x.name} goes back to the built-in system while it is a Draft.` : '', x.active ? `${x.active} record${x.active===1 ? '' : 's'} waiting in this workflow will stop.` : ''].filter(Boolean);
       if (lines.length) { confirmAction(`${lines.join(' ')} Switch it to Draft?`, () => wfSetPublished(key, false, { asked: true }), { danger: false, title: 'Draft workflow?', confirmLabel: 'Draft workflow' }); return; }
     } else {
       const ask = wfPublishAsk(x, [...WF_VIEW.byKey.values()]);
@@ -20313,6 +20325,30 @@ async function wfSetPublished(key, on, opts){
   if (!r.ok) { showToast((on ? 'Not published: ' : 'Not switched to Draft: ') + r.why, { kind: 'warn' }); wfChanged(); render(); return; }
   logSettingsActivity(wfActor(), `${CAT_NAMES.automations}: "${x.name}" ${on ? 'published' : 'switched to Draft'}`);
   showToast(on ? `${x.name}: published` : `${x.name}: Draft`);
+  wfChanged(); render();
+}
+// Move into the engine / Move back (stage 2 G7.2, owners; design §4.10). x = a System row (the list's item or the builder's
+// System row: name, base, virtual / moved, movable, id). The engine makes the moved row, a Draft (the built-in one goes on
+// as it is until it is published, and stops 30 minutes after), or gives the base back to the built-in system at once.
+function wfSystemMove(x){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  const why = x && x.virtual ? wfSystemMoveWhy(x, getRealProfile()?.role==='owner') : 'Not a System workflow';
+  if (why) { showToast(why, { kind: 'info' }); return; }
+  confirmAction(`"${x.name}" moves into the engine as a Draft. The built-in one goes on as it is until you publish it, and stops 30 minutes after that. Move it?`,
+    () => wfSystemMoveGo(x, { step: 'system_move', base: x.base, name: x.name }, 'moved into the engine (Draft)'), { danger: false, title: 'Move into the engine?', confirmLabel: 'Move' });
+}
+function wfSystemUnmove(x){
+  if (readOnlyReason()) { showToast(readOnlyReason()); return; }
+  if (!x || !x.moved || !x.id) return;
+  if (getRealProfile()?.role!=='owner') { showToast('Only owners move System workflows', { kind: 'info' }); return; }
+  confirmAction(`"${x.name}" goes back to the built-in system, which sends it again at once. Move it back?`,
+    () => wfSystemMoveGo(x, { step: 'system_unmove', automation_id: x.id }, 'moved back to the built-in system'), { danger: false, title: 'Move back?', confirmLabel: 'Move back' });
+}
+async function wfSystemMoveGo(x, body, done){
+  const res = await autoFnCall(body);
+  if (!res.ok) { showToast('Not moved: ' + autoFnReason(res.body), { kind: 'warn' }); return; }
+  logSettingsActivity(wfActor(), `${CAT_NAMES.automations}: "${x.name}" ${done}`);
+  showToast(`${x.name}: ${done}`);
   wfChanged(); render();
 }
 // A small window of its own (rename, a new folder, delete, move, bulk): the popup layer, drawn without render().
@@ -25580,7 +25616,7 @@ function wfBannerHtml(sys, owner){
   const s = wfObj(sys);
   return `<span>${ico('lock', 14)}System workflow · runs on the built-in system</span><button type="button" class="btn small primary" data-act="sysCopy">Duplicate to edit</button>`
     + (s.page ? `<button type="button" class="btn small" data-act="sysOld">Open its old settings</button>` : '')
-    + `<button type="button" class="btn small"${wfDisAttr(owner ? 'It moves into the engine in a later release' : 'Only owners move System workflows')}>Move into the engine</button>`;
+    + `<button type="button" class="btn small"${wfDisAttr(wfSystemMoveWhy(s, owner))} data-act="sysMove">Move into the engine</button>`;
 }
 
 // ── runtime ──
@@ -26249,6 +26285,7 @@ const WF_RAIL_ACTS = {
   stHide: (W, a) => { const id = a.dataset.sid, s = wfStickiesOf(W.layout).find(x => x.id===id); if (s) wfStickyCommit(s.hidden ? 'Show sticky note' : 'Hide sticky note', l => wfStickySet(l, id, { hidden: !s.hidden })); },
   stDel: (W, a) => { const id = a.dataset.sid; const no = wfStickyCommit('Delete sticky note', l => wfStickyRemove(l, id)); if (no) { W.panels.stickies.edit = null; showToast('Sticky note deleted', { undo: () => wfUndoCommit(no), local: true }); } },
   sysCopy: W => wfSystemCopyOpen(W.sys),
+  sysMove: W => { const sys = W.sys; if (wfSystemMoveWhy(sys, wfMe().role==='owner')) return; wfBuilderClose({ nav: false }); wfSystemMove(sys); },
   sysOld: W => { const page = W.sys && W.sys.page; if (!page) return; wfBuilderClose({ nav: false }); if (typeof setSettingsPage==='function') setSettingsPage(page); },   // the settings page's own entry follows the builder's (a back would undo it)
   // G6.3: the mode's banner and the Version history panel
   cmExit: () => wfModeExit(),
@@ -26303,7 +26340,8 @@ async function wfEdit(key){
   const row = await wfReadRow(k);
   if (!row) { if (WF_UUID_RE.test(k)) showToast('That workflow is no longer there', { kind: 'warn' }); return; }
   if (row.deleted_at) { showToast('It is in Deleted: restore it first', { kind: 'info' }); return; }
-  wfBuilderOpen(row, { mode: 'edit' });
+  // a moved System workflow keeps its steps (the engine refuses a change: G7.2); it is published from the list
+  wfBuilderOpen(row, { mode: 'edit', ...(row.system_key ? { ro: 'A System workflow keeps its steps: duplicate it to edit' } : {}) });
 }
 
 // ══ A workflow's Settings, Enrollment history and Execution logs tabs (stage 2, phase 6 · G6.2; design §4.6, §4.8) ══

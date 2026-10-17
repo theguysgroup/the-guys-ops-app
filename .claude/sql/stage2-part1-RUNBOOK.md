@@ -1082,3 +1082,47 @@ Remove the compat producer (`phase4_compat`, `enqueue`, the phase-4 `advance` / 
 `wfPublishBlock`, `autoProblems`, `autoStepIssues` and the six registries from the app (the Message templates tab then reads the
 engine's registry); retire `automations-phase4-compat` (it runs `trigger` + `steps`, so it can not outlive the columns); the offline
 differential then ends. Only then un-comment PART 4 · G7.1 on staging, then live.
+
+## 22. Phase 7 · G7.2 — System moves, team (app + `automations` + `push`; no SQL is run)
+
+What changes (design §4.10; one base per release — this release: **team:newLead** only):
+- **The System team block** (`SYS_TEAM`, `SYS_LEAD_COLS`, `sysLeadArrival`, `sysLeadKey`, `leadPayload`, `sysTeamTo`,
+  `sysHandedOver`, `OFFICE_KINDS`): ONE block, byte-identical in `push` and `automations` (automations' tests check). push's scan
+  now reads a new lead's first thread entry only (`first_at` / `first_quiet`: less egress, the same leads).
+- **push**: each scan reads `public.automations` (`system_key, enabled, deleted_at, system_handover_at` of the movable team bases)
+  and leaves a kind out only when its moved row is Published, not deleted, and handed over more than 30 minutes ago. Draft, Move
+  back, no row, or a read that fails = push sends it as before.
+- **automations**: `WF_SYSTEM` (every System base: legacy function, audience, key, overlap, movable or why not); the System mirror
+  (`systemMirror`, every tick in v2 modes, from the tick's own list of what is on: no extra read when nothing moved) sends a moved
+  `team:newLead` exactly as push does (same leads, words, people incl. vacations / stand-ins, `push_sent` key claimed first, at
+  most 30 a tick) and writes one log row per notification on the moved row; a moved row never runs as a workflow and never enters
+  the capture list. Steps `system_move` (owners; a Draft row, origin system, its folder; idempotent) and `system_unmove` (owners;
+  Deleted, System link cleared). Publish of a moved row sets `system_handover_at` (the handover); Draft clears it. A save that
+  changes a moved row's steps is refused ("duplicate it to edit"). The Publish overlap block now needs the same start **and** the
+  same kind of step (a moved team notification never blocks a customer workflow on a new lead).
+- **App**: "Move into the engine" (list ⋮ and the System banner, owners, `WF_SYSTEM_MOVABLE`), "Move back to the built-in system"
+  (owners, with a confirm); a moved row opens read-only in the builder; the Draft confirm of a moved row says the built-in one
+  takes over again.
+- Customer bases (review, chatText, missedText) stay virtual and not movable until Ofek's OK. leadWaiting, unpaid, docExpiry,
+  bizInsurance, vacationBack: later releases, one each (each needs its own mirror + parity scenarios first); missedCall with the
+  business phone; invoice when the app stops calling `notifyOwnersInvoice`; googleReview with its connector.
+
+### 22.1 Order
+1. ALL GREEN, one suite at a time (automations: the differential IDENTICAL, test 41 = the parity / handover / rollback guards;
+   push; business-logic; read-only; syntax).
+2. Deploy **push first** (it only gains the skip; with no moved row nothing changes), then **automations**, then the **app**.
+   Fingerprint each function as before (dashboard editor, never "deploy all").
+3. Staging, as an owner: Settings → Automation → the "A new lead comes in" System row → ⋮ Move into the engine → a Draft row
+   appears (the built-in card goes). Create a test lead: push still sends it (the row is a Draft). Publish the moved row; create
+   another lead: ONE notification (`push_sent` has `lead:<id>:<arrived>` once). After 30 minutes push's scan leaves new leads out;
+   the moved row's Execution logs show each one. Draft it: the next lead comes from push again. Move it back: the System card is back.
+4. Live: the same, at a quiet hour; watch the first leads after Publish (one notification each).
+
+### 22.2 Roll back (nothing dropped, nothing twice: push looks 6 hours back and the keys are shared)
+- **One base**: Draft the moved row (push takes over at once), or ⋮ Move back to the built-in system.
+- **The automations function** to a build before G7.2: first Draft or Move back every moved row (`select id, system_key from
+  public.automations where system_key like 'team:%' and deleted_at is null`), THEN redeploy — an older engine has no mirror while
+  push would still leave a handed-over kind out.
+- **push** to a build before G7.2: safe at any time (it sends every kind again; the engine's mirror finds the keys taken).
+- **App**: the previous commit (the move buttons go grey; moved rows still show and can be switched to Draft).
+- No SQL ran, so there is nothing to roll back in the database.

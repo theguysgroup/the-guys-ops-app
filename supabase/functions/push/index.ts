@@ -27,7 +27,9 @@
 //              (once per vacation). "Back tomorrow", or "back on Monday" when their working days (employees.working_days)
 //              put the return later (stage 3 follow-up 6).
 //              Anyone may call it: it only ever sends what push_sent hasn't recorded yet, and does nothing while
-//              everything is switched off.
+//              everything is switched off. A kind moved into the engine (stage 2 G7.2: "Move into the engine", then
+//              Publish) is left out once it is handed over; the engine sends it with the same words, people and keys
+//              (the System team block).
 // Recipients skip people on vacation with "No notifications" and go to their stand-in when one is chosen (stage 3; the
 // vacations block below). The test steps always go to the caller's own devices.
 // A device that the phone's push service says is gone (404 / 410) is removed.
@@ -318,21 +320,74 @@ export function holidayDaysOf(cat: any): Record<string, string> {
 }
 // ── end region ──
 
-// ── scan: news for the phones (Settings → Notifications) ──
-export const NOTIFY_KINDS = ["newLead", "leadWaiting", "missedCall", "unpaid", "docExpiry", "bizInsurance", "vacationBack"];
+// ── System team notifications (stage 2 G7.2): ONE block, byte-identical in push and automations (automations' tests check) ──
+// A team notification moves from push's scan into the engine one base per release (design §4.10). For a base that can
+// move, both sides use this block, so the engine's System mirror sends exactly what push would: the same leads, words,
+// people and once-ever key in push_sent (whoever claims a key first sends: one notification never goes twice). Moved =
+// a row of public.automations with system_key "team:<kind>". Handed over = that row is Published (enabled), not deleted,
+// and was published (system_handover_at) more than the base's overlap ago: only then does push's scan leave the kind
+// out. Draft, Move back, no row or a read that fails = push sends it again at once (its 6-hour look-back with the shared
+// keys: nothing dropped, nothing twice). During the overlap both look; the first claim sends.
+export const SYS_TEAM: Record<string, { overlapMinutes: number }> = { newLead: { overlapMinutes: 30 } };
 // Only these may also go to the office (VA and managers); the rest are money and private details, for the owners only.
 export const OFFICE_KINDS = ["newLead", "leadWaiting", "missedCall"];
+// What a lead scan reads of a card: its first thread entry's time and quiet mark only, never the thread.
+export const SYS_LEAD_COLS = "id, full_name, division, source, status, created_at, contacted_at, last_read_at, tags, reopened_at, import_quiet, first_at:messages->0->>at, first_quiet:messages->0->>quiet";
+// deno-lint-ignore no-explicit-any
+const sysFirst = (c: any) => (Array.isArray(c.messages) && c.messages[0]) || {};
+// When a lead arrived: reopened, else its first thread entry (a card made by hand has none: it is no news).
+// deno-lint-ignore no-explicit-any
+export const sysArrivedAt = (c: any): string | null => c.reopened_at || c.first_at || sysFirst(c).at || null;
+// A quiet MCP import (automations off: the column import_quiet; older imports: quiet on the first thread entry) is not
+// "new lead" news, until the customer comes back.
+// deno-lint-ignore no-explicit-any
+export const sysQuietArrival = (c: any): boolean => !c.reopened_at && (c.import_quiet === true || String(c.first_quiet ?? sysFirst(c).quiet ?? "") === "true");
+export const sysTestTag = (tags: unknown) => Array.isArray(tags) && tags.some((t) => String(t).toLowerCase() === "test");
+// A lead that is news now: arrived in the last 6 hours (never a backlog), not a test card, not a quiet import. → when.
+// deno-lint-ignore no-explicit-any
+export function sysLeadArrival(c: any, nowMs: number): { at: string; atMs: number } | null {
+  const at = sysArrivedAt(c); if (!at || sysTestTag(c.tags) || sysQuietArrival(c)) return null;
+  const atMs = Date.parse(at), age = nowMs - atMs;
+  return age >= 0 && age < 6 * 3600e3 ? { at, atMs } : null;
+}
+// deno-lint-ignore no-explicit-any
+export const sysLeadKey = (c: any, at: string) => `lead:${c.id}:${at}`;
+// deno-lint-ignore no-explicit-any
+export function leadPayload(c: any) {
+  const what = [c.division, c.source].filter(Boolean).join(" · ");
+  return { title: `New lead: ${c.full_name || "no name"}`, body: what || "A new enquiry came in.", url: `${APP_URL}?tab=crm`, tag: `lead-${c.id}` };
+}
+// Who gets a team notification: the owners, and the office too for a new lead, a waiting lead or a missed call when
+// chosen (N = catalog.notify); someone away with "No notifications" is left out or their stand-in gets it (only a
+// stand-in whose role may see it: money and private details stay with owners).
+// deno-lint-ignore no-explicit-any
+export function sysTeamTo(kind: string, people: any[], N: any, C: VacCtx): string[] {
+  // deno-lint-ignore no-explicit-any
+  const owners = (people || []).filter((p: any) => p.role === "owner").map((p: any) => p.id);
+  // deno-lint-ignore no-explicit-any
+  const office = (people || []).filter((p: any) => p.role === "va" || p.role === "manager").map((p: any) => p.id);
+  const withOffice = OFFICE_KINDS.includes(kind) && !!(N && N[kind] && N[kind].office);
+  return vacRecipients([...owners, ...(withOffice ? office : [])], C, withOffice ? ["owner", "va", "manager"] : ["owner"]);
+}
+// The kinds push leaves to the engine now. rows: { system_key, enabled, deleted_at, system_handover_at } of public.automations.
+// deno-lint-ignore no-explicit-any
+export function sysHandedOver(rows: any[], nowMs: number): string[] {
+  const out: string[] = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const key = String((r && r.system_key) || ""), kind = key.startsWith("team:") ? key.slice(5) : "", at = Date.parse(String((r && r.system_handover_at) || ""));
+    if (!kind || !Object.prototype.hasOwnProperty.call(SYS_TEAM, kind) || r.enabled !== true || r.deleted_at || !Number.isFinite(at)) continue;
+    if (at < nowMs - SYS_TEAM[kind].overlapMinutes * 60000 && !out.includes(kind)) out.push(kind);
+  }
+  return out;
+}
+// ── end System team ──
+
+// ── scan: news for the phones (Settings → Notifications) ──
+export const NOTIFY_KINDS = ["newLead", "leadWaiting", "missedCall", "unpaid", "docExpiry", "bizInsurance", "vacationBack"];
 export const BIZ_INSURANCE_DAYS = 30;   // the business insurance is always flagged 30 days before (Ofek 14 Oct)
 const DOC_LABEL: Record<string, string> = { license: "driver licence", passport: "passport", visa: "visa", heights: "working-at-heights ticket", arc: "refrigerant licence", insurance: "public liability insurance" };
 const BIZ_INSURANCE_LABEL: Record<string, string> = { workers: "workers compensation", liability: "public liability" };
 export function shiftDay(day: string, n: number) { const [y, m, d] = day.split("-").map(Number); const t = new Date(Date.UTC(y, m - 1, d + n)); return t.toISOString().slice(0, 10); }
-const TEST_TAG = (tags: unknown) => Array.isArray(tags) && tags.some((t) => String(t).toLowerCase() === "test");
-// deno-lint-ignore no-explicit-any
-const arrivedAt = (c: any) => c.reopened_at || (Array.isArray(c.messages) && c.messages[0] && c.messages[0].at) || null;
-// A quiet MCP import (automations off: the column import_quiet; older imports: quiet on the first thread entry) is not
-// "new lead" news, until the customer comes back.
-// deno-lint-ignore no-explicit-any
-const quietArrival = (c: any) => !c.reopened_at && (c.import_quiet === true || (Array.isArray(c.messages) && !!c.messages[0] && c.messages[0].quiet === true));
 // The numbers behind the notifications, set in Settings → Notifications (catalog.notify.rules, Ofek 13 Oct); "unpaid"
 // follows the business's own "Flag a job as unpaid after" (settings.unpaid_reminder_days). Nothing set = the originals.
 // deno-lint-ignore no-explicit-any
@@ -353,12 +408,8 @@ export function notifyOn(N: any, k: string): boolean {
   return !!(x && x.on);
 }
 
-// What each notification says (title, body, where it opens, tag). scan, the invoice step and the test step share them.
-// deno-lint-ignore no-explicit-any
-export function leadPayload(c: any) {
-  const what = [c.division, c.source].filter(Boolean).join(" · ");
-  return { title: `New lead: ${c.full_name || "no name"}`, body: what || "A new enquiry came in.", url: `${APP_URL}?tab=crm`, tag: `lead-${c.id}` };
-}
+// What each notification says (title, body, where it opens, tag). scan, the invoice step and the test step share them
+// (a new lead's, leadPayload, is in the System team block).
 // deno-lint-ignore no-explicit-any
 export function waitingPayload(c: any, R: { waitMinutes: number }) {
   return { title: `Waiting ${R.waitMinutes}+ minutes: ${c.full_name || "a new lead"}`, body: `Nobody has picked up this ${c.division || ""} lead yet.`.replace("  ", " "), url: `${APP_URL}?tab=crm`, tag: `waiting-${c.id}` };
@@ -459,7 +510,13 @@ export async function scan(sb: any, nowMs: number) {
   const { data: st } = await sb.from("settings").select("catalog, unpaid_reminder_days").eq("id", 1).single();
   const N = (st && st.catalog && st.catalog.notify) || {};
   const R = notifyRules(N, st && st.unpaid_reminder_days);
-  const on = (k: string) => notifyOn(N, k);
+  // a kind handed over to the engine (stage 2 G7.2, the System team block) is the engine's from then on; not read = none
+  let moved: string[] = [];
+  try {
+    const { data: rows, error } = await sb.from("automations").select("system_key, enabled, deleted_at, system_handover_at").in("system_key", Object.keys(SYS_TEAM).map((k) => "team:" + k));
+    if (!error) moved = sysHandedOver(rows || [], nowMs);
+  } catch { /* push sends as before; the shared keys keep each one once */ }
+  const on = (k: string) => notifyOn(N, k) && !moved.includes(k);
   const tz = bizTzOf(st && st.catalog), now = bizParts(nowMs, tz), today = now.day;   // the business's day and hour (Region and format)
   // "back tomorrow" (stage 3) has its own switch and keeps to the notifications' hours, like a waiting lead
   const anyOn = NOTIFY_KINDS.some((k) => k !== "vacationBack" && on(k)), backOn = on("vacationBack") && now.hour >= R.from && now.hour < R.until;
@@ -474,12 +531,11 @@ export async function scan(sb: any, nowMs: number) {
   // deno-lint-ignore no-explicit-any
   const events: { key: string; kind: string; payload: any }[] = [];
   if (on("newLead") || on("leadWaiting")) {
-    const { data: leads } = await sb.from("contacts").select("id, full_name, division, source, status, created_at, contacted_at, last_read_at, tags, messages, reopened_at, import_quiet").gte("created_at", shiftDay(today, -1));
+    const { data: leads } = await sb.from("contacts").select(SYS_LEAD_COLS).gte("created_at", shiftDay(today, -1));
     for (const c of leads || []) {
-      const at = arrivedAt(c); if (!at || TEST_TAG(c.tags) || quietArrival(c)) continue;
-      const atMs = Date.parse(at), age = nowMs - atMs;
-      if (!(age >= 0 && age < 6 * 3600e3)) continue;   // only what came in in the last 6 hours, never a backlog
-      if (on("newLead")) events.push({ key: `lead:${c.id}:${at}`, kind: "newLead", payload: leadPayload(c) });
+      const got = sysLeadArrival(c, nowMs); if (!got) continue;   // only what came in in the last 6 hours, never a backlog
+      const { at, atMs } = got, age = nowMs - atMs;
+      if (on("newLead")) events.push({ key: sysLeadKey(c, at), kind: "newLead", payload: leadPayload(c) });
       const touched = (c.status && c.status !== "New") || (c.contacted_at && Date.parse(c.contacted_at) >= atMs) || (c.last_read_at && Date.parse(c.last_read_at) >= atMs);
       if (on("leadWaiting") && !touched && age >= R.waitMinutes * 60000 && now.hour >= R.from && now.hour < R.until) events.push({ key: `waiting:${c.id}:${at}`, kind: "leadWaiting", payload: waitingPayload(c, R) });
     }
@@ -518,8 +574,6 @@ export async function scan(sb: any, nowMs: number) {
   const { data: people } = await sb.from("profiles").select("id, role");
   // deno-lint-ignore no-explicit-any
   const owners = (people || []).filter((p: any) => p.role === "owner").map((p: any) => p.id);
-  // deno-lint-ignore no-explicit-any
-  const office = (people || []).filter((p: any) => p.role === "va" || p.role === "manager").map((p: any) => p.id);
   const keys = await vapidKeys(sb);
   let sent = 0, skipped = 0;
   for (const ev of events.slice(0, 30)) {
@@ -527,9 +581,7 @@ export async function scan(sb: any, nowMs: number) {
     if (dup) { skipped++; continue; }
     // the office only for a new lead, a waiting lead and a missed call, when chosen; the rest to the owners only (a
     // stand-in gets it only when they may: an owner's technician stand-in never sees money or private details)
-    const withOffice = OFFICE_KINDS.includes(ev.kind) && N[ev.kind] && N[ev.kind].office;
-    const to = vacRecipients([...owners, ...(withOffice ? office : [])], C, withOffice ? ["owner", "va", "manager"] : ["owner"]);
-    const r = await sendTo(sb, to, ev.payload, keys);
+    const r = await sendTo(sb, sysTeamTo(ev.kind, people || [], N, C), ev.payload, keys);
     sent += r.sent;
   }
   // the day before someone is back (stage 3): to them (even with "No notifications": it is for them) and the owners
