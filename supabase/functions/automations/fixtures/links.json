@@ -1,0 +1,25 @@
+{
+  "about": "Links into Settings → Automation (design §4.1, group G3.1). The app's wfLink and the engine's wfLink give exactly `link` for each case (both test suites read this file); the app's wfStartLink reads `link` back as `parsed`. Expected values are written by hand.",
+  "cases": [
+    { "name": "a workflow in the builder", "id": "0b6c1f7e-4a2d-4c3b-9e8f-1a2b3c4d5e6f", "wfTab": "builder", "extra": {},
+      "link": "?tab=settings&page=automation&wf=0b6c1f7e-4a2d-4c3b-9e8f-1a2b3c4d5e6f&wfTab=builder",
+      "parsed": { "wf": "0b6c1f7e-4a2d-4c3b-9e8f-1a2b3c4d5e6f", "wfTab": "builder", "run": null, "listTab": null } },
+    { "name": "a run in the logs, on the business's address (its path kept, its query dropped)", "id": "0B6C1F7E-4A2D-4C3B-9E8F-1A2B3C4D5E6F", "wfTab": "logs",
+      "extra": { "base": "https://ops.example.com/app/?old=1#x", "run": "9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a" },
+      "link": "https://ops.example.com/app/?tab=settings&page=automation&wf=0B6C1F7E-4A2D-4C3B-9E8F-1A2B3C4D5E6F&wfTab=logs&run=9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a",
+      "parsed": { "wf": "0B6C1F7E-4A2D-4C3B-9E8F-1A2B3C4D5E6F", "wfTab": "logs", "run": "9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a", "listTab": null } },
+    { "name": "a System row (its key is escaped)", "id": "ready:team:newLead", "wfTab": "settings", "extra": {},
+      "link": "?tab=settings&page=automation&wf=ready%3Ateam%3AnewLead&wfTab=settings",
+      "parsed": { "wf": "ready:team:newLead", "wfTab": "settings", "run": null, "listTab": null } },
+    { "name": "the Needs review list, no workflow", "id": "", "wfTab": null, "extra": { "listTab": "review", "base": "https://ops.example.com" },
+      "link": "https://ops.example.com?tab=settings&page=automation&listTab=review",
+      "parsed": { "wf": null, "wfTab": null, "run": null, "listTab": "review" } },
+    { "name": "nothing that fails a rule gets in (an id with a quote, an unknown tab, a run that is not an id, an unknown list tab)",
+      "id": "x' onmouseover='1", "wfTab": "admin", "extra": { "run": "1; drop", "listTab": "everything" },
+      "link": "?tab=settings&page=automation",
+      "parsed": { "wf": null, "wfTab": null, "run": null, "listTab": null } },
+    { "name": "a System key outside the list of ready-made ones", "id": "ready:somethingElse", "wfTab": "enroll", "extra": { "listTab": "deleted" },
+      "link": "?tab=settings&page=automation&wfTab=enroll&listTab=deleted",
+      "parsed": { "wf": null, "wfTab": "enroll", "run": null, "listTab": "deleted" } }
+  ]
+}

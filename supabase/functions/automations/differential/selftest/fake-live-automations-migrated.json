@@ -1,0 +1,2816 @@
+[
+ {
+  "id": "live-0",
+  "name": "Review request after a closed job (ready-made shape)",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "jobClosed",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "r1",
+    "kind": "window",
+    "days": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "from": "09:00",
+    "until": "19:00",
+    "outside": "at",
+    "at": "10:00"
+   },
+   {
+    "id": "r2",
+    "kind": "if",
+    "match": "all",
+    "conds": [
+     {
+      "field": "dont_ask",
+      "op": "true",
+      "lock": true
+     },
+     {
+      "field": "asked_within_months",
+      "op": "true",
+      "n": 6
+     }
+    ]
+   },
+   {
+    "id": "r3",
+    "kind": "action",
+    "type": "text",
+    "templateKey": "reviewSms"
+   },
+   {
+    "id": "r4",
+    "kind": "action",
+    "type": "email",
+    "templateKey": "reviewEmailBody",
+    "subject": "How did we go, {first_name}?"
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 4,
+   "entry": "r1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "jobClosed",
+     "name": "Job closed",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "r1": {
+     "kind": "wait",
+     "type": "recurring",
+     "config": {
+      "mode": "window",
+      "window": {
+       "use": "custom",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "from": "09:00",
+       "until": "19:00",
+       "outside": "at",
+       "at": "10:00"
+      }
+     },
+     "out": {
+      "next": "r2"
+     }
+    },
+    "r2": {
+     "kind": "if_else",
+     "type": "if_else",
+     "config": {
+      "gate": true,
+      "noneName": "None",
+      "branches": [
+       {
+        "id": "r2_yes",
+        "name": "Yes",
+        "when": {
+         "match": "any",
+         "segments": [
+          {
+           "match": "all",
+           "rules": [
+            {
+             "field": "dont_ask",
+             "op": "true",
+             "lock": true
+            },
+            {
+             "field": "asked_within_months",
+             "op": "true",
+             "n": 6
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "out": {
+      "r2_yes": "r3",
+      "none": null
+     }
+    },
+    "r3": {
+     "kind": "action",
+     "type": "send_sms",
+     "config": {
+      "templateKey": "reviewSms"
+     },
+     "out": {
+      "next": "r4"
+     }
+    },
+    "r4": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "templateKey": "reviewEmailBody",
+      "subject": "How did we go, {first_name}?"
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-1",
+  "name": "Text after an unanswered website chat (ready-made shape)",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "chat",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "c1",
+    "kind": "wait",
+    "n": 5,
+    "unit": "minutes"
+   },
+   {
+    "id": "c2",
+    "kind": "if",
+    "match": "all",
+    "conds": [
+     {
+      "field": "has_mobile",
+      "op": "true",
+      "lock": true
+     },
+     {
+      "field": "chat_age_hours",
+      "op": "lte",
+      "n": 12
+     }
+    ]
+   },
+   {
+    "id": "c3",
+    "kind": "action",
+    "type": "text",
+    "templateKey": "chatOpen"
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 3,
+   "entry": "c1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "chat",
+     "name": "Conversations SLA",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "c1": {
+     "kind": "wait",
+     "type": "period",
+     "config": {
+      "n": 5,
+      "unit": "minutes"
+     },
+     "out": {
+      "next": "c2"
+     }
+    },
+    "c2": {
+     "kind": "if_else",
+     "type": "if_else",
+     "config": {
+      "gate": true,
+      "noneName": "None",
+      "branches": [
+       {
+        "id": "c2_yes",
+        "name": "Yes",
+        "when": {
+         "match": "any",
+         "segments": [
+          {
+           "match": "all",
+           "rules": [
+            {
+             "field": "has_mobile",
+             "op": "true",
+             "lock": true
+            },
+            {
+             "field": "chat_age_hours",
+             "op": "lte",
+             "n": 12
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "out": {
+      "c2_yes": "c3",
+      "none": null
+     }
+    },
+    "c3": {
+     "kind": "action",
+     "type": "send_sms",
+     "config": {
+      "templateKey": "chatOpen"
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-2",
+  "name": "Text after a missed call (ready-made shape)",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "missedCall",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "m1",
+    "kind": "if",
+    "match": "all",
+    "conds": [
+     {
+      "field": "has_mobile",
+      "op": "true",
+      "lock": true
+     }
+    ]
+   },
+   {
+    "id": "m2",
+    "kind": "action",
+    "type": "text",
+    "templateKey": "missedCall"
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 2,
+   "entry": "m1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "call_details",
+     "name": "Call details",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": [
+         {
+          "field": "call.status",
+          "op": "is",
+          "v": "missed"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "m1": {
+     "kind": "if_else",
+     "type": "if_else",
+     "config": {
+      "gate": true,
+      "noneName": "None",
+      "branches": [
+       {
+        "id": "m1_yes",
+        "name": "Yes",
+        "when": {
+         "match": "any",
+         "segments": [
+          {
+           "match": "all",
+           "rules": [
+            {
+             "field": "has_mobile",
+             "op": "true",
+             "lock": true
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "out": {
+      "m1_yes": "m2",
+      "none": null
+     }
+    },
+    "m2": {
+     "kind": "action",
+     "type": "send_sms",
+     "config": {
+      "templateKey": "missedCall"
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-3",
+  "name": "New lead (team card)",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "newLead",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "t9",
+    "kind": "action",
+    "type": "push",
+    "to": {
+     "roles": [
+      "owner",
+      "va",
+      "manager"
+     ],
+     "people": []
+    },
+    "title": "New lead",
+    "body": ""
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 9,
+   "entry": "t9",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "newLead",
+     "name": "Contact created",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "t9": {
+     "kind": "action",
+     "type": "internal_notification",
+     "config": {
+      "channel": "push",
+      "to": {
+       "roles": [
+        "owner",
+        "va",
+        "manager"
+       ],
+       "people": []
+      },
+      "title": "New lead",
+      "body": ""
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-4",
+  "name": "Lead waiting (team card)",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "newLead",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "t1",
+    "kind": "wait",
+    "n": 15,
+    "unit": "minutes"
+   },
+   {
+    "id": "t2",
+    "kind": "window",
+    "days": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "from": "08:00",
+    "until": "18:00",
+    "outside": "skip"
+   },
+   {
+    "id": "t3",
+    "kind": "if",
+    "match": "all",
+    "conds": [
+     {
+      "field": "not_picked",
+      "op": "true",
+      "lock": true
+     }
+    ]
+   },
+   {
+    "id": "t9",
+    "kind": "action",
+    "type": "push",
+    "to": {
+     "roles": [
+      "owner"
+     ],
+     "people": []
+    },
+    "title": "Lead waiting: {name}",
+    "body": "{service} from {source}"
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 10,
+   "entry": "t1",
+   "triggers": [
+    {
+     "id": "t10",
+     "type": "newLead",
+     "name": "Contact created",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "t1": {
+     "kind": "wait",
+     "type": "period",
+     "config": {
+      "n": 15,
+      "unit": "minutes"
+     },
+     "out": {
+      "next": "t2"
+     }
+    },
+    "t2": {
+     "kind": "wait",
+     "type": "recurring",
+     "config": {
+      "mode": "window",
+      "window": {
+       "use": "custom",
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "from": "08:00",
+       "until": "18:00",
+       "outside": "end"
+      }
+     },
+     "out": {
+      "next": "t3"
+     }
+    },
+    "t3": {
+     "kind": "if_else",
+     "type": "if_else",
+     "config": {
+      "gate": true,
+      "noneName": "None",
+      "branches": [
+       {
+        "id": "t3_yes",
+        "name": "Yes",
+        "when": {
+         "match": "any",
+         "segments": [
+          {
+           "match": "all",
+           "rules": [
+            {
+             "field": "not_picked",
+             "op": "true",
+             "lock": true
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "out": {
+      "t3_yes": "t9",
+      "none": null
+     }
+    },
+    "t9": {
+     "kind": "action",
+     "type": "internal_notification",
+     "config": {
+      "channel": "push",
+      "to": {
+       "roles": [
+        "owner"
+       ],
+       "people": []
+      },
+      "title": "Lead waiting: {name}",
+      "body": "{service} from {source}"
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-5",
+  "name": "Unpaid job (team card)",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "jobClosed",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "t1",
+    "kind": "wait",
+    "n": 3,
+    "unit": "days"
+   },
+   {
+    "id": "t3",
+    "kind": "if",
+    "match": "all",
+    "conds": [
+     {
+      "field": "unpaid",
+      "op": "true",
+      "lock": true
+     }
+    ]
+   },
+   {
+    "id": "t9",
+    "kind": "action",
+    "type": "push",
+    "to": {
+     "roles": [
+      "owner"
+     ],
+     "people": []
+    },
+    "title": "Unpaid: {name} {amount}",
+    "body": ""
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 10,
+   "entry": "t1",
+   "triggers": [
+    {
+     "id": "t10",
+     "type": "jobClosed",
+     "name": "Job closed",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "t1": {
+     "kind": "wait",
+     "type": "period",
+     "config": {
+      "n": 3,
+      "unit": "days"
+     },
+     "out": {
+      "next": "t3"
+     }
+    },
+    "t3": {
+     "kind": "if_else",
+     "type": "if_else",
+     "config": {
+      "gate": true,
+      "noneName": "None",
+      "branches": [
+       {
+        "id": "t3_yes",
+        "name": "Yes",
+        "when": {
+         "match": "any",
+         "segments": [
+          {
+           "match": "all",
+           "rules": [
+            {
+             "field": "unpaid",
+             "op": "true",
+             "lock": true
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "out": {
+      "t3_yes": "t9",
+      "none": null
+     }
+    },
+    "t9": {
+     "kind": "action",
+     "type": "internal_notification",
+     "config": {
+      "channel": "push",
+      "to": {
+       "roles": [
+        "owner"
+       ],
+       "people": []
+      },
+      "title": "Unpaid: {name} {amount}",
+      "body": ""
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-6",
+  "name": "Missed call (team card)",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "missedCall",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "t9",
+    "kind": "action",
+    "type": "push",
+    "to": {
+     "roles": [
+      "owner",
+      "va"
+     ],
+     "people": []
+    },
+    "title": "Missed call {number}",
+    "body": ""
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 9,
+   "entry": "t9",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "call_details",
+     "name": "Call details",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": [
+         {
+          "field": "call.status",
+          "op": "is",
+          "v": "missed"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "t9": {
+     "kind": "action",
+     "type": "internal_notification",
+     "config": {
+      "channel": "push",
+      "to": {
+       "roles": [
+        "owner",
+        "va"
+       ],
+       "people": []
+      },
+      "title": "Missed call {number}",
+      "body": ""
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-7",
+  "name": "Welcome email in office hours",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "newLead",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "w1",
+    "kind": "wait",
+    "n": 5,
+    "unit": "minutes"
+   },
+   {
+    "id": "w2",
+    "kind": "window",
+    "mode": "office",
+    "outside": "next"
+   },
+   {
+    "id": "w3",
+    "kind": "if",
+    "match": "all",
+    "conds": [
+     {
+      "field": "has_email",
+      "op": "true"
+     }
+    ]
+   },
+   {
+    "id": "w4",
+    "kind": "action",
+    "type": "email",
+    "templateKey": "welcomeEmail",
+    "subject": "Thanks for contacting {business_name}"
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 4,
+   "entry": "w1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "newLead",
+     "name": "Contact created",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "w1": {
+     "kind": "wait",
+     "type": "period",
+     "config": {
+      "n": 5,
+      "unit": "minutes"
+     },
+     "out": {
+      "next": "w2"
+     }
+    },
+    "w2": {
+     "kind": "wait",
+     "type": "recurring",
+     "config": {
+      "mode": "window",
+      "window": {
+       "use": "office",
+       "outside": "next"
+      }
+     },
+     "out": {
+      "next": "w3"
+     }
+    },
+    "w3": {
+     "kind": "if_else",
+     "type": "if_else",
+     "config": {
+      "gate": true,
+      "noneName": "None",
+      "branches": [
+       {
+        "id": "w3_yes",
+        "name": "Yes",
+        "when": {
+         "match": "any",
+         "segments": [
+          {
+           "match": "all",
+           "rules": [
+            {
+             "field": "has_email",
+             "op": "true"
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "out": {
+      "w3_yes": "w4",
+      "none": null
+     }
+    },
+    "w4": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "templateKey": "welcomeEmail",
+      "subject": "Thanks for contacting {business_name}"
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-8",
+  "name": "Quote follow-up after 2 days",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "stage",
+   "params": {
+    "stage": "Quoted"
+   }
+  },
+  "steps": [
+   {
+    "id": "q1",
+    "kind": "wait",
+    "n": 2,
+    "unit": "days"
+   },
+   {
+    "id": "q2",
+    "kind": "if",
+    "match": "all",
+    "conds": [
+     {
+      "field": "stage_unchanged",
+      "op": "true"
+     }
+    ]
+   },
+   {
+    "id": "q3",
+    "kind": "action",
+    "type": "email",
+    "subject": "Your {service} quote",
+    "body": "{hi}, just checking you got our quote. {agent} at {business_name}"
+   },
+   {
+    "id": "q4",
+    "kind": "action",
+    "type": "task",
+    "title": "Call {name} about the quote",
+    "notes": "{number}",
+    "assignees": [
+     "e-va"
+    ],
+    "due_days": 1,
+    "priority": "High"
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 4,
+   "entry": "q1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "stage",
+     "name": "Pipeline stage changed",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": [
+         {
+          "field": "trigger.stage",
+          "op": "is",
+          "v": "Quoted"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "q1": {
+     "kind": "wait",
+     "type": "period",
+     "config": {
+      "n": 2,
+      "unit": "days"
+     },
+     "out": {
+      "next": "q2"
+     }
+    },
+    "q2": {
+     "kind": "if_else",
+     "type": "if_else",
+     "config": {
+      "gate": true,
+      "noneName": "None",
+      "branches": [
+       {
+        "id": "q2_yes",
+        "name": "Yes",
+        "when": {
+         "match": "any",
+         "segments": [
+          {
+           "match": "all",
+           "rules": [
+            {
+             "field": "stage_unchanged",
+             "op": "true"
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "out": {
+      "q2_yes": "q3",
+      "none": null
+     }
+    },
+    "q3": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "subject": "Your {service} quote",
+      "body": "{hi}, just checking you got our quote. {agent} at {business_name}"
+     },
+     "out": {
+      "next": "q4"
+     }
+    },
+    "q4": {
+     "kind": "action",
+     "type": "add_task",
+     "config": {
+      "title": "Call {name} about the quote",
+      "notes": "{number}",
+      "assignees": [
+       "e-va"
+      ],
+      "due_days": 1,
+      "priority": "High"
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-9",
+  "name": "Any stage move: a task",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "stage",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "s1",
+    "kind": "action",
+    "type": "task",
+    "title": "Check {name} ({stage})",
+    "due_days": 0
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 1,
+   "entry": "s1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "stage",
+     "name": "Pipeline stage changed",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "s1": {
+     "kind": "action",
+     "type": "add_task",
+     "config": {
+      "title": "Check {name} ({stage})",
+      "due_days": 0
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-10",
+  "name": "After-hours lead ping",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "newLead",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "o1",
+    "kind": "window",
+    "mode": "outsideOffice",
+    "outside": "next"
+   },
+   {
+    "id": "o2",
+    "kind": "action",
+    "type": "push",
+    "to": {
+     "roles": [
+      "owner"
+     ]
+    },
+    "title": "After-hours lead: {name}"
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 2,
+   "entry": "o1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "newLead",
+     "name": "Contact created",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "o1": {
+     "kind": "wait",
+     "type": "recurring",
+     "config": {
+      "mode": "window",
+      "window": {
+       "use": "outsideOffice",
+       "outside": "next"
+      }
+     },
+     "out": {
+      "next": "o2"
+     }
+    },
+    "o2": {
+     "kind": "action",
+     "type": "internal_notification",
+     "config": {
+      "channel": "push",
+      "to": {
+       "roles": [
+        "owner"
+       ]
+      },
+      "title": "After-hours lead: {name}"
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-11",
+  "name": "Office-hours email at 07:30 otherwise",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "newLead",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "a1",
+    "kind": "window",
+    "mode": "office",
+    "outside": "at",
+    "at": "07:30"
+   },
+   {
+    "id": "a2",
+    "kind": "action",
+    "type": "email",
+    "subject": "We got your message",
+    "body": "{hi}, {agent} will call you soon."
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 2,
+   "entry": "a1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "newLead",
+     "name": "Contact created",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "a1": {
+     "kind": "wait",
+     "type": "recurring",
+     "config": {
+      "mode": "window",
+      "window": {
+       "use": "office",
+       "outside": "at",
+       "at": "07:30"
+      }
+     },
+     "out": {
+      "next": "a2"
+     }
+    },
+    "a2": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "subject": "We got your message",
+      "body": "{hi}, {agent} will call you soon."
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-12",
+  "name": "Unanswered chat ping",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "chat",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "h1",
+    "kind": "wait",
+    "n": 10,
+    "unit": "minutes"
+   },
+   {
+    "id": "h2",
+    "kind": "action",
+    "type": "push",
+    "to": {
+     "roles": [
+      "owner",
+      "va"
+     ]
+    },
+    "title": "Chat not answered: {name}"
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 2,
+   "entry": "h1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "chat",
+     "name": "Conversations SLA",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "h1": {
+     "kind": "wait",
+     "type": "period",
+     "config": {
+      "n": 10,
+      "unit": "minutes"
+     },
+     "out": {
+      "next": "h2"
+     }
+    },
+    "h2": {
+     "kind": "action",
+     "type": "internal_notification",
+     "config": {
+      "channel": "push",
+      "to": {
+       "roles": [
+        "owner",
+        "va"
+       ]
+      },
+      "title": "Chat not answered: {name}"
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-13",
+  "name": "Aircon Google Ads leads, not VIP",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "newLead",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "g1",
+    "kind": "if",
+    "match": "all",
+    "conds": [
+     {
+      "field": "service",
+      "op": "in",
+      "v": [
+       "Aircon"
+      ]
+     },
+     {
+      "field": "source",
+      "op": "is",
+      "v": "Google Ads"
+     },
+     {
+      "field": "tag",
+      "op": "has_not",
+      "v": "VIP"
+     }
+    ]
+   },
+   {
+    "id": "g2",
+    "kind": "action",
+    "type": "email",
+    "subject": "Your {service} enquiry",
+    "body": "{hi}, thanks for asking {business_name} about {service} ({brand})."
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 2,
+   "entry": "g1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "newLead",
+     "name": "Contact created",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "g1": {
+     "kind": "if_else",
+     "type": "if_else",
+     "config": {
+      "gate": true,
+      "noneName": "None",
+      "branches": [
+       {
+        "id": "g1_yes",
+        "name": "Yes",
+        "when": {
+         "match": "any",
+         "segments": [
+          {
+           "match": "all",
+           "rules": [
+            {
+             "field": "service",
+             "op": "in",
+             "v": [
+              "Aircon"
+             ]
+            },
+            {
+             "field": "source",
+             "op": "is",
+             "v": "Google Ads"
+            },
+            {
+             "field": "tag",
+             "op": "has_not",
+             "v": "VIP"
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "out": {
+      "g1_yes": "g2",
+      "none": null
+     }
+    },
+    "g2": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "subject": "Your {service} enquiry",
+      "body": "{hi}, thanks for asking {business_name} about {service} ({brand})."
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-14",
+  "name": "Review email an hour after a recent job",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "jobClosed",
+   "params": {
+    "maxJobAgeDays": 3
+   }
+  },
+  "steps": [
+   {
+    "id": "v1",
+    "kind": "wait",
+    "n": 1,
+    "unit": "hours"
+   },
+   {
+    "id": "v2",
+    "kind": "if",
+    "match": "all",
+    "conds": [
+     {
+      "field": "dont_ask",
+      "op": "true"
+     },
+     {
+      "field": "asked_within_months",
+      "op": "true",
+      "n": 3
+     }
+    ]
+   },
+   {
+    "id": "v3",
+    "kind": "action",
+    "type": "email",
+    "subject": "Thanks, {first_name}",
+    "body": "{hi}, {technician} did your job on {job_date} ({amount})."
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 3,
+   "entry": "v1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "jobClosed",
+     "name": "Job closed",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     },
+     "config": {
+      "maxJobAgeDays": 3
+     }
+    }
+   ],
+   "nodes": {
+    "v1": {
+     "kind": "wait",
+     "type": "period",
+     "config": {
+      "n": 1,
+      "unit": "hours"
+     },
+     "out": {
+      "next": "v2"
+     }
+    },
+    "v2": {
+     "kind": "if_else",
+     "type": "if_else",
+     "config": {
+      "gate": true,
+      "noneName": "None",
+      "branches": [
+       {
+        "id": "v2_yes",
+        "name": "Yes",
+        "when": {
+         "match": "any",
+         "segments": [
+          {
+           "match": "all",
+           "rules": [
+            {
+             "field": "dont_ask",
+             "op": "true"
+            },
+            {
+             "field": "asked_within_months",
+             "op": "true",
+             "n": 3
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "out": {
+      "v2_yes": "v3",
+      "none": null
+     }
+    },
+    "v3": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "subject": "Thanks, {first_name}",
+      "body": "{hi}, {technician} did your job on {job_date} ({amount})."
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-15",
+  "name": "Long nurture",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "newLead",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "n1",
+    "kind": "wait",
+    "n": 1,
+    "unit": "minutes"
+   },
+   {
+    "id": "n2",
+    "kind": "action",
+    "type": "push",
+    "to": {
+     "roles": [
+      "owner"
+     ]
+    },
+    "title": "Nurture start {name}"
+   },
+   {
+    "id": "n3",
+    "kind": "wait",
+    "n": 1,
+    "unit": "days"
+   },
+   {
+    "id": "n4",
+    "kind": "action",
+    "type": "email",
+    "subject": "Still need {service}?",
+    "body": "{hi}, it took {minutes} minutes to say hello."
+   },
+   {
+    "id": "n5",
+    "kind": "wait",
+    "n": 2,
+    "unit": "days"
+   },
+   {
+    "id": "n6",
+    "kind": "action",
+    "type": "text",
+    "body": "{hi}, {business_name} here."
+   },
+   {
+    "id": "n7",
+    "kind": "action",
+    "type": "task",
+    "title": "Nurture done: {name}"
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 7,
+   "entry": "n1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "newLead",
+     "name": "Contact created",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "n1": {
+     "kind": "wait",
+     "type": "period",
+     "config": {
+      "n": 1,
+      "unit": "minutes"
+     },
+     "out": {
+      "next": "n2"
+     }
+    },
+    "n2": {
+     "kind": "action",
+     "type": "internal_notification",
+     "config": {
+      "channel": "push",
+      "to": {
+       "roles": [
+        "owner"
+       ]
+      },
+      "title": "Nurture start {name}"
+     },
+     "out": {
+      "next": "n3"
+     }
+    },
+    "n3": {
+     "kind": "wait",
+     "type": "period",
+     "config": {
+      "n": 1,
+      "unit": "days"
+     },
+     "out": {
+      "next": "n4"
+     }
+    },
+    "n4": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "subject": "Still need {service}?",
+      "body": "{hi}, it took {minutes} minutes to say hello."
+     },
+     "out": {
+      "next": "n5"
+     }
+    },
+    "n5": {
+     "kind": "wait",
+     "type": "period",
+     "config": {
+      "n": 2,
+      "unit": "days"
+     },
+     "out": {
+      "next": "n6"
+     }
+    },
+    "n6": {
+     "kind": "action",
+     "type": "send_sms",
+     "config": {
+      "body": "{hi}, {business_name} here."
+     },
+     "out": {
+      "next": "n7"
+     }
+    },
+    "n7": {
+     "kind": "action",
+     "type": "add_task",
+     "config": {
+      "title": "Nurture done: {name}"
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-16",
+  "name": "Booked: any-of with the moved-on gate",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "stage",
+   "params": {
+    "stage": "Booked"
+   }
+  },
+  "steps": [
+   {
+    "id": "b1",
+    "kind": "if",
+    "match": "any",
+    "conds": [
+     {
+      "field": "has_email",
+      "op": "true"
+     },
+     {
+      "field": "has_mobile",
+      "op": "true"
+     },
+     {
+      "field": "stage_unchanged",
+      "op": "true"
+     }
+    ]
+   },
+   {
+    "id": "b2",
+    "kind": "action",
+    "type": "email",
+    "subject": "You're booked",
+    "body": "{hi}, see you soon."
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 2,
+   "entry": "b1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "stage",
+     "name": "Pipeline stage changed",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": [
+         {
+          "field": "trigger.stage",
+          "op": "is",
+          "v": "Booked"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "b1": {
+     "kind": "if_else",
+     "type": "if_else",
+     "config": {
+      "gate": true,
+      "noneName": "None",
+      "branches": [
+       {
+        "id": "b1_yes",
+        "name": "Yes",
+        "when": {
+         "match": "any",
+         "segments": [
+          {
+           "match": "any",
+           "rules": [
+            {
+             "field": "has_email",
+             "op": "true"
+            },
+            {
+             "field": "has_mobile",
+             "op": "true"
+            },
+            {
+             "field": "stage_unchanged",
+             "op": "true"
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "out": {
+      "b1_yes": "b2",
+      "none": null
+     }
+    },
+    "b2": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "subject": "You're booked",
+      "body": "{hi}, see you soon."
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-17",
+  "name": "Instant customer email",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "newLead",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "i1",
+    "kind": "action",
+    "type": "email",
+    "subject": "Hello from {business_name}",
+    "body": "{hi}."
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 1,
+   "entry": "i1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "newLead",
+     "name": "Contact created",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "i1": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "subject": "Hello from {business_name}",
+      "body": "{hi}."
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-18",
+  "name": "If, then a weekday window, then an email",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "newLead",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "k1",
+    "kind": "if",
+    "match": "all",
+    "conds": [
+     {
+      "field": "has_email",
+      "op": "true"
+     }
+    ]
+   },
+   {
+    "id": "k2",
+    "kind": "window",
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "09:00",
+    "until": "17:00",
+    "outside": "next"
+   },
+   {
+    "id": "k3",
+    "kind": "action",
+    "type": "push",
+    "to": {
+     "roles": [
+      "owner"
+     ]
+    },
+    "title": "Emailing {name}"
+   },
+   {
+    "id": "k4",
+    "kind": "action",
+    "type": "email",
+    "subject": "Weekday hello",
+    "body": "{hi}."
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 4,
+   "entry": "k1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "newLead",
+     "name": "Contact created",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "k1": {
+     "kind": "if_else",
+     "type": "if_else",
+     "config": {
+      "gate": true,
+      "noneName": "None",
+      "branches": [
+       {
+        "id": "k1_yes",
+        "name": "Yes",
+        "when": {
+         "match": "any",
+         "segments": [
+          {
+           "match": "all",
+           "rules": [
+            {
+             "field": "has_email",
+             "op": "true"
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "out": {
+      "k1_yes": "k2",
+      "none": null
+     }
+    },
+    "k2": {
+     "kind": "wait",
+     "type": "recurring",
+     "config": {
+      "mode": "window",
+      "window": {
+       "use": "custom",
+       "days": [
+        1,
+        2,
+        3,
+        4,
+        5
+       ],
+       "from": "09:00",
+       "until": "17:00",
+       "outside": "next"
+      }
+     },
+     "out": {
+      "next": "k3"
+     }
+    },
+    "k3": {
+     "kind": "action",
+     "type": "internal_notification",
+     "config": {
+      "channel": "push",
+      "to": {
+       "roles": [
+        "owner"
+       ]
+      },
+      "title": "Emailing {name}"
+     },
+     "out": {
+      "next": "k4"
+     }
+    },
+    "k4": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "subject": "Weekday hello",
+      "body": "{hi}."
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-19",
+  "name": "Weekend window that ends the run",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "newLead",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "y1",
+    "kind": "window",
+    "days": [
+     0,
+     6
+    ],
+    "from": "10:00",
+    "until": "16:00",
+    "outside": "skip"
+   },
+   {
+    "id": "y2",
+    "kind": "action",
+    "type": "email",
+    "subject": "Weekend",
+    "body": "{hi}."
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 2,
+   "entry": "y1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "newLead",
+     "name": "Contact created",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "y1": {
+     "kind": "wait",
+     "type": "recurring",
+     "config": {
+      "mode": "window",
+      "window": {
+       "use": "custom",
+       "days": [
+        0,
+        6
+       ],
+       "from": "10:00",
+       "until": "16:00",
+       "outside": "end"
+      }
+     },
+     "out": {
+      "next": "y2"
+     }
+    },
+    "y2": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "subject": "Weekend",
+      "body": "{hi}."
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ },
+ {
+  "id": "live-20",
+  "name": "A blank that cannot be filled",
+  "enabled": false,
+  "armed_at": null,
+  "version": 3,
+  "created_by_name": "Olivia Owner",
+  "trigger": {
+   "type": "newLead",
+   "params": {}
+  },
+  "steps": [
+   {
+    "id": "x1",
+    "kind": "action",
+    "type": "email",
+    "subject": "About {technician}",
+    "body": "{hi}."
+   }
+  ],
+  "definition": {
+   "schema": 2,
+   "seq": 1,
+   "entry": "x1",
+   "triggers": [
+    {
+     "id": "t1",
+     "type": "newLead",
+     "name": "Contact created",
+     "filters": {
+      "match": "all",
+      "segments": [
+       {
+        "match": "all",
+        "rules": []
+       }
+      ]
+     }
+    }
+   ],
+   "nodes": {
+    "x1": {
+     "kind": "action",
+     "type": "send_email",
+     "config": {
+      "subject": "About {technician}",
+      "body": "{hi}."
+     },
+     "out": {
+      "next": null
+     }
+    }
+   }
+  },
+  "settings": {
+   "reentry": "legacy_always",
+   "perRecord": true,
+   "stopOnResponse": false,
+   "timezone": "business",
+   "window": {
+    "on": false,
+    "days": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "from": "08:00",
+    "until": "17:00"
+   },
+   "sender": {
+    "fromName": null
+   },
+   "markRead": false
+  },
+  "revision": 2
+ }
+]
