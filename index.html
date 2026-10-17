@@ -2359,6 +2359,71 @@ body.pipe-dragging, body.pipe-dragging * { cursor: grabbing !important; user-sel
   .wfh-sw { margin-inline-start: 0; }
   .wfh-d { grid-template-columns: 1fr; gap: 2px; }
 }
+/* the canvas modes (stage 2, phase 6 · G6.3; design §4.7, §4.8): a run's or a test's path (visited green with a halo and
+   dashed green lines, failed red, skipped grey dashed, the step it waits at with a pulsing amber dot), Stats view's counts,
+   the banners, Version history, the Test workflow panel and the "Stats: <trigger>" window. Every state is a text tag too. */
+.wfb-card.wfm-vis, .wfb-card.wfm-in { border-color: var(--wf-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wf-ok) 22%, transparent); }
+.wfb-card.wfm-fail { border-color: var(--wf-fail); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wf-fail) 22%, transparent); }
+.wfb-card.wfm-skip { border-style: dashed; border-color: var(--wf-skip); }
+.wfb-card.wfm-wait { border-color: var(--wf-wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wf-wait) 22%, transparent); }
+.wfb-card.wfm-wait::after { content: ''; position: absolute; top: -6px; right: -6px; width: 12px; height: 12px; border-radius: 50%; background: var(--wf-wait); animation: wfm-pulse 1.4s ease-in-out infinite; pointer-events: none; }
+@keyframes wfm-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(1.5); } }
+@media (prefers-reduced-motion: reduce) { .wfb-card.wfm-wait::after { animation: none; } }
+.wfb-card.wfm-dim, .wfb-head.wfm-dim { opacity: .45; }
+.wfb-head.wfm-vis { border-color: var(--wf-ok); border-bottom-color: var(--wf-ok); }
+.wfb-edges path.wfm-e { stroke: var(--wf-ok); stroke-width: 2.5; stroke-dasharray: 6 4; }
+.wfb-edges path.is-arrow.wfm-e { fill: var(--wf-ok); stroke: none; stroke-dasharray: none; }
+.wfb-edges path.wfm-off { opacity: .35; }
+.wfb-tag.is-verdict { background: var(--surface-2); color: var(--ink); max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.wfb-tag.is-stats { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.wfm-vis .wfb-tag.is-verdict, .wfm-in .wfb-tag.is-stats { background: var(--good-soft); color: var(--good); }
+.wfm-fail .wfb-tag.is-verdict { background: var(--bad-soft); color: var(--bad); }
+.wfm-wait .wfb-tag.is-verdict { background: var(--warn-soft); color: var(--warn); }
+.wfb-tf .wfb-tst { margin-inline-end: auto; }
+.wfb-test.on { background: var(--wf-sel-soft); color: var(--wf-sel); }
+.wfb-banner.is-path { background: var(--good-soft); color: var(--ink); border-bottom-color: var(--line); }
+.wfb-banner.is-test { background: var(--wf-stats-soft); color: var(--wf-stats); border-bottom-color: var(--line); }
+.wfb-banner > .btn { flex: none; }
+.wfm-info { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 0; font-size: 12.5px; min-width: 0; }
+.wfm-info > div { display: flex; gap: 4px; min-width: 0; }
+.wfm-info dt { font-weight: 600; color: var(--ink-soft); }
+.wfm-info dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.wfm-note { flex: 1 1 100%; margin: 0; font-size: 12.5px; }
+.wfr-tag.is-pub { background: var(--good-soft); color: var(--good); }
+.wfr-item.is-on { border-color: var(--wf-sel); }
+.wfm-h { margin: 0; font-size: 14px; }
+.wfm-test .field { display: flex; flex-direction: column; gap: 4px; margin: 0; font-size: 13px; }
+.wfm-assume { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.wfm-assume legend { font-size: 12px; font-weight: 700; color: var(--ink-soft); padding: 0 4px; }
+.wfm-assume .wfr-row > span { flex: 1 1 140px; min-width: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.wfm-assume .wfr-row > .input { flex: 1 1 140px; width: auto; }
+.wfm-chip { flex: none; max-width: 60%; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; background: var(--surface-2); color: var(--ink-soft); overflow-wrap: anywhere; }
+.wfm-chip.is-good { background: var(--good-soft); color: var(--good); }
+.wfm-chip.is-warn { background: var(--warn-soft); color: var(--warn); }
+.wfm-chip.is-bad { background: var(--bad-soft); color: var(--bad); }
+.wfm-prev { margin: 6px 0 0; padding: 6px 8px; background: var(--surface-2); border-radius: 6px; font-size: 12.5px; max-height: 180px; overflow: auto; }
+.wfm-prev > div { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 6px; padding: 2px 0; }
+.wfm-prev dt { color: var(--ink-soft); font-weight: 600; }
+.wfm-prev dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wfm-probs { margin: 0; padding-inline-start: 18px; font-size: 12.5px; color: var(--bad); }
+.wfm-bad { color: var(--bad); }
+.wfb-dlg.wfm-dlg { width: min(820px, 100%); }
+.wfm-stats { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.wfm-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.wfm-kpi { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; font-size: 12px; color: var(--ink-soft); }
+.wfm-kpi b { display: block; font-size: 20px; color: var(--ink); }
+.wfm-range .input { width: auto; margin: 0; }
+.wfm-tabs { margin: 0; }
+.wfm-reasons { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.wfm-reasons li > span { margin-inline-end: 8px; overflow-wrap: anywhere; }
+.wfm-caps { margin: 0; padding-inline-start: 18px; font-size: 12.5px; color: var(--ink-soft); }
+.wfm-pager { justify-content: flex-end; }
+.wfm-foot { margin-inline-end: auto; }
+@media (max-width: 600px) {
+  .wfm-kpis { grid-template-columns: 1fr; }
+  .wfm-prev > div { grid-template-columns: 1fr; gap: 0; }
+  .wfm-chip { max-width: 100%; }
+}
 .lead-sub-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 99px; white-space: nowrap; color: var(--ink-soft); border: 1px solid var(--line); }
 .stage-select { border-color: color-mix(in srgb, var(--stage) 70%, var(--line)) !important; box-shadow: inset 4px 0 0 var(--stage); }
 .jobs-table select.lead-assignee { width: auto; max-width: 160px; }
@@ -24006,14 +24071,15 @@ function wfStepCardHtml(c){
   return `<span class="wfb-tile" style="--tone:var(--wf-${esc(c.tone)})">${wfIcon(c.icon, 18)}</span>`
     + `<span class="wfb-txt"><b dir="auto" title="${esc(c.name)}">${esc(c.name)}</b>${c.sum && c.sum!==c.name ? `<small dir="auto" title="${esc(c.sum)}">${esc(c.sum)}</small>` : ''}</span>`
     + `<span class="wfb-tags">${c.disabled ? '<span class="wfb-tag">Disabled</span>' : ''}${c.unknown ? '<span class="wfb-tag">Unknown step</span>' : ''}`
-    + `${c.issue ? `<span class="wfb-tag is-${c.issue==='error' ? 'err' : 'warn'}">${c.issue==='error' ? 'Error' : 'Warning'}</span>` : ''}${c.stats ? `<span class="wfb-tag is-stats">${esc(c.stats)}</span>` : ''}${c.verdict ? `<span class="wfb-tag is-verdict">${esc(c.verdict)}</span>` : ''}</span>`
+    + `${c.issue ? `<span class="wfb-tag is-${c.issue==='error' ? 'err' : 'warn'}">${c.issue==='error' ? 'Error' : 'Warning'}</span>` : ''}${c.stats ? `<span class="wfb-tag is-stats" title="${esc(c.stats)}">${esc(c.stats)}</span>` : ''}${c.verdict ? `<span class="wfb-tag is-verdict" title="${esc(c.verdict)}">${esc(c.verdict)}</span>` : ''}</span>`
     + b('menu', 'Step menu', ico('moreH', 18), 'wfb-more')
     + `<span class="wfb-hov">${!c.ro && c.canToggle ? b('toggle', c.disabled ? 'Enable' : 'Disable', ico(c.disabled ? 'play' : 'pause', 14)) : ''}`
     + `${b('notes', c.notes ? `Notes (${c.notes})` : 'Notes', `${ico('message', 14)}${c.notes ? `<i>${Number(c.notes) || 0}</i>` : ''}`, c.notes ? 'has' : '', c.notesWhy)}</span>`
     + (!c.ro && !c.mobile && c.canMove ? `<span class="wfb-grip" data-act="drag" data-id="${id}" title="Drag to move" aria-hidden="true">${ico('grip', 14)}</span>` : '');
 }
 // The trigger card (330 wide; header, narration, footer). c = { id, head, name, lines, more, icon, tone, disabled, issue, ro,
-// statsWhy (Stats can't open yet: the reason, greyed) }.
+// statsWhy (Stats can't open yet: the reason, greyed), stats (G6.3: Stats view's counts, a path's "Entered"), statsOn
+// (Stats view: "View Detailed Stats") }.
 function wfTriggerCardHtml(c){
   const id = esc(c.id), b = (act, label, icon, cls) => `<button type="button" tabindex="-1" class="${cls || ''}" data-act="${act}" data-id="${id}" aria-label="${esc(label)}" title="${esc(label)}">${icon}</button>`;
   return `<div class="wfb-th"><span class="wfb-tile" style="--tone:var(--wf-${esc(c.tone)})">${wfIcon(c.icon, 18)}</span>`
@@ -24022,15 +24088,18 @@ function wfTriggerCardHtml(c){
     + `${b('tmenu', 'Trigger menu', ico('moreH', 18), 'wfb-more')}</div>`
     + `<div class="wfb-tn">${(c.lines || []).map(l => `<div dir="auto" title="${esc(l)}">${esc(l)}</div>`).join('')}${c.more ? `<div class="wfb-tm">+${Number(c.more) || 0} more</div>` : ''}</div>`
     + `<div class="wfb-tf">${c.ro ? '' : b('tcopy', 'Copy trigger', ico('copy', 15)) + b('tdel', 'Delete trigger', ico('trash', 15))}`
-    + `<button type="button" tabindex="-1" class="wfb-tstats" data-act="tstats" data-id="${id}"${c.statsWhy ? ` title="${esc(c.statsWhy)}"` : ''}${wfDisAttr(c.statsWhy)}>${ico('chart', 14)}Stats</button></div>`;
+    + `${c.stats ? `<span class="wfb-tag is-stats wfb-tst" title="${esc(c.stats)}">${esc(c.stats)}</span>` : ''}`
+    + `<button type="button" tabindex="-1" class="wfb-tstats" data-act="tstats" data-id="${id}"${c.statsWhy ? ` title="${esc(c.statsWhy)}"` : ''}${wfDisAttr(c.statsWhy)}>${ico('chart', 14)}${c.statsOn ? 'View Detailed Stats' : 'Stats'}</button></div>`;
 }
-// A branch header card (220 × 56): fork icon, the branch's name, its conditions in one line.
+// A branch header card (220 × 56): fork icon, the branch's name, its conditions in one line; Stats view's count (G6.3).
 function wfHeadCardHtml(c){
-  return `<span class="wfb-fork">${ico(c.kind==='split' ? 'split' : 'branch', 16)}</span><span class="wfb-txt"><b dir="auto" title="${esc(c.label)}">${esc(c.label)}</b>${c.sum ? `<small dir="auto" title="${esc(c.sum)}">${esc(c.sum)}</small>` : ''}</span>`;
+  return `<span class="wfb-fork">${ico(c.kind==='split' ? 'split' : 'branch', 16)}</span><span class="wfb-txt"><b dir="auto" title="${esc(c.label)}">${esc(c.label)}</b>${c.sum ? `<small dir="auto" title="${esc(c.sum)}">${esc(c.sum)}</small>` : ''}</span>`
+    + (c.stats ? `<span class="wfb-tag is-stats">${esc(c.stats)}</span>` : '');
 }
 // Everything on the canvas as keyed descriptions (the paint creates, patches or removes elements by key; nothing is
 // measured). x = { at, seq (wfA11yTree), issueOf: { key: 'error'|'warning' }, ro, mobile, clip, move: { keys: Set, hot },
-// notes: { id: n }, stats: { id: text }, verdicts: { id: text }, I, order }. → { items: [{ key, group ('trig'|'tree'|'deco'),
+// notes: { id: n }, stats: { id: text }, verdicts: { id: text }, I, order; G6.3: tstats: { triggerId: text }, hstats:
+// { 'stepId:port': text }, statsOn }. → { items: [{ key, group ('trig'|'tree'|'deco'),
 // tag, act, id, cls, x, y, w, h, attrs, al, ck, html() }], edges }.
 function wfCanvasItems(doc, L, reg, ctx, x){
   const d = wfObj(doc), o = x || {}, lay = wfObj(L), at = wfObj(o.at), iss = wfObj(o.issueOf), ro = !!o.ro, mob = !!o.mobile, items = [];
@@ -24043,9 +24112,10 @@ function wfCanvasItems(doc, L, reg, ctx, x){
   const trigs = Array.isArray(d.triggers) ? d.triggers.map(wfObj) : [];
   (lay.triggers || []).forEach(b => {
     const t = trigs.find(z => String(z.id)===b.id) || {}, e = wfTrigEntry(reg, t.type), N = wfTriggerNarration(t, reg, ctx), key = `t:${b.id}`;
-    const c = { id: b.id, head: N.head, name: N.name, lines: N.lines, more: N.more, icon: e ? e.icon : 'zap', tone: e ? wfToneOf(e) : 'grey', disabled: t.disabled===true, issue: iss[key] || '', ro, statsWhy: String(o.statsWhy || '') };
+    const c = { id: b.id, head: N.head, name: N.name, lines: N.lines, more: N.more, icon: e ? e.icon : 'zap', tone: e ? wfToneOf(e) : 'grey', disabled: t.disabled===true, issue: iss[key] || '', ro, statsWhy: String(o.statsWhy || ''),
+      stats: String(wfObj(o.tstats)[b.id] || ''), statsOn: !!o.statsOn };
     items.push({ key, group: 'trig', act: 'card', id: b.id, cls: `wfb-card wfb-trig${c.disabled ? ' is-off' : ''}${c.issue ? ` iss-${c.issue}` : ''}`, x: b.x, y: b.y, w: b.w, h: b.h, attrs: aria(key),
-      al: `Trigger: ${N.head}${N.name ? `, ${N.name}` : ''}. ${N.lines.join('. ')}${N.more ? `. +${N.more} more` : ''}.${c.disabled ? ' Disabled.' : ''}${issueWords(key)}`, ck: JSON.stringify(c), html: () => wfTriggerCardHtml(c) });
+      al: `Trigger: ${N.head}${N.name ? `, ${N.name}` : ''}. ${N.lines.join('. ')}${N.more ? `. +${N.more} more` : ''}.${c.disabled ? ' Disabled.' : ''}${c.stats ? ` ${c.stats}.` : ''}${issueWords(key)}`, ck: JSON.stringify(c), html: () => wfTriggerCardHtml(c) });
   });
   // GHL's "+ Add new trigger"; while its picker is open it is the "● New Trigger" placeholder (o.pickingTrigger)
   if (lay.addTrigger && !ro) {
@@ -24066,9 +24136,9 @@ function wfCanvasItems(doc, L, reg, ctx, x){
     const n = wfObj(I.nodes[b.node]), cfg = wfObj(n.config), key = `h:${b.node}:${b.port}`;
     const br = n.kind==='if_else' && b.port!=='none' ? wfObj((Array.isArray(cfg.branches) ? cfg.branches : []).find(z => wfObj(z).id===b.port)) : null;
     const sum = n.kind!=='if_else' ? '' : b.port==='none' ? WF_NONE_SUMMARY : wfSafe(() => wfBranchSummary(br.when, reg, ctx), '');
-    const c = { label: b.label || b.port, sum, kind: n.kind==='split' ? 'split' : n.kind==='wait' ? 'wait' : 'branch' };
+    const c = { label: b.label || b.port, sum, kind: n.kind==='split' ? 'split' : n.kind==='wait' ? 'wait' : 'branch', stats: String(wfObj(o.hstats)[`${b.node}:${b.port}`] || '') };
     tree.push({ key, group: 'tree', act: 'head', id: b.node, cls: `wfb-head is-${c.kind}`, x: b.x, y: b.y, w: b.w, h: b.h, attrs: { ...aria(key), 'aria-expanded': 'true' },
-      al: `Path: ${c.label}${sum ? `. ${sum}` : ''}.`, ck: JSON.stringify(c), html: () => wfHeadCardHtml(c) });
+      al: `Path: ${c.label}${sum ? `. ${sum}` : ''}.${c.stats ? ` ${c.stats}.` : ''}`, ck: JSON.stringify(c), html: () => wfHeadCardHtml(c) });
   });
   const seqIx = new Map((o.seq || []).map((k, i) => [k, i]));
   tree.sort((a, b) => (seqIx.has(a.key) ? seqIx.get(a.key) : 1e9) - (seqIx.has(b.key) ? seqIx.get(b.key) : 1e9) || (a.key < b.key ? -1 : 1));
@@ -24115,9 +24185,10 @@ function wfTopHtml(s){
   const name = s.renaming
     ? `<input class="input wfb-rename" data-act="renameInput" value="${esc(s.renameDraft)}" maxlength="${WF_DOC_LIMITS.name}" aria-label="Workflow name" dir="auto">`
     : `<h1 class="wfb-title" dir="auto" title="${esc(s.name)}">${esc(s.name)}</h1>${s.mobile ? '' : `<button type="button" class="wfb-ib" data-act="rename" aria-label="Rename the workflow" title="Rename"${wfDisAttr(s.ro)}>${ico('pencil', 15)}</button>`}`;
-  if (s.mobile) return `<button type="button" class="wfb-ib" data-act="back" aria-label="Workflows list">${ico('arrowLeft', 18)}</button><div class="wfb-name"${s.renaming ? '' : ' data-act="rename"'}>${name}</div>`
+  const path = s.mode==='path';   // See contact path (G6.3): "← Back" leaves the path first
+  if (s.mobile) return `<button type="button" class="wfb-ib" data-act="${path ? 'cmExit' : 'back'}" aria-label="${path ? 'Back' : 'Workflows list'}">${ico('arrowLeft', 18)}</button><div class="wfb-name"${s.renaming ? '' : ' data-act="rename"'}>${name}</div>`
     + `<button type="button" class="wfb-ib" data-act="more" aria-label="More" aria-haspopup="menu">${ico('moreH', 18)}</button>${saveBtn}`;
-  return `<button type="button" class="wfb-tb wfb-back" data-act="back">${ico('arrowLeft', 16)}Workflows list</button>`
+  return `<button type="button" class="wfb-tb wfb-back" data-act="${path ? 'cmExit' : 'back'}">${ico('arrowLeft', 16)}${path ? 'Back' : 'Workflows list'}</button>`
     + `<button type="button" class="wfb-ib" data-act="railToggle" aria-label="Side panel" aria-pressed="${!s.railHidden}" title="Show or hide the side panel">${ico('sidebar', 16)}</button>`
     + `<div class="wfb-name">${name}</div><div class="wfb-presence" role="group" aria-label="Editing now">${wfPresenceHtml(s.presence)}</div>`
     + `<button type="button" class="wfb-tb" data-act="recent"${wfDisAttr(h.recent ? (s.canUndo ? '' : 'No changes yet') : WF_SOON)}>${ico('history', 15)}Recent changes</button>`
@@ -24126,11 +24197,11 @@ function wfTopHtml(s){
 }
 function wfSubHtml(s){
   const h = wfObj(s.hooks), tabs = Array.isArray(h.tabs) ? h.tabs : [], pub = s.status==='published';
-  const tabHtml = `<div class="wfb-tabs" role="tablist" aria-label="Workflow">${WF_BUILDER_TABS.map(([k, label]) => `<button type="button" role="tab" class="wfb-tab${s.tab===k ? ' on' : ''}" data-act="tab" data-tab="${k}" aria-selected="${s.tab===k}"${k==='builder' || tabs.includes(k) ? '' : wfDisAttr(WF_SOON)}>${label}</button>`).join('')}</div>`;
+  const tabHtml = `<div class="wfb-tabs" role="tablist" aria-label="Workflow">${WF_BUILDER_TABS.filter(([k]) => s.mode!=='version' || k==='builder' || k==='settings').map(([k, label]) => `<button type="button" role="tab" class="wfb-tab${s.tab===k ? ' on' : ''}" data-act="tab" data-tab="${k}" aria-selected="${s.tab===k}"${k==='builder' || tabs.includes(k) ? '' : wfDisAttr(WF_SOON)}>${label}</button>`).join('')}</div>`;
   const pubHtml = `<span class="wfb-pub"><span>Draft</span><button type="button" role="switch" class="wfb-switch${pub ? ' on' : ''}" aria-checked="${pub}" aria-label="Publish" data-act="publish"${wfDisAttr(h.publish ? (s.publishing ? 'Publishing…' : s.saving ? 'Saving…' : s.pubWhy ?? s.ro) : WF_SOON)}><i></i></button><span>Publish</span></span>`;
   if (s.mobile) return `${tabHtml}${pubHtml}`;
   return `<button type="button" class="wfb-tb wfb-bsel" data-act="builderMenu" aria-haspopup="menu">${s.builder==='advanced' ? 'Advanced builder' : 'Standard builder'}${ico('chevronDown', 14)}</button>${tabHtml}`
-    + `<button type="button" class="wfb-tb wfb-test" data-act="test"${wfDisAttr(h.test ? '' : WF_SOON)}>Test workflow</button>${pubHtml}`;
+    + `<button type="button" class="wfb-tb wfb-test${s.mode==='test' ? ' on' : ''}" data-act="test"${h.test ? ` aria-pressed="${s.mode==='test'}"` : ''}${wfDisAttr(h.test ? '' : WF_SOON)}>Test workflow</button>${pubHtml}`;
 }
 // Why a rail tool can't open now ('' = it can): Workflow AI comes later; Notes, Stats view and Version history need a saved
 // workflow; a tool whose panel isn't built yet says so. have = the keys with a panel (WF_HOOKS.rail).
@@ -24142,7 +24213,8 @@ function wfRailHtml(s, mac){
   return WF_RAIL.map(([k, label, icon, keyId]) => {
     const why = wfRailWhy(k, s.hasId, h.rail);
     const keyText = wfKeyHint(keyId, mac), badge = k==='errors' && s.errors ? `<i class="wfb-badge">${Number(s.errors) || 0}</i>` : '';
-    return `<button type="button" class="wfb-rb${s.rail===k ? ' on' : ''}" data-act="rail" data-rail="${k}" aria-label="${esc(label)}${k==='errors' && s.errors ? ` (${Number(s.errors) || 0})` : ''}" aria-pressed="${s.rail===k}" title="${esc(label)}${keyText ? ` (${esc(keyText)})` : ''}${why ? ` · ${esc(why)}` : ''}"${wfDisAttr(why)}>${ico(icon, 18)}${badge}</button>`;
+    const on = s.rail===k || (k==='stats' && s.mode==='stats');
+    return `<button type="button" class="wfb-rb${on ? ' on' : ''}" data-act="rail" data-rail="${k}" aria-label="${esc(label)}${k==='errors' && s.errors ? ` (${Number(s.errors) || 0})` : ''}" aria-pressed="${on}" title="${esc(label)}${keyText ? ` (${esc(keyText)})` : ''}${why ? ` · ${esc(why)}` : ''}"${wfDisAttr(why)}>${ico(icon, 18)}${badge}</button>`;
   }).join('');
 }
 function wfPillHtml(mode){ const p = WF_MODE_PILL[mode]; return p ? `<span class="wfb-pill-${p[0]}">${esc(p[1])}</span>` : ''; }
@@ -24240,11 +24312,12 @@ function wfQ4Html(d){
 // What the next build steps add (null = not built yet: its button is greyed with WF_SOON). G4.3 (built): picker(kind,
 // slot), pickerHtml(W, D), openStep(id), drawerHtml(W, D), drawerClose(); G4.4 (built): save(), publish(), recent(),
 // notes(id), leave(then) (the unsaved-changes guard), stash() (the local draft; → true when kept), rail[key](W, D) → the
-// panel's HTML (Notes, Errors, Sticky notes, Workflow switcher, Find and replace); phase 6: stats(id), test(), tabs[key](W)
-// → the tab's HTML, rail.stats / rail.versions.
+// panel's HTML (Notes, Errors, Sticky notes, Workflow switcher, Find and replace); phase 6: tabs[key](W) → the tab's HTML;
+// G6.3: stats(id) (a trigger's "Stats: <trigger>" window), statsView() (Stats view on / off), test() (Test workflow on /
+// off), rail.versions (Version history).
 const WF_HOOKS = { picker: wfPickerOpen, pickerHtml: wfPickerHtmlHook, openStep: wfDrawerOpenStep, drawerHtml: wfDrawerHtmlHook, drawerClose: wfDrawerCloseAsk, save: wfSave, publish: wfPublishToggle,
-  recent: wfRecentOpen, notes: wfNotesOpen, stats: null, leave: wfLeaveGuard, stash: wfStash, test: null,
-  rail: { notes: wfRailNotes, errors: wfRailErrors, stickies: wfRailStickies, switcher: wfRailSwitcher, find: wfRailFind }, tabs: {} };
+  recent: wfRecentOpen, notes: wfNotesOpen, stats: wfTstatsOpen, statsView: wfStatsViewToggle, leave: wfLeaveGuard, stash: wfStash, test: wfTestToggle,
+  rail: { notes: wfRailNotes, errors: wfRailErrors, stickies: wfRailStickies, switcher: wfRailSwitcher, find: wfRailFind, versions: wfRailVersions }, tabs: {} };
 // The ONE place the page history (stage 4: navPush / NAV_LAYERS / NAV_LEAVERS / NAV_RESTORERS) connects to the builder
 // (G5.3; the layers, the leaver and the restorer are registered by wfNavWire). opened → an entry of its own ({ kind: 'wf',
 // x: { id } }); saved(id) → a new one's first Save gives its entry the id, in place; closed → closed in the app (← Workflows
@@ -24331,22 +24404,23 @@ function wfBuilderCtx(){
   return ctx;
 }
 // What the canvas and the chrome read, memoised on the revisions (design §5.2): the layout, the issues, the reading order,
-// the tree for screen readers and the boxes keyboard navigation moves between.
+// the tree for screen readers and the boxes keyboard navigation moves between. A mode with a doc of its own (a version, a
+// run's path: G6.3) draws that doc, unchecked (it can't be edited here).
 function wfDerived(){
-  const W = WF, key = `${W.docRev}:${W.layoutRev}:${W.builder}:${W.mode}:${W.regRev}:${W.ctxRev}`;
+  const W = WF, own = !!(W.cm && W.cm.doc), key = `${W.docRev}:${W.layoutRev}:${W.builder}:${W.mode}:${W.regRev}:${W.ctxRev}:${own ? W.cm.seq : 0}`;
   if (W.derived && W.derived.key===key) return W.derived;
-  const ctx = wfBuilderCtx(), reg = W.reg, adv = W.builder==='advanced', layout = adv ? wfLayoutAdvanced(W.doc, W.layout, reg) : wfLayoutStandard(W.doc, reg, ctx);
+  const doc = wfShownDoc(W), lay = wfShownLayout(W), ctx = wfBuilderCtx(), reg = W.reg, adv = W.builder==='advanced', layout = adv ? wfLayoutAdvanced(doc, lay, reg) : wfLayoutStandard(doc, reg, ctx);
   // the sticky notes' lane is placed from the steps' bounds (Advanced: where they were put), then widens them so Fit and
   // the minimap cover the notes too
-  const stickies = adv ? wfAdvStickyBoxes(W.layout) : wfStickyBoxes(W.layout, layout);
+  const stickies = adv ? wfAdvStickyBoxes(lay) : wfStickyBoxes(lay, layout);
   if (stickies.length && layout.bounds) layout.bounds = wfBoundsWith(layout.bounds, stickies);
   let issues = { errors: [], warnings: [] };
-  try { issues = wfValidate(W.doc, reg, { builder: W.builder, catalog: ctx.catalog, stored: W.base.doc, profiles: ctx.profiles }); } catch (e) { console.error('workflow check', e); }
+  if (!own) try { issues = wfValidate(W.doc, reg, { builder: W.builder, catalog: ctx.catalog, stored: W.base.doc, profiles: ctx.profiles }); } catch (e) { console.error('workflow check', e); }
   const issueOf = {};
   [...issues.warnings, ...issues.errors].forEach(x => { const k = x.nodeId ? `n:${x.nodeId}` : x.triggerId ? `t:${x.triggerId}` : null; if (k) issueOf[k] = x.severity; });
-  const tree = wfA11yTree(W.doc), boxes = wfBoxesOf(layout);
+  const tree = wfA11yTree(doc), boxes = wfBoxesOf(layout);
   const navSeq = [...layout.triggers.map(b => `t:${b.id}`), 'addt', ...tree.seq].filter(k => boxes[k]);
-  W.derived = { key, ctx, layout, stickies, issues, issueOf, order: wfOrder(W.doc), I: wfIndex(W.doc), tree, boxes, navSeq, first: navSeq[0] || null };
+  W.derived = { key, ctx, layout, stickies, issues, issueOf, order: wfOrder(doc), I: wfIndex(doc), tree, boxes, navSeq, first: navSeq[0] || null };
   return W.derived;
 }
 
@@ -24381,11 +24455,12 @@ function wfPatch(el, html){ if (!el || el._h===html) return false; el._h = html;
 // The cards and lines, by key: a new key makes an element, a gone key removes it, a changed content key rewrites only that
 // element, a moved card only gets a new transform. Selection, issue level and focus are classes and attributes.
 function wfSyncCanvas(D){
-  const W = WF, E = W.el, mv = W.moveMode, canvasItems = D.layout.builder==='advanced' ? wfAdvCanvasItems : wfCanvasItems;
-  const { items, edges } = canvasItems(W.doc, D.layout, W.reg, D.ctx, { at: D.tree.at, seq: D.tree.seq, issueOf: D.issueOf, ro: !!wfGuardEdit(), mobile: W.mobile, I: D.I, order: D.order,
+  const W = WF, E = W.el, mv = W.moveMode, canvasItems = D.layout.builder==='advanced' ? wfAdvCanvasItems : wfCanvasItems, cm = W.cm, dx = wfModeDeco(W, D);
+  const { items, edges } = canvasItems(wfShownDoc(W), D.layout, W.reg, D.ctx, { at: D.tree.at, seq: D.tree.seq, issueOf: D.issueOf, ro: !!wfGuardEdit(), mobile: W.mobile, I: D.I, order: D.order,
     clip: !!wfClipLoad(AUTO_BUSINESS_ID, Date.now()), move: mv ? { keys: new Set(mv.slots.map(wfSlotKey)), hot: mv.slots[mv.i] ? wfSlotKey(mv.slots[mv.i]) : null } : null,
-    notes: W.noteCounts, stats: W.statsText, verdicts: W.verdicts, stickies: D.stickies, pickingTrigger: !!(W.picker && W.picker.kind==='trigger'),
-    statsWhy: WF_HOOKS.stats ? '' : WF_SOON, notesWhy: W.id ? '' : 'Save the workflow first' });
+    notes: W.noteCounts, stats: cm && cm.text ? cm.text : W.statsText, verdicts: dx ? dx.verdicts : W.verdicts, stickies: D.stickies, pickingTrigger: !!(W.picker && W.picker.kind==='trigger'),
+    tstats: dx ? dx.tstats : cm && cm.tstats, hstats: cm && cm.hstats, statsOn: !!(cm && cm.kind==='stats'),
+    statsWhy: WF_HOOKS.stats ? (W.id ? '' : 'Save the workflow first') : WF_SOON, notesWhy: W.id ? '' : 'Save the workflow first' });
   const seen = new Set(), order = { trig: [], tree: [], deco: [] };
   let made = false;
   // the other builder (G5.3): its cards are not reused as tiles (nor the other way round)
@@ -24401,7 +24476,8 @@ function wfSyncCanvas(D){
     }
     if (it.act && el.dataset.act!==it.act) el.dataset.act = it.act;
     if (it.id!=null && el.dataset.id!==String(it.id)) el.dataset.id = String(it.id);
-    if (el._cls!==it.cls) { el.className = it.cls; el._cls = it.cls; if (W.selShown.has(it.key)) el.classList.add('is-sel'); }   // the selection survives a new class list
+    const cls = dx && dx.cls[it.key] ? it.cls + dx.cls[it.key] : it.cls;   // a path's classes (G6.3)
+    if (el._cls!==cls) { el.className = cls; el._cls = cls; if (W.selShown.has(it.key)) el.classList.add('is-sel'); }   // the selection survives a new class list
     if (el._ck!==it.ck) { el.innerHTML = it.html(); el._ck = it.ck; }
     const at = JSON.stringify(it.attrs || {});
     if (el._at!==at) { Object.entries(it.attrs || {}).forEach(([k, v]) => el.setAttribute(k, String(v))); el._at = at; }
@@ -24425,13 +24501,15 @@ function wfSyncCanvas(D){
     let p = E.paths.get(ed.key);
     if (!p) { p = document.createElementNS(WF_SVGNS, 'path'); p.setAttribute('data-e', ed.key); E.edges.appendChild(p); E.paths.set(ed.key, p); }
     if (p._d!==ed.d) { p.setAttribute('d', ed.d); p._d = ed.d; }
-    const c = ed.dashed ? 'is-dashed' : '';
+    const pc = dx && dx.edges[ed.key] ? dx.edges[ed.key] : '', c = [ed.dashed ? 'is-dashed' : '', pc].filter(Boolean).join(' ');
     if (p._c!==c) { p.setAttribute('class', c); p._c = c; }
     eseen.add(ed.key);
     // the Advanced lines' arrowheads: a filled path of their own (key + ">")
     if (ed.arrow) {
       let h = E.paths.get(`${ed.key}>`);
-      if (!h) { h = document.createElementNS(WF_SVGNS, 'path'); h.setAttribute('data-e', `${ed.key}>`); h.setAttribute('class', 'is-arrow'); E.edges.appendChild(h); E.paths.set(`${ed.key}>`, h); }
+      if (!h) { h = document.createElementNS(WF_SVGNS, 'path'); h.setAttribute('data-e', `${ed.key}>`); E.edges.appendChild(h); E.paths.set(`${ed.key}>`, h); }
+      const ac = pc ? `is-arrow ${pc}` : 'is-arrow';
+      if (h._c!==ac) { h.setAttribute('class', ac); h._c = ac; }
       if (h._d!==ed.arrow) { h.setAttribute('d', ed.arrow); h._d = ed.arrow; }
       eseen.add(`${ed.key}>`);
     }
@@ -24497,13 +24575,13 @@ function wfPaintMini(D){
 function wfChromeState(W, D){
   const h = WF_HOOKS;
   // a new workflow can be saved as it is (an empty Draft, design §5.11); a System one never (wfSaveWhy says why)
-  const saveWhy = W.mode==='edit' ? wfSaveWhy(W) : '', pub = W.status==='published', paused = pub ? '' : wfPausedText(W);
-  return { name: W.name, mobile: W.mobile, dirty: wfIsDirty(W) || (W.mode==='edit' && !W.id), canUndo: W.hist.past.length > 0, canRedo: W.hist.future.length > 0, renaming: W.renaming, renameDraft: W.renameDraft,
+  const saveWhy = W.mode==='edit' || W.cm ? wfSaveWhy(W) : '', pub = W.status==='published', paused = pub ? '' : wfPausedText(W);
+  return { name: W.name, mobile: W.mobile, dirty: wfIsDirty(W) || ((W.mode==='edit' || !!W.cm) && !W.id), canUndo: W.hist.past.length > 0, canRedo: W.hist.future.length > 0, renaming: W.renaming, renameDraft: W.renameDraft,
     railHidden: W.railHidden, status: W.status, tab: W.tab, builder: W.builder, mode: W.mode, ro: wfGuardEdit(), rail: W.rail, errors: D.issues.errors.length + wfRemoteExtra(W, D), hasId: !!W.id,
     presence: W.presence || [],
     saving: !!W.saving, publishing: !!W.publishing, saveWhy, pubWhy: wfGuardWrite() || wfGuardEdit() || (paused ? `Paused until ${paused} (Global Workflow Settings)` : ''),
     hooks: { save: !!h.save, publish: !!h.publish, recent: !!h.recent, test: !!h.test, picker: !!h.picker, openStep: !!h.openStep, notes: !!h.notes,
-      tabs: Object.keys(h.tabs).filter(k => typeof h.tabs[k]==='function'), rail: Object.keys(h.rail).filter(k => typeof h.rail[k]==='function') } };
+      tabs: Object.keys(h.tabs).filter(k => typeof h.tabs[k]==='function'), rail: wfRailHave() } };
 }
 function wfPopCtx(W, D){
   const M = W.menu || {}, Q = M.kind==='quick' ? M.on : null, n = M.kind==='node' || Q==='node' ? wfNodesOf(W.doc)[M.id] : null, t = M.kind==='trigger' || Q==='trigger' ? (W.doc.triggers || []).find(x => x.id===M.id) : null;
@@ -24539,8 +24617,10 @@ function wfPaintChrome(D){
   E.tools.hidden = !W.mobile;
   E.kbtn.hidden = W.mobile;
   E.vp.hidden = W.tab!=='builder';
-  E.banner.hidden = W.mode!=='system';
-  wfPatch(E.banner, W.mode==='system' ? wfBannerHtml(W.sys, wfMe().role==='owner') : '');
+  E.banner.hidden = W.mode!=='system' && !W.cm;
+  const bc = `wfb-banner${W.cm ? ` is-${W.cm.kind}` : ''}`;
+  if (E.banner.className!==bc) E.banner.className = bc;
+  wfPatch(E.banner, W.mode==='system' ? wfBannerHtml(W.sys, wfMe().role==='owner') : W.cm ? wfModeBanner(W) : '');
   const tabFn = W.tab!=='builder' ? WF_HOOKS.tabs[W.tab] : null;
   E.tabBody.hidden = !tabFn;
   wfPatch(E.tabBody, tabFn ? String(tabFn(W) || '') : '');
@@ -24548,7 +24628,8 @@ function wfPaintChrome(D){
   E.ldrawer.hidden = !railFn;
   wfPatch(E.lbody, railFn ? `<div class="wfb-dh"><b>${esc(railRow ? railRow[1] : '')}</b><button type="button" class="wfb-ib" data-act="railClose" aria-label="Close">${ico('x', 15)}</button></div>${String(railFn(W, D) || '')}` : '');
   wfRailAfterPaint(W);
-  const right = W.drawer && WF_HOOKS.drawerHtml ? String(WF_HOOKS.drawerHtml(W, D) || '') : W.picker && WF_HOOKS.pickerHtml ? String(WF_HOOKS.pickerHtml(W, D) || '') : '';
+  const right = W.drawer && WF_HOOKS.drawerHtml ? String(WF_HOOKS.drawerHtml(W, D) || '') : W.picker && WF_HOOKS.pickerHtml ? String(WF_HOOKS.pickerHtml(W, D) || '')
+    : W.cm && W.cm.kind==='test' ? wfTestPanelHtml(wfTestModel(W, D)) : '';
   E.rdrawer.hidden = !right;
   wfPatch(E.rbody, right);
   wfPanelAfterPaint(W);
@@ -24859,7 +24940,7 @@ function wfSetLayer(name, value){
   if (name==='moveMode' || name==='picker') wfDirty('canvas');
 }
 // Closes the top layer: a running gesture, the rename box, a menu, a dialog, move mode, the step drawer (G4.3 may ask
-// first), a picker, the rail panel. → true when one closed (stage 4's back uses this before leaving).
+// first), a picker, the rail panel, a canvas mode (G6.3). → true when one closed (stage 4's back uses this before leaving).
 function wfNavTop(){
   const W = WF;
   if (!W) return false;
@@ -24871,6 +24952,7 @@ function wfNavTop(){
   if (W.drawer) { if (WF_HOOKS.drawerClose) WF_HOOKS.drawerClose(); else wfSetLayer('drawer', null); return true; }
   if (W.picker) { wfSetLayer('picker', null); return true; }
   if (W.rail) { wfSetLayer('rail', null); return true; }
+  if (W.cm) { wfModeExit(); return true; }
   return false;
 }
 // Esc: the top layer, else the selection.
@@ -25161,11 +25243,14 @@ const WF_POP_ACTS = {
   swDup: W => { const id = W.menu.id; wfSetLayer('menu', null); wfSwitchDuplicate(id); },
   swDel: W => { const id = W.menu.id; wfSetLayer('menu', null); wfSwitchDelete(id); },
 };
+// The rail's tools that open now: the panels, and Stats view (a mode, no panel: G6.3).
+function wfRailHave(){ return Object.keys(WF_HOOKS.rail).filter(k => typeof WF_HOOKS.rail[k]==='function').concat(typeof WF_HOOKS.statsView==='function' ? ['stats'] : []); }
 function wfRailToggle(key){
   const W = WF;
   if (!W || !WF_RAIL.some(r => r[0]===key)) return;
-  const why = wfRailWhy(key, !!W.id, Object.keys(WF_HOOKS.rail).filter(k => typeof WF_HOOKS.rail[k]==='function'));
+  const why = wfRailWhy(key, !!W.id, wfRailHave());
   if (why) { showToast(why, { kind: 'info' }); return; }
+  if (key==='stats') { WF_HOOKS.statsView(); return; }
   wfSetLayer('rail', W.rail===key ? null : key);
   if (W.rail===key && WF_RAIL_ON[key]) WF_RAIL_ON[key](W);
 }
@@ -25180,7 +25265,7 @@ const WF_ACTS = {
   save: () => { if (WF_HOOKS.save) WF_HOOKS.save(); },
   publish: () => { if (WF_HOOKS.publish) WF_HOOKS.publish(); },
   test: () => { if (WF_HOOKS.test) WF_HOOKS.test(); },
-  tab: (W, a) => { const t = a.dataset.tab; if (!WF_BUILDER_TABS.some(x => x[0]===t) || t===W.tab) return; W.tab = t; W.vpSize = null; wfDirty('chrome', 'view', 'mini'); },
+  tab: (W, a) => { const t = a.dataset.tab; if (!WF_BUILDER_TABS.some(x => x[0]===t) || t===W.tab) return; if (W.cm && t!=='builder' && !(W.cm.kind==='version' && t==='settings')) wfModeSet(null); W.tab = t; W.vpSize = null; wfDirty('chrome', 'view', 'mini'); },
   rail: (W, a) => wfRailToggle(a.dataset.rail),
   railClose: () => wfSetLayer('rail', null),
   builderMenu: (W, a) => wfPopOpen('builder', a),
@@ -25203,7 +25288,7 @@ const WF_ACTS = {
     if (W.moveMode) return;
     if (W.drawer && W.drawer.picking) { if (key.startsWith('n:')) wfDrawerPickTarget(key.slice(2)); return; }
     wfSelectKey(key, e.shiftKey || e.metaKey || e.ctrlKey);
-    if (!(e.shiftKey || e.metaKey || e.ctrlKey) && /^[nt]:/.test(key)) wfOpenStep(key.slice(2));
+    if (!(e.shiftKey || e.metaKey || e.ctrlKey) && /^[nt]:/.test(key) && !(W.cm && W.cm.doc)) wfOpenStep(key.slice(2));
   },
   head: (W, a) => { const k = a.dataset.key; if (k) wfSelectKey(k, false); },
   addTrigger: () => wfPicker('trigger', null),
@@ -27020,6 +27105,7 @@ function wfDlgHtml(id, title, body, foot){
 }
 const WF_DIALOG_HTML = {
   keys: (W, D, mac) => wfKeysHtml(W.builder, mac),
+  tstats: W => wfStatsDlgHtml(wfTstatsModel(W)),
   connect: (W, D) => wfConnectDlg(W, D),
   q4: W => wfQ4Html(W.dialog),
   blockers: W => wfBlockersHtml(W.dialog.rows),
@@ -27051,7 +27137,7 @@ const WF_LOCAL = { tab: '' };
 function wfGuardWrite(){ return typeof readOnlyReason==='function' ? readOnlyReason() : ''; }
 function wfSaveWhy(W){ return wfGuardWrite() || (W.mode!=='edit' ? WF_MODE_RO[W.mode] || 'This view can\'t be saved' : '') || W.ro || ''; }
 // Something to lose: changes since the last save, or a new copy (a template, a System copy, a restored draft) not saved yet.
-function wfUnsaved(W){ return !!W && W.mode==='edit' && (wfIsDirty(W) || (!W.id && !!W.isCopy)); }
+function wfUnsaved(W){ return !!W && (W.mode==='edit' || !!W.cm) && (wfIsDirty(W) || (!W.id && !!W.isCopy)); }
 function wfMe(){ try { const p = getCurrentProfile(); return p ? { id: p.id, role: p.role } : {}; } catch (e) { return {}; } }
 function wfTz(){ try { return bizTz(); } catch (e) { return REGION_DEFAULTS.timeZone; } }
 function wfUseOldEditor(){ try { return localStorage.getItem('ops.wfOldEditor')==='1'; } catch (e) { return false; } }
@@ -27062,7 +27148,7 @@ function wfTabSession(){
   WF_LOCAL.tab = t;
   return t;
 }
-function wfPanelsNew(){ return { notes: { rev: 0, q: '', draft: '', for: null, editing: null, editDraft: null, busy: false }, errors: { rev: 0 }, find: { rev: 0, mode: 'text', q: '', to: '', i: 0 }, switcher: { rev: 0, q: '' }, stickies: { rev: 0, edit: null } }; }
+function wfPanelsNew(){ return { notes: { rev: 0, q: '', draft: '', for: null, editing: null, editDraft: null, busy: false }, errors: { rev: 0 }, find: { rev: 0, mode: 'text', q: '', to: '', i: 0 }, switcher: { rev: 0, q: '' }, stickies: { rev: 0, edit: null }, versions: { rev: 0, rows: [], state: 'idle', error: '', editor: '', more: false, seq: 0 } }; }
 function wfPanelBump(key){ const W = WF; if (!W || !W.panels[key]) return; W.panels[key].rev++; if (W.rail===key) wfDirty('chrome'); }
 // A panel's HTML, memoised on its revision and the canvas's (paint path: never asks for a paint, never reads).
 function wfRailMemo(W, D, key, extra, fn){
@@ -27230,6 +27316,7 @@ async function wfSave(opts){
   try {
     const body = wfSaveBody({ id: W.id, rev: W.rev, enabled: pub, name, doc: snap.doc, settings: snap.settings, layout: snap.layout, builder: snap.builder, tplDrafts: snap.tplDrafts, saved: wfSavedTpls(),
       tplConfirmed: !!o.tplAsked, templateKey: W.templateKey, ai: W.aiDirty });
+    if (o.reason==='save_version' && W.id) body.reason = 'save_version';   // Version history's "Save Version" (G6.3)
     // a Published workflow: what the save will do to what is waiting in it is asked first (step "validate" says)
     if (W.id && pub && !asked) {
       const v = await autoFnCall({ step: 'validate', automation_id: W.id, base_revision: W.rev, name: body.name, definition: body.definition, settings: body.settings, builder: body.builder, editor: WF_EDITOR_MARK,
@@ -27670,7 +27757,7 @@ function wfSystemCopyOpen(row){
 }
 
 // What opening a panel starts (WF_HOOKS.rail draws them), and the panels' and dialogs' clicks, typing and choices.
-const WF_RAIL_ON = { notes: W => wfNotesLoad(W), errors: W => wfValidateRemote(W, true), switcher: wfSwitchLoad, find: wfFindLoad };
+const WF_RAIL_ON = { notes: W => wfNotesLoad(W), errors: W => wfValidateRemote(W, true), switcher: wfSwitchLoad, find: wfFindLoad, versions: W => wfVersionsLoad(W) };
 const WF_RAIL_ACTS = {
   errOpen: (W, a) => wfErrOpen(a.dataset.key),
   gateReview: W => { wfSetLayer('dialog', null); if (W.rail!=='errors') wfRailToggle('errors'); },
@@ -27709,6 +27796,15 @@ const WF_RAIL_ACTS = {
   stDel: (W, a) => { const id = a.dataset.sid; const no = wfStickyCommit('Delete sticky note', l => wfStickyRemove(l, id)); if (no) { W.panels.stickies.edit = null; showToast('Sticky note deleted', { undo: () => wfUndoCommit(no), local: true }); } },
   sysCopy: W => wfSystemCopyOpen(W.sys),
   sysOld: W => { const page = W.sys && W.sys.page; if (!page) return; wfBuilderClose({ nav: false }); if (typeof setSettingsPage==='function') setSettingsPage(page); },   // the settings page's own entry follows the builder's (a back would undo it)
+  // G6.3: the mode's banner and the Version history panel
+  cmExit: () => wfModeExit(),
+  cmLead: W => { const id = W.cm && W.cm.info ? W.cm.info.contactId : ''; if (id) wfhOpenLead(id); },
+  cmVerView: (W, a) => wfVersionView(a.dataset.vno),
+  cmVerRestore: (W, a) => wfVersionRestore(a.dataset.vno),
+  cmVerCopy: (W, a) => wfVersionCopy(a.dataset.vno),
+  cmVerSave: () => wfVersionSave(),
+  cmVerMore: W => wfVersionsLoad(W, true),
+  cmVerRetry: W => wfVersionsLoad(W),
 };
 // Typing in a panel: its state only, and the list it filters (never a paint).
 function wfRailInput(t){
@@ -27726,6 +27822,7 @@ function wfRailChange(t){
   const W = WF;
   if (!W || !t || !t.dataset) return;
   if (t.dataset.act==='stAnchor') { const e = W.panels.stickies.edit; if (e) e.anchor = WF_ID_RE.test(String(t.value || '')) ? String(t.value) : null; }
+  if (t.dataset.act==='cmVerEditor') { wfVersionsP(W).editor = String(t.value || '').slice(0, 120); W.railFocus = '[data-act="cmVerEditor"]'; wfPanelBump('versions'); }
 }
 // After the chrome is painted: the focus a panel's button asked for (the same control, drawn again).
 function wfRailAfterPaint(W){
@@ -28045,7 +28142,7 @@ function wfhEnrollTableHtml(rows){
   const body = rows.map(r => `<tr><td class="wrap"><div class="wfh-rec"><b dir="auto">${esc(r.name)}</b>${r.kind ? `<span class="hint">${esc(r.kind)}</span>` : ''}</div></td><td class="wrap">${esc(r.reason)}</td>`
     + `<td>${esc(r.enrolled)}<small class="wfh-tz">${esc(r.tz)}</small></td><td class="wrap">${esc(r.step || '—')}</td><td>${wfhPillHtml(r.status)}</td><td>${esc(r.next)}</td>`
     + `<td class="wf-acts"><button type="button" class="btn ghost small wfh-ib" aria-label="${esc('View lead history of ' + r.name)}" title="View lead history" onclick="wfhHistory('${esc(jsStr(r.id))}')">${ico('clock', 15)}</button>`
-    + `<button type="button" class="btn ghost small wfh-ib" aria-disabled="true" aria-label="Highlight lead path" title="${esc(WF_SOON)}" onclick="showToast('${esc(jsStr(WF_SOON))}', { kind: 'info' })">${ico('branch', 15)}</button>`
+    + `<button type="button" class="btn ghost small wfh-ib" aria-label="${esc('Highlight the path of ' + r.name)}" title="Highlight lead path" onclick="wfPathOpen('${esc(jsStr(r.id))}')">${ico('branch', 15)}</button>`
     + `<button type="button" class="btn ghost small wfh-ib" aria-label="${esc('Open ' + r.name)}" title="Open the lead card"${r.contactId ? '' : ' disabled'} onclick="wfhOpenLead('${esc(jsStr(r.contactId))}')">${ico('external', 15)}</button></td></tr>`).join('');
   return `<div class="table-wrap wf-table wfh-table"><table><caption class="sr-only">Enrollment history</caption><thead><tr><th>Record</th><th>Enrollment reason</th><th>Date enrolled</th><th>Current action</th><th>Current status</th><th>Next execution on</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
@@ -28057,13 +28154,14 @@ function wfhLogTableHtml(rows, perLead){
     + (r.stepId ? `<button type="button" class="btn ghost small" ${r.stepHere ? `onclick="wfhGoStep('${esc(jsStr(r.stepId))}')"` : 'aria-disabled="true" title="No longer in the workflow"'}>Go to action</button>` : '') + '</td></tr>').join('');
   return `<div class="table-wrap wf-table wfh-table"><table><caption class="sr-only">Execution logs</caption><thead><tr><th>Record</th><th>Action</th><th>Status</th><th>Executed on</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
-// The per-lead header of the logs: breadcrumb, the lead, "See contact path" (G6.3) and the Enrollment switcher (the lead's runs here).
+// The per-lead header of the logs: breadcrumb, the lead, "See contact path" (G6.3: the enrollment picked, else the newest) and
+// the Enrollment switcher (the lead's runs here).
 // l = { name, contactId, runId, runs [{ id, label }] }.
 function wfhLeadHeadHtml(l){
   const x = wfObj(l), runs = Array.isArray(x.runs) ? x.runs : [], id = String(x.runId || '');
   return `<div class="wfh-lead"><nav class="wfh-crumbs" aria-label="Logs"><button type="button" class="wf-crumb" onclick="wfhLeadBack()">Logs</button><span aria-hidden="true">/</span><span>${esc(x.name || 'Lead')}</span>`
     + (id ? `<span aria-hidden="true">/</span><span class="wf-crumb on" aria-current="location">Execution ID - ${esc(id.slice(0, 8))}</span>` : '') + `</nav>`
-    + `<div class="wfh-leadrow"><b dir="auto">${esc(x.name || 'Lead')}</b><button type="button" class="btn ghost small" aria-disabled="true" title="${esc(WF_SOON)}" onclick="showToast('${esc(jsStr(WF_SOON))}', { kind: 'info' })">See contact path</button>`
+    + `<div class="wfh-leadrow"><b dir="auto">${esc(x.name || 'Lead')}</b><button type="button" class="btn ghost small" onclick="wfPathFromLogs()">See contact path</button>`
     + (x.contactId ? `<button type="button" class="btn ghost small" onclick="wfhOpenLead('${esc(jsStr(x.contactId))}')">Open lead card</button>` : '')
     + `<label class="wfh-sw">Enrollment <select data-f="run" aria-label="Enrollment" onchange="wfhRunPick(this.value)"><option value="">All enrollments</option>${runs.map(r => `<option value="${esc(r.id)}"${r.id===id ? ' selected' : ''}>${esc(r.label)}</option>`).join('')}</select></label></div></div>`;
 }
@@ -28240,7 +28338,8 @@ function wfhSettingsTab(W){
   if (!e && W.id) e = wfEnsure('pauses', 'all', wfFetchPauses, () => false, () => { if (WF && WF.tab==='settings') wfhPaint(); });
   if (e && e.status==='loading' && e.p && !e._wfh) { e._wfh = true; const tok = W.token; e.p.then(() => { if (WF && WF.token===tok && WF.tab==='settings') wfhPaint(); }); }
   const tz = W.tz || bizTz(), me = typeof getCurrentProfile==='function' ? getCurrentProfile() : null, biz = catalogObject('business');
-  return wfhSettingsHtml({ settings: W.settings, base: W.base ? W.base.settings : W.settings, ro: wfGuardEdit(), tz, tzLabel: autoTzLabel(tz),
+  const vs = W.cm && W.cm.kind==='version' ? W.cm.settings : null;   // a version's own settings, read-only (G6.3)
+  return wfhSettingsHtml({ settings: vs || W.settings, base: vs || (W.base ? W.base.settings : W.settings), ro: wfGuardEdit(), tz, tzLabel: autoTzLabel(tz),
     signature: signatureOf(me && me.fullName, { name: (STATE.data.settings || {}).companyName, phone: biz && biz.phone }), pause: W.id && e && e.status==='ok' ? wfhPauseRanges(e.data, W.id, Date.now(), tz) : [] });
 }
 // Draws the open tab again (a read ended, a filter changed): this tab's body only; the field being used keeps its focus.
@@ -28374,6 +28473,782 @@ function wfhFromLink(L){
   wfhInit(W);
   if (tab==='logs' && L.run) Object.assign(WFH.log, { runId: String(L.run), range: { preset: String(WF_HIST.maxDays), from: '', to: '' }, state: 'idle' });
   WF_ACTS.tab(W, { dataset: { tab } });
+}
+
+// ══ The workflow builder: canvas modes (stage 2, phase 6 · G6.3; design §4.7, §4.8, §5.2): See contact path, Stats view
+// and its "Stats: <trigger>" window, Version history (the panel, the view-only mode, Restore, Create new workflow from
+// version) and Test workflow (its panel; the engine's step "test", G6.1) ══
+// A mode is ONE layer of the builder (W.cm, set through wfSetLayer: the page history's back leaves it before it leaves the
+// builder; navLayer 'wf-mode', z 205, under the builder's menus 210, drawers 220 and pickers 230) and W.mode is its kind, so
+// wfGuardEdit refuses every edit and the pill says which mode it is. Both builders draw it with the same paint: a version
+// or a run's path brings its own doc (W.cm.doc; the builder's draft is left as it is and still saves once the mode is
+// off), wfPathDeco puts classes on the cards and lines and a verdict tag on each step (never colour only), Stats view puts
+// counts on the steps, the triggers and the branch headers. Every read starts from a person's action and ends with one
+// paint of what it changed; none of them writes. Restore (the version becomes the Draft: nothing is published) and Create
+// new workflow from version (a new Draft) are the only writes, each asked first. Nothing here sends anything to anyone: a
+// test is the engine's dry run on its read-only client, and its answer becomes log rows only in this page's memory. (The
+// step "test" stays out of READ_ONLY_CALLS: the read-only check sees the executor it shares with real runs, so Presentation
+// mode and View as grey "Run test" with their reason.)
+
+// ── pure helpers (tests/business-logic.test.js) ──
+// statsDays: Stats view's period; unmatchCap: the unmatched trigger-log rows the engine keeps a trigger a day; page: the
+// Stats window's rows a page; versions: Version history's page; pathRows / pathPages: a run's log rows read for its path.
+const WF_CM = { statsDays: 30, unmatchCap: 200, page: 10, versions: 50, pathRows: 100, pathPages: 5, records: 20, text: 600 };
+const WF_CM_SEQ = { n: 0 };
+const WF_CM_VER_COLS = 'id, version_no, revision, status, reason, name, builder, created_by_name, created_at';
+const WF_CM_RUN_COLS = 'id, automation_id, contact_id, record_kind, record_id, revision, status, created_at, trigger_id';
+// What a version row's reason says in the list.
+const WF_VERSION_WORDS = { create: 'Created', save: 'Saved', save_version: 'Version saved', publish: 'Published', unpublish: 'Switched to Draft', restore: 'Restored', ai: 'Changed by Workflow AI',
+  migration: 'Moved to the new builder', duplicate: 'Copied', system_move: 'Moved into the engine' };
+const WF_RESTORE_WHY = 'Switch to Draft first, or create a new workflow from this version';
+// The engine's unmatch codes the Stats window names (a filter's code is "filter:<field>"; any other code shows as it is).
+const WF_UNMATCH_WORDS = { before_published: 'Happened before the workflow was published', test_record: 'A test record', loop_guard: 'Stopped a loop between workflows', own_change: 'This workflow\'s own change',
+  reentry_off: 'Already went through this workflow (re-entry is off)', already_enrolled: 'Already in this workflow', duplicate_event: 'The same event again', no_contact: 'No lead card',
+  unavailable: 'Not available', wrong_kind: 'Not for this kind of record', move_undone: 'The stage move was undone', moved_on: 'The lead had already moved to another stage' };
+// A test's customer guards, as words ("Skipped: opted out").
+const WF_TEST_GUARD_WORDS = { opt_out: 'opted out', cap: 'already contacted today', test_record: 'a test record', customer_hours: 'outside the customer hours' };
+function wfCmMs(t){ const ms = typeof t==='number' ? t : Date.parse(String(t ?? '')); return Number.isFinite(ms) ? ms : NaN; }
+// A run's path from its log rows (design §4.8; the same for a real run's rows and a test's synthetic ones). def = the doc
+// the run used; rows = automation_log rows in any order ({ row_kind, step_id, status, detail, at, seq, loop, trigger_id }).
+// → { entered (the trigger that started it, or null), visited (in order, once each), failed, skipped, waitingAt (the step
+// it waits at now, or null), branchTaken ({ stepId: port }), edges (the lines it went along: '<step>:<port>', '<step>:end',
+// 'trigger:<id>'), gotoEdges ([{ from, to }]: a Go to, or a goal reached ahead), missing (steps it went through that this doc
+// doesn't have: an older version), finished }. A step it went through twice is one entry; a line only joins two steps that
+// followed each other with nothing missing between them.
+function wfPathFromLog(def, rows){
+  const d = wfObj(def), nodes = wfObj(d.nodes), trigs = (Array.isArray(d.triggers) ? d.triggers : []).map(wfObj);
+  const list = (Array.isArray(rows) ? rows : []).map((r, i) => ({ r: wfObj(r), i })).filter(x => x.r.row_kind || x.r.status);
+  list.sort((a, b) => {
+    const x = wfCmMs(a.r.at), y = wfCmMs(b.r.at), s = Number(a.r.seq), t = Number(b.r.seq);
+    if (Number.isFinite(x) && Number.isFinite(y) && x!==y) return x - y;
+    if (a.r.seq!=null && b.r.seq!=null && Number.isFinite(s) && Number.isFinite(t) && s!==t) return s - t;
+    return a.i - b.i;
+  });
+  const visited = [], failed = [], skipped = [], missing = [], edges = [], gotoEdges = [], branchTaken = {}, visits = [];
+  const add = (a, v) => { if (!a.includes(v)) a.push(v); };
+  let entered = null, ended = false, finished = false;
+  for (const { r } of list) {
+    const kind = String(r.row_kind || ''), st = String(r.status || ''), id = r.step_id==null ? '' : String(r.step_id), det = wfObj(r.detail);
+    if (kind==='enroll') { if (entered==null && r.trigger_id!=null && r.trigger_id!=='') entered = String(r.trigger_id); continue; }
+    if (kind==='exit') { ended = true; finished = st==='finished'; if (st==='failed' && wfHas(nodes, id)) add(failed, id); continue; }
+    if (!id) continue;
+    if (!wfHas(nodes, id)) { add(missing, id); visits.push({ id, gone: true }); continue; }
+    const loop = Number(r.loop) || 0, last = visits[visits.length - 1], ports = wfPorts(nodes[id]);
+    let v = last && !last.gone && last.id===id && last.loop===loop ? last : null;
+    if (!v) { v = { id, loop, port: null, waiting: false, jump: null }; visits.push(v); }
+    add(visited, id);
+    if (st==='failed') add(failed, id);
+    else if (st==='skipped') add(skipped, id);
+    else if (st==='waiting') v.waiting = true;
+    else if (st==='wait_finished') { v.waiting = false; if (ports.includes('timeout')) v.port = det.outcome==='timeout' || det.branch_id==='timeout' ? 'timeout' : 'next'; }
+    else if (st==='branch') { const p = det.branch_id ?? det.path_id; if (p!=null && ports.includes(String(p))) v.port = String(p); }
+    else if (st==='jumped') { const to = det.to ?? det.target_step_id; if (typeof to==='string' && to) { v.jump = to; if (!gotoEdges.some(g => g.from===id && g.to===to)) gotoEdges.push({ from: id, to }); } }
+    if (v.port!=null && ports.length > 1) branchTaken[id] = v.port;
+  }
+  const outOf = (id, p) => { const t = wfObj(wfObj(nodes[id]).out)[p]; return typeof t==='string' && wfHas(nodes, t) ? t : null; };
+  visits.forEach((v, k) => {
+    if (v.gone || v.jump) return;
+    const nx = visits[k + 1], ports = wfPorts(nodes[v.id]);
+    if (nx) {
+      if (nx.gone) return;
+      const p = v.port!=null && outOf(v.id, v.port)===nx.id ? v.port : ports.find(q => outOf(v.id, q)===nx.id);
+      if (p!=null) { add(edges, `${v.id}:${p}`); if (ports.length > 1 && branchTaken[v.id]==null) branchTaken[v.id] = p; }
+      return;
+    }
+    if (!finished || failed.includes(v.id)) return;
+    const p = v.port!=null ? v.port : ports.length===1 ? ports[0] : null;
+    if (p!=null && !outOf(v.id, p)) add(edges, `${v.id}:${p}`);
+    else if (!ports.length && wfObj(nodes[v.id]).kind!=='goto') add(edges, `${v.id}:end`);
+  });
+  const t = entered!=null ? trigs.find(x => String(x.id)===entered) : null, first = visits.find(v => !v.gone);
+  if (t && first && (typeof t.goto==='string' && wfHas(nodes, t.goto) ? t.goto : d.entry)===first.id) edges.unshift(`trigger:${entered}`);
+  const lastV = visits.filter(v => !v.gone).pop();
+  return { entered, visited, failed, skipped, waitingAt: !ended && lastV && lastV.waiting ? lastV.id : null, branchTaken, edges, gotoEdges, missing, finished };
+}
+// A test's answer (the engine's { trigger, path: [{ stepId, would, … }], ended }) → the log rows a real run would have
+// written (design §4.8: execute → executed; wait → waiting, then wait_finished with how it ended and its branch; branch →
+// branch with branch_id / path_id; goal → executed with met; goto → jumped with the target; stop → an exit row, removed,
+// with the reason; skip → skipped; not_reached → nothing), so wfPathFromLog lights the canvas as for a real run.
+function wfTestRows(res){
+  const x = wfObj(res), t = wfObj(x.trigger), rows = [{ row_kind: 'enroll', step_id: null, status: 'added', trigger_id: t.id!=null && t.id!=='' ? String(t.id) : null }];
+  (Array.isArray(x.path) ? x.path : []).map(wfObj).forEach(e => {
+    const step = e.stepId==null ? null : String(e.stepId), base = { row_kind: 'step', step_id: step };
+    if (e.would==='execute') rows.push({ ...base, row_kind: e.kind==='action' ? 'action' : 'step', status: 'executed', detail: wfObj(e.preview) });
+    else if (e.would==='wait' || (e.would==='goal' && e.outcome==='waiting')) {
+      rows.push({ ...base, status: 'waiting', ...(e.until ? { next_at: e.until } : {}) });
+      if (e.would==='wait' && e.outcome && e.outcome!=='waiting') rows.push({ ...base, status: 'wait_finished', detail: { outcome: e.outcome, resumed_by: e.resumedBy ?? null, branch_id: e.branchId ?? null } });
+    }
+    else if (e.would==='branch') rows.push({ ...base, status: 'branch', detail: { branch_id: e.branchId ?? null, path_id: e.pathId ?? null } });
+    else if (e.would==='goal') rows.push({ ...base, status: 'executed', detail: { met: e.outcome==='met' } });
+    else if (e.would==='goto') rows.push({ ...base, status: 'jumped', detail: { to: e.target ?? null, target_step_id: e.target ?? null } });
+    else if (e.would==='stop') rows.push({ row_kind: 'exit', step_id: step, status: 'removed', reason: e.why ?? null });
+    else if (e.would==='skip') rows.push({ ...base, status: 'skipped', reason: e.why ?? null });
+  });
+  if (x.ended==='done') rows.push({ row_kind: 'exit', step_id: null, status: 'finished' });
+  return rows;
+}
+// The canvas's decorations for a path (both builders: the Standard lines' keys, the Advanced ones' from / to). doc = the
+// doc shown, layout = its layout (wfLayoutStandard / wfLayoutAdvanced), words = { stepId: verdict } (a test's; else
+// "Done", "Failed", …). → { cls: { cardKey: ' wfm-…' }, edges: { edgeKey: class }, verdicts: { stepId: text }, tstats:
+// { triggerId: 'Entered' } }.
+function wfPathDeco(path, doc, layout, words){
+  const p = wfObj(path), d = wfObj(doc), L = wfObj(layout), nodes = wfObj(d.nodes), w = wfObj(words), cls = {}, edges = {}, verdicts = {}, tstats = {};
+  const vis = new Set(p.visited || []), fail = new Set(p.failed || []), skip = new Set(p.skipped || []), bt = wfObj(p.branchTaken);
+  Object.keys(nodes).forEach(id => {
+    const k = `n:${id}`, say = (c, text) => { cls[k] = c; verdicts[id] = String(w[id] || text); };
+    if (p.waitingAt===id) say(' wfm-wait', 'Waiting here');
+    else if (fail.has(id)) say(' wfm-fail', 'Failed');
+    else if (skip.has(id)) say(' wfm-skip', 'Skipped');
+    else if (vis.has(id)) say(' wfm-vis', 'Done');
+    else { cls[k] = ' wfm-dim'; if (w[id]) verdicts[id] = String(w[id]); }
+  });
+  (Array.isArray(d.triggers) ? d.triggers : []).map(wfObj).forEach(t => {
+    const id = String(t.id ?? '');
+    if (id && id===p.entered) { cls[`t:${id}`] = ' wfm-in'; tstats[id] = 'Entered'; } else if (id) cls[`t:${id}`] = ' wfm-dim';
+  });
+  (Array.isArray(L.heads) ? L.heads : []).forEach(h => { cls[`h:${h.node}:${h.port}`] = vis.has(h.node) && bt[h.node]===h.port ? ' wfm-vis' : ' wfm-dim'; });
+  const on = new Set(p.edges || []), gotoFrom = new Set((p.gotoEdges || []).map(g => g.from)), gotoPair = new Set((p.gotoEdges || []).map(g => `${g.from}>${g.to}`));
+  (Array.isArray(L.edges) ? L.edges : []).forEach(e => {
+    const k = String(e.key || ''), hit = on.has(k) || (/:drop$/.test(k) && on.has(k.slice(0, -5))) || (/:goto$/.test(k) && gotoFrom.has(k.slice(0, -5))) || (!!e.ref && gotoPair.has(`${e.from}>${e.to}`));
+    edges[k] = hit ? 'wfm-e' : 'wfm-off';
+  });
+  return { cls, edges, verdicts, tstats };
+}
+// The snapshot a run used (design §4.8): the latest version with revision ≤ the run's; null = none kept (pruned, or a run
+// from before versions: the current definition is shown with a banner).
+function wfVersionPick(versions, revision){
+  const r = Number(revision);
+  if (revision==null || !Number.isFinite(r)) return null;
+  return (Array.isArray(versions) ? versions : []).map(wfObj).filter(v => Number(v.revision) <= r && v.definition)
+    .sort((a, b) => Number(b.revision) - Number(a.revision) || Number(b.version_no) - Number(a.version_no))[0] || null;
+}
+// Restore (design §4.7, as GHL): only a Draft with nothing unsaved; a write refused (Presentation mode, View as) says so.
+function wfRestoreWhy(x){ const o = wfObj(x); return String(o.writeWhy || '') || (o.status==='published' || o.unsaved ? WF_RESTORE_WHY : ''); }
+// Stats view's counts (design §4.8). doc = the workflow; steps = automation_step_stats rows ({ step_id, status, branch, n };
+// 'now_waiting' = runs waiting there now); trigs = automation_trigger_stats rows ({ trigger_id, attempted, matched }).
+// → { text: { stepId }, htext: { 'stepId:port' }, ttext: { triggerId }, steps, heads, triggers } (a step no run reached says
+// "No runs yet").
+function wfStatsModel(doc, steps, trigs){
+  const nodes = wfObj(wfObj(doc).nodes), S = {}, heads = {}, T = {}, text = {}, htext = {}, ttext = {};
+  const bucket = { executed: 'done', branch: 'done', jumped: 'done', wait_finished: 'done', added: 'done', sent: 'sent', queued: 'sent', sending: 'sent', waiting_phone: 'sent', skipped: 'skipped', failed: 'failed', now_waiting: 'waiting' };
+  (Array.isArray(steps) ? steps : []).map(wfObj).forEach(r => {
+    const id = String(r.step_id ?? ''), n = Math.max(0, Number(r.n) || 0), b = bucket[String(r.status ?? '')];
+    if (!wfHas(nodes, id) || !n) return;
+    const s = S[id] || (S[id] = { done: 0, sent: 0, skipped: 0, failed: 0, waiting: 0 });
+    if (b) s[b] += n;
+    const ports = wfPorts(nodes[id]);
+    if (ports.length < 2 || r.branch==null) return;
+    const port = r.status==='wait_finished' ? (r.branch==='timeout' ? 'timeout' : 'next') : r.status==='branch' ? String(r.branch) : null;
+    if (port!=null && ports.includes(port)) heads[`${id}:${port}`] = (heads[`${id}:${port}`] || 0) + n;
+  });
+  Object.keys(nodes).forEach(id => {
+    const s = S[id], parts = s ? [['done', 'executed'], ['sent', 'sent'], ['skipped', 'skipped'], ['failed', 'failed'], ['waiting', 'waiting']].filter(([k]) => s[k]).map(([k, w]) => `${s[k]} ${w}`) : [];
+    text[id] = parts.length ? parts.join(' · ') : 'No runs yet';
+    wfPorts(nodes[id]).forEach(p => { if (wfPorts(nodes[id]).length > 1) { const n = heads[`${id}:${p}`] || 0; htext[`${id}:${p}`] = `${n} lead${n===1 ? '' : 's'}`; } });
+  });
+  (Array.isArray(trigs) ? trigs : []).map(wfObj).forEach(r => {
+    const id = String(r.trigger_id ?? ''), a = Math.max(0, Number(r.attempted) || 0), m = Math.max(0, Math.min(a, Number(r.matched) || 0));
+    if (!id) return;
+    T[id] = { attempted: a, matched: m, unmatched: a - m };
+    ttext[id] = `Attempted ${a} · Matched ${m} · Unmatched ${a - m}`;
+  });
+  (Array.isArray(wfObj(doc).triggers) ? doc.triggers : []).map(wfObj).forEach(t => { const id = String(t.id ?? ''); if (id && !ttext[id]) ttext[id] = 'Attempted 0 · Matched 0 · Unmatched 0'; });
+  return { text, htext, ttext, steps: S, heads, triggers: T };
+}
+// The Stats window's dates ("Stats are only available for the last 30 days"): from / to as the business's days → { from,
+// to, days } | { error }.
+function wfStatsRange(from, to, today){
+  const f = String(from ?? ''), t = String(to ?? ''), min = wfDayShift(today, 1 - WF_CM.statsDays);
+  if (!wfhDayOk(f) || !wfhDayOk(t)) return { error: 'Pick both dates' };
+  if (f > t) return { error: 'The first date is after the last one' };
+  if (f < min) return { error: `Only the last ${WF_CM.statsDays} days are kept` };
+  return { from: f, to: t > today ? today : t, days: wfhDaysBetween(f, t > today ? today : t) + 1 };
+}
+// The KPI cards and the days whose unmatched rows went over the engine's daily cap (automation_trigger_days rows).
+function wfStatsKpi(days){
+  const k = { attempted: 0, matched: 0, unmatched: 0 };
+  (Array.isArray(days) ? days : []).map(wfObj).forEach(d => { k.attempted += Math.max(0, Number(d.attempted) || 0); k.matched += Math.max(0, Number(d.matched) || 0); });
+  k.matched = Math.min(k.matched, k.attempted); k.unmatched = k.attempted - k.matched;
+  const pct = n => k.attempted ? Math.round(n / k.attempted * 1000) / 10 : 0;
+  return { ...k, matchedPct: pct(k.matched), unmatchedPct: pct(k.unmatched) };
+}
+function wfStatsCapNotes(days, cap){
+  const c = cap==null ? WF_CM.unmatchCap : cap;
+  return (Array.isArray(days) ? days : []).map(wfObj).map(d => ({ day: String(d.day ?? ''), more: Math.max(0, (Number(d.unmatched) || 0) - (Number(d.before_published) || 0) - c) })).filter(x => x.day && x.more > 0);
+}
+function wfUnmatchText(code){
+  const c = String(code ?? '');
+  if (c.startsWith('filter:')) return `Filter not matched: ${c.slice(7).replace(/_/g, ' ') || 'a filter'}`;
+  return WF_UNMATCH_WORDS[c] || (c ? c.replace(/_/g, ' ') : 'Unknown');
+}
+// A test: the record kind it asks for (the chosen trigger's; a contactless trigger needs none) and its word.
+function wfTestKind(doc, reg, triggerId){
+  const t = (Array.isArray(wfObj(doc).triggers) ? doc.triggers : []).map(wfObj).find(x => String(x.id)===String(triggerId ?? '')), e = t ? wfTrigEntry(reg, t.type) : null;
+  const rk = e ? String(e.recordKind || '') : '', kind = ['job', 'call', 'chat'].includes(rk) ? rk : 'contact';
+  return { kind, word: kind==='contact' ? 'lead' : kind, contactless: !!(e && e.contactless) };
+}
+// The steps a test can be told what happens at (the engine's assume): a reply / conditions wait (met, or timed out when it
+// has a timeout path) and a goal (met or not met). → [{ id, name, opts: [[value, label]] }].
+function wfTestAssumeRows(doc, reg){
+  const nodes = wfObj(wfObj(doc).nodes);
+  return wfOrder(doc).filter(id => wfHas(nodes, id)).map(id => {
+    const n = wfObj(nodes[id]);
+    if (n.kind==='wait' && ['reply', 'user_reply', 'conditions'].includes(n.type)) return { id, name: wfNodeName(n, reg), opts: [['', 'As the record is now'], ['met', 'Met'], ...(wfPorts(n).includes('timeout') ? [['timeout', 'Timed out']] : [])] };
+    if (n.kind==='goal') return { id, name: wfNodeName(n, reg), opts: [['', 'As the record is now'], ['met', 'Met'], ['not_met', 'Not met']] };
+    return null;
+  }).filter(Boolean);
+}
+// Why "Run test" can't go now ('' = it can).
+function wfTestRunWhy(x){
+  const o = wfObj(x);
+  if (o.state==='running') return 'The test is running';
+  if (o.errors) return 'Fix the errors first';
+  if (!o.steps) return 'Add a step first';
+  if (!o.record && !o.contactless) return `Select a ${o.word || 'lead'} first`;
+  return '';
+}
+// One test step's verdict: { chip, tone } (tone good | warn | bad | muted). nameOf(stepId) → its name; when(iso) → words.
+function wfTestVerdict(e, nameOf, when){
+  const x = wfObj(e), w = String(x.would || ''), g = WF_TEST_GUARD_WORDS[x.guard] || '', at = x.until ? when(x.until) : '';
+  if (w==='execute') return x.guard==='customer_hours' && at ? { chip: `Would go at ${at}`, tone: 'warn' } : { chip: 'Would run', tone: 'good' };
+  if (w==='skip') return { chip: `Skipped: ${g || String(x.why || 'skipped')}`, tone: 'warn' };
+  if (w==='wait') return x.outcome==='waiting' ? { chip: x.why ? `Would wait: ${x.why}` : 'Would wait here', tone: 'warn' } : x.outcome==='timeout' ? { chip: 'Timed out', tone: 'good' } : { chip: at ? `Waits until ${at}` : 'Waits', tone: 'good' };
+  if (w==='branch') return { chip: `Takes ${String(x.why || x.branchId || 'a path')}`, tone: 'good' };
+  if (w==='goal') return x.outcome==='met' ? { chip: 'Goal met', tone: 'good' } : x.outcome==='waiting' ? { chip: 'Would wait for the goal', tone: 'warn' } : { chip: 'Goal not met', tone: 'warn' };
+  if (w==='goto') return { chip: `Goes to ${nameOf(x.target) || 'a step'}`, tone: 'good' };
+  if (w==='stop') return { chip: `Stops: ${String(x.why || 'ends here')}`, tone: 'bad' };
+  return { chip: 'Not reached', tone: 'muted' };
+}
+// A test's answer for the panel: the trigger's line, the notes, each step's verdict and its preview as text. → { rows: [{ id,
+// name, chip, tone, preview: [{ label, text }] }], words: { stepId: chip } (the canvas's tags), notes, problems }.
+function wfTestResult(res, doc, reg, tz){
+  const x = wfObj(res), nodes = wfObj(wfObj(doc).nodes), nameOf = id => wfHas(nodes, String(id ?? '')) ? wfNodeName(nodes[id], reg) : '', when = t => wfhWhen(t, tz), words = {};
+  const rows = (Array.isArray(x.path) ? x.path : []).map(wfObj).filter(e => e.stepId!=null).map(e => {
+    const id = String(e.stepId), v = wfTestVerdict(e, nameOf, when), preview = e.preview ? wfhDetailRows(e.preview).rows.map(r => ({ label: r.label, text: String(r.text).slice(0, WF_CM.text) })) : [];
+    if (e.would!=='not_reached' || !words[id]) words[id] = v.chip;
+    return { id, name: nameOf(id) || id, chip: v.chip, tone: v.tone, preview, to: e.to ? String(e.to) : '' };
+  });
+  return { rows, words, notes: (Array.isArray(x.notes) ? x.notes : []).map(String), problems: (Array.isArray(x.problems) ? x.problems : []).map(p => String(wfObj(p).text || wfObj(p).code || p)) };
+}
+
+// ── words (pure: the model in, the HTML out; every word escaped) ──
+// The mode's banner. m = { kind, state, error, vno, name, by, at, restoreWhy, info: { name, contactId, runId, enrolled, tz,
+// vno }, pruned, missing, ran (a test has an answer) }.
+function wfModeBannerHtml(m){
+  const x = wfObj(m), st = x.state==='loading' ? ' · Reading…' : x.state==='error' ? ` · Not read: ${x.error || 'try again'}` : '';
+  if (x.kind==='stats') return `<span>${ico('chart', 14)}${esc(`Workflow is not editable in Stats view. Note: Stats are only available for the last ${WF_CM.statsDays} days.${st}`)}</span>`
+    + '<button type="button" class="btn small" data-act="cmExit">Exit Stats view</button>';
+  if (x.kind==='version') return `<span>${ico('lock', 14)}This Version is in View Only Mode · v${Number(x.vno) || 0}${x.name ? ` · <span dir="auto">${esc(x.name)}</span>` : ''}${x.by ? ` · ${esc(x.by)}` : ''}${x.at ? ` · ${esc(x.at)}` : ''}</span>`
+    + '<button type="button" class="btn small" data-act="cmExit">Back to builder</button>'
+    + `<button type="button" class="btn small primary" data-act="cmVerRestore" data-vno="${Number(x.vno) || 0}"${wfDisAttr(x.restoreWhy)}>Restore</button>`
+    + `<button type="button" class="btn small" data-act="cmVerCopy" data-vno="${Number(x.vno) || 0}">Create new workflow from this version</button>`;
+  if (x.kind==='path') {
+    const i = wfObj(x.info), row = (label, v) => v ? `<div><dt>${esc(label)}</dt><dd dir="auto">${esc(v)}</dd></div>` : '';
+    return `<button type="button" class="btn small" data-act="cmExit">${ico('arrowLeft', 14)}Back</button><span>${ico('branch', 14)}${esc(i.word ? `${i.word[0].toUpperCase()}${i.word.slice(1)} path` : 'Contact path')}${esc(st)}</span>`
+      + (i.contactId ? `<button type="button" class="btn small" data-act="cmLead">Open lead card</button>` : '')
+      + `<dl class="wfm-info">${row('Lead', i.name)}${row('Lead ID', i.contactId)}${row('Execution ID', i.runId)}${row('Enrollment date', i.enrolled ? `${i.enrolled}${i.tz ? ` (${i.tz})` : ''}` : '')}`
+      + `${row('Workflow version when execution started', i.vno ? `v${i.vno}` : 'Not kept')}</dl>`
+      + (x.pruned ? '<p class="wfm-note">This run used an older version that is no longer kept; showing the current one.</p>' : '')
+      + (x.missing ? `<p class="wfm-note">${Number(x.missing)} step${Number(x.missing)===1 ? '' : 's'} of this run ${Number(x.missing)===1 ? 'is' : 'are'} no longer in the workflow.</p>` : '');
+  }
+  if (x.kind==='test') return `<span>${ico('play', 14)}${esc(x.ran ? 'Test result: nothing was sent' : 'Test workflow: pick a record and run a test. Nothing is sent.')}</span>`
+    + '<button type="button" class="btn small" data-act="cmExit">Close the test</button>';
+  return '';
+}
+// The Version history panel. m = { state, error, current: { name, vno, by, at, status } | null, rows: [{ vno, name, by, at,
+// reason, status }], editors, editor, restoreWhy, saveWhy, viewing, more }.
+function wfVersionsHtml(m){
+  const x = wfObj(m), rows = Array.isArray(x.rows) ? x.rows : [], c = x.current ? wfObj(x.current) : null, eds = Array.isArray(x.editors) ? x.editors : [];
+  const pill = s => `<span class="wfr-tag${s==='published' ? ' is-pub' : ''}">${s==='published' ? 'Published' : 'Draft'}</span>`;
+  let h = '<div class="wfr wfm-ver"><p class="wfr-note">Version history is kept for 30 days, or the last 10 versions if older.</p>';
+  if (eds.length > 1) h += `<label class="wfr-row"><span class="wfr-note">Editor</span><select class="input" data-act="cmVerEditor" aria-label="Filter by editor"><option value="">All editors</option>${eds.map(n => `<option value="${esc(n)}"${n===x.editor ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>`;
+  h += '<div class="wfr-list"><h3>Current version</h3>';
+  h += c ? `<div class="wfr-item"><div class="wfr-gh"><b dir="auto">${esc(c.name)}</b>${pill(c.status)}</div><div class="wfr-meta">${c.vno ? `<b>v${Number(c.vno)}</b>` : ''}${c.by ? `<span class="wfb-av" aria-hidden="true">${esc(initials(c.by))}</span><span>${esc(c.by)}</span>` : ''}${c.at ? `<span>${esc(c.at)}</span>` : ''}</div>`
+    + `<div class="wfr-acts"><button type="button" class="btn small" data-act="cmVerSave"${wfDisAttr(x.saveWhy)}>Save Version</button></div></div>` : '';
+  h += '<h3>Previous versions</h3>';
+  if (x.state==='loading' && !rows.length) h += '<p class="wfr-note">Reading…</p>';
+  else if (x.state==='error') h += `<p class="wfr-note">Not read: ${esc(x.error || 'try again')} <button type="button" class="btn small ghost" data-act="cmVerRetry">Try again</button></p>`;
+  else if (!rows.length) h += '<p class="wfr-note">No earlier versions yet.</p>';
+  h += rows.map(r => `<div class="wfr-item${r.vno===x.viewing ? ' is-on' : ''}"><button type="button" class="wfr-hit${r.vno===x.viewing ? ' on' : ''}" data-act="cmVerView" data-vno="${Number(r.vno) || 0}" aria-label="${esc(`View version ${r.vno}: ${r.name}`)}">`
+    + `<b dir="auto">${esc(r.name)}</b><small>v${Number(r.vno) || 0} · ${esc(r.reason)}${r.by ? ` · ${esc(r.by)}` : ''}${r.at ? ` · ${esc(r.at)}` : ''}</small></button>`
+    + `<div class="wfr-acts">${pill(r.status)}<button type="button" class="btn small" data-act="cmVerRestore" data-vno="${Number(r.vno) || 0}"${wfDisAttr(x.restoreWhy)}>Restore</button>`
+    + `<button type="button" class="btn small ghost" data-act="cmVerCopy" data-vno="${Number(r.vno) || 0}" aria-label="${esc(`Create new workflow from version ${r.vno}`)}" title="Create new workflow from version">${ico('copy', 14)}</button></div></div>`).join('');
+  if (x.more) h += '<button type="button" class="btn small ghost" data-act="cmVerMore">Load more</button>';
+  return h + '</div></div>';
+}
+// The Test workflow panel (the right drawer). m = { word, triggers: [{ id, name }], trigger, q, matches, searching, record,
+// contactless, assumes: [{ id, name, opts, value }], state, error, runWhy, result (wfTestResult) | null }.
+function wfTestPanelHtml(m){
+  const x = wfObj(m), trigs = Array.isArray(x.triggers) ? x.triggers : [], word = String(x.word || 'lead'), r = x.result ? wfObj(x.result) : null;
+  let h = `<div class="wfb-dh"><b>Test workflow</b><button type="button" class="wfb-ib" data-act="cmExit" aria-label="Close the test">${ico('x', 15)}</button></div>`
+    + `<div class="wfr wfm-test"><h3 class="wfm-h">Run a test for ${esc(word)}</h3><p class="wfr-note">Runs what is in the builder now, saved or not. Nothing is sent and nothing is changed.</p>`;
+  if (trigs.length > 1) h += `<label class="field"><span>Test as if</span><select class="input" data-f="ttrig" onchange="wfTestSet('trigger', this.value)">${trigs.map(t => `<option value="${esc(t.id)}"${t.id===x.trigger ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>`;
+  if (x.record) h += `<div class="wfr-item wfm-rec"><span class="wfr-note">${esc(`Testing with this ${word}`)}</span><div class="wfr-gh"><b dir="auto">${esc(x.record.name)}</b><button type="button" class="btn small ghost" data-f="trec" onclick="wfTestSet('record', '')">Change</button></div></div>`;
+  else if (x.contactless) h += `<p class="wfr-note">${esc('This trigger has no record: the test runs without one.')}</p>`;
+  else {
+    h += `<label class="field"><span>${esc(`Select ${word} to test this workflow`)}</span><span class="wfr-row"><input class="input" type="search" data-f="tq" value="${esc(x.q)}" maxlength="${WF_HIST.term}" placeholder="Name, phone or email" autocomplete="off" oninput="wfTestSet('q', this.value)" onkeydown="if (event.key==='Enter') { event.preventDefault(); wfTestSearch(); }">`
+      + `<button type="button" class="btn small" data-f="tfind" onclick="wfTestSearch()">${x.searching ? 'Searching…' : 'Search'}</button></span></label>`;
+    if (Array.isArray(x.matches)) h += x.matches.length ? `<div class="wfr-list" role="group" aria-label="Matches">${x.matches.map((c, i) => `<button type="button" class="wfr-hit" onclick="wfTestPick(${i})"><b dir="auto">${esc(c.name)}</b>${c.sub ? `<small>${esc(c.sub)}</small>` : ''}</button>`).join('')}</div>`
+      : `<p class="wfr-note">${esc(`No ${word} matches that.`)}</p>`;
+  }
+  const as = Array.isArray(x.assumes) ? x.assumes : [];
+  if (as.length) h += `<fieldset class="wfm-assume"><legend>Assume</legend>${as.map(a => `<label class="wfr-row"><span dir="auto">${esc(a.name)}</span><select class="input" data-f="ta-${esc(a.id)}" onchange="wfTestAssume('${esc(jsStr(a.id))}', this.value)">`
+    + `${a.opts.map(([v, l]) => `<option value="${esc(v)}"${v===(a.value || '') ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`).join('')}</fieldset>`;
+  h += `<div class="wfr-acts"><button type="button" class="btn primary" data-f="trun" onclick="wfTestRun()"${wfDisAttr(x.runWhy)}>${x.state==='running' ? 'Running…' : 'Run test'}</button></div>`;
+  if (x.state==='error') h += `<p class="wfr-note wfm-bad" role="alert">${esc(x.error || 'The test did not run')}</p>`;
+  if (r) {
+    h += '<div class="wfr-list" aria-live="polite"><h3>Result</h3>' + (r.problems.length ? `<ul class="wfm-probs">${r.problems.map(p => `<li>${esc(p)}</li>`).join('')}</ul>` : '')
+      + r.notes.map(n => `<p class="wfr-note">${esc(n)}</p>`).join('')
+      + r.rows.map(s => `<div class="wfr-item"><div class="wfr-gh"><b dir="auto">${esc(s.name)}</b><span class="wfm-chip is-${esc(s.tone)}">${esc(s.chip)}</span></div>`
+        + (s.to ? `<div class="wfr-meta"><span>To ${esc(s.to)}</span></div>` : '')
+        + (s.preview.length ? `<dl class="wfm-prev">${s.preview.map(p => `<div><dt>${esc(p.label)}</dt><dd dir="auto">${esc(p.text)}</dd></div>`).join('')}</dl>` : '') + '</div>').join('') + '</div>';
+  }
+  return h + '</div>';
+}
+// The "Stats: <trigger>" window (design §4.8). m = { name, from, to, min, today, tab, state, error, kpi, caps, rows: [{ name,
+// reach, at, tz, matched, reason }], page, more, reasons: [{ text, n }], q, matches, lead, searching }.
+function wfStatsDlgHtml(m){
+  const x = wfObj(m), k = wfObj(x.kpi), tab = x.tab==='reasons' ? 'reasons' : 'data', rows = Array.isArray(x.rows) ? x.rows : [];
+  const card = (label, v, sub) => `<div class="wfm-kpi"><span>${esc(label)}</span><b>${esc(v)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
+  let b = `<div class="wfm-kpis">${card('Attempted', String(Number(k.attempted) || 0))}${card('Matched', `${Number(k.matchedPct) || 0}%`, `${Number(k.matched) || 0} leads`)}${card('Unmatched', `${Number(k.unmatchedPct) || 0}%`, `${Number(k.unmatched) || 0} leads`)}</div>`;
+  b += `<div class="wfr-row wfm-range"><label class="wfr-row">From <input class="input" type="date" data-f="sfrom" min="${esc(x.min)}" max="${esc(x.today)}" value="${esc(x.from)}" onchange="wfTstatsSet('from', this.value)"></label>`
+    + `<label class="wfr-row">To <input class="input" type="date" data-f="sto" min="${esc(x.min)}" max="${esc(x.today)}" value="${esc(x.to)}" onchange="wfTstatsSet('to', this.value)"></label></div>`;
+  b += x.lead ? `<div class="wfr-row"><span class="wfr-note">Lead: <b dir="auto">${esc(x.lead.name)}</b></span><button type="button" class="btn small ghost" data-f="slead" onclick="wfTstatsSet('lead', '')">Show all leads</button></div>`
+    : `<div class="wfr-row"><input class="input" type="search" data-f="sq" value="${esc(x.q)}" maxlength="${WF_HIST.term}" placeholder="Select Lead" aria-label="Select lead" autocomplete="off" oninput="wfTstatsSet('q', this.value)" onkeydown="if (event.key==='Enter') { event.preventDefault(); wfTstatsFind(); }">`
+      + `<button type="button" class="btn small" data-f="sfind" onclick="wfTstatsFind()">${x.searching ? 'Searching…' : 'Find'}</button></div>`
+      + (Array.isArray(x.matches) ? (x.matches.length ? `<div class="wfr-row" role="group" aria-label="Matching leads">${x.matches.map((c, i) => `<button type="button" class="btn small ghost" onclick="wfTstatsPick(${i})"><span dir="auto">${esc(c.name)}</span></button>`).join('')}</div>` : '<p class="wfr-note">No lead matches that.</p>') : '');
+  b += `<div class="wfb-tabs wfm-tabs" role="tablist" aria-label="Stats">${[['data', 'Stats Data'], ['reasons', 'Top Reasons for Unmatch']].map(([t, l]) => `<button type="button" role="tab" class="wfb-tab${tab===t ? ' on' : ''}" aria-selected="${tab===t}" data-f="st-${t}" onclick="wfTstatsSet('tab', '${t}')">${l}</button>`).join('')}</div>`;
+  if (x.state==='error') b += `<p class="wfr-note wfm-bad" role="alert">${esc(x.error || 'Not read')}</p>`;
+  else if (x.state==='loading' && !rows.length) b += '<p class="wfr-note">Reading…</p>';
+  if (tab==='reasons') {
+    const rs = Array.isArray(x.reasons) ? x.reasons : [];
+    b += rs.length ? `<ol class="wfm-reasons">${rs.map(r => `<li><span>${esc(r.text)}</span><b>${Number(r.n) || 0}</b></li>`).join('')}</ol>` : '<p class="wfr-note">Nothing unmatched in these days.</p>';
+  } else {
+    b += rows.length ? `<div class="table-wrap wf-table wfh-table"><table><caption class="sr-only">Stats data</caption><thead><tr><th>Record</th><th>Phone or email</th><th>Date/Time</th><th>Match Status</th><th>Reason for unmatch</th></tr></thead><tbody>`
+      + rows.map(r => `<tr><td class="wrap"><b dir="auto">${esc(r.name || 'Lead')}</b></td><td>${esc(r.reach || '—')}</td><td>${esc(r.at)}<small class="wfh-tz">${esc(r.tz)}</small></td>`
+        + `<td><span class="pill ${r.matched ? 'good' : 'neutral'}">${r.matched ? 'Matched' : 'Unmatched'}</span></td><td class="wrap">${esc(r.reason || '—')}</td></tr>`).join('') + '</tbody></table></div>'
+      : x.state==='ok' ? '<p class="wfr-note">No checks in these days.</p>' : '';
+    const caps = Array.isArray(x.caps) ? x.caps : [];
+    if (caps.length && !x.lead) b += `<ul class="wfm-caps">${caps.map(c => `<li>${esc(`${c.day}: +${c.more} more unmatched that day, counted in the totals`)}</li>`).join('')}</ul>`;
+    b += `<div class="wfr-row wfm-pager"><button type="button" class="btn small ghost" data-f="sprev" onclick="wfTstatsPage(-1)"${x.page > 0 ? '' : ' disabled'}>Previous</button><span class="wfr-note">Page ${(Number(x.page) || 0) + 1}</span>`
+      + `<button type="button" class="btn small ghost" data-f="snext" onclick="wfTstatsPage(1)"${x.more ? '' : ' disabled'}>Next</button></div>`;
+  }
+  return wfDlgHtml('wfm-ts-t', `Stats: ${x.name || 'Trigger'}`, `<div class="wfm-stats">${b}</div>`,
+    `<span class="wfr-note wfm-foot">Data is stored for last ${WF_CM.statsDays} days · ${WF_CM.page} / page</span><button type="button" class="btn" data-act="dlgClose">Close</button>`).replace('class="wfb-dlg"', 'class="wfb-dlg wfm-dlg"');
+}
+
+// ── the mode layer (impure: state in WF) ──
+// Why a mode can't start now ('' = it can): a System workflow, an unsaved new one (all but a test), a step being typed in,
+// something being moved.
+function wfModeWhy(W, kind){
+  if (!W) return 'The builder is closed';
+  if (W.mode==='system') return 'A System workflow runs on the built-in system: duplicate it first';
+  if (W.mode!=='edit' && !W.cm) return WF_MODE_RO[W.mode] || 'Not in this view';
+  if (kind!=='test' && !W.id) return 'Save the workflow first';
+  if (W.drawer && W.drawer.dirty) return 'Save or cancel the step first';
+  if (W.moveMode || W.gesture) return 'Finish moving first';
+  return '';
+}
+function wfShownDoc(W){ return W.cm && W.cm.doc ? W.cm.doc : W.doc; }
+function wfShownLayout(W){ return W.cm && W.cm.doc ? wfObj(W.cm.layout) : W.layout; }
+// Starts, switches or ends a mode (cm = { kind, doc?, layout?, settings?, … } | null): the step drawer and the picker
+// close, a doc of its own starts with nothing selected and the view fitted, the tab is the Builder (a version may stay on
+// Settings).
+function wfModeSet(cm){
+  const W = WF;
+  if (!W) return;
+  const was = W.cm, swap = !!((was && was.doc) || (cm && cm.doc));
+  if (cm) { cm.seq = ++WF_CM_SEQ.n; if (cm.back==null) cm.back = was ? was.back : W.tab; }
+  if (W.drawer) wfSetLayer('drawer', null);
+  if (W.picker) wfSetLayer('picker', null);
+  W.mode = cm ? cm.kind : 'edit';
+  if (swap) { W.sel = new Set(); W.focus = null; W.view = null; }
+  if (cm && W.tab!=='builder' && !(cm.kind==='version' && W.tab==='settings')) { W.tab = 'builder'; W.vpSize = null; }
+  wfSetLayer('cm', cm || null);
+  wfPanelBump('versions');
+  wfDirty('chrome', 'canvas', 'sel', 'view', 'mini');
+}
+// A read for the mode that is on now ended: its answer in, one paint (never if the mode changed meanwhile).
+function wfModeUpdate(W, seq, patch){
+  if (WF!==W || !W.cm || W.cm.seq!==seq) return false;
+  W.cm = { ...W.cm, ...patch };
+  wfDirty('chrome', 'canvas');
+  return true;
+}
+// Leaves the mode; a path goes back to the tab it was opened from.
+function wfModeExit(){
+  const W = WF;
+  if (!W || !W.cm) return;
+  const back = W.cm.kind==='path' ? W.cm.back : null;
+  wfModeSet(null);
+  if (back && back!=='builder' && typeof WF_HOOKS.tabs[back]==='function') { W.tab = back; W.vpSize = null; wfDirty('chrome', 'view', 'mini'); }
+  W.focusPending = true;
+}
+// The canvas's decorations for the mode on now (paint path: memoised on the mode and the derived key; never reads).
+function wfModeDeco(W, D){
+  const cm = W.cm;
+  if (!cm || !cm.path) return null;
+  if (cm.decoMemo && cm.decoMemo.k===D.key) return cm.decoMemo.v;
+  const v = wfPathDeco(cm.path, wfShownDoc(W), D.layout, cm.words);
+  cm.decoMemo = { k: D.key, v };
+  return v;
+}
+// What the banner says (the chrome's paint).
+function wfModeBanner(W){
+  const cm = W.cm, tz = W.tz || bizTz();
+  if (!cm) return '';
+  return wfModeBannerHtml({ kind: cm.kind, state: cm.state, error: cm.error, vno: cm.vno, name: cm.name, by: cm.by, at: cm.at ? wfhWhen(cm.at, tz) : '', restoreWhy: wfRestoreWhyNow(W),
+    info: cm.info, pruned: cm.pruned, missing: cm.path ? cm.path.missing.length : 0, ran: !!cm.res });
+}
+function wfRestoreWhyNow(W){ return wfRestoreWhy({ writeWhy: wfGuardWrite(), status: W.status, unsaved: W.mode==='edit' || W.cm ? wfIsDirty(W) || (W.drawer && W.drawer.dirty) : false }); }
+
+// ── Stats view ──
+function wfStatsViewToggle(){
+  const W = WF;
+  if (!W) return;
+  if (W.cm && W.cm.kind==='stats') { wfModeExit(); return; }
+  const why = wfModeWhy(W, 'stats');
+  if (why) { showToast(why, { kind: 'info' }); return; }
+  wfModeSet({ kind: 'stats', state: 'loading', text: {}, tstats: {}, hstats: {} });
+  wfAnnounce('Stats view on');
+  wfStatsLoad(W, W.cm.seq);
+}
+async function wfStatsLoad(W, seq){
+  const tz = W.tz || bizTz(), today = bizPartsIn(Date.now(), tz).day, from = wfDayShift(today, 1 - WF_CM.statsDays);
+  try {
+    const [steps, trigs] = await Promise.all([wfFetchRpc('automation_step_stats', { p_automation: W.id, p_since: new Date(bizToUtc(from, 0, 0, tz)).toISOString() }),
+      wfFetchRpc('automation_trigger_stats', { p_automation: W.id, p_from: from, p_to: today })]);
+    const m = wfStatsModel(W.doc, steps, trigs);
+    wfModeUpdate(W, seq, { state: 'ok', text: m.text, tstats: m.ttext, hstats: m.htext });
+  } catch (e) { wfModeUpdate(W, seq, { state: 'error', error: String((e && e.message) || e || 'not read') }); }
+}
+// A trigger's "Stats" (its card's footer, or "View Detailed Stats" in Stats view): the "Stats: <trigger>" window.
+function wfTstatsOpen(id){
+  const W = WF;
+  if (!W) return;
+  if (!W.id) { showToast('Save the workflow first', { kind: 'info' }); return; }
+  const t = wfhTriggers(W.doc, W.reg).find(x => x.id===String(id));
+  if (!t) return;
+  const today = bizPartsIn(Date.now(), W.tz || bizTz()).day;
+  wfSetLayer('dialog', { kind: 'tstats', id: t.id, name: t.name, tab: 'data', from: wfDayShift(today, 1 - WF_CM.statsDays), to: today, q: '', matches: null, lead: null, searching: false,
+    rows: [], cursors: [], page: 0, more: false, kpi: wfStatsKpi([]), caps: [], reasons: [], state: 'loading', error: '', seq: 0 });
+  wfTstatsLoad(0);
+}
+function wfTstatsModel(W){
+  const x = W.dialog, tz = W.tz || bizTz(), today = bizPartsIn(Date.now(), tz).day;
+  return { ...x, today, min: wfDayShift(today, 1 - WF_CM.statsDays) };
+}
+// The window drawn again on its own (a read ended, a choice made): the field in use keeps its focus.
+function wfTstatsPaint(){
+  const W = WF;
+  if (!W || !W.dialog || W.dialog.kind!=='tstats') return;
+  const E = W.el, a = document.activeElement, f = a && E.modal.contains(a) && a.dataset ? a.dataset.f : '';
+  if (!wfPatch(E.modal, WF_DIALOG_HTML.tstats(W)) || !f) return;
+  const el = E.modal.querySelector(`[data-f="${f}"]`);
+  if (el && el.focus) el.focus({ preventScroll: true });
+}
+async function wfTstatsLoad(page){
+  const W = WF, x = W && W.dialog;
+  if (!x || x.kind!=='tstats' || !W.id) return;
+  const tz = W.tz || bizTz(), today = bizPartsIn(Date.now(), tz).day, rg = wfStatsRange(x.from, x.to, today);
+  if (rg.error) { Object.assign(x, { state: 'error', error: rg.error }); wfTstatsPaint(); return; }
+  const seq = ++x.seq, cur = page > 0 ? x.cursors[page - 1] : null, fromIso = new Date(bizToUtc(rg.from, 0, 0, tz)).toISOString(), toIso = new Date(bizToUtc(wfDayShift(rg.to, 1), 0, 0, tz)).toISOString();
+  Object.assign(x, { state: 'loading', error: '' });
+  wfTstatsPaint();
+  try {
+    const [days, evals, reasons] = await Promise.all([
+      page===0 ? wfFetchRpc('automation_trigger_days', { p_automation: W.id, p_trigger: x.id, p_from: rg.from, p_to: rg.to }) : null,
+      wfFetchRpc('automation_trigger_evals', { p_automation: W.id, p_trigger: x.id, p_from: fromIso, p_to: toIso, p_matched: null, p_contact: x.lead ? x.lead.id : null,
+        p_before_at: cur ? cur.at : null, p_before_id: cur ? cur.id : null, p_limit: WF_CM.page + 1 }),
+      page===0 ? wfFetchRpc('automation_unmatch_reasons', { p_automation: W.id, p_trigger: x.id, p_from: rg.from, p_to: rg.to }) : null]);
+    if (WF!==W || W.dialog!==x || x.seq!==seq) return;
+    const got = Array.isArray(evals) ? evals : [], list = got.slice(0, WF_CM.page);
+    if (page===0) Object.assign(x, { kpi: wfStatsKpi(days), caps: wfStatsCapNotes(days), reasons: (Array.isArray(reasons) ? reasons : []).map(r => ({ text: wfUnmatchText(r.reason), n: Number(r.n) || 0 })) });
+    x.cursors = x.cursors.slice(0, page);
+    if (list.length) x.cursors[page] = { at: list[list.length - 1].at, id: list[list.length - 1].id };
+    Object.assign(x, { page, more: got.length > WF_CM.page, state: 'ok', rows: list.map(r => {
+      const c = r.contact_id ? contactById(String(r.contact_id)) : null;
+      return { name: c ? String(c.fullName || '') : wfhNameOf(r) || String(r.record_id || ''), reach: c ? String(c.phone || c.email || '') : '', at: wfhWhen(r.at, tz), tz: wfhTzText(r.at, tz), matched: r.matched===true,
+        reason: r.matched===true ? '' : String(wfObj(r.detail).text || wfUnmatchText(r.reason)) };
+    }) });
+  } catch (e) {
+    if (WF!==W || W.dialog!==x || x.seq!==seq) return;
+    Object.assign(x, { state: 'error', error: String((e && e.message) || e || 'not read') });
+  }
+  wfTstatsPaint();
+}
+function wfTstatsSet(key, v){
+  const W = WF, x = W && W.dialog;
+  if (!x || x.kind!=='tstats') return;
+  const val = String(v ?? '');
+  if (key==='q') { x.q = val.slice(0, WF_HIST.term); return; }
+  if (key==='tab') { x.tab = val==='reasons' ? 'reasons' : 'data'; wfTstatsPaint(); return; }
+  if (key==='from' || key==='to') x[key] = val;
+  else if (key==='lead') Object.assign(x, { lead: null, matches: null, q: '' });
+  else return;
+  Object.assign(x, { cursors: [], page: 0 });
+  wfTstatsLoad(0);
+}
+function wfTstatsPage(dir){ const W = WF, x = W && W.dialog; if (!x || x.kind!=='tstats' || x.state==='loading') return; const p = x.page + (dir > 0 ? 1 : -1); if (p < 0 || (dir > 0 && !x.more)) return; wfTstatsLoad(p); }
+async function wfTstatsFind(){
+  const W = WF, x = W && W.dialog;
+  if (!x || x.kind!=='tstats' || x.searching) return;
+  x.searching = true; wfTstatsPaint();
+  let f = null;
+  try { f = await wfhSearch(x.q); } catch (e) { f = null; }
+  if (WF!==W || W.dialog!==x) return;
+  x.searching = false;
+  const leads = f ? f.contacts.map(c => ({ id: String(c.id), name: String(c.full_name || 'Lead') })).slice(0, WF_CM.records) : [];
+  if (leads.length===1) { Object.assign(x, { lead: leads[0], matches: null, cursors: [], page: 0 }); wfTstatsLoad(0); return; }
+  x.matches = f ? leads : null;
+  if (!f) showToast('Type at least 2 letters', { kind: 'info' });
+  wfTstatsPaint();
+}
+function wfTstatsPick(i){ const W = WF, x = W && W.dialog; const c = x && x.kind==='tstats' && Array.isArray(x.matches) ? x.matches[Number(i)] : null; if (!c) return; Object.assign(x, { lead: c, matches: null, cursors: [], page: 0 }); wfTstatsLoad(0); }
+
+// ── Version history ──
+function wfVersionsP(W){ if (!W.panels.versions) W.panels.versions = { rev: 0, rows: [], state: 'idle', error: '', editor: '', more: false, seq: 0 }; return W.panels.versions; }
+async function wfVersionsLoad(W, more){
+  if (!W || !W.id) return;
+  const P = wfVersionsP(W), seq = ++P.seq, from = more ? P.rows.length : 0;
+  P.state = 'loading'; wfPanelBump('versions');
+  try {
+    const { data, error } = await sb.from('automation_versions').select(WF_CM_VER_COLS).eq('automation_id', W.id).order('version_no', { ascending: false }).range(from, from + WF_CM.versions - 1);
+    if (error) throw error;
+    if (WF!==W || P.seq!==seq) return;
+    const got = Array.isArray(data) ? data : [];
+    Object.assign(P, { rows: more ? P.rows.concat(got) : got, more: got.length===WF_CM.versions, state: 'ok', error: '' });
+  } catch (e) {
+    if (WF!==W || P.seq!==seq) return;
+    Object.assign(P, { state: 'error', error: String((e && e.message) || e || 'not read') });
+  }
+  wfPanelBump('versions');
+}
+function wfVersionsModel(W){
+  const P = wfVersionsP(W), tz = W.tz || bizTz(), all = P.rows.map(wfObj), top = all[0] || null;
+  const row = r => ({ vno: Number(r.version_no) || 0, name: String(r.name || ''), by: String(r.created_by_name || ''), at: wfhWhen(r.created_at, tz), reason: WF_VERSION_WORDS[r.reason] || String(r.reason || ''), status: r.status==='published' ? 'published' : 'draft' });
+  const editors = [...new Set(all.map(r => String(r.created_by_name || '')).filter(Boolean))].sort();
+  return { state: P.state, error: P.error, editors, editor: P.editor, more: P.more, viewing: W.cm && W.cm.kind==='version' ? W.cm.vno : null,
+    current: { name: W.name, vno: top ? Number(top.version_no) || 0 : 0, by: top ? String(top.created_by_name || '') : '', at: top ? wfhWhen(top.created_at, tz) : '', status: W.status },
+    rows: all.slice(1).filter(r => !P.editor || String(r.created_by_name || '')===P.editor).map(row), restoreWhy: wfRestoreWhyNow(W), saveWhy: W.saving ? 'Saving…' : wfSaveWhy(W) };
+}
+function wfRailVersions(W, D){
+  const P = wfVersionsP(W);
+  return wfRailMemo(W, D, 'versions', `${P.state}|${W.status}|${W.cm ? `${W.cm.kind}${W.cm.vno || ''}` : ''}|${wfIsDirty(W)}|${!!W.saving}|${W.name}|${wfGuardWrite()}`, () => wfVersionsHtml(wfVersionsModel(W)));
+}
+// One version opened read-only on the canvas (its doc, layout and settings; the tabs shrink to Builder | Settings).
+async function wfVersionView(vno){
+  const W = WF, n = Number(vno);
+  if (!W || !Number.isInteger(n) || n < 1) return;
+  const why = wfModeWhy(W, 'version');
+  if (why) { showToast(why, { kind: 'info' }); return; }
+  let row = null;
+  try {
+    const { data, error } = await sb.from('automation_versions').select(`${WF_CM_VER_COLS}, definition, settings, layout`).eq('automation_id', W.id).eq('version_no', n).maybeSingle();
+    if (error) throw error;
+    row = data;
+  } catch (e) { showToast('That version could not be read: ' + String((e && e.message) || e), { kind: 'warn' }); return; }
+  if (WF!==W) return;
+  const def = row && wfObj(row.definition);
+  if (!def || def.schema!==2 || !def.nodes) { showToast('That version is no longer kept', { kind: 'info' }); return; }
+  wfModeSet({ kind: 'version', doc: def, layout: wfObj(row.layout), settings: wfObj(row.settings), vno: n, name: String(row.name || ''), by: String(row.created_by_name || ''), at: row.created_at || null });
+  wfAnnounce(`Version ${n}, view only`);
+}
+// Restore (design §4.7): the version is written back as the Draft (reason restore); the builder then shows what is saved.
+function wfVersionRestore(vno){
+  const W = WF, n = Number(vno);
+  if (!W || !W.id || !Number.isInteger(n) || n < 1) return;
+  const why = wfRestoreWhyNow(W);
+  if (why) { showToast(why, { kind: 'info' }); return; }
+  confirmAction(`Version v${n} becomes this workflow's Draft. Nothing is published; what is saved now stays in Version history.`, async () => {
+    const res = await autoFnCall({ step: 'restore', automation_id: W.id, version_no: n });
+    if (WF!==W) return;
+    if (!res.ok) { showToast('Not restored: ' + autoFnReason(res.body), { kind: 'warn' }); return; }
+    const row = await wfReadRow(W.id);
+    if (WF!==W || !row) return;
+    if (W.cm) wfModeSet(null);
+    wfRowApply(W, row);
+    wfDraftClear(W);
+    wfListChanged(W);
+    try { logSettingsActivity(wfActor(), `${CAT_NAMES.automations}: "${W.name}" restored from version ${n} (Draft)`); } catch (e) { /* a convenience */ }
+    showToast(`Version ${n} restored as the Draft`);
+    wfVersionsLoad(W);
+  }, { danger: false, title: 'Restore this version?', confirmLabel: 'Restore' });
+}
+// What is stored now, in place (no new page-history entry): the doc, its layout and settings, the revision and status; the
+// undo history starts again from it.
+function wfRowApply(W, row){
+  const def = wfObj(row.definition), doc = def.schema===2 && def.nodes ? def : W.doc;
+  const s = { doc, layout: wfObj(row.layout), builder: row.builder==='advanced' ? 'advanced' : 'standard', settings: wfObj(row.settings), name: String(row.name || W.name).slice(0, WF_DOC_LIMITS.name), tplDrafts: {}, sel: [] };
+  W.rev = row.revision ?? W.rev; W.status = row.enabled ? 'published' : 'draft';
+  W.base = { ...s, rev: W.rev }; delete W.base.sel;
+  W.hist = { past: [], future: [] }; W.aiDirty = false; W.aiKept = false; W.view = null;
+  wfApplySnap(W, s);
+  wfDirty('view');
+}
+// Create new workflow from version: a new Draft of its own (the function's copy_version), then it opens.
+async function wfVersionCopy(vno){
+  const W = WF, n = Number(vno), why = wfGuardWrite();
+  if (!W || !W.id || !Number.isInteger(n) || n < 1) return;
+  if (why) { showToast(why, { kind: 'warn' }); return; }
+  const res = await autoFnCall({ step: 'copy_version', automation_id: W.id, version_no: n, name: `${W.name} (v${n})`.slice(0, WF_DOC_LIMITS.name) });
+  if (WF!==W) return;
+  if (!res.ok || !res.body || !res.body.id) { showToast('Not copied: ' + autoFnReason(res.body), { kind: 'warn' }); return; }
+  try { logSettingsActivity(wfActor(), `${CAT_NAMES.automations}: a new workflow from version ${n} of "${W.name}" (a Draft)`); } catch (e) { /* a convenience */ }
+  wfListChanged(W);
+  showToast(`A new Draft from version ${n}`);
+  wfSwitchTo(String(res.body.id));
+}
+// "Save Version" (GHL's): a save that keeps a version even with nothing changed since the last save.
+async function wfVersionSave(){
+  const W = WF;
+  if (!W) return;
+  if (await wfSave({ force: true, reason: 'save_version' }) && WF===W) wfVersionsLoad(W);
+}
+
+// ── See contact path ──
+// A run's path (Enrollment history's "Highlight lead path", the per-lead logs' "See contact path"): the run, its log rows
+// (newest first, ≤ 500) and the version it started on; a run pruned meanwhile is read from its enroll row.
+async function wfPathOpen(runId){
+  const W = WF, id = String(runId || '');
+  if (!W || !W.id || !WF_UUID_RE.test(id)) return;
+  const why = wfModeWhy(W, 'path');
+  if (why) { showToast(why, { kind: 'info' }); return; }
+  const tok = W.token, back = W.cm ? W.cm.back : W.tab, tz = W.tz || bizTz(), rg = wfhRange({ preset: String(WF_HIST.maxDays) }, Date.now(), tz);
+  let run = null, rows = [], ver = null;
+  try {
+    const r = await sb.from('automation_runs').select(WF_CM_RUN_COLS).eq('id', id).maybeSingle();
+    if (r.error) throw r.error;
+    run = r.data || null;
+    for (let page = 0, last = null; page < WF_CM.pathPages; page++) {
+      const got = await wfFetchRpc('automation_execution_log', { p_automation: W.id, p_from: rg.fromIso, p_to: new Date(Date.now() + 86400000).toISOString(), p_steps: null, p_status: null, p_run: id, p_contact: null,
+        p_before_at: last ? last.at : null, p_before_id: last ? last.id : null, p_limit: WF_CM.pathRows });
+      const list = Array.isArray(got) ? got : [];
+      rows = rows.concat(list);
+      if (list.length < WF_CM.pathRows) break;
+      last = list[list.length - 1];
+    }
+    const enroll = rows.find(x => x.row_kind==='enroll'), rev = run && run.revision!=null ? run.revision : enroll ? enroll.revision : null;
+    if (rev!=null) {
+      const v = await sb.from('automation_versions').select('version_no, revision, name, definition, layout').eq('automation_id', W.id).lte('revision', Number(rev)).order('revision', { ascending: false }).order('version_no', { ascending: false }).limit(1);
+      if (v.error) throw v.error;
+      ver = wfVersionPick(v.data, rev);
+    }
+  } catch (e) { if (WF===W && W.token===tok) showToast('The path could not be read: ' + String((e && e.message) || e), { kind: 'warn' }); return; }
+  if (WF!==W || W.token!==tok) return;
+  if (!run && !rows.length) { showToast('This run is no longer kept', { kind: 'info' }); return; }
+  wfPathApply(W, { run, rows, version: ver, back });
+}
+// The path shown (no reads here: the runtime tests call it with their own rows). x = { run, rows, version, back }.
+function wfPathApply(W, x){
+  const o = wfObj(x), run = o.run ? wfObj(o.run) : null, rows = Array.isArray(o.rows) ? o.rows : [], enroll = wfObj(rows.find(r => wfObj(r).row_kind==='enroll')), ver = o.version ? wfObj(o.version) : null;
+  const vdef = ver ? wfObj(ver.definition) : null, def = vdef && vdef.schema===2 && vdef.nodes ? vdef : W.base.doc, tz = W.tz || bizTz(), src = run || enroll;
+  const path = wfPathFromLog(def, rows), contactId = String(wfObj(src).contact_id || '');
+  wfModeSet({ kind: 'path', doc: def, layout: ver && vdef===def ? wfObj(ver.layout) : W.base.layout, path, words: {}, back: o.back || W.tab, pruned: def!==vdef,
+    info: { word: wfhRecordWord(def, W.reg), name: wfhNameOf(src) || 'Lead', contactId, runId: String((run && run.id) || enroll.run_id || ''), enrolled: (run && run.created_at) || enroll.at ? wfhWhen((run && run.created_at) || enroll.at, tz) : '',
+      tz: (run && run.created_at) || enroll.at ? wfhTzText((run && run.created_at) || enroll.at, tz) : '', vno: ver && def===vdef ? Number(ver.version_no) || 0 : 0 } });
+  wfAnnounce(`Path shown: ${path.visited.length} step${path.visited.length===1 ? '' : 's'}${path.waitingAt ? ', waiting now' : ''}${path.failed.length ? `, ${path.failed.length} failed` : ''}`);
+}
+// The per-lead logs' "See contact path": the enrollment picked, else the newest one of the lead's.
+function wfPathFromLogs(){
+  const L = typeof WFH!=='undefined' && WFH.log ? WFH.log : null, id = L ? L.runId || (L.rows[0] && L.rows[0].run_id) || (L.runs[0] && L.runs[0].id) || '' : '';
+  if (!id) { showToast('Pick an enrollment first', { kind: 'info' }); return; }
+  wfPathOpen(String(id));
+}
+
+// ── Test workflow ──
+function wfTestToggle(){
+  const W = WF;
+  if (!W) return;
+  if (W.cm && W.cm.kind==='test') { wfModeExit(); return; }
+  const why = wfModeWhy(W, 'test');
+  if (why) { showToast(why, { kind: 'info' }); return; }
+  const t = (W.doc.triggers || []).map(wfObj).find(x => x.disabled!==true) || (W.doc.triggers || [])[0];
+  wfModeSet({ kind: 'test', trigger: t ? String(t.id) : '', q: '', matches: null, searching: false, record: null, assume: {}, state: 'idle', error: '', res: null, path: null, words: {} });
+  W.panelFocus = 'first';
+}
+function wfTestModel(W, D){
+  const cm = W.cm, k = wfTestKind(W.doc, W.reg, cm.trigger), as = wfTestAssumeRows(W.doc, W.reg);
+  return { word: k.word, contactless: k.contactless, triggers: wfhTriggers(W.doc, W.reg), trigger: cm.trigger, q: cm.q, matches: cm.matches, searching: cm.searching, record: cm.record, state: cm.state, error: cm.error,
+    assumes: as.map(a => ({ ...a, value: cm.assume[a.id] || '' })), result: cm.res ? wfTestResult(cm.res, W.doc, W.reg, W.tz || bizTz()) : null,
+    runWhy: wfGuardWrite() || wfTestRunWhy({ state: cm.state, errors: D.issues.errors.length, steps: Object.keys(wfNodesOf(W.doc)).length, record: cm.record, contactless: k.contactless, word: k.word }) };
+}
+// The panel drawn again on its own (a choice, a search or the test ended): the field in use keeps its focus.
+function wfTestPaint(){
+  const W = WF;
+  if (!W || !W.cm || W.cm.kind!=='test' || W.drawer || W.picker) return;
+  const E = W.el, a = document.activeElement, f = a && E.rbody.contains(a) && a.dataset ? a.dataset.f : '';
+  if (!wfPatch(E.rbody, wfTestPanelHtml(wfTestModel(W, wfDerived()))) || !f) return;
+  const el = E.rbody.querySelector(`[data-f="${f}"]`);
+  if (el && el.focus) el.focus({ preventScroll: true });
+}
+function wfTestSet(key, v){
+  const W = WF, cm = W && W.cm;
+  if (!cm || cm.kind!=='test') return;
+  const val = String(v ?? '');
+  if (key==='q') { cm.q = val.slice(0, WF_HIST.term); return; }
+  if (key==='trigger') { if (!(W.doc.triggers || []).some(t => String(t.id)===val)) return; const k0 = wfTestKind(W.doc, W.reg, cm.trigger).kind; cm.trigger = val; if (wfTestKind(W.doc, W.reg, val).kind!==k0) Object.assign(cm, { record: null, matches: null }); }
+  else if (key==='record') Object.assign(cm, { record: null, matches: null });
+  else return;
+  wfTestPaint();
+}
+function wfTestAssume(id, v){
+  const W = WF, cm = W && W.cm;
+  if (!cm || cm.kind!=='test' || !wfNodeIdOk(id) || !wfHas(wfNodesOf(W.doc), id)) return;
+  const a = { ...cm.assume };
+  if (['met', 'timeout', 'not_met'].includes(String(v))) a[id] = String(v); else delete a[id];
+  cm.assume = a;
+}
+// The records the test can run for: leads by name / phone / email, jobs by name or invoice, a lead's latest calls or chats.
+async function wfTestSearch(){
+  const W = WF, cm = W && W.cm;
+  if (!cm || cm.kind!=='test' || cm.searching) return;
+  const k = wfTestKind(W.doc, W.reg, cm.trigger), seq = cm.seq;
+  cm.searching = true; wfTestPaint();
+  let matches = null;
+  try {
+    const f = await wfhSearch(cm.q);
+    if (f && k.kind==='contact') matches = f.contacts.map(c => ({ kind: 'contact', id: String(c.id), name: String(c.full_name || 'Lead') }));
+    else if (f && k.kind==='job') matches = f.jobs.map(j => ({ kind: 'job', id: String(j.id), name: String(j.customer_name || 'Job'), sub: 'Job' }));
+    else if (f) {
+      const ids = f.contacts.map(c => String(c.id)), names = new Map(f.contacts.map(c => [String(c.id), String(c.full_name || 'Lead')]));
+      const q = k.kind==='call' ? sb.from('calls').select('id, contact_id, started_at').in('contact_id', ids).order('started_at', { ascending: false }) : sb.from('chat_sessions').select('id, contact_id, created_at').in('contact_id', ids).order('created_at', { ascending: false });
+      const { data, error } = ids.length ? await q.limit(WF_CM.records) : { data: [], error: null };
+      if (error) throw error;
+      matches = (data || []).map(r => ({ kind: k.kind, id: String(r.id), name: names.get(String(r.contact_id)) || 'Lead', sub: `${k.kind==='call' ? 'Call' : 'Chat'} · ${wfhWhen(r.started_at || r.created_at, W.tz || bizTz())}` }));
+    }
+  } catch (e) { matches = null; if (WF===W && W.cm && W.cm.seq===seq) showToast('Could not search: ' + String((e && e.message) || e), { kind: 'warn' }); }
+  if (WF!==W || !W.cm || W.cm.seq!==seq) return;
+  W.cm.searching = false;
+  W.cm.matches = matches ? matches.slice(0, WF_CM.records) : null;
+  if (!matches && String(W.cm.q).trim().length < 2) showToast('Type at least 2 letters', { kind: 'info' });
+  wfTestPaint();
+}
+function wfTestPick(i){
+  const W = WF, cm = W && W.cm, c = cm && cm.kind==='test' && Array.isArray(cm.matches) ? cm.matches[Number(i)] : null;
+  if (!c) return;
+  Object.assign(cm, { record: c, matches: null });
+  wfTestPaint();
+}
+// Run test: the CURRENT draft (saved or not) on the engine's dry run; the answer lights the canvas as a run's path would.
+async function wfTestRun(){
+  const W = WF, cm = W && W.cm;
+  if (!cm || cm.kind!=='test') return;
+  const why = wfTestModel(W, wfDerived()).runWhy;
+  if (why) { showToast(why, { kind: 'info' }); return; }
+  const seq = cm.seq, doc = W.doc, assume = { ...cm.assume };
+  cm.state = 'running'; cm.error = ''; wfTestPaint();
+  const res = await autoFnCall({ step: 'test', ...(W.id ? { automation_id: W.id } : {}), definition: doc, settings: W.settings, ...(cm.trigger ? { trigger_id: cm.trigger } : {}),
+    ...(cm.record ? { record: { kind: cm.record.kind, id: cm.record.id } } : {}), ...(Object.keys(assume).length ? { assume } : {}) });
+  if (WF!==W || !W.cm || W.cm.seq!==seq) return;
+  const b = wfObj(res && res.body);
+  if (b.ok===true && Array.isArray(b.path)) {
+    const path = wfPathFromLog(doc, wfTestRows(b)), r = wfTestResult(b, doc, W.reg, W.tz || bizTz());
+    wfModeUpdate(W, seq, { state: 'ok', error: '', res: b, path, words: r.words, decoMemo: null });
+    wfAnnounce('Test result: nothing was sent');
+  } else if (b.ok===false && Array.isArray(b.problems) && b.problems.length) wfModeUpdate(W, seq, { state: 'ok', error: '', res: { ...b, path: [], notes: ['Fix these first: the test did not run'] }, path: null, words: {}, decoMemo: null });
+  else wfModeUpdate(W, seq, { state: 'error', error: `The test did not run: ${autoFnReason(b)}`, res: null, path: null, words: {}, decoMemo: null });
+  wfTestPaint();
 }
 
 // ══ The workflow builder: the Advanced canvas (stage 2, phase 5 · G5.2; design §5.5 "Advanced", §5.6, §5.7, §5.8; GHL's
@@ -28602,14 +29477,15 @@ function wfAdvCanvasItems(doc, L, reg, ctx, x){
   const trigs = Array.isArray(d.triggers) ? d.triggers.map(wfObj) : [];
   (lay.triggers || []).forEach(b => {
     const t = trigs.find(z => String(z.id)===b.id) || {}, e = wfTrigEntry(reg, t.type), N = wfTriggerNarration(t, reg, ctx), key = `t:${b.id}`, go = typeof t.goto==='string' && I.nodes[t.goto] ? wfNodeName(I.nodes[t.goto], reg) : '';
-    const c = { id: b.id, trigger: true, name: N.head, sub: N.name, icon: e ? e.icon : 'zap', tone: e ? wfToneOf(e) : 'grey', disabled: t.disabled===true, issue: iss[key] || '', ro };
+    const c = { id: b.id, trigger: true, name: N.head, sub: N.name, icon: e ? e.icon : 'zap', tone: e ? wfToneOf(e) : 'grey', disabled: t.disabled===true, issue: iss[key] || '', ro, stats: String(wfObj(o.tstats)[b.id] || '') };
     items.push({ key, group: 'trig', act: 'card', id: b.id, cls: `wfb-card wfa-tile wfa-trig${c.disabled ? ' is-off' : ''}${c.issue ? ` iss-${c.issue}` : ''}`, x: b.x, y: b.y, w: b.w, h: b.h, attrs: aria(key),
-      al: `Trigger: ${N.head}${N.name ? `, ${N.name}` : ''}. ${N.lines.join('. ')}${N.more ? `. +${N.more} more` : ''}.${go ? ` Starts at ${go}.` : ''}${c.disabled ? ' Disabled.' : ''}${issueWords(key)}`, ck: JSON.stringify(c), html: () => wfAdvTileHtml(c) });
+      al: `Trigger: ${N.head}${N.name ? `, ${N.name}` : ''}. ${N.lines.join('. ')}${N.more ? `. +${N.more} more` : ''}.${go ? ` Starts at ${go}.` : ''}${c.disabled ? ' Disabled.' : ''}${c.stats ? ` ${c.stats}.` : ''}${issueWords(key)}`, ck: JSON.stringify(c), html: () => wfAdvTileHtml(c) });
   });
   Object.entries(wfObj(lay.nodes)).forEach(([id, b]) => {
     const n = wfObj(I.nodes[id]), e = wfNodeEntry(reg, n.kind, n.type), unknown = loaded && !e, key = `n:${id}`, gi = groups.findIndex(g => g.head===id);
     const c = { id, name: wfNodeName(n, reg), icon: e ? e.icon : n.kind==='wait' ? 'hourglass' : 'zap', tone: e ? wfToneOf(e) : 'grey', disabled: n.disabled===true, unknown, issue: iss[key] || '',
-      notes: Number(wfObj(o.notes)[id]) || 0, stats: String(wfObj(o.stats)[id] || ''), verdict: String(wfObj(o.verdicts)[id] || ''), ro, ports: wfPorts(n).map(p => ({ port: p, label: wfPortLabel(n, p, reg) })),
+      notes: Number(wfObj(o.notes)[id]) || 0, stats: String(wfObj(o.stats)[id] || ''), verdict: String(wfObj(o.verdicts)[id] || ''), ro,
+      ports: wfPorts(n).map(p => { const hs = String(wfObj(o.hstats)[`${id}:${p}`] || ''), label = wfPortLabel(n, p, reg); return { port: p, label: hs ? `${label} · ${hs}` : label }; }),
       entry: groups.length > 1 && d.entry===id, head: gi >= 0 && !I.parent[id] && d.entry!==id, unreached: unreached.has(id) };
     const grp = gi >= 0 && groups.length > 1 ? ` Group ${gi + 1} of ${groups.length}${d.entry===id ? ' (Default Path)' : ''}.` : '';
     tree.push({ key, group: 'tree', act: 'card', id, cls: `wfb-card wfa-tile${c.disabled ? ' is-off' : ''}${unknown ? ' is-unknown' : ''}${c.issue ? ` iss-${c.issue}` : ''}`, x: b.x, y: b.y, w: b.w, h: b.h, attrs: aria(key),
@@ -29162,8 +30038,8 @@ function wfNavId(W){ return W ? W.id || (W.sys && W.sys.key) || null : null; }
 function wfNavReady(){ return [typeof navPush, typeof navReplace, typeof navBackTo, typeof navOurs, typeof navSnap].every(t => t==='function') && typeof NAV_HIST!=='undefined' && !!NAV_HIST.ready; }
 // A builder layer opened or closed: its entry follows once the change is done (never inside back's own handling).
 function wfNavSync(){ if (typeof navOverlaySync==='function') setTimeout(navOverlaySync, 0); }
-// How many of the builder's layers are open (menu, dialog, move mode, drawer, picker, side panel).
-function wfNavOpen(W){ return W ? ['menu', 'dialog', 'moveMode', 'drawer', 'picker', 'rail'].filter(k => !!W[k]).length : 0; }
+// How many of the builder's layers are open (menu, dialog, move mode, drawer, picker, side panel, a canvas mode).
+function wfNavOpen(W){ return W ? ['menu', 'dialog', 'moveMode', 'drawer', 'picker', 'rail', 'cm'].filter(k => !!W[k]).length : 0; }
 // Back with a builder layer open: the builder's own top one closes (wfNavTop's order: a menu over the side panel goes
 // first); false = nothing closed (it asked first: a step with changes), so the entry stays.
 function wfNavClose(){
@@ -29191,11 +30067,13 @@ function wfNavRestore(s){
   else wfBuilderOpen(null, { folderId: typeof WF_UI!=='undefined' ? WF_UI.folder || null : null });
   return true;
 }
-// The layers (stage 4's note: a layer inside a window sits between 200 and 300): the builder's dialogs and menus 210, its
-// drawers (the step drawer, the side panel) 220, its pickers 230. Each close() is wfNavClose, so back closes what is on top.
+// The layers (stage 4's note: a layer inside a window sits between 200 and 300): a canvas mode 205 (G6.3: Stats view, a
+// version, a path, a test), the builder's dialogs and menus 210, its drawers (the step drawer, the side panel) 220, its
+// pickers 230. Each close() is wfNavClose, so back closes what is on top.
 function wfNavWire(){
   if (typeof navLayer!=='function') return;
   const open = k => () => !!WF && k.some(n => !!WF[n]);
+  navLayer({ id: 'wf-mode', z: 205, isOpen: open(['cm']), close: wfNavClose });
   navLayer({ id: 'wf-modal', z: 210, isOpen: open(['menu', 'dialog', 'moveMode']), close: wfNavClose });
   navLayer({ id: 'wf-drawer', z: 220, isOpen: open(['drawer', 'rail']), close: wfNavClose });
   navLayer({ id: 'wf-picker', z: 230, isOpen: open(['picker']), close: wfNavClose });

@@ -251,6 +251,11 @@ const DECLS = [
   // The workflow builder: switching builders, the blockers list, Default builder (stage 2, phase 5 · G5.3); the lead's
   // "Assigned to" picker through vacationPickerInfo
   'wfDefaultBuilder', 'wfStickyNearest', 'wfSwitchPlan', 'wfBlockerRows', 'wfBlockersHtml', 'vacationProfileWho',
+  // Stage 2 phase 6 G6.3: the canvas modes (a run's path from its log rows, a test's rows, the decorations, Stats view, versions,
+  // the banners and panels)
+  'WF_CM', 'WF_CM_SEQ', 'WF_CM_VER_COLS', 'WF_CM_RUN_COLS', 'WF_VERSION_WORDS', 'WF_RESTORE_WHY', 'WF_UNMATCH_WORDS', 'WF_TEST_GUARD_WORDS', 'wfCmMs', 'wfPathFromLog', 'wfTestRows',
+  'wfPathDeco', 'wfVersionPick', 'wfRestoreWhy', 'wfStatsModel', 'wfStatsRange', 'wfStatsKpi', 'wfStatsCapNotes', 'wfUnmatchText', 'wfTestKind', 'wfTestAssumeRows', 'wfTestRunWhy',
+  'wfTestVerdict', 'wfTestResult', 'wfModeBannerHtml', 'wfVersionsHtml', 'wfTestPanelHtml', 'wfStatsDlgHtml',
 ];
 
 function extractDecl(source, name){
@@ -6312,8 +6317,8 @@ function testWfShellRuntime(){
     'keys: K = shortcuts, Esc closes it, ↓ = the next card in reading order (Standard); unbound keys and Tab pass through; in a text field only ⌘S is taken');
   const kr = [key('KeyC', { shiftKey: true }), W.rail, key('KeyC', { shiftKey: true }), W.rail, key('KeyV', { shiftKey: true }), S.toasts.slice(-1)[0], key('KeyA', { shiftKey: true }), S.toasts.slice(-1)[0], W.rail];
   flush();
-  assertEqual(kr, [true, 'notes', true, null, true, X.WF_SOON, true, 'Coming with Workflow AI', null],
-    'rail shortcuts: ⇧C opens Notes (G4.4) and closes it again; a panel not built yet (⇧V Version history, phase 6) and Workflow AI say why instead of doing nothing');
+  assertEqual(kr, [true, 'notes', true, null, true, null, true, 'Coming with Workflow AI', 'versions'],
+    'rail shortcuts: ⇧C opens Notes (G4.4) and closes it again; ⇧V opens Version history (G6.3); Workflow AI says why instead of doing nothing');
   const k3 = [key('ArrowDown') && W.focus, key('ArrowDown') && W.focus, key('ArrowDown') && W.focus, key('ArrowDown') && W.focus, key('ArrowRight') && W.focus, key('ArrowUp') && W.focus, key('ArrowDown', { shiftKey: true }) && [...W.sel].join()];
   assertEqual(k3, ['n:n1', 'n:n2', 'h:n2:b1', 'n:n3', 'h:n2:none', 'n:n3', 'n:n3'], 'Standard: ↓ / ↑ the reading order, → / ← the card beside; Shift+↓ adds to the selection (steps and triggers only)');
   X.wfSelectKey('n:n3', false);
@@ -9059,7 +9064,7 @@ async function testWfSwitchRuntime(){
   const syncs = () => { const n = N.timers.filter(f => f===C.navOverlaySync).length; N.timers.length = 0; return n; };
   V('wfNavWire')();
   assertEqual([N.layers.map(l => `${l.id}:${l.z}`), C.NAV_LEAVERS.wf===V('wfNavLeave'), C.NAV_RESTORERS.wf===V('wfNavRestore'), N.layers.some(l => l.isOpen())],
-    [['wf-modal:210', 'wf-drawer:220', 'wf-picker:230'], true, true, false], 'wfNavWire: the builder\'s layers by stage 4\'s z (dialogs 210, drawers 220, pickers 230), its leaver and restorer; closed → none open');
+    [['wf-mode:205', 'wf-modal:210', 'wf-drawer:220', 'wf-picker:230'], true, true, false], 'wfNavWire: the builder\'s layers by stage 4\'s z (a canvas mode 205 since G6.3, dialogs 210, drawers 220, pickers 230), its leaver and restorer; closed → none open');
   const DS = { schema: 2, seq: 4, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }], nodes: { n1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct(null) } };
   X.wfBuilderOpen({ id: 'w9', name: 'Switch', enabled: true, definition: DS, revision: 1, builder: 'standard' }, {});
   const W = S.W(), E = W.el;
@@ -9242,6 +9247,221 @@ async function testWfPhase5ReviewFixes(){
     'a System workflow\'s "Open its old settings" closes the builder with nav false, then goes to the page');
 }
 
+// ── Stage 2 phase 6 G6.3: the canvas modes (See contact path, Stats view, Version history, Test workflow) ──
+// The fixture both test functions use: t1 → n1 → n2 (wait 1 day) → n3 (if: Hot → n4 → n6 "Go to n5" | None → n5).
+const WF_CM_DOC = { schema: 2, seq: 9, entry: 'n1', triggers: [{ id: 't1', type: 'newLead', filters: WF_F0 }, { id: 't2', type: 'newLead', filters: WF_F0 }],
+  nodes: { n1: wfAct('n2'), n2: { kind: 'wait', type: 'period', config: { n: 1, unit: 'days' }, out: { next: 'n3' } },
+    n3: { kind: 'if_else', type: 'if_else', config: { noneName: 'None', branches: [{ id: 'b1', name: 'Hot', when: WF_F0 }] }, out: { b1: 'n4', none: 'n5' } },
+    n4: wfAct('n6'), n5: wfAct(null), n6: { kind: 'goto', type: 'goto', config: { target: 'n5' }, out: {} } } };
+// A real run of it as the engine logs it (automation_execution_log: newest first): Hot, then the Go to, then n5, finished.
+const wfCmAt = i => new Date(Date.UTC(2026, 9, 16, 0, i)).toISOString();
+const WF_CM_REAL = [
+  { id: 'r0', row_kind: 'enroll', step_id: 'n1', status: 'added', trigger_id: 't1', at: wfCmAt(0), seq: 0, revision: 4 },
+  { id: 'r1', row_kind: 'action', step_id: 'n1', status: 'sent', at: wfCmAt(1), seq: 1 },
+  { id: 'r2', row_kind: 'step', step_id: 'n2', status: 'waiting', at: wfCmAt(1), seq: 2, next_at: wfCmAt(3) },
+  { id: 'r3', row_kind: 'step', step_id: 'n2', status: 'wait_finished', detail: { outcome: 'time', resumed_by: 'timer' }, at: wfCmAt(3), seq: 3 },
+  { id: 'r4', row_kind: 'step', step_id: 'n3', status: 'branch', detail: { branch_id: 'b1', branch_name: 'Hot' }, at: wfCmAt(3), seq: 4 },
+  { id: 'r5', row_kind: 'action', step_id: 'n4', status: 'executed', at: wfCmAt(3), seq: 5 },
+  { id: 'r6', row_kind: 'step', step_id: 'n6', status: 'jumped', detail: { to: 'n5' }, at: wfCmAt(3), seq: 6 },
+  { id: 'r7', row_kind: 'action', step_id: 'n5', status: 'executed', at: wfCmAt(3), seq: 7, loop: 1 },
+  { id: 'r8', row_kind: 'exit', step_id: 'n5', status: 'finished', at: wfCmAt(3), seq: 8, loop: 1 },
+].reverse();
+// The same run as the engine's step "test" answers it (wfTestPath of those rows: one entry a step, the wait folded).
+const WF_CM_TEST = { ok: true, trigger: { id: 't1', type: 'newLead', matched: true, reason: null, text: null }, ended: 'done', notes: ['Test result: nothing was sent'], path: [
+  { stepId: 'n1', kind: 'action', type: 'add_task', would: 'execute', preview: { title: 'Call' } }, { stepId: 'n2', kind: 'wait', type: 'period', would: 'wait', until: wfCmAt(3), outcome: 'time', resumedBy: 'timer' },
+  { stepId: 'n3', kind: 'if_else', type: 'if_else', would: 'branch', branchId: 'b1', why: 'Hot' }, { stepId: 'n4', kind: 'action', type: 'add_task', would: 'execute' },
+  { stepId: 'n6', kind: 'goto', type: 'goto', would: 'goto', target: 'n5' }, { stepId: 'n5', kind: 'action', type: 'add_task', would: 'execute' }] };
+function testWfCanvasModesPure(sb){
+  console.log('\nWorkflow builder: canvas modes — wfPathFromLog, test rows, decorations, Stats view, versions, the panels (stage 2, phase 6 · G6.3)');
+  const reg = wfRegFor(WF_AV_TODAY), P = sb.wfPathFromLog, evil = '<img src=x onerror=alert(1)>', T1 = { id: 't1', type: 'newLead', filters: WF_F0 };
+  const en = { row_kind: 'enroll', step_id: null, status: 'added', trigger_id: 't1' }, ex = st => ({ row_kind: 'exit', step_id: null, status: st }), step = (id, status, x) => ({ row_kind: 'step', step_id: id, status, ...(x || {}) });
+  const base = { entered: 't1', visited: [], failed: [], skipped: [], waitingAt: null, branchTaken: {}, edges: [], gotoEdges: [], missing: [], finished: false };
+  // 1. straight: every line from the trigger to the end
+  const D1 = { schema: 2, seq: 4, entry: 'n1', triggers: [T1], nodes: { n1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct(null) } };
+  assertEqual(P(D1, [en, step('n1', 'executed'), step('n2', 'sent'), step('n3', 'executed'), ex('finished')]),
+    { ...base, visited: ['n1', 'n2', 'n3'], edges: ['trigger:t1', 'n1:next', 'n2:next', 'n3:next'], finished: true }, 'wfPathFromLog straight: visited in order, the trigger\'s line, each line, the last one to END (finished)');
+  // 2. if / none: the None path; a gate whose None is empty ends there (skipped: no line to END), finished: the line to END
+  assertEqual(P(WF_CM_DOC, [en, step('n1', 'sent'), step('n2', 'waiting'), step('n2', 'wait_finished', { detail: { outcome: 'time' } }), step('n3', 'branch', { detail: { branch_id: 'none' } }), step('n5', 'executed'), ex('finished')]),
+    { ...base, visited: ['n1', 'n2', 'n3', 'n5'], branchTaken: { n3: 'none' }, edges: ['trigger:t1', 'n1:next', 'n2:next', 'n3:none', 'n5:next'], finished: true }, 'wfPathFromLog if / none: the None branch taken and its line');
+  const Dg = { ...WF_CM_DOC, nodes: { ...WF_CM_DOC.nodes, n3: { ...WF_CM_DOC.nodes.n3, config: { ...WF_CM_DOC.nodes.n3.config, gate: true }, out: { b1: 'n4', none: null } } } };
+  const g = st => P(Dg, [en, step('n1', 'sent'), step('n2', 'wait_finished'), step('n3', 'branch', { detail: { branch_id: 'none' } }), ex(st)]);
+  assertEqual([g('skipped').edges, g('skipped').branchTaken, g('finished').edges.slice(-1)], [['trigger:t1', 'n1:next', 'n2:next'], { n3: 'none' }, ['n3:none']],
+    'wfPathFromLog if / none on a gate: ended skipped → no line after it; finished → the empty None line to END');
+  // 3. split: the path it took
+  const D3 = { schema: 2, seq: 4, entry: 's1', triggers: [T1], nodes: { s1: { kind: 'split', type: 'split', config: { paths: [{ id: 'p', name: 'A', percent: 50 }, { id: 'q', name: 'B', percent: 50 }] }, out: { p: 'a1', q: 'a2' } }, a1: wfAct(null), a2: wfAct(null) } };
+  assertEqual(P(D3, [en, step('s1', 'branch', { detail: { path_id: 'q', path_name: 'B' } }), step('a2', 'executed'), ex('finished')]),
+    { ...base, visited: ['s1', 'a2'], branchTaken: { s1: 'q' }, edges: ['trigger:t1', 's1:q', 'a2:next'], finished: true }, 'wfPathFromLog split: the path taken (path_id) and its line, not the other');
+  // 4. a Go to loop: each step once, the jump once, no line out of the Go to
+  const D4 = { schema: 2, seq: 4, entry: 'n1', triggers: [T1], nodes: { n1: wfAct('g1'), g1: { kind: 'goto', type: 'goto', config: { target: 'n1' }, out: {} } } };
+  assertEqual(P(D4, [en, step('n1', 'executed'), step('g1', 'jumped', { detail: { to: 'n1' } }), step('n1', 'executed', { loop: 1 }), step('g1', 'jumped', { detail: { to: 'n1' }, loop: 1 }), ex('skipped')]),
+    { ...base, visited: ['n1', 'g1'], edges: ['trigger:t1', 'n1:next'], gotoEdges: [{ from: 'g1', to: 'n1' }] }, 'wfPathFromLog go-to loop: two passes = each step once, one jump, the loop guard\'s end is not finished');
+  // 5. waiting: the step it waits at; then its timeout path
+  const D5 = { schema: 2, seq: 6, entry: 'n1', triggers: [T1], nodes: { n1: wfAct('w1'), w1: { kind: 'wait', type: 'reply', config: { channels: ['email'], timeout: { n: 2, unit: 'days' } }, out: { next: 'n2', timeout: 'n3' } },
+    n2: wfAct(null), n3: wfAct(null), g1: { kind: 'goal', type: 'tag_added', config: {}, out: { next: null } } } };
+  const wA = [en, step('n1', 'sent'), step('w1', 'waiting', { next_at: wfCmAt(9) })], pw = P(D5, wA);
+  assertEqual(pw, { ...base, visited: ['n1', 'w1'], waitingAt: 'w1', edges: ['trigger:t1', 'n1:next'] }, 'wfPathFromLog waiting: waitingAt = the wait it is held at; nothing after it');
+  assertEqual(P(D5, [...wA, step('w1', 'wait_finished', { detail: { outcome: 'timeout', resumed_by: 'timer' } }), step('n3', 'executed'), ex('finished')]),
+    { ...base, visited: ['n1', 'w1', 'n3'], branchTaken: { w1: 'timeout' }, edges: ['trigger:t1', 'n1:next', 'w1:timeout', 'n3:next'], finished: true }, 'wfPathFromLog a wait with a timeout: timed out = its Timeout path');
+  assertEqual(P(D5, [...wA, ex('removed')]).waitingAt, null, 'wfPathFromLog: removed while waiting → not waiting any more');
+  // 6. failed
+  const pf = P(D1, [en, step('n1', 'executed'), { row_kind: 'action', step_id: 'n2', status: 'failed' }, { row_kind: 'exit', step_id: 'n2', status: 'failed' }]);
+  assertEqual(pf, { ...base, visited: ['n1', 'n2'], failed: ['n2'], edges: ['trigger:t1', 'n1:next'] }, 'wfPathFromLog failed: the step marked failed, no line out of it');
+  // 7. missing: a step this doc doesn't have breaks the chain (no line across it); 8. the older version that had it
+  const rowsOld = [en, step('n1', 'executed'), step('old1', 'executed'), step('n2', 'executed'), ex('finished')];
+  assertEqual(P(D1, rowsOld), { ...base, visited: ['n1', 'n2'], edges: ['trigger:t1'], missing: ['old1'], finished: true }, 'wfPathFromLog missing: listed, and no line drawn across the gap');
+  const Vold = { schema: 2, seq: 5, entry: 'n1', triggers: [T1], nodes: { n1: wfAct('old1'), old1: wfAct('n2'), n2: wfAct('n3'), n3: wfAct(null) } };
+  const vers = [{ version_no: 2, revision: 3, definition: Vold }, { version_no: 3, revision: 5, definition: D1 }, { version_no: 1, revision: 1, definition: null }, { version_no: 4, revision: 3, definition: Vold }];
+  const pick = sb.wfVersionPick(vers, 4);
+  assertEqual([pick && pick.version_no, (sb.wfVersionPick(vers, 5) || {}).version_no, sb.wfVersionPick(vers, 0), sb.wfVersionPick(vers, null), sb.wfVersionPick(vers, 'x')], [4, 3, null, null, null],
+    'wfVersionPick: the latest snapshot with revision ≤ the run\'s (same revision: the higher version); none kept / no revision → null (the current one, with the banner)');
+  assertEqual(P(pick.definition, rowsOld), { ...base, visited: ['n1', 'old1', 'n2'], edges: ['trigger:t1', 'n1:next', 'old1:next'], finished: true }, 'wfPathFromLog older version: on the version the run used, nothing is missing');
+  // the order: rows newest first (the RPC's), by time then seq
+  assertEqual(P(WF_CM_DOC, WF_CM_REAL), { entered: 't1', visited: ['n1', 'n2', 'n3', 'n4', 'n6', 'n5'], failed: [], skipped: [], waitingAt: null, branchTaken: { n3: 'b1' },
+    edges: ['trigger:t1', 'n1:next', 'n2:next', 'n3:b1', 'n4:next', 'n5:next'], gotoEdges: [{ from: 'n6', to: 'n5' }], missing: [], finished: true }, 'wfPathFromLog real run: rows newest first are put in order (time, then seq)');
+  // test → rows (design §4.8's mapping)
+  const tr = sb.wfTestRows({ trigger: { id: 't1' }, ended: 'would_wait', path: [
+    { stepId: 'a', kind: 'action', would: 'execute', preview: { subject: 'Hi' } }, { stepId: 'w', kind: 'wait', would: 'wait', until: 'U', outcome: 'timeout', resumedBy: 'timer', branchId: 'timeout' },
+    { stepId: 'w2', kind: 'wait', would: 'wait', until: 'U2', outcome: 'waiting', why: 'Would wait for a reply' }, { stepId: 'b', kind: 'if_else', would: 'branch', branchId: 'b1' },
+    { stepId: 's', kind: 'split', would: 'branch', branchId: 'p', pathId: 'p' }, { stepId: 'g', kind: 'goal', would: 'goal', outcome: 'met' }, { stepId: 'j', kind: 'goto', would: 'goto', target: 'a' },
+    { stepId: 'k', kind: 'action', would: 'skip', why: 'opted out', guard: 'opt_out' }, { stepId: 'x', kind: 'action', would: 'stop', why: 'goal not met' }, { stepId: 'z', kind: 'action', would: 'not_reached' }] });
+  assertEqual(tr, [{ row_kind: 'enroll', step_id: null, status: 'added', trigger_id: 't1' }, { row_kind: 'action', step_id: 'a', status: 'executed', detail: { subject: 'Hi' } },
+    { row_kind: 'step', step_id: 'w', status: 'waiting', next_at: 'U' }, { row_kind: 'step', step_id: 'w', status: 'wait_finished', detail: { outcome: 'timeout', resumed_by: 'timer', branch_id: 'timeout' } },
+    { row_kind: 'step', step_id: 'w2', status: 'waiting', next_at: 'U2' }, { row_kind: 'step', step_id: 'b', status: 'branch', detail: { branch_id: 'b1', path_id: null } },
+    { row_kind: 'step', step_id: 's', status: 'branch', detail: { branch_id: 'p', path_id: 'p' } }, { row_kind: 'step', step_id: 'g', status: 'executed', detail: { met: true } },
+    { row_kind: 'step', step_id: 'j', status: 'jumped', detail: { to: 'a', target_step_id: 'a' } }, { row_kind: 'step', step_id: 'k', status: 'skipped', reason: 'opted out' },
+    { row_kind: 'exit', step_id: 'x', status: 'removed', reason: 'goal not met' }],
+    'wfTestRows: execute → executed; wait → waiting + wait_finished (resumed_by, branch_id); a wait it stops at → waiting only; branch → branch_id / path_id; goal → executed + met; goto → jumped + target; skip → skipped; stop → removed + reason; not_reached → nothing');
+  assertEqual([sb.wfTestRows({ path: [], ended: 'done' }), sb.wfTestRows(null)], [[{ row_kind: 'enroll', step_id: null, status: 'added', trigger_id: null }, { row_kind: 'exit', step_id: null, status: 'finished' }],
+    [{ row_kind: 'enroll', step_id: null, status: 'added', trigger_id: null }]], 'wfTestRows: ended done → a finished exit row; no trigger (added by hand) → no trigger id');
+  // a real run and a test of the same fixture light the same path
+  assertEqual(P(WF_CM_DOC, sb.wfTestRows(WF_CM_TEST)), P(WF_CM_DOC, WF_CM_REAL), 'a real run and a test of the same fixture give equal paths');
+  // the decorations, in both builders
+  const path = P(WF_CM_DOC, WF_CM_REAL), LS = sb.wfLayoutStandard(WF_CM_DOC, reg, {}), LA = sb.wfLayoutAdvanced(WF_CM_DOC, {}, reg), dS = sb.wfPathDeco(path, WF_CM_DOC, LS, { n4: 'Would run' }), dA = sb.wfPathDeco(path, WF_CM_DOC, LA, {});
+  const aRef = LA.edges.filter(e => e.ref && e.from==='n6');
+  assertEqual([dS.cls['n:n1'], dS.cls['t:t1'], dS.cls['t:t2'], dS.cls['h:n3:b1'], dS.cls['h:n3:none'], dS.edges['trigger:t1'], dS.edges['trigger:t2'], dS.edges['n3:b1:drop'], dS.edges['n3:b1'], dS.edges['n3:none:drop'],
+    dS.edges['n6:goto'], dS.edges['n5:next'], dS.verdicts.n1, dS.verdicts.n4, dS.tstats, Object.keys(dS.edges).length===LS.edges.length],
+    [' wfm-vis', ' wfm-in', ' wfm-dim', ' wfm-vis', ' wfm-dim', 'wfm-e', 'wfm-off', 'wfm-e', 'wfm-e', 'wfm-off', 'wfm-e', 'wfm-e', 'Done', 'Would run', { t1: 'Entered' }, true],
+    'wfPathDeco (Standard): the steps, the trigger it entered by ("Entered"), the branch taken and its drop line, the Go to\'s line, a test\'s words; every line marked on or off');
+  assertEqual([dA.cls['n:n6'], dA.edges['n3:b1'], dA.edges['n3:none'], dA.edges['trigger:t1'], aRef.length > 0 && aRef.every(e => dA.edges[e.key]==='wfm-e'), Object.keys(dA.cls).some(k => k.startsWith('h:'))],
+    [' wfm-vis', 'wfm-e', 'wfm-off', 'wfm-e', true, false], 'wfPathDeco (Advanced): the same path on the tiles and lines; the Go to\'s line to its target');
+  const dw = sb.wfPathDeco(pw, D5, sb.wfLayoutStandard(D5, reg, {}), {}), df = sb.wfPathDeco(pf, D1, sb.wfLayoutStandard(D1, reg, {}), {});
+  assertEqual([dw.cls['n:w1'], dw.verdicts.w1, dw.cls['n:n2'], dw.verdicts.n2, df.cls['n:n2'], df.verdicts.n2, df.cls['n:n3']], [' wfm-wait', 'Waiting here', ' wfm-dim', undefined, ' wfm-fail', 'Failed', ' wfm-dim'],
+    'wfPathDeco: waiting (the pulsing dot) and failed say so in words too; a step it never reached is dimmed, with no words');
+  // Stats view's counts
+  const M = sb.wfStatsModel(WF_CM_DOC, [{ step_id: 'n1', status: 'sent', branch: null, n: 5 }, { step_id: 'n1', status: 'failed', branch: null, n: 1 }, { step_id: 'n2', status: 'waiting', branch: null, n: 4 },
+    { step_id: 'n2', status: 'wait_finished', branch: 'time', n: 3 }, { step_id: 'n2', status: 'now_waiting', branch: null, n: 1 }, { step_id: 'n3', status: 'branch', branch: 'b1', n: 2 },
+    { step_id: 'n3', status: 'branch', branch: 'none', n: 1 }, { step_id: 'gone', status: 'executed', branch: null, n: 9 }], [{ trigger_id: 't1', attempted: 10, matched: 4, enrolled: 4 }]);
+  assertEqual([M.text, M.htext, M.ttext], [{ n1: '5 sent · 1 failed', n2: '3 executed · 1 waiting', n3: '3 executed', n4: 'No runs yet', n5: 'No runs yet', n6: 'No runs yet' }, { 'n3:b1': '2 leads', 'n3:none': '1 lead' },
+    { t1: 'Attempted 10 · Matched 4 · Unmatched 6', t2: 'Attempted 0 · Matched 0 · Unmatched 0' }], 'wfStatsModel: per step executed / sent / skipped / failed / waiting now; per branch; per trigger; a step no longer here is left out');
+  assertEqual(sb.wfStatsModel(D5, [{ step_id: 'w1', status: 'wait_finished', branch: 'timeout', n: 2 }, { step_id: 'w1', status: 'wait_finished', branch: 'replied', n: 3 }], []).htext, { 'w1:next': '3 leads', 'w1:timeout': '2 leads' },
+    'wfStatsModel: a wait with a timeout counts each of its two paths');
+  assertEqual([sb.wfStatsRange('2026-10-01', '2026-10-17', '2026-10-17'), sb.wfStatsRange('2026-10-10', '2026-10-20', '2026-10-17'), sb.wfStatsRange('2026-09-17', '2026-10-17', '2026-10-17').error,
+    sb.wfStatsRange('2026-10-10', '2026-10-01', '2026-10-17').error, sb.wfStatsRange('x', '', '2026-10-17').error],
+    [{ from: '2026-10-01', to: '2026-10-17', days: 17 }, { from: '2026-10-10', to: '2026-10-17', days: 8 }, 'Only the last 30 days are kept', 'The first date is after the last one', 'Pick both dates'], 'wfStatsRange: at most the last 30 days; a future end is today');
+  const days = [{ day: '2026-10-15', attempted: 10, matched: 4, unmatched: 6, before_published: 0 }, { day: '2026-10-16', attempted: 250, matched: 10, unmatched: 240, before_published: 5 }];
+  assertEqual([sb.wfStatsKpi(days), sb.wfStatsKpi([]), sb.wfStatsCapNotes(days)], [{ attempted: 260, matched: 14, unmatched: 246, matchedPct: 5.4, unmatchedPct: 94.6 },
+    { attempted: 0, matched: 0, unmatched: 0, matchedPct: 0, unmatchedPct: 0 }, [{ day: '2026-10-16', more: 35 }]], 'wfStatsKpi / wfStatsCapNotes: totals and shares; a day over the 200 kept unmatched rows says how many more');
+  assertEqual([sb.wfUnmatchText('filter:stage'), sb.wfUnmatchText('reentry_off'), sb.wfUnmatchText('odd_code')], ['Filter not matched: stage', 'Already went through this workflow (re-entry is off)', 'odd code'], 'wfUnmatchText');
+  // versions: Restore only on a Draft with nothing unsaved; a refused write says its own reason
+  assertEqual([sb.wfRestoreWhy({ status: 'draft' }), sb.wfRestoreWhy({ status: 'published' }), sb.wfRestoreWhy({ status: 'draft', unsaved: true }), sb.wfRestoreWhy({ status: 'draft', writeWhy: 'Presentation mode' })],
+    ['', sb.WF_RESTORE_WHY, sb.WF_RESTORE_WHY, 'Presentation mode'], 'wfRestoreWhy: as GHL, a Draft with nothing unsaved');
+  // the test panel's helpers
+  const DJ = { schema: 2, seq: 2, entry: 'n1', triggers: [{ id: 'j1', type: 'jobClosed', filters: WF_F0 }, { id: 's1', type: 'scheduler', filters: WF_F0 }], nodes: { n1: wfAct(null) } };
+  assertEqual([sb.wfTestKind(WF_CM_DOC, reg, 't1'), sb.wfTestKind(DJ, reg, 'j1'), sb.wfTestKind(DJ, reg, 's1'), sb.wfTestKind(DJ, reg, 'nope').kind],
+    [{ kind: 'contact', word: 'lead', contactless: false }, { kind: 'job', word: 'job', contactless: false }, { kind: 'contact', word: 'lead', contactless: true }, 'contact'], 'wfTestKind: the record the trigger is about; a trigger with no record needs none');
+  assertEqual(sb.wfTestAssumeRows(D5, reg).map(a => [a.id, a.opts.map(o => o[0])]), [['w1', ['', 'met', 'timeout']], ['g1', ['', 'met', 'not_met']]], 'wfTestAssumeRows: a reply wait (with its timeout) and a goal');
+  assertEqual([sb.wfTestRunWhy({ steps: 1, record: { id: 'c' } }), sb.wfTestRunWhy({ steps: 1, contactless: true }), sb.wfTestRunWhy({ steps: 1, word: 'job' }), sb.wfTestRunWhy({ steps: 1, record: {}, errors: 2 }),
+    sb.wfTestRunWhy({ steps: 0, record: {} }), sb.wfTestRunWhy({ state: 'running' })], ['', '', 'Select a job first', 'Fix the errors first', 'Add a step first', 'The test is running'], 'wfTestRunWhy');
+  const nm = id => ({ n5: 'Last step' })[id] || '', wh = t => `at ${t}`, V = e => sb.wfTestVerdict(e, nm, wh);
+  assertEqual([V({ would: 'execute' }), V({ would: 'execute', guard: 'customer_hours', until: 'T' }), V({ would: 'skip', guard: 'opt_out', why: 'opted out' }), V({ would: 'wait', outcome: 'waiting', why: 'Would wait for a reply' }),
+    V({ would: 'wait', outcome: 'time', until: 'T' }), V({ would: 'wait', outcome: 'timeout' }), V({ would: 'branch', why: 'Hot' }), V({ would: 'goal', outcome: 'not_met' }), V({ would: 'goto', target: 'n5' }),
+    V({ would: 'stop', why: 'goal not met' }), V({ would: 'not_reached' })].map(v => `${v.chip}|${v.tone}`),
+    ['Would run|good', 'Would go at at T|warn', 'Skipped: opted out|warn', 'Would wait: Would wait for a reply|warn', 'Waits until at T|good', 'Timed out|good', 'Takes Hot|good', 'Goal not met|warn', 'Goes to Last step|good',
+      'Stops: goal not met|bad', 'Not reached|muted'], 'wfTestVerdict: every would');
+  const R = sb.wfTestResult({ ...WF_CM_TEST, path: [{ stepId: 'n1', kind: 'action', would: 'execute', to: 'a@b.co', preview: { subject: evil, body: 'x'.repeat(900) } }, { stepId: 'n5', would: 'not_reached' }] }, WF_CM_DOC, reg, 'Australia/Sydney');
+  assertEqual([R.rows.length, R.rows[0].to, R.rows[0].preview.map(p => p.label), R.rows[0].preview[1].text.length, R.words, R.notes], [2, 'a@b.co', ['Subject', 'Message'], 600, { n1: 'Would run', n5: 'Not reached' }, ['Test result: nothing was sent']],
+    'wfTestResult: each step\'s verdict and its preview as labelled text (cut to 600), the canvas words, the notes');
+  // the words: everything escaped, the handlers' ids quoted
+  const ban = sb.wfModeBannerHtml({ kind: 'path', info: { word: 'lead', name: evil, contactId: 'c1', runId: 'r-1', enrolled: '16 Oct 2026, 11:00am', tz: 'AEDT +11:00', vno: 3 }, pruned: true, missing: 2 });
+  assertEqual([ban.includes('<img'), /data-act="cmExit"/.test(ban), /Lead path/.test(ban), /v3/.test(ban), /no longer kept; showing the current one/.test(ban), /2 steps of this run are no longer in the workflow/.test(ban), /data-act="cmLead"/.test(ban)],
+    [false, true, true, true, true, true, true], 'the path banner: Back, the info box (escaped), the older-version and missing-steps lines, Open lead card');
+  const bv = sb.wfModeBannerHtml({ kind: 'version', vno: 2, name: evil, restoreWhy: sb.WF_RESTORE_WHY }), bs = sb.wfModeBannerHtml({ kind: 'stats', state: 'loading' }), bt = sb.wfModeBannerHtml({ kind: 'test', ran: true });
+  assertEqual([bv.includes('<img'), /This Version is in View Only Mode/.test(bv), /data-act="cmVerRestore" data-vno="2" aria-disabled="true"/.test(bv), /Create new workflow from this version/.test(bv),
+    /Workflow is not editable in Stats view\. Note: Stats are only available for the last 30 days\. · Reading…/.test(bs), /Test result: nothing was sent/.test(bt)], [false, true, true, true, true, true],
+    'the version / Stats view / test banners (GHL\'s words; Restore greyed with its reason)');
+  const vh = sb.wfVersionsHtml({ state: 'ok', current: { name: evil, vno: 4, by: 'Kim', at: 'now', status: 'published' }, rows: [{ vno: 3, name: evil, by: 'Kim', at: 'x', reason: 'Saved', status: 'draft' }], editors: ['Kim', 'Dana'], editor: 'Kim',
+    restoreWhy: sb.WF_RESTORE_WHY, saveWhy: '', viewing: 3, more: true });
+  assertEqual([vh.includes('<img'), /kept for 30 days, or the last 10 versions if older/.test(vh), /Current version/.test(vh), /data-act="cmVerSave"/.test(vh), /data-act="cmVerView" data-vno="3"/.test(vh), /wfr-hit on/.test(vh),
+    /data-act="cmVerRestore" data-vno="3" aria-disabled="true"/.test(vh), /aria-label="Create new workflow from version 3"/.test(vh), /option value="Kim" selected/.test(vh), /data-act="cmVerMore"/.test(vh)],
+    [false, true, true, true, true, true, true, true, true, true], 'the Version history panel: the current card with Save Version, the previous ones (view, Restore greyed, copy), the editor filter, Load more');
+  const tp = sb.wfTestPanelHtml({ word: 'lead', triggers: [{ id: 't1', name: evil }, { id: 't2', name: 'B' }], trigger: 't2', q: evil, matches: [{ name: evil, sub: 'x' }], assumes: [{ id: 'w1', name: evil, opts: [['', 'As now'], ['met', 'Met']], value: 'met' }],
+    state: 'ok', runWhy: 'Select a lead first', result: R });
+  assertEqual([tp.includes('<img'), /Run a test for lead/.test(tp), /option value="t2" selected/.test(tp), /onclick="wfTestPick\(0\)"/.test(tp), /wfTestAssume\('w1', this.value\)/.test(tp), /option value="met" selected/.test(tp),
+    /data-f="trun" onclick="wfTestRun\(\)" aria-disabled="true" data-why="Select a lead first"/.test(tp), /Would run/.test(tp), /To a@b.co/.test(tp)], [false, true, true, true, true, true, true, true, true],
+    'the Test workflow panel: Test as if, the search and its matches, Assume, Run test greyed with its reason, the result');
+  const sd = sb.wfStatsDlgHtml({ name: evil, from: '2026-10-01', to: '2026-10-17', min: '2026-09-18', today: '2026-10-17', tab: 'data', state: 'ok', kpi: sb.wfStatsKpi(days), caps: sb.wfStatsCapNotes(days),
+    rows: [{ name: evil, reach: '0400', at: '16 Oct', tz: 'AEDT +11:00', matched: false, reason: evil }], page: 0, more: true, reasons: [] });
+  assertEqual([sd.includes('<img'), /Stats: &lt;img/.test(sd), /wfb-dlg wfm-dlg/.test(sd), /94.6%/.test(sd), /Top Reasons for Unmatch/.test(sd), /\+35 more unmatched that day, counted in the totals/.test(sd), /Data is stored for last 30 days · 10 \/ page/.test(sd),
+    /data-f="sprev" onclick="wfTstatsPage\(-1\)" disabled/.test(sd), /min="2026-09-18"/.test(sd)], [false, true, true, true, true, true, true, true, true], 'the "Stats: <trigger>" window: KPI cards, dates kept to 30 days, the tabs, the table, the capped days, the footer, the pager');
+}
+// The modes in the builder itself (fake DOM): each in both builders, one layer of the page history, read-only, no idle paint.
+async function testWfCanvasModesRuntime(){
+  console.log('\nWorkflow builder: canvas modes in both builders — path, Stats view, test, versions (stage 2, phase 6 · G6.3; fake DOM)');
+  const N = { layers: [] };
+  const nav = { NAV_HIST: { ready: true, restoring: false }, NAV_LEAVERS: {}, NAV_RESTORERS: {}, history: { state: null }, navOurs: () => false, navSnap: () => ({}), navPush: () => {}, navReplace: () => {},
+    navBackTo: () => true, navOverlaySync: () => {}, navLayer: d => { N.layers.push(d); return d; }, setTimeout: () => 0 };
+  const reg = wfRegFor(WF_AV_TODAY), S = wfShellSandbox(reg, { ctx: nav }), { X, flush } = S, C = S.ctx, V = n => vm.runInContext(n, C), win = C.window;
+  V('wfNavWire')();
+  const layer = N.layers.find(l => l.id==='wf-mode'), zs = Object.fromEntries(N.layers.map(l => [l.id, l.z]));
+  assertEqual([!!layer, zs['wf-mode'] < zs['wf-modal'], zs['wf-modal'], zs['wf-drawer'], zs['wf-picker']], [true, true, 210, 220, 230], 'the mode is a page-history layer (z 205) under the builder\'s own menus, drawers and pickers');
+  for (const builder of ['standard', 'advanced']) {
+    X.wfBuilderOpen({ id: 'w1', name: 'Modes', enabled: false, definition: WF_CM_DOC, revision: 4, builder }, {}); flush();
+    const W = S.W(), E = W.el, doc0 = W.doc;
+    // See contact path: the run's version, its path on the cards and lines, the info box, read-only
+    V('wfPathApply')(W, { run: { id: 'r-1', contact_id: null, created_at: wfCmAt(0), revision: 4, record_kind: 'none' }, rows: WF_CM_REAL, version: { version_no: 3, revision: 4, definition: WF_CM_DOC, layout: {} }, back: 'logs' });
+    flush();
+    const cl = k => (E.map.get(k) || { className: '' }).className, ec = k => (E.paths.get(k) || { getAttribute: () => '' }).getAttribute('class') || '';
+    assertEqual([W.mode, !!V('wfGuardEdit')(), layer.isOpen(), cl('n:n1').includes('wfm-vis'), cl('t:t1').includes('wfm-in'), cl('t:t2').includes('wfm-dim'), ec('n3:b1').includes('wfm-e'), ec(builder==='standard' ? 'n3:none:drop' : 'n3:none').includes('wfm-off'),
+      E.banner.hidden, /Execution ID/.test(E.banner.innerHTML) && /v3/.test(E.banner.innerHTML), /wfb-pill-green/.test(E.pill.innerHTML), /data-act="cmExit"/.test(E.top.innerHTML), W.doc===doc0],
+      ['path', true, true, true, true, true, true, true, false, true, true, true, true], `${builder}: See contact path lights the run's steps and lines, says which version, "← Back"; nothing editable, the draft untouched`);
+    const p0 = win.__wfp;
+    for (let i = 0; i < 3; i++) flush();
+    assertEqual([X.wfCommit('Rename workflow', () => ({ name: 'x' })), win.__wfp - p0, S.raf.size], [0, 0, 0], `${builder}: in a mode an edit is refused; idle = no paint`);
+    // back leaves the mode first (the builder stays open)
+    X.wfNavTop(); flush();
+    assertEqual([W.mode, W.cm, layer.isOpen(), E.banner.hidden, cl('n:n1').includes('wfm-'), ec('n3:b1').includes('wfm-'), !!S.W()], ['edit', null, false, true, false, false, true], `${builder}: back leaves the path first, the canvas is plain again`);
+    // Stats view: the counts on the steps, the triggers ("View Detailed Stats") and the branch headers / port labels
+    V('wfModeSet')({ kind: 'stats', state: 'loading', text: {}, tstats: {}, hstats: {} }); flush();
+    const m = V('wfStatsModel')(W.doc, [{ step_id: 'n1', status: 'sent', n: 5 }, { step_id: 'n3', status: 'branch', branch: 'b1', n: 2 }], [{ trigger_id: 't1', attempted: 3, matched: 2 }]);
+    V('wfModeUpdate')(W, W.cm.seq, { state: 'ok', text: m.text, tstats: m.ttext, hstats: m.htext }); flush();
+    const n1 = E.map.get('n:n1').innerHTML, t1 = E.map.get('t:t1').innerHTML, h3 = builder==='standard' ? E.map.get('h:n3:b1').innerHTML : E.map.get('n:n3').innerHTML;
+    assertEqual([W.mode, /5 sent/.test(n1), /Attempted 3 · Matched 2 · Unmatched 1/.test(t1), builder==='standard' ? /View Detailed Stats/.test(t1) : true, /2 leads/.test(h3), /Stats view/.test(E.pill.innerHTML), /Stats view/.test(E.banner.innerHTML),
+      /aria-pressed="true"[^>]*title="Stats view/.test(E.rail.innerHTML)], ['stats', true, true, true, true, true, true, true], `${builder}: Stats view shows the counts on steps, triggers and branches; the rail's Stats view is pressed`);
+    V('wfStatsViewToggle')(); flush();
+    // Test workflow: its panel on the right, then an answer lights the canvas like a run
+    V('wfTestToggle')(); flush();
+    assertEqual([W.mode, E.rdrawer.hidden, /Run a test for lead/.test(E.rbody.innerHTML), /aria-pressed="true"/.test(E.sub.innerHTML), /pick a record and run a test/.test(E.banner.innerHTML)], ['test', false, true, true, true],
+      `${builder}: Test workflow opens its panel (nothing run yet)`);
+    const seq = W.cm.seq, tpath = V('wfPathFromLog')(W.doc, V('wfTestRows')(WF_CM_TEST)), tw = V('wfTestResult')(WF_CM_TEST, W.doc, reg, 'Australia/Sydney').words;
+    V('wfModeUpdate')(W, seq, { state: 'ok', res: WF_CM_TEST, path: tpath, words: tw }); flush();
+    assertEqual([cl('n:n4').includes('wfm-vis'), /Would run/.test(E.map.get('n:n4').innerHTML), ec('n3:b1').includes('wfm-e'), /Test result: nothing was sent/.test(E.banner.innerHTML), /Result/.test(E.rbody.innerHTML)],
+      [true, true, true, true, true], `${builder}: a test's answer lights the same path, with each step's verdict, and the panel lists it`);
+    V('wfTestToggle')(); flush();
+    // a version: its own doc (a step the draft doesn't have), the tabs Builder | Settings; Restore greyed while unsaved
+    const vdoc = { ...WF_CM_DOC, nodes: { ...WF_CM_DOC.nodes, x9: wfAct(null) } };
+    V('wfModeSet')({ kind: 'version', doc: vdoc, layout: {}, settings: {}, vno: 2, name: 'Old' }); flush();
+    assertEqual([W.mode, E.map.has('n:x9'), W.doc===doc0, (E.sub.innerHTML.match(/role="tab"/g) || []).length, /View only mode/.test(E.pill.innerHTML), /This Version is in View Only Mode · v2/.test(E.banner.innerHTML)],
+      ['version', true, true, 2, true, true], `${builder}: a version shows its own steps read-only; tabs Builder | Settings`);
+    X.wfNavTop(); flush();
+    assertEqual([W.mode, E.map.has('n:x9'), S.raf.size], ['edit', false, 0], `${builder}: back from the version: the draft's canvas again`);
+    X.wfBuilderClose({ nav: false });
+  }
+  // a mode can't start on a System workflow or with a step being typed in
+  assertEqual([V('wfModeWhy')({ mode: 'system' }, 'stats'), V('wfModeWhy')({ mode: 'edit', id: null }, 'path'), V('wfModeWhy')({ mode: 'edit', id: null }, 'test'), V('wfModeWhy')({ mode: 'edit', id: 'w', drawer: { dirty: true } }, 'test')],
+    ['A System workflow runs on the built-in system: duplicate it first', 'Save the workflow first', '', 'Save or cancel the step first'], 'wfModeWhy: System, unsaved new (a test can run on it), a step with changes');
+}
+{ const sb = wfSb(); testWfCanvasModesPure(sb); }
+
 (async () => {
   await testVacationFollowUps();
   await testWfSaveRuntime();
@@ -9270,6 +9490,7 @@ async function testWfPhase5ReviewFixes(){
   await testWfSwitchRuntime();
   testLeadAssigneeGrey();
   await testWfPhase5ReviewFixes();
+  await testWfCanvasModesRuntime();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('business-logic tests crashed:', e); process.exit(1); });
