@@ -21787,7 +21787,7 @@ const WF_REL_UNITS = ['minutes', 'hours', 'days', 'weeks', 'months'];
 const WF_REF_TYPES = ['number', 'money', 'date', 'enum'];
 // The words next to a greyed item, per missing piece (the engine's AVAIL_REASONS; the snapshot test pins them).
 const WF_AVAIL_REASONS = { phone: 'Needs the phone line (Twilio)', xero: 'Needs Xero', gbp: 'Needs the Google Business Profile connector', reviews: 'Turn on Google reviews first',
-  ai: 'Coming with Workflow AI', teamEmail: 'Needs a team email sender', atomicTags: 'Coming with the new lead card' };
+  ai: 'Coming later', teamEmail: 'Needs a team email sender', atomicTags: 'Coming with the new lead card' };
 // What a trigger's record gives a run (the engine's PROVIDES by recordKind).
 const WF_PROVIDES = { contact: ['contact'], job: ['job', 'contact'], call: ['call', 'contact'], chat: ['chat', 'contact'], task: ['task', 'contact'], hook: ['contact'], supplier: ['supplier'], employee: ['employee'], none: [] };
 const WF_SETTINGS_DEFAULTS = { reentry: 'off', perRecord: true, stopOnResponse: false, timezone: 'business', window: { on: false, days: [1, 2, 3, 4, 5], from: '08:00', until: '17:00' }, sender: { fromName: null }, markRead: false };
@@ -23894,10 +23894,10 @@ function wfSubHtml(s){
   return `<button type="button" class="wfb-tb wfb-bsel" data-act="builderMenu" aria-haspopup="menu">${s.builder==='advanced' ? 'Advanced builder' : 'Standard builder'}${ico('chevronDown', 14)}</button>${tabHtml}`
     + `<button type="button" class="wfb-tb wfb-test" data-act="test"${wfDisAttr(h.test ? '' : WF_SOON)}>Test workflow</button>${pubHtml}`;
 }
-// Why a rail tool can't open now ('' = it can): Workflow AI comes later; Notes, Stats view and Version history need a saved
+// Why a rail tool can't open now ('' = it can): Workflow AI's own switch and role; Notes, Stats view and Version history need a saved
 // workflow; a tool whose panel isn't built yet says so. have = the keys with a panel (WF_HOOKS.rail).
 function wfRailWhy(k, hasId, have){
-  return k==='ai' ? WF_AVAIL_REASONS.ai : (k==='notes' || k==='stats' || k==='versions') && !hasId ? 'Save the workflow first' : (Array.isArray(have) ? have : []).includes(k) ? '' : WF_SOON;
+  return k==='ai' ? wfAiWhy() : (k==='notes' || k==='stats' || k==='versions') && !hasId ? 'Save the workflow first' : (Array.isArray(have) ? have : []).includes(k) ? '' : WF_SOON;
 }
 function wfRailHtml(s, mac){
   const h = wfObj(s.hooks);
@@ -24005,7 +24005,7 @@ function wfQ4Html(d){
 // panel's HTML (Notes, Errors, Sticky notes, Workflow switcher, Find and replace); phase 6: stats(id), test(), tabs[key](W)
 // → the tab's HTML, rail.stats / rail.versions.
 const WF_HOOKS = { picker: wfPickerOpen, pickerHtml: wfPickerHtmlHook, openStep: wfDrawerOpenStep, drawerHtml: wfDrawerHtmlHook, drawerClose: wfDrawerCloseAsk, save: wfSave, publish: wfPublishToggle,
-  recent: wfRecentOpen, notes: wfNotesOpen, stats: null, leave: wfLeaveGuard, stash: wfStash, test: null,
+  recent: wfRecentOpen, notes: wfNotesOpen, ai: wfAiOpenFromBuilder, stats: null, leave: wfLeaveGuard, stash: wfStash, test: null,
   rail: { notes: wfRailNotes, errors: wfRailErrors, stickies: wfRailStickies, switcher: wfRailSwitcher, find: wfRailFind }, tabs: {} };
 // The ONE place the page history (stage 4: navPush / NAV_LAYERS / NAV_LEAVERS / NAV_RESTORERS) connects to the builder
 // (G5.3; the layers, the leaver and the restorer are registered by wfNavWire). opened → an entry of its own ({ kind: 'wf',
@@ -24928,6 +24928,7 @@ function wfRailToggle(key){
   if (!W || !WF_RAIL.some(r => r[0]===key)) return;
   const why = wfRailWhy(key, !!W.id, Object.keys(WF_HOOKS.rail).filter(k => typeof WF_HOOKS.rail[k]==='function'));
   if (why) { showToast(why, { kind: 'info' }); return; }
+  if (key==='ai' && WF_HOOKS.ai) { WF_HOOKS.ai(W); return; }   // Workflow AI is the assistant's panel, not a rail panel
   wfSetLayer('rail', W.rail===key ? null : key);
   if (W.rail===key && WF_RAIL_ON[key]) WF_RAIL_ON[key](W);
 }
@@ -34770,6 +34771,14 @@ function wfAiBuild(){
   const why = wfAiWhy();
   if (why) { showToast(why, { kind: 'info' }); return; }
   cobraOpen({ mode: 'workflow', context: {} });
+}
+// The builder's rail row and shift+A: edit mode on the open saved workflow; an unsaved one asks for a first Save and opens build mode.
+function wfAiOpenFromBuilder(W){
+  const why = wfAiWhy();
+  if (why) { showToast(why, { kind: 'info' }); return; }
+  const saved = !!(W && W.id);
+  if (!saved) showToast('Save first to edit this one with AI', { kind: 'info' });
+  cobraOpen({ mode: 'workflow', context: saved ? { workflowId: String(W.id), ...(W.builder==='advanced' || W.builder==='standard' ? { builder: W.builder } : {}) } : {} });
 }
 // The floating button on the automations board opens Workflow AI: edit mode when a saved workflow is open in the builder
 // (its id and builder kind are all the AI is told), build mode on the list or an unsaved builder; elsewhere the assistant.

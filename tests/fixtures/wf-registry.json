@@ -5,7 +5,7 @@
   "xero": "Needs Xero",
   "gbp": "Needs the Google Business Profile connector",
   "reviews": "Turn on Google reviews first",
-  "ai": "Coming with Workflow AI",
+  "ai": "Coming later",
   "teamEmail": "Needs a team email sender",
   "atomicTags": "Coming with the new lead card"
  },
@@ -7685,15 +7685,15 @@
     },
     "n:action/ai_agent": {
      "ok": false,
-     "reason": "Coming with Workflow AI"
+     "reason": "Coming later"
     },
     "n:action/ai_decision": {
      "ok": false,
-     "reason": "Coming with Workflow AI"
+     "reason": "Coming later"
     },
     "n:action/ai_summarize": {
      "ok": false,
-     "reason": "Coming with Workflow AI"
+     "reason": "Coming later"
     },
     "n:wait/period": {
      "ok": true
@@ -8175,15 +8175,15 @@
     },
     "n:action/ai_agent": {
      "ok": false,
-     "reason": "Coming with Workflow AI"
+     "reason": "Coming later"
     },
     "n:action/ai_decision": {
      "ok": false,
-     "reason": "Coming with Workflow AI"
+     "reason": "Coming later"
     },
     "n:action/ai_summarize": {
      "ok": false,
-     "reason": "Coming with Workflow AI"
+     "reason": "Coming later"
     },
     "n:wait/period": {
      "ok": true
@@ -8663,15 +8663,15 @@
     },
     "n:action/ai_agent": {
      "ok": false,
-     "reason": "Coming with Workflow AI"
+     "reason": "Coming later"
     },
     "n:action/ai_decision": {
      "ok": false,
-     "reason": "Coming with Workflow AI"
+     "reason": "Coming later"
     },
     "n:action/ai_summarize": {
      "ok": false,
-     "reason": "Coming with Workflow AI"
+     "reason": "Coming later"
     },
     "n:wait/period": {
      "ok": true

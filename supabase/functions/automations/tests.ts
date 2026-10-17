@@ -1608,7 +1608,7 @@ async function phase4Suite() {
     if (new Set(aliasList).size !== aliasList.length || aliasList.some((a) => WF_TRIGGERS[a] || WF_ACTIONS[a])) bad.push("aliases collide");
     eq(bad, [], "registry entries are complete, greyed ones say why, aliases never collide");
     eq(Object.values(WF_ACTIONS).filter((a) => !a.available(AV_OFF).ok).map((a) => [a.key, a.available(AV_OFF).reason]).filter(([k]) => ["send_sms", "assign_user", "send_invoice", "math", "ai_agent", "add_tag"].includes(k as string)),
-      [["add_tag", "Coming with the new lead card"], ["send_sms", "Needs the phone line (Twilio)"], ["send_invoice", "Needs Xero"], ["math", "Coming later"], ["ai_agent", "Coming with Workflow AI"]], "greyed reasons are the design's words");
+      [["add_tag", "Coming with the new lead card"], ["send_sms", "Needs the phone line (Twilio)"], ["send_invoice", "Needs Xero"], ["math", "Coming later"], ["ai_agent", "Coming later"]], "greyed reasons are the design's words");
     // Q6 (G3.5): the lead's "Assigned to" exists, so nothing about it is greyed, whatever the business has
     eq([WF_ACTIONS.assign_user.available(AV_OFF).ok, WF_ACTIONS.remove_assigned_user.available(AV_OFF).ok, !WF_FIELDS["lead.assigned_user"].available,
       !!WF_MERGE["lead.assigned_to"] && !WF_MERGE["lead.assigned_to"].available && !WF_MERGE["lead.assigned_to_first_name"].available, !!WF_MERGE.assigned_user,

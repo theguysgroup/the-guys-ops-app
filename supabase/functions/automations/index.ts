@@ -1183,7 +1183,7 @@ export type AvailCtx = { phone: boolean; xero: boolean; gbp: boolean; reviews: b
 // The words next to a greyed item, per missing piece (design §2.4, exact).
 export const AVAIL_REASONS: Record<string, string> = {
   phone: "Needs the phone line (Twilio)", xero: "Needs Xero", gbp: "Needs the Google Business Profile connector",
-  reviews: "Turn on Google reviews first", ai: "Coming with Workflow AI", teamEmail: "Needs a team email sender",
+  reviews: "Turn on Google reviews first", ai: "Coming later", teamEmail: "Needs a team email sender",
   atomicTags: "Coming with the new lead card",
 };
 // The connectors whose steps the pickers show under "Apps" (design §5.5: Apps = Connectors items): an AvailCtx flag each,

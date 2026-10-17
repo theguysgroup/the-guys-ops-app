@@ -248,6 +248,8 @@ const DECLS = [
   // The workflow builder: switching builders, the blockers list, Default builder (stage 2, phase 5 · G5.3); the lead's
   // "Assigned to" picker through vacationPickerInfo
   'wfDefaultBuilder', 'wfStickyNearest', 'wfSwitchPlan', 'wfBlockerRows', 'wfBlockersHtml', 'vacationProfileWho',
+  // Stage 7 C2: the builder's entry (rail row and ⇧A)
+  'wfAiOpenFromBuilder',
 ];
 
 function extractDecl(source, name){
@@ -6083,9 +6085,12 @@ function testWfShellWords(sb){
   const tabs = [...sub.matchAll(/data-tab="(\w+)"[^>]*>([^<]+)</g)].map(m => m[2]);
   assertEqual([tabs, sub.includes('Standard builder'), sub.includes('Test workflow'), /role="switch"[^>]*aria-checked="false"/.test(sub), /aria-checked="true"/.test(subM), subM.includes('Standard builder'), sub.includes(`data-tab="settings" aria-selected="false" aria-disabled="true" data-why="${sb.WF_SOON}"`)],
     [['Builder', 'Settings', 'Enrollment history', 'Execution logs'], true, true, true, true, false, true], 'the second bar: GHL\'s tabs, the builder ▾, "Test workflow", "Draft ⬤ Publish"; parts not built yet are greyed with the reason');
+  sb.getRealProfile = () => ({ id: 'u1', role: 'owner' }); sb.COBRA = { status: { enabled: true }, statusErr: '' }; sb.readOnlyReason = () => '';
   const rail = sb.wfRailHtml(S, true);
-  assertEqual([[...rail.matchAll(/data-rail="(\w+)"/g)].map(m => m[1]), rail.includes('<i class="wfb-badge">2</i>'), rail.includes(`data-why="${sb.WF_AVAIL_REASONS.ai}"`), rail.includes('title="Notes (⇧C)'), sb.wfRailHtml({ ...S, hasId: false }, false).includes('data-why="Save the workflow first"')],
-    [['notes', 'errors', 'stats', 'stickies', 'switcher', 'find', 'versions', 'ai'], true, true, true, true], 'the rail in GHL\'s order with the shortcuts; Errors counts; Workflow AI greyed "Coming with Workflow AI"; Notes needs a saved workflow');
+  sb.getRealProfile = () => ({ id: 'u2', role: 'va' });
+  const railVa = sb.wfRailHtml(S, true);   // C2: the rail's Workflow AI row says who may use it, never "Coming with Workflow AI"
+  assertEqual([[...rail.matchAll(/data-rail="(\w+)"/g)].map(m => m[1]), rail.includes('<i class="wfb-badge">2</i>'), !/data-rail="ai"[^>]*data-why=/.test(rail), rail.includes('title="Notes (⇧C)'), sb.wfRailHtml({ ...S, hasId: false }, false).includes('data-why="Save the workflow first"'), /data-rail="ai"[^>]*data-why="Only owners and managers can use Workflow AI"/.test(railVa)],
+    [['notes', 'errors', 'stats', 'stickies', 'switcher', 'find', 'versions', 'ai'], true, true, true, true, true], 'the rail in GHL\'s order with the shortcuts; Errors counts; Workflow AI open for an owner and greyed with the role for others; Notes needs a saved workflow');
   assertEqual([sb.wfPillHtml('edit'), sb.wfPillHtml('stats'), sb.wfPillHtml('system')], ['', '<span class="wfb-pill-yellow">Stats view</span>', '<span class="wfb-pill-yellow">System workflow · view only</span>'], 'the mode pill');
   // menus
   const lab = m => m.items.map(i => i.label + (i.why ? '!' : '') + (i.sub ? '>' : ''));
@@ -6231,12 +6236,14 @@ function wfShellSandbox(reg, opt){
   const extra = ['WF_DATA', 'WF_UI', 'WF_LIST_LIMITS', 'wfDbWrite', 'wfActor', 'autoFnReason', 'wfInvalidate', 'wfChanged'].filter(n => !DECLS.includes(n) && !names.includes(n));
   const F = wfFakeDom(), raf = new Map();
   let rafId = 0, renders = 0, toasts = [];
+  const opened = [];   // what the rail's Workflow AI row / ⇧A asked the assistant to open (C2)
   const ctx = { console, Map, Set, WeakMap, Promise, String, Number, Math, Object, Array, Date, JSON, RegExp, Error, URL, TextEncoder, setTimeout: () => 0, clearTimeout: () => {},
     document: F.doc, window: F.win, navigator: { platform: 'MacIntel' }, localStorage: { getItem: () => null, setItem: () => {} }, getComputedStyle: () => ({ getPropertyValue: () => '' }),
     requestAnimationFrame: f => { raf.set(++rafId, f); return rafId; }, cancelAnimationFrame: id => { raf.delete(id); },
     STATE: { data: { settings: { catalog: {} } }, profiles: [{ id: 'p1', role: 'owner', fullName: 'Owner' }] }, AUTH: { status: 'ready' }, AUTO_BUSINESS_ID: 'default',
     render: () => { renders++; }, renderKeepingInput: () => { renders++; }, showToast: (m) => { toasts.push(String(m)); }, confirmAction: (m, fn) => fn(), motionReduced: () => true,
     canViewSection: () => true, wfFetchRegistry: async () => reg, CAT_NAMES: { automations: 'Automations' }, AUTO_TABLE: 'automations', logSettingsActivity: () => {}, WF_VIEW: { byKey: new Map() },
+    getRealProfile: () => ctx.getCurrentProfile(), COBRA: { status: null, statusErr: '' }, readOnlyReason: () => '', cobraOpen: o => { opened.push(o); },
     wfPublishFix: async () => '', wfLink: id => `https://app.example/?wf=${id}`, AUTO: { list: [], loaded: true }, ...(opt && opt.ctx) };
   if (!ctx.getCurrentProfile) ctx.getCurrentProfile = () => ctx.STATE.profiles[0];
   vm.createContext(ctx);
@@ -6248,7 +6255,7 @@ function wfShellSandbox(reg, opt){
   const X = ctx.__x;
   X.WF_DATA.registry.set('v2', { status: 'ok', data: reg });
   const flush = () => { let n = 0; while (raf.size && n < 20) { const [id, f] = raf.entries().next().value; raf.delete(id); f(); n++; } return n; };
-  return { ctx, X, F, flush, raf, W: () => ctx.__get(), renders: () => renders, toasts };
+  return { ctx, X, F, flush, raf, W: () => ctx.__get(), renders: () => renders, toasts, opened };
 }
 function wfHasKey(o, k){ return Object.prototype.hasOwnProperty.call(o, k); }
 function testWfShellRuntime(){
@@ -6310,10 +6317,10 @@ function testWfShellRuntime(){
   flush();
   assertEqual([k1, k2], [[true, 'keys', true, null, true, 't:t2', true, 'addt', false, false], [false, true]],
     'keys: K = shortcuts, Esc closes it, ↓ = the next card in reading order (Standard); unbound keys and Tab pass through; in a text field only ⌘S is taken');
-  const kr = [key('KeyC', { shiftKey: true }), W.rail, key('KeyC', { shiftKey: true }), W.rail, key('KeyV', { shiftKey: true }), S.toasts.slice(-1)[0], key('KeyA', { shiftKey: true }), S.toasts.slice(-1)[0], W.rail];
+  const kr = [key('KeyC', { shiftKey: true }), W.rail, key('KeyC', { shiftKey: true }), W.rail, key('KeyV', { shiftKey: true }), S.toasts.slice(-1)[0], key('KeyA', { shiftKey: true }), S.opened.length, W.rail];
   flush();
-  assertEqual(kr, [true, 'notes', true, null, true, X.WF_SOON, true, 'Coming with Workflow AI', null],
-    'rail shortcuts: ⇧C opens Notes (G4.4) and closes it again; a panel not built yet (⇧V Version history, phase 6) and Workflow AI say why instead of doing nothing');
+  assertEqual(kr, [true, 'notes', true, null, true, X.WF_SOON, true, 1, null],
+    'rail shortcuts: ⇧C opens Notes (G4.4) and closes it again; a panel not built yet (⇧V Version history, phase 6) says why instead of doing nothing; ⇧A opens Workflow AI in the assistant, never a rail panel');
   const k3 = [key('ArrowDown') && W.focus, key('ArrowDown') && W.focus, key('ArrowDown') && W.focus, key('ArrowDown') && W.focus, key('ArrowRight') && W.focus, key('ArrowUp') && W.focus, key('ArrowDown', { shiftKey: true }) && [...W.sel].join()];
   assertEqual(k3, ['n:n1', 'n:n2', 'h:n2:b1', 'n:n3', 'h:n2:none', 'n:n3', 'n:n3'], 'Standard: ↓ / ↑ the reading order, → / ← the card beside; Shift+↓ adds to the selection (steps and triggers only)');
   X.wfSelectKey('n:n3', false);
@@ -6736,9 +6743,9 @@ function testWfRailWords(sb){
   console.log('\nWorkflow builder: the rail\'s panels, the dialogs and the System banner as words (stage 2 G4.4)');
   const evil = '<img src=x onerror=alert(1)>"\'&';
   const e0 = sb.wfRailErrorsHtml([], {}), e1 = sb.wfRailErrorsHtml([{ key: 'n:n1', title: evil, errors: [{ code: 'E', text: evil }], warnings: [{ code: 'W', text: 'Wide' }] }, { key: 'wf', title: 'Workflow', errors: [{ code: 'E2', text: 'Name' }], warnings: [] }], { remote: 'loading', published: true });
-  assertEqual([e0.includes('No errors found. All good.'), e1.includes('2 errors · 1 warning'), e1.includes('data-act="errOpen" data-key="n:n1">Open step'), (e1.match(/Open step/g) || []).length, /How to fix<\/button>/.test(e1) && e1.includes('data-why="Coming with Workflow AI"'),
+  assertEqual([e0.includes('No errors found. All good.'), e1.includes('2 errors · 1 warning'), e1.includes('data-act="errOpen" data-key="n:n1">Open step'), (e1.match(/Open step/g) || []).length, /How to fix<\/button>/.test(e1) && e1.includes('data-why="Coming later"'),
     e1.includes('Checking with the server…'), e1.includes('It is published: fix the errors before you save it.'), /<img|onerror=alert\(1\)>"/.test(e1)], [true, true, true, 1, true, true, true, false],
-    'Errors: GHL\'s "No errors found. All good."; grouped with "Open step" (not on the workflow\'s own group); "How to fix" greyed "Coming with Workflow AI"; the server check said; escaped');
+    'Errors: GHL\'s "No errors found. All good."; grouped with "Open step" (not on the workflow\'s own group); "How to fix" greyed "Coming later"; the server check said; escaped');
   const nrows = [{ id: 'u1', node_id: 'n1', body: evil, created_by: 'p2', created_by_name: evil, created_at: '2026-10-15T01:30:00Z', edited_at: '2026-10-15T02:00:00Z', edited_by_name: 'Kim' }];
   const n1 = sb.wfRailNotesHtml({ why: '', stepWhy: '', forId: null, q: evil, draft: evil, status: 'ok', rows: nrows, me: { id: 'p1', role: 'manager' }, tz: 'Australia/Sydney', stepName: () => 'Call' });
   const n2 = sb.wfRailNotesHtml({ why: 'Save the workflow first', status: 'none', rows: [] }), n3 = sb.wfRailNotesHtml({ forId: 'n1', forName: 'Call', stepWhy: 'Save first to add notes to a new step', status: 'ok', rows: [] });
@@ -8497,6 +8504,30 @@ async function testWorkflowAiB(sb){
 }
 
 // ── Stage 7 C: edit and describe ──
+// ── Stage 7 C2: the builder's rail row and ⇧A ──
+function testWorkflowAiC2(sb){
+  console.log('\nStage 7 C2: Workflow AI from the builder (rail row, shift+A)');
+  const toasts = [], opened = [];
+  sb.showToast = (m, o) => toasts.push([m, o && o.kind]);
+  sb.cobraOpen = o => opened.push(o);
+  sb.readOnlyReason = () => '';
+  sb.COBRA = { status: { enabled: true }, statusErr: '' };
+  sb.getRealProfile = () => ({ id: 'u1', role: 'manager' });
+  sb.wfAiOpenFromBuilder({ id: WFAI_ID, builder: 'advanced' });
+  sb.wfAiOpenFromBuilder({ id: WFAI_ID, builder: 'weird' });
+  sb.wfAiOpenFromBuilder({ id: null, builder: 'standard' });
+  assertEqual([opened, toasts], [[{ mode: 'workflow', context: { workflowId: WFAI_ID, builder: 'advanced' } }, { mode: 'workflow', context: { workflowId: WFAI_ID } }, { mode: 'workflow', context: {} }], [['Save first to edit this one with AI', 'info']]],
+    'a saved workflow opens edit mode with its id and builder kind only; an unsaved one opens build mode and says to save first');
+  opened.length = 0; toasts.length = 0;
+  sb.getRealProfile = () => ({ id: 'u2', role: 'va' });
+  sb.wfAiOpenFromBuilder({ id: WFAI_ID });
+  sb.getRealProfile = () => ({ id: 'u1', role: 'owner' }); sb.COBRA.status = { enabled: false };
+  sb.wfAiOpenFromBuilder({ id: WFAI_ID });
+  assertEqual([opened.length, toasts.map(t => t[0])], [0, ['Only owners and managers can use Workflow AI', 'Turn on the assistant in Settings → AI']], 'not allowed or switched off: it says why and opens nothing');
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  assertEqual([/k==='ai' \? wfAiWhy\(\)/.test(html), /ai: wfAiOpenFromBuilder/.test(html), /if \(key==='ai' && WF_HOOKS\.ai\) \{ WF_HOOKS\.ai\(W\); return; \}/.test(html), html.includes("ai: 'Coming later', teamEmail")], [true, true, true, true],
+    'the builder touch list (spec 5.4) is exactly: wfRailWhy, the WF_HOOKS key, the rail toggle line; the AI steps say "Coming later"');
+}
 async function testWorkflowAiC(sb){
   console.log('\nStage 7 C: Workflow AI (describe, Explain it in my words, reopen after Confirm / Undo)');
   const reg = wfRegFor(WF_AV_TODAY), ctx = { lists: { stages: [{ key: 'quoted', label: 'Quoted' }], tags: [{ key: 'vip', label: 'VIP' }] } };
@@ -9149,6 +9180,7 @@ async function testWfPhase5ReviewFixes(){
   await testCobraChangeFlow();
   await testWorkflowAiB(loadSandbox());
   await testWorkflowAiC(loadSandbox());
+  testWorkflowAiC2(loadSandbox());
   await testWfSwitchRuntime();
   testLeadAssigneeGrey();
   await testWfPhase5ReviewFixes();

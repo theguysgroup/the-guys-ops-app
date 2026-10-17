@@ -29,7 +29,7 @@ SUITES.push(async () => {
       { key: "send_email", kind: "action", label: "Send email", availability: ok1, hidden: false,
         fields: { type: "object", properties: { subject: { type: "string" }, templateKey: { type: "string", "x-source": "catalog.templates", enum: ["welcome"], "x-enumLabels": ["welcome"] } } } },
       { key: "send_sms", kind: "action", label: "Send SMS", availability: { ok: false, reason: "Needs the phone line (Twilio)" }, hidden: false },
-      { key: "ai_agent", kind: "action", label: "AI Agent", availability: { ok: false, reason: "Coming with Workflow AI" }, hidden: false },
+      { key: "ai_agent", kind: "action", label: "AI Agent", availability: { ok: false, reason: "Coming later" }, hidden: false },
       { key: "internal_notification", kind: "action", label: "Send internal notification", availability: ok1, hidden: false },
       { key: "add_tag", kind: "action", label: "Add lead tag", availability: ok1, hidden: false, fields: { type: "object", properties: { tags: { type: "array", items: { type: "string", "x-source": "catalog.tags", enum: ["vip"], "x-enumLabels": ["VIP"] } } } } },
       { key: "old_thing", kind: "action", label: "Old", availability: ok1, hidden: true },
@@ -183,7 +183,7 @@ SUITES.push(async () => {
   // ── 4. workflow_options and the pure checks ──
   {
     eq(wfAvailOf(REG), { available: { triggers: ["newLead", "stage"], actions: ["send_email", "internal_notification", "add_tag"], waits: ["period"], logic: ["if_else"], goals: ["stage_reached"] },
-      unavailable: [{ key: "trigger/review_received", reason: "Needs the Google Business Profile connector" }, { key: "action/send_sms", reason: "Needs the phone line (Twilio)" }, { key: "action/ai_agent", reason: "Coming with Workflow AI" }] },
+      unavailable: [{ key: "trigger/review_received", reason: "Needs the Google Business Profile connector" }, { key: "action/send_sms", reason: "Needs the phone line (Twilio)" }, { key: "action/ai_agent", reason: "Coming later" }] },
       "wfAvailOf: the available keys per group; the greyed ones with their reason; hidden ones left out");
     eq(wfListsOf(REG), { templates: [{ key: "welcome", name: "welcome" }], tags: [{ key: "vip", name: "VIP" }], stages: [{ key: "quoted", name: "Quoted" }, { key: "booked", name: "Booked" }], services: [{ key: "split", name: "Split system" }], people: [{ key: "u-owner", name: "Olivia Owner" }] },
       "wfListsOf: the business's lists from the registry");
