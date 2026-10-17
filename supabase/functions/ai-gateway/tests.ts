@@ -404,7 +404,7 @@ const whoamiScripts = () => [toolScript("toolu_w1", "whoami", {}), textScript("Y
       [{ text: "x".repeat(4001) }, 400, "bad_request", "text over 4000 characters"],
       [{ text: "hi", lang: "fr" }, 400, "bad_request", "an unknown language"],
       [{ text: "hi", conversation_id: "not-a-uuid" }, 400, "bad_request", "a conversation id that isn't one"],
-      [{ text: "hi", mode: "workflow_build" }, 400, "unknown_mode", "an unknown mode"],
+      [{ text: "hi", mode: "no_such_mode" }, 400, "unknown_mode", "an unknown mode"],
       [{ text: "hi", context: { page: "crm", extra: 1 } }, 400, "bad_context", "context with an extra property"],
       [{ text: "hi", context: { page: 5 } }, 400, "bad_context", "context of the wrong type"],
       // B6 (Ofek's review): the page is a short id, never free text

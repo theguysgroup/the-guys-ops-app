@@ -50,7 +50,8 @@ const Anthropic: any = class { constructor() { throw new Error("the eval never u
 for (const n of ["APIUserAbortError", "APIConnectionError", "BadRequestError", "AuthenticationError", "PermissionDeniedError", "NotFoundError", "RateLimitError", "InternalServerError"]) Anthropic[n] = class extends __APIError {};
 Anthropic.APIError = __APIError;
 TS
-  sed -e '/^import { createClient }/d' -e '/^import Anthropic/d' -e '/^import webpush/d' -e 's/^export //' "$GW/index.ts"
+  sed -e 's/^export //' "$GW/wf_catalog.ts"
+  sed -e '/^import { createClient }/d' -e '/^import Anthropic/d' -e '/^import webpush/d' -e '/^import { WF_CATALOG_TEXT }/d' -e 's/^export //' "$GW/index.ts"
   echo "const EVAL_CASES: any = $(cat "$DIR/ai_eval_cases.json");"
   node -e 'console.log("const EVAL_PATHS = " + JSON.stringify({ fixtures: process.argv[1], root: process.argv[2] }) + ";")' "$GW/fixtures" "$ROOT"
   cat "$DIR/ai_eval.ts"

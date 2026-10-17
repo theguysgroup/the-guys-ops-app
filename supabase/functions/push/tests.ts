@@ -147,6 +147,26 @@ const DOLEV = { id: "u-dolev", role: "technician", full_name: "Dolev", technicia
   sent.length = 0;
   await scan(qdb, NOW);
   eq(sent.map((x) => x.msg.title).sort(), ["New lead: Back Again", "Waiting 15+ minutes: Back Again"], "scan: a quiet import reopened 30 minutes ago is news again (New lead + Waiting)");
+  // Stage 2 G7.2: a kind handed over to the engine (its moved row Published more than the overlap ago) is left out; in the
+  // overlap, a Draft, a deleted row or a table that can't be read, push sends as before (the shared keys keep each once)
+  {
+    const hdb = (row: any) => fakeDb({
+      profiles: [OFEK], push_subscriptions: [{ id: "p1", user_id: "u-ofek", endpoint: "https://push/ofek", p256dh: "k", auth: "a" }],
+      settings: [{ id: 1, catalog: { notify: { newLead: { on: true }, missedCall: { on: true }, vacationBack: { on: false } } } }], push_sent: [], jobs: [], employees: [],
+      calls: [{ id: "k1", from_number: "+61400000000", missed: true, started_at: "2026-10-12T03:10:00Z", division: "Aircon" }],
+      contacts: [{ id: "h1", full_name: "Hand Over", division: "Aircon", source: "Organic", status: "New", created_at: "2026-10-12", first_at: "2026-10-12T03:20:00Z", tags: [] }],
+      automations: row ? [{ system_key: "team:newLead", enabled: true, deleted_at: null, system_handover_at: "2026-10-12T02:00:00Z", ...row }] : [],
+    });
+    const titles = async (db: any) => { sent.length = 0; await scan(db, NOW); return sent.map((x) => x.msg.title).sort(); };
+    eq(await titles(hdb({})), ["Missed call"], "scan (G7.2): a new lead handed over to the engine is left out; the rest as before");
+    eq([await titles(hdb({ system_handover_at: "2026-10-12T03:20:00Z" })), await titles(hdb({ enabled: false })), await titles(hdb({ deleted_at: "2026-10-12T03:00:00Z" })), await titles(hdb(null))],
+      [["Missed call", "New lead: Hand Over"], ["Missed call", "New lead: Hand Over"], ["Missed call", "New lead: Hand Over"], ["Missed call", "New lead: Hand Over"]],
+      "scan (G7.2): in the 30-minute overlap, in Draft, moved back (deleted) or never moved, push sends it (from the first entry's time alone, the lean read)");
+    const bad = hdb({}), from0 = bad.from;
+    bad.from = (t: string) => { if (t === "automations") throw new Error("no column"); return from0(t); };
+    eq(await titles(bad), ["Missed call", "New lead: Hand Over"], "scan (G7.2): the table can't be read → push sends as before");
+    eq(sysHandedOver([{ system_key: "team:missedCall", enabled: true, deleted_at: null, system_handover_at: "2026-10-01T00:00:00Z" }], NOW), [], "sysHandedOver: only a base push can hand over (SYS_TEAM)");
+  }
 
   // The business's day (Region and format): at 14:30 Monday in Sydney it is still Sunday 11 Oct in Chicago, so the job of
   // 4 Oct (not 5 Oct) turns a week unpaid; the amount is in the business's currency.

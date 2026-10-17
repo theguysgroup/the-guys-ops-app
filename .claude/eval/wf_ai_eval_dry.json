@@ -1,0 +1,400 @@
+{
+  "about": "wf_ai_eval.ts --dry: every request built with no network; scripted turns (the tools the case needs plus one canned proposal) run on the real checks. Estimates only: the model's own answers are not run.",
+  "dry": true,
+  "models": [
+    "@cf/zai-org/glm-4.7-flash"
+  ],
+  "stream": "on",
+  "thinking": "off",
+  "cases": 30,
+  "system_prompt_chars": {
+    "workflow_build": 11311,
+    "workflow_edit": 11892
+  },
+  "tool_schema_chars": {
+    "workflow_build": 1074,
+    "workflow_edit": 1273
+  },
+  "largest_request_prompt_tokens": 7039,
+  "wiring": {
+    "proposals_accepted": 17,
+    "proposals_expected": 17,
+    "tool_errors": 0
+  },
+  "ok": true,
+  "rows": [
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-build-quote-followup",
+      "mode": "workflow_build",
+      "lang": "en",
+      "calls": 3,
+      "request_bytes": [
+        13721,
+        17064,
+        18707
+      ],
+      "est_neurons": 156
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-build-quote-followup",
+      "mode": "workflow_build",
+      "lang": "he",
+      "calls": 3,
+      "request_bytes": [
+        13760,
+        17103,
+        18746
+      ],
+      "est_neurons": 156
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-build-form-task",
+      "mode": "workflow_build",
+      "lang": "en",
+      "calls": 3,
+      "request_bytes": [
+        13751,
+        17094,
+        18737
+      ],
+      "est_neurons": 156
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-build-booked-confirm",
+      "mode": "workflow_build",
+      "lang": "he",
+      "calls": 3,
+      "request_bytes": [
+        13739,
+        17082,
+        18725
+      ],
+      "est_neurons": 156
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-build-stale-assign",
+      "mode": "workflow_build",
+      "lang": "en",
+      "calls": 3,
+      "request_bytes": [
+        13750,
+        17093,
+        18736
+      ],
+      "est_neurons": 156
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-build-paid-thanks",
+      "mode": "workflow_build",
+      "lang": "he",
+      "calls": 3,
+      "request_bytes": [
+        13732,
+        17075,
+        18718
+      ],
+      "est_neurons": 156
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-build-vip-ifelse",
+      "mode": "workflow_build",
+      "lang": "en",
+      "calls": 3,
+      "request_bytes": [
+        13753,
+        17096,
+        18739
+      ],
+      "est_neurons": 156
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-build-reply-wait",
+      "mode": "workflow_build",
+      "lang": "he",
+      "calls": 3,
+      "request_bytes": [
+        13804,
+        17147,
+        18790
+      ],
+      "est_neurons": 157
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-build-split",
+      "mode": "workflow_build",
+      "lang": "en",
+      "calls": 3,
+      "request_bytes": [
+        13741,
+        17084,
+        18727
+      ],
+      "est_neurons": 156
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-build-lost-dnd",
+      "mode": "workflow_build",
+      "lang": "he",
+      "calls": 3,
+      "request_bytes": [
+        13757,
+        17100,
+        18743
+      ],
+      "est_neurons": 156
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-greyed-sms",
+      "mode": "workflow_build",
+      "lang": "en",
+      "calls": 2,
+      "request_bytes": [
+        13712,
+        17055
+      ],
+      "est_neurons": 100
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-greyed-sms",
+      "mode": "workflow_build",
+      "lang": "he",
+      "calls": 2,
+      "request_bytes": [
+        13695,
+        17038
+      ],
+      "est_neurons": 100
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-greyed-xero",
+      "mode": "workflow_build",
+      "lang": "en",
+      "calls": 2,
+      "request_bytes": [
+        13699,
+        17042
+      ],
+      "est_neurons": 100
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-greyed-ai-step",
+      "mode": "workflow_build",
+      "lang": "he",
+      "calls": 2,
+      "request_bytes": [
+        13749,
+        17092
+      ],
+      "est_neurons": 100
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-greyed-review",
+      "mode": "workflow_build",
+      "lang": "en",
+      "calls": 2,
+      "request_bytes": [
+        13711,
+        17054
+      ],
+      "est_neurons": 100
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-build-publish-now",
+      "mode": "workflow_build",
+      "lang": "en",
+      "calls": 3,
+      "request_bytes": [
+        13725,
+        17068,
+        18711
+      ],
+      "est_neurons": 156
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-refuse-send-now",
+      "mode": "workflow_build",
+      "lang": "he",
+      "calls": 1,
+      "request_bytes": [
+        13723
+      ],
+      "est_neurons": 47
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-refuse-offtopic",
+      "mode": "workflow_build",
+      "lang": "en",
+      "calls": 1,
+      "request_bytes": [
+        13650
+      ],
+      "est_neurons": 47
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-refuse-delete-all",
+      "mode": "workflow_build",
+      "lang": "en",
+      "calls": 1,
+      "request_bytes": [
+        13657
+      ],
+      "est_neurons": 47
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-edit-wait",
+      "mode": "workflow_edit",
+      "lang": "en",
+      "calls": 3,
+      "request_bytes": [
+        14642,
+        20261,
+        21071
+      ],
+      "est_neurons": 168
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-edit-wait",
+      "mode": "workflow_edit",
+      "lang": "he",
+      "calls": 3,
+      "request_bytes": [
+        14676,
+        20295,
+        21105
+      ],
+      "est_neurons": 168
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-edit-add-tag",
+      "mode": "workflow_edit",
+      "lang": "en",
+      "calls": 3,
+      "request_bytes": [
+        14667,
+        20286,
+        21096
+      ],
+      "est_neurons": 168
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-edit-remove-call",
+      "mode": "workflow_edit",
+      "lang": "he",
+      "calls": 3,
+      "request_bytes": [
+        14641,
+        20260,
+        21070
+      ],
+      "est_neurons": 168
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-edit-rename",
+      "mode": "workflow_edit",
+      "lang": "en",
+      "calls": 3,
+      "request_bytes": [
+        14641,
+        20260,
+        21070
+      ],
+      "est_neurons": 168
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-edit-notify-owner",
+      "mode": "workflow_edit",
+      "lang": "he",
+      "calls": 3,
+      "request_bytes": [
+        14688,
+        20307,
+        21117
+      ],
+      "est_neurons": 168
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-edit-greyed-sms",
+      "mode": "workflow_edit",
+      "lang": "en",
+      "calls": 2,
+      "request_bytes": [
+        14638,
+        20257
+      ],
+      "est_neurons": 108
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-edit-turn-on",
+      "mode": "workflow_edit",
+      "lang": "en",
+      "calls": 1,
+      "request_bytes": [
+        14624
+      ],
+      "est_neurons": 49
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-describe",
+      "mode": "workflow_edit",
+      "lang": "en",
+      "calls": 2,
+      "request_bytes": [
+        14621,
+        20240
+      ],
+      "est_neurons": 108
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "he-describe",
+      "mode": "workflow_edit",
+      "lang": "he",
+      "calls": 2,
+      "request_bytes": [
+        14654,
+        20273
+      ],
+      "est_neurons": 108
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "id": "en-describe-noreply",
+      "mode": "workflow_edit",
+      "lang": "en",
+      "calls": 2,
+      "request_bytes": [
+        14651,
+        20270
+      ],
+      "est_neurons": 108
+    }
+  ]
+}
