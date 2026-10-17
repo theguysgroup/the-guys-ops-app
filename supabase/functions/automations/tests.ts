@@ -59,6 +59,7 @@ const UNIQUE: Record<string, Uniq[]> = {
     key: (r) => [r.business_id, r.parent_id ?? "-", String(r.name ?? "").trim().toLowerCase()].join("|") }],
   automations: [{ name: "automations_system_key_once", keys: ["business_id", "system_key"], where: (r) => r.system_key != null && r.deleted_at == null }],
   app_keys: [{ name: "app_keys_pkey", keys: ["name"] }],
+  push_sent: [{ name: "push_sent_pkey", keys: ["key"] }],
 };
 // Column defaults the SQL gives (every phase-4 log row is an 'action' row of loop 0; runs and events per Part 1).
 const DEFAULTS: Record<string, Record<string, any>> = {
@@ -921,27 +922,9 @@ async function phase4Suite() {
     eq(db.T.automation_runs.some((r: any) => r.id === "old2"), true, "prune: once a day");
   }
 
-  // ── 17. preview and registry ──
+  // ── 17. registry (the step "preview" went with the old editor: stage 2 phase 7; the dry run is the step "test") ──
   {
-    const a = auto({ id: "a-prev", enabled: false, steps: [{ id: "w", kind: "wait", unit: "hours", n: 1 }, { id: "i", kind: "if", match: "all", conds: [{ field: "service", op: "is", v: "Aircon" }] },
-      emailStep(), { id: "x1", kind: "action", type: "text", body: "{hi}!" }, { id: "p1", kind: "action", type: "push", to: { roles: ["owner"] }, title: "Lead {name}" }, { id: "t1", kind: "action", type: "task", title: "Call {first_name}", assignees: ["e-va"], due_days: 2 }] });
-    const db = world({ automations: [a], contacts: [lead("c1")] });
-    const before = JSON.stringify(db.T);
-    sent.length = 0;
-    const p = await handle(db, { step: "preview", automation_id: "a-prev", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([p.status, p.body.ok, p.body.steps.map((s: any) => s.would)], [200, true, ["wait", "go on", "queue", "wait for the business phone", "send", "add"]], "preview: what each step would do");
-    const em = p.body.steps[2];
-    eq([em.subject, em.body, em.signature, em.to, em.note], ["Your Aircon cleaning enquiry", "Hi Sam, thanks for contacting Acme Home Services." + FOOT, "\n\nOlivia\nAcme Home Services", "sam@example.com", "this automation is off: nothing is sent"], "preview: the filled email with its way out, the signature the mailbox adds (a real first name), and that it is off");
-    eq([p.body.steps[4].to, p.body.steps[5].board, p.body.steps[5].due], [["Olivia Owner"], "ron", "2026-10-16"], "preview: recipients and the task");
-    eq([JSON.stringify(db.T) === before, sent.length], [true, 0], "preview: writes nothing and sends nothing");
-    const bad = await handle(db, { step: "preview", automation: { name: "x", trigger: { type: "newLead" }, steps: [{ id: "q", kind: "action", type: "fax" }] }, record: { kind: "contact", id: "c1" } }, MANAGER, false);
-    ok(bad.body.ok === false && bad.body.problems.some((x: string) => x.includes("unknown action")), "preview: reports the problems");
-    const nightDb = world({ automations: [a], contacts: [lead("c1")] });
-    clock = syd("2026-10-14", 20, 30);
-    const pn = await handle(nightDb, { step: "preview", automation_id: "a-prev", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([pn.body.steps[2].would, pn.body.steps[2].until], ["wait", isoMs(syd("2026-10-15", 8))], "preview: an email that would land at night waits for the morning");
-    clock = NOW;
-    eq((await handle(db, { step: "preview", automation_id: "a-prev", record: { kind: "contact", id: "c1" } }, VA, false)).status, 403, "preview: owners and managers only");
+    const db = world({ contacts: [lead("c1")] });
     // the phase-4 lists (since G2.4 the step "registry" answers with the stage-2 DTO: section 34)
     const reg = { status: 200, body: registry() as any };
     const text = JSON.stringify(reg.body);
@@ -1211,21 +1194,6 @@ async function phase4Suite() {
     eq([vacTaskPeople([EMPS[3], EMPS[1]], C, undefined, moved), moved], [["Vicky Va", "Max Manager"], [{ from: "Cal Tech", to: "Vicky Va" }]], "vacTaskPeople: who was swapped for whom");
     eq([vacMovedNote([]), vacMovedNote([{ from: "A", to: "B" }, { from: "C", to: "B" }])], ["", "For A (on vacation): given to B, the stand-in.\nFor C (on vacation): given to B, the stand-in."], "vacMovedNote: one line each, none when nobody moved");
     eq([vacTaskPeople([EMPS[3]], C, "2026-10-18"), vacTaskPeople([EMPS[3]], C, "2026-10-17"), vacTaskPeople([EMPS[3]], C, day)], [["Cal Tech"], ["Vicky Va"], ["Vicky Va"]], "vacTaskPeople: on the day given (the due day)");
-    // preview shows the same
-    const a = auto({ id: "a-vac", enabled: false, steps: [pushTo(["owner", "manager"]), { ...task(["e-cal"]), id: "t1" }] });
-    const pdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } }), vac({ id: "v2", employee_id: "e-cal", stand_in_id: "e-va", options: { notAssignable: true, standIn: true } })], automations: [a], contacts: [lead("c1")] });
-    const p = await handle(pdb, { step: "preview", automation_id: "a-vac", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([p.body.steps[0].to, p.body.steps[1].assignees, p.body.steps[1].board, p.body.steps[1].notes], [["Max Manager"], ["Vicky Va"], "ron", "For Cal Tech (on vacation): given to Vicky Va, the stand-in."], "preview: the redirected push names, task assignees and the line in its notes");
-    const sdb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac()], automations: [auto({ id: "a-skip", enabled: false, steps: [pushTo(["owner"])] })], contacts: [lead("c1")] });
-    const ps = await handle(sdb, { step: "preview", automation_id: "a-skip", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([ps.body.steps[0].would, ps.body.steps[0].reason], ["skip", "on vacation"], "preview: everyone picked is away → 'skip: on vacation'");
-    // the preview reads the vacations of the day the action would run (after its waits), not today's
-    const later = (vacs: any[]) => world({ profiles: PROFS, employees: EMPS, employee_vacations: vacs, contacts: [lead("c1")],
-      automations: [auto({ id: "a-later", enabled: false, steps: [{ id: "w", kind: "wait", unit: "days", n: 7 }, pushTo(["owner"])] })] });
-    const pl = await handle(later([vac()]), { step: "preview", automation_id: "a-later", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([pl.body.steps[1].would, pl.body.steps[1].to], ["send", ["Olivia Owner"]], "preview: the owner away today but back before the action (in 7 days) → sent to them");
-    const pf = await handle(later([vac({ starts_on: "2026-10-20", ends_on: "2026-10-23" })]), { step: "preview", automation_id: "a-later", record: { kind: "contact", id: "c1" } }, OWNER, false);
-    eq([pf.body.steps[1].would, pf.body.steps[1].reason], ["skip", "on vacation"], "preview: the owner away on the action's day (not today) → 'skip: on vacation'");
     // read once per tick
     const twice = auto({ steps: [pushTo(["owner"]), { ...pushTo(["manager"]), id: "p2" }] });
     const odb = world({ profiles: PROFS, employees: EMPS, employee_vacations: [vac({ starts_on: "2026-10-01", ends_on: "2026-10-02" })], automations: [twice, auto({ steps: [pushTo(["manager"])] })], contacts: [lead("c1")] });
@@ -1344,7 +1312,6 @@ async function phase4Suite() {
     ok(bad({ steps: [emailStep({ subject: "" })] }).some((p) => p.includes("subject")), "an email without a subject");
     ok(bad({ steps: [{ id: "t", kind: "action", type: "text", body: "x".repeat(641) }] }).some((p) => p.includes("longer than 640")), "a text that is too long");
     ok(bad({ trigger: { type: "jobClosed", params: { maxJobAgeDays: 40 } } }).some((p) => p.includes("1 to 30")), "job age out of range");
-    eq([audienceOf(good), audienceOf({ steps: [emailStep()] }), audienceOf({ steps: [{ kind: "action", type: "text" }] })], ["team", "customer", "customer"], "audience from the steps");
   }
 
   // ── 4. conditions (on fresh facts) ──
@@ -2125,7 +2092,7 @@ async function phase4Suite() {
     const tableSql = (t: string) => { const m = new RegExp(`create table if not exists public\\.${t} \\(([\\s\\S]*?)\\n\\);`).exec(tx); return m ? m[1] : ""; };
     const keyProblems: string[] = [];
     for (const [t, list] of Object.entries(UNIQUE)) for (const u of list) {
-      if (t === "app_keys") continue;
+      if (t === "app_keys" || t === "push_sent") continue;   // the push function's own tables (not stage 2's SQL)
       const stmtOf = (text: string) => { const a0 = text.search(new RegExp(`\\b${u.name} `)); return a0 < 0 ? "" : text.slice(a0, text.indexOf(";", a0)); };
       const line = stmtOf(tx) || stmtOf(p4sql);
       if (line) { if (!u.keys.every((k) => line.includes(k))) keyProblems.push(u.name + ": columns"); }
@@ -4025,10 +3992,15 @@ async function phase4Suite() {
         [200, "team:new-lead_1", 200, null, null, 200, "team:new-lead_1", false], "save: template_key kept on a new one (a Draft); a bad key or a later save never sets it");
       // overlap with a ready-made System row that is on
       const sysRow = db.T.automations.find((a: any) => a.id === id);
-      Object.assign(sysRow, { enabled: true, list_summary: { triggers: ["newLead"] } });
+      Object.assign(sysRow, { enabled: true, list_summary: { triggers: ["newLead"], actions: ["internal_notification"] } });
       const other = await api(db, "save", { automation_id: null, name: "Same start", definition: d1 });
       const ov = await api(db, "publish", { automation_id: other.body.id, on: true });
-      eq([ov.status, ov.body.text], [409, "Turn off the ready-made Team alert first, or it sends twice"], "publish: an active System row with the same start blocks (it would send twice)");
+      eq([ov.status, ov.body.text], [409, "Turn off the ready-made Team alert first, or it sends twice"], "publish: an active System row with the same start and the same kind of step blocks (it would send twice)");
+      // G7.2: a moved team notification never blocks a workflow on the same start that does something else
+      const mail = await api(db, "save", { automation_id: null, name: "Welcome email", definition: doc({ e1: { kind: "action", type: "send_email", config: { subject: "Hi", body: "{hi}, thanks." }, out: { next: null } } }) });
+      const ok2 = await api(db, "publish", { automation_id: mail.body.id, on: true, confirm: true });
+      eq([ok2.status, ok2.body.enabled], [200, true], "publish (G7.2): the same start but another kind of step (a customer email) is not blocked by a System team row");
+      await api(db, "publish", { automation_id: mail.body.id, on: false });
       // no trigger on: allowed, with the warning
       const nt = await api(db, "save", { automation_id: null, name: "Manual only", definition: doc({ n1: push() }, []) });
       const pn = await api(db, "publish", { automation_id: nt.body.id, on: true });
@@ -5040,6 +5012,257 @@ async function phase4Suite() {
       };
       eq([await vd([]), await vd([vac()]), await vd([vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } })]), await vd([vac({ employee_id: "e-mgr" })], { push: true, users: ["u-mgr"] })],
         [["https://push/owner"], [], ["https://push/mgr"], ["https://push/owner"]], "digest (stage 3): the owner away with No notifications → not to them; their stand-in manager gets it; the chosen manager away → the owners");
+    }
+  }
+
+  // ── 41. G7.2 System moves, team (design §4.10, §7 G7.2): the System team block is push's, byte for byte; WF_SYSTEM's
+  //        parity per team base (the engine's mirror = push's scan: the same notifications, words, people with vacations
+  //        and stand-ins, keys); only a base with a mirror and its parity scenarios may be movable, customer bases never;
+  //        system_move / publish (handover) / Draft / system_unmove; the guards: never twice in the handover window,
+  //        nothing dropped at the handover or after it, the rollback (Draft, Move back, a push that can't read the table)
+  //        gives it back to push at once; the tick runs moved rows only through the mirror ──
+  {
+    io.advance = PROD_ADVANCE;
+    const api41 = (db: any, step: string, body: any = {}, me: any = OWNER) => handle(db, { step, ...body }, me, false);
+    const sysBlock = (text: string) => { const a = text.indexOf("// ── System team notifications (stage 2 G7.2)"), z = text.indexOf("// ── end System team ──"); return a < 0 || z < a ? "" : text.slice(a, z); };
+    const blkA = sysBlock(src("index.ts")), blkB = sysBlock(src("../push/index.ts"));
+    ok(blkA.length > 2000 && blkA === blkB, "the System team block is byte-identical in automations and push", [blkA.length, blkB.length]);
+    // push itself, as deployed (its imports stubbed), next to the engine
+    const os: any = await import("node:os"), nodeUrl: any = await import("node:url"), nodePath: any = await import("node:path");
+    const pushFile = nodePath.join(os.tmpdir(), `push_g72_${process.pid}.ts`);
+    fs.writeFileSync(pushFile, "const createClient = null as any;\nconst webpush = null as any;\n" + src("../push/index.ts").replace(/^import .*\n/gm, ""));
+    const P: any = await import(nodeUrl.pathToFileURL(pushFile).href);
+    fs.unlinkSync(pushFile);
+    const psent: { to: string; msg: any }[] = [];
+    P.io.send = async (sub: any, payload: string) => { psent.push({ to: sub.endpoint, msg: JSON.parse(payload) }); return { statusCode: 201 }; };
+    P.io.generate = () => ({ publicKey: "PUB", privateKey: "PRIV" });
+
+    // the handover rule (pure)
+    const H = NOW - HR, hrow = (o: any = {}) => ({ system_key: "team:newLead", enabled: true, deleted_at: null, system_handover_at: isoMs(H), ...o });
+    eq([sysHandedOver([hrow()], H + 29 * MIN), sysHandedOver([hrow()], H + 31 * MIN), sysHandedOver([hrow({ enabled: false })], NOW), sysHandedOver([hrow({ deleted_at: isoMs(H) })], NOW),
+      sysHandedOver([hrow({ system_handover_at: null })], NOW), sysHandedOver([hrow({ system_key: "team:unpaid" }), hrow({ system_key: "review" }), null as any], NOW), sysHandedOver("x" as any, NOW)],
+      [[], ["newLead"], [], [], [], [], []], "sysHandedOver: only a Published, kept row past its overlap (30 minutes); a Draft, a deleted row, no handover time, a base push can't hand over = push keeps it");
+
+    // the parity worlds: the same records, people, vacations and catalog for push's scan and for the engine's mirror
+    const vemps = [{ id: "e-own", name: "Olivia Owner", status: "Active" }, { id: "e-mgr", name: "Max Manager", status: "Active" }];
+    const vac = (o: any = {}) => ({ id: "v1", business_id: "default", employee_id: "e-own", starts_on: "2026-10-13", ends_on: "2026-10-17", stand_in_id: null, options: { noNotify: true }, ended_at: null, cancelled_at: null, reminded_at: null, ...o });
+    const LEADS = () => [
+      lead("n1"),                                                                        // news
+      lead("n2", { messages: undefined, first_at: isoMs(NOW - 20 * MIN) }),              // the lean read (first entry's time only)
+      lead("n3", { tags: ["Test"] }),                                                     // a test card
+      lead("n4", { import_quiet: true }),                                                 // a quiet import
+      lead("n5", { messages: [{ at: isoMs(NOW - 3 * MIN), quiet: true }] }),             // an older quiet import
+      lead("n6", { created_at: "2026-09-01", reopened_at: isoMs(NOW - 5 * MIN) }),       // a card made long ago and reopened (push never read it)
+      lead("n7", { messages: [{ at: isoMs(NOW - 7 * HR) }] }),                           // a backlog
+      lead("n8", { messages: [{ at: isoMs(NOW + 10 * MIN) }] }),                         // a clock ahead
+      lead("n9", { messages: [], created_at: "2026-10-14" }),                            // made by hand
+      lead("n10", { linked_job_id: "j1" }),                                               // a job's card with a thread: push tells it
+      lead("n11", { created_at: "2026-10-13", messages: [{ at: isoMs(NOW - 5 * HR) }] }),
+      lead("n12", { created_at: "2026-10-13T20:00:00Z", reopened_at: isoMs(NOW - HR), messages: [{ at: isoMs(NOW - 20 * HR) }] }),
+      lead("n13", { full_name: "", division: "", source: "" }),
+    ];
+    const CFG = [
+      { name: "owners only", notify: { newLead: { on: true } }, emps: [], vacs: [] as any[], none: false },
+      { name: "the office too", notify: { newLead: { on: true, office: true } }, emps: [], vacs: [] },
+      { name: "the owner away with No notifications", notify: { newLead: { on: true, office: true } }, emps: vemps, vacs: [vac()] },
+      // owners only: the manager stand-in may not see it either, so nobody does (as push)
+      { name: "the owner away, a manager stand-in (owners only)", notify: { newLead: { on: true } }, emps: vemps, vacs: [vac({ stand_in_id: "e-mgr", options: { noNotify: true, standIn: true } })], none: true },
+      { name: "the VA away (office on)", notify: { newLead: { on: true, office: true } }, emps: vemps, vacs: [vac({ id: "v2", employee_id: "e-va" })] },
+    ];
+    const PARITY: Record<string, any[]> = { "team:newLead": CFG };
+    const STATE = [{ business_id: "default", tick_lease_until: null, pruned_on: null, phase4_compat: false, error_notice_at: null }];
+    const movedRow = (o: any = {}) => ({ id: "a-sys1-0000", business_id: "default", name: "A new lead comes in", enabled: true, armed_at: null, revision: 1, version: 1, audience: "team", origin: "system",
+      system_key: "team:newLead", system_handover_at: isoMs(H), deleted_at: null, updated_at: isoMs(H), settings: {}, layout: { v: 1 }, builder: "standard", list_summary: {},
+      definition: systemDefinition("team:newLead", CATALOG), trigger: null, steps: null, ...o });
+    const sysWorld = (c: any, over: Record<string, any[]> = {}) => {
+      const db = world({ automation_state: STATE.map((x) => ({ ...x })), contacts: LEADS(), push_sent: [], employees: [{ id: "e-va", name: "Vicky Va", status: "Active" }, ...c.emps], employee_vacations: c.vacs.map((v: any) => ({ ...v })), ...over });
+      db.T.settings[0].catalog = { ...CATALOG, notify: { ...c.notify, vacationBack: { on: false } } };
+      return db;
+    };
+    const keysOf = (db: any) => db.T.push_sent.map((r: any) => r.key).filter((k: string) => !k.startsWith("scan:")).sort();
+    const viaPush = async (db: any, at = NOW) => { psent.length = 0; await P.scan(db, at); return psent.map((x) => ({ ...x })); };
+    const viaMirror = async (db: any, at = NOW) => { sent.length = 0; clock = at; const T = await loadContext(db, at); T.mirrored = db.T.automations.filter((a: any) => a.system_key === "team:newLead"); await systemMirror(db, T, at); return sent.map((x) => ({ ...x })); };
+    // parity per team base: every movable one has a mirror and its scenarios, and gives exactly push's notifications
+    const team = Object.entries(WF_SYSTEM).filter(([, e]) => e.audience === "team");
+    eq(team.map(([b]) => b), ["team:newLead", "team:leadWaiting", "team:missedCall", "team:unpaid", "team:docExpiry", "team:bizInsurance", "team:invoice", "team:googleReview", "team:vacationBack"], "WF_SYSTEM: every team base of the System list");
+    for (const [base, e] of team) {
+      if (!e.movable) { ok(!!e.why && !has(WF_SYSTEM_MIRRORS, base), `parity ${base}: not movable in this release (${e.why}); no mirror, so push alone sends it`); continue; }
+      ok(has(WF_SYSTEM_MIRRORS, base) && has(PARITY, base) && Object.prototype.hasOwnProperty.call(SYS_TEAM, base.slice(5)), `parity ${base}: movable only with a mirror, its parity scenarios and push's handover rule`);
+      for (const c of PARITY[base] || []) {
+        const a = sysWorld(c), b = sysWorld(c, { automations: [movedRow()] });
+        const fromPush = await viaPush(a), fromMirror = await viaMirror(b);
+        ok(c.none ? !fromPush.length : fromPush.length >= 2, `parity ${base} "${c.name}": push ${c.none ? "sends nothing" : "sends something"} here`, fromPush.length);
+        eq([fromMirror, keysOf(b)], [fromPush, keysOf(a)], `parity ${base} "${c.name}": the mirror sends exactly what push sends (each device, title, body, link, tag, in order) under push's own keys`);
+      }
+    }
+    {
+      const db = sysWorld(CFG[1], { automations: [movedRow()] });
+      const got = await viaMirror(db);
+      eq([[...new Set(got.map((x) => x.msg.tag))], keysOf(db), got.find((x) => x.msg.tag === "lead-n13").msg],
+        [["lead-n1", "lead-n2", "lead-n10", "lead-n11", "lead-n12", "lead-n13"], ["lead:n1:" + isoMs(NOW - 2 * MIN), "lead:n10:" + isoMs(NOW - 2 * MIN), "lead:n11:" + isoMs(NOW - 5 * HR), "lead:n12:" + isoMs(NOW - HR), "lead:n13:" + isoMs(NOW - 2 * MIN), "lead:n2:" + isoMs(NOW - 20 * MIN)].sort(),
+          { title: "New lead: no name", body: "A new enquiry came in.", url: "https://theguysgroup.github.io/the-guys-ops-app/?tab=crm", tag: "lead-n13" }],
+        "mirror: the leads push tells (not a test card, a quiet import, a backlog, a card made by hand), push's keys and words");
+      const log = db.T.automation_log;
+      eq([log.length, log[0].automation_id, log[0].status, log[0].channel, log[0].audience, log[0].record_id, log[0].recipient, log[0].run_id], [6, "a-sys1-0000", "sent", "push", "team", "n1", "Olivia Owner, Max Manager, Vicky Va, Vera Va", null],
+        "mirror: one log row per notification on the moved workflow (its history starts with the move)");
+      eq([(await viaMirror(db, NOW + MIN)).length, db.calls.filter((c: string) => c === "push_sent.insert").length], [0, 6], "mirror: the next minute sends nothing and tries no claim again (one read of what went)");
+    }
+
+    // the guards: the handover window, no drop, the rollback
+    {
+      const c = CFG[0], count = (list: any[], tag: string) => list.filter((x) => x.msg.tag === tag).length;
+      // in the window (published 10 minutes ago): both look, the first claim sends; either order, one each
+      const w1 = sysWorld(c, { automations: [movedRow({ system_handover_at: isoMs(NOW - 10 * MIN) })] });
+      const m1 = await viaMirror(w1), p1 = await viaPush(w1);
+      const w2 = sysWorld(c, { automations: [movedRow({ system_handover_at: isoMs(NOW - 10 * MIN) })] });
+      const p2 = await viaPush(w2), m2 = await viaMirror(w2);
+      eq([count(m1, "lead-n1"), count(p1, "lead-n1"), count(p2, "lead-n1"), count(m2, "lead-n1"), p1.length, m2.length], [1, 0, 1, 0, 0, 0],
+        "handover window: push still looks, but whichever claims first sends — never twice (mirror first or push first)");
+      // past the overlap push leaves newLead out (no claim tried); a lead that arrives later reaches the team once, from the engine
+      const w3 = sysWorld(c, { automations: [movedRow({ system_handover_at: isoMs(NOW - 31 * MIN) })] });
+      const p3 = await viaPush(w3);
+      eq([p3.length, keysOf(w3)], [0, []], "handed over: push's scan leaves the new lead out entirely");
+      w3.T.contacts.push(lead("n20", { messages: [{ at: isoMs(NOW + 4 * MIN) }] }));
+      const m3 = await viaMirror(w3, NOW + 5 * MIN), p3b = await viaPush(w3, NOW + 9 * MIN);
+      eq([count(m3, "lead-n20"), count(m3, "lead-n1"), p3b.length], [1, 1, 0], "handed over: the engine sends what arrives (and what push had not sent yet); push sends nothing — no drop, no double");
+      // a lead that came in just before the Publish and push had not scanned yet: the mirror's 6-hour look-back sends it
+      const w4 = sysWorld(c, { automations: [movedRow({ system_handover_at: isoMs(NOW - MIN) })] });
+      w4.T.contacts = [lead("n30", { messages: [{ at: isoMs(NOW - 6 * MIN) }] })];
+      eq(count(await viaMirror(w4), "lead-n30"), 1, "Publish: a lead from before the handover that push had not told yet is not dropped");
+      // rollback 1: Draft (the handover flag off) → push sends again at once, only what was not sent
+      const w5 = sysWorld(c, { automations: [movedRow({ system_handover_at: isoMs(NOW - 2 * HR) })] });
+      await viaMirror(w5);
+      Object.assign(w5.T.automations[0], { enabled: false, system_handover_at: null });
+      w5.T.contacts.push(lead("n40", { messages: [{ at: isoMs(NOW + MIN) }] }));
+      const p5 = await viaPush(w5, NOW + 2 * MIN);
+      eq([p5.map((x) => x.msg.tag), (await viaMirror(w5, NOW + 3 * MIN)).length], [["lead-n40"], 0], "rollback (Draft): push sends again at once — only what the engine had not sent; the mirror stops");
+      // rollback 2: Move back (deleted, the System link cleared) → the same
+      const w6 = sysWorld(c, { automations: [movedRow({ system_handover_at: isoMs(NOW - 2 * HR) })] });
+      await viaMirror(w6);
+      Object.assign(w6.T.automations[0], { enabled: false, system_handover_at: null, system_key: null, deleted_at: isoMs(NOW) });
+      w6.T.contacts.push(lead("n41", { messages: [{ at: isoMs(NOW + MIN) }] }));
+      eq((await viaPush(w6, NOW + 2 * MIN)).map((x) => x.msg.tag), ["lead-n41"], "rollback (Move back): push sends again at once, nothing twice");
+      // push can't read the table (no column yet, an error): it sends as before; the shared keys keep each one once
+      const w7 = sysWorld(c, { automations: [movedRow({ system_handover_at: isoMs(NOW - 2 * HR) })] });
+      const from7 = w7.from;
+      w7.from = (t: string) => { if (t === "automations") throw new Error("column automations.system_key does not exist"); return from7(t); };
+      const p7 = await viaPush(w7);
+      w7.from = from7;
+      eq([count(p7, "lead-n1"), (await viaMirror(w7, NOW + MIN)).length], [1, 0], "push without the table: it sends as before (fail-open), and the engine then sends nothing twice");
+      // a later release taking the base off the movable list stops only new moves: a moved row keeps running (push still leaves it out)
+      const was = WF_SYSTEM["team:newLead"].movable;
+      WF_SYSTEM["team:newLead"].movable = false;
+      const w8 = sysWorld(c, { automations: [movedRow({ system_handover_at: isoMs(NOW - 2 * HR) })] });
+      eq([count(await viaMirror(w8), "lead-n1"), (await api41(w8, "system_move", { base: "team:newLead" })).status], [1, 409], "movable off later: a moved row keeps sending (never a gap); only new moves are refused");
+      WF_SYSTEM["team:newLead"].movable = was;
+    }
+
+    // the tick: a moved row runs only through the mirror (never a run, never in the capture list), in both engine modes
+    {
+      const db = sysWorld(CFG[0], { automations: [movedRow({ system_handover_at: isoMs(NOW - 2 * HR) })] });
+      sent.length = 0;
+      const r = await tickAt(db, NOW);
+      eq([r.system, sent.filter((x) => x.msg.tag === "lead-n1").length, db.T.automation_runs.length, (db.T.automation_wanted || []).map((w: any) => w.event_type)], [6, 1, 0, []],
+        "tick (event store): the moved row is sent by the mirror only — no run, not in the capture list");
+      sent.length = 0;
+      await tickAt(db, NOW + MIN);
+      eq(sent.length, 0, "tick: the next minute sends nothing again");
+      const cdb = sysWorld(CFG[0], { automations: [movedRow({ system_handover_at: isoMs(NOW - 2 * HR) })] });
+      cdb.T.automation_state[0].phase4_compat = true;
+      sent.length = 0;
+      await tickAt(cdb, NOW);
+      eq([sent.filter((x) => x.msg.tag === "lead-n1").length, cdb.T.automation_runs.length], [1, 0], "tick (compat mode): the same, never as a phase-4 run");
+      const off = sysWorld(CFG[0], { automations: [movedRow({ enabled: false })] });
+      sent.length = 0;
+      await tickAt(off, NOW);
+      eq(sent.length, 0, "tick: a moved row in Draft sends nothing (push has it)");
+    }
+
+    // a moved row never runs as a workflow: no manual add, no Add to workflow step into it, and a run that got in anyway
+    // ends before its push (the mirror's push_sent key is the only new-lead notification)
+    {
+      const NONE = { match: "all", segments: [{ match: "all", rules: [] }] };
+      const adds = { id: "w-adds-0001", business_id: "default", name: "Adds", enabled: true, armed_at: isoMs(H), version: 1, revision: 1, trigger: {}, steps: [], deleted_at: null,
+        settings: { reentry: "off", perRecord: true }, definition: { schema: 2, seq: 2, entry: "e1", triggers: [{ id: "t1", type: "newLead", filters: NONE }],
+          nodes: { e1: { kind: "workflow", type: "add_to_workflow", config: { workflowId: "a-sys1-0000" }, out: { next: null } } } } };
+      const runOf = (id: string, a: any) => ({ id, business_id: "default", automation_id: a.id, automation_version: a.version, event_key: "n1:new", event_type: "newLead", event_at: isoMs(NOW),
+        record_kind: "contact", record_id: "n1", contact_id: "n1", status: "running", step_index: 0, anchor_at: isoMs(NOW), due_at: isoMs(NOW), attempts: 1, context: {}, trigger_id: "t1",
+        cursor_step: null, remove_requested: false });
+      const sys = movedRow({ armed_at: isoMs(H), system_handover_at: isoMs(NOW - 2 * HR) });
+      const db = sysWorld(CFG[1], { automations: [sys, adds], automation_runs: [runOf("r-adds", adds), runOf("r-sys", sys)], automation_enrollment_keys: [] });
+      const rr: any = await api41(db, "record_runs", { record: { kind: "contact", id: "n1" } });
+      const en: any = await api41(db, "enroll", { automation_id: sys.id, record: { kind: "contact", id: "n1" }, request_id: "req-sys00001" });
+      eq([(rr.body.enrollable.find((x: any) => x.id === sys.id) || {}).why, (rr.body.enrollable.find((x: any) => x.id === adds.id) || {}).why, en.status, en.body.reason, db.T.automation_runs.length],
+        [WF_REASONS.system, null, 409, "system", 2], "Add to workflow by hand: a moved System row is greyed ('runs on its own') and refused — no run");
+      sent.length = 0; clock = NOW;
+      const pa: any = await advanceV2(db, { ...db.T.automation_runs[0] }, ctxOf(db), NOW), ps: any = await advanceV2(db, { ...db.T.automation_runs[1] }, ctxOf(db), NOW);
+      const e1 = db.T.automation_log.find((l: any) => l.run_id === "r-adds" && l.step_id === "e1");
+      eq([pa.status, e1 && e1.status, e1 && e1.reason, db.T.automation_runs.filter((r: any) => r.automation_id === sys.id).map((r: any) => r.id), ps.status, ps.exit_reason, sent.length],
+        ["done", "skipped", WF_REASONS.system, ["r-sys"], "cancelled", "system", 0],
+        "Add to workflow step into a moved System row: skipped, no run; a run of it that got in anyway ends before any step — no second new-lead push");
+    }
+
+    // the API: move, publish (the handover), Draft, steps kept, move back
+    {
+      const db = sysWorld(CFG[1], { automation_system_meta: [{ business_id: "default", base: "team:newLead", folder_id: "f-sys" }], automation_folders: [{ id: "f-sys", business_id: "default", name: "Team", parent_id: null }] });
+      for (const b of ["review", "chatText", "missedText"]) {
+        const r = await api41(db, "system_move", { base: b });
+        eq([r.status, r.body.reason, r.body.text, WF_SYSTEM[b].movable], [409, "not_movable", "Customer System workflows stay on the built-in system for now", false], `system_move: the customer base ${b} stays on the built-in system (Ofek's OK first)`);
+      }
+      eq([(await api41(db, "system_move", { base: "team:unpaid" })).body.text, (await api41(db, "system_move", { base: "team:missedCall" })).body.text, (await api41(db, "system_move", { base: "nope" })).status,
+        (await api41(db, "system_move", { base: "team:newLead" }, MANAGER)).status, db.T.automations.length],
+        ["It moves into the engine in a later release", "It moves into the engine with the business phone", 404, 403, 0], "system_move: a base not movable yet says why; an unknown one 404; owners only; nothing written");
+      const mv = await api41(db, "system_move", { base: "team:newLead", name: "A new lead comes in" });
+      const row = () => db.T.automations.find((a: any) => a.id === mv.body.id);
+      eq([mv.status, row().enabled, row().origin, row().system_key, row().folder_id, row().system_handover_at ?? null, row().name, canonJson(row().definition) === canonJson(systemDefinition("team:newLead", db.T.settings[0].catalog)),
+        row().definition.nodes.n1.config.to.roles, db.T.automation_versions.filter((v: any) => v.automation_id === mv.body.id).map((v: any) => v.reason)],
+        [200, false, "system", "team:newLead", "f-sys", null, "A new lead comes in", true, ["owner", "va", "manager"], ["system_move"]],
+        "system_move: a Draft row (origin system, its key, its folder), built here, no handover yet, one 'Moved into the engine' version");
+      const again = await api41(db, "system_move", { base: "team:newLead" });
+      eq([again.body.id, again.body.already, db.T.automations.filter((a: any) => a.system_key === "team:newLead").length], [mv.body.id, true, 1], "system_move: idempotent (the same row)");
+      // nothing changes for push while it is a Draft
+      eq(sysHandedOver(db.T.automations, NOW + DAYMS), [], "a moved Draft: push still sends it");
+      const pub = await api41(db, "publish", { automation_id: mv.body.id, on: true, confirm: true });
+      eq([pub.status, row().enabled, row().system_handover_at, sysHandedOver(db.T.automations, NOW + 29 * MIN), sysHandedOver(db.T.automations, NOW + 31 * MIN)], [200, true, isoMs(NOW), [], ["newLead"]],
+        "publish: the handover (now); push leaves it out after the 30-minute overlap");
+      const ren = await api41(db, "save", { automation_id: mv.body.id, expected_revision: Number(row().revision), name: "New lead (team)", definition: row().definition });
+      const edit = JSON.parse(JSON.stringify(row().definition)); edit.nodes.n1.config.title = "Other words";
+      const chg = await api41(db, "save", { automation_id: mv.body.id, expected_revision: Number(row().revision), name: "New lead (team)", definition: edit });
+      eq([ren.status, row().name, chg.status, chg.body.text, row().definition.nodes.n1.config.title], [200, "New lead (team)", 409, "A System workflow keeps its steps: duplicate it to edit", "New lead: {name}"],
+        "save: a moved row may be renamed; its steps stay (duplicate it to edit)");
+      const dr = await api41(db, "publish", { automation_id: mv.body.id, on: false });
+      eq([dr.status, row().enabled, row().system_handover_at, sysHandedOver(db.T.automations, NOW + DAYMS)], [200, false, null, []], "Draft: the handover is off — push sends it again at once");
+      await api41(db, "publish", { automation_id: mv.body.id, on: true, confirm: true });
+      eq([(await api41(db, "system_unmove", { automation_id: mv.body.id }, MANAGER)).status, (await api41(db, "system_unmove", { automation_id: "a-none" })).status], [403, 404], "system_unmove: owners only; a moved row only");
+      const back = await api41(db, "system_unmove", { automation_id: mv.body.id });
+      eq([back.status, back.body.base, row().enabled, row().system_key, row().system_handover_at, !!row().deleted_at, sysHandedOver(db.T.automations, NOW + DAYMS)], [200, "team:newLead", false, null, null, true, []],
+        "system_unmove (Move back): Deleted, its System link cleared — push sends it again at once");
+      const re = await api41(db, "system_move", { base: "team:newLead" });
+      ok(re.status === 200 && re.body.id !== mv.body.id && !re.body.already, "system_move after a Move back: a new row");
+      // another (non-System) workflow on the same start: a moved team notification never blocks a customer workflow
+      await api41(db, "publish", { automation_id: re.body.id, on: true, confirm: true });
+      const mail = await api41(db, "save", { automation_id: null, name: "Welcome", definition: { schema: 2, seq: 2, entry: "e1", triggers: [{ id: "t1", type: "newLead", filters: { match: "all", segments: [{ match: "all", rules: [] }] } }],
+        nodes: { e1: { kind: "action", type: "send_email", config: { subject: "Hi", body: "{hi}, thanks." }, out: { next: null } } } } });
+      eq((await api41(db, "publish", { automation_id: mail.body.id, on: true, confirm: true })).status, 200, "publish: a customer email on a new lead is not blocked by the moved team notification");
+    }
+    // the app's list of movable bases is the engine's
+    {
+      const m = /const WF_SYSTEM_MOVABLE = (\[[^\]]*\]);/.exec(src("../../../index.html"));
+      eq(m ? JSON.parse(m[1].replace(/'/g, '"')) : null, Object.keys(WF_SYSTEM).filter((b) => WF_SYSTEM[b].movable), "the app's WF_SYSTEM_MOVABLE = the engine's movable bases (team:newLead first, one per release)");
+    }
+    // PART 4 (the plan to drop trigger / steps): the phase-4 off guard's function (its trigger went in G2.4, the function names
+    // new.steps) is dropped by the plan, not a "still read by" stop; its ROLLBACK puts both functions back byte for byte (no trigger)
+    {
+      const sql = src(SQL_DIR + "stage2-automations.sql"), p4 = src(SQL_DIR + "settings-round2-phase4.sql");
+      const plan = sql.slice(sql.indexOf("-- PART 4 · G7.1"), sql.indexOf("-- END PART 4 · G7.1")).split("\n").map((l: string) => l.startsWith("-- ") ? l.slice(3) : l === "--" ? "" : l).join("\n");
+      const fwd = plan.slice(plan.indexOf("\nbegin;\n"), plan.indexOf("\ncommit;\n")), rb = plan.slice(plan.indexOf("ROLLBACK (exact"));
+      const fnTo = (text: string, name: string, end: string) => { const a0 = text.indexOf(`create or replace function public.${name}(`); return a0 < 0 ? "" : text.slice(a0, text.indexOf(end, a0) + end.length); };
+      ok(fwd.includes("drop function if exists public.automations_customer_off_guard();") && fwd.includes("drop function if exists public.automation_customer_channels(jsonb);")
+        && /where f\.proname not in \([^)]*'automations_customer_off_guard'/.test(fwd) && /\bnew\.steps\b/.test(fnTo(p4, "automations_customer_off_guard", "end $$;")),
+        "PART 4: the off guard's function (it names new.steps) is dropped by the plan, never a 'still read by' stop");
+      ok(fnTo(rb, "automations_customer_off_guard", "end $$;").length > 100 && fnTo(rb, "automations_customer_off_guard", "end $$;") === fnTo(p4, "automations_customer_off_guard", "end $$;")
+        && fnTo(rb, "automation_customer_channels", "\n$$;") === fnTo(p4, "automation_customer_channels", "\n$$;") && fnTo(p4, "automation_customer_channels", "\n$$;").length > 100
+        && !rb.includes("create trigger automations_customer_off_guard"), "PART 4 ROLLBACK: the off guard's two functions back byte for byte, without their trigger (G2.4 dropped it)");
     }
   }
 

@@ -21,9 +21,6 @@
 //   event     { type, id } from the app right after it saved something (owners, managers, and the office with CRM / Jobs
 //             access): "look now". The server re-reads the record itself (the app's data is never used) and starts
 //             only what the tick would start; the same event later seen by the tick does nothing more.
-//   preview   { automation | automation_id, record: { kind, id } } (owners and managers): what this automation would do
-//             for that record — the filled messages, the guard verdicts, would-wait-until / would-skip-because. Writes
-//             nothing and sends nothing.
 //   registry  (owners and managers) the lists the builder shows: triggers, conditions, actions, merge fields.
 //
 // Guard rails (always on; their numbers are settings in public.automation_settings):
@@ -353,6 +350,68 @@ export function vacBackDay(endsOn: string, workingDays: unknown): string {
   return vacShiftDay(endsOn, 1);
 }
 // ── end vacations ──
+
+// ── System team notifications (stage 2 G7.2): ONE block, byte-identical in push and automations (automations' tests check) ──
+// A team notification moves from push's scan into the engine one base per release (design §4.10). For a base that can
+// move, both sides use this block, so the engine's System mirror sends exactly what push would: the same leads, words,
+// people and once-ever key in push_sent (whoever claims a key first sends: one notification never goes twice). Moved =
+// a row of public.automations with system_key "team:<kind>". Handed over = that row is Published (enabled), not deleted,
+// and was published (system_handover_at) more than the base's overlap ago: only then does push's scan leave the kind
+// out. Draft, Move back, no row or a read that fails = push sends it again at once (its 6-hour look-back with the shared
+// keys: nothing dropped, nothing twice). During the overlap both look; the first claim sends.
+export const SYS_TEAM: Record<string, { overlapMinutes: number }> = { newLead: { overlapMinutes: 30 } };
+// Only these may also go to the office (VA and managers); the rest are money and private details, for the owners only.
+export const OFFICE_KINDS = ["newLead", "leadWaiting", "missedCall"];
+// What a lead scan reads of a card: its first thread entry's time and quiet mark only, never the thread.
+export const SYS_LEAD_COLS = "id, full_name, division, source, status, created_at, contacted_at, last_read_at, tags, reopened_at, import_quiet, first_at:messages->0->>at, first_quiet:messages->0->>quiet";
+// deno-lint-ignore no-explicit-any
+const sysFirst = (c: any) => (Array.isArray(c.messages) && c.messages[0]) || {};
+// When a lead arrived: reopened, else its first thread entry (a card made by hand has none: it is no news).
+// deno-lint-ignore no-explicit-any
+export const sysArrivedAt = (c: any): string | null => c.reopened_at || c.first_at || sysFirst(c).at || null;
+// A quiet MCP import (automations off: the column import_quiet; older imports: quiet on the first thread entry) is not
+// "new lead" news, until the customer comes back.
+// deno-lint-ignore no-explicit-any
+export const sysQuietArrival = (c: any): boolean => !c.reopened_at && (c.import_quiet === true || String(c.first_quiet ?? sysFirst(c).quiet ?? "") === "true");
+export const sysTestTag = (tags: unknown) => Array.isArray(tags) && tags.some((t) => String(t).toLowerCase() === "test");
+// A lead that is news now: arrived in the last 6 hours (never a backlog), not a test card, not a quiet import. → when.
+// deno-lint-ignore no-explicit-any
+export function sysLeadArrival(c: any, nowMs: number): { at: string; atMs: number } | null {
+  const at = sysArrivedAt(c); if (!at || sysTestTag(c.tags) || sysQuietArrival(c)) return null;
+  const atMs = Date.parse(at), age = nowMs - atMs;
+  return age >= 0 && age < 6 * 3600e3 ? { at, atMs } : null;
+}
+// deno-lint-ignore no-explicit-any
+export const sysLeadKey = (c: any, at: string) => `lead:${c.id}:${at}`;
+// deno-lint-ignore no-explicit-any
+export function leadPayload(c: any) {
+  const what = [c.division, c.source].filter(Boolean).join(" · ");
+  return { title: `New lead: ${c.full_name || "no name"}`, body: what || "A new enquiry came in.", url: `${APP_URL}?tab=crm`, tag: `lead-${c.id}` };
+}
+// Who gets a team notification: the owners, and the office too for a new lead, a waiting lead or a missed call when
+// chosen (N = catalog.notify); someone away with "No notifications" is left out or their stand-in gets it (only a
+// stand-in whose role may see it: money and private details stay with owners).
+// deno-lint-ignore no-explicit-any
+export function sysTeamTo(kind: string, people: any[], N: any, C: VacCtx): string[] {
+  // deno-lint-ignore no-explicit-any
+  const owners = (people || []).filter((p: any) => p.role === "owner").map((p: any) => p.id);
+  // deno-lint-ignore no-explicit-any
+  const office = (people || []).filter((p: any) => p.role === "va" || p.role === "manager").map((p: any) => p.id);
+  const withOffice = OFFICE_KINDS.includes(kind) && !!(N && N[kind] && N[kind].office);
+  return vacRecipients([...owners, ...(withOffice ? office : [])], C, withOffice ? ["owner", "va", "manager"] : ["owner"]);
+}
+// The kinds push leaves to the engine now. rows: { system_key, enabled, deleted_at, system_handover_at } of public.automations.
+// deno-lint-ignore no-explicit-any
+export function sysHandedOver(rows: any[], nowMs: number): string[] {
+  const out: string[] = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const key = String((r && r.system_key) || ""), kind = key.startsWith("team:") ? key.slice(5) : "", at = Date.parse(String((r && r.system_handover_at) || ""));
+    if (!kind || !Object.prototype.hasOwnProperty.call(SYS_TEAM, kind) || r.enabled !== true || r.deleted_at || !Number.isFinite(at)) continue;
+    if (at < nowMs - SYS_TEAM[kind].overlapMinutes * 60000 && !out.includes(kind)) out.push(kind);
+  }
+  return out;
+}
+// ── end System team ──
 
 // The timer's secret, compared without an early exit. Both must be set. (Copied from backup/index.ts.)
 const enc = new TextEncoder();
@@ -1160,11 +1219,6 @@ export function validateAutomation(a: any, _catalog?: any): string[] {
   });
   return out;
 }
-// deno-lint-ignore no-explicit-any
-export function audienceOf(a: any): "team" | "customer" {
-  // deno-lint-ignore no-explicit-any
-  return (Array.isArray(a && a.steps) ? a.steps : []).some((s: any) => s && s.kind === "action" && ACTIONS[s.type] && ACTIONS[s.type].audience === "customer") ? "customer" : "team";
-}
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // ==== REGISTRY (stage 2: workflow docs, schema 2; design §2.3–§2.5)
@@ -1408,7 +1462,7 @@ export const WF_REASONS: Record<string, string> = nul({
   missing_details: "Missing details", skip_comms: "Messages skipped until the next wait", removed_by_action: "Removed by Workflow Action",
   removed_by_external_action: "Removed by External Workflow Action", end_of_workflow: "Removed by - End Of Workflow", replied: "Stopped: the lead replied",
   automation_changed: "The workflow changed", switched_off: "The workflow was switched off", deleted: "The workflow was deleted", wrong_kind: "This workflow is not for this kind of record",
-  move_undone: "The stage move was undone", moved_on: "The lead had already moved to another stage",
+  move_undone: "The stage move was undone", moved_on: "The lead had already moved to another stage", system: "A System workflow runs on its own",
 });
 // "Filter not matched - Service - Received value: Gutters, Expected value: Aircon" (GHL's format).
 export function filterReasonText(label: string, received: unknown, expected: unknown): string {
@@ -2750,7 +2804,8 @@ export function jsonSchema(ctx: AvailCtx, biz: BizLists = {}, opts: { mode?: "ge
 // vac = who is on vacation (stage 3), read once per tick by the first action that sends to or assigns people (vacOf);
 // vacBox = that read, shared by every copy of this tick's context (a run's TS, a dry run's T2: their spreads keep the box).
 // deno-lint-ignore no-explicit-any
-export type TickCtx = { S: Settings; cat: any; company: string; agent?: string; autos: Map<string, any>; counts: Record<string, number>; avail?: AvailCtx; pauses?: any[]; custom?: Record<string, string>; people?: Record<string, string>; vac?: VacCtx; vacBox?: { c?: VacCtx } };
+export type TickCtx = { S: Settings; cat: any; company: string; agent?: string; autos: Map<string, any>; counts: Record<string, number>; avail?: AvailCtx; pauses?: any[]; custom?: Record<string, string>; people?: Record<string, string>; vac?: VacCtx; vacBox?: { c?: VacCtx };
+  mirrored?: Row[] };
 const newCounts = () => ({ events: 0, enqueued: 0, processed: 0, sent: 0, queued: 0, skipped: 0, deferred: 0 });
 // deno-lint-ignore no-explicit-any
 export async function loadContext(sb: any, nowMs = Date.now()): Promise<TickCtx> {
@@ -3963,6 +4018,8 @@ export async function advanceV2(sb: any, run: any, T: TickCtx, nowMs: number, fx
   a = T.autos.get(run.automation_id);
   const gone = staleV2(a, run);
   if (gone) return await end("cancelled", gone.text, gone.code);
+  // a moved System workflow is sent by its System mirror, never as a run: a run that got in anyway ends before any step
+  if (has(WF_SYSTEM_MIRRORS, String(a.system_key ?? ""))) return await end("cancelled", WF_REASONS.system, "system");
   // a Remove from workflow (another run's) asked for this run while it was claimed
   if (run.remove_requested === true) return await end("removed", WF_REASONS.removed_by_external_action, "removed_by_external_action");
   R = runDocOf(a);
@@ -4192,6 +4249,7 @@ export async function advanceV2(sb: any, run: any, T: TickCtx, nowMs: number, fx
       const wid = String(c.workflowId ?? "");
       const target = wid ? await fx.readAutomation(wid) : null;
       if (!target || target.deleted_at || (target.business_id && target.business_id !== BUSINESS_ID)) return await skipped("the workflow is gone", { workflow_id: wid });
+      if (has(WF_SYSTEM_MIRRORS, String(target.system_key ?? ""))) return await skipped(WF_REASONS.system, { workflow_id: wid, code: "system" });
       if (target.enabled !== true || !target.armed_at) return await skipped("target is a Draft", { workflow_id: wid });
       if (!wfEligible(target, T.cat)) return await skipped("the workflow has errors", { workflow_id: wid });
       const chain = (Number(run.chain_depth) || 0) + 1;
@@ -4508,7 +4566,7 @@ export function wfCatalogKey(cat: any, name: string, def: string): string { cons
 // changed (updated_at moves on every write, the phase-4 guard sets it). A row without updated_at is never cached. ──
 export type PubWf = { a: Row; R: RunDoc };
 const PUB_CACHE = new Map<string, { key: string; a: Row }>();
-const PUB_COLS = "id, updated_at, revision, version, armed_at, enabled, deleted_at";
+const PUB_COLS = "id, updated_at, revision, version, armed_at, enabled, deleted_at, system_key";
 const pubKey = (x: Row) => x.updated_at ? [x.updated_at, x.revision, x.version, x.armed_at, x.enabled, x.deleted_at].map((v) => String(v ?? "")).join("|") : "";
 const ELIGIBLE = new WeakMap<object, string>();
 // Can this row start runs: on, armed, not deleted, this business, and valid (a phase-4 row by the phase-4 rules, as
@@ -4543,8 +4601,11 @@ export async function publishedWorkflows(sb: any, T: TickCtx): Promise<PubWf[]> 
   const live = new Set(list.map((x) => String(x.id)));
   for (const id of [...PUB_CACHE.keys()]) if (!live.has(id)) PUB_CACHE.delete(id);
   const out: PubWf[] = [];
+  T.mirrored = [];
   for (const x of list) {
     const id = String(x.id), a = fresh.get(id) || (PUB_CACHE.get(id) || { a: null }).a;
+    // a moved System workflow: the System mirror sends it (G7.2), never a run
+    if (has(WF_SYSTEM_MIRRORS, String(x.system_key ?? ""))) { if (a) (T.mirrored = T.mirrored || []).push(a); continue; }
     const v = wfRunRow(a);   // an upgraded row that is still a phase-4 workflow runs as one
     if (v && wfEligible(v, T.cat)) out.push({ a: v, R: runDocOf(v) });
   }
@@ -5071,7 +5132,8 @@ export async function tick(sb: any, nowMs: number) {
       }
       const autos = await enabledAutomations(sb);
       for (const a of autos) T.autos.set(String(a.id), a);
-      const valid = autos.filter((a) => !validateAutomation(a, T.cat).length);
+      T.mirrored = autos.filter((a) => has(WF_SYSTEM_MIRRORS, String(a.system_key ?? "")));
+      const valid = autos.filter((a) => !T.mirrored!.includes(a) && !validateAutomation(a, T.cat).length);
       if (valid.length) {
         const sinceMs = nowMs - T.S.lookback_hours * HOUR;
         const events: Ev[] = [];
@@ -5105,6 +5167,11 @@ export async function tick(sb: any, nowMs: number) {
       }
       // A crash in one run leaves it 'running' until its lease ends; it is tried again then (at most 5 times).
       try { await exec(sb, run, T, nowMs); } catch (e) { console.error("automation run failed:", clip(String((e as Error).message || e), 200)); }
+    }
+    // the moved System team workflows (G7.2): the mirror sends what push sent, with push's keys; never stops the tick
+    if (mode.v2 && T.mirrored && T.mirrored.length) {
+      try { const m = await systemMirror(sb, T, nowMs); if (m.sent || m.skipped) T.counts.system = m.sent; }
+      catch (e) { console.error("automations System mirror failed:", clip(String((e as Error).message || e), 200)); }
     }
     await reconcile(sb, nowMs, T.S, T.cat);
     // once a day: phase 4's prune before SQL Part 1; after it the stage-2 housekeeping (budgeted, with its cursor)
@@ -5614,7 +5681,7 @@ export async function hookAdmin(sb: any, step: string, body: any, me: any, nowMs
 // unpublish; a layout-only save never makes one.
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 export const WF_API_STEPS = ["validate", "patch", "schema", "registry", "save", "publish", "duplicate", "restore", "copy_version", "migrate", "template_upload", "template_rename", "template_delete",
-  "test", "enroll", "unenroll", "record_runs"];
+  "test", "enroll", "unenroll", "record_runs", "system_move", "system_unmove"];
 // Reasons a version row may carry (= the SQL check). The client may only ask for save / save_version; the rest are set here.
 export const WF_VERSION_REASONS = ["create", "save", "save_version", "publish", "unpublish", "restore", "ai", "migration", "duplicate", "system_move"];
 const WF_SNAP_ON_CHANGE = ["save", "save_version", "ai", "restore", "create", "duplicate", "migration"];
@@ -5993,6 +6060,8 @@ async function apiSave(sb: any, b: Row, me: any, nowMs: number, opts: { reason?:
     // switched to Draft meanwhile is answered first, so a save never puts words live under the "Draft" the person sees
     if (typeof b.expected_enabled === "boolean" && (a.enabled === true) !== b.expected_enabled) return apiErr(409, "status", { enabled: a.enabled === true, revision: Number(a.revision) });
   }
+  // a moved System workflow keeps its steps: its System mirror sends the built-in words (G7.2); a rename is fine
+  if (a && has(WF_SYSTEM_MIRRORS, String(a.system_key ?? "")) && canonJson(doc) !== canonJson(a.definition)) return apiErr(409, "system", { text: "A System workflow keeps its steps: duplicate it to edit" });
   let layout = b.layout == null ? (a && a.layout) || { v: 1 } : b.layout;
   if (!layout || typeof layout !== "object" || Array.isArray(layout) || utf8Len(JSON.stringify(layout)) > WF_API_LIMITS.layoutBytes) return apiErr(422, "the layout is not valid (128 KB at most)");
   // Which editor saved it last (v1EditorView): the new builder says so (editor "builder") → the mark; the old editor sends
@@ -6068,7 +6137,7 @@ async function lastLiveDoc(sb: any, id: string): Promise<Row | null> {
 // unsigned email). Words of a saved template: the catalog's (what the engine sends; the app may fall back to a built-in
 // text the engine doesn't have — stricter here, never looser). V1_EDITOR = the app's registries these words need
 // (tests/business-logic.test.js compares it with index.html's AUTO_TRIGGERS / AUTO_MIRROR_TRIGGERS / AUTO_CONDS /
-// AUTO_ACTIONS / AUTO_FIELDS / AUTO_WAIT_UNITS / FLOW_MAX_STEPS_* / FLOW_STEP_KINDS); fixtures/editor-blocks.json holds
+// AUTO_ACTIONS / AUTO_FIELDS / AUTO_WAIT_UNITS / autoMaxSteps); fixtures/editor-blocks.json holds
 // the cases both run. ──
 export const V1_EDITOR: Row = {
   triggers: {
@@ -6252,10 +6321,12 @@ async function apiPublish(sb: any, b: Row, me: any, nowMs: number): Promise<ApiR
     const view = v1EditorView(a), fix = view ? v1EditorProblems(view, C.cat, a.name).map((text) => issue("E_EDITOR_BLOCK", "", text)) : wfRunsOldProblems(a, C.cat);
     if (fix.length || chk.errors.length) return apiErr(422, "errors", { errors: [...fix, ...chk.errors], warnings: chk.warnings });
     warnings.push(...chk.warnings);
-    // a ready-made System row that is on and starts the same way would send twice
-    const mine = wfListSummary(a.definition, a.settings).triggers;
-    const sys = (await rows(sb.from("automations").select("id, name, system_key, list_summary").eq("business_id", BUSINESS_ID).eq("enabled", true).is("deleted_at", null)))
-      .filter((x: Row) => x.system_key != null && x.id !== a.id && (obj(x.list_summary).triggers || []).some((t: string) => mine.includes(t)));
+    // a ready-made System row that is on, starts the same way and does the same kind of step would send twice (a moved
+    // team notification never blocks a customer workflow on the same start; System rows never block each other)
+    const mine = wfListSummary(a.definition, a.settings);
+    const sys = a.system_key != null ? [] : (await rows(sb.from("automations").select("id, name, system_key, list_summary").eq("business_id", BUSINESS_ID).eq("enabled", true).is("deleted_at", null)))
+      .filter((x: Row) => x.system_key != null && x.id !== a.id && (obj(x.list_summary).triggers || []).some((t: string) => mine.triggers.includes(t))
+        && (obj(x.list_summary).actions || []).some((t: string) => mine.actions.includes(t)));
     if (sys.length) return apiErr(409, "overlap", { text: `Turn off the ready-made ${sys[0].name} first, or it sends twice` });
     const lines = wfPublishLines(a.definition);
     if (lines.length && b.confirm !== true) return apiErr(409, "confirm", { confirm: lines });
@@ -6267,6 +6338,12 @@ async function apiPublish(sb: any, b: Row, me: any, nowMs: number): Promise<ApiR
   if (r.ok !== true) return apiErr(404, String(r.reason || "workflow not found"));
   const saved = await readAutomation(sb, String(a.id));
   if (!saved) throw new Error("workflow not read back");
+  // a moved System workflow (G7.2): Publish is the handover (push leaves its kind out after the overlap), Draft gives it
+  // back to push at once. Not written = push keeps sending too; the shared keys still send each one once.
+  if (saved.system_key != null && has(WF_SYSTEM, String(saved.system_key))) {
+    const at = on ? iso(nowMs) : null, { error } = await sb.from("automations").update({ system_handover_at: at }).eq("id", saved.id).eq("business_id", BUSINESS_ID);
+    if (error) console.error("automations: System handover not written:", clip(String(error.message || error), 200)); else saved.system_handover_at = at;
+  }
   await wfSnapshot(sb, saved, on ? "publish" : "unpublish", me, nowMs, true);
   await wantedNow(sb, nowMs);
   return out(saved, warnings);
@@ -6394,7 +6471,134 @@ async function apiTemplateEdit(sb: any, step: string, b: Row, nowMs: number): Pr
   if (error) throw new Error("template not changed: " + clip(String(error.message || error), 200));
   return { status: 200, body: { ok: true, id: t.id, ...(patch.name ? { name: patch.name } : { deleted: true }) } };
 }
-// One API step (design §3.1): owners and managers (migrate: owners).
+// ══════════════════════════════════════════════════════════════════════════════════
+// ==== SYSTEM WORKFLOWS (stage 2 phase 7 · G7.2, design §4.10): the ready-made automations move into the engine one base
+// per release. WF_SYSTEM = every System base: the function that sends it today (legacy), who it reaches, its once-ever key
+// (claim), how long both sides look after the handover (overlapMinutes ≥ the legacy's longest delay) and whether it may
+// move now (movable, else why). A base is movable only when the engine's System mirror sends exactly what the legacy
+// function sends (WF_SYSTEM_MIRRORS; the parity tests) — customer bases only with Ofek's OK. Move (system_move) makes a
+// Draft row; its Publish is the handover (system_handover_at: push leaves the kind out after the overlap); Draft or Move
+// back (system_unmove) gives it back to push at once. The mirror reads the table, never the catalog; movable only gates
+// new moves, so a moved row keeps running even if a later release took its base off the list (push still leaves it).
+// ══════════════════════════════════════════════════════════════════════════════════
+export type WfSystemBase = { legacy: string; audience: "team" | "customer"; name: string; claim: string; overlapMinutes: number; movable: boolean; why: string };
+export const WF_SYSTEM_WHY = { customer: "Customer System workflows stay on the built-in system for now", later: "It moves into the engine in a later release",
+  phone: "It moves into the engine with the business phone", invoice: "It moves into the engine when the app stops sending it itself", review: "It moves into the engine with the Google reviews connection" };
+const sysEntry = (legacy: string, audience: "team" | "customer", name: string, claim: string, overlapMinutes: number, why: string): WfSystemBase =>
+  ({ legacy, audience, name, claim, overlapMinutes, movable: !why, why });
+export const WF_SYSTEM: Record<string, WfSystemBase> = nul({
+  review: sysEntry("review-requests", "customer", "Review request after a closed job", "system_claims review:${job_id}", 30, WF_SYSTEM_WHY.customer),
+  chatText: sysEntry("conversations", "customer", "Text after an unanswered website chat", "system_claims", 30, WF_SYSTEM_WHY.customer),
+  missedText: sysEntry("voice", "customer", "Text after a missed call", "system_claims", 30, WF_SYSTEM_WHY.customer),
+  "team:newLead": sysEntry("push", "team", "A new lead comes in", "push_sent lead:${id}:${arrived}", SYS_TEAM.newLead.overlapMinutes, ""),
+  // push looks 6 hours back and waits up to 240 minutes
+  "team:leadWaiting": sysEntry("push", "team", "A new lead nobody picked up", "push_sent waiting:${id}:${arrived}", 6 * 60 + 240, WF_SYSTEM_WHY.later),
+  "team:missedCall": sysEntry("push", "team", "A call is missed", "push_sent call:${id}", 30, WF_SYSTEM_WHY.phone),
+  "team:unpaid": sysEntry("push", "team", "A job is still unpaid", "push_sent unpaid:${id}", 24 * 60, WF_SYSTEM_WHY.later),
+  "team:docExpiry": sysEntry("push", "team", "An employee document expires soon", "push_sent doc:${employee}:${kind}:${expiry}", 24 * 60, WF_SYSTEM_WHY.later),
+  "team:bizInsurance": sysEntry("push", "team", "The business insurance expires soon", "push_sent bizins:${kind}:${expiry}", 24 * 60, WF_SYSTEM_WHY.later),
+  "team:invoice": sysEntry("push", "team", "A technician sends his commission invoice", "the app's call (once)", 30, WF_SYSTEM_WHY.invoice),
+  "team:googleReview": sysEntry("none", "team", "A new Google review comes in", "none yet", 30, WF_SYSTEM_WHY.review),
+  "team:vacationBack": sysEntry("push", "team", "Someone is back from a vacation tomorrow", "push_sent vacback:${vacation}:${ends_on}", 24 * 60, WF_SYSTEM_WHY.later),
+});
+// The definition a moved row shows (built here, never sent by the app): what it does, in the engine's words. The mirror
+// sends the legacy words (the System team block); the row's steps stay as they are (a save that changes them is
+// refused: duplicate it to edit). null = no mirror for this base.
+// deno-lint-ignore no-explicit-any
+export function systemDefinition(base: string, cat: any): Row | null {
+  if (base !== "team:newLead") return null;
+  const office = !!obj(obj(obj(cat).notify).newLead).office;
+  return { schema: 2, seq: 1, entry: "n1", triggers: tplTrig("newLead"),
+    nodes: { n1: { ...tplPush("New lead: {name}", "{service} · {source}", office ? ["owner", "va", "manager"] : ["owner"]), name: "Tell the team", locked: true } } };
+}
+// deno-lint-ignore no-explicit-any
+type MirrorCtx = { sb: any; a: Row; nowMs: number; tz: string; N: Row; T: TickCtx };
+// Each mirror: push's own selection, key, words and people for its kind (the System team block). It claims the key in
+// push_sent before sending (push's scan does the same: the first claim sends) and writes one log row per notification on
+// the moved workflow (its history starts with the move). At most 30 sends a tick, as push's scan; the rest go next tick.
+export const WF_SYSTEM_MIRRORS: Record<string, (x: MirrorCtx) => Promise<{ sent: number; skipped: number }>> = nul({
+  "team:newLead": async (x: MirrorCtx) => {
+    const today = bizParts(x.nowMs, x.tz).day;
+    const news = (await rows(x.sb.from("contacts").select(SYS_LEAD_COLS).gte("created_at", shiftDay(today, -1))))
+      .map((c: Row) => ({ c, got: sysLeadArrival(c, x.nowMs) })).filter((e: Row) => !!e.got).map((e: Row) => ({ c: e.c, key: sysLeadKey(e.c, e.got.at) }));
+    if (!news.length) return { sent: 0, skipped: 0 };
+    // one read of what already went (push's or ours): the minute tick never retries a claim that is taken
+    const done = new Set((await rows(x.sb.from("push_sent").select("key").in("key", news.map((e: Row) => e.key)))).map((r: Row) => String(r.key)));
+    const todo = news.filter((e: Row) => !done.has(e.key)).slice(0, 30);
+    if (!todo.length) return { sent: 0, skipped: 0 };
+    const people = await rows(x.sb.from("profiles").select("id, full_name, role")), C = await vacContext(x.sb, x.nowMs, x.tz), keys = await vapidKeys(x.sb);
+    let sent = 0, skipped = 0;
+    for (const { c, key } of todo) {
+      const { error: dup } = await x.sb.from("push_sent").insert({ key });   // claimed once, ever (push's key)
+      if (dup) { skipped++; continue; }
+      const to = sysTeamTo("newLead", people, x.N, C), r = await sendTo(x.sb, to, leadPayload(c), keys);
+      if (r.sent > 0) sent++;
+      // deno-lint-ignore no-explicit-any
+      const names = clip(to.map((id) => (people.find((p: any) => String(p.id) === id) || {}).full_name || "").filter(Boolean).join(", "), 200) || null;
+      const { error } = await x.sb.from("automation_log").insert({ business_id: BUSINESS_ID, run_id: null, step_id: "n1", row_kind: "action", channel: "push", audience: "team",
+        status: r.sent > 0 ? "sent" : to.length ? "failed" : "skipped", reason: r.sent > 0 ? null : to.length ? "no device" : "on vacation", automation_id: x.a.id,
+        automation_name: clip(String(x.a.name || "System workflow"), LIMITS.name), record_kind: "contact", record_id: String(c.id), contact_id: c.id, recipient: names, at: iso(x.nowMs) });
+      if (error) console.error("automations: System log row not written:", clip(String(error.message || error), 200));   // sent all the same
+    }
+    return { sent, skipped };
+  },
+});
+// The tick's System step: every moved workflow that is on and has a mirror (T.mirrored: from the tick's own list of what
+// is on, no read of its own).
+// deno-lint-ignore no-explicit-any
+export async function systemMirror(sb: any, T: TickCtx, nowMs: number): Promise<{ sent: number; skipped: number }> {
+  const out = { sent: 0, skipped: 0 }, tz = bizTzOf(T.cat), N = obj(obj(T.cat).notify);
+  for (const a of T.mirrored || []) {
+    if (a.enabled !== true || a.deleted_at || (a.business_id && a.business_id !== BUSINESS_ID) || !has(WF_SYSTEM_MIRRORS, String(a.system_key ?? ""))) continue;
+    try { const r = await WF_SYSTEM_MIRRORS[String(a.system_key)]({ sb, a, nowMs, tz, N, T }); out.sent += r.sent; out.skipped += r.skipped; }
+    catch (e) { console.error(`automations: System ${a.system_key} failed:`, clip(String((e as Error).message || e), 200)); }   // push's 6-hour look-back covers it
+  }
+  return out;
+}
+// step "system_move" {base, name?} (owners): the base becomes a Draft row of its own (origin system, system_key = base,
+// its folder kept), with a "Moved into the engine" version. Nothing changes for push until it is published. Idempotent:
+// a base already moved gives that row (two moves at the same moment: one row, the unique index decides).
+// deno-lint-ignore no-explicit-any
+async function apiSystemMove(sb: any, b: Row, me: any, nowMs: number): Promise<ApiRes> {
+  if (!me || me.role !== "owner") return apiErr(403, "owners only", { text: "Only owners move System workflows" });
+  const base = String(b.base ?? ""), e = has(WF_SYSTEM, base) ? WF_SYSTEM[base] : null;
+  if (!e) return apiErr(404, "not a System workflow");
+  if (!e.movable || !has(WF_SYSTEM_MIRRORS, base)) return apiErr(409, "not_movable", { text: e.why || WF_SYSTEM_WHY.later });
+  const movedRow = async () => (await rows(sb.from("automations").select("id, revision").eq("business_id", BUSINESS_ID).eq("system_key", base).is("deleted_at", null).limit(1)))[0];
+  const was = await movedRow();
+  if (was) return { status: 200, body: { ok: true, id: was.id, revision: Number(was.revision), already: true } };
+  const { data: st } = await sb.from("settings").select("catalog").limit(1);
+  const name = clip(String(b.name ?? "").trim(), WF_LIMITS.name) || e.name;
+  const r = await apiSave(sb, { definition: systemDefinition(base, st && st[0] && st[0].catalog), settings: {}, layout: { v: 1 }, builder: "standard", name }, me, nowMs, { reason: "system_move" });
+  if (r.status !== 200) return r;
+  const id = String(r.body.id), meta = (await rows(sb.from("automation_system_meta").select("folder_id").eq("business_id", BUSINESS_ID).eq("base", base).limit(1)))[0];
+  const { error } = await sb.from("automations").update({ system_key: base, origin: "system", ...(meta && meta.folder_id ? { folder_id: meta.folder_id } : {}) }).eq("id", id).eq("business_id", BUSINESS_ID);
+  if (error) {
+    // another move of this base won at the same moment: this copy goes, theirs is the one
+    await sb.from("automations").update({ deleted_at: iso(nowMs) }).eq("id", id).eq("business_id", BUSINESS_ID);
+    const won = await movedRow();
+    if (won) return { status: 200, body: { ok: true, id: won.id, revision: Number(won.revision), already: true } };
+    throw new Error("not moved: " + clip(String(error.message || error), 200));
+  }
+  const row = await readAutomation(sb, id);
+  if (row) await wfSnapshot(sb, row, "system_move", me, nowMs, true);
+  return { status: 200, body: { ok: true, id, revision: Number(r.body.revision) } };
+}
+// step "system_unmove" {automation_id} (owners): Move back to the built-in system — the rollback. The moved row goes to
+// Deleted with its System link cleared (Draft, no handover), so push sends the kind again at once (its switch in the
+// catalog is as it was before the move) and the base can move again later.
+// deno-lint-ignore no-explicit-any
+async function apiSystemUnmove(sb: any, b: Row, me: any, nowMs: number): Promise<ApiRes> {
+  if (!me || me.role !== "owner") return apiErr(403, "owners only", { text: "Only owners move System workflows" });
+  const a = await apiRow(sb, b.automation_id, me, nowMs);
+  if (!a || a.system_key == null) return apiErr(404, "not a moved System workflow");
+  const { error } = await sb.from("automations").update({ enabled: false, system_handover_at: null, system_key: null, deleted_at: iso(nowMs), deleted_by: me.id ?? null, updated_at: iso(nowMs) })
+    .eq("id", a.id).eq("business_id", BUSINESS_ID);
+  if (error) throw new Error("not moved back: " + clip(String(error.message || error), 200));
+  return { status: 200, body: { ok: true, id: a.id, base: String(a.system_key) } };
+}
+
+// One API step (design §3.1): owners and managers (migrate, system_move, system_unmove: owners).
 // deno-lint-ignore no-explicit-any
 export async function apiStep(sb: any, step: string, body: any, me: any, nowMs: number): Promise<ApiRes> {
   if (step === "migrate") return await apiMigrate(sb, me, nowMs);
@@ -6418,6 +6622,8 @@ export async function apiStep(sb: any, step: string, body: any, me: any, nowMs: 
   if (step === "test") return await apiTest(sb, b, me, nowMs);
   if (step === "enroll") return await apiEnroll(sb, b, me, nowMs);
   if (step === "unenroll") return await apiUnenroll(sb, b, me, nowMs);
+  if (step === "system_move") return await apiSystemMove(sb, b, me, nowMs);
+  if (step === "system_unmove") return await apiSystemUnmove(sb, b, me, nowMs);
   return apiErr(400, "unknown step");
 }
 
@@ -6599,11 +6805,13 @@ export const wfMayReadRuns = (me: any) => isOffice(me) || (!!me && me.role === "
 const LEAD_KINDS = ["contact", "hook", "none"];
 const KIND_WORD: Record<string, string> = nul({ job: "a job", call: "a call", chat: "a chat", task: "a task", supplier: "a supplier", employee: "an employee" });
 // Can a lead be added to this workflow by hand? null = yes, else { code, why } (the picker greys it with why; enroll
-// refuses with code). Published (not a Draft), valid, starts from a lead (not only from a job / call / chat), and its
-// steps use only blanks a lead has.
+// refuses with code). Not a moved System workflow, Published (not a Draft), valid, starts from a lead (not only from a
+// job / call / chat), and its steps use only blanks a lead has.
 // deno-lint-ignore no-explicit-any
 export function wfManualWhy(a: Row | null, cat: any): { code: string; why: string } | null {
   if (!a || a.deleted_at || (a.business_id && a.business_id !== BUSINESS_ID)) return { code: "not_found", why: "The workflow is gone" };
+  // a moved System workflow: its System mirror sends it, never a run (a second team notification)
+  if (has(WF_SYSTEM_MIRRORS, String(a.system_key ?? ""))) return { code: "system", why: WF_REASONS.system };
   if (a.enabled !== true || !a.armed_at) return { code: "draft", why: "Publish it first" };
   if (!wfEligible(a, cat)) return { code: "invalid", why: "Fix its errors first" };
   const doc = runDocOf(a).doc, kinds = (Array.isArray(doc.triggers) ? doc.triggers : []).map(obj).filter((t: Row) => t.disabled !== true)
@@ -6943,77 +7151,6 @@ async function eventStep(sb: any, body: any, me: any, nowMs: number) {
   return { status: 200, body: { ok: true, runs: ids.length, statuses } };
 }
 
-// ── preview: what an automation would do for one record (writes nothing, sends nothing) ──
-// deno-lint-ignore no-explicit-any
-async function previewStep(sb: any, body: any, me: any, nowMs: number) {
-  if (!isOffice(me)) return { status: 403, body: { ok: false, reason: "owners and managers only" } };
-  const T = await loadContext(sb, nowMs);
-  // deno-lint-ignore no-explicit-any
-  let a: any = body.automation && typeof body.automation === "object" ? body.automation : null;
-  if (!a && body.automation_id) a = wfRunRow(await readAutomation(sb, String(body.automation_id)));
-  if (!a) return { status: 404, body: { ok: false, reason: "automation not found" } };
-  a = { id: a.id || "preview", name: String(a.name || ""), enabled: a.enabled === true, trigger: obj(a.trigger), steps: a.steps, version: a.version || 1,
-    created_by_name: String(a.created_by_name || (body.automation ? me.full_name : "") || "") };
-  const problems = validateAutomation(a, T.cat);
-  if (problems.length) return { status: 200, body: { ok: false, problems, steps: [] } };
-  const rec = obj(body.record), kind = String(rec.kind || ""), rid = String(rec.id || "");
-  const trig = TRIGGERS[a.trigger.type];
-  // deno-lint-ignore no-explicit-any
-  let e: Ev | null = null;
-  if (kind === trig.recordKind && rid) {
-    const { data: row } = await sb.from(trig.table).select(trig.cols).eq("id", rid).maybeSingle();
-    if (row) e = trig.fromRecord(row, { ...T.S, ignore_test_records: false });
-  }
-  const run = { record_kind: kind, record_id: rid, event_type: a.trigger.type, event_at: e ? e.at : iso(nowMs), context: e ? e.ctx : {} };
-  const f = ["contact", "job", "call", "chat"].includes(kind) && rid ? await loadFacts(sb, run, T, nowMs) : null;
-  if (!f) return { status: 200, body: { ok: false, problems: ["record not found"], steps: [] } };
-  // deno-lint-ignore no-explicit-any
-  const out: any[] = [];
-  const tz = T.S.timezone, vars = mergeVars(f, a), known = fieldsFor(f.type);
-  let at = nowMs, stopped = "";
-  for (const st of a.steps) {
-    if (stopped) { out.push({ id: st.id, kind: st.kind, would: "not reached" }); continue; }
-    if (st.kind === "wait") { at = planWait(at, st, tz); out.push({ id: st.id, kind: "wait", would: "wait", until: iso(at) }); continue; }
-    if (st.kind === "window") {
-      if (inWindow(at, st, tz, T.cat)) { out.push({ id: st.id, kind: "window", would: "go on" }); continue; }
-      if (st.outside === "skip") { stopped = "outside the allowed days and hours"; out.push({ id: st.id, kind: "window", would: "skip", reason: stopped }); continue; }
-      const next = st.outside === "at" ? nextAt(at, st, st.at, tz, T.cat) : nextAllowed(at, st, tz, T.cat);
-      if (next === null) { stopped = "the window never opens"; out.push({ id: st.id, kind: "window", would: "skip", reason: stopped }); continue; }
-      at = next; out.push({ id: st.id, kind: "window", would: "wait", until: iso(at) }); continue;
-    }
-    if (st.kind === "if") {
-      const imp = trig.implicit.length ? await evalConds(sb, f, trig.implicit, "all") : { ok: true, failed: null };
-      const r = imp.ok ? await evalConds(sb, f, st.conds, st.match) : imp;
-      if (!r.ok) stopped = "condition: " + (r.failed || "not met");
-      out.push({ id: st.id, kind: "if", would: r.ok ? "go on" : "skip", reason: r.ok ? undefined : stopped });
-      continue;
-    }
-    const act = ACTIONS[st.type];
-    // vacations on the day the action would run (after the waits and windows above), not today (stage 3)
-    const vacAt = async (): Promise<VacCtx> => { const C = await vacOf(sb, T, nowMs); return { ...C, day: bizParts(at, C.tz).day }; };
-    if (st.type === "push") {
-      const r = await pushRecipients(sb, st, await vacAt());
-      out.push({ id: st.id, kind: "action", type: "push", ...(!r.ids.length && r.chosen ? { would: "skip", reason: "on vacation" } : { would: "send" }), to: r.names, title: fillMerge(st.title, vars, known), body: fillMerge(st.body || "", vars, known) });
-    } else if (st.type === "task") {
-      const due = st.due_days == null ? null : shiftDay(zoneParts(at, tz).day, Number(st.due_days));
-      const { names, moved } = await taskPeople(sb, st, await vacAt(), due || undefined);
-      const profiles = await rows(sb.from("profiles").select("id, full_name, role, technician_name"));
-      const employees = names.length ? await rows(sb.from("employees").select("name, roles").eq("name", names[0])) : [];
-      out.push({ id: st.id, kind: "action", type: "task", would: "add", board: boardFor(names, profiles, employees), assignees: names, title: fillMerge(st.title, vars, known), notes: [vacMovedNote(moved), fillMerge(st.notes || "", vars, known)].filter(Boolean).join("\n\n"),
-        due });
-    } else {
-      const msg = messageOf(st, T.cat);
-      const texts = st.type === "email" ? [fillMerge(st.subject, vars, known), fillMerge(msg ?? "{template}", vars, known)] : [fillMerge(msg ?? "{template}", vars, known)];
-      const author = st.type === "email" ? emailAuthor(T.S, a) : "";
-      const g = st.type === "email" && !author ? { skip: "no email signer set" } : await customerGuard(sb, T.S, f, st.type, at, { ...a, enabled: true }, texts, T.cat);
-      const verdict = "defer" in g ? { would: "wait", until: iso(g.defer) } : "skip" in g ? { would: "skip", reason: g.skip } : { would: st.type === "text" ? "wait for the business phone" : "queue", to: g.to };
-      out.push({ id: st.id, kind: "action", type: st.type, audience: act.audience, ...verdict, ...(st.type === "email" ? { subject: texts[0], body: emailBody(texts[1], T.S), signature: author ? signatureOf(author, bizOf(T.company, T.cat)) : "" } : { body: texts[0] }),
-        ...(a.enabled ? {} : { note: "this automation is off: nothing is sent" }) });
-    }
-  }
-  return { status: 200, body: { ok: true, problems: [], steps: out } };
-}
-
 // The lists the builder shows (labels only: no code, no secrets).
 export function registry() {
   return {
@@ -7038,7 +7175,6 @@ export async function handle(sb: any, body: any, me: any, secretOk: boolean) {
   }
   if (!me) return { status: 401, body: { ok: false, reason: "unauthorized" } };
   if (step === "event") return await eventStep(sb, body, me, nowMs);
-  if (step === "preview") return await previewStep(sb, body, me, nowMs);
   // the stage-2 API (G2.4): registry = the v2 DTO (the phase-4 lists stay in registry() for the tests only)
   if (WF_API_STEPS.includes(step)) return await apiStep(sb, step, body, me, nowMs);
   if (step === "hook_create" || step === "hook_revoke" || step === "hook_sample") return await hookAdmin(sb, step, body, me, nowMs);

@@ -6986,7 +6986,8 @@
    "deleted": "The workflow was deleted",
    "wrong_kind": "This workflow is not for this kind of record",
    "move_undone": "The stage move was undone",
-   "moved_on": "The lead had already moved to another stage"
+   "moved_on": "The lead had already moved to another stage",
+   "system": "A System workflow runs on its own"
   },
   "settings": {
    "defaults": {

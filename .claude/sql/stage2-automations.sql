@@ -5,6 +5,7 @@
 --   Part 1 (this section)  → phase 1, BEFORE the v2 function is deployed in compat mode (additive, safe while phase 4 runs)
 --   Part 2 (switch the guards to the doc) → phase 2, right after the function that can save and migrate is deployed
 --   Part 3 (lock direct writes)           → phase 3, after the new app is live
+--   Part 4 (PLAN, all commented, not run)  → phase 7, 30 days after "migrate": drop the phase-4 columns trigger and steps (gates inside)
 -- Nothing in this file has been run by the builder: the owner (or the main builder, staging first) runs it.
 -- NO secret is written anywhere in this file. Nothing here sends a message or switches an automation on.
 -- ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -4419,3 +4420,252 @@ commit;
 -- Check after the rollback: select to_regprocedure('public.automation_trigger_days(uuid, text, date, date)') is null;   -- true
 -- ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 -- END PART 3 · G6.1
+
+-- ═════════════════════════════════════════════════════════════════
+-- PART 4 · G7.1 — PLAN, NOT YET RUN (stage 2 phase 7; design §3.16 "phase 7: drop trigger/steps 30 days later after a
+-- backup" and §7 G7.1). Drops the phase-4 columns public.automations.trigger and public.automations.steps. EVERY LINE OF
+-- THIS SECTION IS A COMMENT ON PURPOSE: nothing here has been run, nothing here runs by pasting the file. To run it, the
+-- owner (or the main builder) takes the block out of the comments on STAGING first, after the gates below hold.
+--
+-- GATES (all four, in this order; a gate that does not hold = stop, nothing is changed):
+--   G-a  30 days after step "migrate" (automation_state.v2_migrated_at), and the rollback build (automations-phase4-compat) was not
+--        needed in those 30 days: that build runs `trigger` + `steps`; once they are gone it can never run again, so it is
+--        retired in the same release (RUNBOOK §21).
+--   G-b  The function no longer reads the columns (the follow-up build "G7.1b" that removes the compat producer, wfRunRow,
+--        upgradeV1's reads, v1EditorView and the step "migrate"). Check: none of these finds a read of a row's trigger or steps
+--        (every hit of the first one is reviewed by hand: a row is mostly `a`, `r`, `x`, `v` or `row` — enqueue's obj(a.trigger)
+--        is one; only a flat step list's or an op's own field may stay, e.g. flat.trigger, op.trigger)
+--          grep -nE "\b[A-Za-z_]+\.(trigger|steps)\b" supabase/functions/automations/index.ts
+--          grep -nE "wfRunRow|upgradeV1|v1EditorView|v1EditorProblems|automation_migrate_row" supabase/functions/automations/index.ts
+--   G-c  The app no longer reads them: WF_LIST_COLS has no `trigger`, autoNormalize reads no r.trigger / r.steps. Check:
+--          grep -nE "r\.(trigger|steps)\b|WF_LIST_COLS = .*trigger" index.html
+--   G-d  A backup (below) is saved under .claude/backups/ and its row count equals the table's.
+-- Why in this order: after the drop an old tab or build that still selects or writes `trigger` / `steps` gets a database
+-- error ("column does not exist"), and the two functions below would fail on their first write. The stop-check inside the
+-- transaction refuses to run while any function still names the columns.
+--
+-- BACKUP FIRST (read-only; save the output as .claude/backups/automations.before_drop_v1_<date>.sql):
+--   select format('insert into backup.automations_v1_columns (id, business_id, trigger, steps) values (%L, %L, %L::jsonb, %L::jsonb) on conflict (id) do nothing;',
+--                 id, business_id, trigger::text, steps::text) from public.automations order by created_at;
+--   select pg_get_functiondef(p.oid) || ';' from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--    where n.nspname = 'public' and p.proname in ('automations_guard', 'automation_save', 'automation_migrate_row', 'automations_customer_off_guard', 'automation_customer_channels');
+--   select format('alter table public.automations add constraint %I %s;', conname, pg_get_constraintdef(oid))
+--     from pg_constraint where conrelid = 'public.automations'::regclass and conname in ('automations_trigger_obj', 'automations_steps_arr');
+--
+-- Check before (read-only):
+--   select count(*) from public.automations where definition is null;                                  -- 0 (every row has its doc, deleted ones too)
+--   select v2_migrated_at, v2_migrated_at < now() - interval '30 days' from public.automation_state where business_id = 'default';   -- a date, true
+--   select f.oid::regprocedure from (select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind = 'f' offset 0) f
+--    where pg_get_functiondef(f.oid) ~ '\m(new|old|a|r)\.(trigger|steps)\M|\m(trigger|steps) ->'
+--    order by 1;                                -- exactly: automations_customer_off_guard(), automations_guard(), automation_save(...), automation_migrate_row(...)
+--                                               -- (this block replaces or drops them; the off guard's trigger went in Part 2 · G2.4, its function stayed)
+--   select attname, attnum from pg_attribute where attrelid = 'public.automations'::regclass and attname in ('trigger', 'steps') and not attisdropped;   -- 2 rows
+--   select conname from pg_constraint where conrelid = 'public.automations'::regclass and contype = 'c' and conname in ('automations_trigger_obj', 'automations_steps_arr');   -- 2 rows (they go with the columns)
+--   select to_regclass('backup.automations_v1_columns');                                               -- null the first time
+--
+-- Idempotent: the block does nothing (a notice) when the columns are already gone; the backup rows are kept from the first run
+-- (on conflict do nothing); the functions are `create or replace`; `drop column if exists`.
+-- ─────────────────────────────────────────────────────────────────
+-- begin;
+-- set local lock_timeout = '5s';
+-- do $$
+-- declare has_cols boolean := exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'automations' and column_name in ('trigger', 'steps'));
+--         left_over text;
+-- begin
+--   if not has_cols then raise notice 'Part 4 · G7.1: the columns are already gone, nothing to do'; return; end if;
+--   if exists (select 1 from public.automations where definition is null) then
+--     raise exception 'Part 4 · G7.1: a row without a doc: run step "migrate" first, nothing changed';
+--   end if;
+--   if not exists (select 1 from public.automation_state s where s.v2_migrated_at is not null and s.v2_migrated_at < now() - interval '30 days') then
+--     raise exception 'Part 4 · G7.1: less than 30 days since step "migrate" (or never run), nothing changed';
+--   end if;
+--   -- any function other than the four this block replaces or drops that still names the columns: stop
+--   select string_agg(f.oid::regprocedure::text, ', ' order by f.oid::regprocedure::text) into left_over
+--     from (select p.oid, p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind = 'f' offset 0) f
+--    where f.proname not in ('automations_guard', 'automation_save', 'automation_migrate_row', 'automations_customer_off_guard')
+--      and pg_get_functiondef(f.oid) ~ '\m(new|old|a|r)\.(trigger|steps)\M|\m(trigger|steps) ->';
+--   if left_over is not null then raise exception 'Part 4 · G7.1: still read by %: nothing changed', left_over; end if;
+--   -- the backup (kept from the first run)
+--   create schema if not exists backup;
+--   create table if not exists backup.automations_v1_columns (id uuid primary key, business_id text not null, trigger jsonb, steps jsonb, saved_at timestamptz not null default now());
+--   alter table backup.automations_v1_columns enable row level security;
+--   execute 'insert into backup.automations_v1_columns (id, business_id, trigger, steps) select id, business_id, trigger, steps from public.automations on conflict (id) do nothing';
+--   if (select count(*) from backup.automations_v1_columns) < (select count(*) from public.automations) then
+--     raise exception 'Part 4 · G7.1: the backup is missing rows, nothing changed';
+--   end if;
+-- end $$;
+-- -- 1. The guard on the doc alone (Part 2 · G2.4's automations_guard without the phase-4 branches: no `trigger` / `steps`
+-- --    comparison, the customer channels and the shape from the doc only).
+-- create or replace function public.automations_guard() returns trigger
+-- language plpgsql security invoker set search_path = ''
+-- as $$
+-- declare
+--   via_fn boolean := coalesce(pg_catalog.current_setting('automation.via', true), '') = 'fn';
+--   trusted boolean := via_fn or current_user::text not in ('authenticated', 'anon');
+--   migrating boolean := via_fn and coalesce(pg_catalog.current_setting('automation.migrating', true), '') = 'on';
+--   g_new text[]; g_old text[]; content boolean; shape_changed boolean; arm_changed boolean;
+-- begin
+--   g_new := public.automation_guarded_channels(new.definition);
+--   if auth.uid() is not null then new.updated_by := auth.uid(); end if;
+--   if tg_op = 'INSERT' then
+--     if auth.uid() is not null then new.created_by := auth.uid(); end if;
+--     new.created_at := now();
+--     new.updated_at := now();
+--     new.version := 1;
+--     new.revision := 1;
+--     new.enrolled_total := 0;
+--     new.enabled := false;
+--     new.armed_at := null;
+--     new.switched_on_at := null;
+--     new.published_at := null;
+--     new.published_by := null;
+--     if not via_fn and new.origin not in ('user', 'copy') then new.origin := 'user'; end if;
+--     new.audience := case when pg_catalog.cardinality(g_new) > 0 then 'customer' else 'team' end;
+--     return new;
+--   end if;
+--   if new.business_id is distinct from old.business_id then raise exception 'business_id cannot change'; end if;
+--   new.created_by := old.created_by;
+--   new.created_at := old.created_at;
+--   if not trusted then
+--     new.origin := old.origin; new.published_at := old.published_at; new.published_by := old.published_by;
+--     new.enrolled_total := old.enrolled_total; new.system_key := old.system_key; new.system_handover_at := old.system_handover_at;
+--   end if;
+--   content := (new.name, new.definition, new.settings, new.layout, new.builder) is distinct from (old.name, old.definition, old.settings, old.layout, old.builder);
+--   new.revision := old.revision + case when content then 1 else 0 end;
+--   if migrating then
+--     new.version := old.version; new.armed_at := old.armed_at; new.enabled := old.enabled; new.audience := old.audience; new.updated_at := old.updated_at;
+--     new.switched_on_at := old.switched_on_at;
+--     return new;
+--   end if;
+--   if old.deleted_at is null and new.deleted_at is not null then new.enabled := false; new.deleted_by := auth.uid(); end if;
+--   g_old := public.automation_guarded_channels(old.definition);
+--   if new.enabled and not (g_new <@ g_old) then new.enabled := false; end if;
+--   shape_changed := public.automation_def_shape(new.definition) is distinct from public.automation_def_shape(old.definition)
+--                    or (old.definition is not null and new.definition is not null and old.settings ->> 'reentry' = 'legacy_always'
+--                        and (public.automation_arm_key(new.definition, new.settings) -> 'triggers')
+--                            is distinct from (public.automation_arm_key(old.definition, old.settings) -> 'triggers'));
+--   arm_changed := public.automation_arm_key(new.definition, new.settings) is distinct from public.automation_arm_key(old.definition, old.settings);
+--   new.version := old.version + case when shape_changed then 1 else 0 end;
+--   if not new.enabled then new.armed_at := null; new.switched_on_at := null;
+--   elsif not old.enabled or shape_changed then new.armed_at := now(); new.switched_on_at := now();
+--   elsif arm_changed then new.armed_at := now(); new.switched_on_at := coalesce(old.switched_on_at, old.armed_at);
+--   else new.armed_at := old.armed_at; new.switched_on_at := coalesce(old.switched_on_at, old.armed_at); end if;
+--   new.audience := case when pg_catalog.cardinality(g_new) > 0 then 'customer' else 'team' end;
+--   new.updated_at := case when content or (new.enabled, new.deleted_at, new.description, new.folder_id, new.template_key)
+--                                          is distinct from (old.enabled, old.deleted_at, old.description, old.folder_id, old.template_key)
+--                          then now() else old.updated_at end;
+--   return new;
+-- end $$;
+-- revoke all on function public.automations_guard() from public, anon, authenticated;
+-- -- 2. automation_save without the two columns (a new Draft is inserted with its doc only; the table defaults are gone with them).
+-- --    Same signature, same grants, same body as Part 2 · G2.4's, except the insert list.
+-- create or replace function public.automation_save(p_business text, p_id uuid, p_expected integer, p_name text, p_definition jsonb, p_settings jsonb,
+--   p_layout jsonb, p_builder text, p_origin text, p_reason text, p_draft boolean, p_summary jsonb, p_actor uuid, p_actor_name text)
+-- returns jsonb language plpgsql volatile security definer set search_path = ''
+-- as $$
+-- declare r public.automations%rowtype; o public.automations%rowtype;
+-- begin
+--   perform pg_catalog.set_config('automation.via', 'fn', true);
+--   perform pg_catalog.set_config('automation.reason', coalesce(p_reason, 'save'), true);
+--   if p_definition is null or pg_catalog.jsonb_typeof(p_definition) <> 'object' or p_definition ->> 'schema' is distinct from '2' then
+--     return pg_catalog.jsonb_build_object('ok', false, 'reason', 'definition must be a workflow (schema 2)');
+--   end if;
+--   if p_id is null then
+--     insert into public.automations (business_id, name, enabled, definition, settings, layout, builder, origin, list_summary,
+--                                     created_by, created_by_name, updated_by, updated_by_name)
+--     values (p_business, p_name, false, p_definition, coalesce(p_settings, '{}'::jsonb), coalesce(p_layout, '{"v":1}'::jsonb),
+--             coalesce(p_builder, 'standard'), case when p_origin in ('user', 'copy', 'template', 'ai') then p_origin else 'user' end,
+--             coalesce(p_summary, '{}'::jsonb), p_actor, p_actor_name, p_actor, p_actor_name)
+--     returning * into r;
+--     return pg_catalog.jsonb_build_object('ok', true, 'id', r.id, 'revision', r.revision, 'version', r.version, 'enabled', r.enabled, 'armed_at', r.armed_at,
+--                                          'created', true, 'shape_changed', false, 'arm_changed', false);
+--   end if;
+--   select * into o from public.automations a where a.id = p_id and a.business_id = p_business and a.deleted_at is null for update;
+--   if not found then return pg_catalog.jsonb_build_object('ok', false, 'reason', 'not_found'); end if;
+--   if o.revision is distinct from p_expected then
+--     return pg_catalog.jsonb_build_object('ok', false, 'reason', 'conflict', 'revision', o.revision, 'updated_by_name', o.updated_by_name, 'updated_at', o.updated_at);
+--   end if;
+--   update public.automations a set name = p_name, definition = p_definition, settings = coalesce(p_settings, '{}'::jsonb), layout = coalesce(p_layout, a.layout),
+--          builder = coalesce(p_builder, a.builder), list_summary = coalesce(p_summary, a.list_summary), updated_by = p_actor, updated_by_name = p_actor_name,
+--          enabled = case when coalesce(p_draft, false) then false else a.enabled end
+--    where a.id = p_id
+--   returning * into r;
+--   return pg_catalog.jsonb_build_object('ok', true, 'id', r.id, 'revision', r.revision, 'version', r.version, 'enabled', r.enabled, 'armed_at', r.armed_at,
+--     'created', false, 'shape_changed', r.version <> o.version,
+--     'arm_changed', public.automation_arm_key(r.definition, r.settings) is distinct from public.automation_arm_key(o.definition, o.settings));
+-- end $$;
+-- revoke all on function public.automation_save(text, uuid, integer, text, jsonb, jsonb, jsonb, text, text, text, boolean, jsonb, uuid, text) from public, anon, authenticated;
+-- grant execute on function public.automation_save(text, uuid, integer, text, jsonb, jsonb, jsonb, text, text, text, boolean, jsonb, uuid, text) to service_role;
+-- -- 3. The migration is over: the one-row migrate function compared trigger / steps, which are going. Its step "migrate" left the function in G7.1b (gate G-b).
+-- drop function if exists public.automation_migrate_row(text, uuid, jsonb, jsonb, jsonb, jsonb, jsonb);
+-- -- 3b. The phase-4 off guard (settings-round2-phase4.sql): its trigger went in Part 2 · G2.4 (the v2 guard does the same from the
+-- --     doc), its function compares new.steps / old.steps; the channels helper only it used goes with it.
+-- drop function if exists public.automations_customer_off_guard();
+-- drop function if exists public.automation_customer_channels(jsonb);
+-- -- 4. The columns (their two check constraints go with them).
+-- alter table public.automations drop column if exists trigger, drop column if exists steps;
+-- -- 5. The proof, inside the transaction: the columns and their constraints are gone, the guard and the save no longer name them, the rows are all still there.
+-- do $$
+-- begin
+--   if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'automations' and column_name in ('trigger', 'steps')) then
+--     raise exception 'Part 4 · G7.1: the columns are still there';
+--   end if;
+--   if exists (select 1 from pg_constraint where conrelid = 'public.automations'::regclass and conname in ('automations_trigger_obj', 'automations_steps_arr')) then
+--     raise exception 'Part 4 · G7.1: a check constraint on the dropped columns is still there';
+--   end if;
+--   if (select count(*) from backup.automations_v1_columns) < (select count(*) from public.automations) then
+--     raise exception 'Part 4 · G7.1: the backup has fewer rows than the table';
+--   end if;
+--   if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--               where n.nspname = 'public' and p.prokind = 'f' and p.proname in ('automations_guard', 'automation_save', 'automations_customer_off_guard')
+--                 and pg_get_functiondef(p.oid) ~ '\m(new|old|a|r)\.(trigger|steps)\M') then
+--     raise exception 'Part 4 · G7.1: a replaced function still names the columns';
+--   end if;
+-- end $$;
+-- commit;
+-- Check after (read-only):
+--   select column_name from information_schema.columns where table_schema = 'public' and table_name = 'automations' and column_name in ('trigger', 'steps');   -- 0 rows
+--   select count(*) from public.automations;  select count(*) from backup.automations_v1_columns;      -- the second is >= the first
+--   select count(*) from public.automations where definition is null;                                    -- 0
+--   select has_function_privilege('authenticated', 'public.automation_save(text, uuid, integer, text, jsonb, jsonb, jsonb, text, text, text, boolean, jsonb, uuid, text)', 'execute');   -- false
+--   -- then in the app (staging): open a workflow, Save, Publish, Draft, Duplicate, Delete and Restore; each answers 200 and the list loads
+-- ROLLBACK (exact: the two columns back with their phase-4 definition and data, their two constraints, the three functions as Part 2 · G2.4 defines them,
+-- the off guard's two functions as settings-round2-phase4.sql defines them — without their trigger, which Part 2 · G2.4 dropped):
+-- begin;
+-- set local lock_timeout = '5s';
+-- alter table public.automations add column if not exists trigger jsonb not null default '{}'::jsonb;
+-- alter table public.automations add column if not exists steps jsonb not null default '[]'::jsonb;
+-- -- the data back WITHOUT waking the guards (a restore is not an edit: version, armed_at, updated_at stay as they are)
+-- alter table public.automations disable trigger user;
+-- update public.automations a set trigger = b.trigger, steps = b.steps from backup.automations_v1_columns b where b.id = a.id;
+-- alter table public.automations enable trigger user;
+-- alter table public.automations drop constraint if exists automations_trigger_obj;
+-- alter table public.automations add constraint automations_trigger_obj check (jsonb_typeof(trigger) = 'object');
+-- alter table public.automations drop constraint if exists automations_steps_arr;
+-- alter table public.automations add constraint automations_steps_arr check (jsonb_typeof(steps) = 'array' and jsonb_array_length(steps) <= 30);
+-- -- then run, unchanged and in this order, from this same file: PART 2 · G2.4 §4 (create or replace function public.automations_guard() … and its revoke) and §6
+-- -- (create or replace function public.automation_save(…), public.automation_migrate_row(…), and their revoke / grant lines).
+-- create or replace function public.automation_customer_channels(steps jsonb) returns text[]
+-- language sql immutable set search_path = ''
+-- as $$
+--   select coalesce(pg_catalog.array_agg(distinct s ->> 'type' order by s ->> 'type'), '{}'::text[])
+--     from pg_catalog.jsonb_array_elements(case when pg_catalog.jsonb_typeof(steps) = 'array' then steps else '[]'::jsonb end) s
+--    where s ->> 'kind' = 'action' and s ->> 'type' in ('email', 'text')
+-- $$;
+-- create or replace function public.automations_customer_off_guard() returns trigger
+-- language plpgsql security invoker set search_path = ''
+-- as $$
+-- begin
+--   if new.enabled
+--      and not (public.automation_customer_channels(new.steps) <@ public.automation_customer_channels(old.steps)) then
+--     new.enabled := false;
+--   end if;
+--   return new;
+-- end $$;
+-- commit;
+-- Check after the rollback:
+--   select count(*) from public.automations a join backup.automations_v1_columns b on b.id = a.id where a.trigger is distinct from b.trigger or a.steps is distinct from b.steps;   -- 0
+--   select count(*) from public.automations where trigger = '{}'::jsonb and steps = '[]'::jsonb;   -- the workflows made after the drop (they never had phase-4 steps) and nothing else
+--   (and put the function and the app back to the builds that still read the columns: roll them back together with this block)
+-- ─────────────────────────────────────────────────────────────────
+-- END PART 4 · G7.1 (PLAN, not run)
